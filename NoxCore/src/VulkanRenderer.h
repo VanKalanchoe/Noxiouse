@@ -15,9 +15,9 @@
 import vulkan_hpp;
 #endif
 
-const std::string  MODEL_PATH           = "../../models/viking_room.obj";
-const std::string  TEXTURE_PATH         = "../../textures/viking_room.png";
-constexpr int      MAX_FRAMES_IN_FLIGHT = 2;
+const std::string MODEL_PATH = "../../models/viking_room.obj";
+const std::string TEXTURE_PATH = "../../textures/viking_room.png";
+constexpr int MAX_FRAMES_IN_FLIGHT = 2;
 
 const std::vector<char const*> validationLayers =
 {
@@ -43,12 +43,16 @@ struct Vertex
 
     static std::array<vk::VertexInputAttributeDescription, 3> getAttributeDescriptions()
     {
-        return {{{.location = 0, .binding = 0, .format = vk::Format::eR32G32B32Sfloat, .offset = offsetof(Vertex, pos)},
-                 {.location = 1, .binding = 0, .format = vk::Format::eR32G32B32Sfloat, .offset = offsetof(Vertex, color)},
-                 {.location = 2, .binding = 0, .format = vk::Format::eR32G32Sfloat, .offset = offsetof(Vertex, texCoord)}}};
+        return {
+            {
+                {.location = 0, .binding = 0, .format = vk::Format::eR32G32B32Sfloat, .offset = offsetof(Vertex, pos)},
+                {.location = 1, .binding = 0, .format = vk::Format::eR32G32B32Sfloat, .offset = offsetof(Vertex, color)},
+                {.location = 2, .binding = 0, .format = vk::Format::eR32G32Sfloat, .offset = offsetof(Vertex, texCoord)}
+            }
+        };
     }
 
-    bool operator==(const Vertex &other) const
+    bool operator==(const Vertex& other) const
     {
         return pos == other.pos && color == other.color && texCoord == other.texCoord;
     }
@@ -57,7 +61,7 @@ struct Vertex
 template <>
 struct std::hash<Vertex>
 {
-    size_t operator()(Vertex const &vertex) const noexcept
+    size_t operator()(Vertex const& vertex) const noexcept
     {
         return ((hash<glm::vec3>()(vertex.pos) ^ (hash<glm::vec3>()(vertex.color) << 1)) >> 1) ^ (hash<glm::vec2>()(vertex.texCoord) << 1);
     }
@@ -68,8 +72,8 @@ inline struct UniformBufferObject
     alignas(16) glm::mat4 model;
     alignas(16) glm::mat4 view;
     alignas(16) glm::mat4 proj;
-    uint32_t samplerIndex{ 0 };
-    uint32_t imageHeapIndexOffset{ 0 };
+    uint32_t samplerIndex{0};
+    uint32_t imageHeapIndexOffset{0};
 } uniformData;
 
 // 2 quads
@@ -91,37 +95,39 @@ const std::vector<uint16_t> indices = {
 };*/
 
 // This per-model data will be accessed via resource heaps
-struct ModelData {
+struct ModelData
+{
     glm::vec4 pos;
     glm::vec4 color;
 };
 
-struct PushConstantBlock {
+struct PushConstantBlock
+{
     vk::DeviceAddress matrixReference;
 };
 
-inline int32_t selectedSampler{ 0 };
+inline int32_t selectedSampler{0};
 
 // Size and offset values for heap objects
-inline VkDeviceSize bufferHeapOffset{ 0 };
-inline VkDeviceSize bufferDescriptorSize{ 0 };
-inline VkDeviceSize imageHeapOffset{ 0 };
-inline VkDeviceSize imageDescriptorSize{ 0 };
-inline VkDeviceSize samplerHeapOffset{ 0 };
-inline VkDeviceSize samplerDescriptorSize{ 0 };
+inline VkDeviceSize bufferHeapOffset{0};
+inline VkDeviceSize bufferDescriptorSize{0};
+inline VkDeviceSize imageHeapOffset{0};
+inline VkDeviceSize imageDescriptorSize{0};
+inline VkDeviceSize samplerHeapOffset{0};
+inline VkDeviceSize samplerDescriptorSize{0};
 
-inline std::vector<std::string> samplerNames{ "Linear", "Nearest" };
+inline std::vector<std::string> samplerNames{"Linear", "Nearest"};
 
 inline vk::PhysicalDeviceDescriptorHeapPropertiesEXT descriptorHeapProperties{};
 
 class VulkanRenderer
 {
 public:
-    VulkanRenderer(SDL_Window &window);
+    VulkanRenderer(SDL_Window& window);
     ~VulkanRenderer();
     void drawFrame();
     void resizeWindow();
-    
+
 private:
     void initVulkan();
     void cleanupSwapChain();
@@ -174,80 +180,81 @@ private:
     static vk::PresentModeKHR chooseSwapPresentMode(std::vector<vk::PresentModeKHR> const& availablePresentModes);
     vk::Extent2D chooseSwapExtent(vk::SurfaceCapabilitiesKHR const& capabilities);
     std::vector<const char*> getRequiredInstanceExtensions();
-    static vk::Bool32 debugCallback(vk::DebugUtilsMessageSeverityFlagBitsEXT severity, vk::DebugUtilsMessageTypeFlagsEXT type, const vk::DebugUtilsMessengerCallbackDataEXT* pCallbackData, void* pUserData);
+    static vk::Bool32 debugCallback(vk::DebugUtilsMessageSeverityFlagBitsEXT severity, vk::DebugUtilsMessageTypeFlagsEXT type, const vk::DebugUtilsMessengerCallbackDataEXT* pCallbackData,
+                                    void* pUserData);
     std::vector<char> readFile(const std::string& filename);
 
 private:
-    SDL_Window                      *m_window = nullptr;
-    vk::raii::Context                m_context;
-    vk::raii::Instance               m_instance = nullptr;
+    SDL_Window* m_window = nullptr;
+    vk::raii::Context m_context;
+    vk::raii::Instance m_instance = nullptr;
     vk::raii::DebugUtilsMessengerEXT debugMessenger = nullptr;
-    vk::raii::PhysicalDevice         physicalDevice = nullptr;
-    vk::SampleCountFlagBits          msaaSamples    = vk::SampleCountFlagBits::e1;
-    vk::raii::Device                 device = nullptr;
-    uint32_t                         queueIndex     = ~0;
-    vk::raii::Queue                  queue = nullptr;
-    vk::raii::SurfaceKHR             surface = nullptr;
-    vk::raii::SwapchainKHR           swapChain = nullptr;
-    std::vector<vk::Image>           swapChainImages;
-    vk::SurfaceFormatKHR             swapChainSurfaceFormat;
-    vk::Extent2D                     swapChainExtent;
+    vk::raii::PhysicalDevice physicalDevice = nullptr;
+    vk::SampleCountFlagBits msaaSamples = vk::SampleCountFlagBits::e1;
+    vk::raii::Device device = nullptr;
+    uint32_t queueIndex = ~0;
+    vk::raii::Queue queue = nullptr;
+    vk::raii::SurfaceKHR surface = nullptr;
+    vk::raii::SwapchainKHR swapChain = nullptr;
+    std::vector<vk::Image> swapChainImages;
+    vk::SurfaceFormatKHR swapChainSurfaceFormat;
+    vk::Extent2D swapChainExtent;
     std::vector<vk::raii::ImageView> swapChainImageViews;
-    
+
     /*vk::raii::PipelineLayout pipelineLayout = nullptr;*/
-    vk::raii::Pipeline       computePipeline = nullptr;
-    vk::raii::Pipeline       graphicsPipeline = nullptr;
-    
-    vk::raii::Image        colorImage       = nullptr;
+    vk::raii::Pipeline computePipeline = nullptr;
+    vk::raii::Pipeline graphicsPipeline = nullptr;
+
+    vk::raii::Image colorImage = nullptr;
     vk::raii::DeviceMemory colorImageMemory = nullptr;
-    vk::raii::ImageView    colorImageView   = nullptr;
-    
-    vk::raii::Image        depthImage       = nullptr;
+    vk::raii::ImageView colorImageView = nullptr;
+
+    vk::raii::Image depthImage = nullptr;
     vk::raii::DeviceMemory depthImageMemory = nullptr;
-    vk::raii::ImageView    depthImageView   = nullptr;
-    
+    vk::raii::ImageView depthImageView = nullptr;
+
     uint32_t mipLevels;
-    vk::raii::Image        textureImage       = nullptr;
+    vk::raii::Image textureImage = nullptr;
     vk::raii::DeviceMemory textureImageMemory = nullptr;
-    vk::raii::ImageView    textureImageView   = nullptr;
-    
-    std::vector<Vertex>    vertices;
-    std::vector<uint32_t>  indices;
-    vk::raii::Buffer       vertexBuffer       = nullptr;
+    vk::raii::ImageView textureImageView = nullptr;
+
+    std::vector<Vertex> vertices;
+    std::vector<uint32_t> indices;
+    vk::raii::Buffer vertexBuffer = nullptr;
     vk::raii::DeviceMemory vertexBufferMemory = nullptr;
-    vk::raii::Buffer       indexBuffer        = nullptr;
-    vk::raii::DeviceMemory indexBufferMemory  = nullptr;
-    
-    std::vector<vk::raii::Buffer>       uniformBuffers;
+    vk::raii::Buffer indexBuffer = nullptr;
+    vk::raii::DeviceMemory indexBufferMemory = nullptr;
+
+    std::vector<vk::raii::Buffer> uniformBuffers;
     std::vector<vk::raii::DeviceMemory> uniformBuffersMemory;
-    std::vector<void *>                 uniformBuffersMapped;
-    
-    vk::raii::Buffer       descriptorHeapSamplers       = nullptr;
+    std::vector<void*> uniformBuffersMapped;
+
+    vk::raii::Buffer descriptorHeapSamplers = nullptr;
     vk::raii::DeviceMemory descriptorHeapSamplersMemory = nullptr;
-    void * descriptorHeapSamplersMapped;
-    
-    vk::raii::Buffer       descriptorHeapResources       = nullptr;
+    void* descriptorHeapSamplersMapped;
+
+    vk::raii::Buffer descriptorHeapResources = nullptr;
     vk::raii::DeviceMemory descriptorHeapResourcesMemory = nullptr;
-    void * descriptorHeapResourcesMapped;
-    
-    std::vector<vk::raii::Buffer>       ModelDataBuffers;
+    void* descriptorHeapResourcesMapped;
+
+    std::vector<vk::raii::Buffer> ModelDataBuffers;
     std::vector<vk::raii::DeviceMemory> ModelDataBuffersMemory;
-    std::vector<void *>                 ModelDataBuffersMapped;
-    
+    std::vector<void*> ModelDataBuffersMapped;
+
     vk::raii::CommandPool commandPool = nullptr;
     std::vector<vk::raii::CommandBuffer> commandBuffers;
-    
+
     std::vector<vk::raii::Semaphore> presentCompleteSemaphores;
     std::vector<vk::raii::Semaphore> renderFinishedSemaphores;
-    std::vector<vk::raii::Fence>     inFlightFences;
-    uint32_t                         frameIndex = 0;
-    
+    std::vector<vk::raii::Fence> inFlightFences;
+    uint32_t frameIndex = 0;
+
     bool framebufferResized = false;
-    
-    std::vector<const char *> requiredDeviceExtension = 
+
+    std::vector<const char*> requiredDeviceExtension =
     {
         vk::KHRSwapchainExtensionName,
-        
+
         vk::EXTDescriptorHeapExtensionName,
         vk::KHRMaintenance5ExtensionName,
         vk::KHRShaderUntypedPointersExtensionName,
