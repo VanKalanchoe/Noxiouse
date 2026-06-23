@@ -1,0 +1,2 @@
+C:/VulkanSDK/1.4.350.0/bin/slangc.exe shader.slang -target spirv -profile spirv_1_4 -emit-spirv-directly -fvk-use-entrypoint-name  -capability spvDescriptorHeapEXT -entry vertMain -entry fragMain -entry compMain -o slang.spv
+pause
