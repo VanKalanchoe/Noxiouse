@@ -80,7 +80,7 @@ add_executable(${PROJECT_NAME} ${NOXCORE_FILES}) #main file here
 set_target_properties (${PROJECT_NAME} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${TEMPLATE_DIR})
 set_target_properties (${PROJECT_NAME} PROPERTIES CXX_STANDARD 20)
 target_link_libraries (${PROJECT_NAME} Vulkan::cppm SDL3::SDL3 glm::glm tinyobjloader::tinyobjloader)
-target_include_directories (${PROJECT_NAME} PRIVATE ${STB_INCLUDEDIR})
+target_include_directories (${PROJECT_NAME} PRIVATE ${STB_INCLUDEDIR} ${CMAKE_CURRENT_SOURCE_DIR}/vendors/taskflow ${CMAKE_CURRENT_SOURCE_DIR}/vendors/VulkanMemoryAllocator-Hpp/include ${CMAKE_CURRENT_SOURCE_DIR}/vendors/VulkanMemoryAllocator-Hpp/VulkanMemoryAllocator/include)
 
 # Add compile definition if C++ 20 module is enabled
 if(ENABLE_CPP20_MODULE)

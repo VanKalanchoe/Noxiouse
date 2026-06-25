@@ -1,0 +1,6 @@
+[submodule "NoxCore/vendors/taskflow"]
+	path = NoxCore/vendors/taskflow
+	url = https://github.com/taskflow/taskflow
+[submodule "NoxCore/vendors/VulkanMemoryAllocator-Hpp"]
+	path = NoxCore/vendors/VulkanMemoryAllocator-Hpp
+	url = https://github.com/YaaZ/VulkanMemoryAllocator-Hpp
