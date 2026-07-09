@@ -20,6 +20,19 @@ set(STB_INCLUDEDIR ${stb_INCLUDE_DIRS})
 find_package (KTX REQUIRED)
 find_package (tinyobjloader REQUIRED)
 
+set(IMGUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendors/imgui")
+
+set(IMGUI_SOURCES
+    ${IMGUI_DIR}/imgui.cpp
+    ${IMGUI_DIR}/imgui_demo.cpp
+    ${IMGUI_DIR}/imgui_draw.cpp
+    ${IMGUI_DIR}/imgui_tables.cpp
+    ${IMGUI_DIR}/imgui_widgets.cpp
+    # Add the specific backends matching your engine tech!
+    ${IMGUI_DIR}/backends/imgui_impl_sdl3.cpp
+    ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp
+)
+
 # Set up Vulkan C++ module only if enabled
 if(ENABLE_CPP20_MODULE)
   add_library(VulkanCppModule)
@@ -76,11 +89,11 @@ file(GLOB_RECURSE NOXCORE_FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
 )
 
-add_executable(${PROJECT_NAME} ${NOXCORE_FILES}) #main file here
+add_executable(${PROJECT_NAME} ${NOXCORE_FILES} ${IMGUI_SOURCES}) #main file here
 set_target_properties (${PROJECT_NAME} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${TEMPLATE_DIR})
 set_target_properties (${PROJECT_NAME} PROPERTIES CXX_STANDARD 20)
 target_link_libraries (${PROJECT_NAME} Vulkan::cppm SDL3::SDL3 glm::glm tinyobjloader::tinyobjloader)
-target_include_directories (${PROJECT_NAME} PRIVATE ${STB_INCLUDEDIR} ${CMAKE_CURRENT_SOURCE_DIR}/vendors/taskflow ${CMAKE_CURRENT_SOURCE_DIR}/vendors/VulkanMemoryAllocator-Hpp/include ${CMAKE_CURRENT_SOURCE_DIR}/vendors/VulkanMemoryAllocator-Hpp/VulkanMemoryAllocator/include)
+target_include_directories (${PROJECT_NAME} SYSTEM PRIVATE ${STB_INCLUDEDIR} ${CMAKE_CURRENT_SOURCE_DIR}/vendors/taskflow ${CMAKE_CURRENT_SOURCE_DIR}/vendors/VulkanMemoryAllocator-Hpp/include ${CMAKE_CURRENT_SOURCE_DIR}/vendors/VulkanMemoryAllocator-Hpp/VulkanMemoryAllocator/include ${IMGUI_DIR} ${IMGUI_DIR}/backends)
 
 # Add compile definition if C++ 20 module is enabled
 if(ENABLE_CPP20_MODULE)

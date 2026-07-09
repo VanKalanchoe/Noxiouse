@@ -44,8 +44,8 @@ float4 fragMain(VSOutput vertIn) : SV_TARGET
 {
     UniformBuffer ubo = *pushConst.uboBuffer;
    
-    DescriptorHandle<Texture2D> texHandle = (DescriptorHandle<Texture2D>)ubo.imageHeapIndexOffset;
-    DescriptorHandle<SamplerState> sampHandle = (DescriptorHandle<SamplerState>)ubo.samplerIndex;
+    Texture2D texHandle = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset, 0));
+    SamplerState sampHandle = SamplerState.Handle(uint2(0, 0));
 
     float4 img = texHandle.Sample(sampHandle, vertIn.fragTexCoord);
     return img;
