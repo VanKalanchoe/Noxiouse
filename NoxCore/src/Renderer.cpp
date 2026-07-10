@@ -448,15 +448,63 @@ void Renderer::recordCommandBuffer(uint32_t imageIndex)
     };
     m_commandBuffers->beginRendering(desc);
     
-    m_commandBuffers->setViewport(m_swapChainExtent);
-    m_commandBuffers->setScissor(m_swapChainExtent);
+    // Viewport / scissor (counts and values are both dynamic).
+    m_commandBuffers->setViewportWithCount(m_swapChainExtent);
+    m_commandBuffers->setScissorWithCount(m_swapChainExtent);
+    
+    // Vertex input empty since we use vertex fetch BDA but still needs to be called empty
+    m_commandBuffers->setVertexInput();
+    
+    // Input assembly.
+    m_commandBuffers->setPrimitiveTopology(NRI::PrimitiveTopology::TriangleList);
+    m_commandBuffers->setPrimitiveRestartEnable(false);
+    
+    // Rasterization (most of these come from VK_EXT_extended_dynamic_state_3).
+    m_commandBuffers->setRasterizerDiscardEnable(false);
+    m_commandBuffers->setPolygonMode(NRI::PolygonMode::Fill);
+    m_commandBuffers->setCullMode(NRI::CullMode::Back);
+    m_commandBuffers->setFrontFace(NRI::FrontFace::CounterClockWise);
+    m_commandBuffers->setDepthBiasEnable(false);
+    m_commandBuffers->setDepthClampEnable(false);//LineWidth maybe ?
+    
+    // Multisampling.
+    uint32_t sampleCount = m_device->getMSAASampleCount();
+    m_commandBuffers->setRasterizationSamples(sampleCount);
+    const uint32_t sampleMask = 0xFFFFFFFF;
+    m_commandBuffers->setSampleMask(sampleCount, sampleMask);
+    m_commandBuffers->setAlphaToCoverageEnable(false);
+    // alphaToOne is required by the spec when its device feature is enabled and a
+    // shader object is bound, even if we don't actually use it.
+    m_commandBuffers->setAlphaToOneEnableEXT(false);
+    
+    // Depth / stencil.
+    m_commandBuffers->setDepthTestEnable(true);
+    m_commandBuffers->setDepthWriteEnable(true);
+    m_commandBuffers->setDepthCompareOp(NRI::CompareOp::Less);
+    m_commandBuffers->setDepthBoundsTestEnable(false);
+    m_commandBuffers->setStencilTestEnable(false);
+    
+    // Color blend (for one color attachment). Match the previous pipeline's
+    // alpha-blend setup; nothing varies between draws so we set it once.
+    const NRI::ColorBlendEquation blendEquation
+    {
+        .srcColorBlendFactor = NRI::BlendFactor::SrcAlpha,
+        .dstColorBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha,
+        .colorBlendOp = NRI::BlendOp::Add,
+        .srcAlphaBlendFactor = NRI::BlendFactor::SrcAlpha,
+        .dstAlphaBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha,
+        .alphaBlendOp = NRI::BlendOp::Add,
+    };
+    uint32_t colorWriteMask = NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A;
+    m_commandBuffers->setColorBlendEnable(0, false);
+    m_commandBuffers->setColorBlendEquation(0, blendEquation);
+    m_commandBuffers->setColorWriteMask(0, colorWriteMask);
+    m_commandBuffers->setLogicOpEnable(false);
     
     m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_graphicsPipeline);
-    
     m_commandBuffers->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
-    /*m_commandBuffers->bindVertexBuffers(0, *m_vertexBuffer, {0});*/
-    m_commandBuffers->bindIndexBuffer(*m_indexBuffer, 0);
     
+    m_commandBuffers->bindIndexBuffer(*m_indexBuffer, 0);
     PushConstantBlock references{};
     // Pass pointer to the global matrix via a buffer device address
     references.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();

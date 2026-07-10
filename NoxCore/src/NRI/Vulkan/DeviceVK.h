@@ -29,6 +29,7 @@ namespace NRI
         vk::SampleCountFlagBits& getMSAASamples() { return m_msaaSamples; }
         uint32_t getMSAASampleCount() const override { return static_cast<uint32_t>(m_msaaSamples); }
         vk::raii::Device& getDevice() { return m_device; }
+        bool isShaderObjectExtensionEnabled() const { return m_shaderObjectsEnabled; }
         uint32_t getQueueIndex() { return m_queueIndex; }
         vk::raii::Queue& getQueue() { return m_queue; }
         vk::raii::SurfaceKHR& getSurface() { return m_surface; }
@@ -69,7 +70,7 @@ namespace NRI
         vk::Format findDepthFormat();
         vk::SurfaceFormatKHR chooseSurfaceFormat();
         vk::SurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<vk::SurfaceFormatKHR>& availableFormats);
-
+        
     private:
         SDL_Window* m_window;
         vk::raii::Context m_context;
@@ -78,6 +79,7 @@ namespace NRI
         vk::raii::PhysicalDevice m_physicalDevice = nullptr;
         vk::SampleCountFlagBits m_msaaSamples = vk::SampleCountFlagBits::e1;
         vk::raii::Device m_device = nullptr;
+        bool m_shaderObjectsEnabled = false;
         uint32_t m_queueIndex = ~0;
         vk::raii::Queue m_queue = nullptr;
         vk::raii::SurfaceKHR m_surface = nullptr;
@@ -92,7 +94,5 @@ namespace NRI
         {
             "VK_LAYER_KHRONOS_validation"
         };
-        
-        const size_t MAX_FRAMES_IN_FLIGHT = 2; // Match your configuration
     };
 }

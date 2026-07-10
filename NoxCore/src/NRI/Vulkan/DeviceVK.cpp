@@ -23,7 +23,7 @@ namespace NRI
         if (err < 0)
             abort();
     }
-    
+
     // Factory
     std::unique_ptr<Swapchain> DeviceVK::createSwapchain(const SwapchainDesc& desc)
     {
@@ -34,7 +34,7 @@ namespace NRI
     {
         return std::make_unique<PipelineVK>(*this, desc);
     }
-    
+
     std::unique_ptr<CommandAllocator> DeviceVK::createCommandAllocator()
     {
         return std::make_unique<CommandAllocatorVK>(*this);
@@ -49,7 +49,7 @@ namespace NRI
     {
         return std::make_unique<BufferVK>(*this, desc);
     }
-    
+
     std::unique_ptr<DescriptorHeap> DeviceVK::createDescriptorHeap(const DescriptorHeapDesc& desc)
     {
         return std::make_unique<DescriptorHeapVK>(*this, desc);
@@ -82,7 +82,7 @@ namespace NRI
         {
             m_allocator.reset();
         }
-        
+
         ImGui_ImplVulkan_Shutdown();
         ImGui_ImplSDL3_Shutdown();
         ImGui::DestroyContext();
@@ -209,13 +209,13 @@ namespace NRI
         auto features = physicalDevice.template getFeatures2<vk::PhysicalDeviceFeatures2,
                                                              vk::PhysicalDeviceVulkan11Features,
                                                              vk::PhysicalDeviceVulkan13Features,
-                                                             vk::PhysicalDeviceShaderObjectFeaturesEXT,
+                                                             /*vk::PhysicalDeviceShaderObjectFeaturesEXT,*/
                                                              vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>();
         bool supportsRequiredFeatures = features.template get<vk::PhysicalDeviceFeatures2>().features.samplerAnisotropy &&
             features.template get<vk::PhysicalDeviceVulkan11Features>().shaderDrawParameters &&
             features.template get<vk::PhysicalDeviceVulkan13Features>().dynamicRendering &&
             features.template get<vk::PhysicalDeviceVulkan13Features>().synchronization2 &&
-            features.template get<vk::PhysicalDeviceShaderObjectFeaturesEXT>().shaderObject &&
+            /*features.template get<vk::PhysicalDeviceShaderObjectFeaturesEXT>().shaderObject &&*/ // dont force to support both legacy pipeline and shaderobject
             features.template get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>().extendedDynamicState;
 
         // Return true if the physicalDevice meets all the criteria
@@ -253,6 +253,8 @@ namespace NRI
         {
             throw std::runtime_error("Could not find a queue for graphics and present -> terminating");
         }
+        auto features = m_physicalDevice.template getFeatures2<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceShaderObjectFeaturesEXT>();
+        m_shaderObjectsEnabled = features.template get<vk::PhysicalDeviceShaderObjectFeaturesEXT>().shaderObject;
 
         // query for Vulkan 1.3 features
         vk::StructureChain<vk::PhysicalDeviceFeatures2,
@@ -261,6 +263,8 @@ namespace NRI
                            vk::PhysicalDeviceVulkan13Features,
                            vk::PhysicalDeviceShaderObjectFeaturesEXT,
                            vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT,
+                           vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT,
+                           vk::PhysicalDeviceVertexInputDynamicStateFeaturesEXT,
                            vk::PhysicalDeviceDescriptorHeapFeaturesEXT,
                            vk::PhysicalDeviceShaderUntypedPointersFeaturesKHR,
                            vk::PhysicalDeviceMaintenance5FeaturesKHR
@@ -274,10 +278,24 @@ namespace NRI
                     }
                 }, // vk::PhysicalDeviceFeatures2
                 {.shaderDrawParameters = true}, // vk::PhysicalDeviceVulkan11Features
-                {.shaderSampledImageArrayNonUniformIndexing = true, .shaderStorageBufferArrayNonUniformIndexing = true, .scalarBlockLayout = true, .bufferDeviceAddress = true}, // vk::PhysicalDeviceVulkan12Features
+                {.shaderSampledImageArrayNonUniformIndexing = true, .shaderStorageBufferArrayNonUniformIndexing = true, .scalarBlockLayout = true, .bufferDeviceAddress = true},
+                // vk::PhysicalDeviceVulkan12Features
                 {.synchronization2 = true, .dynamicRendering = true}, // vk::PhysicalDeviceVulkan13Features
-                {.shaderObject = true}, // vk::PhysicalDeviceVulkan14Features
+                {.shaderObject = m_shaderObjectsEnabled}, // vk::PhysicalDeviceVulkan14Features
                 {.extendedDynamicState = true}, // vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT
+                {
+                    .extendedDynamicState3DepthClampEnable = vk::True,
+                    .extendedDynamicState3PolygonMode = vk::True,
+                    .extendedDynamicState3RasterizationSamples = vk::True,
+                    .extendedDynamicState3SampleMask = vk::True,
+                    .extendedDynamicState3AlphaToCoverageEnable = vk::True,
+                    .extendedDynamicState3AlphaToOneEnable = vk::True,
+                    .extendedDynamicState3LogicOpEnable = vk::True,
+                    .extendedDynamicState3ColorBlendEnable = vk::True,
+                    .extendedDynamicState3ColorBlendEquation = vk::True,
+                    .extendedDynamicState3ColorWriteMask = vk::True
+                },
+                {.vertexInputDynamicState = true},
                 {.descriptorHeap = true},
                 {.shaderUntypedPointers = true},
                 {.maintenance5 = true}
@@ -400,7 +418,7 @@ namespace NRI
         std::vector<vk::SurfaceFormatKHR> availableFormats = m_physicalDevice.getSurfaceFormatsKHR(*m_surface);
         return chooseSwapSurfaceFormat(availableFormats);
     }
-    
+
     vk::SurfaceFormatKHR DeviceVK::chooseSwapSurfaceFormat(const std::vector<vk::SurfaceFormatKHR>& availableFormats)
     {
         const auto formatIt = std::ranges::find_if(
@@ -408,7 +426,7 @@ namespace NRI
             [](const auto& format) { return format.format == vk::Format::eB8G8R8A8Srgb && format.colorSpace == vk::ColorSpaceKHR::eSrgbNonlinear; });
         return formatIt != availableFormats.end() ? *formatIt : availableFormats[0];
     }
-    
+
     uint32_t DeviceVK::findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties)
     {
         vk::PhysicalDeviceMemoryProperties memProperties = m_physicalDevice.getMemoryProperties();
@@ -423,22 +441,22 @@ namespace NRI
 
         throw std::runtime_error("failed to find suitable memory type!");
     }
-    
+
     void DeviceVK::submitAndWait(CommandBuffer& cmdBuffer, uint32_t slotIndex)
     {
         auto* cmdBufferVK = static_cast<CommandBufferVK*>(&cmdBuffer);
-        
+
         vk::raii::CommandBuffer& nativeCB = cmdBufferVK->getNativeBuffer(slotIndex);
         vk::SubmitInfo submitInfo{.commandBufferCount = 1, .pCommandBuffers = &*nativeCB};
         m_queue.submit(submitInfo, nullptr);
         m_queue.waitIdle();
     }
-    
+
     void DeviceVK::submitCommandBuffer(CommandBuffer& cmdBuffer, Swapchain& swapchain, uint32_t frameIndex, uint32_t imageIndex)
     {
         auto* vkCmd = static_cast<CommandBufferVK*>(&cmdBuffer);
         auto* vkSwap = static_cast<SwapchainVK*>(&swapchain);
-        
+
         vk::PipelineStageFlags waitDestinationStageMask(vk::PipelineStageFlagBits::eColorAttachmentOutput);
         const vk::SubmitInfo submitInfo{
             .waitSemaphoreCount = 1,
@@ -451,36 +469,36 @@ namespace NRI
         };
         m_queue.submit(submitInfo, *vkSwap->getInFlightFence(frameIndex));
     }
-    
+
     void DeviceVK::waitIdle()
     {
         m_device.waitIdle();
     }
-    
+
     void DeviceVK::initImGui()
     {
-        vk::DescriptorPoolSize poolSizes[] = 
+        vk::DescriptorPoolSize poolSizes[] =
         {
-            { vk::DescriptorType::eSampledImage, IMGUI_IMPL_VULKAN_MINIMUM_SAMPLED_IMAGE_POOL_SIZE },
-            { vk::DescriptorType::eSampler, IMGUI_IMPL_VULKAN_MINIMUM_SAMPLER_POOL_SIZE },
+            {vk::DescriptorType::eSampledImage, IMGUI_IMPL_VULKAN_MINIMUM_SAMPLED_IMAGE_POOL_SIZE},
+            {vk::DescriptorType::eSampler, IMGUI_IMPL_VULKAN_MINIMUM_SAMPLER_POOL_SIZE},
         };
-        
+
         uint32_t maxSets = 0;
         for (vk::DescriptorPoolSize& poolSize : poolSizes)
             maxSets += poolSize.descriptorCount;
-        
-        vk::DescriptorPoolCreateInfo poolInfo 
+
+        vk::DescriptorPoolCreateInfo poolInfo
         {
             .flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet,
             .maxSets = maxSets,
             .poolSizeCount = static_cast<uint32_t>(IM_COUNTOF(poolSizes)),
             .pPoolSizes = poolSizes
         };
-        
+
         m_uiDescriptorPool = vk::raii::DescriptorPool(m_device, poolInfo);
-        
+
         static VkFormat imageFormats[] = {static_cast<VkFormat>(getSurfaceFormat().format)};
-      
+
         // Setup Platform/Renderer backends
         ImGui_ImplSDL3_InitForVulkan(m_window);
         ImGui_ImplVulkan_InitInfo init_info = {};

@@ -13,6 +13,67 @@
 
 namespace NRI
 {
+    static vk::PrimitiveTopology translateTopologyToVk(const PrimitiveTopology& topology)
+    {
+        switch (topology)
+        {
+        case PrimitiveTopology::TriangleList:  return vk::PrimitiveTopology::eTriangleList;
+        }
+        return vk::PrimitiveTopology::eTriangleList; // Default fallback
+    }
+    
+    static vk::PolygonMode translatePolygonToVk(const PolygonMode& polygon)
+    {
+        switch (polygon)
+        {
+            case PolygonMode::Fill: return vk::PolygonMode::eFill;
+        }
+    }
+    
+    static vk::CullModeFlagBits translateCullModeToVk(const CullMode& cullMode)
+    {
+        switch (cullMode)
+        {
+            case CullMode::None: return vk::CullModeFlagBits::eNone;
+            case CullMode::Back: return vk::CullModeFlagBits::eBack;
+        }
+    }
+    
+    static vk::FrontFace translateFrontFaceToVk(const FrontFace& frontFace)
+    {
+        switch (frontFace)
+        {
+            case FrontFace::CounterClockWise: return vk::FrontFace::eCounterClockwise;
+        }
+    }
+    
+    static vk::CompareOp translateCompareOpToVk(const CompareOp& compareOp)
+    {
+        switch (compareOp)
+        {
+            case CompareOp::Less: return vk::CompareOp::eLess;
+        }
+    }
+    
+    static vk::BlendFactor translateBlendFactor(BlendFactor factor)
+    {
+        switch (factor)
+        {
+        case BlendFactor::SrcAlpha:         return vk::BlendFactor::eSrcAlpha;
+        case BlendFactor::OneMinusSrcAlpha: return vk::BlendFactor::eOneMinusSrcAlpha;
+        }
+        return vk::BlendFactor::eOne;
+    }
+
+    static vk::BlendOp translateBlendOp(BlendOp op)
+    {
+        switch (op)
+        {
+        case BlendOp::Add:             return vk::BlendOp::eAdd;
+        }
+        return vk::BlendOp::eAdd;
+    }
+    
     CommandBufferVK::CommandBufferVK(DeviceVK& device, CommandAllocatorVK& allocator, uint32_t cbCount) : m_deviceVK(device)
     {
         vk::CommandBufferAllocateInfo allocInfo
@@ -172,23 +233,30 @@ namespace NRI
     {
         auto* vkPip = dynamic_cast<PipelineVK*>(&pipeline);
 
-        auto toVkPipelineBindPoint = [](PipelineBindPoint point)
+        if (vkPip->isShaderObject())
         {
-            switch (point)
+            m_commandBuffers[m_currentFrameIndex].bindShadersEXT(vkPip->getStages(), vkPip->getRawShaders());
+        }
+        else
+        {
+            auto toVkPipelineBindPoint = [](PipelineBindPoint point)
             {
-            case PipelineBindPoint::Graphics:
-                return vk::PipelineBindPoint::eGraphics;
+                switch (point)
+                {
+                case PipelineBindPoint::Graphics:
+                    return vk::PipelineBindPoint::eGraphics;
 
-            case PipelineBindPoint::Compute:
-                return vk::PipelineBindPoint::eCompute;
-            }
+                case PipelineBindPoint::Compute:
+                    return vk::PipelineBindPoint::eCompute;
+                }
 
-            throw std::runtime_error("Unknown PipelineBindPoint");
-        };
+                throw std::runtime_error("Unknown PipelineBindPoint");
+            };
 
-        vk::PipelineBindPoint vkBindPoint = toVkPipelineBindPoint(bindPoint);
+            vk::PipelineBindPoint vkBindPoint = toVkPipelineBindPoint(bindPoint);
 
-        m_commandBuffers[m_currentFrameIndex].bindPipeline(vkBindPoint, vkPip->getNativePipeline());
+            m_commandBuffers[m_currentFrameIndex].bindPipeline(vkBindPoint, vkPip->getNativePipeline());
+        }
     }
 
     void CommandBufferVK::setViewport(Extent2D swapChainExtent)
@@ -215,11 +283,136 @@ namespace NRI
         m_commandBuffers[m_currentFrameIndex].setScissorWithCount(scissor);
     }
     
-    /*void CommandBufferVK::setVertexInput()
+    void CommandBufferVK::setVertexInput()
+    {
+        m_commandBuffers[m_currentFrameIndex].setVertexInputEXT({}, {});
+    }
+    
+    void CommandBufferVK::setPrimitiveTopology(const PrimitiveTopology& topology)
+    {
+        vk::PrimitiveTopology vkTopolgy = translateTopologyToVk(topology);
+        m_commandBuffers[m_currentFrameIndex].setPrimitiveTopology(vkTopolgy);
+    }
+    
+    void CommandBufferVK::setPrimitiveRestartEnable(bool enable)
+    {
+        m_commandBuffers[m_currentFrameIndex].setPrimitiveRestartEnable(enable);
+    }
+    
+    void CommandBufferVK::setRasterizerDiscardEnable(bool enable)
+    {
+        m_commandBuffers[m_currentFrameIndex].setRasterizerDiscardEnable(enable);
+    }
+    
+    void CommandBufferVK::setPolygonMode(const PolygonMode& polygon)
+    {
+        vk::PolygonMode vkPolygon = translatePolygonToVk(polygon);
+        m_commandBuffers[m_currentFrameIndex].setPolygonModeEXT(vkPolygon);
+    }
+    
+    void CommandBufferVK::setCullMode(const CullMode& cullMode)
+    {
+        vk::CullModeFlagBits vkCullMode = translateCullModeToVk(cullMode);
+        m_commandBuffers[m_currentFrameIndex].setCullMode(vkCullMode);
+    }
+    
+    void CommandBufferVK::setFrontFace(const FrontFace& frontFace)
+    {
+        vk::FrontFace vkFrontFace = translateFrontFaceToVk(frontFace);
+        m_commandBuffers[m_currentFrameIndex].setFrontFace(vkFrontFace);
+    }
+    
+    void CommandBufferVK::setDepthBiasEnable(bool enable)
+    {
+        m_commandBuffers[m_currentFrameIndex].setDepthBiasEnable(enable);
+    }
+    
+    void CommandBufferVK::setDepthClampEnable(bool enable)
+    {
+        m_commandBuffers[m_currentFrameIndex].setDepthClampEnableEXT(enable);
+    }
+    
+    void CommandBufferVK::setRasterizationSamples(uint32_t sampleCount)
+    {
+        m_commandBuffers[m_currentFrameIndex].setRasterizationSamplesEXT(static_cast<vk::SampleCountFlagBits>(sampleCount));
+    }
+    
+    void CommandBufferVK::setSampleMask(uint32_t sampleCount, uint32_t sampleMask)
+    {
+        m_commandBuffers[m_currentFrameIndex].setSampleMaskEXT(static_cast<vk::SampleCountFlagBits>(sampleCount), sampleMask);
+    }
+    
+    void CommandBufferVK::setAlphaToCoverageEnable(bool enable)
+    {
+        m_commandBuffers[m_currentFrameIndex].setAlphaToCoverageEnableEXT(enable);
+    }
+    
+    void CommandBufferVK::setAlphaToOneEnableEXT(bool enable)
+    {
+        m_commandBuffers[m_currentFrameIndex].setAlphaToOneEnableEXT(enable);
+    }
+    
+    void CommandBufferVK::setDepthTestEnable(bool enable)
+    {
+        m_commandBuffers[m_currentFrameIndex].setDepthTestEnable(enable);
+    }
+    
+    void CommandBufferVK::setDepthWriteEnable(bool enable)
+    {
+        m_commandBuffers[m_currentFrameIndex].setDepthWriteEnable(enable);
+    }
+    
+    void CommandBufferVK::setDepthCompareOp(const CompareOp& compareOp)
+    {
+        vk::CompareOp vkCompareOp = translateCompareOpToVk(compareOp);
+        m_commandBuffers[m_currentFrameIndex].setDepthCompareOp(vkCompareOp);
+    }
+    
+    void CommandBufferVK::setDepthBoundsTestEnable(bool enable)
+    {
+        m_commandBuffers[m_currentFrameIndex].setDepthBoundsTestEnable(enable);
+    }
+    
+    void CommandBufferVK::setStencilTestEnable(bool enable)
+    {
+        m_commandBuffers[m_currentFrameIndex].setStencilTestEnable(enable);
+    }
+    
+    void CommandBufferVK::setColorBlendEnable(uint32_t firstAttachment, bool enable)
+    {
+        m_commandBuffers[m_currentFrameIndex].setColorBlendEnableEXT(firstAttachment, enable);
+    }
+    
+    void CommandBufferVK::setColorBlendEquation(uint32_t firstAttachment, const ColorBlendEquation& blendEquation)
+    {
+        vk::ColorBlendEquationEXT vkBlendQuation
+        {
+            .srcColorBlendFactor = translateBlendFactor(blendEquation.srcColorBlendFactor),
+            .dstColorBlendFactor = translateBlendFactor(blendEquation.dstColorBlendFactor),
+            .colorBlendOp = translateBlendOp(blendEquation.colorBlendOp),
+            .srcAlphaBlendFactor = translateBlendFactor(blendEquation.srcAlphaBlendFactor),
+            .dstAlphaBlendFactor = translateBlendFactor(blendEquation.dstAlphaBlendFactor),
+            .alphaBlendOp = translateBlendOp(blendEquation.alphaBlendOp),
+        };
+        m_commandBuffers[m_currentFrameIndex].setColorBlendEquationEXT(firstAttachment, vkBlendQuation);
+    }
+    
+    void CommandBufferVK::setColorWriteMask(uint32_t firstAttachment, uint32_t colorWriteMask)
+    {
+        vk::ColorComponentFlags vkColorMask(colorWriteMask);
+        m_commandBuffers[m_currentFrameIndex].setColorWriteMaskEXT(firstAttachment, vkColorMask);
+    }
+    
+    void CommandBufferVK::setLogicOpEnable(bool enable)
+    {
+        m_commandBuffers[m_currentFrameIndex].setLogicOpEnableEXT(enable);
+    }
+
+    /*void CommandBufferVK::set()
     {
         
     }*/
-
+    
     void CommandBufferVK::bindDescriptorHeaps(DescriptorHeap* resourceHeap, DescriptorHeap* samplerHeap)
     {
         if (resourceHeap)
