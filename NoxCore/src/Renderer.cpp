@@ -1,8 +1,6 @@
 #include "Renderer.h"
 
 #include <iostream>
-#include <cstdint> // Necessary for uint32_t
-#include <limits> // Necessary for std::numeric_limits
 #include <algorithm> // Necessary for std::clamp
 #include <chrono>
 #include <fstream>
@@ -17,7 +15,7 @@
 #include <SDL3/SDL_log.h>
 
 #include "imgui.h"
-
+static bool m_reloadShader = false;
 Renderer::Renderer(SDL_Window& window) : m_window(&window)
 {
     std::cout << "VulkanRenderer created\n";
@@ -25,8 +23,9 @@ Renderer::Renderer(SDL_Window& window) : m_window(&window)
     m_device = NRI::Device::create(NRI::GraphicsAPI::Vulkan, m_window);
     if (!m_device) throw std::runtime_error("Failed to create NRI device");
 
-    initVulkan();
+    initRenderer();
     initImGui();
+    m_fileWatcher.watch(std::filesystem::path("../../shaders/shader.slang"), [this]() { m_reloadShader = true; });
 }
 
 void Renderer::initImGui()
@@ -97,10 +96,11 @@ void Renderer::resizeWindow()
     framebufferResized = true;
 }
 
-void Renderer::initVulkan()
+void Renderer::initRenderer()
 {
     createSwapChain();
-    createGraphicsPipeline();
+    createCompiler();
+    createGraphicsPipeline(false);
     createComputePipeline();
     createCommandPool();
     createColorResources();
@@ -147,20 +147,26 @@ void Renderer::createSwapChain()
     m_swapChainExtent = m_swapChain->getExtent();
 }
 
-void Renderer::createGraphicsPipeline()
+void Renderer::createCompiler()
+{
+    m_shaderCompiler = NRI::CreateSlangCompiler();
+}
+
+void Renderer::createGraphicsPipeline(bool forceCompile)
 {
     NRI::PipelineDesc desc{};
+    desc.forceCompile = forceCompile;
     desc.shaders.push_back({
         .stage = NRI::ShaderStage::Vertex,
         .entryPoint = "vertMain",
-        .bytecode = readFile("../../shaders/slang.spv")
+        .sourcePath = "../../shaders/shader.slang"
     });
     desc.shaders.push_back({
         .stage = NRI::ShaderStage::Fragment,
         .entryPoint = "fragMain",
-        .bytecode = readFile("../../shaders/slang.spv")
+        .sourcePath = "../../shaders/shader.slang"
     });
-    m_graphicsPipeline = m_device->createPipeline(desc);
+    m_graphicsPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
 }
 
 void Renderer::createComputePipeline()
@@ -557,6 +563,13 @@ void Renderer::updateUniformBuffer(uint32_t currentImage)
 // according to gpt no async since compute and graphics same commandbuffer and executed in order
 void Renderer::drawFrame()
 {
+    if (m_reloadShader)
+    {
+        m_reloadShader = false;
+        createGraphicsPipeline(true);
+        return;
+    }
+    
     ImGui_ImplVulkan_NewFrame();
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();

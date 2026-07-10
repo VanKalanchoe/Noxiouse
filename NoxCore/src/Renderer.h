@@ -10,6 +10,7 @@
 #include <glm/gtx/hash.hpp>
 
 #include "NRI/NRI.h"
+#include "Utils/NOXWatcher.h"
 
 const std::string MODEL_PATH = "../../models/viking_room.obj";
 const std::string TEXTURE_PATH = "../../textures/viking_room.png";
@@ -90,12 +91,13 @@ public:
     void resizeWindow();
 
 private:
-    void initVulkan();
+    void initRenderer();
     void cleanupSwapChain();
     void recreateSwapChain();
  
     void createSwapChain();
-    void createGraphicsPipeline();
+    void createCompiler();
+    void createGraphicsPipeline(bool forceCompile);
     void createComputePipeline();
     void createCommandPool();
     void createColorResources();
@@ -118,6 +120,9 @@ private:
     std::unique_ptr<NRI::Device> m_device = nullptr;
     std::unique_ptr<NRI::Swapchain> m_swapChain = nullptr;
     NRI::Extent2D m_swapChainExtent;
+    
+    Utils::NOXWatcher m_fileWatcher;
+    std::unique_ptr<NRI::ShaderCompiler> m_shaderCompiler = nullptr;
     std::unique_ptr<NRI::Pipeline> m_graphicsPipeline = nullptr;
     std::unique_ptr<NRI::Pipeline> m_computePipeline = nullptr;
     std::unique_ptr<NRI::CommandAllocator> m_commandAllocator = nullptr;

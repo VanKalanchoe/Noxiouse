@@ -51,7 +51,31 @@ if not exist %TEMP%\vcpkg-cache mkdir %TEMP%\vcpkg-cache
 
 :: Install all dependencies at once using vcpkg with parallel installation
 echo Installing all dependencies...
-vcpkg install sdl3[vulkan] glm stb ktx[vulkan] tinyobjloader --triplet=x64-windows
+vcpkg install sdl3[vulkan] glm xxhash stb ktx[vulkan] tinyobjloader --triplet=x64-windows
+
+:: slang
+set SLANG_VERSION=2026.13
+set SLANG_URL=https://github.com/shader-slang/slang/releases/download/v%SLANG_VERSION%/slang-%SLANG_VERSION%-windows-x86_64.zip
+set DEST_DIR=../NoxCore/vendors/slang
+
+:: Only download and extract if DEST_DIR does NOT exist
+if not exist "%DEST_DIR%" (
+    echo Downloading Slang %SLANG_VERSION%...
+    curl -L "%SLANG_URL%" -o slang.zip || exit /b 1
+
+    echo Creating destination folder...
+    mkdir "%DEST_DIR%"
+
+    echo Extracting zip AS-IS into %DEST_DIR%...
+    tar -xf slang.zip -C "%DEST_DIR%"
+
+    del slang.zip
+    echo Slang downloaded and extracted into "%DEST_DIR%".
+) else (
+    echo Slang already installed in "%DEST_DIR%", skipping download and extraction.
+)
+:: -------------
+
 
 :: Remind about Vulkan SDK
 echo.

@@ -11,13 +11,14 @@ namespace NRI
     {
         ShaderStage stage;
         std::string entryPoint;
-        std::vector<char> bytecode; // The compiled SPV data
+        std::string sourcePath;
     };
 
     struct PipelineDesc
     {
         PipelineType type = PipelineType::Graphics; // default to graphics
-        std::vector<ShaderStageDesc> shaders;   
+        std::vector<ShaderStageDesc> shaders;
+        bool forceCompile = false;
     };
 
     class Pipeline

@@ -8,6 +8,7 @@
 #include "Texture.h"
 #include "Buffer.h"
 #include "DescriptorHeap.h"
+#include "ShaderCompiler.h"
 
 namespace NRI
 {
@@ -24,7 +25,7 @@ namespace NRI
         static std::unique_ptr<Device> create(GraphicsAPI api, void* windowHandle);
         
         virtual std::unique_ptr<Swapchain> createSwapchain(const SwapchainDesc& desc) = 0;
-        virtual std::unique_ptr<Pipeline> createPipeline(const PipelineDesc& desc) = 0;
+        virtual std::unique_ptr<Pipeline> createPipeline(const PipelineDesc& desc, ShaderCompiler& compiler) = 0;
         virtual std::unique_ptr<CommandAllocator> createCommandAllocator() = 0;
         virtual std::unique_ptr<Texture> createTexture(const TextureDesc& desc) = 0;
         virtual std::unique_ptr<Buffer> createBuffer(const BufferDesc& desc) = 0;

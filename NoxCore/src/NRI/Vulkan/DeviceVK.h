@@ -14,6 +14,7 @@ constexpr bool enableValidationLayers = true;
 namespace NRI
 {
     class MemoryAllocatorVK;
+    class ShaderCompiler;
 
     class DeviceVK final : public Device
     {
@@ -47,7 +48,7 @@ namespace NRI
 
         // Factory
         std::unique_ptr<Swapchain> createSwapchain(const SwapchainDesc& desc) override;
-        std::unique_ptr<Pipeline> createPipeline(const PipelineDesc& desc) override;
+        std::unique_ptr<Pipeline> createPipeline(const PipelineDesc& desc, ShaderCompiler& compiler) override;
         std::unique_ptr<CommandAllocator> createCommandAllocator() override;
         std::unique_ptr<Texture> createTexture(const TextureDesc& desc) override;
         std::unique_ptr<Buffer> createBuffer(const BufferDesc& desc) override;

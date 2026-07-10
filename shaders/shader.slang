@@ -42,9 +42,6 @@ VSOutput vertMain(uint vertexID : SV_VertexID)
     VSOutput output;
     UniformBuffer ubo = *pushConst.uboBuffer;
     VertexBuffer vertex = pushConst.vertexBuffer[vertexID];
-  /*   output.pos = mul(ubo.proj, mul(ubo.view, mul(ubo.model, float4(input.inPosition, 1.0))));
-    output.color = input.inColor;
-    output.fragTexCoord = input.inTexCoord; */
     output.pos = mul(ubo.proj, mul(ubo.view, mul(ubo.model, float4(vertex.inPosition, 1.0))));
     output.color = vertex.inColor;
     output.fragTexCoord = vertex.inTexCoord;
@@ -61,11 +58,4 @@ float4 fragMain(VSOutput vertIn) : SV_TARGET
 
     float4 img = texHandle.Sample(sampHandle, vertIn.fragTexCoord);
     return img;
-}
-
-[shader("compute")]
-[numthreads(256,1,1)]
-void compMain(uint3 threadId : SV_DispatchThreadID)
-{
-
 }

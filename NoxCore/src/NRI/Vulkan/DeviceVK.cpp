@@ -30,9 +30,9 @@ namespace NRI
         return std::make_unique<SwapchainVK>(*this, static_cast<SDL_Window*>(desc.windowHandle));
     }
 
-    std::unique_ptr<Pipeline> DeviceVK::createPipeline(const PipelineDesc& desc)
+    std::unique_ptr<Pipeline> DeviceVK::createPipeline(const PipelineDesc& desc, ShaderCompiler& compiler)
     {
-        return std::make_unique<PipelineVK>(*this, desc);
+        return std::make_unique<PipelineVK>(*this, desc, compiler);
     }
 
     std::unique_ptr<CommandAllocator> DeviceVK::createCommandAllocator()
@@ -278,7 +278,7 @@ namespace NRI
                     }
                 }, // vk::PhysicalDeviceFeatures2
                 {.shaderDrawParameters = true}, // vk::PhysicalDeviceVulkan11Features
-                {.shaderSampledImageArrayNonUniformIndexing = true, .shaderStorageBufferArrayNonUniformIndexing = true, .scalarBlockLayout = true, .bufferDeviceAddress = true},
+                {.shaderSampledImageArrayNonUniformIndexing = true, .shaderStorageBufferArrayNonUniformIndexing = true, .runtimeDescriptorArray = true, .scalarBlockLayout = true, .bufferDeviceAddress = true},
                 // vk::PhysicalDeviceVulkan12Features
                 {.synchronization2 = true, .dynamicRendering = true}, // vk::PhysicalDeviceVulkan13Features
                 {.shaderObject = m_shaderObjectsEnabled}, // vk::PhysicalDeviceVulkan14Features

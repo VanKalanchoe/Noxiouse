@@ -5,12 +5,13 @@
 
 namespace NRI
 {
+    class ShaderCompiler;
     class DeviceVK; // Forward declaration
     
     class PipelineVK final : public Pipeline
     {
     public:
-        PipelineVK(DeviceVK& device, const PipelineDesc& desc);
+        PipelineVK(DeviceVK& device, const PipelineDesc& desc, ShaderCompiler& compiler);
         ~PipelineVK() override = default;
         
         bool isShaderObject() const { return !m_shaders.empty(); }

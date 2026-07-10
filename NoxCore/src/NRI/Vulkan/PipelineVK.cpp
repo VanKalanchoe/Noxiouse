@@ -1,11 +1,78 @@
 #include "PipelineVK.h"
 
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <SDL3/SDL_filesystem.h>
+
 #include "DeviceVK.h"
 
 namespace NRI
 {
-    PipelineVK::PipelineVK(DeviceVK& device, const PipelineDesc& desc) : m_deviceVK(device)
+    static std::filesystem::path shaderFolder()
     {
+        const char* basePath = SDL_GetBasePath();
+
+        if (!basePath)
+            throw std::runtime_error(SDL_GetError());
+
+        std::filesystem::path path = std::filesystem::path(basePath) / "shaders";
+
+        std::filesystem::create_directories(path);
+
+        return path;
+    }
+
+    static std::filesystem::path shaderBinaryPath(const ShaderStageDesc& shaderDesc)
+    {
+        auto folder = shaderFolder();
+
+        std::string stage;
+
+        switch (shaderDesc.stage)
+        {
+        case ShaderStage::Vertex:
+            stage = "vert";
+            break;
+
+        case ShaderStage::Fragment:
+            stage = "frag";
+            break;
+
+        default:
+            stage = "unknown";
+            break;
+        }
+
+        std::filesystem::path source(shaderDesc.sourcePath);
+
+        return folder / (source.stem().string() + "." + stage + ".bin");
+    }
+
+    static std::vector<uint8_t> loadShaderBinary(const std::filesystem::path& path)
+    {
+        std::ifstream file(path, std::ios::binary | std::ios::ate);
+
+        if (!file)
+            throw std::runtime_error("Failed to open shader binary");
+
+        size_t size = file.tellg();
+        file.seekg(0);
+
+        std::vector<uint8_t> data(size);
+
+        file.read(
+            reinterpret_cast<char*>(data.data()),
+            size
+        );
+
+        return data;
+    }
+
+    PipelineVK::PipelineVK(DeviceVK& device, const PipelineDesc& desc, ShaderCompiler& compiler) : m_deviceVK(device)
+    {
+        std::vector<std::vector<char>> tempBytecodeStorage;
+        tempBytecodeStorage.reserve(desc.shaders.size());
         bool useShaderObjects = m_deviceVK.isShaderObjectExtensionEnabled();
 
         if (desc.type == PipelineType::Graphics)
@@ -21,41 +88,112 @@ namespace NRI
                 const vk::ShaderCreateFlagsEXT commonFlags = vk::ShaderCreateFlagBitsEXT::eDescriptorHeap;
 
                 std::vector<std::string> entryPointNames;
-                entryPointNames.reserve(desc.shaders.size());
+                std::vector<std::vector<uint8_t>> binaryStorage;
 
+                std::vector<bool> loadedFromBinary;
+
+                entryPointNames.reserve(desc.shaders.size());
+                binaryStorage.reserve(desc.shaders.size());
+                loadedFromBinary.reserve(desc.shaders.size());
+
+                // Load cache or compile
+                for (auto& shaderDesc : desc.shaders)
+                {
+                    entryPointNames.push_back(shaderDesc.entryPoint);
+                    
+                    m_stages.push_back( translateShaderStage(shaderDesc.stage));
+
+                    auto binaryPath = shaderBinaryPath(shaderDesc);
+
+                    if (std::filesystem::exists(binaryPath) && !desc.forceCompile)
+                    {
+                        std::cout << "Loading shader binary: "
+                            << binaryPath << '\n';
+
+                        binaryStorage.push_back(
+                            loadShaderBinary(binaryPath)
+                        );
+
+                        loadedFromBinary.push_back(true);
+                    }
+                    else
+                    {
+                        std::cout << "Compiling shader: "
+                            << shaderDesc.sourcePath << '\n';
+
+                        tempBytecodeStorage.emplace_back(
+                            compiler.compile(shaderDesc.sourcePath)
+                        );
+
+                        loadedFromBinary.push_back(false);
+                    }
+                }
+                
                 std::vector<vk::ShaderCreateInfoEXT> shaderCreateInfos;
                 shaderCreateInfos.reserve(desc.shaders.size());
 
-                for (const auto& shaderDesc : desc.shaders)
+                size_t binaryIndex = 0;
+                size_t spirvIndex = 0;
+
+                for (size_t i = 0; i < desc.shaders.size(); i++)
                 {
-                    if (shaderDesc.bytecode.empty())
-                        throw std::runtime_error("Empty shader bytecode");
+                    auto& shaderDesc = desc.shaders[i];
 
-                    entryPointNames.push_back(shaderDesc.entryPoint);
-                    vk::ShaderStageFlagBits stageBit = translateShaderStage(shaderDesc.stage);
-                    m_stages.push_back(stageBit);
-
-                    shaderCreateInfos.push_back({
+                    vk::ShaderCreateInfoEXT info
+                    {
                         .flags = commonFlags,
                         .stage = translateShaderStage(shaderDesc.stage),
                         .nextStage = determineNextStage(shaderDesc.stage),
-                        .codeType = vk::ShaderCodeTypeEXT::eSpirv,
-                        .codeSize = shaderDesc.bytecode.size() * sizeof(char),
-                        .pCode = reinterpret_cast<const uint32_t*>(shaderDesc.bytecode.data()),
-                        .pName = entryPointNames.back().c_str(),
-                        .setLayoutCount = 0, // Descriptor heap: no descriptor set layouts
+                        .pName = entryPointNames[i].c_str(),
+                        .setLayoutCount = 0,
                         .pSetLayouts = nullptr,
-                        .pushConstantRangeCount = 0, // Push data (vkCmdPushDataEXT) is used instead
+                        .pushConstantRangeCount = 0,
                         .pPushConstantRanges = nullptr,
-                        .pSpecializationInfo = nullptr, // Vertex shader has no spec constants
-                    });
+                        .pSpecializationInfo = nullptr,
+                    };
+
+                    if (loadedFromBinary[i])
+                    {
+                        auto& binary = binaryStorage[binaryIndex++];
+
+                        info.codeType = vk::ShaderCodeTypeEXT::eBinary;
+                        info.codeSize = binary.size();
+                        info.pCode = binary.data();
+                    }
+                    else
+                    {
+                        auto& spirv = tempBytecodeStorage[spirvIndex++];
+
+                        info.codeType = vk::ShaderCodeTypeEXT::eSpirv;
+                        info.codeSize = spirv.size();
+                        info.pCode = reinterpret_cast<const uint32_t*>(spirv.data());
+                    }
+
+                    shaderCreateInfos.push_back(info);
                 }
 
                 m_shaders = m_deviceVK.getDevice().createShadersEXT(shaderCreateInfos);
-                m_rawShaders.reserve(m_shaders.size());
-                for (const auto& raiiShader : m_shaders)
+                
+                for (auto& shader : m_shaders) m_rawShaders.push_back(*shader);
+
+                for (size_t i = 0; i < desc.shaders.size(); i++)
                 {
-                    m_rawShaders.push_back(*raiiShader);
+                    if (!loadedFromBinary[i])
+                    {
+                        auto path = shaderBinaryPath(desc.shaders[i]);
+
+                        std::cout << "Saving shader binary: "
+                                  << path << '\n';
+
+                        auto data = m_shaders[i].getBinaryData();
+
+                        std::ofstream file(path, std::ios::binary);
+
+                        file.write(
+                            reinterpret_cast<const char*>(data.data()),
+                            data.size()
+                        );
+                    }
                 }
             }
             else
@@ -70,7 +208,8 @@ namespace NRI
 
                 for (const auto& shaderDesc : desc.shaders)
                 {
-                    temporaryModules.push_back(createShaderModule(shaderDesc.bytecode));
+                    tempBytecodeStorage.emplace_back(compiler.compile(shaderDesc.sourcePath));
+                    temporaryModules.push_back(createShaderModule(tempBytecodeStorage.back()));
 
                     auto& allocatedModule = temporaryModules.back();
                     vk::ShaderStageFlagBits stageBit = translateShaderStage(shaderDesc.stage);
@@ -88,7 +227,8 @@ namespace NRI
                 vk::PipelineShaderStageCreateInfo fragShaderStageInfo{.stage = vk::ShaderStageFlagBits::eFragment, .module = shaderModule, .pName = "fragMain"};
                 vk::PipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo, fragShaderStageInfo};*/
 
-                vk::PipelineVertexInputStateCreateInfo vertexInputInfo{
+                vk::PipelineVertexInputStateCreateInfo vertexInputInfo
+                {
                     .vertexBindingDescriptionCount = 0,
                     .pVertexBindingDescriptions = nullptr,
                     .vertexAttributeDescriptionCount = 0,
@@ -128,19 +268,19 @@ namespace NRI
 
                 /*std::vector<vk::DynamicState> dynamicStates = {vk::DynamicState::eViewport, vk::DynamicState::eScissor};
                 vk::PipelineDynamicStateCreateInfo dynamicState{.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size()), .pDynamicStates = dynamicStates.data()};*/
-                
+
                 std::vector<vk::DynamicState> dynamicStates = {
                     // Replaces the old standard Viewport/Scissor
                     vk::DynamicState::eViewportWithCount,
                     vk::DynamicState::eScissorWithCount,
-    
+
                     // Vertex Input
                     vk::DynamicState::eVertexInputEXT,
-    
+
                     // Input Assembly
                     vk::DynamicState::ePrimitiveTopology,
                     vk::DynamicState::ePrimitiveRestartEnable,
-    
+
                     // Rasterization
                     vk::DynamicState::eRasterizerDiscardEnable,
                     vk::DynamicState::ePolygonModeEXT,
@@ -148,20 +288,20 @@ namespace NRI
                     vk::DynamicState::eFrontFace,
                     vk::DynamicState::eDepthBiasEnable,
                     vk::DynamicState::eDepthClampEnableEXT,
-    
+
                     // Multisampling
                     vk::DynamicState::eRasterizationSamplesEXT,
                     vk::DynamicState::eSampleMaskEXT,
                     vk::DynamicState::eAlphaToCoverageEnableEXT,
                     vk::DynamicState::eAlphaToOneEnableEXT,
-    
+
                     // Depth / Stencil
                     vk::DynamicState::eDepthTestEnable,
                     vk::DynamicState::eDepthWriteEnable,
                     vk::DynamicState::eDepthCompareOp,
                     vk::DynamicState::eDepthBoundsTestEnable,
                     vk::DynamicState::eStencilTestEnable,
-    
+
                     // Color Blending
                     vk::DynamicState::eColorBlendEnableEXT,
                     vk::DynamicState::eColorBlendEquationEXT,
@@ -170,7 +310,7 @@ namespace NRI
                 };
 
                 vk::PipelineDynamicStateCreateInfo dynamicState{
-                    .dynamicStateCount = static_cast<uint32_t>(dynamicStates.size()), 
+                    .dynamicStateCount = static_cast<uint32_t>(dynamicStates.size()),
                     .pDynamicStates = dynamicStates.data()
                 };
 
@@ -206,7 +346,7 @@ namespace NRI
         }
         else if (desc.type == PipelineType::Compute)
         {
-            // Verify we have exactly one compute shader
+            /*// Verify we have exactly one compute shader
             if (desc.shaders.empty())
             {
                 throw std::runtime_error("Compute pipeline requires a shader stage.");
@@ -214,7 +354,7 @@ namespace NRI
 
             /*vk::raii::ShaderModule shaderModule = createShaderModule(readFile("../../shaders/slang.spv"));
 
-            vk::PipelineShaderStageCreateInfo computeShaderStageInfo{.stage = vk::ShaderStageFlagBits::eCompute, .module = shaderModule, .pName = "compMain"};*/
+            vk::PipelineShaderStageCreateInfo computeShaderStageInfo{.stage = vk::ShaderStageFlagBits::eCompute, .module = shaderModule, .pName = "compMain"};#1#
 
             const auto& computeShaderDesc = desc.shaders[0];
             auto shaderModule = createShaderModule(computeShaderDesc.bytecode);
@@ -235,7 +375,7 @@ namespace NRI
                 // This struct must be chained into pipeline creation to enable the use of heaps (allowing us to leave pipelineLayout empty)
                 {.flags = vk::PipelineCreateFlagBits2::eDescriptorHeapEXT},
             };
-            m_pipeline = vk::raii::Pipeline(m_deviceVK.getDevice(), nullptr, pipelineCreateInfoChain.get<vk::ComputePipelineCreateInfo>());
+            m_pipeline = vk::raii::Pipeline(m_deviceVK.getDevice(), nullptr, pipelineCreateInfoChain.get<vk::ComputePipelineCreateInfo>());*/
         }
     }
 

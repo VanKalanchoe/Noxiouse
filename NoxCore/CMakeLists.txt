@@ -19,6 +19,29 @@ find_package(stb REQUIRED)
 set(STB_INCLUDEDIR ${stb_INCLUDE_DIRS})
 find_package (KTX REQUIRED)
 find_package (tinyobjloader REQUIRED)
+find_package (xxhash REQUIRED)
+
+# Define Slang as an imported library
+add_library(Slang::slang IMPORTED UNKNOWN)
+
+# Set the include directory
+set(SLANG_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendors/slang/include")
+target_include_directories(Slang::slang INTERFACE "${SLANG_INCLUDE_DIR}")
+
+# Set the library path
+if(WIN32)
+    set(SLANG_LIB "${CMAKE_CURRENT_SOURCE_DIR}/vendors/slang/lib/slang.lib")
+    
+    # CRITICAL: This sets the actual file location for the linker
+    set_target_properties(Slang::slang PROPERTIES
+        IMPORTED_LOCATION "${SLANG_LIB}"
+    )
+else()
+    set(SLANG_LIB "${CMAKE_CURRENT_SOURCE_DIR}/vendors/slang/lib/libslang.dylib")
+    set_target_properties(Slang::slang PROPERTIES
+        IMPORTED_LOCATION "${SLANG_LIB}"
+    )
+endif()
 
 set(IMGUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendors/imgui")
 
@@ -92,8 +115,8 @@ file(GLOB_RECURSE NOXCORE_FILES
 add_executable(${PROJECT_NAME} ${NOXCORE_FILES} ${IMGUI_SOURCES}) #main file here
 set_target_properties (${PROJECT_NAME} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${TEMPLATE_DIR})
 set_target_properties (${PROJECT_NAME} PROPERTIES CXX_STANDARD 20)
-target_link_libraries (${PROJECT_NAME} Vulkan::cppm SDL3::SDL3 glm::glm tinyobjloader::tinyobjloader)
-target_include_directories (${PROJECT_NAME} SYSTEM PRIVATE ${STB_INCLUDEDIR} ${CMAKE_CURRENT_SOURCE_DIR}/vendors/taskflow ${CMAKE_CURRENT_SOURCE_DIR}/vendors/VulkanMemoryAllocator-Hpp/include ${CMAKE_CURRENT_SOURCE_DIR}/vendors/VulkanMemoryAllocator-Hpp/VulkanMemoryAllocator/include ${IMGUI_DIR} ${IMGUI_DIR}/backends)
+target_link_libraries (${PROJECT_NAME} Vulkan::cppm SDL3::SDL3 glm::glm Slang::slang xxHash::xxhash tinyobjloader::tinyobjloader)
+target_include_directories (${PROJECT_NAME} SYSTEM PRIVATE ${STB_INCLUDEDIR} ${CMAKE_CURRENT_SOURCE_DIR}/vendors/taskflow ${CMAKE_CURRENT_SOURCE_DIR}/vendors/VulkanMemoryAllocator-Hpp/include ${CMAKE_CURRENT_SOURCE_DIR}/vendors/VulkanMemoryAllocator-Hpp/VulkanMemoryAllocator/include ${IMGUI_DIR} ${IMGUI_DIR}/backends ${CMAKE_CURRENT_SOURCE_DIR}/vendors/FileWatch)
 
 # Add compile definition if C++ 20 module is enabled
 if(ENABLE_CPP20_MODULE)
@@ -107,6 +130,12 @@ if(WIN32)
   if(${CMAKE_GENERATOR} MATCHES "Visual Studio.*")
     set_target_properties(${PROJECT_NAME} PROPERTIES VS_DEBUGGER_WORKING_DIRECTORY ${TEMPLATE_DIR})
   endif()
+
+  add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/vendors/slang/bin/slang.dll"
+            $<TARGET_FILE_DIR:${PROJECT_NAME}>
+    )
 endif()
 
 target_compile_options(${PROJECT_NAME} PRIVATE /std:c++latest)
