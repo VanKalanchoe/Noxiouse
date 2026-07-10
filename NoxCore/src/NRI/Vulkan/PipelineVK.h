@@ -18,9 +18,11 @@ namespace NRI
     private:
         [[nodiscard]] vk::raii::ShaderModule createShaderModule(const std::vector<char>& code) const;
         vk::ShaderStageFlagBits translateShaderStage(ShaderStage stage);
+        vk::ShaderStageFlagBits determineNextStage(ShaderStage stage);
 
     private:
         DeviceVK& m_deviceVK;
         vk::raii::Pipeline m_pipeline = nullptr;
+        std::vector<vk::raii::ShaderEXT> m_shaders;
     };
 }

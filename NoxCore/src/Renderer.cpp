@@ -165,7 +165,7 @@ void Renderer::createGraphicsPipeline()
 
 void Renderer::createComputePipeline()
 {
-    NRI::PipelineDesc computeDesc
+    /*NRI::PipelineDesc computeDesc
     {
         .type = NRI::PipelineType::Compute,
         .shaders = {
@@ -177,7 +177,7 @@ void Renderer::createComputePipeline()
         }
     };
 
-    m_computePipeline = m_device->createPipeline(computeDesc);
+    m_computePipeline = m_device->createPipeline(computeDesc);*/
 }
 
 void Renderer::createCommandPool()
@@ -307,7 +307,7 @@ void Renderer::createVertexBuffer()
     m_vertexBuffer = m_device->createBuffer(NRI::BufferDesc
     {
         .size = bufferSize,
-        .usage = NRI::BufferUsage::Vertex
+        .usage = NRI::BufferUsage::Storage
     });
     
     std::unique_ptr<NRI::CommandBuffer> commandCopyBuffer = beginSingleTimeCommands();
@@ -448,16 +448,21 @@ void Renderer::recordCommandBuffer(uint32_t imageIndex)
     };
     m_commandBuffers->beginRendering(desc);
     
-    m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_graphicsPipeline);
     m_commandBuffers->setViewport(m_swapChainExtent);
     m_commandBuffers->setScissor(m_swapChainExtent);
+    
+    m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_graphicsPipeline);
+    
     m_commandBuffers->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
+    /*m_commandBuffers->bindVertexBuffers(0, *m_vertexBuffer, {0});*/
+    m_commandBuffers->bindIndexBuffer(*m_indexBuffer, 0);
+    
     PushConstantBlock references{};
     // Pass pointer to the global matrix via a buffer device address
     references.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+    references.vertexReference = m_vertexBuffer->getDeviceAddress();
     m_commandBuffers->pushData(&references, sizeof(PushConstantBlock));
-    m_commandBuffers->bindVertexBuffers(0, *m_vertexBuffer, {0});
-    m_commandBuffers->bindIndexBuffer(*m_indexBuffer, 0);
+    
     m_commandBuffers->drawIndexed(static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
     
     m_commandBuffers->endRendering();

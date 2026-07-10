@@ -62,7 +62,11 @@ namespace NRI
         vk::EXTDescriptorHeapExtensionName,
         vk::KHRMaintenance5ExtensionName,
         vk::KHRShaderUntypedPointersExtensionName,
-        vk::KHRShaderNonSemanticInfoExtensionName
+        vk::KHRShaderNonSemanticInfoExtensionName,
+        // Shader Objects
+        vk::EXTShaderObjectExtensionName,
+        vk::EXTExtendedDynamicState3ExtensionName,
+        vk::EXTVertexInputDynamicStateExtensionName
     };
 
     DeviceVK::DeviceVK(SDL_Window* window) : m_window(window)
@@ -205,11 +209,13 @@ namespace NRI
         auto features = physicalDevice.template getFeatures2<vk::PhysicalDeviceFeatures2,
                                                              vk::PhysicalDeviceVulkan11Features,
                                                              vk::PhysicalDeviceVulkan13Features,
+                                                             vk::PhysicalDeviceShaderObjectFeaturesEXT,
                                                              vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>();
         bool supportsRequiredFeatures = features.template get<vk::PhysicalDeviceFeatures2>().features.samplerAnisotropy &&
             features.template get<vk::PhysicalDeviceVulkan11Features>().shaderDrawParameters &&
             features.template get<vk::PhysicalDeviceVulkan13Features>().dynamicRendering &&
             features.template get<vk::PhysicalDeviceVulkan13Features>().synchronization2 &&
+            features.template get<vk::PhysicalDeviceShaderObjectFeaturesEXT>().shaderObject &&
             features.template get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>().extendedDynamicState;
 
         // Return true if the physicalDevice meets all the criteria
@@ -253,6 +259,7 @@ namespace NRI
                            vk::PhysicalDeviceVulkan11Features,
                            vk::PhysicalDeviceVulkan12Features,
                            vk::PhysicalDeviceVulkan13Features,
+                           vk::PhysicalDeviceShaderObjectFeaturesEXT,
                            vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT,
                            vk::PhysicalDeviceDescriptorHeapFeaturesEXT,
                            vk::PhysicalDeviceShaderUntypedPointersFeaturesKHR,
@@ -267,8 +274,9 @@ namespace NRI
                     }
                 }, // vk::PhysicalDeviceFeatures2
                 {.shaderDrawParameters = true}, // vk::PhysicalDeviceVulkan11Features
-                {.shaderSampledImageArrayNonUniformIndexing = true, .shaderStorageBufferArrayNonUniformIndexing = true, .bufferDeviceAddress = true}, // vk::PhysicalDeviceVulkan12Features
+                {.shaderSampledImageArrayNonUniformIndexing = true, .shaderStorageBufferArrayNonUniformIndexing = true, .scalarBlockLayout = true, .bufferDeviceAddress = true}, // vk::PhysicalDeviceVulkan12Features
                 {.synchronization2 = true, .dynamicRendering = true}, // vk::PhysicalDeviceVulkan13Features
+                {.shaderObject = true}, // vk::PhysicalDeviceVulkan14Features
                 {.extendedDynamicState = true}, // vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT
                 {.descriptorHeap = true},
                 {.shaderUntypedPointers = true},

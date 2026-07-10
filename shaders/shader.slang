@@ -1,10 +1,10 @@
-struct VSInput 
+/* struct VSInput 
 {
     float3 inPosition;
     float3 inColor;
     float2 inTexCoord;
 };
-
+ */
 struct UniformBuffer 
 {
     float4x4 model;
@@ -14,9 +14,17 @@ struct UniformBuffer
     uint imageHeapIndexOffset;
 };
 
+struct VertexBuffer
+{
+    float3 inPosition;
+    float3 inColor;
+    float2 inTexCoord;
+};
+
 struct PushConstant 
 {
     UniformBuffer* uboBuffer;
+    VertexBuffer* vertexBuffer;
 };
 [[vk::push_constant]]
 ConstantBuffer<PushConstant> pushConst;
@@ -29,13 +37,17 @@ struct VSOutput
 };
 
 [shader("vertex")]
-VSOutput vertMain(VSInput input) 
+VSOutput vertMain(uint vertexID : SV_VertexID) 
 {
     VSOutput output;
     UniformBuffer ubo = *pushConst.uboBuffer;
-    output.pos = mul(ubo.proj, mul(ubo.view, mul(ubo.model, float4(input.inPosition, 1.0))));
+    VertexBuffer vertex = pushConst.vertexBuffer[vertexID];
+  /*   output.pos = mul(ubo.proj, mul(ubo.view, mul(ubo.model, float4(input.inPosition, 1.0))));
     output.color = input.inColor;
-    output.fragTexCoord = input.inTexCoord;
+    output.fragTexCoord = input.inTexCoord; */
+    output.pos = mul(ubo.proj, mul(ubo.view, mul(ubo.model, float4(vertex.inPosition, 1.0))));
+    output.color = vertex.inColor;
+    output.fragTexCoord = vertex.inTexCoord;
     return output;
 }
 

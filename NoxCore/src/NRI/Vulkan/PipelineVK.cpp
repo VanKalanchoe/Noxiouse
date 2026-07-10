@@ -7,39 +7,53 @@
 
 namespace NRI
 {
-    struct Vertex
-    {
-        glm::vec3 pos;
-        glm::vec3 color;
-        glm::vec2 texCoord;
-
-        static vk::VertexInputBindingDescription getBindingDescription()
-        {
-            return {.binding = 0, .stride = sizeof(Vertex), .inputRate = vk::VertexInputRate::eVertex};
-        }
-
-        static std::array<vk::VertexInputAttributeDescription, 3> getAttributeDescriptions()
-        {
-            return {
-                {
-                    {.location = 0, .binding = 0, .format = vk::Format::eR32G32B32Sfloat, .offset = offsetof(Vertex, pos)},
-                    {.location = 1, .binding = 0, .format = vk::Format::eR32G32B32Sfloat, .offset = offsetof(Vertex, color)},
-                    {.location = 2, .binding = 0, .format = vk::Format::eR32G32Sfloat, .offset = offsetof(Vertex, texCoord)}
-                }
-            };
-        }
-
-        bool operator==(const Vertex& other) const
-        {
-            return pos == other.pos && color == other.color && texCoord == other.texCoord;
-        }
-    };
-    
     PipelineVK::PipelineVK(DeviceVK& device, const PipelineDesc& desc) : m_deviceVK(device)
     {
         if (desc.type == PipelineType::Graphics)
         {
-            // Verify we have exactly one compute shader
+            // Verify we have shader
+            if (desc.shaders.empty()) 
+            {
+                throw std::runtime_error("Graphics pipeline requires a shader stage.");
+            }
+            
+            const vk::ShaderCreateFlagsEXT commonFlags = vk::ShaderCreateFlagBitsEXT::eDescriptorHeap;
+            
+            std::vector<std::string> entryPointNames;
+            entryPointNames.reserve(desc.shaders.size());
+
+            std::vector<vk::ShaderCreateInfoEXT> shaderCreateInfos;
+            shaderCreateInfos.reserve(desc.shaders.size());
+            
+            for (const auto& shaderDesc : desc.shaders)
+            {
+                entryPointNames.push_back(shaderDesc.entryPoint);
+                
+                shaderCreateInfos.push_back({
+                    .flags                  = commonFlags,
+                    .stage                  = translateShaderStage(shaderDesc.stage),
+                    .nextStage              = determineNextStage(shaderDesc.stage),
+                    .codeType               = vk::ShaderCodeTypeEXT::eSpirv,
+                    .codeSize               = shaderDesc.bytecode.size() * sizeof(uint32_t),
+                    .pCode                  = shaderDesc.bytecode.data(),
+                    .pName                  = shaderDesc.entryPoint.c_str(),
+                    .setLayoutCount         = 0,  // Descriptor heap: no descriptor set layouts
+                    .pSetLayouts            = nullptr,
+                    .pushConstantRangeCount = 0,  // Push data (vkCmdPushDataEXT) is used instead
+                    .pPushConstantRanges    = nullptr,
+                    .pSpecializationInfo    = nullptr,  // Vertex shader has no spec constants
+                });
+            }
+            
+            m_shaders = m_deviceVK.getDevice().createShadersEXT(shaderCreateInfos);
+        }
+    }
+    
+    /*PipelineVK::PipelineVK(DeviceVK& device, const PipelineDesc& desc) : m_deviceVK(device)
+    {
+        if (desc.type == PipelineType::Graphics)
+        {
+            // Verify we have shader
             if (desc.shaders.empty()) 
             {
                 throw std::runtime_error("Graphics pipeline requires a shader stage.");
@@ -71,15 +85,13 @@ namespace NRI
 
             /*vk::PipelineShaderStageCreateInfo vertShaderStageInfo{.stage = vk::ShaderStageFlagBits::eVertex, .module = shaderModule, .pName = "vertMain"};
             vk::PipelineShaderStageCreateInfo fragShaderStageInfo{.stage = vk::ShaderStageFlagBits::eFragment, .module = shaderModule, .pName = "fragMain"};
-            vk::PipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo, fragShaderStageInfo};*/
-
-            auto bindingDescription = Vertex::getBindingDescription();
-            auto attributeDescriptions = Vertex::getAttributeDescriptions();
+            vk::PipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo, fragShaderStageInfo};#1#
+            
             vk::PipelineVertexInputStateCreateInfo vertexInputInfo{
-                .vertexBindingDescriptionCount = 1,
-                .pVertexBindingDescriptions = &bindingDescription,
-                .vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size()),
-                .pVertexAttributeDescriptions = attributeDescriptions.data()
+                .vertexBindingDescriptionCount = 0,
+                .pVertexBindingDescriptions = nullptr,
+                .vertexAttributeDescriptionCount = 0,
+                .pVertexAttributeDescriptions = nullptr
             };
             vk::PipelineInputAssemblyStateCreateInfo inputAssembly{.topology = vk::PrimitiveTopology::eTriangleList};
             vk::PipelineViewportStateCreateInfo viewportState{.viewportCount = 1, .scissorCount = 1};
@@ -116,7 +128,7 @@ namespace NRI
             vk::PipelineDynamicStateCreateInfo dynamicState{.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size()), .pDynamicStates = dynamicStates.data()};
 
             /*vk::PipelineLayoutCreateInfo pipelineLayoutInfo{.setLayoutCount = 0, .pushConstantRangeCount = 0};
-            pipelineLayout = vk::raii::PipelineLayout(device, pipelineLayoutInfo);*/
+            pipelineLayout = vk::raii::PipelineLayout(device, pipelineLayoutInfo);#1#
 
             vk::Format depthFormat = m_deviceVK.getDepthFormat();
 
@@ -132,7 +144,7 @@ namespace NRI
                     .pDepthStencilState = &depthStencil,
                     .pColorBlendState = &colorBlending,
                     .pDynamicState = &dynamicState,
-                    /*.layout = pipelineLayout,*/
+                    /*.layout = pipelineLayout,#1#
                     .layout = nullptr,
                     .renderPass = nullptr
                 },
@@ -154,7 +166,7 @@ namespace NRI
             
             /*vk::raii::ShaderModule shaderModule = createShaderModule(readFile("../../shaders/slang.spv"));
 
-            vk::PipelineShaderStageCreateInfo computeShaderStageInfo{.stage = vk::ShaderStageFlagBits::eCompute, .module = shaderModule, .pName = "compMain"};*/
+            vk::PipelineShaderStageCreateInfo computeShaderStageInfo{.stage = vk::ShaderStageFlagBits::eCompute, .module = shaderModule, .pName = "compMain"};#1#
             
             const auto& computeShaderDesc = desc.shaders[0];
             auto shaderModule = createShaderModule(computeShaderDesc.bytecode);
@@ -177,7 +189,7 @@ namespace NRI
             };
             m_pipeline = vk::raii::Pipeline(m_deviceVK.getDevice(), nullptr, pipelineCreateInfoChain.get<vk::ComputePipelineCreateInfo>());
         }
-    }
+    }*/
 
     [[nodiscard]] vk::raii::ShaderModule PipelineVK::createShaderModule(const std::vector<char>& code) const
     {
@@ -202,6 +214,15 @@ namespace NRI
             
         default:
             throw std::runtime_error("Unsupported shader stage passed to Vulkan backend!");
+        }
+    }
+    
+    vk::ShaderStageFlagBits PipelineVK::determineNextStage(ShaderStage stage)
+    {
+        switch (stage)
+        {
+            case ShaderStage::Vertex:    return vk::ShaderStageFlagBits::eFragment;
+            case ShaderStage::Fragment: return {};
         }
     }
 }

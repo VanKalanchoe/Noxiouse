@@ -200,6 +200,25 @@ namespace NRI
     {
         m_commandBuffers[m_currentFrameIndex].setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), {.width = swapChainExtent.width, .height = swapChainExtent.height}));
     }
+    
+    void CommandBufferVK::setViewportWithCount(const Extent2D& swapChainExtent)
+    {
+        vk::Viewport viewport(0.0f, 0.0f, static_cast<float>(swapChainExtent.width), static_cast<float>(swapChainExtent.height), 0.0f, 1.0f);
+        
+        m_commandBuffers[m_currentFrameIndex].setViewportWithCount(viewport);
+    }
+
+    void CommandBufferVK::setScissorWithCount(const Extent2D& swapChainExtent)
+    {
+        vk::Rect2D scissor(vk::Offset2D(0, 0), {.width = swapChainExtent.width, .height = swapChainExtent.height});
+        
+        m_commandBuffers[m_currentFrameIndex].setScissorWithCount(scissor);
+    }
+    
+    /*void CommandBufferVK::setVertexInput()
+    {
+        
+    }*/
 
     void CommandBufferVK::bindDescriptorHeaps(DescriptorHeap* resourceHeap, DescriptorHeap* samplerHeap)
     {

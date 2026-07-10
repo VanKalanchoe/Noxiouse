@@ -22,6 +22,8 @@ namespace NRI
         void bindPipeline(PipelineBindPoint bindPoint, Pipeline& pipeline) override;
         void setViewport(Extent2D swapChainExtent) override;
         void setScissor(Extent2D swapChainExtent) override;
+        void setViewportWithCount(const Extent2D& swapChainExtent) override;
+        void setScissorWithCount(const Extent2D& swapChainExtent) override;
         void bindDescriptorHeaps(DescriptorHeap* resourceHeap, DescriptorHeap* samplerHeap) override;
         void pushData(const void* data, uint32_t size) override;
         void bindVertexBuffers(uint32_t firstBinding, Buffer& buffer, uint64_t offset) override;

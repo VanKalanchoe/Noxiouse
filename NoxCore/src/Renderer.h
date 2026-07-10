@@ -73,6 +73,7 @@ struct ModelData
 struct PushConstantBlock
 {
     uint64_t matrixReference;
+    uint64_t vertexReference;
 };
 
 inline int32_t selectedSampler{0};

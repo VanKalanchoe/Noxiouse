@@ -57,6 +57,8 @@ namespace NRI
         virtual void bindPipeline(PipelineBindPoint bindPoint, Pipeline& pipeline) = 0;
         virtual void setViewport(Extent2D swapChainExtent) = 0;
         virtual void setScissor(Extent2D swapChainExtent) = 0;
+        virtual void setViewportWithCount(const Extent2D& swapChainExtent) = 0;
+        virtual void setScissorWithCount(const Extent2D& swapChainExtent) = 0;
         virtual void bindDescriptorHeaps(DescriptorHeap* resourceHeap, DescriptorHeap* samplerHeap) = 0;
         virtual void pushData(const void* data, uint32_t size) = 0;
         virtual void bindVertexBuffers(uint32_t firstBinding, Buffer& buffer, uint64_t offset) = 0;
