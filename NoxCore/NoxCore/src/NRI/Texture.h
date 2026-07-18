@@ -2,6 +2,8 @@
 #include <cstdint>
 #include <memory>
 
+#include <imgui.h>
+
 namespace NRI
 {
     enum class TextureLayout : uint8_t
@@ -17,7 +19,8 @@ namespace NRI
     {
         ColorAttachment,
         DepthStencilAttachment,
-        ShaderResource // For regular textures
+        ShaderResource, // For regular textures
+        ColorResolveAttachment,
     };
 
     struct TextureDesc
@@ -38,5 +41,7 @@ namespace NRI
         
         [[nodiscard]] virtual uint32_t getMipLevels() const = 0;
         [[nodiscard]] virtual TextureUsage getUsage() const = 0;
+        
+        virtual ImTextureID getImTextureID() = 0;
     };
 }

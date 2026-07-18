@@ -9,6 +9,7 @@
 #include "Buffer.h"
 #include "DescriptorHeap.h"
 #include "ShaderCompiler.h"
+#include "NoxCore/Core/Window.h"
 
 namespace NRI
 {
@@ -22,7 +23,7 @@ namespace NRI
     {
     public:
         // Factory function: The ONLY place that knows about specific backends
-        static std::unique_ptr<Device> create(GraphicsAPI api, void* windowHandle);
+        static std::unique_ptr<Device> create(GraphicsAPI api, Nox::Window& window);
         
         virtual std::unique_ptr<Swapchain> createSwapchain(const SwapchainDesc& desc) = 0;
         virtual std::unique_ptr<Pipeline> createPipeline(const PipelineDesc& desc, ShaderCompiler& compiler) = 0;
@@ -31,11 +32,15 @@ namespace NRI
         virtual std::unique_ptr<Buffer> createBuffer(const BufferDesc& desc) = 0;
         virtual std::unique_ptr<DescriptorHeap> createDescriptorHeap(const DescriptorHeapDesc& desc) = 0;
         
+        virtual void shutdown() = 0;
         virtual uint32_t getMSAASampleCount() const = 0;
         virtual void submitAndWait(CommandBuffer& cmdBuffer, uint32_t slotIndex = 0) = 0;
         virtual void submitCommandBuffer(CommandBuffer& cmdBuffer, Swapchain& swapchain, uint32_t frameIndex, uint32_t imageIndex) = 0;
         virtual void waitIdle() = 0;
-        virtual void initImGui() = 0;
+        virtual void initImGui(Nox::Window& window) = 0;
+        virtual void shutdownImGui() = 0;
+        virtual void beginImGui() = 0;
+        virtual void endImGui() = 0;
         
         virtual ~Device() = default;
     };

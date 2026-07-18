@@ -3,21 +3,21 @@
 
 namespace NRI
 {
-    SwapchainVK::SwapchainVK(DeviceVK& device, SDL_Window* window) : m_deviceVK(device)
+    SwapchainVK::SwapchainVK(DeviceVK& device, const SwapchainDesc& desc) : m_deviceVK(device)
     {
-        createSwapChain();
+        createSwapChain(desc);
         createImageViews();
         createSyncObjects();
     }
     
-    void SwapchainVK::createSwapChain()
+    void SwapchainVK::createSwapChain(const SwapchainDesc& desc)
     {
         auto& physicalDevice = m_deviceVK.getPhysicalDevice();
         auto& device = m_deviceVK.getDevice();
         auto& surface = m_deviceVK.getSurface();
 
         vk::SurfaceCapabilitiesKHR surfaceCapabilities = physicalDevice.getSurfaceCapabilitiesKHR(*surface);
-        m_swapChainExtent = chooseSwapExtent(surfaceCapabilities);
+        m_swapChainExtent = chooseSwapExtent(surfaceCapabilities, desc.Width, desc.Height);
         uint32_t minImageCount = chooseSwapMinImageCount(surfaceCapabilities);
 
         /*std::vector<vk::SurfaceFormatKHR> availableFormats = physicalDevice.getSurfaceFormatsKHR(*surface);*/
@@ -85,18 +85,16 @@ namespace NRI
         return minImageCount;
     }
 
-    vk::Extent2D SwapchainVK::chooseSwapExtent(vk::SurfaceCapabilitiesKHR const& capabilities)
+    vk::Extent2D SwapchainVK::chooseSwapExtent(vk::SurfaceCapabilitiesKHR const& capabilities, uint32_t windowWidth, uint32_t windowHeight)
     {
         if (capabilities.currentExtent.width != std::numeric_limits<uint32_t>::max())
         {
             return capabilities.currentExtent;
         }
-        int width, height;
-        SDL_GetWindowSizeInPixels(m_deviceVK.getWindow(), &width, &height);
-
+        
         return {
-            std::clamp<uint32_t>(width, capabilities.minImageExtent.width, capabilities.maxImageExtent.width),
-            std::clamp<uint32_t>(height, capabilities.minImageExtent.height, capabilities.maxImageExtent.height)
+            std::clamp<uint32_t>(windowWidth, capabilities.minImageExtent.width, capabilities.maxImageExtent.width),
+            std::clamp<uint32_t>(windowHeight, capabilities.minImageExtent.height, capabilities.maxImageExtent.height)
         };
     }
 

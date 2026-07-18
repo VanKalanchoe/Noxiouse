@@ -1,5 +1,7 @@
 #include "TextureVK.h"
 
+#include <imgui_impl_vulkan.h>
+
 #include "DeviceVK.h"
 #include "CommandBufferVK.h"
 #include "BufferVK.h"
@@ -21,6 +23,12 @@ namespace NRI
             usageFlags = vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled;
         }
         else if (desc.usage == TextureUsage::ColorAttachment)
+        {
+            format = m_deviceVK.getSurfaceFormat().format;
+            aspectFlags = vk::ImageAspectFlagBits::eColor;
+            usageFlags = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled;
+        }
+        else if (desc.usage == TextureUsage::ColorResolveAttachment)
         {
             format = m_deviceVK.getSurfaceFormat().format;
             aspectFlags = vk::ImageAspectFlagBits::eColor;
@@ -62,9 +70,18 @@ namespace NRI
             }
         };
 
-        if (desc.usage == TextureUsage::ColorAttachment || desc.usage == TextureUsage::DepthStencilAttachment)
+        if (desc.usage == TextureUsage::ColorAttachment || desc.usage == TextureUsage::ColorResolveAttachment || desc.usage == TextureUsage::DepthStencilAttachment)
         {
             m_imageResource.view = m_deviceVK.createImageView(*m_imageResource.image, format, aspectFlags, 1);
+        }
+    }
+    
+    TextureVK::~TextureVK()
+    {
+        if (m_deviceVK.isDeviceInit() && m_imGuiHandle != VK_NULL_HANDLE)
+        {
+            ImGui_ImplVulkan_RemoveTexture(m_imGuiHandle);
+            m_imGuiHandle = VK_NULL_HANDLE;
         }
     }
 
@@ -195,5 +212,27 @@ namespace NRI
             .imageExtent = {width, height, 1}
         };
         commandBuffer.copyBufferToImage(buffer, m_imageResource.image, vk::ImageLayout::eTransferDstOptimal, region);
+    }
+
+    ImTextureID TextureVK::getImTextureID()
+    {
+        if (m_imGuiHandle != VK_NULL_HANDLE)
+            return reinterpret_cast<ImTextureID>(m_imGuiHandle);
+        
+        // Check if the wrapper object itself is valid
+        if (!*m_imageResource.view) {
+            throw std::runtime_error("m_imageResource.view is null!");
+        }
+    
+        if (m_imGuiHandle == VK_NULL_HANDLE)
+        {
+            // Now it is safe to dereference no sampler needeed anymore
+            m_imGuiHandle = ImGui_ImplVulkan_AddTexture(
+                *m_imageResource.view,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+            );
+        }
+    
+        return reinterpret_cast<ImTextureID>(m_imGuiHandle);
     }
 }

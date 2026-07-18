@@ -8,7 +8,8 @@ namespace NRI
     
     struct SwapchainDesc
     {
-        void* windowHandle = nullptr;
+        uint32_t Width;
+        uint32_t Height;
     };
     
     enum class FrameResult { Success, ResizeRequired };

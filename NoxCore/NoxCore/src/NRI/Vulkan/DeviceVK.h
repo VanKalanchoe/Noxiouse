@@ -1,6 +1,4 @@
 #pragma once
-#include <SDL3/SDL_vulkan.h>
-
 #include "VulkanCommon.h"
 
 #ifdef NDEBUG
@@ -19,8 +17,11 @@ namespace NRI
     class DeviceVK final : public Device
     {
     public:
-        DeviceVK(SDL_Window* window);
+        DeviceVK(Nox::Window& window);
         ~DeviceVK() override;
+        void shutdown() override;
+
+        bool isDeviceInit() const { return m_deviceInitialized; }
         
         MemoryAllocatorVK& getAllocator() { return *m_allocator; }
         
@@ -43,8 +44,10 @@ namespace NRI
         void submitAndWait(CommandBuffer& cmdBuffer, uint32_t slotIndex) override;
         void submitCommandBuffer(CommandBuffer& cmdBuffer, Swapchain& swapchain, uint32_t frameIndex, uint32_t imageIndex) override;
         void waitIdle() override;
-        SDL_Window* getWindow() const { return m_window; }
-        void initImGui() override;
+        void initImGui(Nox::Window& window) override;
+        void shutdownImGui() override;
+        void beginImGui() override;
+        void endImGui() override;
 
         // Factory
         std::unique_ptr<Swapchain> createSwapchain(const SwapchainDesc& desc) override;
@@ -55,10 +58,10 @@ namespace NRI
         std::unique_ptr<DescriptorHeap> createDescriptorHeap(const DescriptorHeapDesc& desc) override;
         
     private:
-        void initVulkan(SDL_Window* window);
+        void initVulkan(Nox::Window& window);
         void createInstance();
         void setupDebugMessenger();
-        void createSurface(SDL_Window* window);
+        void createSurface(Nox::Window& window);
         bool isDeviceSuitable(vk::raii::PhysicalDevice const& physicalDevice);
         void pickPhysicalDevice();
         void createLogicalDevice();
@@ -73,7 +76,7 @@ namespace NRI
         vk::SurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<vk::SurfaceFormatKHR>& availableFormats);
         
     private:
-        SDL_Window* m_window;
+        bool m_deviceInitialized = false;
         vk::raii::Context m_context;
         vk::raii::Instance m_instance = nullptr;
         vk::raii::DebugUtilsMessengerEXT m_debugMessenger = nullptr;

@@ -1,5 +1,4 @@
 #pragma once
-#include <SDL3/SDL_video.h>
 
 #include "VulkanCommon.h"
 #include "../Swapchain.h"
@@ -13,7 +12,7 @@ namespace NRI
     class SwapchainVK final : public Swapchain
     {
     public:
-        SwapchainVK(DeviceVK& device, SDL_Window* window);
+        SwapchainVK(DeviceVK& device, const SwapchainDesc& desc);
         ~SwapchainVK() = default;
         
         Extent2D getExtent() const override { return { m_swapChainExtent.width, m_swapChainExtent.height }; };
@@ -26,12 +25,12 @@ namespace NRI
         const vk::raii::Fence& getInFlightFence(uint32_t frameIndex) const { return m_inFlightFences[frameIndex]; }
         
     private:
-        void createSwapChain();
+        void createSwapChain(const SwapchainDesc& desc);
         void createImageViews();
         vk::PresentModeKHR chooseSwapPresentMode(std::vector<vk::PresentModeKHR> const& availablePresentModes);
         vk::SurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<vk::SurfaceFormatKHR>& availableFormats);
         uint32_t chooseSwapMinImageCount(vk::SurfaceCapabilitiesKHR const& surfaceCapabilities);
-        vk::Extent2D chooseSwapExtent(vk::SurfaceCapabilitiesKHR const& capabilities);
+        vk::Extent2D chooseSwapExtent(vk::SurfaceCapabilitiesKHR const& capabilities, uint32_t windowWidth, uint32_t windowHeight);
         void createSyncObjects();
 
     private:

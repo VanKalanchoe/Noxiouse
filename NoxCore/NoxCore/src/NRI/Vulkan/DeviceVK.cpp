@@ -1,5 +1,6 @@
 #include "DeviceVK.h"
 #include <iostream>
+#include <SDL3/SDL_vulkan.h>
 
 #include "imgui_impl_vulkan.h"
 #include "imgui_impl_sdl3.h"
@@ -12,6 +13,7 @@
 #include "BufferVK.h"
 #include "DescriptorHeapVK.h"
 #include "MemoryAllocatorVK.h"
+
 
 namespace NRI
 {
@@ -27,7 +29,7 @@ namespace NRI
     // Factory
     std::unique_ptr<Swapchain> DeviceVK::createSwapchain(const SwapchainDesc& desc)
     {
-        return std::make_unique<SwapchainVK>(*this, static_cast<SDL_Window*>(desc.windowHandle));
+        return std::make_unique<SwapchainVK>(*this, desc);
     }
 
     std::unique_ptr<Pipeline> DeviceVK::createPipeline(const PipelineDesc& desc, ShaderCompiler& compiler)
@@ -69,10 +71,11 @@ namespace NRI
         vk::EXTVertexInputDynamicStateExtensionName
     };
 
-    DeviceVK::DeviceVK(SDL_Window* window) : m_window(window)
+    DeviceVK::DeviceVK(Nox::Window& window)
     {
         initVulkan(window);
         m_allocator = std::make_unique<MemoryAllocatorVK>(*this);
+        m_deviceInitialized = true;
     }
 
     DeviceVK::~DeviceVK()
@@ -82,13 +85,14 @@ namespace NRI
         {
             m_allocator.reset();
         }
-
-        ImGui_ImplVulkan_Shutdown();
-        ImGui_ImplSDL3_Shutdown();
-        ImGui::DestroyContext();
+    }
+    
+    void DeviceVK::shutdown()
+    {
+        m_deviceInitialized = false;
     }
 
-    void DeviceVK::initVulkan(SDL_Window* window)
+    void DeviceVK::initVulkan(Nox::Window& window)
     {
         createInstance();
         setupDebugMessenger();
@@ -173,10 +177,10 @@ namespace NRI
         m_debugMessenger = m_instance.createDebugUtilsMessengerEXT(debugUtilsMessengerCreateInfoEXT);
     }
 
-    void DeviceVK::createSurface(SDL_Window* window)
+    void DeviceVK::createSurface(Nox::Window& window)
     {
         VkSurfaceKHR _surface;
-        if (!SDL_Vulkan_CreateSurface(window, *m_instance, nullptr, &_surface))
+        if (!SDL_Vulkan_CreateSurface(window.getHandle(), *m_instance, nullptr, &_surface))
         {
             throw std::runtime_error("failed to create window surface!");
         }
@@ -475,7 +479,7 @@ namespace NRI
         m_device.waitIdle();
     }
 
-    void DeviceVK::initImGui()
+    void DeviceVK::initImGui(Nox::Window& window)
     {
         vk::DescriptorPoolSize poolSizes[] =
         {
@@ -500,7 +504,7 @@ namespace NRI
         static VkFormat imageFormats[] = {static_cast<VkFormat>(getSurfaceFormat().format)};
 
         // Setup Platform/Renderer backends
-        ImGui_ImplSDL3_InitForVulkan(m_window);
+        ImGui_ImplSDL3_InitForVulkan(window.getHandle());
         ImGui_ImplVulkan_InitInfo init_info = {};
         init_info.ApiVersion = VK_API_VERSION_1_4;
         init_info.Instance = *m_instance;
@@ -522,5 +526,25 @@ namespace NRI
         init_info.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
         init_info.CheckVkResultFn = check_vk_result;
         ImGui_ImplVulkan_Init(&init_info);
+    }
+    
+    void DeviceVK::shutdownImGui()
+    {
+        ImGui_ImplVulkan_Shutdown();
+    }
+    
+    void DeviceVK::beginImGui()
+    {
+        ImGui_ImplVulkan_NewFrame();
+    }
+    
+    void DeviceVK::endImGui()
+    {
+        // Update and Render additional Platform Windows
+        if (ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
+        {
+            ImGui::UpdatePlatformWindows();
+            ImGui::RenderPlatformWindowsDefault();
+        }
     }
 }

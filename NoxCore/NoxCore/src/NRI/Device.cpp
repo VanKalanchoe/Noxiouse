@@ -5,12 +5,12 @@
 
 namespace NRI
 {
-    std::unique_ptr<Device> Device::create(GraphicsAPI api, void* windowHandle)
+    std::unique_ptr<Device> Device::create(GraphicsAPI api, Nox::Window& window)
     {
         switch (api)
         {
         case GraphicsAPI::Vulkan:
-            return std::make_unique<DeviceVK>(static_cast<SDL_Window*>(windowHandle));
+            return std::make_unique<DeviceVK>(window);
             
         case GraphicsAPI::Metal:
             // return std::make_unique<mtl::DeviceMTL>(windowHandle);

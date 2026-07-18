@@ -11,11 +11,12 @@ namespace NRI
     {
     public:
         TextureVK(DeviceVK& device, const TextureDesc& desc);
-        ~TextureVK() override = default;
+        ~TextureVK() override;
 
         vma::raii::Image& getNativeImage() { return m_imageResource.image; }
         vk::raii::ImageView& getNativeView() { return m_imageResource.view; }
         vk::ImageViewCreateInfo& getNativeViewInfo() { return m_viewCreateInfo; }
+        ImTextureID getImTextureID() override;
         
         [[nodiscard]] uint32_t getMipLevels() const override { return m_desc.mipLevels; }
         [[nodiscard]] TextureUsage getUsage() const override { return m_desc.usage; }
@@ -32,6 +33,7 @@ namespace NRI
         DeviceVK& m_deviceVK;
         TextureDesc m_desc;
         ImageResource m_imageResource;
+        VkDescriptorSet m_imGuiHandle = nullptr; //imgui only
         
         // Memory-stable structures required for descriptor storage tracking
         vk::ImageViewCreateInfo m_viewCreateInfo;

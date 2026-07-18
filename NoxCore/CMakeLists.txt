@@ -1,5 +1,3 @@
-#add_library(VanK STATIC)
-
 set (PROJECT_NAME "NoxCore")
 
 # Add option to enable/disable C++ 20 module
@@ -15,6 +13,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../cmake")
 find_package(sdl3 REQUIRED)
 find_package(glm REQUIRED)
 find_package(Vulkan 1.4.350 REQUIRED)
+find_package(entt REQUIRED)
 find_package(stb REQUIRED)
 set(STB_INCLUDEDIR ${stb_INCLUDE_DIRS})
 find_package (KTX REQUIRED)
@@ -108,15 +107,22 @@ set(TEMPLATE_DIR ${CMAKE_BINARY_DIR}/${PROJECT_NAME})
 
 file(GLOB_RECURSE NOXCORE_FILES
     CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/NoxCore/src/*.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/NoxCore/src/*.h"
 )
 
-add_executable(${PROJECT_NAME} ${NOXCORE_FILES} ${IMGUI_SOURCES}) #main file here
+add_library(${PROJECT_NAME} STATIC ${NOXCORE_FILES} ${IMGUI_SOURCES}) #main file here
 set_target_properties (${PROJECT_NAME} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${TEMPLATE_DIR})
 set_target_properties (${PROJECT_NAME} PROPERTIES CXX_STANDARD 20)
-target_link_libraries (${PROJECT_NAME} Vulkan::cppm SDL3::SDL3 glm::glm Slang::slang xxHash::xxhash tinyobjloader::tinyobjloader)
-target_include_directories (${PROJECT_NAME} SYSTEM PRIVATE ${STB_INCLUDEDIR} ${CMAKE_CURRENT_SOURCE_DIR}/vendors/taskflow ${CMAKE_CURRENT_SOURCE_DIR}/vendors/VulkanMemoryAllocator-Hpp/include ${CMAKE_CURRENT_SOURCE_DIR}/vendors/VulkanMemoryAllocator-Hpp/VulkanMemoryAllocator/include ${IMGUI_DIR} ${IMGUI_DIR}/backends ${CMAKE_CURRENT_SOURCE_DIR}/vendors/FileWatch)
+target_link_libraries (${PROJECT_NAME} PUBLIC Vulkan::cppm SDL3::SDL3 glm::glm Slang::slang EnTT::EnTT xxHash::xxhash tinyobjloader::tinyobjloader)
+# Add here vendors
+target_include_directories (${PROJECT_NAME} SYSTEM PRIVATE ${STB_INCLUDEDIR} ${CMAKE_CURRENT_SOURCE_DIR}/vendors/taskflow ${CMAKE_CURRENT_SOURCE_DIR}/vendors/VulkanMemoryAllocator-Hpp/include ${CMAKE_CURRENT_SOURCE_DIR}/vendors/VulkanMemoryAllocator-Hpp/VulkanMemoryAllocator/include ${IMGUI_DIR}/backends)
+
+#vendors visible to other projects like editor
+target_include_directories (${PROJECT_NAME} SYSTEM PUBLIC ${IMGUI_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/vendors/FileWatch)
+
+# Sysmtem means supress warnings from the include directories, so we don't get warnings from external libraries.
+target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/NoxCore/src)
 
 # Add compile definition if C++ 20 module is enabled
 if(ENABLE_CPP20_MODULE)
