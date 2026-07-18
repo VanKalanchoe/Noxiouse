@@ -1,5 +1,6 @@
 #pragma once
 #include "NoxCore/Core/Layer.h"
+#include "Panels/SceneHierarchyPanel.h"
 
 namespace Nox
 {
@@ -13,5 +14,9 @@ namespace Nox
         void OnUpdate(Timestep ts) override;
         void OnRender() override;
         void OnImGuiRender() override;
+        
+    private:
+        // Panels
+        SceneHierarchyPanel m_SceneHierarchyPanel;
     };
 }

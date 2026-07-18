@@ -25,7 +25,7 @@ namespace NRI
         m_swapChainSurfaceFormat = m_deviceVK.getSurfaceFormat();
 
         std::vector<vk::PresentModeKHR> availablePresentModes = physicalDevice.getSurfacePresentModesKHR(*surface);
-        vk::PresentModeKHR presentMode = chooseSwapPresentMode(availablePresentModes);
+        vk::PresentModeKHR presentMode = chooseSwapPresentMode(availablePresentModes, desc.VSync);
 
         vk::SwapchainCreateInfoKHR swapChainCreateInfo{
             .surface = *surface,
@@ -58,9 +58,15 @@ namespace NRI
         }
     }
 
-    vk::PresentModeKHR SwapchainVK::chooseSwapPresentMode(std::vector<vk::PresentModeKHR> const& availablePresentModes)
+    vk::PresentModeKHR SwapchainVK::chooseSwapPresentMode(std::vector<vk::PresentModeKHR> const& availablePresentModes, bool vSync)
     {
         assert(std::ranges::any_of(availablePresentModes, [](auto presentMode) { return presentMode == vk::PresentModeKHR::eFifo; }));
+        
+        if (vSync)
+        {
+            return vk::PresentModeKHR::eFifo; 
+        }
+        
         return std::ranges::any_of(availablePresentModes,
                                    [](const vk::PresentModeKHR value) { return vk::PresentModeKHR::eMailbox == value; })
                    ? vk::PresentModeKHR::eMailbox

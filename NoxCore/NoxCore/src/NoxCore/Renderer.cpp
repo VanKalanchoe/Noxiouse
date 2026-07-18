@@ -93,8 +93,26 @@ namespace Nox
     {
         int width = 0, height = 0;
         m_window->getSizeInPixels(width, height);
-        m_swapChain = m_device->createSwapchain(NRI::SwapchainDesc{static_cast<uint32_t>(width), static_cast<uint32_t>(height)});
+        m_swapChain = m_device->createSwapchain(NRI::SwapchainDesc{static_cast<uint32_t>(width), static_cast<uint32_t>(height), m_vSync});
         m_swapChainExtent = m_swapChain->getExtent();
+    }
+    
+    void Renderer::setVSync(bool enabled)
+    {
+        if (m_vSync != enabled)
+        {
+            m_vSync = enabled;
+            recreateSwapChain(); // Rebuild swapchain with the new Present Mode
+        }
+    }
+    
+    void Renderer::onViewportSizeChange(NRI::Extent2D size)
+    {
+        m_viewportSize = size;
+        m_device->waitIdle();
+        createSceneResources();
+        createColorResources();
+        createDepthResources();
     }
 
     void Renderer::createCompiler()
@@ -143,9 +161,10 @@ namespace Nox
     
     void Renderer::createSceneResources()
     {
+        //changed from m_swapChainExtent to m_viewportSize
         m_sceneResource = m_device->createTexture(NRI::TextureDesc{
-            .width = m_swapChainExtent.width,
-            .height = m_swapChainExtent.height,
+            .width = m_viewportSize.width,
+            .height = m_viewportSize.height,
             .mipLevels = 1,
             .sampleCount = 1,
             .usage = NRI::TextureUsage::ColorAttachment
@@ -154,9 +173,10 @@ namespace Nox
 
     void Renderer::createColorResources()
     {
+        //changed from m_swapChainExtent to m_viewportSize
         m_colorResource = m_device->createTexture(NRI::TextureDesc{
-            .width = m_swapChainExtent.width,
-            .height = m_swapChainExtent.height,
+            .width = m_viewportSize.width,
+            .height = m_viewportSize.height,
             .mipLevels = 1,
             .sampleCount = m_device->getMSAASampleCount(),
             .usage = NRI::TextureUsage::ColorResolveAttachment
@@ -165,9 +185,10 @@ namespace Nox
 
     void Renderer::createDepthResources()
     {
+        //changed from m_swapChainExtent to m_viewportSize
         m_depthResource = m_device->createTexture(NRI::TextureDesc{
-            .width = m_swapChainExtent.width,
-            .height = m_swapChainExtent.height,
+            .width = m_viewportSize.width,
+            .height = m_viewportSize.height,
             .mipLevels = 1,
             .sampleCount = m_device->getMSAASampleCount(),
             .usage = NRI::TextureUsage::DepthStencilAttachment
@@ -409,15 +430,15 @@ namespace Nox
     
         NRI::RenderDesc desc = 
         {
-            .renderArea = { m_swapChainExtent.width, m_swapChainExtent.height },
+            .renderArea = { m_viewportSize.width, m_viewportSize.height },
             .colorAttachments = colorAttachments,
             .depthAttachment = depthAttachment
         };
         m_commandBuffers->beginRendering(desc);
     
         // Viewport / scissor (counts and values are both dynamic).
-        m_commandBuffers->setViewportWithCount(m_swapChainExtent);
-        m_commandBuffers->setScissorWithCount(m_swapChainExtent);
+        m_commandBuffers->setViewportWithCount(m_viewportSize);
+        m_commandBuffers->setScissorWithCount(m_viewportSize);
     
         // Vertex input empty since we use vertex fetch BDA but still needs to be called empty
         m_commandBuffers->setVertexInput();
@@ -513,7 +534,7 @@ namespace Nox
         uniformData.model = rotate(glm::mat4(1.0f), /*time **/ glm::radians(45.0f), glm::vec3(0.0f, 0.0f, 1.0f));
         uniformData.view = lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
         uniformData.proj =
-            glm::perspective(glm::radians(45.0f), static_cast<float>(m_swapChainExtent.width) / static_cast<float>(m_swapChainExtent.height), 0.1f, 10.0f);
+            glm::perspective(glm::radians(45.0f), static_cast<float>(m_viewportSize.width) / static_cast<float>(m_viewportSize.height), 0.1f, 10.0f);
         uniformData.proj[1][1] *= -1;
         uniformData.samplerIndex = selectedSampler;
 

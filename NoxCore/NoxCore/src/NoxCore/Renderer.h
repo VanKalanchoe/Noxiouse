@@ -98,6 +98,10 @@ namespace Nox
         void beginImGui();
         void endImGui();
         NRI::Texture* GetSceneResource() const { return m_sceneResource.get(); }
+        void setVSync(bool enabled);
+        void onViewportSizeChange(NRI::Extent2D size);
+        bool getVSync() const { return m_vSync; }
+        NRI::Extent2D getViewPortSize() const { return m_viewportSize; }
         
     private:
         void initRenderer();
@@ -126,13 +130,12 @@ namespace Nox
         std::vector<char> readFile(const std::string& filename);
 
     private:
-        Nox::Scene m_activeScene;
-        Nox::Entity m_testEntity;
-
         std::shared_ptr<Nox::Window> m_window;
         std::unique_ptr<NRI::Device> m_device = nullptr;
         std::unique_ptr<NRI::Swapchain> m_swapChain = nullptr;
-        NRI::Extent2D m_swapChainExtent;
+        NRI::Extent2D m_swapChainExtent{640, 480};
+        NRI::Extent2D m_viewportSize{640, 480};
+        bool m_vSync = false;
 
         Utils::NOXWatcher m_fileWatcher;
         std::unique_ptr<NRI::ShaderCompiler> m_shaderCompiler = nullptr;

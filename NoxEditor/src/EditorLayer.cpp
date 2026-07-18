@@ -64,5 +64,7 @@ namespace Nox
             }
             ImGui::End();
         }
+        
+        m_SceneHierarchyPanel.OnImGuiRender();
     }
 }

@@ -101,7 +101,23 @@ namespace Nox
       -*/
         
         const ImGuiDockNodeFlags dockFlags = ImGuiDockNodeFlags_PassthruCentralNode | ImGuiDockNodeFlags_NoDockingInCentralNode;
+        
+        // 1. Grab the style and save the default minimum size
+        ImGuiStyle& style = ImGui::GetStyle();
+        float minWinSizeX = style.WindowMinSize.x;
+        float minWinSizeY = style.WindowMinSize.y;
+        
+        // 2. Enforce the new minimum size globally for the DockSpace
+        style.WindowMinSize.x = 370.0f;
+        style.WindowMinSize.y = 370.0f;
+        
+        // 3. Submit the DockSpace (It will inherit the 370x350 constraint)
         ImGuiID dockID = ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport(), dockFlags);
+        
+        // 4. Restore the original minimum size for standard floating windows
+        style.WindowMinSize.x = minWinSizeX;
+        style.WindowMinSize.y = minWinSizeY;
+        
         // Docking layout, must be done only if it doesn't exist
         if(!ImGui::DockBuilderGetNode(dockID)->IsSplitNode() && !ImGui::FindWindowByName("Viewport"))
         {
@@ -116,10 +132,16 @@ namespace Nox
         {
             if(ImGui::BeginMenu("File"))
             {
-                /*if(ImGui::MenuItem("vSync", "", &m_vSync))*/
-                    /*m_swapchain.requestRebuild();  // Recreate the swapchain with the new vSync setting*/
-                /*ImGui::Separator();*/
-                if(ImGui::MenuItem("Exit")) Application::Shutdown();
+                auto& app = Application::Get();
+                if (auto* renderer = app.GetRenderer())
+                {
+                    bool currentVSync = renderer->getVSync();
+                    if(ImGui::MenuItem("vSync", "", &currentVSync))
+                        renderer->setVSync(currentVSync); // Recreate the swapchain with the new vSync setting
+                }
+                ImGui::Separator();
+                if(ImGui::MenuItem("Exit"))
+                    Application::Shutdown();
                 ImGui::EndMenu();
             }
             ImGui::EndMainMenuBar();
@@ -134,14 +156,19 @@ namespace Nox
         ImGui::End();
         ImGui::PopStyleVar();
 
-        /*// Verify if the viewport has a new size and resize the RenderTarget accordingly.
-        const VkExtent2D viewportSize = {uint32_t(windowSize.x), uint32_t(windowSize.y)};
-        if(m_viewportSize.width != viewportSize.width || m_viewportSize.height != viewportSize.height)
+        // Verify if the viewport has a new size and resize the RenderTarget accordingly.
+        auto& app = Application::Get();
+        if (auto* renderer = app.GetRenderer())
         {
-            onViewportSizeChange(viewportSize);
-        }*/
+            NRI::Extent2D m_viewportSize = renderer->getViewPortSize();
+            const NRI::Extent2D viewportSize = {static_cast<uint32_t>(windowSize.x), static_cast<uint32_t>(windowSize.y)};
+            if(m_viewportSize.width != viewportSize.width || m_viewportSize.height != viewportSize.height)
+            {
+                renderer->onViewportSizeChange(viewportSize);
+            }
+        }
         
-        // Extra ImGui windows can be added here, like the demo window.
+        // Extra ImGui windows can be added in OnImGuiRender() layer, like the demo window.
         // ImGui::ShowDemoWindow();
     }
 

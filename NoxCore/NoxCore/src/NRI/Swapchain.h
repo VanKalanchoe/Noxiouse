@@ -10,6 +10,7 @@ namespace NRI
     {
         uint32_t Width;
         uint32_t Height;
+        bool VSync = true;
     };
     
     enum class FrameResult { Success, ResizeRequired };

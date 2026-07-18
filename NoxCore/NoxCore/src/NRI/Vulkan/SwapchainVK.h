@@ -27,7 +27,7 @@ namespace NRI
     private:
         void createSwapChain(const SwapchainDesc& desc);
         void createImageViews();
-        vk::PresentModeKHR chooseSwapPresentMode(std::vector<vk::PresentModeKHR> const& availablePresentModes);
+        vk::PresentModeKHR chooseSwapPresentMode(std::vector<vk::PresentModeKHR> const& availablePresentModes, bool vSync);
         vk::SurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<vk::SurfaceFormatKHR>& availableFormats);
         uint32_t chooseSwapMinImageCount(vk::SurfaceCapabilitiesKHR const& surfaceCapabilities);
         vk::Extent2D chooseSwapExtent(vk::SurfaceCapabilitiesKHR const& capabilities, uint32_t windowWidth, uint32_t windowHeight);
