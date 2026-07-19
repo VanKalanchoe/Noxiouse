@@ -2,8 +2,11 @@
 
 #include <imgui.h>
 
-#include "NoxCore/Renderer.h"
+#include "NoxCore/Renderer/Renderer.h"
 #include "NoxCore/Core/Application.h"
+#include "NoxCore/Core/Input.h"
+#include "NoxCore/Events/InputEvents.h"
+#include "NoxCore/ImGui/ImGuiLayer.h"
 
 namespace Nox
 {
@@ -17,6 +20,9 @@ namespace Nox
 
     void EditorLayer::OnEvent(Event& event)
     {
+        EventDispatcher dispatcher(event);
+        dispatcher.Dispatch<KeyPressedEvent>([this](KeyPressedEvent& e) { return OnKeyPressed(e); });
+        dispatcher.Dispatch<MouseButtonPressedEvent>([this](MouseButtonPressedEvent& e) { return OnMouseButtonPressed(e); });
     }
 
     void EditorLayer::OnUpdate(Timestep ts)
@@ -66,5 +72,115 @@ namespace Nox
         }
         
         m_SceneHierarchyPanel.OnImGuiRender();
+    }
+    
+    bool EditorLayer::OnKeyPressed(KeyPressedEvent& e)
+    {
+        // Shortcuts
+        if (e.IsRepeat())
+        {
+            return false;
+        }
+
+        bool control = (Input::IsKeyPressed(SDL_SCANCODE_LCTRL) || Input::IsKeyPressed(SDL_SCANCODE_RCTRL));
+        bool shift = (Input::IsKeyPressed(SDL_SCANCODE_LSHIFT) || Input::IsKeyPressed(SDL_SCANCODE_RSHIFT));
+
+        switch (e.GetKeyCode())
+        {
+        case SDL_SCANCODE_N:
+            {
+                if (control)
+                {
+                    /*NewScene();*/
+                }
+                break;
+            }
+        case SDL_SCANCODE_O:
+            {
+                if (control)
+                {
+                    /*OpenProject();*/
+                }
+                break;
+            }
+        case SDL_SCANCODE_S:
+            {
+                if (control)
+                {
+                    /*if (shift)
+                        SaveSceneAs();
+                    else
+                        SaveScene();*/
+                }
+                break;
+            }
+
+        // Scene Commands
+        case SDL_SCANCODE_D:
+            {
+                if (control)
+                {
+                    /*OnDuplicateEntity();*/
+                }
+                break;
+            }
+
+
+        /*// Gizmos
+        case SDL_SCANCODE_Q:
+            m_GizmoType = -1;
+            break;
+        case SDL_SCANCODE_W:
+            m_GizmoType = ImGuizmo::OPERATION::TRANSLATE;
+            break;
+        case SDL_SCANCODE_E:
+            m_GizmoType = ImGuizmo::OPERATION::ROTATE;
+            break;
+        case SDL_SCANCODE_R:
+            if (control)
+            {
+                /*ScriptEngine::ReloadAssembly();#1#
+            }
+            else
+            {
+                m_GizmoType = ImGuizmo::OPERATION::SCALE;
+            }
+            break;*/
+        case SDL_SCANCODE_DELETE:
+            {
+                if (Application::Get().GetLayer<ImGuiLayer>()->GetActiveWidgetID() == 0)
+                {
+                    Entity selectedEntity = m_SceneHierarchyPanel.GetSelectedEntity();
+                    if (selectedEntity)
+                    {
+                        m_SceneHierarchyPanel.SetSelectedEntity({});
+                        /*m_ActiveScene->DestroyEntity(selectedEntity);*/
+                    }
+                }
+                break;
+            }
+        default:
+            break;
+        }
+
+        return false;
+    }
+
+    bool EditorLayer::IsButtonHovered() const
+    {
+        return true; //maybe useful for imgui ImGui::IsItemHovered()
+    }
+
+    bool EditorLayer::OnMouseButtonPressed(MouseButtonPressedEvent& event)
+    {
+        if (event.GetMouseButton() == SDL_BUTTON_LEFT)
+        {
+            /*if (m_ViewportHovered && !ImGuizmo::IsOver() && !Input::IsKeyPressed(SDL_SCANCODE_LALT))
+            {
+                m_SceneHierarchyPanel.SetSelectedEntity(m_HoveredEntity);
+            }*/
+        }
+
+        return false;
     }
 }

@@ -42,6 +42,7 @@ namespace NRI
         [[nodiscard]] virtual uint32_t getMipLevels() const = 0;
         [[nodiscard]] virtual TextureUsage getUsage() const = 0;
         
+        virtual uint32_t getDescriptorIndexSlot() const = 0;
         virtual ImTextureID getImTextureID() = 0;
     };
 }

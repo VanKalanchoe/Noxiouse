@@ -5,7 +5,9 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 
-#include "NoxCore/Renderer.h"
+#include "NoxCore/Events/InputEvents.h"
+#include "NoxCore/Events/WindowEvents.h"
+#include "NoxCore/Renderer/Renderer.h"
 #include "NoxCore/ImGui/ImGuiLayer.h"
 
 namespace Nox
@@ -21,10 +23,11 @@ namespace Nox
         
         m_Window = std::make_shared<Window>(m_Specification.WindowSpec);
         
-        renderer = std::make_unique<Renderer>(m_Window);
+        renderer = std::make_unique<Renderer>(m_Window, m_Specification.isEditor);
         
         // ImGui
-        m_ImGuiLayer = PushLayer<ImGuiLayer>(*renderer);
+        if (m_Specification.isEditor)
+            m_ImGuiLayer = PushLayer<ImGuiLayer>(*renderer);
     }
 
     Application::~Application()
@@ -113,22 +116,70 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[])
 }
 
 /* This function runs when a new event (mouse input, keypresses, etc) occurs. */
-SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event)
+SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* currentEvent)
 {
     auto applicationState = static_cast<Nox::AppState*>(appstate);
     
-    ImGui_ImplSDL3_ProcessEvent(event);
+    if (applicationState->app->GetSpecification().isEditor)
+        ImGui_ImplSDL3_ProcessEvent(currentEvent);
     
-    switch (event->type)
+    switch (currentEvent->type)
     {
     case SDL_EVENT_QUIT: return SDL_APP_SUCCESS; /* end the program, reporting success to the OS. */
     case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED: /* framebuffer resize swapchain */
-        applicationState->app->GetRenderer()->resizeWindow();
-        break;
-    case SDL_EVENT_WINDOW_MINIMIZED: minimized = true; break;
-    case SDL_EVENT_WINDOW_RESTORED: minimized = false; break;
+        {
+            applicationState->app->GetRenderer()->resizeWindow();
+            
+            int width, height;
+            applicationState->app->getWindow()->getSizeInPixels(width, height);
+            Nox::WindowResizeEvent event(width, height); //maybe uint32_t in the future cast ?
+            applicationState->app->RaiseEvent(event);
+            return SDL_APP_CONTINUE;
+        }
+    case SDL_EVENT_WINDOW_MINIMIZED: minimized = true; return SDL_APP_CONTINUE;;
+    case SDL_EVENT_WINDOW_RESTORED: minimized = false; return SDL_APP_CONTINUE;;
+    case SDL_EVENT_MOUSE_MOTION:
+        {
+            SDL_MouseMotionEvent motion = currentEvent->motion;
+                    
+            int x = motion.x; // X position in **pixels** relative to the window
+            int y = motion.y; // Y position in pixels
+            int dx = motion.xrel; // Delta X since last event
+            int dy = motion.yrel; // Delta Y since last event
+
+            Nox::MouseMovedEvent event(x, y);
+            applicationState->app->RaiseEvent(event);
+                    
+            return SDL_APP_CONTINUE;
+        }
+    case SDL_EVENT_MOUSE_WHEEL:
+        {
+            Nox::MouseScrolledEvent event(currentEvent->wheel.x, currentEvent->wheel.y);
+            applicationState->app->RaiseEvent(event);
+                        
+            return SDL_APP_CONTINUE;
+        }
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+        {
+            Uint8 sdlButton = currentEvent->button.button;
+
+            Nox::MouseButtonPressedEvent event(sdlButton);
+            applicationState->app->RaiseEvent(event);
+                    
+            return SDL_APP_CONTINUE;
+        }
     case SDL_EVENT_KEY_DOWN:
-        if (event->key.scancode == SDL_SCANCODE_ESCAPE) return SDL_APP_SUCCESS;
+        {
+            if (currentEvent->key.scancode == SDL_SCANCODE_ESCAPE) return SDL_APP_SUCCESS;
+            
+            SDL_Scancode scan = currentEvent->key.scancode; // maybe keycode better ?
+            bool repeat = (currentEvent->key.repeat != 0);
+
+            Nox::KeyPressedEvent event(scan, repeat);
+            applicationState->app->RaiseEvent(event);
+                        
+            return SDL_APP_CONTINUE;
+        }
     }
 
     return SDL_APP_CONTINUE; /* carry on with the program! */

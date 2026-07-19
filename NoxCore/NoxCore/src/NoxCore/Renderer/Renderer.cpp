@@ -16,7 +16,7 @@ namespace Nox
 {
     static bool m_reloadShader = false;
 
-    Renderer::Renderer(std::shared_ptr<Nox::Window> window) : m_window(std::move(window))
+    Renderer::Renderer(std::shared_ptr<Nox::Window> window, bool isEditor) : m_window(std::move(window)), m_isEditor(isEditor)
     {
         std::cout << "VulkanRenderer created\n";
 
@@ -26,15 +26,16 @@ namespace Nox
         initRenderer();
 
         m_fileWatcher.watch(std::filesystem::path("../../shaders/shader.slang"), [this]() { m_reloadShader = true; });
+        m_fileWatcher.watch(std::filesystem::path("../../shaders/present.slang"), [this]() { m_reloadShader = true; });
     }
 
     Renderer::~Renderer()
     {
         std::cout << "VulkanRenderer destroyed\n";
-    
+
         m_device->waitIdle();
         m_device->shutdown(); // needed for texture to not remove imguitexture
-    
+
         // Cleanup Vulkan resources here
     }
 
@@ -48,17 +49,19 @@ namespace Nox
         createSwapChain();
         createCompiler();
         createGraphicsPipeline(false);
+        if (!m_isEditor) createPresentPipeline(false);
         createComputePipeline();
         createCommandPool();
-        createSceneResources();
-        createColorResources();
-        createDepthResources(); 
         loadModel();
         createVertexBuffer();
         createIndexBuffer();
         createUniformBuffers();
+        createInstanceBuffer();
         createDescriptorHeaps();
         createTextureImage();
+        createSceneResources();
+        createColorResources();
+        createDepthResources();
         createCommandBuffers();
     }
 
@@ -66,6 +69,8 @@ namespace Nox
     {
         m_swapChain.reset();
     }
+
+    bool firstframe = true;
 
     void Renderer::recreateSwapChain()
     {
@@ -82,6 +87,13 @@ namespace Nox
         */
 
         m_device->waitIdle();
+
+        if (!m_isEditor)
+        {
+            firstframe = true;
+            m_resourceHeap->unregisterTexture(m_sceneResource->getDescriptorIndexSlot());
+        }
+
         cleanupSwapChain();
         createSwapChain();
         createSceneResources();
@@ -96,7 +108,7 @@ namespace Nox
         m_swapChain = m_device->createSwapchain(NRI::SwapchainDesc{static_cast<uint32_t>(width), static_cast<uint32_t>(height), m_vSync});
         m_swapChainExtent = m_swapChain->getExtent();
     }
-    
+
     void Renderer::setVSync(bool enabled)
     {
         if (m_vSync != enabled)
@@ -105,7 +117,7 @@ namespace Nox
             recreateSwapChain(); // Rebuild swapchain with the new Present Mode
         }
     }
-    
+
     void Renderer::onViewportSizeChange(NRI::Extent2D size)
     {
         m_viewportSize = size;
@@ -137,6 +149,23 @@ namespace Nox
         m_graphicsPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
+    void Renderer::createPresentPipeline(bool forceCompile)
+    {
+        NRI::PipelineDesc desc{};
+        desc.forceCompile = forceCompile;
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Vertex,
+            .entryPoint = "vertMain",
+            .sourcePath = "../../shaders/present.slang"
+        });
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Fragment,
+            .entryPoint = "fragMain",
+            .sourcePath = "../../shaders/present.slang"
+        });
+        m_presentPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+    }
+
     void Renderer::createComputePipeline()
     {
         /*NRI::PipelineDesc computeDesc
@@ -158,25 +187,31 @@ namespace Nox
     {
         m_commandAllocator = m_device->createCommandAllocator();
     }
-    
+
     void Renderer::createSceneResources()
     {
         //changed from m_swapChainExtent to m_viewportSize
         m_sceneResource = m_device->createTexture(NRI::TextureDesc{
-            .width = m_viewportSize.width,
-            .height = m_viewportSize.height,
+            .width = m_isEditor ? m_viewportSize.width : m_swapChainExtent.width,
+            .height = m_isEditor ? m_viewportSize.height : m_swapChainExtent.height,
             .mipLevels = 1,
             .sampleCount = 1,
             .usage = NRI::TextureUsage::ColorAttachment
         });
+
+        if (!m_isEditor)
+        {
+            m_resourceHeap->registerTexture(*m_sceneResource);
+            uniformData.imageHeapIndexOffset = m_resourceHeap->getImageHeapIndexOffset();
+        }
     }
 
     void Renderer::createColorResources()
     {
         //changed from m_swapChainExtent to m_viewportSize
         m_colorResource = m_device->createTexture(NRI::TextureDesc{
-            .width = m_viewportSize.width,
-            .height = m_viewportSize.height,
+            .width = m_isEditor ? m_viewportSize.width : m_swapChainExtent.width,
+            .height = m_isEditor ? m_viewportSize.height : m_swapChainExtent.height,
             .mipLevels = 1,
             .sampleCount = m_device->getMSAASampleCount(),
             .usage = NRI::TextureUsage::ColorResolveAttachment
@@ -187,8 +222,8 @@ namespace Nox
     {
         //changed from m_swapChainExtent to m_viewportSize
         m_depthResource = m_device->createTexture(NRI::TextureDesc{
-            .width = m_viewportSize.width,
-            .height = m_viewportSize.height,
+            .width = m_isEditor ? m_viewportSize.width : m_swapChainExtent.width,
+            .height = m_isEditor ? m_viewportSize.height : m_swapChainExtent.height,
             .mipLevels = 1,
             .sampleCount = m_device->getMSAASampleCount(),
             .usage = NRI::TextureUsage::DepthStencilAttachment
@@ -206,26 +241,26 @@ namespace Nox
         {
             throw std::runtime_error("failed to load texture image!");
         }
-    
+
         std::unique_ptr<NRI::Buffer> stagingBuffer = m_device->createBuffer(NRI::BufferDesc{
             .size = imageSize,
             .usage = NRI::BufferUsage::Staging
         });
-    
+
         void* data = stagingBuffer->map(0, imageSize);
         memcpy(data, pixels, imageSize);
         stagingBuffer->unmap();
 
         stbi_image_free(pixels);
-    
+
         m_textureResource = m_device->createTexture(NRI::TextureDesc
-        {
-            .width = static_cast<uint32_t>(texWidth),
-            .height = static_cast<uint32_t>(texHeight),
-            .mipLevels = mipLevels,
-            .sampleCount = 1,
-            .usage = NRI::TextureUsage::ShaderResource
-        });
+            {
+                .width = static_cast<uint32_t>(texWidth),
+                .height = static_cast<uint32_t>(texHeight),
+                .mipLevels = mipLevels,
+                .sampleCount = 1,
+                .usage = NRI::TextureUsage::ShaderResource
+            });
 
         std::unique_ptr<NRI::CommandBuffer> commandBuffer = beginSingleTimeCommands();
         m_textureResource->uploadFromBuffer(*commandBuffer, *stagingBuffer, texWidth, texHeight, mipLevels);
@@ -286,18 +321,18 @@ namespace Nox
     void Renderer::createVertexBuffer()
     {
         uint64_t bufferSize = sizeof(vertices[0]) * vertices.size();
-    
+
         std::unique_ptr<NRI::Buffer> stagingBuffer = m_device->createBuffer(NRI::BufferDesc{
             .size = bufferSize,
             .usage = NRI::BufferUsage::Staging
         });
-    
+
         m_vertexBuffer = m_device->createBuffer(NRI::BufferDesc
-        {
-            .size = bufferSize,
-            .usage = NRI::BufferUsage::Storage
-        });
-    
+            {
+                .size = bufferSize,
+                .usage = NRI::BufferUsage::Storage
+            });
+
         std::unique_ptr<NRI::CommandBuffer> commandCopyBuffer = beginSingleTimeCommands();
         m_vertexBuffer->uploadData(*commandCopyBuffer, *stagingBuffer, vertices.data());
         endSingleTimeCommands(std::move(commandCopyBuffer));
@@ -306,18 +341,18 @@ namespace Nox
     void Renderer::createIndexBuffer()
     {
         uint64_t bufferSize = sizeof(indices[0]) * indices.size();
-    
+
         std::unique_ptr<NRI::Buffer> stagingBuffer = m_device->createBuffer(NRI::BufferDesc{
             .size = bufferSize,
             .usage = NRI::BufferUsage::Staging
         });
-    
+
         m_indexBuffer = m_device->createBuffer(NRI::BufferDesc
-        {
-            .size = bufferSize,
-            .usage = NRI::BufferUsage::Index
-        });
-    
+            {
+                .size = bufferSize,
+                .usage = NRI::BufferUsage::Index
+            });
+
         std::unique_ptr<NRI::CommandBuffer> commandCopyBuffer = beginSingleTimeCommands();
         m_indexBuffer->uploadData(*commandCopyBuffer, *stagingBuffer, indices.data());
         endSingleTimeCommands(std::move(commandCopyBuffer));
@@ -329,20 +364,58 @@ namespace Nox
         // Reserve memory in vectors to prevent reallocation overhead
         m_uniformBuffers.reserve(MAX_FRAMES_IN_FLIGHT);
         m_uniformBuffersMapped.reserve(MAX_FRAMES_IN_FLIGHT);
-    
+
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
         {
             std::unique_ptr<NRI::Buffer> uboBuffer = m_device->createBuffer(NRI::BufferDesc
-            {
-                .size = bufferSize,
-                .usage = NRI::BufferUsage::Uniform
-            });
-        
+                {
+                    .size = bufferSize,
+                    .usage = NRI::BufferUsage::Uniform
+                });
+
             void* mappedMemory = uboBuffer->map(0, bufferSize);
-        
+
             m_uniformBuffers.emplace_back(std::move(uboBuffer));
             m_uniformBuffersMapped.emplace_back(mappedMemory);
         }
+    }
+
+    struct instanceBuffer
+    {
+        glm::mat4 model;
+    };
+
+    std::vector<instanceBuffer> instanceBufferObjects;
+
+    void Renderer::createInstanceBuffer()
+    {
+        // Model on the left
+        instanceBuffer leftModel;
+        leftModel.model = glm::translate(glm::mat4(1.0f), glm::vec3(-2.0f, 0.0f, 0.0f));
+
+        // Model on the right
+        instanceBuffer rightModel;
+        rightModel.model = glm::translate(glm::mat4(1.0f), glm::vec3(2.0f, 0.0f, 0.0f));
+
+        instanceBufferObjects.push_back(leftModel);
+        instanceBufferObjects.push_back(rightModel);
+
+        uint64_t bufferSize = sizeof(instanceBuffer) * instanceBufferObjects.size();
+
+        std::unique_ptr<NRI::Buffer> stagingBuffer = m_device->createBuffer(NRI::BufferDesc{
+            .size = bufferSize,
+            .usage = NRI::BufferUsage::Staging
+        });
+
+        m_instanceBuffer = m_device->createBuffer(NRI::BufferDesc
+            {
+                .size = bufferSize,
+                .usage = NRI::BufferUsage::Storage
+            });
+
+        std::unique_ptr<NRI::CommandBuffer> commandCopyBuffer = beginSingleTimeCommands();
+        m_instanceBuffer->uploadData(*commandCopyBuffer, *stagingBuffer, instanceBufferObjects.data());
+        endSingleTimeCommands(std::move(commandCopyBuffer));
     }
 
     void Renderer::createDescriptorHeaps()
@@ -352,13 +425,13 @@ namespace Nox
             .type = NRI::DescriptorHeapType::Sampler,
             .maxSamplerDescriptors = 2
         });
-    
+
         m_resourceHeap = m_device->createDescriptorHeap(NRI::DescriptorHeapDesc{
             .type = NRI::DescriptorHeapType::Resource,
             .maxBufferDescriptors = 0,
             .maxImageDescriptors = 1000
         });
-    
+
         /*m_modelDataBuffers.reserve(2);
         for (uint32_t i = 0; i < 2; i++)
         {
@@ -407,54 +480,64 @@ namespace Nox
     {
         m_commandBuffers->begin(frameIndex, false);
         m_commandBuffers->transitionSwapchainLayout(*m_swapChain, imageIndex, NRI::TextureLayout::Undefined, NRI::TextureLayout::ColorAttachment);
-        m_commandBuffers->transitionTextureLayout(*m_sceneResource, NRI::TextureLayout::Undefined, NRI::TextureLayout::ColorAttachment);
+        if (firstframe)
+        {
+            if (!m_isEditor)
+                firstframe = false;
+            m_commandBuffers->transitionTextureLayout(*m_sceneResource, NRI::TextureLayout::Undefined, NRI::TextureLayout::ColorAttachment);
+        }
+        else
+        {
+            m_commandBuffers->transitionTextureLayout(*m_sceneResource, NRI::TextureLayout::ShaderResource, NRI::TextureLayout::ColorAttachment);
+        }
+
         m_commandBuffers->transitionTextureLayout(*m_colorResource, NRI::TextureLayout::Undefined, NRI::TextureLayout::ColorAttachment);
         m_commandBuffers->transitionTextureLayout(*m_depthResource, NRI::TextureLayout::Undefined, NRI::TextureLayout::DepthAttachment);
-    
+
         std::vector<NRI::RenderAttachDesc> colorAttachments;
         colorAttachments.push_back({
             .attachment = m_colorResource.get(),
             .resolve = m_sceneResource.get(),
             .loadOP = NRI::LoadOP::clear,
             .storeOP = NRI::StoreOP::store,
-            .clearColor = { 0.0f, 0.0f, 0.0f, 1.0f }
+            .clearColor = {0.0f, 0.0f, 0.0f, 1.0f}
         });
-    
-        NRI::RenderAttachDesc depthAttachment = 
+
+        NRI::RenderAttachDesc depthAttachment =
         {
             .attachment = m_depthResource.get(),
             .loadOP = NRI::LoadOP::clear,
             .storeOP = NRI::StoreOP::dontCare,
-            .clearDepth = { 1.0f, 0 }
+            .clearDepth = {1.0f, 0}
         };
-    
-        NRI::RenderDesc desc = 
+
+        NRI::RenderDesc desc =
         {
-            .renderArea = { m_viewportSize.width, m_viewportSize.height },
+            .renderArea = m_isEditor ? NRI::Extent2D{m_viewportSize.width, m_viewportSize.height} : NRI::Extent2D{m_swapChainExtent.width, m_swapChainExtent.height},
             .colorAttachments = colorAttachments,
             .depthAttachment = depthAttachment
         };
         m_commandBuffers->beginRendering(desc);
-    
+
         // Viewport / scissor (counts and values are both dynamic).
-        m_commandBuffers->setViewportWithCount(m_viewportSize);
-        m_commandBuffers->setScissorWithCount(m_viewportSize);
-    
+        m_commandBuffers->setViewportWithCount(m_isEditor ? m_viewportSize : m_swapChainExtent);
+        m_commandBuffers->setScissorWithCount(m_isEditor ? m_viewportSize : m_swapChainExtent);
+
         // Vertex input empty since we use vertex fetch BDA but still needs to be called empty
         m_commandBuffers->setVertexInput();
-    
+
         // Input assembly.
         m_commandBuffers->setPrimitiveTopology(NRI::PrimitiveTopology::TriangleList);
         m_commandBuffers->setPrimitiveRestartEnable(false);
-    
+
         // Rasterization (most of these come from VK_EXT_extended_dynamic_state_3).
         m_commandBuffers->setRasterizerDiscardEnable(false);
         m_commandBuffers->setPolygonMode(NRI::PolygonMode::Fill);
         m_commandBuffers->setCullMode(NRI::CullMode::Back);
         m_commandBuffers->setFrontFace(NRI::FrontFace::CounterClockWise);
         m_commandBuffers->setDepthBiasEnable(false);
-        m_commandBuffers->setDepthClampEnable(false);//LineWidth maybe ?
-    
+        m_commandBuffers->setDepthClampEnable(false); //LineWidth maybe ?
+
         // Multisampling.
         uint32_t sampleCount = m_device->getMSAASampleCount();
         m_commandBuffers->setRasterizationSamples(sampleCount);
@@ -464,14 +547,14 @@ namespace Nox
         // alphaToOne is required by the spec when its device feature is enabled and a
         // shader object is bound, even if we don't actually use it.
         m_commandBuffers->setAlphaToOneEnableEXT(false);
-    
+
         // Depth / stencil.
         m_commandBuffers->setDepthTestEnable(true);
         m_commandBuffers->setDepthWriteEnable(true);
         m_commandBuffers->setDepthCompareOp(NRI::CompareOp::Less);
         m_commandBuffers->setDepthBoundsTestEnable(false);
         m_commandBuffers->setStencilTestEnable(false);
-    
+
         // Color blend (for one color attachment). Match the previous pipeline's
         // alpha-blend setup; nothing varies between draws so we set it once.
         const NRI::ColorBlendEquation blendEquation
@@ -488,37 +571,111 @@ namespace Nox
         m_commandBuffers->setColorBlendEquation(0, blendEquation);
         m_commandBuffers->setColorWriteMask(0, colorWriteMask);
         m_commandBuffers->setLogicOpEnable(false);
-    
+
         m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_graphicsPipeline);
         m_commandBuffers->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
-    
+
         m_commandBuffers->bindIndexBuffer(*m_indexBuffer, 0);
+        
         PushConstantBlock references{};
         // Pass pointer to the global matrix via a buffer device address
         references.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
         references.vertexReference = m_vertexBuffer->getDeviceAddress();
+        references.instanceReference = m_instanceBuffer->getDeviceAddress();
         m_commandBuffers->pushData(&references, sizeof(PushConstantBlock));
-    
-        m_commandBuffers->drawIndexed(static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
-    
+
+        m_commandBuffers->drawIndexed(static_cast<uint32_t>(indices.size()), instanceBufferObjects.size(), 0, 0, 0);
+
         m_commandBuffers->endRendering();
+
         m_commandBuffers->transitionTextureLayout(*m_sceneResource, NRI::TextureLayout::ColorAttachment, NRI::TextureLayout::ShaderResource);
+
         std::vector<NRI::RenderAttachDesc> imguiColorAttachments;
         imguiColorAttachments.push_back({
             .attachmentSwapchain = m_swapChain.get(),
             .resolveImageIndex = imageIndex,
             .loadOP = NRI::LoadOP::load,
-            .storeOP = NRI::StoreOP::store, 
+            .storeOP = NRI::StoreOP::store,
         });
-    
-        NRI::RenderDesc imguiDesc = {
-            .renderArea = { m_swapChainExtent.width, m_swapChainExtent.height },
+
+        NRI::RenderDesc imguiDesc =
+        {
+            .renderArea = {m_swapChainExtent.width, m_swapChainExtent.height},
             .colorAttachments = imguiColorAttachments,
         };
+
         m_commandBuffers->beginRendering(imguiDesc);
-        m_commandBuffers->renderImGui();
+        if (m_isEditor)
+            m_commandBuffers->renderImGui();
+        else
+        {
+            // Viewport / scissor (counts and values are both dynamic).
+            m_commandBuffers->setViewportWithCount(m_swapChainExtent);
+            m_commandBuffers->setScissorWithCount(m_swapChainExtent);
+
+            // Vertex input empty since we use vertex fetch BDA but still needs to be called empty
+            m_commandBuffers->setVertexInput();
+
+            // Input assembly.
+            m_commandBuffers->setPrimitiveTopology(NRI::PrimitiveTopology::TriangleList);
+            m_commandBuffers->setPrimitiveRestartEnable(false);
+
+            // Rasterization (most of these come from VK_EXT_extended_dynamic_state_3).
+            m_commandBuffers->setRasterizerDiscardEnable(false);
+            m_commandBuffers->setPolygonMode(NRI::PolygonMode::Fill);
+            m_commandBuffers->setCullMode(NRI::CullMode::None);
+            m_commandBuffers->setFrontFace(NRI::FrontFace::CounterClockWise);
+            m_commandBuffers->setDepthBiasEnable(false);
+            m_commandBuffers->setDepthClampEnable(false); //LineWidth maybe ?
+
+            // Multisampling.
+            uint32_t sampleCount = 1;
+            m_commandBuffers->setRasterizationSamples(sampleCount);
+            const uint32_t sampleMask = 0xFFFFFFFF;
+            m_commandBuffers->setSampleMask(sampleCount, sampleMask);
+            m_commandBuffers->setAlphaToCoverageEnable(false);
+            // alphaToOne is required by the spec when its device feature is enabled and a
+            // shader object is bound, even if we don't actually use it.
+            m_commandBuffers->setAlphaToOneEnableEXT(false);
+
+            // Depth / stencil.
+            m_commandBuffers->setDepthTestEnable(false);
+            m_commandBuffers->setDepthWriteEnable(false);
+            m_commandBuffers->setDepthCompareOp(NRI::CompareOp::Less);
+            m_commandBuffers->setDepthBoundsTestEnable(false);
+            m_commandBuffers->setStencilTestEnable(false);
+
+            // Color blend (for one color attachment). Match the previous pipeline's
+            // alpha-blend setup; nothing varies between draws so we set it once.
+            const NRI::ColorBlendEquation blendEquation
+            {
+                .srcColorBlendFactor = NRI::BlendFactor::SrcAlpha,
+                .dstColorBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha,
+                .colorBlendOp = NRI::BlendOp::Add,
+                .srcAlphaBlendFactor = NRI::BlendFactor::SrcAlpha,
+                .dstAlphaBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha,
+                .alphaBlendOp = NRI::BlendOp::Add,
+            };
+            uint32_t colorWriteMask = NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A;
+            m_commandBuffers->setColorBlendEnable(0, false);
+            m_commandBuffers->setColorBlendEquation(0, blendEquation);
+            m_commandBuffers->setColorWriteMask(0, colorWriteMask);
+            m_commandBuffers->setLogicOpEnable(false);
+
+            m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_presentPipeline);
+            m_commandBuffers->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
+
+            PushConstantBlock references{};
+            // Pass pointer to the global matrix via a buffer device address
+            references.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+            references.vertexReference = -1;
+            references.instanceReference = -1;
+            m_commandBuffers->pushData(&references, sizeof(PushConstantBlock));
+
+            m_commandBuffers->draw(3, 1, 0, 0);
+        }
         m_commandBuffers->endRendering();
-    
+
         m_commandBuffers->transitionSwapchainLayout(*m_swapChain, imageIndex, NRI::TextureLayout::ColorAttachment, NRI::TextureLayout::Present);
         m_commandBuffers->end(frameIndex);
     }
@@ -532,9 +689,11 @@ namespace Nox
 
         /*UniformBufferObject ubo{};*/
         uniformData.model = rotate(glm::mat4(1.0f), /*time **/ glm::radians(45.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-        uniformData.view = lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+        uniformData.view = lookAt(glm::vec3(0.0f, 2.0f, 3.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
         uniformData.proj =
-            glm::perspective(glm::radians(45.0f), static_cast<float>(m_viewportSize.width) / static_cast<float>(m_viewportSize.height), 0.1f, 10.0f);
+            glm::perspective(glm::radians(90.0f),
+                             static_cast<float>(m_isEditor ? m_viewportSize.width : m_swapChainExtent.width) / static_cast<float>(m_isEditor ? m_viewportSize.height : m_swapChainExtent.height), 0.1f,
+                             100.0f);
         uniformData.proj[1][1] *= -1;
         uniformData.samplerIndex = selectedSampler;
 
@@ -549,23 +708,24 @@ namespace Nox
         {
             m_reloadShader = false;
             createGraphicsPipeline(true);
+            createPresentPipeline(true);
             return;
         }
-        
+
         uint32_t imageIndex = 0;
-    
+
         if (m_swapChain->acquireNextImage(frameIndex, imageIndex) == NRI::FrameResult::ResizeRequired)
         {
             recreateSwapChain();
             return;
         }
-    
+
         updateUniformBuffer(frameIndex);
-    
+
         recordCommandBuffer(imageIndex);
-    
+
         m_device->submitCommandBuffer(*m_commandBuffers, *m_swapChain, frameIndex, imageIndex);
-    
+
         if (m_swapChain->present(frameIndex, imageIndex) == NRI::FrameResult::ResizeRequired || framebufferResized)
         {
             framebufferResized = false;
@@ -598,12 +758,12 @@ namespace Nox
         m_device->waitIdle();
         m_device->shutdownImGui();
     }
-    
+
     void Renderer::beginImGui()
     {
         m_device->beginImGui();
     }
-    
+
     void Renderer::endImGui()
     {
         m_device->endImGui();

@@ -147,7 +147,7 @@ namespace NRI
 
     void DescriptorHeapVK::unregisterTexture(uint32_t slot)
     {
-        // 1. Create a safe descriptor payload pointing to a null view
+        /*// 1. Create a safe descriptor payload pointing to a null view
         vk::ImageDescriptorInfoEXT nullImageInfo
         {
             .pView = nullptr, //  Null view tells the driver this descriptor is empty
@@ -166,7 +166,7 @@ namespace NRI
         };
 
         // 3. Overwrite the memory on the host-mapped pointer
-        m_deviceVK.getDevice().writeResourceDescriptorsEXT(info, hostRange);
+        m_deviceVK.getDevice().writeResourceDescriptorsEXT(info, hostRange);*/
 
         // 4. Push this index slot back into the recycling bin so another texture can grab it
         m_freeImageSlots.push_back(slot);

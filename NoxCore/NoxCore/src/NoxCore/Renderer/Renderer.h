@@ -7,13 +7,13 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtx/hash.hpp>
 
-#include "Core/Window.h"
+#include "NoxCore/Core/Window.h"
 
 #include "NRI/NRI.h"
 
-#include "Utils/NOXWatcher.h"
+#include "NoxCore/Utils/NOXWatcher.h"
 
-#include "Scene/Entity.h"
+#include "NoxCore/Scene/Entity.h"
 
 const std::string MODEL_PATH = "../../models/viking_room.obj";
 const std::string TEXTURE_PATH = "../../textures/viking_room.png";
@@ -78,6 +78,7 @@ struct PushConstantBlock
 {
     uint64_t matrixReference;
     uint64_t vertexReference;
+    uint64_t instanceReference;
 };
 
 inline int32_t selectedSampler{0};
@@ -89,7 +90,7 @@ namespace Nox
     class Renderer
     {
     public:
-        Renderer(std::shared_ptr<Nox::Window> window);
+        Renderer(std::shared_ptr<Nox::Window> window, bool isEditor);
         ~Renderer();
         void drawFrame();
         void resizeWindow();
@@ -111,6 +112,7 @@ namespace Nox
         void createSwapChain();
         void createCompiler();
         void createGraphicsPipeline(bool forceCompile);
+        void createPresentPipeline(bool forceCompile);
         void createComputePipeline();
         void createCommandPool();
         void createSceneResources();
@@ -121,6 +123,7 @@ namespace Nox
         void createVertexBuffer();
         void createIndexBuffer();
         void createUniformBuffers();
+        void createInstanceBuffer();
         void createDescriptorHeaps();
         std::unique_ptr<NRI::CommandBuffer> beginSingleTimeCommands();
         void endSingleTimeCommands(std::unique_ptr<NRI::CommandBuffer>&& commandBuffer);
@@ -136,10 +139,12 @@ namespace Nox
         NRI::Extent2D m_swapChainExtent{640, 480};
         NRI::Extent2D m_viewportSize{640, 480};
         bool m_vSync = false;
+        bool m_isEditor = false;
 
         Utils::NOXWatcher m_fileWatcher;
         std::unique_ptr<NRI::ShaderCompiler> m_shaderCompiler = nullptr;
         std::unique_ptr<NRI::Pipeline> m_graphicsPipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_presentPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_computePipeline = nullptr;
         std::unique_ptr<NRI::CommandAllocator> m_commandAllocator = nullptr;
         std::unique_ptr<NRI::CommandBuffer> m_commandBuffers = nullptr;
@@ -154,6 +159,7 @@ namespace Nox
 
         std::unique_ptr<NRI::Buffer> m_vertexBuffer = nullptr;
         std::unique_ptr<NRI::Buffer> m_indexBuffer = nullptr;
+        std::unique_ptr<NRI::Buffer> m_instanceBuffer = nullptr;
 
         std::vector<std::unique_ptr<NRI::Buffer>> m_uniformBuffers;
         std::vector<void*> m_uniformBuffersMapped;

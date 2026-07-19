@@ -143,6 +143,7 @@ namespace NRI
         virtual void pushData(const void* data, uint32_t size) = 0;
         virtual void bindVertexBuffers(uint32_t firstBinding, Buffer& buffer, uint64_t offset) = 0;
         virtual void bindIndexBuffer(Buffer& buffer, uint64_t offet) = 0;
+        virtual void draw(uint32_t vertexCount, uint32_t instanceCount, uint32_t firstVertex, uint32_t firstInstance) = 0;
         virtual void drawIndexed(uint32_t indexCount, uint32_t instanceCount, uint32_t firstIndex, int32_t vertexOffset, uint32_t firstInstance) = 0;
         
         virtual void copyBuffer(class Buffer& srcBuffer, class Buffer& dstBuffer, uint64_t deviceSize) = 0;

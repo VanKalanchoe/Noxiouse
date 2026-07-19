@@ -50,6 +50,7 @@ namespace NRI
         void pushData(const void* data, uint32_t size) override;
         void bindVertexBuffers(uint32_t firstBinding, Buffer& buffer, uint64_t offset) override;
         void bindIndexBuffer(Buffer& buffer, uint64_t offet) override;
+        void draw(uint32_t vertexCount, uint32_t instanceCount, uint32_t firstVertex, uint32_t firstInstance) override;
         void drawIndexed(uint32_t indexCount, uint32_t instanceCount, uint32_t firstIndex, int32_t vertexOffset, uint32_t firstInstance) override;
 
         void copyBuffer(Buffer& srcBuffer, Buffer& dstBuffer, uint64_t deviceSize) override;

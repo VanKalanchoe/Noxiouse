@@ -26,7 +26,7 @@ namespace NRI
         {
             format = m_deviceVK.getSurfaceFormat().format;
             aspectFlags = vk::ImageAspectFlagBits::eColor;
-            usageFlags = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled;
+            usageFlags = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled |vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst ;
         }
         else if (desc.usage == TextureUsage::ColorResolveAttachment)
         {

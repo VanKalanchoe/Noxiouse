@@ -28,6 +28,40 @@ namespace Nox
         return entity;
     }
     
+    void Scene::DestroyEntity(Entity entity)
+    {
+        m_EntityMap.erase(entity.GetUUID());
+        m_Registry.destroy(entity);
+    }
+
+    void Scene::OnRuntimeStart()
+    {
+    }
+
+    void Scene::OnRuntimeStop()
+    {
+    }
+
+    void Scene::OnSimulationStart()
+    {
+    }
+
+    void Scene::OnSimulationStop()
+    {
+    }
+
+    void Scene::OnUpdateRuntime(Timestep ts)
+    {
+    }
+
+    void Scene::OnUpdateSimulation(Timestep ts)
+    {
+    }
+
+    void Scene::OnUpdateEditor(Timestep ts)
+    {
+    }
+
     Entity Scene::GetEntityByUUID(UUID uuid)
     {
         // Check if it exists in the map

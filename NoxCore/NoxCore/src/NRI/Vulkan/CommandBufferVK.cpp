@@ -217,8 +217,11 @@ namespace NRI
 
     void CommandBufferVK::renderImGui()
     {
-        ImGui::Render();
-        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), *m_commandBuffers[m_currentFrameIndex]);
+        ImDrawData* drawData = ImGui::GetDrawData();
+        if (drawData == nullptr || drawData->CmdListsCount == 0 || drawData->TotalVtxCount == 0)
+            return;
+        
+        ImGui_ImplVulkan_RenderDrawData(drawData, *m_commandBuffers[m_currentFrameIndex]);
     }
     
     void CommandBufferVK::copyBuffer(Buffer& srcBuffer, Buffer& dstBuffer, uint64_t deviceSize)
@@ -469,6 +472,11 @@ namespace NRI
     {
         auto& vkBuffer = dynamic_cast<BufferVK&>(buffer);
         m_commandBuffers[m_currentFrameIndex].bindIndexBuffer(vkBuffer.getNativeBuffer(), offet, vk::IndexType::eUint32);
+    }
+    
+    void CommandBufferVK::draw(uint32_t vertexCount, uint32_t instanceCount, uint32_t firstVertex, uint32_t firstInstance)
+    {
+        m_commandBuffers[m_currentFrameIndex].draw(vertexCount, instanceCount, firstVertex, firstInstance);
     }
 
     void CommandBufferVK::drawIndexed(uint32_t indexCount, uint32_t instanceCount, uint32_t firstIndex, int32_t vertexOffset, uint32_t firstInstance)

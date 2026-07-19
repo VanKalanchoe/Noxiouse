@@ -17,6 +17,7 @@ namespace NRI
         vk::raii::ImageView& getNativeView() { return m_imageResource.view; }
         vk::ImageViewCreateInfo& getNativeViewInfo() { return m_viewCreateInfo; }
         ImTextureID getImTextureID() override;
+        uint32_t getDescriptorIndexSlot() const override { return m_imageResource.descriptorIndexSlot; }
         
         [[nodiscard]] uint32_t getMipLevels() const override { return m_desc.mipLevels; }
         [[nodiscard]] TextureUsage getUsage() const override { return m_desc.usage; }

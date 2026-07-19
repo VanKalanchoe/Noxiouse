@@ -6,7 +6,7 @@
 
 #include <SDL3/SDL_video.h>
 
-#include "NoxCore/Renderer.h"
+#include "NoxCore/Renderer/Renderer.h"
 #include "NoxCore/Core/Application.h"
 
 namespace Nox
@@ -175,6 +175,7 @@ namespace Nox
     void ImGuiLayer::End()
     {
         m_renderer.endImGui();
+        ImGui::Render();
     }
 
     uint32_t ImGuiLayer::GetActiveWidgetID() const

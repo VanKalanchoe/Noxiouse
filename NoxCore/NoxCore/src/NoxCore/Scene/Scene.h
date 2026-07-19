@@ -2,13 +2,15 @@
 #include <entt/entt.hpp>
 #include <string>
 
+#include "NoxCore/Core/Ref.h"
 #include "NoxCore/Core/UUID.h"
+#include "NoxCore/Core/Timestep.h"
 
 namespace Nox
 {
     class Entity; // Forward declaration
     
-    class Scene
+    class Scene : public RefCounted
     {
     public:
         Scene() = default;
@@ -16,9 +18,19 @@ namespace Nox
         
         // Creates an entity, auto-generates a UUID, and assigns a name
         Entity CreateEntity(const std::string& name = std::string());
-        
         // Creates an entity with a specific UUID (crucial for loading saved games!)
         Entity CreateEntityWithUUID(UUID uuid, const std::string& name = std::string());
+        void DestroyEntity(Entity entity);
+
+        void OnRuntimeStart();
+        void OnRuntimeStop();
+        
+        void OnSimulationStart();
+        void OnSimulationStop();
+        
+        void OnUpdateRuntime(Timestep ts);
+        void OnUpdateSimulation(Timestep ts/*, EditorCamera& camera*/);
+        void OnUpdateEditor(Timestep ts/*, EditorCamera& camera*/);
         
         Entity GetEntityByUUID(UUID uuid);
 
@@ -32,5 +44,7 @@ namespace Nox
         
         // Allow the Entity class to access m_Registry to add/get components
         friend class Entity;
+        
+        friend class SceneHierarchyPanel;
     };
 }

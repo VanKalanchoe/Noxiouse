@@ -1,10 +1,3 @@
-/* struct VSInput 
-{
-    float3 inPosition;
-    float3 inColor;
-    float2 inTexCoord;
-};
- */
 struct UniformBuffer 
 {
     float4x4 model;
@@ -26,6 +19,7 @@ struct InstanceBuffer
     float4x4 model;
 };
 
+
 struct PushConstant 
 {
     UniformBuffer* uboBuffer;
@@ -43,15 +37,25 @@ struct VSOutput
 };
 
 [shader("vertex")]
-VSOutput vertMain(uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID) 
+VSOutput vertMain(uint vertexID : SV_VertexID) 
 {
+    static const float2 positions[3] =
+    {
+        float2(-1.0, -1.0),
+        float2( 3.0, -1.0),
+        float2(-1.0,  3.0)
+    };
+
+    static const float2 uvs[3] =
+    {
+        float2(0.0, 0.0),
+        float2(2.0, 0.0),
+        float2(0.0, 2.0)
+    };
+
     VSOutput output;
-    UniformBuffer ubo = *pushConst.uboBuffer;
-    VertexBuffer vertex = pushConst.vertexBuffer[vertexID];
-    InstanceBuffer instance = pushConst.instanceBuffer[instanceID];
-    output.pos = mul(ubo.proj, mul(ubo.view, mul(instance.model, float4(vertex.inPosition, 1.0))));
-    output.color = vertex.inColor;
-    output.fragTexCoord = vertex.inTexCoord;
+    output.pos = float4(positions[vertexID], 0.0, 1.0);
+    output.fragTexCoord = uvs[vertexID];
     return output;
 }
 
@@ -60,7 +64,7 @@ float4 fragMain(VSOutput vertIn) : SV_TARGET
 {
     UniformBuffer ubo = *pushConst.uboBuffer;
    
-    Texture2D texHandle = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + 0, 0));
+    Texture2D texHandle = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + 1, 0));
     SamplerState sampHandle = SamplerState.Handle(uint2(0, 0));
 
     float4 img = texHandle.Sample(sampHandle, vertIn.fragTexCoord);
