@@ -53,7 +53,7 @@ namespace NRI
         std::unique_ptr<Swapchain> createSwapchain(const SwapchainDesc& desc) override;
         std::unique_ptr<Pipeline> createPipeline(const PipelineDesc& desc, ShaderCompiler& compiler) override;
         std::unique_ptr<CommandAllocator> createCommandAllocator() override;
-        std::unique_ptr<Texture> createTexture(const TextureDesc& desc) override;
+        Nox::Ref<Texture2D> createTexture(const TextureDesc& desc) override;
         std::unique_ptr<Buffer> createBuffer(const BufferDesc& desc) override;
         std::unique_ptr<DescriptorHeap> createDescriptorHeap(const DescriptorHeapDesc& desc) override;
         

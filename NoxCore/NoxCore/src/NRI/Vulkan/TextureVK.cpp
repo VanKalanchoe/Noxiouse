@@ -5,6 +5,7 @@
 #include "DeviceVK.h"
 #include "CommandBufferVK.h"
 #include "BufferVK.h"
+#include "NoxCore/Core/core.h"
 
 namespace NRI
 {
@@ -70,7 +71,9 @@ namespace NRI
             }
         };
 
-        if (desc.usage == TextureUsage::ColorAttachment || desc.usage == TextureUsage::ColorResolveAttachment || desc.usage == TextureUsage::DepthStencilAttachment)
+        // because of imgui needing a view to i guess giving all textures the view is fine ? since that means all textures need it no exception sad
+        /*if (desc.usage == TextureUsage::ColorAttachment || desc.usage == TextureUsage::ColorResolveAttachment || desc.usage == TextureUsage::DepthStencilAttachment)
+        */
         {
             m_imageResource.view = m_deviceVK.createImageView(*m_imageResource.image, format, aspectFlags, 1);
         }
@@ -78,7 +81,12 @@ namespace NRI
     
     TextureVK::~TextureVK()
     {
-        if (m_deviceVK.isDeviceInit() && m_imGuiHandle != VK_NULL_HANDLE)
+        if (m_boundHeap && m_imageResource.descriptorIndexSlot != ~0u)
+        {
+            m_boundHeap->unregisterTexture(m_imageResource.descriptorIndexSlot);
+        }
+        
+        if (!Nox::IsEngineShuttingDown && m_deviceVK.isDeviceInit() && m_imGuiHandle != VK_NULL_HANDLE)
         {
             ImGui_ImplVulkan_RemoveTexture(m_imGuiHandle);
             m_imGuiHandle = VK_NULL_HANDLE;

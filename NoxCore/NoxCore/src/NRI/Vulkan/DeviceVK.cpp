@@ -13,6 +13,7 @@
 #include "BufferVK.h"
 #include "DescriptorHeapVK.h"
 #include "MemoryAllocatorVK.h"
+#include "NoxCore/Core/core.h"
 
 
 namespace NRI
@@ -42,9 +43,9 @@ namespace NRI
         return std::make_unique<CommandAllocatorVK>(*this);
     }
 
-    std::unique_ptr<Texture> DeviceVK::createTexture(const TextureDesc& desc)
+    Nox::Ref<Texture2D> DeviceVK::createTexture(const TextureDesc& desc)
     {
-        return std::make_unique<TextureVK>(*this, desc);
+        return Nox::CreateRef<TextureVK>(*this, desc);
     }
 
     std::unique_ptr<Buffer> DeviceVK::createBuffer(const BufferDesc& desc)

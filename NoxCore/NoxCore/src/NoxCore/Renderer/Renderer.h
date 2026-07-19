@@ -8,12 +8,9 @@
 #include <glm/gtx/hash.hpp>
 
 #include "NoxCore/Core/Window.h"
-
 #include "NRI/NRI.h"
-
 #include "NoxCore/Utils/NOXWatcher.h"
-
-#include "NoxCore/Scene/Entity.h"
+#include "NoxCore/Asset/TextureImporter.h"
 
 const std::string MODEL_PATH = "../../models/viking_room.obj";
 const std::string TEXTURE_PATH = "../../textures/viking_room.png";
@@ -98,11 +95,13 @@ namespace Nox
         void shutdownImGui();
         void beginImGui();
         void endImGui();
-        NRI::Texture* GetSceneResource() const { return m_sceneResource.get(); }
+        Texture2D* GetSceneResource() const { return m_sceneResource.get(); }
         void setVSync(bool enabled);
         void onViewportSizeChange(NRI::Extent2D size);
         bool getVSync() const { return m_vSync; }
         NRI::Extent2D getViewPortSize() const { return m_viewportSize; }
+        
+        Ref<Texture2D> UploadTexture(const TextureData& cpuData);
         
     private:
         void initRenderer();
@@ -164,11 +163,11 @@ namespace Nox
         std::vector<std::unique_ptr<NRI::Buffer>> m_uniformBuffers;
         std::vector<void*> m_uniformBuffersMapped;
 
-        std::unique_ptr<NRI::Texture> m_sceneResource = nullptr;
-        std::unique_ptr<NRI::Texture> m_colorResource = nullptr;
-        std::unique_ptr<NRI::Texture> m_depthResource = nullptr;
-        std::unique_ptr<NRI::Texture> m_textureResource = nullptr;
-
+        Ref<Texture2D> m_sceneResource;
+        Ref<Texture2D> m_colorResource;
+        Ref<Texture2D> m_depthResource;
+        Ref<Texture2D> m_textureResource;
+        Ref<Texture2D> m_textureResource2;
         uint32_t mipLevels;
 
         std::vector<Vertex> vertices;

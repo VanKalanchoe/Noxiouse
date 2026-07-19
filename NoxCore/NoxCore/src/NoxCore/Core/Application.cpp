@@ -5,10 +5,13 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 
+#include <ranges>
+
 #include "NoxCore/Events/InputEvents.h"
 #include "NoxCore/Events/WindowEvents.h"
 #include "NoxCore/Renderer/Renderer.h"
 #include "NoxCore/ImGui/ImGuiLayer.h"
+
 
 namespace Nox
 {
@@ -32,6 +35,8 @@ namespace Nox
 
     Application::~Application()
     {
+        IsEngineShuttingDown = true;
+        
         PopLayer<ImGuiLayer>();
         
         s_Application = nullptr;

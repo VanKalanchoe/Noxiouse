@@ -5,11 +5,9 @@
 #include <chrono>
 #include <fstream>
 
-#define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
 #define TINYOBJLOADER_IMPLEMENTATION
-
 #include <tiny_obj_loader.h>
 
 namespace Nox
@@ -91,7 +89,7 @@ namespace Nox
         if (!m_isEditor)
         {
             firstframe = true;
-            m_resourceHeap->unregisterTexture(m_sceneResource->getDescriptorIndexSlot());
+            m_resourceHeap->unregisterTexture(m_sceneResource->GetDescriptorIndexSlot());
         }
 
         cleanupSwapChain();
@@ -232,41 +230,44 @@ namespace Nox
 
     void Renderer::createTextureImage()
     {
-        int texWidth, texHeight, texChannels;
-        stbi_uc* pixels = stbi_load(TEXTURE_PATH.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
-        uint64_t imageSize = texWidth * texHeight * 4;
-        mipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(texWidth, texHeight)))) + 1;
+        m_textureResource = TextureImporter::LoadTexture2D(TEXTURE_PATH, {}, this);
+        std::cout << "indexheap: " << m_textureResource->GetDescriptorIndexSlot() << std::endl;
+       
+        m_textureResource2 = TextureImporter::LoadTexture2D(TEXTURE_PATH, {}, this);
+        std::cout << "indexheap2: " << m_textureResource2->GetDescriptorIndexSlot() << std::endl;
+        m_textureResource = nullptr;
+        m_textureResource = TextureImporter::LoadTexture2D(TEXTURE_PATH, {}, this);
+        std::cout << "indexheap3: " << m_textureResource->GetDescriptorIndexSlot() << std::endl;
+    }
 
-        if (!pixels)
-        {
-            throw std::runtime_error("failed to load texture image!");
-        }
-
+    Ref<Texture2D> Renderer::UploadTexture(const TextureData& cpuData)
+    {
         std::unique_ptr<NRI::Buffer> stagingBuffer = m_device->createBuffer(NRI::BufferDesc{
-            .size = imageSize,
+            .size = cpuData.ImageSize,
             .usage = NRI::BufferUsage::Staging
         });
 
-        void* data = stagingBuffer->map(0, imageSize);
-        memcpy(data, pixels, imageSize);
+        void* data = stagingBuffer->map(0, cpuData.ImageSize);
+        memcpy(data, cpuData.Pixels, cpuData.ImageSize);
         stagingBuffer->unmap();
 
-        stbi_image_free(pixels);
-
-        m_textureResource = m_device->createTexture(NRI::TextureDesc
+        Ref<Texture2D> textureResource = m_device->createTexture(NRI::TextureDesc
             {
-                .width = static_cast<uint32_t>(texWidth),
-                .height = static_cast<uint32_t>(texHeight),
-                .mipLevels = mipLevels,
+                .width = static_cast<uint32_t>(cpuData.Width),
+                .height = static_cast<uint32_t>(cpuData.Height),
+                .mipLevels = cpuData.MipLevels,
                 .sampleCount = 1,
                 .usage = NRI::TextureUsage::ShaderResource
             });
 
         std::unique_ptr<NRI::CommandBuffer> commandBuffer = beginSingleTimeCommands();
-        m_textureResource->uploadFromBuffer(*commandBuffer, *stagingBuffer, texWidth, texHeight, mipLevels);
+        textureResource->uploadFromBuffer(*commandBuffer, *stagingBuffer, cpuData.Width, cpuData.Height, cpuData.MipLevels);
         endSingleTimeCommands(std::move(commandBuffer));
-        m_resourceHeap->registerTexture(*m_textureResource);
+
+        m_resourceHeap->registerTexture(*textureResource);
         uniformData.imageHeapIndexOffset = m_resourceHeap->getImageHeapIndexOffset();
+        
+        return textureResource;
     }
 
     void Renderer::loadModel()
@@ -576,7 +577,7 @@ namespace Nox
         m_commandBuffers->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
 
         m_commandBuffers->bindIndexBuffer(*m_indexBuffer, 0);
-        
+
         PushConstantBlock references{};
         // Pass pointer to the global matrix via a buffer device address
         references.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();

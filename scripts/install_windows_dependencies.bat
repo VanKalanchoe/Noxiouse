@@ -51,7 +51,7 @@ if not exist %TEMP%\vcpkg-cache mkdir %TEMP%\vcpkg-cache
 
 :: Install all dependencies at once using vcpkg with parallel installation
 echo Installing all dependencies...
-vcpkg install sdl3[vulkan] glm entt xxhash stb ktx[vulkan] tinyobjloader --triplet=x64-windows
+vcpkg install sdl3[vulkan] glm entt xxhash yaml-cpp stb ktx[vulkan] tinyobjloader --triplet=x64-windows
 
 :: slang
 set SLANG_VERSION=2026.13

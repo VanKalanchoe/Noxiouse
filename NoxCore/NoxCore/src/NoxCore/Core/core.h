@@ -4,8 +4,15 @@
 
 #include "Ref.h"
 
+//---------Event def------
+#define BIT(x) (1 << (x))
+#define Nox_BIND_EVENT_FN(fn) [this](auto&&... args) -> decltype(auto) { return this->fn(std::forward<decltype(args)>(args)...); }
+//------------------------
+
 namespace Nox
 {
+    inline bool IsEngineShuttingDown = false;
+    
     template <typename T>
     using Scope = std::unique_ptr<T>;
     template <typename T, typename... Args>

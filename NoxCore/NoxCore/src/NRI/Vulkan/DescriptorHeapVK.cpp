@@ -143,6 +143,7 @@ namespace NRI
         m_deviceVK.getDevice().writeResourceDescriptorsEXT(info, hostRange);
         
         vkTex->setDescriptorIndexSlot(slot);
+        vkTex->setDescriptorHeap(this);
     }
 
     void DescriptorHeapVK::unregisterTexture(uint32_t slot)

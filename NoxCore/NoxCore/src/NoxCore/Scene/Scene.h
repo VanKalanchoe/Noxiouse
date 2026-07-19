@@ -2,19 +2,24 @@
 #include <entt/entt.hpp>
 #include <string>
 
-#include "NoxCore/Core/Ref.h"
+#include "NoxCore/Asset/Asset.h"
 #include "NoxCore/Core/UUID.h"
 #include "NoxCore/Core/Timestep.h"
+#include "NoxCore/Renderer/EditorCamera.h"
 
 namespace Nox
 {
     class Entity; // Forward declaration
     
-    class Scene : public RefCounted
+    class Scene : public Asset
     {
     public:
         Scene() = default;
         ~Scene() = default;
+        
+        static Ref<Scene> Copy(Ref<Scene> other);
+        
+        virtual AssetType GetType() const { return AssetType::Scene;};
         
         // Creates an entity, auto-generates a UUID, and assigns a name
         Entity CreateEntity(const std::string& name = std::string());
@@ -44,7 +49,7 @@ namespace Nox
         
         // Allow the Entity class to access m_Registry to add/get components
         friend class Entity;
-        
+        friend class SceneSerializer;
         friend class SceneHierarchyPanel;
     };
 }

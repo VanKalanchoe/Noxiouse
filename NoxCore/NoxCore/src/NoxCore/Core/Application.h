@@ -109,11 +109,10 @@ namespace Nox
         ApplicationSpecification m_Specification;
         std::shared_ptr<Window> m_Window;
         ImGuiLayer* m_ImGuiLayer = nullptr;
-
-        std::vector<std::unique_ptr<Layer>> m_LayerStack;
-        
         /* We will use this renderer to draw into this window every frame. */
         std::unique_ptr<Renderer> renderer;
+        // has to be last otherwise renderer cant free resoruces
+        std::vector<std::unique_ptr<Layer>> m_LayerStack;
     };
 
     extern Application* CreateApplication(ApplicationCommandLineArgs args);

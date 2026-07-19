@@ -1,7 +1,11 @@
 #pragma once
+
+#include <filesystem>
+
 #include "NoxCore/Core/Layer.h"
 #include "NoxCore/Events/InputEvents.h"
 #include "Panels/SceneHierarchyPanel.h"
+#include "NoxCore/Asset/TextureImporter.h"
 
 namespace Nox
 {
@@ -21,6 +25,19 @@ namespace Nox
 
     private:
         Ref<Scene> m_ActiveScene;
+        Ref<Scene> m_EditorScene;
+        /*std::filesystem::path m_EditorScenePath;*/
+        
+        EditorCamera m_EditorCamera;
+        
+        enum class SceneState
+        {
+            Edit = 0, Play = 1, Simulate = 2
+        };
+    
+        Ref<Texture2D> texture1;
+        
+        SceneState m_SceneState = SceneState::Edit;
         
         // Panels
         SceneHierarchyPanel m_SceneHierarchyPanel;
