@@ -12,13 +12,14 @@
 #include "NoxCore/Renderer/Renderer.h"
 #include "NoxCore/ImGui/ImGuiLayer.h"
 
-
 namespace Nox
 {
     static Application* s_Application = nullptr;
 
     Application::Application(ApplicationSpecification specification) : m_Specification(std::move(specification))
     {
+        NOX_CORE_INFO("Application Start");
+        
         s_Application = this;
         
         if (m_Specification.WindowSpec.Ttile.empty())
@@ -35,6 +36,8 @@ namespace Nox
 
     Application::~Application()
     {
+        NOX_CORE_INFO("Application Shutdown");
+        
         IsEngineShuttingDown = true;
         
         PopLayer<ImGuiLayer>();
@@ -44,6 +47,8 @@ namespace Nox
     
     void Application::Shutdown()
     {
+        NOX_CORE_INFO("Application Shutdown");
+        
         SDL_Event quitEvent;
         SDL_zero(quitEvent); // Zero-initialize
         quitEvent.type = SDL_EVENT_QUIT; // Set event type
@@ -107,6 +112,8 @@ static bool minimized = false;
 SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[])
 {
     SDL_SetAppMetadata("Nox Engine", "1.0", "com.example.renderer-clear");
+    
+    Nox::Log::Init(); // todo: make it disalable when shipping
     
     Nox::ApplicationCommandLineArgs args;
     args.Count = argc;

@@ -6,6 +6,8 @@
 #include <SDL3/SDL_filesystem.h>
 
 #include "DeviceVK.h"
+#include "NoxCore/Core/core.h"
+#include "NoxCore/Core/Log.h"
 
 namespace NRI
 {
@@ -80,7 +82,7 @@ namespace NRI
             // Verify we have shader
             if (desc.shaders.empty())
             {
-                throw std::runtime_error("Graphics pipeline requires a shader stage.");
+                NOX_CORE_ASSERT("PipelineVK requires a shader stage");
             }
 
             if (useShaderObjects)
@@ -107,8 +109,7 @@ namespace NRI
 
                     if (std::filesystem::exists(binaryPath) && !desc.forceCompile)
                     {
-                        std::cout << "Loading shader binary: "
-                            << binaryPath << '\n';
+                        NOX_CORE_INFO("PipelineVK loading shader binary: {}", binaryPath);
 
                         binaryStorage.push_back(
                             loadShaderBinary(binaryPath)
@@ -118,12 +119,9 @@ namespace NRI
                     }
                     else
                     {
-                        std::cout << "Compiling shader: "
-                            << shaderDesc.sourcePath << '\n';
+                        NOX_CORE_INFO("PipelineVK compiling shader: {}", shaderDesc.sourcePath);
 
-                        tempBytecodeStorage.emplace_back(
-                            compiler.compile(shaderDesc.sourcePath)
-                        );
+                        tempBytecodeStorage.emplace_back(compiler.compile(shaderDesc.sourcePath));
 
                         loadedFromBinary.push_back(false);
                     }
@@ -182,8 +180,7 @@ namespace NRI
                     {
                         auto path = shaderBinaryPath(desc.shaders[i]);
 
-                        std::cout << "Saving shader binary: "
-                                  << path << '\n';
+                        NOX_CORE_INFO("PipelineVK Saving shader binary: {}", path);
 
                         auto data = m_shaders[i].getBinaryData();
 
@@ -401,7 +398,7 @@ namespace NRI
         // case ShaderStage::RayGen:   return vk::ShaderStageFlagBits::eRaygenKHR;
 
         default:
-            throw std::runtime_error("Unsupported shader stage passed to Vulkan backend!");
+            NOX_CORE_ASSERT("PipelineVK::translateShaderStage unsupported shader stage passed to Vulkan backend!");
         }
     }
 

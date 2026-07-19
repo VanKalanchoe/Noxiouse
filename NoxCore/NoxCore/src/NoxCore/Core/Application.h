@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 
+#include "Log.h"
 #include "NoxCore/Core/Window.h"
 #include "NoxCore/Core/Layer.h"
 #include "NoxCore/Events/Event.h"

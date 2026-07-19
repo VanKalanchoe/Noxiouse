@@ -103,7 +103,11 @@ namespace NRI
 
         transitionImageLayout(cb, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal, mipLevels);
         copyBufferToImage(cb, nativeBuffer, static_cast<uint32_t>(width), static_cast<uint32_t>(height));
-        generateMipmaps(cb, vk::Format::eR8G8B8A8Srgb, width, height, mipLevels);
+        
+        if (mipLevels > 1)
+            generateMipmaps(cb, vk::Format::eR8G8B8A8Srgb, width, height, mipLevels);
+        else
+            transitionImageLayout(cb, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal, mipLevels);
     }
 
     void TextureVK::generateMipmaps(vk::raii::CommandBuffer& commandBuffer, vk::Format imageFormat, int32_t texWidth, int32_t texHeight, uint32_t mipLevels)

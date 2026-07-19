@@ -1,12 +1,12 @@
 # pragma once
 
 #include <string>
-#include <filesystem>
 
 #include "NoxCore/Core/core.h"
 
 #include "NoxCore/Asset/RuntimeAssetManager.h"
 #include "NoxCore/Asset/EditorAssetManager.h"
+#include "NoxCore/Core/Log.h"
 
 namespace Nox
 {
@@ -26,26 +26,26 @@ namespace Nox
     public:
         static const std::filesystem::path& GetProjectDirectory()
         {
-            /*VK_CORE_ASSERT(s_ActiveProject, "No active project");*/
+            NOX_CORE_ASSERT(s_ActiveProject, "No active project");
             return s_ActiveProject->m_ProjectDirectory;
         }
         
         static std::filesystem::path GetAssetDirectory()
         {
-            /*VK_CORE_ASSERT(s_ActiveProject, "No active project");*/
+            NOX_CORE_ASSERT(s_ActiveProject, "No active project");
             return GetProjectDirectory() / s_ActiveProject->m_Config.AssetDirectory;
         }
 
         static std::filesystem::path GetAssetRegistryPath()
         {
-            /*VK_CORE_ASSERT(s_ActiveProject, "No active project");*/
+            NOX_CORE_ASSERT(s_ActiveProject, "No active project");
             return GetAssetDirectory() / s_ActiveProject->m_Config.AssetRegistryPath;
         }
         
         // todo move to asset manager when we have one
         static std::filesystem::path GetAssetFileSystemPath(const std::filesystem::path& path)
         {
-            /*VK_CORE_ASSERT(s_ActiveProject, "No active project");*/
+            NOX_CORE_ASSERT(s_ActiveProject, "No active project");
             return GetAssetDirectory() / path;
         }
 
@@ -53,26 +53,26 @@ namespace Nox
 
         static const std::filesystem::path& GetActiveProjectDirectory()
         {
-            /*VK_CORE_ASSERT(s_ActiveProject);*/
+            NOX_CORE_ASSERT(s_ActiveProject);
             return s_ActiveProject->GetProjectDirectory();
         }
 
         static std::filesystem::path GetActiveAssetDirectory()
         {
-            /*VK_CORE_ASSERT(s_ActiveProject);*/
+            NOX_CORE_ASSERT(s_ActiveProject);
             return s_ActiveProject->GetAssetDirectory();
         }
 
         static std::filesystem::path GetActiveAssetRegistryPath()
         {
-            /*VK_CORE_ASSERT(s_ActiveProject);*/
+            NOX_CORE_ASSERT(s_ActiveProject);
             return s_ActiveProject->GetAssetRegistryPath();
         }
 
         // TODO(Yan): move to asset manager when we have one
         static std::filesystem::path GetActiveAssetFileSystemPath(const std::filesystem::path& path)
         {
-            /*VK_CORE_ASSERT(s_ActiveProject);*/
+            NOX_CORE_ASSERT(s_ActiveProject);
             return s_ActiveProject->GetAssetFileSystemPath(path);
         }
         

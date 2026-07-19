@@ -5,10 +5,10 @@
 #include <chrono>
 #include <fstream>
 
-#include <stb_image.h>
-
 #define TINYOBJLOADER_IMPLEMENTATION
 #include <tiny_obj_loader.h>
+
+#include "NoxCore/Core/Log.h"
 
 namespace Nox
 {
@@ -16,10 +16,10 @@ namespace Nox
 
     Renderer::Renderer(std::shared_ptr<Nox::Window> window, bool isEditor) : m_window(std::move(window)), m_isEditor(isEditor)
     {
-        std::cout << "VulkanRenderer created\n";
+        NOX_CORE_INFO("Renderer Start");
 
         m_device = NRI::Device::create(NRI::GraphicsAPI::Vulkan, *m_window);
-        if (!m_device) throw std::runtime_error("Failed to create NRI device");
+        if (!m_device) NOX_CORE_ASSERT("Failed to create NRI device");
 
         initRenderer();
 
@@ -29,7 +29,7 @@ namespace Nox
 
     Renderer::~Renderer()
     {
-        std::cout << "VulkanRenderer destroyed\n";
+        NOX_CORE_INFO("Renderer Shutdown");
 
         m_device->waitIdle();
         m_device->shutdown(); // needed for texture to not remove imguitexture
@@ -201,6 +201,7 @@ namespace Nox
         {
             m_resourceHeap->registerTexture(*m_sceneResource);
             uniformData.imageHeapIndexOffset = m_resourceHeap->getImageHeapIndexOffset();
+            uniformData.finalImageIndex = m_sceneResource->GetDescriptorIndexSlot();
         }
     }
 
@@ -231,13 +232,6 @@ namespace Nox
     void Renderer::createTextureImage()
     {
         m_textureResource = TextureImporter::LoadTexture2D(TEXTURE_PATH, {}, this);
-        std::cout << "indexheap: " << m_textureResource->GetDescriptorIndexSlot() << std::endl;
-       
-        m_textureResource2 = TextureImporter::LoadTexture2D(TEXTURE_PATH, {}, this);
-        std::cout << "indexheap2: " << m_textureResource2->GetDescriptorIndexSlot() << std::endl;
-        m_textureResource = nullptr;
-        m_textureResource = TextureImporter::LoadTexture2D(TEXTURE_PATH, {}, this);
-        std::cout << "indexheap3: " << m_textureResource->GetDescriptorIndexSlot() << std::endl;
     }
 
     Ref<Texture2D> Renderer::UploadTexture(const TextureData& cpuData)
@@ -282,13 +276,13 @@ namespace Nox
             throw std::runtime_error(warn + err);
         }
 
-        std::unordered_map<Vertex, uint32_t> uniqueVertices{};
+        std::unordered_map<shaderio::Vertex, uint32_t> uniqueVertices{};
 
         for (const auto& shape : shapes)
         {
             for (const auto& index : shape.mesh.indices)
             {
-                Vertex vertex{};
+                shaderio::Vertex vertex{};
 
                 vertex.pos = {
                     attrib.vertices[3 * index.vertex_index + 0],
@@ -361,7 +355,7 @@ namespace Nox
 
     void Renderer::createUniformBuffers()
     {
-        uint64_t bufferSize = sizeof(UniformBufferObject);
+        uint64_t bufferSize = sizeof(shaderio::UniformBufferObject);
         // Reserve memory in vectors to prevent reallocation overhead
         m_uniformBuffers.reserve(MAX_FRAMES_IN_FLIGHT);
         m_uniformBuffersMapped.reserve(MAX_FRAMES_IN_FLIGHT);

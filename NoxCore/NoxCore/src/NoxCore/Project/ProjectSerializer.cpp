@@ -3,6 +3,8 @@
 #include <fstream>
 #include <yaml-cpp/yaml.h>
 
+#include "NoxCore/Core/Log.h"
+
 namespace Nox
 {
     ProjectSerializer::ProjectSerializer(Ref<Project> project) : m_Project(project)
@@ -46,7 +48,7 @@ namespace Nox
         }
         catch (YAML::ParserException e)
         {
-            /*VK_CORE_ERROR("Failed to load project file '{0}'\n    {1}", filePath.string(), e.what());*/
+            NOX_CORE_ERROR("Failed to load project file '{0}'\n    {1}", filePath.string(), e.what());
         }
 
         auto projectNode = data["Project"];

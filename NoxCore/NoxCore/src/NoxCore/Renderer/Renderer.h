@@ -12,39 +12,32 @@
 #include "NoxCore/Utils/NOXWatcher.h"
 #include "NoxCore/Asset/TextureImporter.h"
 
+namespace shaderio // Shader IO namespace -- shared layout between C++ and shaders
+{
+    using namespace glm; // GLSL-style types without the glm:: prefix inside the namespace
+    #include "shaderIO.h"
+    
+    inline bool operator==(const shaderio::Vertex& other1, const shaderio::Vertex& other2)
+    {
+        return other1.pos == other2.pos && other1.color == other2.color && other1.texCoord == other2.texCoord;
+    }
+}
+
+namespace std
+{
+    template <>
+    struct std::hash<shaderio::Vertex>
+    {
+        size_t operator()(shaderio::Vertex const& vertex) const noexcept
+        {
+            return ((hash<glm::vec3>()(vertex.pos) ^ (hash<glm::vec3>()(vertex.color) << 1)) >> 1) ^ (hash<glm::vec2>()(vertex.texCoord) << 1);
+        }
+    };
+}
+
 const std::string MODEL_PATH = "../../models/viking_room.obj";
 const std::string TEXTURE_PATH = "../../textures/viking_room.png";
 constexpr int MAX_FRAMES_IN_FLIGHT = 2; // currently in swapchainvk and devicevk headers seperate combine them in the future
-
-struct Vertex
-{
-    glm::vec3 pos;
-    glm::vec3 color;
-    glm::vec2 texCoord;
-
-    bool operator==(const Vertex& other) const
-    {
-        return pos == other.pos && color == other.color && texCoord == other.texCoord;
-    }
-};
-
-template <>
-struct std::hash<Vertex>
-{
-    size_t operator()(Vertex const& vertex) const noexcept
-    {
-        return ((hash<glm::vec3>()(vertex.pos) ^ (hash<glm::vec3>()(vertex.color) << 1)) >> 1) ^ (hash<glm::vec2>()(vertex.texCoord) << 1);
-    }
-};
-
-inline struct UniformBufferObject
-{
-    glm::mat4 model;
-    glm::mat4 view;
-    glm::mat4 proj;
-    uint32_t samplerIndex{0};
-    uint32_t imageHeapIndexOffset{0};
-} uniformData;
 
 // 2 quads
 /*const std::vector<Vertex> vertices = {
@@ -65,7 +58,8 @@ const std::vector<uint16_t> indices = {
 };*/
 
 // This per-model data will be accessed via resource heaps
-struct ModelData
+struct ModelData // not used was a example for descriptor heap buffer 
+//but im using bda need to remove this later with createDescriptorHeaps commented out thing
 {
     glm::vec4 pos;
     glm::vec4 color;
@@ -162,15 +156,17 @@ namespace Nox
 
         std::vector<std::unique_ptr<NRI::Buffer>> m_uniformBuffers;
         std::vector<void*> m_uniformBuffersMapped;
+        shaderio::UniformBufferObject uniformData = {};
 
         Ref<Texture2D> m_sceneResource;
         Ref<Texture2D> m_colorResource;
         Ref<Texture2D> m_depthResource;
         Ref<Texture2D> m_textureResource;
         Ref<Texture2D> m_textureResource2;
+        Ref<Texture2D> m_textureResource3;
         uint32_t mipLevels;
 
-        std::vector<Vertex> vertices;
+        std::vector<shaderio::Vertex> vertices;
         std::vector<uint32_t> indices;
 
         uint32_t frameIndex = 0;

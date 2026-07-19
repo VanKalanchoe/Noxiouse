@@ -22,6 +22,14 @@ namespace Nox
 
     Ref<Texture2D> TextureImporter::LoadTexture2D(const std::filesystem::path& path, const TextureSpecification& spec, Renderer* renderer)
     {
+        std::filesystem::path absolutePath = std::filesystem::absolute(path);
+        
+        if (!std::filesystem::exists(path))
+        {
+            NOX_CORE_ERROR("TextureImporter::ImportTexture2D - file not found from filepath: {}", absolutePath.string());
+            return Ref<Texture2D>(nullptr);
+        }
+        
         if (path.extension() == ".png" || path.extension() == ".jpg" || path.extension() == ".jpeg")
             return LoadWithSTB(path, spec, renderer);
         
@@ -45,9 +53,9 @@ namespace Nox
 
         if (!pixels)
         {
-            throw std::runtime_error("failed to load texture image!");
+            NOX_CORE_ERROR("TextureImporter::LoadWithSTB - Could not load texture from filepath: {}", path.string());
         }
-
+        
         TextureData cpuData;
         cpuData.Width = texWidth;
         cpuData.Height = texHeight;

@@ -1,29 +1,14 @@
-struct UniformBuffer 
-{
-    float4x4 model;
-    float4x4 view;
-    float4x4 proj;
-    uint samplerIndex;
-    uint imageHeapIndexOffset;
-};
-
-struct VertexBuffer
-{
-    float3 inPosition;
-    float3 inColor;
-    float2 inTexCoord;
-};
+#include "shaderIO.h"
 
 struct InstanceBuffer
 {
     float4x4 model;
 };
 
-
 struct PushConstant 
 {
-    UniformBuffer* uboBuffer;
-    VertexBuffer* vertexBuffer;
+    UniformBufferObject* uboBuffer;
+    Vertex* vertexBuffer;
     InstanceBuffer* instanceBuffer;
 };
 [[vk::push_constant]]
@@ -62,9 +47,9 @@ VSOutput vertMain(uint vertexID : SV_VertexID)
 [shader("fragment")]
 float4 fragMain(VSOutput vertIn) : SV_TARGET 
 {
-    UniformBuffer ubo = *pushConst.uboBuffer;
+    UniformBufferObject ubo = *pushConst.uboBuffer;
    
-    Texture2D texHandle = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + 1, 0));
+    Texture2D texHandle = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + ubo.finalImageIndex, 0));
     SamplerState sampHandle = SamplerState.Handle(uint2(0, 0));
 
     float4 img = texHandle.Sample(sampHandle, vertIn.fragTexCoord);

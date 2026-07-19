@@ -1,7 +1,6 @@
 #pragma once
 
 #include "Project.h"
-#include "NoxCore/Core/core.h"
 
 namespace Nox
 {

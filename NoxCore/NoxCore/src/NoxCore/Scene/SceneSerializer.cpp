@@ -7,7 +7,7 @@
 
 /*#include "VanK/Scripting/ScriptEngine.h"*/
 #include "NoxCore/Core/core.h"
-/*#include "NoxCore/Core/Log.h"*/
+#include "NoxCore/Core/Log.h"
 #include <iostream>
 
 #include "NoxCore/Core/UUID.h"
@@ -156,7 +156,7 @@ namespace Nox
         case RigidBody2DComponent::BodyType::Kinematic: return "Kinematic";
         }
 
-        VK_CORE_ASSERT(false, "Unknown RigidBody2DComponent::BodyType!");
+        NOX_CORE_ASSERT(false, "Unknown RigidBody2DComponent::BodyType!");
         return {};
     }
 
@@ -166,7 +166,7 @@ namespace Nox
         if (bodyTypeString == "Dynamic") return RigidBody2DComponent::BodyType::Dynamic;
         if (bodyTypeString == "Kinematic") return RigidBody2DComponent::BodyType::Kinematic;
 
-        VK_CORE_ASSERT(false, "Unknown RigidBody2DComponent::BodyType!");
+        NOX_CORE_ASSERT(false, "Unknown RigidBody2DComponent::BodyType!");
         return RigidBody2DComponent::BodyType::Static;
     }*/
     
@@ -176,7 +176,7 @@ namespace Nox
 
     static void SerializeEntity(YAML::Emitter& out, Entity entity)
     {
-        /*VK_CORE_ASSERT(entity.HasComponent<IDComponent>(), "Entity does not have an ID component!");*/
+        NOX_CORE_ASSERT(entity.HasComponent<IDComponent>(), "Entity does not have an ID component!");
         
         out << YAML::BeginMap; // Corrected: No parentheses
         out << YAML::Key << "Entity" << YAML::Value << entity.GetUUID(); // guid
@@ -405,12 +405,12 @@ namespace Nox
     void SceneSerializer::SerializeRuntime(const std::filesystem::path& filepath)
     {
         // Not Implemented
-        /*VK_CORE_ASSERT(false,"SerializeRuntime");*/
+        NOX_CORE_ASSERT(false,"SerializeRuntime");
     }
 
     bool SceneSerializer::Deserialize(const std::filesystem::path& filepath)
     {
-        /*VK_CORE_ERROR("{0}", filepath);
+        /*NOX_CORE_ERROR("{0}", filepath);
         std::ifstream stream(filepath);
         std::stringstream strStream;
         strStream << stream.rdbuf();*/
@@ -422,7 +422,7 @@ namespace Nox
         }
         catch (YAML::ParserException& e)
         {
-            /*VK_CORE_ERROR("Failed to load .nox file `{0}`\n       {1}", filepath.string(), e.what());*/
+            NOX_CORE_ERROR("Failed to load .nox file `{0}`\n       {1}", filepath.string(), e.what());
             return false;
         }
         
@@ -430,7 +430,7 @@ namespace Nox
             return false;
         
         std::string sceneName = data["Scene"].as<std::string>();
-        /*VK_CORE_TRACE("Deserializing scene '{0}'", sceneName);*/
+        NOX_CORE_TRACE("Deserializing scene '{0}'", sceneName);
 
         auto entities = data["Entities"];
         if (entities)
@@ -444,7 +444,7 @@ namespace Nox
                 if (tagComponent)
                     name = tagComponent["Tag"].as<std::string>();
 
-                /*VK_CORE_TRACE("Deserialized entity with ID = {0}, name = {1}", uuid, name);*/
+                NOX_CORE_TRACE("Deserialized entity with ID = {0}, name = {1}", uuid, name);
 
                 Entity deserializedEntity = m_Scene->CreateEntityWithUUID(uuid, name);
 
@@ -503,7 +503,7 @@ namespace Nox
                                 ScriptFieldInstance& fieldInstance = entityFields[name];
 
                                 // TODO(Yan): turn this assert into Hazelnut log warning
-                                VK_CORE_ASSERT(fields.find(name) != fields.end(), "field not found");
+                                NOX_CORE_ASSERT(fields.find(name) != fields.end(), "field not found");
 
                                 if (fields.find(name) == fields.end())
                                     continue;
@@ -616,7 +616,7 @@ namespace Nox
     bool SceneSerializer::DeserializeRuntime(const std::filesystem::path& filepath)
     {
         // Not Implemented
-        /*VK_CORE_ASSERT(false, "DeserializeRuntime");*/
+        NOX_CORE_ASSERT(false, "DeserializeRuntime");
         return false;
     }
 }

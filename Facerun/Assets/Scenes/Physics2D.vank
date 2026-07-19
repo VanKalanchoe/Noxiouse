@@ -1,0 +1,153 @@
+Scene: Untitled
+Entities:
+  - Entity: 7458477438869110338
+    TagComponent:
+      Tag: Floor
+    TransformComponent:
+      Translation: [-0.929275036, -8.19746399, -1.39245605]
+      Rotation: [0, 0, 0.000489341852]
+      Scale: [56.7723541, 0.999892712, 1]
+    SpriteRendererComponent:
+      Color: [0.845559835, 0.127323687, 0.127323687, 1]
+      TilingFactor: 1
+    RigidBody2DComponent:
+      BodyType: Static
+      FixedRotation: false
+    BoxCollider2DComponent:
+      Offset: [0, 0]
+      Size: [0.5, 0.5]
+      Density: 1
+      Friction: 0.5
+      Restitution: 0
+      RestitutionThreshold: 0.5
+  - Entity: 4121581257695217148
+    TagComponent:
+      Tag: Floor
+    TransformComponent:
+      Translation: [-0.929275036, 23.3887177, -1.39245605]
+      Rotation: [0, 0, 0.00048928766]
+      Scale: [56.7723541, 0.999892712, 1]
+    SpriteRendererComponent:
+      Color: [0.845559835, 0.127323687, 0.127323687, 1]
+      TilingFactor: 1
+    RigidBody2DComponent:
+      BodyType: Static
+      FixedRotation: false
+    BoxCollider2DComponent:
+      Offset: [0, 0]
+      Size: [0.5, 0.5]
+      Density: 1
+      Friction: 0.5
+      Restitution: 0
+      RestitutionThreshold: 0.5
+  - Entity: 12137122527445741245
+    TagComponent:
+      Tag: Floor
+    TransformComponent:
+      Translation: [-28.7897453, 7.68155193, -1.39245605]
+      Rotation: [0, 0, 1.57079637]
+      Scale: [30, 0.999921024, 1]
+    SpriteRendererComponent:
+      Color: [0.845559835, 0.127323687, 0.127323687, 1]
+      TilingFactor: 1
+    RigidBody2DComponent:
+      BodyType: Static
+      FixedRotation: false
+    BoxCollider2DComponent:
+      Offset: [0, 0]
+      Size: [0.5, 0.5]
+      Density: 1
+      Friction: 0.5
+      Restitution: 0
+      RestitutionThreshold: 0.5
+  - Entity: 14528818116965091480
+    TagComponent:
+      Tag: Camera
+    TransformComponent:
+      Translation: [0, 0, 16.8999996]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    CameraComponent:
+      Camera:
+        ProjectionType: 0
+        PerspectiveFOV: 0.785398185
+        PerspectiveNear: 0.00999999978
+        PerspectiveFar: 1000
+        OrthographicSize: 10
+        OrthographicNear: 0.100000001
+        OrthographicFar: 1
+      Primary: true
+      FixedAspectRatio: false
+    ScriptComponent:
+      ClassName: Sandbox.Camera
+      ScriptFields:
+        - Name: DistanceFromPlayer
+          Type: Float
+          Data: 2
+  - Entity: 12928356809540355405
+    TagComponent:
+      Tag: Player
+    TransformComponent:
+      Translation: [-23.838604, 19.276001, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    ScriptComponent:
+      ClassName: Sandbox.Player
+      ScriptFields:
+        - Name: Speed
+          Type: Float
+          Data: 2
+    SpriteRendererComponent:
+      Color: [1, 1, 1, 1]
+      TexturePath: E:\dev\VanK\build\win\Facerun\Assets\Textures\Pacmanface.png
+      TilingFactor: 1
+    RigidBody2DComponent:
+      BodyType: Dynamic
+      FixedRotation: false
+    CircleCollider2DComponent:
+      Offset: [0, 0]
+      Radius: 0.5
+      Density: 1
+      Friction: 0.5
+      Restitution: 0
+      RestitutionThreshold: 0.5
+  - Entity: 7476576110378913452
+    TagComponent:
+      Tag: Floor
+    TransformComponent:
+      Translation: [26.0789948, 7.60488892, 1.68927002]
+      Rotation: [0, 0, 1.57079637]
+      Scale: [29.9983616, 0.999778509, 1]
+    SpriteRendererComponent:
+      Color: [0.845559835, 0.127323687, 0.127323687, 1]
+      TilingFactor: 1
+    RigidBody2DComponent:
+      BodyType: Static
+      FixedRotation: false
+    BoxCollider2DComponent:
+      Offset: [0, 0]
+      Size: [0.5, 0.5]
+      Density: 1
+      Friction: 0.5
+      Restitution: 0
+      RestitutionThreshold: 0.5
+  - Entity: 8174377456763282214
+    TagComponent:
+      Tag: Floor
+    TransformComponent:
+      Translation: [-15.8093681, 8.36541653, -1.39245605]
+      Rotation: [0, 0, 2.34490705]
+      Scale: [29.9984989, 0.999877155, 1]
+    SpriteRendererComponent:
+      Color: [0.845559835, 0.127323687, 0.127323687, 1]
+      TilingFactor: 1
+    RigidBody2DComponent:
+      BodyType: Static
+      FixedRotation: false
+    BoxCollider2DComponent:
+      Offset: [0, 0]
+      Size: [0.5, 0.5]
+      Density: 1
+      Friction: 0.5
+      Restitution: 0
+      RestitutionThreshold: 0.5

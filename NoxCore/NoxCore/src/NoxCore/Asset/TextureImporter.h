@@ -1,7 +1,5 @@
 #pragma once
 
-#include <filesystem>
-
 #include "Asset.h"
 #include "AssetMetadata.h"
 #include "NoxCore/Core/core.h"

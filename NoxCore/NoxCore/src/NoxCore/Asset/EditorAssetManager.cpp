@@ -22,7 +22,7 @@ namespace Nox
     {
         if (s_AssetExtensionMap.find(extension) == s_AssetExtensionMap.end())
         {
-            /*VK_CORE_WARN("Could not find AssetType for {}", extension.string());*/
+            NOX_CORE_WARN("Could not find AssetType for {}", extension.string());
             return AssetType::None;
         }
 
@@ -59,7 +59,7 @@ namespace Nox
         AssetMetadata metadata;
         metadata.FilePath = filepath;
         metadata.Type = GetAssetTypeFromExtension(filepath.extension());
-        /*VK_CORE_ASSERT(metadata.Type != AssetType::None, "could not determine asset type from extension");*/
+        NOX_CORE_ASSERT(metadata.Type != AssetType::None, "could not determine asset type from extension");
         Ref<Asset> asset = AssetImporter::ImportAsset(handle, metadata);
         if (asset)
         {
@@ -105,7 +105,7 @@ namespace Nox
             if (!asset)
             {
                 // import failed
-                /*VK_CORE_ASSERT("EditorAssetManager::GetAsset - asset import failed")*/
+                NOX_CORE_ASSERT("EditorAssetManager::GetAsset - asset import failed")
             }
             m_LoadedAssets[handle] = asset;
         }
@@ -144,6 +144,12 @@ namespace Nox
     {
         auto path = Project::GetActiveAssetRegistryPath();
 
+        if (!std::filesystem::exists(path))
+        {
+            NOX_CORE_ERROR("Asset Registry file does not exist: {0}", path.string());
+            return false;
+        }
+        
         YAML::Node data;
         try
         {
@@ -151,7 +157,7 @@ namespace Nox
         }
         catch (YAML::ParserException e)
         {
-            /*VK_CORE_ERROR("Failed to load project file '{0}'\n    {1}", path.string(), e.what());*/
+            NOX_CORE_ERROR("Failed to load project file '{0}'\n    {1}", path.string(), e.what());
         }
 
         auto rootNode = data["AssetRegistry"];

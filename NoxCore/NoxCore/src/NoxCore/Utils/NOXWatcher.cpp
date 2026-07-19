@@ -1,13 +1,15 @@
 #include "NOXWatcher.h"
 
+#include "NoxCore/Core/Log.h"
+
 namespace Utils
 {
     void NOXWatcher::watch(std::filesystem::path path, std::function<void()> onModified)
     {
         if (!std::filesystem::exists(path))
         {
-            std::cerr << "FileWatcher Error: Cannot watch path because it does not exist: " 
-                      << path.string() << '\n';
+            NOX_CORE_ERROR("NOXWatcher::watch Cannot watch path because it does not exist: {}", path.string());
+            
             return;
         }
         
@@ -36,7 +38,7 @@ namespace Utils
                     }
                     
                     std::filesystem::path modifiedPath(pathStr);
-                    std::cout << "FileWatcher: " << modifiedPath.filename().string() << '\n';
+                    NOX_CORE_INFO("NoxWatcher: {}", modifiedPath.filename().string());;
                 }
             }
         ));

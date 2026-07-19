@@ -20,6 +20,8 @@ find_package (KTX REQUIRED)
 find_package (tinyobjloader REQUIRED)
 find_package (xxhash REQUIRED)
 find_package (yaml-cpp REQUIRED)
+find_package(spdlog CONFIG REQUIRED)
+find_package(box2d REQUIRED)
 
 # Define Slang as an imported library
 add_library(Slang::slang IMPORTED UNKNOWN)
@@ -110,12 +112,13 @@ file(GLOB_RECURSE NOXCORE_FILES
     CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/NoxCore/src/*.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/NoxCore/src/*.h"
+    "${CMAKE_SOURCE_DIR}/shaders/*.h"
 )
 
 add_library(${PROJECT_NAME} STATIC ${NOXCORE_FILES} ${IMGUI_SOURCES}) #main file here
 set_target_properties (${PROJECT_NAME} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${TEMPLATE_DIR})
 set_target_properties (${PROJECT_NAME} PROPERTIES CXX_STANDARD 20)
-target_link_libraries (${PROJECT_NAME} PUBLIC Vulkan::cppm SDL3::SDL3 glm::glm Slang::slang EnTT::EnTT xxHash::xxhash yaml-cpp tinyobjloader::tinyobjloader)
+target_link_libraries (${PROJECT_NAME} PUBLIC Vulkan::cppm SDL3::SDL3 glm::glm spdlog::spdlog Slang::slang EnTT::EnTT xxHash::xxhash yaml-cpp box2d::box2d tinyobjloader::tinyobjloader)
 # Add here vendors
 target_include_directories (${PROJECT_NAME} SYSTEM PRIVATE ${STB_INCLUDEDIR} ${CMAKE_CURRENT_SOURCE_DIR}/vendors/taskflow ${CMAKE_CURRENT_SOURCE_DIR}/vendors/VulkanMemoryAllocator-Hpp/include ${CMAKE_CURRENT_SOURCE_DIR}/vendors/VulkanMemoryAllocator-Hpp/VulkanMemoryAllocator/include ${IMGUI_DIR}/backends)
 
@@ -123,7 +126,7 @@ target_include_directories (${PROJECT_NAME} SYSTEM PRIVATE ${STB_INCLUDEDIR} ${C
 target_include_directories (${PROJECT_NAME} SYSTEM PUBLIC ${IMGUI_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/vendors/FileWatch)
 
 # Sysmtem means supress warnings from the include directories, so we don't get warnings from external libraries.
-target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/NoxCore/src)
+target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/NoxCore/src ${CMAKE_SOURCE_DIR}/shaders)
 
 # Add compile definition if C++ 20 module is enabled
 if(ENABLE_CPP20_MODULE)
