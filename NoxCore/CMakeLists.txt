@@ -10,18 +10,19 @@ endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../cmake")
 
-find_package(sdl3 REQUIRED)
-find_package(glm REQUIRED)
-find_package(Vulkan 1.4.350 REQUIRED)
-find_package(entt REQUIRED)
-find_package(stb REQUIRED)
+find_package (sdl3 REQUIRED)
+find_package (glm REQUIRED)
+find_package (Vulkan 1.4.350 REQUIRED)
+find_package (entt REQUIRED)
+find_package (stb REQUIRED)
 set(STB_INCLUDEDIR ${stb_INCLUDE_DIRS})
 find_package (KTX REQUIRED)
 find_package (tinyobjloader REQUIRED)
 find_package (xxhash REQUIRED)
 find_package (yaml-cpp REQUIRED)
-find_package(spdlog CONFIG REQUIRED)
-find_package(box2d REQUIRED)
+find_package (spdlog CONFIG REQUIRED)
+find_package (box2d REQUIRED)
+find_package (imguizmo REQUIRED)
 
 # Define Slang as an imported library
 add_library(Slang::slang IMPORTED UNKNOWN)
@@ -118,7 +119,7 @@ file(GLOB_RECURSE NOXCORE_FILES
 add_library(${PROJECT_NAME} STATIC ${NOXCORE_FILES} ${IMGUI_SOURCES}) #main file here
 set_target_properties (${PROJECT_NAME} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${TEMPLATE_DIR})
 set_target_properties (${PROJECT_NAME} PROPERTIES CXX_STANDARD 20)
-target_link_libraries (${PROJECT_NAME} PUBLIC Vulkan::cppm SDL3::SDL3 glm::glm spdlog::spdlog Slang::slang EnTT::EnTT xxHash::xxhash yaml-cpp box2d::box2d tinyobjloader::tinyobjloader)
+target_link_libraries (${PROJECT_NAME} PUBLIC Vulkan::cppm SDL3::SDL3 glm::glm spdlog::spdlog Slang::slang EnTT::EnTT xxHash::xxhash yaml-cpp box2d::box2d imguizmo::imguizmo msdf-atlas-gen::msdf-atlas-gen tinyobjloader::tinyobjloader)
 # Add here vendors
 target_include_directories (${PROJECT_NAME} SYSTEM PRIVATE ${STB_INCLUDEDIR} ${CMAKE_CURRENT_SOURCE_DIR}/vendors/taskflow ${CMAKE_CURRENT_SOURCE_DIR}/vendors/VulkanMemoryAllocator-Hpp/include ${CMAKE_CURRENT_SOURCE_DIR}/vendors/VulkanMemoryAllocator-Hpp/VulkanMemoryAllocator/include ${IMGUI_DIR}/backends)
 

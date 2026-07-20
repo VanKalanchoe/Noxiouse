@@ -106,8 +106,11 @@ namespace Nox
         static float GetTime();
         static std::string GetExecutableRootPath();
 
+        void setBlockEvents(bool block) { m_BlockEvents = block; }
+        bool getBlockEvents() { return m_BlockEvents; }
     private:
         ApplicationSpecification m_Specification;
+        bool m_BlockEvents = false;
         std::shared_ptr<Window> m_Window;
         ImGuiLayer* m_ImGuiLayer = nullptr;
         /* We will use this renderer to draw into this window every frame. */

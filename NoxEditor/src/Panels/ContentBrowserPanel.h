@@ -1,6 +1,4 @@
 #pragma once
-
-#include "NoxCore/Project/Project.h"
 #include "ThumbnailCache.h"
 
 namespace Nox

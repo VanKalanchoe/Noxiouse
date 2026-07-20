@@ -6,7 +6,6 @@
 
 #include "NoxCore/Asset/RuntimeAssetManager.h"
 #include "NoxCore/Asset/EditorAssetManager.h"
-#include "NoxCore/Core/Log.h"
 
 namespace Nox
 {

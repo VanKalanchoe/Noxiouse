@@ -3,6 +3,8 @@
 #include "NoxCore/Events/InputEvents.h"
 #include "Panels/SceneHierarchyPanel.h"
 #include "Panels/ContentBrowserPanel.h"
+#include "NoxCore/Renderer/Font.h"
+#include "NoxCore/Renderer/Renderer.h"
 
 namespace Nox
 {
@@ -46,6 +48,8 @@ namespace Nox
         void SerializeScene(Ref<Scene> scene, const std::filesystem::path& path);
 
     private:
+        Renderer* m_Renderer;
+        
         Ref<Scene> m_ActiveScene;
         Ref<Scene> m_EditorScene;
         std::filesystem::path m_EditorScenePath;
@@ -78,5 +82,7 @@ namespace Nox
         
         // Editor resources always static
         Ref<Texture2D> m_IconPlay, m_IconPause, m_IconStep, m_IconStop, m_IconSimulate;
+        
+        Ref<Font> m_Font; 
     };
 }

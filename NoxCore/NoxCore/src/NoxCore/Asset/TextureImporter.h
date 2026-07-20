@@ -4,11 +4,13 @@
 #include "AssetMetadata.h"
 #include "NoxCore/Core/core.h"
 #include "NRI/Texture.h"
+#include "NoxCore/Core/Buffer.h"
 
 namespace Nox
 {
     struct TextureSpecification
     {
+        bool flip = false;
         bool generateMips = true;
     };
     
@@ -17,8 +19,10 @@ namespace Nox
         uint32_t Width = 0;
         uint32_t Height = 0;
         uint32_t MipLevels = 0;
-        uint64_t ImageSize = 0;
-        uint8_t* Pixels = nullptr; // Raw CPU buffer from stb
+        Buffer Data; // Raw CPU buffer from stb
+        NRI::ImageFormat Format = NRI::ImageFormat::SRGBA8;
+        uint32_t DirectFormat;
+        std::vector<size_t> MipOffsets;
     };
     
     class Renderer;
@@ -32,10 +36,11 @@ namespace Nox
         // Reads file directly from filesystem
         // (i.e. path has to be relative / absolute to working directory)
         static Ref<Texture2D> LoadTexture2D(const std::filesystem::path& path, const TextureSpecification& spec = TextureSpecification(), Renderer* renderer = nullptr);
+        static Ref<Texture2D> LoadTexture2DFromMemory(TextureData& cpuData, const TextureSpecification& spec  = TextureSpecification(), Renderer* renderer = nullptr);
         
     private:
         static Ref<Texture2D> LoadWithSTB(const std::filesystem::path& path, const TextureSpecification& spec, Renderer* renderer);
-        static Ref<Texture2D> LoadWithDDS(const std::filesystem::path& path, const TextureSpecification& spec);
-        static Ref<Texture2D> LoadWithKTX(const std::filesystem::path& path, const TextureSpecification& spec);
+        static Ref<Texture2D> LoadWithDDS(const std::filesystem::path& path, const TextureSpecification& spec, Renderer* renderer);
+        static Ref<Texture2D> LoadWithKTX(const std::filesystem::path& path, const TextureSpecification& spec, Renderer* renderer);
     };
 }

@@ -8,3 +8,6 @@
 	path = NoxCore/vendors/imgui
 	url = https://github.com/VanKalanchoe/imgui.git
 	branch = docking
+[submodule "NoxCore/vendors/msdf-atlas-gen"]
+	path = NoxCore/vendors/msdf-atlas-gen
+	url = https://github.com/Chlumsky/msdf-atlas-gen.git

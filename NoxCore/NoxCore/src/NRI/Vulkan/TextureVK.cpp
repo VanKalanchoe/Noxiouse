@@ -8,18 +8,53 @@
 #include "NoxCore/Core/core.h"
 
 namespace NRI
-{
+{   
+    static vk::Format MapToVulkanFormat(ImageFormat format)
+    {
+        switch (format)
+        {
+        case ImageFormat::RGB8: return vk::Format::eR8G8B8A8Unorm;
+        case ImageFormat::SRGB8: return vk::Format::eR8G8B8A8Srgb;
+            
+        case ImageFormat::RGBA8:  return vk::Format::eR8G8B8A8Unorm;
+        case ImageFormat::SRGBA8: return vk::Format::eR8G8B8A8Srgb;
+            
+        case ImageFormat::R16G16: return vk::Format::eR16G16Unorm;
+        case ImageFormat::R32SINT: return vk::Format::eR32Sint;
+        case ImageFormat::R32G32B32A32_SFLOAT: return vk::Format::eR32G32B32A32Sfloat;
+            
+        //tinyddsloader format
+        case ImageFormat::BC7_UNorm: return vk::Format::eBc7UnormBlock;
+        case ImageFormat::BC7_UNorm_SRGB: return vk::Format::eBc7SrgbBlock;
+            
+        default: return vk::Format::eR8G8B8A8Srgb;
+        }
+    }
+    
+    static vk::Format MapToVulkanFormat(uint32_t format)
+    {
+        // For KTX2 files, we can get the format directly
+        vk::Format textureFormat = static_cast<vk::Format>(format);
+        if (textureFormat == vk::Format::eUndefined)
+        {
+            // If the format is undefined, fall back to a reasonable default
+            textureFormat = vk::Format::eR8G8B8A8Unorm;
+        }
+        
+        return textureFormat;
+    }
+    
     TextureVK::TextureVK(DeviceVK& device, const TextureDesc& desc) : m_deviceVK(device)
     {
         m_desc = desc; // used for image transition layout in commandbuffer colorattachments
-        
+
         // Assumes there is only color depth and shader aka png textures
         vk::Format format;
         vk::ImageAspectFlags aspectFlags;
         vk::ImageUsageFlags usageFlags;
         if (desc.usage == TextureUsage::ShaderResource)
         {
-            format = vk::Format::eR8G8B8A8Srgb;
+            format = desc.directFormat == UINT32_MAX ? MapToVulkanFormat(desc.format) : MapToVulkanFormat(desc.directFormat)/*vk::Format::eR8G8B8A8Srgb*/;
             aspectFlags = vk::ImageAspectFlagBits::eColor;
             usageFlags = vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled;
         }
@@ -27,7 +62,7 @@ namespace NRI
         {
             format = m_deviceVK.getSurfaceFormat().format;
             aspectFlags = vk::ImageAspectFlagBits::eColor;
-            usageFlags = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled |vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst ;
+            usageFlags = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst;
         }
         else if (desc.usage == TextureUsage::ColorResolveAttachment)
         {
@@ -41,6 +76,7 @@ namespace NRI
             aspectFlags = vk::ImageAspectFlagBits::eDepth;
             usageFlags = vk::ImageUsageFlagBits::eDepthStencilAttachment;
         }
+        m_format = format;
 
         vk::ImageCreateInfo imageInfo
         {
@@ -55,13 +91,13 @@ namespace NRI
             .sharingMode = vk::SharingMode::eExclusive
         };
         m_imageResource.image = m_deviceVK.getAllocator().createImage(imageInfo).image;
-        
-        m_viewCreateInfo = 
+
+        m_viewCreateInfo =
         {
             .image = *m_imageResource.image,
             .viewType = vk::ImageViewType::e2D,
             .format = format,
-            .subresourceRange = 
+            .subresourceRange =
             {
                 .aspectMask = aspectFlags,
                 .baseMipLevel = 0,
@@ -78,7 +114,7 @@ namespace NRI
             m_imageResource.view = m_deviceVK.createImageView(*m_imageResource.image, format, aspectFlags, 1);
         }
     }
-    
+
     TextureVK::~TextureVK()
     {
         if (m_boundHeap && m_imageResource.descriptorIndexSlot != ~0u)
@@ -93,7 +129,7 @@ namespace NRI
         }
     }
 
-    void TextureVK::uploadFromBuffer(CommandBuffer& cmdBuffer, Buffer& stagingBuffer, uint32_t width, uint32_t height, uint32_t mipLevels)
+    void TextureVK::uploadFromBuffer(CommandBuffer& cmdBuffer, Buffer& stagingBuffer, uint32_t width, uint32_t height, uint32_t mipLevels, const std::vector<size_t>& mipOffsets)
     {
         auto* cmdBufferVK = dynamic_cast<CommandBufferVK*>(&cmdBuffer);
         auto* stagingBufferVK = dynamic_cast<BufferVK*>(&stagingBuffer);
@@ -102,10 +138,42 @@ namespace NRI
         vk::raii::Buffer& nativeBuffer = stagingBufferVK->getNativeBuffer();
 
         transitionImageLayout(cb, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal, mipLevels);
-        copyBufferToImage(cb, nativeBuffer, static_cast<uint32_t>(width), static_cast<uint32_t>(height));
         
-        if (mipLevels > 1)
-            generateMipmaps(cb, vk::Format::eR8G8B8A8Srgb, width, height, mipLevels);
+        std::vector<vk::BufferImageCopy> copyRegions;
+        
+        if (mipOffsets.empty() || mipOffsets.size() <= 1)
+        {
+            // STB Fallback: Only one base level provided
+            copyRegions.push_back(vk::BufferImageCopy
+            {
+                .bufferOffset = 0,
+                .bufferRowLength = 0,
+                .bufferImageHeight = 0,
+                .imageSubresource = { .aspectMask = vk::ImageAspectFlagBits::eColor, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1 },
+                .imageOffset = {0, 0, 0},
+                .imageExtent = { width, height, 1 }
+            });
+        }
+        else
+        {
+            // DDS/KTX Path: Multiple pre-calculated levels provided
+            for (uint32_t i = 0; i < mipOffsets.size(); i++)
+            {
+                copyRegions.push_back(vk::BufferImageCopy
+                {
+                    .bufferOffset = mipOffsets[i],
+                    .bufferRowLength = 0,
+                    .bufferImageHeight = 0,
+                    .imageSubresource = { .aspectMask = vk::ImageAspectFlagBits::eColor, .mipLevel = i, .baseArrayLayer = 0, .layerCount = 1 },
+                    .imageOffset = {0, 0, 0},
+                    .imageExtent = { width >> i, height >> i, 1 }
+                });
+            }
+        }
+        copyBufferToImage(cb, nativeBuffer, copyRegions);
+        
+        if (mipLevels > 1 && copyRegions.size() == 1)
+            generateMipmaps(cb, m_format, width, height, mipLevels);
         else
             transitionImageLayout(cb, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal, mipLevels);
     }
@@ -212,18 +280,9 @@ namespace NRI
         commandBuffer.pipelineBarrier(sourceStage, destinationStage, {}, {}, {}, barrier);
     }
 
-    void TextureVK::copyBufferToImage(vk::raii::CommandBuffer& commandBuffer, const vk::raii::Buffer& buffer, uint32_t width, uint32_t height)
+    void TextureVK::copyBufferToImage(vk::raii::CommandBuffer& commandBuffer, const vk::raii::Buffer& buffer, std::vector<vk::BufferImageCopy>& regions)
     {
-        vk::BufferImageCopy region
-        {
-            .bufferOffset = 0,
-            .bufferRowLength = 0,
-            .bufferImageHeight = 0,
-            .imageSubresource = {.aspectMask = vk::ImageAspectFlagBits::eColor, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1},
-            .imageOffset = {0, 0, 0},
-            .imageExtent = {width, height, 1}
-        };
-        commandBuffer.copyBufferToImage(buffer, m_imageResource.image, vk::ImageLayout::eTransferDstOptimal, region);
+        commandBuffer.copyBufferToImage(buffer, m_imageResource.image, vk::ImageLayout::eTransferDstOptimal, regions);
     }
 
     ImTextureID TextureVK::getImTextureID()

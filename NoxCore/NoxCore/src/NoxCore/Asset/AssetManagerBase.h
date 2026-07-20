@@ -1,7 +1,5 @@
 #pragma once
 
-#include "NoxCore/Core/core.h"
-
 #include "Asset.h"
 
 #include <map>

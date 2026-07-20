@@ -36,7 +36,7 @@ namespace std
 }
 
 const std::string MODEL_PATH = "../../models/viking_room.obj";
-const std::string TEXTURE_PATH = "../../textures/viking_room.png";
+const std::string TEXTURE_PATH = "../../textures/viking_room.ktx2";
 constexpr int MAX_FRAMES_IN_FLIGHT = 2; // currently in swapchainvk and devicevk headers seperate combine them in the future
 
 // 2 quads

@@ -1,6 +1,5 @@
 #pragma once
 #include <cstdint>
-#include <memory>
 
 #include <imgui.h>
 
@@ -12,8 +11,11 @@ namespace NRI
     {
         None = 0,
         RGB8,
+        SRGB8,
+        
         RGBA8,
         SRGBA8,
+        
         R16G16,
         R32SINT,
         R32G32B32A32_SFLOAT,
@@ -47,6 +49,8 @@ namespace NRI
         uint32_t mipLevels = 1;
         uint32_t sampleCount = 1; // For MSAA
         TextureUsage usage;
+        ImageFormat format = ImageFormat::SRGBA8;
+        uint32_t directFormat = UINT32_MAX;
     };
 
     class Texture : public Nox::Asset
@@ -62,7 +66,7 @@ namespace NRI
     class Texture2D : public Texture
     {
     public:
-        virtual void uploadFromBuffer(class CommandBuffer& cmdBuffer, class Buffer& stagingBuffer, uint32_t width, uint32_t height, uint32_t mipLevels) = 0;
+        virtual void uploadFromBuffer(class CommandBuffer& cmdBuffer, class Buffer& stagingBuffer, uint32_t width, uint32_t height, uint32_t mipLevels, const std::vector<size_t>& mipOffsets) = 0;
         
         [[nodiscard]] virtual uint32_t getMipLevels() const = 0; // ??
         [[nodiscard]] virtual TextureUsage getUsage() const = 0; // ??

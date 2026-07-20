@@ -28,12 +28,12 @@ namespace NRI
         void setDescriptorIndexSlot(uint32_t index) { m_imageResource.descriptorIndexSlot = index; }
         void setDescriptorHeap(DescriptorHeap* heap) { m_boundHeap = heap; }
         
-        void uploadFromBuffer(CommandBuffer& cmdBuffer, Buffer& stagingBuffer, uint32_t width, uint32_t height, uint32_t mipLevels) override;
+        void uploadFromBuffer(CommandBuffer& cmdBuffer, Buffer& stagingBuffer, uint32_t width, uint32_t height, uint32_t mipLevels, const std::vector<size_t>& mipOffsets) override;
         
     private:
         void generateMipmaps(vk::raii::CommandBuffer& commandBuffer, vk::Format imageFormat, int32_t texWidth, int32_t texHeight, uint32_t mipLevels);
         void transitionImageLayout(vk::raii::CommandBuffer& commandBuffer, vk::ImageLayout oldLayout, vk::ImageLayout newLayout, uint32_t mipLevels);
-        void copyBufferToImage(vk::raii::CommandBuffer& commandBuffer, const vk::raii::Buffer& buffer, uint32_t width, uint32_t height);
+        void copyBufferToImage(vk::raii::CommandBuffer& commandBuffer, const vk::raii::Buffer& buffer, std::vector<vk::BufferImageCopy>& regions);
 
     private:
         DeviceVK& m_deviceVK;
@@ -41,6 +41,7 @@ namespace NRI
         ImageResource m_imageResource;
         VkDescriptorSet m_imGuiHandle = nullptr; //imgui only
         DescriptorHeap* m_boundHeap = nullptr;
+        vk::Format m_format;
         
         // Memory-stable structures required for descriptor storage tracking
         vk::ImageViewCreateInfo m_viewCreateInfo;

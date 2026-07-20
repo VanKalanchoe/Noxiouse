@@ -237,12 +237,12 @@ namespace Nox
     Ref<Texture2D> Renderer::UploadTexture(const TextureData& cpuData)
     {
         std::unique_ptr<NRI::Buffer> stagingBuffer = m_device->createBuffer(NRI::BufferDesc{
-            .size = cpuData.ImageSize,
+            .size = cpuData.Data.Size,
             .usage = NRI::BufferUsage::Staging
         });
 
-        void* data = stagingBuffer->map(0, cpuData.ImageSize);
-        memcpy(data, cpuData.Pixels, cpuData.ImageSize);
+        void* data = stagingBuffer->map(0, cpuData.Data.Size);
+        memcpy(data, cpuData.Data.Data, cpuData.Data.Size);
         stagingBuffer->unmap();
 
         Ref<Texture2D> textureResource = m_device->createTexture(NRI::TextureDesc
@@ -251,11 +251,13 @@ namespace Nox
                 .height = static_cast<uint32_t>(cpuData.Height),
                 .mipLevels = cpuData.MipLevels,
                 .sampleCount = 1,
-                .usage = NRI::TextureUsage::ShaderResource
+                .usage = NRI::TextureUsage::ShaderResource,
+                .format = cpuData.Format,
+                .directFormat = cpuData.DirectFormat
             });
 
         std::unique_ptr<NRI::CommandBuffer> commandBuffer = beginSingleTimeCommands();
-        textureResource->uploadFromBuffer(*commandBuffer, *stagingBuffer, cpuData.Width, cpuData.Height, cpuData.MipLevels);
+        textureResource->uploadFromBuffer(*commandBuffer, *stagingBuffer, cpuData.Width, cpuData.Height, cpuData.MipLevels, cpuData.MipOffsets);
         endSingleTimeCommands(std::move(commandBuffer));
 
         m_resourceHeap->registerTexture(*textureResource);

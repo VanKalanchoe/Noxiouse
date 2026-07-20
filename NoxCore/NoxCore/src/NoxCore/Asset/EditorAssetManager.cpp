@@ -9,6 +9,8 @@
 #include <fstream>
 #include <yaml-cpp/yaml.h>
 
+#include "NoxCore/Core/Log.h"
+
 namespace Nox
 {
     static std::map<std::filesystem::path, AssetType> s_AssetExtensionMap = {

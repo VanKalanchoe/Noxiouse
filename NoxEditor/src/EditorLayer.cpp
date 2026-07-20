@@ -1,8 +1,13 @@
 #include "EditorLayer.h"
 
-#include <imgui.h>
 #include <iostream>
 
+#include <imgui.h>
+#include <imgui_internal.h>// For Docking
+#include <ImGuizmo.h>
+#include <glm/gtc/type_ptr.hpp>  // for pointer to matrix or vector
+
+#include "NoxCore/Math/Math.h"
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Asset/SceneImporter.h"
 #include "NoxCore/Core/Application.h"
@@ -10,7 +15,6 @@
 #include "NoxCore/Events/InputEvents.h"
 #include "NoxCore/ImGui/ImGuiLayer.h"
 #include "NoxCore/Project/Project.h"
-#include "NoxCore/Renderer/Renderer.h"
 #include "NoxCore/Utils/Utils.h"
 
 namespace Nox
@@ -19,22 +23,26 @@ namespace Nox
     {
         NOX_INFO("EditorLayer Start");
         
-        /*m_IconPlay = TextureImporter::LoadTexture2D("../build/VanK-Editor/Resources/Icons/PlayButton.ktx2", {.generateMips = false});
-        m_IconStop = TextureImporter::LoadTexture2D("../build/VanK-Editor/Resources/Icons/StopButton.ktx2", {.generateMips = false});
-        m_IconPause = TextureImporter::LoadTexture2D("../build/VanK-Editor/Resources/Icons/PauseButton.ktx2", {.generateMips = false});
-        m_IconSimulate = TextureImporter::LoadTexture2D("../build/VanK-Editor/Resources/Icons/SimulateButton.ktx2", {.generateMips = false});
-        m_IconStep = TextureImporter::LoadTexture2D("../build/VanK-Editor/Resources/Icons/StepButton.ktx2", {.generateMips = false});*/
-        
-        
-        m_IconPlay = TextureImporter::LoadTexture2D("Resources/Icons/PlayButton.png", {.generateMips = false});
+        auto& app = Application::Get();
+        m_Renderer = app.GetRenderer();
+
+        m_Font = Font::GetDefault();
+
+        m_IconPlay = TextureImporter::LoadTexture2D("Resources/Icons/PlayButton.ktx2", {.generateMips = false});
+        /*m_IconStop = TextureImporter::LoadTexture2D("Resources/Icons/StopButton.ktx2", {.generateMips = false});
+        m_IconPause = TextureImporter::LoadTexture2D("Resources/Icons/PauseButton.ktx2", {.generateMips = false});
+        m_IconSimulate = TextureImporter::LoadTexture2D("Resources/Icons/SimulateButton.ktx2", {.generateMips = false});
+        m_IconStep = TextureImporter::LoadTexture2D("Resources/Icons/StepButton.ktx2", {.generateMips = false});*/
+
+        /*m_IconPlay = TextureImporter::LoadTexture2D("Resources/Icons/PlayButton.png", {.generateMips = false});*/
         m_IconStop = TextureImporter::LoadTexture2D("Resources/Icons/StopButton.png", {.generateMips = false});
         m_IconPause = TextureImporter::LoadTexture2D("Resources/Icons/PauseButton.png", {.generateMips = false});
         m_IconSimulate = TextureImporter::LoadTexture2D("Resources/Icons/SimulateButton.png", {.generateMips = false});
         m_IconStep = TextureImporter::LoadTexture2D("Resources/Icons/StepButton.png", {.generateMips = false});
-        
+
         m_EditorScene = CreateRef<Scene>();
         m_ActiveScene = m_EditorScene;
-        
+
         auto commandLineArgs = Application::Get().GetSpecification().CommandLineArgs;
         if (commandLineArgs.Count > 1)
         {
@@ -56,20 +64,24 @@ namespace Nox
                 SDL_PushEvent(&event);
             }
         }
-        
+
         m_EditorCamera = EditorCamera(30.0f, 1.778f, 0.1f, 1000.0f);
     }
 
     EditorLayer::~EditorLayer()
     {
         NOX_CORE_INFO("EditorLayer Shutdown");
+
+        m_Font->ReleaseDefault(); // Since Editor Layer since static dies After renderer not needed for components
     }
 
     void EditorLayer::OnEvent(Event& event)
     {
+        //std::println("{}", event.ToString());
+
         if (m_SceneState == SceneState::Edit)
             m_EditorCamera.OnEvent(event);
-        
+
         EventDispatcher dispatcher(event);
         dispatcher.Dispatch<KeyPressedEvent>(Nox_BIND_EVENT_FN(EditorLayer::OnKeyPressed));
         /*dispatcher.Dispatch<KeyPressedEvent>([this](KeyPressedEvent& e) { return OnKeyPressed(e); });*/
@@ -79,6 +91,69 @@ namespace Nox
 
     void EditorLayer::OnUpdate(Timestep ts)
     {
+        m_ActiveScene->OnViewportResize(m_ViewportSize.x, m_ViewportSize.y);
+        
+         // zero sized framebuffer is invalid
+        if (m_ViewportSize.x > 0.0f && m_ViewportSize.y > 0.0f)
+        {
+            // Verify if the viewport has a new size and resize the RenderTarget accordingly.
+            NRI::Extent2D viewportSize = m_Renderer->getViewPortSize();
+            if ( m_ViewportSize.x != viewportSize.width || m_ViewportSize.y != viewportSize.height)
+            {
+                m_Renderer->onViewportSizeChange({m_ViewportSize.x, m_ViewportSize.y});
+                m_EditorCamera.SetViewportSize(m_ViewportSize.x, m_ViewportSize.y);
+            }
+        }
+        
+        switch (m_SceneState)
+        {
+        case SceneState::Edit:
+            {
+                if (m_ViewportFocused)
+                {
+                    /*m_CameraController.OnUpdate(ts);*/
+                }
+
+                m_EditorCamera.OnUpdate(ts);
+
+                /*m_ActiveScene->OnUpdateEditor(ts, m_EditorCamera);*/
+                break;
+            }
+        case SceneState::Simulate:
+            {
+                m_EditorCamera.OnUpdate(ts);
+
+                /*m_ActiveScene->OnUpdateSimulation(ts, m_EditorCamera);*/
+                break;
+            }
+        case SceneState::Play:
+            {
+                m_ActiveScene->OnUpdateRuntime(ts);
+                break;
+            }
+        }
+        
+        /*// Mouse Selection
+        auto [mx, my] = ImGui::GetMousePos();
+        mx -= m_ViewportBounds[0].x;
+        my -= m_ViewportBounds[0].y;
+        glm::vec2 viewportSize = m_ViewportBounds[1] - m_ViewportBounds[0];
+        //my = viewportSize.y - my;
+        int mouseX = (int)mx;
+        int mouseY = (int)my;
+
+        if (mouseX >= 0 && mouseY >= 0 && mouseX < (int)viewportSize.x && mouseY < (int)viewportSize.y)
+        {
+            /*ScopeTimer timer("MousePicking");#1#
+            // Retrieve the pixel data (ID) from the calculated index
+            // reading only 1 pixel right now but if multi select maybe i need full viewport ? 
+            int pixelData = Renderer::ReadPixel(mouseX, mouseY);
+
+            m_HoveredEntity = pixelData == -1 ? Entity() : Entity((entt::entity)pixelData, m_ActiveScene.get());
+            
+            Renderer::setPickRequest(mouseX, mouseY, true);
+        }*/
+        
         OnOverlayRender();
     }
 
@@ -88,51 +163,245 @@ namespace Nox
 
     void EditorLayer::OnImGuiRender()
     {
-        /*-- 
-         * The rendering of the scene is done using dynamic rendering into the RenderTarget (see recordGraphicsCommands).
-         * The target image will be rendered/displayed using ImGui.
-         * Its placement will cover the entire viewport (ImGui draws a quad with the texture we provide),
-         * and the image will be displayed in the viewport.
-         * There are multiple ways to display the image, but this method is the most flexible.
-         * Other methods include:
-         *  - Blitting the image to the swapchain image, with the UI drawn on top. However, this makes it harder 
-         *    to fit the image within a specific area of the window.
-         *  - Using the image as a texture in a quad and rendering it to the swapchain image. This is what ImGui 
-         *    does, but we don't need to add a quad to the scene, as ImGui handles it for us.
-        -*/
+        auto& app = Application::Get();
+
+        /*--
+       * IMGUI Docking
+       * Create a dockspace and dock the viewport and settings window.
+       * The central node is named "Viewport", which can be used later with Begin("Viewport")
+       * to render the final image.
+      -*/
+
+        const ImGuiDockNodeFlags dockFlags = ImGuiDockNodeFlags_PassthruCentralNode | ImGuiDockNodeFlags_NoDockingInCentralNode;
+
+        // 1. Grab the style and save the default minimum size
+        ImGuiStyle& style = ImGui::GetStyle();
+        float minWinSizeX = style.WindowMinSize.x;
+        float minWinSizeY = style.WindowMinSize.y;
+
+        // 2. Enforce the new minimum size globally for the DockSpace
+        style.WindowMinSize.x = 370.0f;
+
+        // 3. Submit the DockSpace (It will inherit the 370x350 constraint)
+        ImGuiID dockID = ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport(), dockFlags);
+
+        // 4. Restore the original minimum size for standard floating windows
+        style.WindowMinSize.x = minWinSizeX;
+        style.WindowMinSize.y = minWinSizeY;
+
+        // Docking layout, must be done only if it doesn't exist
+        if (!ImGui::DockBuilderGetNode(dockID)->IsSplitNode() && !ImGui::FindWindowByName("Viewport"))
+        {
+            ImGui::DockBuilderDockWindow("Viewport", dockID); // Dock "Viewport" to  central node
+            ImGui::DockBuilderGetCentralNode(dockID)->LocalFlags |= ImGuiDockNodeFlags_NoTabBar; // Remove "Tab" from the central node
+            ImGuiID leftID = ImGui::DockBuilderSplitNode(dockID, ImGuiDir_Left, 0.2f, nullptr, &dockID); // Split the central node
+            ImGui::DockBuilderDockWindow("Settings", leftID); // Dock "Settings" to the left node
+        }
+
+        // [optional] Show the menu bar
+        if (ImGui::BeginMainMenuBar())
+        {
+            if (ImGui::BeginMenu("File"))
+            {
+                if (ImGui::MenuItem("Open Project...", "Ctrl+O"))
+                {
+                    OpenProject();
+                }
+
+                ImGui::Separator();
+
+                if (ImGui::MenuItem("New Scene", "Ctrl+N"))
+                {
+                    NewScene();
+                }
+
+                if (ImGui::MenuItem("Save Scene", "Ctrl+S"))
+                {
+                    SaveScene();
+                }
+
+                if (ImGui::MenuItem("Save Scene As...", "Ctrl+Shift+S"))
+                {
+                    SaveSceneAs();
+                }
+
+                ImGui::Separator();
+
+                if (ImGui::MenuItem("Exit"))
+                    Application::Shutdown();
+
+                ImGui::EndMenu();
+            }
+
+
+            if (ImGui::BeginMenu("Script"))
+            {
+                if (ImGui::MenuItem("Reload assembly", "Ctrl+R"))
+                {
+                    /*ScriptEngine::ReloadAssembly();*/ // otherwise it thinkgs its exectuing endmenu if you dont use {}
+                }
+
+                ImGui::EndMenu();
+            }
+
+            bool currentVSync = m_Renderer->getVSync();
+            if (ImGui::MenuItem("vSync", "", &currentVSync))
+                m_Renderer->setVSync(currentVSync); // Recreate the swapchain with the new vSync setting
+
+            ImGui::EndMainMenuBar();
+        }
+
+        /* END Docking */
+
+        // We define "viewport" with no padding an retrieve the rendering area
         // Using the dock "Viewport", this sets the window to cover the entire central viewport
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
         if (ImGui::Begin("Viewport"))
         {
-            auto& app = Application::Get();
-            auto* renderer = app.GetRenderer();
-            if (renderer)
+            if (m_ViewportHovered)
             {
-                auto* texture = renderer->GetSceneResource();
-                if (texture)
+                Application::Get().setBlockEvents(false);
+            }
+            else
+            {
+                Application::Get().setBlockEvents(true);
+            }
+
+            auto viewportMinRegion = ImGui::GetWindowContentRegionMin();
+            auto viewportMaxRegion = ImGui::GetWindowContentRegionMax();
+            auto viewportOffset = ImGui::GetWindowPos();
+            m_ViewportBounds[0] = {viewportMinRegion.x + viewportOffset.x, viewportMinRegion.y + viewportOffset.y};
+            m_ViewportBounds[1] = {viewportMaxRegion.x + viewportOffset.x, viewportMaxRegion.y + viewportOffset.y};
+
+            m_ViewportFocused = ImGui::IsWindowFocused();
+            m_ViewportHovered = ImGui::IsWindowHovered();
+
+            ImVec2 viewportPanelSize = ImGui::GetContentRegionAvail();
+            m_ViewportSize = {viewportPanelSize.x, viewportPanelSize.y};
+            
+            auto* texture = m_Renderer->GetSceneResource();
+            if (texture)
+            {
+                auto textureID = texture->getImTextureID();
+                if (textureID)
                 {
-                    auto textureID = texture->getImTextureID();
-                    if (textureID)
-                    {
-                        // !!! This is where the RenderTarget image is displayed !!!
-                        ImGui::Image(textureID, ImGui::GetContentRegionAvail());
-                    }
-                    // Adding overlay text on the upper left corner
-                    ImGui::SetCursorPos(ImVec2(0, 0));
-                    ImGui::Text("FPS: %.1f", ImGui::GetIO().Framerate);
+                    // !!! This is where the RenderTarget image is displayed !!!
+                    ImGui::Image(textureID, viewportPanelSize);
+                }
+                // Adding overlay text on the upper left corner
+                ImGui::SetCursorPos(ImVec2(0, 0));
+                ImGui::Text("FPS: %.1f", ImGui::GetIO().Framerate);
+            }
+
+            if (ImGui::BeginDragDropTarget())
+            {
+                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEM"))
+                {
+                    AssetHandle handle = *(const AssetHandle*)payload->Data;
+                    OpenScene(handle);
+                }
+                ImGui::EndDragDropTarget();
+            }
+
+            // Gizmos
+
+            Entity selectedEntity = m_SceneHierarchyPanel.GetSelectedEntity();
+
+            if (selectedEntity && m_GizmoType != -1)
+            {
+                ImGuizmo::SetOrthographic(false);
+                ImGuizmo::SetDrawlist();
+
+                ImGuizmo::SetRect(m_ViewportBounds[0].x, m_ViewportBounds[0].y,
+                                  m_ViewportBounds[1].x - m_ViewportBounds[0].x,
+                                  m_ViewportBounds[1].y - m_ViewportBounds[0].y);
+
+                // Camera
+                // Runtime camera from entity
+                /*auto cameraEntity = m_ActiveScene->GetPrimaryCameraEntity();
+                const auto& camera = cameraEntity.GetComponent<CameraComponent>().Camera;
+                const glm::mat4& cameraProjection = camera.GetProjection();
+                glm::mat4 cameraView = glm::inverse(cameraEntity.GetComponent<TransformComponent>().GetTransform());*/
+
+                // Editor camera
+                const glm::mat4& cameraProjection = m_EditorCamera.GetGizmoProjection();
+
+                glm::mat4 cameraView = m_EditorCamera.GetGizmoView();
+
+                // Entity transform
+                auto& tc = selectedEntity.GetComponent<TransformComponent>();
+                glm::mat4 transform = tc.GetTransform();
+
+                // Snapping
+                bool snap = Input::IsKeyPressed(SDL_SCANCODE_LCTRL);
+                float snapValue = 0.5f; // Snap to 0.5m for translation/scale
+                // Snap to 45 degrees for rotation
+                if (m_GizmoType == ImGuizmo::OPERATION::ROTATE)
+                {
+                    snapValue = 45.0f;
+                }
+
+                float snapValues[3] = {snapValue, snapValue, snapValue};
+
+                ImGuizmo::Manipulate(glm::value_ptr(cameraView), glm::value_ptr(cameraProjection),
+                                     static_cast<ImGuizmo::OPERATION>(m_GizmoType), ImGuizmo::LOCAL,
+                                     glm::value_ptr(transform), nullptr, snap ? snapValues : nullptr);
+
+                if (ImGuizmo::IsUsing())
+                {
+                    //translation is position for me maybe change
+                    glm::vec3 translation, rotation, scale;
+                    Math::DecomposeTransform(transform, translation, rotation, scale);
+
+                    glm::vec3 deltaRotation = rotation - tc.Rotation;
+                    tc.Translation = translation;
+                    tc.Rotation += deltaRotation;
+                    tc.Scale = scale;
                 }
             }
+
             ImGui::End();
+            ImGui::PopStyleVar();
         }
-        
+
+
+        // Extra ImGui windows can be added in OnImGuiRender() layer, like the demo window.
+        // ImGui::ShowDemoWindow();
+
         m_SceneHierarchyPanel.OnImGuiRender();
-        
+        m_ContentBrowserPanel->OnImGuiRender();
+
+        // "Right" Window
+        ImGui::Begin("Stats");
+
+        std::string name = "None";
+        if (m_HoveredEntity && m_HoveredEntity.HasComponent<TagComponent>())
+        {
+            name = m_HoveredEntity.GetComponent<TagComponent>().Tag;
+        }
+        ImGui::Text("Hovered Entity: %s", name.c_str());
+
+        ImGui::Spacing();
+
+        ImGui::Text("ImGui ActiveID: %u", Application::Get().GetLayer<ImGuiLayer>()->GetActiveWidgetID());
+        ImGui::End(); // End "right" Window
+
+        ImGui::Begin("Settings");
+
+        ImGui::Checkbox("Show physics collider", &m_ShowPhysicsColliders);
+        ImGui::Image(m_Font->GetAtlasTexture()->getImTextureID(), {512, 512}, ImVec2(0, 1), ImVec2(1, 0));
+
+        ImGui::End(); // End Settings
+
+
         UI_ToolBar();
     }
-    
+
     void EditorLayer::UI_ToolBar()
     {
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2{0, 2});
         ImGui::PushStyleVar(ImGuiStyleVar_ItemInnerSpacing, ImVec2{0, 0});
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowMinSize, ImVec2{0, 50});
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4{0, 0, 0, 0});
         auto& colors = ImGui::GetStyle().Colors; //imguilayer styling ganz unten
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4{
@@ -146,6 +415,8 @@ namespace Nox
 
         ImGui::Begin("##toolbar", nullptr,
                      ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+
+        ImGui::SetWindowSize(ImVec2(ImGui::GetWindowWidth(), 40.0f));
 
         float size = ImGui::GetWindowHeight() - 4.0f;
         ImGui::SetCursorPosX((ImGui::GetWindowContentRegionMax().x * 0.5f) - (size * 0.5f));
@@ -219,11 +490,11 @@ namespace Nox
                 }
             }
         }
-        ImGui::PopStyleVar(2);
+        ImGui::PopStyleVar(3);
         ImGui::PopStyleColor(3);
         ImGui::End();
     }
-    
+
     bool EditorLayer::OnKeyPressed(KeyPressedEvent& e)
     {
         // Shortcuts
@@ -333,7 +604,7 @@ namespace Nox
 
         return false;
     }
-    
+
     void EditorLayer::OnOverlayRender()
     {
         /*if (m_SceneState == SceneState::Play)
@@ -396,12 +667,12 @@ namespace Nox
         }
         Renderer::EndScene();*/
     }
-    
+
     void EditorLayer::NewProject()
     {
         Project::New();
     }
-    
+
     bool EditorLayer::OpenProject()
     {
         std::string filepath = Utility::OpenFile("Nox Project *.nxproj\0nxproj\0");
@@ -412,7 +683,7 @@ namespace Nox
         OpenProject(filepath);
         return true;
     }
-     
+
     void EditorLayer::OpenProject(const std::filesystem::path& path)
     {
         if (Project::Load(path))
@@ -426,12 +697,12 @@ namespace Nox
             m_ContentBrowserPanel = CreateScope<ContentBrowserPanel>(Project::GetActive());
         }
     }
-    
+
     void EditorLayer::SaveProject()
     {
         //Project::SaveActive();
     }
-    
+
     void EditorLayer::NewScene()
     {
         m_EditorScene = CreateRef<Scene>();
@@ -441,7 +712,7 @@ namespace Nox
 
         m_EditorScenePath = std::filesystem::path();
     }
-     
+
     void EditorLayer::OpenScene()
     {
         /*std::string filepath = Utility::OpenFile("Nox Scene *.nox\0nox\0");
@@ -451,7 +722,7 @@ namespace Nox
             OpenScene(filepath);
         }*/
     }
-    
+
     void EditorLayer::OpenScene(AssetHandle handle)
     {
         NOX_CORE_ASSERT(handle);
@@ -470,7 +741,7 @@ namespace Nox
         m_ActiveScene = m_EditorScene;
         m_EditorScenePath = Project::GetActive()->GetEditorAssetManager()->GetFilePath(handle);
     }
-    
+
     void EditorLayer::SaveScene()
     {
         if (!m_EditorScenePath.empty())
@@ -482,7 +753,7 @@ namespace Nox
             SaveSceneAs();
         }
     }
-    
+
     void EditorLayer::SaveSceneAs()
     {
         std::string filepath = Utility::SaveFile("Vank Scene *.vank\0vank\0");
@@ -492,12 +763,12 @@ namespace Nox
             m_EditorScenePath = filepath;
         }
     }
-    
+
     void EditorLayer::SerializeScene(Ref<Scene> scene, const std::filesystem::path& path)
     {
         SceneImporter::SaveScene(scene, path);
     }
-    
+
     void EditorLayer::OnScenePlay()
     {
         if (m_SceneState == SceneState::Simulate)
@@ -510,7 +781,7 @@ namespace Nox
 
         m_SceneHierarchyPanel.SetContext(m_ActiveScene);
     }
-    
+
     void EditorLayer::OnSceneSimulate()
     {
         if (m_SceneState == SceneState::Play)
@@ -523,7 +794,7 @@ namespace Nox
 
         m_SceneHierarchyPanel.SetContext(m_ActiveScene);
     }
-    
+
     void EditorLayer::OnSceneStop()
     {
         NOX_CORE_ASSERT("OnSceneStop failed no sceneState match", m_SceneState == SceneState::Play || m_SceneState == SceneState::Simulate);
@@ -539,7 +810,7 @@ namespace Nox
 
         m_SceneHierarchyPanel.SetContext(m_ActiveScene);
     }
-    
+
     void EditorLayer::OnScenePause()
     {
         if (m_SceneState == SceneState::Edit)
@@ -547,7 +818,7 @@ namespace Nox
 
         m_ActiveScene->SetPaused(true);
     }
-    
+
     void EditorLayer::OnDuplicateEntity()
     {
         if (m_SceneState != SceneState::Edit)

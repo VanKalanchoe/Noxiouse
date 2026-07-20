@@ -56,6 +56,24 @@ namespace Nox
         {
             return (bool)Data;
         }
+        
+        static Buffer FromRGBToRGBA(const void* rgbData, uint64_t width, uint64_t height)
+        {
+            uint64_t pixelCount = width * height;
+            Buffer result(pixelCount * 4); // Allocate for 4 channels
+
+            const uint8_t* src = static_cast<const uint8_t*>(rgbData);
+            uint8_t* dst = result.Data;
+
+            for (uint64_t i = 0; i < pixelCount; ++i)
+            {
+                dst[i * 4 + 0] = src[i * 3 + 0]; // R
+                dst[i * 4 + 1] = src[i * 3 + 1]; // G
+                dst[i * 4 + 2] = src[i * 3 + 2]; // B
+                dst[i * 4 + 3] = 255;            // A (Alpha)
+            }
+            return result;
+        }
     };
 
     struct ScopedBuffer

@@ -4,11 +4,13 @@
 #include <stb_image.h>
 
 #define TINYDDSLOADER_IMPLEMENTATION
-#include "NoxCore/Core/Application.h"
-#include "NoxCore/Renderer/Renderer.h"
 #include "NoxCore/Renderer/tinyddsloader.h"
 using namespace tinyddsloader;
 
+#include <ktx.h>
+
+#include "NoxCore/Core/Application.h"
+#include "NoxCore/Renderer/Renderer.h"
 #include "NoxCore/Core/Buffer.h"
 #include "NoxCore/Debug/Instrumentor.h"
 #include "NoxCore/Project/Project.h"
@@ -34,13 +36,16 @@ namespace Nox
             return LoadWithSTB(path, spec, renderer);
         
         if (path.extension() == ".dds")
-            return LoadWithDDS(path, spec);
+            return LoadWithDDS(path, spec, renderer);
         
-        return LoadWithKTX(path, spec);
+        return LoadWithKTX(path, spec, renderer);
     }
     
     Ref<Texture2D> TextureImporter::LoadWithSTB(const std::filesystem::path& path, const TextureSpecification& spec, Renderer* renderer)
     {
+        if (spec.flip)
+            stbi_set_flip_vertically_on_load(true);
+        
         int texWidth, texHeight, texChannels;
         stbi_uc* pixels = stbi_load(path.string().c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
         uint64_t imageSize = texWidth * texHeight * 4;
@@ -60,8 +65,8 @@ namespace Nox
         cpuData.Width = texWidth;
         cpuData.Height = texHeight;
         cpuData.MipLevels = mipLevels;
-        cpuData.ImageSize = imageSize;
-        cpuData.Pixels = pixels;
+        cpuData.Data = Buffer((void*)pixels, imageSize);
+        cpuData.DirectFormat = UINT32_MAX;
         
         Renderer* targetRenderer = renderer ? renderer : Application::Get().GetRenderer();
         
@@ -72,13 +77,109 @@ namespace Nox
         return texture;
     }
     
-    Ref<Texture2D> TextureImporter::LoadWithDDS(const std::filesystem::path& path, const TextureSpecification& spec)
+    Ref<Texture2D> TextureImporter::LoadWithDDS(const std::filesystem::path& path, const TextureSpecification& spec, Renderer* renderer)
     {
         
     }
     
-    Ref<Texture2D> TextureImporter::LoadWithKTX(const std::filesystem::path& path, const TextureSpecification& spec)
+    void flipKTXTexture2(ktxTexture2* tex)
     {
+        const uint32_t mipCount = tex->numLevels;
+        const uint32_t channels = 4; // because we transcode to RGBA32
+
+        for (uint32_t level = 0; level < mipCount; level++)
+        {
+            ktx_size_t offset;
+            ktxTexture_GetImageOffset(ktxTexture(tex), level, 0, 0, &offset);
+
+            uint32_t w = std::max(1u, tex->baseWidth  >> level);
+            uint32_t h = std::max(1u, tex->baseHeight >> level);
+
+            uint8_t* mipData = tex->pData + offset;
+
+            uint32_t rowSize = w * channels;
+            std::vector<uint8_t> row(rowSize);
+
+            for (uint32_t y = 0; y < h / 2; y++)
+            {
+                uint8_t* top = mipData + y * rowSize;
+                uint8_t* bottom = mipData + (h - 1 - y) * rowSize;
+
+                memcpy(row.data(), top, rowSize);
+                memcpy(top, bottom, rowSize);
+                memcpy(bottom, row.data(), rowSize);
+            }
+        }
+    }
+    
+    Ref<Texture2D> TextureImporter::LoadWithKTX(const std::filesystem::path& path, const TextureSpecification& spec, Renderer* renderer)
+    {
+        ktxTexture2* kTexture;
+        KTX_error_code result = ktxTexture2_CreateFromNamedFile
+        (
+            path.string().c_str(),
+            KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT,
+            &kTexture
+        );
         
+        if (result != KTX_SUCCESS) NOX_CORE_ASSERT("TextureImporter::LoadWithKTX failed to load ktx texture image!");
+        
+        if (ktxTexture2_NeedsTranscoding(kTexture))
+        {
+            // Transcode to standard uncompressed RGBA8 so it works on all GPUs.
+            // (If you want block compression, you can look into targeting KTX_TTF_BC7_RGBA instead!)
+            result = ktxTexture2_TranscodeBasis(kTexture, KTX_TTF_BC7_RGBA, 0);
+            
+            if (result != KTX_SUCCESS) NOX_CORE_ASSERT("TextureImporter::LoadWithKTX failed to transcode Basis texture!");
+        }
+        
+        if (spec.flip)
+            flipKTXTexture2(kTexture);
+        
+        // Get texture dimensions and data
+        TextureData cpuData;
+        cpuData.Width = kTexture->baseWidth;
+        cpuData.Height = kTexture->baseHeight;
+        cpuData.MipLevels = kTexture->numLevels; // todo:
+        
+        cpuData.MipOffsets.resize(kTexture->numLevels);
+        for (uint32_t level = 0; level < kTexture->numLevels; level++)
+        {
+            ktx_size_t offset;
+            ktxTexture2_GetImageOffset(kTexture, level, 0, 0, &offset);
+            cpuData.MipOffsets[level] = offset;
+        }
+
+        // Check if the KTX texture has a format
+        if (kTexture->classId == ktxTexture2_c)
+        {
+            // For KTX2 files, we can get the format directly
+            cpuData.DirectFormat = kTexture->vkFormat;
+        }
+        else
+        {
+            uint32_t directFormat = UINT32_MAX;
+            // For KTX1 files or if we can't determine the format, use a reasonable default
+            cpuData.DirectFormat = directFormat;
+        }
+        
+        cpuData.Data = Buffer((void*)kTexture->pData, kTexture->dataSize);
+        
+        Renderer* targetRenderer = renderer ? renderer : Application::Get().GetRenderer();
+        
+        Ref<Texture2D> texture = targetRenderer->UploadTexture(cpuData);
+        
+        ktxTexture2_Destroy(kTexture);
+        
+        return texture;
+    }
+    
+    Ref<Texture2D> TextureImporter::LoadTexture2DFromMemory(TextureData& cpuData, const TextureSpecification& spec, Renderer* renderer)
+    {
+        Renderer* targetRenderer = renderer ? renderer : Application::Get().GetRenderer();
+        
+        Ref<Texture2D> texture = targetRenderer->UploadTexture(cpuData);
+        
+        return texture;
     }
 }
