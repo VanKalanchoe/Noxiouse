@@ -10,6 +10,8 @@
 
 #include "box2d/box2d.h"
 
+#include "NoxCore/Renderer/Font.h"
+
 #include "NoxCore/Asset/Asset.h"
 
 namespace Nox
@@ -159,14 +161,14 @@ namespace Nox
         CircleCollider2DComponent(const CircleCollider2DComponent&) = default;
     };
 
-    /*struct TextComponent
+    struct TextComponent
     {
         std::string TextString;
         Ref<Font> FontAsset = Font::GetDefault();
         glm::vec4 Color{ 1.0f };
         float Kerning = 0.0f;
         float LineSpacing = 0.0f;
-    };*/
+    };
     
     template<typename... Component>
     struct ComponentGroup
@@ -177,5 +179,5 @@ namespace Nox
         ComponentGroup<TransformComponent, SpriteRendererComponent,
             CircleRendererComponent, CameraComponent, ScriptComponent,
             /*NativeScriptComponent,*/ RigidBody2DComponent, BoxCollider2DComponent,
-            CircleCollider2DComponent/*, TextComponent*/>;
+            CircleCollider2DComponent, TextComponent>;
 }

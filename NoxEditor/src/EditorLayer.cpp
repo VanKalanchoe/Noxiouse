@@ -29,16 +29,10 @@ namespace Nox
         m_Font = Font::GetDefault();
 
         m_IconPlay = TextureImporter::LoadTexture2D("Resources/Icons/PlayButton.ktx2", {.generateMips = false});
-        /*m_IconStop = TextureImporter::LoadTexture2D("Resources/Icons/StopButton.ktx2", {.generateMips = false});
+        m_IconStop = TextureImporter::LoadTexture2D("Resources/Icons/StopButton.ktx2", {.generateMips = false});
         m_IconPause = TextureImporter::LoadTexture2D("Resources/Icons/PauseButton.ktx2", {.generateMips = false});
         m_IconSimulate = TextureImporter::LoadTexture2D("Resources/Icons/SimulateButton.ktx2", {.generateMips = false});
-        m_IconStep = TextureImporter::LoadTexture2D("Resources/Icons/StepButton.ktx2", {.generateMips = false});*/
-
-        /*m_IconPlay = TextureImporter::LoadTexture2D("Resources/Icons/PlayButton.png", {.generateMips = false});*/
-        m_IconStop = TextureImporter::LoadTexture2D("Resources/Icons/StopButton.png", {.generateMips = false});
-        m_IconPause = TextureImporter::LoadTexture2D("Resources/Icons/PauseButton.png", {.generateMips = false});
-        m_IconSimulate = TextureImporter::LoadTexture2D("Resources/Icons/SimulateButton.png", {.generateMips = false});
-        m_IconStep = TextureImporter::LoadTexture2D("Resources/Icons/StepButton.png", {.generateMips = false});
+        m_IconStep = TextureImporter::LoadTexture2D("Resources/Icons/StepButton.ktx2", {.generateMips = false});
 
         m_EditorScene = CreateRef<Scene>();
         m_ActiveScene = m_EditorScene;
@@ -116,7 +110,7 @@ namespace Nox
 
                 m_EditorCamera.OnUpdate(ts);
 
-                /*m_ActiveScene->OnUpdateEditor(ts, m_EditorCamera);*/
+                m_ActiveScene->OnUpdateEditor(ts, m_EditorCamera);
                 break;
             }
         case SceneState::Simulate:
@@ -675,7 +669,7 @@ namespace Nox
 
     bool EditorLayer::OpenProject()
     {
-        std::string filepath = Utility::OpenFile("Nox Project *.nxproj\0nxproj\0");
+        std::string filepath = Utility::OpenFile("Nox Project *.nproj\0nproj\0");
 
         if (filepath.empty())
             return false;

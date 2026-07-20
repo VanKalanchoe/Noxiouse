@@ -250,7 +250,7 @@ namespace Nox
         }*/
     }
 
-    void Scene::OnUpdateSimulation(Timestep ts)
+    void Scene::OnUpdateSimulation(Timestep ts, EditorCamera& camera)
     {
         if (!m_IsPaused || m_StepFrames-- > 0)
         {
@@ -276,12 +276,12 @@ namespace Nox
         }
     
         // Render
-        /*RenderScene(camera);*/
+        RenderScene(camera);
     }
 
-    void Scene::OnUpdateEditor(Timestep ts)
+    void Scene::OnUpdateEditor(Timestep ts, EditorCamera& camera)
     {
-        /*RenderScene(camera);*/
+        RenderScene(camera);
     }
     
     void Scene::OnViewportResize(uint32_t width, uint32_t height)
@@ -339,7 +339,7 @@ namespace Nox
         }
 
         // Return a null entity if the UUID wasn't found
-        return { entt::null, this }; 
+        return {}; 
     }
     
     Entity Scene::GetPrimaryCameraEntity()
@@ -436,6 +436,50 @@ namespace Nox
         m_PhysicsWorldID = b2_nullWorldId;
     }
     
+    void Scene::RenderScene(EditorCamera& camera)
+    {
+        /*Renderer::BeginScene(camera);
+        
+        // Draw Sprites
+        {
+            auto group = m_Registry.group<TransformComponent>(entt::get<SpriteRendererComponent>);
+            for (auto entity : group)
+            {
+                auto [transform, sprite] = group.get<TransformComponent, SpriteRendererComponent>(entity);
+                //Renderer2D::DrawQuad(transform.Position, transform.Size, transform.Scale, transform.Rotation, sprite.Color);
+                Renderer::DrawSprite(transform.GetTransform(), sprite, (int)entity);
+                //Renderer2D::DrawRect(transform, sprite, (int)entity);
+            }
+        }
+        
+        // Draw Circles
+        {
+            auto view = m_Registry.view<TransformComponent, CircleRendererComponent>();
+            for (auto entity : view)
+            {
+                auto [transform, circle] = view.get<TransformComponent, CircleRendererComponent>(entity);
+
+                Renderer::DrawCircle(transform.GetTransform(), circle.Color, circle.Thickness, circle.Fade, (int)entity);
+            }
+        }
+        
+        // Draw Text
+        {
+            auto view = m_Registry.view<TransformComponent, TextComponent>();
+            for (auto entity : view)
+            {
+                auto [transform, text] = view.get<TransformComponent, TextComponent>(entity);
+
+                Renderer::DrawString(text.TextString, transform.GetTransform(), text, (int)entity);
+            }
+        }
+        /*
+        //Renderer2D::DrawLine(glm::vec3(2.0f), glm::vec3(5.0f), glm::vec4(1.0f, 0.0f, 1.0f, 1.0f));
+        //Renderer2D::DrawRect(glm::vec3(0.0f), glm::vec2(1.0f), glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+        #1#
+        Renderer::EndScene();*/
+    }
+    
     template <typename T>
     void Scene::OnComponentAdded(Entity entity, T& component)
     {
@@ -500,8 +544,8 @@ namespace Nox
     {
     }
 
-    /*template <>
+    template <>
     void Scene::OnComponentAdded<TextComponent>(Entity entity, TextComponent& component)
     {
-    }*/
+    }
 }

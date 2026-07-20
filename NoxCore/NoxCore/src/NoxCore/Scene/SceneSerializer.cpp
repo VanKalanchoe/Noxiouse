@@ -147,7 +147,7 @@ namespace Nox
         return out;
     }
 
-    /*static std::string Rigidbody2DTypeToString(RigidBody2DComponent::BodyType bodyType)
+    static std::string Rigidbody2DTypeToString(RigidBody2DComponent::BodyType bodyType)
     {
         switch (bodyType)
         {
@@ -168,7 +168,7 @@ namespace Nox
 
         NOX_CORE_ASSERT(false, "Unknown RigidBody2DComponent::BodyType!");
         return RigidBody2DComponent::BodyType::Static;
-    }*/
+    }
     
     SceneSerializer::SceneSerializer(const Ref<Scene>& scene) : m_Scene(scene)
     {
@@ -285,7 +285,7 @@ namespace Nox
             out << YAML::EndMap; // ScriptComponent
         }*/
         
-        /*if (entity.HasComponent<SpriteRendererComponent>())
+        if (entity.HasComponent<SpriteRendererComponent>())
         {
             out << YAML::Key << "SpriteRendererComponent";
             out << YAML::BeginMap; // SpriteRendererComponent
@@ -369,7 +369,7 @@ namespace Nox
             out << YAML::Key << "LineSpacing" << YAML::Value << textComponent.LineSpacing;
 
             out << YAML::EndMap; // TextComponent
-        }*/
+        }
         
         out << YAML::EndMap; // Corrected: No parentheses
     }
@@ -536,17 +536,17 @@ namespace Nox
                 }
                 */
 
-                /*auto spriteRendererComponent = entity["SpriteRendererComponent"];
+                auto spriteRendererComponent = entity["SpriteRendererComponent"];
                 if (spriteRendererComponent)
                 {
                     auto& src = deserializedEntity.AddComponent<SpriteRendererComponent>();
                     src.Color = spriteRendererComponent["Color"].as<glm::vec4>();
                     if (spriteRendererComponent["TexturePath"])
                     {
-                        /#1#/ legacy, could try and find somehting in the asset registry that matches ?
+                        /*// legacy, could try and find somehting in the asset registry that matches ?
                         std::string texturePath = spriteRendererComponent["TexturePath"].as<std::string>();
                         auto path = Project::GetAssetFileSystemPath(texturePath);
-                        src.Texture = Texture2D::Create(path.string(), Renderer2D::m_sampler);#1#
+                        src.Texture = Texture2D::Create(path.string(), Renderer2D::m_sampler);*/
                     }
 
                     if (spriteRendererComponent["TextureHandle"])
@@ -606,7 +606,7 @@ namespace Nox
                     tc.Color = textComponent["Color"].as<glm::vec4>();
                     tc.Kerning = textComponent["Kerning"].as<float>();
                     tc.LineSpacing = textComponent["LineSpacing"].as<float>();
-                }*/
+                }
             }
         }
 

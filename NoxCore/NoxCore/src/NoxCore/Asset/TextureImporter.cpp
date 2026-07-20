@@ -5,7 +5,6 @@
 
 #define TINYDDSLOADER_IMPLEMENTATION
 #include "NoxCore/Renderer/tinyddsloader.h"
-using namespace tinyddsloader;
 
 #include <ktx.h>
 
@@ -79,37 +78,43 @@ namespace Nox
     
     Ref<Texture2D> TextureImporter::LoadWithDDS(const std::filesystem::path& path, const TextureSpecification& spec, Renderer* renderer)
     {
+        tinyddsloader::DDSFile dds;
         
-    }
-    
-    void flipKTXTexture2(ktxTexture2* tex)
-    {
-        const uint32_t mipCount = tex->numLevels;
-        const uint32_t channels = 4; // because we transcode to RGBA32
-
-        for (uint32_t level = 0; level < mipCount; level++)
+        auto result = dds.Load(path.string().c_str());
+        
+        if (result != tinyddsloader::Result::Success) 
         {
-            ktx_size_t offset;
-            ktxTexture_GetImageOffset(ktxTexture(tex), level, 0, 0, &offset);
-
-            uint32_t w = std::max(1u, tex->baseWidth  >> level);
-            uint32_t h = std::max(1u, tex->baseHeight >> level);
-
-            uint8_t* mipData = tex->pData + offset;
-
-            uint32_t rowSize = w * channels;
-            std::vector<uint8_t> row(rowSize);
-
-            for (uint32_t y = 0; y < h / 2; y++)
-            {
-                uint8_t* top = mipData + y * rowSize;
-                uint8_t* bottom = mipData + (h - 1 - y) * rowSize;
-
-                memcpy(row.data(), top, rowSize);
-                memcpy(top, bottom, rowSize);
-                memcpy(bottom, row.data(), rowSize);
-            }
+            NOX_CORE_ASSERT("TextureImporter::LoadWithDDS - Failed to load DDS from: {} Result: {}", path.string(), std::to_string(result));
         }
+        
+        TextureData cpuData;
+        cpuData.Width = dds.GetWidth();
+        cpuData.Height = dds.GetHeight();
+        cpuData.MipLevels = dds.GetMipCount();
+        
+        if (dds.GetFormat() == tinyddsloader::DDSFile::DXGIFormat::BC7_UNorm)
+            cpuData.Format = NRI::ImageFormat::BC7_UNorm;
+        else if (dds.GetFormat() == tinyddsloader::DDSFile::DXGIFormat::BC7_UNorm_SRGB)
+            cpuData.Format = NRI::ImageFormat::BC7_UNorm_SRGB;
+        
+        size_t currentOffset = 0;
+        cpuData.MipOffsets.resize(dds.GetMipCount());
+        
+        for (uint32_t level = 0; level < dds.GetMipCount(); level++)
+        {
+            cpuData.MipOffsets[level] = currentOffset;
+            
+            const auto* imageData = dds.GetImageData(level, 0);
+            currentOffset += imageData->m_memSlicePitch;
+        }
+        
+        cpuData.Data = Buffer((void*)dds.GetImageData()->m_mem, currentOffset);
+        
+        Renderer* targetRenderer = renderer ? renderer : Application::Get().GetRenderer();
+        
+        Ref<Texture2D> texture = targetRenderer->UploadTexture(cpuData);
+        
+        return texture;   
     }
     
     Ref<Texture2D> TextureImporter::LoadWithKTX(const std::filesystem::path& path, const TextureSpecification& spec, Renderer* renderer)
@@ -133,8 +138,7 @@ namespace Nox
             if (result != KTX_SUCCESS) NOX_CORE_ASSERT("TextureImporter::LoadWithKTX failed to transcode Basis texture!");
         }
         
-        if (spec.flip)
-            flipKTXTexture2(kTexture);
+        if (spec.flip) NOX_CORE_ERROR("TextureImporter::LoadWithKTX doesnt support flipping pls convert with tool manually");
         
         // Get texture dimensions and data
         TextureData cpuData;
