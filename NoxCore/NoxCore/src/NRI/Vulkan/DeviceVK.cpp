@@ -482,10 +482,12 @@ namespace NRI
 
     void DeviceVK::initImGui(Nox::Window& window)
     {
+        const uint32_t maxCustomTextures = 1000;
+        
         vk::DescriptorPoolSize poolSizes[] =
         {
-            {vk::DescriptorType::eSampledImage, IMGUI_IMPL_VULKAN_MINIMUM_SAMPLED_IMAGE_POOL_SIZE},
-            {vk::DescriptorType::eSampler, IMGUI_IMPL_VULKAN_MINIMUM_SAMPLER_POOL_SIZE},
+            {vk::DescriptorType::eSampledImage, IMGUI_IMPL_VULKAN_MINIMUM_SAMPLED_IMAGE_POOL_SIZE + maxCustomTextures},
+            {vk::DescriptorType::eSampler, IMGUI_IMPL_VULKAN_MINIMUM_SAMPLER_POOL_SIZE + maxCustomTextures},
         };
 
         uint32_t maxSets = 0;

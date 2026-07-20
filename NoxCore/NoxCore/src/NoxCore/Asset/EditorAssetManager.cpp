@@ -14,7 +14,7 @@
 namespace Nox
 {
     static std::map<std::filesystem::path, AssetType> s_AssetExtensionMap = {
-        { ".vank", AssetType::Scene },
+        { ".nox", AssetType::Scene },
         { ".png", AssetType::Texture2D },
         { ".jpg", AssetType::Texture2D },
         { ".jpeg", AssetType::Texture2D }

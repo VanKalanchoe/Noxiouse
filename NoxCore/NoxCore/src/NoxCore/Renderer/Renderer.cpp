@@ -417,6 +417,9 @@ namespace Nox
 
     void Renderer::createDescriptorHeaps()
     {
+        // todo: imgui needs more space to if you want to register it
+        // currently 1000 in initimgui devicevk.cpp
+        
         //hardcoded samplerinfos inside descriptorheapvk cosntructor
         m_samplerHeap = m_device->createDescriptorHeap(NRI::DescriptorHeapDesc{
             .type = NRI::DescriptorHeapType::Sampler,

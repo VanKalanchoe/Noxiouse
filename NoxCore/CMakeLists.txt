@@ -57,6 +57,8 @@ set(IMGUI_SOURCES
     # Add the specific backends matching your engine tech!
     ${IMGUI_DIR}/backends/imgui_impl_sdl3.cpp
     ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp
+
+    ${IMGUI_DIR}/misc/cpp/imgui_stdlib.cpp
 )
 
 # Set up Vulkan C++ module only if enabled

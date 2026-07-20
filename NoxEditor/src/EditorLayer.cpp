@@ -77,10 +77,10 @@ namespace Nox
             m_EditorCamera.OnEvent(event);
 
         EventDispatcher dispatcher(event);
-        dispatcher.Dispatch<KeyPressedEvent>(Nox_BIND_EVENT_FN(EditorLayer::OnKeyPressed));
-        /*dispatcher.Dispatch<KeyPressedEvent>([this](KeyPressedEvent& e) { return OnKeyPressed(e); });*/
-        dispatcher.Dispatch<MouseButtonPressedEvent>(Nox_BIND_EVENT_FN(EditorLayer::OnMouseButtonPressed));
-        /*dispatcher.Dispatch<MouseButtonPressedEvent>([this](MouseButtonPressedEvent& e) { return OnMouseButtonPressed(e); });*/
+        /*dispatcher.Dispatch<KeyPressedEvent>(Nox_BIND_EVENT_FN(EditorLayer::OnKeyPressed));*/
+        dispatcher.Dispatch<KeyPressedEvent>([this](KeyPressedEvent& e) { return OnKeyPressed(e); });
+        /*dispatcher.Dispatch<MouseButtonPressedEvent>(Nox_BIND_EVENT_FN(EditorLayer::OnMouseButtonPressed));*/
+        dispatcher.Dispatch<MouseButtonPressedEvent>([this](MouseButtonPressedEvent& e) { return OnMouseButtonPressed(e); });
     }
 
     void EditorLayer::OnUpdate(Timestep ts)
@@ -506,7 +506,7 @@ namespace Nox
             {
                 if (control)
                 {
-                    /*NewScene();*/
+                    NewScene();
                 }
                 break;
             }
@@ -514,7 +514,7 @@ namespace Nox
             {
                 if (control)
                 {
-                    /*OpenProject();*/
+                    OpenProject();
                 }
                 break;
             }
@@ -522,10 +522,10 @@ namespace Nox
             {
                 if (control)
                 {
-                    /*if (shift)
+                    if (shift)
                         SaveSceneAs();
                     else
-                        SaveScene();*/
+                        SaveScene();
                 }
                 break;
             }
@@ -535,13 +535,13 @@ namespace Nox
             {
                 if (control)
                 {
-                    /*OnDuplicateEntity();*/
+                    OnDuplicateEntity();
                 }
                 break;
             }
 
 
-        /*// Gizmos
+        // Gizmos
         case SDL_SCANCODE_Q:
             m_GizmoType = -1;
             break;
@@ -554,13 +554,13 @@ namespace Nox
         case SDL_SCANCODE_R:
             if (control)
             {
-                /*ScriptEngine::ReloadAssembly();#1#
+                /*ScriptEngine::ReloadAssembly();*/
             }
             else
             {
                 m_GizmoType = ImGuizmo::OPERATION::SCALE;
             }
-            break;*/
+            break;
         case SDL_SCANCODE_DELETE:
             {
                 if (Application::Get().GetLayer<ImGuiLayer>()->GetActiveWidgetID() == 0)
@@ -569,7 +569,7 @@ namespace Nox
                     if (selectedEntity)
                     {
                         m_SceneHierarchyPanel.SetSelectedEntity({});
-                        /*m_ActiveScene->DestroyEntity(selectedEntity);*/
+                        m_ActiveScene->DestroyEntity(selectedEntity);
                     }
                 }
                 break;
@@ -590,10 +590,10 @@ namespace Nox
     {
         if (event.GetMouseButton() == SDL_BUTTON_LEFT)
         {
-            /*if (m_ViewportHovered && !ImGuizmo::IsOver() && !Input::IsKeyPressed(SDL_SCANCODE_LALT))
+            if (m_ViewportHovered && !ImGuizmo::IsOver() && !Input::IsKeyPressed(SDL_SCANCODE_LALT))
             {
                 m_SceneHierarchyPanel.SetSelectedEntity(m_HoveredEntity);
-            }*/
+            }
         }
 
         return false;

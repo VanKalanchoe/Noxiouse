@@ -2,6 +2,11 @@
 
 #include <imgui.h>
 #include <imgui_internal.h>
+#include "misc/cpp/imgui_stdlib.h"
+#include <glm/gtc/type_ptr.hpp>
+
+#include "NoxCore/Asset/AssetManager.h"
+#include "NoxCore/Core/Log.h"
 
 namespace Nox
 {
@@ -258,13 +263,13 @@ namespace Nox
         if (ImGui::BeginPopup("AddComponent"))
         {
             DisplayAddComponentEntry<CameraComponent>("Camera");
-            /*DisplayAddComponentEntry<ScriptComponent>("Script");
+            DisplayAddComponentEntry<ScriptComponent>("Script");
             DisplayAddComponentEntry<SpriteRendererComponent>("Sprite Renderer");
             DisplayAddComponentEntry<CircleRendererComponent>("Circle Renderer");
             DisplayAddComponentEntry<RigidBody2DComponent>("Rigidbody 2D");
             DisplayAddComponentEntry<BoxCollider2DComponent>("Box Collider 2D");
             DisplayAddComponentEntry<CircleCollider2DComponent>("Circle Collider 2D");
-            DisplayAddComponentEntry<TextComponent>("Text Component");*/
+            DisplayAddComponentEntry<TextComponent>("Text Component");
             
             ImGui::EndPopup();
         }
@@ -352,7 +357,7 @@ namespace Nox
             }
         });
 
-        /*DrawComponent<ScriptComponent>("Script", entity, [entity, scene = m_Context](auto& component) mutable
+        DrawComponent<ScriptComponent>("Script", entity, [entity, scene = m_Context](auto& component) mutable
 		{
 			/*bool scriptClassExists = ScriptEngine::EntityClassExists(component.ClassName);
 
@@ -427,7 +432,7 @@ namespace Nox
 						}
 					}
 				}
-			}#1#
+			}*/
 		});
 
         DrawComponent<SpriteRendererComponent>("Sprite Renderer", entity, [](auto& component)
@@ -465,7 +470,7 @@ namespace Nox
                     }
                     else
                     {
-                        VK_CORE_WARN("Wrong Asset Type");
+                        NOX_CORE_WARN("Wrong Asset Type");
                     }
                 }
                 ImGui::EndDragDropTarget();
@@ -547,7 +552,7 @@ namespace Nox
             ImGui::ColorEdit4("Color", glm::value_ptr(component.Color));
             ImGui::DragFloat("Kerning", &component.Kerning, 0.025f);
             ImGui::DragFloat("Line Spacing", &component.LineSpacing, 0.025f);
-        });*/
+        });
     }
     
     template<typename T>

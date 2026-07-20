@@ -3,20 +3,23 @@ AssetRegistry:
     FilePath: Textures/ChernoLogo.png
     Type: AssetType::Texture2D
   - Handle: 3904161952643960358
-    FilePath: Scenes/flat.vank
+    FilePath: Scenes/flat.nox
     Type: AssetType::Scene
   - Handle: 5314834349182513991
     FilePath: Textures/blending_transparent_window.png
     Type: AssetType::Texture2D
+  - Handle: 6925804595022315940
+    FilePath: Scenes/Physics2D.nox
+    Type: AssetType::Scene
   - Handle: 7412818356000165226
     FilePath: Textures/Pacmanface.png
     Type: AssetType::Texture2D
   - Handle: 13004636392655663239
-    FilePath: Scenes/3DScene.vank
+    FilePath: Scenes/3DScene.nox
     Type: AssetType::Scene
   - Handle: 15753039888186244122
     FilePath: Textures/grass.png
     Type: AssetType::Texture2D
   - Handle: 18013020098634633818
-    FilePath: Scenes/Physics2D.vank
+    FilePath: Scenes/Physics2D.nox
     Type: AssetType::Scene
