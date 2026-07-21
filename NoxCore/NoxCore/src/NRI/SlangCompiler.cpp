@@ -4,6 +4,8 @@
 #include <memory>
 #include <filesystem>
 
+#include "NoxCore/Core/Log.h"
+
 namespace NRI
 {
     std::unique_ptr<ShaderCompiler> CreateSlangCompiler()
@@ -24,7 +26,7 @@ namespace NRI
             std::to_array<slang::TargetDesc>({
                 {
                     .format{SLANG_SPIRV},
-                    .profile{m_globalSession->findProfile("spirv_1_4")}
+                    .profile{m_globalSession->findProfile("spirv_1_6")}
                 }
             })
         };
@@ -33,7 +35,7 @@ namespace NRI
                 { slang::CompilerOptionName::EmitSpirvDirectly, { slang::CompilerOptionValueKind::Int, 1 } },
                 { slang::CompilerOptionName::VulkanUseEntryPointName, { slang::CompilerOptionValueKind::Int, 1 } },
                 { slang::CompilerOptionName::GLSLForceScalarLayout,  { slang::CompilerOptionValueKind::Int, 1  } },
-                { slang::CompilerOptionName::Capability, { slang::CompilerOptionValueKind::Int, m_globalSession->findCapability("spvDescriptorHeapEXT") } }
+                { slang::CompilerOptionName::Capability, { slang::CompilerOptionValueKind::Int, m_globalSession->findCapability("spvDescriptorHeapEXT") } },
             })
         };
         slang::SessionDesc slangSessionDesc{
@@ -47,13 +49,33 @@ namespace NRI
         
         std::string moduleName = std::filesystem::path(path).stem().string();
         
+        Slang::ComPtr<slang::IBlob> diagnostics;
         Slang::ComPtr<slang::IModule> slangModule
         {
-            session->loadModuleFromSource(moduleName.c_str(), path.c_str(), nullptr, nullptr)
+            session->loadModuleFromSource(moduleName.c_str(), path.c_str(), nullptr, diagnostics.writeRef())
         };
         
+        if (diagnostics)
+        {
+            NOX_CORE_ERROR("Slang compile diagnostics ({}): {}", path,
+                static_cast<const char*>(diagnostics->getBufferPointer()));
+        }
+        
+        if (!slangModule)
+            throw std::runtime_error("Slang failed to load module: " + path);
+        
         Slang::ComPtr<ISlangBlob> spirv;
-        slangModule->getTargetCode(0, spirv.writeRef());
+        Slang::ComPtr<slang::IBlob> targetDiagnostics;
+        SlangResult result = slangModule->getTargetCode(0, spirv.writeRef(), targetDiagnostics.writeRef());
+        
+        if (targetDiagnostics)
+        {
+            NOX_CORE_ERROR("Slang target-code diagnostics ({}): {}", path,
+                static_cast<const char*>(targetDiagnostics->getBufferPointer()));
+        }
+
+        if (SLANG_FAILED(result) || !spirv)
+            throw std::runtime_error("Slang failed to generate target code: " + path);
         
         const char* dataPtr = static_cast<const char*>(spirv->getBufferPointer());
         size_t dataSize = spirv->getBufferSize();

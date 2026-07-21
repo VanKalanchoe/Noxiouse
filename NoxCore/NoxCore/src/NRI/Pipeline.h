@@ -5,7 +5,7 @@
 namespace NRI
 {
     enum class PipelineType { Graphics, Compute };
-    enum class ShaderStage { Vertex, Fragment, Compute };
+    enum class ShaderStage { Vertex, Fragment, Compute, Task, Mesh };
 
     struct ShaderStageDesc
     {

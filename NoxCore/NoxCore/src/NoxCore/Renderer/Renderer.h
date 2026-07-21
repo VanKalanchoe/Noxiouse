@@ -105,6 +105,7 @@ namespace Nox
         void createSwapChain();
         void createCompiler();
         void createGraphicsPipeline(bool forceCompile);
+        void createMeshPipeline(bool forceCompile);
         void createPresentPipeline(bool forceCompile);
         void createComputePipeline();
         void createCommandPool();
@@ -137,8 +138,10 @@ namespace Nox
         Utils::NOXWatcher m_fileWatcher;
         std::unique_ptr<NRI::ShaderCompiler> m_shaderCompiler = nullptr;
         std::unique_ptr<NRI::Pipeline> m_graphicsPipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_MeshQuadPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_presentPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_computePipeline = nullptr;
+        
         std::unique_ptr<NRI::CommandAllocator> m_commandAllocator = nullptr;
         std::unique_ptr<NRI::CommandBuffer> m_commandBuffers = nullptr;
 

@@ -29,4 +29,9 @@ struct Vertex
     vec2 texCoord;
 };
 
+struct PushConstantQuad
+{
+    uint64_t matrixReference;
+};
+
 #endif  // HOST_DEVICE_H

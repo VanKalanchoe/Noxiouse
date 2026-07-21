@@ -7,6 +7,7 @@
 
 #include "DeviceVK.h"
 #include "NoxCore/Core/core.h"
+#include "NoxCore/Core/Hash.h"
 #include "NoxCore/Core/Log.h"
 
 namespace NRI
@@ -27,10 +28,12 @@ namespace NRI
 
     static std::filesystem::path shaderBinaryPath(const ShaderStageDesc& shaderDesc)
     {
-        auto folder = shaderFolder();
+        std::filesystem::path source(shaderDesc.sourcePath);
+        
+        auto folder = shaderFolder() / source.stem();
+        std::filesystem::create_directories(folder);
 
         std::string stage;
-
         switch (shaderDesc.stage)
         {
         case ShaderStage::Vertex:
@@ -40,15 +43,27 @@ namespace NRI
         case ShaderStage::Fragment:
             stage = "frag";
             break;
+            
+        case ShaderStage::Compute:
+            stage = "comp";
+            break;
+            
+        case ShaderStage::Task:
+            stage = "task";
+            break;
+            
+        case ShaderStage::Mesh:
+            stage = "mesh";
+            break;
 
         default:
             stage = "unknown";
             break;
         }
-
-        std::filesystem::path source(shaderDesc.sourcePath);
-
-        return folder / (source.stem().string() + "." + stage + ".bin");
+        
+        uint64_t sourceHash = Nox::Hash::computeFile(shaderDesc.sourcePath);
+        
+        return folder / (source.stem().string() + "." + stage + "." + std::to_string(sourceHash) +  ".bin");
     }
 
     static std::vector<uint8_t> loadShaderBinary(const std::filesystem::path& path)
@@ -70,7 +85,7 @@ namespace NRI
 
         return data;
     }
-
+    
     PipelineVK::PipelineVK(DeviceVK& device, const PipelineDesc& desc, ShaderCompiler& compiler) : m_deviceVK(device)
     {
         std::vector<std::vector<char>> tempBytecodeStorage;
@@ -87,6 +102,10 @@ namespace NRI
 
             if (useShaderObjects)
             {
+                std::vector<vk::ShaderStageFlagBits> m_stages;
+                // need to set all stages to VK_NULL_HANDLE 
+                // because shaderbojects requires all stages even if not used by this pipeline
+                
                 const vk::ShaderCreateFlagsEXT commonFlags = vk::ShaderCreateFlagBitsEXT::eDescriptorHeap;
 
                 std::vector<std::string> entryPointNames;
@@ -172,7 +191,13 @@ namespace NRI
 
                 m_shaders = m_deviceVK.getDevice().createShadersEXT(shaderCreateInfos);
                 
-                for (auto& shader : m_shaders) m_rawShaders.push_back(*shader);
+                m_rawShaders.assign(m_allGraphicsStages.size(), vk::ShaderEXT{});
+                for (size_t i = 0; i < m_stages.size(); i++)
+                {
+                    auto it = std::find(m_allGraphicsStages.begin(), m_allGraphicsStages.end(), m_stages[i]);
+                    size_t slot = std::distance(m_allGraphicsStages.begin(), it);
+                    m_rawShaders[slot] = *m_shaders[i];
+                }
 
                 for (size_t i = 0; i < desc.shaders.size(); i++)
                 {
@@ -391,11 +416,8 @@ namespace NRI
         case ShaderStage::Vertex: return vk::ShaderStageFlagBits::eVertex;
         case ShaderStage::Fragment: return vk::ShaderStageFlagBits::eFragment;
         case ShaderStage::Compute: return vk::ShaderStageFlagBits::eCompute;
-
-        // Future-proofing is now trivial to add:
-        // case ShaderStage::Task:     return vk::ShaderStageFlagBits::eTaskEXT;
-        // case ShaderStage::Mesh:     return vk::ShaderStageFlagBits::eMeshEXT;
-        // case ShaderStage::RayGen:   return vk::ShaderStageFlagBits::eRaygenKHR;
+        case ShaderStage::Task:     return vk::ShaderStageFlagBits::eTaskEXT;
+        case ShaderStage::Mesh:     return vk::ShaderStageFlagBits::eMeshEXT;
 
         default:
             NOX_CORE_ASSERT("PipelineVK::translateShaderStage unsupported shader stage passed to Vulkan backend!");
@@ -408,6 +430,8 @@ namespace NRI
         {
         case ShaderStage::Vertex: return vk::ShaderStageFlagBits::eFragment;
         case ShaderStage::Fragment: return {};
+        case ShaderStage::Task: return vk::ShaderStageFlagBits::eMeshEXT;
+        case ShaderStage::Mesh: return vk::ShaderStageFlagBits::eFragment;
         }
         return {};
     }

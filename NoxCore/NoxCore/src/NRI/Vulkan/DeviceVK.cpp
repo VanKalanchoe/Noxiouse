@@ -61,15 +61,20 @@ namespace NRI
     std::vector<const char*> requiredDeviceExtension =
     {
         vk::KHRSwapchainExtensionName,
-
+        
+        // Descriptorheap + untyped Pointer
         vk::EXTDescriptorHeapExtensionName,
         vk::KHRMaintenance5ExtensionName,
         vk::KHRShaderUntypedPointersExtensionName,
         vk::KHRShaderNonSemanticInfoExtensionName,
+        
         // Shader Objects
         vk::EXTShaderObjectExtensionName,
         vk::EXTExtendedDynamicState3ExtensionName,
-        vk::EXTVertexInputDynamicStateExtensionName
+        vk::EXTVertexInputDynamicStateExtensionName,
+        
+        // Task + Mesh Shader
+        vk::EXTMeshShaderExtensionName,
     };
 
     DeviceVK::DeviceVK(Nox::Window& window)
@@ -215,14 +220,15 @@ namespace NRI
                                                              vk::PhysicalDeviceVulkan11Features,
                                                              vk::PhysicalDeviceVulkan13Features,
                                                              /*vk::PhysicalDeviceShaderObjectFeaturesEXT,*/
-                                                             vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>();
+                                                             vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT,
+                                                             vk::PhysicalDeviceMeshShaderFeaturesEXT>();
         bool supportsRequiredFeatures = features.template get<vk::PhysicalDeviceFeatures2>().features.samplerAnisotropy &&
             features.template get<vk::PhysicalDeviceVulkan11Features>().shaderDrawParameters &&
             features.template get<vk::PhysicalDeviceVulkan13Features>().dynamicRendering &&
             features.template get<vk::PhysicalDeviceVulkan13Features>().synchronization2 &&
             /*features.template get<vk::PhysicalDeviceShaderObjectFeaturesEXT>().shaderObject &&*/ // dont force to support both legacy pipeline and shaderobject
             features.template get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>().extendedDynamicState;
-
+            features.template get<vk::PhysicalDeviceMeshShaderFeaturesEXT>().meshShader;
         // Return true if the physicalDevice meets all the criteria
         return supportsVulkan1_3 && supportsGraphics && supportsAllRequiredExtensions && supportsRequiredFeatures;
     }
@@ -272,7 +278,8 @@ namespace NRI
                            vk::PhysicalDeviceVertexInputDynamicStateFeaturesEXT,
                            vk::PhysicalDeviceDescriptorHeapFeaturesEXT,
                            vk::PhysicalDeviceShaderUntypedPointersFeaturesKHR,
-                           vk::PhysicalDeviceMaintenance5FeaturesKHR
+                           vk::PhysicalDeviceMaintenance5FeaturesKHR,
+                           vk::PhysicalDeviceMeshShaderFeaturesEXT
             >
             featureChain = {
                 {
@@ -303,7 +310,8 @@ namespace NRI
                 {.vertexInputDynamicState = true},
                 {.descriptorHeap = true},
                 {.shaderUntypedPointers = true},
-                {.maintenance5 = true}
+                {.maintenance5 = true},
+                {.taskShader = true, .meshShader = true}
             };
 
         // create a Device

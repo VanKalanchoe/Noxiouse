@@ -47,6 +47,7 @@ namespace Nox
         createSwapChain();
         createCompiler();
         createGraphicsPipeline(false);
+        createMeshPipeline(false);
         if (!m_isEditor) createPresentPipeline(false);
         createComputePipeline();
         createCommandPool();
@@ -145,6 +146,28 @@ namespace Nox
             .sourcePath = "../../shaders/shader.slang"
         });
         m_graphicsPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+    }
+    
+    void Renderer::createMeshPipeline(bool forceCompile)
+    {
+        NRI::PipelineDesc desc{};
+        desc.forceCompile = forceCompile;
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Task,
+            .entryPoint = "taskMain",
+            .sourcePath = "../../shaders/MeshQuad.slang"
+        });
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Mesh,
+            .entryPoint = "meshMain",
+            .sourcePath = "../../shaders/MeshQuad.slang"
+        });
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Fragment,
+            .entryPoint = "fragMain",
+            .sourcePath = "../../shaders/MeshQuad.slang"
+        });
+        m_MeshQuadPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
     void Renderer::createPresentPipeline(bool forceCompile)
@@ -585,6 +608,18 @@ namespace Nox
         m_commandBuffers->pushData(&references, sizeof(PushConstantBlock));
 
         m_commandBuffers->drawIndexed(static_cast<uint32_t>(indices.size()), instanceBufferObjects.size(), 0, 0, 0);
+        
+        // MeshQuad
+        {
+            m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_MeshQuadPipeline);
+            
+            shaderio::PushConstantQuad quadReferences{};
+            quadReferences.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+            
+            m_commandBuffers->pushData(&quadReferences, sizeof(shaderio::PushConstantQuad));
+            
+            m_commandBuffers->drawMeshTasks(1, 1, 1);    
+        }
 
         m_commandBuffers->endRendering();
 

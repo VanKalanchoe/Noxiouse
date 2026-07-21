@@ -43,6 +43,7 @@ namespace NRI
     {
         switch (frontFace)
         {
+            case FrontFace::ClockWise: return vk::FrontFace::eClockwise;
             case FrontFace::CounterClockWise: return vk::FrontFace::eCounterClockwise;
         }
     }
@@ -482,6 +483,11 @@ namespace NRI
     void CommandBufferVK::drawIndexed(uint32_t indexCount, uint32_t instanceCount, uint32_t firstIndex, int32_t vertexOffset, uint32_t firstInstance)
     {
         m_commandBuffers[m_currentFrameIndex].drawIndexed(indexCount, instanceCount, firstIndex, vertexOffset, firstInstance);
+    }
+    
+    void CommandBufferVK::drawMeshTasks(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ)
+    {
+        m_commandBuffers[m_currentFrameIndex].drawMeshTasksEXT(groupCountX, groupCountY, groupCountZ);
     }
 
     void CommandBufferVK::transitionTextureLayout(Texture& texture, TextureLayout oldLayout, TextureLayout newLayout)
