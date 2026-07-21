@@ -438,7 +438,7 @@ namespace Nox
     
     void Scene::RenderScene(EditorCamera& camera)
     {
-        /*Renderer::BeginScene(camera);
+        m_renderer->BeginScene(camera);
         
         // Draw Sprites
         {
@@ -447,11 +447,11 @@ namespace Nox
             {
                 auto [transform, sprite] = group.get<TransformComponent, SpriteRendererComponent>(entity);
                 //Renderer2D::DrawQuad(transform.Position, transform.Size, transform.Scale, transform.Rotation, sprite.Color);
-                Renderer::DrawSprite(transform.GetTransform(), sprite, (int)entity);
+                m_renderer2D->DrawSprite(transform.GetTransform(), sprite, (int)entity);
                 //Renderer2D::DrawRect(transform, sprite, (int)entity);
             }
         }
-        
+        /* 
         // Draw Circles
         {
             auto view = m_Registry.view<TransformComponent, CircleRendererComponent>();
@@ -476,8 +476,8 @@ namespace Nox
         /*
         //Renderer2D::DrawLine(glm::vec3(2.0f), glm::vec3(5.0f), glm::vec4(1.0f, 0.0f, 1.0f, 1.0f));
         //Renderer2D::DrawRect(glm::vec3(0.0f), glm::vec2(1.0f), glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
-        #1#
-        Renderer::EndScene();*/
+        #1#*/
+        m_renderer->EndScene();
     }
     
     template <typename T>

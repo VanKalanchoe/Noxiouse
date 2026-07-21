@@ -22,7 +22,7 @@ namespace NRI
         void bindPipeline(PipelineBindPoint bindPoint, Pipeline& pipeline) override;
         void setViewport(Extent2D swapChainExtent) override;
         void setScissor(Extent2D swapChainExtent) override;
-        void setViewportWithCount(const Extent2D& swapChainExtent) override;
+        void setViewportWithCount(const ViewportBounds& bounds, float minDepth, float maxDepth) override;
         void setScissorWithCount(const Extent2D& swapChainExtent) override;
         void setVertexInput() override;
         void setPrimitiveTopology(const PrimitiveTopology& topology) override;

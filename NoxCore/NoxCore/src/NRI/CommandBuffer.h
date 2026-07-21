@@ -68,7 +68,8 @@ namespace NRI
     
     enum class CompareOp
     {
-        Less
+        Less,
+        Greater
     };
     
     enum class BlendFactor
@@ -115,7 +116,7 @@ namespace NRI
         
         virtual void setViewport(Extent2D swapChainExtent) = 0;
         virtual void setScissor(Extent2D swapChainExtent) = 0;
-        virtual void setViewportWithCount(const Extent2D& swapChainExtent) = 0;
+        virtual void setViewportWithCount(const ViewportBounds& bounds, float minDepth, float maxDepth) = 0;
         virtual void setScissorWithCount(const Extent2D& swapChainExtent) = 0;
         virtual void setVertexInput() = 0;
         virtual void setPrimitiveTopology(const PrimitiveTopology& topology) = 0;

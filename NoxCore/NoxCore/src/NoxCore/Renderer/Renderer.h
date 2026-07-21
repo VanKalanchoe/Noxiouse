@@ -1,27 +1,7 @@
 #pragma once
 
-#define GLM_FORCE_RADIANS
-#define GLM_FORCE_DEPTH_ZERO_TO_ONE
-#define GLM_ENABLE_EXPERIMENTAL
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-#include <glm/gtx/hash.hpp>
-
+#include "Renderer2D.h"
 #include "NoxCore/Core/Window.h"
-#include "NRI/NRI.h"
-#include "NoxCore/Utils/NOXWatcher.h"
-#include "NoxCore/Asset/TextureImporter.h"
-
-namespace shaderio // Shader IO namespace -- shared layout between C++ and shaders
-{
-    using namespace glm; // GLSL-style types without the glm:: prefix inside the namespace
-    #include "shaderIO.h"
-    
-    inline bool operator==(const shaderio::Vertex& other1, const shaderio::Vertex& other2)
-    {
-        return other1.pos == other2.pos && other1.color == other2.color && other1.texCoord == other2.texCoord;
-    }
-}
 
 namespace std
 {
@@ -83,20 +63,27 @@ namespace Nox
     public:
         Renderer(std::shared_ptr<Nox::Window> window, bool isEditor);
         ~Renderer();
+        
         void drawFrame();
         void resizeWindow();
         void initImGui();
         void shutdownImGui();
         void beginImGui();
         void endImGui();
+        
+        void BeginScene(const EditorCamera& camera);
+        void EndScene();
+        
         Texture2D* GetSceneResource() const { return m_sceneResource.get(); }
         void setVSync(bool enabled);
         void onViewportSizeChange(NRI::Extent2D size);
         bool getVSync() const { return m_vSync; }
         NRI::Extent2D getViewPortSize() const { return m_viewportSize; }
+        Renderer2D* getRenderer2D() const { return m_renderer2D.get(); }
         
         Ref<Texture2D> UploadTexture(const TextureData& cpuData);
-        
+        Ref<Texture2D> createSolidColorTexture(uint8_t r, uint8_t g, uint8_t b, uint8_t a);
+
     private:
         void initRenderer();
         void cleanupSwapChain();
@@ -105,7 +92,6 @@ namespace Nox
         void createSwapChain();
         void createCompiler();
         void createGraphicsPipeline(bool forceCompile);
-        void createMeshPipeline(bool forceCompile);
         void createPresentPipeline(bool forceCompile);
         void createComputePipeline();
         void createCommandPool();
@@ -127,6 +113,7 @@ namespace Nox
         std::vector<char> readFile(const std::string& filename);
 
     private:
+        std::unique_ptr<Renderer2D> m_renderer2D;
         std::shared_ptr<Nox::Window> m_window;
         std::unique_ptr<NRI::Device> m_device = nullptr;
         std::unique_ptr<NRI::Swapchain> m_swapChain = nullptr;
@@ -138,7 +125,6 @@ namespace Nox
         Utils::NOXWatcher m_fileWatcher;
         std::unique_ptr<NRI::ShaderCompiler> m_shaderCompiler = nullptr;
         std::unique_ptr<NRI::Pipeline> m_graphicsPipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_MeshQuadPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_presentPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_computePipeline = nullptr;
         
@@ -161,6 +147,7 @@ namespace Nox
         std::vector<void*> m_uniformBuffersMapped;
         shaderio::UniformBufferObject uniformData = {};
 
+        Ref<Texture2D> m_whiteTexture;
         Ref<Texture2D> m_sceneResource;
         Ref<Texture2D> m_colorResource;
         Ref<Texture2D> m_depthResource;

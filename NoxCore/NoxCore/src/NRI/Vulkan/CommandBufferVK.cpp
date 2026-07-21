@@ -53,6 +53,7 @@ namespace NRI
         switch (compareOp)
         {
             case CompareOp::Less: return vk::CompareOp::eLess;
+        case CompareOp::Greater: return vk::CompareOp::eGreater;
         }
     }
     
@@ -273,10 +274,9 @@ namespace NRI
         m_commandBuffers[m_currentFrameIndex].setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), {.width = swapChainExtent.width, .height = swapChainExtent.height}));
     }
     
-    void CommandBufferVK::setViewportWithCount(const Extent2D& swapChainExtent)
+    void CommandBufferVK::setViewportWithCount(const ViewportBounds& bounds, float minDepth, float maxDepth)
     {
-        vk::Viewport viewport(0.0f, 0.0f, static_cast<float>(swapChainExtent.width), static_cast<float>(swapChainExtent.height), 0.0f, 1.0f);
-        
+        vk::Viewport viewport(bounds.x, bounds.y, bounds.width, bounds.height, minDepth, maxDepth);
         m_commandBuffers[m_currentFrameIndex].setViewportWithCount(viewport);
     }
 

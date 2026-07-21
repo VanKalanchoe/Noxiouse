@@ -7,6 +7,7 @@
 #include "NoxCore/Core/UUID.h"
 #include "NoxCore/Core/Timestep.h"
 #include "NoxCore/Renderer/EditorCamera.h"
+#include "NoxCore/Renderer/Renderer.h"
 
 namespace Nox
 {
@@ -56,6 +57,9 @@ namespace Nox
         {
             return m_Registry.view<Components...>();
         }
+        
+        void SetRenderer(Renderer* renderer) { m_renderer = renderer; }
+        void SetRenderer2D(Renderer2D* renderer) { m_renderer2D = renderer; }
     private:
         template<typename T>
         void OnComponentAdded(Entity entity, T& component);
@@ -80,5 +84,8 @@ namespace Nox
         friend class Entity;
         friend class SceneSerializer;
         friend class SceneHierarchyPanel;
+        
+        Renderer* m_renderer = nullptr;
+        Renderer2D* m_renderer2D = nullptr;
     };
 }

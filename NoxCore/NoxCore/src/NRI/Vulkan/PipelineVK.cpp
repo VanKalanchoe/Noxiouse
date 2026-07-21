@@ -275,7 +275,7 @@ namespace NRI
                 vk::PipelineDepthStencilStateCreateInfo depthStencil{
                     .depthTestEnable = vk::True,
                     .depthWriteEnable = vk::True,
-                    .depthCompareOp = vk::CompareOp::eLess,
+                    .depthCompareOp = vk::CompareOp::eGreater,
                     .depthBoundsTestEnable = vk::False,
                     .stencilTestEnable = vk::False
                 };

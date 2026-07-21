@@ -99,6 +99,9 @@ namespace Nox
             }
         }
         
+        m_ActiveScene->SetRenderer(m_Renderer);
+        m_ActiveScene->SetRenderer2D(m_Renderer->getRenderer2D());
+        
         switch (m_SceneState)
         {
         case SceneState::Edit:
@@ -117,7 +120,7 @@ namespace Nox
             {
                 m_EditorCamera.OnUpdate(ts);
 
-                /*m_ActiveScene->OnUpdateSimulation(ts, m_EditorCamera);*/
+                m_ActiveScene->OnUpdateSimulation(ts, m_EditorCamera);
                 break;
             }
         case SceneState::Play:
@@ -160,11 +163,11 @@ namespace Nox
         auto& app = Application::Get();
 
         /*--
-       * IMGUI Docking
-       * Create a dockspace and dock the viewport and settings window.
-       * The central node is named "Viewport", which can be used later with Begin("Viewport")
-       * to render the final image.
-      -*/
+        * IMGUI Docking
+        * Create a dockspace and dock the viewport and settings window.
+        * The central node is named "Viewport", which can be used later with Begin("Viewport")
+        * to render the final image.
+        -*/
 
         const ImGuiDockNodeFlags dockFlags = ImGuiDockNodeFlags_PassthruCentralNode | ImGuiDockNodeFlags_NoDockingInCentralNode;
 
@@ -357,8 +360,7 @@ namespace Nox
             ImGui::End();
             ImGui::PopStyleVar();
         }
-
-
+        
         // Extra ImGui windows can be added in OnImGuiRender() layer, like the demo window.
         // ImGui::ShowDemoWindow();
 
@@ -539,7 +541,6 @@ namespace Nox
                 }
                 break;
             }
-
 
         // Gizmos
         case SDL_SCANCODE_Q:

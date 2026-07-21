@@ -25,11 +25,17 @@ namespace Nox
 
         m_fileWatcher.watch(std::filesystem::path("../../shaders/shader.slang"), [this]() { m_reloadShader = true; });
         m_fileWatcher.watch(std::filesystem::path("../../shaders/present.slang"), [this]() { m_reloadShader = true; });
+        
+        m_whiteTexture = createSolidColorTexture(255, 255, 255, 255);
+        
+        m_renderer2D = std::make_unique<Renderer2D>(isEditor, RendererContext{ *m_device , *m_shaderCompiler, m_fileWatcher, m_whiteTexture });
     }
 
     Renderer::~Renderer()
     {
         NOX_CORE_INFO("Renderer Shutdown");
+        
+        m_renderer2D.reset();
 
         m_device->waitIdle();
         m_device->shutdown(); // needed for texture to not remove imguitexture
@@ -47,7 +53,6 @@ namespace Nox
         createSwapChain();
         createCompiler();
         createGraphicsPipeline(false);
-        createMeshPipeline(false);
         if (!m_isEditor) createPresentPipeline(false);
         createComputePipeline();
         createCommandPool();
@@ -146,28 +151,6 @@ namespace Nox
             .sourcePath = "../../shaders/shader.slang"
         });
         m_graphicsPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
-    }
-    
-    void Renderer::createMeshPipeline(bool forceCompile)
-    {
-        NRI::PipelineDesc desc{};
-        desc.forceCompile = forceCompile;
-        desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Task,
-            .entryPoint = "taskMain",
-            .sourcePath = "../../shaders/MeshQuad.slang"
-        });
-        desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Mesh,
-            .entryPoint = "meshMain",
-            .sourcePath = "../../shaders/MeshQuad.slang"
-        });
-        desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Fragment,
-            .entryPoint = "fragMain",
-            .sourcePath = "../../shaders/MeshQuad.slang"
-        });
-        m_MeshQuadPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
     void Renderer::createPresentPipeline(bool forceCompile)
@@ -287,6 +270,23 @@ namespace Nox
         uniformData.imageHeapIndexOffset = m_resourceHeap->getImageHeapIndexOffset();
         
         return textureResource;
+    }
+    
+    Ref<Texture2D> Renderer::createSolidColorTexture(uint8_t r, uint8_t g, uint8_t b, uint8_t a)
+    {
+        std::array<uint8_t, 4> pixel = { r, g, b, a };
+
+        TextureData cpuData{};
+        cpuData.Width = 1;
+        cpuData.Height = 1;
+        cpuData.MipLevels = 1;
+        cpuData.Format = NRI::ImageFormat::SRGBA8;
+        cpuData.DirectFormat = UINT32_MAX;
+        cpuData.Data.Data = pixel.data();
+        cpuData.Data.Size = pixel.size();
+        cpuData.MipOffsets = { 0 };
+
+        return UploadTexture(cpuData);
     }
 
     void Renderer::loadModel()
@@ -502,6 +502,9 @@ namespace Nox
     void Renderer::recordCommandBuffer(uint32_t imageIndex)
     {
         m_commandBuffers->begin(frameIndex, false);
+        
+        m_commandBuffers->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
+        
         m_commandBuffers->transitionSwapchainLayout(*m_swapChain, imageIndex, NRI::TextureLayout::Undefined, NRI::TextureLayout::ColorAttachment);
         if (firstframe)
         {
@@ -531,20 +534,23 @@ namespace Nox
             .attachment = m_depthResource.get(),
             .loadOP = NRI::LoadOP::clear,
             .storeOP = NRI::StoreOP::dontCare,
-            .clearDepth = {1.0f, 0}
+            .clearDepth = {0.0f, 0}
         };
 
         NRI::RenderDesc desc =
         {
-            .renderArea = m_isEditor ? NRI::Extent2D{m_viewportSize.width, m_viewportSize.height} : NRI::Extent2D{m_swapChainExtent.width, m_swapChainExtent.height},
+            .renderArea = m_isEditor ? NRI::Extent2D{ m_viewportSize.width, m_viewportSize.height } : NRI::Extent2D{ m_swapChainExtent.width, m_swapChainExtent.height },
             .colorAttachments = colorAttachments,
             .depthAttachment = depthAttachment
         };
         m_commandBuffers->beginRendering(desc);
-
+       
         // Viewport / scissor (counts and values are both dynamic).
-        m_commandBuffers->setViewportWithCount(m_isEditor ? m_viewportSize : m_swapChainExtent);
-        m_commandBuffers->setScissorWithCount(m_isEditor ? m_viewportSize : m_swapChainExtent);
+        NRI::Extent2D locViewportSize = m_isEditor ? m_viewportSize : m_swapChainExtent;
+        float w = static_cast<float>(locViewportSize.width);
+        float h = static_cast<float>(locViewportSize.height);
+        m_commandBuffers->setViewportWithCount({ 0.0f, h, w, -h }, 0.0f, 1.0f);
+        m_commandBuffers->setScissorWithCount(locViewportSize);
 
         // Vertex input empty since we use vertex fetch BDA but still needs to be called empty
         m_commandBuffers->setVertexInput();
@@ -574,7 +580,7 @@ namespace Nox
         // Depth / stencil.
         m_commandBuffers->setDepthTestEnable(true);
         m_commandBuffers->setDepthWriteEnable(true);
-        m_commandBuffers->setDepthCompareOp(NRI::CompareOp::Less);
+        m_commandBuffers->setDepthCompareOp(NRI::CompareOp::Greater);
         m_commandBuffers->setDepthBoundsTestEnable(false);
         m_commandBuffers->setStencilTestEnable(false);
 
@@ -596,7 +602,6 @@ namespace Nox
         m_commandBuffers->setLogicOpEnable(false);
 
         m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_graphicsPipeline);
-        m_commandBuffers->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
 
         m_commandBuffers->bindIndexBuffer(*m_indexBuffer, 0);
 
@@ -609,17 +614,7 @@ namespace Nox
 
         m_commandBuffers->drawIndexed(static_cast<uint32_t>(indices.size()), instanceBufferObjects.size(), 0, 0, 0);
         
-        // MeshQuad
-        {
-            m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_MeshQuadPipeline);
-            
-            shaderio::PushConstantQuad quadReferences{};
-            quadReferences.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
-            
-            m_commandBuffers->pushData(&quadReferences, sizeof(shaderio::PushConstantQuad));
-            
-            m_commandBuffers->drawMeshTasks(1, 1, 1);    
-        }
+        m_renderer2D->Flush(*m_commandBuffers, *m_uniformBuffers[frameIndex]);
 
         m_commandBuffers->endRendering();
 
@@ -635,7 +630,7 @@ namespace Nox
 
         NRI::RenderDesc imguiDesc =
         {
-            .renderArea = {m_swapChainExtent.width, m_swapChainExtent.height},
+            .renderArea = { m_swapChainExtent.width,  m_swapChainExtent.height },
             .colorAttachments = imguiColorAttachments,
         };
 
@@ -645,7 +640,9 @@ namespace Nox
         else
         {
             // Viewport / scissor (counts and values are both dynamic).
-            m_commandBuffers->setViewportWithCount(m_swapChainExtent);
+            float w = static_cast<float>(m_swapChainExtent.width);
+            float h = static_cast<float>(m_swapChainExtent.height);
+            m_commandBuffers->setViewportWithCount({ 0.0f, 0.0f,w, h }, 0.0f, 1.0f);
             m_commandBuffers->setScissorWithCount(m_swapChainExtent);
 
             // Vertex input empty since we use vertex fetch BDA but still needs to be called empty
@@ -698,7 +695,6 @@ namespace Nox
             m_commandBuffers->setLogicOpEnable(false);
 
             m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_presentPipeline);
-            m_commandBuffers->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
 
             PushConstantBlock references{};
             // Pass pointer to the global matrix via a buffer device address
@@ -723,13 +719,13 @@ namespace Nox
         float time = std::chrono::duration<float>(currentTime - startTime).count();
 
         /*UniformBufferObject ubo{};*/
-        uniformData.model = rotate(glm::mat4(1.0f), /*time **/ glm::radians(45.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-        uniformData.view = lookAt(glm::vec3(0.0f, 2.0f, 3.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+        /*uniformData.model = rotate(glm::mat4(1.0f), /*time *#1# glm::radians(45.0f), glm::vec3(0.0f, 0.0f, 1.0f));*/
+        /*uniformData.view = lookAt(glm::vec3(0.0f, 2.0f, 3.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
         uniformData.proj =
             glm::perspective(glm::radians(90.0f),
                              static_cast<float>(m_isEditor ? m_viewportSize.width : m_swapChainExtent.width) / static_cast<float>(m_isEditor ? m_viewportSize.height : m_swapChainExtent.height), 0.1f,
                              100.0f);
-        uniformData.proj[1][1] *= -1;
+        uniformData.proj[1][1] *= -1;*/
         uniformData.samplerIndex = selectedSampler;
 
         memcpy(m_uniformBuffersMapped[currentImage], &uniformData, sizeof(uniformData));
@@ -747,6 +743,11 @@ namespace Nox
             return;
         }
 
+        if (m_renderer2D->drawFrame())
+        {
+            return;
+        }
+        
         uint32_t imageIndex = 0;
 
         if (m_swapChain->acquireNextImage(frameIndex, imageIndex) == NRI::FrameResult::ResizeRequired)
@@ -802,5 +803,18 @@ namespace Nox
     void Renderer::endImGui()
     {
         m_device->endImGui();
+    }
+    
+    void Renderer::BeginScene(const EditorCamera& camera)
+    {
+        uniformData.proj = camera.GetProjection();
+        uniformData.view = camera.GetViewMatrix();
+        
+        m_renderer2D->BeginScene(camera);
+    }
+    
+    void Renderer::EndScene()
+    {
+        m_renderer2D->EndScene();
     }
 }
