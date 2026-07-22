@@ -1,0 +1,107 @@
+name: Build
+
+on:
+  push:
+    branches: [ custom-engine ]
+  pull_request:
+    branches: [ custom-engine ]
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+
+      matrix:
+        include:
+
+          # Windows MSVC
+          - os: windows-latest
+            name: windows-msvc
+            generator: "Visual Studio 18 2026"
+            compiler: cl
+
+          # Windows ClangCL
+          - os: windows-latest
+            name: windows-clangcl
+            generator: "Visual Studio 18 2026"
+            compiler: clangcl
+
+          # Linux GCC
+          - os: ubuntu-latest
+            name: linux-gcc
+            compiler: gcc
+
+          # Linux Clang
+          - os: ubuntu-latest
+            name: linux-clang
+            compiler: clang
+
+          # macOS AppleClang
+          - os: macos-latest
+            name: macos-clang
+            compiler: clang
+
+
+    runs-on: ${{ matrix.os }}
+
+
+    steps:
+
+    - name: Checkout
+      uses: actions/checkout@v4
+
+
+    - name: Install Linux dependencies
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt update
+        sudo apt install -y ninja-build clang gcc g++
+
+
+    - name: Install macOS dependencies
+      if: runner.os == 'macOS'
+      run: |
+        brew install ninja
+
+
+    - name: Configure CMake Windows
+      if: runner.os == 'Windows'
+      shell: cmd
+      run: |
+
+        if "${{ matrix.compiler }}"=="clangcl" (
+          cmake -S . -B build ^
+          -G "${{ matrix.generator }}" ^
+          -T ClangCL ^
+          -A x64 ^
+          -DCMAKE_BUILD_TYPE=Release ^
+          -DCMAKE_TOOLCHAIN_FILE=NoxCore/vendors/vcpkg/scripts/buildsystems/vcpkg.cmake
+        ) else (
+          cmake -S . -B build ^
+          -G "${{ matrix.generator }}" ^
+          -A x64 ^
+          -DCMAKE_BUILD_TYPE=Release ^
+          -DCMAKE_TOOLCHAIN_FILE=NoxCore/vendors/vcpkg/scripts/buildsystems/vcpkg.cmake
+        )
+
+
+    - name: Configure Unix CMake
+      if: runner.os != 'Windows'
+      run: |
+
+        cmake -S . -B build \
+        -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_C_COMPILER=${{ matrix.compiler }} \
+        -DCMAKE_CXX_COMPILER=${{ matrix.compiler == 'gcc' && 'g++' || matrix.compiler == 'clang' && 'clang++' || 'clang++' }}
+
+
+    - name: Build
+      run: |
+        cmake --build build --config Release
+
+
+    - name: Test
+      working-directory: build
+      run: |
+        ctest --build-config Release
