@@ -13,23 +13,44 @@ jobs:
     steps:
 
     - name: Checkout
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
+      with:
+          submodules: recursive
+
+    #
+    # Cache vcpkg
+    #
+    - name: Cache vcpkg
+      uses: actions/cache@v4
+      with:
+        path: |
+          NoxCore/vendors/vcpkg
+        key: windows-vcpkg-${{ hashFiles('NoxCore/**') }}
+        restore-keys: |
+          windows-vcpkg-
 
 
+    #
+    # Install vcpkg + packages
+    #
     - name: Install dependencies
       shell: cmd
       run: |
 
         echo ==== Clone vcpkg ====
 
-        git clone https://github.com/microsoft/vcpkg.git NoxCore\vendors\vcpkg
+        if not exist NoxCore\vendors\vcpkg (
+            git clone https://github.com/microsoft/vcpkg.git NoxCore\vendors\vcpkg
+        )
 
 
         echo ==== Bootstrap ====
 
         cd NoxCore\vendors\vcpkg
 
-        call bootstrap-vcpkg.bat
+        if not exist vcpkg.exe (
+            call bootstrap-vcpkg.bat
+        )
 
         if errorlevel 1 exit /b 1
 
@@ -40,6 +61,7 @@ jobs:
 
 
         cd ..\..\..
+
 
 
         echo ==== Install packages ====
@@ -65,21 +87,73 @@ jobs:
 
 
 
-    - name: Verify vcpkg installation
+    #
+    # Verify
+    #
+    - name: Verify vcpkg
       shell: cmd
       run: |
 
-        echo ==== VCPKG PACKAGES ====
-
         NoxCore\vendors\vcpkg\vcpkg.exe list
-
-
-        echo ==== SDL3 FILES ====
 
         dir NoxCore\vendors\vcpkg\installed\x64-windows\share\sdl3
 
 
 
+    #
+    # Cache Vulkan SDK
+    #
+    - name: Cache Vulkan SDK
+      id: vulkan-cache
+      uses: actions/cache@v4
+      with:
+        path: C:\VulkanSDK
+        key: windows-vulkan-sdk-1.4.350
+
+
+
+    #
+    # Install Vulkan SDK
+    #
+    - name: Install Vulkan SDK
+      if: steps.vulkan-cache.outputs.cache-hit != 'true'
+      shell: pwsh
+      run: |
+
+        $version = "1.4.350.0"
+
+        $url = "https://sdk.lunarg.com/sdk/download/$version/windows/VulkanSDK-$version-Installer.exe"
+
+        Invoke-WebRequest `
+          -Uri $url `
+          -OutFile VulkanSDK.exe
+
+
+        Start-Process `
+          -FilePath VulkanSDK.exe `
+          -ArgumentList "--accept-licenses --default-answer --confirm-command install" `
+          -Wait
+
+
+
+    #
+    # Setup Vulkan variables
+    #
+    - name: Setup Vulkan environment
+      shell: pwsh
+      run: |
+
+        $version = "1.4.350.0"
+
+        echo "VULKAN_SDK=C:\VulkanSDK\$version" >> $env:GITHUB_ENV
+        echo "Vulkan_INCLUDE_DIR=C:\VulkanSDK\$version\Include" >> $env:GITHUB_ENV
+        echo "Vulkan_LIBRARY=C:\VulkanSDK\$version\Lib\vulkan-1.lib" >> $env:GITHUB_ENV
+
+
+
+    #
+    # Install Slang
+    #
     - name: Install Slang
       shell: cmd
       run: |
@@ -101,6 +175,9 @@ jobs:
 
 
 
+    #
+    # Configure
+    #
     - name: Configure CMake
       shell: cmd
       run: |
@@ -109,10 +186,15 @@ jobs:
         -G "Visual Studio 18 2026" ^
         -T ClangCL ^
         -A x64 ^
-        -DCMAKE_TOOLCHAIN_FILE=NoxCore\vendors\vcpkg\scripts\buildsystems\vcpkg.cmake
+        -DCMAKE_TOOLCHAIN_FILE=NoxCore\vendors\vcpkg\scripts\buildsystems\vcpkg.cmake ^
+        -DVulkan_INCLUDE_DIR=%Vulkan_INCLUDE_DIR% ^
+        -DVulkan_LIBRARY=%Vulkan_LIBRARY%
 
 
 
+    #
+    # Build
+    #
     - name: Build
       shell: cmd
       run: |
