@@ -10,35 +10,47 @@ jobs:
 
   build:
 
-    name: ${{ matrix.compiler.name }}
+    name: ${{ matrix.env.name }}
 
-    runs-on: ${{ matrix.compiler.os }}
+    runs-on: ${{ matrix.env.os }}
 
     strategy:
       matrix:
-        compiler:
+        env:
 
-          # Normal Visual Studio build
+          # MSVC + Visual Studio solution build
           - name: MSVC VS2026
             os: windows-2025-vs2026
-            generator: Visual Studio 18 2026
-            compiler: cl
-            architecture: x64
+            c: cl
+            cxx: cl
+            arch: x64
+            gen: Visual Studio 18 2026
 
-          # Khronos style clang-cl build
+
+          # clang-cl + Ninja build (Khronos style)
           - name: ClangCL Ninja
             os: windows-2025-vs2026
-            generator: Ninja
-            compiler: clang-cl
-            architecture: x64
+            c: clang-cl
+            cxx: clang-cl
+            arch: x64
+            gen: Ninja
+
+
+    env:
+
+      VAR_CMAKE_FLAGS: >
+        -D CMAKE_C_COMPILER=${{matrix.env.c}}
+        -D CMAKE_CXX_COMPILER=${{matrix.env.cxx}}
 
 
     steps:
+
 
     - name: Checkout
       uses: actions/checkout@v7
       with:
         submodules: recursive
+
 
 
     #
@@ -50,8 +62,9 @@ jobs:
         path: |
           NoxCore/vendors/vcpkg
         key: windows-vcpkg-${{ hashFiles('NoxCore/**') }}
-        restore-keys:
+        restore-keys: |
           windows-vcpkg-
+
 
 
     #
@@ -62,16 +75,20 @@ jobs:
       run: |
 
         if not exist NoxCore\vendors\vcpkg (
-          git clone https://github.com/microsoft/vcpkg.git NoxCore\vendors\vcpkg
+            git clone https://github.com/microsoft/vcpkg.git NoxCore\vendors\vcpkg
         )
+
 
         cd NoxCore\vendors\vcpkg
 
+
         if not exist vcpkg.exe (
-          call bootstrap-vcpkg.bat
+            call bootstrap-vcpkg.bat
         )
 
+
         cd ..\..\..
+
 
         NoxCore\vendors\vcpkg\vcpkg.exe install ^
           sdl3[vulkan] ^
@@ -90,11 +107,13 @@ jobs:
           --triplet=x64-windows
 
 
+
+
     #
-    # Install Ninja only for clang-cl
+    # Install Ninja only for clang-cl job
     #
     - name: Install Ninja
-      if: matrix.compiler.generator == 'Ninja'
+      if: matrix.env.gen == 'Ninja'
       shell: cmd
       run: |
 
@@ -104,20 +123,22 @@ jobs:
 
 
 
+
     #
-    # Configure
+    # Configure CMake
     #
     - name: Configure CMake
       shell: cmd
       run: |
 
         cmake -S . -B build ^
-        -G "${{ matrix.compiler.generator }}" ^
-        -A ${{ matrix.compiler.architecture }} ^
-        ${{ matrix.compiler.generator == 'Ninja' && '-DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl' || '-T ClangCL' }} ^
+        -G "${{matrix.env.gen}}" ^
+        %VAR_CMAKE_FLAGS% ^
         -DCMAKE_TOOLCHAIN_FILE=NoxCore\vendors\vcpkg\scripts\buildsystems\vcpkg.cmake ^
         -DVulkan_INCLUDE_DIR=%Vulkan_INCLUDE_DIR% ^
-        -DVulkan_LIBRARY=%Vulkan_LIBRARY%
+        -DVulkan_LIBRARY=%Vulkan_LIBRARY% ^
+        -DCMAKE_BUILD_TYPE=Release
+
 
 
 
@@ -128,4 +149,4 @@ jobs:
       shell: cmd
       run: |
 
-        cmake --build build --config Release --parallel
+        cmake --build build --parallel --config Release
