@@ -11,8 +11,10 @@ jobs:
     runs-on: windows-latest
 
     steps:
+
     - name: Checkout
       uses: actions/checkout@v4
+
 
     #
     # Install vcpkg + dependencies
@@ -49,6 +51,23 @@ jobs:
           tinyobjloader ^
           --triplet=x64-windows
 
+
+    #
+    # Verify vcpkg
+    #
+    - name: Verify vcpkg installation
+      shell: cmd
+      run: |
+
+        echo ==== VCPKG PACKAGES ====
+
+        NoxCore\vendors\vcpkg\vcpkg.exe list
+
+        echo ==== SDL3 FILES ====
+
+        dir NoxCore\vendors\vcpkg\installed\x64-windows\share\sdl3
+
+
     #
     # Install Slang
     #
@@ -62,16 +81,15 @@ jobs:
         https://github.com/shader-slang/slang/releases/download/v%SLANG_VERSION%/slang-%SLANG_VERSION%-windows-x86_64.zip ^
         -o slang.zip
 
-
         mkdir NoxCore\vendors\slang
-
 
         tar -xf slang.zip -C NoxCore\vendors\slang
 
-
         del slang.zip
+
+
     #
-    # Configure exactly like your bat file
+    # Configure CMake
     #
     - name: Configure CMake
       shell: cmd
@@ -83,10 +101,12 @@ jobs:
         -A x64 ^
         -DCMAKE_TOOLCHAIN_FILE=NoxCore\vendors\vcpkg\scripts\buildsystems\vcpkg.cmake
 
+
     #
     # Build
     #
     - name: Build
       shell: cmd
       run: |
+
         cmake --build build --config Release
