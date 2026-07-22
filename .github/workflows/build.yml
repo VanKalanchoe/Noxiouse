@@ -8,100 +8,85 @@ on:
 
 jobs:
   build:
-    strategy:
-      fail-fast: false
-
-      matrix:
-        include:
-
-          # Windows MSVC
-          - os: windows-latest
-            name: windows-msvc
-            generator: "Visual Studio 18 2026"
-            compiler: cl
-
-          # Windows ClangCL
-          - os: windows-latest
-            name: windows-clangcl
-            generator: "Visual Studio 18 2026"
-            compiler: clangcl
-
-          # Linux GCC
-          - os: ubuntu-latest
-            name: linux-gcc
-            compiler: gcc
-
-          # Linux Clang
-          - os: ubuntu-latest
-            name: linux-clang
-            compiler: clang
-
-          # macOS AppleClang
-          - os: macos-latest
-            name: macos-clang
-            compiler: clang
-
-
-    runs-on: ${{ matrix.os }}
-
+    runs-on: windows-latest
 
     steps:
-
     - name: Checkout
       uses: actions/checkout@v4
 
-
-    - name: Install Linux dependencies
-      if: runner.os == 'Linux'
-      run: |
-        sudo apt update
-        sudo apt install -y ninja-build clang gcc g++
-
-
-    - name: Install macOS dependencies
-      if: runner.os == 'macOS'
-      run: |
-        brew install ninja
-
-
-    - name: Configure CMake Windows
-      if: runner.os == 'Windows'
+    #
+    # Install vcpkg + dependencies
+    #
+    - name: Install dependencies
       shell: cmd
       run: |
 
-        if "${{ matrix.compiler }}"=="clangcl" (
-          cmake -S . -B build ^
-          -G "${{ matrix.generator }}" ^
-          -T ClangCL ^
-          -A x64 ^
-          -DCMAKE_BUILD_TYPE=Release ^
-          -DCMAKE_TOOLCHAIN_FILE=NoxCore/vendors/vcpkg/scripts/buildsystems/vcpkg.cmake
-        ) else (
-          cmake -S . -B build ^
-          -G "${{ matrix.generator }}" ^
-          -A x64 ^
-          -DCMAKE_BUILD_TYPE=Release ^
-          -DCMAKE_TOOLCHAIN_FILE=NoxCore/vendors/vcpkg/scripts/buildsystems/vcpkg.cmake
-        )
+        echo Installing vcpkg...
 
+        git clone https://github.com/microsoft/vcpkg.git NoxCore\vendors\vcpkg
 
-    - name: Configure Unix CMake
-      if: runner.os != 'Windows'
+        cd NoxCore\vendors\vcpkg
+
+        bootstrap-vcpkg.bat
+
+        cd ..\..\..
+
+        echo Installing packages...
+
+        NoxCore\vendors\vcpkg\vcpkg.exe install ^
+          sdl3[vulkan] ^
+          glm ^
+          entt ^
+          spdlog ^
+          xxhash ^
+          yaml-cpp ^
+          box2d ^
+          imguizmo ^
+          freetype ^
+          skia ^
+          stb ^
+          ktx[vulkan] ^
+          tinyobjloader ^
+          --triplet=x64-windows
+
+    #
+    # Install Slang
+    #
+    - name: Install Slang
+      shell: cmd
       run: |
 
-        cmake -S . -B build \
-        -G Ninja \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_C_COMPILER=${{ matrix.compiler }} \
-        -DCMAKE_CXX_COMPILER=${{ matrix.compiler == 'gcc' && 'g++' || matrix.compiler == 'clang' && 'clang++' || 'clang++' }}
+        set SLANG_VERSION=2026.13
+
+        curl -L ^
+        https://github.com/shader-slang/slang/releases/download/v%SLANG_VERSION%/slang-%SLANG_VERSION%-windows-x86_64.zip ^
+        -o slang.zip
 
 
+        mkdir NoxCore\vendors\slang
+
+
+        tar -xf slang.zip -C NoxCore\vendors\slang
+
+
+        del slang.zip
+    #
+    # Configure exactly like your bat file
+    #
+    - name: Configure CMake
+      shell: cmd
+      run: |
+
+        cmake -S . -B build ^
+        -G "Visual Studio 18 2026" ^
+        -T ClangCL ^
+        -A x64 ^
+        -DCMAKE_TOOLCHAIN_FILE=NoxCore\vendors\vcpkg\scripts\buildsystems\vcpkg.cmake
+
+    #
+    # Build
+    #
     - name: Build
+      shell: cmd
       run: |
         cmake --build build --config Release
-
-
-    - name: Test
-      working-directory: build
-      run: |
-        ctest --build-config Release
