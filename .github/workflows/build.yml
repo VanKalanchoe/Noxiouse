@@ -115,6 +115,52 @@ jobs:
 
 
 
+     #
+    # Cache Vulkan SDK
+    #
+    - name: Cache Vulkan SDK
+      id: vulkan-cache
+      uses: actions/cache@v5
+      with:
+        path: C:\VulkanSDK\1.4.350.0
+        key: windows-vulkan-sdk-1.4.350.0
+
+
+
+    #
+    # Install Vulkan SDK
+    #
+    - name: Install Vulkan SDK
+      if: steps.vulkan-cache.outputs.cache-hit != 'true'
+      shell: pwsh
+      run: |
+
+        winget install `
+          --id KhronosGroup.VulkanSDK `
+          --exact `
+          --version 1.4.350.0 `
+          --accept-source-agreements `
+          --accept-package-agreements
+
+
+
+    #
+    # Setup Vulkan environment
+    #
+    - name: Setup Vulkan environment
+      shell: pwsh
+      run: |
+
+        $version = "1.4.350.0"
+
+        echo "VULKAN_SDK=C:\VulkanSDK\$version" >> $env:GITHUB_ENV
+        echo "Vulkan_INCLUDE_DIR=C:\VulkanSDK\$version\Include" >> $env:GITHUB_ENV
+        echo "Vulkan_LIBRARY=C:\VulkanSDK\$version\Lib\vulkan-1.lib" >> $env:GITHUB_ENV
+
+
+        echo "Vulkan SDK:"
+        dir C:\VulkanSDK\$version
+    
     #
     # Configure CMake
     #
