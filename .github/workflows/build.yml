@@ -21,7 +21,7 @@ jobs:
     # Cache vcpkg
     #
     - name: Cache vcpkg
-      uses: actions/cache@v4
+      uses: actions/cache@v7
       with:
         path: |
           NoxCore/vendors/vcpkg
@@ -105,11 +105,10 @@ jobs:
     #
     - name: Cache Vulkan SDK
       id: vulkan-cache
-      uses: actions/cache@v4
+      uses: actions/cache@v7
       with:
-        path: C:\VulkanSDK
-        key: windows-vulkan-sdk-1.4.350
-
+        path: C:\VulkanSDK\1.4.350.0
+        key: windows-vulkan-sdk-1.4.350.0
 
 
     #
@@ -120,24 +119,16 @@ jobs:
       shell: pwsh
       run: |
 
-        $version = "1.4.350.0"
-
-        $url = "https://sdk.lunarg.com/sdk/download/$version/windows/VulkanSDK-$version-Installer.exe"
-
-        Invoke-WebRequest `
-          -Uri $url `
-          -OutFile VulkanSDK.exe
-
-
-        Start-Process `
-          -FilePath VulkanSDK.exe `
-          -ArgumentList "--accept-licenses --default-answer --confirm-command install" `
-          -Wait
-
+        winget install `
+          --id KhronosGroup.VulkanSDK `
+          --exact `
+          --version 1.4.350.0 `
+          --accept-source-agreements `
+          --accept-package-agreements
 
 
     #
-    # Setup Vulkan variables
+    # Setup Vulkan environment
     #
     - name: Setup Vulkan environment
       shell: pwsh
@@ -148,6 +139,10 @@ jobs:
         echo "VULKAN_SDK=C:\VulkanSDK\$version" >> $env:GITHUB_ENV
         echo "Vulkan_INCLUDE_DIR=C:\VulkanSDK\$version\Include" >> $env:GITHUB_ENV
         echo "Vulkan_LIBRARY=C:\VulkanSDK\$version\Lib\vulkan-1.lib" >> $env:GITHUB_ENV
+
+
+        echo "Vulkan SDK:"
+        dir C:\VulkanSDK\$version
 
 
 
