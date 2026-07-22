@@ -21,7 +21,7 @@ jobs:
     # Cache vcpkg
     #
     - name: Cache vcpkg
-      uses: actions/cache@v7
+      uses: actions/cache@v5
       with:
         path: |
           NoxCore/vendors/vcpkg
@@ -105,7 +105,7 @@ jobs:
     #
     - name: Cache Vulkan SDK
       id: vulkan-cache
-      uses: actions/cache@v7
+      uses: actions/cache@v5
       with:
         path: C:\VulkanSDK\1.4.350.0
         key: windows-vulkan-sdk-1.4.350.0
