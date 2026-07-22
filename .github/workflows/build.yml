@@ -36,13 +36,6 @@ jobs:
             gen: Ninja
 
 
-    env:
-
-      VAR_CMAKE_FLAGS: >
-        -D CMAKE_C_COMPILER=${{matrix.env.c}}
-        -D CMAKE_CXX_COMPILER=${{matrix.env.cxx}}
-
-
     steps:
 
 
@@ -89,7 +82,7 @@ jobs:
 
         cd ..\..\..
 
-
+        
         NoxCore\vendors\vcpkg\vcpkg.exe install ^
           sdl3[vulkan] ^
           glm ^
@@ -108,7 +101,6 @@ jobs:
 
 
 
-
     #
     # Install Ninja only for clang-cl job
     #
@@ -123,7 +115,6 @@ jobs:
 
 
 
-
     #
     # Configure CMake
     #
@@ -132,13 +123,13 @@ jobs:
       run: |
 
         cmake -S . -B build ^
-        -G "${{matrix.env.gen}}" ^
-        %VAR_CMAKE_FLAGS% ^
+        -G "${{ matrix.env.gen }}" ^
+        -D CMAKE_C_COMPILER=${{ matrix.env.c }} ^
+        -D CMAKE_CXX_COMPILER=${{ matrix.env.cxx }} ^
         -DCMAKE_TOOLCHAIN_FILE=NoxCore\vendors\vcpkg\scripts\buildsystems\vcpkg.cmake ^
         -DVulkan_INCLUDE_DIR=%Vulkan_INCLUDE_DIR% ^
         -DVulkan_LIBRARY=%Vulkan_LIBRARY% ^
         -DCMAKE_BUILD_TYPE=Release
-
 
 
 
