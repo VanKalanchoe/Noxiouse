@@ -346,6 +346,10 @@ namespace Nox
             .size = bufferSize,
             .usage = NRI::BufferUsage::Staging
         });
+        
+        void* mappedMemory = stagingBuffer->map(0, bufferSize);
+        memcpy(mappedMemory, vertices.data(), bufferSize);
+        stagingBuffer->unmap();
 
         m_vertexBuffer = m_device->createBuffer(NRI::BufferDesc
             {
@@ -366,7 +370,11 @@ namespace Nox
             .size = bufferSize,
             .usage = NRI::BufferUsage::Staging
         });
-
+        
+        void* mappedMemory = stagingBuffer->map(0, bufferSize);
+        memcpy(mappedMemory, indices.data(), bufferSize);
+        stagingBuffer->unmap();
+        
         m_indexBuffer = m_device->createBuffer(NRI::BufferDesc
             {
                 .size = bufferSize,
@@ -426,6 +434,10 @@ namespace Nox
             .size = bufferSize,
             .usage = NRI::BufferUsage::Staging
         });
+        
+        void* mappedMemory = stagingBuffer->map(0, bufferSize);
+        memcpy(mappedMemory, instanceBufferObjects.data(), bufferSize);
+        stagingBuffer->unmap();
 
         m_instanceBuffer = m_device->createBuffer(NRI::BufferDesc
             {

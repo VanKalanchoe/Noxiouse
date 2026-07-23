@@ -26,7 +26,7 @@ if %ERRORLEVEL% neq 0 (
     :: Bootstrap vcpkg
     echo Bootstrapping vcpkg...
     pushd "%VCPKG_ROOT%"
-    bootstrap-vcpkg.bat
+    call bootstrap-vcpkg.bat
     if errorlevel 1 (
         echo Failed to bootstrap vcpkg.
         popd
@@ -76,6 +76,23 @@ if not exist "%DEST_DIR%" (
 )
 :: -------------
 
+:: FileWatch
+set FILEWATCH_DIR=../NoxCore/vendors/filewatch
+
+if not exist "%FILEWATCH_DIR%" (
+    echo Downloading FileWatch...
+
+    git clone https://github.com/ThomasMonkman/filewatch.git "%FILEWATCH_DIR%"
+
+    if errorlevel 1 (
+        echo Failed to clone FileWatch.
+        exit /b 1
+    )
+
+    echo FileWatch installed.
+) else (
+    echo FileWatch already installed, skipping.
+)
 
 :: Remind about Vulkan SDK
 echo.

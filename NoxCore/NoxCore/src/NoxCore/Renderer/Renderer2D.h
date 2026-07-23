@@ -41,23 +41,32 @@ namespace Nox
         Renderer2D(bool isEditor, RendererContext ctx);
         ~Renderer2D();
         
-        bool drawFrame();
-        void Flush(NRI::CommandBuffer& cmd, const NRI::Buffer& currentUniformBuffer) const;
-        
-        static void BeginScene(const EditorCamera& camera);
-        static void EndScene();
-        
         void DrawQuad(const glm::mat4& transform, const glm::vec4& color, int entityID = -1);
         void DrawQuad(const glm::mat4& transform, const Ref<Texture2D>& texture, float tilingFactor = 1.0f, const glm::vec4& tintColor = glm::vec4(1.0f), int entityID = -1);
         void DrawSprite(const glm::mat4& transform, SpriteRendererComponent& src, int entityID);
+        
+        bool drawFrame();
+        
+        void Flush(NRI::CommandBuffer& cmd, const NRI::Buffer& currentUniformBuffer) const;
+        
+        void BeginScene(const EditorCamera& camera);
+        void EndScene();
 
     private:
         void initRenderer2D();
         void createMeshPipeline(bool forceCompile);
         
     private:
+        struct Data
+        {
+            std::vector<shaderio::QuadData> quadDatas;
+            std::unique_ptr<NRI::Buffer> quadBuffer;
+        };
+        
+    private:
         bool m_isEditor = false;
         RendererContext m_context;
+        Data m_data;
         
         std::unique_ptr<NRI::Pipeline> m_MeshQuadPipeline = nullptr;
     };   

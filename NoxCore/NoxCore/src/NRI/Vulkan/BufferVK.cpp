@@ -89,11 +89,12 @@ namespace NRI
         }
         else
         {
-            auto* stagingVK = dynamic_cast<BufferVK*>(&cmd);
+            // wtf is this 
+            /*auto* stagingVK = dynamic_cast<BufferVK*>(&cmd);
             void * data = stagingBuffer.map(0, m_allocatedBuffer.size);
             memcpy(data, vectorData, m_allocatedBuffer.size);
             const std::array<vk::BufferCopy, 1> copyRegion{{{.size = m_allocatedBuffer.size}}};
-            cmdVK->getActiveNativeBuffer().copyBuffer(stagingVK->getNativeBuffer(), m_allocatedBuffer.buffer, copyRegion);
+            cmdVK->getActiveNativeBuffer().copyBuffer(stagingVK->getNativeBuffer(), m_allocatedBuffer.buffer, copyRegion);*/
         }
     }
 }

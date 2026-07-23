@@ -26,7 +26,8 @@ namespace Nox
         createMeshPipeline(false);
     }
     
-    bool Renderer2D::drawFrame()
+    // needed for pipeline management you cant run this inside a commandbuffer that already started
+    bool Renderer2D::drawFrame() 
     {
         if (m_reloadShader)
         {
@@ -60,59 +61,26 @@ namespace Nox
         m_MeshQuadPipeline = m_context.device.createPipeline(desc, m_context.shaderCompiler);
     }
     
-    void Renderer2D::Flush(NRI::CommandBuffer& commandBuffer, const NRI::Buffer& currentUniformBuffer) const
-    {
-        // MeshQuad
-        {
-            commandBuffer.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_MeshQuadPipeline);
-            
-            shaderio::PushConstantQuad quadReferences{};
-            quadReferences.matrixReference = currentUniformBuffer.getDeviceAddress();
-            commandBuffer.pushData(&quadReferences, sizeof(shaderio::PushConstantQuad));
-            
-            commandBuffer.drawMeshTasks(1, 1, 1);    
-        }
-    }
-    
-    void Renderer2D::BeginScene(const EditorCamera& camera)
-    {
-        
-    }
-    
-    void Renderer2D::EndScene()
-    {
-        
-    }
-    
-    struct QuadData
-    {
-        glm::mat4 modelMatrix;
-        glm::vec4 color;
-        uint32_t materialIndex;
-        int EntityID;
-    };
-    static std::vector<QuadData> quads;
-
     void Renderer2D::DrawQuad(const glm::mat4& transform, const glm::vec4& color, int entityID)
     {
-        /*QuadData instance;
+        shaderio::QuadData instance;
         instance.modelMatrix = transform;
         instance.color = color;
         instance.materialIndex = m_context.whiteTexture->GetDescriptorIndexSlot();
         instance.EntityID = entityID;
 
-        quads.emplace_back(instance);*/
+        m_data.quadDatas.emplace_back(instance);
     }
 
     void Renderer2D::DrawQuad(const glm::mat4& transform, const Ref<Texture2D>& texture, float tilingFactor, const glm::vec4& tintColor, int entityID)
     {
-        /*QuadData instance;
+        shaderio::QuadData instance;
         instance.modelMatrix = transform;
         instance.color = tintColor;
-        instance.materialIndex = texture->GetTextureIndex();
+        instance.materialIndex = texture->GetDescriptorIndexSlot();
         instance.EntityID = entityID;
 
-        quads.emplace_back(instance);*/
+        m_data.quadDatas.emplace_back(instance);
     }
     
     void Renderer2D::DrawSprite(const glm::mat4& transform, SpriteRendererComponent& src, int entityID)
@@ -126,5 +94,33 @@ namespace Nox
         {
             DrawQuad(transform, src.Color, entityID);
         }
+    }
+    
+    // Runs inside a Begin rendering
+    void Renderer2D::Flush(NRI::CommandBuffer& commandBuffer, const NRI::Buffer& currentUniformBuffer) const
+    {
+        // MeshQuad
+        if (!m_data.quadDatas.empty())
+        {
+            commandBuffer.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_MeshQuadPipeline);
+            
+            shaderio::PushConstantQuad quadReferences{};
+            quadReferences.matrixReference = currentUniformBuffer.getDeviceAddress();
+            commandBuffer.pushData(&quadReferences, sizeof(shaderio::PushConstantQuad));
+            
+            commandBuffer.drawMeshTasks(m_data.quadDatas.size(), 1, 1);    
+        }
+    }
+    
+    // Runs outside of any rendering call whenever you want
+    void Renderer2D::BeginScene(const EditorCamera& camera)
+    {
+        m_data.quadDatas.clear();
+    }
+    
+    // Runs outside of any rendering call whenever you want
+    void Renderer2D::EndScene()
+    {
+        
     }
 }

@@ -32,6 +32,14 @@ struct Vertex
 struct PushConstantQuad
 {
     uint64_t matrixReference;
+    uint64_t quadDataReference;
+};
+struct QuadData
+{
+    mat4 modelMatrix;
+    vec4 color;
+    uint32_t materialIndex;
+    int EntityID;
 };
 
 #endif  // HOST_DEVICE_H

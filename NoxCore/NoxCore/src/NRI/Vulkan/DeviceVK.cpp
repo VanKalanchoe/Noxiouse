@@ -15,6 +15,10 @@
 #include "MemoryAllocatorVK.h"
 #include "NoxCore/Core/core.h"
 
+// Vulkan-Hpp loads extension functions through a dispatcher.
+// This can create a dispatch table to cache function pointers,
+// and can skip the loader when calling Vulkan functions.
+VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 
 namespace NRI
 {
@@ -165,6 +169,23 @@ namespace NRI
             .ppEnabledExtensionNames = requiredExtensions.data()
         };
         m_instance = vk::raii::Instance(m_context, createInfo);
+        
+        // Load function pointers for the Vulkan instance.
+        {
+            // It is complicated to explain how Vulkan is loaded, but as an oversimplification:
+            // When calling a Vulkan function, the application does not call the function directly.
+            // First it calls the Vulkan loader, and the loader then obtains this function from the device or instance.
+            // Vulkan allows us to use vkGetInstanceProcAddr to cache the final function pointers, to call them directly
+            // and skip the lookup work done by the loader.
+            //
+            // The process of creating a table of function pointers is a bit tedious, so it is handled automatically by
+            // Vulkan-Hpp. Applications using the C API are encouraged to use a library like Volk for similar
+            // functionality. Most third-party bindings for other languages also handle this automatically.
+            //
+            // The VULKAN_HPP_DEFAULT_DISPATCHER contains the function pointers for the Vulkan instance and device
+            // functions. It is used by Vulkan-Hpp to call C API functions directly without going through the loader.
+            VULKAN_HPP_DEFAULT_DISPATCHER.init(*m_instance, vkGetInstanceProcAddr);
+        }
     }
 
     void DeviceVK::setupDebugMessenger()
@@ -327,6 +348,13 @@ namespace NRI
 
         m_device = vk::raii::Device(m_physicalDevice, deviceCreateInfo);
         m_queue = vk::raii::Queue(m_device, m_queueIndex, 0);
+        
+        // Load device-level function pointers for Vulkan-Hpp wrappers.
+        // Before we only loaded the function pointers for the instance-level functions.
+        // After creating the logical device, we can load the function pointers that depend on it to skip the
+        // loader. Loading the function pointers is a bit tedious, but is handled automatically by Vulkan-Hpp.
+        // Other libraries like Volk provide similar functionality for the C API.
+        VULKAN_HPP_DEFAULT_DISPATCHER.init(*m_instance, vkGetInstanceProcAddr, *m_device);
     }
 
     void DeviceVK::initDeviceCapabilities()

@@ -14,7 +14,7 @@ find_package (sdl3 REQUIRED)
 find_package (glm REQUIRED)
 find_package (Vulkan 1.4.350 REQUIRED)
 find_package (entt REQUIRED)
-find_package (stb REQUIRED)
+find_package (Stb REQUIRED)
 set(STB_INCLUDEDIR ${stb_INCLUDE_DIRS})
 find_package (KTX REQUIRED)
 find_package (tinyobjloader REQUIRED)
@@ -121,12 +121,12 @@ file(GLOB_RECURSE NOXCORE_FILES
 add_library(${PROJECT_NAME} STATIC ${NOXCORE_FILES} ${IMGUI_SOURCES}) #main file here
 set_target_properties (${PROJECT_NAME} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${TEMPLATE_DIR})
 set_target_properties (${PROJECT_NAME} PROPERTIES CXX_STANDARD 20)
-target_link_libraries (${PROJECT_NAME} PUBLIC Vulkan::cppm SDL3::SDL3 glm::glm spdlog::spdlog Slang::slang EnTT::EnTT xxHash::xxhash yaml-cpp box2d::box2d imguizmo::imguizmo msdf-atlas-gen::msdf-atlas-gen tinyobjloader::tinyobjloader)
+target_link_libraries (${PROJECT_NAME} PUBLIC Vulkan::cppm SDL3::SDL3 glm::glm spdlog::spdlog Slang::slang EnTT::EnTT xxHash::xxhash yaml-cpp::yaml-cpp box2d::box2d imguizmo::imguizmo msdf-atlas-gen::msdf-atlas-gen tinyobjloader::tinyobjloader)
 # Add here vendors
 target_include_directories (${PROJECT_NAME} SYSTEM PRIVATE ${STB_INCLUDEDIR} ${CMAKE_CURRENT_SOURCE_DIR}/vendors/taskflow ${CMAKE_CURRENT_SOURCE_DIR}/vendors/VulkanMemoryAllocator-Hpp/include ${CMAKE_CURRENT_SOURCE_DIR}/vendors/VulkanMemoryAllocator-Hpp/VulkanMemoryAllocator/include ${IMGUI_DIR}/backends)
 
 #vendors visible to other projects like editor
-target_include_directories (${PROJECT_NAME} SYSTEM PUBLIC ${IMGUI_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/vendors/FileWatch)
+target_include_directories (${PROJECT_NAME} SYSTEM PUBLIC ${IMGUI_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/vendors/filewatch)
 
 # Sysmtem means supress warnings from the include directories, so we don't get warnings from external libraries.
 target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/NoxCore/src ${CMAKE_SOURCE_DIR}/shaders)
