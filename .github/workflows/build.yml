@@ -100,6 +100,16 @@ jobs:
           --triplet=x64-windows
 
 
+        #
+    # Install FileWatch
+    #
+    - name: Install FileWatch
+      shell: cmd
+      run: |
+
+        if not exist NoxCore\vendors\filewatch (
+          git clone https://github.com/ThomasMonkman/filewatch.git NoxCore\vendors\filewatch
+        )
 
     #
     # Install Ninja only for clang-cl job
