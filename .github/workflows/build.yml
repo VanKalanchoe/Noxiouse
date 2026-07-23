@@ -160,6 +160,37 @@ jobs:
 
         echo "Vulkan SDK:"
         dir C:\VulkanSDK\$version
+
+     #
+    # Install Slang
+    #
+    - name: Install Slang
+      shell: cmd
+      run: |
+
+        set SLANG_VERSION=2026.13
+
+        curl -L ^
+        https://github.com/shader-slang/slang/releases/download/v%SLANG_VERSION%/slang-%SLANG_VERSION%-windows-x86_64.zip ^
+        -o slang.zip
+
+
+        if exist NoxCore\vendors\slang (
+            rmdir /s /q NoxCore\vendors\slang
+        )
+
+
+        mkdir NoxCore\vendors\slang
+
+
+        tar -xf slang.zip -C NoxCore\vendors\slang
+
+
+        del slang.zip
+
+
+        echo ==== Slang contents ====
+        dir NoxCore\vendors\slang
     
     #
     # Configure CMake
