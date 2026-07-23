@@ -246,3 +246,4 @@ playground.xcworkspace
 *.moved-aside
 *.xcuserstate
 *.xcscmblueprint
+Nox.log

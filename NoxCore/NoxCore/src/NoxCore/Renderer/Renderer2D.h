@@ -13,7 +13,7 @@ namespace shaderio // Shader IO namespace -- shared layout between C++ and shade
     
     inline bool operator==(const shaderio::Vertex& other1, const shaderio::Vertex& other2)
     {
-        return other1.pos == other2.pos && other1.color == other2.color && other1.texCoord == other2.texCoord;
+        return other1.pos == other2.pos  && other1.texCoord == other2.texCoord;
     }
 }
 
@@ -23,6 +23,8 @@ namespace shaderio // Shader IO namespace -- shared layout between C++ and shade
 #include "NoxCore/Scene/Components.h"
 #include "NoxCore/Asset/TextureImporter.h"
 
+constexpr int MAX_FRAMES_IN_FLIGHT = 2; // currently in swapchainvk and devicevk headers seperate combine them in the future
+
 namespace Nox
 {
     struct RendererContext
@@ -31,8 +33,22 @@ namespace Nox
         NRI::ShaderCompiler& shaderCompiler;
         Utils::NOXWatcher& fileWatcher;
         Ref<Texture2D>& whiteTexture;
-        /*NRI::DescriptorHeap& resourceHeap;
-        NRI::DescriptorHeap& samplerHeap;*/
+        
+        std::function<std::unique_ptr<NRI::CommandBuffer>()> beginSingleTimeCommands;
+        std::function<void(std::unique_ptr<NRI::CommandBuffer>&&)> endSingleTimeCommands;
+    };
+    
+    const std::vector<shaderio::Vertex> m_vertices =
+    {
+        {{-0.5f, -0.5f, 0.0f}, {0.0f, 0.0f}},
+        {{0.5f, -0.5f, 0.0f}, {1.0f, 0.0f}},
+        {{0.5f, 0.5f, 0.0f}, {1.0f, 1.0f}},
+        {{-0.5f, 0.5f, 0.0f}, {0.0f, 1.0f}},
+    };
+
+    const std::vector<uint32_t> m_indices = 
+    {
+        0, 1, 2, 2, 3, 0
     };
     
     class Renderer2D
@@ -45,9 +61,10 @@ namespace Nox
         void DrawQuad(const glm::mat4& transform, const Ref<Texture2D>& texture, float tilingFactor = 1.0f, const glm::vec4& tintColor = glm::vec4(1.0f), int entityID = -1);
         void DrawSprite(const glm::mat4& transform, SpriteRendererComponent& src, int entityID);
         
+
         bool drawFrame();
-        
-        void Flush(NRI::CommandBuffer& cmd, const NRI::Buffer& currentUniformBuffer) const;
+        void Update(uint32_t currentImage);
+        void Flush(NRI::CommandBuffer& commandBuffer, const NRI::Buffer& currentUniformBuffer, uint32_t frameIndex) const;
         
         void BeginScene(const EditorCamera& camera);
         void EndScene();
@@ -55,12 +72,19 @@ namespace Nox
     private:
         void initRenderer2D();
         void createMeshPipeline(bool forceCompile);
-        
+        void createQuadVertexBuffer();
+        void createQuadIndexBuffer();
+        void createQuadUniformBuffers();
+
     private:
         struct Data
         {
+            std::unique_ptr<NRI::Buffer> vertexBuffer = nullptr;
+            std::unique_ptr<NRI::Buffer> indexBuffer = nullptr;
+            
             std::vector<shaderio::QuadData> quadDatas;
-            std::unique_ptr<NRI::Buffer> quadBuffer;
+            std::vector<std::unique_ptr<NRI::Buffer>> quadUniformBuffers;
+            std::vector<void*> quadUniformBuffersMapped;
         };
         
     private:

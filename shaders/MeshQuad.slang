@@ -1,21 +1,21 @@
 #include "shaderIO.h"
 
-const static int32_t TASK_SHADER_DISPATCH_X = 64;
-const static int32_t MESH_SHADER_DISPATCH_X = 32;
-
 struct QuadPayLoad
 {
     uint quadID;
 };
 
 [shader("task")]
-[numthreads(TASK_SHADER_DISPATCH_X, 1, 1)]
+[numthreads(64, 1, 1)]
 void taskMain(
-    uint3 gid : SV_GroupID, uint3 groupThreadID: SV_GroupThreadID
+    uint3 gid : SV_GroupID, uint3 groupThreadID: SV_GroupThreadID, uniform PushConstantQuad pushConstant
 )
 {
     // globalThreadID = thread index in group + offset from group
     uint globalThreadID = gid.x;
+
+    // safety check
+    if (globalThreadID >= pushConstant.numOfElements) return;
 
     // create payload for this quad
     QuadPayLoad payload;
@@ -44,7 +44,10 @@ static const float2 uv[4] =
 struct VSOutput
 {
     float4 position : SV_Position;
-    float2 texcoords : TEXCOORD0;
+    float4 color : TEXCOORD0;
+    float2 texcoords : TEXCOORD1;
+    uint32_t materialIndex : TEXCOORD2;
+    int entityID : TEXCOORD3;
 };
 
 [shader("mesh")]
@@ -59,13 +62,17 @@ void meshMain
 {
     uint quadID = sharedPayload.quadID;
     UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+    QuadData* quadData = (QuadData*)pushConstant.quadDataReference;
 
 	SetMeshOutputCounts(4, 2); // 4 vertices, 2 triangles
 
 	for (uint i = 0; i < 4; i++) 
     {
-		vertices[i].position = mul(ubo.proj, mul(ubo.view, positions[i]));
+		vertices[i].position = mul(ubo.proj, mul(ubo.view, mul(quadData[quadID].modelMatrix, positions[i])));
+        vertices[i].color = quadData[quadID].color;
         vertices[i].texcoords = uv[i];
+        vertices[i].materialIndex = quadData[quadID].materialIndex;
+        vertices[i].entityID = quadData[quadID].entityID;
 	}
 
 	triangles[0] = uint3(0, 1, 2);
@@ -82,7 +89,7 @@ FSOutput fragMain(VSOutput vertexInput)
 {
     FSOutput output;
 
-    output.color = float4(1.0, 0.0, 1.0, 1.0); // Default pink color
+    output.color = vertexInput.color; // Default pink color
 
     return output;
 }

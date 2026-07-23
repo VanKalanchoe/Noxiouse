@@ -10,14 +10,13 @@ namespace std
     {
         size_t operator()(shaderio::Vertex const& vertex) const noexcept
         {
-            return ((hash<glm::vec3>()(vertex.pos) ^ (hash<glm::vec3>()(vertex.color) << 1)) >> 1) ^ (hash<glm::vec2>()(vertex.texCoord) << 1);
+            return (hash<glm::vec3>()(vertex.pos) >> 1) ^ (hash<glm::vec2>()(vertex.texCoord) << 1);
         }
     };
 }
 
 const std::string MODEL_PATH = "../../models/viking_room.obj";
 const std::string TEXTURE_PATH = "../../textures/viking_room.ktx2";
-constexpr int MAX_FRAMES_IN_FLIGHT = 2; // currently in swapchainvk and devicevk headers seperate combine them in the future
 
 // 2 quads
 /*const std::vector<Vertex> vertices = {

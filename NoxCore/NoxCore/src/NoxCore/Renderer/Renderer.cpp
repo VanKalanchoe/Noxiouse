@@ -25,21 +25,37 @@ namespace Nox
 
         m_fileWatcher.watch(std::filesystem::path("../../shaders/shader.slang"), [this]() { m_reloadShader = true; });
         m_fileWatcher.watch(std::filesystem::path("../../shaders/present.slang"), [this]() { m_reloadShader = true; });
-        
+
         m_whiteTexture = createSolidColorTexture(255, 255, 255, 255);
-        
-        m_renderer2D = std::make_unique<Renderer2D>(isEditor, RendererContext{ *m_device , *m_shaderCompiler, m_fileWatcher, m_whiteTexture });
+
+        m_renderer2D = std::make_unique<Renderer2D>(isEditor, RendererContext
+                                                    {
+                                                        *m_device,
+                                                        *m_shaderCompiler,
+                                                        m_fileWatcher,
+                                                        m_whiteTexture,
+                                                        [this]()
+                                                        {
+                                                            return beginSingleTimeCommands();
+                                                        },
+
+                                                        [this](std::unique_ptr<NRI::CommandBuffer>&& commandBuffer)
+                                                        {
+                                                            endSingleTimeCommands(std::move(commandBuffer));
+                                                        }
+                                                    }
+        );
     }
 
     Renderer::~Renderer()
     {
         NOX_CORE_INFO("Renderer Shutdown");
+
         
-        m_renderer2D.reset();
 
         m_device->waitIdle();
         m_device->shutdown(); // needed for texture to not remove imguitexture
-
+        m_renderer2D.reset();
         // Cleanup Vulkan resources here
     }
 
@@ -268,13 +284,13 @@ namespace Nox
 
         m_resourceHeap->registerTexture(*textureResource);
         uniformData.imageHeapIndexOffset = m_resourceHeap->getImageHeapIndexOffset();
-        
+
         return textureResource;
     }
-    
+
     Ref<Texture2D> Renderer::createSolidColorTexture(uint8_t r, uint8_t g, uint8_t b, uint8_t a)
     {
-        std::array<uint8_t, 4> pixel = { r, g, b, a };
+        std::array<uint8_t, 4> pixel = {r, g, b, a};
 
         TextureData cpuData{};
         cpuData.Width = 1;
@@ -284,7 +300,7 @@ namespace Nox
         cpuData.DirectFormat = UINT32_MAX;
         cpuData.Data.Data = pixel.data();
         cpuData.Data.Size = pixel.size();
-        cpuData.MipOffsets = { 0 };
+        cpuData.MipOffsets = {0};
 
         return UploadTexture(cpuData);
     }
@@ -320,8 +336,6 @@ namespace Nox
                     1.0f - attrib.texcoords[2 * index.texcoord_index + 1]
                 };
 
-                vertex.color = {1.0f, 1.0f, 1.0f};
-
 #if 1
                 auto [it, inserted] = uniqueVertices.insert({vertex, static_cast<uint32_t>(vertices.size())});
                 if (inserted)
@@ -346,7 +360,7 @@ namespace Nox
             .size = bufferSize,
             .usage = NRI::BufferUsage::Staging
         });
-        
+
         void* mappedMemory = stagingBuffer->map(0, bufferSize);
         memcpy(mappedMemory, vertices.data(), bufferSize);
         stagingBuffer->unmap();
@@ -370,11 +384,11 @@ namespace Nox
             .size = bufferSize,
             .usage = NRI::BufferUsage::Staging
         });
-        
+
         void* mappedMemory = stagingBuffer->map(0, bufferSize);
         memcpy(mappedMemory, indices.data(), bufferSize);
         stagingBuffer->unmap();
-        
+
         m_indexBuffer = m_device->createBuffer(NRI::BufferDesc
             {
                 .size = bufferSize,
@@ -434,7 +448,7 @@ namespace Nox
             .size = bufferSize,
             .usage = NRI::BufferUsage::Staging
         });
-        
+
         void* mappedMemory = stagingBuffer->map(0, bufferSize);
         memcpy(mappedMemory, instanceBufferObjects.data(), bufferSize);
         stagingBuffer->unmap();
@@ -454,7 +468,7 @@ namespace Nox
     {
         // todo: imgui needs more space to if you want to register it
         // currently 1000 in initimgui devicevk.cpp
-        
+
         //hardcoded samplerinfos inside descriptorheapvk cosntructor
         m_samplerHeap = m_device->createDescriptorHeap(NRI::DescriptorHeapDesc{
             .type = NRI::DescriptorHeapType::Sampler,
@@ -514,9 +528,9 @@ namespace Nox
     void Renderer::recordCommandBuffer(uint32_t imageIndex)
     {
         m_commandBuffers->begin(frameIndex, false);
-        
+
         m_commandBuffers->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
-        
+
         m_commandBuffers->transitionSwapchainLayout(*m_swapChain, imageIndex, NRI::TextureLayout::Undefined, NRI::TextureLayout::ColorAttachment);
         if (firstframe)
         {
@@ -551,17 +565,17 @@ namespace Nox
 
         NRI::RenderDesc desc =
         {
-            .renderArea = m_isEditor ? NRI::Extent2D{ m_viewportSize.width, m_viewportSize.height } : NRI::Extent2D{ m_swapChainExtent.width, m_swapChainExtent.height },
+            .renderArea = m_isEditor ? NRI::Extent2D{m_viewportSize.width, m_viewportSize.height} : NRI::Extent2D{m_swapChainExtent.width, m_swapChainExtent.height},
             .colorAttachments = colorAttachments,
             .depthAttachment = depthAttachment
         };
         m_commandBuffers->beginRendering(desc);
-       
+
         // Viewport / scissor (counts and values are both dynamic).
         NRI::Extent2D locViewportSize = m_isEditor ? m_viewportSize : m_swapChainExtent;
         float w = static_cast<float>(locViewportSize.width);
         float h = static_cast<float>(locViewportSize.height);
-        m_commandBuffers->setViewportWithCount({ 0.0f, h, w, -h }, 0.0f, 1.0f);
+        m_commandBuffers->setViewportWithCount({0.0f, h, w, -h}, 0.0f, 1.0f);
         m_commandBuffers->setScissorWithCount(locViewportSize);
 
         // Vertex input empty since we use vertex fetch BDA but still needs to be called empty
@@ -591,7 +605,7 @@ namespace Nox
 
         // Depth / stencil.
         m_commandBuffers->setDepthTestEnable(true);
-        m_commandBuffers->setDepthWriteEnable(true);
+        m_commandBuffers->setDepthWriteEnable(false);
         m_commandBuffers->setDepthCompareOp(NRI::CompareOp::Greater);
         m_commandBuffers->setDepthBoundsTestEnable(false);
         m_commandBuffers->setStencilTestEnable(false);
@@ -608,7 +622,7 @@ namespace Nox
             .alphaBlendOp = NRI::BlendOp::Add,
         };
         uint32_t colorWriteMask = NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A;
-        m_commandBuffers->setColorBlendEnable(0, false);
+        m_commandBuffers->setColorBlendEnable(0, true);
         m_commandBuffers->setColorBlendEquation(0, blendEquation);
         m_commandBuffers->setColorWriteMask(0, colorWriteMask);
         m_commandBuffers->setLogicOpEnable(false);
@@ -625,8 +639,8 @@ namespace Nox
         m_commandBuffers->pushData(&references, sizeof(PushConstantBlock));
 
         m_commandBuffers->drawIndexed(static_cast<uint32_t>(indices.size()), instanceBufferObjects.size(), 0, 0, 0);
-        
-        m_renderer2D->Flush(*m_commandBuffers, *m_uniformBuffers[frameIndex]);
+
+        m_renderer2D->Flush(*m_commandBuffers, *m_uniformBuffers[frameIndex], frameIndex);
 
         m_commandBuffers->endRendering();
 
@@ -642,7 +656,7 @@ namespace Nox
 
         NRI::RenderDesc imguiDesc =
         {
-            .renderArea = { m_swapChainExtent.width,  m_swapChainExtent.height },
+            .renderArea = {m_swapChainExtent.width, m_swapChainExtent.height},
             .colorAttachments = imguiColorAttachments,
         };
 
@@ -654,7 +668,7 @@ namespace Nox
             // Viewport / scissor (counts and values are both dynamic).
             float w = static_cast<float>(m_swapChainExtent.width);
             float h = static_cast<float>(m_swapChainExtent.height);
-            m_commandBuffers->setViewportWithCount({ 0.0f, 0.0f,w, h }, 0.0f, 1.0f);
+            m_commandBuffers->setViewportWithCount({0.0f, 0.0f, w, h}, 0.0f, 1.0f);
             m_commandBuffers->setScissorWithCount(m_swapChainExtent);
 
             // Vertex input empty since we use vertex fetch BDA but still needs to be called empty
@@ -759,7 +773,7 @@ namespace Nox
         {
             return;
         }
-        
+
         uint32_t imageIndex = 0;
 
         if (m_swapChain->acquireNextImage(frameIndex, imageIndex) == NRI::FrameResult::ResizeRequired)
@@ -769,6 +783,8 @@ namespace Nox
         }
 
         updateUniformBuffer(frameIndex);
+
+        m_renderer2D->Update(frameIndex);
 
         recordCommandBuffer(imageIndex);
 
@@ -816,15 +832,15 @@ namespace Nox
     {
         m_device->endImGui();
     }
-    
+
     void Renderer::BeginScene(const EditorCamera& camera)
     {
         uniformData.proj = camera.GetProjection();
         uniformData.view = camera.GetViewMatrix();
-        
+
         m_renderer2D->BeginScene(camera);
     }
-    
+
     void Renderer::EndScene()
     {
         m_renderer2D->EndScene();

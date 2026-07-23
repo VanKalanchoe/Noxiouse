@@ -68,6 +68,7 @@ namespace Nox
 
         m_Font->ReleaseDefault(); // Since Editor Layer since static dies After renderer not needed for components
         
+        //idk what hapens if i have clientproject is this a good place here 
         if (Project::GetActive() && Project::GetActive()->GetEditorAssetManager())
         {
             std::static_pointer_cast<EditorAssetManager>(Project::GetActive()->GetEditorAssetManager())->Shutdown();

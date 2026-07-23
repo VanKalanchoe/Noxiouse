@@ -25,21 +25,22 @@ struct UniformBufferObject
 struct Vertex
 {
     vec3 pos;
-    vec3 color;
     vec2 texCoord;
 };
 
 struct PushConstantQuad
 {
     uint64_t matrixReference;
+    uint64_t vertexReference;
     uint64_t quadDataReference;
+    uint64_t numOfElements;
 };
 struct QuadData
 {
     mat4 modelMatrix;
     vec4 color;
     uint32_t materialIndex;
-    int EntityID;
+    int entityID;
 };
 
 #endif  // HOST_DEVICE_H

@@ -29,7 +29,7 @@ VSOutput vertMain(uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID)
     Vertex vertex = pushConst.vertexBuffer[vertexID];
     InstanceBuffer instance = pushConst.instanceBuffer[instanceID];
     output.pos = mul(ubo.proj, mul(ubo.view, mul(instance.model, float4(vertex.pos, 1.0))));
-    output.color = vertex.color;
+    output.color = float3(1.0, 1.0, 1.0); // Set the color to white
     output.fragTexCoord = vertex.texCoord;
     return output;
 }
