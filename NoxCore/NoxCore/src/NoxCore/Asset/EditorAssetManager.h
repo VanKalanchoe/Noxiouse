@@ -25,6 +25,8 @@ namespace Nox
 
         const AssetRegistry& GetAssetRegistry() const { return m_AssetRegistry; }
 
+        void Shutdown();
+        
         void SerializeAssetRegistry();
         bool DeserializeAssetRegistry();
     private:

@@ -67,6 +67,11 @@ namespace Nox
         NOX_CORE_INFO("EditorLayer Shutdown");
 
         m_Font->ReleaseDefault(); // Since Editor Layer since static dies After renderer not needed for components
+        
+        if (Project::GetActive() && Project::GetActive()->GetEditorAssetManager())
+        {
+            std::static_pointer_cast<EditorAssetManager>(Project::GetActive()->GetEditorAssetManager())->Shutdown();
+        }
     }
 
     void EditorLayer::OnEvent(Event& event)

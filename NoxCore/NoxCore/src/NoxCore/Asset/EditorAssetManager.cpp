@@ -115,6 +115,11 @@ namespace Nox
         return asset;
     }
 
+    void EditorAssetManager::Shutdown()
+    {
+        m_LoadedAssets.clear();
+    }
+
     void EditorAssetManager::SerializeAssetRegistry()
     {
         auto path = Project::GetActiveAssetRegistryPath();
