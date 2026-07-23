@@ -1,0 +1,6 @@
+Project:
+  Name: Facerun
+  StartScene: 18013020098634633818
+  AssetDirectory: "Assets"
+  AssetRegistryPath: "AssetRegistry.nxr"
+  ScriptModulePath: "Scripts/Binaries/Facerun.dll"

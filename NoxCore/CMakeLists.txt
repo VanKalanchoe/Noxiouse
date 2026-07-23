@@ -1,5 +1,3 @@
-#add_library(VanK STATIC)
-
 set (PROJECT_NAME "NoxCore")
 
 # Add option to enable/disable C++ 20 module
@@ -12,13 +10,56 @@ endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../cmake")
 
-find_package(sdl3 REQUIRED)
-find_package(glm REQUIRED)
-find_package(Vulkan 1.4.350 REQUIRED)
-find_package(stb REQUIRED)
+find_package (sdl3 REQUIRED)
+find_package (glm REQUIRED)
+find_package (Vulkan 1.4.350 REQUIRED)
+find_package (entt REQUIRED)
+find_package (Stb REQUIRED)
 set(STB_INCLUDEDIR ${stb_INCLUDE_DIRS})
 find_package (KTX REQUIRED)
 find_package (tinyobjloader REQUIRED)
+find_package (xxhash REQUIRED)
+find_package (yaml-cpp REQUIRED)
+find_package (spdlog CONFIG REQUIRED)
+find_package (box2d REQUIRED)
+find_package (imguizmo REQUIRED)
+
+# Define Slang as an imported library
+add_library(Slang::slang IMPORTED UNKNOWN)
+
+# Set the include directory
+set(SLANG_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendors/slang/include")
+target_include_directories(Slang::slang INTERFACE "${SLANG_INCLUDE_DIR}")
+
+# Set the library path
+if(WIN32)
+    set(SLANG_LIB "${CMAKE_CURRENT_SOURCE_DIR}/vendors/slang/lib/slang.lib")
+    
+    # CRITICAL: This sets the actual file location for the linker
+    set_target_properties(Slang::slang PROPERTIES
+        IMPORTED_LOCATION "${SLANG_LIB}"
+    )
+else()
+    set(SLANG_LIB "${CMAKE_CURRENT_SOURCE_DIR}/vendors/slang/lib/libslang.dylib")
+    set_target_properties(Slang::slang PROPERTIES
+        IMPORTED_LOCATION "${SLANG_LIB}"
+    )
+endif()
+
+set(IMGUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendors/imgui")
+
+set(IMGUI_SOURCES
+    ${IMGUI_DIR}/imgui.cpp
+    ${IMGUI_DIR}/imgui_demo.cpp
+    ${IMGUI_DIR}/imgui_draw.cpp
+    ${IMGUI_DIR}/imgui_tables.cpp
+    ${IMGUI_DIR}/imgui_widgets.cpp
+    # Add the specific backends matching your engine tech!
+    ${IMGUI_DIR}/backends/imgui_impl_sdl3.cpp
+    ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp
+
+    ${IMGUI_DIR}/misc/cpp/imgui_stdlib.cpp
+)
 
 # Set up Vulkan C++ module only if enabled
 if(ENABLE_CPP20_MODULE)
@@ -72,15 +113,23 @@ set(TEMPLATE_DIR ${CMAKE_BINARY_DIR}/${PROJECT_NAME})
 
 file(GLOB_RECURSE NOXCORE_FILES
     CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/NoxCore/src/*.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/NoxCore/src/*.h"
+    "${CMAKE_SOURCE_DIR}/shaders/*.h"
 )
 
-add_executable(${PROJECT_NAME} ${NOXCORE_FILES}) #main file here
+add_library(${PROJECT_NAME} STATIC ${NOXCORE_FILES} ${IMGUI_SOURCES}) #main file here
 set_target_properties (${PROJECT_NAME} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${TEMPLATE_DIR})
 set_target_properties (${PROJECT_NAME} PROPERTIES CXX_STANDARD 20)
-target_link_libraries (${PROJECT_NAME} Vulkan::cppm SDL3::SDL3 glm::glm tinyobjloader::tinyobjloader)
-target_include_directories (${PROJECT_NAME} PRIVATE ${STB_INCLUDEDIR} ${CMAKE_CURRENT_SOURCE_DIR}/vendors/taskflow ${CMAKE_CURRENT_SOURCE_DIR}/vendors/VulkanMemoryAllocator-Hpp/include ${CMAKE_CURRENT_SOURCE_DIR}/vendors/VulkanMemoryAllocator-Hpp/VulkanMemoryAllocator/include)
+target_link_libraries (${PROJECT_NAME} PUBLIC Vulkan::cppm SDL3::SDL3 glm::glm spdlog::spdlog Slang::slang EnTT::EnTT xxHash::xxhash yaml-cpp::yaml-cpp box2d::box2d imguizmo::imguizmo msdf-atlas-gen::msdf-atlas-gen tinyobjloader::tinyobjloader)
+# Add here vendors
+target_include_directories (${PROJECT_NAME} SYSTEM PRIVATE ${STB_INCLUDEDIR} ${CMAKE_CURRENT_SOURCE_DIR}/vendors/taskflow ${CMAKE_CURRENT_SOURCE_DIR}/vendors/VulkanMemoryAllocator-Hpp/include ${CMAKE_CURRENT_SOURCE_DIR}/vendors/VulkanMemoryAllocator-Hpp/VulkanMemoryAllocator/include ${IMGUI_DIR}/backends)
+
+#vendors visible to other projects like editor
+target_include_directories (${PROJECT_NAME} SYSTEM PUBLIC ${IMGUI_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/vendors/filewatch)
+
+# Sysmtem means supress warnings from the include directories, so we don't get warnings from external libraries.
+target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/NoxCore/src ${CMAKE_SOURCE_DIR}/shaders)
 
 # Add compile definition if C++ 20 module is enabled
 if(ENABLE_CPP20_MODULE)
@@ -94,6 +143,12 @@ if(WIN32)
   if(${CMAKE_GENERATOR} MATCHES "Visual Studio.*")
     set_target_properties(${PROJECT_NAME} PROPERTIES VS_DEBUGGER_WORKING_DIRECTORY ${TEMPLATE_DIR})
   endif()
+
+  add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/vendors/slang/bin/slang.dll"
+            $<TARGET_FILE_DIR:${PROJECT_NAME}>
+    )
 endif()
 
 target_compile_options(${PROJECT_NAME} PRIVATE /std:c++latest)

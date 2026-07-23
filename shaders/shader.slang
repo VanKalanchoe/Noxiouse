@@ -1,22 +1,15 @@
-struct VSInput 
-{
-    float3 inPosition;
-    float3 inColor;
-    float2 inTexCoord;
-};
+#include "shaderIO.h"
 
-struct UniformBuffer 
+struct InstanceBuffer
 {
     float4x4 model;
-    float4x4 view;
-    float4x4 proj;
-    uint samplerIndex;
-    uint imageHeapIndexOffset;
 };
 
 struct PushConstant 
 {
-    UniformBuffer* uboBuffer;
+    UniformBufferObject* uboBuffer;
+    Vertex* vertexBuffer;
+    InstanceBuffer* instanceBuffer;
 };
 [[vk::push_constant]]
 ConstantBuffer<PushConstant> pushConst;
@@ -29,31 +22,26 @@ struct VSOutput
 };
 
 [shader("vertex")]
-VSOutput vertMain(VSInput input) 
+VSOutput vertMain(uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID) 
 {
     VSOutput output;
-    UniformBuffer ubo = *pushConst.uboBuffer;
-    output.pos = mul(ubo.proj, mul(ubo.view, mul(ubo.model, float4(input.inPosition, 1.0))));
-    output.color = input.inColor;
-    output.fragTexCoord = input.inTexCoord;
+    UniformBufferObject ubo = *pushConst.uboBuffer;
+    Vertex vertex = pushConst.vertexBuffer[vertexID];
+    InstanceBuffer instance = pushConst.instanceBuffer[instanceID];
+    output.pos = mul(ubo.proj, mul(ubo.view, mul(instance.model, float4(vertex.pos, 1.0))));
+    output.color = vertex.color;
+    output.fragTexCoord = vertex.texCoord;
     return output;
 }
 
 [shader("fragment")]
 float4 fragMain(VSOutput vertIn) : SV_TARGET 
 {
-    UniformBuffer ubo = *pushConst.uboBuffer;
+    UniformBufferObject ubo = *pushConst.uboBuffer;
    
-    DescriptorHandle<Texture2D> texHandle = (DescriptorHandle<Texture2D>)ubo.imageHeapIndexOffset;
-    DescriptorHandle<SamplerState> sampHandle = (DescriptorHandle<SamplerState>)ubo.samplerIndex;
+    Texture2D texHandle = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + 0, 0));
+    SamplerState sampHandle = SamplerState.Handle(uint2(0, 0));
 
     float4 img = texHandle.Sample(sampHandle, vertIn.fragTexCoord);
     return img;
-}
-
-[shader("compute")]
-[numthreads(256,1,1)]
-void compMain(uint3 threadId : SV_DispatchThreadID)
-{
-
 }
