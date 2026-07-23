@@ -100,7 +100,7 @@ jobs:
           --triplet=x64-windows
 
 
-        #
+    #
     # Install FileWatch
     #
     - name: Install FileWatch
@@ -125,7 +125,7 @@ jobs:
 
 
 
-     #
+    #
     # Cache Vulkan SDK
     #
     - name: Cache Vulkan SDK
