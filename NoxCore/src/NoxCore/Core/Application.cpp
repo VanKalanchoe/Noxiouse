@@ -21,6 +21,9 @@ namespace Nox
         NOX_CORE_INFO("Application Start");
 
         s_Application = this;
+        
+        if (!m_Specification.WorkingDirectory.empty())
+            std::filesystem::current_path(m_Specification.WorkingDirectory);
 
         if (m_Specification.WindowSpec.Ttile.empty())
             m_Specification.WindowSpec.Ttile = m_Specification.Name;

@@ -8,8 +8,8 @@ namespace Nox
     {
         m_TreeNodes.push_back(TreeNode(".", 0));
  	
-        m_DirectoryIcon = TextureImporter::LoadTexture2D("Resources/Icons/DirectoryIcon.ktx2", {  .generateMips = false });
-        m_FileIcon = TextureImporter::LoadTexture2D("Resources/Icons/FileIcon.ktx2", { .generateMips = false });
+        m_DirectoryIcon = TextureImporter::LoadTexture2D("assets/Icons/DirectoryIcon.ktx2", {  .generateMips = false });
+        m_FileIcon = TextureImporter::LoadTexture2D("assets/Icons/FileIcon.ktx2", { .generateMips = false });
 
         RefreshAssetTree();
 

@@ -3,9 +3,6 @@
 #include <imgui.h>
 #include "imgui_internal.h"  // For Docking
 #include <imgui_impl_sdl3.h>
-#include <SDL3/SDL_filesystem.h>
-
-#include <SDL3/SDL_video.h>
 
 #include "NoxCore/Renderer/Renderer.h"
 #include "NoxCore/Core/Application.h"
@@ -68,13 +65,9 @@ namespace Nox
         //ImFont* font = io.Fonts->AddFontFromFileTTF("c:\\Windows\\Fonts\\ArialUni.ttf");
         //IM_ASSERT(font != nullptr);
         
-        char fullPathRegular[256];
-        SDL_snprintf(fullPathRegular, sizeof(fullPathRegular), "%s../../Resources/fonts/opensans/static/%s", SDL_GetBasePath(), "OpenSans-Regular.ttf");
-        io.FontDefault = io.Fonts->AddFontFromFileTTF(fullPathRegular, 18.0f);
-        
-        char fullPathBold[256];
-        SDL_snprintf(fullPathBold, sizeof(fullPathBold), "%s../../Resources/fonts/opensans/static/%s", SDL_GetBasePath(), "OpenSans-Bold.ttf");
-        io.Fonts->AddFontFromFileTTF(fullPathBold, 18.0f);
+        float fontSize = 18.0f;// *2.0f;
+        io.Fonts->AddFontFromFileTTF("assets/fonts/opensans/static/OpenSans-Bold.ttf", fontSize);
+        io.FontDefault = io.Fonts->AddFontFromFileTTF("assets/fonts/opensans/static/OpenSans-Regular.ttf", fontSize);
     }
 
     ImGuiLayer::~ImGuiLayer()

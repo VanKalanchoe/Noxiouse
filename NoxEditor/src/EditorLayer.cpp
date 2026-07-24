@@ -28,11 +28,11 @@ namespace Nox
 
         m_Font = Font::GetDefault();
 
-        m_IconPlay = TextureImporter::LoadTexture2D("Resources/Icons/PlayButton.ktx2", {.generateMips = false});
-        m_IconStop = TextureImporter::LoadTexture2D("Resources/Icons/StopButton.ktx2", {.generateMips = false});
-        m_IconPause = TextureImporter::LoadTexture2D("Resources/Icons/PauseButton.ktx2", {.generateMips = false});
-        m_IconSimulate = TextureImporter::LoadTexture2D("Resources/Icons/SimulateButton.ktx2", {.generateMips = false});
-        m_IconStep = TextureImporter::LoadTexture2D("Resources/Icons/StepButton.ktx2", {.generateMips = false});
+        m_IconPlay = TextureImporter::LoadTexture2D("assets/Icons/PlayButton.ktx2", {.generateMips = false});
+        m_IconStop = TextureImporter::LoadTexture2D("assets/Icons/StopButton.ktx2", {.generateMips = false});
+        m_IconPause = TextureImporter::LoadTexture2D("assets/Icons/PauseButton.ktx2", {.generateMips = false});
+        m_IconSimulate = TextureImporter::LoadTexture2D("assets/Icons/SimulateButton.ktx2", {.generateMips = false});
+        m_IconStep = TextureImporter::LoadTexture2D("assets/Icons/StepButton.ktx2", {.generateMips = false});
 
         m_EditorScene = CreateRef<Scene>();
         m_ActiveScene = m_EditorScene;
@@ -136,10 +136,11 @@ namespace Nox
             }
         }
         
-        /*// Mouse Selection
+        // Mouse Selection
         auto [mx, my] = ImGui::GetMousePos();
         mx -= m_ViewportBounds[0].x;
         my -= m_ViewportBounds[0].y;
+        
         glm::vec2 viewportSize = m_ViewportBounds[1] - m_ViewportBounds[0];
         //my = viewportSize.y - my;
         int mouseX = (int)mx;
@@ -147,15 +148,19 @@ namespace Nox
 
         if (mouseX >= 0 && mouseY >= 0 && mouseX < (int)viewportSize.x && mouseY < (int)viewportSize.y)
         {
-            /*ScopeTimer timer("MousePicking");#1#
+            /*ScopeTimer timer("MousePicking");*/
             // Retrieve the pixel data (ID) from the calculated index
             // reading only 1 pixel right now but if multi select maybe i need full viewport ? 
-            int pixelData = Renderer::ReadPixel(mouseX, mouseY);
+            /*int pixelData = Renderer::ReadPixel(mouseX, mouseY);
 
             m_HoveredEntity = pixelData == -1 ? Entity() : Entity((entt::entity)pixelData, m_ActiveScene.get());
+            */
+            int32_t pixelData = m_Renderer->getPickedEntityID();
             
-            Renderer::setPickRequest(mouseX, mouseY, true);
-        }*/
+            m_HoveredEntity = pixelData == -1 ? Entity() : Entity((entt::entity)pixelData, m_ActiveScene.get());
+            
+            m_Renderer->setPickRequest(mouseX, mouseY, true);
+        }
         
         OnOverlayRender();
     }
@@ -614,13 +619,13 @@ namespace Nox
             if (!camera)
                 return;
 
-            Renderer::BeginScene(camera.GetComponent<CameraComponent>().Camera, camera.GetComponent<TransformComponent>().GetTransform());
+            m_Renderer->BeginScene(camera.GetComponent<CameraComponent>().Camera, camera.GetComponent<TransformComponent>().GetTransform());
         }
         else
         {
-            Renderer::BeginScene(m_EditorCamera);
+            m_Renderer->BeginScene(m_EditorCamera);
         }
-
+        
         if (m_ShowPhysicsColliders)
         {
             // Box Colliders
@@ -666,7 +671,7 @@ namespace Nox
             const TransformComponent& transform = selectedEntity.GetComponent<TransformComponent>();
             Renderer::DrawRect(transform.GetTransform(), glm::vec4(1.0f, 0.5f, 0.0f, 1.0f));
         }
-        Renderer::EndScene();*/
+        m_Renderer->EndScene();*/
     }
 
     void EditorLayer::NewProject()
@@ -706,6 +711,9 @@ namespace Nox
 
     void EditorLayer::NewScene()
     {
+        /*m_HoveredEntity = Entity(); //added because ofentity id hovered stats fails
+        m_SceneHierarchyPanel.SetSelectedEntity(Entity()); //added because ofentity id hovered stats fails*/
+        
         m_EditorScene = CreateRef<Scene>();
         m_ActiveScene = m_EditorScene;
 

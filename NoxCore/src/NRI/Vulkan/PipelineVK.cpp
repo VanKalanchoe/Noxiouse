@@ -1,6 +1,5 @@
 #include "PipelineVK.h"
 
-#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <SDL3/SDL_filesystem.h>
@@ -29,6 +28,8 @@ namespace NRI
     static std::filesystem::path shaderBinaryPath(const ShaderStageDesc& shaderDesc)
     {
         std::filesystem::path source(shaderDesc.sourcePath);
+     
+        if (!std::filesystem::exists(source)) NOX_CORE_ERROR("PipelineVK::shaderBinaryPath file not found: {}", source);
         
         auto folder = shaderFolder() / source.stem();
         std::filesystem::create_directories(folder);
@@ -279,13 +280,23 @@ namespace NRI
                     .depthBoundsTestEnable = vk::False,
                     .stencilTestEnable = vk::False
                 };
-                vk::PipelineColorBlendAttachmentState colorBlendAttachment{
+                
+                std::vector<vk::Format> vkColorFormats;
+                vkColorFormats.reserve(desc.colorFormats.size());
+                
+                for (auto fmt : desc.colorFormats) vkColorFormats.push_back(translateImageFormat(fmt));
+                
+                vk::PipelineColorBlendAttachmentState colorBlendAttachment
+                {
                     .blendEnable = vk::False,
                     .colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA,
                 };
+                
+                std::vector<vk::PipelineColorBlendAttachmentState> colorBlendAttachmentStates(vkColorFormats.size(), colorBlendAttachment);
 
-                vk::PipelineColorBlendStateCreateInfo colorBlending{
-                    .logicOpEnable = vk::False, .logicOp = vk::LogicOp::eCopy, .attachmentCount = 1, .pAttachments = &colorBlendAttachment
+                vk::PipelineColorBlendStateCreateInfo colorBlending
+                {
+                    .logicOpEnable = vk::False, .logicOp = vk::LogicOp::eCopy, .attachmentCount = static_cast<uint32_t>(colorBlendAttachmentStates.size()), .pAttachments = colorBlendAttachmentStates.data()
                 };
 
                 /*std::vector<vk::DynamicState> dynamicStates = {vk::DynamicState::eViewport, vk::DynamicState::eScissor};
@@ -360,7 +371,7 @@ namespace NRI
                     // With descriptor heaps we no longer need a pipeline layout
                     // This struct must be chained into pipeline creation to enable the use of heaps (allowing us to leave pipelineLayout empty)
                     {.flags = vk::PipelineCreateFlagBits2::eDescriptorHeapEXT},
-                    {.colorAttachmentCount = 1, .pColorAttachmentFormats = &m_deviceVK.getSurfaceFormat().format, .depthAttachmentFormat = depthFormat}
+                    {.colorAttachmentCount = static_cast<uint32_t>(vkColorFormats.size()), .pColorAttachmentFormats = vkColorFormats.data(), .depthAttachmentFormat = depthFormat}
                 };
 
                 m_pipeline = vk::raii::Pipeline(m_deviceVK.getDevice(), nullptr, pipelineCreateInfoChain.get<vk::GraphicsPipelineCreateInfo>());
@@ -434,5 +445,14 @@ namespace NRI
         case ShaderStage::Mesh: return vk::ShaderStageFlagBits::eFragment;
         }
         return {};
+    }
+    
+    vk::Format PipelineVK::translateImageFormat(ImageFormat format)
+    {
+        switch (format)
+        {
+            case ImageFormat::Surface: return m_deviceVK.getSurfaceFormat().format;
+            case ImageFormat::R32SINT: return vk::Format::eR32Sint;
+        }
     }
 }

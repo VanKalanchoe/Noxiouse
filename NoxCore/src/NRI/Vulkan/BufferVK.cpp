@@ -14,7 +14,7 @@ namespace NRI
         {
         case BufferUsage::Staging:
             // CPU host-writes streaming, sequential transfers to GPU
-            usageFlags = vk::BufferUsageFlagBits2::eTransferSrc;
+            usageFlags = vk::BufferUsageFlagBits2::eTransferSrc | vk::BufferUsageFlagBits2::eTransferDst;
             memoryUsage = vma::MemoryUsage::eAuto;
             allocFlags = vma::AllocationCreateFlagBits::eHostAccessSequentialWrite | vma::AllocationCreateFlagBits::eMapped;
             break;
@@ -56,6 +56,7 @@ namespace NRI
     {
         //  Check if VMA already persistently mapped this for us (due to eMapped)
         vma::AllocationInfo info = m_allocatedBuffer.buffer.getAllocation().getInfo();
+        
         if (info.pMappedData)
         {
             return static_cast<uint8_t*>(info.pMappedData) + offset;

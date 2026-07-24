@@ -17,17 +17,26 @@ namespace Nox
     Renderer::Renderer(std::shared_ptr<Nox::Window> window, bool isEditor) : m_window(std::move(window)), m_isEditor(isEditor)
     {
         NOX_CORE_INFO("Renderer Start");
-
+        std::cout << "current workking dir:" << std::filesystem::current_path() << std::endl;
         m_device = NRI::Device::create(NRI::GraphicsAPI::Vulkan, *m_window);
         if (!m_device) NOX_CORE_ASSERT("Failed to create NRI device");
 
         initRenderer();
-
-        m_fileWatcher.watch(std::filesystem::path("../../shaders/shader.slang"), [this]() { m_reloadShader = true; });
-        m_fileWatcher.watch(std::filesystem::path("../../shaders/present.slang"), [this]() { m_reloadShader = true; });
+       
+        m_fileWatcher.watch(std::filesystem::path("assets/shaders/shader.slang"), [this]() { m_reloadShader = true; });
+        m_fileWatcher.watch(std::filesystem::path("assets/shaders/present.slang"), [this]() { m_reloadShader = true; });
 
         m_whiteTexture = createSolidColorTexture(255, 255, 255, 255);
-
+        
+        m_pickerStagingBuffers.reserve(MAX_FRAMES_IN_FLIGHT);
+        for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+        {
+            m_pickerStagingBuffers.emplace_back(m_device->createBuffer(NRI::BufferDesc{
+        .size = sizeof(int32_t),
+        .usage = NRI::BufferUsage::Staging
+    }));
+        }
+        
         m_renderer2D = std::make_unique<Renderer2D>(isEditor, RendererContext
                                                     {
                                                         *m_device,
@@ -81,6 +90,7 @@ namespace Nox
         createTextureImage();
         createSceneResources();
         createColorResources();
+        createEntityResources();
         createDepthResources();
         createCommandBuffers();
     }
@@ -118,6 +128,7 @@ namespace Nox
         createSwapChain();
         createSceneResources();
         createColorResources();
+        createEntityResources();
         createDepthResources();
     }
 
@@ -144,6 +155,7 @@ namespace Nox
         m_device->waitIdle();
         createSceneResources();
         createColorResources();
+        createEntityResources();
         createDepthResources();
     }
 
@@ -156,15 +168,22 @@ namespace Nox
     {
         NRI::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
+        
+        desc.colorFormats = 
+        {
+            NRI::ImageFormat::Surface,
+            NRI::ImageFormat::R32SINT
+        };
+        
         desc.shaders.push_back({
             .stage = NRI::ShaderStage::Vertex,
             .entryPoint = "vertMain",
-            .sourcePath = "../../shaders/shader.slang"
+            .sourcePath = "assets/shaders/shader.slang"
         });
         desc.shaders.push_back({
             .stage = NRI::ShaderStage::Fragment,
             .entryPoint = "fragMain",
-            .sourcePath = "../../shaders/shader.slang"
+            .sourcePath = "assets/shaders/shader.slang"
         });
         m_graphicsPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
     }
@@ -176,12 +195,12 @@ namespace Nox
         desc.shaders.push_back({
             .stage = NRI::ShaderStage::Vertex,
             .entryPoint = "vertMain",
-            .sourcePath = "../../shaders/present.slang"
+            .sourcePath = "assets/shaders/present.slang"
         });
         desc.shaders.push_back({
             .stage = NRI::ShaderStage::Fragment,
             .entryPoint = "fragMain",
-            .sourcePath = "../../shaders/present.slang"
+            .sourcePath = "assets/shaders/present.slang"
         });
         m_presentPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
     }
@@ -216,7 +235,9 @@ namespace Nox
             .height = m_isEditor ? m_viewportSize.height : m_swapChainExtent.height,
             .mipLevels = 1,
             .sampleCount = 1,
-            .usage = NRI::TextureUsage::ColorAttachment
+            .usage = NRI::TextureUsage::ColorAttachment,
+            .format = NRI::ImageFormat::Surface,
+            .directFormat = UINT32_MAX
         });
 
         if (!m_isEditor)
@@ -235,7 +256,33 @@ namespace Nox
             .height = m_isEditor ? m_viewportSize.height : m_swapChainExtent.height,
             .mipLevels = 1,
             .sampleCount = m_device->getMSAASampleCount(),
-            .usage = NRI::TextureUsage::ColorResolveAttachment
+            .usage = NRI::TextureUsage::ColorResolveAttachment,
+            .format = NRI::ImageFormat::Surface,
+            .directFormat = UINT32_MAX
+        });
+    }
+    
+    void Renderer::createEntityResources()
+    {
+        //changed from m_swapChainExtent to m_viewportSize
+        m_entityResource = m_device->createTexture(NRI::TextureDesc{
+            .width = m_isEditor ? m_viewportSize.width : m_swapChainExtent.width,
+            .height = m_isEditor ? m_viewportSize.height : m_swapChainExtent.height,
+            .mipLevels = 1,
+            .sampleCount = m_device->getMSAASampleCount(),
+            .usage = NRI::TextureUsage::ColorAttachment,
+            .format = NRI::ImageFormat::R32SINT,
+            .directFormat = UINT32_MAX
+        });
+        
+        m_entityResolveResource = m_device->createTexture(NRI::TextureDesc{
+            .width = m_isEditor ? m_viewportSize.width : m_swapChainExtent.width,
+            .height = m_isEditor ? m_viewportSize.height : m_swapChainExtent.height,
+            .mipLevels = 1,
+            .sampleCount = 1,
+            .usage = NRI::TextureUsage::ColorAttachment,
+            .format = NRI::ImageFormat::R32SINT,
+            .directFormat = UINT32_MAX
         });
     }
 
@@ -543,6 +590,8 @@ namespace Nox
             m_commandBuffers->transitionTextureLayout(*m_sceneResource, NRI::TextureLayout::ShaderResource, NRI::TextureLayout::ColorAttachment);
         }
 
+        m_commandBuffers->transitionTextureLayout(*m_entityResource, NRI::TextureLayout::Undefined, NRI::TextureLayout::ColorAttachment);
+        m_commandBuffers->transitionTextureLayout(*m_entityResolveResource, NRI::TextureLayout::Undefined, NRI::TextureLayout::ColorAttachment);
         m_commandBuffers->transitionTextureLayout(*m_colorResource, NRI::TextureLayout::Undefined, NRI::TextureLayout::ColorAttachment);
         m_commandBuffers->transitionTextureLayout(*m_depthResource, NRI::TextureLayout::Undefined, NRI::TextureLayout::DepthAttachment);
 
@@ -554,7 +603,15 @@ namespace Nox
             .storeOP = NRI::StoreOP::store,
             .clearColor = {0.0f, 0.0f, 0.0f, 1.0f}
         });
-
+        
+        colorAttachments.push_back({
+            .attachment = m_entityResource.get(),
+            .resolve = m_entityResolveResource.get(),
+            .loadOP = NRI::LoadOP::clear,
+            .storeOP = NRI::StoreOP::store,
+            .clearColor = {-1.0f, 0.0f, 0.0f, 1.0f}
+        });
+        
         NRI::RenderAttachDesc depthAttachment =
         {
             .attachment = m_depthResource.get(),
@@ -612,19 +669,38 @@ namespace Nox
 
         // Color blend (for one color attachment). Match the previous pipeline's
         // alpha-blend setup; nothing varies between draws so we set it once.
-        const NRI::ColorBlendEquation blendEquation
         {
-            .srcColorBlendFactor = NRI::BlendFactor::SrcAlpha,
-            .dstColorBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha,
-            .colorBlendOp = NRI::BlendOp::Add,
-            .srcAlphaBlendFactor = NRI::BlendFactor::SrcAlpha,
-            .dstAlphaBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha,
-            .alphaBlendOp = NRI::BlendOp::Add,
-        };
-        uint32_t colorWriteMask = NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A;
-        m_commandBuffers->setColorBlendEnable(0, true);
-        m_commandBuffers->setColorBlendEquation(0, blendEquation);
-        m_commandBuffers->setColorWriteMask(0, colorWriteMask);
+            const NRI::ColorBlendEquation blendEquation
+            {
+                .srcColorBlendFactor = NRI::BlendFactor::SrcAlpha,
+                .dstColorBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha,
+                .colorBlendOp = NRI::BlendOp::Add,
+                .srcAlphaBlendFactor = NRI::BlendFactor::SrcAlpha,
+                .dstAlphaBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha,
+                .alphaBlendOp = NRI::BlendOp::Add,
+            };
+            uint32_t colorWriteMask = NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A;
+            m_commandBuffers->setColorBlendEnable(0, true);
+            m_commandBuffers->setColorBlendEquation(0, blendEquation);
+            m_commandBuffers->setColorWriteMask(0, colorWriteMask);
+        }
+        
+        {
+            const NRI::ColorBlendEquation blendEquation
+            {
+                .srcColorBlendFactor = NRI::BlendFactor::One,
+                .dstColorBlendFactor = NRI::BlendFactor::Zero,
+                .colorBlendOp = NRI::BlendOp::Add,
+                .srcAlphaBlendFactor = NRI::BlendFactor::One,
+                .dstAlphaBlendFactor = NRI::BlendFactor::Zero,
+                .alphaBlendOp = NRI::BlendOp::Add,
+            };
+            uint32_t colorWriteMask = NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A;
+            m_commandBuffers->setColorBlendEnable(1, false);
+            m_commandBuffers->setColorBlendEquation(1, blendEquation);
+            m_commandBuffers->setColorWriteMask(1, colorWriteMask);
+        }
+        
         m_commandBuffers->setLogicOpEnable(false);
 
         m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_graphicsPipeline);
@@ -734,7 +810,38 @@ namespace Nox
         m_commandBuffers->endRendering();
 
         m_commandBuffers->transitionSwapchainLayout(*m_swapChain, imageIndex, NRI::TextureLayout::ColorAttachment, NRI::TextureLayout::Present);
-        m_commandBuffers->end(frameIndex);
+        
+        if (m_pickRequest.active && m_pickRequest.x >= 0 && m_pickRequest.y >= 0)
+        {
+            uint32_t width  = m_isEditor ? m_viewportSize.width  : m_swapChainExtent.width;
+            uint32_t height = m_isEditor ? m_viewportSize.height : m_swapChainExtent.height;
+
+            // Apply Vulkan negative-height viewport inversion (Top-Left -> Bottom-Left)
+            uint32_t sampleX = static_cast<uint32_t>(m_pickRequest.x);
+            uint32_t sampleY = static_cast<uint32_t>(m_pickRequest.y);
+        
+            if (sampleX < width && sampleY < height)
+            {
+                m_commandBuffers->transitionTextureLayout(*m_entityResource, NRI::TextureLayout::ColorAttachment, NRI::TextureLayout::TransferSrc);
+                /*m_commandBuffers->transitionTextureLayout(*m_entityResolveResource, NRI::TextureLayout::ColorAttachment, NRI::TextureLayout::TransferDst);*/
+            
+                /*m_commandBuffers->resolveImage(*m_entityResource, *m_entityResolveResource, width, height);*/
+            
+                m_commandBuffers->transitionTextureLayout(*m_entityResolveResource, NRI::TextureLayout::ColorAttachment, NRI::TextureLayout::TransferSrc);
+            
+                m_entityResolveResource->copyImageToBuffer(*m_commandBuffers, *m_pickerStagingBuffers[frameIndex], sampleX, sampleY, 1, 1);
+            
+                m_commandBuffers->transitionTextureLayout(*m_entityResource, NRI::TextureLayout::TransferSrc, NRI::TextureLayout::ColorAttachment);
+                
+                m_pickRequest.active = false;
+            }
+            
+            m_commandBuffers->end(frameIndex);
+        }
+        else
+        {
+            m_commandBuffers->end(frameIndex);
+        }
     }
 
     void Renderer::updateUniformBuffer(uint32_t currentImage)
@@ -781,7 +888,7 @@ namespace Nox
             recreateSwapChain();
             return;
         }
-
+        
         updateUniformBuffer(frameIndex);
 
         m_renderer2D->Update(frameIndex);
@@ -796,6 +903,22 @@ namespace Nox
             recreateSwapChain();
         }
         frameIndex = (frameIndex + 1) % MAX_FRAMES_IN_FLIGHT;
+    }
+    
+    int32_t Renderer::getPickedEntityID()
+    {
+        int32_t clickedEntityID = -1;
+    
+        // Map the staging buffer for the current in-flight frame
+        void* mappedMemory = m_pickerStagingBuffers[frameIndex]->map(0, sizeof(int32_t));
+        
+        if (mappedMemory)
+        {
+            memcpy(&clickedEntityID, mappedMemory, sizeof(int32_t));
+            m_pickerStagingBuffers[frameIndex]->unmap();
+        }
+    
+        return clickedEntityID;
     }
 
     std::vector<char> Renderer::readFile(const std::string& filename)
@@ -831,6 +954,14 @@ namespace Nox
     void Renderer::endImGui()
     {
         m_device->endImGui();
+    }
+    
+    void Renderer::BeginScene(const Camera& camera, const glm::mat4& transform)
+    {
+        uniformData.proj = camera.GetProjection();
+        uniformData.view = glm::scale(glm::mat4(1.0f), glm::vec3(1.0f, 1.0f, -1.0f)) * glm::inverse(transform);
+        
+        m_renderer2D->BeginScene(camera, transform);
     }
 
     void Renderer::BeginScene(const EditorCamera& camera)

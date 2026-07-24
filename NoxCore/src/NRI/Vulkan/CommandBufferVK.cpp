@@ -61,6 +61,8 @@ namespace NRI
     {
         switch (factor)
         {
+        case BlendFactor::Zero:         return vk::BlendFactor::eZero;
+        case BlendFactor::One:         return vk::BlendFactor::eOne;
         case BlendFactor::SrcAlpha:         return vk::BlendFactor::eSrcAlpha;
         case BlendFactor::OneMinusSrcAlpha: return vk::BlendFactor::eOneMinusSrcAlpha;
         }
@@ -131,13 +133,18 @@ namespace NRI
 
         std::vector<vk::RenderingAttachmentInfo> vkColorAttachments;
         vkColorAttachments.reserve(desc.colorAttachments.size());
-
+        
         for (const auto& colorDesc : desc.colorAttachments)
         {
             vk::ImageView mainView = nullptr;
+            bool isIntegerFormat = false;
+            
             if (colorDesc.attachment)
             {
-                mainView = static_cast<TextureVK*>(colorDesc.attachment)->getNativeView();
+                auto* textureVK = static_cast<TextureVK*>(colorDesc.attachment);
+                mainView = textureVK->getNativeView();
+                
+                if (textureVK->getFormat() == vk::Format::eR32Sint) isIntegerFormat = true;
             }
             else if (colorDesc.attachmentSwapchain)
             {
@@ -170,7 +177,11 @@ namespace NRI
 
             if (resolveView)
             {
-                colorAttachmentInfo.resolveMode = vk::ResolveModeFlagBits::eAverage;
+                if (isIntegerFormat)
+                    colorAttachmentInfo.resolveMode = vk::ResolveModeFlagBits::eSampleZero;
+                else
+                    colorAttachmentInfo.resolveMode = vk::ResolveModeFlagBits::eAverage;
+                
                 colorAttachmentInfo.resolveImageView = resolveView;
                 colorAttachmentInfo.resolveImageLayout = vk::ImageLayout::eColorAttachmentOptimal;
             }
@@ -508,6 +519,42 @@ namespace NRI
 
         submitImageBarrier(rawImage, oldLayout, newLayout, vk::ImageAspectFlagBits::eColor);
     }
+    
+    void CommandBufferVK::resolveImage(Texture& srcTexture, Texture& dstTexture, uint32_t width, uint32_t height)
+    {
+        auto* vkSrc = dynamic_cast<TextureVK*>(&srcTexture);
+        auto* vkDst = dynamic_cast<TextureVK*>(&dstTexture);
+        
+        vk::ImageResolve resolveRegion
+        {
+          .srcSubresource = 
+              {
+                    .aspectMask = vk::ImageAspectFlagBits::eColor,
+                  .mipLevel = 0,
+                  .baseArrayLayer = 0,
+                  .layerCount = 1,
+              },
+            .srcOffset = {0, 0, 0},
+            .dstSubresource = 
+                {
+                    .aspectMask = vk::ImageAspectFlagBits::eColor,
+                .mipLevel = 0,
+                .baseArrayLayer = 0,
+                .layerCount = 1,
+                },
+            .dstOffset = {0, 0, 0},
+            .extent = { width, height, 1},
+        };
+        
+        m_commandBuffers[m_currentFrameIndex].resolveImage
+        (
+            vkSrc->getNativeImage(), 
+            vk::ImageLayout::eTransferSrcOptimal, 
+            vkDst->getNativeImage(), 
+            vk::ImageLayout::eTransferDstOptimal, 
+            resolveRegion
+        );
+    }
 
     void CommandBufferVK::submitImageBarrier(vk::Image image, TextureLayout oldLayout, TextureLayout newLayout, vk::ImageAspectFlags aspectFlags)
     {
@@ -571,6 +618,16 @@ namespace NRI
             stageMask = vk::PipelineStageFlagBits2::eFragmentShader;
             accessMask = vk::AccessFlagBits2::eShaderRead;
             break;
+            
+        case TextureLayout::TransferSrc:
+            stageMask = vk::PipelineStageFlagBits2::eTransfer;
+            accessMask = vk::AccessFlagBits2::eTransferRead;
+            break;
+            
+        case TextureLayout::TransferDst:
+            stageMask = vk::PipelineStageFlagBits2::eTransfer;
+            accessMask = vk::AccessFlagBits2::eTransferWrite;
+            break;
 
         case TextureLayout::Present:
             stageMask = vk::PipelineStageFlagBits2::eBottomOfPipe;
@@ -592,6 +649,8 @@ namespace NRI
         case TextureLayout::ColorAttachment: return vk::ImageLayout::eColorAttachmentOptimal;
         case TextureLayout::DepthAttachment: return vk::ImageLayout::eDepthAttachmentOptimal;
         case TextureLayout::ShaderResource: return vk::ImageLayout::eShaderReadOnlyOptimal;
+        case TextureLayout::TransferSrc: return vk::ImageLayout::eTransferSrcOptimal;
+        case TextureLayout::TransferDst: return vk::ImageLayout::eTransferDstOptimal;
         case TextureLayout::Present: return vk::ImageLayout::ePresentSrcKHR;
         default:
             throw std::runtime_error("Unsupported TextureLayout passed to Vulkan backend!");

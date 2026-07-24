@@ -60,13 +60,13 @@ namespace NRI
         }
         else if (desc.usage == TextureUsage::ColorAttachment)
         {
-            format = m_deviceVK.getSurfaceFormat().format;
+            format = desc.format == ImageFormat::Surface ? m_deviceVK.getSurfaceFormat().format : MapToVulkanFormat(desc.format);
             aspectFlags = vk::ImageAspectFlagBits::eColor;
             usageFlags = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst;
         }
         else if (desc.usage == TextureUsage::ColorResolveAttachment)
         {
-            format = m_deviceVK.getSurfaceFormat().format;
+            format = desc.format == ImageFormat::Surface ? m_deviceVK.getSurfaceFormat().format : MapToVulkanFormat(desc.format);
             aspectFlags = vk::ImageAspectFlagBits::eColor;
             usageFlags = vk::ImageUsageFlagBits::eTransientAttachment | vk::ImageUsageFlagBits::eColorAttachment;
         }
@@ -283,6 +283,27 @@ namespace NRI
     void TextureVK::copyBufferToImage(vk::raii::CommandBuffer& commandBuffer, const vk::raii::Buffer& buffer, std::vector<vk::BufferImageCopy>& regions)
     {
         commandBuffer.copyBufferToImage(buffer, m_imageResource.image, vk::ImageLayout::eTransferDstOptimal, regions);
+    }
+    
+    void TextureVK::copyImageToBuffer(CommandBuffer& commandBuffer, Buffer& dstBuffer, uint32_t x, uint32_t y, uint32_t width, uint32_t height)
+    {
+        auto* cmdBufferVK = dynamic_cast<CommandBufferVK*>(&commandBuffer);
+        vk::raii::CommandBuffer& cb = cmdBufferVK->getActiveNativeBuffer();
+        
+        auto* dstBufferVK = dynamic_cast<BufferVK*>(&dstBuffer);
+        vk::raii::Buffer& nativeBuffer = dstBufferVK->getNativeBuffer();
+        
+        vk::BufferImageCopy region = 
+        {
+            .bufferOffset = 0,
+            .bufferRowLength = 0,
+            .bufferImageHeight = 0,
+            .imageSubresource = { .aspectMask = vk::ImageAspectFlagBits::eColor, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1 },
+            .imageOffset = { static_cast<int32_t>(x), static_cast<int32_t>(y), 0 },
+            .imageExtent = { width, height, 1 }
+        };
+        
+        cb.copyImageToBuffer(m_imageResource.image, vk::ImageLayout::eTransferSrcOptimal, nativeBuffer, region);
     }
 
     ImTextureID TextureVK::getImTextureID()

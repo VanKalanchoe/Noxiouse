@@ -21,6 +21,7 @@ namespace NRI
         vma::raii::Image& getNativeImage() { return m_imageResource.image; }
         vk::raii::ImageView& getNativeView() { return m_imageResource.view; }
         vk::ImageViewCreateInfo& getNativeViewInfo() { return m_viewCreateInfo; }
+        [[nodiscard]] vk::Format getFormat() const { return m_format; }
         ImTextureID getImTextureID() override;
         
         [[nodiscard]] uint32_t getMipLevels() const override { return m_desc.mipLevels; }
@@ -29,7 +30,7 @@ namespace NRI
         void setDescriptorHeap(DescriptorHeap* heap) { m_boundHeap = heap; }
         
         void uploadFromBuffer(CommandBuffer& cmdBuffer, Buffer& stagingBuffer, uint32_t width, uint32_t height, uint32_t mipLevels, const std::vector<size_t>& mipOffsets) override;
-        
+        void copyImageToBuffer(CommandBuffer& commandBuffer, Buffer& dstBuffer, uint32_t x, uint32_t y, uint32_t width, uint32_t height) override;
     private:
         void generateMipmaps(vk::raii::CommandBuffer& commandBuffer, vk::Format imageFormat, int32_t texWidth, int32_t texHeight, uint32_t mipLevels);
         void transitionImageLayout(vk::raii::CommandBuffer& commandBuffer, vk::ImageLayout oldLayout, vk::ImageLayout newLayout, uint32_t mipLevels);

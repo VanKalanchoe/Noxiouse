@@ -6,7 +6,7 @@ struct VSOutput
     float4 color;
     float2 fragTexCoord;
     uint32_t materialIndex;
-    /* int entityID; */
+    int entityID;
 };
 
 [shader("vertex")]
@@ -24,7 +24,7 @@ VSOutput vertMain(uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID, 
     output.color = quad.color /* * float4(vertex.color, 1) */;
     output.fragTexCoord = vertex.texCoord;
     output.materialIndex = quad.materialIndex;
-    /* output.entityID = quad.entityID */;
+    output.entityID = quad.entityID;
 
     return output;
 }
@@ -32,6 +32,7 @@ VSOutput vertMain(uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID, 
 struct FSOutput
 {
     float4 color : SV_TARGET0; // Final color output (RGBA)
+    int entityID : SV_TARGET1;
 };
 
 [shader("fragment")]
@@ -46,6 +47,8 @@ FSOutput fragMain(VSOutput vertIn, uniform PushConstantQuad pushConstant) : SV_T
     float4 img = texHandle.Sample(sampHandle, vertIn.fragTexCoord);
 
     output.color = img * vertIn.color;
+
+    output.entityID = vertIn.entityID;
 
     return output;
 }

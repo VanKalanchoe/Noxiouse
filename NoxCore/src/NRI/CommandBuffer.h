@@ -74,6 +74,8 @@ namespace NRI
     
     enum class BlendFactor
     {
+        One,
+        Zero,
         SrcAlpha,
         OneMinusSrcAlpha
     };
@@ -153,5 +155,6 @@ namespace NRI
         
         virtual void transitionTextureLayout(Texture& texture, TextureLayout oldLayout, TextureLayout newLayout) = 0;
         virtual void transitionSwapchainLayout(Swapchain& swapchain, uint32_t imageIndex, TextureLayout oldLayout, TextureLayout newLayout) = 0;
+        virtual void resolveImage(Texture& srcTexture, Texture& dstTexture, uint32_t width, uint32_t height) = 0;
     };
 }

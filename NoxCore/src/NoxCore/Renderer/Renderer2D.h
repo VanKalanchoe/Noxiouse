@@ -9,7 +9,7 @@
 namespace shaderio // Shader IO namespace -- shared layout between C++ and shaders
 {
     using namespace glm; // GLSL-style types without the glm:: prefix inside the namespace
-#include "shaderIO.h"
+    #include "NoxCore/Renderer/shaderIO.h"
     
     inline bool operator==(const shaderio::Vertex& other1, const shaderio::Vertex& other2)
     {
@@ -66,6 +66,7 @@ namespace Nox
         void Update(uint32_t currentImage);
         void Flush(NRI::CommandBuffer& commandBuffer, const NRI::Buffer& currentUniformBuffer, uint32_t frameIndex) const;
         
+        void Renderer2D::BeginScene(const Camera& camera, const glm::mat4& transform);
         void BeginScene(const EditorCamera& camera);
         void EndScene();
 

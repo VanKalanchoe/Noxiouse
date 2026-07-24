@@ -25,6 +25,7 @@ namespace NRI
         [[nodiscard]] vk::raii::ShaderModule createShaderModule(const std::vector<char>& code) const;
         vk::ShaderStageFlagBits translateShaderStage(ShaderStage stage);
         vk::ShaderStageFlagBits determineNextStage(ShaderStage stage);
+        vk::Format translateImageFormat(ImageFormat format);
 
     private:
         DeviceVK& m_deviceVK;

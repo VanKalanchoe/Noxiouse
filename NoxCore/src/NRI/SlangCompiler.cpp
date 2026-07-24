@@ -4,6 +4,7 @@
 #include <memory>
 #include <filesystem>
 
+#include "NoxCore/Core/core.h"
 #include "NoxCore/Core/Log.h"
 
 namespace NRI
@@ -20,6 +21,8 @@ namespace NRI
     
     std::vector<char> SlangCompiler::compile(const std::string& path)
     {
+        if (!std::filesystem::exists(path)) NOX_CORE_ERROR("SlangCompiler::compile file not found: {}", path);
+        
         Slang::ComPtr<slang::ISession> session;
         
         auto slangTargets{
@@ -38,12 +41,33 @@ namespace NRI
                 { slang::CompilerOptionName::Capability, { slang::CompilerOptionValueKind::Int, m_globalSession->findCapability("spvDescriptorHeapEXT") } },
             })
         };
-        slang::SessionDesc slangSessionDesc{
+        
+        std::array<const char*, 4> searchPaths = 
+        {
+            "../NoxCore/src/NoxCore/Renderer",
+            "shaders",
+            "../shaders",
+            "../../shaders"
+        };
+        NOX_CORE_INFO("Slang current working directory: {}", std::filesystem::current_path().string());
+        NOX_CORE_INFO("Slang search paths being checked:");
+        for (const char* path : searchPaths)
+        {
+            std::filesystem::path p(path);
+            std::filesystem::path absPath = std::filesystem::absolute(p);
+            bool exists = std::filesystem::exists(absPath);
+    
+            NOX_CORE_INFO("  - [{}] {}", exists ? "EXISTS" : "NOT FOUND", absPath.string());
+        }
+        slang::SessionDesc slangSessionDesc
+        {
             .targets{slangTargets.data()},
             .targetCount{SlangInt(slangTargets.size())},
             .defaultMatrixLayoutMode = SLANG_MATRIX_LAYOUT_COLUMN_MAJOR,
+            .searchPaths = searchPaths.data(),
+            .searchPathCount = SlangInt(searchPaths.size()),
             .compilerOptionEntries{slangOptions.data()},
-            .compilerOptionEntryCount{uint32_t(slangOptions.size())}
+            .compilerOptionEntryCount{uint32_t(slangOptions.size())},
         };
         m_globalSession->createSession(slangSessionDesc, session.writeRef());
         

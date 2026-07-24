@@ -15,8 +15,8 @@ namespace std
     };
 }
 
-const std::string MODEL_PATH = "../../models/viking_room.obj";
-const std::string TEXTURE_PATH = "../../textures/viking_room.ktx2";
+const std::string MODEL_PATH = "assets/models/viking_room.obj";
+const std::string TEXTURE_PATH = "assets/textures/viking_room.ktx2";
 
 // 2 quads
 /*const std::vector<Vertex> vertices = {
@@ -57,11 +57,29 @@ inline std::vector<std::string> samplerNames{"Linear", "Nearest"};
 
 namespace Nox
 {
+    struct PickRequest
+    {
+        int32_t x = -1;
+        int32_t y = -1;
+        bool active = false;
+    };
+    
     class Renderer
     {
     public:
         Renderer(std::shared_ptr<Nox::Window> window, bool isEditor);
         ~Renderer();
+        
+        // Call this from EditorLayer during mouse hover/click
+        void setPickRequest(int32_t x, int32_t y, bool active = true)
+        {
+            m_pickRequest.x = x;
+            m_pickRequest.y = y;
+            m_pickRequest.active = active;
+        }
+
+        // Call this in drawFrame() or EditorLayer to read the result
+        int32_t getPickedEntityID();
         
         void drawFrame();
         void resizeWindow();
@@ -70,6 +88,7 @@ namespace Nox
         void beginImGui();
         void endImGui();
         
+        void BeginScene(const Camera& camera, const glm::mat4& transform);
         void BeginScene(const EditorCamera& camera);
         void EndScene();
         
@@ -96,6 +115,7 @@ namespace Nox
         void createCommandPool();
         void createSceneResources();
         void createColorResources();
+        void createEntityResources();
         void createDepthResources();
         void createTextureImage();
         void loadModel();
@@ -149,6 +169,12 @@ namespace Nox
         Ref<Texture2D> m_whiteTexture;
         Ref<Texture2D> m_sceneResource;
         Ref<Texture2D> m_colorResource;
+        
+        Ref<Texture2D> m_entityResource;
+        Ref<Texture2D> m_entityResolveResource;
+        std::vector<std::unique_ptr<NRI::Buffer>> m_pickerStagingBuffers;
+        PickRequest m_pickRequest;
+        
         Ref<Texture2D> m_depthResource;
         Ref<Texture2D> m_textureResource;
         Ref<Texture2D> m_textureResource2;

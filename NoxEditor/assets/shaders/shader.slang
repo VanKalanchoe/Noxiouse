@@ -34,14 +34,26 @@ VSOutput vertMain(uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID)
     return output;
 }
 
-[shader("fragment")]
-float4 fragMain(VSOutput vertIn) : SV_TARGET 
+struct FSOutput
 {
+    float4 color : SV_TARGET0; // Final color output (RGBA)
+    int entityID : SV_TARGET1;
+};
+
+[shader("fragment")]
+FSOutput fragMain(VSOutput vertIn) : SV_TARGET 
+{
+    FSOutput output;
+    
     UniformBufferObject ubo = *pushConst.uboBuffer;
    
     Texture2D texHandle = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + 0, 0));
     SamplerState sampHandle = SamplerState.Handle(uint2(0, 0));
 
     float4 img = texHandle.Sample(sampHandle, vertIn.fragTexCoord);
-    return img;
+
+    output.color = img;
+    output.entityID = -1; // Set entityID to -1 as a placeholder
+
+    return output;
 }

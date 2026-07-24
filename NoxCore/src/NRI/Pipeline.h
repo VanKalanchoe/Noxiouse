@@ -4,6 +4,8 @@
 
 namespace NRI
 {
+    enum class ImageFormat;
+
     enum class PipelineType { Graphics, Compute };
     enum class ShaderStage { Vertex, Fragment, Compute, Task, Mesh };
 
@@ -18,6 +20,9 @@ namespace NRI
     {
         PipelineType type = PipelineType::Graphics; // default to graphics
         std::vector<ShaderStageDesc> shaders;
+        
+        std::vector<ImageFormat> colorFormats;
+        
         bool forceCompile = false;
     };
 

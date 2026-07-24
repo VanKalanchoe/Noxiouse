@@ -13,8 +13,8 @@ namespace Nox
 
         initRenderer2D();
 
-        m_context.fileWatcher.watch(std::filesystem::path("../../shaders/MeshQuad.slang"), [this]() { m_reloadShader = true; });
-        m_context.fileWatcher.watch(std::filesystem::path("../../shaders/quad.slang"), [this]() { m_reloadShader = true; });
+        m_context.fileWatcher.watch(std::filesystem::path("assets/shaders/MeshQuad.slang"), [this]() { m_reloadShader = true; });
+        m_context.fileWatcher.watch(std::filesystem::path("assets/shaders/quad.slang"), [this]() { m_reloadShader = true; });
     }
 
     Renderer2D::~Renderer2D()
@@ -70,12 +70,12 @@ namespace Nox
         desc.shaders.push_back({
             .stage = NRI::ShaderStage::Vertex,
             .entryPoint = "vertMain",
-            .sourcePath = "../../shaders/quad.slang"
+            .sourcePath = "assets/shaders/quad.slang"
         });
         desc.shaders.push_back({
             .stage = NRI::ShaderStage::Fragment,
             .entryPoint = "fragMain",
-            .sourcePath = "../../shaders/quad.slang"
+            .sourcePath = "assets/shaders/quad.slang"
         });
         m_MeshQuadPipeline = m_context.device.createPipeline(desc, m_context.shaderCompiler);
     }
@@ -211,6 +211,12 @@ namespace Nox
          
             /*commandBuffer.drawMeshTasks(m_data.quadDatas.size(), 1, 1);*/
         }
+    }
+    
+    // Runs outside of any rendering call whenever you want
+    void Renderer2D::BeginScene(const Camera& camera, const glm::mat4& transform)
+    {
+        m_data.quadDatas.clear();
     }
 
     // Runs outside of any rendering call whenever you want
