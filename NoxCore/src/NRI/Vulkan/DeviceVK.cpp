@@ -519,11 +519,12 @@ namespace NRI
     void DeviceVK::initImGui(Nox::Window& window)
     {
         const uint32_t maxCustomTextures = 1000;
-        
+
+#if IMGUI_VERSION_NUM >= 19280
         vk::DescriptorPoolSize poolSizes[] =
         {
-            {vk::DescriptorType::eSampledImage, IMGUI_IMPL_VULKAN_MINIMUM_SAMPLED_IMAGE_POOL_SIZE + maxCustomTextures},
-            {vk::DescriptorType::eSampler, IMGUI_IMPL_VULKAN_MINIMUM_SAMPLER_POOL_SIZE + maxCustomTextures},
+            { vk::DescriptorType::eSampledImage, IMGUI_IMPL_VULKAN_MINIMUM_SAMPLED_IMAGE_POOL_SIZE + maxCustomTextures },
+            { vk::DescriptorType::eSampler, IMGUI_IMPL_VULKAN_MINIMUM_SAMPLER_POOL_SIZE + maxCustomTextures },
         };
 
         uint32_t maxSets = 0;
@@ -539,7 +540,30 @@ namespace NRI
         };
 
         m_uiDescriptorPool = vk::raii::DescriptorPool(m_device, poolInfo);
+        
+#elif IMGUI_VERSION_NUM >= 19250
+        // Backend uses a small number of descriptors per font atlas + as many as additional calls done to ImGui_ImplVulkan_AddTexture().
+        #define IM_COUNTOF(_ARR)            ((int)(sizeof(_ARR) / sizeof(*(_ARR))))     // Size of a static C-style array. Don't use on pointers!
+        vk::DescriptorPoolSize poolSizes[] =
+        {
+            { vk::DescriptorType::eCombinedImageSampler, maxCustomTextures }
+        };
 
+        uint32_t maxSets = 0;
+        for (vk::DescriptorPoolSize& poolSize : poolSizes)
+            maxSets += poolSize.descriptorCount;
+
+        vk::DescriptorPoolCreateInfo poolInfo
+        {
+            .flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet,
+            .maxSets = maxSets,
+            .poolSizeCount = static_cast<uint32_t>(IM_COUNTOF(poolSizes)),
+            .pPoolSizes = poolSizes
+        };
+
+        m_uiDescriptorPool = vk::raii::DescriptorPool(m_device, poolInfo);
+#endif
+        
         static VkFormat imageFormats[] = {static_cast<VkFormat>(getSurfaceFormat().format)};
 
         // Setup Platform/Renderer backends

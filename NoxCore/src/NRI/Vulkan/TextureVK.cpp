@@ -318,11 +318,29 @@ namespace NRI
     
         if (m_imGuiHandle == VK_NULL_HANDLE)
         {
+#if IMGUI_VERSION_NUM >= 19280
             // Now it is safe to dereference no sampler needeed anymore
             m_imGuiHandle = ImGui_ImplVulkan_AddTexture(
                 *m_imageResource.view,
                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
             );
+#elif IMGUI_VERSION_NUM >= 19250
+            vk::SamplerCreateInfo samplerInfo{
+                .magFilter = vk::Filter::eLinear,
+                .minFilter = vk::Filter::eLinear,
+                .mipmapMode = vk::SamplerMipmapMode::eLinear,
+                .addressModeU = vk::SamplerAddressMode::eRepeat,
+                .addressModeV = vk::SamplerAddressMode::eRepeat,
+                .addressModeW = vk::SamplerAddressMode::eRepeat
+            };
+
+            vk::raii::Sampler sampler(m_deviceVK.getDevice(), samplerInfo);
+            // Now it is safe to dereference no sampler needeed anymore
+            m_imGuiHandle = ImGui_ImplVulkan_AddTexture(*sampler,
+                *m_imageResource.view,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+            );
+#endif
         }
     
         return reinterpret_cast<ImTextureID>(m_imGuiHandle);

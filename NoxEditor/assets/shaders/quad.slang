@@ -36,7 +36,7 @@ struct FSOutput
 };
 
 [shader("fragment")]
-FSOutput fragMain(VSOutput vertIn, uniform PushConstantQuad pushConstant) : SV_TARGET 
+FSOutput fragMain(VSOutput vertIn, uniform PushConstantQuad pushConstant)
 {
     FSOutput output;
 
