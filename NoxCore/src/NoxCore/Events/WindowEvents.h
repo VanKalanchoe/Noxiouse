@@ -12,6 +12,7 @@ namespace Nox {
         WindowClosedEvent() {}
 
         EVENT_CLASS_TYPE(WindowClose)
+        EVENT_CLASS_CATEGORY(EventCategoryApplication)
     };
 
     class WindowResizeEvent : public Event
@@ -29,6 +30,7 @@ namespace Nox {
         }
 
         EVENT_CLASS_TYPE(WindowResize)
+        EVENT_CLASS_CATEGORY(EventCategoryApplication)
     private:
         uint32_t m_Width, m_Height;
     };

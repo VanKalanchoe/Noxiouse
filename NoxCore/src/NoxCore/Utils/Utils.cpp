@@ -3,9 +3,9 @@
 #include <atomic>
 #include <fstream>
 #include <iostream>
+#include <SDL3/SDL_filesystem.h>
 #include <SDL3/SDL_dialog.h>
 #include <SDL3/SDL_events.h>
-#include <SDL3/SDL_filesystem.h>
 #include <SDL3/SDL_log.h>
 #include <SDL3/SDL_timer.h>
 

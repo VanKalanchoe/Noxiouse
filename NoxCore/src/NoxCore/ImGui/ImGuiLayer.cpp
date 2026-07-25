@@ -1,6 +1,8 @@
 #include "ImGuiLayer.h"
 
 #include <imgui.h>
+#include <ImGuizmo.h>
+
 #include "imgui_internal.h"  // For Docking
 #include <imgui_impl_sdl3.h>
 
@@ -46,6 +48,8 @@ namespace Nox
         }
 
         m_renderer.initImGui();
+        
+        SetImGuizmoTheme();
 
         // Load Fonts
         // - If fonts are not explicitly loaded, Dear ImGui will select an embedded font: either AddFontDefaultVector() or AddFontDefaultBitmap().
@@ -77,6 +81,16 @@ namespace Nox
         ImGui::DestroyContext();
     }
 
+    void ImGuiLayer::OnEvent(Event& event)
+    {
+        if (m_BlockEvents)
+        {
+            ImGuiIO& io = ImGui::GetIO();
+            event.Handled |= event.IsInCategory(EventCategoryMouse) & io.WantCaptureMouse;
+            event.Handled |= event.IsInCategory(EventCategoryKeyboard) & io.WantCaptureKeyboard;
+        }
+    }
+
     void ImGuiLayer::OnUpdate(Timestep ts)
     {
     }
@@ -94,6 +108,7 @@ namespace Nox
         m_renderer.beginImGui();
         ImGui_ImplSDL3_NewFrame();
         ImGui::NewFrame();
+        ImGuizmo::BeginFrame();
     }
 
     void ImGuiLayer::End()
@@ -105,5 +120,33 @@ namespace Nox
     uint32_t ImGuiLayer::GetActiveWidgetID() const
     {
         return GImGui->ActiveId;
+    }
+    
+    void ImGuiLayer::SetImGuizmoTheme()
+    {
+        ImGuizmo::Style& style = ImGuizmo::GetStyle();
+        
+        ImGuizmo::SetGizmoSizeClipSpace(0.15f);
+        
+        // const float screenRotateSize = 0.04f;
+        
+        style.TranslationLineThickness   = 6.0f; // lineThickness = 6.0f
+        style.TranslationLineArrowSize   = 12.0f; // arrowSize = 12.0f
+    
+        style.RotationLineThickness      = 6.0f; // circleLineThickness = 6.0f
+        style.RotationOuterLineThickness = 6.0f;
+
+        style.ScaleLineThickness         = 6.0f; // lineThickness = 6.0f
+        style.ScaleLineCircleSize        = 12.0f; // circleSize = 12.0f
+        
+        style.Colors[ImGuizmo::DIRECTION_X] = ImGui::ColorConvertU32ToFloat4(0xFF715ED8);
+        style.Colors[ImGuizmo::DIRECTION_Y] = ImGui::ColorConvertU32ToFloat4(0xFF25AA25);
+        style.Colors[ImGuizmo::DIRECTION_Z] = ImGui::ColorConvertU32ToFloat4(0xFFCC532C);
+        
+        style.Colors[ImGuizmo::PLANE_X] = ImGui::ColorConvertU32ToFloat4(0xFF7A68D8);
+        style.Colors[ImGuizmo::PLANE_Y] = ImGui::ColorConvertU32ToFloat4(0xFF55AB55);
+        style.Colors[ImGuizmo::PLANE_Z] = ImGui::ColorConvertU32ToFloat4(0xFFD96742);
+    
+        style.Colors[ImGuizmo::SELECTION]   = ImGui::ColorConvertU32ToFloat4(0xFF20AACC);
     }
 }

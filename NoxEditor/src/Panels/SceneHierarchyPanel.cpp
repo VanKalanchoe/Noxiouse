@@ -239,6 +239,9 @@ namespace Nox
 
     void SceneHierarchyPanel::DrawComponents(Entity entity)
     {
+        if (!entity)
+            return;
+        
         if (entity.HasComponent<TagComponent>())
         {
             auto& tag = entity.GetComponent<TagComponent>().Tag;
@@ -557,7 +560,7 @@ namespace Nox
     
     template<typename T>
     void SceneHierarchyPanel::DisplayAddComponentEntry(const std::string& entryName) {
-        if (!m_SelectionContext.HasComponent<T>())
+        if (m_SelectionContext && !m_SelectionContext.HasComponent<T>())
         {
             if (ImGui::MenuItem(entryName.c_str()))
             {

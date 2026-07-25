@@ -102,6 +102,7 @@ namespace Nox
         static Application& Get();
         const ApplicationSpecification& GetSpecification() const { return m_Specification; }
         std::shared_ptr<Window> getWindow() { return m_Window; }
+        ImGuiLayer* GetImGuiLayer() { return m_ImGuiLayer; }
 
         static float GetTime();
         static std::string GetExecutableRootPath();

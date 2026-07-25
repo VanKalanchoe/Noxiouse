@@ -1,4 +1,6 @@
 #pragma once
+#include <optional>
+
 #include "DeviceVK.h"
 #include "vk_mem_alloc_raii.hpp"
 

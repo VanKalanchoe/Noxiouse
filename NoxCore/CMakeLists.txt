@@ -59,9 +59,9 @@ set(IMGUI_SOURCES
     ${IMGUI_DIR}/misc/cpp/imgui_stdlib.cpp
 )
 
-set(IMGUIZMO_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendors/ImGuizmo")
+set(IMGUIZMO_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendors/ImGuizmo/src")
 set(IMGUIZMO_SOURCES
-    ${IMGUIZMO_DIR}/src/ImGuizmo.cpp
+    ${IMGUIZMO_DIR}/ImGuizmo.cpp
 )
 
 # Set up Vulkan C++ module only if enabled
@@ -119,7 +119,7 @@ file(GLOB_RECURSE NOXCORE_FILES
 )
 
 add_library(${PROJECT_NAME} STATIC ${NOXCORE_FILES} ${IMGUI_SOURCES} ${IMGUIZMO_SOURCES}) #main file here
-set_target_properties (${PROJECT_NAME} PROPERTIES CXX_STANDARD 20)
+
 target_link_libraries (${PROJECT_NAME} PUBLIC Vulkan::cppm SDL3::SDL3 glm::glm spdlog::spdlog Slang::slang EnTT::EnTT xxHash::xxhash yaml-cpp::yaml-cpp box2d::box2d msdf-atlas-gen::msdf-atlas-gen tinyobjloader::tinyobjloader)
 # Add here vendors
 target_include_directories (${PROJECT_NAME} SYSTEM PRIVATE ${STB_INCLUDEDIR} ${CMAKE_CURRENT_SOURCE_DIR}/vendors/taskflow ${CMAKE_CURRENT_SOURCE_DIR}/vendors/VulkanMemoryAllocator-Hpp/include ${CMAKE_CURRENT_SOURCE_DIR}/vendors/VulkanMemoryAllocator-Hpp/VulkanMemoryAllocator/include ${IMGUI_DIR}/backends)
@@ -137,5 +137,3 @@ endif()
 
 # Define VULKAN_HPP_HANDLE_ERROR_OUT_OF_DATE_AS_SUCCESS to treat VK_ERROR_OUT_OF_DATE_KHR as a success code
 target_compile_definitions(${PROJECT_NAME} PRIVATE "VULKAN_HPP_HANDLE_ERROR_OUT_OF_DATE_AS_SUCCESS" )
-
-target_compile_options(${PROJECT_NAME} PRIVATE /std:c++latest)

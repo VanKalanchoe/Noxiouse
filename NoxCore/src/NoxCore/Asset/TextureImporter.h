@@ -1,4 +1,5 @@
 #pragma once
+#include <filesystem>
 
 #include "Asset.h"
 #include "AssetMetadata.h"

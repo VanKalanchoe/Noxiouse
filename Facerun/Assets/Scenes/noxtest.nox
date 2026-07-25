@@ -1,0 +1,13 @@
+Scene: Untitled
+Entities:
+  - Entity: 11779729218519551926
+    TagComponent:
+      Tag: Empty Entity
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    SpriteRendererComponent:
+      Color: [1, 1, 1, 1]
+      TextureHandle: 3725258042431064742
+      TilingFactor: 1

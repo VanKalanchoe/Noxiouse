@@ -1,6 +1,6 @@
 #include "SceneSerializer.h"
 
-#include <filesystem>
+
 #include <fstream>
 
 #include <yaml-cpp/yaml.h>

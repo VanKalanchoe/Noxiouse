@@ -645,7 +645,7 @@ namespace Nox
         // Rasterization (most of these come from VK_EXT_extended_dynamic_state_3).
         m_commandBuffers->setRasterizerDiscardEnable(false);
         m_commandBuffers->setPolygonMode(NRI::PolygonMode::Fill);
-        m_commandBuffers->setCullMode(NRI::CullMode::Back);
+        m_commandBuffers->setCullMode(NRI::CullMode::None);
         m_commandBuffers->setFrontFace(NRI::FrontFace::CounterClockWise);
         m_commandBuffers->setDepthBiasEnable(false);
         m_commandBuffers->setDepthClampEnable(false); //LineWidth maybe ?

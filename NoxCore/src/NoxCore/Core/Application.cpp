@@ -21,7 +21,7 @@ namespace Nox
         NOX_CORE_INFO("Application Start");
 
         s_Application = this;
-        
+
         if (!m_Specification.WorkingDirectory.empty())
             std::filesystem::current_path(m_Specification.WorkingDirectory);
 
@@ -141,16 +141,28 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* currentEvent)
     switch (currentEvent->type)
     {
     case SDL_EVENT_QUIT: return SDL_APP_SUCCESS; /* end the program, reporting success to the OS. */
+    case SDL_EVENT_WINDOW_RESIZED:
+        {
+            applicationState->app->GetRenderer()->resizeWindow();
+
+            int width, height;
+            applicationState->app->getWindow()->getSizeInPixels(width, height);
+
+            Nox::WindowResizeEvent event(width, height); //maybe uint32_t in the future cast ?
+            applicationState->app->RaiseEvent(event);
+
+            return SDL_APP_CONTINUE;
+        }
     case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED: /* framebuffer resize swapchain */
         {
             applicationState->app->GetRenderer()->resizeWindow();
 
             int width, height;
             applicationState->app->getWindow()->getSizeInPixels(width, height);
-            
+
             Nox::WindowResizeEvent event(width, height); //maybe uint32_t in the future cast ?
             applicationState->app->RaiseEvent(event);
-            
+
             return SDL_APP_CONTINUE;
         }
     case SDL_EVENT_WINDOW_MINIMIZED:
@@ -179,13 +191,10 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* currentEvent)
         }
     case SDL_EVENT_MOUSE_WHEEL:
         {
-            if (!applicationState->app->getBlockEvents())
-            {
-                Nox::MouseScrolledEvent event(currentEvent->wheel.x, currentEvent->wheel.y);
-                applicationState->app->RaiseEvent(event);
+            Nox::MouseScrolledEvent event(currentEvent->wheel.x, currentEvent->wheel.y);
+            applicationState->app->RaiseEvent(event);
 
-                return SDL_APP_CONTINUE;
-            }
+            return SDL_APP_CONTINUE;
         }
     case SDL_EVENT_MOUSE_BUTTON_DOWN:
         {
@@ -200,16 +209,13 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* currentEvent)
         {
             if (currentEvent->key.scancode == SDL_SCANCODE_ESCAPE) return SDL_APP_SUCCESS;
 
-            if (!applicationState->app->getBlockEvents())
-            {
-                SDL_Scancode scan = currentEvent->key.scancode; // maybe keycode better ?
-                bool repeat = (currentEvent->key.repeat != 0);
-                
-                Nox::KeyPressedEvent event(scan, repeat);
-                applicationState->app->RaiseEvent(event);
-                
-                return SDL_APP_CONTINUE;
-            }
+            SDL_Scancode scan = currentEvent->key.scancode; // maybe keycode better ?
+            bool repeat = (currentEvent->key.repeat != 0);
+
+            Nox::KeyPressedEvent event(scan, repeat);
+            applicationState->app->RaiseEvent(event);
+
+            return SDL_APP_CONTINUE;
         }
     }
 

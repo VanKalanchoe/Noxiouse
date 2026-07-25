@@ -79,14 +79,12 @@ namespace Nox
     {
         //std::println("{}", event.ToString());
 
-        if (m_SceneState == SceneState::Edit)
+        if (m_SceneState == SceneState::Edit && m_ViewportHovered)
             m_EditorCamera.OnEvent(event);
 
         EventDispatcher dispatcher(event);
-        /*dispatcher.Dispatch<KeyPressedEvent>(Nox_BIND_EVENT_FN(EditorLayer::OnKeyPressed));*/
-        dispatcher.Dispatch<KeyPressedEvent>([this](KeyPressedEvent& e) { return OnKeyPressed(e); });
-        /*dispatcher.Dispatch<MouseButtonPressedEvent>(Nox_BIND_EVENT_FN(EditorLayer::OnMouseButtonPressed));*/
-        dispatcher.Dispatch<MouseButtonPressedEvent>([this](MouseButtonPressedEvent& e) { return OnMouseButtonPressed(e); });
+        dispatcher.Dispatch<KeyPressedEvent>(Nox_BIND_EVENT_FN(EditorLayer::OnKeyPressed));
+        dispatcher.Dispatch<MouseButtonPressedEvent>(Nox_BIND_EVENT_FN(EditorLayer::OnMouseButtonPressed));
     }
 
     void EditorLayer::OnUpdate(Timestep ts)
@@ -171,8 +169,6 @@ namespace Nox
 
     void EditorLayer::OnImGuiRender()
     {
-        auto& app = Application::Get();
-
         /*--
         * IMGUI Docking
         * Create a dockspace and dock the viewport and settings window.
@@ -266,15 +262,6 @@ namespace Nox
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
         if (ImGui::Begin("Viewport"))
         {
-            if (m_ViewportHovered)
-            {
-                Application::Get().setBlockEvents(false);
-            }
-            else
-            {
-                Application::Get().setBlockEvents(true);
-            }
-
             auto viewportMinRegion = ImGui::GetWindowContentRegionMin();
             auto viewportMaxRegion = ImGui::GetWindowContentRegionMax();
             auto viewportOffset = ImGui::GetWindowPos();
@@ -283,6 +270,8 @@ namespace Nox
 
             m_ViewportFocused = ImGui::IsWindowFocused();
             m_ViewportHovered = ImGui::IsWindowHovered();
+            
+            Application::Get().GetImGuiLayer()->BlockEvents(!m_ViewportHovered);
 
             ImVec2 viewportPanelSize = ImGui::GetContentRegionAvail();
             m_ViewportSize = {viewportPanelSize.x, viewportPanelSize.y};
@@ -312,34 +301,32 @@ namespace Nox
             }
 
             // Gizmos
-
+            //maybe be a callback you subscribe to instead
             Entity selectedEntity = m_SceneHierarchyPanel.GetSelectedEntity();
-
             if (selectedEntity && m_GizmoType != -1)
             {
-                ImGuizmo::SetOrthographic(false);
+                ImGuizmo::SetOrthographic(false); // maybe needed later for setortho camera
                 ImGuizmo::SetDrawlist();
 
-                ImGuizmo::SetRect(m_ViewportBounds[0].x, m_ViewportBounds[0].y,
-                                  m_ViewportBounds[1].x - m_ViewportBounds[0].x,
-                                  m_ViewportBounds[1].y - m_ViewportBounds[0].y);
+                ImGuizmo::SetRect(m_ViewportBounds[0].x, m_ViewportBounds[0].y, m_ViewportBounds[1].x - m_ViewportBounds[0].x, m_ViewportBounds[1].y - m_ViewportBounds[0].y);
 
                 // Camera
+                
                 // Runtime camera from entity
-                /*auto cameraEntity = m_ActiveScene->GetPrimaryCameraEntity();
-                const auto& camera = cameraEntity.GetComponent<CameraComponent>().Camera;
-                const glm::mat4& cameraProjection = camera.GetProjection();
-                glm::mat4 cameraView = glm::inverse(cameraEntity.GetComponent<TransformComponent>().GetTransform());*/
+                // auto cameraEntity = m_ActiveScene->GetPrimaryCameraEntity();
+                // const auto& camera = cameraEntity.GetComponent<CameraComponent>().Camera;
+                // const glm::mat4& cameraProjection = camera.GetProjection();
+                // glm::mat4 cameraView = glm::inverse(cameraEntity.GetComponent<TransformComponent>().GetTransform());
 
                 // Editor camera
                 const glm::mat4& cameraProjection = m_EditorCamera.GetGizmoProjection();
-
+                
                 glm::mat4 cameraView = m_EditorCamera.GetGizmoView();
 
                 // Entity transform
                 auto& tc = selectedEntity.GetComponent<TransformComponent>();
                 glm::mat4 transform = tc.GetTransform();
-
+                
                 // Snapping
                 bool snap = Input::IsKeyPressed(SDL_SCANCODE_LCTRL);
                 float snapValue = 0.5f; // Snap to 0.5m for translation/scale
@@ -354,13 +341,13 @@ namespace Nox
                 ImGuizmo::Manipulate(glm::value_ptr(cameraView), glm::value_ptr(cameraProjection),
                                      static_cast<ImGuizmo::OPERATION>(m_GizmoType), ImGuizmo::LOCAL,
                                      glm::value_ptr(transform), nullptr, snap ? snapValues : nullptr);
-
+               
                 if (ImGuizmo::IsUsing())
                 {
                     //translation is position for me maybe change
                     glm::vec3 translation, rotation, scale;
                     Math::DecomposeTransform(transform, translation, rotation, scale);
-
+                    
                     glm::vec3 deltaRotation = rotation - tc.Rotation;
                     tc.Translation = translation;
                     tc.Rotation += deltaRotation;
@@ -368,7 +355,7 @@ namespace Nox
                 }
             }
 
-            ImGui::End();
+            ImGui::End(); // End viewport
             ImGui::PopStyleVar();
         }
         
@@ -504,11 +491,16 @@ namespace Nox
 
     bool EditorLayer::OnKeyPressed(KeyPressedEvent& e)
     {
+        // 1. Abort if the user is typing in an ImGui text field
+        if (ImGui::GetIO().WantTextInput)
+            return false;
+        
         // Shortcuts
         if (e.IsRepeat())
         {
             return false;
         }
+        
 
         bool control = (Input::IsKeyPressed(SDL_SCANCODE_LCTRL) || Input::IsKeyPressed(SDL_SCANCODE_RCTRL));
         bool shift = (Input::IsKeyPressed(SDL_SCANCODE_LSHIFT) || Input::IsKeyPressed(SDL_SCANCODE_RSHIFT));
@@ -555,14 +547,23 @@ namespace Nox
 
         // Gizmos
         case SDL_SCANCODE_Q:
-            m_GizmoType = -1;
-            break;
+            {
+                if (m_ViewportHovered)
+                    m_GizmoType = -1;
+                break;
+            }
         case SDL_SCANCODE_W:
-            m_GizmoType = ImGuizmo::OPERATION::TRANSLATE;
-            break;
+            {
+                if (m_ViewportHovered)
+                    m_GizmoType = ImGuizmo::OPERATION::TRANSLATE;
+                break;
+            }
         case SDL_SCANCODE_E:
-            m_GizmoType = ImGuizmo::OPERATION::ROTATE;
-            break;
+            {
+                if (m_ViewportHovered)
+                    m_GizmoType = ImGuizmo::OPERATION::ROTATE;
+                break;
+            }
         case SDL_SCANCODE_R:
             if (control)
             {
@@ -711,8 +712,8 @@ namespace Nox
 
     void EditorLayer::NewScene()
     {
-        /*m_HoveredEntity = Entity(); //added because ofentity id hovered stats fails
-        m_SceneHierarchyPanel.SetSelectedEntity(Entity()); //added because ofentity id hovered stats fails*/
+        m_HoveredEntity = Entity();
+        m_SceneHierarchyPanel.SetSelectedEntity(Entity());
         
         m_EditorScene = CreateRef<Scene>();
         m_ActiveScene = m_EditorScene;
@@ -765,7 +766,7 @@ namespace Nox
 
     void EditorLayer::SaveSceneAs()
     {
-        std::string filepath = Utility::SaveFile("Vank Scene *.vank\0vank\0");
+        std::string filepath = Utility::SaveFile("Nox Scene *.nox\0nox\0");
         if (!filepath.empty())
         {
             SerializeScene(m_ActiveScene, filepath);

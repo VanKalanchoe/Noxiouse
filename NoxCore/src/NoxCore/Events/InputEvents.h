@@ -14,6 +14,8 @@ namespace Nox {
 	{
 	public:
 		inline int GetKeyCode() const { return m_KeyCode; }
+		
+		EVENT_CLASS_CATEGORY(EventCategoryKeyboard | EventCategoryInput)
 	protected:
 		KeyEvent(int keycode)
 			: m_KeyCode(keycode) {}
@@ -72,6 +74,7 @@ namespace Nox {
 		}
 
 		EVENT_CLASS_TYPE(MouseMoved)
+		EVENT_CLASS_CATEGORY(EventCategoryMouse | EventCategoryInput)
 	private:
 		double m_MouseX, m_MouseY;
 	};
@@ -91,6 +94,7 @@ namespace Nox {
 		}
 
 		EVENT_CLASS_TYPE(MouseScrolled)
+		EVENT_CLASS_CATEGORY(EventCategoryMouse | EventCategoryInput)
 	private:
 		double m_XOffset, m_YOffset;
 	};
@@ -99,6 +103,8 @@ namespace Nox {
 	{
 	public:
 		inline int GetMouseButton() const { return m_Button; }
+		
+		EVENT_CLASS_CATEGORY(EventCategoryMouse | EventCategoryInput | EventCategoryMouseButton)
 	protected:
 		MouseButtonEvent(int button)
 			: m_Button(button) {}

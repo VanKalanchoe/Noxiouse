@@ -44,6 +44,7 @@ namespace Nox
         template<typename T>
         bool HasComponent()
         {
+            if (!*this) return false; // added myself
             return m_Scene->m_Registry.all_of<T>(m_EntityHandle);
         }
         
@@ -56,7 +57,12 @@ namespace Nox
         }
         
         // Allow if (entity) checks
-        operator bool() const { return m_EntityHandle != entt::null; }
+        operator bool() const
+        {
+            return m_EntityHandle != entt::null && 
+                m_Scene != nullptr && // added myself
+            m_Scene->m_Registry.valid(m_EntityHandle);// added myself
+        }
         operator entt::entity() const { return m_EntityHandle; }
         operator uint32_t() const { return (uint32_t)m_EntityHandle; }
         

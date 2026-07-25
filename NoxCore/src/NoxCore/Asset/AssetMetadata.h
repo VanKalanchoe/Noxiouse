@@ -1,8 +1,7 @@
 #pragma once
+#include <filesystem>
 
 #include "Asset.h"
-
-#include <filesystem>
 
 namespace Nox
 {
