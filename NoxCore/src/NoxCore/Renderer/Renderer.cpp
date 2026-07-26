@@ -8,6 +8,10 @@
 #define TINYOBJLOADER_IMPLEMENTATION
 #include <tiny_obj_loader.h>
 
+#define TINYGLTF3_IMPLEMENTATION
+#define TINYGLTF3_ENABLE_FS 
+#include "tiny_gltf_v3.h"
+
 #include "NoxCore/Core/Log.h"
 
 namespace Nox
@@ -17,26 +21,26 @@ namespace Nox
     Renderer::Renderer(std::shared_ptr<Nox::Window> window, bool isEditor) : m_window(std::move(window)), m_isEditor(isEditor)
     {
         NOX_CORE_INFO("Renderer Start");
-        
+
         m_device = NRI::Device::create(NRI::GraphicsAPI::Vulkan, *m_window);
         if (!m_device) NOX_CORE_ASSERT("Failed to create NRI device");
 
         initRenderer();
-       
+
         m_fileWatcher.watch(std::filesystem::path("assets/shaders/shader.slang"), [this]() { m_reloadShader = true; });
         m_fileWatcher.watch(std::filesystem::path("assets/shaders/present.slang"), [this]() { m_reloadShader = true; });
 
         m_whiteTexture = createSolidColorTexture(255, 255, 255, 255);
-        
+
         m_pickerStagingBuffers.reserve(MAX_FRAMES_IN_FLIGHT);
         for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
         {
             m_pickerStagingBuffers.emplace_back(m_device->createBuffer(NRI::BufferDesc{
-        .size = sizeof(int32_t),
-        .usage = NRI::BufferUsage::Staging
-    }));
+                .size = sizeof(int32_t),
+                .usage = NRI::BufferUsage::Staging
+            }));
         }
-        
+
         m_renderer2D = std::make_unique<Renderer2D>(isEditor, RendererContext
                                                     {
                                                         *m_device,
@@ -60,7 +64,6 @@ namespace Nox
     {
         NOX_CORE_INFO("Renderer Shutdown");
 
-        
 
         m_device->waitIdle();
         m_device->shutdown(); // needed for texture to not remove imguitexture
@@ -168,13 +171,13 @@ namespace Nox
     {
         NRI::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
-        
-        desc.colorFormats = 
+
+        desc.colorFormats =
         {
             NRI::ImageFormat::Surface,
             NRI::ImageFormat::R32SINT
         };
-        
+
         desc.shaders.push_back({
             .stage = NRI::ShaderStage::Vertex,
             .entryPoint = "vertMain",
@@ -261,7 +264,7 @@ namespace Nox
             .directFormat = UINT32_MAX
         });
     }
-    
+
     void Renderer::createEntityResources()
     {
         //changed from m_swapChainExtent to m_viewportSize
@@ -274,7 +277,7 @@ namespace Nox
             .format = NRI::ImageFormat::R32SINT,
             .directFormat = UINT32_MAX
         });
-        
+
         m_entityResolveResource = m_device->createTexture(NRI::TextureDesc{
             .width = m_isEditor ? m_viewportSize.width : m_swapChainExtent.width,
             .height = m_isEditor ? m_viewportSize.height : m_swapChainExtent.height,
@@ -352,9 +355,151 @@ namespace Nox
         return UploadTexture(cpuData);
     }
 
+    int32_t FindAttribute(const tg3_primitive& primitive, const char* name)
+    {
+        for (uint32_t i = 0; i < primitive.attributes_count; i++)
+        {
+            const tg3_str_int_pair& attr = primitive.attributes[i];
+
+            if (strcmp(attr.key.data, name) == 0)
+            {
+                return attr.value;
+            }
+        }
+
+        return -1;
+    }
+
     void Renderer::loadModel()
     {
-        tinyobj::attrib_t attrib;
+        /*
+            Here is the exact layout based on your EditorCamera class:
+            Up: +Y
+            Right: +X
+            Forward: -Z
+        */
+        
+        tg3_parse_options opts;
+        tg3_error_stack errors;
+        tg3_model model;
+
+        tg3_parse_options_init(&opts);
+        tg3_error_stack_init(&errors);
+
+        tg3_error_code err = tg3_parse_file(&model, &errors, MODEL_PATH_GLTF.c_str(), MODEL_PATH_GLTF.size(), &opts);
+        if (err != TG3_OK)
+        {
+            for (uint32_t i = 0; i < errors.count; i++)
+            {
+                NOX_CORE_ERROR("[{}] {}", (int)errors.entries[i].severity, errors.entries[i].message ? errors.entries[i].message : "(null)");
+            }
+        }
+
+        for (uint32_t meshIndex = 0; meshIndex < model.meshes_count; meshIndex++)
+        {
+            const tg3_mesh& mesh = model.meshes[meshIndex];
+
+            for (uint32_t primitiveIndex = 0; primitiveIndex < mesh.primitives_count; primitiveIndex++)
+            {
+                const tg3_primitive& primitive = mesh.primitives[primitiveIndex];
+
+                // Get indices
+                const tg3_accessor& indexAccessor = model.accessors[primitive.indices];
+                const tg3_buffer_view& indexBufferView = model.buffer_views[indexAccessor.buffer_view];
+                const tg3_buffer& indexBuffer = model.buffers[indexBufferView.buffer];
+
+                // Get vertex positions
+                const tg3_accessor& posAccessor = model.accessors[FindAttribute(primitive, "POSITION")];
+                const tg3_buffer_view& posBufferView = model.buffer_views[posAccessor.buffer_view];
+                const tg3_buffer& posBuffer = model.buffers[posBufferView.buffer];
+
+                // Get texture coordinates if available
+                bool hasTexCoords = FindAttribute(primitive, "TEXCOORD_0") ? true : false;
+                const tg3_accessor* texCoordAccessor = nullptr;
+                const tg3_buffer_view* texCoordBufferView = nullptr;
+                const tg3_buffer* texCoordBuffer = nullptr;
+
+                if (hasTexCoords)
+                {
+                    texCoordAccessor = &model.accessors[FindAttribute(primitive, "TEXCOORD_0")];
+                    texCoordBufferView = &model.buffer_views[texCoordAccessor->buffer_view];
+                    texCoordBuffer = &model.buffers[texCoordBufferView->buffer];
+                }
+
+                uint32_t baseVertex = static_cast<uint32_t>(vertices.size());
+
+                for (size_t i = 0; i < posAccessor.count; i++)
+                {
+                    shaderio::Vertex vertex{};
+
+                    const float* pos = reinterpret_cast<const float*>(&posBuffer.data.data[posBufferView.byte_offset + posAccessor.byte_offset + i * 12]);
+                    // glTF uses a right-handed coordinate system with Y-up
+                    // Vulkan uses a right-handed coordinate system with Y-down
+                    // We need to flip the Y coordinate
+                    vertex.pos = {pos[0], pos[1], pos[2]};
+
+                    if (hasTexCoords)
+                    {
+                        const float* texCoord = reinterpret_cast<const float*>(&texCoordBuffer->data.data[texCoordBufferView->byte_offset + texCoordAccessor->byte_offset + i * 8]);
+                        vertex.texCoord = {texCoord[0], texCoord[1]};
+                    }
+                    else
+                    {
+                        vertex.texCoord = {0.0f, 0.0f};
+                    }
+
+                    vertices.push_back(vertex);
+                }
+                const unsigned char* indexData = &indexBuffer.data.data[indexBufferView.byte_offset + indexAccessor.byte_offset];
+                size_t indexCount = indexAccessor.count;
+                size_t indexStride = 0;
+
+                // Determine index stride based on component type
+                if (indexAccessor.component_type == TG3_COMPONENT_TYPE_UNSIGNED_SHORT)
+                {
+                    indexStride = sizeof(uint16_t);
+                }
+                else if (indexAccessor.component_type == TG3_COMPONENT_TYPE_UNSIGNED_INT)
+                {
+                    indexStride = sizeof(uint32_t);
+                }
+                else if (indexAccessor.component_type == TG3_COMPONENT_TYPE_UNSIGNED_BYTE)
+                {
+                    indexStride = sizeof(uint8_t);
+                }
+                else
+                {
+                    throw std::runtime_error("Unsupported index component type");
+                }
+
+                indices.reserve(indices.size() + indexCount);
+
+                for (size_t i = 0; i < indexCount; i++)
+                {
+                    uint32_t index = 0;
+
+                    if (indexAccessor.component_type == TG3_COMPONENT_TYPE_UNSIGNED_SHORT)
+                    {
+                        index = *reinterpret_cast<const uint16_t*>(indexData + i * indexStride);
+                    }
+                    else if (indexAccessor.component_type == TG3_COMPONENT_TYPE_UNSIGNED_INT)
+                    {
+                        index = *reinterpret_cast<const uint32_t*>(indexData + i * indexStride);
+                    }
+                    else if (indexAccessor.component_type == TG3_COMPONENT_TYPE_UNSIGNED_BYTE)
+                    {
+                        index = *reinterpret_cast<const uint8_t*>(indexData + i * indexStride);
+                    }
+
+                    indices.push_back(baseVertex + index);
+                }
+            }
+        }
+
+        tg3_model_free(&model);
+        tg3_error_stack_free(&errors);
+
+        /*tinyobj::attrib_t attrib;
         std::vector<tinyobj::shape_t> shapes;
         std::vector<tinyobj::material_t> materials;
         std::string warn, err;
@@ -396,7 +541,7 @@ namespace Nox
                 indices.push_back(static_cast<uint32_t>(indices.size()));
 #endif
             }
-        }
+        }*/
     }
 
     void Renderer::createVertexBuffer()
@@ -603,7 +748,7 @@ namespace Nox
             .storeOP = NRI::StoreOP::store,
             .clearColor = {0.0f, 0.0f, 0.0f, 1.0f}
         });
-        
+
         colorAttachments.push_back({
             .attachment = m_entityResource.get(),
             .resolve = m_entityResolveResource.get(),
@@ -611,7 +756,7 @@ namespace Nox
             .storeOP = NRI::StoreOP::store,
             .clearColor = {-1.0f, 0.0f, 0.0f, 1.0f}
         });
-        
+
         NRI::RenderAttachDesc depthAttachment =
         {
             .attachment = m_depthResource.get(),
@@ -685,7 +830,7 @@ namespace Nox
             m_commandBuffers->setColorBlendEquation(0, blendEquation);
             m_commandBuffers->setColorWriteMask(0, colorWriteMask);
         }
-        
+
         {
             const NRI::ColorBlendEquation blendEquation
             {
@@ -701,7 +846,7 @@ namespace Nox
             m_commandBuffers->setColorBlendEquation(1, blendEquation);
             m_commandBuffers->setColorWriteMask(1, colorWriteMask);
         }
-        
+
         m_commandBuffers->setLogicOpEnable(false);
 
         m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_graphicsPipeline);
@@ -811,32 +956,32 @@ namespace Nox
         m_commandBuffers->endRendering();
 
         m_commandBuffers->transitionSwapchainLayout(*m_swapChain, imageIndex, NRI::TextureLayout::ColorAttachment, NRI::TextureLayout::Present);
-        
+
         if (m_pickRequest.active && m_pickRequest.x >= 0 && m_pickRequest.y >= 0)
         {
-            uint32_t width  = m_isEditor ? m_viewportSize.width  : m_swapChainExtent.width;
+            uint32_t width = m_isEditor ? m_viewportSize.width : m_swapChainExtent.width;
             uint32_t height = m_isEditor ? m_viewportSize.height : m_swapChainExtent.height;
 
             // Apply Vulkan negative-height viewport inversion (Top-Left -> Bottom-Left)
             uint32_t sampleX = static_cast<uint32_t>(m_pickRequest.x);
             uint32_t sampleY = static_cast<uint32_t>(m_pickRequest.y);
-        
+
             if (sampleX < width && sampleY < height)
             {
                 m_commandBuffers->transitionTextureLayout(*m_entityResource, NRI::TextureLayout::ColorAttachment, NRI::TextureLayout::TransferSrc);
                 /*m_commandBuffers->transitionTextureLayout(*m_entityResolveResource, NRI::TextureLayout::ColorAttachment, NRI::TextureLayout::TransferDst);*/
-            
+
                 /*m_commandBuffers->resolveImage(*m_entityResource, *m_entityResolveResource, width, height);*/
-            
+
                 m_commandBuffers->transitionTextureLayout(*m_entityResolveResource, NRI::TextureLayout::ColorAttachment, NRI::TextureLayout::TransferSrc);
-            
+
                 m_entityResolveResource->copyImageToBuffer(*m_commandBuffers, *m_pickerStagingBuffers[frameIndex], sampleX, sampleY, 1, 1);
-            
+
                 m_commandBuffers->transitionTextureLayout(*m_entityResource, NRI::TextureLayout::TransferSrc, NRI::TextureLayout::ColorAttachment);
-                
+
                 m_pickRequest.active = false;
             }
-            
+
             m_commandBuffers->end(frameIndex);
         }
         else
@@ -889,7 +1034,7 @@ namespace Nox
             recreateSwapChain();
             return;
         }
-        
+
         updateUniformBuffer(frameIndex);
 
         m_renderer2D->Update(frameIndex);
@@ -903,25 +1048,25 @@ namespace Nox
             framebufferResized = false;
             recreateSwapChain();
         }
-        
+
         m_renderer2D->EndFrame();
-        
+
         frameIndex = (frameIndex + 1) % MAX_FRAMES_IN_FLIGHT;
     }
-    
+
     int32_t Renderer::getPickedEntityID()
     {
         int32_t clickedEntityID = -1;
-    
+
         // Map the staging buffer for the current in-flight frame
         void* mappedMemory = m_pickerStagingBuffers[frameIndex]->map(0, sizeof(int32_t));
-        
+
         if (mappedMemory)
         {
             memcpy(&clickedEntityID, mappedMemory, sizeof(int32_t));
             m_pickerStagingBuffers[frameIndex]->unmap();
         }
-    
+
         return clickedEntityID;
     }
 
@@ -959,12 +1104,12 @@ namespace Nox
     {
         m_device->endImGui();
     }
-    
+
     void Renderer::BeginScene(const Camera& camera, const glm::mat4& transform)
     {
         uniformData.proj = camera.GetProjection();
         uniformData.view = glm::scale(glm::mat4(1.0f), glm::vec3(1.0f, 1.0f, -1.0f)) * glm::inverse(transform);
-        
+
         m_renderer2D->BeginScene(camera, transform);
     }
 

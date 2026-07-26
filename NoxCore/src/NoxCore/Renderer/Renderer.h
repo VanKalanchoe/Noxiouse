@@ -16,6 +16,7 @@ namespace std
 }
 
 const std::string MODEL_PATH = "assets/models/viking_room.obj";
+const std::string MODEL_PATH_GLTF = "assets/models/viking_room.glb";
 const std::string TEXTURE_PATH = "assets/textures/viking_room.ktx2";
 
 // 2 quads

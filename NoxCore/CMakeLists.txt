@@ -8,7 +8,7 @@ if(ENABLE_CPP20_MODULE)
   set(CMAKE_CXX_SCAN_FOR_MODULES ON)
 endif()
 
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../cmake")
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 find_package (sdl3 REQUIRED)
 find_package (glm REQUIRED)
@@ -64,6 +64,11 @@ set(IMGUIZMO_SOURCES
     ${IMGUIZMO_DIR}/ImGuizmo.cpp
 )
 
+set(TINYGLTF_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendors/tinygltf")
+#set(TINYGLTF_SOURCE
+#    ${TINYGLTF_DIR}/tiny_gltf_v3.c
+#)
+
 # Set up Vulkan C++ module only if enabled
 if(ENABLE_CPP20_MODULE)
   add_library(VulkanCppModule)
@@ -118,7 +123,7 @@ file(GLOB_RECURSE NOXCORE_FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
 )
 
-add_library(${PROJECT_NAME} STATIC ${NOXCORE_FILES} ${IMGUI_SOURCES} ${IMGUIZMO_SOURCES}) #main file here
+add_library(${PROJECT_NAME} STATIC ${NOXCORE_FILES} ${IMGUI_SOURCES} ${IMGUIZMO_SOURCES} ${TINYGLTF_SOURCE}) #main file here
 
 target_link_libraries (${PROJECT_NAME} PUBLIC Vulkan::cppm SDL3::SDL3 glm::glm spdlog::spdlog Slang::slang EnTT::EnTT xxHash::xxhash yaml-cpp::yaml-cpp box2d::box2d msdf-atlas-gen::msdf-atlas-gen tinyobjloader::tinyobjloader)
 # Add here vendors
@@ -128,7 +133,7 @@ target_include_directories (${PROJECT_NAME} SYSTEM PRIVATE ${STB_INCLUDEDIR} ${C
 target_include_directories (${PROJECT_NAME} SYSTEM PUBLIC ${IMGUI_DIR} ${IMGUIZMO_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/vendors/filewatch)
 
 # Sysmtem means supress warnings from the include directories, so we don't get warnings from external libraries.
-target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/shaders)
+target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/shaders ${TINYGLTF_DIR})
 
 # Add compile definition if C++ 20 module is enabled
 if(ENABLE_CPP20_MODULE)
