@@ -4,25 +4,13 @@ struct CirclePayLoad
 {
     uint circleID;
 };
+groupshared CirclePayLoad dummyPayLoad;
 
 [shader("task")]
-[numthreads(64, 1, 1)]
-void taskMain(
-    uint3 gid : SV_GroupID, uint3 groupThreadID: SV_GroupThreadID, uniform PushConstantCircle pushConstant
-)
+[numthreads(1, 1, 1)]
+void taskMain(uniform PushConstantCircle pushConstant)
 {
-    // globalThreadID = thread index in group + offset from group
-    uint globalThreadID = gid.x;
-
-    // safety check
-    if (globalThreadID >= pushConstant.numOfElements) return;
-
-    // create payload for this circle
-    CirclePayLoad payload;
-    payload.circleID = globalThreadID;
-
-    // dispatch exactly 1 mesh per circle
-    DispatchMesh(1, 1, 1, payload);
+    DispatchMesh(pushConstant.numOfElements, 1, 1, dummyPayLoad);
 }
 
 static const float4 positions[4] = 
@@ -48,12 +36,12 @@ struct VSOutput
 [numthreads(1, 1, 1)]
 void meshMain
 (
-    in payload CirclePayLoad sharedPayload,
     out indices uint3 triangles[2], out vertices VSOutput vertices[4],
+    uint3 DispatchThreadID : SV_DispatchThreadID,
     uniform PushConstantCircle pushConstant
 )
 {
-    uint circleID = sharedPayload.circleID;
+    uint circleID = DispatchThreadID.x;
     UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
     CircleData* circleData = (CircleData*)pushConstant.circleDataReference;
     CircleData circle = circleData[circleID];

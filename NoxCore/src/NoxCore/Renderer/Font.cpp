@@ -34,7 +34,7 @@ namespace Nox
         cpuData.Height = bitmap.height;
         cpuData.MipLevels = 1;
         cpuData.Data = Buffer::FromRGBToRGBA((void*)bitmap.pixels, bitmap.width ,bitmap.height);
-        cpuData.Format = NRI::ImageFormat::SRGB8;
+        cpuData.Format = NRI::ImageFormat::RGB8;
         cpuData.DirectFormat = UINT32_MAX;
         
         Ref<Texture2D> texture = TextureImporter::LoadTexture2DFromMemory(cpuData, {.generateMips = false});

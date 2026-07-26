@@ -31,9 +31,8 @@ struct Vertex
 struct PushConstantQuad
 {
     uint64_t matrixReference;
-    uint64_t vertexReference;
     uint64_t quadDataReference;
-    uint64_t numOfElements;
+    uint numOfElements;
 };
 struct QuadData
 {
@@ -48,9 +47,8 @@ struct QuadData
 struct PushConstantCircle
 {
     uint64_t matrixReference;
-    uint64_t vertexReference;
     uint64_t circleDataReference;
-    uint64_t numOfElements;
+    uint numOfElements;
 };
 struct CircleData
 {
@@ -66,9 +64,8 @@ struct CircleData
 struct PushConstantText
 {
     uint64_t matrixReference;
-    uint64_t vertexReference;
     uint64_t textDataReference;
-    uint64_t numOfElements;
+    uint numOfElements;
 };
 struct TextData
 {
@@ -89,9 +86,8 @@ struct TextData
 struct PushConstantLine
 {
     uint64_t matrixReference;
-    uint64_t vertexReference;
     uint64_t lineDataReference;
-    uint64_t numOfElements;
+    uint numOfElements;
 };
 struct LineData
 {

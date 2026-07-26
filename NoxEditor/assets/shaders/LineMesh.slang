@@ -4,25 +4,13 @@ struct LinePayLoad
 {
     uint lineID;
 };
+groupshared LinePayLoad dummyPayLoad;
 
 [shader("task")]
-[numthreads(64, 1, 1)]
-void taskMain(
-    uint3 gid : SV_GroupID, uint3 groupThreadID: SV_GroupThreadID, uniform PushConstantLine pushConstant
-)
+[numthreads(1, 1, 1)]
+void taskMain(uniform PushConstantLine pushConstant)
 {
-    // globalThreadID = thread index in group + offset from group
-    uint globalThreadID = gid.x;
-
-    // safety check
-    if (globalThreadID >= pushConstant.numOfElements) return;
-
-    // create payload for this line
-    LinePayLoad payload;
-    payload.lineID = globalThreadID;
-
-    // dispatch exactly 1 mesh per line
-    DispatchMesh(1, 1, 1, payload);
+    DispatchMesh(pushConstant.numOfElements, 1, 1, dummyPayLoad);
 }
 
 struct VSOutput
@@ -37,12 +25,12 @@ struct VSOutput
 [numthreads(1, 1, 1)]
 void meshMain
 (
-    in payload LinePayLoad sharedPayload,
     out indices uint2 lines[1], out vertices VSOutput vertices[2],
+    uint3 DispatchThreadID : SV_DispatchThreadID,
     uniform PushConstantLine pushConstant
 )
 {
-    uint lineID = sharedPayload.lineID;
+    uint lineID = DispatchThreadID.x;
     UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
     LineData* lineData = (LineData*)pushConstant.lineDataReference;
     LineData line = lineData[lineID];

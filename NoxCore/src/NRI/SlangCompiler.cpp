@@ -49,7 +49,7 @@ namespace NRI
             "../shaders",
             "../../shaders"
         };
-        NOX_CORE_INFO("Slang current working directory: {}", std::filesystem::current_path().string());
+        /*NOX_CORE_INFO("Slang current working directory: {}", std::filesystem::current_path().string());
         NOX_CORE_INFO("Slang search paths being checked:");
         for (const char* path : searchPaths)
         {
@@ -58,7 +58,7 @@ namespace NRI
             bool exists = std::filesystem::exists(absPath);
     
             NOX_CORE_INFO("  - [{}] {}", exists ? "EXISTS" : "NOT FOUND", absPath.string());
-        }
+        }*/
         slang::SessionDesc slangSessionDesc
         {
             .targets{slangTargets.data()},

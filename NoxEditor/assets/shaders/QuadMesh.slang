@@ -4,25 +4,13 @@ struct QuadPayLoad
 {
     uint quadID;
 };
+groupshared QuadPayLoad dummyPayLoad;
 
 [shader("task")]
-[numthreads(64, 1, 1)]
-void taskMain(
-    uint3 gid : SV_GroupID, uint3 groupThreadID: SV_GroupThreadID, uniform PushConstantQuad pushConstant
-)
+[numthreads(1, 1, 1)]
+void taskMain(uniform PushConstantQuad pushConstant)
 {
-    // globalThreadID = thread index in group + offset from group
-    uint globalThreadID = gid.x;
-
-    // safety check
-    if (globalThreadID >= pushConstant.numOfElements) return;
-
-    // create payload for this quad
-    QuadPayLoad payload;
-    payload.quadID = globalThreadID;
-
-    // dispatch exactly 1 mesh per quad
-    DispatchMesh(1, 1, 1, payload);
+    DispatchMesh(pushConstant.numOfElements, 1, 1, dummyPayLoad);
 }
 
 static const float4 positions[4] = 
@@ -55,12 +43,12 @@ struct VSOutput
 [numthreads(1, 1, 1)]
 void meshMain
 (
-    in payload QuadPayLoad sharedPayload,
     out indices uint3 triangles[2], out vertices VSOutput vertices[4],
+    uint3 DispatchThreadID : SV_DispatchThreadID,
     uniform PushConstantQuad pushConstant
 )
 {
-    uint quadID = sharedPayload.quadID;
+    uint quadID = DispatchThreadID.x;
     UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
     QuadData* quadData = (QuadData*)pushConstant.quadDataReference;
     QuadData quad = quadData[quadID];

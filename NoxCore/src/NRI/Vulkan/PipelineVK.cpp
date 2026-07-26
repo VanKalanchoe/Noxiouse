@@ -89,8 +89,7 @@ namespace NRI
     
     PipelineVK::PipelineVK(DeviceVK& device, const PipelineDesc& desc, ShaderCompiler& compiler) : m_deviceVK(device)
     {
-        std::vector<std::vector<char>> tempBytecodeStorage;
-        tempBytecodeStorage.reserve(desc.shaders.size());
+        std::vector<std::vector<char>> tempBytecodeStorage(desc.shaders.size());
         bool useShaderObjects = m_deviceVK.isShaderObjectExtensionEnabled();
 
         if (desc.type == PipelineType::Graphics)
@@ -119,10 +118,11 @@ namespace NRI
                 loadedFromBinary.reserve(desc.shaders.size());
 
                 // Load cache or compile
-                for (auto& shaderDesc : desc.shaders)
+                for (size_t i = 0; i < desc.shaders.size(); i++)
                 {
-                    entryPointNames.push_back(shaderDesc.entryPoint);
+                    auto& shaderDesc = desc.shaders[i];
                     
+                    entryPointNames.push_back(shaderDesc.entryPoint);
                     m_stages.push_back( translateShaderStage(shaderDesc.stage));
 
                     auto binaryPath = shaderBinaryPath(shaderDesc);
@@ -141,7 +141,7 @@ namespace NRI
                     {
                         NOX_CORE_INFO("PipelineVK compiling shader: {}", shaderDesc.sourcePath);
 
-                        tempBytecodeStorage.emplace_back(compiler.compile(shaderDesc.sourcePath));
+                        tempBytecodeStorage[i] = compiler.compile(shaderDesc.sourcePath);
 
                         loadedFromBinary.push_back(false);
                     }
@@ -151,7 +151,6 @@ namespace NRI
                 shaderCreateInfos.reserve(desc.shaders.size());
 
                 size_t binaryIndex = 0;
-                size_t spirvIndex = 0;
 
                 for (size_t i = 0; i < desc.shaders.size(); i++)
                 {
@@ -180,7 +179,7 @@ namespace NRI
                     }
                     else
                     {
-                        auto& spirv = tempBytecodeStorage[spirvIndex++];
+                        auto& spirv = tempBytecodeStorage[i];
 
                         info.codeType = vk::ShaderCodeTypeEXT::eSpirv;
                         info.codeSize = spirv.size();
@@ -191,6 +190,38 @@ namespace NRI
                 }
 
                 m_shaders = m_deviceVK.getDevice().createShadersEXT(shaderCreateInfos);
+                
+                if (m_shaders.empty())
+                {
+                    NOX_CORE_WARN("PipelineVK::PipelineVK Shader binaries incompatible (likely driver update). Falling back to SPIR-V");
+                    
+                    for (size_t i = 0; i < desc.shaders.size(); i++)
+                    {
+                        if (loadedFromBinary[i])
+                        {
+                            NOX_CORE_INFO("PipelineVK:PipelineVk Recompiling invalidated shader: {}", desc.shaders[i].sourcePath);
+                            
+                            tempBytecodeStorage[i] = compiler.compile(desc.shaders[i].sourcePath);
+                            
+                            shaderCreateInfos[i].codeType = vk::ShaderCodeTypeEXT::eSpirv;
+                            shaderCreateInfos[i].codeSize = tempBytecodeStorage[i].size();
+                            shaderCreateInfos[i].pCode = reinterpret_cast<const uint32_t*>(tempBytecodeStorage[i].data());
+                            
+                            loadedFromBinary[i] = false;
+                        }
+                        else
+                        {
+                            shaderCreateInfos[i].pCode = reinterpret_cast<const uint32_t*>(tempBytecodeStorage[i].data());
+                        }
+                    }
+                }
+                
+                m_shaders = m_deviceVK.getDevice().createShadersEXT(shaderCreateInfos);
+                
+                if (m_shaders.empty())
+                {
+                    NOX_CORE_ASSERT("PipelineVK::PipelineVK Failed to create Binary and SPIR-V shaders");
+                }
                 
                 m_rawShaders.assign(m_allGraphicsStages.size(), vk::ShaderEXT{});
                 for (size_t i = 0; i < m_stages.size(); i++)

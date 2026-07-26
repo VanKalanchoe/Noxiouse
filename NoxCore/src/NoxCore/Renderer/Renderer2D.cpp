@@ -30,8 +30,6 @@ namespace Nox
     {
         // Quad
         createMeshPipeline(false);
-        createQuadVertexBuffer();
-        createQuadIndexBuffer();
         createQuadUniformBuffers();
         
         // Circle
@@ -79,93 +77,57 @@ namespace Nox
         if (!m_data.quadDatas.empty())
         {
             commandBuffer.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_QuadMeshPipeline);
-
-            /*
-            commandBuffer.bindIndexBuffer(*m_data.indexBuffer, 0);
-            */
             
             shaderio::PushConstantQuad quadReferences;
             quadReferences.matrixReference = currentUniformBuffer.getDeviceAddress();
-            quadReferences.vertexReference = m_data.vertexBuffer->getDeviceAddress();
             quadReferences.quadDataReference = m_data.quadUniformBuffers[frameIndex]->getDeviceAddress();
             quadReferences.numOfElements = m_data.quadDatas.size();
             commandBuffer.pushData(&quadReferences, sizeof(shaderio::PushConstantQuad));
             
-            /*
-            commandBuffer.drawIndexed(m_indices.size(), m_data.quadDatas.size(), 0, 0, 0);
-            */
-         
-            commandBuffer.drawMeshTasks(m_data.quadDatas.size(), 1, 1);
+            commandBuffer.drawMeshTasks(1, 1, 1);
         }
         
         // CircleMesh
         if (!m_data.circleDatas.empty())
         {
             commandBuffer.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_CircleMeshPipeline);
-
-            /*
-            commandBuffer.bindIndexBuffer(*m_data.indexBuffer, 0);
-            */
             
             shaderio::PushConstantCircle circleReferences;
             circleReferences.matrixReference = currentUniformBuffer.getDeviceAddress();
-            circleReferences.vertexReference = m_data.vertexBuffer->getDeviceAddress();
             circleReferences.circleDataReference = m_data.circleUniformBuffers[frameIndex]->getDeviceAddress();
             circleReferences.numOfElements = m_data.circleDatas.size();
             commandBuffer.pushData(&circleReferences, sizeof(shaderio::PushConstantCircle));
-            
-            /*
-            commandBuffer.drawIndexed(m_indices.size(), m_data.quadDatas.size(), 0, 0, 0);
-            */
-         
-            commandBuffer.drawMeshTasks(m_data.circleDatas.size(), 1, 1);
+
+            commandBuffer.drawMeshTasks(1, 1, 1);
         }
         
         // TextMesh
         if (!m_data.textDatas.empty())
         {
             commandBuffer.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_TextMeshPipeline);
-
-            /*
-            commandBuffer.bindIndexBuffer(*m_data.indexBuffer, 0);
-            */
             
             shaderio::PushConstantText circleReferences;
             circleReferences.matrixReference = currentUniformBuffer.getDeviceAddress();
-            circleReferences.vertexReference = m_data.vertexBuffer->getDeviceAddress();
             circleReferences.textDataReference = m_data.textUniformBuffers[frameIndex]->getDeviceAddress();
             circleReferences.numOfElements = m_data.textDatas.size();
             commandBuffer.pushData(&circleReferences, sizeof(shaderio::PushConstantText));
-            
-            /*
-            commandBuffer.drawIndexed(m_indices.size(), m_data.quadDatas.size(), 0, 0, 0);
-            */
-         
-            commandBuffer.drawMeshTasks(m_data.textDatas.size(), 1, 1);
+
+            commandBuffer.drawMeshTasks(1, 1, 1);
         }
         
-        // TextMesh
+        // LineMesh
         if (!m_data.lineDatas.empty())
         {
             commandBuffer.setLineWidth(5.0f);
             commandBuffer.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_LineMeshPipeline);
 
-            /*
-            commandBuffer.bindIndexBuffer(*m_data.indexBuffer, 0);
-            */
-            
             shaderio::PushConstantLine circleReferences;
             circleReferences.matrixReference = currentUniformBuffer.getDeviceAddress();
-            circleReferences.vertexReference = m_data.vertexBuffer->getDeviceAddress();
             circleReferences.lineDataReference = m_data.lineUniformBuffers[frameIndex]->getDeviceAddress();
             circleReferences.numOfElements = m_data.lineDatas.size();
             commandBuffer.pushData(&circleReferences, sizeof(shaderio::PushConstantLine));
             
-            /*
-            commandBuffer.drawIndexed(m_indices.size(), m_data.quadDatas.size(), 0, 0, 0);
-            */
-         
-            commandBuffer.drawMeshTasks(m_data.lineDatas.size(), 1, 1);
+            commandBuffer.drawMeshTasks(1, 1, 1);
         }
     }
 
@@ -213,67 +175,6 @@ namespace Nox
             .sourcePath = "assets/shaders/QuadMesh.slang"
         });
         m_QuadMeshPipeline = m_context.device.createPipeline(desc, m_context.shaderCompiler);
-        /*NRI::PipelineDesc desc{};
-        desc.forceCompile = forceCompile;
-        desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Vertex,
-            .entryPoint = "vertMain",
-            .sourcePath = "assets/shaders/quad.slang"
-        });
-        desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Fragment,
-            .entryPoint = "fragMain",
-            .sourcePath = "assets/shaders/quad.slang"
-        });*/
-        /*m_QuadMeshPipeline = m_context.device.createPipeline(desc, m_context.shaderCompiler);*/
-    }
-
-    void Renderer2D::createQuadVertexBuffer()
-    {
-        uint64_t bufferSize = sizeof(m_vertices[0]) * m_vertices.size();
-
-        std::unique_ptr<NRI::Buffer> stagingBuffer = m_context.device.createBuffer(NRI::BufferDesc{
-            .size = bufferSize,
-            .usage = NRI::BufferUsage::Staging
-        });
-
-        void* mappedMemory = stagingBuffer->map(0, bufferSize);
-        memcpy(mappedMemory, m_vertices.data(), bufferSize);
-        stagingBuffer->unmap();
-
-        m_data.vertexBuffer = m_context.device.createBuffer(NRI::BufferDesc
-            {
-                .size = bufferSize,
-                .usage = NRI::BufferUsage::Storage
-            });
-
-        std::unique_ptr<NRI::CommandBuffer> commandCopyBuffer = m_context.beginSingleTimeCommands();
-        m_data.vertexBuffer->uploadData(*commandCopyBuffer, *stagingBuffer, m_vertices.data());
-        m_context.endSingleTimeCommands(std::move(commandCopyBuffer));
-    }
-
-    void Renderer2D::createQuadIndexBuffer()
-    {
-        uint64_t bufferSize = sizeof(m_indices[0]) * m_indices.size();
-
-        std::unique_ptr<NRI::Buffer> stagingBuffer = m_context.device.createBuffer(NRI::BufferDesc{
-            .size = bufferSize,
-            .usage = NRI::BufferUsage::Staging
-        });
-
-        void* mappedMemory = stagingBuffer->map(0, bufferSize);
-        memcpy(mappedMemory, m_indices.data(), bufferSize);
-        stagingBuffer->unmap();
-
-        m_data.indexBuffer = m_context.device.createBuffer(NRI::BufferDesc
-            {
-                .size = bufferSize,
-                .usage = NRI::BufferUsage::Index
-            });
-
-        std::unique_ptr<NRI::CommandBuffer> commandCopyBuffer = m_context.beginSingleTimeCommands();
-        m_data.indexBuffer->uploadData(*commandCopyBuffer, *stagingBuffer, m_indices.data());
-        m_context.endSingleTimeCommands(std::move(commandCopyBuffer));
     }
 
     void Renderer2D::createQuadUniformBuffers()
@@ -353,19 +254,6 @@ namespace Nox
             .sourcePath = "assets/shaders/CircleMesh.slang"
         });
         m_CircleMeshPipeline = m_context.device.createPipeline(desc, m_context.shaderCompiler);
-        /*NRI::PipelineDesc desc{};
-        desc.forceCompile = forceCompile;
-        desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Vertex,
-            .entryPoint = "vertMain",
-            .sourcePath = "assets/shaders/quad.slang"
-        });
-        desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Fragment,
-            .entryPoint = "fragMain",
-            .sourcePath = "assets/shaders/quad.slang"
-        });*/
-        /*m_CircleMeshPipeline = m_context.device.createPipeline(desc, m_context.shaderCompiler);*/
     }
     
     void Renderer2D::createCircleUniformBuffers()
@@ -422,19 +310,6 @@ namespace Nox
             .sourcePath = "assets/shaders/TextMesh.slang"
         });
         m_TextMeshPipeline = m_context.device.createPipeline(desc, m_context.shaderCompiler);
-        /*NRI::PipelineDesc desc{};
-        desc.forceCompile = forceCompile;
-        desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Vertex,
-            .entryPoint = "vertMain",
-            .sourcePath = "assets/shaders/quad.slang"
-        });
-        desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Fragment,
-            .entryPoint = "fragMain",
-            .sourcePath = "assets/shaders/quad.slang"
-        });*/
-        /*m_TextMeshPipeline = m_context.device.createPipeline(desc, m_context.shaderCompiler);*/
     }
     
     void Renderer2D::createTextUniformBuffers()
@@ -533,19 +408,6 @@ namespace Nox
             texCoordMin *= glm::vec2(texelWidth, texelHeight);
             texCoordMax *= glm::vec2(texelWidth, texelHeight);
 
-            // render here
-            /*shaderio::InstancedTextData instance;
-            instance.QuadMin = quadMin;
-            instance.QuadMax = quadMax;
-            instance.Transform = transform; // store transform per draw
-            instance.TexMin = texCoordMin;
-            instance.TexMax = texCoordMax;
-            instance.Color = textParams.Color;
-            instance.TextureIndex = fontAtlas->GetTextureIndex();
-            instance.EntityID = entityID;
-
-            RegistryMesh::registerInstance(shaderio::PipelineType_Text, s_Data.textHandle, instance);*/
-
             shaderio::TextData instance;
             instance.quadMin = quadMin;
             instance.quadMax = quadMax;
@@ -594,19 +456,6 @@ namespace Nox
             .sourcePath = "assets/shaders/LineMesh.slang"
         });
         m_LineMeshPipeline = m_context.device.createPipeline(desc, m_context.shaderCompiler);
-        /*NRI::PipelineDesc desc{};
-        desc.forceCompile = forceCompile;
-        desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Vertex,
-            .entryPoint = "vertMain",
-            .sourcePath = "assets/shaders/quad.slang"
-        });
-        desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Fragment,
-            .entryPoint = "fragMain",
-            .sourcePath = "assets/shaders/quad.slang"
-        });*/
-        /*m_TextMeshPipeline = m_context.device.createPipeline(desc, m_context.shaderCompiler);*/
     }
     
     void Renderer2D::createLineUniformBuffers()
@@ -633,14 +482,6 @@ namespace Nox
     
     void Renderer2D::DrawLine(const glm::vec3& p0, const glm::vec3& p1, const glm::vec4& color, int entityID)
     {
-        /*shaderio::InstancedLineData instance;
-        instance.P0 = p0;
-        instance.P1 = p1;
-        instance.Color = color;
-        instance.EntityID = entityID;
-
-        RegistryMesh::registerInstance(shaderio::PipelineType_Line, s_Data.lineHandle, instance);*/
-
         shaderio::LineData instance;
         instance.p0 = p0;
         instance.p1 = p1;

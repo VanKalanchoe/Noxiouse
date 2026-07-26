@@ -17,7 +17,7 @@ namespace Nox
     Renderer::Renderer(std::shared_ptr<Nox::Window> window, bool isEditor) : m_window(std::move(window)), m_isEditor(isEditor)
     {
         NOX_CORE_INFO("Renderer Start");
-        std::cout << "current workking dir:" << std::filesystem::current_path() << std::endl;
+        
         m_device = NRI::Device::create(NRI::GraphicsAPI::Vulkan, *m_window);
         if (!m_device) NOX_CORE_ASSERT("Failed to create NRI device");
 
@@ -663,7 +663,7 @@ namespace Nox
 
         // Depth / stencil.
         m_commandBuffers->setDepthTestEnable(true);
-        m_commandBuffers->setDepthWriteEnable(false);
+        m_commandBuffers->setDepthWriteEnable(true);
         m_commandBuffers->setDepthCompareOp(NRI::CompareOp::Greater);
         m_commandBuffers->setDepthBoundsTestEnable(false);
         m_commandBuffers->setStencilTestEnable(false);

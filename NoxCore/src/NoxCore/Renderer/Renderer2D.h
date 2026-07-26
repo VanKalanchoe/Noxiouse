@@ -93,8 +93,6 @@ namespace Nox
         
         // Quad
         void createMeshPipeline(bool forceCompile);
-        void createQuadVertexBuffer();
-        void createQuadIndexBuffer();
         void createQuadUniformBuffers();
         
         // Circle
@@ -114,9 +112,6 @@ namespace Nox
         {
             // todo:: combine all buffers into with offsets idk how mcuh improvement that is
             // Quad
-            std::unique_ptr<NRI::Buffer> vertexBuffer = nullptr;
-            std::unique_ptr<NRI::Buffer> indexBuffer = nullptr;
-            
             std::vector<shaderio::QuadData> quadDatas;
             std::vector<std::unique_ptr<NRI::Buffer>> quadUniformBuffers;
             std::vector<void*> quadUniformBuffersMapped;

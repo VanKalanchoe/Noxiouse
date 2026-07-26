@@ -4,25 +4,13 @@ struct TextPayLoad
 {
     uint textID;
 };
+groupshared TextPayLoad dummyPayLoad;
 
 [shader("task")]
-[numthreads(64, 1, 1)]
-void taskMain(
-    uint3 gid : SV_GroupID, uint3 groupThreadID: SV_GroupThreadID, uniform PushConstantText pushConstant
-)
+[numthreads(1, 1, 1)]
+void taskMain(uniform PushConstantText pushConstant)
 {
-    // globalThreadID = thread index in group + offset from group
-    uint globalThreadID = gid.x;
-
-    // safety check
-    if (globalThreadID >= pushConstant.numOfElements) return;
-
-    // create payload for this text
-    TextPayLoad payload;
-    payload.textID = globalThreadID;
-
-    // dispatch exactly 1 mesh per text
-    DispatchMesh(1, 1, 1, payload);
+    DispatchMesh(pushConstant.numOfElements, 1, 1, dummyPayLoad);
 }
 
 struct VSOutput
@@ -39,12 +27,12 @@ struct VSOutput
 [numthreads(1, 1, 1)]
 void meshMain
 (
-    in payload TextPayLoad sharedPayload,
     out indices uint3 triangles[2], out vertices VSOutput vertices[4],
+    uint3 DispatchThreadID : SV_DispatchThreadID,
     uniform PushConstantText pushConstant
 )
 {
-    uint textID = sharedPayload.textID;
+    uint textID = DispatchThreadID.x;
     UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
     TextData* textData = (TextData*)pushConstant.textDataReference;
     TextData text = textData[textID];
