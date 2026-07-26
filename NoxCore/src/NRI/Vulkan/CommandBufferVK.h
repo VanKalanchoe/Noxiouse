@@ -33,6 +33,7 @@ namespace NRI
         void setFrontFace(const FrontFace& frontFace) override;
         void setDepthBiasEnable(bool enable) override;
         void setDepthClampEnable(bool enable) override;
+        void setLineWidth(float lineWidth) override;
         void setRasterizationSamples(uint32_t sampleCount) override;
         void setSampleMask(uint32_t sampleCount, uint32_t sampleMask) override;
         void setAlphaToCoverageEnable(bool enable) override;

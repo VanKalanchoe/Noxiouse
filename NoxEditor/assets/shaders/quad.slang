@@ -4,7 +4,7 @@ struct VSOutput
 {
     float4 pos : SV_Position;
     float4 color;
-    float2 fragTexCoord;
+    float2 texCooord;
     uint32_t materialIndex;
     int entityID;
 };
@@ -22,7 +22,7 @@ VSOutput vertMain(uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID, 
 
     output.pos = mul(ubo.proj, mul(ubo.view, mul(quad.modelMatrix, float4(vertex.pos, 1.0))));
     output.color = quad.color /* * float4(vertex.color, 1) */;
-    output.fragTexCoord = vertex.texCoord;
+    output.texCooord = vertex.texCoord;
     output.materialIndex = quad.materialIndex;
     output.entityID = quad.entityID;
 
@@ -44,7 +44,7 @@ FSOutput fragMain(VSOutput vertIn, uniform PushConstantQuad pushConstant)
    
     Texture2D texHandle = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + vertIn.materialIndex, 0));
     SamplerState sampHandle = SamplerState.Handle(uint2(0, 0));
-    float4 img = texHandle.Sample(sampHandle, vertIn.fragTexCoord);
+    float4 img = texHandle.Sample(sampHandle, vertIn.texCooord);
 
     output.color = img * vertIn.color;
 

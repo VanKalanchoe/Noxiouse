@@ -144,9 +144,9 @@ namespace Nox
 
     void Scene::OnUpdateRuntime(Timestep ts)
     {
-        /*if (!m_IsPaused || m_StepFrames-- > 0)
+        if (!m_IsPaused || m_StepFrames-- > 0)
         {
-            /#1#/ Update Scripts
+            /*// Update Scripts
             {
                 // C# Entity OnUpdate
                 auto view = m_Registry.view<ScriptComponent>();
@@ -168,7 +168,7 @@ namespace Nox
 
                     nsc.Instance->OnUpdate(ts);
                 });
-            }#1#
+            }*/
 
             // Physics
             {
@@ -211,7 +211,7 @@ namespace Nox
 
         if (mainCamera)
         {
-            Renderer::BeginScene(*mainCamera, cameraTransform);
+           m_renderer->BeginScene(*mainCamera, cameraTransform);
 
             // Draw Sprites
             {
@@ -220,7 +220,7 @@ namespace Nox
                 {
                     auto [transform, sprite] = group.get<TransformComponent, SpriteRendererComponent>(entity);
                     //Renderer2D::DrawQuad(transform.Position, transform.Size, transform.Scale, transform.Rotation, sprite.Color);
-                    Renderer::DrawSprite(transform.GetTransform(), sprite, (int)entity);
+                    m_renderer2D->DrawSprite(transform.GetTransform(), sprite, (int)entity);
                 }
             }
              
@@ -231,7 +231,7 @@ namespace Nox
                 {
                     auto [transform, circle] = view.get<TransformComponent, CircleRendererComponent>(entity);
 
-                    Renderer::DrawCircle(transform.GetTransform(), circle.Color, circle.Thickness, circle.Fade, (int)entity);
+                    m_renderer2D->DrawCircle(transform.GetTransform(), circle.Color, circle.Thickness, circle.Fade, (int)entity);
                 }
             }
 
@@ -242,12 +242,12 @@ namespace Nox
                 {
                     auto [transform, text] = view.get<TransformComponent, TextComponent>(entity);
 
-                    Renderer::DrawString(text.TextString, transform.GetTransform(), text, (int)entity);
+                    m_renderer2D->DrawString(text.TextString, transform.GetTransform(), text, (int)entity);
                 }
             }
             
-            Renderer::EndScene();
-        }*/
+            m_renderer->EndScene();
+        }
     }
 
     void Scene::OnUpdateSimulation(Timestep ts, EditorCamera& camera)
@@ -451,7 +451,7 @@ namespace Nox
                 //Renderer2D::DrawRect(transform, sprite, (int)entity);
             }
         }
-        /* 
+        
         // Draw Circles
         {
             auto view = m_Registry.view<TransformComponent, CircleRendererComponent>();
@@ -459,10 +459,9 @@ namespace Nox
             {
                 auto [transform, circle] = view.get<TransformComponent, CircleRendererComponent>(entity);
 
-                Renderer::DrawCircle(transform.GetTransform(), circle.Color, circle.Thickness, circle.Fade, (int)entity);
+                m_renderer2D->DrawCircle(transform.GetTransform(), circle.Color, circle.Thickness, circle.Fade, (int)entity);
             }
         }
-        
         // Draw Text
         {
             auto view = m_Registry.view<TransformComponent, TextComponent>();
@@ -470,13 +469,13 @@ namespace Nox
             {
                 auto [transform, text] = view.get<TransformComponent, TextComponent>(entity);
 
-                Renderer::DrawString(text.TextString, transform.GetTransform(), text, (int)entity);
+                m_renderer2D->DrawString(text.TextString, transform.GetTransform(), text, (int)entity);
             }
         }
         /*
         //Renderer2D::DrawLine(glm::vec3(2.0f), glm::vec3(5.0f), glm::vec4(1.0f, 0.0f, 1.0f, 1.0f));
         //Renderer2D::DrawRect(glm::vec3(0.0f), glm::vec2(1.0f), glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
-        #1#*/
+        */
         m_renderer->EndScene();
     }
     

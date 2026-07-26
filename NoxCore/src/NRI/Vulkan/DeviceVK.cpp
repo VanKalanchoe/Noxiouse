@@ -306,14 +306,15 @@ namespace NRI
                 {
                     .features = {
                         .sampleRateShading = true,
+                        .wideLines = true,
                         .samplerAnisotropy = true,
-                        .shaderInt64 = true
+                        .shaderInt64 = true,
                     }
                 }, // vk::PhysicalDeviceFeatures2
                 {.shaderDrawParameters = true}, // vk::PhysicalDeviceVulkan11Features
                 {.shaderSampledImageArrayNonUniformIndexing = true, .shaderStorageBufferArrayNonUniformIndexing = true, .runtimeDescriptorArray = true, .scalarBlockLayout = true, .bufferDeviceAddress = true},
                 // vk::PhysicalDeviceVulkan12Features
-                {.synchronization2 = true, .dynamicRendering = true}, // vk::PhysicalDeviceVulkan13Features
+                {.shaderDemoteToHelperInvocation = true, .synchronization2 = true, .dynamicRendering = true}, // vk::PhysicalDeviceVulkan13Features
                 {.shaderObject = m_shaderObjectsEnabled}, // vk::PhysicalDeviceVulkan14Features
                 {.extendedDynamicState = true}, // vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT
                 {

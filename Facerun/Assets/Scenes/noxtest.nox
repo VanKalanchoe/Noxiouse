@@ -1,13 +1,130 @@
 Scene: Untitled
 Entities:
-  - Entity: 11779729218519551926
+  - Entity: 15258378492097758803
     TagComponent:
-      Tag: Empty Entity
+      Tag: BoxDynamic
     TransformComponent:
-      Translation: [0, 0, 0]
+      Translation: [3.5, 2, 0]
       Rotation: [0, 0, 0]
       Scale: [1, 1, 1]
     SpriteRendererComponent:
       Color: [1, 1, 1, 1]
-      TextureHandle: 3725258042431064742
+      TextureHandle: 0
+      TilingFactor: 1
+    RigidBody2DComponent:
+      BodyType: Dynamic
+      FixedRotation: false
+    BoxCollider2DComponent:
+      Offset: [0, 0]
+      Size: [0.5, 0.5]
+      Density: 1
+      Friction: 0.5
+      Restitution: 0
+      RestitutionThreshold: 0.5
+  - Entity: 3812622580241776826
+    TagComponent:
+      Tag: FloorStatic
+    TransformComponent:
+      Translation: [2.3, -2.2, 0]
+      Rotation: [0, 0, 0]
+      Scale: [5.6, 0.3, 1]
+    SpriteRendererComponent:
+      Color: [1, 1, 1, 1]
+      TextureHandle: 0
+      TilingFactor: 1
+    RigidBody2DComponent:
+      BodyType: Static
+      FixedRotation: false
+    BoxCollider2DComponent:
+      Offset: [0, 0]
+      Size: [0.5, 0.5]
+      Density: 1
+      Friction: 0.5
+      Restitution: 0
+      RestitutionThreshold: 0.5
+  - Entity: 8576717333100322088
+    TagComponent:
+      Tag: Scene Camera
+    TransformComponent:
+      Translation: [0, 0, 4.9]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    CameraComponent:
+      Camera:
+        ProjectionType: 0
+        PerspectiveFOV: 1.5707964
+        PerspectiveNear: 0.1
+        PerspectiveFar: 1000
+        OrthographicSize: 10
+        OrthographicNear: -1
+        OrthographicFar: 1
+      Primary: true
+      FixedAspectRatio: false
+  - Entity: 17664345212999895426
+    TagComponent:
+      Tag: Text2
+    TransformComponent:
+      Translation: [-4.3, -2.3, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    TextComponent:
+      TextString: Whats Up
+      Color: [0.14607233, 0.019379556, 0.5019305, 1]
+      Kerning: 0
+      LineSpacing: 0
+  - Entity: 11223568391611383810
+    TagComponent:
+      Tag: Text1
+    TransformComponent:
+      Translation: [-4.6, -1.5, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    TextComponent:
+      TextString: Hallo World
+      Color: [1, 1, 1, 1]
+      Kerning: 0
+      LineSpacing: 0
+  - Entity: 5520920074132168944
+    TagComponent:
+      Tag: Circle2
+    TransformComponent:
+      Translation: [-2.1, 1.6, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    CircleRendererComponent:
+      Color: [1, 0, 0, 1]
+      Thickness: 0.4
+      Fade: 0.238
+  - Entity: 11574118909961789032
+    TagComponent:
+      Tag: Circle1
+    TransformComponent:
+      Translation: [-3.5, 1.6, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    CircleRendererComponent:
+      Color: [1, 1, 1, 1]
+      Thickness: 0.5
+      Fade: 0.005
+  - Entity: 15123867717331441811
+    TagComponent:
+      Tag: Quad2
+    TransformComponent:
+      Translation: [1.4, 1.9, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    SpriteRendererComponent:
+      Color: [1, 1, 1, 1]
+      TextureHandle: 1634953866148052078
+      TilingFactor: 1
+  - Entity: 16363434036994145449
+    TagComponent:
+      Tag: Quad1
+    TransformComponent:
+      Translation: [0, 2, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    SpriteRendererComponent:
+      Color: [1, 1, 1, 1]
+      TextureHandle: 0
       TilingFactor: 1

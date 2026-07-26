@@ -2,6 +2,7 @@
 
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Core/Log.h"
+#include "MSDFData.h"
 
 namespace Nox
 {
@@ -13,8 +14,11 @@ namespace Nox
 
         initRenderer2D();
 
-        m_context.fileWatcher.watch(std::filesystem::path("assets/shaders/MeshQuad.slang"), [this]() { m_reloadShader = true; });
+        m_context.fileWatcher.watch(std::filesystem::path("assets/shaders/QuadMesh.slang"), [this]() { m_reloadShader = true; });
         m_context.fileWatcher.watch(std::filesystem::path("assets/shaders/quad.slang"), [this]() { m_reloadShader = true; });
+        m_context.fileWatcher.watch(std::filesystem::path("assets/shaders/CircleMesh.slang"), [this]() { m_reloadShader = true; });
+        m_context.fileWatcher.watch(std::filesystem::path("assets/shaders/TextMesh.slang"), [this]() { m_reloadShader = true; });
+        m_context.fileWatcher.watch(std::filesystem::path("assets/shaders/LineMesh.slang"), [this]() { m_reloadShader = true; });
     }
 
     Renderer2D::~Renderer2D()
@@ -24,48 +28,192 @@ namespace Nox
 
     void Renderer2D::initRenderer2D()
     {
+        // Quad
         createMeshPipeline(false);
-
-
         createQuadVertexBuffer();
         createQuadIndexBuffer();
         createQuadUniformBuffers();
+        
+        // Circle
+        createCircleMeshPipeline(false);
+        createCircleUniformBuffers();
+        
+        // Text
+        createTextMeshPipeline(false);
+        createTextUniformBuffers();
+        
+        // Text
+        createLineMeshPipeline(false);
+        createLineUniformBuffers();
     }
 
     // needed for pipeline management you cant run this inside a commandbuffer that already started
-    bool Renderer2D::drawFrame()
+    bool Renderer2D::BeginFrame()
     {
         if (m_reloadShader)
         {
+            // maybe i can compile only the one thats i geuss with bool m_reload shader but every pipeline hs own bool
             m_reloadShader = false;
             createMeshPipeline(true);
+            createCircleMeshPipeline(true);
+            createTextMeshPipeline(true);
+            createLineMeshPipeline(true);
             return m_reloadShader;
         }
 
         return m_reloadShader;
     }
+    
+    void Renderer2D::Update(uint32_t currentImage)
+    {
+        memcpy(m_data.quadUniformBuffersMapped[currentImage], m_data.quadDatas.data(), m_data.quadDatas.size() * sizeof(shaderio::QuadData));
+        memcpy(m_data.circleUniformBuffersMapped[currentImage], m_data.circleDatas.data(), m_data.circleDatas.size() * sizeof(shaderio::CircleData));
+        memcpy(m_data.textUniformBuffersMapped[currentImage], m_data.textDatas.data(), m_data.textDatas.size() * sizeof(shaderio::TextData));
+        memcpy(m_data.lineUniformBuffersMapped[currentImage], m_data.lineDatas.data(), m_data.lineDatas.size() * sizeof(shaderio::LineData));
+    }
+
+    // Runs inside a Begin rendering
+    void Renderer2D::Flush(NRI::CommandBuffer& commandBuffer, const NRI::Buffer& currentUniformBuffer, uint32_t frameIndex)
+    {
+        // QuadMesh
+        if (!m_data.quadDatas.empty())
+        {
+            commandBuffer.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_QuadMeshPipeline);
+
+            /*
+            commandBuffer.bindIndexBuffer(*m_data.indexBuffer, 0);
+            */
+            
+            shaderio::PushConstantQuad quadReferences;
+            quadReferences.matrixReference = currentUniformBuffer.getDeviceAddress();
+            quadReferences.vertexReference = m_data.vertexBuffer->getDeviceAddress();
+            quadReferences.quadDataReference = m_data.quadUniformBuffers[frameIndex]->getDeviceAddress();
+            quadReferences.numOfElements = m_data.quadDatas.size();
+            commandBuffer.pushData(&quadReferences, sizeof(shaderio::PushConstantQuad));
+            
+            /*
+            commandBuffer.drawIndexed(m_indices.size(), m_data.quadDatas.size(), 0, 0, 0);
+            */
+         
+            commandBuffer.drawMeshTasks(m_data.quadDatas.size(), 1, 1);
+        }
+        
+        // CircleMesh
+        if (!m_data.circleDatas.empty())
+        {
+            commandBuffer.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_CircleMeshPipeline);
+
+            /*
+            commandBuffer.bindIndexBuffer(*m_data.indexBuffer, 0);
+            */
+            
+            shaderio::PushConstantCircle circleReferences;
+            circleReferences.matrixReference = currentUniformBuffer.getDeviceAddress();
+            circleReferences.vertexReference = m_data.vertexBuffer->getDeviceAddress();
+            circleReferences.circleDataReference = m_data.circleUniformBuffers[frameIndex]->getDeviceAddress();
+            circleReferences.numOfElements = m_data.circleDatas.size();
+            commandBuffer.pushData(&circleReferences, sizeof(shaderio::PushConstantCircle));
+            
+            /*
+            commandBuffer.drawIndexed(m_indices.size(), m_data.quadDatas.size(), 0, 0, 0);
+            */
+         
+            commandBuffer.drawMeshTasks(m_data.circleDatas.size(), 1, 1);
+        }
+        
+        // TextMesh
+        if (!m_data.textDatas.empty())
+        {
+            commandBuffer.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_TextMeshPipeline);
+
+            /*
+            commandBuffer.bindIndexBuffer(*m_data.indexBuffer, 0);
+            */
+            
+            shaderio::PushConstantText circleReferences;
+            circleReferences.matrixReference = currentUniformBuffer.getDeviceAddress();
+            circleReferences.vertexReference = m_data.vertexBuffer->getDeviceAddress();
+            circleReferences.textDataReference = m_data.textUniformBuffers[frameIndex]->getDeviceAddress();
+            circleReferences.numOfElements = m_data.textDatas.size();
+            commandBuffer.pushData(&circleReferences, sizeof(shaderio::PushConstantText));
+            
+            /*
+            commandBuffer.drawIndexed(m_indices.size(), m_data.quadDatas.size(), 0, 0, 0);
+            */
+         
+            commandBuffer.drawMeshTasks(m_data.textDatas.size(), 1, 1);
+        }
+        
+        // TextMesh
+        if (!m_data.lineDatas.empty())
+        {
+            commandBuffer.setLineWidth(5.0f);
+            commandBuffer.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_LineMeshPipeline);
+
+            /*
+            commandBuffer.bindIndexBuffer(*m_data.indexBuffer, 0);
+            */
+            
+            shaderio::PushConstantLine circleReferences;
+            circleReferences.matrixReference = currentUniformBuffer.getDeviceAddress();
+            circleReferences.vertexReference = m_data.vertexBuffer->getDeviceAddress();
+            circleReferences.lineDataReference = m_data.lineUniformBuffers[frameIndex]->getDeviceAddress();
+            circleReferences.numOfElements = m_data.lineDatas.size();
+            commandBuffer.pushData(&circleReferences, sizeof(shaderio::PushConstantLine));
+            
+            /*
+            commandBuffer.drawIndexed(m_indices.size(), m_data.quadDatas.size(), 0, 0, 0);
+            */
+         
+            commandBuffer.drawMeshTasks(m_data.lineDatas.size(), 1, 1);
+        }
+    }
+
+    void Renderer2D::EndFrame()
+    {
+        m_data.quadDatas.clear();
+        m_data.circleDatas.clear();
+        m_data.textDatas.clear();
+        m_data.lineDatas.clear();
+    }
+
+    // Runs outside of any rendering call whenever you want
+    void Renderer2D::BeginScene(const Camera& camera, const glm::mat4& transform)
+    {
+    }
+
+    // Runs outside of any rendering call whenever you want
+    void Renderer2D::BeginScene(const EditorCamera& camera)
+    {
+
+    }
+
+    // Runs outside of any rendering call whenever you want
+    void Renderer2D::EndScene()
+    {
+    }
 
     void Renderer2D::createMeshPipeline(bool forceCompile)
     {
-        /*NRI::PipelineDesc desc{};
+        NRI::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
         desc.shaders.push_back({
             .stage = NRI::ShaderStage::Task,
             .entryPoint = "taskMain",
-            .sourcePath = "../../shaders/MeshQuad.slang"
+            .sourcePath = "assets/shaders/QuadMesh.slang"
         });
         desc.shaders.push_back({
             .stage = NRI::ShaderStage::Mesh,
             .entryPoint = "meshMain",
-            .sourcePath = "../../shaders/MeshQuad.slang"
+            .sourcePath = "assets/shaders/QuadMesh.slang"
         });
         desc.shaders.push_back({
             .stage = NRI::ShaderStage::Fragment,
             .entryPoint = "fragMain",
-            .sourcePath = "../../shaders/MeshQuad.slang"
+            .sourcePath = "assets/shaders/QuadMesh.slang"
         });
-        m_MeshQuadPipeline = m_context.device.createPipeline(desc, m_context.shaderCompiler);*/
-        NRI::PipelineDesc desc{};
+        m_QuadMeshPipeline = m_context.device.createPipeline(desc, m_context.shaderCompiler);
+        /*NRI::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
         desc.shaders.push_back({
             .stage = NRI::ShaderStage::Vertex,
@@ -76,8 +224,8 @@ namespace Nox
             .stage = NRI::ShaderStage::Fragment,
             .entryPoint = "fragMain",
             .sourcePath = "assets/shaders/quad.slang"
-        });
-        m_MeshQuadPipeline = m_context.device.createPipeline(desc, m_context.shaderCompiler);
+        });*/
+        /*m_QuadMeshPipeline = m_context.device.createPipeline(desc, m_context.shaderCompiler);*/
     }
 
     void Renderer2D::createQuadVertexBuffer()
@@ -184,49 +332,347 @@ namespace Nox
             DrawQuad(transform, src.Color, entityID);
         }
     }
-
-    void Renderer2D::Update(uint32_t currentImage)
+    
+    void Renderer2D::createCircleMeshPipeline(bool forceCompile)
     {
-        memcpy(m_data.quadUniformBuffersMapped[currentImage], m_data.quadDatas.data(), m_data.quadDatas.size() * sizeof(shaderio::QuadData));
+        NRI::PipelineDesc desc{};
+        desc.forceCompile = forceCompile;
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Task,
+            .entryPoint = "taskMain",
+            .sourcePath = "assets/shaders/CircleMesh.slang"
+        });
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Mesh,
+            .entryPoint = "meshMain",
+            .sourcePath = "assets/shaders/CircleMesh.slang"
+        });
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Fragment,
+            .entryPoint = "fragMain",
+            .sourcePath = "assets/shaders/CircleMesh.slang"
+        });
+        m_CircleMeshPipeline = m_context.device.createPipeline(desc, m_context.shaderCompiler);
+        /*NRI::PipelineDesc desc{};
+        desc.forceCompile = forceCompile;
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Vertex,
+            .entryPoint = "vertMain",
+            .sourcePath = "assets/shaders/quad.slang"
+        });
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Fragment,
+            .entryPoint = "fragMain",
+            .sourcePath = "assets/shaders/quad.slang"
+        });*/
+        /*m_CircleMeshPipeline = m_context.device.createPipeline(desc, m_context.shaderCompiler);*/
     }
-
-    // Runs inside a Begin rendering
-    void Renderer2D::Flush(NRI::CommandBuffer& commandBuffer, const NRI::Buffer& currentUniformBuffer, uint32_t frameIndex) const
+    
+    void Renderer2D::createCircleUniformBuffers()
     {
-        // MeshQuad
-        if (!m_data.quadDatas.empty())
-        {
-            commandBuffer.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_MeshQuadPipeline);
+        uint64_t bufferSize = 10000 * sizeof(shaderio::CircleData);
+        // Reserve memory in vectors to prevent reallocation overhead
+        m_data.circleUniformBuffers.reserve(MAX_FRAMES_IN_FLIGHT);
+        m_data.circleUniformBuffersMapped.reserve(MAX_FRAMES_IN_FLIGHT);
 
-            commandBuffer.bindIndexBuffer(*m_data.indexBuffer, 0);
-            
-            shaderio::PushConstantQuad quadReferences{};
-            quadReferences.matrixReference = currentUniformBuffer.getDeviceAddress();
-            quadReferences.vertexReference = m_data.vertexBuffer->getDeviceAddress();
-            quadReferences.quadDataReference = m_data.quadUniformBuffers[frameIndex]->getDeviceAddress();
-            quadReferences.numOfElements = m_data.quadDatas.size();
-            commandBuffer.pushData(&quadReferences, sizeof(shaderio::PushConstantQuad));
-            
-            commandBuffer.drawIndexed(m_indices.size(), m_data.quadDatas.size(), 0, 0, 0);
-         
-            /*commandBuffer.drawMeshTasks(m_data.quadDatas.size(), 1, 1);*/
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+        {
+            std::unique_ptr<NRI::Buffer> uboBuffer = m_context.device.createBuffer(NRI::BufferDesc
+                {
+                    .size = bufferSize,
+                    .usage = NRI::BufferUsage::Storage
+                });
+
+            void* mappedMemory = uboBuffer->map(0, bufferSize);
+
+            m_data.circleUniformBuffers.emplace_back(std::move(uboBuffer));
+            m_data.circleUniformBuffersMapped.emplace_back(mappedMemory);
         }
     }
     
-    // Runs outside of any rendering call whenever you want
-    void Renderer2D::BeginScene(const Camera& camera, const glm::mat4& transform)
+    void Renderer2D::DrawCircle(const glm::mat4& transform, const glm::vec4& color, float thickness /*= 1.0f*/, float fade /*= 0.005f*/, int entityID /*= -1*/)
     {
-        m_data.quadDatas.clear();
+        shaderio::CircleData instance;
+        instance.worldPosition = transform;
+        instance.color = color;
+        instance.thickness = thickness;
+        instance.fade = fade;
+        instance.entityID = entityID;
+        
+        m_data.circleDatas.emplace_back(instance);
+    }
+    
+     void Renderer2D::createTextMeshPipeline(bool forceCompile)
+    {
+        NRI::PipelineDesc desc{};
+        desc.forceCompile = forceCompile;
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Task,
+            .entryPoint = "taskMain",
+            .sourcePath = "assets/shaders/TextMesh.slang"
+        });
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Mesh,
+            .entryPoint = "meshMain",
+            .sourcePath = "assets/shaders/TextMesh.slang"
+        });
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Fragment,
+            .entryPoint = "fragMain",
+            .sourcePath = "assets/shaders/TextMesh.slang"
+        });
+        m_TextMeshPipeline = m_context.device.createPipeline(desc, m_context.shaderCompiler);
+        /*NRI::PipelineDesc desc{};
+        desc.forceCompile = forceCompile;
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Vertex,
+            .entryPoint = "vertMain",
+            .sourcePath = "assets/shaders/quad.slang"
+        });
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Fragment,
+            .entryPoint = "fragMain",
+            .sourcePath = "assets/shaders/quad.slang"
+        });*/
+        /*m_TextMeshPipeline = m_context.device.createPipeline(desc, m_context.shaderCompiler);*/
+    }
+    
+    void Renderer2D::createTextUniformBuffers()
+    {
+        uint64_t bufferSize = 10000 * sizeof(shaderio::TextData);
+        // Reserve memory in vectors to prevent reallocation overhead
+        m_data.textUniformBuffers.reserve(MAX_FRAMES_IN_FLIGHT);
+        m_data.textUniformBuffersMapped.reserve(MAX_FRAMES_IN_FLIGHT);
+
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+        {
+            std::unique_ptr<NRI::Buffer> uboBuffer = m_context.device.createBuffer(NRI::BufferDesc
+                {
+                    .size = bufferSize,
+                    .usage = NRI::BufferUsage::Storage
+                });
+
+            void* mappedMemory = uboBuffer->map(0, bufferSize);
+
+            m_data.textUniformBuffers.emplace_back(std::move(uboBuffer));
+            m_data.textUniformBuffersMapped.emplace_back(mappedMemory);
+        }
+    }
+    
+    void Renderer2D::DrawString(const std::string& string, Ref<Font> font, const glm::mat4& transform, const TextParams& textParams, int entityID)
+    {
+        const auto& fontGeometry = font->GetMSDFData()->FontGeometry;
+        const auto& metrics = fontGeometry.getMetrics();
+        Ref<Texture2D> fontAtlas = font->GetAtlasTexture();
+
+        m_data.FontAtlasTexture = fontAtlas;
+
+        double x = 0.0;
+        double fsScale = 1.0 / (metrics.ascenderY - metrics.descenderY);
+        double y = 0.0;
+
+        const float spaceGlyphAdvance = fontGeometry.getGlyph(' ')->getAdvance();
+
+        for (size_t i = 0; i < string.size(); i++)
+        {
+            char character = string[i];
+            if (character == '\r')
+                continue;
+
+            if (character == '\n')
+            {
+                x = 0;
+                y -= fsScale * metrics.lineHeight * textParams.LineSpacing;
+                continue;
+            }
+
+            if (character == ' ')
+            {
+                float advance = spaceGlyphAdvance;
+                if (i < string.size() - 1)
+                {
+                    char nextCharacter = string[i + 1];
+                    double dAdvance;
+                    fontGeometry.getAdvance(dAdvance, character, nextCharacter);
+                    advance = (float)dAdvance;
+                }
+
+                x += fsScale * advance + textParams.Kerning;
+                continue;
+            }
+
+            if (character == '\t')
+            {
+                // NOTE(Yan): is this right?
+                x += 4.0f * (fsScale * spaceGlyphAdvance + textParams.Kerning);
+                continue;
+            }
+
+            auto glyph = fontGeometry.getGlyph(character);
+            if (!glyph)
+                glyph = fontGeometry.getGlyph('?');
+            if (!glyph)
+                return;
+
+            double al, ab, ar, at;
+            glyph->getQuadAtlasBounds(al, ab, ar, at);
+            glm::vec2 texCoordMin((float)al, (float)ab);
+            glm::vec2 texCoordMax((float)ar, (float)at);
+
+            double pl, pb, pr, pt;
+            glyph->getQuadPlaneBounds(pl, pb, pr, pt);
+            glm::vec2 quadMin((float)pl, (float)pb);
+            glm::vec2 quadMax((float)pr, (float)pt);
+
+            quadMin *= fsScale, quadMax *= fsScale;
+            quadMin += glm::vec2(x, y);
+            quadMax += glm::vec2(x, y);
+
+            float texelWidth = 1.0f / fontAtlas->GetWidth();
+            float texelHeight = 1.0f / fontAtlas->GetHeight();
+            texCoordMin *= glm::vec2(texelWidth, texelHeight);
+            texCoordMax *= glm::vec2(texelWidth, texelHeight);
+
+            // render here
+            /*shaderio::InstancedTextData instance;
+            instance.QuadMin = quadMin;
+            instance.QuadMax = quadMax;
+            instance.Transform = transform; // store transform per draw
+            instance.TexMin = texCoordMin;
+            instance.TexMax = texCoordMax;
+            instance.Color = textParams.Color;
+            instance.TextureIndex = fontAtlas->GetTextureIndex();
+            instance.EntityID = entityID;
+
+            RegistryMesh::registerInstance(shaderio::PipelineType_Text, s_Data.textHandle, instance);*/
+
+            shaderio::TextData instance;
+            instance.quadMin = quadMin;
+            instance.quadMax = quadMax;
+            instance.transform = transform; // store transform per draw
+            instance.texMin = texCoordMin;
+            instance.texMax = texCoordMax;
+            instance.color = textParams.Color;
+            instance.materialIndex = fontAtlas->GetDescriptorIndexSlot();
+            instance.entityID = entityID;
+
+            m_data.textDatas.emplace_back(instance);
+
+            if (i < string.size() - 1)
+            {
+                double advance = glyph->getAdvance();
+                char nextCharacter = string[i + 1];
+                fontGeometry.getAdvance(advance, character, nextCharacter);
+
+                x += fsScale * advance + textParams.Kerning;
+            }
+        }
     }
 
-    // Runs outside of any rendering call whenever you want
-    void Renderer2D::BeginScene(const EditorCamera& camera)
+    void Renderer2D::DrawString(const std::string& string, const glm::mat4& transform, const TextComponent& component, int entityID)
     {
-        m_data.quadDatas.clear();
+        DrawString(string, component.FontAsset, transform, {component.Color, component.Kerning, component.LineSpacing}, entityID);
+    }
+    
+    void Renderer2D::createLineMeshPipeline(bool forceCompile)
+    {
+        NRI::PipelineDesc desc{};
+        desc.forceCompile = forceCompile;
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Task,
+            .entryPoint = "taskMain",
+            .sourcePath = "assets/shaders/LineMesh.slang"
+        });
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Mesh,
+            .entryPoint = "meshMain",
+            .sourcePath = "assets/shaders/LineMesh.slang"
+        });
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Fragment,
+            .entryPoint = "fragMain",
+            .sourcePath = "assets/shaders/LineMesh.slang"
+        });
+        m_LineMeshPipeline = m_context.device.createPipeline(desc, m_context.shaderCompiler);
+        /*NRI::PipelineDesc desc{};
+        desc.forceCompile = forceCompile;
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Vertex,
+            .entryPoint = "vertMain",
+            .sourcePath = "assets/shaders/quad.slang"
+        });
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Fragment,
+            .entryPoint = "fragMain",
+            .sourcePath = "assets/shaders/quad.slang"
+        });*/
+        /*m_TextMeshPipeline = m_context.device.createPipeline(desc, m_context.shaderCompiler);*/
+    }
+    
+    void Renderer2D::createLineUniformBuffers()
+    {
+        uint64_t bufferSize = 10000 * sizeof(shaderio::LineData);
+        // Reserve memory in vectors to prevent reallocation overhead
+        m_data.lineUniformBuffers.reserve(MAX_FRAMES_IN_FLIGHT);
+        m_data.lineUniformBuffersMapped.reserve(MAX_FRAMES_IN_FLIGHT);
+
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+        {
+            std::unique_ptr<NRI::Buffer> uboBuffer = m_context.device.createBuffer(NRI::BufferDesc
+                {
+                    .size = bufferSize,
+                    .usage = NRI::BufferUsage::Storage
+                });
+
+            void* mappedMemory = uboBuffer->map(0, bufferSize);
+
+            m_data.lineUniformBuffers.emplace_back(std::move(uboBuffer));
+            m_data.lineUniformBuffersMapped.emplace_back(mappedMemory);
+        }
+    }
+    
+    void Renderer2D::DrawLine(const glm::vec3& p0, const glm::vec3& p1, const glm::vec4& color, int entityID)
+    {
+        /*shaderio::InstancedLineData instance;
+        instance.P0 = p0;
+        instance.P1 = p1;
+        instance.Color = color;
+        instance.EntityID = entityID;
+
+        RegistryMesh::registerInstance(shaderio::PipelineType_Line, s_Data.lineHandle, instance);*/
+
+        shaderio::LineData instance;
+        instance.p0 = p0;
+        instance.p1 = p1;
+        instance.color = color;
+        instance.entityID = entityID;
+
+        m_data.lineDatas.emplace_back(instance);
     }
 
-    // Runs outside of any rendering call whenever you want
-    void Renderer2D::EndScene()
+    void Renderer2D::DrawRect(const glm::vec3& position, const glm::vec2& size, const glm::vec4& color, int entityID)
     {
+        glm::vec3 p0 = glm::vec3(position.x - size.x * 0.5f, position.y - size.y * 0.5f, position.z);
+        glm::vec3 p1 = glm::vec3(position.x + size.x * 0.5f, position.y - size.y * 0.5f, position.z);
+        glm::vec3 p2 = glm::vec3(position.x + size.x * 0.5f, position.y + size.y * 0.5f, position.z);
+        glm::vec3 p3 = glm::vec3(position.x - size.x * 0.5f, position.y + size.y * 0.5f, position.z);
+
+        DrawLine(p0, p1, color, entityID);
+        DrawLine(p1, p2, color, entityID);
+        DrawLine(p2, p3, color, entityID);
+        DrawLine(p3, p0, color, entityID);
+    }
+
+    void Renderer2D::DrawRect(const glm::mat4& transform, const glm::vec4& color, int entityID)
+    {
+        glm::vec3 p0 = transform * glm::vec4(-0.5f, -0.5f, 0.0f, 1.0f);
+        glm::vec3 p1 = transform * glm::vec4(0.5f, -0.5f, 0.0f, 1.0f);
+        glm::vec3 p2 = transform * glm::vec4(0.5f, 0.5f, 0.0f, 1.0f);
+        glm::vec3 p3 = transform * glm::vec4(-0.5f, 0.5f, 0.0f, 1.0f);
+
+        DrawLine(p0, p1, color, entityID);
+        DrawLine(p1, p2, color, entityID);
+        DrawLine(p2, p3, color, entityID);
+        DrawLine(p3, p0, color, entityID);
     }
 }

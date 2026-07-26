@@ -58,11 +58,12 @@ namespace Nox
         SDL_PushEvent(&quitEvent);
     }
 
-    void Application::Run(const AppState& applicationState) const
+    void Application::Run(AppState& applicationState)
     {
         float currentTime = GetTime();
-        float timestep = glm::clamp(currentTime - applicationState.lastTime, 0.001f, 0.1f);
-
+        Timestep timestep = currentTime - m_LastFrameTime ;
+        m_LastFrameTime = currentTime;
+        
         // Main layer update here
         for (const std::unique_ptr<Layer>& layer : m_LayerStack)
             layer->OnUpdate(timestep);
@@ -124,7 +125,6 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[])
 
     auto applicationState = new Nox::AppState();
     applicationState->app = Nox::CreateApplication(args);
-    applicationState->lastTime = Nox::Application::GetTime();
     *appstate = applicationState;
 
     return SDL_APP_CONTINUE; /* carry on with the program! */

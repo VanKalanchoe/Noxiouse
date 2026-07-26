@@ -49,6 +49,7 @@ namespace Nox
 
     private:
         Renderer* m_Renderer;
+        Renderer2D* m_Renderer2D;
         
         Ref<Scene> m_ActiveScene;
         Ref<Scene> m_EditorScene;

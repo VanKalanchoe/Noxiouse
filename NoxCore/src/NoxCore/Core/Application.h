@@ -40,7 +40,6 @@ namespace Nox
     struct AppState
     {
         Application* app;
-        float lastTime;
     };
 
     class Application
@@ -49,7 +48,7 @@ namespace Nox
         Application(ApplicationSpecification specification = ApplicationSpecification());
         ~Application();
 
-        void Run(const AppState& applicationState) const;
+        void Run(AppState& applicationState);
         static void Shutdown();
         
         Renderer* GetRenderer() { return renderer.get(); }
@@ -118,6 +117,7 @@ namespace Nox
         std::unique_ptr<Renderer> renderer;
         // has to be last otherwise renderer cant free resoruces
         std::vector<std::unique_ptr<Layer>> m_LayerStack;
+        float m_LastFrameTime = 0.0f;
     };
 
     extern Application* CreateApplication(ApplicationCommandLineArgs args);

@@ -43,11 +43,11 @@ static const float2 uv[4] =
 
 struct VSOutput
 {
-    float4 position : SV_Position;
-    float4 color : TEXCOORD0;
-    float2 texcoords : TEXCOORD1;
-    uint32_t materialIndex : TEXCOORD2;
-    int entityID : TEXCOORD3;
+    float4 pos : SV_Position;
+    float4 color;
+    float2 texCooord;
+    uint32_t materialIndex;
+    int entityID;
 };
 
 [shader("mesh")]
@@ -63,16 +63,17 @@ void meshMain
     uint quadID = sharedPayload.quadID;
     UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
     QuadData* quadData = (QuadData*)pushConstant.quadDataReference;
+    QuadData quad = quadData[quadID];
 
 	SetMeshOutputCounts(4, 2); // 4 vertices, 2 triangles
 
 	for (uint i = 0; i < 4; i++) 
     {
-		vertices[i].position = mul(ubo.proj, mul(ubo.view, mul(quadData[quadID].modelMatrix, positions[i])));
-        vertices[i].color = quadData[quadID].color;
-        vertices[i].texcoords = uv[i];
-        vertices[i].materialIndex = quadData[quadID].materialIndex;
-        vertices[i].entityID = quadData[quadID].entityID;
+		vertices[i].pos = mul(ubo.proj, mul(ubo.view, mul(quad.modelMatrix, positions[i])));
+        vertices[i].color = quad.color;
+        vertices[i].texCooord = uv[i];
+        vertices[i].materialIndex = quad.materialIndex;
+        vertices[i].entityID = quad.entityID;
 	}
 
 	triangles[0] = uint3(0, 1, 2);
@@ -82,14 +83,23 @@ void meshMain
 struct FSOutput
 {
     float4 color : SV_TARGET0; // Final color output (RGBA)
+    int entityID : SV_TARGET1;
 };
 
 [shader("fragment")]
-FSOutput fragMain(VSOutput vertexInput)
+FSOutput fragMain(VSOutput vertIn, uniform PushConstantQuad pushConstant)
 {
     FSOutput output;
 
-    output.color = vertexInput.color; // Default pink color
+    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+
+    Texture2D texHandle = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + vertIn.materialIndex, 0));
+    SamplerState sampHandle = SamplerState.Handle(uint2(0, 0));
+    float4 img = texHandle.Sample(sampHandle, vertIn.texCooord);
+
+    output.color = img * vertIn.color;
+
+    output.entityID = vertIn.entityID;
 
     return output;
 }

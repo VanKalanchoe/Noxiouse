@@ -1,4 +1,7 @@
 AssetRegistry:
+  - Handle: 1634953866148052078
+    FilePath: textures/Checkerboard.png
+    Type: AssetType::Texture2D
   - Handle: 3725258042431064742
     FilePath: textures/ChernoLogo.png
     Type: AssetType::Texture2D

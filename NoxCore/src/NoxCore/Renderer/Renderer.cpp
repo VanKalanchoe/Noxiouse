@@ -649,6 +649,7 @@ namespace Nox
         m_commandBuffers->setFrontFace(NRI::FrontFace::CounterClockWise);
         m_commandBuffers->setDepthBiasEnable(false);
         m_commandBuffers->setDepthClampEnable(false); //LineWidth maybe ?
+        m_commandBuffers->setLineWidth(1.0f);
 
         // Multisampling.
         uint32_t sampleCount = m_device->getMSAASampleCount();
@@ -876,7 +877,7 @@ namespace Nox
             return;
         }
 
-        if (m_renderer2D->drawFrame())
+        if (m_renderer2D->BeginFrame())
         {
             return;
         }
@@ -902,6 +903,9 @@ namespace Nox
             framebufferResized = false;
             recreateSwapChain();
         }
+        
+        m_renderer2D->EndFrame();
+        
         frameIndex = (frameIndex + 1) % MAX_FRAMES_IN_FLIGHT;
     }
     

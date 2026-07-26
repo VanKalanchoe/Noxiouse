@@ -158,7 +158,7 @@ namespace Nox
     Ref<Font> Font::GetDefault()
     {
         if (!s_DefaultFont)
-            s_DefaultFont = CreateRef<Font>("E:/dev/VanK/VanK-Editor/assets/Content/fonts/opensans/static/OpenSans-Regular.ttf");
+            s_DefaultFont = CreateRef<Font>("assets/fonts/opensans/static/OpenSans-Regular.ttf");
 
         return s_DefaultFont;
     }

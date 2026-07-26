@@ -25,6 +25,7 @@ namespace Nox
         
         auto& app = Application::Get();
         m_Renderer = app.GetRenderer();
+        m_Renderer2D = m_Renderer->getRenderer2D();
 
         m_Font = Font::GetDefault();
 
@@ -49,7 +50,7 @@ namespace Nox
             // TODO: promp the user to select a directory
             //NewProject();
 
-            // If no project is opened, close vank
+            // If no project is opened, close nox
             // note: this is while we dont have a new project path
             if (!OpenProject())
             {
@@ -251,6 +252,9 @@ namespace Nox
             bool currentVSync = m_Renderer->getVSync();
             if (ImGui::MenuItem("vSync", "", &currentVSync))
                 m_Renderer->setVSync(currentVSync); // Recreate the swapchain with the new vSync setting
+            
+            // Adding overlay text on the upper left corner
+            ImGui::Text("FPS: %.1f", ImGui::GetIO().Framerate);
 
             ImGui::EndMainMenuBar();
         }
@@ -285,9 +289,6 @@ namespace Nox
                     // !!! This is where the RenderTarget image is displayed !!!
                     ImGui::Image(textureID, viewportPanelSize);
                 }
-                // Adding overlay text on the upper left corner
-                ImGui::SetCursorPos(ImVec2(0, 0));
-                ImGui::Text("FPS: %.1f", ImGui::GetIO().Framerate);
             }
 
             if (ImGui::BeginDragDropTarget())
@@ -299,7 +300,7 @@ namespace Nox
                 }
                 ImGui::EndDragDropTarget();
             }
-
+            
             // Gizmos
             //maybe be a callback you subscribe to instead
             Entity selectedEntity = m_SceneHierarchyPanel.GetSelectedEntity();
@@ -614,7 +615,7 @@ namespace Nox
 
     void EditorLayer::OnOverlayRender()
     {
-        /*if (m_SceneState == SceneState::Play)
+        if (m_SceneState == SceneState::Play)
         {
             Entity camera = m_ActiveScene->GetPrimaryCameraEntity();
             if (!camera)
@@ -645,7 +646,7 @@ namespace Nox
                         * glm::translate(glm::mat4(1.0f), glm::vec3(bc2d.Offset, 0.001f))
                         * glm::scale(glm::mat4(1.0f), scale * glm::vec3(bc2d.Size * 2.0f, 1.0f));
 
-                    Renderer::DrawRect(transform, glm::vec4(0, 1, 0, 1));
+                    m_Renderer2D->DrawRect(transform, glm::vec4(0, 1, 0, 1));
                 }
             }
             // Circle Colliders
@@ -661,7 +662,7 @@ namespace Nox
                     glm::mat4 transform = glm::translate(glm::mat4(1.0f), translation)
                         * glm::scale(glm::mat4(1.0f), scale);
 
-                    Renderer::DrawCircle(transform, glm::vec4(0, 1, 0, 1), 0.01f);
+                    m_Renderer2D->DrawCircle(transform, glm::vec4(0, 1, 0, 1), 0.01f);
                 }
             }
         }
@@ -670,9 +671,9 @@ namespace Nox
         if (Entity selectedEntity = m_SceneHierarchyPanel.GetSelectedEntity())
         {
             const TransformComponent& transform = selectedEntity.GetComponent<TransformComponent>();
-            Renderer::DrawRect(transform.GetTransform(), glm::vec4(1.0f, 0.5f, 0.0f, 1.0f));
+            m_Renderer2D->DrawRect(transform.GetTransform(), glm::vec4(1.0f, 0.5f, 0.0f, 1.0f));
         }
-        m_Renderer->EndScene();*/
+        m_Renderer->EndScene();
     }
 
     void EditorLayer::NewProject()

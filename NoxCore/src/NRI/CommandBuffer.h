@@ -129,6 +129,7 @@ namespace NRI
         virtual void setFrontFace(const FrontFace& frontFace) = 0;
         virtual void setDepthBiasEnable(bool enable) = 0;
         virtual void setDepthClampEnable(bool enable) = 0;
+        virtual void setLineWidth(float lineWidth) = 0;
         virtual void setRasterizationSamples(uint32_t sampleCount) = 0;
         virtual void setSampleMask(uint32_t sampleCount, uint32_t sampleMask) = 0;
         virtual void setAlphaToCoverageEnable(bool enable) = 0;

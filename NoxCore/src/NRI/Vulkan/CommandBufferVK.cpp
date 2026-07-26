@@ -347,6 +347,11 @@ namespace NRI
         m_commandBuffers[m_currentFrameIndex].setDepthClampEnableEXT(enable);
     }
     
+    void CommandBufferVK::setLineWidth(float lineWidth)
+    {
+        m_commandBuffers[m_currentFrameIndex].setLineWidth(lineWidth);
+    }
+    
     void CommandBufferVK::setRasterizationSamples(uint32_t sampleCount)
     {
         m_commandBuffers[m_currentFrameIndex].setRasterizationSamplesEXT(static_cast<vk::SampleCountFlagBits>(sampleCount));
