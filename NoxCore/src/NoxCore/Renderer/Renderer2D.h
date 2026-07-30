@@ -93,19 +93,19 @@ namespace Nox
         
         // Quad
         void createMeshPipeline(bool forceCompile);
-        void createQuadUniformBuffers();
+        void createQuadStorageBuffers();
         
         // Circle
         void createCircleMeshPipeline(bool forceCompile);
-        void createCircleUniformBuffers();
+        void createCircleStorageBuffers();
         
         // Text
         void createTextMeshPipeline(bool forceCompile);
-        void createTextUniformBuffers();
+        void createTextStorageBuffers();
         
         // Line
         void createLineMeshPipeline(bool forceCompile);
-        void createLineUniformBuffers();
+        void createLineStorageBuffers();
 
     private:
         struct Data
@@ -113,24 +113,24 @@ namespace Nox
             // todo:: combine all buffers into with offsets idk how mcuh improvement that is
             // Quad
             std::vector<shaderio::QuadData> quadDatas;
-            std::vector<std::unique_ptr<NRI::Buffer>> quadUniformBuffers;
-            std::vector<void*> quadUniformBuffersMapped;
+            std::vector<std::unique_ptr<NRI::Buffer>> quadStorageBuffers;
+            std::vector<void*> quadStorageBuffersMapped;
             
             // Circle
             std::vector<shaderio::CircleData> circleDatas;
-            std::vector<std::unique_ptr<NRI::Buffer>> circleUniformBuffers;
-            std::vector<void*> circleUniformBuffersMapped;
+            std::vector<std::unique_ptr<NRI::Buffer>> circleStorageBuffers;
+            std::vector<void*> circleStorageBuffersMapped;
             
             // Text
             Ref<Texture2D> FontAtlasTexture;
             std::vector<shaderio::TextData> textDatas;
-            std::vector<std::unique_ptr<NRI::Buffer>> textUniformBuffers;
-            std::vector<void*> textUniformBuffersMapped;
+            std::vector<std::unique_ptr<NRI::Buffer>> textStorageBuffers;
+            std::vector<void*> textStorageBuffersMapped;
             
             // Line
             std::vector<shaderio::LineData> lineDatas;
-            std::vector<std::unique_ptr<NRI::Buffer>> lineUniformBuffers;
-            std::vector<void*> lineUniformBuffersMapped;
+            std::vector<std::unique_ptr<NRI::Buffer>> lineStorageBuffers;
+            std::vector<void*> lineStorageBuffersMapped;
         };
         
     private:

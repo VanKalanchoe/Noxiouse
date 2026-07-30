@@ -30,19 +30,19 @@ namespace Nox
     {
         // Quad
         createMeshPipeline(false);
-        createQuadUniformBuffers();
+        createQuadStorageBuffers();
         
         // Circle
         createCircleMeshPipeline(false);
-        createCircleUniformBuffers();
+        createCircleStorageBuffers();
         
         // Text
         createTextMeshPipeline(false);
-        createTextUniformBuffers();
+        createTextStorageBuffers();
         
         // Text
         createLineMeshPipeline(false);
-        createLineUniformBuffers();
+        createLineStorageBuffers();
     }
 
     // needed for pipeline management you cant run this inside a commandbuffer that already started
@@ -64,10 +64,10 @@ namespace Nox
     
     void Renderer2D::Update(uint32_t currentImage)
     {
-        memcpy(m_data.quadUniformBuffersMapped[currentImage], m_data.quadDatas.data(), m_data.quadDatas.size() * sizeof(shaderio::QuadData));
-        memcpy(m_data.circleUniformBuffersMapped[currentImage], m_data.circleDatas.data(), m_data.circleDatas.size() * sizeof(shaderio::CircleData));
-        memcpy(m_data.textUniformBuffersMapped[currentImage], m_data.textDatas.data(), m_data.textDatas.size() * sizeof(shaderio::TextData));
-        memcpy(m_data.lineUniformBuffersMapped[currentImage], m_data.lineDatas.data(), m_data.lineDatas.size() * sizeof(shaderio::LineData));
+        memcpy(m_data.quadStorageBuffersMapped[currentImage], m_data.quadDatas.data(), m_data.quadDatas.size() * sizeof(shaderio::QuadData));
+        memcpy(m_data.circleStorageBuffersMapped[currentImage], m_data.circleDatas.data(), m_data.circleDatas.size() * sizeof(shaderio::CircleData));
+        memcpy(m_data.textStorageBuffersMapped[currentImage], m_data.textDatas.data(), m_data.textDatas.size() * sizeof(shaderio::TextData));
+        memcpy(m_data.lineStorageBuffersMapped[currentImage], m_data.lineDatas.data(), m_data.lineDatas.size() * sizeof(shaderio::LineData));
     }
 
     // Runs inside a Begin rendering
@@ -80,7 +80,7 @@ namespace Nox
             
             shaderio::PushConstantQuad quadReferences;
             quadReferences.matrixReference = currentUniformBuffer.getDeviceAddress();
-            quadReferences.quadDataReference = m_data.quadUniformBuffers[frameIndex]->getDeviceAddress();
+            quadReferences.quadDataReference = m_data.quadStorageBuffers[frameIndex]->getDeviceAddress();
             quadReferences.numOfElements = m_data.quadDatas.size();
             commandBuffer.pushData(&quadReferences, sizeof(shaderio::PushConstantQuad));
             
@@ -94,7 +94,7 @@ namespace Nox
             
             shaderio::PushConstantCircle circleReferences;
             circleReferences.matrixReference = currentUniformBuffer.getDeviceAddress();
-            circleReferences.circleDataReference = m_data.circleUniformBuffers[frameIndex]->getDeviceAddress();
+            circleReferences.circleDataReference = m_data.circleStorageBuffers[frameIndex]->getDeviceAddress();
             circleReferences.numOfElements = m_data.circleDatas.size();
             commandBuffer.pushData(&circleReferences, sizeof(shaderio::PushConstantCircle));
 
@@ -108,7 +108,7 @@ namespace Nox
             
             shaderio::PushConstantText circleReferences;
             circleReferences.matrixReference = currentUniformBuffer.getDeviceAddress();
-            circleReferences.textDataReference = m_data.textUniformBuffers[frameIndex]->getDeviceAddress();
+            circleReferences.textDataReference = m_data.textStorageBuffers[frameIndex]->getDeviceAddress();
             circleReferences.numOfElements = m_data.textDatas.size();
             commandBuffer.pushData(&circleReferences, sizeof(shaderio::PushConstantText));
 
@@ -123,7 +123,7 @@ namespace Nox
 
             shaderio::PushConstantLine circleReferences;
             circleReferences.matrixReference = currentUniformBuffer.getDeviceAddress();
-            circleReferences.lineDataReference = m_data.lineUniformBuffers[frameIndex]->getDeviceAddress();
+            circleReferences.lineDataReference = m_data.lineStorageBuffers[frameIndex]->getDeviceAddress();
             circleReferences.numOfElements = m_data.lineDatas.size();
             commandBuffer.pushData(&circleReferences, sizeof(shaderio::PushConstantLine));
             
@@ -159,6 +159,11 @@ namespace Nox
     {
         NRI::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
+        desc.colorFormats =
+        {
+            NRI::ImageFormat::Surface,
+            NRI::ImageFormat::R32SINT
+        };
         desc.shaders.push_back({
             .stage = NRI::ShaderStage::Task,
             .entryPoint = "taskMain",
@@ -177,12 +182,12 @@ namespace Nox
         m_QuadMeshPipeline = m_context.device.createPipeline(desc, m_context.shaderCompiler);
     }
 
-    void Renderer2D::createQuadUniformBuffers()
+    void Renderer2D::createQuadStorageBuffers()
     {
         uint64_t bufferSize = 10000 * sizeof(shaderio::QuadData);
         // Reserve memory in vectors to prevent reallocation overhead
-        m_data.quadUniformBuffers.reserve(MAX_FRAMES_IN_FLIGHT);
-        m_data.quadUniformBuffersMapped.reserve(MAX_FRAMES_IN_FLIGHT);
+        m_data.quadStorageBuffers.reserve(MAX_FRAMES_IN_FLIGHT);
+        m_data.quadStorageBuffersMapped.reserve(MAX_FRAMES_IN_FLIGHT);
 
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
         {
@@ -194,8 +199,8 @@ namespace Nox
 
             void* mappedMemory = uboBuffer->map(0, bufferSize);
 
-            m_data.quadUniformBuffers.emplace_back(std::move(uboBuffer));
-            m_data.quadUniformBuffersMapped.emplace_back(mappedMemory);
+            m_data.quadStorageBuffers.emplace_back(std::move(uboBuffer));
+            m_data.quadStorageBuffersMapped.emplace_back(mappedMemory);
         }
     }
 
@@ -238,6 +243,11 @@ namespace Nox
     {
         NRI::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
+        desc.colorFormats =
+        {
+            NRI::ImageFormat::Surface,
+            NRI::ImageFormat::R32SINT
+        };
         desc.shaders.push_back({
             .stage = NRI::ShaderStage::Task,
             .entryPoint = "taskMain",
@@ -256,12 +266,12 @@ namespace Nox
         m_CircleMeshPipeline = m_context.device.createPipeline(desc, m_context.shaderCompiler);
     }
     
-    void Renderer2D::createCircleUniformBuffers()
+    void Renderer2D::createCircleStorageBuffers()
     {
         uint64_t bufferSize = 10000 * sizeof(shaderio::CircleData);
         // Reserve memory in vectors to prevent reallocation overhead
-        m_data.circleUniformBuffers.reserve(MAX_FRAMES_IN_FLIGHT);
-        m_data.circleUniformBuffersMapped.reserve(MAX_FRAMES_IN_FLIGHT);
+        m_data.circleStorageBuffers.reserve(MAX_FRAMES_IN_FLIGHT);
+        m_data.circleStorageBuffersMapped.reserve(MAX_FRAMES_IN_FLIGHT);
 
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
         {
@@ -273,8 +283,8 @@ namespace Nox
 
             void* mappedMemory = uboBuffer->map(0, bufferSize);
 
-            m_data.circleUniformBuffers.emplace_back(std::move(uboBuffer));
-            m_data.circleUniformBuffersMapped.emplace_back(mappedMemory);
+            m_data.circleStorageBuffers.emplace_back(std::move(uboBuffer));
+            m_data.circleStorageBuffersMapped.emplace_back(mappedMemory);
         }
     }
     
@@ -294,6 +304,11 @@ namespace Nox
     {
         NRI::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
+        desc.colorFormats =
+        {
+            NRI::ImageFormat::Surface,
+            NRI::ImageFormat::R32SINT
+        };
         desc.shaders.push_back({
             .stage = NRI::ShaderStage::Task,
             .entryPoint = "taskMain",
@@ -312,12 +327,12 @@ namespace Nox
         m_TextMeshPipeline = m_context.device.createPipeline(desc, m_context.shaderCompiler);
     }
     
-    void Renderer2D::createTextUniformBuffers()
+    void Renderer2D::createTextStorageBuffers()
     {
         uint64_t bufferSize = 10000 * sizeof(shaderio::TextData);
         // Reserve memory in vectors to prevent reallocation overhead
-        m_data.textUniformBuffers.reserve(MAX_FRAMES_IN_FLIGHT);
-        m_data.textUniformBuffersMapped.reserve(MAX_FRAMES_IN_FLIGHT);
+        m_data.textStorageBuffers.reserve(MAX_FRAMES_IN_FLIGHT);
+        m_data.textStorageBuffersMapped.reserve(MAX_FRAMES_IN_FLIGHT);
 
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
         {
@@ -329,8 +344,8 @@ namespace Nox
 
             void* mappedMemory = uboBuffer->map(0, bufferSize);
 
-            m_data.textUniformBuffers.emplace_back(std::move(uboBuffer));
-            m_data.textUniformBuffersMapped.emplace_back(mappedMemory);
+            m_data.textStorageBuffers.emplace_back(std::move(uboBuffer));
+            m_data.textStorageBuffersMapped.emplace_back(mappedMemory);
         }
     }
     
@@ -440,6 +455,11 @@ namespace Nox
     {
         NRI::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
+        desc.colorFormats =
+        {
+            NRI::ImageFormat::Surface,
+            NRI::ImageFormat::R32SINT
+        };
         desc.shaders.push_back({
             .stage = NRI::ShaderStage::Task,
             .entryPoint = "taskMain",
@@ -458,12 +478,12 @@ namespace Nox
         m_LineMeshPipeline = m_context.device.createPipeline(desc, m_context.shaderCompiler);
     }
     
-    void Renderer2D::createLineUniformBuffers()
+    void Renderer2D::createLineStorageBuffers()
     {
         uint64_t bufferSize = 10000 * sizeof(shaderio::LineData);
         // Reserve memory in vectors to prevent reallocation overhead
-        m_data.lineUniformBuffers.reserve(MAX_FRAMES_IN_FLIGHT);
-        m_data.lineUniformBuffersMapped.reserve(MAX_FRAMES_IN_FLIGHT);
+        m_data.lineStorageBuffers.reserve(MAX_FRAMES_IN_FLIGHT);
+        m_data.lineStorageBuffersMapped.reserve(MAX_FRAMES_IN_FLIGHT);
 
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
         {
@@ -475,8 +495,8 @@ namespace Nox
 
             void* mappedMemory = uboBuffer->map(0, bufferSize);
 
-            m_data.lineUniformBuffers.emplace_back(std::move(uboBuffer));
-            m_data.lineUniformBuffersMapped.emplace_back(mappedMemory);
+            m_data.lineStorageBuffers.emplace_back(std::move(uboBuffer));
+            m_data.lineStorageBuffersMapped.emplace_back(mappedMemory);
         }
     }
     

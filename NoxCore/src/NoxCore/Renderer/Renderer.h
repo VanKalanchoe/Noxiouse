@@ -17,6 +17,10 @@ namespace std
 
 const std::string MODEL_PATH = "assets/models/viking_room.obj";
 const std::string MODEL_PATH_GLTF = "assets/models/viking_room.glb";
+const std::string MODEL_PATH_GLTF_STANDFORD = "assets/models/stanford_bunny/stanford_bunny.gltf";
+const std::string MODEL_PATH_FOX_GLTF = "assets/models/Fox/Fox.gltf";
+const std::string MODEL_PATH_GLTF_BIOHAZAR_Crate = "assets/models/Biohazard_Crate/Model/Untitled.gltf";
+const std::string TEXTURE_PATH_FOX = "assets/models/Fox/Texture.png";
 const std::string TEXTURE_PATH = "assets/textures/viking_room.ktx2";
 
 // 2 quads
@@ -94,11 +98,15 @@ namespace Nox
         void EndScene();
         
         Texture2D* GetSceneResource() const { return m_sceneResource.get(); }
+        
         void setVSync(bool enabled);
         void onViewportSizeChange(NRI::Extent2D size);
         bool getVSync() const { return m_vSync; }
         NRI::Extent2D getViewPortSize() const { return m_viewportSize; }
         Renderer2D* getRenderer2D() const { return m_renderer2D.get(); }
+        void setFrozen(bool temp) { m_frozen = temp; }
+        bool getFrozen() { return m_frozen; }
+        void setFrozenDone(bool temp) { m_frozen = temp; }
         
         Ref<Texture2D> UploadTexture(const TextureData& cpuData);
         Ref<Texture2D> createSolidColorTexture(uint8_t r, uint8_t g, uint8_t b, uint8_t a);
@@ -120,8 +128,7 @@ namespace Nox
         void createDepthResources();
         void createTextureImage();
         void loadModel();
-        void createVertexBuffer();
-        void createIndexBuffer();
+        void createMeshletBuffers();
         void createUniformBuffers();
         void createInstanceBuffer();
         void createDescriptorHeaps();
@@ -154,37 +161,49 @@ namespace Nox
         //decsriptor
         std::unique_ptr<NRI::DescriptorHeap> m_samplerHeap = nullptr;
         std::unique_ptr<NRI::DescriptorHeap> m_resourceHeap = nullptr;
-
-        // Abstract storage tracking vectors
-        std::vector<std::unique_ptr<NRI::Buffer>> m_modelDataBuffers;
-        //decsriptor
-
-        std::unique_ptr<NRI::Buffer> m_vertexBuffer = nullptr;
-        std::unique_ptr<NRI::Buffer> m_indexBuffer = nullptr;
+        
         std::unique_ptr<NRI::Buffer> m_instanceBuffer = nullptr;
 
+        // Scene Data + Frustum Freeze
         std::vector<std::unique_ptr<NRI::Buffer>> m_uniformBuffers;
         std::vector<void*> m_uniformBuffersMapped;
         shaderio::UniformBufferObject uniformData = {};
+        shaderio::UniformBufferObject frozenUniformData = {};
+        bool m_frozen = false;
+        bool m_frozenDone = false;
 
         Ref<Texture2D> m_whiteTexture;
         Ref<Texture2D> m_sceneResource;
         Ref<Texture2D> m_colorResource;
         
+        // Entiity ID + readback
         Ref<Texture2D> m_entityResource;
         Ref<Texture2D> m_entityResolveResource;
         std::vector<std::unique_ptr<NRI::Buffer>> m_pickerStagingBuffers;
         PickRequest m_pickRequest;
         
+        // Textures
         Ref<Texture2D> m_depthResource;
         Ref<Texture2D> m_textureResource;
         Ref<Texture2D> m_textureResource2;
         Ref<Texture2D> m_textureResource3;
         uint32_t mipLevels;
 
-        std::vector<shaderio::Vertex> vertices;
-        std::vector<uint32_t> indices;
-
+        std::vector<shaderio::Vertex> m_vertices;
+        std::unique_ptr<NRI::Buffer> m_verticesBuffer;
+        
+        std::vector<shaderio::MeshletBounds> m_meshletBounds;
+        std::unique_ptr<NRI::Buffer> m_meshletBoundsBuffer;
+        
+        std::vector<shaderio::MeshletDraw> m_meshletDraws;
+        std::unique_ptr<NRI::Buffer> m_meshletDrawsBuffer;
+        
+        std::vector<uint32_t> m_meshletVertices;
+        std::unique_ptr<NRI::Buffer> m_meshletVerticesBuffer;
+        
+        std::vector<uint8_t> m_meshletTriangles;
+        std::unique_ptr<NRI::Buffer> m_meshletTrianglesBuffer;
+        
         uint32_t frameIndex = 0;
 
         bool framebufferResized = false;

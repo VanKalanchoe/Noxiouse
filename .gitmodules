@@ -16,3 +16,6 @@
 [submodule "NoxCore/vendors/tinygltf"]
 	path = NoxCore/vendors/tinygltf
 	url = https://github.com/syoyo/tinygltf.git
+[submodule "NoxCore/vendors/meshoptimizer"]
+	path = NoxCore/vendors/meshoptimizer
+	url = https://github.com/zeux/meshoptimizer.git

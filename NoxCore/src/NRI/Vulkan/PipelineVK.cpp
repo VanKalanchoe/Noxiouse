@@ -333,18 +333,30 @@ namespace NRI
                 /*std::vector<vk::DynamicState> dynamicStates = {vk::DynamicState::eViewport, vk::DynamicState::eScissor};
                 vk::PipelineDynamicStateCreateInfo dynamicState{.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size()), .pDynamicStates = dynamicStates.data()};*/
 
+                bool hasMeshShader = false;
+                for (const auto& shaderDesc : desc.shaders)
+                {
+                    if (shaderDesc.stage == ShaderStage::Mesh || shaderDesc.stage == ShaderStage::Task)
+                    {
+                        hasMeshShader = true;
+                        break;
+                    }
+                }
+
                 std::vector<vk::DynamicState> dynamicStates = {
                     // Replaces the old standard Viewport/Scissor
                     vk::DynamicState::eViewportWithCount,
                     vk::DynamicState::eScissorWithCount,
+                };
 
-                    // Vertex Input
-                    vk::DynamicState::eVertexInputEXT,
+                if (!hasMeshShader)
+                {
+                    dynamicStates.push_back(vk::DynamicState::eVertexInputEXT);
+                    dynamicStates.push_back(vk::DynamicState::ePrimitiveTopology);
+                    dynamicStates.push_back(vk::DynamicState::ePrimitiveRestartEnable);
+                }
 
-                    // Input Assembly
-                    vk::DynamicState::ePrimitiveTopology,
-                    vk::DynamicState::ePrimitiveRestartEnable,
-
+                dynamicStates.insert(dynamicStates.end(), {
                     // Rasterization
                     vk::DynamicState::eRasterizerDiscardEnable,
                     vk::DynamicState::ePolygonModeEXT,
@@ -371,7 +383,7 @@ namespace NRI
                     vk::DynamicState::eColorBlendEquationEXT,
                     vk::DynamicState::eColorWriteMaskEXT,
                     vk::DynamicState::eLogicOpEnableEXT
-                };
+                });
 
                 vk::PipelineDynamicStateCreateInfo dynamicState{
                     .dynamicStateCount = static_cast<uint32_t>(dynamicStates.size()),
@@ -387,8 +399,8 @@ namespace NRI
                     {
                         .stageCount = static_cast<uint32_t>(shaderStages.size()),
                         .pStages = shaderStages.data(),
-                        .pVertexInputState = &vertexInputInfo,
-                        .pInputAssemblyState = &inputAssembly,
+                        .pVertexInputState = hasMeshShader ? nullptr : &vertexInputInfo,
+                        .pInputAssemblyState = hasMeshShader ? nullptr : &inputAssembly,
                         .pViewportState = &viewportState,
                         .pRasterizationState = &rasterizer,
                         .pMultisampleState = &multisampling,
@@ -404,6 +416,8 @@ namespace NRI
                     {.flags = vk::PipelineCreateFlagBits2::eDescriptorHeapEXT},
                     {.colorAttachmentCount = static_cast<uint32_t>(vkColorFormats.size()), .pColorAttachmentFormats = vkColorFormats.data(), .depthAttachmentFormat = depthFormat}
                 };
+
+                m_pipeline = vk::raii::Pipeline(m_deviceVK.getDevice(), nullptr, pipelineCreateInfoChain.get<vk::GraphicsPipelineCreateInfo>());
 
                 m_pipeline = vk::raii::Pipeline(m_deviceVK.getDevice(), nullptr, pipelineCreateInfoChain.get<vk::GraphicsPipelineCreateInfo>());
             }

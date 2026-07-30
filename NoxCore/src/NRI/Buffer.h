@@ -12,6 +12,7 @@ namespace NRI
         Vertex,        // DeviceLocal, VertexBuffer | TransferDst
         Index,         // DeviceLocal, IndexBuffer | TransferDst
         Storage,       // DeviceLocal, StorageBuffer
+        StorageStatic,
         DescriptorHeap // HostVisible | HostCoherent, DescriptorHeap
     };
 

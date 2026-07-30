@@ -12,6 +12,8 @@
 #define TINYGLTF3_ENABLE_FS 
 #include "tiny_gltf_v3.h"
 
+#include "meshoptimizer.h"
+
 #include "NoxCore/Core/Log.h"
 
 namespace Nox
@@ -27,6 +29,7 @@ namespace Nox
 
         initRenderer();
 
+        m_fileWatcher.watch(std::filesystem::path("assets/shaders/Meshlet.slang"), [this]() { m_reloadShader = true; });
         m_fileWatcher.watch(std::filesystem::path("assets/shaders/shader.slang"), [this]() { m_reloadShader = true; });
         m_fileWatcher.watch(std::filesystem::path("assets/shaders/present.slang"), [this]() { m_reloadShader = true; });
 
@@ -85,8 +88,7 @@ namespace Nox
         createComputePipeline();
         createCommandPool();
         loadModel();
-        createVertexBuffer();
-        createIndexBuffer();
+        createMeshletBuffers();
         createUniformBuffers();
         createInstanceBuffer();
         createDescriptorHeaps();
@@ -179,14 +181,19 @@ namespace Nox
         };
 
         desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Vertex,
-            .entryPoint = "vertMain",
-            .sourcePath = "assets/shaders/shader.slang"
+            .stage = NRI::ShaderStage::Task,
+            .entryPoint = "taskMain",
+            .sourcePath = "assets/shaders/Meshlet.slang"
+        });
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Mesh,
+            .entryPoint = "meshMain",
+            .sourcePath = "assets/shaders/Meshlet.slang"
         });
         desc.shaders.push_back({
             .stage = NRI::ShaderStage::Fragment,
             .entryPoint = "fragMain",
-            .sourcePath = "assets/shaders/shader.slang"
+            .sourcePath = "assets/shaders/Meshlet.slang"
         });
         m_graphicsPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
     }
@@ -195,6 +202,9 @@ namespace Nox
     {
         NRI::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
+        desc.colorFormats = {
+            NRI::ImageFormat::Surface
+        };
         desc.shaders.push_back({
             .stage = NRI::ShaderStage::Vertex,
             .entryPoint = "vertMain",
@@ -303,7 +313,7 @@ namespace Nox
 
     void Renderer::createTextureImage()
     {
-        m_textureResource = TextureImporter::LoadTexture2D(TEXTURE_PATH, {}, this);
+        m_textureResource = TextureImporter::LoadTexture2D(TEXTURE_PATH_FOX, {}, this);
     }
 
     Ref<Texture2D> Renderer::UploadTexture(const TextureData& cpuData)
@@ -369,7 +379,7 @@ namespace Nox
 
         return -1;
     }
-
+    
     void Renderer::loadModel()
     {
         /*
@@ -386,7 +396,7 @@ namespace Nox
         tg3_parse_options_init(&opts);
         tg3_error_stack_init(&errors);
 
-        tg3_error_code err = tg3_parse_file(&model, &errors, MODEL_PATH_GLTF.c_str(), MODEL_PATH_GLTF.size(), &opts);
+        tg3_error_code err = tg3_parse_file(&model, &errors, MODEL_PATH_GLTF_STANDFORD.c_str(), MODEL_PATH_GLTF_STANDFORD.size(), &opts);
         if (err != TG3_OK)
         {
             for (uint32_t i = 0; i < errors.count; i++)
@@ -402,11 +412,6 @@ namespace Nox
             for (uint32_t primitiveIndex = 0; primitiveIndex < mesh.primitives_count; primitiveIndex++)
             {
                 const tg3_primitive& primitive = mesh.primitives[primitiveIndex];
-
-                // Get indices
-                const tg3_accessor& indexAccessor = model.accessors[primitive.indices];
-                const tg3_buffer_view& indexBufferView = model.buffer_views[indexAccessor.buffer_view];
-                const tg3_buffer& indexBuffer = model.buffers[indexBufferView.buffer];
 
                 // Get vertex positions
                 const tg3_accessor& posAccessor = model.accessors[FindAttribute(primitive, "POSITION")];
@@ -426,9 +431,10 @@ namespace Nox
                     texCoordBuffer = &model.buffers[texCoordBufferView->buffer];
                 }
 
-                uint32_t baseVertex = static_cast<uint32_t>(vertices.size());
+                uint32_t baseVertex = static_cast<uint32_t>(m_vertices.size());
+                size_t primitiveVertexCount = posAccessor.count;
 
-                for (size_t i = 0; i < posAccessor.count; i++)
+                for (size_t i = 0; i < primitiveVertexCount; i++)
                 {
                     shaderio::Vertex vertex{};
 
@@ -436,6 +442,7 @@ namespace Nox
                     // glTF uses a right-handed coordinate system with Y-up
                     // Vulkan uses a right-handed coordinate system with Y-down
                     // We need to flip the Y coordinate
+                    // i dont need that look first line in load model
                     vertex.pos = {pos[0], pos[1], pos[2]};
 
                     if (hasTexCoords)
@@ -448,148 +455,317 @@ namespace Nox
                         vertex.texCoord = {0.0f, 0.0f};
                     }
 
-                    vertices.push_back(vertex);
+                    m_vertices.push_back(vertex);
                 }
-                const unsigned char* indexData = &indexBuffer.data.data[indexBufferView.byte_offset + indexAccessor.byte_offset];
-                size_t indexCount = indexAccessor.count;
-                size_t indexStride = 0;
+                
+                std::vector<uint32_t> primitiveIndices;
+                
+                if (primitive.indices >= 0)
+                {
+                    // Get indices
+                    const tg3_accessor& indexAccessor = model.accessors[primitive.indices];
+                    const tg3_buffer_view& indexBufferView = model.buffer_views[indexAccessor.buffer_view];
+                    const tg3_buffer& indexBuffer = model.buffers[indexBufferView.buffer];
+                    
+                    const unsigned char* indexData = &indexBuffer.data.data[indexBufferView.byte_offset + indexAccessor.byte_offset];
+                    size_t indexCount = indexAccessor.count;
+                    size_t indexStride = 0;
 
-                // Determine index stride based on component type
-                if (indexAccessor.component_type == TG3_COMPONENT_TYPE_UNSIGNED_SHORT)
-                {
-                    indexStride = sizeof(uint16_t);
-                }
-                else if (indexAccessor.component_type == TG3_COMPONENT_TYPE_UNSIGNED_INT)
-                {
-                    indexStride = sizeof(uint32_t);
-                }
-                else if (indexAccessor.component_type == TG3_COMPONENT_TYPE_UNSIGNED_BYTE)
-                {
-                    indexStride = sizeof(uint8_t);
-                }
-                else
-                {
-                    throw std::runtime_error("Unsupported index component type");
-                }
-
-                indices.reserve(indices.size() + indexCount);
-
-                for (size_t i = 0; i < indexCount; i++)
-                {
-                    uint32_t index = 0;
-
+                    // Determine index stride based on component type
                     if (indexAccessor.component_type == TG3_COMPONENT_TYPE_UNSIGNED_SHORT)
                     {
-                        index = *reinterpret_cast<const uint16_t*>(indexData + i * indexStride);
+                        indexStride = sizeof(uint16_t);
                     }
                     else if (indexAccessor.component_type == TG3_COMPONENT_TYPE_UNSIGNED_INT)
                     {
-                        index = *reinterpret_cast<const uint32_t*>(indexData + i * indexStride);
+                        indexStride = sizeof(uint32_t);
                     }
                     else if (indexAccessor.component_type == TG3_COMPONENT_TYPE_UNSIGNED_BYTE)
                     {
-                        index = *reinterpret_cast<const uint8_t*>(indexData + i * indexStride);
+                        indexStride = sizeof(uint8_t);
                     }
+                    else if (indexAccessor.component_type == TG3_COMPONENT_TYPE_BYTE)
+                    {
+                        indexStride = sizeof(int8_t);
+                    }
+                    else if (indexAccessor.component_type == TG3_COMPONENT_TYPE_SHORT)
+                    {
+                        indexStride = sizeof(int16_t);
+                    }
+                    else if (indexAccessor.component_type == TG3_COMPONENT_TYPE_INT)
+                    {
+                        indexStride = sizeof(int32_t);
+                    }
+                    else if (indexAccessor.component_type == TG3_COMPONENT_TYPE_FLOAT)
+                    {
+                        indexStride = sizeof(float);
+                    }
+                    else if (indexAccessor.component_type == TG3_COMPONENT_TYPE_DOUBLE)
+                    {
+                        indexStride = sizeof(double);
+                    }
+                    else
+                    {
+                        NOX_CORE_ERROR("Unsupported index component type encountered. Value: {}", indexAccessor.component_type);
+                    
+                        throw std::runtime_error("Unsupported index component type");
+                    }
+                    
+                    primitiveIndices.reserve(indexCount);
 
-                    indices.push_back(baseVertex + index);
+                    for (size_t i = 0; i < indexCount; i++)
+                    {
+                        uint32_t index = 0;
+
+                        if (indexAccessor.component_type == TG3_COMPONENT_TYPE_UNSIGNED_SHORT)
+                        {
+                            index = *reinterpret_cast<const uint16_t*>(indexData + i * indexStride);
+                        }
+                        else if (indexAccessor.component_type == TG3_COMPONENT_TYPE_UNSIGNED_INT)
+                        {
+                            index = *reinterpret_cast<const uint32_t*>(indexData + i * indexStride);
+                        }
+                        else if (indexAccessor.component_type == TG3_COMPONENT_TYPE_UNSIGNED_BYTE)
+                        {
+                            index = *reinterpret_cast<const uint8_t*>(indexData + i * indexStride);
+                        }
+                        else if (indexAccessor.component_type == TG3_COMPONENT_TYPE_BYTE)
+                        {
+                            index = static_cast<uint32_t>(*reinterpret_cast<const int8_t*>(indexData + i * indexStride));
+                        }
+                        else if (indexAccessor.component_type == TG3_COMPONENT_TYPE_SHORT)
+                        {
+                            index = static_cast<uint32_t>(*reinterpret_cast<const int16_t*>(indexData + i * indexStride));
+                        }
+                        else if (indexAccessor.component_type == TG3_COMPONENT_TYPE_INT)
+                        {
+                            index = static_cast<uint32_t>(*reinterpret_cast<const int32_t*>(indexData + i * indexStride));
+                        }
+                        else if (indexAccessor.component_type == TG3_COMPONENT_TYPE_FLOAT)
+                        {
+                            index = static_cast<uint32_t>(*reinterpret_cast<const float*>(indexData + i * indexStride));
+                        }
+                        else if (indexAccessor.component_type == TG3_COMPONENT_TYPE_DOUBLE)
+                        {
+                            index = static_cast<uint32_t>(*reinterpret_cast<const double*>(indexData + i * indexStride));
+                        }
+                        
+                        primitiveIndices.push_back(index);
+                    }
                 }
+                else
+                {
+                    // Non-indexed primitive fallback: generate sequential indices
+                    primitiveIndices.reserve(primitiveVertexCount);
+                    for (size_t i = 0; i < primitiveVertexCount; i++)
+                    {
+                        primitiveIndices.push_back(static_cast<uint32_t>(i));
+                    }
+                }
+                
+                // Recommended limits for Vulkan mesh shaders
+                const size_t maxVertices = 64;
+                const size_t maxTriangles = 64; //124
+                
+                // Generate meshlets with meshoptimizer
+                size_t maxMeshlets = meshopt_buildMeshletsBound(primitiveIndices.size(), maxVertices, maxTriangles);
+                std::vector<meshopt_Meshlet> localMeshlets(maxMeshlets);
+                std::vector<unsigned int> localMeshletVertices(primitiveIndices.size());
+                std::vector<unsigned char> localMeshletTriangles(primitiveIndices.size());
+                
+                size_t meshletCount = meshopt_buildMeshlets(
+                    localMeshlets.data(),
+                    localMeshletVertices.data(),
+                    localMeshletTriangles.data(),
+                    primitiveIndices.data(),
+                    primitiveIndices.size(),
+                    &m_vertices[baseVertex].pos.x,
+                    primitiveVertexCount,
+                    sizeof(shaderio::Vertex),
+                    maxVertices,
+                    maxTriangles,
+                    0.0f
+                );
+                
+                localMeshlets.resize(meshletCount);
+                
+                for (auto& meshlet : localMeshlets)
+                {
+                    meshopt_optimizeMeshlet(
+                      &localMeshletVertices[meshlet.vertex_offset],
+                      &localMeshletTriangles[meshlet.triangle_offset],
+                      meshlet.triangle_count,
+                      meshlet.vertex_count
+                    );
+                }
+                
+                const meshopt_Meshlet& last = localMeshlets.back();
+                localMeshletVertices.resize(last.vertex_offset + last.vertex_count);
+                localMeshletTriangles.resize(last.triangle_offset + (last.triangle_count * 3));
+                
+                uint32_t meshletVertexOffset = static_cast<uint32_t>(m_meshletVertices.size());
+                uint32_t meshletTrianglesOffset = static_cast<uint32_t>(m_meshletTriangles.size());
+                
+                for (const auto& meshlet : localMeshlets)
+                {
+                    meshopt_Bounds bounds = meshopt_computeMeshletBounds(
+                        &localMeshletVertices[meshlet.vertex_offset],
+                        &localMeshletTriangles[meshlet.triangle_offset],
+                        meshlet.triangle_count,
+                        &m_vertices[baseVertex].pos.x,
+                        primitiveVertexCount,
+                        sizeof(shaderio::Vertex)
+                    );
+                    
+                    // Buffer 1: Tasl Shader Culling Data
+                    shaderio::MeshletBounds b{};
+                    b.center     = glm::vec3(bounds.center[0], bounds.center[1], bounds.center[2]);
+                    b.radius     = bounds.radius;
+                    b.coneApex   = glm::vec3(bounds.cone_apex[0], bounds.cone_apex[1], bounds.cone_apex[2]);
+                    b.coneCutoff = bounds.cone_cutoff;
+                    b.coneAxis   = glm::vec3(bounds.cone_axis[0], bounds.cone_axis[1], bounds.cone_axis[2]);
+                    m_meshletBounds.push_back(b);
+
+                    // Buffer 2: Mesh Shader Drawing Data
+                    shaderio::MeshletDraw d{};
+                    d.vertexOffset       = meshletVertexOffset + meshlet.vertex_offset;
+                    d.triangleOffset     = meshletTrianglesOffset + meshlet.triangle_offset;
+                    d.vertexCount        = meshlet.vertex_count;
+                    d.triangleCount      = meshlet.triangle_count;
+                    d.globalVertexOffset = baseVertex;
+                    m_meshletDraws.push_back(d);
+                }
+                
+                m_meshletVertices.insert(m_meshletVertices.end(), localMeshletVertices.begin(), localMeshletVertices.end());
+                m_meshletTriangles.insert(m_meshletTriangles.end(), localMeshletTriangles.begin(), localMeshletTriangles.end());
             }
         }
 
         tg3_model_free(&model);
         tg3_error_stack_free(&errors);
+    }
 
-        /*tinyobj::attrib_t attrib;
-        std::vector<tinyobj::shape_t> shapes;
-        std::vector<tinyobj::material_t> materials;
-        std::string warn, err;
-
-        if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, MODEL_PATH.c_str()))
+    void Renderer::createMeshletBuffers()
+    {
+        // Vertices
         {
-            throw std::runtime_error(warn + err);
-        }
+            uint64_t bufferSize = sizeof(m_vertices[0]) * m_vertices.size();
 
-        std::unordered_map<shaderio::Vertex, uint32_t> uniqueVertices{};
+            std::unique_ptr<NRI::Buffer> stagingBuffer = m_device->createBuffer(NRI::BufferDesc{
+                .size = bufferSize,
+                .usage = NRI::BufferUsage::Staging
+            });
 
-        for (const auto& shape : shapes)
-        {
-            for (const auto& index : shape.mesh.indices)
-            {
-                shaderio::Vertex vertex{};
+            void* mappedMemory = stagingBuffer->map(0, bufferSize);
+            memcpy(mappedMemory, m_vertices.data(), bufferSize);
+            stagingBuffer->unmap();
 
-                vertex.pos = {
-                    attrib.vertices[3 * index.vertex_index + 0],
-                    attrib.vertices[3 * index.vertex_index + 1],
-                    attrib.vertices[3 * index.vertex_index + 2]
-                };
-
-                vertex.texCoord = {
-                    attrib.texcoords[2 * index.texcoord_index + 0],
-                    1.0f - attrib.texcoords[2 * index.texcoord_index + 1]
-                };
-
-#if 1
-                auto [it, inserted] = uniqueVertices.insert({vertex, static_cast<uint32_t>(vertices.size())});
-                if (inserted)
+            m_verticesBuffer = m_device->createBuffer(NRI::BufferDesc
                 {
-                    vertices.push_back(vertex);
-                }
+                    .size = bufferSize,
+                    .usage = NRI::BufferUsage::StorageStatic
+                });
 
-                indices.push_back(it->second);
-#else
-                vertices.push_back(vertex);
-                indices.push_back(static_cast<uint32_t>(indices.size()));
-#endif
-            }
-        }*/
-    }
+            std::unique_ptr<NRI::CommandBuffer> commandCopyBuffer = beginSingleTimeCommands();
+            m_verticesBuffer->uploadData(*commandCopyBuffer, *stagingBuffer, m_vertices.data());
+            endSingleTimeCommands(std::move(commandCopyBuffer));
+        }
+        
+        // Meshlet Bounds
+        {
+            uint64_t bufferSize = sizeof(m_meshletBounds[0]) * m_meshletBounds.size();
 
-    void Renderer::createVertexBuffer()
-    {
-        uint64_t bufferSize = sizeof(vertices[0]) * vertices.size();
-
-        std::unique_ptr<NRI::Buffer> stagingBuffer = m_device->createBuffer(NRI::BufferDesc{
-            .size = bufferSize,
-            .usage = NRI::BufferUsage::Staging
-        });
-
-        void* mappedMemory = stagingBuffer->map(0, bufferSize);
-        memcpy(mappedMemory, vertices.data(), bufferSize);
-        stagingBuffer->unmap();
-
-        m_vertexBuffer = m_device->createBuffer(NRI::BufferDesc
-            {
+            std::unique_ptr<NRI::Buffer> stagingBuffer = m_device->createBuffer(NRI::BufferDesc{
                 .size = bufferSize,
-                .usage = NRI::BufferUsage::Storage
+                .usage = NRI::BufferUsage::Staging
             });
 
-        std::unique_ptr<NRI::CommandBuffer> commandCopyBuffer = beginSingleTimeCommands();
-        m_vertexBuffer->uploadData(*commandCopyBuffer, *stagingBuffer, vertices.data());
-        endSingleTimeCommands(std::move(commandCopyBuffer));
-    }
+            void* mappedMemory = stagingBuffer->map(0, bufferSize);
+            memcpy(mappedMemory, m_meshletBounds.data(), bufferSize);
+            stagingBuffer->unmap();
 
-    void Renderer::createIndexBuffer()
-    {
-        uint64_t bufferSize = sizeof(indices[0]) * indices.size();
+            m_meshletBoundsBuffer = m_device->createBuffer(NRI::BufferDesc
+                {
+                    .size = bufferSize,
+                    .usage = NRI::BufferUsage::StorageStatic
+                });
 
-        std::unique_ptr<NRI::Buffer> stagingBuffer = m_device->createBuffer(NRI::BufferDesc{
-            .size = bufferSize,
-            .usage = NRI::BufferUsage::Staging
-        });
+            std::unique_ptr<NRI::CommandBuffer> commandCopyBuffer = beginSingleTimeCommands();
+            m_meshletBoundsBuffer->uploadData(*commandCopyBuffer, *stagingBuffer, m_meshletBounds.data());
+            endSingleTimeCommands(std::move(commandCopyBuffer));
+        }
+        
+        // Meshlet Draws
+        {
+            uint64_t bufferSize = sizeof(m_meshletDraws[0]) * m_meshletDraws.size();
 
-        void* mappedMemory = stagingBuffer->map(0, bufferSize);
-        memcpy(mappedMemory, indices.data(), bufferSize);
-        stagingBuffer->unmap();
-
-        m_indexBuffer = m_device->createBuffer(NRI::BufferDesc
-            {
+            std::unique_ptr<NRI::Buffer> stagingBuffer = m_device->createBuffer(NRI::BufferDesc{
                 .size = bufferSize,
-                .usage = NRI::BufferUsage::Index
+                .usage = NRI::BufferUsage::Staging
             });
 
-        std::unique_ptr<NRI::CommandBuffer> commandCopyBuffer = beginSingleTimeCommands();
-        m_indexBuffer->uploadData(*commandCopyBuffer, *stagingBuffer, indices.data());
-        endSingleTimeCommands(std::move(commandCopyBuffer));
+            void* mappedMemory = stagingBuffer->map(0, bufferSize);
+            memcpy(mappedMemory, m_meshletDraws.data(), bufferSize);
+            stagingBuffer->unmap();
+
+            m_meshletDrawsBuffer = m_device->createBuffer(NRI::BufferDesc
+                {
+                    .size = bufferSize,
+                    .usage = NRI::BufferUsage::StorageStatic
+                });
+
+            std::unique_ptr<NRI::CommandBuffer> commandCopyBuffer = beginSingleTimeCommands();
+            m_meshletDrawsBuffer->uploadData(*commandCopyBuffer, *stagingBuffer, m_meshletDraws.data());
+            endSingleTimeCommands(std::move(commandCopyBuffer));
+        }
+        
+        // Meshlet Vertices
+        {
+            uint64_t bufferSize = sizeof(m_meshletVertices[0]) * m_meshletVertices.size();
+
+            std::unique_ptr<NRI::Buffer> stagingBuffer = m_device->createBuffer(NRI::BufferDesc{
+                .size = bufferSize,
+                .usage = NRI::BufferUsage::Staging
+            });
+
+            void* mappedMemory = stagingBuffer->map(0, bufferSize);
+            memcpy(mappedMemory, m_meshletVertices.data(), bufferSize);
+            stagingBuffer->unmap();
+
+            m_meshletVerticesBuffer = m_device->createBuffer(NRI::BufferDesc
+                {
+                    .size = bufferSize,
+                    .usage = NRI::BufferUsage::StorageStatic
+                });
+
+            std::unique_ptr<NRI::CommandBuffer> commandCopyBuffer = beginSingleTimeCommands();
+            m_meshletVerticesBuffer->uploadData(*commandCopyBuffer, *stagingBuffer, m_meshletVertices.data());
+            endSingleTimeCommands(std::move(commandCopyBuffer));
+        }
+        
+        // Meshlet Triangles
+        {
+            uint64_t bufferSize = sizeof(m_meshletTriangles[0]) * m_meshletTriangles.size();
+
+            std::unique_ptr<NRI::Buffer> stagingBuffer = m_device->createBuffer(NRI::BufferDesc{
+                .size = bufferSize,
+                .usage = NRI::BufferUsage::Staging
+            });
+
+            void* mappedMemory = stagingBuffer->map(0, bufferSize);
+            memcpy(mappedMemory, m_meshletTriangles.data(), bufferSize);
+            stagingBuffer->unmap();
+
+            m_meshletTrianglesBuffer = m_device->createBuffer(NRI::BufferDesc
+                {
+                    .size = bufferSize,
+                    .usage = NRI::BufferUsage::StorageStatic
+                });
+
+            std::unique_ptr<NRI::CommandBuffer> commandCopyBuffer = beginSingleTimeCommands();
+            m_meshletTrianglesBuffer->uploadData(*commandCopyBuffer, *stagingBuffer, m_meshletTriangles.data());
+            endSingleTimeCommands(std::move(commandCopyBuffer));
+        }
     }
 
     void Renderer::createUniformBuffers()
@@ -613,28 +789,23 @@ namespace Nox
             m_uniformBuffersMapped.emplace_back(mappedMemory);
         }
     }
-
-    struct instanceBuffer
-    {
-        glm::mat4 model;
-    };
-
-    std::vector<instanceBuffer> instanceBufferObjects;
+    
+    std::vector<shaderio::InstanceData> instanceBufferObjects;
 
     void Renderer::createInstanceBuffer()
     {
         // Model on the left
-        instanceBuffer leftModel;
+        shaderio::InstanceData leftModel;
         leftModel.model = glm::translate(glm::mat4(1.0f), glm::vec3(-2.0f, 0.0f, 0.0f));
 
         // Model on the right
-        instanceBuffer rightModel;
+        shaderio::InstanceData rightModel;
         rightModel.model = glm::translate(glm::mat4(1.0f), glm::vec3(2.0f, 0.0f, 0.0f));
 
         instanceBufferObjects.push_back(leftModel);
         instanceBufferObjects.push_back(rightModel);
 
-        uint64_t bufferSize = sizeof(instanceBuffer) * instanceBufferObjects.size();
+        uint64_t bufferSize = sizeof(shaderio::InstanceData) * instanceBufferObjects.size();
 
         std::unique_ptr<NRI::Buffer> stagingBuffer = m_device->createBuffer(NRI::BufferDesc{
             .size = bufferSize,
@@ -648,7 +819,7 @@ namespace Nox
         m_instanceBuffer = m_device->createBuffer(NRI::BufferDesc
             {
                 .size = bufferSize,
-                .usage = NRI::BufferUsage::Storage
+                .usage = NRI::BufferUsage::StorageStatic
             });
 
         std::unique_ptr<NRI::CommandBuffer> commandCopyBuffer = beginSingleTimeCommands();
@@ -673,7 +844,11 @@ namespace Nox
             .maxImageDescriptors = 1000
         });
 
-        /*m_modelDataBuffers.reserve(2);
+        /*
+        Abstract storage tracking vectors
+        std::vector<std::unique_ptr<NRI::Buffer>> m_modelDataBuffers;
+        
+        m_modelDataBuffers.reserve(2);
         for (uint32_t i = 0; i < 2; i++)
         {
             // Create an abstract Storage Buffer
@@ -780,12 +955,14 @@ namespace Nox
         m_commandBuffers->setViewportWithCount({0.0f, h, w, -h}, 0.0f, 1.0f);
         m_commandBuffers->setScissorWithCount(locViewportSize);
 
+        /*
         // Vertex input empty since we use vertex fetch BDA but still needs to be called empty
         m_commandBuffers->setVertexInput();
+        */
 
-        // Input assembly.
+        /*// Input assembly.
         m_commandBuffers->setPrimitiveTopology(NRI::PrimitiveTopology::TriangleList);
-        m_commandBuffers->setPrimitiveRestartEnable(false);
+        m_commandBuffers->setPrimitiveRestartEnable(false);*/
 
         // Rasterization (most of these come from VK_EXT_extended_dynamic_state_3).
         m_commandBuffers->setRasterizerDiscardEnable(false);
@@ -851,17 +1028,28 @@ namespace Nox
 
         m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_graphicsPipeline);
 
-        m_commandBuffers->bindIndexBuffer(*m_indexBuffer, 0);
-
-        PushConstantBlock references{};
+        shaderio::PushConstantMeshlets references{};
         // Pass pointer to the global matrix via a buffer device address
+        /*references.modelMatrix = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 0.0f));*/
         references.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
-        references.vertexReference = m_vertexBuffer->getDeviceAddress();
         references.instanceReference = m_instanceBuffer->getDeviceAddress();
-        m_commandBuffers->pushData(&references, sizeof(PushConstantBlock));
-
-        m_commandBuffers->drawIndexed(static_cast<uint32_t>(indices.size()), instanceBufferObjects.size(), 0, 0, 0);
-
+        references.verticesReference = m_verticesBuffer->getDeviceAddress();
+        references.meshletBoundsReference = m_meshletBoundsBuffer->getDeviceAddress();
+        references.meshletDrawsReference = m_meshletDrawsBuffer->getDeviceAddress();
+        references.meshletVerticesReference = m_meshletVerticesBuffer->getDeviceAddress();
+        references.meshletTrianglesReference = m_meshletTrianglesBuffer->getDeviceAddress();
+        references.meshletCount = m_meshletDraws.size();
+        references.instanceCount = instanceBufferObjects.size();
+        m_commandBuffers->pushData(&references, sizeof(shaderio::PushConstantMeshlets));
+        
+        /*constexpr uint32_t taskDispatchX = 64;
+        uint32_t xCount = (m_meshletDraws.size() + (taskDispatchX - 1)) / taskDispatchX;
+        uint32_t instanceCount = static_cast<uint32_t>(instanceBufferObjects.size());
+        m_commandBuffers->drawMeshTasks(xCount, 1, 1);*/
+        /*uint32_t instanceCount = static_cast<uint32_t>(instanceBufferObjects.size());
+        m_commandBuffers->drawMeshTasks(1, instanceCount, 1);*/
+        m_commandBuffers->drawMeshTasks(1, 1, 1);
+        
         m_renderer2D->Flush(*m_commandBuffers, *m_uniformBuffers[frameIndex], frameIndex);
 
         m_commandBuffers->endRendering();
@@ -1109,7 +1297,30 @@ namespace Nox
     {
         uniformData.proj = camera.GetProjection();
         uniformData.view = glm::scale(glm::mat4(1.0f), glm::vec3(1.0f, 1.0f, -1.0f)) * glm::inverse(transform);
-
+        /*uniformData.cameraWorldPos = { camera.GetPosition(), 0.0f };*/
+        uniformData.frustum = shaderio::Frustum{ uniformData.proj * uniformData.view };
+        
+        if (m_frozen)
+        {
+            if (!m_frozenDone)
+            {
+                frozenUniformData = uniformData;
+                m_frozenDone = true;
+            }
+            
+            uniformData.frozenProj = frozenUniformData.proj;
+            uniformData.frozenView = frozenUniformData.view;
+            uniformData.frozenCameraWorldPos = frozenUniformData.cameraWorldPos;
+            uniformData.frozenFrustum = frozenUniformData.frustum;
+        }
+        else
+        {
+            uniformData.frozenProj = uniformData.proj;
+            uniformData.frozenView = uniformData.view;
+            uniformData.frozenCameraWorldPos = uniformData.cameraWorldPos;
+            uniformData.frozenFrustum = uniformData.frustum;
+        }
+        
         m_renderer2D->BeginScene(camera, transform);
     }
 
@@ -1117,6 +1328,29 @@ namespace Nox
     {
         uniformData.proj = camera.GetProjection();
         uniformData.view = camera.GetViewMatrix();
+        uniformData.cameraWorldPos = { camera.GetPosition(), 0.0f };
+        uniformData.frustum = shaderio::Frustum{ uniformData.proj * uniformData.view };
+        
+        if (m_frozen)
+        {
+            if (!m_frozenDone)
+            {
+                frozenUniformData = uniformData;
+                m_frozenDone = true;
+            }
+            
+            uniformData.frozenProj = frozenUniformData.proj;
+            uniformData.frozenView = frozenUniformData.view;
+            uniformData.frozenCameraWorldPos = frozenUniformData.cameraWorldPos;
+            uniformData.frozenFrustum = frozenUniformData.frustum;
+        }
+        else
+        {
+            uniformData.frozenProj = uniformData.proj;
+            uniformData.frozenView = uniformData.view;
+            uniformData.frozenCameraWorldPos = uniformData.cameraWorldPos;
+            uniformData.frozenFrustum = uniformData.frustum;
+        }
 
         m_renderer2D->BeginScene(camera);
     }
