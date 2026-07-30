@@ -54,7 +54,7 @@ echo Installing all dependencies...
 vcpkg install sdl3[vulkan] glm entt spdlog xxhash yaml-cpp box2d freetype skia stb ktx[vulkan] tinyobjloader --triplet=x64-windows
 
 :: slang
-set SLANG_VERSION=2026.13
+set SLANG_VERSION=2026.14.1
 set SLANG_URL=https://github.com/shader-slang/slang/releases/download/v%SLANG_VERSION%/slang-%SLANG_VERSION%-windows-x86_64.zip
 set DEST_DIR=../NoxCore/vendors/slang
 

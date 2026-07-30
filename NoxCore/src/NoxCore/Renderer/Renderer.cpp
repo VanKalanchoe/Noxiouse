@@ -19,7 +19,16 @@
 namespace Nox
 {
     static bool m_reloadShader = false;
+    ModelHandle bunnyHandle;
+    ModelHandle foxHandle;
 
+    struct DrawMeshTasksIndirectCommand
+    {
+        uint32_t groupCountX;
+        uint32_t groupCountY;
+        uint32_t groupCountZ;
+    };
+    std::vector<DrawMeshTasksIndirectCommand> m_drawMeshTasksIndirectCommands;
     Renderer::Renderer(std::shared_ptr<Nox::Window> window, bool isEditor) : m_window(std::move(window)), m_isEditor(isEditor)
     {
         NOX_CORE_INFO("Renderer Start");
@@ -28,6 +37,13 @@ namespace Nox
         if (!m_device) NOX_CORE_ASSERT("Failed to create NRI device");
 
         initRenderer();
+        
+        bunnyHandle = loadModel(MODEL_PATH_GLTF_STANDFORD);
+        foxHandle = loadModel(MODEL_PATH_FOX_GLTF);
+        createMeshletBuffers();
+        createInstanceBuffer();
+        createIndirectBuffer();
+        
 
         m_fileWatcher.watch(std::filesystem::path("assets/shaders/Meshlet.slang"), [this]() { m_reloadShader = true; });
         m_fileWatcher.watch(std::filesystem::path("assets/shaders/shader.slang"), [this]() { m_reloadShader = true; });
@@ -87,10 +103,7 @@ namespace Nox
         if (!m_isEditor) createPresentPipeline(false);
         createComputePipeline();
         createCommandPool();
-        loadModel();
-        createMeshletBuffers();
         createUniformBuffers();
-        createInstanceBuffer();
         createDescriptorHeaps();
         createTextureImage();
         createSceneResources();
@@ -179,11 +192,12 @@ namespace Nox
             NRI::ImageFormat::Surface,
             NRI::ImageFormat::R32SINT
         };
-
+        // notes i had to split task from mesh because of i think drawid otherwise weird flickering and not showing up correctly
+        // might be a slang issue could change in the future fuck nvidia not testing slang
         desc.shaders.push_back({
             .stage = NRI::ShaderStage::Task,
             .entryPoint = "taskMain",
-            .sourcePath = "assets/shaders/Meshlet.slang"
+            .sourcePath = "assets/shaders/MeshletTask.slang"
         });
         desc.shaders.push_back({
             .stage = NRI::ShaderStage::Mesh,
@@ -379,8 +393,9 @@ namespace Nox
 
         return -1;
     }
-    
-    void Renderer::loadModel()
+
+
+    ModelHandle Renderer::loadModel(const std::string& path)
     {
         /*
             Here is the exact layout based on your EditorCamera class:
@@ -389,6 +404,9 @@ namespace Nox
             Forward: -Z
         */
         
+        ModelHandle handle{};
+        handle.firstMeshlet = static_cast<uint32_t>(m_meshletDraws.size());
+        
         tg3_parse_options opts;
         tg3_error_stack errors;
         tg3_model model;
@@ -396,7 +414,7 @@ namespace Nox
         tg3_parse_options_init(&opts);
         tg3_error_stack_init(&errors);
 
-        tg3_error_code err = tg3_parse_file(&model, &errors, MODEL_PATH_GLTF_STANDFORD.c_str(), MODEL_PATH_GLTF_STANDFORD.size(), &opts);
+        tg3_error_code err = tg3_parse_file(&model, &errors, path.c_str(), path.size(), &opts);
         if (err != TG3_OK)
         {
             for (uint32_t i = 0; i < errors.count; i++)
@@ -643,6 +661,10 @@ namespace Nox
 
         tg3_model_free(&model);
         tg3_error_stack_free(&errors);
+        
+        handle.meshletCount = static_cast<uint32_t>(m_meshletDraws.size() - handle.firstMeshlet);
+        
+        return handle;
     }
 
     void Renderer::createMeshletBuffers()
@@ -794,16 +816,24 @@ namespace Nox
 
     void Renderer::createInstanceBuffer()
     {
-        // Model on the left
-        shaderio::InstanceData leftModel;
-        leftModel.model = glm::translate(glm::mat4(1.0f), glm::vec3(-2.0f, 0.0f, 0.0f));
+        instanceBufferObjects.clear();
+        
+        // Instance 0: Bunny on the left
+        shaderio::InstanceData bunny{};
+        bunny.modelMatrix   = glm::translate(glm::mat4(1.0f), glm::vec3(-2.0f, 0.0f, 0.0f));
+        bunny.meshletOffset = bunnyHandle.firstMeshlet;
+        bunny.meshletCount  = bunnyHandle.meshletCount;
+        instanceBufferObjects.push_back(bunny);
 
-        // Model on the right
-        shaderio::InstanceData rightModel;
-        rightModel.model = glm::translate(glm::mat4(1.0f), glm::vec3(2.0f, 0.0f, 0.0f));
+        // Instance 1: Fox on the right
+        shaderio::InstanceData fox{};
+        fox.modelMatrix   = glm::translate(glm::mat4(1.0f), glm::vec3(2.0f, 0.0f, 0.0f));
+        fox.meshletOffset = foxHandle.firstMeshlet;
+        fox.meshletCount  = foxHandle.meshletCount;
+        instanceBufferObjects.push_back(fox);
 
-        instanceBufferObjects.push_back(leftModel);
-        instanceBufferObjects.push_back(rightModel);
+        instanceBufferObjects.push_back(bunny);
+        instanceBufferObjects.push_back(fox);
 
         uint64_t bufferSize = sizeof(shaderio::InstanceData) * instanceBufferObjects.size();
 
@@ -824,6 +854,42 @@ namespace Nox
 
         std::unique_ptr<NRI::CommandBuffer> commandCopyBuffer = beginSingleTimeCommands();
         m_instanceBuffer->uploadData(*commandCopyBuffer, *stagingBuffer, instanceBufferObjects.data());
+        endSingleTimeCommands(std::move(commandCopyBuffer));
+    }
+    
+    void Renderer::createIndirectBuffer()
+    {
+        m_drawMeshTasksIndirectCommands.clear();
+        
+        for (const auto& instance : instanceBufferObjects)
+        {
+            DrawMeshTasksIndirectCommand command{};
+            command.groupCountX = (instance.meshletCount + shaderio::TASK_SHADER_DISPATCH_X - 1) / shaderio::TASK_SHADER_DISPATCH_X;
+            command.groupCountY = 1;
+            command.groupCountZ = 1;
+            
+            m_drawMeshTasksIndirectCommands.push_back(command);
+        }
+        
+        uint64_t bufferSize = sizeof(DrawMeshTasksIndirectCommand) * m_drawMeshTasksIndirectCommands.size();
+
+        std::unique_ptr<NRI::Buffer> stagingBuffer = m_device->createBuffer(NRI::BufferDesc{
+            .size = bufferSize,
+            .usage = NRI::BufferUsage::Staging
+        });
+
+        void* mappedMemory = stagingBuffer->map(0, bufferSize);
+        memcpy(mappedMemory, m_drawMeshTasksIndirectCommands.data(), bufferSize);
+        stagingBuffer->unmap();
+
+        m_indirectBuffer = m_device->createBuffer(NRI::BufferDesc
+            {
+                .size = bufferSize,
+                .usage = NRI::BufferUsage::Indirect
+            });
+
+        std::unique_ptr<NRI::CommandBuffer> commandCopyBuffer = beginSingleTimeCommands();
+        m_indirectBuffer->uploadData(*commandCopyBuffer, *stagingBuffer, m_drawMeshTasksIndirectCommands.data());
         endSingleTimeCommands(std::move(commandCopyBuffer));
     }
 
@@ -1048,7 +1114,10 @@ namespace Nox
         m_commandBuffers->drawMeshTasks(xCount, 1, 1);*/
         /*uint32_t instanceCount = static_cast<uint32_t>(instanceBufferObjects.size());
         m_commandBuffers->drawMeshTasks(1, instanceCount, 1);*/
-        m_commandBuffers->drawMeshTasks(1, 1, 1);
+        /*m_commandBuffers->drawMeshTasks(1, 1, 1);
+        */
+        
+        m_commandBuffers->drawMeshTasksIndirect(*m_indirectBuffer, 0, static_cast<uint32_t>(m_drawMeshTasksIndirectCommands.size()), sizeof(DrawMeshTasksIndirectCommand));
         
         m_renderer2D->Flush(*m_commandBuffers, *m_uniformBuffers[frameIndex], frameIndex);
 

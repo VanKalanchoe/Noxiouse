@@ -208,6 +208,13 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* currentEvent)
     case SDL_EVENT_KEY_DOWN:
         {
             if (currentEvent->key.scancode == SDL_SCANCODE_ESCAPE) return SDL_APP_SUCCESS;
+            
+            if (currentEvent->key.scancode == SDL_SCANCODE_F)
+            {
+                applicationState->app->GetRenderer()->setFrozen(!applicationState->app->GetRenderer()->getFrozen());
+                if (!applicationState->app->GetRenderer()->getFrozen())
+                    applicationState->app->GetRenderer()->setFrozenDone(false);
+            }
 
             SDL_Scancode scan = currentEvent->key.scancode; // maybe keycode better ?
             bool repeat = (currentEvent->key.repeat != 0);

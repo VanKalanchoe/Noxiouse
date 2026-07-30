@@ -13,7 +13,8 @@ namespace NRI
         Index,         // DeviceLocal, IndexBuffer | TransferDst
         Storage,       // DeviceLocal, StorageBuffer
         StorageStatic,
-        DescriptorHeap // HostVisible | HostCoherent, DescriptorHeap
+        DescriptorHeap, // HostVisible | HostCoherent, DescriptorHeap
+        Indirect
     };
 
     struct BufferDesc

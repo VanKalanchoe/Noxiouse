@@ -300,19 +300,27 @@ namespace NRI
                            vk::PhysicalDeviceDescriptorHeapFeaturesEXT,
                            vk::PhysicalDeviceShaderUntypedPointersFeaturesKHR,
                            vk::PhysicalDeviceMaintenance5FeaturesKHR,
-                           vk::PhysicalDeviceMeshShaderFeaturesEXT
-            >
+                           vk::PhysicalDeviceMeshShaderFeaturesEXT>
             featureChain = {
                 {
                     .features = {
                         .sampleRateShading = true,
+                        .multiDrawIndirect = true,
                         .wideLines = true,
                         .samplerAnisotropy = true,
                         .shaderInt64 = true,
                     }
                 }, // vk::PhysicalDeviceFeatures2
                 {.shaderDrawParameters = true}, // vk::PhysicalDeviceVulkan11Features
-                {.shaderSampledImageArrayNonUniformIndexing = true, .shaderStorageBufferArrayNonUniformIndexing = true, .runtimeDescriptorArray = true, .scalarBlockLayout = true, .bufferDeviceAddress = true},
+                {
+                    .storageBuffer8BitAccess = true,
+                    .shaderInt8 = true,
+                    .shaderSampledImageArrayNonUniformIndexing = true,
+                    .shaderStorageBufferArrayNonUniformIndexing = true,
+                    .runtimeDescriptorArray = true,
+                    .scalarBlockLayout = true,
+                    .bufferDeviceAddress = true
+                },
                 // vk::PhysicalDeviceVulkan12Features
                 {.shaderDemoteToHelperInvocation = true, .synchronization2 = true, .dynamicRendering = true}, // vk::PhysicalDeviceVulkan13Features
                 {.shaderObject = m_shaderObjectsEnabled}, // vk::PhysicalDeviceVulkan14Features

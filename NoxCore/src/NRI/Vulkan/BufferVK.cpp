@@ -37,15 +37,21 @@ namespace NRI
         case BufferUsage::Uniform:
             // UBO: CPU streaming writes, GPU reads via BDA/Descriptor rules
             usageFlags = vk::BufferUsageFlagBits2::eUniformBuffer | vk::BufferUsageFlagBits2::eShaderDeviceAddress;
-            memoryUsage = vma::MemoryUsage::eAuto;
+            memoryUsage = vma::MemoryUsage::eAutoPreferDevice;
             allocFlags = vma::AllocationCreateFlagBits::eHostAccessSequentialWrite | vma::AllocationCreateFlagBits::eMapped;
             break;
         case BufferUsage::Storage:
-            // SSBO: Structured storage. Assuming dynamic/per-frame host updates here for flexibility, 
-            // feel free to drop HostAccess flags if updating solely via GPU dispatch passes.
             usageFlags = vk::BufferUsageFlagBits2::eStorageBuffer | vk::BufferUsageFlagBits2::eTransferDst | vk::BufferUsageFlagBits2::eShaderDeviceAddress;
-            memoryUsage = vma::MemoryUsage::eAuto;
+            memoryUsage = vma::MemoryUsage::eAutoPreferDevice;
             allocFlags = vma::AllocationCreateFlagBits::eHostAccessSequentialWrite | vma::AllocationCreateFlagBits::eMapped;
+            break;
+        case BufferUsage::StorageStatic:
+            usageFlags = vk::BufferUsageFlagBits2::eStorageBuffer | vk::BufferUsageFlagBits2::eTransferDst | vk::BufferUsageFlagBits2::eShaderDeviceAddress;
+            memoryUsage = vma::MemoryUsage::eAutoPreferDevice;
+            break;
+        case BufferUsage::Indirect:
+             usageFlags = vk::BufferUsageFlagBits2::eIndirectBuffer | vk::BufferUsageFlagBits2::eTransferDst | vk::BufferUsageFlagBits2::eStorageBuffer | vk::BufferUsageFlagBits2::eShaderDeviceAddress;
+             memoryUsage = vma::MemoryUsage::eAutoPreferDevice;
             break;
         }
         

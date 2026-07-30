@@ -10,6 +10,7 @@
 #include "SwapchainVK.h"
 #include "PipelineVK.h"
 #include "DescriptorHeapVK.h"
+#include "NoxCore/Core/core.h"
 
 namespace NRI
 {
@@ -504,6 +505,32 @@ namespace NRI
     void CommandBufferVK::drawMeshTasks(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ)
     {
         m_commandBuffers[m_currentFrameIndex].drawMeshTasksEXT(groupCountX, groupCountY, groupCountZ);
+    }
+    
+    void CommandBufferVK::drawMeshTasksIndirect(Buffer& indirectBuffer, uint64_t offset, uint32_t drawCount, uint32_t stride)
+    {
+        auto& vkBuffer = dynamic_cast<BufferVK&>(indirectBuffer);
+        
+        m_commandBuffers[m_currentFrameIndex].drawMeshTasksIndirectEXT(vkBuffer.getNativeBuffer(), offset, drawCount, stride);
+    }
+    
+    void CommandBufferVK::drawMeshTasksIndirect(uint64_t indirectBufferDeviceAddress, uint64_t offset, uint32_t drawCount, uint32_t stride)
+    {
+        NOX_CORE_ASSERT("My GPU doesnt support idk why will have to look");
+        vk::DrawIndirect2InfoKHR drawInfo = 
+        {
+            .pNext = nullptr,
+            .addressRange = 
+            {
+                .address = indirectBufferDeviceAddress + offset,
+                .size = static_cast<vk::DeviceSize>(drawCount) * stride,
+                .stride = stride,
+            },
+            .addressFlags = {},
+            .drawCount = drawCount,
+        };
+        
+        m_commandBuffers[m_currentFrameIndex].drawMeshTasksIndirect2EXT(drawInfo);
     }
 
     void CommandBufferVK::transitionTextureLayout(Texture& texture, TextureLayout oldLayout, TextureLayout newLayout)

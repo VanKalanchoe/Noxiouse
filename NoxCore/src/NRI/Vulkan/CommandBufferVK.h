@@ -54,6 +54,8 @@ namespace NRI
         void draw(uint32_t vertexCount, uint32_t instanceCount, uint32_t firstVertex, uint32_t firstInstance) override;
         void drawIndexed(uint32_t indexCount, uint32_t instanceCount, uint32_t firstIndex, int32_t vertexOffset, uint32_t firstInstance) override;
         void drawMeshTasks(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) override;
+        void drawMeshTasksIndirect(Buffer& indirectBuffer, uint64_t offset, uint32_t drawCount, uint32_t stride) override;
+        void drawMeshTasksIndirect(uint64_t indirectBufferDeviceAddress, uint64_t offset, uint32_t drawCount, uint32_t stride) override;
 
         void copyBuffer(Buffer& srcBuffer, Buffer& dstBuffer, uint64_t deviceSize) override;
         void transitionTextureLayout(Texture& texture, TextureLayout oldLayout, TextureLayout newLayout) override;

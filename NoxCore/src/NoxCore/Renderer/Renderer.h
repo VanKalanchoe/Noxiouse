@@ -69,6 +69,12 @@ namespace Nox
         bool active = false;
     };
     
+    struct ModelHandle
+    {
+        uint32_t firstMeshlet = 0;
+        uint32_t meshletCount = 0;
+    };
+    
     class Renderer
     {
     public:
@@ -127,10 +133,11 @@ namespace Nox
         void createEntityResources();
         void createDepthResources();
         void createTextureImage();
-        void loadModel();
+        ModelHandle loadModel(const std::string& path);
         void createMeshletBuffers();
         void createUniformBuffers();
         void createInstanceBuffer();
+        void createIndirectBuffer();
         void createDescriptorHeaps();
         std::unique_ptr<NRI::CommandBuffer> beginSingleTimeCommands();
         void endSingleTimeCommands(std::unique_ptr<NRI::CommandBuffer>&& commandBuffer);
@@ -161,8 +168,6 @@ namespace Nox
         //decsriptor
         std::unique_ptr<NRI::DescriptorHeap> m_samplerHeap = nullptr;
         std::unique_ptr<NRI::DescriptorHeap> m_resourceHeap = nullptr;
-        
-        std::unique_ptr<NRI::Buffer> m_instanceBuffer = nullptr;
 
         // Scene Data + Frustum Freeze
         std::vector<std::unique_ptr<NRI::Buffer>> m_uniformBuffers;
@@ -189,6 +194,10 @@ namespace Nox
         Ref<Texture2D> m_textureResource3;
         uint32_t mipLevels;
 
+        std::unique_ptr<NRI::Buffer> m_indirectBuffer;
+        
+        std::unique_ptr<NRI::Buffer> m_instanceBuffer;
+        
         std::vector<shaderio::Vertex> m_vertices;
         std::unique_ptr<NRI::Buffer> m_verticesBuffer;
         

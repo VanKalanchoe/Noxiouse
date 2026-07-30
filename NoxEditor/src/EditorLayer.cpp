@@ -683,7 +683,7 @@ namespace Nox
 
     bool EditorLayer::OpenProject()
     {
-        std::string filepath = Utility::OpenFile("Nox Project *.nproj\0nproj\0");
+        std::string filepath = "E:/dev/noxiouse/Facerun/Facerun.nproj"/*Utility::OpenFile("Nox Project *.nproj\0nproj\0")*/;
 
         if (filepath.empty())
             return false;
