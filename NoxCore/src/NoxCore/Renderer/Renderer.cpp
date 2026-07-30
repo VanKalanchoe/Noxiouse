@@ -393,8 +393,7 @@ namespace Nox
 
         return -1;
     }
-
-
+    
     ModelHandle Renderer::loadModel(const std::string& path)
     {
         /*

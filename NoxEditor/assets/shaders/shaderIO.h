@@ -12,11 +12,94 @@ typealias mat4 = float4x4;
 #define STATIC_CONST const
 #endif
 
+STATIC_CONST uint32_t TASK_SHADER_DISPATCH_X = 64;
+STATIC_CONST uint32_t MESH_SHADER_DISPATCH_X = 32;
+STATIC_CONST uint32_t MAX_VERTICES            = 64;
+STATIC_CONST uint32_t MAX_PRIMITIVES          = 64;
+
+// Per https://developer.nvidia.com/blog/using-mesh-shaders-for-professional-graphics/
+// Task shader output should ideally be below 236/108. We can hit the 108 if we turn uint32_t to uint8_t and store offsets in the payload.
+// 4 + 64 = 68
+struct MeshletPayload
+{
+    uint32_t drawID;
+    uint32_t groupMeshletOffset;
+    uint8_t  meshletIndices[TASK_SHADER_DISPATCH_X];
+};
+
+struct Frustum
+{
+    vec4 planes[6];
+
+#ifndef __SLANG__
+    Frustum() = default;
+
+    explicit Frustum(const mat4& viewProj)
+    {
+        planes[0] = glm::vec4(
+        viewProj[0][3] + viewProj[0][0],
+        viewProj[1][3] + viewProj[1][0],
+        viewProj[2][3] + viewProj[2][0],
+        viewProj[3][3] + viewProj[3][0]
+    );
+
+    planes[1] = glm::vec4(
+        viewProj[0][3] - viewProj[0][0],
+        viewProj[1][3] - viewProj[1][0],
+        viewProj[2][3] - viewProj[2][0],
+        viewProj[3][3] - viewProj[3][0]
+    );
+
+    planes[2] = glm::vec4(
+        viewProj[0][3] + viewProj[0][1],
+        viewProj[1][3] + viewProj[1][1],
+        viewProj[2][3] + viewProj[2][1],
+        viewProj[3][3] + viewProj[3][1]
+    );
+
+    planes[3] = glm::vec4(
+        viewProj[0][3] - viewProj[0][1],
+        viewProj[1][3] - viewProj[1][1],
+        viewProj[2][3] - viewProj[2][1],
+        viewProj[3][3] - viewProj[3][1]
+    );
+
+    planes[4] = glm::vec4(
+        viewProj[0][3] + viewProj[0][2],
+        viewProj[1][3] + viewProj[1][2],
+        viewProj[2][3] + viewProj[2][2],
+        viewProj[3][3] + viewProj[3][2]
+    );
+
+    planes[5] = glm::vec4(
+        viewProj[0][3] - viewProj[0][2],
+        viewProj[1][3] - viewProj[1][2],
+        viewProj[2][3] - viewProj[2][2],
+        viewProj[3][3] - viewProj[3][2]
+    );
+
+    for (auto& plane : planes) {
+        float length = glm::length(glm::vec3(plane));
+        plane /= length;
+    }
+    }
+#endif
+};
+
 struct UniformBufferObject 
 {
-    /*mat4 model;*/
     mat4 view;
     mat4 proj;
+
+    mat4 frozenView;
+    mat4 frozenProj;
+
+    vec4 cameraWorldPos;
+    vec4 frozenCameraWorldPos;
+
+    Frustum frustum;
+    Frustum frozenFrustum;
+
     uint samplerIndex;
     uint imageHeapIndexOffset;
     uint finalImageIndex;
@@ -27,6 +110,14 @@ struct Vertex
     vec3 pos;
     vec2 texCoord;
 };
+
+struct InstanceData
+{
+    mat4 modelMatrix;
+    uint32_t meshletOffset; // Where this model's meshlets start in m_meshletDraws
+    uint32_t meshletCount;  // How many meshlets this model has
+};
+
 
 struct PushConstantQuad
 {
@@ -97,6 +188,40 @@ struct LineData
     
     // Editor-only
     int entityID;
+};
+
+struct PushConstantMeshlets
+{
+    uint64_t matrixReference;
+    uint64_t instanceReference;
+    uint64_t verticesReference;
+    uint64_t meshletBoundsReference;
+    uint64_t meshletDrawsReference;
+    uint64_t meshletVerticesReference;
+    uint64_t meshletTrianglesReference;
+    uint32_t meshletCount;
+    uint32_t instanceCount;
+};
+
+// Meshlet Global stores all meshes
+// Buffer 1: Read ONLY by Task Shader (32 Bytes -> 2 fit in 1 cache line!)
+struct MeshletBounds
+{
+    vec3 center;
+    float radius;
+    vec3 coneApex;
+    float coneCutoff;
+    vec3 coneAxis;
+};
+
+// Buffer 2: Read ONLY by Mesh Shader (24 Bytes)
+struct MeshletDraw
+{
+    uint32_t vertexOffset;          // Global offset into meshletVertices
+    uint32_t triangleOffset;        // Global offset into meshletTriangles
+    uint32_t vertexCount;           // Vertices in this meshlet (max 64)
+    uint32_t triangleCount;         // Triangles in this meshlet (max 124)
+    uint32_t globalVertexOffset;    // Base vertex offset in primary vertex buffer
 };
 
 #endif  // HOST_DEVICE_H
