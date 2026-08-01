@@ -13,11 +13,16 @@
 
 namespace Nox
 {
-    static std::map<std::filesystem::path, AssetType> s_AssetExtensionMap = {
+    static std::map<std::filesystem::path, AssetType> s_AssetExtensionMap = 
+    {
         { ".nox", AssetType::Scene },
         { ".png", AssetType::Texture2D },
         { ".jpg", AssetType::Texture2D },
-        { ".jpeg", AssetType::Texture2D }
+        { ".jpeg", AssetType::Texture2D },
+        { ".gltf", AssetType::MeshSource },
+        { ".glb", AssetType::MeshSource },
+        { ".nmesh", AssetType::Mesh },
+        { ".nsmesh", AssetType::StaticMesh }
     };
 
     static AssetType GetAssetTypeFromExtension(const std::filesystem::path& extension)
@@ -55,13 +60,98 @@ namespace Nox
         return m_AssetRegistry.at(handle).Type;
     }
 
-    void EditorAssetManager::ImportAsset(const std::filesystem::path& filepath)
+    void EditorAssetManager::Init()
+    {
+        m_AssetWatcher.watch(Project::GetActiveAssetDirectory(), [this](const std::filesystem::path& path) 
+        {
+            OnAssetModifiedOnDisk(path);
+        });
+    }
+
+    void EditorAssetManager::Update()
+    {
+        std::set<AssetHandle> toReimport;
+        
+        // Quickly copy and clear the queue safely
+        {
+            std::lock_guard<std::mutex> lock(m_ReimportMutex);
+            toReimport = m_PendingReimports;
+            m_PendingReimports.clear();
+        }
+
+        // Now we are on the MAIN THREAD, we can safely invoke the importer and Vulkan code
+        for (AssetHandle handle : toReimport)
+        {
+            ReimportAsset(handle);
+        }
+    }
+    
+    void EditorAssetManager::ReimportAsset(AssetHandle handle)
+    {
+        if (!IsAssetHandleValid(handle)) return;
+
+        const AssetMetadata& metadata = GetMetadata(handle);
+        NOX_CORE_INFO("Auto-Reimporting asset from source: {}", metadata.SourceFilePath.string());
+
+        // 1. Delete the old cooked cache (.nsmesh/.nmesh) so the Importer is forced to re-cook the GLTF
+        auto cookedPath = Project::GetActiveAssetDirectory() / metadata.FilePath;
+        if (std::filesystem::exists(cookedPath))
+        {
+            std::filesystem::remove(cookedPath);
+        }
+
+        // 2. Re-run the importer on the GLTF
+        Ref<Asset> reimportedAsset = AssetImporter::ImportAsset(handle, metadata);
+        
+        // 3. Overwrite the loaded asset. (If your ECS holds a Ref<Asset> to this, 
+        // it will automatically update in the viewport!)
+        if (reimportedAsset)
+        {
+            reimportedAsset->Handle = handle;
+            m_LoadedAssets[handle] = reimportedAsset;
+        }
+    }
+
+    void EditorAssetManager::OnAssetModifiedOnDisk(const std::filesystem::path& absolutePath)
+    {
+        if (absolutePath.extension() == ".nsmesh" || absolutePath.extension() == ".nmesh")
+            return;
+        
+        // Convert to relative path to match our Asset Registry
+        std::filesystem::path relativePath = std::filesystem::relative(absolutePath, Project::GetActiveAssetDirectory());
+        
+        AssetHandle handleToReimport = 0;
+
+        // Search the registry to see if this modified file is a Source file for one of our assets
+        for (const auto& [handle, metadata] : m_AssetRegistry)
+        {
+            if (metadata.SourceFilePath == relativePath)
+            {
+                handleToReimport = handle;
+                break;
+            }
+        }
+
+        // If we found it, safely queue it for the main thread
+        if (handleToReimport != 0)
+        {
+            std::lock_guard<std::mutex> lock(m_ReimportMutex);
+            m_PendingReimports.insert(handleToReimport);
+        }
+    }
+
+    void EditorAssetManager::ImportAsset(const std::filesystem::path& sourcePath, const std::filesystem::path& destPath, AssetType targetType)
     {
         AssetHandle handle; // generate new handle
         AssetMetadata metadata;
-        metadata.FilePath = filepath;
-        metadata.Type = GetAssetTypeFromExtension(filepath.extension());
+        metadata.FilePath = destPath.empty() ? sourcePath : destPath;
+        metadata.SourceFilePath = sourcePath;
+        
+        // If a target type was provided (e.g. from a UI menu), use it. 
+        // Otherwise, fall back to whatever the file extension is.
+        metadata.Type = (targetType != AssetType::None) ? targetType : GetAssetTypeFromExtension(sourcePath.extension());
         NOX_CORE_ASSERT(metadata.Type != AssetType::None, "could not determine asset type from extension");
+        
         Ref<Asset> asset = AssetImporter::ImportAsset(handle, metadata);
         if (asset)
         {
@@ -136,6 +226,8 @@ namespace Nox
                 out << YAML::Key << "Handle" << YAML::Value << handle;
                 std::string filepathStr = metadata.FilePath.generic_string();
                 out << YAML::Key << "FilePath" << YAML::Value << filepathStr;
+                if (!metadata.SourceFilePath.empty())
+                    out << YAML::Key << "SourceFilePath" << YAML::Value << metadata.SourceFilePath.generic_string();
                 out << YAML::Key << "Type" << YAML::Value << AssetTypeToString(metadata.Type);
                 out << YAML::EndMap;
             }
@@ -176,6 +268,8 @@ namespace Nox
             AssetHandle handle = node["Handle"].as<uint64_t>();
             auto& metadata = m_AssetRegistry[handle];
             metadata.FilePath = node["FilePath"].as<std::string>();
+            if (node["SourceFilePath"])
+                metadata.SourceFilePath = node["SourceFilePath"].as<std::string>();
             metadata.Type = AssetTypeFromString(node["Type"].as<std::string>());
         }
 

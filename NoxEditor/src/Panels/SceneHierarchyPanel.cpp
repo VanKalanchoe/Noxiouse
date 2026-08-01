@@ -265,6 +265,8 @@ namespace Nox
 
         if (ImGui::BeginPopup("AddComponent"))
         {
+            DisplayAddComponentEntry<MeshComponent>("Mesh");
+            
             DisplayAddComponentEntry<CameraComponent>("Camera");
             DisplayAddComponentEntry<ScriptComponent>("Script");
             DisplayAddComponentEntry<SpriteRendererComponent>("Sprite Renderer");
@@ -286,6 +288,82 @@ namespace Nox
             DrawVec3Control("Rotation", rotation);
             component.Rotation = glm::radians(rotation);
             DrawVec3Control("Scale", component.Scale, 1.0f);
+        });
+        
+        DrawComponent<MeshComponent>("Mesh", entity, [](auto& component)
+        {
+            std::string label = "None";
+            bool isMeshValid = false;
+            
+            // 1. Resolve the current mesh name if one is assigned
+            if (component.Mesh != 0)
+            {
+                if (AssetManager::IsAssetHandleValid(component.Mesh))
+                {
+                    // Get the type and allow Source files OR loaded meshes
+                    AssetType type = AssetManager::GetAssetType(component.Mesh);
+                    if (type == AssetType::MeshSource || type == AssetType::StaticMesh || type == AssetType::Mesh)
+                    {
+                        const AssetMetadata& metadata = Project::GetActive()->GetEditorAssetManager()->GetMetadata(component.Mesh);
+                        label = metadata.FilePath.filename().string();
+                        isMeshValid = true;
+                    }
+                    else
+                    {
+                        label = "Invalid";
+                    }
+                }
+                else
+                {
+                    label = "Invalid";
+                }
+            }
+
+            // 2. Draw the button that acts as our Drag & Drop target
+            ImVec2 buttonLabelSize = ImGui::CalcTextSize(label.c_str());
+            buttonLabelSize.x += 20.0f;
+            float buttonLabelWidth = glm::max<float>(100.0f, buttonLabelSize.x);
+            
+            ImGui::Button(label.c_str(), ImVec2(buttonLabelWidth, 0.0f));
+            
+            // 3. Accept the payload from the Content Browser
+            if (ImGui::BeginDragDropTarget())
+            {
+                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEM"))
+                {
+                    AssetHandle handle = *(AssetHandle*)payload->Data;
+                    
+                    // Verify it's a mesh type
+                    AssetType type = AssetManager::GetAssetType(handle);
+                    if (type == AssetType::MeshSource || type == AssetType::StaticMesh || type == AssetType::Mesh)
+                    {
+                        component.Mesh = handle;
+                        component.SubmeshIndex = 0;
+                    }
+                    else
+                    {
+                        NOX_CORE_WARN("Wrong Asset Type - Expected a Mesh");
+                    }
+                }
+                ImGui::EndDragDropTarget();
+            }
+
+            // 4. Draw a clear "X" button to remove the mesh
+            if (isMeshValid)
+            {
+                ImGui::SameLine();
+                ImVec2 xLabelSize = ImGui::CalcTextSize("X");
+                float buttonSize = xLabelSize.y + ImGui::GetStyle().FramePadding.y * 2.0f;
+                if (ImGui::Button("X", ImVec2(buttonSize, buttonSize)))
+                {
+                    component.Mesh = 0;
+                }
+                
+                ImGui::DragScalar("Submesh Index", ImGuiDataType_U32, &component.SubmeshIndex, 0.1f, nullptr, nullptr, "%u");
+            }
+            
+            ImGui::SameLine();
+            ImGui::Text("Mesh Asset");
         });
 
         DrawComponent<CameraComponent>("Camera", entity, [](auto& component)

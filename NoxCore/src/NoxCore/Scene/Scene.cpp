@@ -440,6 +440,17 @@ namespace Nox
     {
         m_renderer->BeginScene(camera);
         
+        // Draw 3D Meshes
+        {
+            auto view = m_Registry.view<TransformComponent, MeshComponent>();
+            for (auto entity : view)
+            {
+                auto [transform, mesh] = view.get<TransformComponent, MeshComponent>(entity);
+                
+                m_renderer->SubmitMesh(transform.GetTransform(), mesh, (int)entity);
+            }
+        }
+        
         // Draw Sprites
         {
             auto group = m_Registry.group<TransformComponent>(entt::get<SpriteRendererComponent>);
@@ -501,6 +512,11 @@ namespace Nox
     {
     }
 
+    template <>
+    void Scene::OnComponentAdded<MeshComponent>(Entity entity, MeshComponent& component)
+    {
+    }
+    
     template <>
     void Scene::OnComponentAdded<CameraComponent>(Entity entity, CameraComponent& component)
     {

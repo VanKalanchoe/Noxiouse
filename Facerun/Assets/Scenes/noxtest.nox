@@ -1,5 +1,26 @@
 Scene: Untitled
 Entities:
+  - Entity: 4875560046283724974
+    TagComponent:
+      Tag: Empty Entity
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+  - Entity: 12268161818422171473
+    TagComponent:
+      Tag: Empty Entity
+    TransformComponent:
+      Translation: [3.6, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+  - Entity: 6249669192779228947
+    TagComponent:
+      Tag: Fox
+    TransformComponent:
+      Translation: [3.8, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
   - Entity: 15258378492097758803
     TagComponent:
       Tag: BoxDynamic
@@ -80,7 +101,7 @@ Entities:
       Rotation: [0, 0, 0]
       Scale: [1, 1, 1]
     TextComponent:
-      TextString: Hallo World
+      TextString: Hello World
       Color: [1, 1, 1, 1]
       Kerning: 0
       LineSpacing: 0

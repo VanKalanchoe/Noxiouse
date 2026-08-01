@@ -52,6 +52,11 @@ namespace NRI
         case BufferUsage::Indirect:
              usageFlags = vk::BufferUsageFlagBits2::eIndirectBuffer | vk::BufferUsageFlagBits2::eTransferDst | vk::BufferUsageFlagBits2::eStorageBuffer | vk::BufferUsageFlagBits2::eShaderDeviceAddress;
              memoryUsage = vma::MemoryUsage::eAutoPreferDevice;
+             allocFlags = vma::AllocationCreateFlagBits::eHostAccessSequentialWrite | vma::AllocationCreateFlagBits::eMapped;
+             break;
+        case BufferUsage::IndirectStatic:
+            usageFlags = vk::BufferUsageFlagBits2::eIndirectBuffer | vk::BufferUsageFlagBits2::eTransferDst | vk::BufferUsageFlagBits2::eStorageBuffer | vk::BufferUsageFlagBits2::eShaderDeviceAddress;
+            memoryUsage = vma::MemoryUsage::eAutoPreferDevice;
             break;
         }
         

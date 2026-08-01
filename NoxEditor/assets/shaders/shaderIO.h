@@ -116,8 +116,10 @@ struct InstanceData
     mat4 modelMatrix;
     uint32_t meshletOffset; // Where this model's meshlets start in m_meshletDraws
     uint32_t meshletCount;  // How many meshlets this model has
+    
+    // Editor-only
+    int entityID;
 };
-
 
 struct PushConstantQuad
 {
@@ -199,8 +201,6 @@ struct PushConstantMeshlets
     uint64_t meshletDrawsReference;
     uint64_t meshletVerticesReference;
     uint64_t meshletTrianglesReference;
-    uint32_t meshletCount;
-    uint32_t instanceCount;
 };
 
 // Meshlet Global stores all meshes

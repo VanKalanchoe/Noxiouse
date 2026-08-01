@@ -42,5 +42,10 @@ namespace Nox
         };
 
         Mode m_Mode = Mode::Asset;
+        
+        char m_ImportDestPathBuffer[256] = {0};
+        std::filesystem::path m_PendingImportPath;
+        bool m_ShowImportModal = false;
+        bool m_ImportAsStaticMesh = true;
     };
 };

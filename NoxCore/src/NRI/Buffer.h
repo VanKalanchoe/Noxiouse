@@ -14,7 +14,8 @@ namespace NRI
         Storage,       // DeviceLocal, StorageBuffer
         StorageStatic,
         DescriptorHeap, // HostVisible | HostCoherent, DescriptorHeap
-        Indirect
+        Indirect,
+        IndirectStatic
     };
 
     struct BufferDesc

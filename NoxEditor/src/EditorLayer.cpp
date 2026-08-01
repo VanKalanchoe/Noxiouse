@@ -61,6 +61,8 @@ namespace Nox
         }
 
         m_EditorCamera = EditorCamera(30.0f, 1.778f, 0.1f, 1000.0f);
+        
+        Project::GetActive()->GetEditorAssetManager()->Init();
     }
 
     EditorLayer::~EditorLayer()
@@ -162,6 +164,8 @@ namespace Nox
         }
         
         OnOverlayRender();
+        
+        Project::GetActive()->GetEditorAssetManager()->Update();
     }
 
     void EditorLayer::OnRender()
@@ -296,7 +300,25 @@ namespace Nox
                 if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEM"))
                 {
                     AssetHandle handle = *(const AssetHandle*)payload->Data;
-                    OpenScene(handle);
+                    auto type = AssetManager::GetAssetType(handle);
+                    if (type == AssetType::Scene)
+                        OpenScene(handle);
+                    else if (type == AssetType::Mesh || type == AssetType::StaticMesh || type == AssetType::MeshSource)
+                    {
+                        // Get name from metada
+                        const AssetMetadata& metadata = Project::GetActive()->GetEditorAssetManager()->GetMetadata(handle);
+                        std::string entityName = metadata.FilePath.filename().stem().string();
+                        if (entityName.empty())
+                            entityName = "Mesh Entity";
+                        
+                        // Create entity in current scene
+                        Entity newEntity = m_ActiveScene->CreateEntity(entityName);
+                        auto& meshComp = newEntity.AddComponent<MeshComponent>();
+                        meshComp.Mesh = handle;
+                        
+                        // Select this newly create entity in the hierachy
+                        m_SceneHierarchyPanel.SetSelectedEntity(newEntity);
+                    }
                 }
                 ImGui::EndDragDropTarget();
             }

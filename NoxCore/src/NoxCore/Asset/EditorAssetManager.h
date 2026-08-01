@@ -4,6 +4,10 @@
 #include "AssetMetadata.h"
 
 #include <map>
+#include <set>
+#include <mutex>
+
+#include "NoxCore/Utils/NOXWatcher.h"
 
 namespace Nox
 {
@@ -18,7 +22,11 @@ namespace Nox
         virtual bool IsAssetLoaded(AssetHandle handle) const override;
         virtual AssetType GetAssetType(AssetHandle handle) const override;
 
-        void ImportAsset(const std::filesystem::path& path);
+        void Init();
+        void Update();
+        void ReimportAsset(AssetHandle handle);
+
+        void ImportAsset(const std::filesystem::path& sourcePath, const std::filesystem::path& destPath, AssetType targetType = AssetType::None);
 
         const AssetMetadata GetMetadata(AssetHandle handle) const;
         const std::filesystem::path GetFilePath(AssetHandle handle) const;
@@ -29,7 +37,15 @@ namespace Nox
         
         void SerializeAssetRegistry();
         bool DeserializeAssetRegistry();
+        
     private:
+        void OnAssetModifiedOnDisk(const std::filesystem::path& absolutePath);
+    private:
+        Utils::NOXWatcher m_AssetWatcher;
+        
+        std::set<AssetHandle> m_PendingReimports;
+        std::mutex m_ReimportMutex;
+        
         AssetRegistry m_AssetRegistry;
         AssetMap m_LoadedAssets;
 

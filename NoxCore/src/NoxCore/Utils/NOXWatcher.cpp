@@ -4,7 +4,7 @@
 
 namespace Utils
 {
-    void NOXWatcher::watch(std::filesystem::path path, std::function<void()> onModified)
+    void NOXWatcher::watch(std::filesystem::path path, std::function<void(const std::filesystem::path&)> onModified)
     {
         if (!std::filesystem::exists(path))
         {
@@ -19,7 +19,7 @@ namespace Utils
         
         m_activeWatches.push_back(std::make_unique<filewatch::FileWatch<std::string>>(
             absolutePathStr,
-            [this, onModified](const std::string& pathStr, const filewatch::Event change_type)
+            [this, onModified, absolutePathStr](const std::string& pathStr, const filewatch::Event change_type)
             {
                 if (change_type == filewatch::Event::modified)
                 {
@@ -32,13 +32,14 @@ namespace Utils
                     
                     lastTime = currentTime;
                     
+                    // pathStr is relative to the watched directory. Build the full path:
+                    std::filesystem::path modifiedPath = std::filesystem::path(absolutePathStr) / pathStr;
+                    NOX_CORE_INFO("NOXWatcher: {}", modifiedPath.string());
+                    
                     if (onModified) 
                     {
-                        onModified();
+                        onModified(modifiedPath);
                     }
-                    
-                    std::filesystem::path modifiedPath(pathStr);
-                    NOX_CORE_INFO("NoxWatcher: {}", modifiedPath.filename().string());;
                 }
             }
         ));

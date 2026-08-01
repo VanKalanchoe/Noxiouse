@@ -8,46 +8,34 @@
 #define TINYOBJLOADER_IMPLEMENTATION
 #include <tiny_obj_loader.h>
 
-#define TINYGLTF3_IMPLEMENTATION
-#define TINYGLTF3_ENABLE_FS 
-#include "tiny_gltf_v3.h"
-
-#include "meshoptimizer.h"
-
+#include "NoxCore/Asset/AssetManager.h"
+#include "NoxCore/Asset/MeshImporter.h"
 #include "NoxCore/Core/Log.h"
 
 namespace Nox
 {
     static bool m_reloadShader = false;
-    ModelHandle bunnyHandle;
-    ModelHandle foxHandle;
-
-    struct DrawMeshTasksIndirectCommand
-    {
-        uint32_t groupCountX;
-        uint32_t groupCountY;
-        uint32_t groupCountZ;
-    };
-    std::vector<DrawMeshTasksIndirectCommand> m_drawMeshTasksIndirectCommands;
-    Renderer::Renderer(std::shared_ptr<Nox::Window> window, bool isEditor) : m_window(std::move(window)), m_isEditor(isEditor)
+    
+    Renderer::Renderer(std::shared_ptr<Window> window, bool isEditor) : m_window(std::move(window)), m_isEditor(isEditor)
     {
         NOX_CORE_INFO("Renderer Start");
 
+        s_Instance = this;
+        
         m_device = NRI::Device::create(NRI::GraphicsAPI::Vulkan, *m_window);
         if (!m_device) NOX_CORE_ASSERT("Failed to create NRI device");
 
         initRenderer();
         
-        bunnyHandle = loadModel(MODEL_PATH_GLTF_STANDFORD);
-        foxHandle = loadModel(MODEL_PATH_FOX_GLTF);
-        createMeshletBuffers();
-        createInstanceBuffer();
-        createIndirectBuffer();
+        /*
+        bunnyMesh = MeshImporter::LoadMesh(MODEL_PATH_GLTF_STANDFORD);
+        foxMesh = MeshImporter::LoadMesh(MODEL_PATH_FOX_GLTF);
         
-
-        m_fileWatcher.watch(std::filesystem::path("assets/shaders/Meshlet.slang"), [this]() { m_reloadShader = true; });
-        m_fileWatcher.watch(std::filesystem::path("assets/shaders/shader.slang"), [this]() { m_reloadShader = true; });
-        m_fileWatcher.watch(std::filesystem::path("assets/shaders/present.slang"), [this]() { m_reloadShader = true; });
+        */
+        
+        m_fileWatcher.watch(std::filesystem::path("assets/shaders/Meshlet.slang"), [this](auto path) { m_reloadShader = true; });
+        m_fileWatcher.watch(std::filesystem::path("assets/shaders/shader.slang"), [this](auto path) { m_reloadShader = true; });
+        m_fileWatcher.watch(std::filesystem::path("assets/shaders/present.slang"), [this](auto path) { m_reloadShader = true; });
 
         m_whiteTexture = createSolidColorTexture(255, 255, 255, 255);
 
@@ -83,6 +71,7 @@ namespace Nox
     {
         NOX_CORE_INFO("Renderer Shutdown");
 
+        if (s_Instance == this) s_Instance = nullptr;
 
         m_device->waitIdle();
         m_device->shutdown(); // needed for texture to not remove imguitexture
@@ -379,291 +368,42 @@ namespace Nox
         return UploadTexture(cpuData);
     }
 
-    int32_t FindAttribute(const tg3_primitive& primitive, const char* name)
+    MeshHandle Renderer::UploadMeshGeometry(const MeshData& data)
     {
-        for (uint32_t i = 0; i < primitive.attributes_count; i++)
-        {
-            const tg3_str_int_pair& attr = primitive.attributes[i];
-
-            if (strcmp(attr.key.data, name) == 0)
-            {
-                return attr.value;
-            }
-        }
-
-        return -1;
-    }
-    
-    ModelHandle Renderer::loadModel(const std::string& path)
-    {
-        /*
-            Here is the exact layout based on your EditorCamera class:
-            Up: +Y
-            Right: +X
-            Forward: -Z
-        */
-        
-        ModelHandle handle{};
+        MeshHandle handle{};
         handle.firstMeshlet = static_cast<uint32_t>(m_meshletDraws.size());
-        
-        tg3_parse_options opts;
-        tg3_error_stack errors;
-        tg3_model model;
 
-        tg3_parse_options_init(&opts);
-        tg3_error_stack_init(&errors);
+        uint32_t baseVertex = static_cast<uint32_t>(m_vertices.size());
+        uint32_t meshletVertexOffset = static_cast<uint32_t>(m_meshletVertices.size());
+        uint32_t meshletTrianglesOffset = static_cast<uint32_t>(m_meshletTriangles.size());
 
-        tg3_error_code err = tg3_parse_file(&model, &errors, path.c_str(), path.size(), &opts);
-        if (err != TG3_OK)
+        // 1. Append vertices
+        m_vertices.insert(m_vertices.end(), data.Vertices.begin(), data.Vertices.end());
+
+        // 2. Append meshlet draw calls (adjusting global offsets)
+        for (auto draw : data.Draws)
         {
-            for (uint32_t i = 0; i < errors.count; i++)
-            {
-                NOX_CORE_ERROR("[{}] {}", (int)errors.entries[i].severity, errors.entries[i].message ? errors.entries[i].message : "(null)");
-            }
+            draw.vertexOffset += meshletVertexOffset;
+            draw.triangleOffset += meshletTrianglesOffset;
+            draw.globalVertexOffset += baseVertex;
+            m_meshletDraws.push_back(draw);
         }
 
-        for (uint32_t meshIndex = 0; meshIndex < model.meshes_count; meshIndex++)
-        {
-            const tg3_mesh& mesh = model.meshes[meshIndex];
+        // 3. Append bounds & raw meshlet buffers
+        m_meshletBounds.insert(m_meshletBounds.end(), data.Bounds.begin(), data.Bounds.end());
+        m_meshletVertices.insert(m_meshletVertices.end(), data.MeshletVertices.begin(), data.MeshletVertices.end());
+        m_meshletTriangles.insert(m_meshletTriangles.end(), data.MeshletTriangles.begin(), data.MeshletTriangles.end());
 
-            for (uint32_t primitiveIndex = 0; primitiveIndex < mesh.primitives_count; primitiveIndex++)
-            {
-                const tg3_primitive& primitive = mesh.primitives[primitiveIndex];
-
-                // Get vertex positions
-                const tg3_accessor& posAccessor = model.accessors[FindAttribute(primitive, "POSITION")];
-                const tg3_buffer_view& posBufferView = model.buffer_views[posAccessor.buffer_view];
-                const tg3_buffer& posBuffer = model.buffers[posBufferView.buffer];
-
-                // Get texture coordinates if available
-                bool hasTexCoords = FindAttribute(primitive, "TEXCOORD_0") ? true : false;
-                const tg3_accessor* texCoordAccessor = nullptr;
-                const tg3_buffer_view* texCoordBufferView = nullptr;
-                const tg3_buffer* texCoordBuffer = nullptr;
-
-                if (hasTexCoords)
-                {
-                    texCoordAccessor = &model.accessors[FindAttribute(primitive, "TEXCOORD_0")];
-                    texCoordBufferView = &model.buffer_views[texCoordAccessor->buffer_view];
-                    texCoordBuffer = &model.buffers[texCoordBufferView->buffer];
-                }
-
-                uint32_t baseVertex = static_cast<uint32_t>(m_vertices.size());
-                size_t primitiveVertexCount = posAccessor.count;
-
-                for (size_t i = 0; i < primitiveVertexCount; i++)
-                {
-                    shaderio::Vertex vertex{};
-
-                    const float* pos = reinterpret_cast<const float*>(&posBuffer.data.data[posBufferView.byte_offset + posAccessor.byte_offset + i * 12]);
-                    // glTF uses a right-handed coordinate system with Y-up
-                    // Vulkan uses a right-handed coordinate system with Y-down
-                    // We need to flip the Y coordinate
-                    // i dont need that look first line in load model
-                    vertex.pos = {pos[0], pos[1], pos[2]};
-
-                    if (hasTexCoords)
-                    {
-                        const float* texCoord = reinterpret_cast<const float*>(&texCoordBuffer->data.data[texCoordBufferView->byte_offset + texCoordAccessor->byte_offset + i * 8]);
-                        vertex.texCoord = {texCoord[0], texCoord[1]};
-                    }
-                    else
-                    {
-                        vertex.texCoord = {0.0f, 0.0f};
-                    }
-
-                    m_vertices.push_back(vertex);
-                }
-                
-                std::vector<uint32_t> primitiveIndices;
-                
-                if (primitive.indices >= 0)
-                {
-                    // Get indices
-                    const tg3_accessor& indexAccessor = model.accessors[primitive.indices];
-                    const tg3_buffer_view& indexBufferView = model.buffer_views[indexAccessor.buffer_view];
-                    const tg3_buffer& indexBuffer = model.buffers[indexBufferView.buffer];
-                    
-                    const unsigned char* indexData = &indexBuffer.data.data[indexBufferView.byte_offset + indexAccessor.byte_offset];
-                    size_t indexCount = indexAccessor.count;
-                    size_t indexStride = 0;
-
-                    // Determine index stride based on component type
-                    if (indexAccessor.component_type == TG3_COMPONENT_TYPE_UNSIGNED_SHORT)
-                    {
-                        indexStride = sizeof(uint16_t);
-                    }
-                    else if (indexAccessor.component_type == TG3_COMPONENT_TYPE_UNSIGNED_INT)
-                    {
-                        indexStride = sizeof(uint32_t);
-                    }
-                    else if (indexAccessor.component_type == TG3_COMPONENT_TYPE_UNSIGNED_BYTE)
-                    {
-                        indexStride = sizeof(uint8_t);
-                    }
-                    else if (indexAccessor.component_type == TG3_COMPONENT_TYPE_BYTE)
-                    {
-                        indexStride = sizeof(int8_t);
-                    }
-                    else if (indexAccessor.component_type == TG3_COMPONENT_TYPE_SHORT)
-                    {
-                        indexStride = sizeof(int16_t);
-                    }
-                    else if (indexAccessor.component_type == TG3_COMPONENT_TYPE_INT)
-                    {
-                        indexStride = sizeof(int32_t);
-                    }
-                    else if (indexAccessor.component_type == TG3_COMPONENT_TYPE_FLOAT)
-                    {
-                        indexStride = sizeof(float);
-                    }
-                    else if (indexAccessor.component_type == TG3_COMPONENT_TYPE_DOUBLE)
-                    {
-                        indexStride = sizeof(double);
-                    }
-                    else
-                    {
-                        NOX_CORE_ERROR("Unsupported index component type encountered. Value: {}", indexAccessor.component_type);
-                    
-                        throw std::runtime_error("Unsupported index component type");
-                    }
-                    
-                    primitiveIndices.reserve(indexCount);
-
-                    for (size_t i = 0; i < indexCount; i++)
-                    {
-                        uint32_t index = 0;
-
-                        if (indexAccessor.component_type == TG3_COMPONENT_TYPE_UNSIGNED_SHORT)
-                        {
-                            index = *reinterpret_cast<const uint16_t*>(indexData + i * indexStride);
-                        }
-                        else if (indexAccessor.component_type == TG3_COMPONENT_TYPE_UNSIGNED_INT)
-                        {
-                            index = *reinterpret_cast<const uint32_t*>(indexData + i * indexStride);
-                        }
-                        else if (indexAccessor.component_type == TG3_COMPONENT_TYPE_UNSIGNED_BYTE)
-                        {
-                            index = *reinterpret_cast<const uint8_t*>(indexData + i * indexStride);
-                        }
-                        else if (indexAccessor.component_type == TG3_COMPONENT_TYPE_BYTE)
-                        {
-                            index = static_cast<uint32_t>(*reinterpret_cast<const int8_t*>(indexData + i * indexStride));
-                        }
-                        else if (indexAccessor.component_type == TG3_COMPONENT_TYPE_SHORT)
-                        {
-                            index = static_cast<uint32_t>(*reinterpret_cast<const int16_t*>(indexData + i * indexStride));
-                        }
-                        else if (indexAccessor.component_type == TG3_COMPONENT_TYPE_INT)
-                        {
-                            index = static_cast<uint32_t>(*reinterpret_cast<const int32_t*>(indexData + i * indexStride));
-                        }
-                        else if (indexAccessor.component_type == TG3_COMPONENT_TYPE_FLOAT)
-                        {
-                            index = static_cast<uint32_t>(*reinterpret_cast<const float*>(indexData + i * indexStride));
-                        }
-                        else if (indexAccessor.component_type == TG3_COMPONENT_TYPE_DOUBLE)
-                        {
-                            index = static_cast<uint32_t>(*reinterpret_cast<const double*>(indexData + i * indexStride));
-                        }
-                        
-                        primitiveIndices.push_back(index);
-                    }
-                }
-                else
-                {
-                    // Non-indexed primitive fallback: generate sequential indices
-                    primitiveIndices.reserve(primitiveVertexCount);
-                    for (size_t i = 0; i < primitiveVertexCount; i++)
-                    {
-                        primitiveIndices.push_back(static_cast<uint32_t>(i));
-                    }
-                }
-                
-                // Recommended limits for Vulkan mesh shaders
-                const size_t maxVertices = 64;
-                const size_t maxTriangles = 64; //124
-                
-                // Generate meshlets with meshoptimizer
-                size_t maxMeshlets = meshopt_buildMeshletsBound(primitiveIndices.size(), maxVertices, maxTriangles);
-                std::vector<meshopt_Meshlet> localMeshlets(maxMeshlets);
-                std::vector<unsigned int> localMeshletVertices(primitiveIndices.size());
-                std::vector<unsigned char> localMeshletTriangles(primitiveIndices.size());
-                
-                size_t meshletCount = meshopt_buildMeshlets(
-                    localMeshlets.data(),
-                    localMeshletVertices.data(),
-                    localMeshletTriangles.data(),
-                    primitiveIndices.data(),
-                    primitiveIndices.size(),
-                    &m_vertices[baseVertex].pos.x,
-                    primitiveVertexCount,
-                    sizeof(shaderio::Vertex),
-                    maxVertices,
-                    maxTriangles,
-                    0.0f
-                );
-                
-                localMeshlets.resize(meshletCount);
-                
-                for (auto& meshlet : localMeshlets)
-                {
-                    meshopt_optimizeMeshlet(
-                      &localMeshletVertices[meshlet.vertex_offset],
-                      &localMeshletTriangles[meshlet.triangle_offset],
-                      meshlet.triangle_count,
-                      meshlet.vertex_count
-                    );
-                }
-                
-                const meshopt_Meshlet& last = localMeshlets.back();
-                localMeshletVertices.resize(last.vertex_offset + last.vertex_count);
-                localMeshletTriangles.resize(last.triangle_offset + (last.triangle_count * 3));
-                
-                uint32_t meshletVertexOffset = static_cast<uint32_t>(m_meshletVertices.size());
-                uint32_t meshletTrianglesOffset = static_cast<uint32_t>(m_meshletTriangles.size());
-                
-                for (const auto& meshlet : localMeshlets)
-                {
-                    meshopt_Bounds bounds = meshopt_computeMeshletBounds(
-                        &localMeshletVertices[meshlet.vertex_offset],
-                        &localMeshletTriangles[meshlet.triangle_offset],
-                        meshlet.triangle_count,
-                        &m_vertices[baseVertex].pos.x,
-                        primitiveVertexCount,
-                        sizeof(shaderio::Vertex)
-                    );
-                    
-                    // Buffer 1: Tasl Shader Culling Data
-                    shaderio::MeshletBounds b{};
-                    b.center     = glm::vec3(bounds.center[0], bounds.center[1], bounds.center[2]);
-                    b.radius     = bounds.radius;
-                    b.coneApex   = glm::vec3(bounds.cone_apex[0], bounds.cone_apex[1], bounds.cone_apex[2]);
-                    b.coneCutoff = bounds.cone_cutoff;
-                    b.coneAxis   = glm::vec3(bounds.cone_axis[0], bounds.cone_axis[1], bounds.cone_axis[2]);
-                    m_meshletBounds.push_back(b);
-
-                    // Buffer 2: Mesh Shader Drawing Data
-                    shaderio::MeshletDraw d{};
-                    d.vertexOffset       = meshletVertexOffset + meshlet.vertex_offset;
-                    d.triangleOffset     = meshletTrianglesOffset + meshlet.triangle_offset;
-                    d.vertexCount        = meshlet.vertex_count;
-                    d.triangleCount      = meshlet.triangle_count;
-                    d.globalVertexOffset = baseVertex;
-                    m_meshletDraws.push_back(d);
-                }
-                
-                m_meshletVertices.insert(m_meshletVertices.end(), localMeshletVertices.begin(), localMeshletVertices.end());
-                m_meshletTriangles.insert(m_meshletTriangles.end(), localMeshletTriangles.begin(), localMeshletTriangles.end());
-            }
-        }
-
-        tg3_model_free(&model);
-        tg3_error_stack_free(&errors);
-        
-        handle.meshletCount = static_cast<uint32_t>(m_meshletDraws.size() - handle.firstMeshlet);
-        
+        handle.meshletCount = static_cast<uint32_t>(data.Draws.size());
         return handle;
+    }
+
+    void Renderer::UpdateMeshletBuffers()
+    {
+        if (s_Instance)
+            s_Instance->createMeshletBuffers();
+        else
+            NOX_CORE_ASSERT(false, "Renderer::updateMeshletBuffers() Renderer instance does not exist when updating meshlet buffers!");
     }
 
     void Renderer::createMeshletBuffers()
@@ -811,85 +551,52 @@ namespace Nox
         }
     }
     
-    std::vector<shaderio::InstanceData> instanceBufferObjects;
-
-    void Renderer::createInstanceBuffer()
+    void Renderer::createInstanceBuffer(uint64_t bufferSize)
     {
-        instanceBufferObjects.clear();
+        m_instanceBuffers.clear();
+        m_instanceBuffersMapped.clear();
         
-        // Instance 0: Bunny on the left
-        shaderio::InstanceData bunny{};
-        bunny.modelMatrix   = glm::translate(glm::mat4(1.0f), glm::vec3(-2.0f, 0.0f, 0.0f));
-        bunny.meshletOffset = bunnyHandle.firstMeshlet;
-        bunny.meshletCount  = bunnyHandle.meshletCount;
-        instanceBufferObjects.push_back(bunny);
+        // Reserve memory in vectors to prevent reallocation overhead
+        m_instanceBuffers.reserve(MAX_FRAMES_IN_FLIGHT);
+        m_instanceBuffersMapped.reserve(MAX_FRAMES_IN_FLIGHT);
 
-        // Instance 1: Fox on the right
-        shaderio::InstanceData fox{};
-        fox.modelMatrix   = glm::translate(glm::mat4(1.0f), glm::vec3(2.0f, 0.0f, 0.0f));
-        fox.meshletOffset = foxHandle.firstMeshlet;
-        fox.meshletCount  = foxHandle.meshletCount;
-        instanceBufferObjects.push_back(fox);
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+        {
+            std::unique_ptr<NRI::Buffer> uboBuffer = m_device->createBuffer(NRI::BufferDesc
+                {
+                    .size = bufferSize,
+                    .usage = NRI::BufferUsage::Storage
+                });
 
-        instanceBufferObjects.push_back(bunny);
-        instanceBufferObjects.push_back(fox);
+            void* mappedMemory = uboBuffer->map(0, bufferSize);
 
-        uint64_t bufferSize = sizeof(shaderio::InstanceData) * instanceBufferObjects.size();
-
-        std::unique_ptr<NRI::Buffer> stagingBuffer = m_device->createBuffer(NRI::BufferDesc{
-            .size = bufferSize,
-            .usage = NRI::BufferUsage::Staging
-        });
-
-        void* mappedMemory = stagingBuffer->map(0, bufferSize);
-        memcpy(mappedMemory, instanceBufferObjects.data(), bufferSize);
-        stagingBuffer->unmap();
-
-        m_instanceBuffer = m_device->createBuffer(NRI::BufferDesc
-            {
-                .size = bufferSize,
-                .usage = NRI::BufferUsage::StorageStatic
-            });
-
-        std::unique_ptr<NRI::CommandBuffer> commandCopyBuffer = beginSingleTimeCommands();
-        m_instanceBuffer->uploadData(*commandCopyBuffer, *stagingBuffer, instanceBufferObjects.data());
-        endSingleTimeCommands(std::move(commandCopyBuffer));
+            m_instanceBuffers.emplace_back(std::move(uboBuffer));
+            m_instanceBuffersMapped.emplace_back(mappedMemory);
+        }
     }
     
-    void Renderer::createIndirectBuffer()
+    void Renderer::createIndirectBuffer(uint64_t bufferSize)
     {
-        m_drawMeshTasksIndirectCommands.clear();
+        m_indirectBuffers.clear();
+        m_indirectBuffersMapped.clear();
         
-        for (const auto& instance : instanceBufferObjects)
+        // Reserve memory in vectors to prevent reallocation overhead
+        m_indirectBuffers.reserve(MAX_FRAMES_IN_FLIGHT);
+        m_indirectBuffersMapped.reserve(MAX_FRAMES_IN_FLIGHT);
+
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
         {
-            DrawMeshTasksIndirectCommand command{};
-            command.groupCountX = (instance.meshletCount + shaderio::TASK_SHADER_DISPATCH_X - 1) / shaderio::TASK_SHADER_DISPATCH_X;
-            command.groupCountY = 1;
-            command.groupCountZ = 1;
-            
-            m_drawMeshTasksIndirectCommands.push_back(command);
+            std::unique_ptr<NRI::Buffer> uboBuffer = m_device->createBuffer(NRI::BufferDesc
+                {
+                    .size = bufferSize,
+                    .usage = NRI::BufferUsage::Indirect
+                });
+
+            void* mappedMemory = uboBuffer->map(0, bufferSize);
+
+            m_indirectBuffers.emplace_back(std::move(uboBuffer));
+            m_indirectBuffersMapped.emplace_back(mappedMemory);
         }
-        
-        uint64_t bufferSize = sizeof(DrawMeshTasksIndirectCommand) * m_drawMeshTasksIndirectCommands.size();
-
-        std::unique_ptr<NRI::Buffer> stagingBuffer = m_device->createBuffer(NRI::BufferDesc{
-            .size = bufferSize,
-            .usage = NRI::BufferUsage::Staging
-        });
-
-        void* mappedMemory = stagingBuffer->map(0, bufferSize);
-        memcpy(mappedMemory, m_drawMeshTasksIndirectCommands.data(), bufferSize);
-        stagingBuffer->unmap();
-
-        m_indirectBuffer = m_device->createBuffer(NRI::BufferDesc
-            {
-                .size = bufferSize,
-                .usage = NRI::BufferUsage::Indirect
-            });
-
-        std::unique_ptr<NRI::CommandBuffer> commandCopyBuffer = beginSingleTimeCommands();
-        m_indirectBuffer->uploadData(*commandCopyBuffer, *stagingBuffer, m_drawMeshTasksIndirectCommands.data());
-        endSingleTimeCommands(std::move(commandCopyBuffer));
     }
 
     void Renderer::createDescriptorHeaps()
@@ -1091,32 +798,24 @@ namespace Nox
 
         m_commandBuffers->setLogicOpEnable(false);
 
-        m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_graphicsPipeline);
+        if (!m_instanceBufferObjects.empty() || !m_drawMeshTasksIndirectCommands.empty())
+        {
+            m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_graphicsPipeline);
 
-        shaderio::PushConstantMeshlets references{};
-        // Pass pointer to the global matrix via a buffer device address
-        /*references.modelMatrix = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 0.0f));*/
-        references.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
-        references.instanceReference = m_instanceBuffer->getDeviceAddress();
-        references.verticesReference = m_verticesBuffer->getDeviceAddress();
-        references.meshletBoundsReference = m_meshletBoundsBuffer->getDeviceAddress();
-        references.meshletDrawsReference = m_meshletDrawsBuffer->getDeviceAddress();
-        references.meshletVerticesReference = m_meshletVerticesBuffer->getDeviceAddress();
-        references.meshletTrianglesReference = m_meshletTrianglesBuffer->getDeviceAddress();
-        references.meshletCount = m_meshletDraws.size();
-        references.instanceCount = instanceBufferObjects.size();
-        m_commandBuffers->pushData(&references, sizeof(shaderio::PushConstantMeshlets));
+            shaderio::PushConstantMeshlets references{};
+            // Pass pointer to the global matrix via a buffer device address
+            /*references.modelMatrix = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 0.0f));*/
+            references.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+            references.instanceReference = m_instanceBuffers[frameIndex]->getDeviceAddress();
+            references.verticesReference = m_verticesBuffer->getDeviceAddress();
+            references.meshletBoundsReference = m_meshletBoundsBuffer->getDeviceAddress();
+            references.meshletDrawsReference = m_meshletDrawsBuffer->getDeviceAddress();
+            references.meshletVerticesReference = m_meshletVerticesBuffer->getDeviceAddress();
+            references.meshletTrianglesReference = m_meshletTrianglesBuffer->getDeviceAddress();
+            m_commandBuffers->pushData(&references, sizeof(shaderio::PushConstantMeshlets));
         
-        /*constexpr uint32_t taskDispatchX = 64;
-        uint32_t xCount = (m_meshletDraws.size() + (taskDispatchX - 1)) / taskDispatchX;
-        uint32_t instanceCount = static_cast<uint32_t>(instanceBufferObjects.size());
-        m_commandBuffers->drawMeshTasks(xCount, 1, 1);*/
-        /*uint32_t instanceCount = static_cast<uint32_t>(instanceBufferObjects.size());
-        m_commandBuffers->drawMeshTasks(1, instanceCount, 1);*/
-        /*m_commandBuffers->drawMeshTasks(1, 1, 1);
-        */
-        
-        m_commandBuffers->drawMeshTasksIndirect(*m_indirectBuffer, 0, static_cast<uint32_t>(m_drawMeshTasksIndirectCommands.size()), sizeof(DrawMeshTasksIndirectCommand));
+            m_commandBuffers->drawMeshTasksIndirect(*m_indirectBuffers[frameIndex], 0, static_cast<uint32_t>(m_drawMeshTasksIndirectCommands.size()), sizeof(DrawMeshTasksIndirectCommand));
+        }
         
         m_renderer2D->Flush(*m_commandBuffers, *m_uniformBuffers[frameIndex], frameIndex);
 
@@ -1265,6 +964,32 @@ namespace Nox
 
         memcpy(m_uniformBuffersMapped[currentImage], &uniformData, sizeof(uniformData));
     }
+    
+    void Renderer::updateInstanceAndIndirectBuffer(uint32_t currentImage)
+    {//fix maybe dont recreate all buffers only the next frame ?
+        if (m_instanceBufferObjects.empty() || m_drawMeshTasksIndirectCommands.empty())
+        {
+            return;
+        }
+        
+        uint64_t requiredInstanceSize = sizeof(shaderio::InstanceData) * m_instanceBufferObjects.size();
+        if (requiredInstanceSize > m_InstanceBufferCapacity)
+        {
+            m_InstanceBufferCapacity = requiredInstanceSize * 2;
+            
+            createInstanceBuffer(m_InstanceBufferCapacity);
+        }
+        memcpy(m_instanceBuffersMapped[currentImage], m_instanceBufferObjects.data(), requiredInstanceSize);
+        
+        uint64_t requiredIndirectSize = sizeof(DrawMeshTasksIndirectCommand) * m_drawMeshTasksIndirectCommands.size();
+        if (requiredIndirectSize > m_IndirectBufferCapacity)
+        {
+            m_IndirectBufferCapacity = requiredIndirectSize * 2;
+            
+            createIndirectBuffer(m_IndirectBufferCapacity);
+        }
+        memcpy(m_indirectBuffersMapped[currentImage], m_drawMeshTasksIndirectCommands.data(), requiredIndirectSize);
+    }
 
     // with compute there might be a snyc issue idk
     // according to gpt no async since compute and graphics same commandbuffer and executed in order
@@ -1292,6 +1017,8 @@ namespace Nox
         }
 
         updateUniformBuffer(frameIndex);
+        
+        updateInstanceAndIndirectBuffer(frameIndex);
 
         m_renderer2D->Update(frameIndex);
 
@@ -1308,6 +1035,9 @@ namespace Nox
         m_renderer2D->EndFrame();
 
         frameIndex = (frameIndex + 1) % MAX_FRAMES_IN_FLIGHT;
+        
+        m_instanceBufferObjects.clear();
+        m_drawMeshTasksIndirectCommands.clear();
     }
 
     int32_t Renderer::getPickedEntityID()
@@ -1426,5 +1156,71 @@ namespace Nox
     void Renderer::EndScene()
     {
         m_renderer2D->EndScene();
+    }
+    
+    void Renderer::DrawMesh(const glm::mat4& transform, Ref<Mesh> mesh, int entityID)
+    {
+        for (const MeshHandle& handle : mesh->GetSubMeshes())
+        {
+            shaderio::InstanceData instance{};
+            instance.modelMatrix = transform;
+            instance.meshletOffset = handle.firstMeshlet;
+            instance.meshletCount = handle.meshletCount;
+            instance.entityID = entityID;
+            
+            m_instanceBufferObjects.push_back(instance);
+            
+            DrawMeshTasksIndirectCommand command{};
+            command.groupCountX = (handle.meshletCount + shaderio::TASK_SHADER_DISPATCH_X - 1) / shaderio::TASK_SHADER_DISPATCH_X;
+            command.groupCountY = 1;
+            command.groupCountZ = 1;
+            
+            m_drawMeshTasksIndirectCommands.push_back(command);
+        }
+    }
+    
+    void Renderer::DrawStaticMesh(const glm::mat4& transform, Ref<StaticMesh> staticMesh, int entityID)
+    {
+        MeshHandle handle = staticMesh->GetHandle(); // Assuming StaticMesh has a getter for its single handle
+
+        shaderio::InstanceData instance{};
+        instance.modelMatrix = transform;
+        instance.meshletOffset = handle.firstMeshlet;
+        instance.meshletCount = handle.meshletCount;
+        instance.entityID = entityID;
+    
+        m_instanceBufferObjects.push_back(instance);
+    
+        DrawMeshTasksIndirectCommand command{};
+        command.groupCountX = (handle.meshletCount + shaderio::TASK_SHADER_DISPATCH_X - 1) / shaderio::TASK_SHADER_DISPATCH_X;
+        command.groupCountY = 1;
+        command.groupCountZ = 1;
+    
+        m_drawMeshTasksIndirectCommands.push_back(command);
+    }
+
+    void Renderer::SubmitMesh(const glm::mat4& transform, MeshComponent& src, int entityID)
+    {
+        if (src.Mesh == 0)
+            return;
+
+        AssetType type = AssetManager::GetAssetType(src.Mesh);
+
+        if (type == AssetType::Mesh)
+        {
+            Ref<Mesh> mesh = AssetManager::GetAsset<Mesh>(src.Mesh);
+            if (mesh)
+            {
+                DrawMesh(transform, mesh, entityID);
+            }
+        }
+        else if (type == AssetType::StaticMesh)
+        {
+            Ref<StaticMesh> staticMesh = AssetManager::GetAsset<StaticMesh>(src.Mesh);
+            if (staticMesh)
+            {
+                DrawStaticMesh(transform, staticMesh, entityID);
+            }
+        }
     }
 }

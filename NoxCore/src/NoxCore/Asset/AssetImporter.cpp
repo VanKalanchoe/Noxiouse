@@ -2,6 +2,7 @@
 
 #include "TextureImporter.h"
 #include "SceneImporter.h"
+#include "MeshImporter.h"
 
 #include <map>
 
@@ -23,6 +24,18 @@ namespace Nox
         }},
         { AssetType::Scene, [](AssetHandle h, const AssetMetadata& meta) -> Ref<Asset> {
             return Ref<Asset>(SceneImporter::ImportScene(h, meta));
+        }},
+        { AssetType::MeshSource, [](AssetHandle h, const AssetMetadata& meta) -> Ref<Asset>
+        {
+            return Ref<Asset>(MeshImporter::ImportMesh(h, meta));
+        }},
+        { AssetType::Mesh, [](AssetHandle h, const AssetMetadata& meta) -> Ref<Asset>
+        {
+            return Ref<Asset>(MeshImporter::ImportMesh(h, meta));
+        }},
+        { AssetType::StaticMesh, [](AssetHandle h, const AssetMetadata& meta) -> Ref<Asset>
+        {
+            return Ref<Asset>(MeshImporter::ImportStaticMesh(h, meta));
         }}
     };
     

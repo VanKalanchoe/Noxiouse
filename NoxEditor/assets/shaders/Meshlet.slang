@@ -4,6 +4,7 @@ struct VSOutput
 {
     float4 pos : SV_Position;
     float4 color;
+    int entityID;
 };
 
 [shader("mesh")]
@@ -57,6 +58,7 @@ void meshMain
 
         vertices[i].pos = clipPos;
         vertices[i].color = float4(color, 1.0);
+        vertices[i].entityID = instance.entityID;
     }
 
     // Process triangles
@@ -91,7 +93,7 @@ FSOutput fragMain(VSOutput vertIn, uniform PushConstantMeshlets pushConstant)
 
     output.color = /* img * */ vertIn.color;
 
-    output.entityID = -1;
+    output.entityID = vertIn.entityID;
 
     return output;
 }

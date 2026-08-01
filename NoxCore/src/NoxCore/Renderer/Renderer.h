@@ -2,6 +2,7 @@
 
 #include "Renderer2D.h"
 #include "NoxCore/Core/Window.h"
+#include "Mesh.h"
 
 namespace std
 {
@@ -69,10 +70,20 @@ namespace Nox
         bool active = false;
     };
     
-    struct ModelHandle
+    struct MeshData
     {
-        uint32_t firstMeshlet = 0;
-        uint32_t meshletCount = 0;
+        std::vector<shaderio::Vertex> Vertices;
+        std::vector<shaderio::MeshletBounds> Bounds;
+        std::vector<shaderio::MeshletDraw> Draws;
+        std::vector<uint32_t> MeshletVertices;
+        std::vector<uint8_t> MeshletTriangles;
+    };
+    
+    struct DrawMeshTasksIndirectCommand
+    {
+        uint32_t groupCountX;
+        uint32_t groupCountY;
+        uint32_t groupCountZ;
     };
     
     class Renderer
@@ -103,6 +114,10 @@ namespace Nox
         void BeginScene(const EditorCamera& camera);
         void EndScene();
         
+        void DrawMesh(const glm::mat4& transform, Ref<Mesh> mesh, int entityID);
+        void DrawStaticMesh(const glm::mat4& transform, Ref<StaticMesh> staticMesh, int entityID);
+        void SubmitMesh(const glm::mat4& transform, MeshComponent& src, int entityID);
+        
         Texture2D* GetSceneResource() const { return m_sceneResource.get(); }
         
         void setVSync(bool enabled);
@@ -116,6 +131,9 @@ namespace Nox
         
         Ref<Texture2D> UploadTexture(const TextureData& cpuData);
         Ref<Texture2D> createSolidColorTexture(uint8_t r, uint8_t g, uint8_t b, uint8_t a);
+        
+        static MeshHandle UploadMeshGeometry(const MeshData& data);
+        static void UpdateMeshletBuffers();
 
     private:
         void initRenderer();
@@ -133,20 +151,21 @@ namespace Nox
         void createEntityResources();
         void createDepthResources();
         void createTextureImage();
-        ModelHandle loadModel(const std::string& path);
         void createMeshletBuffers();
         void createUniformBuffers();
-        void createInstanceBuffer();
-        void createIndirectBuffer();
+        void createInstanceBuffer(uint64_t bufferSize);
+        void createIndirectBuffer(uint64_t bufferSize);
         void createDescriptorHeaps();
         std::unique_ptr<NRI::CommandBuffer> beginSingleTimeCommands();
         void endSingleTimeCommands(std::unique_ptr<NRI::CommandBuffer>&& commandBuffer);
         void createCommandBuffers();
         void recordCommandBuffer(uint32_t imageIndex);
         void updateUniformBuffer(uint32_t currentImage);
+        void updateInstanceAndIndirectBuffer(uint32_t currentImage);
         std::vector<char> readFile(const std::string& filename);
 
     private:
+        inline static Renderer* s_Instance = nullptr;
         std::unique_ptr<Renderer2D> m_renderer2D;
         std::shared_ptr<Nox::Window> m_window;
         std::unique_ptr<NRI::Device> m_device = nullptr;
@@ -193,24 +212,35 @@ namespace Nox
         Ref<Texture2D> m_textureResource2;
         Ref<Texture2D> m_textureResource3;
         uint32_t mipLevels;
-
-        std::unique_ptr<NRI::Buffer> m_indirectBuffer;
         
-        std::unique_ptr<NRI::Buffer> m_instanceBuffer;
         
-        std::vector<shaderio::Vertex> m_vertices;
+        // Meshes
+        Ref<Mesh> bunnyMesh;
+        Ref<Mesh> foxMesh;
+        
+        uint64_t m_IndirectBufferCapacity = 0;
+        std::vector<DrawMeshTasksIndirectCommand> m_drawMeshTasksIndirectCommands;
+        std::vector<std::unique_ptr<NRI::Buffer>> m_indirectBuffers;
+        std::vector<void*> m_indirectBuffersMapped;
+        
+        uint64_t m_InstanceBufferCapacity = 0;
+        std::vector<shaderio::InstanceData> m_instanceBufferObjects;
+        std::vector<std::unique_ptr<NRI::Buffer>> m_instanceBuffers;
+        std::vector<void*> m_instanceBuffersMapped;
+        
+        inline static std::vector<shaderio::Vertex> m_vertices;
         std::unique_ptr<NRI::Buffer> m_verticesBuffer;
         
-        std::vector<shaderio::MeshletBounds> m_meshletBounds;
+        inline static std::vector<shaderio::MeshletBounds> m_meshletBounds;
         std::unique_ptr<NRI::Buffer> m_meshletBoundsBuffer;
         
-        std::vector<shaderio::MeshletDraw> m_meshletDraws;
+        inline static std::vector<shaderio::MeshletDraw> m_meshletDraws;
         std::unique_ptr<NRI::Buffer> m_meshletDrawsBuffer;
         
-        std::vector<uint32_t> m_meshletVertices;
+        inline static std::vector<uint32_t> m_meshletVertices;
         std::unique_ptr<NRI::Buffer> m_meshletVerticesBuffer;
         
-        std::vector<uint8_t> m_meshletTriangles;
+        inline static std::vector<uint8_t> m_meshletTriangles;
         std::unique_ptr<NRI::Buffer> m_meshletTrianglesBuffer;
         
         uint32_t frameIndex = 0;

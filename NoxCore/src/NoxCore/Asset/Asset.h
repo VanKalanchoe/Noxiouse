@@ -13,7 +13,10 @@ namespace Nox
     {
         None = 0,
         Scene,
-        Texture2D
+        Texture2D,
+        MeshSource,
+        Mesh,
+        StaticMesh
     };
 
     std::string_view AssetTypeToString(AssetType type);

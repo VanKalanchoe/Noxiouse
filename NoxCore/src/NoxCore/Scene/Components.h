@@ -52,6 +52,17 @@ namespace Nox
         }
     };
     
+    
+    struct MeshComponent
+    {
+        AssetHandle Mesh = 0;
+        uint32_t SubmeshIndex = 0;
+        
+        MeshComponent() = default;
+        MeshComponent(const MeshComponent&) = default;
+        MeshComponent(AssetHandle mesh) : Mesh(mesh) {};
+    };
+    
     struct SpriteRendererComponent
     {
         glm::vec4 Color{ 1.0f, 1.0f, 1.0f, 1.0f };
@@ -176,7 +187,7 @@ namespace Nox
     };
 
     using AllComponents = 
-        ComponentGroup<TransformComponent, SpriteRendererComponent,
+        ComponentGroup<TransformComponent, MeshComponent, SpriteRendererComponent,
             CircleRendererComponent, CameraComponent, ScriptComponent,
             /*NativeScriptComponent,*/ RigidBody2DComponent, BoxCollider2DComponent,
             CircleCollider2DComponent, TextComponent>;

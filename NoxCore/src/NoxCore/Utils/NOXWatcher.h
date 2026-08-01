@@ -7,7 +7,7 @@ namespace Utils
     class NOXWatcher
     {
     public:
-    void watch(std::filesystem::path path, std::function<void()> onModified);
+    void watch(std::filesystem::path path, std::function<void(const std::filesystem::path&)> onModified);
         
     private:
         std::vector<std::unique_ptr<filewatch::FileWatch<std::string>>> m_activeWatches;
