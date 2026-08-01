@@ -1158,25 +1158,28 @@ namespace Nox
         m_renderer2D->EndScene();
     }
     
-    void Renderer::DrawMesh(const glm::mat4& transform, Ref<Mesh> mesh, int entityID)
+    void Renderer::DrawMesh(const glm::mat4& transform, Ref<Mesh> mesh, uint32_t submeshIndex, int entityID)
     {
-        for (const MeshHandle& handle : mesh->GetSubMeshes())
-        {
-            shaderio::InstanceData instance{};
-            instance.modelMatrix = transform;
-            instance.meshletOffset = handle.firstMeshlet;
-            instance.meshletCount = handle.meshletCount;
-            instance.entityID = entityID;
-            
-            m_instanceBufferObjects.push_back(instance);
-            
-            DrawMeshTasksIndirectCommand command{};
-            command.groupCountX = (handle.meshletCount + shaderio::TASK_SHADER_DISPATCH_X - 1) / shaderio::TASK_SHADER_DISPATCH_X;
-            command.groupCountY = 1;
-            command.groupCountZ = 1;
-            
-            m_drawMeshTasksIndirectCommands.push_back(command);
-        }
+        const auto& submeshes = mesh->GetSubMeshes();
+        if (submeshIndex >= submeshes.size())
+            return;
+        
+        const MeshHandle& handle = submeshes[submeshIndex];
+        
+        shaderio::InstanceData instance{};
+        instance.modelMatrix = transform;
+        instance.meshletOffset = handle.firstMeshlet;
+        instance.meshletCount = handle.meshletCount;
+        instance.entityID = entityID;
+        
+        m_instanceBufferObjects.push_back(instance);
+        
+        DrawMeshTasksIndirectCommand command{};
+        command.groupCountX = (handle.meshletCount + shaderio::TASK_SHADER_DISPATCH_X - 1) / shaderio::TASK_SHADER_DISPATCH_X;
+        command.groupCountY = 1;
+        command.groupCountZ = 1;
+        
+        m_drawMeshTasksIndirectCommands.push_back(command);
     }
     
     void Renderer::DrawStaticMesh(const glm::mat4& transform, Ref<StaticMesh> staticMesh, int entityID)
@@ -1211,7 +1214,7 @@ namespace Nox
             Ref<Mesh> mesh = AssetManager::GetAsset<Mesh>(src.Mesh);
             if (mesh)
             {
-                DrawMesh(transform, mesh, entityID);
+                DrawMesh(transform, mesh, src.SubmeshIndex, entityID);
             }
         }
         else if (type == AssetType::StaticMesh)

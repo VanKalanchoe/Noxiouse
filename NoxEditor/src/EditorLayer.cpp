@@ -22,7 +22,7 @@ namespace Nox
     EditorLayer::EditorLayer() : Layer("EditorLayer")
     {
         NOX_INFO("EditorLayer Start");
-        
+
         auto& app = Application::Get();
         m_Renderer = app.GetRenderer();
         m_Renderer2D = m_Renderer->getRenderer2D();
@@ -61,7 +61,7 @@ namespace Nox
         }
 
         m_EditorCamera = EditorCamera(30.0f, 1.778f, 0.1f, 1000.0f);
-        
+
         Project::GetActive()->GetEditorAssetManager()->Init();
     }
 
@@ -70,7 +70,7 @@ namespace Nox
         NOX_CORE_INFO("EditorLayer Shutdown");
 
         m_Font->ReleaseDefault(); // Since Editor Layer since static dies After renderer not needed for components
-        
+
         //idk what hapens if i have clientproject is this a good place here 
         if (Project::GetActive() && Project::GetActive()->GetEditorAssetManager())
         {
@@ -93,22 +93,22 @@ namespace Nox
     void EditorLayer::OnUpdate(Timestep ts)
     {
         m_ActiveScene->OnViewportResize(m_ViewportSize.x, m_ViewportSize.y);
-        
-         // zero sized framebuffer is invalid
+
+        // zero sized framebuffer is invalid
         if (m_ViewportSize.x > 0.0f && m_ViewportSize.y > 0.0f)
         {
             // Verify if the viewport has a new size and resize the RenderTarget accordingly.
             NRI::Extent2D viewportSize = m_Renderer->getViewPortSize();
-            if ( m_ViewportSize.x != viewportSize.width || m_ViewportSize.y != viewportSize.height)
+            if (m_ViewportSize.x != viewportSize.width || m_ViewportSize.y != viewportSize.height)
             {
                 m_Renderer->onViewportSizeChange({m_ViewportSize.x, m_ViewportSize.y});
                 m_EditorCamera.SetViewportSize(m_ViewportSize.x, m_ViewportSize.y);
             }
         }
-        
+
         m_ActiveScene->SetRenderer(m_Renderer);
         m_ActiveScene->SetRenderer2D(m_Renderer->getRenderer2D());
-        
+
         switch (m_SceneState)
         {
         case SceneState::Edit:
@@ -136,12 +136,12 @@ namespace Nox
                 break;
             }
         }
-        
+
         // Mouse Selection
         auto [mx, my] = ImGui::GetMousePos();
         mx -= m_ViewportBounds[0].x;
         my -= m_ViewportBounds[0].y;
-        
+
         glm::vec2 viewportSize = m_ViewportBounds[1] - m_ViewportBounds[0];
         //my = viewportSize.y - my;
         int mouseX = (int)mx;
@@ -157,14 +157,14 @@ namespace Nox
             m_HoveredEntity = pixelData == -1 ? Entity() : Entity((entt::entity)pixelData, m_ActiveScene.get());
             */
             int32_t pixelData = m_Renderer->getPickedEntityID();
-            
+
             m_HoveredEntity = pixelData == -1 ? Entity() : Entity((entt::entity)pixelData, m_ActiveScene.get());
-            
+
             m_Renderer->setPickRequest(mouseX, mouseY, true);
         }
-        
+
         OnOverlayRender();
-        
+
         Project::GetActive()->GetEditorAssetManager()->Update();
     }
 
@@ -256,7 +256,7 @@ namespace Nox
             bool currentVSync = m_Renderer->getVSync();
             if (ImGui::MenuItem("vSync", "", &currentVSync))
                 m_Renderer->setVSync(currentVSync); // Recreate the swapchain with the new vSync setting
-            
+
             // Adding overlay text on the upper left corner
             ImGui::Text("FPS: %.1f", ImGui::GetIO().Framerate);
 
@@ -278,12 +278,12 @@ namespace Nox
 
             m_ViewportFocused = ImGui::IsWindowFocused();
             m_ViewportHovered = ImGui::IsWindowHovered();
-            
+
             Application::Get().GetImGuiLayer()->BlockEvents(!m_ViewportHovered);
 
             ImVec2 viewportPanelSize = ImGui::GetContentRegionAvail();
             m_ViewportSize = {viewportPanelSize.x, viewportPanelSize.y};
-            
+
             auto* texture = m_Renderer->GetSceneResource();
             if (texture)
             {
@@ -310,19 +310,52 @@ namespace Nox
                         std::string entityName = metadata.FilePath.filename().stem().string();
                         if (entityName.empty())
                             entityName = "Mesh Entity";
-                        
-                        // Create entity in current scene
-                        Entity newEntity = m_ActiveScene->CreateEntity(entityName);
-                        auto& meshComp = newEntity.AddComponent<MeshComponent>();
-                        meshComp.Mesh = handle;
-                        
-                        // Select this newly create entity in the hierachy
-                        m_SceneHierarchyPanel.SetSelectedEntity(newEntity);
+
+                        // Check if it's a dynamic mesh asset with multiple submeshes
+                        if (type == AssetType::Mesh || type == AssetType::MeshSource)
+                        {
+                            Ref<Mesh> meshAsset = AssetManager::GetAsset<Mesh>(handle);
+                            if (meshAsset && meshAsset->GetSubMeshCount() > 1)
+                            {
+                                // 1. Create a Parent Root Entity for the whole file
+                                Entity parentEntity = m_ActiveScene->CreateEntity(entityName);
+
+                                // 2. Create a Child Entity for each submesh
+                                for (size_t i = 0; i < meshAsset->GetSubMeshCount(); i++)
+                                {
+                                    Entity childEntity = m_ActiveScene->CreateEntity(entityName + "_sub_" + std::to_string(i));
+                                    childEntity.SetParent(parentEntity); // Link via Scene Graph!
+
+                                    auto& meshComp = childEntity.AddComponent<MeshComponent>();
+                                    meshComp.Mesh = handle;
+                                    meshComp.SubmeshIndex = static_cast<uint32_t>(i);
+                                }
+
+                                m_SceneHierarchyPanel.SetSelectedEntity(parentEntity);
+                            }
+                            else
+                            {
+                                // Single submesh dynamic mesh
+                                Entity newEntity = m_ActiveScene->CreateEntity(entityName);
+                                auto& meshComp = newEntity.AddComponent<MeshComponent>();
+                                meshComp.Mesh = handle;
+                                meshComp.SubmeshIndex = 0;
+                                m_SceneHierarchyPanel.SetSelectedEntity(newEntity);
+                            }
+                        }
+                        else // StaticMesh (.nsmesh) - always single flattened mesh
+                        {
+                            Entity newEntity = m_ActiveScene->CreateEntity(entityName);
+                            auto& meshComp = newEntity.AddComponent<MeshComponent>();
+                            meshComp.Mesh = handle;
+                            meshComp.SubmeshIndex = 0;
+                            m_SceneHierarchyPanel.SetSelectedEntity(newEntity);
+                        }
                     }
                 }
                 ImGui::EndDragDropTarget();
             }
-            
+
             // Gizmos
             //maybe be a callback you subscribe to instead
             Entity selectedEntity = m_SceneHierarchyPanel.GetSelectedEntity();
@@ -334,7 +367,7 @@ namespace Nox
                 ImGuizmo::SetRect(m_ViewportBounds[0].x, m_ViewportBounds[0].y, m_ViewportBounds[1].x - m_ViewportBounds[0].x, m_ViewportBounds[1].y - m_ViewportBounds[0].y);
 
                 // Camera
-                
+
                 // Runtime camera from entity
                 // auto cameraEntity = m_ActiveScene->GetPrimaryCameraEntity();
                 // const auto& camera = cameraEntity.GetComponent<CameraComponent>().Camera;
@@ -343,13 +376,13 @@ namespace Nox
 
                 // Editor camera
                 const glm::mat4& cameraProjection = m_EditorCamera.GetGizmoProjection();
-                
+
                 glm::mat4 cameraView = m_EditorCamera.GetGizmoView();
 
                 // Entity transform
                 auto& tc = selectedEntity.GetComponent<TransformComponent>();
                 glm::mat4 transform = tc.GetTransform();
-                
+
                 // Snapping
                 bool snap = Input::IsKeyPressed(SDL_SCANCODE_LCTRL);
                 float snapValue = 0.5f; // Snap to 0.5m for translation/scale
@@ -364,13 +397,13 @@ namespace Nox
                 ImGuizmo::Manipulate(glm::value_ptr(cameraView), glm::value_ptr(cameraProjection),
                                      static_cast<ImGuizmo::OPERATION>(m_GizmoType), ImGuizmo::LOCAL,
                                      glm::value_ptr(transform), nullptr, snap ? snapValues : nullptr);
-               
+
                 if (ImGuizmo::IsUsing())
                 {
                     //translation is position for me maybe change
                     glm::vec3 translation, rotation, scale;
                     Math::DecomposeTransform(transform, translation, rotation, scale);
-                    
+
                     glm::vec3 deltaRotation = rotation - tc.Rotation;
                     tc.Translation = translation;
                     tc.Rotation += deltaRotation;
@@ -381,7 +414,7 @@ namespace Nox
             ImGui::End(); // End viewport
             ImGui::PopStyleVar();
         }
-        
+
         // Extra ImGui windows can be added in OnImGuiRender() layer, like the demo window.
         // ImGui::ShowDemoWindow();
 
@@ -517,13 +550,13 @@ namespace Nox
         // 1. Abort if the user is typing in an ImGui text field
         if (ImGui::GetIO().WantTextInput)
             return false;
-        
+
         // Shortcuts
         if (e.IsRepeat())
         {
             return false;
         }
-        
+
 
         bool control = (Input::IsKeyPressed(SDL_SCANCODE_LCTRL) || Input::IsKeyPressed(SDL_SCANCODE_RCTRL));
         bool shift = (Input::IsKeyPressed(SDL_SCANCODE_LSHIFT) || Input::IsKeyPressed(SDL_SCANCODE_RSHIFT));
@@ -649,40 +682,48 @@ namespace Nox
         {
             m_Renderer->BeginScene(m_EditorCamera);
         }
-        
+
         if (m_ShowPhysicsColliders)
         {
             // Box Colliders
             {
-                auto view = m_ActiveScene->GetAllEntitiesWith<TransformComponent, BoxCollider2DComponent>();
+                auto view = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, BoxCollider2DComponent>();
                 for (auto entity : view)
                 {
-                    auto [tc, bc2d] = view.get<TransformComponent, BoxCollider2DComponent>(entity);
+                    auto [wtc, bc2d] = view.get<WorldTransformComponent, BoxCollider2DComponent>(entity);
 
-                    glm::vec3 translation = tc.Translation + glm::vec3(bc2d.Offset, 0.001f);
+                    /*glm::vec3 translation = tc.Translation + glm::vec3(bc2d.Offset, 0.001f);
                     glm::vec3 scale = tc.Scale * glm::vec3(bc2d.Size * 2.0f, 1.0f);
 
                     // box2d needs first translation then offset otherwise it offsets the bounding box from center instead of creating from center around
                     glm::mat4 transform = glm::translate(glm::mat4(1.0f), translation)
                         * glm::rotate(glm::mat4(1.0f), tc.Rotation.z, glm::vec3(0.0f, 0.0f, 1.0f))
                         * glm::translate(glm::mat4(1.0f), glm::vec3(bc2d.Offset, 0.001f))
-                        * glm::scale(glm::mat4(1.0f), scale * glm::vec3(bc2d.Size * 2.0f, 1.0f));
+                        * glm::scale(glm::mat4(1.0f), scale * glm::vec3(bc2d.Size * 2.0f, 1.0f));*/
+                    
+                    glm::mat4 transform = wtc.WorldMatrix
+                        * glm::translate(glm::mat4(1.0f), glm::vec3(bc2d.Offset, 0.001f))
+                        * glm::scale(glm::mat4(1.0f), glm::vec3(bc2d.Size * 2.0f, 1.0f));
 
                     m_Renderer2D->DrawRect(transform, glm::vec4(0, 1, 0, 1));
                 }
             }
             // Circle Colliders
             {
-                auto view = m_ActiveScene->GetAllEntitiesWith<TransformComponent, CircleCollider2DComponent>();
+                auto view = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, CircleCollider2DComponent>();
                 for (auto entity : view)
                 {
-                    auto [tc, cc2d] = view.get<TransformComponent, CircleCollider2DComponent>(entity);
+                    auto [wtc, cc2d] = view.get<WorldTransformComponent, CircleCollider2DComponent>(entity);
 
-                    glm::vec3 translation = tc.Translation + glm::vec3(cc2d.Offset, 0.001f);
+                    /*glm::vec3 translation = tc.Translation + glm::vec3(cc2d.Offset, 0.001f);
                     glm::vec3 scale = tc.Scale * glm::vec3(cc2d.Radius * 2.0f);
 
                     glm::mat4 transform = glm::translate(glm::mat4(1.0f), translation)
-                        * glm::scale(glm::mat4(1.0f), scale);
+                        * glm::scale(glm::mat4(1.0f), scale);*/
+                    
+                    glm::mat4 transform = wtc.WorldMatrix 
+                        * glm::translate(glm::mat4(1.0f), glm::vec3(cc2d.Offset, 0.001f))
+                        * glm::scale(glm::mat4(1.0f), glm::vec3(cc2d.Radius * 2.0f));
 
                     m_Renderer2D->DrawCircle(transform, glm::vec4(0, 1, 0, 1), 0.01f);
                 }
@@ -692,8 +733,21 @@ namespace Nox
         // Draw selected entity outline
         if (Entity selectedEntity = m_SceneHierarchyPanel.GetSelectedEntity())
         {
-            const TransformComponent& transform = selectedEntity.GetComponent<TransformComponent>();
-            m_Renderer2D->DrawRect(transform.GetTransform(), glm::vec4(1.0f, 0.5f, 0.0f, 1.0f));
+            glm::mat4 transform = glm::mat4(1.0f);
+
+            // Use the WorldMatrix so the outline respects parent transformations!
+            if (selectedEntity.HasComponent<WorldTransformComponent>())
+            {
+                transform = selectedEntity.GetComponent<WorldTransformComponent>().WorldMatrix;
+            }
+            else if (selectedEntity.HasComponent<TransformComponent>())
+            {
+                // Fallback just in case an entity somehow doesn't have a WorldTransformComponent yet
+                transform = selectedEntity.GetComponent<TransformComponent>().GetTransform();
+            }
+            m_Renderer2D->DrawRect(transform, glm::vec4(1.0f, 0.5f, 0.0f, 1.0f));
+            /*const TransformComponent& transform = selectedEntity.GetComponent<TransformComponent>();
+            m_Renderer2D->DrawRect(transform.GetTransform(), glm::vec4(1.0f, 0.5f, 0.0f, 1.0f));*/
         }
         m_Renderer->EndScene();
     }
@@ -737,7 +791,7 @@ namespace Nox
     {
         m_HoveredEntity = Entity();
         m_SceneHierarchyPanel.SetSelectedEntity(Entity());
-        
+
         m_EditorScene = CreateRef<Scene>();
         m_ActiveScene = m_EditorScene;
 

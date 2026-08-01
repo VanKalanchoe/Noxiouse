@@ -33,7 +33,14 @@ namespace Nox
             m_Context->m_Registry.view<TagComponent>().each([&](auto entityID, TagComponent&)
             {
                 Entity entity(entityID, m_Context.get());
-                DrawEntityNode(entity);
+                
+                bool isRoot = true;
+                if (entity.HasComponent<RelationshipComponent>())
+                    if (entity.GetComponent<RelationshipComponent>().Parent != 0)
+                        isRoot = false;
+                
+                if (isRoot)
+                    DrawEntityNode(entity);
             });
 
             if (ImGui::IsMouseDown(0) && ImGui::IsWindowHovered())
@@ -77,6 +84,14 @@ namespace Nox
         ImGuiTreeNodeFlags flags = ((m_SelectionContext == entity) ? ImGuiTreeNodeFlags_Selected : 0) |
             ImGuiTreeNodeFlags_OpenOnArrow;
         flags |= ImGuiTreeNodeFlags_SpanAvailWidth;
+        
+        bool hasChildren = false;
+        if (entity.HasComponent<RelationshipComponent>())
+            if (!entity.GetComponent<RelationshipComponent>().Children.empty())
+                hasChildren = true;
+        
+        if (!hasChildren)
+            flags |= ImGuiTreeNodeFlags_Leaf;
 
         bool opened = ImGui::TreeNodeEx((void*)(uint64_t)(uint32_t)entity, flags, tag.c_str());
         if (ImGui::IsItemClicked())
@@ -97,11 +112,21 @@ namespace Nox
 
         if (opened)
         {
-            //ImGuiTreeNodeFlags flags = ((m_SelectionContext == entity) ? ImGuiTreeNodeFlags_Selected : 0) | ImGuiTreeNodeFlags_OpenOnArrow;
+            if (hasChildren)
+            {
+                auto& children = entity.GetComponent<RelationshipComponent>().Children;
+                for (UUID childID : children)
+                {
+                    Entity childEntity = m_Context->GetEntityByUUID(childID);
+                    if (childEntity)
+                        DrawEntityNode(childEntity);
+                }
+            }
+            /*//ImGuiTreeNodeFlags flags = ((m_SelectionContext == entity) ? ImGuiTreeNodeFlags_Selected : 0) | ImGuiTreeNodeFlags_OpenOnArrow;
             ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth;
             bool opened = ImGui::TreeNodeEx((void*)9817239, flags, tag.c_str());
             if (opened)
-                ImGui::TreePop();
+                ImGui::TreePop();*/
             ImGui::TreePop();
         }
         // at the end
@@ -116,9 +141,10 @@ namespace Nox
     }
     
     //styling maybe in the future different clas
-    static void DrawVec3Control(const std::string& label, glm::vec3& values, float resetValue = 0.0f,
+    static bool DrawVec3Control(const std::string& label, glm::vec3& values, float resetValue = 0.0f,
                                 float columnWidth = 100.0f)
     {
+        bool valueChanged = false;
         ImGuiIO& io = ImGui::GetIO();
         auto boldFont = io.Fonts->Fonts[1];
 
@@ -142,12 +168,14 @@ namespace Nox
         if (ImGui::Button("X", buttonSize))
         {
             values.x = resetValue;
+            valueChanged = true;
         }
         ImGui::PopStyleColor(3);
         ImGui::PopFont();
 
         ImGui::SameLine();
-        ImGui::DragFloat("##X", &values.x, 0.1f, 0.0f, 0.0f, "%.2f");
+        if (ImGui::DragFloat("##X", &values.x, 0.1f, 0.0f, 0.0f, "%.2f"))
+            valueChanged = true;
         // the last 3 paramater force it to be only show 2dec
         ImGui::PopItemWidth();
         ImGui::SameLine();
@@ -159,12 +187,14 @@ namespace Nox
         if (ImGui::Button("Y", buttonSize))
         {
             values.y = resetValue;
+            valueChanged = true;
         }
         ImGui::PopStyleColor(3);
         ImGui::PopFont();
 
         ImGui::SameLine();
-        ImGui::DragFloat("##Y", &values.y, 0.1f, 0.0f, 0.0f, "%.2f");
+        if (ImGui::DragFloat("##Y", &values.y, 0.1f, 0.0f, 0.0f, "%.2f"))
+            valueChanged = true;
         // the last 3 paramater force it to be only show 2dec
         ImGui::PopItemWidth();
         ImGui::SameLine();
@@ -176,12 +206,14 @@ namespace Nox
         if (ImGui::Button("Z", buttonSize))
         {
             values.z = resetValue;
+            valueChanged = true;
         }
         ImGui::PopStyleColor(3);
         ImGui::PopFont();
 
         ImGui::SameLine();
-        ImGui::DragFloat("##Z", &values.z, 0.1f, 0.0f, 0.0f, "%.2f");
+        if (ImGui::DragFloat("##Z", &values.z, 0.1f, 0.0f, 0.0f, "%.2f"))
+            valueChanged = true;
         // the last 3 paramater force it to be only show 2dec
         ImGui::PopItemWidth();
         ImGui::PopStyleVar();
@@ -189,6 +221,8 @@ namespace Nox
         ImGui::Columns(1);
 
         ImGui::PopID();
+        
+        return valueChanged;
     }
 
     template <typename T, typename UIFunction>
@@ -281,13 +315,21 @@ namespace Nox
 
         ImGui::PopItemWidth();
 
-        DrawComponent<TransformComponent>("Transform", entity, [](auto& component)
+        DrawComponent<TransformComponent>("Transform", entity, [this, entity](auto& component)
         {
-            DrawVec3Control("Position", component.Translation);
+            bool modified = false;
+            modified |=  DrawVec3Control("Position", component.Translation);
+           
             glm::vec3 rotation = glm::degrees(component.Rotation);
-            DrawVec3Control("Rotation", rotation);
-            component.Rotation = glm::radians(rotation);
-            DrawVec3Control("Scale", component.Scale, 1.0f);
+            if (DrawVec3Control("Rotation", rotation))
+            {
+                component.Rotation = glm::radians(rotation);
+                modified = true;
+            }
+            modified |= DrawVec3Control("Scale", component.Scale, 1.0f);
+            
+            if (modified)
+                m_Context->m_Registry.emplace_or_replace<DirtyTransformComponent>(entity);
         });
         
         DrawComponent<MeshComponent>("Mesh", entity, [](auto& component)

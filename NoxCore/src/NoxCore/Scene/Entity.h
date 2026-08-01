@@ -11,6 +11,45 @@ namespace Nox
         Entity() = default;
         Entity(entt::entity handle, Scene* scene);
         Entity(const Entity& other) = default;
+        
+        void SetParent(Entity parent)
+        {
+            Entity currentParent = GetParent();
+            if (currentParent == parent)
+                return;
+
+            // 1. Remove from old parent's children list
+            if (currentParent)
+            {
+                auto& oldChildren = currentParent.GetComponent<RelationshipComponent>().Children;
+                oldChildren.erase(std::remove(oldChildren.begin(), oldChildren.end(), GetUUID()), oldChildren.end());
+            }
+
+            // 2. Set new parent
+            if (!HasComponent<RelationshipComponent>())
+                AddComponent<RelationshipComponent>();
+
+            auto& rel = GetComponent<RelationshipComponent>();
+            if (parent)
+            {
+                rel.Parent = parent.GetUUID();
+                if (!parent.HasComponent<RelationshipComponent>())
+                    parent.AddComponent<RelationshipComponent>();
+                parent.GetComponent<RelationshipComponent>().Children.push_back(GetUUID());
+            }
+            else
+            {
+                rel.Parent = 0;
+            }
+        }
+
+        Entity GetParent()
+        {
+            if (!HasComponent<RelationshipComponent>()) return {};
+            UUID parentUUID = GetComponent<RelationshipComponent>().Parent;
+            if (parentUUID == 0) return {};
+            return m_Scene->GetEntityByUUID(parentUUID);
+        }
 
         // Add a component: player.AddComponent<TransformComponent>();
         template<typename T, typename... Args>

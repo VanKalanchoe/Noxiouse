@@ -4,6 +4,7 @@
 
 #include "Entity.h"
 #include "Components.h"
+#include "SceneGraph.h"
 #include "NoxCore/Physics/Physics2D.h"
 
 namespace Nox
@@ -92,6 +93,9 @@ namespace Nox
         entity.AddComponent<IDComponent>(uuid);
         entity.AddComponent<TagComponent>(name.empty() ? "Entity" : name);
         entity.AddComponent<TransformComponent>(); // Most engines assume everything has a transform
+        
+        entity.AddComponent<WorldTransformComponent>(); // Required for scene graph
+        entity.AddComponent<DirtyTransformComponent>(); // Mark initial state dirty
         
         m_EntityMap[uuid] = entityHandle;
         
@@ -438,16 +442,18 @@ namespace Nox
     
     void Scene::RenderScene(EditorCamera& camera)
     {
+        SceneGraph::UpdateWorldTransforms(m_Registry, m_EntityMap);
+        
         m_renderer->BeginScene(camera);
         
         // Draw 3D Meshes
         {
-            auto view = m_Registry.view<TransformComponent, MeshComponent>();
+            auto view = m_Registry.view<WorldTransformComponent, MeshComponent>();
             for (auto entity : view)
             {
-                auto [transform, mesh] = view.get<TransformComponent, MeshComponent>(entity);
+                auto [transform, mesh] = view.get<WorldTransformComponent, MeshComponent>(entity);
                 
-                m_renderer->SubmitMesh(transform.GetTransform(), mesh, (int)entity);
+                m_renderer->SubmitMesh(transform.WorldMatrix, mesh, (int)entity);
             }
         }
         
@@ -512,6 +518,16 @@ namespace Nox
     {
     }
 
+    template <>
+    void Scene::OnComponentAdded<WorldTransformComponent>(Entity entity, WorldTransformComponent& component)
+    {
+    }
+    
+    template <>
+    void Scene::OnComponentAdded<DirtyTransformComponent>(Entity entity, DirtyTransformComponent& component)
+    {
+    }
+    
     template <>
     void Scene::OnComponentAdded<MeshComponent>(Entity entity, MeshComponent& component)
     {

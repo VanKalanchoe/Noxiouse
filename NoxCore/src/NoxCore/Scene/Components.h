@@ -52,6 +52,33 @@ namespace Nox
         }
     };
     
+    // Cached World Matrix for Scene Graph
+    struct WorldTransformComponent
+    {
+        glm::mat4 WorldMatrix{ 1.0f };
+
+        WorldTransformComponent() = default;
+        WorldTransformComponent(const WorldTransformComponent&) = default;
+        WorldTransformComponent(const glm::mat4& world) : WorldMatrix(world) {}
+
+        operator const glm::mat4&() const { return WorldMatrix; }
+    };
+
+    // Scene Graph Hierarchy Links (UUID-based for safety)
+    struct RelationshipComponent
+    {
+        UUID Parent = 0;
+        std::vector<UUID> Children;
+
+        RelationshipComponent() = default;
+        RelationshipComponent(const RelationshipComponent&) = default;
+    };
+
+    // Dirty Transform Tracking
+    struct DirtyTransformComponent
+    {
+        bool isDirty = true;
+    };
     
     struct MeshComponent
     {
@@ -187,7 +214,7 @@ namespace Nox
     };
 
     using AllComponents = 
-        ComponentGroup<TransformComponent, MeshComponent, SpriteRendererComponent,
+        ComponentGroup<TransformComponent, WorldTransformComponent, DirtyTransformComponent, MeshComponent, SpriteRendererComponent,
             CircleRendererComponent, CameraComponent, ScriptComponent,
             /*NativeScriptComponent,*/ RigidBody2DComponent, BoxCollider2DComponent,
             CircleCollider2DComponent, TextComponent>;
