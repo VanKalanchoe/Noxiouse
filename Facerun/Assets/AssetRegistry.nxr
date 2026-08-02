@@ -1,10 +1,10 @@
 AssetRegistry:
-  - Handle: 1634953866148052078
-    FilePath: textures/Checkerboard.png
-    Type: AssetType::Texture2D
-  - Handle: 2082260433076975557
+  - Handle: 1376646248311731698
     FilePath: models/Texture.png
     SourceFilePath: models/Texture.png
+    Type: AssetType::Texture2D
+  - Handle: 1634953866148052078
+    FilePath: textures/Checkerboard.png
     Type: AssetType::Texture2D
   - Handle: 3725258042431064742
     FilePath: textures/ChernoLogo.png
@@ -25,21 +25,17 @@ AssetRegistry:
   - Handle: 7412818356000165226
     FilePath: textures/Pacmanface.png
     Type: AssetType::Texture2D
-  - Handle: 9460945706706955331
+  - Handle: 7528056640160431020
+    FilePath: models/multimesh.nsmesh
+    SourceFilePath: models/multimesh.gltf
+    Type: AssetType::StaticMesh
+  - Handle: 7646459343052195166
     FilePath: models/multimesh.nmesh
     SourceFilePath: models/multimesh.gltf
     Type: AssetType::Mesh
   - Handle: 13004636392655663239
     FilePath: scenes/3DScene.nox
     Type: AssetType::Scene
-  - Handle: 13609703284580954733
-    FilePath: models/multimesh.nsmesh
-    SourceFilePath: models/multimesh.gltf
-    Type: AssetType::StaticMesh
   - Handle: 15201526316078530078
     FilePath: scenes/noxtest.nox
     Type: AssetType::Scene
-  - Handle: 17974671351885180632
-    FilePath: models/Texture.png
-    SourceFilePath: models/Texture.png
-    Type: AssetType::Texture2D

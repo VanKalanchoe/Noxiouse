@@ -14,6 +14,25 @@ namespace Nox
     class MeshSerializer
     {
     private:
+        // Helper to write string safely
+        static void WriteString(std::ofstream& stream, const std::string& str)
+        {
+            uint32_t length = static_cast<uint32_t>(str.size());
+            stream.write(reinterpret_cast<const char*>(&length), sizeof(uint32_t));
+            if (length > 0)
+                stream.write(str.data(), length);
+        }
+
+        // Helper to read string safely
+        static void ReadString(std::ifstream& stream, std::string& outStr)
+        {
+            uint32_t length = 0;
+            stream.read(reinterpret_cast<char*>(&length), sizeof(uint32_t));
+            outStr.resize(length);
+            if (length > 0)
+                stream.read(&outStr[0], length);
+        }
+        
         // Helper to write raw vector data safely
         template<typename T>
         static void WriteVector(std::ofstream& stream, const std::vector<T>& vec)
@@ -38,6 +57,7 @@ namespace Nox
         // Writes a single MeshData struct
         static void WriteMeshData(std::ofstream& stream, const MeshData& data)
         {
+            WriteString(stream, data.Name);
             WriteVector(stream, data.Vertices);
             WriteVector(stream, data.Bounds);
             WriteVector(stream, data.MeshletVertices);
@@ -48,6 +68,7 @@ namespace Nox
         // Reads a single MeshData struct
         static void ReadMeshData(std::ifstream& stream, MeshData& outData)
         {
+            ReadString(stream, outData.Name);
             ReadVector(stream, outData.Vertices);
             ReadVector(stream, outData.Bounds);
             ReadVector(stream, outData.MeshletVertices);
@@ -96,17 +117,24 @@ namespace Nox
         // ==========================================
         // STATIC MESH (.nsmesh) - Single flattened MeshData
         // ==========================================
-        static void SerializeStaticMesh(const std::filesystem::path& filepath, const MeshData& data, const std::vector<MaterialData>& materialList)
+        static void SerializeStaticMesh(const std::filesystem::path& filepath, const std::vector<MeshData>& dataList, const std::vector<MaterialData>& materialList)
         {
             std::ofstream stream(filepath, std::ios::binary | std::ios::trunc);
             const char magic[5] = "NSMS"; // Header for Static Mesh
             stream.write(magic, 4);
             
-            WriteMeshData(stream, data);
+            uint32_t count = static_cast<uint32_t>(dataList.size());
+            stream.write(reinterpret_cast<const char*>(&count), sizeof(uint32_t));
+            
+            for (const auto& data : dataList)
+            {
+                WriteMeshData(stream, data);
+            }
+            
             WriteMaterials(stream, materialList);
         }
 
-        static bool DeserializeStaticMesh(const std::filesystem::path& filepath, MeshData& outData, std::vector<MaterialData>& outMaterialList)
+        static bool DeserializeStaticMesh(const std::filesystem::path& filepath, std::vector<MeshData>& outDataList, std::vector<MaterialData>& outMaterialList)
         {
             std::ifstream stream(filepath, std::ios::binary);
             if (!stream.is_open()) return false;
@@ -115,7 +143,15 @@ namespace Nox
             stream.read(magic, 4);
             if (strcmp(magic, "NSMS") != 0) return false;
             
-            ReadMeshData(stream, outData);
+            uint32_t count = 0;
+            stream.read(reinterpret_cast<char*>(&count), sizeof(uint32_t));
+            outDataList.resize(count);
+            
+            for (uint32_t i = 0; i < count; i++)
+            {
+                ReadMeshData(stream, outDataList[i]);
+            }
+            
             ReadMaterials(stream, outMaterialList);
             return true;
         }
@@ -208,6 +244,7 @@ namespace Nox
         {
             MeshHandle subMeshHandle = Renderer::UploadMeshGeometry(data);
             meshAsset->m_SubMeshes.push_back(subMeshHandle);
+            meshAsset->m_SubmeshNames.push_back(data.Name);
         }
         meshAsset->m_Materials = std::move(materialDataList);
         Renderer::UpdateMeshletBuffers();
@@ -228,7 +265,7 @@ namespace Nox
         if (std::filesystem::exists(cookedPath))
         {
             NOX_CORE_INFO("Loading cooked static mesh from {}", cookedPath.string());
-            bool success = MeshSerializer::DeserializeMesh(cookedPath, meshDataList, materialDataList);
+            bool success = MeshSerializer::DeserializeStaticMesh(cookedPath, meshDataList, materialDataList);
             if (!success) 
             {
                 NOX_CORE_ASSERT(false, "MeshImporter::ImportStaticMesh - Failed to deserialize .nsmesh file: {}", cookedPath.string());
@@ -248,7 +285,7 @@ namespace Nox
             if (!std::filesystem::exists(cookedPath.parent_path()))
                 std::filesystem::create_directories(cookedPath.parent_path());
             
-            MeshSerializer::SerializeMesh(cookedPath, meshDataList, materialDataList);
+            MeshSerializer::SerializeStaticMesh(cookedPath, meshDataList, materialDataList);
         }
         
         Ref<StaticMesh> staticMeshAsset = CreateRef<StaticMesh>();
@@ -256,34 +293,9 @@ namespace Nox
         {
             MeshHandle subMeshHandle = Renderer::UploadMeshGeometry(data);
             staticMeshAsset->m_SubMeshes.push_back(subMeshHandle);
+            staticMeshAsset->m_SubmeshNames.push_back(data.Name);
         }
         staticMeshAsset->m_Materials = std::move(materialDataList);
-        auto getOrImportTextureHandle = [&](const std::string& texturePath) -> AssetHandle
-        {
-            if (texturePath.empty()) return 0;
-                            
-            std::filesystem::path pathObj(texturePath);
-            std::filesystem::path relPath = pathObj.is_absolute() 
-                ? std::filesystem::relative(pathObj, Project::GetActiveAssetDirectory()) 
-                : pathObj;
-                            
-            Project::GetActive()->GetEditorAssetManager()->ImportAsset(relPath, {}, {});
-                            
-            for (const auto& [texHandle, meta] : Project::GetActive()->GetEditorAssetManager()->GetAssetRegistry())
-            {
-                if (meta.FilePath == relPath || meta.SourceFilePath == relPath)
-                    return texHandle;
-            }
-                            
-            return 0;
-        };
-        for (auto& mat : staticMeshAsset->m_Materials)
-        {
-            if (!mat.AlbedoTexturePath.empty())
-            {
-                mat.AlbedoMap = getOrImportTextureHandle(mat.AlbedoTexturePath);
-            }
-        }
         
         Renderer::UpdateMeshletBuffers();
         
@@ -325,6 +337,7 @@ namespace Nox
         {
             MeshHandle subMeshHandle = Renderer::UploadMeshGeometry(data);
             meshAsset->m_SubMeshes.push_back(subMeshHandle);
+            meshAsset->m_SubmeshNames.push_back(data.Name);
         }
         meshAsset->m_Materials = std::move(materialDataList);
         
@@ -379,11 +392,51 @@ namespace Nox
         for (uint32_t meshIndex = 0; meshIndex < model.meshes_count; meshIndex++)
         {
             const tg3_mesh& mesh = model.meshes[meshIndex];
-
+            
+            // Naming
+            std::string meshName;
+            if (mesh.name.data && mesh.name.len > 0)
+            {
+                meshName = std::string(mesh.name.data, mesh.name.len);
+            }
+            
+            if (meshName.empty())
+            {
+                for (uint32_t nodeIndex = 0; nodeIndex < model.nodes_count; nodeIndex++)
+                {
+                    const auto& node = model.nodes[nodeIndex];
+                    // Check if this node references our mesh index and has a valid name string
+                    if (node.mesh == meshIndex && node.name.data && node.name.len > 0)
+                    {
+                        meshName = std::string(node.name.data, node.name.len);
+                        NOX_CORE_INFO("[Importer] Found node name for mesh {}: '{}'", meshIndex, meshName);
+                        break; // Found the matching node name!
+                    }
+                }
+                if (meshName.empty())
+                {
+                    NOX_CORE_WARN("[Importer] Could not find any name for mesh {}! Node mesh index matching failed.", meshIndex);
+                }
+            }
+            
+            // Mesh
             for (uint32_t primitiveIndex = 0; primitiveIndex < mesh.primitives_count; primitiveIndex++)
             {
                 const tg3_primitive& primitive = mesh.primitives[primitiveIndex];
                 MeshData primitiveData{};
+                
+                if (!meshName.empty())
+                {
+                    if (mesh.primitives_count > 1)
+                        primitiveData.Name = meshName + "_" + std::to_string(primitiveIndex);
+                    else
+                        primitiveData.Name = meshName; // Results in "bunny", "fox", etc.
+                }
+                else
+                {
+                    // Ultimate fallback if even the node had no name
+                    primitiveData.Name = "Submesh_" + std::to_string(meshIndex);
+                }
 
                 // Get vertex positions
                 const tg3_accessor& posAccessor = model.accessors[FindAttribute(primitive, "POSITION")];

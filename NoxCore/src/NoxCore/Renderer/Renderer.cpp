@@ -1172,14 +1172,24 @@ namespace Nox
         instance.meshletCount = handle.meshletCount;
         
         instance.albedoColor = material.AlbedoColor;
-        if (material.AlbedoMap)
+        instance.albedoTextureIndex = -1;
+        
+        // Select slot matching submeshIndex, fallback to slot 0 if child entity only holds 1 texture
+        uint32_t mapIndex = (submeshIndex < material.AlbedoMaps.size()) ? submeshIndex : 0;
+
+        if (!material.AlbedoMaps.empty() && mapIndex < material.AlbedoMaps.size())
         {
-            Ref<Texture2D> texture = AssetManager::GetAsset<Texture2D>(material.AlbedoMap);
-            instance.albedoTextureIndex = texture->GetDescriptorIndexSlot();
-        }
-        else
-        {
-            instance.albedoTextureIndex = -1;
+            const AssetHandle texHandle = material.AlbedoMaps[mapIndex];
+        
+            // Ensure handle is valid before looking up
+            if (texHandle != 0)
+            {
+                Ref<Texture2D> texture = AssetManager::GetAsset<Texture2D>(texHandle);
+                if (texture)
+                {
+                    instance.albedoTextureIndex = texture->GetDescriptorIndexSlot();
+                }
+            }
         }
         
         instance.entityID = entityID;
@@ -1199,27 +1209,19 @@ namespace Nox
         for (size_t i = 0; i < staticMesh->GetSubMeshes().size(); ++i)
         {
             MeshHandle handle = staticMesh->GetSubMeshes()[i];
-            const auto& matData = staticMesh->GetMaterials()[i];
             
             shaderio::InstanceData instance{};
             instance.modelMatrix = transform;
             instance.meshletOffset = handle.firstMeshlet;
             instance.meshletCount = handle.meshletCount;
             
-            // 1. Color: Entity override -> Submesh material fallback
-            if (material.AlbedoColor != glm::vec4(1.0f))
-                instance.albedoColor = material.AlbedoColor;
-            else
-                instance.albedoColor = matData.AlbedoColor;
-
-            // 2. Texture: Entity override -> Submesh material fallback
+            instance.albedoColor = material.AlbedoColor;
             AssetHandle texHandle = 0;
-            if (material.AlbedoMap != 0)
-                texHandle = material.AlbedoMap; // Entity override
-            else
-                texHandle = matData.AlbedoMap; // Baked per-submesh texture handle
+            if (i < material.AlbedoMaps.size())
+            {
+                texHandle = material.AlbedoMaps[i];
+            }
 
-            // 3. Get GPU Slot Index
             if (texHandle != 0)
             {
                 Ref<Texture2D> texture = AssetManager::GetAsset<Texture2D>(texHandle);

@@ -94,7 +94,8 @@ namespace Nox
     {
         glm::vec4 AlbedoColor{ 1.0f, 1.0f, 1.0f, 1.0f };
         
-        AssetHandle AlbedoMap = 0;
+        /*AssetHandle AlbedoMap = 0;*/
+        std::vector<AssetHandle> AlbedoMaps;
         
         MaterialComponent() = default;
         MaterialComponent(const MaterialComponent&) = default;

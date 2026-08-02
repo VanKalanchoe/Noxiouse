@@ -320,9 +320,17 @@ namespace Nox
                                 ? std::filesystem::relative(pathObj, Project::GetActiveAssetDirectory()) 
                                 : pathObj;
                             
-                            Project::GetActive()->GetEditorAssetManager()->ImportAsset(relPath, {}, {});
+                            auto assetManager = Project::GetActive()->GetEditorAssetManager();
                             
-                            for (const auto& [texHandle, meta] : Project::GetActive()->GetEditorAssetManager()->GetAssetRegistry())
+                            for (const auto& [texHandle, meta] : assetManager->GetAssetRegistry())
+                            {
+                                if (meta.FilePath == relPath || meta.SourceFilePath == relPath)
+                                    return texHandle;
+                            }
+                            
+                            assetManager->ImportAsset(relPath, {}, {});
+                            
+                            for (const auto& [texHandle, meta] : assetManager->GetAssetRegistry())
                             {
                                 if (meta.FilePath == relPath || meta.SourceFilePath == relPath)
                                     return texHandle;
@@ -343,7 +351,12 @@ namespace Nox
                                 // 2. Create a Child Entity for each submesh
                                 for (size_t i = 0; i < meshAsset->GetSubMeshCount(); i++)
                                 {
-                                    Entity childEntity = m_ActiveScene->CreateEntity(entityName + "_sub_" + std::to_string(i));
+                                    std::string subMeshName = meshAsset->GetSubmeshName(i);
+                                    NOX_CORE_INFO("[Scene Drop] Submesh {} name retrieved: '{}'", i, subMeshName);
+                                    if (subMeshName.empty())
+                                        subMeshName = entityName + "_sub_" + std::to_string(i);
+                                    
+                                    Entity childEntity = m_ActiveScene->CreateEntity(subMeshName);
                                     childEntity.SetParent(parentEntity); // Link via Scene Graph!
 
                                     auto& meshComp = childEntity.AddComponent<MeshComponent>();
@@ -353,7 +366,7 @@ namespace Nox
                                     const auto& matData = meshAsset->GetMaterial(i);
                                     auto& matComp = childEntity.AddComponent<MaterialComponent>();
                                     matComp.AlbedoColor = matData.AlbedoColor;
-                                    matComp.AlbedoMap = getOrImportTextureHandle(matData.AlbedoTexturePath);
+                                    matComp.AlbedoMaps.push_back(getOrImportTextureHandle(matData.AlbedoTexturePath));
                                 }
 
                                 m_SceneHierarchyPanel.SetSelectedEntity(parentEntity);
@@ -371,7 +384,7 @@ namespace Nox
                                     const auto& matData = meshAsset->GetMaterial(0);
                                     auto& matComp = newEntity.AddComponent<MaterialComponent>();
                                     matComp.AlbedoColor = matData.AlbedoColor;
-                                    matComp.AlbedoMap = getOrImportTextureHandle(matData.AlbedoTexturePath);
+                                    matComp.AlbedoMaps.push_back(getOrImportTextureHandle(matData.AlbedoTexturePath));
                                 }
                                 else
                                 {
@@ -389,19 +402,19 @@ namespace Nox
                             meshComp.Mesh = handle;
                             meshComp.SubmeshIndex = 0;
                             
-                            /*
-                            if (staticMeshAsset && !staticMeshAsset->GetMaterials().empty())
+                            auto& matComp = newEntity.AddComponent<MaterialComponent>();
+                            
+                            if (staticMeshAsset)
                             {
-                                const auto& matData = staticMeshAsset->GetMaterial(0);
-                                auto& matComp = newEntity.AddComponent<MaterialComponent>();
-                                matComp.AlbedoColor = matData.AlbedoColor;
-                                matComp.AlbedoMap = getOrImportTextureHandle(matData.AlbedoTexturePath);
+                                matComp.AlbedoMaps.resize(staticMeshAsset->GetSubMeshCount(), 0);
+                                
+                                // Resolve paths to AssetHandles for each slot
+                                for (size_t i = 0; i < staticMeshAsset->GetSubMeshCount(); ++i)
+                                {
+                                    const auto& matData = staticMeshAsset->GetMaterial(i);
+                                    matComp.AlbedoMaps[i] = getOrImportTextureHandle(matData.AlbedoTexturePath);
+                                }
                             }
-                            else
-                            {
-                                newEntity.AddComponent<MaterialComponent>();
-                            }
-                            */
                             
                             m_SceneHierarchyPanel.SetSelectedEntity(newEntity);
                         }

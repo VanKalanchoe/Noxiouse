@@ -46,6 +46,6 @@ namespace Nox
         char m_ImportDestPathBuffer[256] = {0};
         std::filesystem::path m_PendingImportPath;
         bool m_ShowImportModal = false;
-        bool m_ImportAsStaticMesh = true;
+        bool m_ImportAsStaticMesh = false;
     };
 };

@@ -104,6 +104,39 @@ namespace Nox
     
     void Scene::DestroyEntity(Entity entity)
     {
+        if (!entity)
+            return;
+        
+        // 1. Unlink this entity from its parent (if it has one)
+        if (entity.HasComponent<RelationshipComponent>())
+        {
+            UUID parentUUID = entity.GetComponent<RelationshipComponent>().Parent;
+            if (parentUUID != 0)
+            {
+                Entity parent = GetEntityByUUID(parentUUID);
+                if (parent && parent.HasComponent<RelationshipComponent>())
+                {
+                    auto& parentChildren = parent.GetComponent<RelationshipComponent>().Children;
+                    std::erase(parentChildren, entity.GetUUID());
+                }
+            }
+        }
+        
+        // 2. Recursively destroy all child entities
+        if (entity.HasComponent<RelationshipComponent>())
+        {
+            // Copy the children vector so modifying it during destruction doesn't invalidate iteration
+            std::vector<UUID> children = entity.GetComponent<RelationshipComponent>().Children;
+            for (UUID childUUID : children)
+            {
+                Entity childEntity = GetEntityByUUID(childUUID);
+                if (childEntity)
+                {
+                    DestroyEntity(childEntity);
+                }
+            }
+        }
+        
         m_EntityMap.erase(entity.GetUUID());
         m_Registry.destroy(entity);
     }

@@ -72,6 +72,7 @@ namespace Nox
     
     struct MeshData
     {
+        std::string Name;
         std::vector<shaderio::Vertex> Vertices;
         std::vector<shaderio::MeshletBounds> Bounds;
         std::vector<shaderio::MeshletDraw> Draws;

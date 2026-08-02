@@ -15,7 +15,6 @@ namespace Nox
     {
         glm::vec4 AlbedoColor = glm::vec4(1.0f);
         std::string AlbedoTexturePath;
-        AssetHandle AlbedoMap = 0;
     };
     
     class StaticMesh : public Asset
@@ -31,6 +30,12 @@ namespace Nox
         const MeshHandle& GetSubMesh(size_t index) const { return m_SubMeshes[index]; }
         size_t GetSubMeshCount() const { return m_SubMeshes.size(); }
         
+        const std::string& GetSubmeshName(size_t index) const 
+        { 
+            static std::string empty = "";
+            return index < m_SubmeshNames.size() ? m_SubmeshNames[index] : empty; 
+        }
+        
         // Material
         const std::vector<MaterialData>& GetMaterials() const { return m_Materials; }
         const MaterialData& GetMaterial(size_t index) const { return m_Materials[index]; }
@@ -42,6 +47,7 @@ namespace Nox
         friend class MeshImporter;
         std::vector<MeshHandle> m_SubMeshes;
         std::vector<MaterialData> m_Materials;
+        std::vector<std::string> m_SubmeshNames;
     };
     
     class Mesh : public Asset
@@ -57,6 +63,12 @@ namespace Nox
         const MeshHandle& GetSubMesh(size_t index) const { return m_SubMeshes[index]; }
         size_t GetSubMeshCount() const { return m_SubMeshes.size(); }
         
+        const std::string& GetSubmeshName(size_t index) const 
+        { 
+            static std::string empty = "";
+            return index < m_SubmeshNames.size() ? m_SubmeshNames[index] : empty; 
+        }
+        
         // Material
         const std::vector<MaterialData>& GetMaterials() const { return m_Materials; }
         const MaterialData& GetMaterial(size_t index) const { return m_Materials[index]; }
@@ -68,5 +80,6 @@ namespace Nox
         friend class MeshImporter;
         std::vector<MeshHandle> m_SubMeshes;
         std::vector<MaterialData> m_Materials;
+        std::vector<std::string> m_SubmeshNames;
     };
 }
