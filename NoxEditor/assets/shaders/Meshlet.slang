@@ -3,7 +3,10 @@
 struct VSOutput
 {
     float4 pos : SV_Position;
+    float2 texCooord;
     float4 color;
+    nointerpolation uint drawID;
+
     int entityID;
 };
 
@@ -57,8 +60,10 @@ void meshMain
         float4 clipPos = mul(viewProj, worldPos);
 
         vertices[i].pos = clipPos;
+        vertices[i].texCooord = v.texCoord;
         vertices[i].color = float4(color, 1.0);
         vertices[i].entityID = instance.entityID;
+        vertices[i].drawID = sharedPayload.drawID;
     }
 
     // Process triangles
@@ -86,12 +91,17 @@ FSOutput fragMain(VSOutput vertIn, uniform PushConstantMeshlets pushConstant)
     FSOutput output;
 
     UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+    InstanceData* instances = (InstanceData*)pushConstant.instanceReference;
+    InstanceData instance = instances[vertIn.drawID];
 
-    /* Texture2D texHandle = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + vertIn.materialIndex, 0));
+    Texture2D texHandle = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.albedoTextureIndex, 0));
     SamplerState sampHandle = SamplerState.Handle(uint2(0, 0));
-    float4 img = texHandle.Sample(sampHandle, vertIn.texCooord); */
+    float4 img = texHandle.Sample(sampHandle, vertIn.texCooord);
 
-    output.color = /* img * */ vertIn.color;
+    if(instance.albedoTextureIndex == -1)
+        output.color = instance.albedoColor * vertIn.color;
+    else
+        output.color = img * instance.albedoColor/* * vertIn.color */;
 
     output.entityID = vertIn.entityID;
 

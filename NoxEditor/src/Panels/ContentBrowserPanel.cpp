@@ -129,12 +129,21 @@ namespace Nox
 				{
 					if (ImGui::MenuItem("Import"))
 					{
-						m_PendingImportPath = relativePath;
-						m_ShowImportModal = true;
+						AssetType type = Project::GetActive()->GetEditorAssetManager()->GetAssetTypeFromExtension(path.extension());
+						if (type == AssetType::MeshSource)
+						{
+							m_PendingImportPath = relativePath;
+							m_ShowImportModal = true;
 						
-						std::filesystem::path defaultDest = m_PendingImportPath;
-						defaultDest.replace_extension(m_ImportAsStaticMesh ? ".nsmesh" : ".nmesh");
-						strncpy_s(m_ImportDestPathBuffer, defaultDest.string().c_str(), sizeof(m_ImportDestPathBuffer));
+							std::filesystem::path defaultDest = m_PendingImportPath;
+							defaultDest.replace_extension(m_ImportAsStaticMesh ? ".nsmesh" : ".nmesh");
+							strncpy_s(m_ImportDestPathBuffer, defaultDest.string().c_str(), sizeof(m_ImportDestPathBuffer));
+						}
+						else
+						{
+							Project::GetActive()->GetEditorAssetManager()->ImportAsset(relativePath, {}, {});
+							RefreshAssetTree();
+						}
 					}
 					ImGui::EndPopup();
 				}

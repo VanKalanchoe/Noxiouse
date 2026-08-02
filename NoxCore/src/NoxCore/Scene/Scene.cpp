@@ -453,7 +453,12 @@ namespace Nox
             {
                 auto [transform, mesh] = view.get<WorldTransformComponent, MeshComponent>(entity);
                 
-                m_renderer->SubmitMesh(transform.WorldMatrix, mesh, (int)entity);
+                MaterialComponent* materialComp = m_Registry.try_get<MaterialComponent>(entity);
+                
+                MaterialComponent defaultMaterial;
+                MaterialComponent& materialToUse = materialComp ? *materialComp : defaultMaterial;
+                
+                m_renderer->SubmitMesh(transform.WorldMatrix, mesh, materialToUse, (int)entity);
             }
         }
         
@@ -530,6 +535,11 @@ namespace Nox
     
     template <>
     void Scene::OnComponentAdded<MeshComponent>(Entity entity, MeshComponent& component)
+    {
+    }
+    
+    template <>
+    void Scene::OnComponentAdded<MaterialComponent>(Entity entity, MaterialComponent& component)
     {
     }
     

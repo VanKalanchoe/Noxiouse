@@ -19,13 +19,14 @@ namespace Nox
         { ".png", AssetType::Texture2D },
         { ".jpg", AssetType::Texture2D },
         { ".jpeg", AssetType::Texture2D },
+        { ".ktx2", AssetType::Texture2D },
         { ".gltf", AssetType::MeshSource },
         { ".glb", AssetType::MeshSource },
         { ".nmesh", AssetType::Mesh },
         { ".nsmesh", AssetType::StaticMesh }
     };
 
-    static AssetType GetAssetTypeFromExtension(const std::filesystem::path& extension)
+    AssetType EditorAssetManager::GetAssetTypeFromExtension(const std::filesystem::path& extension)
     {
         if (s_AssetExtensionMap.find(extension) == s_AssetExtensionMap.end())
         {

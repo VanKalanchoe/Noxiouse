@@ -90,6 +90,18 @@ namespace Nox
         MeshComponent(AssetHandle mesh) : Mesh(mesh) {};
     };
     
+    struct MaterialComponent
+    {
+        glm::vec4 AlbedoColor{ 1.0f, 1.0f, 1.0f, 1.0f };
+        
+        AssetHandle AlbedoMap = 0;
+        
+        MaterialComponent() = default;
+        MaterialComponent(const MaterialComponent&) = default;
+        MaterialComponent(const glm::vec4 color) : AlbedoColor(color) {}
+        
+    };
+    
     struct SpriteRendererComponent
     {
         glm::vec4 Color{ 1.0f, 1.0f, 1.0f, 1.0f };
@@ -214,7 +226,9 @@ namespace Nox
     };
 
     using AllComponents = 
-        ComponentGroup<TransformComponent, WorldTransformComponent, DirtyTransformComponent, MeshComponent, SpriteRendererComponent,
+        ComponentGroup<TransformComponent, WorldTransformComponent, DirtyTransformComponent,
+        MeshComponent, MaterialComponent,
+        SpriteRendererComponent,
             CircleRendererComponent, CameraComponent, ScriptComponent,
             /*NativeScriptComponent,*/ RigidBody2DComponent, BoxCollider2DComponent,
             CircleCollider2DComponent, TextComponent>;

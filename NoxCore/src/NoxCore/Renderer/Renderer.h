@@ -114,9 +114,9 @@ namespace Nox
         void BeginScene(const EditorCamera& camera);
         void EndScene();
         
-        void DrawMesh(const glm::mat4& transform, Ref<Mesh> mesh, uint32_t submeshIndex, int entityID);
-        void DrawStaticMesh(const glm::mat4& transform, Ref<StaticMesh> staticMesh, int entityID);
-        void SubmitMesh(const glm::mat4& transform, MeshComponent& src, int entityID);
+        void DrawMesh(const glm::mat4& transform, Ref<Mesh> mesh, uint32_t submeshIndex, const MaterialComponent& material, int entityID);
+        void DrawStaticMesh(const glm::mat4& transform, Ref<StaticMesh> staticMesh, const MaterialComponent& material, int entityID);
+        void SubmitMesh(const glm::mat4& transform, MeshComponent& src, MaterialComponent& srcMat, int entityID);
         
         Texture2D* GetSceneResource() const { return m_sceneResource.get(); }
         

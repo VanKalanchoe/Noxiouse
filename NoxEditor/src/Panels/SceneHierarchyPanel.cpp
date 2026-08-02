@@ -300,6 +300,7 @@ namespace Nox
         if (ImGui::BeginPopup("AddComponent"))
         {
             DisplayAddComponentEntry<MeshComponent>("Mesh");
+            DisplayAddComponentEntry<MaterialComponent>("Material");
             
             DisplayAddComponentEntry<CameraComponent>("Camera");
             DisplayAddComponentEntry<ScriptComponent>("Script");
@@ -406,6 +407,65 @@ namespace Nox
             
             ImGui::SameLine();
             ImGui::Text("Mesh Asset");
+        });
+        
+        DrawComponent<MaterialComponent>("Material", entity, [](auto& component)
+        {
+            ImGui::ColorEdit4("Albedo Color", glm::value_ptr(component.AlbedoColor));
+            
+            std::string label = "None";
+            bool isTextureValid = false;
+            
+            if (component.AlbedoMap != 0)
+            {
+                if (AssetManager::IsAssetHandleValid(component.AlbedoMap) && AssetManager::GetAssetType(component.AlbedoMap) == AssetType::Texture2D)
+                {
+                    const AssetMetadata& metadata = Project::GetActive()->GetEditorAssetManager()->GetMetadata(component.AlbedoMap);
+                    label = metadata.FilePath.filename().string();
+                    isTextureValid = true;
+                }
+                else
+                {
+                    label = "Invalid";
+                }
+            }
+            
+            ImVec2 buttonLabelSize = ImGui::CalcTextSize(label.c_str());
+            buttonLabelSize.x += 20.0f;
+            float buttonLabelWidth = glm::max<float>(100.0f, buttonLabelSize.x);
+            
+            ImGui::Button(label.c_str(), ImVec2(buttonLabelWidth, 0.0f));
+            
+            if (ImGui::BeginDragDropTarget())
+            {
+                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEM"))
+                {
+                    AssetHandle handle = *(AssetHandle*)payload->Data;
+                    if (AssetManager::GetAssetType(handle) == AssetType::Texture2D)
+                    {
+                        component.AlbedoMap = handle;
+                    }
+                    else
+                    {
+                        NOX_CORE_WARN("Wrong Asset Type - Expected a Texture2D");
+                    }
+                }
+                ImGui::EndDragDropTarget();
+            }
+
+            if (isTextureValid)
+            {
+                ImGui::SameLine();
+                ImVec2 xLabelSize = ImGui::CalcTextSize("X");
+                float buttonSize = xLabelSize.y + ImGui::GetStyle().FramePadding.y * 2.0f;
+                if (ImGui::Button("X", ImVec2(buttonSize, buttonSize)))
+                {
+                    component.AlbedoMap = 0;
+                }
+            }
+            
+            ImGui::SameLine();
+            ImGui::Text("Albedo Map");
         });
 
         DrawComponent<CameraComponent>("Camera", entity, [](auto& component)

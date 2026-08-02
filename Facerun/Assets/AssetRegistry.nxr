@@ -1,23 +1,27 @@
 AssetRegistry:
-  - Handle: 398137702823006938
-    FilePath: models/Fox/Fox.nmesh
-    SourceFilePath: models/Fox/Fox.gltf
-    Type: AssetType::Mesh
   - Handle: 1634953866148052078
     FilePath: textures/Checkerboard.png
     Type: AssetType::Texture2D
   - Handle: 3725258042431064742
     FilePath: textures/ChernoLogo.png
     Type: AssetType::Texture2D
-  - Handle: 3728141459518703673
-    FilePath: models/stanford_bunny/stanford_bunny.nmesh
-    SourceFilePath: models/stanford_bunny/stanford_bunny.gltf
-    Type: AssetType::Mesh
   - Handle: 3904161952643960358
     FilePath: scenes/flat.nox
     Type: AssetType::Scene
+  - Handle: 4143712147893271879
+    FilePath: models/Texture.png
+    SourceFilePath: models/Texture.png
+    Type: AssetType::Texture2D
+  - Handle: 4923247609583320878
+    FilePath: textures/viking_room.ktx2
+    SourceFilePath: textures/viking_room.ktx2
+    Type: AssetType::Texture2D
   - Handle: 5314834349182513991
     FilePath: textures/blending_transparent_window.png
+    Type: AssetType::Texture2D
+  - Handle: 6767821760610353045
+    FilePath: models/Texture.png
+    SourceFilePath: models/Texture.png
     Type: AssetType::Texture2D
   - Handle: 6925804595022315940
     FilePath: scenes/Physics2D.nox
@@ -25,17 +29,17 @@ AssetRegistry:
   - Handle: 7412818356000165226
     FilePath: textures/Pacmanface.png
     Type: AssetType::Texture2D
-  - Handle: 9582522756030411753
-    FilePath: models/multimesh.nsmesh
-    SourceFilePath: models/multimesh.gltf
-    Type: AssetType::StaticMesh
-  - Handle: 11685948046630290179
+  - Handle: 9834391847875872691
     FilePath: models/multimesh.nmesh
     SourceFilePath: models/multimesh.gltf
     Type: AssetType::Mesh
   - Handle: 13004636392655663239
     FilePath: scenes/3DScene.nox
     Type: AssetType::Scene
+  - Handle: 14685016051145578024
+    FilePath: models/multimesh.nsmesh
+    SourceFilePath: models/multimesh.gltf
+    Type: AssetType::StaticMesh
   - Handle: 15201526316078530078
     FilePath: scenes/noxtest.nox
     Type: AssetType::Scene

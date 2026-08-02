@@ -22,6 +22,7 @@ namespace Nox
         virtual bool IsAssetLoaded(AssetHandle handle) const override;
         virtual AssetType GetAssetType(AssetHandle handle) const override;
 
+        static AssetType GetAssetTypeFromExtension(const std::filesystem::path& extension);
         void Init();
         void Update();
         void ReimportAsset(AssetHandle handle);

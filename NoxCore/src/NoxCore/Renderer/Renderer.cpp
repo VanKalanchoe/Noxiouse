@@ -1158,7 +1158,7 @@ namespace Nox
         m_renderer2D->EndScene();
     }
     
-    void Renderer::DrawMesh(const glm::mat4& transform, Ref<Mesh> mesh, uint32_t submeshIndex, int entityID)
+    void Renderer::DrawMesh(const glm::mat4& transform, Ref<Mesh> mesh, uint32_t submeshIndex, const MaterialComponent& material, int entityID)
     {
         const auto& submeshes = mesh->GetSubMeshes();
         if (submeshIndex >= submeshes.size())
@@ -1170,6 +1170,18 @@ namespace Nox
         instance.modelMatrix = transform;
         instance.meshletOffset = handle.firstMeshlet;
         instance.meshletCount = handle.meshletCount;
+        
+        instance.albedoColor = material.AlbedoColor;
+        if (material.AlbedoMap)
+        {
+            Ref<Texture2D> texture = AssetManager::GetAsset<Texture2D>(material.AlbedoMap);
+            instance.albedoTextureIndex = texture->GetDescriptorIndexSlot();
+        }
+        else
+        {
+            instance.albedoTextureIndex = -1;
+        }
+        
         instance.entityID = entityID;
         
         m_instanceBufferObjects.push_back(instance);
@@ -1182,7 +1194,7 @@ namespace Nox
         m_drawMeshTasksIndirectCommands.push_back(command);
     }
     
-    void Renderer::DrawStaticMesh(const glm::mat4& transform, Ref<StaticMesh> staticMesh, int entityID)
+    void Renderer::DrawStaticMesh(const glm::mat4& transform, Ref<StaticMesh> staticMesh, const MaterialComponent& material, int entityID)
     {
         MeshHandle handle = staticMesh->GetHandle(); // Assuming StaticMesh has a getter for its single handle
 
@@ -1190,6 +1202,18 @@ namespace Nox
         instance.modelMatrix = transform;
         instance.meshletOffset = handle.firstMeshlet;
         instance.meshletCount = handle.meshletCount;
+        
+        instance.albedoColor = material.AlbedoColor;
+        if (material.AlbedoMap)
+        {
+            Ref<Texture2D> texture = AssetManager::GetAsset<Texture2D>(material.AlbedoMap);
+            instance.albedoTextureIndex = texture->GetDescriptorIndexSlot();
+        }
+        else
+        {
+            instance.albedoTextureIndex = -1;
+        }
+        
         instance.entityID = entityID;
     
         m_instanceBufferObjects.push_back(instance);
@@ -1202,7 +1226,7 @@ namespace Nox
         m_drawMeshTasksIndirectCommands.push_back(command);
     }
 
-    void Renderer::SubmitMesh(const glm::mat4& transform, MeshComponent& src, int entityID)
+    void Renderer::SubmitMesh(const glm::mat4& transform, MeshComponent& src, MaterialComponent& srcMat, int entityID)
     {
         if (src.Mesh == 0)
             return;
@@ -1214,7 +1238,7 @@ namespace Nox
             Ref<Mesh> mesh = AssetManager::GetAsset<Mesh>(src.Mesh);
             if (mesh)
             {
-                DrawMesh(transform, mesh, src.SubmeshIndex, entityID);
+                DrawMesh(transform, mesh, src.SubmeshIndex, srcMat, entityID);
             }
         }
         else if (type == AssetType::StaticMesh)
@@ -1222,7 +1246,7 @@ namespace Nox
             Ref<StaticMesh> staticMesh = AssetManager::GetAsset<StaticMesh>(src.Mesh);
             if (staticMesh)
             {
-                DrawStaticMesh(transform, staticMesh, entityID);
+                DrawStaticMesh(transform, staticMesh, srcMat, entityID);
             }
         }
     }

@@ -113,9 +113,14 @@ struct Vertex
 
 struct InstanceData
 {
+    // Mesh
     mat4 modelMatrix;
     uint32_t meshletOffset; // Where this model's meshlets start in m_meshletDraws
     uint32_t meshletCount;  // How many meshlets this model has
+    
+    // Material
+    vec4 albedoColor;
+    uint32_t albedoTextureIndex;
     
     // Editor-only
     int entityID;

@@ -18,6 +18,6 @@ namespace Nox
         static Ref<Mesh> LoadMesh(const std::filesystem::path& path);
         
     private:
-        static std::vector<MeshData> ParseGltfToMeshData(const std::filesystem::path& path);
+        static std::vector<MeshData> ParseGltfToMeshData(const std::filesystem::path& path, std::vector<MaterialData>& outMaterials);
     };
 }

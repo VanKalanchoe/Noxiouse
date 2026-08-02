@@ -54,21 +54,59 @@ namespace Nox
             ReadVector(stream, outData.MeshletTriangles);
             ReadVector(stream, outData.Draws);
         }
+        
+        // Helper to write materials vector
+        static void WriteMaterials(std::ofstream& stream, const std::vector<MaterialData>& materialList)
+        {
+            uint32_t matCount = static_cast<uint32_t>(materialList.size());
+            stream.write(reinterpret_cast<const char*>(&matCount), sizeof(uint32_t));
+            for (const auto& mat : materialList)
+            {
+                stream.write(reinterpret_cast<const char*>(&mat.AlbedoColor), sizeof(glm::vec4));
+                uint32_t pathSize = static_cast<uint32_t>(mat.AlbedoTexturePath.size());
+                stream.write(reinterpret_cast<const char*>(&pathSize), sizeof(uint32_t));
+                if (pathSize > 0)
+                    stream.write(mat.AlbedoTexturePath.data(), pathSize);
+            }
+        }
+        
+        // Helper to read materials vector
+        static void ReadMaterials(std::ifstream& stream, std::vector<MaterialData>& outMaterialList)
+        {
+            if (stream.peek() != EOF)
+            {
+                uint32_t matCount = 0;
+                stream.read(reinterpret_cast<char*>(&matCount), sizeof(uint32_t));
+                outMaterialList.resize(matCount);
+                for (uint32_t i = 0; i < matCount; i++)
+                {
+                    stream.read(reinterpret_cast<char*>(&outMaterialList[i].AlbedoColor), sizeof(glm::vec4));
+                    uint32_t pathSize = 0;
+                    stream.read(reinterpret_cast<char*>(&pathSize), sizeof(uint32_t));
+                    if (pathSize > 0)
+                    {
+                        outMaterialList[i].AlbedoTexturePath.resize(pathSize);
+                        stream.read(&outMaterialList[i].AlbedoTexturePath[0], pathSize);
+                    }
+                }
+            }
+        }
 
     public:
         // ==========================================
         // STATIC MESH (.nsmesh) - Single flattened MeshData
         // ==========================================
-        static void SerializeStaticMesh(const std::filesystem::path& filepath, const MeshData& data)
+        static void SerializeStaticMesh(const std::filesystem::path& filepath, const MeshData& data, const std::vector<MaterialData>& materialList)
         {
             std::ofstream stream(filepath, std::ios::binary | std::ios::trunc);
             const char magic[5] = "NSMS"; // Header for Static Mesh
             stream.write(magic, 4);
             
             WriteMeshData(stream, data);
+            WriteMaterials(stream, materialList);
         }
 
-        static bool DeserializeStaticMesh(const std::filesystem::path& filepath, MeshData& outData)
+        static bool DeserializeStaticMesh(const std::filesystem::path& filepath, MeshData& outData, std::vector<MaterialData>& outMaterialList)
         {
             std::ifstream stream(filepath, std::ios::binary);
             if (!stream.is_open()) return false;
@@ -78,13 +116,14 @@ namespace Nox
             if (strcmp(magic, "NSMS") != 0) return false;
             
             ReadMeshData(stream, outData);
+            ReadMaterials(stream, outMaterialList);
             return true;
         }
 
         // ==========================================
         // DYNAMIC MESH (.nmesh) - Vector of MeshData
         // ==========================================
-        static void SerializeMesh(const std::filesystem::path& filepath, const std::vector<MeshData>& dataList)
+        static void SerializeMesh(const std::filesystem::path& filepath, const std::vector<MeshData>& dataList, const std::vector<MaterialData>& materialList)
         {
             std::ofstream stream(filepath, std::ios::binary | std::ios::trunc);
             const char magic[5] = "NMSH"; // Header for regular Mesh
@@ -97,9 +136,11 @@ namespace Nox
             {
                 WriteMeshData(stream, data);
             }
+            
+            WriteMaterials(stream, materialList);
         }
 
-        static bool DeserializeMesh(const std::filesystem::path& filepath, std::vector<MeshData>& outDataList)
+        static bool DeserializeMesh(const std::filesystem::path& filepath, std::vector<MeshData>& outDataList, std::vector<MaterialData>& outMaterialList)
         {
             std::ifstream stream(filepath, std::ios::binary);
             if (!stream.is_open()) return false;
@@ -116,6 +157,9 @@ namespace Nox
             {
                 ReadMeshData(stream, outDataList[i]);
             }
+            
+            ReadMaterials(stream, outMaterialList);
+            
             return true;
         }
     };
@@ -130,20 +174,20 @@ namespace Nox
         NOX_CORE_INFO("MeshImporter::ImportMesh loading mesh from {}", cookedPath.string());
         
         std::vector<MeshData> meshDataList;
+        std::vector<MaterialData> materialDataList;
         
         if (std::filesystem::exists(cookedPath))
         {
             NOX_CORE_INFO("Loading cooked dynamic mesh from {}", cookedPath.string());
-            bool success = MeshSerializer::DeserializeMesh(cookedPath, meshDataList);
+            bool success = MeshSerializer::DeserializeMesh(cookedPath, meshDataList, materialDataList);
             if (!success) NOX_CORE_ASSERT(false, "MeshImporter::ImportMesh - Failed to deserialize .nmesh file: {}", cookedPath.string());
         }
-        
         else
         {
             // It doesn't exist, cook it from the source!
             NOX_CORE_INFO("Cooking GLTF from {} to {}", sourcePath.string(), cookedPath.string());
             
-            meshDataList = ParseGltfToMeshData(sourcePath);
+            meshDataList = ParseGltfToMeshData(sourcePath, materialDataList);
             if (meshDataList.empty())
             {
                 NOX_CORE_ASSERT(false, "MeshImporter::ImportMesh - Failed to load or empty mesh at source path: {}", sourcePath.string());
@@ -154,7 +198,7 @@ namespace Nox
             if (!std::filesystem::exists(cookedPath.parent_path()))
                 std::filesystem::create_directories(cookedPath.parent_path());
             
-            MeshSerializer::SerializeMesh(cookedPath, meshDataList);
+            MeshSerializer::SerializeMesh(cookedPath, meshDataList, materialDataList);
         }
         
         Ref<Mesh> meshAsset = CreateRef<Mesh>();
@@ -165,7 +209,7 @@ namespace Nox
             MeshHandle subMeshHandle = Renderer::UploadMeshGeometry(data);
             meshAsset->m_SubMeshes.push_back(subMeshHandle);
         }
-        
+        meshAsset->m_Materials = std::move(materialDataList);
         Renderer::UpdateMeshletBuffers();
         
         return meshAsset;
@@ -179,11 +223,12 @@ namespace Nox
         NOX_CORE_INFO("MeshImporter::ImportStaticMesh loading static mesh from {}", cookedPath.string());
         
         MeshData combinedData;
+        std::vector<MaterialData> materialDataList;
         
         if (std::filesystem::exists(cookedPath))
         {
             NOX_CORE_INFO("Loading cooked static mesh from {}", cookedPath.string());
-            bool success = MeshSerializer::DeserializeStaticMesh(cookedPath, combinedData);
+            bool success = MeshSerializer::DeserializeStaticMesh(cookedPath, combinedData, materialDataList);
             if (!success) 
             {
                 NOX_CORE_ASSERT(false, "MeshImporter::ImportStaticMesh - Failed to deserialize .nsmesh file: {}", cookedPath.string());
@@ -193,7 +238,7 @@ namespace Nox
         {
             NOX_CORE_INFO("Cooking GLTF from {} to {}", sourcePath.string(), cookedPath.string());
             
-            std::vector<MeshData> meshDataList = ParseGltfToMeshData(sourcePath);
+            std::vector<MeshData> meshDataList = ParseGltfToMeshData(sourcePath, materialDataList);
             if (meshDataList.empty()) 
             {
                 NOX_CORE_ASSERT(false, "No Meshes found in source file: {}", sourcePath.string());
@@ -224,15 +269,17 @@ namespace Nox
             if (!std::filesystem::exists(cookedPath.parent_path()))
                 std::filesystem::create_directories(cookedPath.parent_path());
             
-            MeshSerializer::SerializeStaticMesh(cookedPath, combinedData);
+            MeshSerializer::SerializeStaticMesh(cookedPath, combinedData, materialDataList);
         }
         
         // Upload combined flattened geometry -> Single Handle
         MeshHandle singleHandle = Renderer::UploadMeshGeometry(combinedData);
-        
         Renderer::UpdateMeshletBuffers();
         
-        return CreateRef<StaticMesh>(singleHandle);
+        Ref<StaticMesh> staticMeshAsset = CreateRef<StaticMesh>(singleHandle);
+        staticMeshAsset->m_Materials = std::move(materialDataList);
+        
+        return staticMeshAsset;
     }
 
     Ref<Mesh> MeshImporter::LoadMesh(const std::filesystem::path& path)
@@ -244,22 +291,23 @@ namespace Nox
         cookedPath.replace_extension(".nmesh");
         
         std::vector<MeshData> meshDataList;
+        std::vector<MaterialData> materialDataList;
         
         if (std::filesystem::exists(cookedPath))
         {
-            bool success = MeshSerializer::DeserializeMesh(path, meshDataList);
+            bool success = MeshSerializer::DeserializeMesh(path, meshDataList, materialDataList);
             if (!success) NOX_CORE_ASSERT(false, "MeshImporter::LoadMesh - Failed to deserialize .nmesh file");
         }
         else
         {
-            meshDataList = ParseGltfToMeshData(path);
+            meshDataList = ParseGltfToMeshData(path, materialDataList);
             if (meshDataList.empty())
             {
                 NOX_CORE_ASSERT("MeshImporter::LoadMesh - Failed to load or empty mesh at path: {}", path.string());
                 return Ref<Mesh>(nullptr);
             }
             
-            MeshSerializer::SerializeMesh(cookedPath, meshDataList);
+            MeshSerializer::SerializeMesh(cookedPath, meshDataList, materialDataList);
         }
         
         Ref<Mesh> meshAsset = CreateRef<Mesh>();
@@ -270,6 +318,7 @@ namespace Nox
             MeshHandle subMeshHandle = Renderer::UploadMeshGeometry(data);
             meshAsset->m_SubMeshes.push_back(subMeshHandle);
         }
+        meshAsset->m_Materials = std::move(materialDataList);
         
         Renderer::UpdateMeshletBuffers();
         
@@ -291,7 +340,7 @@ namespace Nox
         return -1;
     }
     
-    std::vector<MeshData> MeshImporter::ParseGltfToMeshData(const std::filesystem::path& path)
+    std::vector<MeshData> MeshImporter::ParseGltfToMeshData(const std::filesystem::path& path, std::vector<MaterialData>& outMaterials)
     {
         /*
             Here is the exact layout based on your EditorCamera class:
@@ -318,7 +367,7 @@ namespace Nox
             tg3_error_stack_free(&errors);
             return result;
         }
-        std::cout << "mesh count: " << model.meshes_count << std::endl;
+        
         for (uint32_t meshIndex = 0; meshIndex < model.meshes_count; meshIndex++)
         {
             const tg3_mesh& mesh = model.meshes[meshIndex];
@@ -505,6 +554,39 @@ namespace Nox
                 primitiveData.MeshletVertices.insert(primitiveData.MeshletVertices.end(), localMeshletVertices.begin(), localMeshletVertices.end());
                 primitiveData.MeshletTriangles.insert(primitiveData.MeshletTriangles.end(), localMeshletTriangles.begin(), localMeshletTriangles.end());
                 
+                MaterialData materialData{};
+                
+                // Materials
+                if (primitive.material >= 0 && primitive.material < (int32_t)model.materials_count)
+                {
+                    const auto& gltfMaterial = model.materials[primitive.material];
+                    
+                    // Base Color Factor
+                    materialData.AlbedoColor = glm::vec4(
+                        static_cast<float>(gltfMaterial.pbr_metallic_roughness.base_color_factor[0]),
+                        static_cast<float>(gltfMaterial.pbr_metallic_roughness.base_color_factor[1]),
+                        static_cast<float>(gltfMaterial.pbr_metallic_roughness.base_color_factor[2]),
+                        static_cast<float>(gltfMaterial.pbr_metallic_roughness.base_color_factor[3])
+                    );
+                    
+                    // Base Color Texture URI
+                    int32_t albedoTexIndex = gltfMaterial.pbr_metallic_roughness.base_color_texture.index;
+                    if (albedoTexIndex >= 0 && albedoTexIndex < (int32_t)model.textures_count)
+                    {
+                        int32_t imageIndex = model.textures[albedoTexIndex].source;
+                        if (imageIndex >= 0 && imageIndex < (int32_t)model.images_count)
+                        {
+                            const auto& image = model.images[imageIndex];
+                            if (image.uri.data && image.uri.len > 0)
+                            {
+                                std::string uriStr(image.uri.data, image.uri.len);
+                                std::filesystem::path texturePath = path.parent_path() / uriStr;
+                                materialData.AlbedoTexturePath = texturePath.string();
+                            }
+                        }
+                    }
+                }
+                outMaterials.push_back(materialData);
                 result.push_back(std::move(primitiveData));
             }
         }
