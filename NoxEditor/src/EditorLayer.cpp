@@ -389,6 +389,7 @@ namespace Nox
                             meshComp.Mesh = handle;
                             meshComp.SubmeshIndex = 0;
                             
+                            /*
                             if (staticMeshAsset && !staticMeshAsset->GetMaterials().empty())
                             {
                                 const auto& matData = staticMeshAsset->GetMaterial(0);
@@ -400,6 +401,7 @@ namespace Nox
                             {
                                 newEntity.AddComponent<MaterialComponent>();
                             }
+                            */
                             
                             m_SceneHierarchyPanel.SetSelectedEntity(newEntity);
                         }

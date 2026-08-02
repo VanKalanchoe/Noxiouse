@@ -15,19 +15,21 @@ namespace Nox
     {
         glm::vec4 AlbedoColor = glm::vec4(1.0f);
         std::string AlbedoTexturePath;
+        AssetHandle AlbedoMap = 0;
     };
     
     class StaticMesh : public Asset
     {
     public:
         StaticMesh() = default;
-        StaticMesh(MeshHandle handle) : m_Handle(handle) {}
         virtual ~StaticMesh() = default;
         
         AssetType GetType() const override { return AssetType::StaticMesh; }
         
         // Mesh
-        MeshHandle GetHandle() const { return m_Handle; }
+        const std::vector<MeshHandle>& GetSubMeshes() const { return m_SubMeshes; }
+        const MeshHandle& GetSubMesh(size_t index) const { return m_SubMeshes[index]; }
+        size_t GetSubMeshCount() const { return m_SubMeshes.size(); }
         
         // Material
         const std::vector<MaterialData>& GetMaterials() const { return m_Materials; }
@@ -38,7 +40,7 @@ namespace Nox
         
     private:
         friend class MeshImporter;
-        MeshHandle m_Handle;
+        std::vector<MeshHandle> m_SubMeshes;
         std::vector<MaterialData> m_Materials;
     };
     

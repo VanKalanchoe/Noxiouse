@@ -222,13 +222,13 @@ namespace Nox
         
         NOX_CORE_INFO("MeshImporter::ImportStaticMesh loading static mesh from {}", cookedPath.string());
         
-        MeshData combinedData;
+        std::vector<MeshData> meshDataList;
         std::vector<MaterialData> materialDataList;
         
         if (std::filesystem::exists(cookedPath))
         {
             NOX_CORE_INFO("Loading cooked static mesh from {}", cookedPath.string());
-            bool success = MeshSerializer::DeserializeStaticMesh(cookedPath, combinedData, materialDataList);
+            bool success = MeshSerializer::DeserializeMesh(cookedPath, meshDataList, materialDataList);
             if (!success) 
             {
                 NOX_CORE_ASSERT(false, "MeshImporter::ImportStaticMesh - Failed to deserialize .nsmesh file: {}", cookedPath.string());
@@ -238,46 +238,54 @@ namespace Nox
         {
             NOX_CORE_INFO("Cooking GLTF from {} to {}", sourcePath.string(), cookedPath.string());
             
-            std::vector<MeshData> meshDataList = ParseGltfToMeshData(sourcePath, materialDataList);
+            meshDataList = ParseGltfToMeshData(sourcePath, materialDataList);
             if (meshDataList.empty()) 
             {
                 NOX_CORE_ASSERT(false, "No Meshes found in source file: {}", sourcePath.string());
                 return Ref<StaticMesh>(nullptr);
             }
-            
-            for (const auto& data : meshDataList)
-            {
-                uint32_t baseVertex = static_cast<uint32_t>(combinedData.Vertices.size());
-                uint32_t meshletVertOffset = static_cast<uint32_t>(combinedData.MeshletVertices.size());
-                uint32_t meshletTriOffset = static_cast<uint32_t>(combinedData.MeshletTriangles.size());
-
-                combinedData.Vertices.insert(combinedData.Vertices.end(), data.Vertices.begin(), data.Vertices.end());
-                combinedData.Bounds.insert(combinedData.Bounds.end(), data.Bounds.begin(), data.Bounds.end());
-                combinedData.MeshletVertices.insert(combinedData.MeshletVertices.end(), data.MeshletVertices.begin(), data.MeshletVertices.end());
-                combinedData.MeshletTriangles.insert(combinedData.MeshletTriangles.end(), data.MeshletTriangles.begin(), data.MeshletTriangles.end());
-
-                for (auto draw : data.Draws)
-                {
-                    // Fix: globalVertexOffset should point to the absolute base vertex of this chunk in the combined buffer
-                    draw.globalVertexOffset = baseVertex; 
-                    draw.vertexOffset += meshletVertOffset;
-                    draw.triangleOffset += meshletTriOffset;
-                    combinedData.Draws.push_back(draw);
-                }
-            }
-            
+           
             if (!std::filesystem::exists(cookedPath.parent_path()))
                 std::filesystem::create_directories(cookedPath.parent_path());
             
-            MeshSerializer::SerializeStaticMesh(cookedPath, combinedData, materialDataList);
+            MeshSerializer::SerializeMesh(cookedPath, meshDataList, materialDataList);
         }
         
-        // Upload combined flattened geometry -> Single Handle
-        MeshHandle singleHandle = Renderer::UploadMeshGeometry(combinedData);
-        Renderer::UpdateMeshletBuffers();
-        
-        Ref<StaticMesh> staticMeshAsset = CreateRef<StaticMesh>(singleHandle);
+        Ref<StaticMesh> staticMeshAsset = CreateRef<StaticMesh>();
+        for (const auto& data : meshDataList)
+        {
+            MeshHandle subMeshHandle = Renderer::UploadMeshGeometry(data);
+            staticMeshAsset->m_SubMeshes.push_back(subMeshHandle);
+        }
         staticMeshAsset->m_Materials = std::move(materialDataList);
+        auto getOrImportTextureHandle = [&](const std::string& texturePath) -> AssetHandle
+        {
+            if (texturePath.empty()) return 0;
+                            
+            std::filesystem::path pathObj(texturePath);
+            std::filesystem::path relPath = pathObj.is_absolute() 
+                ? std::filesystem::relative(pathObj, Project::GetActiveAssetDirectory()) 
+                : pathObj;
+                            
+            Project::GetActive()->GetEditorAssetManager()->ImportAsset(relPath, {}, {});
+                            
+            for (const auto& [texHandle, meta] : Project::GetActive()->GetEditorAssetManager()->GetAssetRegistry())
+            {
+                if (meta.FilePath == relPath || meta.SourceFilePath == relPath)
+                    return texHandle;
+            }
+                            
+            return 0;
+        };
+        for (auto& mat : staticMeshAsset->m_Materials)
+        {
+            if (!mat.AlbedoTexturePath.empty())
+            {
+                mat.AlbedoMap = getOrImportTextureHandle(mat.AlbedoTexturePath);
+            }
+        }
+        
+        Renderer::UpdateMeshletBuffers();
         
         return staticMeshAsset;
     }

@@ -1196,34 +1196,51 @@ namespace Nox
     
     void Renderer::DrawStaticMesh(const glm::mat4& transform, Ref<StaticMesh> staticMesh, const MaterialComponent& material, int entityID)
     {
-        MeshHandle handle = staticMesh->GetHandle(); // Assuming StaticMesh has a getter for its single handle
+        for (size_t i = 0; i < staticMesh->GetSubMeshes().size(); ++i)
+        {
+            MeshHandle handle = staticMesh->GetSubMeshes()[i];
+            const auto& matData = staticMesh->GetMaterials()[i];
+            
+            shaderio::InstanceData instance{};
+            instance.modelMatrix = transform;
+            instance.meshletOffset = handle.firstMeshlet;
+            instance.meshletCount = handle.meshletCount;
+            
+            // 1. Color: Entity override -> Submesh material fallback
+            if (material.AlbedoColor != glm::vec4(1.0f))
+                instance.albedoColor = material.AlbedoColor;
+            else
+                instance.albedoColor = matData.AlbedoColor;
 
-        shaderio::InstanceData instance{};
-        instance.modelMatrix = transform;
-        instance.meshletOffset = handle.firstMeshlet;
-        instance.meshletCount = handle.meshletCount;
-        
-        instance.albedoColor = material.AlbedoColor;
-        if (material.AlbedoMap)
-        {
-            Ref<Texture2D> texture = AssetManager::GetAsset<Texture2D>(material.AlbedoMap);
-            instance.albedoTextureIndex = texture->GetDescriptorIndexSlot();
+            // 2. Texture: Entity override -> Submesh material fallback
+            AssetHandle texHandle = 0;
+            if (material.AlbedoMap != 0)
+                texHandle = material.AlbedoMap; // Entity override
+            else
+                texHandle = matData.AlbedoMap; // Baked per-submesh texture handle
+
+            // 3. Get GPU Slot Index
+            if (texHandle != 0)
+            {
+                Ref<Texture2D> texture = AssetManager::GetAsset<Texture2D>(texHandle);
+                instance.albedoTextureIndex = texture ? texture->GetDescriptorIndexSlot() : -1;
+            }
+            else
+            {
+                instance.albedoTextureIndex = -1;
+            }
+            
+            instance.entityID = entityID;
+            
+            m_instanceBufferObjects.push_back(instance);
+            
+            DrawMeshTasksIndirectCommand command{};
+            command.groupCountX = (handle.meshletCount + shaderio::TASK_SHADER_DISPATCH_X - 1) / shaderio::TASK_SHADER_DISPATCH_X;
+            command.groupCountY = 1;
+            command.groupCountZ = 1;
+    
+            m_drawMeshTasksIndirectCommands.push_back(command);
         }
-        else
-        {
-            instance.albedoTextureIndex = -1;
-        }
-        
-        instance.entityID = entityID;
-    
-        m_instanceBufferObjects.push_back(instance);
-    
-        DrawMeshTasksIndirectCommand command{};
-        command.groupCountX = (handle.meshletCount + shaderio::TASK_SHADER_DISPATCH_X - 1) / shaderio::TASK_SHADER_DISPATCH_X;
-        command.groupCountY = 1;
-        command.groupCountZ = 1;
-    
-        m_drawMeshTasksIndirectCommands.push_back(command);
     }
 
     void Renderer::SubmitMesh(const glm::mat4& transform, MeshComponent& src, MaterialComponent& srcMat, int entityID)
