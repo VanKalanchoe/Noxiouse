@@ -227,7 +227,7 @@ namespace Nox
     };
 
     using AllComponents = 
-        ComponentGroup<TransformComponent, WorldTransformComponent, DirtyTransformComponent,
+        ComponentGroup<TransformComponent, WorldTransformComponent, RelationshipComponent, DirtyTransformComponent,
         MeshComponent, MaterialComponent,
         SpriteRendererComponent,
             CircleRendererComponent, CameraComponent, ScriptComponent,

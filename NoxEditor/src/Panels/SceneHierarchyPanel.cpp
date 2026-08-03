@@ -42,10 +42,31 @@ namespace Nox
                 if (isRoot)
                     DrawEntityNode(entity);
             });
+            
+            // --- 1. FILL REMAINING SPACE WITH AN INVISIBLE BUTTON ---
+            ImVec2 availSize = ImGui::GetContentRegionAvail();
+            if (availSize.x < 1.0f) availSize.x = 1.0f;
+            if (availSize.y < 1.0f) availSize.y = 1.0f;
+            
+            ImGui::InvisibleButton("##SceneHierarchyBackground", availSize);
 
             if (ImGui::IsMouseDown(0) && ImGui::IsWindowHovered())
             {
                 m_SelectionContext = {};
+            }
+            
+            if (ImGui::BeginDragDropTarget())
+            {
+                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("SCENE_HIERARCHY_ENTITY"))
+                {
+                    UUID droppedEntityID = *(UUID*)payload->Data;
+                    Entity droppedEntity = m_Context->GetEntityByUUID(droppedEntityID);
+                    if (droppedEntity)
+                    {
+                        droppedEntity.SetParent({}); // Pass empty entity to make it root
+                    }
+                }
+                ImGui::EndDragDropTarget();
             }
 
             // Right-click on blank space
@@ -98,6 +119,47 @@ namespace Nox
         {
             m_SelectionContext = entity;
         }
+        
+        // --- 1. DRAG SOURCE: Pick up this entity to drag it ---
+        if (ImGui::BeginDragDropSource())
+        {
+            UUID entityID = entity.GetUUID();
+            ImGui::SetDragDropPayload("SCENE_HIERARCHY_ENTITY", &entityID, sizeof(UUID));
+            ImGui::Text("%s", tag.c_str());
+            ImGui::EndDragDropSource();
+        }
+        
+        // --- 2. DROP TARGET: Drop another entity onto this one to make it a child ---
+        if (ImGui::BeginDragDropTarget())
+        {
+            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("SCENE_HIERARCHY_ENTITY"))
+            {
+                UUID droppedEntityID = *(UUID*)payload->Data;
+                Entity droppedEntity = m_Context->GetEntityByUUID(droppedEntityID);
+                
+                if (droppedEntity && droppedEntity != entity)
+                {
+                    // Prevent circular parenting (cannot parent an entity to its own child/descendant)
+                    bool isDescendant = false;
+                    Entity currentCheck = entity;
+                    while (currentCheck)
+                    {
+                        if (currentCheck == droppedEntity)
+                        {
+                            isDescendant = true;
+                            break;
+                        }
+                        currentCheck = currentCheck.GetParent();
+                    }
+
+                    if (!isDescendant)
+                    {
+                        droppedEntity.SetParent(entity);
+                    }
+                }
+            }
+            ImGui::EndDragDropTarget();
+        }
 
         bool entityDeleted = false;
         if (ImGui::BeginPopupContextItem())
@@ -114,7 +176,7 @@ namespace Nox
         {
             if (hasChildren)
             {
-                auto& children = entity.GetComponent<RelationshipComponent>().Children;
+                auto children = entity.GetComponent<RelationshipComponent>().Children;
                 for (UUID childID : children)
                 {
                     Entity childEntity = m_Context->GetEntityByUUID(childID);

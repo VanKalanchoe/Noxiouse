@@ -14,36 +14,80 @@ namespace Nox
         Entity(const Entity& other) = default;
         
         void SetParent(Entity parent)
+    {
+        if (*this == parent)
+            return;
+
+        Entity currentParent = GetParent();
+        if (currentParent == parent)
+            return;
+
+        // 1. Calculate and preserve current World Transform before changing hierarchy
+        glm::mat4 worldTransform(1.0f);
+        if (HasComponent<WorldTransformComponent>())
         {
-            Entity currentParent = GetParent();
-            if (currentParent == parent)
-                return;
-
-            // 1. Remove from old parent's children list
-            if (currentParent)
-            {
-                auto& oldChildren = currentParent.GetComponent<RelationshipComponent>().Children;
-                oldChildren.erase(std::remove(oldChildren.begin(), oldChildren.end(), GetUUID()), oldChildren.end());
-            }
-
-            // 2. Set new parent
-            if (!HasComponent<RelationshipComponent>())
-                AddComponent<RelationshipComponent>();
-
-            auto& rel = GetComponent<RelationshipComponent>();
-            if (parent)
-            {
-                rel.Parent = parent.GetUUID();
-                if (!parent.HasComponent<RelationshipComponent>())
-                    parent.AddComponent<RelationshipComponent>();
-                parent.GetComponent<RelationshipComponent>().Children.push_back(GetUUID());
-            }
-            else
-            {
-                rel.Parent = 0;
-            }
+            worldTransform = GetComponent<WorldTransformComponent>().WorldMatrix;
+        }
+        else if (HasComponent<TransformComponent>())
+        {
+            worldTransform = GetComponent<TransformComponent>().GetTransform();
         }
 
+        // 2. Remove from old parent's children list
+        if (currentParent)
+        {
+            auto& oldChildren = currentParent.GetComponent<RelationshipComponent>().Children;
+            oldChildren.erase(std::remove(oldChildren.begin(), oldChildren.end(), GetUUID()), oldChildren.end());
+        }
+
+        // 3. Set new parent
+        if (!HasComponent<RelationshipComponent>())
+            AddComponent<RelationshipComponent>();
+
+        auto& rel = GetComponent<RelationshipComponent>();
+        if (parent)
+        {
+            rel.Parent = parent.GetUUID();
+            if (!parent.HasComponent<RelationshipComponent>())
+                parent.AddComponent<RelationshipComponent>();
+            parent.GetComponent<RelationshipComponent>().Children.push_back(GetUUID());
+        }
+        else
+        {
+            rel.Parent = 0;
+        }
+
+        // 4. Convert the preserved World Transform into the *new* local space
+        if (HasComponent<TransformComponent>())
+        {
+            glm::mat4 localTransform = worldTransform;
+
+            if (parent)
+            {
+                // If the new parent has a world matrix, invert it to find relative local space
+                if (parent.HasComponent<WorldTransformComponent>())
+                {
+                    glm::mat4 parentWorld = parent.GetComponent<WorldTransformComponent>().WorldMatrix;
+                    localTransform = glm::inverse(parentWorld) * worldTransform;
+                }
+            }
+
+            // Decompose the matrix back into Translation, Rotation, and Scale components
+            glm::vec3 translation, rotation, scale;
+            Math::DecomposeTransform(localTransform, translation, rotation, scale);
+
+            auto& tc = GetComponent<TransformComponent>();
+            tc.Translation = translation;
+            tc.Rotation = rotation;
+            tc.Scale = scale;
+
+            // Mark transform as dirty so the SceneGraph updates immediately
+            if (!HasComponent<DirtyTransformComponent>())
+            {
+                AddComponent<DirtyTransformComponent>();
+            }
+        }
+    }
         Entity GetParent()
         {
             if (!HasComponent<RelationshipComponent>()) return {};

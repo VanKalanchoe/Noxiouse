@@ -225,22 +225,28 @@ namespace Nox
                     transform.Translation.x = position.x;
                     transform.Translation.y = position.y;
                     transform.Rotation.z = b2Rot_GetAngle(b2Body_GetRotation(body));
+                    
+                    m_Registry.get_or_emplace<DirtyTransformComponent>(e);
                 }
             }
         }
+        
+        SceneGraph::UpdateWorldTransforms(m_Registry, m_EntityMap);
+        
        // Render 2D
+        //changed from transformcomp to worldcomp
 		Camera* mainCamera = nullptr;
 		glm::mat4 cameraTransform;
 		{
-			auto view = m_Registry.view<TransformComponent, CameraComponent>();
+			auto view = m_Registry.view<WorldTransformComponent, CameraComponent>();
 			for (auto entity : view)
 			{
-				auto [transform, camera] = view.get<TransformComponent, CameraComponent>(entity);
+				auto [transform, camera] = view.get<WorldTransformComponent, CameraComponent>(entity);
 				
 				if (camera.Primary)
 				{
 					mainCamera = &camera.Camera;
-					cameraTransform = transform.GetTransform();
+					cameraTransform = transform.WorldMatrix;
 					break;
 				}
 			}
@@ -249,37 +255,53 @@ namespace Nox
         if (mainCamera)
         {
            m_renderer->BeginScene(*mainCamera, cameraTransform);
+            
+            // Draw 3D Meshes
+            {
+               auto view = m_Registry.view<WorldTransformComponent, MeshComponent>();
+               for (auto entity : view)
+               {
+                   auto [transform, mesh] = view.get<WorldTransformComponent, MeshComponent>(entity);
+                
+                   MaterialComponent* materialComp = m_Registry.try_get<MaterialComponent>(entity);
+                
+                   MaterialComponent defaultMaterial;
+                   MaterialComponent& materialToUse = materialComp ? *materialComp : defaultMaterial;
+                
+                   m_renderer->SubmitMesh(transform.WorldMatrix, mesh, materialToUse, (int)entity);
+               }
+            }
 
             // Draw Sprites
             {
-                auto group = m_Registry.group<TransformComponent>(entt::get<SpriteRendererComponent>);
+                auto group = m_Registry.group<WorldTransformComponent>(entt::get<SpriteRendererComponent>);
                 for (auto entity : group)
                 {
-                    auto [transform, sprite] = group.get<TransformComponent, SpriteRendererComponent>(entity);
+                    auto [transform, sprite] = group.get<WorldTransformComponent, SpriteRendererComponent>(entity);
                     //Renderer2D::DrawQuad(transform.Position, transform.Size, transform.Scale, transform.Rotation, sprite.Color);
-                    m_renderer2D->DrawSprite(transform.GetTransform(), sprite, (int)entity);
+                    m_renderer2D->DrawSprite(transform.WorldMatrix, sprite, (int)entity);
                 }
             }
              
             // Draw Circles
             {
-                auto view = m_Registry.view<TransformComponent, CircleRendererComponent>();
+                auto view = m_Registry.view<WorldTransformComponent, CircleRendererComponent>();
                 for (auto entity : view)
                 {
-                    auto [transform, circle] = view.get<TransformComponent, CircleRendererComponent>(entity);
+                    auto [transform, circle] = view.get<WorldTransformComponent, CircleRendererComponent>(entity);
 
-                    m_renderer2D->DrawCircle(transform.GetTransform(), circle.Color, circle.Thickness, circle.Fade, (int)entity);
+                    m_renderer2D->DrawCircle(transform.WorldMatrix, circle.Color, circle.Thickness, circle.Fade, (int)entity);
                 }
             }
 
             // Draw Text
             {
-                auto view = m_Registry.view<TransformComponent, TextComponent>();
+                auto view = m_Registry.view<WorldTransformComponent, TextComponent>();
                 for (auto entity : view)
                 {
-                    auto [transform, text] = view.get<TransformComponent, TextComponent>(entity);
+                    auto [transform, text] = view.get<WorldTransformComponent, TextComponent>(entity);
 
-                    m_renderer2D->DrawString(text.TextString, transform.GetTransform(), text, (int)entity);
+                    m_renderer2D->DrawString(text.TextString, transform.WorldMatrix, text, (int)entity);
                 }
             }
             
@@ -309,6 +331,8 @@ namespace Nox
                 transform.Translation.x = position.x;
                 transform.Translation.y = position.y;
                 transform.Rotation.z = b2Rot_GetAngle(b2Body_GetRotation(body));
+                
+                m_Registry.get_or_emplace<DirtyTransformComponent>(e);
             }
         }
     
@@ -497,34 +521,34 @@ namespace Nox
         
         // Draw Sprites
         {
-            auto group = m_Registry.group<TransformComponent>(entt::get<SpriteRendererComponent>);
+            auto group = m_Registry.group<WorldTransformComponent>(entt::get<SpriteRendererComponent>);
             for (auto entity : group)
             {
-                auto [transform, sprite] = group.get<TransformComponent, SpriteRendererComponent>(entity);
+                auto [transform, sprite] = group.get<WorldTransformComponent, SpriteRendererComponent>(entity);
                 //Renderer2D::DrawQuad(transform.Position, transform.Size, transform.Scale, transform.Rotation, sprite.Color);
-                m_renderer2D->DrawSprite(transform.GetTransform(), sprite, (int)entity);
+                m_renderer2D->DrawSprite(transform.WorldMatrix, sprite, (int)entity);
                 //Renderer2D::DrawRect(transform, sprite, (int)entity);
             }
         }
         
         // Draw Circles
         {
-            auto view = m_Registry.view<TransformComponent, CircleRendererComponent>();
+            auto view = m_Registry.view<WorldTransformComponent, CircleRendererComponent>();
             for (auto entity : view)
             {
-                auto [transform, circle] = view.get<TransformComponent, CircleRendererComponent>(entity);
+                auto [transform, circle] = view.get<WorldTransformComponent, CircleRendererComponent>(entity);
 
-                m_renderer2D->DrawCircle(transform.GetTransform(), circle.Color, circle.Thickness, circle.Fade, (int)entity);
+                m_renderer2D->DrawCircle(transform.WorldMatrix, circle.Color, circle.Thickness, circle.Fade, (int)entity);
             }
         }
         // Draw Text
         {
-            auto view = m_Registry.view<TransformComponent, TextComponent>();
+            auto view = m_Registry.view<WorldTransformComponent, TextComponent>();
             for (auto entity : view)
             {
-                auto [transform, text] = view.get<TransformComponent, TextComponent>(entity);
+                auto [transform, text] = view.get<WorldTransformComponent, TextComponent>(entity);
 
-                m_renderer2D->DrawString(text.TextString, transform.GetTransform(), text, (int)entity);
+                m_renderer2D->DrawString(text.TextString, transform.WorldMatrix, text, (int)entity);
             }
         }
         /*
@@ -558,6 +582,11 @@ namespace Nox
 
     template <>
     void Scene::OnComponentAdded<WorldTransformComponent>(Entity entity, WorldTransformComponent& component)
+    {
+    }
+    
+    template <>
+    void Scene::OnComponentAdded<RelationshipComponent>(Entity entity, RelationshipComponent& component)
     {
     }
     

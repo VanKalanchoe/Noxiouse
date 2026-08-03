@@ -204,6 +204,56 @@ namespace Nox
 
             out << YAML::EndMap; // TransformComponent
         }
+        
+        if (entity.HasComponent<RelationshipComponent>())
+        {
+            out << YAML::Key << "RelationshipComponent";
+            out << YAML::BeginMap;
+
+            auto& relationship = entity.GetComponent<RelationshipComponent>();
+            out << YAML::Key << "Parent" << YAML::Value << (uint64_t)relationship.Parent;
+            
+            out << YAML::Key << "Children" << YAML::Value;
+            out << YAML::BeginSeq;
+            for (auto childID : relationship.Children)
+            {
+                out << childID;
+            }
+            out << YAML::EndSeq;
+
+            out << YAML::EndMap;
+        }
+        
+        if (entity.HasComponent<MeshComponent>())
+        {
+            out << YAML::Key << "MeshComponent";
+            out << YAML::BeginMap;
+
+            auto& meshComponent = entity.GetComponent<MeshComponent>();
+            out << YAML::Key << "MeshHandle" << YAML::Value << meshComponent.Mesh;
+            out << YAML::Key << "SubmeshIndex" << YAML::Value << meshComponent.SubmeshIndex;
+
+            out << YAML::EndMap;
+        }
+        
+        if (entity.HasComponent<MaterialComponent>())
+        {
+            out << YAML::Key << "MaterialComponent";
+            out << YAML::BeginMap;
+
+            auto& materialComponent = entity.GetComponent<MaterialComponent>();
+            out << YAML::Key << "AlbedoColor" << YAML::Value << materialComponent.AlbedoColor;
+
+            out << YAML::Key << "AlbedoMaps" << YAML::Value;
+            out << YAML::BeginSeq;
+            for (auto handle : materialComponent.AlbedoMaps)
+            {
+                out << (uint64_t)handle;
+            }
+            out << YAML::EndSeq;
+
+            out << YAML::EndMap;
+        }
 
         if (entity.HasComponent<CameraComponent>())
         {
@@ -456,6 +506,50 @@ namespace Nox
                     tc.Translation = transformComponent["Translation"].as<glm::vec3>();
                     tc.Rotation = transformComponent["Rotation"].as<glm::vec3>();
                     tc.Scale = transformComponent["Scale"].as<glm::vec3>();
+                }
+                
+                auto relationshipComponent = entity["RelationshipComponent"];
+                if (relationshipComponent)
+                {
+                    auto& rc = deserializedEntity.AddComponent<RelationshipComponent>();
+                    rc.Parent = relationshipComponent["Parent"].as<uint64_t>(); // Or uses UUID converter if registered
+
+                    auto childrenSeq = relationshipComponent["Children"];
+                    if (childrenSeq)
+                    {
+                        for (auto child : childrenSeq)
+                        {
+                            rc.Children.push_back(child.as<uint64_t>());
+                        }
+                    }
+                }
+                
+                auto meshComponent = entity["MeshComponent"];
+                if (meshComponent)
+                {
+                    auto& mc = deserializedEntity.AddComponent<MeshComponent>();
+                    if (meshComponent["MeshHandle"])
+                        mc.Mesh = meshComponent["MeshHandle"].as<AssetHandle>();
+                    if (meshComponent["SubmeshIndex"])
+                        mc.SubmeshIndex = meshComponent["SubmeshIndex"].as<uint32_t>();
+                }
+                
+                auto materialComponent = entity["MaterialComponent"];
+                if (materialComponent)
+                {
+                    auto& mc = deserializedEntity.AddComponent<MaterialComponent>();
+                    if (materialComponent["AlbedoColor"])
+                        mc.AlbedoColor = materialComponent["AlbedoColor"].as<glm::vec4>();
+
+                    auto albedoMapsSeq = materialComponent["AlbedoMaps"];
+                    if (albedoMapsSeq)
+                    {
+                        mc.AlbedoMaps.clear();
+                        for (auto mapHandle : albedoMapsSeq)
+                        {
+                            mc.AlbedoMaps.push_back(mapHandle.as<uint64_t>());
+                        }
+                    }
                 }
                 
                 auto cameraComponent = entity["CameraComponent"];
