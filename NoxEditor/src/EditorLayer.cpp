@@ -7,7 +7,6 @@
 #include <ImGuizmo.h>
 #include <glm/gtc/type_ptr.hpp>  // for pointer to matrix or vector
 
-#include "NoxCore/Math/Math.h"
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Asset/SceneImporter.h"
 #include "NoxCore/Core/Application.h"
@@ -22,17 +21,18 @@ namespace Nox
     EditorLayer::EditorLayer() : Layer("EditorLayer")
     {
         NOX_INFO("EditorLayer Start");
-        
+
         auto& app = Application::Get();
         m_Renderer = app.GetRenderer();
+        m_Renderer2D = m_Renderer->getRenderer2D();
 
         m_Font = Font::GetDefault();
 
-        m_IconPlay = TextureImporter::LoadTexture2D("Resources/Icons/PlayButton.ktx2", {.generateMips = false});
-        m_IconStop = TextureImporter::LoadTexture2D("Resources/Icons/StopButton.ktx2", {.generateMips = false});
-        m_IconPause = TextureImporter::LoadTexture2D("Resources/Icons/PauseButton.ktx2", {.generateMips = false});
-        m_IconSimulate = TextureImporter::LoadTexture2D("Resources/Icons/SimulateButton.ktx2", {.generateMips = false});
-        m_IconStep = TextureImporter::LoadTexture2D("Resources/Icons/StepButton.ktx2", {.generateMips = false});
+        m_IconPlay = TextureImporter::LoadTexture2D("assets/Icons/PlayButton.ktx2", {.generateMips = false});
+        m_IconStop = TextureImporter::LoadTexture2D("assets/Icons/StopButton.ktx2", {.generateMips = false});
+        m_IconPause = TextureImporter::LoadTexture2D("assets/Icons/PauseButton.ktx2", {.generateMips = false});
+        m_IconSimulate = TextureImporter::LoadTexture2D("assets/Icons/SimulateButton.ktx2", {.generateMips = false});
+        m_IconStep = TextureImporter::LoadTexture2D("assets/Icons/StepButton.ktx2", {.generateMips = false});
 
         m_EditorScene = CreateRef<Scene>();
         m_ActiveScene = m_EditorScene;
@@ -49,7 +49,7 @@ namespace Nox
             // TODO: promp the user to select a directory
             //NewProject();
 
-            // If no project is opened, close vank
+            // If no project is opened, close nox
             // note: this is while we dont have a new project path
             if (!OpenProject())
             {
@@ -60,6 +60,8 @@ namespace Nox
         }
 
         m_EditorCamera = EditorCamera(30.0f, 1.778f, 0.1f, 1000.0f);
+
+        Project::GetActive()->GetEditorAssetManager()->Init();
     }
 
     EditorLayer::~EditorLayer()
@@ -67,41 +69,45 @@ namespace Nox
         NOX_CORE_INFO("EditorLayer Shutdown");
 
         m_Font->ReleaseDefault(); // Since Editor Layer since static dies After renderer not needed for components
+
+        //idk what hapens if i have clientproject is this a good place here 
+        if (Project::GetActive() && Project::GetActive()->GetEditorAssetManager())
+        {
+            std::static_pointer_cast<EditorAssetManager>(Project::GetActive()->GetEditorAssetManager())->Shutdown();
+        }
     }
 
     void EditorLayer::OnEvent(Event& event)
     {
         //std::println("{}", event.ToString());
 
-        if (m_SceneState == SceneState::Edit)
+        if (m_SceneState == SceneState::Edit && m_ViewportHovered)
             m_EditorCamera.OnEvent(event);
 
         EventDispatcher dispatcher(event);
-        /*dispatcher.Dispatch<KeyPressedEvent>(Nox_BIND_EVENT_FN(EditorLayer::OnKeyPressed));*/
-        dispatcher.Dispatch<KeyPressedEvent>([this](KeyPressedEvent& e) { return OnKeyPressed(e); });
-        /*dispatcher.Dispatch<MouseButtonPressedEvent>(Nox_BIND_EVENT_FN(EditorLayer::OnMouseButtonPressed));*/
-        dispatcher.Dispatch<MouseButtonPressedEvent>([this](MouseButtonPressedEvent& e) { return OnMouseButtonPressed(e); });
+        dispatcher.Dispatch<KeyPressedEvent>(Nox_BIND_EVENT_FN(EditorLayer::OnKeyPressed));
+        dispatcher.Dispatch<MouseButtonPressedEvent>(Nox_BIND_EVENT_FN(EditorLayer::OnMouseButtonPressed));
     }
 
     void EditorLayer::OnUpdate(Timestep ts)
     {
         m_ActiveScene->OnViewportResize(m_ViewportSize.x, m_ViewportSize.y);
-        
-         // zero sized framebuffer is invalid
+
+        // zero sized framebuffer is invalid
         if (m_ViewportSize.x > 0.0f && m_ViewportSize.y > 0.0f)
         {
             // Verify if the viewport has a new size and resize the RenderTarget accordingly.
             NRI::Extent2D viewportSize = m_Renderer->getViewPortSize();
-            if ( m_ViewportSize.x != viewportSize.width || m_ViewportSize.y != viewportSize.height)
+            if (m_ViewportSize.x != viewportSize.width || m_ViewportSize.y != viewportSize.height)
             {
                 m_Renderer->onViewportSizeChange({m_ViewportSize.x, m_ViewportSize.y});
                 m_EditorCamera.SetViewportSize(m_ViewportSize.x, m_ViewportSize.y);
             }
         }
-        
+
         m_ActiveScene->SetRenderer(m_Renderer);
         m_ActiveScene->SetRenderer2D(m_Renderer->getRenderer2D());
-        
+
         switch (m_SceneState)
         {
         case SceneState::Edit:
@@ -129,11 +135,12 @@ namespace Nox
                 break;
             }
         }
-        
-        /*// Mouse Selection
+
+        // Mouse Selection
         auto [mx, my] = ImGui::GetMousePos();
         mx -= m_ViewportBounds[0].x;
         my -= m_ViewportBounds[0].y;
+
         glm::vec2 viewportSize = m_ViewportBounds[1] - m_ViewportBounds[0];
         //my = viewportSize.y - my;
         int mouseX = (int)mx;
@@ -141,17 +148,23 @@ namespace Nox
 
         if (mouseX >= 0 && mouseY >= 0 && mouseX < (int)viewportSize.x && mouseY < (int)viewportSize.y)
         {
-            /*ScopeTimer timer("MousePicking");#1#
+            /*ScopeTimer timer("MousePicking");*/
             // Retrieve the pixel data (ID) from the calculated index
             // reading only 1 pixel right now but if multi select maybe i need full viewport ? 
-            int pixelData = Renderer::ReadPixel(mouseX, mouseY);
+            /*int pixelData = Renderer::ReadPixel(mouseX, mouseY);
 
             m_HoveredEntity = pixelData == -1 ? Entity() : Entity((entt::entity)pixelData, m_ActiveScene.get());
-            
-            Renderer::setPickRequest(mouseX, mouseY, true);
-        }*/
-        
+            */
+            int32_t pixelData = m_Renderer->getPickedEntityID();
+
+            m_HoveredEntity = pixelData == -1 ? Entity() : Entity((entt::entity)pixelData, m_ActiveScene.get());
+
+            m_Renderer->setPickRequest(mouseX, mouseY, true);
+        }
+
         OnOverlayRender();
+
+        Project::GetActive()->GetEditorAssetManager()->Update();
     }
 
     void EditorLayer::OnRender()
@@ -160,8 +173,6 @@ namespace Nox
 
     void EditorLayer::OnImGuiRender()
     {
-        auto& app = Application::Get();
-
         /*--
         * IMGUI Docking
         * Create a dockspace and dock the viewport and settings window.
@@ -245,6 +256,9 @@ namespace Nox
             if (ImGui::MenuItem("vSync", "", &currentVSync))
                 m_Renderer->setVSync(currentVSync); // Recreate the swapchain with the new vSync setting
 
+            // Adding overlay text on the upper left corner
+            ImGui::Text("FPS: %.1f", ImGui::GetIO().Framerate);
+
             ImGui::EndMainMenuBar();
         }
 
@@ -255,15 +269,6 @@ namespace Nox
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
         if (ImGui::Begin("Viewport"))
         {
-            if (m_ViewportHovered)
-            {
-                Application::Get().setBlockEvents(false);
-            }
-            else
-            {
-                Application::Get().setBlockEvents(true);
-            }
-
             auto viewportMinRegion = ImGui::GetWindowContentRegionMin();
             auto viewportMaxRegion = ImGui::GetWindowContentRegionMax();
             auto viewportOffset = ImGui::GetWindowPos();
@@ -273,9 +278,11 @@ namespace Nox
             m_ViewportFocused = ImGui::IsWindowFocused();
             m_ViewportHovered = ImGui::IsWindowHovered();
 
+            Application::Get().GetImGuiLayer()->BlockEvents(!m_ViewportHovered);
+
             ImVec2 viewportPanelSize = ImGui::GetContentRegionAvail();
             m_ViewportSize = {viewportPanelSize.x, viewportPanelSize.y};
-            
+
             auto* texture = m_Renderer->GetSceneResource();
             if (texture)
             {
@@ -285,9 +292,6 @@ namespace Nox
                     // !!! This is where the RenderTarget image is displayed !!!
                     ImGui::Image(textureID, viewportPanelSize);
                 }
-                // Adding overlay text on the upper left corner
-                ImGui::SetCursorPos(ImVec2(0, 0));
-                ImGui::Text("FPS: %.1f", ImGui::GetIO().Framerate);
             }
 
             if (ImGui::BeginDragDropTarget())
@@ -295,39 +299,153 @@ namespace Nox
                 if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEM"))
                 {
                     AssetHandle handle = *(const AssetHandle*)payload->Data;
-                    OpenScene(handle);
+                    auto type = AssetManager::GetAssetType(handle);
+                    if (type == AssetType::Scene)
+                        OpenScene(handle);
+                    else if (type == AssetType::Mesh || type == AssetType::StaticMesh || type == AssetType::MeshSource)
+                    {
+                        // Get name from metada
+                        const AssetMetadata& metadata = Project::GetActive()->GetEditorAssetManager()->GetMetadata(handle);
+                        std::string entityName = metadata.FilePath.filename().stem().string();
+                        if (entityName.empty())
+                            entityName = "Mesh Entity";
+                        
+                        auto getOrImportTextureHandle = [&](const std::string& texturePath) -> AssetHandle
+                        {
+                            if (texturePath.empty()) return 0;
+                            
+                            std::filesystem::path pathObj(texturePath);
+                            std::filesystem::path relPath = pathObj.is_absolute() 
+                                ? std::filesystem::relative(pathObj, Project::GetActiveAssetDirectory()) 
+                                : pathObj;
+                            
+                            auto assetManager = Project::GetActive()->GetEditorAssetManager();
+                            
+                            for (const auto& [texHandle, meta] : assetManager->GetAssetRegistry())
+                            {
+                                if (meta.FilePath == relPath || meta.SourceFilePath == relPath)
+                                    return texHandle;
+                            }
+                            
+                            assetManager->ImportAsset(relPath, {}, {});
+                            
+                            for (const auto& [texHandle, meta] : assetManager->GetAssetRegistry())
+                            {
+                                if (meta.FilePath == relPath || meta.SourceFilePath == relPath)
+                                    return texHandle;
+                            }
+                            
+                            return 0;
+                        };
+
+                        // Check if it's a dynamic mesh asset with multiple submeshes
+                        if (type == AssetType::Mesh || type == AssetType::MeshSource)
+                        {
+                            Ref<Mesh> meshAsset = AssetManager::GetAsset<Mesh>(handle);
+                            if (meshAsset && meshAsset->GetSubMeshCount() > 1)
+                            {
+                                // 1. Create a Parent Root Entity for the whole file
+                                Entity parentEntity = m_ActiveScene->CreateEntity(entityName);
+
+                                // 2. Create a Child Entity for each submesh
+                                for (size_t i = 0; i < meshAsset->GetSubMeshCount(); i++)
+                                {
+                                    std::string subMeshName = meshAsset->GetSubmeshName(i);
+                                    NOX_CORE_INFO("[Scene Drop] Submesh {} name retrieved: '{}'", i, subMeshName);
+                                    if (subMeshName.empty())
+                                        subMeshName = entityName + "_sub_" + std::to_string(i);
+                                    
+                                    Entity childEntity = m_ActiveScene->CreateEntity(subMeshName);
+                                    childEntity.SetParent(parentEntity); // Link via Scene Graph!
+
+                                    auto& meshComp = childEntity.AddComponent<MeshComponent>();
+                                    meshComp.Mesh = handle;
+                                    meshComp.SubmeshIndex = static_cast<uint32_t>(i);
+                                    
+                                    const auto& matData = meshAsset->GetMaterial(i);
+                                    auto& matComp = childEntity.AddComponent<MaterialComponent>();
+                                    matComp.AlbedoColor = matData.AlbedoColor;
+                                    matComp.AlbedoMaps.push_back(getOrImportTextureHandle(matData.AlbedoTexturePath));
+                                }
+
+                                m_SceneHierarchyPanel.SetSelectedEntity(parentEntity);
+                            }
+                            else
+                            {
+                                // Single submesh dynamic mesh
+                                Entity newEntity = m_ActiveScene->CreateEntity(entityName);
+                                auto& meshComp = newEntity.AddComponent<MeshComponent>();
+                                meshComp.Mesh = handle;
+                                meshComp.SubmeshIndex = 0;
+                                
+                                if (meshAsset && !meshAsset->GetMaterials().empty())
+                                {
+                                    const auto& matData = meshAsset->GetMaterial(0);
+                                    auto& matComp = newEntity.AddComponent<MaterialComponent>();
+                                    matComp.AlbedoColor = matData.AlbedoColor;
+                                    matComp.AlbedoMaps.push_back(getOrImportTextureHandle(matData.AlbedoTexturePath));
+                                }
+                                else
+                                {
+                                    newEntity.AddComponent<MaterialComponent>();
+                                }
+                                
+                                m_SceneHierarchyPanel.SetSelectedEntity(newEntity);
+                            }
+                        }
+                        else // StaticMesh (.nsmesh) - always single flattened mesh
+                        {
+                            Ref<StaticMesh> staticMeshAsset = AssetManager::GetAsset<StaticMesh>(handle);
+                            Entity newEntity = m_ActiveScene->CreateEntity(entityName);
+                            auto& meshComp = newEntity.AddComponent<MeshComponent>();
+                            meshComp.Mesh = handle;
+                            meshComp.SubmeshIndex = 0;
+                            
+                            auto& matComp = newEntity.AddComponent<MaterialComponent>();
+                            
+                            if (staticMeshAsset)
+                            {
+                                matComp.AlbedoMaps.resize(staticMeshAsset->GetSubMeshCount(), 0);
+                                
+                                // Resolve paths to AssetHandles for each slot
+                                for (size_t i = 0; i < staticMeshAsset->GetSubMeshCount(); ++i)
+                                {
+                                    const auto& matData = staticMeshAsset->GetMaterial(i);
+                                    matComp.AlbedoMaps[i] = getOrImportTextureHandle(matData.AlbedoTexturePath);
+                                }
+                            }
+                            
+                            m_SceneHierarchyPanel.SetSelectedEntity(newEntity);
+                        }
+                    }
                 }
                 ImGui::EndDragDropTarget();
             }
 
             // Gizmos
-
+            //maybe be a callback you subscribe to instead
             Entity selectedEntity = m_SceneHierarchyPanel.GetSelectedEntity();
-
             if (selectedEntity && m_GizmoType != -1)
             {
-                ImGuizmo::SetOrthographic(false);
+                ImGuizmo::SetOrthographic(false); // maybe needed later for setortho camera
                 ImGuizmo::SetDrawlist();
 
-                ImGuizmo::SetRect(m_ViewportBounds[0].x, m_ViewportBounds[0].y,
-                                  m_ViewportBounds[1].x - m_ViewportBounds[0].x,
-                                  m_ViewportBounds[1].y - m_ViewportBounds[0].y);
+                ImGuizmo::SetRect(m_ViewportBounds[0].x, m_ViewportBounds[0].y, m_ViewportBounds[1].x - m_ViewportBounds[0].x, m_ViewportBounds[1].y - m_ViewportBounds[0].y);
 
                 // Camera
+
                 // Runtime camera from entity
-                /*auto cameraEntity = m_ActiveScene->GetPrimaryCameraEntity();
-                const auto& camera = cameraEntity.GetComponent<CameraComponent>().Camera;
-                const glm::mat4& cameraProjection = camera.GetProjection();
-                glm::mat4 cameraView = glm::inverse(cameraEntity.GetComponent<TransformComponent>().GetTransform());*/
+                // auto cameraEntity = m_ActiveScene->GetPrimaryCameraEntity();
+                // const auto& camera = cameraEntity.GetComponent<CameraComponent>().Camera;
+                // const glm::mat4& cameraProjection = camera.GetProjection();
+                // glm::mat4 cameraView = glm::inverse(cameraEntity.GetComponent<TransformComponent>().GetTransform());
 
                 // Editor camera
                 const glm::mat4& cameraProjection = m_EditorCamera.GetGizmoProjection();
-
                 glm::mat4 cameraView = m_EditorCamera.GetGizmoView();
 
-                // Entity transform
-                auto& tc = selectedEntity.GetComponent<TransformComponent>();
-                glm::mat4 transform = tc.GetTransform();
+                // Grab the WORLD transform for ImGuizmo
+                glm::mat4 worldTransform = selectedEntity.GetComponent<WorldTransformComponent>().WorldMatrix;
 
                 // Snapping
                 bool snap = Input::IsKeyPressed(SDL_SCANCODE_LCTRL);
@@ -342,25 +460,19 @@ namespace Nox
 
                 ImGuizmo::Manipulate(glm::value_ptr(cameraView), glm::value_ptr(cameraProjection),
                                      static_cast<ImGuizmo::OPERATION>(m_GizmoType), ImGuizmo::LOCAL,
-                                     glm::value_ptr(transform), nullptr, snap ? snapValues : nullptr);
+                                     glm::value_ptr(worldTransform), nullptr, snap ? snapValues : nullptr);
 
                 if (ImGuizmo::IsUsing())
                 {
-                    //translation is position for me maybe change
-                    glm::vec3 translation, rotation, scale;
-                    Math::DecomposeTransform(transform, translation, rotation, scale);
-
-                    glm::vec3 deltaRotation = rotation - tc.Rotation;
-                    tc.Translation = translation;
-                    tc.Rotation += deltaRotation;
-                    tc.Scale = scale;
+                    // One single line does all the math, finds the parent, and marks it dirty!
+                    selectedEntity.SetWorldTransform(worldTransform);
                 }
             }
 
-            ImGui::End();
+            ImGui::End(); // End viewport
             ImGui::PopStyleVar();
         }
-        
+
         // Extra ImGui windows can be added in OnImGuiRender() layer, like the demo window.
         // ImGui::ShowDemoWindow();
 
@@ -493,11 +605,16 @@ namespace Nox
 
     bool EditorLayer::OnKeyPressed(KeyPressedEvent& e)
     {
+        // 1. Abort if the user is typing in an ImGui text field
+        if (ImGui::GetIO().WantTextInput)
+            return false;
+
         // Shortcuts
         if (e.IsRepeat())
         {
             return false;
         }
+
 
         bool control = (Input::IsKeyPressed(SDL_SCANCODE_LCTRL) || Input::IsKeyPressed(SDL_SCANCODE_RCTRL));
         bool shift = (Input::IsKeyPressed(SDL_SCANCODE_LSHIFT) || Input::IsKeyPressed(SDL_SCANCODE_RSHIFT));
@@ -544,14 +661,23 @@ namespace Nox
 
         // Gizmos
         case SDL_SCANCODE_Q:
-            m_GizmoType = -1;
-            break;
+            {
+                if (m_ViewportHovered)
+                    m_GizmoType = -1;
+                break;
+            }
         case SDL_SCANCODE_W:
-            m_GizmoType = ImGuizmo::OPERATION::TRANSLATE;
-            break;
+            {
+                if (m_ViewportHovered)
+                    m_GizmoType = ImGuizmo::OPERATION::TRANSLATE;
+                break;
+            }
         case SDL_SCANCODE_E:
-            m_GizmoType = ImGuizmo::OPERATION::ROTATE;
-            break;
+            {
+                if (m_ViewportHovered)
+                    m_GizmoType = ImGuizmo::OPERATION::ROTATE;
+                break;
+            }
         case SDL_SCANCODE_R:
             if (control)
             {
@@ -602,54 +728,62 @@ namespace Nox
 
     void EditorLayer::OnOverlayRender()
     {
-        /*if (m_SceneState == SceneState::Play)
+        if (m_SceneState == SceneState::Play)
         {
             Entity camera = m_ActiveScene->GetPrimaryCameraEntity();
             if (!camera)
                 return;
 
-            Renderer::BeginScene(camera.GetComponent<CameraComponent>().Camera, camera.GetComponent<TransformComponent>().GetTransform());
+            m_Renderer->BeginScene(camera.GetComponent<CameraComponent>().Camera, camera.GetComponent<TransformComponent>().GetTransform());
         }
         else
         {
-            Renderer::BeginScene(m_EditorCamera);
+            m_Renderer->BeginScene(m_EditorCamera);
         }
 
         if (m_ShowPhysicsColliders)
         {
             // Box Colliders
             {
-                auto view = m_ActiveScene->GetAllEntitiesWith<TransformComponent, BoxCollider2DComponent>();
+                auto view = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, BoxCollider2DComponent>();
                 for (auto entity : view)
                 {
-                    auto [tc, bc2d] = view.get<TransformComponent, BoxCollider2DComponent>(entity);
+                    auto [wtc, bc2d] = view.get<WorldTransformComponent, BoxCollider2DComponent>(entity);
 
-                    glm::vec3 translation = tc.Translation + glm::vec3(bc2d.Offset, 0.001f);
+                    /*glm::vec3 translation = tc.Translation + glm::vec3(bc2d.Offset, 0.001f);
                     glm::vec3 scale = tc.Scale * glm::vec3(bc2d.Size * 2.0f, 1.0f);
 
                     // box2d needs first translation then offset otherwise it offsets the bounding box from center instead of creating from center around
                     glm::mat4 transform = glm::translate(glm::mat4(1.0f), translation)
                         * glm::rotate(glm::mat4(1.0f), tc.Rotation.z, glm::vec3(0.0f, 0.0f, 1.0f))
                         * glm::translate(glm::mat4(1.0f), glm::vec3(bc2d.Offset, 0.001f))
-                        * glm::scale(glm::mat4(1.0f), scale * glm::vec3(bc2d.Size * 2.0f, 1.0f));
+                        * glm::scale(glm::mat4(1.0f), scale * glm::vec3(bc2d.Size * 2.0f, 1.0f));*/
+                    
+                    glm::mat4 transform = wtc.WorldMatrix
+                        * glm::translate(glm::mat4(1.0f), glm::vec3(bc2d.Offset, 0.001f))
+                        * glm::scale(glm::mat4(1.0f), glm::vec3(bc2d.Size * 2.0f, 1.0f));
 
-                    Renderer::DrawRect(transform, glm::vec4(0, 1, 0, 1));
+                    m_Renderer2D->DrawRect(transform, glm::vec4(0, 1, 0, 1));
                 }
             }
             // Circle Colliders
             {
-                auto view = m_ActiveScene->GetAllEntitiesWith<TransformComponent, CircleCollider2DComponent>();
+                auto view = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, CircleCollider2DComponent>();
                 for (auto entity : view)
                 {
-                    auto [tc, cc2d] = view.get<TransformComponent, CircleCollider2DComponent>(entity);
+                    auto [wtc, cc2d] = view.get<WorldTransformComponent, CircleCollider2DComponent>(entity);
 
-                    glm::vec3 translation = tc.Translation + glm::vec3(cc2d.Offset, 0.001f);
+                    /*glm::vec3 translation = tc.Translation + glm::vec3(cc2d.Offset, 0.001f);
                     glm::vec3 scale = tc.Scale * glm::vec3(cc2d.Radius * 2.0f);
 
                     glm::mat4 transform = glm::translate(glm::mat4(1.0f), translation)
-                        * glm::scale(glm::mat4(1.0f), scale);
+                        * glm::scale(glm::mat4(1.0f), scale);*/
+                    
+                    glm::mat4 transform = wtc.WorldMatrix 
+                        * glm::translate(glm::mat4(1.0f), glm::vec3(cc2d.Offset, 0.001f))
+                        * glm::scale(glm::mat4(1.0f), glm::vec3(cc2d.Radius * 2.0f));
 
-                    Renderer::DrawCircle(transform, glm::vec4(0, 1, 0, 1), 0.01f);
+                    m_Renderer2D->DrawCircle(transform, glm::vec4(0, 1, 0, 1), 0.01f);
                 }
             }
         }
@@ -657,10 +791,23 @@ namespace Nox
         // Draw selected entity outline
         if (Entity selectedEntity = m_SceneHierarchyPanel.GetSelectedEntity())
         {
-            const TransformComponent& transform = selectedEntity.GetComponent<TransformComponent>();
-            Renderer::DrawRect(transform.GetTransform(), glm::vec4(1.0f, 0.5f, 0.0f, 1.0f));
+            glm::mat4 transform = glm::mat4(1.0f);
+
+            // Use the WorldMatrix so the outline respects parent transformations!
+            if (selectedEntity.HasComponent<WorldTransformComponent>())
+            {
+                transform = selectedEntity.GetComponent<WorldTransformComponent>().WorldMatrix;
+            }
+            else if (selectedEntity.HasComponent<TransformComponent>())
+            {
+                // Fallback just in case an entity somehow doesn't have a WorldTransformComponent yet
+                transform = selectedEntity.GetComponent<TransformComponent>().GetTransform();
+            }
+            m_Renderer2D->DrawRect(transform, glm::vec4(1.0f, 0.5f, 0.0f, 1.0f));
+            /*const TransformComponent& transform = selectedEntity.GetComponent<TransformComponent>();
+            m_Renderer2D->DrawRect(transform.GetTransform(), glm::vec4(1.0f, 0.5f, 0.0f, 1.0f));*/
         }
-        Renderer::EndScene();*/
+        m_Renderer->EndScene();
     }
 
     void EditorLayer::NewProject()
@@ -670,7 +817,7 @@ namespace Nox
 
     bool EditorLayer::OpenProject()
     {
-        std::string filepath = Utility::OpenFile("Nox Project *.nproj\0nproj\0");
+        std::string filepath = "E:/dev/noxiouse/Facerun/Facerun.nproj"/*Utility::OpenFile("Nox Project *.nproj\0nproj\0")*/;
 
         if (filepath.empty())
             return false;
@@ -700,6 +847,9 @@ namespace Nox
 
     void EditorLayer::NewScene()
     {
+        m_HoveredEntity = Entity();
+        m_SceneHierarchyPanel.SetSelectedEntity(Entity());
+
         m_EditorScene = CreateRef<Scene>();
         m_ActiveScene = m_EditorScene;
 
@@ -751,7 +901,7 @@ namespace Nox
 
     void EditorLayer::SaveSceneAs()
     {
-        std::string filepath = Utility::SaveFile("Vank Scene *.vank\0vank\0");
+        std::string filepath = Utility::SaveFile("Nox Scene *.nox\0nox\0");
         if (!filepath.empty())
         {
             SerializeScene(m_ActiveScene, filepath);

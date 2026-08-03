@@ -33,12 +33,40 @@ namespace Nox
             m_Context->m_Registry.view<TagComponent>().each([&](auto entityID, TagComponent&)
             {
                 Entity entity(entityID, m_Context.get());
-                DrawEntityNode(entity);
+                
+                bool isRoot = true;
+                if (entity.HasComponent<RelationshipComponent>())
+                    if (entity.GetComponent<RelationshipComponent>().Parent != 0)
+                        isRoot = false;
+                
+                if (isRoot)
+                    DrawEntityNode(entity);
             });
+            
+            // --- 1. FILL REMAINING SPACE WITH AN INVISIBLE BUTTON ---
+            ImVec2 availSize = ImGui::GetContentRegionAvail();
+            if (availSize.x < 1.0f) availSize.x = 1.0f;
+            if (availSize.y < 1.0f) availSize.y = 1.0f;
+            
+            ImGui::InvisibleButton("##SceneHierarchyBackground", availSize);
 
             if (ImGui::IsMouseDown(0) && ImGui::IsWindowHovered())
             {
                 m_SelectionContext = {};
+            }
+            
+            if (ImGui::BeginDragDropTarget())
+            {
+                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("SCENE_HIERARCHY_ENTITY"))
+                {
+                    UUID droppedEntityID = *(UUID*)payload->Data;
+                    Entity droppedEntity = m_Context->GetEntityByUUID(droppedEntityID);
+                    if (droppedEntity)
+                    {
+                        droppedEntity.SetParent({}); // Pass empty entity to make it root
+                    }
+                }
+                ImGui::EndDragDropTarget();
             }
 
             // Right-click on blank space
@@ -77,11 +105,60 @@ namespace Nox
         ImGuiTreeNodeFlags flags = ((m_SelectionContext == entity) ? ImGuiTreeNodeFlags_Selected : 0) |
             ImGuiTreeNodeFlags_OpenOnArrow;
         flags |= ImGuiTreeNodeFlags_SpanAvailWidth;
+        
+        bool hasChildren = false;
+        if (entity.HasComponent<RelationshipComponent>())
+            if (!entity.GetComponent<RelationshipComponent>().Children.empty())
+                hasChildren = true;
+        
+        if (!hasChildren)
+            flags |= ImGuiTreeNodeFlags_Leaf;
 
         bool opened = ImGui::TreeNodeEx((void*)(uint64_t)(uint32_t)entity, flags, tag.c_str());
         if (ImGui::IsItemClicked())
         {
             m_SelectionContext = entity;
+        }
+        
+        // --- 1. DRAG SOURCE: Pick up this entity to drag it ---
+        if (ImGui::BeginDragDropSource())
+        {
+            UUID entityID = entity.GetUUID();
+            ImGui::SetDragDropPayload("SCENE_HIERARCHY_ENTITY", &entityID, sizeof(UUID));
+            ImGui::Text("%s", tag.c_str());
+            ImGui::EndDragDropSource();
+        }
+        
+        // --- 2. DROP TARGET: Drop another entity onto this one to make it a child ---
+        if (ImGui::BeginDragDropTarget())
+        {
+            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("SCENE_HIERARCHY_ENTITY"))
+            {
+                UUID droppedEntityID = *(UUID*)payload->Data;
+                Entity droppedEntity = m_Context->GetEntityByUUID(droppedEntityID);
+                
+                if (droppedEntity && droppedEntity != entity)
+                {
+                    // Prevent circular parenting (cannot parent an entity to its own child/descendant)
+                    bool isDescendant = false;
+                    Entity currentCheck = entity;
+                    while (currentCheck)
+                    {
+                        if (currentCheck == droppedEntity)
+                        {
+                            isDescendant = true;
+                            break;
+                        }
+                        currentCheck = currentCheck.GetParent();
+                    }
+
+                    if (!isDescendant)
+                    {
+                        droppedEntity.SetParent(entity);
+                    }
+                }
+            }
+            ImGui::EndDragDropTarget();
         }
 
         bool entityDeleted = false;
@@ -97,11 +174,21 @@ namespace Nox
 
         if (opened)
         {
-            //ImGuiTreeNodeFlags flags = ((m_SelectionContext == entity) ? ImGuiTreeNodeFlags_Selected : 0) | ImGuiTreeNodeFlags_OpenOnArrow;
+            if (hasChildren)
+            {
+                auto children = entity.GetComponent<RelationshipComponent>().Children;
+                for (UUID childID : children)
+                {
+                    Entity childEntity = m_Context->GetEntityByUUID(childID);
+                    if (childEntity)
+                        DrawEntityNode(childEntity);
+                }
+            }
+            /*//ImGuiTreeNodeFlags flags = ((m_SelectionContext == entity) ? ImGuiTreeNodeFlags_Selected : 0) | ImGuiTreeNodeFlags_OpenOnArrow;
             ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth;
             bool opened = ImGui::TreeNodeEx((void*)9817239, flags, tag.c_str());
             if (opened)
-                ImGui::TreePop();
+                ImGui::TreePop();*/
             ImGui::TreePop();
         }
         // at the end
@@ -116,9 +203,10 @@ namespace Nox
     }
     
     //styling maybe in the future different clas
-    static void DrawVec3Control(const std::string& label, glm::vec3& values, float resetValue = 0.0f,
+    static bool DrawVec3Control(const std::string& label, glm::vec3& values, float resetValue = 0.0f,
                                 float columnWidth = 100.0f)
     {
+        bool valueChanged = false;
         ImGuiIO& io = ImGui::GetIO();
         auto boldFont = io.Fonts->Fonts[1];
 
@@ -142,12 +230,14 @@ namespace Nox
         if (ImGui::Button("X", buttonSize))
         {
             values.x = resetValue;
+            valueChanged = true;
         }
         ImGui::PopStyleColor(3);
         ImGui::PopFont();
 
         ImGui::SameLine();
-        ImGui::DragFloat("##X", &values.x, 0.1f, 0.0f, 0.0f, "%.2f");
+        if (ImGui::DragFloat("##X", &values.x, 0.1f, 0.0f, 0.0f, "%.2f"))
+            valueChanged = true;
         // the last 3 paramater force it to be only show 2dec
         ImGui::PopItemWidth();
         ImGui::SameLine();
@@ -159,12 +249,14 @@ namespace Nox
         if (ImGui::Button("Y", buttonSize))
         {
             values.y = resetValue;
+            valueChanged = true;
         }
         ImGui::PopStyleColor(3);
         ImGui::PopFont();
 
         ImGui::SameLine();
-        ImGui::DragFloat("##Y", &values.y, 0.1f, 0.0f, 0.0f, "%.2f");
+        if (ImGui::DragFloat("##Y", &values.y, 0.1f, 0.0f, 0.0f, "%.2f"))
+            valueChanged = true;
         // the last 3 paramater force it to be only show 2dec
         ImGui::PopItemWidth();
         ImGui::SameLine();
@@ -176,12 +268,14 @@ namespace Nox
         if (ImGui::Button("Z", buttonSize))
         {
             values.z = resetValue;
+            valueChanged = true;
         }
         ImGui::PopStyleColor(3);
         ImGui::PopFont();
 
         ImGui::SameLine();
-        ImGui::DragFloat("##Z", &values.z, 0.1f, 0.0f, 0.0f, "%.2f");
+        if (ImGui::DragFloat("##Z", &values.z, 0.1f, 0.0f, 0.0f, "%.2f"))
+            valueChanged = true;
         // the last 3 paramater force it to be only show 2dec
         ImGui::PopItemWidth();
         ImGui::PopStyleVar();
@@ -189,6 +283,8 @@ namespace Nox
         ImGui::Columns(1);
 
         ImGui::PopID();
+        
+        return valueChanged;
     }
 
     template <typename T, typename UIFunction>
@@ -239,6 +335,9 @@ namespace Nox
 
     void SceneHierarchyPanel::DrawComponents(Entity entity)
     {
+        if (!entity)
+            return;
+        
         if (entity.HasComponent<TagComponent>())
         {
             auto& tag = entity.GetComponent<TagComponent>().Tag;
@@ -262,6 +361,9 @@ namespace Nox
 
         if (ImGui::BeginPopup("AddComponent"))
         {
+            DisplayAddComponentEntry<MeshComponent>("Mesh");
+            DisplayAddComponentEntry<MaterialComponent>("Material");
+            
             DisplayAddComponentEntry<CameraComponent>("Camera");
             DisplayAddComponentEntry<ScriptComponent>("Script");
             DisplayAddComponentEntry<SpriteRendererComponent>("Sprite Renderer");
@@ -276,13 +378,194 @@ namespace Nox
 
         ImGui::PopItemWidth();
 
-        DrawComponent<TransformComponent>("Transform", entity, [](auto& component)
+        DrawComponent<TransformComponent>("Transform", entity, [this, entity](auto& component)
         {
-            DrawVec3Control("Position", component.Translation);
+            bool modified = false;
+            modified |=  DrawVec3Control("Position", component.Translation);
+           
             glm::vec3 rotation = glm::degrees(component.Rotation);
-            DrawVec3Control("Rotation", rotation);
-            component.Rotation = glm::radians(rotation);
-            DrawVec3Control("Scale", component.Scale, 1.0f);
+            if (DrawVec3Control("Rotation", rotation))
+            {
+                component.Rotation = glm::radians(rotation);
+                modified = true;
+            }
+            modified |= DrawVec3Control("Scale", component.Scale, 1.0f);
+            
+            if (modified)
+                m_Context->m_Registry.emplace_or_replace<DirtyTransformComponent>(entity);
+        });
+        
+        DrawComponent<MeshComponent>("Mesh", entity, [](auto& component)
+        {
+            std::string label = "None";
+            bool isMeshValid = false;
+            
+            // 1. Resolve the current mesh name if one is assigned
+            if (component.Mesh != 0)
+            {
+                if (AssetManager::IsAssetHandleValid(component.Mesh))
+                {
+                    // Get the type and allow Source files OR loaded meshes
+                    AssetType type = AssetManager::GetAssetType(component.Mesh);
+                    if (type == AssetType::MeshSource || type == AssetType::StaticMesh || type == AssetType::Mesh)
+                    {
+                        const AssetMetadata& metadata = Project::GetActive()->GetEditorAssetManager()->GetMetadata(component.Mesh);
+                        label = metadata.FilePath.filename().string();
+                        isMeshValid = true;
+                    }
+                    else
+                    {
+                        label = "Invalid";
+                    }
+                }
+                else
+                {
+                    label = "Invalid";
+                }
+            }
+
+            // 2. Draw the button that acts as our Drag & Drop target
+            ImVec2 buttonLabelSize = ImGui::CalcTextSize(label.c_str());
+            buttonLabelSize.x += 20.0f;
+            float buttonLabelWidth = glm::max<float>(100.0f, buttonLabelSize.x);
+            
+            ImGui::Button(label.c_str(), ImVec2(buttonLabelWidth, 0.0f));
+            
+            // 3. Accept the payload from the Content Browser
+            if (ImGui::BeginDragDropTarget())
+            {
+                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEM"))
+                {
+                    AssetHandle handle = *(AssetHandle*)payload->Data;
+                    
+                    // Verify it's a mesh type
+                    AssetType type = AssetManager::GetAssetType(handle);
+                    if (type == AssetType::MeshSource || type == AssetType::StaticMesh || type == AssetType::Mesh)
+                    {
+                        component.Mesh = handle;
+                        component.SubmeshIndex = 0;
+                    }
+                    else
+                    {
+                        NOX_CORE_WARN("Wrong Asset Type - Expected a Mesh");
+                    }
+                }
+                ImGui::EndDragDropTarget();
+            }
+
+            // 4. Draw a clear "X" button to remove the mesh
+            if (isMeshValid)
+            {
+                ImGui::SameLine();
+                ImVec2 xLabelSize = ImGui::CalcTextSize("X");
+                float buttonSize = xLabelSize.y + ImGui::GetStyle().FramePadding.y * 2.0f;
+                if (ImGui::Button("X", ImVec2(buttonSize, buttonSize)))
+                {
+                    component.Mesh = 0;
+                }
+                
+                ImGui::DragScalar("Submesh Index", ImGuiDataType_U32, &component.SubmeshIndex, 0.1f, nullptr, nullptr, "%u");
+            }
+            
+            ImGui::SameLine();
+            ImGui::Text("Mesh Asset");
+        });
+        
+        DrawComponent<MaterialComponent>("Material", entity, [](auto& component)
+        {
+            ImGui::ColorEdit4("Albedo Color", glm::value_ptr(component.AlbedoColor));
+            
+            ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Text("Material Slots (Submesh Textures)");
+    ImGui::Spacing();
+
+    if (component.AlbedoMaps.empty())
+    {
+        ImGui::TextDisabled("No material slots assigned.");
+        if (ImGui::Button("+ Add Slot"))
+        {
+            component.AlbedoMaps.push_back(0);
+        }
+    }
+    else
+    {
+        for (size_t i = 0; i < component.AlbedoMaps.size(); i++)
+        {
+            // PUSH ID to prevent button ID collisions across multiple vector slots
+            ImGui::PushID(static_cast<int>(i));
+
+            AssetHandle& texHandle = component.AlbedoMaps[i];
+            std::string label = "None";
+            bool isTextureValid = false;
+
+            if (texHandle != 0)
+            {
+                if (AssetManager::IsAssetHandleValid(texHandle) && AssetManager::GetAssetType(texHandle) == AssetType::Texture2D)
+                {
+                    const AssetMetadata& metadata = Project::GetActive()->GetEditorAssetManager()->GetMetadata(texHandle);
+                    label = metadata.FilePath.filename().string();
+                    isTextureValid = true;
+                }
+                else
+                {
+                    label = "Invalid";
+                }
+            }
+
+            ImGui::Text("Slot [%zu]", i);
+            ImGui::SameLine();
+
+            ImVec2 buttonLabelSize = ImGui::CalcTextSize(label.c_str());
+            buttonLabelSize.x += 20.0f;
+            float buttonLabelWidth = glm::max<float>(100.0f, buttonLabelSize.x);
+
+            ImGui::Button(label.c_str(), ImVec2(buttonLabelWidth, 0.0f));
+
+            // Drag & Drop payload target for Texture2D
+            if (ImGui::BeginDragDropTarget())
+            {
+                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEM"))
+                {
+                    AssetHandle handle = *(AssetHandle*)payload->Data;
+                    if (AssetManager::GetAssetType(handle) == AssetType::Texture2D)
+                    {
+                        texHandle = handle;
+                    }
+                    else
+                    {
+                        NOX_CORE_WARN("Wrong Asset Type - Expected a Texture2D");
+                    }
+                }
+                ImGui::EndDragDropTarget();
+            }
+
+            // Clear Texture Button
+            if (isTextureValid)
+            {
+                ImGui::SameLine();
+                ImVec2 xLabelSize = ImGui::CalcTextSize("X");
+                float buttonSize = xLabelSize.y + ImGui::GetStyle().FramePadding.y * 2.0f;
+                if (ImGui::Button("X", ImVec2(buttonSize, buttonSize)))
+                {
+                    texHandle = 0;
+                }
+            }
+
+            ImGui::PopID();
+        }
+
+        ImGui::Spacing();
+        if (ImGui::Button("+ Add Slot"))
+        {
+            component.AlbedoMaps.push_back(0);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("- Remove Slot") && !component.AlbedoMaps.empty())
+        {
+            component.AlbedoMaps.pop_back();
+        }
+    }
         });
 
         DrawComponent<CameraComponent>("Camera", entity, [](auto& component)
@@ -557,7 +840,7 @@ namespace Nox
     
     template<typename T>
     void SceneHierarchyPanel::DisplayAddComponentEntry(const std::string& entryName) {
-        if (!m_SelectionContext.HasComponent<T>())
+        if (m_SelectionContext && !m_SelectionContext.HasComponent<T>())
         {
             if (ImGui::MenuItem(entryName.c_str()))
             {

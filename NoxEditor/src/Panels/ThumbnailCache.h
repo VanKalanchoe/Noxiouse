@@ -21,7 +21,7 @@ namespace Nox
 
         std::map<std::filesystem::path, ThumbnailImage> m_CachedImages;
 		
-        // TEMP (replace with VanK::Serialization)
+        // TEMP (replace with Nox::Serialization)
         std::filesystem::path m_ThumbnailCachePath;
     };   
 }

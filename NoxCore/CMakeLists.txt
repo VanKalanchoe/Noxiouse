@@ -8,7 +8,7 @@ if(ENABLE_CPP20_MODULE)
   set(CMAKE_CXX_SCAN_FOR_MODULES ON)
 endif()
 
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../cmake")
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 find_package (sdl3 REQUIRED)
 find_package (glm REQUIRED)
@@ -22,7 +22,6 @@ find_package (xxhash REQUIRED)
 find_package (yaml-cpp REQUIRED)
 find_package (spdlog CONFIG REQUIRED)
 find_package (box2d REQUIRED)
-find_package (imguizmo REQUIRED)
 
 # Define Slang as an imported library
 add_library(Slang::slang IMPORTED UNKNOWN)
@@ -47,7 +46,6 @@ else()
 endif()
 
 set(IMGUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendors/imgui")
-
 set(IMGUI_SOURCES
     ${IMGUI_DIR}/imgui.cpp
     ${IMGUI_DIR}/imgui_demo.cpp
@@ -60,6 +58,19 @@ set(IMGUI_SOURCES
 
     ${IMGUI_DIR}/misc/cpp/imgui_stdlib.cpp
 )
+
+set(IMGUIZMO_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendors/ImGuizmo/src")
+set(IMGUIZMO_SOURCES
+    ${IMGUIZMO_DIR}/ImGuizmo.cpp
+)
+
+set(TINYGLTF_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendors/tinygltf")
+#set(TINYGLTF_SOURCE
+#    ${TINYGLTF_DIR}/tiny_gltf_v3.c
+#)
+
+set(MESHOPTIMIZER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendors/meshoptimizer/src")
+file(GLOB MESHOPTIMIZER_SOURCES "${MESHOPTIMIZER_DIR}/*.cpp")
 
 # Set up Vulkan C++ module only if enabled
 if(ENABLE_CPP20_MODULE)
@@ -109,27 +120,23 @@ else()
   )
 endif()
 
-set(TEMPLATE_DIR ${CMAKE_BINARY_DIR}/${PROJECT_NAME})
-
 file(GLOB_RECURSE NOXCORE_FILES
     CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/NoxCore/src/*.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/NoxCore/src/*.h"
-    "${CMAKE_SOURCE_DIR}/shaders/*.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
 )
 
-add_library(${PROJECT_NAME} STATIC ${NOXCORE_FILES} ${IMGUI_SOURCES}) #main file here
-set_target_properties (${PROJECT_NAME} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${TEMPLATE_DIR})
-set_target_properties (${PROJECT_NAME} PROPERTIES CXX_STANDARD 20)
-target_link_libraries (${PROJECT_NAME} PUBLIC Vulkan::cppm SDL3::SDL3 glm::glm spdlog::spdlog Slang::slang EnTT::EnTT xxHash::xxhash yaml-cpp::yaml-cpp box2d::box2d imguizmo::imguizmo msdf-atlas-gen::msdf-atlas-gen tinyobjloader::tinyobjloader)
+add_library(${PROJECT_NAME} STATIC ${NOXCORE_FILES} ${IMGUI_SOURCES} ${IMGUIZMO_SOURCES} ${TINYGLTF_SOURCE} ${MESHOPTIMIZER_SOURCES}) #main file here
+
+target_link_libraries (${PROJECT_NAME} PUBLIC Vulkan::cppm SDL3::SDL3 glm::glm spdlog::spdlog Slang::slang EnTT::EnTT xxHash::xxhash yaml-cpp::yaml-cpp box2d::box2d msdf-atlas-gen::msdf-atlas-gen tinyobjloader::tinyobjloader)
 # Add here vendors
 target_include_directories (${PROJECT_NAME} SYSTEM PRIVATE ${STB_INCLUDEDIR} ${CMAKE_CURRENT_SOURCE_DIR}/vendors/taskflow ${CMAKE_CURRENT_SOURCE_DIR}/vendors/VulkanMemoryAllocator-Hpp/include ${CMAKE_CURRENT_SOURCE_DIR}/vendors/VulkanMemoryAllocator-Hpp/VulkanMemoryAllocator/include ${IMGUI_DIR}/backends)
 
 #vendors visible to other projects like editor
-target_include_directories (${PROJECT_NAME} SYSTEM PUBLIC ${IMGUI_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/vendors/filewatch)
+target_include_directories (${PROJECT_NAME} SYSTEM PUBLIC ${IMGUI_DIR} ${IMGUIZMO_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/vendors/filewatch)
 
 # Sysmtem means supress warnings from the include directories, so we don't get warnings from external libraries.
-target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/NoxCore/src ${CMAKE_SOURCE_DIR}/shaders)
+target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/NoxEditor/assets/shaders ${TINYGLTF_DIR} ${MESHOPTIMIZER_DIR})
 
 # Add compile definition if C++ 20 module is enabled
 if(ENABLE_CPP20_MODULE)
@@ -138,17 +145,3 @@ endif()
 
 # Define VULKAN_HPP_HANDLE_ERROR_OUT_OF_DATE_AS_SUCCESS to treat VK_ERROR_OUT_OF_DATE_KHR as a success code
 target_compile_definitions(${PROJECT_NAME} PRIVATE "VULKAN_HPP_HANDLE_ERROR_OUT_OF_DATE_AS_SUCCESS" )
-
-if(WIN32)
-  if(${CMAKE_GENERATOR} MATCHES "Visual Studio.*")
-    set_target_properties(${PROJECT_NAME} PROPERTIES VS_DEBUGGER_WORKING_DIRECTORY ${TEMPLATE_DIR})
-  endif()
-
-  add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_CURRENT_SOURCE_DIR}/vendors/slang/bin/slang.dll"
-            $<TARGET_FILE_DIR:${PROJECT_NAME}>
-    )
-endif()
-
-target_compile_options(${PROJECT_NAME} PRIVATE /std:c++latest)

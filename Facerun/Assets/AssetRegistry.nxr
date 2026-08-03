@@ -1,25 +1,45 @@
 AssetRegistry:
+  - Handle: 1634953866148052078
+    FilePath: textures/Checkerboard.png
+    Type: AssetType::Texture2D
+  - Handle: 1745213228374727182
+    FilePath: models/Texture.png
+    SourceFilePath: models/Texture.png
+    Type: AssetType::Texture2D
   - Handle: 3725258042431064742
-    FilePath: Textures/ChernoLogo.png
+    FilePath: textures/ChernoLogo.png
     Type: AssetType::Texture2D
   - Handle: 3904161952643960358
-    FilePath: Scenes/flat.nox
+    FilePath: scenes/flat.nox
     Type: AssetType::Scene
-  - Handle: 5314834349182513991
-    FilePath: Textures/blending_transparent_window.png
+  - Handle: 4923247609583320878
+    FilePath: textures/viking_room.ktx2
+    SourceFilePath: textures/viking_room.ktx2
     Type: AssetType::Texture2D
+  - Handle: 5314834349182513991
+    FilePath: textures/blending_transparent_window.png
+    Type: AssetType::Texture2D
+  - Handle: 5541764050084968938
+    FilePath: models/multimesh.nmesh
+    SourceFilePath: models/multimesh.gltf
+    Type: AssetType::Mesh
   - Handle: 6925804595022315940
-    FilePath: Scenes/Physics2D.nox
+    FilePath: scenes/Physics2D.nox
     Type: AssetType::Scene
   - Handle: 7412818356000165226
-    FilePath: Textures/Pacmanface.png
+    FilePath: textures/Pacmanface.png
     Type: AssetType::Texture2D
+  - Handle: 7502815306644812760
+    FilePath: models/dancing_stormtrooper/dancing_stormtrooper.nmesh
+    SourceFilePath: models/dancing_stormtrooper/dancing_stormtrooper.glb
+    Type: AssetType::Mesh
   - Handle: 13004636392655663239
-    FilePath: Scenes/3DScene.nox
+    FilePath: scenes/3DScene.nox
     Type: AssetType::Scene
-  - Handle: 15753039888186244122
-    FilePath: Textures/grass.png
+  - Handle: 14928672170422402861
+    FilePath: models/dancing_stormtrooper/textures/dancing_stormtrooper_tex_0.png
+    SourceFilePath: models/dancing_stormtrooper/textures/dancing_stormtrooper_tex_0.png
     Type: AssetType::Texture2D
-  - Handle: 18013020098634633818
-    FilePath: Scenes/Physics2D.nox
+  - Handle: 15201526316078530078
+    FilePath: scenes/noxtest.nox
     Type: AssetType::Scene

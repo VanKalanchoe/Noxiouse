@@ -8,8 +8,8 @@ namespace Nox
     {
         m_TreeNodes.push_back(TreeNode(".", 0));
  	
-        m_DirectoryIcon = TextureImporter::LoadTexture2D("Resources/Icons/DirectoryIcon.ktx2", {  .generateMips = false });
-        m_FileIcon = TextureImporter::LoadTexture2D("Resources/Icons/FileIcon.ktx2", { .generateMips = false });
+        m_DirectoryIcon = TextureImporter::LoadTexture2D("assets/Icons/DirectoryIcon.ktx2", {  .generateMips = false });
+        m_FileIcon = TextureImporter::LoadTexture2D("assets/Icons/FileIcon.ktx2", { .generateMips = false });
 
         RefreshAssetTree();
 
@@ -90,6 +90,7 @@ namespace Nox
 				{
 					AssetHandle handle = m_TreeNodes[treeNodeIndex].Handle;
 					ImGui::SetDragDropPayload("CONTENT_BROWSER_ITEM", &handle, sizeof(AssetHandle));
+					ImGui::Text("%s", itemStr.c_str());
 					ImGui::EndDragDropSource();
 				}
 
@@ -128,8 +129,21 @@ namespace Nox
 				{
 					if (ImGui::MenuItem("Import"))
 					{
-						Project::GetActive()->GetEditorAssetManager()->ImportAsset(relativePath);
-						RefreshAssetTree();
+						AssetType type = Project::GetActive()->GetEditorAssetManager()->GetAssetTypeFromExtension(path.extension());
+						if (type == AssetType::MeshSource)
+						{
+							m_PendingImportPath = relativePath;
+							m_ShowImportModal = true;
+						
+							std::filesystem::path defaultDest = m_PendingImportPath;
+							defaultDest.replace_extension(m_ImportAsStaticMesh ? ".nsmesh" : ".nmesh");
+							strncpy_s(m_ImportDestPathBuffer, defaultDest.string().c_str(), sizeof(m_ImportDestPathBuffer));
+						}
+						else
+						{
+							Project::GetActive()->GetEditorAssetManager()->ImportAsset(relativePath, {}, {});
+							RefreshAssetTree();
+						}
 					}
 					ImGui::EndPopup();
 				}
@@ -144,6 +158,53 @@ namespace Nox
 
 				ImGui::NextColumn();
 			}
+ 			
+ 			if (m_ShowImportModal)
+ 			{
+ 				ImGui::OpenPopup("Import Settings");
+ 				m_ShowImportModal = false; // Reset trigger so it doesn't loop
+ 			}
+ 			
+ 			if (ImGui::BeginPopupModal("Import Settings", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+ 			{
+ 				ImGui::Text("Importing: %s", m_PendingImportPath.filename().string().c_str());
+ 				ImGui::Separator();
+
+ 				// 3. The Checkbox
+ 				if (ImGui::Checkbox("Import as Static Mesh (.nsmesh)", &m_ImportAsStaticMesh))
+ 				{
+ 					std::filesystem::path currentDest = m_ImportDestPathBuffer;
+ 					currentDest.replace_extension(m_ImportAsStaticMesh ? ".nsmesh" : ".nmesh");
+ 					strncpy_s(m_ImportDestPathBuffer, currentDest.string().c_str(), sizeof(m_ImportDestPathBuffer));
+ 				}
+
+ 				ImGui::Text("Destination Path:");
+ 				ImGui::InputText("##dest", m_ImportDestPathBuffer, sizeof(m_ImportDestPathBuffer));
+ 				
+ 				ImGui::Separator();
+    
+ 				if (ImGui::Button("Cook & Import", ImVec2(120, 0)))
+ 				{
+ 					// 4. NOW we call the Asset Manager, passing in the user's choice!
+ 					AssetType targetType = m_ImportAsStaticMesh ? AssetType::StaticMesh : AssetType::Mesh;
+ 					std::filesystem::path destPath = m_ImportDestPathBuffer;
+ 					
+ 					Project::GetActive()->GetEditorAssetManager()->ImportAsset(m_PendingImportPath, destPath, targetType);
+        
+ 					// Refresh the UI
+ 					RefreshAssetTree(); 
+ 					ImGui::CloseCurrentPopup();
+ 				}
+    
+ 				ImGui::SameLine();
+    
+ 				if (ImGui::Button("Cancel", ImVec2(120, 0)))
+ 				{
+ 					ImGui::CloseCurrentPopup();
+ 				}
+    
+ 				ImGui::EndPopup();
+ 			}
 		}
 
 		ImGui::Columns(1);

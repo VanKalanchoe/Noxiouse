@@ -1,0 +1,50 @@
+Scene: Untitled
+Entities:
+  - Entity: 4162415581531913692
+    TagComponent:
+      Tag: fox1
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, -0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 5643130385509280860
+      Children:
+        []
+    MeshComponent:
+      MeshHandle: 5541764050084968938
+      SubmeshIndex: 1
+    MaterialComponent:
+      AlbedoColor: [1, 1, 1, 1]
+      AlbedoMaps:
+        - 1745213228374727182
+  - Entity: 5620825197889024746
+    TagComponent:
+      Tag: bunny
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, -0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 5643130385509280860
+      Children:
+        []
+    MeshComponent:
+      MeshHandle: 5541764050084968938
+      SubmeshIndex: 0
+    MaterialComponent:
+      AlbedoColor: [1, 1, 1, 1]
+      AlbedoMaps:
+        - 0
+  - Entity: 5643130385509280860
+    TagComponent:
+      Tag: multimesh
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        - 5620825197889024746
+        - 4162415581531913692
