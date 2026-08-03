@@ -966,7 +966,8 @@ namespace Nox
     }
     
     void Renderer::updateInstanceAndIndirectBuffer(uint32_t currentImage)
-    {//fix maybe dont recreate all buffers only the next frame ?
+    {
+        //fix maybe dont recreate all buffers only the next frame ?
         if (m_instanceBufferObjects.empty() || m_drawMeshTasksIndirectCommands.empty())
         {
             return;
@@ -976,7 +977,7 @@ namespace Nox
         if (requiredInstanceSize > m_InstanceBufferCapacity)
         {
             m_InstanceBufferCapacity = requiredInstanceSize * 2;
-            
+            m_device->waitIdle();
             createInstanceBuffer(m_InstanceBufferCapacity);
         }
         memcpy(m_instanceBuffersMapped[currentImage], m_instanceBufferObjects.data(), requiredInstanceSize);
@@ -985,7 +986,7 @@ namespace Nox
         if (requiredIndirectSize > m_IndirectBufferCapacity)
         {
             m_IndirectBufferCapacity = requiredIndirectSize * 2;
-            
+            m_device->waitIdle();
             createIndirectBuffer(m_IndirectBufferCapacity);
         }
         memcpy(m_indirectBuffersMapped[currentImage], m_drawMeshTasksIndirectCommands.data(), requiredIndirectSize);

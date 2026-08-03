@@ -377,7 +377,7 @@ namespace Nox
 
         tg3_parse_options_init(&opts);
         tg3_error_stack_init(&errors);
-
+        
         tg3_error_code err = tg3_parse_file(&model, &errors, path.string().c_str(), path.string().size(), &opts);
         if (err != TG3_OK)
         {
@@ -643,6 +643,55 @@ namespace Nox
                                 std::string uriStr(image.uri.data, image.uri.len);
                                 std::filesystem::path texturePath = path.parent_path() / uriStr;
                                 materialData.AlbedoTexturePath = texturePath.string();
+                            }
+                            else if (image.buffer_view >= 0 && image.buffer_view < (int32_t)model.buffer_views_count)
+                            {
+                                const auto& bufView = model.buffer_views[image.buffer_view];
+                                if (bufView.buffer >= 0 && bufView.buffer < (int32_t)model.buffers_count)
+                                {
+                                    const auto& buffer = model.buffers[bufView.buffer];
+                                    const uint8_t* imgData = &buffer.data.data[bufView.byte_offset];
+                                    size_t imgSize = bufView.byte_length;
+                                    
+                                    // Determine file extension from mime_type
+                                    std::string ext = ".png";
+                                    if (image.mime_type.data && image.mime_type.len > 0)
+                                    {
+                                        std::string mime(image.mime_type.data, image.mime_type.len);
+                                        if (mime.find("jpeg") != std::string::npos || mime.find("jpg") != std::string::npos)
+                                        {
+                                            ext = ".jpg";
+                                        }
+                                        else if (mime.find("ktx2") != std::string::npos)
+                                        {
+                                            ext = ".ktx2";
+                                        }
+                                        else
+                                        {
+                                            NOX_CORE_ASSERT(false, "Unsupported image mime type: {}", mime);
+                                        }
+                                    }
+                                    
+                                    // Export embedded image to disk alongside model
+                                    std::filesystem::path textureDir = path.parent_path() / "textures";
+                                    std::filesystem::create_directories(textureDir);
+                                    
+                                    std::string texFileName = path.stem().string() + "_tex_" + std::to_string(imageIndex) + ext;
+                                    std::filesystem::path texturePath = textureDir / texFileName;
+                                    
+                                    std::ofstream outImg(texturePath, std::ios::binary);
+                                    if (outImg.is_open())
+                                    {
+                                        outImg.write(reinterpret_cast<const char*>(imgData), imgSize);
+                                        outImg.close();
+                                        materialData.AlbedoTexturePath = texturePath.string();
+                                        NOX_CORE_INFO("[Importer] Extracted embedded GLB texture to {}", texturePath.string());
+                                    }
+                                    else
+                                    {
+                                        NOX_CORE_ERROR("[Importer] Failed to write extracted GLB texture to {}", texturePath.string());
+                                    }
+                                }
                             }
                         }
                     }
