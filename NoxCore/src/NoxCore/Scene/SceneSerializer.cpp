@@ -208,51 +208,45 @@ namespace Nox
         if (entity.HasComponent<RelationshipComponent>())
         {
             out << YAML::Key << "RelationshipComponent";
-            out << YAML::BeginMap;
+            out << YAML::BeginMap; // RelationshipComponent
 
             auto& relationship = entity.GetComponent<RelationshipComponent>();
             out << YAML::Key << "Parent" << YAML::Value << (uint64_t)relationship.Parent;
-            
             out << YAML::Key << "Children" << YAML::Value;
             out << YAML::BeginSeq;
             for (auto childID : relationship.Children)
-            {
                 out << childID;
-            }
             out << YAML::EndSeq;
 
-            out << YAML::EndMap;
+            out << YAML::EndMap; // RelationshipComponent
         }
         
         if (entity.HasComponent<MeshComponent>())
         {
             out << YAML::Key << "MeshComponent";
-            out << YAML::BeginMap;
+            out << YAML::BeginMap; // MeshComponent
 
             auto& meshComponent = entity.GetComponent<MeshComponent>();
             out << YAML::Key << "MeshHandle" << YAML::Value << meshComponent.Mesh;
             out << YAML::Key << "SubmeshIndex" << YAML::Value << meshComponent.SubmeshIndex;
 
-            out << YAML::EndMap;
+            out << YAML::EndMap; // MeshComponent
         }
         
         if (entity.HasComponent<MaterialComponent>())
         {
             out << YAML::Key << "MaterialComponent";
-            out << YAML::BeginMap;
+            out << YAML::BeginMap; // MaterialComponent
 
             auto& materialComponent = entity.GetComponent<MaterialComponent>();
             out << YAML::Key << "AlbedoColor" << YAML::Value << materialComponent.AlbedoColor;
-
             out << YAML::Key << "AlbedoMaps" << YAML::Value;
             out << YAML::BeginSeq;
             for (auto handle : materialComponent.AlbedoMaps)
-            {
                 out << (uint64_t)handle;
-            }
             out << YAML::EndSeq;
 
-            out << YAML::EndMap;
+            out << YAML::EndMap; // MaterialComponent
         }
 
         if (entity.HasComponent<CameraComponent>())
