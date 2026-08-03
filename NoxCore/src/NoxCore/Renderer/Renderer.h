@@ -1,8 +1,8 @@
 #pragma once
-
 #include "Renderer2D.h"
 #include "NoxCore/Core/Window.h"
 #include "Mesh.h"
+#include "PagedAllocator.h"
 
 namespace std
 {
@@ -63,6 +63,18 @@ inline std::vector<std::string> samplerNames{"Linear", "Nearest"};
 
 namespace Nox
 {
+    struct DeferredBuffer
+    {
+        std::unique_ptr<NRI::Buffer> buffer;
+        uint32_t framesRemaining = MAX_FRAMES_IN_FLIGHT;
+    };
+
+    struct DeferredMeshFree
+    {
+        MeshHandle handle;
+        uint32_t framesRemaining = MAX_FRAMES_IN_FLIGHT;
+    };
+    
     struct PickRequest
     {
         int32_t x = -1;
@@ -133,14 +145,29 @@ namespace Nox
         Ref<Texture2D> UploadTexture(const TextureData& cpuData);
         Ref<Texture2D> createSolidColorTexture(uint8_t r, uint8_t g, uint8_t b, uint8_t a);
         
-        static MeshHandle UploadMeshGeometry(const MeshData& data);
-        static void UpdateMeshletBuffers();
+        template <class T>
+        void UploadBufferSlice(NRI::Buffer& dstBuffer, const T* data, uint32_t elementOffset, uint32_t elementCount);
+      
+        MeshHandle UploadMeshGeometry(const MeshData& data);
+        static MeshHandle UploadMesh(const MeshData& data)
+        {
+            NOX_CORE_ASSERT(s_Instance, "Renderer instance does not exist!");
+            
+            return s_Instance->UploadMeshGeometry(data);
+        }
+        void UnloadMeshGeometry(const MeshHandle& handle);
+        void updatePageTables(uint32_t currentImage);
+
+        static void UnloadMesh(const MeshHandle& handle)
+        {
+            NOX_CORE_ASSERT(s_Instance, "Renderer instance does not exist!");
+            s_Instance->UnloadMeshGeometry(handle);
+        }
 
     private:
         void initRenderer();
         void cleanupSwapChain();
         void recreateSwapChain();
-
         void createSwapChain();
         void createCompiler();
         void createGraphicsPipeline(bool forceCompile);
@@ -152,7 +179,8 @@ namespace Nox
         void createEntityResources();
         void createDepthResources();
         void createTextureImage();
-        void createMeshletBuffers();
+        void initGeometryBuffers();
+        void markPageTablesDirty();
         void createUniformBuffers();
         void createInstanceBuffer(uint64_t bufferSize);
         void createIndirectBuffer(uint64_t bufferSize);
@@ -163,8 +191,11 @@ namespace Nox
         void recordCommandBuffer(uint32_t imageIndex);
         void updateUniformBuffer(uint32_t currentImage);
         void updateInstanceAndIndirectBuffer(uint32_t currentImage);
+        void processDeferredDeletions();
+        void processDeferredMeshFrees();
         std::vector<char> readFile(const std::string& filename);
-
+        void createPageTableBuffers(uint64_t elementCapacity);
+        
     private:
         inline static Renderer* s_Instance = nullptr;
         std::unique_ptr<Renderer2D> m_renderer2D;
@@ -214,10 +245,33 @@ namespace Nox
         Ref<Texture2D> m_textureResource3;
         uint32_t mipLevels;
         
-        
         // Meshes
         Ref<Mesh> bunnyMesh;
         Ref<Mesh> foxMesh;
+        
+        // 2. Queue for sub-allocation range frees
+        std::vector<DeferredMeshFree> m_deferredMeshFrees;
+
+        // 3. Queue for whole NRI::Buffer destructions
+        std::vector<DeferredBuffer> m_deferredBufferDeletions;
+        
+        PagedBufferAllocator<shaderio::Vertex>       m_vertexPages;
+        PagedBufferAllocator<shaderio::MeshletDraw>  m_meshletDrawPages;
+        PagedBufferAllocator<shaderio::MeshletBounds>m_meshletBoundsPages;
+        PagedBufferAllocator<uint32_t>               m_meshletVertPages;
+        PagedBufferAllocator<uint8_t>                m_meshletTriPages;
+        std::vector<std::unique_ptr<NRI::Buffer>> m_vertexPageTableBuffers;
+        std::vector<std::unique_ptr<NRI::Buffer>> m_meshletDrawPageTableBuffers;
+        std::vector<std::unique_ptr<NRI::Buffer>> m_meshletBoundPageTableBuffers;
+        std::vector<std::unique_ptr<NRI::Buffer>> m_meshletVertPageTableBuffers;
+        std::vector<std::unique_ptr<NRI::Buffer>> m_meshletTriPageTableBuffers;
+        std::vector<void*> m_vertexPageTableBuffersMapped;
+        std::vector<void*> m_meshletDrawPageTableBuffersMapped;
+        std::vector<void*> m_meshletBoundPageTableBuffersMapped;
+        std::vector<void*> m_meshletVertPageTableBuffersMapped;
+        std::vector<void*> m_meshletTriPageTableBuffersMapped;
+        bool m_pageTablesDirty[MAX_FRAMES_IN_FLIGHT] = { true, true, /* add 'true' for however many max frames you have */ };
+        uint64_t m_PageTableCapacity = 16; // Capacity in number of uint64_t elements
         
         uint64_t m_IndirectBufferCapacity = 0;
         std::vector<DrawMeshTasksIndirectCommand> m_drawMeshTasksIndirectCommands;
@@ -228,21 +282,6 @@ namespace Nox
         std::vector<shaderio::InstanceData> m_instanceBufferObjects;
         std::vector<std::unique_ptr<NRI::Buffer>> m_instanceBuffers;
         std::vector<void*> m_instanceBuffersMapped;
-        
-        inline static std::vector<shaderio::Vertex> m_vertices;
-        std::unique_ptr<NRI::Buffer> m_verticesBuffer;
-        
-        inline static std::vector<shaderio::MeshletBounds> m_meshletBounds;
-        std::unique_ptr<NRI::Buffer> m_meshletBoundsBuffer;
-        
-        inline static std::vector<shaderio::MeshletDraw> m_meshletDraws;
-        std::unique_ptr<NRI::Buffer> m_meshletDrawsBuffer;
-        
-        inline static std::vector<uint32_t> m_meshletVertices;
-        std::unique_ptr<NRI::Buffer> m_meshletVerticesBuffer;
-        
-        inline static std::vector<uint8_t> m_meshletTriangles;
-        std::unique_ptr<NRI::Buffer> m_meshletTrianglesBuffer;
         
         uint32_t frameIndex = 0;
 

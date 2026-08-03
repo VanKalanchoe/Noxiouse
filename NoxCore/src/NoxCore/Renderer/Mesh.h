@@ -1,14 +1,30 @@
 #pragma once
+#include <string>
 #include <glm/vec4.hpp>
 
 #include "NoxCore/Asset/Asset.h"
 
 namespace Nox
 {
+    struct BufferAllocation
+    {
+        uint32_t pageIndex = UINT32_MAX;
+        uint32_t offset = 0;
+        uint32_t count = 0;
+        
+        bool IsValid() const { return count > 0; };
+    };
+    
     struct MeshHandle
     {
-        uint32_t firstMeshlet = 0;
-        uint32_t meshletCount = 0;
+        BufferAllocation vertices;
+        BufferAllocation meshletDraws; // Also used for bounds (1:1 ratio)
+        BufferAllocation meshletVertices;
+        BufferAllocation meshletTriangles;
+        
+        uint32_t GetFirstMeshlet() const { return meshletDraws.offset; }
+        uint32_t GetMeshletCount() const { return meshletDraws.count; }
+        bool IsValid() const { return vertices.count > 0; }
     };
     
     struct MaterialData
@@ -21,7 +37,7 @@ namespace Nox
     {
     public:
         StaticMesh() = default;
-        virtual ~StaticMesh() = default;
+        ~StaticMesh();
         
         AssetType GetType() const override { return AssetType::StaticMesh; }
         
@@ -54,7 +70,7 @@ namespace Nox
     {
     public:
         Mesh() = default;
-        virtual ~Mesh() = default;
+        ~Mesh();
         
         AssetType GetType() const override { return AssetType::Mesh; }
         

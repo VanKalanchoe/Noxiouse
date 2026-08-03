@@ -2,6 +2,10 @@ AssetRegistry:
   - Handle: 1634953866148052078
     FilePath: textures/Checkerboard.png
     Type: AssetType::Texture2D
+  - Handle: 1745213228374727182
+    FilePath: models/Texture.png
+    SourceFilePath: models/Texture.png
+    Type: AssetType::Texture2D
   - Handle: 3725258042431064742
     FilePath: textures/ChernoLogo.png
     Type: AssetType::Texture2D
@@ -15,23 +19,27 @@ AssetRegistry:
   - Handle: 5314834349182513991
     FilePath: textures/blending_transparent_window.png
     Type: AssetType::Texture2D
+  - Handle: 5541764050084968938
+    FilePath: models/multimesh.nmesh
+    SourceFilePath: models/multimesh.gltf
+    Type: AssetType::Mesh
   - Handle: 6925804595022315940
     FilePath: scenes/Physics2D.nox
     Type: AssetType::Scene
   - Handle: 7412818356000165226
     FilePath: textures/Pacmanface.png
     Type: AssetType::Texture2D
-  - Handle: 9129678151573215989
+  - Handle: 7502815306644812760
     FilePath: models/dancing_stormtrooper/dancing_stormtrooper.nmesh
     SourceFilePath: models/dancing_stormtrooper/dancing_stormtrooper.glb
     Type: AssetType::Mesh
   - Handle: 13004636392655663239
     FilePath: scenes/3DScene.nox
     Type: AssetType::Scene
-  - Handle: 15201526316078530078
-    FilePath: scenes/noxtest.nox
-    Type: AssetType::Scene
-  - Handle: 15646493536499537907
+  - Handle: 14928672170422402861
     FilePath: models/dancing_stormtrooper/textures/dancing_stormtrooper_tex_0.png
     SourceFilePath: models/dancing_stormtrooper/textures/dancing_stormtrooper_tex_0.png
     Type: AssetType::Texture2D
+  - Handle: 15201526316078530078
+    FilePath: scenes/noxtest.nox
+    Type: AssetType::Scene

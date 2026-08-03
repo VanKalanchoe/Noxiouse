@@ -15,8 +15,9 @@ namespace NRI
         void* map(uint64_t offset, uint64_t size) override;
         void unmap() override;
         
-        void uploadData(CommandBuffer& cmd, Buffer& stagingBuffer, const void* vectorData, bool singleUpload = true) override;
         uint64_t getDeviceAddress() const override { return m_allocatedBuffer.address; };
+        uint64_t getSize() const override { return m_allocatedBuffer.size; };
+        
         vma::raii::Buffer& getNativeBuffer() { return m_allocatedBuffer.buffer; };
         
     private:

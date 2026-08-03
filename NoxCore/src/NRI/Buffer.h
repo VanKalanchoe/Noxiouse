@@ -32,7 +32,7 @@ namespace NRI
         virtual void* map(uint64_t offset, uint64_t size) = 0;
         virtual void unmap() = 0;
         
-        virtual void uploadData(CommandBuffer& cmd, Buffer& stagingBuffer, const void* vectorData, bool singleUpload = true) = 0;
         virtual uint64_t getDeviceAddress() const = 0;
+        virtual uint64_t getSize() const = 0;
     };
 }

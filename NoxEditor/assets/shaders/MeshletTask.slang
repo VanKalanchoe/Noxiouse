@@ -23,7 +23,7 @@ void taskMain
 
     uint32_t totalMeshlets = instance.meshletCount;
     // Base global meshlet index for this Task workgroup
-    uint32_t groupBaseMeshlet = instance.meshletOffset + (gid.x * TASK_SHADER_DISPATCH_X);
+    uint32_t groupBaseMeshlet = instance.drawsOffset + (gid.x * TASK_SHADER_DISPATCH_X);
 
     // Thread 0 initializes payload metadata
     if (gtid.x == 0)
@@ -41,8 +41,10 @@ void taskMain
     if (localMeshletIdx < totalMeshlets)
     {
         uint32_t globalMeshletIndex = groupBaseMeshlet + threadOffset;
-        MeshletBounds* meshletBoundsPtr = (MeshletBounds*)pushConstant.meshletBoundsReference;
-        MeshletBounds meshletBounds = meshletBoundsPtr[globalMeshletIndex];
+
+        uint64_t* boundsPageTable = (uint64_t*)pushConstant.meshletBoundsPageTableReference;
+        MeshletBounds* meshletBoundsPage = (MeshletBounds*)boundsPageTable[instance.drawsPageIndex];
+        MeshletBounds meshletBounds = meshletBoundsPage[globalMeshletIndex];
 
         // Transform bounding sphere center to world space
         float3 worldCenter = mul(instance.modelMatrix, float4(meshletBounds.center, 1.0)).xyz;

@@ -1,6 +1,5 @@
 #include "BufferVK.h"
 #include "DeviceVK.h"
-#include "CommandBufferVK.h"
 
 namespace NRI
 {
@@ -89,24 +88,5 @@ namespace NRI
         }
 
         m_allocatedBuffer.buffer.getAllocation().unmap();
-    }
-
-    void BufferVK::uploadData(CommandBuffer& cmd, Buffer& stagingBuffer, const void* vectorData, bool singleUpload)
-    {
-        auto* cmdVK = dynamic_cast<CommandBufferVK*>(&cmd);
-        
-        if (singleUpload)
-        {
-            m_deviceVK.getAllocator().uploadBufferData(cmdVK->getActiveNativeBuffer(), m_allocatedBuffer.buffer, vectorData, m_allocatedBuffer.size);
-        }
-        else
-        {
-            // wtf is this 
-            /*auto* stagingVK = dynamic_cast<BufferVK*>(&cmd);
-            void * data = stagingBuffer.map(0, m_allocatedBuffer.size);
-            memcpy(data, vectorData, m_allocatedBuffer.size);
-            const std::array<vk::BufferCopy, 1> copyRegion{{{.size = m_allocatedBuffer.size}}};
-            cmdVK->getActiveNativeBuffer().copyBuffer(stagingVK->getNativeBuffer(), m_allocatedBuffer.buffer, copyRegion);*/
-        }
     }
 }

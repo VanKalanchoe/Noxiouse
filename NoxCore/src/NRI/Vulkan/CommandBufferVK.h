@@ -57,7 +57,8 @@ namespace NRI
         void drawMeshTasksIndirect(Buffer& indirectBuffer, uint64_t offset, uint32_t drawCount, uint32_t stride) override;
         void drawMeshTasksIndirect(uint64_t indirectBufferDeviceAddress, uint64_t offset, uint32_t drawCount, uint32_t stride) override;
 
-        void copyBuffer(Buffer& srcBuffer, Buffer& dstBuffer, uint64_t deviceSize) override;
+        void copyBuffer(Buffer& srcBuffer, Buffer& dstBuffer, const BufferCopyRegion& region = {}) override;
+        
         void transitionTextureLayout(Texture& texture, TextureLayout oldLayout, TextureLayout newLayout) override;
         void transitionSwapchainLayout(Swapchain& swapchain, uint32_t imageIndex, TextureLayout oldLayout, TextureLayout newLayout) override;
         void resolveImage(Texture& srcTexture, Texture& dstTexture, uint32_t width, uint32_t height) override;

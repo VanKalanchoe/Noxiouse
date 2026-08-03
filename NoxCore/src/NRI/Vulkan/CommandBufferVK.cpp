@@ -238,12 +238,25 @@ namespace NRI
         ImGui_ImplVulkan_RenderDrawData(drawData, *m_commandBuffers[m_currentFrameIndex]);
     }
     
-    void CommandBufferVK::copyBuffer(Buffer& srcBuffer, Buffer& dstBuffer, uint64_t deviceSize)
+    void CommandBufferVK::copyBuffer(Buffer& srcBuffer, Buffer& dstBuffer, const BufferCopyRegion& region)
     {
-        auto* vkSrc = dynamic_cast<BufferVK*>(&srcBuffer);
-        auto* vkDst = dynamic_cast<BufferVK*>(&dstBuffer);
+        auto* srcVK = dynamic_cast<BufferVK*>(&srcBuffer);
+        auto* dstVK = dynamic_cast<BufferVK*>(&dstBuffer);
+        
+        uint64_t copySize = region.size;
+        if (copySize == 0)
+        {
+            copySize = std::min(srcVK->getSize() - region.srcOffset, dstVK->getSize() - region.dstOffset);
+        }
+        
+        vk::BufferCopy copyRegion
+        {
+            .srcOffset = region.srcOffset,
+            .dstOffset = region.dstOffset,
+            .size = copySize
+        };
 
-        m_commandBuffers[m_currentFrameIndex].copyBuffer(*vkSrc->getNativeBuffer(), *vkDst->getNativeBuffer(), vk::BufferCopy{.size = deviceSize});
+        m_commandBuffers[m_currentFrameIndex].copyBuffer(*srcVK->getNativeBuffer(), *dstVK->getNativeBuffer(), copyRegion);
     }
 
     void CommandBufferVK::bindPipeline(PipelineBindPoint bindPoint, Pipeline& pipeline)

@@ -242,12 +242,14 @@ namespace Nox
         // Upload each sub-mesh independently -> Vector of Handles
         for (const auto& data : meshDataList)
         {
-            MeshHandle subMeshHandle = Renderer::UploadMeshGeometry(data);
+            MeshHandle subMeshHandle = Renderer::UploadMesh(data);
             meshAsset->m_SubMeshes.push_back(subMeshHandle);
             meshAsset->m_SubmeshNames.push_back(data.Name);
         }
         meshAsset->m_Materials = std::move(materialDataList);
-        Renderer::UpdateMeshletBuffers();
+        
+        meshDataList.clear();
+        materialDataList.clear();
         
         return meshAsset;
     }
@@ -291,13 +293,15 @@ namespace Nox
         Ref<StaticMesh> staticMeshAsset = CreateRef<StaticMesh>();
         for (const auto& data : meshDataList)
         {
-            MeshHandle subMeshHandle = Renderer::UploadMeshGeometry(data);
+            MeshHandle subMeshHandle = Renderer::UploadMesh(data);
             staticMeshAsset->m_SubMeshes.push_back(subMeshHandle);
             staticMeshAsset->m_SubmeshNames.push_back(data.Name);
         }
         staticMeshAsset->m_Materials = std::move(materialDataList);
         
-        Renderer::UpdateMeshletBuffers();
+        
+        meshDataList.clear();
+        materialDataList.clear();
         
         return staticMeshAsset;
     }
@@ -335,13 +339,11 @@ namespace Nox
         // Upload each sub-mesh independently -> Vector of Handles
         for (const auto& data : meshDataList)
         {
-            MeshHandle subMeshHandle = Renderer::UploadMeshGeometry(data);
+            MeshHandle subMeshHandle = Renderer::UploadMesh(data);
             meshAsset->m_SubMeshes.push_back(subMeshHandle);
             meshAsset->m_SubmeshNames.push_back(data.Name);
         }
         meshAsset->m_Materials = std::move(materialDataList);
-        
-        Renderer::UpdateMeshletBuffers();
         
         return meshAsset;
     }

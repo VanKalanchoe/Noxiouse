@@ -115,8 +115,16 @@ struct InstanceData
 {
     // Mesh
     mat4 modelMatrix;
-    uint32_t meshletOffset; // Where this model's meshlets start in m_meshletDraws
-    uint32_t meshletCount;  // How many meshlets this model has
+
+    // --- NEW: Page Information ---
+    uint32_t drawsPageIndex;            // Same index used for meshletBounds (1:1 allocation)
+    uint32_t drawsOffset;               // Where this model's meshlets start in the page
+    uint32_t meshletCount;              // How many meshlets this model has
+    
+    uint32_t verticesPageIndex;
+    uint32_t meshletVerticesPageIndex;
+    uint32_t meshletTrianglesPageIndex;
+    // -----------------------------
     
     // Material
     vec4 albedoColor;
@@ -125,6 +133,41 @@ struct InstanceData
     // Editor-only
     int entityID;
 };
+
+struct PushConstantMeshlets
+{
+    uint64_t matrixReference;
+    uint64_t instanceReference;
+    
+    // These now point to the Page Table buffers (array of uint64_t BDAs)
+    uint64_t vertexPageTableReference;
+    uint64_t meshletBoundsPageTableReference;
+    uint64_t meshletDrawsPageTableReference;
+    uint64_t meshletVerticesPageTableReference;
+    uint64_t meshletTrianglesPageTableReference;
+};
+
+// Meshlet Global stores all meshes
+// Buffer 1: Read ONLY by Task Shader (32 Bytes -> 2 fit in 1 cache line!)
+struct MeshletBounds
+{
+    vec3 center;
+    float radius;
+    vec3 coneApex;
+    float coneCutoff;
+    vec3 coneAxis;
+};
+
+// Buffer 2: Read ONLY by Mesh Shader (24 Bytes)
+struct MeshletDraw
+{
+    uint32_t vertexOffset;          // Global offset into meshletVertices
+    uint32_t triangleOffset;        // Global offset into meshletTriangles
+    uint32_t vertexCount;           // Vertices in this meshlet (max 64)
+    uint32_t triangleCount;         // Triangles in this meshlet (max 124)
+    uint32_t globalVertexOffset;    // Base vertex offset in primary vertex buffer
+};
+
 
 struct PushConstantQuad
 {
@@ -197,36 +240,5 @@ struct LineData
     int entityID;
 };
 
-struct PushConstantMeshlets
-{
-    uint64_t matrixReference;
-    uint64_t instanceReference;
-    uint64_t verticesReference;
-    uint64_t meshletBoundsReference;
-    uint64_t meshletDrawsReference;
-    uint64_t meshletVerticesReference;
-    uint64_t meshletTrianglesReference;
-};
-
-// Meshlet Global stores all meshes
-// Buffer 1: Read ONLY by Task Shader (32 Bytes -> 2 fit in 1 cache line!)
-struct MeshletBounds
-{
-    vec3 center;
-    float radius;
-    vec3 coneApex;
-    float coneCutoff;
-    vec3 coneAxis;
-};
-
-// Buffer 2: Read ONLY by Mesh Shader (24 Bytes)
-struct MeshletDraw
-{
-    uint32_t vertexOffset;          // Global offset into meshletVertices
-    uint32_t triangleOffset;        // Global offset into meshletTriangles
-    uint32_t vertexCount;           // Vertices in this meshlet (max 64)
-    uint32_t triangleCount;         // Triangles in this meshlet (max 124)
-    uint32_t globalVertexOffset;    // Base vertex offset in primary vertex buffer
-};
 
 #endif  // HOST_DEVICE_H

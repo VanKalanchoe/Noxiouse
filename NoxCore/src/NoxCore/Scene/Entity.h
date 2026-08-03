@@ -2,6 +2,7 @@
 
 #include "Components.h"
 #include "Scene.h"
+#include "NoxCore/Math/Math.h"
 
 namespace Nox
 {
@@ -49,6 +50,44 @@ namespace Nox
             UUID parentUUID = GetComponent<RelationshipComponent>().Parent;
             if (parentUUID == 0) return {};
             return m_Scene->GetEntityByUUID(parentUUID);
+        }
+        
+        void SetWorldTransform(const glm::mat4& newWorldTransform)
+        {
+            auto& tc = GetComponent<TransformComponent>();
+            glm::mat4 localTransform = newWorldTransform;
+
+            // 1. If we have a parent, convert the World transform to a Local transform
+            if (HasComponent<RelationshipComponent>())
+            {
+                UUID parentUUID = GetComponent<RelationshipComponent>().Parent;
+                if (parentUUID != 0)
+                {
+                    // Assuming your Entity class has a reference to the scene (e.g., m_Scene)
+                    Entity parent = m_Scene->GetEntityByUUID(parentUUID);
+                    if (parent)
+                    {
+                        glm::mat4 parentWorld = parent.GetComponent<WorldTransformComponent>().WorldMatrix;
+                        localTransform = glm::inverse(parentWorld) * newWorldTransform;
+                    }
+                }
+            }
+
+            // 2. Decompose the final local transform
+            glm::vec3 translation, rotation, scale;
+            Math::DecomposeTransform(localTransform, translation, rotation, scale);
+
+            // 3. Apply it to the component (Handle rotation wrap-around smoothly)
+            glm::vec3 deltaRotation = rotation - tc.Rotation;
+            tc.Translation = translation;
+            tc.Rotation += deltaRotation;
+            tc.Scale = scale;
+
+            // 4. Mark dirty for the SceneGraph!
+            if (!HasComponent<DirtyTransformComponent>())
+            {
+                AddComponent<DirtyTransformComponent>();
+            }
         }
 
         // Add a component: player.AddComponent<TransformComponent>();

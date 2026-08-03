@@ -7,7 +7,6 @@
 #include <ImGuizmo.h>
 #include <glm/gtc/type_ptr.hpp>  // for pointer to matrix or vector
 
-#include "NoxCore/Math/Math.h"
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Asset/SceneImporter.h"
 #include "NoxCore/Core/Application.h"
@@ -443,12 +442,10 @@ namespace Nox
 
                 // Editor camera
                 const glm::mat4& cameraProjection = m_EditorCamera.GetGizmoProjection();
-
                 glm::mat4 cameraView = m_EditorCamera.GetGizmoView();
 
-                // Entity transform
-                auto& tc = selectedEntity.GetComponent<TransformComponent>();
-                glm::mat4 transform = tc.GetTransform();
+                // Grab the WORLD transform for ImGuizmo
+                glm::mat4 worldTransform = selectedEntity.GetComponent<WorldTransformComponent>().WorldMatrix;
 
                 // Snapping
                 bool snap = Input::IsKeyPressed(SDL_SCANCODE_LCTRL);
@@ -463,18 +460,12 @@ namespace Nox
 
                 ImGuizmo::Manipulate(glm::value_ptr(cameraView), glm::value_ptr(cameraProjection),
                                      static_cast<ImGuizmo::OPERATION>(m_GizmoType), ImGuizmo::LOCAL,
-                                     glm::value_ptr(transform), nullptr, snap ? snapValues : nullptr);
+                                     glm::value_ptr(worldTransform), nullptr, snap ? snapValues : nullptr);
 
                 if (ImGuizmo::IsUsing())
                 {
-                    //translation is position for me maybe change
-                    glm::vec3 translation, rotation, scale;
-                    Math::DecomposeTransform(transform, translation, rotation, scale);
-
-                    glm::vec3 deltaRotation = rotation - tc.Rotation;
-                    tc.Translation = translation;
-                    tc.Rotation += deltaRotation;
-                    tc.Scale = scale;
+                    // One single line does all the math, finds the parent, and marks it dirty!
+                    selectedEntity.SetWorldTransform(worldTransform);
                 }
             }
 

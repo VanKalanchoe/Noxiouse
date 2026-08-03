@@ -15,24 +15,24 @@
 namespace Nox
 {
     static bool m_reloadShader = false;
-    
+
     Renderer::Renderer(std::shared_ptr<Window> window, bool isEditor) : m_window(std::move(window)), m_isEditor(isEditor)
     {
         NOX_CORE_INFO("Renderer Start");
 
         s_Instance = this;
-        
+
         m_device = NRI::Device::create(NRI::GraphicsAPI::Vulkan, *m_window);
         if (!m_device) NOX_CORE_ASSERT("Failed to create NRI device");
 
         initRenderer();
-        
+
         /*
         bunnyMesh = MeshImporter::LoadMesh(MODEL_PATH_GLTF_STANDFORD);
         foxMesh = MeshImporter::LoadMesh(MODEL_PATH_FOX_GLTF);
         
         */
-        
+
         m_fileWatcher.watch(std::filesystem::path("assets/shaders/Meshlet.slang"), [this](auto path) { m_reloadShader = true; });
         m_fileWatcher.watch(std::filesystem::path("assets/shaders/shader.slang"), [this](auto path) { m_reloadShader = true; });
         m_fileWatcher.watch(std::filesystem::path("assets/shaders/present.slang"), [this](auto path) { m_reloadShader = true; });
@@ -100,6 +100,8 @@ namespace Nox
         createEntityResources();
         createDepthResources();
         createCommandBuffers();
+
+        initGeometryBuffers();
     }
 
     void Renderer::cleanupSwapChain()
@@ -368,165 +370,195 @@ namespace Nox
         return UploadTexture(cpuData);
     }
 
+    template <typename T>
+    void Renderer::UploadBufferSlice(NRI::Buffer& dstBuffer, const T* data, uint32_t elementOffset, uint32_t elementCount)
+    {
+        if (elementCount == 0) return;
+
+        uint64_t bufferSize = sizeof(T) * elementCount;
+        uint64_t dstByteOffset = sizeof(T) * elementOffset;
+
+        std::unique_ptr<NRI::Buffer> stagingBuffer = m_device->createBuffer(NRI::BufferDesc{
+            .size = bufferSize,
+            .usage = NRI::BufferUsage::Staging
+        });
+
+        void* mappedMemory = stagingBuffer->map(0, bufferSize);
+        memcpy(mappedMemory, data, bufferSize);
+        stagingBuffer->unmap();
+
+        std::unique_ptr<NRI::CommandBuffer> cmd = beginSingleTimeCommands();
+        // Construct the copy region struct
+        NRI::BufferCopyRegion copyRegion
+        {
+            .srcOffset = 0,
+            .dstOffset = dstByteOffset,
+            .size = bufferSize
+        };
+        cmd->copyBuffer(*stagingBuffer, dstBuffer, copyRegion);
+        endSingleTimeCommands(std::move(cmd));
+    }
+
+    void Renderer::initGeometryBuffers()
+    {
+        constexpr uint32_t INITIAL_VERTICES = 100'000;
+        constexpr uint32_t INITIAL_DRAWS = 50'000;
+        constexpr uint32_t INITIAL_VERTS = 500'000;
+        constexpr uint32_t INITIAL_TRIS = 1'500'000;
+
+        m_vertexPages.Init(m_device.get(), INITIAL_VERTICES);
+        m_meshletDrawPages.Init(m_device.get(), INITIAL_DRAWS);
+        m_meshletBoundsPages.Init(m_device.get(), INITIAL_DRAWS);
+        m_meshletVertPages.Init(m_device.get(), INITIAL_VERTS);
+        m_meshletTriPages.Init(m_device.get(), INITIAL_TRIS);
+    }
+
+    void Renderer::markPageTablesDirty()
+    {
+        for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+        {
+            m_pageTablesDirty[i] = true;
+        }
+    }
+
     MeshHandle Renderer::UploadMeshGeometry(const MeshData& data)
     {
         MeshHandle handle{};
-        handle.firstMeshlet = static_cast<uint32_t>(m_meshletDraws.size());
 
-        uint32_t baseVertex = static_cast<uint32_t>(m_vertices.size());
-        uint32_t meshletVertexOffset = static_cast<uint32_t>(m_meshletVertices.size());
-        uint32_t meshletTrianglesOffset = static_cast<uint32_t>(m_meshletTriangles.size());
+        uint32_t vertCount = static_cast<uint32_t>(data.Vertices.size());
+        uint32_t drawCount = static_cast<uint32_t>(data.Draws.size());
+        uint32_t meshVertCount = static_cast<uint32_t>(data.MeshletVertices.size());
+        uint32_t meshTriCount = static_cast<uint32_t>(data.MeshletTriangles.size());
 
-        // 1. Append vertices
-        m_vertices.insert(m_vertices.end(), data.Vertices.begin(), data.Vertices.end());
+        // Allocate across pages (creates a new page if full or oversized)
+        PageAllocation vertAlloc = m_vertexPages.Allocate(vertCount);
+        PageAllocation drawAlloc = m_meshletDrawPages.Allocate(drawCount);
+        PageAllocation boundAlloc = m_meshletBoundsPages.Allocate(drawCount);
+        PageAllocation mvertAlloc = m_meshletVertPages.Allocate(meshVertCount);
+        PageAllocation mtriAlloc = m_meshletTriPages.Allocate(meshTriCount);
 
-        // 2. Append meshlet draw calls (adjusting global offsets)
-        for (auto draw : data.Draws)
+        handle.vertices = {vertAlloc.pageIndex, vertAlloc.offset, vertAlloc.count};
+        handle.meshletDraws = {drawAlloc.pageIndex, drawAlloc.offset, drawAlloc.count};
+        handle.meshletVertices = {mvertAlloc.pageIndex, mvertAlloc.offset, mvertAlloc.count};
+        handle.meshletTriangles = {mtriAlloc.pageIndex, mtriAlloc.offset, mtriAlloc.count};
+
+        // Patch meshlet local offsets
+        std::vector<shaderio::MeshletDraw> adjustedDraws = data.Draws;
+        for (auto& draw : adjustedDraws)
         {
-            draw.vertexOffset += meshletVertexOffset;
-            draw.triangleOffset += meshletTrianglesOffset;
-            draw.globalVertexOffset += baseVertex;
-            m_meshletDraws.push_back(draw);
+            draw.vertexOffset += handle.meshletVertices.offset;
+            draw.triangleOffset += handle.meshletTriangles.offset;
+            draw.globalVertexOffset += handle.vertices.offset;
         }
 
-        // 3. Append bounds & raw meshlet buffers
-        m_meshletBounds.insert(m_meshletBounds.end(), data.Bounds.begin(), data.Bounds.end());
-        m_meshletVertices.insert(m_meshletVertices.end(), data.MeshletVertices.begin(), data.MeshletVertices.end());
-        m_meshletTriangles.insert(m_meshletTriangles.end(), data.MeshletTriangles.begin(), data.MeshletTriangles.end());
+        // Upload slice directly to target page buffers
+        UploadBufferSlice(*m_vertexPages.GetBuffer(vertAlloc.pageIndex), data.Vertices.data(), vertAlloc.offset, vertAlloc.count);
+        UploadBufferSlice(*m_meshletDrawPages.GetBuffer(drawAlloc.pageIndex), adjustedDraws.data(), drawAlloc.offset, drawAlloc.count);
+        UploadBufferSlice(*m_meshletBoundsPages.GetBuffer(boundAlloc.pageIndex), data.Bounds.data(), boundAlloc.offset, boundAlloc.count);
+        UploadBufferSlice(*m_meshletVertPages.GetBuffer(mvertAlloc.pageIndex), data.MeshletVertices.data(), mvertAlloc.offset, mvertAlloc.count);
+        UploadBufferSlice(*m_meshletTriPages.GetBuffer(mtriAlloc.pageIndex), data.MeshletTriangles.data(), mtriAlloc.offset, mtriAlloc.count);
 
-        handle.meshletCount = static_cast<uint32_t>(data.Draws.size());
+        markPageTablesDirty();
+
         return handle;
     }
 
-    void Renderer::UpdateMeshletBuffers()
+    void Renderer::UnloadMeshGeometry(const MeshHandle& handle)
     {
-        if (s_Instance)
-            s_Instance->createMeshletBuffers();
-        else
-            NOX_CORE_ASSERT(false, "Renderer::updateMeshletBuffers() Renderer instance does not exist when updating meshlet buffers!");
+        if (!handle.IsValid()) return;
+
+        // Defer returning offsets so current frames in flight finish reading
+        m_deferredMeshFrees.push_back({
+            .handle = handle,
+            .framesRemaining = MAX_FRAMES_IN_FLIGHT
+        });
+
+        markPageTablesDirty();
     }
 
-    void Renderer::createMeshletBuffers()
+    void Renderer::createPageTableBuffers(uint64_t elementCapacity)
     {
-        // Vertices
+        uint64_t bufferSize = elementCapacity * sizeof(uint64_t);
+
+        auto initMappedBuffer = [&](std::vector<std::unique_ptr<NRI::Buffer>>& buffers, std::vector<void*>& mapped)
         {
-            uint64_t bufferSize = sizeof(m_vertices[0]) * m_vertices.size();
+            buffers.clear();
+            mapped.clear();
+            buffers.reserve(MAX_FRAMES_IN_FLIGHT);
+            mapped.reserve(MAX_FRAMES_IN_FLIGHT);
 
-            std::unique_ptr<NRI::Buffer> stagingBuffer = m_device->createBuffer(NRI::BufferDesc{
-                .size = bufferSize,
-                .usage = NRI::BufferUsage::Staging
-            });
-
-            void* mappedMemory = stagingBuffer->map(0, bufferSize);
-            memcpy(mappedMemory, m_vertices.data(), bufferSize);
-            stagingBuffer->unmap();
-
-            m_verticesBuffer = m_device->createBuffer(NRI::BufferDesc
-                {
+            for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+            {
+                std::unique_ptr<NRI::Buffer> buf = m_device->createBuffer(NRI::BufferDesc{
                     .size = bufferSize,
-                    .usage = NRI::BufferUsage::StorageStatic
+                    .usage = NRI::BufferUsage::Storage // Just like your instance buffers
                 });
+                mapped.push_back(buf->map(0, bufferSize));
+                buffers.push_back(std::move(buf));
+            }
+        };
 
-            std::unique_ptr<NRI::CommandBuffer> commandCopyBuffer = beginSingleTimeCommands();
-            m_verticesBuffer->uploadData(*commandCopyBuffer, *stagingBuffer, m_vertices.data());
-            endSingleTimeCommands(std::move(commandCopyBuffer));
-        }
-        
-        // Meshlet Bounds
+        initMappedBuffer(m_vertexPageTableBuffers, m_vertexPageTableBuffersMapped);
+        initMappedBuffer(m_meshletDrawPageTableBuffers, m_meshletDrawPageTableBuffersMapped);
+        initMappedBuffer(m_meshletBoundPageTableBuffers, m_meshletBoundPageTableBuffersMapped);
+        initMappedBuffer(m_meshletVertPageTableBuffers, m_meshletVertPageTableBuffersMapped);
+        initMappedBuffer(m_meshletTriPageTableBuffers, m_meshletTriPageTableBuffersMapped);
+    }
+
+    void Renderer::updatePageTables(uint32_t currentImage)
+    {
+        // SKIP entirely if nothing has changed!
+        if (!m_pageTablesDirty[currentImage])
         {
-            uint64_t bufferSize = sizeof(m_meshletBounds[0]) * m_meshletBounds.size();
-
-            std::unique_ptr<NRI::Buffer> stagingBuffer = m_device->createBuffer(NRI::BufferDesc{
-                .size = bufferSize,
-                .usage = NRI::BufferUsage::Staging
-            });
-
-            void* mappedMemory = stagingBuffer->map(0, bufferSize);
-            memcpy(mappedMemory, m_meshletBounds.data(), bufferSize);
-            stagingBuffer->unmap();
-
-            m_meshletBoundsBuffer = m_device->createBuffer(NRI::BufferDesc
-                {
-                    .size = bufferSize,
-                    .usage = NRI::BufferUsage::StorageStatic
-                });
-
-            std::unique_ptr<NRI::CommandBuffer> commandCopyBuffer = beginSingleTimeCommands();
-            m_meshletBoundsBuffer->uploadData(*commandCopyBuffer, *stagingBuffer, m_meshletBounds.data());
-            endSingleTimeCommands(std::move(commandCopyBuffer));
+            return;
         }
-        
-        // Meshlet Draws
+
+        // Find the maximum page count across all allocators to ensure capacity
+        uint64_t maxPagesRequired = std::max({
+            m_vertexPages.GetPageCount(),
+            m_meshletDrawPages.GetPageCount(),
+            m_meshletBoundsPages.GetPageCount(),
+            m_meshletVertPages.GetPageCount(),
+            m_meshletTriPages.GetPageCount()
+        });
+
+        if (maxPagesRequired == 0) return;
+
+        // Resize if we don't have enough capacity
+        if (maxPagesRequired > m_PageTableCapacity || m_vertexPageTableBuffers.empty())
         {
-            uint64_t bufferSize = sizeof(m_meshletDraws[0]) * m_meshletDraws.size();
+            m_PageTableCapacity = maxPagesRequired * 2; // double it to avoid frequent resizes
 
-            std::unique_ptr<NRI::Buffer> stagingBuffer = m_device->createBuffer(NRI::BufferDesc{
-                .size = bufferSize,
-                .usage = NRI::BufferUsage::Staging
-            });
+            // Note: Just like your instance buffers, you should add old buffers to m_deferredBufferDeletions here
 
-            void* mappedMemory = stagingBuffer->map(0, bufferSize);
-            memcpy(mappedMemory, m_meshletDraws.data(), bufferSize);
-            stagingBuffer->unmap();
-
-            m_meshletDrawsBuffer = m_device->createBuffer(NRI::BufferDesc
-                {
-                    .size = bufferSize,
-                    .usage = NRI::BufferUsage::StorageStatic
-                });
-
-            std::unique_ptr<NRI::CommandBuffer> commandCopyBuffer = beginSingleTimeCommands();
-            m_meshletDrawsBuffer->uploadData(*commandCopyBuffer, *stagingBuffer, m_meshletDraws.data());
-            endSingleTimeCommands(std::move(commandCopyBuffer));
+            createPageTableBuffers(m_PageTableCapacity);
         }
-        
-        // Meshlet Vertices
+
+        // Helper to gather BDAs and memcpy them directly into mapped memory
+        auto uploadBDAs = [](const auto& pageAllocator, void* mappedPtr)
         {
-            uint64_t bufferSize = sizeof(m_meshletVertices[0]) * m_meshletVertices.size();
+            uint32_t count = pageAllocator.GetPageCount();
+            if (count == 0) return;
 
-            std::unique_ptr<NRI::Buffer> stagingBuffer = m_device->createBuffer(NRI::BufferDesc{
-                .size = bufferSize,
-                .usage = NRI::BufferUsage::Staging
-            });
+            std::vector<uint64_t> bdas;
+            bdas.reserve(count);
+            for (size_t i = 0; i < count; ++i)
+            {
+                bdas.push_back(pageAllocator.GetBuffer(i)->getDeviceAddress());
+            }
 
-            void* mappedMemory = stagingBuffer->map(0, bufferSize);
-            memcpy(mappedMemory, m_meshletVertices.data(), bufferSize);
-            stagingBuffer->unmap();
+            // Instant memcpy, no command buffers, no blocking sync!
+            memcpy(mappedPtr, bdas.data(), count * sizeof(uint64_t));
+        };
 
-            m_meshletVerticesBuffer = m_device->createBuffer(NRI::BufferDesc
-                {
-                    .size = bufferSize,
-                    .usage = NRI::BufferUsage::StorageStatic
-                });
+        uploadBDAs(m_vertexPages, m_vertexPageTableBuffersMapped[currentImage]);
+        uploadBDAs(m_meshletDrawPages, m_meshletDrawPageTableBuffersMapped[currentImage]);
+        uploadBDAs(m_meshletBoundsPages, m_meshletBoundPageTableBuffersMapped[currentImage]);
+        uploadBDAs(m_meshletVertPages, m_meshletVertPageTableBuffersMapped[currentImage]);
+        uploadBDAs(m_meshletTriPages, m_meshletTriPageTableBuffersMapped[currentImage]);
 
-            std::unique_ptr<NRI::CommandBuffer> commandCopyBuffer = beginSingleTimeCommands();
-            m_meshletVerticesBuffer->uploadData(*commandCopyBuffer, *stagingBuffer, m_meshletVertices.data());
-            endSingleTimeCommands(std::move(commandCopyBuffer));
-        }
-        
-        // Meshlet Triangles
-        {
-            uint64_t bufferSize = sizeof(m_meshletTriangles[0]) * m_meshletTriangles.size();
-
-            std::unique_ptr<NRI::Buffer> stagingBuffer = m_device->createBuffer(NRI::BufferDesc{
-                .size = bufferSize,
-                .usage = NRI::BufferUsage::Staging
-            });
-
-            void* mappedMemory = stagingBuffer->map(0, bufferSize);
-            memcpy(mappedMemory, m_meshletTriangles.data(), bufferSize);
-            stagingBuffer->unmap();
-
-            m_meshletTrianglesBuffer = m_device->createBuffer(NRI::BufferDesc
-                {
-                    .size = bufferSize,
-                    .usage = NRI::BufferUsage::StorageStatic
-                });
-
-            std::unique_ptr<NRI::CommandBuffer> commandCopyBuffer = beginSingleTimeCommands();
-            m_meshletTrianglesBuffer->uploadData(*commandCopyBuffer, *stagingBuffer, m_meshletTriangles.data());
-            endSingleTimeCommands(std::move(commandCopyBuffer));
-        }
+        // Mark as clean for this frame
+        m_pageTablesDirty[currentImage] = false;
     }
 
     void Renderer::createUniformBuffers()
@@ -550,12 +582,12 @@ namespace Nox
             m_uniformBuffersMapped.emplace_back(mappedMemory);
         }
     }
-    
+
     void Renderer::createInstanceBuffer(uint64_t bufferSize)
     {
         m_instanceBuffers.clear();
         m_instanceBuffersMapped.clear();
-        
+
         // Reserve memory in vectors to prevent reallocation overhead
         m_instanceBuffers.reserve(MAX_FRAMES_IN_FLIGHT);
         m_instanceBuffersMapped.reserve(MAX_FRAMES_IN_FLIGHT);
@@ -574,12 +606,12 @@ namespace Nox
             m_instanceBuffersMapped.emplace_back(mappedMemory);
         }
     }
-    
+
     void Renderer::createIndirectBuffer(uint64_t bufferSize)
     {
         m_indirectBuffers.clear();
         m_indirectBuffersMapped.clear();
-        
+
         // Reserve memory in vectors to prevent reallocation overhead
         m_indirectBuffers.reserve(MAX_FRAMES_IN_FLIGHT);
         m_indirectBuffersMapped.reserve(MAX_FRAMES_IN_FLIGHT);
@@ -807,16 +839,16 @@ namespace Nox
             /*references.modelMatrix = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 0.0f));*/
             references.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
             references.instanceReference = m_instanceBuffers[frameIndex]->getDeviceAddress();
-            references.verticesReference = m_verticesBuffer->getDeviceAddress();
-            references.meshletBoundsReference = m_meshletBoundsBuffer->getDeviceAddress();
-            references.meshletDrawsReference = m_meshletDrawsBuffer->getDeviceAddress();
-            references.meshletVerticesReference = m_meshletVerticesBuffer->getDeviceAddress();
-            references.meshletTrianglesReference = m_meshletTrianglesBuffer->getDeviceAddress();
+            references.vertexPageTableReference = m_vertexPageTableBuffers[frameIndex]->getDeviceAddress();
+            references.meshletBoundsPageTableReference = m_meshletBoundPageTableBuffers[frameIndex]->getDeviceAddress();
+            references.meshletDrawsPageTableReference = m_meshletDrawPageTableBuffers[frameIndex]->getDeviceAddress();
+            references.meshletVerticesPageTableReference = m_meshletVertPageTableBuffers[frameIndex]->getDeviceAddress();
+            references.meshletTrianglesPageTableReference = m_meshletTriPageTableBuffers[frameIndex]->getDeviceAddress();
             m_commandBuffers->pushData(&references, sizeof(shaderio::PushConstantMeshlets));
-        
+
             m_commandBuffers->drawMeshTasksIndirect(*m_indirectBuffers[frameIndex], 0, static_cast<uint32_t>(m_drawMeshTasksIndirectCommands.size()), sizeof(DrawMeshTasksIndirectCommand));
         }
-        
+
         m_renderer2D->Flush(*m_commandBuffers, *m_uniformBuffers[frameIndex], frameIndex);
 
         m_commandBuffers->endRendering();
@@ -964,7 +996,7 @@ namespace Nox
 
         memcpy(m_uniformBuffersMapped[currentImage], &uniformData, sizeof(uniformData));
     }
-    
+
     void Renderer::updateInstanceAndIndirectBuffer(uint32_t currentImage)
     {
         //fix maybe dont recreate all buffers only the next frame ?
@@ -972,30 +1004,105 @@ namespace Nox
         {
             return;
         }
-        
+
         uint64_t requiredInstanceSize = sizeof(shaderio::InstanceData) * m_instanceBufferObjects.size();
         if (requiredInstanceSize > m_InstanceBufferCapacity)
         {
             m_InstanceBufferCapacity = requiredInstanceSize * 2;
-            m_device->waitIdle();
+
+            for (auto& oldBuffer : m_instanceBuffers)
+            {
+                if (oldBuffer)
+                {
+                    m_deferredBufferDeletions.push_back({
+                        std::move(oldBuffer),
+                        frameIndex + MAX_FRAMES_IN_FLIGHT
+                    });
+                }
+            }
+
             createInstanceBuffer(m_InstanceBufferCapacity);
         }
         memcpy(m_instanceBuffersMapped[currentImage], m_instanceBufferObjects.data(), requiredInstanceSize);
-        
+
         uint64_t requiredIndirectSize = sizeof(DrawMeshTasksIndirectCommand) * m_drawMeshTasksIndirectCommands.size();
         if (requiredIndirectSize > m_IndirectBufferCapacity)
         {
             m_IndirectBufferCapacity = requiredIndirectSize * 2;
-            m_device->waitIdle();
+
+            for (auto& oldBuffer : m_indirectBuffers)
+            {
+                if (oldBuffer)
+                {
+                    m_deferredBufferDeletions.push_back({
+                        std::move(oldBuffer),
+                        frameIndex + MAX_FRAMES_IN_FLIGHT
+                    });
+                }
+            }
+
             createIndirectBuffer(m_IndirectBufferCapacity);
         }
         memcpy(m_indirectBuffersMapped[currentImage], m_drawMeshTasksIndirectCommands.data(), requiredIndirectSize);
+    }
+
+    void Renderer::processDeferredDeletions()
+    {
+        std::erase_if(m_deferredBufferDeletions, [](DeferredBuffer& deferred)
+        {
+            if (deferred.framesRemaining == 0)
+                return true; // Deletes unique_ptr
+
+            deferred.framesRemaining--;
+            return false;
+        });
+    }
+
+    void Renderer::processDeferredMeshFrees()
+    {
+        std::erase_if(m_deferredMeshFrees, [this](DeferredMeshFree& deferred)
+        {
+            if (deferred.framesRemaining == 0)
+            {
+                const auto& h = deferred.handle;
+                std::unique_ptr<NRI::Buffer> emptyBuffer;
+
+                // Free slots. If page becomes 100% empty, emptyBuffer is populated for deletion!
+                if (m_vertexPages.Free(h.vertices.pageIndex, h.vertices.offset, h.vertices.count, emptyBuffer))
+                {
+                    m_deferredBufferDeletions.push_back({std::move(emptyBuffer), MAX_FRAMES_IN_FLIGHT});
+                }
+
+                if (m_meshletDrawPages.Free(h.meshletDraws.pageIndex, h.meshletDraws.offset, h.meshletDraws.count, emptyBuffer))
+                {
+                    m_deferredBufferDeletions.push_back({std::move(emptyBuffer), MAX_FRAMES_IN_FLIGHT});
+                }
+
+                if (m_meshletVertPages.Free(h.meshletVertices.pageIndex, h.meshletVertices.offset, h.meshletVertices.count, emptyBuffer))
+                {
+                    m_deferredBufferDeletions.push_back({std::move(emptyBuffer), MAX_FRAMES_IN_FLIGHT});
+                }
+
+                if (m_meshletTriPages.Free(h.meshletTriangles.pageIndex, h.meshletTriangles.offset, h.meshletTriangles.count, emptyBuffer))
+                {
+                    m_deferredBufferDeletions.push_back({std::move(emptyBuffer), MAX_FRAMES_IN_FLIGHT});
+                }
+
+                return true; // Done freeing mesh
+            }
+
+            deferred.framesRemaining--;
+            return false;
+        });
     }
 
     // with compute there might be a snyc issue idk
     // according to gpt no async since compute and graphics same commandbuffer and executed in order
     void Renderer::drawFrame()
     {
+        processDeferredDeletions();
+        processDeferredMeshFrees();
+
         if (m_reloadShader)
         {
             m_reloadShader = false;
@@ -1017,8 +1124,10 @@ namespace Nox
             return;
         }
 
+        updatePageTables(frameIndex);
+
         updateUniformBuffer(frameIndex);
-        
+
         updateInstanceAndIndirectBuffer(frameIndex);
 
         m_renderer2D->Update(frameIndex);
@@ -1036,7 +1145,7 @@ namespace Nox
         m_renderer2D->EndFrame();
 
         frameIndex = (frameIndex + 1) % MAX_FRAMES_IN_FLIGHT;
-        
+
         m_instanceBufferObjects.clear();
         m_drawMeshTasksIndirectCommands.clear();
     }
@@ -1097,8 +1206,8 @@ namespace Nox
         uniformData.proj = camera.GetProjection();
         uniformData.view = glm::scale(glm::mat4(1.0f), glm::vec3(1.0f, 1.0f, -1.0f)) * glm::inverse(transform);
         /*uniformData.cameraWorldPos = { camera.GetPosition(), 0.0f };*/
-        uniformData.frustum = shaderio::Frustum{ uniformData.proj * uniformData.view };
-        
+        uniformData.frustum = shaderio::Frustum{uniformData.proj * uniformData.view};
+
         if (m_frozen)
         {
             if (!m_frozenDone)
@@ -1106,7 +1215,7 @@ namespace Nox
                 frozenUniformData = uniformData;
                 m_frozenDone = true;
             }
-            
+
             uniformData.frozenProj = frozenUniformData.proj;
             uniformData.frozenView = frozenUniformData.view;
             uniformData.frozenCameraWorldPos = frozenUniformData.cameraWorldPos;
@@ -1119,7 +1228,7 @@ namespace Nox
             uniformData.frozenCameraWorldPos = uniformData.cameraWorldPos;
             uniformData.frozenFrustum = uniformData.frustum;
         }
-        
+
         m_renderer2D->BeginScene(camera, transform);
     }
 
@@ -1127,9 +1236,9 @@ namespace Nox
     {
         uniformData.proj = camera.GetProjection();
         uniformData.view = camera.GetViewMatrix();
-        uniformData.cameraWorldPos = { camera.GetPosition(), 0.0f };
-        uniformData.frustum = shaderio::Frustum{ uniformData.proj * uniformData.view };
-        
+        uniformData.cameraWorldPos = {camera.GetPosition(), 0.0f};
+        uniformData.frustum = shaderio::Frustum{uniformData.proj * uniformData.view};
+
         if (m_frozen)
         {
             if (!m_frozenDone)
@@ -1137,7 +1246,7 @@ namespace Nox
                 frozenUniformData = uniformData;
                 m_frozenDone = true;
             }
-            
+
             uniformData.frozenProj = frozenUniformData.proj;
             uniformData.frozenView = frozenUniformData.view;
             uniformData.frozenCameraWorldPos = frozenUniformData.cameraWorldPos;
@@ -1158,30 +1267,38 @@ namespace Nox
     {
         m_renderer2D->EndScene();
     }
-    
+
     void Renderer::DrawMesh(const glm::mat4& transform, Ref<Mesh> mesh, uint32_t submeshIndex, const MaterialComponent& material, int entityID)
     {
         const auto& submeshes = mesh->GetSubMeshes();
         if (submeshIndex >= submeshes.size())
             return;
-        
+
         const MeshHandle& handle = submeshes[submeshIndex];
-        
+
         shaderio::InstanceData instance{};
         instance.modelMatrix = transform;
-        instance.meshletOffset = handle.firstMeshlet;
-        instance.meshletCount = handle.meshletCount;
-        
+
+        // 1. Where do the meshlets live, and how many are there?
+        instance.drawsPageIndex = handle.meshletDraws.pageIndex;
+        instance.drawsOffset = handle.meshletDraws.offset; // (Replaces the old meshletOffset)
+        instance.meshletCount = handle.meshletDraws.count; // (Replaces the old GetMeshletCount)
+
+        // 2. Where do the vertices and triangles live?
+        instance.verticesPageIndex = handle.vertices.pageIndex;
+        instance.meshletVerticesPageIndex = handle.meshletVertices.pageIndex;
+        instance.meshletTrianglesPageIndex = handle.meshletTriangles.pageIndex;
+
         instance.albedoColor = material.AlbedoColor;
         instance.albedoTextureIndex = -1;
-        
+
         // Select slot matching submeshIndex, fallback to slot 0 if child entity only holds 1 texture
         uint32_t mapIndex = (submeshIndex < material.AlbedoMaps.size()) ? submeshIndex : 0;
 
         if (!material.AlbedoMaps.empty() && mapIndex < material.AlbedoMaps.size())
         {
             const AssetHandle texHandle = material.AlbedoMaps[mapIndex];
-        
+
             // Ensure handle is valid before looking up
             if (texHandle != 0)
             {
@@ -1192,30 +1309,38 @@ namespace Nox
                 }
             }
         }
-        
+
         instance.entityID = entityID;
-        
+
         m_instanceBufferObjects.push_back(instance);
-        
+
         DrawMeshTasksIndirectCommand command{};
-        command.groupCountX = (handle.meshletCount + shaderio::TASK_SHADER_DISPATCH_X - 1) / shaderio::TASK_SHADER_DISPATCH_X;
+        command.groupCountX = (handle.GetMeshletCount() + shaderio::TASK_SHADER_DISPATCH_X - 1) / shaderio::TASK_SHADER_DISPATCH_X;
         command.groupCountY = 1;
         command.groupCountZ = 1;
-        
+
         m_drawMeshTasksIndirectCommands.push_back(command);
     }
-    
+
     void Renderer::DrawStaticMesh(const glm::mat4& transform, Ref<StaticMesh> staticMesh, const MaterialComponent& material, int entityID)
     {
         for (size_t i = 0; i < staticMesh->GetSubMeshes().size(); ++i)
         {
             MeshHandle handle = staticMesh->GetSubMeshes()[i];
-            
+
             shaderio::InstanceData instance{};
             instance.modelMatrix = transform;
-            instance.meshletOffset = handle.firstMeshlet;
-            instance.meshletCount = handle.meshletCount;
-            
+
+            // --- UPDATED: Page Table Info ---
+            instance.drawsPageIndex = handle.meshletDraws.pageIndex;
+            instance.drawsOffset = handle.meshletDraws.offset;
+            instance.meshletCount = handle.meshletDraws.count;
+
+            instance.verticesPageIndex = handle.vertices.pageIndex;
+            instance.meshletVerticesPageIndex = handle.meshletVertices.pageIndex;
+            instance.meshletTrianglesPageIndex = handle.meshletTriangles.pageIndex;
+            // --------------------------------
+
             instance.albedoColor = material.AlbedoColor;
             AssetHandle texHandle = 0;
             if (i < material.AlbedoMaps.size())
@@ -1232,16 +1357,16 @@ namespace Nox
             {
                 instance.albedoTextureIndex = -1;
             }
-            
+
             instance.entityID = entityID;
-            
+
             m_instanceBufferObjects.push_back(instance);
-            
+
             DrawMeshTasksIndirectCommand command{};
-            command.groupCountX = (handle.meshletCount + shaderio::TASK_SHADER_DISPATCH_X - 1) / shaderio::TASK_SHADER_DISPATCH_X;
+            command.groupCountX = (handle.GetMeshletCount() + shaderio::TASK_SHADER_DISPATCH_X - 1) / shaderio::TASK_SHADER_DISPATCH_X;
             command.groupCountY = 1;
             command.groupCountZ = 1;
-    
+
             m_drawMeshTasksIndirectCommands.push_back(command);
         }
     }

@@ -28,17 +28,21 @@ void meshMain
     InstanceData instance = instances[sharedPayload.drawID];
     float4x4 modelMatrix = instance.modelMatrix;
 
-    uint32_t* meshletVerticesPtr = (uint32_t*)pushConstant.meshletVerticesReference;
-    Vertex* vertexPtr = (Vertex*)pushConstant.verticesReference;
-    uint8_t* meshletTrianglePtr = (uint8_t*)pushConstant.meshletTrianglesReference;
+    uint64_t* drawsPageTable  = (uint64_t*)pushConstant.meshletDrawsPageTableReference;
+    uint64_t* vertsPageTable  = (uint64_t*)pushConstant.vertexPageTableReference;
+    uint64_t* mVertsPageTable = (uint64_t*)pushConstant.meshletVerticesPageTableReference;
+    uint64_t* mTrisPageTable  = (uint64_t*)pushConstant.meshletTrianglesPageTableReference;
 
-    MeshletDraw* meshletDrawPtr = (MeshletDraw*)pushConstant.meshletDrawsReference;
-
+    MeshletDraw* meshletDrawPage = (MeshletDraw*)drawsPageTable[instance.drawsPageIndex];
+    Vertex* vertexPage = (Vertex*)vertsPageTable[instance.verticesPageIndex];
+    uint32_t* meshletVerticesPage = (uint32_t*)mVertsPageTable[instance.meshletVerticesPageIndex];
+    uint8_t* meshletTrianglePage = (uint8_t*)mTrisPageTable[instance.meshletTrianglesPageIndex];
+    
     // Fetch compacted meshlet index from task payload
     uint8_t localMeshletOffset = sharedPayload.meshletIndices[groupId.x];
     uint globalMeshletIdx = sharedPayload.groupMeshletOffset + localMeshletOffset;
     
-    MeshletDraw meshlet = meshletDrawPtr[globalMeshletIdx];
+    MeshletDraw meshlet = meshletDrawPage[globalMeshletIdx];
     float4x4 viewProj = mul(ubo.proj, ubo.view);
 
     uint hash = globalMeshletIdx * 747796405u + 2891336453u;
@@ -53,8 +57,8 @@ void meshMain
     // Process vertices
     for(uint i = gtid.x; i < meshlet.vertexCount; i += MESH_SHADER_DISPATCH_X)
     {
-        uint localVertexIndex = meshletVerticesPtr[meshlet.vertexOffset + i];
-        Vertex v = vertexPtr[meshlet.globalVertexOffset + localVertexIndex];
+        uint localVertexIndex = meshletVerticesPage[meshlet.vertexOffset + i];
+        Vertex v = vertexPage[meshlet.globalVertexOffset + localVertexIndex];
 
         float4 worldPos = mul(modelMatrix, float4(v.pos, 1.0));
         float4 clipPos = mul(viewProj, worldPos);
@@ -71,9 +75,9 @@ void meshMain
     {
         uint triOffset = meshlet.triangleOffset + i * 3;
 
-        uint idx0 = meshletTrianglePtr[triOffset + 0];
-        uint idx1 = meshletTrianglePtr[triOffset + 1];
-        uint idx2 = meshletTrianglePtr[triOffset + 2];
+        uint idx0 = meshletTrianglePage[triOffset + 0];
+        uint idx1 = meshletTrianglePage[triOffset + 1];
+        uint idx2 = meshletTrianglePage[triOffset + 2];
 
         triangles[i] = uint3(idx0, idx1, idx2);
     }

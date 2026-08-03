@@ -104,6 +104,13 @@ namespace NRI
         constexpr uint32_t All = R | G | B | A;
     }
     
+    struct BufferCopyRegion
+    {
+        uint64_t srcOffset = 0;
+        uint64_t dstOffset = 0;
+        uint64_t size      = 0;
+    };
+    
     class CommandBuffer
     {
     public:
@@ -154,7 +161,7 @@ namespace NRI
         virtual void drawMeshTasksIndirect(Buffer& indirectBuffer, uint64_t offset, uint32_t drawCount, uint32_t stride) = 0;
         virtual void drawMeshTasksIndirect(uint64_t indirectBufferDeviceAddress, uint64_t offset, uint32_t drawCount, uint32_t stride) = 0;
         
-        virtual void copyBuffer(class Buffer& srcBuffer, class Buffer& dstBuffer, uint64_t deviceSize) = 0;
+        virtual void copyBuffer(class Buffer& srcBuffer, class Buffer& dstBuffer, const BufferCopyRegion& region = {}) = 0;
         
         virtual void transitionTextureLayout(Texture& texture, TextureLayout oldLayout, TextureLayout newLayout) = 0;
         virtual void transitionSwapchainLayout(Swapchain& swapchain, uint32_t imageIndex, TextureLayout oldLayout, TextureLayout newLayout) = 0;
