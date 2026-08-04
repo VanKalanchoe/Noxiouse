@@ -2,6 +2,8 @@
 
 #define TINYGLTF3_IMPLEMENTATION
 #define TINYGLTF3_ENABLE_FS 
+#include <glm/gtx/matrix_decompose.hpp>
+
 #include "tiny_gltf_v3.h"
 
 #include "meshoptimizer.h"
@@ -50,12 +52,12 @@ namespace Nox
             MeshSerializer::SerializeMesh(cookedPath, meshDataList, materialDataList);
 
             // Save skeleton if present
-            if (!extractedSkeleton.Bones.empty())
+            if (!extractedSkeleton.AllNodes.empty())
             {
                 std::filesystem::path skelPath = cookedPath;
                 skelPath.replace_extension(".nskel");
                 SkeletonSerializer::Serialize(skelPath, extractedSkeleton);
-                NOX_CORE_INFO("[Importer] Extracted and cooked Skeleton ({} bones) to {}", extractedSkeleton.Bones.size(), skelPath.string());
+                NOX_CORE_INFO("[Importer] Extracted and cooked Skeleton ({} nodes) to {}", extractedSkeleton.AllNodes.size(), skelPath.string());
             }
 
             // Save animation clips if present
@@ -198,99 +200,141 @@ namespace Nox
         return -1;
     }
 
-    // Helper: Parses Skeleton topology and Inverse Bind Matrices from model.skins
-    static void ParseSkeletonFromGltf(const tg3_model& model, Skeleton& outSkeleton)
-    {
-        outSkeleton.Bones.clear();
-        outSkeleton.BoneNameToIndexMap.clear();
+    static void LoadNodeHierarchy(int32_t nodeIndex, Node* parent, const tg3_model& model, Skeleton& outSkeleton)
+{
+    const tg3_node& tg3Node = model.nodes[nodeIndex];
 
-        if (model.skins_count == 0)
-            return;
+    Node* newNode = new Node();
+    newNode->Index = nodeIndex;
+    newNode->Parent = parent;
+    newNode->Name = (tg3Node.name.data && tg3Node.name.len > 0)
+                        ? std::string(tg3Node.name.data, tg3Node.name.len)
+                        : ("Node_" + std::to_string(nodeIndex));
 
-        const tg3_skin& skin = model.skins[0];
-        size_t jointCount = skin.joints_count;
-        outSkeleton.Bones.resize(jointCount);
-
-        // 1. Read Inverse Bind Matrices
-        std::vector<glm::mat4> ibms(jointCount, glm::mat4(1.0f));
-        if (skin.inverse_bind_matrices >= 0 && skin.inverse_bind_matrices < (int32_t)model.accessors_count)
+        // 1. Extract base transform
+        bool hasMatrix = false;
+        for (int m = 0; m < 16; m++)
         {
-            const tg3_accessor& ibmAccessor = model.accessors[skin.inverse_bind_matrices];
-            const tg3_buffer_view& ibmBufView = model.buffer_views[ibmAccessor.buffer_view];
-            const tg3_buffer& ibmBuffer = model.buffers[ibmBufView.buffer];
-
-            const float* dataPtr = reinterpret_cast<const float*>(
-                &ibmBuffer.data.data[ibmBufView.byte_offset + ibmAccessor.byte_offset]);
-
-            for (size_t i = 0; i < jointCount; i++)
+            if (tg3Node.matrix[m] != 0.0f)
             {
-                ibms[i] = glm::make_mat4(dataPtr + (i * 16));
+                hasMatrix = true;
+                break;
             }
         }
 
-        // 2. Map node index -> bone index
-        std::unordered_map<int32_t, int32_t> nodeToBoneMap;
-        for (size_t i = 0; i < jointCount; i++)
+        if (hasMatrix)
         {
-            nodeToBoneMap[skin.joints[i]] = static_cast<int32_t>(i);
-        }
-
-        // 3. Build bone hierarchy
-    for (size_t i = 0; i < jointCount; i++)
-    {
-        int32_t nodeIndex = skin.joints[i];
-        const tg3_node& node = model.nodes[nodeIndex];
-        BoneInfo& bone = outSkeleton.Bones[i];
-
-        bone.Name = (node.name.data && node.name.len > 0)
-            ? std::string(node.name.data, node.name.len)
-            : ("Bone_" + std::to_string(i));
-
-        bone.InverseBindMatrix = ibms[i];
-        outSkeleton.BoneNameToIndexMap[bone.Name] = static_cast<int32_t>(i);
-
-        // Parent index lookup
-        bone.ParentIndex = -1;
-        for (uint32_t parentCheck = 0; parentCheck < model.nodes_count; parentCheck++)
-        {
-            const tg3_node& potentialParent = model.nodes[parentCheck];
-            for (uint32_t c = 0; c < potentialParent.children_count; c++)
-            {
-                if (potentialParent.children[c] == nodeIndex)
-                {
-                    if (nodeToBoneMap.find(parentCheck) != nodeToBoneMap.end())
-                    {
-                        bone.ParentIndex = nodeToBoneMap[parentCheck];
-                    }
-                    break;
-                }
-            }
-            if (bone.ParentIndex != -1) break;
-        }
-    }
-
-    // 4. Compute LocalRestTransforms from Inverse Bind Matrices and Hierarchy
-    std::vector<glm::mat4> globalRestTransforms(jointCount);
-    for (size_t i = 0; i < jointCount; i++)
-    {
-        // GlobalRestTransform is the inverse of the InverseBindMatrix
-        globalRestTransforms[i] = glm::inverse(ibms[i]);
-    }
-
-    for (size_t i = 0; i < jointCount; i++)
-    {
-        BoneInfo& bone = outSkeleton.Bones[i];
-        if (bone.ParentIndex >= 0 && bone.ParentIndex < static_cast<int32_t>(jointCount))
-        {
-            // LocalRestTransform = inverse(ParentGlobalRest) * ChildGlobalRest
-            bone.LocalRestTransform = glm::inverse(globalRestTransforms[bone.ParentIndex]) * globalRestTransforms[i];
+            newNode->HasRestMatrix = true;
+            newNode->RestMatrix = glm::make_mat4(tg3Node.matrix);
+    
+            // Default TRS to identity when a raw matrix is present
+            newNode->RestTranslation = glm::vec3(0.0f);
+            newNode->RestRotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+            newNode->RestScale = glm::vec3(1.0f);
         }
         else
         {
-            bone.LocalRestTransform = globalRestTransforms[i];
+            newNode->HasRestMatrix = false;
+            newNode->RestMatrix = glm::mat4(1.0f);
+
+            if (tg3Node.translation) 
+                newNode->RestTranslation = glm::vec3(tg3Node.translation[0], tg3Node.translation[1], tg3Node.translation[2]);
+            else 
+                newNode->RestTranslation = glm::vec3(0.0f);
+
+            if (tg3Node.rotation) 
+                newNode->RestRotation = glm::quat(tg3Node.rotation[3], tg3Node.rotation[0], tg3Node.rotation[1], tg3Node.rotation[2]);
+            else 
+                newNode->RestRotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+
+            if (tg3Node.scale) 
+                newNode->RestScale = glm::vec3(tg3Node.scale[0], tg3Node.scale[1], tg3Node.scale[2]);
+            else 
+                newNode->RestScale = glm::vec3(1.0f);
         }
+
+        // Sync active fields to rest values
+        newNode->Translation = newNode->RestTranslation;
+        newNode->Rotation = newNode->RestRotation;
+        newNode->Scale = newNode->RestScale;
+        newNode->Matrix = newNode->RestMatrix;
+        newNode->HasMatrix = newNode->HasRestMatrix;
+
+    // 2. Register node in the system
+    outSkeleton.AllNodes[nodeIndex] = newNode;
+
+    if (parent)
+        parent->Children.push_back(newNode);
+    else
+        outSkeleton.RootNodes.push_back(newNode);
+
+    // 3. Recurse children
+    for (uint32_t c = 0; c < tg3Node.children_count; c++)
+    {
+        LoadNodeHierarchy(tg3Node.children[c], newNode, model, outSkeleton);
     }
 }
+
+    static void ParseSkeletonFromGltf(const tg3_model& model, Skeleton& outSkeleton)
+    {
+        if (model.nodes_count == 0) return;
+
+        // Pre-allocate node list so we can lookup by index
+        outSkeleton.AllNodes.resize(model.nodes_count, nullptr);
+
+        // Find root nodes (Nodes that have no parents)
+        std::vector<bool> isChild(model.nodes_count, false);
+        for (uint32_t i = 0; i < model.nodes_count; i++)
+        {
+            for (uint32_t c = 0; c < model.nodes[i].children_count; c++)
+            {
+                isChild[model.nodes[i].children[c]] = true;
+            }
+        }
+
+        // Load full hierarchy starting from roots
+        for (uint32_t i = 0; i < model.nodes_count; i++)
+        {
+            if (!isChild[i])
+            {
+                LoadNodeHierarchy(i, nullptr, model, outSkeleton);
+            }
+        }
+
+        // Load Skins EXACTLY as the joints array specifies
+        for (uint32_t i = 0; i < model.skins_count; i++)
+        {
+            const tg3_skin& tg3Skin = model.skins[i];
+            Skin* newSkin = new Skin();
+            newSkin->Name = (tg3Skin.name.data && tg3Skin.name.len > 0)
+                                ? std::string(tg3Skin.name.data, tg3Skin.name.len)
+                                : ("Skin_" + std::to_string(i));
+
+            // This is the critical fix. We map joint index [j] DIRECTLY to the node pointer
+            for (uint32_t j = 0; j < tg3Skin.joints_count; j++)
+            {
+                int32_t nodeIndex = tg3Skin.joints[j];
+                newSkin->Joints.push_back(outSkeleton.AllNodes[nodeIndex]);
+            }
+
+            // Get Inverse Bind Matrices
+            if (tg3Skin.inverse_bind_matrices >= 0)
+            {
+                const tg3_accessor& acc = model.accessors[tg3Skin.inverse_bind_matrices];
+                const tg3_buffer_view& bv = model.buffer_views[acc.buffer_view];
+                const tg3_buffer& buf = model.buffers[bv.buffer];
+                const float* dataPtr = reinterpret_cast<const float*>(&buf.data.data[bv.byte_offset + acc.byte_offset]);
+
+                newSkin->InverseBindMatrices.resize(acc.count);
+                for (size_t m = 0; m < acc.count; m++)
+                {
+                    newSkin->InverseBindMatrices[m] = glm::make_mat4(dataPtr + (m * 16));
+                }
+            }
+
+            outSkeleton.Skins.push_back(newSkin);
+        }
+    }
 
     static bool Tg3StrEquals(const tg3_str& str, std::string_view expected)
     {
@@ -298,7 +342,7 @@ namespace Nox
         return std::string_view(str.data, str.len) == expected;
     }
 
-    // Helper: Parses all animation tracks and keyframes from model.animations
+    // Helper: Parses all animation tracks and safely handles Linear & CubicSpline interpolation
     static void ParseAnimationsFromGltf
     (
         const tg3_model& model,
@@ -311,9 +355,6 @@ namespace Nox
         for (uint32_t animIndex = 0; animIndex < model.animations_count; animIndex++)
         {
             const tg3_animation& tg3Anim = model.animations[animIndex];
-
-            // Emplace directly into the target vector to avoid copying non-copyable Assets
-            // Allocate as Ref<AnimationSequence>
             Ref<AnimationSequence> animSeq = CreateRef<AnimationSequence>();
 
             animSeq->Name = (tg3Anim.name.data && tg3Anim.name.len > 0)
@@ -331,21 +372,23 @@ namespace Nox
 
                 const tg3_animation_sampler& sampler = tg3Anim.samplers[channel.sampler];
 
-                if (channel.target.node < 0 || channel.target.node >= (int32_t)model.nodes_count)
+                // --- CRITICAL FIX: Direct Node Index Mapping ---
+                int32_t targetNodeIdx = channel.target.node;
+
+                // Ensure the node index is valid within our newly parsed skeleton
+                if (targetNodeIdx < 0 || targetNodeIdx >= (int32_t)skeleton.AllNodes.size())
                     continue;
 
-                const tg3_node& targetNode = model.nodes[channel.target.node];
-                if (!targetNode.name.data || targetNode.name.len == 0)
-                    continue;
+                const tg3_node& targetNode = model.nodes[targetNodeIdx];
+                std::string nodeName = (targetNode.name.data && targetNode.name.len > 0)
+                                           ? std::string(targetNode.name.data, targetNode.name.len)
+                                           : ("Node_" + std::to_string(targetNodeIdx));
 
-                std::string boneName(targetNode.name.data, targetNode.name.len);
-                int32_t boneIndex = skeleton.FindBoneIndex(boneName);
-
-                // Find or create the target channel
+                // Find by TargetNodeIndex instead of string name
                 auto channelIt = std::find_if(animSeq->Channels.begin(), animSeq->Channels.end(),
-                                              [&](const BoneAnimationChannel& c) { return c.BoneName == boneName; });
+                                              [&](const NodeAnimationChannel& c) { return c.TargetNodeIndex == targetNodeIdx; });
 
-                BoneAnimationChannel* animChannel = nullptr;
+                NodeAnimationChannel* animChannel = nullptr;
                 if (channelIt != animSeq->Channels.end())
                 {
                     animChannel = &(*channelIt);
@@ -354,11 +397,11 @@ namespace Nox
                 {
                     animSeq->Channels.push_back({});
                     animChannel = &animSeq->Channels.back();
-                    animChannel->BoneName = boneName;
-                    animChannel->BoneIndex = boneIndex;
+                    animChannel->NodeName = nodeName;
+                    animChannel->TargetNodeIndex = targetNodeIdx; // Matches Node::Index in Skeleton
                 }
 
-                // Interpolation check using tg3_str
+                // Interpolation setup
                 if (Tg3StrEquals(sampler.interpolation, "STEP"))
                     animChannel->Interpolation = AnimationInterpolation::Step;
                 else if (Tg3StrEquals(sampler.interpolation, "CUBICSPLINE"))
@@ -366,14 +409,12 @@ namespace Nox
                 else
                     animChannel->Interpolation = AnimationInterpolation::Linear;
 
-                // Input timestamps
                 const tg3_accessor& timeAcc = model.accessors[sampler.input];
                 const tg3_buffer_view& timeView = model.buffer_views[timeAcc.buffer_view];
                 const tg3_buffer& timeBuf = model.buffers[timeView.buffer];
                 const float* timePtr = reinterpret_cast<const float*>(
                     &timeBuf.data.data[timeView.byte_offset + timeAcc.byte_offset]);
 
-                // Output transforms
                 const tg3_accessor& valAcc = model.accessors[sampler.output];
                 const tg3_buffer_view& valView = model.buffer_views[valAcc.buffer_view];
                 const tg3_buffer& valBuf = model.buffers[valView.buffer];
@@ -381,12 +422,11 @@ namespace Nox
                     &valBuf.data.data[valView.byte_offset + valAcc.byte_offset]);
 
                 size_t keyCount = timeAcc.count;
+                bool isCubic = (animChannel->Interpolation == AnimationInterpolation::CubicSpline);
+                size_t strideMultiplier = isCubic ? 3 : 1;
+                size_t valueOffset = isCubic ? 1 : 0;
 
-                // Handle Cubic Spline stride (glTF stores [in-tangent, value, out-tangent] per keyframe)
-                size_t strideMultiplier = (animChannel->Interpolation == AnimationInterpolation::CubicSpline) ? 3 : 1;
-                size_t valueOffset = (animChannel->Interpolation == AnimationInterpolation::CubicSpline) ? 1 : 0;
-
-                // Channel path check using tg3_str
+                // Keyframe extraction (Unchanged, your math here is already correct)
                 if (Tg3StrEquals(channel.target.path, "translation"))
                 {
                     for (size_t k = 0; k < keyCount; k++)
@@ -403,7 +443,6 @@ namespace Nox
                     {
                         float t = timePtr[k];
                         size_t idx = (k * strideMultiplier + valueOffset) * 4;
-                        // glTF stores quat as (x, y, z, w); glm::quat constructor expects (w, x, y, z)
                         glm::quat q(valPtr[idx + 3], valPtr[idx + 0], valPtr[idx + 1], valPtr[idx + 2]);
                         animChannel->RotationKeys.push_back({t, q});
                         maxDuration = std::max(maxDuration, t);
@@ -422,8 +461,7 @@ namespace Nox
             }
 
             animSeq->Duration = maxDuration;
-            animSeq->TicksPerSecond = 1.0f; // Explicitly set to 1.0 for seconds-based formats
-
+            animSeq->TicksPerSecond = 1.0f; // Since glTF time is always in absolute seconds
             outAnimations.push_back(animSeq);
         }
     }
@@ -520,7 +558,7 @@ namespace Nox
                 const tg3_buffer& posBuffer = model.buffers[posBufferView.buffer];
 
                 // Get texture coordinates if available
-                bool hasTexCoords = FindAttribute(primitive, "TEXCOORD_0") ? true : false;
+                bool hasTexCoords = FindAttribute(primitive, "TEXCOORD_0") != -1;
                 const tg3_accessor* texCoordAccessor = nullptr;
                 const tg3_buffer_view* texCoordBufferView = nullptr;
                 const tg3_buffer* texCoordBuffer = nullptr;
@@ -532,7 +570,7 @@ namespace Nox
                     texCoordBuffer = &model.buffers[texCoordBufferView->buffer];
                 }
 
-                bool hasSkinning = (FindAttribute(primitive, "JOINTS_0") && FindAttribute(primitive, "WEIGHTS_0")) ? true : false;
+                bool hasSkinning = (FindAttribute(primitive, "JOINTS_0") != -1 && FindAttribute(primitive, "WEIGHTS_0") != -1);
                 const tg3_accessor* jointsAccessor = nullptr;
                 const tg3_buffer_view* jointsBufferView = nullptr;
                 const tg3_buffer* jointsBuffer = nullptr;
@@ -577,23 +615,63 @@ namespace Nox
 
                     if (hasSkinning)
                     {
+                        // --- 1. Resolve Strides (Accounts for interleaved buffers) ---
+                        uint32_t jointStride = jointsBufferView->byte_stride ? jointsBufferView->byte_stride : (jointsAccessor->component_type == TG3_COMPONENT_TYPE_UNSIGNED_SHORT ? 8 : 4);
+
+                        uint32_t weightStride = weightsBufferView->byte_stride
+                                                    ? weightsBufferView->byte_stride
+                                                    : (weightsAccessor->component_type == TG3_COMPONENT_TYPE_FLOAT ? 16 : weightsAccessor->component_type == TG3_COMPONENT_TYPE_UNSIGNED_SHORT ? 8 : 4);
+
+                        // --- 2. Parse Joints ---
+                        size_t jointOffset = jointsBufferView->byte_offset + jointsAccessor->byte_offset + (i * jointStride);
                         if (jointsAccessor->component_type == TG3_COMPONENT_TYPE_UNSIGNED_SHORT)
                         {
-                            const uint16_t* joints = reinterpret_cast<const uint16_t*>(&jointsBuffer->data.data[jointsBufferView->byte_offset + jointsAccessor->byte_offset + i * 8]);
+                            const uint16_t* joints = reinterpret_cast<const uint16_t*>(&jointsBuffer->data.data[jointOffset]);
                             vertex.boneIDs = glm::uvec4(joints[0], joints[1], joints[2], joints[3]);
                         }
                         else if (jointsAccessor->component_type == TG3_COMPONENT_TYPE_UNSIGNED_BYTE)
                         {
-                            const uint8_t* joints = reinterpret_cast<const uint8_t*>(&jointsBuffer->data.data[jointsBufferView->byte_offset + jointsAccessor->byte_offset + i * 4]);
+                            const uint8_t* joints = reinterpret_cast<const uint8_t*>(&jointsBuffer->data.data[jointOffset]);
                             vertex.boneIDs = glm::uvec4(joints[0], joints[1], joints[2], joints[3]);
                         }
-                        const float* weights = reinterpret_cast<const float*>(&weightsBuffer->data.data[weightsBufferView->byte_offset + weightsAccessor->byte_offset + i * 16]);
-                        vertex.boneWeights = glm::vec4(weights[0], weights[1], weights[2], weights[3]);
+
+                        // --- 3. Parse Weights & Normalize ---
+                        size_t weightOffset = weightsBufferView->byte_offset + weightsAccessor->byte_offset + (i * weightStride);
+                        glm::vec4 rawWeights(0.0f);
+
+                        if (weightsAccessor->component_type == TG3_COMPONENT_TYPE_FLOAT)
+                        {
+                            const float* weights = reinterpret_cast<const float*>(&weightsBuffer->data.data[weightOffset]);
+                            rawWeights = glm::vec4(weights[0], weights[1], weights[2], weights[3]);
+                        }
+                        else if (weightsAccessor->component_type == TG3_COMPONENT_TYPE_UNSIGNED_SHORT)
+                        {
+                            const uint16_t* weights = reinterpret_cast<const uint16_t*>(&weightsBuffer->data.data[weightOffset]);
+                            float scale = weightsAccessor->normalized ? (1.0f / 65535.0f) : 1.0f;
+                            rawWeights = glm::vec4(weights[0], weights[1], weights[2], weights[3]) * scale;
+                        }
+                        else if (weightsAccessor->component_type == TG3_COMPONENT_TYPE_UNSIGNED_BYTE)
+                        {
+                            const uint8_t* weights = reinterpret_cast<const uint8_t*>(&weightsBuffer->data.data[weightOffset]);
+                            float scale = weightsAccessor->normalized ? (1.0f / 255.0f) : 1.0f;
+                            rawWeights = glm::vec4(weights[0], weights[1], weights[2], weights[3]) * scale;
+                        }
+
+                        // Force normalization so weights always sum to 1.0 (prevents collapse/stretching)
+                        float weightSum = rawWeights.x + rawWeights.y + rawWeights.z + rawWeights.w;
+                        if (weightSum > 0.0f)
+                        {
+                            vertex.boneWeights = rawWeights / weightSum;
+                        }
+                        else
+                        {
+                            vertex.boneWeights = glm::vec4(1.0f, 0.0f, 0.0f, 0.0f);
+                        }
                     }
                     else
                     {
                         vertex.boneIDs = glm::uvec4(0);
-                        vertex.boneWeights = glm::vec4(1.0f, 0.0f, 0.0f, 0.0f); // Default to first bone/identity if no skinning
+                        vertex.boneWeights = glm::vec4(1.0f, 0.0f, 0.0f, 0.0f);
                     }
 
                     primitiveData.Vertices.push_back(vertex);

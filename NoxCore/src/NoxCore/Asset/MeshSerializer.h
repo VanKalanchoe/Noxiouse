@@ -62,15 +62,47 @@ namespace Nox
             const char magic[5] = "NSKL";
             stream.write(magic, 4);
 
-            uint32_t boneCount = static_cast<uint32_t>(skeleton.Bones.size());
-            stream.write(reinterpret_cast<const char*>(&boneCount), sizeof(uint32_t));
+            // 1. Serialize AllNodes
+            uint32_t nodeCount = static_cast<uint32_t>(skeleton.AllNodes.size());
+            stream.write(reinterpret_cast<const char*>(&nodeCount), sizeof(uint32_t));
 
-            for (const auto& bone : skeleton.Bones)
+            for (const auto& node : skeleton.AllNodes)
             {
-                SerializerUtils::WriteString(stream, bone.Name);
-                stream.write(reinterpret_cast<const char*>(&bone.ParentIndex), sizeof(int32_t));
-                stream.write(reinterpret_cast<const char*>(&bone.InverseBindMatrix), sizeof(glm::mat4));
-                stream.write(reinterpret_cast<const char*>(&bone.LocalRestTransform), sizeof(glm::mat4));
+                bool valid = (node != nullptr);
+                stream.write(reinterpret_cast<const char*>(&valid), sizeof(bool));
+                if (!valid) continue;
+
+                stream.write(reinterpret_cast<const char*>(&node->Index), sizeof(int32_t));
+                SerializerUtils::WriteString(stream, node->Name);
+                
+                int32_t parentIndex = node->Parent ? node->Parent->Index : -1;
+                stream.write(reinterpret_cast<const char*>(&parentIndex), sizeof(int32_t));
+
+                stream.write(reinterpret_cast<const char*>(&node->RestTranslation), sizeof(glm::vec3));
+                stream.write(reinterpret_cast<const char*>(&node->RestRotation), sizeof(glm::quat));
+                stream.write(reinterpret_cast<const char*>(&node->RestScale), sizeof(glm::vec3));
+                stream.write(reinterpret_cast<const char*>(&node->RestMatrix), sizeof(glm::mat4));
+                stream.write(reinterpret_cast<const char*>(&node->HasRestMatrix), sizeof(bool));
+            }
+
+            // 2. Serialize Skins
+            uint32_t skinCount = static_cast<uint32_t>(skeleton.Skins.size());
+            stream.write(reinterpret_cast<const char*>(&skinCount), sizeof(uint32_t));
+
+            for (const auto& skin : skeleton.Skins)
+            {
+                if (!skin) continue;
+                SerializerUtils::WriteString(stream, skin->Name);
+
+                uint32_t jointCount = static_cast<uint32_t>(skin->Joints.size());
+                stream.write(reinterpret_cast<const char*>(&jointCount), sizeof(uint32_t));
+                for (const auto& jointNode : skin->Joints)
+                {
+                    int32_t jointNodeIndex = jointNode ? jointNode->Index : -1;
+                    stream.write(reinterpret_cast<const char*>(&jointNodeIndex), sizeof(int32_t));
+                }
+
+                SerializerUtils::WriteVector(stream, skin->InverseBindMatrices);
             }
         }
 
@@ -83,20 +115,99 @@ namespace Nox
             stream.read(magic, 4);
             if (strcmp(magic, "NSKL") != 0) return false;
 
-            uint32_t boneCount = 0;
-            stream.read(reinterpret_cast<char*>(&boneCount), sizeof(uint32_t));
-            outSkeleton.Bones.resize(boneCount);
-            outSkeleton.BoneNameToIndexMap.clear();
+            // Clean up existing nodes/skins if any
+            for (auto node : outSkeleton.AllNodes) delete node;
+            for (auto skin : outSkeleton.Skins) delete skin;
+            outSkeleton.AllNodes.clear();
+            outSkeleton.RootNodes.clear();
+            outSkeleton.Skins.clear();
 
-            for (uint32_t i = 0; i < boneCount; i++)
+            // 1. Deserialize AllNodes
+            uint32_t nodeCount = 0;
+            stream.read(reinterpret_cast<char*>(&nodeCount), sizeof(uint32_t));
+            outSkeleton.AllNodes.resize(nodeCount, nullptr);
+
+            std::vector<int32_t> parentIndices(nodeCount, -1);
+
+            for (uint32_t i = 0; i < nodeCount; i++)
             {
-                BoneInfo& bone = outSkeleton.Bones[i];
-                SerializerUtils::ReadString(stream, bone.Name);
-                stream.read(reinterpret_cast<char*>(&bone.ParentIndex), sizeof(int32_t));
-                stream.read(reinterpret_cast<char*>(&bone.InverseBindMatrix), sizeof(glm::mat4));
-                stream.read(reinterpret_cast<char*>(&bone.LocalRestTransform), sizeof(glm::mat4));
+                bool valid = false;
+                stream.read(reinterpret_cast<char*>(&valid), sizeof(bool));
+                if (!valid) continue;
 
-                outSkeleton.BoneNameToIndexMap[bone.Name] = static_cast<int32_t>(i);
+                Node* node = new Node();
+                stream.read(reinterpret_cast<char*>(&node->Index), sizeof(int32_t));
+                SerializerUtils::ReadString(stream, node->Name);
+                
+                stream.read(reinterpret_cast<char*>(&parentIndices[i]), sizeof(int32_t));
+
+                stream.read(reinterpret_cast<char*>(&node->RestTranslation), sizeof(glm::vec3));
+                stream.read(reinterpret_cast<char*>(&node->RestRotation), sizeof(glm::quat));
+                stream.read(reinterpret_cast<char*>(&node->RestScale), sizeof(glm::vec3));
+                stream.read(reinterpret_cast<char*>(&node->RestMatrix), sizeof(glm::mat4));
+                stream.read(reinterpret_cast<char*>(&node->HasRestMatrix), sizeof(bool));
+
+                // Initialize current fields to rest pose
+                node->Translation = node->RestTranslation;
+                node->Rotation = node->RestRotation;
+                node->Scale = node->RestScale;
+                node->Matrix = node->RestMatrix;
+                node->HasMatrix = node->HasRestMatrix;
+
+                outSkeleton.AllNodes[i] = node;
+            }
+
+            // Wire up tree hierarchy and root nodes
+            for (uint32_t i = 0; i < nodeCount; i++)
+            {
+                Node* node = outSkeleton.AllNodes[i];
+                if (!node) continue;
+
+                int32_t pIdx = parentIndices[i];
+                if (pIdx >= 0 && pIdx < static_cast<int32_t>(nodeCount))
+                {
+                    node->Parent = outSkeleton.AllNodes[pIdx];
+                    if (node->Parent)
+                    {
+                        node->Parent->Children.push_back(node);
+                    }
+                }
+                else
+                {
+                    outSkeleton.RootNodes.push_back(node);
+                }
+            }
+
+            // 2. Deserialize Skins
+            uint32_t skinCount = 0;
+            stream.read(reinterpret_cast<char*>(&skinCount), sizeof(uint32_t));
+            outSkeleton.Skins.resize(skinCount);
+
+            for (uint32_t i = 0; i < skinCount; i++)
+            {
+                Skin* skin = new Skin();
+                SerializerUtils::ReadString(stream, skin->Name);
+
+                uint32_t jointCount = 0;
+                stream.read(reinterpret_cast<char*>(&jointCount), sizeof(uint32_t));
+                skin->Joints.resize(jointCount);
+
+                for (uint32_t j = 0; j < jointCount; j++)
+                {
+                    int32_t jointNodeIndex = -1;
+                    stream.read(reinterpret_cast<char*>(&jointNodeIndex), sizeof(int32_t));
+                    if (jointNodeIndex >= 0 && jointNodeIndex < static_cast<int32_t>(outSkeleton.AllNodes.size()))
+                    {
+                        skin->Joints[j] = outSkeleton.AllNodes[jointNodeIndex];
+                    }
+                    else
+                    {
+                        skin->Joints[j] = nullptr;
+                    }
+                }
+
+                SerializerUtils::ReadVector(stream, skin->InverseBindMatrices);
+                outSkeleton.Skins[i] = skin;
             }
 
             return true;
@@ -124,8 +235,8 @@ namespace Nox
 
             for (const auto& channel : anim.Channels)
             {
-                SerializerUtils::WriteString(stream, channel.BoneName);
-                stream.write(reinterpret_cast<const char*>(&channel.BoneIndex), sizeof(int32_t));
+                SerializerUtils::WriteString(stream, channel.NodeName);
+                stream.write(reinterpret_cast<const char*>(&channel.TargetNodeIndex), sizeof(int32_t));
 
                 uint8_t interp = static_cast<uint8_t>(channel.Interpolation);
                 stream.write(reinterpret_cast<const char*>(&interp), sizeof(uint8_t));
@@ -155,9 +266,9 @@ namespace Nox
 
             for (uint32_t i = 0; i < channelCount; i++)
             {
-                BoneAnimationChannel& channel = outAnim.Channels[i];
-                SerializerUtils::ReadString(stream, channel.BoneName);
-                stream.read(reinterpret_cast<char*>(&channel.BoneIndex), sizeof(int32_t));
+                NodeAnimationChannel& channel = outAnim.Channels[i];
+                SerializerUtils::ReadString(stream, channel.NodeName);
+                stream.read(reinterpret_cast<char*>(&channel.TargetNodeIndex), sizeof(int32_t));
 
                 uint8_t interp = 0;
                 stream.read(reinterpret_cast<char*>(&interp), sizeof(uint8_t));

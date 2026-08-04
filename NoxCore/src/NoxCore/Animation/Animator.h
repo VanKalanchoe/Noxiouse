@@ -27,6 +27,7 @@ namespace Nox
 
         // Main evaluation loop
         void Update(float deltaTime, const Skeleton& skeleton);
+        void UpdateTransforms(const Skeleton& skeleton);
 
         // Parameters & Queries
         void SetLooping(bool loop) { m_IsLooping = loop; }
@@ -47,12 +48,10 @@ namespace Nox
         const std::vector<glm::mat4>& GetGlobalBoneTransforms() const { return m_GlobalBoneTransforms; }
 
     private:
-        void UpdateBoneTransforms(const Skeleton& skeleton);
-
-        // Keyframe sampling helpers
-        glm::vec3 InterpolatePosition(float time, const BoneAnimationChannel& channel);
-        glm::quat InterpolateRotation(float time, const BoneAnimationChannel& channel);
-        glm::vec3 InterpolateScale(float time, const BoneAnimationChannel& channel);
+        // Keyframe sampling helpers using NodeAnimationChannel
+        glm::vec3 InterpolatePosition(float time, const NodeAnimationChannel& channel);
+        glm::quat InterpolateRotation(float time, const NodeAnimationChannel& channel);
+        glm::vec3 InterpolateScale(float time, const NodeAnimationChannel& channel);
 
         // O(log N) Binary search for keyframe lookup
         template<typename KeyType>

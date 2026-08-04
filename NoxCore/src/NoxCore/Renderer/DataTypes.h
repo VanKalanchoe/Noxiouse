@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 #include <glm/glm.hpp>
+#include <glm/detail/type_quat.hpp>
 
 namespace shaderio // Shader IO namespace -- shared layout between C++ and shaders
 {

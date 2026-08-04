@@ -1,5 +1,6 @@
 #include "Animator.h"
 #include "NoxCore/Core/Log.h"
+#include <glm/gtx/quaternion.hpp>
 
 namespace Nox
 {
@@ -34,12 +35,12 @@ namespace Nox
 
     void Animator::Update(float deltaTime, const Skeleton& skeleton)
     {
-        if (skeleton.Bones.empty())
+        if (skeleton.AllNodes.empty())
             return;
 
         if (!m_IsPlaying || !m_CurrentAnimation || m_CurrentAnimation->Duration <= 0.0f)
         {
-            UpdateBoneTransforms(skeleton);
+            UpdateTransforms(skeleton);
             return;
         }
 
@@ -62,83 +63,108 @@ namespace Nox
             }
         }
 
-        UpdateBoneTransforms(skeleton);
+        UpdateTransforms(skeleton);
     }
 
-   void Animator::UpdateBoneTransforms(const Skeleton& skeleton)
-{
-    size_t boneCount = skeleton.Bones.size();
-    m_GlobalBoneTransforms.resize(boneCount);
-    m_FinalBoneTransforms.resize(boneCount);
-
-    // 1. Initialize local TRS matrices to the rest pose
-    std::vector<glm::mat4> localTransforms(boneCount);
-    for (size_t i = 0; i < boneCount; ++i)
+    void Animator::UpdateTransforms(const Skeleton& skeleton)
     {
-        localTransforms[i] = skeleton.Bones[i].LocalRestTransform;
-    }
-
-    // 2. Evaluate animation tracks and override animated channels
-    if (m_CurrentAnimation)
-    {
-        for (const auto& channel : m_CurrentAnimation->Channels)
+        // 1. Reset all nodes to their rest pose
+        for (Node* node : skeleton.AllNodes)
         {
-            int32_t boneIndex = channel.BoneIndex;
+            if (!node) continue;
+            node->Translation = node->RestTranslation;
+            node->Rotation = node->RestRotation;
+            node->Scale = node->RestScale;
+            node->Matrix = node->RestMatrix;
+            node->HasMatrix = node->HasRestMatrix;
+        }
 
-            if (boneIndex < 0 || boneIndex >= static_cast<int32_t>(boneCount))
+        // 2. Evaluate animation tracks and override animated node channels
+        if (m_CurrentAnimation)
+        {
+            for (const auto& channel : m_CurrentAnimation->Channels)
             {
-                boneIndex = skeleton.FindBoneIndex(channel.BoneName);
+                int32_t nodeIndex = channel.TargetNodeIndex;
+
+                if (nodeIndex < 0 || nodeIndex >= static_cast<int32_t>(skeleton.AllNodes.size()))
+                    continue;
+
+                Node* node = skeleton.AllNodes[nodeIndex];
+                if (!node) continue;
+
+                // Clear matrix flag so animated TRS takes effect
+                node->HasMatrix = false;
+
+                if (!channel.PositionKeys.empty())
+                    node->Translation = InterpolatePosition(m_CurrentTime, channel);
+                if (!channel.RotationKeys.empty())
+                    node->Rotation = InterpolateRotation(m_CurrentTime, channel);
+                if (!channel.ScaleKeys.empty())
+                    node->Scale = InterpolateScale(m_CurrentTime, channel);
+            }
+        }
+
+        // 3. Recursively calculate node local and global matrices down the tree
+        auto updateNodeRecursive = [](auto& self, Node* node) -> void {
+            // Combine TRS with the raw base matrix if present
+            glm::mat4 trsMatrix = glm::translate(glm::mat4(1.0f), node->Translation) *
+                                  glm::toMat4(node->Rotation) *
+                                  glm::scale(glm::mat4(1.0f), node->Scale);
+
+            if (node->HasMatrix)
+            {
+                node->LocalMatrix = trsMatrix * node->Matrix;
+            }
+            else
+            {
+                node->LocalMatrix = trsMatrix;
             }
 
-            if (boneIndex < 0 || boneIndex >= static_cast<int32_t>(boneCount))
-                continue;
+            if (node->Parent)
+                node->GlobalMatrix = node->Parent->GlobalMatrix * node->LocalMatrix;
+            else
+                node->GlobalMatrix = node->LocalMatrix;
 
-            glm::vec3 pos = InterpolatePosition(m_CurrentTime, channel);
-            glm::quat rot = InterpolateRotation(m_CurrentTime, channel);
-            glm::vec3 scale = InterpolateScale(m_CurrentTime, channel);
+            for (Node* child : node->Children)
+            {
+                self(self, child);
+            }
+        };
 
-            glm::mat4 T = glm::translate(glm::mat4(1.0f), pos);
-            glm::mat4 R = glm::toMat4(rot);
-            glm::mat4 S = glm::scale(glm::mat4(1.0f), scale);
-
-            localTransforms[boneIndex] = T * R * S;
-        }
-    }
-
-    // 3. Recursively calculate global hierarchy transforms (safely handles out-of-order joints)
-    std::vector<bool> calculated(boneCount, false);
-
-    std::function<void(int32_t)> computeGlobalTransform = [&](int32_t i) {
-        if (calculated[i]) return;
-        calculated[i] = true;
-
-        const BoneInfo& bone = skeleton.Bones[i];
-        int32_t parentIndex = bone.ParentIndex;
-
-        if (parentIndex >= 0 && parentIndex < static_cast<int32_t>(boneCount))
+        for (Node* root : skeleton.RootNodes)
         {
-            // Ensure parent is computed first
-            computeGlobalTransform(parentIndex);
-            m_GlobalBoneTransforms[i] = m_GlobalBoneTransforms[parentIndex] * localTransforms[i];
+            updateNodeRecursive(updateNodeRecursive, root);
+        }
+
+        // 4. Populate final shader matrices using ONLY the Skin joints array
+        if (!skeleton.Skins.empty() && skeleton.Skins[0] != nullptr)
+        {
+            const Skin* skin = skeleton.Skins[0];
+            size_t jointCount = skin->Joints.size();
+            m_FinalBoneTransforms.resize(jointCount);
+
+            for (size_t i = 0; i < jointCount; ++i)
+            {
+                Node* jointNode = skin->Joints[i];
+                if (jointNode)
+                {
+                    m_FinalBoneTransforms[i] = jointNode->GlobalMatrix * skin->InverseBindMatrices[i];
+                }
+                else
+                {
+                    m_FinalBoneTransforms[i] = glm::mat4(1.0f);
+                }
+            }
         }
         else
         {
-            m_GlobalBoneTransforms[i] = localTransforms[i];
+            m_FinalBoneTransforms.clear();
         }
-    };
-
-    // Trigger calculation for all bones
-    for (size_t i = 0; i < boneCount; ++i)
-    {
-        computeGlobalTransform(static_cast<int32_t>(i));
-        m_FinalBoneTransforms[i] = m_GlobalBoneTransforms[i] * skeleton.Bones[i].InverseBindMatrix;
     }
-}
 
     template<typename KeyType>
     size_t Animator::FindKeyframeIndex(float time, const std::vector<KeyType>& keys) const
     {
-        // Binary search using std::upper_bound -> O(log N)
         auto it = std::upper_bound(keys.begin(), keys.end(), time,
             [](float t, const KeyType& key) {
                 return t < key.Time;
@@ -150,7 +176,7 @@ namespace Nox
         return std::distance(keys.begin(), it) - 1;
     }
 
-    glm::vec3 Animator::InterpolatePosition(float time, const BoneAnimationChannel& channel)
+    glm::vec3 Animator::InterpolatePosition(float time, const NodeAnimationChannel& channel)
     {
         if (channel.PositionKeys.empty())
             return glm::vec3(0.0f);
@@ -174,7 +200,7 @@ namespace Nox
         return glm::mix(channel.PositionKeys[idx].Value, channel.PositionKeys[nextIdx].Value, factor);
     }
 
-    glm::quat Animator::InterpolateRotation(float time, const BoneAnimationChannel& channel)
+    glm::quat Animator::InterpolateRotation(float time, const NodeAnimationChannel& channel)
     {
         if (channel.RotationKeys.empty())
             return glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
@@ -195,11 +221,10 @@ namespace Nox
         float t1 = channel.RotationKeys[nextIdx].Time;
         float factor = (time - t0) / (t1 - t0);
 
-        // Spherical linear interpolation (SLERP) for smooth quat rotation
         return glm::normalize(glm::slerp(channel.RotationKeys[idx].Value, channel.RotationKeys[nextIdx].Value, factor));
     }
 
-    glm::vec3 Animator::InterpolateScale(float time, const BoneAnimationChannel& channel)
+    glm::vec3 Animator::InterpolateScale(float time, const NodeAnimationChannel& channel)
     {
         if (channel.ScaleKeys.empty())
             return glm::vec3(1.0f);

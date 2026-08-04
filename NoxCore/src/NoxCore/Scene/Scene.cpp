@@ -348,7 +348,8 @@ namespace Nox
         {
             auto& animatorComp = view.get<AnimatorComponent>(entity);
 
-            if (animatorComp.SkeletonAsset && !animatorComp.SkeletonAsset->Bones.empty())
+            // Updated from Bones.empty() to AllNodes.empty()
+            if (animatorComp.SkeletonAsset && !animatorComp.SkeletonAsset->AllNodes.empty())
             {
                 animatorComp.Animator.Update((float)ts, *animatorComp.SkeletonAsset);
             }
