@@ -16,7 +16,11 @@ namespace Nox
         Texture2D,
         MeshSource,
         Mesh,
-        StaticMesh
+        StaticMesh,
+        
+        Skeleton,
+        AnimationSequence,
+        SkeletalMesh
     };
 
     std::string_view AssetTypeToString(AssetType type);

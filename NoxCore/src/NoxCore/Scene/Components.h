@@ -9,6 +9,7 @@
 #include "NoxCore/Core/UUID.h"
 
 #include "box2d/box2d.h"
+#include "NoxCore/Animation/Animator.h"
 
 #include "NoxCore/Renderer/Font.h"
 
@@ -101,6 +102,19 @@ namespace Nox
         MaterialComponent(const MaterialComponent&) = default;
         MaterialComponent(const glm::vec4 color) : AlbedoColor(color) {}
         
+    };
+    
+    // Holds runtime animation state (tracks current time, playing animation, bone matrices)
+    struct AnimatorComponent
+    {
+        Animator Animator;
+        Ref<Skeleton> SkeletonAsset;
+        bool Playing = true;
+
+        AnimatorComponent() = default;
+        AnimatorComponent(const AnimatorComponent&) = default;
+        AnimatorComponent(const Ref<AnimationSequence>& animation)
+            : Animator(animation) {}
     };
     
     struct SpriteRendererComponent
@@ -228,7 +242,7 @@ namespace Nox
 
     using AllComponents = 
         ComponentGroup<TransformComponent, WorldTransformComponent, RelationshipComponent, DirtyTransformComponent,
-        MeshComponent, MaterialComponent,
+        MeshComponent, MaterialComponent, AnimatorComponent,
         SpriteRendererComponent,
             CircleRendererComponent, CameraComponent, ScriptComponent,
             /*NativeScriptComponent,*/ RigidBody2DComponent, BoxCollider2DComponent,

@@ -1,10 +1,10 @@
 AssetRegistry:
+  - Handle: 1084759184137168841
+    FilePath: models/dancing_stormtrooper/dancing_stormtrooper_mixamo.com.nanim
+    SourceFilePath: models/dancing_stormtrooper/dancing_stormtrooper_mixamo.com.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 1634953866148052078
     FilePath: textures/Checkerboard.png
-    Type: AssetType::Texture2D
-  - Handle: 1745213228374727182
-    FilePath: models/Texture.png
-    SourceFilePath: models/Texture.png
     Type: AssetType::Texture2D
   - Handle: 3725258042431064742
     FilePath: textures/ChernoLogo.png
@@ -12,6 +12,10 @@ AssetRegistry:
   - Handle: 3904161952643960358
     FilePath: scenes/flat.nox
     Type: AssetType::Scene
+  - Handle: 4617614288152238058
+    FilePath: models/dancing_stormtrooper/textures/dancing_stormtrooper_tex_0.png
+    SourceFilePath: models/dancing_stormtrooper/textures/dancing_stormtrooper_tex_0.png
+    Type: AssetType::Texture2D
   - Handle: 4923247609583320878
     FilePath: textures/viking_room.ktx2
     SourceFilePath: textures/viking_room.ktx2
@@ -19,9 +23,13 @@ AssetRegistry:
   - Handle: 5314834349182513991
     FilePath: textures/blending_transparent_window.png
     Type: AssetType::Texture2D
-  - Handle: 5541764050084968938
-    FilePath: models/multimesh.nmesh
-    SourceFilePath: models/multimesh.gltf
+  - Handle: 6357230009519216082
+    FilePath: models/dancing_stormtrooper/dancing_stormtrooper.nmesh
+    SourceFilePath: models/dancing_stormtrooper/dancing_stormtrooper.glb
+    Type: AssetType::Mesh
+  - Handle: 6854377278634023499
+    FilePath: models/dancing_stormtrooper/dancing_stormtrooper.nmesh
+    SourceFilePath: models/dancing_stormtrooper/dancing_stormtrooper.glb
     Type: AssetType::Mesh
   - Handle: 6925804595022315940
     FilePath: scenes/Physics2D.nox
@@ -29,17 +37,33 @@ AssetRegistry:
   - Handle: 7412818356000165226
     FilePath: textures/Pacmanface.png
     Type: AssetType::Texture2D
-  - Handle: 7502815306644812760
+  - Handle: 10589341636009495251
+    FilePath: models/fox/Texture.png
+    SourceFilePath: models/fox/Texture.png
+    Type: AssetType::Texture2D
+  - Handle: 11188404286560190002
     FilePath: models/dancing_stormtrooper/dancing_stormtrooper.nmesh
     SourceFilePath: models/dancing_stormtrooper/dancing_stormtrooper.glb
     Type: AssetType::Mesh
+  - Handle: 12120442924234161092
+    FilePath: models/pilot/pilot_avatar.nmesh
+    SourceFilePath: models/pilot/pilot_avatar.glb
+    Type: AssetType::Mesh
+  - Handle: 12526380781911128082
+    FilePath: models/pilot/pilot_avatar_Idle Loop.nanim
+    SourceFilePath: models/pilot/pilot_avatar_Idle Loop.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 13004636392655663239
     FilePath: scenes/3DScene.nox
     Type: AssetType::Scene
-  - Handle: 14928672170422402861
-    FilePath: models/dancing_stormtrooper/textures/dancing_stormtrooper_tex_0.png
-    SourceFilePath: models/dancing_stormtrooper/textures/dancing_stormtrooper_tex_0.png
+  - Handle: 14129544799350762953
+    FilePath: models/pilot/textures/pilot_avatar_tex_0.png
+    SourceFilePath: models/pilot/textures/pilot_avatar_tex_0.png
     Type: AssetType::Texture2D
+  - Handle: 14220520270192612590
+    FilePath: models/fox/Fox.nmesh
+    SourceFilePath: models/fox/Fox.gltf
+    Type: AssetType::Mesh
   - Handle: 15201526316078530078
     FilePath: scenes/noxtest.nox
     Type: AssetType::Scene

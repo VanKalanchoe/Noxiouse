@@ -7,6 +7,7 @@
 
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Core/Log.h"
+#include "NoxCore/Animation/Animator.h"
 
 namespace Nox
 {
@@ -33,28 +34,28 @@ namespace Nox
             m_Context->m_Registry.view<TagComponent>().each([&](auto entityID, TagComponent&)
             {
                 Entity entity(entityID, m_Context.get());
-                
+
                 bool isRoot = true;
                 if (entity.HasComponent<RelationshipComponent>())
                     if (entity.GetComponent<RelationshipComponent>().Parent != 0)
                         isRoot = false;
-                
+
                 if (isRoot)
                     DrawEntityNode(entity);
             });
-            
+
             // --- 1. FILL REMAINING SPACE WITH AN INVISIBLE BUTTON ---
             ImVec2 availSize = ImGui::GetContentRegionAvail();
             if (availSize.x < 1.0f) availSize.x = 1.0f;
             if (availSize.y < 1.0f) availSize.y = 1.0f;
-            
+
             ImGui::InvisibleButton("##SceneHierarchyBackground", availSize);
 
             if (ImGui::IsMouseDown(0) && ImGui::IsWindowHovered())
             {
                 m_SelectionContext = {};
             }
-            
+
             if (ImGui::BeginDragDropTarget())
             {
                 if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("SCENE_HIERARCHY_ENTITY"))
@@ -81,7 +82,7 @@ namespace Nox
             }
         }
         ImGui::End();
-        
+
         ImGui::Begin("Properties");
         leftPropFocused = ImGui::IsWindowFocused();
         leftPropHovered = ImGui::IsWindowHovered();
@@ -97,20 +98,20 @@ namespace Nox
     {
         m_SelectionContext = entity;
     }
-    
+
     void SceneHierarchyPanel::DrawEntityNode(Entity entity)
     {
         auto& tag = entity.GetComponent<TagComponent>().Tag;
-        
+
         ImGuiTreeNodeFlags flags = ((m_SelectionContext == entity) ? ImGuiTreeNodeFlags_Selected : 0) |
             ImGuiTreeNodeFlags_OpenOnArrow;
         flags |= ImGuiTreeNodeFlags_SpanAvailWidth;
-        
+
         bool hasChildren = false;
         if (entity.HasComponent<RelationshipComponent>())
             if (!entity.GetComponent<RelationshipComponent>().Children.empty())
                 hasChildren = true;
-        
+
         if (!hasChildren)
             flags |= ImGuiTreeNodeFlags_Leaf;
 
@@ -119,7 +120,7 @@ namespace Nox
         {
             m_SelectionContext = entity;
         }
-        
+
         // --- 1. DRAG SOURCE: Pick up this entity to drag it ---
         if (ImGui::BeginDragDropSource())
         {
@@ -128,7 +129,7 @@ namespace Nox
             ImGui::Text("%s", tag.c_str());
             ImGui::EndDragDropSource();
         }
-        
+
         // --- 2. DROP TARGET: Drop another entity onto this one to make it a child ---
         if (ImGui::BeginDragDropTarget())
         {
@@ -136,7 +137,7 @@ namespace Nox
             {
                 UUID droppedEntityID = *(UUID*)payload->Data;
                 Entity droppedEntity = m_Context->GetEntityByUUID(droppedEntityID);
-                
+
                 if (droppedEntity && droppedEntity != entity)
                 {
                     // Prevent circular parenting (cannot parent an entity to its own child/descendant)
@@ -201,7 +202,7 @@ namespace Nox
             }
         }
     }
-    
+
     //styling maybe in the future different clas
     static bool DrawVec3Control(const std::string& label, glm::vec3& values, float resetValue = 0.0f,
                                 float columnWidth = 100.0f)
@@ -283,7 +284,7 @@ namespace Nox
         ImGui::Columns(1);
 
         ImGui::PopID();
-        
+
         return valueChanged;
     }
 
@@ -337,7 +338,7 @@ namespace Nox
     {
         if (!entity)
             return;
-        
+
         if (entity.HasComponent<TagComponent>())
         {
             auto& tag = entity.GetComponent<TagComponent>().Tag;
@@ -363,7 +364,8 @@ namespace Nox
         {
             DisplayAddComponentEntry<MeshComponent>("Mesh");
             DisplayAddComponentEntry<MaterialComponent>("Material");
-            
+            DisplayAddComponentEntry<AnimatorComponent>("Animator");
+
             DisplayAddComponentEntry<CameraComponent>("Camera");
             DisplayAddComponentEntry<ScriptComponent>("Script");
             DisplayAddComponentEntry<SpriteRendererComponent>("Sprite Renderer");
@@ -372,7 +374,7 @@ namespace Nox
             DisplayAddComponentEntry<BoxCollider2DComponent>("Box Collider 2D");
             DisplayAddComponentEntry<CircleCollider2DComponent>("Circle Collider 2D");
             DisplayAddComponentEntry<TextComponent>("Text Component");
-            
+
             ImGui::EndPopup();
         }
 
@@ -381,8 +383,8 @@ namespace Nox
         DrawComponent<TransformComponent>("Transform", entity, [this, entity](auto& component)
         {
             bool modified = false;
-            modified |=  DrawVec3Control("Position", component.Translation);
-           
+            modified |= DrawVec3Control("Position", component.Translation);
+
             glm::vec3 rotation = glm::degrees(component.Rotation);
             if (DrawVec3Control("Rotation", rotation))
             {
@@ -390,16 +392,16 @@ namespace Nox
                 modified = true;
             }
             modified |= DrawVec3Control("Scale", component.Scale, 1.0f);
-            
+
             if (modified)
                 m_Context->m_Registry.emplace_or_replace<DirtyTransformComponent>(entity);
         });
-        
+
         DrawComponent<MeshComponent>("Mesh", entity, [](auto& component)
         {
             std::string label = "None";
             bool isMeshValid = false;
-            
+
             // 1. Resolve the current mesh name if one is assigned
             if (component.Mesh != 0)
             {
@@ -428,16 +430,16 @@ namespace Nox
             ImVec2 buttonLabelSize = ImGui::CalcTextSize(label.c_str());
             buttonLabelSize.x += 20.0f;
             float buttonLabelWidth = glm::max<float>(100.0f, buttonLabelSize.x);
-            
+
             ImGui::Button(label.c_str(), ImVec2(buttonLabelWidth, 0.0f));
-            
+
             // 3. Accept the payload from the Content Browser
             if (ImGui::BeginDragDropTarget())
             {
                 if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEM"))
                 {
                     AssetHandle handle = *(AssetHandle*)payload->Data;
-                    
+
                     // Verify it's a mesh type
                     AssetType type = AssetManager::GetAssetType(handle);
                     if (type == AssetType::MeshSource || type == AssetType::StaticMesh || type == AssetType::Mesh)
@@ -463,111 +465,205 @@ namespace Nox
                 {
                     component.Mesh = 0;
                 }
-                
+
                 ImGui::DragScalar("Submesh Index", ImGuiDataType_U32, &component.SubmeshIndex, 0.1f, nullptr, nullptr, "%u");
             }
-            
+
             ImGui::SameLine();
             ImGui::Text("Mesh Asset");
         });
-        
+
         DrawComponent<MaterialComponent>("Material", entity, [](auto& component)
         {
             ImGui::ColorEdit4("Albedo Color", glm::value_ptr(component.AlbedoColor));
-            
-            ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::Text("Material Slots (Submesh Textures)");
-    ImGui::Spacing();
 
-    if (component.AlbedoMaps.empty())
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Text("Material Slots (Submesh Textures)");
+            ImGui::Spacing();
+
+            if (component.AlbedoMaps.empty())
+            {
+                ImGui::TextDisabled("No material slots assigned.");
+                if (ImGui::Button("+ Add Slot"))
+                {
+                    component.AlbedoMaps.push_back(0);
+                }
+            }
+            else
+            {
+                for (size_t i = 0; i < component.AlbedoMaps.size(); i++)
+                {
+                    // PUSH ID to prevent button ID collisions across multiple vector slots
+                    ImGui::PushID(static_cast<int>(i));
+
+                    AssetHandle& texHandle = component.AlbedoMaps[i];
+                    std::string label = "None";
+                    bool isTextureValid = false;
+
+                    if (texHandle != 0)
+                    {
+                        if (AssetManager::IsAssetHandleValid(texHandle) && AssetManager::GetAssetType(texHandle) == AssetType::Texture2D)
+                        {
+                            const AssetMetadata& metadata = Project::GetActive()->GetEditorAssetManager()->GetMetadata(texHandle);
+                            label = metadata.FilePath.filename().string();
+                            isTextureValid = true;
+                        }
+                        else
+                        {
+                            label = "Invalid";
+                        }
+                    }
+
+                    ImGui::Text("Slot [%zu]", i);
+                    ImGui::SameLine();
+
+                    ImVec2 buttonLabelSize = ImGui::CalcTextSize(label.c_str());
+                    buttonLabelSize.x += 20.0f;
+                    float buttonLabelWidth = glm::max<float>(100.0f, buttonLabelSize.x);
+
+                    ImGui::Button(label.c_str(), ImVec2(buttonLabelWidth, 0.0f));
+
+                    // Drag & Drop payload target for Texture2D
+                    if (ImGui::BeginDragDropTarget())
+                    {
+                        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEM"))
+                        {
+                            AssetHandle handle = *(AssetHandle*)payload->Data;
+                            if (AssetManager::GetAssetType(handle) == AssetType::Texture2D)
+                            {
+                                texHandle = handle;
+                            }
+                            else
+                            {
+                                NOX_CORE_WARN("Wrong Asset Type - Expected a Texture2D");
+                            }
+                        }
+                        ImGui::EndDragDropTarget();
+                    }
+
+                    // Clear Texture Button
+                    if (isTextureValid)
+                    {
+                        ImGui::SameLine();
+                        ImVec2 xLabelSize = ImGui::CalcTextSize("X");
+                        float buttonSize = xLabelSize.y + ImGui::GetStyle().FramePadding.y * 2.0f;
+                        if (ImGui::Button("X", ImVec2(buttonSize, buttonSize)))
+                        {
+                            texHandle = 0;
+                        }
+                    }
+
+                    ImGui::PopID();
+                }
+
+                ImGui::Spacing();
+                if (ImGui::Button("+ Add Slot"))
+                {
+                    component.AlbedoMaps.push_back(0);
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("- Remove Slot") && !component.AlbedoMaps.empty())
+                {
+                    component.AlbedoMaps.pop_back();
+                }
+            }
+        });
+
+DrawComponent<AnimatorComponent>("Animator", entity, [](auto& component)
+{
+    Ref<AnimationSequence> currentAnim = component.Animator.GetCurrentAnimation();
+
+    // --- Media Control Buttons ---
+    bool isPlaying = component.Animator.IsPlaying();
+    
+    if (isPlaying)
     {
-        ImGui::TextDisabled("No material slots assigned.");
-        if (ImGui::Button("+ Add Slot"))
+        if (ImGui::Button("Pause", ImVec2(80.0f, 0.0f)))
         {
-            component.AlbedoMaps.push_back(0);
+            component.Animator.Pause();
         }
     }
     else
     {
-        for (size_t i = 0; i < component.AlbedoMaps.size(); i++)
+        if (ImGui::Button("Play", ImVec2(80.0f, 0.0f)))
         {
-            // PUSH ID to prevent button ID collisions across multiple vector slots
-            ImGui::PushID(static_cast<int>(i));
-
-            AssetHandle& texHandle = component.AlbedoMaps[i];
-            std::string label = "None";
-            bool isTextureValid = false;
-
-            if (texHandle != 0)
+            // If looping is off and the animation is at the end, reset to start before playing
+            if (!component.Animator.IsLooping() && currentAnim)
             {
-                if (AssetManager::IsAssetHandleValid(texHandle) && AssetManager::GetAssetType(texHandle) == AssetType::Texture2D)
+                float currentTime = component.Animator.GetCurrentAnimationTime();
+                if (currentTime >= currentAnim->Duration)
                 {
-                    const AssetMetadata& metadata = Project::GetActive()->GetEditorAssetManager()->GetMetadata(texHandle);
-                    label = metadata.FilePath.filename().string();
-                    isTextureValid = true;
-                }
-                else
-                {
-                    label = "Invalid";
+                    component.Animator.SetCurrentTime(0.0f);
                 }
             }
-
-            ImGui::Text("Slot [%zu]", i);
-            ImGui::SameLine();
-
-            ImVec2 buttonLabelSize = ImGui::CalcTextSize(label.c_str());
-            buttonLabelSize.x += 20.0f;
-            float buttonLabelWidth = glm::max<float>(100.0f, buttonLabelSize.x);
-
-            ImGui::Button(label.c_str(), ImVec2(buttonLabelWidth, 0.0f));
-
-            // Drag & Drop payload target for Texture2D
-            if (ImGui::BeginDragDropTarget())
-            {
-                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEM"))
-                {
-                    AssetHandle handle = *(AssetHandle*)payload->Data;
-                    if (AssetManager::GetAssetType(handle) == AssetType::Texture2D)
-                    {
-                        texHandle = handle;
-                    }
-                    else
-                    {
-                        NOX_CORE_WARN("Wrong Asset Type - Expected a Texture2D");
-                    }
-                }
-                ImGui::EndDragDropTarget();
-            }
-
-            // Clear Texture Button
-            if (isTextureValid)
-            {
-                ImGui::SameLine();
-                ImVec2 xLabelSize = ImGui::CalcTextSize("X");
-                float buttonSize = xLabelSize.y + ImGui::GetStyle().FramePadding.y * 2.0f;
-                if (ImGui::Button("X", ImVec2(buttonSize, buttonSize)))
-                {
-                    texHandle = 0;
-                }
-            }
-
-            ImGui::PopID();
-        }
-
-        ImGui::Spacing();
-        if (ImGui::Button("+ Add Slot"))
-        {
-            component.AlbedoMaps.push_back(0);
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("- Remove Slot") && !component.AlbedoMaps.empty())
-        {
-            component.AlbedoMaps.pop_back();
+            component.Animator.Resume();
         }
     }
-        });
 
+    ImGui::SameLine();
+    if (ImGui::Button("Stop", ImVec2(80.0f, 0.0f)))
+    {
+        component.Animator.Stop();
+    }
+
+    ImGui::Spacing();
+
+    bool isLooping = component.Animator.IsLooping();
+    if (ImGui::Checkbox("Looping", &isLooping))
+    {
+        component.Animator.SetLooping(isLooping);
+    }
+
+    float speed = component.Animator.GetPlaybackSpeed();
+    if (ImGui::DragFloat("Playback Speed", &speed, 0.05f, 0.0f, 10.0f))
+    {
+        component.Animator.SetPlaybackSpeed(speed);
+    }
+
+    // Current animation sequence details
+    std::string currentAnimName = "None";
+
+    if (currentAnim)
+    {
+        currentAnimName = currentAnim->Name.empty() ? "Animation Sequence" : currentAnim->Name;
+    }
+
+    ImGui::Text("Animation: %s", currentAnimName.c_str());
+
+    // Timeline control
+    float currentTime = component.Animator.GetCurrentAnimationTime();
+    float maxDuration = currentAnim ? currentAnim->Duration : 100.0f;
+
+    if (ImGui::SliderFloat("Time (Ticks)", &currentTime, 0.0f, maxDuration, "%.2f"))
+    {
+        component.Animator.SetCurrentTime(currentTime);
+    }
+
+    // Drag-and-drop target for .nanim assets
+    ImGui::Spacing();
+    ImGui::Button("Drop Animation Here", ImVec2(-1.0f, 0.0f));
+    if (ImGui::BeginDragDropTarget())
+    {
+        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEM"))
+        {
+            AssetHandle handle = *(AssetHandle*)payload->Data;
+            if (AssetManager::GetAssetType(handle) == AssetType::AnimationSequence)
+            {
+                Ref<AnimationSequence> anim = AssetManager::GetAsset<AnimationSequence>(handle);
+                if (anim)
+                {
+                    component.Animator.PlayAnimation(anim);
+                }
+            }
+            else
+            {
+                NOX_CORE_WARN("Wrong Asset Type - Expected Animation Sequence (.nanim)");
+            }
+        }
+        ImGui::EndDragDropTarget();
+    }
+});
         DrawComponent<CameraComponent>("Camera", entity, [](auto& component)
         {
             auto& camera = component.Camera;
@@ -641,82 +737,82 @@ namespace Nox
         });
 
         DrawComponent<ScriptComponent>("Script", entity, [entity, scene = m_Context](auto& component) mutable
-		{
-			/*bool scriptClassExists = ScriptEngine::EntityClassExists(component.ClassName);
+        {
+            /*bool scriptClassExists = ScriptEngine::EntityClassExists(component.ClassName);
 
-			static char buffer[64];
-			strcpy_s(buffer, sizeof(buffer), component.ClassName.c_str());
+            static char buffer[64];
+            strcpy_s(buffer, sizeof(buffer), component.ClassName.c_str());
 
             UI::ScopedStyleColor textColor(ImGuiCol_Text, ImVec4(0.9f, 0.2f, 0.3f, 1.0f), !scriptClassExists);
 
-			if (ImGui::InputText("Class", buffer, sizeof(buffer)))
-			{
-			    component.ClassName = buffer;
-			    return;
-			}
+            if (ImGui::InputText("Class", buffer, sizeof(buffer)))
+            {
+                component.ClassName = buffer;
+                return;
+            }
 
-			// Fields
-			bool sceneRunning = scene->IsRunning();
-			if (sceneRunning)
-			{
-				Ref<ScriptInstance> scriptInstance = ScriptEngine::GetEntityScriptInstance(entity.GetUUID());
-				if (scriptInstance)
-				{
-					const auto& fields = scriptInstance->GetScriptClass()->GetFields();
-					for (const auto& [name, field] : fields)
-					{
-						if (field.Type == ScriptFieldType::Float)
-						{
-							float data = scriptInstance->GetFieldValue<float>(name);
-							if (ImGui::DragFloat(name.c_str(), &data))
-							{
-								scriptInstance->SetFieldValue(name, data);
-							}
-						}
-					}
-				}
-			}
-			else
-			{
-				if (scriptClassExists)
-				{
-					Ref<ScriptClass> entityClass = ScriptEngine::GetEntityClass(component.ClassName);
-					const auto& fields = entityClass->GetFields();
+            // Fields
+            bool sceneRunning = scene->IsRunning();
+            if (sceneRunning)
+            {
+                Ref<ScriptInstance> scriptInstance = ScriptEngine::GetEntityScriptInstance(entity.GetUUID());
+                if (scriptInstance)
+                {
+                    const auto& fields = scriptInstance->GetScriptClass()->GetFields();
+                    for (const auto& [name, field] : fields)
+                    {
+                        if (field.Type == ScriptFieldType::Float)
+                        {
+                            float data = scriptInstance->GetFieldValue<float>(name);
+                            if (ImGui::DragFloat(name.c_str(), &data))
+                            {
+                                scriptInstance->SetFieldValue(name, data);
+                            }
+                        }
+                    }
+                }
+            }
+            else
+            {
+                if (scriptClassExists)
+                {
+                    Ref<ScriptClass> entityClass = ScriptEngine::GetEntityClass(component.ClassName);
+                    const auto& fields = entityClass->GetFields();
 
-					auto& entityFields = ScriptEngine::GetScriptFieldMap(entity);
-					for (const auto& [name, field] : fields)
-					{
-						// Field has been set in editor
-						if (entityFields.find(name) != entityFields.end())
-						{
-							ScriptFieldInstance& scriptField = entityFields.at(name);
+                    auto& entityFields = ScriptEngine::GetScriptFieldMap(entity);
+                    for (const auto& [name, field] : fields)
+                    {
+                        // Field has been set in editor
+                        if (entityFields.find(name) != entityFields.end())
+                        {
+                            ScriptFieldInstance& scriptField = entityFields.at(name);
 
-							// Display control to set it maybe
-							if (field.Type == ScriptFieldType::Float)
-							{
-								float data = scriptField.GetValue<float>();
-								if (ImGui::DragFloat(name.c_str(), &data))
-									scriptField.SetValue(data);
-							}
-						}
-						else
-						{
-							// Display control to set it maybe
-							if (field.Type == ScriptFieldType::Float)
-							{
-								float data = 0.0f;
-								if (ImGui::DragFloat(name.c_str(), &data))
-								{
-									ScriptFieldInstance& fieldInstance = entityFields[name];
-									fieldInstance.Field = field;
-									fieldInstance.SetValue(data);
-								}
-							}
-						}
-					}
-				}
-			}*/
-		});
+                            // Display control to set it maybe
+                            if (field.Type == ScriptFieldType::Float)
+                            {
+                                float data = scriptField.GetValue<float>();
+                                if (ImGui::DragFloat(name.c_str(), &data))
+                                    scriptField.SetValue(data);
+                            }
+                        }
+                        else
+                        {
+                            // Display control to set it maybe
+                            if (field.Type == ScriptFieldType::Float)
+                            {
+                                float data = 0.0f;
+                                if (ImGui::DragFloat(name.c_str(), &data))
+                                {
+                                    ScriptFieldInstance& fieldInstance = entityFields[name];
+                                    fieldInstance.Field = field;
+                                    fieldInstance.SetValue(data);
+                                }
+                            }
+                        }
+                    }
+                }
+            }*/
+        });
 
         DrawComponent<SpriteRendererComponent>("Sprite Renderer", entity, [](auto& component)
         {
@@ -740,7 +836,7 @@ namespace Nox
             ImVec2 buttonLabelSize = ImGui::CalcTextSize(label.c_str());
             buttonLabelSize.x += 20.0f;
             float buttonLabelWidth = glm::max<float>(100.0f, buttonLabelSize.x);
-            
+
             ImGui::Button(label.c_str(), ImVec2(buttonLabelWidth, 0.0f));
             if (ImGui::BeginDragDropTarget())
             {
@@ -768,7 +864,7 @@ namespace Nox
                     component.Texture = 0;
                 }
             }
-            
+
             ImGui::SameLine();
             ImGui::Text("Texture");
 
@@ -837,9 +933,10 @@ namespace Nox
             ImGui::DragFloat("Line Spacing", &component.LineSpacing, 0.025f);
         });
     }
-    
-    template<typename T>
-    void SceneHierarchyPanel::DisplayAddComponentEntry(const std::string& entryName) {
+
+    template <typename T>
+    void SceneHierarchyPanel::DisplayAddComponentEntry(const std::string& entryName)
+    {
         if (m_SelectionContext && !m_SelectionContext.HasComponent<T>())
         {
             if (ImGui::MenuItem(entryName.c_str()))

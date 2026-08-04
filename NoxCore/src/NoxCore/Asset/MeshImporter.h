@@ -3,6 +3,8 @@
 #include "AssetMetadata.h"
 #include "NoxCore/Renderer/Mesh.h"
 #include "NoxCore/Renderer/Renderer.h"
+#include "NoxCore/Animation/Skeleton.h"
+#include "NoxCore/Animation/AnimationSequence.h"
 
 namespace Nox
 {
@@ -18,6 +20,6 @@ namespace Nox
         static Ref<Mesh> LoadMesh(const std::filesystem::path& path);
         
     private:
-        static std::vector<MeshData> ParseGltfToMeshData(const std::filesystem::path& path, std::vector<MaterialData>& outMaterials);
+        static std::vector<MeshData> ParseGltfToMeshData(const std::filesystem::path& path, std::vector<MaterialData>& outMaterials, Skeleton& outSkeleton, std::vector<Ref<AnimationSequence>>& outAnimations);
     };
 }

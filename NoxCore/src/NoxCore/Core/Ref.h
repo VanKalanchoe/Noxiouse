@@ -30,6 +30,7 @@ namespace Nox
     public:
         // Constructors
         Ref() : m_ptr(nullptr) {}
+        Ref(std::nullptr_t) : m_ptr(nullptr) {}
         explicit Ref(T* ptr) : m_ptr(ptr) { if (m_ptr) m_ptr->IncRefCount(); }
         Ref(const Ref& other) : m_ptr(other.m_ptr) { if (m_ptr) m_ptr->IncRefCount(); }
         Ref(Ref&& other) noexcept : m_ptr(other.m_ptr) { other.m_ptr = nullptr; }
@@ -81,6 +82,8 @@ namespace Nox
         // Comparison
         bool operator==(const Ref& other) const { return m_ptr == other.m_ptr; }
         bool operator!=(const Ref& other) const { return m_ptr != other.m_ptr; }
+        bool operator==(std::nullptr_t) const { return m_ptr == nullptr; }
+        bool operator!=(std::nullptr_t) const { return m_ptr != nullptr; }
 
     private:
         T* m_ptr;

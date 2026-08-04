@@ -7,7 +7,7 @@
 namespace std
 {
     template <>
-    struct std::hash<shaderio::Vertex>
+    struct hash<shaderio::Vertex>
     {
         size_t operator()(shaderio::Vertex const& vertex) const noexcept
         {
@@ -82,16 +82,6 @@ namespace Nox
         bool active = false;
     };
     
-    struct MeshData
-    {
-        std::string Name;
-        std::vector<shaderio::Vertex> Vertices;
-        std::vector<shaderio::MeshletBounds> Bounds;
-        std::vector<shaderio::MeshletDraw> Draws;
-        std::vector<uint32_t> MeshletVertices;
-        std::vector<uint8_t> MeshletTriangles;
-    };
-    
     struct DrawMeshTasksIndirectCommand
     {
         uint32_t groupCountX;
@@ -127,9 +117,9 @@ namespace Nox
         void BeginScene(const EditorCamera& camera);
         void EndScene();
         
-        void DrawMesh(const glm::mat4& transform, Ref<Mesh> mesh, uint32_t submeshIndex, const MaterialComponent& material, int entityID);
+        void DrawMesh(const glm::mat4& transform, Ref<Mesh> mesh, uint32_t submeshIndex, const MaterialComponent& material, int entityID, const std::vector<glm::mat4>* boneTransforms = nullptr);
         void DrawStaticMesh(const glm::mat4& transform, Ref<StaticMesh> staticMesh, const MaterialComponent& material, int entityID);
-        void SubmitMesh(const glm::mat4& transform, MeshComponent& src, MaterialComponent& srcMat, int entityID);
+        void SubmitMesh(const glm::mat4& transform, MeshComponent& src, MaterialComponent& srcMat, int entityID, const std::vector<glm::mat4>* boneTransforms = nullptr);
         
         Texture2D* GetSceneResource() const { return m_sceneResource.get(); }
         
@@ -245,10 +235,16 @@ namespace Nox
         Ref<Texture2D> m_textureResource3;
         uint32_t mipLevels;
         
-        // Meshes
-        Ref<Mesh> bunnyMesh;
-        Ref<Mesh> foxMesh;
+        // Animations
+        std::vector<glm::mat4> m_boneMatrices;
+        std::vector<std::unique_ptr<NRI::Buffer>> m_boneBuffers;
+        std::vector<void*> m_boneBuffersMapped;
+        uint64_t m_BoneBufferCapacity = 0;
+
+        void updateBoneBuffer(uint32_t currentImage);
+        void createBoneBuffer(uint64_t size);
         
+        // Meshes
         // 2. Queue for sub-allocation range frees
         std::vector<DeferredMeshFree> m_deferredMeshFrees;
 

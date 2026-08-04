@@ -23,7 +23,11 @@ namespace Nox
         { ".gltf", AssetType::MeshSource },
         { ".glb", AssetType::MeshSource },
         { ".nmesh", AssetType::Mesh },
-        { ".nsmesh", AssetType::StaticMesh }
+        { ".nsmesh", AssetType::StaticMesh },
+        
+        { ".nskel",   AssetType::Skeleton },
+        { ".nanim",   AssetType::AnimationSequence },
+        { ".nskmesh", AssetType::SkeletalMesh }
     };
 
     AssetType EditorAssetManager::GetAssetTypeFromExtension(const std::filesystem::path& extension)

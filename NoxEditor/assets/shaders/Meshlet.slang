@@ -60,7 +60,24 @@ void meshMain
         uint localVertexIndex = meshletVerticesPage[meshlet.vertexOffset + i];
         Vertex v = vertexPage[meshlet.globalVertexOffset + localVertexIndex];
 
-        float4 worldPos = mul(modelMatrix, float4(v.pos, 1.0));
+        float4 localPos = float4(v.pos, 1.0);
+
+        if(instance.boneMatrixOffset != 0xFFFFFFFF)
+        {
+            float4x4* boneMatrices = (float4x4*)pushConstant.boneMatrixReference;
+            uint baseOffset = instance.boneMatrixOffset;
+
+            // Blend bone matrices using vertex weights
+            float4x4 skinTransform =
+                boneMatrices[baseOffset + v.boneIDs.x] * v.boneWeights.x +
+                boneMatrices[baseOffset + v.boneIDs.y] * v.boneWeights.y +
+                boneMatrices[baseOffset + v.boneIDs.z] * v.boneWeights.z +
+                boneMatrices[baseOffset + v.boneIDs.w] * v.boneWeights.w;
+
+            localPos = mul(skinTransform, localPos);
+        }
+
+        float4 worldPos = mul(modelMatrix, localPos);
         float4 clipPos = mul(viewProj, worldPos);
 
         vertices[i].pos = clipPos;

@@ -6,6 +6,9 @@
 
 #include <map>
 
+#include "AnimationImporter.h"
+#include "SkeletalMeshImporter.h"
+#include "SkeletonImporter.h"
 #include "NoxCore/Core/Log.h"
 
 namespace Nox
@@ -36,6 +39,15 @@ namespace Nox
         { AssetType::StaticMesh, [](AssetHandle h, const AssetMetadata& meta) -> Ref<Asset>
         {
             return Ref<Asset>(MeshImporter::ImportStaticMesh(h, meta));
+        }},
+        { AssetType::Skeleton, [](AssetHandle h, const AssetMetadata& meta) -> Ref<Asset> {
+            return Ref<Asset>(SkeletonImporter::ImportSkeleton(h, meta));
+        }},
+        { AssetType::AnimationSequence, [](AssetHandle h, const AssetMetadata& meta) -> Ref<Asset> {
+            return Ref<Asset>(AnimationImporter::ImportAnimation(h, meta));
+        }},
+        { AssetType::SkeletalMesh, [](AssetHandle h, const AssetMetadata& meta) -> Ref<Asset> {
+            return Ref<Asset>(SkeletalMeshImporter::ImportSkeletalMesh(h, meta));
         }}
     };
     

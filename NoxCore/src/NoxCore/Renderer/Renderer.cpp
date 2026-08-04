@@ -505,6 +505,57 @@ namespace Nox
         initMappedBuffer(m_meshletTriPageTableBuffers, m_meshletTriPageTableBuffersMapped);
     }
 
+    void Renderer::updateBoneBuffer(uint32_t currentImage)
+    {
+        if (m_boneMatrices.empty())
+            return;
+
+        uint64_t requiredBoneSize = sizeof(glm::mat4) * m_boneMatrices.size();
+        if (requiredBoneSize > m_BoneBufferCapacity)
+        {
+            m_BoneBufferCapacity = requiredBoneSize * 2;
+
+            for (auto& oldBuffer : m_boneBuffers)
+            {
+                if (oldBuffer)
+                {
+                    m_deferredBufferDeletions.push_back({
+                        std::move(oldBuffer),
+                        frameIndex + MAX_FRAMES_IN_FLIGHT
+                    });
+                }
+            }
+
+            createBoneBuffer(m_BoneBufferCapacity);
+        }
+
+        memcpy(m_boneBuffersMapped[currentImage], m_boneMatrices.data(), requiredBoneSize);
+    }
+
+    void Renderer::createBoneBuffer(uint64_t size)
+    {
+        m_boneBuffers.clear();
+        m_boneBuffersMapped.clear();
+
+        // Reserve memory in vectors to prevent reallocation overhead
+        m_boneBuffers.reserve(MAX_FRAMES_IN_FLIGHT);
+        m_boneBuffersMapped.reserve(MAX_FRAMES_IN_FLIGHT);
+
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+        {
+            std::unique_ptr<NRI::Buffer> uboBuffer = m_device->createBuffer(NRI::BufferDesc
+                {
+                    .size = size,
+                    .usage = NRI::BufferUsage::Storage
+                });
+
+            void* mappedMemory = uboBuffer->map(0, size);
+
+            m_boneBuffers.emplace_back(std::move(uboBuffer));
+            m_boneBuffersMapped.emplace_back(mappedMemory);
+        }
+    }
+
     void Renderer::updatePageTables(uint32_t currentImage)
     {
         // SKIP entirely if nothing has changed!
@@ -839,6 +890,12 @@ namespace Nox
             /*references.modelMatrix = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 0.0f));*/
             references.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
             references.instanceReference = m_instanceBuffers[frameIndex]->getDeviceAddress();
+            bool hasBoneBuffers = frameIndex < m_boneBuffers.size() && m_boneBuffers[frameIndex] != nullptr;
+            bool hasBones = !m_boneMatrices.empty();
+
+            references.boneMatrixReference = (hasBones && hasBoneBuffers) 
+                ? m_boneBuffers[frameIndex]->getDeviceAddress() 
+                : 0;
             references.vertexPageTableReference = m_vertexPageTableBuffers[frameIndex]->getDeviceAddress();
             references.meshletBoundsPageTableReference = m_meshletBoundPageTableBuffers[frameIndex]->getDeviceAddress();
             references.meshletDrawsPageTableReference = m_meshletDrawPageTableBuffers[frameIndex]->getDeviceAddress();
@@ -1129,6 +1186,8 @@ namespace Nox
         updateUniformBuffer(frameIndex);
 
         updateInstanceAndIndirectBuffer(frameIndex);
+        
+        updateBoneBuffer(frameIndex);
 
         m_renderer2D->Update(frameIndex);
 
@@ -1148,6 +1207,7 @@ namespace Nox
 
         m_instanceBufferObjects.clear();
         m_drawMeshTasksIndirectCommands.clear();
+        m_boneMatrices.clear();
     }
 
     int32_t Renderer::getPickedEntityID()
@@ -1268,7 +1328,7 @@ namespace Nox
         m_renderer2D->EndScene();
     }
 
-    void Renderer::DrawMesh(const glm::mat4& transform, Ref<Mesh> mesh, uint32_t submeshIndex, const MaterialComponent& material, int entityID)
+    void Renderer::DrawMesh(const glm::mat4& transform, Ref<Mesh> mesh, uint32_t submeshIndex, const MaterialComponent& material, int entityID, const std::vector<glm::mat4>* boneTransforms)
     {
         const auto& submeshes = mesh->GetSubMeshes();
         if (submeshIndex >= submeshes.size())
@@ -1311,6 +1371,19 @@ namespace Nox
         }
 
         instance.entityID = entityID;
+        
+        // --- BONE MATRIX PACKING ---
+        if (boneTransforms && !boneTransforms->empty())
+        {
+            // Store starting index in m_boneMatrices buffer for this instance
+            instance.boneMatrixOffset = static_cast<uint32_t>(m_boneMatrices.size());
+            m_boneMatrices.insert(m_boneMatrices.end(), boneTransforms->begin(), boneTransforms->end());
+        }
+        else
+        {
+            // Sentinel value for static/non-skinned mesh
+            instance.boneMatrixOffset = 0xFFFFFFFF;
+        }
 
         m_instanceBufferObjects.push_back(instance);
 
@@ -1371,7 +1444,7 @@ namespace Nox
         }
     }
 
-    void Renderer::SubmitMesh(const glm::mat4& transform, MeshComponent& src, MaterialComponent& srcMat, int entityID)
+    void Renderer::SubmitMesh(const glm::mat4& transform, MeshComponent& src, MaterialComponent& srcMat, int entityID, const std::vector<glm::mat4>* boneTransforms)
     {
         if (src.Mesh == 0)
             return;
@@ -1383,7 +1456,7 @@ namespace Nox
             Ref<Mesh> mesh = AssetManager::GetAsset<Mesh>(src.Mesh);
             if (mesh)
             {
-                DrawMesh(transform, mesh, src.SubmeshIndex, srcMat, entityID);
+                DrawMesh(transform, mesh, src.SubmeshIndex, srcMat, entityID, boneTransforms);
             }
         }
         else if (type == AssetType::StaticMesh)

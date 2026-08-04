@@ -12,6 +12,10 @@ namespace Nox
         case AssetType::MeshSource: return "AssetType::MeshSource";
         case AssetType::Mesh: return "AssetType::Mesh";
         case AssetType::StaticMesh: return "AssetType::StaticMesh";
+            
+        case AssetType::Skeleton: return "AssetType::Skeleton";
+        case AssetType::AnimationSequence: return "AssetType::AnimationSequence";
+        case AssetType::SkeletalMesh: return "AssetType::SkeletalMesh";
         }
 
         return "AssetType::<Invalid>";
@@ -25,6 +29,10 @@ namespace Nox
         if (assetType == "AssetType::MeshSource") return AssetType::MeshSource;
         if (assetType == "AssetType::Mesh") return AssetType::Mesh;
         if (assetType == "AssetType::StaticMesh") return AssetType::StaticMesh;
+        
+        if (assetType == "AssetType::Skeleton") return AssetType::Skeleton;
+        if (assetType == "AssetType::AnimationSequence") return AssetType::AnimationSequence;
+        if (assetType == "AssetType::SkeletalMesh") return AssetType::SkeletalMesh;
         
         return AssetType::None;
     }

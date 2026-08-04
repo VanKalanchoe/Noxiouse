@@ -1,38 +1,11 @@
 #pragma once
 #include <string>
-#include <glm/vec4.hpp>
 
 #include "NoxCore/Asset/Asset.h"
+#include "NoxCore/Renderer/DataTypes.h"
 
 namespace Nox
 {
-    struct BufferAllocation
-    {
-        uint32_t pageIndex = UINT32_MAX;
-        uint32_t offset = 0;
-        uint32_t count = 0;
-        
-        bool IsValid() const { return count > 0; };
-    };
-    
-    struct MeshHandle
-    {
-        BufferAllocation vertices;
-        BufferAllocation meshletDraws; // Also used for bounds (1:1 ratio)
-        BufferAllocation meshletVertices;
-        BufferAllocation meshletTriangles;
-        
-        uint32_t GetFirstMeshlet() const { return meshletDraws.offset; }
-        uint32_t GetMeshletCount() const { return meshletDraws.count; }
-        bool IsValid() const { return vertices.count > 0; }
-    };
-    
-    struct MaterialData
-    {
-        glm::vec4 AlbedoColor = glm::vec4(1.0f);
-        std::string AlbedoTexturePath;
-    };
-    
     class StaticMesh : public Asset
     {
     public:

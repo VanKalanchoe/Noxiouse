@@ -8,6 +8,7 @@
 #include <glm/gtc/type_ptr.hpp>  // for pointer to matrix or vector
 
 #include "NoxCore/Asset/AssetManager.h"
+#include "NoxCore/Asset/MeshSerializer.h"
 #include "NoxCore/Asset/SceneImporter.h"
 #include "NoxCore/Core/Application.h"
 #include "NoxCore/Core/Input.h"
@@ -337,6 +338,41 @@ namespace Nox
                             
                             return 0;
                         };
+                        
+                        // Check if a cooked .nskel file exists on disk for this mesh
+                        std::filesystem::path skelPath = Project::GetActiveAssetDirectory() / metadata.FilePath;
+                        skelPath.replace_extension(".nskel");
+                        bool hasSkeleton = std::filesystem::exists(skelPath);
+
+                        // Helper to attach AnimatorComponent and load its skeleton
+                        auto tryAttachAnimator = [&](Entity entity)
+                        {
+                            if (!hasSkeleton) return;
+
+                            auto& animatorComp = entity.AddComponent<AnimatorComponent>();
+    
+                            // Create and load the skeleton into a Ref<Skeleton>
+                            animatorComp.SkeletonAsset = CreateRef<Skeleton>();
+                            SkeletonSerializer::Deserialize(skelPath, *animatorComp.SkeletonAsset);
+
+                            // Auto-find matching .nanim files...
+                            std::string meshPrefix = metadata.FilePath.stem().string() + "_";
+                            auto assetManager = Project::GetActive()->GetEditorAssetManager();
+
+                            for (const auto& [animHandle, animMeta] : assetManager->GetAssetRegistry())
+                            {
+                                std::string animFileName = animMeta.FilePath.filename().string();
+                                if (animMeta.FilePath.extension() == ".nanim" && animFileName.rfind(meshPrefix, 0) == 0)
+                                {
+                                    Ref<AnimationSequence> anim = AssetManager::GetAsset<AnimationSequence>(animHandle);
+                                    if (anim)
+                                    {
+                                        animatorComp.Animator.PlayAnimation(anim);
+                                        break;
+                                    }
+                                }
+                            }
+                        };
 
                         // Check if it's a dynamic mesh asset with multiple submeshes
                         if (type == AssetType::Mesh || type == AssetType::MeshSource)
@@ -366,6 +402,9 @@ namespace Nox
                                     auto& matComp = childEntity.AddComponent<MaterialComponent>();
                                     matComp.AlbedoColor = matData.AlbedoColor;
                                     matComp.AlbedoMaps.push_back(getOrImportTextureHandle(matData.AlbedoTexturePath));
+                                    
+                                    // Auto-attach AnimatorComponent if skeleton exists
+                                    tryAttachAnimator(childEntity);
                                 }
 
                                 m_SceneHierarchyPanel.SetSelectedEntity(parentEntity);
@@ -389,6 +428,8 @@ namespace Nox
                                 {
                                     newEntity.AddComponent<MaterialComponent>();
                                 }
+                                
+                                tryAttachAnimator(newEntity);
                                 
                                 m_SceneHierarchyPanel.SetSelectedEntity(newEntity);
                             }

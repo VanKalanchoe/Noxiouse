@@ -6,6 +6,7 @@
 typealias vec2 = float2;
 typealias vec3 = float3;
 typealias vec4 = float4;
+typealias uvec4 = uint4;
 typealias mat4 = float4x4;
 #define STATIC_CONST static const
 #else
@@ -109,6 +110,9 @@ struct Vertex
 {
     vec3 pos;
     vec2 texCoord;
+    
+    uvec4 boneIDs;
+    vec4 boneWeights;
 };
 
 struct InstanceData
@@ -130,6 +134,9 @@ struct InstanceData
     vec4 albedoColor;
     uint32_t albedoTextureIndex;
     
+    // MeshAnimation
+    uint32_t boneMatrixOffset = 0xFFFFFFFF;
+
     // Editor-only
     int entityID;
 };
@@ -138,7 +145,7 @@ struct PushConstantMeshlets
 {
     uint64_t matrixReference;
     uint64_t instanceReference;
-    
+    uint64_t boneMatrixReference;
     // These now point to the Page Table buffers (array of uint64_t BDAs)
     uint64_t vertexPageTableReference;
     uint64_t meshletBoundsPageTableReference;

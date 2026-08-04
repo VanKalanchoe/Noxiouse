@@ -342,6 +342,18 @@ namespace Nox
 
     void Scene::OnUpdateEditor(Timestep ts, EditorCamera& camera)
     {
+        // --- Update Animations in Editor Preview ---
+        auto view = m_Registry.view<AnimatorComponent>();
+        for (auto entity : view)
+        {
+            auto& animatorComp = view.get<AnimatorComponent>(entity);
+
+            if (animatorComp.SkeletonAsset && !animatorComp.SkeletonAsset->Bones.empty())
+            {
+                animatorComp.Animator.Update((float)ts, *animatorComp.SkeletonAsset);
+            }
+        }
+        
         RenderScene(camera);
     }
     
@@ -511,11 +523,13 @@ namespace Nox
                 auto [transform, mesh] = view.get<WorldTransformComponent, MeshComponent>(entity);
                 
                 MaterialComponent* materialComp = m_Registry.try_get<MaterialComponent>(entity);
-                
                 MaterialComponent defaultMaterial;
                 MaterialComponent& materialToUse = materialComp ? *materialComp : defaultMaterial;
                 
-                m_renderer->SubmitMesh(transform.WorldMatrix, mesh, materialToUse, (int)entity);
+                AnimatorComponent* animatorComp = m_Registry.try_get<AnimatorComponent>(entity);
+                const std::vector<glm::mat4>* boneTransforms = animatorComp ? &animatorComp->Animator.GetFinalBoneTransforms() : nullptr;
+                
+                m_renderer->SubmitMesh(transform.WorldMatrix, mesh, materialToUse, (int)entity, boneTransforms);
             }
         }
         
@@ -602,6 +616,11 @@ namespace Nox
     
     template <>
     void Scene::OnComponentAdded<MaterialComponent>(Entity entity, MaterialComponent& component)
+    {
+    }
+    
+    template <>
+    void Scene::OnComponentAdded<AnimatorComponent>(Entity entity, AnimatorComponent& component)
     {
     }
     
