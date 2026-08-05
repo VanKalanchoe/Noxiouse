@@ -5,6 +5,7 @@
 #include "Entity.h"
 #include "Components.h"
 #include "SceneGraph.h"
+#include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Physics/Physics2D.h"
 
 namespace Nox
@@ -348,10 +349,32 @@ namespace Nox
         {
             auto& animatorComp = view.get<AnimatorComponent>(entity);
 
-            // Updated from Bones.empty() to AllNodes.empty()
-            if (animatorComp.SkeletonAsset && !animatorComp.SkeletonAsset->AllNodes.empty())
+            if (!animatorComp.Playing)
+                continue;
+
+            // 1. Sync Animation sequence from AssetHandle if assigned
+            if (animatorComp.Animation != 0)
             {
-                animatorComp.Animator.Update((float)ts, *animatorComp.SkeletonAsset);
+                Ref<AnimationSequence> currentAnim = animatorComp.Animator.GetCurrentAnimation();
+                if (!currentAnim || currentAnim->Handle != animatorComp.Animation)
+                {
+                    Ref<AnimationSequence> anim = AssetManager::GetAsset<AnimationSequence>(animatorComp.Animation);
+                    if (anim)
+                    {
+                        anim->Handle = animatorComp.Animation;
+                        animatorComp.Animator.PlayAnimation(anim);
+                    }
+                }
+            }
+
+            // 2. Resolve Skeleton Asset via AssetHandle and update
+            if (animatorComp.Skeleton != 0)
+            {
+                Ref<Skeleton> skeleton = AssetManager::GetAsset<Skeleton>(animatorComp.Skeleton);
+                if (skeleton && !skeleton->AllNodes.empty())
+                {
+                    animatorComp.Animator.Update((float)ts, *skeleton);
+                }
             }
         }
         

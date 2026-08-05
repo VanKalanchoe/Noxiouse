@@ -23,76 +23,71 @@ namespace Nox
     }
 
     void SceneHierarchyPanel::OnImGuiRender()
+{
+    ImGui::Begin("Scene Hierarchy");
+    left = ImGui::GetWindowSize();
+    leftFocused = ImGui::IsWindowFocused();
+    leftHovered = ImGui::IsWindowHovered();
+
+    if (m_Context)
     {
-        ImGui::Begin("Scene Hierarchy");
-        left = ImGui::GetWindowSize(); // temporrary in.h
-        leftFocused = ImGui::IsWindowFocused();
-        leftHovered = ImGui::IsWindowHovered();
-
-        if (m_Context)
+        m_Context->m_Registry.view<TagComponent>().each([&](auto entityID, TagComponent&)
         {
-            m_Context->m_Registry.view<TagComponent>().each([&](auto entityID, TagComponent&)
-            {
-                Entity entity(entityID, m_Context.get());
+            Entity entity(entityID, m_Context.get());
 
-                bool isRoot = true;
-                if (entity.HasComponent<RelationshipComponent>())
-                    if (entity.GetComponent<RelationshipComponent>().Parent != 0)
-                        isRoot = false;
+            bool isRoot = true;
+            if (entity.HasComponent<RelationshipComponent>())
+                if (entity.GetComponent<RelationshipComponent>().Parent != 0)
+                    isRoot = false;
 
-                if (isRoot)
-                    DrawEntityNode(entity);
-            });
+            if (isRoot)
+                DrawEntityNode(entity);
+        });
 
-            // --- 1. FILL REMAINING SPACE WITH AN INVISIBLE BUTTON ---
-            ImVec2 availSize = ImGui::GetContentRegionAvail();
-            if (availSize.x < 1.0f) availSize.x = 1.0f;
-            if (availSize.y < 1.0f) availSize.y = 1.0f;
-
-            ImGui::InvisibleButton("##SceneHierarchyBackground", availSize);
-
-            if (ImGui::IsMouseDown(0) && ImGui::IsWindowHovered())
-            {
-                m_SelectionContext = {};
-            }
-
-            if (ImGui::BeginDragDropTarget())
-            {
-                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("SCENE_HIERARCHY_ENTITY"))
-                {
-                    UUID droppedEntityID = *(UUID*)payload->Data;
-                    Entity droppedEntity = m_Context->GetEntityByUUID(droppedEntityID);
-                    if (droppedEntity)
-                    {
-                        droppedEntity.SetParent({}); // Pass empty entity to make it root
-                    }
-                }
-                ImGui::EndDragDropTarget();
-            }
-
-            // Right-click on blank space
-            if (ImGui::BeginPopupContextWindow(0, 1 | ImGuiPopupFlags_NoOpenOverItems))
-            {
-                if (ImGui::MenuItem("Create Empty Entity"))
-                {
-                    m_Context->CreateEntity("Empty Entity");
-                }
-
-                ImGui::EndPopup();
-            }
-        }
-        ImGui::End();
-
-        ImGui::Begin("Properties");
-        leftPropFocused = ImGui::IsWindowFocused();
-        leftPropHovered = ImGui::IsWindowHovered();
-        if (m_SelectionContext)
+        // 1. Deselect entity when left-clicking blank space
+        if (ImGui::IsMouseDown(0) && ImGui::IsWindowHovered() && !ImGui::IsAnyItemHovered())
         {
-            DrawComponents(m_SelectionContext);
+            m_SelectionContext = {};
         }
 
-        ImGui::End();
+        // 2. Window-level Drag and Drop Target for root entity unparenting
+        if (ImGui::BeginDragDropTarget())
+        {
+            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("SCENE_HIERARCHY_ENTITY"))
+            {
+                UUID droppedEntityID = *(UUID*)payload->Data;
+                Entity droppedEntity = m_Context->GetEntityByUUID(droppedEntityID);
+                if (droppedEntity)
+                {
+                    droppedEntity.SetParent({}); // Make root
+                }
+            }
+            ImGui::EndDragDropTarget();
+        }
+
+        // 3. Right-click context menu on blank space
+        if (ImGui::BeginPopupContextWindow(0, ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems))
+        {
+            if (ImGui::MenuItem("Create Empty Entity"))
+            {
+                m_Context->CreateEntity("Empty Entity");
+            }
+
+            ImGui::EndPopup();
+        }
     }
+    ImGui::End();
+
+    ImGui::Begin("Properties");
+    leftPropFocused = ImGui::IsWindowFocused();
+    leftPropHovered = ImGui::IsWindowHovered();
+    if (m_SelectionContext)
+    {
+        DrawComponents(m_SelectionContext);
+    }
+
+    ImGui::End();
+}
 
     void SceneHierarchyPanel::SetSelectedEntity(Entity entity)
     {

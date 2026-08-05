@@ -108,7 +108,8 @@ namespace Nox
     struct AnimatorComponent
     {
         Animator Animator;
-        Ref<Skeleton> SkeletonAsset;
+        AssetHandle Animation = 0;
+        AssetHandle Skeleton = 0;
         bool Playing = true;
 
         AnimatorComponent() = default;

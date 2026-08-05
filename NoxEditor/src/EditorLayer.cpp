@@ -340,20 +340,41 @@ namespace Nox
                         };
                         
                         // Check if a cooked .nskel file exists on disk for this mesh
-                        std::filesystem::path skelPath = Project::GetActiveAssetDirectory() / metadata.FilePath;
-                        skelPath.replace_extension(".nskel");
-                        bool hasSkeleton = std::filesystem::exists(skelPath);
+                        std::filesystem::path relSkelPath = metadata.FilePath;
+                        relSkelPath.replace_extension(".nskel");
+            
+                        std::filesystem::path fullSkelPath = Project::GetActiveAssetDirectory() / relSkelPath;
+                        bool hasSkeleton = std::filesystem::exists(fullSkelPath);
 
+                        // Helper to find or import the Skeleton AssetHandle
+                        auto getOrImportSkeletonHandle = [&](const std::filesystem::path& relPath) -> AssetHandle
+                        {
+                            auto assetManager = Project::GetActive()->GetEditorAssetManager();
+                
+                            for (const auto& [skelHandle, meta] : assetManager->GetAssetRegistry())
+                            {
+                                if (meta.FilePath == relPath || meta.SourceFilePath == relPath)
+                                    return skelHandle;
+                            }
+                
+                            assetManager->ImportAsset(relPath, {}, {});
+                
+                            for (const auto& [skelHandle, meta] : assetManager->GetAssetRegistry())
+                            {
+                                if (meta.FilePath == relPath || meta.SourceFilePath == relPath)
+                                    return skelHandle;
+                            }
+                
+                            return 0;
+                        };
+                        
                         // Helper to attach AnimatorComponent and load its skeleton
                         auto tryAttachAnimator = [&](Entity entity)
                         {
                             if (!hasSkeleton) return;
 
                             auto& animatorComp = entity.AddComponent<AnimatorComponent>();
-    
-                            // Create and load the skeleton into a Ref<Skeleton>
-                            animatorComp.SkeletonAsset = CreateRef<Skeleton>();
-                            SkeletonSerializer::Deserialize(skelPath, *animatorComp.SkeletonAsset);
+                            animatorComp.Skeleton = getOrImportSkeletonHandle(relSkelPath);
                         };
 
                         // Check if it's a dynamic mesh asset with multiple submeshes

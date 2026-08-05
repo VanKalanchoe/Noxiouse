@@ -248,6 +248,19 @@ namespace Nox
 
             out << YAML::EndMap; // MaterialComponent
         }
+        
+        if (entity.HasComponent<AnimatorComponent>())
+        {
+            out << YAML::Key << "AnimatorComponent";
+            out << YAML::BeginMap; // AnimatorComponent
+
+            auto& animatorComponent = entity.GetComponent<AnimatorComponent>();
+            out << YAML::Key << "Animation" << YAML::Value << animatorComponent.Animation;
+            out << YAML::Key << "Skeleton" << YAML::Value << animatorComponent.Skeleton;
+            out << YAML::Key << "Playing" << YAML::Value << animatorComponent.Playing;
+
+            out << YAML::EndMap; // AnimatorComponent
+        }
 
         if (entity.HasComponent<CameraComponent>())
         {
@@ -544,6 +557,18 @@ namespace Nox
                             mc.AlbedoMaps.push_back(mapHandle.as<uint64_t>());
                         }
                     }
+                }
+                
+                auto animatorComponent = entity["AnimatorComponent"];
+                if (animatorComponent)
+                {
+                    auto& ac = deserializedEntity.AddComponent<AnimatorComponent>();
+                    if (animatorComponent["Animation"])
+                        ac.Animation = animatorComponent["Animation"].as<AssetHandle>();
+                    if (animatorComponent["Skeleton"])
+                        ac.Skeleton = animatorComponent["Skeleton"].as<AssetHandle>();
+                    if (animatorComponent["Playing"])
+                        ac.Playing = animatorComponent["Playing"].as<bool>();
                 }
                 
                 auto cameraComponent = entity["CameraComponent"];

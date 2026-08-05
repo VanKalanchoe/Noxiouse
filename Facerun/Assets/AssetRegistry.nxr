@@ -1,25 +1,49 @@
 AssetRegistry:
-  - Handle: 5371573760268889296
-    FilePath: models/fox/Fox_Walk.nanim
-    SourceFilePath: models/fox/Fox_Walk.nanim
-    Type: AssetType::AnimationSequence
-  - Handle: 6815282228204976856
+  - Handle: 166519122276812158
+    FilePath: models/CesiumMan/glTF-Binary/textures/CesiumMan_tex_0.jpg
+    SourceFilePath: models/CesiumMan/glTF-Binary/textures/CesiumMan_tex_0.jpg
+    Type: AssetType::Texture2D
+  - Handle: 284400685509200133
+    FilePath: Scenes/3D-Scene.nox
+    SourceFilePath: Scenes/3D-Scene.nox
+    Type: AssetType::Scene
+  - Handle: 2938995203616073866
     FilePath: models/fox/Fox_Survey.nanim
     SourceFilePath: models/fox/Fox_Survey.nanim
     Type: AssetType::AnimationSequence
-  - Handle: 8289236401922211419
-    FilePath: models/fox/Fox.nmesh
-    SourceFilePath: models/fox/Fox.gltf
-    Type: AssetType::Mesh
-  - Handle: 8506000977248345001
+  - Handle: 3092756950590666466
+    FilePath: models/fox/Fox_Run.nanim
+    SourceFilePath: models/fox/Fox_Run.nanim
+    Type: AssetType::AnimationSequence
+  - Handle: 3436731810295752103
     FilePath: models/fox/Texture.png
     SourceFilePath: models/fox/Texture.png
     Type: AssetType::Texture2D
-  - Handle: 11766956952111748916
+  - Handle: 4206986502188439960
+    FilePath: models/CesiumMan/glTF-Binary/CesiumMan.nmesh
+    SourceFilePath: models/CesiumMan/glTF-Binary/CesiumMan.glb
+    Type: AssetType::Mesh
+  - Handle: 5283302714725537586
+    FilePath: models/fox/Fox_Walk.nanim
+    SourceFilePath: models/fox/Fox_Walk.nanim
+    Type: AssetType::AnimationSequence
+  - Handle: 6965357044956339817
+    FilePath: models/CesiumMan/glTF-Binary/CesiumMan.nskel
+    SourceFilePath: models/CesiumMan/glTF-Binary/CesiumMan.nskel
+    Type: AssetType::Skeleton
+  - Handle: 7163123135044597277
     FilePath: models/fox/Fox.nskel
     SourceFilePath: models/fox/Fox.nskel
     Type: AssetType::Skeleton
-  - Handle: 14526975812420857606
-    FilePath: models/fox/Fox_Run.nanim
-    SourceFilePath: models/fox/Fox_Run.nanim
+  - Handle: 7636997664502802887
+    FilePath: models/fox/Fox.nmesh
+    SourceFilePath: models/fox/Fox.gltf
+    Type: AssetType::Mesh
+  - Handle: 8443335441063088798
+    FilePath: models/fox/Texture.png
+    SourceFilePath: models/fox/Texture.png
+    Type: AssetType::Texture2D
+  - Handle: 17222912232755252656
+    FilePath: models/CesiumMan/glTF-Binary/CesiumMan_Anim_0.nanim
+    SourceFilePath: models/CesiumMan/glTF-Binary/CesiumMan_Anim_0.nanim
     Type: AssetType::AnimationSequence
