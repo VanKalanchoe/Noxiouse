@@ -38,6 +38,7 @@ namespace Nox
         
         void SerializeAssetRegistry();
         bool DeserializeAssetRegistry();
+        void ScanAndRegisterNewAssets();
         
     private:
         void OnAssetModifiedOnDisk(const std::filesystem::path& absolutePath);

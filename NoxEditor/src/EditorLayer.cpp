@@ -354,24 +354,6 @@ namespace Nox
                             // Create and load the skeleton into a Ref<Skeleton>
                             animatorComp.SkeletonAsset = CreateRef<Skeleton>();
                             SkeletonSerializer::Deserialize(skelPath, *animatorComp.SkeletonAsset);
-
-                            // Auto-find matching .nanim files...
-                            std::string meshPrefix = metadata.FilePath.stem().string() + "_";
-                            auto assetManager = Project::GetActive()->GetEditorAssetManager();
-
-                            for (const auto& [animHandle, animMeta] : assetManager->GetAssetRegistry())
-                            {
-                                std::string animFileName = animMeta.FilePath.filename().string();
-                                if (animMeta.FilePath.extension() == ".nanim" && animFileName.rfind(meshPrefix, 0) == 0)
-                                {
-                                    Ref<AnimationSequence> anim = AssetManager::GetAsset<AnimationSequence>(animHandle);
-                                    if (anim)
-                                    {
-                                        animatorComp.Animator.PlayAnimation(anim);
-                                        break;
-                                    }
-                                }
-                            }
                         };
 
                         // Check if it's a dynamic mesh asset with multiple submeshes

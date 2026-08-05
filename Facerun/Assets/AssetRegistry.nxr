@@ -1,1 +1,25 @@
 AssetRegistry:
+  - Handle: 5371573760268889296
+    FilePath: models/fox/Fox_Walk.nanim
+    SourceFilePath: models/fox/Fox_Walk.nanim
+    Type: AssetType::AnimationSequence
+  - Handle: 6815282228204976856
+    FilePath: models/fox/Fox_Survey.nanim
+    SourceFilePath: models/fox/Fox_Survey.nanim
+    Type: AssetType::AnimationSequence
+  - Handle: 8289236401922211419
+    FilePath: models/fox/Fox.nmesh
+    SourceFilePath: models/fox/Fox.gltf
+    Type: AssetType::Mesh
+  - Handle: 8506000977248345001
+    FilePath: models/fox/Texture.png
+    SourceFilePath: models/fox/Texture.png
+    Type: AssetType::Texture2D
+  - Handle: 11766956952111748916
+    FilePath: models/fox/Fox.nskel
+    SourceFilePath: models/fox/Fox.nskel
+    Type: AssetType::Skeleton
+  - Handle: 14526975812420857606
+    FilePath: models/fox/Fox_Run.nanim
+    SourceFilePath: models/fox/Fox_Run.nanim
+    Type: AssetType::AnimationSequence

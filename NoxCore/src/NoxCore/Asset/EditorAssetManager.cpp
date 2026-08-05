@@ -71,6 +71,8 @@ namespace Nox
         {
             OnAssetModifiedOnDisk(path);
         });
+
+        ScanAndRegisterNewAssets();
     }
 
     void EditorAssetManager::Update()
@@ -115,6 +117,9 @@ namespace Nox
             reimportedAsset->Handle = handle;
             m_LoadedAssets[handle] = reimportedAsset;
         }
+
+        // 4. Scan and register any new .nanim / .nskel files generated during cooking
+        ScanAndRegisterNewAssets();
     }
 
     void EditorAssetManager::OnAssetModifiedOnDisk(const std::filesystem::path& absolutePath)
@@ -163,6 +168,10 @@ namespace Nox
             asset->Handle = handle;
             m_LoadedAssets[handle] = asset;
             m_AssetRegistry[handle] = metadata;
+
+            // Scan for extracted .nanim / .nskel files
+            ScanAndRegisterNewAssets();
+
             SerializeAssetRegistry();
         }
     }
@@ -244,6 +253,53 @@ namespace Nox
         fout << out.c_str();
     }
 
+    void EditorAssetManager::ScanAndRegisterNewAssets()
+    {
+        auto assetDir = Project::GetActiveAssetDirectory();
+        if (!std::filesystem::exists(assetDir)) return;
+
+        bool registryChanged = false;
+
+        for (const auto& entry : std::filesystem::recursive_directory_iterator(assetDir))
+        {
+            if (!entry.is_regular_file()) continue;
+
+            std::filesystem::path ext = entry.path().extension();
+            if (ext == ".nanim" || ext == ".nskel" || ext == ".nmesh" || ext == ".nsmesh")
+            {
+                std::filesystem::path relativePath = std::filesystem::relative(entry.path(), assetDir);
+
+                bool found = false;
+                for (const auto& [handle, metadata] : m_AssetRegistry)
+                {
+                    if (metadata.FilePath == relativePath || metadata.SourceFilePath == relativePath)
+                    {
+                        found = true;
+                        break;
+                    }
+                }
+
+                if (!found)
+                {
+                    AssetHandle newHandle; // generates new random handle
+                    AssetMetadata metadata;
+                    metadata.FilePath = relativePath;
+                    metadata.SourceFilePath = relativePath;
+                    metadata.Type = GetAssetTypeFromExtension(ext);
+
+                    m_AssetRegistry[newHandle] = metadata;
+                    registryChanged = true;
+                    NOX_CORE_INFO("[EditorAssetManager] Auto-registered newly discovered asset: {}", relativePath.string());
+                }
+            }
+        }
+
+        if (registryChanged)
+        {
+            SerializeAssetRegistry();
+        }
+    }
+
     bool EditorAssetManager::DeserializeAssetRegistry()
     {
         auto path = Project::GetActiveAssetRegistryPath();
@@ -277,6 +333,8 @@ namespace Nox
                 metadata.SourceFilePath = node["SourceFilePath"].as<std::string>();
             metadata.Type = AssetTypeFromString(node["Type"].as<std::string>());
         }
+
+        ScanAndRegisterNewAssets();
 
         return true;
     }
