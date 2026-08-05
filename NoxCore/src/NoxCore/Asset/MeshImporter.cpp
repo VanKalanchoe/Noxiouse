@@ -212,45 +212,27 @@ namespace Nox
                         : ("Node_" + std::to_string(nodeIndex));
 
         // 1. Extract base transform
-        bool hasMatrix = false;
-        for (int m = 0; m < 16; m++)
-        {
-            if (tg3Node.matrix[m] != 0.0f)
-            {
-                hasMatrix = true;
-                break;
-            }
-        }
+        bool hasMatrix = (tg3Node.has_matrix != 0);
 
         if (hasMatrix)
         {
             newNode->HasRestMatrix = true;
-            newNode->RestMatrix = glm::make_mat4(tg3Node.matrix);
-    
-            // Default TRS to identity when a raw matrix is present
-            newNode->RestTranslation = glm::vec3(0.0f);
-            newNode->RestRotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
-            newNode->RestScale = glm::vec3(1.0f);
+            newNode->RestMatrix = glm::mat4(glm::make_mat4(tg3Node.matrix));
+
+            glm::vec3 skew;
+            glm::vec4 perspective;
+            glm::decompose(newNode->RestMatrix, newNode->RestScale, newNode->RestRotation, newNode->RestTranslation, skew, perspective);
         }
         else
         {
             newNode->HasRestMatrix = false;
-            newNode->RestMatrix = glm::mat4(1.0f);
+            newNode->RestTranslation = glm::vec3(static_cast<float>(tg3Node.translation[0]), static_cast<float>(tg3Node.translation[1]), static_cast<float>(tg3Node.translation[2]));
+            newNode->RestRotation = glm::quat(static_cast<float>(tg3Node.rotation[3]), static_cast<float>(tg3Node.rotation[0]), static_cast<float>(tg3Node.rotation[1]), static_cast<float>(tg3Node.rotation[2]));
+            newNode->RestScale = glm::vec3(static_cast<float>(tg3Node.scale[0]), static_cast<float>(tg3Node.scale[1]), static_cast<float>(tg3Node.scale[2]));
 
-            if (tg3Node.translation) 
-                newNode->RestTranslation = glm::vec3(tg3Node.translation[0], tg3Node.translation[1], tg3Node.translation[2]);
-            else 
-                newNode->RestTranslation = glm::vec3(0.0f);
-
-            if (tg3Node.rotation) 
-                newNode->RestRotation = glm::quat(tg3Node.rotation[3], tg3Node.rotation[0], tg3Node.rotation[1], tg3Node.rotation[2]);
-            else 
-                newNode->RestRotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
-
-            if (tg3Node.scale) 
-                newNode->RestScale = glm::vec3(tg3Node.scale[0], tg3Node.scale[1], tg3Node.scale[2]);
-            else 
-                newNode->RestScale = glm::vec3(1.0f);
+            newNode->RestMatrix = glm::translate(glm::mat4(1.0f), newNode->RestTranslation) *
+                                  glm::toMat4(newNode->RestRotation) *
+                                  glm::scale(glm::mat4(1.0f), newNode->RestScale);
         }
 
         // Sync active fields to rest values

@@ -106,14 +106,13 @@ namespace Nox
 
         // 3. Recursively calculate node local and global matrices down the tree
         auto updateNodeRecursive = [](auto& self, Node* node) -> void {
-            // Combine TRS with the raw base matrix if present
             glm::mat4 trsMatrix = glm::translate(glm::mat4(1.0f), node->Translation) *
                                   glm::toMat4(node->Rotation) *
                                   glm::scale(glm::mat4(1.0f), node->Scale);
 
             if (node->HasMatrix)
             {
-                node->LocalMatrix = trsMatrix * node->Matrix;
+                node->LocalMatrix = node->Matrix;
             }
             else
             {
@@ -148,6 +147,7 @@ namespace Nox
                 Node* jointNode = skin->Joints[i];
                 if (jointNode)
                 {
+                    // Transforms vertex: Mesh Local -> Joint Bind Space -> Animated Skeleton Space
                     m_FinalBoneTransforms[i] = jointNode->GlobalMatrix * skin->InverseBindMatrices[i];
                 }
                 else
@@ -221,7 +221,16 @@ namespace Nox
         float t1 = channel.RotationKeys[nextIdx].Time;
         float factor = (time - t0) / (t1 - t0);
 
-        return glm::normalize(glm::slerp(channel.RotationKeys[idx].Value, channel.RotationKeys[nextIdx].Value, factor));
+        glm::quat q0 = channel.RotationKeys[idx].Value;
+        glm::quat q1 = channel.RotationKeys[nextIdx].Value;
+
+        // Take shortest path
+        if (glm::dot(q0, q1) < 0.0f)
+        {
+            q1 = -q1;
+        }
+
+        return glm::normalize(glm::slerp(q0, q1, factor));
     }
 
     glm::vec3 Animator::InterpolateScale(float time, const NodeAnimationChannel& channel)
