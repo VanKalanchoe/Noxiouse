@@ -255,14 +255,14 @@ NoxEditor/assets/models
 NoxEditor/assets/Crates_and_Barrels_Assets.zip
 NoxEditor/assets/Scanned_Road_Photogrammetry_Mat.zip
 
-# Ignore everything under vendors...
-NoxCore/vendors/
+# Ignore contents inside vendors...
+NoxCore/vendors/*
 
 # ...EXCEPT your tracked submodules:
-!NoxCore/vendors/taskflow
-!NoxCore/vendors/VulkanMemoryAllocator-Hpp
-!NoxCore/vendors/msdf-atlas-gen
-!NoxCore/vendors/ImGuizmo
-!NoxCore/vendors/imgui
-!NoxCore/vendors/tinygltf
-!NoxCore/vendors/meshoptimizer
+!NoxCore/vendors/taskflow/
+!NoxCore/vendors/VulkanMemoryAllocator-Hpp/
+!NoxCore/vendors/msdf-atlas-gen/
+!NoxCore/vendors/ImGuizmo/
+!NoxCore/vendors/imgui/
+!NoxCore/vendors/tinygltf/
+!NoxCore/vendors/meshoptimizer/
