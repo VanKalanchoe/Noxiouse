@@ -137,7 +137,7 @@ namespace Nox
 						
 							std::filesystem::path defaultDest = m_PendingImportPath;
 							defaultDest.replace_extension(m_ImportAsStaticMesh ? ".nsmesh" : ".nmesh");
-							strncpy_s(m_ImportDestPathBuffer, defaultDest.string().c_str(), sizeof(m_ImportDestPathBuffer));
+							strncpy(m_ImportDestPathBuffer, defaultDest.string().c_str(), sizeof(m_ImportDestPathBuffer));
 						}
 						else
 						{
@@ -175,7 +175,7 @@ namespace Nox
  				{
  					std::filesystem::path currentDest = m_ImportDestPathBuffer;
  					currentDest.replace_extension(m_ImportAsStaticMesh ? ".nsmesh" : ".nmesh");
- 					strncpy_s(m_ImportDestPathBuffer, currentDest.string().c_str(), sizeof(m_ImportDestPathBuffer));
+ 					strncpy(m_ImportDestPathBuffer, currentDest.string().c_str(), sizeof(m_ImportDestPathBuffer));
  				}
 
  				ImGui::Text("Destination Path:");

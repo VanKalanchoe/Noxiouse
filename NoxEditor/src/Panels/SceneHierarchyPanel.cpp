@@ -339,8 +339,7 @@ namespace Nox
             auto& tag = entity.GetComponent<TagComponent>().Tag;
 
             char buffer[256];
-            memset(buffer, 0, sizeof(buffer));
-            strcpy_s(buffer, sizeof(buffer), tag.c_str());
+            std::snprintf(buffer, sizeof(buffer), "%s", tag.c_str());
             if (ImGui::InputText("##Tag", buffer, sizeof(buffer)))
             {
                 tag = std::string(buffer);

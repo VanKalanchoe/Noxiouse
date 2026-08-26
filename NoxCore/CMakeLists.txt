@@ -12,7 +12,11 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 find_package (sdl3 REQUIRED)
 find_package (glm REQUIRED)
-find_package (Vulkan 1.4.350 REQUIRED)
+
+if(WIN32)
+  find_package (Vulkan 1.4.350 REQUIRED)
+endif()
+
 find_package (entt REQUIRED)
 find_package (Stb REQUIRED)
 set(STB_INCLUDEDIR ${stb_INCLUDE_DIRS})
@@ -22,6 +26,7 @@ find_package (xxhash REQUIRED)
 find_package (yaml-cpp REQUIRED)
 find_package (spdlog CONFIG REQUIRED)
 find_package (box2d REQUIRED)
+find_package(zstd CONFIG REQUIRED)
 
 # Define Slang as an imported library
 add_library(Slang::slang IMPORTED UNKNOWN)
@@ -45,6 +50,35 @@ else()
     )
 endif()
 
+# ============================================================
+# Slang compatibility include path
+#
+# Allows:
+#
+#     #include <slang/slang.h>
+#     #include <slang/slang-com-ptr.h>
+#
+# while keeping the actual Slang installation unchanged.
+# ============================================================
+
+set(SLANG_COMPAT_INCLUDE_DIR
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/slang"
+)
+
+file(MAKE_DIRECTORY
+    "${SLANG_COMPAT_INCLUDE_DIR}/slang"
+)
+
+file(WRITE
+    "${SLANG_COMPAT_INCLUDE_DIR}/slang/slang.h"
+    "#include \"../../../../vendors/slang/include/slang.h\"\n"
+)
+
+file(WRITE
+    "${SLANG_COMPAT_INCLUDE_DIR}/slang/slang-com-ptr.h"
+    "#include \"../../../../vendors/slang/include/slang-com-ptr.h\"\n"
+)
+
 set(IMGUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendors/imgui")
 set(IMGUI_SOURCES
     ${IMGUI_DIR}/imgui.cpp
@@ -54,10 +88,19 @@ set(IMGUI_SOURCES
     ${IMGUI_DIR}/imgui_widgets.cpp
     # Add the specific backends matching your engine tech!
     ${IMGUI_DIR}/backends/imgui_impl_sdl3.cpp
-    ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp
 
     ${IMGUI_DIR}/misc/cpp/imgui_stdlib.cpp
 )
+
+if(WIN32)
+    list(APPEND IMGUI_SOURCES
+        ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp
+    )
+elseif(APPLE)
+    list(APPEND IMGUI_SOURCES
+        ${IMGUI_DIR}/backends/imgui_impl_metal4.mm
+    )
+endif()
 
 set(IMGUIZMO_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendors/ImGuizmo/src")
 set(IMGUIZMO_SOURCES
@@ -72,65 +115,170 @@ set(TINYGLTF_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendors/tinygltf")
 set(MESHOPTIMIZER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendors/meshoptimizer/src")
 file(GLOB MESHOPTIMIZER_SOURCES "${MESHOPTIMIZER_DIR}/*.cpp")
 
-# Set up Vulkan C++ module only if enabled
-if(ENABLE_CPP20_MODULE)
-  add_library(VulkanCppModule)
-  add_library(Vulkan::cppm ALIAS VulkanCppModule)
+if(WIN32)
+  # Set up Vulkan C++ module only if enabled
+  if(ENABLE_CPP20_MODULE)
+    add_library(VulkanCppModule)
+    add_library(Vulkan::cppm ALIAS VulkanCppModule)
 
-  target_compile_definitions(VulkanCppModule PUBLIC VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1 VULKAN_HPP_NO_STRUCT_CONSTRUCTORS=1)
-  target_include_directories(VulkanCppModule PUBLIC "${Vulkan_INCLUDE_DIR}")
-  target_link_libraries(VulkanCppModule PUBLIC Vulkan::Vulkan)
+    target_compile_definitions(VulkanCppModule PUBLIC VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1 VULKAN_HPP_NO_STRUCT_CONSTRUCTORS=1)
+    target_include_directories(VulkanCppModule PUBLIC "${Vulkan_INCLUDE_DIR}")
+    target_link_libraries(VulkanCppModule PUBLIC Vulkan::Vulkan)
 
-  set_target_properties(VulkanCppModule PROPERTIES CXX_STANDARD 20)
+    set_target_properties(VulkanCppModule PROPERTIES CXX_STANDARD 20)
 
-  # Add MSVC-specific compiler options for proper C++ module support
-  if(MSVC)
-    target_compile_options(VulkanCppModule PRIVATE
-      /std:c++latest      # Use latest C++ standard for better module support
-      /permissive-        # Standards conformance mode
-      /Zc:__cplusplus     # Enable correct __cplusplus macro
-      /EHsc               # Enable C++ exception handling
-      /Zc:preprocessor    # Use conforming preprocessor
-      /translateInclude   # Automatically translate #include to import for standard library
+    # Add MSVC-specific compiler options for proper C++ module support
+    if(MSVC)
+      target_compile_options(VulkanCppModule PRIVATE
+        /std:c++latest      # Use latest C++ standard for better module support
+        /permissive-        # Standards conformance mode
+        /Zc:__cplusplus     # Enable correct __cplusplus macro
+        /EHsc               # Enable C++ exception handling
+        /Zc:preprocessor    # Use conforming preprocessor
+        /translateInclude   # Automatically translate #include to import for standard library
+      )
+    endif()
+
+    target_sources(VulkanCppModule
+      PUBLIC
+      FILE_SET cxx_modules TYPE CXX_MODULES
+      BASE_DIRS
+      "${Vulkan_INCLUDE_DIR}"
+      FILES
+      "${Vulkan_INCLUDE_DIR}/vulkan/vulkan.cppm"
+    )
+
+
+    # Add the vulkan.cppm file directly as a source file
+    target_sources(VulkanCppModule
+      PRIVATE
+      "${Vulkan_INCLUDE_DIR}/vulkan/vulkan.cppm"
+    )
+  else()
+    # Create a dummy interface library when C++ 20 module is disabled
+    add_library(VulkanCppModule INTERFACE)
+    add_library(Vulkan::cppm ALIAS VulkanCppModule)
+    target_link_libraries(VulkanCppModule INTERFACE Vulkan::Vulkan zstd::libzstd KTX::ktx)
+    target_compile_definitions(VulkanCppModule
+      INTERFACE VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1 VULKAN_HPP_NO_STRUCT_CONSTRUCTORS=1
     )
   endif()
-
-  target_sources(VulkanCppModule
-    PUBLIC
-    FILE_SET cxx_modules TYPE CXX_MODULES
-    BASE_DIRS
-    "${Vulkan_INCLUDE_DIR}"
-    FILES
-    "${Vulkan_INCLUDE_DIR}/vulkan/vulkan.cppm"
-  )
-
-
-  # Add the vulkan.cppm file directly as a source file
-  target_sources(VulkanCppModule
-    PRIVATE
-    "${Vulkan_INCLUDE_DIR}/vulkan/vulkan.cppm"
-  )
-else()
-  # Create a dummy interface library when C++ 20 module is disabled
-  add_library(VulkanCppModule INTERFACE)
-  add_library(Vulkan::cppm ALIAS VulkanCppModule)
-  target_link_libraries(VulkanCppModule INTERFACE Vulkan::Vulkan KTX::ktx)
-  target_compile_definitions(VulkanCppModule
-    INTERFACE VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1 VULKAN_HPP_NO_STRUCT_CONSTRUCTORS=1
-  )
 endif()
 
 file(GLOB_RECURSE NOXCORE_FILES
     CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h" 
 )
+
+# Remove both backend directories from the common list.
+list(FILTER NOXCORE_FILES EXCLUDE REGEX
+    ".*/src/NRI/Vulkan/.*"
+)
+
+list(FILTER NOXCORE_FILES EXCLUDE REGEX
+    ".*/src/NRI/Metal/.*"
+)
+
+# ============================================================
+# Vulkan backend - Windows only
+# ============================================================
+
+if(WIN32)
+
+    file(GLOB_RECURSE NRI_VULKAN_FILES
+        CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/NRI/Vulkan/*.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/NRI/Vulkan/*.h"
+    )
+
+    list(APPEND NOXCORE_FILES
+        ${NRI_VULKAN_FILES}
+    )
+
+endif()
+
+
+# ============================================================
+# Metal backend - macOS only
+# ============================================================
+
+if(APPLE)
+
+    file(GLOB_RECURSE NRI_METAL_FILES
+        CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/NRI/Metal/*.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/NRI/Metal/*.h"
+    )
+
+    list(APPEND NOXCORE_FILES
+        ${NRI_METAL_FILES}
+    )
+
+endif()
+
+source_group(
+  TREE "${CMAKE_CURRENT_SOURCE_DIR}"
+  PREFIX ""
+  FILES ${NOXCORE_FILES}
+  )
 
 add_library(${PROJECT_NAME} STATIC ${NOXCORE_FILES} ${IMGUI_SOURCES} ${IMGUIZMO_SOURCES} ${TINYGLTF_SOURCE} ${MESHOPTIMIZER_SOURCES}) #main file here
 
-target_link_libraries (${PROJECT_NAME} PUBLIC Vulkan::cppm SDL3::SDL3 glm::glm spdlog::spdlog Slang::slang EnTT::EnTT xxHash::xxhash yaml-cpp::yaml-cpp box2d::box2d msdf-atlas-gen::msdf-atlas-gen tinyobjloader::tinyobjloader)
+target_link_libraries (${PROJECT_NAME} PUBLIC SDL3::SDL3 glm::glm spdlog::spdlog Slang::slang EnTT::EnTT xxHash::xxhash yaml-cpp::yaml-cpp box2d::box2d msdf-atlas-gen::msdf-atlas-gen tinyobjloader::tinyobjloader)
+
+if(WIN32)
+    target_link_libraries(
+        ${PROJECT_NAME}
+        PUBLIC
+            Vulkan::cppm
+    )
+endif()
+
+if(APPLE)
+    set(METAL_CPP_DIR
+        "${CMAKE_CURRENT_SOURCE_DIR}/vendors/metal-cpp"
+    )
+
+    set(METAL_CPP_INCLUDE_DIR
+        "${METAL_CPP_DIR}/include"
+    )
+
+    if(NOT EXISTS
+        "${METAL_CPP_INCLUDE_DIR}/Metal/Metal.hpp")
+        message(FATAL_ERROR
+            "metal-cpp is missing.\n"
+            "Run your install.sh first.\n"
+            "Expected: ${METAL_CPP_INCLUDE_DIR}/Metal/Metal.hpp"
+        )
+    endif()
+
+    target_include_directories(
+        ${PROJECT_NAME}
+        SYSTEM PUBLIC
+            "${METAL_CPP_INCLUDE_DIR}"
+    )
+
+    find_library(METAL_FRAMEWORK Metal REQUIRED)
+    find_library(QUARTZCORE_FRAMEWORK QuartzCore REQUIRED)
+    find_library(FOUNDATION_FRAMEWORK Foundation REQUIRED)
+
+    target_link_libraries(${PROJECT_NAME}
+        PUBLIC
+            ${METAL_FRAMEWORK}
+            ${QUARTZCORE_FRAMEWORK}
+            ${FOUNDATION_FRAMEWORK}
+            zstd::libzstd
+            KTX::ktx
+    )
+
+  #enable metal-cpp for imgui metal4 backend instead of objective-c
+  target_compile_definitions(${PROJECT_NAME} PRIVATE IMGUI_IMPL_METAL_CPP)
+
+endif()
+
 # Add here vendors
-target_include_directories (${PROJECT_NAME} SYSTEM PRIVATE ${STB_INCLUDEDIR} ${CMAKE_CURRENT_SOURCE_DIR}/vendors/taskflow ${CMAKE_CURRENT_SOURCE_DIR}/vendors/VulkanMemoryAllocator-Hpp/include ${CMAKE_CURRENT_SOURCE_DIR}/vendors/VulkanMemoryAllocator-Hpp/VulkanMemoryAllocator/include ${IMGUI_DIR}/backends)
+target_include_directories (${PROJECT_NAME} SYSTEM PRIVATE ${STB_INCLUDEDIR} ${SLANG_COMPAT_INCLUDE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/vendors/taskflow ${CMAKE_CURRENT_SOURCE_DIR}/vendors/VulkanMemoryAllocator-Hpp/include ${CMAKE_CURRENT_SOURCE_DIR}/vendors/VulkanMemoryAllocator-Hpp/VulkanMemoryAllocator/include ${IMGUI_DIR}/backends)
 
 #vendors visible to other projects like editor
 target_include_directories (${PROJECT_NAME} SYSTEM PUBLIC ${IMGUI_DIR} ${IMGUIZMO_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/vendors/filewatch)
@@ -139,9 +287,10 @@ target_include_directories (${PROJECT_NAME} SYSTEM PUBLIC ${IMGUI_DIR} ${IMGUIZM
 target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/NoxEditor/assets/shaders ${TINYGLTF_DIR} ${MESHOPTIMIZER_DIR})
 
 # Add compile definition if C++ 20 module is enabled
-if(ENABLE_CPP20_MODULE)
-  target_compile_definitions(${PROJECT_NAME} PRIVATE USE_CPP20_MODULES=1)
+if(WIN32)
+  if(ENABLE_CPP20_MODULE)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE USE_CPP20_MODULES=1)
+  endif()
+  # Define VULKAN_HPP_HANDLE_ERROR_OUT_OF_DATE_AS_SUCCESS to treat VK_ERROR_OUT_OF_DATE_KHR as a success code
+    target_compile_definitions(${PROJECT_NAME} PRIVATE "VULKAN_HPP_HANDLE_ERROR_OUT_OF_DATE_AS_SUCCESS" )
 endif()
-
-# Define VULKAN_HPP_HANDLE_ERROR_OUT_OF_DATE_AS_SUCCESS to treat VK_ERROR_OUT_OF_DATE_KHR as a success code
-target_compile_definitions(${PROJECT_NAME} PRIVATE "VULKAN_HPP_HANDLE_ERROR_OUT_OF_DATE_AS_SUCCESS" )

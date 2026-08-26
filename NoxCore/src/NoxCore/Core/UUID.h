@@ -1,6 +1,7 @@
 #pragma once
 
-#include <xhash>
+#include <cstdint>
+#include <functional>
 
 namespace Nox
 {
@@ -19,8 +20,6 @@ namespace Nox
 
 namespace std
 {
-    template <typename T> struct hash;
-    
     template<>
     struct hash<Nox::UUID>
     {

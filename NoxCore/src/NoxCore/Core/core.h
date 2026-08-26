@@ -11,7 +11,7 @@
 
 #if defined(_WIN32)
         #define NOX_DEBUGBREAK() __debugbreak()
-    #elif defined(__linux__)
+    #elif defined(__linux__) || defined(__APPLE__)
         #include <signal.h>
         #define NOX_DEBUGBREAK() raise(SIGTRAP)
 #else

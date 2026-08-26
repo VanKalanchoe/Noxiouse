@@ -22,7 +22,7 @@ namespace Nox
 
         s_Instance = this;
 
-        m_device = NRI::Device::create(NRI::GraphicsAPI::Vulkan, *m_window);
+        m_device = NRI::Device::create(NRI::GraphicsAPI::Metal, *m_window);
         if (!m_device) NOX_CORE_ASSERT("Failed to create NRI device");
 
         initRenderer();
@@ -170,7 +170,11 @@ namespace Nox
 
     void Renderer::createCompiler()
     {
+#if defined(_WIN32)
         m_shaderCompiler = NRI::CreateSlangCompiler();
+#elif defined(__APPLE__)
+        m_shaderCompiler = NRI::CreateMetalCompiler();
+#endif
     }
 
     void Renderer::createGraphicsPipeline(bool forceCompile)

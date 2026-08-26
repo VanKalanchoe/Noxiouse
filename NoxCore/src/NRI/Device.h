@@ -15,6 +15,7 @@ namespace NRI
 {
     enum class GraphicsAPI : uint8_t
     {
+        None,
         Vulkan,
         Metal
     };

@@ -8,6 +8,12 @@ file(GLOB_RECURSE NOXEDITOR_FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
 )
 
+source_group(
+    TREE "${CMAKE_CURRENT_SOURCE_DIR}"
+    PREFIX ""
+    FILES ${NOXEDITOR_FILES}
+)
+
 target_sources(${PROJECT_NAME} PRIVATE ${NOXEDITOR_FILES})
 
 target_link_libraries(${PROJECT_NAME} PRIVATE NoxCore)
@@ -44,4 +50,18 @@ if(WIN32)
     #        "${CMAKE_CURRENT_SOURCE_DIR}/assets"
     #        "$<TARGET_FILE_DIR:${PROJECT_NAME}>/assets"
     #)
+endif()
+
+if(APPLE)
+
+    add_custom_command(
+        TARGET ${PROJECT_NAME}
+        POST_BUILD
+
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_SOURCE_DIR}/NoxCore/vendors/slang/lib/libslang.dylib"
+            "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
+    )
+
+
 endif()
