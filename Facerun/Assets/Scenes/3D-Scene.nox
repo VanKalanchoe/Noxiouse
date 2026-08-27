@@ -1,3 +1,20 @@
 Scene: Untitled
 Entities:
-  []
+  - Entity: 11449993515745513247
+    TagComponent:
+      Tag: Fox
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    MeshComponent:
+      MeshHandle: 7636997664502802887
+      SubmeshIndex: 0
+    MaterialComponent:
+      AlbedoColor: [1, 1, 1, 1]
+      AlbedoMaps:
+        - 3436731810295752103
+    AnimatorComponent:
+      Animation: 0
+      Skeleton: 7163123135044597277
+      Playing: true

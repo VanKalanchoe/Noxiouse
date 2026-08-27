@@ -101,10 +101,14 @@ namespace Nox
         NOX_CORE_INFO("Auto-Reimporting asset from source: {}", metadata.SourceFilePath.string());
 
         // 1. Delete the old cooked cache (.nsmesh/.nmesh) so the Importer is forced to re-cook the GLTF
-        auto cookedPath = Project::GetActiveAssetDirectory() / metadata.FilePath;
-        if (std::filesystem::exists(cookedPath))
+        if (metadata.Type == AssetType::Mesh || metadata.Type == AssetType::StaticMesh || metadata.Type == AssetType::SkeletalMesh)
         {
-            std::filesystem::remove(cookedPath);
+            auto cookedPath = Project::GetActiveAssetDirectory() / metadata.FilePath;
+            auto ext = cookedPath.extension();
+            if ((ext == ".nsmesh" || ext == ".nmesh") && std::filesystem::exists(cookedPath))
+            {
+                std::filesystem::remove(cookedPath);
+            }
         }
 
         // 2. Re-run the importer on the GLTF
