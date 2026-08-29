@@ -90,6 +90,7 @@ namespace Nox
         createGraphicsPipeline(false);
         if (!m_isEditor) createPresentPipeline(false);
         createComputePipeline();
+        createSkyboxPipeline(false);
         createCommandPool();
         createUniformBuffers();
         createDescriptorHeaps();
@@ -240,6 +241,36 @@ namespace Nox
         };
     
         m_computePipeline = m_device->createPipeline(computeDesc);*/
+    }
+    
+    void Renderer::createSkyboxPipeline(bool forceCompile)
+    {
+        NRI::PipelineDesc desc{};
+        desc.forceCompile = forceCompile;
+        
+        desc.colorFormats =
+        {
+            NRI::ImageFormat::Surface,
+            NRI::ImageFormat::R32SINT
+        };
+
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Task,
+            .entryPoint = "taskMain",
+            .sourcePath = "assets/shaders/Skybox.slang"
+        });
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Mesh,
+            .entryPoint = "meshMain",
+            .sourcePath = "assets/shaders/Skybox.slang"
+        });
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Fragment,
+            .entryPoint = "fragMain",
+            .sourcePath = "assets/shaders/Skybox.slang"
+        });
+
+        m_skyboxPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
     void Renderer::createCommandPool()
@@ -985,6 +1016,27 @@ namespace Nox
             m_commandBuffers->pushData(&references, sizeof(shaderio::PushConstantMeshlets));
 
             m_commandBuffers->drawMeshTasksIndirect(*m_indirectBuffers[frameIndex], 0, static_cast<uint32_t>(m_drawMeshTasksIndirectCommands.size()), sizeof(DrawMeshTasksIndirectCommand));
+        }
+        
+        if (m_skyboxPipeline)
+        {
+            m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_skyboxPipeline);
+            
+            // Reverse-Z configuration: test against far plane (Z = 0.0), disable depth writes
+            m_commandBuffers->setDepthWriteEnable(false);
+            m_commandBuffers->setDepthCompareOp(NRI::CompareOp::GreaterOrEqual);
+            m_commandBuffers->setCullMode(NRI::CullMode::None);
+            
+            shaderio::PushConstantSkybox references{};
+            references.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+            references.cubemapIndex = m_environmentCubemap->GetDescriptorIndexSlot();
+            m_commandBuffers->pushData(&references, sizeof(shaderio::PushConstantSkybox));
+            
+            m_commandBuffers->drawMeshTasks(1, 1, 1);
+            
+            // Restore depth write state
+            m_commandBuffers->setDepthWriteEnable(true);
+            m_commandBuffers->setDepthCompareOp(NRI::CompareOp::Greater);
         }
 
         m_renderer2D->Flush(*m_commandBuffers, *m_uniformBuffers[frameIndex], frameIndex);

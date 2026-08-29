@@ -182,6 +182,12 @@ struct PushConstantEquirect
     uint32_t cubemapSize;
 };
 
+struct PushConstantSkybox
+{
+    uint64_t matrixReference; // BDA to UniformBufferObject
+    uint32_t cubemapIndex;     // Index in descriptor heap
+};
+
 struct PushConstantQuad
 {
     uint64_t matrixReference;

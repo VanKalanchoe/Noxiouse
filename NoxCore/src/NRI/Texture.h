@@ -42,6 +42,7 @@ namespace NRI
     
     enum class TextureUsage : uint8_t
     {
+        Default = 0, // Sentinel value for descriptor heap registration
         ColorAttachment,
         DepthStencilAttachment,
         ShaderResource, // For regular textures

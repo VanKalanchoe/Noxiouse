@@ -164,6 +164,7 @@ namespace Nox
         void createGraphicsPipeline(bool forceCompile);
         void createPresentPipeline(bool forceCompile);
         void createComputePipeline();
+        void createSkyboxPipeline(bool forceCompile);
         void createCommandPool();
         void createSceneResources();
         void createColorResources();
@@ -286,5 +287,6 @@ namespace Nox
         
         // PBR stuff
         Ref<Texture2D> m_environmentCubemap;
+        std::unique_ptr<NRI::Pipeline> m_skyboxPipeline = nullptr;
     };
 }

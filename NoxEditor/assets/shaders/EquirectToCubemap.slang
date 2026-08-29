@@ -5,32 +5,37 @@ static const float2 invAtan = float2(0.15915494309, 0.31830988618); // 1 / (2 * 
 // Converts a 3D unit direction vector to 2D equirectangular UV coordinates
 float2 sampleSphericalMap(float3 v)
 {
-    // atan2(z, x) -> [-PI, PI]
-    // asin(y)    -> [-PI/2, PI/2]
-    float2 uv = float2(atan2(v.z, v.x), asin(v.y));
-    uv *= invAtan;
-    uv += 0.5;
+    // -Z is Forward, +X is Right
+    // atan2(v.x, -v.z) maps -Z (Forward) to the center of the HDR image (UV.x = 0.5)
+    float phi = atan2(v.x, -v.z);
+    
+    // Clamp v.y to avoid NaN from floating point precision issues at extremes
+    float theta = asin(clamp(v.y, -1.0, 1.0));
+
+    float2 uv = float2(phi, theta) * invAtan + 0.5;
+    
+    // Invert V coordinate to match STB's top-left origin (V=0 is Top/Sky, V=1 is Bottom/Floor)
+    uv.y = 1.0 - uv.y;
     return uv;
 }
 
-// Maps cubemap face coordinates [-1, 1] to a 3D world direction vector (Vulkan / OpenGL cubemap spec)
+// Maps cubemap face coordinates [-1, 1] to a 3D world direction vector (Vulkan spec)
 float3 getCubemapVector(uint face, float2 uv)
 {
-    // uv.y in compute space goes from top to bottom (0 -> 1).
-    // Invert Y so that +1.0 points UP in 3D world space.
+    // Compute pixel coordinates uv.x and uv.y lie in [-1, 1]
     float x = uv.x;
-    float y = -uv.y;
+    float y = uv.y;
 
     float3 dir = float3(0.0);
 
     switch (face)
     {
-        case 0: dir = float3( 1.0,    y,   -x); break; // +X (Right)
-        case 1: dir = float3(-1.0,    y,    x); break; // -X (Left)
-        case 2: dir = float3(   x,  1.0,    y); break; // +Y (Top)
-        case 3: dir = float3(   x, -1.0,   -y); break; // -Y (Bottom)
-        case 4: dir = float3(   x,    y,  1.0); break; // +Z (Front)
-        case 5: dir = float3(  -x,    y, -1.0); break; // -Z (Back)
+        case 0: dir = float3( 1.0,  -y,  -x); break; // +X (Right)
+        case 1: dir = float3(-1.0,  -y,   x); break; // -X (Left)
+        case 2: dir = float3(   x, 1.0,   y); break; // +Y (Top)
+        case 3: dir = float3(   x,-1.0,  -y); break; // -Y (Bottom)
+        case 4: dir = float3(   x,  -y, 1.0); break; // +Z (Back)
+        case 5: dir = float3(  -x,  -y, -1.0); break; // -Z (Front)
     }
 
     return normalize(dir);
@@ -43,11 +48,10 @@ void compMain(
     uniform PushConstantEquirect pushConstant
 )
 {
-    // Safety check against padding dispatch threads
     if (dispatchThreadID.x >= pushConstant.cubemapSize || dispatchThreadID.y >= pushConstant.cubemapSize)
         return;
 
-    uint faceIndex = dispatchThreadID.z; // SV_DispatchThreadID.z covers face indices 0 through 5
+    uint faceIndex = dispatchThreadID.z; // SV_DispatchThreadID.z: faces 0 to 5
 
     // Normalize pixel position to [-1.0, 1.0] range
     float2 pixelCenter = float2(dispatchThreadID.xy) + 0.5;

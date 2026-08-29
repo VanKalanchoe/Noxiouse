@@ -128,7 +128,7 @@ namespace NRI
             vkTex->setDescriptorHeap(this);
         }
         
-        TextureUsage activeUsage = (usageOverride != TextureUsage::ShaderResource) ? usageOverride : vkTex->getUsage();
+        TextureUsage activeUsage = (usageOverride != TextureUsage::Default) ? usageOverride : vkTex->getUsage();
         bool isStorage = (activeUsage == TextureUsage::Storage);
 
         vk::ImageViewCreateInfo viewInfo = vkTex->getNativeViewInfo();

@@ -69,7 +69,8 @@ namespace NRI
     enum class CompareOp
     {
         Less,
-        Greater
+        Greater,
+        GreaterOrEqual
     };
     
     enum class BlendFactor

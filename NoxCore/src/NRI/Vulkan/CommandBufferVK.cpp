@@ -53,8 +53,9 @@ namespace NRI
     {
         switch (compareOp)
         {
-            case CompareOp::Less: return vk::CompareOp::eLess;
+        case CompareOp::Less: return vk::CompareOp::eLess;
         case CompareOp::Greater: return vk::CompareOp::eGreater;
+        case CompareOp::GreaterOrEqual : return vk::CompareOp::eGreaterOrEqual;
         }
     }
     
