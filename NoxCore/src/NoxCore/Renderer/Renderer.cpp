@@ -480,6 +480,169 @@ namespace Nox
         m_resourceHeap->registerTexture(*m_environmentCubemap, NRI::TextureUsage::ShaderResource);
         
         // equiRectPipeline and enviromentHDR cleanly go out of scope and release temporary resources
+        
+        // ==========================================
+        //  DIFFUSE IRRADIANCE CONVOLUTION
+        // ==========================================
+        
+        constexpr uint32_t irradianceSize = 32;
+        
+        m_irradianceCubemap = m_device->createTexture(NRI::TextureDesc{
+        .width = irradianceSize,
+        .height = irradianceSize,
+        .arrayLayers = 6,
+        .isCubeMap = true,
+        .mipLevels = 1,
+        .sampleCount = 1,
+        .usage = NRI::TextureUsage::Storage,
+        .format = NRI::ImageFormat::R16G16B16A16_SFLOAT
+    });
+        
+        m_resourceHeap->registerTexture(*m_irradianceCubemap, NRI::TextureUsage::Storage);
+        
+        NRI::PipelineDesc convComputeDesc{};
+        convComputeDesc.type = NRI::PipelineType::Compute;
+        convComputeDesc.shaders.push_back({
+            .stage = NRI::ShaderStage::Compute,
+            .entryPoint = "compMain",
+            .sourcePath = "assets/shaders/IrradianceConvolution.slang"
+        });
+        std::unique_ptr<NRI::Pipeline> irradiancePipeline = m_device->createPipeline(convComputeDesc, *m_shaderCompiler);
+        
+        pushData.hdrTextureIndex = m_environmentCubemap->GetDescriptorIndexSlot();
+        pushData.cubemapStorageIndex = m_irradianceCubemap->GetDescriptorIndexSlot();
+        pushData.cubemapSize = irradianceSize;
+        
+        std::unique_ptr<NRI::CommandBuffer> irradCmd = beginSingleTimeCommands();
+        irradCmd->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
+        irradCmd->transitionTextureLayout(*m_irradianceCubemap, NRI::TextureLayout::Undefined, NRI::TextureLayout::General);
+
+        irradCmd->bindPipeline(NRI::PipelineBindPoint::Compute, *irradiancePipeline);
+        irradCmd->pushData(&pushData, sizeof(EquirectPushConstants));
+
+        uint32_t irradGroupCountX = (irradianceSize + 15) / 16;
+        uint32_t irradGroupCountY = (irradianceSize + 15) / 16;
+        irradCmd->dispatch(irradGroupCountX, irradGroupCountY, 6);
+
+        irradCmd->transitionTextureLayout(*m_irradianceCubemap, NRI::TextureLayout::General, NRI::TextureLayout::ShaderResource);
+        endSingleTimeCommands(std::move(irradCmd));
+
+        m_resourceHeap->registerTexture(*m_irradianceCubemap, NRI::TextureUsage::ShaderResource);
+        
+        // ==========================================
+    //  SPECULAR IBL: PRE-FILTERED ENVIRONMENT MAP
+    // ==========================================
+    constexpr uint32_t prefilteredSize = 512;
+    constexpr uint32_t numMipLevels = 5;
+
+    m_prefilteredEnvMap = m_device->createTexture(NRI::TextureDesc{
+        .width = prefilteredSize,
+        .height = prefilteredSize,
+        .arrayLayers = 6,
+        .isCubeMap = true,
+        .mipLevels = numMipLevels,
+        .sampleCount = 1,
+        .usage = NRI::TextureUsage::Storage,
+        .format = NRI::ImageFormat::R16G16B16A16_SFLOAT
+    });
+
+    m_resourceHeap->registerTexture(*m_prefilteredEnvMap, NRI::TextureUsage::Storage);
+
+    NRI::PipelineDesc prefilterComputeDesc{};
+    prefilterComputeDesc.type = NRI::PipelineType::Compute;
+    prefilterComputeDesc.shaders.push_back({
+        .stage = NRI::ShaderStage::Compute,
+        .entryPoint = "compMain",
+        .sourcePath = "assets/shaders/PrefilterEnv.slang"
+    });
+    std::unique_ptr<NRI::Pipeline> prefilterPipeline = m_device->createPipeline(prefilterComputeDesc, *m_shaderCompiler);
+
+    struct PrefilterPushConstants
+    {
+        uint32_t envTextureIndex;
+        uint32_t cubemapStorageIndex;
+        uint32_t cubemapSize;
+        float roughness;
+    } prefilterData;
+
+    std::unique_ptr<NRI::CommandBuffer> prefCmd = beginSingleTimeCommands();
+    prefCmd->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
+    prefCmd->transitionTextureLayout(*m_prefilteredEnvMap, NRI::TextureLayout::Undefined, NRI::TextureLayout::General);
+    prefCmd->bindPipeline(NRI::PipelineBindPoint::Compute, *prefilterPipeline);
+
+    // Loop through each roughness mip level
+    for (uint32_t mip = 0; mip < numMipLevels; ++mip)
+    {
+        uint32_t mipWidth = prefilteredSize >> mip;
+        uint32_t mipHeight = prefilteredSize >> mip;
+        float roughness = (float)mip / (float)(numMipLevels - 1);
+
+        prefilterData.envTextureIndex = m_environmentCubemap->GetDescriptorIndexSlot();
+        prefilterData.cubemapStorageIndex = m_prefilteredEnvMap->GetDescriptorIndexSlot(); // Note: Needs slice/mip targeting in shader or descriptor binding if multi-mip storage
+        prefilterData.cubemapSize = mipWidth;
+        prefilterData.roughness = roughness;
+
+        prefCmd->pushData(&prefilterData, sizeof(PrefilterPushConstants));
+
+        uint32_t groupX = (mipWidth + 15) / 16;
+        uint32_t groupY = (mipHeight + 15) / 16;
+        prefCmd->dispatch(groupX, groupY, 6);
+    }
+
+    prefCmd->transitionTextureLayout(*m_prefilteredEnvMap, NRI::TextureLayout::General, NRI::TextureLayout::ShaderResource);
+    endSingleTimeCommands(std::move(prefCmd));
+    m_resourceHeap->registerTexture(*m_prefilteredEnvMap, NRI::TextureUsage::ShaderResource);
+
+    // ==========================================
+    //  SPECULAR IBL: BRDF INTEGRATION MAP (2D LUT)
+    // ==========================================
+    constexpr uint32_t brdfLUTSize = 512;
+
+    m_brdfLUT = m_device->createTexture(NRI::TextureDesc{
+        .width = brdfLUTSize,
+        .height = brdfLUTSize,
+        .arrayLayers = 1,
+        .isCubeMap = false,
+        .mipLevels = 1,
+        .sampleCount = 1,
+        .usage = NRI::TextureUsage::Storage,
+        .format = NRI::ImageFormat::R16G16_SFLOAT
+    });
+
+    m_resourceHeap->registerTexture(*m_brdfLUT, NRI::TextureUsage::Storage);
+
+    NRI::PipelineDesc brdfComputeDesc{};
+    brdfComputeDesc.type = NRI::PipelineType::Compute;
+    brdfComputeDesc.shaders.push_back({
+        .stage = NRI::ShaderStage::Compute,
+        .entryPoint = "compMain",
+        .sourcePath = "assets/shaders/BRDFIntegration.slang"
+    });
+    std::unique_ptr<NRI::Pipeline> brdfPipeline = m_device->createPipeline(brdfComputeDesc, *m_shaderCompiler);
+
+    struct BRDFPushConstants
+    {
+        uint32_t lutStorageIndex;
+        uint32_t lutSize;
+    } brdfData;
+
+    brdfData.lutStorageIndex = m_brdfLUT->GetDescriptorIndexSlot();
+    brdfData.lutSize = brdfLUTSize;
+
+    std::unique_ptr<NRI::CommandBuffer> brdfCmd = beginSingleTimeCommands();
+    brdfCmd->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
+    brdfCmd->transitionTextureLayout(*m_brdfLUT, NRI::TextureLayout::Undefined, NRI::TextureLayout::General);
+    
+    brdfCmd->bindPipeline(NRI::PipelineBindPoint::Compute, *brdfPipeline);
+    brdfCmd->pushData(&brdfData, sizeof(BRDFPushConstants));
+
+    uint32_t brdfGroupX = (brdfLUTSize + 15) / 16;
+    uint32_t brdfGroupY = (brdfLUTSize + 15) / 16;
+    brdfCmd->dispatch(brdfGroupX, brdfGroupY, 1);
+
+    brdfCmd->transitionTextureLayout(*m_brdfLUT, NRI::TextureLayout::General, NRI::TextureLayout::ShaderResource);
+    endSingleTimeCommands(std::move(brdfCmd));
+    m_resourceHeap->registerTexture(*m_brdfLUT, NRI::TextureUsage::ShaderResource);
     }
 
     template <typename T>
@@ -1018,6 +1181,8 @@ namespace Nox
             m_commandBuffers->drawMeshTasksIndirect(*m_indirectBuffers[frameIndex], 0, static_cast<uint32_t>(m_drawMeshTasksIndirectCommands.size()), sizeof(DrawMeshTasksIndirectCommand));
         }
         
+        m_renderer2D->Flush(*m_commandBuffers, *m_uniformBuffers[frameIndex], frameIndex);
+        
         if (m_skyboxPipeline)
         {
             m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_skyboxPipeline);
@@ -1038,8 +1203,6 @@ namespace Nox
             m_commandBuffers->setDepthWriteEnable(true);
             m_commandBuffers->setDepthCompareOp(NRI::CompareOp::Greater);
         }
-
-        m_renderer2D->Flush(*m_commandBuffers, *m_uniformBuffers[frameIndex], frameIndex);
 
         m_commandBuffers->endRendering();
 

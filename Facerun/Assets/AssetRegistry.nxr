@@ -7,6 +7,10 @@ AssetRegistry:
     FilePath: Scenes/3D-Scene.nox
     SourceFilePath: Scenes/3D-Scene.nox
     Type: AssetType::Scene
+  - Handle: 605355506038356874
+    FilePath: models/DamagedHelmet/DamagedHelmet.nsmesh
+    SourceFilePath: models/DamagedHelmet/DamagedHelmet.gltf
+    Type: AssetType::StaticMesh
   - Handle: 2938995203616073866
     FilePath: models/fox/Fox_Survey.nanim
     SourceFilePath: models/fox/Fox_Survey.nanim
@@ -43,7 +47,19 @@ AssetRegistry:
     FilePath: models/fox/Texture.png
     SourceFilePath: models/fox/Texture.png
     Type: AssetType::Texture2D
+  - Handle: 9769803540686115874
+    FilePath: models/stanford_bunny/stanford_bunny.nsmesh
+    SourceFilePath: models/stanford_bunny/stanford_bunny.gltf
+    Type: AssetType::StaticMesh
+  - Handle: 15583050050163782075
+    FilePath: models/CesiumMan/glTF/CesiumMan.nsmesh
+    SourceFilePath: models/CesiumMan/glTF/CesiumMan.gltf
+    Type: AssetType::StaticMesh
   - Handle: 17222912232755252656
     FilePath: models/CesiumMan/glTF-Binary/CesiumMan_Anim_0.nanim
     SourceFilePath: models/CesiumMan/glTF-Binary/CesiumMan_Anim_0.nanim
     Type: AssetType::AnimationSequence
+  - Handle: 17905404289975513473
+    FilePath: models/CesiumMan/glTF/CesiumMan_img0.jpg
+    SourceFilePath: models/CesiumMan/glTF/CesiumMan_img0.jpg
+    Type: AssetType::Texture2D

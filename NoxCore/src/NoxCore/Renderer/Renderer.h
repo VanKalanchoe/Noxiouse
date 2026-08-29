@@ -288,5 +288,8 @@ namespace Nox
         // PBR stuff
         Ref<Texture2D> m_environmentCubemap;
         std::unique_ptr<NRI::Pipeline> m_skyboxPipeline = nullptr;
+        Ref<Texture2D> m_irradianceCubemap;
+        Ref<Texture2D> m_prefilteredEnvMap;
+        Ref<Texture2D> m_brdfLUT;
     };
 }
