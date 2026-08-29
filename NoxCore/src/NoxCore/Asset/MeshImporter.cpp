@@ -1,5 +1,8 @@
 #include "MeshImporter.h"
 
+#include <string_view>
+#include <vector>
+
 #define TINYGLTF3_IMPLEMENTATION
 #define TINYGLTF3_ENABLE_FS 
 #include <glm/gtx/matrix_decompose.hpp>
@@ -447,6 +450,229 @@ namespace Nox
             outAnimations.push_back(animSeq);
         }
     }
+    
+    
+    
+    static std::vector<uint8_t> DecodeBase64(std::string_view input)
+    {
+        static constexpr char alphabet[] =
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+            "abcdefghijklmnopqrstuvwxyz"
+            "0123456789+/";
+
+        std::vector<uint8_t> output;
+        output.reserve((input.size() * 3) / 4);
+
+        uint32_t buffer = 0;
+        int bits = 0;
+
+        for (unsigned char c : input)
+        {
+            // Ignore whitespace
+            if (std::isspace(c))
+                continue;
+
+            // Padding
+            if (c == '=')
+                break;
+
+            const char* pos = std::strchr(alphabet, c);
+            if (!pos)
+                continue;
+
+            const uint32_t value =
+                static_cast<uint32_t>(pos - alphabet);
+
+            buffer = (buffer << 6) | value;
+            bits += 6;
+
+            if (bits >= 8)
+            {
+                bits -= 8;
+                output.push_back(
+                    static_cast<uint8_t>((buffer >> bits) & 0xFF)
+                );
+            }
+        }
+
+        return output;
+    }
+    
+    static std::filesystem::path ExtractGltfImage(
+    const tg3_model& model,
+    const tg3_image& image,
+    int32_t imageIndex,
+    const std::filesystem::path& modelPath)
+{
+    std::filesystem::path textureDir =
+        modelPath.parent_path() / "textures";
+
+    std::filesystem::create_directories(textureDir);
+
+    std::string extension = ".png";
+
+    if (image.mime_type.data && image.mime_type.len > 0)
+    {
+        std::string mime(image.mime_type.data, image.mime_type.len);
+
+        if (mime == "image/jpeg")
+            extension = ".jpg";
+        else if (mime == "image/png")
+            extension = ".png";
+        else if (mime == "image/webp")
+            extension = ".webp";
+        else if (mime == "image/ktx2")
+            extension = ".ktx2";
+        else
+            NOX_CORE_WARN("Unknown embedded image MIME type: {}", mime);
+    }
+
+    std::filesystem::path outputPath =
+        textureDir /
+        (modelPath.stem().string() +
+         "_tex_" +
+         std::to_string(imageIndex) +
+         extension);
+
+    // ------------------------------------------------------------
+    // 1. data:image/...;base64,...
+    // ------------------------------------------------------------
+
+    if (image.uri.data && image.uri.len > 0)
+    {
+        std::string uri(image.uri.data, image.uri.len);
+
+        if (uri.starts_with("data:"))
+        {
+            const size_t commaPos = uri.find(',');
+
+            if (commaPos == std::string::npos)
+            {
+                NOX_CORE_ERROR(
+                    "[Importer] Invalid data URI for image {}",
+                    imageIndex
+                );
+
+                return {};
+            }
+
+            std::string_view encodedData =
+                std::string_view(uri).substr(commaPos + 1);
+
+            std::vector<uint8_t> decoded =
+                DecodeBase64(encodedData);
+
+            if (decoded.empty())
+            {
+                NOX_CORE_ERROR(
+                    "[Importer] Failed to decode base64 image {}",
+                    imageIndex
+                );
+
+                return {};
+            }
+
+            std::ofstream outFile(
+                outputPath,
+                std::ios::binary
+            );
+
+            if (!outFile)
+            {
+                NOX_CORE_ERROR(
+                    "[Importer] Failed to create texture file: {}",
+                    outputPath.string()
+                );
+
+                return {};
+            }
+
+            outFile.write(
+                reinterpret_cast<const char*>(decoded.data()),
+                static_cast<std::streamsize>(decoded.size())
+            );
+
+            outFile.close();
+
+            NOX_CORE_INFO(
+                "[Importer] Extracted base64 texture {} -> {}",
+                imageIndex,
+                outputPath.string()
+            );
+
+            return outputPath;
+        }
+
+        // ------------------------------------------------------------
+        // 2. Normal external URI
+        // ------------------------------------------------------------
+
+        return modelPath.parent_path() / uri;
+    }
+
+    // ------------------------------------------------------------
+    // 3. GLB bufferView embedded image
+    // ------------------------------------------------------------
+
+    if (image.buffer_view >= 0 &&
+        image.buffer_view < static_cast<int32_t>(model.buffer_views_count))
+    {
+        const auto& bufView =
+            model.buffer_views[image.buffer_view];
+
+        if (bufView.buffer < 0 ||
+            bufView.buffer >= static_cast<int32_t>(model.buffers_count))
+        {
+            NOX_CORE_ERROR(
+                "[Importer] Invalid buffer index for image {}",
+                imageIndex
+            );
+
+            return {};
+        }
+
+        const auto& buffer =
+            model.buffers[bufView.buffer];
+
+        const uint8_t* imgData =
+    buffer.data.data + bufView.byte_offset;
+
+        const size_t imgSize =
+            bufView.byte_length;
+
+        std::ofstream outFile(
+            outputPath,
+            std::ios::binary
+        );
+
+        if (!outFile)
+        {
+            NOX_CORE_ERROR(
+                "[Importer] Failed to create texture file: {}",
+                outputPath.string()
+            );
+
+            return {};
+        }
+
+        outFile.write(
+            reinterpret_cast<const char*>(imgData),
+            static_cast<std::streamsize>(imgSize)
+        );
+
+        outFile.close();
+
+        NOX_CORE_INFO(
+            "[Importer] Extracted bufferView texture {} -> {}",
+            imageIndex,
+            outputPath.string()
+        );
+
+        return outputPath;
+    }
+
+    return {};
+}
 
     std::vector<MeshData> MeshImporter::ParseGltfToMeshData
     (
@@ -814,60 +1040,19 @@ namespace Nox
                         if (imageIndex >= 0 && imageIndex < (int32_t)model.images_count)
                         {
                             const auto& image = model.images[imageIndex];
-                            if (image.uri.data && image.uri.len > 0)
+
+                            std::filesystem::path texturePath =
+                                ExtractGltfImage(
+                                    model,
+                                    image,
+                                    imageIndex,
+                                    path
+                                );
+
+                            if (!texturePath.empty())
                             {
-                                std::string uriStr(image.uri.data, image.uri.len);
-                                std::filesystem::path texturePath = path.parent_path() / uriStr;
-                                materialData.AlbedoTexturePath = texturePath.string();
-                            }
-                            else if (image.buffer_view >= 0 && image.buffer_view < (int32_t)model.buffer_views_count)
-                            {
-                                const auto& bufView = model.buffer_views[image.buffer_view];
-                                if (bufView.buffer >= 0 && bufView.buffer < (int32_t)model.buffers_count)
-                                {
-                                    const auto& buffer = model.buffers[bufView.buffer];
-                                    const uint8_t* imgData = &buffer.data.data[bufView.byte_offset];
-                                    size_t imgSize = bufView.byte_length;
-
-                                    // Determine file extension from mime_type
-                                    std::string ext = ".png";
-                                    if (image.mime_type.data && image.mime_type.len > 0)
-                                    {
-                                        std::string mime(image.mime_type.data, image.mime_type.len);
-                                        if (mime.find("jpeg") != std::string::npos || mime.find("jpg") != std::string::npos)
-                                        {
-                                            ext = ".jpg";
-                                        }
-                                        else if (mime.find("ktx2") != std::string::npos)
-                                        {
-                                            ext = ".ktx2";
-                                        }
-                                        else
-                                        {
-                                            NOX_CORE_ASSERT(false, "Unsupported image mime type: {}", mime);
-                                        }
-                                    }
-
-                                    // Export embedded image to disk alongside model
-                                    std::filesystem::path textureDir = path.parent_path() / "textures";
-                                    std::filesystem::create_directories(textureDir);
-
-                                    std::string texFileName = path.stem().string() + "_tex_" + std::to_string(imageIndex) + ext;
-                                    std::filesystem::path texturePath = textureDir / texFileName;
-
-                                    std::ofstream outImg(texturePath, std::ios::binary);
-                                    if (outImg.is_open())
-                                    {
-                                        outImg.write(reinterpret_cast<const char*>(imgData), imgSize);
-                                        outImg.close();
-                                        materialData.AlbedoTexturePath = texturePath.string();
-                                        NOX_CORE_INFO("[Importer] Extracted embedded GLB texture to {}", texturePath.string());
-                                    }
-                                    else
-                                    {
-                                        NOX_CORE_ERROR("[Importer] Failed to write extracted GLB texture to {}", texturePath.string());
-                                    }
-                                }
+                                materialData.AlbedoTexturePath =
+                                    texturePath.string();
                             }
                         }
                     }

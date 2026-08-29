@@ -311,33 +311,98 @@ namespace Nox
                         if (entityName.empty())
                             entityName = "Mesh Entity";
                         
-                        auto getOrImportTextureHandle = [&](const std::string& texturePath) -> AssetHandle
-                        {
-                            if (texturePath.empty()) return 0;
-                            
-                            std::filesystem::path pathObj(texturePath);
-                            std::filesystem::path relPath = pathObj.is_absolute() 
-                                ? std::filesystem::relative(pathObj, Project::GetActiveAssetDirectory()) 
-                                : pathObj;
-                            
-                            auto assetManager = Project::GetActive()->GetEditorAssetManager();
-                            
-                            for (const auto& [texHandle, meta] : assetManager->GetAssetRegistry())
-                            {
-                                if (meta.FilePath == relPath || meta.SourceFilePath == relPath)
-                                    return texHandle;
-                            }
-                            
-                            assetManager->ImportAsset(relPath, {}, {});
-                            
-                            for (const auto& [texHandle, meta] : assetManager->GetAssetRegistry())
-                            {
-                                if (meta.FilePath == relPath || meta.SourceFilePath == relPath)
-                                    return texHandle;
-                            }
-                            
-                            return 0;
-                        };
+                        auto getOrImportTextureHandle =
+    [&](const std::string& texturePath) -> AssetHandle
+{
+    if (texturePath.empty())
+        return 0;
+
+    std::filesystem::path pathObj(texturePath);
+
+    // The importer should already have converted embedded
+    // data:image/... URIs into real files.
+    if (texturePath.starts_with("data:"))
+    {
+        NOX_CORE_ERROR(
+            "[Scene Drop] Texture is still an embedded data URI: {}",
+            texturePath.substr(0, 64)
+        );
+        return 0;
+    }
+
+    std::filesystem::path relPath;
+
+    if (pathObj.is_absolute())
+    {
+        std::error_code ec;
+
+        relPath = std::filesystem::relative(
+            pathObj,
+            Project::GetActiveAssetDirectory(),
+            ec
+        );
+
+        if (ec)
+        {
+            NOX_CORE_ERROR(
+                "[Scene Drop] Failed to make texture path relative: {}",
+                pathObj.string()
+            );
+            return 0;
+        }
+    }
+    else
+    {
+        relPath = pathObj;
+    }
+
+    auto assetManager =
+        Project::GetActive()->GetEditorAssetManager();
+
+    // Already imported?
+    for (const auto& [texHandle, meta] :
+         assetManager->GetAssetRegistry())
+    {
+        if (meta.FilePath == relPath ||
+            meta.SourceFilePath == relPath)
+        {
+            return texHandle;
+        }
+    }
+
+    // Make sure the actual file exists before importing.
+    std::filesystem::path fullPath =
+        Project::GetActiveAssetDirectory() / relPath;
+
+    if (!std::filesystem::exists(fullPath))
+    {
+        NOX_CORE_ERROR(
+            "[Scene Drop] Texture file does not exist: {}",
+            fullPath.string()
+        );
+        return 0;
+    }
+
+    assetManager->ImportAsset(relPath, {}, {});
+
+    // Find newly imported asset.
+    for (const auto& [texHandle, meta] :
+         assetManager->GetAssetRegistry())
+    {
+        if (meta.FilePath == relPath ||
+            meta.SourceFilePath == relPath)
+        {
+            return texHandle;
+        }
+    }
+
+    NOX_CORE_ERROR(
+        "[Scene Drop] Failed to import texture: {}",
+        relPath.string()
+    );
+
+    return 0;
+};
                         
                         // Check if a cooked .nskel file exists on disk for this mesh
                         std::filesystem::path relSkelPath = metadata.FilePath;

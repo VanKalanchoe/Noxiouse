@@ -7,10 +7,10 @@ AssetRegistry:
     FilePath: Scenes/3D-Scene.nox
     SourceFilePath: Scenes/3D-Scene.nox
     Type: AssetType::Scene
-  - Handle: 605355506038356874
-    FilePath: models/DamagedHelmet/DamagedHelmet.nsmesh
-    SourceFilePath: models/DamagedHelmet/DamagedHelmet.gltf
-    Type: AssetType::StaticMesh
+  - Handle: 1312791483917374403
+    FilePath: models/FlightHelmet/FlightHelmet_Materials_MetalPartsMat_BaseColor.png
+    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_MetalPartsMat_BaseColor.png
+    Type: AssetType::Texture2D
   - Handle: 2938995203616073866
     FilePath: models/fox/Fox_Survey.nanim
     SourceFilePath: models/fox/Fox_Survey.nanim
@@ -27,10 +27,22 @@ AssetRegistry:
     FilePath: models/CesiumMan/glTF-Binary/CesiumMan.nmesh
     SourceFilePath: models/CesiumMan/glTF-Binary/CesiumMan.glb
     Type: AssetType::Mesh
+  - Handle: 4417117377832136896
+    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_0.png
+    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_0.png
+    Type: AssetType::Texture2D
+  - Handle: 4786235783617615192
+    FilePath: models/FlightHelmet/FlightHelmet_Materials_LensesMat_BaseColor.png
+    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_LensesMat_BaseColor.png
+    Type: AssetType::Texture2D
   - Handle: 5283302714725537586
     FilePath: models/fox/Fox_Walk.nanim
     SourceFilePath: models/fox/Fox_Walk.nanim
     Type: AssetType::AnimationSequence
+  - Handle: 5287044983553940517
+    FilePath: models/FlightHelmet/FlightHelmet_Materials_GlassPlasticMat_BaseColor.png
+    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_GlassPlasticMat_BaseColor.png
+    Type: AssetType::Texture2D
   - Handle: 6965357044956339817
     FilePath: models/CesiumMan/glTF-Binary/CesiumMan.nskel
     SourceFilePath: models/CesiumMan/glTF-Binary/CesiumMan.nskel
@@ -39,6 +51,10 @@ AssetRegistry:
     FilePath: models/fox/Fox.nskel
     SourceFilePath: models/fox/Fox.nskel
     Type: AssetType::Skeleton
+  - Handle: 7218006195194932846
+    FilePath: models/FlightHelmet/FlightHelmet_Materials_LeatherPartsMat_BaseColor.png
+    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_LeatherPartsMat_BaseColor.png
+    Type: AssetType::Texture2D
   - Handle: 7636997664502802887
     FilePath: models/fox/Fox.nmesh
     SourceFilePath: models/fox/Fox.gltf
@@ -47,9 +63,17 @@ AssetRegistry:
     FilePath: models/fox/Texture.png
     SourceFilePath: models/fox/Texture.png
     Type: AssetType::Texture2D
+  - Handle: 9398857867255920900
+    FilePath: models/FlightHelmet/FlightHelmet_Materials_RubberWoodMat_BaseColor.png
+    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_RubberWoodMat_BaseColor.png
+    Type: AssetType::Texture2D
   - Handle: 9769803540686115874
     FilePath: models/stanford_bunny/stanford_bunny.nsmesh
     SourceFilePath: models/stanford_bunny/stanford_bunny.gltf
+    Type: AssetType::StaticMesh
+  - Handle: 9823610258955711552
+    FilePath: models/FlightHelmet/FlightHelmet.nsmesh
+    SourceFilePath: models/FlightHelmet/FlightHelmet.gltf
     Type: AssetType::StaticMesh
   - Handle: 15583050050163782075
     FilePath: models/CesiumMan/glTF/CesiumMan.nsmesh
@@ -59,6 +83,10 @@ AssetRegistry:
     FilePath: models/CesiumMan/glTF-Binary/CesiumMan_Anim_0.nanim
     SourceFilePath: models/CesiumMan/glTF-Binary/CesiumMan_Anim_0.nanim
     Type: AssetType::AnimationSequence
+  - Handle: 17334467166723701209
+    FilePath: models/DamagedHelmet/DamagedHelmet.nsmesh
+    SourceFilePath: models/DamagedHelmet/DamagedHelmet.gltf
+    Type: AssetType::StaticMesh
   - Handle: 17905404289975513473
     FilePath: models/CesiumMan/glTF/CesiumMan_img0.jpg
     SourceFilePath: models/CesiumMan/glTF/CesiumMan_img0.jpg
