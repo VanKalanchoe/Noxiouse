@@ -108,32 +108,47 @@ namespace NRI
         m_size = totalSize;
     }
 
-    void DescriptorHeapVK::registerTexture(Texture& texture)
+    void DescriptorHeapVK::registerTexture(Texture& texture, TextureUsage usageOverride)
     {
         auto* vkTex = dynamic_cast<TextureVK*>(&texture);
         
-        uint32_t slot;
-        if (!m_freeImageSlots.empty())
+        uint32_t slot = vkTex->GetDescriptorIndexSlot();
+        if (slot == ~0u)
         {
-            slot = m_freeImageSlots.back();
-            m_freeImageSlots.pop_back();
+            if (!m_freeImageSlots.empty())
+            {
+                slot = m_freeImageSlots.back();
+                m_freeImageSlots.pop_back();
+            }
+            else
+            {
+                slot = m_allocatedImageCount++;
+            }
+            vkTex->setDescriptorIndexSlot(slot);
+            vkTex->setDescriptorHeap(this);
         }
-        else
-        {
-            slot = m_allocatedImageCount++;
-        }
+        
+        TextureUsage activeUsage = (usageOverride != TextureUsage::ShaderResource) ? usageOverride : vkTex->getUsage();
+        bool isStorage = (activeUsage == TextureUsage::Storage);
 
+        vk::ImageViewCreateInfo viewInfo = vkTex->getNativeViewInfo();
+        // Vulkan Spec Constraint: Storage images CANNOT use eCube or eCubeArray view types.
+        // RWTexture2DArray storage writes require e2DArray.
+        if (isStorage && (viewInfo.viewType == vk::ImageViewType::eCube || viewInfo.viewType == vk::ImageViewType::eCubeArray))
+        {
+            viewInfo.viewType = vk::ImageViewType::e2DArray;
+        }
+        
         vk::ImageDescriptorInfoEXT imageDescriptorInfo
         {
-            .pView = &vkTex->getNativeViewInfo(),
-            .layout = vk::ImageLayout::eShaderReadOnlyOptimal
+            .pView = &viewInfo,
+            .layout = isStorage ? vk::ImageLayout::eGeneral : vk::ImageLayout::eShaderReadOnlyOptimal
         };
 
         vk::ResourceDescriptorInfoEXT info{};
-        info.type = vk::DescriptorType::eSampledImage;
+        info.type = isStorage ? vk::DescriptorType::eStorageImage : vk::DescriptorType::eSampledImage;
         info.data.pImage = &imageDescriptorInfo;
-
-
+        
         vk::HostAddressRangeEXT hostRange
         {
             .address = static_cast<uint8_t*>(m_mappedPtr) + m_imageHeapOffset + (m_imageDescSize * slot),
@@ -141,9 +156,6 @@ namespace NRI
         };
 
         m_deviceVK.getDevice().writeResourceDescriptorsEXT(info, hostRange);
-        
-        vkTex->setDescriptorIndexSlot(slot);
-        vkTex->setDescriptorHeap(this);
     }
 
     void DescriptorHeapVK::unregisterTexture(uint32_t slot)

@@ -265,6 +265,8 @@ namespace NRI
 
         if (vkPip->isShaderObject())
         {
+            // For Graphics: binds 4 stages ({Vert, Frag, Task, Mesh}) with active shaders and null handles
+            // For Compute: binds 1 stage ({Compute}) with 1 shader handle
             m_commandBuffers[m_currentFrameIndex].bindShadersEXT(vkPip->getStages(), vkPip->getRawShaders());
         }
         else
@@ -527,6 +529,11 @@ namespace NRI
         m_commandBuffers[m_currentFrameIndex].drawMeshTasksIndirectEXT(vkBuffer.getNativeBuffer(), offset, drawCount, stride);
     }
     
+    void CommandBufferVK::dispatch(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ)
+    {
+        m_commandBuffers[m_currentFrameIndex].dispatch(groupCountX, groupCountY, groupCountZ);
+    }
+    
     void CommandBufferVK::drawMeshTasksIndirect(uint64_t indirectBufferDeviceAddress, uint64_t offset, uint32_t drawCount, uint32_t stride)
     {
         NOX_CORE_ASSERT("My GPU doesnt support idk why will have to look");
@@ -554,7 +561,7 @@ namespace NRI
                                                     ? vk::ImageAspectFlagBits::eDepth
                                                     : vk::ImageAspectFlagBits::eColor;
 
-        submitImageBarrier(vkTex->getNativeImage(), oldLayout, newLayout, imageAspectFlags);
+        submitImageBarrier(vkTex->getNativeImage(), oldLayout, newLayout, imageAspectFlags, vkTex->getArrayLayers(), vkTex->getMipLevels());
     }
 
     void CommandBufferVK::transitionSwapchainLayout(Swapchain& swapchain, uint32_t imageIndex, TextureLayout oldLayout, TextureLayout newLayout)
@@ -562,7 +569,7 @@ namespace NRI
         auto* vkSwapchain = dynamic_cast<SwapchainVK*>(&swapchain);
         vk::Image rawImage = vkSwapchain->getNativeImage(imageIndex);
 
-        submitImageBarrier(rawImage, oldLayout, newLayout, vk::ImageAspectFlagBits::eColor);
+        submitImageBarrier(rawImage, oldLayout, newLayout, vk::ImageAspectFlagBits::eColor, 1, 1);
     }
     
     void CommandBufferVK::resolveImage(Texture& srcTexture, Texture& dstTexture, uint32_t width, uint32_t height)
@@ -601,7 +608,8 @@ namespace NRI
         );
     }
 
-    void CommandBufferVK::submitImageBarrier(vk::Image image, TextureLayout oldLayout, TextureLayout newLayout, vk::ImageAspectFlags aspectFlags)
+    void CommandBufferVK::submitImageBarrier(vk::Image image, TextureLayout oldLayout, TextureLayout newLayout, vk::ImageAspectFlags aspectFlags, 
+        uint32_t arrayLayers, uint32_t mipLevels)
     {
         vk::PipelineStageFlags2 srcStageMask = vk::PipelineStageFlagBits2::eNone;
         vk::PipelineStageFlags2 dstStageMask = vk::PipelineStageFlagBits2::eNone;
@@ -625,9 +633,9 @@ namespace NRI
             .subresourceRange = {
                 .aspectMask = aspectFlags,
                 .baseMipLevel = 0,
-                .levelCount = 1,
+                .levelCount = mipLevels,
                 .baseArrayLayer = 0,
-                .layerCount = 1
+                .layerCount = arrayLayers
             }
         };
 
@@ -697,6 +705,7 @@ namespace NRI
         case TextureLayout::TransferSrc: return vk::ImageLayout::eTransferSrcOptimal;
         case TextureLayout::TransferDst: return vk::ImageLayout::eTransferDstOptimal;
         case TextureLayout::Present: return vk::ImageLayout::ePresentSrcKHR;
+        case TextureLayout::General: return vk::ImageLayout::eGeneral;
         default:
             throw std::runtime_error("Unsupported TextureLayout passed to Vulkan backend!");
         }

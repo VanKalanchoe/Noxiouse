@@ -19,10 +19,13 @@ namespace Nox
     {
         uint32_t Width = 0;
         uint32_t Height = 0;
+        uint32_t ArrayLayers = 1;
+        bool IsCubeMap = false;
         uint32_t MipLevels = 0;
+        NRI::TextureUsage Usage = NRI::TextureUsage::ShaderResource;
         Buffer Data; // Raw CPU buffer from stb
         NRI::ImageFormat Format = NRI::ImageFormat::SRGBA8;
-        uint32_t DirectFormat;
+        uint32_t DirectFormat = UINT32_MAX;
         std::vector<size_t> MipOffsets;
     };
     
@@ -41,6 +44,7 @@ namespace Nox
         
     private:
         static Ref<Texture2D> LoadWithSTB(const std::filesystem::path& path, const TextureSpecification& spec, Renderer* renderer);
+        static Ref<Texture2D> LoadWithSTBHDR(const std::filesystem::path& path, const TextureSpecification& spec, Renderer* renderer);
         static Ref<Texture2D> LoadWithDDS(const std::filesystem::path& path, const TextureSpecification& spec, Renderer* renderer);
         static Ref<Texture2D> LoadWithKTX(const std::filesystem::path& path, const TextureSpecification& spec, Renderer* renderer);
     };

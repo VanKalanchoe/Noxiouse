@@ -18,7 +18,7 @@ namespace NRI
         const vk::raii::Pipeline& getNativePipeline() const { return m_pipeline; }
         
         const std::vector<vk::raii::ShaderEXT>& getShaders() const { return m_shaders; }
-        const std::vector<vk::ShaderStageFlagBits>& getStages() const { return m_allGraphicsStages; }
+        const std::vector<vk::ShaderStageFlagBits>& getStages() const { return m_stages; }
         const std::vector<vk::ShaderEXT>& getRawShaders() const { return m_rawShaders; }
         
     private:
@@ -35,13 +35,7 @@ namespace NRI
         
         // Shader Object path
         std::vector<vk::raii::ShaderEXT> m_shaders;
+        std::vector<vk::ShaderStageFlagBits> m_stages;
         std::vector<vk::ShaderEXT> m_rawShaders;
-        
-        const std::vector<vk::ShaderStageFlagBits> m_allGraphicsStages = {
-            vk::ShaderStageFlagBits::eVertex,
-            vk::ShaderStageFlagBits::eFragment,
-            vk::ShaderStageFlagBits::eTaskEXT,
-            vk::ShaderStageFlagBits::eMeshEXT
-        };
     };
 }

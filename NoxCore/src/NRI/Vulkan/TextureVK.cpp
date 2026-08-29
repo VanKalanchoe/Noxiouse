@@ -21,6 +21,8 @@ namespace NRI
             
         case ImageFormat::R16G16: return vk::Format::eR16G16Unorm;
         case ImageFormat::R32SINT: return vk::Format::eR32Sint;
+            
+        case ImageFormat::R16G16B16A16_SFLOAT: return vk::Format::eR16G16B16A16Sfloat;
         case ImageFormat::R32G32B32A32_SFLOAT: return vk::Format::eR32G32B32A32Sfloat;
             
         //tinyddsloader format
@@ -76,15 +78,29 @@ namespace NRI
             aspectFlags = vk::ImageAspectFlagBits::eDepth;
             usageFlags = vk::ImageUsageFlagBits::eDepthStencilAttachment;
         }
+        else if (desc.usage == TextureUsage::Storage)
+        {
+            format = desc.directFormat == UINT32_MAX ? MapToVulkanFormat(desc.format) : MapToVulkanFormat(desc.directFormat);
+            aspectFlags = vk::ImageAspectFlagBits::eColor;
+            usageFlags = vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled;
+        }
+        
         m_format = format;
+        
+        vk::ImageCreateFlags createFlags{};
+        if (desc.isCubeMap)
+        {
+            createFlags |= vk::ImageCreateFlagBits::eCubeCompatible;
+        }
 
         vk::ImageCreateInfo imageInfo
         {
+            .flags = createFlags,
             .imageType = vk::ImageType::e2D,
             .format = format,
             .extent = {desc.width, desc.height, 1},
             .mipLevels = desc.mipLevels,
-            .arrayLayers = 1,
+            .arrayLayers = desc.arrayLayers,
             .samples = static_cast<vk::SampleCountFlagBits>(desc.sampleCount), // might be a problem converting uint32_t to vk::samplecountflagbits
             .tiling = vk::ImageTiling::eOptimal,
             .usage = usageFlags,
@@ -92,10 +108,20 @@ namespace NRI
         };
         m_imageResource.image = m_deviceVK.getAllocator().createImage(imageInfo).image;
 
+        vk::ImageViewType viewType = vk::ImageViewType::e2D;
+        if (desc.isCubeMap)
+        {
+            viewType = vk::ImageViewType::eCube;
+        }
+        else if (desc.arrayLayers > 1)
+        {
+            viewType = vk::ImageViewType::e2DArray;
+        }
+        
         m_viewCreateInfo =
         {
             .image = *m_imageResource.image,
-            .viewType = vk::ImageViewType::e2D,
+            .viewType = viewType,
             .format = format,
             .subresourceRange =
             {
@@ -103,7 +129,7 @@ namespace NRI
                 .baseMipLevel = 0,
                 .levelCount = desc.mipLevels,
                 .baseArrayLayer = 0,
-                .layerCount = 1
+                .layerCount = desc.arrayLayers
             }
         };
 
@@ -251,7 +277,7 @@ namespace NRI
             .srcQueueFamilyIndex = vk::QueueFamilyIgnored,
             .dstQueueFamilyIndex = vk::QueueFamilyIgnored,
             .image = m_imageResource.image,
-            .subresourceRange = {.aspectMask = vk::ImageAspectFlagBits::eColor, .levelCount = mipLevels, .layerCount = 1}
+            .subresourceRange = {.aspectMask = vk::ImageAspectFlagBits::eColor, .levelCount = mipLevels, .layerCount = m_desc.arrayLayers}
         };
 
         vk::PipelineStageFlags sourceStage;

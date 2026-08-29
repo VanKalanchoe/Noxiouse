@@ -134,7 +134,8 @@ namespace Nox
         
         Ref<Texture2D> UploadTexture(const TextureData& cpuData);
         Ref<Texture2D> createSolidColorTexture(uint8_t r, uint8_t g, uint8_t b, uint8_t a);
-        
+        void initPBR();
+
         template <class T>
         void UploadBufferSlice(NRI::Buffer& dstBuffer, const T* data, uint32_t elementOffset, uint32_t elementCount);
       
@@ -282,5 +283,8 @@ namespace Nox
         uint32_t frameIndex = 0;
 
         bool framebufferResized = false;
+        
+        // PBR stuff
+        Ref<Texture2D> m_environmentCubemap;
     };
 }

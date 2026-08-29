@@ -87,6 +87,14 @@ namespace NRI
         return data;
     }
     
+    // List of all supported graphics stages for explicit binding/unbinding
+    static const std::vector<vk::ShaderStageFlagBits> g_allGraphicsStages = {
+        vk::ShaderStageFlagBits::eVertex,
+        vk::ShaderStageFlagBits::eFragment,
+        vk::ShaderStageFlagBits::eTaskEXT,
+        vk::ShaderStageFlagBits::eMeshEXT
+    };
+    
     PipelineVK::PipelineVK(DeviceVK& device, const PipelineDesc& desc, ShaderCompiler& compiler) : m_deviceVK(device)
     {
         std::vector<std::vector<char>> tempBytecodeStorage(desc.shaders.size());
@@ -102,7 +110,6 @@ namespace NRI
 
             if (useShaderObjects)
             {
-                std::vector<vk::ShaderStageFlagBits> m_stages;
                 // need to set all stages to VK_NULL_HANDLE 
                 // because shaderbojects requires all stages even if not used by this pipeline
                 
@@ -110,8 +117,8 @@ namespace NRI
 
                 std::vector<std::string> entryPointNames;
                 std::vector<std::vector<uint8_t>> binaryStorage;
-
                 std::vector<bool> loadedFromBinary;
+                std::vector<vk::ShaderStageFlagBits> compiledStages;
 
                 entryPointNames.reserve(desc.shaders.size());
                 binaryStorage.reserve(desc.shaders.size());
@@ -123,7 +130,7 @@ namespace NRI
                     auto& shaderDesc = desc.shaders[i];
                     
                     entryPointNames.push_back(shaderDesc.entryPoint);
-                    m_stages.push_back( translateShaderStage(shaderDesc.stage));
+                    compiledStages.push_back( translateShaderStage(shaderDesc.stage));
 
                     auto binaryPath = shaderBinaryPath(shaderDesc);
 
@@ -159,7 +166,7 @@ namespace NRI
                     vk::ShaderCreateInfoEXT info
                     {
                         .flags = commonFlags,
-                        .stage = translateShaderStage(shaderDesc.stage),
+                        .stage = compiledStages[i],
                         .nextStage = determineNextStage(shaderDesc.stage),
                         .pName = entryPointNames[i].c_str(),
                         .setLayoutCount = 0,
@@ -223,11 +230,12 @@ namespace NRI
                     NOX_CORE_ASSERT("PipelineVK::PipelineVK Failed to create Binary and SPIR-V shaders");
                 }
                 
-                m_rawShaders.assign(m_allGraphicsStages.size(), vk::ShaderEXT{});
-                for (size_t i = 0; i < m_stages.size(); i++)
+                m_stages = g_allGraphicsStages;
+                m_rawShaders.assign(g_allGraphicsStages.size(), vk::ShaderEXT{});
+                for (size_t i = 0; i < compiledStages.size(); i++)
                 {
-                    auto it = std::find(m_allGraphicsStages.begin(), m_allGraphicsStages.end(), m_stages[i]);
-                    size_t slot = std::distance(m_allGraphicsStages.begin(), it);
+                    auto it = std::find(g_allGraphicsStages.begin(), g_allGraphicsStages.end(), compiledStages[i]);
+                    size_t slot = std::distance(g_allGraphicsStages.begin(), it);
                     m_rawShaders[slot] = *m_shaders[i];
                 }
 
@@ -422,9 +430,104 @@ namespace NRI
                 m_pipeline = vk::raii::Pipeline(m_deviceVK.getDevice(), nullptr, pipelineCreateInfoChain.get<vk::GraphicsPipelineCreateInfo>());
             }
         }
-        else if (desc.type == PipelineType::Compute)
+  else if (desc.type == PipelineType::Compute)
         {
-            /*// Verify we have exactly one compute shader
+            if (desc.shaders.empty())
+            {
+                NOX_CORE_ASSERT("PipelineVK: Compute pipeline requires a shader stage!");
+            }
+
+            const auto& shaderDesc = desc.shaders[0];
+
+            if (useShaderObjects)
+            {
+                auto binaryPath = shaderBinaryPath(shaderDesc);
+                std::vector<uint8_t> binaryStorage;
+                std::vector<char> spirvStorage;
+                bool loadedFromBinary = false;
+
+                if (std::filesystem::exists(binaryPath) && !desc.forceCompile)
+                {
+                    NOX_CORE_INFO("PipelineVK loading compute shader binary: {}", binaryPath);
+                    binaryStorage = loadShaderBinary(binaryPath);
+                    loadedFromBinary = true;
+                }
+                else
+                {
+                    NOX_CORE_INFO("PipelineVK compiling compute shader: {}", shaderDesc.sourcePath);
+                    spirvStorage = compiler.compile(shaderDesc.sourcePath);
+                }
+
+                vk::ShaderCreateInfoEXT info
+                {
+                    .flags = vk::ShaderCreateFlagBitsEXT::eDescriptorHeap,
+                    .stage = vk::ShaderStageFlagBits::eCompute,
+                    .nextStage = {},
+                    .codeType = loadedFromBinary ? vk::ShaderCodeTypeEXT::eBinary : vk::ShaderCodeTypeEXT::eSpirv,
+                    .codeSize = loadedFromBinary ? binaryStorage.size() : spirvStorage.size(),
+                    .pCode = loadedFromBinary ? reinterpret_cast<const uint32_t*>(binaryStorage.data()) 
+                                 : reinterpret_cast<const uint32_t*>(spirvStorage.data()),
+                    .pName = shaderDesc.entryPoint.c_str()
+                };
+
+                m_shaders = m_deviceVK.getDevice().createShadersEXT({ info });
+                
+                // Fallback if binary is invalid
+                if (m_shaders.empty() && loadedFromBinary)
+                {
+                    NOX_CORE_WARN("PipelineVK compute binary incompatible. Recompiling SPIR-V...");
+                    spirvStorage = compiler.compile(shaderDesc.sourcePath);
+
+                    info.codeType = vk::ShaderCodeTypeEXT::eSpirv;
+                    info.codeSize = spirvStorage.size();
+                    info.pCode = reinterpret_cast<const uint32_t*>(spirvStorage.data());
+                    loadedFromBinary = false;
+
+                    m_shaders = m_deviceVK.getDevice().createShadersEXT({ info });
+                }
+
+                if (m_shaders.empty())
+                {
+                    NOX_CORE_ASSERT("PipelineVK Failed to create compute shader object");
+                }
+
+                // Compute: Strictly 1 stage, 1 shader handle
+                m_stages = { vk::ShaderStageFlagBits::eCompute };
+                m_rawShaders = { *m_shaders[0] };
+
+                if (!loadedFromBinary)
+                {
+                    auto data = m_shaders[0].getBinaryData();
+                    std::ofstream file(binaryPath, std::ios::binary);
+                    file.write(reinterpret_cast<const char*>(data.data()), data.size());
+                }
+            }
+    else
+    {
+        tempBytecodeStorage.push_back(compiler.compile(shaderDesc.sourcePath));
+        auto shaderModule = createShaderModule(tempBytecodeStorage.back());
+
+        vk::PipelineShaderStageCreateInfo computeShaderStageInfo
+        {
+            .stage = vk::ShaderStageFlagBits::eCompute,
+            .module = *shaderModule,
+            .pName = shaderDesc.entryPoint.c_str()
+        };
+
+        vk::StructureChain<vk::ComputePipelineCreateInfo, vk::PipelineCreateFlags2CreateInfo> pipelineCreateInfoChain = {
+            {
+                .stage = computeShaderStageInfo,
+                .layout = nullptr
+            },
+            {.flags = vk::PipelineCreateFlagBits2::eDescriptorHeapEXT}
+        };
+
+        m_pipeline = vk::raii::Pipeline(m_deviceVK.getDevice(), nullptr, pipelineCreateInfoChain.get<vk::ComputePipelineCreateInfo>());
+    }
+}
+        /*else if (desc.type == PipelineType::Compute)
+        {
+            /#1#/ Verify we have exactly one compute shader
             if (desc.shaders.empty())
             {
                 throw std::runtime_error("Compute pipeline requires a shader stage.");
@@ -432,7 +535,7 @@ namespace NRI
 
             /*vk::raii::ShaderModule shaderModule = createShaderModule(readFile("../../shaders/slang.spv"));
 
-            vk::PipelineShaderStageCreateInfo computeShaderStageInfo{.stage = vk::ShaderStageFlagBits::eCompute, .module = shaderModule, .pName = "compMain"};#1#
+            vk::PipelineShaderStageCreateInfo computeShaderStageInfo{.stage = vk::ShaderStageFlagBits::eCompute, .module = shaderModule, .pName = "compMain"};#2#
 
             const auto& computeShaderDesc = desc.shaders[0];
             auto shaderModule = createShaderModule(computeShaderDesc.bytecode);
@@ -453,8 +556,8 @@ namespace NRI
                 // This struct must be chained into pipeline creation to enable the use of heaps (allowing us to leave pipelineLayout empty)
                 {.flags = vk::PipelineCreateFlagBits2::eDescriptorHeapEXT},
             };
-            m_pipeline = vk::raii::Pipeline(m_deviceVK.getDevice(), nullptr, pipelineCreateInfoChain.get<vk::ComputePipelineCreateInfo>());*/
-        }
+            m_pipeline = vk::raii::Pipeline(m_deviceVK.getDevice(), nullptr, pipelineCreateInfoChain.get<vk::ComputePipelineCreateInfo>());#1#
+        }*/
     }
 
     [[nodiscard]] vk::raii::ShaderModule PipelineVK::createShaderModule(const std::vector<char>& code) const

@@ -175,6 +175,12 @@ struct MeshletDraw
     uint32_t globalVertexOffset;    // Base vertex offset in primary vertex buffer
 };
 
+struct PushConstantEquirect
+{
+    uint32_t hdrTextureIndex;
+    uint32_t cubemapStorageIndex;
+    uint32_t cubemapSize;
+};
 
 struct PushConstantQuad
 {

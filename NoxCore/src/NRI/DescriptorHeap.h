@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include "Texture.h"
 
 namespace NRI
 {
@@ -23,7 +24,7 @@ namespace NRI
         virtual ~DescriptorHeap() = default;
         
         // Abstract API-portable runtime registration methods
-        virtual void registerTexture(class Texture& texture) = 0;
+        virtual void registerTexture(class Texture& texture, TextureUsage usageOverride = TextureUsage::ShaderResource) = 0;
         virtual void unregisterTexture(uint32_t slot) = 0;
         virtual uint32_t registerBuffer(class Buffer& buffer, uint64_t size) = 0;
         

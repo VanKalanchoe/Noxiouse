@@ -23,7 +23,7 @@ namespace NRI
     struct ImageResource : AllocatedImage
     {
         vk::raii::ImageView view { nullptr };
-        uint32_t descriptorIndexSlot;
+        uint32_t descriptorIndexSlot = ~0u;
     };
 
     class MemoryAllocatorVK

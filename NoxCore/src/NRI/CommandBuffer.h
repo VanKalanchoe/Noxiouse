@@ -160,6 +160,7 @@ namespace NRI
         virtual void drawMeshTasks(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) = 0;
         virtual void drawMeshTasksIndirect(Buffer& indirectBuffer, uint64_t offset, uint32_t drawCount, uint32_t stride) = 0;
         virtual void drawMeshTasksIndirect(uint64_t indirectBufferDeviceAddress, uint64_t offset, uint32_t drawCount, uint32_t stride) = 0;
+        virtual void dispatch(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) = 0;
         
         virtual void copyBuffer(class Buffer& srcBuffer, class Buffer& dstBuffer, const BufferCopyRegion& region = {}) = 0;
         

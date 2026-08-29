@@ -30,7 +30,6 @@ namespace Nox
         /*
         bunnyMesh = MeshImporter::LoadMesh(MODEL_PATH_GLTF_STANDFORD);
         foxMesh = MeshImporter::LoadMesh(MODEL_PATH_FOX_GLTF);
-        
         */
 
         m_fileWatcher.watch(std::filesystem::path("assets/shaders/Meshlet.slang"), [this](auto path) { m_reloadShader = true; });
@@ -102,6 +101,9 @@ namespace Nox
         createCommandBuffers();
 
         initGeometryBuffers();
+
+        // Create every resource needed for PBR
+        initPBR();
     }
 
     void Renderer::cleanupSwapChain()
@@ -336,9 +338,11 @@ namespace Nox
             {
                 .width = static_cast<uint32_t>(cpuData.Width),
                 .height = static_cast<uint32_t>(cpuData.Height),
+                .arrayLayers = cpuData.ArrayLayers,
+                .isCubeMap = cpuData.IsCubeMap,
                 .mipLevels = cpuData.MipLevels,
                 .sampleCount = 1,
-                .usage = NRI::TextureUsage::ShaderResource,
+                .usage = cpuData.Usage,
                 .format = cpuData.Format,
                 .directFormat = cpuData.DirectFormat
             });
@@ -368,6 +372,83 @@ namespace Nox
         cpuData.MipOffsets = {0};
 
         return UploadTexture(cpuData);
+    }
+
+    void Renderer::initPBR()
+    {
+        // 1. Load temporary 2D HDR panorama
+        Ref<Texture2D> enviromentHDR = TextureImporter::LoadTexture2D("assets/enviroments/papermill/papermill.hdr", {}, this);
+
+        // 2. Create the permanent Cubemap Texture (512x512 per face, 6 array layers)
+        constexpr uint32_t cubemapSize = 512;
+
+        m_environmentCubemap = m_device->createTexture(NRI::TextureDesc{
+            .width = cubemapSize,
+            .height = cubemapSize,
+            .arrayLayers = 6,
+            .isCubeMap = true,
+            .mipLevels = 1, // Can be increased if generating specular mips later
+            .sampleCount = 1,
+            .usage = NRI::TextureUsage::Storage, // Allows compute shader writing
+            .format = NRI::ImageFormat::R16G16B16A16_SFLOAT
+        });
+        
+        // 3. Register slot X as eStorageImage (writes Storage Descriptor to memory)
+        m_resourceHeap->registerTexture(*m_environmentCubemap, NRI::TextureUsage::Storage);
+
+        // 4. Create local Equirect-to-Cubemap compute pipeline
+        NRI::PipelineDesc computeDesc{};
+        computeDesc.type = NRI::PipelineType::Compute;
+        computeDesc.shaders.push_back({
+            .stage = NRI::ShaderStage::Compute,
+            .entryPoint = "compMain",
+            .sourcePath = "assets/shaders/EquirectToCubemap.slang"
+        });
+        std::unique_ptr<NRI::Pipeline> equirectPipeline = m_device->createPipeline(computeDesc, *m_shaderCompiler);
+        
+        // 5. Structure for Push Constants to pass descriptor slots to Slang
+        struct EquirectPushConstants
+        {
+            uint32_t hdrTextureIndex;
+            uint32_t cubemapStorageIndex;
+            uint32_t cubemapSize;
+        } pushData;
+
+        pushData.hdrTextureIndex = enviromentHDR->GetDescriptorIndexSlot();
+        pushData.cubemapStorageIndex = m_environmentCubemap->GetDescriptorIndexSlot();
+        pushData.cubemapSize = cubemapSize;
+        
+        // 6. Record and dispatch the compute work
+        
+        std::unique_ptr<NRI::CommandBuffer> cmd = beginSingleTimeCommands();
+        
+        // Bind global descriptor heaps
+        cmd->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
+        
+        // Transition Cubemap layout: Undefined -> General (required for storage writes)
+        cmd->transitionTextureLayout(*m_environmentCubemap, NRI::TextureLayout::Undefined, NRI::TextureLayout::General);
+        
+        // Bind compute pipeline & push constant parameters
+        cmd->bindPipeline(NRI::PipelineBindPoint::Compute, *equirectPipeline);
+        cmd->pushData(&pushData, sizeof(EquirectPushConstants));
+        
+        // Calculate thread group counts (16x16 threads per group in compute shader)
+        uint32_t groupCountX = (cubemapSize + 15) / 16;
+        uint32_t groupCountY = (cubemapSize + 15) / 16;
+
+        // Dispatch work: X and Y cover the resolution, Z=6 covers all 6 cubemap faces
+        cmd->dispatch(groupCountX, groupCountY, 6);
+        
+        // Transition Cubemap layout: General -> ShaderResource (ready for graphics sampling)
+        cmd->transitionTextureLayout(*m_environmentCubemap, NRI::TextureLayout::General, NRI::TextureLayout::ShaderResource);
+        
+        // Submit command buffer and wait for execution to complete
+        endSingleTimeCommands(std::move(cmd));
+        
+        // 7. Overwrite descriptor slot in heap with Sampled Image Descriptor
+        m_resourceHeap->registerTexture(*m_environmentCubemap, NRI::TextureUsage::ShaderResource);
+        
+        // equiRectPipeline and enviromentHDR cleanly go out of scope and release temporary resources
     }
 
     template <typename T>
@@ -893,9 +974,9 @@ namespace Nox
             bool hasBoneBuffers = frameIndex < m_boneBuffers.size() && m_boneBuffers[frameIndex] != nullptr;
             bool hasBones = !m_boneMatrices.empty();
 
-            references.boneMatrixReference = (hasBones && hasBoneBuffers) 
-                ? m_boneBuffers[frameIndex]->getDeviceAddress() 
-                : 0;
+            references.boneMatrixReference = (hasBones && hasBoneBuffers)
+                                                 ? m_boneBuffers[frameIndex]->getDeviceAddress()
+                                                 : 0;
             references.vertexPageTableReference = m_vertexPageTableBuffers[frameIndex]->getDeviceAddress();
             references.meshletBoundsPageTableReference = m_meshletBoundPageTableBuffers[frameIndex]->getDeviceAddress();
             references.meshletDrawsPageTableReference = m_meshletDrawPageTableBuffers[frameIndex]->getDeviceAddress();
@@ -1186,7 +1267,7 @@ namespace Nox
         updateUniformBuffer(frameIndex);
 
         updateInstanceAndIndirectBuffer(frameIndex);
-        
+
         updateBoneBuffer(frameIndex);
 
         m_renderer2D->Update(frameIndex);
@@ -1371,7 +1452,7 @@ namespace Nox
         }
 
         instance.entityID = entityID;
-        
+
         // --- BONE MATRIX PACKING ---
         if (boneTransforms && !boneTransforms->empty())
         {

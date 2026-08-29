@@ -19,6 +19,8 @@ namespace NRI
         
         R16G16,
         R32SINT,
+        
+        R16G16B16A16_SFLOAT,
         R32G32B32A32_SFLOAT,
         
         //tinyddsloader format
@@ -34,7 +36,8 @@ namespace NRI
         ShaderResource,
         TransferSrc,
         TransferDst,
-        Present
+        Present,
+        General
     };
     
     enum class TextureUsage : uint8_t
@@ -43,12 +46,15 @@ namespace NRI
         DepthStencilAttachment,
         ShaderResource, // For regular textures
         ColorResolveAttachment,
+        Storage
     };
 
     struct TextureDesc
     {
         uint32_t width = 0;
         uint32_t height = 0;
+        uint32_t arrayLayers = 1;
+        bool isCubeMap = false;
         uint32_t mipLevels = 1;
         uint32_t sampleCount = 1; // For MSAA
         TextureUsage usage;
@@ -73,6 +79,7 @@ namespace NRI
         virtual void copyImageToBuffer(CommandBuffer& commandBuffer, Buffer& dstBuffer, uint32_t x, uint32_t y, uint32_t width, uint32_t height) = 0;
         
         [[nodiscard]] virtual uint32_t getMipLevels() const = 0; // ??
+        [[nodiscard]] virtual uint32_t getArrayLayers() const = 0; // ??
         [[nodiscard]] virtual TextureUsage getUsage() const = 0; // ??
         
         virtual ImTextureID getImTextureID() = 0;

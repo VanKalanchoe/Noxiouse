@@ -34,6 +34,9 @@ namespace Nox
         if (path.extension() == ".png" || path.extension() == ".jpg" || path.extension() == ".jpeg")
             return LoadWithSTB(path, spec, renderer);
         
+        if (path.extension() == ".hdr")
+            return LoadWithSTBHDR(path, spec, renderer);
+        
         if (path.extension() == ".dds")
             return LoadWithDDS(path, spec, renderer);
         
@@ -60,12 +63,59 @@ namespace Nox
             NOX_CORE_ERROR("TextureImporter::LoadWithSTB - Could not load texture from filepath: {}", path.string());
         }
         
-        TextureData cpuData;
+        TextureData cpuData{};
         cpuData.Width = texWidth;
         cpuData.Height = texHeight;
         cpuData.MipLevels = mipLevels;
         cpuData.Data = Buffer((void*)pixels, imageSize);
-        cpuData.DirectFormat = UINT32_MAX;
+        
+        Renderer* targetRenderer = renderer ? renderer : Application::Get().GetRenderer();
+        
+        Ref<Texture2D> texture = targetRenderer->UploadTexture(cpuData);
+        
+        stbi_image_free(pixels);
+        
+        return texture;
+    }
+    
+    Ref<Texture2D> TextureImporter::LoadWithSTBHDR(const std::filesystem::path& path, const TextureSpecification& spec, Renderer* renderer)
+    {
+        if (spec.flip)
+            stbi_set_flip_vertically_on_load(true);
+        
+        int texWidth, texHeight, texChannels;
+        float* pixels = stbi_loadf(path.string().c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+        
+        // Convert FP32 (16 bytes/pixel) to FP16 (8 bytes/pixel) for R16G16B16A16_SFLOAT
+        uint64_t totalElements = static_cast<uint64_t>(texWidth) * texHeight * 4;
+        uint64_t fp16SizeBytes = totalElements * sizeof(uint16_t);
+
+        std::vector<uint16_t> fp16Data(totalElements);
+        for (size_t i = 0; i < totalElements; i += 2)
+        {
+            glm::vec2 val(pixels[i], pixels[i + 1]);
+            uint32_t packed = glm::packHalf2x16(val);
+            fp16Data[i]     = static_cast<uint16_t>(packed & 0xFFFF);
+            fp16Data[i + 1] = static_cast<uint16_t>((packed >> 16) & 0xFFFF);
+        }
+        
+        uint32_t mipLevels;
+        if (spec.generateMips)
+            mipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(texWidth, texHeight)))) + 1;
+        else
+            mipLevels = 1;
+
+        if (!pixels)
+        {
+            NOX_CORE_ERROR("TextureImporter::LoadWithSTB - Could not load texture from filepath: {}", path.string());
+        }
+        
+        TextureData cpuData{};
+        cpuData.Width = texWidth;
+        cpuData.Height = texHeight;
+        cpuData.MipLevels = mipLevels;
+        cpuData.Data = Buffer(fp16Data.data(), fp16SizeBytes);
+        cpuData.Format = NRI::ImageFormat::R16G16B16A16_SFLOAT;
         
         Renderer* targetRenderer = renderer ? renderer : Application::Get().GetRenderer();
         
@@ -87,7 +137,7 @@ namespace Nox
             NOX_CORE_ASSERT("TextureImporter::LoadWithDDS - Failed to load DDS from: {} Result: {}", path.string(), std::to_string(result));
         }
         
-        TextureData cpuData;
+        TextureData cpuData{};
         cpuData.Width = dds.GetWidth();
         cpuData.Height = dds.GetHeight();
         cpuData.MipLevels = dds.GetMipCount();
@@ -141,7 +191,7 @@ namespace Nox
         if (spec.flip) NOX_CORE_ERROR("TextureImporter::LoadWithKTX doesnt support flipping pls convert with tool manually");
         
         // Get texture dimensions and data
-        TextureData cpuData;
+        TextureData cpuData{};
         cpuData.Width = kTexture->baseWidth;
         cpuData.Height = kTexture->baseHeight;
         cpuData.MipLevels = kTexture->numLevels; // todo:

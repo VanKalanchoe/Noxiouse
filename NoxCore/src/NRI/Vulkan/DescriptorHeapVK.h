@@ -16,7 +16,7 @@ namespace NRI
         DescriptorHeapVK(DeviceVK& device, const DescriptorHeapDesc& desc);
         ~DescriptorHeapVK() override = default;
 
-        void registerTexture(Texture& texture) override;
+        void registerTexture(Texture& texture, TextureUsage usageOverride = TextureUsage::ShaderResource) override;
         void unregisterTexture(uint32_t slot) override;
         uint64_t getBufferDeviceAddress(vk::raii::Buffer& buffer) const;
         uint32_t registerBuffer(Buffer& buffer, uint64_t size) override;
