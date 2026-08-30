@@ -79,6 +79,8 @@ namespace Nox
     {
         int32_t x = -1;
         int32_t y = -1;
+        uint32_t width = 1;   // Default 1 for single click
+        uint32_t height = 1;  // Default 1 for single click
         bool active = false;
     };
     
@@ -108,15 +110,22 @@ namespace Nox
         ~Renderer();
         
         // Call this from EditorLayer during mouse hover/click
+        // Single click (1x1)
         void setPickRequest(int32_t x, int32_t y, bool active = true)
         {
-            m_pickRequest.x = x;
-            m_pickRequest.y = y;
-            m_pickRequest.active = active;
+            m_pickRequest = { x, y, 1, 1, active };
+        }
+        // Box drag (WxH)
+        void setBoxPickRequest(int32_t x, int32_t y, uint32_t width, uint32_t height)
+        {
+            m_pickRequest = { x, y, width, height, true };
         }
 
         // Call this in drawFrame() or EditorLayer to read the result
         int32_t getPickedEntityID();
+        
+        // Read back all unique entity IDs in the selected box area
+        std::vector<int32_t> getPickedEntityIDs();
         
         void SetSelectedEntityID(const std::vector<int32_t>& entityIDs) { m_SelectedEntityIDs = entityIDs; }
         
@@ -246,6 +255,7 @@ namespace Nox
         Ref<Texture2D> m_entityResolveResource;
         std::vector<std::unique_ptr<NRI::Buffer>> m_pickerStagingBuffers;
         PickRequest m_pickRequest;
+        std::vector<int32_t> m_SelectedEntityIDs;
         
         // Textures
         Ref<Texture2D> m_depthResource;
@@ -306,7 +316,6 @@ namespace Nox
         std::vector<std::unique_ptr<NRI::Buffer>> m_selectedEntityIDBuffers;
         std::vector<void*> m_selectedEntityIDBuffersMapped;
         std::unique_ptr<NRI::Pipeline> m_outlinePipeline = nullptr;
-        std::vector<int32_t> m_SelectedEntityIDs;
 
         void createOutlinePipeline(bool forceCompile = false);
         

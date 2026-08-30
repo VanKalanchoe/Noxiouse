@@ -85,5 +85,10 @@ namespace Nox
         Ref<Texture2D> m_IconPlay, m_IconPause, m_IconStep, m_IconStop, m_IconSimulate;
         
         Ref<Font> m_Font; 
+        
+        // Multi Select Viewport
+        bool m_IsBoxSelecting = false;
+        glm::vec2 m_BoxSelectStart = { 0.0f, 0.0f };
+        glm::vec2 m_BoxSelectEnd = { 0.0f, 0.0f };
     };
 }

@@ -37,12 +37,15 @@ namespace Nox
         m_fileWatcher.watch(std::filesystem::path("assets/shaders/present.slang"), [this](auto path) { m_reloadShader = true; });
 
         m_whiteTexture = createSolidColorTexture(255, 255, 255, 255);
+        
+        // Allow buffer to hold up to 4K resolution entity pixels (3840 x 2160 * 4 bytes ≈ 33 MB)
+        const uint32_t maxPickerBufferSize = 3840 * 2160 * sizeof(int32_t);
 
         m_pickerStagingBuffers.reserve(MAX_FRAMES_IN_FLIGHT);
         for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
         {
             m_pickerStagingBuffers.emplace_back(m_device->createBuffer(NRI::BufferDesc{
-                .size = sizeof(int32_t),
+                .size = maxPickerBufferSize,
                 .usage = NRI::BufferUsage::Staging
             }));
         }
@@ -1481,6 +1484,9 @@ namespace Nox
 
             if (sampleX < width && sampleY < height)
             {
+                uint32_t copyWidth = std::min(m_pickRequest.width, width - sampleX);
+                uint32_t copyHeight = std::min(m_pickRequest.height, height - sampleY);
+                
                 m_commandBuffers->transitionTextureLayout(*m_entityResource, NRI::TextureLayout::ColorAttachment, NRI::TextureLayout::TransferSrc);
                 /*m_commandBuffers->transitionTextureLayout(*m_entityResolveResource, NRI::TextureLayout::ColorAttachment, NRI::TextureLayout::TransferDst);*/
 
@@ -1488,7 +1494,7 @@ namespace Nox
 
                 m_commandBuffers->transitionTextureLayout(*m_entityResolveResource, NRI::TextureLayout::ColorAttachment, NRI::TextureLayout::TransferSrc);
 
-                m_entityResolveResource->copyImageToBuffer(*m_commandBuffers, *m_pickerStagingBuffers[frameIndex], sampleX, sampleY, 1, 1);
+                m_entityResolveResource->copyImageToBuffer(*m_commandBuffers, *m_pickerStagingBuffers[frameIndex], sampleX, sampleY, copyWidth, copyHeight);
 
                 m_commandBuffers->transitionTextureLayout(*m_entityResource, NRI::TextureLayout::TransferSrc, NRI::TextureLayout::ColorAttachment);
 
@@ -1723,6 +1729,34 @@ namespace Nox
         }
 
         return clickedEntityID;
+    }
+    
+    std::vector<int32_t> Renderer::getPickedEntityIDs()
+    {
+        std::vector<int32_t> uniqueIDs;
+        size_t pixelCount = static_cast<size_t>(m_pickRequest.width) * m_pickRequest.height;
+        if (pixelCount == 0)
+            return uniqueIDs;
+
+        void* mappedMemory = m_pickerStagingBuffers[frameIndex]->map(0, pixelCount * sizeof(int32_t));
+        if (mappedMemory)
+        {
+            const int32_t* pixels = static_cast<const int32_t*>(mappedMemory);
+            std::unordered_set<int32_t> seen;
+
+            for (size_t i = 0; i < pixelCount; ++i)
+            {
+                int32_t id = pixels[i];
+                if (id >= 0 && seen.insert(id).second)
+                {
+                    uniqueIDs.push_back(id);
+                }
+            }
+
+            m_pickerStagingBuffers[frameIndex]->unmap();
+        }
+
+        return uniqueIDs;
     }
 
     std::vector<char> Renderer::readFile(const std::string& filename)

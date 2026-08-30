@@ -160,7 +160,31 @@ namespace Nox
 
             m_HoveredEntity = pixelData == -1 ? Entity() : Entity((entt::entity)pixelData, m_ActiveScene.get());
 
-            m_Renderer->setPickRequest(mouseX, mouseY, true);
+            // If not dragging a box, keep requesting 1x1 pixel under cursor for hover detection
+            if (!m_IsBoxSelecting)
+            {
+                m_Renderer->setPickRequest(mouseX, mouseY, true);
+            }
+            
+            // When actively dragging the box, request the full rectangle from the GPU entity texture
+            if (m_IsBoxSelecting)
+            {
+                glm::vec2 boxMin = {
+                    std::min(m_BoxSelectStart.x, m_BoxSelectEnd.x) - m_ViewportBounds[0].x,
+                    std::min(m_BoxSelectStart.y, m_BoxSelectEnd.y) - m_ViewportBounds[0].y
+                };
+                glm::vec2 boxMax = {
+                    std::max(m_BoxSelectStart.x, m_BoxSelectEnd.x) - m_ViewportBounds[0].x,
+                    std::max(m_BoxSelectStart.y, m_BoxSelectEnd.y) - m_ViewportBounds[0].y
+                };
+
+                int startX = std::max(0, (int)boxMin.x);
+                int startY = std::max(0, (int)boxMin.y);
+                int width = std::max(1, (int)(boxMax.x - boxMin.x));
+                int height = std::max(1, (int)(boxMax.y - boxMin.y));
+
+                m_Renderer->setBoxPickRequest(startX, startY, (uint32_t)width, (uint32_t)height);
+            }
         }
 
         OnOverlayRender();
@@ -292,6 +316,79 @@ namespace Nox
                 {
                     // !!! This is where the RenderTarget image is displayed !!!
                     ImGui::Image(textureID, viewportPanelSize);
+                }
+            }
+               ImVec2 mousePos = ImGui::GetMousePos();
+
+            // Only initiate box select when dragging on viewport and not using gizmos/alt-orbit
+            if (m_ViewportHovered && !ImGuizmo::IsUsing() && !Input::IsKeyPressed(SDL_SCANCODE_LALT))
+            {
+                if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+                {
+                    m_BoxSelectStart = { mousePos.x, mousePos.y };
+                    m_BoxSelectEnd = m_BoxSelectStart;
+                }
+
+                if (ImGui::IsMouseDragging(ImGuiMouseButton_Left, 4.0f) && !m_IsBoxSelecting)
+                {
+                    if (!ImGuizmo::IsOver())
+                    {
+                        m_IsBoxSelecting = true;
+                    }
+                }
+            }
+
+            // Draw visual marquee box using ImGui DrawList while dragging
+            if (m_IsBoxSelecting)
+            {
+                m_BoxSelectEnd = { mousePos.x, mousePos.y };
+
+                ImDrawList* drawList = ImGui::GetWindowDrawList();
+
+                ImVec2 pMin = ImVec2(std::min(m_BoxSelectStart.x, m_BoxSelectEnd.x), std::min(m_BoxSelectStart.y, m_BoxSelectEnd.y));
+                ImVec2 pMax = ImVec2(std::max(m_BoxSelectStart.x, m_BoxSelectEnd.x), std::max(m_BoxSelectStart.y, m_BoxSelectEnd.y));
+
+                // Semi-transparent box fill
+                drawList->AddRectFilled(pMin, pMax, IM_COL32(230, 140, 30, 40));
+                // Solid border outline
+                drawList->AddRect(pMin, pMax, IM_COL32(255, 160, 40, 220), 0.0f, 0, 1.5f);
+            }
+
+            // Commit selection when mouse button is released
+            if (m_IsBoxSelecting && ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+            {
+                m_IsBoxSelecting = false;
+
+                bool shift = Input::IsKeyPressed(SDL_SCANCODE_LSHIFT) || Input::IsKeyPressed(SDL_SCANCODE_RSHIFT);
+                bool ctrl = Input::IsKeyPressed(SDL_SCANCODE_LCTRL) || Input::IsKeyPressed(SDL_SCANCODE_RCTRL);
+
+                // If neither Shift nor Ctrl is held, clear previous selection
+                if (!shift && !ctrl)
+                {
+                    m_SceneHierarchyPanel.ClearSelection();
+                }
+
+                // Read all unique entity IDs directly from the GPU entity resolve texture
+                std::vector<int32_t> pickedIDs = m_Renderer->getPickedEntityIDs();
+
+                for (int32_t id : pickedIDs)
+                {
+                    if (id >= 0)
+                    {
+                        Entity entity{ static_cast<entt::entity>(id), m_ActiveScene.get() };
+                        if (entity)
+                        {
+                            if (ctrl)
+                            {
+                                m_SceneHierarchyPanel.ToggleSelectedEntity(entity);
+                            }
+                            else if (!m_SceneHierarchyPanel.IsSelected(entity))
+                            {
+                                auto& list = const_cast<std::vector<Entity>&>(m_SceneHierarchyPanel.GetSelectedEntities());
+                                list.push_back(entity);
+                            }
+                        }
+                    }
                 }
             }
 
@@ -848,26 +945,22 @@ namespace Nox
                 bool shift = Input::IsKeyPressed(SDL_SCANCODE_LSHIFT) || Input::IsKeyPressed(SDL_SCANCODE_RSHIFT);
                 bool control = Input::IsKeyPressed(SDL_SCANCODE_LCTRL) || Input::IsKeyPressed(SDL_SCANCODE_RCTRL);
 
-                if (shift)
+                if (m_HoveredEntity)
                 {
-                    // Shift + Click: Range select from current anchor to hovered entity
-                    if (m_HoveredEntity)
-                    {
+                    if (shift)
                         m_SceneHierarchyPanel.SelectRange(m_HoveredEntity);
-                    }
-                }
-                else if (control)
-                {
-                    // Ctrl + Click: Toggle selection of clicked entity (add/remove)
-                    if (m_HoveredEntity)
-                    {
+                    else if (control)
                         m_SceneHierarchyPanel.ToggleSelectedEntity(m_HoveredEntity);
-                    }
+                    else
+                        m_SceneHierarchyPanel.SetSelectedEntity(m_HoveredEntity);
                 }
                 else
                 {
-                    // Normal Click: Select single entity (or deselect if clicking empty space)
-                    m_SceneHierarchyPanel.SetSelectedEntity(m_HoveredEntity);
+                    // Clicking empty space: clear selection unless Shift/Ctrl is held
+                    if (!shift && !control)
+                    {
+                        m_SceneHierarchyPanel.ClearSelection();
+                    }
                 }
             }
         }
@@ -942,30 +1035,14 @@ namespace Nox
         if (!selectedEntities.empty())
         {
             std::vector<int32_t> selectedIDs;
-
-            // Recursive lambda to collect an entity and all its descendant children
-            auto collectIDs = [&](auto& self, Entity current) -> void
-            {
-                if (!current)
-                    return;
-
-                selectedIDs.push_back(static_cast<int32_t>(static_cast<uint32_t>(current)));
-
-                if (current.HasComponent<RelationshipComponent>())
-                {
-                    const auto& children = current.GetComponent<RelationshipComponent>().Children;
-                    for (UUID childID : children)
-                    {
-                        Entity child = m_ActiveScene->GetEntityByUUID(childID);
-                        if (child)
-                            self(self, child);
-                    }
-                }
-            };
+            selectedIDs.reserve(selectedEntities.size());
 
             for (const Entity& entity : selectedEntities)
             {
-                collectIDs(collectIDs, entity);
+                if (entity)
+                {
+                    selectedIDs.push_back(static_cast<int32_t>(static_cast<uint32_t>(entity)));
+                }
             }
 
             m_Renderer->SetSelectedEntityID(selectedIDs);
