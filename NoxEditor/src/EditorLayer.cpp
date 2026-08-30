@@ -845,7 +845,30 @@ namespace Nox
         {
             if (m_ViewportHovered && !ImGuizmo::IsOver() && !Input::IsKeyPressed(SDL_SCANCODE_LALT))
             {
-                m_SceneHierarchyPanel.SetSelectedEntity(m_HoveredEntity);
+                bool shift = Input::IsKeyPressed(SDL_SCANCODE_LSHIFT) || Input::IsKeyPressed(SDL_SCANCODE_RSHIFT);
+                bool control = Input::IsKeyPressed(SDL_SCANCODE_LCTRL) || Input::IsKeyPressed(SDL_SCANCODE_RCTRL);
+
+                if (shift)
+                {
+                    // Shift + Click: Range select from current anchor to hovered entity
+                    if (m_HoveredEntity)
+                    {
+                        m_SceneHierarchyPanel.SelectRange(m_HoveredEntity);
+                    }
+                }
+                else if (control)
+                {
+                    // Ctrl + Click: Toggle selection of clicked entity (add/remove)
+                    if (m_HoveredEntity)
+                    {
+                        m_SceneHierarchyPanel.ToggleSelectedEntity(m_HoveredEntity);
+                    }
+                }
+                else
+                {
+                    // Normal Click: Select single entity (or deselect if clicking empty space)
+                    m_SceneHierarchyPanel.SetSelectedEntity(m_HoveredEntity);
+                }
             }
         }
 
