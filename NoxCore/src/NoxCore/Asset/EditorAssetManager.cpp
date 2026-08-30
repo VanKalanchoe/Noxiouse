@@ -98,6 +98,13 @@ namespace Nox
         if (!IsAssetHandleValid(handle)) return;
 
         const AssetMetadata& metadata = GetMetadata(handle);
+        auto sourcePath = Project::GetActiveAssetDirectory() / metadata.SourceFilePath;
+        if (!std::filesystem::exists(sourcePath))
+        {
+            NOX_CORE_WARN("Skipping auto-reimport: source file no longer exists: {}", sourcePath.string());
+            return;
+        }
+        
         NOX_CORE_INFO("Auto-Reimporting asset from source: {}", metadata.SourceFilePath.string());
 
         // 1. Delete the old cooked cache (.nsmesh/.nmesh) so the Importer is forced to re-cook the GLTF
@@ -128,6 +135,9 @@ namespace Nox
 
     void EditorAssetManager::OnAssetModifiedOnDisk(const std::filesystem::path& absolutePath)
     {
+        if (!std::filesystem::exists(absolutePath))
+            return;
+        
         if (absolutePath.extension() == ".nsmesh" || absolutePath.extension() == ".nmesh")
             return;
         

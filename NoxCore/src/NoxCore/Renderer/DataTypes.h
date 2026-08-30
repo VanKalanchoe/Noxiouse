@@ -32,10 +32,24 @@ namespace Nox
         bool IsValid() const { return vertices.count > 0; }
     };
     
+    enum class AlphaMode : uint32_t
+    {
+        Opaque = 0,
+        Mask   = 1,
+        Blend  = 2
+    };
+    
     struct MaterialData
     {
+        std::string Name;
         glm::vec4 AlbedoColor = glm::vec4(1.0f);
         std::string AlbedoTexturePath;
+        
+        // Alpha properties
+        AlphaMode Mode = AlphaMode::Opaque;
+        
+        float AlphaCutoff = 0.5f;
+        bool DoubleSided = false;
     };
     
     struct MeshData

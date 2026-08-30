@@ -1480,6 +1480,8 @@ namespace Nox
         updatePageTables(frameIndex);
 
         updateUniformBuffer(frameIndex);
+        
+        BuildBuffers();
 
         updateInstanceAndIndirectBuffer(frameIndex);
 
@@ -1504,6 +1506,10 @@ namespace Nox
         m_instanceBufferObjects.clear();
         m_drawMeshTasksIndirectCommands.clear();
         m_boneMatrices.clear();
+        
+        m_opaqueQueue.clear();
+        m_maskQueue.clear();
+        m_transparentQueue.clear();
     }
 
     int32_t Renderer::getPickedEntityID()
@@ -1623,6 +1629,36 @@ namespace Nox
     {
         m_renderer2D->EndScene();
     }
+    
+    void Renderer::BuildBuffers()
+    {
+        // 1. Submit Opaque items first
+        for (const auto& packet : m_opaqueQueue)
+        {
+            m_instanceBufferObjects.push_back(packet.instance);
+            m_drawMeshTasksIndirectCommands.push_back(packet.command);
+        }
+
+        // 2. Submit Masked (cutout) items second
+        for (const auto& packet : m_maskQueue)
+        {
+            m_instanceBufferObjects.push_back(packet.instance);
+            m_drawMeshTasksIndirectCommands.push_back(packet.command);
+        }
+
+        // 3. Sort Transparent items Back-to-Front (Furthest camera distance first)
+        std::sort(m_transparentQueue.begin(), m_transparentQueue.end(), 
+            [](const RenderPacket& a, const RenderPacket& b) {
+                return a.distanceToCamera > b.distanceToCamera; 
+            });
+
+        // Submit sorted transparent items last
+        for (const auto& packet : m_transparentQueue)
+        {
+            m_instanceBufferObjects.push_back(packet.instance);
+            m_drawMeshTasksIndirectCommands.push_back(packet.command);
+        }
+    }
 
     void Renderer::DrawMesh(const glm::mat4& transform, Ref<Mesh> mesh, uint32_t submeshIndex, const MaterialComponent& material, int entityID, const std::vector<glm::mat4>* boneTransforms)
     {
@@ -1644,16 +1680,17 @@ namespace Nox
         instance.verticesPageIndex = handle.vertices.pageIndex;
         instance.meshletVerticesPageIndex = handle.meshletVertices.pageIndex;
         instance.meshletTrianglesPageIndex = handle.meshletTriangles.pageIndex;
-
-        instance.albedoColor = material.AlbedoColor;
-        instance.albedoTextureIndex = -1;
-
+        
+        // Since child entities hold only their own single material, index 0 is always the correct target
         // Select slot matching submeshIndex, fallback to slot 0 if child entity only holds 1 texture
-        uint32_t mapIndex = (submeshIndex < material.AlbedoMaps.size()) ? submeshIndex : 0;
-
-        if (!material.AlbedoMaps.empty() && mapIndex < material.AlbedoMaps.size())
+        uint32_t slotIdx = (material.AlbedoColors.size() > 1) ? submeshIndex : 0;
+        
+        instance.albedoColor = (slotIdx < material.AlbedoColors.size()) ? material.AlbedoColors[slotIdx] : glm::vec4(1.0f);
+        instance.albedoTextureIndex = -1;
+        
+        if (!material.AlbedoMaps.empty() && slotIdx < material.AlbedoMaps.size())
         {
-            const AssetHandle texHandle = material.AlbedoMaps[mapIndex];
+            const AssetHandle texHandle = material.AlbedoMaps[slotIdx];
 
             // Ensure handle is valid before looking up
             if (texHandle != 0)
@@ -1665,7 +1702,12 @@ namespace Nox
                 }
             }
         }
-
+        
+        AlphaMode mode = (slotIdx < material.Modes.size()) ? material.Modes[slotIdx] : AlphaMode::Opaque;
+        instance.alphaMode = static_cast<uint32_t>(mode);
+        instance.alphaCutoff = (slotIdx < material.AlphaCutoffs.size()) ? material.AlphaCutoffs[slotIdx] : 0.5f;
+        instance.doubleSided = (slotIdx < material.DoubleSidedFlags.size()) ? (bool)material.DoubleSidedFlags[slotIdx] : false;
+        
         instance.entityID = entityID;
 
         // --- BONE MATRIX PACKING ---
@@ -1681,14 +1723,31 @@ namespace Nox
             instance.boneMatrixOffset = 0xFFFFFFFF;
         }
 
-        m_instanceBufferObjects.push_back(instance);
-
         DrawMeshTasksIndirectCommand command{};
         command.groupCountX = (handle.GetMeshletCount() + shaderio::TASK_SHADER_DISPATCH_X - 1) / shaderio::TASK_SHADER_DISPATCH_X;
         command.groupCountY = 1;
         command.groupCountZ = 1;
+        
+        RenderPacket packet{};
+        packet.instance = instance;
+        packet.command = command;
 
-        m_drawMeshTasksIndirectCommands.push_back(command);
+        // Route to Render Queues (DO NOT push directly to buffers)
+        if (mode == AlphaMode::Blend)
+        {
+            glm::vec3 camPos = glm::vec3(uniformData.cameraWorldPos);
+            glm::vec3 objPos = glm::vec3(transform[3]);
+            packet.distanceToCamera = glm::length(objPos - camPos);
+            m_transparentQueue.push_back(packet);
+        }
+        else if (mode == AlphaMode::Mask)
+        {
+            m_maskQueue.push_back(packet);
+        }
+        else
+        {
+            m_opaqueQueue.push_back(packet);
+        }
     }
 
     void Renderer::DrawStaticMesh(const glm::mat4& transform, Ref<StaticMesh> staticMesh, const MaterialComponent& material, int entityID)
@@ -1710,7 +1769,7 @@ namespace Nox
             instance.meshletTrianglesPageIndex = handle.meshletTriangles.pageIndex;
             // --------------------------------
 
-            instance.albedoColor = material.AlbedoColor;
+            instance.albedoColor = (i < material.AlbedoColors.size()) ? material.AlbedoColors[i] : glm::vec4(1.0f);
             AssetHandle texHandle = 0;
             if (i < material.AlbedoMaps.size())
             {
@@ -1726,17 +1785,39 @@ namespace Nox
             {
                 instance.albedoTextureIndex = -1;
             }
+            
+            AlphaMode mode = (i < material.Modes.size()) ? material.Modes[i] : AlphaMode::Opaque;
+            instance.alphaMode = static_cast<uint32_t>(mode);
+            instance.alphaCutoff = (i < material.AlphaCutoffs.size()) ? material.AlphaCutoffs[i] : 0.5f;
+            instance.doubleSided = (i < material.DoubleSidedFlags.size()) ? (bool)material.DoubleSidedFlags[i] : false;
 
             instance.entityID = entityID;
-
-            m_instanceBufferObjects.push_back(instance);
 
             DrawMeshTasksIndirectCommand command{};
             command.groupCountX = (handle.GetMeshletCount() + shaderio::TASK_SHADER_DISPATCH_X - 1) / shaderio::TASK_SHADER_DISPATCH_X;
             command.groupCountY = 1;
             command.groupCountZ = 1;
+            
+            RenderPacket packet{};
+            packet.instance = instance;
+            packet.command = command;
 
-            m_drawMeshTasksIndirectCommands.push_back(command);
+            // 5. Route to Render Queues
+            if (mode == AlphaMode::Blend)
+            {
+                glm::vec3 camPos = glm::vec3(uniformData.cameraWorldPos);
+                glm::vec3 objPos = glm::vec3(transform[3]);
+                packet.distanceToCamera = glm::length(objPos - camPos);
+                m_transparentQueue.push_back(packet);
+            }
+            else if (mode == AlphaMode::Mask)
+            {
+                m_maskQueue.push_back(packet);
+            }
+            else
+            {
+                m_opaqueQueue.push_back(packet);
+            }
         }
     }
 

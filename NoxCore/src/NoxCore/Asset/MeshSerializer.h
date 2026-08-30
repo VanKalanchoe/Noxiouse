@@ -315,23 +315,42 @@ namespace Nox
             stream.write(reinterpret_cast<const char*>(&matCount), sizeof(uint32_t));
             for (const auto& mat : materialList)
             {
+                SerializerUtils::WriteString(stream, mat.Name);
                 stream.write(reinterpret_cast<const char*>(&mat.AlbedoColor), sizeof(glm::vec4));
                 SerializerUtils::WriteString(stream, mat.AlbedoTexturePath);
+                
+                uint32_t modeVal = static_cast<uint32_t>(mat.Mode);
+                stream.write(reinterpret_cast<const char*>(&modeVal), sizeof(uint32_t));
+                
+                stream.write(reinterpret_cast<const char*>(&mat.AlphaCutoff), sizeof(float));
+                
+                uint8_t doubleSidedVal = mat.DoubleSided ? 1 : 0;
+                stream.write(reinterpret_cast<const char*>(&doubleSidedVal), sizeof(uint8_t));
             }
         }
 
         static void ReadMaterials(std::ifstream& stream, std::vector<MaterialData>& outMaterialList)
         {
-            if (stream.peek() != EOF)
+            uint32_t matCount = 0;
+            stream.read(reinterpret_cast<char*>(&matCount), sizeof(uint32_t));
+            if (stream.fail()) return;
+
+            outMaterialList.resize(matCount);
+            for (uint32_t i = 0; i < matCount; i++)
             {
-                uint32_t matCount = 0;
-                stream.read(reinterpret_cast<char*>(&matCount), sizeof(uint32_t));
-                outMaterialList.resize(matCount);
-                for (uint32_t i = 0; i < matCount; i++)
-                {
-                    stream.read(reinterpret_cast<char*>(&outMaterialList[i].AlbedoColor), sizeof(glm::vec4));
-                    SerializerUtils::ReadString(stream, outMaterialList[i].AlbedoTexturePath);
-                }
+                SerializerUtils::ReadString(stream, outMaterialList[i].Name);
+                stream.read(reinterpret_cast<char*>(&outMaterialList[i].AlbedoColor), sizeof(glm::vec4));
+                SerializerUtils::ReadString(stream, outMaterialList[i].AlbedoTexturePath);
+                
+                uint32_t modeVal = 0;
+                stream.read(reinterpret_cast<char*>(&modeVal), sizeof(uint32_t));
+                outMaterialList[i].Mode = static_cast<AlphaMode>(modeVal);
+                
+                stream.read(reinterpret_cast<char*>(&outMaterialList[i].AlphaCutoff), sizeof(float));
+                
+                uint8_t doubleSidedVal = 0;
+                stream.read(reinterpret_cast<char*>(&doubleSidedVal), sizeof(uint8_t));
+                outMaterialList[i].DoubleSided = (doubleSidedVal != 0);
             }
         }
 

@@ -34,6 +34,11 @@ namespace Utils
                     
                     // pathStr is relative to the watched directory. Build the full path:
                     std::filesystem::path modifiedPath = std::filesystem::path(absolutePathStr) / pathStr;
+                    
+                    // If the file was deleted or removed, do not trigger reimport!
+                    if (!std::filesystem::exists(modifiedPath))
+                        return;
+                    
                     NOX_CORE_INFO("NOXWatcher: {}", modifiedPath.string());
                     
                     if (onModified) 

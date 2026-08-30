@@ -469,101 +469,145 @@ namespace Nox
         });
 
         DrawComponent<MaterialComponent>("Material", entity, [](auto& component)
+{
+    // Ensure all vectors are synchronized in size if they were mismatched or newly created
+    size_t slotCount = component.AlbedoMaps.size();
+    if (slotCount == 0 && (!component.AlbedoColors.empty() || !component.Modes.empty()))
+    {
+        slotCount = std::max({ component.AlbedoColors.size(), component.Modes.size(), component.AlphaCutoffs.size(), component.DoubleSidedFlags.size() });
+        component.AlbedoMaps.resize(slotCount, 0);
+    }
+    
+    // Fallback if completely empty
+    if (slotCount == 0)
+    {
+        slotCount = 1;
+        component.AlbedoColors.push_back(glm::vec4(1.0f));
+        component.AlbedoMaps.push_back(0);
+        component.Modes.push_back(AlphaMode::Opaque);
+        component.AlphaCutoffs.push_back(0.5f);
+        component.DoubleSidedFlags.push_back(false);
+    }
+
+    if (component.AlbedoColors.size() < slotCount) component.AlbedoColors.resize(slotCount, glm::vec4(1.0f));
+    if (component.Modes.size() < slotCount) component.Modes.resize(slotCount, AlphaMode::Opaque);
+    if (component.AlphaCutoffs.size() < slotCount) component.AlphaCutoffs.resize(slotCount, 0.5f);
+    if (component.DoubleSidedFlags.size() < slotCount) component.DoubleSidedFlags.resize(slotCount, false);
+
+    ImGui::Text("Material Slots (%zu submesh(es))", slotCount);
+    ImGui::Spacing();
+    ImGui::Separator();
+
+    for (size_t i = 0; i < slotCount; i++)
+    {
+        ImGui::PushID(static_cast<int>(i));
+
+        ImGui::Text("Submesh / Slot [%zu]", i);
+        
+        // 1. Albedo Color per slot
+        ImGui::ColorEdit4("Albedo Color", glm::value_ptr(component.AlbedoColors[i]));
+
+        // 2. Alpha Mode dropdown
+        const char* alphaModeStrings[] = { "Opaque", "Mask", "Blend" };
+        int currentMode = static_cast<int>(component.Modes[i]);
+        if (ImGui::Combo("Alpha Mode", &currentMode, alphaModeStrings, 3))
         {
-            ImGui::ColorEdit4("Albedo Color", glm::value_ptr(component.AlbedoColor));
+            component.Modes[i] = static_cast<AlphaMode>(currentMode);
+        }
 
-            ImGui::Spacing();
-            ImGui::Separator();
-            ImGui::Text("Material Slots (Submesh Textures)");
-            ImGui::Spacing();
+        // 3. Alpha Cutoff (Visible only for Mask mode)
+        if (component.Modes[i] == AlphaMode::Mask)
+        {
+            ImGui::DragFloat("Alpha Cutoff", &component.AlphaCutoffs[i], 0.005f, 0.0f, 1.0f);
+        }
 
-            if (component.AlbedoMaps.empty())
+        // 4. Double Sided Flag
+        bool doubleSided = component.DoubleSidedFlags[i];
+        if (ImGui::Checkbox("Double Sided", &doubleSided))
+        {
+            component.DoubleSidedFlags[i] = doubleSided;
+        }
+
+        // 5. Albedo Texture Slot UI
+        ImGui::Spacing();
+        AssetHandle& texHandle = component.AlbedoMaps[i];
+        std::string label = "None";
+        bool isTextureValid = false;
+
+        if (texHandle != 0)
+        {
+            if (AssetManager::IsAssetHandleValid(texHandle) && AssetManager::GetAssetType(texHandle) == AssetType::Texture2D)
             {
-                ImGui::TextDisabled("No material slots assigned.");
-                if (ImGui::Button("+ Add Slot"))
-                {
-                    component.AlbedoMaps.push_back(0);
-                }
+                const AssetMetadata& metadata = Project::GetActive()->GetEditorAssetManager()->GetMetadata(texHandle);
+                label = metadata.FilePath.filename().string();
+                isTextureValid = true;
             }
             else
             {
-                for (size_t i = 0; i < component.AlbedoMaps.size(); i++)
+                label = "Invalid";
+            }
+        }
+
+        ImGui::Text("Albedo Texture:");
+        ImGui::SameLine();
+
+        ImVec2 buttonLabelSize = ImGui::CalcTextSize(label.c_str());
+        buttonLabelSize.x += 20.0f;
+        float buttonLabelWidth = glm::max<float>(100.0f, buttonLabelSize.x);
+
+        ImGui::Button(label.c_str(), ImVec2(buttonLabelWidth, 0.0f));
+
+        if (ImGui::BeginDragDropTarget())
+        {
+            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEM"))
+            {
+                AssetHandle handle = *(AssetHandle*)payload->Data;
+                if (AssetManager::GetAssetType(handle) == AssetType::Texture2D)
                 {
-                    // PUSH ID to prevent button ID collisions across multiple vector slots
-                    ImGui::PushID(static_cast<int>(i));
-
-                    AssetHandle& texHandle = component.AlbedoMaps[i];
-                    std::string label = "None";
-                    bool isTextureValid = false;
-
-                    if (texHandle != 0)
-                    {
-                        if (AssetManager::IsAssetHandleValid(texHandle) && AssetManager::GetAssetType(texHandle) == AssetType::Texture2D)
-                        {
-                            const AssetMetadata& metadata = Project::GetActive()->GetEditorAssetManager()->GetMetadata(texHandle);
-                            label = metadata.FilePath.filename().string();
-                            isTextureValid = true;
-                        }
-                        else
-                        {
-                            label = "Invalid";
-                        }
-                    }
-
-                    ImGui::Text("Slot [%zu]", i);
-                    ImGui::SameLine();
-
-                    ImVec2 buttonLabelSize = ImGui::CalcTextSize(label.c_str());
-                    buttonLabelSize.x += 20.0f;
-                    float buttonLabelWidth = glm::max<float>(100.0f, buttonLabelSize.x);
-
-                    ImGui::Button(label.c_str(), ImVec2(buttonLabelWidth, 0.0f));
-
-                    // Drag & Drop payload target for Texture2D
-                    if (ImGui::BeginDragDropTarget())
-                    {
-                        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEM"))
-                        {
-                            AssetHandle handle = *(AssetHandle*)payload->Data;
-                            if (AssetManager::GetAssetType(handle) == AssetType::Texture2D)
-                            {
-                                texHandle = handle;
-                            }
-                            else
-                            {
-                                NOX_CORE_WARN("Wrong Asset Type - Expected a Texture2D");
-                            }
-                        }
-                        ImGui::EndDragDropTarget();
-                    }
-
-                    // Clear Texture Button
-                    if (isTextureValid)
-                    {
-                        ImGui::SameLine();
-                        ImVec2 xLabelSize = ImGui::CalcTextSize("X");
-                        float buttonSize = xLabelSize.y + ImGui::GetStyle().FramePadding.y * 2.0f;
-                        if (ImGui::Button("X", ImVec2(buttonSize, buttonSize)))
-                        {
-                            texHandle = 0;
-                        }
-                    }
-
-                    ImGui::PopID();
+                    texHandle = handle;
                 }
-
-                ImGui::Spacing();
-                if (ImGui::Button("+ Add Slot"))
+                else
                 {
-                    component.AlbedoMaps.push_back(0);
-                }
-                ImGui::SameLine();
-                if (ImGui::Button("- Remove Slot") && !component.AlbedoMaps.empty())
-                {
-                    component.AlbedoMaps.pop_back();
+                    NOX_CORE_WARN("Wrong Asset Type - Expected a Texture2D");
                 }
             }
-        });
+            ImGui::EndDragDropTarget();
+        }
+
+        if (isTextureValid)
+        {
+            ImGui::SameLine();
+            ImVec2 xLabelSize = ImGui::CalcTextSize("X");
+            float buttonSize = xLabelSize.y + ImGui::GetStyle().FramePadding.y * 2.0f;
+            if (ImGui::Button("X", ImVec2(buttonSize, buttonSize)))
+            {
+                texHandle = 0;
+            }
+        }
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::PopID();
+    }
+
+    if (ImGui::Button("+ Add Slot"))
+    {
+        component.AlbedoMaps.push_back(0);
+        component.AlbedoColors.push_back(glm::vec4(1.0f));
+        component.Modes.push_back(AlphaMode::Opaque);
+        component.AlphaCutoffs.push_back(0.5f);
+        component.DoubleSidedFlags.push_back(false);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("- Remove Slot") && slotCount > 1)
+    {
+        component.AlbedoMaps.pop_back();
+        component.AlbedoColors.pop_back();
+        component.Modes.pop_back();
+        component.AlphaCutoffs.pop_back();
+        component.DoubleSidedFlags.pop_back();
+    }
+});
 
         DrawComponent<AnimatorComponent>("Animator", entity, [](auto& component)
         {

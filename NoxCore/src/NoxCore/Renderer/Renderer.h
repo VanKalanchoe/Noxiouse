@@ -89,6 +89,18 @@ namespace Nox
         uint32_t groupCountZ;
     };
     
+    struct RenderPacket 
+    {
+        shaderio::InstanceData instance;
+        DrawMeshTasksIndirectCommand command;
+        float distanceToCamera; // Only really needed for transparent objects now
+    };
+
+    // The 3 Render Queues
+    inline std::vector<RenderPacket> m_opaqueQueue;
+    inline std::vector<RenderPacket> m_maskQueue;
+    inline std::vector<RenderPacket> m_transparentQueue;
+    
     class Renderer
     {
     public:
@@ -116,7 +128,8 @@ namespace Nox
         void BeginScene(const Camera& camera, const glm::mat4& transform);
         void BeginScene(const EditorCamera& camera);
         void EndScene();
-        
+        void BuildBuffers();
+
         void DrawMesh(const glm::mat4& transform, Ref<Mesh> mesh, uint32_t submeshIndex, const MaterialComponent& material, int entityID, const std::vector<glm::mat4>* boneTransforms = nullptr);
         void DrawStaticMesh(const glm::mat4& transform, Ref<StaticMesh> staticMesh, const MaterialComponent& material, int entityID);
         void SubmitMesh(const glm::mat4& transform, MeshComponent& src, MaterialComponent& srcMat, int entityID, const std::vector<glm::mat4>* boneTransforms = nullptr);

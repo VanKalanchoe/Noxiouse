@@ -44,7 +44,7 @@ namespace Nox
             meshDataList = ParseGltfToMeshData(sourcePath, materialDataList, extractedSkeleton, extractedAnimations);
             if (meshDataList.empty())
             {
-                NOX_CORE_ASSERT(false, "MeshImporter::ImportMesh - Failed to load or empty mesh at source path: {}", sourcePath.string());
+                NOX_CORE_WARN("MeshImporter::ImportMesh - Failed to load or empty mesh at source path: {}", sourcePath.string());
                 return Ref<Mesh>(nullptr);
             }
 
@@ -55,7 +55,7 @@ namespace Nox
             MeshSerializer::SerializeMesh(cookedPath, meshDataList, materialDataList);
 
             // Save skeleton if present
-            if (!extractedSkeleton.AllNodes.empty())
+            if (!extractedSkeleton.Skins.empty() || !extractedAnimations.empty())
             {
                 std::filesystem::path skelPath = cookedPath;
                 skelPath.replace_extension(".nskel");
@@ -119,7 +119,7 @@ namespace Nox
             meshDataList = ParseGltfToMeshData(sourcePath, materialDataList, dummySkeleton, dummyAnimations);
             if (meshDataList.empty())
             {
-                NOX_CORE_ASSERT(false, "No Meshes found in source file: {}", sourcePath.string());
+                NOX_CORE_WARN("No Meshes found in source file: {}", sourcePath.string());
                 return Ref<StaticMesh>(nullptr);
             }
 
@@ -1016,14 +1016,38 @@ namespace Nox
 
                 primitiveData.MeshletVertices.insert(primitiveData.MeshletVertices.end(), localMeshletVertices.begin(), localMeshletVertices.end());
                 primitiveData.MeshletTriangles.insert(primitiveData.MeshletTriangles.end(), localMeshletTriangles.begin(), localMeshletTriangles.end());
-
                 MaterialData materialData{};
-
                 // Materials
                 if (primitive.material >= 0 && primitive.material < (int32_t)model.materials_count)
                 {
                     const auto& gltfMaterial = model.materials[primitive.material];
-
+                    
+                    // Material Name
+                    if (gltfMaterial.name.data != nullptr && gltfMaterial.name.len > 0)
+                        materialData.Name = std::string(gltfMaterial.name.data, gltfMaterial.name.len);
+                    else
+                        materialData.Name = "Material_" + std::to_string(primitive.material);
+                    
+                    // Alpha Mode ("OPAQUE", "MASK", "BLEND")
+                    if (gltfMaterial.alpha_mode.data != nullptr && gltfMaterial.alpha_mode.len > 0)
+                    {
+                        std::string_view modeStr(gltfMaterial.alpha_mode.data, gltfMaterial.alpha_mode.len);
+                        if (modeStr == "Opaque")
+                            materialData.Mode = AlphaMode::Opaque;
+                        else if (modeStr == "MASK")
+                            materialData.Mode = AlphaMode::Mask;
+                        else if (modeStr == "BLEND")
+                            materialData.Mode = AlphaMode::Blend;
+                    }
+                    else
+                    {
+                        materialData.Mode = AlphaMode::Opaque;
+                    }
+                    
+                    // Alpha Cutoff & Double Sided
+                    materialData.AlphaCutoff = static_cast<float>(gltfMaterial.alpha_cutoff);
+                    materialData.DoubleSided = (gltfMaterial.double_sided != 0);
+                    
                     // Base Color Factor
                     materialData.AlbedoColor = glm::vec4(
                         static_cast<float>(gltfMaterial.pbr_metallic_roughness.base_color_factor[0]),

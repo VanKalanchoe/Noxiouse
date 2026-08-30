@@ -14,6 +14,7 @@
 #include "NoxCore/Renderer/Font.h"
 
 #include "NoxCore/Asset/Asset.h"
+#include "NoxCore/Renderer/DataTypes.h"
 
 namespace Nox
 {
@@ -93,15 +94,15 @@ namespace Nox
     
     struct MaterialComponent
     {
-        glm::vec4 AlbedoColor{ 1.0f, 1.0f, 1.0f, 1.0f };
-        
-        /*AssetHandle AlbedoMap = 0;*/
-        std::vector<AssetHandle> AlbedoMaps;
-        
+        std::vector<glm::vec4> AlbedoColors = { glm::vec4(1.0f) };
+        std::vector<AssetHandle> AlbedoMaps = { 0 };
+        std::vector<AlphaMode> Modes = { AlphaMode::Opaque };
+        std::vector<float> AlphaCutoffs = { 0.5f };
+        std::vector<bool> DoubleSidedFlags = { false };
+    
         MaterialComponent() = default;
         MaterialComponent(const MaterialComponent&) = default;
-        MaterialComponent(const glm::vec4 color) : AlbedoColor(color) {}
-        
+        MaterialComponent(const glm::vec4 color) : AlbedoColors{ color } {}
     };
     
     // Holds runtime animation state (tracks current time, playing animation, bone matrices)

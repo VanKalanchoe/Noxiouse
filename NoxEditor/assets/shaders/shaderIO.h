@@ -133,6 +133,10 @@ struct InstanceData
     // Material
     vec4 albedoColor;
     uint32_t albedoTextureIndex;
+
+    uint32_t alphaMode;   // 0 = Opaque, 1 = Mask, 2 = Blend
+    float alphaCutoff;
+    uint32_t doubleSided; // Use uint32_t instead of bool for GPU alignment
     
     // MeshAnimation
     uint32_t boneMatrixOffset = 0xFFFFFFFF;

@@ -239,11 +239,36 @@ namespace Nox
             out << YAML::BeginMap; // MaterialComponent
 
             auto& materialComponent = entity.GetComponent<MaterialComponent>();
-            out << YAML::Key << "AlbedoColor" << YAML::Value << materialComponent.AlbedoColor;
+    
+            // Serialize AlbedoColors
+            out << YAML::Key << "AlbedoColors" << YAML::Value;
+            out << YAML::BeginSeq;
+            for (const auto& color : materialComponent.AlbedoColors)
+                out << color;
+            out << YAML::EndSeq;
+    
             out << YAML::Key << "AlbedoMaps" << YAML::Value;
             out << YAML::BeginSeq;
             for (auto handle : materialComponent.AlbedoMaps)
                 out << (uint64_t)handle;
+            out << YAML::EndSeq;
+    
+            out << YAML::Key << "Modes" << YAML::Value;
+            out << YAML::BeginSeq;
+            for (auto mode : materialComponent.Modes)
+                out << static_cast<int>(mode);
+            out << YAML::EndSeq;
+    
+            out << YAML::Key << "AlphaCutoffs" << YAML::Value;
+            out << YAML::BeginSeq;
+            for (auto cutoff : materialComponent.AlphaCutoffs)
+                out << (float)cutoff;
+            out << YAML::EndSeq;
+    
+            out << YAML::Key << "DoubleSidedFlags" << YAML::Value;
+            out << YAML::BeginSeq;
+            for (auto doubleSided : materialComponent.DoubleSidedFlags)
+                out << (bool)doubleSided;
             out << YAML::EndSeq;
 
             out << YAML::EndMap; // MaterialComponent
@@ -545,9 +570,23 @@ namespace Nox
                 if (materialComponent)
                 {
                     auto& mc = deserializedEntity.AddComponent<MaterialComponent>();
-                    if (materialComponent["AlbedoColor"])
-                        mc.AlbedoColor = materialComponent["AlbedoColor"].as<glm::vec4>();
-
+                    
+                    auto albedoColorsSeq = materialComponent["AlbedoColors"];
+                    if (albedoColorsSeq)
+                    {
+                        mc.AlbedoColors.clear();
+                        for (auto colorNode : albedoColorsSeq)
+                        {
+                            mc.AlbedoColors.push_back(colorNode.as<glm::vec4>());
+                        }
+                    }
+                    // Backward compatibility check for single AlbedoColor
+                    else if (materialComponent["AlbedoColor"])
+                    {
+                        mc.AlbedoColors.clear();
+                        mc.AlbedoColors.push_back(materialComponent["AlbedoColor"].as<glm::vec4>());
+                    }
+                    
                     auto albedoMapsSeq = materialComponent["AlbedoMaps"];
                     if (albedoMapsSeq)
                     {
@@ -555,6 +594,39 @@ namespace Nox
                         for (auto mapHandle : albedoMapsSeq)
                         {
                             mc.AlbedoMaps.push_back(mapHandle.as<uint64_t>());
+                        }
+                    }
+                    
+                    // Read Modes (AlphaMode)
+                    auto modesSeq = materialComponent["Modes"];
+                    if (modesSeq)
+                    {
+                        mc.Modes.clear();
+                        for (auto modeNode : modesSeq)
+                        {
+                            mc.Modes.push_back(static_cast<AlphaMode>(modeNode.as<int>()));
+                        }
+                    }
+
+                    // Read AlphaCutoffs
+                    auto alphaCutoffsSeq = materialComponent["AlphaCutoffs"];
+                    if (alphaCutoffsSeq)
+                    {
+                        mc.AlphaCutoffs.clear();
+                        for (auto cutoffNode : alphaCutoffsSeq)
+                        {
+                            mc.AlphaCutoffs.push_back(cutoffNode.as<float>());
+                        }
+                    }
+
+                    // Read DoubleSidedFlags
+                    auto doubleSidedSeq = materialComponent["DoubleSidedFlags"];
+                    if (doubleSidedSeq)
+                    {
+                        mc.DoubleSidedFlags.clear();
+                        for (auto flagNode : doubleSidedSeq)
+                        {
+                            mc.DoubleSidedFlags.push_back(flagNode.as<bool>());
                         }
                     }
                 }

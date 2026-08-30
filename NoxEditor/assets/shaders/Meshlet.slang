@@ -115,6 +115,10 @@ FSOutput fragMain(VSOutput vertIn, uniform PushConstantMeshlets pushConstant)
     InstanceData* instances = (InstanceData*)pushConstant.instanceReference;
     InstanceData instance = instances[vertIn.drawID];
 
+    instance.alphaMode;
+    instance.alphaCutoff;
+    instance.doubleSided;
+
     Texture2D texHandle = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.albedoTextureIndex, 0));
     SamplerState sampHandle = SamplerState.Handle(uint2(0, 0));
     float4 img = texHandle.Sample(sampHandle, vertIn.texCooord);

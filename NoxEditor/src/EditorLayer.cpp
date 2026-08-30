@@ -310,104 +310,104 @@ namespace Nox
                         std::string entityName = metadata.FilePath.filename().stem().string();
                         if (entityName.empty())
                             entityName = "Mesh Entity";
-                        
+
                         auto getOrImportTextureHandle =
-    [&](const std::string& texturePath) -> AssetHandle
-{
-    if (texturePath.empty())
-        return 0;
+                            [&](const std::string& texturePath) -> AssetHandle
+                        {
+                            if (texturePath.empty())
+                                return 0;
 
-    std::filesystem::path pathObj(texturePath);
+                            std::filesystem::path pathObj(texturePath);
 
-    // The importer should already have converted embedded
-    // data:image/... URIs into real files.
-    if (texturePath.starts_with("data:"))
-    {
-        NOX_CORE_ERROR(
-            "[Scene Drop] Texture is still an embedded data URI: {}",
-            texturePath.substr(0, 64)
-        );
-        return 0;
-    }
+                            // The importer should already have converted embedded
+                            // data:image/... URIs into real files.
+                            if (texturePath.starts_with("data:"))
+                            {
+                                NOX_CORE_ERROR(
+                                    "[Scene Drop] Texture is still an embedded data URI: {}",
+                                    texturePath.substr(0, 64)
+                                );
+                                return 0;
+                            }
 
-    std::filesystem::path relPath;
+                            std::filesystem::path relPath;
 
-    if (pathObj.is_absolute())
-    {
-        std::error_code ec;
+                            if (pathObj.is_absolute())
+                            {
+                                std::error_code ec;
 
-        relPath = std::filesystem::relative(
-            pathObj,
-            Project::GetActiveAssetDirectory(),
-            ec
-        );
+                                relPath = std::filesystem::relative(
+                                    pathObj,
+                                    Project::GetActiveAssetDirectory(),
+                                    ec
+                                );
 
-        if (ec)
-        {
-            NOX_CORE_ERROR(
-                "[Scene Drop] Failed to make texture path relative: {}",
-                pathObj.string()
-            );
-            return 0;
-        }
-    }
-    else
-    {
-        relPath = pathObj;
-    }
+                                if (ec)
+                                {
+                                    NOX_CORE_ERROR(
+                                        "[Scene Drop] Failed to make texture path relative: {}",
+                                        pathObj.string()
+                                    );
+                                    return 0;
+                                }
+                            }
+                            else
+                            {
+                                relPath = pathObj;
+                            }
 
-    auto assetManager =
-        Project::GetActive()->GetEditorAssetManager();
+                            auto assetManager =
+                                Project::GetActive()->GetEditorAssetManager();
 
-    // Already imported?
-    for (const auto& [texHandle, meta] :
-         assetManager->GetAssetRegistry())
-    {
-        if (meta.FilePath == relPath ||
-            meta.SourceFilePath == relPath)
-        {
-            return texHandle;
-        }
-    }
+                            // Already imported?
+                            for (const auto& [texHandle, meta] :
+                                 assetManager->GetAssetRegistry())
+                            {
+                                if (meta.FilePath == relPath ||
+                                    meta.SourceFilePath == relPath)
+                                {
+                                    return texHandle;
+                                }
+                            }
 
-    // Make sure the actual file exists before importing.
-    std::filesystem::path fullPath =
-        Project::GetActiveAssetDirectory() / relPath;
+                            // Make sure the actual file exists before importing.
+                            std::filesystem::path fullPath =
+                                Project::GetActiveAssetDirectory() / relPath;
 
-    if (!std::filesystem::exists(fullPath))
-    {
-        NOX_CORE_ERROR(
-            "[Scene Drop] Texture file does not exist: {}",
-            fullPath.string()
-        );
-        return 0;
-    }
+                            if (!std::filesystem::exists(fullPath))
+                            {
+                                NOX_CORE_ERROR(
+                                    "[Scene Drop] Texture file does not exist: {}",
+                                    fullPath.string()
+                                );
+                                return 0;
+                            }
 
-    assetManager->ImportAsset(relPath, {}, {});
+                            assetManager->ImportAsset(relPath, {}, {});
 
-    // Find newly imported asset.
-    for (const auto& [texHandle, meta] :
-         assetManager->GetAssetRegistry())
-    {
-        if (meta.FilePath == relPath ||
-            meta.SourceFilePath == relPath)
-        {
-            return texHandle;
-        }
-    }
+                            // Find newly imported asset.
+                            for (const auto& [texHandle, meta] :
+                                 assetManager->GetAssetRegistry())
+                            {
+                                if (meta.FilePath == relPath ||
+                                    meta.SourceFilePath == relPath)
+                                {
+                                    return texHandle;
+                                }
+                            }
 
-    NOX_CORE_ERROR(
-        "[Scene Drop] Failed to import texture: {}",
-        relPath.string()
-    );
+                            NOX_CORE_ERROR(
+                                "[Scene Drop] Failed to import texture: {}",
+                                relPath.string()
+                            );
 
-    return 0;
-};
-                        
+                            return 0;
+                        };
+
                         // Check if a cooked .nskel file exists on disk for this mesh
                         std::filesystem::path relSkelPath = metadata.FilePath;
                         relSkelPath.replace_extension(".nskel");
-            
+
                         std::filesystem::path fullSkelPath = Project::GetActiveAssetDirectory() / relSkelPath;
                         bool hasSkeleton = std::filesystem::exists(fullSkelPath);
 
@@ -415,24 +415,24 @@ namespace Nox
                         auto getOrImportSkeletonHandle = [&](const std::filesystem::path& relPath) -> AssetHandle
                         {
                             auto assetManager = Project::GetActive()->GetEditorAssetManager();
-                
+
                             for (const auto& [skelHandle, meta] : assetManager->GetAssetRegistry())
                             {
                                 if (meta.FilePath == relPath || meta.SourceFilePath == relPath)
                                     return skelHandle;
                             }
-                
+
                             assetManager->ImportAsset(relPath, {}, {});
-                
+
                             for (const auto& [skelHandle, meta] : assetManager->GetAssetRegistry())
                             {
                                 if (meta.FilePath == relPath || meta.SourceFilePath == relPath)
                                     return skelHandle;
                             }
-                
+
                             return 0;
                         };
-                        
+
                         // Helper to attach AnimatorComponent and load its skeleton
                         auto tryAttachAnimator = [&](Entity entity)
                         {
@@ -458,19 +458,23 @@ namespace Nox
                                     NOX_CORE_INFO("[Scene Drop] Submesh {} name retrieved: '{}'", i, subMeshName);
                                     if (subMeshName.empty())
                                         subMeshName = entityName + "_sub_" + std::to_string(i);
-                                    
+
                                     Entity childEntity = m_ActiveScene->CreateEntity(subMeshName);
                                     childEntity.SetParent(parentEntity); // Link via Scene Graph!
 
                                     auto& meshComp = childEntity.AddComponent<MeshComponent>();
                                     meshComp.Mesh = handle;
                                     meshComp.SubmeshIndex = static_cast<uint32_t>(i);
-                                    
-                                    const auto& matData = meshAsset->GetMaterial(i);
+
                                     auto& matComp = childEntity.AddComponent<MaterialComponent>();
-                                    matComp.AlbedoColor = matData.AlbedoColor;
-                                    matComp.AlbedoMaps.push_back(getOrImportTextureHandle(matData.AlbedoTexturePath));
-                                    
+                                    const auto& matData = meshAsset->GetMaterial(i);
+
+                                    matComp.AlbedoColors = {matData.AlbedoColor};
+                                    matComp.AlbedoMaps = {getOrImportTextureHandle(matData.AlbedoTexturePath)};
+                                    matComp.Modes = {matData.Mode};
+                                    matComp.AlphaCutoffs = {matData.AlphaCutoff};
+                                    matComp.DoubleSidedFlags = {matData.DoubleSided};
+
                                     // Auto-attach AnimatorComponent if skeleton exists
                                     tryAttachAnimator(childEntity);
                                 }
@@ -484,21 +488,24 @@ namespace Nox
                                 auto& meshComp = newEntity.AddComponent<MeshComponent>();
                                 meshComp.Mesh = handle;
                                 meshComp.SubmeshIndex = 0;
-                                
+
+                                auto& matComp = newEntity.AddComponent<MaterialComponent>();
                                 if (meshAsset && !meshAsset->GetMaterials().empty())
                                 {
                                     const auto& matData = meshAsset->GetMaterial(0);
-                                    auto& matComp = newEntity.AddComponent<MaterialComponent>();
-                                    matComp.AlbedoColor = matData.AlbedoColor;
-                                    matComp.AlbedoMaps.push_back(getOrImportTextureHandle(matData.AlbedoTexturePath));
+                                    matComp.AlbedoColors = {matData.AlbedoColor};
+                                    matComp.AlbedoMaps = {getOrImportTextureHandle(matData.AlbedoTexturePath)};
+                                    matComp.Modes = {matData.Mode};
+                                    matComp.AlphaCutoffs = {matData.AlphaCutoff};
+                                    matComp.DoubleSidedFlags = {matData.DoubleSided};
                                 }
                                 else
                                 {
-                                    newEntity.AddComponent<MaterialComponent>();
+                                    matComp.AlbedoColors = {glm::vec4(1.0f)};
                                 }
-                                
+
                                 tryAttachAnimator(newEntity);
-                                
+
                                 m_SceneHierarchyPanel.SetSelectedEntity(newEntity);
                             }
                         }
@@ -509,21 +516,31 @@ namespace Nox
                             auto& meshComp = newEntity.AddComponent<MeshComponent>();
                             meshComp.Mesh = handle;
                             meshComp.SubmeshIndex = 0;
-                            
+
                             auto& matComp = newEntity.AddComponent<MaterialComponent>();
-                            
+
                             if (staticMeshAsset)
                             {
-                                matComp.AlbedoMaps.resize(staticMeshAsset->GetSubMeshCount(), 0);
-                                
+                                size_t subMeshCount = staticMeshAsset->GetSubMeshCount();
+                                matComp.AlbedoColors.resize(subMeshCount);
+                                matComp.AlbedoMaps.resize(subMeshCount, 0);
+                                matComp.Modes.resize(subMeshCount, AlphaMode::Opaque);
+                                matComp.AlphaCutoffs.resize(subMeshCount, 0.5f);
+                                matComp.DoubleSidedFlags.resize(subMeshCount, false);
+
                                 // Resolve paths to AssetHandles for each slot
                                 for (size_t i = 0; i < staticMeshAsset->GetSubMeshCount(); ++i)
                                 {
                                     const auto& matData = staticMeshAsset->GetMaterial(i);
+
+                                    matComp.AlbedoColors[i] = matData.AlbedoColor;
                                     matComp.AlbedoMaps[i] = getOrImportTextureHandle(matData.AlbedoTexturePath);
+                                    matComp.Modes[i] = matData.Mode;
+                                    matComp.AlphaCutoffs[i] = matData.AlphaCutoff;
+                                    matComp.DoubleSidedFlags[i] = matData.DoubleSided;
                                 }
                             }
-                            
+
                             m_SceneHierarchyPanel.SetSelectedEntity(newEntity);
                         }
                     }
@@ -867,7 +884,7 @@ namespace Nox
                         * glm::rotate(glm::mat4(1.0f), tc.Rotation.z, glm::vec3(0.0f, 0.0f, 1.0f))
                         * glm::translate(glm::mat4(1.0f), glm::vec3(bc2d.Offset, 0.001f))
                         * glm::scale(glm::mat4(1.0f), scale * glm::vec3(bc2d.Size * 2.0f, 1.0f));*/
-                    
+
                     glm::mat4 transform = wtc.WorldMatrix
                         * glm::translate(glm::mat4(1.0f), glm::vec3(bc2d.Offset, 0.001f))
                         * glm::scale(glm::mat4(1.0f), glm::vec3(bc2d.Size * 2.0f, 1.0f));
@@ -887,8 +904,8 @@ namespace Nox
 
                     glm::mat4 transform = glm::translate(glm::mat4(1.0f), translation)
                         * glm::scale(glm::mat4(1.0f), scale);*/
-                    
-                    glm::mat4 transform = wtc.WorldMatrix 
+
+                    glm::mat4 transform = wtc.WorldMatrix
                         * glm::translate(glm::mat4(1.0f), glm::vec3(cc2d.Offset, 0.001f))
                         * glm::scale(glm::mat4(1.0f), glm::vec3(cc2d.Radius * 2.0f));
 
