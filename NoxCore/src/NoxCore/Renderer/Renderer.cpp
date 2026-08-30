@@ -91,8 +91,10 @@ namespace Nox
         if (!m_isEditor) createPresentPipeline(false);
         createComputePipeline();
         createSkyboxPipeline(false);
+        createOutlinePipeline(false);
         createCommandPool();
         createUniformBuffers();
+        createSelectedEntityIDBuffers();
         createDescriptorHeaps();
         createTextureImage();
         createSceneResources();
@@ -242,12 +244,12 @@ namespace Nox
     
         m_computePipeline = m_device->createPipeline(computeDesc);*/
     }
-    
+
     void Renderer::createSkyboxPipeline(bool forceCompile)
     {
         NRI::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
-        
+
         desc.colorFormats =
         {
             NRI::ImageFormat::Surface,
@@ -271,6 +273,31 @@ namespace Nox
         });
 
         m_skyboxPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+    }
+
+    void Renderer::createOutlinePipeline(bool forceCompile)
+    {
+        NRI::PipelineDesc desc{};
+        desc.forceCompile = forceCompile;
+        desc.colorFormats = {
+            NRI::ImageFormat::Surface
+        };
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Task,
+            .entryPoint = "taskMain",
+            .sourcePath = "assets/shaders/Outline.slang"
+        });
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Mesh,
+            .entryPoint = "meshMain",
+            .sourcePath = "assets/shaders/Outline.slang"
+        });
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Fragment,
+            .entryPoint = "fragMain",
+            .sourcePath = "assets/shaders/Outline.slang"
+        });
+        m_outlinePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
     void Renderer::createCommandPool()
@@ -335,6 +362,10 @@ namespace Nox
             .format = NRI::ImageFormat::R32SINT,
             .directFormat = UINT32_MAX
         });
+        // Register so shaders can sample entity IDs!
+        m_resourceHeap->registerTexture(*m_entityResolveResource);
+        uniformData.imageHeapIndexOffset = m_resourceHeap->getImageHeapIndexOffset();
+        uniformData.entityTextureIndex = m_entityResolveResource->GetDescriptorIndexSlot();
     }
 
     void Renderer::createDepthResources()
@@ -423,7 +454,7 @@ namespace Nox
             .usage = NRI::TextureUsage::Storage, // Allows compute shader writing
             .format = NRI::ImageFormat::R16G16B16A16_SFLOAT
         });
-        
+
         // 3. Register slot X as eStorageImage (writes Storage Descriptor to memory)
         m_resourceHeap->registerTexture(*m_environmentCubemap, NRI::TextureUsage::Storage);
 
@@ -436,7 +467,7 @@ namespace Nox
             .sourcePath = "assets/shaders/EquirectToCubemap.slang"
         });
         std::unique_ptr<NRI::Pipeline> equirectPipeline = m_device->createPipeline(computeDesc, *m_shaderCompiler);
-        
+
         // 5. Structure for Push Constants to pass descriptor slots to Slang
         struct EquirectPushConstants
         {
@@ -448,58 +479,58 @@ namespace Nox
         pushData.hdrTextureIndex = enviromentHDR->GetDescriptorIndexSlot();
         pushData.cubemapStorageIndex = m_environmentCubemap->GetDescriptorIndexSlot();
         pushData.cubemapSize = cubemapSize;
-        
+
         // 6. Record and dispatch the compute work
-        
+
         std::unique_ptr<NRI::CommandBuffer> cmd = beginSingleTimeCommands();
-        
+
         // Bind global descriptor heaps
         cmd->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
-        
+
         // Transition Cubemap layout: Undefined -> General (required for storage writes)
         cmd->transitionTextureLayout(*m_environmentCubemap, NRI::TextureLayout::Undefined, NRI::TextureLayout::General);
-        
+
         // Bind compute pipeline & push constant parameters
         cmd->bindPipeline(NRI::PipelineBindPoint::Compute, *equirectPipeline);
         cmd->pushData(&pushData, sizeof(EquirectPushConstants));
-        
+
         // Calculate thread group counts (16x16 threads per group in compute shader)
         uint32_t groupCountX = (cubemapSize + 15) / 16;
         uint32_t groupCountY = (cubemapSize + 15) / 16;
 
         // Dispatch work: X and Y cover the resolution, Z=6 covers all 6 cubemap faces
         cmd->dispatch(groupCountX, groupCountY, 6);
-        
+
         // Transition Cubemap layout: General -> ShaderResource (ready for graphics sampling)
         cmd->transitionTextureLayout(*m_environmentCubemap, NRI::TextureLayout::General, NRI::TextureLayout::ShaderResource);
-        
+
         // Submit command buffer and wait for execution to complete
         endSingleTimeCommands(std::move(cmd));
-        
+
         // 7. Overwrite descriptor slot in heap with Sampled Image Descriptor
         m_resourceHeap->registerTexture(*m_environmentCubemap, NRI::TextureUsage::ShaderResource);
-        
+
         // equiRectPipeline and enviromentHDR cleanly go out of scope and release temporary resources
-        
+
         // ==========================================
         //  DIFFUSE IRRADIANCE CONVOLUTION
         // ==========================================
-        
+
         constexpr uint32_t irradianceSize = 32;
-        
+
         m_irradianceCubemap = m_device->createTexture(NRI::TextureDesc{
-        .width = irradianceSize,
-        .height = irradianceSize,
-        .arrayLayers = 6,
-        .isCubeMap = true,
-        .mipLevels = 1,
-        .sampleCount = 1,
-        .usage = NRI::TextureUsage::Storage,
-        .format = NRI::ImageFormat::R16G16B16A16_SFLOAT
-    });
-        
+            .width = irradianceSize,
+            .height = irradianceSize,
+            .arrayLayers = 6,
+            .isCubeMap = true,
+            .mipLevels = 1,
+            .sampleCount = 1,
+            .usage = NRI::TextureUsage::Storage,
+            .format = NRI::ImageFormat::R16G16B16A16_SFLOAT
+        });
+
         m_resourceHeap->registerTexture(*m_irradianceCubemap, NRI::TextureUsage::Storage);
-        
+
         NRI::PipelineDesc convComputeDesc{};
         convComputeDesc.type = NRI::PipelineType::Compute;
         convComputeDesc.shaders.push_back({
@@ -508,11 +539,11 @@ namespace Nox
             .sourcePath = "assets/shaders/IrradianceConvolution.slang"
         });
         std::unique_ptr<NRI::Pipeline> irradiancePipeline = m_device->createPipeline(convComputeDesc, *m_shaderCompiler);
-        
+
         pushData.hdrTextureIndex = m_environmentCubemap->GetDescriptorIndexSlot();
         pushData.cubemapStorageIndex = m_irradianceCubemap->GetDescriptorIndexSlot();
         pushData.cubemapSize = irradianceSize;
-        
+
         std::unique_ptr<NRI::CommandBuffer> irradCmd = beginSingleTimeCommands();
         irradCmd->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
         irradCmd->transitionTextureLayout(*m_irradianceCubemap, NRI::TextureLayout::Undefined, NRI::TextureLayout::General);
@@ -528,121 +559,121 @@ namespace Nox
         endSingleTimeCommands(std::move(irradCmd));
 
         m_resourceHeap->registerTexture(*m_irradianceCubemap, NRI::TextureUsage::ShaderResource);
-        
+
         // ==========================================
-    //  SPECULAR IBL: PRE-FILTERED ENVIRONMENT MAP
-    // ==========================================
-    constexpr uint32_t prefilteredSize = 512;
-    constexpr uint32_t numMipLevels = 5;
+        //  SPECULAR IBL: PRE-FILTERED ENVIRONMENT MAP
+        // ==========================================
+        constexpr uint32_t prefilteredSize = 512;
+        constexpr uint32_t numMipLevels = 5;
 
-    m_prefilteredEnvMap = m_device->createTexture(NRI::TextureDesc{
-        .width = prefilteredSize,
-        .height = prefilteredSize,
-        .arrayLayers = 6,
-        .isCubeMap = true,
-        .mipLevels = numMipLevels,
-        .sampleCount = 1,
-        .usage = NRI::TextureUsage::Storage,
-        .format = NRI::ImageFormat::R16G16B16A16_SFLOAT
-    });
+        m_prefilteredEnvMap = m_device->createTexture(NRI::TextureDesc{
+            .width = prefilteredSize,
+            .height = prefilteredSize,
+            .arrayLayers = 6,
+            .isCubeMap = true,
+            .mipLevels = numMipLevels,
+            .sampleCount = 1,
+            .usage = NRI::TextureUsage::Storage,
+            .format = NRI::ImageFormat::R16G16B16A16_SFLOAT
+        });
 
-    m_resourceHeap->registerTexture(*m_prefilteredEnvMap, NRI::TextureUsage::Storage);
+        m_resourceHeap->registerTexture(*m_prefilteredEnvMap, NRI::TextureUsage::Storage);
 
-    NRI::PipelineDesc prefilterComputeDesc{};
-    prefilterComputeDesc.type = NRI::PipelineType::Compute;
-    prefilterComputeDesc.shaders.push_back({
-        .stage = NRI::ShaderStage::Compute,
-        .entryPoint = "compMain",
-        .sourcePath = "assets/shaders/PrefilterEnv.slang"
-    });
-    std::unique_ptr<NRI::Pipeline> prefilterPipeline = m_device->createPipeline(prefilterComputeDesc, *m_shaderCompiler);
+        NRI::PipelineDesc prefilterComputeDesc{};
+        prefilterComputeDesc.type = NRI::PipelineType::Compute;
+        prefilterComputeDesc.shaders.push_back({
+            .stage = NRI::ShaderStage::Compute,
+            .entryPoint = "compMain",
+            .sourcePath = "assets/shaders/PrefilterEnv.slang"
+        });
+        std::unique_ptr<NRI::Pipeline> prefilterPipeline = m_device->createPipeline(prefilterComputeDesc, *m_shaderCompiler);
 
-    struct PrefilterPushConstants
-    {
-        uint32_t envTextureIndex;
-        uint32_t cubemapStorageIndex;
-        uint32_t cubemapSize;
-        float roughness;
-    } prefilterData;
+        struct PrefilterPushConstants
+        {
+            uint32_t envTextureIndex;
+            uint32_t cubemapStorageIndex;
+            uint32_t cubemapSize;
+            float roughness;
+        } prefilterData;
 
-    std::unique_ptr<NRI::CommandBuffer> prefCmd = beginSingleTimeCommands();
-    prefCmd->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
-    prefCmd->transitionTextureLayout(*m_prefilteredEnvMap, NRI::TextureLayout::Undefined, NRI::TextureLayout::General);
-    prefCmd->bindPipeline(NRI::PipelineBindPoint::Compute, *prefilterPipeline);
+        std::unique_ptr<NRI::CommandBuffer> prefCmd = beginSingleTimeCommands();
+        prefCmd->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
+        prefCmd->transitionTextureLayout(*m_prefilteredEnvMap, NRI::TextureLayout::Undefined, NRI::TextureLayout::General);
+        prefCmd->bindPipeline(NRI::PipelineBindPoint::Compute, *prefilterPipeline);
 
-    // Loop through each roughness mip level
-    for (uint32_t mip = 0; mip < numMipLevels; ++mip)
-    {
-        uint32_t mipWidth = prefilteredSize >> mip;
-        uint32_t mipHeight = prefilteredSize >> mip;
-        float roughness = (float)mip / (float)(numMipLevels - 1);
+        // Loop through each roughness mip level
+        for (uint32_t mip = 0; mip < numMipLevels; ++mip)
+        {
+            uint32_t mipWidth = prefilteredSize >> mip;
+            uint32_t mipHeight = prefilteredSize >> mip;
+            float roughness = (float)mip / (float)(numMipLevels - 1);
 
-        prefilterData.envTextureIndex = m_environmentCubemap->GetDescriptorIndexSlot();
-        prefilterData.cubemapStorageIndex = m_prefilteredEnvMap->GetDescriptorIndexSlot(); // Note: Needs slice/mip targeting in shader or descriptor binding if multi-mip storage
-        prefilterData.cubemapSize = mipWidth;
-        prefilterData.roughness = roughness;
+            prefilterData.envTextureIndex = m_environmentCubemap->GetDescriptorIndexSlot();
+            prefilterData.cubemapStorageIndex = m_prefilteredEnvMap->GetDescriptorIndexSlot(); // Note: Needs slice/mip targeting in shader or descriptor binding if multi-mip storage
+            prefilterData.cubemapSize = mipWidth;
+            prefilterData.roughness = roughness;
 
-        prefCmd->pushData(&prefilterData, sizeof(PrefilterPushConstants));
+            prefCmd->pushData(&prefilterData, sizeof(PrefilterPushConstants));
 
-        uint32_t groupX = (mipWidth + 15) / 16;
-        uint32_t groupY = (mipHeight + 15) / 16;
-        prefCmd->dispatch(groupX, groupY, 6);
-    }
+            uint32_t groupX = (mipWidth + 15) / 16;
+            uint32_t groupY = (mipHeight + 15) / 16;
+            prefCmd->dispatch(groupX, groupY, 6);
+        }
 
-    prefCmd->transitionTextureLayout(*m_prefilteredEnvMap, NRI::TextureLayout::General, NRI::TextureLayout::ShaderResource);
-    endSingleTimeCommands(std::move(prefCmd));
-    m_resourceHeap->registerTexture(*m_prefilteredEnvMap, NRI::TextureUsage::ShaderResource);
+        prefCmd->transitionTextureLayout(*m_prefilteredEnvMap, NRI::TextureLayout::General, NRI::TextureLayout::ShaderResource);
+        endSingleTimeCommands(std::move(prefCmd));
+        m_resourceHeap->registerTexture(*m_prefilteredEnvMap, NRI::TextureUsage::ShaderResource);
 
-    // ==========================================
-    //  SPECULAR IBL: BRDF INTEGRATION MAP (2D LUT)
-    // ==========================================
-    constexpr uint32_t brdfLUTSize = 512;
+        // ==========================================
+        //  SPECULAR IBL: BRDF INTEGRATION MAP (2D LUT)
+        // ==========================================
+        constexpr uint32_t brdfLUTSize = 512;
 
-    m_brdfLUT = m_device->createTexture(NRI::TextureDesc{
-        .width = brdfLUTSize,
-        .height = brdfLUTSize,
-        .arrayLayers = 1,
-        .isCubeMap = false,
-        .mipLevels = 1,
-        .sampleCount = 1,
-        .usage = NRI::TextureUsage::Storage,
-        .format = NRI::ImageFormat::R16G16_SFLOAT
-    });
+        m_brdfLUT = m_device->createTexture(NRI::TextureDesc{
+            .width = brdfLUTSize,
+            .height = brdfLUTSize,
+            .arrayLayers = 1,
+            .isCubeMap = false,
+            .mipLevels = 1,
+            .sampleCount = 1,
+            .usage = NRI::TextureUsage::Storage,
+            .format = NRI::ImageFormat::R16G16_SFLOAT
+        });
 
-    m_resourceHeap->registerTexture(*m_brdfLUT, NRI::TextureUsage::Storage);
+        m_resourceHeap->registerTexture(*m_brdfLUT, NRI::TextureUsage::Storage);
 
-    NRI::PipelineDesc brdfComputeDesc{};
-    brdfComputeDesc.type = NRI::PipelineType::Compute;
-    brdfComputeDesc.shaders.push_back({
-        .stage = NRI::ShaderStage::Compute,
-        .entryPoint = "compMain",
-        .sourcePath = "assets/shaders/BRDFIntegration.slang"
-    });
-    std::unique_ptr<NRI::Pipeline> brdfPipeline = m_device->createPipeline(brdfComputeDesc, *m_shaderCompiler);
+        NRI::PipelineDesc brdfComputeDesc{};
+        brdfComputeDesc.type = NRI::PipelineType::Compute;
+        brdfComputeDesc.shaders.push_back({
+            .stage = NRI::ShaderStage::Compute,
+            .entryPoint = "compMain",
+            .sourcePath = "assets/shaders/BRDFIntegration.slang"
+        });
+        std::unique_ptr<NRI::Pipeline> brdfPipeline = m_device->createPipeline(brdfComputeDesc, *m_shaderCompiler);
 
-    struct BRDFPushConstants
-    {
-        uint32_t lutStorageIndex;
-        uint32_t lutSize;
-    } brdfData;
+        struct BRDFPushConstants
+        {
+            uint32_t lutStorageIndex;
+            uint32_t lutSize;
+        } brdfData;
 
-    brdfData.lutStorageIndex = m_brdfLUT->GetDescriptorIndexSlot();
-    brdfData.lutSize = brdfLUTSize;
+        brdfData.lutStorageIndex = m_brdfLUT->GetDescriptorIndexSlot();
+        brdfData.lutSize = brdfLUTSize;
 
-    std::unique_ptr<NRI::CommandBuffer> brdfCmd = beginSingleTimeCommands();
-    brdfCmd->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
-    brdfCmd->transitionTextureLayout(*m_brdfLUT, NRI::TextureLayout::Undefined, NRI::TextureLayout::General);
-    
-    brdfCmd->bindPipeline(NRI::PipelineBindPoint::Compute, *brdfPipeline);
-    brdfCmd->pushData(&brdfData, sizeof(BRDFPushConstants));
+        std::unique_ptr<NRI::CommandBuffer> brdfCmd = beginSingleTimeCommands();
+        brdfCmd->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
+        brdfCmd->transitionTextureLayout(*m_brdfLUT, NRI::TextureLayout::Undefined, NRI::TextureLayout::General);
 
-    uint32_t brdfGroupX = (brdfLUTSize + 15) / 16;
-    uint32_t brdfGroupY = (brdfLUTSize + 15) / 16;
-    brdfCmd->dispatch(brdfGroupX, brdfGroupY, 1);
+        brdfCmd->bindPipeline(NRI::PipelineBindPoint::Compute, *brdfPipeline);
+        brdfCmd->pushData(&brdfData, sizeof(BRDFPushConstants));
 
-    brdfCmd->transitionTextureLayout(*m_brdfLUT, NRI::TextureLayout::General, NRI::TextureLayout::ShaderResource);
-    endSingleTimeCommands(std::move(brdfCmd));
-    m_resourceHeap->registerTexture(*m_brdfLUT, NRI::TextureUsage::ShaderResource);
+        uint32_t brdfGroupX = (brdfLUTSize + 15) / 16;
+        uint32_t brdfGroupY = (brdfLUTSize + 15) / 16;
+        brdfCmd->dispatch(brdfGroupX, brdfGroupY, 1);
+
+        brdfCmd->transitionTextureLayout(*m_brdfLUT, NRI::TextureLayout::General, NRI::TextureLayout::ShaderResource);
+        endSingleTimeCommands(std::move(brdfCmd));
+        m_resourceHeap->registerTexture(*m_brdfLUT, NRI::TextureUsage::ShaderResource);
     }
 
     template <typename T>
@@ -956,6 +987,32 @@ namespace Nox
             m_indirectBuffersMapped.emplace_back(mappedMemory);
         }
     }
+    
+    void Renderer::createSelectedEntityIDBuffers()
+    {
+        constexpr uint32_t maxSelectedEntities = 4096;
+
+        uint64_t bufferSize =
+            maxSelectedEntities * sizeof(int32_t);
+
+        m_selectedEntityIDBuffers.reserve(MAX_FRAMES_IN_FLIGHT);
+        m_selectedEntityIDBuffersMapped.reserve(MAX_FRAMES_IN_FLIGHT);
+
+        for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+        {
+            auto buffer = m_device->createBuffer(
+                NRI::BufferDesc{
+                    .size = bufferSize,
+                    .usage = NRI::BufferUsage::Storage
+                }
+            );
+
+            void* mapped = buffer->map(0, bufferSize);
+
+            m_selectedEntityIDBuffers.emplace_back(std::move(buffer));
+            m_selectedEntityIDBuffersMapped.emplace_back(mapped);
+        }
+    }
 
     void Renderer::createDescriptorHeaps()
     {
@@ -1180,31 +1237,147 @@ namespace Nox
 
             m_commandBuffers->drawMeshTasksIndirect(*m_indirectBuffers[frameIndex], 0, static_cast<uint32_t>(m_drawMeshTasksIndirectCommands.size()), sizeof(DrawMeshTasksIndirectCommand));
         }
-        
+
         m_renderer2D->Flush(*m_commandBuffers, *m_uniformBuffers[frameIndex], frameIndex);
-        
+
         if (m_skyboxPipeline)
         {
             m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_skyboxPipeline);
-            
+
             // Reverse-Z configuration: test against far plane (Z = 0.0), disable depth writes
             m_commandBuffers->setDepthWriteEnable(false);
             m_commandBuffers->setDepthCompareOp(NRI::CompareOp::GreaterOrEqual);
             m_commandBuffers->setCullMode(NRI::CullMode::None);
-            
+
             shaderio::PushConstantSkybox references{};
             references.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
             references.cubemapIndex = m_environmentCubemap->GetDescriptorIndexSlot();
             m_commandBuffers->pushData(&references, sizeof(shaderio::PushConstantSkybox));
-            
+
             m_commandBuffers->drawMeshTasks(1, 1, 1);
-            
+
             // Restore depth write state
             m_commandBuffers->setDepthWriteEnable(true);
             m_commandBuffers->setDepthCompareOp(NRI::CompareOp::Greater);
         }
 
         m_commandBuffers->endRendering();
+
+        // --- OUTLINE POST-PROCESS ---
+        if (!m_SelectedEntityIDs.empty() && m_outlinePipeline)
+        {
+            m_commandBuffers->transitionTextureLayout(
+                *m_entityResolveResource,
+                NRI::TextureLayout::ColorAttachment,
+                NRI::TextureLayout::ShaderResource
+            );
+
+            std::vector<NRI::RenderAttachDesc> outlineColorAttachments;
+            outlineColorAttachments.push_back({
+                .attachment = m_sceneResource.get(),
+                .loadOP = NRI::LoadOP::load,
+                .storeOP = NRI::StoreOP::store,
+            });
+
+            NRI::RenderDesc outlineDesc =
+            {
+                .renderArea = m_isEditor
+                                  ? m_viewportSize
+                                  : m_swapChainExtent,
+                .colorAttachments = outlineColorAttachments,
+            };
+
+            m_commandBuffers->beginRendering(outlineDesc);
+
+            const NRI::Extent2D locViewportSize =
+                m_isEditor ? m_viewportSize : m_swapChainExtent;
+
+            const float w = static_cast<float>(locViewportSize.width);
+            const float h = static_cast<float>(locViewportSize.height);
+
+            // Same coordinate convention as the main rendering pass.
+            m_commandBuffers->setViewportWithCount(
+                {0.0f, h, w, -h},
+                0.0f,
+                1.0f
+            );
+
+            m_commandBuffers->setScissorWithCount(locViewportSize);
+
+            // Rasterization
+            m_commandBuffers->setRasterizerDiscardEnable(false);
+            m_commandBuffers->setPolygonMode(NRI::PolygonMode::Fill);
+            m_commandBuffers->setCullMode(NRI::CullMode::None);
+            m_commandBuffers->setFrontFace(NRI::FrontFace::CounterClockWise);
+            m_commandBuffers->setDepthBiasEnable(false);
+            m_commandBuffers->setDepthClampEnable(false);
+
+            // This is a fullscreen post-process, so one sample is correct.
+            m_commandBuffers->setRasterizationSamples(1);
+            m_commandBuffers->setSampleMask(1, 0xFFFFFFFF);
+            m_commandBuffers->setAlphaToCoverageEnable(false);
+            m_commandBuffers->setAlphaToOneEnableEXT(false);
+
+            // ------------------------------------------------------------
+            // IMPORTANT:
+            // No depth test/write here.
+            //
+            // The outline is determined entirely from entityResolveResource.
+            // Reverse-Z is therefore irrelevant to this fullscreen pass.
+            // ------------------------------------------------------------
+            m_commandBuffers->setDepthTestEnable(false);
+            m_commandBuffers->setDepthWriteEnable(false);
+            m_commandBuffers->setDepthBoundsTestEnable(false);
+            m_commandBuffers->setStencilTestEnable(false);
+
+            // Alpha blending for the orange outline.
+            const NRI::ColorBlendEquation blendEquation
+            {
+                .srcColorBlendFactor = NRI::BlendFactor::SrcAlpha,
+                .dstColorBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha,
+                .colorBlendOp = NRI::BlendOp::Add,
+
+                .srcAlphaBlendFactor = NRI::BlendFactor::SrcAlpha,
+                .dstAlphaBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha,
+                .alphaBlendOp = NRI::BlendOp::Add,
+            };
+
+            const uint32_t colorWriteMask =
+                NRI::ColorComponent::R |
+                NRI::ColorComponent::G |
+                NRI::ColorComponent::B |
+                NRI::ColorComponent::A;
+
+            m_commandBuffers->setColorBlendEnable(0, true);
+            m_commandBuffers->setColorBlendEquation(0, blendEquation);
+            m_commandBuffers->setColorWriteMask(0, colorWriteMask);
+            m_commandBuffers->setLogicOpEnable(false);
+
+            m_commandBuffers->bindPipeline(
+                NRI::PipelineBindPoint::Graphics,
+                *m_outlinePipeline
+            );
+
+            shaderio::PushConstantOutline references{};
+            references.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+            references.selectedEntityIDsReference = m_selectedEntityIDBuffers[frameIndex]->getDeviceAddress();
+            references.selectedEntityCount = static_cast<uint32_t>(m_SelectedEntityIDs.size());
+
+            m_commandBuffers->pushData(
+                &references,
+                sizeof(shaderio::PushConstantOutline)
+            );
+
+            m_commandBuffers->drawMeshTasks(1, 1, 1);
+
+            m_commandBuffers->endRendering();
+
+            m_commandBuffers->transitionTextureLayout(
+                *m_entityResolveResource,
+                NRI::TextureLayout::ShaderResource,
+                NRI::TextureLayout::ColorAttachment
+            );
+        }
 
         m_commandBuffers->transitionTextureLayout(*m_sceneResource, NRI::TextureLayout::ColorAttachment, NRI::TextureLayout::ShaderResource);
 
@@ -1329,6 +1502,26 @@ namespace Nox
             m_commandBuffers->end(frameIndex);
         }
     }
+    
+    void Renderer::updateEntityIDBuffer(uint32_t currentImage)
+    {
+        uint32_t selectedCount =
+      static_cast<uint32_t>(
+          std::min<size_t>(
+              m_SelectedEntityIDs.size(),
+              4096
+          )
+      );
+
+        if (selectedCount > 0)
+        {
+            memcpy(
+                m_selectedEntityIDBuffersMapped[currentImage],
+                m_SelectedEntityIDs.data(),
+                selectedCount * sizeof(int32_t)
+            );
+        }
+    }
 
     void Renderer::updateUniformBuffer(uint32_t currentImage)
     {
@@ -1346,6 +1539,8 @@ namespace Nox
                              100.0f);
         uniformData.proj[1][1] *= -1;*/
         uniformData.samplerIndex = selectedSampler;
+
+        uniformData.entityTextureIndex = m_entityResolveResource->GetDescriptorIndexSlot();
 
         memcpy(m_uniformBuffersMapped[currentImage], &uniformData, sizeof(uniformData));
     }
@@ -1478,9 +1673,11 @@ namespace Nox
         }
 
         updatePageTables(frameIndex);
+        
+        updateEntityIDBuffer(frameIndex);
 
         updateUniformBuffer(frameIndex);
-        
+
         BuildBuffers();
 
         updateInstanceAndIndirectBuffer(frameIndex);
@@ -1506,7 +1703,7 @@ namespace Nox
         m_instanceBufferObjects.clear();
         m_drawMeshTasksIndirectCommands.clear();
         m_boneMatrices.clear();
-        
+
         m_opaqueQueue.clear();
         m_maskQueue.clear();
         m_transparentQueue.clear();
@@ -1629,7 +1826,7 @@ namespace Nox
     {
         m_renderer2D->EndScene();
     }
-    
+
     void Renderer::BuildBuffers()
     {
         // 1. Submit Opaque items first
@@ -1647,10 +1844,11 @@ namespace Nox
         }
 
         // 3. Sort Transparent items Back-to-Front (Furthest camera distance first)
-        std::sort(m_transparentQueue.begin(), m_transparentQueue.end(), 
-            [](const RenderPacket& a, const RenderPacket& b) {
-                return a.distanceToCamera > b.distanceToCamera; 
-            });
+        std::sort(m_transparentQueue.begin(), m_transparentQueue.end(),
+                  [](const RenderPacket& a, const RenderPacket& b)
+                  {
+                      return a.distanceToCamera > b.distanceToCamera;
+                  });
 
         // Submit sorted transparent items last
         for (const auto& packet : m_transparentQueue)
@@ -1680,14 +1878,14 @@ namespace Nox
         instance.verticesPageIndex = handle.vertices.pageIndex;
         instance.meshletVerticesPageIndex = handle.meshletVertices.pageIndex;
         instance.meshletTrianglesPageIndex = handle.meshletTriangles.pageIndex;
-        
+
         // Since child entities hold only their own single material, index 0 is always the correct target
         // Select slot matching submeshIndex, fallback to slot 0 if child entity only holds 1 texture
         uint32_t slotIdx = (material.AlbedoColors.size() > 1) ? submeshIndex : 0;
-        
+
         instance.albedoColor = (slotIdx < material.AlbedoColors.size()) ? material.AlbedoColors[slotIdx] : glm::vec4(1.0f);
         instance.albedoTextureIndex = -1;
-        
+
         if (!material.AlbedoMaps.empty() && slotIdx < material.AlbedoMaps.size())
         {
             const AssetHandle texHandle = material.AlbedoMaps[slotIdx];
@@ -1702,12 +1900,12 @@ namespace Nox
                 }
             }
         }
-        
+
         AlphaMode mode = (slotIdx < material.Modes.size()) ? material.Modes[slotIdx] : AlphaMode::Opaque;
         instance.alphaMode = static_cast<uint32_t>(mode);
         instance.alphaCutoff = (slotIdx < material.AlphaCutoffs.size()) ? material.AlphaCutoffs[slotIdx] : 0.5f;
         instance.doubleSided = (slotIdx < material.DoubleSidedFlags.size()) ? (bool)material.DoubleSidedFlags[slotIdx] : false;
-        
+
         instance.entityID = entityID;
 
         // --- BONE MATRIX PACKING ---
@@ -1727,7 +1925,7 @@ namespace Nox
         command.groupCountX = (handle.GetMeshletCount() + shaderio::TASK_SHADER_DISPATCH_X - 1) / shaderio::TASK_SHADER_DISPATCH_X;
         command.groupCountY = 1;
         command.groupCountZ = 1;
-        
+
         RenderPacket packet{};
         packet.instance = instance;
         packet.command = command;
@@ -1785,7 +1983,7 @@ namespace Nox
             {
                 instance.albedoTextureIndex = -1;
             }
-            
+
             AlphaMode mode = (i < material.Modes.size()) ? material.Modes[i] : AlphaMode::Opaque;
             instance.alphaMode = static_cast<uint32_t>(mode);
             instance.alphaCutoff = (i < material.AlphaCutoffs.size()) ? material.AlphaCutoffs[i] : 0.5f;
@@ -1797,7 +1995,7 @@ namespace Nox
             command.groupCountX = (handle.GetMeshletCount() + shaderio::TASK_SHADER_DISPATCH_X - 1) / shaderio::TASK_SHADER_DISPATCH_X;
             command.groupCountY = 1;
             command.groupCountZ = 1;
-            
+
             RenderPacket packet{};
             packet.instance = instance;
             packet.command = command;

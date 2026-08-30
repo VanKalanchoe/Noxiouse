@@ -104,6 +104,8 @@ struct UniformBufferObject
     uint samplerIndex;
     uint imageHeapIndexOffset;
     uint finalImageIndex;
+
+    uint entityTextureIndex; // Heap index of m_entityResolveReference
 };
 
 struct Vertex
@@ -190,6 +192,13 @@ struct PushConstantSkybox
 {
     uint64_t matrixReference; // BDA to UniformBufferObject
     uint32_t cubemapIndex;     // Index in descriptor heap
+};
+
+struct PushConstantOutline
+{
+    uint64_t matrixReference; // BDA to UniformBufferObject
+    uint64_t selectedEntityIDsReference;
+    uint32_t selectedEntityCount;
 };
 
 struct PushConstantQuad

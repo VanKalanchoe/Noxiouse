@@ -118,6 +118,8 @@ namespace Nox
         // Call this in drawFrame() or EditorLayer to read the result
         int32_t getPickedEntityID();
         
+        void SetSelectedEntityID(const std::vector<int32_t>& entityIDs) { m_SelectedEntityIDs = entityIDs; }
+        
         void drawFrame();
         void resizeWindow();
         void initImGui();
@@ -189,11 +191,13 @@ namespace Nox
         void createUniformBuffers();
         void createInstanceBuffer(uint64_t bufferSize);
         void createIndirectBuffer(uint64_t bufferSize);
+        void createSelectedEntityIDBuffers();
         void createDescriptorHeaps();
         std::unique_ptr<NRI::CommandBuffer> beginSingleTimeCommands();
         void endSingleTimeCommands(std::unique_ptr<NRI::CommandBuffer>&& commandBuffer);
         void createCommandBuffers();
         void recordCommandBuffer(uint32_t imageIndex);
+        void updateEntityIDBuffer(uint32_t currentImage);
         void updateUniformBuffer(uint32_t currentImage);
         void updateInstanceAndIndirectBuffer(uint32_t currentImage);
         void processDeferredDeletions();
@@ -297,6 +301,14 @@ namespace Nox
         uint32_t frameIndex = 0;
 
         bool framebufferResized = false;
+        
+        // Outline
+        std::vector<std::unique_ptr<NRI::Buffer>> m_selectedEntityIDBuffers;
+        std::vector<void*> m_selectedEntityIDBuffersMapped;
+        std::unique_ptr<NRI::Pipeline> m_outlinePipeline = nullptr;
+        std::vector<int32_t> m_SelectedEntityIDs;
+
+        void createOutlinePipeline(bool forceCompile = false);
         
         // PBR stuff
         Ref<Texture2D> m_environmentCubemap;

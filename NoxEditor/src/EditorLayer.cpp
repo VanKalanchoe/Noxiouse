@@ -914,8 +914,45 @@ namespace Nox
             }
         }
 
-        // Draw selected entity outline
-        if (Entity selectedEntity = m_SceneHierarchyPanel.GetSelectedEntity())
+        // Draw selected entity outline 2D and 3D
+        const auto& selectedEntities = m_SceneHierarchyPanel.GetSelectedEntities();
+        if (!selectedEntities.empty())
+        {
+            std::vector<int32_t> selectedIDs;
+
+            // Recursive lambda to collect an entity and all its descendant children
+            auto collectIDs = [&](auto& self, Entity current) -> void
+            {
+                if (!current)
+                    return;
+
+                selectedIDs.push_back(static_cast<int32_t>(static_cast<uint32_t>(current)));
+
+                if (current.HasComponent<RelationshipComponent>())
+                {
+                    const auto& children = current.GetComponent<RelationshipComponent>().Children;
+                    for (UUID childID : children)
+                    {
+                        Entity child = m_ActiveScene->GetEntityByUUID(childID);
+                        if (child)
+                            self(self, child);
+                    }
+                }
+            };
+
+            for (const Entity& entity : selectedEntities)
+            {
+                collectIDs(collectIDs, entity);
+            }
+
+            m_Renderer->SetSelectedEntityID(selectedIDs);
+        }
+        else
+        {
+            m_Renderer->SetSelectedEntityID({});
+        }
+        
+        /*if (Entity selectedEntity = m_SceneHierarchyPanel.GetSelectedEntity())
         {
             glm::mat4 transform = glm::mat4(1.0f);
 
@@ -931,8 +968,9 @@ namespace Nox
             }
             m_Renderer2D->DrawRect(transform, glm::vec4(1.0f, 0.5f, 0.0f, 1.0f));
             /*const TransformComponent& transform = selectedEntity.GetComponent<TransformComponent>();
-            m_Renderer2D->DrawRect(transform.GetTransform(), glm::vec4(1.0f, 0.5f, 0.0f, 1.0f));*/
-        }
+            m_Renderer2D->DrawRect(transform.GetTransform(), glm::vec4(1.0f, 0.5f, 0.0f, 1.0f));#1#
+        }*/
+        
         m_Renderer->EndScene();
     }
 

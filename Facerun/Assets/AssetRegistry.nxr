@@ -47,6 +47,14 @@ AssetRegistry:
     FilePath: models/fox/Fox.nskel
     SourceFilePath: models/fox/Fox.nskel
     Type: AssetType::Skeleton
+  - Handle: 9084701763035633722
+    FilePath: models/dancing_stormtrooper/textures/dancing_stormtrooper_tex_0.png
+    SourceFilePath: models/dancing_stormtrooper/textures/dancing_stormtrooper_tex_0.png
+    Type: AssetType::Texture2D
+  - Handle: 9401250804027282514
+    FilePath: models/dancing_stormtrooper/dancing_stormtrooper.nsmesh
+    SourceFilePath: models/dancing_stormtrooper/dancing_stormtrooper.glb
+    Type: AssetType::StaticMesh
   - Handle: 9572181435982042286
     FilePath: models/fox/Fox.nmesh
     SourceFilePath: models/fox/Fox.gltf
@@ -59,6 +67,10 @@ AssetRegistry:
     FilePath: models/FlightHelmet/FlightHelmet_Materials_GlassPlasticMat_BaseColor.png
     SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_GlassPlasticMat_BaseColor.png
     Type: AssetType::Texture2D
+  - Handle: 11735983399705475484
+    FilePath: models/FlightHelmet/FlightHelmet.nsmesh
+    SourceFilePath: models/FlightHelmet/FlightHelmet.gltf
+    Type: AssetType::StaticMesh
   - Handle: 14183316351228243624
     FilePath: models/fox/Fox_Survey.nanim
     SourceFilePath: models/fox/Fox_Survey.nanim

@@ -17,8 +17,14 @@ namespace Nox
         
         void OnImGuiRender();
         
-        Entity GetSelectedEntity() const { return m_SelectionContext; };
+        const std::vector<Entity>& GetSelectedEntities() const { return m_SelectionContexts; };
+        Entity GetSelectedEntity() const { return m_SelectionContexts.empty() ? Entity{} : m_SelectionContexts.back(); }
         void SetSelectedEntity(Entity entity);
+        
+        bool IsSelected(Entity entity) const;
+        void ToggleSelectedEntity(Entity entity);
+        void ClearSelection();
+        void SelectRange(Entity entity);
       
         ImVec2 left;
         bool leftFocused;
@@ -33,6 +39,7 @@ namespace Nox
         void DrawComponents(Entity entity);
     private:
         Ref<Scene> m_Context;
-        Entity m_SelectionContext;
+        std::vector<Entity> m_SelectionContexts;
+        Entity m_SelectionAnchor;
     };
 }

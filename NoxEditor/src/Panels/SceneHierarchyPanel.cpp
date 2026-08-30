@@ -19,7 +19,104 @@ namespace Nox
     void SceneHierarchyPanel::SetContext(const Ref<Scene>& context)
     {
         m_Context = context;
-        m_SelectionContext = {}; // if youz want tabs dont null provide the scene
+        ClearSelection(); // if youz want tabs dont null provide the scene
+    }
+    
+    bool SceneHierarchyPanel::IsSelected(Entity entity) const
+    {
+        return std::find(m_SelectionContexts.begin(), m_SelectionContexts.end(), entity) != m_SelectionContexts.end();
+    }
+
+    void SceneHierarchyPanel::SetSelectedEntity(Entity entity)
+    {
+        m_SelectionContexts.clear();
+        if (entity)
+            m_SelectionContexts.push_back(entity);
+        
+        m_SelectionAnchor = entity; // Set the anchor for future Shift-clicks
+    }
+
+    void SceneHierarchyPanel::ToggleSelectedEntity(Entity entity)
+    {
+        auto it = std::find(m_SelectionContexts.begin(), m_SelectionContexts.end(), entity);
+        if (it != m_SelectionContexts.end())
+            m_SelectionContexts.erase(it);
+        else
+            m_SelectionContexts.push_back(entity);
+        
+        m_SelectionAnchor = entity;
+    }
+
+    void SceneHierarchyPanel::SelectRange(Entity targetEntity)
+{
+    if (!m_SelectionAnchor || !m_Context)
+    {
+        SetSelectedEntity(targetEntity);
+        return;
+    }
+
+    // 1. Traverse the scene in hierarchy display order (depth-first)
+    std::vector<Entity> allEntities;
+
+    auto collectHierarchy = [&](auto& self, Entity current) -> void
+    {
+        allEntities.push_back(current);
+        if (current.HasComponent<RelationshipComponent>())
+        {
+            const auto& children = current.GetComponent<RelationshipComponent>().Children;
+            for (UUID childID : children)
+            {
+                Entity child = m_Context->GetEntityByUUID(childID);
+                if (child)
+                    self(self, child);
+            }
+        }
+    };
+
+    m_Context->m_Registry.view<TagComponent>().each([&](auto entityID, TagComponent&)
+    {
+        Entity entity(entityID, m_Context.get());
+
+        bool isRoot = true;
+        if (entity.HasComponent<RelationshipComponent>())
+        {
+            if (entity.GetComponent<RelationshipComponent>().Parent != 0)
+                isRoot = false;
+        }
+
+        if (isRoot)
+            collectHierarchy(collectHierarchy, entity);
+    });
+
+    // 2. Find indices of anchor and target entity
+    auto itAnchor = std::find(allEntities.begin(), allEntities.end(), m_SelectionAnchor);
+    auto itTarget = std::find(allEntities.begin(), allEntities.end(), targetEntity);
+
+    if (itAnchor == allEntities.end() || itTarget == allEntities.end())
+    {
+        SetSelectedEntity(targetEntity);
+        return;
+    }
+
+    size_t indexAnchor = std::distance(allEntities.begin(), itAnchor);
+    size_t indexTarget = std::distance(allEntities.begin(), itTarget);
+
+    size_t startIndex = std::min(indexAnchor, indexTarget);
+    size_t endIndex = std::max(indexAnchor, indexTarget);
+
+    // 3. Fill selection with all entities in between (inclusive)
+    m_SelectionContexts.clear();
+    for (size_t i = startIndex; i <= endIndex; ++i)
+    {
+        m_SelectionContexts.push_back(allEntities[i]);
+    }
+    // Note: Do not change m_SelectionAnchor so subsequent Shift-clicks range from the same origin
+}
+
+    void SceneHierarchyPanel::ClearSelection()
+    {
+        m_SelectionContexts.clear();
+        m_SelectionAnchor = {};
     }
 
     void SceneHierarchyPanel::OnImGuiRender()
@@ -47,7 +144,7 @@ namespace Nox
         // 1. Deselect entity when left-clicking blank space
         if (ImGui::IsMouseDown(0) && ImGui::IsWindowHovered() && !ImGui::IsAnyItemHovered())
         {
-            m_SelectionContext = {};
+            ClearSelection();
         }
 
         // 2. Window-level Drag and Drop Target for root entity unparenting
@@ -81,24 +178,21 @@ namespace Nox
     ImGui::Begin("Properties");
     leftPropFocused = ImGui::IsWindowFocused();
     leftPropHovered = ImGui::IsWindowHovered();
-    if (m_SelectionContext)
+    if (Entity selectedEntity = GetSelectedEntity())
     {
-        DrawComponents(m_SelectionContext);
+        DrawComponents(selectedEntity);
     }
 
     ImGui::End();
 }
 
-    void SceneHierarchyPanel::SetSelectedEntity(Entity entity)
-    {
-        m_SelectionContext = entity;
-    }
-
     void SceneHierarchyPanel::DrawEntityNode(Entity entity)
     {
         auto& tag = entity.GetComponent<TagComponent>().Tag;
+        
+        bool isSelected = IsSelected(entity);
 
-        ImGuiTreeNodeFlags flags = ((m_SelectionContext == entity) ? ImGuiTreeNodeFlags_Selected : 0) |
+        ImGuiTreeNodeFlags flags = (isSelected  ? ImGuiTreeNodeFlags_Selected : 0) |
             ImGuiTreeNodeFlags_OpenOnArrow;
         flags |= ImGuiTreeNodeFlags_SpanAvailWidth;
 
@@ -111,9 +205,23 @@ namespace Nox
             flags |= ImGuiTreeNodeFlags_Leaf;
 
         bool opened = ImGui::TreeNodeEx((void*)(uint64_t)(uint32_t)entity, flags, tag.c_str());
-        if (ImGui::IsItemClicked())
+        
+        // --- Multi-selection click handling ---
+        if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen())
         {
-            m_SelectionContext = entity;
+            ImGuiIO& io = ImGui::GetIO();
+            if (io.KeyShift) // Shift + Click: Select range between anchor and this entity
+            {
+                SelectRange(entity);
+            }
+            else if (io.KeyCtrl) // Ctrl + Click: Add or remove from multi-selection
+            {
+                ToggleSelectedEntity(entity);
+            }
+            else // Normal Click: Select single entity
+            {
+                SetSelectedEntity(entity);
+            }
         }
 
         // --- 1. DRAG SOURCE: Pick up this entity to drag it ---
@@ -190,10 +298,14 @@ namespace Nox
         // at the end
         if (entityDeleted)
         {
+            if (m_SelectionAnchor == entity)
+                m_SelectionAnchor = {};
+
             m_Context->DestroyEntity(entity);
-            if (m_SelectionContext == entity)
+            auto it = std::find(m_SelectionContexts.begin(), m_SelectionContexts.end(), entity);
+            if (it != m_SelectionContexts.end())
             {
-                m_SelectionContext = {};
+                m_SelectionContexts.erase(it);
             }
         }
     }
@@ -979,11 +1091,12 @@ namespace Nox
     template <typename T>
     void SceneHierarchyPanel::DisplayAddComponentEntry(const std::string& entryName)
     {
-        if (m_SelectionContext && !m_SelectionContext.HasComponent<T>())
+        Entity entity = GetSelectedEntity();
+        if (entity && !entity.HasComponent<T>())
         {
             if (ImGui::MenuItem(entryName.c_str()))
             {
-                m_SelectionContext.AddComponent<T>();
+                entity.AddComponent<T>();
                 ImGui::CloseCurrentPopup();
             }
         }
