@@ -764,6 +764,19 @@ namespace Nox
                 const tg3_accessor& posAccessor = model.accessors[FindAttribute(primitive, "POSITION")];
                 const tg3_buffer_view& posBufferView = model.buffer_views[posAccessor.buffer_view];
                 const tg3_buffer& posBuffer = model.buffers[posBufferView.buffer];
+                
+                // Get normals
+                bool hasNormals = FindAttribute(primitive, "NORMAL") != -1;
+                const tg3_accessor* normalAccessor = nullptr;
+                const tg3_buffer_view* normalBufferView = nullptr;
+                const tg3_buffer* normalBuffer = nullptr;
+                
+                if (hasNormals)
+                {
+                    normalAccessor = &model.accessors[FindAttribute(primitive, "NORMAL")];
+                    normalBufferView = &model.buffer_views[normalAccessor->buffer_view];
+                    normalBuffer = &model.buffers[normalBufferView->buffer];
+                }
 
                 // Get texture coordinates if available
                 bool hasTexCoords = FindAttribute(primitive, "TEXCOORD_0") != -1;
@@ -804,16 +817,33 @@ namespace Nox
                 {
                     shaderio::Vertex vertex{};
 
-                    const float* pos = reinterpret_cast<const float*>(&posBuffer.data.data[posBufferView.byte_offset + posAccessor.byte_offset + i * 12]);
+                    uint32_t posStride = posBufferView.byte_stride ? posBufferView.byte_stride : 12;
+                    const float* pos = reinterpret_cast<const float*>(&posBuffer.data.data[posBufferView.byte_offset + posAccessor.byte_offset + (i * posStride)]);
                     // glTF uses a right-handed coordinate system with Y-up
                     // Vulkan uses a right-handed coordinate system with Y-down
                     // We need to flip the Y coordinate
                     // i dont need that look first line in load model
                     vertex.pos = {pos[0], pos[1], pos[2]};
+                    
+                    if (hasNormals)
+                    {
+                        uint32_t normalStride = normalBufferView->byte_stride ? normalBufferView->byte_stride : 12;
+                        
+                        size_t normalOffset = normalBufferView->byte_offset + normalAccessor->byte_offset + (i * normalStride);
+                        const float* norm = reinterpret_cast<const float*>(&normalBuffer->data.data[normalOffset]);
+                        
+                        vertex.normal = {norm[0], norm[1], norm[2]};
+                    }
+                    else
+                    {
+                        vertex.normal = {0.0f, 1.0f, 0.0f};
+                    }
 
                     if (hasTexCoords)
                     {
-                        const float* texCoord = reinterpret_cast<const float*>(&texCoordBuffer->data.data[texCoordBufferView->byte_offset + texCoordAccessor->byte_offset + i * 8]);
+                        uint32_t texStride = texCoordBufferView->byte_stride ? texCoordBufferView->byte_stride : 8;
+                        const float* texCoord = reinterpret_cast<const float*>(&texCoordBuffer->data.data[texCoordBufferView->byte_offset + texCoordAccessor->byte_offset + (i * texStride)]);
+                        
                         vertex.texCoord = {texCoord[0], texCoord[1]};
                     }
                     else
@@ -1016,7 +1046,9 @@ namespace Nox
 
                 primitiveData.MeshletVertices.insert(primitiveData.MeshletVertices.end(), localMeshletVertices.begin(), localMeshletVertices.end());
                 primitiveData.MeshletTriangles.insert(primitiveData.MeshletTriangles.end(), localMeshletTriangles.begin(), localMeshletTriangles.end());
+                
                 MaterialData materialData{};
+                
                 // Materials
                 if (primitive.material >= 0 && primitive.material < (int32_t)model.materials_count)
                 {
@@ -1032,12 +1064,9 @@ namespace Nox
                     if (gltfMaterial.alpha_mode.data != nullptr && gltfMaterial.alpha_mode.len > 0)
                     {
                         std::string_view modeStr(gltfMaterial.alpha_mode.data, gltfMaterial.alpha_mode.len);
-                        if (modeStr == "Opaque")
-                            materialData.Mode = AlphaMode::Opaque;
-                        else if (modeStr == "MASK")
-                            materialData.Mode = AlphaMode::Mask;
-                        else if (modeStr == "BLEND")
-                            materialData.Mode = AlphaMode::Blend;
+                        if (modeStr == "Opaque") materialData.Mode = AlphaMode::Opaque;
+                        else if (modeStr == "MASK") materialData.Mode = AlphaMode::Mask;
+                        else if (modeStr == "BLEND") materialData.Mode = AlphaMode::Blend;
                     }
                     else
                     {
@@ -1048,6 +1077,18 @@ namespace Nox
                     materialData.AlphaCutoff = static_cast<float>(gltfMaterial.alpha_cutoff);
                     materialData.DoubleSided = (gltfMaterial.double_sided != 0);
                     
+                    // --- Helper Lambda to safely extract textures ---
+                    auto GetTexturePath = [&](int32_t texIndex) -> std::string {
+                        if (texIndex >= 0 && texIndex < (int32_t)model.textures_count) {
+                            int32_t imageIndex = model.textures[texIndex].source;
+                            if (imageIndex >= 0 && imageIndex < (int32_t)model.images_count) {
+                                std::filesystem::path texPath = ExtractGltfImage(model, model.images[imageIndex], imageIndex, path);
+                                return texPath.string();
+                            }
+                        }
+                        return "";
+                    };
+                    
                     // Base Color Factor
                     materialData.AlbedoColor = glm::vec4(
                         static_cast<float>(gltfMaterial.pbr_metallic_roughness.base_color_factor[0]),
@@ -1055,32 +1096,31 @@ namespace Nox
                         static_cast<float>(gltfMaterial.pbr_metallic_roughness.base_color_factor[2]),
                         static_cast<float>(gltfMaterial.pbr_metallic_roughness.base_color_factor[3])
                     );
+                    materialData.AlbedoTexturePath = GetTexturePath(gltfMaterial.pbr_metallic_roughness.base_color_texture.index);
 
-                    // Base Color Texture URI
-                    int32_t albedoTexIndex = gltfMaterial.pbr_metallic_roughness.base_color_texture.index;
-                    if (albedoTexIndex >= 0 && albedoTexIndex < (int32_t)model.textures_count)
-                    {
-                        int32_t imageIndex = model.textures[albedoTexIndex].source;
-                        if (imageIndex >= 0 && imageIndex < (int32_t)model.images_count)
-                        {
-                            const auto& image = model.images[imageIndex];
-
-                            std::filesystem::path texturePath =
-                                ExtractGltfImage(
-                                    model,
-                                    image,
-                                    imageIndex,
-                                    path
-                                );
-
-                            if (!texturePath.empty())
-                            {
-                                materialData.AlbedoTexturePath =
-                                    texturePath.string();
-                            }
-                        }
-                    }
+                    // Metallic & Roughness Factors
+                    materialData.MetallicFactor = static_cast<float>(gltfMaterial.pbr_metallic_roughness.metallic_factor);
+                    materialData.RoughnessFactor = static_cast<float>(gltfMaterial.pbr_metallic_roughness.roughness_factor);
+                    
+                    // Metallic-Roughness Texture
+                    // (Note: glTF packs Roughness in the Green channel, Metallic in the Blue channel)
+                    materialData.MetallicRoughnessTexturePath = GetTexturePath(gltfMaterial.pbr_metallic_roughness.metallic_roughness_texture.index);
+                    
+                    // Normal Texture
+                    materialData.NormalTexturePath = GetTexturePath(gltfMaterial.normal_texture.index);
+                    
+                    // Ambient Occlusion Texture
+                    materialData.OcclusionTexturePath = GetTexturePath(gltfMaterial.occlusion_texture.index);
+                    
+                    // Emissive Factor & Texture
+                    materialData.EmissiveFactor = glm::vec3(
+                        static_cast<float>(gltfMaterial.emissive_factor[0]),
+                        static_cast<float>(gltfMaterial.emissive_factor[1]),
+                        static_cast<float>(gltfMaterial.emissive_factor[2])
+                    );
+                    materialData.EmissiveTexturePath = GetTexturePath(gltfMaterial.emissive_texture.index);
                 }
+                    
                 outMaterials.push_back(materialData);
                 result.push_back(std::move(primitiveData));
             }

@@ -1,189 +1,23 @@
 Scene: Untitled
 Entities:
-  - Entity: 3993326561646351801
+  - Entity: 3296592537850175689
     TagComponent:
-      Tag: Lenses_low
-    TransformComponent:
-      Translation: [0, 0, 0]
-      Rotation: [0, -0, 0]
-      Scale: [1, 1, 1]
-    RelationshipComponent:
-      Parent: 15512786898443595992
-      Children:
-        []
-    MeshComponent:
-      MeshHandle: 14440767362188307340
-      SubmeshIndex: 5
-    MaterialComponent:
-      AlbedoColors:
-        - [1, 1, 1, 1]
-      AlbedoMaps:
-        - 2593867236332361984
-      Modes:
-        - 0
-      AlphaCutoffs:
-        - 0.5
-      DoubleSidedFlags:
-        - false
-  - Entity: 18433232361700825261
-    TagComponent:
-      Tag: LeatherParts_low
-    TransformComponent:
-      Translation: [0, 0, 0]
-      Rotation: [0, -0, 0]
-      Scale: [1, 1, 1]
-    RelationshipComponent:
-      Parent: 15512786898443595992
-      Children:
-        []
-    MeshComponent:
-      MeshHandle: 14440767362188307340
-      SubmeshIndex: 4
-    MaterialComponent:
-      AlbedoColors:
-        - [1, 1, 1, 1]
-      AlbedoMaps:
-        - 11039254798054011324
-      Modes:
-        - 0
-      AlphaCutoffs:
-        - 0.5
-      DoubleSidedFlags:
-        - false
-  - Entity: 14944911200052374741
-    TagComponent:
-      Tag: MetalParts_low
-    TransformComponent:
-      Translation: [0, 0, 0]
-      Rotation: [0, -0, 0]
-      Scale: [1, 1, 1]
-    RelationshipComponent:
-      Parent: 15512786898443595992
-      Children:
-        []
-    MeshComponent:
-      MeshHandle: 14440767362188307340
-      SubmeshIndex: 3
-    MaterialComponent:
-      AlbedoColors:
-        - [1, 1, 1, 1]
-      AlbedoMaps:
-        - 8132794531245018272
-      Modes:
-        - 0
-      AlphaCutoffs:
-        - 0.5
-      DoubleSidedFlags:
-        - false
-  - Entity: 3721589492466893566
-    TagComponent:
-      Tag: GlassPlastic_low
-    TransformComponent:
-      Translation: [0, 0, 0]
-      Rotation: [0, -0, 0]
-      Scale: [1, 1, 1]
-    RelationshipComponent:
-      Parent: 15512786898443595992
-      Children:
-        []
-    MeshComponent:
-      MeshHandle: 14440767362188307340
-      SubmeshIndex: 2
-    MaterialComponent:
-      AlbedoColors:
-        - [1, 1, 1, 1]
-      AlbedoMaps:
-        - 11543061378369162841
-      Modes:
-        - 0
-      AlphaCutoffs:
-        - 0.5
-      DoubleSidedFlags:
-        - false
-  - Entity: 15333975749224362195
-    TagComponent:
-      Tag: RubberWood_low
+      Tag: pbr_spheres
     TransformComponent:
       Translation: [0, 0, 0]
       Rotation: [0, 0, 0]
       Scale: [1, 1, 1]
-    RelationshipComponent:
-      Parent: 15512786898443595992
-      Children:
-        []
     MeshComponent:
-      MeshHandle: 14440767362188307340
-      SubmeshIndex: 1
-    MaterialComponent:
-      AlbedoColors:
-        - [1, 1, 1, 1]
-      AlbedoMaps:
-        - 3282450742937072386
-      Modes:
-        - 0
-      AlphaCutoffs:
-        - 0.5
-      DoubleSidedFlags:
-        - false
-  - Entity: 15976842825839932108
-    TagComponent:
-      Tag: Hose_low
-    TransformComponent:
-      Translation: [0, 0, 0]
-      Rotation: [0, -0, 0]
-      Scale: [1, 1, 1]
-    RelationshipComponent:
-      Parent: 15512786898443595992
-      Children:
-        []
-    MeshComponent:
-      MeshHandle: 14440767362188307340
+      MeshHandle: 6934708091172960195
       SubmeshIndex: 0
     MaterialComponent:
       AlbedoColors:
         - [1, 1, 1, 1]
       AlbedoMaps:
-        - 3282450742937072386
+        - 0
       Modes:
         - 0
       AlphaCutoffs:
         - 0.5
       DoubleSidedFlags:
         - true
-  - Entity: 15512786898443595992
-    TagComponent:
-      Tag: FlightHelmet
-    TransformComponent:
-      Translation: [0, 0, 0]
-      Rotation: [0, 0, 0]
-      Scale: [3, 3, 3]
-    RelationshipComponent:
-      Parent: 0
-      Children:
-        - 15976842825839932108
-        - 15333975749224362195
-        - 3721589492466893566
-        - 14944911200052374741
-        - 18433232361700825261
-        - 3993326561646351801
-  - Entity: 8672153771193279695
-    TagComponent:
-      Tag: DamagedHelmet
-    TransformComponent:
-      Translation: [-1.9, 0, 0]
-      Rotation: [1.5707964, 0, 0]
-      Scale: [1, 1, 1]
-    MeshComponent:
-      MeshHandle: 2543572244814198988
-      SubmeshIndex: 0
-    MaterialComponent:
-      AlbedoColors:
-        - [1, 1, 1, 1]
-      AlbedoMaps:
-        - 8495328529823011140
-      Modes:
-        - 0
-      AlphaCutoffs:
-        - 0.5
-      DoubleSidedFlags:
-        - false

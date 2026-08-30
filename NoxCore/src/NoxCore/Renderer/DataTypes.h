@@ -42,12 +42,26 @@ namespace Nox
     struct MaterialData
     {
         std::string Name;
+        
+        // Base Color
         glm::vec4 AlbedoColor = glm::vec4(1.0f);
         std::string AlbedoTexturePath;
         
+        // PBR Properties
+        float MetallicFactor = 1.0f;
+        float RoughnessFactor = 1.0f;
+        std::string MetallicRoughnessTexturePath;
+        
+        // Additional Maps
+        std::string NormalTexturePath;
+        std::string OcclusionTexturePath;
+        
+        // Emission
+        glm::vec3 EmissiveFactor = glm::vec3(0.0f);
+        std::string EmissiveTexturePath;
+        
         // Alpha properties
         AlphaMode Mode = AlphaMode::Opaque;
-        
         float AlphaCutoff = 0.5f;
         bool DoubleSided = false;
     };

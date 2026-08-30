@@ -1547,6 +1547,11 @@ namespace Nox
         uniformData.samplerIndex = selectedSampler;
 
         uniformData.entityTextureIndex = m_entityResolveResource->GetDescriptorIndexSlot();
+        
+        // PBR IBL
+        uniformData.irradianceMapIndex = m_irradianceCubemap->GetDescriptorIndexSlot();
+        uniformData.prefilteredMapIndex = m_prefilteredEnvMap->GetDescriptorIndexSlot();
+        uniformData.brdfLutIndex = m_brdfLUT->GetDescriptorIndexSlot();
 
         memcpy(m_uniformBuffersMapped[currentImage], &uniformData, sizeof(uniformData));
     }
@@ -1917,24 +1922,34 @@ namespace Nox
         // Select slot matching submeshIndex, fallback to slot 0 if child entity only holds 1 texture
         uint32_t slotIdx = (material.AlbedoColors.size() > 1) ? submeshIndex : 0;
 
-        instance.albedoColor = (slotIdx < material.AlbedoColors.size()) ? material.AlbedoColors[slotIdx] : glm::vec4(1.0f);
-        instance.albedoTextureIndex = -1;
-
-        if (!material.AlbedoMaps.empty() && slotIdx < material.AlbedoMaps.size())
-        {
-            const AssetHandle texHandle = material.AlbedoMaps[slotIdx];
-
-            // Ensure handle is valid before looking up
-            if (texHandle != 0)
-            {
-                Ref<Texture2D> texture = AssetManager::GetAsset<Texture2D>(texHandle);
-                if (texture)
-                {
-                    instance.albedoTextureIndex = texture->GetDescriptorIndexSlot();
-                }
+        // Helper to safely fetch descriptor index
+        auto getTextureIndex = [](const std::vector<AssetHandle>& maps, uint32_t idx) -> int {
+            if (!maps.empty() && idx < maps.size() && maps[idx] != 0) {
+                Ref<Texture2D> texture = AssetManager::GetAsset<Texture2D>(maps[idx]);
+                if (texture) return texture->GetDescriptorIndexSlot();
             }
-        }
+            return -1;
+        };
+        
+        // --- MATERIAL PACKING ---
+        // Base Color
+        instance.albedoColor = (slotIdx < material.AlbedoColors.size()) ? material.AlbedoColors[slotIdx] : glm::vec4(1.0f);
+        instance.albedoTextureIndex = getTextureIndex(material.AlbedoMaps, slotIdx);
 
+        // PBR Properties
+        instance.metallicFactor = (slotIdx < material.MetallicFactors.size()) ? material.MetallicFactors[slotIdx] : 1.0f;
+        instance.roughnessFactor = (slotIdx < material.RoughnessFactors.size()) ? material.RoughnessFactors[slotIdx] : 1.0f;
+        instance.metallicRoughnessTextureIndex = getTextureIndex(material.MetallicRoughnessMaps, slotIdx);
+
+        // Additional Maps
+        instance.normalTextureIndex = getTextureIndex(material.NormalMaps, slotIdx);
+        instance.occlusionTextureIndex = getTextureIndex(material.OcclusionMaps, slotIdx);
+
+        // Emission
+        instance.emissiveFactor = (slotIdx < material.EmissiveFactors.size()) ? material.EmissiveFactors[slotIdx] : glm::vec3(0.0f);
+        instance.emissiveTextureIndex = getTextureIndex(material.EmissiveMaps, slotIdx);
+
+        // Settings
         AlphaMode mode = (slotIdx < material.Modes.size()) ? material.Modes[slotIdx] : AlphaMode::Opaque;
         instance.alphaMode = static_cast<uint32_t>(mode);
         instance.alphaCutoff = (slotIdx < material.AlphaCutoffs.size()) ? material.AlphaCutoffs[slotIdx] : 0.5f;
@@ -1984,6 +1999,15 @@ namespace Nox
 
     void Renderer::DrawStaticMesh(const glm::mat4& transform, Ref<StaticMesh> staticMesh, const MaterialComponent& material, int entityID)
     {
+        // Helper to safely fetch descriptor index
+        auto getTextureIndex = [](const std::vector<AssetHandle>& maps, uint32_t idx) -> int {
+            if (!maps.empty() && idx < maps.size() && maps[idx] != 0) {
+                Ref<Texture2D> texture = AssetManager::GetAsset<Texture2D>(maps[idx]);
+                if (texture) return texture->GetDescriptorIndexSlot();
+            }
+            return -1;
+        };
+        
         for (size_t i = 0; i < staticMesh->GetSubMeshes().size(); ++i)
         {
             MeshHandle handle = staticMesh->GetSubMeshes()[i];
@@ -1991,7 +2015,7 @@ namespace Nox
             shaderio::InstanceData instance{};
             instance.modelMatrix = transform;
 
-            // --- UPDATED: Page Table Info ---
+            // Page Table Info
             instance.drawsPageIndex = handle.meshletDraws.pageIndex;
             instance.drawsOffset = handle.meshletDraws.offset;
             instance.meshletCount = handle.meshletDraws.count;
@@ -1999,25 +2023,26 @@ namespace Nox
             instance.verticesPageIndex = handle.vertices.pageIndex;
             instance.meshletVerticesPageIndex = handle.meshletVertices.pageIndex;
             instance.meshletTrianglesPageIndex = handle.meshletTriangles.pageIndex;
-            // --------------------------------
 
+            // --- MATERIAL PACKING ---
+            // Base Color
             instance.albedoColor = (i < material.AlbedoColors.size()) ? material.AlbedoColors[i] : glm::vec4(1.0f);
-            AssetHandle texHandle = 0;
-            if (i < material.AlbedoMaps.size())
-            {
-                texHandle = material.AlbedoMaps[i];
-            }
+            instance.albedoTextureIndex = getTextureIndex(material.AlbedoMaps, i);
 
-            if (texHandle != 0)
-            {
-                Ref<Texture2D> texture = AssetManager::GetAsset<Texture2D>(texHandle);
-                instance.albedoTextureIndex = texture ? texture->GetDescriptorIndexSlot() : -1;
-            }
-            else
-            {
-                instance.albedoTextureIndex = -1;
-            }
+            // PBR Properties
+            instance.metallicFactor = (i < material.MetallicFactors.size()) ? material.MetallicFactors[i] : 1.0f;
+            instance.roughnessFactor = (i < material.RoughnessFactors.size()) ? material.RoughnessFactors[i] : 1.0f;
+            instance.metallicRoughnessTextureIndex = getTextureIndex(material.MetallicRoughnessMaps, i);
 
+            // Additional Maps
+            instance.normalTextureIndex = getTextureIndex(material.NormalMaps, i);
+            instance.occlusionTextureIndex = getTextureIndex(material.OcclusionMaps, i);
+
+            // Emission
+            instance.emissiveFactor = (i < material.EmissiveFactors.size()) ? material.EmissiveFactors[i] : glm::vec3(0.0f);
+            instance.emissiveTextureIndex = getTextureIndex(material.EmissiveMaps, i);
+
+            // Settings
             AlphaMode mode = (i < material.Modes.size()) ? material.Modes[i] : AlphaMode::Opaque;
             instance.alphaMode = static_cast<uint32_t>(mode);
             instance.alphaCutoff = (i < material.AlphaCutoffs.size()) ? material.AlphaCutoffs[i] : 0.5f;

@@ -309,19 +309,34 @@ namespace Nox
             SerializerUtils::ReadVector(stream, outData.Draws);
         }
 
-        static void WriteMaterials(std::ofstream& stream, const std::vector<MaterialData>& materialList)
+       static void WriteMaterials(std::ofstream& stream, const std::vector<MaterialData>& materialList)
         {
             uint32_t matCount = static_cast<uint32_t>(materialList.size());
             stream.write(reinterpret_cast<const char*>(&matCount), sizeof(uint32_t));
             for (const auto& mat : materialList)
             {
                 SerializerUtils::WriteString(stream, mat.Name);
+                
+                // Base Color
                 stream.write(reinterpret_cast<const char*>(&mat.AlbedoColor), sizeof(glm::vec4));
                 SerializerUtils::WriteString(stream, mat.AlbedoTexturePath);
                 
+                // PBR Properties
+                stream.write(reinterpret_cast<const char*>(&mat.MetallicFactor), sizeof(float));
+                stream.write(reinterpret_cast<const char*>(&mat.RoughnessFactor), sizeof(float));
+                SerializerUtils::WriteString(stream, mat.MetallicRoughnessTexturePath);
+                
+                // Additional Maps
+                SerializerUtils::WriteString(stream, mat.NormalTexturePath);
+                SerializerUtils::WriteString(stream, mat.OcclusionTexturePath);
+                
+                // Emission
+                stream.write(reinterpret_cast<const char*>(&mat.EmissiveFactor), sizeof(glm::vec3));
+                SerializerUtils::WriteString(stream, mat.EmissiveTexturePath);
+                
+                // Alpha & Render settings
                 uint32_t modeVal = static_cast<uint32_t>(mat.Mode);
                 stream.write(reinterpret_cast<const char*>(&modeVal), sizeof(uint32_t));
-                
                 stream.write(reinterpret_cast<const char*>(&mat.AlphaCutoff), sizeof(float));
                 
                 uint8_t doubleSidedVal = mat.DoubleSided ? 1 : 0;
@@ -339,13 +354,28 @@ namespace Nox
             for (uint32_t i = 0; i < matCount; i++)
             {
                 SerializerUtils::ReadString(stream, outMaterialList[i].Name);
+                
+                // Base Color
                 stream.read(reinterpret_cast<char*>(&outMaterialList[i].AlbedoColor), sizeof(glm::vec4));
                 SerializerUtils::ReadString(stream, outMaterialList[i].AlbedoTexturePath);
                 
+                // PBR Properties
+                stream.read(reinterpret_cast<char*>(&outMaterialList[i].MetallicFactor), sizeof(float));
+                stream.read(reinterpret_cast<char*>(&outMaterialList[i].RoughnessFactor), sizeof(float));
+                SerializerUtils::ReadString(stream, outMaterialList[i].MetallicRoughnessTexturePath);
+                
+                // Additional Maps
+                SerializerUtils::ReadString(stream, outMaterialList[i].NormalTexturePath);
+                SerializerUtils::ReadString(stream, outMaterialList[i].OcclusionTexturePath);
+                
+                // Emission
+                stream.read(reinterpret_cast<char*>(&outMaterialList[i].EmissiveFactor), sizeof(glm::vec3));
+                SerializerUtils::ReadString(stream, outMaterialList[i].EmissiveTexturePath);
+                
+                // Alpha & Render settings
                 uint32_t modeVal = 0;
                 stream.read(reinterpret_cast<char*>(&modeVal), sizeof(uint32_t));
                 outMaterialList[i].Mode = static_cast<AlphaMode>(modeVal);
-                
                 stream.read(reinterpret_cast<char*>(&outMaterialList[i].AlphaCutoff), sizeof(float));
                 
                 uint8_t doubleSidedVal = 0;

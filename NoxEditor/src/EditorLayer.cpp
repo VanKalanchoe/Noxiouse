@@ -566,8 +566,21 @@ namespace Nox
                                     auto& matComp = childEntity.AddComponent<MaterialComponent>();
                                     const auto& matData = meshAsset->GetMaterial(i);
 
+                                    // Base
                                     matComp.AlbedoColors = {matData.AlbedoColor};
                                     matComp.AlbedoMaps = {getOrImportTextureHandle(matData.AlbedoTexturePath)};
+                                    
+                                    // PBR
+                                    matComp.MetallicFactors = {matData.MetallicFactor};
+                                    matComp.RoughnessFactors = {matData.RoughnessFactor};
+                                    matComp.MetallicRoughnessMaps = {getOrImportTextureHandle(matData.MetallicRoughnessTexturePath)};
+                                    matComp.NormalMaps = {getOrImportTextureHandle(matData.NormalTexturePath)};
+                                    matComp.OcclusionMaps = {getOrImportTextureHandle(matData.OcclusionTexturePath)};
+                        
+                                    // Emission
+                                    matComp.EmissiveFactors = {matData.EmissiveFactor};
+                                    matComp.EmissiveMaps = {getOrImportTextureHandle(matData.EmissiveTexturePath)};
+                                    
                                     matComp.Modes = {matData.Mode};
                                     matComp.AlphaCutoffs = {matData.AlphaCutoff};
                                     matComp.DoubleSidedFlags = {matData.DoubleSided};
@@ -592,6 +605,16 @@ namespace Nox
                                     const auto& matData = meshAsset->GetMaterial(0);
                                     matComp.AlbedoColors = {matData.AlbedoColor};
                                     matComp.AlbedoMaps = {getOrImportTextureHandle(matData.AlbedoTexturePath)};
+                                    
+                                    matComp.MetallicFactors = {matData.MetallicFactor};
+                                    matComp.RoughnessFactors = {matData.RoughnessFactor};
+                                    matComp.MetallicRoughnessMaps = {getOrImportTextureHandle(matData.MetallicRoughnessTexturePath)};
+                                    matComp.NormalMaps = {getOrImportTextureHandle(matData.NormalTexturePath)};
+                                    matComp.OcclusionMaps = {getOrImportTextureHandle(matData.OcclusionTexturePath)};
+                        
+                                    matComp.EmissiveFactors = {matData.EmissiveFactor};
+                                    matComp.EmissiveMaps = {getOrImportTextureHandle(matData.EmissiveTexturePath)};
+                                    
                                     matComp.Modes = {matData.Mode};
                                     matComp.AlphaCutoffs = {matData.AlphaCutoff};
                                     matComp.DoubleSidedFlags = {matData.DoubleSided};
@@ -599,6 +622,9 @@ namespace Nox
                                 else
                                 {
                                     matComp.AlbedoColors = {glm::vec4(1.0f)};
+                                    matComp.MetallicFactors = {1.0f};
+                                    matComp.RoughnessFactors = {1.0f};
+                                    matComp.EmissiveFactors = {glm::vec3(0.0f)};
                                 }
 
                                 tryAttachAnimator(newEntity);
@@ -621,6 +647,15 @@ namespace Nox
                                 size_t subMeshCount = staticMeshAsset->GetSubMeshCount();
                                 matComp.AlbedoColors.resize(subMeshCount);
                                 matComp.AlbedoMaps.resize(subMeshCount, 0);
+                                
+                                matComp.MetallicFactors.resize(subMeshCount, 1.0f);
+                                matComp.RoughnessFactors.resize(subMeshCount, 1.0f);
+                                matComp.MetallicRoughnessMaps.resize(subMeshCount, 0);
+                                matComp.NormalMaps.resize(subMeshCount, 0);
+                                matComp.OcclusionMaps.resize(subMeshCount, 0);
+                                matComp.EmissiveFactors.resize(subMeshCount, glm::vec3(0.0f));
+                                matComp.EmissiveMaps.resize(subMeshCount, 0);
+                                
                                 matComp.Modes.resize(subMeshCount, AlphaMode::Opaque);
                                 matComp.AlphaCutoffs.resize(subMeshCount, 0.5f);
                                 matComp.DoubleSidedFlags.resize(subMeshCount, false);
@@ -632,6 +667,16 @@ namespace Nox
 
                                     matComp.AlbedoColors[i] = matData.AlbedoColor;
                                     matComp.AlbedoMaps[i] = getOrImportTextureHandle(matData.AlbedoTexturePath);
+                                    
+                                    matComp.MetallicFactors[i] = matData.MetallicFactor;
+                                    matComp.RoughnessFactors[i] = matData.RoughnessFactor;
+                                    matComp.MetallicRoughnessMaps[i] = getOrImportTextureHandle(matData.MetallicRoughnessTexturePath);
+                                    matComp.NormalMaps[i] = getOrImportTextureHandle(matData.NormalTexturePath);
+                                    matComp.OcclusionMaps[i] = getOrImportTextureHandle(matData.OcclusionTexturePath);
+                        
+                                    matComp.EmissiveFactors[i] = matData.EmissiveFactor;
+                                    matComp.EmissiveMaps[i] = getOrImportTextureHandle(matData.EmissiveTexturePath);
+                                    
                                     matComp.Modes[i] = matData.Mode;
                                     matComp.AlphaCutoffs[i] = matData.AlphaCutoff;
                                     matComp.DoubleSidedFlags[i] = matData.DoubleSided;

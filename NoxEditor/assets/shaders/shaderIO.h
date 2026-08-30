@@ -105,12 +105,18 @@ struct UniformBufferObject
     uint imageHeapIndexOffset;
     uint finalImageIndex;
 
-    uint entityTextureIndex; // Heap index of m_entityResolveReference
+    uint entityTextureIndex; // Heap index of m_entityResolveReference for edge detection outline
+
+    // PBR IBL
+    uint irradianceMapIndex;
+    uint prefilteredMapIndex;
+    uint brdfLutIndex;
 };
 
 struct Vertex
 {
     vec3 pos;
+    vec3 normal;
     vec2 texCoord;
     
     uvec4 boneIDs;
@@ -135,6 +141,16 @@ struct InstanceData
     // Material
     vec4 albedoColor;
     uint32_t albedoTextureIndex;
+
+    float metallicFactor;
+    float roughnessFactor;
+    uint32_t metallicRoughnessTextureIndex;
+
+    uint32_t normalTextureIndex;
+    uint32_t occlusionTextureIndex;
+
+    vec3 emissiveFactor;
+    uint32_t emissiveTextureIndex;
 
     uint32_t alphaMode;   // 0 = Opaque, 1 = Mask, 2 = Blend
     float alphaCutoff;
