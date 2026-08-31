@@ -9,12 +9,6 @@
 
 namespace Nox
 {
-    struct TextureSpecification
-    {
-        bool flip = false;
-        bool generateMips = true;
-    };
-    
     struct TextureData
     {
         uint32_t Width = 0;

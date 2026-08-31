@@ -580,28 +580,54 @@ namespace Nox
             ImGui::Text("Mesh Asset");
         });
 
-        DrawComponent<MaterialComponent>("Material", entity, [](auto& component)
+     DrawComponent<MaterialComponent>("Material", entity, [](auto& component)
 {
     // Ensure all vectors are synchronized in size if they were mismatched or newly created
-    size_t slotCount = component.AlbedoMaps.size();
-    if (slotCount == 0 && (!component.AlbedoColors.empty() || !component.Modes.empty()))
+    size_t slotCount = component.BaseColorMaps.size();
+    if (slotCount == 0 && (!component.BaseColorFactors.empty() || !component.Modes.empty()))
     {
-        slotCount = std::max({ component.AlbedoColors.size(), component.Modes.size(), component.AlphaCutoffs.size(), component.DoubleSidedFlags.size() });
-        component.AlbedoMaps.resize(slotCount, 0);
+        slotCount = std::max({ component.BaseColorFactors.size(), component.MetallicFactors.size(), component.RoughnessFactors.size(), component.MetallicRoughnessMaps.size(), component.PhysicalDescriptorTextureSets.size(), component.NormalMaps.size(), component.NormalTextureSets.size(), component.OcclusionMaps.size(), component.OcclusionTextureSets.size(), component.EmissiveFactors.size(), component.EmissiveMaps.size(), component.EmissiveTextureSets.size(), component.EmissiveStrengths.size(), component.Modes.size(), component.AlphaCutoffs.size(), component.DoubleSidedFlags.size() });
+        component.BaseColorMaps.resize(slotCount, 0);
     }
     
     // Fallback if completely empty
     if (slotCount == 0)
     {
         slotCount = 1;
-        component.AlbedoColors.push_back(glm::vec4(1.0f));
-        component.AlbedoMaps.push_back(0);
+        component.BaseColorFactors.push_back(glm::vec4(1.0f));
+        component.BaseColorMaps.push_back(0);
+        component.BaseColorTextureSets.push_back(0);
+        component.MetallicFactors.push_back(1.0f);
+        component.RoughnessFactors.push_back(1.0f);
+        component.MetallicRoughnessMaps.push_back(0);
+        component.PhysicalDescriptorTextureSets.push_back(0);
+        component.NormalMaps.push_back(0);
+        component.NormalTextureSets.push_back(0);
+        component.OcclusionMaps.push_back(0);
+        component.OcclusionTextureSets.push_back(0);
+        component.EmissiveFactors.push_back(glm::vec3(0.0f));
+        component.EmissiveMaps.push_back(0);
+        component.EmissiveTextureSets.push_back(0);
+        component.EmissiveStrengths.push_back(1.0f);
         component.Modes.push_back(AlphaMode::Opaque);
         component.AlphaCutoffs.push_back(0.5f);
         component.DoubleSidedFlags.push_back(false);
     }
 
-    if (component.AlbedoColors.size() < slotCount) component.AlbedoColors.resize(slotCount, glm::vec4(1.0f));
+    if (component.BaseColorFactors.size() < slotCount) component.BaseColorFactors.resize(slotCount, glm::vec4(1.0f));
+    if (component.BaseColorTextureSets.size() < slotCount) component.BaseColorTextureSets.resize(slotCount, 0);
+    if (component.MetallicFactors.size() < slotCount) component.MetallicFactors.resize(slotCount, 1.0f);
+    if (component.RoughnessFactors.size() < slotCount) component.RoughnessFactors.resize(slotCount, 1.0f);
+    if (component.MetallicRoughnessMaps.size() < slotCount) component.MetallicRoughnessMaps.resize(slotCount, 0);
+    if (component.PhysicalDescriptorTextureSets.size() < slotCount) component.PhysicalDescriptorTextureSets.resize(slotCount, 0);
+    if (component.NormalMaps.size() < slotCount) component.NormalMaps.resize(slotCount, 0);
+    if (component.NormalTextureSets.size() < slotCount) component.NormalTextureSets.resize(slotCount, 0);
+    if (component.OcclusionMaps.size() < slotCount) component.OcclusionMaps.resize(slotCount, 0);
+    if (component.OcclusionTextureSets.size() < slotCount) component.OcclusionTextureSets.resize(slotCount, 0);
+    if (component.EmissiveFactors.size() < slotCount) component.EmissiveFactors.resize(slotCount, glm::vec3(0.0f));
+    if (component.EmissiveMaps.size() < slotCount) component.EmissiveMaps.resize(slotCount, 0);
+    if (component.EmissiveTextureSets.size() < slotCount) component.EmissiveTextureSets.resize(slotCount, 0);
+    if (component.EmissiveStrengths.size() < slotCount) component.EmissiveStrengths.resize(slotCount, 1.0f);
     if (component.Modes.size() < slotCount) component.Modes.resize(slotCount, AlphaMode::Opaque);
     if (component.AlphaCutoffs.size() < slotCount) component.AlphaCutoffs.resize(slotCount, 0.5f);
     if (component.DoubleSidedFlags.size() < slotCount) component.DoubleSidedFlags.resize(slotCount, false);
@@ -610,39 +636,9 @@ namespace Nox
     ImGui::Spacing();
     ImGui::Separator();
 
-    for (size_t i = 0; i < slotCount; i++)
+    // Helper lambda for drawing texture slots with drag-drop target & clear button
+    auto drawTextureSlot = [](const char* labelName, AssetHandle& texHandle)
     {
-        ImGui::PushID(static_cast<int>(i));
-
-        ImGui::Text("Submesh / Slot [%zu]", i);
-        
-        // 1. Albedo Color per slot
-        ImGui::ColorEdit4("Albedo Color", glm::value_ptr(component.AlbedoColors[i]));
-
-        // 2. Alpha Mode dropdown
-        const char* alphaModeStrings[] = { "Opaque", "Mask", "Blend" };
-        int currentMode = static_cast<int>(component.Modes[i]);
-        if (ImGui::Combo("Alpha Mode", &currentMode, alphaModeStrings, 3))
-        {
-            component.Modes[i] = static_cast<AlphaMode>(currentMode);
-        }
-
-        // 3. Alpha Cutoff (Visible only for Mask mode)
-        if (component.Modes[i] == AlphaMode::Mask)
-        {
-            ImGui::DragFloat("Alpha Cutoff", &component.AlphaCutoffs[i], 0.005f, 0.0f, 1.0f);
-        }
-
-        // 4. Double Sided Flag
-        bool doubleSided = component.DoubleSidedFlags[i];
-        if (ImGui::Checkbox("Double Sided", &doubleSided))
-        {
-            component.DoubleSidedFlags[i] = doubleSided;
-        }
-
-        // 5. Albedo Texture Slot UI
-        ImGui::Spacing();
-        AssetHandle& texHandle = component.AlbedoMaps[i];
         std::string label = "None";
         bool isTextureValid = false;
 
@@ -660,7 +656,7 @@ namespace Nox
             }
         }
 
-        ImGui::Text("Albedo Texture:");
+        ImGui::Text("%s:", labelName);
         ImGui::SameLine();
 
         ImVec2 buttonLabelSize = ImGui::CalcTextSize(label.c_str());
@@ -696,6 +692,70 @@ namespace Nox
                 texHandle = 0;
             }
         }
+    };
+
+    for (size_t i = 0; i < slotCount; i++)
+    {
+        ImGui::PushID(static_cast<int>(i));
+
+        ImGui::Text("Submesh / Slot [%zu]", i);
+        
+        // 1. Base Color
+        ImGui::ColorEdit4("Base Color Factor", glm::value_ptr(component.BaseColorFactors[i]));
+        drawTextureSlot("Base Color Texture", component.BaseColorMaps[i]);
+        ImGui::DragInt("Base Color Texture Set", &component.BaseColorTextureSets[i], 1, 0, 10);
+
+        ImGui::Spacing();
+        ImGui::Separator();
+
+        // 2. PBR Properties
+        ImGui::DragFloat("Metallic Factor", &component.MetallicFactors[i], 0.01f, 0.0f, 1.0f);
+        ImGui::DragFloat("Roughness Factor", &component.RoughnessFactors[i], 0.01f, 0.0f, 1.0f);
+        drawTextureSlot("Metallic-Roughness Map", component.MetallicRoughnessMaps[i]);
+        ImGui::DragInt("Physical Descriptor Texture Set", &component.PhysicalDescriptorTextureSets[i], 1, 0, 10);
+
+        ImGui::Spacing();
+        ImGui::Separator();
+
+        // 3. Additional Maps
+        drawTextureSlot("Normal Map", component.NormalMaps[i]);
+        ImGui::DragInt("Normal Texture Set", &component.NormalTextureSets[i], 1, 0, 10);
+
+        drawTextureSlot("Occlusion Map", component.OcclusionMaps[i]);
+        ImGui::DragInt("Occlusion Texture Set", &component.OcclusionTextureSets[i], 1, 0, 10);
+
+        ImGui::Spacing();
+        ImGui::Separator();
+
+        // 4. Emission
+        ImGui::ColorEdit3("Emissive Factor", glm::value_ptr(component.EmissiveFactors[i]));
+        drawTextureSlot("Emissive Map", component.EmissiveMaps[i]);
+        ImGui::DragInt("Emissive Texture Set", &component.EmissiveTextureSets[i], 1, 0, 10);
+        ImGui::DragFloat("Emissive Strength", &component.EmissiveStrengths[i], 0.1f, 0.0f, 100.0f);
+
+        ImGui::Spacing();
+        ImGui::Separator();
+
+        // 5. Alpha Mode dropdown
+        const char* alphaModeStrings[] = { "Opaque", "Mask", "Blend" };
+        int currentMode = static_cast<int>(component.Modes[i]);
+        if (ImGui::Combo("Alpha Mode", &currentMode, alphaModeStrings, 3))
+        {
+            component.Modes[i] = static_cast<AlphaMode>(currentMode);
+        }
+
+        // 6. Alpha Cutoff (Visible only for Mask mode)
+        if (component.Modes[i] == AlphaMode::Mask)
+        {
+            ImGui::DragFloat("Alpha Cutoff", &component.AlphaCutoffs[i], 0.005f, 0.0f, 1.0f);
+        }
+
+        // 7. Double Sided Flag
+        bool doubleSided = component.DoubleSidedFlags[i];
+        if (ImGui::Checkbox("Double Sided", &doubleSided))
+        {
+            component.DoubleSidedFlags[i] = doubleSided;
+        }
 
         ImGui::Spacing();
         ImGui::Separator();
@@ -704,8 +764,21 @@ namespace Nox
 
     if (ImGui::Button("+ Add Slot"))
     {
-        component.AlbedoMaps.push_back(0);
-        component.AlbedoColors.push_back(glm::vec4(1.0f));
+        component.BaseColorFactors.push_back(glm::vec4(1.0f));
+        component.BaseColorMaps.push_back(0);
+        component.BaseColorTextureSets.push_back(0);
+        component.MetallicFactors.push_back(1.0f);
+        component.RoughnessFactors.push_back(1.0f);
+        component.MetallicRoughnessMaps.push_back(0);
+        component.PhysicalDescriptorTextureSets.push_back(0);
+        component.NormalMaps.push_back(0);
+        component.NormalTextureSets.push_back(0);
+        component.OcclusionMaps.push_back(0);
+        component.OcclusionTextureSets.push_back(0);
+        component.EmissiveFactors.push_back(glm::vec3(0.0f));
+        component.EmissiveMaps.push_back(0);
+        component.EmissiveTextureSets.push_back(0);
+        component.EmissiveStrengths.push_back(1.0f);
         component.Modes.push_back(AlphaMode::Opaque);
         component.AlphaCutoffs.push_back(0.5f);
         component.DoubleSidedFlags.push_back(false);
@@ -713,8 +786,21 @@ namespace Nox
     ImGui::SameLine();
     if (ImGui::Button("- Remove Slot") && slotCount > 1)
     {
-        component.AlbedoMaps.pop_back();
-        component.AlbedoColors.pop_back();
+        component.BaseColorFactors.pop_back();
+        component.BaseColorMaps.pop_back();
+        component.BaseColorTextureSets.pop_back();
+        component.MetallicFactors.pop_back();
+        component.RoughnessFactors.pop_back();
+        component.MetallicRoughnessMaps.pop_back();
+        component.PhysicalDescriptorTextureSets.pop_back();
+        component.NormalMaps.pop_back();
+        component.NormalTextureSets.pop_back();
+        component.OcclusionMaps.pop_back();
+        component.OcclusionTextureSets.pop_back();
+        component.EmissiveFactors.pop_back();
+        component.EmissiveMaps.pop_back();
+        component.EmissiveTextureSets.pop_back();
+        component.EmissiveStrengths.pop_back();
         component.Modes.pop_back();
         component.AlphaCutoffs.pop_back();
         component.DoubleSidedFlags.pop_back();

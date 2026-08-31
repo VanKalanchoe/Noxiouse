@@ -26,9 +26,11 @@ namespace Nox
         void Init();
         void Update();
         void ReimportAsset(AssetHandle handle);
-
+        
         void ImportAsset(const std::filesystem::path& sourcePath, const std::filesystem::path& destPath, AssetType targetType = AssetType::None);
-
+        // New overload for textures with custom spec (also void)
+        void ImportAsset(const std::filesystem::path& sourcePath, const TextureSpecification& spec, const std::filesystem::path& destPath = {});
+        
         const AssetMetadata GetMetadata(AssetHandle handle) const;
         const std::filesystem::path GetFilePath(AssetHandle handle) const;
 

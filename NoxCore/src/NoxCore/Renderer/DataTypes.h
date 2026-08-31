@@ -44,21 +44,28 @@ namespace Nox
         std::string Name;
         
         // Base Color
-        glm::vec4 AlbedoColor = glm::vec4(1.0f);
-        std::string AlbedoTexturePath;
+        glm::vec4 BaseColorFactor = glm::vec4(1.0f);
+        std::string BaseColorTexturePath;
+        int32_t BaseColorTextureSet = 0;
         
         // PBR Properties
         float MetallicFactor = 1.0f;
         float RoughnessFactor = 1.0f;
         std::string MetallicRoughnessTexturePath;
+        int32_t PhysicalDescriptorTextureSet = 0;
         
         // Additional Maps
         std::string NormalTexturePath;
+        int32_t NormalTextureSet = 0;
+        
         std::string OcclusionTexturePath;
+        int32_t OcclusionTextureSet = 0;
         
         // Emission
         glm::vec3 EmissiveFactor = glm::vec3(0.0f);
         std::string EmissiveTexturePath;
+        int32_t EmissiveTextureSet = 0;
+        float emissiveStrength = 1.0f;
         
         // Alpha properties
         AlphaMode Mode = AlphaMode::Opaque;

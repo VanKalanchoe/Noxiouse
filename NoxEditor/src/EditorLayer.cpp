@@ -409,7 +409,7 @@ namespace Nox
                             entityName = "Mesh Entity";
 
                         auto getOrImportTextureHandle =
-                            [&](const std::string& texturePath) -> AssetHandle
+                            [&](const std::string& texturePath, bool sRGB = true) -> AssetHandle
                         {
                             if (texturePath.empty())
                                 return 0;
@@ -479,8 +479,11 @@ namespace Nox
                                 );
                                 return 0;
                             }
-
-                            assetManager->ImportAsset(relPath, {}, {});
+                                
+                            TextureSpecification spec;
+                            spec.format = sRGB ? NRI::ImageFormat::SRGBA8 : NRI::ImageFormat::RGBA8;
+                                
+                            assetManager->ImportAsset(relPath, spec, {});
 
                             // Find newly imported asset.
                             for (const auto& [texHandle, meta] :
@@ -567,19 +570,27 @@ namespace Nox
                                     const auto& matData = meshAsset->GetMaterial(i);
 
                                     // Base
-                                    matComp.AlbedoColors = {matData.AlbedoColor};
-                                    matComp.AlbedoMaps = {getOrImportTextureHandle(matData.AlbedoTexturePath)};
+                                    matComp.BaseColorFactors = {matData.BaseColorFactor};
+                                    matComp.BaseColorMaps = {getOrImportTextureHandle(matData.BaseColorTexturePath, true)};
+                                    matComp.BaseColorTextureSets = {matData.BaseColorTextureSet};
                                     
                                     // PBR
                                     matComp.MetallicFactors = {matData.MetallicFactor};
                                     matComp.RoughnessFactors = {matData.RoughnessFactor};
-                                    matComp.MetallicRoughnessMaps = {getOrImportTextureHandle(matData.MetallicRoughnessTexturePath)};
-                                    matComp.NormalMaps = {getOrImportTextureHandle(matData.NormalTexturePath)};
-                                    matComp.OcclusionMaps = {getOrImportTextureHandle(matData.OcclusionTexturePath)};
-                        
+                                    matComp.MetallicRoughnessMaps = {getOrImportTextureHandle(matData.MetallicRoughnessTexturePath, false)};
+                                    matComp.PhysicalDescriptorTextureSets = {matData.PhysicalDescriptorTextureSet};
+                                    
+                                    matComp.NormalMaps = {getOrImportTextureHandle(matData.NormalTexturePath, false)};
+                                    matComp.NormalTextureSets = {matData.NormalTextureSet};
+                                    
+                                    matComp.OcclusionMaps = {getOrImportTextureHandle(matData.OcclusionTexturePath, false)};
+                                    matComp.OcclusionTextureSets = {matData.OcclusionTextureSet};
+                                    
                                     // Emission
                                     matComp.EmissiveFactors = {matData.EmissiveFactor};
-                                    matComp.EmissiveMaps = {getOrImportTextureHandle(matData.EmissiveTexturePath)};
+                                    matComp.EmissiveMaps = {getOrImportTextureHandle(matData.EmissiveTexturePath, true)};
+                                    matComp.EmissiveTextureSets = {matData.EmissiveTextureSet};
+                                    matComp.EmissiveStrengths = {matData.emissiveStrength};
                                     
                                     matComp.Modes = {matData.Mode};
                                     matComp.AlphaCutoffs = {matData.AlphaCutoff};
@@ -603,17 +614,29 @@ namespace Nox
                                 if (meshAsset && !meshAsset->GetMaterials().empty())
                                 {
                                     const auto& matData = meshAsset->GetMaterial(0);
-                                    matComp.AlbedoColors = {matData.AlbedoColor};
-                                    matComp.AlbedoMaps = {getOrImportTextureHandle(matData.AlbedoTexturePath)};
                                     
+                                    // Base
+                                    matComp.BaseColorFactors = {matData.BaseColorFactor};
+                                    matComp.BaseColorMaps = {getOrImportTextureHandle(matData.BaseColorTexturePath, true)};
+                                    matComp.BaseColorTextureSets = {matData.BaseColorTextureSet};
+                                    
+                                    // PBR
                                     matComp.MetallicFactors = {matData.MetallicFactor};
                                     matComp.RoughnessFactors = {matData.RoughnessFactor};
-                                    matComp.MetallicRoughnessMaps = {getOrImportTextureHandle(matData.MetallicRoughnessTexturePath)};
-                                    matComp.NormalMaps = {getOrImportTextureHandle(matData.NormalTexturePath)};
-                                    matComp.OcclusionMaps = {getOrImportTextureHandle(matData.OcclusionTexturePath)};
-                        
+                                    matComp.MetallicRoughnessMaps = {getOrImportTextureHandle(matData.MetallicRoughnessTexturePath, false)};
+                                    matComp.PhysicalDescriptorTextureSets = {matData.PhysicalDescriptorTextureSet};
+                                    
+                                    matComp.NormalMaps = {getOrImportTextureHandle(matData.NormalTexturePath, false)};
+                                    matComp.NormalTextureSets = {matData.NormalTextureSet};
+                                    
+                                    matComp.OcclusionMaps = {getOrImportTextureHandle(matData.OcclusionTexturePath, false)};
+                                    matComp.OcclusionTextureSets = {matData.OcclusionTextureSet};
+                                    
+                                    // Emission
                                     matComp.EmissiveFactors = {matData.EmissiveFactor};
-                                    matComp.EmissiveMaps = {getOrImportTextureHandle(matData.EmissiveTexturePath)};
+                                    matComp.EmissiveMaps = {getOrImportTextureHandle(matData.EmissiveTexturePath, true)};
+                                    matComp.EmissiveTextureSets = {matData.EmissiveTextureSet};
+                                    matComp.EmissiveStrengths = {matData.emissiveStrength};
                                     
                                     matComp.Modes = {matData.Mode};
                                     matComp.AlphaCutoffs = {matData.AlphaCutoff};
@@ -621,7 +644,7 @@ namespace Nox
                                 }
                                 else
                                 {
-                                    matComp.AlbedoColors = {glm::vec4(1.0f)};
+                                    matComp.BaseColorFactors = {glm::vec4(1.0f)};
                                     matComp.MetallicFactors = {1.0f};
                                     matComp.RoughnessFactors = {1.0f};
                                     matComp.EmissiveFactors = {glm::vec3(0.0f)};
@@ -645,16 +668,25 @@ namespace Nox
                             if (staticMeshAsset)
                             {
                                 size_t subMeshCount = staticMeshAsset->GetSubMeshCount();
-                                matComp.AlbedoColors.resize(subMeshCount);
-                                matComp.AlbedoMaps.resize(subMeshCount, 0);
+                                matComp.BaseColorFactors.resize(subMeshCount);
+                                matComp.BaseColorMaps.resize(subMeshCount, 0);
+                                matComp.BaseColorTextureSets.resize(subMeshCount, 0);
                                 
                                 matComp.MetallicFactors.resize(subMeshCount, 1.0f);
                                 matComp.RoughnessFactors.resize(subMeshCount, 1.0f);
                                 matComp.MetallicRoughnessMaps.resize(subMeshCount, 0);
+                                matComp.PhysicalDescriptorTextureSets.resize(subMeshCount, 0);
+                                
                                 matComp.NormalMaps.resize(subMeshCount, 0);
+                                matComp.NormalTextureSets.resize(subMeshCount, 0);
+                                
                                 matComp.OcclusionMaps.resize(subMeshCount, 0);
+                                matComp.OcclusionTextureSets.resize(subMeshCount, 0);
+                                
                                 matComp.EmissiveFactors.resize(subMeshCount, glm::vec3(0.0f));
                                 matComp.EmissiveMaps.resize(subMeshCount, 0);
+                                matComp.EmissiveTextureSets.resize(subMeshCount, 0);
+                                matComp.EmissiveStrengths.resize(subMeshCount, 1.0f);
                                 
                                 matComp.Modes.resize(subMeshCount, AlphaMode::Opaque);
                                 matComp.AlphaCutoffs.resize(subMeshCount, 0.5f);
@@ -665,17 +697,25 @@ namespace Nox
                                 {
                                     const auto& matData = staticMeshAsset->GetMaterial(i);
 
-                                    matComp.AlbedoColors[i] = matData.AlbedoColor;
-                                    matComp.AlbedoMaps[i] = getOrImportTextureHandle(matData.AlbedoTexturePath);
+                                    matComp.BaseColorFactors[i] = matData.BaseColorFactor;
+                                    matComp.BaseColorMaps[i] = getOrImportTextureHandle(matData.BaseColorTexturePath, true);
+                                    matComp.BaseColorTextureSets[i] = matData.BaseColorTextureSet;
                                     
                                     matComp.MetallicFactors[i] = matData.MetallicFactor;
                                     matComp.RoughnessFactors[i] = matData.RoughnessFactor;
-                                    matComp.MetallicRoughnessMaps[i] = getOrImportTextureHandle(matData.MetallicRoughnessTexturePath);
-                                    matComp.NormalMaps[i] = getOrImportTextureHandle(matData.NormalTexturePath);
-                                    matComp.OcclusionMaps[i] = getOrImportTextureHandle(matData.OcclusionTexturePath);
-                        
+                                    matComp.MetallicRoughnessMaps[i] = getOrImportTextureHandle(matData.MetallicRoughnessTexturePath, false);
+                                    matComp.PhysicalDescriptorTextureSets[i] = matData.PhysicalDescriptorTextureSet;
+                                    
+                                    matComp.NormalMaps[i] = getOrImportTextureHandle(matData.NormalTexturePath, false);
+                                    matComp.NormalTextureSets[i] = matData.NormalTextureSet;
+                                    
+                                    matComp.OcclusionMaps[i] = getOrImportTextureHandle(matData.OcclusionTexturePath, false);
+                                    matComp.OcclusionTextureSets[i] = matData.OcclusionTextureSet;
+                                    
                                     matComp.EmissiveFactors[i] = matData.EmissiveFactor;
-                                    matComp.EmissiveMaps[i] = getOrImportTextureHandle(matData.EmissiveTexturePath);
+                                    matComp.EmissiveMaps[i] = getOrImportTextureHandle(matData.EmissiveTexturePath, true);
+                                    matComp.EmissiveTextureSets[i] = matData.EmissiveTextureSet;
+                                    matComp.EmissiveStrengths[i] = matData.emissiveStrength;
                                     
                                     matComp.Modes[i] = matData.Mode;
                                     matComp.AlphaCutoffs[i] = matData.AlphaCutoff;

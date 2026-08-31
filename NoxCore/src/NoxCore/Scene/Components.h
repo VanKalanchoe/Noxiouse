@@ -95,22 +95,29 @@ namespace Nox
     struct MaterialComponent
     {
         // Base Color
-        std::vector<glm::vec4> AlbedoColors = { glm::vec4(1.0f) };
-        std::vector<AssetHandle> AlbedoMaps = { 0 };
+        std::vector<glm::vec4> BaseColorFactors = { glm::vec4(1.0f) };
+        std::vector<AssetHandle> BaseColorMaps = { 0 };
+        std::vector<int32_t> BaseColorTextureSets = { 0 };
 
         // PBR Properties
         std::vector<float> MetallicFactors = { 1.0f };
         std::vector<float> RoughnessFactors = { 1.0f };
         std::vector<AssetHandle> MetallicRoughnessMaps = { 0 };
-
+        std::vector<int32_t> PhysicalDescriptorTextureSets = { 0 };
+        
         // Additional Maps
         std::vector<AssetHandle> NormalMaps = { 0 };
+        std::vector<int32_t> NormalTextureSets = { 0 };
+        
         std::vector<AssetHandle> OcclusionMaps = { 0 };
-
+        std::vector<int32_t> OcclusionTextureSets = { 0 };
+        
         // Emission
         std::vector<glm::vec3> EmissiveFactors = { glm::vec3(0.0f) };
         std::vector<AssetHandle> EmissiveMaps = { 0 };
-
+        std::vector<int32_t> EmissiveTextureSets = { 0 };
+        std::vector<float> EmissiveStrengths = { 1.0f };
+        
         // Settings
         std::vector<AlphaMode> Modes = { AlphaMode::Opaque };
         std::vector<float> AlphaCutoffs = { 0.5f };
@@ -118,7 +125,7 @@ namespace Nox
     
         MaterialComponent() = default;
         MaterialComponent(const MaterialComponent&) = default;
-        MaterialComponent(const glm::vec4 color) : AlbedoColors{ color } {}
+        MaterialComponent(const glm::vec4 color) : BaseColorFactors{ color } {}
     };
     
     // Holds runtime animation state (tracks current time, playing animation, bone matrices)

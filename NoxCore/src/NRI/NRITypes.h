@@ -16,4 +16,16 @@ namespace NRI
         float width = 0.0f;
         float height = 0.0f;
     };
+    
+    enum class CompareOp : uint8_t
+    {
+        Never = 0,
+        Less,
+        Equal,
+        LessOrEqual,
+        Greater,
+        NotEqual,
+        GreaterOrEqual,
+        Always
+    };
 }

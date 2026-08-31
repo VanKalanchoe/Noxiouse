@@ -1,23 +1,49 @@
 Scene: Untitled
 Entities:
-  - Entity: 3296592537850175689
+  - Entity: 3587782363137504778
     TagComponent:
-      Tag: pbr_spheres
+      Tag: DamagedHelmet
     TransformComponent:
       Translation: [0, 0, 0]
-      Rotation: [0, 0, 0]
+      Rotation: [1.5707964, 0, 0]
       Scale: [1, 1, 1]
     MeshComponent:
-      MeshHandle: 6934708091172960195
+      MeshHandle: 1201220582203156510
       SubmeshIndex: 0
     MaterialComponent:
-      AlbedoColors:
+      BaseColorFactor:
         - [1, 1, 1, 1]
-      AlbedoMaps:
+      BaseColorMaps:
+        - 5502795841815745084
+      BaseColorTextureSets:
         - 0
+      MetallicFactors:
+        - 1
+      RoughnessFactors:
+        - 1
+      MetallicRoughnessMaps:
+        - 2208457521952188714
+      PhysicalDescriptorTextureSets:
+        - 0
+      NormalMaps:
+        - 13756855256417977137
+      NormalTextureSets:
+        - 0
+      OcclusionMaps:
+        - 15219893477457504535
+      OcclusionTextureSets:
+        - 0
+      EmissiveFactors:
+        - [1, 1, 1]
+      EmissiveMaps:
+        - 11615630937579021506
+      EmissiveTextureSets:
+        - 0
+      EmissiveStrengths:
+        - 1
       Modes:
         - 0
       AlphaCutoffs:
         - 0.5
       DoubleSidedFlags:
-        - true
+        - false

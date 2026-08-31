@@ -10,11 +10,6 @@ namespace shaderio // Shader IO namespace -- shared layout between C++ and shade
 {
     using namespace glm; // GLSL-style types without the glm:: prefix inside the namespace
     #include "shaderIO.h"
-    
-    inline bool operator==(const shaderio::Vertex& other1, const shaderio::Vertex& other2)
-    {
-        return other1.pos == other2.pos  && other1.texCoord == other2.texCoord;
-    }
 }
 
 #include "NRI/NRI.h"

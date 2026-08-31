@@ -189,6 +189,27 @@ namespace Nox
             SerializeAssetRegistry();
         }
     }
+    
+    void EditorAssetManager::ImportAsset(const std::filesystem::path& sourcePath, const TextureSpecification& spec, const std::filesystem::path& destPath)
+    {
+        AssetHandle handle;
+        AssetMetadata metadata;
+        metadata.FilePath = destPath.empty() ? sourcePath : destPath;
+        metadata.SourceFilePath = sourcePath;
+        metadata.Type = AssetType::Texture2D;
+        metadata.TextureSpec = spec; // <-- Store spec in metadata
+
+        Ref<Asset> asset = AssetImporter::ImportAsset(handle, metadata);
+        if (asset)
+        {
+            asset->Handle = handle;
+            m_LoadedAssets[handle] = asset;
+            m_AssetRegistry[handle] = metadata;
+
+            ScanAndRegisterNewAssets();
+            SerializeAssetRegistry();
+        }
+    }
 
     const AssetMetadata EditorAssetManager::GetMetadata(AssetHandle handle) const
     {

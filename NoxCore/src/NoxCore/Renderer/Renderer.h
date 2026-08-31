@@ -4,18 +4,6 @@
 #include "Mesh.h"
 #include "PagedAllocator.h"
 
-namespace std
-{
-    template <>
-    struct hash<shaderio::Vertex>
-    {
-        size_t operator()(shaderio::Vertex const& vertex) const noexcept
-        {
-            return (hash<glm::vec3>()(vertex.pos) >> 1) ^ (hash<glm::vec2>()(vertex.texCoord) << 1);
-        }
-    };
-}
-
 const std::string MODEL_PATH = "assets/models/viking_room.obj";
 const std::string MODEL_PATH_GLTF = "assets/models/viking_room.glb";
 const std::string MODEL_PATH_GLTF_STANDFORD = "assets/models/stanford_bunny/stanford_bunny.gltf";

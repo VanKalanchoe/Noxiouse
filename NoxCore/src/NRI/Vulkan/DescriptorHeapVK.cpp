@@ -2,9 +2,69 @@
 #include "DeviceVK.h"
 #include "TextureVK.h"
 #include "BufferVK.h"
+#include "NoxCore/Core/core.h"
 
 namespace NRI
 {
+    vk::Filter filterToVK(Filter f)
+    {
+        switch (f)
+        {
+        case Filter::Linear : return vk::Filter::eLinear;
+        case Filter::Nearest : return vk::Filter::eNearest;
+        }
+        return vk::Filter::eLinear;
+    }
+    
+    vk::SamplerMipmapMode mipMapModeToVK(SamplerMipmapMode s)
+    {
+        switch (s)
+        {
+        case SamplerMipmapMode::Linear : return vk::SamplerMipmapMode::eLinear;
+        case SamplerMipmapMode::Nearest : return vk::SamplerMipmapMode::eNearest;
+        }
+    }
+    
+    vk::SamplerAddressMode adressModeToVK(SamplerAddressMode a)
+    {
+        switch (a)
+        {
+        case SamplerAddressMode::Repeat : return vk::SamplerAddressMode::eRepeat;
+        case SamplerAddressMode::ClampToEdge : return vk::SamplerAddressMode::eClampToEdge;
+        case SamplerAddressMode::ClampToBorder : return vk::SamplerAddressMode::eClampToBorder;
+        case SamplerAddressMode::MirrorClampToEdge : return vk::SamplerAddressMode::eMirrorClampToEdge;
+        case SamplerAddressMode::MirroredRepeat : return vk::SamplerAddressMode::eMirroredRepeat;
+        }
+    }
+    
+    vk::CompareOp compareToVK(CompareOp c)
+    {
+        switch (c)
+        {
+        case CompareOp::Never : return vk::CompareOp::eNever;
+        case CompareOp::Less : return vk::CompareOp::eLess;
+        case CompareOp::Equal : return vk::CompareOp::eEqual;
+        case CompareOp::LessOrEqual : return vk::CompareOp::eLessOrEqual;
+        case CompareOp::Greater : return vk::CompareOp::eGreater;
+        case CompareOp::NotEqual : return vk::CompareOp::eNotEqual;
+        case CompareOp::GreaterOrEqual : return vk::CompareOp::eGreaterOrEqual;
+        case CompareOp::Always : return vk::CompareOp::eAlways;
+        }
+    }
+    
+    vk::BorderColor borderColorToVK(BorderColor bc)
+    {
+        switch (bc)
+        {
+        case BorderColor::FloatTransparentBlack : return vk::BorderColor::eFloatTransparentBlack;
+        case BorderColor::IntTransparentBlack : return vk::BorderColor::eIntTransparentBlack;
+        case BorderColor::FloatOpaqueBlack : return vk::BorderColor::eFloatOpaqueBlack;
+        case BorderColor::IntOpaqueBlack : return vk::BorderColor::eIntOpaqueBlack;
+        case BorderColor::FloatOpaqueWhite : return vk::BorderColor::eFloatOpaqueWhite;
+        case BorderColor::IntOpaqueWhite : return vk::BorderColor::eIntOpaqueWhite;
+        }
+    }
+
     uint64_t DescriptorHeapVK::alignSize(uint64_t value, uint64_t alignment) const
     {
         return (value + alignment - 1) & ~(alignment - 1);
@@ -55,46 +115,38 @@ namespace NRI
         // Pre-populate samplers if this is a Sampler Heap
         if (m_type == DescriptorHeapType::Sampler)
         {
-            vk::PhysicalDeviceProperties properties = m_deviceVK.getPhysicalDevice().getProperties();
-            std::array<vk::SamplerCreateInfo, 2> samplerCreateInfos
+            if (desc.samplers.empty())
             {
-                vk::SamplerCreateInfo
-                {
-                    .magFilter = vk::Filter::eLinear,
-                    .minFilter = vk::Filter::eLinear,
-                    .mipmapMode = vk::SamplerMipmapMode::eLinear,
-                    .addressModeU = vk::SamplerAddressMode::eRepeat,
-                    .addressModeV = vk::SamplerAddressMode::eRepeat,
-                    .addressModeW = vk::SamplerAddressMode::eRepeat,
-                    .mipLodBias = 0.0f,
-                    .anisotropyEnable = vk::True,
-                    .maxAnisotropy = properties.limits.maxSamplerAnisotropy,
-                    .compareEnable = vk::False,
-                    .compareOp = vk::CompareOp::eAlways,
-                    .minLod = 0.0f, // static_cast<float>(mipLevels / 2);
-                    .maxLod = vk::LodClampNone
+                NOX_CORE_ASSERT(false, "Sampler heap descriptor has no samplers");
+            }
+            
+            std::vector<vk::SamplerCreateInfo> samplerCreateInfos;
+            samplerCreateInfos.reserve(desc.samplers.size());
+            
+            vk::PhysicalDeviceProperties properties = m_deviceVK.getPhysicalDevice().getProperties();
+            
+            for (const auto& s : desc.samplers)
+            {
+                samplerCreateInfos.push_back(vk::SamplerCreateInfo{
+                    .magFilter = filterToVK(s.magFilter),
+                    .minFilter = filterToVK(s.minFilter),
+                    .mipmapMode = mipMapModeToVK(s.mipmapMode),
+                    .addressModeU = adressModeToVK(s.addressModeU),
+                    .addressModeV = adressModeToVK(s.addressModeV),
+                    .addressModeW = adressModeToVK(s.addressModeW),
+                    .mipLodBias = s.mipLodBias,
+                    .anisotropyEnable = s.anisotropyEnable,
+                    .maxAnisotropy =  s.anisotropyEnable ? std::min(s.maxAnisotropy, properties.limits.maxSamplerAnisotropy) : 1.0f,
+                    .compareEnable = s.compareEnable,
+                    .compareOp = compareToVK(s.compareOp),
+                    .minLod = s.minLod, // static_cast<float>(mipLevels / 2);
+                    .maxLod = s.maxLod,
+                    .borderColor = borderColorToVK(s.borderColor),
                     /*.maxLod = (float)textures[0].mipLevels,*/
-                },
-                vk::SamplerCreateInfo
-                {
-                    .magFilter = vk::Filter::eNearest,
-                    .minFilter = vk::Filter::eNearest,
-                    .mipmapMode = vk::SamplerMipmapMode::eNearest,
-                    .addressModeU = vk::SamplerAddressMode::eRepeat,
-                    .addressModeV = vk::SamplerAddressMode::eRepeat,
-                    .addressModeW = vk::SamplerAddressMode::eRepeat,
-                    .mipLodBias = 0.0f,
-                    .anisotropyEnable = vk::True,
-                    .maxAnisotropy = properties.limits.maxSamplerAnisotropy,
-                    .compareEnable = vk::False,
-                    .compareOp = vk::CompareOp::eAlways,
-                    .minLod = 0.0f, // static_cast<float>(mipLevels / 2);
-                    .maxLod = vk::LodClampNone
-                    /*.maxLod = (float)textures[0].mipLevels,*/
-                }
-            };
+                });
+            }
 
-            std::array<vk::HostAddressRangeEXT, 2> hostAddressRangesSamplers{};
+            std::vector<vk::HostAddressRangeEXT> hostAddressRangesSamplers(samplerCreateInfos.size());
             for (size_t i = 0; i < samplerCreateInfos.size(); i++)
             {
                 hostAddressRangesSamplers[i] = {

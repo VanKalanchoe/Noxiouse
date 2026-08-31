@@ -18,7 +18,7 @@ namespace Nox
 {
     Ref<Texture2D> TextureImporter::ImportTexture2D(AssetHandle handle, const AssetMetadata& metadata)
     {
-        return LoadTexture2D(Project::GetActiveAssetDirectory() / metadata.FilePath);
+        return LoadTexture2D(Project::GetActiveAssetDirectory() / metadata.FilePath, metadata.TextureSpec);
     }
 
     Ref<Texture2D> TextureImporter::LoadTexture2D(const std::filesystem::path& path, const TextureSpecification& spec, Renderer* renderer)
@@ -68,6 +68,7 @@ namespace Nox
         cpuData.Height = texHeight;
         cpuData.MipLevels = mipLevels;
         cpuData.Data = Buffer((void*)pixels, imageSize);
+        cpuData.Format = spec.format;
         
         Renderer* targetRenderer = renderer ? renderer : Application::Get().GetRenderer();
         

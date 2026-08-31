@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include "Texture.h"
+#include "Sampler.h"
 
 namespace NRI
 {
@@ -16,6 +17,7 @@ namespace NRI
         uint32_t maxSamplerDescriptors = 0;
         uint32_t maxBufferDescriptors = 0;
         uint32_t maxImageDescriptors = 0;
+        std::vector<SamplerDesc> samplers;
     };
     
     class DescriptorHeap

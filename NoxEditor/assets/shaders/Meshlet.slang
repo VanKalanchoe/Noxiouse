@@ -81,7 +81,7 @@ void meshMain
         float4 clipPos = mul(viewProj, worldPos);
 
         vertices[i].pos = clipPos;
-        vertices[i].texCooord = v.texCoord;
+        vertices[i].texCooord = v.uv0;
         vertices[i].color = float4(color, 1.0);
         vertices[i].entityID = instance.entityID;
         vertices[i].drawID = sharedPayload.drawID;
@@ -119,14 +119,14 @@ FSOutput fragMain(VSOutput vertIn, uniform PushConstantMeshlets pushConstant)
     instance.alphaCutoff;
     instance.doubleSided;
 
-    Texture2D texHandle = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.albedoTextureIndex, 0));
+    Texture2D texHandle = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.baseColorTextureIndex, 0));
     SamplerState sampHandle = SamplerState.Handle(uint2(0, 0));
     float4 img = texHandle.Sample(sampHandle, vertIn.texCooord);
 
-    if(instance.albedoTextureIndex == -1)
-        output.color = instance.albedoColor * vertIn.color;
+    if(instance.baseColorTextureIndex == -1)
+        output.color = instance.baseColorFactor * vertIn.color;
     else
-        output.color = img * instance.albedoColor/* * vertIn.color */;
+        output.color = img * instance.baseColorFactor/* * vertIn.color */;
 
     output.entityID = vertIn.entityID;
 

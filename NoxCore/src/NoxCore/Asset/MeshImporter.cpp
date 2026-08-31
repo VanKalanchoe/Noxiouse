@@ -778,7 +778,7 @@ namespace Nox
                     normalBuffer = &model.buffers[normalBufferView->buffer];
                 }
 
-                // Get texture coordinates if available
+                // Get texture coordinates (TEXCOORD_0)
                 bool hasTexCoords = FindAttribute(primitive, "TEXCOORD_0") != -1;
                 const tg3_accessor* texCoordAccessor = nullptr;
                 const tg3_buffer_view* texCoordBufferView = nullptr;
@@ -789,6 +789,19 @@ namespace Nox
                     texCoordAccessor = &model.accessors[FindAttribute(primitive, "TEXCOORD_0")];
                     texCoordBufferView = &model.buffer_views[texCoordAccessor->buffer_view];
                     texCoordBuffer = &model.buffers[texCoordBufferView->buffer];
+                }
+                
+                // Get texture coordinates (TEXCOORD_1)
+                bool hasTexCoords1 = FindAttribute(primitive, "TEXCOORD_1") != -1;
+                const tg3_accessor* texCoord1Accessor = nullptr;
+                const tg3_buffer_view* texCoord1BufferView = nullptr;
+                const tg3_buffer* texCoord1Buffer = nullptr;
+
+                if (hasTexCoords1)
+                {
+                    texCoord1Accessor = &model.accessors[FindAttribute(primitive, "TEXCOORD_1")];
+                    texCoord1BufferView = &model.buffer_views[texCoord1Accessor->buffer_view];
+                    texCoord1Buffer = &model.buffers[texCoord1BufferView->buffer];
                 }
 
                 bool hasSkinning = (FindAttribute(primitive, "JOINTS_0") != -1 && FindAttribute(primitive, "WEIGHTS_0") != -1);
@@ -844,11 +857,22 @@ namespace Nox
                         uint32_t texStride = texCoordBufferView->byte_stride ? texCoordBufferView->byte_stride : 8;
                         const float* texCoord = reinterpret_cast<const float*>(&texCoordBuffer->data.data[texCoordBufferView->byte_offset + texCoordAccessor->byte_offset + (i * texStride)]);
                         
-                        vertex.texCoord = {texCoord[0], texCoord[1]};
+                        vertex.uv0 = {texCoord[0], texCoord[1]};
                     }
                     else
                     {
-                        vertex.texCoord = {0.0f, 0.0f};
+                        vertex.uv0 = {0.0f, 0.0f};
+                    }
+                    
+                    if (hasTexCoords1)
+                    {
+                        uint32_t texStride1 = texCoord1BufferView->byte_stride ? texCoord1BufferView->byte_stride : 8;
+                        const float* texCoord1 = reinterpret_cast<const float*>(&texCoord1Buffer->data.data[texCoord1BufferView->byte_offset + texCoord1Accessor->byte_offset + (i * texStride1)]);
+                        vertex.uv1 = {texCoord1[0], texCoord1[1]};
+                    }
+                    else
+                    {
+                        vertex.uv1 = {0.0f, 0.0f};
                     }
 
                     if (hasSkinning)
@@ -1090,13 +1114,14 @@ namespace Nox
                     };
                     
                     // Base Color Factor
-                    materialData.AlbedoColor = glm::vec4(
+                    materialData.BaseColorFactor = glm::vec4(
                         static_cast<float>(gltfMaterial.pbr_metallic_roughness.base_color_factor[0]),
                         static_cast<float>(gltfMaterial.pbr_metallic_roughness.base_color_factor[1]),
                         static_cast<float>(gltfMaterial.pbr_metallic_roughness.base_color_factor[2]),
                         static_cast<float>(gltfMaterial.pbr_metallic_roughness.base_color_factor[3])
                     );
-                    materialData.AlbedoTexturePath = GetTexturePath(gltfMaterial.pbr_metallic_roughness.base_color_texture.index);
+                    materialData.BaseColorTexturePath = GetTexturePath(gltfMaterial.pbr_metallic_roughness.base_color_texture.index);
+                    materialData.BaseColorTextureSet = gltfMaterial.pbr_metallic_roughness.base_color_texture.tex_coord;
 
                     // Metallic & Roughness Factors
                     materialData.MetallicFactor = static_cast<float>(gltfMaterial.pbr_metallic_roughness.metallic_factor);
@@ -1105,12 +1130,15 @@ namespace Nox
                     // Metallic-Roughness Texture
                     // (Note: glTF packs Roughness in the Green channel, Metallic in the Blue channel)
                     materialData.MetallicRoughnessTexturePath = GetTexturePath(gltfMaterial.pbr_metallic_roughness.metallic_roughness_texture.index);
+                    materialData.PhysicalDescriptorTextureSet = gltfMaterial.pbr_metallic_roughness.metallic_roughness_texture.tex_coord;
                     
                     // Normal Texture
                     materialData.NormalTexturePath = GetTexturePath(gltfMaterial.normal_texture.index);
+                    materialData.NormalTextureSet = gltfMaterial.normal_texture.tex_coord;
                     
                     // Ambient Occlusion Texture
                     materialData.OcclusionTexturePath = GetTexturePath(gltfMaterial.occlusion_texture.index);
+                    materialData.OcclusionTextureSet = gltfMaterial.occlusion_texture.tex_coord;
                     
                     // Emissive Factor & Texture
                     materialData.EmissiveFactor = glm::vec3(
@@ -1119,6 +1147,34 @@ namespace Nox
                         static_cast<float>(gltfMaterial.emissive_factor[2])
                     );
                     materialData.EmissiveTexturePath = GetTexturePath(gltfMaterial.emissive_texture.index);
+                    materialData.EmissiveTextureSet = gltfMaterial.emissive_texture.tex_coord;
+                    float emissiveStrength = 1.0f;
+                    for (uint32_t i = 0; i < gltfMaterial.ext.extensions_count; i++)
+                    {
+                        const tg3_extension& ext = gltfMaterial.ext.extensions[i];
+                        if (std::string_view(ext.name.data, ext.name.len) == "KHR_materials_emissive_strength")
+                        {
+                            if (ext.value.type == TG3_VALUE_OBJECT)
+                            {
+                                for (uint32_t j = 0; j < ext.value.object_count; j++)
+                                {
+                                    const auto& kv = ext.value.object_data[j];
+                                    if (std::string_view(kv.key.data, kv.key.len) == "emissiveStrength")
+                                    {
+                                        if (kv.value.type == TG3_VALUE_REAL)
+                                        {
+                                            emissiveStrength = static_cast<float>(kv.value.real_val);
+                                        }
+                                        else if (kv.value.type == TG3_VALUE_INT)
+                                        {
+                                            emissiveStrength = static_cast<float>(kv.value.int_val);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    materialData.emissiveStrength = emissiveStrength;
                 }
                     
                 outMaterials.push_back(materialData);

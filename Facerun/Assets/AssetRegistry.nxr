@@ -3,39 +3,39 @@ AssetRegistry:
     FilePath: Scenes/3D-Scene.nox
     SourceFilePath: Scenes/3D-Scene.nox
     Type: AssetType::Scene
-  - Handle: 2220198286504862847
+  - Handle: 1201220582203156510
     FilePath: models/DamagedHelmet/DamagedHelmet.nmesh
     SourceFilePath: models/DamagedHelmet/DamagedHelmet.gltf
     Type: AssetType::Mesh
-  - Handle: 5014823588101055762
+  - Handle: 2208457521952188714
     FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_1.png
     SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_1.png
     Type: AssetType::Texture2D
-  - Handle: 6934708091172960195
-    FilePath: models/pbr_testSpheres/pbr_spheres.nmesh
-    SourceFilePath: models/pbr_testSpheres/pbr_spheres.glb
-    Type: AssetType::Mesh
-  - Handle: 11379040523452617704
-    FilePath: models/DamagedHelmet/DamagedHelmet.nsmesh
-    SourceFilePath: models/DamagedHelmet/DamagedHelmet.gltf
-    Type: AssetType::StaticMesh
-  - Handle: 11746614433663186055
-    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_2.png
-    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_2.png
-    Type: AssetType::Texture2D
-  - Handle: 13610523163006707723
+  - Handle: 5502795841815745084
     FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_0.png
     SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_0.png
     Type: AssetType::Texture2D
-  - Handle: 13964146526733210435
-    FilePath: models/pbr_testSpheres/textures/pbr_spheres_tex_0.png
-    SourceFilePath: models/pbr_testSpheres/textures/pbr_spheres_tex_0.png
+  - Handle: 7949131439196247668
+    FilePath: models/DamagedHelmet/DamagedHelmet.nmesh
+    SourceFilePath: models/DamagedHelmet/DamagedHelmet.nmesh
+    Type: AssetType::Mesh
+  - Handle: 11615630937579021506
+    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_2.png
+    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_2.png
     Type: AssetType::Texture2D
-  - Handle: 16601521719856085147
-    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_3.png
-    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_3.png
-    Type: AssetType::Texture2D
-  - Handle: 18164521745846167702
+  - Handle: 12336065688503271008
+    FilePath: models/pbr_testSpheres/pbr_spheres.nmesh
+    SourceFilePath: models/pbr_testSpheres/pbr_spheres.nmesh
+    Type: AssetType::Mesh
+  - Handle: 12522948729484473159
+    FilePath: models/DamagedHelmet/DamagedHelmet.nsmesh
+    SourceFilePath: models/DamagedHelmet/DamagedHelmet.nsmesh
+    Type: AssetType::StaticMesh
+  - Handle: 13756855256417977137
     FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_4.png
     SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_4.png
+    Type: AssetType::Texture2D
+  - Handle: 15219893477457504535
+    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_3.png
+    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_3.png
     Type: AssetType::Texture2D

@@ -446,13 +446,14 @@ namespace Nox
 
         // 2. Create the permanent Cubemap Texture (512x512 per face, 6 array layers)
         constexpr uint32_t cubemapSize = 512;
+        uint32_t  cubemapNumMips = static_cast<uint32_t>(floor(log2(cubemapSize))) + 1;
 
         m_environmentCubemap = m_device->createTexture(NRI::TextureDesc{
             .width = cubemapSize,
             .height = cubemapSize,
             .arrayLayers = 6,
             .isCubeMap = true,
-            .mipLevels = 1, // Can be increased if generating specular mips later
+            .mipLevels = cubemapNumMips, // Can be increased if generating specular mips later
             .sampleCount = 1,
             .usage = NRI::TextureUsage::Storage, // Allows compute shader writing
             .format = NRI::ImageFormat::R16G16B16A16_SFLOAT
@@ -519,17 +520,17 @@ namespace Nox
         //  DIFFUSE IRRADIANCE CONVOLUTION
         // ==========================================
 
-        constexpr uint32_t irradianceSize = 32;
-
+        constexpr uint32_t irradianceSize = 64; // dont forget to change sampler to hardcoded maxlod
+        uint32_t irradianceNumMips = static_cast<uint32_t>(floor(log2(irradianceSize))) + 1;
         m_irradianceCubemap = m_device->createTexture(NRI::TextureDesc{
             .width = irradianceSize,
             .height = irradianceSize,
             .arrayLayers = 6,
             .isCubeMap = true,
-            .mipLevels = 1,
+            .mipLevels = irradianceNumMips,
             .sampleCount = 1,
             .usage = NRI::TextureUsage::Storage,
-            .format = NRI::ImageFormat::R16G16B16A16_SFLOAT
+            .format = NRI::ImageFormat::R32G32B32A32_SFLOAT
         });
 
         m_resourceHeap->registerTexture(*m_irradianceCubemap, NRI::TextureUsage::Storage);
@@ -566,15 +567,15 @@ namespace Nox
         // ==========================================
         //  SPECULAR IBL: PRE-FILTERED ENVIRONMENT MAP
         // ==========================================
-        constexpr uint32_t prefilteredSize = 512;
-        constexpr uint32_t numMipLevels = 5;
+        constexpr uint32_t prefilteredSize = 512; // dont forget to change sampler to hardcoded maxlod
+        uint32_t prefilterNumMips = static_cast<uint32_t>(floor(log2(prefilteredSize))) + 1;
 
         m_prefilteredEnvMap = m_device->createTexture(NRI::TextureDesc{
             .width = prefilteredSize,
             .height = prefilteredSize,
             .arrayLayers = 6,
             .isCubeMap = true,
-            .mipLevels = numMipLevels,
+            .mipLevels = prefilterNumMips,
             .sampleCount = 1,
             .usage = NRI::TextureUsage::Storage,
             .format = NRI::ImageFormat::R16G16B16A16_SFLOAT
@@ -605,11 +606,11 @@ namespace Nox
         prefCmd->bindPipeline(NRI::PipelineBindPoint::Compute, *prefilterPipeline);
 
         // Loop through each roughness mip level
-        for (uint32_t mip = 0; mip < numMipLevels; ++mip)
+        for (uint32_t mip = 0; mip < prefilterNumMips; ++mip)
         {
             uint32_t mipWidth = prefilteredSize >> mip;
             uint32_t mipHeight = prefilteredSize >> mip;
-            float roughness = (float)mip / (float)(numMipLevels - 1);
+            float roughness = (float)mip / (float)(prefilterNumMips - 1);
 
             prefilterData.envTextureIndex = m_environmentCubemap->GetDescriptorIndexSlot();
             prefilterData.cubemapStorageIndex = m_prefilteredEnvMap->GetDescriptorIndexSlot(); // Note: Needs slice/mip targeting in shader or descriptor binding if multi-mip storage
@@ -630,7 +631,7 @@ namespace Nox
         // ==========================================
         //  SPECULAR IBL: BRDF INTEGRATION MAP (2D LUT)
         // ==========================================
-        constexpr uint32_t brdfLUTSize = 512;
+        constexpr uint32_t brdfLUTSize = 512; 
 
         m_brdfLUT = m_device->createTexture(NRI::TextureDesc{
             .width = brdfLUTSize,
@@ -1016,16 +1017,115 @@ namespace Nox
             m_selectedEntityIDBuffersMapped.emplace_back(mapped);
         }
     }
-
+ 
     void Renderer::createDescriptorHeaps()
-    {
+    {/*// Create sampler skybox sampelr from sascha williams ?????????
+        VkSamplerCreateInfo samplerCreateInfo{};
+        samplerCreateInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+        samplerCreateInfo.magFilter = VK_FILTER_LINEAR;
+        samplerCreateInfo.minFilter = VK_FILTER_LINEAR;
+        samplerCreateInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+        samplerCreateInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        samplerCreateInfo.addressModeV = samplerCreateInfo.addressModeU;
+        samplerCreateInfo.addressModeW = samplerCreateInfo.addressModeU;
+        samplerCreateInfo.mipLodBias = 0.0f;
+        samplerCreateInfo.maxAnisotropy = device->enabledFeatures.samplerAnisotropy ? device->properties.limits.maxSamplerAnisotropy : 1.0f;
+        samplerCreateInfo.anisotropyEnable = device->enabledFeatures.samplerAnisotropy;
+        samplerCreateInfo.compareOp = VK_COMPARE_OP_NEVER;
+        samplerCreateInfo.minLod = 0.0f;
+        samplerCreateInfo.maxLod = (float)mipLevels;
+        samplerCreateInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+        VK_CHECK_RESULT(vkCreateSampler(device->logicalDevice, &samplerCreateInfo, nullptr, &sampler));*/
+        std::vector<NRI::SamplerDesc> samplers(shaderio::SamplerCount);
+        
+        // SAMPLER_LINEAR_REPEAT = 0
+        samplers[shaderio::SAMPLER_LINEAR_REPEAT] = NRI::SamplerDesc
+        {
+            .magFilter = NRI::Filter::Linear,
+            .minFilter = NRI::Filter::Linear,
+            .mipmapMode = NRI::SamplerMipmapMode::Linear,
+            .addressModeU = NRI::SamplerAddressMode::Repeat,
+            .addressModeV = NRI::SamplerAddressMode::Repeat,
+            .addressModeW = NRI::SamplerAddressMode::Repeat,
+            .mipLodBias = 0.0f,
+            .anisotropyEnable = true,
+            .maxAnisotropy = 1.0f,
+            .compareEnable = true,
+            .compareOp = NRI::CompareOp::Always,
+            .minLod = 0.0f,
+            .maxLod = 1000.0f
+        };
+        
+        samplers[shaderio::SAMPLER_NEAREST_REPEAT] = NRI::SamplerDesc
+        {
+            .magFilter = NRI::Filter::Nearest,
+            .minFilter = NRI::Filter::Nearest,
+            .mipmapMode = NRI::SamplerMipmapMode::Nearest,
+            .addressModeU = NRI::SamplerAddressMode::Repeat,
+            .addressModeV = NRI::SamplerAddressMode::Repeat,
+            .addressModeW = NRI::SamplerAddressMode::Repeat,
+            .mipLodBias = 0.0f,
+            .anisotropyEnable = true,
+            .maxAnisotropy = 1.0f,
+            .compareEnable = true,
+            .compareOp = NRI::CompareOp::Always,
+            .minLod = 0.0f,
+            .maxLod = 1000.0f
+        };
+        
+        samplers[shaderio::SAMPLER_BRDFLUT] = NRI::SamplerDesc
+        {
+            .magFilter = NRI::Filter::Linear,
+            .minFilter = NRI::Filter::Linear,
+            .mipmapMode = NRI::SamplerMipmapMode::Linear,
+            .addressModeU = NRI::SamplerAddressMode::ClampToEdge,
+            .addressModeV = NRI::SamplerAddressMode::ClampToEdge,
+            .addressModeW = NRI::SamplerAddressMode::ClampToEdge,
+            .mipLodBias = 0.0f,
+            .maxAnisotropy = 1.0f,
+            .minLod = 0.0f,
+            .maxLod = 1.0f,
+            .borderColor = NRI::BorderColor::FloatOpaqueWhite
+        };
+        
+        samplers[shaderio::SAMPLER_IRRADIANCE] = NRI::SamplerDesc
+        {
+            .magFilter = NRI::Filter::Linear,
+            .minFilter = NRI::Filter::Linear,
+            .mipmapMode = NRI::SamplerMipmapMode::Linear,
+            .addressModeU = NRI::SamplerAddressMode::ClampToEdge,
+            .addressModeV = NRI::SamplerAddressMode::ClampToEdge,
+            .addressModeW = NRI::SamplerAddressMode::ClampToEdge,
+            .mipLodBias = 0.0f,
+            .maxAnisotropy = 1.0f,
+            .minLod = 0.0f,
+            .maxLod = static_cast<float>(static_cast<uint32_t>(floor(log2(64))) + 1),
+            .borderColor = NRI::BorderColor::FloatOpaqueWhite
+        };
+        
+        samplers[shaderio::SAMPLER_PREFILTER] = NRI::SamplerDesc
+        {
+            .magFilter = NRI::Filter::Linear,
+            .minFilter = NRI::Filter::Linear,
+            .mipmapMode = NRI::SamplerMipmapMode::Linear,
+            .addressModeU = NRI::SamplerAddressMode::ClampToEdge,
+            .addressModeV = NRI::SamplerAddressMode::ClampToEdge,
+            .addressModeW = NRI::SamplerAddressMode::ClampToEdge,
+            .mipLodBias = 0.0f,
+            .maxAnisotropy = 1.0f,
+            .minLod = 0.0f,
+            .maxLod = static_cast<float>(static_cast<uint32_t>(floor(log2(512))) + 1),
+            .borderColor = NRI::BorderColor::FloatOpaqueWhite
+        };
+
         // todo: imgui needs more space to if you want to register it
         // currently 1000 in initimgui devicevk.cpp
 
         //hardcoded samplerinfos inside descriptorheapvk cosntructor
         m_samplerHeap = m_device->createDescriptorHeap(NRI::DescriptorHeapDesc{
             .type = NRI::DescriptorHeapType::Sampler,
-            .maxSamplerDescriptors = 2
+            .maxSamplerDescriptors = shaderio::SamplerCount,
+            .samplers = std::move(samplers)
         });
 
         m_resourceHeap = m_device->createDescriptorHeap(NRI::DescriptorHeapDesc{
@@ -1920,7 +2020,7 @@ namespace Nox
 
         // Since child entities hold only their own single material, index 0 is always the correct target
         // Select slot matching submeshIndex, fallback to slot 0 if child entity only holds 1 texture
-        uint32_t slotIdx = (material.AlbedoColors.size() > 1) ? submeshIndex : 0;
+        uint32_t slotIdx = (material.BaseColorFactors.size() > 1) ? submeshIndex : 0;
 
         // Helper to safely fetch descriptor index
         auto getTextureIndex = [](const std::vector<AssetHandle>& maps, uint32_t idx) -> int {
@@ -1933,22 +2033,29 @@ namespace Nox
         
         // --- MATERIAL PACKING ---
         // Base Color
-        instance.albedoColor = (slotIdx < material.AlbedoColors.size()) ? material.AlbedoColors[slotIdx] : glm::vec4(1.0f);
-        instance.albedoTextureIndex = getTextureIndex(material.AlbedoMaps, slotIdx);
-
+        instance.baseColorFactor = (slotIdx < material.BaseColorFactors.size()) ? material.BaseColorFactors[slotIdx] : glm::vec4(1.0f);
+        instance.baseColorTextureIndex = getTextureIndex(material.BaseColorMaps, slotIdx);
+        instance.baseColorTextureSet = (slotIdx < material.BaseColorTextureSets.size()) ? material.BaseColorTextureSets[slotIdx] : 0;
+        
         // PBR Properties
         instance.metallicFactor = (slotIdx < material.MetallicFactors.size()) ? material.MetallicFactors[slotIdx] : 1.0f;
         instance.roughnessFactor = (slotIdx < material.RoughnessFactors.size()) ? material.RoughnessFactors[slotIdx] : 1.0f;
         instance.metallicRoughnessTextureIndex = getTextureIndex(material.MetallicRoughnessMaps, slotIdx);
-
+        instance.physicalDescriptorTextureSet = (slotIdx < material.PhysicalDescriptorTextureSets.size()) ? material.PhysicalDescriptorTextureSets[slotIdx] : 0;
+        
         // Additional Maps
         instance.normalTextureIndex = getTextureIndex(material.NormalMaps, slotIdx);
+        instance.normalTextureSet = (slotIdx < material.NormalTextureSets.size()) ? material.NormalTextureSets[slotIdx] : 0;
+        
         instance.occlusionTextureIndex = getTextureIndex(material.OcclusionMaps, slotIdx);
+        instance.occlusionTextureSet = (slotIdx < material.OcclusionTextureSets.size()) ? material.OcclusionTextureSets[slotIdx] : 0;
 
         // Emission
         instance.emissiveFactor = (slotIdx < material.EmissiveFactors.size()) ? material.EmissiveFactors[slotIdx] : glm::vec3(0.0f);
         instance.emissiveTextureIndex = getTextureIndex(material.EmissiveMaps, slotIdx);
-
+        instance.emissiveTextureSet = (slotIdx < material.EmissiveTextureSets.size()) ? material.EmissiveTextureSets[slotIdx] : 0;
+        instance.emissiveStrength = (slotIdx < material.EmissiveStrengths.size()) ? material.EmissiveStrengths[slotIdx] : 1.0f;
+        
         // Settings
         AlphaMode mode = (slotIdx < material.Modes.size()) ? material.Modes[slotIdx] : AlphaMode::Opaque;
         instance.alphaMode = static_cast<uint32_t>(mode);
@@ -2026,22 +2133,29 @@ namespace Nox
 
             // --- MATERIAL PACKING ---
             // Base Color
-            instance.albedoColor = (i < material.AlbedoColors.size()) ? material.AlbedoColors[i] : glm::vec4(1.0f);
-            instance.albedoTextureIndex = getTextureIndex(material.AlbedoMaps, i);
-
+            instance.baseColorFactor = (i < material.BaseColorFactors.size()) ? material.BaseColorFactors[i] : glm::vec4(1.0f);
+            instance.baseColorTextureIndex = getTextureIndex(material.BaseColorMaps, i);
+            instance.baseColorTextureSet = (i < material.BaseColorTextureSets.size()) ? material.BaseColorTextureSets[i] : 0;
+            
             // PBR Properties
             instance.metallicFactor = (i < material.MetallicFactors.size()) ? material.MetallicFactors[i] : 1.0f;
             instance.roughnessFactor = (i < material.RoughnessFactors.size()) ? material.RoughnessFactors[i] : 1.0f;
             instance.metallicRoughnessTextureIndex = getTextureIndex(material.MetallicRoughnessMaps, i);
+            instance.physicalDescriptorTextureSet = (i < material.PhysicalDescriptorTextureSets.size()) ? material.PhysicalDescriptorTextureSets[i] : 0;
 
             // Additional Maps
             instance.normalTextureIndex = getTextureIndex(material.NormalMaps, i);
+            instance.normalTextureSet = (i < material.NormalTextureSets.size()) ? material.NormalTextureSets[i] : 0;
+            
             instance.occlusionTextureIndex = getTextureIndex(material.OcclusionMaps, i);
-
+            instance.occlusionTextureSet = (i < material.OcclusionTextureSets.size()) ? material.OcclusionTextureSets[i] : 0;
+            
             // Emission
             instance.emissiveFactor = (i < material.EmissiveFactors.size()) ? material.EmissiveFactors[i] : glm::vec3(0.0f);
             instance.emissiveTextureIndex = getTextureIndex(material.EmissiveMaps, i);
-
+            instance.emissiveTextureSet = (i < material.EmissiveTextureSets.size()) ? material.EmissiveTextureSets[i] : 0;
+            instance.emissiveStrength = (i < material.EmissiveStrengths.size()) ? material.EmissiveStrengths[i] : 1.0f;
+            
             // Settings
             AlphaMode mode = (i < material.Modes.size()) ? material.Modes[i] : AlphaMode::Opaque;
             instance.alphaMode = static_cast<uint32_t>(mode);

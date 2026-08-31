@@ -66,13 +66,6 @@ namespace NRI
         CounterClockWise
     };
     
-    enum class CompareOp
-    {
-        Less,
-        Greater,
-        GreaterOrEqual
-    };
-    
     enum class BlendFactor
     {
         One,

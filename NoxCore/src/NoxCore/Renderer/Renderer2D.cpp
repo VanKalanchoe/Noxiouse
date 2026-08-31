@@ -15,10 +15,6 @@ namespace Nox
         initRenderer2D();
 
         m_context.fileWatcher.watch(std::filesystem::path("assets/shaders/QuadMesh.slang"), [this](auto path) { m_reloadShader = true; });
-        m_context.fileWatcher.watch(std::filesystem::path("assets/shaders/quad.slang"), [this](auto path) { m_reloadShader = true; });
-        m_context.fileWatcher.watch(std::filesystem::path("assets/shaders/CircleMesh.slang"), [this](auto path) { m_reloadShader = true; });
-        m_context.fileWatcher.watch(std::filesystem::path("assets/shaders/TextMesh.slang"), [this](auto path) { m_reloadShader = true; });
-        m_context.fileWatcher.watch(std::filesystem::path("assets/shaders/LineMesh.slang"), [this](auto path) { m_reloadShader = true; });
     }
 
     Renderer2D::~Renderer2D()

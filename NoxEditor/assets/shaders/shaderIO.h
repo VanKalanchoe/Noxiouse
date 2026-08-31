@@ -13,6 +13,18 @@ typealias mat4 = float4x4;
 #define STATIC_CONST const
 #endif
 
+enum SamplerIndex : uint32_t
+{
+    SAMPLER_LINEAR_REPEAT = 0,
+    SAMPLER_NEAREST_REPEAT = 1,
+    
+    SAMPLER_BRDFLUT = 2,
+    SAMPLER_IRRADIANCE = 3,
+    SAMPLER_PREFILTER = 4,
+
+    SamplerCount
+};
+
 STATIC_CONST uint32_t TASK_SHADER_DISPATCH_X = 64;
 STATIC_CONST uint32_t MESH_SHADER_DISPATCH_X = 32;
 STATIC_CONST uint32_t MAX_VERTICES            = 64;
@@ -117,7 +129,8 @@ struct Vertex
 {
     vec3 pos;
     vec3 normal;
-    vec2 texCoord;
+    vec2 uv0;
+	vec2 uv1;
     
     uvec4 boneIDs;
     vec4 boneWeights;
@@ -139,19 +152,26 @@ struct InstanceData
     // -----------------------------
     
     // Material
-    vec4 albedoColor;
-    uint32_t albedoTextureIndex;
-
+    vec4 baseColorFactor;
+    uint32_t baseColorTextureIndex;
+    int32_t baseColorTextureSet;
+    
     float metallicFactor;
     float roughnessFactor;
     uint32_t metallicRoughnessTextureIndex;
+    int32_t physicalDescriptorTextureSet;
 
     uint32_t normalTextureIndex;
+    int32_t normalTextureSet;
+    
     uint32_t occlusionTextureIndex;
+    int32_t occlusionTextureSet;
 
     vec3 emissiveFactor;
     uint32_t emissiveTextureIndex;
-
+    int32_t emissiveTextureSet;
+    float emissiveStrength;
+    
     uint32_t alphaMode;   // 0 = Opaque, 1 = Mask, 2 = Blend
     float alphaCutoff;
     uint32_t doubleSided; // Use uint32_t instead of bool for GPU alignment
@@ -287,6 +307,5 @@ struct LineData
     // Editor-only
     int entityID;
 };
-
 
 #endif  // HOST_DEVICE_H

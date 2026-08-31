@@ -310,79 +310,93 @@ namespace Nox
         }
 
        static void WriteMaterials(std::ofstream& stream, const std::vector<MaterialData>& materialList)
-        {
-            uint32_t matCount = static_cast<uint32_t>(materialList.size());
-            stream.write(reinterpret_cast<const char*>(&matCount), sizeof(uint32_t));
-            for (const auto& mat : materialList)
-            {
-                SerializerUtils::WriteString(stream, mat.Name);
-                
-                // Base Color
-                stream.write(reinterpret_cast<const char*>(&mat.AlbedoColor), sizeof(glm::vec4));
-                SerializerUtils::WriteString(stream, mat.AlbedoTexturePath);
-                
-                // PBR Properties
-                stream.write(reinterpret_cast<const char*>(&mat.MetallicFactor), sizeof(float));
-                stream.write(reinterpret_cast<const char*>(&mat.RoughnessFactor), sizeof(float));
-                SerializerUtils::WriteString(stream, mat.MetallicRoughnessTexturePath);
-                
-                // Additional Maps
-                SerializerUtils::WriteString(stream, mat.NormalTexturePath);
-                SerializerUtils::WriteString(stream, mat.OcclusionTexturePath);
-                
-                // Emission
-                stream.write(reinterpret_cast<const char*>(&mat.EmissiveFactor), sizeof(glm::vec3));
-                SerializerUtils::WriteString(stream, mat.EmissiveTexturePath);
-                
-                // Alpha & Render settings
-                uint32_t modeVal = static_cast<uint32_t>(mat.Mode);
-                stream.write(reinterpret_cast<const char*>(&modeVal), sizeof(uint32_t));
-                stream.write(reinterpret_cast<const char*>(&mat.AlphaCutoff), sizeof(float));
-                
-                uint8_t doubleSidedVal = mat.DoubleSided ? 1 : 0;
-                stream.write(reinterpret_cast<const char*>(&doubleSidedVal), sizeof(uint8_t));
-            }
-        }
+{
+    uint32_t matCount = static_cast<uint32_t>(materialList.size());
+    stream.write(reinterpret_cast<const char*>(&matCount), sizeof(uint32_t));
+    for (const auto& mat : materialList)
+    {
+        SerializerUtils::WriteString(stream, mat.Name);
+        
+        // Base Color
+        stream.write(reinterpret_cast<const char*>(&mat.BaseColorFactor), sizeof(glm::vec4));
+        SerializerUtils::WriteString(stream, mat.BaseColorTexturePath);
+        stream.write(reinterpret_cast<const char*>(&mat.BaseColorTextureSet), sizeof(int32_t));
+        
+        // PBR Properties
+        stream.write(reinterpret_cast<const char*>(&mat.MetallicFactor), sizeof(float));
+        stream.write(reinterpret_cast<const char*>(&mat.RoughnessFactor), sizeof(float));
+        SerializerUtils::WriteString(stream, mat.MetallicRoughnessTexturePath);
+        stream.write(reinterpret_cast<const char*>(&mat.PhysicalDescriptorTextureSet), sizeof(int32_t));
+        
+        // Additional Maps
+        SerializerUtils::WriteString(stream, mat.NormalTexturePath);
+        stream.write(reinterpret_cast<const char*>(&mat.NormalTextureSet), sizeof(int32_t));
+        
+        SerializerUtils::WriteString(stream, mat.OcclusionTexturePath);
+        stream.write(reinterpret_cast<const char*>(&mat.OcclusionTextureSet), sizeof(int32_t));
+        
+        // Emission
+        stream.write(reinterpret_cast<const char*>(&mat.EmissiveFactor), sizeof(glm::vec3));
+        SerializerUtils::WriteString(stream, mat.EmissiveTexturePath);
+        stream.write(reinterpret_cast<const char*>(&mat.EmissiveTextureSet), sizeof(int32_t));
+        stream.write(reinterpret_cast<const char*>(&mat.emissiveStrength), sizeof(float));
+        
+        // Alpha & Render settings
+        uint32_t modeVal = static_cast<uint32_t>(mat.Mode);
+        stream.write(reinterpret_cast<const char*>(&modeVal), sizeof(uint32_t));
+        stream.write(reinterpret_cast<const char*>(&mat.AlphaCutoff), sizeof(float));
+        
+        uint8_t doubleSidedVal = mat.DoubleSided ? 1 : 0;
+        stream.write(reinterpret_cast<const char*>(&doubleSidedVal), sizeof(uint8_t));
+    }
+}
 
-        static void ReadMaterials(std::ifstream& stream, std::vector<MaterialData>& outMaterialList)
-        {
-            uint32_t matCount = 0;
-            stream.read(reinterpret_cast<char*>(&matCount), sizeof(uint32_t));
-            if (stream.fail()) return;
+static void ReadMaterials(std::ifstream& stream, std::vector<MaterialData>& outMaterialList)
+{
+    uint32_t matCount = 0;
+    stream.read(reinterpret_cast<char*>(&matCount), sizeof(uint32_t));
+    if (stream.fail()) return;
 
-            outMaterialList.resize(matCount);
-            for (uint32_t i = 0; i < matCount; i++)
-            {
-                SerializerUtils::ReadString(stream, outMaterialList[i].Name);
-                
-                // Base Color
-                stream.read(reinterpret_cast<char*>(&outMaterialList[i].AlbedoColor), sizeof(glm::vec4));
-                SerializerUtils::ReadString(stream, outMaterialList[i].AlbedoTexturePath);
-                
-                // PBR Properties
-                stream.read(reinterpret_cast<char*>(&outMaterialList[i].MetallicFactor), sizeof(float));
-                stream.read(reinterpret_cast<char*>(&outMaterialList[i].RoughnessFactor), sizeof(float));
-                SerializerUtils::ReadString(stream, outMaterialList[i].MetallicRoughnessTexturePath);
-                
-                // Additional Maps
-                SerializerUtils::ReadString(stream, outMaterialList[i].NormalTexturePath);
-                SerializerUtils::ReadString(stream, outMaterialList[i].OcclusionTexturePath);
-                
-                // Emission
-                stream.read(reinterpret_cast<char*>(&outMaterialList[i].EmissiveFactor), sizeof(glm::vec3));
-                SerializerUtils::ReadString(stream, outMaterialList[i].EmissiveTexturePath);
-                
-                // Alpha & Render settings
-                uint32_t modeVal = 0;
-                stream.read(reinterpret_cast<char*>(&modeVal), sizeof(uint32_t));
-                outMaterialList[i].Mode = static_cast<AlphaMode>(modeVal);
-                stream.read(reinterpret_cast<char*>(&outMaterialList[i].AlphaCutoff), sizeof(float));
-                
-                uint8_t doubleSidedVal = 0;
-                stream.read(reinterpret_cast<char*>(&doubleSidedVal), sizeof(uint8_t));
-                outMaterialList[i].DoubleSided = (doubleSidedVal != 0);
-            }
-        }
+    outMaterialList.resize(matCount);
+    for (uint32_t i = 0; i < matCount; i++)
+    {
+        SerializerUtils::ReadString(stream, outMaterialList[i].Name);
+        
+        // Base Color
+        stream.read(reinterpret_cast<char*>(&outMaterialList[i].BaseColorFactor), sizeof(glm::vec4));
+        SerializerUtils::ReadString(stream, outMaterialList[i].BaseColorTexturePath);
+        stream.read(reinterpret_cast<char*>(&outMaterialList[i].BaseColorTextureSet), sizeof(int32_t));
+        
+        // PBR Properties
+        stream.read(reinterpret_cast<char*>(&outMaterialList[i].MetallicFactor), sizeof(float));
+        stream.read(reinterpret_cast<char*>(&outMaterialList[i].RoughnessFactor), sizeof(float));
+        SerializerUtils::ReadString(stream, outMaterialList[i].MetallicRoughnessTexturePath);
+        stream.read(reinterpret_cast<char*>(&outMaterialList[i].PhysicalDescriptorTextureSet), sizeof(int32_t));
+        
+        // Additional Maps
+        SerializerUtils::ReadString(stream, outMaterialList[i].NormalTexturePath);
+        stream.read(reinterpret_cast<char*>(&outMaterialList[i].NormalTextureSet), sizeof(int32_t));
+        
+        SerializerUtils::ReadString(stream, outMaterialList[i].OcclusionTexturePath);
+        stream.read(reinterpret_cast<char*>(&outMaterialList[i].OcclusionTextureSet), sizeof(int32_t));
+        
+        // Emission
+        stream.read(reinterpret_cast<char*>(&outMaterialList[i].EmissiveFactor), sizeof(glm::vec3));
+        SerializerUtils::ReadString(stream, outMaterialList[i].EmissiveTexturePath);
+        stream.read(reinterpret_cast<char*>(&outMaterialList[i].EmissiveTextureSet), sizeof(int32_t));
+        stream.read(reinterpret_cast<char*>(&outMaterialList[i].emissiveStrength), sizeof(float));
+        
+        // Alpha & Render settings
+        uint32_t modeVal = 0;
+        stream.read(reinterpret_cast<char*>(&modeVal), sizeof(uint32_t));
+        outMaterialList[i].Mode = static_cast<AlphaMode>(modeVal);
+        stream.read(reinterpret_cast<char*>(&outMaterialList[i].AlphaCutoff), sizeof(float));
+        
+        uint8_t doubleSidedVal = 0;
+        stream.read(reinterpret_cast<char*>(&doubleSidedVal), sizeof(uint8_t));
+        outMaterialList[i].DoubleSided = (doubleSidedVal != 0);
+    }
+}
 
     public:
         static void SerializeStaticMesh(const std::filesystem::path& filepath, const std::vector<MeshData>& dataList, const std::vector<MaterialData>& materialList)

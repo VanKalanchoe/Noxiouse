@@ -17,7 +17,7 @@
 
 namespace YAML
 {
-    template<>
+    template <>
     struct convert<glm::vec2>
     {
         static Node encode(const glm::vec2& rhs)
@@ -39,8 +39,8 @@ namespace YAML
             return true;
         }
     };
-    
-    template<>
+
+    template <>
     struct convert<glm::vec3>
     {
         static Node encode(const glm::vec3& rhs)
@@ -65,7 +65,7 @@ namespace YAML
         }
     };
 
-    template<>
+    template <>
     struct convert<glm::vec4>
     {
         static Node encode(const glm::vec4& rhs)
@@ -92,14 +92,14 @@ namespace YAML
         }
     };
 
-    template<>
+    template <>
     struct convert<Nox::UUID>
     {
         static Node encode(const Nox::UUID& uuid)
         {
             Node node;
             node.push_back((uint64_t)uuid);
-            
+
             node.SetStyle(EmitterStyle::Flow);
             return node;
         }
@@ -111,6 +111,7 @@ namespace YAML
         }
     };
 }
+
 namespace Nox
 {
 #define WRITE_SCRIPT_FIELD(FieldType, Type) \
@@ -125,14 +126,14 @@ namespace Nox
         fieldInstance.SetValue(data);\
         break;\
     }
-    
+
     YAML::Emitter& operator<<(YAML::Emitter& out, const glm::vec2& v)
     {
         out << YAML::Flow;
         out << YAML::BeginSeq << v.x << v.y << YAML::EndSeq;
         return out;
     }
-    
+
     YAML::Emitter& operator<<(YAML::Emitter& out, const glm::vec3& v)
     {
         out << YAML::Flow;
@@ -169,7 +170,7 @@ namespace Nox
         NOX_CORE_ASSERT(false, "Unknown RigidBody2DComponent::BodyType!");
         return RigidBody2DComponent::BodyType::Static;
     }
-    
+
     SceneSerializer::SceneSerializer(const Ref<Scene>& scene) : m_Scene(scene)
     {
     }
@@ -177,10 +178,10 @@ namespace Nox
     static void SerializeEntity(YAML::Emitter& out, Entity entity)
     {
         NOX_CORE_ASSERT(entity.HasComponent<IDComponent>(), "Entity does not have an ID component!");
-        
+
         out << YAML::BeginMap; // Corrected: No parentheses
         out << YAML::Key << "Entity" << YAML::Value << entity.GetUUID(); // guid
-        
+
         if (entity.HasComponent<TagComponent>())
         {
             out << YAML::Key << "TagComponent";
@@ -191,7 +192,7 @@ namespace Nox
 
             out << YAML::EndMap;
         }
-        
+
         if (entity.HasComponent<TransformComponent>())
         {
             out << YAML::Key << "TransformComponent";
@@ -204,7 +205,7 @@ namespace Nox
 
             out << YAML::EndMap; // TransformComponent
         }
-        
+
         if (entity.HasComponent<RelationshipComponent>())
         {
             out << YAML::Key << "RelationshipComponent";
@@ -220,7 +221,7 @@ namespace Nox
 
             out << YAML::EndMap; // RelationshipComponent
         }
-        
+
         if (entity.HasComponent<MeshComponent>())
         {
             out << YAML::Key << "MeshComponent";
@@ -232,48 +233,112 @@ namespace Nox
 
             out << YAML::EndMap; // MeshComponent
         }
-        
+
         if (entity.HasComponent<MaterialComponent>())
         {
             out << YAML::Key << "MaterialComponent";
             out << YAML::BeginMap; // MaterialComponent
 
-            auto& materialComponent = entity.GetComponent<MaterialComponent>();
-    
-            // Serialize AlbedoColors
-            out << YAML::Key << "AlbedoColors" << YAML::Value;
+            auto& mc = entity.GetComponent<MaterialComponent>();
+
+            // Base Color
+            out << YAML::Key << "BaseColorFactor" << YAML::Value;
             out << YAML::BeginSeq;
-            for (const auto& color : materialComponent.AlbedoColors)
-                out << color;
+            for (const auto& color : mc.BaseColorFactors) out << color;
             out << YAML::EndSeq;
-    
-            out << YAML::Key << "AlbedoMaps" << YAML::Value;
+
+            out << YAML::Key << "BaseColorMaps" << YAML::Value;
             out << YAML::BeginSeq;
-            for (auto handle : materialComponent.AlbedoMaps)
-                out << (uint64_t)handle;
+            for (auto handle : mc.BaseColorMaps) out << (uint64_t)handle;
             out << YAML::EndSeq;
-    
+
+            out << YAML::Key << "BaseColorTextureSets" << YAML::Value;
+            out << YAML::BeginSeq;
+            for (auto set : mc.BaseColorTextureSets) out << set;
+            out << YAML::EndSeq;
+
+            // PBR Properties
+            out << YAML::Key << "MetallicFactors" << YAML::Value;
+            out << YAML::BeginSeq;
+            for (auto val : mc.MetallicFactors) out << val;
+            out << YAML::EndSeq;
+
+            out << YAML::Key << "RoughnessFactors" << YAML::Value;
+            out << YAML::BeginSeq;
+            for (auto val : mc.RoughnessFactors) out << val;
+            out << YAML::EndSeq;
+
+            out << YAML::Key << "MetallicRoughnessMaps" << YAML::Value;
+            out << YAML::BeginSeq;
+            for (auto handle : mc.MetallicRoughnessMaps) out << (uint64_t)handle;
+            out << YAML::EndSeq;
+
+            out << YAML::Key << "PhysicalDescriptorTextureSets" << YAML::Value;
+            out << YAML::BeginSeq;
+            for (auto set : mc.PhysicalDescriptorTextureSets) out << set;
+            out << YAML::EndSeq;
+
+            // Additional Maps
+            out << YAML::Key << "NormalMaps" << YAML::Value;
+            out << YAML::BeginSeq;
+            for (auto handle : mc.NormalMaps) out << (uint64_t)handle;
+            out << YAML::EndSeq;
+
+            out << YAML::Key << "NormalTextureSets" << YAML::Value;
+            out << YAML::BeginSeq;
+            for (auto set : mc.NormalTextureSets) out << set;
+            out << YAML::EndSeq;
+
+            out << YAML::Key << "OcclusionMaps" << YAML::Value;
+            out << YAML::BeginSeq;
+            for (auto handle : mc.OcclusionMaps) out << (uint64_t)handle;
+            out << YAML::EndSeq;
+
+            out << YAML::Key << "OcclusionTextureSets" << YAML::Value;
+            out << YAML::BeginSeq;
+            for (auto set : mc.OcclusionTextureSets) out << set;
+            out << YAML::EndSeq;
+
+            // Emission
+            out << YAML::Key << "EmissiveFactors" << YAML::Value;
+            out << YAML::BeginSeq;
+            for (const auto& factor : mc.EmissiveFactors) out << factor;
+            out << YAML::EndSeq;
+
+            out << YAML::Key << "EmissiveMaps" << YAML::Value;
+            out << YAML::BeginSeq;
+            for (auto handle : mc.EmissiveMaps) out << (uint64_t)handle;
+            out << YAML::EndSeq;
+
+            out << YAML::Key << "EmissiveTextureSets" << YAML::Value;
+            out << YAML::BeginSeq;
+            for (auto set : mc.EmissiveTextureSets) out << set;
+            out << YAML::EndSeq;
+
+            out << YAML::Key << "EmissiveStrengths" << YAML::Value;
+            out << YAML::BeginSeq;
+            for (auto strength : mc.EmissiveStrengths) out << strength;
+            out << YAML::EndSeq;
+
+            // Settings
             out << YAML::Key << "Modes" << YAML::Value;
             out << YAML::BeginSeq;
-            for (auto mode : materialComponent.Modes)
-                out << static_cast<int>(mode);
+            for (auto mode : mc.Modes) out << static_cast<int>(mode);
             out << YAML::EndSeq;
-    
+
             out << YAML::Key << "AlphaCutoffs" << YAML::Value;
             out << YAML::BeginSeq;
-            for (auto cutoff : materialComponent.AlphaCutoffs)
-                out << (float)cutoff;
+            for (auto cutoff : mc.AlphaCutoffs) out << (float)cutoff;
             out << YAML::EndSeq;
-    
+
             out << YAML::Key << "DoubleSidedFlags" << YAML::Value;
             out << YAML::BeginSeq;
-            for (auto doubleSided : materialComponent.DoubleSidedFlags)
-                out << (bool)doubleSided;
+            for (auto doubleSided : mc.DoubleSidedFlags) out << (bool)doubleSided;
             out << YAML::EndSeq;
 
             out << YAML::EndMap; // MaterialComponent
         }
-        
+
         if (entity.HasComponent<AnimatorComponent>())
         {
             out << YAML::Key << "AnimatorComponent";
@@ -366,7 +431,7 @@ namespace Nox
 
             out << YAML::EndMap; // ScriptComponent
         }*/
-        
+
         if (entity.HasComponent<SpriteRendererComponent>())
         {
             out << YAML::Key << "SpriteRendererComponent";
@@ -375,7 +440,7 @@ namespace Nox
             auto& spriteRendererComponent = entity.GetComponent<SpriteRendererComponent>();
             out << YAML::Key << "Color" << YAML::Value << spriteRendererComponent.Color;
             out << YAML::Key << "TextureHandle" << YAML::Value << spriteRendererComponent.Texture;
-            
+
             out << YAML::Key << "TilingFactor" << YAML::Value << spriteRendererComponent.TilingFactor;
 
             out << YAML::EndMap; // SpriteRendererComponent
@@ -452,7 +517,7 @@ namespace Nox
 
             out << YAML::EndMap; // TextComponent
         }
-        
+
         out << YAML::EndMap; // Corrected: No parentheses
     }
 
@@ -476,7 +541,8 @@ namespace Nox
         std::filesystem::path file_path(filepath);
         std::cout << file_path << std::endl;
         std::ofstream fout(file_path);
-        if (!fout) {
+        if (!fout)
+        {
             std::cerr << "Failed to open file: " << file_path << std::endl;
             return; // Return or handle the error
         }
@@ -487,7 +553,7 @@ namespace Nox
     void SceneSerializer::SerializeRuntime(const std::filesystem::path& filepath)
     {
         // Not Implemented
-        NOX_CORE_ASSERT(false,"SerializeRuntime");
+        NOX_CORE_ASSERT(false, "SerializeRuntime");
     }
 
     bool SceneSerializer::Deserialize(const std::filesystem::path& filepath)
@@ -507,10 +573,10 @@ namespace Nox
             NOX_CORE_ERROR("Failed to load .nox file `{0}`\n       {1}", filepath.string(), e.what());
             return false;
         }
-        
+
         if (!data["Scene"])
             return false;
-        
+
         std::string sceneName = data["Scene"].as<std::string>();
         NOX_CORE_TRACE("Deserializing scene '{0}'", sceneName);
 
@@ -539,7 +605,7 @@ namespace Nox
                     tc.Rotation = transformComponent["Rotation"].as<glm::vec3>();
                     tc.Scale = transformComponent["Scale"].as<glm::vec3>();
                 }
-                
+
                 auto relationshipComponent = entity["RelationshipComponent"];
                 if (relationshipComponent)
                 {
@@ -555,7 +621,7 @@ namespace Nox
                         }
                     }
                 }
-                
+
                 auto meshComponent = entity["MeshComponent"];
                 if (meshComponent)
                 {
@@ -565,72 +631,159 @@ namespace Nox
                     if (meshComponent["SubmeshIndex"])
                         mc.SubmeshIndex = meshComponent["SubmeshIndex"].as<uint32_t>();
                 }
-                
+
                 auto materialComponent = entity["MaterialComponent"];
                 if (materialComponent)
                 {
                     auto& mc = deserializedEntity.AddComponent<MaterialComponent>();
-                    
-                    auto albedoColorsSeq = materialComponent["AlbedoColors"];
-                    if (albedoColorsSeq)
+
+                    // Base Color
+                    auto baseColorFactorSeq = materialComponent["BaseColorFactor"];
+                    if (baseColorFactorSeq)
                     {
-                        mc.AlbedoColors.clear();
-                        for (auto colorNode : albedoColorsSeq)
-                        {
-                            mc.AlbedoColors.push_back(colorNode.as<glm::vec4>());
-                        }
+                        mc.BaseColorFactors.clear();
+                        for (auto node : baseColorFactorSeq) mc.BaseColorFactors.push_back(node.as<glm::vec4>());
                     }
-                    // Backward compatibility check for single AlbedoColor
+                    else if (materialComponent["AlbedoColors"]) // Backward compatibility
+                    {
+                        mc.BaseColorFactors.clear();
+                        for (auto node : materialComponent["AlbedoColors"]) mc.BaseColorFactors.push_back(node.as<glm::vec4>());
+                    }
                     else if (materialComponent["AlbedoColor"])
                     {
-                        mc.AlbedoColors.clear();
-                        mc.AlbedoColors.push_back(materialComponent["AlbedoColor"].as<glm::vec4>());
+                        mc.BaseColorFactors.clear();
+                        mc.BaseColorFactors.push_back(materialComponent["AlbedoColor"].as<glm::vec4>());
                     }
-                    
-                    auto albedoMapsSeq = materialComponent["AlbedoMaps"];
-                    if (albedoMapsSeq)
+
+                    auto baseColorMapsSeq = materialComponent["BaseColorMaps"];
+                    if (baseColorMapsSeq)
                     {
-                        mc.AlbedoMaps.clear();
-                        for (auto mapHandle : albedoMapsSeq)
-                        {
-                            mc.AlbedoMaps.push_back(mapHandle.as<uint64_t>());
-                        }
+                        mc.BaseColorMaps.clear();
+                        for (auto node : baseColorMapsSeq) mc.BaseColorMaps.push_back(node.as<uint64_t>());
                     }
-                    
-                    // Read Modes (AlphaMode)
+                    else if (materialComponent["AlbedoMaps"])
+                    {
+                        mc.BaseColorMaps.clear();
+                        for (auto node : materialComponent["AlbedoMaps"]) mc.BaseColorMaps.push_back(node.as<uint64_t>());
+                    }
+
+                    auto baseColorSetsSeq = materialComponent["BaseColorTextureSets"];
+                    if (baseColorSetsSeq)
+                    {
+                        mc.BaseColorTextureSets.clear();
+                        for (auto node : baseColorSetsSeq) mc.BaseColorTextureSets.push_back(node.as<int32_t>());
+                    }
+
+                    // PBR Properties
+                    auto metallicSeq = materialComponent["MetallicFactors"];
+                    if (metallicSeq)
+                    {
+                        mc.MetallicFactors.clear();
+                        for (auto node : metallicSeq) mc.MetallicFactors.push_back(node.as<float>());
+                    }
+
+                    auto roughnessSeq = materialComponent["RoughnessFactors"];
+                    if (roughnessSeq)
+                    {
+                        mc.RoughnessFactors.clear();
+                        for (auto node : roughnessSeq) mc.RoughnessFactors.push_back(node.as<float>());
+                    }
+
+                    auto metallicRoughnessMapsSeq = materialComponent["MetallicRoughnessMaps"];
+                    if (metallicRoughnessMapsSeq)
+                    {
+                        mc.MetallicRoughnessMaps.clear();
+                        for (auto node : metallicRoughnessMapsSeq) mc.MetallicRoughnessMaps.push_back(node.as<uint64_t>());
+                    }
+
+                    auto physSetsSeq = materialComponent["PhysicalDescriptorTextureSets"];
+                    if (physSetsSeq)
+                    {
+                        mc.PhysicalDescriptorTextureSets.clear();
+                        for (auto node : physSetsSeq) mc.PhysicalDescriptorTextureSets.push_back(node.as<int32_t>());
+                    }
+
+                    // Additional Maps
+                    auto normalMapsSeq = materialComponent["NormalMaps"];
+                    if (normalMapsSeq)
+                    {
+                        mc.NormalMaps.clear();
+                        for (auto node : normalMapsSeq) mc.NormalMaps.push_back(node.as<uint64_t>());
+                    }
+
+                    auto normalSetsSeq = materialComponent["NormalTextureSets"];
+                    if (normalSetsSeq)
+                    {
+                        mc.NormalTextureSets.clear();
+                        for (auto node : normalSetsSeq) mc.NormalTextureSets.push_back(node.as<int32_t>());
+                    }
+
+                    auto occlusionMapsSeq = materialComponent["OcclusionMaps"];
+                    if (occlusionMapsSeq)
+                    {
+                        mc.OcclusionMaps.clear();
+                        for (auto node : occlusionMapsSeq) mc.OcclusionMaps.push_back(node.as<uint64_t>());
+                    }
+
+                    auto occlusionSetsSeq = materialComponent["OcclusionTextureSets"];
+                    if (occlusionSetsSeq)
+                    {
+                        mc.OcclusionTextureSets.clear();
+                        for (auto node : occlusionSetsSeq) mc.OcclusionTextureSets.push_back(node.as<int32_t>());
+                    }
+
+                    // Emission
+                    auto emissiveFactorsSeq = materialComponent["EmissiveFactors"];
+                    if (emissiveFactorsSeq)
+                    {
+                        mc.EmissiveFactors.clear();
+                        for (auto node : emissiveFactorsSeq) mc.EmissiveFactors.push_back(node.as<glm::vec3>());
+                    }
+
+                    auto emissiveMapsSeq = materialComponent["EmissiveMaps"];
+                    if (emissiveMapsSeq)
+                    {
+                        mc.EmissiveMaps.clear();
+                        for (auto node : emissiveMapsSeq) mc.EmissiveMaps.push_back(node.as<uint64_t>());
+                    }
+
+                    auto emissiveSetsSeq = materialComponent["EmissiveTextureSets"];
+                    if (emissiveSetsSeq)
+                    {
+                        mc.EmissiveTextureSets.clear();
+                        for (auto node : emissiveSetsSeq) mc.EmissiveTextureSets.push_back(node.as<int32_t>());
+                    }
+
+                    auto emissiveStrengthsSeq = materialComponent["EmissiveStrengths"];
+                    if (emissiveStrengthsSeq)
+                    {
+                        mc.EmissiveStrengths.clear();
+                        for (auto node : emissiveStrengthsSeq) mc.EmissiveStrengths.push_back(node.as<float>());
+                    }
+
+                    // Settings
                     auto modesSeq = materialComponent["Modes"];
                     if (modesSeq)
                     {
                         mc.Modes.clear();
-                        for (auto modeNode : modesSeq)
-                        {
-                            mc.Modes.push_back(static_cast<AlphaMode>(modeNode.as<int>()));
-                        }
+                        for (auto node : modesSeq) mc.Modes.push_back(static_cast<AlphaMode>(node.as<int>()));
                     }
 
-                    // Read AlphaCutoffs
                     auto alphaCutoffsSeq = materialComponent["AlphaCutoffs"];
                     if (alphaCutoffsSeq)
                     {
                         mc.AlphaCutoffs.clear();
-                        for (auto cutoffNode : alphaCutoffsSeq)
-                        {
-                            mc.AlphaCutoffs.push_back(cutoffNode.as<float>());
-                        }
+                        for (auto node : alphaCutoffsSeq) mc.AlphaCutoffs.push_back(node.as<float>());
                     }
 
-                    // Read DoubleSidedFlags
                     auto doubleSidedSeq = materialComponent["DoubleSidedFlags"];
                     if (doubleSidedSeq)
                     {
                         mc.DoubleSidedFlags.clear();
-                        for (auto flagNode : doubleSidedSeq)
-                        {
-                            mc.DoubleSidedFlags.push_back(flagNode.as<bool>());
-                        }
+                        for (auto node : doubleSidedSeq) mc.DoubleSidedFlags.push_back(node.as<bool>());
                     }
                 }
-                
+
                 auto animatorComponent = entity["AnimatorComponent"];
                 if (animatorComponent)
                 {
@@ -642,14 +795,14 @@ namespace Nox
                     if (animatorComponent["Playing"])
                         ac.Playing = animatorComponent["Playing"].as<bool>();
                 }
-                
+
                 auto cameraComponent = entity["CameraComponent"];
                 if (cameraComponent)
                 {
                     auto& cc = deserializedEntity.AddComponent<CameraComponent>();
 
                     YAML::Node cameraProps = cameraComponent["Camera"];
-                    
+
                     cc.Camera.SetProjectionType((SceneCamera::ProjectionType)cameraProps["ProjectionType"].as<int>());
 
                     cc.Camera.SetPerspectiveVerticalFOV(cameraProps["PerspectiveFOV"].as<float>());
@@ -736,7 +889,7 @@ namespace Nox
 
                     if (spriteRendererComponent["TextureHandle"])
                         src.Texture = spriteRendererComponent["TextureHandle"].as<AssetHandle>();
-                    
+
                     if (spriteRendererComponent["TilingFactor"])
                         src.TilingFactor = spriteRendererComponent["TilingFactor"].as<float>();
                 }
