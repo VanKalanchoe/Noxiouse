@@ -317,6 +317,11 @@ namespace Nox
     {
         SerializerUtils::WriteString(stream, mat.Name);
         
+        // Workflow + Specular Glossines
+        stream.write(reinterpret_cast<const char*>(&mat.Workflow), sizeof(float));
+        stream.write(reinterpret_cast<const char*>(&mat.DiffuseFactor), sizeof(glm::vec4));
+        stream.write(reinterpret_cast<const char*>(&mat.SpecularFactor), sizeof(glm::vec4));
+        
         // Base Color
         stream.write(reinterpret_cast<const char*>(&mat.BaseColorFactor), sizeof(glm::vec4));
         SerializerUtils::WriteString(stream, mat.BaseColorTexturePath);
@@ -344,7 +349,7 @@ namespace Nox
         // Alpha & Render settings
         uint32_t modeVal = static_cast<uint32_t>(mat.Mode);
         stream.write(reinterpret_cast<const char*>(&modeVal), sizeof(uint32_t));
-        stream.write(reinterpret_cast<const char*>(&mat.AlphaCutoff), sizeof(float));
+        stream.write(reinterpret_cast<const char*>(&mat.AlphaMaskCutoff), sizeof(float));
         
         uint8_t doubleSidedVal = mat.DoubleSided ? 1 : 0;
         stream.write(reinterpret_cast<const char*>(&doubleSidedVal), sizeof(uint8_t));
@@ -361,6 +366,11 @@ static void ReadMaterials(std::ifstream& stream, std::vector<MaterialData>& outM
     for (uint32_t i = 0; i < matCount; i++)
     {
         SerializerUtils::ReadString(stream, outMaterialList[i].Name);
+        
+        // Workflow + Specular Glossines
+        stream.read(reinterpret_cast<char*>(&outMaterialList[i].Workflow), sizeof(float));
+        stream.read(reinterpret_cast<char*>(&outMaterialList[i].DiffuseFactor), sizeof(glm::vec4));
+        stream.read(reinterpret_cast<char*>(&outMaterialList[i].SpecularFactor), sizeof(glm::vec4));
         
         // Base Color
         stream.read(reinterpret_cast<char*>(&outMaterialList[i].BaseColorFactor), sizeof(glm::vec4));
@@ -390,7 +400,7 @@ static void ReadMaterials(std::ifstream& stream, std::vector<MaterialData>& outM
         uint32_t modeVal = 0;
         stream.read(reinterpret_cast<char*>(&modeVal), sizeof(uint32_t));
         outMaterialList[i].Mode = static_cast<AlphaMode>(modeVal);
-        stream.read(reinterpret_cast<char*>(&outMaterialList[i].AlphaCutoff), sizeof(float));
+        stream.read(reinterpret_cast<char*>(&outMaterialList[i].AlphaMaskCutoff), sizeof(float));
         
         uint8_t doubleSidedVal = 0;
         stream.read(reinterpret_cast<char*>(&doubleSidedVal), sizeof(uint8_t));

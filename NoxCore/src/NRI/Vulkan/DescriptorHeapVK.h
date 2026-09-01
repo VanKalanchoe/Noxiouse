@@ -17,6 +17,7 @@ namespace NRI
         ~DescriptorHeapVK() override = default;
 
         void registerTexture(Texture& texture, TextureUsage usageOverride) override;
+        uint32_t registerStorageTextureMip(Texture& texture, uint32_t mipLevel) override;
         void unregisterTexture(uint32_t slot) override;
         uint64_t getBufferDeviceAddress(vk::raii::Buffer& buffer) const;
         uint32_t registerBuffer(Buffer& buffer, uint64_t size) override;

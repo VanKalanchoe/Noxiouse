@@ -586,7 +586,7 @@ namespace Nox
     size_t slotCount = component.BaseColorMaps.size();
     if (slotCount == 0 && (!component.BaseColorFactors.empty() || !component.Modes.empty()))
     {
-        slotCount = std::max({ component.BaseColorFactors.size(), component.MetallicFactors.size(), component.RoughnessFactors.size(), component.MetallicRoughnessMaps.size(), component.PhysicalDescriptorTextureSets.size(), component.NormalMaps.size(), component.NormalTextureSets.size(), component.OcclusionMaps.size(), component.OcclusionTextureSets.size(), component.EmissiveFactors.size(), component.EmissiveMaps.size(), component.EmissiveTextureSets.size(), component.EmissiveStrengths.size(), component.Modes.size(), component.AlphaCutoffs.size(), component.DoubleSidedFlags.size() });
+        slotCount = std::max({ component.BaseColorFactors.size(), component.MetallicFactors.size(), component.RoughnessFactors.size(), component.MetallicRoughnessMaps.size(), component.PhysicalDescriptorTextureSets.size(), component.NormalMaps.size(), component.NormalTextureSets.size(), component.OcclusionMaps.size(), component.OcclusionTextureSets.size(), component.EmissiveFactors.size(), component.EmissiveMaps.size(), component.EmissiveTextureSets.size(), component.EmissiveStrengths.size(), component.Modes.size(), component.AlphaMaskCutoffs.size(), component.DoubleSidedFlags.size() });
         component.BaseColorMaps.resize(slotCount, 0);
     }
     
@@ -610,7 +610,7 @@ namespace Nox
         component.EmissiveTextureSets.push_back(0);
         component.EmissiveStrengths.push_back(1.0f);
         component.Modes.push_back(AlphaMode::Opaque);
-        component.AlphaCutoffs.push_back(0.5f);
+        component.AlphaMaskCutoffs.push_back(0.5f);
         component.DoubleSidedFlags.push_back(false);
     }
 
@@ -629,7 +629,7 @@ namespace Nox
     if (component.EmissiveTextureSets.size() < slotCount) component.EmissiveTextureSets.resize(slotCount, 0);
     if (component.EmissiveStrengths.size() < slotCount) component.EmissiveStrengths.resize(slotCount, 1.0f);
     if (component.Modes.size() < slotCount) component.Modes.resize(slotCount, AlphaMode::Opaque);
-    if (component.AlphaCutoffs.size() < slotCount) component.AlphaCutoffs.resize(slotCount, 0.5f);
+    if (component.AlphaMaskCutoffs.size() < slotCount) component.AlphaMaskCutoffs.resize(slotCount, 0.5f);
     if (component.DoubleSidedFlags.size() < slotCount) component.DoubleSidedFlags.resize(slotCount, false);
 
     ImGui::Text("Material Slots (%zu submesh(es))", slotCount);
@@ -637,7 +637,7 @@ namespace Nox
     ImGui::Separator();
 
     // Helper lambda for drawing texture slots with drag-drop target & clear button
-    auto drawTextureSlot = [](const char* labelName, AssetHandle& texHandle)
+         auto drawTextureSlot = [](const char* labelName, const char* id, AssetHandle& texHandle)
     {
         std::string label = "None";
         bool isTextureValid = false;
@@ -682,16 +682,20 @@ namespace Nox
             ImGui::EndDragDropTarget();
         }
 
-        if (isTextureValid)
-        {
-            ImGui::SameLine();
-            ImVec2 xLabelSize = ImGui::CalcTextSize("X");
-            float buttonSize = xLabelSize.y + ImGui::GetStyle().FramePadding.y * 2.0f;
-            if (ImGui::Button("X", ImVec2(buttonSize, buttonSize)))
-            {
-                texHandle = 0;
-            }
-        }
+             if (isTextureValid)
+             {
+                 ImGui::SameLine();
+
+                 ImVec2 xLabelSize = ImGui::CalcTextSize("X");
+                 float buttonSize = xLabelSize.y + ImGui::GetStyle().FramePadding.y * 2.0f;
+
+                 std::string buttonID = std::string("X##") + id;
+
+                 if (ImGui::Button(buttonID.c_str(), ImVec2(buttonSize, buttonSize)))
+                 {
+                     texHandle = 0;
+                 }
+             }
     };
 
     for (size_t i = 0; i < slotCount; i++)
@@ -702,7 +706,7 @@ namespace Nox
         
         // 1. Base Color
         ImGui::ColorEdit4("Base Color Factor", glm::value_ptr(component.BaseColorFactors[i]));
-        drawTextureSlot("Base Color Texture", component.BaseColorMaps[i]);
+        drawTextureSlot("Base Color Texture", "BaseColor", component.BaseColorMaps[i]);
         ImGui::DragInt("Base Color Texture Set", &component.BaseColorTextureSets[i], 1, 0, 10);
 
         ImGui::Spacing();
@@ -711,17 +715,20 @@ namespace Nox
         // 2. PBR Properties
         ImGui::DragFloat("Metallic Factor", &component.MetallicFactors[i], 0.01f, 0.0f, 1.0f);
         ImGui::DragFloat("Roughness Factor", &component.RoughnessFactors[i], 0.01f, 0.0f, 1.0f);
-        drawTextureSlot("Metallic-Roughness Map", component.MetallicRoughnessMaps[i]);
+        drawTextureSlot("Metallic-Roughness Map", "MetallicRoughness",
+                component.MetallicRoughnessMaps[i]);
         ImGui::DragInt("Physical Descriptor Texture Set", &component.PhysicalDescriptorTextureSets[i], 1, 0, 10);
 
         ImGui::Spacing();
         ImGui::Separator();
 
         // 3. Additional Maps
-        drawTextureSlot("Normal Map", component.NormalMaps[i]);
+        drawTextureSlot("Normal Map", "Normal",
+                component.NormalMaps[i]);
         ImGui::DragInt("Normal Texture Set", &component.NormalTextureSets[i], 1, 0, 10);
 
-        drawTextureSlot("Occlusion Map", component.OcclusionMaps[i]);
+        drawTextureSlot("Occlusion Map", "Occlusion",
+                component.OcclusionMaps[i]);
         ImGui::DragInt("Occlusion Texture Set", &component.OcclusionTextureSets[i], 1, 0, 10);
 
         ImGui::Spacing();
@@ -729,7 +736,8 @@ namespace Nox
 
         // 4. Emission
         ImGui::ColorEdit3("Emissive Factor", glm::value_ptr(component.EmissiveFactors[i]));
-        drawTextureSlot("Emissive Map", component.EmissiveMaps[i]);
+        drawTextureSlot("Emissive Map", "Emissive",
+                component.EmissiveMaps[i]);
         ImGui::DragInt("Emissive Texture Set", &component.EmissiveTextureSets[i], 1, 0, 10);
         ImGui::DragFloat("Emissive Strength", &component.EmissiveStrengths[i], 0.1f, 0.0f, 100.0f);
 
@@ -747,7 +755,7 @@ namespace Nox
         // 6. Alpha Cutoff (Visible only for Mask mode)
         if (component.Modes[i] == AlphaMode::Mask)
         {
-            ImGui::DragFloat("Alpha Cutoff", &component.AlphaCutoffs[i], 0.005f, 0.0f, 1.0f);
+            ImGui::DragFloat("Alpha Mask Cutoff", &component.AlphaMaskCutoffs[i], 0.005f, 0.0f, 1.0f);
         }
 
         // 7. Double Sided Flag
@@ -780,7 +788,7 @@ namespace Nox
         component.EmissiveTextureSets.push_back(0);
         component.EmissiveStrengths.push_back(1.0f);
         component.Modes.push_back(AlphaMode::Opaque);
-        component.AlphaCutoffs.push_back(0.5f);
+        component.AlphaMaskCutoffs.push_back(0.5f);
         component.DoubleSidedFlags.push_back(false);
     }
     ImGui::SameLine();
@@ -802,7 +810,7 @@ namespace Nox
         component.EmissiveTextureSets.pop_back();
         component.EmissiveStrengths.pop_back();
         component.Modes.pop_back();
-        component.AlphaCutoffs.pop_back();
+        component.AlphaMaskCutoffs.pop_back();
         component.DoubleSidedFlags.pop_back();
     }
 });

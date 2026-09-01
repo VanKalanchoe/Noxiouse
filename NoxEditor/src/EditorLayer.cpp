@@ -593,7 +593,7 @@ namespace Nox
                                     matComp.EmissiveStrengths = {matData.emissiveStrength};
                                     
                                     matComp.Modes = {matData.Mode};
-                                    matComp.AlphaCutoffs = {matData.AlphaCutoff};
+                                    matComp.AlphaMaskCutoffs = {matData.AlphaMaskCutoff};
                                     matComp.DoubleSidedFlags = {matData.DoubleSided};
 
                                     // Auto-attach AnimatorComponent if skeleton exists
@@ -639,7 +639,7 @@ namespace Nox
                                     matComp.EmissiveStrengths = {matData.emissiveStrength};
                                     
                                     matComp.Modes = {matData.Mode};
-                                    matComp.AlphaCutoffs = {matData.AlphaCutoff};
+                                    matComp.AlphaMaskCutoffs = {matData.AlphaMaskCutoff};
                                     matComp.DoubleSidedFlags = {matData.DoubleSided};
                                 }
                                 else
@@ -689,7 +689,7 @@ namespace Nox
                                 matComp.EmissiveStrengths.resize(subMeshCount, 1.0f);
                                 
                                 matComp.Modes.resize(subMeshCount, AlphaMode::Opaque);
-                                matComp.AlphaCutoffs.resize(subMeshCount, 0.5f);
+                                matComp.AlphaMaskCutoffs.resize(subMeshCount, 0.5f);
                                 matComp.DoubleSidedFlags.resize(subMeshCount, false);
 
                                 // Resolve paths to AssetHandles for each slot
@@ -718,7 +718,7 @@ namespace Nox
                                     matComp.EmissiveStrengths[i] = matData.emissiveStrength;
                                     
                                     matComp.Modes[i] = matData.Mode;
-                                    matComp.AlphaCutoffs[i] = matData.AlphaCutoff;
+                                    matComp.AlphaMaskCutoffs[i] = matData.AlphaMaskCutoff;
                                     matComp.DoubleSidedFlags[i] = matData.DoubleSided;
                                 }
                             }

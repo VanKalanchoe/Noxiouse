@@ -240,6 +240,22 @@ namespace Nox
             out << YAML::BeginMap; // MaterialComponent
 
             auto& mc = entity.GetComponent<MaterialComponent>();
+            
+            // Workflow & Specular-Glossiness Properties
+            out << YAML::Key << "Workflows" << YAML::Value;
+            out << YAML::BeginSeq;
+            for (auto val : mc.Workflows) out << val;
+            out << YAML::EndSeq;
+
+            out << YAML::Key << "DiffuseFactors" << YAML::Value;
+            out << YAML::BeginSeq;
+            for (const auto& val : mc.DiffuseFactors) out << val;
+            out << YAML::EndSeq;
+
+            out << YAML::Key << "SpecularFactors" << YAML::Value;
+            out << YAML::BeginSeq;
+            for (const auto& val : mc.SpecularFactors) out << val;
+            out << YAML::EndSeq;
 
             // Base Color
             out << YAML::Key << "BaseColorFactor" << YAML::Value;
@@ -326,9 +342,9 @@ namespace Nox
             for (auto mode : mc.Modes) out << static_cast<int>(mode);
             out << YAML::EndSeq;
 
-            out << YAML::Key << "AlphaCutoffs" << YAML::Value;
+            out << YAML::Key << "AlphaMaskCutoffs" << YAML::Value;
             out << YAML::BeginSeq;
-            for (auto cutoff : mc.AlphaCutoffs) out << (float)cutoff;
+            for (auto cutoff : mc.AlphaMaskCutoffs) out << (float)cutoff;
             out << YAML::EndSeq;
 
             out << YAML::Key << "DoubleSidedFlags" << YAML::Value;
@@ -636,6 +652,28 @@ namespace Nox
                 if (materialComponent)
                 {
                     auto& mc = deserializedEntity.AddComponent<MaterialComponent>();
+                    
+                    // Workflow & Specular-Glossiness Properties
+                    auto workflowsSeq = materialComponent["Workflows"];
+                    if (workflowsSeq)
+                    {
+                        mc.Workflows.clear();
+                        for (auto node : workflowsSeq) mc.Workflows.push_back(node.as<float>());
+                    }
+
+                    auto diffuseFactorsSeq = materialComponent["DiffuseFactors"];
+                    if (diffuseFactorsSeq)
+                    {
+                        mc.DiffuseFactors.clear();
+                        for (auto node : diffuseFactorsSeq) mc.DiffuseFactors.push_back(node.as<glm::vec4>());
+                    }
+
+                    auto specularFactorsSeq = materialComponent["SpecularFactors"];
+                    if (specularFactorsSeq)
+                    {
+                        mc.SpecularFactors.clear();
+                        for (auto node : specularFactorsSeq) mc.SpecularFactors.push_back(node.as<glm::vec4>());
+                    }
 
                     // Base Color
                     auto baseColorFactorSeq = materialComponent["BaseColorFactor"];
@@ -772,8 +810,8 @@ namespace Nox
                     auto alphaCutoffsSeq = materialComponent["AlphaCutoffs"];
                     if (alphaCutoffsSeq)
                     {
-                        mc.AlphaCutoffs.clear();
-                        for (auto node : alphaCutoffsSeq) mc.AlphaCutoffs.push_back(node.as<float>());
+                        mc.AlphaMaskCutoffs.clear();
+                        for (auto node : alphaCutoffsSeq) mc.AlphaMaskCutoffs.push_back(node.as<float>());
                     }
 
                     auto doubleSidedSeq = materialComponent["DoubleSidedFlags"];

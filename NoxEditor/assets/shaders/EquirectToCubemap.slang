@@ -5,9 +5,8 @@ static const float2 invAtan = float2(0.15915494309, 0.31830988618); // 1 / (2 * 
 // Converts a 3D unit direction vector to 2D equirectangular UV coordinates
 float2 sampleSphericalMap(float3 v)
 {
-    // -Z is Forward, +X is Right
-    // atan2(v.x, -v.z) maps -Z (Forward) to the center of the HDR image (UV.x = 0.5)
-    float phi = atan2(v.x, -v.z);
+    // -Z is Forward, y+up
+    float phi = atan2(-v.x, v.z);
     
     // Clamp v.y to avoid NaN from floating point precision issues at extremes
     float theta = asin(clamp(v.y, -1.0, 1.0));
@@ -21,25 +20,24 @@ float2 sampleSphericalMap(float3 v)
 
 // Maps cubemap face coordinates [-1, 1] to a 3D world direction vector (Vulkan spec)
 float3 getCubemapVector(uint face, float2 uv)
-{
-    // Compute pixel coordinates uv.x and uv.y lie in [-1, 1]
-    float x = uv.x;
-    float y = uv.y;
-
-    float3 dir = float3(0.0);
-
-    switch (face)
     {
-        case 0: dir = float3( 1.0,  -y,  -x); break; // +X (Right)
-        case 1: dir = float3(-1.0,  -y,   x); break; // -X (Left)
-        case 2: dir = float3(   x, 1.0,   y); break; // +Y (Top)
-        case 3: dir = float3(   x,-1.0,  -y); break; // -Y (Bottom)
-        case 4: dir = float3(   x,  -y, 1.0); break; // +Z (Back)
-        case 5: dir = float3(  -x,  -y, -1.0); break; // -Z (Front)
-    }
+        float x = uv.x;
+        float y = uv.y;
 
-    return normalize(dir);
-}
+        float3 dir = float3(0.0);
+
+        switch (face)
+        {
+            case 0: dir = float3( 1.0,  -y,  -x); break; // +X (Right)
+            case 1: dir = float3(-1.0,  -y,   x); break; // -X (Left)
+            case 2: dir = float3(   x, 1.0,   y); break; // +Y (Top/Sky)
+            case 3: dir = float3(   x,-1.0,  -y); break; // -Y (Bottom/Floor)
+            case 4: dir = float3(   x,  -y, 1.0); break; // +Z (Back)
+            case 5: dir = float3(  -x,  -y, -1.0); break; // -Z (Front)
+        }
+
+        return normalize(dir);
+    }
 
 [shader("compute")]
 [numthreads(16, 16, 1)]

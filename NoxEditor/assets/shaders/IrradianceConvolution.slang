@@ -4,24 +4,24 @@ static const float PI = 3.14159265359;
 
 // Maps cubemap face coordinates [-1, 1] to a 3D world direction vector (Vulkan spec)
 float3 getCubemapVector(uint face, float2 uv)
-{
-float x = uv.x;
-float y = uv.y;
+    {
+        float x = uv.x;
+        float y = uv.y;
 
-float3 dir = float3(0.0);
+        float3 dir = float3(0.0);
 
-switch (face)
-{
-    case 0: dir = float3( 1.0,  -y,  -x); break; // +X (Right)
-    case 1: dir = float3(-1.0,  -y,   x); break; // -X (Left)
-    case 2: dir = float3(   x, 1.0,   y); break; // +Y (Top)
-    case 3: dir = float3(   x,-1.0,  -y); break; // -Y (Bottom)
-    case 4: dir = float3(   x,  -y, 1.0); break; // +Z (Back)
-    case 5: dir = float3(  -x,  -y, -1.0); break; // -Z (Front)
-}
+        switch (face)
+        {
+            case 0: dir = float3( 1.0,  -y,  -x); break; // +X (Right)
+            case 1: dir = float3(-1.0,  -y,   x); break; // -X (Left)
+            case 2: dir = float3(   x, 1.0,   y); break; // +Y (Top/Sky)
+            case 3: dir = float3(   x,-1.0,  -y); break; // -Y (Bottom/Floor)
+            case 4: dir = float3(   x,  -y, 1.0); break; // +Z (Back)
+            case 5: dir = float3(  -x,  -y, -1.0); break; // -Z (Front)
+        }
 
-return normalize(dir);
-}
+        return normalize(dir);
+    }
 
 [shader("compute")]
 [numthreads(16, 16, 1)]

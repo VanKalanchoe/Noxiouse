@@ -210,6 +210,47 @@ namespace NRI
         m_deviceVK.getDevice().writeResourceDescriptorsEXT(info, hostRange);
     }
 
+    uint32_t DescriptorHeapVK::registerStorageTextureMip(Texture& texture, uint32_t mipLevel)
+    {
+        auto* vkTex = dynamic_cast<TextureVK*>(&texture);
+
+        uint32_t slot;
+        if (!m_freeImageSlots.empty())
+        {
+            slot = m_freeImageSlots.back();
+            m_freeImageSlots.pop_back();
+        }
+        else
+        {
+            slot = m_allocatedImageCount++;
+        }
+
+        // Configure the image view to target specifically this mip level
+        vk::ImageViewCreateInfo viewInfo = vkTex->getNativeViewInfo();
+        viewInfo.viewType = vk::ImageViewType::e2DArray;
+        viewInfo.subresourceRange.baseMipLevel = mipLevel;
+        viewInfo.subresourceRange.levelCount = 1;
+
+        vk::ImageDescriptorInfoEXT imageDescriptorInfo
+        {
+            .pView = &viewInfo,
+            .layout = vk::ImageLayout::eGeneral
+        };
+
+        vk::ResourceDescriptorInfoEXT info{};
+        info.type = vk::DescriptorType::eStorageImage;
+        info.data.pImage = &imageDescriptorInfo;
+
+        vk::HostAddressRangeEXT hostRange
+        {
+            .address = static_cast<uint8_t*>(m_mappedPtr) + m_imageHeapOffset + (m_imageDescSize * slot),
+            .size = m_imageDescSize
+        };
+
+        m_deviceVK.getDevice().writeResourceDescriptorsEXT(info, hostRange);
+        return slot;
+    }
+
     void DescriptorHeapVK::unregisterTexture(uint32_t slot)
     {
         /*// 1. Create a safe descriptor payload pointing to a null view

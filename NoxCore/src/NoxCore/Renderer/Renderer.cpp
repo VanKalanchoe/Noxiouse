@@ -506,10 +506,16 @@ namespace Nox
         cmd->dispatch(groupCountX, groupCountY, 6);
 
         // Transition Cubemap layout: General -> ShaderResource (ready for graphics sampling)
-        cmd->transitionTextureLayout(*m_environmentCubemap, NRI::TextureLayout::General, NRI::TextureLayout::ShaderResource);
+        cmd->transitionTextureLayout(*m_environmentCubemap, NRI::TextureLayout::General, NRI::TextureLayout::TransferDst);
 
         // Submit command buffer and wait for execution to complete
         endSingleTimeCommands(std::move(cmd));
+        
+        {
+            std::unique_ptr<NRI::CommandBuffer> mipCmd = beginSingleTimeCommands();
+            m_environmentCubemap->generateMipmaps(*mipCmd);
+            endSingleTimeCommands(std::move(mipCmd));
+        }
 
         // 7. Overwrite descriptor slot in heap with Sampled Image Descriptor
         m_resourceHeap->registerTexture(*m_environmentCubemap, NRI::TextureUsage::ShaderResource);
@@ -568,14 +574,14 @@ namespace Nox
         //  SPECULAR IBL: PRE-FILTERED ENVIRONMENT MAP
         // ==========================================
         constexpr uint32_t prefilteredSize = 512; // dont forget to change sampler to hardcoded maxlod
-        uint32_t prefilterNumMips = static_cast<uint32_t>(floor(log2(prefilteredSize))) + 1;
+        prefilterCubeMipLevels = static_cast<uint32_t>(floor(log2(prefilteredSize))) + 1;
 
         m_prefilteredEnvMap = m_device->createTexture(NRI::TextureDesc{
             .width = prefilteredSize,
             .height = prefilteredSize,
             .arrayLayers = 6,
             .isCubeMap = true,
-            .mipLevels = prefilterNumMips,
+            .mipLevels = prefilterCubeMipLevels,
             .sampleCount = 1,
             .usage = NRI::TextureUsage::Storage,
             .format = NRI::ImageFormat::R16G16B16A16_SFLOAT
@@ -605,15 +611,20 @@ namespace Nox
         prefCmd->transitionTextureLayout(*m_prefilteredEnvMap, NRI::TextureLayout::Undefined, NRI::TextureLayout::General);
         prefCmd->bindPipeline(NRI::PipelineBindPoint::Compute, *prefilterPipeline);
 
+        std::vector<uint32_t> tempMipSlots;
         // Loop through each roughness mip level
-        for (uint32_t mip = 0; mip < prefilterNumMips; ++mip)
+        for (uint32_t mip = 0; mip < prefilterCubeMipLevels; ++mip)
         {
             uint32_t mipWidth = prefilteredSize >> mip;
             uint32_t mipHeight = prefilteredSize >> mip;
-            float roughness = (float)mip / (float)(prefilterNumMips - 1);
+            float roughness = (float)mip / (float)(prefilterCubeMipLevels - 1);
 
+            // Register a descriptor pointing directly to this mip level
+            uint32_t mipStorageSlot = m_resourceHeap->registerStorageTextureMip(*m_prefilteredEnvMap, mip);
+            tempMipSlots.push_back(mipStorageSlot);
+            
             prefilterData.envTextureIndex = m_environmentCubemap->GetDescriptorIndexSlot();
-            prefilterData.cubemapStorageIndex = m_prefilteredEnvMap->GetDescriptorIndexSlot(); // Note: Needs slice/mip targeting in shader or descriptor binding if multi-mip storage
+            prefilterData.cubemapStorageIndex = mipStorageSlot; // Note: Needs slice/mip targeting in shader or descriptor binding if multi-mip storage
             prefilterData.cubemapSize = mipWidth;
             prefilterData.roughness = roughness;
 
@@ -626,6 +637,11 @@ namespace Nox
 
         prefCmd->transitionTextureLayout(*m_prefilteredEnvMap, NRI::TextureLayout::General, NRI::TextureLayout::ShaderResource);
         endSingleTimeCommands(std::move(prefCmd));
+        // Free the temporary per-mip storage descriptor slots
+        for (uint32_t slot : tempMipSlots)
+        {
+            m_resourceHeap->unregisterTexture(slot);
+        }
         m_resourceHeap->registerTexture(*m_prefilteredEnvMap, NRI::TextureUsage::ShaderResource);
 
         // ==========================================
@@ -1651,7 +1667,11 @@ namespace Nox
         // PBR IBL
         uniformData.irradianceMapIndex = m_irradianceCubemap->GetDescriptorIndexSlot();
         uniformData.prefilteredMapIndex = m_prefilteredEnvMap->GetDescriptorIndexSlot();
+        uniformData.prefilteredCubeMipLevels = static_cast<float>(prefilterCubeMipLevels);
         uniformData.brdfLutIndex = m_brdfLUT->GetDescriptorIndexSlot();
+        uniformData.exposure = 4.5f; // slider in the future in imgui
+        uniformData.gamma = 2.2f; // slider in the future in imgui
+        uniformData.scaleIBLAmbient = 1.0f; // slider in the future in imgui
 
         memcpy(m_uniformBuffersMapped[currentImage], &uniformData, sizeof(uniformData));
     }
@@ -2007,6 +2027,7 @@ namespace Nox
 
         shaderio::InstanceData instance{};
         instance.modelMatrix = transform;
+        instance.normalMatrix = glm::transpose(glm::inverse(transform));
 
         // 1. Where do the meshlets live, and how many are there?
         instance.drawsPageIndex = handle.meshletDraws.pageIndex;
@@ -2032,6 +2053,11 @@ namespace Nox
         };
         
         // --- MATERIAL PACKING ---
+        
+        instance.workflow = (slotIdx < material.Workflows.size()) ? material.Workflows[slotIdx] : 0.0f;
+        instance.diffuseFactor = (slotIdx < material.DiffuseFactors.size()) ? material.DiffuseFactors[slotIdx] : glm::vec4(1.0f);
+        instance.specularFactor = (slotIdx < material.SpecularFactors.size()) ? material.SpecularFactors[slotIdx] : glm::vec4(1.0f);
+        
         // Base Color
         instance.baseColorFactor = (slotIdx < material.BaseColorFactors.size()) ? material.BaseColorFactors[slotIdx] : glm::vec4(1.0f);
         instance.baseColorTextureIndex = getTextureIndex(material.BaseColorMaps, slotIdx);
@@ -2059,7 +2085,7 @@ namespace Nox
         // Settings
         AlphaMode mode = (slotIdx < material.Modes.size()) ? material.Modes[slotIdx] : AlphaMode::Opaque;
         instance.alphaMode = static_cast<uint32_t>(mode);
-        instance.alphaCutoff = (slotIdx < material.AlphaCutoffs.size()) ? material.AlphaCutoffs[slotIdx] : 0.5f;
+        instance.alphaMaskCutoff = (slotIdx < material.AlphaMaskCutoffs.size()) ? material.AlphaMaskCutoffs[slotIdx] : 0.5f;
         instance.doubleSided = (slotIdx < material.DoubleSidedFlags.size()) ? (bool)material.DoubleSidedFlags[slotIdx] : false;
 
         instance.entityID = entityID;
@@ -2121,6 +2147,7 @@ namespace Nox
 
             shaderio::InstanceData instance{};
             instance.modelMatrix = transform;
+            instance.normalMatrix = glm::transpose(glm::inverse(transform));
 
             // Page Table Info
             instance.drawsPageIndex = handle.meshletDraws.pageIndex;
@@ -2132,6 +2159,11 @@ namespace Nox
             instance.meshletTrianglesPageIndex = handle.meshletTriangles.pageIndex;
 
             // --- MATERIAL PACKING ---
+            
+            instance.workflow = (i < material.Workflows.size()) ? material.Workflows[i] : 0.0f;
+            instance.diffuseFactor = (i < material.DiffuseFactors.size()) ? material.DiffuseFactors[i] : glm::vec4(1.0f);
+            instance.specularFactor = (i < material.SpecularFactors.size()) ? material.SpecularFactors[i] : glm::vec4(1.0f);
+            
             // Base Color
             instance.baseColorFactor = (i < material.BaseColorFactors.size()) ? material.BaseColorFactors[i] : glm::vec4(1.0f);
             instance.baseColorTextureIndex = getTextureIndex(material.BaseColorMaps, i);
@@ -2159,7 +2191,7 @@ namespace Nox
             // Settings
             AlphaMode mode = (i < material.Modes.size()) ? material.Modes[i] : AlphaMode::Opaque;
             instance.alphaMode = static_cast<uint32_t>(mode);
-            instance.alphaCutoff = (i < material.AlphaCutoffs.size()) ? material.AlphaCutoffs[i] : 0.5f;
+            instance.alphaMaskCutoff = (i < material.AlphaMaskCutoffs.size()) ? material.AlphaMaskCutoffs[i] : 0.5f;
             instance.doubleSided = (i < material.DoubleSidedFlags.size()) ? (bool)material.DoubleSidedFlags[i] : false;
 
             instance.entityID = entityID;

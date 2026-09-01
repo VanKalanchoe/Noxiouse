@@ -204,15 +204,15 @@ namespace Nox
     }
 
     static void LoadNodeHierarchy(int32_t nodeIndex, Node* parent, const tg3_model& model, Skeleton& outSkeleton)
-{
-    const tg3_node& tg3Node = model.nodes[nodeIndex];
+    {
+        const tg3_node& tg3Node = model.nodes[nodeIndex];
 
-    Node* newNode = new Node();
-    newNode->Index = nodeIndex;
-    newNode->Parent = parent;
-    newNode->Name = (tg3Node.name.data && tg3Node.name.len > 0)
-                        ? std::string(tg3Node.name.data, tg3Node.name.len)
-                        : ("Node_" + std::to_string(nodeIndex));
+        Node* newNode = new Node();
+        newNode->Index = nodeIndex;
+        newNode->Parent = parent;
+        newNode->Name = (tg3Node.name.data && tg3Node.name.len > 0)
+                            ? std::string(tg3Node.name.data, tg3Node.name.len)
+                            : ("Node_" + std::to_string(nodeIndex));
 
         // 1. Extract base transform
         bool hasMatrix = (tg3Node.has_matrix != 0);
@@ -230,12 +230,13 @@ namespace Nox
         {
             newNode->HasRestMatrix = false;
             newNode->RestTranslation = glm::vec3(static_cast<float>(tg3Node.translation[0]), static_cast<float>(tg3Node.translation[1]), static_cast<float>(tg3Node.translation[2]));
-            newNode->RestRotation = glm::quat(static_cast<float>(tg3Node.rotation[3]), static_cast<float>(tg3Node.rotation[0]), static_cast<float>(tg3Node.rotation[1]), static_cast<float>(tg3Node.rotation[2]));
+            newNode->RestRotation = glm::quat(static_cast<float>(tg3Node.rotation[3]), static_cast<float>(tg3Node.rotation[0]), static_cast<float>(tg3Node.rotation[1]),
+                                              static_cast<float>(tg3Node.rotation[2]));
             newNode->RestScale = glm::vec3(static_cast<float>(tg3Node.scale[0]), static_cast<float>(tg3Node.scale[1]), static_cast<float>(tg3Node.scale[2]));
 
             newNode->RestMatrix = glm::translate(glm::mat4(1.0f), newNode->RestTranslation) *
-                                  glm::toMat4(newNode->RestRotation) *
-                                  glm::scale(glm::mat4(1.0f), newNode->RestScale);
+                glm::toMat4(newNode->RestRotation) *
+                glm::scale(glm::mat4(1.0f), newNode->RestScale);
         }
 
         // Sync active fields to rest values
@@ -245,20 +246,20 @@ namespace Nox
         newNode->Matrix = newNode->RestMatrix;
         newNode->HasMatrix = newNode->HasRestMatrix;
 
-    // 2. Register node in the system
-    outSkeleton.AllNodes[nodeIndex] = newNode;
+        // 2. Register node in the system
+        outSkeleton.AllNodes[nodeIndex] = newNode;
 
-    if (parent)
-        parent->Children.push_back(newNode);
-    else
-        outSkeleton.RootNodes.push_back(newNode);
+        if (parent)
+            parent->Children.push_back(newNode);
+        else
+            outSkeleton.RootNodes.push_back(newNode);
 
-    // 3. Recurse children
-    for (uint32_t c = 0; c < tg3Node.children_count; c++)
-    {
-        LoadNodeHierarchy(tg3Node.children[c], newNode, model, outSkeleton);
+        // 3. Recurse children
+        for (uint32_t c = 0; c < tg3Node.children_count; c++)
+        {
+            LoadNodeHierarchy(tg3Node.children[c], newNode, model, outSkeleton);
+        }
     }
-}
 
     static void ParseSkeletonFromGltf(const tg3_model& model, Skeleton& outSkeleton)
     {
@@ -450,9 +451,8 @@ namespace Nox
             outAnimations.push_back(animSeq);
         }
     }
-    
-    
-    
+
+
     static std::vector<uint8_t> DecodeBase64(std::string_view input)
     {
         static constexpr char alphabet[] =
@@ -497,80 +497,148 @@ namespace Nox
 
         return output;
     }
-    
+
     static std::filesystem::path ExtractGltfImage(
-    const tg3_model& model,
-    const tg3_image& image,
-    int32_t imageIndex,
-    const std::filesystem::path& modelPath)
-{
-    std::filesystem::path textureDir =
-        modelPath.parent_path() / "textures";
-
-    std::filesystem::create_directories(textureDir);
-
-    std::string extension = ".png";
-
-    if (image.mime_type.data && image.mime_type.len > 0)
+        const tg3_model& model,
+        const tg3_image& image,
+        int32_t imageIndex,
+        const std::filesystem::path& modelPath)
     {
-        std::string mime(image.mime_type.data, image.mime_type.len);
+        std::filesystem::path textureDir =
+            modelPath.parent_path() / "textures";
 
-        if (mime == "image/jpeg")
-            extension = ".jpg";
-        else if (mime == "image/png")
-            extension = ".png";
-        else if (mime == "image/webp")
-            extension = ".webp";
-        else if (mime == "image/ktx2")
-            extension = ".ktx2";
-        else
-            NOX_CORE_WARN("Unknown embedded image MIME type: {}", mime);
-    }
+        std::filesystem::create_directories(textureDir);
 
-    std::filesystem::path outputPath =
-        textureDir /
-        (modelPath.stem().string() +
-         "_tex_" +
-         std::to_string(imageIndex) +
-         extension);
+        std::string extension = ".png";
 
-    // ------------------------------------------------------------
-    // 1. data:image/...;base64,...
-    // ------------------------------------------------------------
-
-    if (image.uri.data && image.uri.len > 0)
-    {
-        std::string uri(image.uri.data, image.uri.len);
-
-        if (uri.starts_with("data:"))
+        if (image.mime_type.data && image.mime_type.len > 0)
         {
-            const size_t commaPos = uri.find(',');
+            std::string mime(image.mime_type.data, image.mime_type.len);
 
-            if (commaPos == std::string::npos)
+            if (mime == "image/jpeg")
+                extension = ".jpg";
+            else if (mime == "image/png")
+                extension = ".png";
+            else if (mime == "image/webp")
+                extension = ".webp";
+            else if (mime == "image/ktx2")
+                extension = ".ktx2";
+            else
+                NOX_CORE_WARN("Unknown embedded image MIME type: {}", mime);
+        }
+
+        std::filesystem::path outputPath =
+            textureDir /
+            (modelPath.stem().string() +
+                "_tex_" +
+                std::to_string(imageIndex) +
+                extension);
+
+        // ------------------------------------------------------------
+        // 1. data:image/...;base64,...
+        // ------------------------------------------------------------
+
+        if (image.uri.data && image.uri.len > 0)
+        {
+            std::string uri(image.uri.data, image.uri.len);
+
+            if (uri.starts_with("data:"))
+            {
+                const size_t commaPos = uri.find(',');
+
+                if (commaPos == std::string::npos)
+                {
+                    NOX_CORE_ERROR(
+                        "[Importer] Invalid data URI for image {}",
+                        imageIndex
+                    );
+
+                    return {};
+                }
+
+                std::string_view encodedData =
+                    std::string_view(uri).substr(commaPos + 1);
+
+                std::vector<uint8_t> decoded =
+                    DecodeBase64(encodedData);
+
+                if (decoded.empty())
+                {
+                    NOX_CORE_ERROR(
+                        "[Importer] Failed to decode base64 image {}",
+                        imageIndex
+                    );
+
+                    return {};
+                }
+
+                std::ofstream outFile(
+                    outputPath,
+                    std::ios::binary
+                );
+
+                if (!outFile)
+                {
+                    NOX_CORE_ERROR(
+                        "[Importer] Failed to create texture file: {}",
+                        outputPath.string()
+                    );
+
+                    return {};
+                }
+
+                outFile.write(
+                    reinterpret_cast<const char*>(decoded.data()),
+                    static_cast<std::streamsize>(decoded.size())
+                );
+
+                outFile.close();
+
+                NOX_CORE_INFO(
+                    "[Importer] Extracted base64 texture {} -> {}",
+                    imageIndex,
+                    outputPath.string()
+                );
+
+                return outputPath;
+            }
+
+            // ------------------------------------------------------------
+            // 2. Normal external URI
+            // ------------------------------------------------------------
+
+            return modelPath.parent_path() / uri;
+        }
+
+        // ------------------------------------------------------------
+        // 3. GLB bufferView embedded image
+        // ------------------------------------------------------------
+
+        if (image.buffer_view >= 0 &&
+            image.buffer_view < static_cast<int32_t>(model.buffer_views_count))
+        {
+            const auto& bufView =
+                model.buffer_views[image.buffer_view];
+
+            if (bufView.buffer < 0 ||
+                bufView.buffer >= static_cast<int32_t>(model.buffers_count))
             {
                 NOX_CORE_ERROR(
-                    "[Importer] Invalid data URI for image {}",
+                    "[Importer] Invalid buffer index for image {}",
                     imageIndex
                 );
 
                 return {};
             }
 
-            std::string_view encodedData =
-                std::string_view(uri).substr(commaPos + 1);
+            const auto& buffer =
+                model.buffers[bufView.buffer];
 
-            std::vector<uint8_t> decoded =
-                DecodeBase64(encodedData);
+            const uint8_t* imgData =
+                buffer.data.data + bufView.byte_offset;
 
-            if (decoded.empty())
-            {
-                NOX_CORE_ERROR(
-                    "[Importer] Failed to decode base64 image {}",
-                    imageIndex
-                );
-
-                return {};
-            }
+            const size_t imgSize =
+                bufView.byte_length;
 
             std::ofstream outFile(
                 outputPath,
@@ -588,14 +656,14 @@ namespace Nox
             }
 
             outFile.write(
-                reinterpret_cast<const char*>(decoded.data()),
-                static_cast<std::streamsize>(decoded.size())
+                reinterpret_cast<const char*>(imgData),
+                static_cast<std::streamsize>(imgSize)
             );
 
             outFile.close();
 
             NOX_CORE_INFO(
-                "[Importer] Extracted base64 texture {} -> {}",
+                "[Importer] Extracted bufferView texture {} -> {}",
                 imageIndex,
                 outputPath.string()
             );
@@ -603,77 +671,17 @@ namespace Nox
             return outputPath;
         }
 
-        // ------------------------------------------------------------
-        // 2. Normal external URI
-        // ------------------------------------------------------------
-
-        return modelPath.parent_path() / uri;
+        return {};
     }
 
-    // ------------------------------------------------------------
-    // 3. GLB bufferView embedded image
-    // ------------------------------------------------------------
-
-    if (image.buffer_view >= 0 &&
-        image.buffer_view < static_cast<int32_t>(model.buffer_views_count))
-    {
-        const auto& bufView =
-            model.buffer_views[image.buffer_view];
-
-        if (bufView.buffer < 0 ||
-            bufView.buffer >= static_cast<int32_t>(model.buffers_count))
-        {
-            NOX_CORE_ERROR(
-                "[Importer] Invalid buffer index for image {}",
-                imageIndex
-            );
-
-            return {};
-        }
-
-        const auto& buffer =
-            model.buffers[bufView.buffer];
-
-        const uint8_t* imgData =
-    buffer.data.data + bufView.byte_offset;
-
-        const size_t imgSize =
-            bufView.byte_length;
-
-        std::ofstream outFile(
-            outputPath,
-            std::ios::binary
-        );
-
-        if (!outFile)
-        {
-            NOX_CORE_ERROR(
-                "[Importer] Failed to create texture file: {}",
-                outputPath.string()
-            );
-
-            return {};
-        }
-
-        outFile.write(
-            reinterpret_cast<const char*>(imgData),
-            static_cast<std::streamsize>(imgSize)
-        );
-
-        outFile.close();
-
-        NOX_CORE_INFO(
-            "[Importer] Extracted bufferView texture {} -> {}",
-            imageIndex,
-            outputPath.string()
-        );
-
-        return outputPath;
-    }
-
-    return {};
-}
-
+    auto getFloatVal = [](const tg3_value& val) -> float {
+        if (val.type == TG3_VALUE_REAL)
+            return static_cast<float>(val.real_val);
+        if (val.type == TG3_VALUE_INT)
+            return static_cast<float>(val.int_val);
+        return 1.0f; // Default fallback
+    };
+    
     std::vector<MeshData> MeshImporter::ParseGltfToMeshData
     (
         const std::filesystem::path& path,
@@ -764,13 +772,13 @@ namespace Nox
                 const tg3_accessor& posAccessor = model.accessors[FindAttribute(primitive, "POSITION")];
                 const tg3_buffer_view& posBufferView = model.buffer_views[posAccessor.buffer_view];
                 const tg3_buffer& posBuffer = model.buffers[posBufferView.buffer];
-                
+
                 // Get normals
                 bool hasNormals = FindAttribute(primitive, "NORMAL") != -1;
                 const tg3_accessor* normalAccessor = nullptr;
                 const tg3_buffer_view* normalBufferView = nullptr;
                 const tg3_buffer* normalBuffer = nullptr;
-                
+
                 if (hasNormals)
                 {
                     normalAccessor = &model.accessors[FindAttribute(primitive, "NORMAL")];
@@ -790,7 +798,7 @@ namespace Nox
                     texCoordBufferView = &model.buffer_views[texCoordAccessor->buffer_view];
                     texCoordBuffer = &model.buffers[texCoordBufferView->buffer];
                 }
-                
+
                 // Get texture coordinates (TEXCOORD_1)
                 bool hasTexCoords1 = FindAttribute(primitive, "TEXCOORD_1") != -1;
                 const tg3_accessor* texCoord1Accessor = nullptr;
@@ -837,14 +845,14 @@ namespace Nox
                     // We need to flip the Y coordinate
                     // i dont need that look first line in load model
                     vertex.pos = {pos[0], pos[1], pos[2]};
-                    
+
                     if (hasNormals)
                     {
                         uint32_t normalStride = normalBufferView->byte_stride ? normalBufferView->byte_stride : 12;
-                        
+
                         size_t normalOffset = normalBufferView->byte_offset + normalAccessor->byte_offset + (i * normalStride);
                         const float* norm = reinterpret_cast<const float*>(&normalBuffer->data.data[normalOffset]);
-                        
+
                         vertex.normal = {norm[0], norm[1], norm[2]};
                     }
                     else
@@ -856,14 +864,14 @@ namespace Nox
                     {
                         uint32_t texStride = texCoordBufferView->byte_stride ? texCoordBufferView->byte_stride : 8;
                         const float* texCoord = reinterpret_cast<const float*>(&texCoordBuffer->data.data[texCoordBufferView->byte_offset + texCoordAccessor->byte_offset + (i * texStride)]);
-                        
+
                         vertex.uv0 = {texCoord[0], texCoord[1]};
                     }
                     else
                     {
                         vertex.uv0 = {0.0f, 0.0f};
                     }
-                    
+
                     if (hasTexCoords1)
                     {
                         uint32_t texStride1 = texCoord1BufferView->byte_stride ? texCoord1BufferView->byte_stride : 8;
@@ -1070,20 +1078,20 @@ namespace Nox
 
                 primitiveData.MeshletVertices.insert(primitiveData.MeshletVertices.end(), localMeshletVertices.begin(), localMeshletVertices.end());
                 primitiveData.MeshletTriangles.insert(primitiveData.MeshletTriangles.end(), localMeshletTriangles.begin(), localMeshletTriangles.end());
-                
+
                 MaterialData materialData{};
-                
+
                 // Materials
                 if (primitive.material >= 0 && primitive.material < (int32_t)model.materials_count)
                 {
                     const auto& gltfMaterial = model.materials[primitive.material];
-                    
+
                     // Material Name
                     if (gltfMaterial.name.data != nullptr && gltfMaterial.name.len > 0)
                         materialData.Name = std::string(gltfMaterial.name.data, gltfMaterial.name.len);
                     else
                         materialData.Name = "Material_" + std::to_string(primitive.material);
-                    
+
                     // Alpha Mode ("OPAQUE", "MASK", "BLEND")
                     if (gltfMaterial.alpha_mode.data != nullptr && gltfMaterial.alpha_mode.len > 0)
                     {
@@ -1096,23 +1104,26 @@ namespace Nox
                     {
                         materialData.Mode = AlphaMode::Opaque;
                     }
-                    
+
                     // Alpha Cutoff & Double Sided
-                    materialData.AlphaCutoff = static_cast<float>(gltfMaterial.alpha_cutoff);
+                    materialData.AlphaMaskCutoff = static_cast<float>(gltfMaterial.alpha_cutoff);
                     materialData.DoubleSided = (gltfMaterial.double_sided != 0);
-                    
+
                     // --- Helper Lambda to safely extract textures ---
-                    auto GetTexturePath = [&](int32_t texIndex) -> std::string {
-                        if (texIndex >= 0 && texIndex < (int32_t)model.textures_count) {
+                    auto GetTexturePath = [&](int32_t texIndex) -> std::string
+                    {
+                        if (texIndex >= 0 && texIndex < (int32_t)model.textures_count)
+                        {
                             int32_t imageIndex = model.textures[texIndex].source;
-                            if (imageIndex >= 0 && imageIndex < (int32_t)model.images_count) {
+                            if (imageIndex >= 0 && imageIndex < (int32_t)model.images_count)
+                            {
                                 std::filesystem::path texPath = ExtractGltfImage(model, model.images[imageIndex], imageIndex, path);
                                 return texPath.string();
                             }
                         }
                         return "";
                     };
-                    
+
                     // Base Color Factor
                     materialData.BaseColorFactor = glm::vec4(
                         static_cast<float>(gltfMaterial.pbr_metallic_roughness.base_color_factor[0]),
@@ -1126,20 +1137,20 @@ namespace Nox
                     // Metallic & Roughness Factors
                     materialData.MetallicFactor = static_cast<float>(gltfMaterial.pbr_metallic_roughness.metallic_factor);
                     materialData.RoughnessFactor = static_cast<float>(gltfMaterial.pbr_metallic_roughness.roughness_factor);
-                    
+
                     // Metallic-Roughness Texture
                     // (Note: glTF packs Roughness in the Green channel, Metallic in the Blue channel)
                     materialData.MetallicRoughnessTexturePath = GetTexturePath(gltfMaterial.pbr_metallic_roughness.metallic_roughness_texture.index);
                     materialData.PhysicalDescriptorTextureSet = gltfMaterial.pbr_metallic_roughness.metallic_roughness_texture.tex_coord;
-                    
+
                     // Normal Texture
                     materialData.NormalTexturePath = GetTexturePath(gltfMaterial.normal_texture.index);
                     materialData.NormalTextureSet = gltfMaterial.normal_texture.tex_coord;
-                    
+
                     // Ambient Occlusion Texture
                     materialData.OcclusionTexturePath = GetTexturePath(gltfMaterial.occlusion_texture.index);
                     materialData.OcclusionTextureSet = gltfMaterial.occlusion_texture.tex_coord;
-                    
+
                     // Emissive Factor & Texture
                     materialData.EmissiveFactor = glm::vec3(
                         static_cast<float>(gltfMaterial.emissive_factor[0]),
@@ -1149,6 +1160,13 @@ namespace Nox
                     materialData.EmissiveTexturePath = GetTexturePath(gltfMaterial.emissive_texture.index);
                     materialData.EmissiveTextureSet = gltfMaterial.emissive_texture.tex_coord;
                     float emissiveStrength = 1.0f;
+
+                    // Default setup
+                    materialData.Workflow = 0.0f;
+                    materialData.DiffuseFactor = glm::vec4(1.0f);
+                    materialData.SpecularFactor = glm::vec4(1.0f); // Default: rgb = 1.0 (specular), a = 1.0 (glossiness)
+
+                    // Check Extensions
                     for (uint32_t i = 0; i < gltfMaterial.ext.extensions_count; i++)
                     {
                         const tg3_extension& ext = gltfMaterial.ext.extensions[i];
@@ -1173,10 +1191,71 @@ namespace Nox
                                 }
                             }
                         }
+
+                        if (std::string_view(ext.name.data, ext.name.len) == "KHR_materials_pbrSpecularGlossiness")
+                        {
+                            materialData.Workflow = 1.0f;
+
+                            if (ext.value.type == TG3_VALUE_OBJECT)
+                            {
+                                for (uint32_t j = 0; j < ext.value.object_count; j++)
+                                {
+                                    const auto& kv = ext.value.object_data[j];
+                                    std::string_view key(kv.key.data, kv.key.len);
+
+                                    // 1. diffuseFactor (vec4)
+                                    if (key == "diffuseFactor" && kv.value.type == TG3_VALUE_ARRAY && kv.value.array_count >= 4)
+                                    {
+                                        materialData.DiffuseFactor = glm::vec4(
+                                            getFloatVal(kv.value.array_data[0]),
+                                            getFloatVal(kv.value.array_data[1]),
+                                            getFloatVal(kv.value.array_data[2]),
+                                            getFloatVal(kv.value.array_data[3])
+                                        );
+                                    }
+                                    // 2. specularFactor (vec3 packed into rgb)
+                                    else if (key == "specularFactor" && kv.value.type == TG3_VALUE_ARRAY && kv.value.array_count >= 3)
+                                    {
+                                        materialData.SpecularFactor.r = getFloatVal(kv.value.array_data[0]);
+                                        materialData.SpecularFactor.g = getFloatVal(kv.value.array_data[1]);
+                                        materialData.SpecularFactor.b = getFloatVal(kv.value.array_data[2]);
+                                    }
+                                    // 3. glossinessFactor (float packed into a)
+                                    else if (key == "glossinessFactor")
+                                    {
+                                        materialData.SpecularFactor.a = getFloatVal(kv.value);
+                                    }
+                                    // 4. diffuseTexture
+                                    else if (key == "diffuseTexture" && kv.value.type == TG3_VALUE_OBJECT)
+                                    {
+                                        for (uint32_t t = 0; t < kv.value.object_count; t++)
+                                        {
+                                            const auto& texKv = kv.value.object_data[t];
+                                            if (std::string_view(texKv.key.data, texKv.key.len) == "index")
+                                                materialData.BaseColorTexturePath = GetTexturePath(static_cast<int32_t>(texKv.value.int_val));
+                                            else if (std::string_view(texKv.key.data, texKv.key.len) == "texCoord")
+                                                materialData.BaseColorTextureSet = static_cast<int32_t>(texKv.value.int_val);
+                                        }
+                                    }
+                                    // 5. specularGlossinessTexture
+                                    else if (key == "specularGlossinessTexture" && kv.value.type == TG3_VALUE_OBJECT)
+                                    {
+                                        for (uint32_t t = 0; t < kv.value.object_count; t++)
+                                        {
+                                            const auto& texKv = kv.value.object_data[t];
+                                            if (std::string_view(texKv.key.data, texKv.key.len) == "index")
+                                                materialData.MetallicRoughnessTexturePath = GetTexturePath(static_cast<int32_t>(texKv.value.int_val));
+                                            else if (std::string_view(texKv.key.data, texKv.key.len) == "texCoord")
+                                                materialData.PhysicalDescriptorTextureSet = static_cast<int32_t>(texKv.value.int_val);
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                     materialData.emissiveStrength = emissiveStrength;
                 }
-                    
+
                 outMaterials.push_back(materialData);
                 result.push_back(std::move(primitiveData));
             }

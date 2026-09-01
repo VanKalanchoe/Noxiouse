@@ -3,39 +3,51 @@ AssetRegistry:
     FilePath: Scenes/3D-Scene.nox
     SourceFilePath: Scenes/3D-Scene.nox
     Type: AssetType::Scene
-  - Handle: 1201220582203156510
-    FilePath: models/DamagedHelmet/DamagedHelmet.nmesh
-    SourceFilePath: models/DamagedHelmet/DamagedHelmet.gltf
-    Type: AssetType::Mesh
-  - Handle: 2208457521952188714
-    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_1.png
-    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_1.png
-    Type: AssetType::Texture2D
-  - Handle: 5502795841815745084
+  - Handle: 2042394369288253694
     FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_0.png
     SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_0.png
     Type: AssetType::Texture2D
-  - Handle: 7949131439196247668
-    FilePath: models/DamagedHelmet/DamagedHelmet.nmesh
-    SourceFilePath: models/DamagedHelmet/DamagedHelmet.nmesh
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 2808623305267139236
+    FilePath: models/FlightHelmet/FlightHelmet.nmesh
+    SourceFilePath: models/FlightHelmet/FlightHelmet.nmesh
     Type: AssetType::Mesh
-  - Handle: 11615630937579021506
+  - Handle: 3015526054783551892
     FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_2.png
     SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_2.png
     Type: AssetType::Texture2D
-  - Handle: 12336065688503271008
-    FilePath: models/pbr_testSpheres/pbr_spheres.nmesh
-    SourceFilePath: models/pbr_testSpheres/pbr_spheres.nmesh
-    Type: AssetType::Mesh
-  - Handle: 12522948729484473159
-    FilePath: models/DamagedHelmet/DamagedHelmet.nsmesh
-    SourceFilePath: models/DamagedHelmet/DamagedHelmet.nsmesh
-    Type: AssetType::StaticMesh
-  - Handle: 13756855256417977137
-    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_4.png
-    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_4.png
-    Type: AssetType::Texture2D
-  - Handle: 15219893477457504535
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 15353522975752038348
     FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_3.png
     SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_3.png
     Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 15731041746803620731
+    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_4.png
+    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_4.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 16041926913046379162
+    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_1.png
+    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_1.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 16898991917861001654
+    FilePath: models/DamagedHelmet/DamagedHelmet.nsmesh
+    SourceFilePath: models/DamagedHelmet/DamagedHelmet.gltf
+    Type: AssetType::StaticMesh

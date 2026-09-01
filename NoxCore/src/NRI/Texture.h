@@ -79,6 +79,7 @@ namespace NRI
     public:
         virtual void uploadFromBuffer(class CommandBuffer& cmdBuffer, class Buffer& stagingBuffer, uint32_t width, uint32_t height, uint32_t mipLevels, const std::vector<size_t>& mipOffsets) = 0;
         virtual void copyImageToBuffer(CommandBuffer& commandBuffer, Buffer& dstBuffer, uint32_t x, uint32_t y, uint32_t width, uint32_t height) = 0;
+        virtual void generateMipmaps(CommandBuffer& commandBuffer) = 0;
         
         [[nodiscard]] virtual uint32_t getMipLevels() const = 0; // ??
         [[nodiscard]] virtual uint32_t getArrayLayers() const = 0; // ??

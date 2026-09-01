@@ -122,7 +122,11 @@ struct UniformBufferObject
     // PBR IBL
     uint irradianceMapIndex;
     uint prefilteredMapIndex;
+    float prefilteredCubeMipLevels;
     uint brdfLutIndex;
+    float exposure;
+	float gamma;
+    float scaleIBLAmbient;
 };
 
 struct Vertex
@@ -140,6 +144,7 @@ struct InstanceData
 {
     // Mesh
     mat4 modelMatrix;
+    mat4 normalMatrix;
 
     // --- NEW: Page Information ---
     uint32_t drawsPageIndex;            // Same index used for meshletBounds (1:1 allocation)
@@ -151,6 +156,11 @@ struct InstanceData
     uint32_t meshletTrianglesPageIndex;
     // -----------------------------
     
+    // Material Workflow & SpecGloss properties
+    float workflow; // 0.0 = Metallic-Roughness, 1.0 = Specular-Glossiness
+    vec4 diffuseFactor;
+    vec4 specularFactor; // rgb: specular factor, a: glossiness factor
+
     // Material
     vec4 baseColorFactor;
     uint32_t baseColorTextureIndex;
@@ -173,7 +183,7 @@ struct InstanceData
     float emissiveStrength;
     
     uint32_t alphaMode;   // 0 = Opaque, 1 = Mask, 2 = Blend
-    float alphaCutoff;
+    float alphaMaskCutoff;
     uint32_t doubleSided; // Use uint32_t instead of bool for GPU alignment
     
     // MeshAnimation

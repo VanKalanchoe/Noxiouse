@@ -27,6 +27,7 @@ namespace NRI
         
         // Abstract API-portable runtime registration methods
         virtual void registerTexture(class Texture& texture, TextureUsage usageOverride = TextureUsage::Default) = 0;
+        virtual uint32_t registerStorageTextureMip(Texture& texture, uint32_t mipLevel) { return 0; }
         virtual void unregisterTexture(uint32_t slot) = 0;
         virtual uint32_t registerBuffer(class Buffer& buffer, uint64_t size) = 0;
         

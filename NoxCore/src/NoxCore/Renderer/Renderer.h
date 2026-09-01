@@ -312,6 +312,7 @@ namespace Nox
         std::unique_ptr<NRI::Pipeline> m_skyboxPipeline = nullptr;
         Ref<Texture2D> m_irradianceCubemap;
         Ref<Texture2D> m_prefilteredEnvMap;
+        uint32_t prefilterCubeMipLevels = 0;
         Ref<Texture2D> m_brdfLUT;
     };
 }

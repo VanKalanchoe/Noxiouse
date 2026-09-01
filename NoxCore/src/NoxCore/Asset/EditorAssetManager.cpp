@@ -13,6 +13,35 @@
 
 namespace Nox
 {
+    static std::string_view ImageFormatToString(NRI::ImageFormat format)
+    {
+        switch (format)
+        {
+        case NRI::ImageFormat::RGBA8:              return "RGBA8";
+        case NRI::ImageFormat::SRGBA8:             return "SRGBA8";
+        case NRI::ImageFormat::RGB8:               return "RGB8";
+        case NRI::ImageFormat::SRGB8:              return "SRGB8";
+        case NRI::ImageFormat::R16G16_SFLOAT:      return "R16G16_SFLOAT";
+        case NRI::ImageFormat::R16G16B16A16_SFLOAT:return "R16G16B16A16_SFLOAT";
+        case NRI::ImageFormat::BC7_UNorm:          return "BC7_UNorm";
+        case NRI::ImageFormat::BC7_UNorm_SRGB:     return "BC7_UNorm_SRGB";
+        default:                                   return "RGBA8";
+        }
+    }
+
+    static NRI::ImageFormat ImageFormatFromString(std::string_view str)
+    {
+        if (str == "SRGBA8")             return NRI::ImageFormat::SRGBA8;
+        if (str == "RGBA8")              return NRI::ImageFormat::RGBA8;
+        if (str == "SRGB8")              return NRI::ImageFormat::SRGB8;
+        if (str == "RGB8")               return NRI::ImageFormat::RGB8;
+        if (str == "R16G16_SFLOAT")      return NRI::ImageFormat::R16G16_SFLOAT;
+        if (str == "R16G16B16A16_SFLOAT")return NRI::ImageFormat::R16G16B16A16_SFLOAT;
+        if (str == "BC7_UNorm")          return NRI::ImageFormat::BC7_UNorm;
+        if (str == "BC7_UNorm_SRGB")     return NRI::ImageFormat::BC7_UNorm_SRGB;
+        return NRI::ImageFormat::RGBA8;
+    }
+    
     static std::map<std::filesystem::path, AssetType> s_AssetExtensionMap = 
     {
         { ".nox", AssetType::Scene },
@@ -278,6 +307,18 @@ namespace Nox
                 if (!metadata.SourceFilePath.empty())
                     out << YAML::Key << "SourceFilePath" << YAML::Value << metadata.SourceFilePath.generic_string();
                 out << YAML::Key << "Type" << YAML::Value << AssetTypeToString(metadata.Type);
+                
+                // --- ADD THIS: Save TextureSpecification for Texture2D assets ---
+                if (metadata.Type == AssetType::Texture2D)
+                {
+                    out << YAML::Key << "TextureSpec" << YAML::Value;
+                    out << YAML::BeginMap;
+                    out << YAML::Key << "Format" << YAML::Value << std::string(ImageFormatToString(metadata.TextureSpec.format));
+                    out << YAML::Key << "GenerateMips" << YAML::Value << metadata.TextureSpec.generateMips;
+                    out << YAML::Key << "Flip" << YAML::Value << metadata.TextureSpec.flip;
+                    out << YAML::EndMap;
+                }
+                
                 out << YAML::EndMap;
             }
             out << YAML::EndSeq;
@@ -367,6 +408,18 @@ namespace Nox
             if (node["SourceFilePath"])
                 metadata.SourceFilePath = node["SourceFilePath"].as<std::string>();
             metadata.Type = AssetTypeFromString(node["Type"].as<std::string>());
+            
+            // --- ADD THIS: Load TextureSpecification if present ---
+            if (node["TextureSpec"])
+            {
+                auto specNode = node["TextureSpec"];
+                if (specNode["Format"])
+                    metadata.TextureSpec.format = ImageFormatFromString(specNode["Format"].as<std::string>());
+                if (specNode["GenerateMips"])
+                    metadata.TextureSpec.generateMips = specNode["GenerateMips"].as<bool>();
+                if (specNode["Flip"])
+                    metadata.TextureSpec.flip = specNode["Flip"].as<bool>();
+            }
         }
 
         ScanAndRegisterNewAssets();

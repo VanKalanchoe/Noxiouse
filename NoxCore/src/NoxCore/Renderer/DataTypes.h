@@ -43,12 +43,19 @@ namespace Nox
     {
         std::string Name;
         
+        // Workflow: 0.0f = Metallic-Roughness, 1.0f = Specular-Glossiness
+        float Workflow = 0.0f;
+        
+        // Specular-Glossiness Properties
+        glm::vec4 DiffuseFactor = glm::vec4(1.0f);
+        glm::vec4 SpecularFactor = glm::vec4(1.0f); // rgb: Specular Factor, a: Glossiness Factor
+        
         // Base Color
         glm::vec4 BaseColorFactor = glm::vec4(1.0f);
         std::string BaseColorTexturePath;
         int32_t BaseColorTextureSet = 0;
         
-        // PBR Properties
+        // PBR Properties (Metallic-Roughness)
         float MetallicFactor = 1.0f;
         float RoughnessFactor = 1.0f;
         std::string MetallicRoughnessTexturePath;
@@ -69,7 +76,7 @@ namespace Nox
         
         // Alpha properties
         AlphaMode Mode = AlphaMode::Opaque;
-        float AlphaCutoff = 0.5f;
+        float AlphaMaskCutoff = 0.5f;
         bool DoubleSided = false;
     };
     

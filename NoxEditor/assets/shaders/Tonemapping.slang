@@ -19,7 +19,7 @@ float3 Uncharted2Tonemap(float3 color)
 	return ((color*(A*color+C*B)+D*E)/(color*(A*color+B)+D*F))-E/F;
 }
 
-float4 tonemap(float4 color, TonemapParameters params)
+public float4 tonemap(float4 color, TonemapParameters params)
 {
 	float3 outcol = Uncharted2Tonemap(color.rgb * params.exposure);
 	outcol = outcol * (1.0f / Uncharted2Tonemap(float3(11.2f)));	

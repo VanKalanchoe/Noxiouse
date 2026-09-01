@@ -1,6 +1,6 @@
 Scene: Untitled
 Entities:
-  - Entity: 3587782363137504778
+  - Entity: 16059169694961845521
     TagComponent:
       Tag: DamagedHelmet
     TransformComponent:
@@ -8,13 +8,19 @@ Entities:
       Rotation: [1.5707964, 0, 0]
       Scale: [1, 1, 1]
     MeshComponent:
-      MeshHandle: 1201220582203156510
+      MeshHandle: 16898991917861001654
       SubmeshIndex: 0
     MaterialComponent:
+      Workflows:
+        - 0
+      DiffuseFactors:
+        - [1, 1, 1, 1]
+      SpecularFactors:
+        - [1, 1, 1, 1]
       BaseColorFactor:
         - [1, 1, 1, 1]
       BaseColorMaps:
-        - 5502795841815745084
+        - 2042394369288253694
       BaseColorTextureSets:
         - 0
       MetallicFactors:
@@ -22,28 +28,28 @@ Entities:
       RoughnessFactors:
         - 1
       MetallicRoughnessMaps:
-        - 2208457521952188714
+        - 16041926913046379162
       PhysicalDescriptorTextureSets:
         - 0
       NormalMaps:
-        - 13756855256417977137
+        - 15731041746803620731
       NormalTextureSets:
         - 0
       OcclusionMaps:
-        - 15219893477457504535
+        - 15353522975752038348
       OcclusionTextureSets:
         - 0
       EmissiveFactors:
         - [1, 1, 1]
       EmissiveMaps:
-        - 11615630937579021506
+        - 3015526054783551892
       EmissiveTextureSets:
         - 0
       EmissiveStrengths:
         - 1
       Modes:
         - 0
-      AlphaCutoffs:
+      AlphaMaskCutoffs:
         - 0.5
       DoubleSidedFlags:
         - false

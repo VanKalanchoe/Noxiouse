@@ -94,6 +94,11 @@ namespace Nox
     
     struct MaterialComponent
     {
+        // Workflow (0.0 = Metallic-Roughness, 1.0 = Specular-Glossiness)
+        std::vector<float> Workflows = { 0.0f };
+        std::vector<glm::vec4> DiffuseFactors = { glm::vec4(1.0f) };
+        std::vector<glm::vec4> SpecularFactors = { glm::vec4(1.0f) }; // rgb: Specular, a: Glossiness
+        
         // Base Color
         std::vector<glm::vec4> BaseColorFactors = { glm::vec4(1.0f) };
         std::vector<AssetHandle> BaseColorMaps = { 0 };
@@ -120,7 +125,7 @@ namespace Nox
         
         // Settings
         std::vector<AlphaMode> Modes = { AlphaMode::Opaque };
-        std::vector<float> AlphaCutoffs = { 0.5f };
+        std::vector<float> AlphaMaskCutoffs = { 0.5f };
         std::vector<bool> DoubleSidedFlags = { false };
     
         MaterialComponent() = default;
