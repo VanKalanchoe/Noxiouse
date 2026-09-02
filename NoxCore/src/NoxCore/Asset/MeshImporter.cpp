@@ -750,6 +750,41 @@ namespace Nox
             }
 
             // Mesh
+            
+            // -------------------------------------------------------------------------
+            // Find Node Transform for this mesh (positions parts side-by-side as in GLB)
+            // -------------------------------------------------------------------------
+            glm::mat4 nodeMatrix(1.0f);
+            for (uint32_t nodeIndex = 0; nodeIndex < model.nodes_count; nodeIndex++)
+            {
+                const auto& node = model.nodes[nodeIndex];
+                if (node.mesh == meshIndex)
+                {
+                    if (node.has_matrix)
+                    {
+                        nodeMatrix = glm::mat4(glm::make_mat4(node.matrix));
+                    }
+                    else
+                    {
+                        glm::vec3 t(0.0f);
+                        if (node.translation[0] != 0.0 || node.translation[1] != 0.0 || node.translation[2] != 0.0)
+                            t = glm::vec3(static_cast<float>(node.translation[0]), static_cast<float>(node.translation[1]), static_cast<float>(node.translation[2]));
+
+                        glm::quat r(1.0f, 0.0f, 0.0f, 0.0f);
+                        if (node.rotation[0] != 0.0 || node.rotation[1] != 0.0 || node.rotation[2] != 0.0 || node.rotation[3] != 1.0)
+                            r = glm::quat(static_cast<float>(node.rotation[3]), static_cast<float>(node.rotation[0]), static_cast<float>(node.rotation[1]), static_cast<float>(node.rotation[2]));
+
+                        glm::vec3 s(1.0f);
+                        if (node.scale[0] != 1.0 || node.scale[1] != 1.0 || node.scale[2] != 1.0)
+                            s = glm::vec3(static_cast<float>(node.scale[0]), static_cast<float>(node.scale[1]), static_cast<float>(node.scale[2]));
+
+                        nodeMatrix = glm::translate(glm::mat4(1.0f), t) * glm::toMat4(r) * glm::scale(glm::mat4(1.0f), s);
+                    }
+                    break;
+                }
+            }
+            glm::mat3 normalMatrix = glm::transpose(glm::inverse(glm::mat3(nodeMatrix)));
+            
             for (uint32_t primitiveIndex = 0; primitiveIndex < mesh.primitives_count; primitiveIndex++)
             {
                 const tg3_primitive& primitive = mesh.primitives[primitiveIndex];
@@ -844,16 +879,32 @@ namespace Nox
                     // Vulkan uses a right-handed coordinate system with Y-down
                     // We need to flip the Y coordinate
                     // i dont need that look first line in load model
-                    vertex.pos = {pos[0], pos[1], pos[2]};
+                    
+                    if (!hasSkinning)
+                    {
+                        glm::vec4 worldPos = nodeMatrix * glm::vec4(pos[0], pos[1], pos[2], 1.0f);
+                        vertex.pos = {worldPos.x, worldPos.y, worldPos.z};
+                    }
+                    else
+                    {
+                        vertex.pos = {pos[0], pos[1], pos[2]};
+                    }
 
                     if (hasNormals)
                     {
                         uint32_t normalStride = normalBufferView->byte_stride ? normalBufferView->byte_stride : 12;
-
                         size_t normalOffset = normalBufferView->byte_offset + normalAccessor->byte_offset + (i * normalStride);
                         const float* norm = reinterpret_cast<const float*>(&normalBuffer->data.data[normalOffset]);
 
-                        vertex.normal = {norm[0], norm[1], norm[2]};
+                        if (!hasSkinning)
+                        {
+                            glm::vec3 worldNormal = glm::normalize(normalMatrix * glm::vec3(norm[0], norm[1], norm[2]));
+                            vertex.normal = {worldNormal.x, worldNormal.y, worldNormal.z};
+                        }
+                        else
+                        {
+                            vertex.normal = {norm[0], norm[1], norm[2]};
+                        }
                     }
                     else
                     {
@@ -1170,6 +1221,12 @@ namespace Nox
                     for (uint32_t i = 0; i < gltfMaterial.ext.extensions_count; i++)
                     {
                         const tg3_extension& ext = gltfMaterial.ext.extensions[i];
+                        
+                        if (std::string_view(ext.name.data, ext.name.len) == "KHR_materials_unlit")
+                        {
+                            materialData.Unlit = true;
+                        }
+                        
                         if (std::string_view(ext.name.data, ext.name.len) == "KHR_materials_emissive_strength")
                         {
                             if (ext.value.type == TG3_VALUE_OBJECT)

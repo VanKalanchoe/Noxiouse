@@ -353,6 +353,9 @@ namespace Nox
         
         uint8_t doubleSidedVal = mat.DoubleSided ? 1 : 0;
         stream.write(reinterpret_cast<const char*>(&doubleSidedVal), sizeof(uint8_t));
+        
+        uint8_t unlitVal = mat.Unlit ? 1 : 0;
+        stream.write(reinterpret_cast<const char*>(&unlitVal), sizeof(uint8_t));
     }
 }
 
@@ -405,6 +408,10 @@ static void ReadMaterials(std::ifstream& stream, std::vector<MaterialData>& outM
         uint8_t doubleSidedVal = 0;
         stream.read(reinterpret_cast<char*>(&doubleSidedVal), sizeof(uint8_t));
         outMaterialList[i].DoubleSided = (doubleSidedVal != 0);
+        
+        uint8_t unlitVal = 0;
+        stream.read(reinterpret_cast<char*>(&unlitVal), sizeof(uint8_t));
+        outMaterialList[i].Unlit = (unlitVal != 0);
     }
 }
 

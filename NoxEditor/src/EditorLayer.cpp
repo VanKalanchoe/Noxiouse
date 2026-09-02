@@ -595,6 +595,7 @@ namespace Nox
                                     matComp.Modes = {matData.Mode};
                                     matComp.AlphaMaskCutoffs = {matData.AlphaMaskCutoff};
                                     matComp.DoubleSidedFlags = {matData.DoubleSided};
+                                    matComp.UnlitFlags = { matData.Unlit };
 
                                     // Auto-attach AnimatorComponent if skeleton exists
                                     tryAttachAnimator(childEntity);
@@ -641,6 +642,7 @@ namespace Nox
                                     matComp.Modes = {matData.Mode};
                                     matComp.AlphaMaskCutoffs = {matData.AlphaMaskCutoff};
                                     matComp.DoubleSidedFlags = {matData.DoubleSided};
+                                    matComp.UnlitFlags = { matData.Unlit };
                                 }
                                 else
                                 {
@@ -691,6 +693,7 @@ namespace Nox
                                 matComp.Modes.resize(subMeshCount, AlphaMode::Opaque);
                                 matComp.AlphaMaskCutoffs.resize(subMeshCount, 0.5f);
                                 matComp.DoubleSidedFlags.resize(subMeshCount, false);
+                                matComp.UnlitFlags.resize(subMeshCount, false);
 
                                 // Resolve paths to AssetHandles for each slot
                                 for (size_t i = 0; i < staticMeshAsset->GetSubMeshCount(); ++i)
@@ -720,6 +723,7 @@ namespace Nox
                                     matComp.Modes[i] = matData.Mode;
                                     matComp.AlphaMaskCutoffs[i] = matData.AlphaMaskCutoff;
                                     matComp.DoubleSidedFlags[i] = matData.DoubleSided;
+                                    matComp.UnlitFlags[i] = matData.Unlit;
                                 }
                             }
 
@@ -766,14 +770,42 @@ namespace Nox
 
                 float snapValues[3] = {snapValue, snapValue, snapValue};
 
+                glm::mat4 deltaMatrix(1.0f);
+                
                 ImGuizmo::Manipulate(glm::value_ptr(cameraView), glm::value_ptr(cameraProjection),
                                      static_cast<ImGuizmo::OPERATION>(m_GizmoType), ImGuizmo::LOCAL,
-                                     glm::value_ptr(worldTransform), nullptr, snap ? snapValues : nullptr);
+                                     glm::value_ptr(worldTransform), glm::value_ptr(deltaMatrix), snap ? snapValues : nullptr);
 
                 if (ImGuizmo::IsUsing())
                 {
-                    // One single line does all the math, finds the parent, and marks it dirty!
-                    selectedEntity.SetWorldTransform(worldTransform);
+                    const auto& selectedEntities = m_SceneHierarchyPanel.GetSelectedEntities();
+                    if (selectedEntities.size() > 1)
+                    {
+                        for (auto entity : selectedEntities)
+                        {
+                            if (!entity) continue;
+
+                            // If this entity's parent is ALSO selected, skip it (the parent moving will already move it)
+                            if (entity.HasComponent<RelationshipComponent>())
+                            {
+                                UUID parentUUID = entity.GetComponent<RelationshipComponent>().Parent;
+                                if (parentUUID != 0)
+                                {
+                                    Entity parent = m_ActiveScene->GetEntityByUUID(parentUUID);
+                                    if (parent && m_SceneHierarchyPanel.IsSelected(parent))
+                                        continue;
+                                }
+                            }
+
+                            glm::mat4 currentWorld = entity.GetComponent<WorldTransformComponent>().WorldMatrix;
+                            entity.SetWorldTransform(deltaMatrix * currentWorld);
+                        }
+                    }
+                    else
+                    {
+                        // One single line does all the math, finds the parent, and marks it dirty!
+                        selectedEntity.SetWorldTransform(worldTransform);
+                    }
                 }
             }
 

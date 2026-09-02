@@ -185,6 +185,7 @@ struct InstanceData
     uint32_t alphaMode;   // 0 = Opaque, 1 = Mask, 2 = Blend
     float alphaMaskCutoff;
     uint32_t doubleSided; // Use uint32_t instead of bool for GPU alignment
+    uint32_t unlit; 
     
     // MeshAnimation
     uint32_t boneMatrixOffset = 0xFFFFFFFF;

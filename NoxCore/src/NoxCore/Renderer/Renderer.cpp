@@ -37,7 +37,7 @@ namespace Nox
         m_fileWatcher.watch(std::filesystem::path("assets/shaders/present.slang"), [this](auto path) { m_reloadShader = true; });
 
         m_whiteTexture = createSolidColorTexture(255, 255, 255, 255);
-        
+
         // Allow buffer to hold up to 4K resolution entity pixels (3840 x 2160 * 4 bytes ≈ 33 MB)
         const uint32_t maxPickerBufferSize = 3840 * 2160 * sizeof(int32_t);
 
@@ -91,6 +91,7 @@ namespace Nox
         createSwapChain();
         createCompiler();
         createGraphicsPipeline(false);
+        createUnlitPipeline(false);
         if (!m_isEditor) createPresentPipeline(false);
         createComputePipeline();
         createSkyboxPipeline(false);
@@ -209,6 +210,36 @@ namespace Nox
             .sourcePath = "assets/shaders/Meshlet.slang"
         });
         m_graphicsPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+    }
+
+    void Renderer::createUnlitPipeline(bool forceCompile)
+    {
+        NRI::PipelineDesc desc{};
+        desc.forceCompile = forceCompile;
+
+        desc.colorFormats =
+        {
+            NRI::ImageFormat::Surface,
+            NRI::ImageFormat::R32SINT
+        };
+        // notes i had to split task from mesh because of i think drawid otherwise weird flickering and not showing up correctly
+        // might be a slang issue could change in the future fuck nvidia not testing slang
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Task,
+            .entryPoint = "taskMain",
+            .sourcePath = "assets/shaders/MeshletTask.slang"
+        });
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Mesh,
+            .entryPoint = "meshMain",
+            .sourcePath = "assets/shaders/Meshlet.slang"
+        });
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Fragment,
+            .entryPoint = "fragMain",
+            .sourcePath = "assets/shaders/Material_Unlit_Mesh.slang"
+        });
+        m_unlitPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
     void Renderer::createPresentPipeline(bool forceCompile)
@@ -446,7 +477,7 @@ namespace Nox
 
         // 2. Create the permanent Cubemap Texture (512x512 per face, 6 array layers)
         constexpr uint32_t cubemapSize = 512;
-        uint32_t  cubemapNumMips = static_cast<uint32_t>(floor(log2(cubemapSize))) + 1;
+        uint32_t cubemapNumMips = static_cast<uint32_t>(floor(log2(cubemapSize))) + 1;
 
         m_environmentCubemap = m_device->createTexture(NRI::TextureDesc{
             .width = cubemapSize,
@@ -510,7 +541,7 @@ namespace Nox
 
         // Submit command buffer and wait for execution to complete
         endSingleTimeCommands(std::move(cmd));
-        
+
         {
             std::unique_ptr<NRI::CommandBuffer> mipCmd = beginSingleTimeCommands();
             m_environmentCubemap->generateMipmaps(*mipCmd);
@@ -559,7 +590,7 @@ namespace Nox
         irradCmd->transitionTextureLayout(*m_irradianceCubemap, NRI::TextureLayout::Undefined, NRI::TextureLayout::General);
 
         irradCmd->bindPipeline(NRI::PipelineBindPoint::Compute, *irradiancePipeline);
-        
+
         std::vector<uint32_t> tempIrradMipSlots;
         // Loop through each mip level to generate all mips (just like Sascha!)
         for (uint32_t mip = 0; mip < irradianceNumMips; ++mip)
@@ -583,7 +614,7 @@ namespace Nox
 
         irradCmd->transitionTextureLayout(*m_irradianceCubemap, NRI::TextureLayout::General, NRI::TextureLayout::ShaderResource);
         endSingleTimeCommands(std::move(irradCmd));
-        
+
         // Free the temporary per-mip storage descriptor slots
         for (uint32_t slot : tempIrradMipSlots)
         {
@@ -644,7 +675,7 @@ namespace Nox
             // Register a descriptor pointing directly to this mip level
             uint32_t mipStorageSlot = m_resourceHeap->registerStorageTextureMip(*m_prefilteredEnvMap, mip);
             tempMipSlots.push_back(mipStorageSlot);
-            
+
             prefilterData.envTextureIndex = m_environmentCubemap->GetDescriptorIndexSlot();
             prefilterData.cubemapStorageIndex = mipStorageSlot; // Note: Needs slice/mip targeting in shader or descriptor binding if multi-mip storage
             prefilterData.cubemapSize = mipWidth;
@@ -669,7 +700,7 @@ namespace Nox
         // ==========================================
         //  SPECULAR IBL: BRDF INTEGRATION MAP (2D LUT)
         // ==========================================
-        constexpr uint32_t brdfLUTSize = 512; 
+        constexpr uint32_t brdfLUTSize = 512;
 
         m_brdfLUT = m_device->createTexture(NRI::TextureDesc{
             .width = brdfLUTSize,
@@ -1029,7 +1060,7 @@ namespace Nox
             m_indirectBuffersMapped.emplace_back(mappedMemory);
         }
     }
-    
+
     void Renderer::createSelectedEntityIDBuffers()
     {
         constexpr uint32_t maxSelectedEntities = 4096;
@@ -1055,27 +1086,28 @@ namespace Nox
             m_selectedEntityIDBuffersMapped.emplace_back(mapped);
         }
     }
- 
+
     void Renderer::createDescriptorHeaps()
-    {/*// Create sampler skybox sampelr from sascha williams ?????????
-        VkSamplerCreateInfo samplerCreateInfo{};
-        samplerCreateInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-        samplerCreateInfo.magFilter = VK_FILTER_LINEAR;
-        samplerCreateInfo.minFilter = VK_FILTER_LINEAR;
-        samplerCreateInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-        samplerCreateInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-        samplerCreateInfo.addressModeV = samplerCreateInfo.addressModeU;
-        samplerCreateInfo.addressModeW = samplerCreateInfo.addressModeU;
-        samplerCreateInfo.mipLodBias = 0.0f;
-        samplerCreateInfo.maxAnisotropy = device->enabledFeatures.samplerAnisotropy ? device->properties.limits.maxSamplerAnisotropy : 1.0f;
-        samplerCreateInfo.anisotropyEnable = device->enabledFeatures.samplerAnisotropy;
-        samplerCreateInfo.compareOp = VK_COMPARE_OP_NEVER;
-        samplerCreateInfo.minLod = 0.0f;
-        samplerCreateInfo.maxLod = (float)mipLevels;
-        samplerCreateInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
-        VK_CHECK_RESULT(vkCreateSampler(device->logicalDevice, &samplerCreateInfo, nullptr, &sampler));*/
+    {
+        /*// Create sampler skybox sampelr from sascha williams ?????????
+                VkSamplerCreateInfo samplerCreateInfo{};
+                samplerCreateInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+                samplerCreateInfo.magFilter = VK_FILTER_LINEAR;
+                samplerCreateInfo.minFilter = VK_FILTER_LINEAR;
+                samplerCreateInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+                samplerCreateInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+                samplerCreateInfo.addressModeV = samplerCreateInfo.addressModeU;
+                samplerCreateInfo.addressModeW = samplerCreateInfo.addressModeU;
+                samplerCreateInfo.mipLodBias = 0.0f;
+                samplerCreateInfo.maxAnisotropy = device->enabledFeatures.samplerAnisotropy ? device->properties.limits.maxSamplerAnisotropy : 1.0f;
+                samplerCreateInfo.anisotropyEnable = device->enabledFeatures.samplerAnisotropy;
+                samplerCreateInfo.compareOp = VK_COMPARE_OP_NEVER;
+                samplerCreateInfo.minLod = 0.0f;
+                samplerCreateInfo.maxLod = (float)mipLevels;
+                samplerCreateInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+                VK_CHECK_RESULT(vkCreateSampler(device->logicalDevice, &samplerCreateInfo, nullptr, &sampler));*/
         std::vector<NRI::SamplerDesc> samplers(shaderio::SamplerCount);
-        
+
         // SAMPLER_LINEAR_REPEAT = 0
         samplers[shaderio::SAMPLER_LINEAR_REPEAT] = NRI::SamplerDesc
         {
@@ -1093,7 +1125,7 @@ namespace Nox
             .minLod = 0.0f,
             .maxLod = 1000.0f
         };
-        
+
         samplers[shaderio::SAMPLER_NEAREST_REPEAT] = NRI::SamplerDesc
         {
             .magFilter = NRI::Filter::Nearest,
@@ -1110,7 +1142,7 @@ namespace Nox
             .minLod = 0.0f,
             .maxLod = 1000.0f
         };
-        
+
         samplers[shaderio::SAMPLER_BRDFLUT] = NRI::SamplerDesc
         {
             .magFilter = NRI::Filter::Linear,
@@ -1125,7 +1157,7 @@ namespace Nox
             .maxLod = 1.0f,
             .borderColor = NRI::BorderColor::FloatOpaqueWhite
         };
-        
+
         samplers[shaderio::SAMPLER_IRRADIANCE] = NRI::SamplerDesc
         {
             .magFilter = NRI::Filter::Linear,
@@ -1140,7 +1172,7 @@ namespace Nox
             .maxLod = static_cast<float>(static_cast<uint32_t>(floor(log2(64))) + 1),
             .borderColor = NRI::BorderColor::FloatOpaqueWhite
         };
-        
+
         samplers[shaderio::SAMPLER_PREFILTER] = NRI::SamplerDesc
         {
             .magFilter = NRI::Filter::Linear,
@@ -1376,7 +1408,83 @@ namespace Nox
             references.meshletTrianglesPageTableReference = m_meshletTriPageTableBuffers[frameIndex]->getDeviceAddress();
             m_commandBuffers->pushData(&references, sizeof(shaderio::PushConstantMeshlets));
 
-            m_commandBuffers->drawMeshTasksIndirect(*m_indirectBuffers[frameIndex], 0, static_cast<uint32_t>(m_drawMeshTasksIndirectCommands.size()), sizeof(DrawMeshTasksIndirectCommand));
+             const uint32_t cmdStride = sizeof(DrawMeshTasksIndirectCommand);
+                const uint32_t instanceStride = sizeof(shaderio::InstanceData);
+                const uint64_t baseInstanceAddress = m_instanceBuffers[frameIndex]->getDeviceAddress();
+
+                uint64_t currentCmdOffset = 0;
+                uint64_t currentInstanceOffset = 0;
+
+                // =========================================================================
+                // PASS 1: Opaque PBR (Pipeline: Graphics, Depth Write: ON, Blend: OFF)
+                // =========================================================================
+                if (m_opaqueCount > 0)
+                {
+                    references.instanceReference = baseInstanceAddress + (currentInstanceOffset * instanceStride);
+                    m_commandBuffers->pushData(&references, sizeof(shaderio::PushConstantMeshlets));
+
+                    m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_graphicsPipeline);
+                    m_commandBuffers->setDepthWriteEnable(true);
+                    m_commandBuffers->setColorBlendEnable(0, false);
+                    m_commandBuffers->drawMeshTasksIndirect(*m_indirectBuffers[frameIndex], currentCmdOffset, m_opaqueCount, cmdStride);
+
+                    currentCmdOffset += static_cast<uint64_t>(m_opaqueCount) * cmdStride;
+                    currentInstanceOffset += m_opaqueCount;
+                }
+
+                // =========================================================================
+                // PASS 2: Alpha Mask PBR (Pipeline: Graphics, Depth Write: ON, Blend: OFF)
+                // =========================================================================
+                if (m_maskCount > 0)
+                {
+                    references.instanceReference = baseInstanceAddress + (currentInstanceOffset * instanceStride);
+                    m_commandBuffers->pushData(&references, sizeof(shaderio::PushConstantMeshlets));
+
+                    m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_graphicsPipeline);
+                    m_commandBuffers->setDepthWriteEnable(true);
+                    m_commandBuffers->setColorBlendEnable(0, false);
+                    m_commandBuffers->drawMeshTasksIndirect(*m_indirectBuffers[frameIndex], currentCmdOffset, m_maskCount, cmdStride);
+
+                    currentCmdOffset += static_cast<uint64_t>(m_maskCount) * cmdStride;
+                    currentInstanceOffset += m_maskCount;
+                }
+
+                // =========================================================================
+                // PASS 3: Transparent PBR (Pipeline: Graphics, Depth Write: OFF, Blend: ON)
+                // =========================================================================
+                if (m_transparentCount > 0)
+                {
+                    references.instanceReference = baseInstanceAddress + (currentInstanceOffset * instanceStride);
+                    m_commandBuffers->pushData(&references, sizeof(shaderio::PushConstantMeshlets));
+
+                    m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_graphicsPipeline);
+                    m_commandBuffers->setDepthWriteEnable(false); // Transparent objects do not occlude!
+                    m_commandBuffers->setColorBlendEnable(0, true);
+                    m_commandBuffers->drawMeshTasksIndirect(*m_indirectBuffers[frameIndex], currentCmdOffset, m_transparentCount, cmdStride);
+
+                    currentCmdOffset += static_cast<uint64_t>(m_transparentCount) * cmdStride;
+                    currentInstanceOffset += m_transparentCount;
+                }
+
+                // =========================================================================
+                // PASS 4: Unlit (Pipeline: Unlit, Depth Write: ON, Blend: OFF)
+                // =========================================================================
+                if (m_unlitCount > 0 && m_unlitPipeline)
+                {
+                    references.instanceReference = baseInstanceAddress + (currentInstanceOffset * instanceStride);
+                    m_commandBuffers->pushData(&references, sizeof(shaderio::PushConstantMeshlets));
+
+                    m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_unlitPipeline);
+                    m_commandBuffers->setDepthWriteEnable(true);
+                    m_commandBuffers->setColorBlendEnable(0, false);
+                    m_commandBuffers->drawMeshTasksIndirect(*m_indirectBuffers[frameIndex], currentCmdOffset, m_unlitCount, cmdStride);
+
+                    currentCmdOffset += static_cast<uint64_t>(m_unlitCount) * cmdStride;
+                    currentInstanceOffset += m_unlitCount;
+                }
+
+                // Restore depth write for subsequent passes
+                m_commandBuffers->setDepthWriteEnable(true);
         }
 
         m_renderer2D->Flush(*m_commandBuffers, *m_uniformBuffers[frameIndex], frameIndex);
@@ -1624,7 +1732,7 @@ namespace Nox
             {
                 uint32_t copyWidth = std::min(m_pickRequest.width, width - sampleX);
                 uint32_t copyHeight = std::min(m_pickRequest.height, height - sampleY);
-                
+
                 m_commandBuffers->transitionTextureLayout(*m_entityResource, NRI::TextureLayout::ColorAttachment, NRI::TextureLayout::TransferSrc);
                 /*m_commandBuffers->transitionTextureLayout(*m_entityResolveResource, NRI::TextureLayout::ColorAttachment, NRI::TextureLayout::TransferDst);*/
 
@@ -1646,16 +1754,16 @@ namespace Nox
             m_commandBuffers->end(frameIndex);
         }
     }
-    
+
     void Renderer::updateEntityIDBuffer(uint32_t currentImage)
     {
         uint32_t selectedCount =
-      static_cast<uint32_t>(
-          std::min<size_t>(
-              m_SelectedEntityIDs.size(),
-              4096
-          )
-      );
+            static_cast<uint32_t>(
+                std::min<size_t>(
+                    m_SelectedEntityIDs.size(),
+                    4096
+                )
+            );
 
         if (selectedCount > 0)
         {
@@ -1685,7 +1793,7 @@ namespace Nox
         uniformData.samplerIndex = selectedSampler;
 
         uniformData.entityTextureIndex = m_entityResolveResource->GetDescriptorIndexSlot();
-        
+
         // PBR IBL
         uniformData.irradianceMapIndex = m_irradianceCubemap->GetDescriptorIndexSlot();
         uniformData.prefilteredMapIndex = m_prefilteredEnvMap->GetDescriptorIndexSlot();
@@ -1826,7 +1934,7 @@ namespace Nox
         }
 
         updatePageTables(frameIndex);
-        
+
         updateEntityIDBuffer(frameIndex);
 
         updateUniformBuffer(frameIndex);
@@ -1860,6 +1968,7 @@ namespace Nox
         m_opaqueQueue.clear();
         m_maskQueue.clear();
         m_transparentQueue.clear();
+        m_unlitQueue.clear();
     }
 
     int32_t Renderer::getPickedEntityID()
@@ -1877,7 +1986,7 @@ namespace Nox
 
         return clickedEntityID;
     }
-    
+
     std::vector<int32_t> Renderer::getPickedEntityIDs()
     {
         std::vector<int32_t> uniqueIDs;
@@ -2010,29 +2119,42 @@ namespace Nox
 
     void Renderer::BuildBuffers()
     {
-        // 1. Submit Opaque items first
+        m_instanceBufferObjects.clear();
+        m_drawMeshTasksIndirectCommands.clear();
+
+        // 1. Opaque PBR
+        m_opaqueCount = static_cast<uint32_t>(m_opaqueQueue.size());
         for (const auto& packet : m_opaqueQueue)
         {
             m_instanceBufferObjects.push_back(packet.instance);
             m_drawMeshTasksIndirectCommands.push_back(packet.command);
         }
 
-        // 2. Submit Masked (cutout) items second
+        // 2. Masked PBR
+        m_maskCount = static_cast<uint32_t>(m_maskQueue.size());
         for (const auto& packet : m_maskQueue)
         {
             m_instanceBufferObjects.push_back(packet.instance);
             m_drawMeshTasksIndirectCommands.push_back(packet.command);
         }
 
-        // 3. Sort Transparent items Back-to-Front (Furthest camera distance first)
+        // 3. Transparent PBR (Sorted back-to-front)
         std::sort(m_transparentQueue.begin(), m_transparentQueue.end(),
                   [](const RenderPacket& a, const RenderPacket& b)
                   {
                       return a.distanceToCamera > b.distanceToCamera;
                   });
 
-        // Submit sorted transparent items last
+        m_transparentCount = static_cast<uint32_t>(m_transparentQueue.size());
         for (const auto& packet : m_transparentQueue)
+        {
+            m_instanceBufferObjects.push_back(packet.instance);
+            m_drawMeshTasksIndirectCommands.push_back(packet.command);
+        }
+        
+        // 4. Unlit
+        m_unlitCount = static_cast<uint32_t>(m_unlitQueue.size());
+        for (const auto& packet : m_unlitQueue)
         {
             m_instanceBufferObjects.push_back(packet.instance);
             m_drawMeshTasksIndirectCommands.push_back(packet.command);
@@ -2066,35 +2188,37 @@ namespace Nox
         uint32_t slotIdx = (material.BaseColorFactors.size() > 1) ? submeshIndex : 0;
 
         // Helper to safely fetch descriptor index
-        auto getTextureIndex = [](const std::vector<AssetHandle>& maps, uint32_t idx) -> int {
-            if (!maps.empty() && idx < maps.size() && maps[idx] != 0) {
+        auto getTextureIndex = [](const std::vector<AssetHandle>& maps, uint32_t idx) -> int
+        {
+            if (!maps.empty() && idx < maps.size() && maps[idx] != 0)
+            {
                 Ref<Texture2D> texture = AssetManager::GetAsset<Texture2D>(maps[idx]);
                 if (texture) return texture->GetDescriptorIndexSlot();
             }
             return -1;
         };
-        
+
         // --- MATERIAL PACKING ---
-        
+
         instance.workflow = (slotIdx < material.Workflows.size()) ? material.Workflows[slotIdx] : 0.0f;
         instance.diffuseFactor = (slotIdx < material.DiffuseFactors.size()) ? material.DiffuseFactors[slotIdx] : glm::vec4(1.0f);
         instance.specularFactor = (slotIdx < material.SpecularFactors.size()) ? material.SpecularFactors[slotIdx] : glm::vec4(1.0f);
-        
+
         // Base Color
         instance.baseColorFactor = (slotIdx < material.BaseColorFactors.size()) ? material.BaseColorFactors[slotIdx] : glm::vec4(1.0f);
         instance.baseColorTextureIndex = getTextureIndex(material.BaseColorMaps, slotIdx);
         instance.baseColorTextureSet = (slotIdx < material.BaseColorTextureSets.size()) ? material.BaseColorTextureSets[slotIdx] : 0;
-        
+
         // PBR Properties
         instance.metallicFactor = (slotIdx < material.MetallicFactors.size()) ? material.MetallicFactors[slotIdx] : 1.0f;
         instance.roughnessFactor = (slotIdx < material.RoughnessFactors.size()) ? material.RoughnessFactors[slotIdx] : 1.0f;
         instance.metallicRoughnessTextureIndex = getTextureIndex(material.MetallicRoughnessMaps, slotIdx);
         instance.physicalDescriptorTextureSet = (slotIdx < material.PhysicalDescriptorTextureSets.size()) ? material.PhysicalDescriptorTextureSets[slotIdx] : 0;
-        
+
         // Additional Maps
         instance.normalTextureIndex = getTextureIndex(material.NormalMaps, slotIdx);
         instance.normalTextureSet = (slotIdx < material.NormalTextureSets.size()) ? material.NormalTextureSets[slotIdx] : 0;
-        
+
         instance.occlusionTextureIndex = getTextureIndex(material.OcclusionMaps, slotIdx);
         instance.occlusionTextureSet = (slotIdx < material.OcclusionTextureSets.size()) ? material.OcclusionTextureSets[slotIdx] : 0;
 
@@ -2103,12 +2227,13 @@ namespace Nox
         instance.emissiveTextureIndex = getTextureIndex(material.EmissiveMaps, slotIdx);
         instance.emissiveTextureSet = (slotIdx < material.EmissiveTextureSets.size()) ? material.EmissiveTextureSets[slotIdx] : 0;
         instance.emissiveStrength = (slotIdx < material.EmissiveStrengths.size()) ? material.EmissiveStrengths[slotIdx] : 1.0f;
-        
+
         // Settings
         AlphaMode mode = (slotIdx < material.Modes.size()) ? material.Modes[slotIdx] : AlphaMode::Opaque;
         instance.alphaMode = static_cast<uint32_t>(mode);
         instance.alphaMaskCutoff = (slotIdx < material.AlphaMaskCutoffs.size()) ? material.AlphaMaskCutoffs[slotIdx] : 0.5f;
-        instance.doubleSided = (slotIdx < material.DoubleSidedFlags.size()) ? (bool)material.DoubleSidedFlags[slotIdx] : false;
+        instance.doubleSided = (slotIdx < material.DoubleSidedFlags.size()) ? (uint32_t)material.DoubleSidedFlags[slotIdx] : 0;
+        instance.unlit = (slotIdx < material.UnlitFlags.size()) ? (uint32_t)material.UnlitFlags[slotIdx] : 0;
 
         instance.entityID = entityID;
 
@@ -2135,7 +2260,11 @@ namespace Nox
         packet.command = command;
 
         // Route to Render Queues (DO NOT push directly to buffers)
-        if (mode == AlphaMode::Blend)
+        if (instance.unlit != 0)
+        {
+            m_unlitQueue.push_back(packet);
+        }
+        else if (mode == AlphaMode::Blend)
         {
             glm::vec3 camPos = glm::vec3(uniformData.cameraWorldPos);
             glm::vec3 objPos = glm::vec3(transform[3]);
@@ -2155,14 +2284,16 @@ namespace Nox
     void Renderer::DrawStaticMesh(const glm::mat4& transform, Ref<StaticMesh> staticMesh, const MaterialComponent& material, int entityID)
     {
         // Helper to safely fetch descriptor index
-        auto getTextureIndex = [](const std::vector<AssetHandle>& maps, uint32_t idx) -> int {
-            if (!maps.empty() && idx < maps.size() && maps[idx] != 0) {
+        auto getTextureIndex = [](const std::vector<AssetHandle>& maps, uint32_t idx) -> int
+        {
+            if (!maps.empty() && idx < maps.size() && maps[idx] != 0)
+            {
                 Ref<Texture2D> texture = AssetManager::GetAsset<Texture2D>(maps[idx]);
                 if (texture) return texture->GetDescriptorIndexSlot();
             }
             return -1;
         };
-        
+
         for (size_t i = 0; i < staticMesh->GetSubMeshes().size(); ++i)
         {
             MeshHandle handle = staticMesh->GetSubMeshes()[i];
@@ -2181,16 +2312,16 @@ namespace Nox
             instance.meshletTrianglesPageIndex = handle.meshletTriangles.pageIndex;
 
             // --- MATERIAL PACKING ---
-            
+
             instance.workflow = (i < material.Workflows.size()) ? material.Workflows[i] : 0.0f;
             instance.diffuseFactor = (i < material.DiffuseFactors.size()) ? material.DiffuseFactors[i] : glm::vec4(1.0f);
             instance.specularFactor = (i < material.SpecularFactors.size()) ? material.SpecularFactors[i] : glm::vec4(1.0f);
-            
+
             // Base Color
             instance.baseColorFactor = (i < material.BaseColorFactors.size()) ? material.BaseColorFactors[i] : glm::vec4(1.0f);
             instance.baseColorTextureIndex = getTextureIndex(material.BaseColorMaps, i);
             instance.baseColorTextureSet = (i < material.BaseColorTextureSets.size()) ? material.BaseColorTextureSets[i] : 0;
-            
+
             // PBR Properties
             instance.metallicFactor = (i < material.MetallicFactors.size()) ? material.MetallicFactors[i] : 1.0f;
             instance.roughnessFactor = (i < material.RoughnessFactors.size()) ? material.RoughnessFactors[i] : 1.0f;
@@ -2200,21 +2331,22 @@ namespace Nox
             // Additional Maps
             instance.normalTextureIndex = getTextureIndex(material.NormalMaps, i);
             instance.normalTextureSet = (i < material.NormalTextureSets.size()) ? material.NormalTextureSets[i] : 0;
-            
+
             instance.occlusionTextureIndex = getTextureIndex(material.OcclusionMaps, i);
             instance.occlusionTextureSet = (i < material.OcclusionTextureSets.size()) ? material.OcclusionTextureSets[i] : 0;
-            
+
             // Emission
             instance.emissiveFactor = (i < material.EmissiveFactors.size()) ? material.EmissiveFactors[i] : glm::vec3(0.0f);
             instance.emissiveTextureIndex = getTextureIndex(material.EmissiveMaps, i);
             instance.emissiveTextureSet = (i < material.EmissiveTextureSets.size()) ? material.EmissiveTextureSets[i] : 0;
             instance.emissiveStrength = (i < material.EmissiveStrengths.size()) ? material.EmissiveStrengths[i] : 1.0f;
-            
+
             // Settings
             AlphaMode mode = (i < material.Modes.size()) ? material.Modes[i] : AlphaMode::Opaque;
             instance.alphaMode = static_cast<uint32_t>(mode);
             instance.alphaMaskCutoff = (i < material.AlphaMaskCutoffs.size()) ? material.AlphaMaskCutoffs[i] : 0.5f;
-            instance.doubleSided = (i < material.DoubleSidedFlags.size()) ? (bool)material.DoubleSidedFlags[i] : false;
+            instance.doubleSided = (i < material.DoubleSidedFlags.size()) ? (uint32_t)material.DoubleSidedFlags[i] : 0;
+            instance.unlit = (i < material.UnlitFlags.size()) ? (uint32_t)material.UnlitFlags[i] : 0;
 
             instance.entityID = entityID;
 
@@ -2228,7 +2360,11 @@ namespace Nox
             packet.command = command;
 
             // 5. Route to Render Queues
-            if (mode == AlphaMode::Blend)
+            if (instance.unlit != 0)
+            {
+                m_unlitQueue.push_back(packet);
+            }
+            else if (mode == AlphaMode::Blend)
             {
                 glm::vec3 camPos = glm::vec3(uniformData.cameraWorldPos);
                 glm::vec3 objPos = glm::vec3(transform[3]);

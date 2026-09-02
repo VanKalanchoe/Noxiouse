@@ -488,21 +488,73 @@ namespace Nox
         ImGui::PopItemWidth();
 
         DrawComponent<TransformComponent>("Transform", entity, [this, entity](auto& component)
-        {
-            bool modified = false;
-            modified |= DrawVec3Control("Position", component.Translation);
-
-            glm::vec3 rotation = glm::degrees(component.Rotation);
-            if (DrawVec3Control("Rotation", rotation))
             {
-                component.Rotation = glm::radians(rotation);
-                modified = true;
-            }
-            modified |= DrawVec3Control("Scale", component.Scale, 1.0f);
+                // Record old values before UI interaction to compute the delta
+                glm::vec3 oldTranslation = component.Translation;
+                glm::vec3 oldRotation = component.Rotation;
+                glm::vec3 oldScale = component.Scale;
 
-            if (modified)
-                m_Context->m_Registry.emplace_or_replace<DirtyTransformComponent>(entity);
-        });
+                bool posModified = DrawVec3Control("Position", component.Translation);
+
+                bool rotModified = false;
+                glm::vec3 rotation = glm::degrees(component.Rotation);
+                if (DrawVec3Control("Rotation", rotation))
+                {
+                    component.Rotation = glm::radians(rotation);
+                    rotModified = true;
+                }
+
+                bool scaleModified = DrawVec3Control("Scale", component.Scale, 1.0f);
+
+                bool modified = posModified || rotModified || scaleModified;
+
+                if (modified)
+                {
+                    m_Context->m_Registry.emplace_or_replace<DirtyTransformComponent>(entity);
+
+                    // If multiple entities are selected, apply the exact same delta to all other selected entities!
+                    if (m_SelectionContexts.size() > 1)
+                    {
+                        glm::vec3 deltaTranslation = component.Translation - oldTranslation;
+                        glm::vec3 deltaRotation = component.Rotation - oldRotation;
+                        glm::vec3 deltaScale = component.Scale - oldScale;
+
+                        for (auto otherEntity : m_SelectionContexts)
+                        {
+                            if (!otherEntity || otherEntity == entity)
+                                continue;
+
+                            // If otherEntity's parent is also selected, skip it (its parent will move it)
+                            if (otherEntity.HasComponent<RelationshipComponent>())
+                            {
+                                UUID parentUUID = otherEntity.GetComponent<RelationshipComponent>().Parent;
+                                if (parentUUID != 0)
+                                {
+                                    Entity parent = m_Context->GetEntityByUUID(parentUUID);
+                                    if (parent && IsSelected(parent))
+                                        continue;
+                                }
+                            }
+
+                            if (otherEntity.HasComponent<TransformComponent>())
+                            {
+                                auto& otherTc = otherEntity.GetComponent<TransformComponent>();
+
+                                if (posModified)
+                                    otherTc.Translation += deltaTranslation;
+
+                                if (rotModified)
+                                    otherTc.Rotation += deltaRotation;
+
+                                if (scaleModified)
+                                    otherTc.Scale += deltaScale;
+
+                                m_Context->m_Registry.emplace_or_replace<DirtyTransformComponent>(otherEntity);
+                            }
+                        }
+                    }
+                }
+            });
 
         DrawComponent<MeshComponent>("Mesh", entity, [](auto& component)
         {
@@ -612,6 +664,7 @@ namespace Nox
         component.Modes.push_back(AlphaMode::Opaque);
         component.AlphaMaskCutoffs.push_back(0.5f);
         component.DoubleSidedFlags.push_back(false);
+        component.UnlitFlags.push_back(false);
     }
 
     if (component.BaseColorFactors.size() < slotCount) component.BaseColorFactors.resize(slotCount, glm::vec4(1.0f));
@@ -631,6 +684,7 @@ namespace Nox
     if (component.Modes.size() < slotCount) component.Modes.resize(slotCount, AlphaMode::Opaque);
     if (component.AlphaMaskCutoffs.size() < slotCount) component.AlphaMaskCutoffs.resize(slotCount, 0.5f);
     if (component.DoubleSidedFlags.size() < slotCount) component.DoubleSidedFlags.resize(slotCount, false);
+    if (component.UnlitFlags.size() < slotCount) component.UnlitFlags.resize(slotCount, false);
 
     ImGui::Text("Material Slots (%zu submesh(es))", slotCount);
     ImGui::Spacing();
@@ -663,7 +717,8 @@ namespace Nox
         buttonLabelSize.x += 20.0f;
         float buttonLabelWidth = glm::max<float>(100.0f, buttonLabelSize.x);
 
-        ImGui::Button(label.c_str(), ImVec2(buttonLabelWidth, 0.0f));
+        std::string slotButtonID = label + "##" + id;
+        ImGui::Button(slotButtonID.c_str(), ImVec2(buttonLabelWidth, 0.0f));
 
         if (ImGui::BeginDragDropTarget())
         {
@@ -764,6 +819,12 @@ namespace Nox
         {
             component.DoubleSidedFlags[i] = doubleSided;
         }
+        
+        bool unlit = component.UnlitFlags[i];
+            if (ImGui::Checkbox("Unlit", &unlit))
+            {
+                component.UnlitFlags[i] = unlit;
+            }
 
         ImGui::Spacing();
         ImGui::Separator();
@@ -790,6 +851,7 @@ namespace Nox
         component.Modes.push_back(AlphaMode::Opaque);
         component.AlphaMaskCutoffs.push_back(0.5f);
         component.DoubleSidedFlags.push_back(false);
+        component.UnlitFlags.push_back(false);
     }
     ImGui::SameLine();
     if (ImGui::Button("- Remove Slot") && slotCount > 1)
@@ -812,6 +874,7 @@ namespace Nox
         component.Modes.pop_back();
         component.AlphaMaskCutoffs.pop_back();
         component.DoubleSidedFlags.pop_back();
+        component.UnlitFlags.pop_back();
     }
 });
 

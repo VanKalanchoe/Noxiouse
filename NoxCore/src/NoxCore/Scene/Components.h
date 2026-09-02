@@ -127,6 +127,7 @@ namespace Nox
         std::vector<AlphaMode> Modes = { AlphaMode::Opaque };
         std::vector<float> AlphaMaskCutoffs = { 0.5f };
         std::vector<bool> DoubleSidedFlags = { false };
+        std::vector<bool> UnlitFlags = { false };
     
         MaterialComponent() = default;
         MaterialComponent(const MaterialComponent&) = default;

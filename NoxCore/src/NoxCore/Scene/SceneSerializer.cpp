@@ -351,6 +351,11 @@ namespace Nox
             out << YAML::BeginSeq;
             for (auto doubleSided : mc.DoubleSidedFlags) out << (bool)doubleSided;
             out << YAML::EndSeq;
+            
+            out << YAML::Key << "UnlitFlags" << YAML::Value;
+            out << YAML::BeginSeq;
+            for (auto unlit : mc.UnlitFlags) out << (bool)unlit;
+            out << YAML::EndSeq;
 
             out << YAML::EndMap; // MaterialComponent
         }
@@ -819,6 +824,13 @@ namespace Nox
                     {
                         mc.DoubleSidedFlags.clear();
                         for (auto node : doubleSidedSeq) mc.DoubleSidedFlags.push_back(node.as<bool>());
+                    }
+                    
+                    auto unlitSeq = materialComponent["UnlitFlags"];
+                    if (unlitSeq)
+                    {
+                        mc.UnlitFlags.clear();
+                        for (auto node : unlitSeq) mc.UnlitFlags.push_back(node.as<bool>());
                     }
                 }
 

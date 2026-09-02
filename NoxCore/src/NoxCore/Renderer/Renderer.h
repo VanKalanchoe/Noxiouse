@@ -86,10 +86,16 @@ namespace Nox
         float distanceToCamera; // Only really needed for transparent objects now
     };
 
-    // The 3 Render Queues
+    // The Render Queues
     inline std::vector<RenderPacket> m_opaqueQueue;
     inline std::vector<RenderPacket> m_maskQueue;
     inline std::vector<RenderPacket> m_transparentQueue;
+    inline std::vector<RenderPacket> m_unlitQueue;
+
+    inline uint32_t m_opaqueCount = 0;
+    inline uint32_t m_maskCount = 0;
+    inline uint32_t m_transparentCount = 0;
+    inline uint32_t m_unlitCount = 0;
     
     class Renderer
     {
@@ -174,6 +180,7 @@ namespace Nox
         void createSwapChain();
         void createCompiler();
         void createGraphicsPipeline(bool forceCompile);
+        void createUnlitPipeline(bool forceCompile);
         void createPresentPipeline(bool forceCompile);
         void createComputePipeline();
         void createSkyboxPipeline(bool forceCompile);
@@ -216,6 +223,7 @@ namespace Nox
         Utils::NOXWatcher m_fileWatcher;
         std::unique_ptr<NRI::ShaderCompiler> m_shaderCompiler = nullptr;
         std::unique_ptr<NRI::Pipeline> m_graphicsPipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_unlitPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_presentPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_computePipeline = nullptr;
         

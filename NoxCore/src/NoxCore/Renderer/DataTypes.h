@@ -78,6 +78,7 @@ namespace Nox
         AlphaMode Mode = AlphaMode::Opaque;
         float AlphaMaskCutoff = 0.5f;
         bool DoubleSided = false;
+        bool Unlit = false;
     };
     
     struct MeshData
