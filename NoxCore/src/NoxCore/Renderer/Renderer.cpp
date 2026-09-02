@@ -1408,83 +1408,70 @@ namespace Nox
             references.meshletTrianglesPageTableReference = m_meshletTriPageTableBuffers[frameIndex]->getDeviceAddress();
             m_commandBuffers->pushData(&references, sizeof(shaderio::PushConstantMeshlets));
 
-             const uint32_t cmdStride = sizeof(DrawMeshTasksIndirectCommand);
-                const uint32_t instanceStride = sizeof(shaderio::InstanceData);
-                const uint64_t baseInstanceAddress = m_instanceBuffers[frameIndex]->getDeviceAddress();
+            const uint32_t cmdStride = sizeof(DrawMeshTasksIndirectCommand);
+            const uint32_t instanceStride = sizeof(shaderio::InstanceData);
+            const uint64_t baseInstanceAddress = m_instanceBuffers[frameIndex]->getDeviceAddress();
 
-                uint64_t currentCmdOffset = 0;
-                uint64_t currentInstanceOffset = 0;
+            uint64_t currentCmdOffset = 0;
+            uint64_t currentInstanceOffset = 0;
 
-                // =========================================================================
-                // PASS 1: Opaque PBR (Pipeline: Graphics, Depth Write: ON, Blend: OFF)
-                // =========================================================================
-                if (m_opaqueCount > 0)
+            // Track bound pipeline to avoid redundant vkCmdBindPipeline calls
+            NRI::Pipeline* boundPipeline = nullptr;
+
+            auto drawPass = [&](uint32_t count, NRI::Pipeline& pipeline, NRI::CullMode cullMode, bool depthWrite, bool blendEnable)
+            {
+                if (count == 0) return;
+
+                references.instanceReference = baseInstanceAddress + (currentInstanceOffset * instanceStride);
+                m_commandBuffers->pushData(&references, sizeof(shaderio::PushConstantMeshlets));
+
+                // ✅ ONLY bind if we are switching to a different pipeline!
+                if (boundPipeline != &pipeline)
                 {
-                    references.instanceReference = baseInstanceAddress + (currentInstanceOffset * instanceStride);
-                    m_commandBuffers->pushData(&references, sizeof(shaderio::PushConstantMeshlets));
-
-                    m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_graphicsPipeline);
-                    m_commandBuffers->setDepthWriteEnable(true);
-                    m_commandBuffers->setColorBlendEnable(0, false);
-                    m_commandBuffers->drawMeshTasksIndirect(*m_indirectBuffers[frameIndex], currentCmdOffset, m_opaqueCount, cmdStride);
-
-                    currentCmdOffset += static_cast<uint64_t>(m_opaqueCount) * cmdStride;
-                    currentInstanceOffset += m_opaqueCount;
+                    m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, pipeline);
+                    boundPipeline = &pipeline;
                 }
 
-                // =========================================================================
-                // PASS 2: Alpha Mask PBR (Pipeline: Graphics, Depth Write: ON, Blend: OFF)
-                // =========================================================================
-                if (m_maskCount > 0)
-                {
-                    references.instanceReference = baseInstanceAddress + (currentInstanceOffset * instanceStride);
-                    m_commandBuffers->pushData(&references, sizeof(shaderio::PushConstantMeshlets));
+                m_commandBuffers->setCullMode(cullMode);
+                m_commandBuffers->setDepthWriteEnable(depthWrite);
+                m_commandBuffers->setColorBlendEnable(0, blendEnable);
 
-                    m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_graphicsPipeline);
-                    m_commandBuffers->setDepthWriteEnable(true);
-                    m_commandBuffers->setColorBlendEnable(0, false);
-                    m_commandBuffers->drawMeshTasksIndirect(*m_indirectBuffers[frameIndex], currentCmdOffset, m_maskCount, cmdStride);
+                m_commandBuffers->drawMeshTasksIndirect(*m_indirectBuffers[frameIndex], currentCmdOffset, count, cmdStride);
 
-                    currentCmdOffset += static_cast<uint64_t>(m_maskCount) * cmdStride;
-                    currentInstanceOffset += m_maskCount;
-                }
+                currentCmdOffset += static_cast<uint64_t>(count) * cmdStride;
+                currentInstanceOffset += count;
+            };
 
-                // =========================================================================
-                // PASS 3: Transparent PBR (Pipeline: Graphics, Depth Write: OFF, Blend: ON)
-                // =========================================================================
-                if (m_transparentCount > 0)
-                {
-                    references.instanceReference = baseInstanceAddress + (currentInstanceOffset * instanceStride);
-                    m_commandBuffers->pushData(&references, sizeof(shaderio::PushConstantMeshlets));
+            // =========================================================================
+            // 1. ALL PBR OPAQUE & MASK (Binds Graphics Pipeline ONCE for all 4 passes)
+            // =========================================================================
+            drawPass(m_opaqueCount, *m_graphicsPipeline, NRI::CullMode::Back, true, false);
+            drawPass(m_opaqueDoubleSidedCount, *m_graphicsPipeline, NRI::CullMode::None, true, false);
+            drawPass(m_maskCount, *m_graphicsPipeline, NRI::CullMode::Back, true, false);
+            drawPass(m_maskDoubleSidedCount, *m_graphicsPipeline, NRI::CullMode::None, true, false);
 
-                    m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_graphicsPipeline);
-                    m_commandBuffers->setDepthWriteEnable(false); // Transparent objects do not occlude!
-                    m_commandBuffers->setColorBlendEnable(0, true);
-                    m_commandBuffers->drawMeshTasksIndirect(*m_indirectBuffers[frameIndex], currentCmdOffset, m_transparentCount, cmdStride);
+            // =========================================================================
+            // 2. ALL UNLIT OPAQUE & MASK (Switches to Unlit Pipeline ONCE for both passes)
+            // =========================================================================
+            if (m_unlitPipeline)
+            {
+                drawPass(m_unlitCount, *m_unlitPipeline, NRI::CullMode::Back, true, false);
+                drawPass(m_unlitDoubleSidedCount, *m_unlitPipeline, NRI::CullMode::None, true, false);
+            }
 
-                    currentCmdOffset += static_cast<uint64_t>(m_transparentCount) * cmdStride;
-                    currentInstanceOffset += m_transparentCount;
-                }
+            // =========================================================================
+            // 3. TRANSPARENT PASSES (Rendered last so they blend over the opaque depth)
+            // =========================================================================
+            drawPass(m_transparentCount, *m_graphicsPipeline, NRI::CullMode::None, false, true);
+            if (m_unlitPipeline)
+            {
+                drawPass(m_transparentUnlitCount, *m_unlitPipeline, NRI::CullMode::None, false, true);
+            }
 
-                // =========================================================================
-                // PASS 4: Unlit (Pipeline: Unlit, Depth Write: ON, Blend: OFF)
-                // =========================================================================
-                if (m_unlitCount > 0 && m_unlitPipeline)
-                {
-                    references.instanceReference = baseInstanceAddress + (currentInstanceOffset * instanceStride);
-                    m_commandBuffers->pushData(&references, sizeof(shaderio::PushConstantMeshlets));
-
-                    m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_unlitPipeline);
-                    m_commandBuffers->setDepthWriteEnable(true);
-                    m_commandBuffers->setColorBlendEnable(0, false);
-                    m_commandBuffers->drawMeshTasksIndirect(*m_indirectBuffers[frameIndex], currentCmdOffset, m_unlitCount, cmdStride);
-
-                    currentCmdOffset += static_cast<uint64_t>(m_unlitCount) * cmdStride;
-                    currentInstanceOffset += m_unlitCount;
-                }
-
-                // Restore depth write for subsequent passes
-                m_commandBuffers->setDepthWriteEnable(true);
+            // Restore defaults for subsequent passes (skybox, etc.)
+            m_commandBuffers->setCullMode(NRI::CullMode::Back);
+            m_commandBuffers->setDepthWriteEnable(true);
+            m_commandBuffers->setColorBlendEnable(0, false);
         }
 
         m_renderer2D->Flush(*m_commandBuffers, *m_uniformBuffers[frameIndex], frameIndex);
@@ -1964,11 +1951,15 @@ namespace Nox
         m_instanceBufferObjects.clear();
         m_drawMeshTasksIndirectCommands.clear();
         m_boneMatrices.clear();
-
+        
         m_opaqueQueue.clear();
+        m_opaqueDoubleSidedQueue.clear();
         m_maskQueue.clear();
-        m_transparentQueue.clear();
+        m_maskDoubleSidedQueue.clear();
         m_unlitQueue.clear();
+        m_unlitDoubleSidedQueue.clear();
+        m_transparentQueue.clear();
+        m_transparentUnlitQueue.clear();
     }
 
     int32_t Renderer::getPickedEntityID()
@@ -2122,43 +2113,42 @@ namespace Nox
         m_instanceBufferObjects.clear();
         m_drawMeshTasksIndirectCommands.clear();
 
-        // 1. Opaque PBR
-        m_opaqueCount = static_cast<uint32_t>(m_opaqueQueue.size());
-        for (const auto& packet : m_opaqueQueue)
+        auto packQueue = [this](const std::vector<RenderPacket>& queue, uint32_t& outCount)
         {
-            m_instanceBufferObjects.push_back(packet.instance);
-            m_drawMeshTasksIndirectCommands.push_back(packet.command);
-        }
+            outCount = static_cast<uint32_t>(queue.size());
+            for (const auto& packet : queue)
+            {
+                m_instanceBufferObjects.push_back(packet.instance);
+                m_drawMeshTasksIndirectCommands.push_back(packet.command);
+            }
+        };
 
-        // 2. Masked PBR
-        m_maskCount = static_cast<uint32_t>(m_maskQueue.size());
-        for (const auto& packet : m_maskQueue)
-        {
-            m_instanceBufferObjects.push_back(packet.instance);
-            m_drawMeshTasksIndirectCommands.push_back(packet.command);
-        }
+        // 1. Opaque PBR (Single-Sided & Double-Sided)
+        packQueue(m_opaqueQueue, m_opaqueCount);
+        packQueue(m_opaqueDoubleSidedQueue, m_opaqueDoubleSidedCount);
 
-        // 3. Transparent PBR (Sorted back-to-front)
-        std::sort(m_transparentQueue.begin(), m_transparentQueue.end(),
-                  [](const RenderPacket& a, const RenderPacket& b)
-                  {
-                      return a.distanceToCamera > b.distanceToCamera;
-                  });
+        // 2. Alpha Mask PBR (Single-Sided & Double-Sided)
+        packQueue(m_maskQueue, m_maskCount);
+        packQueue(m_maskDoubleSidedQueue, m_maskDoubleSidedCount);
 
-        m_transparentCount = static_cast<uint32_t>(m_transparentQueue.size());
-        for (const auto& packet : m_transparentQueue)
+        // 3. Unlit (Single-Sided & Double-Sided)
+        packQueue(m_unlitQueue, m_unlitCount);
+        packQueue(m_unlitDoubleSidedQueue, m_unlitDoubleSidedCount);
+
+        // 4. Transparent (Sorted back-to-front)
+        auto sortByDistance = [](std::vector<RenderPacket>& queue)
         {
-            m_instanceBufferObjects.push_back(packet.instance);
-            m_drawMeshTasksIndirectCommands.push_back(packet.command);
-        }
-        
-        // 4. Unlit
-        m_unlitCount = static_cast<uint32_t>(m_unlitQueue.size());
-        for (const auto& packet : m_unlitQueue)
-        {
-            m_instanceBufferObjects.push_back(packet.instance);
-            m_drawMeshTasksIndirectCommands.push_back(packet.command);
-        }
+            std::sort(queue.begin(), queue.end(), [](const RenderPacket& a, const RenderPacket& b)
+            {
+                return a.distanceToCamera > b.distanceToCamera;
+            });
+        };
+
+        sortByDistance(m_transparentQueue);
+        packQueue(m_transparentQueue, m_transparentCount);
+
+        sortByDistance(m_transparentUnlitQueue);
+        packQueue(m_transparentUnlitQueue, m_transparentUnlitCount);
     }
 
     void Renderer::DrawMesh(const glm::mat4& transform, Ref<Mesh> mesh, uint32_t submeshIndex, const MaterialComponent& material, int entityID, const std::vector<glm::mat4>* boneTransforms)
@@ -2260,24 +2250,53 @@ namespace Nox
         packet.command = command;
 
         // Route to Render Queues (DO NOT push directly to buffers)
-        if (instance.unlit != 0)
-        {
-            m_unlitQueue.push_back(packet);
-        }
-        else if (mode == AlphaMode::Blend)
+        bool isDoubleSided = (instance.doubleSided != 0);
+        bool isUnlit = (instance.unlit != 0);
+
+        if (mode == AlphaMode::Blend)
         {
             glm::vec3 camPos = glm::vec3(uniformData.cameraWorldPos);
             glm::vec3 objPos = glm::vec3(transform[3]);
             packet.distanceToCamera = glm::length(objPos - camPos);
-            m_transparentQueue.push_back(packet);
+
+            if (isUnlit)
+                m_transparentUnlitQueue.push_back(packet);
+            else
+                m_transparentQueue.push_back(packet);
         }
         else if (mode == AlphaMode::Mask)
         {
-            m_maskQueue.push_back(packet);
+            if (isUnlit)
+            {
+                if (isDoubleSided)
+                    m_unlitDoubleSidedQueue.push_back(packet);
+                else
+                    m_unlitQueue.push_back(packet);
+            }
+            else
+            {
+                if (isDoubleSided)
+                    m_maskDoubleSidedQueue.push_back(packet);
+                else
+                    m_maskQueue.push_back(packet);
+            }
         }
-        else
+        else // AlphaMode::Opaque
         {
-            m_opaqueQueue.push_back(packet);
+            if (isUnlit)
+            {
+                if (isDoubleSided)
+                    m_unlitDoubleSidedQueue.push_back(packet);
+                else
+                    m_unlitQueue.push_back(packet);
+            }
+            else
+            {
+                if (isDoubleSided)
+                    m_opaqueDoubleSidedQueue.push_back(packet);
+                else
+                    m_opaqueQueue.push_back(packet);
+            }
         }
     }
 
@@ -2360,24 +2379,53 @@ namespace Nox
             packet.command = command;
 
             // 5. Route to Render Queues
-            if (instance.unlit != 0)
-            {
-                m_unlitQueue.push_back(packet);
-            }
-            else if (mode == AlphaMode::Blend)
+            bool isDoubleSided = (instance.doubleSided != 0);
+            bool isUnlit = (instance.unlit != 0);
+
+            if (mode == AlphaMode::Blend)
             {
                 glm::vec3 camPos = glm::vec3(uniformData.cameraWorldPos);
                 glm::vec3 objPos = glm::vec3(transform[3]);
                 packet.distanceToCamera = glm::length(objPos - camPos);
-                m_transparentQueue.push_back(packet);
+
+                if (isUnlit)
+                    m_transparentUnlitQueue.push_back(packet);
+                else
+                    m_transparentQueue.push_back(packet);
             }
             else if (mode == AlphaMode::Mask)
             {
-                m_maskQueue.push_back(packet);
+                if (isUnlit)
+                {
+                    if (isDoubleSided)
+                        m_unlitDoubleSidedQueue.push_back(packet);
+                    else
+                        m_unlitQueue.push_back(packet);
+                }
+                else
+                {
+                    if (isDoubleSided)
+                        m_maskDoubleSidedQueue.push_back(packet);
+                    else
+                        m_maskQueue.push_back(packet);
+                }
             }
-            else
+            else // AlphaMode::Opaque
             {
-                m_opaqueQueue.push_back(packet);
+                if (isUnlit)
+                {
+                    if (isDoubleSided)
+                        m_unlitDoubleSidedQueue.push_back(packet);
+                    else
+                        m_unlitQueue.push_back(packet);
+                }
+                else
+                {
+                    if (isDoubleSided)
+                        m_opaqueDoubleSidedQueue.push_back(packet);
+                    else
+                        m_opaqueQueue.push_back(packet);
+                }
             }
         }
     }

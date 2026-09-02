@@ -719,47 +719,23 @@ namespace Nox
         ParseSkeletonFromGltf(model, outSkeleton);
         ParseAnimationsFromGltf(model, outSkeleton, outAnimations);
 
-        for (uint32_t meshIndex = 0; meshIndex < model.meshes_count; meshIndex++)
-        {
-            const tg3_mesh& mesh = model.meshes[meshIndex];
+         uint32_t totalInstances = (model.nodes_count > 0) ? model.nodes_count : model.meshes_count;
 
-            // Naming
-            std::string meshName;
-            if (mesh.name.data && mesh.name.len > 0)
+            for (uint32_t instanceIdx = 0; instanceIdx < totalInstances; instanceIdx++)
             {
-                meshName = std::string(mesh.name.data, mesh.name.len);
-            }
+                uint32_t meshIndex = 0;
+                glm::mat4 nodeMatrix(1.0f);
+                std::string meshName;
 
-            if (meshName.empty())
-            {
-                for (uint32_t nodeIndex = 0; nodeIndex < model.nodes_count; nodeIndex++)
+                if (model.nodes_count > 0)
                 {
-                    const auto& node = model.nodes[nodeIndex];
-                    // Check if this node references our mesh index and has a valid name string
-                    if (node.mesh == meshIndex && node.name.data && node.name.len > 0)
-                    {
-                        meshName = std::string(node.name.data, node.name.len);
-                        NOX_CORE_INFO("[Importer] Found node name for mesh {}: '{}'", meshIndex, meshName);
-                        break; // Found the matching node name!
-                    }
-                }
-                if (meshName.empty())
-                {
-                    NOX_CORE_WARN("[Importer] Could not find any name for mesh {}! Node mesh index matching failed.", meshIndex);
-                }
-            }
+                    const auto& node = model.nodes[instanceIdx];
+                    if (node.mesh < 0 || node.mesh >= static_cast<int32_t>(model.meshes_count))
+                        continue; // Skip nodes that don't reference a mesh (e.g. empty groupings, cameras)
 
-            // Mesh
-            
-            // -------------------------------------------------------------------------
-            // Find Node Transform for this mesh (positions parts side-by-side as in GLB)
-            // -------------------------------------------------------------------------
-            glm::mat4 nodeMatrix(1.0f);
-            for (uint32_t nodeIndex = 0; nodeIndex < model.nodes_count; nodeIndex++)
-            {
-                const auto& node = model.nodes[nodeIndex];
-                if (node.mesh == meshIndex)
-                {
+                    meshIndex = static_cast<uint32_t>(node.mesh);
+
+                    // 1. Calculate this node instance's transform
                     if (node.has_matrix)
                     {
                         nodeMatrix = glm::mat4(glm::make_mat4(node.matrix));
@@ -780,10 +756,26 @@ namespace Nox
 
                         nodeMatrix = glm::translate(glm::mat4(1.0f), t) * glm::toMat4(r) * glm::scale(glm::mat4(1.0f), s);
                     }
-                    break;
+
+                    if (node.name.data && node.name.len > 0)
+                        meshName = std::string(node.name.data, node.name.len);
                 }
-            }
-            glm::mat3 normalMatrix = glm::transpose(glm::inverse(glm::mat3(nodeMatrix)));
+                else
+                {
+                    meshIndex = instanceIdx;
+                }
+
+                const tg3_mesh& mesh = model.meshes[meshIndex];
+
+                if (meshName.empty())
+                {
+                    if (mesh.name.data && mesh.name.len > 0)
+                        meshName = std::string(mesh.name.data, mesh.name.len);
+                    else
+                        meshName = "Instance_" + std::to_string(instanceIdx);
+                }
+
+                glm::mat3 normalMatrix = glm::transpose(glm::inverse(glm::mat3(nodeMatrix)));
             
             for (uint32_t primitiveIndex = 0; primitiveIndex < mesh.primitives_count; primitiveIndex++)
             {

@@ -3,139 +3,31 @@ AssetRegistry:
     FilePath: Scenes/3D-Scene.nox
     SourceFilePath: Scenes/3D-Scene.nox
     Type: AssetType::Scene
-  - Handle: 1269092441897425845
-    FilePath: models/FlightHelmet/FlightHelmet_Materials_LensesMat_OcclusionRoughMetal.png
-    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_LensesMat_OcclusionRoughMetal.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: RGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 2867009863075033212
-    FilePath: models/FlightHelmet/FlightHelmet_Materials_LeatherPartsMat_OcclusionRoughMetal.png
-    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_LeatherPartsMat_OcclusionRoughMetal.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: RGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 2925690482628945307
-    FilePath: models/FlightHelmet/FlightHelmet_Materials_RubberWoodMat_Normal.png
-    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_RubberWoodMat_Normal.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: RGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 5463997673142322237
-    FilePath: models/FlightHelmet/FlightHelmet_Materials_LensesMat_BaseColor.png
-    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_LensesMat_BaseColor.png
+  - Handle: 4675048049564595723
+    FilePath: models/TransmissionOrderTest/textures/TransmissionOrderTest_tex_1.png
+    SourceFilePath: models/TransmissionOrderTest/textures/TransmissionOrderTest_tex_1.png
     Type: AssetType::Texture2D
     TextureSpec:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
-  - Handle: 5496992653432465431
-    FilePath: models/FlightHelmet/FlightHelmet_Materials_MetalPartsMat_BaseColor.png
-    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_MetalPartsMat_BaseColor.png
+  - Handle: 10417000002135003264
+    FilePath: models/TransmissionOrderTest/textures/TransmissionOrderTest_tex_0.png
+    SourceFilePath: models/TransmissionOrderTest/textures/TransmissionOrderTest_tex_0.png
     Type: AssetType::Texture2D
     TextureSpec:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
-  - Handle: 5923596268724734345
-    FilePath: models/FlightHelmet/FlightHelmet_Materials_MetalPartsMat_Normal.png
-    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_MetalPartsMat_Normal.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: RGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 6879334928563824842
-    FilePath: models/FlightHelmet/FlightHelmet_Materials_RubberWoodMat_OcclusionRoughMetal.png
-    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_RubberWoodMat_OcclusionRoughMetal.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: RGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 6982885775305990646
-    FilePath: models/UnlitTest/UnlitTest.nmesh
-    SourceFilePath: models/UnlitTest/UnlitTest.glb
-    Type: AssetType::Mesh
-  - Handle: 7955564876377924575
-    FilePath: models/FlightHelmet/FlightHelmet_Materials_LeatherPartsMat_BaseColor.png
-    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_LeatherPartsMat_BaseColor.png
+  - Handle: 10678039247694374754
+    FilePath: models/TransmissionOrderTest/textures/TransmissionOrderTest_tex_2.png
+    SourceFilePath: models/TransmissionOrderTest/textures/TransmissionOrderTest_tex_2.png
     Type: AssetType::Texture2D
     TextureSpec:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
-  - Handle: 9197814473888492430
-    FilePath: models/FlightHelmet/FlightHelmet_Materials_LensesMat_Normal.png
-    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_LensesMat_Normal.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: RGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 10054655984937002416
-    FilePath: models/FlightHelmet/FlightHelmet_Materials_MetalPartsMat_OcclusionRoughMetal.png
-    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_MetalPartsMat_OcclusionRoughMetal.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: RGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 10702057425523987403
-    FilePath: models/FlightHelmet/FlightHelmet_Materials_LeatherPartsMat_Normal.png
-    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_LeatherPartsMat_Normal.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: RGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 11186500395002906834
-    FilePath: models/FlightHelmet/FlightHelmet_Materials_GlassPlasticMat_Normal.png
-    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_GlassPlasticMat_Normal.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: RGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 12221609492845217461
-    FilePath: models/UnlitTest/UnlitTest.nsmesh
-    SourceFilePath: models/UnlitTest/UnlitTest.glb
+  - Handle: 17688825175305904184
+    FilePath: models/TransmissionOrderTest/TransmissionOrderTest.nsmesh
+    SourceFilePath: models/TransmissionOrderTest/TransmissionOrderTest.glb
     Type: AssetType::StaticMesh
-  - Handle: 12833278027683755763
-    FilePath: models/FlightHelmet/FlightHelmet.nmesh
-    SourceFilePath: models/FlightHelmet/FlightHelmet.gltf
-    Type: AssetType::Mesh
-  - Handle: 14076220995257208471
-    FilePath: models/FlightHelmet/FlightHelmet_Materials_RubberWoodMat_BaseColor.png
-    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_RubberWoodMat_BaseColor.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: SRGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 14395691027613417511
-    FilePath: models/FlightHelmet/FlightHelmet_Materials_GlassPlasticMat_BaseColor.png
-    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_GlassPlasticMat_BaseColor.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: SRGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 14433247413575110569
-    FilePath: models/FlightHelmet/FlightHelmet.nsmesh
-    SourceFilePath: models/FlightHelmet/FlightHelmet.gltf
-    Type: AssetType::StaticMesh
-  - Handle: 15583257340461966052
-    FilePath: models/FlightHelmet/FlightHelmet_Materials_GlassPlasticMat_OcclusionRoughMetal.png
-    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_GlassPlasticMat_OcclusionRoughMetal.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: RGBA8
-      GenerateMips: true
-      Flip: false

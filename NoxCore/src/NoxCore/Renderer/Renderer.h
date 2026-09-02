@@ -87,15 +87,24 @@ namespace Nox
     };
 
     // The Render Queues
+    // The Render Queues (Matching Sascha Willems 1:1)
     inline std::vector<RenderPacket> m_opaqueQueue;
+    inline std::vector<RenderPacket> m_opaqueDoubleSidedQueue;
     inline std::vector<RenderPacket> m_maskQueue;
-    inline std::vector<RenderPacket> m_transparentQueue;
+    inline std::vector<RenderPacket> m_maskDoubleSidedQueue;
     inline std::vector<RenderPacket> m_unlitQueue;
+    inline std::vector<RenderPacket> m_unlitDoubleSidedQueue;
+    inline std::vector<RenderPacket> m_transparentQueue;
+    inline std::vector<RenderPacket> m_transparentUnlitQueue;
 
     inline uint32_t m_opaqueCount = 0;
+    inline uint32_t m_opaqueDoubleSidedCount = 0;
     inline uint32_t m_maskCount = 0;
-    inline uint32_t m_transparentCount = 0;
+    inline uint32_t m_maskDoubleSidedCount = 0;
     inline uint32_t m_unlitCount = 0;
+    inline uint32_t m_unlitDoubleSidedCount = 0;
+    inline uint32_t m_transparentCount = 0;
+    inline uint32_t m_transparentUnlitCount = 0;
     
     class Renderer
     {
