@@ -559,14 +559,36 @@ namespace Nox
         irradCmd->transitionTextureLayout(*m_irradianceCubemap, NRI::TextureLayout::Undefined, NRI::TextureLayout::General);
 
         irradCmd->bindPipeline(NRI::PipelineBindPoint::Compute, *irradiancePipeline);
-        irradCmd->pushData(&pushData, sizeof(EquirectPushConstants));
+        
+        std::vector<uint32_t> tempIrradMipSlots;
+        // Loop through each mip level to generate all mips (just like Sascha!)
+        for (uint32_t mip = 0; mip < irradianceNumMips; ++mip)
+        {
+            uint32_t mipSize = irradianceSize >> mip;
 
-        uint32_t irradGroupCountX = (irradianceSize + 15) / 16;
-        uint32_t irradGroupCountY = (irradianceSize + 15) / 16;
-        irradCmd->dispatch(irradGroupCountX, irradGroupCountY, 6);
+            // Target specifically this mip level with a spec-compliant storage descriptor
+            uint32_t mipStorageSlot = m_resourceHeap->registerStorageTextureMip(*m_irradianceCubemap, mip);
+            tempIrradMipSlots.push_back(mipStorageSlot);
+
+            pushData.hdrTextureIndex = m_environmentCubemap->GetDescriptorIndexSlot();
+            pushData.cubemapStorageIndex = mipStorageSlot;
+            pushData.cubemapSize = mipSize;
+
+            irradCmd->pushData(&pushData, sizeof(EquirectPushConstants));
+
+            uint32_t irradGroupCountX = (mipSize + 15) / 16;
+            uint32_t irradGroupCountY = (mipSize + 15) / 16;
+            irradCmd->dispatch(irradGroupCountX, irradGroupCountY, 6);
+        }
 
         irradCmd->transitionTextureLayout(*m_irradianceCubemap, NRI::TextureLayout::General, NRI::TextureLayout::ShaderResource);
         endSingleTimeCommands(std::move(irradCmd));
+        
+        // Free the temporary per-mip storage descriptor slots
+        for (uint32_t slot : tempIrradMipSlots)
+        {
+            m_resourceHeap->unregisterTexture(slot);
+        }
 
         m_resourceHeap->registerTexture(*m_irradianceCubemap, NRI::TextureUsage::ShaderResource);
 
@@ -1065,9 +1087,9 @@ namespace Nox
             .addressModeW = NRI::SamplerAddressMode::Repeat,
             .mipLodBias = 0.0f,
             .anisotropyEnable = true,
-            .maxAnisotropy = 1.0f,
-            .compareEnable = true,
-            .compareOp = NRI::CompareOp::Always,
+            .maxAnisotropy = 16.0f,
+            .compareEnable = false,
+            .compareOp = NRI::CompareOp::Never,
             .minLod = 0.0f,
             .maxLod = 1000.0f
         };
@@ -1273,7 +1295,7 @@ namespace Nox
         // Rasterization (most of these come from VK_EXT_extended_dynamic_state_3).
         m_commandBuffers->setRasterizerDiscardEnable(false);
         m_commandBuffers->setPolygonMode(NRI::PolygonMode::Fill);
-        m_commandBuffers->setCullMode(NRI::CullMode::None);
+        m_commandBuffers->setCullMode(NRI::CullMode::Back);
         m_commandBuffers->setFrontFace(NRI::FrontFace::CounterClockWise);
         m_commandBuffers->setDepthBiasEnable(false);
         m_commandBuffers->setDepthClampEnable(false); //LineWidth maybe ?

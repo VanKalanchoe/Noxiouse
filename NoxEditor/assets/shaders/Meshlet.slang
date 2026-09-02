@@ -142,36 +142,20 @@ import Math;
 float3 getNormal(UniformBufferObject* ubo, InstanceData instance, VSOutput vertIn, SamplerState samplerState)
 {
 	// Perturb normal, see http://www.thetenthplanet.de/archives/1180
-    // Christian Schüler's original paper (Normal Mapping Without Precomputed Tangents)
     Texture2D normalTexture = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.normalTextureIndex, 0));
     float3 tangentNormal = normalTexture.Sample(samplerState, instance.normalTextureSet == 0 ? vertIn.uv0 : vertIn.uv1).xyz * 2.0 - 1.0;
+	
+    float3 q1 = ddx(vertIn.worldPos);
+	float3 q2 = ddy(vertIn.worldPos);
+	float2 st1 = ddx(vertIn.uv0);
+	float2 st2 = ddy(vertIn.uv0);
 
-    float3 N = normalize(vertIn.normal);
+	float3 N = normalize(vertIn.normal);
+	float3 T = normalize(q1 * st2.y - q2 * st1.y);
+	float3 B = normalize(cross(N, T));
+	float3x3 TBN = float3x3(T, B, N);
 
-	 // Screen-space position and UV derivatives
-        float3 dp1 = ddx(vertIn.worldPos);
-        float3 dp2 = ddy(vertIn.worldPos);
-        float2 duv1 = ddx(vertIn.uv0);
-        float2 duv2 = ddy(vertIn.uv0);
-
-        // Solve linear system
-        float3 dp2perp = cross(dp2, N);
-        float3 dp1perp = cross(N, dp1);
-
-        float3 T = dp2perp * duv1.x + dp1perp * duv2.x;
-        float3 B = dp2perp * duv1.y + dp1perp * duv2.y;
-
-        // Construct scale-invariant frame with NaN protection
-        float det = max(dot(T, T), dot(B, B));
-        if (det < 1e-10)
-        {
-            return N; // Safe fallback to geometric normal on seams/degeneracies
-        }
-
-        float invmax = rsqrt(det);
-        float3x3 TBN = float3x3(T * invmax, B * invmax, N);
-
-        return normalize(mul(tangentNormal, TBN));
+	return normalize(mul(tangentNormal, TBN));
 }
 
 // Calculation of the lighting contribution from an optional Image Based Light source.

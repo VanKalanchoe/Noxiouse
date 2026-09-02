@@ -186,9 +186,14 @@ namespace NRI
         vk::ImageViewCreateInfo viewInfo = vkTex->getNativeViewInfo();
         // Vulkan Spec Constraint: Storage images CANNOT use eCube or eCubeArray view types.
         // RWTexture2DArray storage writes require e2DArray.
-        if (isStorage && (viewInfo.viewType == vk::ImageViewType::eCube || viewInfo.viewType == vk::ImageViewType::eCubeArray))
+        if (isStorage)
         {
-            viewInfo.viewType = vk::ImageViewType::e2DArray;
+            if (viewInfo.viewType == vk::ImageViewType::eCube || viewInfo.viewType == vk::ImageViewType::eCubeArray)
+            {
+                viewInfo.viewType = vk::ImageViewType::e2DArray;
+            }
+            viewInfo.subresourceRange.baseMipLevel = 0;
+            viewInfo.subresourceRange.levelCount = 1; // ✅ VULKAN SPEC: Storage images must have levelCount = 1
         }
         
         vk::ImageDescriptorInfoEXT imageDescriptorInfo
