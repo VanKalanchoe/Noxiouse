@@ -1,4 +1,12 @@
 AssetRegistry:
+  - Handle: 202591723975913953
+    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_2.png
+    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_2.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
   - Handle: 284400685509200133
     FilePath: Scenes/3D-Scene.nox
     SourceFilePath: Scenes/3D-Scene.nox
@@ -19,6 +27,18 @@ AssetRegistry:
     FilePath: models/fox/Fox_Walk.nanim
     SourceFilePath: models/fox/Fox_Walk.nanim
     Type: AssetType::AnimationSequence
+  - Handle: 3524248266384499960
+    FilePath: models/Box/Box.nmesh
+    SourceFilePath: models/Box/Box.glb
+    Type: AssetType::Mesh
+  - Handle: 3778257443097452568
+    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_3.png
+    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_3.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
   - Handle: 4169800304157829132
     FilePath: models/dancing_stormtrooper/textures/dancing_stormtrooper_tex_0.png
     SourceFilePath: models/dancing_stormtrooper/textures/dancing_stormtrooper_tex_0.png
@@ -43,6 +63,18 @@ AssetRegistry:
     FilePath: models/fox/Fox_Run.nanim
     SourceFilePath: models/fox/Fox_Run.nanim
     Type: AssetType::AnimationSequence
+  - Handle: 7467471520470579485
+    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_0.png
+    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_0.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 9366737451771377502
+    FilePath: models/DamagedHelmet/DamagedHelmet.nmesh
+    SourceFilePath: models/DamagedHelmet/DamagedHelmet.gltf
+    Type: AssetType::Mesh
   - Handle: 10417000002135003264
     FilePath: models/TransmissionOrderTest/textures/TransmissionOrderTest_tex_0.png
     SourceFilePath: models/TransmissionOrderTest/textures/TransmissionOrderTest_tex_0.png
@@ -67,6 +99,14 @@ AssetRegistry:
     FilePath: models/fox/Fox.nskel
     SourceFilePath: models/fox/Fox.nskel
     Type: AssetType::Skeleton
+  - Handle: 12751788300075542500
+    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_4.png
+    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_4.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
   - Handle: 14132583861332063530
     FilePath: models/dancing_stormtrooper/dancing_stormtrooper.nmesh
     SourceFilePath: models/dancing_stormtrooper/dancing_stormtrooper.glb
@@ -79,3 +119,11 @@ AssetRegistry:
     FilePath: models/TransmissionOrderTest/TransmissionOrderTest.nsmesh
     SourceFilePath: models/TransmissionOrderTest/TransmissionOrderTest.glb
     Type: AssetType::StaticMesh
+  - Handle: 18061909308823890755
+    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_1.png
+    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_1.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false

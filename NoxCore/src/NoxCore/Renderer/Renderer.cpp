@@ -1086,6 +1086,27 @@ namespace Nox
             m_selectedEntityIDBuffersMapped.emplace_back(mapped);
         }
     }
+    
+    void Renderer::createLightBuffer(uint64_t bufferSize)
+    {
+        m_lightBuffers.clear();
+        m_lightBuffersMapped.clear();
+        m_lightBuffers.reserve(MAX_FRAMES_IN_FLIGHT);
+        m_lightBuffersMapped.reserve(MAX_FRAMES_IN_FLIGHT);
+
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+        {
+            std::unique_ptr<NRI::Buffer> lightBuffer = m_device->createBuffer(NRI::BufferDesc
+                {
+                    .size = bufferSize,
+                    .usage = NRI::BufferUsage::Storage
+                });
+
+            void* mappedMemory = lightBuffer->map(0, bufferSize);
+            m_lightBuffers.emplace_back(std::move(lightBuffer));
+            m_lightBuffersMapped.emplace_back(mappedMemory);
+        }
+    }
 
     void Renderer::createDescriptorHeaps()
     {
@@ -1788,7 +1809,7 @@ namespace Nox
         uniformData.brdfLutIndex = m_brdfLUT->GetDescriptorIndexSlot();
         uniformData.exposure = 4.5f; // slider in the future in imgui
         uniformData.gamma = 2.2f; // slider in the future in imgui
-        uniformData.scaleIBLAmbient = 1.0f; // slider in the future in imgui
+        uniformData.scaleIBLAmbient = 0.0f; // slider in the future in imgui
 
         memcpy(m_uniformBuffersMapped[currentImage], &uniformData, sizeof(uniformData));
     }
@@ -1840,6 +1861,40 @@ namespace Nox
             createIndirectBuffer(m_IndirectBufferCapacity);
         }
         memcpy(m_indirectBuffersMapped[currentImage], m_drawMeshTasksIndirectCommands.data(), requiredIndirectSize);
+    }
+    
+    void Renderer::updateLightBuffer(uint32_t currentImage)
+    {
+        if (m_lightBuffers.empty())
+        {
+            m_LightBufferCapacity = sizeof(shaderio::LightData) * 16;
+            createLightBuffer(m_LightBufferCapacity);
+        }
+
+        uint64_t requiredLightSize = sizeof(shaderio::LightData) * m_lightBufferObjects.size();
+        if (requiredLightSize > m_LightBufferCapacity)
+        {
+            m_LightBufferCapacity = requiredLightSize * 2;
+            for (auto& oldBuffer : m_lightBuffers)
+            {
+                if (oldBuffer)
+                {
+                    m_deferredBufferDeletions.push_back({
+                        std::move(oldBuffer),
+                        frameIndex + MAX_FRAMES_IN_FLIGHT
+                    });
+                }
+            }
+            createLightBuffer(m_LightBufferCapacity);
+        }
+
+        if (requiredLightSize > 0)
+        {
+            memcpy(m_lightBuffersMapped[currentImage], m_lightBufferObjects.data(), requiredLightSize);
+        }
+
+        uniformData.lightDataReference = m_lightBuffers[currentImage]->getDeviceAddress();
+        uniformData.lightCount = static_cast<uint32_t>(m_lightBufferObjects.size());
     }
 
     void Renderer::processDeferredDeletions()
@@ -1923,6 +1978,8 @@ namespace Nox
         updatePageTables(frameIndex);
 
         updateEntityIDBuffer(frameIndex);
+        
+        updateLightBuffer(frameIndex);
 
         updateUniformBuffer(frameIndex);
 
@@ -1951,6 +2008,7 @@ namespace Nox
         m_instanceBufferObjects.clear();
         m_drawMeshTasksIndirectCommands.clear();
         m_boneMatrices.clear();
+        m_lightBufferObjects.clear();
         
         m_opaqueQueue.clear();
         m_opaqueDoubleSidedQueue.clear();
@@ -2453,5 +2511,55 @@ namespace Nox
                 DrawStaticMesh(transform, staticMesh, srcMat, entityID);
             }
         }
+    }
+
+    void Renderer::SubmitLight(const glm::mat4& transform, const DirectionalLightComponent& light)
+    {
+        glm::vec3 forward = glm::normalize(glm::vec3(transform * glm::vec4(0.0f, 0.0f, -1.0f, 0.0f)));
+
+        shaderio::LightData l{};
+        l.position = glm::vec4(0.0f, 0.0f, 0.0f, (float)shaderio::LightType::Directional);
+        l.direction = glm::vec4(forward, 0.0f);
+        l.color = glm::vec4(light.Color, light.Intensity);
+        l.spotParams = glm::vec4(0.0f);
+
+        m_lightBufferObjects.push_back(l);
+    }
+
+    void Renderer::SubmitLight(const glm::mat4& transform, const PointLightComponent& light)
+    {
+        glm::vec3 worldPos = glm::vec3(transform[3]);
+
+        shaderio::LightData l{};
+        l.position = glm::vec4(worldPos, (float)shaderio::LightType::Point);
+        l.direction = glm::vec4(0.0f, 0.0f, 0.0f, light.Range);
+        l.color = glm::vec4(light.Color, light.Intensity);
+        l.spotParams = glm::vec4(0.0f);
+
+        m_lightBufferObjects.push_back(l);
+    }
+
+    void Renderer::SubmitLight(const glm::mat4& transform, const SpotLightComponent& light)
+    {
+        glm::vec3 worldPos = glm::vec3(transform[3]);
+        glm::vec3 forward = glm::normalize(glm::vec3(transform * glm::vec4(0.0f, 0.0f, -1.0f, 0.0f)));
+
+        // glTF KHR_lights_punctual specification:
+        float innerConeAngle = glm::radians(light.InnerAngle);
+        float outerConeAngle = glm::radians(light.OuterAngle);
+
+        float cosInner = glm::cos(innerConeAngle);
+        float cosOuter = glm::cos(outerConeAngle);
+
+        float lightAngleScale = 1.0f / glm::max(0.001f, cosInner - cosOuter);
+        float lightAngleOffset = -cosOuter * lightAngleScale;
+
+        shaderio::LightData l{};
+        l.position = glm::vec4(worldPos, (float)shaderio::LightType::Spot);
+        l.direction = glm::vec4(forward, light.Range);
+        l.color = glm::vec4(light.Color, light.Intensity);
+        l.spotParams = glm::vec4(lightAngleScale, lightAngleOffset, 0.0f, 0.0f);
+
+        m_lightBufferObjects.push_back(l);
     }
 }

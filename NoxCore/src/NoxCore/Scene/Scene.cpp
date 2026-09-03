@@ -557,6 +557,36 @@ namespace Nox
             }
         }
         
+        // Submit Directional Lights
+        {
+            auto view = m_Registry.view<WorldTransformComponent, DirectionalLightComponent>();
+            for (auto entity : view)
+            {
+                auto [wtc, light] = view.get<WorldTransformComponent, DirectionalLightComponent>(entity);
+                m_renderer->SubmitLight(wtc.WorldMatrix, light);
+            }
+        }
+
+        // Submit Point Lights
+        {
+            auto view = m_Registry.view<WorldTransformComponent, PointLightComponent>();
+            for (auto entity : view)
+            {
+                auto [wtc, light] = view.get<WorldTransformComponent, PointLightComponent>(entity);
+                m_renderer->SubmitLight(wtc.WorldMatrix, light);
+            }
+        }
+
+        // Submit Spot Lights
+        {
+            auto view = m_Registry.view<WorldTransformComponent, SpotLightComponent>();
+            for (auto entity : view)
+            {
+                auto [wtc, light] = view.get<WorldTransformComponent, SpotLightComponent>(entity);
+                m_renderer->SubmitLight(wtc.WorldMatrix, light);
+            }
+        }
+        
         // Draw Sprites
         {
             auto group = m_Registry.group<WorldTransformComponent>(entt::get<SpriteRendererComponent>);
@@ -640,6 +670,21 @@ namespace Nox
     
     template <>
     void Scene::OnComponentAdded<MaterialComponent>(Entity entity, MaterialComponent& component)
+    {
+    }
+    
+    template <>
+    void Scene::OnComponentAdded<DirectionalLightComponent>(Entity entity, DirectionalLightComponent& component)
+    {
+    }
+    
+    template <>
+    void Scene::OnComponentAdded<PointLightComponent>(Entity entity, PointLightComponent& component)
+    {
+    }
+    
+    template <>
+    void Scene::OnComponentAdded<SpotLightComponent>(Entity entity, SpotLightComponent& component)
     {
     }
     

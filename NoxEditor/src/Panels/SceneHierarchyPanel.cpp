@@ -471,6 +471,11 @@ namespace Nox
         {
             DisplayAddComponentEntry<MeshComponent>("Mesh");
             DisplayAddComponentEntry<MaterialComponent>("Material");
+            
+            DisplayAddComponentEntry<DirectionalLightComponent>("Directional Light");
+            DisplayAddComponentEntry<PointLightComponent>("Point Light");
+            DisplayAddComponentEntry<SpotLightComponent>("Spot Light");
+            
             DisplayAddComponentEntry<AnimatorComponent>("Animator");
 
             DisplayAddComponentEntry<CameraComponent>("Camera");
@@ -877,6 +882,28 @@ namespace Nox
         component.UnlitFlags.pop_back();
     }
 });
+        
+        DrawComponent<DirectionalLightComponent>("Directional Light", entity, [](auto& component)
+            {
+                ImGui::ColorEdit3("Color", glm::value_ptr(component.Color));
+                ImGui::DragFloat("Intensity", &component.Intensity, 0.1f, 0.0f, 100.0f);
+            });
+
+        DrawComponent<PointLightComponent>("Point Light", entity, [](auto& component)
+        {
+            ImGui::ColorEdit3("Color", glm::value_ptr(component.Color));
+            ImGui::DragFloat("Intensity", &component.Intensity, 0.5f, 0.0f, 1000.0f);
+            ImGui::DragFloat("Range", &component.Range, 0.5f, 0.1f, 1000.0f);
+        });
+
+        DrawComponent<SpotLightComponent>("Spot Light", entity, [](auto& component)
+        {
+            ImGui::ColorEdit3("Color", glm::value_ptr(component.Color));
+            ImGui::DragFloat("Intensity", &component.Intensity, 0.5f, 0.0f, 1000.0f);
+            ImGui::DragFloat("Range", &component.Range, 0.5f, 0.1f, 1000.0f);
+            ImGui::DragFloat("Inner Angle", &component.InnerAngle, 0.5f, 0.0f, component.OuterAngle);
+            ImGui::DragFloat("Outer Angle", &component.OuterAngle, 0.5f, component.InnerAngle, 89.0f);
+        });
 
         DrawComponent<AnimatorComponent>("Animator", entity, [](auto& component)
         {

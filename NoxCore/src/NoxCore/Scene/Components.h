@@ -134,6 +134,37 @@ namespace Nox
         MaterialComponent(const glm::vec4 color) : BaseColorFactors{ color } {}
     };
     
+    struct DirectionalLightComponent
+    {
+        glm::vec3 Color{ 1.0f, 1.0f, 1.0f };
+        float Intensity = 1.0f;
+
+        DirectionalLightComponent() = default;
+        DirectionalLightComponent(const DirectionalLightComponent&) = default;
+    };
+
+    struct PointLightComponent
+    {
+        glm::vec3 Color{ 1.0f, 1.0f, 1.0f };
+        float Intensity = 5.0f;
+        float Range = 10.0f;
+
+        PointLightComponent() = default;
+        PointLightComponent(const PointLightComponent&) = default;
+    };
+
+    struct SpotLightComponent
+    {
+        glm::vec3 Color{ 1.0f, 1.0f, 1.0f };
+        float Intensity = 10.0f;
+        float Range = 15.0f;
+        float InnerAngle = 20.0f; // degrees
+        float OuterAngle = 35.0f; // degrees
+
+        SpotLightComponent() = default;
+        SpotLightComponent(const SpotLightComponent&) = default;
+    };
+    
     // Holds runtime animation state (tracks current time, playing animation, bone matrices)
     struct AnimatorComponent
     {
@@ -273,7 +304,7 @@ namespace Nox
 
     using AllComponents = 
         ComponentGroup<TransformComponent, WorldTransformComponent, RelationshipComponent, DirtyTransformComponent,
-        MeshComponent, MaterialComponent, AnimatorComponent,
+        MeshComponent, MaterialComponent, DirectionalLightComponent, PointLightComponent, SpotLightComponent, AnimatorComponent,
         SpriteRendererComponent,
             CircleRendererComponent, CameraComponent, ScriptComponent,
             /*NativeScriptComponent,*/ RigidBody2DComponent, BoxCollider2DComponent,

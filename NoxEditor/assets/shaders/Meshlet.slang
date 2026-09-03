@@ -395,46 +395,117 @@ FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform Pu
     }
     //n.y *= -1.0f;
     float3 v = normalize(ubo->cameraWorldPos.xyz - vertIn.worldPos);    // Vector from surface point to camera
-    float3 l = normalize(/* uboParams.lightDir.xyz */float3(0.739942, 0.642788, 0.198267));     // Vector from surface point to light
-    float3 h = normalize(l+v);                        // Half vector between both l and v
     float3 reflection = normalize(reflect(-v, n));
+    float NdotV = clamp(abs(dot(n, v)), 0.001, 1.0);
 
-    float NdotL = clamp(dot(n, l), 0.001, 1.0);
-	float NdotV = clamp(abs(dot(n, v)), 0.001, 1.0);
-	float NdotH = clamp(dot(n, h), 0.0, 1.0);
-	float LdotH = clamp(dot(l, h), 0.0, 1.0);
-	float VdotH = clamp(dot(v, h), 0.0, 1.0);
+    float3 directLighting = float3(0.0);
 
-    PBRInfo pbrInputs = PBRInfo(
-		NdotL,
-		NdotV,
-		NdotH,
-		LdotH,
-		VdotH,
-		perceptualRoughness,
-		metallic,
-		specularEnvironmentR0,
-		specularEnvironmentR90,
-		alphaRoughness,
-		diffuseColor,
-		specularColor
-	);
+    // Cas Buffer device adress to dynamic LightData array
+    LightData* lights = (LightData*)ubo->lightDataReference;
 
-    // Calculate the shading terms for the microfacet specular shading model
-    float3 F = specularReflection(pbrInputs);
-	float G = geometricOcclusion(pbrInputs);
-	float D = microfacetDistribution(pbrInputs);
+    for(uint i = 0; i < ubo->lightCount; i++)
+    {
+        LightData light = lights[i];
+        uint lightType = (uint)light.position.w;
 
-	const float3 u_LightColor = float3(1.0);
+        float3 l;
+        float attenuation = 1.0;
 
-    // Calculation of analytical lighting contribution
-	float3 diffuseContrib = (1.0 - F) * diffuse(pbrInputs);
-	float3 specContrib = F * G * D / (4.0 * NdotL * NdotV);
-	// Obtain final intensity as reflectance (BRDF) scaled by the energy of the light (cosine law)
-	float3 color = NdotL * u_LightColor * (diffuseContrib + specContrib);
+        if(lightType == 0) // Directional Light
+        {
+            l = normalize(-light.direction.xyz); // Vector from surface point to light
+        }
+        else // Point Light (1) or Spot Light (2)
+        {
+            float3 lightVec = light.position.xyz - vertIn.worldPos;
+            float distance = length(lightVec);
+            l = distance > 0.0001 ? lightVec / distance : float3(0.0, 1.0, 0.0);
+
+            float range = light.direction.w;
+            if (range > 0.0)
+            {
+                float dOverR = distance / range;
+
+                float window = max(1.0 -  pow(dOverR, 4.0), 0.0);
+
+                attenuation = window / (distance * distance);
+            }
+            else
+            {
+                attenuation = 1.0 / (distance * distance);
+            }
+
+            if(lightType == 2) // Spot Light Cone Attenuatuion
+            {
+                float cd = dot(normalize(light.direction.xyz), -l);
+                float lightAngleScale = light.spotParams.x;
+                float lightAngleOffset = light.spotParams.y;
+
+                float angularAttenuation = saturate(cd * lightAngleScale + lightAngleOffset);
+                angularAttenuation *= angularAttenuation;
+
+                attenuation *= angularAttenuation;
+            }
+        }
+
+        if(attenuation <= 0.0)
+        {
+            continue;
+        }
+
+        float3 h = normalize(l+v);                        // Half vector between both l and v
+
+        float NdotL = clamp(dot(n, l), 0.001, 1.0);
+        float NdotH = clamp(dot(n, h), 0.0, 1.0);
+	    float LdotH = clamp(dot(l, h), 0.0, 1.0);
+	    float VdotH = clamp(dot(v, h), 0.0, 1.0);
+
+        PBRInfo pbrInputs = PBRInfo(
+            NdotL,
+            NdotV,
+		    NdotH,
+		    LdotH,
+		    VdotH,
+            perceptualRoughness,
+		    metallic,
+		    specularEnvironmentR0,
+		    specularEnvironmentR90,
+		    alphaRoughness,
+		    diffuseColor,
+		    specularColor
+        );
+
+        // Calculate the shading terms for the microfacet specular shading model
+        float3 F = specularReflection(pbrInputs);
+	    float G = geometricOcclusion(pbrInputs);
+	    float D = microfacetDistribution(pbrInputs);
+
+        // Calculation of analytical lighting contribution
+	    float3 diffuseContrib = (1.0 - F) * diffuse(pbrInputs);
+	    float3 specContrib = F * G * D / (4.0 * NdotL * NdotV);
+
+        // Obtain final intensity as reflectance (BRDF) scaled by the energy of the light (cosine law)
+        float3 lightRadiance = light.color.rgb * light.color.w * attenuation;
+	    directLighting += NdotL * lightRadiance * (diffuseContrib + specContrib);
+    }
+
+    PBRInfo iblInputs = PBRInfo(
+            1.0,
+            NdotV,
+            1.0,
+            1.0,
+            1.0,
+            perceptualRoughness,
+            metallic,
+            specularEnvironmentR0,
+            specularEnvironmentR90,
+            alphaRoughness,
+            diffuseColor,
+            specularColor
+        );
 
     // Calculate lighting contribution from image based lighting source (IBL)
-	color += getIBLContribution(ubo, pbrInputs, n, reflection);
+	float3 color = directLighting + getIBLContribution(ubo, iblInputs, n, reflection);
 
     const float u_OcclusionStrength = 1.0f;
 	// Apply optional PBR terms for additional (optional) shading

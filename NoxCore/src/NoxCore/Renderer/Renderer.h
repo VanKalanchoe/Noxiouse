@@ -148,6 +148,10 @@ namespace Nox
         void DrawStaticMesh(const glm::mat4& transform, Ref<StaticMesh> staticMesh, const MaterialComponent& material, int entityID);
         void SubmitMesh(const glm::mat4& transform, MeshComponent& src, MaterialComponent& srcMat, int entityID, const std::vector<glm::mat4>* boneTransforms = nullptr);
         
+        void SubmitLight(const glm::mat4& transform, const DirectionalLightComponent& light);
+        void SubmitLight(const glm::mat4& transform, const PointLightComponent& light);
+        void SubmitLight(const glm::mat4& transform, const SpotLightComponent& light);
+        
         Texture2D* GetSceneResource() const { return m_sceneResource.get(); }
         
         void setVSync(bool enabled);
@@ -217,6 +221,8 @@ namespace Nox
         void processDeferredMeshFrees();
         std::vector<char> readFile(const std::string& filename);
         void createPageTableBuffers(uint64_t elementCapacity);
+        void createLightBuffer(uint64_t bufferSize);
+        void updateLightBuffer(uint32_t currentImage);
         
     private:
         inline static Renderer* s_Instance = nullptr;
@@ -331,5 +337,11 @@ namespace Nox
         Ref<Texture2D> m_prefilteredEnvMap;
         uint32_t prefilterCubeMipLevels = 0;
         Ref<Texture2D> m_brdfLUT;
+        
+        // Lighting
+        std::vector<shaderio::LightData> m_lightBufferObjects;
+        std::vector<std::unique_ptr<NRI::Buffer>> m_lightBuffers;
+        std::vector<void*> m_lightBuffersMapped;
+        uint64_t m_LightBufferCapacity = 0;
     };
 }

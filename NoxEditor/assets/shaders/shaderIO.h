@@ -127,6 +127,10 @@ struct UniformBufferObject
     float exposure;
 	float gamma;
     float scaleIBLAmbient;
+
+    // Lighting
+    uint64_t lightDataReference;
+    uint32_t lightCount;
 };
 
 struct Vertex
@@ -192,6 +196,21 @@ struct InstanceData
 
     // Editor-only
     int entityID;
+};
+
+enum LightType : uint32_t
+{
+    Directional = 0,
+    Point = 1,
+    Spot = 2
+};
+
+struct LightData
+{
+    vec4 position;     // xyz: World Position, w: LightType (0 = Directional, 1 = Point, 2 = Spot)
+    vec4 direction;    // xyz: Normalized Direction, w: Range (0.0 = infinite)
+    vec4 color;        // rgb: Color, w: Intensity
+    vec4 spotParams;   // x: cos(innerAngle), y: cos(outerAngle), z: 0.0, w: 0.0
 };
 
 struct PushConstantMeshlets
