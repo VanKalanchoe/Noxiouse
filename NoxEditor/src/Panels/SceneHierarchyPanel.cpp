@@ -298,14 +298,28 @@ namespace Nox
         // at the end
         if (entityDeleted)
         {
-            if (m_SelectionAnchor == entity)
-                m_SelectionAnchor = {};
-
-            m_Context->DestroyEntity(entity);
-            auto it = std::find(m_SelectionContexts.begin(), m_SelectionContexts.end(), entity);
-            if (it != m_SelectionContexts.end())
+            // If the right-clicked entity is part of the selection, delete all selected entities
+            if (IsSelected(entity))
             {
-                m_SelectionContexts.erase(it);
+                auto toDelete = m_SelectionContexts;
+                ClearSelection();
+
+                for (auto e : toDelete)
+                {
+                    if (e)
+                        m_Context->DestroyEntity(e);
+                }
+            }
+            else
+            {
+                if (m_SelectionAnchor == entity)
+                    m_SelectionAnchor = {};
+
+                m_Context->DestroyEntity(entity);
+
+                auto it = std::find(m_SelectionContexts.begin(), m_SelectionContexts.end(), entity);
+                if (it != m_SelectionContexts.end())
+                    m_SelectionContexts.erase(it);
             }
         }
     }
