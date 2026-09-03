@@ -260,7 +260,7 @@ struct FSOutput
 };
 
 [shader("fragment")]
-FSOutput fragMain(VSOutput vertIn, uniform PushConstantMeshlets pushConstant)
+FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform PushConstantMeshlets pushConstant)
 {
     FSOutput output;
 
@@ -388,6 +388,11 @@ FSOutput fragMain(VSOutput vertIn, uniform PushConstantMeshlets pushConstant)
 	float3 specularEnvironmentR90 = float3(1.0, 1.0, 1.0) * reflectance90;
 
     float3 n = (instance.normalTextureIndex != 0xFFFFFFFF) ? getNormal(ubo, instance, vertIn, sampLinearHandle) : vertIn.normal;
+    // glTF specification: back-face MUST have its normals reversed before lighting is evaluated
+    if (instance.doubleSided != 0 && !isFrontFace)
+    {
+        n = -n;
+    }
     //n.y *= -1.0f;
     float3 v = normalize(ubo->cameraWorldPos.xyz - vertIn.worldPos);    // Vector from surface point to camera
     float3 l = normalize(/* uboParams.lightDir.xyz */float3(0.739942, 0.642788, 0.198267));     // Vector from surface point to light

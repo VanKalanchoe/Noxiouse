@@ -3,6 +3,30 @@ AssetRegistry:
     FilePath: Scenes/3D-Scene.nox
     SourceFilePath: Scenes/3D-Scene.nox
     Type: AssetType::Scene
+  - Handle: 544510991256075411
+    FilePath: models/fox/Texture.png
+    SourceFilePath: models/fox/Texture.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 1960315772571738636
+    FilePath: models/dancing_stormtrooper/dancing_stormtrooper_mixamo.com.nanim
+    SourceFilePath: models/dancing_stormtrooper/dancing_stormtrooper_mixamo.com.nanim
+    Type: AssetType::AnimationSequence
+  - Handle: 3483252635467661256
+    FilePath: models/fox/Fox_Walk.nanim
+    SourceFilePath: models/fox/Fox_Walk.nanim
+    Type: AssetType::AnimationSequence
+  - Handle: 4169800304157829132
+    FilePath: models/dancing_stormtrooper/textures/dancing_stormtrooper_tex_0.png
+    SourceFilePath: models/dancing_stormtrooper/textures/dancing_stormtrooper_tex_0.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
   - Handle: 4675048049564595723
     FilePath: models/TransmissionOrderTest/textures/TransmissionOrderTest_tex_1.png
     SourceFilePath: models/TransmissionOrderTest/textures/TransmissionOrderTest_tex_1.png
@@ -11,6 +35,14 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 6173583651399272451
+    FilePath: models/fox/Fox_Survey.nanim
+    SourceFilePath: models/fox/Fox_Survey.nanim
+    Type: AssetType::AnimationSequence
+  - Handle: 7251285350954949489
+    FilePath: models/fox/Fox_Run.nanim
+    SourceFilePath: models/fox/Fox_Run.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 10417000002135003264
     FilePath: models/TransmissionOrderTest/textures/TransmissionOrderTest_tex_0.png
     SourceFilePath: models/TransmissionOrderTest/textures/TransmissionOrderTest_tex_0.png
@@ -27,6 +59,22 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 11940857382577104504
+    FilePath: models/fox/Fox.nmesh
+    SourceFilePath: models/fox/Fox.gltf
+    Type: AssetType::Mesh
+  - Handle: 12307358999426552267
+    FilePath: models/fox/Fox.nskel
+    SourceFilePath: models/fox/Fox.nskel
+    Type: AssetType::Skeleton
+  - Handle: 14132583861332063530
+    FilePath: models/dancing_stormtrooper/dancing_stormtrooper.nmesh
+    SourceFilePath: models/dancing_stormtrooper/dancing_stormtrooper.glb
+    Type: AssetType::Mesh
+  - Handle: 16565947936674256268
+    FilePath: models/dancing_stormtrooper/dancing_stormtrooper.nskel
+    SourceFilePath: models/dancing_stormtrooper/dancing_stormtrooper.nskel
+    Type: AssetType::Skeleton
   - Handle: 17688825175305904184
     FilePath: models/TransmissionOrderTest/TransmissionOrderTest.nsmesh
     SourceFilePath: models/TransmissionOrderTest/TransmissionOrderTest.glb
