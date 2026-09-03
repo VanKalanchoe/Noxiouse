@@ -359,6 +359,46 @@ namespace Nox
 
             out << YAML::EndMap; // MaterialComponent
         }
+        
+        if (entity.HasComponent<DirectionalLightComponent>())
+        {
+            out << YAML::Key << "DirectionalLightComponent";
+            out << YAML::BeginMap;
+
+            auto& dlc = entity.GetComponent<DirectionalLightComponent>();
+            out << YAML::Key << "Color" << YAML::Value << dlc.Color;
+            out << YAML::Key << "Intensity" << YAML::Value << dlc.Intensity;
+
+            out << YAML::EndMap;
+        }
+
+        if (entity.HasComponent<PointLightComponent>())
+        {
+            out << YAML::Key << "PointLightComponent";
+            out << YAML::BeginMap;
+
+            auto& plc = entity.GetComponent<PointLightComponent>();
+            out << YAML::Key << "Color" << YAML::Value << plc.Color;
+            out << YAML::Key << "Intensity" << YAML::Value << plc.Intensity;
+            out << YAML::Key << "Range" << YAML::Value << plc.Range;
+
+            out << YAML::EndMap;
+        }
+
+        if (entity.HasComponent<SpotLightComponent>())
+        {
+            out << YAML::Key << "SpotLightComponent";
+            out << YAML::BeginMap;
+
+            auto& slc = entity.GetComponent<SpotLightComponent>();
+            out << YAML::Key << "Color" << YAML::Value << slc.Color;
+            out << YAML::Key << "Intensity" << YAML::Value << slc.Intensity;
+            out << YAML::Key << "Range" << YAML::Value << slc.Range;
+            out << YAML::Key << "InnerAngle" << YAML::Value << slc.InnerAngle;
+            out << YAML::Key << "OuterAngle" << YAML::Value << slc.OuterAngle;
+
+            out << YAML::EndMap;
+        }
 
         if (entity.HasComponent<AnimatorComponent>())
         {
@@ -832,6 +872,34 @@ namespace Nox
                         mc.UnlitFlags.clear();
                         for (auto node : unlitSeq) mc.UnlitFlags.push_back(node.as<bool>());
                     }
+                }
+                
+                auto directionalLightComponent = entity["DirectionalLightComponent"];
+                if (directionalLightComponent)
+                {
+                    auto& dlc = deserializedEntity.AddComponent<DirectionalLightComponent>();
+                    dlc.Color = directionalLightComponent["Color"].as<glm::vec3>();
+                    dlc.Intensity = directionalLightComponent["Intensity"].as<float>();
+                }
+
+                auto pointLightComponent = entity["PointLightComponent"];
+                if (pointLightComponent)
+                {
+                    auto& plc = deserializedEntity.AddComponent<PointLightComponent>();
+                    plc.Color = pointLightComponent["Color"].as<glm::vec3>();
+                    plc.Intensity = pointLightComponent["Intensity"].as<float>();
+                    plc.Range = pointLightComponent["Range"].as<float>();
+                }
+
+                auto spotLightComponent = entity["SpotLightComponent"];
+                if (spotLightComponent)
+                {
+                    auto& slc = deserializedEntity.AddComponent<SpotLightComponent>();
+                    slc.Color = spotLightComponent["Color"].as<glm::vec3>();
+                    slc.Intensity = spotLightComponent["Intensity"].as<float>();
+                    slc.Range = spotLightComponent["Range"].as<float>();
+                    slc.InnerAngle = spotLightComponent["InnerAngle"].as<float>();
+                    slc.OuterAngle = spotLightComponent["OuterAngle"].as<float>();
                 }
 
                 auto animatorComponent = entity["AnimatorComponent"];

@@ -29,6 +29,9 @@ namespace Nox
         const std::vector<MaterialData>& GetMaterials() const { return m_Materials; }
         const MaterialData& GetMaterial(size_t index) const { return m_Materials[index]; }
         
+        // Lights
+        const std::vector<LightNodeData>& GetLights() const { return m_Lights; }
+        
         static AssetType GetStaticType() { return AssetType::StaticMesh; }
         virtual AssetType GetAssetType() const { return GetStaticType(); }
         
@@ -36,6 +39,7 @@ namespace Nox
         friend class MeshImporter;
         std::vector<MeshHandle> m_SubMeshes;
         std::vector<MaterialData> m_Materials;
+        std::vector<LightNodeData> m_Lights;
         std::vector<std::string> m_SubmeshNames;
     };
     
@@ -62,6 +66,9 @@ namespace Nox
         const std::vector<MaterialData>& GetMaterials() const { return m_Materials; }
         const MaterialData& GetMaterial(size_t index) const { return m_Materials[index]; }
         
+        // Lights
+        const std::vector<LightNodeData>& GetLights() const { return m_Lights; }
+        
         static AssetType GetStaticType() { return AssetType::Mesh; }
         virtual AssetType GetAssetType() const { return GetStaticType(); }
         
@@ -69,6 +76,7 @@ namespace Nox
         friend class MeshImporter;
         std::vector<MeshHandle> m_SubMeshes;
         std::vector<MaterialData> m_Materials;
+        std::vector<LightNodeData> m_Lights;
         std::vector<std::string> m_SubmeshNames;
     };
 }

@@ -1807,9 +1807,9 @@ namespace Nox
         uniformData.prefilteredMapIndex = m_prefilteredEnvMap->GetDescriptorIndexSlot();
         uniformData.prefilteredCubeMipLevels = static_cast<float>(prefilterCubeMipLevels);
         uniformData.brdfLutIndex = m_brdfLUT->GetDescriptorIndexSlot();
-        uniformData.exposure = 4.5f; // slider in the future in imgui
+        uniformData.exposure = 1.0f; // slider in the future in imgui
         uniformData.gamma = 2.2f; // slider in the future in imgui
-        uniformData.scaleIBLAmbient = 0.0f; // slider in the future in imgui
+        uniformData.scaleIBLAmbient = 1.0f; // slider in the future in imgui
 
         memcpy(m_uniformBuffersMapped[currentImage], &uniformData, sizeof(uniformData));
     }

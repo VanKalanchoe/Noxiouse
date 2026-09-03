@@ -1,105 +1,25 @@
 AssetRegistry:
-  - Handle: 202591723975913953
-    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_2.png
-    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_2.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: SRGBA8
-      GenerateMips: true
-      Flip: false
   - Handle: 284400685509200133
     FilePath: Scenes/3D-Scene.nox
     SourceFilePath: Scenes/3D-Scene.nox
     Type: AssetType::Scene
-  - Handle: 544510991256075411
-    FilePath: models/fox/Texture.png
-    SourceFilePath: models/fox/Texture.png
+  - Handle: 366340525722099673
+    FilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_4.png
+    SourceFilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_4.png
     Type: AssetType::Texture2D
     TextureSpec:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
-  - Handle: 1960315772571738636
-    FilePath: models/dancing_stormtrooper/dancing_stormtrooper_mixamo.com.nanim
-    SourceFilePath: models/dancing_stormtrooper/dancing_stormtrooper_mixamo.com.nanim
-    Type: AssetType::AnimationSequence
-  - Handle: 3483252635467661256
-    FilePath: models/fox/Fox_Walk.nanim
-    SourceFilePath: models/fox/Fox_Walk.nanim
-    Type: AssetType::AnimationSequence
-  - Handle: 3524248266384499960
-    FilePath: models/Box/Box.nmesh
-    SourceFilePath: models/Box/Box.glb
-    Type: AssetType::Mesh
-  - Handle: 3778257443097452568
-    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_3.png
-    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_3.png
+  - Handle: 1871362080354860757
+    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_1.png
+    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_1.png
     Type: AssetType::Texture2D
     TextureSpec:
       Format: RGBA8
       GenerateMips: true
       Flip: false
-  - Handle: 4169800304157829132
-    FilePath: models/dancing_stormtrooper/textures/dancing_stormtrooper_tex_0.png
-    SourceFilePath: models/dancing_stormtrooper/textures/dancing_stormtrooper_tex_0.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: SRGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 4675048049564595723
-    FilePath: models/TransmissionOrderTest/textures/TransmissionOrderTest_tex_1.png
-    SourceFilePath: models/TransmissionOrderTest/textures/TransmissionOrderTest_tex_1.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: SRGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 6173583651399272451
-    FilePath: models/fox/Fox_Survey.nanim
-    SourceFilePath: models/fox/Fox_Survey.nanim
-    Type: AssetType::AnimationSequence
-  - Handle: 7251285350954949489
-    FilePath: models/fox/Fox_Run.nanim
-    SourceFilePath: models/fox/Fox_Run.nanim
-    Type: AssetType::AnimationSequence
-  - Handle: 7467471520470579485
-    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_0.png
-    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_0.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: SRGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 9366737451771377502
-    FilePath: models/DamagedHelmet/DamagedHelmet.nmesh
-    SourceFilePath: models/DamagedHelmet/DamagedHelmet.gltf
-    Type: AssetType::Mesh
-  - Handle: 10417000002135003264
-    FilePath: models/TransmissionOrderTest/textures/TransmissionOrderTest_tex_0.png
-    SourceFilePath: models/TransmissionOrderTest/textures/TransmissionOrderTest_tex_0.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: SRGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 10678039247694374754
-    FilePath: models/TransmissionOrderTest/textures/TransmissionOrderTest_tex_2.png
-    SourceFilePath: models/TransmissionOrderTest/textures/TransmissionOrderTest_tex_2.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: SRGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 11940857382577104504
-    FilePath: models/fox/Fox.nmesh
-    SourceFilePath: models/fox/Fox.gltf
-    Type: AssetType::Mesh
-  - Handle: 12307358999426552267
-    FilePath: models/fox/Fox.nskel
-    SourceFilePath: models/fox/Fox.nskel
-    Type: AssetType::Skeleton
-  - Handle: 12751788300075542500
+  - Handle: 2093462898057618317
     FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_4.png
     SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_4.png
     Type: AssetType::Texture2D
@@ -107,23 +27,79 @@ AssetRegistry:
       Format: RGBA8
       GenerateMips: true
       Flip: false
-  - Handle: 14132583861332063530
-    FilePath: models/dancing_stormtrooper/dancing_stormtrooper.nmesh
-    SourceFilePath: models/dancing_stormtrooper/dancing_stormtrooper.glb
-    Type: AssetType::Mesh
-  - Handle: 16565947936674256268
-    FilePath: models/dancing_stormtrooper/dancing_stormtrooper.nskel
-    SourceFilePath: models/dancing_stormtrooper/dancing_stormtrooper.nskel
-    Type: AssetType::Skeleton
-  - Handle: 17688825175305904184
-    FilePath: models/TransmissionOrderTest/TransmissionOrderTest.nsmesh
-    SourceFilePath: models/TransmissionOrderTest/TransmissionOrderTest.glb
-    Type: AssetType::StaticMesh
-  - Handle: 18061909308823890755
-    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_1.png
-    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_1.png
+  - Handle: 2148842802858138593
+    FilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_3.jpg
+    SourceFilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_3.jpg
     Type: AssetType::Texture2D
     TextureSpec:
       Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 3429749825708263038
+    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_2.png
+    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_2.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 4293224151087460058
+    FilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_1.png
+    SourceFilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_1.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 4545884080309558990
+    FilePath: models/DamagedHelmet/DamagedHelmet.nmesh
+    SourceFilePath: models/DamagedHelmet/DamagedHelmet.gltf
+    Type: AssetType::Mesh
+  - Handle: 4606592353943161312
+    FilePath: models/Box/Box.nmesh
+    SourceFilePath: models/Box/Box.nmesh
+    Type: AssetType::Mesh
+  - Handle: 5363457423442908178
+    FilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_5.png
+    SourceFilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_5.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 6759581301732888925
+    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_0.png
+    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_0.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 7943372192880300104
+    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_3.png
+    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_3.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 11421697598724601720
+    FilePath: models/LightsPunctualLamp/LightsPunctualLamp.nmesh
+    SourceFilePath: models/LightsPunctualLamp/LightsPunctualLamp.glb
+    Type: AssetType::Mesh
+  - Handle: 14432045906638632156
+    FilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_0.jpg
+    SourceFilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_0.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 16209643937057692729
+    FilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_2.jpg
+    SourceFilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_2.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
       GenerateMips: true
       Flip: false

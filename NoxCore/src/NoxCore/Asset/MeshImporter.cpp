@@ -26,11 +26,12 @@ namespace Nox
 
         std::vector<MeshData> meshDataList;
         std::vector<MaterialData> materialDataList;
+        std::vector<LightNodeData> lightDataList;
 
         if (std::filesystem::exists(cookedPath))
         {
             NOX_CORE_INFO("Loading cooked dynamic mesh from {}", cookedPath.string());
-            bool success = MeshSerializer::DeserializeMesh(cookedPath, meshDataList, materialDataList);
+            bool success = MeshSerializer::DeserializeMesh(cookedPath, meshDataList, materialDataList, lightDataList);
             if (!success) NOX_CORE_ASSERT(false, "MeshImporter::ImportMesh - Failed to deserialize .nmesh file: {}", cookedPath.string());
         }
         else
@@ -41,7 +42,7 @@ namespace Nox
             Skeleton extractedSkeleton;
             std::vector<Ref<AnimationSequence>> extractedAnimations;
 
-            meshDataList = ParseGltfToMeshData(sourcePath, materialDataList, extractedSkeleton, extractedAnimations);
+            meshDataList = ParseGltfToMeshData(sourcePath, materialDataList, extractedSkeleton, extractedAnimations, lightDataList);
             if (meshDataList.empty())
             {
                 NOX_CORE_WARN("MeshImporter::ImportMesh - Failed to load or empty mesh at source path: {}", sourcePath.string());
@@ -82,6 +83,7 @@ namespace Nox
             meshAsset->m_SubmeshNames.push_back(data.Name);
         }
         meshAsset->m_Materials = std::move(materialDataList);
+        meshAsset->m_Lights = std::move(lightDataList);
 
         meshDataList.clear();
         materialDataList.clear();
@@ -98,11 +100,12 @@ namespace Nox
 
         std::vector<MeshData> meshDataList;
         std::vector<MaterialData> materialDataList;
+        std::vector<LightNodeData> lightDataList;
 
         if (std::filesystem::exists(cookedPath))
         {
             NOX_CORE_INFO("Loading cooked static mesh from {}", cookedPath.string());
-            bool success = MeshSerializer::DeserializeStaticMesh(cookedPath, meshDataList, materialDataList);
+            bool success = MeshSerializer::DeserializeStaticMesh(cookedPath, meshDataList, materialDataList, lightDataList);
             if (!success)
             {
                 NOX_CORE_ASSERT(false, "MeshImporter::ImportStaticMesh - Failed to deserialize .nsmesh file: {}", cookedPath.string());
@@ -116,7 +119,7 @@ namespace Nox
             Skeleton dummySkeleton;
             std::vector<Ref<AnimationSequence>> dummyAnimations;
 
-            meshDataList = ParseGltfToMeshData(sourcePath, materialDataList, dummySkeleton, dummyAnimations);
+            meshDataList = ParseGltfToMeshData(sourcePath, materialDataList, dummySkeleton, dummyAnimations, lightDataList);
             if (meshDataList.empty())
             {
                 NOX_CORE_WARN("No Meshes found in source file: {}", sourcePath.string());
@@ -137,7 +140,7 @@ namespace Nox
             staticMeshAsset->m_SubmeshNames.push_back(data.Name);
         }
         staticMeshAsset->m_Materials = std::move(materialDataList);
-
+        staticMeshAsset->m_Lights = std::move(lightDataList);
 
         meshDataList.clear();
         materialDataList.clear();
@@ -682,12 +685,97 @@ namespace Nox
         return 1.0f; // Default fallback
     };
     
+    static void ParseLightsFromGltf(const tg3_model& model, std::vector<LightNodeData>& outLights)
+        {
+            outLights.clear();
+            for (uint32_t i = 0; i < model.nodes_count; i++)
+            {
+                const tg3_node& node = model.nodes[i];
+                if (node.light < 0 || node.light >= static_cast<int32_t>(model.lights_count))
+                    continue;
+
+                const tg3_light& gltfLight = model.lights[node.light];
+                LightNodeData l{};
+
+                if (node.name.data && node.name.len > 0)
+                    l.Name = std::string(node.name.data, node.name.len);
+                else if (gltfLight.name.data && gltfLight.name.len > 0)
+                    l.Name = std::string(gltfLight.name.data, gltfLight.name.len);
+                else
+                    l.Name = "Light_" + std::to_string(node.light);
+
+                l.Color = glm::vec3(
+                    static_cast<float>(gltfLight.color[0]),
+                    static_cast<float>(gltfLight.color[1]),
+                    static_cast<float>(gltfLight.color[2])
+                );
+
+                l.Intensity = static_cast<float>(gltfLight.intensity);
+                l.Range = static_cast<float>(gltfLight.range);
+
+                std::string_view typeStr = (gltfLight.type.data && gltfLight.type.len > 0)
+                    ? std::string_view(gltfLight.type.data, gltfLight.type.len)
+                    : std::string_view("point");
+
+                if (typeStr == "directional")
+                {
+                    l.Type = GltfLightType::Directional;
+                }
+                else if (typeStr == "spot")
+                {
+                    l.Type = GltfLightType::Spot;
+                    l.InnerConeAngle = glm::degrees(static_cast<float>(gltfLight.spot.inner_cone_angle));
+                    l.OuterConeAngle = glm::degrees(static_cast<float>(gltfLight.spot.outer_cone_angle));
+                    if (l.Range <= 0.0f) l.Range = 10.0f;
+                }
+                else // "point"
+                {
+                    l.Type = GltfLightType::Point;
+                    if (l.Range <= 0.0f) l.Range = 10.0f;
+                }
+
+                // Extract Node Transform
+                if (node.has_matrix)
+                {
+                    glm::mat4 m = glm::make_mat4(node.matrix);
+                    glm::vec3 skew;
+                    glm::vec4 perspective;
+                    glm::decompose(m, l.Scale, l.Rotation, l.Translation, skew, perspective);
+                }
+                else
+                {
+                    l.Translation = glm::vec3(
+                        static_cast<float>(node.translation[0]),
+                        static_cast<float>(node.translation[1]),
+                        static_cast<float>(node.translation[2])
+                    );
+
+                    // Note: GLM quat is (w, x, y, z), glTF rotation array is [x, y, z, w]
+                    l.Rotation = glm::quat(
+                        static_cast<float>(node.rotation[3]),
+                        static_cast<float>(node.rotation[0]),
+                        static_cast<float>(node.rotation[1]),
+                        static_cast<float>(node.rotation[2])
+                    );
+
+                    l.Scale = glm::vec3(
+                        static_cast<float>(node.scale[0]),
+                        static_cast<float>(node.scale[1]),
+                        static_cast<float>(node.scale[2])
+                    );
+                }
+
+                outLights.push_back(l);
+            }
+        }
+    
     std::vector<MeshData> MeshImporter::ParseGltfToMeshData
     (
         const std::filesystem::path& path,
         std::vector<MaterialData>& outMaterials,
         Skeleton& outSkeleton,
-        std::vector<Ref<AnimationSequence>>& outAnimations
+        std::vector<Ref<AnimationSequence>>& outAnimations,
+        std::vector<LightNodeData>& outLights
     )
     {
         /*
@@ -718,6 +806,7 @@ namespace Nox
 
         ParseSkeletonFromGltf(model, outSkeleton);
         ParseAnimationsFromGltf(model, outSkeleton, outAnimations);
+        ParseLightsFromGltf(model, outLights);
 
          uint32_t totalInstances = (model.nodes_count > 0) ? model.nodes_count : model.meshes_count;
 

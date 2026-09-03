@@ -17,6 +17,10 @@ namespace Nox
         std::vector<MeshHandle> m_SubMeshes;
         std::vector<std::string> m_SubmeshNames;
         std::vector<MaterialData> m_Materials;
+        
+        // Lights
+        std::vector<LightNodeData> m_Lights;
+        const std::vector<LightNodeData>& GetLights() const { return m_Lights; }
 
         // References to Skeletal & Animation Assets
         Ref<Skeleton> SkeletonAsset;

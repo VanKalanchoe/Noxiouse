@@ -413,7 +413,7 @@ FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform Pu
 
         if(lightType == 0) // Directional Light
         {
-            l = normalize(-light.direction.xyz); // Vector from surface point to light
+            l = normalize(light.direction.xyz); // Vector from surface point to light
         }
         else // Point Light (1) or Spot Light (2)
         {

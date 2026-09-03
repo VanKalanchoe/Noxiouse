@@ -32,8 +32,9 @@ namespace Nox
 
         std::vector<MeshData> meshDataList;
         std::vector<MaterialData> materialDataList;
+        std::vector<LightNodeData> lightDataList;
 
-        bool success = MeshSerializer::DeserializeMesh(path, meshDataList, materialDataList);
+        bool success = MeshSerializer::DeserializeMesh(path, meshDataList, materialDataList, lightDataList);
         if (!success)
         {
             NOX_CORE_ASSERT(false, "SkeletalMeshImporter::LoadSkeletalMesh - Failed to deserialize skeletal mesh file: {}", path.string());
@@ -49,6 +50,7 @@ namespace Nox
             skeletalMeshAsset->m_SubmeshNames.push_back(data.Name);
         }
         skeletalMeshAsset->m_Materials = std::move(materialDataList);
+        skeletalMeshAsset->m_Lights = std::move(lightDataList);
 
         return skeletalMeshAsset;
     }

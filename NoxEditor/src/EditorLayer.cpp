@@ -541,6 +541,45 @@ namespace Nox
                             auto& animatorComp = entity.AddComponent<AnimatorComponent>();
                             animatorComp.Skeleton = getOrImportSkeletonHandle(relSkelPath);
                         };
+                        
+                        // Helper lambda to spawn lights from glTF KHR_lights_punctual
+                            auto spawnGltfLights = [&](Entity parent, const std::vector<LightNodeData>& lights)
+                            {
+                                for (const auto& l : lights)
+                                {
+                                    Entity lightEntity = m_ActiveScene->CreateEntity(l.Name);
+                                    if (parent)
+                                        lightEntity.SetParent(parent);
+
+                                    auto& tc = lightEntity.GetComponent<TransformComponent>();
+                                    tc.Translation = l.Translation;
+                                    tc.Rotation = glm::eulerAngles(l.Rotation);
+                                    tc.Scale = l.Scale;
+
+                                    if (l.Type == GltfLightType::Directional)
+                                    {
+                                        auto& dlc = lightEntity.AddComponent<DirectionalLightComponent>();
+                                        dlc.Color = l.Color;
+                                        dlc.Intensity = l.Intensity;
+                                    }
+                                    else if (l.Type == GltfLightType::Point)
+                                    {
+                                        auto& plc = lightEntity.AddComponent<PointLightComponent>();
+                                        plc.Color = l.Color;
+                                        plc.Intensity = l.Intensity;
+                                        plc.Range = l.Range;
+                                    }
+                                    else if (l.Type == GltfLightType::Spot)
+                                    {
+                                        auto& slc = lightEntity.AddComponent<SpotLightComponent>();
+                                        slc.Color = l.Color;
+                                        slc.Intensity = l.Intensity;
+                                        slc.Range = l.Range;
+                                        slc.InnerAngle = l.InnerConeAngle;
+                                        slc.OuterAngle = l.OuterConeAngle;
+                                    }
+                                }
+                            };
 
                         // Check if it's a dynamic mesh asset with multiple submeshes
                         if (type == AssetType::Mesh || type == AssetType::MeshSource)
@@ -600,6 +639,9 @@ namespace Nox
                                     // Auto-attach AnimatorComponent if skeleton exists
                                     tryAttachAnimator(childEntity);
                                 }
+                                
+                                if (meshAsset)
+                                    spawnGltfLights(parentEntity, meshAsset->GetLights());
 
                                 m_SceneHierarchyPanel.SetSelectedEntity(parentEntity);
                             }
@@ -653,6 +695,9 @@ namespace Nox
                                 }
 
                                 tryAttachAnimator(newEntity);
+                                
+                                if (meshAsset)
+                                    spawnGltfLights(newEntity, meshAsset->GetLights());
 
                                 m_SceneHierarchyPanel.SetSelectedEntity(newEntity);
                             }
@@ -726,6 +771,9 @@ namespace Nox
                                     matComp.UnlitFlags[i] = matData.Unlit;
                                 }
                             }
+                            
+                            if (staticMeshAsset)
+                                spawnGltfLights(newEntity, staticMeshAsset->GetLights());
 
                             m_SceneHierarchyPanel.SetSelectedEntity(newEntity);
                         }

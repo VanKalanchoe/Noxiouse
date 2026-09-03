@@ -81,6 +81,28 @@ namespace Nox
         bool Unlit = false;
     };
     
+    enum class GltfLightType : uint32_t
+    {
+        Directional = 0,
+        Point = 1,
+        Spot = 2
+    };
+
+    struct LightNodeData
+    {
+        std::string Name;
+        GltfLightType Type = GltfLightType::Point;
+        glm::vec3 Color = glm::vec3(1.0f);
+        float Intensity = 1.0f;
+        float Range = 10.0f;
+        float InnerConeAngle = 0.0f;  // in degrees
+        float OuterConeAngle = 45.0f; // in degrees
+
+        glm::vec3 Translation = glm::vec3(0.0f);
+        glm::quat Rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+        glm::vec3 Scale = glm::vec3(1.0f);
+    };
+    
     struct MeshData
     {
         std::string Name;
