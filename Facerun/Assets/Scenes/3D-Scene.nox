@@ -1,211 +1,14 @@
 Scene: Untitled
 Entities:
-  - Entity: 3826753227802113667
+  - Entity: 8976984150806981824
     TagComponent:
-      Tag: Point.004_Orientation
-    TransformComponent:
-      Translation: [0.29202104, 1.0323999, 1.558916]
-      Rotation: [-1.5707964, 0, 0]
-      Scale: [1, 0.99999994, 0.99999994]
-    RelationshipComponent:
-      Parent: 9904954959088807629
-      Children:
-        []
-    PointLightComponent:
-      Color: [1, 0.6278365, 0.5012404]
-      Intensity: 180
-      Range: 10
-  - Entity: 8252998068335011219
-    TagComponent:
-      Tag: Point.003_Orientation
-    TransformComponent:
-      Translation: [0.044289, 0.25436437, -1.2090324]
-      Rotation: [-1.5707964, 0, 0]
-      Scale: [1, 0.99999994, 0.99999994]
-    RelationshipComponent:
-      Parent: 9904954959088807629
-      Children:
-        []
-    PointLightComponent:
-      Color: [0.2122308, 0.590619, 0.55834055]
-      Intensity: 80
-      Range: 10
-  - Entity: 9613236448047520515
-    TagComponent:
-      Tag: Point.001_Orientation
-    TransformComponent:
-      Translation: [0.13761821, 2.0669837, -1.1789864]
-      Rotation: [-1.5707964, 0, 0]
-      Scale: [1, 0.99999994, 0.99999994]
-    RelationshipComponent:
-      Parent: 9904954959088807629
-      Children:
-        []
-    PointLightComponent:
-      Color: [0.2122308, 0.590619, 0.55834055]
-      Intensity: 80
-      Range: 10
-  - Entity: 12974149416069425617
-    TagComponent:
-      Tag: Point.002_Orientation
-    TransformComponent:
-      Translation: [0.17545623, -0.7642199, -0.0057040825]
-      Rotation: [-1.5707964, 0, 0]
-      Scale: [1, 0.99999994, 0.99999994]
-    RelationshipComponent:
-      Parent: 9904954959088807629
-      Children:
-        []
-    PointLightComponent:
-      Color: [1, 1, 1]
-      Intensity: 1.5
-      Range: 10
-  - Entity: 9064174751645972374
-    TagComponent:
-      Tag: Point_Orientation
-    TransformComponent:
-      Translation: [0.046223555, 0.90779734, 0.0066966293]
-      Rotation: [-1.5707964, 0, 0]
-      Scale: [1, 0.99999994, 0.99999994]
-    RelationshipComponent:
-      Parent: 9904954959088807629
-      Children:
-        []
-    PointLightComponent:
-      Color: [1, 0.631875, 0.23909976]
-      Intensity: 15
-      Range: 10
-  - Entity: 9740053006290550979
-    TagComponent:
-      Tag: Instance_2
+      Tag: DamagedHelmet
     TransformComponent:
       Translation: [0, 0, 0]
-      Rotation: [0, -0, 0]
+      Rotation: [0, 0, 0]
       Scale: [1, 1, 1]
-    RelationshipComponent:
-      Parent: 9904954959088807629
-      Children:
-        []
     MeshComponent:
-      MeshHandle: 11421697598724601720
-      SubmeshIndex: 2
-    MaterialComponent:
-      Workflows:
-        - 0
-      DiffuseFactors:
-        - [1, 1, 1, 1]
-      SpecularFactors:
-        - [1, 1, 1, 1]
-      BaseColorFactor:
-        - [1, 1, 1, 1]
-      BaseColorMaps:
-        - 14432045906638632156
-      BaseColorTextureSets:
-        - 0
-      MetallicFactors:
-        - 1
-      RoughnessFactors:
-        - 1
-      MetallicRoughnessMaps:
-        - 2148842802858138593
-      PhysicalDescriptorTextureSets:
-        - 0
-      NormalMaps:
-        - 4293224151087460058
-      NormalTextureSets:
-        - 0
-      OcclusionMaps:
-        - 0
-      OcclusionTextureSets:
-        - 0
-      EmissiveFactors:
-        - [1, 1, 1]
-      EmissiveMaps:
-        - 16209643937057692729
-      EmissiveTextureSets:
-        - 0
-      EmissiveStrengths:
-        - 1
-      Modes:
-        - 0
-      AlphaMaskCutoffs:
-        - 0.5
-      DoubleSidedFlags:
-        - true
-      UnlitFlags:
-        - false
-  - Entity: 17327172369131454987
-    TagComponent:
-      Tag: Instance_1
-    TransformComponent:
-      Translation: [0, 0, 0]
-      Rotation: [0, -0, 0]
-      Scale: [1, 1, 1]
-    RelationshipComponent:
-      Parent: 9904954959088807629
-      Children:
-        []
-    MeshComponent:
-      MeshHandle: 11421697598724601720
-      SubmeshIndex: 1
-    MaterialComponent:
-      Workflows:
-        - 0
-      DiffuseFactors:
-        - [1, 1, 1, 1]
-      SpecularFactors:
-        - [1, 1, 1, 1]
-      BaseColorFactor:
-        - [1, 1, 1, 1]
-      BaseColorMaps:
-        - 366340525722099673
-      BaseColorTextureSets:
-        - 0
-      MetallicFactors:
-        - 0
-      RoughnessFactors:
-        - 0.5
-      MetallicRoughnessMaps:
-        - 0
-      PhysicalDescriptorTextureSets:
-        - 0
-      NormalMaps:
-        - 5363457423442908178
-      NormalTextureSets:
-        - 0
-      OcclusionMaps:
-        - 0
-      OcclusionTextureSets:
-        - 0
-      EmissiveFactors:
-        - [0, 0, 0]
-      EmissiveMaps:
-        - 0
-      EmissiveTextureSets:
-        - 0
-      EmissiveStrengths:
-        - 1
-      Modes:
-        - 2
-      AlphaMaskCutoffs:
-        - 0.5
-      DoubleSidedFlags:
-        - true
-      UnlitFlags:
-        - false
-  - Entity: 16988147449432598865
-    TagComponent:
-      Tag: Instance_0
-    TransformComponent:
-      Translation: [0, 0, 0]
-      Rotation: [0, -0, 0]
-      Scale: [1, 1, 1]
-    RelationshipComponent:
-      Parent: 9904954959088807629
-      Children:
-        []
-    MeshComponent:
-      MeshHandle: 11421697598724601720
+      MeshHandle: 4545884080309558990
       SubmeshIndex: 0
     MaterialComponent:
       Workflows:
@@ -217,7 +20,7 @@ Entities:
       BaseColorFactor:
         - [1, 1, 1, 1]
       BaseColorMaps:
-        - 14432045906638632156
+        - 6759581301732888925
       BaseColorTextureSets:
         - 0
       MetallicFactors:
@@ -225,21 +28,21 @@ Entities:
       RoughnessFactors:
         - 1
       MetallicRoughnessMaps:
-        - 2148842802858138593
+        - 1871362080354860757
       PhysicalDescriptorTextureSets:
         - 0
       NormalMaps:
-        - 4293224151087460058
+        - 2093462898057618317
       NormalTextureSets:
         - 0
       OcclusionMaps:
-        - 0
+        - 7943372192880300104
       OcclusionTextureSets:
         - 0
       EmissiveFactors:
         - [1, 1, 1]
       EmissiveMaps:
-        - 16209643937057692729
+        - 3429749825708263038
       EmissiveTextureSets:
         - 0
       EmissiveStrengths:
@@ -249,24 +52,6 @@ Entities:
       AlphaMaskCutoffs:
         - 0.5
       DoubleSidedFlags:
-        - true
+        - false
       UnlitFlags:
         - false
-  - Entity: 9904954959088807629
-    TagComponent:
-      Tag: LightsPunctualLamp
-    TransformComponent:
-      Translation: [0, 0, 0]
-      Rotation: [0, 0, 0]
-      Scale: [1, 1, 1]
-    RelationshipComponent:
-      Parent: 0
-      Children:
-        - 16988147449432598865
-        - 17327172369131454987
-        - 9740053006290550979
-        - 9064174751645972374
-        - 12974149416069425617
-        - 9613236448047520515
-        - 8252998068335011219
-        - 3826753227802113667

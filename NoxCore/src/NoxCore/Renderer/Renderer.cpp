@@ -473,7 +473,7 @@ namespace Nox
     void Renderer::initPBR()
     {
         // 1. Load temporary 2D HDR panorama
-        Ref<Texture2D> enviromentHDR = TextureImporter::LoadTexture2D("assets/enviroments/papermill/papermill.hdr", {}, this);
+        Ref<Texture2D> enviromentHDR = TextureImporter::LoadTexture2D("assets/enviroments/papermill/khronos_papermill.hdr", {}, this);
 
         // 2. Create the permanent Cubemap Texture (512x512 per face, 6 array layers)
         constexpr uint32_t cubemapSize = 512;
