@@ -13,27 +13,31 @@ namespace Utils
             return;
         }
         
-        std::string absolutePathStr = std::filesystem::absolute(path).string();
+        std::filesystem::path absPath = std::filesystem::absolute(path);
+        std::string absolutePathStr = absPath.string();
+        bool isDir = std::filesystem::is_directory(absPath);
         
         m_fileTimestamps[absolutePathStr] = std::chrono::steady_clock::now();
         
         m_activeWatches.push_back(std::make_unique<filewatch::FileWatch<std::string>>(
             absolutePathStr,
-            [this, onModified, absolutePathStr](const std::string& pathStr, const filewatch::Event change_type)
+            [this, onModified, absPath, isDir](const std::string& pathStr, const filewatch::Event change_type)
             {
                 if (change_type == filewatch::Event::modified)
                 {
                     auto currentTime = std::chrono::steady_clock::now();
                     
-                    auto& lastTime = m_fileTimestamps[pathStr];
+                    // If directory: pathStr is relative to it.
+                    // If single file: the modified path is the file itself!
+                    std::filesystem::path modifiedPath = isDir ? (absPath / pathStr) : absPath;
+                    std::string key = modifiedPath.string();
+                    
+                    auto& lastTime = m_fileTimestamps[key];
                     auto elapsedTime = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - lastTime).count();
                     
                     if (elapsedTime < 100) return; 
                     
                     lastTime = currentTime;
-                    
-                    // pathStr is relative to the watched directory. Build the full path:
-                    std::filesystem::path modifiedPath = std::filesystem::path(absolutePathStr) / pathStr;
                     
                     // If the file was deleted or removed, do not trigger reimport!
                     if (!std::filesystem::exists(modifiedPath))

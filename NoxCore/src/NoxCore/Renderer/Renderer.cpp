@@ -14,8 +14,6 @@
 
 namespace Nox
 {
-    static bool m_reloadShader = false;
-
     Renderer::Renderer(std::shared_ptr<Window> window, bool isEditor) : m_window(std::move(window)), m_isEditor(isEditor)
     {
         NOX_CORE_INFO("Renderer Start");
@@ -31,11 +29,11 @@ namespace Nox
         bunnyMesh = MeshImporter::LoadMesh(MODEL_PATH_GLTF_STANDFORD);
         foxMesh = MeshImporter::LoadMesh(MODEL_PATH_FOX_GLTF);
         */
-
-        m_fileWatcher.watch(std::filesystem::path("assets/shaders/Meshlet.slang"), [this](auto path) { m_reloadShader = true; });
-        m_fileWatcher.watch(std::filesystem::path("assets/shaders/shader.slang"), [this](auto path) { m_reloadShader = true; });
-        m_fileWatcher.watch(std::filesystem::path("assets/shaders/present.slang"), [this](auto path) { m_reloadShader = true; });
-
+        
+        //PBR
+        watchShader("assets/shaders/Material_PBR_MeshTask.slang", "PBR", [this]() { createPBRPipeline(true); });
+        watchShader("assets/shaders/Material_PBR_Mesh.slang",     "PBR", [this]() { createPBRPipeline(true); });
+        
         m_whiteTexture = createSolidColorTexture(255, 255, 255, 255);
 
         // Allow buffer to hold up to 4K resolution entity pixels (3840 x 2160 * 4 bytes ≈ 33 MB)
@@ -90,7 +88,7 @@ namespace Nox
     {
         createSwapChain();
         createCompiler();
-        createGraphicsPipeline(false);
+        createPBRPipeline(false);
         createUnlitPipeline(false);
         if (!m_isEditor) createPresentPipeline(false);
         createComputePipeline();
@@ -182,7 +180,16 @@ namespace Nox
         m_shaderCompiler = NRI::CreateSlangCompiler();
     }
 
-    void Renderer::createGraphicsPipeline(bool forceCompile)
+    void Renderer::watchShader(const std::filesystem::path& path, const std::string& pipelineKey, std::function<void()> reloadFn)
+    {
+        m_fileWatcher.watch(path, [this, pipelineKey, reloadFn](const auto& modifiedPath)
+            {
+                std::scoped_lock lock(m_reloadMutex);
+                m_pendingReloads[pipelineKey] = reloadFn;
+            });
+    }
+
+    void Renderer::createPBRPipeline(bool forceCompile)
     {
         NRI::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
@@ -197,19 +204,19 @@ namespace Nox
         desc.shaders.push_back({
             .stage = NRI::ShaderStage::Task,
             .entryPoint = "taskMain",
-            .sourcePath = "assets/shaders/MeshletTask.slang"
+            .sourcePath = "assets/shaders/Material_PBR_MeshTask.slang"
         });
         desc.shaders.push_back({
             .stage = NRI::ShaderStage::Mesh,
             .entryPoint = "meshMain",
-            .sourcePath = "assets/shaders/Meshlet.slang"
+            .sourcePath = "assets/shaders/Material_PBR_Mesh.slang"
         });
         desc.shaders.push_back({
             .stage = NRI::ShaderStage::Fragment,
             .entryPoint = "fragMain",
-            .sourcePath = "assets/shaders/Meshlet.slang"
+            .sourcePath = "assets/shaders/Material_PBR_Mesh.slang"
         });
-        m_graphicsPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        m_graphics_PBR_Pipeline = m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
     void Renderer::createUnlitPipeline(bool forceCompile)
@@ -227,12 +234,12 @@ namespace Nox
         desc.shaders.push_back({
             .stage = NRI::ShaderStage::Task,
             .entryPoint = "taskMain",
-            .sourcePath = "assets/shaders/MeshletTask.slang"
+            .sourcePath = "assets/shaders/Material_PBR_MeshTask.slang"
         });
         desc.shaders.push_back({
             .stage = NRI::ShaderStage::Mesh,
             .entryPoint = "meshMain",
-            .sourcePath = "assets/shaders/Meshlet.slang"
+            .sourcePath = "assets/shaders/Material_PBR_Mesh.slang"
         });
         desc.shaders.push_back({
             .stage = NRI::ShaderStage::Fragment,
@@ -1409,8 +1416,6 @@ namespace Nox
 
         if (!m_instanceBufferObjects.empty() || !m_drawMeshTasksIndirectCommands.empty())
         {
-            m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_graphicsPipeline);
-
             shaderio::PushConstantMeshlets references{};
             // Pass pointer to the global matrix via a buffer device address
             /*references.modelMatrix = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 0.0f));*/
@@ -1446,7 +1451,7 @@ namespace Nox
                 references.instanceReference = baseInstanceAddress + (currentInstanceOffset * instanceStride);
                 m_commandBuffers->pushData(&references, sizeof(shaderio::PushConstantMeshlets));
 
-                // ✅ ONLY bind if we are switching to a different pipeline!
+                //  ONLY bind if we are switching to a different pipeline!
                 if (boundPipeline != &pipeline)
                 {
                     m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, pipeline);
@@ -1466,10 +1471,10 @@ namespace Nox
             // =========================================================================
             // 1. ALL PBR OPAQUE & MASK (Binds Graphics Pipeline ONCE for all 4 passes)
             // =========================================================================
-            drawPass(m_opaqueCount, *m_graphicsPipeline, NRI::CullMode::Back, true, false);
-            drawPass(m_opaqueDoubleSidedCount, *m_graphicsPipeline, NRI::CullMode::None, true, false);
-            drawPass(m_maskCount, *m_graphicsPipeline, NRI::CullMode::Back, true, false);
-            drawPass(m_maskDoubleSidedCount, *m_graphicsPipeline, NRI::CullMode::None, true, false);
+            drawPass(m_opaqueCount, *m_graphics_PBR_Pipeline, NRI::CullMode::Back, true, false);
+            drawPass(m_opaqueDoubleSidedCount, *m_graphics_PBR_Pipeline, NRI::CullMode::None, true, false);
+            drawPass(m_maskCount, *m_graphics_PBR_Pipeline, NRI::CullMode::Back, true, false);
+            drawPass(m_maskDoubleSidedCount, *m_graphics_PBR_Pipeline, NRI::CullMode::None, true, false);
 
             // =========================================================================
             // 2. ALL UNLIT OPAQUE & MASK (Switches to Unlit Pipeline ONCE for both passes)
@@ -1483,7 +1488,7 @@ namespace Nox
             // =========================================================================
             // 3. TRANSPARENT PASSES (Rendered last so they blend over the opaque depth)
             // =========================================================================
-            drawPass(m_transparentCount, *m_graphicsPipeline, NRI::CullMode::None, false, true);
+            drawPass(m_transparentCount, *m_graphics_PBR_Pipeline, NRI::CullMode::None, false, true);
             if (m_unlitPipeline)
             {
                 drawPass(m_transparentUnlitCount, *m_unlitPipeline, NRI::CullMode::None, false, true);
@@ -1953,12 +1958,21 @@ namespace Nox
     {
         processDeferredDeletions();
         processDeferredMeshFrees();
-
-        if (m_reloadShader)
+        
+        // Process any queued shader hot-reloads
+        if (!m_pendingReloads.empty())
         {
-            m_reloadShader = false;
-            createGraphicsPipeline(true);
-            createPresentPipeline(true);
+            std::unordered_map<std::string, std::function<void()>> reloads;
+            {
+                std::scoped_lock lock(m_reloadMutex);
+                reloads = std::move(m_pendingReloads);
+            }
+
+            for (auto& [pipelineName, reloadFn] : reloads)
+            {
+                NOX_CORE_INFO("Hot-reloading pipeline: {}", pipelineName);
+                reloadFn();
+            }
             return;
         }
 

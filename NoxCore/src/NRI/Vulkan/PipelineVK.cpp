@@ -95,6 +95,9 @@ namespace NRI
         vk::ShaderStageFlagBits::eMeshEXT
     };
     
+    // Cache of the last working binary data for each shader stage (populated on startup & compile)
+    static std::unordered_map<std::string, std::vector<uint8_t>> s_lastWorkingBinaries;
+    
     PipelineVK::PipelineVK(DeviceVK& device, const PipelineDesc& desc, ShaderCompiler& compiler) : m_deviceVK(device)
     {
         std::vector<std::vector<char>> tempBytecodeStorage(desc.shaders.size());
@@ -133,24 +136,42 @@ namespace NRI
                     compiledStages.push_back( translateShaderStage(shaderDesc.stage));
 
                     auto binaryPath = shaderBinaryPath(shaderDesc);
+                    std::string stageKey = shaderDesc.sourcePath + "." + shaderDesc.entryPoint;
 
                     if (std::filesystem::exists(binaryPath) && !desc.forceCompile)
                     {
                         NOX_CORE_INFO("PipelineVK loading shader binary: {}", binaryPath);
-
-                        binaryStorage.push_back(
-                            loadShaderBinary(binaryPath)
-                        );
-
+                        
+                        auto binary = loadShaderBinary(binaryPath);
+                        s_lastWorkingBinaries[stageKey] = binary;
+                        
+                        binaryStorage.push_back(std::move(binary));
                         loadedFromBinary.push_back(true);
                     }
                     else
                     {
                         NOX_CORE_INFO("PipelineVK compiling shader: {}", shaderDesc.sourcePath);
 
-                        tempBytecodeStorage[i] = compiler.compile(shaderDesc.sourcePath);
-
-                        loadedFromBinary.push_back(false);
+                        try
+                        {
+                            tempBytecodeStorage[i] = compiler.compile(shaderDesc.sourcePath);
+                            loadedFromBinary.push_back(false);
+                        }
+                        catch (const std::exception& e)
+                        {
+                            // If Slang fails, fall back to the last working binary from memory!
+                            auto it = s_lastWorkingBinaries.find(stageKey);
+                            if (it != s_lastWorkingBinaries.end())
+                            {
+                                NOX_CORE_WARN("Slang compilation failed for '{}'. Retaining previous working binary.", shaderDesc.sourcePath);
+                                binaryStorage.push_back(it->second);
+                                loadedFromBinary.push_back(true); // Don't write broken shader to disk
+                            }
+                            else
+                            {
+                                throw; // Only throws if no working version exists at all
+                            }
+                        }
                     }
                 }
                 
@@ -251,6 +272,10 @@ namespace NRI
 
                         std::ofstream file(path, std::ios::binary);
 
+                        // Update in-memory fallback cache with the newly compiled working binary
+                        std::string stageKey = desc.shaders[i].sourcePath + "." + desc.shaders[i].entryPoint;
+                        s_lastWorkingBinaries[stageKey] = data;
+                        
                         file.write(
                             reinterpret_cast<const char*>(data.data()),
                             data.size()

@@ -192,7 +192,8 @@ namespace Nox
         void recreateSwapChain();
         void createSwapChain();
         void createCompiler();
-        void createGraphicsPipeline(bool forceCompile);
+        void watchShader(const std::filesystem::path& path, const std::string& pipelineKey, std::function<void()> reloadFn);
+        void createPBRPipeline(bool forceCompile);
         void createUnlitPipeline(bool forceCompile);
         void createPresentPipeline(bool forceCompile);
         void createComputePipeline();
@@ -236,8 +237,10 @@ namespace Nox
         bool m_isEditor = false;
 
         Utils::NOXWatcher m_fileWatcher;
+        std::mutex m_reloadMutex;
+        std::unordered_map<std::string, std::function<void()>> m_pendingReloads;
         std::unique_ptr<NRI::ShaderCompiler> m_shaderCompiler = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_graphicsPipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_graphics_PBR_Pipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_unlitPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_presentPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_computePipeline = nullptr;
