@@ -94,6 +94,7 @@ namespace Nox
     inline std::vector<RenderPacket> m_maskDoubleSidedQueue;
     inline std::vector<RenderPacket> m_unlitQueue;
     inline std::vector<RenderPacket> m_unlitDoubleSidedQueue;
+    inline std::vector<RenderPacket> m_transmissionQueue;
     inline std::vector<RenderPacket> m_transparentQueue;
     inline std::vector<RenderPacket> m_transparentUnlitQueue;
 
@@ -103,6 +104,7 @@ namespace Nox
     inline uint32_t m_maskDoubleSidedCount = 0;
     inline uint32_t m_unlitCount = 0;
     inline uint32_t m_unlitDoubleSidedCount = 0;
+    inline uint32_t m_transmissionCount = 0;
     inline uint32_t m_transparentCount = 0;
     inline uint32_t m_transparentUnlitCount = 0;
     

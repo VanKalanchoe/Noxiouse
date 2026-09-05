@@ -49,12 +49,12 @@ up = normalize(cross(N, right));
 
 // 3. Obtain bindless handles for resources
 TextureCube envCubemap = TextureCube.Handle(uint2(pushConstant.hdrTextureIndex, 0));
-SamplerState linearSampler = SamplerState.Handle(uint2(0, 0));
+SamplerState linearSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_PREFILTER, 0));
 RWTexture2DArray<float4> irradianceOutput = RWTexture2DArray<float4>.Handle(uint2(pushConstant.cubemapStorageIndex, 0));
 
 // 4. Riemann sum integral over the hemisphere
 float3 irradiance = float3(0.0);
-float sampleDelta = 0.025;
+float sampleDelta = 0.05;
 uint nrSamples = 0;
 
 for (float phi = 0.0; phi < 2.0 * PI; phi += sampleDelta)

@@ -123,6 +123,11 @@ namespace Nox
         std::vector<int32_t> EmissiveTextureSets = { 0 };
         std::vector<float> EmissiveStrengths = { 1.0f };
         
+        // Transmission (KHR_materials_transmission)
+        std::vector<float> TransmissionFactors = { 0.0f };
+        std::vector<AssetHandle> TransmissionMaps = { 0 };
+        std::vector<int32_t> TransmissionTextureSets = { 0 };
+        
         // Settings
         std::vector<AlphaMode> Modes = { AlphaMode::Opaque };
         std::vector<float> AlphaMaskCutoffs = { 0.5f };
@@ -134,6 +139,7 @@ namespace Nox
         MaterialComponent(const glm::vec4 color) : BaseColorFactors{ color } {}
     };
     
+    // Following KHR_Punctual
     struct DirectionalLightComponent
     {
         glm::vec3 Color{ 1.0f, 1.0f, 1.0f };

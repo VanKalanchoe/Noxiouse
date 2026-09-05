@@ -631,6 +631,11 @@ namespace Nox
                                     matComp.EmissiveTextureSets = {matData.EmissiveTextureSet};
                                     matComp.EmissiveStrengths = {matData.emissiveStrength};
                                     
+                                    // Transmission
+                                    matComp.TransmissionFactors = {matData.TransmissionFactor};
+                                    matComp.TransmissionMaps = {getOrImportTextureHandle(matData.TransmissionTexturePath, false)};
+                                    matComp.TransmissionTextureSets = {matData.TransmissionTextureSet};
+                                    
                                     matComp.Modes = {matData.Mode};
                                     matComp.AlphaMaskCutoffs = {matData.AlphaMaskCutoff};
                                     matComp.DoubleSidedFlags = {matData.DoubleSided};
@@ -681,6 +686,11 @@ namespace Nox
                                     matComp.EmissiveTextureSets = {matData.EmissiveTextureSet};
                                     matComp.EmissiveStrengths = {matData.emissiveStrength};
                                     
+                                    // Transmission
+                                    matComp.TransmissionFactors = {matData.TransmissionFactor};
+                                    matComp.TransmissionMaps = {getOrImportTextureHandle(matData.TransmissionTexturePath, false)};
+                                    matComp.TransmissionTextureSets = {matData.TransmissionTextureSet};
+                                    
                                     matComp.Modes = {matData.Mode};
                                     matComp.AlphaMaskCutoffs = {matData.AlphaMaskCutoff};
                                     matComp.DoubleSidedFlags = {matData.DoubleSided};
@@ -692,6 +702,7 @@ namespace Nox
                                     matComp.MetallicFactors = {1.0f};
                                     matComp.RoughnessFactors = {1.0f};
                                     matComp.EmissiveFactors = {glm::vec3(0.0f)};
+                                    matComp.TransmissionFactors = {0.0f};
                                 }
 
                                 tryAttachAnimator(newEntity);
@@ -735,6 +746,10 @@ namespace Nox
                                 matComp.EmissiveTextureSets.resize(subMeshCount, 0);
                                 matComp.EmissiveStrengths.resize(subMeshCount, 1.0f);
                                 
+                                matComp.TransmissionFactors.resize(subMeshCount, 0.0f);
+                                matComp.TransmissionMaps.resize(subMeshCount, 0);
+                                matComp.TransmissionTextureSets.resize(subMeshCount, 0);
+                                
                                 matComp.Modes.resize(subMeshCount, AlphaMode::Opaque);
                                 matComp.AlphaMaskCutoffs.resize(subMeshCount, 0.5f);
                                 matComp.DoubleSidedFlags.resize(subMeshCount, false);
@@ -764,6 +779,10 @@ namespace Nox
                                     matComp.EmissiveMaps[i] = getOrImportTextureHandle(matData.EmissiveTexturePath, true);
                                     matComp.EmissiveTextureSets[i] = matData.EmissiveTextureSet;
                                     matComp.EmissiveStrengths[i] = matData.emissiveStrength;
+                                    
+                                    matComp.TransmissionFactors[i] = matData.TransmissionFactor;
+                                    matComp.TransmissionMaps[i] = getOrImportTextureHandle(matData.TransmissionTexturePath, false);
+                                    matComp.TransmissionTextureSets[i] = matData.TransmissionTextureSet;
                                     
                                     matComp.Modes[i] = matData.Mode;
                                     matComp.AlphaMaskCutoffs[i] = matData.AlphaMaskCutoff;

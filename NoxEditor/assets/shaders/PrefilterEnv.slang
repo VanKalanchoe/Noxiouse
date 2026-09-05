@@ -96,7 +96,7 @@ float3 R = N;
 float3 V = R;
 
 TextureCube envMap = TextureCube.Handle(uint2(pushConstant.envTextureIndex, 0));
-SamplerState linearSampler = SamplerState.Handle(uint2(0, 0));
+SamplerState linearSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_PREFILTER, 0));
 RWTexture2DArray<float4> prefilteredOutput = RWTexture2DArray<float4>.Handle(uint2(pushConstant.cubemapStorageIndex, 0));
 
 const uint SAMPLE_COUNT = 1024u;
@@ -116,10 +116,11 @@ for (uint i = 0u; i < SAMPLE_COUNT; ++i)
         float dotVH = clamp(dot(V, H), 0.0, 1.0);
 
         float pdf = D_GGX(dotNH, pushConstant.roughness) * dotNH / (4.0 * dotVH) + 0.0001;
-        float omegaS = 1.0 / (float(SAMPLE_COUNT) * pdf);
-        float omegaP = 4.0 * PI / (6.0 * float(pushConstant.cubemapSize * pushConstant.cubemapSize));
-        float mipLevel = pushConstant.roughness == 0.0 ? 0.0 : max(0.5 * log2(omegaS / omegaP) + 1.0, 0.0);
-
+            float omegaS = 1.0 / (float(SAMPLE_COUNT) * pdf);
+            const float sourceResolution = 512.0;
+            float omegaP = 4.0 * PI / (6.0 * sourceResolution * sourceResolution);
+         /*    float mipLevel = pushConstant.roughness == 0.0 ? 0.0 : max(0.5 * log2(omegaS / omegaP), 0.0); */
+float mipLevel = 0.0;
         prefilteredColor += envMap.SampleLevel(linearSampler, L, mipLevel).rgb * dotNL;
         totalWeight += dotNL;
     }

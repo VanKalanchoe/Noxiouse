@@ -86,6 +86,8 @@ void meshMain
     }
 }
 
+import Tonemapping;
+
 struct FSOutput
 {
     float4 color : SV_TARGET0;
@@ -97,13 +99,22 @@ FSOutput fragMain(MSOutput input, uniform PushConstantSkybox pushConstant)
 {
     FSOutput output;
 
+    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+
     TextureCube texHandle = TextureCube.Handle(uint2(pushConstant.cubemapIndex, 0));
-    SamplerState sampHandle = SamplerState.Handle(uint2(0, 0));
+    SamplerState sampHandle = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_PREFILTER, 0));
 
     // Sample the environment cubemap using interpolating 3D direction
     float3 envColor = texHandle.Sample(sampHandle, input.localPos).rgb;
 
-    output.color = float4(envColor, 1.0);
+    TonemapParameters tonemapParams;
+    tonemapParams.exposure = ubo->exposure;
+    tonemapParams.gamma = ubo->gamma;
+    tonemapParams.mode = (int)TonemapMode::None;
+
+    float3 color = toneMap(envColor, tonemapParams);
+
+    output.color = float4(color, 1.0);
     output.entityID = -1;
 
     return output;

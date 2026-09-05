@@ -33,6 +33,7 @@ namespace Nox
         //PBR
         watchShader("assets/shaders/Material_PBR_MeshTask.slang", "PBR", [this]() { createPBRPipeline(true); });
         watchShader("assets/shaders/Material_PBR_Mesh.slang",     "PBR", [this]() { createPBRPipeline(true); });
+        watchShader("assets/shaders/Skybox.slang",     "PBR", [this]() { createSkyboxPipeline(true); });
         
         m_whiteTexture = createSolidColorTexture(255, 255, 255, 255);
 
@@ -1175,7 +1176,7 @@ namespace Nox
         {
             .magFilter = NRI::Filter::Linear,
             .minFilter = NRI::Filter::Linear,
-            .mipmapMode = NRI::SamplerMipmapMode::Linear,
+            .mipmapMode = NRI::SamplerMipmapMode::Nearest,
             .addressModeU = NRI::SamplerAddressMode::ClampToEdge,
             .addressModeV = NRI::SamplerAddressMode::ClampToEdge,
             .addressModeW = NRI::SamplerAddressMode::ClampToEdge,
@@ -1383,7 +1384,7 @@ namespace Nox
         {
             const NRI::ColorBlendEquation blendEquation
             {
-                .srcColorBlendFactor = NRI::BlendFactor::SrcAlpha,
+                .srcColorBlendFactor = NRI::BlendFactor::One,
                 .dstColorBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha,
                 .colorBlendOp = NRI::BlendOp::Add,
                 .srcAlphaBlendFactor = NRI::BlendFactor::SrcAlpha,
@@ -1484,9 +1485,35 @@ namespace Nox
                 drawPass(m_unlitCount, *m_unlitPipeline, NRI::CullMode::Back, true, false);
                 drawPass(m_unlitDoubleSidedCount, *m_unlitPipeline, NRI::CullMode::None, true, false);
             }
+            
+            if (m_skyboxPipeline)
+            {
+                m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_skyboxPipeline);
+                boundPipeline = m_skyboxPipeline.get(); 
+                // Reverse-Z configuration: test against far plane (Z = 0.0), disable depth writes
+                m_commandBuffers->setDepthWriteEnable(false);
+                m_commandBuffers->setDepthCompareOp(NRI::CompareOp::GreaterOrEqual);
+                m_commandBuffers->setCullMode(NRI::CullMode::None);
+
+                shaderio::PushConstantSkybox skyboxRef{};
+                skyboxRef.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                skyboxRef.cubemapIndex = m_environmentCubemap->GetDescriptorIndexSlot();
+                m_commandBuffers->pushData(&skyboxRef, sizeof(shaderio::PushConstantSkybox));
+
+                m_commandBuffers->drawMeshTasks(1, 1, 1);
+
+                // Restore depth write state
+                m_commandBuffers->setDepthWriteEnable(true);
+                m_commandBuffers->setDepthCompareOp(NRI::CompareOp::Greater);
+            }
+            
+            // =========================================================================
+            // 3. TRANSMISSION PASS (Solid glass: writes depth so front wall blocks inner/back wall)
+            // =========================================================================
+            drawPass(m_transmissionCount, *m_graphics_PBR_Pipeline, NRI::CullMode::Back, false, true);
 
             // =========================================================================
-            // 3. TRANSPARENT PASSES (Rendered last so they blend over the opaque depth)
+            // 4. TRANSPARENT PASSES (Alpha blend: rendered last without depth write)
             // =========================================================================
             drawPass(m_transparentCount, *m_graphics_PBR_Pipeline, NRI::CullMode::None, false, true);
             if (m_unlitPipeline)
@@ -1498,30 +1525,30 @@ namespace Nox
             m_commandBuffers->setCullMode(NRI::CullMode::Back);
             m_commandBuffers->setDepthWriteEnable(true);
             m_commandBuffers->setColorBlendEnable(0, false);
+        }else
+        {
+            // If NO meshes are loaded in the scene, still draw the skybox!
+            if (m_skyboxPipeline)
+            {
+                m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_skyboxPipeline);
+                m_commandBuffers->setDepthWriteEnable(false);
+                m_commandBuffers->setDepthCompareOp(NRI::CompareOp::GreaterOrEqual);
+                m_commandBuffers->setCullMode(NRI::CullMode::None);
+
+                shaderio::PushConstantSkybox skyboxRef{};
+                skyboxRef.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                skyboxRef.cubemapIndex = m_environmentCubemap->GetDescriptorIndexSlot();
+                m_commandBuffers->pushData(&skyboxRef, sizeof(shaderio::PushConstantSkybox));
+
+                m_commandBuffers->drawMeshTasks(1, 1, 1);
+
+                m_commandBuffers->setDepthWriteEnable(true);
+                m_commandBuffers->setDepthCompareOp(NRI::CompareOp::Greater);
+            }
         }
+
 
         m_renderer2D->Flush(*m_commandBuffers, *m_uniformBuffers[frameIndex], frameIndex);
-
-        if (m_skyboxPipeline)
-        {
-            m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_skyboxPipeline);
-
-            // Reverse-Z configuration: test against far plane (Z = 0.0), disable depth writes
-            m_commandBuffers->setDepthWriteEnable(false);
-            m_commandBuffers->setDepthCompareOp(NRI::CompareOp::GreaterOrEqual);
-            m_commandBuffers->setCullMode(NRI::CullMode::None);
-
-            shaderio::PushConstantSkybox references{};
-            references.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
-            references.cubemapIndex = m_environmentCubemap->GetDescriptorIndexSlot();
-            m_commandBuffers->pushData(&references, sizeof(shaderio::PushConstantSkybox));
-
-            m_commandBuffers->drawMeshTasks(1, 1, 1);
-
-            // Restore depth write state
-            m_commandBuffers->setDepthWriteEnable(true);
-            m_commandBuffers->setDepthCompareOp(NRI::CompareOp::Greater);
-        }
 
         m_commandBuffers->endRendering();
 
@@ -2030,6 +2057,7 @@ namespace Nox
         m_maskDoubleSidedQueue.clear();
         m_unlitQueue.clear();
         m_unlitDoubleSidedQueue.clear();
+        m_transmissionQueue.clear();
         m_transparentQueue.clear();
         m_transparentUnlitQueue.clear();
     }
@@ -2215,6 +2243,9 @@ namespace Nox
                 return a.distanceToCamera > b.distanceToCamera;
             });
         };
+        
+        sortByDistance(m_transmissionQueue);
+        packQueue(m_transmissionQueue, m_transmissionCount);
 
         sortByDistance(m_transparentQueue);
         packQueue(m_transparentQueue, m_transparentCount);
@@ -2289,6 +2320,11 @@ namespace Nox
         instance.emissiveTextureIndex = getTextureIndex(material.EmissiveMaps, slotIdx);
         instance.emissiveTextureSet = (slotIdx < material.EmissiveTextureSets.size()) ? material.EmissiveTextureSets[slotIdx] : 0;
         instance.emissiveStrength = (slotIdx < material.EmissiveStrengths.size()) ? material.EmissiveStrengths[slotIdx] : 1.0f;
+        
+        // Transmission
+        instance.transmissionFactor = (slotIdx < material.TransmissionFactors.size()) ? material.TransmissionFactors[slotIdx] : 0.0f;
+        instance.transmissionTextureIndex = getTextureIndex(material.TransmissionMaps, slotIdx);
+        instance.transmissionTextureSet = (slotIdx < material.TransmissionTextureSets.size()) ? material.TransmissionTextureSets[slotIdx] : 0;
 
         // Settings
         AlphaMode mode = (slotIdx < material.Modes.size()) ? material.Modes[slotIdx] : AlphaMode::Opaque;
@@ -2325,7 +2361,15 @@ namespace Nox
         bool isDoubleSided = (instance.doubleSided != 0);
         bool isUnlit = (instance.unlit != 0);
 
-        if (mode == AlphaMode::Blend)
+        if (instance.transmissionFactor > 0.0f)
+        {
+            glm::vec3 camPos = glm::vec3(uniformData.cameraWorldPos);
+            glm::vec3 objPos = glm::vec3(transform[3]);
+            packet.distanceToCamera = glm::length(objPos - camPos);
+
+            m_transmissionQueue.push_back(packet);
+        }
+        else if (mode == AlphaMode::Blend)
         {
             glm::vec3 camPos = glm::vec3(uniformData.cameraWorldPos);
             glm::vec3 objPos = glm::vec3(transform[3]);
@@ -2431,6 +2475,11 @@ namespace Nox
             instance.emissiveTextureIndex = getTextureIndex(material.EmissiveMaps, i);
             instance.emissiveTextureSet = (i < material.EmissiveTextureSets.size()) ? material.EmissiveTextureSets[i] : 0;
             instance.emissiveStrength = (i < material.EmissiveStrengths.size()) ? material.EmissiveStrengths[i] : 1.0f;
+            
+            // Transmission
+            instance.transmissionFactor = (i < material.TransmissionFactors.size()) ? material.TransmissionFactors[i] : 0.0f;
+            instance.transmissionTextureIndex = getTextureIndex(material.TransmissionMaps, i);
+            instance.transmissionTextureSet = (i < material.TransmissionTextureSets.size()) ? material.TransmissionTextureSets[i] : 0;
 
             // Settings
             AlphaMode mode = (i < material.Modes.size()) ? material.Modes[i] : AlphaMode::Opaque;
@@ -2454,7 +2503,15 @@ namespace Nox
             bool isDoubleSided = (instance.doubleSided != 0);
             bool isUnlit = (instance.unlit != 0);
 
-            if (mode == AlphaMode::Blend)
+            if (instance.transmissionFactor > 0.0f)
+            {
+                glm::vec3 camPos = glm::vec3(uniformData.cameraWorldPos);
+                glm::vec3 objPos = glm::vec3(transform[3]);
+                packet.distanceToCamera = glm::length(objPos - camPos);
+
+                m_transmissionQueue.push_back(packet);
+            }
+            else if (mode == AlphaMode::Blend)
             {
                 glm::vec3 camPos = glm::vec3(uniformData.cameraWorldPos);
                 glm::vec3 objPos = glm::vec3(transform[3]);

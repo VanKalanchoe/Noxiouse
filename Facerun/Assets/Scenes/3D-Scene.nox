@@ -1,14 +1,278 @@
 Scene: Untitled
 Entities:
-  - Entity: 8976984150806981824
+  - Entity: 17594864308319456582
     TagComponent:
-      Tag: DamagedHelmet
+      Tag: Checker
     TransformComponent:
       Translation: [0, 0, 0]
-      Rotation: [0, 0, 0]
+      Rotation: [0, -0, 0]
       Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 15571653699130974787
+      Children:
+        []
     MeshComponent:
-      MeshHandle: 4545884080309558990
+      MeshHandle: 3661622699375605288
+      SubmeshIndex: 4
+    MaterialComponent:
+      Workflows:
+        - 0
+      DiffuseFactors:
+        - [1, 1, 1, 1]
+      SpecularFactors:
+        - [1, 1, 1, 1]
+      BaseColorFactor:
+        - [1, 1, 1, 1]
+      BaseColorMaps:
+        - 6641936013596027665
+      BaseColorTextureSets:
+        - 0
+      MetallicFactors:
+        - 0
+      RoughnessFactors:
+        - 1
+      MetallicRoughnessMaps:
+        - 0
+      PhysicalDescriptorTextureSets:
+        - 0
+      NormalMaps:
+        - 0
+      NormalTextureSets:
+        - 0
+      OcclusionMaps:
+        - 0
+      OcclusionTextureSets:
+        - 0
+      EmissiveFactors:
+        - [0, 0, 0]
+      EmissiveMaps:
+        - 0
+      EmissiveTextureSets:
+        - 0
+      EmissiveStrengths:
+        - 1
+      TransmissionFactors:
+        - 0
+      TransmissionMaps:
+        - 0
+      TransmissionTextureSets:
+        - 0
+      Modes:
+        - 0
+      AlphaMaskCutoffs:
+        - 0.5
+      DoubleSidedFlags:
+        - false
+      UnlitFlags:
+        - false
+  - Entity: 3364113558773985665
+    TagComponent:
+      Tag: Sphere002_1
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, -0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 15571653699130974787
+      Children:
+        []
+    MeshComponent:
+      MeshHandle: 3661622699375605288
+      SubmeshIndex: 3
+    MaterialComponent:
+      Workflows:
+        - 0
+      DiffuseFactors:
+        - [1, 1, 1, 1]
+      SpecularFactors:
+        - [1, 1, 1, 1]
+      BaseColorFactor:
+        - [1, 1, 1, 1]
+      BaseColorMaps:
+        - 0
+      BaseColorTextureSets:
+        - 0
+      MetallicFactors:
+        - 0
+      RoughnessFactors:
+        - 1
+      MetallicRoughnessMaps:
+        - 17175334000662849693
+      PhysicalDescriptorTextureSets:
+        - 0
+      NormalMaps:
+        - 0
+      NormalTextureSets:
+        - 0
+      OcclusionMaps:
+        - 0
+      OcclusionTextureSets:
+        - 0
+      EmissiveFactors:
+        - [0.25, 0.25, 0.25]
+      EmissiveMaps:
+        - 11755469058763859077
+      EmissiveTextureSets:
+        - 0
+      EmissiveStrengths:
+        - 1
+      TransmissionFactors:
+        - 1
+      TransmissionMaps:
+        - 0
+      TransmissionTextureSets:
+        - 0
+      Modes:
+        - 0
+      AlphaMaskCutoffs:
+        - 0.5
+      DoubleSidedFlags:
+        - false
+      UnlitFlags:
+        - false
+  - Entity: 18404803412693766090
+    TagComponent:
+      Tag: Sphere002_0
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, -0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 15571653699130974787
+      Children:
+        []
+    MeshComponent:
+      MeshHandle: 3661622699375605288
+      SubmeshIndex: 2
+    MaterialComponent:
+      Workflows:
+        - 0
+      DiffuseFactors:
+        - [1, 1, 1, 1]
+      SpecularFactors:
+        - [1, 1, 1, 1]
+      BaseColorFactor:
+        - [0.882353, 0.5921569, 0.2509804, 1]
+      BaseColorMaps:
+        - 0
+      BaseColorTextureSets:
+        - 0
+      MetallicFactors:
+        - 1
+      RoughnessFactors:
+        - 0.2
+      MetallicRoughnessMaps:
+        - 0
+      PhysicalDescriptorTextureSets:
+        - 0
+      NormalMaps:
+        - 0
+      NormalTextureSets:
+        - 0
+      OcclusionMaps:
+        - 0
+      OcclusionTextureSets:
+        - 0
+      EmissiveFactors:
+        - [0, 0, 0]
+      EmissiveMaps:
+        - 0
+      EmissiveTextureSets:
+        - 0
+      EmissiveStrengths:
+        - 1
+      TransmissionFactors:
+        - 0
+      TransmissionMaps:
+        - 0
+      TransmissionTextureSets:
+        - 0
+      Modes:
+        - 0
+      AlphaMaskCutoffs:
+        - 0.5
+      DoubleSidedFlags:
+        - true
+      UnlitFlags:
+        - false
+  - Entity: 18412519516594347958
+    TagComponent:
+      Tag: Sphere001_1
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, -0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 15571653699130974787
+      Children:
+        []
+    MeshComponent:
+      MeshHandle: 3661622699375605288
+      SubmeshIndex: 1
+    MaterialComponent:
+      Workflows:
+        - 0
+      DiffuseFactors:
+        - [1, 1, 1, 1]
+      SpecularFactors:
+        - [1, 1, 1, 1]
+      BaseColorFactor:
+        - [0.882353, 0.5921569, 0.2509804, 1]
+      BaseColorMaps:
+        - 0
+      BaseColorTextureSets:
+        - 0
+      MetallicFactors:
+        - 1
+      RoughnessFactors:
+        - 0.2
+      MetallicRoughnessMaps:
+        - 0
+      PhysicalDescriptorTextureSets:
+        - 0
+      NormalMaps:
+        - 0
+      NormalTextureSets:
+        - 0
+      OcclusionMaps:
+        - 0
+      OcclusionTextureSets:
+        - 0
+      EmissiveFactors:
+        - [0, 0, 0]
+      EmissiveMaps:
+        - 0
+      EmissiveTextureSets:
+        - 0
+      EmissiveStrengths:
+        - 1
+      TransmissionFactors:
+        - 0
+      TransmissionMaps:
+        - 0
+      TransmissionTextureSets:
+        - 0
+      Modes:
+        - 0
+      AlphaMaskCutoffs:
+        - 0.5
+      DoubleSidedFlags:
+        - true
+      UnlitFlags:
+        - false
+  - Entity: 16208540718915765561
+    TagComponent:
+      Tag: Sphere001_0
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, -0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 15571653699130974787
+      Children:
+        []
+    MeshComponent:
+      MeshHandle: 3661622699375605288
       SubmeshIndex: 0
     MaterialComponent:
       Workflows:
@@ -20,38 +284,59 @@ Entities:
       BaseColorFactor:
         - [1, 1, 1, 1]
       BaseColorMaps:
-        - 6759581301732888925
+        - 4834977518379706652
       BaseColorTextureSets:
         - 0
       MetallicFactors:
-        - 1
+        - 0
       RoughnessFactors:
         - 1
       MetallicRoughnessMaps:
-        - 1871362080354860757
+        - 17175334000662849693
       PhysicalDescriptorTextureSets:
         - 0
       NormalMaps:
-        - 2093462898057618317
+        - 0
       NormalTextureSets:
         - 0
       OcclusionMaps:
-        - 7943372192880300104
+        - 0
       OcclusionTextureSets:
         - 0
       EmissiveFactors:
-        - [1, 1, 1]
+        - [0.25, 0.25, 0.25]
       EmissiveMaps:
-        - 3429749825708263038
+        - 11755469058763859077
       EmissiveTextureSets:
         - 0
       EmissiveStrengths:
         - 1
-      Modes:
+      TransmissionFactors:
         - 0
+      TransmissionMaps:
+        - 0
+      TransmissionTextureSets:
+        - 0
+      Modes:
+        - 2
       AlphaMaskCutoffs:
         - 0.5
       DoubleSidedFlags:
         - false
       UnlitFlags:
         - false
+  - Entity: 15571653699130974787
+    TagComponent:
+      Tag: CompareTransmission
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        - 16208540718915765561
+        - 18412519516594347958
+        - 18404803412693766090
+        - 3364113558773985665
+        - 17594864308319456582

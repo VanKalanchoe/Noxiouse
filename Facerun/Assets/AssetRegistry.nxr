@@ -3,103 +3,151 @@ AssetRegistry:
     FilePath: Scenes/3D-Scene.nox
     SourceFilePath: Scenes/3D-Scene.nox
     Type: AssetType::Scene
-  - Handle: 366340525722099673
-    FilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_4.png
-    SourceFilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_4.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: SRGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 1871362080354860757
-    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_1.png
-    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_1.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: RGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 2093462898057618317
-    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_4.png
-    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_4.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: RGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 2148842802858138593
-    FilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_3.jpg
-    SourceFilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_3.jpg
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: RGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 3429749825708263038
-    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_2.png
-    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_2.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: SRGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 4293224151087460058
-    FilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_1.png
-    SourceFilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_1.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: RGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 4545884080309558990
-    FilePath: models/DamagedHelmet/DamagedHelmet.nmesh
-    SourceFilePath: models/DamagedHelmet/DamagedHelmet.gltf
+  - Handle: 485521262022411021
+    FilePath: models/TextureTransformMultiTest/TextureTransformMultiTest.nmesh
+    SourceFilePath: models/TextureTransformMultiTest/TextureTransformMultiTest.glb
     Type: AssetType::Mesh
-  - Handle: 4606592353943161312
-    FilePath: models/Box/Box.nmesh
-    SourceFilePath: models/Box/Box.nmesh
+  - Handle: 3154225952272881735
+    FilePath: models/TransmissionRoughnessTest/textures/TransmissionRoughnessTest_tex_3.png
+    SourceFilePath: models/TransmissionRoughnessTest/textures/TransmissionRoughnessTest_tex_3.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 3661622699375605288
+    FilePath: models/CompareTransmission/CompareTransmission.nmesh
+    SourceFilePath: models/CompareTransmission/CompareTransmission.glb
     Type: AssetType::Mesh
-  - Handle: 5363457423442908178
-    FilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_5.png
-    SourceFilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_5.png
+  - Handle: 4037841408545912562
+    FilePath: models/TextureTransformMultiTest/textures/TextureTransformMultiTest_tex_0.png
+    SourceFilePath: models/TextureTransformMultiTest/textures/TextureTransformMultiTest_tex_0.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 4834977518379706652
+    FilePath: models/CompareTransmission/textures/CompareTransmission_tex_1.png
+    SourceFilePath: models/CompareTransmission/textures/CompareTransmission_tex_1.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 5282171330334897839
+    FilePath: models/TextureTransformMultiTest/textures/TextureTransformMultiTest_tex_1.png
+    SourceFilePath: models/TextureTransformMultiTest/textures/TextureTransformMultiTest_tex_1.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 5642915583326242079
+    FilePath: models/TransmissionRoughnessTest/TransmissionRoughnessTest.nmesh
+    SourceFilePath: models/TransmissionRoughnessTest/TransmissionRoughnessTest.glb
+    Type: AssetType::Mesh
+  - Handle: 6641936013596027665
+    FilePath: models/CompareTransmission/textures/CompareTransmission_tex_2.png
+    SourceFilePath: models/CompareTransmission/textures/CompareTransmission_tex_2.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 6864513187540351769
+    FilePath: models/TransmissionThinwallTestGrid/textures/TransmissionThinwallTestGrid_tex_0.png
+    SourceFilePath: models/TransmissionThinwallTestGrid/textures/TransmissionThinwallTestGrid_tex_0.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 7675043744195171622
+    FilePath: models/TransmissionRoughnessTest/textures/TransmissionRoughnessTest_tex_4.png
+    SourceFilePath: models/TransmissionRoughnessTest/textures/TransmissionRoughnessTest_tex_4.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 8396357833249748974
+    FilePath: models/TransmissionOrderTest/TransmissionOrderTest.nmesh
+    SourceFilePath: models/TransmissionOrderTest/TransmissionOrderTest.glb
+    Type: AssetType::Mesh
+  - Handle: 8649772518595925516
+    FilePath: models/TransmissionOrderTest/textures/TransmissionOrderTest_tex_1.png
+    SourceFilePath: models/TransmissionOrderTest/textures/TransmissionOrderTest_tex_1.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 10149606881722848177
+    FilePath: models/TransmissionOrderTest/textures/TransmissionOrderTest_tex_0.png
+    SourceFilePath: models/TransmissionOrderTest/textures/TransmissionOrderTest_tex_0.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 10517463620102677116
+    FilePath: models/TextureTransformMultiTest/textures/TextureTransformMultiTest_tex_2.png
+    SourceFilePath: models/TextureTransformMultiTest/textures/TextureTransformMultiTest_tex_2.png
     Type: AssetType::Texture2D
     TextureSpec:
       Format: RGBA8
       GenerateMips: true
       Flip: false
-  - Handle: 6759581301732888925
-    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_0.png
-    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_0.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: SRGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 7943372192880300104
-    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_3.png
-    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_3.png
+  - Handle: 11164514660205950637
+    FilePath: models/TransmissionRoughnessTest/textures/TransmissionRoughnessTest_tex_2.png
+    SourceFilePath: models/TransmissionRoughnessTest/textures/TransmissionRoughnessTest_tex_2.png
     Type: AssetType::Texture2D
     TextureSpec:
       Format: RGBA8
       GenerateMips: true
       Flip: false
-  - Handle: 11421697598724601720
-    FilePath: models/LightsPunctualLamp/LightsPunctualLamp.nmesh
-    SourceFilePath: models/LightsPunctualLamp/LightsPunctualLamp.glb
-    Type: AssetType::Mesh
-  - Handle: 14432045906638632156
-    FilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_0.jpg
-    SourceFilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_0.jpg
+  - Handle: 11512670645994356974
+    FilePath: models/TransmissionOrderTest/textures/TransmissionOrderTest_tex_2.png
+    SourceFilePath: models/TransmissionOrderTest/textures/TransmissionOrderTest_tex_2.png
     Type: AssetType::Texture2D
     TextureSpec:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
-  - Handle: 16209643937057692729
-    FilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_2.jpg
-    SourceFilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_2.jpg
+  - Handle: 11755469058763859077
+    FilePath: models/CompareTransmission/textures/CompareTransmission_tex_3.jpg
+    SourceFilePath: models/CompareTransmission/textures/CompareTransmission_tex_3.jpg
     Type: AssetType::Texture2D
     TextureSpec:
       Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 13824049991032014809
+    FilePath: models/TransmissionRoughnessTest/textures/TransmissionRoughnessTest_tex_0.png
+    SourceFilePath: models/TransmissionRoughnessTest/textures/TransmissionRoughnessTest_tex_0.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 15440165629083905710
+    FilePath: models/TransmissionThinwallTestGrid/TransmissionThinwallTestGrid.nmesh
+    SourceFilePath: models/TransmissionThinwallTestGrid/TransmissionThinwallTestGrid.glb
+    Type: AssetType::Mesh
+  - Handle: 16468829994185518924
+    FilePath: models/TransmissionRoughnessTest/textures/TransmissionRoughnessTest_tex_1.png
+    SourceFilePath: models/TransmissionRoughnessTest/textures/TransmissionRoughnessTest_tex_1.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 17175334000662849693
+    FilePath: models/CompareTransmission/textures/CompareTransmission_tex_0.jpg
+    SourceFilePath: models/CompareTransmission/textures/CompareTransmission_tex_0.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
       GenerateMips: true
       Flip: false
