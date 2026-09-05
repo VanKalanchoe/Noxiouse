@@ -74,6 +74,11 @@ namespace Nox
         int32_t EmissiveTextureSet = 0;
         float emissiveStrength = 1.0f;
         
+        // Transmission (KHR_materials_transmission)
+        float TransmissionFactor = 0.0f;
+        std::string TransmissionTexturePath;
+        int32_t TransmissionTextureSet = 0;
+        
         // Alpha properties
         AlphaMode Mode = AlphaMode::Opaque;
         float AlphaMaskCutoff = 0.5f;

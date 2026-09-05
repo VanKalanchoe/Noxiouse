@@ -53,7 +53,7 @@ namespace Nox
             if (!std::filesystem::exists(cookedPath.parent_path()))
                 std::filesystem::create_directories(cookedPath.parent_path());
 
-            MeshSerializer::SerializeMesh(cookedPath, meshDataList, materialDataList);
+            MeshSerializer::SerializeMesh(cookedPath, meshDataList, materialDataList, lightDataList);
 
             // Save skeleton if present
             if (!extractedSkeleton.Skins.empty() || !extractedAnimations.empty())
@@ -129,7 +129,7 @@ namespace Nox
             if (!std::filesystem::exists(cookedPath.parent_path()))
                 std::filesystem::create_directories(cookedPath.parent_path());
 
-            MeshSerializer::SerializeStaticMesh(cookedPath, meshDataList, materialDataList);
+            MeshSerializer::SerializeStaticMesh(cookedPath, meshDataList, materialDataList, lightDataList);
         }
 
         Ref<StaticMesh> staticMeshAsset = CreateRef<StaticMesh>();
@@ -808,7 +808,62 @@ namespace Nox
         ParseAnimationsFromGltf(model, outSkeleton, outAnimations);
         ParseLightsFromGltf(model, outLights);
 
-         uint32_t totalInstances = (model.nodes_count > 0) ? model.nodes_count : model.meshes_count;
+         // 1. Build parent hierarchy map to resolve accumulated world transforms
+            std::vector<int32_t> parentMap(model.nodes_count, -1);
+            for (uint32_t i = 0; i < model.nodes_count; i++)
+            {
+                const auto& n = model.nodes[i];
+                for (uint32_t c = 0; c < n.children_count; c++)
+                {
+                    int32_t childIdx = n.children[c];
+                    if (childIdx >= 0 && childIdx < static_cast<int32_t>(model.nodes_count))
+                    {
+                        parentMap[childIdx] = static_cast<int32_t>(i);
+                    }
+                }
+            }
+
+            auto getLocalTransform = [](const tg3_node& n) -> glm::mat4
+            {
+                if (n.has_matrix)
+                {
+                    return glm::mat4(glm::make_mat4(n.matrix));
+                }
+
+                glm::vec3 t(0.0f);
+                if (n.translation[0] != 0.0 || n.translation[1] != 0.0 || n.translation[2] != 0.0)
+                    t = glm::vec3(static_cast<float>(n.translation[0]), static_cast<float>(n.translation[1]), static_cast<float>(n.translation[2]));
+
+                glm::quat r(1.0f, 0.0f, 0.0f, 0.0f);
+                if (n.rotation[0] != 0.0 || n.rotation[1] != 0.0 || n.rotation[2] != 0.0 || n.rotation[3] != 1.0)
+                    r = glm::quat(static_cast<float>(n.rotation[3]), static_cast<float>(n.rotation[0]), static_cast<float>(n.rotation[1]), static_cast<float>(n.rotation[2]));
+
+                glm::vec3 s(1.0f);
+                if (n.scale[0] != 1.0 || n.scale[1] != 1.0 || n.scale[2] != 1.0)
+                    s = glm::vec3(static_cast<float>(n.scale[0]), static_cast<float>(n.scale[1]), static_cast<float>(n.scale[2]));
+
+                return glm::translate(glm::mat4(1.0f), t) * glm::toMat4(r) * glm::scale(glm::mat4(1.0f), s);
+            };
+
+            auto getNodeWorldMatrix = [&](uint32_t nodeIdx) -> glm::mat4
+            {
+                glm::mat4 world(1.0f);
+                int32_t curr = static_cast<int32_t>(nodeIdx);
+                std::vector<int32_t> chain;
+                while (curr != -1)
+                {
+                    chain.push_back(curr);
+                    curr = parentMap[curr];
+                }
+                // Multiply from root parent down to leaf child: parent * ... * child
+                for (auto it = chain.rbegin(); it != chain.rend(); ++it)
+                {
+                    world = world * getLocalTransform(model.nodes[*it]);
+                }
+                return world;
+            };
+
+            uint32_t totalInstances = (model.nodes_count > 0) ? model.nodes_count : model.meshes_count;
 
             for (uint32_t instanceIdx = 0; instanceIdx < totalInstances; instanceIdx++)
             {
@@ -824,27 +879,8 @@ namespace Nox
 
                     meshIndex = static_cast<uint32_t>(node.mesh);
 
-                    // 1. Calculate this node instance's transform
-                    if (node.has_matrix)
-                    {
-                        nodeMatrix = glm::mat4(glm::make_mat4(node.matrix));
-                    }
-                    else
-                    {
-                        glm::vec3 t(0.0f);
-                        if (node.translation[0] != 0.0 || node.translation[1] != 0.0 || node.translation[2] != 0.0)
-                            t = glm::vec3(static_cast<float>(node.translation[0]), static_cast<float>(node.translation[1]), static_cast<float>(node.translation[2]));
-
-                        glm::quat r(1.0f, 0.0f, 0.0f, 0.0f);
-                        if (node.rotation[0] != 0.0 || node.rotation[1] != 0.0 || node.rotation[2] != 0.0 || node.rotation[3] != 1.0)
-                            r = glm::quat(static_cast<float>(node.rotation[3]), static_cast<float>(node.rotation[0]), static_cast<float>(node.rotation[1]), static_cast<float>(node.rotation[2]));
-
-                        glm::vec3 s(1.0f);
-                        if (node.scale[0] != 1.0 || node.scale[1] != 1.0 || node.scale[2] != 1.0)
-                            s = glm::vec3(static_cast<float>(node.scale[0]), static_cast<float>(node.scale[1]), static_cast<float>(node.scale[2]));
-
-                        nodeMatrix = glm::translate(glm::mat4(1.0f), t) * glm::toMat4(r) * glm::scale(glm::mat4(1.0f), s);
-                    }
+                    // Calculate accumulated world transform through scene graph hierarchy
+                    nodeMatrix = getNodeWorldMatrix(instanceIdx);
 
                     if (node.name.data && node.name.len > 0)
                         meshName = std::string(node.name.data, node.name.len);
@@ -1228,7 +1264,7 @@ namespace Nox
                     if (gltfMaterial.alpha_mode.data != nullptr && gltfMaterial.alpha_mode.len > 0)
                     {
                         std::string_view modeStr(gltfMaterial.alpha_mode.data, gltfMaterial.alpha_mode.len);
-                        if (modeStr == "Opaque") materialData.Mode = AlphaMode::Opaque;
+                        if (modeStr == "OPAQUE" || modeStr == "Opaque") materialData.Mode = AlphaMode::Opaque;
                         else if (modeStr == "MASK") materialData.Mode = AlphaMode::Mask;
                         else if (modeStr == "BLEND") materialData.Mode = AlphaMode::Blend;
                     }
@@ -1390,6 +1426,38 @@ namespace Nox
                                 }
                             }
                         }
+                        
+                        if (std::string_view(ext.name.data, ext.name.len) == "KHR_materials_transmission")
+                            {
+                                if (ext.value.type == TG3_VALUE_OBJECT)
+                                {
+                                    for (uint32_t j = 0; j < ext.value.object_count; j++)
+                                    {
+                                        const auto& kv = ext.value.object_data[j];
+                                        std::string_view key(kv.key.data, kv.key.len);
+
+                                        if (key == "transmissionFactor")
+                                        {
+                                            if (kv.value.type == TG3_VALUE_REAL)
+                                                materialData.TransmissionFactor = static_cast<float>(kv.value.real_val);
+                                            else if (kv.value.type == TG3_VALUE_INT)
+                                                materialData.TransmissionFactor = static_cast<float>(kv.value.int_val);
+                                        }
+                                        else if (key == "transmissionTexture" && kv.value.type == TG3_VALUE_OBJECT)
+                                        {
+                                            for (uint32_t t = 0; t < kv.value.object_count; t++)
+                                            {
+                                                const auto& texKv = kv.value.object_data[t];
+                                                std::string_view tkey(texKv.key.data, texKv.key.len);
+                                                if (tkey == "index")
+                                                    materialData.TransmissionTexturePath = GetTexturePath(static_cast<int32_t>(texKv.value.int_val));
+                                                else if (tkey == "texCoord")
+                                                    materialData.TransmissionTextureSet = static_cast<int32_t>(texKv.value.int_val);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                     }
                     materialData.emissiveStrength = emissiveStrength;
                 }

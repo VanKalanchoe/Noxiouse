@@ -335,6 +335,22 @@ namespace Nox
             out << YAML::BeginSeq;
             for (auto strength : mc.EmissiveStrengths) out << strength;
             out << YAML::EndSeq;
+            
+            // Transmission
+            out << YAML::Key << "TransmissionFactors" << YAML::Value;
+            out << YAML::BeginSeq;
+            for (auto factor : mc.TransmissionFactors) out << factor;
+            out << YAML::EndSeq;
+
+            out << YAML::Key << "TransmissionMaps" << YAML::Value;
+            out << YAML::BeginSeq;
+            for (auto handle : mc.TransmissionMaps) out << (uint64_t)handle;
+            out << YAML::EndSeq;
+
+            out << YAML::Key << "TransmissionTextureSets" << YAML::Value;
+            out << YAML::BeginSeq;
+            for (auto set : mc.TransmissionTextureSets) out << set;
+            out << YAML::EndSeq;
 
             // Settings
             out << YAML::Key << "Modes" << YAML::Value;
@@ -842,6 +858,27 @@ namespace Nox
                     {
                         mc.EmissiveStrengths.clear();
                         for (auto node : emissiveStrengthsSeq) mc.EmissiveStrengths.push_back(node.as<float>());
+                    }
+                    
+                    auto transmissionFactorsSeq = materialComponent["TransmissionFactors"];
+                    if (transmissionFactorsSeq)
+                    {
+                        mc.TransmissionFactors.clear();
+                        for (auto node : transmissionFactorsSeq) mc.TransmissionFactors.push_back(node.as<float>());
+                    }
+
+                    auto transmissionMapsSeq = materialComponent["TransmissionMaps"];
+                    if (transmissionMapsSeq)
+                    {
+                        mc.TransmissionMaps.clear();
+                        for (auto node : transmissionMapsSeq) mc.TransmissionMaps.push_back(node.as<uint64_t>());
+                    }
+
+                    auto transmissionSetsSeq = materialComponent["TransmissionTextureSets"];
+                    if (transmissionSetsSeq)
+                    {
+                        mc.TransmissionTextureSets.clear();
+                        for (auto node : transmissionSetsSeq) mc.TransmissionTextureSets.push_back(node.as<int32_t>());
                     }
 
                     // Settings

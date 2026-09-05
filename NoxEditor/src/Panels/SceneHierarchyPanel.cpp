@@ -654,12 +654,33 @@ namespace Nox
      DrawComponent<MaterialComponent>("Material", entity, [](auto& component)
 {
     // Ensure all vectors are synchronized in size if they were mismatched or newly created
-    size_t slotCount = component.BaseColorMaps.size();
-    if (slotCount == 0 && (!component.BaseColorFactors.empty() || !component.Modes.empty()))
-    {
-        slotCount = std::max({ component.BaseColorFactors.size(), component.MetallicFactors.size(), component.RoughnessFactors.size(), component.MetallicRoughnessMaps.size(), component.PhysicalDescriptorTextureSets.size(), component.NormalMaps.size(), component.NormalTextureSets.size(), component.OcclusionMaps.size(), component.OcclusionTextureSets.size(), component.EmissiveFactors.size(), component.EmissiveMaps.size(), component.EmissiveTextureSets.size(), component.EmissiveStrengths.size(), component.Modes.size(), component.AlphaMaskCutoffs.size(), component.DoubleSidedFlags.size() });
-        component.BaseColorMaps.resize(slotCount, 0);
-    }
+         size_t slotCount = component.BaseColorMaps.size();
+             if (slotCount == 0 && (!component.BaseColorFactors.empty() || !component.Modes.empty()))
+             {
+                 slotCount = std::max({
+                     component.BaseColorFactors.size(),
+                     component.MetallicFactors.size(),
+                     component.RoughnessFactors.size(),
+                     component.MetallicRoughnessMaps.size(),
+                     component.PhysicalDescriptorTextureSets.size(),
+                     component.NormalMaps.size(),
+                     component.NormalTextureSets.size(),
+                     component.OcclusionMaps.size(),
+                     component.OcclusionTextureSets.size(),
+                     component.EmissiveFactors.size(),
+                     component.EmissiveMaps.size(),
+                     component.EmissiveTextureSets.size(),
+                     component.EmissiveStrengths.size(),
+                     component.TransmissionFactors.size(),
+                     component.TransmissionMaps.size(),
+                     component.TransmissionTextureSets.size(),
+                     component.Modes.size(),
+                     component.AlphaMaskCutoffs.size(),
+                     component.DoubleSidedFlags.size(),
+                     component.UnlitFlags.size()
+                 });
+                 component.BaseColorMaps.resize(slotCount, 0);
+             }
     
     // Fallback if completely empty
     if (slotCount == 0)
@@ -680,6 +701,9 @@ namespace Nox
         component.EmissiveMaps.push_back(0);
         component.EmissiveTextureSets.push_back(0);
         component.EmissiveStrengths.push_back(1.0f);
+        component.TransmissionFactors.push_back(0.0f);
+            component.TransmissionMaps.push_back(0);
+            component.TransmissionTextureSets.push_back(0);
         component.Modes.push_back(AlphaMode::Opaque);
         component.AlphaMaskCutoffs.push_back(0.5f);
         component.DoubleSidedFlags.push_back(false);
@@ -700,6 +724,10 @@ namespace Nox
     if (component.EmissiveMaps.size() < slotCount) component.EmissiveMaps.resize(slotCount, 0);
     if (component.EmissiveTextureSets.size() < slotCount) component.EmissiveTextureSets.resize(slotCount, 0);
     if (component.EmissiveStrengths.size() < slotCount) component.EmissiveStrengths.resize(slotCount, 1.0f);
+    // Transmission (KHR_materials_transmission)
+    if (component.TransmissionFactors.size() < slotCount) component.TransmissionFactors.resize(slotCount, 0.0f);
+    if (component.TransmissionMaps.size() < slotCount) component.TransmissionMaps.resize(slotCount, 0);
+    if (component.TransmissionTextureSets.size() < slotCount) component.TransmissionTextureSets.resize(slotCount, 0);
     if (component.Modes.size() < slotCount) component.Modes.resize(slotCount, AlphaMode::Opaque);
     if (component.AlphaMaskCutoffs.size() < slotCount) component.AlphaMaskCutoffs.resize(slotCount, 0.5f);
     if (component.DoubleSidedFlags.size() < slotCount) component.DoubleSidedFlags.resize(slotCount, false);
@@ -814,6 +842,11 @@ namespace Nox
                 component.EmissiveMaps[i]);
         ImGui::DragInt("Emissive Texture Set", &component.EmissiveTextureSets[i], 1, 0, 10);
         ImGui::DragFloat("Emissive Strength", &component.EmissiveStrengths[i], 0.1f, 0.0f, 100.0f);
+        
+        // Transmission (KHR_materials_transmission)
+        ImGui::DragFloat("Transmission Factor", &component.TransmissionFactors[i], 0.01f, 0.0f, 1.0f);
+        drawTextureSlot("Transmission Map", "Transmission", component.TransmissionMaps[i]);
+        ImGui::DragInt("Transmission Texture Set", &component.TransmissionTextureSets[i], 1, 0, 10);
 
         ImGui::Spacing();
         ImGui::Separator();
@@ -867,6 +900,9 @@ namespace Nox
         component.EmissiveMaps.push_back(0);
         component.EmissiveTextureSets.push_back(0);
         component.EmissiveStrengths.push_back(1.0f);
+        component.TransmissionFactors.push_back(0.0f);
+            component.TransmissionMaps.push_back(0);
+            component.TransmissionTextureSets.push_back(0);
         component.Modes.push_back(AlphaMode::Opaque);
         component.AlphaMaskCutoffs.push_back(0.5f);
         component.DoubleSidedFlags.push_back(false);
@@ -890,6 +926,9 @@ namespace Nox
         component.EmissiveMaps.pop_back();
         component.EmissiveTextureSets.pop_back();
         component.EmissiveStrengths.pop_back();
+        component.TransmissionFactors.pop_back();
+            component.TransmissionMaps.pop_back();
+            component.TransmissionTextureSets.pop_back();
         component.Modes.pop_back();
         component.AlphaMaskCutoffs.pop_back();
         component.DoubleSidedFlags.pop_back();

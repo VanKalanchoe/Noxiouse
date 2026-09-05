@@ -33,6 +33,7 @@ namespace Nox
         //PBR
         watchShader("assets/shaders/Material_PBR_MeshTask.slang", "PBR", [this]() { createPBRPipeline(true); });
         watchShader("assets/shaders/Material_PBR_Mesh.slang",     "PBR", [this]() { createPBRPipeline(true); });
+        watchShader("assets/shaders/Skybox.slang",     "PBR", [this]() { createSkyboxPipeline(true); });
         
         m_whiteTexture = createSolidColorTexture(255, 255, 255, 255);
 
@@ -1175,7 +1176,7 @@ namespace Nox
         {
             .magFilter = NRI::Filter::Linear,
             .minFilter = NRI::Filter::Linear,
-            .mipmapMode = NRI::SamplerMipmapMode::Linear,
+            .mipmapMode = NRI::SamplerMipmapMode::Nearest,
             .addressModeU = NRI::SamplerAddressMode::ClampToEdge,
             .addressModeV = NRI::SamplerAddressMode::ClampToEdge,
             .addressModeW = NRI::SamplerAddressMode::ClampToEdge,
@@ -2289,6 +2290,11 @@ namespace Nox
         instance.emissiveTextureIndex = getTextureIndex(material.EmissiveMaps, slotIdx);
         instance.emissiveTextureSet = (slotIdx < material.EmissiveTextureSets.size()) ? material.EmissiveTextureSets[slotIdx] : 0;
         instance.emissiveStrength = (slotIdx < material.EmissiveStrengths.size()) ? material.EmissiveStrengths[slotIdx] : 1.0f;
+        
+        // Transmission
+        instance.transmissionFactor = (slotIdx < material.TransmissionFactors.size()) ? material.TransmissionFactors[slotIdx] : 0.0f;
+        instance.transmissionTextureIndex = getTextureIndex(material.TransmissionMaps, slotIdx);
+        instance.transmissionTextureSet = (slotIdx < material.TransmissionTextureSets.size()) ? material.TransmissionTextureSets[slotIdx] : 0;
 
         // Settings
         AlphaMode mode = (slotIdx < material.Modes.size()) ? material.Modes[slotIdx] : AlphaMode::Opaque;
@@ -2431,6 +2437,11 @@ namespace Nox
             instance.emissiveTextureIndex = getTextureIndex(material.EmissiveMaps, i);
             instance.emissiveTextureSet = (i < material.EmissiveTextureSets.size()) ? material.EmissiveTextureSets[i] : 0;
             instance.emissiveStrength = (i < material.EmissiveStrengths.size()) ? material.EmissiveStrengths[i] : 1.0f;
+            
+            // Transmission
+            instance.transmissionFactor = (i < material.TransmissionFactors.size()) ? material.TransmissionFactors[i] : 0.0f;
+            instance.transmissionTextureIndex = getTextureIndex(material.TransmissionMaps, i);
+            instance.transmissionTextureSet = (i < material.TransmissionTextureSets.size()) ? material.TransmissionTextureSets[i] : 0;
 
             // Settings
             AlphaMode mode = (i < material.Modes.size()) ? material.Modes[i] : AlphaMode::Opaque;

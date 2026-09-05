@@ -185,6 +185,11 @@ struct InstanceData
     uint32_t emissiveTextureIndex;
     int32_t emissiveTextureSet;
     float emissiveStrength;
+
+    // Transmission (KHR_materials_transmission)
+    float transmissionFactor;
+    uint32_t transmissionTextureIndex;
+    int32_t transmissionTextureSet;
     
     uint32_t alphaMode;   // 0 = Opaque, 1 = Mask, 2 = Blend
     float alphaMaskCutoff;

@@ -3,23 +3,11 @@ AssetRegistry:
     FilePath: Scenes/3D-Scene.nox
     SourceFilePath: Scenes/3D-Scene.nox
     Type: AssetType::Scene
-  - Handle: 366340525722099673
-    FilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_4.png
-    SourceFilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_4.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: SRGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 1871362080354860757
-    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_1.png
-    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_1.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: RGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 2093462898057618317
+  - Handle: 348045291934081069
+    FilePath: models/DamagedHelmet/DamagedHelmet.nmesh
+    SourceFilePath: models/DamagedHelmet/DamagedHelmet.gltf
+    Type: AssetType::Mesh
+  - Handle: 1202726475023137870
     FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_4.png
     SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_4.png
     Type: AssetType::Texture2D
@@ -27,47 +15,7 @@ AssetRegistry:
       Format: RGBA8
       GenerateMips: true
       Flip: false
-  - Handle: 2148842802858138593
-    FilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_3.jpg
-    SourceFilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_3.jpg
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: RGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 3429749825708263038
-    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_2.png
-    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_2.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: SRGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 4293224151087460058
-    FilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_1.png
-    SourceFilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_1.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: RGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 4545884080309558990
-    FilePath: models/DamagedHelmet/DamagedHelmet.nmesh
-    SourceFilePath: models/DamagedHelmet/DamagedHelmet.gltf
-    Type: AssetType::Mesh
-  - Handle: 4606592353943161312
-    FilePath: models/Box/Box.nmesh
-    SourceFilePath: models/Box/Box.nmesh
-    Type: AssetType::Mesh
-  - Handle: 5363457423442908178
-    FilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_5.png
-    SourceFilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_5.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: RGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 6759581301732888925
+  - Handle: 3600470967164703398
     FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_0.png
     SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_0.png
     Type: AssetType::Texture2D
@@ -75,31 +23,31 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
-  - Handle: 7943372192880300104
-    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_3.png
-    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_3.png
+  - Handle: 4852130791899754320
+    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_1.png
+    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_1.png
     Type: AssetType::Texture2D
     TextureSpec:
       Format: RGBA8
       GenerateMips: true
       Flip: false
-  - Handle: 11421697598724601720
+  - Handle: 12706593288137890609
     FilePath: models/LightsPunctualLamp/LightsPunctualLamp.nmesh
-    SourceFilePath: models/LightsPunctualLamp/LightsPunctualLamp.glb
+    SourceFilePath: models/LightsPunctualLamp/LightsPunctualLamp.nmesh
     Type: AssetType::Mesh
-  - Handle: 14432045906638632156
-    FilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_0.jpg
-    SourceFilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_0.jpg
+  - Handle: 13624952040610929849
+    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_2.png
+    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_2.png
     Type: AssetType::Texture2D
     TextureSpec:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
-  - Handle: 16209643937057692729
-    FilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_2.jpg
-    SourceFilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_2.jpg
+  - Handle: 13975316889553124087
+    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_3.png
+    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_3.png
     Type: AssetType::Texture2D
     TextureSpec:
-      Format: SRGBA8
+      Format: RGBA8
       GenerateMips: true
       Flip: false

@@ -96,7 +96,7 @@ float3 R = N;
 float3 V = R;
 
 TextureCube envMap = TextureCube.Handle(uint2(pushConstant.envTextureIndex, 0));
-SamplerState linearSampler = SamplerState.Handle(uint2(0, 0));
+SamplerState linearSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_PREFILTER, 0));
 RWTexture2DArray<float4> prefilteredOutput = RWTexture2DArray<float4>.Handle(uint2(pushConstant.cubemapStorageIndex, 0));
 
 const uint SAMPLE_COUNT = 1024u;

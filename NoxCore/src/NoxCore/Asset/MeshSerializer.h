@@ -346,6 +346,11 @@ namespace Nox
         stream.write(reinterpret_cast<const char*>(&mat.EmissiveTextureSet), sizeof(int32_t));
         stream.write(reinterpret_cast<const char*>(&mat.emissiveStrength), sizeof(float));
         
+        // Transmission
+        stream.write(reinterpret_cast<const char*>(&mat.TransmissionFactor), sizeof(float));
+        SerializerUtils::WriteString(stream, mat.TransmissionTexturePath);
+        stream.write(reinterpret_cast<const char*>(&mat.TransmissionTextureSet), sizeof(int32_t));
+        
         // Alpha & Render settings
         uint32_t modeVal = static_cast<uint32_t>(mat.Mode);
         stream.write(reinterpret_cast<const char*>(&modeVal), sizeof(uint32_t));
@@ -398,6 +403,11 @@ static void ReadMaterials(std::ifstream& stream, std::vector<MaterialData>& outM
         SerializerUtils::ReadString(stream, outMaterialList[i].EmissiveTexturePath);
         stream.read(reinterpret_cast<char*>(&outMaterialList[i].EmissiveTextureSet), sizeof(int32_t));
         stream.read(reinterpret_cast<char*>(&outMaterialList[i].emissiveStrength), sizeof(float));
+        
+        // Transmission
+        stream.read(reinterpret_cast<char*>(&outMaterialList[i].TransmissionFactor), sizeof(float));
+        SerializerUtils::ReadString(stream, outMaterialList[i].TransmissionTexturePath);
+        stream.read(reinterpret_cast<char*>(&outMaterialList[i].TransmissionTextureSet), sizeof(int32_t));
         
         // Alpha & Render settings
         uint32_t modeVal = 0;

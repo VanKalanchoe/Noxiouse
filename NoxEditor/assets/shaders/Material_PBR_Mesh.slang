@@ -169,9 +169,7 @@ float3 getIBLContribution(UniformBufferObject* ubo, PBRInfo pbrInputs, vec3 n, v
     SamplerState samplerIrradiance = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_IRRADIANCE, 0));
     SamplerState samplerPrefiltered = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_PREFILTER, 0));
 
-    TonemapParameters tonemapParams;
-    tonemapParams.exposure = ubo->exposure;
-    tonemapParams.gamma = ubo->gamma;
+    
 
     // retrieve a scale and bias to F0. See [1], Figure 3
     // Sample BRDF LUT (2D Texture from heap)
@@ -181,12 +179,12 @@ float3 getIBLContribution(UniformBufferObject* ubo, PBRInfo pbrInputs, vec3 n, v
     // Sample Irradiance Map (Cube Texture from heap)
     TextureCube irradianceTex = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + ubo->irradianceMapIndex, 0));
     float4 irradianceSample = irradianceTex.Sample(samplerIrradiance, n);
-    float3 diffuseLight = SRGBtoLINEAR(tonemap(irradianceSample, tonemapParams)).rgb;
+    float3 diffuseLight = irradianceSample.rgb;
 
     // Sample Prefiltered Environment Map with Mip Level LOD (Cube Texture from heap)
     TextureCube prefilteredTex = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + ubo->prefilteredMapIndex, 0));
     float4 prefilteredSample = prefilteredTex.SampleLevel(samplerPrefiltered, reflection, lod);
-    float3 specularLight = SRGBtoLINEAR(tonemap(prefilteredSample, tonemapParams)).rgb;
+    float3 specularLight = prefilteredSample.rgb;
 
 	float3 diffuse = diffuseLight * pbrInputs.diffuseColor;
 	float3 specular = specularLight * (pbrInputs.specularColor * brdf.x + brdf.y);
@@ -523,6 +521,13 @@ FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform Pu
         emissive *= emissiveTex.Sample(sampLinearHandle, instance.emissiveTextureSet == 0 ? vertIn.uv0 : vertIn.uv1).rgb;
     }
     color += emissive;
+
+    TonemapParameters tonemapParams;
+    tonemapParams.exposure = ubo->exposure;
+    tonemapParams.gamma = ubo->gamma;
+    tonemapParams.mode = (int)TonemapMode::KhronosPbrNeutral;
+
+    color = toneMap(color, tonemapParams);
 
     output.color = float4(color, baseColor.a);
 
