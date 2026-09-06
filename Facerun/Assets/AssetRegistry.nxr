@@ -3,3 +3,75 @@ AssetRegistry:
     FilePath: Scenes/3D-Scene.nox
     SourceFilePath: Scenes/3D-Scene.nox
     Type: AssetType::Scene
+  - Handle: 542063245227745545
+    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_4.png
+    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_4.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 1390650798385755602
+    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_1.png
+    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_1.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 2057004897525794821
+    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_3.png
+    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_3.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 3167706731515971424
+    FilePath: models/DamagedHelmet/DamagedHelmet.nmesh
+    SourceFilePath: models/DamagedHelmet/DamagedHelmet.gltf
+    Type: AssetType::Mesh
+  - Handle: 5317410254392963727
+    FilePath: models/fox/Fox_Survey.nanim
+    SourceFilePath: models/fox/Fox_Survey.nanim
+    Type: AssetType::AnimationSequence
+  - Handle: 5735421443580852166
+    FilePath: models/fox/Fox_Run.nanim
+    SourceFilePath: models/fox/Fox_Run.nanim
+    Type: AssetType::AnimationSequence
+  - Handle: 5774826277349096753
+    FilePath: models/fox/Fox.nskel
+    SourceFilePath: models/fox/Fox.nskel
+    Type: AssetType::Skeleton
+  - Handle: 14168085809762532914
+    FilePath: models/fox/Fox.nmesh
+    SourceFilePath: models/fox/Fox.gltf
+    Type: AssetType::Mesh
+  - Handle: 16225910947284343333
+    FilePath: models/fox/Texture.png
+    SourceFilePath: models/fox/Texture.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 16782098967821604305
+    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_0.png
+    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_0.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 17989198929163727266
+    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_2.png
+    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_2.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 18046271482966131541
+    FilePath: models/fox/Fox_Walk.nanim
+    SourceFilePath: models/fox/Fox_Walk.nanim
+    Type: AssetType::AnimationSequence

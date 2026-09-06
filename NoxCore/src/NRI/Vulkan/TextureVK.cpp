@@ -21,6 +21,7 @@ namespace NRI
             
         case ImageFormat::R16G16: return vk::Format::eR16G16Unorm;
         case ImageFormat::R32SINT: return vk::Format::eR32Sint;
+        case ImageFormat::R32G32_UINT: return vk::Format::eR32G32Uint;
             
         case ImageFormat::R16G16_SFLOAT: return vk::Format::eR16G16Sfloat;
         case ImageFormat::R16G16B16A16_SFLOAT: return vk::Format::eR16G16B16A16Sfloat;
@@ -201,6 +202,7 @@ namespace NRI
         if (m_boundHeap && m_imageResource.descriptorIndexSlot != ~0u)
         {
             m_boundHeap->unregisterTexture(m_imageResource.descriptorIndexSlot);
+            m_imageResource.descriptorIndexSlot = ~0u;
         }
         
         if (!Nox::IsEngineShuttingDown && m_deviceVK.isDeviceInit() && m_imGuiHandle != VK_NULL_HANDLE)

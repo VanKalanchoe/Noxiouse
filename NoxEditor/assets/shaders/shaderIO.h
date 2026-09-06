@@ -265,6 +265,20 @@ struct PushConstantSkybox
     uint32_t cubemapIndex;     // Index in descriptor heap
 };
 
+struct PushConstantVisibilityDebug
+{
+    uint64_t matrixReference;
+    uint64_t instanceReference;
+    uint64_t boneMatrixReference;
+    uint64_t vertexPageTableReference;
+    uint64_t meshletDrawsPageTableReference;
+    uint64_t meshletVerticesPageTableReference;
+    uint64_t meshletTrianglesPageTableReference;
+    uint32_t visibilityTextureIndex;
+    uint32_t debugMode; // 0 = Reconstructed UVs, 1 = Reconstructed Normals, 2 = Colored Meshlets
+    vec2 viewportSize;
+};
+
 struct PushConstantOutline
 {
     uint64_t matrixReference; // BDA to UniformBufferObject

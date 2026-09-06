@@ -199,10 +199,17 @@ namespace Nox
         void createComputePipeline();
         void createSkyboxPipeline(bool forceCompile);
         void createCommandPool();
+        
         void createSceneResources();
         void createColorResources();
         void createEntityResources();
         void createDepthResources();
+        
+        // Visability
+        void createVisibilityResources();
+        void createVisibilityPipeline(bool forceCompile);
+        void createVisibilityDebugPipeline(bool forceCompile);
+        
         void createTextureImage();
         void initGeometryBuffers();
         void markPageTablesDirty();
@@ -245,6 +252,10 @@ namespace Nox
         std::unique_ptr<NRI::Pipeline> m_presentPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_computePipeline = nullptr;
         
+        // Visability
+        std::unique_ptr<NRI::Pipeline> m_visibilityPipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_visibilityDebugPipeline = nullptr;
+        
         std::unique_ptr<NRI::CommandAllocator> m_commandAllocator = nullptr;
         std::unique_ptr<NRI::CommandBuffer> m_commandBuffers = nullptr;
 
@@ -259,6 +270,9 @@ namespace Nox
         shaderio::UniformBufferObject frozenUniformData = {};
         bool m_frozen = false;
         bool m_frozenDone = false;
+        
+        // Visability
+        Ref<Texture2D> m_visibilityResource;
 
         Ref<Texture2D> m_whiteTexture;
         Ref<Texture2D> m_sceneResource;

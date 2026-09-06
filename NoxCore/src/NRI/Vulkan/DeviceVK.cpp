@@ -245,6 +245,7 @@ namespace NRI
                                                              vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT,
                                                              vk::PhysicalDeviceMeshShaderFeaturesEXT>();
         bool supportsRequiredFeatures = features.template get<vk::PhysicalDeviceFeatures2>().features.samplerAnisotropy &&
+            features.template get<vk::PhysicalDeviceFeatures2>().features.geometryShader && // Visability buffer
             features.template get<vk::PhysicalDeviceVulkan11Features>().shaderDrawParameters &&
             features.template get<vk::PhysicalDeviceVulkan13Features>().dynamicRendering &&
             features.template get<vk::PhysicalDeviceVulkan13Features>().synchronization2 &&
@@ -307,6 +308,7 @@ namespace NRI
             featureChain = {
                 {
                     .features = {
+                        .geometryShader = true,
                         .sampleRateShading = true,
                         .multiDrawIndirect = true,
                         .wideLines = true,

@@ -151,7 +151,8 @@ namespace NRI
                 auto* textureVK = static_cast<TextureVK*>(colorDesc.attachment);
                 mainView = textureVK->getNativeView();
                 
-                if (textureVK->getFormat() == vk::Format::eR32Sint) isIntegerFormat = true;
+                if (textureVK->getFormat() == vk::Format::eR32Sint || textureVK->getFormat() == vk::Format::eR32G32Uint) 
+                    isIntegerFormat = true;
             }
             else if (colorDesc.attachmentSwapchain)
             {

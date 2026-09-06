@@ -91,6 +91,7 @@ namespace NRI
     static const std::vector<vk::ShaderStageFlagBits> g_allGraphicsStages = {
         vk::ShaderStageFlagBits::eVertex,
         vk::ShaderStageFlagBits::eFragment,
+        vk::ShaderStageFlagBits::eGeometry,
         vk::ShaderStageFlagBits::eTaskEXT,
         vk::ShaderStageFlagBits::eMeshEXT
     };

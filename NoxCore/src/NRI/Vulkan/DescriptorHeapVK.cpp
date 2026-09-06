@@ -258,26 +258,14 @@ namespace NRI
 
     void DescriptorHeapVK::unregisterTexture(uint32_t slot)
     {
-        /*// 1. Create a safe descriptor payload pointing to a null view
-        vk::ImageDescriptorInfoEXT nullImageInfo
+        if (slot == ~0u)
+            return;
+
+        // Prevent duplicate entries in the free list!
+        if (std::find(m_freeImageSlots.begin(), m_freeImageSlots.end(), slot) != m_freeImageSlots.end())
         {
-            .pView = nullptr, //  Null view tells the driver this descriptor is empty
-            .layout = vk::ImageLayout::eUndefined
-        };
-
-        vk::ResourceDescriptorInfoEXT info{};
-        info.type = vk::DescriptorType::eSampledImage;
-        info.data.pImage = &nullImageInfo;
-
-        // 2. Locate the exact spot this texture was parked in
-        vk::HostAddressRangeEXT hostRange
-        {
-            .address = static_cast<uint8_t*>(m_mappedPtr) + m_imageHeapOffset + (m_imageDescSize * slot),
-            .size = m_imageDescSize
-        };
-
-        // 3. Overwrite the memory on the host-mapped pointer
-        m_deviceVK.getDevice().writeResourceDescriptorsEXT(info, hostRange);*/
+            return;
+        }
 
         // 4. Push this index slot back into the recycling bin so another texture can grab it
         m_freeImageSlots.push_back(slot);
