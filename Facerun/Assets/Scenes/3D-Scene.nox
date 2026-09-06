@@ -1,5 +1,16 @@
 Scene: Untitled
 Entities:
+  - Entity: 1046906346744094343
+    TagComponent:
+      Tag: Empty Entity
+    TransformComponent:
+      Translation: [-3.4, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    SpriteRendererComponent:
+      Color: [1, 1, 1, 1]
+      TextureHandle: 13670283566026550113
+      TilingFactor: 1
   - Entity: 4493093982643158216
     TagComponent:
       Tag: Fox

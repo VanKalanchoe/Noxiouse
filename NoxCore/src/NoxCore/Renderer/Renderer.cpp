@@ -29,12 +29,13 @@ namespace Nox
         bunnyMesh = MeshImporter::LoadMesh(MODEL_PATH_GLTF_STANDFORD);
         foxMesh = MeshImporter::LoadMesh(MODEL_PATH_FOX_GLTF);
         */
-        
+
         //PBR
         watchShader("assets/shaders/Material_PBR_MeshTask.slang", "PBR", [this]() { createPBRPipeline(true); });
-        watchShader("assets/shaders/Material_PBR_Mesh.slang",     "PBR", [this]() { createPBRPipeline(true); });
-        watchShader("assets/shaders/Skybox.slang",     "PBR", [this]() { createSkyboxPipeline(true); });
-        
+        watchShader("assets/shaders/Material_PBR_Mesh.slang", "PBR", [this]() { createPBRPipeline(true); });
+        watchShader("assets/shaders/Skybox.slang", "PBR", [this]() { createSkyboxPipeline(true); });
+        // Unlit
+        watchShader("assets/shaders/Material_Unlit_Mesh.slang", "Unlit", [this]() { createUnlitPipeline(true); });
         // Visability
         watchShader("assets/shaders/VisibilityBuffer.slang", "VisBuffer", [this]() { createVisibilityPipeline(true); });
         watchShader("assets/shaders/VisibilityDebug.slang", "VisDebug", [this]() { createVisibilityDebugPipeline(true); });
@@ -42,7 +43,7 @@ namespace Nox
         watchShader("assets/shaders/GBufferMaterial.slang", "VisDebug", [this]() { createVisibilityDebugPipeline(true); });
         // PBR
         watchShader("assets/shaders/DeferredLighting.slang", "DeferredLighting", [this]() { createDeferredLightingPipeline(true); });
-        
+
         m_whiteTexture = createSolidColorTexture(255, 255, 255, 255);
 
         // Allow buffer to hold up to 4K resolution entity pixels (3840 x 2160 * 4 bytes ≈ 33 MB)
@@ -103,13 +104,13 @@ namespace Nox
         createComputePipeline();
         createSkyboxPipeline(false);
         createOutlinePipeline(false);
-        
+
         // Visability
-        createVisibilityPipeline(false);      // <--- ADD THIS
+        createVisibilityPipeline(false); // <--- ADD THIS
         createVisibilityDebugPipeline(false);
         // G-Buffer
         createGBufferPipeline();
-        
+
         createCommandPool();
         createUniformBuffers();
         createSelectedEntityIDBuffers();
@@ -119,14 +120,14 @@ namespace Nox
         createColorResources();
         createEntityResources();
         createDepthResources();
-        
+
         // Visability
         createVisibilityResources();
         // G-Buffer
         createGBufferResources();
         // PBR
         createDeferredLightingPipeline(false);
-        
+
         createCommandBuffers();
 
         initGeometryBuffers();
@@ -167,10 +168,10 @@ namespace Nox
         createColorResources();
         createEntityResources();
         createDepthResources();
-        
+
         // Visability
         createVisibilityResources();
-        
+
         // G-Buffer
         createGBufferResources();
     }
@@ -200,10 +201,10 @@ namespace Nox
         createColorResources();
         createEntityResources();
         createDepthResources();
-        
+
         //Visability
         createVisibilityResources();
-        
+
         // G-Buffer
         createGBufferResources();
     }
@@ -216,10 +217,10 @@ namespace Nox
     void Renderer::watchShader(const std::filesystem::path& path, const std::string& pipelineKey, std::function<void()> reloadFn)
     {
         m_fileWatcher.watch(path, [this, pipelineKey, reloadFn](const auto& modifiedPath)
-            {
-                std::scoped_lock lock(m_reloadMutex);
-                m_pendingReloads[pipelineKey] = reloadFn;
-            });
+        {
+            std::scoped_lock lock(m_reloadMutex);
+            m_pendingReloads[pipelineKey] = reloadFn;
+        });
     }
 
     void Renderer::createPBRPipeline(bool forceCompile)
@@ -436,15 +437,15 @@ namespace Nox
     {
         //changed from m_swapChainExtent to m_viewportSize
         m_depthResource = m_device->createTexture(NRI::TextureDesc{
-                .width = m_isEditor ? m_viewportSize.width : m_swapChainExtent.width,
-                .height = m_isEditor ? m_viewportSize.height : m_swapChainExtent.height,
-                .mipLevels = 1,
-                .sampleCount = 1,
-                .usage = NRI::TextureUsage::DepthStencilAttachment
-            });
+            .width = m_isEditor ? m_viewportSize.width : m_swapChainExtent.width,
+            .height = m_isEditor ? m_viewportSize.height : m_swapChainExtent.height,
+            .mipLevels = 1,
+            .sampleCount = 1,
+            .usage = NRI::TextureUsage::DepthStencilAttachment
+        });
         m_resourceHeap->registerTexture(*m_depthResource);
     }
-    
+
     void Renderer::createVisibilityResources()
     {
         m_visibilityResource = m_device->createTexture(NRI::TextureDesc{
@@ -466,7 +467,7 @@ namespace Nox
     {
         NRI::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
-        desc.colorFormats = { NRI::ImageFormat::R32G32_UINT };
+        desc.colorFormats = {NRI::ImageFormat::R32G32_UINT};
 
         desc.shaders.push_back({
             .stage = NRI::ShaderStage::Task,
@@ -491,7 +492,7 @@ namespace Nox
     {
         NRI::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
-        desc.colorFormats = { NRI::ImageFormat::Surface };
+        desc.colorFormats = {NRI::ImageFormat::Surface};
 
         desc.shaders.push_back({
             .stage = NRI::ShaderStage::Task,
@@ -513,93 +514,93 @@ namespace Nox
     }
 
     void Renderer::createGBufferResources()
-        {
-            const uint32_t width = m_isEditor ? m_viewportSize.width : m_swapChainExtent.width;
-            const uint32_t height = m_isEditor ? m_viewportSize.height : m_swapChainExtent.height;
+    {
+        const uint32_t width = m_isEditor ? m_viewportSize.width : m_swapChainExtent.width;
+        const uint32_t height = m_isEditor ? m_viewportSize.height : m_swapChainExtent.height;
 
-            m_gbufferAlbedo = m_device->createTexture(NRI::TextureDesc{
-                .width = width,
-                .height = height,
-                .mipLevels = 1,
-                .sampleCount = 1,
-                .usage = NRI::TextureUsage::ColorAttachment,
-                .format = NRI::ImageFormat::RGBA8,
-                .directFormat = UINT32_MAX
-            });
-            m_resourceHeap->registerTexture(*m_gbufferAlbedo);
+        m_gbufferAlbedo = m_device->createTexture(NRI::TextureDesc{
+            .width = width,
+            .height = height,
+            .mipLevels = 1,
+            .sampleCount = 1,
+            .usage = NRI::TextureUsage::ColorAttachment,
+            .format = NRI::ImageFormat::RGBA8,
+            .directFormat = UINT32_MAX
+        });
+        m_resourceHeap->registerTexture(*m_gbufferAlbedo);
 
-            m_gbufferNormal = m_device->createTexture(NRI::TextureDesc{
-                .width = width,
-                .height = height,
-                .mipLevels = 1,
-                .sampleCount = 1,
-                .usage = NRI::TextureUsage::ColorAttachment,
-                .format = NRI::ImageFormat::R16G16B16A16_SFLOAT,
-                .directFormat = UINT32_MAX
-            });
-            m_resourceHeap->registerTexture(*m_gbufferNormal);
+        m_gbufferNormal = m_device->createTexture(NRI::TextureDesc{
+            .width = width,
+            .height = height,
+            .mipLevels = 1,
+            .sampleCount = 1,
+            .usage = NRI::TextureUsage::ColorAttachment,
+            .format = NRI::ImageFormat::R16G16B16A16_SFLOAT,
+            .directFormat = UINT32_MAX
+        });
+        m_resourceHeap->registerTexture(*m_gbufferNormal);
 
-            m_gbufferMaterial = m_device->createTexture(NRI::TextureDesc{
-                .width = width,
-                .height = height,
-                .mipLevels = 1,
-                .sampleCount = 1,
-                .usage = NRI::TextureUsage::ColorAttachment,
-                .format = NRI::ImageFormat::RGBA8,
-                .directFormat = UINT32_MAX
-            });
-            m_resourceHeap->registerTexture(*m_gbufferMaterial);
+        m_gbufferMaterial = m_device->createTexture(NRI::TextureDesc{
+            .width = width,
+            .height = height,
+            .mipLevels = 1,
+            .sampleCount = 1,
+            .usage = NRI::TextureUsage::ColorAttachment,
+            .format = NRI::ImageFormat::RGBA8,
+            .directFormat = UINT32_MAX
+        });
+        m_resourceHeap->registerTexture(*m_gbufferMaterial);
 
-            m_gbufferEmission = m_device->createTexture(NRI::TextureDesc{
-                .width = width,
-                .height = height,
-                .mipLevels = 1,
-                .sampleCount = 1,
-                .usage = NRI::TextureUsage::ColorAttachment,
-                .format = NRI::ImageFormat::R16G16B16A16_SFLOAT,
-                .directFormat = UINT32_MAX
-            });
-            m_resourceHeap->registerTexture(*m_gbufferEmission);
+        m_gbufferEmission = m_device->createTexture(NRI::TextureDesc{
+            .width = width,
+            .height = height,
+            .mipLevels = 1,
+            .sampleCount = 1,
+            .usage = NRI::TextureUsage::ColorAttachment,
+            .format = NRI::ImageFormat::R16G16B16A16_SFLOAT,
+            .directFormat = UINT32_MAX
+        });
+        m_resourceHeap->registerTexture(*m_gbufferEmission);
 
-            uniformData.imageHeapIndexOffset = m_resourceHeap->getImageHeapIndexOffset();
-        }
+        uniformData.imageHeapIndexOffset = m_resourceHeap->getImageHeapIndexOffset();
+    }
 
-        void Renderer::createGBufferPipeline(bool forceCompile)
-        {
-            NRI::PipelineDesc desc{};
-            desc.forceCompile = forceCompile;
-            desc.colorFormats = {
-                NRI::ImageFormat::RGBA8,
-                NRI::ImageFormat::R16G16B16A16_SFLOAT,
-                NRI::ImageFormat::RGBA8,
-                NRI::ImageFormat::R16G16B16A16_SFLOAT,
-                NRI::ImageFormat::R32SINT
-            };
+    void Renderer::createGBufferPipeline(bool forceCompile)
+    {
+        NRI::PipelineDesc desc{};
+        desc.forceCompile = forceCompile;
+        desc.colorFormats = {
+            NRI::ImageFormat::RGBA8,
+            NRI::ImageFormat::R16G16B16A16_SFLOAT,
+            NRI::ImageFormat::RGBA8,
+            NRI::ImageFormat::R16G16B16A16_SFLOAT,
+            NRI::ImageFormat::R32SINT
+        };
 
-            desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Task,
-                .entryPoint = "taskMain",
-                .sourcePath = "assets/shaders/GBufferMaterial.slang"
-            });
-            desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Mesh,
-                .entryPoint = "meshMain",
-                .sourcePath = "assets/shaders/GBufferMaterial.slang"
-            });
-            desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Fragment,
-                .entryPoint = "fragMain",
-                .sourcePath = "assets/shaders/GBufferMaterial.slang"
-            });
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Task,
+            .entryPoint = "taskMain",
+            .sourcePath = "assets/shaders/GBufferMaterial.slang"
+        });
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Mesh,
+            .entryPoint = "meshMain",
+            .sourcePath = "assets/shaders/GBufferMaterial.slang"
+        });
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Fragment,
+            .entryPoint = "fragMain",
+            .sourcePath = "assets/shaders/GBufferMaterial.slang"
+        });
 
-            m_gbufferPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
-        }
-    
+        m_gbufferPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+    }
+
     void Renderer::createDeferredLightingPipeline(bool forceCompile)
     {
         NRI::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
-        desc.colorFormats = { NRI::ImageFormat::Surface };
+        desc.colorFormats = {NRI::ImageFormat::Surface};
 
         desc.shaders.push_back({
             .stage = NRI::ShaderStage::Task,
@@ -624,7 +625,7 @@ namespace Nox
     {
         m_textureResource = TextureImporter::LoadTexture2D(TEXTURE_PATH_FOX, {}, this);
     }
-    
+
     Ref<Texture2D> Renderer::UploadTexture(const TextureData& cpuData)
     {
         std::unique_ptr<NRI::Buffer> stagingBuffer = m_device->createBuffer(NRI::BufferDesc{
@@ -727,7 +728,7 @@ namespace Nox
 
         // Bind global descriptor heaps
         cmd->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
-        
+
         // Bind compute pipeline & push constant parameters
         cmd->bindPipeline(NRI::PipelineBindPoint::Compute, *equirectPipeline);
         cmd->pushData(&pushData, sizeof(EquirectPushConstants));
@@ -738,7 +739,7 @@ namespace Nox
 
         // Dispatch work: X and Y cover the resolution, Z=6 covers all 6 cubemap faces
         cmd->dispatch(groupCountX, groupCountY, 6);
-        
+
         // Submit command buffer and wait for execution to complete
         endSingleTimeCommands(std::move(cmd));
 
@@ -787,7 +788,7 @@ namespace Nox
 
         std::unique_ptr<NRI::CommandBuffer> irradCmd = beginSingleTimeCommands();
         irradCmd->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
-        
+
         irradCmd->bindPipeline(NRI::PipelineBindPoint::Compute, *irradiancePipeline);
 
         std::vector<uint32_t> tempIrradMipSlots;
@@ -810,7 +811,7 @@ namespace Nox
             uint32_t irradGroupCountY = (mipSize + 15) / 16;
             irradCmd->dispatch(irradGroupCountX, irradGroupCountY, 6);
         }
-        
+
         endSingleTimeCommands(std::move(irradCmd));
 
         // Free the temporary per-mip storage descriptor slots
@@ -859,7 +860,7 @@ namespace Nox
 
         std::unique_ptr<NRI::CommandBuffer> prefCmd = beginSingleTimeCommands();
         prefCmd->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
-        
+
         prefCmd->bindPipeline(NRI::PipelineBindPoint::Compute, *prefilterPipeline);
 
         std::vector<uint32_t> tempMipSlots;
@@ -885,7 +886,7 @@ namespace Nox
             uint32_t groupY = (mipHeight + 15) / 16;
             prefCmd->dispatch(groupX, groupY, 6);
         }
-        
+
         endSingleTimeCommands(std::move(prefCmd));
         // Free the temporary per-mip storage descriptor slots
         for (uint32_t slot : tempMipSlots)
@@ -939,7 +940,7 @@ namespace Nox
         uint32_t brdfGroupX = (brdfLUTSize + 15) / 16;
         uint32_t brdfGroupY = (brdfLUTSize + 15) / 16;
         brdfCmd->dispatch(brdfGroupX, brdfGroupY, 1);
-        
+
         endSingleTimeCommands(std::move(brdfCmd));
         m_resourceHeap->registerTexture(*m_brdfLUT, NRI::TextureUsage::ShaderResource);
     }
@@ -1281,7 +1282,7 @@ namespace Nox
             m_selectedEntityIDBuffersMapped.emplace_back(mapped);
         }
     }
-    
+
     void Renderer::createLightBuffer(uint64_t bufferSize)
     {
         m_lightBuffers.clear();
@@ -1475,6 +1476,58 @@ namespace Nox
         m_commandBuffers->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
 
         m_commandBuffers->transitionSwapchainLayout(*m_swapChain, imageIndex, NRI::TextureLayout::Undefined, NRI::TextureLayout::ColorAttachment);
+        
+        // -------------------------------------------------------------
+            // Shared Indirect Meshlet Drawing State (Used by Pass 1 & Pass 4)
+            // -------------------------------------------------------------
+            const uint32_t cmdStride = sizeof(DrawMeshTasksIndirectCommand);
+            const uint32_t instanceStride = sizeof(shaderio::InstanceData);
+            const uint64_t baseInstanceAddress = (!m_instanceBuffers.empty() && frameIndex < m_instanceBuffers.size() && m_instanceBuffers[frameIndex])
+                                                     ? m_instanceBuffers[frameIndex]->getDeviceAddress()
+                                                     : 0;
+
+            uint64_t currentCmdOffset = 0;
+            uint64_t currentInstanceOffset = 0;
+
+            shaderio::PushConstantMeshlets references{};
+            if (baseInstanceAddress != 0)
+            {
+                references.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                references.instanceReference = baseInstanceAddress;
+                bool hasBoneBuffers = frameIndex < m_boneBuffers.size() && m_boneBuffers[frameIndex] != nullptr;
+                bool hasBones = !m_boneMatrices.empty();
+                references.boneMatrixReference = (hasBones && hasBoneBuffers) ? m_boneBuffers[frameIndex]->getDeviceAddress() : 0;
+                references.vertexPageTableReference = m_vertexPageTableBuffers[frameIndex]->getDeviceAddress();
+                references.meshletBoundsPageTableReference = m_meshletBoundPageTableBuffers[frameIndex]->getDeviceAddress();
+                references.meshletDrawsPageTableReference = m_meshletDrawPageTableBuffers[frameIndex]->getDeviceAddress();
+                references.meshletVerticesPageTableReference = m_meshletVertPageTableBuffers[frameIndex]->getDeviceAddress();
+                references.meshletTrianglesPageTableReference = m_meshletTriPageTableBuffers[frameIndex]->getDeviceAddress();
+            }
+
+            NRI::Pipeline* boundPipeline = nullptr;
+
+            auto drawPass = [&](uint32_t count, NRI::Pipeline& pipeline, NRI::CullMode cullMode, bool depthWrite, bool blendEnable)
+            {
+                if (count == 0 || !m_indirectBuffers[frameIndex]) return;
+
+                references.instanceReference = baseInstanceAddress + (currentInstanceOffset * instanceStride);
+                m_commandBuffers->pushData(&references, sizeof(shaderio::PushConstantMeshlets));
+
+                if (boundPipeline != &pipeline)
+                {
+                    m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, pipeline);
+                    boundPipeline = &pipeline;
+                }
+
+                m_commandBuffers->setCullMode(cullMode);
+                m_commandBuffers->setDepthWriteEnable(depthWrite);
+                m_commandBuffers->setColorBlendEnable(0, blendEnable);
+
+                m_commandBuffers->drawMeshTasksIndirect(*m_indirectBuffers[frameIndex], currentCmdOffset, count, cmdStride);
+
+                currentCmdOffset += static_cast<uint64_t>(count) * cmdStride;
+                currentInstanceOffset += count;
+            };
 
         std::vector<NRI::RenderAttachDesc> colorAttachments;
         // 1. VISIBILITY BUFFER TARGET (R32G32_UINT)
@@ -1490,7 +1543,7 @@ namespace Nox
             .attachment = m_depthResource.get(),
             .loadOP = NRI::LoadOP::clear,
             .storeOP = NRI::StoreOP::store, // store depth so subsequent passes can read it
-            .clearDepth = {0.0f, 0}         // Reverse-Z
+            .clearDepth = {0.0f, 0} // Reverse-Z
         };
 
         NRI::RenderDesc desc =
@@ -1562,253 +1615,274 @@ namespace Nox
         }
 
         m_commandBuffers->setLogicOpEnable(false);
-
-        if (!m_instanceBufferObjects.empty() || !m_drawMeshTasksIndirectCommands.empty())
+        
+        if ((!m_instanceBufferObjects.empty() || !m_drawMeshTasksIndirectCommands.empty()) && m_visibilityPipeline)
         {
-            shaderio::PushConstantMeshlets references{};
-            // Pass pointer to the global matrix via a buffer device address
-            /*references.modelMatrix = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 0.0f));*/
-            references.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
-            references.instanceReference = m_instanceBuffers[frameIndex]->getDeviceAddress();
-            bool hasBoneBuffers = frameIndex < m_boneBuffers.size() && m_boneBuffers[frameIndex] != nullptr;
-            bool hasBones = !m_boneMatrices.empty();
-
-            references.boneMatrixReference = (hasBones && hasBoneBuffers)
-                                                 ? m_boneBuffers[frameIndex]->getDeviceAddress()
-                                                 : 0;
-            references.vertexPageTableReference = m_vertexPageTableBuffers[frameIndex]->getDeviceAddress();
-            references.meshletBoundsPageTableReference = m_meshletBoundPageTableBuffers[frameIndex]->getDeviceAddress();
-            references.meshletDrawsPageTableReference = m_meshletDrawPageTableBuffers[frameIndex]->getDeviceAddress();
-            references.meshletVerticesPageTableReference = m_meshletVertPageTableBuffers[frameIndex]->getDeviceAddress();
-            references.meshletTrianglesPageTableReference = m_meshletTriPageTableBuffers[frameIndex]->getDeviceAddress();
-            m_commandBuffers->pushData(&references, sizeof(shaderio::PushConstantMeshlets));
-
-            const uint32_t cmdStride = sizeof(DrawMeshTasksIndirectCommand);
-            const uint32_t instanceStride = sizeof(shaderio::InstanceData);
-            const uint64_t baseInstanceAddress = m_instanceBuffers[frameIndex]->getDeviceAddress();
-
-            uint64_t currentCmdOffset = 0;
-            uint64_t currentInstanceOffset = 0;
-
-            // Track bound pipeline to avoid redundant vkCmdBindPipeline calls
-            NRI::Pipeline* boundPipeline = nullptr;
-
-            auto drawPass = [&](uint32_t count, NRI::Pipeline& pipeline, NRI::CullMode cullMode, bool depthWrite, bool blendEnable)
-            {
-                if (count == 0) return;
-
-                references.instanceReference = baseInstanceAddress + (currentInstanceOffset * instanceStride);
-                m_commandBuffers->pushData(&references, sizeof(shaderio::PushConstantMeshlets));
-
-                //  ONLY bind if we are switching to a different pipeline!
-                if (boundPipeline != &pipeline)
-                {
-                    m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, pipeline);
-                    boundPipeline = &pipeline;
-                }
-
-                m_commandBuffers->setCullMode(cullMode);
-                m_commandBuffers->setDepthWriteEnable(depthWrite);
-                m_commandBuffers->setColorBlendEnable(0, blendEnable);
-
-                m_commandBuffers->drawMeshTasksIndirect(*m_indirectBuffers[frameIndex], currentCmdOffset, count, cmdStride);
-
-                currentCmdOffset += static_cast<uint64_t>(count) * cmdStride;
-                currentInstanceOffset += count;
-            };
-
             // =========================================================================
-            // 1. ALL PBR OPAQUE & MASK (Binds Graphics Pipeline ONCE for all 4 passes)
+            // 1. ALL PBR OPAQUE & MASK (Rasterizes to Visibility Buffer & Depth)
             // =========================================================================
             drawPass(m_opaqueCount, *m_visibilityPipeline, NRI::CullMode::Back, true, false);
             drawPass(m_opaqueDoubleSidedCount, *m_visibilityPipeline, NRI::CullMode::None, true, false);
             drawPass(m_maskCount, *m_visibilityPipeline, NRI::CullMode::Back, true, false);
             drawPass(m_maskDoubleSidedCount, *m_visibilityPipeline, NRI::CullMode::None, true, false);
 
-            // =========================================================================
-            // 2. ALL UNLIT OPAQUE & MASK (Switches to Unlit Pipeline ONCE for both passes)
-            // =========================================================================
-            if (m_unlitPipeline)
-            {
-                drawPass(m_unlitCount, *m_unlitPipeline, NRI::CullMode::Back, true, false);
-                drawPass(m_unlitDoubleSidedCount, *m_unlitPipeline, NRI::CullMode::None, true, false);
-            }
-
-            /*// =========================================================================
-            // 3. TRANSPARENT PASSES (Rendered last so they blend over the opaque depth)
-            // =========================================================================
-            drawPass(m_transparentCount, *m_graphics_PBR_Pipeline, NRI::CullMode::None, false, true);
-            if (m_unlitPipeline)
-            {
-                drawPass(m_transparentUnlitCount, *m_unlitPipeline, NRI::CullMode::None, false, true);
-            }*/
-
-            // Restore defaults for subsequent passes (skybox, etc.)
+            // Restore defaults for subsequent passes
             m_commandBuffers->setCullMode(NRI::CullMode::Back);
             m_commandBuffers->setDepthWriteEnable(true);
             m_commandBuffers->setColorBlendEnable(0, false);
         }
         
+
         m_commandBuffers->endRendering();
 
-        /*
-        m_renderer2D->Flush(*m_commandBuffers, *m_uniformBuffers[frameIndex], frameIndex);
-
-        if (m_skyboxPipeline)
+        uint32_t currentDebugMode = m_debugMode;
+        // =========================================================================
+        // 2. G-BUFFER MATERIAL GENERATION PASS (Decoupled Material Resolve)
+        // =========================================================================
+        if (m_gbufferPipeline)
         {
-            m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_skyboxPipeline);
+            std::vector<NRI::RenderAttachDesc> gbufferAttachments;
+            // 0. Albedo (RGBA8)
+            gbufferAttachments.push_back({
+                .attachment = m_gbufferAlbedo.get(),
+                .loadOP = NRI::LoadOP::clear,
+                .storeOP = NRI::StoreOP::store,
+                .clearColor = {0.0f, 0.0f, 0.0f, 0.0f}
+            });
+            // 1. World Normal (R16G16B16A16_SFLOAT)
+            gbufferAttachments.push_back({
+                .attachment = m_gbufferNormal.get(),
+                .loadOP = NRI::LoadOP::clear,
+                .storeOP = NRI::StoreOP::store,
+                .clearColor = {0.0f, 0.0f, 0.0f, 0.0f}
+            });
+            // 2. Material (RGBA8: Roughness, Metallic, Workflow)
+            gbufferAttachments.push_back({
+                .attachment = m_gbufferMaterial.get(),
+                .loadOP = NRI::LoadOP::clear,
+                .storeOP = NRI::StoreOP::store,
+                .clearColor = {0.0f, 0.0f, 0.0f, 0.0f}
+            });
+            // 3. Emission (R16G16B16A16_SFLOAT)
+            gbufferAttachments.push_back({
+                .attachment = m_gbufferEmission.get(),
+                .loadOP = NRI::LoadOP::clear,
+                .storeOP = NRI::StoreOP::store,
+                .clearColor = {0.0f, 0.0f, 0.0f, 0.0f}
+            });
+            // 4. Entity ID (R32SINT)
+            gbufferAttachments.push_back({
+                .attachment = m_entityResource.get(),
+                .loadOP = NRI::LoadOP::clear,
+                .storeOP = NRI::StoreOP::store,
+                .clearColor = {-1.0f, 0.0f, 0.0f, 0.0f}
+            });
 
-            // Reverse-Z configuration: test against far plane (Z = 0.0), disable depth writes
-            m_commandBuffers->setDepthWriteEnable(false);
-            m_commandBuffers->setDepthCompareOp(NRI::CompareOp::GreaterOrEqual);
+            NRI::RenderDesc gbufferDesc = {
+                .renderArea = locViewportSize,
+                .colorAttachments = gbufferAttachments
+            };
+
+            m_commandBuffers->beginRendering(gbufferDesc);
+
+            m_commandBuffers->setViewportWithCount({0.0f, h, w, -h}, 0.0f, 1.0f);
+            m_commandBuffers->setScissorWithCount(locViewportSize);
+
+            m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_gbufferPipeline);
             m_commandBuffers->setCullMode(NRI::CullMode::None);
+            m_commandBuffers->setDepthTestEnable(false);
+            m_commandBuffers->setDepthWriteEnable(false);
 
-            shaderio::PushConstantSkybox references{};
-            references.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
-            references.cubemapIndex = m_environmentCubemap->GetDescriptorIndexSlot();
-            m_commandBuffers->pushData(&references, sizeof(shaderio::PushConstantSkybox));
+            for (uint32_t a = 0; a < 5; ++a)
+            {
+                m_commandBuffers->setColorBlendEnable(a, false);
+                m_commandBuffers->setColorWriteMask(a, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
+            }
+
+            shaderio::PushConstantVisibilityDebug gbufferPush{};
+            gbufferPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+            gbufferPush.instanceReference = m_instanceBuffers[frameIndex]->getDeviceAddress();
+
+            bool hasBoneBuffers = frameIndex < m_boneBuffers.size() && m_boneBuffers[frameIndex] != nullptr;
+            bool hasBones = !m_boneMatrices.empty();
+            gbufferPush.boneMatrixReference = (hasBones && hasBoneBuffers) ? m_boneBuffers[frameIndex]->getDeviceAddress() : 0;
+
+            gbufferPush.vertexPageTableReference = m_vertexPageTableBuffers[frameIndex]->getDeviceAddress();
+            gbufferPush.meshletDrawsPageTableReference = m_meshletDrawPageTableBuffers[frameIndex]->getDeviceAddress();
+            gbufferPush.meshletVerticesPageTableReference = m_meshletVertPageTableBuffers[frameIndex]->getDeviceAddress();
+            gbufferPush.meshletTrianglesPageTableReference = m_meshletTriPageTableBuffers[frameIndex]->getDeviceAddress();
+            gbufferPush.visibilityTextureIndex = m_visibilityResource->GetDescriptorIndexSlot();
+            gbufferPush.viewportSize = glm::vec2(w, h);
+            gbufferPush.debugMode = currentDebugMode;
+            m_commandBuffers->pushData(&gbufferPush, sizeof(shaderio::PushConstantVisibilityDebug));
 
             m_commandBuffers->drawMeshTasks(1, 1, 1);
-
-            // Restore depth write state
-            m_commandBuffers->setDepthWriteEnable(true);
-            m_commandBuffers->setDepthCompareOp(NRI::CompareOp::Greater);
+            m_commandBuffers->endRendering();
         }
-        */
-        uint32_t currentDebugMode = 0;
-            // =========================================================================
-            // 2. G-BUFFER MATERIAL GENERATION PASS (Decoupled Material Resolve)
-            // =========================================================================
-            if (m_gbufferPipeline)
+
+        // =========================================================================
+        // 3. DECOUPLED DEFERRED PBR LIGHTING PASS
+        // =========================================================================
+        if (m_deferredLightingPipeline)
+        {
+            std::vector<NRI::RenderAttachDesc> lightingAttachments;
+            lightingAttachments.push_back({
+                .attachment = m_sceneResource.get(),
+                .loadOP = NRI::LoadOP::clear,
+                .storeOP = NRI::StoreOP::store,
+                .clearColor = {0.0f, 0.0f, 0.0f, 1.0f}
+            });
+
+            NRI::RenderDesc lightingDesc = {
+                .renderArea = locViewportSize,
+                .colorAttachments = lightingAttachments
+            };
+
+            m_commandBuffers->beginRendering(lightingDesc);
+
+            m_commandBuffers->setViewportWithCount({0.0f, h, w, -h}, 0.0f, 1.0f);
+            m_commandBuffers->setScissorWithCount(locViewportSize);
+
+            m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_deferredLightingPipeline);
+            m_commandBuffers->setCullMode(NRI::CullMode::None);
+            m_commandBuffers->setDepthTestEnable(false);
+            m_commandBuffers->setDepthWriteEnable(false);
+            m_commandBuffers->setColorBlendEnable(0, false);
+            m_commandBuffers->setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
+
+            glm::mat4 viewProj = uniformData.proj * uniformData.view;
+            shaderio::PushConstantDeferredLighting lightingPush{};
+            lightingPush.invViewProj = glm::inverse(viewProj);
+            lightingPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+            lightingPush.visibilityTextureIndex = m_visibilityResource->GetDescriptorIndexSlot();
+            lightingPush.gbufferAlbedoIndex = m_gbufferAlbedo->GetDescriptorIndexSlot();
+            lightingPush.gbufferNormalIndex = m_gbufferNormal->GetDescriptorIndexSlot();
+            lightingPush.gbufferMaterialIndex = m_gbufferMaterial->GetDescriptorIndexSlot();
+            lightingPush.gbufferEmissionIndex = m_gbufferEmission->GetDescriptorIndexSlot();
+            lightingPush.depthTextureIndex = m_depthResource->GetDescriptorIndexSlot();
+            lightingPush.viewportSize = glm::vec2(w, h);
+            lightingPush.debugMode = currentDebugMode;
+            // 0 = Full PBR Lit, 1 = Direct Lights Only, 2 = IBL Only, 3 = World Pos, 4 = Albedo, 5 = Normal, 6 = Roughness, 7 = Metallic, 8 = Occlusion, 9 = Emission
+            m_commandBuffers->pushData(&lightingPush, sizeof(shaderio::PushConstantDeferredLighting));
+
+            m_commandBuffers->drawMeshTasks(1, 1, 1);
+            m_commandBuffers->endRendering();
+        }
+
+        // =========================================================================
+        // 4. FORWARD PASS: SKYBOX + RENDERER2D (Quads, Circles, Text, Lines)
+        // =========================================================================
+        {
+            std::vector<NRI::RenderAttachDesc> forwardColorAttachments;
+            // Attachment 0: Scene color
+            forwardColorAttachments.push_back({
+                .attachment = m_sceneResource.get(),
+                .loadOP = NRI::LoadOP::load,
+                .storeOP = NRI::StoreOP::store,
+            });
+            // Attachment 1: Entity IDs
+            forwardColorAttachments.push_back({
+                .attachment = m_entityResource.get(),
+                .loadOP = NRI::LoadOP::load,
+                .storeOP = NRI::StoreOP::store,
+            });
+
+            // Depth attachment for depth-testing against 3D scene
+            NRI::RenderAttachDesc forwardDepthAttachment = {
+                .attachment = m_depthResource.get(),
+                .loadOP = NRI::LoadOP::load,
+                .storeOP = NRI::StoreOP::store,
+            };
+
+            NRI::RenderDesc forwardDesc = {
+                .renderArea = locViewportSize,
+                .colorAttachments = forwardColorAttachments,
+                .depthAttachment = forwardDepthAttachment
+            };
+
+            m_commandBuffers->beginRendering(forwardDesc);
+
+            m_commandBuffers->setViewportWithCount({0.0f, h, w, -h}, 0.0f, 1.0f);
+            m_commandBuffers->setScissorWithCount(locViewportSize);
+
+            // -------------------------------------------------------------
+            // A. UNLIT MESHES (Dedicated Forward Shader with Base Color & Depth Write)
+            // -------------------------------------------------------------
+            if (m_unlitPipeline && (m_unlitCount > 0 || m_unlitDoubleSidedCount > 0))
             {
-                std::vector<NRI::RenderAttachDesc> gbufferAttachments;
-                // 0. Albedo (RGBA8)
-                gbufferAttachments.push_back({
-                    .attachment = m_gbufferAlbedo.get(),
-                    .loadOP = NRI::LoadOP::clear,
-                    .storeOP = NRI::StoreOP::store,
-                    .clearColor = {0.0f, 0.0f, 0.0f, 0.0f}
-                });
-                // 1. World Normal (R16G16B16A16_SFLOAT)
-                gbufferAttachments.push_back({
-                    .attachment = m_gbufferNormal.get(),
-                    .loadOP = NRI::LoadOP::clear,
-                    .storeOP = NRI::StoreOP::store,
-                    .clearColor = {0.0f, 0.0f, 0.0f, 0.0f}
-                });
-                // 2. Material (RGBA8: Roughness, Metallic, Workflow)
-                gbufferAttachments.push_back({
-                    .attachment = m_gbufferMaterial.get(),
-                    .loadOP = NRI::LoadOP::clear,
-                    .storeOP = NRI::StoreOP::store,
-                    .clearColor = {0.0f, 0.0f, 0.0f, 0.0f}
-                });
-                // 3. Emission (R16G16B16A16_SFLOAT)
-                gbufferAttachments.push_back({
-                    .attachment = m_gbufferEmission.get(),
-                    .loadOP = NRI::LoadOP::clear,
-                    .storeOP = NRI::StoreOP::store,
-                    .clearColor = {0.0f, 0.0f, 0.0f, 0.0f}
-                });
-                // 4. Entity ID (R32SINT)
-                gbufferAttachments.push_back({
-                    .attachment = m_entityResource.get(),
-                    .loadOP = NRI::LoadOP::clear,
-                    .storeOP = NRI::StoreOP::store,
-                    .clearColor = {-1.0f, 0.0f, 0.0f, 0.0f}
-                });
+                boundPipeline = nullptr; // Reset to force binding m_unlitPipeline
+                m_commandBuffers->setDepthTestEnable(true);
+                m_commandBuffers->setDepthWriteEnable(true);
+                m_commandBuffers->setDepthCompareOp(NRI::CompareOp::GreaterOrEqual);
 
-                NRI::RenderDesc gbufferDesc = {
-                    .renderArea = locViewportSize,
-                    .colorAttachments = gbufferAttachments
-                };
+                m_commandBuffers->setColorBlendEnable(0, false);
+                m_commandBuffers->setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
+                m_commandBuffers->setColorBlendEnable(1, false);
+                m_commandBuffers->setColorWriteMask(1, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
 
-                m_commandBuffers->beginRendering(gbufferDesc);
+                drawPass(m_unlitCount, *m_unlitPipeline, NRI::CullMode::Back, true, false);
+                drawPass(m_unlitDoubleSidedCount, *m_unlitPipeline, NRI::CullMode::None, true, false);
+            }
+            
+            // -------------------------------------------------------------
+            // B. SKYBOX (Draws only into background pixels where depth == 0.0)
+            // -------------------------------------------------------------
+            if (m_skyboxPipeline && m_environmentCubemap && currentDebugMode == 0)
+            {
+                m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_skyboxPipeline);
 
-                m_commandBuffers->setViewportWithCount({0.0f, h, w, -h}, 0.0f, 1.0f);
-                m_commandBuffers->setScissorWithCount(locViewportSize);
-
-                m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_gbufferPipeline);
                 m_commandBuffers->setCullMode(NRI::CullMode::None);
-                m_commandBuffers->setDepthTestEnable(false);
+                m_commandBuffers->setDepthTestEnable(true);
                 m_commandBuffers->setDepthWriteEnable(false);
+                m_commandBuffers->setDepthCompareOp(NRI::CompareOp::GreaterOrEqual); // Reverse-Z: depth == 0.0
 
-                for (uint32_t a = 0; a < 5; ++a)
-                {
-                    m_commandBuffers->setColorBlendEnable(a, false);
-                    m_commandBuffers->setColorWriteMask(a, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
-                }
+                m_commandBuffers->setColorBlendEnable(0, false);
+                m_commandBuffers->setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
+                m_commandBuffers->setColorBlendEnable(1, false);
+                m_commandBuffers->setColorWriteMask(1, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
 
-                shaderio::PushConstantVisibilityDebug gbufferPush{};
-                gbufferPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
-                gbufferPush.instanceReference = m_instanceBuffers[frameIndex]->getDeviceAddress();
-
-                bool hasBoneBuffers = frameIndex < m_boneBuffers.size() && m_boneBuffers[frameIndex] != nullptr;
-                bool hasBones = !m_boneMatrices.empty();
-                gbufferPush.boneMatrixReference = (hasBones && hasBoneBuffers) ? m_boneBuffers[frameIndex]->getDeviceAddress() : 0;
-
-                gbufferPush.vertexPageTableReference = m_vertexPageTableBuffers[frameIndex]->getDeviceAddress();
-                gbufferPush.meshletDrawsPageTableReference = m_meshletDrawPageTableBuffers[frameIndex]->getDeviceAddress();
-                gbufferPush.meshletVerticesPageTableReference = m_meshletVertPageTableBuffers[frameIndex]->getDeviceAddress();
-                gbufferPush.meshletTrianglesPageTableReference = m_meshletTriPageTableBuffers[frameIndex]->getDeviceAddress();
-                gbufferPush.visibilityTextureIndex = m_visibilityResource->GetDescriptorIndexSlot();
-                gbufferPush.viewportSize = glm::vec2(w, h);
-                gbufferPush.debugMode = currentDebugMode;
-                m_commandBuffers->pushData(&gbufferPush, sizeof(shaderio::PushConstantVisibilityDebug));
+                shaderio::PushConstantSkybox skyboxPush{};
+                skyboxPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                skyboxPush.cubemapIndex = m_environmentCubemap->GetDescriptorIndexSlot();
+                m_commandBuffers->pushData(&skyboxPush, sizeof(shaderio::PushConstantSkybox));
 
                 m_commandBuffers->drawMeshTasks(1, 1, 1);
-                m_commandBuffers->endRendering();
             }
-        
-                // =========================================================================
-                // 3. DECOUPLED DEFERRED PBR LIGHTING PASS
-                // =========================================================================
-                if (m_deferredLightingPipeline)
-                {
-                    std::vector<NRI::RenderAttachDesc> lightingAttachments;
-                    lightingAttachments.push_back({
-                        .attachment = m_sceneResource.get(),
-                        .loadOP = NRI::LoadOP::clear,
-                        .storeOP = NRI::StoreOP::store,
-                        .clearColor = {0.0f, 0.0f, 0.0f, 1.0f}
-                    });
 
-                    NRI::RenderDesc lightingDesc = {
-                        .renderArea = locViewportSize,
-                        .colorAttachments = lightingAttachments
-                    };
+            // -------------------------------------------------------------
+            // C. RENDERER 2D (Quads, Circles, Text, Lines/Gizmos)
+            // -------------------------------------------------------------
+            {
+                // Alpha blending for 2D sprites, text, and gizmos
+                const NRI::ColorBlendEquation blendEquation{
+                    .srcColorBlendFactor = NRI::BlendFactor::SrcAlpha,
+                    .dstColorBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha,
+                    .colorBlendOp = NRI::BlendOp::Add,
+                    .srcAlphaBlendFactor = NRI::BlendFactor::Zero,
+                    .dstAlphaBlendFactor = NRI::BlendFactor::One,
+                    .alphaBlendOp = NRI::BlendOp::Add,
+                };
 
-                    m_commandBuffers->beginRendering(lightingDesc);
+                m_commandBuffers->setCullMode(NRI::CullMode::None);
+                m_commandBuffers->setDepthTestEnable(true);
+                m_commandBuffers->setDepthWriteEnable(false);
+                m_commandBuffers->setDepthCompareOp(NRI::CompareOp::GreaterOrEqual);
 
-                    m_commandBuffers->setViewportWithCount({0.0f, h, w, -h}, 0.0f, 1.0f);
-                    m_commandBuffers->setScissorWithCount(locViewportSize);
+                m_commandBuffers->setColorBlendEnable(0, true);
+                m_commandBuffers->setColorBlendEquation(0, blendEquation);
+                m_commandBuffers->setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B);
 
-                    m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_deferredLightingPipeline);
-                    m_commandBuffers->setCullMode(NRI::CullMode::None);
-                    m_commandBuffers->setDepthTestEnable(false);
-                    m_commandBuffers->setDepthWriteEnable(false);
-                    m_commandBuffers->setColorBlendEnable(0, false);
-                    m_commandBuffers->setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
+                // Entity IDs do not blend
+                m_commandBuffers->setColorBlendEnable(1, false);
+                m_commandBuffers->setColorWriteMask(1, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
 
-                    glm::mat4 viewProj = uniformData.proj * uniformData.view;
-                    shaderio::PushConstantDeferredLighting lightingPush{};
-                    lightingPush.invViewProj = glm::inverse(viewProj);
-                    lightingPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
-                    lightingPush.visibilityTextureIndex = m_visibilityResource->GetDescriptorIndexSlot();
-                    lightingPush.gbufferAlbedoIndex = m_gbufferAlbedo->GetDescriptorIndexSlot();
-                    lightingPush.gbufferNormalIndex = m_gbufferNormal->GetDescriptorIndexSlot();
-                    lightingPush.gbufferMaterialIndex = m_gbufferMaterial->GetDescriptorIndexSlot();
-                    lightingPush.gbufferEmissionIndex = m_gbufferEmission->GetDescriptorIndexSlot();
-                    lightingPush.depthTextureIndex = m_depthResource->GetDescriptorIndexSlot();
-                    lightingPush.viewportSize = glm::vec2(w, h);
-                    lightingPush.debugMode = currentDebugMode; // 0 = Full PBR Lit, 1 = Direct Lights Only, 2 = IBL Only, 3 = World Pos, 4 = Albedo, 5 = Normal, 6 = Roughness, 7 = Metallic, 8 = Occlusion, 9 = Emission
-                    m_commandBuffers->pushData(&lightingPush, sizeof(shaderio::PushConstantDeferredLighting));
+                m_renderer2D->Flush(*m_commandBuffers, *m_uniformBuffers[frameIndex], frameIndex);
+            }
 
-                    m_commandBuffers->drawMeshTasks(1, 1, 1);
-                    m_commandBuffers->endRendering();
-                }
+            m_commandBuffers->endRendering();
+        }
 
-        /*// --- OUTLINE POST-PROCESS ---
+        // --- OUTLINE POST-PROCESS ---
         if (!m_SelectedEntityIDs.empty() && m_outlinePipeline)
         {
             std::vector<NRI::RenderAttachDesc> outlineColorAttachments;
@@ -1910,8 +1984,8 @@ namespace Nox
             m_commandBuffers->drawMeshTasks(1, 1, 1);
 
             m_commandBuffers->endRendering();
-        }*/
-        
+        }
+
         std::vector<NRI::RenderAttachDesc> imguiColorAttachments;
         imguiColorAttachments.push_back({
             .attachmentSwapchain = m_swapChain.get(),
@@ -2014,9 +2088,9 @@ namespace Nox
             {
                 uint32_t copyWidth = std::min(m_pickRequest.width, width - sampleX);
                 uint32_t copyHeight = std::min(m_pickRequest.height, height - sampleY);
-                
+
                 m_entityResource->copyImageToBuffer(*m_commandBuffers, *m_pickerStagingBuffers[frameIndex], sampleX, sampleY, copyWidth, copyHeight);
-                
+
                 m_pickRequest.active = false;
             }
 
@@ -2127,7 +2201,7 @@ namespace Nox
         }
         memcpy(m_indirectBuffersMapped[currentImage], m_drawMeshTasksIndirectCommands.data(), requiredIndirectSize);
     }
-    
+
     void Renderer::updateLightBuffer(uint32_t currentImage)
     {
         if (m_lightBuffers.empty())
@@ -2218,7 +2292,7 @@ namespace Nox
     {
         processDeferredDeletions();
         processDeferredMeshFrees();
-        
+
         // Process any queued shader hot-reloads
         if (!m_pendingReloads.empty())
         {
@@ -2252,7 +2326,7 @@ namespace Nox
         updatePageTables(frameIndex);
 
         updateEntityIDBuffer(frameIndex);
-        
+
         updateLightBuffer(frameIndex);
 
         updateUniformBuffer(frameIndex);
@@ -2283,7 +2357,7 @@ namespace Nox
         m_drawMeshTasksIndirectCommands.clear();
         m_boneMatrices.clear();
         m_lightBufferObjects.clear();
-        
+
         m_opaqueQueue.clear();
         m_opaqueDoubleSidedQueue.clear();
         m_maskQueue.clear();
@@ -2549,7 +2623,7 @@ namespace Nox
         instance.emissiveTextureIndex = getTextureIndex(material.EmissiveMaps, slotIdx);
         instance.emissiveTextureSet = (slotIdx < material.EmissiveTextureSets.size()) ? material.EmissiveTextureSets[slotIdx] : 0;
         instance.emissiveStrength = (slotIdx < material.EmissiveStrengths.size()) ? material.EmissiveStrengths[slotIdx] : 1.0f;
-        
+
         // Transmission
         instance.transmissionFactor = (slotIdx < material.TransmissionFactors.size()) ? material.TransmissionFactors[slotIdx] : 0.0f;
         instance.transmissionTextureIndex = getTextureIndex(material.TransmissionMaps, slotIdx);
@@ -2696,7 +2770,7 @@ namespace Nox
             instance.emissiveTextureIndex = getTextureIndex(material.EmissiveMaps, i);
             instance.emissiveTextureSet = (i < material.EmissiveTextureSets.size()) ? material.EmissiveTextureSets[i] : 0;
             instance.emissiveStrength = (i < material.EmissiveStrengths.size()) ? material.EmissiveStrengths[i] : 1.0f;
-            
+
             // Transmission
             instance.transmissionFactor = (i < material.TransmissionFactors.size()) ? material.TransmissionFactors[i] : 0.0f;
             instance.transmissionTextureIndex = getTextureIndex(material.TransmissionMaps, i);

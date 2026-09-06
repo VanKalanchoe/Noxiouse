@@ -155,10 +155,15 @@
         uint4 rawVis = visTex.Load(int3(pixelCoord, 0));
         uint2 visData = rawVis.xy;
 
-        if (visData.x == 0)
+       if (visData.x == 0)
         {
-            // Background clear color
-            return float4(0.12, 0.12, 0.18, 1.0);
+            // When inspecting material debug modes (Albedo, Normals, Roughness), show neutral dark gray
+            if (pushConstant.debugMode != 0)
+            {
+                return float4(0.12, 0.12, 0.18, 1.0);
+            }
+            // In full PBR lit mode (0), discard so the Skybox pass can render into the background!
+            discard;
         }
 
         // 2. Fetch G-Buffer Render Targets
@@ -190,6 +195,17 @@
         float perceptualRoughness = clamp(materialSample.r, c_MinRoughness, 1.0);
         float metallic = clamp(materialSample.g, 0.0, 1.0);
         float alphaRoughness = perceptualRoughness * perceptualRoughness;
+
+        // --- UNLIT MATERIAL CHECK ---
+        // If material is UNLIT (workflow == 2.0), bypass all lighting and output base color directly!
+        if (materialSample.b >= 2.0)
+        {
+            TonemapParameters tonemapParams;
+            tonemapParams.exposure = ubo->exposure;
+            tonemapParams.gamma = ubo->gamma;
+            tonemapParams.mode = (int)TonemapMode::KhronosPbrNeutral;
+            return float4(toneMap(baseColor, tonemapParams), 1.0);
+        }
 
         float3 f0 = float3(0.04);
         float3 diffuseColor = baseColor * (float3(1.0) - f0) * (1.0 - metallic);

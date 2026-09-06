@@ -360,7 +360,11 @@
         // Output to MRT
         output.albedo   = float4(baseColor.rgb, occlusion);
         output.normal   = (pushConstant.debugMode == 2) ? float4(rawNormalTex, 1.0) : float4(finalNormal, 1.0);
-        output.material = float4(roughness, metallic, instance.workflow, 1.0);
+
+        // Encode unlit flag: 2.0 = UNLIT
+        float workflow  = (instance.unlit != 0) ? 2.0 : instance.workflow;
+        output.material = float4(roughness, metallic, workflow, 1.0);
+
         output.emission = float4(emission, 1.0);
         output.entityID = instance.entityID;
 

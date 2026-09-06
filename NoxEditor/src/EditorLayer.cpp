@@ -902,6 +902,25 @@ namespace Nox
         ImGui::End(); // End "right" Window
 
         ImGui::Begin("Settings");
+        
+        static const char* debugModeNames[] = {
+            "0: Full PBR Lit",
+            "1: Base Color (Sascha 1:1)",
+            "2: Normal Texture (Sascha 1:1)",
+            "3: Occlusion (Sascha 1:1)",
+            "4: Emissive (Sascha 1:1)",
+            "5: Metallic (Sascha 1:1)",
+            "6: Roughness (Sascha 1:1)",
+            "7: Shading Normal (World)",
+            "8: Direct Lights Only",
+            "9: IBL Ambient Only",
+            "10: World Position"
+        };
+        int currentMode = static_cast<int>(m_Renderer->getDebugMode());
+        if (ImGui::Combo("PBR Debug View", &currentMode, debugModeNames, IM_ARRAYSIZE(debugModeNames)))
+        {
+            m_Renderer->setDebugMode(static_cast<uint32_t>(currentMode));
+        }
 
         ImGui::Checkbox("Show physics collider", &m_ShowPhysicsColliders);
         ImGui::Image(m_Font->GetAtlasTexture()->getImTextureID(), {512, 512}, ImVec2(0, 1), ImVec2(1, 0));

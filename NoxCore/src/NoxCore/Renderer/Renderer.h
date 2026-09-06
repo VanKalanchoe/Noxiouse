@@ -163,6 +163,9 @@ namespace Nox
         bool getFrozen() { return m_frozen; }
         void setFrozenDone(bool temp) { m_frozen = temp; }
         
+        void setDebugMode(uint32_t mode) { m_debugMode = mode; }
+        uint32_t getDebugMode() const { return m_debugMode; }
+        
         Ref<Texture2D> UploadTexture(const TextureData& cpuData);
         Ref<Texture2D> createSolidColorTexture(uint8_t r, uint8_t g, uint8_t b, uint8_t a);
         void initPBR();
@@ -279,6 +282,8 @@ namespace Nox
         shaderio::UniformBufferObject frozenUniformData = {};
         bool m_frozen = false;
         bool m_frozenDone = false;
+        
+        uint32_t m_debugMode = 0;
         
         // Visability
         Ref<Texture2D> m_visibilityResource;
