@@ -117,8 +117,6 @@ namespace Nox
         m_swapChain.reset();
     }
 
-    bool firstframe = true;
-
     void Renderer::recreateSwapChain()
     {
         /*
@@ -137,7 +135,6 @@ namespace Nox
 
         if (!m_isEditor)
         {
-            firstframe = true;
             m_resourceHeap->unregisterTexture(m_sceneResource->GetDescriptorIndexSlot());
         }
 
@@ -529,10 +526,7 @@ namespace Nox
 
         // Bind global descriptor heaps
         cmd->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
-
-        // Transition Cubemap layout: Undefined -> General (required for storage writes)
-        cmd->transitionTextureLayout(*m_environmentCubemap, NRI::TextureLayout::Undefined, NRI::TextureLayout::General);
-
+        
         // Bind compute pipeline & push constant parameters
         cmd->bindPipeline(NRI::PipelineBindPoint::Compute, *equirectPipeline);
         cmd->pushData(&pushData, sizeof(EquirectPushConstants));
@@ -543,10 +537,7 @@ namespace Nox
 
         // Dispatch work: X and Y cover the resolution, Z=6 covers all 6 cubemap faces
         cmd->dispatch(groupCountX, groupCountY, 6);
-
-        // Transition Cubemap layout: General -> ShaderResource (ready for graphics sampling)
-        cmd->transitionTextureLayout(*m_environmentCubemap, NRI::TextureLayout::General, NRI::TextureLayout::TransferDst);
-
+        
         // Submit command buffer and wait for execution to complete
         endSingleTimeCommands(std::move(cmd));
 
@@ -595,8 +586,7 @@ namespace Nox
 
         std::unique_ptr<NRI::CommandBuffer> irradCmd = beginSingleTimeCommands();
         irradCmd->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
-        irradCmd->transitionTextureLayout(*m_irradianceCubemap, NRI::TextureLayout::Undefined, NRI::TextureLayout::General);
-
+        
         irradCmd->bindPipeline(NRI::PipelineBindPoint::Compute, *irradiancePipeline);
 
         std::vector<uint32_t> tempIrradMipSlots;
@@ -619,8 +609,7 @@ namespace Nox
             uint32_t irradGroupCountY = (mipSize + 15) / 16;
             irradCmd->dispatch(irradGroupCountX, irradGroupCountY, 6);
         }
-
-        irradCmd->transitionTextureLayout(*m_irradianceCubemap, NRI::TextureLayout::General, NRI::TextureLayout::ShaderResource);
+        
         endSingleTimeCommands(std::move(irradCmd));
 
         // Free the temporary per-mip storage descriptor slots
@@ -669,7 +658,7 @@ namespace Nox
 
         std::unique_ptr<NRI::CommandBuffer> prefCmd = beginSingleTimeCommands();
         prefCmd->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
-        prefCmd->transitionTextureLayout(*m_prefilteredEnvMap, NRI::TextureLayout::Undefined, NRI::TextureLayout::General);
+        
         prefCmd->bindPipeline(NRI::PipelineBindPoint::Compute, *prefilterPipeline);
 
         std::vector<uint32_t> tempMipSlots;
@@ -695,8 +684,7 @@ namespace Nox
             uint32_t groupY = (mipHeight + 15) / 16;
             prefCmd->dispatch(groupX, groupY, 6);
         }
-
-        prefCmd->transitionTextureLayout(*m_prefilteredEnvMap, NRI::TextureLayout::General, NRI::TextureLayout::ShaderResource);
+        
         endSingleTimeCommands(std::move(prefCmd));
         // Free the temporary per-mip storage descriptor slots
         for (uint32_t slot : tempMipSlots)
@@ -743,7 +731,6 @@ namespace Nox
 
         std::unique_ptr<NRI::CommandBuffer> brdfCmd = beginSingleTimeCommands();
         brdfCmd->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
-        brdfCmd->transitionTextureLayout(*m_brdfLUT, NRI::TextureLayout::Undefined, NRI::TextureLayout::General);
 
         brdfCmd->bindPipeline(NRI::PipelineBindPoint::Compute, *brdfPipeline);
         brdfCmd->pushData(&brdfData, sizeof(BRDFPushConstants));
@@ -751,8 +738,7 @@ namespace Nox
         uint32_t brdfGroupX = (brdfLUTSize + 15) / 16;
         uint32_t brdfGroupY = (brdfLUTSize + 15) / 16;
         brdfCmd->dispatch(brdfGroupX, brdfGroupY, 1);
-
-        brdfCmd->transitionTextureLayout(*m_brdfLUT, NRI::TextureLayout::General, NRI::TextureLayout::ShaderResource);
+        
         endSingleTimeCommands(std::move(brdfCmd));
         m_resourceHeap->registerTexture(*m_brdfLUT, NRI::TextureUsage::ShaderResource);
     }
@@ -1288,21 +1274,6 @@ namespace Nox
         m_commandBuffers->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
 
         m_commandBuffers->transitionSwapchainLayout(*m_swapChain, imageIndex, NRI::TextureLayout::Undefined, NRI::TextureLayout::ColorAttachment);
-        if (firstframe)
-        {
-            if (!m_isEditor)
-                firstframe = false;
-            m_commandBuffers->transitionTextureLayout(*m_sceneResource, NRI::TextureLayout::Undefined, NRI::TextureLayout::ColorAttachment);
-        }
-        else
-        {
-            m_commandBuffers->transitionTextureLayout(*m_sceneResource, NRI::TextureLayout::ShaderResource, NRI::TextureLayout::ColorAttachment);
-        }
-
-        m_commandBuffers->transitionTextureLayout(*m_entityResource, NRI::TextureLayout::Undefined, NRI::TextureLayout::ColorAttachment);
-        m_commandBuffers->transitionTextureLayout(*m_entityResolveResource, NRI::TextureLayout::Undefined, NRI::TextureLayout::ColorAttachment);
-        m_commandBuffers->transitionTextureLayout(*m_colorResource, NRI::TextureLayout::Undefined, NRI::TextureLayout::ColorAttachment);
-        m_commandBuffers->transitionTextureLayout(*m_depthResource, NRI::TextureLayout::Undefined, NRI::TextureLayout::DepthAttachment);
 
         std::vector<NRI::RenderAttachDesc> colorAttachments;
         colorAttachments.push_back({
@@ -1529,12 +1500,6 @@ namespace Nox
         // --- OUTLINE POST-PROCESS ---
         if (!m_SelectedEntityIDs.empty() && m_outlinePipeline)
         {
-            m_commandBuffers->transitionTextureLayout(
-                *m_entityResolveResource,
-                NRI::TextureLayout::ColorAttachment,
-                NRI::TextureLayout::ShaderResource
-            );
-
             std::vector<NRI::RenderAttachDesc> outlineColorAttachments;
             outlineColorAttachments.push_back({
                 .attachment = m_sceneResource.get(),
@@ -1634,16 +1599,8 @@ namespace Nox
             m_commandBuffers->drawMeshTasks(1, 1, 1);
 
             m_commandBuffers->endRendering();
-
-            m_commandBuffers->transitionTextureLayout(
-                *m_entityResolveResource,
-                NRI::TextureLayout::ShaderResource,
-                NRI::TextureLayout::ColorAttachment
-            );
         }
-
-        m_commandBuffers->transitionTextureLayout(*m_sceneResource, NRI::TextureLayout::ColorAttachment, NRI::TextureLayout::ShaderResource);
-
+        
         std::vector<NRI::RenderAttachDesc> imguiColorAttachments;
         imguiColorAttachments.push_back({
             .attachmentSwapchain = m_swapChain.get(),
@@ -1746,18 +1703,9 @@ namespace Nox
             {
                 uint32_t copyWidth = std::min(m_pickRequest.width, width - sampleX);
                 uint32_t copyHeight = std::min(m_pickRequest.height, height - sampleY);
-
-                m_commandBuffers->transitionTextureLayout(*m_entityResource, NRI::TextureLayout::ColorAttachment, NRI::TextureLayout::TransferSrc);
-                /*m_commandBuffers->transitionTextureLayout(*m_entityResolveResource, NRI::TextureLayout::ColorAttachment, NRI::TextureLayout::TransferDst);*/
-
-                /*m_commandBuffers->resolveImage(*m_entityResource, *m_entityResolveResource, width, height);*/
-
-                m_commandBuffers->transitionTextureLayout(*m_entityResolveResource, NRI::TextureLayout::ColorAttachment, NRI::TextureLayout::TransferSrc);
-
+                
                 m_entityResolveResource->copyImageToBuffer(*m_commandBuffers, *m_pickerStagingBuffers[frameIndex], sampleX, sampleY, copyWidth, copyHeight);
-
-                m_commandBuffers->transitionTextureLayout(*m_entityResource, NRI::TextureLayout::TransferSrc, NRI::TextureLayout::ColorAttachment);
-
+                
                 m_pickRequest.active = false;
             }
 

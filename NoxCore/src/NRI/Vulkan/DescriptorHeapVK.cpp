@@ -199,7 +199,7 @@ namespace NRI
         vk::ImageDescriptorInfoEXT imageDescriptorInfo
         {
             .pView = &viewInfo,
-            .layout = isStorage ? vk::ImageLayout::eGeneral : vk::ImageLayout::eShaderReadOnlyOptimal
+            .layout = vk::ImageLayout::eGeneral
         };
 
         vk::ResourceDescriptorInfoEXT info{};

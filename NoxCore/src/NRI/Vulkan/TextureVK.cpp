@@ -140,6 +140,60 @@ namespace NRI
         {
             m_imageResource.view = m_deviceVK.createImageView(*m_imageResource.image, format, aspectFlags, 1);
         }
+        
+        // VK_KHR_unified_image_layouts:
+            // Automatically initialize attachment and storage textures to eGeneral upon creation!
+            {
+                vk::CommandPoolCreateInfo poolInfo{
+                    .flags = vk::CommandPoolCreateFlagBits::eTransient,
+                    .queueFamilyIndex = m_deviceVK.getQueueIndex()
+                };
+                vk::raii::CommandPool tempPool(m_deviceVK.getDevice(), poolInfo);
+
+                vk::CommandBufferAllocateInfo allocInfo{
+                    .commandPool = *tempPool,
+                    .level = vk::CommandBufferLevel::ePrimary,
+                    .commandBufferCount = 1
+                };
+                vk::raii::CommandBuffers tempCmdBuffers(m_deviceVK.getDevice(), allocInfo);
+                auto& tempCmd = tempCmdBuffers[0];
+
+                tempCmd.begin({ .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit });
+
+                vk::ImageMemoryBarrier2 barrier{
+                    .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
+                    .srcAccessMask = {},
+                    .dstStageMask = vk::PipelineStageFlagBits2::eAllCommands,
+                    .dstAccessMask = vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eMemoryWrite,
+                    .oldLayout = vk::ImageLayout::eUndefined,
+                    .newLayout = vk::ImageLayout::eGeneral,
+                    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                    .image = *m_imageResource.image,
+                    .subresourceRange = {
+                        .aspectMask = aspectFlags,
+                        .baseMipLevel = 0,
+                        .levelCount = desc.mipLevels,
+                        .baseArrayLayer = 0,
+                        .layerCount = desc.arrayLayers
+                    }
+                };
+
+                vk::DependencyInfo depInfo{
+                    .imageMemoryBarrierCount = 1,
+                    .pImageMemoryBarriers = &barrier
+                };
+                tempCmd.pipelineBarrier2(depInfo);
+
+                tempCmd.end();
+
+                vk::SubmitInfo submitInfo{
+                    .commandBufferCount = 1,
+                    .pCommandBuffers = &*tempCmd
+                };
+                m_deviceVK.getQueue().submit(submitInfo);
+                m_deviceVK.getQueue().waitIdle();
+            }
     }
 
     TextureVK::~TextureVK()
@@ -163,8 +217,6 @@ namespace NRI
 
         vk::raii::CommandBuffer& cb = cmdBufferVK->getNativeBuffer(0);
         vk::raii::Buffer& nativeBuffer = stagingBufferVK->getNativeBuffer();
-
-        transitionImageLayout(cb, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal, mipLevels);
         
         std::vector<vk::BufferImageCopy> copyRegions;
         
@@ -202,7 +254,26 @@ namespace NRI
         if (mipLevels > 1 && copyRegions.size() == 1)
             generateMipmaps(cb, m_format, width, height, mipLevels);
         else
-            transitionImageLayout(cb, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal, mipLevels);
+        {
+            // Simple execution barrier to make sure transfer writes finish before shaders read:
+            vk::ImageMemoryBarrier barrier = {
+                .srcAccessMask = vk::AccessFlagBits::eTransferWrite,
+                .dstAccessMask = vk::AccessFlagBits::eShaderRead,
+                .oldLayout = vk::ImageLayout::eGeneral,
+                .newLayout = vk::ImageLayout::eGeneral,
+                .srcQueueFamilyIndex = vk::QueueFamilyIgnored,
+                .dstQueueFamilyIndex = vk::QueueFamilyIgnored,
+                .image = m_imageResource.image,
+                .subresourceRange = {
+                    .aspectMask = vk::ImageAspectFlagBits::eColor,
+                    .baseMipLevel = 0,
+                    .levelCount = mipLevels,
+                    .baseArrayLayer = 0,
+                    .layerCount = m_desc.arrayLayers
+                }
+            };
+            cb.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eFragmentShader | vk::PipelineStageFlagBits::eComputeShader, {}, {}, {}, barrier);
+        }
     }
 
     void TextureVK::generateMipmaps(vk::raii::CommandBuffer& commandBuffer, vk::Format imageFormat, int32_t texWidth, int32_t texHeight, uint32_t mipLevels)
@@ -226,8 +297,8 @@ namespace NRI
                 vk::ImageMemoryBarrier barrier = {
                     .srcAccessMask = vk::AccessFlagBits::eTransferWrite,
                     .dstAccessMask = vk::AccessFlagBits::eTransferRead,
-                    .oldLayout = vk::ImageLayout::eTransferDstOptimal,
-                    .newLayout = vk::ImageLayout::eTransferSrcOptimal,
+                    .oldLayout = vk::ImageLayout::eGeneral,
+                    .newLayout = vk::ImageLayout::eGeneral,
                     .srcQueueFamilyIndex = vk::QueueFamilyIgnored,
                     .dstQueueFamilyIndex = vk::QueueFamilyIgnored,
                     .image = m_imageResource.image
@@ -250,10 +321,10 @@ namespace NRI
                 blit.srcSubresource = vk::ImageSubresourceLayers(vk::ImageAspectFlagBits::eColor, i - 1, layer, 1);
                 blit.dstSubresource = vk::ImageSubresourceLayers(vk::ImageAspectFlagBits::eColor, i, layer, 1);
 
-                commandBuffer.blitImage(m_imageResource.image, vk::ImageLayout::eTransferSrcOptimal, m_imageResource.image, vk::ImageLayout::eTransferDstOptimal, {blit}, vk::Filter::eLinear);
+                commandBuffer.blitImage(m_imageResource.image, vk::ImageLayout::eGeneral, m_imageResource.image, vk::ImageLayout::eGeneral, {blit}, vk::Filter::eLinear);
 
-                barrier.oldLayout = vk::ImageLayout::eTransferSrcOptimal;
-                barrier.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+                barrier.oldLayout = vk::ImageLayout::eGeneral;
+                barrier.newLayout = vk::ImageLayout::eGeneral;
                 barrier.srcAccessMask = vk::AccessFlagBits::eTransferRead;
                 barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
 
@@ -266,8 +337,8 @@ namespace NRI
             vk::ImageMemoryBarrier lastBarrier = {
                 .srcAccessMask = vk::AccessFlagBits::eTransferWrite,
                 .dstAccessMask = vk::AccessFlagBits::eShaderRead,
-                .oldLayout = vk::ImageLayout::eTransferDstOptimal,
-                .newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+                .oldLayout = vk::ImageLayout::eGeneral,
+                .newLayout = vk::ImageLayout::eGeneral,
                 .srcQueueFamilyIndex = vk::QueueFamilyIgnored,
                 .dstQueueFamilyIndex = vk::QueueFamilyIgnored,
                 .image = m_imageResource.image
@@ -281,47 +352,10 @@ namespace NRI
             commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eFragmentShader | vk::PipelineStageFlagBits::eComputeShader, {}, {}, {}, lastBarrier);
         }
     }
-
-    void TextureVK::transitionImageLayout(vk::raii::CommandBuffer& commandBuffer, vk::ImageLayout oldLayout, vk::ImageLayout newLayout, uint32_t mipLevels)
-    {
-        vk::ImageMemoryBarrier barrier{
-            .oldLayout = oldLayout,
-            .newLayout = newLayout,
-            .srcQueueFamilyIndex = vk::QueueFamilyIgnored,
-            .dstQueueFamilyIndex = vk::QueueFamilyIgnored,
-            .image = m_imageResource.image,
-            .subresourceRange = {.aspectMask = vk::ImageAspectFlagBits::eColor, .levelCount = mipLevels, .layerCount = m_desc.arrayLayers}
-        };
-
-        vk::PipelineStageFlags sourceStage;
-        vk::PipelineStageFlags destinationStage;
-
-        if (oldLayout == vk::ImageLayout::eUndefined && newLayout == vk::ImageLayout::eTransferDstOptimal)
-        {
-            barrier.srcAccessMask = {};
-            barrier.dstAccessMask = vk::AccessFlagBits::eTransferWrite;
-
-            sourceStage = vk::PipelineStageFlagBits::eTopOfPipe;
-            destinationStage = vk::PipelineStageFlagBits::eTransfer;
-        }
-        else if (oldLayout == vk::ImageLayout::eTransferDstOptimal && newLayout == vk::ImageLayout::eShaderReadOnlyOptimal)
-        {
-            barrier.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
-            barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
-
-            sourceStage = vk::PipelineStageFlagBits::eTransfer;
-            destinationStage = vk::PipelineStageFlagBits::eFragmentShader;
-        }
-        else
-        {
-            throw std::invalid_argument("unsupported layout transition!");
-        }
-        commandBuffer.pipelineBarrier(sourceStage, destinationStage, {}, {}, {}, barrier);
-    }
-
+    
     void TextureVK::copyBufferToImage(vk::raii::CommandBuffer& commandBuffer, const vk::raii::Buffer& buffer, std::vector<vk::BufferImageCopy>& regions)
     {
-        commandBuffer.copyBufferToImage(buffer, m_imageResource.image, vk::ImageLayout::eTransferDstOptimal, regions);
+        commandBuffer.copyBufferToImage(buffer, m_imageResource.image, vk::ImageLayout::eGeneral, regions);
     }
     
     void TextureVK::copyImageToBuffer(CommandBuffer& commandBuffer, Buffer& dstBuffer, uint32_t x, uint32_t y, uint32_t width, uint32_t height)
@@ -342,7 +376,7 @@ namespace NRI
             .imageExtent = { width, height, 1 }
         };
         
-        cb.copyImageToBuffer(m_imageResource.image, vk::ImageLayout::eTransferSrcOptimal, nativeBuffer, region);
+        cb.copyImageToBuffer(m_imageResource.image, vk::ImageLayout::eGeneral, nativeBuffer, region);
     }
 
     void TextureVK::generateMipmaps(CommandBuffer& commandBuffer)
@@ -367,7 +401,7 @@ namespace NRI
             // Now it is safe to dereference no sampler needeed anymore
             m_imGuiHandle = ImGui_ImplVulkan_AddTexture(
                 *m_imageResource.view,
-                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                VK_IMAGE_LAYOUT_GENERAL
             );
 #elif IMGUI_VERSION_NUM >= 19250
             vk::SamplerCreateInfo samplerInfo{

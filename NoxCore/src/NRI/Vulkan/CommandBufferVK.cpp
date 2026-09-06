@@ -165,7 +165,7 @@ namespace NRI
             vk::RenderingAttachmentInfo colorAttachmentInfo
             {
                 .imageView = mainView,
-                .imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
+                .imageLayout = vk::ImageLayout::eGeneral,
                 .loadOp = translateLoadOp(colorDesc.loadOP),
                 .storeOp = translateStoreOp(colorDesc.storeOP),
                 .clearValue = vkClearColor
@@ -190,7 +190,7 @@ namespace NRI
                     colorAttachmentInfo.resolveMode = vk::ResolveModeFlagBits::eAverage;
                 
                 colorAttachmentInfo.resolveImageView = resolveView;
-                colorAttachmentInfo.resolveImageLayout = vk::ImageLayout::eColorAttachmentOptimal;
+                colorAttachmentInfo.resolveImageLayout = vk::ImageLayout::eGeneral;
             }
 
             vkColorAttachments.push_back(colorAttachmentInfo);
@@ -211,7 +211,7 @@ namespace NRI
             depthAttachmentInfo =
             {
                 .imageView = depthView,
-                .imageLayout = vk::ImageLayout::eDepthAttachmentOptimal,
+                .imageLayout = vk::ImageLayout::eGeneral,
                 .loadOp = translateLoadOp(desc.depthAttachment.loadOP),
                 .storeOp = translateStoreOp(desc.depthAttachment.storeOP),
                 .clearValue = vkClearDepth
@@ -607,9 +607,9 @@ namespace NRI
         m_commandBuffers[m_currentFrameIndex].resolveImage
         (
             vkSrc->getNativeImage(), 
-            vk::ImageLayout::eTransferSrcOptimal, 
+            vk::ImageLayout::eGeneral, 
             vkDst->getNativeImage(), 
-            vk::ImageLayout::eTransferDstOptimal, 
+            vk::ImageLayout::eGeneral, 
             resolveRegion
         );
     }
@@ -662,6 +662,12 @@ namespace NRI
             stageMask = vk::PipelineStageFlagBits2::eAllCommands;
             accessMask = {};
             break;
+            
+        case TextureLayout::General: // <--- Add this case!
+            stageMask = vk::PipelineStageFlagBits2::eAllCommands;
+            accessMask = isSource ? (vk::AccessFlagBits2::eMemoryWrite | vk::AccessFlagBits2::eTransferWrite | vk::AccessFlagBits2::eColorAttachmentWrite)
+                                  : (vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eShaderRead | vk::AccessFlagBits2::eTransferRead);
+            break;
 
         case TextureLayout::ColorAttachment:
             stageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
@@ -705,15 +711,9 @@ namespace NRI
         switch (layout)
         {
         case TextureLayout::Undefined: return vk::ImageLayout::eUndefined;
-        case TextureLayout::ColorAttachment: return vk::ImageLayout::eColorAttachmentOptimal;
-        case TextureLayout::DepthAttachment: return vk::ImageLayout::eDepthAttachmentOptimal;
-        case TextureLayout::ShaderResource: return vk::ImageLayout::eShaderReadOnlyOptimal;
-        case TextureLayout::TransferSrc: return vk::ImageLayout::eTransferSrcOptimal;
-        case TextureLayout::TransferDst: return vk::ImageLayout::eTransferDstOptimal;
         case TextureLayout::Present: return vk::ImageLayout::ePresentSrcKHR;
-        case TextureLayout::General: return vk::ImageLayout::eGeneral;
         default:
-            throw std::runtime_error("Unsupported TextureLayout passed to Vulkan backend!");
+            return vk::ImageLayout::eGeneral;
         }
     }
 }

@@ -65,6 +65,7 @@ namespace NRI
     std::vector<const char*> requiredDeviceExtension =
     {
         vk::KHRSwapchainExtensionName,
+        vk::KHRUnifiedImageLayoutsExtensionName,
         
         // Descriptorheap + untyped Pointer
         vk::EXTDescriptorHeapExtensionName,
@@ -300,7 +301,9 @@ namespace NRI
                            vk::PhysicalDeviceDescriptorHeapFeaturesEXT,
                            vk::PhysicalDeviceShaderUntypedPointersFeaturesKHR,
                            vk::PhysicalDeviceMaintenance5FeaturesKHR,
-                           vk::PhysicalDeviceMeshShaderFeaturesEXT>
+                           vk::PhysicalDeviceMeshShaderFeaturesEXT,
+                           vk::PhysicalDeviceUnifiedImageLayoutsFeaturesKHR
+        >
             featureChain = {
                 {
                     .features = {
@@ -341,7 +344,8 @@ namespace NRI
                 {.descriptorHeap = true},
                 {.shaderUntypedPointers = true},
                 {.maintenance5 = true},
-                {.taskShader = true, .meshShader = true}
+                {.taskShader = true, .meshShader = true},
+            {.unifiedImageLayouts = true}
             };
 
         // create a Device
