@@ -38,6 +38,10 @@ namespace Nox
         // Visability
         watchShader("assets/shaders/VisibilityBuffer.slang", "VisBuffer", [this]() { createVisibilityPipeline(true); });
         watchShader("assets/shaders/VisibilityDebug.slang", "VisDebug", [this]() { createVisibilityDebugPipeline(true); });
+        // G-Buffer
+        watchShader("assets/shaders/GBufferMaterial.slang", "VisDebug", [this]() { createVisibilityDebugPipeline(true); });
+        // PBR
+        watchShader("assets/shaders/DeferredLighting.slang", "DeferredLighting", [this]() { createDeferredLightingPipeline(true); });
         
         m_whiteTexture = createSolidColorTexture(255, 255, 255, 255);
 
@@ -103,13 +107,14 @@ namespace Nox
         // Visability
         createVisibilityPipeline(false);      // <--- ADD THIS
         createVisibilityDebugPipeline(false);
+        // G-Buffer
+        createGBufferPipeline();
         
         createCommandPool();
         createUniformBuffers();
         createSelectedEntityIDBuffers();
         createDescriptorHeaps();
         createTextureImage();
-        
         createSceneResources();
         createColorResources();
         createEntityResources();
@@ -117,6 +122,10 @@ namespace Nox
         
         // Visability
         createVisibilityResources();
+        // G-Buffer
+        createGBufferResources();
+        // PBR
+        createDeferredLightingPipeline(false);
         
         createCommandBuffers();
 
@@ -161,6 +170,9 @@ namespace Nox
         
         // Visability
         createVisibilityResources();
+        
+        // G-Buffer
+        createGBufferResources();
     }
 
     void Renderer::createSwapChain()
@@ -191,6 +203,9 @@ namespace Nox
         
         //Visability
         createVisibilityResources();
+        
+        // G-Buffer
+        createGBufferResources();
     }
 
     void Renderer::createCompiler()
@@ -401,18 +416,7 @@ namespace Nox
 
     void Renderer::createEntityResources()
     {
-        //changed from m_swapChainExtent to m_viewportSize
         m_entityResource = m_device->createTexture(NRI::TextureDesc{
-            .width = m_isEditor ? m_viewportSize.width : m_swapChainExtent.width,
-            .height = m_isEditor ? m_viewportSize.height : m_swapChainExtent.height,
-            .mipLevels = 1,
-            .sampleCount = m_device->getMSAASampleCount(),
-            .usage = NRI::TextureUsage::ColorAttachment,
-            .format = NRI::ImageFormat::R32SINT,
-            .directFormat = UINT32_MAX
-        });
-
-        m_entityResolveResource = m_device->createTexture(NRI::TextureDesc{
             .width = m_isEditor ? m_viewportSize.width : m_swapChainExtent.width,
             .height = m_isEditor ? m_viewportSize.height : m_swapChainExtent.height,
             .mipLevels = 1,
@@ -421,22 +425,24 @@ namespace Nox
             .format = NRI::ImageFormat::R32SINT,
             .directFormat = UINT32_MAX
         });
-        // Register so shaders can sample entity IDs!
-        m_resourceHeap->registerTexture(*m_entityResolveResource);
+
+        // Register so shaders / outline post-process can read entity IDs directly
+        m_resourceHeap->registerTexture(*m_entityResource);
         uniformData.imageHeapIndexOffset = m_resourceHeap->getImageHeapIndexOffset();
-        uniformData.entityTextureIndex = m_entityResolveResource->GetDescriptorIndexSlot();
+        uniformData.entityTextureIndex = m_entityResource->GetDescriptorIndexSlot();
     }
 
     void Renderer::createDepthResources()
     {
         //changed from m_swapChainExtent to m_viewportSize
         m_depthResource = m_device->createTexture(NRI::TextureDesc{
-            .width = m_isEditor ? m_viewportSize.width : m_swapChainExtent.width,
-            .height = m_isEditor ? m_viewportSize.height : m_swapChainExtent.height,
-            .mipLevels = 1,
-            .sampleCount = 1,
-            .usage = NRI::TextureUsage::DepthStencilAttachment
-        });
+                .width = m_isEditor ? m_viewportSize.width : m_swapChainExtent.width,
+                .height = m_isEditor ? m_viewportSize.height : m_swapChainExtent.height,
+                .mipLevels = 1,
+                .sampleCount = 1,
+                .usage = NRI::TextureUsage::DepthStencilAttachment
+            });
+        m_resourceHeap->registerTexture(*m_depthResource);
     }
     
     void Renderer::createVisibilityResources()
@@ -506,11 +512,119 @@ namespace Nox
         m_visibilityDebugPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
+    void Renderer::createGBufferResources()
+        {
+            const uint32_t width = m_isEditor ? m_viewportSize.width : m_swapChainExtent.width;
+            const uint32_t height = m_isEditor ? m_viewportSize.height : m_swapChainExtent.height;
+
+            m_gbufferAlbedo = m_device->createTexture(NRI::TextureDesc{
+                .width = width,
+                .height = height,
+                .mipLevels = 1,
+                .sampleCount = 1,
+                .usage = NRI::TextureUsage::ColorAttachment,
+                .format = NRI::ImageFormat::RGBA8,
+                .directFormat = UINT32_MAX
+            });
+            m_resourceHeap->registerTexture(*m_gbufferAlbedo);
+
+            m_gbufferNormal = m_device->createTexture(NRI::TextureDesc{
+                .width = width,
+                .height = height,
+                .mipLevels = 1,
+                .sampleCount = 1,
+                .usage = NRI::TextureUsage::ColorAttachment,
+                .format = NRI::ImageFormat::R16G16B16A16_SFLOAT,
+                .directFormat = UINT32_MAX
+            });
+            m_resourceHeap->registerTexture(*m_gbufferNormal);
+
+            m_gbufferMaterial = m_device->createTexture(NRI::TextureDesc{
+                .width = width,
+                .height = height,
+                .mipLevels = 1,
+                .sampleCount = 1,
+                .usage = NRI::TextureUsage::ColorAttachment,
+                .format = NRI::ImageFormat::RGBA8,
+                .directFormat = UINT32_MAX
+            });
+            m_resourceHeap->registerTexture(*m_gbufferMaterial);
+
+            m_gbufferEmission = m_device->createTexture(NRI::TextureDesc{
+                .width = width,
+                .height = height,
+                .mipLevels = 1,
+                .sampleCount = 1,
+                .usage = NRI::TextureUsage::ColorAttachment,
+                .format = NRI::ImageFormat::R16G16B16A16_SFLOAT,
+                .directFormat = UINT32_MAX
+            });
+            m_resourceHeap->registerTexture(*m_gbufferEmission);
+
+            uniformData.imageHeapIndexOffset = m_resourceHeap->getImageHeapIndexOffset();
+        }
+
+        void Renderer::createGBufferPipeline(bool forceCompile)
+        {
+            NRI::PipelineDesc desc{};
+            desc.forceCompile = forceCompile;
+            desc.colorFormats = {
+                NRI::ImageFormat::RGBA8,
+                NRI::ImageFormat::R16G16B16A16_SFLOAT,
+                NRI::ImageFormat::RGBA8,
+                NRI::ImageFormat::R16G16B16A16_SFLOAT,
+                NRI::ImageFormat::R32SINT
+            };
+
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Task,
+                .entryPoint = "taskMain",
+                .sourcePath = "assets/shaders/GBufferMaterial.slang"
+            });
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Mesh,
+                .entryPoint = "meshMain",
+                .sourcePath = "assets/shaders/GBufferMaterial.slang"
+            });
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Fragment,
+                .entryPoint = "fragMain",
+                .sourcePath = "assets/shaders/GBufferMaterial.slang"
+            });
+
+            m_gbufferPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        }
+    
+    void Renderer::createDeferredLightingPipeline(bool forceCompile)
+    {
+        NRI::PipelineDesc desc{};
+        desc.forceCompile = forceCompile;
+        desc.colorFormats = { NRI::ImageFormat::Surface };
+
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Task,
+            .entryPoint = "taskMain",
+            .sourcePath = "assets/shaders/DeferredLighting.slang"
+        });
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Mesh,
+            .entryPoint = "meshMain",
+            .sourcePath = "assets/shaders/DeferredLighting.slang"
+        });
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Fragment,
+            .entryPoint = "fragMain",
+            .sourcePath = "assets/shaders/DeferredLighting.slang"
+        });
+
+        m_deferredLightingPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+    }
+
     void Renderer::createTextureImage()
     {
         m_textureResource = TextureImporter::LoadTexture2D(TEXTURE_PATH_FOX, {}, this);
     }
-
+    
     Ref<Texture2D> Renderer::UploadTexture(const TextureData& cpuData)
     {
         std::unique_ptr<NRI::Buffer> stagingBuffer = m_device->createBuffer(NRI::BufferDesc{
@@ -1561,63 +1675,138 @@ namespace Nox
             m_commandBuffers->setDepthCompareOp(NRI::CompareOp::Greater);
         }
         */
-
-        
-        // Flush visibility attachment writes so the visual debug pass reads the latest data
-        m_commandBuffers->transitionTextureLayout(*m_visibilityResource, NRI::TextureLayout::ColorAttachment, NRI::TextureLayout::ShaderResource);
-        
-        // =========================================================================
-            // 2. ON-SCREEN VISUAL DEBUG PASS (Reads VisBuffer and draws colorful mosaic to screen)
+        uint32_t currentDebugMode = 0;
             // =========================================================================
-            if (m_visibilityDebugPipeline)
+            // 2. G-BUFFER MATERIAL GENERATION PASS (Decoupled Material Resolve)
+            // =========================================================================
+            if (m_gbufferPipeline)
             {
-                std::vector<NRI::RenderAttachDesc> debugAttachments;
-                debugAttachments.push_back({
-                    .attachment = m_sceneResource.get(),
+                std::vector<NRI::RenderAttachDesc> gbufferAttachments;
+                // 0. Albedo (RGBA8)
+                gbufferAttachments.push_back({
+                    .attachment = m_gbufferAlbedo.get(),
                     .loadOP = NRI::LoadOP::clear,
                     .storeOP = NRI::StoreOP::store,
-                    .clearColor = {0.0f, 0.0f, 0.0f, 1.0f}
+                    .clearColor = {0.0f, 0.0f, 0.0f, 0.0f}
+                });
+                // 1. World Normal (R16G16B16A16_SFLOAT)
+                gbufferAttachments.push_back({
+                    .attachment = m_gbufferNormal.get(),
+                    .loadOP = NRI::LoadOP::clear,
+                    .storeOP = NRI::StoreOP::store,
+                    .clearColor = {0.0f, 0.0f, 0.0f, 0.0f}
+                });
+                // 2. Material (RGBA8: Roughness, Metallic, Workflow)
+                gbufferAttachments.push_back({
+                    .attachment = m_gbufferMaterial.get(),
+                    .loadOP = NRI::LoadOP::clear,
+                    .storeOP = NRI::StoreOP::store,
+                    .clearColor = {0.0f, 0.0f, 0.0f, 0.0f}
+                });
+                // 3. Emission (R16G16B16A16_SFLOAT)
+                gbufferAttachments.push_back({
+                    .attachment = m_gbufferEmission.get(),
+                    .loadOP = NRI::LoadOP::clear,
+                    .storeOP = NRI::StoreOP::store,
+                    .clearColor = {0.0f, 0.0f, 0.0f, 0.0f}
+                });
+                // 4. Entity ID (R32SINT)
+                gbufferAttachments.push_back({
+                    .attachment = m_entityResource.get(),
+                    .loadOP = NRI::LoadOP::clear,
+                    .storeOP = NRI::StoreOP::store,
+                    .clearColor = {-1.0f, 0.0f, 0.0f, 0.0f}
                 });
 
-                NRI::RenderDesc debugDesc =
-                {
-                    .renderArea = m_isEditor ? m_viewportSize : m_swapChainExtent,
-                    .colorAttachments = debugAttachments
+                NRI::RenderDesc gbufferDesc = {
+                    .renderArea = locViewportSize,
+                    .colorAttachments = gbufferAttachments
                 };
 
-                m_commandBuffers->beginRendering(debugDesc);
+                m_commandBuffers->beginRendering(gbufferDesc);
 
-                const NRI::Extent2D locViewportSize = m_isEditor ? m_viewportSize : m_swapChainExtent;
-                const float w = static_cast<float>(locViewportSize.width);
-                const float h = static_cast<float>(locViewportSize.height);
                 m_commandBuffers->setViewportWithCount({0.0f, h, w, -h}, 0.0f, 1.0f);
                 m_commandBuffers->setScissorWithCount(locViewportSize);
 
-                m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_visibilityDebugPipeline);
+                m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_gbufferPipeline);
                 m_commandBuffers->setCullMode(NRI::CullMode::None);
                 m_commandBuffers->setDepthTestEnable(false);
                 m_commandBuffers->setDepthWriteEnable(false);
 
-                shaderio::PushConstantVisibilityDebug debugPush{};
-                debugPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
-                debugPush.instanceReference = m_instanceBuffers[frameIndex]->getDeviceAddress();
+                for (uint32_t a = 0; a < 5; ++a)
+                {
+                    m_commandBuffers->setColorBlendEnable(a, false);
+                    m_commandBuffers->setColorWriteMask(a, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
+                }
+
+                shaderio::PushConstantVisibilityDebug gbufferPush{};
+                gbufferPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                gbufferPush.instanceReference = m_instanceBuffers[frameIndex]->getDeviceAddress();
 
                 bool hasBoneBuffers = frameIndex < m_boneBuffers.size() && m_boneBuffers[frameIndex] != nullptr;
                 bool hasBones = !m_boneMatrices.empty();
-                debugPush.boneMatrixReference = (hasBones && hasBoneBuffers) ? m_boneBuffers[frameIndex]->getDeviceAddress() : 0;
+                gbufferPush.boneMatrixReference = (hasBones && hasBoneBuffers) ? m_boneBuffers[frameIndex]->getDeviceAddress() : 0;
 
-                debugPush.vertexPageTableReference = m_vertexPageTableBuffers[frameIndex]->getDeviceAddress();
-                debugPush.meshletDrawsPageTableReference = m_meshletDrawPageTableBuffers[frameIndex]->getDeviceAddress();
-                debugPush.meshletVerticesPageTableReference = m_meshletVertPageTableBuffers[frameIndex]->getDeviceAddress();
-                debugPush.meshletTrianglesPageTableReference = m_meshletTriPageTableBuffers[frameIndex]->getDeviceAddress();
-                debugPush.visibilityTextureIndex = m_visibilityResource->GetDescriptorIndexSlot();
-                debugPush.debugMode = 0; // 0 = Albedo Texture/Color, 1 = Reconstructed Normals, 2 = Reconstructed UVs, 3 = Colored Meshlets
-                debugPush.viewportSize = glm::vec2(w, h);
-                m_commandBuffers->pushData(&debugPush, sizeof(shaderio::PushConstantVisibilityDebug));
+                gbufferPush.vertexPageTableReference = m_vertexPageTableBuffers[frameIndex]->getDeviceAddress();
+                gbufferPush.meshletDrawsPageTableReference = m_meshletDrawPageTableBuffers[frameIndex]->getDeviceAddress();
+                gbufferPush.meshletVerticesPageTableReference = m_meshletVertPageTableBuffers[frameIndex]->getDeviceAddress();
+                gbufferPush.meshletTrianglesPageTableReference = m_meshletTriPageTableBuffers[frameIndex]->getDeviceAddress();
+                gbufferPush.visibilityTextureIndex = m_visibilityResource->GetDescriptorIndexSlot();
+                gbufferPush.viewportSize = glm::vec2(w, h);
+                gbufferPush.debugMode = currentDebugMode;
+                m_commandBuffers->pushData(&gbufferPush, sizeof(shaderio::PushConstantVisibilityDebug));
 
                 m_commandBuffers->drawMeshTasks(1, 1, 1);
                 m_commandBuffers->endRendering();
             }
+        
+                // =========================================================================
+                // 3. DECOUPLED DEFERRED PBR LIGHTING PASS
+                // =========================================================================
+                if (m_deferredLightingPipeline)
+                {
+                    std::vector<NRI::RenderAttachDesc> lightingAttachments;
+                    lightingAttachments.push_back({
+                        .attachment = m_sceneResource.get(),
+                        .loadOP = NRI::LoadOP::clear,
+                        .storeOP = NRI::StoreOP::store,
+                        .clearColor = {0.0f, 0.0f, 0.0f, 1.0f}
+                    });
+
+                    NRI::RenderDesc lightingDesc = {
+                        .renderArea = locViewportSize,
+                        .colorAttachments = lightingAttachments
+                    };
+
+                    m_commandBuffers->beginRendering(lightingDesc);
+
+                    m_commandBuffers->setViewportWithCount({0.0f, h, w, -h}, 0.0f, 1.0f);
+                    m_commandBuffers->setScissorWithCount(locViewportSize);
+
+                    m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_deferredLightingPipeline);
+                    m_commandBuffers->setCullMode(NRI::CullMode::None);
+                    m_commandBuffers->setDepthTestEnable(false);
+                    m_commandBuffers->setDepthWriteEnable(false);
+                    m_commandBuffers->setColorBlendEnable(0, false);
+                    m_commandBuffers->setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
+
+                    glm::mat4 viewProj = uniformData.proj * uniformData.view;
+                    shaderio::PushConstantDeferredLighting lightingPush{};
+                    lightingPush.invViewProj = glm::inverse(viewProj);
+                    lightingPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                    lightingPush.visibilityTextureIndex = m_visibilityResource->GetDescriptorIndexSlot();
+                    lightingPush.gbufferAlbedoIndex = m_gbufferAlbedo->GetDescriptorIndexSlot();
+                    lightingPush.gbufferNormalIndex = m_gbufferNormal->GetDescriptorIndexSlot();
+                    lightingPush.gbufferMaterialIndex = m_gbufferMaterial->GetDescriptorIndexSlot();
+                    lightingPush.gbufferEmissionIndex = m_gbufferEmission->GetDescriptorIndexSlot();
+                    lightingPush.depthTextureIndex = m_depthResource->GetDescriptorIndexSlot();
+                    lightingPush.viewportSize = glm::vec2(w, h);
+                    lightingPush.debugMode = currentDebugMode; // 0 = Full PBR Lit, 1 = Direct Lights Only, 2 = IBL Only, 3 = World Pos, 4 = Albedo, 5 = Normal, 6 = Roughness, 7 = Metallic, 8 = Occlusion, 9 = Emission
+                    m_commandBuffers->pushData(&lightingPush, sizeof(shaderio::PushConstantDeferredLighting));
+
+                    m_commandBuffers->drawMeshTasks(1, 1, 1);
+                    m_commandBuffers->endRendering();
+                }
 
         /*// --- OUTLINE POST-PROCESS ---
         if (!m_SelectedEntityIDs.empty() && m_outlinePipeline)
@@ -1826,7 +2015,7 @@ namespace Nox
                 uint32_t copyWidth = std::min(m_pickRequest.width, width - sampleX);
                 uint32_t copyHeight = std::min(m_pickRequest.height, height - sampleY);
                 
-                m_entityResolveResource->copyImageToBuffer(*m_commandBuffers, *m_pickerStagingBuffers[frameIndex], sampleX, sampleY, copyWidth, copyHeight);
+                m_entityResource->copyImageToBuffer(*m_commandBuffers, *m_pickerStagingBuffers[frameIndex], sampleX, sampleY, copyWidth, copyHeight);
                 
                 m_pickRequest.active = false;
             }
@@ -1876,7 +2065,7 @@ namespace Nox
         uniformData.proj[1][1] *= -1;*/
         uniformData.samplerIndex = selectedSampler;
 
-        uniformData.entityTextureIndex = m_entityResolveResource->GetDescriptorIndexSlot();
+        uniformData.entityTextureIndex = m_entityResource->GetDescriptorIndexSlot();
 
         // PBR IBL
         uniformData.irradianceMapIndex = m_irradianceCubemap->GetDescriptorIndexSlot();

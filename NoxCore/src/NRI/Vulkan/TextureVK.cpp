@@ -78,7 +78,7 @@ namespace NRI
         {
             format = m_deviceVK.getDepthFormat();
             aspectFlags = vk::ImageAspectFlagBits::eDepth;
-            usageFlags = vk::ImageUsageFlagBits::eDepthStencilAttachment;
+            usageFlags = vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled;
         }
         else if (desc.usage == TextureUsage::Storage)
         {

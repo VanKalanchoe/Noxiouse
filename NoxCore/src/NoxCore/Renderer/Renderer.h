@@ -209,6 +209,11 @@ namespace Nox
         void createVisibilityResources();
         void createVisibilityPipeline(bool forceCompile);
         void createVisibilityDebugPipeline(bool forceCompile);
+        // G-Buffer
+        void createGBufferResources();
+        void createGBufferPipeline(bool forceCompile = false);
+        // PBR
+        void createDeferredLightingPipeline(bool forceCompile = false);
         
         void createTextureImage();
         void initGeometryBuffers();
@@ -255,6 +260,10 @@ namespace Nox
         // Visability
         std::unique_ptr<NRI::Pipeline> m_visibilityPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_visibilityDebugPipeline = nullptr;
+        // G-Buffer
+        std::unique_ptr<NRI::Pipeline> m_gbufferPipeline = nullptr;
+        // PBR
+        std::unique_ptr<NRI::Pipeline> m_deferredLightingPipeline = nullptr;
         
         std::unique_ptr<NRI::CommandAllocator> m_commandAllocator = nullptr;
         std::unique_ptr<NRI::CommandBuffer> m_commandBuffers = nullptr;
@@ -273,6 +282,12 @@ namespace Nox
         
         // Visability
         Ref<Texture2D> m_visibilityResource;
+        
+        // G-Buffer Render Targets (Decoupled Material Pass)
+        Ref<Texture2D> m_gbufferAlbedo;    // RGBA8_UNORM: RGB = BaseColor, A = Occlusion
+        Ref<Texture2D> m_gbufferNormal;    // R16G16B16A16_SFLOAT: RGB = World Normal
+        Ref<Texture2D> m_gbufferMaterial;  // RGBA8_UNORM: R = Roughness, G = Metallic, B = Workflow
+        Ref<Texture2D> m_gbufferEmission;  // R16G16B16A16_SFLOAT: RGB = Emissive
 
         Ref<Texture2D> m_whiteTexture;
         Ref<Texture2D> m_sceneResource;
@@ -280,7 +295,6 @@ namespace Nox
         
         // Entiity ID + readback
         Ref<Texture2D> m_entityResource;
-        Ref<Texture2D> m_entityResolveResource;
         std::vector<std::unique_ptr<NRI::Buffer>> m_pickerStagingBuffers;
         PickRequest m_pickRequest;
         std::vector<int32_t> m_SelectedEntityIDs;

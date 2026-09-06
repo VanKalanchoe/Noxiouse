@@ -275,8 +275,26 @@ struct PushConstantVisibilityDebug
     uint64_t meshletVerticesPageTableReference;
     uint64_t meshletTrianglesPageTableReference;
     uint32_t visibilityTextureIndex;
-    uint32_t debugMode; // 0 = Reconstructed UVs, 1 = Reconstructed Normals, 2 = Colored Meshlets
+    uint32_t debugMode; // 0 = Albedo, 1 = Normal, 2 = Roughness, 3 = Metallic, 4 = Emission, 5 = Occlusion, 6 = Colored Meshlets
     vec2 viewportSize;
+    uint32_t gbufferAlbedoIndex;
+    uint32_t gbufferNormalIndex;
+    uint32_t gbufferMaterialIndex;
+    uint32_t gbufferEmissionIndex;
+};
+
+struct PushConstantDeferredLighting
+{
+    mat4 invViewProj;
+    uint64_t matrixReference;
+    uint32_t gbufferAlbedoIndex;
+    uint32_t gbufferNormalIndex;
+    uint32_t gbufferMaterialIndex;
+    uint32_t gbufferEmissionIndex;
+    uint32_t depthTextureIndex;
+    uint32_t visibilityTextureIndex;
+    vec2 viewportSize;
+    uint32_t debugMode; // 0 = Full PBR, 1 = Direct Lights, 2 = IBL, 3 = World Pos, 4 = Albedo, 5 = Normal, 6 = Roughness, 7 = Metallic, 8 = Occlusion, 9 = Emission
 };
 
 struct PushConstantOutline
