@@ -349,9 +349,6 @@ namespace Nox
         {
             auto& animatorComp = view.get<AnimatorComponent>(entity);
 
-            if (!animatorComp.Playing)
-                continue;
-
             // 1. Sync Animation sequence from AssetHandle if assigned
             if (animatorComp.Animation != 0)
             {
@@ -363,6 +360,8 @@ namespace Nox
                     {
                         anim->Handle = animatorComp.Animation;
                         animatorComp.Animator.PlayAnimation(anim);
+                        if (!animatorComp.Playing)
+                            animatorComp.Animator.Pause();
                     }
                 }
             }
@@ -373,11 +372,14 @@ namespace Nox
                 Ref<Skeleton> skeleton = AssetManager::GetAsset<Skeleton>(animatorComp.Skeleton);
                 if (skeleton && !skeleton->AllNodes.empty())
                 {
-                    animatorComp.Animator.Update((float)ts, *skeleton);
+                    if (animatorComp.Playing)
+                        animatorComp.Animator.Update((float)ts, *skeleton);
+                    else
+                        animatorComp.Animator.UpdateTransforms(*skeleton);
                 }
             }
         }
-        
+
         RenderScene(camera);
     }
     

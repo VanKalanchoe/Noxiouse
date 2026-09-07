@@ -425,7 +425,9 @@ namespace Nox
             out << YAML::Key << "Animation" << YAML::Value << animatorComponent.Animation;
             out << YAML::Key << "Skeleton" << YAML::Value << animatorComponent.Skeleton;
             out << YAML::Key << "Playing" << YAML::Value << animatorComponent.Playing;
-
+            out << YAML::Key << "Looping" << YAML::Value << animatorComponent.Animator.IsLooping();
+            out << YAML::Key << "PlaybackSpeed" << YAML::Value << animatorComponent.Animator.GetPlaybackSpeed();
+            
             out << YAML::EndMap; // AnimatorComponent
         }
 
@@ -949,6 +951,10 @@ namespace Nox
                         ac.Skeleton = animatorComponent["Skeleton"].as<AssetHandle>();
                     if (animatorComponent["Playing"])
                         ac.Playing = animatorComponent["Playing"].as<bool>();
+                    if (animatorComponent["Looping"])
+                        ac.Animator.SetLooping(animatorComponent["Looping"].as<bool>());
+                    if (animatorComponent["PlaybackSpeed"])
+                        ac.Animator.SetPlaybackSpeed(animatorComponent["PlaybackSpeed"].as<float>());
                 }
 
                 auto cameraComponent = entity["CameraComponent"];

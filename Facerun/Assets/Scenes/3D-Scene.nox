@@ -73,9 +73,11 @@ Entities:
       UnlitFlags:
         - false
     AnimatorComponent:
-      Animation: 0
+      Animation: 5317410254392963727
       Skeleton: 5774826277349096753
       Playing: true
+      Looping: true
+      PlaybackSpeed: 1
   - Entity: 8032561430481148605
     TagComponent:
       Tag: DamagedHelmet

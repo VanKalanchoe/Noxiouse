@@ -959,101 +959,169 @@ namespace Nox
         });
 
         DrawComponent<AnimatorComponent>("Animator", entity, [](auto& component)
-        {
-            Ref<AnimationSequence> currentAnim = component.Animator.GetCurrentAnimation();
-
-            // --- Media Control Buttons ---
-            bool isPlaying = component.Animator.IsPlaying();
-
-            if (isPlaying)
             {
-                if (ImGui::Button("Pause", ImVec2(80.0f, 0.0f)))
+                Ref<AnimationSequence> currentAnim = component.Animator.GetCurrentAnimation();
+
+                // Auto-resolve animation if assigned on the component but not yet loaded into the Animator
+                if (!currentAnim && component.Animation != 0)
                 {
-                    component.Animator.Pause();
-                }
-            }
-            else
-            {
-                if (ImGui::Button("Play", ImVec2(80.0f, 0.0f)))
-                {
-                    // Reset to start if at the end and not looping
-                    if (!component.Animator.IsLooping() && currentAnim)
+                    Ref<AnimationSequence> anim = AssetManager::GetAsset<AnimationSequence>(component.Animation);
+                    if (anim)
                     {
-                        if (component.Animator.GetCurrentAnimationTime() >= currentAnim->Duration)
+                        anim->Handle = component.Animation;
+                        component.Animator.PlayAnimation(anim);
+                        if (!component.Playing)
+                            component.Animator.Pause();
+                        currentAnim = component.Animator.GetCurrentAnimation();
+                    }
+                }
+
+                // --- Media Control Buttons ---
+                bool isPlaying = component.Animator.IsPlaying();
+
+                if (isPlaying)
+                {
+                    if (ImGui::Button("Pause", ImVec2(80.0f, 0.0f)))
+                    {
+                        component.Animator.Pause();
+                        component.Playing = false;
+                    }
+                }
+                else
+                {
+                    if (ImGui::Button("Play", ImVec2(80.0f, 0.0f)))
+                    {
+                        // Reset to start if at the end and not looping
+                        if (!component.Animator.IsLooping() && currentAnim)
                         {
-                            component.Animator.SetCurrentTime(0.0f);
+                            if (component.Animator.GetCurrentAnimationTime() >= currentAnim->Duration)
+                            {
+                                component.Animator.SetCurrentTime(0.0f);
+                            }
+                        }
+                        component.Animator.Resume();
+                        component.Playing = true;
+                    }
+                }
+
+                ImGui::SameLine();
+                if (ImGui::Button("Stop", ImVec2(80.0f, 0.0f)))
+                {
+                    component.Animator.Stop();
+                    component.Playing = false;
+                }
+
+                ImGui::Spacing();
+
+                // --- Looping & Playback Speed ---
+                bool isLooping = component.Animator.IsLooping();
+                if (ImGui::Checkbox("Looping", &isLooping))
+                {
+                    component.Animator.SetLooping(isLooping);
+                }
+
+                float speed = component.Animator.GetPlaybackSpeed();
+                if (ImGui::DragFloat("Playback Speed", &speed, 0.05f, 0.0f, 10.0f))
+                {
+                    component.Animator.SetPlaybackSpeed(speed);
+                }
+
+                ImGui::Spacing();
+                ImGui::Separator();
+                ImGui::Spacing();
+
+                // --- Animation Selection Dropdown ---
+                auto assetManager = Project::GetActive()->GetEditorAssetManager();
+                const auto& registry = assetManager->GetAssetRegistry();
+
+                std::string currentAnimName = "None (Select Animation)";
+                if (currentAnim)
+                {
+                    if (registry.contains(currentAnim->Handle))
+                        currentAnimName = registry.at(currentAnim->Handle).FilePath.stem().string();
+                    else if (!currentAnim->Name.empty())
+                        currentAnimName = currentAnim->Name;
+                    else
+                        currentAnimName = "Selected Animation";
+                }
+                else if (component.Animation != 0 && registry.contains(component.Animation))
+                {
+                    currentAnimName = registry.at(component.Animation).FilePath.stem().string();
+                }
+
+                if (ImGui::BeginCombo("Animation Clip", currentAnimName.c_str()))
+                {
+                    bool isNoneSelected = (currentAnim == nullptr && component.Animation == 0);
+                    if (ImGui::Selectable("None", isNoneSelected))
+                    {
+                        component.Animation = 0;
+                        component.Playing = false;
+                        component.Animator.Stop();
+                        component.Animator.PlayAnimation(nullptr);
+                    }
+                    if (isNoneSelected)
+                        ImGui::SetItemDefaultFocus();
+
+                    for (const auto& [handle, metadata] : registry)
+                    {
+                        if (metadata.Type == AssetType::AnimationSequence)
+                        {
+                            std::string animName = metadata.FilePath.stem().string();
+                            bool isSelected = (currentAnim && (currentAnim->Handle == handle || component.Animation == handle));
+
+                            if (ImGui::Selectable(animName.c_str(), isSelected))
+                            {
+                                Ref<AnimationSequence> anim = AssetManager::GetAsset<AnimationSequence>(handle);
+                                if (anim)
+                                {
+                                    anim->Handle = handle;
+                                    component.Animation = handle;
+                                    component.Playing = true;
+                                    component.Animator.PlayAnimation(anim);
+                                }
+                            }
+
+                            if (isSelected)
+                                ImGui::SetItemDefaultFocus();
                         }
                     }
-                    component.Animator.Resume();
+                    ImGui::EndCombo();
                 }
-            }
 
-            ImGui::SameLine();
-            if (ImGui::Button("Stop", ImVec2(80.0f, 0.0f)))
-            {
-                component.Animator.Stop();
-            }
-
-            ImGui::Spacing();
-
-            // --- Looping & Playback Speed ---
-            bool isLooping = component.Animator.IsLooping();
-            if (ImGui::Checkbox("Looping", &isLooping))
-            {
-                component.Animator.SetLooping(isLooping);
-            }
-
-            float speed = component.Animator.GetPlaybackSpeed();
-            if (ImGui::DragFloat("Playback Speed", &speed, 0.05f, 0.0f, 10.0f))
-            {
-                component.Animator.SetPlaybackSpeed(speed);
-            }
-
-            ImGui::Spacing();
-            ImGui::Separator();
-            ImGui::Spacing();
-
-            // --- Animation Selection Dropdown ---
-            auto assetManager = Project::GetActive()->GetEditorAssetManager();
-            const auto& registry = assetManager->GetAssetRegistry();
-
-            std::string currentAnimName = currentAnim ? (!currentAnim->Name.empty() ? currentAnim->Name : "Selected Animation") : "None (Select Animation)";
-
-            if (ImGui::BeginCombo("Animation Clip", currentAnimName.c_str()))
-            {
-                for (const auto& [handle, metadata] : registry)
+                // Drag and drop support from Content Browser onto the Animation Clip field
+                if (ImGui::BeginDragDropTarget())
                 {
-                    if (metadata.Type == AssetType::AnimationSequence)
+                    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEM"))
                     {
-                        std::string animName = metadata.FilePath.stem().string();
-                        bool isSelected = (currentAnim && currentAnim->Handle == handle);
-
-                        if (ImGui::Selectable(animName.c_str(), isSelected))
+                        AssetHandle handle = *(AssetHandle*)payload->Data;
+                        if (AssetManager::GetAssetType(handle) == AssetType::AnimationSequence)
                         {
                             Ref<AnimationSequence> anim = AssetManager::GetAsset<AnimationSequence>(handle);
                             if (anim)
                             {
                                 anim->Handle = handle;
+                                component.Animation = handle;
+                                component.Playing = true;
                                 component.Animator.PlayAnimation(anim);
                             }
                         }
-
-                        if (isSelected)
-                            ImGui::SetItemDefaultFocus();
+                        else
+                        {
+                            NOX_CORE_WARN("Wrong Asset Type - Expected an AnimationSequence");
+                        }
                     }
+                    ImGui::EndDragDropTarget();
                 }
-                ImGui::EndCombo();
-            }
 
-            // --- Timeline Slider ---
-            float currentTime = component.Animator.GetCurrentAnimationTime();
-            float maxDuration = currentAnim ? currentAnim->Duration : 100.0f;
+                // --- Timeline Slider ---
+                float currentTime = component.Animator.GetCurrentAnimationTime();
+                float maxDuration = currentAnim ? currentAnim->Duration : 100.0f;
 
-            if (ImGui::SliderFloat("Time (Ticks)", &currentTime, 0.0f, maxDuration, "%.2f"))
-            {
-                component.Animator.SetCurrentTime(currentTime);
-            }
-        });
+                if (ImGui::SliderFloat("Time (Ticks)", &currentTime, 0.0f, maxDuration, "%.2f"))
+                {
+                    component.Animator.SetCurrentTime(currentTime);
+                }
+            });
 
         DrawComponent<CameraComponent>("Camera", entity, [](auto& component)
         {
