@@ -916,7 +916,9 @@ namespace Nox
             "9: IBL Ambient Only",
             "10: World Position",
             "11: Entity ID",
-            "12: Depth Buffer"
+            "12: Depth Buffer",
+            "13: RT Shadow Mask",
+            "14: RT Reflections"
         };
         int currentMode = static_cast<int>(m_Renderer->getDebugMode());
         if (ImGui::Combo("PBR Debug View", &currentMode, debugModeNames, IM_ARRAYSIZE(debugModeNames)))
@@ -955,6 +957,33 @@ namespace Nox
             m_Renderer->setScaleIBLAmbient(iblAmbient);
         }
 
+        ImGui::Separator();
+        ImGui::Text("Ray Tracing");
+
+        bool rtEnabled = m_Renderer->getRayTracingEnabled();
+        if (ImGui::Checkbox("Enable Ray Tracing", &rtEnabled))
+        {
+            m_Renderer->setRayTracingEnabled(rtEnabled);
+        }
+
+        if (rtEnabled)
+        {
+            ImGui::Indent();
+            bool rtShadows = m_Renderer->getRayTracingShadows();
+            if (ImGui::Checkbox("Ray Tracing Shadows", &rtShadows))
+            {
+                m_Renderer->setRayTracingShadows(rtShadows);
+            }
+
+            bool rtReflections = m_Renderer->getRayTracingReflections();
+            if (ImGui::Checkbox("Ray Tracing Reflections", &rtReflections))
+            {
+                m_Renderer->setRayTracingReflections(rtReflections);
+            }
+            ImGui::Unindent();
+        }
+
+        ImGui::Separator();
         ImGui::Checkbox("Show physics collider", &m_ShowPhysicsColliders);
         ImGui::Image(m_Font->GetAtlasTexture()->getImTextureID(), {512, 512}, ImVec2(0, 1), ImVec2(1, 0));
 

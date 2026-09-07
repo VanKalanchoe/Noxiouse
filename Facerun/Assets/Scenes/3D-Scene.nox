@@ -1,26 +1,29 @@
 Scene: Untitled
 Entities:
-  - Entity: 1046906346744094343
+  - Entity: 2678748617419640166
     TagComponent:
       Tag: Empty Entity
     TransformComponent:
-      Translation: [-3.4, 0, 0]
-      Rotation: [0, 0, 0]
+      Translation: [0, 0, 0]
+      Rotation: [1.4538593, 0.0017453292, 0.7853982]
       Scale: [1, 1, 1]
-    SpriteRendererComponent:
-      Color: [1, 1, 1, 1]
-      TextureHandle: 13670283566026550113
-      TilingFactor: 1
-  - Entity: 4493093982643158216
+    DirectionalLightComponent:
+      Color: [0.1312741, 0.1312741, 0.1312741]
+      Intensity: 100
+  - Entity: 1284590277930242781
     TagComponent:
-      Tag: Fox
+      Tag: wooden_picnic_table_1
     TransformComponent:
-      Translation: [1.6, -0.6, 0]
-      Rotation: [0, 0, 0]
-      Scale: [0.03, 0.03, 0.03]
+      Translation: [0, 0, 0]
+      Rotation: [0, -0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 13372889058186574251
+      Children:
+        []
     MeshComponent:
-      MeshHandle: 14168085809762532914
-      SubmeshIndex: 0
+      MeshHandle: 264344941853641833
+      SubmeshIndex: 5
     MaterialComponent:
       Workflows:
         - 0
@@ -31,13 +34,13 @@ Entities:
       BaseColorFactor:
         - [1, 1, 1, 1]
       BaseColorMaps:
-        - 16225910947284343333
+        - 5255653405854183958
       BaseColorTextureSets:
         - 0
       MetallicFactors:
-        - 0
+        - 0.01
       RoughnessFactors:
-        - 0.58
+        - 0
       MetallicRoughnessMaps:
         - 0
       PhysicalDescriptorTextureSets:
@@ -69,25 +72,23 @@ Entities:
       AlphaMaskCutoffs:
         - 0.5
       DoubleSidedFlags:
-        - false
+        - true
       UnlitFlags:
         - false
-    AnimatorComponent:
-      Animation: 5317410254392963727
-      Skeleton: 5774826277349096753
-      Playing: true
-      Looping: true
-      PlaybackSpeed: 1
-  - Entity: 8032561430481148605
+  - Entity: 6872504423460677314
     TagComponent:
-      Tag: DamagedHelmet
+      Tag: wooden_picnic_table_0
     TransformComponent:
       Translation: [0, 0, 0]
       Rotation: [0, 0, 0]
       Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 13372889058186574251
+      Children:
+        []
     MeshComponent:
-      MeshHandle: 3167706731515971424
-      SubmeshIndex: 0
+      MeshHandle: 264344941853641833
+      SubmeshIndex: 4
     MaterialComponent:
       Workflows:
         - 0
@@ -98,29 +99,29 @@ Entities:
       BaseColorFactor:
         - [1, 1, 1, 1]
       BaseColorMaps:
-        - 16782098967821604305
+        - 2666883814347191499
       BaseColorTextureSets:
         - 0
       MetallicFactors:
-        - 1
+        - 0.01
       RoughnessFactors:
-        - 1
+        - 0
       MetallicRoughnessMaps:
-        - 1390650798385755602
+        - 0
       PhysicalDescriptorTextureSets:
         - 0
       NormalMaps:
-        - 542063245227745545
+        - 0
       NormalTextureSets:
         - 0
       OcclusionMaps:
-        - 2057004897525794821
+        - 0
       OcclusionTextureSets:
         - 0
       EmissiveFactors:
-        - [1, 1, 1]
+        - [0, 0, 0]
       EmissiveMaps:
-        - 17989198929163727266
+        - 0
       EmissiveTextureSets:
         - 0
       EmissiveStrengths:
@@ -136,6 +137,282 @@ Entities:
       AlphaMaskCutoffs:
         - 0.5
       DoubleSidedFlags:
-        - false
+        - true
       UnlitFlags:
         - false
+  - Entity: 3666493300578216890
+    TagComponent:
+      Tag: potted_plant_02_pot
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, -0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 13372889058186574251
+      Children:
+        []
+    MeshComponent:
+      MeshHandle: 264344941853641833
+      SubmeshIndex: 3
+    MaterialComponent:
+      Workflows:
+        - 0
+      DiffuseFactors:
+        - [1, 1, 1, 1]
+      SpecularFactors:
+        - [1, 1, 1, 1]
+      BaseColorFactor:
+        - [1, 1, 1, 1]
+      BaseColorMaps:
+        - 7528257573198008490
+      BaseColorTextureSets:
+        - 0
+      MetallicFactors:
+        - 0
+      RoughnessFactors:
+        - 0
+      MetallicRoughnessMaps:
+        - 0
+      PhysicalDescriptorTextureSets:
+        - 0
+      NormalMaps:
+        - 0
+      NormalTextureSets:
+        - 0
+      OcclusionMaps:
+        - 0
+      OcclusionTextureSets:
+        - 0
+      EmissiveFactors:
+        - [0, 0, 0]
+      EmissiveMaps:
+        - 0
+      EmissiveTextureSets:
+        - 0
+      EmissiveStrengths:
+        - 1
+      TransmissionFactors:
+        - 0
+      TransmissionMaps:
+        - 0
+      TransmissionTextureSets:
+        - 0
+      Modes:
+        - 0
+      AlphaMaskCutoffs:
+        - 0.5
+      DoubleSidedFlags:
+        - true
+      UnlitFlags:
+        - false
+  - Entity: 10181764670912449174
+    TagComponent:
+      Tag: potted_plant_02_dirt
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, -0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 13372889058186574251
+      Children:
+        []
+    MeshComponent:
+      MeshHandle: 264344941853641833
+      SubmeshIndex: 2
+    MaterialComponent:
+      Workflows:
+        - 0
+      DiffuseFactors:
+        - [1, 1, 1, 1]
+      SpecularFactors:
+        - [1, 1, 1, 1]
+      BaseColorFactor:
+        - [1, 1, 1, 1]
+      BaseColorMaps:
+        - 7528257573198008490
+      BaseColorTextureSets:
+        - 0
+      MetallicFactors:
+        - 0
+      RoughnessFactors:
+        - 0
+      MetallicRoughnessMaps:
+        - 0
+      PhysicalDescriptorTextureSets:
+        - 0
+      NormalMaps:
+        - 0
+      NormalTextureSets:
+        - 0
+      OcclusionMaps:
+        - 0
+      OcclusionTextureSets:
+        - 0
+      EmissiveFactors:
+        - [0, 0, 0]
+      EmissiveMaps:
+        - 0
+      EmissiveTextureSets:
+        - 0
+      EmissiveStrengths:
+        - 1
+      TransmissionFactors:
+        - 0
+      TransmissionMaps:
+        - 0
+      TransmissionTextureSets:
+        - 0
+      Modes:
+        - 0
+      AlphaMaskCutoffs:
+        - 0.5
+      DoubleSidedFlags:
+        - true
+      UnlitFlags:
+        - false
+  - Entity: 9755515275860145588
+    TagComponent:
+      Tag: nettle_plant_tall_a_LOD0
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, -0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 13372889058186574251
+      Children:
+        []
+    MeshComponent:
+      MeshHandle: 264344941853641833
+      SubmeshIndex: 1
+    MaterialComponent:
+      Workflows:
+        - 0
+      DiffuseFactors:
+        - [1, 1, 1, 1]
+      SpecularFactors:
+        - [1, 1, 1, 1]
+      BaseColorFactor:
+        - [1, 1, 1, 1]
+      BaseColorMaps:
+        - 6664719640111262319
+      BaseColorTextureSets:
+        - 0
+      MetallicFactors:
+        - 0
+      RoughnessFactors:
+        - 0.39999998
+      MetallicRoughnessMaps:
+        - 0
+      PhysicalDescriptorTextureSets:
+        - 0
+      NormalMaps:
+        - 0
+      NormalTextureSets:
+        - 0
+      OcclusionMaps:
+        - 0
+      OcclusionTextureSets:
+        - 0
+      EmissiveFactors:
+        - [0, 0, 0]
+      EmissiveMaps:
+        - 0
+      EmissiveTextureSets:
+        - 0
+      EmissiveStrengths:
+        - 1
+      TransmissionFactors:
+        - 0
+      TransmissionMaps:
+        - 0
+      TransmissionTextureSets:
+        - 0
+      Modes:
+        - 1
+      AlphaMaskCutoffs:
+        - 0.5
+      DoubleSidedFlags:
+        - true
+      UnlitFlags:
+        - false
+  - Entity: 6572064784701715164
+    TagComponent:
+      Tag: nettle_plant_medium_b_LOD0
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, -0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 13372889058186574251
+      Children:
+        []
+    MeshComponent:
+      MeshHandle: 264344941853641833
+      SubmeshIndex: 0
+    MaterialComponent:
+      Workflows:
+        - 0
+      DiffuseFactors:
+        - [1, 1, 1, 1]
+      SpecularFactors:
+        - [1, 1, 1, 1]
+      BaseColorFactor:
+        - [1, 1, 1, 1]
+      BaseColorMaps:
+        - 6664719640111262319
+      BaseColorTextureSets:
+        - 0
+      MetallicFactors:
+        - 0
+      RoughnessFactors:
+        - 0.39999998
+      MetallicRoughnessMaps:
+        - 0
+      PhysicalDescriptorTextureSets:
+        - 0
+      NormalMaps:
+        - 0
+      NormalTextureSets:
+        - 0
+      OcclusionMaps:
+        - 0
+      OcclusionTextureSets:
+        - 0
+      EmissiveFactors:
+        - [0, 0, 0]
+      EmissiveMaps:
+        - 0
+      EmissiveTextureSets:
+        - 0
+      EmissiveStrengths:
+        - 1
+      TransmissionFactors:
+        - 0
+      TransmissionMaps:
+        - 0
+      TransmissionTextureSets:
+        - 0
+      Modes:
+        - 1
+      AlphaMaskCutoffs:
+        - 0.5
+      DoubleSidedFlags:
+        - true
+      UnlitFlags:
+        - false
+  - Entity: 13372889058186574251
+    TagComponent:
+      Tag: Untitled
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        - 6572064784701715164
+        - 9755515275860145588
+        - 10181764670912449174
+        - 3666493300578216890
+        - 6872504423460677314
+        - 1284590277930242781

@@ -151,6 +151,166 @@
         float3 rgb = saturate(abs(fmod(hue * 6.0 + float3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0);
         return rgb * 0.85 + 0.1;
     }
+// TASK09: Intersection UV interpolation (matching 38_ray_tracing_complete.slang:75-91)
+    float2 intersection_uv(InstanceLUT lut, uint primIndex, float2 barycentrics)
+    {
+        uint32_t* indices = (uint32_t*)lut.indexBufferAddress;
+        uint i0 = indices[primIndex * 3 + 0];
+        uint i1 = indices[primIndex * 3 + 1];
+        uint i2 = indices[primIndex * 3 + 2];
+
+        Vertex* vertices = (Vertex*)lut.vertexBufferAddress;
+        float2 uv0 = vertices[i0].uv0;
+        float2 uv1 = vertices[i1].uv0;
+        float2 uv2 = vertices[i2].uv0;
+
+        float w0 = 1.0 - barycentrics.x - barycentrics.y;
+        float w1 = barycentrics.x;
+        float w2 = barycentrics.y;
+
+        return w0 * uv0 + w1 * uv1 + w2 * uv2;
+    }
+
+    // TASK05 & TASK09: Ray query shadows with alpha test (matching 38_ray_tracing_complete.slang:146-186)
+    bool in_shadow(UniformBufferObject* ubo, float3 worldPos, float3 normal, float3 lightDir, float maxDist)
+    {
+        if (ubo->enableRTShadows == 0 || ubo->tlasDeviceAddress == 0)
+            return false;
+
+        // Small epsilon offset along normal to eliminate self-intersection acne
+        float3 rayOrigin = worldPos + normal * 0.02;
+
+        RayDesc shadowRayDesc;
+        shadowRayDesc.Origin = rayOrigin;
+        shadowRayDesc.Direction = normalize(lightDir);
+        shadowRayDesc.TMin = 0.005;
+        shadowRayDesc.TMax = maxDist;
+
+        RaytracingAccelerationStructure accelerationStructure = RaytracingAccelerationStructure(ubo->tlasDeviceAddress);
+
+        // Initialize ray query (WITHOUT RAY_FLAG_FORCE_OPAQUE so non-opaque triangles run the loop)
+        RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES |
+                 RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> sq;
+        let rayFlags = RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES |
+                       RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH;
+
+        sq.TraceRayInline(accelerationStructure, rayFlags, 0xFF, shadowRayDesc);
+
+        InstanceLUT* instanceLUTBuffer = (InstanceLUT*)ubo->instanceLUTReference;
+        SamplerState textureSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
+
+        while (sq.Proceed())
+            {
+                uint instanceID = sq.CandidateRayInstanceCustomIndex();
+                uint primIndex = sq.CandidatePrimitiveIndex();
+
+                InstanceLUT lut = instanceLUTBuffer[instanceID];
+
+                // If instance is Opaque (alphaMode == 0) or has no texture, commit hit immediately
+                if (lut.alphaMode == 0 || lut.baseColorTextureIndex == 0xFFFFFFFF)
+                {
+                    sq.CommitNonOpaqueTriangleHit();
+                }
+                else
+                {
+                    float2 uv = intersection_uv(lut, primIndex, sq.CandidateTriangleBarycentrics());
+                    Texture2D tex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + lut.baseColorTextureIndex, 0));
+                    float4 intersectionColor = tex.SampleLevel(textureSampler, uv, 0);
+
+                    if (intersectionColor.a < lut.alphaCutoff)
+                    {
+                        // Transparent gap: continue tracing
+                    }
+                    else
+                    {
+                        // Opaque part of leaf: commit hit
+                        sq.CommitNonOpaqueTriangleHit();
+                    }
+                }
+            }
+
+        // If the shadow ray intersects an opaque or committed triangle, pixel is in shadow
+        bool hit = (sq.CommittedStatus() == COMMITTED_TRIANGLE_HIT);
+        return hit;
+    }
+
+    // TASK11: Ray query reflections (matching 38_ray_tracing_complete.slang:93-143)
+    float3 trace_reflection(UniformBufferObject* ubo, float3 worldPos, float3 normal, float3 v, out bool hit)
+    {
+        hit = false;
+        if (ubo->enableRTReflections == 0 || ubo->tlasDeviceAddress == 0 || dot(normal, v) <= 0.001)
+            return float3(0.0);
+
+        // Tight 2mm bias along normal to avoid self-intersection with table surface
+        float3 rayOrigin = worldPos + normal * 0.002;
+        float3 R = reflect(-v, normal);
+
+        RayDesc reflectionRayDesc;
+        reflectionRayDesc.Origin = rayOrigin;
+        reflectionRayDesc.Direction = R;
+        reflectionRayDesc.TMin = 0.005;
+        reflectionRayDesc.TMax = 1e4;
+
+        RaytracingAccelerationStructure accelerationStructure = RaytracingAccelerationStructure(ubo->tlasDeviceAddress);
+
+        // Closest-hit query: NO ACCEPT_FIRST_HIT_AND_END_SEARCH flag
+        RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> rq;
+        let rayFlags = RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES;
+
+        rq.TraceRayInline(accelerationStructure, rayFlags, 0xFF, reflectionRayDesc);
+
+        InstanceLUT* instanceLUTBuffer = (InstanceLUT*)ubo->instanceLUTReference;
+        SamplerState textureSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
+
+        while (rq.Proceed())
+        {
+            uint instanceID = rq.CandidateRayInstanceCustomIndex();
+            uint primIndex = rq.CandidatePrimitiveIndex();
+
+            InstanceLUT lut = instanceLUTBuffer[instanceID];
+
+            if (lut.alphaMode == 0 || lut.baseColorTextureIndex == 0xFFFFFFFF)
+            {
+                rq.CommitNonOpaqueTriangleHit();
+            }
+            else
+            {
+                float2 uv = intersection_uv(lut, primIndex, rq.CandidateTriangleBarycentrics());
+                Texture2D tex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + lut.baseColorTextureIndex, 0));
+                float4 intersectionColor = tex.SampleLevel(textureSampler, uv, 0);
+
+                if (intersectionColor.a < lut.alphaCutoff)
+                {
+                    // Leaf gap: transparent, continue searching for next geometry behind it
+                }
+                else
+                {
+                    rq.CommitNonOpaqueTriangleHit();
+                }
+            }
+        }
+
+        hit = (rq.CommittedStatus() == COMMITTED_TRIANGLE_HIT);
+        if (!hit)
+            return float3(0.0);
+
+        // Query closest committed hit
+        uint committedInstanceID = rq.CommittedRayInstanceCustomIndex();
+        uint committedPrimIndex = rq.CommittedPrimitiveIndex();
+        float2 committedBary = rq.CommittedTriangleBarycentrics();
+
+        InstanceLUT hitLut = instanceLUTBuffer[committedInstanceID];
+        float2 hitUV = intersection_uv(hitLut, committedPrimIndex, committedBary);
+
+        float3 hitColor = float3(0.5);
+        if (hitLut.baseColorTextureIndex != 0xFFFFFFFF)
+        {
+            Texture2D hitTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + hitLut.baseColorTextureIndex, 0));
+            hitColor = hitTex.SampleLevel(textureSampler, hitUV, 0).rgb;
+        }
+
+        return hitColor;
+    }
 
     [shader("fragment")]
     float4 fragMain(
@@ -190,17 +350,19 @@
                 return float4(visualDepth, visualDepth, visualDepth, 1.0);
             }
 
-            // 1. Check Visibility Buffer to distinguish background from geometry
-            Texture2D<uint4> visTex = Texture2D<uint4>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.
-  visibilityTextureIndex, 0));
-            uint4 rawVis = visTex.Load(int3(pixelCoord, 0));
-            uint2 visData = rawVis.xy;
+            // 1. Check Visibility Buffer and Depth to distinguish background from geometry
+                Texture2D<uint4> visTex = Texture2D<uint4>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.visibilityTextureIndex, 0));
+                uint4 rawVis = visTex.Load(int3(pixelCoord, 0));
+                uint2 visData = rawVis.xy;
 
-            if (visData.x == 0)
-            {
-                // Discard background pixels for all other modes so they keep the colorAttachments clearColor!
-                discard;
-            }
+                Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
+                float depth = depthTex.Load(int3(pixelCoord, 0)).r;
+
+                // In Reverse-Z: 0.0 is background/skybox -> discard so skybox pass can render!
+                if (visData.x == 0 || depth <= 0.0)
+                {
+                    discard;
+                }
 
         // 2. Fetch G-Buffer Render Targets
         Texture2D albedoTex   = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.gbufferAlbedoIndex, 0));
@@ -217,9 +379,6 @@
         float2 uv = (float2(pixelCoord) + 0.5) / pushConstant.viewportSize;
         float2 ndc_xy = float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
 
-        Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
-        float depth = depthTex.Load(int3(pixelCoord, 0)).r;
-
         float4 ndc = float4(ndc_xy, depth, 1.0);
         float4 worldPosH = mul(pushConstant.invViewProj, ndc);
         float3 worldPos = worldPosH.xyz / worldPosH.w;
@@ -227,7 +386,8 @@
         // 4. Material Attributes
         float3 baseColor = albedoSample.rgb;
         float occlusion = albedoSample.a;
-        float3 n = normalize(normalSample.rgb);
+        float lenSqN = dot(normalSample.rgb, normalSample.rgb);
+            float3 n = lenSqN > 1e-6 ? normalSample.rgb * rsqrt(lenSqN) : float3(0.0, 1.0, 0.0);
         float perceptualRoughness = clamp(materialSample.r, c_MinRoughness, 1.0);
         float metallic = clamp(materialSample.g, 0.0, 1.0);
         float alphaRoughness = perceptualRoughness * perceptualRoughness;
@@ -256,88 +416,95 @@
         float3 reflection = -normalize(reflect(v, n));
 
         // 6. Direct Analytical Lighting (Directional, Point, Spot)
-        float3 directLighting = float3(0.0);
-        LightData* lights = (LightData*)ubo->lightDataReference;
+            float3 directLighting = float3(0.0);
+            LightData* lights = (LightData*)ubo->lightDataReference;
 
-        for (uint i = 0; i < ubo->lightCount; i++)
-        {
-            LightData light = lights[i];
-            uint lightType = (uint)light.position.w;
-
-            float3 l;
-            float attenuation = 1.0;
-
-            if (lightType == 0) // Directional Light
+            for (uint i = 0; i < ubo->lightCount; i++)
             {
-                l = normalize(light.direction.xyz);
-            }
-            else // Point (1) or Spot (2)
-            {
-                float3 lightVec = light.position.xyz - worldPos;
-                float distance = length(lightVec);
-                l = distance > 0.0001 ? lightVec / distance : float3(0.0, 1.0, 0.0);
+                LightData light = lights[i];
+                uint lightType = (uint)light.position.w;
 
-                float range = light.direction.w;
-                if (range > 0.0)
+                float3 l;
+                float attenuation = 1.0;
+                float maxDist = 1e4;
+
+                if (lightType == 0) // Directional Light
                 {
-                    float dOverR = distance / range;
-                    float window = max(1.0 - pow(dOverR, 4.0), 0.0);
-                    attenuation = window / (distance * distance);
+                    l = normalize(light.direction.xyz);
+                    maxDist = 1e4;
                 }
-                else
+                else // Point (1) or Spot (2)
                 {
-                    attenuation = 1.0 / (distance * distance);
+                    float3 lightVec = light.position.xyz - worldPos;
+                    float distance = length(lightVec);
+                    l = distance > 0.0001 ? lightVec / distance : float3(0.0, 1.0, 0.0);
+                    maxDist = distance;
+
+                    float range = light.direction.w;
+                    if (range > 0.0)
+                    {
+                        float dOverR = distance / range;
+                        float window = max(1.0 - pow(dOverR, 4.0), 0.0);
+                        attenuation = window / (distance * distance);
+                    }
+                    else
+                    {
+                        attenuation = 1.0 / (distance * distance);
+                    }
+
+                    if (lightType == 2) // Spot Cone
+                    {
+                        float cd = dot(normalize(light.direction.xyz), -l);
+                        float lightAngleScale = light.spotParams.x;
+                        float lightAngleOffset = light.spotParams.y;
+
+                        float angularAttenuation = saturate(cd * lightAngleScale + lightAngleOffset);
+                        angularAttenuation *= angularAttenuation;
+                        attenuation *= angularAttenuation;
+                    }
                 }
 
-                if (lightType == 2) // Spot Cone
+                if (attenuation <= 0.0)
                 {
-                    float cd = dot(normalize(light.direction.xyz), -l);
-                    float lightAngleScale = light.spotParams.x;
-                    float lightAngleOffset = light.spotParams.y;
-
-                    float angularAttenuation = saturate(cd * lightAngleScale + lightAngleOffset);
-                    angularAttenuation *= angularAttenuation;
-                    attenuation *= angularAttenuation;
+                    continue;
                 }
+
+                // Test hardware ray query shadow
+                bool occluded = in_shadow(ubo, worldPos, n, l, maxDist);
+                float shadowFactor = occluded ? 0.0 : 1.0;
+
+                float3 h = normalize(l + v);
+
+                float NdotL = clamp(dot(n, l), 0.001, 1.0);
+                float NdotH = clamp(dot(n, h), 0.0, 1.0);
+                float LdotH = clamp(dot(l, h), 0.0, 1.0);
+                float VdotH = clamp(dot(v, h), 0.0, 1.0);
+
+                PBRInfo pbrInputs = PBRInfo(
+                    NdotL,
+                    NdotV,
+                    NdotH,
+                    LdotH,
+                    VdotH,
+                    perceptualRoughness,
+                    metallic,
+                    specularEnvironmentR0,
+                    specularEnvironmentR90,
+                    alphaRoughness,
+                    diffuseColor,
+                    specularColor
+                );
+
+                float3 F = specularReflection(pbrInputs);
+                float G = geometricOcclusion(pbrInputs);
+                float D = microfacetDistribution(pbrInputs);
+
+                float3 diffuseContrib = (1.0 - F) * diffuse(pbrInputs);
+                float3 specContrib = F * G * D / (4.0 * NdotL * NdotV);
+
+                float3 lightRadiance = light.color.rgb * light.color.w * attenuation * shadowFactor;
+                directLighting += NdotL * lightRadiance * (diffuseContrib + specContrib);
             }
-
-            if (attenuation <= 0.0)
-            {
-                continue;
-            }
-
-            float3 h = normalize(l + v);
-
-            float NdotL = clamp(dot(n, l), 0.001, 1.0);
-            float NdotH = clamp(dot(n, h), 0.0, 1.0);
-            float LdotH = clamp(dot(l, h), 0.0, 1.0);
-            float VdotH = clamp(dot(v, h), 0.0, 1.0);
-
-            PBRInfo pbrInputs = PBRInfo(
-                NdotL,
-                NdotV,
-                NdotH,
-                LdotH,
-                VdotH,
-                perceptualRoughness,
-                metallic,
-                specularEnvironmentR0,
-                specularEnvironmentR90,
-                alphaRoughness,
-                diffuseColor,
-                specularColor
-            );
-
-            float3 F = specularReflection(pbrInputs);
-            float G = geometricOcclusion(pbrInputs);
-            float D = microfacetDistribution(pbrInputs);
-
-            float3 diffuseContrib = (1.0 - F) * diffuse(pbrInputs);
-            float3 specContrib = F * G * D / (4.0 * NdotL * NdotV);
-
-            float3 lightRadiance = light.color.rgb * light.color.w * attenuation;
-            directLighting += NdotL * lightRadiance * (diffuseContrib + specContrib);
-        }
 
         // 7. Image-Based Lighting (IBL)
         PBRInfo iblInputs = PBRInfo(
@@ -434,12 +601,51 @@
             return float4(idToColor(entityID), 1.0);
         }
 
-        // =========================================================================
-        // Mode 0: FULL PBR LIT SCENE (Direct + IBL + AO + Emission + Tonemap)
-        // =========================================================================
-        float3 finalColor = directLighting + iblColor;
-        finalColor = lerp(finalColor, finalColor * occlusion, 1.0);
-        finalColor += emissionSample.rgb;
+        // Mode 13: RT Shadow Mask (White = Lit, Black = Shadowed)
+        if (pushConstant.debugMode == 13)
+        {
+            float shadowMask = 1.0;
+            if (ubo->lightCount > 0)
+            {
+                LightData light0 = lights[0];
+                float3 l = (light0.position.w == 0) ? normalize(light0.direction.xyz) : normalize(light0.position.xyz - worldPos);
+                float maxD = (light0.position.w == 0) ? 1e4 : length(light0.position.xyz - worldPos);
+                bool occluded = in_shadow(ubo, worldPos, n, l, maxD);
+                shadowMask = occluded ? 0.0 : 1.0;
+            }
+            return float4(shadowMask, shadowMask, shadowMask, 1.0);
+        }
 
-        return float4(finalColor, 1.0);
-    }
+        // =========================================================================
+            // Mode 0: FULL PBR LIT SCENE (Direct + IBL + AO + Emission + Reflections)
+            // =========================================================================
+            float3 finalColor = directLighting + iblColor;
+            finalColor = lerp(finalColor, finalColor * occlusion, 1.0);
+            finalColor += emissionSample.rgb;
+
+            // TASK11: Ray Query Reflections
+            bool reflHit = false;
+            float3 reflColor = float3(0.0);
+
+            // Only trace reflection rays for glossy / smooth surfaces (perceptualRoughness < 0.6)
+            if (ubo->enableRTReflections != 0 && perceptualRoughness < 0.6)
+            {
+                reflColor = trace_reflection(ubo, worldPos, n, v, reflHit);
+            }
+
+            // Mode 14: RT Reflections Debug View (Hit Color or Black)
+            if (pushConstant.debugMode == 14)
+            {
+                return float4(reflHit ? reflColor : float3(0.0), 1.0);
+            }
+
+            if (reflHit)
+            {
+                // Blend reflection based on glossiness:
+                // Mirror surfaces (roughness == 0) blend at 70% matching tutorial lerp(baseColor, hitColor, 0.7)
+                float reflWeight = (1.0 - perceptualRoughness) * 0.7;
+                finalColor = lerp(finalColor, reflColor, reflWeight);
+            }
+
+            return float4(finalColor, 1.0);
+        }

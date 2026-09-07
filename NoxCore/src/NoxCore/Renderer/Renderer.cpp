@@ -128,6 +128,19 @@ namespace Nox
 
         createCommandBuffers();
 
+        // Allocate baseline capacities for dynamic GPU buffers so vectors are NEVER empty
+        m_InstanceBufferCapacity = sizeof(shaderio::InstanceData) * 64;
+        createInstanceBuffer(m_InstanceBufferCapacity);
+
+        m_IndirectBufferCapacity = sizeof(DrawMeshTasksIndirectCommand) * 64;
+        createIndirectBuffer(m_IndirectBufferCapacity);
+
+        m_BoneBufferCapacity = sizeof(glm::mat4) * 64;
+        createBoneBuffer(m_BoneBufferCapacity);
+
+        m_PageTableCapacity = 64;
+        createPageTableBuffers(m_PageTableCapacity);
+
         initGeometryBuffers();
 
         // Create every resource needed for PBR
@@ -960,7 +973,7 @@ namespace Nox
         }
     }
 
-    MeshHandle Renderer::UploadMeshGeometry(const MeshData& data)
+    MeshHandle Renderer::UploadMeshGeometry(const MeshData& data, bool isOpaque)
     {
         MeshHandle handle{};
 
@@ -996,6 +1009,93 @@ namespace Nox
         UploadBufferSlice(*m_meshletBoundsPages.GetBuffer(boundAlloc.pageIndex), data.Bounds.data(), boundAlloc.offset, boundAlloc.count);
         UploadBufferSlice(*m_meshletVertPages.GetBuffer(mvertAlloc.pageIndex), data.MeshletVertices.data(), mvertAlloc.offset, mvertAlloc.count);
         UploadBufferSlice(*m_meshletTriPages.GetBuffer(mtriAlloc.pageIndex), data.MeshletTriangles.data(), mtriAlloc.offset, mtriAlloc.count);
+
+        // --- Hardware Ray Tracing: Build BLAS ---
+        if (vertCount > 0 && !data.Draws.empty())
+        {
+            // 1. Reconstruct flat index buffer from meshlets (compatible with glTF, OBJ, and .nmesh)
+            std::vector<uint32_t> indices;
+            for (const auto& draw : data.Draws)
+            {
+                for (uint32_t t = 0; t < draw.triangleCount; t++)
+                {
+                    uint32_t triBase = draw.triangleOffset + t * 3;
+                    uint32_t i0 = data.MeshletVertices[draw.vertexOffset + data.MeshletTriangles[triBase + 0]];
+                    uint32_t i1 = data.MeshletVertices[draw.vertexOffset + data.MeshletTriangles[triBase + 1]];
+                    uint32_t i2 = data.MeshletVertices[draw.vertexOffset + data.MeshletTriangles[triBase + 2]];
+                    indices.push_back(i0);
+                    indices.push_back(i1);
+                    indices.push_back(i2);
+                }
+            }
+
+            if (!indices.empty())
+            {
+                // 2. Upload dedicated index buffer for AS build and shader lookup
+                uint64_t indexBufferSize = sizeof(uint32_t) * indices.size();
+                std::unique_ptr<NRI::Buffer> indexBuffer = m_device->createBuffer(NRI::BufferDesc{
+                    .size = indexBufferSize,
+                    .usage = NRI::BufferUsage::Index
+                });
+                UploadBufferSlice(*indexBuffer, indices.data(), 0, static_cast<uint32_t>(indices.size()));
+
+                // 3. Query BLAS build sizes
+                uint64_t vertexBufferBDA = m_vertexPages.GetBuffer(vertAlloc.pageIndex)->getDeviceAddress() + (sizeof(shaderio::Vertex) * vertAlloc.offset);
+
+                NRI::AccelerationStructureBuildDesc buildDesc{
+                    .type = NRI::AccelerationStructureType::BottomLevel,
+                    .flags = NRI::AccelerationStructureBuildFlags::PreferFastTrace,
+                    .triangles = {
+                        NRI::AccelerationStructureTrianglesDesc{
+                            .vertexBufferAddress = vertexBufferBDA,
+                            .vertexStride = sizeof(shaderio::Vertex),
+                            .maxVertex = vertCount - 1,
+                            .indexBufferAddress = indexBuffer->getDeviceAddress(),
+                            .primitiveCount = static_cast<uint32_t>(indices.size() / 3),
+                            .primitiveOffset = 0,
+                            .firstVertex = 0,
+                            .isOpaque = isOpaque
+                        }
+                    }
+                };
+
+                NRI::AccelerationStructureBuildSizes buildSizes = m_device->getAccelerationStructureBuildSizes(buildDesc);
+
+                // 4. Create storage buffer and BLAS
+                std::unique_ptr<NRI::Buffer> asBuffer = m_device->createBuffer(NRI::BufferDesc{
+                    .size = buildSizes.accelerationStructureSize,
+                    .usage = NRI::BufferUsage::AccelerationStructure
+                });
+
+                std::unique_ptr<NRI::AccelerationStructure> blas = m_device->createAccelerationStructure(NRI::AccelerationStructureDesc{
+                    .type = NRI::AccelerationStructureType::BottomLevel,
+                    .storageBuffer = asBuffer.get(),
+                    .bufferOffset = 0,
+                    .size = buildSizes.accelerationStructureSize
+                });
+
+                // 5. Create temporary scratch buffer and build on GPU
+                std::unique_ptr<NRI::Buffer> scratchBuffer = m_device->createBuffer(NRI::BufferDesc{
+                    .size = buildSizes.buildScratchSize,
+                    .usage = NRI::BufferUsage::AccelerationStructureScratch
+                });
+
+                std::unique_ptr<NRI::CommandBuffer> cmd = beginSingleTimeCommands();
+                cmd->buildAccelerationStructure(buildDesc, scratchBuffer->getDeviceAddress(), *blas);
+                cmd->accelerationStructureBarrier(NRI::AccelerationStructureBarrierType::BuildToBuild);
+                endSingleTimeCommands(std::move(cmd));
+
+                // 6. Cache BLAS and store ID in handle
+                handle.blasId = static_cast<uint32_t>(m_meshBLASes.size());
+                m_meshBLASes.push_back(MeshBLAS{
+                    .storageBuffer = std::move(asBuffer),
+                    .as = std::move(blas),
+                    .indexBuffer = std::move(indexBuffer),
+                    .vertexBufferAddress = vertexBufferBDA,
+                    .indexCount = static_cast<uint32_t>(indices.size())
+                });
+            }
+        }
 
         markPageTablesDirty();
 
@@ -1112,7 +1212,11 @@ namespace Nox
             m_meshletTriPages.GetPageCount()
         });
 
-        if (maxPagesRequired == 0) return;
+        if (maxPagesRequired == 0)
+        {
+            m_pageTablesDirty[currentImage] = false;
+            return;
+        }
 
         // Resize if we don't have enough capacity
         if (maxPagesRequired > m_PageTableCapacity || m_vertexPageTableBuffers.empty())
@@ -1381,7 +1485,7 @@ namespace Nox
 
         m_resourceHeap = m_device->createDescriptorHeap(NRI::DescriptorHeapDesc{
             .type = NRI::DescriptorHeapType::Resource,
-            .maxBufferDescriptors = 0,
+            .maxBufferDescriptors = 128,
             .maxImageDescriptors = 1000
         });
 
@@ -1439,6 +1543,9 @@ namespace Nox
 
         m_commandBuffers->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
 
+        // Hardware Ray Tracing: Record TLAS build/update commands on GPU
+        BuildSceneAccelerationStructure(frameIndex);
+
         m_commandBuffers->transitionSwapchainLayout(*m_swapChain, imageIndex, NRI::TextureLayout::Undefined, NRI::TextureLayout::ColorAttachment);
 
         // -------------------------------------------------------------
@@ -1461,20 +1568,31 @@ namespace Nox
             bool hasBoneBuffers = frameIndex < m_boneBuffers.size() && m_boneBuffers[frameIndex] != nullptr;
             bool hasBones = !m_boneMatrices.empty();
             references.boneMatrixReference = (hasBones && hasBoneBuffers) ? m_boneBuffers[frameIndex]->getDeviceAddress() : 0;
-            references.vertexPageTableReference = m_vertexPageTableBuffers[frameIndex]->getDeviceAddress();
-            references.meshletBoundsPageTableReference = m_meshletBoundPageTableBuffers[frameIndex]->getDeviceAddress();
-            references.meshletDrawsPageTableReference = m_meshletDrawPageTableBuffers[frameIndex]->getDeviceAddress();
-            references.meshletVerticesPageTableReference = m_meshletVertPageTableBuffers[frameIndex]->getDeviceAddress();
-            references.meshletTrianglesPageTableReference = m_meshletTriPageTableBuffers[frameIndex]->getDeviceAddress();
+
+            bool hasPageTables = frameIndex < m_vertexPageTableBuffers.size() && m_vertexPageTableBuffers[frameIndex] != nullptr;
+            references.vertexPageTableReference = hasPageTables ? m_vertexPageTableBuffers[frameIndex]->getDeviceAddress() : 0;
+            references.meshletBoundsPageTableReference = (hasPageTables && frameIndex < m_meshletBoundPageTableBuffers.size() && m_meshletBoundPageTableBuffers[frameIndex])
+                                                             ? m_meshletBoundPageTableBuffers[frameIndex]->getDeviceAddress()
+                                                             : 0;
+            references.meshletDrawsPageTableReference = (hasPageTables && frameIndex < m_meshletDrawPageTableBuffers.size() && m_meshletDrawPageTableBuffers[frameIndex])
+                                                            ? m_meshletDrawPageTableBuffers[frameIndex]->getDeviceAddress()
+                                                            : 0;
+            references.meshletVerticesPageTableReference = (hasPageTables && frameIndex < m_meshletVertPageTableBuffers.size() && m_meshletVertPageTableBuffers[frameIndex])
+                                                               ? m_meshletVertPageTableBuffers[frameIndex]->getDeviceAddress()
+                                                               : 0;
+            references.meshletTrianglesPageTableReference = (hasPageTables && frameIndex < m_meshletTriPageTableBuffers.size() && m_meshletTriPageTableBuffers[frameIndex])
+                                                                ? m_meshletTriPageTableBuffers[frameIndex]->getDeviceAddress()
+                                                                : 0;
         }
 
         NRI::Pipeline* boundPipeline = nullptr;
 
         auto drawPass = [&](uint32_t count, NRI::Pipeline& pipeline, NRI::CullMode cullMode, bool depthWrite, bool blendEnable)
         {
-            if (count == 0 || !m_indirectBuffers[frameIndex]) return;
+            if (count == 0 || frameIndex >= m_indirectBuffers.size() || !m_indirectBuffers[frameIndex]) return;
 
-            references.instanceReference = baseInstanceAddress + (currentInstanceOffset * instanceStride);
+            references.instanceReference = baseInstanceAddress;
+            references.instanceBaseIndex = static_cast<uint32_t>(currentInstanceOffset);
             m_commandBuffers->pushData(&references, sizeof(shaderio::PushConstantMeshlets));
 
             if (boundPipeline != &pipeline)
@@ -1596,13 +1714,14 @@ namespace Nox
             m_commandBuffers->setColorBlendEnable(0, false);
         }
 
-
         m_commandBuffers->endRendering();
-        
+        m_commandBuffers->executionBarrier();
+
         // =========================================================================
         // 2. G-BUFFER MATERIAL GENERATION PASS (Decoupled Material Resolve)
+        // Only run if there are active meshes in the scene!
         // =========================================================================
-        if (m_gbufferPipeline)
+        if (m_gbufferPipeline && baseInstanceAddress != 0)
         {
             std::vector<NRI::RenderAttachDesc> gbufferAttachments;
             // 0. Albedo (RGBA8)
@@ -1664,16 +1783,23 @@ namespace Nox
 
             shaderio::PushConstantVisibilityDebug gbufferPush{};
             gbufferPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
-            gbufferPush.instanceReference = m_instanceBuffers[frameIndex]->getDeviceAddress();
+            gbufferPush.instanceReference = baseInstanceAddress;
 
             bool hasBoneBuffers = frameIndex < m_boneBuffers.size() && m_boneBuffers[frameIndex] != nullptr;
             bool hasBones = !m_boneMatrices.empty();
             gbufferPush.boneMatrixReference = (hasBones && hasBoneBuffers) ? m_boneBuffers[frameIndex]->getDeviceAddress() : 0;
 
-            gbufferPush.vertexPageTableReference = m_vertexPageTableBuffers[frameIndex]->getDeviceAddress();
-            gbufferPush.meshletDrawsPageTableReference = m_meshletDrawPageTableBuffers[frameIndex]->getDeviceAddress();
-            gbufferPush.meshletVerticesPageTableReference = m_meshletVertPageTableBuffers[frameIndex]->getDeviceAddress();
-            gbufferPush.meshletTrianglesPageTableReference = m_meshletTriPageTableBuffers[frameIndex]->getDeviceAddress();
+            bool hasPageTables = frameIndex < m_vertexPageTableBuffers.size() && m_vertexPageTableBuffers[frameIndex] != nullptr;
+            gbufferPush.vertexPageTableReference = hasPageTables ? m_vertexPageTableBuffers[frameIndex]->getDeviceAddress() : 0;
+            gbufferPush.meshletDrawsPageTableReference = (hasPageTables && frameIndex < m_meshletDrawPageTableBuffers.size() && m_meshletDrawPageTableBuffers[frameIndex])
+                                                             ? m_meshletDrawPageTableBuffers[frameIndex]->getDeviceAddress()
+                                                             : 0;
+            gbufferPush.meshletVerticesPageTableReference = (hasPageTables && frameIndex < m_meshletVertPageTableBuffers.size() && m_meshletVertPageTableBuffers[frameIndex])
+                                                                ? m_meshletVertPageTableBuffers[frameIndex]->getDeviceAddress()
+                                                                : 0;
+            gbufferPush.meshletTrianglesPageTableReference = (hasPageTables && frameIndex < m_meshletTriPageTableBuffers.size() && m_meshletTriPageTableBuffers[frameIndex])
+                                                                 ? m_meshletTriPageTableBuffers[frameIndex]->getDeviceAddress()
+                                                                 : 0;
             gbufferPush.visibilityTextureIndex = m_visibilityResource->GetDescriptorIndexSlot();
             gbufferPush.viewportSize = glm::vec2(w, h);
             gbufferPush.debugMode = m_debugMode;
@@ -1681,6 +1807,7 @@ namespace Nox
 
             m_commandBuffers->drawMeshTasks(1, 1, 1);
             m_commandBuffers->endRendering();
+            m_commandBuffers->executionBarrier();
         }
 
         // =========================================================================
@@ -1728,6 +1855,7 @@ namespace Nox
 
             m_commandBuffers->drawMeshTasks(1, 1, 1);
             m_commandBuffers->endRendering();
+            m_commandBuffers->executionBarrier();
         }
 
         // =========================================================================
@@ -1798,7 +1926,27 @@ namespace Nox
                 m_commandBuffers->drawMeshTasks(1, 1, 1);
             }
 
+            // C. TRANSPARENT FORWARD PASS (Back-to-front sorted, Alpha Blending)
+            if (m_unlitPipeline && (m_transparentCount > 0 || m_transparentUnlitCount > 0))
+            {
+                boundPipeline = nullptr;
+                m_commandBuffers->setDepthTestEnable(true);
+                m_commandBuffers->setDepthWriteEnable(false);
+                m_commandBuffers->setDepthCompareOp(NRI::CompareOp::GreaterOrEqual);
+                m_commandBuffers->setColorBlendEnable(0, true);
+                m_commandBuffers->setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
+                m_commandBuffers->setColorBlendEnable(1, false);
+                m_commandBuffers->setColorWriteMask(1, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
+
+                drawPass(m_transparentCount, *m_unlitPipeline, NRI::CullMode::None, false, true);
+                drawPass(m_transparentUnlitCount, *m_unlitPipeline, NRI::CullMode::None, false, true);
+
+                m_commandBuffers->setColorBlendEnable(0, false);
+                m_commandBuffers->setDepthWriteEnable(true);
+            }
+
             m_commandBuffers->endRendering();
+            m_commandBuffers->executionBarrier();
         }
 
         // =========================================================================
@@ -1889,7 +2037,7 @@ namespace Nox
 
             m_commandBuffers->setColorBlendEnable(0, true);
             m_commandBuffers->setColorBlendEquation(0, blendEquation);
-            m_commandBuffers->setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B);
+            m_commandBuffers->setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
 
             m_commandBuffers->setColorBlendEnable(1, false);
             m_commandBuffers->setColorWriteMask(1, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
@@ -2154,6 +2302,7 @@ namespace Nox
                              100.0f);
         uniformData.proj[1][1] *= -1;*/
         uniformData.samplerIndex = selectedSampler;
+        uniformData.imageHeapIndexOffset = m_resourceHeap->getImageHeapIndexOffset();
 
         uniformData.entityTextureIndex = m_entityResource->GetDescriptorIndexSlot();
 
@@ -2345,13 +2494,16 @@ namespace Nox
 
         updateLightBuffer(frameIndex);
 
-        updateUniformBuffer(frameIndex);
-
         BuildBuffers();
 
         updateInstanceAndIndirectBuffer(frameIndex);
 
         updateBoneBuffer(frameIndex);
+
+        // Hardware Ray Tracing: CPU gathering, instance buffer upload, TLAS heap registration
+        updateSceneAccelerationStructure(frameIndex);
+
+        updateUniformBuffer(frameIndex);
 
         m_renderer2D->Update(frameIndex);
 
@@ -2382,6 +2534,198 @@ namespace Nox
         m_unlitDoubleSidedQueue.clear();
         m_transparentQueue.clear();
         m_transparentUnlitQueue.clear();
+    }
+
+    void Renderer::updateSceneAccelerationStructure(uint32_t currentFrameIndex)
+    {
+        if (!m_rayTracingEnabled || (!m_rayTracingShadows && !m_rayTracingReflections))
+        {
+            m_hasTLASBuild = false;
+            uniformData.enableRTShadows = 0;
+            uniformData.enableRTReflections = 0;
+            return;
+        }
+
+        // Collect all active render packets that have valid BLASes
+        std::vector<NRI::AccelerationStructureInstance> rtInstances;
+        std::vector<shaderio::InstanceLUT> rtInstanceLUTs;
+
+        auto collectFromQueue = [&](const std::vector<RenderPacket>& queue)
+        {
+            for (const auto& packet : queue)
+            {
+                if (packet.blasId >= m_meshBLASes.size() || !m_meshBLASes[packet.blasId].as)
+                    continue;
+
+                const glm::mat4& model = packet.instance.modelMatrix;
+                NRI::AccelerationStructureInstance inst{};
+
+                // Convert column-major glm::mat4 to row-major 3x4 transform matrix
+                for (int r = 0; r < 3; ++r)
+                {
+                    for (int c = 0; c < 4; ++c)
+                    {
+                        inst.transform.matrix[r][c] = model[c][r];
+                    }
+                }
+
+                inst.instanceCustomIndex = static_cast<uint32_t>(rtInstances.size());
+                inst.mask = 0xFF;
+                inst.instanceShaderBindingTableRecordOffset = 0;
+                inst.flags = 0;
+
+                // Dynamic runtime AlphaMode handling:
+                // 0x04 = VK_GEOMETRY_INSTANCE_FORCE_OPAQUE_BIT_KHR
+                // 0x08 = VK_GEOMETRY_INSTANCE_FORCE_NO_OPAQUE_BIT_KHR
+                // 0x01 = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR
+                if (packet.instance.alphaMode == 0)
+                {
+                    inst.flags |= 0x00000004; // Force Opaque in hardware traversal
+                }
+                else if (packet.instance.alphaMode == 1)
+                {
+                    inst.flags |= 0x00000008; // Force Non-Opaque for any-hit alpha testing
+                }
+
+                if (packet.instance.doubleSided != 0)
+                {
+                    inst.flags |= 0x00000001; // Disable face culling
+                }
+
+                inst.accelerationStructureReference = m_meshBLASes[packet.blasId].as->getDeviceAddress();
+
+                rtInstances.push_back(inst);
+
+                // Tutorial TASK09: Store the instance look-up table entry
+                shaderio::InstanceLUT lut{};
+                lut.vertexBufferAddress = m_meshBLASes[packet.blasId].vertexBufferAddress;
+                lut.indexBufferAddress = m_meshBLASes[packet.blasId].indexBuffer ? m_meshBLASes[packet.blasId].indexBuffer->getDeviceAddress() : 0;
+                lut.baseColorTextureIndex = packet.instance.baseColorTextureIndex;
+                lut.alphaCutoff = packet.instance.alphaMaskCutoff;
+                lut.alphaMode = packet.instance.alphaMode;
+                rtInstanceLUTs.push_back(lut);
+            }
+        };
+
+        collectFromQueue(m_opaqueQueue);
+        collectFromQueue(m_opaqueDoubleSidedQueue);
+        collectFromQueue(m_maskQueue);
+        collectFromQueue(m_maskDoubleSidedQueue);
+
+        if (rtInstances.empty())
+        {
+            m_hasTLASBuild = false;
+            uniformData.enableRTShadows = 0;
+            uniformData.enableRTReflections = 0;
+            return;
+        }
+
+        if (m_rtInstanceBuffers.size() < MAX_FRAMES_IN_FLIGHT)
+            m_rtInstanceBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+        if (m_instanceLUTBuffers.size() < MAX_FRAMES_IN_FLIGHT)
+            m_instanceLUTBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+
+        uint32_t instanceCount = static_cast<uint32_t>(rtInstances.size());
+        uint64_t instanceBufferSize = sizeof(NRI::AccelerationStructureInstance) * instanceCount;
+        uint64_t lutBufferSize = sizeof(shaderio::InstanceLUT) * rtInstanceLUTs.size();
+
+        // 1. Ensure TLAS Instance Buffer is allocated and populated
+        if (!m_rtInstanceBuffers[currentFrameIndex] || m_rtInstanceBuffers[currentFrameIndex]->getSize() < instanceBufferSize)
+        {
+            m_rtInstanceBuffers[currentFrameIndex] = m_device->createBuffer(NRI::BufferDesc{
+                .size = std::max(instanceBufferSize, static_cast<uint64_t>(64 * 1024)),
+                .usage = NRI::BufferUsage::AccelerationStructureInstance
+            });
+        }
+        void* mapped = m_rtInstanceBuffers[currentFrameIndex]->map(0, instanceBufferSize);
+        memcpy(mapped, rtInstances.data(), instanceBufferSize);
+        m_rtInstanceBuffers[currentFrameIndex]->unmap();
+
+        // 2. Ensure Instance LUT Buffer is allocated and populated
+        if (!m_instanceLUTBuffers[currentFrameIndex] || m_instanceLUTBuffers[currentFrameIndex]->getSize() < lutBufferSize)
+        {
+            m_instanceLUTBuffers[currentFrameIndex] = m_device->createBuffer(NRI::BufferDesc{
+                .size = std::max(lutBufferSize, static_cast<uint64_t>(64 * 1024)),
+                .usage = NRI::BufferUsage::Storage
+            });
+        }
+        void* lutMapped = m_instanceLUTBuffers[currentFrameIndex]->map(0, lutBufferSize);
+        memcpy(lutMapped, rtInstanceLUTs.data(), lutBufferSize);
+        m_instanceLUTBuffers[currentFrameIndex]->unmap();
+
+        uniformData.instanceLUTReference = m_instanceLUTBuffers[currentFrameIndex]->getDeviceAddress();
+
+        // 2. Query TLAS build sizes
+        m_tlasBuildDesc = NRI::AccelerationStructureBuildDesc{
+            .type = NRI::AccelerationStructureType::TopLevel,
+            .flags = NRI::AccelerationStructureBuildFlags::PreferFastTrace | NRI::AccelerationStructureBuildFlags::AllowUpdate,
+            .instances = {
+                .instanceBufferAddress = m_rtInstanceBuffers[currentFrameIndex]->getDeviceAddress(),
+                .instanceCount = instanceCount
+            }
+        };
+
+        NRI::AccelerationStructureBuildSizes tlasSizes = m_device->getAccelerationStructureBuildSizes(m_tlasBuildDesc);
+
+        // 3. Allocate / resize TLAS storage and scratch buffers
+        m_tlasNeedFullBuild = false;
+        if (!m_sceneTLAS || m_sceneTLASCapacity < instanceCount || !m_tlasBuffer || m_tlasBuffer->getSize() < tlasSizes.accelerationStructureSize)
+        {
+            m_sceneTLASCapacity = std::max(instanceCount * 2, 64u);
+
+            m_tlasBuffer = m_device->createBuffer(NRI::BufferDesc{
+                .size = tlasSizes.accelerationStructureSize,
+                .usage = NRI::BufferUsage::AccelerationStructure
+            });
+
+            m_sceneTLAS = m_device->createAccelerationStructure(NRI::AccelerationStructureDesc{
+                .type = NRI::AccelerationStructureType::TopLevel,
+                .storageBuffer = m_tlasBuffer.get(),
+                .bufferOffset = 0,
+                .size = tlasSizes.accelerationStructureSize
+            });
+
+            m_tlasScratchBuffer = m_device->createBuffer(NRI::BufferDesc{
+                .size = std::max(tlasSizes.buildScratchSize, tlasSizes.updateScratchSize),
+                .usage = NRI::BufferUsage::AccelerationStructureScratch
+            });
+
+            m_tlasNeedFullBuild = true;
+
+            // Register TLAS into Descriptor Heap ONLY when newly created or resized
+            m_tlasHeapSlot = m_resourceHeap->registerAccelerationStructure(*m_sceneTLAS, m_tlasHeapSlot);
+            m_tlasHeapIndex = m_tlasHeapSlot;
+        }
+
+        // 4. Update UBO flags (ready for updateUniformBuffer!)
+        uniformData.tlasDeviceAddress = m_sceneTLAS ? m_sceneTLAS->getDeviceAddress() : 0;
+        uniformData.tlasHeapIndex = m_tlasHeapIndex;
+        uniformData.enableRTShadows = (m_rayTracingEnabled && m_rayTracingShadows) ? 1 : 0;
+        uniformData.enableRTReflections = (m_rayTracingEnabled && m_rayTracingReflections) ? 1 : 0;
+
+        m_hasTLASBuild = true;
+    }
+
+    void Renderer::BuildSceneAccelerationStructure(uint32_t currentFrameIndex)
+    {
+        if (!m_hasTLASBuild)
+            return;
+
+        // 1. Pre-build barrier: Host/Transfer instance writes -> AS Build Read
+        m_commandBuffers->accelerationStructureBarrier(NRI::AccelerationStructureBarrierType::TransferToBuild);
+
+        // 2. Build or Update TLAS in active command buffer
+        if (m_tlasNeedFullBuild)
+        {
+            m_commandBuffers->buildAccelerationStructure(m_tlasBuildDesc, m_tlasScratchBuffer->getDeviceAddress(), *m_sceneTLAS);
+        }
+        else
+        {
+            m_commandBuffers->updateAccelerationStructure(m_tlasBuildDesc, m_tlasScratchBuffer->getDeviceAddress(), *m_sceneTLAS, *m_sceneTLAS);
+        }
+
+        // 3. Post-build barrier: AS Build Write -> Fragment/Compute Shader Read
+        m_commandBuffers->accelerationStructureBarrier(NRI::AccelerationStructureBarrierType::BuildToShaderRead);
     }
 
     int32_t Renderer::getPickedEntityID()
@@ -2677,6 +3021,7 @@ namespace Nox
         RenderPacket packet{};
         packet.instance = instance;
         packet.command = command;
+        packet.blasId = handle.blasId;
 
         // Route to Render Queues (DO NOT push directly to buffers)
         bool isDoubleSided = (instance.doubleSided != 0);
@@ -2811,6 +3156,7 @@ namespace Nox
             RenderPacket packet{};
             packet.instance = instance;
             packet.command = command;
+            packet.blasId = handle.blasId;
 
             // 5. Route to Render Queues
             bool isDoubleSided = (instance.doubleSided != 0);

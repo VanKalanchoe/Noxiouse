@@ -15,7 +15,10 @@ namespace NRI
         StorageStatic,
         DescriptorHeap, // HostVisible | HostCoherent, DescriptorHeap
         Indirect,
-        IndirectStatic
+        IndirectStatic,
+        AccelerationStructure,        // DeviceLocal, AS storage (BLAS/TLAS backing)
+        AccelerationStructureScratch, // DeviceLocal, Scratch buffer for AS build/update
+        AccelerationStructureInstance // HostVisible | Mapped, TLAS instance records
     };
 
     struct BufferDesc

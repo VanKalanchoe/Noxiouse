@@ -13,9 +13,9 @@ void taskMain
     uniform PushConstantMeshlets pushConstant
 )
 {
-    uint drawIndex = drawID;
+    uint drawIndex = drawID + pushConstant.instanceBaseIndex;
 
-    // 1. Fetch instance data for this draw call via SV_DrawIndex
+    // 1. Fetch instance data for this draw call via global drawIndex
     InstanceData* instances = (InstanceData*)pushConstant.instanceReference;
     InstanceData instance = instances[drawIndex];
 
@@ -61,16 +61,16 @@ void taskMain
 
         // Frustum Cull
         bool frustumVisible = true;
-        for(uint i = 0; i < 6; i++)
+     /*    for(uint i = 0; i < 4; i++)
         {
             float dist = dot(ubo.frozenFrustum.planes[i].xyz, worldBounds.xyz) + ubo.frozenFrustum.planes[i].w;
             frustumVisible &= (dist >= -worldBounds.w);
         }
         visible &= frustumVisible;
         if(!frustumVisible)
-        {
+        { */
            /*  pushConstant.culledData.frustumCulled.add(1); */
-        }
+       /*  } */
 
         // Backface cull from meshoptimizer.h
         // visible = dot(center - camera_position, cone_axis) >= cone_cutoff * length(center - camera_position) + radius

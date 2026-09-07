@@ -56,6 +56,8 @@ namespace NRI
         Nox::Ref<Texture2D> createTexture(const TextureDesc& desc) override;
         std::unique_ptr<Buffer> createBuffer(const BufferDesc& desc) override;
         std::unique_ptr<DescriptorHeap> createDescriptorHeap(const DescriptorHeapDesc& desc) override;
+        AccelerationStructureBuildSizes getAccelerationStructureBuildSizes(const AccelerationStructureBuildDesc& desc) override;
+        std::unique_ptr<AccelerationStructure> createAccelerationStructure(const AccelerationStructureDesc& desc) override;
         
     private:
         void initVulkan(Nox::Window& window);

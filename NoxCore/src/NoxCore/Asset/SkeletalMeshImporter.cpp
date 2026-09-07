@@ -42,12 +42,12 @@ namespace Nox
         }
 
         Ref<SkeletalMesh> skeletalMeshAsset = CreateRef<SkeletalMesh>();
-
-        for (const auto& data : meshDataList)
+        for (size_t i = 0; i < meshDataList.size(); ++i)
         {
-            MeshHandle subMeshHandle = Renderer::UploadMesh(data);
+            bool isOpaque = (i < materialDataList.size()) ? (materialDataList[i].Mode == AlphaMode::Opaque) : true;
+            MeshHandle subMeshHandle = Renderer::UploadMesh(meshDataList[i], isOpaque);
             skeletalMeshAsset->m_SubMeshes.push_back(subMeshHandle);
-            skeletalMeshAsset->m_SubmeshNames.push_back(data.Name);
+            skeletalMeshAsset->m_SubmeshNames.push_back(meshDataList[i].Name);
         }
         skeletalMeshAsset->m_Materials = std::move(materialDataList);
         skeletalMeshAsset->m_Lights = std::move(lightDataList);

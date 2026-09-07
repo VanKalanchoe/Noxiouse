@@ -1,6 +1,7 @@
 #pragma once
 #include "VulkanCommon.h"
 #include "../CommandBuffer.h"
+#include "../AccelerationStructure.h"
 
 namespace NRI
 {
@@ -66,9 +67,18 @@ namespace NRI
         void submitImageBarrier(vk::Image image, TextureLayout oldLayout, TextureLayout newLayout, vk::ImageAspectFlags aspectFlags, uint32_t arrayLayers, uint32_t mipLevels);
         void getSyncFlags(TextureLayout layout, bool isSource, vk::PipelineStageFlags2& stageMask, vk::AccessFlags2& accessMask) const;
         vk::ImageLayout translateLayoutToVk(TextureLayout layout) const;
+        
+        void buildAccelerationStructure(const AccelerationStructureBuildDesc& buildDesc, uint64_t scratchAddress, AccelerationStructure& dstAS) override;
+        void updateAccelerationStructure(const AccelerationStructureBuildDesc& buildDesc, uint64_t scratchAddress, AccelerationStructure& srcAS, AccelerationStructure& dstAS) override;
+        void accelerationStructureBarrier(AccelerationStructureBarrierType barrierType = AccelerationStructureBarrierType::BuildToShaderRead) override;
+        void executionBarrier() override;
 
         vk::raii::CommandBuffer& getNativeBuffer(uint32_t index) { return m_commandBuffers[index]; }
         vk::raii::CommandBuffer& getActiveNativeBuffer() { return m_commandBuffers[m_currentFrameIndex]; }
+        
+    private:
+        void buildOrUpdateAccelerationStructure(vk::BuildAccelerationStructureModeKHR mode, const AccelerationStructureBuildDesc& buildDesc, uint64_t scratchAddress, AccelerationStructure* srcAS,
+  AccelerationStructure& dstAS);
         
     private:
         DeviceVK& m_deviceVK;

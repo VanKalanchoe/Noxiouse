@@ -2,6 +2,7 @@
 #include "DeviceVK.h"
 #include "TextureVK.h"
 #include "BufferVK.h"
+#include "AccelerationStructureVK.h"
 #include "NoxCore/Core/core.h"
 
 namespace NRI
@@ -89,18 +90,24 @@ namespace NRI
         }
         else // Resource
         {
+            m_maxBufferDescriptors = desc.maxBufferDescriptors;
+            m_maxImageDescriptors = desc.maxImageDescriptors;
+            
             m_bufferDescSize = alignSize(m_heapProps.bufferDescriptorSize, m_heapProps.bufferDescriptorAlignment);
             m_imageDescSize = alignSize(m_heapProps.imageDescriptorSize, m_heapProps.imageDescriptorAlignment);
 
-            m_imageHeapOffset = alignSize(desc.maxBufferDescriptors * m_bufferDescSize, m_heapProps.imageDescriptorAlignment);
-            m_imageHeapIndexOffset = static_cast<uint32_t>(m_imageHeapOffset / m_imageDescSize);
+            // 1. Images start at offset 0 so all shaders can index textures with raw slot index (offset 0)
+            m_imageHeapOffset = 0;
+            m_imageHeapIndexOffset = 0;
 
-            totalSize = alignSize(m_imageHeapOffset + (m_imageDescSize * desc.maxImageDescriptors) + m_heapProps.minResourceHeapReservedRange, m_heapProps.resourceHeapAlignment);
+            // 2. Buffers / Acceleration Structures are placed after images
+            m_bufferHeapOffset = alignSize(desc.maxImageDescriptors * m_imageDescSize, m_heapProps.bufferDescriptorAlignment);
+            uint64_t bufferHeapSize = alignSize(desc.maxBufferDescriptors * m_bufferDescSize, m_heapProps.resourceHeapAlignment);
+
+            totalSize = alignSize(m_bufferHeapOffset + bufferHeapSize + m_heapProps.minResourceHeapReservedRange, m_heapProps.resourceHeapAlignment);
 
             m_reservedRangeSize = m_heapProps.minResourceHeapReservedRange;
-
-            m_reservedRangeOffset =
-                totalSize - m_heapProps.minResourceHeapReservedRange;
+            m_reservedRangeOffset = totalSize - m_heapProps.minResourceHeapReservedRange;
         }
 
         // 1. Map allocation calls right into your custom abstraction class!
@@ -305,7 +312,7 @@ namespace NRI
 
 
         vk::HostAddressRangeEXT hostRange{
-            .address = static_cast<uint8_t*>(m_mappedPtr) + (m_bufferDescSize * slot),
+            .address = static_cast<uint8_t*>(m_mappedPtr) + m_bufferHeapOffset + (m_bufferDescSize * slot),
             .size = m_bufferDescSize
         };
 
@@ -323,12 +330,51 @@ namespace NRI
 
         vk::HostAddressRangeEXT hostRange
         {
-            .address = static_cast<uint8_t*>(m_mappedPtr) + (m_bufferDescSize * slot),
+            .address = static_cast<uint8_t*>(m_mappedPtr) + m_bufferHeapOffset + (m_bufferDescSize * slot),
             .size = m_bufferDescSize
         };
 
         m_deviceVK.getDevice().writeResourceDescriptorsEXT(info, hostRange);
 
         m_freeBufferSlots.push_back(slot);
+    }
+
+    uint32_t DescriptorHeapVK::registerAccelerationStructure(AccelerationStructure& as, uint32_t slot)
+    {
+        if (slot == ~0u)
+        {
+            if (!m_freeBufferSlots.empty())
+            {
+                slot = m_freeBufferSlots.back();
+                m_freeBufferSlots.pop_back();
+            }
+            else
+            {
+                slot = m_allocatedBufferCount++;
+            }
+        }
+
+        NOX_CORE_ASSERT(slot < m_maxBufferDescriptors, "DescriptorHeapVK: acceleration structure slot out of bounds!");
+
+        vk::DeviceAddressRangeEXT addressRange
+        {
+            .address = as.getDeviceAddress(),
+            .size    = as.getSize()
+        };
+
+        vk::ResourceDescriptorInfoEXT info{};
+        info.type = vk::DescriptorType::eAccelerationStructureKHR;
+        info.data.pAddressRange = &addressRange;
+
+        vk::HostAddressRangeEXT hostRange{
+            .address = static_cast<uint8_t*>(m_mappedPtr) + m_bufferHeapOffset + (m_bufferDescSize * slot),
+            .size    = m_bufferDescSize
+        };
+
+        NOX_CORE_ASSERT(static_cast<uint8_t*>(hostRange.address) + hostRange.size <= static_cast<uint8_t*>(m_mappedPtr) + m_size,
+                        "DescriptorHeapVK: write range exceeds mapped buffer size!");
+
+        m_deviceVK.getDevice().writeResourceDescriptorsEXT(info, hostRange);
+        return slot; // Return the assigned buffer slot (0, 1, ...)
     }
 }

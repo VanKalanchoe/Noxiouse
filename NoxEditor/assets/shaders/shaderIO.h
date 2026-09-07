@@ -99,6 +99,15 @@ struct Frustum
 #endif
 };
 
+struct InstanceLUT
+{
+    uint64_t vertexBufferAddress;
+    uint64_t indexBufferAddress;
+    uint32_t baseColorTextureIndex;
+    float alphaCutoff;
+    uint32_t alphaMode; // 0 = Opaque, 1 = Mask, 2 = Blend
+};
+
 struct UniformBufferObject 
 {
     mat4 view;
@@ -132,6 +141,13 @@ struct UniformBufferObject
     // Lighting
     uint64_t lightDataReference;
     uint32_t lightCount;
+    uint32_t enableRTShadows;
+
+    // Ray Tracing
+    uint64_t tlasDeviceAddress;
+    uint32_t tlasHeapIndex;
+    uint32_t enableRTReflections;
+    uint64_t instanceLUTReference;
 };
 
 struct Vertex
@@ -230,6 +246,7 @@ struct PushConstantMeshlets
     uint64_t meshletDrawsPageTableReference;
     uint64_t meshletVerticesPageTableReference;
     uint64_t meshletTrianglesPageTableReference;
+    uint32_t instanceBaseIndex;
 };
 
 // Meshlet Global stores all meshes

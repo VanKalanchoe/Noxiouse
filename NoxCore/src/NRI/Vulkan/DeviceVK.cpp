@@ -12,6 +12,7 @@
 #include "TextureVK.h"
 #include "BufferVK.h"
 #include "DescriptorHeapVK.h"
+#include "AccelerationStructureVK.h"
 #include "MemoryAllocatorVK.h"
 #include "NoxCore/Core/core.h"
 
@@ -62,6 +63,105 @@ namespace NRI
         return std::make_unique<DescriptorHeapVK>(*this, desc);
     }
 
+    AccelerationStructureBuildSizes DeviceVK::getAccelerationStructureBuildSizes(const AccelerationStructureBuildDesc& desc)
+        {
+            vk::BuildAccelerationStructureFlagsKHR vkFlags{};
+            if (desc.flags & AccelerationStructureBuildFlags::AllowUpdate)
+                vkFlags |= vk::BuildAccelerationStructureFlagBitsKHR::eAllowUpdate;
+            if (desc.flags & AccelerationStructureBuildFlags::PreferFastTrace)
+                vkFlags |= vk::BuildAccelerationStructureFlagBitsKHR::ePreferFastTrace;
+            if (desc.flags & AccelerationStructureBuildFlags::PreferFastBuild)
+                vkFlags |= vk::BuildAccelerationStructureFlagBitsKHR::ePreferFastBuild;
+            if (desc.flags & AccelerationStructureBuildFlags::LowMemory)
+                vkFlags |= vk::BuildAccelerationStructureFlagBitsKHR::eLowMemory;
+
+            if (desc.type == AccelerationStructureType::BottomLevel)
+            {
+                std::vector<vk::AccelerationStructureGeometryKHR> geometries;
+                geometries.reserve(desc.triangles.size());
+                std::vector<uint32_t> maxPrimitiveCounts;
+                maxPrimitiveCounts.reserve(desc.triangles.size());
+
+                for (const auto& tri : desc.triangles)
+                {
+                    vk::AccelerationStructureGeometryTrianglesDataKHR trianglesData{
+                        .vertexFormat = vk::Format::eR32G32B32Sfloat,
+                        .vertexData   = tri.vertexBufferAddress,
+                        .vertexStride = tri.vertexStride,
+                        .maxVertex    = tri.maxVertex,
+                        .indexType    = vk::IndexType::eUint32,
+                        .indexData    = tri.indexBufferAddress
+                    };
+
+                    vk::AccelerationStructureGeometryKHR geometry{
+                        .geometryType = vk::GeometryTypeKHR::eTriangles,
+                        .geometry     = trianglesData,
+                        .flags        = tri.isOpaque ? vk::GeometryFlagBitsKHR::eOpaque : vk::GeometryFlagsKHR{}
+                    };
+
+                    geometries.push_back(geometry);
+                    maxPrimitiveCounts.push_back(tri.primitiveCount);
+                }
+
+                vk::AccelerationStructureBuildGeometryInfoKHR buildInfo{
+                    .type          = vk::AccelerationStructureTypeKHR::eBottomLevel,
+                    .flags         = vkFlags,
+                    .mode          = vk::BuildAccelerationStructureModeKHR::eBuild,
+                    .geometryCount = static_cast<uint32_t>(geometries.size()),
+                    .pGeometries   = geometries.data()
+                };
+
+                vk::AccelerationStructureBuildSizesInfoKHR vkSizes = m_device.getAccelerationStructureBuildSizesKHR(
+                    vk::AccelerationStructureBuildTypeKHR::eDevice,
+                    buildInfo,
+                    maxPrimitiveCounts
+                );
+
+                return AccelerationStructureBuildSizes{
+                    .accelerationStructureSize = vkSizes.accelerationStructureSize,
+                    .buildScratchSize           = vkSizes.buildScratchSize,
+                    .updateScratchSize          = vkSizes.updateScratchSize
+                };
+            }
+            else // TopLevel
+            {
+                vk::AccelerationStructureGeometryInstancesDataKHR instancesData{
+                    .arrayOfPointers = vk::False,
+                    .data            = desc.instances.instanceBufferAddress
+                };
+
+                vk::AccelerationStructureGeometryKHR geometry{
+                    .geometryType = vk::GeometryTypeKHR::eInstances,
+                    .geometry     = instancesData
+                };
+
+                vk::AccelerationStructureBuildGeometryInfoKHR buildInfo{
+                    .type          = vk::AccelerationStructureTypeKHR::eTopLevel,
+                    .flags         = vkFlags,
+                    .mode          = vk::BuildAccelerationStructureModeKHR::eBuild,
+                    .geometryCount = 1,
+                    .pGeometries   = &geometry
+                };
+
+                vk::AccelerationStructureBuildSizesInfoKHR vkSizes = m_device.getAccelerationStructureBuildSizesKHR(
+                    vk::AccelerationStructureBuildTypeKHR::eDevice,
+                    buildInfo,
+                    { desc.instances.instanceCount }
+                );
+
+                return AccelerationStructureBuildSizes{
+                    .accelerationStructureSize = vkSizes.accelerationStructureSize,
+                    .buildScratchSize           = vkSizes.buildScratchSize,
+                    .updateScratchSize          = vkSizes.updateScratchSize
+                };
+            }
+        }
+
+        std::unique_ptr<AccelerationStructure> DeviceVK::createAccelerationStructure(const AccelerationStructureDesc& desc)
+        {
+            return std::make_unique<AccelerationStructureVK>(*this, desc);
+        }
+
     std::vector<const char*> requiredDeviceExtension =
     {
         vk::KHRSwapchainExtensionName,
@@ -80,6 +180,12 @@ namespace NRI
         
         // Task + Mesh Shader
         vk::EXTMeshShaderExtensionName,
+        
+        // Hardware Ray Tracing (Khronos Tutorial Course 18)
+        vk::KHRAccelerationStructureExtensionName,
+        vk::KHRRayQueryExtensionName,
+        vk::KHRDeferredHostOperationsExtensionName,
+        vk::KHRRayTracingPipelineExtensionName,
     };
 
     DeviceVK::DeviceVK(Nox::Window& window)
@@ -239,19 +345,25 @@ namespace NRI
 
         // Check if the physicalDevice supports the required features
         auto features = physicalDevice.template getFeatures2<vk::PhysicalDeviceFeatures2,
-                                                             vk::PhysicalDeviceVulkan11Features,
-                                                             vk::PhysicalDeviceVulkan13Features,
-                                                             /*vk::PhysicalDeviceShaderObjectFeaturesEXT,*/
-                                                             vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT,
-                                                             vk::PhysicalDeviceMeshShaderFeaturesEXT>();
+                                                                 vk::PhysicalDeviceVulkan11Features,
+                                                                 vk::PhysicalDeviceVulkan13Features,
+                                                                 /*vk::PhysicalDeviceShaderObjectFeaturesEXT,*/
+                                                                 vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT,
+                                                                 vk::PhysicalDeviceMeshShaderFeaturesEXT,
+                                                                 vk::PhysicalDeviceAccelerationStructureFeaturesKHR,
+                                                                 vk::PhysicalDeviceRayQueryFeaturesKHR,
+                                                                 vk::PhysicalDeviceRayTracingPipelineFeaturesKHR>();
         bool supportsRequiredFeatures = features.template get<vk::PhysicalDeviceFeatures2>().features.samplerAnisotropy &&
             features.template get<vk::PhysicalDeviceFeatures2>().features.geometryShader && // Visability buffer
             features.template get<vk::PhysicalDeviceVulkan11Features>().shaderDrawParameters &&
             features.template get<vk::PhysicalDeviceVulkan13Features>().dynamicRendering &&
             features.template get<vk::PhysicalDeviceVulkan13Features>().synchronization2 &&
             /*features.template get<vk::PhysicalDeviceShaderObjectFeaturesEXT>().shaderObject &&*/ // dont force to support both legacy pipeline and shaderobject
-            features.template get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>().extendedDynamicState;
-            features.template get<vk::PhysicalDeviceMeshShaderFeaturesEXT>().meshShader;
+            features.template get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>().extendedDynamicState &&
+                features.template get<vk::PhysicalDeviceMeshShaderFeaturesEXT>().meshShader &&
+                features.template get<vk::PhysicalDeviceAccelerationStructureFeaturesKHR>().accelerationStructure &&
+                features.template get<vk::PhysicalDeviceRayQueryFeaturesKHR>().rayQuery &&
+                features.template get<vk::PhysicalDeviceRayTracingPipelineFeaturesKHR>().rayTracingPipeline;
         // Return true if the physicalDevice meets all the criteria
         return supportsVulkan1_3 && supportsGraphics && supportsAllRequiredExtensions && supportsRequiredFeatures;
     }
@@ -303,7 +415,10 @@ namespace NRI
                            vk::PhysicalDeviceShaderUntypedPointersFeaturesKHR,
                            vk::PhysicalDeviceMaintenance5FeaturesKHR,
                            vk::PhysicalDeviceMeshShaderFeaturesEXT,
-                           vk::PhysicalDeviceUnifiedImageLayoutsFeaturesKHR
+                           vk::PhysicalDeviceUnifiedImageLayoutsFeaturesKHR,
+                           vk::PhysicalDeviceAccelerationStructureFeaturesKHR,
+                           vk::PhysicalDeviceRayQueryFeaturesKHR,
+                           vk::PhysicalDeviceRayTracingPipelineFeaturesKHR
         >
             featureChain = {
                 {
@@ -347,7 +462,10 @@ namespace NRI
                 {.shaderUntypedPointers = true},
                 {.maintenance5 = true},
                 {.taskShader = true, .meshShader = true},
-            {.unifiedImageLayouts = true}
+            {.unifiedImageLayouts = true},
+        {.accelerationStructure = true},
+        {.rayQuery = true},
+{.rayTracingPipeline = true}
             };
 
         // create a Device

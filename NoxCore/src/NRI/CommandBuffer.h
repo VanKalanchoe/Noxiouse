@@ -9,6 +9,8 @@ namespace NRI
     class Swapchain;
     class DescriptorHeap;
     class Buffer;
+    class AccelerationStructure;
+    struct AccelerationStructureBuildDesc;
     
     enum class TextureLayout : uint8_t;
 
@@ -105,6 +107,13 @@ namespace NRI
         uint64_t size      = 0;
     };
     
+    enum class AccelerationStructureBarrierType : uint8_t
+    {
+        BuildToBuild,      // BLAS build write -> TLAS build read
+        BuildToShaderRead, // TLAS build/update write -> Fragment/Compute shader ray query read
+        TransferToBuild    // Instance buffer transfer/write -> TLAS build read
+    };
+    
     class CommandBuffer
     {
     public:
@@ -161,5 +170,10 @@ namespace NRI
         virtual void transitionTextureLayout(Texture& texture, TextureLayout oldLayout, TextureLayout newLayout) = 0;
         virtual void transitionSwapchainLayout(Swapchain& swapchain, uint32_t imageIndex, TextureLayout oldLayout, TextureLayout newLayout) = 0;
         virtual void resolveImage(Texture& srcTexture, Texture& dstTexture, uint32_t width, uint32_t height) = 0;
+        
+        virtual void buildAccelerationStructure(const AccelerationStructureBuildDesc& buildDesc, uint64_t scratchAddress, AccelerationStructure& dstAS) = 0;
+        virtual void updateAccelerationStructure(const AccelerationStructureBuildDesc& buildDesc, uint64_t scratchAddress, AccelerationStructure& srcAS, AccelerationStructure& dstAS) = 0;
+        virtual void accelerationStructureBarrier(AccelerationStructureBarrierType barrierType = AccelerationStructureBarrierType::BuildToShaderRead) = 0;
+        virtual void executionBarrier() = 0;
     };
 }

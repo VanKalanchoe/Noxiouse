@@ -64,6 +64,20 @@
         int    entityID : SV_Target4; // Editor Entity Picking ID
     };
 
+    float4 computeBarycentric3D(float3 rayOrigin, float3 rayDir, float3 v0, float3 e1, float3 e2, float3 triNorm, float d00, float d01, float d11, float invDenom)
+    {
+        float normDotRay = dot(triNorm, rayDir);
+        float t = (abs(normDotRay) > 1e-12) ? (dot(v0 - rayOrigin, triNorm) / normDotRay) : 0.0;
+        float3 p = rayOrigin + t * rayDir;
+        float3 dp = p - v0;
+        float d20 = dot(dp, e1);
+        float d21 = dot(dp, e2);
+        float bw1 = (d11 * d20 - d01 * d21) * invDenom;
+        float bw2 = (d00 * d21 - d01 * d20) * invDenom;
+        float bw0 = 1.0 - bw1 - bw2;
+        return float4(bw0, bw1, bw2, t);
+    }
+
     [shader("fragment")]
     GBufferOutput fragMain(
         MSOutput input,
@@ -164,93 +178,94 @@
         }
 
         // World & Screen Clip Space
-        float4x4 viewProj = mul(ubo->proj, ubo->view);
-        float4 worldPos0 = mul(instance.modelMatrix, localPos0);
-        float4 worldPos1 = mul(instance.modelMatrix, localPos1);
-        float4 worldPos2 = mul(instance.modelMatrix, localPos2);
+        // World Space Vertices
+            float4 worldPos0 = mul(instance.modelMatrix, localPos0);
+            float4 worldPos1 = mul(instance.modelMatrix, localPos1);
+            float4 worldPos2 = mul(instance.modelMatrix, localPos2);
 
-        float4 clip0 = mul(viewProj, worldPos0);
-        float4 clip1 = mul(viewProj, worldPos1);
-        float4 clip2 = mul(viewProj, worldPos2);
+            // 3D World-Space Ray-Triangle Intersection & Barycentric Reconstruction
+            // Immune to near-plane clipping singularities (avoids 2D perspective divide by clip.w <= 0)
+            float2 invViewport = 1.0 / pushConstant.viewportSize;
+            float2 uvScreen = (float2(pixelCoord) + 0.5) * invViewport;
+            float2 ndc = float2(uvScreen.x * 2.0 - 1.0, 1.0 - uvScreen.y * 2.0);
 
-        float2 s0 = float2((clip0.x / clip0.w + 1.0) * 0.5 * pushConstant.viewportSize.x,
-                           (1.0 - clip0.y / clip0.w) * 0.5 * pushConstant.viewportSize.y);
-        float2 s1 = float2((clip1.x / clip1.w + 1.0) * 0.5 * pushConstant.viewportSize.x,
-                           (1.0 - clip1.y / clip1.w) * 0.5 * pushConstant.viewportSize.y);
-        float2 s2 = float2((clip2.x / clip2.w + 1.0) * 0.5 * pushConstant.viewportSize.x,
-                           (1.0 - clip2.y / clip2.w) * 0.5 * pushConstant.viewportSize.y);
+            float4 targetH    = mul(ubo->invViewProj, float4(ndc, 1.0, 1.0));
+            float4 targetH_dx = mul(ubo->invViewProj, float4(ndc + float2(2.0 * invViewport.x, 0.0), 1.0, 1.0));
+            float4 targetH_dy = mul(ubo->invViewProj, float4(ndc - float2(0.0, 2.0 * invViewport.y), 1.0, 1.0));
 
-        float2 P = input.pos.xy;
+            float3 pNear    = targetH.xyz / targetH.w;
+            float3 pNear_dx = targetH_dx.xyz / targetH_dx.w;
+            float3 pNear_dy = targetH_dy.xyz / targetH_dy.w;
 
-        float2 e0 = s1 - s0;
-        float2 e1 = s2 - s0;
-        float2 ep = P - s0;
+            float3 rayOrigin = ubo->cameraWorldPos.xyz;
+            float3 rayDir    = normalize(pNear - rayOrigin);
+            float3 rayDir_dx = normalize(pNear_dx - rayOrigin);
+            float3 rayDir_dy = normalize(pNear_dy - rayOrigin);
 
-        float det = e0.x * e1.y - e1.x * e0.y;
-        float invDet = (abs(det) > 1e-7) ? (1.0 / det) : 0.0;
+            float3 e1 = worldPos1.xyz - worldPos0.xyz;
+            float3 e2 = worldPos2.xyz - worldPos0.xyz;
+            float3 triNorm = cross(e1, e2);
 
-        float l1 = (ep.x * e1.y - e1.x * ep.y) * invDet;
-        float l2 = (e0.x * ep.y - ep.x * e0.y) * invDet;
-        float l0 = 1.0 - l1 - l2;
+            float d00 = dot(e1, e1);
+            float d01 = dot(e1, e2);
+            float d11 = dot(e2, e2);
+            float denom = d00 * d11 - d01 * d01;
+            float invDenom = (abs(denom) > 1e-12) ? (1.0 / denom) : 0.0;
 
-        float invW0 = 1.0 / clip0.w;
-        float invW1 = 1.0 / clip1.w;
-        float invW2 = 1.0 / clip2.w;
+            float4 bary4 = computeBarycentric3D(rayOrigin, rayDir, worldPos0.xyz, e1, e2, triNorm, d00, d01, d11, invDenom);
+                if (bary4.w <= 0.0)
+                {
+                    output.albedo = float4(0.0, 0.0, 0.0, 0.0);
+                    output.normal = float4(0.0, 0.0, 0.0, 0.0);
+                    output.material = float4(0.0, 0.0, 0.0, 0.0);
+                    output.emission = float4(0.0, 0.0, 0.0, 0.0);
+                    output.entityID = -1;
+                    return output;
+                }
+                float3 bary    = bary4.xyz;
+                float3 bary_dx = computeBarycentric3D(rayOrigin, rayDir_dx, worldPos0.xyz, e1, e2, triNorm, d00, d01, d11, invDenom).xyz;
+                float3 bary_dy = computeBarycentric3D(rayOrigin, rayDir_dy, worldPos0.xyz, e1, e2, triNorm, d00, d01, d11, invDenom).xyz;
 
-        float w0 = max(0.0, l0) * invW0;
-        float w1 = max(0.0, l1) * invW1;
-        float w2 = max(0.0, l2) * invW2;
-        float sumW = w0 + w1 + w2;
-        float invSumW = (sumW > 1e-7) ? (1.0 / sumW) : 0.0;
-        w0 *= invSumW;
-        w1 *= invSumW;
-        w2 *= invSumW;
+            float w0 = clamp(bary.x, 0.0, 1.0);
+            float w1 = clamp(bary.y, 0.0, 1.0);
+            float w2 = clamp(bary.z, 0.0, 1.0);
+            float sumW = w0 + w1 + w2;
+            if (sumW > 1e-7)
+            {
+                w0 /= sumW;
+                w1 /= sumW;
+                w2 /= sumW;
+            }
+            else
+            {
+                w0 = 1.0; w1 = 0.0; w2 = 0.0;
+            }
 
-        // Intra-triangle Screen-Space Differentials (+1px in X, +1px in Y)
-        // Avoids cross-triangle derivative jumps (eliminating scissor line artifacts)
-        float l0_dx = l0 + (-e1.y + e0.y) * invDet;
-        float l1_dx = l1 + e1.y * invDet;
-        float l2_dx = l2 - e0.y * invDet;
+            float3 dbary_dx = bary_dx - bary;
+            float3 dbary_dy = bary_dy - bary;
 
-        float w0_dx = l0_dx * invW0;
-        float w1_dx = l1_dx * invW1;
-        float w2_dx = l2_dx * invW2;
-        float sumW_dx = w0_dx + w1_dx + w2_dx;
-        float invSumW_dx = (abs(sumW_dx) > 1e-7) ? (1.0 / sumW_dx) : 0.0;
-        w0_dx *= invSumW_dx;
-        w1_dx *= invSumW_dx;
-        w2_dx *= invSumW_dx;
+            float w0_dx = w0 + dbary_dx.x;
+            float w1_dx = w1 + dbary_dx.y;
+            float w2_dx = w2 + dbary_dx.z;
 
-        float l0_dy = l0 + (e1.x - e0.x) * invDet;
-        float l1_dy = l1 - e1.x * invDet;
-        float l2_dy = l2 + e0.x * invDet;
+            float w0_dy = w0 + dbary_dy.x;
+            float w1_dy = w1 + dbary_dy.y;
+            float w2_dy = w2 + dbary_dy.z;
 
-        float w0_dy = l0_dy * invW0;
-        float w1_dy = l1_dy * invW1;
-        float w2_dy = l2_dy * invW2;
-        float sumW_dy = w0_dy + w1_dy + w2_dy;
-        float invSumW_dy = (abs(sumW_dy) > 1e-7) ? (1.0 / sumW_dy) : 0.0;
-        w0_dy *= invSumW_dy;
-        w1_dy *= invSumW_dy;
-        w2_dy *= invSumW_dy;
+            float2 uv0 = v0.uv0 * w0 + v1.uv0 * w1 + v2.uv0 * w2;
+            float2 ddx_uv0 = v0.uv0 * dbary_dx.x + v1.uv0 * dbary_dx.y + v2.uv0 * dbary_dx.z;
+            float2 ddy_uv0 = v0.uv0 * dbary_dy.x + v1.uv0 * dbary_dy.y + v2.uv0 * dbary_dy.z;
 
-        // Reconstruct Attributes & Exact Differentials
-        float2 uv0 = v0.uv0 * w0 + v1.uv0 * w1 + v2.uv0 * w2;
-        float2 uv0_dx = v0.uv0 * w0_dx + v1.uv0 * w1_dx + v2.uv0 * w2_dx;
-        float2 uv0_dy = v0.uv0 * w0_dy + v1.uv0 * w1_dy + v2.uv0 * w2_dy;
-        float2 ddx_uv0 = uv0_dx - uv0;
-        float2 ddy_uv0 = uv0_dy - uv0;
+            float2 uv1 = v0.uv1 * w0 + v1.uv1 * w1 + v2.uv1 * w2;
+            float2 ddx_uv1 = v0.uv1 * dbary_dx.x + v1.uv1 * dbary_dx.y + v2.uv1 * dbary_dx.z;
+            float2 ddy_uv1 = v0.uv1 * dbary_dy.x + v1.uv1 * dbary_dy.y + v2.uv1 * dbary_dy.z;
 
-        float2 uv1 = v0.uv1 * w0 + v1.uv1 * w1 + v2.uv1 * w2;
-        float2 uv1_dx = v0.uv1 * w0_dx + v1.uv1 * w1_dx + v2.uv1 * w2_dx;
-        float2 uv1_dy = v0.uv1 * w0_dy + v1.uv1 * w1_dy + v2.uv1 * w2_dy;
-        float2 ddx_uv1 = uv1_dx - uv1;
-        float2 ddy_uv1 = uv1_dy - uv1;
-
-        float3 worldNorm0 = mul((float3x3)instance.normalMatrix, localNorm0);
-        float3 worldNorm1 = mul((float3x3)instance.normalMatrix, localNorm1);
-        float3 worldNorm2 = mul((float3x3)instance.normalMatrix, localNorm2);
-        float3 geomNormal = normalize(worldNorm0 * w0 + worldNorm1 * w1 + worldNorm2 * w2);
+            float3 worldNorm0 = mul((float3x3)instance.normalMatrix, localNorm0);
+            float3 worldNorm1 = mul((float3x3)instance.normalMatrix, localNorm1);
+            float3 worldNorm2 = mul((float3x3)instance.normalMatrix, localNorm2);
+            float3 rawGeomNorm = worldNorm0 * w0 + worldNorm1 * w1 + worldNorm2 * w2;
+            float lenNorm = length(rawGeomNorm);
+            float3 geomNormal = (lenNorm > 1e-6) ? (rawGeomNorm / lenNorm) : normalize(triNorm);
 
         float3 worldPos = worldPos0.xyz * w0 + worldPos1.xyz * w1 + worldPos2.xyz * w2;
         float3 worldPos_dx = worldPos0.xyz * w0_dx + worldPos1.xyz * w1_dx + worldPos2.xyz * w2_dx;
@@ -269,12 +284,6 @@
         {
             Texture2D baseColorTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.baseColorTextureIndex, 0));
             baseColor = baseColorTex.SampleGrad(samp, baseColorUV, ddx_bc, ddy_bc) * instance.baseColorFactor;
-        }
-
-        // Alpha Mask discard
-        if (instance.alphaMode == 1 && baseColor.a < instance.alphaMaskCutoff)
-        {
-            discard;
         }
 
         // 2. NORMAL MAPPING (Analytical Tangent Frame from 3D Triangle Geometry)

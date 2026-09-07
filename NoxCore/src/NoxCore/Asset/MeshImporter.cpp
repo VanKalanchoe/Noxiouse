@@ -76,11 +76,12 @@ namespace Nox
         Ref<Mesh> meshAsset = CreateRef<Mesh>();
 
         // Upload each sub-mesh independently -> Vector of Handles
-        for (const auto& data : meshDataList)
+        for (size_t i = 0; i < meshDataList.size(); ++i)
         {
-            MeshHandle subMeshHandle = Renderer::UploadMesh(data);
+            bool isOpaque = (i < materialDataList.size()) ? (materialDataList[i].Mode == AlphaMode::Opaque) : true;
+            MeshHandle subMeshHandle = Renderer::UploadMesh(meshDataList[i], isOpaque);
             meshAsset->m_SubMeshes.push_back(subMeshHandle);
-            meshAsset->m_SubmeshNames.push_back(data.Name);
+            meshAsset->m_SubmeshNames.push_back(meshDataList[i].Name);
         }
         meshAsset->m_Materials = std::move(materialDataList);
         meshAsset->m_Lights = std::move(lightDataList);
@@ -133,11 +134,12 @@ namespace Nox
         }
 
         Ref<StaticMesh> staticMeshAsset = CreateRef<StaticMesh>();
-        for (const auto& data : meshDataList)
+        for (size_t i = 0; i < meshDataList.size(); ++i)
         {
-            MeshHandle subMeshHandle = Renderer::UploadMesh(data);
+            bool isOpaque = (i < materialDataList.size()) ? (materialDataList[i].Mode == AlphaMode::Opaque) : true;
+            MeshHandle subMeshHandle = Renderer::UploadMesh(meshDataList[i], isOpaque);
             staticMeshAsset->m_SubMeshes.push_back(subMeshHandle);
-            staticMeshAsset->m_SubmeshNames.push_back(data.Name);
+            staticMeshAsset->m_SubmeshNames.push_back(meshDataList[i].Name);
         }
         staticMeshAsset->m_Materials = std::move(materialDataList);
         staticMeshAsset->m_Lights = std::move(lightDataList);

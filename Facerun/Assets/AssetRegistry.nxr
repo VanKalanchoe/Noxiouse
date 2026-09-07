@@ -1,121 +1,13 @@
 AssetRegistry:
+  - Handle: 264344941853641833
+    FilePath: models/plantOnTable/Untitled.nmesh
+    SourceFilePath: models/plantOnTable/Untitled.gltf
+    Type: AssetType::Mesh
   - Handle: 284400685509200133
     FilePath: Scenes/3D-Scene.nox
     SourceFilePath: Scenes/3D-Scene.nox
     Type: AssetType::Scene
-  - Handle: 542063245227745545
-    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_4.png
-    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_4.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: RGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 1007193102927386319
-    FilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_0.jpg
-    SourceFilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_0.jpg
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: SRGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 1390650798385755602
-    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_1.png
-    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_1.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: RGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 2057004897525794821
-    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_3.png
-    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_3.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: RGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 3028776003559272153
-    FilePath: models/FlightHelmet/FlightHelmet_Materials_MetalPartsMat_OcclusionRoughMetal.png
-    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_MetalPartsMat_OcclusionRoughMetal.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: RGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 3167706731515971424
-    FilePath: models/DamagedHelmet/DamagedHelmet.nmesh
-    SourceFilePath: models/DamagedHelmet/DamagedHelmet.gltf
-    Type: AssetType::Mesh
-  - Handle: 3962779578966558429
-    FilePath: models/FlightHelmet/FlightHelmet_Materials_RubberWoodMat_OcclusionRoughMetal.png
-    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_RubberWoodMat_OcclusionRoughMetal.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: RGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 4729121605009934208
-    FilePath: models/FlightHelmet/FlightHelmet_Materials_MetalPartsMat_BaseColor.png
-    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_MetalPartsMat_BaseColor.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: SRGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 5265102634754901942
-    FilePath: models/FlightHelmet/FlightHelmet_Materials_LeatherPartsMat_OcclusionRoughMetal.png
-    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_LeatherPartsMat_OcclusionRoughMetal.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: RGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 5317410254392963727
-    FilePath: models/fox/Fox_Survey.nanim
-    SourceFilePath: models/fox/Fox_Survey.nanim
-    Type: AssetType::AnimationSequence
-  - Handle: 5611635185517561587
-    FilePath: models/FlightHelmet/FlightHelmet_Materials_RubberWoodMat_BaseColor.png
-    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_RubberWoodMat_BaseColor.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: SRGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 5735421443580852166
-    FilePath: models/fox/Fox_Run.nanim
-    SourceFilePath: models/fox/Fox_Run.nanim
-    Type: AssetType::AnimationSequence
-  - Handle: 5736148730152321641
-    FilePath: models/FlightHelmet/FlightHelmet_Materials_RubberWoodMat_Normal.png
-    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_RubberWoodMat_Normal.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: RGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 5774826277349096753
-    FilePath: models/fox/Fox.nskel
-    SourceFilePath: models/fox/Fox.nskel
-    Type: AssetType::Skeleton
-  - Handle: 6308795754132740234
-    FilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_4.png
-    SourceFilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_4.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: SRGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 6976697926471367048
-    FilePath: models/FlightHelmet/FlightHelmet_Materials_LeatherPartsMat_Normal.png
-    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_LeatherPartsMat_Normal.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: RGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 7401672705177551370
+  - Handle: 1176793041678696778
     FilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_3.jpg
     SourceFilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_3.jpg
     Type: AssetType::Texture2D
@@ -123,103 +15,51 @@ AssetRegistry:
       Format: RGBA8
       GenerateMips: true
       Flip: false
-  - Handle: 7401740534228704582
-    FilePath: models/FlightHelmet/FlightHelmet_Materials_LensesMat_Normal.png
-    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_LensesMat_Normal.png
+  - Handle: 1901232951555874091
+    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_1.png
+    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_1.png
     Type: AssetType::Texture2D
     TextureSpec:
       Format: RGBA8
       GenerateMips: true
       Flip: false
-  - Handle: 9120357261643868190
-    FilePath: models/UnlitTest/UnlitTest.nmesh
-    SourceFilePath: models/UnlitTest/UnlitTest.glb
-    Type: AssetType::Mesh
-  - Handle: 9354421239407170532
-    FilePath: models/FlightHelmet/FlightHelmet_Materials_LensesMat_BaseColor.png
-    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_LensesMat_BaseColor.png
+  - Handle: 2666883814347191499
+    FilePath: models/plantOnTable/wooden_picnic_table_bottom_diff_1k.png
+    SourceFilePath: models/plantOnTable/wooden_picnic_table_bottom_diff_1k.png
     Type: AssetType::Texture2D
     TextureSpec:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
-  - Handle: 9444066855847815033
-    FilePath: models/FlightHelmet/FlightHelmet_Materials_MetalPartsMat_Normal.png
-    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_MetalPartsMat_Normal.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: RGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 9772971879814344454
-    FilePath: models/FlightHelmet/FlightHelmet_Materials_GlassPlasticMat_Normal.png
-    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_GlassPlasticMat_Normal.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: RGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 9798515278423998480
-    FilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_5.png
-    SourceFilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_5.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: RGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 11278962721648313999
-    FilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_6.jpg
-    SourceFilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_6.jpg
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: RGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 12019681196275758420
-    FilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_2.jpg
-    SourceFilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_2.jpg
+  - Handle: 4862229754173170656
+    FilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_4.png
+    SourceFilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_4.png
     Type: AssetType::Texture2D
     TextureSpec:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
-  - Handle: 12334841354351480219
-    FilePath: models/FlightHelmet/FlightHelmet.nmesh
-    SourceFilePath: models/FlightHelmet/FlightHelmet.gltf
-    Type: AssetType::Mesh
-  - Handle: 13118275503229584124
-    FilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_1.png
-    SourceFilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_1.png
+  - Handle: 5255653405854183958
+    FilePath: models/plantOnTable/wooden_picnic_table_top_diff_1k.png
+    SourceFilePath: models/plantOnTable/wooden_picnic_table_top_diff_1k.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 6176438191584092660
+    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_4.png
+    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_4.png
     Type: AssetType::Texture2D
     TextureSpec:
       Format: RGBA8
       GenerateMips: true
       Flip: false
-  - Handle: 13531662515546872503
-    FilePath: models/LightsPunctualLamp/LightsPunctualLamp.nmesh
-    SourceFilePath: models/LightsPunctualLamp/LightsPunctualLamp.glb
+  - Handle: 6474779547609446813
+    FilePath: models/pbr_testSpheres/pbr_spheres.nmesh
+    SourceFilePath: models/pbr_testSpheres/pbr_spheres.glb
     Type: AssetType::Mesh
-  - Handle: 13670283566026550113
-    FilePath: Textures/ChernoLogo.png
-    SourceFilePath: Textures/ChernoLogo.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: SRGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 14168085809762532914
-    FilePath: models/fox/Fox.nmesh
-    SourceFilePath: models/fox/Fox.gltf
-    Type: AssetType::Mesh
-  - Handle: 16225910947284343333
-    FilePath: models/fox/Texture.png
-    SourceFilePath: models/fox/Texture.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: SRGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 16782098967821604305
+  - Handle: 6516327325368907088
     FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_0.png
     SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_0.png
     Type: AssetType::Texture2D
@@ -227,31 +67,35 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
-  - Handle: 17551678354756691658
-    FilePath: models/FlightHelmet/FlightHelmet_Materials_LeatherPartsMat_BaseColor.png
-    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_LeatherPartsMat_BaseColor.png
+  - Handle: 6664719640111262319
+    FilePath: models/plantOnTable/nettle_plant_diff_4k.png
+    SourceFilePath: models/plantOnTable/nettle_plant_diff_4k.png
     Type: AssetType::Texture2D
     TextureSpec:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
-  - Handle: 17567666003953665665
-    FilePath: models/FlightHelmet/FlightHelmet_Materials_GlassPlasticMat_OcclusionRoughMetal.png
-    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_GlassPlasticMat_OcclusionRoughMetal.png
+  - Handle: 7162657065975010670
+    FilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_0.jpg
+    SourceFilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_0.jpg
     Type: AssetType::Texture2D
     TextureSpec:
-      Format: RGBA8
+      Format: SRGBA8
       GenerateMips: true
       Flip: false
-  - Handle: 17899116925571033380
-    FilePath: models/FlightHelmet/FlightHelmet_Materials_LensesMat_OcclusionRoughMetal.png
-    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_LensesMat_OcclusionRoughMetal.png
+  - Handle: 7528257573198008490
+    FilePath: models/plantOnTable/potted_plant_02_pot_diff_1k.png
+    SourceFilePath: models/plantOnTable/potted_plant_02_pot_diff_1k.png
     Type: AssetType::Texture2D
     TextureSpec:
-      Format: RGBA8
+      Format: SRGBA8
       GenerateMips: true
       Flip: false
-  - Handle: 17989198929163727266
+  - Handle: 7579772818493674608
+    FilePath: models/LightsPunctualLamp/LightsPunctualLamp.nmesh
+    SourceFilePath: models/LightsPunctualLamp/LightsPunctualLamp.glb
+    Type: AssetType::Mesh
+  - Handle: 8374063622249125914
     FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_2.png
     SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_2.png
     Type: AssetType::Texture2D
@@ -259,15 +103,59 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
-  - Handle: 17991651049533075913
-    FilePath: models/FlightHelmet/FlightHelmet_Materials_GlassPlasticMat_BaseColor.png
-    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_GlassPlasticMat_BaseColor.png
+  - Handle: 8803745538539128957
+    FilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_1.png
+    SourceFilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_1.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 9715756649947465372
+    FilePath: models/pbr_testSpheres/textures/pbr_spheres_tex_0.png
+    SourceFilePath: models/pbr_testSpheres/textures/pbr_spheres_tex_0.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 14930794198075937406
+    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_3.png
+    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_3.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 15147217129306486967
+    FilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_5.png
+    SourceFilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_5.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 15979166570816760265
+    FilePath: models/DamagedHelmet/DamagedHelmet.nmesh
+    SourceFilePath: models/DamagedHelmet/DamagedHelmet.gltf
+    Type: AssetType::Mesh
+  - Handle: 16037344808523690575
+    FilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_2.jpg
+    SourceFilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_2.jpg
     Type: AssetType::Texture2D
     TextureSpec:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
-  - Handle: 18046271482966131541
-    FilePath: models/fox/Fox_Walk.nanim
-    SourceFilePath: models/fox/Fox_Walk.nanim
-    Type: AssetType::AnimationSequence
+  - Handle: 16499501888754279141
+    FilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_6.jpg
+    SourceFilePath: models/LightsPunctualLamp/textures/LightsPunctualLamp_tex_6.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 17734233979031378683
+    FilePath: models/Box/Box.nmesh
+    SourceFilePath: models/Box/Box.glb
+    Type: AssetType::Mesh

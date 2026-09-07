@@ -22,6 +22,7 @@ namespace NRI
         uint64_t getBufferDeviceAddress(vk::raii::Buffer& buffer) const;
         uint32_t registerBuffer(Buffer& buffer, uint64_t size) override;
         void unregisterBuffer(uint32_t slot);
+        uint32_t registerAccelerationStructure(class AccelerationStructure& as, uint32_t slot = ~0u) override;
 
         uint32_t getImageHeapIndexOffset() const override { return m_imageHeapIndexOffset; }
         
@@ -64,11 +65,14 @@ namespace NRI
         uint64_t m_samplerDescSize = 0;
         uint64_t m_imageHeapOffset = 0;
         uint32_t m_imageHeapIndexOffset = 0;
+        uint64_t m_bufferHeapOffset = 0;
 
         uint32_t m_allocatedBufferCount = 0;
         uint32_t m_allocatedImageCount = 0;
         std::vector<uint32_t> m_freeImageSlots;
         std::vector<uint32_t> m_freeBufferSlots;
+        uint32_t m_maxBufferDescriptors = 0;
+        uint32_t m_maxImageDescriptors = 0;
         
         uint64_t m_size = 0;
         uint64_t m_reservedRangeOffset = 0;

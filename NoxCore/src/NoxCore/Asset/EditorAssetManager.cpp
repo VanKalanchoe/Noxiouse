@@ -100,8 +100,6 @@ namespace Nox
         {
             OnAssetModifiedOnDisk(path);
         });
-
-        ScanAndRegisterNewAssets();
     }
 
     void EditorAssetManager::Update()
@@ -341,7 +339,7 @@ namespace Nox
             if (!entry.is_regular_file()) continue;
 
             std::filesystem::path ext = entry.path().extension();
-            if (ext == ".nanim" || ext == ".nskel" || ext == ".nmesh" || ext == ".nsmesh")
+            if (ext == ".nanim" || ext == ".nskel")
             {
                 std::filesystem::path relativePath = std::filesystem::relative(entry.path(), assetDir);
 
@@ -421,8 +419,6 @@ namespace Nox
                     metadata.TextureSpec.flip = specNode["Flip"].as<bool>();
             }
         }
-
-        ScanAndRegisterNewAssets();
 
         return true;
     }

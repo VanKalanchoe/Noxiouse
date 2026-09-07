@@ -8,6 +8,7 @@
 #include "Texture.h"
 #include "Buffer.h"
 #include "DescriptorHeap.h"
+#include "AccelerationStructure.h"
 #include "ShaderCompiler.h"
 #include "NoxCore/Core/Window.h"
 
@@ -31,6 +32,8 @@ namespace NRI
         virtual Nox::Ref<Texture2D> createTexture(const TextureDesc& desc) = 0;
         virtual std::unique_ptr<Buffer> createBuffer(const BufferDesc& desc) = 0;
         virtual std::unique_ptr<DescriptorHeap> createDescriptorHeap(const DescriptorHeapDesc& desc) = 0;
+        virtual AccelerationStructureBuildSizes getAccelerationStructureBuildSizes(const AccelerationStructureBuildDesc& desc) = 0;
+        virtual std::unique_ptr<AccelerationStructure> createAccelerationStructure(const AccelerationStructureDesc& desc) = 0;
         
         virtual void shutdown() = 0;
         virtual uint32_t getMSAASampleCount() const = 0;

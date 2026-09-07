@@ -26,6 +26,7 @@ namespace Nox
         BufferAllocation meshletDraws; // Also used for bounds (1:1 ratio)
         BufferAllocation meshletVertices;
         BufferAllocation meshletTriangles;
+        uint32_t blasId = UINT32_MAX;
         
         uint32_t GetFirstMeshlet() const { return meshletDraws.offset; }
         uint32_t GetMeshletCount() const { return meshletDraws.count; }

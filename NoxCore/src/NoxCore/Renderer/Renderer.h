@@ -51,6 +51,15 @@ inline std::vector<std::string> samplerNames{"Linear", "Nearest"};
 
 namespace Nox
 {
+    struct MeshBLAS
+    {
+        std::unique_ptr<NRI::Buffer> storageBuffer;
+        std::unique_ptr<NRI::AccelerationStructure> as;
+        std::unique_ptr<NRI::Buffer> indexBuffer;
+        uint64_t vertexBufferAddress = 0;
+        uint32_t indexCount = 0;
+    };
+    
     struct DeferredBuffer
     {
         std::unique_ptr<NRI::Buffer> buffer;
@@ -84,6 +93,7 @@ namespace Nox
         shaderio::InstanceData instance;
         DrawMeshTasksIndirectCommand command;
         float distanceToCamera; // Only really needed for transparent objects now
+        uint32_t blasId = UINT32_MAX;
     };
 
     // The Render Queues
@@ -170,12 +180,17 @@ namespace Nox
         uint32_t getTonemapMode() const { return m_tonemapMode; }
         float getExposure() const { return m_exposure; }
         void setExposure(float exposure) { m_exposure = exposure; }
-
         float getGamma() const { return m_gamma; }
         void setGamma(float gamma) { m_gamma = gamma; }
-
         float getScaleIBLAmbient() const { return m_scaleIBLAmbient; }
         void setScaleIBLAmbient(float scale) { m_scaleIBLAmbient = scale; }
+        // RayTracing
+        void setRayTracingEnabled(bool enabled) { m_rayTracingEnabled = enabled; }
+        bool getRayTracingEnabled() const { return m_rayTracingEnabled; }
+        void setRayTracingShadows(bool enabled) { m_rayTracingShadows = enabled; }
+        bool getRayTracingShadows() const { return m_rayTracingShadows; }
+        void setRayTracingReflections(bool enabled) { m_rayTracingReflections = enabled; }
+        bool getRayTracingReflections() const { return m_rayTracingReflections; }
         
         Ref<Texture2D> UploadTexture(const TextureData& cpuData);
         Ref<Texture2D> createSolidColorTexture(uint8_t r, uint8_t g, uint8_t b, uint8_t a);
@@ -184,12 +199,12 @@ namespace Nox
         template <class T>
         void UploadBufferSlice(NRI::Buffer& dstBuffer, const T* data, uint32_t elementOffset, uint32_t elementCount);
       
-        MeshHandle UploadMeshGeometry(const MeshData& data);
-        static MeshHandle UploadMesh(const MeshData& data)
+        MeshHandle UploadMeshGeometry(const MeshData& data, bool isOpaque = true);
+        static MeshHandle UploadMesh(const MeshData& data, bool isOpaque = true)
         {
             NOX_CORE_ASSERT(s_Instance, "Renderer instance does not exist!");
             
-            return s_Instance->UploadMeshGeometry(data);
+            return s_Instance->UploadMeshGeometry(data, isOpaque);
         }
         void UnloadMeshGeometry(const MeshHandle& handle);
         void updatePageTables(uint32_t currentImage);
@@ -350,11 +365,33 @@ namespace Nox
         PagedBufferAllocator<shaderio::MeshletBounds>m_meshletBoundsPages;
         PagedBufferAllocator<uint32_t>               m_meshletVertPages;
         PagedBufferAllocator<uint8_t>                m_meshletTriPages;
+        std::vector<MeshBLAS>                        m_meshBLASes;
+        // --- Hardware Ray Tracing: Scene TLAS ---
+        void updateSceneAccelerationStructure(uint32_t currentFrameIndex);
+        void BuildSceneAccelerationStructure(uint32_t currentFrameIndex);
+
+        bool m_rayTracingEnabled = true;
+        bool m_rayTracingShadows = true;
+        bool m_rayTracingReflections = true;
+
+        std::unique_ptr<NRI::AccelerationStructure> m_sceneTLAS;
+        std::unique_ptr<NRI::Buffer> m_tlasBuffer;
+        std::unique_ptr<NRI::Buffer> m_tlasScratchBuffer;
+        std::vector<std::unique_ptr<NRI::Buffer>> m_instanceLUTBuffers;
+        std::vector<std::unique_ptr<NRI::Buffer>> m_rtInstanceBuffers;
+        uint32_t m_sceneTLASCapacity = 0;
+        uint32_t m_tlasHeapIndex = 0;
+        uint32_t m_tlasHeapSlot = ~0u;
+        bool m_hasTLASBuild = false;
+        bool m_tlasNeedFullBuild = false;
+        NRI::AccelerationStructureBuildDesc m_tlasBuildDesc{};
+
         std::vector<std::unique_ptr<NRI::Buffer>> m_vertexPageTableBuffers;
         std::vector<std::unique_ptr<NRI::Buffer>> m_meshletDrawPageTableBuffers;
         std::vector<std::unique_ptr<NRI::Buffer>> m_meshletBoundPageTableBuffers;
         std::vector<std::unique_ptr<NRI::Buffer>> m_meshletVertPageTableBuffers;
         std::vector<std::unique_ptr<NRI::Buffer>> m_meshletTriPageTableBuffers;
+        
         std::vector<void*> m_vertexPageTableBuffersMapped;
         std::vector<void*> m_meshletDrawPageTableBuffersMapped;
         std::vector<void*> m_meshletBoundPageTableBuffersMapped;

@@ -74,7 +74,7 @@
         SamplerState sampHandle = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_PREFILTER, 0));
 
         // Sample the environment cubemap using interpolated 3D world direction
-        float3 envColor = texHandle.Sample(sampHandle, normalize(input.worldRay)).rgb;
+        float3 envColor = texHandle.SampleLevel(sampHandle, normalize(input.worldRay), 0.0).rgb;
 
         output.color = float4(envColor, 1.0);
         output.entityID = -1;

@@ -30,6 +30,7 @@ namespace NRI
         virtual uint32_t registerStorageTextureMip(Texture& texture, uint32_t mipLevel) { return 0; }
         virtual void unregisterTexture(uint32_t slot) = 0;
         virtual uint32_t registerBuffer(class Buffer& buffer, uint64_t size) = 0;
+        virtual uint32_t registerAccelerationStructure(class AccelerationStructure& as, uint32_t slot = ~0u) = 0;
         
         // Expose your uniform offset calculation seamlessly to the Renderer
         virtual uint32_t getImageHeapIndexOffset() const = 0;

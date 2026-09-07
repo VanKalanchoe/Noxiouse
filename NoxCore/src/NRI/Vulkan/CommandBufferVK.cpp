@@ -10,6 +10,7 @@
 #include "SwapchainVK.h"
 #include "PipelineVK.h"
 #include "DescriptorHeapVK.h"
+#include "AccelerationStructureVK.h"
 #include "NoxCore/Core/core.h"
 
 namespace NRI
@@ -716,5 +717,165 @@ namespace NRI
         default:
             return vk::ImageLayout::eGeneral;
         }
+    }
+
+    void CommandBufferVK::buildOrUpdateAccelerationStructure(
+            vk::BuildAccelerationStructureModeKHR mode,
+            const AccelerationStructureBuildDesc& buildDesc,
+            uint64_t scratchAddress,
+            AccelerationStructure* srcAS,
+            AccelerationStructure& dstAS)
+        {
+            auto* dstVK = static_cast<AccelerationStructureVK*>(&dstAS);
+            auto* srcVK = srcAS ? static_cast<AccelerationStructureVK*>(srcAS) : nullptr;
+
+            vk::BuildAccelerationStructureFlagsKHR vkFlags = toVkBuildFlags(buildDesc.flags);
+
+            if (buildDesc.type == AccelerationStructureType::BottomLevel)
+            {
+                std::vector<vk::AccelerationStructureGeometryKHR> geometries;
+                geometries.reserve(buildDesc.triangles.size());
+                std::vector<vk::AccelerationStructureBuildRangeInfoKHR> ranges;
+                ranges.reserve(buildDesc.triangles.size());
+                std::vector<vk::AccelerationStructureGeometryTrianglesDataKHR> triData;
+                triData.reserve(buildDesc.triangles.size());
+
+                for (const auto& tri : buildDesc.triangles)
+                {
+                    triData.push_back(vk::AccelerationStructureGeometryTrianglesDataKHR{
+                        .vertexFormat = vk::Format::eR32G32B32Sfloat,
+                        .vertexData   = tri.vertexBufferAddress,
+                        .vertexStride = tri.vertexStride,
+                        .maxVertex    = tri.maxVertex,
+                        .indexType    = vk::IndexType::eUint32,
+                        .indexData    = tri.indexBufferAddress
+                    });
+
+                    vk::AccelerationStructureGeometryKHR geometry{
+                        .geometryType = vk::GeometryTypeKHR::eTriangles,
+                        .geometry     = triData.back(),
+                        .flags        = tri.isOpaque ? vk::GeometryFlagBitsKHR::eOpaque : vk::GeometryFlagsKHR{}
+                    };
+                    geometries.push_back(geometry);
+
+                    vk::AccelerationStructureBuildRangeInfoKHR range{
+                        .primitiveCount  = tri.primitiveCount,
+                        .primitiveOffset = tri.primitiveOffset,
+                        .firstVertex     = tri.firstVertex,
+                        .transformOffset = 0
+                    };
+                    ranges.push_back(range);
+                }
+
+                vk::AccelerationStructureBuildGeometryInfoKHR buildInfo{
+                    .type                     = vk::AccelerationStructureTypeKHR::eBottomLevel,
+                    .flags                    = vkFlags,
+                    .mode                     = mode,
+                    .srcAccelerationStructure = (srcVK && mode == vk::BuildAccelerationStructureModeKHR::eUpdate) ? *srcVK->getNativeHandle() : vk::AccelerationStructureKHR{},
+                    .dstAccelerationStructure = *dstVK->getNativeHandle(),
+                    .geometryCount            = static_cast<uint32_t>(geometries.size()),
+                    .pGeometries              = geometries.data()
+                };
+                buildInfo.scratchData.deviceAddress = scratchAddress;
+
+                const vk::AccelerationStructureBuildRangeInfoKHR* pRangeData = ranges.data();
+                m_commandBuffers[m_currentFrameIndex].buildAccelerationStructuresKHR({ buildInfo }, { pRangeData });
+            }
+            else // TopLevel
+            {
+                vk::AccelerationStructureGeometryInstancesDataKHR instancesData{
+                    .arrayOfPointers = vk::False,
+                    .data            = buildDesc.instances.instanceBufferAddress
+                };
+
+                vk::AccelerationStructureGeometryKHR geometry{
+                    .geometryType = vk::GeometryTypeKHR::eInstances,
+                    .geometry     = instancesData
+                };
+
+                vk::AccelerationStructureBuildGeometryInfoKHR buildInfo{
+                    .type                     = vk::AccelerationStructureTypeKHR::eTopLevel,
+                    .flags                    = vkFlags,
+                    .mode                     = mode,
+                    .srcAccelerationStructure = (srcVK && mode == vk::BuildAccelerationStructureModeKHR::eUpdate) ? *srcVK->getNativeHandle() : vk::AccelerationStructureKHR{},
+                    .dstAccelerationStructure = *dstVK->getNativeHandle(),
+                    .geometryCount            = 1,
+                    .pGeometries              = &geometry
+                };
+                buildInfo.scratchData.deviceAddress = scratchAddress;
+
+                vk::AccelerationStructureBuildRangeInfoKHR range{
+                    .primitiveCount  = buildDesc.instances.instanceCount,
+                    .primitiveOffset = 0,
+                    .firstVertex     = 0,
+                    .transformOffset = 0
+                };
+                const vk::AccelerationStructureBuildRangeInfoKHR* pRangeData = &range;
+                m_commandBuffers[m_currentFrameIndex].buildAccelerationStructuresKHR({ buildInfo }, { pRangeData });
+            }
+        }
+
+        void CommandBufferVK::buildAccelerationStructure(const AccelerationStructureBuildDesc& buildDesc, uint64_t scratchAddress, AccelerationStructure& dstAS)
+        {
+            buildOrUpdateAccelerationStructure(vk::BuildAccelerationStructureModeKHR::eBuild, buildDesc, scratchAddress, nullptr, dstAS);
+        }
+
+        void CommandBufferVK::updateAccelerationStructure(const AccelerationStructureBuildDesc& buildDesc, uint64_t scratchAddress, AccelerationStructure& srcAS, AccelerationStructure& dstAS)
+        {
+            buildOrUpdateAccelerationStructure(vk::BuildAccelerationStructureModeKHR::eUpdate, buildDesc, scratchAddress, &srcAS, dstAS);
+        }
+
+        void CommandBufferVK::accelerationStructureBarrier(AccelerationStructureBarrierType barrierType)
+        {
+            vk::MemoryBarrier2 barrier{};
+
+            switch (barrierType)
+            {
+            case AccelerationStructureBarrierType::BuildToBuild:
+                barrier.srcStageMask  = vk::PipelineStageFlagBits2::eAccelerationStructureBuildKHR;
+                barrier.srcAccessMask = vk::AccessFlagBits2::eAccelerationStructureWriteKHR;
+                barrier.dstStageMask  = vk::PipelineStageFlagBits2::eAccelerationStructureBuildKHR;
+                barrier.dstAccessMask = vk::AccessFlagBits2::eAccelerationStructureReadKHR;
+                break;
+
+            case AccelerationStructureBarrierType::BuildToShaderRead:
+                barrier.srcStageMask  = vk::PipelineStageFlagBits2::eAccelerationStructureBuildKHR;
+                barrier.srcAccessMask = vk::AccessFlagBits2::eAccelerationStructureWriteKHR;
+                barrier.dstStageMask  = vk::PipelineStageFlagBits2::eFragmentShader | vk::PipelineStageFlagBits2::eComputeShader;
+                barrier.dstAccessMask = vk::AccessFlagBits2::eAccelerationStructureReadKHR | vk::AccessFlagBits2::eShaderRead;
+                break;
+
+            case AccelerationStructureBarrierType::TransferToBuild:
+                barrier.srcStageMask  = vk::PipelineStageFlagBits2::eTransfer | vk::PipelineStageFlagBits2::eAllCommands;
+                barrier.srcAccessMask = vk::AccessFlagBits2::eTransferWrite | vk::AccessFlagBits2::eMemoryWrite;
+                barrier.dstStageMask  = vk::PipelineStageFlagBits2::eAccelerationStructureBuildKHR;
+                barrier.dstAccessMask = vk::AccessFlagBits2::eAccelerationStructureReadKHR | vk::AccessFlagBits2::eAccelerationStructureWriteKHR;
+                break;
+            }
+
+            vk::DependencyInfo depInfo{
+                .memoryBarrierCount = 1,
+                .pMemoryBarriers    = &barrier
+            };
+
+            m_commandBuffers[m_currentFrameIndex].pipelineBarrier2(depInfo);
+        }
+
+    void CommandBufferVK::executionBarrier()
+    {
+        vk::MemoryBarrier2 barrier = {
+            .srcStageMask  = vk::PipelineStageFlagBits2::eAllCommands,
+            .srcAccessMask = vk::AccessFlagBits2::eMemoryWrite | vk::AccessFlagBits2::eColorAttachmentWrite | vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
+            .dstStageMask  = vk::PipelineStageFlagBits2::eAllCommands,
+            .dstAccessMask = vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eMemoryWrite | vk::AccessFlagBits2::eShaderRead | vk::AccessFlagBits2::eColorAttachmentRead |
+vk::AccessFlagBits2::eColorAttachmentWrite | vk::AccessFlagBits2::eDepthStencilAttachmentRead | vk::AccessFlagBits2::eDepthStencilAttachmentWrite
+        };
+
+        vk::DependencyInfo depInfo = {
+            .memoryBarrierCount = 1,
+            .pMemoryBarriers    = &barrier
+        };
+
+        m_commandBuffers[m_currentFrameIndex].pipelineBarrier2(depInfo);
     }
 }
