@@ -2461,6 +2461,8 @@ namespace Nox
         // Process any queued shader hot-reloads
         if (!m_pendingReloads.empty())
         {
+            m_device->waitIdle(); // Ensure GPU is idle before destroying and recreating pipelines!
+            
             std::unordered_map<std::string, std::function<void()>> reloads;
             {
                 std::scoped_lock lock(m_reloadMutex);
@@ -2668,65 +2670,63 @@ namespace Nox
         NRI::AccelerationStructureBuildSizes tlasSizes = m_device->getAccelerationStructureBuildSizes(m_tlasBuildDesc);
 
         // 3. Allocate / resize TLAS storage and scratch buffers
-        m_tlasNeedFullBuild = false;
-        if (!m_sceneTLAS || m_sceneTLASCapacity < instanceCount || !m_tlasBuffer || m_tlasBuffer->getSize() < tlasSizes.accelerationStructureSize)
-        {
-            m_sceneTLASCapacity = std::max(instanceCount * 2, 64u);
+            if (!m_sceneTLAS || m_sceneTLASCapacity < instanceCount || !m_tlasBuffer || m_tlasBuffer->getSize() < tlasSizes.accelerationStructureSize)
+            {
+                m_device->waitIdle();
 
-            m_tlasBuffer = m_device->createBuffer(NRI::BufferDesc{
-                .size = tlasSizes.accelerationStructureSize,
-                .usage = NRI::BufferUsage::AccelerationStructure
-            });
+                // CRITICAL ORDER: Destroy VkAccelerationStructureKHR FIRST, then the backing VkBuffer!
+                m_sceneTLAS.reset();
+                m_tlasBuffer.reset();
+                m_tlasScratchBuffer.reset();
 
-            m_sceneTLAS = m_device->createAccelerationStructure(NRI::AccelerationStructureDesc{
-                .type = NRI::AccelerationStructureType::TopLevel,
-                .storageBuffer = m_tlasBuffer.get(),
-                .bufferOffset = 0,
-                .size = tlasSizes.accelerationStructureSize
-            });
+                m_sceneTLASCapacity = std::max(instanceCount * 2, 64u);
 
-            m_tlasScratchBuffer = m_device->createBuffer(NRI::BufferDesc{
-                .size = std::max(tlasSizes.buildScratchSize, tlasSizes.updateScratchSize),
-                .usage = NRI::BufferUsage::AccelerationStructureScratch
-            });
+                m_tlasBuffer = m_device->createBuffer(NRI::BufferDesc{
+                    .size = tlasSizes.accelerationStructureSize,
+                    .usage = NRI::BufferUsage::AccelerationStructure
+                });
 
-            m_tlasNeedFullBuild = true;
+                m_sceneTLAS = m_device->createAccelerationStructure(NRI::AccelerationStructureDesc{
+                    .type = NRI::AccelerationStructureType::TopLevel,
+                    .storageBuffer = m_tlasBuffer.get(),
+                    .bufferOffset = 0,
+                    .size = tlasSizes.accelerationStructureSize
+                });
 
-            // Register TLAS into Descriptor Heap ONLY when newly created or resized
-            m_tlasHeapSlot = m_resourceHeap->registerAccelerationStructure(*m_sceneTLAS, m_tlasHeapSlot);
-            m_tlasHeapIndex = m_tlasHeapSlot;
+                m_tlasScratchBuffer = m_device->createBuffer(NRI::BufferDesc{
+                    .size = std::max(tlasSizes.buildScratchSize, tlasSizes.updateScratchSize),
+                    .usage = NRI::BufferUsage::AccelerationStructureScratch
+                });
+
+                // Register TLAS into Descriptor Heap ONLY when newly created or resized
+                m_tlasHeapSlot = m_resourceHeap->registerAccelerationStructure(*m_sceneTLAS, m_tlasHeapSlot);
+                m_tlasHeapIndex = m_tlasHeapSlot;
+            }
+
+            // 4. Update UBO flags (ready for updateUniformBuffer!)
+            uniformData.tlasDeviceAddress = m_sceneTLAS ? m_sceneTLAS->getDeviceAddress() : 0;
+            uniformData.tlasHeapIndex = m_tlasHeapIndex;
+            uniformData.enableRTShadows = (m_rayTracingEnabled && m_rayTracingShadows) ? 1 : 0;
+            uniformData.enableRTReflections = (m_rayTracingEnabled && m_rayTracingReflections) ? 1 : 0;
+
+            m_hasTLASBuild = true;
         }
 
-        // 4. Update UBO flags (ready for updateUniformBuffer!)
-        uniformData.tlasDeviceAddress = m_sceneTLAS ? m_sceneTLAS->getDeviceAddress() : 0;
-        uniformData.tlasHeapIndex = m_tlasHeapIndex;
-        uniformData.enableRTShadows = (m_rayTracingEnabled && m_rayTracingShadows) ? 1 : 0;
-        uniformData.enableRTReflections = (m_rayTracingEnabled && m_rayTracingReflections) ? 1 : 0;
-
-        m_hasTLASBuild = true;
-    }
-
-    void Renderer::BuildSceneAccelerationStructure(uint32_t currentFrameIndex)
-    {
-        if (!m_hasTLASBuild)
-            return;
-
-        // 1. Pre-build barrier: Host/Transfer instance writes -> AS Build Read
-        m_commandBuffers->accelerationStructureBarrier(NRI::AccelerationStructureBarrierType::TransferToBuild);
-
-        // 2. Build or Update TLAS in active command buffer
-        if (m_tlasNeedFullBuild)
+        void Renderer::BuildSceneAccelerationStructure(uint32_t currentFrameIndex)
         {
+            if (!m_hasTLASBuild)
+                return;
+
+            // 1. Pre-build barrier: Host/Transfer instance writes -> AS Build Read
+            m_commandBuffers->accelerationStructureBarrier(NRI::AccelerationStructureBarrierType::TransferToBuild);
+
+            // 2. Always BUILD TLAS fresh every frame (matching Khronos tutorial line 1825).
+            // This ensures deleted, swapped, or moved meshes update immediately with zero ghost geometry!
             m_commandBuffers->buildAccelerationStructure(m_tlasBuildDesc, m_tlasScratchBuffer->getDeviceAddress(), *m_sceneTLAS);
-        }
-        else
-        {
-            m_commandBuffers->updateAccelerationStructure(m_tlasBuildDesc, m_tlasScratchBuffer->getDeviceAddress(), *m_sceneTLAS, *m_sceneTLAS);
-        }
 
-        // 3. Post-build barrier: AS Build Write -> Fragment/Compute Shader Read
-        m_commandBuffers->accelerationStructureBarrier(NRI::AccelerationStructureBarrierType::BuildToShaderRead);
-    }
+            // 3. Post-build barrier: AS Build Write -> Fragment/Compute Shader Read
+            m_commandBuffers->accelerationStructureBarrier(NRI::AccelerationStructureBarrierType::BuildToShaderRead);
+        }
 
     int32_t Renderer::getPickedEntityID()
     {
