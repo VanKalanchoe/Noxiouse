@@ -625,8 +625,20 @@ namespace NRI
     {
         switch (format)
         {
-            case ImageFormat::Surface: return m_deviceVK.getSurfaceFormat().format;
-            case ImageFormat::R32SINT: return vk::Format::eR32Sint;
+        case ImageFormat::Surface: return m_deviceVK.getSurfaceFormat().format;
+        case ImageFormat::RGB8: return vk::Format::eR8G8B8A8Unorm;
+        case ImageFormat::SRGB8: return vk::Format::eR8G8B8A8Srgb;
+        case ImageFormat::RGBA8: return vk::Format::eR8G8B8A8Unorm;
+        case ImageFormat::SRGBA8: return vk::Format::eR8G8B8A8Srgb;
+        case ImageFormat::R16G16: return vk::Format::eR16G16Unorm;
+        case ImageFormat::R32SINT: return vk::Format::eR32Sint;
+        case ImageFormat::R32G32_UINT: return vk::Format::eR32G32Uint;
+        case ImageFormat::R16G16_SFLOAT: return vk::Format::eR16G16Sfloat;
+        case ImageFormat::R16G16B16A16_SFLOAT: return vk::Format::eR16G16B16A16Sfloat;
+        case ImageFormat::R32G32B32A32_SFLOAT: return vk::Format::eR32G32B32A32Sfloat;
+        case ImageFormat::BC7_UNorm: return vk::Format::eBc7UnormBlock;
+        case ImageFormat::BC7_UNorm_SRGB: return vk::Format::eBc7SrgbBlock;
+        default: return vk::Format::eUndefined;
         }
     }
 }

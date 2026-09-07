@@ -914,20 +914,52 @@ namespace Nox
             "7: Shading Normal (World)",
             "8: Direct Lights Only",
             "9: IBL Ambient Only",
-            "10: World Position"
+            "10: World Position",
+            "11: Entity ID",
+            "12: Depth Buffer"
         };
         int currentMode = static_cast<int>(m_Renderer->getDebugMode());
         if (ImGui::Combo("PBR Debug View", &currentMode, debugModeNames, IM_ARRAYSIZE(debugModeNames)))
         {
             m_Renderer->setDebugMode(static_cast<uint32_t>(currentMode));
         }
+        
+        static const char* tonemapModeNames[] = {
+            "0: None (Clamped Linear)",
+            "1: ACES (Narkowicz)",
+            "2: ACES (Hill)",
+            "3: ACES (Hill + Exposure Boost)",
+            "4: Khronos PBR Neutral"
+        };
+        int currentTonemap = static_cast<int>(m_Renderer->getTonemapMode());
+        if (ImGui::Combo("Tonemapping Mode", &currentTonemap, tonemapModeNames, IM_ARRAYSIZE(tonemapModeNames)))
+        {
+            m_Renderer->setTonemapMode(static_cast<uint32_t>(currentTonemap));
+        }
+        
+        float exposure = m_Renderer->getExposure();
+        if (ImGui::SliderFloat("Exposure", &exposure, 0.0f, 5.0f, "%.2f"))
+        {
+            m_Renderer->setExposure(exposure);
+        }
+
+        float gamma = m_Renderer->getGamma();
+        if (ImGui::SliderFloat("Gamma", &gamma, 0.5f, 3.5f, "%.2f"))
+        {
+            m_Renderer->setGamma(gamma);
+        }
+
+        float iblAmbient = m_Renderer->getScaleIBLAmbient();
+        if (ImGui::SliderFloat("IBL Ambient Scale", &iblAmbient, 0.0f, 5.0f, "%.2f"))
+        {
+            m_Renderer->setScaleIBLAmbient(iblAmbient);
+        }
 
         ImGui::Checkbox("Show physics collider", &m_ShowPhysicsColliders);
         ImGui::Image(m_Font->GetAtlasTexture()->getImTextureID(), {512, 512}, ImVec2(0, 1), ImVec2(1, 0));
 
         ImGui::End(); // End Settings
-
-
+        
         UI_ToolBar();
     }
 

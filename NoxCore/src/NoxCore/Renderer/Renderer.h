@@ -163,8 +163,19 @@ namespace Nox
         bool getFrozen() { return m_frozen; }
         void setFrozenDone(bool temp) { m_frozen = temp; }
         
+        // EditorLayer Settings
         void setDebugMode(uint32_t mode) { m_debugMode = mode; }
         uint32_t getDebugMode() const { return m_debugMode; }
+        void setTonemapMode(uint32_t mode) { m_tonemapMode = mode; }
+        uint32_t getTonemapMode() const { return m_tonemapMode; }
+        float getExposure() const { return m_exposure; }
+        void setExposure(float exposure) { m_exposure = exposure; }
+
+        float getGamma() const { return m_gamma; }
+        void setGamma(float gamma) { m_gamma = gamma; }
+
+        float getScaleIBLAmbient() const { return m_scaleIBLAmbient; }
+        void setScaleIBLAmbient(float scale) { m_scaleIBLAmbient = scale; }
         
         Ref<Texture2D> UploadTexture(const TextureData& cpuData);
         Ref<Texture2D> createSolidColorTexture(uint8_t r, uint8_t g, uint8_t b, uint8_t a);
@@ -196,7 +207,7 @@ namespace Nox
         void createSwapChain();
         void createCompiler();
         void watchShader(const std::filesystem::path& path, const std::string& pipelineKey, std::function<void()> reloadFn);
-        void createPBRPipeline(bool forceCompile);
+   
         void createUnlitPipeline(bool forceCompile);
         void createPresentPipeline(bool forceCompile);
         void createComputePipeline();
@@ -204,19 +215,19 @@ namespace Nox
         void createCommandPool();
         
         void createSceneResources();
-        void createColorResources();
         void createEntityResources();
         void createDepthResources();
         
         // Visability
         void createVisibilityResources();
         void createVisibilityPipeline(bool forceCompile);
-        void createVisibilityDebugPipeline(bool forceCompile);
         // G-Buffer
         void createGBufferResources();
         void createGBufferPipeline(bool forceCompile = false);
         // PBR
         void createDeferredLightingPipeline(bool forceCompile = false);
+        // Post Process
+        void createPostProcessPipeline(bool forceCompile = false);
         
         void createTextureImage();
         void initGeometryBuffers();
@@ -255,18 +266,18 @@ namespace Nox
         std::mutex m_reloadMutex;
         std::unordered_map<std::string, std::function<void()>> m_pendingReloads;
         std::unique_ptr<NRI::ShaderCompiler> m_shaderCompiler = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_graphics_PBR_Pipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_unlitPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_presentPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_computePipeline = nullptr;
         
         // Visability
         std::unique_ptr<NRI::Pipeline> m_visibilityPipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_visibilityDebugPipeline = nullptr;
         // G-Buffer
         std::unique_ptr<NRI::Pipeline> m_gbufferPipeline = nullptr;
         // PBR
         std::unique_ptr<NRI::Pipeline> m_deferredLightingPipeline = nullptr;
+        // Post Process
+        std::unique_ptr<NRI::Pipeline> m_postProcessPipeline = nullptr;
         
         std::unique_ptr<NRI::CommandAllocator> m_commandAllocator = nullptr;
         std::unique_ptr<NRI::CommandBuffer> m_commandBuffers = nullptr;
@@ -283,7 +294,12 @@ namespace Nox
         bool m_frozen = false;
         bool m_frozenDone = false;
         
+        // EditorLayer Settings
         uint32_t m_debugMode = 0;
+        uint32_t m_tonemapMode = 4; // Default: KhronosPbrNeutral
+        float m_exposure = 1.0f;
+        float m_gamma = 2.2f;
+        float m_scaleIBLAmbient = 1.0f;
         
         // Visability
         Ref<Texture2D> m_visibilityResource;
@@ -293,10 +309,12 @@ namespace Nox
         Ref<Texture2D> m_gbufferNormal;    // R16G16B16A16_SFLOAT: RGB = World Normal
         Ref<Texture2D> m_gbufferMaterial;  // RGBA8_UNORM: R = Roughness, G = Metallic, B = Workflow
         Ref<Texture2D> m_gbufferEmission;  // R16G16B16A16_SFLOAT: RGB = Emissive
+        
+        // Post Process
+        Ref<Texture2D> m_hdrSceneResource;
 
         Ref<Texture2D> m_whiteTexture;
         Ref<Texture2D> m_sceneResource;
-        Ref<Texture2D> m_colorResource;
         
         // Entiity ID + readback
         Ref<Texture2D> m_entityResource;

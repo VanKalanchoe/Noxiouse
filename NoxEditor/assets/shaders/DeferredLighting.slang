@@ -141,6 +141,17 @@
         return diffuse + specular;
     }
 
+    // Generates a distinct, saturated pseudo-random color for each unique entity ID
+    float3 idToColor(int id)
+    {
+        if (id < 0) return float3(0.05, 0.05, 0.05); // Background / unassigned
+        // Golden ratio hue distribution guarantees adjacent IDs have radically different hues
+        float hue = frac(float(id) * 0.618033988749895);
+        // Convert HSV (Hue, Saturation = 0.85, Value = 0.95) to RGB
+        float3 rgb = saturate(abs(fmod(hue * 6.0 + float3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0);
+        return rgb * 0.85 + 0.1;
+    }
+
     [shader("fragment")]
     float4 fragMain(
         MSOutput input,
@@ -150,21 +161,46 @@
         UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
         int2 pixelCoord = int2(input.pos.xy);
 
-        // 1. Check Visibility Buffer to distinguish background from geometry
-        Texture2D<uint4> visTex = Texture2D<uint4>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.visibilityTextureIndex, 0));
-        uint4 rawVis = visTex.Load(int3(pixelCoord, 0));
-        uint2 visData = rawVis.xy;
-
-       if (visData.x == 0)
-        {
-            // When inspecting material debug modes (Albedo, Normals, Roughness), show neutral dark gray
-            if (pushConstant.debugMode != 0)
+        // =========================================================================
+            // Mode 12: Whole-Screen Depth Buffer (Hi-Z / Shadow Map View)
+            // =========================================================================
+            if (pushConstant.debugMode == 12)
             {
-                return float4(0.12, 0.12, 0.18, 1.0);
+                Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.
+  depthTextureIndex, 0));
+                float rawDepth = depthTex.Load(int3(pixelCoord, 0)).r;
+
+                // In Reverse-Z, 0.0 is the far plane / background -> pure white (1.0)
+                if (rawDepth <= 0.0)
+                {
+                    return float4(1.0, 1.0, 1.0, 1.0);
+                }
+
+                // For geometry: reconstruct world position to get exact linear camera distance
+                float2 uv = (float2(pixelCoord) + 0.5) / pushConstant.viewportSize;
+                float2 ndc_xy = float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+                float4 ndc = float4(ndc_xy, rawDepth, 1.0);
+                float4 worldPosH = mul(pushConstant.invViewProj, ndc);
+                float3 worldPos = worldPosH.xyz / worldPosH.w;
+
+                float linearDist = length(worldPos - ubo->cameraWorldPos.xyz);
+
+                // Near = Black/Dark Gray, Far = White (1.0), seamlessly merging into white background
+                float visualDepth = saturate(linearDist / 25.0);
+                return float4(visualDepth, visualDepth, visualDepth, 1.0);
             }
-            // In full PBR lit mode (0), discard so the Skybox pass can render into the background!
-            discard;
-        }
+
+            // 1. Check Visibility Buffer to distinguish background from geometry
+            Texture2D<uint4> visTex = Texture2D<uint4>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.
+  visibilityTextureIndex, 0));
+            uint4 rawVis = visTex.Load(int3(pixelCoord, 0));
+            uint2 visData = rawVis.xy;
+
+            if (visData.x == 0)
+            {
+                // Discard background pixels for all other modes so they keep the colorAttachments clearColor!
+                discard;
+            }
 
         // 2. Fetch G-Buffer Render Targets
         Texture2D albedoTex   = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.gbufferAlbedoIndex, 0));
@@ -372,24 +408,16 @@
             return float4(n * 0.5 + 0.5, 1.0);
         }
 
-        // Mode 8: Direct Analytical Lights Only
+        // Mode 8: Direct Analytical Lights Only (HDR)
         if (pushConstant.debugMode == 8)
         {
-            TonemapParameters tonemapParams;
-            tonemapParams.exposure = ubo->exposure;
-            tonemapParams.gamma = ubo->gamma;
-            tonemapParams.mode = (int)TonemapMode::KhronosPbrNeutral;
-            return float4(toneMap(directLighting, tonemapParams), 1.0);
+            return float4(directLighting, 1.0);
         }
 
-        // Mode 9: IBL (Ambient) Only
+        // Mode 9: IBL (Ambient) Only (HDR)
         if (pushConstant.debugMode == 9)
         {
-            TonemapParameters tonemapParams;
-            tonemapParams.exposure = ubo->exposure;
-            tonemapParams.gamma = ubo->gamma;
-            tonemapParams.mode = (int)TonemapMode::KhronosPbrNeutral;
-            return float4(toneMap(iblColor, tonemapParams), 1.0);
+            return float4(iblColor, 1.0);
         }
 
         // Mode 10: Reconstructed World Position
@@ -398,18 +426,20 @@
             return float4(frac(worldPos), 1.0);
         }
 
+        // Mode 11: Entity ID
+        if (pushConstant.debugMode == 11)
+        {
+            Texture2D<int4> entityTex = Texture2D<int4>.Handle(uint2(ubo->imageHeapIndexOffset + ubo->entityTextureIndex, 0));
+            int entityID = entityTex.Load(int3(pixelCoord, 0)).r;
+            return float4(idToColor(entityID), 1.0);
+        }
+
         // =========================================================================
         // Mode 0: FULL PBR LIT SCENE (Direct + IBL + AO + Emission + Tonemap)
         // =========================================================================
         float3 finalColor = directLighting + iblColor;
         finalColor = lerp(finalColor, finalColor * occlusion, 1.0);
         finalColor += emissionSample.rgb;
-
-        TonemapParameters tonemapParams;
-        tonemapParams.exposure = ubo->exposure;
-        tonemapParams.gamma = ubo->gamma;
-        tonemapParams.mode = (int)TonemapMode::KhronosPbrNeutral;
-        finalColor = toneMap(finalColor, tonemapParams);
 
         return float4(finalColor, 1.0);
     }

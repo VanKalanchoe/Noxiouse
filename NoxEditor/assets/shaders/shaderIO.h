@@ -103,6 +103,7 @@ struct UniformBufferObject
 {
     mat4 view;
     mat4 proj;
+    mat4 invViewProj;
 
     mat4 frozenView;
     mat4 frozenProj;
@@ -294,7 +295,17 @@ struct PushConstantDeferredLighting
     uint32_t depthTextureIndex;
     uint32_t visibilityTextureIndex;
     vec2 viewportSize;
-    uint32_t debugMode; // 0 = Full PBR, 1 = Direct Lights, 2 = IBL, 3 = World Pos, 4 = Albedo, 5 = Normal, 6 = Roughness, 7 = Metallic, 8 = Occlusion, 9 = Emission
+    uint32_t debugMode;
+    // 0 = Full PBR, 1 = Direct Lights, 2 = IBL, 3 = World Pos, 4 = Albedo, 5 = Normal, 6 = Roughness, 
+    // 7 = Metallic, 8 = Occlusion, 9 = Emission, 10 = World Pos, 11 = Entity ID, 12 = Depth Buffer
+};
+
+struct PushConstantPostProcess
+{
+    uint64_t matrixReference;
+    uint32_t hdrTextureIndex;
+    uint32_t debugMode;
+    uint32_t tonemapMode; // 0 = None, 1 = ACES Narkowicz, 2 = ACES Hill, 3 = ACES Hill Exp, 4 = Khronos PBR Neutral
 };
 
 struct PushConstantOutline
