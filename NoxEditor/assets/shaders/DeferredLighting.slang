@@ -350,6 +350,17 @@
                 return float4(visualDepth, visualDepth, visualDepth, 1.0);
             }
 
+            // Mode 15: Motion Vectors (Velocity Buffer)
+                if (pushConstant.debugMode == 15)
+                {
+                    Texture2D velocityTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.gbufferVelocityIndex, 0));
+                    float2 vel = velocityTex.Load(int3(pixelCoord, 0)).rg;
+                    // Amplify 100x so motion is vividly visible in the viewport
+                    // Red = horizontal motion, Green = vertical motion
+                    float3 visualVel = float3(abs(vel.x) * 100.0, abs(vel.y) * 100.0, 0.0);
+                    return float4(visualVel, 1.0);
+                }
+
             // 1. Check Visibility Buffer and Depth to distinguish background from geometry
                 Texture2D<uint4> visTex = Texture2D<uint4>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.visibilityTextureIndex, 0));
                 uint4 rawVis = visTex.Load(int3(pixelCoord, 0));

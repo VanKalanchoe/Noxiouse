@@ -192,6 +192,10 @@ namespace Nox
         void setRayTracingReflections(bool enabled) { m_rayTracingReflections = enabled; }
         bool getRayTracingReflections() const { return m_rayTracingReflections; }
         
+        void setCameraJitterEnabled(bool enabled) { m_cameraJitterEnabled = enabled; }
+        bool getCameraJitterEnabled() const { return m_cameraJitterEnabled; }
+        glm::vec2 getCurrentJitter() const { return m_currentJitter; }
+        
         Ref<Texture2D> UploadTexture(const TextureData& cpuData);
         Ref<Texture2D> createSolidColorTexture(uint8_t r, uint8_t g, uint8_t b, uint8_t a);
         void initPBR();
@@ -324,6 +328,7 @@ namespace Nox
         Ref<Texture2D> m_gbufferNormal;    // R16G16B16A16_SFLOAT: RGB = World Normal
         Ref<Texture2D> m_gbufferMaterial;  // RGBA8_UNORM: R = Roughness, G = Metallic, B = Workflow
         Ref<Texture2D> m_gbufferEmission;  // R16G16B16A16_SFLOAT: RGB = Emissive
+        Ref<Texture2D> m_gbufferVelocity;  // R16G16_SFLOAT: Screen-space motion vectors
         
         // Post Process
         Ref<Texture2D> m_hdrSceneResource;
@@ -434,5 +439,18 @@ namespace Nox
         std::vector<std::unique_ptr<NRI::Buffer>> m_lightBuffers;
         std::vector<void*> m_lightBuffersMapped;
         uint64_t m_LightBufferCapacity = 0;
+        
+        // Temporal & Motion Vector State
+        glm::mat4 m_prevView = glm::mat4(1.0f);
+        glm::mat4 m_prevNonJitteredProj = glm::mat4(1.0f);
+        glm::mat4 m_currentNonJitteredProj = glm::mat4(1.0f);
+        glm::mat4 m_currentView = glm::mat4(1.0f);
+        uint64_t m_sceneFrameCounter = 0;
+        uint64_t m_lastSceneFrameCounter = UINT64_MAX;
+        bool m_isFirstFrame = true;
+
+        bool m_cameraJitterEnabled = false;
+        uint32_t m_jitterPhase = 0;
+        glm::vec2 m_currentJitter = glm::vec2(0.0f);
     };
 }

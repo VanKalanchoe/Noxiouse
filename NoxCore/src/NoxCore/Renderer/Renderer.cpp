@@ -513,6 +513,17 @@ namespace Nox
             .directFormat = UINT32_MAX
         });
         m_resourceHeap->registerTexture(*m_gbufferEmission);
+        
+        m_gbufferVelocity = m_device->createTexture(NRI::TextureDesc{
+               .width = width,
+               .height = height,
+               .mipLevels = 1,
+               .sampleCount = 1,
+               .usage = NRI::TextureUsage::ColorAttachment,
+               .format = NRI::ImageFormat::R16G16_SFLOAT,
+               .directFormat = UINT32_MAX
+           });
+        m_resourceHeap->registerTexture(*m_gbufferVelocity);
 
         uniformData.imageHeapIndexOffset = m_resourceHeap->getImageHeapIndexOffset();
     }
@@ -526,7 +537,8 @@ namespace Nox
             NRI::ImageFormat::R16G16B16A16_SFLOAT,
             NRI::ImageFormat::RGBA8,
             NRI::ImageFormat::R16G16B16A16_SFLOAT,
-            NRI::ImageFormat::R32SINT
+            NRI::ImageFormat::R32SINT,
+            NRI::ImageFormat::R16G16_SFLOAT
         };
 
         desc.shaders.push_back({
@@ -1759,6 +1771,13 @@ namespace Nox
                 .storeOP = NRI::StoreOP::store,
                 .clearColor = {-1.0f, 0.0f, 0.0f, 0.0f}
             });
+            // 5. Velocity (R16G16_SFLOAT)
+            gbufferAttachments.push_back({
+                .attachment = m_gbufferVelocity.get(),
+                .loadOP = NRI::LoadOP::clear,
+                .storeOP = NRI::StoreOP::store,
+                .clearColor = {0.0f, 0.0f, 0.0f, 0.0f}
+            });
 
             NRI::RenderDesc gbufferDesc = {
                 .renderArea = locViewportSize,
@@ -1775,7 +1794,7 @@ namespace Nox
             m_commandBuffers->setDepthTestEnable(false);
             m_commandBuffers->setDepthWriteEnable(false);
 
-            for (uint32_t a = 0; a < 5; ++a)
+            for (uint32_t a = 0; a < 6; ++a)
             {
                 m_commandBuffers->setColorBlendEnable(a, false);
                 m_commandBuffers->setColorWriteMask(a, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
@@ -1851,6 +1870,7 @@ namespace Nox
             lightingPush.depthTextureIndex = m_depthResource->GetDescriptorIndexSlot();
             lightingPush.viewportSize = glm::vec2(w, h);
             lightingPush.debugMode = m_debugMode;
+            lightingPush.gbufferVelocityIndex = m_gbufferVelocity->GetDescriptorIndexSlot();
             m_commandBuffers->pushData(&lightingPush, sizeof(shaderio::PushConstantDeferredLighting));
 
             m_commandBuffers->drawMeshTasks(1, 1, 1);
@@ -2301,6 +2321,8 @@ namespace Nox
                              static_cast<float>(m_isEditor ? m_viewportSize.width : m_swapChainExtent.width) / static_cast<float>(m_isEditor ? m_viewportSize.height : m_swapChainExtent.height), 0.1f,
                              100.0f);
         uniformData.proj[1][1] *= -1;*/
+        
+        uniformData.jitterOffset = m_currentJitter;
         uniformData.samplerIndex = selectedSampler;
         uniformData.imageHeapIndexOffset = m_resourceHeap->getImageHeapIndexOffset();
 
@@ -2314,7 +2336,7 @@ namespace Nox
         uniformData.exposure = m_exposure; // slider in the future in imgui
         uniformData.gamma = m_gamma; // slider in the future in imgui
         uniformData.scaleIBLAmbient = m_scaleIBLAmbient; // slider in the future in imgui
-
+        
         memcpy(m_uniformBuffersMapped[currentImage], &uniformData, sizeof(uniformData));
     }
 
@@ -2522,6 +2544,7 @@ namespace Nox
         m_renderer2D->EndFrame();
 
         frameIndex = (frameIndex + 1) % MAX_FRAMES_IN_FLIGHT;
+        m_sceneFrameCounter++;
 
         m_instanceBufferObjects.clear();
         m_drawMeshTasksIndirectCommands.clear();
@@ -2806,15 +2829,72 @@ namespace Nox
     {
         m_device->endImGui();
     }
+    
+    // 8-Phase Halton(2, 3) sequence for subpixel jitter
+    static constexpr glm::vec2 s_Halton8[8] = {
+        { 0.5000f, 0.3333f },
+        { 0.2500f, 0.6667f },
+        { 0.7500f, 0.1111f },
+        { 0.1250f, 0.4444f },
+        { 0.6250f, 0.7778f },
+        { 0.3750f, 0.2222f },
+        { 0.8750f, 0.5556f },
+        { 0.0625f, 0.8889f }
+    };
 
     void Renderer::BeginScene(const Camera& camera, const glm::mat4& transform)
     {
-        uniformData.proj = camera.GetProjection();
-        uniformData.view = glm::scale(glm::mat4(1.0f), glm::vec3(1.0f, 1.0f, -1.0f)) * glm::inverse(transform);
+        // Only advance temporal state once per frame (ignores secondary calls like OnOverlayRender)
+        if (m_lastSceneFrameCounter != m_sceneFrameCounter)
+        {
+            m_lastSceneFrameCounter = m_sceneFrameCounter;
+
+            if (m_isFirstFrame)
+            {
+                m_prevView = glm::scale(glm::mat4(1.0f), glm::vec3(1.0f, 1.0f, -1.0f)) * glm::inverse(transform);
+                m_prevNonJitteredProj = camera.GetProjection();
+                m_isFirstFrame = false;
+            }
+            else
+            {
+                m_prevView = m_currentView;
+                m_prevNonJitteredProj = m_currentNonJitteredProj;
+            }
+
+            m_currentView = glm::scale(glm::mat4(1.0f), glm::vec3(1.0f, 1.0f, -1.0f)) * glm::inverse(transform);
+            m_currentNonJitteredProj = camera.GetProjection();
+
+            if (m_cameraJitterEnabled && m_viewportSize.width > 0 && m_viewportSize.height > 0)
+            {
+                m_jitterPhase = (m_jitterPhase + 1) % 8;
+                glm::vec2 halton = s_Halton8[m_jitterPhase];
+                m_currentJitter = halton - 0.5f;
+            }
+            else
+            {
+                m_currentJitter = glm::vec2(0.0f);
+            }
+        }
+
+        // Apply subpixel jitter to the rasterization projection matrix
+        glm::mat4 rasterProj = m_currentNonJitteredProj;
+        if (m_cameraJitterEnabled && m_viewportSize.width > 0 && m_viewportSize.height > 0)
+        {
+            float deltaNdcX = (2.0f * m_currentJitter.x) / static_cast<float>(m_viewportSize.width);
+            float deltaNdcY = (2.0f * m_currentJitter.y) / static_cast<float>(m_viewportSize.height);
+            rasterProj[2][0] += deltaNdcX;
+            rasterProj[2][1] += deltaNdcY;
+        }
+        
+        uniformData.proj = rasterProj;
+        uniformData.view = m_currentView;
+        uniformData.nonJitteredProj = m_currentNonJitteredProj;
+        uniformData.prevProj = m_prevNonJitteredProj;
+        uniformData.prevView = m_prevView;
         uniformData.invViewProj = glm::inverse(uniformData.proj * uniformData.view);
         /*uniformData.cameraWorldPos = { camera.GetPosition(), 0.0f };*/
         uniformData.frustum = shaderio::Frustum{uniformData.proj * uniformData.view};
-
+        
         if (m_frozen)
         {
             if (!m_frozenDone)
@@ -2838,38 +2918,84 @@ namespace Nox
 
         m_renderer2D->BeginScene(camera, transform);
     }
-
+    
     void Renderer::BeginScene(const EditorCamera& camera)
-    {
-        uniformData.proj = camera.GetProjection();
-        uniformData.view = camera.GetViewMatrix();
-        uniformData.invViewProj = glm::inverse(uniformData.proj * uniformData.view);
-        uniformData.cameraWorldPos = {camera.GetPosition(), 0.0f};
-        uniformData.frustum = shaderio::Frustum{uniformData.proj * uniformData.view};
-
-        if (m_frozen)
         {
-            if (!m_frozenDone)
+            // Only advance temporal state once per frame (ignores secondary calls like OnOverlayRender)
+            if (m_lastSceneFrameCounter != m_sceneFrameCounter)
             {
-                frozenUniformData = uniformData;
-                m_frozenDone = true;
+                m_lastSceneFrameCounter = m_sceneFrameCounter;
+
+                if (m_isFirstFrame)
+                {
+                    m_prevView = camera.GetViewMatrix();
+                    m_prevNonJitteredProj = camera.GetProjection();
+                    m_isFirstFrame = false;
+                }
+                else
+                {
+                    m_prevView = m_currentView;
+                    m_prevNonJitteredProj = m_currentNonJitteredProj;
+                }
+
+                m_currentView = camera.GetViewMatrix();
+                m_currentNonJitteredProj = camera.GetProjection();
+
+                if (m_cameraJitterEnabled && m_viewportSize.width > 0 && m_viewportSize.height > 0)
+                {
+                    m_jitterPhase = (m_jitterPhase + 1) % 8;
+                    glm::vec2 halton = s_Halton8[m_jitterPhase];
+                    m_currentJitter = halton - 0.5f;
+                }
+                else
+                {
+                    m_currentJitter = glm::vec2(0.0f);
+                }
             }
 
-            uniformData.frozenProj = frozenUniformData.proj;
-            uniformData.frozenView = frozenUniformData.view;
-            uniformData.frozenCameraWorldPos = frozenUniformData.cameraWorldPos;
-            uniformData.frozenFrustum = frozenUniformData.frustum;
-        }
-        else
-        {
-            uniformData.frozenProj = uniformData.proj;
-            uniformData.frozenView = uniformData.view;
-            uniformData.frozenCameraWorldPos = uniformData.cameraWorldPos;
-            uniformData.frozenFrustum = uniformData.frustum;
-        }
+            // Apply subpixel jitter to the rasterization projection matrix
+            glm::mat4 rasterProj = m_currentNonJitteredProj;
+            if (m_cameraJitterEnabled && m_viewportSize.width > 0 && m_viewportSize.height > 0)
+            {
+                float deltaNdcX = (2.0f * m_currentJitter.x) / static_cast<float>(m_viewportSize.width);
+                float deltaNdcY = (2.0f * m_currentJitter.y) / static_cast<float>(m_viewportSize.height);
+                rasterProj[2][0] += deltaNdcX;
+                rasterProj[2][1] += deltaNdcY;
+            }
 
-        m_renderer2D->BeginScene(camera);
-    }
+            uniformData.proj = rasterProj;
+            uniformData.view = m_currentView;
+            uniformData.nonJitteredProj = m_currentNonJitteredProj;
+            uniformData.prevProj = m_prevNonJitteredProj;
+            uniformData.prevView = m_prevView;
+
+            uniformData.invViewProj = glm::inverse(uniformData.proj * uniformData.view);
+            uniformData.cameraWorldPos = {camera.GetPosition(), 0.0f};
+            uniformData.frustum = shaderio::Frustum{uniformData.proj * uniformData.view};
+
+            if (m_frozen)
+            {
+                if (!m_frozenDone)
+                {
+                    frozenUniformData = uniformData;
+                    m_frozenDone = true;
+                }
+
+                uniformData.frozenProj = frozenUniformData.proj;
+                uniformData.frozenView = frozenUniformData.view;
+                uniformData.frozenCameraWorldPos = frozenUniformData.cameraWorldPos;
+                uniformData.frozenFrustum = frozenUniformData.frustum;
+            }
+            else
+            {
+                uniformData.frozenProj = uniformData.proj;
+                uniformData.frozenView = uniformData.view;
+                uniformData.frozenCameraWorldPos = uniformData.cameraWorldPos;
+                uniformData.frozenFrustum = uniformData.frustum;
+            }
+
+            m_renderer2D->BeginScene(camera);
+        }
 
     void Renderer::EndScene()
     {

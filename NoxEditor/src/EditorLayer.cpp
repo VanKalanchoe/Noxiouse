@@ -918,7 +918,8 @@ namespace Nox
             "11: Entity ID",
             "12: Depth Buffer",
             "13: RT Shadow Mask",
-            "14: RT Reflections"
+            "14: RT Reflections",
+            "15: Motion Vectors (Velocity Buffer)"
         };
         int currentMode = static_cast<int>(m_Renderer->getDebugMode());
         if (ImGui::Combo("PBR Debug View", &currentMode, debugModeNames, IM_ARRAYSIZE(debugModeNames)))
@@ -955,6 +956,17 @@ namespace Nox
         if (ImGui::SliderFloat("IBL Ambient Scale", &iblAmbient, 0.0f, 5.0f, "%.2f"))
         {
             m_Renderer->setScaleIBLAmbient(iblAmbient);
+        }
+        
+        bool jitter = m_Renderer->getCameraJitterEnabled();
+        if (ImGui::Checkbox("Camera Subpixel Jitter (Halton 2,3)", &jitter))
+        {
+            m_Renderer->setCameraJitterEnabled(jitter);
+        }
+        if (jitter)
+        {
+            glm::vec2 j = m_Renderer->getCurrentJitter(); // or expose m_currentJitter
+            ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Jitter Offset: (%.3f, %.3f) px", j.x, j.y);
         }
 
         ImGui::Separator();

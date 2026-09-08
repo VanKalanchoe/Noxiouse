@@ -111,8 +111,14 @@ struct InstanceLUT
 struct UniformBufferObject 
 {
     mat4 view;
-    mat4 proj;
+    mat4 proj; // Jittered projection (for rasterization)
     mat4 invViewProj;
+
+    // --- Previous Frame Separate Matrices ---
+    mat4 prevView;
+    mat4 nonJitteredProj; // Clean projection (for motion vectors)
+    mat4 prevProj;        // Clean previous projection (for motion vectors)
+    // ----------------------------------------
 
     mat4 frozenView;
     mat4 frozenProj;
@@ -122,6 +128,11 @@ struct UniformBufferObject
 
     Frustum frustum;
     Frustum frozenFrustum;
+
+    // --- Temporal & Motion Vector Matrices ---
+    vec2 jitterOffset;     // Subpixel jitter in pixels
+    vec2 prevJitterOffset; // Previous frame jitter in pixels
+    //
 
     uint samplerIndex;
     uint imageHeapIndexOffset;
@@ -315,6 +326,7 @@ struct PushConstantDeferredLighting
     uint32_t debugMode;
     // 0 = Full PBR, 1 = Direct Lights, 2 = IBL, 3 = World Pos, 4 = Albedo, 5 = Normal, 6 = Roughness, 
     // 7 = Metallic, 8 = Occlusion, 9 = Emission, 10 = World Pos, 11 = Entity ID, 12 = Depth Buffer
+    uint32_t gbufferVelocityIndex;
 };
 
 struct PushConstantPostProcess

@@ -62,6 +62,7 @@
         float4 material : SV_Target2; // R: Roughness, G: Metallic, B: Workflow, A: 1.0
         float4 emission : SV_Target3; // RGB: Emissive, A: 1.0
         int    entityID : SV_Target4; // Editor Entity Picking ID
+        float2 velocity : SV_Target5; // Screen-Space Motion Vectors (RG16F)
     };
 
     float4 computeBarycentric3D(float3 rayOrigin, float3 rayDir, float3 v0, float3 e1, float3 e2, float3 triNorm, float d00, float d01, float d11, float invDenom)
@@ -101,6 +102,7 @@
             output.material = float4(0.0, 0.0, 0.0, 0.0);
             output.emission = float4(0.0, 0.0, 0.0, 0.0);
             output.entityID = -1;
+            output.velocity = float2(0.0, 0.0);
             return output;
         }
 
@@ -376,6 +378,17 @@
 
         output.emission = float4(emission, 1.0);
         output.entityID = instance.entityID;
+
+        // --- Screen-Space Motion Vector (Jitter-Free) ---
+        float4 currClip = mul(ubo->nonJitteredProj, mul(ubo->view, float4(worldPos, 1.0)));
+        float4 prevClip = mul(ubo->prevProj, mul(ubo->prevView, float4(worldPos, 1.0)));
+
+        float2 currNDC = currClip.xy / currClip.w;
+        float2 prevNDC = prevClip.xy / prevClip.w;
+
+        // NVIDIA Streamline / DLSS standard: delta in UV space [0, 1]
+        float2 velocity = (currNDC - prevNDC) * float2(0.5, -0.5);
+        output.velocity = velocity;
 
         return output;
     }
