@@ -423,10 +423,11 @@ namespace Nox
             uniformData.finalImageIndex = m_sceneResource->GetDescriptorIndexSlot();
         }
 
-        // HDR scene target for 3D deferred lighting, skybox, and unlit passes
+        // HDR scene target for 3D deferred lighting, skybox, and unlit passes - render resolution,
+        // this is what DLSS reads as its color input.
         m_hdrSceneResource = m_device->createTexture(NRI::TextureDesc{
-            .width = m_isEditor ? m_viewportSize.width : m_swapChainExtent.width,
-            .height = m_isEditor ? m_viewportSize.height : m_swapChainExtent.height,
+            .width = m_renderSize.width,
+            .height = m_renderSize.height,
             .mipLevels = 1,
             .sampleCount = 1,
             .usage = NRI::TextureUsage::ColorAttachment,
@@ -434,7 +435,7 @@ namespace Nox
             .directFormat = UINT32_MAX
         });
         m_resourceHeap->registerTexture(*m_hdrSceneResource);
-        
+
         // DLSS Super Resolution output target (HDR unresolved before tonemapping)
         m_dlssOutputResource = m_device->createTexture(NRI::TextureDesc{
             .width = m_isEditor ? m_viewportSize.width : m_swapChainExtent.width,
@@ -450,40 +451,74 @@ namespace Nox
 
     void Renderer::createEntityResources()
     {
+        const uint32_t outputWidth = m_isEditor ? m_viewportSize.width : m_swapChainExtent.width;
+        const uint32_t outputHeight = m_isEditor ? m_viewportSize.height : m_swapChainExtent.height;
+
+        // Render-resolution entity IDs, written directly by the G-buffer/unlit/skybox 3D passes.
         m_entityResource = m_device->createTexture(NRI::TextureDesc{
-            .width = m_isEditor ? m_viewportSize.width : m_swapChainExtent.width,
-            .height = m_isEditor ? m_viewportSize.height : m_swapChainExtent.height,
+            .width = m_renderSize.width,
+            .height = m_renderSize.height,
             .mipLevels = 1,
             .sampleCount = 1,
             .usage = NRI::TextureUsage::ColorAttachment,
             .format = NRI::ImageFormat::R32SINT,
             .directFormat = UINT32_MAX
         });
-
-        // Register so shaders / outline post-process can read entity IDs directly
         m_resourceHeap->registerTexture(*m_entityResource);
+
+        // Display-resolution copy (nearest-upsampled from m_entityResource each frame - see the blit
+        // right after DLSS evaluate in RecordCommandBuffer) - what the 2D overlay pass, outline effect,
+        // and mouse-pick readback all use so they line up with the final on-screen image.
+        m_entityResourceHi = m_device->createTexture(NRI::TextureDesc{
+            .width = outputWidth,
+            .height = outputHeight,
+            .mipLevels = 1,
+            .sampleCount = 1,
+            .usage = NRI::TextureUsage::ColorAttachment,
+            .format = NRI::ImageFormat::R32SINT,
+            .directFormat = UINT32_MAX
+        });
+        m_resourceHeap->registerTexture(*m_entityResourceHi);
+
         uniformData.imageHeapIndexOffset = m_resourceHeap->getImageHeapIndexOffset();
-        uniformData.entityTextureIndex = m_entityResource->GetDescriptorIndexSlot();
+        uniformData.entityTextureIndex = m_entityResourceHi->GetDescriptorIndexSlot();
+        uniformData.entityGBufferTextureIndex = m_entityResource->GetDescriptorIndexSlot();
     }
 
     void Renderer::createDepthResources()
     {
-        //changed from m_swapChainExtent to m_viewportSize
+        const uint32_t outputWidth = m_isEditor ? m_viewportSize.width : m_swapChainExtent.width;
+        const uint32_t outputHeight = m_isEditor ? m_viewportSize.height : m_swapChainExtent.height;
+
+        // Render-resolution depth, written by the visibility/G-buffer/unlit/skybox 3D passes and
+        // tagged directly to DLSS.
         m_depthResource = m_device->createTexture(NRI::TextureDesc{
-            .width = m_isEditor ? m_viewportSize.width : m_swapChainExtent.width,
-            .height = m_isEditor ? m_viewportSize.height : m_swapChainExtent.height,
+            .width = m_renderSize.width,
+            .height = m_renderSize.height,
             .mipLevels = 1,
             .sampleCount = 1,
             .usage = NRI::TextureUsage::DepthStencilAttachment
         });
         m_resourceHeap->registerTexture(*m_depthResource);
+
+        // Display-resolution copy (nearest-upsampled each frame) used only by the 2D overlay pass so
+        // world-space 2D/text content (e.g. in-world signs) still depth-tests correctly against 3D
+        // geometry at full display resolution even while DLSS is rendering the 3D scene smaller.
+        m_depthResourceHi = m_device->createTexture(NRI::TextureDesc{
+            .width = outputWidth,
+            .height = outputHeight,
+            .mipLevels = 1,
+            .sampleCount = 1,
+            .usage = NRI::TextureUsage::DepthStencilAttachment
+        });
+        m_resourceHeap->registerTexture(*m_depthResourceHi);
     }
 
     void Renderer::createVisibilityResources()
     {
         m_visibilityResource = m_device->createTexture(NRI::TextureDesc{
-            .width = m_isEditor ? m_viewportSize.width : m_swapChainExtent.width,
-            .height = m_isEditor ? m_viewportSize.height : m_swapChainExtent.height,
+            .width = m_renderSize.width,
+            .height = m_renderSize.height,
             .mipLevels = 1,
             .sampleCount = 1,
             .usage = NRI::TextureUsage::ColorAttachment,
@@ -523,8 +558,8 @@ namespace Nox
 
     void Renderer::createGBufferResources()
     {
-        const uint32_t width = m_isEditor ? m_viewportSize.width : m_swapChainExtent.width;
-        const uint32_t height = m_isEditor ? m_viewportSize.height : m_swapChainExtent.height;
+        const uint32_t width = m_renderSize.width;
+        const uint32_t height = m_renderSize.height;
 
         m_gbufferAlbedo = m_device->createTexture(NRI::TextureDesc{
             .width = width,
@@ -1696,20 +1731,25 @@ namespace Nox
             .clearDepth = {0.0f, 0} // Reverse-Z
         };
 
+        // renderExtent/rw/rh: render resolution - what DLSS actually upscales from. Used by every
+        // pass through section 4 (visibility, G-buffer, lighting, unlit/skybox forward) plus the DLSS
+        // evaluate itself. outputExtent/ow/oh (computed further down, before section 5) is the final
+        // display/swapchain resolution used by everything after DLSS.
+        NRI::Extent2D renderExtent = m_renderSize;
+        float rw = static_cast<float>(renderExtent.width);
+        float rh = static_cast<float>(renderExtent.height);
+
         NRI::RenderDesc desc =
         {
-            .renderArea = m_isEditor ? NRI::Extent2D{m_viewportSize.width, m_viewportSize.height} : NRI::Extent2D{m_swapChainExtent.width, m_swapChainExtent.height},
+            .renderArea = renderExtent,
             .colorAttachments = colorAttachments,
             .depthAttachment = depthAttachment
         };
         m_commandBuffers->beginRendering(desc);
 
         // Viewport / scissor (counts and values are both dynamic).
-        NRI::Extent2D locViewportSize = m_isEditor ? m_viewportSize : m_swapChainExtent;
-        float w = static_cast<float>(locViewportSize.width);
-        float h = static_cast<float>(locViewportSize.height);
-        m_commandBuffers->setViewportWithCount({0.0f, h, w, -h}, 0.0f, 1.0f);
-        m_commandBuffers->setScissorWithCount(locViewportSize);
+        m_commandBuffers->setViewportWithCount({0.0f, rh, rw, -rh}, 0.0f, 1.0f);
+        m_commandBuffers->setScissorWithCount(renderExtent);
 
         /*
         // Vertex input empty since we use vertex fetch BDA but still needs to be called empty
@@ -1836,14 +1876,14 @@ namespace Nox
             });
 
             NRI::RenderDesc gbufferDesc = {
-                .renderArea = locViewportSize,
+                .renderArea = renderExtent,
                 .colorAttachments = gbufferAttachments
             };
 
             m_commandBuffers->beginRendering(gbufferDesc);
 
-            m_commandBuffers->setViewportWithCount({0.0f, h, w, -h}, 0.0f, 1.0f);
-            m_commandBuffers->setScissorWithCount(locViewportSize);
+            m_commandBuffers->setViewportWithCount({0.0f, rh, rw, -rh}, 0.0f, 1.0f);
+            m_commandBuffers->setScissorWithCount(renderExtent);
 
             m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_gbufferPipeline);
             m_commandBuffers->setCullMode(NRI::CullMode::None);
@@ -1876,7 +1916,7 @@ namespace Nox
                                                                  ? m_meshletTriPageTableBuffers[frameIndex]->getDeviceAddress()
                                                                  : 0;
             gbufferPush.visibilityTextureIndex = m_visibilityResource->GetDescriptorIndexSlot();
-            gbufferPush.viewportSize = glm::vec2(w, h);
+            gbufferPush.viewportSize = glm::vec2(rw, rh);
             gbufferPush.debugMode = m_debugMode;
             m_commandBuffers->pushData(&gbufferPush, sizeof(shaderio::PushConstantVisibilityDebug));
 
@@ -1899,13 +1939,13 @@ namespace Nox
             });
 
             NRI::RenderDesc lightingDesc = {
-                .renderArea = locViewportSize,
+                .renderArea = renderExtent,
                 .colorAttachments = lightingAttachments
             };
 
             m_commandBuffers->beginRendering(lightingDesc);
-            m_commandBuffers->setViewportWithCount({0.0f, h, w, -h}, 0.0f, 1.0f);
-            m_commandBuffers->setScissorWithCount(locViewportSize);
+            m_commandBuffers->setViewportWithCount({0.0f, rh, rw, -rh}, 0.0f, 1.0f);
+            m_commandBuffers->setScissorWithCount(renderExtent);
 
             m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_deferredLightingPipeline);
             m_commandBuffers->setCullMode(NRI::CullMode::None);
@@ -1924,7 +1964,7 @@ namespace Nox
             lightingPush.gbufferMaterialIndex = m_gbufferMaterial->GetDescriptorIndexSlot();
             lightingPush.gbufferEmissionIndex = m_gbufferEmission->GetDescriptorIndexSlot();
             lightingPush.depthTextureIndex = m_depthResource->GetDescriptorIndexSlot();
-            lightingPush.viewportSize = glm::vec2(w, h);
+            lightingPush.viewportSize = glm::vec2(rw, rh);
             lightingPush.debugMode = m_debugMode;
             lightingPush.gbufferVelocityIndex = m_gbufferVelocity->GetDescriptorIndexSlot();
             m_commandBuffers->pushData(&lightingPush, sizeof(shaderio::PushConstantDeferredLighting));
@@ -1957,14 +1997,14 @@ namespace Nox
             };
 
             NRI::RenderDesc forward3DDesc = {
-                .renderArea = locViewportSize,
+                .renderArea = renderExtent,
                 .colorAttachments = forward3DAttachments,
                 .depthAttachment = forwardDepthAttachment
             };
 
             m_commandBuffers->beginRendering(forward3DDesc);
-            m_commandBuffers->setViewportWithCount({0.0f, h, w, -h}, 0.0f, 1.0f);
-            m_commandBuffers->setScissorWithCount(locViewportSize);
+            m_commandBuffers->setViewportWithCount({0.0f, rh, rw, -rh}, 0.0f, 1.0f);
+            m_commandBuffers->setScissorWithCount(renderExtent);
 
             // A. UNLIT MESHES
             if (m_unlitPipeline && (m_unlitCount > 0 || m_unlitDoubleSidedCount > 0))
@@ -2024,7 +2064,7 @@ namespace Nox
             m_commandBuffers->endRendering();
             m_commandBuffers->executionBarrier();
         }
-        
+
         // =========================================================================
         // 4.5 DLSS EVALUATION PASS (via NRI Device Abstraction)
         // =========================================================================
@@ -2034,8 +2074,8 @@ namespace Nox
         {
             s_loggedSlots = true;
             NOX_CORE_INFO("[DLSS Debug] m_dlssOutputResource slot: {}, m_hdrSceneResource slot: {}",
-                m_dlssOutputResource ? m_dlssOutputResource->GetDescriptorIndexSlot() : 999999,
-                m_hdrSceneResource ? m_hdrSceneResource->GetDescriptorIndexSlot() : 999999);
+                          m_dlssOutputResource ? m_dlssOutputResource->GetDescriptorIndexSlot() : 999999,
+                          m_hdrSceneResource ? m_hdrSceneResource->GetDescriptorIndexSlot() : 999999);
         }
         //debug good here or no should they be raw or not ?
         if (m_dlssEnabled && m_dlssMode != NRI::UpscaleMode::Off && m_device->isDLSSSupported() && m_dlssOutputResource)
@@ -2067,6 +2107,24 @@ namespace Nox
         }
         m_commandBuffers->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
 
+        // outputExtent/ow/oh: final display/swapchain resolution, used by everything from here on
+        // (post-process, 2D overlays, outline, present) - as opposed to renderExtent/rw/rh above,
+        // which is the (possibly smaller, when DLSS is scaling) resolution the 3D scene rendered at.
+        NRI::Extent2D outputExtent = m_isEditor ? m_viewportSize : m_swapChainExtent;
+        float ow = static_cast<float>(outputExtent.width);
+        float oh = static_cast<float>(outputExtent.height);
+
+        // 4.6 Propagate render-resolution entity IDs/depth up to display resolution. The 2D overlay
+        // pass right below composites against the final image and needs to depth-test world-space 2D
+        // content (e.g. in-world text/signs) against the 3D scene, and mouse-picking/the outline effect
+        // need entity IDs at full display resolution - a nearest blit is the cheapest way to give them
+        // that without re-rendering the 3D scene a second time at display resolution. Everything
+        // downstream reads exclusively from the Hi copies, so this always has to run even at 1:1
+        // (DLSS off/DLAA), where it's just a same-size copy.
+        m_entityResource->blitTo(*m_commandBuffers, *m_entityResourceHi);
+        m_depthResource->blitTo(*m_commandBuffers, *m_depthResourceHi);
+        m_commandBuffers->executionBarrier();
+
         // =========================================================================
         // 5. POST-PROCESSING & TONEMAPPING (HDR m_hdrSceneResource -> LDR m_sceneResource)
         // =========================================================================
@@ -2081,13 +2139,13 @@ namespace Nox
             });
 
             NRI::RenderDesc postDesc = {
-                .renderArea = locViewportSize,
+                .renderArea = outputExtent,
                 .colorAttachments = postAttachments
             };
 
             m_commandBuffers->beginRendering(postDesc);
-            m_commandBuffers->setViewportWithCount({0.0f, h, w, -h}, 0.0f, 1.0f);
-            m_commandBuffers->setScissorWithCount(locViewportSize);
+            m_commandBuffers->setViewportWithCount({0.0f, oh, ow, -oh}, 0.0f, 1.0f);
+            m_commandBuffers->setScissorWithCount(outputExtent);
 
             m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_postProcessPipeline);
             m_commandBuffers->setCullMode(NRI::CullMode::None);
@@ -2118,26 +2176,26 @@ namespace Nox
                 .storeOP = NRI::StoreOP::store
             });
             forward2DAttachments.push_back({
-                .attachment = m_entityResource.get(),
+                .attachment = m_entityResourceHi.get(),
                 .loadOP = NRI::LoadOP::load,
                 .storeOP = NRI::StoreOP::store
             });
 
             NRI::RenderAttachDesc forward2DDepth = {
-                .attachment = m_depthResource.get(),
+                .attachment = m_depthResourceHi.get(),
                 .loadOP = NRI::LoadOP::load,
                 .storeOP = NRI::StoreOP::store
             };
 
             NRI::RenderDesc forward2DDesc = {
-                .renderArea = locViewportSize,
+                .renderArea = outputExtent,
                 .colorAttachments = forward2DAttachments,
                 .depthAttachment = forward2DDepth
             };
 
             m_commandBuffers->beginRendering(forward2DDesc);
-            m_commandBuffers->setViewportWithCount({0.0f, h, w, -h}, 0.0f, 1.0f);
-            m_commandBuffers->setScissorWithCount(locViewportSize);
+            m_commandBuffers->setViewportWithCount({0.0f, oh, ow, -oh}, 0.0f, 1.0f);
+            m_commandBuffers->setScissorWithCount(outputExtent);
 
             const NRI::ColorBlendEquation blendEquation{
                 .srcColorBlendFactor = NRI::BlendFactor::SrcAlpha,
@@ -2371,7 +2429,7 @@ namespace Nox
                 uint32_t copyWidth = std::min(m_pickRequest.width, width - sampleX);
                 uint32_t copyHeight = std::min(m_pickRequest.height, height - sampleY);
 
-                m_entityResource->copyImageToBuffer(*m_commandBuffers, *m_pickerStagingBuffers[frameIndex], sampleX, sampleY, copyWidth, copyHeight);
+                m_entityResourceHi->copyImageToBuffer(*m_commandBuffers, *m_pickerStagingBuffers[frameIndex], sampleX, sampleY, copyWidth, copyHeight);
 
                 m_pickRequest.active = false;
             }
@@ -2424,7 +2482,8 @@ namespace Nox
         uniformData.samplerIndex = selectedSampler;
         uniformData.imageHeapIndexOffset = m_resourceHeap->getImageHeapIndexOffset();
 
-        uniformData.entityTextureIndex = m_entityResource->GetDescriptorIndexSlot();
+        uniformData.entityTextureIndex = m_entityResourceHi->GetDescriptorIndexSlot();
+        uniformData.entityGBufferTextureIndex = m_entityResource->GetDescriptorIndexSlot();
 
         // PBR IBL
         uniformData.irradianceMapIndex = m_irradianceCubemap->GetDescriptorIndexSlot();
@@ -2940,9 +2999,17 @@ namespace Nox
         {0.0625f, 0.8889f}
     };
 
-    // need to fix this for nvidia like beginscene for editorcamera
     void Renderer::BeginScene(const Camera& camera, const glm::mat4& transform)
     {
+        // DLSS/DLAA cannot function without jitter, so it's forced on whenever DLSS will actually
+        // evaluate this frame - matching the exact gate in RecordCommandBuffer's evaluateDLSS() call,
+        // not just "DLSS enabled" (mode == Off means evaluateDLSS never runs, so jitter shouldn't
+        // either - the "Camera Subpixel Jitter" toggle only has an effect while DLSS is genuinely off).
+        const bool enableJitter =
+            (m_cameraJitterEnabled || (m_dlssEnabled && m_dlssMode != NRI::UpscaleMode::Off && m_device->isDLSSSupported()))
+            && m_viewportSize.width > 0
+            && m_viewportSize.height > 0;
+
         // Must run before anything this frame touches a render-resolution-dependent texture (G-buffer,
         // depth, entity, scene targets) - BeginScene runs during OnUpdate(), strictly before
         // OnImGuiRender() draws the Viewport window's ImGui::Image(), so applying a pending DLSS
@@ -2970,7 +3037,7 @@ namespace Nox
             m_currentView = glm::scale(glm::mat4(1.0f), glm::vec3(1.0f, 1.0f, -1.0f)) * glm::inverse(transform);
             m_currentNonJitteredProj = camera.GetProjection();
 
-            if (m_cameraJitterEnabled && m_viewportSize.width > 0 && m_viewportSize.height > 0)
+            if (enableJitter)
             {
                 m_jitterPhase = (m_jitterPhase + 1) % 8;
                 glm::vec2 halton = s_Halton8[m_jitterPhase];
@@ -2984,7 +3051,7 @@ namespace Nox
 
         // Apply subpixel jitter to the rasterization projection matrix
         glm::mat4 rasterProj = m_currentNonJitteredProj;
-        if (m_cameraJitterEnabled && m_viewportSize.width > 0 && m_viewportSize.height > 0)
+        if (enableJitter)
         {
             float deltaNdcX = (2.0f * m_currentJitter.x) / static_cast<float>(m_viewportSize.width);
             float deltaNdcY = (2.0f * m_currentJitter.y) / static_cast<float>(m_viewportSize.height);
@@ -3031,11 +3098,14 @@ namespace Nox
         // ImGui::Image() call, which happens during OnUpdate() -> BeginScene(), before OnImGuiRender().
         applyPendingRenderResolutionIfNeeded();
 
+        // Camera Subpixel Jitter checkbox only matters while DLSS is genuinely off (disabled, or mode
+        // == Off) - DLSS/DLAA cannot function without jitter, so it's forced on whenever evaluateDLSS()
+        // will actually run this frame, matching that exact gate in RecordCommandBuffer.
         const bool enableJitter =
-   (m_cameraJitterEnabled ||
-    (m_dlssEnabled && m_device->isDLSSSupported()))
-   && m_viewportSize.width > 0
-   && m_viewportSize.height > 0;
+            (m_cameraJitterEnabled ||
+                (m_dlssEnabled && m_dlssMode != NRI::UpscaleMode::Off && m_device->isDLSSSupported()))
+            && m_viewportSize.width > 0
+            && m_viewportSize.height > 0;
         // Only advance temporal state once per frame (ignores secondary calls like OnOverlayRender)
         if (m_lastSceneFrameCounter != m_sceneFrameCounter)
         {
@@ -3055,14 +3125,14 @@ namespace Nox
 
             m_currentView = camera.GetViewMatrix();
             m_currentNonJitteredProj = camera.GetProjection();
-            
+
             m_cameraPosition = camera.GetPosition();
             m_cameraUp = camera.GetUpDirection();
             m_cameraRight = camera.GetRightDirection();
             m_cameraForward = camera.GetForwardDirection();
             m_cameraNear = camera.GetNearClip();
             m_cameraFOV = camera.GetFOV();
-            
+
             // Apply subpixel jitter to the rasterization projection matrix
             if (enableJitter)
             {

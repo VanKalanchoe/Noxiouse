@@ -38,12 +38,12 @@ void meshMain
 	SetMeshOutputCounts(2, 1); // 2 vertices, 1 line
 
 	// Vertex 0
-    vertices[0].pos = mul(ubo.proj, mul(ubo.view, float4(line.p0, 1.0)));
+    vertices[0].pos = mul(ubo.nonJitteredProj, mul(ubo.view, float4(line.p0, 1.0)));
     vertices[0].color = line.color;
     vertices[0].entityID = line.entityID;
 
     // Vertex 1
-    vertices[1].pos = mul(ubo.proj, mul(ubo.view, float4(line.p1, 1.0)));
+    vertices[1].pos = mul(ubo.nonJitteredProj, mul(ubo.view, float4(line.p1, 1.0)));
     vertices[1].color = line.color;
     vertices[1].entityID = line.entityID;
 

@@ -138,7 +138,8 @@ struct UniformBufferObject
     uint imageHeapIndexOffset;
     uint finalImageIndex;
 
-    uint entityTextureIndex; // Heap index of m_entityResolveReference for edge detection outline
+    uint entityTextureIndex; // Heap index of m_entityResolveReference for edge detection outline (display resolution)
+    uint entityGBufferTextureIndex; // Heap index of the render-resolution G-buffer entity ID texture (debug views only)
 
     // PBR IBL
     uint irradianceMapIndex;

@@ -607,7 +607,7 @@
         // Mode 11: Entity ID
         if (pushConstant.debugMode == 11)
         {
-            Texture2D<int4> entityTex = Texture2D<int4>.Handle(uint2(ubo->imageHeapIndexOffset + ubo->entityTextureIndex, 0));
+            Texture2D<int4> entityTex = Texture2D<int4>.Handle(uint2(ubo->imageHeapIndexOffset + ubo->entityGBufferTextureIndex, 0));
             int entityID = entityTex.Load(int3(pixelCoord, 0)).r;
             return float4(idToColor(entityID), 1.0);
         }

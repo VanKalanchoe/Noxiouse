@@ -84,7 +84,8 @@ namespace NRI
         {
             format = m_deviceVK.getDepthFormat();
             aspectFlags = vk::ImageAspectFlagBits::eDepth;
-            usageFlags = vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled;
+            usageFlags = vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled |
+                         vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst;
         }
         else if (desc.usage == TextureUsage::Storage)
         {
@@ -386,6 +387,35 @@ namespace NRI
         };
         
         cb.copyImageToBuffer(m_imageResource.image, vk::ImageLayout::eGeneral, nativeBuffer, region);
+    }
+
+    void TextureVK::blitTo(CommandBuffer& commandBuffer, Texture2D& dst)
+    {
+        auto* cmdBufferVK = dynamic_cast<CommandBufferVK*>(&commandBuffer);
+        vk::raii::CommandBuffer& cb = cmdBufferVK->getActiveNativeBuffer();
+
+        auto* dstVK = dynamic_cast<TextureVK*>(&dst);
+
+        // Depth and integer-ID formats only support nearest filtering in Vulkan anyway - which is
+        // exactly what we want here, this is a resolution change, not a quality resample.
+        vk::ImageAspectFlags aspectMask =
+            (m_desc.usage == TextureUsage::DepthStencilAttachment) ? vk::ImageAspectFlagBits::eDepth : vk::ImageAspectFlagBits::eColor;
+
+        vk::ImageBlit region{
+            .srcSubresource = {.aspectMask = aspectMask, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1},
+            .srcOffsets = std::array<vk::Offset3D, 2>{
+                vk::Offset3D{0, 0, 0},
+                vk::Offset3D{static_cast<int32_t>(m_desc.width), static_cast<int32_t>(m_desc.height), 1}
+            },
+            .dstSubresource = {.aspectMask = aspectMask, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1},
+            .dstOffsets = std::array<vk::Offset3D, 2>{
+                vk::Offset3D{0, 0, 0},
+                vk::Offset3D{static_cast<int32_t>(dstVK->m_desc.width), static_cast<int32_t>(dstVK->m_desc.height), 1}
+            }
+        };
+
+        cb.blitImage(m_imageResource.image, vk::ImageLayout::eGeneral, dstVK->m_imageResource.image, vk::ImageLayout::eGeneral,
+                     {region}, vk::Filter::eNearest);
     }
 
     void TextureVK::generateMipmaps(CommandBuffer& commandBuffer)

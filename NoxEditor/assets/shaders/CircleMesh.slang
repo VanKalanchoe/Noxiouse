@@ -50,7 +50,7 @@ void meshMain
 
 	for (uint i = 0; i < 4; i++) 
     {
-		vertices[i].pos = mul(ubo.proj, mul(ubo.view, mul(circle.worldPosition, positions[i])));
+		vertices[i].pos = mul(ubo.nonJitteredProj, mul(ubo.view, mul(circle.worldPosition, positions[i])));
         vertices[i].color = circle.color;
         vertices[i].thickness = circle.thickness;
         float2 lp = positions[i].xy * 2.0;

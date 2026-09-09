@@ -356,13 +356,20 @@ namespace Nox
         Ref<Texture2D> m_sceneResource;
 
         // Entiity ID + readback
+        // m_entityResource is render-resolution (written directly by the G-buffer/unlit/skybox passes,
+        // alongside m_hdrSceneResource). m_entityResourceHi is a nearest-upsampled display-resolution
+        // copy (see applyRenderResolution's blit step) used by anything compositing against the final
+        // image at full res: the 2D overlay pass, the outline effect, and mouse-pick readback.
         Ref<Texture2D> m_entityResource;
+        Ref<Texture2D> m_entityResourceHi;
         std::vector<std::unique_ptr<NRI::Buffer>> m_pickerStagingBuffers;
         PickRequest m_pickRequest;
         std::vector<int32_t> m_SelectedEntityIDs;
 
         // Textures
+        // Same render-resolution/display-resolution split as m_entityResource above.
         Ref<Texture2D> m_depthResource;
+        Ref<Texture2D> m_depthResourceHi;
         Ref<Texture2D> m_textureResource;
         Ref<Texture2D> m_textureResource2;
         Ref<Texture2D> m_textureResource3;

@@ -57,7 +57,7 @@ void meshMain
 
 	for (uint i = 0; i < 4; i++) 
     {
-		vertices[i].pos = mul(ubo.proj, mul(ubo.view, mul(quad.modelMatrix, positions[i])));
+		vertices[i].pos = mul(ubo.nonJitteredProj, mul(ubo.view, mul(quad.modelMatrix, positions[i])));
         vertices[i].color = quad.color;
         vertices[i].texCooord = uv[i];
         vertices[i].materialIndex = quad.materialIndex;

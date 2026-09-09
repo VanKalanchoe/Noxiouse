@@ -111,7 +111,7 @@ float4 fragMain(
         discard;
     }
 
-    const int radius = 2;
+    const int radius = 4;
 
     bool neighborSelected = false;
 

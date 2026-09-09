@@ -53,7 +53,7 @@ void meshMain
         else { pos = text.quadMin; uv = text.texMin; }                                                                    // bottom-left
 
         float4 worldPos = mul(text.transform, float4(pos, 0.0, 1.0));
-		vertices[i].pos = mul(ubo.proj, mul(ubo.view, worldPos));
+		vertices[i].pos = mul(ubo.nonJitteredProj, mul(ubo.view, worldPos));
         vertices[i].texCooord = uv;
         vertices[i].color = text.color;
         vertices[i].materialIndex =  text.materialIndex;
