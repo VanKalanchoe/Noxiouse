@@ -34,6 +34,20 @@ namespace NRI
             abort();
     }
 
+    static sl::DLSSMode ToSLDLSSMode(UpscaleMode mode)
+    {
+        switch (mode)
+        {
+        case UpscaleMode::Off: return sl::DLSSMode::eOff;
+        case UpscaleMode::DLAA: return sl::DLSSMode::eDLAA;
+        case UpscaleMode::Quality: return sl::DLSSMode::eMaxQuality;
+        case UpscaleMode::Balanced: return sl::DLSSMode::eBalanced;
+        case UpscaleMode::Performance: return sl::DLSSMode::eMaxPerformance;
+        case UpscaleMode::UltraPerformance: return sl::DLSSMode::eUltraPerformance;
+        }
+        return sl::DLSSMode::eOff;
+    }
+
     // Factory
     std::unique_ptr<Swapchain> DeviceVK::createSwapchain(const SwapchainDesc& desc)
     {
@@ -174,7 +188,6 @@ namespace NRI
         "VK_NVX_binary_import",
         "VK_NVX_image_view_handle",
         vk::KHRBufferDeviceAddressExtensionName,
-        vk::EXTBufferDeviceAddressExtensionName,
 
         // Descriptorheap + untyped Pointer
         vk::EXTDescriptorHeapExtensionName,
@@ -227,7 +240,7 @@ namespace NRI
     {
         // 1. Initialize NVIDIA Streamline before Vulkan creation
         sl::Preferences pref{};
-        pref.showConsole = true;
+        pref.showConsole = false;
         pref.logLevel = sl::LogLevel::eVerbose; // Mutes verbose NGX / Streamline config dumps
         pref.pathsToPlugins = nullptr;
         pref.numPathsToPlugins = 0; // Searches application exe directory
@@ -336,13 +349,13 @@ namespace NRI
             if (vkRes == sl::Result::eOk)
             {
                 NOX_CORE_INFO("[Streamline] Vulkan device registered successfully.");
-                
+
                 // Resolve Streamline's present proxy via SDL3 so SwapchainVK routes presentation through Streamline
                 SDL_SharedObject* slInterposer = SDL_LoadObject("sl.interposer.dll");
                 if (slInterposer)
                 {
                     m_slQueuePresentKHR = reinterpret_cast<PFN_vkQueuePresentKHR>(SDL_LoadFunction(slInterposer,
-"vkQueuePresentKHR"));
+                                                                                                   "vkQueuePresentKHR"));
                     if (m_slQueuePresentKHR)
                     {
                         NOX_CORE_INFO("[Streamline] Hooked vkQueuePresentKHR from sl.interposer.dll");
@@ -721,13 +734,14 @@ namespace NRI
 
     void DeviceVK::resetDLSSViewport()
     {
-        if (!m_streamlineInitialized)
-            return;
+        if (!m_streamlineInitialized || !m_dlssContextEverEvaluated)
+            return; // nothing has actually created a DLSSContext for this viewport yet - nothing to free
 
         // NGX creates its internal DLSSContext at whatever resolution it sees on the first evaluate
         // for this viewport and does NOT resize it just because we later tag differently-sized
         // resources - it must be explicitly freed so the next evaluateDLSS() recreates it at the
         // new size. Without this, evaluate silently no-ops forever after any resize.
+        m_dlssContextEverEvaluated = false;
         sl::ViewportHandle viewport{0};
         if (m_slDLSSSupported)
         {
@@ -741,6 +755,30 @@ namespace NRI
         {
             slFreeResources(sl::kFeatureDLSS_RR, viewport);
         }
+    }
+
+    Device::DLSSRenderExtent DeviceVK::getDLSSOptimalRenderSize(UpscaleMode mode, Extent2D outputSize)
+    {
+        if (!m_streamlineInitialized || !m_slDLSSSupported || mode == UpscaleMode::Off ||
+            outputSize.width == 0 || outputSize.height == 0)
+        {
+            return {outputSize, 0.0f};
+        }
+
+        sl::DLSSOptions opts{};
+        opts.mode = ToSLDLSSMode(mode);
+        opts.outputWidth = outputSize.width;
+        opts.outputHeight = outputSize.height;
+
+        sl::DLSSOptimalSettings settings{};
+        sl::Result res = slDLSSGetOptimalSettings(opts, settings);
+        if (res != sl::Result::eOk || settings.optimalRenderWidth == 0 || settings.optimalRenderHeight == 0)
+        {
+            NOX_CORE_WARN("[Streamline] slDLSSGetOptimalSettings failed: {}", (int)res);
+            return {outputSize, 0.0f};
+        }
+
+        return {Extent2D{settings.optimalRenderWidth, settings.optimalRenderHeight}, settings.optimalSharpness};
     }
 
     void DeviceVK::ensureDummyDescriptorSet()
@@ -759,8 +797,10 @@ namespace NRI
             .descriptorSetCount = 1,
             .pSetLayouts = &*m_dummyDescriptorSetLayout
         };
-        vk::raii::DescriptorSets sets(m_device, allocInfo);
-        m_dummyDescriptorSet = sets.front().release();
+        // Plain (non-RAII) allocation on purpose: we want a raw handle nothing ever auto-frees, owned
+        // manually for the life of the device (freed implicitly when m_dummyDescriptorPool is destroyed).
+        std::vector<vk::DescriptorSet> sets = (*m_device).allocateDescriptorSets(allocInfo);
+        m_dummyDescriptorSet = sets.front();
 
         vk::PipelineLayoutCreateInfo pipelineLayoutInfo{
             .setLayoutCount = 1,
@@ -784,7 +824,7 @@ namespace NRI
         auto* depthVK = static_cast<TextureVK*>(params.depth);
         auto* mvecVK = static_cast<TextureVK*>(params.motionVectors);
         auto* cmdBufferVK = static_cast<CommandBufferVK*>(params.commandBuffer);
-        
+
         // 1. Obtain unique frame token
         sl::FrameToken* frameToken = nullptr;
         m_slFrameIndex++;
@@ -829,8 +869,8 @@ namespace NRI
         consts.cameraFar = 10000.0f;
         consts.cameraFOV = params.cameraFovRad;
         float aspect = (outputColorVK->GetHeight() > 0)
-                               ? (static_cast<float>(outputColorVK->GetWidth()) / static_cast<float>(outputColorVK->GetHeight()))
-                               : 1.777f;
+                           ? (static_cast<float>(outputColorVK->GetWidth()) / static_cast<float>(outputColorVK->GetHeight()))
+                           : 1.777f;
         consts.cameraAspectRatio = aspect;
 
         consts.depthInverted = sl::Boolean::eTrue;
@@ -841,103 +881,95 @@ namespace NRI
         consts.orthographicProjection = sl::Boolean::eFalse;
         consts.reset = params.reset ? sl::Boolean::eTrue : sl::Boolean::eFalse;
 
-            sl::Result constRes = slSetConstants(consts, *frameToken, viewport);
-            if (constRes != sl::Result::eOk)
-            {
-                NOX_CORE_WARN("[Streamline] slSetConstants failed: {}", (int)constRes);
-                return false;
-            }
+        sl::Result constRes = slSetConstants(consts, *frameToken, viewport);
+        if (constRes != sl::Result::eOk)
+        {
+            NOX_CORE_WARN("[Streamline] slSetConstants failed: {}", (int)constRes);
+            return false;
+        }
 
-            // 3. DLSS Options
-            sl::DLSSOptions dlssOptions{};
-            switch (params.mode)
-            {
-            case UpscaleMode::Off: dlssOptions.mode = sl::DLSSMode::eOff; break;
-            case UpscaleMode::DLAA: dlssOptions.mode = sl::DLSSMode::eDLAA; break;
-            case UpscaleMode::Quality: dlssOptions.mode = sl::DLSSMode::eMaxQuality; break;
-            case UpscaleMode::Balanced: dlssOptions.mode = sl::DLSSMode::eBalanced; break;
-            case UpscaleMode::Performance: dlssOptions.mode = sl::DLSSMode::eMaxPerformance; break;
-            case UpscaleMode::UltraPerformance: dlssOptions.mode = sl::DLSSMode::eUltraPerformance; break;
-            }
+        // 3. DLSS Options
+        sl::DLSSOptions dlssOptions{};
+        dlssOptions.mode = ToSLDLSSMode(params.mode);
 
-            dlssOptions.outputWidth = outputColorVK->GetWidth();
-            dlssOptions.outputHeight = outputColorVK->GetHeight();
-            dlssOptions.colorBuffersHDR = sl::Boolean::eTrue;
-            dlssOptions.preExposure = 1.0f;
-            dlssOptions.exposureScale = 1.0f;
-            dlssOptions.useAutoExposure = sl::Boolean::eTrue; // Enable DLSS auto-exposure calculation
-            dlssOptions.dlaaPreset = sl::DLSSPreset::ePresetK;
-            dlssOptions.qualityPreset = sl::DLSSPreset::ePresetK;
-            dlssOptions.balancedPreset = sl::DLSSPreset::ePresetK;
-            dlssOptions.performancePreset = sl::DLSSPreset::ePresetM;
-            dlssOptions.ultraPerformancePreset = sl::DLSSPreset::ePresetL;
+        dlssOptions.outputWidth = outputColorVK->GetWidth();
+        dlssOptions.outputHeight = outputColorVK->GetHeight();
+        dlssOptions.colorBuffersHDR = sl::Boolean::eTrue;
+        dlssOptions.preExposure = 1.0f;
+        dlssOptions.exposureScale = 1.0f;
+        dlssOptions.useAutoExposure = sl::Boolean::eTrue; // Enable DLSS auto-exposure calculation
+        dlssOptions.dlaaPreset = sl::DLSSPreset::ePresetK;
+        dlssOptions.qualityPreset = sl::DLSSPreset::ePresetK;
+        dlssOptions.balancedPreset = sl::DLSSPreset::ePresetK;
+        dlssOptions.performancePreset = sl::DLSSPreset::ePresetM;
+        dlssOptions.ultraPerformancePreset = sl::DLSSPreset::ePresetL;
 
-            sl::Result optRes = slDLSSSetOptions(viewport, dlssOptions);
-            if (optRes != sl::Result::eOk)
-            {
-                NOX_CORE_WARN("[Streamline] slDLSSSetOptions failed: {}", (int)optRes);
-                return false;
-            }
+        sl::Result optRes = slDLSSSetOptions(viewport, dlssOptions);
+        if (optRes != sl::Result::eOk)
+        {
+            NOX_CORE_WARN("[Streamline] slDLSSSetOptions failed: {}", (int)optRes);
+            return false;
+        }
 
-            // 4. Tag Resources with explicit usage flags & subresource range for Depth
-            VkCommandBuffer vkCmd = static_cast<VkCommandBuffer>(*cmdBufferVK->getActiveNativeBuffer());
+        // 4. Tag Resources with explicit usage flags & subresource range for Depth
+        VkCommandBuffer vkCmd = static_cast<VkCommandBuffer>(*cmdBufferVK->getActiveNativeBuffer());
 
-            sl::Resource colorIn{};
-            colorIn.type = sl::ResourceType::eTex2d;
-            colorIn.native = static_cast<VkImage>(*inputColorVK->getNativeImage());
-            colorIn.view = static_cast<VkImageView>(*inputColorVK->getNativeView());
-            colorIn.nativeFormat = static_cast<uint32_t>(inputColorVK->getFormat());
-            colorIn.width = inputColorVK->GetWidth();
-            colorIn.height = inputColorVK->GetHeight();
-            colorIn.state = VK_IMAGE_LAYOUT_GENERAL;
-            colorIn.mipLevels = 1;
-            colorIn.arrayLayers = 1;
-            colorIn.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
+        sl::Resource colorIn{};
+        colorIn.type = sl::ResourceType::eTex2d;
+        colorIn.native = static_cast<VkImage>(*inputColorVK->getNativeImage());
+        colorIn.view = static_cast<VkImageView>(*inputColorVK->getNativeView());
+        colorIn.nativeFormat = static_cast<uint32_t>(inputColorVK->getFormat());
+        colorIn.width = inputColorVK->GetWidth();
+        colorIn.height = inputColorVK->GetHeight();
+        colorIn.state = VK_IMAGE_LAYOUT_GENERAL;
+        colorIn.mipLevels = 1;
+        colorIn.arrayLayers = 1;
+        colorIn.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
 
-            sl::Resource colorOut{};
-            colorOut.type = sl::ResourceType::eTex2d;
-            colorOut.native = static_cast<VkImage>(*outputColorVK->getNativeImage());
-            colorOut.view = static_cast<VkImageView>(*outputColorVK->getNativeView());
-            colorOut.nativeFormat = static_cast<uint32_t>(outputColorVK->getFormat());
-            colorOut.width = outputColorVK->GetWidth();
-            colorOut.height = outputColorVK->GetHeight();
-            colorOut.state = VK_IMAGE_LAYOUT_GENERAL;
-            colorOut.mipLevels = 1;
-            colorOut.arrayLayers = 1;
-            colorOut.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
+        sl::Resource colorOut{};
+        colorOut.type = sl::ResourceType::eTex2d;
+        colorOut.native = static_cast<VkImage>(*outputColorVK->getNativeImage());
+        colorOut.view = static_cast<VkImageView>(*outputColorVK->getNativeView());
+        colorOut.nativeFormat = static_cast<uint32_t>(outputColorVK->getFormat());
+        colorOut.width = outputColorVK->GetWidth();
+        colorOut.height = outputColorVK->GetHeight();
+        colorOut.state = VK_IMAGE_LAYOUT_GENERAL;
+        colorOut.mipLevels = 1;
+        colorOut.arrayLayers = 1;
+        colorOut.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
 
-            sl::SubresourceRange depthRange{};
-            depthRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-            depthRange.baseMipLevel = 0;
-            depthRange.levelCount = 1;
-            depthRange.baseArrayLayer = 0;
-            depthRange.layerCount = 1;
+        sl::SubresourceRange depthRange{};
+        depthRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        depthRange.baseMipLevel = 0;
+        depthRange.levelCount = 1;
+        depthRange.baseArrayLayer = 0;
+        depthRange.layerCount = 1;
 
-            sl::Resource depth{};
-            depth.next = &depthRange; // Essential for Vulkan: tells NGX to sample depth aspect, not color
-            depth.type = sl::ResourceType::eTex2d;
-            depth.native = static_cast<VkImage>(*depthVK->getNativeImage());
-            depth.view = static_cast<VkImageView>(*depthVK->getNativeView());
-            depth.nativeFormat = static_cast<uint32_t>(depthVK->getFormat());
-            depth.width = depthVK->GetWidth();
-            depth.height = depthVK->GetHeight();
-            depth.state = VK_IMAGE_LAYOUT_GENERAL;
-            depth.mipLevels = 1;
-            depth.arrayLayers = 1;
-            depth.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        sl::Resource depth{};
+        depth.next = &depthRange; // Essential for Vulkan: tells NGX to sample depth aspect, not color
+        depth.type = sl::ResourceType::eTex2d;
+        depth.native = static_cast<VkImage>(*depthVK->getNativeImage());
+        depth.view = static_cast<VkImageView>(*depthVK->getNativeView());
+        depth.nativeFormat = static_cast<uint32_t>(depthVK->getFormat());
+        depth.width = depthVK->GetWidth();
+        depth.height = depthVK->GetHeight();
+        depth.state = VK_IMAGE_LAYOUT_GENERAL;
+        depth.mipLevels = 1;
+        depth.arrayLayers = 1;
+        depth.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
 
-            sl::Resource mvec{};
-            mvec.type = sl::ResourceType::eTex2d;
-            mvec.native = static_cast<VkImage>(*mvecVK->getNativeImage());
-            mvec.view = static_cast<VkImageView>(*mvecVK->getNativeView());
-            mvec.nativeFormat = static_cast<uint32_t>(mvecVK->getFormat());
-            mvec.width = mvecVK->GetWidth();
-            mvec.height = mvecVK->GetHeight();
-            mvec.state = VK_IMAGE_LAYOUT_GENERAL;
-            mvec.mipLevels = 1;
-            mvec.arrayLayers = 1;
-            mvec.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
-        
+        sl::Resource mvec{};
+        mvec.type = sl::ResourceType::eTex2d;
+        mvec.native = static_cast<VkImage>(*mvecVK->getNativeImage());
+        mvec.view = static_cast<VkImageView>(*mvecVK->getNativeView());
+        mvec.nativeFormat = static_cast<uint32_t>(mvecVK->getFormat());
+        mvec.width = mvecVK->GetWidth();
+        mvec.height = mvecVK->GetHeight();
+        mvec.state = VK_IMAGE_LAYOUT_GENERAL;
+        mvec.mipLevels = 1;
+        mvec.arrayLayers = 1;
+        mvec.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
+
         sl::Extent inputExtent{0, 0, inputColorVK->GetWidth(), inputColorVK->GetHeight()};
         sl::Extent outputExtent{0, 0, outputColorVK->GetWidth(), outputColorVK->GetHeight()};
         sl::Extent depthExtent{0, 0, depthVK->GetWidth(), depthVK->GetHeight()};
@@ -961,8 +993,13 @@ namespace NRI
         // compute dispatch fails to read our tagged images when this command buffer has only ever used
         // VK_EXT_descriptor_heap binding (vkCmdBindResourceHeapEXT/vkCmdBindSamplerHeapEXT) and never a
         // classic descriptor set. Bind one dummy (empty) descriptor set right before evaluate.
-        ensureDummyDescriptorSet();
-        vk::CommandBuffer(vkCmd).bindDescriptorSets(vk::PipelineBindPoint::eCompute, *m_dummyPipelineLayout, 0, {m_dummyDescriptorSet}, {});
+        // Flip to false + rebuild to capture a "without fix" repro for the GitHub issue.
+        constexpr bool kEnableDescriptorHeapWorkaround = true;
+        if constexpr (kEnableDescriptorHeapWorkaround)
+        {
+            ensureDummyDescriptorSet();
+            vk::CommandBuffer(vkCmd).bindDescriptorSets(vk::PipelineBindPoint::eCompute, *m_dummyPipelineLayout, 0, {m_dummyDescriptorSet}, {});
+        }
 
         // 5. Evaluate DLSS
         const sl::BaseStructure* inputs[] = {&viewport};
@@ -979,6 +1016,7 @@ namespace NRI
             NOX_CORE_WARN("[Streamline] slEvaluateFeature(DLSS) failed: {}", (int)evalRes);
             return false;
         }
+        m_dlssContextEverEvaluated = true;
 
         // 6. Memory barrier to ensure subsequent shader reads see DLSS writes
         cmdBufferVK->executionBarrier();

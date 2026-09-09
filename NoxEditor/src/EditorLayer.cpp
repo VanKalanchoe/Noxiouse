@@ -970,6 +970,44 @@ namespace Nox
         }
 
         ImGui::Separator();
+        ImGui::Text("DLSS / Upscaling");
+
+        if (!m_Renderer->isDLSSSupported())
+        {
+            ImGui::TextColored(ImVec4(0.8f, 0.4f, 0.4f, 1.0f), "Not supported (Streamline/NGX unavailable on this GPU or driver)");
+        }
+        else
+        {
+            bool dlssEnabled = m_Renderer->isDLSSEnabled();
+            if (ImGui::Checkbox("Enable DLSS", &dlssEnabled))
+            {
+                m_Renderer->setDLSSEnabled(dlssEnabled);
+            }
+
+            if (dlssEnabled)
+            {
+                static const char* upscaleModeNames[] = {
+                    "Off",
+                    "DLAA (no upscale, best quality)",
+                    "Quality",
+                    "Balanced",
+                    "Performance",
+                    "Ultra Performance"
+                };
+                int currentUpscaleMode = static_cast<int>(m_Renderer->getUpscaleMode());
+                if (ImGui::Combo("Mode", &currentUpscaleMode, upscaleModeNames, IM_ARRAYSIZE(upscaleModeNames)))
+                {
+                    m_Renderer->setUpscaleMode(static_cast<NRI::UpscaleMode>(currentUpscaleMode));
+                }
+
+                NRI::Extent2D renderSize = m_Renderer->getRenderSize();
+                NRI::Extent2D outputSize = m_Renderer->getViewPortSize();
+                ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Rendering %ux%u -> %ux%u",
+                    renderSize.width, renderSize.height, outputSize.width, outputSize.height);
+            }
+        }
+
+        ImGui::Separator();
         ImGui::Text("Ray Tracing");
 
         bool rtEnabled = m_Renderer->getRayTracingEnabled();

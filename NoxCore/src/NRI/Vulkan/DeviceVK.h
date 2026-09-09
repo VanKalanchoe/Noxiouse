@@ -48,6 +48,7 @@ namespace NRI
         bool isDLSS_RRSupported() const { return m_slDLSS_RRSupported; }
         bool evaluateDLSS(const DLSSParams& params) override;
         void resetDLSSViewport() override;
+        DLSSRenderExtent getDLSSOptimalRenderSize(UpscaleMode mode, Extent2D outputSize) override;
         PFN_vkQueuePresentKHR getStreamlinePresentFn() const { return m_slQueuePresentKHR; }
         
         // access to functions for other classses to use
@@ -119,6 +120,10 @@ namespace NRI
         bool m_slDLSS_RRSupported = false;
         uint32_t m_slFrameIndex = 0;
         PFN_vkQueuePresentKHR m_slQueuePresentKHR = nullptr;
+        // True once evaluateDLSS() has actually succeeded since the last resetDLSSViewport() - guards
+        // resetDLSSViewport() from calling slFreeResources when there's no DLSSContext to free yet
+        // (e.g. toggling DLSS off/on before a frame ever evaluated), which Streamline rejects.
+        bool m_dlssContextEverEvaluated = false;
 
         // Workaround for https://github.com/NVIDIA-RTX/Streamline/issues/109 : Streamline's internal
         // Vulkan compute dispatch cannot read our tagged resources when the command buffer has only

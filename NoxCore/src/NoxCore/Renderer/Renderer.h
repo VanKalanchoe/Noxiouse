@@ -169,6 +169,7 @@ namespace Nox
         void onViewportSizeChange(NRI::Extent2D size);
         bool getVSync() const { return m_vSync; }
         NRI::Extent2D getViewPortSize() const { return m_viewportSize; }
+        NRI::Extent2D getRenderSize() const { return m_renderSize; }
         Renderer2D* getRenderer2D() const { return m_renderer2D.get(); }
         void setFrozen(bool temp) { m_frozen = temp; }
         bool getFrozen() { return m_frozen; }
@@ -222,10 +223,11 @@ namespace Nox
             s_Instance->UnloadMeshGeometry(handle);
         }
         
-        void setDLSSEnabled(bool enabled) { m_dlssEnabled = enabled; }
+        void setDLSSEnabled(bool enabled);
         bool isDLSSEnabled() const { return m_dlssEnabled; }
-        void setUpscaleMode(NRI::UpscaleMode mode) { m_dlssMode = mode; }
+        void setUpscaleMode(NRI::UpscaleMode mode);
         NRI::UpscaleMode getUpscaleMode() const { return m_dlssMode; }
+        bool isDLSSSupported() const { return m_device && m_device->isDLSSSupported(); }
 
     private:
         void initRenderer();
@@ -244,6 +246,11 @@ namespace Nox
         void createSceneResources();
         void createEntityResources();
         void createDepthResources();
+        // Recomputes m_renderSize from the current output size + DLSS mode and recreates every
+        // resource whose size depends on it. Called on viewport resize, DLSS enable/disable, and
+        // DLSS mode change - the three things that can change what m_renderSize should be.
+        void applyRenderResolution();
+        void applyPendingRenderResolutionIfNeeded();
 
         // Visability
         void createVisibilityResources();
@@ -286,6 +293,10 @@ namespace Nox
         std::unique_ptr<NRI::Swapchain> m_swapChain = nullptr;
         NRI::Extent2D m_swapChainExtent{640, 480};
         NRI::Extent2D m_viewportSize{640, 480};
+        // Resolution the pre-DLSS 3D pipeline (visibility, G-buffer, lighting) actually renders at.
+        // Equal to the output size unless a DLSS mode other than Off/DLAA is active, in which case
+        // it's whatever slDLSSGetOptimalSettings recommends for that mode - see applyRenderResolution().
+        NRI::Extent2D m_renderSize{640, 480};
         bool m_vSync = false;
         bool m_isEditor = false;
 
@@ -463,9 +474,10 @@ namespace Nox
         
         // DLSS Super Resolution
         Ref<Texture2D> m_dlssOutputResource;
-        bool m_dlssEnabled = true;
-        NRI::UpscaleMode m_dlssMode = NRI::UpscaleMode::DLAA;
+        bool m_dlssEnabled = false;
+        NRI::UpscaleMode m_dlssMode = NRI::UpscaleMode::Off;
         bool m_resetDLSS = true;
+        bool m_pendingRenderResolutionUpdate = false;
 
         // Camera Cache (Reverse-Z: no far clip)
         glm::vec3 m_cameraPosition{0.0f};

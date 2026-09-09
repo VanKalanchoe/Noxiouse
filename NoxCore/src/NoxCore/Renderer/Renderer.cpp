@@ -206,6 +206,36 @@ namespace Nox
     void Renderer::onViewportSizeChange(NRI::Extent2D size)
     {
         m_viewportSize = size;
+        applyRenderResolution();
+    }
+
+    void Renderer::setDLSSEnabled(bool enabled)
+    {
+        if (m_dlssEnabled == enabled) return;
+        m_dlssEnabled = enabled;
+        m_pendingRenderResolutionUpdate = true;
+    }
+
+    void Renderer::setUpscaleMode(NRI::UpscaleMode mode)
+    {
+        if (m_dlssMode == mode) return;
+        m_dlssMode = mode;
+        if (m_dlssEnabled)
+            m_pendingRenderResolutionUpdate = true;
+    }
+
+    void Renderer::applyRenderResolution()
+    {
+        NRI::Extent2D outputSize = m_isEditor ? m_viewportSize : m_swapChainExtent;
+        if (outputSize.width == 0 || outputSize.height == 0)
+            return;
+
+        // While DLSS is disabled we always render 1:1 regardless of the remembered mode, so turning
+        // it back on later doesn't require the user to also re-pick a mode.
+        NRI::UpscaleMode effectiveMode = m_dlssEnabled ? m_dlssMode : NRI::UpscaleMode::Off;
+        auto optimal = m_device->getDLSSOptimalRenderSize(effectiveMode, outputSize);
+        m_renderSize = (optimal.size.width > 0 && optimal.size.height > 0) ? optimal.size : outputSize;
+
         m_device->waitIdle();
         createSceneResources();
         createEntityResources();
@@ -222,6 +252,14 @@ namespace Nox
         // no-ops forever once our tagged resources no longer match the size it was created with.
         m_device->resetDLSSViewport();
         m_resetDLSS = true;
+    }
+
+    void Renderer::applyPendingRenderResolutionIfNeeded()
+    {
+        if (!m_pendingRenderResolutionUpdate)
+            return;
+        m_pendingRenderResolutionUpdate = false;
+        applyRenderResolution();
     }
 
     void Renderer::createCompiler()
@@ -2000,7 +2038,7 @@ namespace Nox
                 m_hdrSceneResource ? m_hdrSceneResource->GetDescriptorIndexSlot() : 999999);
         }
         //debug good here or no should they be raw or not ?
-        if (m_dlssEnabled && m_device->isDLSSSupported() && m_dlssOutputResource)
+        if (m_dlssEnabled && m_dlssMode != NRI::UpscaleMode::Off && m_device->isDLSSSupported() && m_dlssOutputResource)
         {
             NRI::DLSSParams dlssParams{};
             dlssParams.inputColor = m_hdrSceneResource.get();
@@ -2905,6 +2943,13 @@ namespace Nox
     // need to fix this for nvidia like beginscene for editorcamera
     void Renderer::BeginScene(const Camera& camera, const glm::mat4& transform)
     {
+        // Must run before anything this frame touches a render-resolution-dependent texture (G-buffer,
+        // depth, entity, scene targets) - BeginScene runs during OnUpdate(), strictly before
+        // OnImGuiRender() draws the Viewport window's ImGui::Image(), so applying a pending DLSS
+        // enable/mode change here (rather than synchronously inside the Settings checkbox callback)
+        // guarantees resources are never destroyed mid-ImGui-frame after already being referenced.
+        applyPendingRenderResolutionIfNeeded();
+
         // Only advance temporal state once per frame (ignores secondary calls like OnOverlayRender)
         if (m_lastSceneFrameCounter != m_sceneFrameCounter)
         {
@@ -2982,6 +3027,10 @@ namespace Nox
 
     void Renderer::BeginScene(const EditorCamera& camera)
     {
+        // See comment in the other BeginScene overload - must run before this frame's Viewport
+        // ImGui::Image() call, which happens during OnUpdate() -> BeginScene(), before OnImGuiRender().
+        applyPendingRenderResolutionIfNeeded();
+
         const bool enableJitter =
    (m_cameraJitterEnabled ||
     (m_dlssEnabled && m_device->isDLSSSupported()))

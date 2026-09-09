@@ -80,6 +80,16 @@ namespace NRI
         // resized just by tagging differently-sized resources later - it must be explicitly freed
         // so it gets recreated at the new size on the next evaluate.
         virtual void resetDLSSViewport() {}
+
+        struct DLSSRenderExtent
+        {
+            Extent2D size{};
+            float optimalSharpness = 0.0f;
+        };
+        // For a given upscale mode and desired output size, returns the resolution the scene should
+        // actually be rendered at (DLSS then upscales render size -> outputSize). UpscaleMode::Off or
+        // a backend without DLSS just returns outputSize back unchanged (1:1, no scaling).
+        virtual DLSSRenderExtent getDLSSOptimalRenderSize(UpscaleMode mode, Extent2D outputSize) { return {outputSize, 0.0f}; }
         
         virtual void shutdown() = 0;
         virtual uint32_t getMSAASampleCount() const = 0;
