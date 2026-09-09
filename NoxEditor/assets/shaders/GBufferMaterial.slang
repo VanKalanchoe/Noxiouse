@@ -102,8 +102,23 @@
             output.material = float4(0.0, 0.0, 0.0, 0.0);
             output.emission = float4(0.0, 0.0, 0.0, 0.0);
             output.entityID = -1;
-            output.velocity = float2(0.0, 0.0);
-            return output;
+            // Compute camera background motion vector (rotation-only, jitter-free like the geometry path below)
+        float2 uv = (input.pos.xy / pushConstant.viewportSize) * 2.0 - 1.0;
+        float4 currClipJittered = float4(uv, 1.0, 1.0);
+        // Reconstruct the actual world-space point along this (jittered) pixel's view ray.
+        // ubo->invViewProj is jittered on purpose here: it must match the matrix the pixel was rasterized with.
+        float4 worldPos4 = mul(ubo->invViewProj, currClipJittered);
+        float3 worldPos = worldPos4.xyz / worldPos4.w;
+
+        // Re-project that same world point with the CLEAN (non-jittered) matrices for both frames,
+        // exactly like the geometry path does, so background pixels use the same jitter-free convention.
+        float4 currClip = mul(ubo->nonJitteredProj, mul(ubo->view, float4(worldPos, 1.0)));
+        float4 prevClip = mul(ubo->prevProj, mul(ubo->prevView, float4(worldPos, 1.0)));
+        float2 currNDC = currClip.xy / currClip.w;
+        float2 prevNDC = prevClip.xy / prevClip.w;
+
+        output.velocity = (prevNDC - currNDC) * float2(0.5, -0.5);
+        return output;
         }
 
         // Decode Visibility Buffer IDs
@@ -387,7 +402,7 @@
         float2 prevNDC = prevClip.xy / prevClip.w;
 
         // NVIDIA Streamline / DLSS standard: delta in UV space [0, 1]
-        float2 velocity = (currNDC - prevNDC) * float2(0.5, -0.5);
+        float2 velocity = (prevNDC - currNDC) * float2(0.5, -0.5);
         output.velocity = velocity;
 
         return output;

@@ -39,6 +39,9 @@ namespace Nox
 
         float GetPitch() const { return m_Pitch; }
         float GetYaw() const { return m_Yaw; }
+        
+        float GetFOV() const { return m_FOV; }
+        float GetNearClip() const { return m_NearClip; }
     private:
         void UpdateProjection();
         void UpdateView();

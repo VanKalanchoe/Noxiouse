@@ -32,7 +32,7 @@ const std::vector<uint16_t> indices = {
 
 // This per-model data will be accessed via resource heaps
 struct ModelData // not used was a example for descriptor heap buffer 
-//but im using bda need to remove this later with createDescriptorHeaps commented out thing
+    //but im using bda need to remove this later with createDescriptorHeaps commented out thing
 {
     glm::vec4 pos;
     glm::vec4 color;
@@ -59,7 +59,7 @@ namespace Nox
         uint64_t vertexBufferAddress = 0;
         uint32_t indexCount = 0;
     };
-    
+
     struct DeferredBuffer
     {
         std::unique_ptr<NRI::Buffer> buffer;
@@ -71,24 +71,24 @@ namespace Nox
         MeshHandle handle;
         uint32_t framesRemaining = MAX_FRAMES_IN_FLIGHT;
     };
-    
+
     struct PickRequest
     {
         int32_t x = -1;
         int32_t y = -1;
-        uint32_t width = 1;   // Default 1 for single click
-        uint32_t height = 1;  // Default 1 for single click
+        uint32_t width = 1; // Default 1 for single click
+        uint32_t height = 1; // Default 1 for single click
         bool active = false;
     };
-    
+
     struct DrawMeshTasksIndirectCommand
     {
         uint32_t groupCountX;
         uint32_t groupCountY;
         uint32_t groupCountZ;
     };
-    
-    struct RenderPacket 
+
+    struct RenderPacket
     {
         shaderio::InstanceData instance;
         DrawMeshTasksIndirectCommand command;
@@ -115,40 +115,41 @@ namespace Nox
     inline uint32_t m_unlitDoubleSidedCount = 0;
     inline uint32_t m_transparentCount = 0;
     inline uint32_t m_transparentUnlitCount = 0;
-    
+
     class Renderer
     {
     public:
         Renderer(std::shared_ptr<Nox::Window> window, bool isEditor);
         ~Renderer();
-        
+
         // Call this from EditorLayer during mouse hover/click
         // Single click (1x1)
         void setPickRequest(int32_t x, int32_t y, bool active = true)
         {
-            m_pickRequest = { x, y, 1, 1, active };
+            m_pickRequest = {x, y, 1, 1, active};
         }
+
         // Box drag (WxH)
         void setBoxPickRequest(int32_t x, int32_t y, uint32_t width, uint32_t height)
         {
-            m_pickRequest = { x, y, width, height, true };
+            m_pickRequest = {x, y, width, height, true};
         }
 
         // Call this in drawFrame() or EditorLayer to read the result
         int32_t getPickedEntityID();
-        
+
         // Read back all unique entity IDs in the selected box area
         std::vector<int32_t> getPickedEntityIDs();
-        
+
         void SetSelectedEntityID(const std::vector<int32_t>& entityIDs) { m_SelectedEntityIDs = entityIDs; }
-        
+
         void drawFrame();
         void resizeWindow();
         void initImGui();
         void shutdownImGui();
         void beginImGui();
         void endImGui();
-        
+
         void BeginScene(const Camera& camera, const glm::mat4& transform);
         void BeginScene(const EditorCamera& camera);
         void EndScene();
@@ -157,13 +158,13 @@ namespace Nox
         void DrawMesh(const glm::mat4& transform, Ref<Mesh> mesh, uint32_t submeshIndex, const MaterialComponent& material, int entityID, const std::vector<glm::mat4>* boneTransforms = nullptr);
         void DrawStaticMesh(const glm::mat4& transform, Ref<StaticMesh> staticMesh, const MaterialComponent& material, int entityID);
         void SubmitMesh(const glm::mat4& transform, MeshComponent& src, MaterialComponent& srcMat, int entityID, const std::vector<glm::mat4>* boneTransforms = nullptr);
-        
+
         void SubmitLight(const glm::mat4& transform, const DirectionalLightComponent& light);
         void SubmitLight(const glm::mat4& transform, const PointLightComponent& light);
         void SubmitLight(const glm::mat4& transform, const SpotLightComponent& light);
-        
+
         Texture2D* GetSceneResource() const { return m_sceneResource.get(); }
-        
+
         void setVSync(bool enabled);
         void onViewportSizeChange(NRI::Extent2D size);
         bool getVSync() const { return m_vSync; }
@@ -172,7 +173,7 @@ namespace Nox
         void setFrozen(bool temp) { m_frozen = temp; }
         bool getFrozen() { return m_frozen; }
         void setFrozenDone(bool temp) { m_frozen = temp; }
-        
+
         // EditorLayer Settings
         void setDebugMode(uint32_t mode) { m_debugMode = mode; }
         uint32_t getDebugMode() const { return m_debugMode; }
@@ -191,25 +192,27 @@ namespace Nox
         bool getRayTracingShadows() const { return m_rayTracingShadows; }
         void setRayTracingReflections(bool enabled) { m_rayTracingReflections = enabled; }
         bool getRayTracingReflections() const { return m_rayTracingReflections; }
-        
+
         void setCameraJitterEnabled(bool enabled) { m_cameraJitterEnabled = enabled; }
         bool getCameraJitterEnabled() const { return m_cameraJitterEnabled; }
         glm::vec2 getCurrentJitter() const { return m_currentJitter; }
-        
+
         Ref<Texture2D> UploadTexture(const TextureData& cpuData);
         Ref<Texture2D> createSolidColorTexture(uint8_t r, uint8_t g, uint8_t b, uint8_t a);
         void initPBR();
 
         template <class T>
         void UploadBufferSlice(NRI::Buffer& dstBuffer, const T* data, uint32_t elementOffset, uint32_t elementCount);
-      
+
         MeshHandle UploadMeshGeometry(const MeshData& data, bool isOpaque = true);
+
         static MeshHandle UploadMesh(const MeshData& data, bool isOpaque = true)
         {
             NOX_CORE_ASSERT(s_Instance, "Renderer instance does not exist!");
-            
+
             return s_Instance->UploadMeshGeometry(data, isOpaque);
         }
+
         void UnloadMeshGeometry(const MeshHandle& handle);
         void updatePageTables(uint32_t currentImage);
 
@@ -218,6 +221,11 @@ namespace Nox
             NOX_CORE_ASSERT(s_Instance, "Renderer instance does not exist!");
             s_Instance->UnloadMeshGeometry(handle);
         }
+        
+        void setDLSSEnabled(bool enabled) { m_dlssEnabled = enabled; }
+        bool isDLSSEnabled() const { return m_dlssEnabled; }
+        void setUpscaleMode(NRI::UpscaleMode mode) { m_dlssMode = mode; }
+        NRI::UpscaleMode getUpscaleMode() const { return m_dlssMode; }
 
     private:
         void initRenderer();
@@ -226,17 +234,17 @@ namespace Nox
         void createSwapChain();
         void createCompiler();
         void watchShader(const std::filesystem::path& path, const std::string& pipelineKey, std::function<void()> reloadFn);
-   
+
         void createUnlitPipeline(bool forceCompile);
         void createPresentPipeline(bool forceCompile);
         void createComputePipeline();
         void createSkyboxPipeline(bool forceCompile);
         void createCommandPool();
-        
+
         void createSceneResources();
         void createEntityResources();
         void createDepthResources();
-        
+
         // Visability
         void createVisibilityResources();
         void createVisibilityPipeline(bool forceCompile);
@@ -247,7 +255,7 @@ namespace Nox
         void createDeferredLightingPipeline(bool forceCompile = false);
         // Post Process
         void createPostProcessPipeline(bool forceCompile = false);
-        
+
         void createTextureImage();
         void initGeometryBuffers();
         void markPageTablesDirty();
@@ -269,7 +277,7 @@ namespace Nox
         void createPageTableBuffers(uint64_t elementCapacity);
         void createLightBuffer(uint64_t bufferSize);
         void updateLightBuffer(uint32_t currentImage);
-        
+
     private:
         inline static Renderer* s_Instance = nullptr;
         std::unique_ptr<Renderer2D> m_renderer2D;
@@ -288,7 +296,7 @@ namespace Nox
         std::unique_ptr<NRI::Pipeline> m_unlitPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_presentPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_computePipeline = nullptr;
-        
+
         // Visability
         std::unique_ptr<NRI::Pipeline> m_visibilityPipeline = nullptr;
         // G-Buffer
@@ -297,7 +305,7 @@ namespace Nox
         std::unique_ptr<NRI::Pipeline> m_deferredLightingPipeline = nullptr;
         // Post Process
         std::unique_ptr<NRI::Pipeline> m_postProcessPipeline = nullptr;
-        
+
         std::unique_ptr<NRI::CommandAllocator> m_commandAllocator = nullptr;
         std::unique_ptr<NRI::CommandBuffer> m_commandBuffers = nullptr;
 
@@ -312,43 +320,43 @@ namespace Nox
         shaderio::UniformBufferObject frozenUniformData = {};
         bool m_frozen = false;
         bool m_frozenDone = false;
-        
+
         // EditorLayer Settings
         uint32_t m_debugMode = 0;
         uint32_t m_tonemapMode = 4; // Default: KhronosPbrNeutral
         float m_exposure = 1.0f;
         float m_gamma = 2.2f;
         float m_scaleIBLAmbient = 1.0f;
-        
+
         // Visability
         Ref<Texture2D> m_visibilityResource;
-        
+
         // G-Buffer Render Targets (Decoupled Material Pass)
-        Ref<Texture2D> m_gbufferAlbedo;    // RGBA8_UNORM: RGB = BaseColor, A = Occlusion
-        Ref<Texture2D> m_gbufferNormal;    // R16G16B16A16_SFLOAT: RGB = World Normal
-        Ref<Texture2D> m_gbufferMaterial;  // RGBA8_UNORM: R = Roughness, G = Metallic, B = Workflow
-        Ref<Texture2D> m_gbufferEmission;  // R16G16B16A16_SFLOAT: RGB = Emissive
-        Ref<Texture2D> m_gbufferVelocity;  // R16G16_SFLOAT: Screen-space motion vectors
-        
+        Ref<Texture2D> m_gbufferAlbedo; // RGBA8_UNORM: RGB = BaseColor, A = Occlusion
+        Ref<Texture2D> m_gbufferNormal; // R16G16B16A16_SFLOAT: RGB = World Normal
+        Ref<Texture2D> m_gbufferMaterial; // RGBA8_UNORM: R = Roughness, G = Metallic, B = Workflow
+        Ref<Texture2D> m_gbufferEmission; // R16G16B16A16_SFLOAT: RGB = Emissive
+        Ref<Texture2D> m_gbufferVelocity; // R16G16_SFLOAT: Screen-space motion vectors
+
         // Post Process
         Ref<Texture2D> m_hdrSceneResource;
 
         Ref<Texture2D> m_whiteTexture;
         Ref<Texture2D> m_sceneResource;
-        
+
         // Entiity ID + readback
         Ref<Texture2D> m_entityResource;
         std::vector<std::unique_ptr<NRI::Buffer>> m_pickerStagingBuffers;
         PickRequest m_pickRequest;
         std::vector<int32_t> m_SelectedEntityIDs;
-        
+
         // Textures
         Ref<Texture2D> m_depthResource;
         Ref<Texture2D> m_textureResource;
         Ref<Texture2D> m_textureResource2;
         Ref<Texture2D> m_textureResource3;
         uint32_t mipLevels;
-        
+
         // Animations
         std::vector<glm::mat4> m_boneMatrices;
         std::vector<std::unique_ptr<NRI::Buffer>> m_boneBuffers;
@@ -357,20 +365,20 @@ namespace Nox
 
         void updateBoneBuffer(uint32_t currentImage);
         void createBoneBuffer(uint64_t size);
-        
+
         // Meshes
         // 2. Queue for sub-allocation range frees
         std::vector<DeferredMeshFree> m_deferredMeshFrees;
 
         // 3. Queue for whole NRI::Buffer destructions
         std::vector<DeferredBuffer> m_deferredBufferDeletions;
-        
-        PagedBufferAllocator<shaderio::Vertex>       m_vertexPages;
-        PagedBufferAllocator<shaderio::MeshletDraw>  m_meshletDrawPages;
-        PagedBufferAllocator<shaderio::MeshletBounds>m_meshletBoundsPages;
-        PagedBufferAllocator<uint32_t>               m_meshletVertPages;
-        PagedBufferAllocator<uint8_t>                m_meshletTriPages;
-        std::vector<MeshBLAS>                        m_meshBLASes;
+
+        PagedBufferAllocator<shaderio::Vertex> m_vertexPages;
+        PagedBufferAllocator<shaderio::MeshletDraw> m_meshletDrawPages;
+        PagedBufferAllocator<shaderio::MeshletBounds> m_meshletBoundsPages;
+        PagedBufferAllocator<uint32_t> m_meshletVertPages;
+        PagedBufferAllocator<uint8_t> m_meshletTriPages;
+        std::vector<MeshBLAS> m_meshBLASes;
         // --- Hardware Ray Tracing: Scene TLAS ---
         void updateSceneAccelerationStructure(uint32_t currentFrameIndex);
         void BuildSceneAccelerationStructure(uint32_t currentFrameIndex);
@@ -396,36 +404,36 @@ namespace Nox
         std::vector<std::unique_ptr<NRI::Buffer>> m_meshletBoundPageTableBuffers;
         std::vector<std::unique_ptr<NRI::Buffer>> m_meshletVertPageTableBuffers;
         std::vector<std::unique_ptr<NRI::Buffer>> m_meshletTriPageTableBuffers;
-        
+
         std::vector<void*> m_vertexPageTableBuffersMapped;
         std::vector<void*> m_meshletDrawPageTableBuffersMapped;
         std::vector<void*> m_meshletBoundPageTableBuffersMapped;
         std::vector<void*> m_meshletVertPageTableBuffersMapped;
         std::vector<void*> m_meshletTriPageTableBuffersMapped;
-        bool m_pageTablesDirty[MAX_FRAMES_IN_FLIGHT] = { true, true, /* add 'true' for however many max frames you have */ };
+        bool m_pageTablesDirty[MAX_FRAMES_IN_FLIGHT] = {true, true, /* add 'true' for however many max frames you have */};
         uint64_t m_PageTableCapacity = 16; // Capacity in number of uint64_t elements
-        
+
         uint64_t m_IndirectBufferCapacity = 0;
         std::vector<DrawMeshTasksIndirectCommand> m_drawMeshTasksIndirectCommands;
         std::vector<std::unique_ptr<NRI::Buffer>> m_indirectBuffers;
         std::vector<void*> m_indirectBuffersMapped;
-        
+
         uint64_t m_InstanceBufferCapacity = 0;
         std::vector<shaderio::InstanceData> m_instanceBufferObjects;
         std::vector<std::unique_ptr<NRI::Buffer>> m_instanceBuffers;
         std::vector<void*> m_instanceBuffersMapped;
-        
+
         uint32_t frameIndex = 0;
 
         bool framebufferResized = false;
-        
+
         // Outline
         std::vector<std::unique_ptr<NRI::Buffer>> m_selectedEntityIDBuffers;
         std::vector<void*> m_selectedEntityIDBuffersMapped;
         std::unique_ptr<NRI::Pipeline> m_outlinePipeline = nullptr;
 
         void createOutlinePipeline(bool forceCompile = false);
-        
+
         // PBR stuff
         Ref<Texture2D> m_environmentCubemap;
         std::unique_ptr<NRI::Pipeline> m_skyboxPipeline = nullptr;
@@ -433,13 +441,13 @@ namespace Nox
         Ref<Texture2D> m_prefilteredEnvMap;
         uint32_t prefilterCubeMipLevels = 0;
         Ref<Texture2D> m_brdfLUT;
-        
+
         // Lighting
         std::vector<shaderio::LightData> m_lightBufferObjects;
         std::vector<std::unique_ptr<NRI::Buffer>> m_lightBuffers;
         std::vector<void*> m_lightBuffersMapped;
         uint64_t m_LightBufferCapacity = 0;
-        
+
         // Temporal & Motion Vector State
         glm::mat4 m_prevView = glm::mat4(1.0f);
         glm::mat4 m_prevNonJitteredProj = glm::mat4(1.0f);
@@ -452,5 +460,19 @@ namespace Nox
         bool m_cameraJitterEnabled = false;
         uint32_t m_jitterPhase = 0;
         glm::vec2 m_currentJitter = glm::vec2(0.0f);
+        
+        // DLSS Super Resolution
+        Ref<Texture2D> m_dlssOutputResource;
+        bool m_dlssEnabled = true;
+        NRI::UpscaleMode m_dlssMode = NRI::UpscaleMode::DLAA;
+        bool m_resetDLSS = true;
+
+        // Camera Cache (Reverse-Z: no far clip)
+        glm::vec3 m_cameraPosition{0.0f};
+        glm::vec3 m_cameraUp{0.0f, 1.0f, 0.0f};
+        glm::vec3 m_cameraRight{1.0f, 0.0f, 0.0f};
+        glm::vec3 m_cameraForward{0.0f, 0.0f, -1.0f};
+        float m_cameraNear = 0.1f;
+        float m_cameraFOV = 30.0f;
     };
 }

@@ -216,6 +216,12 @@ namespace Nox
 
         // G-Buffer
         createGBufferResources();
+
+        // NGX's internal DLSS feature is fixed-size once created; it must be explicitly freed here
+        // so it gets recreated at the new resolution on the next evaluate, otherwise evaluate silently
+        // no-ops forever once our tagged resources no longer match the size it was created with.
+        m_device->resetDLSSViewport();
+        m_resetDLSS = true;
     }
 
     void Renderer::createCompiler()
@@ -390,6 +396,18 @@ namespace Nox
             .directFormat = UINT32_MAX
         });
         m_resourceHeap->registerTexture(*m_hdrSceneResource);
+        
+        // DLSS Super Resolution output target (HDR unresolved before tonemapping)
+        m_dlssOutputResource = m_device->createTexture(NRI::TextureDesc{
+            .width = m_isEditor ? m_viewportSize.width : m_swapChainExtent.width,
+            .height = m_isEditor ? m_viewportSize.height : m_swapChainExtent.height,
+            .mipLevels = 1,
+            .sampleCount = 1,
+            .usage = NRI::TextureUsage::ColorAttachment, // <-- Must be ColorAttachment so DescriptorHeap registers it as eSampledImage for PostProcess.slang
+            .format = NRI::ImageFormat::R16G16B16A16_SFLOAT,
+            .directFormat = UINT32_MAX
+        });
+        m_resourceHeap->registerTexture(*m_dlssOutputResource);
     }
 
     void Renderer::createEntityResources()
@@ -513,16 +531,16 @@ namespace Nox
             .directFormat = UINT32_MAX
         });
         m_resourceHeap->registerTexture(*m_gbufferEmission);
-        
+
         m_gbufferVelocity = m_device->createTexture(NRI::TextureDesc{
-               .width = width,
-               .height = height,
-               .mipLevels = 1,
-               .sampleCount = 1,
-               .usage = NRI::TextureUsage::ColorAttachment,
-               .format = NRI::ImageFormat::R16G16_SFLOAT,
-               .directFormat = UINT32_MAX
-           });
+            .width = width,
+            .height = height,
+            .mipLevels = 1,
+            .sampleCount = 1,
+            .usage = NRI::TextureUsage::ColorAttachment,
+            .format = NRI::ImageFormat::R32G32_SFLOAT,
+            .directFormat = UINT32_MAX
+        });
         m_resourceHeap->registerTexture(*m_gbufferVelocity);
 
         uniformData.imageHeapIndexOffset = m_resourceHeap->getImageHeapIndexOffset();
@@ -538,7 +556,7 @@ namespace Nox
             NRI::ImageFormat::RGBA8,
             NRI::ImageFormat::R16G16B16A16_SFLOAT,
             NRI::ImageFormat::R32SINT,
-            NRI::ImageFormat::R16G16_SFLOAT
+            NRI::ImageFormat::R32G32_SFLOAT
         };
 
         desc.shaders.push_back({
@@ -1968,6 +1986,48 @@ namespace Nox
             m_commandBuffers->endRendering();
             m_commandBuffers->executionBarrier();
         }
+        
+        // =========================================================================
+        // 4.5 DLSS EVALUATION PASS (via NRI Device Abstraction)
+        // =========================================================================
+        bool dlssActive = false;
+        static bool s_loggedSlots = false;
+        if (!s_loggedSlots && m_dlssEnabled)
+        {
+            s_loggedSlots = true;
+            NOX_CORE_INFO("[DLSS Debug] m_dlssOutputResource slot: {}, m_hdrSceneResource slot: {}",
+                m_dlssOutputResource ? m_dlssOutputResource->GetDescriptorIndexSlot() : 999999,
+                m_hdrSceneResource ? m_hdrSceneResource->GetDescriptorIndexSlot() : 999999);
+        }
+        //debug good here or no should they be raw or not ?
+        if (m_dlssEnabled && m_device->isDLSSSupported() && m_dlssOutputResource)
+        {
+            NRI::DLSSParams dlssParams{};
+            dlssParams.inputColor = m_hdrSceneResource.get();
+            dlssParams.outputColor = m_dlssOutputResource.get();
+            dlssParams.depth = m_depthResource.get();
+            dlssParams.motionVectors = m_gbufferVelocity.get();
+            dlssParams.commandBuffer = m_commandBuffers.get();
+
+            dlssParams.nonJitteredProj = uniformData.nonJitteredProj;
+            dlssParams.view = uniformData.view;
+            dlssParams.prevNonJitteredProj = uniformData.prevProj;
+            dlssParams.prevView = uniformData.prevView;
+
+            dlssParams.jitterOffset = m_currentJitter;
+            dlssParams.cameraPos = m_cameraPosition;
+            dlssParams.cameraUp = m_cameraUp;
+            dlssParams.cameraRight = m_cameraRight;
+            dlssParams.cameraFwd = m_cameraForward;
+            dlssParams.cameraNear = m_cameraNear;
+            dlssParams.cameraFovRad = glm::radians(m_cameraFOV);
+            dlssParams.mode = m_dlssMode;
+            dlssParams.reset = m_isFirstFrame || m_resetDLSS;
+            m_resetDLSS = false;
+
+            dlssActive = m_device->evaluateDLSS(dlssParams);
+        }
+        m_commandBuffers->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
 
         // =========================================================================
         // 5. POST-PROCESSING & TONEMAPPING (HDR m_hdrSceneResource -> LDR m_sceneResource)
@@ -2000,7 +2060,7 @@ namespace Nox
 
             shaderio::PushConstantPostProcess postPush{};
             postPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
-            postPush.hdrTextureIndex = m_hdrSceneResource->GetDescriptorIndexSlot();
+            postPush.hdrTextureIndex = dlssActive ? m_dlssOutputResource->GetDescriptorIndexSlot() : m_hdrSceneResource->GetDescriptorIndexSlot();
             postPush.debugMode = m_debugMode;
             postPush.tonemapMode = m_tonemapMode;
             m_commandBuffers->pushData(&postPush, sizeof(shaderio::PushConstantPostProcess));
@@ -2321,7 +2381,7 @@ namespace Nox
                              static_cast<float>(m_isEditor ? m_viewportSize.width : m_swapChainExtent.width) / static_cast<float>(m_isEditor ? m_viewportSize.height : m_swapChainExtent.height), 0.1f,
                              100.0f);
         uniformData.proj[1][1] *= -1;*/
-        
+
         uniformData.jitterOffset = m_currentJitter;
         uniformData.samplerIndex = selectedSampler;
         uniformData.imageHeapIndexOffset = m_resourceHeap->getImageHeapIndexOffset();
@@ -2336,7 +2396,7 @@ namespace Nox
         uniformData.exposure = m_exposure; // slider in the future in imgui
         uniformData.gamma = m_gamma; // slider in the future in imgui
         uniformData.scaleIBLAmbient = m_scaleIBLAmbient; // slider in the future in imgui
-        
+
         memcpy(m_uniformBuffersMapped[currentImage], &uniformData, sizeof(uniformData));
     }
 
@@ -2484,7 +2544,7 @@ namespace Nox
         if (!m_pendingReloads.empty())
         {
             m_device->waitIdle(); // Ensure GPU is idle before destroying and recreating pipelines!
-            
+
             std::unordered_map<std::string, std::function<void()>> reloads;
             {
                 std::scoped_lock lock(m_reloadMutex);
@@ -2693,63 +2753,63 @@ namespace Nox
         NRI::AccelerationStructureBuildSizes tlasSizes = m_device->getAccelerationStructureBuildSizes(m_tlasBuildDesc);
 
         // 3. Allocate / resize TLAS storage and scratch buffers
-            if (!m_sceneTLAS || m_sceneTLASCapacity < instanceCount || !m_tlasBuffer || m_tlasBuffer->getSize() < tlasSizes.accelerationStructureSize)
-            {
-                m_device->waitIdle();
-
-                // CRITICAL ORDER: Destroy VkAccelerationStructureKHR FIRST, then the backing VkBuffer!
-                m_sceneTLAS.reset();
-                m_tlasBuffer.reset();
-                m_tlasScratchBuffer.reset();
-
-                m_sceneTLASCapacity = std::max(instanceCount * 2, 64u);
-
-                m_tlasBuffer = m_device->createBuffer(NRI::BufferDesc{
-                    .size = tlasSizes.accelerationStructureSize,
-                    .usage = NRI::BufferUsage::AccelerationStructure
-                });
-
-                m_sceneTLAS = m_device->createAccelerationStructure(NRI::AccelerationStructureDesc{
-                    .type = NRI::AccelerationStructureType::TopLevel,
-                    .storageBuffer = m_tlasBuffer.get(),
-                    .bufferOffset = 0,
-                    .size = tlasSizes.accelerationStructureSize
-                });
-
-                m_tlasScratchBuffer = m_device->createBuffer(NRI::BufferDesc{
-                    .size = std::max(tlasSizes.buildScratchSize, tlasSizes.updateScratchSize),
-                    .usage = NRI::BufferUsage::AccelerationStructureScratch
-                });
-
-                // Register TLAS into Descriptor Heap ONLY when newly created or resized
-                m_tlasHeapSlot = m_resourceHeap->registerAccelerationStructure(*m_sceneTLAS, m_tlasHeapSlot);
-                m_tlasHeapIndex = m_tlasHeapSlot;
-            }
-
-            // 4. Update UBO flags (ready for updateUniformBuffer!)
-            uniformData.tlasDeviceAddress = m_sceneTLAS ? m_sceneTLAS->getDeviceAddress() : 0;
-            uniformData.tlasHeapIndex = m_tlasHeapIndex;
-            uniformData.enableRTShadows = (m_rayTracingEnabled && m_rayTracingShadows) ? 1 : 0;
-            uniformData.enableRTReflections = (m_rayTracingEnabled && m_rayTracingReflections) ? 1 : 0;
-
-            m_hasTLASBuild = true;
-        }
-
-        void Renderer::BuildSceneAccelerationStructure(uint32_t currentFrameIndex)
+        if (!m_sceneTLAS || m_sceneTLASCapacity < instanceCount || !m_tlasBuffer || m_tlasBuffer->getSize() < tlasSizes.accelerationStructureSize)
         {
-            if (!m_hasTLASBuild)
-                return;
+            m_device->waitIdle();
 
-            // 1. Pre-build barrier: Host/Transfer instance writes -> AS Build Read
-            m_commandBuffers->accelerationStructureBarrier(NRI::AccelerationStructureBarrierType::TransferToBuild);
+            // CRITICAL ORDER: Destroy VkAccelerationStructureKHR FIRST, then the backing VkBuffer!
+            m_sceneTLAS.reset();
+            m_tlasBuffer.reset();
+            m_tlasScratchBuffer.reset();
 
-            // 2. Always BUILD TLAS fresh every frame (matching Khronos tutorial line 1825).
-            // This ensures deleted, swapped, or moved meshes update immediately with zero ghost geometry!
-            m_commandBuffers->buildAccelerationStructure(m_tlasBuildDesc, m_tlasScratchBuffer->getDeviceAddress(), *m_sceneTLAS);
+            m_sceneTLASCapacity = std::max(instanceCount * 2, 64u);
 
-            // 3. Post-build barrier: AS Build Write -> Fragment/Compute Shader Read
-            m_commandBuffers->accelerationStructureBarrier(NRI::AccelerationStructureBarrierType::BuildToShaderRead);
+            m_tlasBuffer = m_device->createBuffer(NRI::BufferDesc{
+                .size = tlasSizes.accelerationStructureSize,
+                .usage = NRI::BufferUsage::AccelerationStructure
+            });
+
+            m_sceneTLAS = m_device->createAccelerationStructure(NRI::AccelerationStructureDesc{
+                .type = NRI::AccelerationStructureType::TopLevel,
+                .storageBuffer = m_tlasBuffer.get(),
+                .bufferOffset = 0,
+                .size = tlasSizes.accelerationStructureSize
+            });
+
+            m_tlasScratchBuffer = m_device->createBuffer(NRI::BufferDesc{
+                .size = std::max(tlasSizes.buildScratchSize, tlasSizes.updateScratchSize),
+                .usage = NRI::BufferUsage::AccelerationStructureScratch
+            });
+
+            // Register TLAS into Descriptor Heap ONLY when newly created or resized
+            m_tlasHeapSlot = m_resourceHeap->registerAccelerationStructure(*m_sceneTLAS, m_tlasHeapSlot);
+            m_tlasHeapIndex = m_tlasHeapSlot;
         }
+
+        // 4. Update UBO flags (ready for updateUniformBuffer!)
+        uniformData.tlasDeviceAddress = m_sceneTLAS ? m_sceneTLAS->getDeviceAddress() : 0;
+        uniformData.tlasHeapIndex = m_tlasHeapIndex;
+        uniformData.enableRTShadows = (m_rayTracingEnabled && m_rayTracingShadows) ? 1 : 0;
+        uniformData.enableRTReflections = (m_rayTracingEnabled && m_rayTracingReflections) ? 1 : 0;
+
+        m_hasTLASBuild = true;
+    }
+
+    void Renderer::BuildSceneAccelerationStructure(uint32_t currentFrameIndex)
+    {
+        if (!m_hasTLASBuild)
+            return;
+
+        // 1. Pre-build barrier: Host/Transfer instance writes -> AS Build Read
+        m_commandBuffers->accelerationStructureBarrier(NRI::AccelerationStructureBarrierType::TransferToBuild);
+
+        // 2. Always BUILD TLAS fresh every frame (matching Khronos tutorial line 1825).
+        // This ensures deleted, swapped, or moved meshes update immediately with zero ghost geometry!
+        m_commandBuffers->buildAccelerationStructure(m_tlasBuildDesc, m_tlasScratchBuffer->getDeviceAddress(), *m_sceneTLAS);
+
+        // 3. Post-build barrier: AS Build Write -> Fragment/Compute Shader Read
+        m_commandBuffers->accelerationStructureBarrier(NRI::AccelerationStructureBarrierType::BuildToShaderRead);
+    }
 
     int32_t Renderer::getPickedEntityID()
     {
@@ -2829,19 +2889,20 @@ namespace Nox
     {
         m_device->endImGui();
     }
-    
+
     // 8-Phase Halton(2, 3) sequence for subpixel jitter
     static constexpr glm::vec2 s_Halton8[8] = {
-        { 0.5000f, 0.3333f },
-        { 0.2500f, 0.6667f },
-        { 0.7500f, 0.1111f },
-        { 0.1250f, 0.4444f },
-        { 0.6250f, 0.7778f },
-        { 0.3750f, 0.2222f },
-        { 0.8750f, 0.5556f },
-        { 0.0625f, 0.8889f }
+        {0.5000f, 0.3333f},
+        {0.2500f, 0.6667f},
+        {0.7500f, 0.1111f},
+        {0.1250f, 0.4444f},
+        {0.6250f, 0.7778f},
+        {0.3750f, 0.2222f},
+        {0.8750f, 0.5556f},
+        {0.0625f, 0.8889f}
     };
 
+    // need to fix this for nvidia like beginscene for editorcamera
     void Renderer::BeginScene(const Camera& camera, const glm::mat4& transform)
     {
         // Only advance temporal state once per frame (ignores secondary calls like OnOverlayRender)
@@ -2885,7 +2946,7 @@ namespace Nox
             rasterProj[2][0] += deltaNdcX;
             rasterProj[2][1] += deltaNdcY;
         }
-        
+
         uniformData.proj = rasterProj;
         uniformData.view = m_currentView;
         uniformData.nonJitteredProj = m_currentNonJitteredProj;
@@ -2894,7 +2955,7 @@ namespace Nox
         uniformData.invViewProj = glm::inverse(uniformData.proj * uniformData.view);
         /*uniformData.cameraWorldPos = { camera.GetPosition(), 0.0f };*/
         uniformData.frustum = shaderio::Frustum{uniformData.proj * uniformData.view};
-        
+
         if (m_frozen)
         {
             if (!m_frozenDone)
@@ -2918,84 +2979,97 @@ namespace Nox
 
         m_renderer2D->BeginScene(camera, transform);
     }
-    
+
     void Renderer::BeginScene(const EditorCamera& camera)
+    {
+        const bool enableJitter =
+   (m_cameraJitterEnabled ||
+    (m_dlssEnabled && m_device->isDLSSSupported()))
+   && m_viewportSize.width > 0
+   && m_viewportSize.height > 0;
+        // Only advance temporal state once per frame (ignores secondary calls like OnOverlayRender)
+        if (m_lastSceneFrameCounter != m_sceneFrameCounter)
         {
-            // Only advance temporal state once per frame (ignores secondary calls like OnOverlayRender)
-            if (m_lastSceneFrameCounter != m_sceneFrameCounter)
+            m_lastSceneFrameCounter = m_sceneFrameCounter;
+
+            if (m_isFirstFrame)
             {
-                m_lastSceneFrameCounter = m_sceneFrameCounter;
-
-                if (m_isFirstFrame)
-                {
-                    m_prevView = camera.GetViewMatrix();
-                    m_prevNonJitteredProj = camera.GetProjection();
-                    m_isFirstFrame = false;
-                }
-                else
-                {
-                    m_prevView = m_currentView;
-                    m_prevNonJitteredProj = m_currentNonJitteredProj;
-                }
-
-                m_currentView = camera.GetViewMatrix();
-                m_currentNonJitteredProj = camera.GetProjection();
-
-                if (m_cameraJitterEnabled && m_viewportSize.width > 0 && m_viewportSize.height > 0)
-                {
-                    m_jitterPhase = (m_jitterPhase + 1) % 8;
-                    glm::vec2 halton = s_Halton8[m_jitterPhase];
-                    m_currentJitter = halton - 0.5f;
-                }
-                else
-                {
-                    m_currentJitter = glm::vec2(0.0f);
-                }
-            }
-
-            // Apply subpixel jitter to the rasterization projection matrix
-            glm::mat4 rasterProj = m_currentNonJitteredProj;
-            if (m_cameraJitterEnabled && m_viewportSize.width > 0 && m_viewportSize.height > 0)
-            {
-                float deltaNdcX = (2.0f * m_currentJitter.x) / static_cast<float>(m_viewportSize.width);
-                float deltaNdcY = (2.0f * m_currentJitter.y) / static_cast<float>(m_viewportSize.height);
-                rasterProj[2][0] += deltaNdcX;
-                rasterProj[2][1] += deltaNdcY;
-            }
-
-            uniformData.proj = rasterProj;
-            uniformData.view = m_currentView;
-            uniformData.nonJitteredProj = m_currentNonJitteredProj;
-            uniformData.prevProj = m_prevNonJitteredProj;
-            uniformData.prevView = m_prevView;
-
-            uniformData.invViewProj = glm::inverse(uniformData.proj * uniformData.view);
-            uniformData.cameraWorldPos = {camera.GetPosition(), 0.0f};
-            uniformData.frustum = shaderio::Frustum{uniformData.proj * uniformData.view};
-
-            if (m_frozen)
-            {
-                if (!m_frozenDone)
-                {
-                    frozenUniformData = uniformData;
-                    m_frozenDone = true;
-                }
-
-                uniformData.frozenProj = frozenUniformData.proj;
-                uniformData.frozenView = frozenUniformData.view;
-                uniformData.frozenCameraWorldPos = frozenUniformData.cameraWorldPos;
-                uniformData.frozenFrustum = frozenUniformData.frustum;
+                m_prevView = camera.GetViewMatrix();
+                m_prevNonJitteredProj = camera.GetProjection();
+                m_isFirstFrame = false;
             }
             else
             {
-                uniformData.frozenProj = uniformData.proj;
-                uniformData.frozenView = uniformData.view;
-                uniformData.frozenCameraWorldPos = uniformData.cameraWorldPos;
-                uniformData.frozenFrustum = uniformData.frustum;
+                m_prevView = m_currentView;
+                m_prevNonJitteredProj = m_currentNonJitteredProj;
             }
 
-            m_renderer2D->BeginScene(camera);
+            m_currentView = camera.GetViewMatrix();
+            m_currentNonJitteredProj = camera.GetProjection();
+            
+            m_cameraPosition = camera.GetPosition();
+            m_cameraUp = camera.GetUpDirection();
+            m_cameraRight = camera.GetRightDirection();
+            m_cameraForward = camera.GetForwardDirection();
+            m_cameraNear = camera.GetNearClip();
+            m_cameraFOV = camera.GetFOV();
+            
+            // Apply subpixel jitter to the rasterization projection matrix
+            if (enableJitter)
+            {
+                m_jitterPhase = (m_jitterPhase + 1) % 8;
+                glm::vec2 halton = s_Halton8[m_jitterPhase];
+                m_currentJitter = halton - 0.5f;
+            }
+            else
+            {
+                m_currentJitter = glm::vec2(0.0f);
+            }
         }
+
+        // Apply subpixel jitter to the rasterization projection matrix
+        glm::mat4 rasterProj = m_currentNonJitteredProj;
+        if (enableJitter)
+        {
+            float deltaNdcX = (2.0f * m_currentJitter.x) / static_cast<float>(m_viewportSize.width);
+            float deltaNdcY = (2.0f * m_currentJitter.y) / static_cast<float>(m_viewportSize.height);
+            rasterProj[2][0] += deltaNdcX;
+            rasterProj[2][1] += deltaNdcY;
+        }
+
+        uniformData.proj = rasterProj;
+        uniformData.view = m_currentView;
+        uniformData.nonJitteredProj = m_currentNonJitteredProj;
+        uniformData.prevProj = m_prevNonJitteredProj;
+        uniformData.prevView = m_prevView;
+
+        uniformData.invViewProj = glm::inverse(uniformData.proj * uniformData.view);
+        uniformData.cameraWorldPos = {camera.GetPosition(), 0.0f};
+        uniformData.frustum = shaderio::Frustum{uniformData.proj * uniformData.view};
+
+        if (m_frozen)
+        {
+            if (!m_frozenDone)
+            {
+                frozenUniformData = uniformData;
+                m_frozenDone = true;
+            }
+
+            uniformData.frozenProj = frozenUniformData.proj;
+            uniformData.frozenView = frozenUniformData.view;
+            uniformData.frozenCameraWorldPos = frozenUniformData.cameraWorldPos;
+            uniformData.frozenFrustum = frozenUniformData.frustum;
+        }
+        else
+        {
+            uniformData.frozenProj = uniformData.proj;
+            uniformData.frozenView = uniformData.view;
+            uniformData.frozenCameraWorldPos = uniformData.cameraWorldPos;
+            uniformData.frozenFrustum = uniformData.frustum;
+        }
+
+        m_renderer2D->BeginScene(camera);
+    }
 
     void Renderer::EndScene()
     {

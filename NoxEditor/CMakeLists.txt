@@ -44,4 +44,11 @@ if(WIN32)
     #        "${CMAKE_CURRENT_SOURCE_DIR}/assets"
     #        "$<TARGET_FILE_DIR:${PROJECT_NAME}>/assets"
     #)
+
+    # Copy Streamline runtime binaries next to the editor executable
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_SOURCE_DIR}/NoxCore/vendors/Streamline/bin/x64"
+        "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
+    )
 endif()

@@ -22,6 +22,7 @@ namespace NRI
         case ImageFormat::R16G16: return vk::Format::eR16G16Unorm;
         case ImageFormat::R32SINT: return vk::Format::eR32Sint;
         case ImageFormat::R32G32_UINT: return vk::Format::eR32G32Uint;
+        case ImageFormat::R32G32_SFLOAT: return vk::Format::eR32G32Sfloat;
             
         case ImageFormat::R16G16_SFLOAT: return vk::Format::eR16G16Sfloat;
         case ImageFormat::R16G16B16A16_SFLOAT: return vk::Format::eR16G16B16A16Sfloat;
@@ -67,6 +68,11 @@ namespace NRI
             format = desc.format == ImageFormat::Surface ? m_deviceVK.getSurfaceFormat().format : MapToVulkanFormat(desc.format);
             aspectFlags = vk::ImageAspectFlagBits::eColor;
             usageFlags = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst;
+            // Only add eStorage if not the surface sRGB swapchain format (prevents VK_ERROR_FORMAT_NOT_SUPPORTED on m_sceneResource)
+            if (desc.format != ImageFormat::Surface)
+            {
+              usageFlags |= vk::ImageUsageFlagBits::eStorage;
+            }
         }
         else if (desc.usage == TextureUsage::ColorResolveAttachment)
         {
@@ -84,7 +90,8 @@ namespace NRI
         {
             format = desc.directFormat == UINT32_MAX ? MapToVulkanFormat(desc.format) : MapToVulkanFormat(desc.directFormat);
             aspectFlags = vk::ImageAspectFlagBits::eColor;
-            usageFlags = vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled;
+            usageFlags = vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc |
+                         vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eColorAttachment;
         }
         
         m_format = format;

@@ -68,7 +68,7 @@ import Tonemapping;
 
         Texture2D hdrTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.hdrTextureIndex, 0));
         float4 hdrColor = hdrTex.Load(int3(pixelCoord, 0));
-
+ 
         // When inspecting debug views (Albedo, Normals, Roughness, EntityID, DepthBuffer), pass through directly!
         if (pushConstant.debugMode != 0)
         {

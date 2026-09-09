@@ -21,6 +21,11 @@ To maintain absolute code safety, stability, and mutual verification, the develo
    - The Assistant provides direct links to the official programming guides, GitHub repositories, and papers for every referenced technology so every algorithm and parameter can be cross-checked.
 3. **Phase Advancement Gate**:
    - No phase begins until the previous phase's interactive debug view mode is visually confirmed running and stable.
+4. **C++ Class Layout Scheme (Strict Engine Convention)**:
+   - **Top**: `public:` section containing all public methods, interface overrides, and inline getters/setters.
+   - **Middle**: `private:` section containing all private helper functions and internal methods.
+   - **Bottom**: `private:` section containing all member variables (`m_*`).
+   - The Assistant must always specify exactly which section (public methods, private methods, or bottom private variables) new code belongs to.
 
 ---
 

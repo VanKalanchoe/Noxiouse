@@ -67,6 +67,13 @@ namespace NRI
             return vk::PresentModeKHR::eFifo; 
         }
         
+        // Prefer Immediate mode for uncapped framerate (800+ FPS), bypassing G-Sync refresh caps
+        if (std::ranges::any_of(availablePresentModes, [](const vk::PresentModeKHR mode) { return vk::PresentModeKHR::eImmediate ==
+mode; }))
+        {
+            return vk::PresentModeKHR::eImmediate;
+        }
+        
         return std::ranges::any_of(availablePresentModes,
                                    [](const vk::PresentModeKHR value) { return vk::PresentModeKHR::eMailbox == value; })
                    ? vk::PresentModeKHR::eMailbox
@@ -169,8 +176,20 @@ namespace NRI
             .pSwapchains = &*m_swapChain,
             .pImageIndices = &imageIndex
         };
-
-        vk::Result result = queue.presentKHR(presentInfoKHR);
+        
+        vk::Result result = vk::Result::eSuccess;
+        if (auto slPresent = m_deviceVK.getStreamlinePresentFn())
+        {
+            result = static_cast<vk::Result>(slPresent(
+                static_cast<VkQueue>(*queue),
+                reinterpret_cast<const VkPresentInfoKHR*>(&presentInfoKHR)
+            ));
+        }
+        else
+        {
+            result = queue.presentKHR(presentInfoKHR);
+        }
+        
         // Due to VULKAN_HPP_HANDLE_ERROR_OUT_OF_DATE_AS_SUCCESS being defined, eErrorOutOfDateKHR can be checked as a result
         // here and does not need to be caught by an exception.
         if ((result == vk::Result::eSuboptimalKHR) || (result == vk::Result::eErrorOutOfDateKHR))

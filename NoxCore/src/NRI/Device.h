@@ -1,6 +1,8 @@
 #pragma once
 #include <memory>
 
+#include <glm/glm.hpp>
+
 #include "Swapchain.h"
 #include "Pipeline.h"
 #include "CommandAllocator.h"
@@ -20,6 +22,41 @@ namespace NRI
         Metal
     };
     
+    enum class UpscaleMode : uint8_t
+    {
+        Off,
+        DLAA,
+        Quality,
+        Balanced,
+        Performance,
+        UltraPerformance
+    };
+
+    struct DLSSParams
+    {
+        Texture* inputColor = nullptr;
+        Texture* outputColor = nullptr;
+        Texture* depth = nullptr;
+        Texture* motionVectors = nullptr;
+        CommandBuffer* commandBuffer = nullptr;
+
+        glm::mat4 nonJitteredProj{ 1.0f };
+        glm::mat4 view{ 1.0f };
+        glm::mat4 prevNonJitteredProj{ 1.0f };
+        glm::mat4 prevView{ 1.0f };
+
+        glm::vec2 jitterOffset{ 0.0f };
+        glm::vec3 cameraPos{ 0.0f };
+        glm::vec3 cameraUp{ 0.0f, 1.0f, 0.0f };
+        glm::vec3 cameraRight{ 1.0f, 0.0f, 0.0f };
+        glm::vec3 cameraFwd{ 0.0f, 0.0f, -1.0f };
+
+        float cameraNear = 0.1f;
+        float cameraFovRad = 0.523599f;
+        bool reset = false;
+        UpscaleMode mode = UpscaleMode::DLAA;
+    };
+    
     class Device
     {
     public:
@@ -34,6 +71,15 @@ namespace NRI
         virtual std::unique_ptr<DescriptorHeap> createDescriptorHeap(const DescriptorHeapDesc& desc) = 0;
         virtual AccelerationStructureBuildSizes getAccelerationStructureBuildSizes(const AccelerationStructureBuildDesc& desc) = 0;
         virtual std::unique_ptr<AccelerationStructure> createAccelerationStructure(const AccelerationStructureDesc& desc) = 0;
+        
+        virtual bool evaluateDLSS(const DLSSParams& params) { return false; }
+        virtual bool isDLSSSupported() const { return false; }
+        virtual bool isStreamlineInitialized() const { return false; }
+        // Must be called whenever the DLSS input/output resolution changes (e.g. viewport resize).
+        // NGX's internal DLSSContext is created at a fixed resolution on first evaluate and is NOT
+        // resized just by tagging differently-sized resources later - it must be explicitly freed
+        // so it gets recreated at the new size on the next evaluate.
+        virtual void resetDLSSViewport() {}
         
         virtual void shutdown() = 0;
         virtual uint32_t getMSAASampleCount() const = 0;

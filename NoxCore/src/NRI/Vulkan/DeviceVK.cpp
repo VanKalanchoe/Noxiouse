@@ -1,6 +1,7 @@
 #include "DeviceVK.h"
 #include <iostream>
 #include <SDL3/SDL_vulkan.h>
+#include <SDL3/SDL_loadso.h>
 
 #include "imgui_impl_vulkan.h"
 #include "imgui_impl_sdl3.h"
@@ -15,6 +16,7 @@
 #include "AccelerationStructureVK.h"
 #include "MemoryAllocatorVK.h"
 #include "NoxCore/Core/core.h"
+#include "NoxCore/Core/Log.h"
 
 // Vulkan-Hpp loads extension functions through a dispatcher.
 // This can create a dispatch table to cache function pointers,
@@ -64,123 +66,130 @@ namespace NRI
     }
 
     AccelerationStructureBuildSizes DeviceVK::getAccelerationStructureBuildSizes(const AccelerationStructureBuildDesc& desc)
+    {
+        vk::BuildAccelerationStructureFlagsKHR vkFlags{};
+        if (desc.flags & AccelerationStructureBuildFlags::AllowUpdate)
+            vkFlags |= vk::BuildAccelerationStructureFlagBitsKHR::eAllowUpdate;
+        if (desc.flags & AccelerationStructureBuildFlags::PreferFastTrace)
+            vkFlags |= vk::BuildAccelerationStructureFlagBitsKHR::ePreferFastTrace;
+        if (desc.flags & AccelerationStructureBuildFlags::PreferFastBuild)
+            vkFlags |= vk::BuildAccelerationStructureFlagBitsKHR::ePreferFastBuild;
+        if (desc.flags & AccelerationStructureBuildFlags::LowMemory)
+            vkFlags |= vk::BuildAccelerationStructureFlagBitsKHR::eLowMemory;
+
+        if (desc.type == AccelerationStructureType::BottomLevel)
         {
-            vk::BuildAccelerationStructureFlagsKHR vkFlags{};
-            if (desc.flags & AccelerationStructureBuildFlags::AllowUpdate)
-                vkFlags |= vk::BuildAccelerationStructureFlagBitsKHR::eAllowUpdate;
-            if (desc.flags & AccelerationStructureBuildFlags::PreferFastTrace)
-                vkFlags |= vk::BuildAccelerationStructureFlagBitsKHR::ePreferFastTrace;
-            if (desc.flags & AccelerationStructureBuildFlags::PreferFastBuild)
-                vkFlags |= vk::BuildAccelerationStructureFlagBitsKHR::ePreferFastBuild;
-            if (desc.flags & AccelerationStructureBuildFlags::LowMemory)
-                vkFlags |= vk::BuildAccelerationStructureFlagBitsKHR::eLowMemory;
+            std::vector<vk::AccelerationStructureGeometryKHR> geometries;
+            geometries.reserve(desc.triangles.size());
+            std::vector<uint32_t> maxPrimitiveCounts;
+            maxPrimitiveCounts.reserve(desc.triangles.size());
 
-            if (desc.type == AccelerationStructureType::BottomLevel)
+            for (const auto& tri : desc.triangles)
             {
-                std::vector<vk::AccelerationStructureGeometryKHR> geometries;
-                geometries.reserve(desc.triangles.size());
-                std::vector<uint32_t> maxPrimitiveCounts;
-                maxPrimitiveCounts.reserve(desc.triangles.size());
-
-                for (const auto& tri : desc.triangles)
-                {
-                    vk::AccelerationStructureGeometryTrianglesDataKHR trianglesData{
-                        .vertexFormat = vk::Format::eR32G32B32Sfloat,
-                        .vertexData   = tri.vertexBufferAddress,
-                        .vertexStride = tri.vertexStride,
-                        .maxVertex    = tri.maxVertex,
-                        .indexType    = vk::IndexType::eUint32,
-                        .indexData    = tri.indexBufferAddress
-                    };
-
-                    vk::AccelerationStructureGeometryKHR geometry{
-                        .geometryType = vk::GeometryTypeKHR::eTriangles,
-                        .geometry     = trianglesData,
-                        .flags        = tri.isOpaque ? vk::GeometryFlagBitsKHR::eOpaque : vk::GeometryFlagsKHR{}
-                    };
-
-                    geometries.push_back(geometry);
-                    maxPrimitiveCounts.push_back(tri.primitiveCount);
-                }
-
-                vk::AccelerationStructureBuildGeometryInfoKHR buildInfo{
-                    .type          = vk::AccelerationStructureTypeKHR::eBottomLevel,
-                    .flags         = vkFlags,
-                    .mode          = vk::BuildAccelerationStructureModeKHR::eBuild,
-                    .geometryCount = static_cast<uint32_t>(geometries.size()),
-                    .pGeometries   = geometries.data()
-                };
-
-                vk::AccelerationStructureBuildSizesInfoKHR vkSizes = m_device.getAccelerationStructureBuildSizesKHR(
-                    vk::AccelerationStructureBuildTypeKHR::eDevice,
-                    buildInfo,
-                    maxPrimitiveCounts
-                );
-
-                return AccelerationStructureBuildSizes{
-                    .accelerationStructureSize = vkSizes.accelerationStructureSize,
-                    .buildScratchSize           = vkSizes.buildScratchSize,
-                    .updateScratchSize          = vkSizes.updateScratchSize
-                };
-            }
-            else // TopLevel
-            {
-                vk::AccelerationStructureGeometryInstancesDataKHR instancesData{
-                    .arrayOfPointers = vk::False,
-                    .data            = desc.instances.instanceBufferAddress
+                vk::AccelerationStructureGeometryTrianglesDataKHR trianglesData{
+                    .vertexFormat = vk::Format::eR32G32B32Sfloat,
+                    .vertexData = tri.vertexBufferAddress,
+                    .vertexStride = tri.vertexStride,
+                    .maxVertex = tri.maxVertex,
+                    .indexType = vk::IndexType::eUint32,
+                    .indexData = tri.indexBufferAddress
                 };
 
                 vk::AccelerationStructureGeometryKHR geometry{
-                    .geometryType = vk::GeometryTypeKHR::eInstances,
-                    .geometry     = instancesData
+                    .geometryType = vk::GeometryTypeKHR::eTriangles,
+                    .geometry = trianglesData,
+                    .flags = tri.isOpaque ? vk::GeometryFlagBitsKHR::eOpaque : vk::GeometryFlagsKHR{}
                 };
 
-                vk::AccelerationStructureBuildGeometryInfoKHR buildInfo{
-                    .type          = vk::AccelerationStructureTypeKHR::eTopLevel,
-                    .flags         = vkFlags,
-                    .mode          = vk::BuildAccelerationStructureModeKHR::eBuild,
-                    .geometryCount = 1,
-                    .pGeometries   = &geometry
-                };
-
-                vk::AccelerationStructureBuildSizesInfoKHR vkSizes = m_device.getAccelerationStructureBuildSizesKHR(
-                    vk::AccelerationStructureBuildTypeKHR::eDevice,
-                    buildInfo,
-                    { desc.instances.instanceCount }
-                );
-
-                return AccelerationStructureBuildSizes{
-                    .accelerationStructureSize = vkSizes.accelerationStructureSize,
-                    .buildScratchSize           = vkSizes.buildScratchSize,
-                    .updateScratchSize          = vkSizes.updateScratchSize
-                };
+                geometries.push_back(geometry);
+                maxPrimitiveCounts.push_back(tri.primitiveCount);
             }
-        }
 
-        std::unique_ptr<AccelerationStructure> DeviceVK::createAccelerationStructure(const AccelerationStructureDesc& desc)
-        {
-            return std::make_unique<AccelerationStructureVK>(*this, desc);
+            vk::AccelerationStructureBuildGeometryInfoKHR buildInfo{
+                .type = vk::AccelerationStructureTypeKHR::eBottomLevel,
+                .flags = vkFlags,
+                .mode = vk::BuildAccelerationStructureModeKHR::eBuild,
+                .geometryCount = static_cast<uint32_t>(geometries.size()),
+                .pGeometries = geometries.data()
+            };
+
+            vk::AccelerationStructureBuildSizesInfoKHR vkSizes = m_device.getAccelerationStructureBuildSizesKHR(
+                vk::AccelerationStructureBuildTypeKHR::eDevice,
+                buildInfo,
+                maxPrimitiveCounts
+            );
+
+            return AccelerationStructureBuildSizes{
+                .accelerationStructureSize = vkSizes.accelerationStructureSize,
+                .buildScratchSize = vkSizes.buildScratchSize,
+                .updateScratchSize = vkSizes.updateScratchSize
+            };
         }
+        else // TopLevel
+        {
+            vk::AccelerationStructureGeometryInstancesDataKHR instancesData{
+                .arrayOfPointers = vk::False,
+                .data = desc.instances.instanceBufferAddress
+            };
+
+            vk::AccelerationStructureGeometryKHR geometry{
+                .geometryType = vk::GeometryTypeKHR::eInstances,
+                .geometry = instancesData
+            };
+
+            vk::AccelerationStructureBuildGeometryInfoKHR buildInfo{
+                .type = vk::AccelerationStructureTypeKHR::eTopLevel,
+                .flags = vkFlags,
+                .mode = vk::BuildAccelerationStructureModeKHR::eBuild,
+                .geometryCount = 1,
+                .pGeometries = &geometry
+            };
+
+            vk::AccelerationStructureBuildSizesInfoKHR vkSizes = m_device.getAccelerationStructureBuildSizesKHR(
+                vk::AccelerationStructureBuildTypeKHR::eDevice,
+                buildInfo,
+                {desc.instances.instanceCount}
+            );
+
+            return AccelerationStructureBuildSizes{
+                .accelerationStructureSize = vkSizes.accelerationStructureSize,
+                .buildScratchSize = vkSizes.buildScratchSize,
+                .updateScratchSize = vkSizes.updateScratchSize
+            };
+        }
+    }
+
+    std::unique_ptr<AccelerationStructure> DeviceVK::createAccelerationStructure(const AccelerationStructureDesc& desc)
+    {
+        return std::make_unique<AccelerationStructureVK>(*this, desc);
+    }
 
     std::vector<const char*> requiredDeviceExtension =
     {
         vk::KHRSwapchainExtensionName,
         vk::KHRUnifiedImageLayoutsExtensionName,
-        
+        vk::KHRPushDescriptorExtensionName, // <-- Required by Streamline
+
+        // NVIDIA DLSS Extensions (Required by NGX on Vulkan, confirmed via slGetFeatureRequirements)
+        "VK_NVX_binary_import",
+        "VK_NVX_image_view_handle",
+        vk::KHRBufferDeviceAddressExtensionName,
+        vk::EXTBufferDeviceAddressExtensionName,
+
         // Descriptorheap + untyped Pointer
         vk::EXTDescriptorHeapExtensionName,
         vk::KHRMaintenance5ExtensionName,
         vk::KHRShaderUntypedPointersExtensionName,
         vk::KHRShaderNonSemanticInfoExtensionName,
-        
+
         // Shader Objects
         vk::EXTShaderObjectExtensionName,
         vk::EXTExtendedDynamicState3ExtensionName,
         vk::EXTVertexInputDynamicStateExtensionName,
-        
+
         // Task + Mesh Shader
         vk::EXTMeshShaderExtensionName,
-        
+
         // Hardware Ray Tracing (Khronos Tutorial Course 18)
         vk::KHRAccelerationStructureExtensionName,
         vk::KHRRayQueryExtensionName,
@@ -203,14 +212,106 @@ namespace NRI
             m_allocator.reset();
         }
     }
-    
+
     void DeviceVK::shutdown()
     {
+        if (m_streamlineInitialized)
+        {
+            slShutdown();
+            m_streamlineInitialized = false;
+        }
         m_deviceInitialized = false;
     }
 
     void DeviceVK::initVulkan(Nox::Window& window)
     {
+        // 1. Initialize NVIDIA Streamline before Vulkan creation
+        sl::Preferences pref{};
+        pref.showConsole = true;
+        pref.logLevel = sl::LogLevel::eVerbose; // Mutes verbose NGX / Streamline config dumps
+        pref.pathsToPlugins = nullptr;
+        pref.numPathsToPlugins = 0; // Searches application exe directory
+        pref.applicationId = 231313;
+        pref.engine = sl::EngineType::eCustom;
+        pref.engineVersion = "1.0.0";
+        pref.projectId = "09481010-0ae3-4697-92e9-7ba7e9ee7ead";
+        pref.renderAPI = sl::RenderAPI::eVulkan;
+        // Explicitly clear eAllowOTA so Streamline doesn't scan ProgramData or contact OTA servers
+        pref.flags = sl::PreferenceFlags::eDisableCLStateTracking
+            | sl::PreferenceFlags::eDisableDebugText
+            | sl::PreferenceFlags::eUseManualHooking
+            | sl::PreferenceFlags::eUseFrameBasedResourceTagging;
+
+        // Only log critical errors and DLSS context messages from Streamline / NGX
+        pref.logMessageCallback = [](sl::LogType type, const char* msg)
+        {
+            if (type == sl::LogType::eError)
+            {
+                NOX_CORE_ERROR("[Streamline] {}", msg);
+            }
+            else if (type == sl::LogType::eWarn)
+            {
+                NOX_CORE_WARN("[Streamline] {}", msg);
+            }
+            else if (type == sl::LogType::eInfo)
+            {
+                std::string_view sv(msg);
+                if (sv.find("DLSS") != std::string_view::npos || sv.find("NGX") != std::string_view::npos ||
+                    sv.find("extents") != std::string_view::npos || sv.find("optimal") != std::string_view::npos)
+                {
+                    NOX_CORE_INFO("[Streamline] {}", msg);
+                }
+            }
+        };
+        static const sl::Feature s_FeaturesToLoad[] = {
+            sl::kFeatureDLSS,
+            sl::kFeatureDLSS_RR
+        };
+        pref.featuresToLoad = s_FeaturesToLoad;
+        pref.numFeaturesToLoad = static_cast<uint32_t>(std::size(s_FeaturesToLoad));
+
+        sl::Result initRes = slInit(pref, sl::kSDKVersion);
+        if (initRes == sl::Result::eOk)
+        {
+            m_streamlineInitialized = true;
+            NOX_CORE_INFO("[Streamline] Initialized successfully.");
+        }
+        else
+        {
+            NOX_CORE_WARN("[Streamline] slInit failed with result: {}", (int)initRes);
+        }
+
+        // 1.5 Manual hooking requires US to query what SL/NGX needs from the VkInstance/VkDevice
+        // BEFORE creating them (ProgrammingGuideManualHooking.md, section 5.2.1). We were previously
+        // creating the device with a hand-guessed extension/feature list and never checking this at all.
+        if (m_streamlineInitialized)
+        {
+            auto logFeatureRequirements = [](sl::Feature feature, const char* name)
+            {
+                sl::FeatureRequirements reqs{};
+                sl::Result res = slGetFeatureRequirements(feature, reqs);
+                if (res != sl::Result::eOk)
+                {
+                    NOX_CORE_WARN("[Streamline] slGetFeatureRequirements({}) failed: {}", name, (int)res);
+                    return;
+                }
+                NOX_CORE_INFO("[Streamline] {} requirements: vkGraphicsQueues={}, vkComputeQueues={}, "
+                              "deviceExt={}, instanceExt={}, vk12Features={}, vk13Features={}",
+                              name, reqs.vkNumGraphicsQueuesRequired, reqs.vkNumComputeQueuesRequired,
+                              reqs.vkNumDeviceExtensions, reqs.vkNumInstanceExtensions, reqs.vkNumFeatures12, reqs.vkNumFeatures13);
+                for (uint32_t i = 0; i < reqs.vkNumDeviceExtensions; ++i)
+                    NOX_CORE_INFO("[Streamline]   {} needs device extension: {}", name, reqs.vkDeviceExtensions[i]);
+                for (uint32_t i = 0; i < reqs.vkNumInstanceExtensions; ++i)
+                    NOX_CORE_INFO("[Streamline]   {} needs instance extension: {}", name, reqs.vkInstanceExtensions[i]);
+                for (uint32_t i = 0; i < reqs.vkNumFeatures12; ++i)
+                    NOX_CORE_INFO("[Streamline]   {} needs VK1.2 feature: {}", name, reqs.vkFeatures12[i]);
+                for (uint32_t i = 0; i < reqs.vkNumFeatures13; ++i)
+                    NOX_CORE_INFO("[Streamline]   {} needs VK1.3 feature: {}", name, reqs.vkFeatures13[i]);
+            };
+            logFeatureRequirements(sl::kFeatureDLSS, "DLSS");
+            logFeatureRequirements(sl::kFeatureDLSS_RR, "DLSS_RR");
+        }
+
         createInstance();
         setupDebugMessenger();
         createSurface(window);
@@ -218,6 +319,58 @@ namespace NRI
         m_msaaSamples = getMaxUsableSampleCount();
         createLogicalDevice();
         initDeviceCapabilities();
+
+        // 2. Register Vulkan Device with Streamline
+        if (m_streamlineInitialized)
+        {
+            sl::VulkanInfo vkInfo{};
+            vkInfo.device = static_cast<VkDevice>(*m_device);
+            vkInfo.instance = static_cast<VkInstance>(*m_instance);
+            vkInfo.physicalDevice = static_cast<VkPhysicalDevice>(*m_physicalDevice);
+            vkInfo.graphicsQueueFamily = m_queueIndex;
+            vkInfo.graphicsQueueIndex = 0;
+            vkInfo.computeQueueFamily = m_queueIndex;
+            vkInfo.computeQueueIndex = 0;
+
+            sl::Result vkRes = slSetVulkanInfo(vkInfo);
+            if (vkRes == sl::Result::eOk)
+            {
+                NOX_CORE_INFO("[Streamline] Vulkan device registered successfully.");
+                
+                // Resolve Streamline's present proxy via SDL3 so SwapchainVK routes presentation through Streamline
+                SDL_SharedObject* slInterposer = SDL_LoadObject("sl.interposer.dll");
+                if (slInterposer)
+                {
+                    m_slQueuePresentKHR = reinterpret_cast<PFN_vkQueuePresentKHR>(SDL_LoadFunction(slInterposer,
+"vkQueuePresentKHR"));
+                    if (m_slQueuePresentKHR)
+                    {
+                        NOX_CORE_INFO("[Streamline] Hooked vkQueuePresentKHR from sl.interposer.dll");
+                    }
+                }
+                sl::AdapterInfo adapterInfo{};
+                adapterInfo.vkPhysicalDevice = static_cast<VkPhysicalDevice>(*m_physicalDevice);
+
+                bool dlssLoaded = false;
+                slIsFeatureLoaded(sl::kFeatureDLSS, dlssLoaded);
+                sl::Result dlssRes = slIsFeatureSupported(sl::kFeatureDLSS, adapterInfo);
+                m_slDLSSSupported = (dlssRes == sl::Result::eOk);
+
+                bool dlssRRLoaded = false;
+                slIsFeatureLoaded(sl::kFeatureDLSS_RR, dlssRRLoaded);
+                sl::Result dlssRRRes = slIsFeatureSupported(sl::kFeatureDLSS_RR, adapterInfo);
+                m_slDLSS_RRSupported = (dlssRRRes == sl::Result::eOk);
+
+                NOX_CORE_INFO("[Streamline] DLSS Super Resolution - Loaded: {}, Supported: {} (code: {})", dlssLoaded,
+                              m_slDLSSSupported, (int)dlssRes);
+                NOX_CORE_INFO("[Streamline] DLSS Ray Reconstruction - Loaded: {}, Supported: {} (code: {})", dlssRRLoaded,
+                              m_slDLSS_RRSupported, (int)dlssRRRes);
+            }
+            else
+            {
+                NOX_CORE_WARN("[Streamline] slSetVulkanInfo failed with result: {}", (int)vkRes);
+            }
+        }
     }
 
     void DeviceVK::createInstance()
@@ -276,7 +429,7 @@ namespace NRI
             .ppEnabledExtensionNames = requiredExtensions.data()
         };
         m_instance = vk::raii::Instance(m_context, createInfo);
-        
+
         // Load function pointers for the Vulkan instance.
         {
             // It is complicated to explain how Vulkan is loaded, but as an oversimplification:
@@ -345,14 +498,14 @@ namespace NRI
 
         // Check if the physicalDevice supports the required features
         auto features = physicalDevice.template getFeatures2<vk::PhysicalDeviceFeatures2,
-                                                                 vk::PhysicalDeviceVulkan11Features,
-                                                                 vk::PhysicalDeviceVulkan13Features,
-                                                                 /*vk::PhysicalDeviceShaderObjectFeaturesEXT,*/
-                                                                 vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT,
-                                                                 vk::PhysicalDeviceMeshShaderFeaturesEXT,
-                                                                 vk::PhysicalDeviceAccelerationStructureFeaturesKHR,
-                                                                 vk::PhysicalDeviceRayQueryFeaturesKHR,
-                                                                 vk::PhysicalDeviceRayTracingPipelineFeaturesKHR>();
+                                                             vk::PhysicalDeviceVulkan11Features,
+                                                             vk::PhysicalDeviceVulkan13Features,
+                                                             /*vk::PhysicalDeviceShaderObjectFeaturesEXT,*/
+                                                             vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT,
+                                                             vk::PhysicalDeviceMeshShaderFeaturesEXT,
+                                                             vk::PhysicalDeviceAccelerationStructureFeaturesKHR,
+                                                             vk::PhysicalDeviceRayQueryFeaturesKHR,
+                                                             vk::PhysicalDeviceRayTracingPipelineFeaturesKHR>();
         bool supportsRequiredFeatures = features.template get<vk::PhysicalDeviceFeatures2>().features.samplerAnisotropy &&
             features.template get<vk::PhysicalDeviceFeatures2>().features.geometryShader && // Visability buffer
             features.template get<vk::PhysicalDeviceVulkan11Features>().shaderDrawParameters &&
@@ -360,10 +513,10 @@ namespace NRI
             features.template get<vk::PhysicalDeviceVulkan13Features>().synchronization2 &&
             /*features.template get<vk::PhysicalDeviceShaderObjectFeaturesEXT>().shaderObject &&*/ // dont force to support both legacy pipeline and shaderobject
             features.template get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>().extendedDynamicState &&
-                features.template get<vk::PhysicalDeviceMeshShaderFeaturesEXT>().meshShader &&
-                features.template get<vk::PhysicalDeviceAccelerationStructureFeaturesKHR>().accelerationStructure &&
-                features.template get<vk::PhysicalDeviceRayQueryFeaturesKHR>().rayQuery &&
-                features.template get<vk::PhysicalDeviceRayTracingPipelineFeaturesKHR>().rayTracingPipeline;
+            features.template get<vk::PhysicalDeviceMeshShaderFeaturesEXT>().meshShader &&
+            features.template get<vk::PhysicalDeviceAccelerationStructureFeaturesKHR>().accelerationStructure &&
+            features.template get<vk::PhysicalDeviceRayQueryFeaturesKHR>().rayQuery &&
+            features.template get<vk::PhysicalDeviceRayTracingPipelineFeaturesKHR>().rayTracingPipeline;
         // Return true if the physicalDevice meets all the criteria
         return supportsVulkan1_3 && supportsGraphics && supportsAllRequiredExtensions && supportsRequiredFeatures;
     }
@@ -419,7 +572,7 @@ namespace NRI
                            vk::PhysicalDeviceAccelerationStructureFeaturesKHR,
                            vk::PhysicalDeviceRayQueryFeaturesKHR,
                            vk::PhysicalDeviceRayTracingPipelineFeaturesKHR
-        >
+            >
             featureChain = {
                 {
                     .features = {
@@ -439,10 +592,17 @@ namespace NRI
                     .shaderStorageBufferArrayNonUniformIndexing = true,
                     .runtimeDescriptorArray = true,
                     .scalarBlockLayout = true,
-                    .bufferDeviceAddress = true
+                    .timelineSemaphore = true, // <-- Required by Streamline
+                    .bufferDeviceAddress = true // <-- Required by Streamline
                 },
                 // vk::PhysicalDeviceVulkan12Features
-                {.shaderDemoteToHelperInvocation = true, .synchronization2 = true, .dynamicRendering = true}, // vk::PhysicalDeviceVulkan13Features
+                {
+                    .privateData = true // <-- Required by Streamline
+                    ,
+                    .shaderDemoteToHelperInvocation = true,
+                    .synchronization2 = true,
+                    .dynamicRendering = true // <-- Required by Streamline
+                }, // vk::PhysicalDeviceVulkan13Features
                 {.shaderObject = m_shaderObjectsEnabled}, // vk::PhysicalDeviceVulkan14Features
                 {.extendedDynamicState = true}, // vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT
                 {
@@ -462,10 +622,10 @@ namespace NRI
                 {.shaderUntypedPointers = true},
                 {.maintenance5 = true},
                 {.taskShader = true, .meshShader = true},
-            {.unifiedImageLayouts = true},
-        {.accelerationStructure = true},
-        {.rayQuery = true},
-{.rayTracingPipeline = true}
+                {.unifiedImageLayouts = true},
+                {.accelerationStructure = true},
+                {.rayQuery = true},
+                {.rayTracingPipeline = true}
             };
 
         // create a Device
@@ -481,7 +641,7 @@ namespace NRI
 
         m_device = vk::raii::Device(m_physicalDevice, deviceCreateInfo);
         m_queue = vk::raii::Queue(m_device, m_queueIndex, 0);
-        
+
         // Load device-level function pointers for Vulkan-Hpp wrappers.
         // Before we only loaded the function pointers for the instance-level functions.
         // After creating the logical device, we can load the function pointers that depend on it to skip the
@@ -540,6 +700,12 @@ namespace NRI
             extensions.push_back(vk::EXTDebugUtilsExtensionName);
         }
 
+        // Required by Streamline/NGX (confirmed via slGetFeatureRequirements) but never requested before,
+        // since manual hooking means SL cannot inject these into instance creation itself.
+        extensions.push_back(vk::KHRGetPhysicalDeviceProperties2ExtensionName);
+        extensions.push_back(vk::KHRExternalMemoryCapabilitiesExtensionName);
+        extensions.push_back(vk::KHRExternalSemaphoreCapabilitiesExtensionName);
+
         return extensions;
     }
 
@@ -551,6 +717,273 @@ namespace NRI
         std::cerr << "validation layer: type " << to_string(type) << " msg: " << pCallbackData->pMessage << std::endl;
 
         return vk::False;
+    }
+
+    void DeviceVK::resetDLSSViewport()
+    {
+        if (!m_streamlineInitialized)
+            return;
+
+        // NGX creates its internal DLSSContext at whatever resolution it sees on the first evaluate
+        // for this viewport and does NOT resize it just because we later tag differently-sized
+        // resources - it must be explicitly freed so the next evaluateDLSS() recreates it at the
+        // new size. Without this, evaluate silently no-ops forever after any resize.
+        sl::ViewportHandle viewport{0};
+        if (m_slDLSSSupported)
+        {
+            sl::Result res = slFreeResources(sl::kFeatureDLSS, viewport);
+            if (res != sl::Result::eOk)
+            {
+                NOX_CORE_WARN("[Streamline] slFreeResources(DLSS) failed: {}", (int)res);
+            }
+        }
+        if (m_slDLSS_RRSupported)
+        {
+            slFreeResources(sl::kFeatureDLSS_RR, viewport);
+        }
+    }
+
+    void DeviceVK::ensureDummyDescriptorSet()
+    {
+        if (m_dummyDescriptorSetReady)
+            return;
+
+        vk::DescriptorSetLayoutCreateInfo layoutInfo{.bindingCount = 0, .pBindings = nullptr};
+        m_dummyDescriptorSetLayout = vk::raii::DescriptorSetLayout(m_device, layoutInfo);
+
+        vk::DescriptorPoolCreateInfo poolInfo{.maxSets = 1, .poolSizeCount = 0, .pPoolSizes = nullptr};
+        m_dummyDescriptorPool = vk::raii::DescriptorPool(m_device, poolInfo);
+
+        vk::DescriptorSetAllocateInfo allocInfo{
+            .descriptorPool = *m_dummyDescriptorPool,
+            .descriptorSetCount = 1,
+            .pSetLayouts = &*m_dummyDescriptorSetLayout
+        };
+        vk::raii::DescriptorSets sets(m_device, allocInfo);
+        m_dummyDescriptorSet = sets.front().release();
+
+        vk::PipelineLayoutCreateInfo pipelineLayoutInfo{
+            .setLayoutCount = 1,
+            .pSetLayouts = &*m_dummyDescriptorSetLayout
+        };
+        m_dummyPipelineLayout = vk::raii::PipelineLayout(m_device, pipelineLayoutInfo);
+
+        m_dummyDescriptorSetReady = true;
+    }
+
+    bool DeviceVK::evaluateDLSS(const DLSSParams& params)
+    {
+        if (!m_streamlineInitialized || !m_slDLSSSupported)
+            return false;
+
+        if (!params.inputColor || !params.outputColor || !params.depth || !params.motionVectors || !params.commandBuffer)
+            return false;
+
+        auto* inputColorVK = static_cast<TextureVK*>(params.inputColor);
+        auto* outputColorVK = static_cast<TextureVK*>(params.outputColor);
+        auto* depthVK = static_cast<TextureVK*>(params.depth);
+        auto* mvecVK = static_cast<TextureVK*>(params.motionVectors);
+        auto* cmdBufferVK = static_cast<CommandBufferVK*>(params.commandBuffer);
+        
+        // 1. Obtain unique frame token
+        sl::FrameToken* frameToken = nullptr;
+        m_slFrameIndex++;
+        sl::Result tokenRes = slGetNewFrameToken(frameToken, &m_slFrameIndex);
+        if (tokenRes != sl::Result::eOk || !frameToken)
+        {
+            NOX_CORE_WARN("[Streamline] slGetNewFrameToken failed: {}", (int)tokenRes);
+            return false;
+        }
+
+        sl::ViewportHandle viewport{0};
+
+        auto glmToSl = [](const glm::mat4& m) -> sl::float4x4
+        {
+            sl::float4x4 r{};
+            glm::mat4 t = glm::transpose(m);
+            memcpy(&r, &t, sizeof(t));
+            return r;
+        };
+
+        // Common Constants for Streamline DLSS
+        sl::Constants consts{};
+        consts.cameraViewToClip = glmToSl(params.nonJitteredProj);
+        consts.clipToCameraView = glmToSl(glm::inverse(params.nonJitteredProj));
+
+        glm::mat4 currentViewProj = params.nonJitteredProj * params.view;
+        glm::mat4 prevViewProj = params.prevNonJitteredProj * params.prevView;
+        glm::mat4 clipToPrevClip = prevViewProj * glm::inverse(currentViewProj);
+        consts.clipToPrevClip = glmToSl(clipToPrevClip);
+        consts.prevClipToClip = glmToSl(glm::inverse(clipToPrevClip));
+
+        consts.jitterOffset = {params.jitterOffset.x, params.jitterOffset.y};
+        consts.mvecScale = {1.0f, 1.0f};
+        consts.cameraPinholeOffset = {0.0f, 0.0f};
+
+        consts.cameraPos = {params.cameraPos.x, params.cameraPos.y, params.cameraPos.z};
+        consts.cameraUp = {params.cameraUp.x, params.cameraUp.y, params.cameraUp.z};
+        consts.cameraRight = {params.cameraRight.x, params.cameraRight.y, params.cameraRight.z};
+        consts.cameraFwd = {params.cameraFwd.x, params.cameraFwd.y, params.cameraFwd.z};
+
+        consts.cameraNear = params.cameraNear;
+        consts.cameraFar = 10000.0f;
+        consts.cameraFOV = params.cameraFovRad;
+        float aspect = (outputColorVK->GetHeight() > 0)
+                               ? (static_cast<float>(outputColorVK->GetWidth()) / static_cast<float>(outputColorVK->GetHeight()))
+                               : 1.777f;
+        consts.cameraAspectRatio = aspect;
+
+        consts.depthInverted = sl::Boolean::eTrue;
+        consts.cameraMotionIncluded = sl::Boolean::eTrue; // Our G-buffer motion vectors already include camera motion; Streamline uses them directly
+        consts.motionVectors3D = sl::Boolean::eFalse;
+        consts.motionVectorsJittered = sl::Boolean::eFalse;
+        consts.motionVectorsDilated = sl::Boolean::eFalse;
+        consts.orthographicProjection = sl::Boolean::eFalse;
+        consts.reset = params.reset ? sl::Boolean::eTrue : sl::Boolean::eFalse;
+
+            sl::Result constRes = slSetConstants(consts, *frameToken, viewport);
+            if (constRes != sl::Result::eOk)
+            {
+                NOX_CORE_WARN("[Streamline] slSetConstants failed: {}", (int)constRes);
+                return false;
+            }
+
+            // 3. DLSS Options
+            sl::DLSSOptions dlssOptions{};
+            switch (params.mode)
+            {
+            case UpscaleMode::Off: dlssOptions.mode = sl::DLSSMode::eOff; break;
+            case UpscaleMode::DLAA: dlssOptions.mode = sl::DLSSMode::eDLAA; break;
+            case UpscaleMode::Quality: dlssOptions.mode = sl::DLSSMode::eMaxQuality; break;
+            case UpscaleMode::Balanced: dlssOptions.mode = sl::DLSSMode::eBalanced; break;
+            case UpscaleMode::Performance: dlssOptions.mode = sl::DLSSMode::eMaxPerformance; break;
+            case UpscaleMode::UltraPerformance: dlssOptions.mode = sl::DLSSMode::eUltraPerformance; break;
+            }
+
+            dlssOptions.outputWidth = outputColorVK->GetWidth();
+            dlssOptions.outputHeight = outputColorVK->GetHeight();
+            dlssOptions.colorBuffersHDR = sl::Boolean::eTrue;
+            dlssOptions.preExposure = 1.0f;
+            dlssOptions.exposureScale = 1.0f;
+            dlssOptions.useAutoExposure = sl::Boolean::eTrue; // Enable DLSS auto-exposure calculation
+            dlssOptions.dlaaPreset = sl::DLSSPreset::ePresetK;
+            dlssOptions.qualityPreset = sl::DLSSPreset::ePresetK;
+            dlssOptions.balancedPreset = sl::DLSSPreset::ePresetK;
+            dlssOptions.performancePreset = sl::DLSSPreset::ePresetM;
+            dlssOptions.ultraPerformancePreset = sl::DLSSPreset::ePresetL;
+
+            sl::Result optRes = slDLSSSetOptions(viewport, dlssOptions);
+            if (optRes != sl::Result::eOk)
+            {
+                NOX_CORE_WARN("[Streamline] slDLSSSetOptions failed: {}", (int)optRes);
+                return false;
+            }
+
+            // 4. Tag Resources with explicit usage flags & subresource range for Depth
+            VkCommandBuffer vkCmd = static_cast<VkCommandBuffer>(*cmdBufferVK->getActiveNativeBuffer());
+
+            sl::Resource colorIn{};
+            colorIn.type = sl::ResourceType::eTex2d;
+            colorIn.native = static_cast<VkImage>(*inputColorVK->getNativeImage());
+            colorIn.view = static_cast<VkImageView>(*inputColorVK->getNativeView());
+            colorIn.nativeFormat = static_cast<uint32_t>(inputColorVK->getFormat());
+            colorIn.width = inputColorVK->GetWidth();
+            colorIn.height = inputColorVK->GetHeight();
+            colorIn.state = VK_IMAGE_LAYOUT_GENERAL;
+            colorIn.mipLevels = 1;
+            colorIn.arrayLayers = 1;
+            colorIn.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
+
+            sl::Resource colorOut{};
+            colorOut.type = sl::ResourceType::eTex2d;
+            colorOut.native = static_cast<VkImage>(*outputColorVK->getNativeImage());
+            colorOut.view = static_cast<VkImageView>(*outputColorVK->getNativeView());
+            colorOut.nativeFormat = static_cast<uint32_t>(outputColorVK->getFormat());
+            colorOut.width = outputColorVK->GetWidth();
+            colorOut.height = outputColorVK->GetHeight();
+            colorOut.state = VK_IMAGE_LAYOUT_GENERAL;
+            colorOut.mipLevels = 1;
+            colorOut.arrayLayers = 1;
+            colorOut.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
+
+            sl::SubresourceRange depthRange{};
+            depthRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+            depthRange.baseMipLevel = 0;
+            depthRange.levelCount = 1;
+            depthRange.baseArrayLayer = 0;
+            depthRange.layerCount = 1;
+
+            sl::Resource depth{};
+            depth.next = &depthRange; // Essential for Vulkan: tells NGX to sample depth aspect, not color
+            depth.type = sl::ResourceType::eTex2d;
+            depth.native = static_cast<VkImage>(*depthVK->getNativeImage());
+            depth.view = static_cast<VkImageView>(*depthVK->getNativeView());
+            depth.nativeFormat = static_cast<uint32_t>(depthVK->getFormat());
+            depth.width = depthVK->GetWidth();
+            depth.height = depthVK->GetHeight();
+            depth.state = VK_IMAGE_LAYOUT_GENERAL;
+            depth.mipLevels = 1;
+            depth.arrayLayers = 1;
+            depth.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+
+            sl::Resource mvec{};
+            mvec.type = sl::ResourceType::eTex2d;
+            mvec.native = static_cast<VkImage>(*mvecVK->getNativeImage());
+            mvec.view = static_cast<VkImageView>(*mvecVK->getNativeView());
+            mvec.nativeFormat = static_cast<uint32_t>(mvecVK->getFormat());
+            mvec.width = mvecVK->GetWidth();
+            mvec.height = mvecVK->GetHeight();
+            mvec.state = VK_IMAGE_LAYOUT_GENERAL;
+            mvec.mipLevels = 1;
+            mvec.arrayLayers = 1;
+            mvec.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
+        
+        sl::Extent inputExtent{0, 0, inputColorVK->GetWidth(), inputColorVK->GetHeight()};
+        sl::Extent outputExtent{0, 0, outputColorVK->GetWidth(), outputColorVK->GetHeight()};
+        sl::Extent depthExtent{0, 0, depthVK->GetWidth(), depthVK->GetHeight()};
+        sl::Extent mvecExtent{0, 0, mvecVK->GetWidth(), mvecVK->GetHeight()};
+        sl::ResourceTag tags[] = {
+            sl::ResourceTag(&colorIn, sl::kBufferTypeScalingInputColor, sl::ResourceLifecycle::eValidUntilEvaluate, &inputExtent),
+            sl::ResourceTag(&colorOut, sl::kBufferTypeScalingOutputColor, sl::ResourceLifecycle::eValidUntilEvaluate, &outputExtent),
+            sl::ResourceTag(&depth, sl::kBufferTypeDepth, sl::ResourceLifecycle::eValidUntilEvaluate, &depthExtent),
+            sl::ResourceTag(&mvec, sl::kBufferTypeMotionVectors, sl::ResourceLifecycle::eValidUntilEvaluate, &mvecExtent)
+        };
+
+        sl::Result tagRes = slSetTagForFrame(*frameToken, viewport, tags, static_cast<uint32_t>(std::size(tags)),
+                                             reinterpret_cast<sl::CommandBuffer*>(vkCmd));
+        if (tagRes != sl::Result::eOk)
+        {
+            NOX_CORE_WARN("[Streamline] slSetTagForFrame failed: {}", (int)tagRes);
+            return false;
+        }
+
+        // 4.5 Workaround for https://github.com/NVIDIA-RTX/Streamline/issues/109 - Streamline's internal
+        // compute dispatch fails to read our tagged images when this command buffer has only ever used
+        // VK_EXT_descriptor_heap binding (vkCmdBindResourceHeapEXT/vkCmdBindSamplerHeapEXT) and never a
+        // classic descriptor set. Bind one dummy (empty) descriptor set right before evaluate.
+        ensureDummyDescriptorSet();
+        vk::CommandBuffer(vkCmd).bindDescriptorSets(vk::PipelineBindPoint::eCompute, *m_dummyPipelineLayout, 0, {m_dummyDescriptorSet}, {});
+
+        // 5. Evaluate DLSS
+        const sl::BaseStructure* inputs[] = {&viewport};
+        sl::Result evalRes = slEvaluateFeature(sl::kFeatureDLSS, *frameToken, inputs, static_cast<uint32_t>(std::size(inputs)),
+                                               reinterpret_cast<sl::CommandBuffer*>(vkCmd));
+        static bool s_firstEvalLogged = false;
+        if (!s_firstEvalLogged)
+        {
+            s_firstEvalLogged = true;
+            NOX_CORE_INFO("[Streamline] First evaluateDLSS: tagRes={}, evalRes={}", (int)tagRes, (int)evalRes);
+        }
+        if (evalRes != sl::Result::eOk)
+        {
+            NOX_CORE_WARN("[Streamline] slEvaluateFeature(DLSS) failed: {}", (int)evalRes);
+            return false;
+        }
+
+        // 6. Memory barrier to ensure subsequent shader reads see DLSS writes
+        cmdBufferVK->executionBarrier();
+
+        return true;
     }
 
     //----------------------------------------------
@@ -656,8 +1089,8 @@ namespace NRI
 #if IMGUI_VERSION_NUM >= 19280
         vk::DescriptorPoolSize poolSizes[] =
         {
-            { vk::DescriptorType::eSampledImage, IMGUI_IMPL_VULKAN_MINIMUM_SAMPLED_IMAGE_POOL_SIZE + maxCustomTextures },
-            { vk::DescriptorType::eSampler, IMGUI_IMPL_VULKAN_MINIMUM_SAMPLER_POOL_SIZE + maxCustomTextures },
+            {vk::DescriptorType::eSampledImage, IMGUI_IMPL_VULKAN_MINIMUM_SAMPLED_IMAGE_POOL_SIZE + maxCustomTextures},
+            {vk::DescriptorType::eSampler, IMGUI_IMPL_VULKAN_MINIMUM_SAMPLER_POOL_SIZE + maxCustomTextures},
         };
 
         uint32_t maxSets = 0;
@@ -673,13 +1106,13 @@ namespace NRI
         };
 
         m_uiDescriptorPool = vk::raii::DescriptorPool(m_device, poolInfo);
-        
+
 #elif IMGUI_VERSION_NUM >= 19250
         // Backend uses a small number of descriptors per font atlas + as many as additional calls done to ImGui_ImplVulkan_AddTexture().
-        #define IM_COUNTOF(_ARR)            ((int)(sizeof(_ARR) / sizeof(*(_ARR))))     // Size of a static C-style array. Don't use on pointers!
+#define IM_COUNTOF(_ARR)            ((int)(sizeof(_ARR) / sizeof(*(_ARR))))     // Size of a static C-style array. Don't use on pointers!
         vk::DescriptorPoolSize poolSizes[] =
         {
-            { vk::DescriptorType::eCombinedImageSampler, maxCustomTextures }
+            {vk::DescriptorType::eCombinedImageSampler, maxCustomTextures}
         };
 
         uint32_t maxSets = 0;
@@ -696,7 +1129,7 @@ namespace NRI
 
         m_uiDescriptorPool = vk::raii::DescriptorPool(m_device, poolInfo);
 #endif
-        
+
         static VkFormat imageFormats[] = {static_cast<VkFormat>(getSurfaceFormat().format)};
 
         // Setup Platform/Renderer backends
@@ -723,17 +1156,17 @@ namespace NRI
         init_info.CheckVkResultFn = check_vk_result;
         ImGui_ImplVulkan_Init(&init_info);
     }
-    
+
     void DeviceVK::shutdownImGui()
     {
         ImGui_ImplVulkan_Shutdown();
     }
-    
+
     void DeviceVK::beginImGui()
     {
         ImGui_ImplVulkan_NewFrame();
     }
-    
+
     void DeviceVK::endImGui()
     {
         // Update and Render additional Platform Windows

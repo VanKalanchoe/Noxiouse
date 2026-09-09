@@ -8,6 +8,10 @@ constexpr bool enableValidationLayers = true;
 #endif
 
 #include "../Device.h"
+#include <sl.h>
+#include <sl_consts.h>
+#include <sl_dlss.h>
+#include <sl_helpers_vk.h>
 
 namespace NRI
 {
@@ -37,6 +41,14 @@ namespace NRI
         vk::raii::SurfaceKHR& getSurface() { return m_surface; }
         vk::Format& getDepthFormat() { return m_depthFormat; }
         vk::SurfaceFormatKHR& getSurfaceFormat() { return m_surfaceFormat; }
+        
+        // --- Streamline & DLSS ---
+        bool isStreamlineInitialized() const override { return m_streamlineInitialized; }
+        bool isDLSSSupported() const override { return m_slDLSSSupported; }
+        bool isDLSS_RRSupported() const { return m_slDLSS_RRSupported; }
+        bool evaluateDLSS(const DLSSParams& params) override;
+        void resetDLSSViewport() override;
+        PFN_vkQueuePresentKHR getStreamlinePresentFn() const { return m_slQueuePresentKHR; }
         
         // access to functions for other classses to use
         vk::raii::ImageView createImageView(vk::Image const& image, vk::Format format, vk::ImageAspectFlags aspectFlags, uint32_t mipLevels);
@@ -100,5 +112,24 @@ namespace NRI
         {
             "VK_LAYER_KHRONOS_validation"
         };
+        
+        // Streamline state
+        bool m_streamlineInitialized = false;
+        bool m_slDLSSSupported = false;
+        bool m_slDLSS_RRSupported = false;
+        uint32_t m_slFrameIndex = 0;
+        PFN_vkQueuePresentKHR m_slQueuePresentKHR = nullptr;
+
+        // Workaround for https://github.com/NVIDIA-RTX/Streamline/issues/109 : Streamline's internal
+        // Vulkan compute dispatch cannot read our tagged resources when the command buffer has only
+        // ever used VK_EXT_descriptor_heap (vkCmdBindResourceHeapEXT/vkCmdBindSamplerHeapEXT) and never
+        // a classic vkCmdBindDescriptorSets. Binding one dummy (empty) descriptor set right before
+        // slEvaluateFeature works around it. NVIDIA has acknowledged this as a bug, no real fix yet.
+        void ensureDummyDescriptorSet();
+        vk::raii::DescriptorSetLayout m_dummyDescriptorSetLayout = nullptr;
+        vk::raii::DescriptorPool m_dummyDescriptorPool = nullptr;
+        vk::raii::PipelineLayout m_dummyPipelineLayout = nullptr;
+        vk::DescriptorSet m_dummyDescriptorSet;
+        bool m_dummyDescriptorSetReady = false;
     };
 }

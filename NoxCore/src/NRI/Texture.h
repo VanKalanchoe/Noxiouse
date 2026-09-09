@@ -20,6 +20,7 @@ namespace NRI
         R16G16,
         R32SINT,
         R32G32_UINT,
+        R32G32_SFLOAT,
         
         R16G16_SFLOAT,
         R16G16B16A16_SFLOAT,
