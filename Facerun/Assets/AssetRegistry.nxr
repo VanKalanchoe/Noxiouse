@@ -35,6 +35,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 8997427590121902801
+    FilePath: models/DamagedHelmet/Meshes/DamagedHelmet.nmesh
+    SourceFilePath: models/DamagedHelmet/DamagedHelmet.gltf
+    Type: AssetType::Mesh
   - Handle: 10696313279426281675
     FilePath: models/DamagedHelmet/Textures/DamagedHelmet_tex_1.ntex
     SourceFilePath: models/DamagedHelmet/Textures/DamagedHelmet_tex_1.png

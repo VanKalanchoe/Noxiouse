@@ -69,12 +69,28 @@ namespace Nox
 
     static int GetTextureIndex(const std::string& path)
     {
+        if (path.empty())
+            return -1;
+
+        // MaterialData stores source paths, while the renderer needs the bindless
+        // descriptor slot. Resolve that conversion once instead of doing filesystem
+        // and asset-registry work for every draw call on every frame.
+        static std::unordered_map<std::string, int> descriptorCache;
+        auto cached = descriptorCache.find(path);
+        if (cached != descriptorCache.end())
+            return cached->second;
+
         AssetHandle handle = FindTextureAsset(path);
         if (handle == 0)
             return -1;
 
         Ref<Texture2D> texture = AssetManager::GetAsset<Texture2D>(handle);
-        return texture ? texture->GetDescriptorIndexSlot() : -1;
+        if (!texture)
+            return -1;
+
+        const int descriptorIndex = static_cast<int>(texture->GetDescriptorIndexSlot());
+        descriptorCache.emplace(path, descriptorIndex);
+        return descriptorIndex;
     }
 
     static void PackMaterial(shaderio::InstanceData& instance, const MaterialData& material)
@@ -3553,16 +3569,20 @@ namespace Nox
             Ref<Mesh> mesh = AssetManager::GetAsset<Mesh>(src.Mesh);
             if (mesh)
             {
-                MaterialComponent material = srcMat;
-                if (material.MaterialAssets.empty())
-                    material.MaterialAssets = mesh->GetMaterialAssets();
+                MaterialComponent meshMaterial;
+                const MaterialComponent* material = &srcMat;
+                if (srcMat.MaterialAssets.empty() && !mesh->GetMaterialAssets().empty())
+                {
+                    meshMaterial.MaterialAssets = mesh->GetMaterialAssets();
+                    material = &meshMaterial;
+                }
 
                 uint32_t firstSubmesh = std::min(src.SubmeshIndex, static_cast<uint32_t>(mesh->GetSubMeshCount()));
                 uint32_t submeshCount = std::max(src.SubmeshCount, 1u);
                 uint32_t lastSubmesh = std::min(firstSubmesh + submeshCount, static_cast<uint32_t>(mesh->GetSubMeshCount()));
 
                 for (uint32_t i = firstSubmesh; i < lastSubmesh; i++)
-                    DrawMesh(transform, mesh, i, material, entityID, boneTransforms);
+                    DrawMesh(transform, mesh, i, *material, entityID, boneTransforms);
             }
         }
         else if (type == AssetType::StaticMesh)
@@ -3570,10 +3590,14 @@ namespace Nox
             Ref<StaticMesh> staticMesh = AssetManager::GetAsset<StaticMesh>(src.Mesh);
             if (staticMesh)
             {
-                MaterialComponent material = srcMat;
-                if (material.MaterialAssets.empty())
-                    material.MaterialAssets = staticMesh->GetMaterialAssets();
-                DrawStaticMesh(transform, staticMesh, material, entityID, src.SubmeshIndex, src.SubmeshCount);
+                MaterialComponent meshMaterial;
+                const MaterialComponent* material = &srcMat;
+                if (srcMat.MaterialAssets.empty() && !staticMesh->GetMaterialAssets().empty())
+                {
+                    meshMaterial.MaterialAssets = staticMesh->GetMaterialAssets();
+                    material = &meshMaterial;
+                }
+                DrawStaticMesh(transform, staticMesh, *material, entityID, src.SubmeshIndex, src.SubmeshCount);
             }
         }
     }
