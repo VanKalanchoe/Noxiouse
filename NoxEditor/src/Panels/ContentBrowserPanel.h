@@ -9,8 +9,12 @@ namespace Nox
         ContentBrowserPanel(Ref<Project> project);
         
         void OnImGuiRender();
+        void OnExternalFileDrop(const std::filesystem::path& path);
     private:
-        void RefreshAssetTree();    
+        void RefreshAssetTree();
+        AssetHandle FindAssetHandle(const std::filesystem::path& relativePath) const;
+        Ref<Texture2D> GetThumbnail(AssetHandle handle, const AssetMetadata& metadata);
+        void SetImportDestination(const std::filesystem::path& path);
     private:
         Ref<Project> m_Project;
         Ref<ThumbnailCache> m_ThumbnailCache;
@@ -21,31 +25,23 @@ namespace Nox
         Ref<Texture2D> m_DirectoryIcon;
         Ref<Texture2D> m_FileIcon;
 
-        struct TreeNode
+        struct BrowserEntry
         {
             std::filesystem::path Path;
+            AssetMetadata Metadata;
             AssetHandle Handle = 0;
-
-            uint32_t Parent = (uint32_t)-1;
-            std::map<std::filesystem::path, uint32_t> Children;
-
-            TreeNode(const std::filesystem::path& path, AssetHandle handle) : Path(path), Handle(handle) {};
+            bool IsDirectory = false;
         };
+        std::vector<BrowserEntry> m_CurrentEntries;
+        std::filesystem::path m_EntriesDirectory;
 
-        std::vector<TreeNode> m_TreeNodes;
-        
-        std::map<std::filesystem::path, std::vector<std::filesystem::path>> m_AssetTree;
-
-        enum class Mode
-        {
-            Asset = 0, FileSystem = 1,
-        };
-
-        Mode m_Mode = Mode::Asset;
-        
         char m_ImportDestPathBuffer[256] = {0};
+        char m_ImportFileNameBuffer[128] = {0};
         std::filesystem::path m_PendingImportPath;
+        std::filesystem::path m_PendingExternalSourcePath;
+        std::filesystem::path m_PendingPackageDirectory;
         bool m_ShowImportModal = false;
         bool m_ImportAsStaticMesh = false;
+        bool m_WindowHovered = false;
     };
 };

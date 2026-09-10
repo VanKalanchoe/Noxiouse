@@ -3,8 +3,23 @@
 #include "Event.h"
 
 #include <format>
+#include <utility>
 
 namespace Nox {
+
+	class ExternalFileDropEvent : public Event
+	{
+	public:
+		 explicit ExternalFileDropEvent(std::string path)
+			: m_Path(std::move(path)) {}
+
+		const std::string& GetPath() const { return m_Path; }
+
+		EVENT_CLASS_TYPE(ExternalFileDrop)
+		EVENT_CLASS_CATEGORY(EventCategoryApplication | EventCategoryInput)
+	private:
+		std::string m_Path;
+	};
 
 	//
 	// Key Events

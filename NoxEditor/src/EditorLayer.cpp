@@ -89,6 +89,12 @@ namespace Nox
             m_EditorCamera.OnEvent(event);
 
         EventDispatcher dispatcher(event);
+        dispatcher.Dispatch<ExternalFileDropEvent>([this](ExternalFileDropEvent& drop)
+        {
+            if (m_ContentBrowserPanel)
+                m_ContentBrowserPanel->OnExternalFileDrop(drop.GetPath());
+            return false;
+        });
         dispatcher.Dispatch<KeyPressedEvent>(Nox_BIND_EVENT_FN(EditorLayer::OnKeyPressed));
         dispatcher.Dispatch<MouseButtonPressedEvent>(Nox_BIND_EVENT_FN(EditorLayer::OnMouseButtonPressed));
     }

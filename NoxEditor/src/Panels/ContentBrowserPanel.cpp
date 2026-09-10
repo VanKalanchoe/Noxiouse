@@ -1,248 +1,293 @@
 #include "ContentBrowserPanel.h"
+
+#include <algorithm>
+#include <cstring>
+
+#include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Asset/TextureImporter.h"
+#include "NoxCore/Utils/Utils.h"
 
 namespace Nox
 {
     ContentBrowserPanel::ContentBrowserPanel(Ref<Project> project)
-        : m_Project(project), m_ThumbnailCache(CreateRef<ThumbnailCache>(project)), m_BaseDirectory(m_Project->GetAssetDirectory()), m_CurrentDirectory(m_BaseDirectory)
+        : m_Project(std::move(project)), m_ThumbnailCache(CreateRef<ThumbnailCache>(m_Project)),
+          m_BaseDirectory(m_Project->GetAssetDirectory()), m_CurrentDirectory(m_BaseDirectory)
     {
-        m_TreeNodes.push_back(TreeNode(".", 0));
- 	
-        m_DirectoryIcon = TextureImporter::LoadTexture2D("assets/Icons/DirectoryIcon.ktx2", {  .generateMips = false });
-        m_FileIcon = TextureImporter::LoadTexture2D("assets/Icons/FileIcon.ktx2", { .generateMips = false });
-
+        m_DirectoryIcon = TextureImporter::LoadTexture2D("assets/Icons/DirectoryIcon.ktx2", {.generateMips = false});
+        m_FileIcon = TextureImporter::LoadTexture2D("assets/Icons/FileIcon.ktx2", {.generateMips = false});
         RefreshAssetTree();
-
-        m_Mode = Mode::FileSystem;
     }
-    
+
+    AssetHandle ContentBrowserPanel::FindAssetHandle(const std::filesystem::path& relativePath) const
+    {
+        const auto normalized = relativePath.lexically_normal();
+        for (const auto& [handle, metadata] : m_Project->GetEditorAssetManager()->GetAssetRegistry())
+            if (metadata.FilePath.lexically_normal() == normalized ||
+                metadata.SourceFilePath.lexically_normal() == normalized)
+                return handle;
+        return 0;
+    }
+
+    Ref<Texture2D> ContentBrowserPanel::GetThumbnail(AssetHandle handle, const AssetMetadata& metadata)
+    {
+        return m_ThumbnailCache->GetOrCreateThumbnail(handle, metadata);
+    }
+
+    void ContentBrowserPanel::SetImportDestination(const std::filesystem::path& path)
+    {
+        strncpy_s(m_ImportDestPathBuffer, path.generic_string().c_str(), sizeof(m_ImportDestPathBuffer));
+        strncpy_s(m_ImportFileNameBuffer, path.filename().generic_string().c_str(), sizeof(m_ImportFileNameBuffer));
+    }
+
+    void ContentBrowserPanel::OnExternalFileDrop(const std::filesystem::path& path)
+    {
+        if (!std::filesystem::exists(path))
+            return;
+
+        const auto extension = path.extension().string();
+        if (extension != ".gltf" && extension != ".glb")
+            return;
+
+        std::error_code error;
+        const auto assetRoot = std::filesystem::weakly_canonical(m_BaseDirectory, error);
+        const auto sourcePath = std::filesystem::weakly_canonical(path, error);
+        if (error)
+            return;
+
+        const auto relativeToAssetRoot = sourcePath.lexically_relative(assetRoot);
+        const bool isInsideProject = !relativeToAssetRoot.empty() &&
+            relativeToAssetRoot != "." &&
+            relativeToAssetRoot.generic_string().rfind("..", 0) != 0;
+
+        std::filesystem::path relativeSource;
+        if (isInsideProject)
+        {
+            // A project file already has valid relative references. Do not flatten
+            // it into the current folder or its .bin/textures will stop resolving.
+            relativeSource = relativeToAssetRoot;
+        }
+        else
+        {
+            // Defer copying until Cook & Import so Cancel has no side effects.
+            m_PendingExternalSourcePath = sourcePath;
+            m_PendingPackageDirectory = std::filesystem::relative(
+                m_CurrentDirectory / path.stem(), m_BaseDirectory, error);
+            if (error)
+                return;
+            relativeSource = m_PendingPackageDirectory / path.filename();
+        }
+
+        m_PendingImportPath = relativeSource;
+        m_ImportAsStaticMesh = false;
+        const auto defaultDest = relativeSource.parent_path() / "Meshes" /
+            (relativeSource.stem().string() + ".nmesh");
+        SetImportDestination(defaultDest);
+        m_ShowImportModal = true;
+    }
+
     void ContentBrowserPanel::OnImGuiRender()
-	{
-		ImGui::Begin("Content Browser");
+    {
+        ImGui::Begin("Content Browser");
+        m_WindowHovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByPopup);
 
- 		const char* label = m_Mode == Mode::Asset ? "Asset" : "File";
- 		if (ImGui::Button(label))
- 		{
- 			m_Mode = m_Mode == Mode::Asset ? Mode::FileSystem : Mode::Asset;
- 		}
+        if (ImGui::Button("Import"))
+        {
+            static constexpr char filter[] = "glTF files\0gltf;glb";
+            const std::string selectedFile = Utility::OpenFile(filter);
+            if (!selectedFile.empty())
+            {
+                const bool wasHovered = m_WindowHovered;
+                m_WindowHovered = true;
+                OnExternalFileDrop(selectedFile);
+                m_WindowHovered = wasHovered;
+            }
+        }
+        ImGui::SameLine();
+        if (m_CurrentDirectory != m_BaseDirectory)
+        {
+            if (ImGui::Button("<"))
+                m_CurrentDirectory = m_CurrentDirectory.parent_path();
+            ImGui::SameLine();
+        }
+        const std::string breadcrumb = std::filesystem::relative(m_CurrentDirectory, m_BaseDirectory).generic_string();
+        ImGui::TextUnformatted(breadcrumb.empty() ? "Assets" : breadcrumb.c_str());
+        ImGui::Separator();
 
-		if (m_CurrentDirectory != std::filesystem::path(m_BaseDirectory))
-		{
-			
-			if (ImGui::Button("<-"))
-			{
-				m_CurrentDirectory = m_CurrentDirectory.parent_path();
-			}
-		}
+        static float padding = 16.0f;
+        static float thumbnailSize = 96.0f;
+        const float cellSize = thumbnailSize + padding;
+        int columnCount = static_cast<int>(ImGui::GetContentRegionAvail().x / cellSize);
+        columnCount = std::max(columnCount, 1);
+        ImGui::Columns(columnCount, nullptr, false);
 
-		static float padding = 16.0f;
-		static float thumbnailSize = 128.0f;
-		float cellSize = thumbnailSize + padding;
+        if (m_EntriesDirectory != m_CurrentDirectory)
+            RefreshAssetTree();
 
-		float panelWidth = ImGui::GetContentRegionAvail().x;
-		int columnCount = (int)(panelWidth / cellSize);
-		if (columnCount < 1)
-			columnCount = 1;
+        for (const auto& browserEntry : m_CurrentEntries)
+        {
+            const auto& path = browserEntry.Path;
+            const auto relativePath = path.lexically_relative(m_BaseDirectory);
 
-		ImGui::Columns(columnCount, 0, false);
+            if (browserEntry.IsDirectory)
+            {
+                const std::string id = "##directory_" + relativePath.generic_string();
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
+                ImGui::ImageButton(id.c_str(), m_DirectoryIcon->getImTextureID(),
+                    {thumbnailSize, thumbnailSize}, {0, 1}, {1, 0});
+                ImGui::PopStyleColor();
+                if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+                    m_CurrentDirectory = path;
+                ImGui::TextWrapped("%s", path.filename().string().c_str());
+                ImGui::NextColumn();
+                continue;
+            }
 
-		if (m_Mode == Mode::Asset)
-		{
-			TreeNode* node = &m_TreeNodes[0];
+            const AssetHandle handle = browserEntry.Handle;
+            const auto& metadata = browserEntry.Metadata;
 
-			auto currentDir = std::filesystem::relative(m_CurrentDirectory, Project::GetActiveAssetDirectory());
-			for (const auto& p : currentDir)
-			{
-				// if only one level
-				if (node->Path == currentDir)
-					break;
-				
-				if (node->Children.find(p) != node->Children.end())
-				{
-					node = &m_TreeNodes[node->Children[p]];
-					continue;
-				} else
-				{
-					// cant find path
-					NOX_CORE_ASSERT(false);
-				}
-			}
+            Ref<Texture2D> thumbnail = GetThumbnail(handle, metadata);
+            if (!thumbnail)
+                thumbnail = m_FileIcon;
 
-			for (const auto& [item, treeNodeIndex] : node->Children)
-			{
-				bool isDirectory = std::filesystem::is_directory(Project::GetActiveAssetDirectory() / item);
-				std::string itemStr = item.generic_string();
-				
-				Ref<Texture2D> icon = isDirectory ? m_DirectoryIcon : m_FileIcon;
-				ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
-				ImGui::ImageButton(itemStr.c_str(), (ImTextureID)icon->getImTextureID(), { thumbnailSize, thumbnailSize }, { 0, 1 }, { 1, 0 });
+            const std::string id = "##asset_" + relativePath.generic_string();
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
+            ImGui::ImageButton(id.c_str(), thumbnail->getImTextureID(),
+                {thumbnailSize, thumbnailSize}, {0, 1}, {1, 0});
+            ImGui::PopStyleColor();
 
-				if (ImGui::BeginPopupContextItem())
-				{
-					if (ImGui::MenuItem("Delete"))
-					{
-						NOX_CORE_ASSERT(false, "Not implemented")
-					}
-					ImGui::EndPopup();
-				}
+            if (ImGui::BeginDragDropSource())
+            {
+                ImGui::SetDragDropPayload("CONTENT_BROWSER_ITEM", &handle, sizeof(AssetHandle));
+                ImGui::TextUnformatted(metadata.FilePath.filename().string().c_str());
+                ImGui::EndDragDropSource();
+            }
 
-				if (ImGui::BeginDragDropSource())
-				{
-					AssetHandle handle = m_TreeNodes[treeNodeIndex].Handle;
-					ImGui::SetDragDropPayload("CONTENT_BROWSER_ITEM", &handle, sizeof(AssetHandle));
-					ImGui::Text("%s", itemStr.c_str());
-					ImGui::EndDragDropSource();
-				}
+            if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) &&
+                metadata.Type == AssetType::MeshSource)
+            {
+                m_PendingImportPath = metadata.FilePath;
+                m_ShowImportModal = true;
+                const auto defaultDest = m_PendingImportPath.parent_path() / "Meshes" /
+                    (m_PendingImportPath.stem().string() + (m_ImportAsStaticMesh ? ".nsmesh" : ".nmesh"));
+                SetImportDestination(defaultDest);
+            }
+            ImGui::TextWrapped("%s", path.filename().string().c_str());
+            ImGui::NextColumn();
+        }
 
-				ImGui::PopStyleColor();
-				if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
-				{
-					if (isDirectory)
-						m_CurrentDirectory /= item.filename();
-				}
-				ImGui::TextWrapped(itemStr.c_str());
+        ImGui::Columns(1);
+        ImGui::SliderFloat("Thumbnail Size", &thumbnailSize, 48.0f, 256.0f);
+        ImGui::SliderFloat("Padding", &padding, 0.0f, 32.0f);
 
-				ImGui::NextColumn();
-			}
-		}
- 		else
-		{
-			for (auto& directoryEntry : std::filesystem::directory_iterator(m_CurrentDirectory))
-			{
-				const auto& path = directoryEntry.path();
-				std::string filenameString = path.filename().string();
+        if (m_ShowImportModal)
+        {
+            ImGui::OpenPopup("Import Settings");
+            m_ShowImportModal = false;
+        }
+        if (ImGui::BeginPopupModal("Import Settings", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+        {
+            ImGui::Text("Importing: %s", m_PendingImportPath.filename().string().c_str());
+            if (ImGui::Checkbox("Import as Static Mesh (.nsmesh)", &m_ImportAsStaticMesh))
+            {
+                std::filesystem::path destination = m_ImportDestPathBuffer;
+                destination.replace_extension(m_ImportAsStaticMesh ? ".nsmesh" : ".nmesh");
+                SetImportDestination(destination);
+            }
 
-				// THUMBNAIL
-				auto relativePath = std::filesystem::relative(path, Project::GetActiveAssetDirectory());
-				Ref<Texture2D> thumbnail = m_DirectoryIcon;
-				if (!directoryEntry.is_directory())
-				{
-					thumbnail = m_ThumbnailCache->GetOrCreateThumbnail(relativePath);
-					if (!thumbnail)
-						thumbnail = m_FileIcon;
-				}
-				
-				ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
-				ImGui::ImageButton(filenameString.c_str(),(ImTextureID)thumbnail->getImTextureID(), { thumbnailSize, thumbnailSize }, { 0, 1 }, { 1, 0 });
+            ImGui::TextUnformatted("Destination:");
+            ImGui::SameLine();
+            std::filesystem::path destinationPath = m_ImportDestPathBuffer;
+            ImGui::TextDisabled("%s", destinationPath.parent_path().generic_string().c_str());
+            ImGui::InputText("File name", m_ImportFileNameBuffer, sizeof(m_ImportFileNameBuffer));
+            if (ImGui::Button("Cook & Import"))
+            {
+                if (!m_PendingExternalSourcePath.empty())
+                {
+                    std::error_code error;
+                    const auto packageDirectory = m_BaseDirectory / m_PendingPackageDirectory;
+                    std::filesystem::create_directories(packageDirectory, error);
+                    for (const auto& dependency :
+                         std::filesystem::directory_iterator(m_PendingExternalSourcePath.parent_path(), error))
+                    {
+                        if (error)
+                            break;
+                        std::filesystem::copy(
+                            dependency.path(), packageDirectory / dependency.path().filename(),
+                            std::filesystem::copy_options::recursive |
+                            std::filesystem::copy_options::overwrite_existing,
+                            error);
+                        if (error)
+                            break;
+                    }
+                    if (error)
+                    {
+                        ImGui::CloseCurrentPopup();
+                        ImGui::EndPopup();
+                        return;
+                    }
+                }
 
-				if (ImGui::BeginPopupContextItem())
-				{
-					if (ImGui::MenuItem("Import"))
-					{
-						AssetType type = Project::GetActive()->GetEditorAssetManager()->GetAssetTypeFromExtension(path.extension());
-						if (type == AssetType::MeshSource)
-						{
-							m_PendingImportPath = relativePath;
-							m_ShowImportModal = true;
-						
-							std::filesystem::path defaultDest = m_PendingImportPath;
-							defaultDest = defaultDest.parent_path() / "Meshes" /
-								(defaultDest.stem().string() +
-								 (m_ImportAsStaticMesh ? ".nsmesh" : ".nmesh"));
-							strncpy_s(m_ImportDestPathBuffer, defaultDest.string().c_str(), sizeof(m_ImportDestPathBuffer));
-						}
-						else
-						{
-							Project::GetActive()->GetEditorAssetManager()->ImportAsset(relativePath, {}, {});
-							RefreshAssetTree();
-						}
-					}
-					ImGui::EndPopup();
-				}
-				
-				ImGui::PopStyleColor();
-				if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
-				{
-					if (directoryEntry.is_directory())
-						m_CurrentDirectory /= path.filename();
-				}
-				ImGui::TextWrapped(filenameString.c_str());
+                const AssetType type = m_ImportAsStaticMesh ? AssetType::StaticMesh : AssetType::Mesh;
+                const auto finalDestination = destinationPath.parent_path() / m_ImportFileNameBuffer;
+                m_Project->GetEditorAssetManager()->ImportAsset(m_PendingImportPath, finalDestination, type);
+                m_PendingExternalSourcePath.clear();
+                m_PendingPackageDirectory.clear();
+                RefreshAssetTree();
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel"))
+            {
+                m_PendingExternalSourcePath.clear();
+                m_PendingPackageDirectory.clear();
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndPopup();
+        }
+        ImGui::End();
+    }
 
-				ImGui::NextColumn();
-			}
- 			
- 			if (m_ShowImportModal)
- 			{
- 				ImGui::OpenPopup("Import Settings");
- 				m_ShowImportModal = false; // Reset trigger so it doesn't loop
- 			}
- 			
- 			if (ImGui::BeginPopupModal("Import Settings", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
- 			{
- 				ImGui::Text("Importing: %s", m_PendingImportPath.filename().string().c_str());
- 				ImGui::Separator();
+    void ContentBrowserPanel::RefreshAssetTree()
+    {
+        m_ThumbnailCache = CreateRef<ThumbnailCache>(m_Project);
+        m_CurrentEntries.clear();
 
- 				// 3. The Checkbox
- 				if (ImGui::Checkbox("Import as Static Mesh (.nsmesh)", &m_ImportAsStaticMesh))
- 				{
- 					std::filesystem::path currentDest = m_ImportDestPathBuffer;
- 					currentDest.replace_extension(m_ImportAsStaticMesh ? ".nsmesh" : ".nmesh");
- 					strncpy_s(m_ImportDestPathBuffer, currentDest.string().c_str(), sizeof(m_ImportDestPathBuffer));
- 				}
+        std::error_code error;
+        for (const auto& entry : std::filesystem::directory_iterator(m_CurrentDirectory, error))
+        {
+            const auto path = entry.path();
+            const auto relativePath = path.lexically_relative(m_BaseDirectory);
+            if (entry.is_directory())
+            {
+                m_CurrentEntries.push_back({path, {}, 0, true});
+                continue;
+            }
 
- 				ImGui::Text("Destination Path:");
- 				ImGui::InputText("##dest", m_ImportDestPathBuffer, sizeof(m_ImportDestPathBuffer));
- 				
- 				ImGui::Separator();
-    
- 				if (ImGui::Button("Cook & Import", ImVec2(120, 0)))
- 				{
- 					// 4. NOW we call the Asset Manager, passing in the user's choice!
- 					AssetType targetType = m_ImportAsStaticMesh ? AssetType::StaticMesh : AssetType::Mesh;
- 					std::filesystem::path destPath = m_ImportDestPathBuffer;
- 					
- 					Project::GetActive()->GetEditorAssetManager()->ImportAsset(m_PendingImportPath, destPath, targetType);
-        
- 					// Refresh the UI
- 					RefreshAssetTree(); 
- 					ImGui::CloseCurrentPopup();
- 				}
-    
- 				ImGui::SameLine();
-    
- 				if (ImGui::Button("Cancel", ImVec2(120, 0)))
- 				{
- 					ImGui::CloseCurrentPopup();
- 				}
-    
- 				ImGui::EndPopup();
- 			}
-		}
+            const AssetHandle handle = FindAssetHandle(relativePath);
+            if (handle == 0)
+                continue;
 
-		ImGui::Columns(1);
-
-		ImGui::SliderFloat("Thumbnail Size", &thumbnailSize, 16, 512);
-		ImGui::SliderFloat("Padding", &padding, 0, 32);
-
-		// TODO: status bar
-		ImGui::End();
-	}
-
-	void ContentBrowserPanel::RefreshAssetTree()
-	{
- 		const auto& assetRegistry = Project::GetActive()->GetEditorAssetManager()->GetAssetRegistry();
- 		for (const auto& [handle, metadata] : assetRegistry)
- 		{
- 			uint32_t currentNodeIndex = 0;
- 			
- 			for (const auto& p : metadata.FilePath)
- 			{
- 				auto it = m_TreeNodes[currentNodeIndex].Children.find(p.generic_string());
- 				if (it != m_TreeNodes[currentNodeIndex].Children.end())
- 				{
- 					currentNodeIndex = it->second;
- 				}
- 				else
- 				{
- 					// add node
- 					TreeNode newNode(p, handle);
- 					newNode.Parent = currentNodeIndex;
- 					m_TreeNodes.push_back(newNode);
- 					
- 					m_TreeNodes[currentNodeIndex].Children[p] =  m_TreeNodes.size() - 1;
- 					currentNodeIndex = m_TreeNodes.size() - 1;
- 				}
- 			}
- 		}
-	}
+            const AssetMetadata metadata = m_Project->GetEditorAssetManager()->GetMetadata(handle);
+            const auto extension = path.extension().string();
+            if (extension == ".hash")
+                continue;
+            if (extension == ".ntex")
+            {
+                const auto sourceStem = metadata.FilePath.parent_path() / metadata.FilePath.stem();
+                bool hasSourceTexture = false;
+                for (const char* sourceExtension : { ".png", ".jpg", ".jpeg", ".ktx2", ".hdr" })
+                {
+                    if (std::filesystem::exists(m_BaseDirectory / (sourceStem.string() + sourceExtension)))
+                    {
+                        hasSourceTexture = true;
+                        break;
+                    }
+                }
+                if (hasSourceTexture)
+                    continue;
+            }
+            m_CurrentEntries.push_back({path, metadata, handle, false});
+        }
+        m_EntriesDirectory = m_CurrentDirectory;
+    }
 }

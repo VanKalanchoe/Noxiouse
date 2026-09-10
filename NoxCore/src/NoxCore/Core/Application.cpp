@@ -224,6 +224,15 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* currentEvent)
 
             return SDL_APP_CONTINUE;
         }
+    case SDL_EVENT_DROP_FILE:
+        {
+            if (currentEvent->drop.data)
+            {
+                Nox::ExternalFileDropEvent event(currentEvent->drop.data);
+                applicationState->app->RaiseEvent(event);
+            }
+            return SDL_APP_CONTINUE;
+        }
     }
 
     return SDL_APP_CONTINUE; /* carry on with the program! */

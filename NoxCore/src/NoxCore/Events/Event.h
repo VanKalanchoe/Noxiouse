@@ -12,6 +12,7 @@ namespace Nox {
         WindowClose, WindowResize,
         KeyPressed, KeyReleased,
         MouseButtonPressed, MouseButtonReleased, MouseMoved, MouseScrolled,
+        ExternalFileDrop,
     };
     
     enum EventCategory
