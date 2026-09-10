@@ -3,51 +3,83 @@ AssetRegistry:
     FilePath: Scenes/3D-Scene.nox
     SourceFilePath: Scenes/3D-Scene.nox
     Type: AssetType::Scene
-  - Handle: 2567181852263737134
-    FilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_2.ntex
-    SourceFilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_2.png
+  - Handle: 2074548183165322695
+    FilePath: Models/Fox/Meshes/Fox_Run.nanim
+    SourceFilePath: Models/Fox/Meshes/Fox_Run.nanim
+    Type: AssetType::AnimationSequence
+  - Handle: 2355125743156849425
+    FilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_0.ntex
+    SourceFilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_0.ntex
     Type: AssetType::Texture2D
     TextureSpec:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
-  - Handle: 3494781854857409040
-    FilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_3.ntex
-    SourceFilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_3.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: RGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 8960190135584105160
-    FilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_1.ntex
-    SourceFilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_1.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: RGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 9698761856467428114
+  - Handle: 3246969113192297207
+    FilePath: Models/Fox/Meshes/Fox.nmesh
+    SourceFilePath: Models/Fox/Fox.gltf
+    Type: AssetType::Mesh
+  - Handle: 3287924992552235101
+    FilePath: Models/Fox/Meshes/Fox_Survey.nanim
+    SourceFilePath: Models/Fox/Meshes/Fox_Survey.nanim
+    Type: AssetType::AnimationSequence
+  - Handle: 6537536419484704265
+    FilePath: Models/DamagedHelmet/Meshes/DamagedHelmet.nmesh
+    SourceFilePath: Models/DamagedHelmet/Meshes/DamagedHelmet.nmesh
+    Type: AssetType::Mesh
+  - Handle: 8206982747548630179
     FilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_4.ntex
-    SourceFilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_4.png
+    SourceFilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_4.ntex
     Type: AssetType::Texture2D
     TextureSpec:
-      Format: RGBA8
+      Format: SRGBA8
       GenerateMips: true
       Flip: false
-  - Handle: 10329571131553823086
+  - Handle: 8378455864061764936
+    FilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_2.ntex
+    SourceFilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_2.ntex
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 9032025084249123886
+    FilePath: Models/Fox/Textures/Texture.ntex
+    SourceFilePath: Models/Fox/Texture.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 13208704617093807453
+    FilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_3.ntex
+    SourceFilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_3.ntex
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 13494963088403364537
+    FilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_1.ntex
+    SourceFilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_1.ntex
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 13590567474650257432
+    FilePath: Models/Fox/Meshes/Fox.nskel
+    SourceFilePath: Models/Fox/Meshes/Fox.nskel
+    Type: AssetType::Skeleton
+  - Handle: 13719473565864025785
+    FilePath: Models/Fox/Meshes/Fox_Walk.nanim
+    SourceFilePath: Models/Fox/Meshes/Fox_Walk.nanim
+    Type: AssetType::AnimationSequence
+  - Handle: 13797063291917513190
+    FilePath: Models/Fox/Materials/Fox_fox_material.nmat
+    SourceFilePath: Models/Fox/Materials/Fox_fox_material.nmat
+    Type: AssetType::Material
+  - Handle: 16386892812733954348
     FilePath: Models/DamagedHelmet/Materials/DamagedHelmet_Material_MR.nmat
     SourceFilePath: Models/DamagedHelmet/Materials/DamagedHelmet_Material_MR.nmat
     Type: AssetType::Material
-  - Handle: 10864066223892568258
-    FilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_0.ntex
-    SourceFilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_0.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: SRGBA8
-      GenerateMips: true
-      Flip: false
-  - Handle: 12356996155856167066
-    FilePath: Models/DamagedHelmet/Meshes/DamagedHelmet.nmesh
-    SourceFilePath: Models/DamagedHelmet/DamagedHelmet.gltf
-    Type: AssetType::Mesh

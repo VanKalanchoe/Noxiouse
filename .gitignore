@@ -270,3 +270,5 @@ NoxCore/vendors/*
 *.nmesh
 *.hash
 *.nmat
+*.nskel
+*.nanim

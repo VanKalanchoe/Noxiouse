@@ -171,7 +171,7 @@ namespace Nox
                     (m_PendingImportPath.stem().string() + (m_ImportAsStaticMesh ? ".nsmesh" : ".nmesh"));
                 SetImportDestination(defaultDest);
             }
-            ImGui::TextWrapped("%s", path.filename().string().c_str());
+            ImGui::TextWrapped("%s", metadata.FilePath.filename().string().c_str());
             ImGui::NextColumn();
         }
 
@@ -268,24 +268,11 @@ namespace Nox
                 continue;
 
             const AssetMetadata metadata = m_Project->GetEditorAssetManager()->GetMetadata(handle);
-            const auto extension = path.extension().string();
-            if (extension == ".hash")
+            // Source and cooked files resolve to the same logical asset. Show only
+            // the canonical registered path so Fox.gltf/Fox.nmesh and
+            // Texture.png/Texture.ntex do not appear twice.
+            if (metadata.FilePath.lexically_normal() != relativePath.lexically_normal())
                 continue;
-            if (extension == ".ntex")
-            {
-                const auto sourceStem = metadata.FilePath.parent_path() / metadata.FilePath.stem();
-                bool hasSourceTexture = false;
-                for (const char* sourceExtension : { ".png", ".jpg", ".jpeg", ".ktx2", ".hdr" })
-                {
-                    if (std::filesystem::exists(m_BaseDirectory / (sourceStem.string() + sourceExtension)))
-                    {
-                        hasSourceTexture = true;
-                        break;
-                    }
-                }
-                if (hasSourceTexture)
-                    continue;
-            }
             m_CurrentEntries.push_back({path, metadata, handle, false});
         }
         m_EntriesDirectory = m_CurrentDirectory;
