@@ -30,6 +30,8 @@ namespace Nox
         foxMesh = MeshImporter::LoadMesh(MODEL_PATH_FOX_GLTF);
         */
 
+        // Outline
+        watchShader("assets/shaders/Outline.slang", "Skybox", [this]() { createOutlinePipeline(true); });
         // Skybox
         watchShader("assets/shaders/Skybox.slang", "Skybox", [this]() { createSkyboxPipeline(true); });
         // Unlit
