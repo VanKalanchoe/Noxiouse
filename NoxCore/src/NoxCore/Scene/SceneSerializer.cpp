@@ -12,8 +12,10 @@
 
 #include "NoxCore/Core/UUID.h"
 #include "NoxCore/Project/Project.h"
+#include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Scene/Entity.h"
 #include "NoxCore/Scene/Components.h"
+#include "NoxCore/Renderer/Mesh.h"
 
 namespace YAML
 {
@@ -241,138 +243,11 @@ namespace Nox
             out << YAML::BeginMap; // MaterialComponent
 
             auto& mc = entity.GetComponent<MaterialComponent>();
-            
-            // Workflow & Specular-Glossiness Properties
-            out << YAML::Key << "Workflows" << YAML::Value;
-            out << YAML::BeginSeq;
-            for (auto val : mc.Workflows) out << val;
-            out << YAML::EndSeq;
 
-            out << YAML::Key << "DiffuseFactors" << YAML::Value;
-            out << YAML::BeginSeq;
-            for (const auto& val : mc.DiffuseFactors) out << val;
-            out << YAML::EndSeq;
-
-            out << YAML::Key << "SpecularFactors" << YAML::Value;
-            out << YAML::BeginSeq;
-            for (const auto& val : mc.SpecularFactors) out << val;
-            out << YAML::EndSeq;
-
-            // Base Color
-            out << YAML::Key << "BaseColorFactor" << YAML::Value;
-            out << YAML::BeginSeq;
-            for (const auto& color : mc.BaseColorFactors) out << color;
-            out << YAML::EndSeq;
-
-            out << YAML::Key << "BaseColorMaps" << YAML::Value;
-            out << YAML::BeginSeq;
-            for (auto handle : mc.BaseColorMaps) out << (uint64_t)handle;
-            out << YAML::EndSeq;
-
-            out << YAML::Key << "BaseColorTextureSets" << YAML::Value;
-            out << YAML::BeginSeq;
-            for (auto set : mc.BaseColorTextureSets) out << set;
-            out << YAML::EndSeq;
-
-            // PBR Properties
-            out << YAML::Key << "MetallicFactors" << YAML::Value;
-            out << YAML::BeginSeq;
-            for (auto val : mc.MetallicFactors) out << val;
-            out << YAML::EndSeq;
-
-            out << YAML::Key << "RoughnessFactors" << YAML::Value;
-            out << YAML::BeginSeq;
-            for (auto val : mc.RoughnessFactors) out << val;
-            out << YAML::EndSeq;
-
-            out << YAML::Key << "MetallicRoughnessMaps" << YAML::Value;
-            out << YAML::BeginSeq;
-            for (auto handle : mc.MetallicRoughnessMaps) out << (uint64_t)handle;
-            out << YAML::EndSeq;
-
-            out << YAML::Key << "PhysicalDescriptorTextureSets" << YAML::Value;
-            out << YAML::BeginSeq;
-            for (auto set : mc.PhysicalDescriptorTextureSets) out << set;
-            out << YAML::EndSeq;
-
-            // Additional Maps
-            out << YAML::Key << "NormalMaps" << YAML::Value;
-            out << YAML::BeginSeq;
-            for (auto handle : mc.NormalMaps) out << (uint64_t)handle;
-            out << YAML::EndSeq;
-
-            out << YAML::Key << "NormalTextureSets" << YAML::Value;
-            out << YAML::BeginSeq;
-            for (auto set : mc.NormalTextureSets) out << set;
-            out << YAML::EndSeq;
-
-            out << YAML::Key << "OcclusionMaps" << YAML::Value;
-            out << YAML::BeginSeq;
-            for (auto handle : mc.OcclusionMaps) out << (uint64_t)handle;
-            out << YAML::EndSeq;
-
-            out << YAML::Key << "OcclusionTextureSets" << YAML::Value;
-            out << YAML::BeginSeq;
-            for (auto set : mc.OcclusionTextureSets) out << set;
-            out << YAML::EndSeq;
-
-            // Emission
-            out << YAML::Key << "EmissiveFactors" << YAML::Value;
-            out << YAML::BeginSeq;
-            for (const auto& factor : mc.EmissiveFactors) out << factor;
-            out << YAML::EndSeq;
-
-            out << YAML::Key << "EmissiveMaps" << YAML::Value;
-            out << YAML::BeginSeq;
-            for (auto handle : mc.EmissiveMaps) out << (uint64_t)handle;
-            out << YAML::EndSeq;
-
-            out << YAML::Key << "EmissiveTextureSets" << YAML::Value;
-            out << YAML::BeginSeq;
-            for (auto set : mc.EmissiveTextureSets) out << set;
-            out << YAML::EndSeq;
-
-            out << YAML::Key << "EmissiveStrengths" << YAML::Value;
-            out << YAML::BeginSeq;
-            for (auto strength : mc.EmissiveStrengths) out << strength;
+            out << YAML::Key << "MaterialAssets" << YAML::Value << YAML::BeginSeq;
+            for (auto handle : mc.MaterialAssets) out << (uint64_t)handle;
             out << YAML::EndSeq;
             
-            // Transmission
-            out << YAML::Key << "TransmissionFactors" << YAML::Value;
-            out << YAML::BeginSeq;
-            for (auto factor : mc.TransmissionFactors) out << factor;
-            out << YAML::EndSeq;
-
-            out << YAML::Key << "TransmissionMaps" << YAML::Value;
-            out << YAML::BeginSeq;
-            for (auto handle : mc.TransmissionMaps) out << (uint64_t)handle;
-            out << YAML::EndSeq;
-
-            out << YAML::Key << "TransmissionTextureSets" << YAML::Value;
-            out << YAML::BeginSeq;
-            for (auto set : mc.TransmissionTextureSets) out << set;
-            out << YAML::EndSeq;
-
-            // Settings
-            out << YAML::Key << "Modes" << YAML::Value;
-            out << YAML::BeginSeq;
-            for (auto mode : mc.Modes) out << static_cast<int>(mode);
-            out << YAML::EndSeq;
-
-            out << YAML::Key << "AlphaMaskCutoffs" << YAML::Value;
-            out << YAML::BeginSeq;
-            for (auto cutoff : mc.AlphaMaskCutoffs) out << (float)cutoff;
-            out << YAML::EndSeq;
-
-            out << YAML::Key << "DoubleSidedFlags" << YAML::Value;
-            out << YAML::BeginSeq;
-            for (auto doubleSided : mc.DoubleSidedFlags) out << (bool)doubleSided;
-            out << YAML::EndSeq;
-            
-            out << YAML::Key << "UnlitFlags" << YAML::Value;
-            out << YAML::BeginSeq;
-            for (auto unlit : mc.UnlitFlags) out << (bool)unlit;
-            out << YAML::EndSeq;
 
             out << YAML::EndMap; // MaterialComponent
         }
@@ -718,202 +593,32 @@ namespace Nox
                 if (materialComponent)
                 {
                     auto& mc = deserializedEntity.AddComponent<MaterialComponent>();
-                    
-                    // Workflow & Specular-Glossiness Properties
-                    auto workflowsSeq = materialComponent["Workflows"];
-                    if (workflowsSeq)
+
+                    auto materialAssetsSeq = materialComponent["MaterialAssets"];
+                    if (materialAssetsSeq)
                     {
-                        mc.Workflows.clear();
-                        for (auto node : workflowsSeq) mc.Workflows.push_back(node.as<float>());
+                        mc.MaterialAssets.clear();
+                        for (auto node : materialAssetsSeq)
+                            mc.MaterialAssets.push_back(node.as<uint64_t>());
                     }
 
-                    auto diffuseFactorsSeq = materialComponent["DiffuseFactors"];
-                    if (diffuseFactorsSeq)
+                    if (mc.MaterialAssets.empty() && deserializedEntity.HasComponent<MeshComponent>())
                     {
-                        mc.DiffuseFactors.clear();
-                        for (auto node : diffuseFactorsSeq) mc.DiffuseFactors.push_back(node.as<glm::vec4>());
-                    }
-
-                    auto specularFactorsSeq = materialComponent["SpecularFactors"];
-                    if (specularFactorsSeq)
-                    {
-                        mc.SpecularFactors.clear();
-                        for (auto node : specularFactorsSeq) mc.SpecularFactors.push_back(node.as<glm::vec4>());
-                    }
-
-                    // Base Color
-                    auto baseColorFactorSeq = materialComponent["BaseColorFactor"];
-                    if (baseColorFactorSeq)
-                    {
-                        mc.BaseColorFactors.clear();
-                        for (auto node : baseColorFactorSeq) mc.BaseColorFactors.push_back(node.as<glm::vec4>());
-                    }
-                    else if (materialComponent["AlbedoColors"]) // Backward compatibility
-                    {
-                        mc.BaseColorFactors.clear();
-                        for (auto node : materialComponent["AlbedoColors"]) mc.BaseColorFactors.push_back(node.as<glm::vec4>());
-                    }
-                    else if (materialComponent["AlbedoColor"])
-                    {
-                        mc.BaseColorFactors.clear();
-                        mc.BaseColorFactors.push_back(materialComponent["AlbedoColor"].as<glm::vec4>());
-                    }
-
-                    auto baseColorMapsSeq = materialComponent["BaseColorMaps"];
-                    if (baseColorMapsSeq)
-                    {
-                        mc.BaseColorMaps.clear();
-                        for (auto node : baseColorMapsSeq) mc.BaseColorMaps.push_back(node.as<uint64_t>());
-                    }
-                    else if (materialComponent["AlbedoMaps"])
-                    {
-                        mc.BaseColorMaps.clear();
-                        for (auto node : materialComponent["AlbedoMaps"]) mc.BaseColorMaps.push_back(node.as<uint64_t>());
-                    }
-
-                    auto baseColorSetsSeq = materialComponent["BaseColorTextureSets"];
-                    if (baseColorSetsSeq)
-                    {
-                        mc.BaseColorTextureSets.clear();
-                        for (auto node : baseColorSetsSeq) mc.BaseColorTextureSets.push_back(node.as<int32_t>());
-                    }
-
-                    // PBR Properties
-                    auto metallicSeq = materialComponent["MetallicFactors"];
-                    if (metallicSeq)
-                    {
-                        mc.MetallicFactors.clear();
-                        for (auto node : metallicSeq) mc.MetallicFactors.push_back(node.as<float>());
-                    }
-
-                    auto roughnessSeq = materialComponent["RoughnessFactors"];
-                    if (roughnessSeq)
-                    {
-                        mc.RoughnessFactors.clear();
-                        for (auto node : roughnessSeq) mc.RoughnessFactors.push_back(node.as<float>());
-                    }
-
-                    auto metallicRoughnessMapsSeq = materialComponent["MetallicRoughnessMaps"];
-                    if (metallicRoughnessMapsSeq)
-                    {
-                        mc.MetallicRoughnessMaps.clear();
-                        for (auto node : metallicRoughnessMapsSeq) mc.MetallicRoughnessMaps.push_back(node.as<uint64_t>());
-                    }
-
-                    auto physSetsSeq = materialComponent["PhysicalDescriptorTextureSets"];
-                    if (physSetsSeq)
-                    {
-                        mc.PhysicalDescriptorTextureSets.clear();
-                        for (auto node : physSetsSeq) mc.PhysicalDescriptorTextureSets.push_back(node.as<int32_t>());
-                    }
-
-                    // Additional Maps
-                    auto normalMapsSeq = materialComponent["NormalMaps"];
-                    if (normalMapsSeq)
-                    {
-                        mc.NormalMaps.clear();
-                        for (auto node : normalMapsSeq) mc.NormalMaps.push_back(node.as<uint64_t>());
-                    }
-
-                    auto normalSetsSeq = materialComponent["NormalTextureSets"];
-                    if (normalSetsSeq)
-                    {
-                        mc.NormalTextureSets.clear();
-                        for (auto node : normalSetsSeq) mc.NormalTextureSets.push_back(node.as<int32_t>());
-                    }
-
-                    auto occlusionMapsSeq = materialComponent["OcclusionMaps"];
-                    if (occlusionMapsSeq)
-                    {
-                        mc.OcclusionMaps.clear();
-                        for (auto node : occlusionMapsSeq) mc.OcclusionMaps.push_back(node.as<uint64_t>());
-                    }
-
-                    auto occlusionSetsSeq = materialComponent["OcclusionTextureSets"];
-                    if (occlusionSetsSeq)
-                    {
-                        mc.OcclusionTextureSets.clear();
-                        for (auto node : occlusionSetsSeq) mc.OcclusionTextureSets.push_back(node.as<int32_t>());
-                    }
-
-                    // Emission
-                    auto emissiveFactorsSeq = materialComponent["EmissiveFactors"];
-                    if (emissiveFactorsSeq)
-                    {
-                        mc.EmissiveFactors.clear();
-                        for (auto node : emissiveFactorsSeq) mc.EmissiveFactors.push_back(node.as<glm::vec3>());
-                    }
-
-                    auto emissiveMapsSeq = materialComponent["EmissiveMaps"];
-                    if (emissiveMapsSeq)
-                    {
-                        mc.EmissiveMaps.clear();
-                        for (auto node : emissiveMapsSeq) mc.EmissiveMaps.push_back(node.as<uint64_t>());
-                    }
-
-                    auto emissiveSetsSeq = materialComponent["EmissiveTextureSets"];
-                    if (emissiveSetsSeq)
-                    {
-                        mc.EmissiveTextureSets.clear();
-                        for (auto node : emissiveSetsSeq) mc.EmissiveTextureSets.push_back(node.as<int32_t>());
-                    }
-
-                    auto emissiveStrengthsSeq = materialComponent["EmissiveStrengths"];
-                    if (emissiveStrengthsSeq)
-                    {
-                        mc.EmissiveStrengths.clear();
-                        for (auto node : emissiveStrengthsSeq) mc.EmissiveStrengths.push_back(node.as<float>());
+                        const AssetHandle meshHandle = deserializedEntity.GetComponent<MeshComponent>().Mesh;
+                        if (AssetManager::GetAssetType(meshHandle) == AssetType::Mesh)
+                        {
+                            Ref<Mesh> mesh = AssetManager::GetAsset<Mesh>(meshHandle);
+                            if (mesh)
+                                mc.MaterialAssets = mesh->GetMaterialAssets();
+                        }
+                        else if (AssetManager::GetAssetType(meshHandle) == AssetType::StaticMesh)
+                        {
+                            Ref<StaticMesh> mesh = AssetManager::GetAsset<StaticMesh>(meshHandle);
+                            if (mesh)
+                                mc.MaterialAssets = mesh->GetMaterialAssets();
+                        }
                     }
                     
-                    auto transmissionFactorsSeq = materialComponent["TransmissionFactors"];
-                    if (transmissionFactorsSeq)
-                    {
-                        mc.TransmissionFactors.clear();
-                        for (auto node : transmissionFactorsSeq) mc.TransmissionFactors.push_back(node.as<float>());
-                    }
-
-                    auto transmissionMapsSeq = materialComponent["TransmissionMaps"];
-                    if (transmissionMapsSeq)
-                    {
-                        mc.TransmissionMaps.clear();
-                        for (auto node : transmissionMapsSeq) mc.TransmissionMaps.push_back(node.as<uint64_t>());
-                    }
-
-                    auto transmissionSetsSeq = materialComponent["TransmissionTextureSets"];
-                    if (transmissionSetsSeq)
-                    {
-                        mc.TransmissionTextureSets.clear();
-                        for (auto node : transmissionSetsSeq) mc.TransmissionTextureSets.push_back(node.as<int32_t>());
-                    }
-
-                    // Settings
-                    auto modesSeq = materialComponent["Modes"];
-                    if (modesSeq)
-                    {
-                        mc.Modes.clear();
-                        for (auto node : modesSeq) mc.Modes.push_back(static_cast<AlphaMode>(node.as<int>()));
-                    }
-
-                    auto alphaCutoffsSeq = materialComponent["AlphaCutoffs"];
-                    if (alphaCutoffsSeq)
-                    {
-                        mc.AlphaMaskCutoffs.clear();
-                        for (auto node : alphaCutoffsSeq) mc.AlphaMaskCutoffs.push_back(node.as<float>());
-                    }
-
-                    auto doubleSidedSeq = materialComponent["DoubleSidedFlags"];
-                    if (doubleSidedSeq)
-                    {
-                        mc.DoubleSidedFlags.clear();
-                        for (auto node : doubleSidedSeq) mc.DoubleSidedFlags.push_back(node.as<bool>());
-                    }
-                    
-                    auto unlitSeq = materialComponent["UnlitFlags"];
-                    if (unlitSeq)
-                    {
-                        mc.UnlitFlags.clear();
-                        for (auto node : unlitSeq) mc.UnlitFlags.push_back(node.as<bool>());
-                    }
                 }
                 
                 auto directionalLightComponent = entity["DirectionalLightComponent"];

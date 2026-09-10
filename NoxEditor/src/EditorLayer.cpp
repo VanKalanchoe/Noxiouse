@@ -585,70 +585,6 @@ namespace Nox
                             animatorComp.Skeleton = getOrImportSkeletonHandle(relSkelPath);
                         };
 
-                        auto resizeMaterialComponent = [](MaterialComponent& matComp, size_t subMeshCount)
-                        {
-                            matComp.BaseColorFactors.resize(subMeshCount, glm::vec4(1.0f));
-                            matComp.BaseColorMaps.resize(subMeshCount, 0);
-                            matComp.BaseColorTextureSets.resize(subMeshCount, 0);
-
-                            matComp.MetallicFactors.resize(subMeshCount, 1.0f);
-                            matComp.RoughnessFactors.resize(subMeshCount, 1.0f);
-                            matComp.MetallicRoughnessMaps.resize(subMeshCount, 0);
-                            matComp.PhysicalDescriptorTextureSets.resize(subMeshCount, 0);
-
-                            matComp.NormalMaps.resize(subMeshCount, 0);
-                            matComp.NormalTextureSets.resize(subMeshCount, 0);
-
-                            matComp.OcclusionMaps.resize(subMeshCount, 0);
-                            matComp.OcclusionTextureSets.resize(subMeshCount, 0);
-
-                            matComp.EmissiveFactors.resize(subMeshCount, glm::vec3(0.0f));
-                            matComp.EmissiveMaps.resize(subMeshCount, 0);
-                            matComp.EmissiveTextureSets.resize(subMeshCount, 0);
-                            matComp.EmissiveStrengths.resize(subMeshCount, 1.0f);
-
-                            matComp.TransmissionFactors.resize(subMeshCount, 0.0f);
-                            matComp.TransmissionMaps.resize(subMeshCount, 0);
-                            matComp.TransmissionTextureSets.resize(subMeshCount, 0);
-
-                            matComp.Modes.resize(subMeshCount, AlphaMode::Opaque);
-                            matComp.AlphaMaskCutoffs.resize(subMeshCount, 0.5f);
-                            matComp.DoubleSidedFlags.resize(subMeshCount, false);
-                            matComp.UnlitFlags.resize(subMeshCount, false);
-                        };
-
-                        auto copyMaterialSlot = [&](MaterialComponent& matComp, size_t slot, const MaterialData& matData)
-                        {
-                            matComp.BaseColorFactors[slot] = matData.BaseColorFactor;
-                            matComp.BaseColorMaps[slot] = getOrImportTextureHandle(matData.BaseColorTexturePath, true);
-                            matComp.BaseColorTextureSets[slot] = matData.BaseColorTextureSet;
-
-                            matComp.MetallicFactors[slot] = matData.MetallicFactor;
-                            matComp.RoughnessFactors[slot] = matData.RoughnessFactor;
-                            matComp.MetallicRoughnessMaps[slot] = getOrImportTextureHandle(matData.MetallicRoughnessTexturePath, false);
-                            matComp.PhysicalDescriptorTextureSets[slot] = matData.PhysicalDescriptorTextureSet;
-
-                            matComp.NormalMaps[slot] = getOrImportTextureHandle(matData.NormalTexturePath, false);
-                            matComp.NormalTextureSets[slot] = matData.NormalTextureSet;
-
-                            matComp.OcclusionMaps[slot] = getOrImportTextureHandle(matData.OcclusionTexturePath, false);
-                            matComp.OcclusionTextureSets[slot] = matData.OcclusionTextureSet;
-
-                            matComp.EmissiveFactors[slot] = matData.EmissiveFactor;
-                            matComp.EmissiveMaps[slot] = getOrImportTextureHandle(matData.EmissiveTexturePath, true);
-                            matComp.EmissiveTextureSets[slot] = matData.EmissiveTextureSet;
-                            matComp.EmissiveStrengths[slot] = matData.emissiveStrength;
-
-                            matComp.TransmissionFactors[slot] = matData.TransmissionFactor;
-                            matComp.TransmissionMaps[slot] = getOrImportTextureHandle(matData.TransmissionTexturePath, false);
-                            matComp.TransmissionTextureSets[slot] = matData.TransmissionTextureSet;
-
-                            matComp.Modes[slot] = matData.Mode;
-                            matComp.AlphaMaskCutoffs[slot] = matData.AlphaMaskCutoff;
-                            matComp.DoubleSidedFlags[slot] = matData.DoubleSided;
-                            matComp.UnlitFlags[slot] = matData.Unlit;
-                        };
-
                         auto addLightComponent = [&](Entity entity, const LightNodeData& l)
                         {
                             if (l.Type == GltfLightType::Directional)
@@ -746,10 +682,7 @@ namespace Nox
                                     meshComp.SubmeshCount = nodes[i].SubmeshCount;
 
                                     auto& matComp = createdNodes[i].AddComponent<MaterialComponent>();
-                                    resizeMaterialComponent(matComp, meshAsset->GetSubMeshCount());
-                                    size_t materialSlotCount = std::min(meshAsset->GetMaterials().size(), meshAsset->GetSubMeshCount());
-                                    for (size_t materialIndex = 0; materialIndex < materialSlotCount; materialIndex++)
-                                        copyMaterialSlot(matComp, materialIndex, meshAsset->GetMaterial(materialIndex));
+                                    matComp.MaterialAssets = meshAsset->GetMaterialAssets();
 
                                     tryAttachAnimator(createdNodes[i]);
                                 }
@@ -789,21 +722,8 @@ namespace Nox
                                 meshComp.SubmeshCount = meshAsset ? static_cast<uint32_t>(meshAsset->GetSubMeshCount()) : 1;
 
                                 auto& matComp = newEntity.AddComponent<MaterialComponent>();
-                                if (meshAsset && !meshAsset->GetMaterials().empty())
-                                {
-                                    resizeMaterialComponent(matComp, meshAsset->GetSubMeshCount());
-                                    size_t materialSlotCount = std::min(meshAsset->GetMaterials().size(), meshAsset->GetSubMeshCount());
-                                    for (size_t materialIndex = 0; materialIndex < materialSlotCount; materialIndex++)
-                                        copyMaterialSlot(matComp, materialIndex, meshAsset->GetMaterial(materialIndex));
-                                }
-                                else
-                                {
-                                    matComp.BaseColorFactors = {glm::vec4(1.0f)};
-                                    matComp.MetallicFactors = {1.0f};
-                                    matComp.RoughnessFactors = {1.0f};
-                                    matComp.EmissiveFactors = {glm::vec3(0.0f)};
-                                    matComp.TransmissionFactors = {0.0f};
-                                }
+                                if (meshAsset)
+                                    matComp.MaterialAssets = meshAsset->GetMaterialAssets();
 
                                 tryAttachAnimator(newEntity);
                                 
@@ -832,75 +752,9 @@ namespace Nox
                             meshComp.SubmeshCount = staticMeshAsset ? static_cast<uint32_t>(staticMeshAsset->GetSubMeshCount()) : 1;
 
                             auto& matComp = newEntity.AddComponent<MaterialComponent>();
-
                             if (staticMeshAsset)
-                            {
-                                size_t subMeshCount = staticMeshAsset->GetSubMeshCount();
-                                matComp.BaseColorFactors.resize(subMeshCount);
-                                matComp.BaseColorMaps.resize(subMeshCount, 0);
-                                matComp.BaseColorTextureSets.resize(subMeshCount, 0);
-                                
-                                matComp.MetallicFactors.resize(subMeshCount, 1.0f);
-                                matComp.RoughnessFactors.resize(subMeshCount, 1.0f);
-                                matComp.MetallicRoughnessMaps.resize(subMeshCount, 0);
-                                matComp.PhysicalDescriptorTextureSets.resize(subMeshCount, 0);
-                                
-                                matComp.NormalMaps.resize(subMeshCount, 0);
-                                matComp.NormalTextureSets.resize(subMeshCount, 0);
-                                
-                                matComp.OcclusionMaps.resize(subMeshCount, 0);
-                                matComp.OcclusionTextureSets.resize(subMeshCount, 0);
-                                
-                                matComp.EmissiveFactors.resize(subMeshCount, glm::vec3(0.0f));
-                                matComp.EmissiveMaps.resize(subMeshCount, 0);
-                                matComp.EmissiveTextureSets.resize(subMeshCount, 0);
-                                matComp.EmissiveStrengths.resize(subMeshCount, 1.0f);
-                                
-                                matComp.TransmissionFactors.resize(subMeshCount, 0.0f);
-                                matComp.TransmissionMaps.resize(subMeshCount, 0);
-                                matComp.TransmissionTextureSets.resize(subMeshCount, 0);
-                                
-                                matComp.Modes.resize(subMeshCount, AlphaMode::Opaque);
-                                matComp.AlphaMaskCutoffs.resize(subMeshCount, 0.5f);
-                                matComp.DoubleSidedFlags.resize(subMeshCount, false);
-                                matComp.UnlitFlags.resize(subMeshCount, false);
+                                matComp.MaterialAssets = staticMeshAsset->GetMaterialAssets();
 
-                                // Resolve paths to AssetHandles for each slot
-                                for (size_t i = 0; i < staticMeshAsset->GetSubMeshCount(); ++i)
-                                {
-                                    const auto& matData = staticMeshAsset->GetMaterial(i);
-
-                                    matComp.BaseColorFactors[i] = matData.BaseColorFactor;
-                                    matComp.BaseColorMaps[i] = getOrImportTextureHandle(matData.BaseColorTexturePath, true);
-                                    matComp.BaseColorTextureSets[i] = matData.BaseColorTextureSet;
-                                    
-                                    matComp.MetallicFactors[i] = matData.MetallicFactor;
-                                    matComp.RoughnessFactors[i] = matData.RoughnessFactor;
-                                    matComp.MetallicRoughnessMaps[i] = getOrImportTextureHandle(matData.MetallicRoughnessTexturePath, false);
-                                    matComp.PhysicalDescriptorTextureSets[i] = matData.PhysicalDescriptorTextureSet;
-                                    
-                                    matComp.NormalMaps[i] = getOrImportTextureHandle(matData.NormalTexturePath, false);
-                                    matComp.NormalTextureSets[i] = matData.NormalTextureSet;
-                                    
-                                    matComp.OcclusionMaps[i] = getOrImportTextureHandle(matData.OcclusionTexturePath, false);
-                                    matComp.OcclusionTextureSets[i] = matData.OcclusionTextureSet;
-                                    
-                                    matComp.EmissiveFactors[i] = matData.EmissiveFactor;
-                                    matComp.EmissiveMaps[i] = getOrImportTextureHandle(matData.EmissiveTexturePath, true);
-                                    matComp.EmissiveTextureSets[i] = matData.EmissiveTextureSet;
-                                    matComp.EmissiveStrengths[i] = matData.emissiveStrength;
-                                    
-                                    matComp.TransmissionFactors[i] = matData.TransmissionFactor;
-                                    matComp.TransmissionMaps[i] = getOrImportTextureHandle(matData.TransmissionTexturePath, false);
-                                    matComp.TransmissionTextureSets[i] = matData.TransmissionTextureSet;
-                                    
-                                    matComp.Modes[i] = matData.Mode;
-                                    matComp.AlphaMaskCutoffs[i] = matData.AlphaMaskCutoff;
-                                    matComp.DoubleSidedFlags[i] = matData.DoubleSided;
-                                    matComp.UnlitFlags[i] = matData.Unlit;
-                                }
-                            }
-                            
                             if (staticMeshAsset)
                                 spawnGltfLights(newEntity, staticMeshAsset->GetLights());
 

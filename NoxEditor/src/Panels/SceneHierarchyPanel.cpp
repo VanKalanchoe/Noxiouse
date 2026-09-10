@@ -6,8 +6,11 @@
 #include <glm/gtc/type_ptr.hpp>
 
 #include "NoxCore/Asset/AssetManager.h"
+#include "NoxCore/Asset/Material.h"
+#include "NoxCore/Asset/MaterialSerializer.h"
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Animation/Animator.h"
+#include "NoxCore/Project/Project.h"
 
 namespace Nox
 {
@@ -652,289 +655,156 @@ namespace Nox
             ImGui::Text("Mesh Asset");
         });
 
-     DrawComponent<MaterialComponent>("Material", entity, [](auto& component)
+DrawComponent<MaterialComponent>("Material", entity, [](auto& component)
 {
-    // Ensure all vectors are synchronized in size if they were mismatched or newly created
-         size_t slotCount = component.BaseColorMaps.size();
-             if (slotCount == 0 && (!component.BaseColorFactors.empty() || !component.Modes.empty()))
-             {
-                 slotCount = std::max({
-                     component.BaseColorFactors.size(),
-                     component.MetallicFactors.size(),
-                     component.RoughnessFactors.size(),
-                     component.MetallicRoughnessMaps.size(),
-                     component.PhysicalDescriptorTextureSets.size(),
-                     component.NormalMaps.size(),
-                     component.NormalTextureSets.size(),
-                     component.OcclusionMaps.size(),
-                     component.OcclusionTextureSets.size(),
-                     component.EmissiveFactors.size(),
-                     component.EmissiveMaps.size(),
-                     component.EmissiveTextureSets.size(),
-                     component.EmissiveStrengths.size(),
-                     component.TransmissionFactors.size(),
-                     component.TransmissionMaps.size(),
-                     component.TransmissionTextureSets.size(),
-                     component.Modes.size(),
-                     component.AlphaMaskCutoffs.size(),
-                     component.DoubleSidedFlags.size(),
-                     component.UnlitFlags.size()
-                 });
-                 component.BaseColorMaps.resize(slotCount, 0);
-             }
-    
-    // Fallback if completely empty
-    if (slotCount == 0)
+    if (component.MaterialAssets.empty())
     {
-        slotCount = 1;
-        component.BaseColorFactors.push_back(glm::vec4(1.0f));
-        component.BaseColorMaps.push_back(0);
-        component.BaseColorTextureSets.push_back(0);
-        component.MetallicFactors.push_back(1.0f);
-        component.RoughnessFactors.push_back(1.0f);
-        component.MetallicRoughnessMaps.push_back(0);
-        component.PhysicalDescriptorTextureSets.push_back(0);
-        component.NormalMaps.push_back(0);
-        component.NormalTextureSets.push_back(0);
-        component.OcclusionMaps.push_back(0);
-        component.OcclusionTextureSets.push_back(0);
-        component.EmissiveFactors.push_back(glm::vec3(0.0f));
-        component.EmissiveMaps.push_back(0);
-        component.EmissiveTextureSets.push_back(0);
-        component.EmissiveStrengths.push_back(1.0f);
-        component.TransmissionFactors.push_back(0.0f);
-            component.TransmissionMaps.push_back(0);
-            component.TransmissionTextureSets.push_back(0);
-        component.Modes.push_back(AlphaMode::Opaque);
-        component.AlphaMaskCutoffs.push_back(0.5f);
-        component.DoubleSidedFlags.push_back(false);
-        component.UnlitFlags.push_back(false);
-    }
-
-    if (component.BaseColorFactors.size() < slotCount) component.BaseColorFactors.resize(slotCount, glm::vec4(1.0f));
-    if (component.BaseColorTextureSets.size() < slotCount) component.BaseColorTextureSets.resize(slotCount, 0);
-    if (component.MetallicFactors.size() < slotCount) component.MetallicFactors.resize(slotCount, 1.0f);
-    if (component.RoughnessFactors.size() < slotCount) component.RoughnessFactors.resize(slotCount, 1.0f);
-    if (component.MetallicRoughnessMaps.size() < slotCount) component.MetallicRoughnessMaps.resize(slotCount, 0);
-    if (component.PhysicalDescriptorTextureSets.size() < slotCount) component.PhysicalDescriptorTextureSets.resize(slotCount, 0);
-    if (component.NormalMaps.size() < slotCount) component.NormalMaps.resize(slotCount, 0);
-    if (component.NormalTextureSets.size() < slotCount) component.NormalTextureSets.resize(slotCount, 0);
-    if (component.OcclusionMaps.size() < slotCount) component.OcclusionMaps.resize(slotCount, 0);
-    if (component.OcclusionTextureSets.size() < slotCount) component.OcclusionTextureSets.resize(slotCount, 0);
-    if (component.EmissiveFactors.size() < slotCount) component.EmissiveFactors.resize(slotCount, glm::vec3(0.0f));
-    if (component.EmissiveMaps.size() < slotCount) component.EmissiveMaps.resize(slotCount, 0);
-    if (component.EmissiveTextureSets.size() < slotCount) component.EmissiveTextureSets.resize(slotCount, 0);
-    if (component.EmissiveStrengths.size() < slotCount) component.EmissiveStrengths.resize(slotCount, 1.0f);
-    // Transmission (KHR_materials_transmission)
-    if (component.TransmissionFactors.size() < slotCount) component.TransmissionFactors.resize(slotCount, 0.0f);
-    if (component.TransmissionMaps.size() < slotCount) component.TransmissionMaps.resize(slotCount, 0);
-    if (component.TransmissionTextureSets.size() < slotCount) component.TransmissionTextureSets.resize(slotCount, 0);
-    if (component.Modes.size() < slotCount) component.Modes.resize(slotCount, AlphaMode::Opaque);
-    if (component.AlphaMaskCutoffs.size() < slotCount) component.AlphaMaskCutoffs.resize(slotCount, 0.5f);
-    if (component.DoubleSidedFlags.size() < slotCount) component.DoubleSidedFlags.resize(slotCount, false);
-    if (component.UnlitFlags.size() < slotCount) component.UnlitFlags.resize(slotCount, false);
-
-    ImGui::Text("Material Slots (%zu submesh(es))", slotCount);
-    ImGui::Spacing();
-    ImGui::Separator();
-
-    // Helper lambda for drawing texture slots with drag-drop target & clear button
-         auto drawTextureSlot = [](const char* labelName, const char* id, AssetHandle& texHandle)
-    {
-        std::string label = "None";
-        bool isTextureValid = false;
-
-        if (texHandle != 0)
-        {
-            if (AssetManager::IsAssetHandleValid(texHandle) && AssetManager::GetAssetType(texHandle) == AssetType::Texture2D)
-            {
-                const AssetMetadata& metadata = Project::GetActive()->GetEditorAssetManager()->GetMetadata(texHandle);
-                label = metadata.FilePath.filename().string();
-                isTextureValid = true;
-            }
-            else
-            {
-                label = "Invalid";
-            }
-        }
-
-        ImGui::Text("%s:", labelName);
-        ImGui::SameLine();
-
-        ImVec2 buttonLabelSize = ImGui::CalcTextSize(label.c_str());
-        buttonLabelSize.x += 20.0f;
-        float buttonLabelWidth = glm::max<float>(100.0f, buttonLabelSize.x);
-
-        std::string slotButtonID = label + "##" + id;
-        ImGui::Button(slotButtonID.c_str(), ImVec2(buttonLabelWidth, 0.0f));
-
+        ImGui::TextDisabled("Drop a material asset here");
         if (ImGui::BeginDragDropTarget())
         {
             if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEM"))
             {
-                AssetHandle handle = *(AssetHandle*)payload->Data;
-                if (AssetManager::GetAssetType(handle) == AssetType::Texture2D)
-                {
-                    texHandle = handle;
-                }
-                else
-                {
-                    NOX_CORE_WARN("Wrong Asset Type - Expected a Texture2D");
-                }
+                AssetHandle handle = *(const AssetHandle*)payload->Data;
+                if (AssetManager::IsAssetHandleValid(handle) &&
+                    AssetManager::GetAssetType(handle) == AssetType::Material)
+                    component.MaterialAssets.push_back(handle);
             }
             ImGui::EndDragDropTarget();
         }
+        return;
+    }
 
-             if (isTextureValid)
-             {
-                 ImGui::SameLine();
-
-                 ImVec2 xLabelSize = ImGui::CalcTextSize("X");
-                 float buttonSize = xLabelSize.y + ImGui::GetStyle().FramePadding.y * 2.0f;
-
-                 std::string buttonID = std::string("X##") + id;
-
-                 if (ImGui::Button(buttonID.c_str(), ImVec2(buttonSize, buttonSize)))
-                 {
-                     texHandle = 0;
-                 }
-             }
-    };
-
-    for (size_t i = 0; i < slotCount; i++)
+    if (!component.MaterialAssets.empty())
     {
-        ImGui::PushID(static_cast<int>(i));
-
-        ImGui::Text("Submesh / Slot [%zu]", i);
-        
-        // 1. Base Color
-        ImGui::ColorEdit4("Base Color Factor", glm::value_ptr(component.BaseColorFactors[i]));
-        drawTextureSlot("Base Color Texture", "BaseColor", component.BaseColorMaps[i]);
-        ImGui::DragInt("Base Color Texture Set", &component.BaseColorTextureSets[i], 1, 0, 10);
-
-        ImGui::Spacing();
-        ImGui::Separator();
-
-        // 2. PBR Properties
-        ImGui::DragFloat("Metallic Factor", &component.MetallicFactors[i], 0.01f, 0.0f, 1.0f);
-        ImGui::DragFloat("Roughness Factor", &component.RoughnessFactors[i], 0.01f, 0.0f, 1.0f);
-        drawTextureSlot("Metallic-Roughness Map", "MetallicRoughness",
-                component.MetallicRoughnessMaps[i]);
-        ImGui::DragInt("Physical Descriptor Texture Set", &component.PhysicalDescriptorTextureSets[i], 1, 0, 10);
-
-        ImGui::Spacing();
-        ImGui::Separator();
-
-        // 3. Additional Maps
-        drawTextureSlot("Normal Map", "Normal",
-                component.NormalMaps[i]);
-        ImGui::DragInt("Normal Texture Set", &component.NormalTextureSets[i], 1, 0, 10);
-
-        drawTextureSlot("Occlusion Map", "Occlusion",
-                component.OcclusionMaps[i]);
-        ImGui::DragInt("Occlusion Texture Set", &component.OcclusionTextureSets[i], 1, 0, 10);
-
-        ImGui::Spacing();
-        ImGui::Separator();
-
-        // 4. Emission
-        ImGui::ColorEdit3("Emissive Factor", glm::value_ptr(component.EmissiveFactors[i]));
-        drawTextureSlot("Emissive Map", "Emissive",
-                component.EmissiveMaps[i]);
-        ImGui::DragInt("Emissive Texture Set", &component.EmissiveTextureSets[i], 1, 0, 10);
-        ImGui::DragFloat("Emissive Strength", &component.EmissiveStrengths[i], 0.1f, 0.0f, 100.0f);
-        
-        // Transmission (KHR_materials_transmission)
-        ImGui::DragFloat("Transmission Factor", &component.TransmissionFactors[i], 0.01f, 0.0f, 1.0f);
-        drawTextureSlot("Transmission Map", "Transmission", component.TransmissionMaps[i]);
-        ImGui::DragInt("Transmission Texture Set", &component.TransmissionTextureSets[i], 1, 0, 10);
-
-        ImGui::Spacing();
-        ImGui::Separator();
-
-        // 5. Alpha Mode dropdown
-        const char* alphaModeStrings[] = { "Opaque", "Mask", "Blend" };
-        int currentMode = static_cast<int>(component.Modes[i]);
-        if (ImGui::Combo("Alpha Mode", &currentMode, alphaModeStrings, 3))
+        ImGui::Text("Material Assets");
+        for (size_t i = 0; i < component.MaterialAssets.size(); ++i)
         {
-            component.Modes[i] = static_cast<AlphaMode>(currentMode);
-        }
-
-        // 6. Alpha Cutoff (Visible only for Mask mode)
-        if (component.Modes[i] == AlphaMode::Mask)
-        {
-            ImGui::DragFloat("Alpha Mask Cutoff", &component.AlphaMaskCutoffs[i], 0.005f, 0.0f, 1.0f);
-        }
-
-        // 7. Double Sided Flag
-        bool doubleSided = component.DoubleSidedFlags[i];
-        if (ImGui::Checkbox("Double Sided", &doubleSided))
-        {
-            component.DoubleSidedFlags[i] = doubleSided;
-        }
-        
-        bool unlit = component.UnlitFlags[i];
-            if (ImGui::Checkbox("Unlit", &unlit))
+            AssetHandle handle = component.MaterialAssets[i];
+            std::string label = "None";
+            if (handle != 0 && AssetManager::IsAssetHandleValid(handle) &&
+                AssetManager::GetAssetType(handle) == AssetType::Material)
             {
-                component.UnlitFlags[i] = unlit;
+                const auto& metadata = Project::GetActive()->GetEditorAssetManager()->GetMetadata(handle);
+                label = metadata.FilePath.filename().string();
             }
 
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::PopID();
+            if (ImGui::TreeNode((void*)(uintptr_t)i, "%zu: %s", i, label.c_str()))
+            {
+                if (ImGui::BeginDragDropTarget())
+                {
+                    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEM"))
+                    {
+                        AssetHandle droppedHandle = *(const AssetHandle*)payload->Data;
+                        if (AssetManager::IsAssetHandleValid(droppedHandle) &&
+                            AssetManager::GetAssetType(droppedHandle) == AssetType::Material)
+                            component.MaterialAssets[i] = droppedHandle;
+                    }
+                    ImGui::EndDragDropTarget();
+                }
+
+                if (handle != 0 && AssetManager::IsAssetHandleValid(handle) &&
+                    AssetManager::GetAssetType(handle) == AssetType::Material)
+                {
+                    Ref<Material> material = AssetManager::GetAsset<Material>(handle);
+                    if (material)
+                    {
+                        MaterialData& data = material->GetData();
+                        if (ImGui::Button(("Make Unique##" + std::to_string(i)).c_str()))
+                        {
+                            auto manager = Project::GetActive()->GetEditorAssetManager();
+                            const auto& metadata = manager->GetMetadata(handle);
+                            std::filesystem::path uniquePath = metadata.FilePath.parent_path() /
+                                (metadata.FilePath.stem().string() + "_Instance_" +
+                                 std::to_string(static_cast<uint64_t>(AssetHandle())) + ".nmat");
+                            if (MaterialSerializer::Serialize(
+                                    Project::GetActiveAssetDirectory() / uniquePath, data))
+                            {
+                                manager->ImportAsset(uniquePath, uniquePath, AssetType::Material);
+                                for (const auto& [uniqueHandle, uniqueMetadata] : manager->GetAssetRegistry())
+                                {
+                                    if (uniqueMetadata.Type == AssetType::Material &&
+                                        uniqueMetadata.FilePath == uniquePath)
+                                    {
+                                        component.MaterialAssets[i] = uniqueHandle;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+
+                        bool changed = false;
+                        changed |= ImGui::ColorEdit4("Base Color", glm::value_ptr(data.BaseColorFactor));
+                        changed |= ImGui::DragFloat("Metallic", &data.MetallicFactor, 0.01f, 0.0f, 1.0f);
+                        changed |= ImGui::DragFloat("Roughness", &data.RoughnessFactor, 0.01f, 0.0f, 1.0f);
+                        changed |= ImGui::ColorEdit3("Emissive", glm::value_ptr(data.EmissiveFactor));
+                        changed |= ImGui::DragFloat("Emissive Strength", &data.emissiveStrength, 0.01f, 0.0f, 100.0f);
+                        changed |= ImGui::DragFloat("Transmission", &data.TransmissionFactor, 0.01f, 0.0f, 1.0f);
+
+                        auto drawTextureReference = [&](const char* labelName,
+                                                         const char* id,
+                                                         std::string& texturePath)
+                        {
+                            std::string label = texturePath.empty()
+                                ? "None"
+                                : std::filesystem::path(texturePath).filename().string();
+                            ImGui::Text("%s", labelName);
+                            ImGui::SameLine();
+                            ImGui::Button((label + "##" + id).c_str(), ImVec2(150.0f, 0.0f));
+
+                            if (ImGui::BeginDragDropTarget())
+                            {
+                                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEM"))
+                                {
+                                    AssetHandle textureHandle = *(const AssetHandle*)payload->Data;
+                                    if (AssetManager::GetAssetType(textureHandle) == AssetType::Texture2D)
+                                    {
+                                        const auto& textureMetadata =
+                                            Project::GetActive()->GetEditorAssetManager()->GetMetadata(textureHandle);
+                                        texturePath = textureMetadata.SourceFilePath.empty()
+                                            ? textureMetadata.FilePath.generic_string()
+                                            : textureMetadata.SourceFilePath.generic_string();
+                                        changed = true;
+                                    }
+                                }
+                                ImGui::EndDragDropTarget();
+                            }
+                        };
+
+                        drawTextureReference("Base Color Texture", "BaseColor", data.BaseColorTexturePath);
+                        drawTextureReference("Metallic Roughness", "MetallicRoughness", data.MetallicRoughnessTexturePath);
+                        drawTextureReference("Normal Texture", "Normal", data.NormalTexturePath);
+                        drawTextureReference("Occlusion Texture", "Occlusion", data.OcclusionTexturePath);
+                        drawTextureReference("Emissive Texture", "Emissive", data.EmissiveTexturePath);
+                        drawTextureReference("Transmission Texture", "Transmission", data.TransmissionTexturePath);
+
+                        int alphaMode = static_cast<int>(data.Mode);
+                        const char* alphaModes[] = { "Opaque", "Mask", "Blend" };
+                        if (ImGui::Combo("Alpha Mode", &alphaMode, alphaModes, 3))
+                        {
+                            data.Mode = static_cast<AlphaMode>(alphaMode);
+                            changed = true;
+                        }
+                        if (data.Mode == AlphaMode::Mask)
+                            changed |= ImGui::DragFloat("Alpha Cutoff", &data.AlphaMaskCutoff, 0.005f, 0.0f, 1.0f);
+                        changed |= ImGui::Checkbox("Double Sided", &data.DoubleSided);
+                        changed |= ImGui::Checkbox("Unlit", &data.Unlit);
+
+                        if (changed)
+                        {
+                            const auto& metadata = Project::GetActive()->GetEditorAssetManager()->GetMetadata(handle);
+                            MaterialSerializer::Serialize(
+                                Project::GetActiveAssetDirectory() / metadata.FilePath,
+                                data
+                            );
+                        }
+                    }
+                }
+                ImGui::TreePop();
+            }
+        }
+        return;
     }
 
-    if (ImGui::Button("+ Add Slot"))
-    {
-        component.BaseColorFactors.push_back(glm::vec4(1.0f));
-        component.BaseColorMaps.push_back(0);
-        component.BaseColorTextureSets.push_back(0);
-        component.MetallicFactors.push_back(1.0f);
-        component.RoughnessFactors.push_back(1.0f);
-        component.MetallicRoughnessMaps.push_back(0);
-        component.PhysicalDescriptorTextureSets.push_back(0);
-        component.NormalMaps.push_back(0);
-        component.NormalTextureSets.push_back(0);
-        component.OcclusionMaps.push_back(0);
-        component.OcclusionTextureSets.push_back(0);
-        component.EmissiveFactors.push_back(glm::vec3(0.0f));
-        component.EmissiveMaps.push_back(0);
-        component.EmissiveTextureSets.push_back(0);
-        component.EmissiveStrengths.push_back(1.0f);
-        component.TransmissionFactors.push_back(0.0f);
-            component.TransmissionMaps.push_back(0);
-            component.TransmissionTextureSets.push_back(0);
-        component.Modes.push_back(AlphaMode::Opaque);
-        component.AlphaMaskCutoffs.push_back(0.5f);
-        component.DoubleSidedFlags.push_back(false);
-        component.UnlitFlags.push_back(false);
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("- Remove Slot") && slotCount > 1)
-    {
-        component.BaseColorFactors.pop_back();
-        component.BaseColorMaps.pop_back();
-        component.BaseColorTextureSets.pop_back();
-        component.MetallicFactors.pop_back();
-        component.RoughnessFactors.pop_back();
-        component.MetallicRoughnessMaps.pop_back();
-        component.PhysicalDescriptorTextureSets.pop_back();
-        component.NormalMaps.pop_back();
-        component.NormalTextureSets.pop_back();
-        component.OcclusionMaps.pop_back();
-        component.OcclusionTextureSets.pop_back();
-        component.EmissiveFactors.pop_back();
-        component.EmissiveMaps.pop_back();
-        component.EmissiveTextureSets.pop_back();
-        component.EmissiveStrengths.pop_back();
-        component.TransmissionFactors.pop_back();
-            component.TransmissionMaps.pop_back();
-            component.TransmissionTextureSets.pop_back();
-        component.Modes.pop_back();
-        component.AlphaMaskCutoffs.pop_back();
-        component.DoubleSidedFlags.pop_back();
-        component.UnlitFlags.pop_back();
-    }
 });
         
         DrawComponent<DirectionalLightComponent>("Directional Light", entity, [](auto& component)

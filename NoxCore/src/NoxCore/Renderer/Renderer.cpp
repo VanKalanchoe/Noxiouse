@@ -4,16 +4,108 @@
 #include <algorithm> // Necessary for std::clamp
 #include <chrono>
 #include <fstream>
+#include <cctype>
+#include <unordered_map>
 
 #define TINYOBJLOADER_IMPLEMENTATION
 #include <tiny_obj_loader.h>
 
 #include "NoxCore/Asset/AssetManager.h"
+#include "NoxCore/Asset/Material.h"
 #include "NoxCore/Asset/MeshImporter.h"
+#include "NoxCore/Project/Project.h"
 #include "NoxCore/Core/Log.h"
 
 namespace Nox
 {
+    static AssetHandle FindTextureAsset(const std::string& texturePath)
+    {
+        if (texturePath.empty())
+            return 0;
+
+        static std::unordered_map<std::string, AssetHandle> textureCache;
+
+        std::filesystem::path sourcePath(texturePath);
+        if (sourcePath.is_absolute())
+        {
+            std::error_code ec;
+            sourcePath = std::filesystem::relative(
+                sourcePath,
+                Project::GetActiveAssetDirectory(),
+                ec
+            );
+            if (ec)
+                return 0;
+        }
+
+        std::string parentFolder = sourcePath.parent_path().filename().string();
+        std::transform(parentFolder.begin(), parentFolder.end(), parentFolder.begin(),
+            [](unsigned char character) { return static_cast<char>(std::tolower(character)); });
+
+        std::filesystem::path cookedPath = sourcePath;
+        if (parentFolder == "textures")
+            cookedPath.replace_extension(".ntex");
+        else
+            cookedPath = sourcePath.parent_path() / "Textures" /
+                (sourcePath.stem().string() + ".ntex");
+
+        const std::string cacheKey = cookedPath.generic_string();
+        auto cached = textureCache.find(cacheKey);
+        if (cached != textureCache.end())
+            return cached->second;
+
+        for (const auto& [handle, metadata] : Project::GetActive()->GetEditorAssetManager()->GetAssetRegistry())
+        {
+            if (metadata.Type != AssetType::Texture2D)
+                continue;
+            if (metadata.FilePath == cookedPath || metadata.SourceFilePath == sourcePath)
+            {
+                textureCache.emplace(cacheKey, handle);
+                return handle;
+            }
+        }
+        return 0;
+    }
+
+    static int GetTextureIndex(const std::string& path)
+    {
+        AssetHandle handle = FindTextureAsset(path);
+        if (handle == 0)
+            return -1;
+
+        Ref<Texture2D> texture = AssetManager::GetAsset<Texture2D>(handle);
+        return texture ? texture->GetDescriptorIndexSlot() : -1;
+    }
+
+    static void PackMaterial(shaderio::InstanceData& instance, const MaterialData& material)
+    {
+        instance.workflow = material.Workflow;
+        instance.diffuseFactor = material.DiffuseFactor;
+        instance.specularFactor = material.SpecularFactor;
+        instance.baseColorFactor = material.BaseColorFactor;
+        instance.baseColorTextureIndex = GetTextureIndex(material.BaseColorTexturePath);
+        instance.baseColorTextureSet = material.BaseColorTextureSet;
+        instance.metallicFactor = material.MetallicFactor;
+        instance.roughnessFactor = material.RoughnessFactor;
+        instance.metallicRoughnessTextureIndex = GetTextureIndex(material.MetallicRoughnessTexturePath);
+        instance.physicalDescriptorTextureSet = material.PhysicalDescriptorTextureSet;
+        instance.normalTextureIndex = GetTextureIndex(material.NormalTexturePath);
+        instance.normalTextureSet = material.NormalTextureSet;
+        instance.occlusionTextureIndex = GetTextureIndex(material.OcclusionTexturePath);
+        instance.occlusionTextureSet = material.OcclusionTextureSet;
+        instance.emissiveFactor = material.EmissiveFactor;
+        instance.emissiveTextureIndex = GetTextureIndex(material.EmissiveTexturePath);
+        instance.emissiveTextureSet = material.EmissiveTextureSet;
+        instance.emissiveStrength = material.emissiveStrength;
+        instance.transmissionFactor = material.TransmissionFactor;
+        instance.transmissionTextureIndex = GetTextureIndex(material.TransmissionTexturePath);
+        instance.transmissionTextureSet = material.TransmissionTextureSet;
+        instance.alphaMode = static_cast<uint32_t>(material.Mode);
+        instance.alphaMaskCutoff = material.AlphaMaskCutoff;
+        instance.doubleSided = material.DoubleSided ? 1u : 0u;
+        instance.unlit = material.Unlit ? 1u : 0u;
+    }
+
     Renderer::Renderer(std::shared_ptr<Window> window, bool isEditor) : m_window(std::move(window)), m_isEditor(isEditor)
     {
         NOX_CORE_INFO("Renderer Start");
@@ -3240,13 +3332,22 @@ namespace Nox
         packQueue(m_transparentUnlitQueue, m_transparentUnlitCount);
     }
 
-    void Renderer::DrawMesh(const glm::mat4& transform, Ref<Mesh> mesh, uint32_t submeshIndex, const MaterialComponent& material, int entityID, const std::vector<glm::mat4>* boneTransforms)
+    void Renderer::DrawMesh(const glm::mat4& transform, Ref<Mesh> mesh, uint32_t submeshIndex, const MaterialComponent& materialOverrides, int entityID, const std::vector<glm::mat4>* boneTransforms)
     {
         const auto& submeshes = mesh->GetSubMeshes();
         if (submeshIndex >= submeshes.size())
             return;
 
         const MeshHandle& handle = submeshes[submeshIndex];
+
+        MaterialData material = mesh->GetMaterial(submeshIndex);
+        const auto& materialAssets = materialOverrides.MaterialAssets;
+        if (submeshIndex < materialAssets.size() && materialAssets[submeshIndex] != 0)
+        {
+            Ref<Material> materialAsset = AssetManager::GetAsset<Material>(materialAssets[submeshIndex]);
+            if (materialAsset)
+                material = materialAsset->GetData();
+        }
 
         shaderio::InstanceData instance{};
         instance.modelMatrix = transform;
@@ -3262,62 +3363,8 @@ namespace Nox
         instance.meshletVerticesPageIndex = handle.meshletVertices.pageIndex;
         instance.meshletTrianglesPageIndex = handle.meshletTriangles.pageIndex;
 
-        // Since child entities hold only their own single material, index 0 is always the correct target
-        // Select slot matching submeshIndex, fallback to slot 0 if child entity only holds 1 texture
-        uint32_t slotIdx = (material.BaseColorFactors.size() > 1) ? submeshIndex : 0;
-
-        // Helper to safely fetch descriptor index
-        auto getTextureIndex = [](const std::vector<AssetHandle>& maps, uint32_t idx) -> int
-        {
-            if (!maps.empty() && idx < maps.size() && maps[idx] != 0)
-            {
-                Ref<Texture2D> texture = AssetManager::GetAsset<Texture2D>(maps[idx]);
-                if (texture) return texture->GetDescriptorIndexSlot();
-            }
-            return -1;
-        };
-
-        // --- MATERIAL PACKING ---
-
-        instance.workflow = (slotIdx < material.Workflows.size()) ? material.Workflows[slotIdx] : 0.0f;
-        instance.diffuseFactor = (slotIdx < material.DiffuseFactors.size()) ? material.DiffuseFactors[slotIdx] : glm::vec4(1.0f);
-        instance.specularFactor = (slotIdx < material.SpecularFactors.size()) ? material.SpecularFactors[slotIdx] : glm::vec4(1.0f);
-
-        // Base Color
-        instance.baseColorFactor = (slotIdx < material.BaseColorFactors.size()) ? material.BaseColorFactors[slotIdx] : glm::vec4(1.0f);
-        instance.baseColorTextureIndex = getTextureIndex(material.BaseColorMaps, slotIdx);
-        instance.baseColorTextureSet = (slotIdx < material.BaseColorTextureSets.size()) ? material.BaseColorTextureSets[slotIdx] : 0;
-
-        // PBR Properties
-        instance.metallicFactor = (slotIdx < material.MetallicFactors.size()) ? material.MetallicFactors[slotIdx] : 1.0f;
-        instance.roughnessFactor = (slotIdx < material.RoughnessFactors.size()) ? material.RoughnessFactors[slotIdx] : 1.0f;
-        instance.metallicRoughnessTextureIndex = getTextureIndex(material.MetallicRoughnessMaps, slotIdx);
-        instance.physicalDescriptorTextureSet = (slotIdx < material.PhysicalDescriptorTextureSets.size()) ? material.PhysicalDescriptorTextureSets[slotIdx] : 0;
-
-        // Additional Maps
-        instance.normalTextureIndex = getTextureIndex(material.NormalMaps, slotIdx);
-        instance.normalTextureSet = (slotIdx < material.NormalTextureSets.size()) ? material.NormalTextureSets[slotIdx] : 0;
-
-        instance.occlusionTextureIndex = getTextureIndex(material.OcclusionMaps, slotIdx);
-        instance.occlusionTextureSet = (slotIdx < material.OcclusionTextureSets.size()) ? material.OcclusionTextureSets[slotIdx] : 0;
-
-        // Emission
-        instance.emissiveFactor = (slotIdx < material.EmissiveFactors.size()) ? material.EmissiveFactors[slotIdx] : glm::vec3(0.0f);
-        instance.emissiveTextureIndex = getTextureIndex(material.EmissiveMaps, slotIdx);
-        instance.emissiveTextureSet = (slotIdx < material.EmissiveTextureSets.size()) ? material.EmissiveTextureSets[slotIdx] : 0;
-        instance.emissiveStrength = (slotIdx < material.EmissiveStrengths.size()) ? material.EmissiveStrengths[slotIdx] : 1.0f;
-
-        // Transmission
-        instance.transmissionFactor = (slotIdx < material.TransmissionFactors.size()) ? material.TransmissionFactors[slotIdx] : 0.0f;
-        instance.transmissionTextureIndex = getTextureIndex(material.TransmissionMaps, slotIdx);
-        instance.transmissionTextureSet = (slotIdx < material.TransmissionTextureSets.size()) ? material.TransmissionTextureSets[slotIdx] : 0;
-
-        // Settings
-        AlphaMode mode = (slotIdx < material.Modes.size()) ? material.Modes[slotIdx] : AlphaMode::Opaque;
-        instance.alphaMode = static_cast<uint32_t>(mode);
-        instance.alphaMaskCutoff = (slotIdx < material.AlphaMaskCutoffs.size()) ? material.AlphaMaskCutoffs[slotIdx] : 0.5f;
-        instance.doubleSided = (slotIdx < material.DoubleSidedFlags.size()) ? (uint32_t)material.DoubleSidedFlags[slotIdx] : 0;
-        instance.unlit = (slotIdx < material.UnlitFlags.size()) ? (uint32_t)material.UnlitFlags[slotIdx] : 0;
+        PackMaterial(instance, material);
+        AlphaMode mode = material.Mode;
 
         instance.entityID = entityID;
 
@@ -3395,19 +3442,8 @@ namespace Nox
         }
     }
 
-    void Renderer::DrawStaticMesh(const glm::mat4& transform, Ref<StaticMesh> staticMesh, const MaterialComponent& material, int entityID, uint32_t firstSubmesh, uint32_t submeshCount)
+    void Renderer::DrawStaticMesh(const glm::mat4& transform, Ref<StaticMesh> staticMesh, const MaterialComponent& materialOverrides, int entityID, uint32_t firstSubmesh, uint32_t submeshCount)
     {
-        // Helper to safely fetch descriptor index
-        auto getTextureIndex = [](const std::vector<AssetHandle>& maps, uint32_t idx) -> int
-        {
-            if (!maps.empty() && idx < maps.size() && maps[idx] != 0)
-            {
-                Ref<Texture2D> texture = AssetManager::GetAsset<Texture2D>(maps[idx]);
-                if (texture) return texture->GetDescriptorIndexSlot();
-            }
-            return -1;
-        };
-
         uint32_t first = std::min(firstSubmesh, static_cast<uint32_t>(staticMesh->GetSubMeshes().size()));
         uint32_t count = submeshCount == UINT32_MAX ? static_cast<uint32_t>(staticMesh->GetSubMeshes().size()) : std::max(submeshCount, 1u);
         uint32_t last = std::min(first + count, static_cast<uint32_t>(staticMesh->GetSubMeshes().size()));
@@ -3415,6 +3451,15 @@ namespace Nox
         for (size_t i = first; i < last; ++i)
         {
             MeshHandle handle = staticMesh->GetSubMeshes()[i];
+
+            MaterialData material = staticMesh->GetMaterial(i);
+            const auto& materialAssets = materialOverrides.MaterialAssets;
+            if (i < materialAssets.size() && materialAssets[i] != 0)
+            {
+                Ref<Material> materialAsset = AssetManager::GetAsset<Material>(materialAssets[i]);
+                if (materialAsset)
+                    material = materialAsset->GetData();
+            }
 
             shaderio::InstanceData instance{};
             instance.modelMatrix = transform;
@@ -3429,47 +3474,8 @@ namespace Nox
             instance.meshletVerticesPageIndex = handle.meshletVertices.pageIndex;
             instance.meshletTrianglesPageIndex = handle.meshletTriangles.pageIndex;
 
-            // --- MATERIAL PACKING ---
-
-            instance.workflow = (i < material.Workflows.size()) ? material.Workflows[i] : 0.0f;
-            instance.diffuseFactor = (i < material.DiffuseFactors.size()) ? material.DiffuseFactors[i] : glm::vec4(1.0f);
-            instance.specularFactor = (i < material.SpecularFactors.size()) ? material.SpecularFactors[i] : glm::vec4(1.0f);
-
-            // Base Color
-            instance.baseColorFactor = (i < material.BaseColorFactors.size()) ? material.BaseColorFactors[i] : glm::vec4(1.0f);
-            instance.baseColorTextureIndex = getTextureIndex(material.BaseColorMaps, i);
-            instance.baseColorTextureSet = (i < material.BaseColorTextureSets.size()) ? material.BaseColorTextureSets[i] : 0;
-
-            // PBR Properties
-            instance.metallicFactor = (i < material.MetallicFactors.size()) ? material.MetallicFactors[i] : 1.0f;
-            instance.roughnessFactor = (i < material.RoughnessFactors.size()) ? material.RoughnessFactors[i] : 1.0f;
-            instance.metallicRoughnessTextureIndex = getTextureIndex(material.MetallicRoughnessMaps, i);
-            instance.physicalDescriptorTextureSet = (i < material.PhysicalDescriptorTextureSets.size()) ? material.PhysicalDescriptorTextureSets[i] : 0;
-
-            // Additional Maps
-            instance.normalTextureIndex = getTextureIndex(material.NormalMaps, i);
-            instance.normalTextureSet = (i < material.NormalTextureSets.size()) ? material.NormalTextureSets[i] : 0;
-
-            instance.occlusionTextureIndex = getTextureIndex(material.OcclusionMaps, i);
-            instance.occlusionTextureSet = (i < material.OcclusionTextureSets.size()) ? material.OcclusionTextureSets[i] : 0;
-
-            // Emission
-            instance.emissiveFactor = (i < material.EmissiveFactors.size()) ? material.EmissiveFactors[i] : glm::vec3(0.0f);
-            instance.emissiveTextureIndex = getTextureIndex(material.EmissiveMaps, i);
-            instance.emissiveTextureSet = (i < material.EmissiveTextureSets.size()) ? material.EmissiveTextureSets[i] : 0;
-            instance.emissiveStrength = (i < material.EmissiveStrengths.size()) ? material.EmissiveStrengths[i] : 1.0f;
-
-            // Transmission
-            instance.transmissionFactor = (i < material.TransmissionFactors.size()) ? material.TransmissionFactors[i] : 0.0f;
-            instance.transmissionTextureIndex = getTextureIndex(material.TransmissionMaps, i);
-            instance.transmissionTextureSet = (i < material.TransmissionTextureSets.size()) ? material.TransmissionTextureSets[i] : 0;
-
-            // Settings
-            AlphaMode mode = (i < material.Modes.size()) ? material.Modes[i] : AlphaMode::Opaque;
-            instance.alphaMode = static_cast<uint32_t>(mode);
-            instance.alphaMaskCutoff = (i < material.AlphaMaskCutoffs.size()) ? material.AlphaMaskCutoffs[i] : 0.5f;
-            instance.doubleSided = (i < material.DoubleSidedFlags.size()) ? (uint32_t)material.DoubleSidedFlags[i] : 0;
-            instance.unlit = (i < material.UnlitFlags.size()) ? (uint32_t)material.UnlitFlags[i] : 0;
+            PackMaterial(instance, material);
+            AlphaMode mode = material.Mode;
 
             instance.entityID = entityID;
 
@@ -3547,12 +3553,16 @@ namespace Nox
             Ref<Mesh> mesh = AssetManager::GetAsset<Mesh>(src.Mesh);
             if (mesh)
             {
+                MaterialComponent material = srcMat;
+                if (material.MaterialAssets.empty())
+                    material.MaterialAssets = mesh->GetMaterialAssets();
+
                 uint32_t firstSubmesh = std::min(src.SubmeshIndex, static_cast<uint32_t>(mesh->GetSubMeshCount()));
                 uint32_t submeshCount = std::max(src.SubmeshCount, 1u);
                 uint32_t lastSubmesh = std::min(firstSubmesh + submeshCount, static_cast<uint32_t>(mesh->GetSubMeshCount()));
 
                 for (uint32_t i = firstSubmesh; i < lastSubmesh; i++)
-                    DrawMesh(transform, mesh, i, srcMat, entityID, boneTransforms);
+                    DrawMesh(transform, mesh, i, material, entityID, boneTransforms);
             }
         }
         else if (type == AssetType::StaticMesh)
@@ -3560,7 +3570,10 @@ namespace Nox
             Ref<StaticMesh> staticMesh = AssetManager::GetAsset<StaticMesh>(src.Mesh);
             if (staticMesh)
             {
-                DrawStaticMesh(transform, staticMesh, srcMat, entityID, src.SubmeshIndex, src.SubmeshCount);
+                MaterialComponent material = srcMat;
+                if (material.MaterialAssets.empty())
+                    material.MaterialAssets = staticMesh->GetMaterialAssets();
+                DrawStaticMesh(transform, staticMesh, material, entityID, src.SubmeshIndex, src.SubmeshCount);
             }
         }
     }

@@ -17,6 +17,7 @@ namespace Nox
         MeshSource,
         Mesh,
         StaticMesh,
+        Material,
         
         Skeleton,
         AnimationSequence,

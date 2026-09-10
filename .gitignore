@@ -268,3 +268,5 @@ NoxCore/vendors/*
 !NoxCore/vendors/meshoptimizer/
 *.ntex
 *.nmesh
+*.hash
+*.nmat

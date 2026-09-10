@@ -95,49 +95,11 @@ namespace Nox
     
     struct MaterialComponent
     {
-        // Workflow (0.0 = Metallic-Roughness, 1.0 = Specular-Glossiness)
-        std::vector<float> Workflows = { 0.0f };
-        std::vector<glm::vec4> DiffuseFactors = { glm::vec4(1.0f) };
-        std::vector<glm::vec4> SpecularFactors = { glm::vec4(1.0f) }; // rgb: Specular, a: Glossiness
-        
-        // Base Color
-        std::vector<glm::vec4> BaseColorFactors = { glm::vec4(1.0f) };
-        std::vector<AssetHandle> BaseColorMaps = { 0 };
-        std::vector<int32_t> BaseColorTextureSets = { 0 };
+        // Per-entity material overrides. A zero handle uses the mesh primitive's default .nmat.
+        std::vector<AssetHandle> MaterialAssets;
 
-        // PBR Properties
-        std::vector<float> MetallicFactors = { 1.0f };
-        std::vector<float> RoughnessFactors = { 1.0f };
-        std::vector<AssetHandle> MetallicRoughnessMaps = { 0 };
-        std::vector<int32_t> PhysicalDescriptorTextureSets = { 0 };
-        
-        // Additional Maps
-        std::vector<AssetHandle> NormalMaps = { 0 };
-        std::vector<int32_t> NormalTextureSets = { 0 };
-        
-        std::vector<AssetHandle> OcclusionMaps = { 0 };
-        std::vector<int32_t> OcclusionTextureSets = { 0 };
-        
-        // Emission
-        std::vector<glm::vec3> EmissiveFactors = { glm::vec3(0.0f) };
-        std::vector<AssetHandle> EmissiveMaps = { 0 };
-        std::vector<int32_t> EmissiveTextureSets = { 0 };
-        std::vector<float> EmissiveStrengths = { 1.0f };
-        
-        // Transmission (KHR_materials_transmission)
-        std::vector<float> TransmissionFactors = { 0.0f };
-        std::vector<AssetHandle> TransmissionMaps = { 0 };
-        std::vector<int32_t> TransmissionTextureSets = { 0 };
-        
-        // Settings
-        std::vector<AlphaMode> Modes = { AlphaMode::Opaque };
-        std::vector<float> AlphaMaskCutoffs = { 0.5f };
-        std::vector<bool> DoubleSidedFlags = { false };
-        std::vector<bool> UnlitFlags = { false };
-    
         MaterialComponent() = default;
         MaterialComponent(const MaterialComponent&) = default;
-        MaterialComponent(const glm::vec4 color) : BaseColorFactors{ color } {}
     };
     
     // Following KHR_Punctual

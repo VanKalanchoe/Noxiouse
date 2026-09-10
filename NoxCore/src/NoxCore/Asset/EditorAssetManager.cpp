@@ -4,10 +4,15 @@
 
 #include "AssetManager.h"
 
+#include <algorithm>
 #include "AssetImporter.h"
 #include "NoxCore/Renderer/Mesh.h"
+#include "Material.h"
+#include "MaterialSerializer.h"
 
 #include <fstream>
+#include <cstring>
+#include <cctype>
 #include <yaml-cpp/yaml.h>
 
 #include "NoxCore/Core/Log.h"
@@ -42,6 +47,35 @@ namespace Nox
         if (str == "BC7_UNorm_SRGB")     return NRI::ImageFormat::BC7_UNorm_SRGB;
         return NRI::ImageFormat::RGBA8;
     }
+
+    static std::filesystem::path GeneratedAssetPath(
+        const std::filesystem::path& sourcePath,
+        const char* folder,
+        const char* extension)
+    {
+        auto parent = sourcePath.parent_path();
+        std::string parentFolder = parent.filename().string();
+        std::string expectedFolder = folder;
+        std::transform(parentFolder.begin(), parentFolder.end(), parentFolder.begin(),
+            [](unsigned char character) { return static_cast<char>(std::tolower(character)); });
+        std::transform(expectedFolder.begin(), expectedFolder.end(), expectedFolder.begin(),
+            [](unsigned char character) { return static_cast<char>(std::tolower(character)); });
+
+        if (parentFolder == expectedFolder)
+            return parent / (sourcePath.stem().string() + extension);
+        return parent / folder / (sourcePath.stem().string() + extension);
+    }
+
+    static std::string SanitizeAssetName(std::string name)
+    {
+        constexpr const char* invalid = "<>:\"/\\|?*";
+        for (char& character : name)
+        {
+            if (std::strchr(invalid, character) != nullptr)
+                character = '_';
+        }
+        return name.empty() ? "Material" : name;
+    }
     
     static std::map<std::filesystem::path, AssetType> s_AssetExtensionMap = 
     {
@@ -55,6 +89,7 @@ namespace Nox
         { ".glb", AssetType::MeshSource },
         { ".nmesh", AssetType::Mesh },
         { ".nsmesh", AssetType::StaticMesh },
+        { ".nmat", AssetType::Material },
         
         { ".nskel",   AssetType::Skeleton },
         { ".nanim",   AssetType::AnimationSequence },
@@ -137,20 +172,27 @@ namespace Nox
         NOX_CORE_INFO("Auto-Reimporting asset from source: {}", metadata.SourceFilePath.string());
 
         // 1. Delete the old cooked cache (.nsmesh/.nmesh) so the Importer is forced to re-cook the GLTF
-        if (metadata.Type == AssetType::Mesh || metadata.Type == AssetType::StaticMesh || metadata.Type == AssetType::SkeletalMesh)
+        if (metadata.Type == AssetType::Mesh || metadata.Type == AssetType::StaticMesh ||
+            metadata.Type == AssetType::MeshSource || metadata.Type == AssetType::SkeletalMesh)
         {
             auto cookedPath = Project::GetActiveAssetDirectory() / metadata.FilePath;
             auto ext = cookedPath.extension();
             if ((ext == ".nsmesh" || ext == ".nmesh") && std::filesystem::exists(cookedPath))
             {
                 std::filesystem::remove(cookedPath);
+                if (std::filesystem::exists(cookedPath.string() + ".hash"))
+                    std::filesystem::remove(cookedPath.string() + ".hash");
             }
         }
         else if (metadata.Type == AssetType::Texture2D)
         {
             auto cookedPath = Project::GetActiveAssetDirectory() / metadata.FilePath;
             if (cookedPath.extension() == ".ntex" && std::filesystem::exists(cookedPath))
+            {
                 std::filesystem::remove(cookedPath);
+                if (std::filesystem::exists(cookedPath.string() + ".hash"))
+                    std::filesystem::remove(cookedPath.string() + ".hash");
+            }
         }
 
         // 2. Re-run the importer on the GLTF
@@ -162,6 +204,14 @@ namespace Nox
         {
             reimportedAsset->Handle = handle;
             m_LoadedAssets[handle] = reimportedAsset;
+
+            if (metadata.Type == AssetType::Mesh ||
+                metadata.Type == AssetType::StaticMesh ||
+                metadata.Type == AssetType::MeshSource)
+            {
+                ImportMeshTextures(reimportedAsset);
+                ImportMeshMaterials(reimportedAsset, metadata);
+            }
         }
 
         // 4. Scan and register any new .nanim / .nskel files generated during cooking
@@ -211,10 +261,13 @@ namespace Nox
         metadata.Type = (targetType != AssetType::None) ? targetType : GetAssetTypeFromExtension(sourcePath.extension());
         NOX_CORE_ASSERT(metadata.Type != AssetType::None, "could not determine asset type from extension");
 
+        if (destPath.empty() && metadata.Type == AssetType::MeshSource)
+            metadata.FilePath = GeneratedAssetPath(sourcePath, "Meshes", ".nmesh");
+
         if (metadata.Type == AssetType::Texture2D && destPath.empty() &&
             sourcePath.extension() != ".ntex" && sourcePath.extension() != ".ktx2")
         {
-            metadata.FilePath.replace_extension(".ntex");
+            metadata.FilePath = GeneratedAssetPath(sourcePath, "Textures", ".ntex");
         }
         
         Ref<Asset> asset = AssetImporter::ImportAsset(handle, metadata);
@@ -224,8 +277,13 @@ namespace Nox
             m_LoadedAssets[handle] = asset;
             m_AssetRegistry[handle] = metadata;
 
-            if (metadata.Type == AssetType::Mesh || metadata.Type == AssetType::StaticMesh)
+            if (metadata.Type == AssetType::Mesh ||
+                metadata.Type == AssetType::StaticMesh ||
+                metadata.Type == AssetType::MeshSource)
+            {
                 ImportMeshTextures(asset);
+                ImportMeshMaterials(asset, metadata);
+            }
 
             // Scan for extracted .nanim / .nskel files
             ScanAndRegisterNewAssets();
@@ -268,13 +326,12 @@ namespace Nox
                 relativePath = sourcePath;
             }
 
-            std::filesystem::path cookedPath = relativePath;
-            cookedPath.replace_extension(".ntex");
+            std::filesystem::path cookedPath = GeneratedAssetPath(relativePath, "Textures", ".ntex");
 
             for (const auto& [textureHandle, metadata] : m_AssetRegistry)
             {
                 if (metadata.Type == AssetType::Texture2D &&
-                    metadata.FilePath == cookedPath)
+                    (metadata.FilePath == cookedPath || metadata.SourceFilePath == relativePath))
                 {
                     return;
                 }
@@ -300,6 +357,81 @@ namespace Nox
             importTexture(material.TransmissionTexturePath, false);
         }
     }
+
+    void EditorAssetManager::ImportMeshMaterials(const Ref<Asset>& meshAsset, const AssetMetadata& meshMetadata)
+    {
+        const std::vector<MaterialData>* materials = nullptr;
+        std::vector<AssetHandle> materialAssets;
+
+        if (meshAsset->GetType() == AssetType::Mesh)
+        {
+            auto* mesh = static_cast<Mesh*>(meshAsset.get());
+            materials = &mesh->GetMaterials();
+        }
+        else if (meshAsset->GetType() == AssetType::StaticMesh)
+        {
+            auto* mesh = static_cast<StaticMesh*>(meshAsset.get());
+            materials = &mesh->GetMaterials();
+        }
+
+        if (!materials)
+            return;
+
+        materialAssets.reserve(materials->size());
+
+        for (size_t index = 0; index < materials->size(); ++index)
+        {
+            const MaterialData& material = (*materials)[index];
+            std::string materialName = material.Name.empty()
+                ? "Material_" + std::to_string(index)
+                : SanitizeAssetName(material.Name);
+
+            std::filesystem::path materialPath = meshMetadata.FilePath.parent_path().parent_path() / "Materials" /
+                (meshMetadata.FilePath.stem().string() + "_" + materialName + ".nmat");
+
+            AssetHandle materialHandle = 0;
+            for (const auto& [handle, metadata] : m_AssetRegistry)
+            {
+                if (metadata.Type == AssetType::Material && metadata.FilePath == materialPath)
+                {
+                    materialHandle = handle;
+                    break;
+                }
+            }
+
+            const auto fullMaterialPath = Project::GetActiveAssetDirectory() / materialPath;
+            if (materialHandle == 0 || !std::filesystem::exists(fullMaterialPath))
+            {
+                if (!MaterialSerializer::Serialize(fullMaterialPath, material))
+                    continue;
+
+                if (materialHandle != 0)
+                {
+                    ReimportAsset(materialHandle);
+                }
+                else
+                {
+                    ImportAsset(materialPath, materialPath, AssetType::Material);
+                    for (const auto& [handle, metadata] : m_AssetRegistry)
+                    {
+                        if (metadata.Type == AssetType::Material && metadata.FilePath == materialPath)
+                        {
+                            materialHandle = handle;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (materialHandle != 0)
+                materialAssets.push_back(materialHandle);
+        }
+
+        if (meshAsset->GetType() == AssetType::Mesh)
+            static_cast<Mesh*>(meshAsset.get())->SetMaterialAssets(std::move(materialAssets));
+        else
+            static_cast<StaticMesh*>(meshAsset.get())->SetMaterialAssets(std::move(materialAssets));
+    }
     
     void EditorAssetManager::ImportAsset(const std::filesystem::path& sourcePath, const TextureSpecification& spec, const std::filesystem::path& destPath)
     {
@@ -315,8 +447,7 @@ namespace Nox
         }
         else
         {
-            metadata.FilePath = sourcePath;
-            metadata.FilePath.replace_extension(".ntex");
+            metadata.FilePath = GeneratedAssetPath(sourcePath, "Textures", ".ntex");
         }
         metadata.SourceFilePath = sourcePath;
         metadata.Type = AssetType::Texture2D;
@@ -372,6 +503,15 @@ namespace Nox
                 NOX_CORE_ASSERT("EditorAssetManager::GetAsset - asset import failed")
             }
             m_LoadedAssets[handle] = asset;
+
+            if (asset && (metadata.Type == AssetType::Mesh ||
+                          metadata.Type == AssetType::StaticMesh ||
+                          metadata.Type == AssetType::MeshSource))
+            {
+                ImportMeshTextures(asset);
+                ImportMeshMaterials(asset, metadata);
+                ScanAndRegisterNewAssets();
+            }
         }
         // 3. return asset
         return asset;
@@ -435,7 +575,8 @@ namespace Nox
             if (!entry.is_regular_file()) continue;
 
             std::filesystem::path ext = entry.path().extension();
-            if (ext == ".nanim" || ext == ".nskel")
+            if (ext == ".nanim" || ext == ".nskel" || ext == ".nmat" ||
+                ext == ".ntex" || ext == ".nmesh" || ext == ".nsmesh")
             {
                 std::filesystem::path relativePath = std::filesystem::relative(entry.path(), assetDir);
 

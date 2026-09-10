@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include <utility>
 
 #include "NoxCore/Asset/Asset.h"
 #include "NoxCore/Renderer/DataTypes.h"
@@ -27,7 +28,13 @@ namespace Nox
         
         // Material
         const std::vector<MaterialData>& GetMaterials() const { return m_Materials; }
-        const MaterialData& GetMaterial(size_t index) const { return m_Materials[index]; }
+        const MaterialData& GetMaterial(size_t index) const
+        {
+            static const MaterialData defaultMaterial;
+            return index < m_Materials.size() ? m_Materials[index] : defaultMaterial;
+        }
+        const std::vector<AssetHandle>& GetMaterialAssets() const { return m_MaterialAssets; }
+        void SetMaterialAssets(std::vector<AssetHandle> assets) { m_MaterialAssets = std::move(assets); }
         
         // Lights
         const std::vector<LightNodeData>& GetLights() const { return m_Lights; }
@@ -42,6 +49,7 @@ namespace Nox
         friend class MeshImporter;
         std::vector<MeshHandle> m_SubMeshes;
         std::vector<MaterialData> m_Materials;
+        std::vector<AssetHandle> m_MaterialAssets;
         std::vector<LightNodeData> m_Lights;
         std::vector<MeshNodeData> m_Nodes;
         std::vector<std::string> m_SubmeshNames;
@@ -68,7 +76,13 @@ namespace Nox
         
         // Material
         const std::vector<MaterialData>& GetMaterials() const { return m_Materials; }
-        const MaterialData& GetMaterial(size_t index) const { return m_Materials[index]; }
+        const MaterialData& GetMaterial(size_t index) const
+        {
+            static const MaterialData defaultMaterial;
+            return index < m_Materials.size() ? m_Materials[index] : defaultMaterial;
+        }
+        const std::vector<AssetHandle>& GetMaterialAssets() const { return m_MaterialAssets; }
+        void SetMaterialAssets(std::vector<AssetHandle> assets) { m_MaterialAssets = std::move(assets); }
         
         // Lights
         const std::vector<LightNodeData>& GetLights() const { return m_Lights; }
@@ -83,6 +97,7 @@ namespace Nox
         friend class MeshImporter;
         std::vector<MeshHandle> m_SubMeshes;
         std::vector<MaterialData> m_Materials;
+        std::vector<AssetHandle> m_MaterialAssets;
         std::vector<LightNodeData> m_Lights;
         std::vector<MeshNodeData> m_Nodes;
         std::vector<std::string> m_SubmeshNames;

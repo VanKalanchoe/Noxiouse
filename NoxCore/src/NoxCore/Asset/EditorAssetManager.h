@@ -45,6 +45,7 @@ namespace Nox
     private:
         void OnAssetModifiedOnDisk(const std::filesystem::path& absolutePath);
         void ImportMeshTextures(const Ref<Asset>& meshAsset);
+        void ImportMeshMaterials(const Ref<Asset>& meshAsset, const AssetMetadata& meshMetadata);
     private:
         Utils::NOXWatcher m_AssetWatcher;
         

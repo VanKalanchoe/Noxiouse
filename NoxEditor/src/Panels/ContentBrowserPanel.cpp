@@ -136,7 +136,9 @@ namespace Nox
 							m_ShowImportModal = true;
 						
 							std::filesystem::path defaultDest = m_PendingImportPath;
-							defaultDest.replace_extension(m_ImportAsStaticMesh ? ".nsmesh" : ".nmesh");
+							defaultDest = defaultDest.parent_path() / "Meshes" /
+								(defaultDest.stem().string() +
+								 (m_ImportAsStaticMesh ? ".nsmesh" : ".nmesh"));
 							strncpy_s(m_ImportDestPathBuffer, defaultDest.string().c_str(), sizeof(m_ImportDestPathBuffer));
 						}
 						else

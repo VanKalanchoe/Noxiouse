@@ -18,6 +18,7 @@
 #include "NoxCore/Core/Buffer.h"
 #include "NoxCore/Debug/Instrumentor.h"
 #include "NoxCore/Project/Project.h"
+#include "NoxCore/Utils/Utils.h"
 
 namespace Nox
 {
@@ -101,12 +102,34 @@ namespace Nox
     Ref<Texture2D> TextureImporter::ImportTexture2D(AssetHandle handle, const AssetMetadata& metadata)
     {
         std::filesystem::path cookedPath = GetCookedTexturePath(metadata);
-        if (std::filesystem::exists(cookedPath))
-            return LoadTexture2D(cookedPath, metadata.TextureSpec);
-
         std::filesystem::path sourcePath = Project::GetActiveAssetDirectory() / metadata.SourceFilePath;
         if (metadata.SourceFilePath.empty())
             sourcePath = Project::GetActiveAssetDirectory() / metadata.FilePath;
+
+        const bool sourceIsCooked = sourcePath.extension() == ".ntex" || sourcePath.extension() == ".ktx2";
+        const auto hashPath = cookedPath.string() + ".hash";
+        XXH128_hash_t sourceHash{};
+        XXH128_hash_t cookedHash{};
+        struct TextureCookSettings
+        {
+            XXH128_hash_t source;
+            uint8_t flip;
+            uint8_t generateMips;
+            uint16_t format;
+        };
+        TextureCookSettings cookSettings{};
+        cookSettings.source = Utility::calcul_hash_streaming(sourcePath.string());
+        cookSettings.flip = static_cast<uint8_t>(metadata.TextureSpec.flip);
+        cookSettings.generateMips = static_cast<uint8_t>(metadata.TextureSpec.generateMips);
+        cookSettings.format = static_cast<uint16_t>(metadata.TextureSpec.format);
+        sourceHash = XXH3_128bits(&cookSettings, sizeof(cookSettings));
+        const bool cookedIsCurrent = sourceIsCooked ||
+            (std::filesystem::exists(sourcePath) &&
+             (Utility::loadHashFromFile(hashPath, cookedHash) &&
+              XXH128_isEqual(sourceHash, cookedHash)));
+
+        if (std::filesystem::exists(cookedPath) && cookedIsCurrent)
+            return LoadTexture2D(cookedPath, metadata.TextureSpec);
 
         if (sourcePath.extension() == ".png" || sourcePath.extension() == ".jpg" || sourcePath.extension() == ".jpeg")
         {
@@ -140,6 +163,8 @@ namespace Nox
             if (!std::filesystem::exists(cookedPath.parent_path()))
                 std::filesystem::create_directories(cookedPath.parent_path());
             SaveNTEX(cookedPath, cpuData);
+            if (!sourceIsCooked)
+                Utility::saveHashToFile(hashPath, sourceHash);
 
             Renderer* targetRenderer = Application::Get().GetRenderer();
             Ref<Texture2D> texture = targetRenderer->UploadTexture(cpuData);

@@ -14,6 +14,7 @@
 
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Asset/MeshSerializer.h"
+#include "NoxCore/Utils/Utils.h"
 
 namespace Nox
 {
@@ -29,7 +30,14 @@ namespace Nox
         std::vector<LightNodeData> lightDataList;
         std::vector<MeshNodeData> nodeDataList;
 
-        if (std::filesystem::exists(cookedPath))
+        const auto hashPath = cookedPath.string() + ".hash";
+        const auto sourceHash = Utility::calcul_hash_streaming(sourcePath.string());
+        XXH128_hash_t cookedHash{};
+        const bool cookedIsCurrent = std::filesystem::exists(cookedPath) &&
+            Utility::loadHashFromFile(hashPath, cookedHash) &&
+            XXH128_isEqual(sourceHash, cookedHash);
+
+        if (cookedIsCurrent)
         {
             NOX_CORE_INFO("Loading cooked dynamic mesh from {}", cookedPath.string());
             bool success = MeshSerializer::DeserializeMesh(cookedPath, meshDataList, materialDataList, lightDataList, nodeDataList);
@@ -55,6 +63,7 @@ namespace Nox
                 std::filesystem::create_directories(cookedPath.parent_path());
 
             MeshSerializer::SerializeMesh(cookedPath, meshDataList, materialDataList, lightDataList, nodeDataList);
+            Utility::saveHashToFile(hashPath, sourceHash);
 
             // Save skeleton if present
             if (!extractedSkeleton.Skins.empty() || !extractedAnimations.empty())
@@ -106,7 +115,14 @@ namespace Nox
         std::vector<LightNodeData> lightDataList;
         std::vector<MeshNodeData> nodeDataList;
 
-        if (std::filesystem::exists(cookedPath))
+        const auto hashPath = cookedPath.string() + ".hash";
+        const auto sourceHash = Utility::calcul_hash_streaming(sourcePath.string());
+        XXH128_hash_t cookedHash{};
+        const bool cookedIsCurrent = std::filesystem::exists(cookedPath) &&
+            Utility::loadHashFromFile(hashPath, cookedHash) &&
+            XXH128_isEqual(sourceHash, cookedHash);
+
+        if (cookedIsCurrent)
         {
             NOX_CORE_INFO("Loading cooked static mesh from {}", cookedPath.string());
             bool success = MeshSerializer::DeserializeStaticMesh(cookedPath, meshDataList, materialDataList, lightDataList, nodeDataList);
@@ -134,6 +150,7 @@ namespace Nox
                 std::filesystem::create_directories(cookedPath.parent_path());
 
             MeshSerializer::SerializeStaticMesh(cookedPath, meshDataList, materialDataList, lightDataList, nodeDataList);
+            Utility::saveHashToFile(hashPath, sourceHash);
         }
 
         Ref<StaticMesh> staticMeshAsset = CreateRef<StaticMesh>();
@@ -514,7 +531,7 @@ namespace Nox
         const std::filesystem::path& modelPath)
     {
         std::filesystem::path textureDir =
-            modelPath.parent_path() / "textures";
+            modelPath.parent_path() / "Textures";
 
         std::filesystem::create_directories(textureDir);
 
