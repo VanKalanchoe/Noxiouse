@@ -98,6 +98,7 @@ namespace Nox
     {
         std::string Name;
         GltfLightType Type = GltfLightType::Point;
+        int32_t NodeIndex = -1;
         glm::vec3 Color = glm::vec3(1.0f);
         float Intensity = 1.0f;
         float Range = 10.0f;
@@ -107,6 +108,19 @@ namespace Nox
         glm::vec3 Translation = glm::vec3(0.0f);
         glm::quat Rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
         glm::vec3 Scale = glm::vec3(1.0f);
+    };
+
+    struct MeshNodeData
+    {
+        std::string Name;
+        int32_t Parent = -1;
+
+        glm::vec3 Translation = glm::vec3(0.0f);
+        glm::quat Rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+        glm::vec3 Scale = glm::vec3(1.0f);
+
+        uint32_t FirstSubmesh = UINT32_MAX;
+        uint32_t SubmeshCount = 0;
     };
     
     struct MeshData

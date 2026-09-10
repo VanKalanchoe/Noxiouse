@@ -3395,7 +3395,7 @@ namespace Nox
         }
     }
 
-    void Renderer::DrawStaticMesh(const glm::mat4& transform, Ref<StaticMesh> staticMesh, const MaterialComponent& material, int entityID)
+    void Renderer::DrawStaticMesh(const glm::mat4& transform, Ref<StaticMesh> staticMesh, const MaterialComponent& material, int entityID, uint32_t firstSubmesh, uint32_t submeshCount)
     {
         // Helper to safely fetch descriptor index
         auto getTextureIndex = [](const std::vector<AssetHandle>& maps, uint32_t idx) -> int
@@ -3408,7 +3408,11 @@ namespace Nox
             return -1;
         };
 
-        for (size_t i = 0; i < staticMesh->GetSubMeshes().size(); ++i)
+        uint32_t first = std::min(firstSubmesh, static_cast<uint32_t>(staticMesh->GetSubMeshes().size()));
+        uint32_t count = submeshCount == UINT32_MAX ? static_cast<uint32_t>(staticMesh->GetSubMeshes().size()) : std::max(submeshCount, 1u);
+        uint32_t last = std::min(first + count, static_cast<uint32_t>(staticMesh->GetSubMeshes().size()));
+
+        for (size_t i = first; i < last; ++i)
         {
             MeshHandle handle = staticMesh->GetSubMeshes()[i];
 
@@ -3543,7 +3547,12 @@ namespace Nox
             Ref<Mesh> mesh = AssetManager::GetAsset<Mesh>(src.Mesh);
             if (mesh)
             {
-                DrawMesh(transform, mesh, src.SubmeshIndex, srcMat, entityID, boneTransforms);
+                uint32_t firstSubmesh = std::min(src.SubmeshIndex, static_cast<uint32_t>(mesh->GetSubMeshCount()));
+                uint32_t submeshCount = std::max(src.SubmeshCount, 1u);
+                uint32_t lastSubmesh = std::min(firstSubmesh + submeshCount, static_cast<uint32_t>(mesh->GetSubMeshCount()));
+
+                for (uint32_t i = firstSubmesh; i < lastSubmesh; i++)
+                    DrawMesh(transform, mesh, i, srcMat, entityID, boneTransforms);
             }
         }
         else if (type == AssetType::StaticMesh)
@@ -3551,7 +3560,7 @@ namespace Nox
             Ref<StaticMesh> staticMesh = AssetManager::GetAsset<StaticMesh>(src.Mesh);
             if (staticMesh)
             {
-                DrawStaticMesh(transform, staticMesh, srcMat, entityID);
+                DrawStaticMesh(transform, staticMesh, srcMat, entityID, src.SubmeshIndex, src.SubmeshCount);
             }
         }
     }

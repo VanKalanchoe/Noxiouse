@@ -31,6 +31,9 @@ namespace Nox
         
         // Lights
         const std::vector<LightNodeData>& GetLights() const { return m_Lights; }
+
+        // glTF scene hierarchy
+        const std::vector<MeshNodeData>& GetNodes() const { return m_Nodes; }
         
         static AssetType GetStaticType() { return AssetType::StaticMesh; }
         virtual AssetType GetAssetType() const { return GetStaticType(); }
@@ -40,6 +43,7 @@ namespace Nox
         std::vector<MeshHandle> m_SubMeshes;
         std::vector<MaterialData> m_Materials;
         std::vector<LightNodeData> m_Lights;
+        std::vector<MeshNodeData> m_Nodes;
         std::vector<std::string> m_SubmeshNames;
     };
     
@@ -68,6 +72,9 @@ namespace Nox
         
         // Lights
         const std::vector<LightNodeData>& GetLights() const { return m_Lights; }
+
+        // glTF scene hierarchy
+        const std::vector<MeshNodeData>& GetNodes() const { return m_Nodes; }
         
         static AssetType GetStaticType() { return AssetType::Mesh; }
         virtual AssetType GetAssetType() const { return GetStaticType(); }
@@ -77,6 +84,7 @@ namespace Nox
         std::vector<MeshHandle> m_SubMeshes;
         std::vector<MaterialData> m_Materials;
         std::vector<LightNodeData> m_Lights;
+        std::vector<MeshNodeData> m_Nodes;
         std::vector<std::string> m_SubmeshNames;
     };
 }

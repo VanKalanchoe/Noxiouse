@@ -266,3 +266,5 @@ NoxCore/vendors/*
 !NoxCore/vendors/imgui/
 !NoxCore/vendors/tinygltf/
 !NoxCore/vendors/meshoptimizer/
+*.ntex
+*.nmesh

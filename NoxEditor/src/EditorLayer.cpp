@@ -1,10 +1,13 @@
 #include "EditorLayer.h"
 
+#include <algorithm>
+#include <cmath>
 #include <iostream>
 
 #include <imgui.h>
 #include <imgui_internal.h>// For Docking
 #include <ImGuizmo.h>
+#include <glm/glm.hpp>
 #include <glm/gtc/type_ptr.hpp>  // for pointer to matrix or vector
 
 #include "NoxCore/Asset/AssetManager.h"
@@ -308,6 +311,16 @@ namespace Nox
             ImVec2 viewportPanelSize = ImGui::GetContentRegionAvail();
             m_ViewportSize = {viewportPanelSize.x, viewportPanelSize.y};
 
+            // A cancelled drag has no delivery callback, so remove its temporary entity here.
+            if (m_PlacementPreview.Active && !ImGui::IsDragDropActive())
+            {
+                if (m_SceneHierarchyPanel.GetSelectedEntity() == m_PlacementPreview.Root)
+                    m_SceneHierarchyPanel.ClearSelection();
+                if (m_PlacementPreview.Root)
+                    m_ActiveScene->DestroyEntity(m_PlacementPreview.Root);
+                m_PlacementPreview = {};
+            }
+
             auto* texture = m_Renderer->GetSceneResource();
             if (texture)
             {
@@ -394,14 +407,26 @@ namespace Nox
 
             if (ImGui::BeginDragDropTarget())
             {
-                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEM"))
+                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(
+                        "CONTENT_BROWSER_ITEM", ImGuiDragDropFlags_AcceptBeforeDelivery))
                 {
                     AssetHandle handle = *(const AssetHandle*)payload->Data;
                     auto type = AssetManager::GetAssetType(handle);
-                    if (type == AssetType::Scene)
+                    if (type == AssetType::Scene && payload->Delivery)
                         OpenScene(handle);
                     else if (type == AssetType::Mesh || type == AssetType::StaticMesh || type == AssetType::MeshSource)
                     {
+                        if (!m_PlacementPreview.Active || m_PlacementPreview.Handle != handle)
+                        {
+                            if (m_PlacementPreview.Active &&
+                                m_SceneHierarchyPanel.GetSelectedEntity() == m_PlacementPreview.Root)
+                            {
+                                m_SceneHierarchyPanel.ClearSelection();
+                            }
+                            if (m_PlacementPreview.Active && m_PlacementPreview.Root)
+                                m_ActiveScene->DestroyEntity(m_PlacementPreview.Root);
+                            m_PlacementPreview = {};
+
                         // Get name from metada
                         const AssetMetadata& metadata = Project::GetActive()->GetEditorAssetManager()->GetMetadata(handle);
                         std::string entityName = metadata.FilePath.filename().stem().string();
@@ -456,12 +481,30 @@ namespace Nox
                             auto assetManager =
                                 Project::GetActive()->GetEditorAssetManager();
 
-                            // Already imported?
+                            std::filesystem::path cookedRelPath = relPath;
+                            cookedRelPath.replace_extension(".ntex");
+
+                            // Prefer the cooked texture when the source was already imported.
                             for (const auto& [texHandle, meta] :
                                  assetManager->GetAssetRegistry())
                             {
-                                if (meta.FilePath == relPath ||
-                                    meta.SourceFilePath == relPath)
+                                if (meta.FilePath == cookedRelPath &&
+                                    meta.Type == AssetType::Texture2D)
+                                {
+                                    return texHandle;
+                                }
+                            }
+
+                            // Existing source records can still be used for formats that are
+                            // not cooked by the texture importer.
+                            for (const auto& [texHandle, meta] :
+                                 assetManager->GetAssetRegistry())
+                            {
+                                if ((meta.FilePath == relPath ||
+                                     meta.SourceFilePath == relPath) &&
+                                    meta.Type == AssetType::Texture2D &&
+                                    !std::filesystem::exists(
+                                        Project::GetActiveAssetDirectory() / cookedRelPath))
                                 {
                                     return texHandle;
                                 }
@@ -485,12 +528,12 @@ namespace Nox
                                 
                             assetManager->ImportAsset(relPath, spec, {});
 
-                            // Find newly imported asset.
+                            // Find newly imported cooked asset.
                             for (const auto& [texHandle, meta] :
                                  assetManager->GetAssetRegistry())
                             {
-                                if (meta.FilePath == relPath ||
-                                    meta.SourceFilePath == relPath)
+                                if (meta.FilePath == cookedRelPath &&
+                                    meta.Type == AssetType::Texture2D)
                                 {
                                     return texHandle;
                                 }
@@ -541,6 +584,96 @@ namespace Nox
                             auto& animatorComp = entity.AddComponent<AnimatorComponent>();
                             animatorComp.Skeleton = getOrImportSkeletonHandle(relSkelPath);
                         };
+
+                        auto resizeMaterialComponent = [](MaterialComponent& matComp, size_t subMeshCount)
+                        {
+                            matComp.BaseColorFactors.resize(subMeshCount, glm::vec4(1.0f));
+                            matComp.BaseColorMaps.resize(subMeshCount, 0);
+                            matComp.BaseColorTextureSets.resize(subMeshCount, 0);
+
+                            matComp.MetallicFactors.resize(subMeshCount, 1.0f);
+                            matComp.RoughnessFactors.resize(subMeshCount, 1.0f);
+                            matComp.MetallicRoughnessMaps.resize(subMeshCount, 0);
+                            matComp.PhysicalDescriptorTextureSets.resize(subMeshCount, 0);
+
+                            matComp.NormalMaps.resize(subMeshCount, 0);
+                            matComp.NormalTextureSets.resize(subMeshCount, 0);
+
+                            matComp.OcclusionMaps.resize(subMeshCount, 0);
+                            matComp.OcclusionTextureSets.resize(subMeshCount, 0);
+
+                            matComp.EmissiveFactors.resize(subMeshCount, glm::vec3(0.0f));
+                            matComp.EmissiveMaps.resize(subMeshCount, 0);
+                            matComp.EmissiveTextureSets.resize(subMeshCount, 0);
+                            matComp.EmissiveStrengths.resize(subMeshCount, 1.0f);
+
+                            matComp.TransmissionFactors.resize(subMeshCount, 0.0f);
+                            matComp.TransmissionMaps.resize(subMeshCount, 0);
+                            matComp.TransmissionTextureSets.resize(subMeshCount, 0);
+
+                            matComp.Modes.resize(subMeshCount, AlphaMode::Opaque);
+                            matComp.AlphaMaskCutoffs.resize(subMeshCount, 0.5f);
+                            matComp.DoubleSidedFlags.resize(subMeshCount, false);
+                            matComp.UnlitFlags.resize(subMeshCount, false);
+                        };
+
+                        auto copyMaterialSlot = [&](MaterialComponent& matComp, size_t slot, const MaterialData& matData)
+                        {
+                            matComp.BaseColorFactors[slot] = matData.BaseColorFactor;
+                            matComp.BaseColorMaps[slot] = getOrImportTextureHandle(matData.BaseColorTexturePath, true);
+                            matComp.BaseColorTextureSets[slot] = matData.BaseColorTextureSet;
+
+                            matComp.MetallicFactors[slot] = matData.MetallicFactor;
+                            matComp.RoughnessFactors[slot] = matData.RoughnessFactor;
+                            matComp.MetallicRoughnessMaps[slot] = getOrImportTextureHandle(matData.MetallicRoughnessTexturePath, false);
+                            matComp.PhysicalDescriptorTextureSets[slot] = matData.PhysicalDescriptorTextureSet;
+
+                            matComp.NormalMaps[slot] = getOrImportTextureHandle(matData.NormalTexturePath, false);
+                            matComp.NormalTextureSets[slot] = matData.NormalTextureSet;
+
+                            matComp.OcclusionMaps[slot] = getOrImportTextureHandle(matData.OcclusionTexturePath, false);
+                            matComp.OcclusionTextureSets[slot] = matData.OcclusionTextureSet;
+
+                            matComp.EmissiveFactors[slot] = matData.EmissiveFactor;
+                            matComp.EmissiveMaps[slot] = getOrImportTextureHandle(matData.EmissiveTexturePath, true);
+                            matComp.EmissiveTextureSets[slot] = matData.EmissiveTextureSet;
+                            matComp.EmissiveStrengths[slot] = matData.emissiveStrength;
+
+                            matComp.TransmissionFactors[slot] = matData.TransmissionFactor;
+                            matComp.TransmissionMaps[slot] = getOrImportTextureHandle(matData.TransmissionTexturePath, false);
+                            matComp.TransmissionTextureSets[slot] = matData.TransmissionTextureSet;
+
+                            matComp.Modes[slot] = matData.Mode;
+                            matComp.AlphaMaskCutoffs[slot] = matData.AlphaMaskCutoff;
+                            matComp.DoubleSidedFlags[slot] = matData.DoubleSided;
+                            matComp.UnlitFlags[slot] = matData.Unlit;
+                        };
+
+                        auto addLightComponent = [&](Entity entity, const LightNodeData& l)
+                        {
+                            if (l.Type == GltfLightType::Directional)
+                            {
+                                auto& dlc = entity.AddComponent<DirectionalLightComponent>();
+                                dlc.Color = l.Color;
+                                dlc.Intensity = l.Intensity;
+                            }
+                            else if (l.Type == GltfLightType::Point)
+                            {
+                                auto& plc = entity.AddComponent<PointLightComponent>();
+                                plc.Color = l.Color;
+                                plc.Intensity = l.Intensity;
+                                plc.Range = l.Range;
+                            }
+                            else if (l.Type == GltfLightType::Spot)
+                            {
+                                auto& slc = entity.AddComponent<SpotLightComponent>();
+                                slc.Color = l.Color;
+                                slc.Intensity = l.Intensity;
+                                slc.Range = l.Range;
+                                slc.InnerAngle = l.InnerConeAngle;
+                                slc.OuterAngle = l.OuterConeAngle;
+                            }
+                        };
                         
                         // Helper lambda to spawn lights from glTF KHR_lights_punctual
                             auto spawnGltfLights = [&](Entity parent, const std::vector<LightNodeData>& lights)
@@ -556,99 +689,95 @@ namespace Nox
                                     tc.Rotation = glm::eulerAngles(l.Rotation);
                                     tc.Scale = l.Scale;
 
-                                    if (l.Type == GltfLightType::Directional)
-                                    {
-                                        auto& dlc = lightEntity.AddComponent<DirectionalLightComponent>();
-                                        dlc.Color = l.Color;
-                                        dlc.Intensity = l.Intensity;
-                                    }
-                                    else if (l.Type == GltfLightType::Point)
-                                    {
-                                        auto& plc = lightEntity.AddComponent<PointLightComponent>();
-                                        plc.Color = l.Color;
-                                        plc.Intensity = l.Intensity;
-                                        plc.Range = l.Range;
-                                    }
-                                    else if (l.Type == GltfLightType::Spot)
-                                    {
-                                        auto& slc = lightEntity.AddComponent<SpotLightComponent>();
-                                        slc.Color = l.Color;
-                                        slc.Intensity = l.Intensity;
-                                        slc.Range = l.Range;
-                                        slc.InnerAngle = l.InnerConeAngle;
-                                        slc.OuterAngle = l.OuterConeAngle;
-                                    }
+                                    addLightComponent(lightEntity, l);
                                 }
                             };
+
+                        auto createGltfNodeEntities = [&](const auto& meshAsset, AssetHandle meshHandle) -> Entity
+                        {
+                            const auto& nodes = meshAsset->GetNodes();
+                            if (nodes.empty())
+                                return {};
+
+                            std::vector<Entity> createdNodes(nodes.size());
+                            Entity firstRoot;
+                            size_t rootCount = 0;
+
+                            for (size_t i = 0; i < nodes.size(); i++)
+                            {
+                                if (nodes[i].Parent < 0)
+                                    rootCount++;
+                            }
+
+                            Entity importRoot;
+                            if (rootCount > 1)
+                                importRoot = m_ActiveScene->CreateEntity(entityName);
+
+                            for (size_t i = 0; i < nodes.size(); i++)
+                            {
+                                std::string nodeName = nodes[i].Name.empty() ? entityName + "_" + std::to_string(i) : nodes[i].Name;
+                                createdNodes[i] = m_ActiveScene->CreateEntity(nodeName);
+                                if (!firstRoot && nodes[i].Parent < 0)
+                                    firstRoot = createdNodes[i];
+                            }
+
+                            for (size_t i = 0; i < nodes.size(); i++)
+                            {
+                                int32_t parentIndex = nodes[i].Parent;
+                                if (parentIndex >= 0 && parentIndex < static_cast<int32_t>(createdNodes.size()))
+                                    createdNodes[i].SetParent(createdNodes[parentIndex]);
+                                else if (importRoot)
+                                    createdNodes[i].SetParent(importRoot);
+                            }
+
+                            for (size_t i = 0; i < nodes.size(); i++)
+                            {
+                                auto& tc = createdNodes[i].GetComponent<TransformComponent>();
+                                tc.Translation = nodes[i].Translation;
+                                tc.Rotation = glm::eulerAngles(nodes[i].Rotation);
+                                tc.Scale = nodes[i].Scale;
+                                createdNodes[i].AddOrReplaceComponent<DirtyTransformComponent>();
+
+                                if (nodes[i].SubmeshCount > 0)
+                                {
+                                    auto& meshComp = createdNodes[i].AddComponent<MeshComponent>();
+                                    meshComp.Mesh = meshHandle;
+                                    meshComp.SubmeshIndex = nodes[i].FirstSubmesh;
+                                    meshComp.SubmeshCount = nodes[i].SubmeshCount;
+
+                                    auto& matComp = createdNodes[i].AddComponent<MaterialComponent>();
+                                    resizeMaterialComponent(matComp, meshAsset->GetSubMeshCount());
+                                    size_t materialSlotCount = std::min(meshAsset->GetMaterials().size(), meshAsset->GetSubMeshCount());
+                                    for (size_t materialIndex = 0; materialIndex < materialSlotCount; materialIndex++)
+                                        copyMaterialSlot(matComp, materialIndex, meshAsset->GetMaterial(materialIndex));
+
+                                    tryAttachAnimator(createdNodes[i]);
+                                }
+                            }
+
+                            for (const auto& light : meshAsset->GetLights())
+                            {
+                                if (light.NodeIndex >= 0 && light.NodeIndex < static_cast<int32_t>(createdNodes.size()))
+                                    addLightComponent(createdNodes[light.NodeIndex], light);
+                                else
+                                    spawnGltfLights(importRoot ? importRoot : firstRoot, { light });
+                            }
+
+                            if (importRoot)
+                                return importRoot;
+
+                            return firstRoot ? firstRoot : createdNodes.front();
+                        };
 
                         // Check if it's a dynamic mesh asset with multiple submeshes
                         if (type == AssetType::Mesh || type == AssetType::MeshSource)
                         {
                             Ref<Mesh> meshAsset = AssetManager::GetAsset<Mesh>(handle);
-                            if (meshAsset && meshAsset->GetSubMeshCount() > 1)
+                            if (meshAsset && !meshAsset->GetNodes().empty())
                             {
-                                // 1. Create a Parent Root Entity for the whole file
-                                Entity parentEntity = m_ActiveScene->CreateEntity(entityName);
-
-                                // 2. Create a Child Entity for each submesh
-                                for (size_t i = 0; i < meshAsset->GetSubMeshCount(); i++)
-                                {
-                                    std::string subMeshName = meshAsset->GetSubmeshName(i);
-                                    NOX_CORE_INFO("[Scene Drop] Submesh {} name retrieved: '{}'", i, subMeshName);
-                                    if (subMeshName.empty())
-                                        subMeshName = entityName + "_sub_" + std::to_string(i);
-
-                                    Entity childEntity = m_ActiveScene->CreateEntity(subMeshName);
-                                    childEntity.SetParent(parentEntity); // Link via Scene Graph!
-
-                                    auto& meshComp = childEntity.AddComponent<MeshComponent>();
-                                    meshComp.Mesh = handle;
-                                    meshComp.SubmeshIndex = static_cast<uint32_t>(i);
-
-                                    auto& matComp = childEntity.AddComponent<MaterialComponent>();
-                                    const auto& matData = meshAsset->GetMaterial(i);
-
-                                    // Base
-                                    matComp.BaseColorFactors = {matData.BaseColorFactor};
-                                    matComp.BaseColorMaps = {getOrImportTextureHandle(matData.BaseColorTexturePath, true)};
-                                    matComp.BaseColorTextureSets = {matData.BaseColorTextureSet};
-                                    
-                                    // PBR
-                                    matComp.MetallicFactors = {matData.MetallicFactor};
-                                    matComp.RoughnessFactors = {matData.RoughnessFactor};
-                                    matComp.MetallicRoughnessMaps = {getOrImportTextureHandle(matData.MetallicRoughnessTexturePath, false)};
-                                    matComp.PhysicalDescriptorTextureSets = {matData.PhysicalDescriptorTextureSet};
-                                    
-                                    matComp.NormalMaps = {getOrImportTextureHandle(matData.NormalTexturePath, false)};
-                                    matComp.NormalTextureSets = {matData.NormalTextureSet};
-                                    
-                                    matComp.OcclusionMaps = {getOrImportTextureHandle(matData.OcclusionTexturePath, false)};
-                                    matComp.OcclusionTextureSets = {matData.OcclusionTextureSet};
-                                    
-                                    // Emission
-                                    matComp.EmissiveFactors = {matData.EmissiveFactor};
-                                    matComp.EmissiveMaps = {getOrImportTextureHandle(matData.EmissiveTexturePath, true)};
-                                    matComp.EmissiveTextureSets = {matData.EmissiveTextureSet};
-                                    matComp.EmissiveStrengths = {matData.emissiveStrength};
-                                    
-                                    // Transmission
-                                    matComp.TransmissionFactors = {matData.TransmissionFactor};
-                                    matComp.TransmissionMaps = {getOrImportTextureHandle(matData.TransmissionTexturePath, false)};
-                                    matComp.TransmissionTextureSets = {matData.TransmissionTextureSet};
-                                    
-                                    matComp.Modes = {matData.Mode};
-                                    matComp.AlphaMaskCutoffs = {matData.AlphaMaskCutoff};
-                                    matComp.DoubleSidedFlags = {matData.DoubleSided};
-                                    matComp.UnlitFlags = { matData.Unlit };
-
-                                    // Auto-attach AnimatorComponent if skeleton exists
-                                    tryAttachAnimator(childEntity);
-                                }
-                                
-                                if (meshAsset)
-                                    spawnGltfLights(parentEntity, meshAsset->GetLights());
-
-                                m_SceneHierarchyPanel.SetSelectedEntity(parentEntity);
+                                Entity rootEntity = createGltfNodeEntities(meshAsset, handle);
+                                m_SceneHierarchyPanel.SetSelectedEntity(rootEntity);
+                                m_PlacementPreview.Root = rootEntity;
                             }
                             else
                             {
@@ -657,44 +786,15 @@ namespace Nox
                                 auto& meshComp = newEntity.AddComponent<MeshComponent>();
                                 meshComp.Mesh = handle;
                                 meshComp.SubmeshIndex = 0;
+                                meshComp.SubmeshCount = meshAsset ? static_cast<uint32_t>(meshAsset->GetSubMeshCount()) : 1;
 
                                 auto& matComp = newEntity.AddComponent<MaterialComponent>();
                                 if (meshAsset && !meshAsset->GetMaterials().empty())
                                 {
-                                    const auto& matData = meshAsset->GetMaterial(0);
-                                    
-                                    // Base
-                                    matComp.BaseColorFactors = {matData.BaseColorFactor};
-                                    matComp.BaseColorMaps = {getOrImportTextureHandle(matData.BaseColorTexturePath, true)};
-                                    matComp.BaseColorTextureSets = {matData.BaseColorTextureSet};
-                                    
-                                    // PBR
-                                    matComp.MetallicFactors = {matData.MetallicFactor};
-                                    matComp.RoughnessFactors = {matData.RoughnessFactor};
-                                    matComp.MetallicRoughnessMaps = {getOrImportTextureHandle(matData.MetallicRoughnessTexturePath, false)};
-                                    matComp.PhysicalDescriptorTextureSets = {matData.PhysicalDescriptorTextureSet};
-                                    
-                                    matComp.NormalMaps = {getOrImportTextureHandle(matData.NormalTexturePath, false)};
-                                    matComp.NormalTextureSets = {matData.NormalTextureSet};
-                                    
-                                    matComp.OcclusionMaps = {getOrImportTextureHandle(matData.OcclusionTexturePath, false)};
-                                    matComp.OcclusionTextureSets = {matData.OcclusionTextureSet};
-                                    
-                                    // Emission
-                                    matComp.EmissiveFactors = {matData.EmissiveFactor};
-                                    matComp.EmissiveMaps = {getOrImportTextureHandle(matData.EmissiveTexturePath, true)};
-                                    matComp.EmissiveTextureSets = {matData.EmissiveTextureSet};
-                                    matComp.EmissiveStrengths = {matData.emissiveStrength};
-                                    
-                                    // Transmission
-                                    matComp.TransmissionFactors = {matData.TransmissionFactor};
-                                    matComp.TransmissionMaps = {getOrImportTextureHandle(matData.TransmissionTexturePath, false)};
-                                    matComp.TransmissionTextureSets = {matData.TransmissionTextureSet};
-                                    
-                                    matComp.Modes = {matData.Mode};
-                                    matComp.AlphaMaskCutoffs = {matData.AlphaMaskCutoff};
-                                    matComp.DoubleSidedFlags = {matData.DoubleSided};
-                                    matComp.UnlitFlags = { matData.Unlit };
+                                    resizeMaterialComponent(matComp, meshAsset->GetSubMeshCount());
+                                    size_t materialSlotCount = std::min(meshAsset->GetMaterials().size(), meshAsset->GetSubMeshCount());
+                                    for (size_t materialIndex = 0; materialIndex < materialSlotCount; materialIndex++)
+                                        copyMaterialSlot(matComp, materialIndex, meshAsset->GetMaterial(materialIndex));
                                 }
                                 else
                                 {
@@ -711,15 +811,25 @@ namespace Nox
                                     spawnGltfLights(newEntity, meshAsset->GetLights());
 
                                 m_SceneHierarchyPanel.SetSelectedEntity(newEntity);
+                                m_PlacementPreview.Root = newEntity;
                             }
                         }
                         else // StaticMesh (.nsmesh) - always single flattened mesh
                         {
                             Ref<StaticMesh> staticMeshAsset = AssetManager::GetAsset<StaticMesh>(handle);
+                            if (staticMeshAsset && !staticMeshAsset->GetNodes().empty())
+                            {
+                                Entity rootEntity = createGltfNodeEntities(staticMeshAsset, handle);
+                                m_SceneHierarchyPanel.SetSelectedEntity(rootEntity);
+                                m_PlacementPreview.Root = rootEntity;
+                            }
+                            else
+                            {
                             Entity newEntity = m_ActiveScene->CreateEntity(entityName);
                             auto& meshComp = newEntity.AddComponent<MeshComponent>();
                             meshComp.Mesh = handle;
                             meshComp.SubmeshIndex = 0;
+                            meshComp.SubmeshCount = staticMeshAsset ? static_cast<uint32_t>(staticMeshAsset->GetSubMeshCount()) : 1;
 
                             auto& matComp = newEntity.AddComponent<MaterialComponent>();
 
@@ -795,6 +905,69 @@ namespace Nox
                                 spawnGltfLights(newEntity, staticMeshAsset->GetLights());
 
                             m_SceneHierarchyPanel.SetSelectedEntity(newEntity);
+                            m_PlacementPreview.Root = newEntity;
+                            }
+                        }
+
+                            m_PlacementPreview.Handle = handle;
+                            if (m_PlacementPreview.Root)
+                            {
+                                m_PlacementPreview.InitialTranslation =
+                                    m_PlacementPreview.Root.GetComponent<TransformComponent>().Translation;
+                            }
+                            m_PlacementPreview.Active = static_cast<bool>(m_PlacementPreview.Root);
+                        }
+
+                        if (m_PlacementPreview.Active && m_PlacementPreview.Root)
+                        {
+                            ImVec2 imguiMouse = ImGui::GetMousePos();
+                            glm::vec2 mouse = {
+                                imguiMouse.x - m_ViewportBounds[0].x,
+                                imguiMouse.y - m_ViewportBounds[0].y
+                            };
+                            glm::vec2 viewportSize = m_ViewportBounds[1] - m_ViewportBounds[0];
+
+                            if (viewportSize.x > 0.0f && viewportSize.y > 0.0f)
+                            {
+                                glm::vec2 ndc = {
+                                    (mouse.x / viewportSize.x) * 2.0f - 1.0f,
+                                    1.0f - (mouse.y / viewportSize.y) * 2.0f
+                                };
+
+                                glm::mat4 inverseViewProjection = glm::inverse(
+                                    m_EditorCamera.GetGizmoProjection() * m_EditorCamera.GetGizmoView());
+                                glm::vec4 nearPoint = inverseViewProjection * glm::vec4(ndc, -1.0f, 1.0f);
+                                glm::vec4 farPoint = inverseViewProjection * glm::vec4(ndc, 1.0f, 1.0f);
+                                nearPoint /= nearPoint.w;
+                                farPoint /= farPoint.w;
+
+                                glm::vec3 rayOrigin = glm::vec3(nearPoint);
+                                glm::vec3 rayDirection = glm::normalize(glm::vec3(farPoint - nearPoint));
+
+                                // Keep the preview on a plane facing the editor camera. A horizontal
+                                // ground plane becomes parallel to the ray in a level side view.
+                                glm::vec3 planeNormal = m_EditorCamera.GetForwardDirection();
+                                float rayPlaneDenominator = glm::dot(rayDirection, planeNormal);
+                                if (std::abs(rayPlaneDenominator) > 0.0001f)
+                                {
+                                    float distance = glm::dot(
+                                        m_PlacementPreview.InitialTranslation - rayOrigin,
+                                        planeNormal
+                                    ) / rayPlaneDenominator;
+                                    if (distance >= 0.0f)
+                                    {
+                                        auto& transform = m_PlacementPreview.Root.GetComponent<TransformComponent>();
+                                        transform.Translation = rayOrigin + rayDirection * distance;
+                                        m_PlacementPreview.Root.AddOrReplaceComponent<DirtyTransformComponent>();
+                                    }
+                                }
+                            }
+
+                            if (payload->Delivery)
+                            {
+                                m_SceneHierarchyPanel.SetSelectedEntity(m_PlacementPreview.Root);
+                                m_PlacementPreview = {};
+                            }
                         }
                     }
                 }

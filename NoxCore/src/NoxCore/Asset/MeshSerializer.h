@@ -434,6 +434,7 @@ static void ReadMaterials(std::ifstream& stream, std::vector<MaterialData>& outM
                     SerializerUtils::WriteString(stream, l.Name);
                     uint32_t type = static_cast<uint32_t>(l.Type);
                     stream.write(reinterpret_cast<const char*>(&type), sizeof(uint32_t));
+                    stream.write(reinterpret_cast<const char*>(&l.NodeIndex), sizeof(int32_t));
                     stream.write(reinterpret_cast<const char*>(&l.Color), sizeof(glm::vec3));
                     stream.write(reinterpret_cast<const char*>(&l.Intensity), sizeof(float));
                     stream.write(reinterpret_cast<const char*>(&l.Range), sizeof(float));
@@ -458,6 +459,7 @@ static void ReadMaterials(std::ifstream& stream, std::vector<MaterialData>& outM
                     uint32_t type = 0;
                     stream.read(reinterpret_cast<char*>(&type), sizeof(uint32_t));
                     outLights[i].Type = static_cast<GltfLightType>(type);
+                    stream.read(reinterpret_cast<char*>(&outLights[i].NodeIndex), sizeof(int32_t));
                     stream.read(reinterpret_cast<char*>(&outLights[i].Color), sizeof(glm::vec3));
                     stream.read(reinterpret_cast<char*>(&outLights[i].Intensity), sizeof(float));
                     stream.read(reinterpret_cast<char*>(&outLights[i].Range), sizeof(float));
@@ -469,17 +471,53 @@ static void ReadMaterials(std::ifstream& stream, std::vector<MaterialData>& outM
                 }
             }
 
+            static void WriteNodes(std::ofstream& stream, const std::vector<MeshNodeData>& nodes)
+            {
+                uint32_t count = static_cast<uint32_t>(nodes.size());
+                stream.write(reinterpret_cast<const char*>(&count), sizeof(uint32_t));
+                for (const auto& node : nodes)
+                {
+                    SerializerUtils::WriteString(stream, node.Name);
+                    stream.write(reinterpret_cast<const char*>(&node.Parent), sizeof(int32_t));
+                    stream.write(reinterpret_cast<const char*>(&node.Translation), sizeof(glm::vec3));
+                    stream.write(reinterpret_cast<const char*>(&node.Rotation), sizeof(glm::quat));
+                    stream.write(reinterpret_cast<const char*>(&node.Scale), sizeof(glm::vec3));
+                    stream.write(reinterpret_cast<const char*>(&node.FirstSubmesh), sizeof(uint32_t));
+                    stream.write(reinterpret_cast<const char*>(&node.SubmeshCount), sizeof(uint32_t));
+                }
+            }
+
+            static void ReadNodes(std::ifstream& stream, std::vector<MeshNodeData>& outNodes)
+            {
+                uint32_t count = 0;
+                stream.read(reinterpret_cast<char*>(&count), sizeof(uint32_t));
+                if (stream.fail()) return;
+
+                outNodes.resize(count);
+                for (uint32_t i = 0; i < count; i++)
+                {
+                    SerializerUtils::ReadString(stream, outNodes[i].Name);
+                    stream.read(reinterpret_cast<char*>(&outNodes[i].Parent), sizeof(int32_t));
+                    stream.read(reinterpret_cast<char*>(&outNodes[i].Translation), sizeof(glm::vec3));
+                    stream.read(reinterpret_cast<char*>(&outNodes[i].Rotation), sizeof(glm::quat));
+                    stream.read(reinterpret_cast<char*>(&outNodes[i].Scale), sizeof(glm::vec3));
+                    stream.read(reinterpret_cast<char*>(&outNodes[i].FirstSubmesh), sizeof(uint32_t));
+                    stream.read(reinterpret_cast<char*>(&outNodes[i].SubmeshCount), sizeof(uint32_t));
+                }
+            }
+
     public:
         static void SerializeStaticMesh
         (
             const std::filesystem::path& filepath,
             const std::vector<MeshData>& dataList,
             const std::vector<MaterialData>& materialList,
-            const std::vector<LightNodeData>& lightList = {}
+            const std::vector<LightNodeData>& lightList = {},
+            const std::vector<MeshNodeData>& nodeList = {}
         )
         {
             std::ofstream stream(filepath, std::ios::binary | std::ios::trunc);
-            const char magic[5] = "NSMS";
+            const char magic[5] = "NSM2";
             stream.write(magic, 4);
 
             uint32_t count = static_cast<uint32_t>(dataList.size());
@@ -492,12 +530,14 @@ static void ReadMaterials(std::ifstream& stream, std::vector<MaterialData>& outM
 
             WriteMaterials(stream, materialList);
             WriteLights(stream, lightList);
+            WriteNodes(stream, nodeList);
         }
 
         static bool DeserializeStaticMesh(const std::filesystem::path& filepath, std::vector<MeshData>& outDataList, std::vector<MaterialData>& outMaterialList)
         {
             std::vector<LightNodeData> dummyLights;
-            return DeserializeStaticMesh(filepath, outDataList, outMaterialList, dummyLights);
+            std::vector<MeshNodeData> dummyNodes;
+            return DeserializeStaticMesh(filepath, outDataList, outMaterialList, dummyLights, dummyNodes);
         }
         
         static bool DeserializeStaticMesh
@@ -508,12 +548,25 @@ static void ReadMaterials(std::ifstream& stream, std::vector<MaterialData>& outM
             std::vector<LightNodeData>& outLightList
             )
         {
+            std::vector<MeshNodeData> dummyNodes;
+            return DeserializeStaticMesh(filepath, outDataList, outMaterialList, outLightList, dummyNodes);
+        }
+
+        static bool DeserializeStaticMesh
+        (
+            const std::filesystem::path& filepath,
+            std::vector<MeshData>& outDataList,
+            std::vector<MaterialData>& outMaterialList,
+            std::vector<LightNodeData>& outLightList,
+            std::vector<MeshNodeData>& outNodeList
+            )
+        {
             std::ifstream stream(filepath, std::ios::binary);
             if (!stream.is_open()) return false;
 
             char magic[5] = { 0 };
             stream.read(magic, 4);
-            if (strcmp(magic, "NSMS") != 0) return false;
+            if (strcmp(magic, "NSM2") != 0) return false;
 
             uint32_t count = 0;
             stream.read(reinterpret_cast<char*>(&count), sizeof(uint32_t));
@@ -526,6 +579,7 @@ static void ReadMaterials(std::ifstream& stream, std::vector<MaterialData>& outM
 
             ReadMaterials(stream, outMaterialList);
             ReadLights(stream, outLightList);
+            ReadNodes(stream, outNodeList);
             return true;
         }
 
@@ -534,11 +588,12 @@ static void ReadMaterials(std::ifstream& stream, std::vector<MaterialData>& outM
             const std::filesystem::path& filepath,
             const std::vector<MeshData>& dataList,
             const std::vector<MaterialData>& materialList,
-            const std::vector<LightNodeData>& lightList = {}
+            const std::vector<LightNodeData>& lightList = {},
+            const std::vector<MeshNodeData>& nodeList = {}
         )
         {
             std::ofstream stream(filepath, std::ios::binary | std::ios::trunc);
-            const char magic[5] = "NMSH";
+            const char magic[5] = "NMS2";
             stream.write(magic, 4);
 
             uint32_t count = static_cast<uint32_t>(dataList.size());
@@ -551,12 +606,14 @@ static void ReadMaterials(std::ifstream& stream, std::vector<MaterialData>& outM
 
             WriteMaterials(stream, materialList);
             WriteLights(stream, lightList);
+            WriteNodes(stream, nodeList);
         }
         
         static bool DeserializeMesh(const std::filesystem::path& filepath, std::vector<MeshData>& outDataList, std::vector<MaterialData>& outMaterialList)
         {
             std::vector<LightNodeData> dummyLights;
-            return DeserializeMesh(filepath, outDataList, outMaterialList, dummyLights);
+            std::vector<MeshNodeData> dummyNodes;
+            return DeserializeMesh(filepath, outDataList, outMaterialList, dummyLights, dummyNodes);
         }
 
         static bool DeserializeMesh
@@ -567,12 +624,25 @@ static void ReadMaterials(std::ifstream& stream, std::vector<MaterialData>& outM
             std::vector<LightNodeData>& outLightList
         )
         {
+            std::vector<MeshNodeData> dummyNodes;
+            return DeserializeMesh(filepath, outDataList, outMaterialList, outLightList, dummyNodes);
+        }
+
+        static bool DeserializeMesh
+        (
+            const std::filesystem::path& filepath,
+            std::vector<MeshData>& outDataList,
+            std::vector<MaterialData>& outMaterialList,
+            std::vector<LightNodeData>& outLightList,
+            std::vector<MeshNodeData>& outNodeList
+        )
+        {
             std::ifstream stream(filepath, std::ios::binary);
             if (!stream.is_open()) return false;
 
             char magic[5] = { 0 };
             stream.read(magic, 4);
-            if (strcmp(magic, "NMSH") != 0) return false;
+            if (strcmp(magic, "NMS2") != 0) return false;
 
             uint32_t count = 0;
             stream.read(reinterpret_cast<char*>(&count), sizeof(uint32_t));
@@ -585,6 +655,7 @@ static void ReadMaterials(std::ifstream& stream, std::vector<MaterialData>& outM
 
             ReadMaterials(stream, outMaterialList);
             ReadLights(stream, outLightList);
+            ReadNodes(stream, outNodeList);
             return true;
         }
     };

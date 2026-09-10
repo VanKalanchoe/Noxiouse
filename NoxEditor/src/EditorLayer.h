@@ -56,6 +56,16 @@ namespace Nox
         std::filesystem::path m_EditorScenePath;
         
         Entity m_HoveredEntity;
+
+        struct PlacementPreview
+        {
+            AssetHandle Handle = 0;
+            Entity Root;
+            glm::vec3 InitialTranslation = { 0.0f, 0.0f, 0.0f };
+            bool Active = false;
+        };
+
+        PlacementPreview m_PlacementPreview;
         
         bool m_PrimaryCamera = true;
         

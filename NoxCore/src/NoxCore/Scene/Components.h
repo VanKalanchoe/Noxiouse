@@ -86,6 +86,7 @@ namespace Nox
     {
         AssetHandle Mesh = 0;
         uint32_t SubmeshIndex = 0;
+        uint32_t SubmeshCount = 1;
         
         MeshComponent() = default;
         MeshComponent(const MeshComponent&) = default;

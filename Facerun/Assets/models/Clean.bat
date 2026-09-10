@@ -11,6 +11,7 @@ if errorlevel 2 goto :cancel
 
 del /s /q "*.nmesh"
 del /s /q "*.nsmesh"
+del /s /q "*.ntex"
 
 echo.
 echo Done.

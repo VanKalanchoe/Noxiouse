@@ -156,7 +156,7 @@ namespace Nox
         void BuildBuffers();
 
         void DrawMesh(const glm::mat4& transform, Ref<Mesh> mesh, uint32_t submeshIndex, const MaterialComponent& material, int entityID, const std::vector<glm::mat4>* boneTransforms = nullptr);
-        void DrawStaticMesh(const glm::mat4& transform, Ref<StaticMesh> staticMesh, const MaterialComponent& material, int entityID);
+        void DrawStaticMesh(const glm::mat4& transform, Ref<StaticMesh> staticMesh, const MaterialComponent& material, int entityID, uint32_t firstSubmesh = 0, uint32_t submeshCount = UINT32_MAX);
         void SubmitMesh(const glm::mat4& transform, MeshComponent& src, MaterialComponent& srcMat, int entityID, const std::vector<glm::mat4>* boneTransforms = nullptr);
 
         void SubmitLight(const glm::mat4& transform, const DirectionalLightComponent& light);
@@ -401,9 +401,9 @@ namespace Nox
         void updateSceneAccelerationStructure(uint32_t currentFrameIndex);
         void BuildSceneAccelerationStructure(uint32_t currentFrameIndex);
 
-        bool m_rayTracingEnabled = true;
-        bool m_rayTracingShadows = true;
-        bool m_rayTracingReflections = true;
+        bool m_rayTracingEnabled = false;
+        bool m_rayTracingShadows = false;
+        bool m_rayTracingReflections = false;
 
         std::unique_ptr<NRI::AccelerationStructure> m_sceneTLAS;
         std::unique_ptr<NRI::Buffer> m_tlasBuffer;

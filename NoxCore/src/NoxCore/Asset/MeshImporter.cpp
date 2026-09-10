@@ -27,11 +27,12 @@ namespace Nox
         std::vector<MeshData> meshDataList;
         std::vector<MaterialData> materialDataList;
         std::vector<LightNodeData> lightDataList;
+        std::vector<MeshNodeData> nodeDataList;
 
         if (std::filesystem::exists(cookedPath))
         {
             NOX_CORE_INFO("Loading cooked dynamic mesh from {}", cookedPath.string());
-            bool success = MeshSerializer::DeserializeMesh(cookedPath, meshDataList, materialDataList, lightDataList);
+            bool success = MeshSerializer::DeserializeMesh(cookedPath, meshDataList, materialDataList, lightDataList, nodeDataList);
             if (!success) NOX_CORE_ASSERT(false, "MeshImporter::ImportMesh - Failed to deserialize .nmesh file: {}", cookedPath.string());
         }
         else
@@ -42,7 +43,7 @@ namespace Nox
             Skeleton extractedSkeleton;
             std::vector<Ref<AnimationSequence>> extractedAnimations;
 
-            meshDataList = ParseGltfToMeshData(sourcePath, materialDataList, extractedSkeleton, extractedAnimations, lightDataList);
+            meshDataList = ParseGltfToMeshData(sourcePath, materialDataList, extractedSkeleton, extractedAnimations, lightDataList, nodeDataList);
             if (meshDataList.empty())
             {
                 NOX_CORE_WARN("MeshImporter::ImportMesh - Failed to load or empty mesh at source path: {}", sourcePath.string());
@@ -53,7 +54,7 @@ namespace Nox
             if (!std::filesystem::exists(cookedPath.parent_path()))
                 std::filesystem::create_directories(cookedPath.parent_path());
 
-            MeshSerializer::SerializeMesh(cookedPath, meshDataList, materialDataList, lightDataList);
+            MeshSerializer::SerializeMesh(cookedPath, meshDataList, materialDataList, lightDataList, nodeDataList);
 
             // Save skeleton if present
             if (!extractedSkeleton.Skins.empty() || !extractedAnimations.empty())
@@ -85,6 +86,7 @@ namespace Nox
         }
         meshAsset->m_Materials = std::move(materialDataList);
         meshAsset->m_Lights = std::move(lightDataList);
+        meshAsset->m_Nodes = std::move(nodeDataList);
 
         meshDataList.clear();
         materialDataList.clear();
@@ -102,11 +104,12 @@ namespace Nox
         std::vector<MeshData> meshDataList;
         std::vector<MaterialData> materialDataList;
         std::vector<LightNodeData> lightDataList;
+        std::vector<MeshNodeData> nodeDataList;
 
         if (std::filesystem::exists(cookedPath))
         {
             NOX_CORE_INFO("Loading cooked static mesh from {}", cookedPath.string());
-            bool success = MeshSerializer::DeserializeStaticMesh(cookedPath, meshDataList, materialDataList, lightDataList);
+            bool success = MeshSerializer::DeserializeStaticMesh(cookedPath, meshDataList, materialDataList, lightDataList, nodeDataList);
             if (!success)
             {
                 NOX_CORE_ASSERT(false, "MeshImporter::ImportStaticMesh - Failed to deserialize .nsmesh file: {}", cookedPath.string());
@@ -120,7 +123,7 @@ namespace Nox
             Skeleton dummySkeleton;
             std::vector<Ref<AnimationSequence>> dummyAnimations;
 
-            meshDataList = ParseGltfToMeshData(sourcePath, materialDataList, dummySkeleton, dummyAnimations, lightDataList);
+            meshDataList = ParseGltfToMeshData(sourcePath, materialDataList, dummySkeleton, dummyAnimations, lightDataList, nodeDataList);
             if (meshDataList.empty())
             {
                 NOX_CORE_WARN("No Meshes found in source file: {}", sourcePath.string());
@@ -130,7 +133,7 @@ namespace Nox
             if (!std::filesystem::exists(cookedPath.parent_path()))
                 std::filesystem::create_directories(cookedPath.parent_path());
 
-            MeshSerializer::SerializeStaticMesh(cookedPath, meshDataList, materialDataList, lightDataList);
+            MeshSerializer::SerializeStaticMesh(cookedPath, meshDataList, materialDataList, lightDataList, nodeDataList);
         }
 
         Ref<StaticMesh> staticMeshAsset = CreateRef<StaticMesh>();
@@ -143,6 +146,7 @@ namespace Nox
         }
         staticMeshAsset->m_Materials = std::move(materialDataList);
         staticMeshAsset->m_Lights = std::move(lightDataList);
+        staticMeshAsset->m_Nodes = std::move(nodeDataList);
 
         meshDataList.clear();
         materialDataList.clear();
@@ -686,6 +690,37 @@ namespace Nox
             return static_cast<float>(val.int_val);
         return 1.0f; // Default fallback
     };
+
+    static void ExtractNodeTRS(const tg3_node& node, glm::vec3& translation, glm::quat& rotation, glm::vec3& scale)
+    {
+        if (node.has_matrix)
+        {
+            glm::mat4 m = glm::make_mat4(node.matrix);
+            glm::vec3 skew;
+            glm::vec4 perspective;
+            glm::decompose(m, scale, rotation, translation, skew, perspective);
+            return;
+        }
+
+        translation = glm::vec3(
+            static_cast<float>(node.translation[0]),
+            static_cast<float>(node.translation[1]),
+            static_cast<float>(node.translation[2])
+        );
+
+        rotation = glm::quat(
+            static_cast<float>(node.rotation[3]),
+            static_cast<float>(node.rotation[0]),
+            static_cast<float>(node.rotation[1]),
+            static_cast<float>(node.rotation[2])
+        );
+
+        scale = glm::vec3(
+            static_cast<float>(node.scale[0]),
+            static_cast<float>(node.scale[1]),
+            static_cast<float>(node.scale[2])
+        );
+    }
     
     static void ParseLightsFromGltf(const tg3_model& model, std::vector<LightNodeData>& outLights)
         {
@@ -698,6 +733,7 @@ namespace Nox
 
                 const tg3_light& gltfLight = model.lights[node.light];
                 LightNodeData l{};
+                l.NodeIndex = static_cast<int32_t>(i);
 
                 if (node.name.data && node.name.len > 0)
                     l.Name = std::string(node.name.data, node.name.len);
@@ -736,36 +772,7 @@ namespace Nox
                     if (l.Range <= 0.0f) l.Range = 10.0f;
                 }
 
-                // Extract Node Transform
-                if (node.has_matrix)
-                {
-                    glm::mat4 m = glm::make_mat4(node.matrix);
-                    glm::vec3 skew;
-                    glm::vec4 perspective;
-                    glm::decompose(m, l.Scale, l.Rotation, l.Translation, skew, perspective);
-                }
-                else
-                {
-                    l.Translation = glm::vec3(
-                        static_cast<float>(node.translation[0]),
-                        static_cast<float>(node.translation[1]),
-                        static_cast<float>(node.translation[2])
-                    );
-
-                    // Note: GLM quat is (w, x, y, z), glTF rotation array is [x, y, z, w]
-                    l.Rotation = glm::quat(
-                        static_cast<float>(node.rotation[3]),
-                        static_cast<float>(node.rotation[0]),
-                        static_cast<float>(node.rotation[1]),
-                        static_cast<float>(node.rotation[2])
-                    );
-
-                    l.Scale = glm::vec3(
-                        static_cast<float>(node.scale[0]),
-                        static_cast<float>(node.scale[1]),
-                        static_cast<float>(node.scale[2])
-                    );
-                }
+                ExtractNodeTRS(node, l.Translation, l.Rotation, l.Scale);
 
                 outLights.push_back(l);
             }
@@ -777,7 +784,8 @@ namespace Nox
         std::vector<MaterialData>& outMaterials,
         Skeleton& outSkeleton,
         std::vector<Ref<AnimationSequence>>& outAnimations,
-        std::vector<LightNodeData>& outLights
+        std::vector<LightNodeData>& outLights,
+        std::vector<MeshNodeData>& outNodes
     )
     {
         /*
@@ -809,6 +817,7 @@ namespace Nox
         ParseSkeletonFromGltf(model, outSkeleton);
         ParseAnimationsFromGltf(model, outSkeleton, outAnimations);
         ParseLightsFromGltf(model, outLights);
+        outNodes.clear();
 
          // 1. Build parent hierarchy map to resolve accumulated world transforms
             std::vector<int32_t> parentMap(model.nodes_count, -1);
@@ -825,52 +834,38 @@ namespace Nox
                 }
             }
 
-            auto getLocalTransform = [](const tg3_node& n) -> glm::mat4
+            if (model.nodes_count > 0)
             {
-                if (n.has_matrix)
+                outNodes.resize(model.nodes_count);
+                for (uint32_t i = 0; i < model.nodes_count; i++)
                 {
-                    return glm::mat4(glm::make_mat4(n.matrix));
+                    const tg3_node& node = model.nodes[i];
+                    MeshNodeData& nodeData = outNodes[i];
+                    nodeData.Name = (node.name.data && node.name.len > 0)
+                                        ? std::string(node.name.data, node.name.len)
+                                        : ("Node_" + std::to_string(i));
+                    nodeData.Parent = parentMap[i];
+                    ExtractNodeTRS(node, nodeData.Translation, nodeData.Rotation, nodeData.Scale);
                 }
-
-                glm::vec3 t(0.0f);
-                if (n.translation[0] != 0.0 || n.translation[1] != 0.0 || n.translation[2] != 0.0)
-                    t = glm::vec3(static_cast<float>(n.translation[0]), static_cast<float>(n.translation[1]), static_cast<float>(n.translation[2]));
-
-                glm::quat r(1.0f, 0.0f, 0.0f, 0.0f);
-                if (n.rotation[0] != 0.0 || n.rotation[1] != 0.0 || n.rotation[2] != 0.0 || n.rotation[3] != 1.0)
-                    r = glm::quat(static_cast<float>(n.rotation[3]), static_cast<float>(n.rotation[0]), static_cast<float>(n.rotation[1]), static_cast<float>(n.rotation[2]));
-
-                glm::vec3 s(1.0f);
-                if (n.scale[0] != 1.0 || n.scale[1] != 1.0 || n.scale[2] != 1.0)
-                    s = glm::vec3(static_cast<float>(n.scale[0]), static_cast<float>(n.scale[1]), static_cast<float>(n.scale[2]));
-
-                return glm::translate(glm::mat4(1.0f), t) * glm::toMat4(r) * glm::scale(glm::mat4(1.0f), s);
-            };
-
-            auto getNodeWorldMatrix = [&](uint32_t nodeIdx) -> glm::mat4
+            }
+            else
             {
-                glm::mat4 world(1.0f);
-                int32_t curr = static_cast<int32_t>(nodeIdx);
-                std::vector<int32_t> chain;
-                while (curr != -1)
+                outNodes.resize(model.meshes_count);
+                for (uint32_t i = 0; i < model.meshes_count; i++)
                 {
-                    chain.push_back(curr);
-                    curr = parentMap[curr];
+                    MeshNodeData& nodeData = outNodes[i];
+                    const tg3_mesh& mesh = model.meshes[i];
+                    nodeData.Name = (mesh.name.data && mesh.name.len > 0)
+                                        ? std::string(mesh.name.data, mesh.name.len)
+                                        : ("Mesh_" + std::to_string(i));
                 }
-                // Multiply from root parent down to leaf child: parent * ... * child
-                for (auto it = chain.rbegin(); it != chain.rend(); ++it)
-                {
-                    world = world * getLocalTransform(model.nodes[*it]);
-                }
-                return world;
-            };
+            }
 
             uint32_t totalInstances = (model.nodes_count > 0) ? model.nodes_count : model.meshes_count;
 
             for (uint32_t instanceIdx = 0; instanceIdx < totalInstances; instanceIdx++)
             {
                 uint32_t meshIndex = 0;
-                glm::mat4 nodeMatrix(1.0f);
                 std::string meshName;
 
                 if (model.nodes_count > 0)
@@ -880,16 +875,12 @@ namespace Nox
                         continue; // Skip nodes that don't reference a mesh (e.g. empty groupings, cameras)
 
                     meshIndex = static_cast<uint32_t>(node.mesh);
-
-                    // Calculate accumulated world transform through scene graph hierarchy
-                    nodeMatrix = getNodeWorldMatrix(instanceIdx);
-
-                    if (node.name.data && node.name.len > 0)
-                        meshName = std::string(node.name.data, node.name.len);
+                    meshName = outNodes[instanceIdx].Name;
                 }
                 else
                 {
                     meshIndex = instanceIdx;
+                    meshName = outNodes[instanceIdx].Name;
                 }
 
                 const tg3_mesh& mesh = model.meshes[meshIndex];
@@ -902,14 +893,27 @@ namespace Nox
                         meshName = "Instance_" + std::to_string(instanceIdx);
                 }
 
-                glm::mat3 normalMatrix = glm::transpose(glm::inverse(glm::mat3(nodeMatrix)));
+                MeshNodeData& nodeData = outNodes[instanceIdx];
+                nodeData.FirstSubmesh = static_cast<uint32_t>(result.size());
             
             for (uint32_t primitiveIndex = 0; primitiveIndex < mesh.primitives_count; primitiveIndex++)
             {
                 const tg3_primitive& primitive = mesh.primitives[primitiveIndex];
                 MeshData primitiveData{};
 
-                if (!meshName.empty())
+                std::string materialName;
+                if (primitive.material >= 0 && primitive.material < static_cast<int32_t>(model.materials_count))
+                {
+                    const auto& gltfMaterial = model.materials[primitive.material];
+                    if (gltfMaterial.name.data != nullptr && gltfMaterial.name.len > 0)
+                        materialName = std::string(gltfMaterial.name.data, gltfMaterial.name.len);
+                }
+
+                if (mesh.primitives_count > 1 && !materialName.empty())
+                {
+                    primitiveData.Name = materialName;
+                }
+                else if (!meshName.empty())
                 {
                     if (mesh.primitives_count > 1)
                         primitiveData.Name = meshName + "_" + std::to_string(primitiveIndex);
@@ -1001,8 +1005,7 @@ namespace Nox
                     
                     if (!hasSkinning)
                     {
-                        glm::vec4 worldPos = nodeMatrix * glm::vec4(pos[0], pos[1], pos[2], 1.0f);
-                        vertex.pos = {worldPos.x, worldPos.y, worldPos.z};
+                        vertex.pos = {pos[0], pos[1], pos[2]};
                     }
                     else
                     {
@@ -1017,8 +1020,7 @@ namespace Nox
 
                         if (!hasSkinning)
                         {
-                            glm::vec3 worldNormal = glm::normalize(normalMatrix * glm::vec3(norm[0], norm[1], norm[2]));
-                            vertex.normal = {worldNormal.x, worldNormal.y, worldNormal.z};
+                            vertex.normal = {norm[0], norm[1], norm[2]};
                         }
                         else
                         {
@@ -1467,6 +1469,8 @@ namespace Nox
                 outMaterials.push_back(materialData);
                 result.push_back(std::move(primitiveData));
             }
+
+            nodeData.SubmeshCount = static_cast<uint32_t>(result.size()) - nodeData.FirstSubmesh;
         }
 
         tg3_model_free(&model);

@@ -3,11 +3,171 @@ AssetRegistry:
     FilePath: Scenes/3D-Scene.nox
     SourceFilePath: Scenes/3D-Scene.nox
     Type: AssetType::Scene
-  - Handle: 3882768454766087021
-    FilePath: models/CornelBox/CornellBox-Sphere.nmesh
-    SourceFilePath: models/CornelBox/CornellBox-Sphere.gltf
+  - Handle: 1829651366693707493
+    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_4.ntex
+    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_4.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 2564771389863333997
+    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_3.ntex
+    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_3.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 3444406408455887341
+    FilePath: models/FlightHelmet/FlightHelmet_Materials_MetalPartsMat_OcclusionRoughMetal.ntex
+    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_MetalPartsMat_OcclusionRoughMetal.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 3890047955018259485
+    FilePath: models/FlightHelmet/FlightHelmet.nmesh
+    SourceFilePath: models/FlightHelmet/FlightHelmet.gltf
     Type: AssetType::Mesh
-  - Handle: 15033828818975856368
-    FilePath: models/Box/Box.nmesh
-    SourceFilePath: models/Box/Box.glb
+  - Handle: 5486206261896623704
+    FilePath: models/FlightHelmet/FlightHelmet_Materials_RubberWoodMat_OcclusionRoughMetal.ntex
+    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_RubberWoodMat_OcclusionRoughMetal.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 6932202109106418366
+    FilePath: models/FlightHelmet/FlightHelmet_Materials_GlassPlasticMat_BaseColor.ntex
+    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_GlassPlasticMat_BaseColor.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 10156391637124688172
+    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_0.ntex
+    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_0.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 10260705881268377338
+    FilePath: models/FlightHelmet/FlightHelmet_Materials_MetalPartsMat_Normal.ntex
+    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_MetalPartsMat_Normal.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 10652627545644966414
+    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_1.ntex
+    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_1.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 10688807392220546637
+    FilePath: models/FlightHelmet/FlightHelmet_Materials_MetalPartsMat_BaseColor.ntex
+    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_MetalPartsMat_BaseColor.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 11725669111059447018
+    FilePath: models/DamagedHelmet/DamagedHelmet.nmesh
+    SourceFilePath: models/DamagedHelmet/DamagedHelmet.gltf
     Type: AssetType::Mesh
+  - Handle: 11767166309181946638
+    FilePath: models/FlightHelmet/FlightHelmet_Materials_LeatherPartsMat_BaseColor.ntex
+    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_LeatherPartsMat_BaseColor.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 12076699180850865291
+    FilePath: models/FlightHelmet/FlightHelmet_Materials_RubberWoodMat_Normal.ntex
+    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_RubberWoodMat_Normal.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 12994372605698652683
+    FilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_2.ntex
+    SourceFilePath: models/DamagedHelmet/textures/DamagedHelmet_tex_2.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 13404950087274770523
+    FilePath: models/FlightHelmet/FlightHelmet_Materials_LeatherPartsMat_OcclusionRoughMetal.ntex
+    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_LeatherPartsMat_OcclusionRoughMetal.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 13826698448371496595
+    FilePath: models/FlightHelmet/FlightHelmet_Materials_LeatherPartsMat_Normal.ntex
+    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_LeatherPartsMat_Normal.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 14499205355221828341
+    FilePath: models/FlightHelmet/FlightHelmet_Materials_LensesMat_BaseColor.ntex
+    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_LensesMat_BaseColor.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 14817327663154539765
+    FilePath: models/FlightHelmet/FlightHelmet_Materials_GlassPlasticMat_Normal.ntex
+    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_GlassPlasticMat_Normal.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 15183779842409561979
+    FilePath: models/FlightHelmet/FlightHelmet_Materials_LensesMat_Normal.ntex
+    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_LensesMat_Normal.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 15294393295068485539
+    FilePath: models/FlightHelmet/FlightHelmet_Materials_LensesMat_OcclusionRoughMetal.ntex
+    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_LensesMat_OcclusionRoughMetal.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 16422124484040779525
+    FilePath: models/FlightHelmet/FlightHelmet_Materials_RubberWoodMat_BaseColor.ntex
+    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_RubberWoodMat_BaseColor.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 18414724873988179140
+    FilePath: models/FlightHelmet/FlightHelmet_Materials_GlassPlasticMat_OcclusionRoughMetal.ntex
+    SourceFilePath: models/FlightHelmet/FlightHelmet_Materials_GlassPlasticMat_OcclusionRoughMetal.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false

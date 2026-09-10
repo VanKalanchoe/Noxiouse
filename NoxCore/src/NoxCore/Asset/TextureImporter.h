@@ -1,5 +1,6 @@
 #pragma once
 #include <filesystem>
+#include <vector>
 
 #include "Asset.h"
 #include "AssetMetadata.h"
@@ -41,5 +42,8 @@ namespace Nox
         static Ref<Texture2D> LoadWithSTBHDR(const std::filesystem::path& path, const TextureSpecification& spec, Renderer* renderer);
         static Ref<Texture2D> LoadWithDDS(const std::filesystem::path& path, const TextureSpecification& spec, Renderer* renderer);
         static Ref<Texture2D> LoadWithKTX(const std::filesystem::path& path, const TextureSpecification& spec, Renderer* renderer);
+        static Ref<Texture2D> LoadWithNTEX(const std::filesystem::path& path, Renderer* renderer);
+        static bool SaveNTEX(const std::filesystem::path& path, const TextureData& cpuData);
+        static bool ReadNTEX(const std::filesystem::path& path, TextureData& outData);
     };
 }

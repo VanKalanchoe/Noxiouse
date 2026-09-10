@@ -230,6 +230,7 @@ namespace Nox
             auto& meshComponent = entity.GetComponent<MeshComponent>();
             out << YAML::Key << "MeshHandle" << YAML::Value << meshComponent.Mesh;
             out << YAML::Key << "SubmeshIndex" << YAML::Value << meshComponent.SubmeshIndex;
+            out << YAML::Key << "SubmeshCount" << YAML::Value << meshComponent.SubmeshCount;
 
             out << YAML::EndMap; // MeshComponent
         }
@@ -709,6 +710,8 @@ namespace Nox
                         mc.Mesh = meshComponent["MeshHandle"].as<AssetHandle>();
                     if (meshComponent["SubmeshIndex"])
                         mc.SubmeshIndex = meshComponent["SubmeshIndex"].as<uint32_t>();
+                    if (meshComponent["SubmeshCount"])
+                        mc.SubmeshCount = meshComponent["SubmeshCount"].as<uint32_t>();
                 }
 
                 auto materialComponent = entity["MaterialComponent"];
