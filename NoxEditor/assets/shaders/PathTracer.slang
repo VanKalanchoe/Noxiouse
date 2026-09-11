@@ -293,21 +293,54 @@
                 uint lightType = (uint)light.position.w;
 
                 float3 lightDir;
-                float maxDist = 1e4;
-                float attenuation = 1.0;
+                    float maxDist = 1e4;
+                    float attenuation = 1.0;
 
-                if (lightType == 0) // Directional
-                {
-                    lightDir = normalize(light.direction.xyz);
-                }
-                else // Point / Spot
-                {
-                    float3 toLight = light.position.xyz - hitPos;
-                    float dist = length(toLight);
-                    lightDir = dist > 1e-4 ? toLight / dist : float3(0, 1, 0);
-                    maxDist = dist;
-                    attenuation = 1.0 / max(dist * dist, 0.001);
-                }
+                    float angularDiameter = light.spotParams.z; // Angular radius (radians) for Directional; Radius (meters) for Point/Spot
+
+                    if (lightType == 0) // Directional Light (Sun Cone Sampling)
+                    {
+                        float3 unjitteredDir = normalize(light.direction.xyz);
+                        if (angularDiameter > 1e-4)
+                        {
+                            // Sample a random point on the sun disk
+                            float u1 = rand(rngState);
+                            float u2 = rand(rngState);
+                            float r = sqrt(u1) * tan(angularDiameter);
+                            float theta = 2.0 * M_PI * u2;
+
+                            float3 T, B;
+                            build_orthonormal_basis(unjitteredDir, T, B);
+                            lightDir = normalize(unjitteredDir + (cos(theta) * T + sin(theta) * B) * r);
+                        }
+                        else
+                        {
+                            lightDir = unjitteredDir;
+                        }
+                    }
+                    else // Point / Spot Light (Sphere Source Sampling)
+                    {
+                        float3 lightPos = light.position.xyz;
+                        if (angularDiameter > 1e-4)
+                        {
+                            // Jitter light position within source sphere radius
+                            float u1 = rand(rngState);
+                            float u2 = rand(rngState);
+                            float r = sqrt(u1) * angularDiameter;
+                            float theta = 2.0 * M_PI * u2;
+
+                            float3 toLightBase = normalize(lightPos - hitPos);
+                            float3 T, B;
+                            build_orthonormal_basis(toLightBase, T, B);
+                            lightPos += (cos(theta) * T + sin(theta) * B) * r;
+                        }
+
+                        float3 toLight = lightPos - hitPos;
+                        float dist = length(toLight);
+                        lightDir = dist > 1e-4 ? toLight / dist : float3(0, 1, 0);
+                        maxDist = dist;
+                        attenuation = 1.0 / max(dist * dist, 0.001);
+                    }
 
                 // Always trace shadow rays for direct lights (Next Event Estimation)
                     float NdotL = dot(hitNormal, lightDir);
