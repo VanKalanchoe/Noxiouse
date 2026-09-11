@@ -129,14 +129,13 @@ namespace Nox
 
 	void EditorCamera::MouseZoom(float delta)
 	{
-		/*m_Distance -= delta * ZoomSpeed();
-		if (m_Distance < 1.0f)
-		{
-			m_FocalPoint += GetForwardDirection();
-			m_Distance = 1.0f;
-		}*/
 		m_Distance -= delta * ZoomSpeed();
-		m_Distance = std::max(m_Distance, 0.001f);
+		constexpr float minimumDistance = 1.0f;
+		if (m_Distance < minimumDistance)
+		{
+			m_FocalPoint += GetForwardDirection() * (minimumDistance - m_Distance);
+			m_Distance = minimumDistance;
+		}
 	}
 
 	glm::vec3 EditorCamera::GetUpDirection() const

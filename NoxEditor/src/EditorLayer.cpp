@@ -63,7 +63,7 @@ namespace Nox
             }
         }
 
-        m_EditorCamera = EditorCamera(30.0f, 1.778f, 0.1f, 1000.0f);
+        m_EditorCamera = EditorCamera(30.0f, 1.778f, 0.01f, 1000.0f);
 
         Project::GetActive()->GetEditorAssetManager()->Init();
     }

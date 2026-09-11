@@ -15,8 +15,6 @@
         bool cull : SV_CullPrimitive;
     };
 
-    groupshared float s_vertexW[MAX_VERTICES];
-
     // =========================================================================
     // MESH SHADER (Pure Geometry: Positions & IDs only, no textures or lighting)
     // =========================================================================
@@ -82,9 +80,6 @@
             float4 worldPos = mul(modelMatrix, localPos);
             float4 clipPos = mul(viewProj, worldPos);
             vertices[i].pos = clipPos;
-            s_vertexW[i] = clipPos.w;
-            // Prevent projective divide-by-zero/negative-w singularities
-            vertices[i].pos = float4(clipPos.xyz, max(clipPos.w, 0.001));
             vertices[i].uv0 = vert.uv0;
             vertices[i].uv1 = vert.uv1;
             vertices[i].drawID = sharedPayload.drawID;
@@ -103,9 +98,9 @@
 
             triangles[i] = uint3(idx0, idx1, idx2);
             primitives[i].primitiveID = i;
-
-            // Hardware primitive culling: completely drops the primitive before rasterization
-            primitives[i].cull = (s_vertexW[idx0] <= 0.001 || s_vertexW[idx1] <= 0.001 || s_vertexW[idx2] <= 0.001);
+            // Let rasterization clip triangles against the near plane. Culling the
+            // complete triangle here makes large surfaces disappear near the camera.
+            primitives[i].cull = false;
         }
     }
 

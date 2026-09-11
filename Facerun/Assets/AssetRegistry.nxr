@@ -43,6 +43,10 @@ AssetRegistry:
     FilePath: Models/CornellBox-Original/Materials/CornellBox-Original_backWall.007.nmat
     SourceFilePath: Models/CornellBox-Original/Materials/CornellBox-Original_backWall.007.nmat
     Type: AssetType::Material
+  - Handle: 5924974148496953984
+    FilePath: Models/Box/Materials/Box_Red_Instance_6322294098808749156.nmat
+    SourceFilePath: Models/Box/Materials/Box_Red_Instance_6322294098808749156.nmat
+    Type: AssetType::Material
   - Handle: 6537536419484704265
     FilePath: Models/DamagedHelmet/Meshes/DamagedHelmet.nmesh
     SourceFilePath: Models/DamagedHelmet/Meshes/DamagedHelmet.nmesh
@@ -83,6 +87,14 @@ AssetRegistry:
     FilePath: Models/CornellBox-Original/Materials/CornellBox-Original_tallBox.001.nmat
     SourceFilePath: Models/CornellBox-Original/Materials/CornellBox-Original_tallBox.001.nmat
     Type: AssetType::Material
+  - Handle: 10584556158970797074
+    FilePath: Models/Box/Materials/Box_Red_Instance_10716039454136746130.nmat
+    SourceFilePath: Models/Box/Materials/Box_Red_Instance_10716039454136746130.nmat
+    Type: AssetType::Material
+  - Handle: 11575064581848346143
+    FilePath: Models/Box/Materials/Box_Red_Instance_10716039454136746130_Instance_2462416643620510603_Instance_15338619392834088379_Instance_12552764984690426143.nmat
+    SourceFilePath: Models/Box/Materials/Box_Red_Instance_10716039454136746130_Instance_2462416643620510603_Instance_15338619392834088379_Instance_12552764984690426143.nmat
+    Type: AssetType::Material
   - Handle: 12104204518536809933
     FilePath: Models/CornellBox-Original/Materials/CornellBox-Original_shortBox.003.nmat
     SourceFilePath: Models/CornellBox-Original/Materials/CornellBox-Original_shortBox.003.nmat
@@ -122,6 +134,14 @@ AssetRegistry:
   - Handle: 16963796367680183809
     FilePath: Models/Box/Materials/Box_Red.nmat
     SourceFilePath: Models/Box/Materials/Box_Red.nmat
+    Type: AssetType::Material
+  - Handle: 17169980057311162252
+    FilePath: Models/Box/Materials/Box_Red_Instance_10716039454136746130_Instance_2462416643620510603.nmat
+    SourceFilePath: Models/Box/Materials/Box_Red_Instance_10716039454136746130_Instance_2462416643620510603.nmat
+    Type: AssetType::Material
+  - Handle: 17291510554910159197
+    FilePath: Models/Box/Materials/Box_Red_Instance_10716039454136746130_Instance_2462416643620510603_Instance_15338619392834088379.nmat
+    SourceFilePath: Models/Box/Materials/Box_Red_Instance_10716039454136746130_Instance_2462416643620510603_Instance_15338619392834088379.nmat
     Type: AssetType::Material
   - Handle: 17378343803687919801
     FilePath: Models/CornellBox-Original/Materials/CornellBox-Original_rightWall.007.nmat
