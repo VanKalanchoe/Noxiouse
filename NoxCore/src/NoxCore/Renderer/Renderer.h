@@ -193,6 +193,10 @@ namespace Nox
         bool getRayTracingShadows() const { return m_rayTracingShadows; }
         void setRayTracingReflections(bool enabled) { m_rayTracingReflections = enabled; }
         bool getRayTracingReflections() const { return m_rayTracingReflections; }
+        void setPathTracingEnabled(bool enabled) { m_pathTracingEnabled = enabled; }
+        bool isPathTracingEnabled() const { return m_pathTracingEnabled; }
+        void setPathTracingAccumulation(bool enabled) { m_pathTracingAccumulation = enabled; }
+        bool isPathTracingAccumulation() const { return m_pathTracingAccumulation; }
         Ref<Texture2D> getRawShadowMask() const { return m_rawShadowMask; }
 
         void setCameraJitterEnabled(bool enabled) { m_cameraJitterEnabled = enabled; }
@@ -272,6 +276,10 @@ namespace Nox
         
         // NRD
         void createShadowMaskPipeline(bool forceCompile = false);
+        
+        // Path Tracer
+        void createPathTracerResources();
+        void createPathTracerPipeline(bool forceCompile = false);
 
         void createTextureImage();
         void initGeometryBuffers();
@@ -328,6 +336,8 @@ namespace Nox
         std::unique_ptr<NRI::Pipeline> m_postProcessPipeline = nullptr;
         // NRD
         std::unique_ptr<NRI::Pipeline> m_shadowMaskPipeline = nullptr;
+        // Path Tracer
+        std::unique_ptr<NRI::Pipeline> m_pathTracerPipeline = nullptr;
 
         std::unique_ptr<NRI::CommandAllocator> m_commandAllocator = nullptr;
         std::unique_ptr<NRI::CommandBuffer> m_commandBuffers = nullptr;
@@ -364,6 +374,11 @@ namespace Nox
 
         // NRD
         Ref<Texture2D> m_rawShadowMask;
+        
+        // Path Tracer Accumulation Ping-Pong
+        Ref<Texture2D> m_pathTracerAccum[2];
+        uint32_t m_pathTracerSampleCount = 0;
+        glm::mat4 m_pathTracerPrevView = glm::mat4(1.0f);
         
         // Post Process
         Ref<Texture2D> m_hdrSceneResource;
@@ -420,6 +435,8 @@ namespace Nox
         bool m_rayTracingEnabled = false;
         bool m_rayTracingShadows = false;
         bool m_rayTracingReflections = false;
+        bool m_pathTracingEnabled = false;
+        bool m_pathTracingAccumulation = true;
 
         std::unique_ptr<NRI::AccelerationStructure> m_sceneTLAS;
         std::unique_ptr<NRI::Buffer> m_tlasBuffer;

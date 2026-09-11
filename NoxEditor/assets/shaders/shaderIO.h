@@ -347,6 +347,19 @@ struct PushConstantDeferredLighting
     uint32_t shadowMaskTextureIndex; // NRD
 };
 
+struct PushConstantPathTracer
+{
+    mat4 invViewProj;
+    uint64_t matrixReference;
+    vec2 viewportSize;
+    uint32_t frameIndex;
+    uint32_t sampleCount;              // Progressive sample counter (1, 2, 3...)
+    uint32_t maxBounces;               // Default: 3
+    uint32_t accumulationTextureIndex; // Texture slot for previous accumulation
+    uint32_t debugMode;                // 16 = 1-SPP, 17 = Progressive Accumulation
+    uint32_t skyboxTextureIndex;       // Environment cubemap slot
+};
+
 struct PushConstantPostProcess
 {
     uint64_t matrixReference;

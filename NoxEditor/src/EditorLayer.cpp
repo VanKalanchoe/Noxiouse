@@ -952,7 +952,9 @@ namespace Nox
             "12: Depth Buffer",
             "13: RT Shadow Mask",
             "14: RT Reflections",
-            "15: Motion Vectors (Velocity Buffer)"
+            "15: Motion Vectors (Velocity Buffer)",
+            "16: Path Tracer (1-SPP Raw)",
+            "17: Path Tracer (Progressive Ground Truth)"
         };
         int currentMode = static_cast<int>(m_Renderer->getDebugMode());
         if (ImGui::Combo("PBR Debug View", &currentMode, debugModeNames, IM_ARRAYSIZE(debugModeNames)))
@@ -1052,29 +1054,49 @@ namespace Nox
         ImGui::Separator();
         ImGui::Text("Ray Tracing");
 
-        bool rtEnabled = m_Renderer->getRayTracingEnabled();
-        if (ImGui::Checkbox("Enable Ray Tracing", &rtEnabled))
+        bool ptEnabled = m_Renderer->isPathTracingEnabled();
+        if (ImGui::Checkbox("Enable Path Tracing (Unified Light Transport)", &ptEnabled))
         {
-            m_Renderer->setRayTracingEnabled(rtEnabled);
+            m_Renderer->setPathTracingEnabled(ptEnabled);
         }
 
-        if (rtEnabled)
+        if (ptEnabled)
         {
             ImGui::Indent();
-            bool rtShadows = m_Renderer->getRayTracingShadows();
-            if (ImGui::Checkbox("Ray Tracing Shadows", &rtShadows))
+            bool ptAccum = m_Renderer->isPathTracingAccumulation();
+            if (ImGui::Checkbox("Progressive Ground Truth (Accumulate when static)", &ptAccum))
             {
-                m_Renderer->setRayTracingShadows(rtShadows);
-            }
-
-            bool rtReflections = m_Renderer->getRayTracingReflections();
-            if (ImGui::Checkbox("Ray Tracing Reflections", &rtReflections))
-            {
-                m_Renderer->setRayTracingReflections(rtReflections);
+                m_Renderer->setPathTracingAccumulation(ptAccum);
             }
             ImGui::Unindent();
         }
+        else
+        {
+            // Hybrid Ray Tracing options (only visible when not in full Path Tracing)
+            bool rtEnabled = m_Renderer->getRayTracingEnabled();
+            if (ImGui::Checkbox("Enable Hybrid Ray Tracing", &rtEnabled))
+            {
+                m_Renderer->setRayTracingEnabled(rtEnabled);
+            }
 
+            if (rtEnabled)
+            {
+                ImGui::Indent();
+                bool rtShadows = m_Renderer->getRayTracingShadows();
+                if (ImGui::Checkbox("Ray Tracing Shadows", &rtShadows))
+                {
+                    m_Renderer->setRayTracingShadows(rtShadows);
+                }
+
+                bool rtReflections = m_Renderer->getRayTracingReflections();
+                if (ImGui::Checkbox("Ray Tracing Reflections", &rtReflections))
+                {
+                    m_Renderer->setRayTracingReflections(rtReflections);
+                }
+                ImGui::Unindent();
+            }
+        }
+        
         ImGui::Separator();
         ImGui::Checkbox("Show physics collider", &m_ShowPhysicsColliders);
         ImGui::Image(m_Font->GetAtlasTexture()->getImTextureID(), {512, 512}, ImVec2(0, 1), ImVec2(1, 0));

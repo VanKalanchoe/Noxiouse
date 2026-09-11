@@ -154,6 +154,8 @@ namespace Nox
         watchShader("assets/shaders/PostProcess.slang", "PostProcess", [this]() { createPostProcessPipeline(true); });
         // NRD
         watchShader("assets/shaders/ShadowMask.slang", "ShadowMask", [this]() { createShadowMaskPipeline(true); });
+        // Path Tracer
+        watchShader("assets/shaders/PathTracer.slang", "PathTracer", [this]() { createPathTracerPipeline(true); });
 
         m_whiteTexture = createSolidColorTexture(255, 255, 255, 255);
 
@@ -223,6 +225,8 @@ namespace Nox
         createPostProcessPipeline(false);
         //NRD
         createShadowMaskPipeline();
+        // Path Tracer
+        createPathTracerPipeline(false);
 
         createCommandPool();
         createUniformBuffers();
@@ -241,6 +245,8 @@ namespace Nox
         createDeferredLightingPipeline(false);
         // NRD
         createShadowMaskResources();
+        // Path Tracer
+        createPathTracerResources();
 
         createCommandBuffers();
 
@@ -301,6 +307,8 @@ namespace Nox
         // G-Buffer
         createGBufferResources();
         createShadowMaskResources();
+        createPathTracerResources();
+        m_pathTracerSampleCount = 0;
     }
 
     void Renderer::createSwapChain()
@@ -373,6 +381,8 @@ namespace Nox
         // G-Buffer
         createGBufferResources();
         createShadowMaskResources();
+        createPathTracerResources();
+        m_pathTracerSampleCount = 0;
 
         // NGX's internal DLSS feature is fixed-size once created; it must be explicitly freed here
         // so it gets recreated at the new resolution on the next evaluate, otherwise evaluate silently
@@ -429,6 +439,51 @@ namespace Nox
         });
 
         m_shadowMaskPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+    }
+
+    void Renderer::createPathTracerResources()
+    {
+        const uint32_t width = m_renderSize.width;
+        const uint32_t height = m_renderSize.height;
+
+        for (int i = 0; i < 2; i++)
+        {
+            m_pathTracerAccum[i] = m_device->createTexture(NRI::TextureDesc{
+                .width = width,
+                .height = height,
+                .mipLevels = 1,
+                .sampleCount = 1,
+                .usage = NRI::TextureUsage::ColorAttachment,
+                .format = NRI::ImageFormat::R16G16B16A16_SFLOAT,
+                .directFormat = UINT32_MAX
+            });
+            m_resourceHeap->registerTexture(*m_pathTracerAccum[i]);
+        }
+    }
+
+    void Renderer::createPathTracerPipeline(bool forceCompile)
+    {
+        NRI::PipelineDesc desc{};
+        desc.forceCompile = forceCompile;
+        desc.colorFormats = {NRI::ImageFormat::R16G16B16A16_SFLOAT};
+
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Task,
+            .entryPoint = "taskMain",
+            .sourcePath = "assets/shaders/PathTracer.slang"
+        });
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Mesh,
+            .entryPoint = "meshMain",
+            .sourcePath = "assets/shaders/PathTracer.slang"
+        });
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Fragment,
+            .entryPoint = "fragMain",
+            .sourcePath = "assets/shaders/PathTracer.slang"
+        });
+
+        m_pathTracerPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
     void Renderer::createCompiler()
@@ -2159,9 +2214,69 @@ namespace Nox
         }
 
         // =========================================================================
-        // 3. DEFERRED LIGHTING PASS (Evaluates HDR Radiance -> m_hdrSceneResource)
+        // 3. LIGHTING PASS: PATH TRACER (Modes 16 & 17) OR DEFERRED LIGHTING
         // =========================================================================
-        if (m_deferredLightingPipeline)
+        bool runPathTracer = (m_pathTracingEnabled || m_debugMode == 16 || m_debugMode == 17);
+        if (runPathTracer && m_pathTracerPipeline && m_pathTracerAccum[0] && m_pathTracerAccum[1])
+        {
+            bool dlssRRActive = m_dlssEnabled && (m_dlssMode != NRI::UpscaleMode::Off) && m_dlssRayReconstructionEnabled;
+            bool cameraMoved = (uniformData.view != m_pathTracerPrevView);
+
+            // If DLSS-RR is active, it denoises 1-SPP per frame via motion vectors.
+            // When DLSS-RR is OFF, accumulate progressively when static!
+            bool accumulate = m_pathTracingAccumulation && (m_debugMode != 16) && !dlssRRActive;
+            if (cameraMoved || !accumulate)
+            {
+                m_pathTracerSampleCount = 0;
+            }
+            m_pathTracerPrevView = uniformData.view;
+            m_pathTracerSampleCount++;
+
+            uint32_t writeIndex = m_pathTracerSampleCount % 2;
+            uint32_t readIndex = 1 - writeIndex;
+
+            std::vector<NRI::RenderAttachDesc> ptAttachments;
+            ptAttachments.push_back({
+                .attachment = m_pathTracerAccum[writeIndex].get(),
+                .loadOP = NRI::LoadOP::clear,
+                .storeOP = NRI::StoreOP::store,
+                .clearColor = {0.0f, 0.0f, 0.0f, 1.0f}
+            });
+
+            NRI::RenderDesc ptDesc = {
+                .renderArea = renderExtent,
+                .colorAttachments = ptAttachments
+            };
+
+            m_commandBuffers->beginRendering(ptDesc);
+            m_commandBuffers->setViewportWithCount({0.0f, rh, rw, -rh}, 0.0f, 1.0f);
+            m_commandBuffers->setScissorWithCount(renderExtent);
+
+            m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_pathTracerPipeline);
+            m_commandBuffers->setCullMode(NRI::CullMode::None);
+            m_commandBuffers->setDepthTestEnable(false);
+            m_commandBuffers->setDepthWriteEnable(false);
+            m_commandBuffers->setColorBlendEnable(0, false);
+            m_commandBuffers->setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
+
+            glm::mat4 viewProj = uniformData.proj * uniformData.view;
+            shaderio::PushConstantPathTracer ptPush{};
+            ptPush.invViewProj = glm::inverse(viewProj);
+            ptPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+            ptPush.viewportSize = glm::vec2(rw, rh);
+            ptPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
+            ptPush.maxBounces = 3;
+            ptPush.accumulationTextureIndex = m_pathTracerAccum[readIndex]->GetDescriptorIndexSlot();
+            ptPush.sampleCount = accumulate ? m_pathTracerSampleCount : 1;
+            ptPush.debugMode = accumulate ? 17 : 16;
+            ptPush.skyboxTextureIndex = m_environmentCubemap ? m_environmentCubemap->GetDescriptorIndexSlot() : 0xFFFFFFFF;
+            m_commandBuffers->pushData(&ptPush, sizeof(shaderio::PushConstantPathTracer));
+
+            m_commandBuffers->drawMeshTasks(1, 1, 1);
+            m_commandBuffers->endRendering();
+            m_commandBuffers->executionBarrier();
+        }
+        else if (m_deferredLightingPipeline)
         {
             std::vector<NRI::RenderAttachDesc> lightingAttachments;
             lightingAttachments.push_back({
@@ -2300,23 +2415,16 @@ namespace Nox
             m_commandBuffers->executionBarrier();
         }
 
-        // =========================================================================
         // 4.5 DLSS EVALUATION PASS (via NRI Device Abstraction)
         // =========================================================================
         bool dlssActive = false;
-        static bool s_loggedSlots = false;
-        if (!s_loggedSlots && m_dlssEnabled)
-        {
-            s_loggedSlots = true;
-            NOX_CORE_INFO("[DLSS Debug] m_dlssOutputResource slot: {}, m_hdrSceneResource slot: {}",
-                          m_dlssOutputResource ? m_dlssOutputResource->GetDescriptorIndexSlot() : 999999,
-                          m_hdrSceneResource ? m_hdrSceneResource->GetDescriptorIndexSlot() : 999999);
-        }
-        //debug good here or no should they be raw or not ?
         if (m_dlssEnabled && m_dlssMode != NRI::UpscaleMode::Off && m_device->isDLSSSupported() && m_dlssOutputResource)
         {
+            uint32_t ptWriteIndex = m_pathTracerSampleCount % 2;
+
             NRI::DLSSParams dlssParams{};
-            dlssParams.inputColor = m_hdrSceneResource.get();
+            // Route the noisy 1-SPP Path Tracer buffer to DLSS when Path Tracing is active!
+            dlssParams.inputColor = runPathTracer ? m_pathTracerAccum[ptWriteIndex].get() : m_hdrSceneResource.get();
             dlssParams.outputColor = m_dlssOutputResource.get();
             dlssParams.depth = m_depthResource.get();
             dlssParams.motionVectors = m_gbufferVelocity.get();
@@ -2396,7 +2504,20 @@ namespace Nox
 
             shaderio::PushConstantPostProcess postPush{};
             postPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
-            postPush.hdrTextureIndex = dlssActive ? m_dlssOutputResource->GetDescriptorIndexSlot() : m_hdrSceneResource->GetDescriptorIndexSlot();
+            uint32_t activeHdrSlot = m_hdrSceneResource->GetDescriptorIndexSlot();
+
+            if (dlssActive && m_dlssOutputResource)
+            {
+                activeHdrSlot = m_dlssOutputResource->GetDescriptorIndexSlot();
+            }
+            else if (runPathTracer)
+            {
+                uint32_t writeIndex = m_pathTracerSampleCount % 2;
+                if (m_pathTracerAccum[writeIndex])
+                    activeHdrSlot = m_pathTracerAccum[writeIndex]->GetDescriptorIndexSlot();
+            }
+
+            postPush.hdrTextureIndex = activeHdrSlot;
             postPush.debugMode = m_debugMode;
             postPush.tonemapMode = m_tonemapMode;
             m_commandBuffers->pushData(&postPush, sizeof(shaderio::PushConstantPostProcess));
@@ -2961,7 +3082,8 @@ namespace Nox
 
     void Renderer::updateSceneAccelerationStructure(uint32_t currentFrameIndex)
     {
-        if (!m_rayTracingEnabled || (!m_rayTracingShadows && !m_rayTracingReflections))
+        bool isPathTracing = m_pathTracingEnabled || (m_debugMode == 16 || m_debugMode == 17);
+        if (!isPathTracing && (!m_rayTracingEnabled || (!m_rayTracingShadows && !m_rayTracingReflections)))
         {
             m_hasTLASBuild = false;
             uniformData.enableRTShadows = 0;

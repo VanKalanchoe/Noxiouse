@@ -1,0 +1,355 @@
+#include "shaderIO.h"
+
+    struct PTPayload
+    {
+        uint dummy;
+    };
+    groupshared PTPayload gPayload;
+
+    [shader("task")]
+    [numthreads(1, 1, 1)]
+    void taskMain()
+    {
+        DispatchMesh(1, 1, 1, gPayload);
+    }
+
+    struct MSOutput
+    {
+        float4 pos : SV_Position;
+        float2 uv : TEXCOORD0;
+    };
+
+    static const float2 positions[3] = {
+        float2(-1.0, -1.0),
+        float2( 3.0, -1.0),
+        float2(-1.0,  3.0)
+    };
+
+    static const float2 uvs[3] = {
+        float2(0.0, 0.0),
+        float2(2.0, 0.0),
+        float2(0.0, 2.0)
+    };
+
+    [shader("mesh")]
+    [outputtopology("triangle")]
+    [numthreads(3, 1, 1)]
+    void meshMain(
+        out indices uint3 triangles[1],
+        out vertices MSOutput vertices[3],
+        uint threadID : SV_GroupIndex,
+        uniform PushConstantPathTracer pushConstant
+    )
+    {
+        SetMeshOutputCounts(3, 1);
+        if (threadID < 3)
+        {
+            vertices[threadID].pos = float4(positions[threadID], 0.0, 1.0);
+            vertices[threadID].uv = uvs[threadID];
+        }
+        if (threadID == 0)
+        {
+            triangles[0] = uint3(0, 1, 2);
+        }
+    }
+
+    static const float M_PI = 3.141592653589793;
+
+    // High-quality PCG Random Number Generator
+    uint pcg_hash(inout uint state)
+    {
+        state = state * 747796405u + 2891336453u;
+        uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+        return (word >> 22u) ^ word;
+    }
+
+    float rand(inout uint state)
+    {
+        return float(pcg_hash(state)) / 4294967296.0;
+    }
+
+    // Duff et al. orthonormal basis construction
+    void build_orthonormal_basis(float3 n, out float3 b1, out float3 b2)
+    {
+        float sign = n.z >= 0.0 ? 1.0 : -1.0;
+        float a = -1.0 / (sign + n.z);
+        float b = n.x * n.y * a;
+        b1 = float3(1.0 + sign * n.x * n.x * a, sign * b, -sign * n.x);
+        b2 = float3(b, sign + n.y * n.y * a, -n.y);
+    }
+
+    // Cosine-weighted hemisphere sampling (Malley's method)
+    float3 sample_cosine_hemisphere(float u1, float u2, float3 normal)
+    {
+        float r = sqrt(u1);
+        float theta = 2.0 * M_PI * u2;
+        float x = r * cos(theta);
+        float y = r * sin(theta);
+        float z = sqrt(max(0.0, 1.0 - u1));
+
+        float3 tangent, bitangent;
+        build_orthonormal_basis(normal, tangent, bitangent);
+        return normalize(tangent * x + bitangent * y + normal * z);
+    }
+
+    float2 intersection_uv(InstanceLUT lut, uint primIndex, float2 barycentrics)
+    {
+        uint32_t* indices = (uint32_t*)lut.indexBufferAddress;
+        uint i0 = indices[primIndex * 3 + 0];
+        uint i1 = indices[primIndex * 3 + 1];
+        uint i2 = indices[primIndex * 3 + 2];
+
+        Vertex* vertices = (Vertex*)lut.vertexBufferAddress;
+        float2 uv0 = vertices[i0].uv0;
+        float2 uv1 = vertices[i1].uv0;
+        float2 uv2 = vertices[i2].uv0;
+
+        float w0 = 1.0 - barycentrics.x - barycentrics.y;
+        float w1 = barycentrics.x;
+        float w2 = barycentrics.y;
+
+        return w0 * uv0 + w1 * uv1 + w2 * uv2;
+    }
+
+    // Ray query shadow test for direct analytical lights (Next Event Estimation)
+    bool trace_shadow_ray(UniformBufferObject* ubo, float3 rayOrigin, float3 rayDir, float maxDist)
+    {
+        if (ubo->tlasDeviceAddress == 0) return false;
+
+        RayDesc shadowRay;
+        shadowRay.Origin = rayOrigin;
+        shadowRay.Direction = rayDir;
+        shadowRay.TMin = 0.005;
+        shadowRay.TMax = maxDist;
+
+        RaytracingAccelerationStructure as = RaytracingAccelerationStructure(ubo->tlasDeviceAddress);
+        RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> sq;
+        sq.TraceRayInline(as, RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, 0xFF, shadowRay);
+
+        InstanceLUT* instanceLUTBuffer = (InstanceLUT*)ubo->instanceLUTReference;
+        SamplerState textureSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
+
+        while (sq.Proceed())
+        {
+            uint instID = sq.CandidateRayInstanceCustomIndex();
+            uint primIndex = sq.CandidatePrimitiveIndex();
+            InstanceLUT lut = instanceLUTBuffer[instID];
+
+            if (lut.alphaMode == 0 || lut.baseColorTextureIndex == 0xFFFFFFFF)
+            {
+                sq.CommitNonOpaqueTriangleHit();
+            }
+            else
+            {
+                float2 uv = intersection_uv(lut, primIndex, sq.CandidateTriangleBarycentrics());
+                Texture2D tex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + lut.baseColorTextureIndex, 0));
+                float4 col = tex.SampleLevel(textureSampler, uv, 0);
+                if (col.a >= lut.alphaCutoff)
+                {
+                    sq.CommitNonOpaqueTriangleHit();
+                }
+            }
+        }
+
+        return (sq.CommittedStatus() == COMMITTED_TRIANGLE_HIT);
+    }
+
+    [shader("fragment")]
+    float4 fragMain(
+        MSOutput input,
+        uniform PushConstantPathTracer pushConstant
+    ) : SV_Target0
+    {
+        int2 pixelCoord = int2(input.pos.xy);
+        UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+
+        // Decorrelated per-pixel seed using coordinate primes and sample counter
+        uint rngState = uint(pixelCoord.x * 1973 + pixelCoord.y * 9277) + pushConstant.frameIndex * 26699;
+
+        // Subpixel jitter for anti-aliasing
+        float2 jitter = float2(rand(rngState) - 0.5, rand(rngState) - 0.5);
+        float2 uv = (float2(pixelCoord) + 0.5 + jitter) / pushConstant.viewportSize;
+        float2 ndc_xy = float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+
+        // Primary pinhole camera ray reconstruction (near plane is depth = 1.0 in Reverse-Z)
+        float4 nearPosH = mul(pushConstant.invViewProj, float4(ndc_xy, 1.0, 1.0));
+        float3 nearPos = nearPosH.xyz / nearPosH.w;
+
+        float3 rayOrigin = ubo->cameraWorldPos.xyz;
+        float3 rayDir = normalize(nearPos - rayOrigin);
+
+        float3 throughput = float3(1.0, 1.0, 1.0);
+        float3 radiance = float3(0.0, 0.0, 0.0);
+
+        RaytracingAccelerationStructure as = RaytracingAccelerationStructure(ubo->tlasDeviceAddress);
+        InstanceLUT* instanceLUTBuffer = (InstanceLUT*)ubo->instanceLUTReference;
+        SamplerState textureSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
+
+        // Always run full path tracing bounces
+        uint maxBounces = max(1u, pushConstant.maxBounces);
+
+        // --- Path Tracing Multi-Bounce Loop ---
+        for (uint bounce = 0; bounce < maxBounces; bounce++)
+        {
+            RayDesc ray;
+            ray.Origin = rayOrigin;
+            ray.Direction = rayDir;
+            ray.TMin = 0.005;
+            ray.TMax = 1e4;
+
+            RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> rq;
+            rq.TraceRayInline(as, RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES, 0xFF, ray);
+
+            while (rq.Proceed())
+            {
+                uint instID = rq.CandidateRayInstanceCustomIndex();
+                uint primIndex = rq.CandidatePrimitiveIndex();
+                InstanceLUT lut = instanceLUTBuffer[instID];
+
+                if (lut.alphaMode == 0 || lut.baseColorTextureIndex == 0xFFFFFFFF)
+                {
+                    rq.CommitNonOpaqueTriangleHit();
+                }
+                else
+                {
+                    float2 uvSample = intersection_uv(lut, primIndex, rq.CandidateTriangleBarycentrics());
+                    Texture2D tex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + lut.baseColorTextureIndex, 0));
+                    float4 col = tex.SampleLevel(textureSampler, uvSample, 0);
+                    if (col.a >= lut.alphaCutoff)
+                    {
+                        rq.CommitNonOpaqueTriangleHit();
+                    }
+                }
+            }
+
+            // Miss: Sample Environment Map / Skybox
+            if (rq.CommittedStatus() != COMMITTED_TRIANGLE_HIT)
+            {
+                float3 skyRadiance = float3(0.0);
+                if (pushConstant.skyboxTextureIndex != 0xFFFFFFFF)
+                {
+                    TextureCube skyTex = TextureCube.Handle(uint2(pushConstant.skyboxTextureIndex, 0));
+                    SamplerState skySamp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_PREFILTER, 0));
+                    skyRadiance = skyTex.SampleLevel(skySamp, rayDir, 0.0).rgb;
+                }
+                else
+                {
+                    // Smooth physical sky gradient if no cubemap is loaded
+                    skyRadiance = lerp(float3(0.08, 0.08, 0.12), float3(0.4, 0.6, 0.95), saturate(rayDir.y * 0.5 + 0.5));
+                }
+
+                radiance += skyRadiance * throughput;
+                break;
+            }
+
+            // Hit geometry
+            float hitT = rq.CommittedRayT();
+            uint committedInstID = rq.CommittedRayInstanceCustomIndex();
+            uint committedPrimIndex = rq.CommittedPrimitiveIndex();
+            float2 bary = rq.CommittedTriangleBarycentrics();
+
+            InstanceLUT lut = instanceLUTBuffer[committedInstID];
+            uint32_t* indices = (uint32_t*)lut.indexBufferAddress;
+            Vertex* vertices = (Vertex*)lut.vertexBufferAddress;
+
+            uint i0 = indices[committedPrimIndex * 3 + 0];
+            uint i1 = indices[committedPrimIndex * 3 + 1];
+            uint i2 = indices[committedPrimIndex * 3 + 2];
+
+            float w0 = 1.0 - bary.x - bary.y;
+            float w1 = bary.x;
+            float w2 = bary.y;
+
+            float2 hitUV = w0 * vertices[i0].uv0 + w1 * vertices[i1].uv0 + w2 * vertices[i2].uv0;
+            float3 hitNormal = normalize(w0 * vertices[i0].normal + w1 * vertices[i1].normal + w2 * vertices[i2].normal);
+
+            // Ensure normal faces incoming ray direction
+            if (dot(hitNormal, -rayDir) < 0.0)
+                hitNormal = -hitNormal;
+
+            float3 hitPos = ray.Origin + ray.Direction * hitT;
+
+            // Sample Material Base Color
+            float3 albedo = float3(0.8, 0.8, 0.8);
+            if (lut.baseColorTextureIndex != 0xFFFFFFFF)
+            {
+                Texture2D colTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + lut.baseColorTextureIndex, 0));
+                albedo = colTex.SampleLevel(textureSampler, hitUV, 0).rgb;
+            }
+
+            // --- Next Event Estimation (NEE): Direct Lights ---
+            LightData* lights = (LightData*)ubo->lightDataReference;
+            for (uint i = 0; i < ubo->lightCount; i++)
+            {
+                LightData light = lights[i];
+                uint lightType = (uint)light.position.w;
+
+                float3 lightDir;
+                float maxDist = 1e4;
+                float attenuation = 1.0;
+
+                if (lightType == 0) // Directional
+                {
+                    lightDir = normalize(light.direction.xyz);
+                }
+                else // Point / Spot
+                {
+                    float3 toLight = light.position.xyz - hitPos;
+                    float dist = length(toLight);
+                    lightDir = dist > 1e-4 ? toLight / dist : float3(0, 1, 0);
+                    maxDist = dist;
+                    attenuation = 1.0 / max(dist * dist, 0.001);
+                }
+
+                // Always trace shadow rays for direct lights (Next Event Estimation)
+                float NdotL = dot(hitNormal, lightDir);
+                if (NdotL > 0.001)
+                {
+                    float3 shadowOrigin = hitPos + hitNormal * 0.005;
+                    bool inShadow = trace_shadow_ray(ubo, shadowOrigin, lightDir, maxDist);
+
+                    if (!inShadow)
+                    {
+                        float3 lightRadiance = light.color.rgb * light.color.w * attenuation;
+                        float3 diffuseContrib = albedo / M_PI;
+                        radiance += diffuseContrib * lightRadiance * NdotL * throughput;
+                    }
+        
+                }
+            }
+
+            // --- Russian Roulette Ray Termination ---
+            if (bounce >= 2)
+            {
+                float p = clamp(max(throughput.r, max(throughput.g, throughput.b)), 0.05, 0.95);
+                if (rand(rngState) > p)
+                    break;
+                throughput /= p;
+            }
+
+            // --- Indirect Bounce (Cosine-Weighted Hemisphere Sample) ---
+            float u1 = rand(rngState);
+            float u2 = rand(rngState);
+            float3 nextDir = sample_cosine_hemisphere(u1, u2, hitNormal);
+
+            throughput *= albedo; // Cosine sampling PDF cancels cosTheta / M_PI
+
+            rayOrigin = hitPos + hitNormal * 0.005;
+            rayDir = nextDir;
+        }
+
+        // Mode 16: 1-SPP Interactive Output
+        if (pushConstant.debugMode == 16 || pushConstant.sampleCount <= 1)
+        {
+            return float4(radiance, 1.0);
+        }
+
+        // Mode 17: Progressive Accumulation (blends previous samples over time)
+        Texture2D accumTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.accumulationTextureIndex, 0));
+        float4 prevColor = accumTex.Load(int3(pixelCoord, 0));
+
+        float blendFactor = 1.0 / float(pushConstant.sampleCount);
+        float3 accumulated = lerp(prevColor.rgb, radiance, blendFactor);
+
+        return float4(accumulated, 1.0);
+    }
