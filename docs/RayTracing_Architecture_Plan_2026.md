@@ -1,10 +1,10 @@
 # NoxEngine: Modern Ray Tracing & Lighting Architecture Plan (2026)
 
-> **Document Version:** 3.0 (Master Blueprint & Collaboration Contract — March 2026)  
+> **Document Version:** 6.0 (Dual-Track GI Architecture: DDGI vs ReSTIR GI & RTXDI Integration — March 2026)  
 > **Target API:** Vulkan 1.3 / 1.4 (`VK_KHR_ray_query`, `VK_KHR_acceleration_structure`, `VK_KHR_ray_tracing_pipeline`, `VK_EXT_descriptor_buffer`, `VK_EXT_shader_object`)  
 > **Shading Language:** Slang (SPIR-V Target)  
-> **Orchestration & Denoising Framework:** NVIDIA Streamline (SL) + NRD + DLSS / DLSS-RR  
-> **Industry Benchmarks:** Unreal Engine 5.4 (Lumen & MegaLights), Cyberpunk 2077 (REDengine 4 RT Overdrive), NVIDIA RTX SDKs  
+> **Orchestration & Denoising Framework:** NVIDIA Streamline (SL) + DLSS 3.5 / DLSS-RR + Standalone NRD  
+> **Industry Benchmarks:** Unreal Engine 5.4 (Lumen & MegaLights), Cyberpunk 2077 (REDengine 4 RT Overdrive), NVIDIA RTX SDKs (RTXPT, RTXDI, RTXGI)  
 
 ---
 
@@ -12,20 +12,22 @@
 
 To maintain absolute code safety, stability, and mutual verification, the development of this rendering architecture strictly adheres to the following rules:
 
-1. **User Role**:
-   - The **User exclusively performs all code editing**, file saves, compilations, and engine executions.
-   - The User tests each visual debug view mode in the viewport and provides feedback/validation before advancing to the next step.
-2. **Assistant Role**:
-   - The **Assistant never edits engine or editor code files directly via tool calls**.
-   - The Assistant provides precise, step-by-step instructions, exact file paths, line numbers, and clean copy-pasteable code snippets.
-   - The Assistant provides direct links to the official programming guides, GitHub repositories, and papers for every referenced technology so every algorithm and parameter can be cross-checked.
-3. **Phase Advancement Gate**:
+1. **Execution Policy (Strict)**:
+   - Antigravity never executes terminal commands, scripts (`.bat`, `.ps1`), compilers, or background tasks unless the user explicitly requests them.
+   - All code inspection and modifications are performed purely on files, with clear explanations. The user compiles and runs.
+2. **Phase Advancement Gate**:
    - No phase begins until the previous phase's interactive debug view mode is visually confirmed running and stable.
-4. **C++ Class Layout Scheme (Strict Engine Convention)**:
+3. **C++ Class Layout Scheme (Strict Engine Convention)**:
    - **Top**: `public:` section containing all public methods, interface overrides, and inline getters/setters.
    - **Middle**: `private:` section containing all private helper functions and internal methods.
    - **Bottom**: `private:` section containing all member variables (`m_*`).
-   - The Assistant must always specify exactly which section (public methods, private methods, or bottom private variables) new code belongs to.
+4. **Strict NRI Backend Abstraction Boundary**:
+   - **Zero Graphics Leak**: High-level systems interact purely with abstract `NRI` types (`NRI::Device`, `NRI::Texture`, `NRI::CommandBuffer`, `NRI::Buffer`, etc.).
+   - Vulkan headers (`<vulkan/vulkan.h>`), `VkCommandBuffer`, `VkImage`, `vk::*`, and Streamline headers remain strictly inside `NoxCore/src/NRI/Vulkan/`.
+5. **Infinite Reverse-Z Projection & Depth Convention**:
+   - NoxEngine uses infinite Reverse-Z (`depth = 1.0` at `zNear`, `depth = 0.0` at infinity).
+   - Far clip is **never used or queried** for camera projection.
+   - Upscaling/denoising frameworks (DLSS, NRD) must always configure `depthInverted = sl::Boolean::eTrue` and `cameraFar = 0.0f`.
 
 ---
 
@@ -34,10 +36,13 @@ To maintain absolute code safety, stability, and mutual verification, the develo
 The following official documentation, source code repositories, and technical whitepapers serve as the ground-truth specifications for NoxEngine's implementation:
 
 ### 2.1. NVIDIA Streamline (SL)
-- **Official GitHub Repository**: [NVIDIAGameWorks/Streamline](https://github.com/NVIDIAGameWorks/Streamline)
-- **Programming Guide**: [Streamline Programming Guide](https://github.com/NVIDIAGameWorks/Streamline/blob/main/docs/ProgrammingGuide.md)
-- **Vulkan Integration Guide**: [Streamline Vulkan Guide](https://github.com/NVIDIAGameWorks/Streamline/blob/main/docs/ProgrammingGuideVulkan.md)
-- **DLSS & Motion Vectors Guide**: [Streamline DLSS Guide](https://github.com/NVIDIAGameWorks/Streamline/blob/main/docs/ProgrammingGuideDLSS.md)
+- **Official GitHub Repository**: [NVIDIA-RTX/Streamline](https://github.com/NVIDIA-RTX/Streamline)
+- **GitHub Releases (Binaries)**: [Streamline Releases](https://github.com/NVIDIA-RTX/Streamline/releases)
+- **Programming Guide**: [Streamline Programming Guide](https://github.com/NVIDIA-RTX/Streamline/blob/main/docs/ProgrammingGuide.md)
+- **Vulkan Integration Guide**: [Streamline Vulkan Guide](https://github.com/NVIDIA-RTX/Streamline/blob/main/docs/ProgrammingGuideVulkan.md)
+- **DLSS & Motion Vectors Guide**: [Streamline DLSS Guide](https://github.com/NVIDIA-RTX/Streamline/blob/main/docs/ProgrammingGuideDLSS.md)
+- **DLSS Ray Reconstruction Guide**: [Streamline DLSS-RR Guide](https://github.com/NVIDIA-RTX/Streamline/blob/main/docs/ProgrammingGuideDLSS_RR.md)
+- **NVIDIA Reflex Guide**: [Streamline Reflex Guide](https://github.com/NVIDIA-RTX/Streamline/blob/main/docs/ProgrammingGuideReflex.md)
 
 ### 2.2. NVIDIA NRD (Real-Time Denoisers)
 - **Official GitHub Repository**: [NVIDIAGameWorks/RayTracingDenoiser](https://github.com/NVIDIAGameWorks/RayTracingDenoiser)
@@ -45,215 +50,236 @@ The following official documentation, source code repositories, and technical wh
 - **Engine Integration Guide**: [NRD Integration Guide](https://github.com/NVIDIAGameWorks/RayTracingDenoiser/blob/master/Integration.md)
 - **SIGMA (Shadow Denoiser) Specs**: [NRD Denoisers Overview](https://github.com/NVIDIAGameWorks/RayTracingDenoiser/tree/master/Shaders)
 
-### 2.3. NVIDIA RTXGI & DDGI (Dynamic Diffuse Global Illumination)
+### 2.3. Path Tracing & Vulkan Shader Binding Table (SBT)
+- **NVIDIA `nvvk::SBTGenerator` Source**: [nvpro_core/nvvk/raytraceKHR_vk.hpp](https://github.com/nvpro-samples/nvpro_core/blob/master/nvvk/raytraceKHR_vk.hpp)
+- **Vulkan Ray Tracing Tutorial**: [NVIDIA Vulkan Ray Tracing Tutorial (KHR)](https://nvpro-samples.github.io/vk_raytracing_tutorial_KHR/)
+- **Physically Based Rendering (PBRT v4)**: [pbrt.org](https://www.pbrt.org/)
+
+### 2.4. NVIDIA RTXGI & DDGI (Dynamic Diffuse Global Illumination)
 - **Official GitHub Repository**: [NVIDIAGameWorks/RTXGI](https://github.com/NVIDIAGameWorks/RTXGI)
 - **RTXGI DDGI Guide**: [RTXGI DDGI Implementation Guide (PDF)](https://github.com/NVIDIAGameWorks/RTXGI/blob/main/RTXGI-DDGI-Guide.pdf)
 - **Foundational Paper**: [Majercik et al., *Dynamic Diffuse Global Illumination with Ray-Traced Irradiance Fields*, JCGT 2019](https://jcgt.org/published/0008/02/01/)
 
-### 2.4. NVIDIA RTXDI (ReSTIR Direct Illumination)
-- **Official GitHub Repository**: [NVIDIAGameWorks/RTXDI](https://github.com/NVIDIAGameWorks/RTXDI)
-- **RTXDI Programming Guide**: [RTXDI Programming Guide (PDF)](https://github.com/NVIDIAGameWorks/RTXDI/blob/main/doc/RTXDI_Programming_Guide.pdf)
+### 2.5. NVIDIA RTXDI (ReSTIR DI, ReSTIR GI & ReSTIR PT)
+- **Official GitHub Repository**: [NVIDIA-RTX/RTXDI](https://github.com/NVIDIA-RTX/RTXDI)
+- **RTXDI Library Source**: [NVIDIA-RTX/RTXDI-Library](https://github.com/NVIDIA-RTX/RTXDI-Library)
 - **Foundational ReSTIR Paper**: [Bitterli et al., *Spatiotemporal Reservoir Resampling for Real-Time Ray Tracing with Dynamic Direct Lighting*, SIGGRAPH 2020](https://cs.dartmouth.edu/wjarosz/publications/bitterli20spatiotemporal.html)
+- **ReSTIR GI Paper**: [Ouyang et al., *ReSTIR GI: Path Resampling for Real-Time Path Tracing*, HPG 2021](https://intro-to-restir.cwyman.org/)
+- **ReSTIR PT (GRIS) Paper**: [Lin et al., *Generalized Resampled Importance Sampling: Foundations of ReSTIR*, SIGGRAPH 2022](https://intro-to-restir.cwyman.org/)
 
-### 2.5. Vulkan Ray Tracing Pipeline & Shader Binding Table (SBT)
-- **NVIDIA `nvvk::SBTGenerator` Source**: [nvpro_core/nvvk/raytraceKHR_vk.hpp](https://github.com/nvpro-samples/nvpro_core/blob/master/nvvk/raytraceKHR_vk.hpp)
-- **Vulkan Ray Tracing Tutorial**: [NVIDIA Vulkan Ray Tracing Tutorial (KHR)](https://nvpro-samples.github.io/vk_raytracing_tutorial_KHR/)
-
-### 2.6. Area Lights (Linearly Transformed Cosines - LTC)
-- **Foundational Paper & Code**: [Heitz et al., *Real-Time Polygonal-Light Shading with Linearly Transformed Cosines*, ACM SIGGRAPH 2016](https://eheitzresearch.wordpress.com/415-2/)
-
-### 2.7. Camera Jitter & Temporal Sequences
-- **Halton Sequence**: [Halton Sequence Reference (Wikipedia)](https://en.wikipedia.org/wiki/Halton_sequence)
-- **DLSS Camera Jitter Specification**: [NVIDIA DLSS Camera Jitter Requirements](https://github.com/NVIDIAGameWorks/Streamline/blob/main/docs/ProgrammingGuideDLSS.md#camera-jitter)
+### 2.6. NVIDIA RTXPT (RTX Path Tracing SDK) & BSDF Reference Specifications
+- **Official Overview**: [NVIDIA RTX Path Tracing](https://developer.nvidia.com/rtx/ray-tracing/path-tracing)
+- **NVIDIA Falcor PBR BSDF Framework**: [NVIDIAGameWorks/Falcor](https://github.com/NVIDIAGameWorks/Falcor)
+- **GGX VNDF Sampling**: [Eric Heitz, *Sampling the GGX Distribution of Visible Normals*, JCGT 2018](https://jcgt.org/published/0007/04/01/)
+- **Microfacet Refraction & Glass**: [Walter et al., *Microfacet Models for Refraction through Rough Surfaces*, EGSR 2007](https://www.cs.cornell.edu/~srm/publications/EGSR07-btdf.html)
+- **Multiple Importance Sampling (MIS)**: [Veach & Guibas, *Optimally Combining Sampling Techniques for Monte Carlo Rendering*, SIGGRAPH 1995](https://graphics.stanford.edu/papers/combining/)
 
 ---
 
-## 3. Executive Summary & Architecture Philosophy
+## 3. Unified Lighting & Global Illumination (GI) Architecture
 
-NoxEngine adopts a modern, high-performance hybrid rendering architecture combining:
-1. **Visibility Buffer Rasterization**: Nanite-style meshlet rasterization producing decoupled visibility geometry (`R32G32_UINT`).
-2. **Decoupled Deferred G-Buffer**: Material evaluation decoupled from geometry rasterization.
-3. **NVIDIA Streamline (SL) Plugin Ecosystem**: A unified, vendor-neutral orchestration layer managing:
-   - **NVIDIA Real-Time Denoisers (NRD)**: Cross-vendor denoisers running on AMD, Intel, and NVIDIA for soft shadows (`SIGMA`), reflections (`ReBLUR`), and ambient occlusion.
-   - **DLSS 3.5 / DLSS-RR (Ray Reconstruction)**: AI neural reconstruction replacing separate heuristic denoisers for reflections, GI, and path tracing on NVIDIA RTX hardware.
-   - **Multi-Vendor Upscalers**: Streamline plugin support for AMD FSR and Intel XeSS alongside DLSS.
-4. **Dynamic Diffuse Global Illumination (DDGI)**: Probe-based multi-bounce indirect GI providing rock-solid, leak-free bounce lighting with zero screen-space boiling noise.
-5. **RTXDI (ReSTIR Direct Illumination)**: Reservoir-sampled direct lighting supporting hundreds of dynamic shadow-casting area and punctual lights at 1-2 rays per pixel.
-6. **Path Tracing Pipeline (`VK_KHR_ray_tracing_pipeline`)**: Monolithic RT pipeline with `nvvk::SBTGenerator` for interactive ground-truth reference, offline baking, and cinematic rendering.
-
----
-
-## 4. Industry Standards Comparison (UE 5.4, Cyberpunk 2077, NoxEngine)
-
-| Architecture Component | Unreal Engine 5.4 (Lumen & MegaLights) | Cyberpunk 2077 (REDengine 4 RT Overdrive) | NoxEngine (2026 Plan) |
-| :--- | :--- | :--- | :--- |
-| **Geometry Raster** | Nanite Meshlets | Traditional Mesh Pipeline | Nanite-Style VisBuffer Meshlets (`VK_EXT_mesh_shader`) |
-| **Direct Lighting** | MegaLights (ReSTIR DI) | RTXDI (ReSTIR DI) | Analytical Direct Lights -> RTXDI (Phase 4) |
-| **Soft Shadows** | Virtual Shadow Maps + HWRT Shadows | Ray Tracing Shadows + NRD SIGMA | Ray Query Stochastic Penumbra + NRD SIGMA (Phase 2 & 4) |
-| **Global Illumination** | Lumen Radiance Cache (World Probes + Screen Probes) | Multi-Bounce Path Traced Indirect GI | DDGI Probe Irradiance Field (Phase 3) |
-| **Specular Reflections** | Lumen HWRT Rough Reflections + Bilateral Filter | Ray Traced GGX Reflections | Ray Query Mirror (Done) + Rough GGX + NRD ReBLUR (Phase 2) |
-| **Denoising Framework** | Custom Spatio-Temporal Bilateral & TAA | NVIDIA Streamline (NRD + DLSS-RR) | NVIDIA Streamline (NRD + DLSS-RR) (Phase 2) |
-| **Cinematic Ground Truth** | Unreal Path Tracer (Offline / Reference) | RT Overdrive Path Tracer (Real-Time) | Monolithic RT Pipeline + `nvvk::SBTGenerator` |
-
----
-
-## 5. The Testing Dilemma: How Do We Test Streamline in Phase 2?
-
-Streamline is modular: it hosts **DLSS Super Resolution**, **NRD SIGMA** (soft shadows), and **NRD ReBLUR** (reflections). We verify each step-by-step with immediate visual feedback:
+NoxEngine adopts a dual-engine architecture designed for maximum performance, research flexibility, and ground-truth comparison:
 
 ```
-                                  Streamline Phase 2 Test Plan
-                                                │
-         ┌──────────────────────────────────────┼──────────────────────────────────────┐
-         ▼                                      ▼                                      ▼
-   [Test 1: DLSS SR]                    [Test 2: NRD SIGMA]                    [Test 3: NRD ReBLUR]
-   Render at 50% res (960x540)          Add 1-spp cone jitter to               Add 1-spp GGX jitter to
-   Upscale to 1080p via DLSS            shadow rays in DeferredLighting        reflection rays in DeferredLighting
-   Verify: Camera jitter &              Verify: Raw noisy penumbra             Verify: Rough surface speckles
-   motion vector stability              instantly smooths out                  instantly smooth out
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                                 NoxEngine Lighting Core                                 │
+├────────────────────────────────────────────┬────────────────────────────────────────────┤
+│   Primary: Deferred Visibility Buffer RT   │         Ground-Truth: Path Tracer          │
+├────────────────────────────────────────────┼────────────────────────────────────────────┤
+│ • Direct Lighting:                         │ • Direct Lighting:                         │
+│   - RTXDI (ReSTIR DI Many-Light Resampling)│   - RTXDI (ReSTIR DI NEE Light Resampling) │
+│   - RT Shadows (1 ray/px) + NRD SIGMA      │   - Monte Carlo Area Light Soft Shadows    │
+│ • Specular Reflections:                    │ • Specular / Transmission / Diffuse:       │
+│   - RT Reflections (1 ray/px GGX VNDF)     │   - NVIDIA RTXPT Multi-Lobe Microfacet     │
+│   - NRD REBLUR/RELAX or DLSS-RR            │   - Cook-Torrance GGX, Fresnel, Glass Snell│
+│ • Diffuse Global Illumination (Dual-Track):│ • Indirect Path Acceleration:              │
+│   [Runtime Toggle: Benchmark & Compare]    │   - RTXDI ReSTIR PT / ReSTIR GI            │
+│   ├─ Track A: DDGI (3D Octahedral Probes)  │   - Multi-bounce spatiotemporal path reuse │
+│   ├─ Track B: RTXDI ReSTIR GI (Screen Rays)│ • Denoising / Output:                      │
+│   └─ Track C: Off (IBL Cubemap Fallback)   │   - Progressive Accumulation (Stationary)  │
+│ • Denoising & Upscaling:                   │   - DLSS 3.5 Ray Reconstruction (Dynamic)  │
+│   - NRD Suite or Streamline DLSS-RR/SR     │                                            │
+└────────────────────────────────────────────┴────────────────────────────────────────────┘
 ```
 
-1. **Test 1: DLSS Super Resolution (Immediate with Phase 1)**:
-   * **Input**: Current Clean Deferred Lighting Output + Depth + Motion Vectors + Subpixel Jitter.
-   * **Verification**: Render the viewport at $50\%$ internal resolution (e.g. $960 \times 540$) and run `slEvaluateFeature(kFeatureDLSS)`.
-   * **Expected Result**: Viewport renders razor-sharp at $1920 \times 1080$ with stable edges. If motion vectors or camera jitter are inverted, you see instant ghosting/smearing. If correct, the image is rock-solid.
-2. **Test 2: NRD SIGMA Shadow Denoising Verification**:
-   * **Input**: In `DeferredLighting.slang`, fire 1 stochastic cone ray per pixel (producing Monte Carlo noise).
-   * **Verification**: Feed the 1-spp noisy shadow mask to Streamline `slEvaluateFeature(kFeatureNRD)` targeting `SIGMA`.
-   * **Expected Result**: 
-     - **NRD OFF (Debug View 13)**: Grainy, noisy penumbra.
-     - **NRD ON**: Smooth, contact-hardened penumbra with crisp contact shadows near occluder base.
-3. **Test 3: NRD ReBLUR Reflection Denoising Verification**:
-   * **Input**: In `DeferredLighting.slang`, add GGX importance-sampling jitter to the reflection ray direction based on surface roughness ($1$ ray per pixel). On rough materials, this produces noisy reflection speckles.
-   * **Verification**: Feed noisy reflections to Streamline `slEvaluateFeature(kFeatureNRD)` targeting `ReBLUR`.
-   * **Expected Result**:
-     - **NRD OFF (Debug View 14)**: Rough surfaces have boiling white/colored speckles.
-     - **NRD ON**: Smooth, physically accurate glossy reflections.
+### 3.1. Denoising Architecture: DLSS-RR vs NRD (SIGMA, REBLUR, RELAX)
+
+To achieve optimal visual fidelity across all hardware platforms and rendering paths, NoxEngine implements a dual-track denoising framework with strict runtime arbitration and mutual exclusion toggles:
+
+1. **NRD SIGMA (Upstream Direct Shadow Penumbra Denoiser)**:
+   - **Pipeline Location**: Runs *pre-lighting* directly on the raw screen-space 1-SPP shadow mask buffer (`m_rawShadowMask` $\rightarrow$ `m_denoisedShadowMask`).
+   - **Function**: Performs physical penumbra contact hardening based on light source angular radius, occluder distance, surface normal/roughness, and linear View-Z.
+   - **Coexistence**: **Fully compatible with DLSS-SR and DLSS-RR**. In hybrid AAA pipelines (e.g. Cyberpunk 2077, Alan Wake 2), NRD SIGMA supplies a clean, stable direct shadow mask to deferred lighting.
+
+2. **NRD REBLUR / RELAX (The True Alternative & Competitor to DLSS-RR)**:
+   - **Pipeline Location**: Runs on indirect specular reflection radiance (`m_rawReflection`) and indirect diffuse GI buffers.
+   - **Function**: Denoises multi-bounce stochastic Monte Carlo radiance using spatiotemporal variance estimation, anti-lag, and A-trous wavelet filters.
+   - **Spherical Harmonics (`_SH`) Mode**: In `REBLUR_DIFFUSE_SPECULAR_SH` and `RELAX_DIFFUSE_SPECULAR_SH`, NRD tracks directional spherical harmonics coefficients ($L_0, L_1$), preserving high-frequency specular lobes and directional color bleed comparable in visual quality to DLSS-RR.
 
 ---
 
-## 6. Comprehensive Debugging Suite & Interactive Viewport Toggles
+### 3.2. Definitive Compatibility & Mutual Exclusion Matrix
 
-In line with Unreal Engine 5 and Cyberpunk 2077, every stage of the pipeline is isolated with an interactive debug view mode selectable directly from the editor viewport:
-
-| Mode ID | Name | Visual Output & Debugging Purpose |
-| :---: | :--- | :--- |
-| **0** | **Final Lit (PBR + GI + Post)** | Full engine output with Tonemapping, DDGI, Soft Shadows, Reflections, and Denoising. |
-| **1** | **VisBuffer Meshlets** | Pseudo-colored mosaic verifying indirect meshlet rasterization and primitive culling. |
-| **2** | **Barycentrics / UVs** | Perspective-correct reconstructed UV coordinates (`frac(u), frac(v)`). |
-| **3** | **Albedo (BaseColor)** | Demodulated surface diffuse color without any lighting. |
-| **4** | **World Normals** | Octahedral / tangent perturbed normals transformed to world space ($[-1, 1] \to [0, 1]$). |
-| **5** | **Roughness** | Grayscale roughness map (black = pure mirror, white = completely rough). |
-| **6** | **Metallic** | Grayscale metallic mask (black = dielectric, white = conductor). |
-| **7** | **Emission** | Raw emissive intensity and HDR bloom candidate pixels. |
-| **8** | **Entity ID** | Unique integer colors per scene entity for viewport mouse-picking validation. |
-| **9** | **Linear Depth** | Linearized Reverse-Z depth buffer verifying near/far planes. |
-| **10** | **Direct Lighting Only** | Shading from analytical lights & area lights without bounce GI or reflections. |
-| **11** | **DDGI Indirect Diffuse** | Multi-bounce indirect GI isolated without direct lighting or materials. |
-| **12** | **Ambient Occlusion (RTAO)** | Grayscale contact shadowing factor ($d \le 3.0\text{m}$). |
-| **13** | **Shadows: Raw vs Denoised** | Side-by-side or toggle: 1-spp stochastic penumbra vs NRD `SIGMA` smoothed shadow. |
-| **14** | **Reflections: Raw vs Denoised** | Side-by-side or toggle: 1-spp rough GGX jitter vs NRD `ReBLUR` / DLSS-RR reflection. |
-| **15** | **Motion Vectors (Velocity Buffer)**| Screen-space velocity encoded as RGB ($R = \Delta X, G = \Delta Y, B = 0$). |
-| **16** | **DDGI Probe Grid Debug** | 3D visualizer rendering spheres at probe locations displaying probe irradiance. |
-| **17** | **Path Tracing Reference** | Interactive progressive path tracer accumulating ground-truth samples for comparison. |
+| Feature / Pass | NRD SIGMA (Shadows) | NRD REBLUR / RELAX (Reflections & GI) | DLSS Super Resolution (DLSS-SR) | DLSS Ray Reconstruction (DLSS-RR) | Compatibility & Arbitration Status |
+| :--- | :---: | :---: | :---: | :---: | :--- |
+| **Direct RT Shadows** | **Active** (Primary) | N/A | Compatible | Compatible | **Fully Compatible**. Runs upstream pre-lighting. |
+| **Direct RT Shadows (Raw)** | Off (Bypassed) | N/A | Compatible | Compatible | **Compatible**. Passes 1-SPP stochastic noise to lighting. |
+| **Specular Reflections** | Compatible | **Active** (Primary) | Compatible | **MUTUALLY EXCLUSIVE** | **Strict Mutual Exclusion**. Running both causes dual-filtering blur and ghosting. |
+| **Specular Reflections** | Compatible | **MUTUALLY EXCLUSIVE** | Compatible | **Active** (Primary) | **Strict Mutual Exclusion**. DLSS-RR replaces downstream reflection denoisers. |
+| **Diffuse GI (DDGI Probes)**| Compatible | N/A (Self-filtered via Hysteresis) | Compatible | Compatible | **Zero Denoiser Required**. Filtered via temporal hysteresis ($\alpha = 0.97$). |
+| **Diffuse GI (ReSTIR GI)**  | Compatible | **Active** (REBLUR_DIFFUSE) | Compatible | **MUTUALLY EXCLUSIVE** | **Strict Mutual Exclusion**. Denoised by NRD Diffuse or DLSS-RR. |
+| **Path Tracer (Full MC)** | N/A (Embedded) | N/A (Embedded) | Compatible | **Active** (Real-Time) | **DLSS-RR or Progressive Accumulation**. Standalone hybrid denoisers are bypassed. |
 
 ---
 
-## 7. The 6-Phase Implementation Roadmap
+### 3.3. Runtime Arbitration & Auto-Disable Engine Rules
 
-```
-Current Engine Baseline:
-[Visibility Buffer] -> [Decoupled G-Buffer] -> [Deferred PBR + Hard RT Shadows & Mirror RT Reflections]
-```
+1. **Activating DLSS Ray Reconstruction (`m_dlssRayReconstructionEnabled = true`)**:
+   - Automatically sets `m_nrdReflectionDenoiser = NRDReflectionDenoiser::Off`.
+2. **Activating NRD REBLUR or RELAX (`m_nrdReflectionDenoiser != Off`)**:
+   - Automatically sets `m_dlssRayReconstructionEnabled = false` (triggers DLSS context reset `m_resetDLSS = true`).
+3. **Indirect GI Mode Switching (`m_diffuseGIMode`)**:
+   - **Mode 0 (Off)**: Deferred lighting uses environment cubemap `irradianceMap`.
+   - **Mode 1 (DDGI Probes)**: Evaluates 3D probe field. Zero denoiser overhead.
+   - **Mode 2 (RTXDI ReSTIR GI)**: Evaluates 1-ray-per-pixel screen-space path resampling + NRD/DLSS-RR denoising.
+4. **Path Tracing Overrides**:
+   - Activating full Path Tracing (`m_pathTracingEnabled = true`) automatically disables G-Buffer hybrid ray tracing passes (RT Shadows, RT Reflections, NRD SIGMA, NRD REBLUR, DDGI).
 
-### Phase 1: Temporal Foundation (Motion Vectors & Camera Jitter)
-- **Objective**: Establish the temporal history and subpixel jitter required by Streamline, NRD, DLSS, and TAA.
-- **Reference**: [NVIDIA DLSS Motion Vector Guide](https://github.com/NVIDIAGameWorks/Streamline/blob/main/docs/ProgrammingGuideDLSS.md#motion-vectors)
-- **Tasks**:
-  1. Add `m_velocityResource` (`RG16_SFLOAT`) to G-Buffer resolve pass.
-  2. In `GBufferMaterial.slang`, compute screen-space velocity:
-     $$\text{velocity} = (\text{currHClip.xy} / \text{currHClip.w}) - (\text{prevHClip.xy} / \text{prevHClip.w})$$
-  3. Store `m_prevViewProj` across frames in `Renderer`.
-  4. Implement Halton(2, 3) 8-phase subpixel projection jitter in `Camera` / `EditorCamera`.
-  5. Add **Debug View 15 (Motion Vectors)** in `DeferredLighting.slang` and Editor UI.
+---
 
-### Phase 2: NVIDIA Streamline (SL) Core Framework + NRD & DLSS Verification
-- **Objective**: Establish the unified denoising and upscaling pipeline.
-- **Reference**: [Streamline Programming Guide](https://github.com/NVIDIAGameWorks/Streamline/blob/main/docs/ProgrammingGuide.md)
-- **Tasks**:
-  1. Integrate Streamline SDK headers and DLL binaries (`sl.interposer.dll`, `sl.nrd.dll`, `sl.dlss.dll`).
-  2. Initialize Streamline in `DeviceVK` during Vulkan device creation.
-  3. Wrap G-Buffer, Depth, and Motion Vectors into `sl::ResourceTag`.
-  4. Verify Step 1: **DLSS Super Resolution** (`kFeatureDLSS`) to upscale the viewport and verify motion vector accuracy.
-  5. Verify Step 2: Add 1-spp stochastic jitter to shadows and hook up **NRD SIGMA** (`kFeatureNRD`).
-  6. Verify Step 3: Add 1-spp GGX roughness jitter to reflections and hook up **NRD ReBLUR**.
-  7. Add UI toggles for DLSS quality and Denoiser modes (Raw Noisy vs Denoised).
+## 4. Viewport Visual Debug View Modes (0 - 19)
 
-### Phase 3: Dynamic Diffuse Global Illumination (DDGI)
-- **Objective**: Noise-free, multi-bounce real-time indirect GI.
-- **Reference**: [Majercik et al. JCGT 2019](https://jcgt.org/published/0008/02/01/), [NVIDIA RTXGI Guide](https://github.com/NVIDIAGameWorks/RTXGI/blob/main/RTXGI-DDGI-Guide.pdf)
-- **Tasks**:
+NoxEngine provides 20 interactive debug view modes selectable in the Viewport Toolbar:
+
+| Mode ID | Visual Mode Name | Target Shader Pass | Visual Output Description |
+| :---: | :--- | :--- | :--- |
+| **0** | **Full PBR Lit Scene** | `DeferredLighting.slang` | Final composition (Direct Lighting + GI + AO + Emission + Reflections). |
+| **1** | **Base Color (Albedo)** | `GBufferMaterial.slang` | Raw diffuse/base color texture without lighting or shadows. |
+| **2** | **Normal Map Texture** | `GBufferMaterial.slang` | Raw tangent-space normal map texture (periwinkle blue with scratches). |
+| **3** | **Ambient Occlusion** | `GBufferMaterial.slang` | Material ambient occlusion map channel ($A$ channel of albedo target). |
+| **4** | **Emissive Color** | `GBufferMaterial.slang` | Emissive texture multiplied by emissive factor and strength. |
+| **5** | **Metallic** | `GBufferMaterial.slang` | Grayscale metalness mask ($0.0 = \text{dielectric}, 1.0 = \text{metal}$). |
+| **6** | **Roughness** | `GBufferMaterial.slang` | Grayscale linear roughness mask ($0.0 = \text{mirror}, 1.0 = \text{rough}$). |
+| **7** | **Perturbed Shading Normal** | `GBufferMaterial.slang` | Orthonormal world-space normal perturbed by normal map ($N \cdot 0.5 + 0.5$). |
+| **8** | **Direct Lighting Only** | `DeferredLighting.slang` | Analytical & RTXDI punctual/area light contribution in HDR. |
+| **9** | **IBL / Ambient Sky Only** | `DeferredLighting.slang` | Split-sum diffuse and specular environment cubemap ambient contribution. |
+| **10** | **Reconstructed World Pos** | `DeferredLighting.slang` | Fractional world position ($x, y, z \pmod 1$) reconstructed from depth. |
+| **11** | **Entity ID Picking** | `DeferredLighting.slang` | Pseudo-random vibrant color per unique scene entity ID. |
+| **12** | **Linear Depth Buffer** | `DeferredLighting.slang` | Linear camera distance visualization ($0.0\text{m} = \text{black}, 25.0\text{m} = \text{white}$). |
+| **13** | **RT Shadow Mask** | `DeferredLighting.slang` | 1-SPP raw vs NRD SIGMA denoised shadow factor ($1.0 = \text{lit}, 0.0 = \text{shadow}$). |
+| **14** | **RT Reflections Radiance**| `DeferredLighting.slang` | Decoupled 1-SPP raw or NRD REBLUR/RELAX denoised reflection radiance. |
+| **15** | **Motion Vectors (Velocity)**| `GBufferMaterial.slang` | Screen-space velocity buffer ($R = |\Delta X| \times 100, G = |\Delta Y| \times 100$). |
+| **16** | **Indirect Diffuse GI Only** | `DeferredLighting.slang` | Pure bounced indirect diffuse light (DDGI Probes or RTXDI ReSTIR GI). |
+| **17** | **DDGI Probe Grid Spheres** | Debug Overlay | Visual debug spheres rendering each probe's irradiance in world space. |
+| **18** | **Path Tracer 1-SPP** | `PathTracer.slang` | Real-time 1-SPP raw path tracing output (interactive or DLSS-RR input). |
+| **19** | **Path Tracer Ground Truth**| `PathTracer.slang` | Progressive multi-bounce ground-truth Monte Carlo accumulated radiance. |
+
+---
+
+## 5. Implementation Phases & Milestones
+
+### Phase 1: Camera Motion Vectors & Halton Jitter Sequence ✅ COMPLETED
+- Non-jittered projection for velocity buffer evaluation.
+- 8-phase Halton(2, 3) subpixel projection jittering.
+- Verified in Viewport Debug Mode 15 (Motion Vectors).
+
+### Phase 2: NVIDIA Streamline Core & DLSS 3.5 Ray Reconstruction ✅ COMPLETED
+- Streamline initialized with manual hooking in `DeviceVK`.
+- G-Buffer attachments (Albedo, Specular $F_0$, World Normals, Roughness, Depth, Motion Vectors) tagged to Streamline.
+- DLSS Super Resolution (`kFeatureDLSS`) and Ray Reconstruction (`kFeatureDLSS_RR`) running with zero Vulkan validation errors.
+- Runtime toggleable without resource deletion crashes (`m_resetDLSS = true`).
+
+### Phase 3: Interactive Path Tracer Ground Truth Core ✅ COMPLETED
+- Full multi-bounce inline RayQuery path tracer (`PathTracer.slang`) with mesh shader invocation.
+- Monte Carlo area light soft shadows with angular diameter and PCG random numbers.
+- Camera-stationary progressive accumulation + real-time DLSS Ray Reconstruction integration.
+- IBL ambient sky scale slider (0.0 to disable ambient, punctual lights only).
+
+### Phase 3.5: NVIDIA RTXPT Microfacet Multi-Lobe BSDF Model ✅ COMPLETED
+- **Objective**: Upgraded `PathTracer.slang` to NVIDIA RTXPT's full multi-lobe microfacet BSDF standard.
+- **Implemented**:
+  1. Extended `InstanceLUT` in `shaderIO.h` and `Renderer.cpp` with `metallicFactor`, `roughnessFactor`, `metallicRoughnessTextureIndex`, `normalTextureIndex`, `transmissionFactor`, `transmissionTextureIndex`, and `workflow` (160 bytes).
+  2. Integrated Eric Heitz 2018 GGX VNDF sampling (`sample_ggx_vndf`) for specular reflection bounce rays.
+  3. Cook-Torrance direct lighting (NEE) with height-correlated Smith $G_2$, GGX $D$, and Schlick Fresnel.
+  4. Multi-lobe indirect ray generation: Fresnel-weighted specular bounce for metals/glossy, Snell's law refraction ray generation for glass/transmission ($n = 1.5$), and cosine diffuse bounce for dielectrics.
+  5. Tangent-space normal mapping perturbation (`perturb_normal`).
+
+### Phase 4: Standalone NRD SIGMA & Shadow Denoising ✅ COMPLETED
+- Dedicated penumbra-aware contact hardening for 1-SPP shadow rays in Deferred Lighting.
+- HAL interface in `NRI::Device.h` (`initNRD`, `evaluateNRDShadows`, `destroyNRD`).
+- NRD SIGMA integration in `NRI/Vulkan/DeviceVK` using `nrd::Integration` and `NRIWrapperVK` (Zero Graphics Leak).
+- Debug View 13 displays raw vs denoised shadow mask in real time.
+
+### Phase 4.5: NRD REBLUR / RELAX Decoupled Specular Reflections ✅ COMPLETED
+- Decoupled 1-SPP GGX VNDF ray-traced reflections denoised via NRD REBLUR (variance-guided) and RELAX (A-Trous wavelet).
+- `Reflection.slang` evaluates 1-SPP GGX VNDF reflection rays against TLAS with hit radiance and hit distance output.
+- Strict runtime arbitration UI toggle (mutually exclusive with DLSS-RR).
+- Physically correct specular Fresnel blending in `DeferredLighting.slang` (preserving 96% dielectric albedo on foliage and 100% metal reflections).
+
+### Phase 5: Dual-Track Indirect Diffuse GI (DDGI Probes vs RTXDI ReSTIR GI) 🚀 NEXT UP
+- **Objective**: Implement real-time multi-bounce diffuse indirect illumination with a runtime toggle between **3D Octahedral Probe Fields (DDGI)** and **Screen-Space Ray Resampling (RTXDI ReSTIR GI)** to benchmark graphics, VRAM, and performance.
+- **Track A: Dynamic Diffuse Global Illumination (DDGI Probes)**:
   1. Allocate DDGI probe grid buffers ($32 \times 16 \times 32$ probes) and 2D octahedral atlases:
      - Irradiance Atlas ($8 \times 8$ texels per probe, `RGBA16_SFLOAT`).
-     - Distance Atlas ($16 \times 16$ texels per probe, `RG16_SFLOAT`).
+     - Distance Atlas ($16 \times 16$ texels per probe, `RG16_SFLOAT` for mean depth and depth squared).
   2. Implement `DDGIRadiance.comp.slang`: Trace 64–128 rays per probe against TLAS using `RayQuery`.
-  3. Implement `DDGIUpdate.comp.slang`: Octahedral mapping and temporal accumulation with hysteresis ($\alpha = 0.97$).
-  4. Sample DDGI in `DeferredLighting.slang` with trilinear probe interpolation and Chebyshev visibility test.
-  5. Add **Debug View 11 (DDGI Indirect Diffuse)** and **Debug View 16 (Probe Grid Debug Spheres)**.
+  3. Implement `DDGIBlend.comp.slang`: Octahedral mapping and temporal accumulation with hysteresis ($\alpha = 0.97$).
+  4. Chebyshev visibility test in `DeferredLighting.slang` to eliminate wall light leaking.
+- **Track B: RTXDI ReSTIR GI (Screen-Space Path Resampling)**:
+  1. Trace 1 indirect diffuse ray per screen pixel from primary G-Buffer hit points.
+  2. Resample and share indirect paths across spatial neighbors and temporal history via RTXDI ReSTIR GI reservoirs.
+  3. Denoise the resulting diffuse radiance buffer using NRD `REBLUR_DIFFUSE` or DLSS-RR.
+- **Comparison & UI Controls**:
+  - Runtime combo dropdown: `[ Indirect GI: DDGI Probes | RTXDI ReSTIR GI | Off (IBL Cubemap) ]`.
+  - Side-by-side performance profiling (ms/frame, VRAM consumption, visual comparison).
 
-### Phase 4: Area Lights & Soft Shadows + RTXDI (ReSTIR DI)
-- **Objective**: Physical area lights and many-light scaling with ReSTIR reservoir sampling.
-- **Reference**: [RTXDI Programming Guide](https://github.com/NVIDIAGameWorks/RTXDI/blob/main/doc/RTXDI_Programming_Guide.pdf), [Heitz et al. LTC Paper](https://eheitzresearch.wordpress.com/415-2/)
-- **Tasks**:
-  1. Linearly Transformed Cosines (LTC) LUT evaluation for rectangular and disc area lights.
-  2. Stochastic cone-sampled soft shadows denoised via Streamline NRD `SIGMA`.
-  3. Integrate RTXDI (ReSTIR DI) compute passes:
-     - Initial candidate light sampling.
-     - Temporal reservoir reuse across frames.
-     - Spatial reservoir reuse across neighbor pixels.
-     - 1-shadow-ray visibility test for winning reservoir light.
-  4. Support 500+ dynamic shadow-casting lights at fixed 1-ray-per-pixel cost.
+### Phase 6: Many-Light Direct Illumination & Area Lights via RTXDI (ReSTIR DI)
+- **Objective**: Scale direct lighting to thousands of dynamic shadow-casting lights (point, spot, directional, rectangular/disc area lights) at 1-ray-per-pixel across both the Hybrid Deferred Renderer and the Path Tracer.
+- **Components**:
+  1. **Linearly Transformed Cosines (LTC)** LUT evaluation for rectangular and disc area lights.
+  2. **RTXDI ReSTIR DI Core Pipeline**:
+     - Light tile presampling pass.
+     - Spatiotemporal reservoir generation and reuse.
+     - Single shadow ray test for the winning reservoir light.
+  3. **Path Tracer Integration (ReSTIR DI + ReSTIR PT)**:
+     - Replace random Next Event Estimation (NEE) in `PathTracer.slang` with RTXDI reservoir sampling for instantaneous noise-free direct lighting.
+     - Integrate ReSTIR PT for multi-bounce path importance resampling.
 
-### Phase 5: Ray-Traced Ambient Occlusion (RTAO) & Volumetric Froxels
+### Phase 7: Ray-Traced Ambient Occlusion (RTAO) & Volumetric Froxels
 - **Objective**: Physical contact darkening and atmospheric light shafts.
 - **Tasks**:
   1. RTAO 1-spp cosine-weighted hemisphere ray query ($d \le 3.0\text{m}$) replacing SSAO.
-  2. Denoise RTAO via Streamline NRD / bilateral filter (Debug View 12).
-  3. Allocate 3D Frustum-aligned Froxel Grid ($160 \times 90 \times 64$, `RGBA16_SFLOAT`).
-  4. Compute froxel in-scattering from lights shadowed against the TLAS.
-  5. Front-to-back raymarching composite into HDR scene.
+  2. Allocate 3D Frustum-aligned Froxel Grid ($160 \times 90 \times 64$, `RGBA16_SFLOAT`).
+  3. Compute froxel in-scattering from lights shadowed against the TLAS.
+  4. Front-to-back raymarching composite into HDR scene.
 
-### Phase 6: Monolithic RT Pipeline & Path Tracing (`nvvk::SBTGenerator` + DLSS-RR)
-- **Objective**: Ground-truth reference and cinematic offline rendering.
-- **Reference**: [nvvk::SBTGenerator Source](https://github.com/nvpro-samples/nvpro_core/blob/master/nvvk/raytraceKHR_vk.hpp)
+### Phase 8: NVIDIA Reflex Low-Latency Integration
+- **Objective**: Ultra-low input latency and frame pacing synchronization.
 - **Tasks**:
-  1. Integrate `nvvk::SBTGenerator` (header-only C++ utility) for Vulkan Shader Binding Table management.
-  2. Add `RayTracingPipelineVK` in NRI wrapping `vkCreateRayTracingPipelinesKHR`.
-  3. Write Slang RT shaders:
-     - `PathTracer.rgen.slang`
-     - `PathTracer.rchit.slang`
-     - `PathTracer.rmiss.slang`
-  4. Progressive accumulation pass with interactive camera freeze/reset.
-  5. Enable **Streamline DLSS Ray Reconstruction (DLSS-RR)** on RTX hardware for real-time neural path tracing denoising.
-  6. Add **Debug View 17 (Path Tracing Ground Truth)**.
+  1. Integrate `sl.reflex.dll` and `NvLowLatencyVk.dll`.
+  2. Implement PCL markers (`eSimulationStart`, `eRenderSubmitEnd`, `ePresentStart`, etc.).
+  3. Reflex refresh-rate synchronization toggle in Editor UI.
 
 ---
 
-## 8. Current Implementation Progress Checkpoint
+## 6. Current Implementation Progress Checkpoint
 
-| Feature | Technology | Status |
+| Feature / Phase | Technology | Status |
 | :--- | :--- | :---: |
-| Meshlet Rasterization | `VK_EXT_mesh_shader` + Task Shader | ✅ Complete |
-| Visibility Buffer | $R32G32\_UINT$ Primitive/Meshlet IDs | ✅ Complete |
-| Decoupled G-Buffer | BaseColor, Normal, Metallic, Roughness, Emission | ✅ Complete |
-| Acceleration Structures | TLAS & BLAS Rebuild & Compaction | ✅ Complete |
-| Ray Query Hard Shadows | Directional, Point, Spot (`VK_KHR_ray_query`) | ✅ Complete |
-| Alpha Cutout Shadows | Dynamic `alphaMode` evaluation via InstanceLUT | ✅ Complete |
-| Ray Query Mirror Reflections | G-Buffer depth unproject + TLAS reflection ray | ✅ Complete |
-| Hot-Reload & Mesh Swap Safety | Device idle synchronization & TLAS cleanup | ✅ Complete |
-| Camera Motion Vectors & Jitter | Pre/Post Projection delta + Halton(2,3) | ⏳ **Phase 1 (In Progress)** |
-| RTX Streamline & NRD / DLSS | `sl.interposer`, `sl.nrd`, `sl.dlss` Vulkan Host | ⏳ **Phase 2** |
-| Dynamic Diffuse GI (DDGI) | Slang Octahedral Probe Field | ⏳ **Phase 3** |
-| Soft Shadows & RTXDI | ReSTIR DI + LTC Area Lights + NRD SIGMA | ⏳ **Phase 4** |
-| RTAO & Volumetric Froxels | 3D Frustum Grid + Ray Query Occlusion | ⏳ **Phase 5** |
-| Full Path Tracer | `VK_KHR_ray_tracing_pipeline` + SBTGenerator + DLSS-RR | ⏳ **Phase 6** |
+| **Meshlet Rasterization** | `VK_EXT_mesh_shader` + Task Shader | ✅ Complete |
+| **Visibility Buffer** | $R32G32\_UINT$ Primitive/Meshlet IDs | ✅ Complete |
+| **Decoupled G-Buffer** | BaseColor, Normal, Metallic, Roughness, Emission, Specular $F_0$ | ✅ Complete |
+| **Acceleration Structures** | TLAS & BLAS Rebuild & Compaction | ✅ Complete |
+| **Ray Query Hard Shadows** | Directional, Point, Spot (`VK_KHR_ray_query`) | ✅ Complete |
+| **Alpha Cutout Shadows** | Dynamic `alphaMode` evaluation via InstanceLUT | ✅ Complete |
+| **Camera Motion Vectors & Jitter** | Pre/Post Projection delta + Halton(2,3) | ✅ Complete (Phase 1) |
+| **Streamline DLSS & DLSS-RR** | `sl.dlss`, `sl.dlss_d` Vulkan Host Integration | ✅ Complete (Phase 2) |
+| **Interactive Path Tracer Core** | `VK_KHR_ray_tracing_pipeline` + SBT + Progressive Accumulation | ✅ Complete (Phase 3) |
+| **RTXPT Microfacet Multi-Lobe BSDF** | GGX VNDF, Metals, Roughness, Tangent Normals, Glass Transmission | ✅ Complete (Phase 3.5) |
+| **Standalone NRD SIGMA** | `RayTracingDenoiser` Shadow Mask Penumbra Hardening | ✅ Complete (Phase 4) |
+| **NRD REBLUR / RELAX & Auto-Arbitration** | Specular Reflections Denoising (Decoupled 1-SPP Pass) | ✅ Complete (Phase 4.5) |
+| **Dual-Track Indirect Diffuse GI** | **DDGI Probes vs RTXDI ReSTIR GI (Hybrid Renderer Switch)** | 🚀 **NEXT UP (Phase 5)** |
+| **Many-Light RTXDI & Area Lights** | **ReSTIR DI (Deferred + Path Tracer) + ReSTIR PT + LTC Area Lights**| ⏳ Phase 6 |
+| **RTAO & Volumetric Froxels** | 3D Frustum Grid + Ray Query Occlusion | ⏳ Phase 7 |
+| **NVIDIA Reflex Low-Latency** | `sl.reflex` + PCL Markers + Refresh Synchronization | ⏳ Phase 8 |
+

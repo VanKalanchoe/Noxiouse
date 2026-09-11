@@ -110,6 +110,18 @@ struct InstanceLUT
     float alphaCutoff;
     uint32_t alphaMode;             // 0 = Opaque, 1 = Mask, 2 = Blend
     uint32_t doubleSided;           // 0 = Single-sided, 1 = Double-sided
+
+    // PBR Material & Textures
+    float metallicFactor;
+    float roughnessFactor;
+    uint32_t metallicRoughnessTextureIndex;
+    uint32_t normalTextureIndex;
+
+    // Transmission & Workflow
+    float transmissionFactor;
+    uint32_t transmissionTextureIndex;
+    float workflow;                 // 0.0 = MetalRough, 1.0 = SpecGloss
+    uint32_t padding0;
 };
 
 struct UniformBufferObject 

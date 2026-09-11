@@ -575,7 +575,7 @@ namespace Nox
             if (!entry.is_regular_file()) continue;
 
             std::filesystem::path ext = entry.path().extension();
-            if (ext == ".nanim" || ext == ".nskel" || ext == ".nmat" ||
+            if (ext == ".nox" || ext == ".nanim" || ext == ".nskel" || ext == ".nmat" ||
                 ext == ".ntex" || ext == ".nmesh" || ext == ".nsmesh")
             {
                 std::filesystem::path relativePath = std::filesystem::relative(entry.path(), assetDir);

@@ -45,6 +45,41 @@ namespace Nox
             return;
 
         const auto extension = path.extension().string();
+        if (extension == ".nox")
+        {
+            std::error_code error;
+            const auto assetRoot = std::filesystem::weakly_canonical(m_BaseDirectory, error);
+            const auto sourcePath = std::filesystem::weakly_canonical(path, error);
+            if (error)
+                return;
+
+            const auto relativePath = sourcePath.lexically_relative(assetRoot);
+            const bool isInsideProject = !relativePath.empty() &&
+                relativePath != "." &&
+                relativePath.generic_string().rfind("..", 0) != 0;
+
+            if (isInsideProject)
+            {
+                m_Project->GetEditorAssetManager()->ImportAsset(relativePath, relativePath, AssetType::Scene);
+            }
+            else
+            {
+                const auto destination = m_CurrentDirectory / path.filename();
+                std::filesystem::copy_file(
+                    sourcePath, destination,
+                    std::filesystem::copy_options::overwrite_existing, error);
+                if (error)
+                    return;
+
+                const auto destinationRelative = destination.lexically_relative(m_BaseDirectory);
+                m_Project->GetEditorAssetManager()->ImportAsset(
+                    destinationRelative, destinationRelative, AssetType::Scene);
+            }
+
+            RefreshAssetTree();
+            return;
+        }
+
         if (extension != ".gltf" && extension != ".glb")
             return;
 
@@ -92,7 +127,7 @@ namespace Nox
 
         if (ImGui::Button("Import"))
         {
-            static constexpr char filter[] = "glTF files\0gltf;glb";
+            static constexpr char filter[] = "Scene and glTF files\0nox;gltf;glb";
             const std::string selectedFile = Utility::OpenFile(filter);
             if (!selectedFile.empty())
             {

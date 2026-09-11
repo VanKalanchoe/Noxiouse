@@ -3412,6 +3412,14 @@ namespace Nox
                 lut.alphaCutoff = packet.instance.alphaMaskCutoff;
                 lut.alphaMode = packet.instance.alphaMode;
                 lut.doubleSided = packet.instance.doubleSided;
+                lut.metallicFactor = packet.instance.metallicFactor;
+                lut.roughnessFactor = packet.instance.roughnessFactor;
+                lut.metallicRoughnessTextureIndex = packet.instance.metallicRoughnessTextureIndex;
+                lut.normalTextureIndex = packet.instance.normalTextureIndex;
+                lut.transmissionFactor = packet.instance.transmissionFactor;
+                lut.transmissionTextureIndex = packet.instance.transmissionTextureIndex;
+                lut.workflow = packet.instance.workflow;
+                lut.padding0 = 0;
                 rtInstanceLUTs.push_back(lut);
             }
         };

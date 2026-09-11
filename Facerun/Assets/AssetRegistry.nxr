@@ -67,6 +67,10 @@ AssetRegistry:
       Format: RGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 1875648511588384707
+    FilePath: Scenes/noxtest.nox
+    SourceFilePath: Scenes/noxtest.nox
+    Type: AssetType::Scene
   - Handle: 2074408738490978313
     FilePath: Models/Sponza/Textures/332936164838540657.ntex
     SourceFilePath: Models/Sponza/332936164838540657.jpg
@@ -183,6 +187,10 @@ AssetRegistry:
     FilePath: Models/Sponza/Materials/Sponza_Material_4.nmat
     SourceFilePath: Models/Sponza/Materials/Sponza_Material_4.nmat
     Type: AssetType::Material
+  - Handle: 4727967034860517244
+    FilePath: Scenes/flat.nox
+    SourceFilePath: Scenes/flat.nox
+    Type: AssetType::Scene
   - Handle: 4774808525240898677
     FilePath: Models/SpecGlossVsMetalRough/Textures/SpecGlossVsMetalRough_tex_7.ntex
     SourceFilePath: Models/SpecGlossVsMetalRough/Textures/SpecGlossVsMetalRough_tex_7.png
@@ -331,6 +339,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 8433666780713369233
+    FilePath: Scenes/Physics2D.nox
+    SourceFilePath: Scenes/Physics2D.nox
+    Type: AssetType::Scene
   - Handle: 8491552615314869794
     FilePath: Models/SpecGlossVsMetalRough/Materials/SpecGlossVsMetalRough_Label Material SpecGloss.nmat
     SourceFilePath: Models/SpecGlossVsMetalRough/Materials/SpecGlossVsMetalRough_Label Material SpecGloss.nmat
@@ -375,6 +387,10 @@ AssetRegistry:
     FilePath: Models/Sponza/Materials/Sponza_Material_20.nmat
     SourceFilePath: Models/Sponza/Materials/Sponza_Material_20.nmat
     Type: AssetType::Material
+  - Handle: 10594628785723633571
+    FilePath: Scenes/Sponza.nox
+    SourceFilePath: Scenes/Sponza.nox
+    Type: AssetType::Scene
   - Handle: 10740518504067132963
     FilePath: Models/Sponza/Materials/Sponza_Material_23.nmat
     SourceFilePath: Models/Sponza/Materials/Sponza_Material_23.nmat
@@ -431,6 +447,10 @@ AssetRegistry:
     FilePath: Models/Sponza/Materials/Sponza_Material_12.nmat
     SourceFilePath: Models/Sponza/Materials/Sponza_Material_12.nmat
     Type: AssetType::Material
+  - Handle: 11639550248518056677
+    FilePath: Scenes/lol.nox
+    SourceFilePath: Scenes/lol.nox
+    Type: AssetType::Scene
   - Handle: 11649657622565568563
     FilePath: Models/Sponza/Textures/1219024358953944284.ntex
     SourceFilePath: Models/Sponza/1219024358953944284.jpg
@@ -475,6 +495,10 @@ AssetRegistry:
       Format: RGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 12215212654405439522
+    FilePath: Scenes/Texture.nox
+    SourceFilePath: Scenes/Texture.nox
+    Type: AssetType::Scene
   - Handle: 12322602522497671884
     FilePath: Models/Sponza/Textures/5823059166183034438.ntex
     SourceFilePath: Models/Sponza/5823059166183034438.jpg
@@ -547,6 +571,10 @@ AssetRegistry:
     FilePath: Models/Sponza/Materials/Sponza_Material_11.nmat
     SourceFilePath: Models/Sponza/Materials/Sponza_Material_11.nmat
     Type: AssetType::Material
+  - Handle: 13744937191199109554
+    FilePath: Scenes/PinkCube1.nox
+    SourceFilePath: Scenes/PinkCube1.nox
+    Type: AssetType::Scene
   - Handle: 13872071982585247212
     FilePath: Models/Sponza/Textures/11968150294050148237.ntex
     SourceFilePath: Models/Sponza/11968150294050148237.jpg
