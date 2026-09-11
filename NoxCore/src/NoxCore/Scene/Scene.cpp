@@ -1,6 +1,7 @@
 #include "Scene.h"
 
 #include <box2d/box2d.h>
+#include <functional>
 
 #include "Entity.h"
 #include "Components.h"
@@ -405,14 +406,50 @@ namespace Nox
     
     Entity Scene::DuplicateEntity(Entity entity)
     {
-        // Copy name becuase were going to modify component data structure
-        std::string name = entity.GetName();
-        Entity newEntity = CreateEntity(name);
+        // Relationship links contain entity UUIDs and must be rebuilt. Copying
+        // them directly makes duplicated glTF hierarchies share their children.
+        using DuplicatableComponents = ComponentGroup<
+            MeshComponent, MaterialComponent, DirectionalLightComponent,
+            PointLightComponent, SpotLightComponent, AnimatorComponent,
+            SpriteRendererComponent, CircleRendererComponent, CameraComponent,
+            ScriptComponent, RigidBody2DComponent, BoxCollider2DComponent,
+            CircleCollider2DComponent, TextComponent>;
 
-        // Copy components (except IDComponent and TagComponent)
-        CopyComponentIfExists(AllComponents{}, newEntity, entity);
+        std::function<Entity(Entity, Entity)> duplicateHierarchy =
+            [&](Entity source, Entity parent) -> Entity
+        {
+            Entity duplicate = CreateEntity(source.GetName() + " Copy");
+            CopyComponentIfExists(DuplicatableComponents{}, duplicate, source);
 
-        return newEntity;
+            if (parent || source.HasComponent<RelationshipComponent>())
+            {
+                auto& relationship = duplicate.AddComponent<RelationshipComponent>();
+                if (parent)
+                {
+                    relationship.Parent = parent.GetUUID();
+                    parent.GetComponent<RelationshipComponent>().Children.push_back(duplicate.GetUUID());
+                }
+            }
+
+            std::vector<UUID> children;
+            if (source.HasComponent<RelationshipComponent>())
+                children = source.GetComponent<RelationshipComponent>().Children;
+
+            for (UUID childUUID : children)
+            {
+                Entity child = GetEntityByUUID(childUUID);
+                if (child)
+                    duplicateHierarchy(child, duplicate);
+            }
+
+            return duplicate;
+        };
+
+        Entity parent;
+        if (entity.HasComponent<RelationshipComponent>())
+            parent = GetEntityByUUID(entity.GetComponent<RelationshipComponent>().Parent);
+
+        return duplicateHierarchy(entity, parent);
     }
     
     // bad for performance dont use this often
