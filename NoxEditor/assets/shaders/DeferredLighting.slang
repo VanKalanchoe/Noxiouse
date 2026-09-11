@@ -330,10 +330,19 @@
         float4 materialSample = materialTex.Load(int3(pixelCoord, 0));
         float4 emissionSample = emissionTex.Load(int3(pixelCoord, 0));
 
-        // Fetch Decoupled RT Shadow Mask (computed in Pass 2.5)
+        // Fetch Decoupled RT Shadow Mask (computed in Pass 2.5 / 2.6)
         Texture2D shadowMaskTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.shadowMaskTextureIndex, 0));
         float2 shadowData = shadowMaskTex.Load(int3(pixelCoord, 0)).rg;
-        float shadowFactor = shadowData.r;
+        float shadowFactor;
+        if (pushConstant.nrdShadowsEnabled != 0)
+        {
+            float s = shadowData.r;
+            shadowFactor = clamp(s * s, 0.0, 1.0);
+        }
+        else
+        {
+            shadowFactor = clamp(shadowData.g, 0.0, 1.0);
+        }
 
         // 3. Reconstruct World Position from Depth
         float2 uv = (float2(pixelCoord) + 0.5) / pushConstant.viewportSize;

@@ -347,6 +347,7 @@ struct PushConstantDeferredLighting
     // Temporal
     uint32_t frameIndex; // RR
     uint32_t shadowMaskTextureIndex; // NRD
+    uint32_t nrdShadowsEnabled;
 };
 
 struct PushConstantPathTracer

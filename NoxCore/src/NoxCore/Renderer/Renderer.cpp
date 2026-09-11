@@ -404,6 +404,9 @@ namespace Nox
         const uint32_t width = m_renderSize.width;
         const uint32_t height = m_renderSize.height;
 
+        if (width == 0 || height == 0)
+            return;
+
         m_rawShadowMask = m_device->createTexture(NRI::TextureDesc{
             .width = width,
             .height = height,
@@ -414,13 +417,53 @@ namespace Nox
             .directFormat = UINT32_MAX
         });
         m_resourceHeap->registerTexture(*m_rawShadowMask);
+
+        m_denoisedShadowMask = m_device->createTexture(NRI::TextureDesc{
+            .width = width,
+            .height = height,
+            .mipLevels = 1,
+            .sampleCount = 1,
+            .usage = NRI::TextureUsage::ColorAttachment,
+            .format = NRI::ImageFormat::R16G16_SFLOAT,
+            .directFormat = UINT32_MAX
+        });
+        m_resourceHeap->registerTexture(*m_denoisedShadowMask);
+
+        m_viewZ = m_device->createTexture(NRI::TextureDesc{
+            .width = width,
+            .height = height,
+            .mipLevels = 1,
+            .sampleCount = 1,
+            .usage = NRI::TextureUsage::ColorAttachment,
+            .format = NRI::ImageFormat::R16_SFLOAT,
+            .directFormat = UINT32_MAX
+        });
+        m_resourceHeap->registerTexture(*m_viewZ);
+
+        m_nrdNormalRoughness = m_device->createTexture(NRI::TextureDesc{
+            .width = width,
+            .height = height,
+            .mipLevels = 1,
+            .sampleCount = 1,
+            .usage = NRI::TextureUsage::ColorAttachment,
+            .format = NRI::ImageFormat::R10G10B10A2_UNORM,
+            .directFormat = UINT32_MAX
+        });
+        m_resourceHeap->registerTexture(*m_nrdNormalRoughness);
+
+        m_device->initNRD(width, height);
+        m_resetNRD = true;
     }
 
     void Renderer::createShadowMaskPipeline(bool forceCompile)
     {
         NRI::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
-        desc.colorFormats = {NRI::ImageFormat::R16G16_SFLOAT};
+        desc.colorFormats = {
+            NRI::ImageFormat::R16G16_SFLOAT,
+            NRI::ImageFormat::R16_SFLOAT,
+            NRI::ImageFormat::R10G10B10A2_UNORM
+        };
 
         desc.shaders.push_back({
             .stage = NRI::ShaderStage::Task,
@@ -2169,16 +2212,28 @@ namespace Nox
         }
 
         // =========================================================================
-        // 2.5. SHADOW MASK PASS (Evaluates 1-SPP RT Shadow -> m_rawShadowMask)
+        // 2.5. SHADOW MASK PASS (Evaluates 1-SPP RT Shadow -> m_rawShadowMask, m_viewZ, m_nrdNormalRoughness)
         // =========================================================================
-        if (m_shadowMaskPipeline && m_rawShadowMask)
+        if (m_shadowMaskPipeline && m_rawShadowMask && m_viewZ && m_nrdNormalRoughness)
         {
             std::vector<NRI::RenderAttachDesc> shadowAttachments;
             shadowAttachments.push_back({
                 .attachment = m_rawShadowMask.get(),
                 .loadOP = NRI::LoadOP::clear,
                 .storeOP = NRI::StoreOP::store,
-                .clearColor = {1.0f, 10000.0f, 0.0f, 0.0f}
+                .clearColor = {65504.0f, 1.0f, 0.0f, 0.0f}
+            });
+            shadowAttachments.push_back({
+                .attachment = m_viewZ.get(),
+                .loadOP = NRI::LoadOP::clear,
+                .storeOP = NRI::StoreOP::store,
+                .clearColor = {500000.0f, 0.0f, 0.0f, 0.0f}
+            });
+            shadowAttachments.push_back({
+                .attachment = m_nrdNormalRoughness.get(),
+                .loadOP = NRI::LoadOP::clear,
+                .storeOP = NRI::StoreOP::store,
+                .clearColor = {0.0f, 0.0f, 0.0f, 0.0f}
             });
 
             NRI::RenderDesc shadowDesc = {
@@ -2194,9 +2249,12 @@ namespace Nox
             m_commandBuffers->setCullMode(NRI::CullMode::None);
             m_commandBuffers->setDepthTestEnable(false);
             m_commandBuffers->setDepthWriteEnable(false);
-            m_commandBuffers->setColorBlendEnable(0, false);
-            m_commandBuffers->setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G |
-                                                NRI::ColorComponent::B | NRI::ColorComponent::A);
+            for (uint32_t a = 0; a < shadowAttachments.size(); ++a)
+            {
+                m_commandBuffers->setColorBlendEnable(a, false);
+                m_commandBuffers->setColorWriteMask(a, NRI::ColorComponent::R | NRI::ColorComponent::G |
+                                                    NRI::ColorComponent::B | NRI::ColorComponent::A);
+            }
 
             glm::mat4 viewProj = uniformData.proj * uniformData.view;
             shaderio::PushConstantShadowMask shadowPush{};
@@ -2211,6 +2269,43 @@ namespace Nox
             m_commandBuffers->drawMeshTasks(1, 1, 1);
             m_commandBuffers->endRendering();
             m_commandBuffers->executionBarrier();
+        }
+
+        // =========================================================================
+        // 2.6. NRD DENOISING PASS (Denoises 1-SPP RT Shadow -> m_denoisedShadowMask)
+        // =========================================================================
+        if (m_nrdShadowsEnabled && m_device->isNRDInitialized() && m_rawShadowMask && m_denoisedShadowMask && m_viewZ && m_nrdNormalRoughness)
+        {
+            NRI::NRDShadowParams nrdParams{};
+            nrdParams.inShadowData = m_rawShadowMask.get();
+            nrdParams.inMotionVectors = m_gbufferVelocity.get();
+            nrdParams.inNormalRoughness = m_nrdNormalRoughness.get();
+            nrdParams.inViewZ = m_viewZ.get();
+            nrdParams.outDenoisedShadow = m_denoisedShadowMask.get();
+            nrdParams.commandBuffer = m_commandBuffers.get();
+
+            nrdParams.view = uniformData.view;
+            nrdParams.proj = uniformData.nonJitteredProj;
+            nrdParams.prevView = uniformData.prevView;
+            nrdParams.prevProj = uniformData.prevProj;
+
+            glm::vec3 lightDir = glm::vec3(0.0f, 1.0f, 0.0f);
+            if (!m_lightBufferObjects.empty())
+            {
+                lightDir = glm::normalize(glm::vec3(m_lightBufferObjects[0].direction));
+            }
+            nrdParams.lightDirection[0] = lightDir.x;
+            nrdParams.lightDirection[1] = lightDir.y;
+            nrdParams.lightDirection[2] = lightDir.z;
+
+            nrdParams.motionVectorScale = glm::vec2(1.0f, 1.0f);
+            nrdParams.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
+            nrdParams.resetHistory = m_isFirstFrame || m_resetNRD;
+            m_resetNRD = false;
+
+            m_device->evaluateNRDShadows(nrdParams);
+            m_commandBuffers->executionBarrier();
+            m_commandBuffers->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
         }
 
         // =========================================================================
@@ -2316,7 +2411,10 @@ namespace Nox
             lightingPush.debugMode = m_debugMode;
             lightingPush.gbufferVelocityIndex = m_gbufferVelocity->GetDescriptorIndexSlot();
             lightingPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
-            lightingPush.shadowMaskTextureIndex = m_rawShadowMask->GetDescriptorIndexSlot();
+            lightingPush.shadowMaskTextureIndex = (m_nrdShadowsEnabled && m_denoisedShadowMask)
+                ? m_denoisedShadowMask->GetDescriptorIndexSlot()
+                : (m_rawShadowMask ? m_rawShadowMask->GetDescriptorIndexSlot() : 0);
+            lightingPush.nrdShadowsEnabled = (m_nrdShadowsEnabled && m_denoisedShadowMask) ? 1 : 0;
             m_commandBuffers->pushData(&lightingPush, sizeof(shaderio::PushConstantDeferredLighting));
 
             m_commandBuffers->drawMeshTasks(1, 1, 1);

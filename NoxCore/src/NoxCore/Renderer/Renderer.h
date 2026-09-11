@@ -198,6 +198,18 @@ namespace Nox
         void setPathTracingAccumulation(bool enabled) { m_pathTracingAccumulation = enabled; }
         bool isPathTracingAccumulation() const { return m_pathTracingAccumulation; }
         Ref<Texture2D> getRawShadowMask() const { return m_rawShadowMask; }
+        Ref<Texture2D> getDenoisedShadowMask() const { return m_denoisedShadowMask; }
+        Ref<Texture2D> getViewZ() const { return m_viewZ; }
+        Ref<Texture2D> getNRDNormalRoughness() const { return m_nrdNormalRoughness; }
+        void setNRDShadowsEnabled(bool enabled)
+        {
+            if (m_nrdShadowsEnabled != enabled)
+            {
+                m_nrdShadowsEnabled = enabled;
+                m_resetNRD = true;
+            }
+        }
+        bool getNRDShadowsEnabled() const { return m_nrdShadowsEnabled; }
 
         void setCameraJitterEnabled(bool enabled) { m_cameraJitterEnabled = enabled; }
         bool getCameraJitterEnabled() const { return m_cameraJitterEnabled; }
@@ -374,6 +386,11 @@ namespace Nox
 
         // NRD
         Ref<Texture2D> m_rawShadowMask;
+        Ref<Texture2D> m_denoisedShadowMask;
+        Ref<Texture2D> m_viewZ;
+        Ref<Texture2D> m_nrdNormalRoughness;
+        bool m_nrdShadowsEnabled = true;
+        bool m_resetNRD = true;
         
         // Path Tracer Accumulation Ping-Pong
         Ref<Texture2D> m_pathTracerAccum[2];

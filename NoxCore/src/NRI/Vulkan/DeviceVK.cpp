@@ -18,6 +18,15 @@
 #include "NoxCore/Core/core.h"
 #include "NoxCore/Core/Log.h"
 
+// NVIDIA Real-Time Denoisers (NRD)
+#include "NRD.h"
+#include "NRDSettings.h"
+#include "NRI.h"
+#include "Extensions/NRIHelper.h"
+#include "Extensions/NRIRayTracing.h"
+#include "Extensions/NRIWrapperVK.h"
+#include "NRDIntegration.hpp"
+
 // Vulkan-Hpp loads extension functions through a dispatcher.
 // This can create a dispatch table to cache function pointers,
 // and can skip the loader when calling Vulkan functions.
@@ -219,6 +228,7 @@ namespace NRI
 
     DeviceVK::~DeviceVK()
     {
+        destroyNRD();
         // VMA must be destroyed BEFORE the logical device goes out of scope
         if (m_allocator)
         {
@@ -228,6 +238,7 @@ namespace NRI
 
     void DeviceVK::shutdown()
     {
+        destroyNRD();
         if (m_streamlineInitialized)
         {
             slShutdown();
@@ -589,6 +600,7 @@ namespace NRI
             featureChain = {
                 {
                     .features = {
+                        .tessellationShader = true,
                         .geometryShader = true,
                         .sampleRateShading = true,
                         .multiDrawIndirect = true,
@@ -603,6 +615,13 @@ namespace NRI
                     .shaderInt8 = true,
                     .shaderSampledImageArrayNonUniformIndexing = true,
                     .shaderStorageBufferArrayNonUniformIndexing = true,
+                    .descriptorBindingUniformBufferUpdateAfterBind = true,
+                    .descriptorBindingSampledImageUpdateAfterBind = true,
+                    .descriptorBindingStorageImageUpdateAfterBind = true,
+                    .descriptorBindingStorageBufferUpdateAfterBind = true,
+                    .descriptorBindingUpdateUnusedWhilePending = true,
+                    .descriptorBindingPartiallyBound = true,
+                    .descriptorBindingVariableDescriptorCount = true,
                     .runtimeDescriptorArray = true,
                     .scalarBlockLayout = true,
                     .timelineSemaphore = true, // <-- Required by Streamline
@@ -1266,5 +1285,185 @@ namespace NRI
             ImGui::UpdatePlatformWindows();
             ImGui::RenderPlatformWindowsDefault();
         }
+    }
+
+    // =========================================================================
+    // NRD (NVIDIA Real-Time Denoisers) Implementation
+    // =========================================================================
+    struct DeviceVK::NRDContext
+    {
+        ::nrd::Integration integration;
+        uint32_t width = 0;
+        uint32_t height = 0;
+        bool initialized = false;
+        static constexpr ::nrd::Identifier SIGMA_DENOISER = 0;
+    };
+
+    bool DeviceVK::initNRD(uint32_t width, uint32_t height)
+    {
+        if (width == 0 || height == 0)
+            return false;
+
+        if (!m_nrdContext)
+            m_nrdContext = std::make_unique<NRDContext>();
+
+        // Recreate only if dimensions change or not initialized yet
+        if (m_nrdContext->initialized && m_nrdContext->width == width && m_nrdContext->height == height)
+            return true;
+
+        m_nrdContext->width = width;
+        m_nrdContext->height = height;
+
+        // 1. Integration Creation Desc
+        ::nrd::IntegrationCreationDesc integrationDesc{};
+        snprintf(integrationDesc.name, sizeof(integrationDesc.name), "Noxiouse-SIGMA");
+        integrationDesc.residencyPriority = 0.0f;
+        integrationDesc.resourceWidth = static_cast<uint16_t>(width);
+        integrationDesc.resourceHeight = static_cast<uint16_t>(height);
+        integrationDesc.queuedFrameNum = 3;
+        integrationDesc.autoWaitForIdle = true;
+
+        // 2. Denoiser Instance Desc (SIGMA_SHADOW)
+        ::nrd::DenoiserDesc denoiserDesc{};
+        denoiserDesc.identifier = NRDContext::SIGMA_DENOISER;
+        denoiserDesc.denoiser = ::nrd::Denoiser::SIGMA_SHADOW;
+
+        ::nrd::InstanceCreationDesc instanceDesc{};
+        instanceDesc.denoisers = &denoiserDesc;
+        instanceDesc.denoisersNum = 1;
+
+        // 3. Native Vulkan Device Creation Desc
+        ::nri::QueueFamilyVKDesc queueFamily{};
+        queueFamily.familyIndex = m_queueIndex;
+        queueFamily.queueType = ::nri::QueueType::GRAPHICS;
+        queueFamily.queueNum = 1;
+
+        ::nri::DeviceCreationVKDesc vkDesc{};
+        vkDesc.vkInstance = static_cast<VKHandle>(static_cast<VkInstance>(*m_instance));
+        vkDesc.vkDevice = static_cast<VKHandle>(static_cast<VkDevice>(*m_device));
+        vkDesc.vkPhysicalDevice = static_cast<VKHandle>(static_cast<VkPhysicalDevice>(*m_physicalDevice));
+        vkDesc.queueFamilies = &queueFamily;
+        vkDesc.queueFamilyNum = 1;
+        vkDesc.minorVersion = 4; // Vulkan 1.4
+
+        ::nrd::Result res = m_nrdContext->integration.RecreateVK(integrationDesc, instanceDesc, vkDesc);
+        if (res != ::nrd::Result::SUCCESS)
+        {
+            NOX_CORE_ERROR("[NRD] Failed to initialize NRD SIGMA via RecreateVK! Error code: {}", static_cast<uint32_t>(res));
+            m_nrdContext->initialized = false;
+            return false;
+        }
+
+        NOX_CORE_INFO("[NRD] Successfully initialized NRD SIGMA Denoiser ({}x{})", width, height);
+        m_nrdContext->initialized = true;
+        return true;
+    }
+
+    bool DeviceVK::evaluateNRDShadows(const NRDShadowParams& params)
+    {
+        if (!m_nrdContext || !m_nrdContext->initialized)
+            return false;
+
+        if (!params.commandBuffer || !params.inShadowData || !params.outDenoisedShadow)
+            return false;
+
+        auto* cmdBufferVK = static_cast<CommandBufferVK*>(params.commandBuffer);
+        VkCommandBuffer vkCmd = static_cast<VkCommandBuffer>(*cmdBufferVK->getActiveNativeBuffer());
+
+        // 1. Advance NRD internal frame counter
+        m_nrdContext->integration.NewFrame();
+
+        // 2. Set Common Settings (Matrices, Jitter, MVs)
+        ::nrd::CommonSettings commonSettings{};
+        memcpy(commonSettings.viewToClipMatrix, &params.proj[0][0], sizeof(float) * 16);
+        memcpy(commonSettings.viewToClipMatrixPrev, &params.prevProj[0][0], sizeof(float) * 16);
+        memcpy(commonSettings.worldToViewMatrix, &params.view[0][0], sizeof(float) * 16);
+        memcpy(commonSettings.worldToViewMatrixPrev, &params.prevView[0][0], sizeof(float) * 16);
+
+        commonSettings.motionVectorScale[0] = params.motionVectorScale.x;
+        commonSettings.motionVectorScale[1] = params.motionVectorScale.y;
+        commonSettings.motionVectorScale[2] = 0.0f;
+
+        commonSettings.resourceSize[0] = static_cast<uint16_t>(m_nrdContext->width);
+        commonSettings.resourceSize[1] = static_cast<uint16_t>(m_nrdContext->height);
+        commonSettings.resourceSizePrev[0] = static_cast<uint16_t>(m_nrdContext->width);
+        commonSettings.resourceSizePrev[1] = static_cast<uint16_t>(m_nrdContext->height);
+        commonSettings.rectSize[0] = static_cast<uint16_t>(m_nrdContext->width);
+        commonSettings.rectSize[1] = static_cast<uint16_t>(m_nrdContext->height);
+        commonSettings.rectSizePrev[0] = static_cast<uint16_t>(m_nrdContext->width);
+        commonSettings.rectSizePrev[1] = static_cast<uint16_t>(m_nrdContext->height);
+
+        commonSettings.frameIndex = params.frameIndex;
+        commonSettings.accumulationMode = params.resetHistory ? ::nrd::AccumulationMode::RESTART : ::nrd::AccumulationMode::CONTINUE;
+
+        m_nrdContext->integration.SetCommonSettings(commonSettings);
+
+        // 3. Set Sigma Denoiser Settings
+        ::nrd::SigmaSettings sigmaSettings{};
+        sigmaSettings.lightDirection[0] = params.lightDirection[0];
+        sigmaSettings.lightDirection[1] = params.lightDirection[1];
+        sigmaSettings.lightDirection[2] = params.lightDirection[2];
+        sigmaSettings.planeDistanceSensitivity = 0.02f;
+        sigmaSettings.maxStabilizedFrameNum = 5;
+
+        m_nrdContext->integration.SetDenoiserSettings(NRDContext::SIGMA_DENOISER, &sigmaSettings);
+
+        // 4. Populate ResourceSnapshot with Vulkan Images
+        ::nrd::ResourceSnapshot snapshot{};
+        snapshot.restoreInitialState = true;
+
+        auto bindVKTexture = [](::nrd::ResourceSnapshot& snap, ::nrd::ResourceType slot, Texture* tex, ::nri::AccessBits access, ::nri::Layout layout, ::nri::StageBits stages) {
+            if (!tex) return;
+            auto* texVK = static_cast<TextureVK*>(tex);
+            ::nrd::Resource res{};
+            res.vk.image = (VKNonDispatchableHandle)(uintptr_t)static_cast<VkImage>(*texVK->getNativeImage());
+            res.vk.format = static_cast<VKEnum>(static_cast<VkFormat>(texVK->getFormat()));
+            res.state.access = access;
+            res.state.layout = layout;
+            res.state.stages = stages;
+            snap.SetResource(slot, res);
+        };
+
+        constexpr auto commonStages = ::nri::StageBits::COMPUTE_SHADER | ::nri::StageBits::FRAGMENT_SHADER | ::nri::StageBits::COLOR_ATTACHMENT;
+
+        // IN_PENUMBRA: raw 1-SPP shadow mask (RG16F)
+        bindVKTexture(snapshot, ::nrd::ResourceType::IN_PENUMBRA, params.inShadowData, ::nri::AccessBits::SHADER_RESOURCE_STORAGE, ::nri::Layout::GENERAL, commonStages);
+
+        // IN_MV: motion vectors (RG16F)
+        bindVKTexture(snapshot, ::nrd::ResourceType::IN_MV, params.inMotionVectors, ::nri::AccessBits::SHADER_RESOURCE_STORAGE, ::nri::Layout::GENERAL, commonStages);
+
+        // IN_NORMAL_ROUGHNESS: normals (RGB) and roughness (A)
+        bindVKTexture(snapshot, ::nrd::ResourceType::IN_NORMAL_ROUGHNESS, params.inNormalRoughness, ::nri::AccessBits::SHADER_RESOURCE_STORAGE, ::nri::Layout::GENERAL, commonStages);
+
+        // IN_VIEWZ: linear view depth (R16F / R32F)
+        bindVKTexture(snapshot, ::nrd::ResourceType::IN_VIEWZ, params.inViewZ, ::nri::AccessBits::SHADER_RESOURCE_STORAGE, ::nri::Layout::GENERAL, commonStages);
+
+        // OUT_SHADOW_TRANSLUCENCY: denoised shadow output
+        bindVKTexture(snapshot, ::nrd::ResourceType::OUT_SHADOW_TRANSLUCENCY, params.outDenoisedShadow, ::nri::AccessBits::SHADER_RESOURCE_STORAGE, ::nri::Layout::GENERAL, commonStages);
+
+        // 5. Dispatch NRD DenoiseVK
+        ::nri::CommandBufferVKDesc cmdDesc{};
+        cmdDesc.vkCommandBuffer = static_cast<VKHandle>(vkCmd);
+        cmdDesc.queueType = ::nri::QueueType::GRAPHICS;
+
+        const ::nrd::Identifier denoiserId = NRDContext::SIGMA_DENOISER;
+        m_nrdContext->integration.DenoiseVK(&denoiserId, 1, cmdDesc, snapshot);
+
+        return true;
+    }
+
+    void DeviceVK::destroyNRD()
+    {
+        if (m_nrdContext)
+        {
+            m_nrdContext->integration.Destroy();
+            m_nrdContext->initialized = false;
+            m_nrdContext.reset();
+        }
+    }
+
+    bool DeviceVK::isNRDInitialized() const
+    {
+        return m_nrdContext && m_nrdContext->initialized;
     }
 }

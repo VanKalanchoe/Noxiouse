@@ -52,6 +52,12 @@ namespace NRI
         DLSSRenderExtent getDLSSOptimalRenderSize(UpscaleMode mode, Extent2D outputSize) override;
         PFN_vkQueuePresentKHR getStreamlinePresentFn() const { return m_slQueuePresentKHR; }
         
+        // NRD
+        bool initNRD(uint32_t width, uint32_t height) override;
+        bool evaluateNRDShadows(const NRDShadowParams& params) override;
+        void destroyNRD() override;
+        bool isNRDInitialized() const override;
+        
         // access to functions for other classses to use
         vk::raii::ImageView createImageView(vk::Image const& image, vk::Format format, vk::ImageAspectFlags aspectFlags, uint32_t mipLevels);
         uint32_t findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties);
@@ -137,5 +143,9 @@ namespace NRI
         vk::raii::PipelineLayout m_dummyPipelineLayout = nullptr;
         vk::DescriptorSet m_dummyDescriptorSet;
         bool m_dummyDescriptorSetReady = false;
+
+        // NRD (Real-Time Denoisers)
+        struct NRDContext;
+        std::unique_ptr<NRDContext> m_nrdContext;
     };
 }

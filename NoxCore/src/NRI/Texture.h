@@ -17,6 +17,8 @@ namespace NRI
         RGBA8,
         SRGBA8,
         
+        R16_SFLOAT,
+        R10G10B10A2_UNORM,
         R16G16,
         R32SINT,
         R32G32_UINT,

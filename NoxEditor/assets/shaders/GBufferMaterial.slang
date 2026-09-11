@@ -388,7 +388,7 @@
 
         // Output to MRT
         output.albedo   = float4(baseColor.rgb, occlusion);
-        output.normal   = (pushConstant.debugMode == 2) ? float4(rawNormalTex, 1.0) : float4(finalNormal, 1.0);
+        output.normal   = (pushConstant.debugMode == 2) ? float4(rawNormalTex, roughness) : float4(finalNormal, roughness);
 
         // Encode unlit flag: 2.0 = UNLIT
         float workflow  = (instance.unlit != 0) ? 2.0 : instance.workflow;

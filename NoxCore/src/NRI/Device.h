@@ -63,6 +63,27 @@ namespace NRI
         bool reset = false;
         UpscaleMode mode = UpscaleMode::DLAA;
     };
+
+    struct NRDShadowParams
+    {
+        Texture* inShadowData = nullptr;         // Raw 1-SPP shadow mask (R16G16: x = visibility, y = hitDist)
+        Texture* inMotionVectors = nullptr;      // Screen-space / UV-space Motion Vectors
+        Texture* inNormalRoughness = nullptr;    // World-space Normal (RGB) and Roughness (A)
+        Texture* inViewZ = nullptr;              // Linear View-Z (R16_SFLOAT or R32_SFLOAT)
+        Texture* outDenoisedShadow = nullptr;    // Denoised Shadow output (R16G16 or R8)
+
+        CommandBuffer* commandBuffer = nullptr;
+
+        glm::mat4 view{ 1.0f };
+        glm::mat4 proj{ 1.0f };
+        glm::mat4 prevView{ 1.0f };
+        glm::mat4 prevProj{ 1.0f };
+
+        float lightDirection[3] = { 0.0f, 0.0f, 0.0f }; // Direction to primary light source
+        glm::vec2 motionVectorScale{ 1.0f, 1.0f };
+        uint32_t frameIndex = 0;
+        bool resetHistory = false;
+    };
     
     class Device
     {
@@ -98,6 +119,12 @@ namespace NRI
         // actually be rendered at (DLSS then upscales render size -> outputSize). UpscaleMode::Off or
         // a backend without DLSS just returns outputSize back unchanged (1:1, no scaling).
         virtual DLSSRenderExtent getDLSSOptimalRenderSize(UpscaleMode mode, Extent2D outputSize) { return {outputSize, 0.0f}; }
+        
+        // NRD (NVIDIA Real-Time Denoisers)
+        virtual bool initNRD(uint32_t width, uint32_t height) { return false; }
+        virtual bool evaluateNRDShadows(const struct NRDShadowParams& params) { return false; }
+        virtual void destroyNRD() {}
+        virtual bool isNRDInitialized() const { return false; }
         
         virtual void shutdown() = 0;
         virtual uint32_t getMSAASampleCount() const = 0;

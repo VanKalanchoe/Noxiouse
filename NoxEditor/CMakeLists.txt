@@ -46,9 +46,19 @@ if(WIN32)
     #)
 
     # Copy Streamline runtime binaries next to the editor executable
+    # (In Debug, copies development binaries; in Release, copies production binaries)
     add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${CMAKE_SOURCE_DIR}/NoxCore/vendors/Streamline/bin/x64"
+            "${CMAKE_SOURCE_DIR}/NoxCore/vendors/Streamline/bin/x64/$<IF:$<CONFIG:Debug>,development,>"
+            "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
+        COMMAND ${CMAKE_COMMAND} -E rm -rf
+            "$<TARGET_FILE_DIR:${PROJECT_NAME}>/development"
+    )
+
+    # Copy NRD runtime binaries next to the editor executable
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different
+        "${CMAKE_SOURCE_DIR}/NoxCore/vendors/NRD/Lib/$<IF:$<CONFIG:Debug>,Debug,Release>"
         "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
     )
 endif()

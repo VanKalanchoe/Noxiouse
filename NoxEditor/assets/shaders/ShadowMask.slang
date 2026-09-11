@@ -155,23 +155,51 @@
         b2 = float3(b, sign + n.y * n.y * a, -n.y);
     }
 
+    float3 encode_normal_roughness_101010(float3 n, float roughness)
+    {
+        n /= max(abs(n.x) + abs(n.y) + abs(n.z), 1e-6);
+
+        float3 r;
+        r.y = n.y * 0.5 + 0.5;
+        r.x = n.x * 0.5 + r.y;
+        r.y -= n.x * 0.5;
+
+        roughness = clamp(roughness, 1.5 / 512.0, 1.0);
+        float s = n.z < 0.0 ? -roughness : roughness;
+        r.z = s * 0.5 + 0.5;
+
+        return r;
+    }
+
+    static const float NRD_FP16_MAX = 65504.0;
+
+    struct ShadowMaskOutput
+    {
+        float2 shadowData         : SV_Target0; // NRD IN_PENUMBRA in R, raw visibility in G
+        float  viewZ              : SV_Target1; // linear view depth (positive)
+        float4 nrdNormalRoughness : SV_Target2; // NRD R10_G10_B10_A2_UNORM oct-packed normal + roughness
+    };
+
     [shader("fragment")]
-    float2 fragMain(
+    ShadowMaskOutput fragMain(
         MSOutput input,
         uniform PushConstantShadowMask pushConstant
-    ) : SV_Target0
+    )
     {
+        ShadowMaskOutput output;
         UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
         int2 pixelCoord = int2(input.pos.xy);
 
-        Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.
-  depthTextureIndex, 0));
+        Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
         float rawDepth = depthTex.Load(int3(pixelCoord, 0)).r;
 
-        // Reverse-Z: 0.0 is sky/background -> fully lit, maximum distance
+        // Reverse-Z: 0.0 is sky/background -> fully lit, maximum distance, infinite viewZ
         if (rawDepth <= 0.0)
         {
-            return float2(1.0, 10000.0);
+            output.shadowData = float2(NRD_FP16_MAX, 1.0);
+            output.viewZ = 500000.0;
+            output.nrdNormalRoughness = float4(encode_normal_roughness_101010(float3(0.0, 1.0, 0.0), 1.0), 0.0);
+            return output;
         }
 
         float2 uv = (float2(pixelCoord) + 0.5) / pushConstant.viewportSize;
@@ -180,14 +208,21 @@
         float4 worldPosH = mul(pushConstant.invViewProj, ndc);
         float3 worldPos = worldPosH.xyz / worldPosH.w;
 
+        // Linear View-Z (depth from camera along view direction)
+        float4 viewPosH = mul(ubo->view, float4(worldPos, 1.0));
+        output.viewZ = abs(viewPosH.z);
+
         Texture2D normalTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.gbufferNormalIndex, 0));
-        float3 normalSample = normalTex.Load(int3(pixelCoord, 0)).rgb;
-        float lenSqN = dot(normalSample, normalSample);
-        float3 normal = lenSqN > 1e-6 ? normalSample * rsqrt(lenSqN) : float3(0.0, 1.0, 0.0);
+        float4 normalSample = normalTex.Load(int3(pixelCoord, 0));
+        float lenSqN = dot(normalSample.rgb, normalSample.rgb);
+        float3 normal = lenSqN > 1e-6 ? normalSample.rgb * rsqrt(lenSqN) : float3(0.0, 1.0, 0.0);
+        float roughness = clamp(normalSample.a, 0.01, 1.0);
+        output.nrdNormalRoughness = float4(encode_normal_roughness_101010(normal, roughness), 0.0);
 
         if (ubo->lightCount == 0 || ubo->enableRTShadows == 0 || ubo->tlasDeviceAddress == 0)
         {
-            return float2(1.0, 10000.0);
+            output.shadowData = float2(NRD_FP16_MAX, 1.0);
+            return output;
         }
 
         LightData* lights = (LightData*)ubo->lightDataReference;
@@ -212,47 +247,41 @@
             unjitteredMaxDist = dist;
         }
 
+        // Backfacing surface relative to light direction: 0.0 distance to occluder (NRD rule: NoL <= 0 is 0.0)
+        float NoL = dot(normal, unjitteredLightDir);
+        if (NoL <= 0.0)
+        {
+            output.shadowData = float2(0.0, 0.0);
+            return output;
+        }
+
         float3 rayOrigin = worldPos + normal * 0.02;
 
         if (sourceRadius <= 1e-4)
         {
             float hitT;
             bool hit = trace_shadow_ray(ubo, rayOrigin, unjitteredLightDir, unjitteredMaxDist, hitT);
-            return float2(hit ? 0.0 : 1.0, hitT);
+            float penumbra = hit ? 0.0 : NRD_FP16_MAX;
+            float rawVis = hit ? 0.0 : 1.0;
+            output.shadowData = float2(penumbra, rawVis);
+            return output;
         }
 
         float ign = interleaved_gradient_noise(float2(pixelCoord), pushConstant.frameIndex);
         float phiOffset = ign;
         float rOffset = frac(ign * 1.6180339887 + 0.314159);
 
-        float unoccludedCount = 0.0;
-        float minHitDistance = unjitteredMaxDist;
+        float hitT;
+        float3 rayDir;
+        float maxDist = unjitteredMaxDist;
 
         if (lightType == 0) // Directional (Cone sampling)
         {
             float tanRadius = tan(sourceRadius);
             float3 T, B;
             build_orthonormal_basis(unjitteredLightDir, T, B);
-
-            for (uint s = 0; s < numSamples; s++)
-            {
-                float2 disk = sample_vogel_disk(s, numSamples, phiOffset, rOffset);
-                float3 rayDir = normalize(unjitteredLightDir + (disk.x * T + disk.y * B) * tanRadius);
-
-                if (dot(normal, rayDir) <= 0.001)
-                    continue;
-
-                float hitT;
-                bool hit = trace_shadow_ray(ubo, rayOrigin, rayDir, unjitteredMaxDist, hitT);
-                if (!hit)
-                {
-                    unoccludedCount += 1.0;
-                }
-                else
-                {
-                    minHitDistance = min(minHitDistance, hitT);
-                }
-            }
+            float2 disk = sample_vogel_disk(0, 1, phiOffset, rOffset);
+            rayDir = normalize(unjitteredLightDir + (disk.x * T + disk.y * B) * tanRadius);
         }
         else // Point / Spot (Disk sampling)
         {
@@ -263,32 +292,43 @@
 
             float3 T, B;
             build_orthonormal_basis(centerDir, T, B);
+            float2 disk = sample_vogel_disk(0, 1, phiOffset, rOffset);
+            float3 samplePosOnLight = lightCenterPos + (disk.x * T + disk.y * B) * sourceRadius;
 
-            for (uint s = 0; s < numSamples; s++)
-            {
-                float2 disk = sample_vogel_disk(s, numSamples, phiOffset, rOffset);
-                float3 samplePosOnLight = lightCenterPos + (disk.x * T + disk.y * B) * sourceRadius;
-
-                float3 toSample = samplePosOnLight - rayOrigin;
-                float sampleDist = length(toSample);
-                float3 rayDir = sampleDist > 1e-4 ? toSample / sampleDist : centerDir;
-
-                if (dot(normal, rayDir) <= 0.001)
-                    continue;
-
-                float hitT;
-                bool hit = trace_shadow_ray(ubo, rayOrigin, rayDir, sampleDist, hitT);
-                if (!hit)
-                {
-                    unoccludedCount += 1.0;
-                }
-                else
-                {
-                    minHitDistance = min(minHitDistance, hitT);
-                }
-            }
+            float3 toSample = samplePosOnLight - rayOrigin;
+            float sampleDist = length(toSample);
+            rayDir = sampleDist > 1e-4 ? toSample / sampleDist : centerDir;
+            maxDist = sampleDist;
         }
 
-        float visibility = unoccludedCount / float(numSamples);
-        return float2(visibility, minHitDistance);
+        if (dot(normal, rayDir) <= 0.001)
+        {
+            output.shadowData = float2(0.0, 0.0);
+            return output;
+        }
+
+        bool hit = trace_shadow_ray(ubo, rayOrigin, rayDir, maxDist, hitT);
+        float penumbra;
+        if (hit)
+        {
+            if (lightType == 0)
+            {
+                float tanRadius = tan(sourceRadius);
+                float penumbraSize = hitT * tanRadius;
+                penumbra = min(penumbraSize * 0.5, 32768.0);
+            }
+            else
+            {
+                float penumbraSize = sourceRadius * hitT / max(maxDist - hitT, 1e-4);
+                penumbra = min(penumbraSize * 0.5, 32768.0);
+            }
+        }
+        else
+        {
+            penumbra = NRD_FP16_MAX;
+        }
+
+        float rawVis = hit ? 0.0 : 1.0;
+        output.shadowData = float2(penumbra, rawVis);
+        return output;
     }

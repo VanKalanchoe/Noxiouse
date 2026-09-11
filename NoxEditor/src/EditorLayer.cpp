@@ -1088,6 +1088,21 @@ namespace Nox
                     m_Renderer->setRayTracingShadows(rtShadows);
                 }
 
+                if (rtShadows)
+                {
+                    ImGui::Indent();
+                    bool nrdShadows = m_Renderer->getNRDShadowsEnabled();
+                    if (ImGui::Checkbox("NRD SIGMA Denoiser", &nrdShadows))
+                    {
+                        m_Renderer->setNRDShadowsEnabled(nrdShadows);
+                    }
+                    if (ImGui::IsItemHovered())
+                    {
+                        ImGui::SetTooltip("Uses NVIDIA Real-Time Denoisers (SIGMA) for penumbra filtering & temporal accumulation.\nUncheck to view raw 1-SPP shadows.");
+                    }
+                    ImGui::Unindent();
+                }
+
                 bool rtReflections = m_Renderer->getRayTracingReflections();
                 if (ImGui::Checkbox("Ray Tracing Reflections", &rtReflections))
                 {

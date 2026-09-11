@@ -273,7 +273,7 @@ namespace NRI
 
         if (vkPip->isShaderObject())
         {
-            // For Graphics: binds 4 stages ({Vert, Frag, Task, Mesh}) with active shaders and null handles
+            // For Graphics: binds all graphics stages ({Vert, TessCtrl, TessEval, Geom, Frag, Task, Mesh}) with active shaders and null handles
             // For Compute: binds 1 stage ({Compute}) with 1 shader handle
             m_commandBuffers[m_currentFrameIndex].bindShadersEXT(vkPip->getStages(), vkPip->getRawShaders());
         }

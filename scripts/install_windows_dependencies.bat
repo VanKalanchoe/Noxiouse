@@ -6,6 +6,9 @@ echo Installing dependencies
 set "VCPKG_ROOT=%~dp0..\NoxCore\vendors\vcpkg"
 set "PATH=%VCPKG_ROOT%;%PATH%"
 
+:: Define vendors directory anchored to this script's directory
+set "VENDORS_DIR=%~dp0..\NoxCore\vendors"
+
 :: Check if vcpkg is installed
 where vcpkg >nul 2>nul
 if %ERRORLEVEL% neq 0 (
@@ -75,6 +78,81 @@ if not exist "%DEST_DIR%" (
     echo Slang already installed in "%DEST_DIR%", skipping download and extraction.
 )
 :: -------------
+
+ :: Streamline (NVIDIA DLSS SDK)
+    set STREAMLINE_VERSION=2.14.1
+    set STREAMLINE_URL=https://github.com/NVIDIA-RTX/Streamline/releases/download/v%STREAMLINE_VERSION%/streamline-sdk-v%STREAMLINE_VERSION%.zip
+    set "STREAMLINE_DIR=%VENDORS_DIR%\Streamline"
+
+    if not exist "%STREAMLINE_DIR%" (
+        echo Downloading NVIDIA Streamline %STREAMLINE_VERSION%...
+        curl -L "%STREAMLINE_URL%" -o "%TEMP%\streamline.zip" || exit /b 1
+
+        echo Creating Streamline destination folder...
+        mkdir "%STREAMLINE_DIR%"
+
+        echo Extracting Streamline...
+        tar -xf "%TEMP%\streamline.zip" -C "%STREAMLINE_DIR%"
+        del "%TEMP%\streamline.zip"
+
+        echo Streamline installed in "%STREAMLINE_DIR%".
+    ) else (
+        echo Streamline already installed in "%STREAMLINE_DIR%", skipping.
+    )
+
+    :: NRD (NVIDIA Real-Time Denoisers)
+    set NRD_VERSION=v4.17.3
+    set "NRD_DIR=%VENDORS_DIR%\NRD"
+    set "NRD_BUILD_DIR=%TEMP%\NRD_build"
+
+    if not exist "%NRD_DIR%" (
+        echo Setting up NVIDIA Real-Time Denoisers %NRD_VERSION%...
+        if exist "%NRD_BUILD_DIR%" rmdir /S /Q "%NRD_BUILD_DIR%"
+
+        git clone --depth 1 --branch %NRD_VERSION% --recursive https://github.com/NVIDIA-RTX/NRD.git "%NRD_BUILD_DIR%" || exit /b 1
+        pushd "%NRD_BUILD_DIR%"
+
+        call 1-Deploy.bat
+        if errorlevel 1 (
+            echo Failed to deploy NRD.
+            popd
+            exit /b 1
+        )
+
+        call 2-Build.bat
+        if errorlevel 1 (
+            echo Failed to build NRD.
+            popd
+            exit /b 1
+        )
+
+        call 3-PrepareSDK.bat
+        if errorlevel 1 (
+            echo Failed to prepare NRD SDK.
+            popd
+            exit /b 1
+        )
+        popd
+
+        echo Copying NRD SDK into "%NRD_DIR%"...
+        mkdir "%NRD_DIR%"
+        xcopy /E /I /Y "%NRD_BUILD_DIR%\_NRD_SDK\*" "%NRD_DIR%"
+
+        rem Also copy NRI SDK needed by NRDIntegration
+        if exist "%NRD_BUILD_DIR%\_NRI_SDK" (
+            echo Copying NRI SDK into "%NRD_DIR%"...
+            xcopy /E /I /Y "%NRD_BUILD_DIR%\_NRI_SDK\*" "%NRD_DIR%"
+        )
+        if exist "%NRD_BUILD_DIR%\_Build\_deps\nri-src\_NRI_SDK" (
+            echo Copying NRI SDK from _deps into "%NRD_DIR%"...
+            xcopy /E /I /Y "%NRD_BUILD_DIR%\_Build\_deps\nri-src\_NRI_SDK\*" "%NRD_DIR%"
+        )
+
+        rmdir /S /Q "%NRD_BUILD_DIR%"
+        echo NRD %NRD_VERSION% installed successfully in "%NRD_DIR%".
+    ) else (
+        echo NRD already installed in "%NRD_DIR%", skipping.
+    )
 
 :: FileWatch
 set FILEWATCH_DIR=../NoxCore/vendors/filewatch

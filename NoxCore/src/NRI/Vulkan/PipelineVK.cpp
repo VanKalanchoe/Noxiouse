@@ -90,8 +90,10 @@ namespace NRI
     // List of all supported graphics stages for explicit binding/unbinding
     static const std::vector<vk::ShaderStageFlagBits> g_allGraphicsStages = {
         vk::ShaderStageFlagBits::eVertex,
-        vk::ShaderStageFlagBits::eFragment,
+        vk::ShaderStageFlagBits::eTessellationControl,
+        vk::ShaderStageFlagBits::eTessellationEvaluation,
         vk::ShaderStageFlagBits::eGeometry,
+        vk::ShaderStageFlagBits::eFragment,
         vk::ShaderStageFlagBits::eTaskEXT,
         vk::ShaderStageFlagBits::eMeshEXT
     };
@@ -633,6 +635,8 @@ namespace NRI
         case ImageFormat::R16G16: return vk::Format::eR16G16Unorm;
         case ImageFormat::R32SINT: return vk::Format::eR32Sint;
         case ImageFormat::R32G32_UINT: return vk::Format::eR32G32Uint;
+        case ImageFormat::R16_SFLOAT: return vk::Format::eR16Sfloat;
+        case ImageFormat::R10G10B10A2_UNORM: return vk::Format::eA2B10G10R10UnormPack32;
         case ImageFormat::R16G16_SFLOAT: return vk::Format::eR16G16Sfloat;
         case ImageFormat::R16G16B16A16_SFLOAT: return vk::Format::eR16G16B16A16Sfloat;
         case ImageFormat::R32G32B32A32_SFLOAT: return vk::Format::eR32G32B32A32Sfloat;

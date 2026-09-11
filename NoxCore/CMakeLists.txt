@@ -49,6 +49,16 @@ set(STREAMLINE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendors/Streamline")
 set(STREAMLINE_INCLUDE_DIR "${STREAMLINE_DIR}/include")
 set(STREAMLINE_LIB "${STREAMLINE_DIR}/lib/x64/sl.interposer.lib")
 
+set(NRD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendors/NRD")
+set(NRD_INCLUDE_DIR "${NRD_DIR}/Include")
+set(NRD_INTEGRATION_DIR "${NRD_DIR}/Integration")
+set(NRD_LIB "$<$<CONFIG:Debug>:${NRD_DIR}/Lib/Debug/NRD.lib>$<$<NOT:$<CONFIG:Debug>>:${NRD_DIR}/Lib/Release/NRD.lib>")
+set(NRD_LIBS "${NRD_LIB}")
+if(EXISTS "${NRD_DIR}/Lib/Release/NRI.lib")
+    set(NRI_LIB "$<$<CONFIG:Debug>:${NRD_DIR}/Lib/Debug/NRI.lib>$<$<NOT:$<CONFIG:Debug>>:${NRD_DIR}/Lib/Release/NRI.lib>")
+    list(APPEND NRD_LIBS "${NRI_LIB}")
+endif()
+
 set(IMGUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendors/imgui")
 set(IMGUI_SOURCES
     ${IMGUI_DIR}/imgui.cpp
@@ -132,7 +142,7 @@ file(GLOB_RECURSE NOXCORE_FILES
 
 add_library(${PROJECT_NAME} STATIC ${NOXCORE_FILES} ${IMGUI_SOURCES} ${IMGUIZMO_SOURCES} ${TINYGLTF_SOURCE} ${MESHOPTIMIZER_SOURCES}) #main file here
 
-target_link_libraries (${PROJECT_NAME} PUBLIC Vulkan::cppm SDL3::SDL3 glm::glm spdlog::spdlog Slang::slang EnTT::EnTT xxHash::xxhash yaml-cpp::yaml-cpp box2d::box2d msdf-atlas-gen::msdf-atlas-gen tinyobjloader::tinyobjloader "${STREAMLINE_LIB}")
+target_link_libraries (${PROJECT_NAME} PUBLIC Vulkan::cppm SDL3::SDL3 glm::glm spdlog::spdlog Slang::slang EnTT::EnTT xxHash::xxhash yaml-cpp::yaml-cpp box2d::box2d msdf-atlas-gen::msdf-atlas-gen tinyobjloader::tinyobjloader "${STREAMLINE_LIB}" ${NRD_LIBS})
 # Add here vendors
 target_include_directories (${PROJECT_NAME} SYSTEM PRIVATE ${STB_INCLUDEDIR} ${CMAKE_CURRENT_SOURCE_DIR}/vendors/taskflow ${CMAKE_CURRENT_SOURCE_DIR}/vendors/VulkanMemoryAllocator-Hpp/include ${CMAKE_CURRENT_SOURCE_DIR}/vendors/VulkanMemoryAllocator-Hpp/VulkanMemoryAllocator/include ${IMGUI_DIR}/backends)
 
@@ -140,7 +150,7 @@ target_include_directories (${PROJECT_NAME} SYSTEM PRIVATE ${STB_INCLUDEDIR} ${C
 target_include_directories (${PROJECT_NAME} SYSTEM PUBLIC ${IMGUI_DIR} ${IMGUIZMO_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/vendors/filewatch)
 
 # Sysmtem means supress warnings from the include directories, so we don't get warnings from external libraries.
-target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/NoxEditor/assets/shaders ${TINYGLTF_DIR} ${MESHOPTIMIZER_DIR} ${STREAMLINE_INCLUDE_DIR})
+target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/NoxEditor/assets/shaders ${TINYGLTF_DIR} ${MESHOPTIMIZER_DIR} ${STREAMLINE_INCLUDE_DIR} ${NRD_INCLUDE_DIR} ${NRD_INTEGRATION_DIR})
 
 # Add compile definition if C++ 20 module is enabled
 if(ENABLE_CPP20_MODULE)
