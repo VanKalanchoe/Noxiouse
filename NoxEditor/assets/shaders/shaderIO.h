@@ -160,6 +160,9 @@ struct UniformBufferObject
     uint32_t tlasHeapIndex;
     uint32_t enableRTReflections;
     uint64_t instanceLUTReference;
+
+    // Temporal
+    uint32_t frameIndex;
 };
 
 struct Vertex
@@ -313,6 +316,16 @@ struct PushConstantVisibilityDebug
     uint32_t gbufferEmissionIndex;
 };
 
+struct PushConstantShadowMask
+{
+    mat4 invViewProj;
+    uint64_t matrixReference;
+    uint32_t depthTextureIndex;
+    uint32_t gbufferNormalIndex;
+    vec2 viewportSize;
+    uint32_t frameIndex;
+};
+
 struct PushConstantDeferredLighting
 {
     mat4 invViewProj;
@@ -328,6 +341,10 @@ struct PushConstantDeferredLighting
     // 0 = Full PBR, 1 = Direct Lights, 2 = IBL, 3 = World Pos, 4 = Albedo, 5 = Normal, 6 = Roughness, 
     // 7 = Metallic, 8 = Occlusion, 9 = Emission, 10 = World Pos, 11 = Entity ID, 12 = Depth Buffer
     uint32_t gbufferVelocityIndex;
+
+    // Temporal
+    uint32_t frameIndex; // RR
+    uint32_t shadowMaskTextureIndex; // NRD
 };
 
 struct PushConstantPostProcess

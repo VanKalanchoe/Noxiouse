@@ -39,6 +39,13 @@ namespace NRI
         Texture* depth = nullptr;
         Texture* motionVectors = nullptr;
         CommandBuffer* commandBuffer = nullptr;
+        
+        // Ray Reconstruction (DLSS 3.5 Denoiser)
+        bool rayReconstruction = false;
+        Texture* albedo = nullptr;
+        Texture* specularAlbedo = nullptr;
+        Texture* normal = nullptr;
+        Texture* roughness = nullptr;
 
         glm::mat4 nonJitteredProj{ 1.0f };
         glm::mat4 view{ 1.0f };
@@ -74,6 +81,7 @@ namespace NRI
         
         virtual bool evaluateDLSS(const DLSSParams& params) { return false; }
         virtual bool isDLSSSupported() const { return false; }
+        virtual bool isDLSSRayReconstructionSupported() const { return false; }
         virtual bool isStreamlineInitialized() const { return false; }
         // Must be called whenever the DLSS input/output resolution changes (e.g. viewport resize).
         // NGX's internal DLSSContext is created at a fixed resolution on first evaluate and is NOT

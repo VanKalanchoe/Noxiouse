@@ -171,68 +171,12 @@
         return w0 * uv0 + w1 * uv1 + w2 * uv2;
     }
 
-    // TASK05 & TASK09: Ray query shadows with alpha test (matching 38_ray_tracing_complete.slang:146-186)
-    bool in_shadow(UniformBufferObject* ubo, float3 worldPos, float3 normal, float3 lightDir, float maxDist)
-    {
-        if (ubo->enableRTShadows == 0 || ubo->tlasDeviceAddress == 0)
-            return false;
-
-        // Small epsilon offset along normal to eliminate self-intersection acne
-        float3 rayOrigin = worldPos + normal * 0.02;
-
-        RayDesc shadowRayDesc;
-        shadowRayDesc.Origin = rayOrigin;
-        shadowRayDesc.Direction = normalize(lightDir);
-        shadowRayDesc.TMin = 0.005;
-        shadowRayDesc.TMax = maxDist;
-
-        RaytracingAccelerationStructure accelerationStructure = RaytracingAccelerationStructure(ubo->tlasDeviceAddress);
-
-        // Initialize ray query (WITHOUT RAY_FLAG_FORCE_OPAQUE so non-opaque triangles run the loop)
-        RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES |
-                 RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> sq;
-        let rayFlags = RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES |
-                       RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH;
-
-        sq.TraceRayInline(accelerationStructure, rayFlags, 0xFF, shadowRayDesc);
-
-        InstanceLUT* instanceLUTBuffer = (InstanceLUT*)ubo->instanceLUTReference;
-        SamplerState textureSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
-
-        while (sq.Proceed())
-            {
-                uint instanceID = sq.CandidateRayInstanceCustomIndex();
-                uint primIndex = sq.CandidatePrimitiveIndex();
-
-                InstanceLUT lut = instanceLUTBuffer[instanceID];
-
-                // If instance is Opaque (alphaMode == 0) or has no texture, commit hit immediately
-                if (lut.alphaMode == 0 || lut.baseColorTextureIndex == 0xFFFFFFFF)
-                {
-                    sq.CommitNonOpaqueTriangleHit();
-                }
-                else
-                {
-                    float2 uv = intersection_uv(lut, primIndex, sq.CandidateTriangleBarycentrics());
-                    Texture2D tex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + lut.baseColorTextureIndex, 0));
-                    float4 intersectionColor = tex.SampleLevel(textureSampler, uv, 0);
-
-                    if (intersectionColor.a < lut.alphaCutoff)
-                    {
-                        // Transparent gap: continue tracing
-                    }
-                    else
-                    {
-                        // Opaque part of leaf: commit hit
-                        sq.CommitNonOpaqueTriangleHit();
-                    }
-                }
-            }
-
-        // If the shadow ray intersects an opaque or committed triangle, pixel is in shadow
-        bool hit = (sq.CommittedStatus() == COMMITTED_TRIANGLE_HIT);
-        return hit;
-    }
+        // Interleaved Gradient Noise (Jorge Jimenez, Call of Duty / Jimenez 2014)
+        float interleaved_gradient_noise(float2 pixelCoord, uint frameIndex)
+        {
+            float2 p = pixelCoord + float(frameIndex % 64) * float2(5.588238, 3.45367);
+            return frac(52.9829189 * frac(0.06711056 * p.x + 0.00583715 * p.y));
+        }
 
     // TASK11: Ray query reflections (matching 38_ray_tracing_complete.slang:93-143)
     float3 trace_reflection(UniformBufferObject* ubo, float3 worldPos, float3 normal, float3 v, out bool hit)
@@ -386,6 +330,11 @@
         float4 materialSample = materialTex.Load(int3(pixelCoord, 0));
         float4 emissionSample = emissionTex.Load(int3(pixelCoord, 0));
 
+        // Fetch Decoupled RT Shadow Mask (computed in Pass 2.5)
+        Texture2D shadowMaskTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.shadowMaskTextureIndex, 0));
+        float2 shadowData = shadowMaskTex.Load(int3(pixelCoord, 0)).rg;
+        float shadowFactor = shadowData.r;
+
         // 3. Reconstruct World Position from Depth
         float2 uv = (float2(pixelCoord) + 0.5) / pushConstant.viewportSize;
         float2 ndc_xy = float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
@@ -480,9 +429,8 @@
                     continue;
                 }
 
-                // Test hardware ray query shadow
-                bool occluded = in_shadow(ubo, worldPos, n, l, maxDist);
-                float shadowFactor = occluded ? 0.0 : 1.0;
+                // Comes from 2.5 ShadowMask Pass
+                float lightShadow = (i == 0) ? shadowFactor : 1.0;
 
                 float3 h = normalize(l + v);
 
@@ -513,7 +461,7 @@
                 float3 diffuseContrib = (1.0 - F) * diffuse(pbrInputs);
                 float3 specContrib = F * G * D / (4.0 * NdotL * NdotV);
 
-                float3 lightRadiance = light.color.rgb * light.color.w * attenuation * shadowFactor;
+                float3 lightRadiance = light.color.rgb * light.color.w * attenuation * lightShadow;
                 directLighting += NdotL * lightRadiance * (diffuseContrib + specContrib);
             }
 
@@ -615,16 +563,7 @@
         // Mode 13: RT Shadow Mask (White = Lit, Black = Shadowed)
         if (pushConstant.debugMode == 13)
         {
-            float shadowMask = 1.0;
-            if (ubo->lightCount > 0)
-            {
-                LightData light0 = lights[0];
-                float3 l = (light0.position.w == 0) ? normalize(light0.direction.xyz) : normalize(light0.position.xyz - worldPos);
-                float maxD = (light0.position.w == 0) ? 1e4 : length(light0.position.xyz - worldPos);
-                bool occluded = in_shadow(ubo, worldPos, n, l, maxD);
-                shadowMask = occluded ? 0.0 : 1.0;
-            }
-            return float4(shadowMask, shadowMask, shadowMask, 1.0);
+            return float4(shadowFactor, shadowFactor, shadowFactor, 1.0);
         }
 
         // =========================================================================

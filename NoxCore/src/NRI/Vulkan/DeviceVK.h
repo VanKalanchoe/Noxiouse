@@ -11,6 +11,7 @@ constexpr bool enableValidationLayers = true;
 #include <sl.h>
 #include <sl_consts.h>
 #include <sl_dlss.h>
+#include <sl_dlss_d.h>
 #include <sl_helpers_vk.h>
 
 namespace NRI
@@ -45,7 +46,7 @@ namespace NRI
         // --- Streamline & DLSS ---
         bool isStreamlineInitialized() const override { return m_streamlineInitialized; }
         bool isDLSSSupported() const override { return m_slDLSSSupported; }
-        bool isDLSS_RRSupported() const { return m_slDLSS_RRSupported; }
+        bool isDLSSRayReconstructionSupported() const override { return m_slDLSS_RRSupported; }
         bool evaluateDLSS(const DLSSParams& params) override;
         void resetDLSSViewport() override;
         DLSSRenderExtent getDLSSOptimalRenderSize(UpscaleMode mode, Extent2D outputSize) override;

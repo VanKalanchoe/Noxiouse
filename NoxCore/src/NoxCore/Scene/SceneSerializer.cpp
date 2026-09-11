@@ -247,11 +247,11 @@ namespace Nox
             out << YAML::Key << "MaterialAssets" << YAML::Value << YAML::BeginSeq;
             for (auto handle : mc.MaterialAssets) out << (uint64_t)handle;
             out << YAML::EndSeq;
-            
+
 
             out << YAML::EndMap; // MaterialComponent
         }
-        
+
         if (entity.HasComponent<DirectionalLightComponent>())
         {
             out << YAML::Key << "DirectionalLightComponent";
@@ -260,6 +260,8 @@ namespace Nox
             auto& dlc = entity.GetComponent<DirectionalLightComponent>();
             out << YAML::Key << "Color" << YAML::Value << dlc.Color;
             out << YAML::Key << "Intensity" << YAML::Value << dlc.Intensity;
+            out << YAML::Key << "AngularDiameter" << YAML::Value << dlc.AngularDiameter;
+            out << YAML::Key << "ShadowSamples" << YAML::Value << dlc.ShadowSamples;
 
             out << YAML::EndMap;
         }
@@ -273,6 +275,8 @@ namespace Nox
             out << YAML::Key << "Color" << YAML::Value << plc.Color;
             out << YAML::Key << "Intensity" << YAML::Value << plc.Intensity;
             out << YAML::Key << "Range" << YAML::Value << plc.Range;
+            out << YAML::Key << "Radius" << YAML::Value << plc.Radius;
+            out << YAML::Key << "ShadowSamples" << YAML::Value << plc.ShadowSamples;
 
             out << YAML::EndMap;
         }
@@ -288,6 +292,8 @@ namespace Nox
             out << YAML::Key << "Range" << YAML::Value << slc.Range;
             out << YAML::Key << "InnerAngle" << YAML::Value << slc.InnerAngle;
             out << YAML::Key << "OuterAngle" << YAML::Value << slc.OuterAngle;
+            out << YAML::Key << "Radius" << YAML::Value << slc.Radius;
+            out << YAML::Key << "ShadowSamples" << YAML::Value << slc.ShadowSamples;
 
             out << YAML::EndMap;
         }
@@ -303,7 +309,7 @@ namespace Nox
             out << YAML::Key << "Playing" << YAML::Value << animatorComponent.Playing;
             out << YAML::Key << "Looping" << YAML::Value << animatorComponent.Animator.IsLooping();
             out << YAML::Key << "PlaybackSpeed" << YAML::Value << animatorComponent.Animator.GetPlaybackSpeed();
-            
+
             out << YAML::EndMap; // AnimatorComponent
         }
 
@@ -618,15 +624,18 @@ namespace Nox
                                 mc.MaterialAssets = mesh->GetMaterialAssets();
                         }
                     }
-                    
                 }
-                
+
                 auto directionalLightComponent = entity["DirectionalLightComponent"];
                 if (directionalLightComponent)
                 {
                     auto& dlc = deserializedEntity.AddComponent<DirectionalLightComponent>();
                     dlc.Color = directionalLightComponent["Color"].as<glm::vec3>();
                     dlc.Intensity = directionalLightComponent["Intensity"].as<float>();
+                    if (directionalLightComponent["AngularDiameter"])
+                        dlc.AngularDiameter = directionalLightComponent["AngularDiameter"].as<float>();
+                    if (directionalLightComponent["ShadowSamples"])
+                        dlc.ShadowSamples = directionalLightComponent["ShadowSamples"].as<uint32_t>();
                 }
 
                 auto pointLightComponent = entity["PointLightComponent"];
@@ -636,6 +645,10 @@ namespace Nox
                     plc.Color = pointLightComponent["Color"].as<glm::vec3>();
                     plc.Intensity = pointLightComponent["Intensity"].as<float>();
                     plc.Range = pointLightComponent["Range"].as<float>();
+                    if (pointLightComponent["Radius"])
+                        plc.Radius = pointLightComponent["Radius"].as<float>();
+                    if (pointLightComponent["ShadowSamples"])
+                        plc.ShadowSamples = pointLightComponent["ShadowSamples"].as<uint32_t>();
                 }
 
                 auto spotLightComponent = entity["SpotLightComponent"];
@@ -647,6 +660,10 @@ namespace Nox
                     slc.Range = spotLightComponent["Range"].as<float>();
                     slc.InnerAngle = spotLightComponent["InnerAngle"].as<float>();
                     slc.OuterAngle = spotLightComponent["OuterAngle"].as<float>();
+                    if (spotLightComponent["Radius"])
+                        slc.Radius = spotLightComponent["Radius"].as<float>();
+                    if (spotLightComponent["ShadowSamples"])
+                        slc.ShadowSamples = spotLightComponent["ShadowSamples"].as<uint32_t>();
                 }
 
                 auto animatorComponent = entity["AnimatorComponent"];

@@ -1032,6 +1032,15 @@ namespace Nox
                 {
                     m_Renderer->setUpscaleMode(static_cast<NRI::UpscaleMode>(currentUpscaleMode));
                 }
+                
+                if (m_Renderer->isDLSSRayReconstructionSupported())
+                {
+                    bool rrEnabled = m_Renderer->isDLSSRayReconstructionEnabled();
+                    if (ImGui::Checkbox("Ray Reconstruction (DLSS 3.5 Denoising)", &rrEnabled))
+                    {
+                        m_Renderer->setDLSSRayReconstructionEnabled(rrEnabled);
+                    }
+                }
 
                 NRI::Extent2D renderSize = m_Renderer->getRenderSize();
                 NRI::Extent2D outputSize = m_Renderer->getViewPortSize();

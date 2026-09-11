@@ -888,27 +888,51 @@ namespace NRI
             return false;
         }
 
-        // 3. DLSS Options
-        sl::DLSSOptions dlssOptions{};
-        dlssOptions.mode = ToSLDLSSMode(params.mode);
+        bool useRayReconstruction = params.rayReconstruction && m_slDLSS_RRSupported;
 
-        dlssOptions.outputWidth = outputColorVK->GetWidth();
-        dlssOptions.outputHeight = outputColorVK->GetHeight();
-        dlssOptions.colorBuffersHDR = sl::Boolean::eTrue;
-        dlssOptions.preExposure = 1.0f;
-        dlssOptions.exposureScale = 1.0f;
-        dlssOptions.useAutoExposure = sl::Boolean::eTrue; // Enable DLSS auto-exposure calculation
-        dlssOptions.dlaaPreset = sl::DLSSPreset::ePresetK;
-        dlssOptions.qualityPreset = sl::DLSSPreset::ePresetK;
-        dlssOptions.balancedPreset = sl::DLSSPreset::ePresetK;
-        dlssOptions.performancePreset = sl::DLSSPreset::ePresetM;
-        dlssOptions.ultraPerformancePreset = sl::DLSSPreset::ePresetL;
-
-        sl::Result optRes = slDLSSSetOptions(viewport, dlssOptions);
-        if (optRes != sl::Result::eOk)
+        // 3. Set DLSS / DLSS-RR Options
+        if (useRayReconstruction)
         {
-            NOX_CORE_WARN("[Streamline] slDLSSSetOptions failed: {}", (int)optRes);
-            return false;
+            sl::DLSSDOptions dlssdOptions{};
+            dlssdOptions.mode = ToSLDLSSMode(params.mode);
+            dlssdOptions.outputWidth = outputColorVK->GetWidth();
+            dlssdOptions.outputHeight = outputColorVK->GetHeight();
+            dlssdOptions.colorBuffersHDR = sl::Boolean::eTrue;
+            dlssdOptions.preExposure = 1.0f;
+            dlssdOptions.exposureScale = 1.0f;
+            dlssdOptions.normalRoughnessMode = sl::DLSSDNormalRoughnessMode::eUnpacked;
+            dlssdOptions.worldToCameraView = glmToSl(params.view);
+            dlssdOptions.cameraViewToWorld = glmToSl(glm::inverse(params.view));
+
+            sl::Result optRes = slDLSSDSetOptions(viewport, dlssdOptions);
+            if (optRes != sl::Result::eOk)
+            {
+                NOX_CORE_WARN("[Streamline] slDLSSDSetOptions failed: {}", (int)optRes);
+                return false;
+            }
+        }
+        else
+        {
+            sl::DLSSOptions dlssOptions{};
+            dlssOptions.mode = ToSLDLSSMode(params.mode);
+            dlssOptions.outputWidth = outputColorVK->GetWidth();
+            dlssOptions.outputHeight = outputColorVK->GetHeight();
+            dlssOptions.colorBuffersHDR = sl::Boolean::eTrue;
+            dlssOptions.preExposure = 1.0f;
+            dlssOptions.exposureScale = 1.0f;
+            dlssOptions.useAutoExposure = sl::Boolean::eTrue;
+            dlssOptions.dlaaPreset = sl::DLSSPreset::ePresetF;
+            dlssOptions.qualityPreset = sl::DLSSPreset::ePresetK;
+            dlssOptions.balancedPreset = sl::DLSSPreset::ePresetK;
+            dlssOptions.performancePreset = sl::DLSSPreset::ePresetM;
+            dlssOptions.ultraPerformancePreset = sl::DLSSPreset::ePresetL;
+
+            sl::Result optRes = slDLSSSetOptions(viewport, dlssOptions);
+            if (optRes != sl::Result::eOk)
+            {
+                NOX_CORE_WARN("[Streamline] slDLSSSetOptions failed: {}", (int)optRes);
+                return false;
+            }
         }
 
         // 4. Tag Resources with explicit usage flags & subresource range for Depth
@@ -946,7 +970,7 @@ namespace NRI
         depthRange.layerCount = 1;
 
         sl::Resource depth{};
-        depth.next = &depthRange; // Essential for Vulkan: tells NGX to sample depth aspect, not color
+        depth.next = &depthRange;
         depth.type = sl::ResourceType::eTex2d;
         depth.native = static_cast<VkImage>(*depthVK->getNativeImage());
         depth.view = static_cast<VkImageView>(*depthVK->getNativeView());
@@ -974,14 +998,45 @@ namespace NRI
         sl::Extent outputExtent{0, 0, outputColorVK->GetWidth(), outputColorVK->GetHeight()};
         sl::Extent depthExtent{0, 0, depthVK->GetWidth(), depthVK->GetHeight()};
         sl::Extent mvecExtent{0, 0, mvecVK->GetWidth(), mvecVK->GetHeight()};
-        sl::ResourceTag tags[] = {
-            sl::ResourceTag(&colorIn, sl::kBufferTypeScalingInputColor, sl::ResourceLifecycle::eValidUntilEvaluate, &inputExtent),
-            sl::ResourceTag(&colorOut, sl::kBufferTypeScalingOutputColor, sl::ResourceLifecycle::eValidUntilEvaluate, &outputExtent),
-            sl::ResourceTag(&depth, sl::kBufferTypeDepth, sl::ResourceLifecycle::eValidUntilEvaluate, &depthExtent),
-            sl::ResourceTag(&mvec, sl::kBufferTypeMotionVectors, sl::ResourceLifecycle::eValidUntilEvaluate, &mvecExtent)
-        };
 
-        sl::Result tagRes = slSetTagForFrame(*frameToken, viewport, tags, static_cast<uint32_t>(std::size(tags)),
+        std::vector<sl::ResourceTag> tags;
+        tags.push_back(sl::ResourceTag(&colorIn, sl::kBufferTypeScalingInputColor, sl::ResourceLifecycle::eValidUntilEvaluate, &inputExtent));
+        tags.push_back(sl::ResourceTag(&colorOut, sl::kBufferTypeScalingOutputColor, sl::ResourceLifecycle::eValidUntilEvaluate, &outputExtent));
+        tags.push_back(sl::ResourceTag(&depth, sl::kBufferTypeDepth, sl::ResourceLifecycle::eValidUntilEvaluate, &depthExtent));
+        tags.push_back(sl::ResourceTag(&mvec, sl::kBufferTypeMotionVectors, sl::ResourceLifecycle::eValidUntilEvaluate, &mvecExtent));
+
+        // When Ray Reconstruction is enabled, tag G-Buffer Albedo, Specular Albedo, Normals, and Roughness
+        sl::Resource albedoRes{}, specularAlbedoRes{}, normalRes{}, roughnessRes{};
+        if (useRayReconstruction && params.albedo && params.normal && params.roughness)
+        {
+            auto wrapTex = [](TextureVK* t) -> sl::Resource
+            {
+                sl::Resource r{};
+                r.type = sl::ResourceType::eTex2d;
+                r.native = static_cast<VkImage>(*t->getNativeImage());
+                r.view = static_cast<VkImageView>(*t->getNativeView());
+                r.nativeFormat = static_cast<uint32_t>(t->getFormat());
+                r.width = t->GetWidth();
+                r.height = t->GetHeight();
+                r.state = VK_IMAGE_LAYOUT_GENERAL;
+                r.mipLevels = 1;
+                r.arrayLayers = 1;
+                r.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
+                return r;
+            };
+
+            albedoRes = wrapTex(dynamic_cast<TextureVK*>(params.albedo));
+            specularAlbedoRes = wrapTex(dynamic_cast<TextureVK*>(params.specularAlbedo ? params.specularAlbedo : params.albedo));
+            normalRes = wrapTex(dynamic_cast<TextureVK*>(params.normal));
+            roughnessRes = wrapTex(dynamic_cast<TextureVK*>(params.roughness));
+
+            tags.push_back(sl::ResourceTag(&albedoRes, sl::kBufferTypeAlbedo, sl::ResourceLifecycle::eValidUntilEvaluate, &inputExtent));
+            tags.push_back(sl::ResourceTag(&specularAlbedoRes, sl::kBufferTypeSpecularAlbedo, sl::ResourceLifecycle::eValidUntilEvaluate, &inputExtent));
+            tags.push_back(sl::ResourceTag(&normalRes, sl::kBufferTypeNormals, sl::ResourceLifecycle::eValidUntilEvaluate, &inputExtent));
+            tags.push_back(sl::ResourceTag(&roughnessRes, sl::kBufferTypeRoughness, sl::ResourceLifecycle::eValidUntilEvaluate, &inputExtent));
+        }
+
+        sl::Result tagRes = slSetTagForFrame(*frameToken, viewport, tags.data(), static_cast<uint32_t>(tags.size()),
                                              reinterpret_cast<sl::CommandBuffer*>(vkCmd));
         if (tagRes != sl::Result::eOk)
         {
@@ -989,11 +1044,7 @@ namespace NRI
             return false;
         }
 
-        // 4.5 Workaround for https://github.com/NVIDIA-RTX/Streamline/issues/109 - Streamline's internal
-        // compute dispatch fails to read our tagged images when this command buffer has only ever used
-        // VK_EXT_descriptor_heap binding (vkCmdBindResourceHeapEXT/vkCmdBindSamplerHeapEXT) and never a
-        // classic descriptor set. Bind one dummy (empty) descriptor set right before evaluate.
-        // Flip to false + rebuild to capture a "without fix" repro for the GitHub issue.
+        // 4.5 Dummy Descriptor Set Workaround for VK_EXT_descriptor_heap
         constexpr bool kEnableDescriptorHeapWorkaround = true;
         if constexpr (kEnableDescriptorHeapWorkaround)
         {
@@ -1001,19 +1052,21 @@ namespace NRI
             vk::CommandBuffer(vkCmd).bindDescriptorSets(vk::PipelineBindPoint::eCompute, *m_dummyPipelineLayout, 0, {m_dummyDescriptorSet}, {});
         }
 
-        // 5. Evaluate DLSS
+        // 5. Evaluate DLSS or DLSS Ray Reconstruction
         const sl::BaseStructure* inputs[] = {&viewport};
-        sl::Result evalRes = slEvaluateFeature(sl::kFeatureDLSS, *frameToken, inputs, static_cast<uint32_t>(std::size(inputs)),
+        sl::Feature featureToEval = useRayReconstruction ? sl::kFeatureDLSS_RR : sl::kFeatureDLSS;
+        sl::Result evalRes = slEvaluateFeature(featureToEval, *frameToken, inputs, static_cast<uint32_t>(std::size(inputs)),
                                                reinterpret_cast<sl::CommandBuffer*>(vkCmd));
         static bool s_firstEvalLogged = false;
         if (!s_firstEvalLogged)
         {
             s_firstEvalLogged = true;
-            NOX_CORE_INFO("[Streamline] First evaluateDLSS: tagRes={}, evalRes={}", (int)tagRes, (int)evalRes);
+            NOX_CORE_INFO("[Streamline] First evaluateDLSS (Feature: {}): tagRes={}, evalRes={}",
+                          useRayReconstruction ? "DLSS_RR" : "DLSS_SR", (int)tagRes, (int)evalRes);
         }
         if (evalRes != sl::Result::eOk)
         {
-            NOX_CORE_WARN("[Streamline] slEvaluateFeature(DLSS) failed: {}", (int)evalRes);
+            NOX_CORE_WARN("[Streamline] slEvaluateFeature failed: {}", (int)evalRes);
             return false;
         }
         m_dlssContextEverEvaluated = true;

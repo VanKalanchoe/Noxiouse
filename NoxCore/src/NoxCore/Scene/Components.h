@@ -107,6 +107,8 @@ namespace Nox
     {
         glm::vec3 Color{ 1.0f, 1.0f, 1.0f };
         float Intensity = 1.0f;
+        float AngularDiameter = 1.0f; // In degrees (e.g., Sun is ~0.53 deg, 1.0 - 3.0 for noticeable soft shadows)
+        uint32_t ShadowSamples = 1;   // 1 for fast stochastic + DLSS, 2-8 for high quality
 
         DirectionalLightComponent() = default;
         DirectionalLightComponent(const DirectionalLightComponent&) = default;
@@ -117,6 +119,8 @@ namespace Nox
         glm::vec3 Color{ 1.0f, 1.0f, 1.0f };
         float Intensity = 5.0f;
         float Range = 10.0f;
+        float Radius = 0.1f;          // Light source radius in meters for contact hardening
+        uint32_t ShadowSamples = 1;;
 
         PointLightComponent() = default;
         PointLightComponent(const PointLightComponent&) = default;
@@ -129,6 +133,8 @@ namespace Nox
         float Range = 15.0f;
         float InnerAngle = 20.0f; // degrees
         float OuterAngle = 35.0f; // degrees
+        float Radius = 0.1f;          // Light source radius in meters for contact hardening
+        uint32_t ShadowSamples = 1;
 
         SpotLightComponent() = default;
         SpotLightComponent(const SpotLightComponent&) = default;

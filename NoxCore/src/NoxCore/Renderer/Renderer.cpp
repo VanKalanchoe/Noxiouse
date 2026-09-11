@@ -40,7 +40,7 @@ namespace Nox
 
         std::string parentFolder = sourcePath.parent_path().filename().string();
         std::transform(parentFolder.begin(), parentFolder.end(), parentFolder.begin(),
-            [](unsigned char character) { return static_cast<char>(std::tolower(character)); });
+                       [](unsigned char character) { return static_cast<char>(std::tolower(character)); });
 
         std::filesystem::path cookedPath = sourcePath;
         if (parentFolder == "textures")
@@ -152,6 +152,8 @@ namespace Nox
         watchShader("assets/shaders/DeferredLighting.slang", "DeferredLighting", [this]() { createDeferredLightingPipeline(true); });
         // Post Process
         watchShader("assets/shaders/PostProcess.slang", "PostProcess", [this]() { createPostProcessPipeline(true); });
+        // NRD
+        watchShader("assets/shaders/ShadowMask.slang", "ShadowMask", [this]() { createShadowMaskPipeline(true); });
 
         m_whiteTexture = createSolidColorTexture(255, 255, 255, 255);
 
@@ -219,6 +221,8 @@ namespace Nox
         createGBufferPipeline();
         // Post Process
         createPostProcessPipeline(false);
+        //NRD
+        createShadowMaskPipeline();
 
         createCommandPool();
         createUniformBuffers();
@@ -235,6 +239,8 @@ namespace Nox
         createGBufferResources();
         // PBR
         createDeferredLightingPipeline(false);
+        // NRD
+        createShadowMaskResources();
 
         createCommandBuffers();
 
@@ -294,6 +300,7 @@ namespace Nox
 
         // G-Buffer
         createGBufferResources();
+        createShadowMaskResources();
     }
 
     void Renderer::createSwapChain()
@@ -334,6 +341,15 @@ namespace Nox
             m_pendingRenderResolutionUpdate = true;
     }
 
+    void Renderer::setDLSSRayReconstructionEnabled(bool enabled)
+    {
+        if (m_dlssRayReconstructionEnabled != enabled)
+        {
+            m_dlssRayReconstructionEnabled = enabled;
+            m_resetDLSS = true; // Signals Streamline to flush history cleanly on the next frame without destroying contexts
+        }
+    }
+
     void Renderer::applyRenderResolution()
     {
         NRI::Extent2D outputSize = m_isEditor ? m_viewportSize : m_swapChainExtent;
@@ -356,6 +372,7 @@ namespace Nox
 
         // G-Buffer
         createGBufferResources();
+        createShadowMaskResources();
 
         // NGX's internal DLSS feature is fixed-size once created; it must be explicitly freed here
         // so it gets recreated at the new resolution on the next evaluate, otherwise evaluate silently
@@ -370,6 +387,48 @@ namespace Nox
             return;
         m_pendingRenderResolutionUpdate = false;
         applyRenderResolution();
+    }
+
+    void Renderer::createShadowMaskResources()
+    {
+        const uint32_t width = m_renderSize.width;
+        const uint32_t height = m_renderSize.height;
+
+        m_rawShadowMask = m_device->createTexture(NRI::TextureDesc{
+            .width = width,
+            .height = height,
+            .mipLevels = 1,
+            .sampleCount = 1,
+            .usage = NRI::TextureUsage::ColorAttachment,
+            .format = NRI::ImageFormat::R16G16_SFLOAT,
+            .directFormat = UINT32_MAX
+        });
+        m_resourceHeap->registerTexture(*m_rawShadowMask);
+    }
+
+    void Renderer::createShadowMaskPipeline(bool forceCompile)
+    {
+        NRI::PipelineDesc desc{};
+        desc.forceCompile = forceCompile;
+        desc.colorFormats = {NRI::ImageFormat::R16G16_SFLOAT};
+
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Task,
+            .entryPoint = "taskMain",
+            .sourcePath = "assets/shaders/ShadowMask.slang"
+        });
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Mesh,
+            .entryPoint = "meshMain",
+            .sourcePath = "assets/shaders/ShadowMask.slang"
+        });
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Fragment,
+            .entryPoint = "fragMain",
+            .sourcePath = "assets/shaders/ShadowMask.slang"
+        });
+
+        m_shadowMaskPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
     void Renderer::createCompiler()
@@ -682,6 +741,17 @@ namespace Nox
         });
         m_resourceHeap->registerTexture(*m_gbufferAlbedo);
 
+        m_gbufferSpecular = m_device->createTexture(NRI::TextureDesc{
+            .width = width,
+            .height = height,
+            .mipLevels = 1,
+            .sampleCount = 1,
+            .usage = NRI::TextureUsage::ColorAttachment,
+            .format = NRI::ImageFormat::RGBA8,
+            .directFormat = UINT32_MAX
+        });
+        m_resourceHeap->registerTexture(*m_gbufferSpecular);
+
         m_gbufferNormal = m_device->createTexture(NRI::TextureDesc{
             .width = width,
             .height = height,
@@ -734,12 +804,13 @@ namespace Nox
         NRI::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
         desc.colorFormats = {
-            NRI::ImageFormat::RGBA8,
-            NRI::ImageFormat::R16G16B16A16_SFLOAT,
-            NRI::ImageFormat::RGBA8,
-            NRI::ImageFormat::R16G16B16A16_SFLOAT,
-            NRI::ImageFormat::R32SINT,
-            NRI::ImageFormat::R32G32_SFLOAT
+            NRI::ImageFormat::RGBA8, // 0: SV_Target0 (Albedo)
+            NRI::ImageFormat::R16G16B16A16_SFLOAT, // 1: SV_Target1 (Normal)
+            NRI::ImageFormat::RGBA8, // 2: SV_Target2 (Material)
+            NRI::ImageFormat::R16G16B16A16_SFLOAT, // 3: SV_Target3 (Emission)
+            NRI::ImageFormat::R32SINT, // 4: SV_Target4 (Entity ID)
+            NRI::ImageFormat::R32G32_SFLOAT, // 5: SV_Target5 (Velocity)
+            NRI::ImageFormat::RGBA8 // 6: SV_Target6 (Specular Albedo)
         };
 
         desc.shaders.push_back({
@@ -1984,6 +2055,13 @@ namespace Nox
                 .storeOP = NRI::StoreOP::store,
                 .clearColor = {0.0f, 0.0f, 0.0f, 0.0f}
             });
+            // 6. Specular Albedo (RGBA8)
+            gbufferAttachments.push_back({
+                .attachment = m_gbufferSpecular.get(),
+                .loadOP = NRI::LoadOP::clear,
+                .storeOP = NRI::StoreOP::store,
+                .clearColor = {0.0f, 0.0f, 0.0f, 0.0f}
+            });
 
             NRI::RenderDesc gbufferDesc = {
                 .renderArea = renderExtent,
@@ -2000,7 +2078,7 @@ namespace Nox
             m_commandBuffers->setDepthTestEnable(false);
             m_commandBuffers->setDepthWriteEnable(false);
 
-            for (uint32_t a = 0; a < 6; ++a)
+            for (uint32_t a = 0; a < gbufferAttachments.size(); ++a)
             {
                 m_commandBuffers->setColorBlendEnable(a, false);
                 m_commandBuffers->setColorWriteMask(a, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
@@ -2029,6 +2107,51 @@ namespace Nox
             gbufferPush.viewportSize = glm::vec2(rw, rh);
             gbufferPush.debugMode = m_debugMode;
             m_commandBuffers->pushData(&gbufferPush, sizeof(shaderio::PushConstantVisibilityDebug));
+
+            m_commandBuffers->drawMeshTasks(1, 1, 1);
+            m_commandBuffers->endRendering();
+            m_commandBuffers->executionBarrier();
+        }
+
+        // =========================================================================
+        // 2.5. SHADOW MASK PASS (Evaluates 1-SPP RT Shadow -> m_rawShadowMask)
+        // =========================================================================
+        if (m_shadowMaskPipeline && m_rawShadowMask)
+        {
+            std::vector<NRI::RenderAttachDesc> shadowAttachments;
+            shadowAttachments.push_back({
+                .attachment = m_rawShadowMask.get(),
+                .loadOP = NRI::LoadOP::clear,
+                .storeOP = NRI::StoreOP::store,
+                .clearColor = {1.0f, 10000.0f, 0.0f, 0.0f}
+            });
+
+            NRI::RenderDesc shadowDesc = {
+                .renderArea = renderExtent,
+                .colorAttachments = shadowAttachments
+            };
+
+            m_commandBuffers->beginRendering(shadowDesc);
+            m_commandBuffers->setViewportWithCount({0.0f, rh, rw, -rh}, 0.0f, 1.0f);
+            m_commandBuffers->setScissorWithCount(renderExtent);
+
+            m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_shadowMaskPipeline);
+            m_commandBuffers->setCullMode(NRI::CullMode::None);
+            m_commandBuffers->setDepthTestEnable(false);
+            m_commandBuffers->setDepthWriteEnable(false);
+            m_commandBuffers->setColorBlendEnable(0, false);
+            m_commandBuffers->setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G |
+                                                NRI::ColorComponent::B | NRI::ColorComponent::A);
+
+            glm::mat4 viewProj = uniformData.proj * uniformData.view;
+            shaderio::PushConstantShadowMask shadowPush{};
+            shadowPush.invViewProj = glm::inverse(viewProj);
+            shadowPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+            shadowPush.depthTextureIndex = m_depthResource->GetDescriptorIndexSlot();
+            shadowPush.gbufferNormalIndex = m_gbufferNormal->GetDescriptorIndexSlot();
+            shadowPush.viewportSize = glm::vec2(rw, rh);
+            shadowPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
+            m_commandBuffers->pushData(&shadowPush, sizeof(shaderio::PushConstantShadowMask));
 
             m_commandBuffers->drawMeshTasks(1, 1, 1);
             m_commandBuffers->endRendering();
@@ -2077,6 +2200,8 @@ namespace Nox
             lightingPush.viewportSize = glm::vec2(rw, rh);
             lightingPush.debugMode = m_debugMode;
             lightingPush.gbufferVelocityIndex = m_gbufferVelocity->GetDescriptorIndexSlot();
+            lightingPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
+            lightingPush.shadowMaskTextureIndex = m_rawShadowMask->GetDescriptorIndexSlot();
             m_commandBuffers->pushData(&lightingPush, sizeof(shaderio::PushConstantDeferredLighting));
 
             m_commandBuffers->drawMeshTasks(1, 1, 1);
@@ -2195,6 +2320,11 @@ namespace Nox
             dlssParams.outputColor = m_dlssOutputResource.get();
             dlssParams.depth = m_depthResource.get();
             dlssParams.motionVectors = m_gbufferVelocity.get();
+            dlssParams.albedo = m_gbufferAlbedo.get();
+            dlssParams.specularAlbedo = m_gbufferSpecular.get();
+            dlssParams.normal = m_gbufferNormal.get();
+            dlssParams.roughness = m_gbufferMaterial.get();
+            dlssParams.rayReconstruction = m_dlssRayReconstructionEnabled;
             dlssParams.commandBuffer = m_commandBuffers.get();
 
             dlssParams.nonJitteredProj = uniformData.nonJitteredProj;
@@ -2603,6 +2733,7 @@ namespace Nox
         uniformData.exposure = m_exposure; // slider in the future in imgui
         uniformData.gamma = m_gamma; // slider in the future in imgui
         uniformData.scaleIBLAmbient = m_scaleIBLAmbient; // slider in the future in imgui
+        uniformData.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
 
         memcpy(m_uniformBuffersMapped[currentImage], &uniformData, sizeof(uniformData));
     }
@@ -3610,7 +3741,8 @@ namespace Nox
         l.position = glm::vec4(0.0f, 0.0f, 0.0f, (float)shaderio::LightType::Directional);
         l.direction = glm::vec4(forward, 0.0f);
         l.color = glm::vec4(light.Color, light.Intensity);
-        l.spotParams = glm::vec4(0.0f);
+        // spotParams.z: half-angle angular radius in radians; spotParams.w: shadow samples
+        l.spotParams = glm::vec4(0.0f, 0.0f, glm::radians(glm::max(0.0f, light.AngularDiameter) * 0.5f), (float)glm::max(1u, light.ShadowSamples));
 
         m_lightBufferObjects.push_back(l);
     }
@@ -3623,7 +3755,8 @@ namespace Nox
         l.position = glm::vec4(worldPos, (float)shaderio::LightType::Point);
         l.direction = glm::vec4(0.0f, 0.0f, 0.0f, light.Range);
         l.color = glm::vec4(light.Color, light.Intensity);
-        l.spotParams = glm::vec4(0.0f);
+        // spotParams.z: light source radius in meters; spotParams.w: shadow samples
+        l.spotParams = glm::vec4(0.0f, 0.0f, glm::max(0.0f, light.Radius), (float)glm::max(1u, light.ShadowSamples));
 
         m_lightBufferObjects.push_back(l);
     }
@@ -3647,7 +3780,7 @@ namespace Nox
         l.position = glm::vec4(worldPos, (float)shaderio::LightType::Spot);
         l.direction = glm::vec4(forward, light.Range);
         l.color = glm::vec4(light.Color, light.Intensity);
-        l.spotParams = glm::vec4(lightAngleScale, lightAngleOffset, 0.0f, 0.0f);
+        l.spotParams = glm::vec4(lightAngleScale, lightAngleOffset, glm::max(0.0f, light.Radius), (float)glm::max(1u, light.ShadowSamples));
 
         m_lightBufferObjects.push_back(l);
     }

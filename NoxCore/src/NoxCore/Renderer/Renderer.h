@@ -193,6 +193,7 @@ namespace Nox
         bool getRayTracingShadows() const { return m_rayTracingShadows; }
         void setRayTracingReflections(bool enabled) { m_rayTracingReflections = enabled; }
         bool getRayTracingReflections() const { return m_rayTracingReflections; }
+        Ref<Texture2D> getRawShadowMask() const { return m_rawShadowMask; }
 
         void setCameraJitterEnabled(bool enabled) { m_cameraJitterEnabled = enabled; }
         bool getCameraJitterEnabled() const { return m_cameraJitterEnabled; }
@@ -228,6 +229,9 @@ namespace Nox
         void setUpscaleMode(NRI::UpscaleMode mode);
         NRI::UpscaleMode getUpscaleMode() const { return m_dlssMode; }
         bool isDLSSSupported() const { return m_device && m_device->isDLSSSupported(); }
+        void setDLSSRayReconstructionEnabled(bool enabled);
+        bool isDLSSRayReconstructionEnabled() const { return m_dlssRayReconstructionEnabled; }
+        bool isDLSSRayReconstructionSupported() const { return m_device && m_device->isDLSSRayReconstructionSupported(); }
 
     private:
         void initRenderer();
@@ -251,6 +255,9 @@ namespace Nox
         // DLSS mode change - the three things that can change what m_renderSize should be.
         void applyRenderResolution();
         void applyPendingRenderResolutionIfNeeded();
+        
+        // NRD
+        void createShadowMaskResources();
 
         // Visability
         void createVisibilityResources();
@@ -262,6 +269,9 @@ namespace Nox
         void createDeferredLightingPipeline(bool forceCompile = false);
         // Post Process
         void createPostProcessPipeline(bool forceCompile = false);
+        
+        // NRD
+        void createShadowMaskPipeline(bool forceCompile = false);
 
         void createTextureImage();
         void initGeometryBuffers();
@@ -316,6 +326,8 @@ namespace Nox
         std::unique_ptr<NRI::Pipeline> m_deferredLightingPipeline = nullptr;
         // Post Process
         std::unique_ptr<NRI::Pipeline> m_postProcessPipeline = nullptr;
+        // NRD
+        std::unique_ptr<NRI::Pipeline> m_shadowMaskPipeline = nullptr;
 
         std::unique_ptr<NRI::CommandAllocator> m_commandAllocator = nullptr;
         std::unique_ptr<NRI::CommandBuffer> m_commandBuffers = nullptr;
@@ -344,11 +356,15 @@ namespace Nox
 
         // G-Buffer Render Targets (Decoupled Material Pass)
         Ref<Texture2D> m_gbufferAlbedo; // RGBA8_UNORM: RGB = BaseColor, A = Occlusion
+        Ref<Texture2D> m_gbufferSpecular;
         Ref<Texture2D> m_gbufferNormal; // R16G16B16A16_SFLOAT: RGB = World Normal
         Ref<Texture2D> m_gbufferMaterial; // RGBA8_UNORM: R = Roughness, G = Metallic, B = Workflow
         Ref<Texture2D> m_gbufferEmission; // R16G16B16A16_SFLOAT: RGB = Emissive
         Ref<Texture2D> m_gbufferVelocity; // R16G16_SFLOAT: Screen-space motion vectors
 
+        // NRD
+        Ref<Texture2D> m_rawShadowMask;
+        
         // Post Process
         Ref<Texture2D> m_hdrSceneResource;
 
@@ -485,6 +501,7 @@ namespace Nox
         NRI::UpscaleMode m_dlssMode = NRI::UpscaleMode::Off;
         bool m_resetDLSS = true;
         bool m_pendingRenderResolutionUpdate = false;
+        bool m_dlssRayReconstructionEnabled = false; // Enabled by default when DLSS is on
 
         // Camera Cache (Reverse-Z: no far clip)
         glm::vec3 m_cameraPosition{0.0f};

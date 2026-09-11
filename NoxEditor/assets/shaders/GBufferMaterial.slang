@@ -58,11 +58,12 @@
     struct GBufferOutput
     {
         float4 albedo   : SV_Target0; // RGB: BaseColor, A: Occlusion
-        float4 normal   : SV_Target1; // RGB: World Normal, A: 1.0
-        float4 material : SV_Target2; // R: Roughness, G: Metallic, B: Workflow, A: 1.0
-        float4 emission : SV_Target3; // RGB: Emissive, A: 1.0
-        int    entityID : SV_Target4; // Editor Entity Picking ID
-        float2 velocity : SV_Target5; // Screen-Space Motion Vectors (RG16F)
+        float4 normal   : SV_Target2; // RGB: World Normal, A: 1.0
+        float4 material : SV_Target3; // R: Roughness, G: Metallic, B: Workflow, A: 1.0
+        float4 emission : SV_Target4; // RGB: Emissive, A: 1.0
+        int    entityID : SV_Target5; // Editor Entity Picking ID
+        float2 velocity : SV_Target6; // Screen-Space Motion Vectors (RG16F)
+        float4 specular : SV_Target1; // RGB: Specular Albedo (F0), A: 1.0
     };
 
     float4 computeBarycentric3D(float3 rayOrigin, float3 rayDir, float3 v0, float3 e1, float3 e2, float3 triNorm, float d00, float d01, float d11, float invDenom)
@@ -102,6 +103,8 @@
             output.material = float4(0.0, 0.0, 0.0, 0.0);
             output.emission = float4(0.0, 0.0, 0.0, 0.0);
             output.entityID = -1;
+            output.specular = float4(0.0, 0.0, 0.0, 0.0);
+
             // Compute camera background motion vector (rotation-only, jitter-free like the geometry path below)
         float2 uv = (input.pos.xy / pushConstant.viewportSize) * 2.0 - 1.0;
         float4 currClipJittered = float4(uv, 1.0, 1.0);
@@ -404,6 +407,9 @@
         // NVIDIA Streamline / DLSS standard: delta in UV space [0, 1]
         float2 velocity = (prevNDC - currNDC) * float2(0.5, -0.5);
         output.velocity = velocity;
+
+        // Specular Albedo (F0) for DLSS-RR
+        output.specular = float4(lerp(float3(0.04), baseColor.rgb, metallic), 1.0);
 
         return output;
     }
