@@ -109,8 +109,14 @@
         return roughnessSq / (M_PI * f * f);
     }
 
+    struct IBLResult
+    {
+        float3 diffuse;
+        float3 specular;
+    };
+
     // Image Based Lighting (IBL)
-    float3 getIBLContribution(UniformBufferObject* ubo, PBRInfo pbrInputs, float3 n, float3 reflection)
+    IBLResult getIBLContribution(UniformBufferObject* ubo, PBRInfo pbrInputs, float3 n, float3 reflection)
     {
         float lod = (pbrInputs.perceptualRoughness * ubo->prefilteredCubeMipLevels);
 
@@ -130,15 +136,12 @@
         // Sample Prefiltered Environment Map with Mip Level LOD (Cube Texture from heap)
         TextureCube prefilteredTex = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + ubo->prefilteredMapIndex, 0));
         float4 prefilteredSample = prefilteredTex.SampleLevel(samplerPrefiltered, reflection, lod);
-        float3 specularLight = prefilteredSample.rgb;
+        float3 specularLight = prefilteredSample.rgb * ubo->scaleIBLAmbient;
 
-        float3 diffuse = diffuseLight * pbrInputs.diffuseColor;
-        float3 specular = specularLight * (pbrInputs.specularColor * brdf.x + brdf.y);
-
-        diffuse *= ubo->scaleIBLAmbient;
-        specular *= ubo->scaleIBLAmbient;
-
-        return diffuse + specular;
+        IBLResult result;
+        result.diffuse = diffuseLight * pbrInputs.diffuseColor * ubo->scaleIBLAmbient;
+        result.specular = specularLight * (pbrInputs.specularColor * brdf.x + brdf.y);
+        return result;
     }
 
     // Generates a distinct, saturated pseudo-random color for each unique entity ID
@@ -151,203 +154,18 @@
         float3 rgb = saturate(abs(fmod(hue * 6.0 + float3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0);
         return rgb * 0.85 + 0.1;
     }
-// TASK09: Intersection UV interpolation (matching 38_ray_tracing_complete.slang:75-91)
-    float2 intersection_uv(InstanceLUT lut, uint primIndex, float2 barycentrics)
+
+    // NRD REBLUR YCoCg to Linear RGB conversion (matching NRD.hlsli:407)
+    float3 YCoCgToLinear(float3 color)
     {
-        uint32_t* indices = (uint32_t*)lut.indexBufferAddress;
-        uint i0 = indices[primIndex * 3 + 0];
-        uint i1 = indices[primIndex * 3 + 1];
-        uint i2 = indices[primIndex * 3 + 2];
-
-        Vertex* vertices = (Vertex*)lut.vertexBufferAddress;
-        float2 uv0 = vertices[i0].uv0;
-        float2 uv1 = vertices[i1].uv0;
-        float2 uv2 = vertices[i2].uv0;
-
-        float w0 = 1.0 - barycentrics.x - barycentrics.y;
-        float w1 = barycentrics.x;
-        float w2 = barycentrics.y;
-
-        return w0 * uv0 + w1 * uv1 + w2 * uv2;
+        float t = color.x - color.z;
+        float3 r;
+        r.y = color.x + color.z;
+        r.x = t + color.y;
+        r.z = t - color.y;
+        return max(r, 0.0);
     }
 
-        // Interleaved Gradient Noise (Jorge Jimenez, Call of Duty / Jimenez 2014)
-        float interleaved_gradient_noise(float2 pixelCoord, uint frameIndex)
-        {
-            float2 p = pixelCoord + float(frameIndex % 64) * float2(5.588238, 3.45367);
-            return frac(52.9829189 * frac(0.06711056 * p.x + 0.00583715 * p.y));
-        }
-
-    // TASK11: Ray query reflections (matching 38_ray_tracing_complete.slang:93-143)
-    float3 trace_reflection(UniformBufferObject* ubo, float3 worldPos, float3 normal, float3 v, out bool hit)
-    {
-        hit = false;
-        if (ubo->enableRTReflections == 0 || ubo->tlasDeviceAddress == 0 || dot(normal, v) <= 0.001)
-            return float3(0.0);
-
-        // Tight 2mm bias along normal to avoid self-intersection with table surface
-        float3 rayOrigin = worldPos + normal * 0.002;
-        float3 R = reflect(-v, normal);
-
-        RayDesc reflectionRayDesc;
-        reflectionRayDesc.Origin = rayOrigin;
-        reflectionRayDesc.Direction = R;
-        reflectionRayDesc.TMin = 0.005;
-        reflectionRayDesc.TMax = 1e4;
-
-        RaytracingAccelerationStructure accelerationStructure = RaytracingAccelerationStructure(ubo->tlasDeviceAddress);
-
-        // Closest-hit query: NO ACCEPT_FIRST_HIT_AND_END_SEARCH flag
-        RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> rq;
-        let rayFlags = RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES;
-
-        rq.TraceRayInline(accelerationStructure, rayFlags, 0xFF, reflectionRayDesc);
-
-        InstanceLUT* instanceLUTBuffer = (InstanceLUT*)ubo->instanceLUTReference;
-        SamplerState textureSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
-
-        while (rq.Proceed())
-        {
-            uint instanceID = rq.CandidateRayInstanceCustomIndex();
-            uint primIndex = rq.CandidatePrimitiveIndex();
-
-            InstanceLUT lut = instanceLUTBuffer[instanceID];
-
-            if (lut.alphaMode == 0 || lut.baseColorTextureIndex == 0xFFFFFFFF)
-            {
-                rq.CommitNonOpaqueTriangleHit();
-            }
-            else
-            {
-                float2 uv = intersection_uv(lut, primIndex, rq.CandidateTriangleBarycentrics());
-                Texture2D tex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + lut.baseColorTextureIndex, 0));
-                float4 intersectionColor = tex.SampleLevel(textureSampler, uv, 0);
-
-                if (intersectionColor.a < lut.alphaCutoff)
-                {
-                    // Leaf gap: transparent, continue searching for next geometry behind it
-                }
-                else
-                {
-                    rq.CommitNonOpaqueTriangleHit();
-                }
-            }
-        }
-
-        hit = (rq.CommittedStatus() == COMMITTED_TRIANGLE_HIT);
-        if (!hit)
-            return float3(0.0);
-
-        // Query closest committed hit
-        uint committedInstanceID = rq.CommittedRayInstanceCustomIndex();
-        uint committedPrimIndex = rq.CommittedPrimitiveIndex();
-        float2 committedBary = rq.CommittedTriangleBarycentrics();
-
-        InstanceLUT hitLut = instanceLUTBuffer[committedInstanceID];
-        uint32_t* indices = (uint32_t*)hitLut.indexBufferAddress;
-        Vertex* vertices = (Vertex*)hitLut.vertexBufferAddress;
-
-        uint i0, i1, i2;
-        if (hitLut.indexBufferAddress != 0)
-        {
-            i0 = indices[committedPrimIndex * 3 + 0];
-            i1 = indices[committedPrimIndex * 3 + 1];
-            i2 = indices[committedPrimIndex * 3 + 2];
-        }
-        else
-        {
-            i0 = committedPrimIndex * 3 + 0;
-            i1 = committedPrimIndex * 3 + 1;
-            i2 = committedPrimIndex * 3 + 2;
-        }
-
-        float w0 = 1.0 - committedBary.x - committedBary.y;
-        float w1 = committedBary.x;
-        float w2 = committedBary.y;
-
-        float2 hitUV = w0 * vertices[i0].uv0 + w1 * vertices[i1].uv0 + w2 * vertices[i2].uv0;
-        float3 localNormal = normalize(w0 * vertices[i0].normal + w1 * vertices[i1].normal + w2 * vertices[i2].normal);
-        float3 hitNormal = normalize(mul((float3x3)hitLut.normalMatrix, localNormal));
-
-        if (hitLut.doubleSided != 0 && dot(hitNormal, -R) < 0.0)
-        {
-            hitNormal = -hitNormal;
-        }
-
-        float hitT = rq.CommittedRayT();
-        float3 hitPos = rayOrigin + R * hitT;
-
-        float3 albedo = hitLut.baseColorFactor.rgb;
-        if (hitLut.baseColorTextureIndex != 0xFFFFFFFF)
-        {
-            Texture2D hitTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + hitLut.baseColorTextureIndex, 0));
-            albedo *= hitTex.SampleLevel(textureSampler, hitUV, 0).rgb;
-        }
-
-        // Direct lighting from scene lights on the reflected surface
-        LightData* lights = (LightData*)ubo->lightDataReference;
-        float3 directLight = float3(0.0);
-
-        for (uint i = 0; i < ubo->lightCount; i++)
-        {
-            LightData light = lights[i];
-            uint lightType = (uint)light.position.w;
-
-            float3 l;
-            float attenuation = 1.0;
-
-            if (lightType == 0) // Directional Light
-            {
-                l = normalize(light.direction.xyz);
-            }
-            else // Point (1) or Spot (2)
-            {
-                float3 lightVec = light.position.xyz - hitPos;
-                float dist = length(lightVec);
-                l = dist > 0.0001 ? lightVec / dist : float3(0.0, 1.0, 0.0);
-
-                float range = light.direction.w;
-                if (range > 0.0)
-                {
-                    float dOverR = dist / range;
-                    float window = max(1.0 - pow(dOverR, 4.0), 0.0);
-                    attenuation = window / (dist * dist);
-                }
-                else
-                {
-                    attenuation = 1.0 / (dist * dist);
-                }
-
-                if (lightType == 2) // Spot Cone
-                {
-                    float cd = dot(normalize(light.direction.xyz), -l);
-                    float lightAngleScale = light.spotParams.x;
-                    float lightAngleOffset = light.spotParams.y;
-                    float angularAttenuation = saturate(cd * lightAngleScale + lightAngleOffset);
-                    angularAttenuation *= angularAttenuation;
-                    attenuation *= angularAttenuation;
-                }
-            }
-
-            if (attenuation <= 0.0)
-                continue;
-
-            float NdotL = max(dot(hitNormal, l), 0.0);
-            if (NdotL > 0.0)
-            {
-                float3 lightRadiance = light.color.rgb * light.color.w * attenuation;
-                directLight += (albedo / 3.14159265) * lightRadiance * NdotL;
-            }
-        }
-
-        // Ambient room bounce fallback
-        float3 ambientLight = albedo * 0.15 * ubo->scaleIBLAmbient;
-
-        // Emissive light from hit surface (e.g. Cornell Box ceiling light)
-        float3 emissiveLight = hitLut.emissiveFactor.rgb * hitLut.emissiveFactor.a;
-
-        return directLight + ambientLight + emissiveLight;
-    }
 
     [shader("fragment")]
     float4 fragMain(
@@ -427,7 +245,7 @@
         Texture2D shadowMaskTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.shadowMaskTextureIndex, 0));
         float2 shadowData = shadowMaskTex.Load(int3(pixelCoord, 0)).rg;
         float shadowFactor;
-        if (pushConstant.nrdShadowsEnabled != 0)
+        if ((pushConstant.nrdShadowsEnabled & 1) != 0)
         {
             float s = shadowData.r;
             shadowFactor = clamp(s * s, 0.0, 1.0);
@@ -474,8 +292,8 @@
 
         // 5. Vectors
         float3 v = normalize(ubo->cameraWorldPos.xyz - worldPos);
-        float NdotV = clamp(abs(dot(n, v)), 0.001, 1.0);
-        float3 reflection = -normalize(reflect(v, n));
+        float NdotV = clamp(dot(n, v), 0.001, 1.0);
+        float3 reflection = normalize(reflect(-v, n));
 
         // 6. Direct Analytical Lighting (Directional, Point, Spot)
             float3 directLighting = float3(0.0);
@@ -531,12 +349,18 @@
                     continue;
                 }
 
+                float NdotL_raw = dot(n, l);
+                if (NdotL_raw <= 0.0)
+                {
+                    continue;
+                }
+
                 // Comes from 2.5 ShadowMask Pass
                 float lightShadow = (i == 0) ? shadowFactor : 1.0;
 
                 float3 h = normalize(l + v);
 
-                float NdotL = clamp(dot(n, l), 0.001, 1.0);
+                float NdotL = clamp(NdotL_raw, 0.001, 1.0);
                 float NdotH = clamp(dot(n, h), 0.0, 1.0);
                 float LdotH = clamp(dot(l, h), 0.0, 1.0);
                 float VdotH = clamp(dot(v, h), 0.0, 1.0);
@@ -567,7 +391,7 @@
                 directLighting += NdotL * lightRadiance * (diffuseContrib + specContrib);
             }
 
-        // 7. Image-Based Lighting (IBL)
+        // 7. Image-Based Lighting (IBL) & Decoupled RT Reflections
         PBRInfo iblInputs = PBRInfo(
             1.0,
             NdotV,
@@ -582,7 +406,39 @@
             diffuseColor,
             specularColor
         );
-        float3 iblColor = getIBLContribution(ubo, iblInputs, n, reflection);
+        IBLResult ibl = getIBLContribution(ubo, iblInputs, n, reflection);
+        float3 ambientDiffuse = ibl.diffuse;
+        float3 ambientSpecular = ibl.specular;
+
+        // Sample Decoupled RT Reflection (Denoised via NRD REBLUR/RELAX or Raw 1-SPP)
+        float3 reflColor = float3(0.0);
+        bool hasRTReflection = (ubo->enableRTReflections != 0 && perceptualRoughness < 0.85);
+        if (hasRTReflection)
+        {
+            Texture2D reflTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.reflectionTextureIndex, 0));
+            float4 reflSample = reflTex.Load(int3(pixelCoord, 0));
+            reflColor = reflSample.rgb;
+
+            uint reflDenoiserMode = (pushConstant.nrdShadowsEnabled >> 1) & 3;
+            if (reflDenoiserMode == 1) // NRD REBLUR outputs in YCoCg
+            {
+                reflColor = YCoCgToLinear(reflColor);
+            }
+
+            SamplerState samplerBrdf = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_BRDFLUT, 0));
+            Texture2D brdfTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->brdfLutIndex, 0));
+            float3 brdf = brdfTex.Sample(samplerBrdf, float2(NdotV, 1.0 - perceptualRoughness)).rgb;
+
+            // Specular Fresnel factor: only ~0.04 (4%) for dielectrics (plants, stone), ~0.9-1.0 for metals
+            float3 specularFactor = specularColor * brdf.x + brdf.y;
+            float3 rtSpecular = reflColor * specularFactor;
+
+            // Smooth fade out into environment IBL as roughness reaches 0.85
+            float rtWeight = saturate((0.85 - perceptualRoughness) / 0.15);
+            ambientSpecular = lerp(ambientSpecular, rtSpecular, rtWeight);
+        }
+
+        float3 iblColor = ambientDiffuse + ambientSpecular;
 
         // =========================================================================
         // DEBUG OUTPUT SELECTION
@@ -668,36 +524,18 @@
             return float4(shadowFactor, shadowFactor, shadowFactor, 1.0);
         }
 
-        // =========================================================================
-            // Mode 0: FULL PBR LIT SCENE (Direct + IBL + AO + Emission + Reflections)
-            // =========================================================================
-            float3 finalColor = directLighting + iblColor;
-            finalColor = lerp(finalColor, finalColor * occlusion, 1.0);
-            finalColor += emissionSample.rgb;
-
-            // TASK11: Ray Query Reflections
-            bool reflHit = false;
-            float3 reflColor = float3(0.0);
-
-            // Only trace reflection rays for glossy / smooth surfaces (perceptualRoughness < 0.6)
-            if (ubo->enableRTReflections != 0 && perceptualRoughness < 0.6)
-            {
-                reflColor = trace_reflection(ubo, worldPos, n, v, reflHit);
-            }
-
-            // Mode 14: RT Reflections Debug View (Hit Color or Black)
-            if (pushConstant.debugMode == 14)
-            {
-                return float4(reflHit ? reflColor : float3(0.0), 1.0);
-            }
-
-            if (reflHit)
-            {
-                // Blend reflection based on glossiness and metallic:
-                // Mirror metals (metallic == 1, roughness == 0) blend up to 95%, dielectrics up to 70%
-                float reflWeight = (1.0 - perceptualRoughness) * lerp(0.7, 0.95, metallic);
-                finalColor = lerp(finalColor, reflColor, reflWeight);
-            }
-
-            return float4(finalColor, 1.0);
+        // Mode 14: RT Reflections Debug View (Hit Radiance or Denoised Reflection)
+        if (pushConstant.debugMode == 14)
+        {
+            return float4(reflColor, 1.0);
         }
+
+        // =========================================================================
+        // Mode 0: FULL PBR LIT SCENE (Direct + IBL + AO + Emission + Reflections)
+        // =========================================================================
+        float3 finalColor = directLighting + iblColor;
+        finalColor = lerp(finalColor, finalColor * occlusion, 1.0);
+        finalColor += emissionSample.rgb;
+
+        return float4(finalColor, 1.0);
+    }

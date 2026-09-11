@@ -1,185 +1,745 @@
 AssetRegistry:
+  - Handle: 150365958368520112
+    FilePath: Models/Sponza/Textures/14170708867020035030.ntex
+    SourceFilePath: Models/Sponza/14170708867020035030.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
   - Handle: 284400685509200133
     FilePath: Scenes/3D-Scene.nox
     SourceFilePath: Scenes/3D-Scene.nox
     Type: AssetType::Scene
-  - Handle: 628180141406162795
-    FilePath: Models/CornellBox-Sphere/Materials/CornellBox-Sphere_backWall.nmat
-    SourceFilePath: Models/CornellBox-Sphere/Materials/CornellBox-Sphere_backWall.nmat
+  - Handle: 629247030867910579
+    FilePath: Models/Sponza/Materials/Sponza_Material_8.nmat
+    SourceFilePath: Models/Sponza/Materials/Sponza_Material_8.nmat
     Type: AssetType::Material
-  - Handle: 1194732318065482695
-    FilePath: Models/CornellBox-Original/Materials/CornellBox-Original_light.007.nmat
-    SourceFilePath: Models/CornellBox-Original/Materials/CornellBox-Original_light.007.nmat
+  - Handle: 672420169438652116
+    FilePath: Models/SpecGlossVsMetalRough/Textures/SpecGlossVsMetalRough_tex_4.ntex
+    SourceFilePath: Models/SpecGlossVsMetalRough/Textures/SpecGlossVsMetalRough_tex_4.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 768622397571652363
+    FilePath: Models/Sponza/Materials/Sponza_Material_14.nmat
+    SourceFilePath: Models/Sponza/Materials/Sponza_Material_14.nmat
     Type: AssetType::Material
-  - Handle: 2074548183165322695
-    FilePath: Models/Fox/Meshes/Fox_Run.nanim
-    SourceFilePath: Models/Fox/Meshes/Fox_Run.nanim
-    Type: AssetType::AnimationSequence
-  - Handle: 2355125743156849425
-    FilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_0.ntex
-    SourceFilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_0.ntex
+  - Handle: 802903468704062460
+    FilePath: Models/Sponza/Textures/6667038893015345571.ntex
+    SourceFilePath: Models/Sponza/6667038893015345571.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 803280363127435747
+    FilePath: Models/Sponza/Textures/15295713303328085182.ntex
+    SourceFilePath: Models/Sponza/15295713303328085182.jpg
     Type: AssetType::Texture2D
     TextureSpec:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
-  - Handle: 2450698901534752524
-    FilePath: Models/CornellBox-Original/Materials/CornellBox-Original_ceiling.007.nmat
-    SourceFilePath: Models/CornellBox-Original/Materials/CornellBox-Original_ceiling.007.nmat
+  - Handle: 1035953818098941407
+    FilePath: Models/Sponza/Materials/Sponza_Material_7.nmat
+    SourceFilePath: Models/Sponza/Materials/Sponza_Material_7.nmat
     Type: AssetType::Material
-  - Handle: 3246969113192297207
-    FilePath: Models/Fox/Meshes/Fox.nmesh
-    SourceFilePath: Models/Fox/Fox.gltf
+  - Handle: 1508139164721441227
+    FilePath: Models/Sponza/Textures/white.ntex
+    SourceFilePath: Models/Sponza/white.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 1608294687610163868
+    FilePath: Models/SpecGlossVsMetalRough/Meshes/SpecGlossVsMetalRough.nmesh
+    SourceFilePath: Models/SpecGlossVsMetalRough/SpecGlossVsMetalRough.glb
     Type: AssetType::Mesh
-  - Handle: 3287924992552235101
-    FilePath: Models/Fox/Meshes/Fox_Survey.nanim
-    SourceFilePath: Models/Fox/Meshes/Fox_Survey.nanim
-    Type: AssetType::AnimationSequence
-  - Handle: 3639825994299164144
-    FilePath: Models/CornellBox-Original/Meshes/CornellBox-Original.nmesh
-    SourceFilePath: Models/CornellBox-Original/CornellBox-Original.gltf
+  - Handle: 1730698692450538614
+    FilePath: Models/Sponza/Textures/2374361008830720677.ntex
+    SourceFilePath: Models/Sponza/2374361008830720677.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 2074408738490978313
+    FilePath: Models/Sponza/Textures/332936164838540657.ntex
+    SourceFilePath: Models/Sponza/332936164838540657.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 2118074532114796494
+    FilePath: Models/Sponza/Textures/759203620573749278.ntex
+    SourceFilePath: Models/Sponza/759203620573749278.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 2167076190647040090
+    FilePath: Models/Sponza/Meshes/Sponza.nmesh
+    SourceFilePath: Models/Sponza/Sponza.gltf
     Type: AssetType::Mesh
-  - Handle: 3857021536663714078
-    FilePath: Models/CornellBox-Sphere/Materials/CornellBox-Sphere_rightSphere.nmat
-    SourceFilePath: Models/CornellBox-Sphere/Materials/CornellBox-Sphere_rightSphere.nmat
-    Type: AssetType::Material
-  - Handle: 4869236123690462678
-    FilePath: Models/CornellBox-Original/Materials/CornellBox-Original_floor.007.nmat
-    SourceFilePath: Models/CornellBox-Original/Materials/CornellBox-Original_floor.007.nmat
-    Type: AssetType::Material
-  - Handle: 5700840898858191134
-    FilePath: Models/CornellBox-Original/Materials/CornellBox-Original_backWall.007.nmat
-    SourceFilePath: Models/CornellBox-Original/Materials/CornellBox-Original_backWall.007.nmat
-    Type: AssetType::Material
-  - Handle: 5803239819837397058
-    FilePath: Models/CornellBox-Sphere/Materials/CornellBox-Sphere_rightWall.nmat
-    SourceFilePath: Models/CornellBox-Sphere/Materials/CornellBox-Sphere_rightWall.nmat
-    Type: AssetType::Material
-  - Handle: 5924974148496953984
-    FilePath: Models/Box/Materials/Box_Red_Instance_6322294098808749156.nmat
-    SourceFilePath: Models/Box/Materials/Box_Red_Instance_6322294098808749156.nmat
-    Type: AssetType::Material
-  - Handle: 6537536419484704265
-    FilePath: Models/DamagedHelmet/Meshes/DamagedHelmet.nmesh
-    SourceFilePath: Models/DamagedHelmet/Meshes/DamagedHelmet.nmesh
-    Type: AssetType::Mesh
-  - Handle: 7520141906006346444
-    FilePath: Models/CornellBox-Original/Materials/CornellBox-Original_leftWall.007.nmat
-    SourceFilePath: Models/CornellBox-Original/Materials/CornellBox-Original_leftWall.007.nmat
-    Type: AssetType::Material
-  - Handle: 7562238990589021482
-    FilePath: Models/Box/Meshes/Box.nmesh
-    SourceFilePath: Models/Box/Box.glb
-    Type: AssetType::Mesh
-  - Handle: 8206982747548630179
-    FilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_4.ntex
-    SourceFilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_4.ntex
+  - Handle: 2682676782642930043
+    FilePath: Models/Sponza/Textures/14650633544276105767.ntex
+    SourceFilePath: Models/Sponza/14650633544276105767.jpg
     Type: AssetType::Texture2D
     TextureSpec:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
-  - Handle: 8233010243962803859
-    FilePath: Models/CornellBox-Sphere/Materials/CornellBox-Sphere_floor.nmat
-    SourceFilePath: Models/CornellBox-Sphere/Materials/CornellBox-Sphere_floor.nmat
-    Type: AssetType::Material
-  - Handle: 8378455864061764936
-    FilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_2.ntex
-    SourceFilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_2.ntex
+  - Handle: 2929646370584654415
+    FilePath: Models/Sponza/Textures/7441062115984513793.ntex
+    SourceFilePath: Models/Sponza/7441062115984513793.jpg
     Type: AssetType::Texture2D
     TextureSpec:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
-  - Handle: 9020476312662236457
-    FilePath: Models/CornellBox-Sphere/Materials/CornellBox-Sphere_light.nmat
-    SourceFilePath: Models/CornellBox-Sphere/Materials/CornellBox-Sphere_light.nmat
+  - Handle: 2998218234486674687
+    FilePath: Models/Sponza/Materials/Sponza_Material_17.nmat
+    SourceFilePath: Models/Sponza/Materials/Sponza_Material_17.nmat
     Type: AssetType::Material
-  - Handle: 9032025084249123886
-    FilePath: Models/Fox/Textures/Texture.ntex
-    SourceFilePath: Models/Fox/Texture.png
+  - Handle: 3108922315280685583
+    FilePath: Models/Sponza/Materials/Sponza_Material_6.nmat
+    SourceFilePath: Models/Sponza/Materials/Sponza_Material_6.nmat
+    Type: AssetType::Material
+  - Handle: 3339194402428202586
+    FilePath: Models/Sponza/Textures/10381718147657362067.ntex
+    SourceFilePath: Models/Sponza/10381718147657362067.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 3487629228101231606
+    FilePath: Models/Sponza/Textures/4477655471536070370.ntex
+    SourceFilePath: Models/Sponza/4477655471536070370.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 3579415858564907932
+    FilePath: Models/Sponza/Textures/5792855332885324923.ntex
+    SourceFilePath: Models/Sponza/5792855332885324923.jpg
     Type: AssetType::Texture2D
     TextureSpec:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
-  - Handle: 9346186886319135241
-    FilePath: Models/CornellBox-Original/Materials/CornellBox-Original_tallBox.001.nmat
-    SourceFilePath: Models/CornellBox-Original/Materials/CornellBox-Original_tallBox.001.nmat
+  - Handle: 3596598519206231658
+    FilePath: Models/Sponza/Materials/Sponza_Material_13.nmat
+    SourceFilePath: Models/Sponza/Materials/Sponza_Material_13.nmat
     Type: AssetType::Material
-  - Handle: 10584556158970797074
-    FilePath: Models/Box/Materials/Box_Red_Instance_10716039454136746130.nmat
-    SourceFilePath: Models/Box/Materials/Box_Red_Instance_10716039454136746130.nmat
-    Type: AssetType::Material
-  - Handle: 10954185523191953878
-    FilePath: Models/CornellBox-Sphere/Materials/CornellBox-Sphere_leftSphere.nmat
-    SourceFilePath: Models/CornellBox-Sphere/Materials/CornellBox-Sphere_leftSphere.nmat
-    Type: AssetType::Material
-  - Handle: 11575064581848346143
-    FilePath: Models/Box/Materials/Box_Red_Instance_10716039454136746130_Instance_2462416643620510603_Instance_15338619392834088379_Instance_12552764984690426143.nmat
-    SourceFilePath: Models/Box/Materials/Box_Red_Instance_10716039454136746130_Instance_2462416643620510603_Instance_15338619392834088379_Instance_12552764984690426143.nmat
-    Type: AssetType::Material
-  - Handle: 12104204518536809933
-    FilePath: Models/CornellBox-Original/Materials/CornellBox-Original_shortBox.003.nmat
-    SourceFilePath: Models/CornellBox-Original/Materials/CornellBox-Original_shortBox.003.nmat
-    Type: AssetType::Material
-  - Handle: 13208704617093807453
-    FilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_3.ntex
-    SourceFilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_3.ntex
+  - Handle: 3600479979399246393
+    FilePath: Models/Sponza/Textures/2969916736137545357.ntex
+    SourceFilePath: Models/Sponza/2969916736137545357.jpg
     Type: AssetType::Texture2D
     TextureSpec:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
-  - Handle: 13494963088403364537
-    FilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_1.ntex
-    SourceFilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_1.ntex
+  - Handle: 3608915240694653674
+    FilePath: Models/Sponza/Textures/7268504077753552595.ntex
+    SourceFilePath: Models/Sponza/7268504077753552595.jpg
     Type: AssetType::Texture2D
     TextureSpec:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
-  - Handle: 13590567474650257432
-    FilePath: Models/Fox/Meshes/Fox.nskel
-    SourceFilePath: Models/Fox/Meshes/Fox.nskel
-    Type: AssetType::Skeleton
-  - Handle: 13719473565864025785
-    FilePath: Models/Fox/Meshes/Fox_Walk.nanim
-    SourceFilePath: Models/Fox/Meshes/Fox_Walk.nanim
-    Type: AssetType::AnimationSequence
-  - Handle: 13797063291917513190
-    FilePath: Models/Fox/Materials/Fox_fox_material.nmat
-    SourceFilePath: Models/Fox/Materials/Fox_fox_material.nmat
+  - Handle: 3900525952773879425
+    FilePath: Models/Sponza/Textures/2299742237651021498.ntex
+    SourceFilePath: Models/Sponza/2299742237651021498.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 3915150495941993863
+    FilePath: Models/Sponza/Materials/Sponza_Material_21.nmat
+    SourceFilePath: Models/Sponza/Materials/Sponza_Material_21.nmat
     Type: AssetType::Material
-  - Handle: 14442448987381621717
-    FilePath: Models/CornellBox-Sphere/Materials/CornellBox-Sphere_leftWall.nmat
-    SourceFilePath: Models/CornellBox-Sphere/Materials/CornellBox-Sphere_leftWall.nmat
+  - Handle: 4344701145778501143
+    FilePath: Models/Sponza/Textures/2185409758123873465.ntex
+    SourceFilePath: Models/Sponza/2185409758123873465.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 4373848161455831356
+    FilePath: Models/SpecGlossVsMetalRough/Materials/SpecGlossVsMetalRough_BottleMat_SpecGloss.nmat
+    SourceFilePath: Models/SpecGlossVsMetalRough/Materials/SpecGlossVsMetalRough_BottleMat_SpecGloss.nmat
     Type: AssetType::Material
-  - Handle: 15025713658148557039
-    FilePath: Models/CornellBox-Sphere/Materials/CornellBox-Sphere_ceiling.nmat
-    SourceFilePath: Models/CornellBox-Sphere/Materials/CornellBox-Sphere_ceiling.nmat
+  - Handle: 4644693217562300793
+    FilePath: Models/Sponza/Materials/Sponza_Material_4.nmat
+    SourceFilePath: Models/Sponza/Materials/Sponza_Material_4.nmat
     Type: AssetType::Material
-  - Handle: 16386892812733954348
-    FilePath: Models/DamagedHelmet/Materials/DamagedHelmet_Material_MR.nmat
-    SourceFilePath: Models/DamagedHelmet/Materials/DamagedHelmet_Material_MR.nmat
+  - Handle: 4774808525240898677
+    FilePath: Models/SpecGlossVsMetalRough/Textures/SpecGlossVsMetalRough_tex_7.ntex
+    SourceFilePath: Models/SpecGlossVsMetalRough/Textures/SpecGlossVsMetalRough_tex_7.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 4795084485459429989
+    FilePath: Models/Sponza/Textures/10388182081421875623.ntex
+    SourceFilePath: Models/Sponza/10388182081421875623.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 5108249433636612956
+    FilePath: Models/Sponza/Textures/13982482287905699490.ntex
+    SourceFilePath: Models/Sponza/13982482287905699490.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 5116735738623632714
+    FilePath: Models/Sponza/Textures/8006627369776289000.ntex
+    SourceFilePath: Models/Sponza/8006627369776289000.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 5291253998697781521
+    FilePath: Models/SpecGlossVsMetalRough/Textures/SpecGlossVsMetalRough_tex_1.ntex
+    SourceFilePath: Models/SpecGlossVsMetalRough/Textures/SpecGlossVsMetalRough_tex_1.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 5555988032058728764
+    FilePath: Models/Sponza/Materials/Sponza_Material_0.nmat
+    SourceFilePath: Models/Sponza/Materials/Sponza_Material_0.nmat
     Type: AssetType::Material
-  - Handle: 16963796367680183809
-    FilePath: Models/Box/Materials/Box_Red.nmat
-    SourceFilePath: Models/Box/Materials/Box_Red.nmat
+  - Handle: 5819787386123581044
+    FilePath: Models/Sponza/Textures/3827035219084910048.ntex
+    SourceFilePath: Models/Sponza/3827035219084910048.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 5848695652429173586
+    FilePath: Models/Sponza/Textures/8481240838833932244.ntex
+    SourceFilePath: Models/Sponza/8481240838833932244.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 5854745234884357367
+    FilePath: Models/Sponza/Materials/Sponza_Material_15.nmat
+    SourceFilePath: Models/Sponza/Materials/Sponza_Material_15.nmat
     Type: AssetType::Material
-  - Handle: 17169980057311162252
-    FilePath: Models/Box/Materials/Box_Red_Instance_10716039454136746130_Instance_2462416643620510603.nmat
-    SourceFilePath: Models/Box/Materials/Box_Red_Instance_10716039454136746130_Instance_2462416643620510603.nmat
+  - Handle: 5874196390111843482
+    FilePath: Models/Sponza/Textures/13824894030729245199.ntex
+    SourceFilePath: Models/Sponza/13824894030729245199.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 6081788434679641142
+    FilePath: Models/Sponza/Textures/6047387724914829168.ntex
+    SourceFilePath: Models/Sponza/6047387724914829168.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 6317013962339685670
+    FilePath: Models/Sponza/Textures/2411100444841994089.ntex
+    SourceFilePath: Models/Sponza/2411100444841994089.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 6692753453454818524
+    FilePath: Models/Sponza/Textures/715093869573992647.ntex
+    SourceFilePath: Models/Sponza/715093869573992647.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 6802262179805633976
+    FilePath: Models/Sponza/Textures/9916269861720640319.ntex
+    SourceFilePath: Models/Sponza/9916269861720640319.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 6836781571977712175
+    FilePath: Models/Sponza/Textures/16275776544635328252.ntex
+    SourceFilePath: Models/Sponza/16275776544635328252.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 6917527084433523434
+    FilePath: Models/Sponza/Textures/8750083169368950601.ntex
+    SourceFilePath: Models/Sponza/8750083169368950601.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 6933204033081265284
+    FilePath: Models/SpecGlossVsMetalRough/Textures/SpecGlossVsMetalRough_tex_5.ntex
+    SourceFilePath: Models/SpecGlossVsMetalRough/Textures/SpecGlossVsMetalRough_tex_5.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 7168744197129831700
+    FilePath: Models/SpecGlossVsMetalRough/Materials/SpecGlossVsMetalRough_BottleMat_MR.nmat
+    SourceFilePath: Models/SpecGlossVsMetalRough/Materials/SpecGlossVsMetalRough_BottleMat_MR.nmat
     Type: AssetType::Material
-  - Handle: 17291510554910159197
-    FilePath: Models/Box/Materials/Box_Red_Instance_10716039454136746130_Instance_2462416643620510603_Instance_15338619392834088379.nmat
-    SourceFilePath: Models/Box/Materials/Box_Red_Instance_10716039454136746130_Instance_2462416643620510603_Instance_15338619392834088379.nmat
+  - Handle: 7183382990054495691
+    FilePath: Models/Sponza/Textures/4871783166746854860.ntex
+    SourceFilePath: Models/Sponza/4871783166746854860.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 7566061074477615974
+    FilePath: Models/Sponza/Textures/6151467286084645207.ntex
+    SourceFilePath: Models/Sponza/6151467286084645207.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 8491552615314869794
+    FilePath: Models/SpecGlossVsMetalRough/Materials/SpecGlossVsMetalRough_Label Material SpecGloss.nmat
+    SourceFilePath: Models/SpecGlossVsMetalRough/Materials/SpecGlossVsMetalRough_Label Material SpecGloss.nmat
     Type: AssetType::Material
-  - Handle: 17378343803687919801
-    FilePath: Models/CornellBox-Original/Materials/CornellBox-Original_rightWall.007.nmat
-    SourceFilePath: Models/CornellBox-Original/Materials/CornellBox-Original_rightWall.007.nmat
+  - Handle: 8572012175807417982
+    FilePath: Models/Sponza/Materials/Sponza_Material_3.nmat
+    SourceFilePath: Models/Sponza/Materials/Sponza_Material_3.nmat
     Type: AssetType::Material
-  - Handle: 17870295934081198928
-    FilePath: Models/CornellBox-Sphere/Meshes/CornellBox-Sphere.nmesh
-    SourceFilePath: Models/CornellBox-Sphere/CornellBox-Sphere.gltf
-    Type: AssetType::Mesh
+  - Handle: 8641642098542994815
+    FilePath: Models/Sponza/Materials/Sponza_Material_10.nmat
+    SourceFilePath: Models/Sponza/Materials/Sponza_Material_10.nmat
+    Type: AssetType::Material
+  - Handle: 8654122996976677727
+    FilePath: Models/SpecGlossVsMetalRough/Materials/SpecGlossVsMetalRough_Label Material MetalRough.nmat
+    SourceFilePath: Models/SpecGlossVsMetalRough/Materials/SpecGlossVsMetalRough_Label Material MetalRough.nmat
+    Type: AssetType::Material
+  - Handle: 8964845419396798769
+    FilePath: Models/SpecGlossVsMetalRough/Textures/SpecGlossVsMetalRough_tex_3.ntex
+    SourceFilePath: Models/SpecGlossVsMetalRough/Textures/SpecGlossVsMetalRough_tex_3.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 9205946154284836706
+    FilePath: Models/Sponza/Textures/16299174074766089871.ntex
+    SourceFilePath: Models/Sponza/16299174074766089871.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 9882380035134431468
+    FilePath: Models/SpecGlossVsMetalRough/Textures/SpecGlossVsMetalRough_tex_0.ntex
+    SourceFilePath: Models/SpecGlossVsMetalRough/Textures/SpecGlossVsMetalRough_tex_0.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 10333574298122075846
+    FilePath: Models/Sponza/Materials/Sponza_Material_20.nmat
+    SourceFilePath: Models/Sponza/Materials/Sponza_Material_20.nmat
+    Type: AssetType::Material
+  - Handle: 10740518504067132963
+    FilePath: Models/Sponza/Materials/Sponza_Material_23.nmat
+    SourceFilePath: Models/Sponza/Materials/Sponza_Material_23.nmat
+    Type: AssetType::Material
+  - Handle: 10834723066755364630
+    FilePath: Models/Sponza/Textures/14267839433702832875.ntex
+    SourceFilePath: Models/Sponza/14267839433702832875.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 10982800852196486899
+    FilePath: Models/Sponza/Textures/13196865903111448057.ntex
+    SourceFilePath: Models/Sponza/13196865903111448057.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 11001398671703880917
+    FilePath: Models/Sponza/Materials/Sponza_Material_5.nmat
+    SourceFilePath: Models/Sponza/Materials/Sponza_Material_5.nmat
+    Type: AssetType::Material
+  - Handle: 11169895583488132136
+    FilePath: Models/Sponza/Textures/8747919177698443163.ntex
+    SourceFilePath: Models/Sponza/8747919177698443163.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 11258762405739863103
+    FilePath: Models/SpecGlossVsMetalRough/Textures/SpecGlossVsMetalRough_tex_6.ntex
+    SourceFilePath: Models/SpecGlossVsMetalRough/Textures/SpecGlossVsMetalRough_tex_6.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 11312935121572337110
+    FilePath: Models/Sponza/Textures/8783994986360286082.ntex
+    SourceFilePath: Models/Sponza/8783994986360286082.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 11396254604846428696
+    FilePath: Models/Sponza/Materials/Sponza_Material_2.nmat
+    SourceFilePath: Models/Sponza/Materials/Sponza_Material_2.nmat
+    Type: AssetType::Material
+  - Handle: 11497549198870787307
+    FilePath: Models/Sponza/Materials/Sponza_Material_12.nmat
+    SourceFilePath: Models/Sponza/Materials/Sponza_Material_12.nmat
+    Type: AssetType::Material
+  - Handle: 11649657622565568563
+    FilePath: Models/Sponza/Textures/1219024358953944284.ntex
+    SourceFilePath: Models/Sponza/1219024358953944284.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 11791830277119886697
+    FilePath: Models/Sponza/Materials/Sponza_Material_16.nmat
+    SourceFilePath: Models/Sponza/Materials/Sponza_Material_16.nmat
+    Type: AssetType::Material
+  - Handle: 12055622780826643343
+    FilePath: Models/Sponza/Textures/3455394979645218238.ntex
+    SourceFilePath: Models/Sponza/3455394979645218238.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 12096810749433155783
+    FilePath: Models/Sponza/Textures/17876391417123941155.ntex
+    SourceFilePath: Models/Sponza/17876391417123941155.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 12139371060270102485
+    FilePath: Models/Sponza/Textures/466164707995436622.ntex
+    SourceFilePath: Models/Sponza/466164707995436622.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 12140272472822803207
+    FilePath: Models/Sponza/Textures/14118779221266351425.ntex
+    SourceFilePath: Models/Sponza/14118779221266351425.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 12322602522497671884
+    FilePath: Models/Sponza/Textures/5823059166183034438.ntex
+    SourceFilePath: Models/Sponza/5823059166183034438.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 12411169858486197069
+    FilePath: Models/Sponza/Materials/Sponza_Material_9.nmat
+    SourceFilePath: Models/Sponza/Materials/Sponza_Material_9.nmat
+    Type: AssetType::Material
+  - Handle: 12667579991802306024
+    FilePath: Models/Sponza/Textures/2051777328469649772.ntex
+    SourceFilePath: Models/Sponza/2051777328469649772.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 12763230391079382455
+    FilePath: Models/Sponza/Textures/6772804448157695701.ntex
+    SourceFilePath: Models/Sponza/6772804448157695701.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 12765923651450818674
+    FilePath: Models/Sponza/Textures/11872827283454512094.ntex
+    SourceFilePath: Models/Sponza/11872827283454512094.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 12819487896473850774
+    FilePath: Models/Sponza/Textures/4601176305987539675.ntex
+    SourceFilePath: Models/Sponza/4601176305987539675.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 12850783426233117520
+    FilePath: Models/Sponza/Textures/15722799267630235092.ntex
+    SourceFilePath: Models/Sponza/15722799267630235092.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 13126535763909829683
+    FilePath: Models/Sponza/Textures/755318871556304029.ntex
+    SourceFilePath: Models/Sponza/755318871556304029.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 13131243684844915099
+    FilePath: Models/Sponza/Textures/11490520546946913238.ntex
+    SourceFilePath: Models/Sponza/11490520546946913238.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 13706941621925631228
+    FilePath: Models/Sponza/Materials/Sponza_Material_11.nmat
+    SourceFilePath: Models/Sponza/Materials/Sponza_Material_11.nmat
+    Type: AssetType::Material
+  - Handle: 13872071982585247212
+    FilePath: Models/Sponza/Textures/11968150294050148237.ntex
+    SourceFilePath: Models/Sponza/11968150294050148237.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 14322524369075924243
+    FilePath: Models/Sponza/Textures/7645212358685992005.ntex
+    SourceFilePath: Models/Sponza/7645212358685992005.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 14654753025320220081
+    FilePath: Models/Sponza/Textures/12501374198249454378.ntex
+    SourceFilePath: Models/Sponza/12501374198249454378.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 14725381129597692234
+    FilePath: Models/Sponza/Textures/16885566240357350108.ntex
+    SourceFilePath: Models/Sponza/16885566240357350108.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 14782749380271615548
+    FilePath: Models/Sponza/Textures/8114461559286000061.ntex
+    SourceFilePath: Models/Sponza/8114461559286000061.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 14845484149102818419
+    FilePath: Models/Sponza/Textures/4975155472559461469.ntex
+    SourceFilePath: Models/Sponza/4975155472559461469.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 15262389375291998184
+    FilePath: Models/Sponza/Textures/17556969131407844942.ntex
+    SourceFilePath: Models/Sponza/17556969131407844942.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 15492727354467459379
+    FilePath: Models/Sponza/Textures/4910669866631290573.ntex
+    SourceFilePath: Models/Sponza/4910669866631290573.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 15662375430425987151
+    FilePath: Models/Sponza/Materials/Sponza_Material_1.nmat
+    SourceFilePath: Models/Sponza/Materials/Sponza_Material_1.nmat
+    Type: AssetType::Material
+  - Handle: 15668055516015448140
+    FilePath: Models/SpecGlossVsMetalRough/Textures/SpecGlossVsMetalRough_tex_2.ntex
+    SourceFilePath: Models/SpecGlossVsMetalRough/Textures/SpecGlossVsMetalRough_tex_2.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 15906181835451757383
+    FilePath: Models/Sponza/Textures/9288698199695299068.ntex
+    SourceFilePath: Models/Sponza/9288698199695299068.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 15923251341886795810
+    FilePath: Models/Sponza/Materials/Sponza_Material_24.nmat
+    SourceFilePath: Models/Sponza/Materials/Sponza_Material_24.nmat
+    Type: AssetType::Material
+  - Handle: 16181869151272154084
+    FilePath: Models/Sponza/Textures/8503262930880235456.ntex
+    SourceFilePath: Models/Sponza/8503262930880235456.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 16609912294944206736
+    FilePath: Models/Sponza/Textures/7056944414013900257.ntex
+    SourceFilePath: Models/Sponza/7056944414013900257.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 16764250467269253328
+    FilePath: Models/Sponza/Textures/8051790464816141987.ntex
+    SourceFilePath: Models/Sponza/8051790464816141987.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 16833024927044659648
+    FilePath: Models/Sponza/Textures/11474523244911310074.ntex
+    SourceFilePath: Models/Sponza/11474523244911310074.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 17011328137407123149
+    FilePath: Models/Sponza/Materials/Sponza_Material_19.nmat
+    SourceFilePath: Models/Sponza/Materials/Sponza_Material_19.nmat
+    Type: AssetType::Material
+  - Handle: 17016339802485689477
+    FilePath: Models/Sponza/Textures/3628158980083700836.ntex
+    SourceFilePath: Models/Sponza/3628158980083700836.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 17028615946074551627
+    FilePath: Models/Sponza/Textures/7815564343179553343.ntex
+    SourceFilePath: Models/Sponza/7815564343179553343.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 17647667912274246176
+    FilePath: Models/Sponza/Textures/2775690330959970771.ntex
+    SourceFilePath: Models/Sponza/2775690330959970771.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 17661280845982316082
+    FilePath: Models/Sponza/Textures/5061699253647017043.ntex
+    SourceFilePath: Models/Sponza/5061699253647017043.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 17801552911129641577
+    FilePath: Models/Sponza/Textures/3371964815757888145.ntex
+    SourceFilePath: Models/Sponza/3371964815757888145.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 17869477903572564022
+    FilePath: Models/Sponza/Textures/6593109234861095314.ntex
+    SourceFilePath: Models/Sponza/6593109234861095314.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 17948179387350665420
+    FilePath: Models/Sponza/Textures/8773302468495022225.ntex
+    SourceFilePath: Models/Sponza/8773302468495022225.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 18018513854245858793
+    FilePath: Models/Sponza/Materials/Sponza_Material_18.nmat
+    SourceFilePath: Models/Sponza/Materials/Sponza_Material_18.nmat
+    Type: AssetType::Material
+  - Handle: 18411865188729972116
+    FilePath: Models/Sponza/Materials/Sponza_Material_22.nmat
+    SourceFilePath: Models/Sponza/Materials/Sponza_Material_22.nmat
+    Type: AssetType::Material
+  - Handle: 18416290284258603885
+    FilePath: Models/Sponza/Textures/4675343432951571524.ntex
+    SourceFilePath: Models/Sponza/4675343432951571524.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false

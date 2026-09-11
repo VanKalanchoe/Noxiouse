@@ -1,5 +1,6 @@
 #include "TextureVK.h"
 
+#include <algorithm>
 #include <imgui_impl_vulkan.h>
 
 #include "DeviceVK.h"
@@ -257,7 +258,7 @@ namespace NRI
                     .bufferImageHeight = 0,
                     .imageSubresource = { .aspectMask = vk::ImageAspectFlagBits::eColor, .mipLevel = i, .baseArrayLayer = 0, .layerCount = 1 },
                     .imageOffset = {0, 0, 0},
-                    .imageExtent = { width >> i, height >> i, 1 }
+                    .imageExtent = { std::max(1u, width >> i), std::max(1u, height >> i), 1 }
                 });
             }
         }

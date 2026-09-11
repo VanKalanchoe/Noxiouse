@@ -98,7 +98,7 @@ namespace Nox
         instance.workflow = material.Workflow;
         instance.diffuseFactor = material.DiffuseFactor;
         instance.specularFactor = material.SpecularFactor;
-        instance.baseColorFactor = material.BaseColorFactor;
+        instance.baseColorFactor = (material.Workflow == 1.0f) ? material.DiffuseFactor : material.BaseColorFactor;
         instance.baseColorTextureIndex = GetTextureIndex(material.BaseColorTexturePath);
         instance.baseColorTextureSet = material.BaseColorTextureSet;
         instance.metallicFactor = material.MetallicFactor;
@@ -154,6 +154,7 @@ namespace Nox
         watchShader("assets/shaders/PostProcess.slang", "PostProcess", [this]() { createPostProcessPipeline(true); });
         // NRD
         watchShader("assets/shaders/ShadowMask.slang", "ShadowMask", [this]() { createShadowMaskPipeline(true); });
+        watchShader("assets/shaders/Reflection.slang", "Reflection", [this]() { createReflectionPipeline(true); });
         // Path Tracer
         watchShader("assets/shaders/PathTracer.slang", "PathTracer", [this]() { createPathTracerPipeline(true); });
 
@@ -225,6 +226,7 @@ namespace Nox
         createPostProcessPipeline(false);
         //NRD
         createShadowMaskPipeline();
+        createReflectionPipeline();
         // Path Tracer
         createPathTracerPipeline(false);
 
@@ -529,6 +531,33 @@ namespace Nox
         });
 
         m_shadowMaskPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+    }
+
+    void Renderer::createReflectionPipeline(bool forceCompile)
+    {
+        NRI::PipelineDesc desc{};
+        desc.forceCompile = forceCompile;
+        desc.colorFormats = {
+            NRI::ImageFormat::R16G16B16A16_SFLOAT // m_rawReflection (Radiance RGB + HitDist A)
+        };
+
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Task,
+            .entryPoint = "taskMain",
+            .sourcePath = "assets/shaders/Reflection.slang"
+        });
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Mesh,
+            .entryPoint = "meshMain",
+            .sourcePath = "assets/shaders/Reflection.slang"
+        });
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Fragment,
+            .entryPoint = "fragMain",
+            .sourcePath = "assets/shaders/Reflection.slang"
+        });
+
+        m_reflectionPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
     void Renderer::createPathTracerResources()
@@ -2355,6 +2384,57 @@ namespace Nox
         }
 
         // =========================================================================
+        // 2.65. RAY TRACED REFLECTION PASS (Evaluates 1-SPP GGX VNDF -> m_rawReflection)
+        // =========================================================================
+        if (m_reflectionPipeline && m_rawReflection && (uniformData.enableRTReflections != 0))
+        {
+            std::vector<NRI::RenderAttachDesc> reflectionAttachments;
+            reflectionAttachments.push_back({
+                .attachment = m_rawReflection.get(),
+                .loadOP = NRI::LoadOP::clear,
+                .storeOP = NRI::StoreOP::store,
+                .clearColor = {0.0f, 0.0f, 0.0f, 10000.0f}
+            });
+
+            NRI::RenderDesc reflectionDesc = {
+                .renderArea = renderExtent,
+                .colorAttachments = reflectionAttachments
+            };
+
+            m_commandBuffers->beginRendering(reflectionDesc);
+            m_commandBuffers->setViewportWithCount({0.0f, rh, rw, -rh}, 0.0f, 1.0f);
+            m_commandBuffers->setScissorWithCount(renderExtent);
+
+            m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_reflectionPipeline);
+            m_commandBuffers->setCullMode(NRI::CullMode::None);
+            m_commandBuffers->setDepthTestEnable(false);
+            m_commandBuffers->setDepthWriteEnable(false);
+            for (uint32_t a = 0; a < reflectionAttachments.size(); ++a)
+            {
+                m_commandBuffers->setColorBlendEnable(a, false);
+                m_commandBuffers->setColorWriteMask(a, NRI::ColorComponent::R | NRI::ColorComponent::G |
+                                                    NRI::ColorComponent::B | NRI::ColorComponent::A);
+            }
+
+            glm::mat4 viewProj = uniformData.proj * uniformData.view;
+            shaderio::PushConstantReflection reflPush{};
+            reflPush.invViewProj = glm::inverse(viewProj);
+            reflPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+            reflPush.depthTextureIndex = m_depthResource->GetDescriptorIndexSlot();
+            reflPush.gbufferNormalIndex = m_gbufferNormal->GetDescriptorIndexSlot();
+            reflPush.gbufferMaterialIndex = m_gbufferMaterial->GetDescriptorIndexSlot();
+            reflPush.visibilityTextureIndex = m_visibilityResource->GetDescriptorIndexSlot();
+            reflPush.viewportSize = glm::vec2(rw, rh);
+            reflPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
+            reflPush.denoiserMode = static_cast<uint32_t>(m_nrdReflectionDenoiser);
+            m_commandBuffers->pushData(&reflPush, sizeof(shaderio::PushConstantReflection));
+
+            m_commandBuffers->drawMeshTasks(1, 1, 1);
+            m_commandBuffers->endRendering();
+            m_commandBuffers->executionBarrier();
+        }
+
+        // =========================================================================
         // 2.7. NRD REFLECTIONS DENOISING PASS (Denoises 1-SPP Reflections via REBLUR / RELAX)
         // =========================================================================
         if (m_nrdReflectionDenoiser != NRI::NRDReflectionDenoiser::Off &&
@@ -2491,7 +2571,12 @@ namespace Nox
             lightingPush.shadowMaskTextureIndex = (m_nrdShadowsEnabled && m_denoisedShadowMask)
                 ? m_denoisedShadowMask->GetDescriptorIndexSlot()
                 : (m_rawShadowMask ? m_rawShadowMask->GetDescriptorIndexSlot() : 0);
-            lightingPush.nrdShadowsEnabled = (m_nrdShadowsEnabled && m_denoisedShadowMask) ? 1 : 0;
+            uint32_t nrdShadowBit = (m_nrdShadowsEnabled && m_denoisedShadowMask) ? 1 : 0;
+            uint32_t nrdReflMode = static_cast<uint32_t>(m_nrdReflectionDenoiser);
+            lightingPush.nrdShadowsEnabled = nrdShadowBit | (nrdReflMode << 1);
+            lightingPush.reflectionTextureIndex = (m_nrdReflectionDenoiser != NRI::NRDReflectionDenoiser::Off && m_denoisedReflection)
+                ? m_denoisedReflection->GetDescriptorIndexSlot()
+                : (m_rawReflection ? m_rawReflection->GetDescriptorIndexSlot() : 0);
             m_commandBuffers->pushData(&lightingPush, sizeof(shaderio::PushConstantDeferredLighting));
 
             m_commandBuffers->drawMeshTasks(1, 1, 1);
@@ -3607,7 +3692,7 @@ namespace Nox
         uniformData.prevProj = m_prevNonJitteredProj;
         uniformData.prevView = m_prevView;
         uniformData.invViewProj = glm::inverse(uniformData.proj * uniformData.view);
-        /*uniformData.cameraWorldPos = { camera.GetPosition(), 0.0f };*/
+        uniformData.cameraWorldPos = glm::vec4(glm::vec3(transform[3]), 0.0f);
         uniformData.frustum = shaderio::Frustum{uniformData.proj * uniformData.view};
 
         if (m_frozen)

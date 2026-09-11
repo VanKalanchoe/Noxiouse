@@ -80,6 +80,33 @@
         return float4(bw0, bw1, bw2, t);
     }
 
+    static const float c_MinRoughness = 0.04;
+    static const float PBR_WORKFLOW_METALLIC_ROUGHNESS = 0.0;
+    static const float PBR_WORKFLOW_SPECULAR_GLOSSINESS = 1.0;
+
+    // Convert sRGB color to linear RGB (Khronos IEC 61966-2-1 transfer function)
+    float3 srgbToLinear(float3 c)
+    {
+        float3 bLess = step(c, float3(0.04045));
+        return lerp(pow((c + 0.055) / 1.055, float3(2.4)), c / 12.92, bLess);
+    }
+
+    // Gets metallic factor from specular glossiness workflow inputs (Khronos / Sascha Willems PBR formula)
+    float convertMetallic(float3 diffuse, float3 specular, float maxSpecular)
+    {
+        float perceivedDiffuse = sqrt(0.299 * diffuse.r * diffuse.r + 0.587 * diffuse.g * diffuse.g + 0.114 * diffuse.b * diffuse.b);
+        float perceivedSpecular = sqrt(0.299 * specular.r * specular.r + 0.587 * specular.g * specular.g + 0.114 * specular.b * specular.b);
+        if (perceivedSpecular < c_MinRoughness)
+        {
+            return 0.0;
+        }
+        float a = c_MinRoughness;
+        float b = perceivedDiffuse * (1.0 - maxSpecular) / (1.0 - c_MinRoughness) + perceivedSpecular - 2.0 * c_MinRoughness;
+        float c = c_MinRoughness - perceivedSpecular;
+        float D = max(b * b - 4.0 * a * c, 0.0);
+        return clamp((-b + sqrt(D)) / (2.0 * a), 0.0, 1.0);
+    }
+
     [shader("fragment")]
     GBufferOutput fragMain(
         MSOutput input,
@@ -295,74 +322,119 @@
 
         SamplerState samp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
 
-        // 1. BASE COLOR (Albedo)
+        // 1. TEXTURE COORDINATE SETS & DERIVATIVES
         float2 baseColorUV = (instance.baseColorTextureSet == 0) ? uv0 : uv1;
         float2 ddx_bc = (instance.baseColorTextureSet == 0) ? ddx_uv0 : ddx_uv1;
         float2 ddy_bc = (instance.baseColorTextureSet == 0) ? ddy_uv0 : ddy_uv1;
-        float4 baseColor = instance.baseColorFactor;
-        if (instance.baseColorTextureIndex != 0xFFFFFFFF)
+
+        float2 mrUV = (instance.physicalDescriptorTextureSet == 0) ? uv0 : uv1;
+        float2 ddx_mr = (instance.physicalDescriptorTextureSet == 0) ? ddx_uv0 : ddx_uv1;
+        float2 ddy_mr = (instance.physicalDescriptorTextureSet == 0) ? ddy_uv0 : ddy_uv1;
+
+        // 2. PBR MATERIAL EVALUATION (Metallic-Roughness vs Specular-Glossiness)
+        float4 baseColor;
+        float roughness;
+        float metallic;
+
+        if (instance.workflow == PBR_WORKFLOW_SPECULAR_GLOSSINESS)
         {
-            Texture2D baseColorTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.baseColorTextureIndex, 0));
-            baseColor = baseColorTex.SampleGrad(samp, baseColorUV, ddx_bc, ddy_bc) * instance.baseColorFactor;
+            // Diffuse Color (baseColorTextureIndex holds diffuseTexture)
+            float4 diffuse = instance.diffuseFactor;
+            if (instance.baseColorTextureIndex != 0xFFFFFFFF)
+            {
+                Texture2D diffuseTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.baseColorTextureIndex, 0));
+                // BaseColor/Diffuse texture is loaded as SRGBA8, hardware sampler automatically decodes to linear RGB
+                diffuse = diffuseTex.SampleGrad(samp, baseColorUV, ddx_bc, ddy_bc) * instance.diffuseFactor;
+            }
+
+            // Specular Color & Glossiness (metallicRoughnessTextureIndex holds specularGlossinessTexture)
+            float3 specular = instance.specularFactor.rgb;
+            float glossiness = instance.specularFactor.a;
+            if (instance.metallicRoughnessTextureIndex != 0xFFFFFFFF)
+            {
+                Texture2D specGlossTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.metallicRoughnessTextureIndex, 0));
+                float4 specGlossSample = specGlossTex.SampleGrad(samp, mrUV, ddx_mr, ddy_mr);
+                // Specular texture RGB is authored in sRGB (imported as UNORM), decode to linear RGB:
+                float3 linearSpec = srgbToLinear(specGlossSample.rgb);
+                specular = linearSpec * instance.specularFactor.rgb;
+                glossiness = specGlossSample.a * instance.specularFactor.a;
+            }
+
+            // Perceptual Roughness is the inverse of glossiness
+            roughness = clamp(1.0 - glossiness, 0.0, 1.0);
+
+            // Convert Specular-Glossiness inputs to Metallic & Base Color (Khronos / Sascha Willems formula)
+            float maxSpecular = max(max(specular.r, specular.g), specular.b);
+            metallic = convertMetallic(diffuse.rgb, specular, maxSpecular);
+
+            const float epsilon = 1e-6;
+            float3 baseColorDiffusePart = diffuse.rgb * ((1.0 - maxSpecular) / (1.0 - c_MinRoughness) / max(1.0 - metallic, epsilon));
+            float3 baseColorSpecularPart = specular - (float3(c_MinRoughness) * (1.0 - metallic) * (1.0 / max(metallic, epsilon)));
+            baseColor = float4(clamp(lerp(baseColorDiffusePart, baseColorSpecularPart, metallic * metallic), float3(0.0), float3(1.0)), diffuse.a);
+        }
+        else
+        {
+            // Standard Metallic-Roughness Workflow
+            baseColor = instance.baseColorFactor;
+            if (instance.baseColorTextureIndex != 0xFFFFFFFF)
+            {
+                Texture2D baseColorTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.baseColorTextureIndex, 0));
+                baseColor = baseColorTex.SampleGrad(samp, baseColorUV, ddx_bc, ddy_bc) * instance.baseColorFactor;
+            }
+
+            roughness = instance.roughnessFactor;
+            metallic = instance.metallicFactor;
+            if (instance.metallicRoughnessTextureIndex != 0xFFFFFFFF)
+            {
+                Texture2D mrTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.metallicRoughnessTextureIndex, 0));
+                float4 mrSample = mrTex.SampleGrad(samp, mrUV, ddx_mr, ddy_mr);
+                roughness *= mrSample.g;
+                metallic  *= mrSample.b;
+            }
+            roughness = clamp(roughness, 0.0, 1.0);
+            metallic  = clamp(metallic, 0.0, 1.0);
         }
 
-        // 2. NORMAL MAPPING (Analytical Tangent Frame from 3D Triangle Geometry)
-            float3 finalNormal = geomNormal;
-            float3 rawNormalTex = geomNormal * 0.5 + 0.5; // fallback matching Sascha's normalize(inNormal)
-            if (instance.normalTextureIndex != 0xFFFFFFFF)
+        // 3. NORMAL MAPPING (Analytical Tangent Frame from 3D Triangle Geometry)
+        float3 finalNormal = geomNormal;
+        float3 rawNormalTex = geomNormal * 0.5 + 0.5; // fallback matching Sascha's normalize(inNormal)
+        if (instance.normalTextureIndex != 0xFFFFFFFF)
+        {
+            float2 normalUV = (instance.normalTextureSet == 0) ? uv0 : uv1;
+            Texture2D normalTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.normalTextureIndex, 0));
+            rawNormalTex = normalTex.SampleLevel(samp, normalUV, 0.0).xyz;
+            float3 tangentNormal = rawNormalTex * 2.0 - 1.0;
+
+            // Compute triangle edge vectors in world space and UV space
+            float3 dp1 = worldPos1.xyz - worldPos0.xyz;
+            float3 dp2 = worldPos2.xyz - worldPos0.xyz;
+            float2 duv1 = (instance.normalTextureSet == 0) ? (v1.uv0 - v0.uv0) : (v1.uv1 - v0.uv1);
+            float2 duv2 = (instance.normalTextureSet == 0) ? (v2.uv0 - v0.uv0) : (v2.uv1 - v0.uv1);
+
+            float detUV = duv1.x * duv2.y - duv2.x * duv1.y;
+            float3 T = dp1 * duv2.y - dp2 * duv1.y;
+            float3 B = dp2 * duv1.x - dp1 * duv2.x;
+
+            float3 N = geomNormal;
+            float lenT = length(T);
+            if (lenT > 1e-12 && abs(detUV) > 1e-12)
             {
-                float2 normalUV = (instance.normalTextureSet == 0) ? uv0 : uv1;
-                Texture2D normalTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.normalTextureIndex,
-  0));
-                rawNormalTex = normalTex.SampleLevel(samp, normalUV, 0.0).xyz;
-                float3 tangentNormal = rawNormalTex * 2.0 - 1.0;
-
-                // Compute triangle edge vectors in world space and UV space
-                float3 dp1 = worldPos1.xyz - worldPos0.xyz;
-                float3 dp2 = worldPos2.xyz - worldPos0.xyz;
-                float2 duv1 = (instance.normalTextureSet == 0) ? (v1.uv0 - v0.uv0) : (v1.uv1 - v0.uv1);
-                float2 duv2 = (instance.normalTextureSet == 0) ? (v2.uv0 - v0.uv0) : (v2.uv1 - v0.uv1);
-
-                float detUV = duv1.x * duv2.y - duv2.x * duv1.y;
-                float3 T = dp1 * duv2.y - dp2 * duv1.y;
-                float3 B = dp2 * duv1.x - dp1 * duv2.x;
-
-                float3 N = geomNormal;
-                float lenT = length(T);
-                if (lenT > 1e-12 && abs(detUV) > 1e-12)
+                // Gram-Schmidt orthonormalization
+                T = normalize(T - N * dot(N, T));
+                float3 B_ortho = normalize(cross(N, T));
+                if (dot(B_ortho, B) < 0.0)
                 {
-                    // Gram-Schmidt orthonormalization
-                    T = normalize(T - N * dot(N, T));
-                    float3 B_ortho = normalize(cross(N, T));
-                    if (dot(B_ortho, B) < 0.0)
-                    {
-                        B_ortho = -B_ortho;
-                    }
-                    float3x3 TBN = float3x3(T, B_ortho, N);
-                    finalNormal = normalize(mul(tangentNormal, TBN));
+                    B_ortho = -B_ortho;
                 }
+                float3x3 TBN = float3x3(T, B_ortho, N);
+                finalNormal = normalize(mul(tangentNormal, TBN));
             }
-            else
-            {
-                // Visual Diagnostic: Bright red if normal texture is not bound
-                finalNormal = geomNormal;
-            }
-
-        // 3. METALLIC & ROUGHNESS
-        float roughness = instance.roughnessFactor;
-        float metallic = instance.metallicFactor;
-        if (instance.metallicRoughnessTextureIndex != 0xFFFFFFFF)
-        {
-            float2 mrUV = (instance.physicalDescriptorTextureSet == 0) ? uv0 : uv1;
-            float2 ddx_mr = (instance.physicalDescriptorTextureSet == 0) ? ddx_uv0 : ddx_uv1;
-            float2 ddy_mr = (instance.physicalDescriptorTextureSet == 0) ? ddy_uv0 : ddy_uv1;
-            Texture2D mrTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.metallicRoughnessTextureIndex, 0));
-            float4 mrSample = mrTex.SampleGrad(samp, mrUV, ddx_mr, ddy_mr);
-            roughness *= mrSample.g;
-            metallic  *= mrSample.b;
         }
-        roughness = clamp(roughness, 0.0, 1.0);
-        metallic  = clamp(metallic, 0.0, 1.0);
+        else
+        {
+            // Visual Diagnostic: Bright red if normal texture is not bound
+            finalNormal = geomNormal;
+        }
 
         // 4. OCCLUSION
         float occlusion = 1.0;

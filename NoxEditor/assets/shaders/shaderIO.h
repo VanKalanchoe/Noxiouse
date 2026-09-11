@@ -330,6 +330,19 @@ struct PushConstantShadowMask
     uint32_t frameIndex;
 };
 
+struct PushConstantReflection
+{
+    mat4 invViewProj;
+    uint64_t matrixReference;
+    uint32_t depthTextureIndex;
+    uint32_t gbufferNormalIndex;
+    uint32_t gbufferMaterialIndex;
+    uint32_t visibilityTextureIndex;
+    vec2 viewportSize;
+    uint32_t frameIndex;
+    uint32_t denoiserMode; // 0 = Off, 1 = REBLUR (YCoCg), 2 = RELAX (RGB)
+};
+
 struct PushConstantDeferredLighting
 {
     mat4 invViewProj;
@@ -346,10 +359,11 @@ struct PushConstantDeferredLighting
     // 7 = Metallic, 8 = Occlusion, 9 = Emission, 10 = World Pos, 11 = Entity ID, 12 = Depth Buffer
     uint32_t gbufferVelocityIndex;
 
-    // Temporal
+    // Temporal & RT Denoised Buffers
     uint32_t frameIndex; // RR
     uint32_t shadowMaskTextureIndex; // NRD
     uint32_t nrdShadowsEnabled;
+    uint32_t reflectionTextureIndex; // NRD REBLUR / RELAX or Raw 1-SPP
 };
 
 struct PushConstantPathTracer

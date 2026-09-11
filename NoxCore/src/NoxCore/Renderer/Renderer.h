@@ -292,6 +292,7 @@ namespace Nox
         
         // NRD
         void createShadowMaskPipeline(bool forceCompile = false);
+        void createReflectionPipeline(bool forceCompile = false);
         
         // Path Tracer
         void createPathTracerResources();
@@ -352,6 +353,7 @@ namespace Nox
         std::unique_ptr<NRI::Pipeline> m_postProcessPipeline = nullptr;
         // NRD
         std::unique_ptr<NRI::Pipeline> m_shadowMaskPipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_reflectionPipeline = nullptr;
         // Path Tracer
         std::unique_ptr<NRI::Pipeline> m_pathTracerPipeline = nullptr;
 
