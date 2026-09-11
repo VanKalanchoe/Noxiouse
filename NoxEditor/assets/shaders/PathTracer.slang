@@ -119,7 +119,7 @@
         RayDesc shadowRay;
         shadowRay.Origin = rayOrigin;
         shadowRay.Direction = rayDir;
-        shadowRay.TMin = 0.005;
+        shadowRay.TMin = 0.01;
         shadowRay.TMax = maxDist;
 
         RaytracingAccelerationStructure as = RaytracingAccelerationStructure(ubo->tlasDeviceAddress);
@@ -238,6 +238,9 @@
                     skyRadiance = lerp(float3(0.08, 0.08, 0.12), float3(0.4, 0.6, 0.95), saturate(rayDir.y * 0.5 + 0.5));
                 }
 
+                // Scale ambient environment light by IBL Ambient Scale
+                skyRadiance *= ubo->scaleIBLAmbient;
+
                 radiance += skyRadiance * throughput;
                 break;
             }
@@ -261,11 +264,16 @@
             float w2 = bary.y;
 
             float2 hitUV = w0 * vertices[i0].uv0 + w1 * vertices[i1].uv0 + w2 * vertices[i2].uv0;
-            float3 hitNormal = normalize(w0 * vertices[i0].normal + w1 * vertices[i1].normal + w2 * vertices[i2].normal);
 
-            // Ensure normal faces incoming ray direction
-            if (dot(hitNormal, -rayDir) < 0.0)
+            // 1. Interpolate local normal, then transform to TRUE WORLD SPACE
+            float3 localNormal = normalize(w0 * vertices[i0].normal + w1 * vertices[i1].normal + w2 * vertices[i2].normal);
+            float3 hitNormal = normalize(mul((float3x3)lut.normalMatrix, localNormal));
+
+            // 2. Only flip normal if the material is explicitly DOUBLE-SIDED (e.g. foliage/cloth)
+            if (lut.doubleSided != 0 && dot(hitNormal, -rayDir) < 0.0)
+            {
                 hitNormal = -hitNormal;
+            }
 
             float3 hitPos = ray.Origin + ray.Direction * hitT;
 
@@ -302,41 +310,43 @@
                 }
 
                 // Always trace shadow rays for direct lights (Next Event Estimation)
-                float NdotL = dot(hitNormal, lightDir);
-                if (NdotL > 0.001)
-                {
-                    float3 shadowOrigin = hitPos + hitNormal * 0.005;
-                    bool inShadow = trace_shadow_ray(ubo, shadowOrigin, lightDir, maxDist);
-
-                    if (!inShadow)
+                    float NdotL = dot(hitNormal, lightDir);
+                    if (NdotL > 0.001)
                     {
-                        float3 lightRadiance = light.color.rgb * light.color.w * attenuation;
-                        float3 diffuseContrib = albedo / M_PI;
-                        radiance += diffuseContrib * lightRadiance * NdotL * throughput;
+                        // Robust offset (0.02) along normal prevents self-shadowing on curved meshes
+                        float3 shadowOrigin = hitPos + hitNormal * 0.02;
+                        bool inShadow = trace_shadow_ray(ubo, shadowOrigin, lightDir, maxDist);
+
+                        if (!inShadow)
+                        {
+                            // Smooth terminator falloff: eliminates stepped polygon tessellation rings at grazing angles
+                            float terminatorFade = saturate(NdotL * 10.0);
+                            float3 lightRadiance = light.color.rgb * light.color.w * attenuation;
+                            float3 diffuseContrib = albedo / M_PI;
+                            radiance += diffuseContrib * lightRadiance * (NdotL * terminatorFade) * throughput;
+                        }
                     }
-        
                 }
+
+                // --- Russian Roulette Ray Termination ---
+                if (bounce >= 2)
+                {
+                    float p = clamp(max(throughput.r, max(throughput.g, throughput.b)), 0.05, 0.95);
+                    if (rand(rngState) > p)
+                        break;
+                    throughput /= p;
+                }
+
+                // --- Indirect Bounce (Cosine-Weighted Hemisphere Sample) ---
+                float u1 = rand(rngState);
+                float u2 = rand(rngState);
+                float3 nextDir = sample_cosine_hemisphere(u1, u2, hitNormal);
+
+                throughput *= albedo; // Cosine sampling PDF cancels cosTheta / M_PI
+
+                rayOrigin = hitPos + hitNormal * 0.02; // Offset bounce ray by 0.02 as well
+                rayDir = nextDir;
             }
-
-            // --- Russian Roulette Ray Termination ---
-            if (bounce >= 2)
-            {
-                float p = clamp(max(throughput.r, max(throughput.g, throughput.b)), 0.05, 0.95);
-                if (rand(rngState) > p)
-                    break;
-                throughput /= p;
-            }
-
-            // --- Indirect Bounce (Cosine-Weighted Hemisphere Sample) ---
-            float u1 = rand(rngState);
-            float u2 = rand(rngState);
-            float3 nextDir = sample_cosine_hemisphere(u1, u2, hitNormal);
-
-            throughput *= albedo; // Cosine sampling PDF cancels cosTheta / M_PI
-
-            rayOrigin = hitPos + hitNormal * 0.005;
-            rayDir = nextDir;
-        }
 
         // Mode 16: 1-SPP Interactive Output
         if (pushConstant.debugMode == 16 || pushConstant.sampleCount <= 1)

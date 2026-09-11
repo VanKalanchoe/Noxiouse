@@ -103,9 +103,11 @@ struct InstanceLUT
 {
     uint64_t vertexBufferAddress;
     uint64_t indexBufferAddress;
+    mat4 normalMatrix;              // Transforms local vertex normals to world space
     uint32_t baseColorTextureIndex;
     float alphaCutoff;
-    uint32_t alphaMode; // 0 = Opaque, 1 = Mask, 2 = Blend
+    uint32_t alphaMode;             // 0 = Opaque, 1 = Mask, 2 = Blend
+    uint32_t doubleSided;           // 0 = Single-sided, 1 = Double-sided
 };
 
 struct UniformBufferObject 

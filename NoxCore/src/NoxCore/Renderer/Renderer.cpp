@@ -3145,9 +3145,11 @@ namespace Nox
                 shaderio::InstanceLUT lut{};
                 lut.vertexBufferAddress = m_meshBLASes[packet.blasId].vertexBufferAddress;
                 lut.indexBufferAddress = m_meshBLASes[packet.blasId].indexBuffer ? m_meshBLASes[packet.blasId].indexBuffer->getDeviceAddress() : 0;
+                lut.normalMatrix = packet.instance.normalMatrix;
                 lut.baseColorTextureIndex = packet.instance.baseColorTextureIndex;
                 lut.alphaCutoff = packet.instance.alphaMaskCutoff;
                 lut.alphaMode = packet.instance.alphaMode;
+                lut.doubleSided = packet.instance.doubleSided;
                 rtInstanceLUTs.push_back(lut);
             }
         };
