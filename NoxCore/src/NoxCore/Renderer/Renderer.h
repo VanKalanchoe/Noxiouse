@@ -210,6 +210,10 @@ namespace Nox
             }
         }
         bool getNRDShadowsEnabled() const { return m_nrdShadowsEnabled; }
+        NRI::NRDReflectionDenoiser getNRDReflectionDenoiser() const { return m_nrdReflectionDenoiser; }
+        void setNRDReflectionDenoiser(NRI::NRDReflectionDenoiser mode);
+        Ref<Texture2D> getRawReflection() const { return m_rawReflection; }
+        Ref<Texture2D> getDenoisedReflection() const { return m_denoisedReflection; }
 
         void setCameraJitterEnabled(bool enabled) { m_cameraJitterEnabled = enabled; }
         bool getCameraJitterEnabled() const { return m_cameraJitterEnabled; }
@@ -389,7 +393,10 @@ namespace Nox
         Ref<Texture2D> m_denoisedShadowMask;
         Ref<Texture2D> m_viewZ;
         Ref<Texture2D> m_nrdNormalRoughness;
+        Ref<Texture2D> m_rawReflection;
+        Ref<Texture2D> m_denoisedReflection;
         bool m_nrdShadowsEnabled = true;
+        NRI::NRDReflectionDenoiser m_nrdReflectionDenoiser = NRI::NRDReflectionDenoiser::Off;
         bool m_resetNRD = true;
         
         // Path Tracer Accumulation Ping-Pong

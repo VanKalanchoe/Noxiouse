@@ -104,6 +104,8 @@ struct InstanceLUT
     uint64_t vertexBufferAddress;
     uint64_t indexBufferAddress;
     mat4 normalMatrix;              // Transforms local vertex normals to world space
+    vec4 baseColorFactor;
+    vec4 emissiveFactor;            // rgb: color, a: strength
     uint32_t baseColorTextureIndex;
     float alphaCutoff;
     uint32_t alphaMode;             // 0 = Opaque, 1 = Mask, 2 = Blend

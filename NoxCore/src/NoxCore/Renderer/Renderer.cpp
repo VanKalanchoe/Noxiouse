@@ -355,6 +355,31 @@ namespace Nox
         {
             m_dlssRayReconstructionEnabled = enabled;
             m_resetDLSS = true; // Signals Streamline to flush history cleanly on the next frame without destroying contexts
+
+            // Mutual Exclusion: DLSS-RR replaces downstream reflection/GI denoisers (NRD REBLUR/RELAX)
+            if (enabled && m_nrdReflectionDenoiser != NRI::NRDReflectionDenoiser::Off)
+            {
+                m_nrdReflectionDenoiser = NRI::NRDReflectionDenoiser::Off;
+                m_resetNRD = true;
+                NOX_CORE_INFO("[Denoising] DLSS Ray Reconstruction activated: NRD REBLUR/RELAX automatically disabled (mutually exclusive).");
+            }
+        }
+    }
+
+    void Renderer::setNRDReflectionDenoiser(NRI::NRDReflectionDenoiser mode)
+    {
+        if (m_nrdReflectionDenoiser != mode)
+        {
+            m_nrdReflectionDenoiser = mode;
+            m_resetNRD = true;
+
+            // Mutual Exclusion: NRD REBLUR/RELAX conflicts with DLSS Ray Reconstruction
+            if (mode != NRI::NRDReflectionDenoiser::Off && m_dlssRayReconstructionEnabled)
+            {
+                m_dlssRayReconstructionEnabled = false;
+                m_resetDLSS = true;
+                NOX_CORE_INFO("[Denoising] NRD Reflection Denoiser activated: DLSS Ray Reconstruction automatically disabled (mutually exclusive).");
+            }
         }
     }
 
@@ -450,6 +475,28 @@ namespace Nox
             .directFormat = UINT32_MAX
         });
         m_resourceHeap->registerTexture(*m_nrdNormalRoughness);
+
+        m_rawReflection = m_device->createTexture(NRI::TextureDesc{
+            .width = width,
+            .height = height,
+            .mipLevels = 1,
+            .sampleCount = 1,
+            .usage = NRI::TextureUsage::ColorAttachment,
+            .format = NRI::ImageFormat::R16G16B16A16_SFLOAT,
+            .directFormat = UINT32_MAX
+        });
+        m_resourceHeap->registerTexture(*m_rawReflection);
+
+        m_denoisedReflection = m_device->createTexture(NRI::TextureDesc{
+            .width = width,
+            .height = height,
+            .mipLevels = 1,
+            .sampleCount = 1,
+            .usage = NRI::TextureUsage::ColorAttachment,
+            .format = NRI::ImageFormat::R16G16B16A16_SFLOAT,
+            .directFormat = UINT32_MAX
+        });
+        m_resourceHeap->registerTexture(*m_denoisedReflection);
 
         m_device->initNRD(width, height);
         m_resetNRD = true;
@@ -2301,12 +2348,42 @@ namespace Nox
             nrdParams.motionVectorScale = glm::vec2(1.0f, 1.0f);
             nrdParams.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
             nrdParams.resetHistory = m_isFirstFrame || m_resetNRD;
-            m_resetNRD = false;
 
             m_device->evaluateNRDShadows(nrdParams);
             m_commandBuffers->executionBarrier();
             m_commandBuffers->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
         }
+
+        // =========================================================================
+        // 2.7. NRD REFLECTIONS DENOISING PASS (Denoises 1-SPP Reflections via REBLUR / RELAX)
+        // =========================================================================
+        if (m_nrdReflectionDenoiser != NRI::NRDReflectionDenoiser::Off &&
+            m_device->isNRDInitialized() &&
+            m_rawReflection && m_denoisedReflection && m_viewZ && m_nrdNormalRoughness)
+        {
+            NRI::NRDReflectionParams reflParams{};
+            reflParams.inSpecularRadianceHitDist = m_rawReflection.get();
+            reflParams.inMotionVectors = m_gbufferVelocity.get();
+            reflParams.inNormalRoughness = m_nrdNormalRoughness.get();
+            reflParams.inViewZ = m_viewZ.get();
+            reflParams.outDenoisedSpecular = m_denoisedReflection.get();
+            reflParams.commandBuffer = m_commandBuffers.get();
+
+            reflParams.view = uniformData.view;
+            reflParams.proj = uniformData.nonJitteredProj;
+            reflParams.prevView = uniformData.prevView;
+            reflParams.prevProj = uniformData.prevProj;
+
+            reflParams.motionVectorScale = glm::vec2(1.0f, 1.0f);
+            reflParams.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
+            reflParams.resetHistory = m_isFirstFrame || m_resetNRD;
+
+            m_device->evaluateNRDReflections(reflParams, m_nrdReflectionDenoiser);
+            m_commandBuffers->executionBarrier();
+            m_commandBuffers->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
+        }
+
+        m_resetNRD = false;
 
         // =========================================================================
         // 3. LIGHTING PASS: PATH TRACER (Modes 16 & 17) OR DEFERRED LIGHTING
@@ -3244,6 +3321,8 @@ namespace Nox
                 lut.vertexBufferAddress = m_meshBLASes[packet.blasId].vertexBufferAddress;
                 lut.indexBufferAddress = m_meshBLASes[packet.blasId].indexBuffer ? m_meshBLASes[packet.blasId].indexBuffer->getDeviceAddress() : 0;
                 lut.normalMatrix = packet.instance.normalMatrix;
+                lut.baseColorFactor = packet.instance.baseColorFactor;
+                lut.emissiveFactor = glm::vec4(packet.instance.emissiveFactor, packet.instance.emissiveStrength);
                 lut.baseColorTextureIndex = packet.instance.baseColorTextureIndex;
                 lut.alphaCutoff = packet.instance.alphaMaskCutoff;
                 lut.alphaMode = packet.instance.alphaMode;

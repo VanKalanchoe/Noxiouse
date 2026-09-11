@@ -55,6 +55,7 @@ namespace NRI
         // NRD
         bool initNRD(uint32_t width, uint32_t height) override;
         bool evaluateNRDShadows(const NRDShadowParams& params) override;
+        bool evaluateNRDReflections(const NRDReflectionParams& params, NRDReflectionDenoiser denoiser) override;
         void destroyNRD() override;
         bool isNRDInitialized() const override;
         
@@ -96,6 +97,10 @@ namespace NRI
         vk::Format findDepthFormat();
         vk::SurfaceFormatKHR chooseSurfaceFormat();
         vk::SurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<vk::SurfaceFormatKHR>& availableFormats);
+        void updateNRDCommonSettings(uint32_t frameIndex, bool resetHistory,
+            const glm::mat4& proj, const glm::mat4& prevProj,
+            const glm::mat4& view, const glm::mat4& prevView,
+            const glm::vec2& mvScale);
         
     private:
         bool m_deviceInitialized = false;

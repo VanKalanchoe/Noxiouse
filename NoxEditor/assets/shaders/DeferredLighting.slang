@@ -244,16 +244,109 @@
         float2 committedBary = rq.CommittedTriangleBarycentrics();
 
         InstanceLUT hitLut = instanceLUTBuffer[committedInstanceID];
-        float2 hitUV = intersection_uv(hitLut, committedPrimIndex, committedBary);
+        uint32_t* indices = (uint32_t*)hitLut.indexBufferAddress;
+        Vertex* vertices = (Vertex*)hitLut.vertexBufferAddress;
 
-        float3 hitColor = float3(0.5);
+        uint i0, i1, i2;
+        if (hitLut.indexBufferAddress != 0)
+        {
+            i0 = indices[committedPrimIndex * 3 + 0];
+            i1 = indices[committedPrimIndex * 3 + 1];
+            i2 = indices[committedPrimIndex * 3 + 2];
+        }
+        else
+        {
+            i0 = committedPrimIndex * 3 + 0;
+            i1 = committedPrimIndex * 3 + 1;
+            i2 = committedPrimIndex * 3 + 2;
+        }
+
+        float w0 = 1.0 - committedBary.x - committedBary.y;
+        float w1 = committedBary.x;
+        float w2 = committedBary.y;
+
+        float2 hitUV = w0 * vertices[i0].uv0 + w1 * vertices[i1].uv0 + w2 * vertices[i2].uv0;
+        float3 localNormal = normalize(w0 * vertices[i0].normal + w1 * vertices[i1].normal + w2 * vertices[i2].normal);
+        float3 hitNormal = normalize(mul((float3x3)hitLut.normalMatrix, localNormal));
+
+        if (hitLut.doubleSided != 0 && dot(hitNormal, -R) < 0.0)
+        {
+            hitNormal = -hitNormal;
+        }
+
+        float hitT = rq.CommittedRayT();
+        float3 hitPos = rayOrigin + R * hitT;
+
+        float3 albedo = hitLut.baseColorFactor.rgb;
         if (hitLut.baseColorTextureIndex != 0xFFFFFFFF)
         {
             Texture2D hitTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + hitLut.baseColorTextureIndex, 0));
-            hitColor = hitTex.SampleLevel(textureSampler, hitUV, 0).rgb;
+            albedo *= hitTex.SampleLevel(textureSampler, hitUV, 0).rgb;
         }
 
-        return hitColor;
+        // Direct lighting from scene lights on the reflected surface
+        LightData* lights = (LightData*)ubo->lightDataReference;
+        float3 directLight = float3(0.0);
+
+        for (uint i = 0; i < ubo->lightCount; i++)
+        {
+            LightData light = lights[i];
+            uint lightType = (uint)light.position.w;
+
+            float3 l;
+            float attenuation = 1.0;
+
+            if (lightType == 0) // Directional Light
+            {
+                l = normalize(light.direction.xyz);
+            }
+            else // Point (1) or Spot (2)
+            {
+                float3 lightVec = light.position.xyz - hitPos;
+                float dist = length(lightVec);
+                l = dist > 0.0001 ? lightVec / dist : float3(0.0, 1.0, 0.0);
+
+                float range = light.direction.w;
+                if (range > 0.0)
+                {
+                    float dOverR = dist / range;
+                    float window = max(1.0 - pow(dOverR, 4.0), 0.0);
+                    attenuation = window / (dist * dist);
+                }
+                else
+                {
+                    attenuation = 1.0 / (dist * dist);
+                }
+
+                if (lightType == 2) // Spot Cone
+                {
+                    float cd = dot(normalize(light.direction.xyz), -l);
+                    float lightAngleScale = light.spotParams.x;
+                    float lightAngleOffset = light.spotParams.y;
+                    float angularAttenuation = saturate(cd * lightAngleScale + lightAngleOffset);
+                    angularAttenuation *= angularAttenuation;
+                    attenuation *= angularAttenuation;
+                }
+            }
+
+            if (attenuation <= 0.0)
+                continue;
+
+            float NdotL = max(dot(hitNormal, l), 0.0);
+            if (NdotL > 0.0)
+            {
+                float3 lightRadiance = light.color.rgb * light.color.w * attenuation;
+                directLight += (albedo / 3.14159265) * lightRadiance * NdotL;
+            }
+        }
+
+        // Ambient room bounce fallback
+        float3 ambientLight = albedo * 0.15 * ubo->scaleIBLAmbient;
+
+        // Emissive light from hit surface (e.g. Cornell Box ceiling light)
+        float3 emissiveLight = hitLut.emissiveFactor.rgb * hitLut.emissiveFactor.a;
+
+        return directLight + ambientLight + emissiveLight;
     }
 
     [shader("fragment")]
@@ -600,9 +693,9 @@
 
             if (reflHit)
             {
-                // Blend reflection based on glossiness:
-                // Mirror surfaces (roughness == 0) blend at 70% matching tutorial lerp(baseColor, hitColor, 0.7)
-                float reflWeight = (1.0 - perceptualRoughness) * 0.7;
+                // Blend reflection based on glossiness and metallic:
+                // Mirror metals (metallic == 1, roughness == 0) blend up to 95%, dielectrics up to 70%
+                float reflWeight = (1.0 - perceptualRoughness) * lerp(0.7, 0.95, metallic);
                 finalColor = lerp(finalColor, reflColor, reflWeight);
             }
 

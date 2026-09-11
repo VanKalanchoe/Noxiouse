@@ -255,9 +255,19 @@
             uint32_t* indices = (uint32_t*)lut.indexBufferAddress;
             Vertex* vertices = (Vertex*)lut.vertexBufferAddress;
 
-            uint i0 = indices[committedPrimIndex * 3 + 0];
-            uint i1 = indices[committedPrimIndex * 3 + 1];
-            uint i2 = indices[committedPrimIndex * 3 + 2];
+            uint i0, i1, i2;
+            if (lut.indexBufferAddress != 0)
+            {
+                i0 = indices[committedPrimIndex * 3 + 0];
+                i1 = indices[committedPrimIndex * 3 + 1];
+                i2 = indices[committedPrimIndex * 3 + 2];
+            }
+            else
+            {
+                i0 = committedPrimIndex * 3 + 0;
+                i1 = committedPrimIndex * 3 + 1;
+                i2 = committedPrimIndex * 3 + 2;
+            }
 
             float w0 = 1.0 - bary.x - bary.y;
             float w1 = bary.x;
@@ -278,12 +288,15 @@
             float3 hitPos = ray.Origin + ray.Direction * hitT;
 
             // Sample Material Base Color
-            float3 albedo = float3(0.8, 0.8, 0.8);
+            float3 albedo = lut.baseColorFactor.rgb;
             if (lut.baseColorTextureIndex != 0xFFFFFFFF)
             {
                 Texture2D colTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + lut.baseColorTextureIndex, 0));
-                albedo = colTex.SampleLevel(textureSampler, hitUV, 0).rgb;
+                albedo *= colTex.SampleLevel(textureSampler, hitUV, 0).rgb;
             }
+
+            // Hit surface emission (e.g. Cornell Box ceiling light)
+            radiance += lut.emissiveFactor.rgb * lut.emissiveFactor.a * throughput;
 
             // --- Next Event Estimation (NEE): Direct Lights ---
             LightData* lights = (LightData*)ubo->lightDataReference;

@@ -1042,6 +1042,15 @@ namespace Nox
                     {
                         m_Renderer->setDLSSRayReconstructionEnabled(rrEnabled);
                     }
+                    if (ImGui::IsItemHovered())
+                    {
+                        ImGui::SetTooltip("AI Neural Reconstruction for reflections & indirect lighting.\nReplaces downstream reflection/GI denoisers (automatically disables NRD REBLUR/RELAX).\nNRD SIGMA shadows remain compatible and independent.");
+                    }
+                    if (rrEnabled)
+                    {
+                        ImGui::SameLine();
+                        ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f), "(Active)");
+                    }
                 }
 
                 NRI::Extent2D renderSize = m_Renderer->getRenderSize();
@@ -1098,7 +1107,7 @@ namespace Nox
                     }
                     if (ImGui::IsItemHovered())
                     {
-                        ImGui::SetTooltip("Uses NVIDIA Real-Time Denoisers (SIGMA) for penumbra filtering & temporal accumulation.\nUncheck to view raw 1-SPP shadows.");
+                        ImGui::SetTooltip("Uses NVIDIA Real-Time Denoisers (SIGMA) for penumbra filtering & contact hardening.\nRuns upstream pre-lighting on the shadow mask; fully compatible with DLSS-SR and DLSS-RR.\nUncheck to view raw 1-SPP shadows.");
                     }
                     ImGui::Unindent();
                 }
@@ -1107,6 +1116,36 @@ namespace Nox
                 if (ImGui::Checkbox("Ray Tracing Reflections", &rtReflections))
                 {
                     m_Renderer->setRayTracingReflections(rtReflections);
+                }
+
+                if (rtReflections)
+                {
+                    ImGui::Indent();
+                    bool dlssRR = m_Renderer->isDLSSRayReconstructionEnabled();
+                    if (dlssRR)
+                    {
+                        ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f), "Denoiser: DLSS Ray Reconstruction (Active)");
+                        if (ImGui::IsItemHovered())
+                        {
+                            ImGui::SetTooltip("DLSS Ray Reconstruction is active and handles reflections downstream.\nSelect NRD REBLUR or RELAX below to switch to cross-vendor non-AI denoising (auto-disables DLSS-RR).");
+                        }
+                    }
+
+                    static const char* reflDenoiserNames[] = {
+                        "Off (Raw 1-SPP)",
+                        "NRD REBLUR (Variance Guided)",
+                        "NRD RELAX (A-Trous Wavelet)"
+                    };
+                    int currentReflDenoiser = static_cast<int>(m_Renderer->getNRDReflectionDenoiser());
+                    if (ImGui::Combo("Reflection Denoiser", &currentReflDenoiser, reflDenoiserNames, IM_ARRAYSIZE(reflDenoiserNames)))
+                    {
+                        m_Renderer->setNRDReflectionDenoiser(static_cast<NRI::NRDReflectionDenoiser>(currentReflDenoiser));
+                    }
+                    if (ImGui::IsItemHovered())
+                    {
+                        ImGui::SetTooltip("Cross-vendor non-AI denoisers for specular reflections.\nEnabling NRD REBLUR or RELAX automatically disables DLSS Ray Reconstruction to prevent double-filtering.");
+                    }
+                    ImGui::Unindent();
                 }
                 ImGui::Unindent();
             }

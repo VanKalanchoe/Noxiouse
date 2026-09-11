@@ -3,6 +3,10 @@ AssetRegistry:
     FilePath: Scenes/3D-Scene.nox
     SourceFilePath: Scenes/3D-Scene.nox
     Type: AssetType::Scene
+  - Handle: 628180141406162795
+    FilePath: Models/CornellBox-Sphere/Materials/CornellBox-Sphere_backWall.nmat
+    SourceFilePath: Models/CornellBox-Sphere/Materials/CornellBox-Sphere_backWall.nmat
+    Type: AssetType::Material
   - Handle: 1194732318065482695
     FilePath: Models/CornellBox-Original/Materials/CornellBox-Original_light.007.nmat
     SourceFilePath: Models/CornellBox-Original/Materials/CornellBox-Original_light.007.nmat
@@ -35,6 +39,10 @@ AssetRegistry:
     FilePath: Models/CornellBox-Original/Meshes/CornellBox-Original.nmesh
     SourceFilePath: Models/CornellBox-Original/CornellBox-Original.gltf
     Type: AssetType::Mesh
+  - Handle: 3857021536663714078
+    FilePath: Models/CornellBox-Sphere/Materials/CornellBox-Sphere_rightSphere.nmat
+    SourceFilePath: Models/CornellBox-Sphere/Materials/CornellBox-Sphere_rightSphere.nmat
+    Type: AssetType::Material
   - Handle: 4869236123690462678
     FilePath: Models/CornellBox-Original/Materials/CornellBox-Original_floor.007.nmat
     SourceFilePath: Models/CornellBox-Original/Materials/CornellBox-Original_floor.007.nmat
@@ -42,6 +50,10 @@ AssetRegistry:
   - Handle: 5700840898858191134
     FilePath: Models/CornellBox-Original/Materials/CornellBox-Original_backWall.007.nmat
     SourceFilePath: Models/CornellBox-Original/Materials/CornellBox-Original_backWall.007.nmat
+    Type: AssetType::Material
+  - Handle: 5803239819837397058
+    FilePath: Models/CornellBox-Sphere/Materials/CornellBox-Sphere_rightWall.nmat
+    SourceFilePath: Models/CornellBox-Sphere/Materials/CornellBox-Sphere_rightWall.nmat
     Type: AssetType::Material
   - Handle: 5924974148496953984
     FilePath: Models/Box/Materials/Box_Red_Instance_6322294098808749156.nmat
@@ -67,6 +79,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 8233010243962803859
+    FilePath: Models/CornellBox-Sphere/Materials/CornellBox-Sphere_floor.nmat
+    SourceFilePath: Models/CornellBox-Sphere/Materials/CornellBox-Sphere_floor.nmat
+    Type: AssetType::Material
   - Handle: 8378455864061764936
     FilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_2.ntex
     SourceFilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_2.ntex
@@ -75,6 +91,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 9020476312662236457
+    FilePath: Models/CornellBox-Sphere/Materials/CornellBox-Sphere_light.nmat
+    SourceFilePath: Models/CornellBox-Sphere/Materials/CornellBox-Sphere_light.nmat
+    Type: AssetType::Material
   - Handle: 9032025084249123886
     FilePath: Models/Fox/Textures/Texture.ntex
     SourceFilePath: Models/Fox/Texture.png
@@ -90,6 +110,10 @@ AssetRegistry:
   - Handle: 10584556158970797074
     FilePath: Models/Box/Materials/Box_Red_Instance_10716039454136746130.nmat
     SourceFilePath: Models/Box/Materials/Box_Red_Instance_10716039454136746130.nmat
+    Type: AssetType::Material
+  - Handle: 10954185523191953878
+    FilePath: Models/CornellBox-Sphere/Materials/CornellBox-Sphere_leftSphere.nmat
+    SourceFilePath: Models/CornellBox-Sphere/Materials/CornellBox-Sphere_leftSphere.nmat
     Type: AssetType::Material
   - Handle: 11575064581848346143
     FilePath: Models/Box/Materials/Box_Red_Instance_10716039454136746130_Instance_2462416643620510603_Instance_15338619392834088379_Instance_12552764984690426143.nmat
@@ -127,6 +151,14 @@ AssetRegistry:
     FilePath: Models/Fox/Materials/Fox_fox_material.nmat
     SourceFilePath: Models/Fox/Materials/Fox_fox_material.nmat
     Type: AssetType::Material
+  - Handle: 14442448987381621717
+    FilePath: Models/CornellBox-Sphere/Materials/CornellBox-Sphere_leftWall.nmat
+    SourceFilePath: Models/CornellBox-Sphere/Materials/CornellBox-Sphere_leftWall.nmat
+    Type: AssetType::Material
+  - Handle: 15025713658148557039
+    FilePath: Models/CornellBox-Sphere/Materials/CornellBox-Sphere_ceiling.nmat
+    SourceFilePath: Models/CornellBox-Sphere/Materials/CornellBox-Sphere_ceiling.nmat
+    Type: AssetType::Material
   - Handle: 16386892812733954348
     FilePath: Models/DamagedHelmet/Materials/DamagedHelmet_Material_MR.nmat
     SourceFilePath: Models/DamagedHelmet/Materials/DamagedHelmet_Material_MR.nmat
@@ -147,3 +179,7 @@ AssetRegistry:
     FilePath: Models/CornellBox-Original/Materials/CornellBox-Original_rightWall.007.nmat
     SourceFilePath: Models/CornellBox-Original/Materials/CornellBox-Original_rightWall.007.nmat
     Type: AssetType::Material
+  - Handle: 17870295934081198928
+    FilePath: Models/CornellBox-Sphere/Meshes/CornellBox-Sphere.nmesh
+    SourceFilePath: Models/CornellBox-Sphere/CornellBox-Sphere.gltf
+    Type: AssetType::Mesh
