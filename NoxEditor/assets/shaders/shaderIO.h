@@ -21,6 +21,7 @@ enum SamplerIndex : uint32_t
     SAMPLER_BRDFLUT = 2,
     SAMPLER_IRRADIANCE = 3,
     SAMPLER_PREFILTER = 4,
+    SAMPLER_LINEAR_CLAMP = 5,
 
     SamplerCount
 };
@@ -179,6 +180,15 @@ struct UniformBufferObject
 
     // Temporal
     uint32_t frameIndex;
+    uint32_t enableDDGI;
+    uint32_t ddgiIrradianceTextureIndex;
+    uint32_t ddgiDistanceTextureIndex;
+
+    // DDGI (Dynamic Diffuse Global Illumination)
+    vec4 ddgiGridOrigin;   // xyz: origin, w: countX
+    vec4 ddgiGridSpacing;  // xyz: spacing, w: countY
+    vec4 ddgiGridParams;   // x: countZ, y: raysPerProbe, z: hysteresis, w: normalBias
+    vec4 ddgiAtlasParams;  // x: irrWidth, y: irrHeight, z: distWidth, w: distHeight
 };
 
 struct Vertex
@@ -397,6 +407,35 @@ struct PushConstantPostProcess
     uint32_t hdrTextureIndex;
     uint32_t debugMode;
     uint32_t tonemapMode; // 0 = None, 1 = ACES Narkowicz, 2 = ACES Hill, 3 = ACES Hill Exp, 4 = Khronos PBR Neutral
+};
+
+struct PushConstantDDGIRadiance
+{
+    uint64_t matrixReference;
+    uint32_t raysPerProbe;
+    uint32_t probeCountTotal;
+    uint32_t frameIndex;
+};
+
+struct PushConstantDDGIBlend
+{
+    uint64_t matrixReference;
+    uint32_t rayDataTextureIndex;
+    uint32_t prevAtlasTextureIndex;
+    uint32_t probesPerRow;
+    uint32_t raysPerProbe;
+    uint32_t probeCountTotal;
+    float hysteresis;
+    uint32_t firstFrame;
+    uint32_t frameIndex;
+};
+
+struct PushConstantDDGIDebug
+{
+    uint64_t matrixReference;
+    uint32_t probeCountTotal;
+    float sphereRadius;
+    uint32_t irradianceAtlasIndex;
 };
 
 struct PushConstantOutline

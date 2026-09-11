@@ -1,4 +1,5 @@
 #include "shaderIO.h"
+#include "DDGICommon.slang"
 
 struct ReflectionPayload
 {
@@ -342,6 +343,7 @@ float4 fragMain(
         uint lightType = (uint)light.position.w;
 
         float3 l;
+        float dist = 1000.0;
         float attenuation = 1.0;
 
         if (lightType == 0) // Directional Light
@@ -351,7 +353,7 @@ float4 fragMain(
         else // Point (1) or Spot (2)
         {
             float3 lightVec = light.position.xyz - hitPos;
-            float dist = length(lightVec);
+            dist = length(lightVec);
             l = dist > 0.0001 ? lightVec / dist : float3(0.0, 1.0, 0.0);
 
             float range = light.direction.w;
@@ -380,25 +382,62 @@ float4 fragMain(
         if (attenuation <= 0.0)
             continue;
 
-        float NdotL = max(dot(hitNormal, l), 0.0);
+        float NdotL = dot(hitNormal, l);
+        float3 shadowNormal = hitNormal;
+        if (hitLut.doubleSided != 0)
+        {
+            if (NdotL < 0.0)
+            {
+                NdotL = -NdotL;
+                shadowNormal = -hitNormal;
+            }
+        }
+        else
+        {
+            NdotL = max(NdotL, 0.0);
+        }
+
         if (NdotL > 0.0)
         {
-            float3 lightRadiance = light.color.rgb * light.color.w * attenuation;
-            directLight += (albedo / 3.14159265) * lightRadiance * NdotL;
+            // Shadow test: Ensure reflected surface is truly lit and not in shadow
+            RayDesc shadowRay;
+            shadowRay.Origin = hitPos + shadowNormal * 0.02;
+            shadowRay.Direction = l;
+            shadowRay.TMin = 0.005;
+            shadowRay.TMax = (lightType == 0) ? 1000.0 : dist;
+
+            RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> shadowRq;
+            shadowRq.TraceRayInline(accelerationStructure, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES, 0xFF, shadowRay);
+            shadowRq.Proceed();
+
+            if (shadowRq.CommittedStatus() != COMMITTED_TRIANGLE_HIT)
+            {
+                float3 lightRadiance = light.color.rgb * light.color.w * attenuation;
+                directLight += (albedo / 3.14159265) * lightRadiance * NdotL;
+            }
         }
     }
 
-    // Ambient light from scene irradiance map
+    // Ambient diffuse light: sample DDGI probes if active, or scene irradiance cubemap
     float3 ambientLight = float3(0.0);
-    if (ubo->irradianceMapIndex != 0xFFFFFFFF)
+    if (ubo->enableDDGI != 0 && ubo->ddgiIrradianceTextureIndex != 0xFFFFFFFF && ubo->ddgiDistanceTextureIndex != 0xFFFFFFFF)
+    {
+        Texture2D ddgiIrrTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->ddgiIrradianceTextureIndex, 0));
+        Texture2D ddgiDistTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->ddgiDistanceTextureIndex, 0));
+        SamplerState ddgiSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
+
+        float3 ddgiIrr = sample_ddgi_diffuse(ubo, hitPos, hitNormal, ddgiIrrTex, ddgiDistTex, ddgiSampler);
+        ambientLight = (albedo / 3.14159265) * ddgiIrr;
+    }
+    else if (ubo->irradianceMapIndex != 0xFFFFFFFF)
     {
         TextureCube irradianceTex = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + ubo->irradianceMapIndex, 0));
         SamplerState samplerIrradiance = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_IRRADIANCE, 0));
-        ambientLight = irradianceTex.SampleLevel(samplerIrradiance, hitNormal, 0).rgb * albedo * ubo->scaleIBLAmbient;
+        ambientLight = irradianceTex.SampleLevel(samplerIrradiance, hitNormal, 0).rgb * (albedo / 3.14159265) * ubo->scaleIBLAmbient * 0.2;
     }
     else
     {
-        ambientLight = albedo * 0.5 * ubo->scaleIBLAmbient;
+        ambientLight = (albedo / 3.14159265) * 0.05 * ubo->scaleIBLAmbient;
     }
 
     // Emissive light from hit surface (e.g. Cornell Box ceiling light)

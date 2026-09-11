@@ -157,6 +157,11 @@ namespace Nox
         watchShader("assets/shaders/Reflection.slang", "Reflection", [this]() { createReflectionPipeline(true); });
         // Path Tracer
         watchShader("assets/shaders/PathTracer.slang", "PathTracer", [this]() { createPathTracerPipeline(true); });
+        // DDGI
+        watchShader("assets/shaders/DDGIRadiance.slang", "DDGIRadiance", [this]() { createDDGIPipelines(true); });
+        watchShader("assets/shaders/DDGIBlendIrradiance.slang", "DDGIBlendIrradiance", [this]() { createDDGIPipelines(true); });
+        watchShader("assets/shaders/DDGIBlendDistance.slang", "DDGIBlendDistance", [this]() { createDDGIPipelines(true); });
+        watchShader("assets/shaders/DDGIProbeSpheres.slang", "DDGIProbeSpheres", [this]() { createDDGIPipelines(true); });
 
         m_whiteTexture = createSolidColorTexture(255, 255, 255, 255);
 
@@ -229,6 +234,8 @@ namespace Nox
         createReflectionPipeline();
         // Path Tracer
         createPathTracerPipeline(false);
+        // DDGI
+        createDDGIPipelines(false);
 
         createCommandPool();
         createUniformBuffers();
@@ -249,6 +256,8 @@ namespace Nox
         createShadowMaskResources();
         // Path Tracer
         createPathTracerResources();
+        // DDGI
+        createDDGIResources();
 
         createCommandBuffers();
 
@@ -603,6 +612,179 @@ namespace Nox
         });
 
         m_pathTracerPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+    }
+
+    void Renderer::createDDGIResources()
+    {
+        uint32_t totalProbes = m_ddgiProbeCountX * m_ddgiProbeCountY * m_ddgiProbeCountZ;
+        if (totalProbes == 0)
+            return;
+
+        uint32_t probesPerRow = 64;
+        uint32_t probeRows = (totalProbes + probesPerRow - 1) / probesPerRow;
+
+        if (m_ddgiRayData)
+        {
+            m_resourceHeap->unregisterTexture(m_ddgiRayData->GetDescriptorIndexSlot());
+        }
+        for (int i = 0; i < 2; i++)
+        {
+            if (m_ddgiIrradiance[i])
+                m_resourceHeap->unregisterTexture(m_ddgiIrradiance[i]->GetDescriptorIndexSlot());
+            if (m_ddgiDistance[i])
+                m_resourceHeap->unregisterTexture(m_ddgiDistance[i]->GetDescriptorIndexSlot());
+        }
+
+        // 1. Ray Data Buffer (Width = RaysPerProbe, Height = TotalProbes)
+        m_ddgiRayData = m_device->createTexture(NRI::TextureDesc{
+            .width = m_ddgiRaysPerProbe,
+            .height = totalProbes,
+            .mipLevels = 1,
+            .sampleCount = 1,
+            .usage = NRI::TextureUsage::ColorAttachment,
+            .format = NRI::ImageFormat::R16G16B16A16_SFLOAT,
+            .directFormat = UINT32_MAX
+        });
+        m_resourceHeap->registerTexture(*m_ddgiRayData);
+
+        // 2. Irradiance Atlases (Ping-Pong: 8x8 interior + 2 border = 10x10 per probe)
+        uint32_t irrWidth = probesPerRow * 10;
+        uint32_t irrHeight = probeRows * 10;
+        for (int i = 0; i < 2; i++)
+        {
+            m_ddgiIrradiance[i] = m_device->createTexture(NRI::TextureDesc{
+                .width = irrWidth,
+                .height = irrHeight,
+                .mipLevels = 1,
+                .sampleCount = 1,
+                .usage = NRI::TextureUsage::ColorAttachment,
+                .format = NRI::ImageFormat::R16G16B16A16_SFLOAT,
+                .directFormat = UINT32_MAX
+            });
+            m_resourceHeap->registerTexture(*m_ddgiIrradiance[i]);
+        }
+
+        // 3. Distance Atlases (Ping-Pong: 16x16 interior + 2 border = 18x18 per probe)
+        uint32_t distWidth = probesPerRow * 18;
+        uint32_t distHeight = probeRows * 18;
+        for (int i = 0; i < 2; i++)
+        {
+            m_ddgiDistance[i] = m_device->createTexture(NRI::TextureDesc{
+                .width = distWidth,
+                .height = distHeight,
+                .mipLevels = 1,
+                .sampleCount = 1,
+                .usage = NRI::TextureUsage::ColorAttachment,
+                .format = NRI::ImageFormat::R16G16_SFLOAT,
+                .directFormat = UINT32_MAX
+            });
+            m_resourceHeap->registerTexture(*m_ddgiDistance[i]);
+        }
+
+        m_ddgiFirstFrame = true;
+    }
+
+    void Renderer::resetDDGIGridToDefaults()
+    {
+        m_ddgiGridOrigin = glm::vec3(-20.0f, -0.5f, -12.0f);
+        m_ddgiGridSpacing = glm::vec3(1.8f, 1.4f, 1.7f);
+        m_ddgiHysteresis = 0.97f;
+        m_ddgiNormalBias = 0.2f;
+        m_ddgiDebugSphereRadius = 0.15f;
+        m_ddgiFirstFrame = true;
+    }
+
+    void Renderer::createDDGIPipelines(bool forceCompile)
+    {
+        // 1. Radiance Pipeline
+        {
+            NRI::PipelineDesc desc{};
+            desc.forceCompile = forceCompile;
+            desc.colorFormats = {NRI::ImageFormat::R16G16B16A16_SFLOAT};
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Task,
+                .entryPoint = "taskMain",
+                .sourcePath = "assets/shaders/DDGIRadiance.slang"
+            });
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Mesh,
+                .entryPoint = "meshMain",
+                .sourcePath = "assets/shaders/DDGIRadiance.slang"
+            });
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Fragment,
+                .entryPoint = "fragMain",
+                .sourcePath = "assets/shaders/DDGIRadiance.slang"
+            });
+            m_ddgiRadiancePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        }
+
+        // 2. Blend Irradiance Pipeline
+        {
+            NRI::PipelineDesc desc{};
+            desc.forceCompile = forceCompile;
+            desc.colorFormats = {NRI::ImageFormat::R16G16B16A16_SFLOAT};
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Task,
+                .entryPoint = "taskMain",
+                .sourcePath = "assets/shaders/DDGIBlendIrradiance.slang"
+            });
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Mesh,
+                .entryPoint = "meshMain",
+                .sourcePath = "assets/shaders/DDGIBlendIrradiance.slang"
+            });
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Fragment,
+                .entryPoint = "fragMain",
+                .sourcePath = "assets/shaders/DDGIBlendIrradiance.slang"
+            });
+            m_ddgiBlendIrradiancePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        }
+
+        // 3. Blend Distance Pipeline
+        {
+            NRI::PipelineDesc desc{};
+            desc.forceCompile = forceCompile;
+            desc.colorFormats = {NRI::ImageFormat::R16G16_SFLOAT};
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Task,
+                .entryPoint = "taskMain",
+                .sourcePath = "assets/shaders/DDGIBlendDistance.slang"
+            });
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Mesh,
+                .entryPoint = "meshMain",
+                .sourcePath = "assets/shaders/DDGIBlendDistance.slang"
+            });
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Fragment,
+                .entryPoint = "fragMain",
+                .sourcePath = "assets/shaders/DDGIBlendDistance.slang"
+            });
+            m_ddgiBlendDistancePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        }
+
+        // 4. Debug Spheres Pipeline (Rendered in Forward 3D pass into m_hdrSceneResource + m_entityResource)
+        {
+            NRI::PipelineDesc desc{};
+            desc.forceCompile = true;
+            desc.colorFormats = {
+                NRI::ImageFormat::R16G16B16A16_SFLOAT,
+                NRI::ImageFormat::R32SINT
+            };
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Mesh,
+                .entryPoint = "meshMain",
+                .sourcePath = "assets/shaders/DDGIProbeSpheres.slang"
+            });
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Fragment,
+                .entryPoint = "fragMain",
+                .sourcePath = "assets/shaders/DDGIProbeSpheres.slang"
+            });
+            m_ddgiDebugSpheresPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        }
     }
 
     void Renderer::createCompiler()
@@ -1931,6 +2113,23 @@ namespace Nox
             .borderColor = NRI::BorderColor::FloatOpaqueWhite
         };
 
+        samplers[shaderio::SAMPLER_LINEAR_CLAMP] = NRI::SamplerDesc
+        {
+            .magFilter = NRI::Filter::Linear,
+            .minFilter = NRI::Filter::Linear,
+            .mipmapMode = NRI::SamplerMipmapMode::Linear,
+            .addressModeU = NRI::SamplerAddressMode::ClampToEdge,
+            .addressModeV = NRI::SamplerAddressMode::ClampToEdge,
+            .addressModeW = NRI::SamplerAddressMode::ClampToEdge,
+            .mipLodBias = 0.0f,
+            .maxAnisotropy = 1.0f,
+            .compareEnable = false,
+            .compareOp = NRI::CompareOp::Never,
+            .minLod = 0.0f,
+            .maxLod = 1000.0f,
+            .borderColor = NRI::BorderColor::FloatOpaqueWhite
+        };
+
         // todo: imgui needs more space to if you want to register it
         // currently 1000 in initimgui devicevk.cpp
 
@@ -2466,9 +2665,175 @@ namespace Nox
         m_resetNRD = false;
 
         // =========================================================================
-        // 3. LIGHTING PASS: PATH TRACER (Modes 16 & 17) OR DEFERRED LIGHTING
+        // 2.8. DYNAMIC DIFFUSE GLOBAL ILLUMINATION (DDGI) PASSES
         // =========================================================================
-        bool runPathTracer = (m_pathTracingEnabled || m_debugMode == 16 || m_debugMode == 17);
+        uint32_t totalDDGIProbes = m_ddgiProbeCountX * m_ddgiProbeCountY * m_ddgiProbeCountZ;
+        bool runDDGI = (m_ddgiEnabled || m_debugMode == 16 || m_debugMode == 17) &&
+                       m_ddgiRadiancePipeline && m_ddgiBlendIrradiancePipeline && m_ddgiBlendDistancePipeline &&
+                       m_ddgiRayData && m_ddgiIrradiance[0] && m_ddgiIrradiance[1] &&
+                       m_ddgiDistance[0] && m_ddgiDistance[1] && (totalDDGIProbes > 0);
+
+        if (runDDGI)
+        {
+            uint32_t probesPerRow = 64;
+            uint32_t probeRows = (totalDDGIProbes + probesPerRow - 1) / probesPerRow;
+            uint32_t irrWidth = probesPerRow * 10;
+            uint32_t irrHeight = probeRows * 10;
+            uint32_t distWidth = probesPerRow * 18;
+            uint32_t distHeight = probeRows * 18;
+
+            uint32_t writeIndex = 1 - m_ddgiHistoryIndex;
+            uint32_t readIndex = m_ddgiHistoryIndex;
+
+            // 1. Trace DDGI Radiance Rays: (Width = m_ddgiRaysPerProbe, Height = totalDDGIProbes)
+            {
+                NRI::Extent2D radExtent = {m_ddgiRaysPerProbe, totalDDGIProbes};
+                std::vector<NRI::RenderAttachDesc> radAttachments;
+                radAttachments.push_back({
+                    .attachment = m_ddgiRayData.get(),
+                    .loadOP = NRI::LoadOP::clear,
+                    .storeOP = NRI::StoreOP::store,
+                    .clearColor = {0.0f, 0.0f, 0.0f, 1000.0f}
+                });
+
+                NRI::RenderDesc radDesc = {
+                    .renderArea = radExtent,
+                    .colorAttachments = radAttachments
+                };
+
+                m_commandBuffers->beginRendering(radDesc);
+                float radW = static_cast<float>(m_ddgiRaysPerProbe);
+                float radH = static_cast<float>(totalDDGIProbes);
+                m_commandBuffers->setViewportWithCount({0.0f, radH, radW, -radH}, 0.0f, 1.0f);
+                m_commandBuffers->setScissorWithCount(radExtent);
+
+                m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_ddgiRadiancePipeline);
+                m_commandBuffers->setCullMode(NRI::CullMode::None);
+                m_commandBuffers->setDepthTestEnable(false);
+                m_commandBuffers->setDepthWriteEnable(false);
+                m_commandBuffers->setColorBlendEnable(0, false);
+                m_commandBuffers->setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G |
+                                                    NRI::ColorComponent::B | NRI::ColorComponent::A);
+
+                shaderio::PushConstantDDGIRadiance radPush{};
+                radPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                radPush.raysPerProbe = m_ddgiRaysPerProbe;
+                radPush.probeCountTotal = totalDDGIProbes;
+                radPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
+                m_commandBuffers->pushData(&radPush, sizeof(shaderio::PushConstantDDGIRadiance));
+
+                m_commandBuffers->drawMeshTasks(1, 1, 1);
+                m_commandBuffers->endRendering();
+                m_commandBuffers->executionBarrier();
+            }
+
+            // 2. Blend Irradiance Atlas: (Width = irrWidth, Height = irrHeight)
+            {
+                NRI::Extent2D irrExtent = {irrWidth, irrHeight};
+                std::vector<NRI::RenderAttachDesc> irrAttachments;
+                irrAttachments.push_back({
+                    .attachment = m_ddgiIrradiance[writeIndex].get(),
+                    .loadOP = NRI::LoadOP::clear,
+                    .storeOP = NRI::StoreOP::store,
+                    .clearColor = {0.0f, 0.0f, 0.0f, 1.0f}
+                });
+
+                NRI::RenderDesc irrDesc = {
+                    .renderArea = irrExtent,
+                    .colorAttachments = irrAttachments
+                };
+
+                m_commandBuffers->beginRendering(irrDesc);
+                float irrW = static_cast<float>(irrWidth);
+                float irrH = static_cast<float>(irrHeight);
+                m_commandBuffers->setViewportWithCount({0.0f, irrH, irrW, -irrH}, 0.0f, 1.0f);
+                m_commandBuffers->setScissorWithCount(irrExtent);
+
+                m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_ddgiBlendIrradiancePipeline);
+                m_commandBuffers->setCullMode(NRI::CullMode::None);
+                m_commandBuffers->setDepthTestEnable(false);
+                m_commandBuffers->setDepthWriteEnable(false);
+                m_commandBuffers->setColorBlendEnable(0, false);
+                m_commandBuffers->setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G |
+                                                    NRI::ColorComponent::B | NRI::ColorComponent::A);
+
+                shaderio::PushConstantDDGIBlend blendIrrPush{};
+                blendIrrPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                blendIrrPush.rayDataTextureIndex = m_ddgiRayData->GetDescriptorIndexSlot();
+                blendIrrPush.prevAtlasTextureIndex = m_ddgiIrradiance[readIndex]->GetDescriptorIndexSlot();
+                blendIrrPush.probesPerRow = probesPerRow;
+                blendIrrPush.raysPerProbe = m_ddgiRaysPerProbe;
+                blendIrrPush.probeCountTotal = totalDDGIProbes;
+                blendIrrPush.hysteresis = m_ddgiHysteresis;
+                blendIrrPush.firstFrame = (m_ddgiFirstFrame || m_isFirstFrame) ? 1 : 0;
+                blendIrrPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
+                m_commandBuffers->pushData(&blendIrrPush, sizeof(shaderio::PushConstantDDGIBlend));
+
+                m_commandBuffers->drawMeshTasks(1, 1, 1);
+                m_commandBuffers->endRendering();
+                m_commandBuffers->executionBarrier();
+            }
+
+            // 3. Blend Distance Atlas: (Width = distWidth, Height = distHeight)
+            {
+                NRI::Extent2D distExtent = {distWidth, distHeight};
+                std::vector<NRI::RenderAttachDesc> distAttachments;
+                distAttachments.push_back({
+                    .attachment = m_ddgiDistance[writeIndex].get(),
+                    .loadOP = NRI::LoadOP::clear,
+                    .storeOP = NRI::StoreOP::store,
+                    .clearColor = {0.0f, 0.0f, 0.0f, 0.0f}
+                });
+
+                NRI::RenderDesc distDesc = {
+                    .renderArea = distExtent,
+                    .colorAttachments = distAttachments
+                };
+
+                m_commandBuffers->beginRendering(distDesc);
+                float distW = static_cast<float>(distWidth);
+                float distH = static_cast<float>(distHeight);
+                m_commandBuffers->setViewportWithCount({0.0f, distH, distW, -distH}, 0.0f, 1.0f);
+                m_commandBuffers->setScissorWithCount(distExtent);
+
+                m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_ddgiBlendDistancePipeline);
+                m_commandBuffers->setCullMode(NRI::CullMode::None);
+                m_commandBuffers->setDepthTestEnable(false);
+                m_commandBuffers->setDepthWriteEnable(false);
+                m_commandBuffers->setColorBlendEnable(0, false);
+                m_commandBuffers->setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G);
+
+                shaderio::PushConstantDDGIBlend blendDistPush{};
+                blendDistPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                blendDistPush.rayDataTextureIndex = m_ddgiRayData->GetDescriptorIndexSlot();
+                blendDistPush.prevAtlasTextureIndex = m_ddgiDistance[readIndex]->GetDescriptorIndexSlot();
+                blendDistPush.probesPerRow = probesPerRow;
+                blendDistPush.raysPerProbe = m_ddgiRaysPerProbe;
+                blendDistPush.probeCountTotal = totalDDGIProbes;
+                blendDistPush.hysteresis = m_ddgiHysteresis;
+                blendDistPush.firstFrame = (m_ddgiFirstFrame || m_isFirstFrame) ? 1 : 0;
+                blendDistPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
+                m_commandBuffers->pushData(&blendDistPush, sizeof(shaderio::PushConstantDDGIBlend));
+
+                m_commandBuffers->drawMeshTasks(1, 1, 1);
+                m_commandBuffers->endRendering();
+                m_commandBuffers->executionBarrier();
+            }
+
+            // Swap history to writeIndex for subsequent lighting and next frame
+            m_ddgiHistoryIndex = writeIndex;
+            m_ddgiFirstFrame = false;
+
+            // Update UBO so the Deferred Lighting pass in this same frame reads the fresh atlas
+            uniformData.ddgiIrradianceTextureIndex = m_ddgiIrradiance[writeIndex]->GetDescriptorIndexSlot();
+            uniformData.ddgiDistanceTextureIndex = m_ddgiDistance[writeIndex]->GetDescriptorIndexSlot();
+            memcpy(m_uniformBuffersMapped[frameIndex], &uniformData, sizeof(shaderio::UniformBufferObject));
+        }
+
+        // =========================================================================
+        // 3. LIGHTING PASS: PATH TRACER (Modes 18 & 19) OR DEFERRED LIGHTING
+        // =========================================================================
+        bool runPathTracer = (m_pathTracingEnabled || m_debugMode == 18 || m_debugMode == 19);
         if (runPathTracer && m_pathTracerPipeline && m_pathTracerAccum[0] && m_pathTracerAccum[1])
         {
             bool dlssRRActive = m_dlssEnabled && (m_dlssMode != NRI::UpscaleMode::Off) && m_dlssRayReconstructionEnabled;
@@ -2476,7 +2841,7 @@ namespace Nox
 
             // If DLSS-RR is active, it denoises 1-SPP per frame via motion vectors.
             // When DLSS-RR is OFF, accumulate progressively when static!
-            bool accumulate = m_pathTracingAccumulation && (m_debugMode != 16) && !dlssRRActive;
+            bool accumulate = m_pathTracingAccumulation && (m_debugMode != 18) && !dlssRRActive;
             if (cameraMoved || !accumulate)
             {
                 m_pathTracerSampleCount = 0;
@@ -2520,7 +2885,7 @@ namespace Nox
             ptPush.maxBounces = 3;
             ptPush.accumulationTextureIndex = m_pathTracerAccum[readIndex]->GetDescriptorIndexSlot();
             ptPush.sampleCount = accumulate ? m_pathTracerSampleCount : 1;
-            ptPush.debugMode = accumulate ? 17 : 16;
+            ptPush.debugMode = accumulate ? 19 : 18;
             ptPush.skyboxTextureIndex = m_environmentCubemap ? m_environmentCubemap->GetDescriptorIndexSlot() : 0xFFFFFFFF;
             m_commandBuffers->pushData(&ptPush, sizeof(shaderio::PushConstantPathTracer));
 
@@ -2669,6 +3034,29 @@ namespace Nox
 
                 m_commandBuffers->setColorBlendEnable(0, false);
                 m_commandBuffers->setDepthWriteEnable(true);
+            }
+
+            // D. DDGI PROBE SPHERES (Debug Mode 17: Visualizes 3D Probe Grid with Irradiance)
+            if (m_ddgiDebugSpheresPipeline && m_debugMode == 17 && totalDDGIProbes > 0 && m_ddgiIrradiance[m_ddgiHistoryIndex])
+            {
+                m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_ddgiDebugSpheresPipeline);
+                m_commandBuffers->setCullMode(NRI::CullMode::None);
+                m_commandBuffers->setDepthTestEnable(!m_ddgiDebugXRay);
+                m_commandBuffers->setDepthWriteEnable(false);
+                m_commandBuffers->setDepthCompareOp(NRI::CompareOp::GreaterOrEqual);
+                m_commandBuffers->setColorBlendEnable(0, false);
+                m_commandBuffers->setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
+                m_commandBuffers->setColorBlendEnable(1, false);
+                m_commandBuffers->setColorWriteMask(1, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
+
+                shaderio::PushConstantDDGIDebug debugPush{};
+                debugPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                debugPush.probeCountTotal = totalDDGIProbes;
+                debugPush.sphereRadius = m_ddgiDebugSphereRadius;
+                debugPush.irradianceAtlasIndex = m_ddgiIrradiance[m_ddgiHistoryIndex]->GetDescriptorIndexSlot();
+                m_commandBuffers->pushData(&debugPush, sizeof(shaderio::PushConstantDDGIDebug));
+
+                m_commandBuffers->drawMeshTasks(totalDDGIProbes, 1, 1);
             }
 
             m_commandBuffers->endRendering();
@@ -3703,6 +4091,28 @@ namespace Nox
         uniformData.cameraWorldPos = glm::vec4(glm::vec3(transform[3]), 0.0f);
         uniformData.frustum = shaderio::Frustum{uniformData.proj * uniformData.view};
 
+        // DDGI
+        uniformData.enableDDGI = m_ddgiEnabled ? 1 : 0;
+        uniformData.ddgiGridOrigin = glm::vec4(m_ddgiGridOrigin, static_cast<float>(m_ddgiProbeCountX));
+        uniformData.ddgiGridSpacing = glm::vec4(m_ddgiGridSpacing, static_cast<float>(m_ddgiProbeCountY));
+        uniformData.ddgiGridParams = glm::vec4(
+            static_cast<float>(m_ddgiProbeCountZ),
+            static_cast<float>(m_ddgiRaysPerProbe),
+            m_ddgiHysteresis,
+            m_ddgiNormalBias
+        );
+        uint32_t ddgiProbesPerRow = 64;
+        uint32_t ddgiTotalProbes = m_ddgiProbeCountX * m_ddgiProbeCountY * m_ddgiProbeCountZ;
+        uint32_t ddgiProbeRows = (ddgiTotalProbes + ddgiProbesPerRow - 1) / ddgiProbesPerRow;
+        uniformData.ddgiAtlasParams = glm::vec4(
+            static_cast<float>(ddgiProbesPerRow * 10),
+            static_cast<float>(ddgiProbeRows * 10),
+            static_cast<float>(ddgiProbesPerRow * 18),
+            static_cast<float>(ddgiProbeRows * 18)
+        );
+        uniformData.ddgiIrradianceTextureIndex = m_ddgiIrradiance[m_ddgiHistoryIndex] ? m_ddgiIrradiance[m_ddgiHistoryIndex]->GetDescriptorIndexSlot() : 0xFFFFFFFF;
+        uniformData.ddgiDistanceTextureIndex = m_ddgiDistance[m_ddgiHistoryIndex] ? m_ddgiDistance[m_ddgiHistoryIndex]->GetDescriptorIndexSlot() : 0xFFFFFFFF;
+
         if (m_frozen)
         {
             if (!m_frozenDone)
@@ -3800,6 +4210,29 @@ namespace Nox
         uniformData.invViewProj = glm::inverse(uniformData.proj * uniformData.view);
         uniformData.cameraWorldPos = {camera.GetPosition(), 0.0f};
         uniformData.frustum = shaderio::Frustum{uniformData.proj * uniformData.view};
+        uniformData.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
+
+        // DDGI
+        uniformData.enableDDGI = m_ddgiEnabled ? 1 : 0;
+        uniformData.ddgiGridOrigin = glm::vec4(m_ddgiGridOrigin, static_cast<float>(m_ddgiProbeCountX));
+        uniformData.ddgiGridSpacing = glm::vec4(m_ddgiGridSpacing, static_cast<float>(m_ddgiProbeCountY));
+        uniformData.ddgiGridParams = glm::vec4(
+            static_cast<float>(m_ddgiProbeCountZ),
+            static_cast<float>(m_ddgiRaysPerProbe),
+            m_ddgiHysteresis,
+            m_ddgiNormalBias
+        );
+        uint32_t ddgiProbesPerRow = 64;
+        uint32_t ddgiTotalProbes = m_ddgiProbeCountX * m_ddgiProbeCountY * m_ddgiProbeCountZ;
+        uint32_t ddgiProbeRows = (ddgiTotalProbes + ddgiProbesPerRow - 1) / ddgiProbesPerRow;
+        uniformData.ddgiAtlasParams = glm::vec4(
+            static_cast<float>(ddgiProbesPerRow * 10),
+            static_cast<float>(ddgiProbeRows * 10),
+            static_cast<float>(ddgiProbesPerRow * 18),
+            static_cast<float>(ddgiProbeRows * 18)
+        );
+        uniformData.ddgiIrradianceTextureIndex = m_ddgiIrradiance[m_ddgiHistoryIndex] ? m_ddgiIrradiance[m_ddgiHistoryIndex]->GetDescriptorIndexSlot() : 0xFFFFFFFF;
+        uniformData.ddgiDistanceTextureIndex = m_ddgiDistance[m_ddgiHistoryIndex] ? m_ddgiDistance[m_ddgiHistoryIndex]->GetDescriptorIndexSlot() : 0xFFFFFFFF;
 
         if (m_frozen)
         {

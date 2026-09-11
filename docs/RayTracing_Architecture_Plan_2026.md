@@ -216,16 +216,23 @@ NoxEngine provides 20 interactive debug view modes selectable in the Viewport To
 - Strict runtime arbitration UI toggle (mutually exclusive with DLSS-RR).
 - Physically correct specular Fresnel blending in `DeferredLighting.slang` (preserving 96% dielectric albedo on foliage and 100% metal reflections).
 
-### Phase 5: Dual-Track Indirect Diffuse GI (DDGI Probes vs RTXDI ReSTIR GI) 🚀 NEXT UP
+### Phase 5: Dual-Track Indirect Diffuse GI (DDGI Probes vs RTXDI ReSTIR GI) 🚀 IN PROGRESS
 - **Objective**: Implement real-time multi-bounce diffuse indirect illumination with a runtime toggle between **3D Octahedral Probe Fields (DDGI)** and **Screen-Space Ray Resampling (RTXDI ReSTIR GI)** to benchmark graphics, VRAM, and performance.
-- **Track A: Dynamic Diffuse Global Illumination (DDGI Probes)**:
-  1. Allocate DDGI probe grid buffers ($32 \times 16 \times 32$ probes) and 2D octahedral atlases:
-     - Irradiance Atlas ($8 \times 8$ texels per probe, `RGBA16_SFLOAT`).
-     - Distance Atlas ($16 \times 16$ texels per probe, `RG16_SFLOAT` for mean depth and depth squared).
-  2. Implement `DDGIRadiance.comp.slang`: Trace 64–128 rays per probe against TLAS using `RayQuery`.
-  3. Implement `DDGIBlend.comp.slang`: Octahedral mapping and temporal accumulation with hysteresis ($\alpha = 0.97$).
-  4. Chebyshev visibility test in `DeferredLighting.slang` to eliminate wall light leaking.
-- **Track B: RTXDI ReSTIR GI (Screen-Space Path Resampling)**:
+- **Track A: Dynamic Diffuse Global Illumination (DDGI Probes)**: ✅ COMPLETED
+  1. Complete DDGI shader suite created:
+     - `DDGICommon.slang`: Octahedral mapping, spherical Fibonacci sampling, Rodrigues 3D rotation, Chebyshev visibility test, and multi-probe trilinear interpolation.
+     - `DDGIRadiance.slang`: Inline `RayQuery` tracing 128 rays per probe against TLAS evaluating direct lights, emissive, and multi-bounce irradiance.
+     - `DDGIBlendIrradiance.slang`: Octahedral irradiance atlas integration with temporal hysteresis ($\alpha = 0.97$) and 1-pixel border wrapping.
+     - `DDGIBlendDistance.slang`: Octahedral distance moments ($r, r^2$) integration with temporal hysteresis and border wrapping.
+     - `DDGIProbeSpheres.slang`: Mesh/task shader rendering 3D instanced octahedron spheres (18 vertices, 32 triangles per workgroup) colored by probe irradiance.
+  2. Integration in Deferred Lighting:
+     - Multi-probe trilinear interpolation with normal biasing and Chebyshev visibility weighting in `DeferredLighting.slang`.
+  3. Visual Debug Modes:
+     - **Mode 16**: Indirect Diffuse GI Only (DDGI).
+     - **Mode 17**: DDGI Probe Grid Spheres (Reverse-Z depth tested in Forward 3D Pass).
+  4. Interactive Editor Controls:
+     - Real-time sliders for Grid Origin, Grid Spacing, Temporal Hysteresis, Normal Bias, Debug Sphere Radius, and "Reset DDGI History" button.
+- **Track B: RTXDI ReSTIR GI (Screen-Space Path Resampling)**: 🚀 NEXT UP
   1. Trace 1 indirect diffuse ray per screen pixel from primary G-Buffer hit points.
   2. Resample and share indirect paths across spatial neighbors and temporal history via RTXDI ReSTIR GI reservoirs.
   3. Denoise the resulting diffuse radiance buffer using NRD `REBLUR_DIFFUSE` or DLSS-RR.

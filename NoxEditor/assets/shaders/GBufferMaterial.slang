@@ -436,6 +436,12 @@
             finalNormal = geomNormal;
         }
 
+        // Only flip normal if the material is explicitly DOUBLE-SIDED (e.g. foliage/cloth)
+        if (instance.doubleSided != 0 && dot(finalNormal, -rayDir) < 0.0)
+        {
+            finalNormal = -finalNormal;
+        }
+
         // 4. OCCLUSION
         float occlusion = 1.0;
         if (instance.occlusionTextureIndex != 0xFFFFFFFF)
@@ -464,7 +470,8 @@
 
         // Encode unlit flag: 2.0 = UNLIT
         float workflow  = (instance.unlit != 0) ? 2.0 : instance.workflow;
-        output.material = float4(roughness, metallic, workflow, 1.0);
+        float isDoubleSided = (instance.doubleSided != 0) ? 1.0 : 0.0;
+        output.material = float4(roughness, metallic, workflow, isDoubleSided);
 
         output.emission = float4(emission, 1.0);
         output.entityID = instance.entityID;

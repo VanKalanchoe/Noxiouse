@@ -215,6 +215,33 @@ namespace Nox
         Ref<Texture2D> getRawReflection() const { return m_rawReflection; }
         Ref<Texture2D> getDenoisedReflection() const { return m_denoisedReflection; }
 
+        // DDGI (Dynamic Diffuse Global Illumination)
+        bool isDDGIEnabled() const { return m_ddgiEnabled; }
+        void setDDGIEnabled(bool enabled)
+        {
+            if (m_ddgiEnabled != enabled)
+            {
+                m_ddgiEnabled = enabled;
+                m_ddgiFirstFrame = true;
+            }
+        }
+        glm::vec3& getDDGIGridOrigin() { return m_ddgiGridOrigin; }
+        glm::vec3& getDDGIGridSpacing() { return m_ddgiGridSpacing; }
+        uint32_t getDDGIProbeCountX() const { return m_ddgiProbeCountX; }
+        uint32_t getDDGIProbeCountY() const { return m_ddgiProbeCountY; }
+        uint32_t getDDGIProbeCountZ() const { return m_ddgiProbeCountZ; }
+        uint32_t getDDGIProbeCountTotal() const { return m_ddgiProbeCountX * m_ddgiProbeCountY * m_ddgiProbeCountZ; }
+        uint32_t getDDGIRaysPerProbe() const { return m_ddgiRaysPerProbe; }
+        void setDDGIRaysPerProbe(uint32_t count) { m_ddgiRaysPerProbe = count; }
+        float& getDDGIHysteresis() { return m_ddgiHysteresis; }
+        float& getDDGINormalBias() { return m_ddgiNormalBias; }
+        float& getDDGIDebugSphereRadius() { return m_ddgiDebugSphereRadius; }
+        bool& getDDGIDebugXRay() { return m_ddgiDebugXRay; }
+        void resetDDGIHistory() { m_ddgiFirstFrame = true; }
+        void resetDDGIGridToDefaults();
+        Ref<Texture2D> getDDGIIrradianceAtlas() const { return m_ddgiIrradiance[m_ddgiHistoryIndex]; }
+        Ref<Texture2D> getDDGIDistanceAtlas() const { return m_ddgiDistance[m_ddgiHistoryIndex]; }
+
         void setCameraJitterEnabled(bool enabled) { m_cameraJitterEnabled = enabled; }
         bool getCameraJitterEnabled() const { return m_cameraJitterEnabled; }
         glm::vec2 getCurrentJitter() const { return m_currentJitter; }
@@ -298,6 +325,10 @@ namespace Nox
         void createPathTracerResources();
         void createPathTracerPipeline(bool forceCompile = false);
 
+        // DDGI (Dynamic Diffuse Global Illumination)
+        void createDDGIResources();
+        void createDDGIPipelines(bool forceCompile = false);
+
         void createTextureImage();
         void initGeometryBuffers();
         void markPageTablesDirty();
@@ -356,6 +387,11 @@ namespace Nox
         std::unique_ptr<NRI::Pipeline> m_reflectionPipeline = nullptr;
         // Path Tracer
         std::unique_ptr<NRI::Pipeline> m_pathTracerPipeline = nullptr;
+        // DDGI
+        std::unique_ptr<NRI::Pipeline> m_ddgiRadiancePipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_ddgiBlendIrradiancePipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_ddgiBlendDistancePipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_ddgiDebugSpheresPipeline = nullptr;
 
         std::unique_ptr<NRI::CommandAllocator> m_commandAllocator = nullptr;
         std::unique_ptr<NRI::CommandBuffer> m_commandBuffers = nullptr;
@@ -400,6 +436,25 @@ namespace Nox
         bool m_nrdShadowsEnabled = true;
         NRI::NRDReflectionDenoiser m_nrdReflectionDenoiser = NRI::NRDReflectionDenoiser::Off;
         bool m_resetNRD = true;
+
+        // DDGI (Dynamic Diffuse Global Illumination)
+        Ref<Texture2D> m_ddgiRayData;
+        Ref<Texture2D> m_ddgiIrradiance[2];
+        Ref<Texture2D> m_ddgiDistance[2];
+        uint32_t m_ddgiHistoryIndex = 0;
+        bool m_ddgiFirstFrame = true;
+
+        bool m_ddgiEnabled = false;
+        glm::vec3 m_ddgiGridOrigin = glm::vec3(-20.0f, -0.5f, -12.0f);
+        glm::vec3 m_ddgiGridSpacing = glm::vec3(1.8f, 1.4f, 1.7f);
+        uint32_t m_ddgiProbeCountX = 22;
+        uint32_t m_ddgiProbeCountY = 10;
+        uint32_t m_ddgiProbeCountZ = 14;
+        uint32_t m_ddgiRaysPerProbe = 128;
+        float m_ddgiHysteresis = 0.97f;
+        float m_ddgiNormalBias = 0.2f;
+        float m_ddgiDebugSphereRadius = 0.15f;
+        bool m_ddgiDebugXRay = true;
         
         // Path Tracer Accumulation Ping-Pong
         Ref<Texture2D> m_pathTracerAccum[2];

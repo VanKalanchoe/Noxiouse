@@ -607,13 +607,13 @@
             }
             }
 
-        // Mode 16: 1-SPP Interactive Output
-        if (pushConstant.debugMode == 16 || pushConstant.sampleCount <= 1)
+        // Mode 18: 1-SPP Interactive Output
+        if (pushConstant.debugMode == 18 || pushConstant.sampleCount <= 1)
         {
             return float4(radiance, 1.0);
         }
 
-        // Mode 17: Progressive Accumulation (blends previous samples over time)
+        // Mode 19: Progressive Accumulation (blends previous samples over time)
         Texture2D accumTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.accumulationTextureIndex, 0));
         float4 prevColor = accumTex.Load(int3(pixelCoord, 0));
 

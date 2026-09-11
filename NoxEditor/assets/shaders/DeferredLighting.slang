@@ -1,4 +1,5 @@
 #include "shaderIO.h"
+#include "DDGICommon.slang"
 
     import Tonemapping;
     import Math;
@@ -350,6 +351,13 @@
                 }
 
                 float NdotL_raw = dot(n, l);
+                bool isDoubleSided = (materialSample.a > 0.5);
+                if (isDoubleSided && NdotL_raw < 0.0)
+                {
+                    // Translucent thin cloth / foliage: sun transmits through to the back face
+                    NdotL_raw = -NdotL_raw * 0.6;
+                }
+
                 if (NdotL_raw <= 0.0)
                 {
                     continue;
@@ -410,6 +418,24 @@
         float3 ambientDiffuse = ibl.diffuse;
         float3 ambientSpecular = ibl.specular;
 
+        float specularOcclusion = 1.0;
+        // Dynamic Diffuse Global Illumination (DDGI Probes)
+        if ((ubo->enableDDGI != 0 || pushConstant.debugMode == 16) && ubo->ddgiIrradianceTextureIndex != 0xFFFFFFFF && ubo->ddgiDistanceTextureIndex != 0xFFFFFFFF)
+        {
+            Texture2D ddgiIrrTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->ddgiIrradianceTextureIndex, 0));
+            Texture2D ddgiDistTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->ddgiDistanceTextureIndex, 0));
+            SamplerState ddgiSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
+
+            float3 ddgiIrradiance = sample_ddgi_diffuse(ubo, worldPos, n, ddgiIrrTex, ddgiDistTex, ddgiSampler);
+            ambientDiffuse = ddgiIrradiance * diffuseColor;
+
+            // Prevent outdoor skybox specular from leaking onto dark indoor surfaces
+            float ddgiLuma = dot(ddgiIrradiance, float3(0.2126, 0.7152, 0.0722));
+            float skyLuma = max(ubo->scaleIBLAmbient, 0.01);
+            specularOcclusion = saturate(ddgiLuma / skyLuma);
+            ambientSpecular *= specularOcclusion;
+        }
+
         // Sample Decoupled RT Reflection (Denoised via NRD REBLUR/RELAX or Raw 1-SPP)
         float3 reflColor = float3(0.0);
         bool hasRTReflection = (ubo->enableRTReflections != 0 && perceptualRoughness < 0.85);
@@ -432,6 +458,13 @@
             // Specular Fresnel factor: only ~0.04 (4%) for dielectrics (plants, stone), ~0.9-1.0 for metals
             float3 specularFactor = specularColor * brdf.x + brdf.y;
             float3 rtSpecular = reflColor * specularFactor;
+
+            // If the reflection ray missed geometry (sampled outdoor skybox) and we are indoors / in dark area,
+            // attenuate the sky reflection by local specular occlusion!
+            if (reflSample.a >= 1000.0)
+            {
+                rtSpecular *= specularOcclusion;
+            }
 
             // Smooth fade out into environment IBL as roughness reaches 0.85
             float rtWeight = saturate((0.85 - perceptualRoughness) / 0.15);
@@ -528,6 +561,12 @@
         if (pushConstant.debugMode == 14)
         {
             return float4(reflColor, 1.0);
+        }
+
+        // Mode 16: Indirect Diffuse GI Only (DDGI Probes)
+        if (pushConstant.debugMode == 16)
+        {
+            return float4(ambientDiffuse, 1.0);
         }
 
         // =========================================================================

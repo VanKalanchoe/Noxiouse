@@ -178,6 +178,16 @@ namespace NRI
                     }
                 }
                 
+                bool hasTaskShader = false;
+                for (const auto& s : desc.shaders)
+                {
+                    if (s.stage == ShaderStage::Task)
+                    {
+                        hasTaskShader = true;
+                        break;
+                    }
+                }
+
                 std::vector<vk::ShaderCreateInfoEXT> shaderCreateInfos;
                 shaderCreateInfos.reserve(desc.shaders.size());
 
@@ -187,9 +197,15 @@ namespace NRI
                 {
                     auto& shaderDesc = desc.shaders[i];
 
+                    vk::ShaderCreateFlagsEXT stageFlags = commonFlags;
+                    if (shaderDesc.stage == ShaderStage::Mesh && !hasTaskShader)
+                    {
+                        stageFlags |= vk::ShaderCreateFlagBitsEXT::eNoTaskShader;
+                    }
+
                     vk::ShaderCreateInfoEXT info
                     {
-                        .flags = commonFlags,
+                        .flags = stageFlags,
                         .stage = compiledStages[i],
                         .nextStage = determineNextStage(shaderDesc.stage),
                         .pName = entryPointNames[i].c_str(),
@@ -220,7 +236,15 @@ namespace NRI
                     shaderCreateInfos.push_back(info);
                 }
 
-                m_shaders = m_deviceVK.getDevice().createShadersEXT(shaderCreateInfos);
+                try
+                {
+                    m_shaders = m_deviceVK.getDevice().createShadersEXT(shaderCreateInfos);
+                }
+                catch (const std::exception& e)
+                {
+                    NOX_CORE_WARN("PipelineVK::PipelineVK Failed to create shaders from binary: {}. Falling back to SPIR-V", e.what());
+                    m_shaders.clear();
+                }
                 
                 if (m_shaders.empty())
                 {
@@ -245,9 +269,9 @@ namespace NRI
                             shaderCreateInfos[i].pCode = reinterpret_cast<const uint32_t*>(tempBytecodeStorage[i].data());
                         }
                     }
+
+                    m_shaders = m_deviceVK.getDevice().createShadersEXT(shaderCreateInfos);
                 }
-                
-                m_shaders = m_deviceVK.getDevice().createShadersEXT(shaderCreateInfos);
                 
                 if (m_shaders.empty())
                 {

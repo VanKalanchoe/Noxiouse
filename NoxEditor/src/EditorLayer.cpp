@@ -953,8 +953,10 @@ namespace Nox
             "13: RT Shadow Mask",
             "14: RT Reflections",
             "15: Motion Vectors (Velocity Buffer)",
-            "16: Path Tracer (1-SPP Raw)",
-            "17: Path Tracer (Progressive Ground Truth)"
+            "16: Indirect Diffuse GI Only (DDGI)",
+            "17: DDGI Probe Grid Spheres",
+            "18: Path Tracer (1-SPP Raw)",
+            "19: Path Tracer (Progressive Ground Truth)"
         };
         int currentMode = static_cast<int>(m_Renderer->getDebugMode());
         if (ImGui::Combo("PBR Debug View", &currentMode, debugModeNames, IM_ARRAYSIZE(debugModeNames)))
@@ -1147,6 +1149,64 @@ namespace Nox
                     }
                     ImGui::Unindent();
                 }
+
+                // Dynamic Diffuse Global Illumination (DDGI Probes)
+                bool ddgiEnabled = m_Renderer->isDDGIEnabled();
+                if (ImGui::Checkbox("Dynamic Diffuse Global Illumination (DDGI Probes)", &ddgiEnabled))
+                {
+                    m_Renderer->setDDGIEnabled(ddgiEnabled);
+                }
+                if (ImGui::IsItemHovered())
+                {
+                    ImGui::SetTooltip("Multi-bounce indirect diffuse global illumination using irradiance & distance probe volumes.\nVisualize with Debug Mode 16 (GI Only) or Debug Mode 17 (Probe Grid Spheres).");
+                }
+
+                uint32_t activeDebugMode = m_Renderer->getDebugMode();
+                if (ddgiEnabled || activeDebugMode == 16 || activeDebugMode == 17)
+                {
+                    ImGui::Indent();
+                    uint32_t totalProbes = m_Renderer->getDDGIProbeCountTotal();
+                    ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Grid: %ux%ux%u (%u probes, %u rays/probe)",
+                        m_Renderer->getDDGIProbeCountX(),
+                        m_Renderer->getDDGIProbeCountY(),
+                        m_Renderer->getDDGIProbeCountZ(),
+                        totalProbes,
+                        m_Renderer->getDDGIRaysPerProbe());
+
+                    glm::vec3& origin = m_Renderer->getDDGIGridOrigin();
+                    ImGui::DragFloat3("Grid Origin", glm::value_ptr(origin), 0.1f);
+
+                    glm::vec3& spacing = m_Renderer->getDDGIGridSpacing();
+                    ImGui::DragFloat3("Grid Spacing", glm::value_ptr(spacing), 0.05f, 0.2f, 10.0f);
+
+                    float& hysteresis = m_Renderer->getDDGIHysteresis();
+                    ImGui::SliderFloat("Temporal Hysteresis", &hysteresis, 0.80f, 0.995f, "%.3f");
+
+                    float& normalBias = m_Renderer->getDDGINormalBias();
+                    ImGui::SliderFloat("Normal Bias", &normalBias, 0.0f, 1.0f, "%.2f");
+
+                    float& sphereRadius = m_Renderer->getDDGIDebugSphereRadius();
+                    ImGui::SliderFloat("Debug Sphere Radius", &sphereRadius, 0.02f, 0.5f, "%.2f");
+
+                    bool& xray = m_Renderer->getDDGIDebugXRay();
+                    ImGui::Checkbox("Probe Spheres X-Ray (See Through Walls)", &xray);
+                    if (ImGui::IsItemHovered())
+                    {
+                        ImGui::SetTooltip("Disables depth testing for probe spheres so all probes are visible in the scene without being occluded by walls or floors.");
+                    }
+
+                    if (ImGui::Button("Reset Grid to Sponza Defaults"))
+                    {
+                        m_Renderer->resetDDGIGridToDefaults();
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button("Reset DDGI History"))
+                    {
+                        m_Renderer->resetDDGIHistory();
+                    }
+                    ImGui::Unindent();
+                }
+
                 ImGui::Unindent();
             }
         }
