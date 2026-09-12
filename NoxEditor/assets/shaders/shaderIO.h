@@ -122,7 +122,6 @@ struct InstanceLUT
     float transmissionFactor;
     uint32_t transmissionTextureIndex;
     float workflow;                 // 0.0 = MetalRough, 1.0 = SpecGloss
-    uint32_t padding0;
 };
 
 struct UniformBufferObject 
@@ -189,6 +188,12 @@ struct UniformBufferObject
     vec4 ddgiGridSpacing;  // xyz: spacing, w: countY
     vec4 ddgiGridParams;   // x: countZ, y: raysPerProbe, z: hysteresis, w: normalBias
     vec4 ddgiAtlasParams;  // x: irrWidth, y: irrHeight, z: distWidth, w: distHeight
+
+    // ReSTIR GI (Screen-Space Diffuse Path Resampling via RTXDI)
+    uint32_t diffuseGIMode; // 0 = Off (IBL), 1 = DDGI Probes, 2 = ReSTIR GI
+    uint32_t restirGIDiffuseTextureIndex;
+    uint32_t restirGIReservoirBufferIndex;
+    uint32_t restirGINeighborOffsetsBufferIndex;
 };
 
 struct Vertex
@@ -386,6 +391,12 @@ struct PushConstantDeferredLighting
     uint32_t shadowMaskTextureIndex; // NRD
     uint32_t nrdShadowsEnabled;
     uint32_t reflectionTextureIndex; // NRD REBLUR / RELAX or Raw 1-SPP
+
+    // ReSTIR GI (passed via push constant instead of the UBO -- push-constant-sourced bindless
+    // indices are proven reliable elsewhere in this shader; the UBO-sourced restirGIDiffuseTextureIndex
+    // read was empirically returning stale/wrong data despite correct C++-side values)
+    uint32_t diffuseGIMode;
+    uint32_t restirGIDiffuseTextureIndex;
 };
 
 struct PushConstantPathTracer
@@ -436,6 +447,93 @@ struct PushConstantDDGIDebug
     uint32_t probeCountTotal;
     float sphereRadius;
     uint32_t irradianceAtlasIndex;
+};
+
+struct PushConstantReSTIRGIInitial
+{
+    mat4 invViewProj;
+    uint64_t matrixReference;
+    uint64_t reservoirBufferReference;
+    // viewportSize placed right after the uint64_t fields (offset 80, a multiple of 16) rather than
+    // after 5 uint32_t fields (offset 100, not a multiple of 8) -- a vec2 at a non-8-aligned offset
+    // is ambiguous between C++'s natural/tight struct packing and SPIR-V's std430-like push-constant
+    // layout rules, which can silently insert 4 bytes of padding GPU-side that C++ never writes,
+    // shifting every field after it (including reservoirBlockRowPitch/reservoirArrayPitch, which the
+    // reservoir pointer math directly depends on) by 4 bytes between what C++ sends and what the
+    // shader reads.
+    vec2 viewportSize;
+    uint32_t depthTextureIndex;
+    uint32_t gbufferNormalIndex;
+    uint32_t gbufferAlbedoIndex;
+    uint32_t gbufferMaterialIndex;
+    uint32_t visibilityTextureIndex;
+    uint32_t frameIndex;
+    uint32_t reservoirBlockRowPitch;
+    uint32_t reservoirArrayPitch;
+};
+
+// ReSTIR GI is now a proper two-pass pipeline (Temporal, then Spatial), matching RTXPT's actual
+// architecture (rtxdi::ReSTIRGI_ResamplingMode::TemporalAndSpatial, using the SDK's separate
+// Rtxdi/GI/TemporalResampling.hlsli + Rtxdi/GI/SpatialResampling.hlsli) instead of the fused
+// Rtxdi/GI/SpatioTemporalResampling.hlsli. The fused function's "spatial" phase reads neighbor
+// reservoirs from the SAME previous-frame history buffer as its temporal phase, so during camera
+// motion -- when many neighboring pixels are simultaneously disoccluded/noisy from their own failed
+// temporal reprojection -- spatial reuse was compounding that noise instead of stabilizing it. The
+// two-pass split makes the spatial pass read THIS frame's already-temporally-resampled neighbors.
+//
+// Every vec2/vec4 field below is placed at an offset that's already a multiple of 8 (viewportSize)
+// under BOTH natural/tight packing and SPIR-V's std430-like push-constant rules, to avoid the exact
+// byte-offset ambiguity that caused the original ReSTIR GI reservoir hand-off bug.
+struct PushConstantReSTIRGITemporal
+{
+    mat4 invViewProj;
+    mat4 prevInvViewProj; // for reconstructing world position from the PREVIOUS frame's depth/normal
+                          // textures -- unprojecting last frame's depth with THIS frame's matrix
+                          // gives a wrong world position whenever the camera has moved, which
+                          // silently corrupts the reprojection validity check and jacobian.
+    vec4 cameraWorldPos;
+    uint64_t matrixReference;
+    uint64_t currentReservoirReference;  // Pass 1's initial candidate (read as inputReservoir); overwritten in place with the temporal result
+    uint64_t previousReservoirReference; // history buffer, read for temporal candidates
+    uint32_t depthTextureIndex;
+    uint32_t prevDepthTextureIndex;
+    uint32_t gbufferNormalIndex;
+    uint32_t prevNormalTextureIndex;
+    uint32_t gbufferVelocityIndex;
+    uint32_t gbufferMaterialIndex;
+    vec2 viewportSize; // offset 192, multiple of 8 -- safe under both packing conventions
+    uint32_t frameIndex;
+    uint32_t reservoirBlockRowPitch;
+    uint32_t reservoirArrayPitch;
+    uint32_t maxHistoryLength;
+    float normalThreshold;
+    float depthThreshold;
+    uint32_t enablePermutationSampling;
+    uint32_t maxReservoirAge;
+};
+
+struct PushConstantReSTIRGISpatial
+{
+    mat4 invViewProj;
+    vec4 cameraWorldPos;
+    uint64_t matrixReference;
+    uint64_t inputReservoirReference;  // this frame's temporally-resampled buffer; READ ONLY, used for both the own-pixel input and every spatial neighbor -- must stay untouched for the whole pass so concurrently-running neighbor pixels never race a write against this read.
+    uint64_t outputReservoirReference; // separate physical buffer; WRITE ONLY, receives the final resampled result and becomes next frame's temporal history.
+    uint64_t neighborOffsetsReference;
+    uint32_t depthTextureIndex;
+    uint32_t gbufferNormalIndex;
+    uint32_t gbufferMaterialIndex;
+    uint32_t frameIndex;
+    vec2 viewportSize; // offset 128, multiple of 8 -- safe under both packing conventions
+    uint32_t reservoirBlockRowPitch;
+    uint32_t reservoirArrayPitch;
+    float samplingRadius;
+    uint32_t numSamples;
+    float normalThreshold;
+    float depthThreshold;
+    uint32_t neighborOffsetMask;
+    uint32_t enableBoilingFilter;
+    float boilingFilterStrength;
 };
 
 struct PushConstantOutline

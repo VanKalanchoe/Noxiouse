@@ -616,7 +616,50 @@ namespace NRI
         );
     }
 
-    void CommandBufferVK::submitImageBarrier(vk::Image image, TextureLayout oldLayout, TextureLayout newLayout, vk::ImageAspectFlags aspectFlags, 
+    void CommandBufferVK::copyTexture(Texture& srcTexture, Texture& dstTexture, uint32_t width, uint32_t height)
+    {
+        auto* vkSrc = dynamic_cast<TextureVK*>(&srcTexture);
+        auto* vkDst = dynamic_cast<TextureVK*>(&dstTexture);
+
+        vk::ImageAspectFlags srcAspect = (vkSrc->getUsage() == TextureUsage::DepthStencilAttachment)
+                                              ? vk::ImageAspectFlagBits::eDepth
+                                              : vk::ImageAspectFlagBits::eColor;
+        vk::ImageAspectFlags dstAspect = (vkDst->getUsage() == TextureUsage::DepthStencilAttachment)
+                                              ? vk::ImageAspectFlagBits::eDepth
+                                              : vk::ImageAspectFlagBits::eColor;
+
+        vk::ImageCopy copyRegion
+        {
+            .srcSubresource =
+            {
+                .aspectMask = srcAspect,
+                .mipLevel = 0,
+                .baseArrayLayer = 0,
+                .layerCount = 1,
+            },
+            .srcOffset = {0, 0, 0},
+            .dstSubresource =
+            {
+                .aspectMask = dstAspect,
+                .mipLevel = 0,
+                .baseArrayLayer = 0,
+                .layerCount = 1,
+            },
+            .dstOffset = {0, 0, 0},
+            .extent = { width, height, 1 },
+        };
+
+        m_commandBuffers[m_currentFrameIndex].copyImage
+        (
+            vkSrc->getNativeImage(),
+            vk::ImageLayout::eGeneral,
+            vkDst->getNativeImage(),
+            vk::ImageLayout::eGeneral,
+            copyRegion
+        );
+    }
+
+    void CommandBufferVK::submitImageBarrier(vk::Image image, TextureLayout oldLayout, TextureLayout newLayout, vk::ImageAspectFlags aspectFlags,
         uint32_t arrayLayers, uint32_t mipLevels)
     {
         vk::PipelineStageFlags2 srcStageMask = vk::PipelineStageFlagBits2::eNone;

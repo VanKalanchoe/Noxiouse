@@ -1,4 +1,6 @@
 #include "Renderer.h"
+#include <Rtxdi/GI/ReSTIRGI.h>
+#include <Rtxdi/RtxdiUtils.h>
 
 #include <iostream>
 #include <algorithm> // Necessary for std::clamp
@@ -162,6 +164,10 @@ namespace Nox
         watchShader("assets/shaders/DDGIBlendIrradiance.slang", "DDGIBlendIrradiance", [this]() { createDDGIPipelines(true); });
         watchShader("assets/shaders/DDGIBlendDistance.slang", "DDGIBlendDistance", [this]() { createDDGIPipelines(true); });
         watchShader("assets/shaders/DDGIProbeSpheres.slang", "DDGIProbeSpheres", [this]() { createDDGIPipelines(true); });
+        // ReSTIR GI
+        watchShader("assets/shaders/ReSTIRGIInitial.slang", "ReSTIRGIInitial", [this]() { createReSTIRGIPipelines(true); });
+        watchShader("assets/shaders/ReSTIRGITemporal.slang", "ReSTIRGITemporal", [this]() { createReSTIRGIPipelines(true); });
+        watchShader("assets/shaders/ReSTIRGISpatial.slang", "ReSTIRGISpatial", [this]() { createReSTIRGIPipelines(true); });
 
         m_whiteTexture = createSolidColorTexture(255, 255, 255, 255);
 
@@ -236,6 +242,8 @@ namespace Nox
         createPathTracerPipeline(false);
         // DDGI
         createDDGIPipelines(false);
+        // ReSTIR GI
+        createReSTIRGIPipelines(false);
 
         createCommandPool();
         createUniformBuffers();
@@ -258,6 +266,8 @@ namespace Nox
         createPathTracerResources();
         // DDGI
         createDDGIResources();
+        // ReSTIR GI
+        createReSTIRGIResources();
 
         createCommandBuffers();
 
@@ -418,6 +428,7 @@ namespace Nox
         createGBufferResources();
         createShadowMaskResources();
         createPathTracerResources();
+        createReSTIRGIResources();
         m_pathTracerSampleCount = 0;
 
         // NGX's internal DLSS feature is fixed-size once created; it must be explicitly freed here
@@ -694,6 +705,100 @@ namespace Nox
         m_ddgiFirstFrame = true;
     }
 
+    void Renderer::createReSTIRGIResources()
+    {
+        const uint32_t width = m_renderSize.width;
+        const uint32_t height = m_renderSize.height;
+
+        if (width == 0 || height == 0)
+            return;
+
+        // 1. Output Texture: Raw Resampled Diffuse Irradiance (R16G16B16A16_SFLOAT)
+        if (m_restirGIRawDiffuse)
+        {
+            m_resourceHeap->unregisterTexture(m_restirGIRawDiffuse->GetDescriptorIndexSlot());
+        }
+
+        m_restirGIRawDiffuse = m_device->createTexture(NRI::TextureDesc{
+            .width = width,
+            .height = height,
+            .mipLevels = 1,
+            .sampleCount = 1,
+            .usage = NRI::TextureUsage::ColorAttachment,
+            .format = NRI::ImageFormat::R16G16B16A16_SFLOAT,
+            .directFormat = UINT32_MAX
+        });
+        m_resourceHeap->registerTexture(*m_restirGIRawDiffuse);
+
+        if (m_denoisedReSTIRGIDiffuse)
+        {
+            m_resourceHeap->unregisterTexture(m_denoisedReSTIRGIDiffuse->GetDescriptorIndexSlot());
+        }
+
+        m_denoisedReSTIRGIDiffuse = m_device->createTexture(NRI::TextureDesc{
+            .width = width,
+            .height = height,
+            .mipLevels = 1,
+            .sampleCount = 1,
+            .usage = NRI::TextureUsage::ColorAttachment,
+            .format = NRI::ImageFormat::R16G16B16A16_SFLOAT,
+            .directFormat = UINT32_MAX
+        });
+        m_resourceHeap->registerTexture(*m_denoisedReSTIRGIDiffuse);
+
+        // 2. Reservoir Buffers (Ping-Pong, Block-Linear 16x16 tiles per RTXDI SDK)
+        RTXDI_ReservoirBufferParameters resParams = rtxdi::CalculateReservoirBufferParameters(
+            width, height, rtxdi::CheckerboardMode::Off);
+        uint64_t reservoirBufferSize = static_cast<uint64_t>(resParams.reservoirArrayPitch) * sizeof(RTXDI_PackedGIReservoir);
+
+        for (int i = 0; i < 2; i++)
+        {
+            m_restirGIReservoirBuffers[i] = m_device->createBuffer(NRI::BufferDesc{
+                .size = reservoirBufferSize,
+                .usage = NRI::BufferUsage::Storage
+            });
+            void* mapped = m_restirGIReservoirBuffers[i]->map(0, reservoirBufferSize);
+            memset(mapped, 0, reservoirBufferSize);
+            m_restirGIReservoirBuffers[i]->unmap();
+        }
+
+        // 3. Neighbor Offsets Buffer (128 offsets within a unit disk: [-1.0, 1.0])
+        if (!m_restirGINeighborOffsetsBuffer)
+        {
+            constexpr uint32_t neighborOffsetCount = 128;
+            glm::vec2 floatOffsets[neighborOffsetCount];
+            const float phi2 = 1.0f / 1.3247179572447f;
+            float u = 0.5f;
+            float v = 0.5f;
+            uint32_t count = 0;
+            while (count < neighborOffsetCount)
+            {
+                u += phi2;
+                v += phi2 * phi2;
+                if (u >= 1.0f) u -= 1.0f;
+                if (v >= 1.0f) v -= 1.0f;
+
+                float du = (u - 0.5f) * 2.0f;
+                float dv = (v - 0.5f) * 2.0f;
+                if (du * du + dv * dv <= 1.0f)
+                {
+                    floatOffsets[count++] = glm::vec2(du, dv);
+                }
+            }
+
+            uint64_t offsetsBufferSize = sizeof(floatOffsets);
+            m_restirGINeighborOffsetsBuffer = m_device->createBuffer(NRI::BufferDesc{
+                .size = offsetsBufferSize,
+                .usage = NRI::BufferUsage::Storage
+            });
+
+            void* mapped = m_restirGINeighborOffsetsBuffer->map(0, offsetsBufferSize);
+            memcpy(mapped, floatOffsets, offsetsBufferSize);
+            m_restirGINeighborOffsetsBuffer->unmap();
+        }
+
+    }
+
     void Renderer::createDDGIPipelines(bool forceCompile)
     {
         // 1. Radiance Pipeline
@@ -784,6 +889,78 @@ namespace Nox
                 .sourcePath = "assets/shaders/DDGIProbeSpheres.slang"
             });
             m_ddgiDebugSpheresPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        }
+    }
+
+    void Renderer::createReSTIRGIPipelines(bool forceCompile)
+    {
+        // 1. Initial Candidate Generation Pipeline
+        {
+            NRI::PipelineDesc desc{};
+            desc.forceCompile = forceCompile;
+            desc.colorFormats = {NRI::ImageFormat::R16G16B16A16_SFLOAT};
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Task,
+                .entryPoint = "taskMain",
+                .sourcePath = "assets/shaders/ReSTIRGIInitial.slang"
+            });
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Mesh,
+                .entryPoint = "meshMain",
+                .sourcePath = "assets/shaders/ReSTIRGIInitial.slang"
+            });
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Fragment,
+                .entryPoint = "fragMain",
+                .sourcePath = "assets/shaders/ReSTIRGIInitial.slang"
+            });
+            m_restirGIInitialPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        }
+
+        // 2. Temporal Resampling Pipeline
+        {
+            NRI::PipelineDesc desc{};
+            desc.forceCompile = forceCompile;
+            desc.colorFormats = {NRI::ImageFormat::R16G16B16A16_SFLOAT};
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Task,
+                .entryPoint = "taskMain",
+                .sourcePath = "assets/shaders/ReSTIRGITemporal.slang"
+            });
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Mesh,
+                .entryPoint = "meshMain",
+                .sourcePath = "assets/shaders/ReSTIRGITemporal.slang"
+            });
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Fragment,
+                .entryPoint = "fragMain",
+                .sourcePath = "assets/shaders/ReSTIRGITemporal.slang"
+            });
+            m_restirGITemporalPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        }
+
+        // 3. Spatial Resampling Pipeline
+        {
+            NRI::PipelineDesc desc{};
+            desc.forceCompile = forceCompile;
+            desc.colorFormats = {NRI::ImageFormat::R16G16B16A16_SFLOAT};
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Task,
+                .entryPoint = "taskMain",
+                .sourcePath = "assets/shaders/ReSTIRGISpatial.slang"
+            });
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Mesh,
+                .entryPoint = "meshMain",
+                .sourcePath = "assets/shaders/ReSTIRGISpatial.slang"
+            });
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Fragment,
+                .entryPoint = "fragMain",
+                .sourcePath = "assets/shaders/ReSTIRGISpatial.slang"
+            });
+            m_restirGISpatialPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
         }
     }
 
@@ -1026,6 +1203,16 @@ namespace Nox
         });
         m_resourceHeap->registerTexture(*m_depthResource);
 
+        // Previous-frame depth snapshot for ReSTIR GI temporal reprojection (see declaration comment).
+        m_prevDepthResource = m_device->createTexture(NRI::TextureDesc{
+            .width = m_renderSize.width,
+            .height = m_renderSize.height,
+            .mipLevels = 1,
+            .sampleCount = 1,
+            .usage = NRI::TextureUsage::DepthStencilAttachment
+        });
+        m_resourceHeap->registerTexture(*m_prevDepthResource);
+
         // Display-resolution copy (nearest-upsampled each frame) used only by the 2D overlay pass so
         // world-space 2D/text content (e.g. in-world signs) still depth-tests correctly against 3D
         // geometry at full display resolution even while DLSS is rendering the 3D scene smaller.
@@ -1118,6 +1305,18 @@ namespace Nox
             .directFormat = UINT32_MAX
         });
         m_resourceHeap->registerTexture(*m_gbufferNormal);
+
+        // Previous-frame normal snapshot for ReSTIR GI temporal reprojection (see declaration comment).
+        m_prevGbufferNormal = m_device->createTexture(NRI::TextureDesc{
+            .width = width,
+            .height = height,
+            .mipLevels = 1,
+            .sampleCount = 1,
+            .usage = NRI::TextureUsage::ColorAttachment,
+            .format = NRI::ImageFormat::R16G16B16A16_SFLOAT,
+            .directFormat = UINT32_MAX
+        });
+        m_resourceHeap->registerTexture(*m_prevGbufferNormal);
 
         m_gbufferMaterial = m_device->createTexture(NRI::TextureDesc{
             .width = width,
@@ -2831,6 +3030,265 @@ namespace Nox
         }
 
         // =========================================================================
+        // 2.9. RESTIR GI (SCREEN-SPACE DIFFUSE PATH RESAMPLING VIA RTXDI)
+        // =========================================================================
+        bool runReSTIRGI = (m_diffuseGIMode == 2 || (m_debugMode == 16 && m_diffuseGIMode != 1)) &&
+                           m_hasTLASBuild && m_sceneTLAS && (uniformData.tlasDeviceAddress != 0) &&
+                           (uniformData.instanceLUTReference != 0) &&
+                           m_restirGIInitialPipeline && m_restirGITemporalPipeline && m_restirGISpatialPipeline &&
+                           m_restirGIRawDiffuse && m_restirGIReservoirBuffers[0] &&
+                           m_restirGIReservoirBuffers[1] && m_restirGINeighborOffsetsBuffer;
+
+        if (runReSTIRGI)
+        {
+            RTXDI_ReservoirBufferParameters resParams = rtxdi::CalculateReservoirBufferParameters(
+                m_renderSize.width, m_renderSize.height, rtxdi::CheckerboardMode::Off);
+
+            // Fixed buffer roles, matching RTXPT's ReSTIRGIContext::UpdateBufferIndices for
+            // TemporalAndSpatial mode (NOT ping-ponged by frame parity, unlike Temporal-only/Fused
+            // modes): buffer 0 is pure this-frame scratch (Initial writes it, Temporal reads its own
+            // candidate from it and overwrites it in place with the temporal result -- safe because
+            // that read+write only ever touches a single pixel's own slot). Buffer 1 is the
+            // persistent cross-frame result: Temporal reads it as history, and Spatial -- which reads
+            // every neighbor out of buffer 0 -- writes its finished result there, never back into
+            // buffer 0, so it can never race a neighboring pixel's still-in-flight read of buffer 0.
+            constexpr uint32_t kScratchBuffer = 0;
+            constexpr uint32_t kPersistentBuffer = 1;
+
+            // 1. Initial Candidate Generation Pass
+            {
+                std::vector<NRI::RenderAttachDesc> initAttachments;
+                initAttachments.push_back({
+                    .attachment = m_restirGIRawDiffuse.get(),
+                    .loadOP = NRI::LoadOP::clear,
+                    .storeOP = NRI::StoreOP::store,
+                    .clearColor = {0.0f, 0.0f, 0.0f, 0.0f}
+                });
+
+                NRI::RenderDesc initDesc = {
+                    .renderArea = renderExtent,
+                    .colorAttachments = initAttachments
+                };
+
+                m_commandBuffers->beginRendering(initDesc);
+                m_commandBuffers->setViewportWithCount({0.0f, rh, rw, -rh}, 0.0f, 1.0f);
+                m_commandBuffers->setScissorWithCount(renderExtent);
+
+                m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_restirGIInitialPipeline);
+                m_commandBuffers->setCullMode(NRI::CullMode::None);
+                m_commandBuffers->setDepthTestEnable(false);
+                m_commandBuffers->setDepthWriteEnable(false);
+                m_commandBuffers->setColorBlendEnable(0, false);
+                m_commandBuffers->setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G |
+                                                    NRI::ColorComponent::B | NRI::ColorComponent::A);
+
+                shaderio::PushConstantReSTIRGIInitial initPush{};
+                initPush.invViewProj = uniformData.invViewProj;
+                initPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                initPush.reservoirBufferReference = m_restirGIReservoirBuffers[kScratchBuffer]->getDeviceAddress();
+                initPush.depthTextureIndex = m_depthResource->GetDescriptorIndexSlot();
+                initPush.gbufferNormalIndex = m_gbufferNormal->GetDescriptorIndexSlot();
+                initPush.gbufferAlbedoIndex = m_gbufferAlbedo->GetDescriptorIndexSlot();
+                initPush.gbufferMaterialIndex = m_gbufferMaterial->GetDescriptorIndexSlot();
+                initPush.visibilityTextureIndex = m_visibilityResource->GetDescriptorIndexSlot();
+                initPush.viewportSize = glm::vec2(rw, rh);
+                initPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
+                initPush.reservoirBlockRowPitch = resParams.reservoirBlockRowPitch;
+                initPush.reservoirArrayPitch = resParams.reservoirArrayPitch;
+                m_commandBuffers->pushData(&initPush, sizeof(shaderio::PushConstantReSTIRGIInitial));
+
+                m_commandBuffers->drawMeshTasks(1, 1, 1);
+                m_commandBuffers->endRendering();
+                m_commandBuffers->executionBarrier();
+            }
+
+            // 2. Temporal Resampling Pass: reads Pass 1's candidate + history, overwrites the
+            // candidate in place with the temporally-resampled result.
+            {
+                std::vector<NRI::RenderAttachDesc> tAttachments;
+                tAttachments.push_back({
+                    .attachment = m_restirGIRawDiffuse.get(),
+                    .loadOP = NRI::LoadOP::dontCare,
+                    .storeOP = NRI::StoreOP::dontCare
+                });
+
+                NRI::RenderDesc tDesc = {
+                    .renderArea = renderExtent,
+                    .colorAttachments = tAttachments
+                };
+
+                m_commandBuffers->beginRendering(tDesc);
+                m_commandBuffers->setViewportWithCount({0.0f, rh, rw, -rh}, 0.0f, 1.0f);
+                m_commandBuffers->setScissorWithCount(renderExtent);
+
+                m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_restirGITemporalPipeline);
+                m_commandBuffers->setCullMode(NRI::CullMode::None);
+                m_commandBuffers->setDepthTestEnable(false);
+                m_commandBuffers->setDepthWriteEnable(false);
+                m_commandBuffers->setColorBlendEnable(0, false);
+                m_commandBuffers->setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G |
+                                                    NRI::ColorComponent::B | NRI::ColorComponent::A);
+
+                shaderio::PushConstantReSTIRGITemporal tPush{};
+                tPush.invViewProj = uniformData.invViewProj;
+                // Last frame's depth/normal snapshot was rendered with last frame's camera matrix --
+                // must unproject it with the SAME matrix, never this frame's, or the reconstructed
+                // previous-frame world position is simply wrong as soon as the camera moves.
+                tPush.prevInvViewProj = glm::inverse(uniformData.prevProj * uniformData.prevView);
+                tPush.cameraWorldPos = uniformData.cameraWorldPos;
+                tPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                tPush.currentReservoirReference = m_restirGIReservoirBuffers[kScratchBuffer]->getDeviceAddress();
+                tPush.previousReservoirReference = m_restirGIReservoirBuffers[kPersistentBuffer]->getDeviceAddress();
+                tPush.depthTextureIndex = m_depthResource->GetDescriptorIndexSlot();
+                tPush.prevDepthTextureIndex = m_prevDepthResource ? m_prevDepthResource->GetDescriptorIndexSlot() : UINT32_MAX;
+                tPush.gbufferNormalIndex = m_gbufferNormal->GetDescriptorIndexSlot();
+                tPush.prevNormalTextureIndex = m_prevGbufferNormal ? m_prevGbufferNormal->GetDescriptorIndexSlot() : UINT32_MAX;
+                tPush.gbufferVelocityIndex = m_gbufferVelocity->GetDescriptorIndexSlot();
+                tPush.gbufferMaterialIndex = m_gbufferMaterial->GetDescriptorIndexSlot();
+                tPush.viewportSize = glm::vec2(rw, rh);
+                tPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
+                tPush.reservoirBlockRowPitch = resParams.reservoirBlockRowPitch;
+                tPush.reservoirArrayPitch = resParams.reservoirArrayPitch;
+                tPush.maxHistoryLength = m_restirGIMaxHistoryLength;
+                tPush.normalThreshold = m_restirGINormalThreshold;
+                tPush.depthThreshold = m_restirGIDepthThreshold;
+                tPush.enablePermutationSampling = 1; // matches RTXPT's default (true)
+                tPush.maxReservoirAge = 50; // matches RTXPT's GI-specific default
+                m_commandBuffers->pushData(&tPush, sizeof(shaderio::PushConstantReSTIRGITemporal));
+
+                m_commandBuffers->drawMeshTasks(1, 1, 1);
+                m_commandBuffers->endRendering();
+                m_commandBuffers->executionBarrier();
+            }
+
+            // 3. Spatial Resampling Pass: reads THIS frame's just-temporally-resampled scratch buffer
+            // (for both its own-pixel input and every spatial neighbor) but writes its finished
+            // result into the SEPARATE persistent buffer -- never back into the scratch buffer, since
+            // that is still being read concurrently by other in-flight pixels of this same pass.
+            {
+                std::vector<NRI::RenderAttachDesc> sAttachments;
+                sAttachments.push_back({
+                    .attachment = m_restirGIRawDiffuse.get(),
+                    .loadOP = NRI::LoadOP::clear,
+                    .storeOP = NRI::StoreOP::store,
+                    .clearColor = {0.0f, 0.0f, 0.0f, 0.0f}
+                });
+
+                NRI::RenderDesc sDesc = {
+                    .renderArea = renderExtent,
+                    .colorAttachments = sAttachments
+                };
+
+                m_commandBuffers->beginRendering(sDesc);
+                m_commandBuffers->setViewportWithCount({0.0f, rh, rw, -rh}, 0.0f, 1.0f);
+                m_commandBuffers->setScissorWithCount(renderExtent);
+
+                m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_restirGISpatialPipeline);
+                m_commandBuffers->setCullMode(NRI::CullMode::None);
+                m_commandBuffers->setDepthTestEnable(false);
+                m_commandBuffers->setDepthWriteEnable(false);
+                m_commandBuffers->setColorBlendEnable(0, false);
+                m_commandBuffers->setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G |
+                                                    NRI::ColorComponent::B | NRI::ColorComponent::A);
+
+                shaderio::PushConstantReSTIRGISpatial sPush{};
+                sPush.invViewProj = uniformData.invViewProj;
+                sPush.cameraWorldPos = uniformData.cameraWorldPos;
+                sPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                sPush.inputReservoirReference = m_restirGIReservoirBuffers[kScratchBuffer]->getDeviceAddress();
+                sPush.outputReservoirReference = m_restirGIReservoirBuffers[kPersistentBuffer]->getDeviceAddress();
+                sPush.neighborOffsetsReference = m_restirGINeighborOffsetsBuffer->getDeviceAddress();
+                sPush.depthTextureIndex = m_depthResource->GetDescriptorIndexSlot();
+                sPush.gbufferNormalIndex = m_gbufferNormal->GetDescriptorIndexSlot();
+                sPush.gbufferMaterialIndex = m_gbufferMaterial->GetDescriptorIndexSlot();
+                sPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
+                sPush.viewportSize = glm::vec2(rw, rh);
+                sPush.reservoirBlockRowPitch = resParams.reservoirBlockRowPitch;
+                sPush.reservoirArrayPitch = resParams.reservoirArrayPitch;
+                sPush.samplingRadius = m_restirGISpatialRadius;
+                sPush.numSamples = m_restirGINumSpatialSamples;
+                sPush.normalThreshold = m_restirGINormalThreshold;
+                sPush.depthThreshold = m_restirGIDepthThreshold;
+                sPush.neighborOffsetMask = 127;
+                sPush.enableBoilingFilter = m_restirGIEnableBoilingFilter ? 1 : 0;
+                sPush.boilingFilterStrength = m_restirGIBoilingFilterStrength;
+                m_commandBuffers->pushData(&sPush, sizeof(shaderio::PushConstantReSTIRGISpatial));
+
+                m_commandBuffers->drawMeshTasks(1, 1, 1);
+                m_commandBuffers->endRendering();
+                m_commandBuffers->executionBarrier();
+            }
+
+            // Snapshot this frame's depth/normal into the "previous frame" buffers now that the
+            // temporal pass above has already consumed last frame's snapshot -- these feed next
+            // frame's ReSTIR GI temporal reprojection validity check (see declaration comment on
+            // m_prevDepthResource).
+            if (m_prevDepthResource && m_prevGbufferNormal)
+            {
+                m_commandBuffers->copyTexture(*m_depthResource, *m_prevDepthResource, m_renderSize.width, m_renderSize.height);
+                m_commandBuffers->copyTexture(*m_gbufferNormal, *m_prevGbufferNormal, m_renderSize.width, m_renderSize.height);
+                m_commandBuffers->executionBarrier();
+            }
+
+            // =========================================================================
+            // NRD DIFFUSE GI DENOISING PASS (Denoises 1-SPP ReSTIR GI via REBLUR / RELAX)
+            // =========================================================================
+            bool restirGIDenoised = false;
+            if (m_nrdGIDenoiser != NRI::NRDDiffuseDenoiser::Off &&
+                m_device->isNRDInitialized() &&
+                m_restirGIRawDiffuse && m_denoisedReSTIRGIDiffuse && m_viewZ && m_nrdNormalRoughness)
+            {
+                NRI::NRDDiffuseParams giDenoiseParams{};
+                giDenoiseParams.inDiffuseRadianceHitDist = m_restirGIRawDiffuse.get();
+                giDenoiseParams.inMotionVectors = m_gbufferVelocity.get();
+                giDenoiseParams.inNormalRoughness = m_nrdNormalRoughness.get();
+                giDenoiseParams.inViewZ = m_viewZ.get();
+                giDenoiseParams.outDenoisedDiffuse = m_denoisedReSTIRGIDiffuse.get();
+                giDenoiseParams.commandBuffer = m_commandBuffers.get();
+
+                giDenoiseParams.view = uniformData.view;
+                giDenoiseParams.proj = uniformData.nonJitteredProj;
+                giDenoiseParams.prevView = uniformData.prevView;
+                giDenoiseParams.prevProj = uniformData.prevProj;
+
+                giDenoiseParams.motionVectorScale = glm::vec2(1.0f, 1.0f);
+                giDenoiseParams.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
+                giDenoiseParams.resetHistory = m_isFirstFrame || m_resetNRD;
+
+                restirGIDenoised = m_device->evaluateNRDDiffuse(giDenoiseParams, m_nrdGIDenoiser);
+                m_commandBuffers->executionBarrier();
+                m_commandBuffers->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
+            }
+
+            // Update UBO so Deferred Lighting reads the fresh ReSTIR GI diffuse
+            uniformData.diffuseGIMode = m_diffuseGIMode;
+            uniformData.restirGIDiffuseTextureIndex = restirGIDenoised
+                ? m_denoisedReSTIRGIDiffuse->GetDescriptorIndexSlot()
+                : m_restirGIRawDiffuse->GetDescriptorIndexSlot();
+            uniformData.restirGIReservoirBufferIndex = 0;
+            uniformData.restirGINeighborOffsetsBufferIndex = 0;
+            memcpy(m_uniformBuffersMapped[frameIndex], &uniformData, sizeof(shaderio::UniformBufferObject));
+        }
+        else
+        {
+            if (m_diffuseGIMode == 2)
+            {
+                // Fallback to IBL ambient if ReSTIR GI cannot run yet (e.g. TLAS build pending)
+                uniformData.diffuseGIMode = 0;
+                uniformData.restirGIDiffuseTextureIndex = 0xFFFFFFFF;
+            }
+            else
+            {
+                uniformData.diffuseGIMode = m_diffuseGIMode;
+                if (m_restirGIRawDiffuse)
+                    uniformData.restirGIDiffuseTextureIndex = m_restirGIRawDiffuse->GetDescriptorIndexSlot();
+                else
+                    uniformData.restirGIDiffuseTextureIndex = 0xFFFFFFFF;
+            }
+            memcpy(m_uniformBuffersMapped[frameIndex], &uniformData, sizeof(shaderio::UniformBufferObject));
+        }
+
+        // =========================================================================
         // 3. LIGHTING PASS: PATH TRACER (Modes 18 & 19) OR DEFERRED LIGHTING
         // =========================================================================
         bool runPathTracer = (m_pathTracingEnabled || m_debugMode == 18 || m_debugMode == 19);
@@ -2942,6 +3400,8 @@ namespace Nox
             lightingPush.reflectionTextureIndex = (m_nrdReflectionDenoiser != NRI::NRDReflectionDenoiser::Off && m_denoisedReflection)
                 ? m_denoisedReflection->GetDescriptorIndexSlot()
                 : (m_rawReflection ? m_rawReflection->GetDescriptorIndexSlot() : 0);
+            lightingPush.diffuseGIMode = uniformData.diffuseGIMode;
+            lightingPush.restirGIDiffuseTextureIndex = uniformData.restirGIDiffuseTextureIndex;
             m_commandBuffers->pushData(&lightingPush, sizeof(shaderio::PushConstantDeferredLighting));
 
             m_commandBuffers->drawMeshTasks(1, 1, 1);
@@ -3730,10 +4190,15 @@ namespace Nox
 
     void Renderer::updateSceneAccelerationStructure(uint32_t currentFrameIndex)
     {
-        bool isPathTracing = m_pathTracingEnabled || (m_debugMode == 16 || m_debugMode == 17);
-        if (!isPathTracing && (!m_rayTracingEnabled || (!m_rayTracingShadows && !m_rayTracingReflections)))
+        bool isPathTracing = m_pathTracingEnabled || (m_debugMode == 18 || m_debugMode == 19);
+        bool isReSTIRGI = (m_diffuseGIMode == 2 || (m_debugMode == 16 && m_diffuseGIMode != 1));
+        bool isHybridRT = m_rayTracingEnabled && (m_rayTracingShadows || m_rayTracingReflections);
+
+        if (!isPathTracing && !isReSTIRGI && !isHybridRT)
         {
             m_hasTLASBuild = false;
+            uniformData.tlasDeviceAddress = 0;
+            uniformData.instanceLUTReference = 0;
             uniformData.enableRTShadows = 0;
             uniformData.enableRTReflections = 0;
             return;
@@ -3807,7 +4272,6 @@ namespace Nox
                 lut.transmissionFactor = packet.instance.transmissionFactor;
                 lut.transmissionTextureIndex = packet.instance.transmissionTextureIndex;
                 lut.workflow = packet.instance.workflow;
-                lut.padding0 = 0;
                 rtInstanceLUTs.push_back(lut);
             }
         };
@@ -3917,7 +4381,7 @@ namespace Nox
 
     void Renderer::BuildSceneAccelerationStructure(uint32_t currentFrameIndex)
     {
-        if (!m_hasTLASBuild)
+        if (!m_hasTLASBuild || !m_sceneTLAS || !m_tlasScratchBuffer)
             return;
 
         // 1. Pre-build barrier: Host/Transfer instance writes -> AS Build Read
@@ -4113,6 +4577,12 @@ namespace Nox
         uniformData.ddgiIrradianceTextureIndex = m_ddgiIrradiance[m_ddgiHistoryIndex] ? m_ddgiIrradiance[m_ddgiHistoryIndex]->GetDescriptorIndexSlot() : 0xFFFFFFFF;
         uniformData.ddgiDistanceTextureIndex = m_ddgiDistance[m_ddgiHistoryIndex] ? m_ddgiDistance[m_ddgiHistoryIndex]->GetDescriptorIndexSlot() : 0xFFFFFFFF;
 
+        // ReSTIR GI
+        uniformData.diffuseGIMode = m_diffuseGIMode;
+        uniformData.restirGIDiffuseTextureIndex = m_restirGIRawDiffuse ? m_restirGIRawDiffuse->GetDescriptorIndexSlot() : 0xFFFFFFFF;
+        uniformData.restirGIReservoirBufferIndex = 0;
+        uniformData.restirGINeighborOffsetsBufferIndex = 0;
+
         if (m_frozen)
         {
             if (!m_frozenDone)
@@ -4233,6 +4703,12 @@ namespace Nox
         );
         uniformData.ddgiIrradianceTextureIndex = m_ddgiIrradiance[m_ddgiHistoryIndex] ? m_ddgiIrradiance[m_ddgiHistoryIndex]->GetDescriptorIndexSlot() : 0xFFFFFFFF;
         uniformData.ddgiDistanceTextureIndex = m_ddgiDistance[m_ddgiHistoryIndex] ? m_ddgiDistance[m_ddgiHistoryIndex]->GetDescriptorIndexSlot() : 0xFFFFFFFF;
+
+        // ReSTIR GI
+        uniformData.diffuseGIMode = m_diffuseGIMode;
+        uniformData.restirGIDiffuseTextureIndex = m_restirGIRawDiffuse ? m_restirGIRawDiffuse->GetDescriptorIndexSlot() : 0xFFFFFFFF;
+        uniformData.restirGIReservoirBufferIndex = 0;
+        uniformData.restirGINeighborOffsetsBufferIndex = 0;
 
         if (m_frozen)
         {

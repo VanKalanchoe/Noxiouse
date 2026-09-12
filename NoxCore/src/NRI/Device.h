@@ -111,7 +111,34 @@ namespace NRI
         uint32_t frameIndex = 0;
         bool resetHistory = false;
     };
-    
+
+    enum class NRDDiffuseDenoiser : uint8_t
+    {
+        Off = 0,
+        REBLUR = 1,
+        RELAX = 2
+    };
+
+    struct NRDDiffuseParams
+    {
+        Texture* inDiffuseRadianceHitDist = nullptr;  // Raw 1-SPP diffuse GI radiance + hit distance (RGBA16_SFLOAT)
+        Texture* inMotionVectors = nullptr;           // Screen-space Motion Vectors (RG16_SFLOAT)
+        Texture* inNormalRoughness = nullptr;         // World-space Normal (RGB) and Roughness (A) (R10G10B10A2_UNORM)
+        Texture* inViewZ = nullptr;                   // Linear View-Z (R16_SFLOAT)
+        Texture* outDenoisedDiffuse = nullptr;        // Denoised diffuse GI output (RGBA16_SFLOAT)
+
+        CommandBuffer* commandBuffer = nullptr;
+
+        glm::mat4 view{ 1.0f };
+        glm::mat4 proj{ 1.0f };
+        glm::mat4 prevView{ 1.0f };
+        glm::mat4 prevProj{ 1.0f };
+
+        glm::vec2 motionVectorScale{ 1.0f, 1.0f };
+        uint32_t frameIndex = 0;
+        bool resetHistory = false;
+    };
+
     class Device
     {
     public:
@@ -151,6 +178,7 @@ namespace NRI
         virtual bool initNRD(uint32_t width, uint32_t height) { return false; }
         virtual bool evaluateNRDShadows(const struct NRDShadowParams& params) { return false; }
         virtual bool evaluateNRDReflections(const struct NRDReflectionParams& params, NRDReflectionDenoiser denoiser) { return false; }
+        virtual bool evaluateNRDDiffuse(const struct NRDDiffuseParams& params, NRDDiffuseDenoiser denoiser) { return false; }
         virtual void destroyNRD() {}
         virtual bool isNRDInitialized() const { return false; }
         

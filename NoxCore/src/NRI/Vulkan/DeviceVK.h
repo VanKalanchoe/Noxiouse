@@ -56,6 +56,7 @@ namespace NRI
         bool initNRD(uint32_t width, uint32_t height) override;
         bool evaluateNRDShadows(const NRDShadowParams& params) override;
         bool evaluateNRDReflections(const NRDReflectionParams& params, NRDReflectionDenoiser denoiser) override;
+        bool evaluateNRDDiffuse(const NRDDiffuseParams& params, NRDDiffuseDenoiser denoiser) override;
         void destroyNRD() override;
         bool isNRDInitialized() const override;
         

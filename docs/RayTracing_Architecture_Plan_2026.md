@@ -60,12 +60,33 @@ The following official documentation, source code repositories, and technical wh
 - **RTXGI DDGI Guide**: [RTXGI DDGI Implementation Guide (PDF)](https://github.com/NVIDIAGameWorks/RTXGI/blob/main/RTXGI-DDGI-Guide.pdf)
 - **Foundational Paper**: [Majercik et al., *Dynamic Diffuse Global Illumination with Ray-Traced Irradiance Fields*, JCGT 2019](https://jcgt.org/published/0008/02/01/)
 
-### 2.5. NVIDIA RTXDI (ReSTIR DI, ReSTIR GI & ReSTIR PT)
-- **Official GitHub Repository**: [NVIDIA-RTX/RTXDI](https://github.com/NVIDIA-RTX/RTXDI)
-- **RTXDI Library Source**: [NVIDIA-RTX/RTXDI-Library](https://github.com/NVIDIA-RTX/RTXDI-Library)
+### 2.5. NVIDIA RTXDI (ReSTIR DI, ReSTIR GI & ReSTIR PT SDK v3.1.0)
+- **Official Documentation & Integration Guide**: [RTXDI Integration Documentation (`Doc/Integration.md`)](https://github.com/NVIDIA-RTX/RTXDI/blob/main/Doc/Integration.md)
+- **RTXDI Library-Only Repository (Clean SDK without LFS/Samples)**: [NVIDIA-RTX/RTXDI-Library](https://github.com/NVIDIA-RTX/RTXDI-Library) (Branch: `main`, commit `f12037f` — this matches the `Libraries/Rtxdi` submodule pinned by RTXDI `v3.1.0`. Note: NVIDIA does not publish git tags or releases on `RTXDI-Library`)
+- **Full Monorepo (Samples & Reference App)**: [NVIDIA-RTX/RTXDI](https://github.com/NVIDIA-RTX/RTXDI)
 - **Foundational ReSTIR Paper**: [Bitterli et al., *Spatiotemporal Reservoir Resampling for Real-Time Ray Tracing with Dynamic Direct Lighting*, SIGGRAPH 2020](https://cs.dartmouth.edu/wjarosz/publications/bitterli20spatiotemporal.html)
 - **ReSTIR GI Paper**: [Ouyang et al., *ReSTIR GI: Path Resampling for Real-Time Path Tracing*, HPG 2021](https://intro-to-restir.cwyman.org/)
 - **ReSTIR PT (GRIS) Paper**: [Lin et al., *Generalized Resampled Importance Sampling: Foundations of ReSTIR*, SIGGRAPH 2022](https://intro-to-restir.cwyman.org/)
+
+#### RTXDI v3.x Full Feature Matrix for NoxEngine:
+1. **ReSTIR DI (Direct Illumination)**:
+   - Dynamic light presampling into 2D screen tiles (`LocalLightTiles`, `EnvLightTiles`).
+   - Primary surface & secondary hit light candidate generation (`PrepareSurfaceData`, `SampleLights`).
+   - Spatiotemporal reservoir reuse (`TemporalResampling`, `SpatialResampling`) with confidence weight tracking.
+   - Boiling filter & Pairwise Multiple Importance Sampling (MIS).
+   - Single shadow ray evaluation per pixel for the winning reservoir light.
+2. **ReSTIR GI (Indirect Illumination)**:
+   - 1-ray-per-pixel screen-space primary bounce candidate generation.
+   - Secondary hit surface representation (sample position, normal, incoming radiance).
+   - Spatiotemporal reservoir reuse across frames and neighbor pixels with Jacobian alignment.
+   - Unbiased normalization weighting and denoising handoff (NRD `REBLUR_DIFFUSE` or DLSS-RR).
+3. **ReSTIR PT (Path Tracing via GRIS)**:
+   - Generalized Resampled Importance Sampling for multi-bounce paths.
+   - Path reconnection and random replay shift mappings.
+   - Tremendous variance reduction for complex multi-bounce indirect lighting in `PathTracer.slang`.
+4. **Integration Strategy**:
+   - **Path Tracer (`PathTracer.slang`)**: Full ReSTIR DI + ReSTIR PT integration for noise-free convergence and reference truth.
+   - **Hybrid Deferred Renderer**: Decoupled ReSTIR DI (many-lights) + ReSTIR GI (screen-space indirect diffuse bounces).
 
 ### 2.6. NVIDIA RTXPT (RTX Path Tracing SDK) & BSDF Reference Specifications
 - **Official Overview**: [NVIDIA RTX Path Tracing](https://developer.nvidia.com/rtx/ray-tracing/path-tracing)
@@ -233,24 +254,30 @@ NoxEngine provides 20 interactive debug view modes selectable in the Viewport To
   4. Interactive Editor Controls:
      - Real-time sliders for Grid Origin, Grid Spacing, Temporal Hysteresis, Normal Bias, Debug Sphere Radius, and "Reset DDGI History" button.
 - **Track B: RTXDI ReSTIR GI (Screen-Space Path Resampling)**: 🚀 NEXT UP
-  1. Trace 1 indirect diffuse ray per screen pixel from primary G-Buffer hit points.
-  2. Resample and share indirect paths across spatial neighbors and temporal history via RTXDI ReSTIR GI reservoirs.
-  3. Denoise the resulting diffuse radiance buffer using NRD `REBLUR_DIFFUSE` or DLSS-RR.
+  - **Integration Reference**: [`Doc/Integration.md`](https://github.com/NVIDIA-RTX/RTXDI/blob/main/Doc/Integration.md)
+  1. Allocate RTXDI GI Context and reservoir textures (`m_restirGIReservoirs`, `m_restirGIRadiance`, `m_restirGIWeights`).
+  2. Trace 1 indirect diffuse ray per screen pixel from primary G-Buffer hit points (`ReSTIRGIInitial.slang`) to discover secondary hit surface data.
+  3. Resample and share indirect paths across spatial neighbors and temporal history via RTXDI ReSTIR GI reservoirs (`ReSTIRGISpatialTemporal.slang`).
+  4. Compute unbiased Monte Carlo normalization weights and hand off diffuse radiance to NRD `REBLUR_DIFFUSE` or DLSS-RR.
 - **Comparison & UI Controls**:
   - Runtime combo dropdown: `[ Indirect GI: DDGI Probes | RTXDI ReSTIR GI | Off (IBL Cubemap) ]`.
   - Side-by-side performance profiling (ms/frame, VRAM consumption, visual comparison).
 
-### Phase 6: Many-Light Direct Illumination & Area Lights via RTXDI (ReSTIR DI)
-- **Objective**: Scale direct lighting to thousands of dynamic shadow-casting lights (point, spot, directional, rectangular/disc area lights) at 1-ray-per-pixel across both the Hybrid Deferred Renderer and the Path Tracer.
+### Phase 6: Many-Light Direct Illumination & Path Resampling via RTXDI v3.1.0 (ReSTIR DI & ReSTIR PT)
+- **Objective**: Scale direct lighting to thousands of dynamic shadow-casting lights (punctual, directional, emissive triangles, and area lights) at 1-ray-per-pixel across both the Hybrid Deferred Renderer and the Path Tracer, plus multi-bounce path resampling (ReSTIR PT / GRIS).
+- **Reference**: [RTXDI Integration Guide: ReSTIR DI & ReSTIR PT](https://github.com/NVIDIA-RTX/RTXDI/blob/main/Doc/Integration.md)
 - **Components**:
   1. **Linearly Transformed Cosines (LTC)** LUT evaluation for rectangular and disc area lights.
-  2. **RTXDI ReSTIR DI Core Pipeline**:
-     - Light tile presampling pass.
-     - Spatiotemporal reservoir generation and reuse.
+  2. **RTXDI ReSTIR DI Core Pipeline (Hybrid Renderer & Path Tracer)**:
+     - Light tile presampling pass (`rtxdi::ReSTIRDI::PrepareLightTiles`, `rtxdi::ReSTIRDI::PresampleLights`).
+     - Primary screen-space reservoir generation (`rtxdi::ReSTIRDI::SampleLights`).
+     - Spatiotemporal reservoir generation and reuse (`rtxdi::ReSTIRDI::TemporalResampling`, `rtxdi::ReSTIRDI::SpatialResampling`).
+     - Boiling filter and Pairwise MIS for high dynamic range emissives.
      - Single shadow ray test for the winning reservoir light.
   3. **Path Tracer Integration (ReSTIR DI + ReSTIR PT)**:
-     - Replace random Next Event Estimation (NEE) in `PathTracer.slang` with RTXDI reservoir sampling for instantaneous noise-free direct lighting.
-     - Integrate ReSTIR PT for multi-bounce path importance resampling.
+     - Direct Light Resampling: Replace random Next Event Estimation (NEE) in `PathTracer.slang` with RTXDI reservoir sampling for instantaneous noise-free direct lighting.
+     - Multi-Bounce Path Resampling (ReSTIR PT): Generalized Resampled Importance Sampling (GRIS) across multi-bounce paths with random replay and reconnection shift mappings.
+     - Rapid convergence for indirect bounces and caustic paths in the interactive path tracer.
 
 ### Phase 7: Ray-Traced Ambient Occlusion (RTAO) & Volumetric Froxels
 - **Objective**: Physical contact darkening and atmospheric light shafts.

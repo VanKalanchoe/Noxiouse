@@ -953,7 +953,7 @@ namespace Nox
             "13: RT Shadow Mask",
             "14: RT Reflections",
             "15: Motion Vectors (Velocity Buffer)",
-            "16: Indirect Diffuse GI Only (DDGI)",
+            "16: Indirect Diffuse GI Only (DDGI / ReSTIR GI)",
             "17: DDGI Probe Grid Spheres",
             "18: Path Tracer (1-SPP Raw)",
             "19: Path Tracer (Progressive Ground Truth)"
@@ -1150,19 +1150,88 @@ namespace Nox
                     ImGui::Unindent();
                 }
 
-                // Dynamic Diffuse Global Illumination (DDGI Probes)
-                bool ddgiEnabled = m_Renderer->isDDGIEnabled();
-                if (ImGui::Checkbox("Dynamic Diffuse Global Illumination (DDGI Probes)", &ddgiEnabled))
+                // Diffuse Global Illumination (GI)
+                static const char* giModeNames[] = {
+                    "Off (IBL Ambient)",
+                    "DDGI (Probe Volumes)",
+                    "ReSTIR GI (Screen-Space Resampling via RTXDI)"
+                };
+                int currentGIMode = static_cast<int>(m_Renderer->getDiffuseGIMode());
+                if (ImGui::Combo("Diffuse Global Illumination", &currentGIMode, giModeNames, IM_ARRAYSIZE(giModeNames)))
                 {
-                    m_Renderer->setDDGIEnabled(ddgiEnabled);
+                    m_Renderer->setDiffuseGIMode(static_cast<uint32_t>(currentGIMode));
+                    if (currentGIMode == 1)
+                    {
+                        m_Renderer->setDDGIEnabled(true);
+                    }
+                    else
+                    {
+                        m_Renderer->setDDGIEnabled(false);
+                    }
                 }
                 if (ImGui::IsItemHovered())
                 {
-                    ImGui::SetTooltip("Multi-bounce indirect diffuse global illumination using irradiance & distance probe volumes.\nVisualize with Debug Mode 16 (GI Only) or Debug Mode 17 (Probe Grid Spheres).");
+                    ImGui::SetTooltip("Select indirect diffuse lighting technique:\n- Off: Constant or Cubemap IBL\n- DDGI: Irradiance probe volume grid\n- ReSTIR GI: RTXDI Spatiotemporal reservoir resampling (screen-space indirect diffuse)");
                 }
 
                 uint32_t activeDebugMode = m_Renderer->getDebugMode();
-                if (ddgiEnabled || activeDebugMode == 16 || activeDebugMode == 17)
+
+                // ReSTIR GI Settings (RTXDI)
+                if (m_Renderer->getDiffuseGIMode() == 2 || (activeDebugMode == 16 && m_Renderer->getDiffuseGIMode() != 1))
+                {
+                    ImGui::Indent();
+                    ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f), "ReSTIR GI (RTXDI SDK Active)");
+
+                    float& spatialRadius = m_Renderer->getReSTIRGISpatialRadius();
+                    ImGui::SliderFloat("Spatial Radius (px)", &spatialRadius, 4.0f, 64.0f, "%.1f");
+
+                    uint32_t& numSamples = m_Renderer->getReSTIRGINumSpatialSamples();
+                    int samplesInt = static_cast<int>(numSamples);
+                    if (ImGui::SliderInt("Spatial Samples", &samplesInt, 1, 8))
+                    {
+                        numSamples = static_cast<uint32_t>(samplesInt);
+                    }
+
+                    uint32_t& maxM = m_Renderer->getReSTIRGIMaxHistoryLength();
+                    int maxMInt = static_cast<int>(maxM);
+                    if (ImGui::SliderInt("Max History Length (M)", &maxMInt, 1, 32))
+                    {
+                        maxM = static_cast<uint32_t>(maxMInt);
+                    }
+
+                    float& normalThresh = m_Renderer->getReSTIRGINormalThreshold();
+                    ImGui::SliderFloat("Normal Threshold", &normalThresh, 0.1f, 0.99f, "%.2f");
+
+                    float& depthThresh = m_Renderer->getReSTIRGIDepthThreshold();
+                    ImGui::SliderFloat("Depth Threshold", &depthThresh, 0.01f, 0.5f, "%.2f");
+
+                    bool& boiling = m_Renderer->getReSTIRGIEnableBoilingFilter();
+                    ImGui::Checkbox("Enable Boiling Filter", &boiling);
+                    if (boiling)
+                    {
+                        float& strength = m_Renderer->getReSTIRGIBoilingFilterStrength();
+                        ImGui::SliderFloat("Boiling Filter Strength", &strength, 0.0f, 1.0f, "%.2f");
+                    }
+
+                    static const char* giDenoiserNames[] = {
+                        "Off (Raw 1-SPP)",
+                        "NRD REBLUR Diffuse (Variance Guided)",
+                        "NRD RELAX Diffuse (A-Trous Wavelet)"
+                    };
+                    int currentGIDenoiser = static_cast<int>(m_Renderer->getNRDGIDenoiser());
+                    if (ImGui::Combo("GI Denoiser", &currentGIDenoiser, giDenoiserNames, IM_ARRAYSIZE(giDenoiserNames)))
+                    {
+                        m_Renderer->setNRDGIDenoiser(static_cast<NRI::NRDDiffuseDenoiser>(currentGIDenoiser));
+                    }
+                    if (ImGui::IsItemHovered())
+                    {
+                        ImGui::SetTooltip("Denoises the raw 1-SPP ReSTIR GI diffuse output using NRD (same suite already denoising reflections/shadows).\nStabilizes the swimming/rotating artifacts inherent to raw ReSTIR GI under camera motion.");
+                    }
+                    ImGui::Unindent();
+                }
+
+                // DDGI Settings
+                if (m_Renderer->getDiffuseGIMode() == 1 || activeDebugMode == 17)
                 {
                     ImGui::Indent();
                     uint32_t totalProbes = m_Renderer->getDDGIProbeCountTotal();

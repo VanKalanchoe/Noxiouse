@@ -242,6 +242,21 @@ namespace Nox
         Ref<Texture2D> getDDGIIrradianceAtlas() const { return m_ddgiIrradiance[m_ddgiHistoryIndex]; }
         Ref<Texture2D> getDDGIDistanceAtlas() const { return m_ddgiDistance[m_ddgiHistoryIndex]; }
 
+        // ReSTIR GI (Screen-Space Diffuse Indirect Resampling via RTXDI)
+        uint32_t getDiffuseGIMode() const { return m_diffuseGIMode; }
+        void setDiffuseGIMode(uint32_t mode) { m_diffuseGIMode = mode; }
+        Ref<Texture2D> getReSTIRGIDiffuse() const { return m_restirGIRawDiffuse; }
+        float& getReSTIRGISpatialRadius() { return m_restirGISpatialRadius; }
+        uint32_t& getReSTIRGINumSpatialSamples() { return m_restirGINumSpatialSamples; }
+        uint32_t& getReSTIRGIMaxHistoryLength() { return m_restirGIMaxHistoryLength; }
+        float& getReSTIRGINormalThreshold() { return m_restirGINormalThreshold; }
+        float& getReSTIRGIDepthThreshold() { return m_restirGIDepthThreshold; }
+        bool& getReSTIRGIEnableBoilingFilter() { return m_restirGIEnableBoilingFilter; }
+        float& getReSTIRGIBoilingFilterStrength() { return m_restirGIBoilingFilterStrength; }
+        NRI::NRDDiffuseDenoiser getNRDGIDenoiser() const { return m_nrdGIDenoiser; }
+        void setNRDGIDenoiser(NRI::NRDDiffuseDenoiser mode) { m_nrdGIDenoiser = mode; }
+        Ref<Texture2D> getDenoisedReSTIRGIDiffuse() const { return m_denoisedReSTIRGIDiffuse; }
+
         void setCameraJitterEnabled(bool enabled) { m_cameraJitterEnabled = enabled; }
         bool getCameraJitterEnabled() const { return m_cameraJitterEnabled; }
         glm::vec2 getCurrentJitter() const { return m_currentJitter; }
@@ -328,6 +343,10 @@ namespace Nox
         // DDGI (Dynamic Diffuse Global Illumination)
         void createDDGIResources();
         void createDDGIPipelines(bool forceCompile = false);
+
+        // ReSTIR GI (Screen-Space Diffuse Path Resampling via RTXDI)
+        void createReSTIRGIResources();
+        void createReSTIRGIPipelines(bool forceCompile = false);
 
         void createTextureImage();
         void initGeometryBuffers();
@@ -424,6 +443,13 @@ namespace Nox
         Ref<Texture2D> m_gbufferNormal; // R16G16B16A16_SFLOAT: RGB = World Normal
         Ref<Texture2D> m_gbufferMaterial; // RGBA8_UNORM: R = Roughness, G = Metallic, B = Workflow
         Ref<Texture2D> m_gbufferEmission; // R16G16B16A16_SFLOAT: RGB = Emissive
+        // Previous-frame snapshots (copied from m_depthResource/m_gbufferNormal at the end of each
+        // frame) used ONLY by ReSTIR GI's temporal reprojection validity check -- without a real
+        // previous-frame buffer, that check was comparing the CURRENT frame's G-buffer at the
+        // reprojected screen position against the current pixel, which is comparing two unrelated
+        // surfaces during camera motion (causing bright/incorrect history reuse until motion stops).
+        Ref<Texture2D> m_prevDepthResource;
+        Ref<Texture2D> m_prevGbufferNormal;
         Ref<Texture2D> m_gbufferVelocity; // R16G16_SFLOAT: Screen-space motion vectors
 
         // NRD
@@ -455,7 +481,32 @@ namespace Nox
         float m_ddgiNormalBias = 0.2f;
         float m_ddgiDebugSphereRadius = 0.15f;
         bool m_ddgiDebugXRay = true;
-        
+
+        // ReSTIR GI (Screen-Space Diffuse Path Resampling via RTXDI) -- proper 3-pass pipeline
+        // (Initial candidate -> Temporal -> Spatial), matching RTXPT's actual architecture instead
+        // of the fused SpatioTemporal SDK function (see PushConstantReSTIRGITemporal comment).
+        std::unique_ptr<NRI::Pipeline> m_restirGIInitialPipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_restirGITemporalPipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_restirGISpatialPipeline = nullptr;
+        Ref<Texture2D> m_restirGIRawDiffuse;
+        std::unique_ptr<NRI::Buffer> m_restirGIReservoirBuffers[2];
+        std::unique_ptr<NRI::Buffer> m_restirGINeighborOffsetsBuffer;
+        // m_restirGIReservoirBuffers[0] is always this-frame scratch (Initial writes it, Temporal
+        // overwrites it in place); m_restirGIReservoirBuffers[1] is always the persistent
+        // cross-frame result (Temporal reads it as history, Spatial writes the final result into
+        // it). Fixed roles, not ping-ponged per frame -- see the runReSTIRGI dispatch code.
+
+        uint32_t m_diffuseGIMode = 0; // 0 = Off (IBL), 1 = DDGI, 2 = ReSTIR GI
+        float m_restirGISpatialRadius = 32.0f;
+        uint32_t m_restirGINumSpatialSamples = 4;
+        uint32_t m_restirGIMaxHistoryLength = 20;
+        float m_restirGINormalThreshold = 0.6f;
+        float m_restirGIDepthThreshold = 0.1f;
+        bool m_restirGIEnableBoilingFilter = true;
+        float m_restirGIBoilingFilterStrength = 0.2f;
+        Ref<Texture2D> m_denoisedReSTIRGIDiffuse;
+        NRI::NRDDiffuseDenoiser m_nrdGIDenoiser = NRI::NRDDiffuseDenoiser::Off;
+
         // Path Tracer Accumulation Ping-Pong
         Ref<Texture2D> m_pathTracerAccum[2];
         uint32_t m_pathTracerSampleCount = 0;

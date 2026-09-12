@@ -154,6 +154,23 @@ if not exist "%DEST_DIR%" (
         echo NRD already installed in "%NRD_DIR%", skipping.
     )
 
+    rem RTXDI (NVIDIA RTX Direct Illumination SDK - Library Only)
+    rem Note: RTXDI-Library repository does not have git tags/releases; main branch HEAD is the official v3.1.0 library SDK.
+    set "RTXDI_DIR=%VENDORS_DIR%\RTXDI"
+
+    if not exist "%RTXDI_DIR%" (
+        echo Setting up NVIDIA RTXDI Library [v3.1.0 SDK]...
+        git clone --depth 1 https://github.com/NVIDIA-RTX/RTXDI-Library.git "%RTXDI_DIR%"
+        if errorlevel 1 (
+            echo Failed to clone RTXDI Library.
+            pause
+            exit /b 1
+        )
+        echo RTXDI Library installed successfully in "%RTXDI_DIR%".
+    ) else (
+        echo RTXDI already installed in "%RTXDI_DIR%", skipping.
+    )
+
 :: FileWatch
 set FILEWATCH_DIR=../NoxCore/vendors/filewatch
 
@@ -164,6 +181,7 @@ if not exist "%FILEWATCH_DIR%" (
 
     if errorlevel 1 (
         echo Failed to clone FileWatch.
+        pause
         exit /b 1
     )
 

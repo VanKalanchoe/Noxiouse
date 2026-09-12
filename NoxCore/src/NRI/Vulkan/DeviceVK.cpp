@@ -1306,6 +1306,8 @@ namespace NRI
         static constexpr ::nrd::Identifier SIGMA_DENOISER = 0;
         static constexpr ::nrd::Identifier REBLUR_SPECULAR_DENOISER = 1;
         static constexpr ::nrd::Identifier RELAX_SPECULAR_DENOISER = 2;
+        static constexpr ::nrd::Identifier REBLUR_DIFFUSE_DENOISER = 3;
+        static constexpr ::nrd::Identifier RELAX_DIFFUSE_DENOISER = 4;
         uint32_t currentEngineFrameIndex = 0xFFFFFFFF;
     };
 
@@ -1372,8 +1374,8 @@ namespace NRI
         integrationDesc.queuedFrameNum = 3;
         integrationDesc.autoWaitForIdle = true;
 
-        // 2. Denoiser Instance Descs: SIGMA_SHADOW, REBLUR_SPECULAR, RELAX_SPECULAR
-        ::nrd::DenoiserDesc denoiserDescs[3]{};
+        // 2. Denoiser Instance Descs: SIGMA_SHADOW, REBLUR_SPECULAR, RELAX_SPECULAR, REBLUR_DIFFUSE, RELAX_DIFFUSE
+        ::nrd::DenoiserDesc denoiserDescs[5]{};
         denoiserDescs[0].identifier = NRDContext::SIGMA_DENOISER;
         denoiserDescs[0].denoiser = ::nrd::Denoiser::SIGMA_SHADOW;
 
@@ -1383,9 +1385,15 @@ namespace NRI
         denoiserDescs[2].identifier = NRDContext::RELAX_SPECULAR_DENOISER;
         denoiserDescs[2].denoiser = ::nrd::Denoiser::RELAX_SPECULAR;
 
+        denoiserDescs[3].identifier = NRDContext::REBLUR_DIFFUSE_DENOISER;
+        denoiserDescs[3].denoiser = ::nrd::Denoiser::REBLUR_DIFFUSE;
+
+        denoiserDescs[4].identifier = NRDContext::RELAX_DIFFUSE_DENOISER;
+        denoiserDescs[4].denoiser = ::nrd::Denoiser::RELAX_DIFFUSE;
+
         ::nrd::InstanceCreationDesc instanceDesc{};
         instanceDesc.denoisers = denoiserDescs;
-        instanceDesc.denoisersNum = 3;
+        instanceDesc.denoisersNum = 5;
 
         // 3. Native Vulkan Device Creation Desc
         ::nri::QueueFamilyVKDesc queueFamily{};
@@ -1409,7 +1417,7 @@ namespace NRI
             return false;
         }
 
-        NOX_CORE_INFO("[NRD] Successfully initialized NRD Denoiser Suite: SIGMA, REBLUR, RELAX ({}x{})", width, height);
+        NOX_CORE_INFO("[NRD] Successfully initialized NRD Denoiser Suite: SIGMA, REBLUR/RELAX Specular, REBLUR/RELAX Diffuse ({}x{})", width, height);
         m_nrdContext->initialized = true;
         return true;
     }
@@ -1549,6 +1557,83 @@ namespace NRI
 
         // OUT_SPEC_RADIANCE_HITDIST: denoised specular reflection
         bindVKTexture(snapshot, ::nrd::ResourceType::OUT_SPEC_RADIANCE_HITDIST, params.outDenoisedSpecular, ::nri::AccessBits::SHADER_RESOURCE_STORAGE, ::nri::Layout::GENERAL, commonStages);
+
+        // 4. Dispatch NRD DenoiseVK
+        ::nri::CommandBufferVKDesc cmdDesc{};
+        cmdDesc.vkCommandBuffer = static_cast<VKHandle>(vkCmd);
+        cmdDesc.queueType = ::nri::QueueType::GRAPHICS;
+
+        m_nrdContext->integration.DenoiseVK(&activeDenoiserId, 1, cmdDesc, snapshot);
+
+        return true;
+    }
+
+    bool DeviceVK::evaluateNRDDiffuse(const NRDDiffuseParams& params, NRDDiffuseDenoiser denoiser)
+    {
+        if (!m_nrdContext || !m_nrdContext->initialized)
+            return false;
+
+        if (denoiser == NRDDiffuseDenoiser::Off)
+            return false;
+
+        if (!params.commandBuffer || !params.inDiffuseRadianceHitDist || !params.outDenoisedDiffuse)
+            return false;
+
+        auto* cmdBufferVK = static_cast<CommandBufferVK*>(params.commandBuffer);
+        VkCommandBuffer vkCmd = static_cast<VkCommandBuffer>(*cmdBufferVK->getActiveNativeBuffer());
+
+        // 1. Advance frame & set common settings (guaranteed once per frame)
+        updateNRDCommonSettings(params.frameIndex, params.resetHistory,
+            params.proj, params.prevProj, params.view, params.prevView, params.motionVectorScale);
+
+        // 2. Set Denoiser Settings
+        ::nrd::Identifier activeDenoiserId = NRDContext::REBLUR_DIFFUSE_DENOISER;
+        if (denoiser == NRDDiffuseDenoiser::REBLUR)
+        {
+            activeDenoiserId = NRDContext::REBLUR_DIFFUSE_DENOISER;
+            ::nrd::ReblurSettings reblurSettings{};
+            reblurSettings.planeDistanceSensitivity = 0.02f;
+            m_nrdContext->integration.SetDenoiserSettings(activeDenoiserId, &reblurSettings);
+        }
+        else if (denoiser == NRDDiffuseDenoiser::RELAX)
+        {
+            activeDenoiserId = NRDContext::RELAX_DIFFUSE_DENOISER;
+            ::nrd::RelaxSettings relaxSettings{};
+            m_nrdContext->integration.SetDenoiserSettings(activeDenoiserId, &relaxSettings);
+        }
+
+        // 3. Populate ResourceSnapshot with Vulkan Images
+        ::nrd::ResourceSnapshot snapshot{};
+        snapshot.restoreInitialState = true;
+
+        auto bindVKTexture = [](::nrd::ResourceSnapshot& snap, ::nrd::ResourceType slot, Texture* tex, ::nri::AccessBits access, ::nri::Layout layout, ::nri::StageBits stages) {
+            if (!tex) return;
+            auto* texVK = static_cast<TextureVK*>(tex);
+            ::nrd::Resource res{};
+            res.vk.image = (VKNonDispatchableHandle)(uintptr_t)static_cast<VkImage>(*texVK->getNativeImage());
+            res.vk.format = static_cast<VKEnum>(static_cast<VkFormat>(texVK->getFormat()));
+            res.state.access = access;
+            res.state.layout = layout;
+            res.state.stages = stages;
+            snap.SetResource(slot, res);
+        };
+
+        constexpr auto commonStages = ::nri::StageBits::COMPUTE_SHADER | ::nri::StageBits::FRAGMENT_SHADER | ::nri::StageBits::COLOR_ATTACHMENT;
+
+        // IN_DIFF_RADIANCE_HITDIST: raw 1-SPP diffuse GI radiance + normalized hit distance (RGBA16F)
+        bindVKTexture(snapshot, ::nrd::ResourceType::IN_DIFF_RADIANCE_HITDIST, params.inDiffuseRadianceHitDist, ::nri::AccessBits::SHADER_RESOURCE_STORAGE, ::nri::Layout::GENERAL, commonStages);
+
+        // IN_MV: motion vectors (RG16F)
+        bindVKTexture(snapshot, ::nrd::ResourceType::IN_MV, params.inMotionVectors, ::nri::AccessBits::SHADER_RESOURCE_STORAGE, ::nri::Layout::GENERAL, commonStages);
+
+        // IN_NORMAL_ROUGHNESS: normals (RGB) and roughness (A)
+        bindVKTexture(snapshot, ::nrd::ResourceType::IN_NORMAL_ROUGHNESS, params.inNormalRoughness, ::nri::AccessBits::SHADER_RESOURCE_STORAGE, ::nri::Layout::GENERAL, commonStages);
+
+        // IN_VIEWZ: linear view depth (R16F / R32F)
+        bindVKTexture(snapshot, ::nrd::ResourceType::IN_VIEWZ, params.inViewZ, ::nri::AccessBits::SHADER_RESOURCE_STORAGE, ::nri::Layout::GENERAL, commonStages);
+
+        // OUT_DIFF_RADIANCE_HITDIST: denoised diffuse GI
+        bindVKTexture(snapshot, ::nrd::ResourceType::OUT_DIFF_RADIANCE_HITDIST, params.outDenoisedDiffuse, ::nri::AccessBits::SHADER_RESOURCE_STORAGE, ::nri::Layout::GENERAL, commonStages);
 
         // 4. Dispatch NRD DenoiseVK
         ::nri::CommandBufferVKDesc cmdDesc{};

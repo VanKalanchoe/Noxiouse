@@ -177,6 +177,7 @@
         UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
         int2 pixelCoord = int2(input.pos.xy);
 
+
         // =========================================================================
             // Mode 12: Whole-Screen Depth Buffer (Hi-Z / Shadow Map View)
             // =========================================================================
@@ -215,6 +216,39 @@
                     // Red = horizontal motion, Green = vertical motion
                     float3 visualVel = float3(abs(vel.x) * 100.0, abs(vel.y) * 100.0, 0.0);
                     return float4(visualVel, 1.0);
+                }
+
+            // Mode 16: Diffuse GI (ReSTIR GI Diffuse or DDGI Probes)
+                if (pushConstant.debugMode == 16)
+                {
+                    if (pushConstant.diffuseGIMode == 2 && pushConstant.restirGIDiffuseTextureIndex != 0xFFFFFFFF)
+                    {
+                        Texture2D restirTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.restirGIDiffuseTextureIndex, 0));
+                        float3 restirDiffuse = restirTex.Load(int3(pixelCoord, 0)).rgb;
+                        return float4(restirDiffuse, 1.0);
+                    }
+                    else if (ubo->ddgiIrradianceTextureIndex != 0xFFFFFFFF && ubo->ddgiDistanceTextureIndex != 0xFFFFFFFF)
+                    {
+                        Texture2D normalTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.gbufferNormalIndex, 0));
+                        float4 normalSample = normalTex.Load(int3(pixelCoord, 0));
+                        float lenSqN = dot(normalSample.rgb, normalSample.rgb);
+                        float3 n = lenSqN > 1e-6 ? normalSample.rgb * rsqrt(lenSqN) : float3(0.0, 1.0, 0.0);
+
+                        Texture2D ddgiIrrTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->ddgiIrradianceTextureIndex, 0));
+                        Texture2D ddgiDistTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->ddgiDistanceTextureIndex, 0));
+                        SamplerState ddgiSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
+
+                        float2 uv = (float2(pixelCoord) + 0.5) / pushConstant.viewportSize;
+                        float2 ndc_xy = float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+                        Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
+                        float depthVal = depthTex.Load(int3(pixelCoord, 0)).r;
+                        float4 ndc = float4(ndc_xy, depthVal, 1.0);
+                        float4 worldPosH = mul(ubo->invViewProj, ndc);
+                        float3 worldPos = worldPosH.xyz / worldPosH.w;
+
+                        float3 ddgiIrradiance = sample_ddgi_diffuse(ubo, worldPos, n, ddgiIrrTex, ddgiDistTex, ddgiSampler);
+                        return float4(ddgiIrradiance, 1.0);
+                    }
                 }
 
             // 1. Check Visibility Buffer and Depth to distinguish background from geometry
@@ -419,8 +453,20 @@
         float3 ambientSpecular = ibl.specular;
 
         float specularOcclusion = 1.0;
-        // Dynamic Diffuse Global Illumination (DDGI Probes)
-        if ((ubo->enableDDGI != 0 || pushConstant.debugMode == 16) && ubo->ddgiIrradianceTextureIndex != 0xFFFFFFFF && ubo->ddgiDistanceTextureIndex != 0xFFFFFFFF)
+        // Diffuse Global Illumination: ReSTIR GI (Screen-Space Resampling) or DDGI Probes
+        if ((pushConstant.diffuseGIMode == 2 || pushConstant.debugMode == 16) && pushConstant.restirGIDiffuseTextureIndex != 0xFFFFFFFF)
+        {
+            Texture2D restirTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.restirGIDiffuseTextureIndex, 0));
+            float3 restirDiffuse = restirTex.Load(int3(pixelCoord, 0)).rgb;
+            ambientDiffuse = restirDiffuse * diffuseColor;
+
+            // Prevent outdoor skybox specular from leaking onto dark indoor surfaces
+            float restirLuma = dot(restirDiffuse, float3(0.2126, 0.7152, 0.0722));
+            float skyLuma = max(ubo->scaleIBLAmbient, 0.01);
+            specularOcclusion = saturate(restirLuma / skyLuma + 0.15);
+            ambientSpecular *= specularOcclusion;
+        }
+        else if ((pushConstant.diffuseGIMode == 1 || ubo->enableDDGI != 0) && ubo->ddgiIrradianceTextureIndex != 0xFFFFFFFF && ubo->ddgiDistanceTextureIndex != 0xFFFFFFFF)
         {
             Texture2D ddgiIrrTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->ddgiIrradianceTextureIndex, 0));
             Texture2D ddgiDistTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->ddgiDistanceTextureIndex, 0));

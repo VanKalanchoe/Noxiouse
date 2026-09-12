@@ -43,12 +43,21 @@ namespace NRI
             })
         };
         
-        std::array<const char*, 4> searchPaths = 
+        std::array<const char*, 13> searchPaths = 
         {
             "../NoxCore/src/NoxCore/Renderer",
             "shaders",
             "../shaders",
-            "../../shaders"
+            "../../shaders",
+            "../NoxCore/vendors/RTXDI/Include",
+            "../../NoxCore/vendors/RTXDI/Include",
+            "../../../NoxCore/vendors/RTXDI/Include",
+            "../NoxCore/vendors/RTXDI/Include/Rtxdi",
+            "../../NoxCore/vendors/RTXDI/Include/Rtxdi",
+            "../../../NoxCore/vendors/RTXDI/Include/Rtxdi",
+            "../NoxCore/vendors/RTXDI/shaders",
+            "../../NoxCore/vendors/RTXDI/shaders",
+            "../../../NoxCore/vendors/RTXDI/shaders"
         };
         /*NOX_CORE_INFO("Slang current working directory: {}", std::filesystem::current_path().string());
         NOX_CORE_INFO("Slang search paths being checked:");

@@ -6,8 +6,10 @@
 #include <map>
 #include <set>
 #include <mutex>
+#include <unordered_map>
 
 #include "NoxCore/Utils/NOXWatcher.h"
+#include "NoxCore/Utils/Utils.h"
 
 namespace Nox
 {
@@ -54,6 +56,11 @@ namespace Nox
         
         AssetRegistry m_AssetRegistry;
         AssetMap m_LoadedAssets;
+
+        // Last content-hash seen for each asset's source file. Lets ReimportAsset tell a genuine
+        // on-disk edit apart from a spurious file-watcher event caused by our own cooker writing
+        // derived files (extracted textures, .nmesh/.hash/.nmat) into the same watched directory tree.
+        std::unordered_map<AssetHandle, XXH128_hash_t> m_LastKnownSourceHash;
 
         // todo: memory-only assets
     };

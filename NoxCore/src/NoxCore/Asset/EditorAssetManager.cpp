@@ -168,7 +168,20 @@ namespace Nox
             NOX_CORE_WARN("Skipping auto-reimport: source file no longer exists: {}", sourcePath.string());
             return;
         }
-        
+
+        // The file watcher can fire on this source file even though its content never actually
+        // changed -- e.g. our own cooker rewrites extracted embedded textures unconditionally on
+        // every recook, and that write is picked up by the same recursive watch. Verify against the
+        // last known content hash before doing anything destructive; a spurious event is a no-op.
+        XXH128_hash_t currentHash = Utility::calcul_hash_streaming(sourcePath.string());
+        auto knownHashIt = m_LastKnownSourceHash.find(handle);
+        if (knownHashIt != m_LastKnownSourceHash.end() && XXH128_isEqual(currentHash, knownHashIt->second))
+        {
+            NOX_CORE_INFO("Skipping auto-reimport, source content unchanged: {}", metadata.SourceFilePath.string());
+            return;
+        }
+        m_LastKnownSourceHash[handle] = currentHash;
+
         NOX_CORE_INFO("Auto-Reimporting asset from source: {}", metadata.SourceFilePath.string());
 
         // 1. Delete the old cooked cache (.nsmesh/.nmesh) so the Importer is forced to re-cook the GLTF
@@ -276,6 +289,7 @@ namespace Nox
             asset->Handle = handle;
             m_LoadedAssets[handle] = asset;
             m_AssetRegistry[handle] = metadata;
+            m_LastKnownSourceHash[handle] = Utility::calcul_hash_streaming((Project::GetActiveAssetDirectory() / metadata.SourceFilePath).string());
 
             if (metadata.Type == AssetType::Mesh ||
                 metadata.Type == AssetType::StaticMesh ||
@@ -459,6 +473,7 @@ namespace Nox
             asset->Handle = handle;
             m_LoadedAssets[handle] = asset;
             m_AssetRegistry[handle] = metadata;
+            m_LastKnownSourceHash[handle] = Utility::calcul_hash_streaming((Project::GetActiveAssetDirectory() / metadata.SourceFilePath).string());
 
             ScanAndRegisterNewAssets();
             SerializeAssetRegistry();
@@ -503,6 +518,13 @@ namespace Nox
                 NOX_CORE_ASSERT("EditorAssetManager::GetAsset - asset import failed")
             }
             m_LoadedAssets[handle] = asset;
+
+            if (asset && !metadata.SourceFilePath.empty())
+            {
+                auto sourcePath = Project::GetActiveAssetDirectory() / metadata.SourceFilePath;
+                if (std::filesystem::exists(sourcePath))
+                    m_LastKnownSourceHash[handle] = Utility::calcul_hash_streaming(sourcePath.string());
+            }
 
             if (asset && (metadata.Type == AssetType::Mesh ||
                           metadata.Type == AssetType::StaticMesh ||

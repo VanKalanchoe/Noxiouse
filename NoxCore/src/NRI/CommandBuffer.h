@@ -170,6 +170,9 @@ namespace NRI
         virtual void transitionTextureLayout(Texture& texture, TextureLayout oldLayout, TextureLayout newLayout) = 0;
         virtual void transitionSwapchainLayout(Swapchain& swapchain, uint32_t imageIndex, TextureLayout oldLayout, TextureLayout newLayout) = 0;
         virtual void resolveImage(Texture& srcTexture, Texture& dstTexture, uint32_t width, uint32_t height) = 0;
+        // Direct (non-MSAA) same-format image copy, e.g. snapshotting the current G-buffer into a
+        // "previous frame" texture for temporal reprojection validity checks.
+        virtual void copyTexture(Texture& srcTexture, Texture& dstTexture, uint32_t width, uint32_t height) = 0;
         
         virtual void buildAccelerationStructure(const AccelerationStructureBuildDesc& buildDesc, uint64_t scratchAddress, AccelerationStructure& dstAS) = 0;
         virtual void updateAccelerationStructure(const AccelerationStructureBuildDesc& buildDesc, uint64_t scratchAddress, AccelerationStructure& srcAS, AccelerationStructure& dstAS) = 0;
