@@ -2748,7 +2748,8 @@ namespace Nox
         // =========================================================================
         // 2.6. NRD DENOISING PASS (Denoises 1-SPP RT Shadow -> m_denoisedShadowMask)
         // =========================================================================
-        if (m_nrdShadowsEnabled && m_device->isNRDInitialized() && m_rawShadowMask && m_denoisedShadowMask && m_viewZ && m_nrdNormalRoughness)
+        if (m_nrdShadowsEnabled && (uniformData.enableRTShadows != 0) &&
+            m_device->isNRDInitialized() && m_rawShadowMask && m_denoisedShadowMask && m_viewZ && m_nrdNormalRoughness)
         {
             NRI::NRDShadowParams nrdParams{};
             nrdParams.inShadowData = m_rawShadowMask.get();
@@ -2835,7 +2836,7 @@ namespace Nox
         // =========================================================================
         // 2.7. NRD REFLECTIONS DENOISING PASS (Denoises 1-SPP Reflections via REBLUR / RELAX)
         // =========================================================================
-        if (m_nrdReflectionDenoiser != NRI::NRDReflectionDenoiser::Off &&
+        if (m_nrdReflectionDenoiser != NRI::NRDReflectionDenoiser::Off && (uniformData.enableRTReflections != 0) &&
             m_device->isNRDInitialized() &&
             m_rawReflection && m_denoisedReflection && m_viewZ && m_nrdNormalRoughness)
         {
@@ -2867,7 +2868,11 @@ namespace Nox
         // 2.8. DYNAMIC DIFFUSE GLOBAL ILLUMINATION (DDGI) PASSES
         // =========================================================================
         uint32_t totalDDGIProbes = m_ddgiProbeCountX * m_ddgiProbeCountY * m_ddgiProbeCountZ;
-        bool runDDGI = (m_ddgiEnabled || m_debugMode == 16 || m_debugMode == 17) &&
+        // DDGI ray-traces every probe against the scene TLAS (see DDGIRadiance.slang), so it has no
+        // meaning without ray tracing hardware access -- gate it on the master toggle too, or turning
+        // "Enable Hybrid Ray Tracing" off silently leaves it (and its cost) running.
+        bool runDDGI = m_rayTracingEnabled &&
+                       (m_ddgiEnabled || m_debugMode == 16 || m_debugMode == 17) &&
                        m_ddgiRadiancePipeline && m_ddgiBlendIrradiancePipeline && m_ddgiBlendDistancePipeline &&
                        m_ddgiRayData && m_ddgiIrradiance[0] && m_ddgiIrradiance[1] &&
                        m_ddgiDistance[0] && m_ddgiDistance[1] && (totalDDGIProbes > 0);
@@ -3032,7 +3037,11 @@ namespace Nox
         // =========================================================================
         // 2.9. RESTIR GI (SCREEN-SPACE DIFFUSE PATH RESAMPLING VIA RTXDI)
         // =========================================================================
-        bool runReSTIRGI = (m_diffuseGIMode == 2 || (m_debugMode == 16 && m_diffuseGIMode != 1)) &&
+        // ReSTIR GI ray-traces its initial candidate against the scene TLAS, so like DDGI it has no
+        // meaning without ray tracing hardware access -- gate it on the master toggle too, or turning
+        // "Enable Hybrid Ray Tracing" off silently leaves it (and its cost) running.
+        bool runReSTIRGI = m_rayTracingEnabled &&
+                           (m_diffuseGIMode == 2 || (m_debugMode == 16 && m_diffuseGIMode != 1)) &&
                            m_hasTLASBuild && m_sceneTLAS && (uniformData.tlasDeviceAddress != 0) &&
                            (uniformData.instanceLUTReference != 0) &&
                            m_restirGIInitialPipeline && m_restirGITemporalPipeline && m_restirGISpatialPipeline &&
@@ -4191,10 +4200,14 @@ namespace Nox
     void Renderer::updateSceneAccelerationStructure(uint32_t currentFrameIndex)
     {
         bool isPathTracing = m_pathTracingEnabled || (m_debugMode == 18 || m_debugMode == 19);
-        bool isReSTIRGI = (m_diffuseGIMode == 2 || (m_debugMode == 16 && m_diffuseGIMode != 1));
+        // DDGI and ReSTIR GI both ray-trace against this TLAS, so neither means anything without ray
+        // tracing hardware access -- require the master toggle here too, matching runDDGI/runReSTIRGI,
+        // so disabling "Enable Hybrid Ray Tracing" actually stops the TLAS rebuild cost as well.
+        bool isDDGI = m_rayTracingEnabled && (m_ddgiEnabled || m_debugMode == 16 || m_debugMode == 17);
+        bool isReSTIRGI = m_rayTracingEnabled && (m_diffuseGIMode == 2 || (m_debugMode == 16 && m_diffuseGIMode != 1));
         bool isHybridRT = m_rayTracingEnabled && (m_rayTracingShadows || m_rayTracingReflections);
 
-        if (!isPathTracing && !isReSTIRGI && !isHybridRT)
+        if (!isPathTracing && !isDDGI && !isReSTIRGI && !isHybridRT)
         {
             m_hasTLASBuild = false;
             uniformData.tlasDeviceAddress = 0;

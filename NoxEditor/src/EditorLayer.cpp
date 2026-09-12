@@ -1099,55 +1099,10 @@ namespace Nox
                     m_Renderer->setRayTracingShadows(rtShadows);
                 }
 
-                if (rtShadows)
-                {
-                    ImGui::Indent();
-                    bool nrdShadows = m_Renderer->getNRDShadowsEnabled();
-                    if (ImGui::Checkbox("NRD SIGMA Denoiser", &nrdShadows))
-                    {
-                        m_Renderer->setNRDShadowsEnabled(nrdShadows);
-                    }
-                    if (ImGui::IsItemHovered())
-                    {
-                        ImGui::SetTooltip("Uses NVIDIA Real-Time Denoisers (SIGMA) for penumbra filtering & contact hardening.\nRuns upstream pre-lighting on the shadow mask; fully compatible with DLSS-SR and DLSS-RR.\nUncheck to view raw 1-SPP shadows.");
-                    }
-                    ImGui::Unindent();
-                }
-
                 bool rtReflections = m_Renderer->getRayTracingReflections();
                 if (ImGui::Checkbox("Ray Tracing Reflections", &rtReflections))
                 {
                     m_Renderer->setRayTracingReflections(rtReflections);
-                }
-
-                if (rtReflections)
-                {
-                    ImGui::Indent();
-                    bool dlssRR = m_Renderer->isDLSSRayReconstructionEnabled();
-                    if (dlssRR)
-                    {
-                        ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f), "Denoiser: DLSS Ray Reconstruction (Active)");
-                        if (ImGui::IsItemHovered())
-                        {
-                            ImGui::SetTooltip("DLSS Ray Reconstruction is active and handles reflections downstream.\nSelect NRD REBLUR or RELAX below to switch to cross-vendor non-AI denoising (auto-disables DLSS-RR).");
-                        }
-                    }
-
-                    static const char* reflDenoiserNames[] = {
-                        "Off (Raw 1-SPP)",
-                        "NRD REBLUR (Variance Guided)",
-                        "NRD RELAX (A-Trous Wavelet)"
-                    };
-                    int currentReflDenoiser = static_cast<int>(m_Renderer->getNRDReflectionDenoiser());
-                    if (ImGui::Combo("Reflection Denoiser", &currentReflDenoiser, reflDenoiserNames, IM_ARRAYSIZE(reflDenoiserNames)))
-                    {
-                        m_Renderer->setNRDReflectionDenoiser(static_cast<NRI::NRDReflectionDenoiser>(currentReflDenoiser));
-                    }
-                    if (ImGui::IsItemHovered())
-                    {
-                        ImGui::SetTooltip("Cross-vendor non-AI denoisers for specular reflections.\nEnabling NRD REBLUR or RELAX automatically disables DLSS Ray Reconstruction to prevent double-filtering.");
-                    }
-                    ImGui::Unindent();
                 }
 
                 // Diffuse Global Illumination (GI)
@@ -1167,6 +1122,17 @@ namespace Nox
                     else
                     {
                         m_Renderer->setDDGIEnabled(false);
+                    }
+
+                    // "PBR Debug View" mode 16 ("Indirect Diffuse GI Only") is a second, independent
+                    // switch that also keeps ReSTIR GI's full pipeline running (see runReSTIRGI's
+                    // `m_debugMode == 16 && m_diffuseGIMode != 1` clause) even after this combo is
+                    // switched away from ReSTIR GI -- leaving it stuck on 16 silently keeps paying
+                    // for TLAS build + all three ReSTIR GI passes + NRD GI denoise every frame with
+                    // no visual indication why. Clear it whenever GI mode no longer needs it.
+                    if (currentGIMode != 2 && m_Renderer->getDebugMode() == 16)
+                    {
+                        m_Renderer->setDebugMode(0);
                     }
                 }
                 if (ImGui::IsItemHovered())
@@ -1212,21 +1178,7 @@ namespace Nox
                         float& strength = m_Renderer->getReSTIRGIBoilingFilterStrength();
                         ImGui::SliderFloat("Boiling Filter Strength", &strength, 0.0f, 1.0f, "%.2f");
                     }
-
-                    static const char* giDenoiserNames[] = {
-                        "Off (Raw 1-SPP)",
-                        "NRD REBLUR Diffuse (Variance Guided)",
-                        "NRD RELAX Diffuse (A-Trous Wavelet)"
-                    };
-                    int currentGIDenoiser = static_cast<int>(m_Renderer->getNRDGIDenoiser());
-                    if (ImGui::Combo("GI Denoiser", &currentGIDenoiser, giDenoiserNames, IM_ARRAYSIZE(giDenoiserNames)))
-                    {
-                        m_Renderer->setNRDGIDenoiser(static_cast<NRI::NRDDiffuseDenoiser>(currentGIDenoiser));
-                    }
-                    if (ImGui::IsItemHovered())
-                    {
-                        ImGui::SetTooltip("Denoises the raw 1-SPP ReSTIR GI diffuse output using NRD (same suite already denoising reflections/shadows).\nStabilizes the swimming/rotating artifacts inherent to raw ReSTIR GI under camera motion.");
-                    }
+                    ImGui::TextDisabled("(GI Denoiser moved to the Denoising section below)");
                     ImGui::Unindent();
                 }
 
@@ -1279,7 +1231,92 @@ namespace Nox
                 ImGui::Unindent();
             }
         }
-        
+
+        // =========================================================================
+        // DENOISING (NRD / DLSS) -- its own top-level section, independent of whichever tracer mode
+        // or GI technique is active above: a denoiser is a separate concern from what produced the
+        // signal it's cleaning up, not a sub-setting of "Ray Tracing". NOTE: right now NRD is only
+        // wired to Hybrid Ray Tracing's separate 1-SPP shadow/reflection/GI passes -- the Path Tracer
+        // instead relies on DLSS Ray Reconstruction or progressive accumulation, so these controls
+        // stay hidden while Path Tracing is active rather than implying they'd do something they
+        // currently don't.
+        // =========================================================================
+        ImGui::Separator();
+        ImGui::Text("Denoising");
+
+        bool showAnyDenoiserControl = false;
+        if (!m_Renderer->isPathTracingEnabled() && m_Renderer->getRayTracingEnabled())
+        {
+            if (m_Renderer->getRayTracingShadows())
+            {
+                showAnyDenoiserControl = true;
+                bool nrdShadows = m_Renderer->getNRDShadowsEnabled();
+                if (ImGui::Checkbox("NRD SIGMA Denoiser (Shadows)", &nrdShadows))
+                {
+                    m_Renderer->setNRDShadowsEnabled(nrdShadows);
+                }
+                if (ImGui::IsItemHovered())
+                {
+                    ImGui::SetTooltip("Uses NVIDIA Real-Time Denoisers (SIGMA) for penumbra filtering & contact hardening.\nRuns upstream pre-lighting on the shadow mask; fully compatible with DLSS-SR and DLSS-RR.\nUncheck to view raw 1-SPP shadows.");
+                }
+            }
+
+            if (m_Renderer->getRayTracingReflections())
+            {
+                showAnyDenoiserControl = true;
+                bool dlssRR = m_Renderer->isDLSSRayReconstructionEnabled();
+                if (dlssRR)
+                {
+                    ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f), "Reflections Denoiser: DLSS Ray Reconstruction (Active)");
+                    if (ImGui::IsItemHovered())
+                    {
+                        ImGui::SetTooltip("DLSS Ray Reconstruction is active and handles reflections downstream.\nSelect NRD REBLUR or RELAX below to switch to cross-vendor non-AI denoising (auto-disables DLSS-RR).");
+                    }
+                }
+
+                static const char* reflDenoiserNames[] = {
+                    "Off (Raw 1-SPP)",
+                    "NRD REBLUR (Variance Guided)",
+                    "NRD RELAX (A-Trous Wavelet)"
+                };
+                int currentReflDenoiser = static_cast<int>(m_Renderer->getNRDReflectionDenoiser());
+                if (ImGui::Combo("Reflection Denoiser", &currentReflDenoiser, reflDenoiserNames, IM_ARRAYSIZE(reflDenoiserNames)))
+                {
+                    m_Renderer->setNRDReflectionDenoiser(static_cast<NRI::NRDReflectionDenoiser>(currentReflDenoiser));
+                }
+                if (ImGui::IsItemHovered())
+                {
+                    ImGui::SetTooltip("Cross-vendor non-AI denoisers for specular reflections.\nEnabling NRD REBLUR or RELAX automatically disables DLSS Ray Reconstruction to prevent double-filtering.");
+                }
+            }
+
+            if (m_Renderer->getDiffuseGIMode() == 2 || (m_Renderer->getDebugMode() == 16 && m_Renderer->getDiffuseGIMode() != 1))
+            {
+                showAnyDenoiserControl = true;
+                static const char* giDenoiserNames[] = {
+                    "Off (Raw 1-SPP)",
+                    "NRD REBLUR Diffuse (Variance Guided)",
+                    "NRD RELAX Diffuse (A-Trous Wavelet)"
+                };
+                int currentGIDenoiser = static_cast<int>(m_Renderer->getNRDGIDenoiser());
+                if (ImGui::Combo("GI Denoiser", &currentGIDenoiser, giDenoiserNames, IM_ARRAYSIZE(giDenoiserNames)))
+                {
+                    m_Renderer->setNRDGIDenoiser(static_cast<NRI::NRDDiffuseDenoiser>(currentGIDenoiser));
+                }
+                if (ImGui::IsItemHovered())
+                {
+                    ImGui::SetTooltip("Denoises the raw 1-SPP ReSTIR GI diffuse output using NRD (same suite already denoising reflections/shadows).\nStabilizes the swimming/rotating artifacts inherent to raw ReSTIR GI under camera motion.");
+                }
+            }
+        }
+
+        if (!showAnyDenoiserControl)
+        {
+            ImGui::TextDisabled(m_Renderer->isPathTracingEnabled()
+                ? "Path Tracer denoises via DLSS Ray Reconstruction / progressive accumulation instead."
+                : "Enable Ray Tracing Shadows, Reflections, or ReSTIR GI above to configure their denoisers.");
+        }
+
         ImGui::Separator();
         ImGui::Checkbox("Show physics collider", &m_ShowPhysicsColliders);
         ImGui::Image(m_Font->GetAtlasTexture()->getImTextureID(), {512, 512}, ImVec2(0, 1), ImVec2(1, 0));
