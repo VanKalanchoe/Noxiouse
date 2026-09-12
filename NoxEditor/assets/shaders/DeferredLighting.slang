@@ -225,6 +225,10 @@
                     {
                         Texture2D restirTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.restirGIDiffuseTextureIndex, 0));
                         float3 restirDiffuse = restirTex.Load(int3(pixelCoord, 0)).rgb;
+                        if (pushConstant.restirGIDenoiserMode == 1) // NRD REBLUR outputs in YCoCg
+                        {
+                            restirDiffuse = YCoCgToLinear(restirDiffuse);
+                        }
                         return float4(restirDiffuse, 1.0);
                     }
                     else if (ubo->ddgiIrradianceTextureIndex != 0xFFFFFFFF && ubo->ddgiDistanceTextureIndex != 0xFFFFFFFF)
@@ -458,6 +462,10 @@
         {
             Texture2D restirTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.restirGIDiffuseTextureIndex, 0));
             float3 restirDiffuse = restirTex.Load(int3(pixelCoord, 0)).rgb;
+            if (pushConstant.restirGIDenoiserMode == 1) // NRD REBLUR outputs in YCoCg
+            {
+                restirDiffuse = YCoCgToLinear(restirDiffuse);
+            }
             ambientDiffuse = restirDiffuse * diffuseColor;
 
             // Prevent outdoor skybox specular from leaking onto dark indoor surfaces

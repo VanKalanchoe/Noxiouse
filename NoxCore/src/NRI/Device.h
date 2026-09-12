@@ -176,6 +176,18 @@ namespace NRI
         
         // NRD (NVIDIA Real-Time Denoisers)
         virtual bool initNRD(uint32_t width, uint32_t height) { return false; }
+        // NRD's integration layer requires SetCommonSettings()/NewFrame() to be called exactly once
+        // every real frame, with frameIndex incrementing by exactly 1 each time, or its internal frame
+        // counter desyncs and the NEXT SetCommonSettings() call hits an assert ("'frameIndex' must be
+        // incremented by 1 on each frame"). Call this unconditionally once per frame whenever
+        // isNRDInitialized() is true, regardless of whether any specific denoiser (shadows/reflections
+        // /GI) actually has work to do this frame -- evaluateNRDShadows/Reflections/Diffuse each call
+        // the same underlying tick internally too, but only when THEY run, which is no longer every
+        // frame now that they're gated on their feature being active.
+        virtual bool tickNRD(uint32_t frameIndex, bool resetHistory,
+            const glm::mat4& view, const glm::mat4& proj,
+            const glm::mat4& prevView, const glm::mat4& prevProj,
+            const glm::vec2& motionVectorScale = glm::vec2(1.0f, 1.0f)) { return false; }
         virtual bool evaluateNRDShadows(const struct NRDShadowParams& params) { return false; }
         virtual bool evaluateNRDReflections(const struct NRDReflectionParams& params, NRDReflectionDenoiser denoiser) { return false; }
         virtual bool evaluateNRDDiffuse(const struct NRDDiffuseParams& params, NRDDiffuseDenoiser denoiser) { return false; }

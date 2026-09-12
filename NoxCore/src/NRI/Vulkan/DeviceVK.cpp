@@ -1349,6 +1349,18 @@ namespace NRI
         }
     }
 
+    bool DeviceVK::tickNRD(uint32_t frameIndex, bool resetHistory,
+        const glm::mat4& view, const glm::mat4& proj,
+        const glm::mat4& prevView, const glm::mat4& prevProj,
+        const glm::vec2& motionVectorScale)
+    {
+        if (!m_nrdContext || !m_nrdContext->initialized)
+            return false;
+
+        updateNRDCommonSettings(frameIndex, resetHistory, proj, prevProj, view, prevView, motionVectorScale);
+        return true;
+    }
+
     bool DeviceVK::initNRD(uint32_t width, uint32_t height)
     {
         if (width == 0 || height == 0)

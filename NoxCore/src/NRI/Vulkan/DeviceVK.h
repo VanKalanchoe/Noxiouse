@@ -54,6 +54,10 @@ namespace NRI
         
         // NRD
         bool initNRD(uint32_t width, uint32_t height) override;
+        bool tickNRD(uint32_t frameIndex, bool resetHistory,
+            const glm::mat4& view, const glm::mat4& proj,
+            const glm::mat4& prevView, const glm::mat4& prevProj,
+            const glm::vec2& motionVectorScale = glm::vec2(1.0f, 1.0f)) override;
         bool evaluateNRDShadows(const NRDShadowParams& params) override;
         bool evaluateNRDReflections(const NRDReflectionParams& params, NRDReflectionDenoiser denoiser) override;
         bool evaluateNRDDiffuse(const NRDDiffuseParams& params, NRDDiffuseDenoiser denoiser) override;

@@ -310,10 +310,61 @@ namespace Nox
         cpuData.Height = dds.GetHeight();
         cpuData.MipLevels = dds.GetMipCount();
         
-        if (dds.GetFormat() == tinyddsloader::DDSFile::DXGIFormat::BC7_UNorm)
+        switch (dds.GetFormat())
+        {
+        case tinyddsloader::DDSFile::DXGIFormat::BC1_Typeless:
+        case tinyddsloader::DDSFile::DXGIFormat::BC1_UNorm:
+            cpuData.Format = NRI::ImageFormat::BC1_UNorm;
+            break;
+        case tinyddsloader::DDSFile::DXGIFormat::BC1_UNorm_SRGB:
+            cpuData.Format = NRI::ImageFormat::BC1_UNorm_SRGB;
+            break;
+        case tinyddsloader::DDSFile::DXGIFormat::BC2_Typeless:
+        case tinyddsloader::DDSFile::DXGIFormat::BC2_UNorm:
+            cpuData.Format = NRI::ImageFormat::BC2_UNorm;
+            break;
+        case tinyddsloader::DDSFile::DXGIFormat::BC2_UNorm_SRGB:
+            cpuData.Format = NRI::ImageFormat::BC2_UNorm_SRGB;
+            break;
+        case tinyddsloader::DDSFile::DXGIFormat::BC3_Typeless:
+        case tinyddsloader::DDSFile::DXGIFormat::BC3_UNorm:
+            cpuData.Format = NRI::ImageFormat::BC3_UNorm;
+            break;
+        case tinyddsloader::DDSFile::DXGIFormat::BC3_UNorm_SRGB:
+            cpuData.Format = NRI::ImageFormat::BC3_UNorm_SRGB;
+            break;
+        case tinyddsloader::DDSFile::DXGIFormat::BC4_Typeless:
+        case tinyddsloader::DDSFile::DXGIFormat::BC4_UNorm:
+            cpuData.Format = NRI::ImageFormat::BC4_UNorm;
+            break;
+        case tinyddsloader::DDSFile::DXGIFormat::BC4_SNorm:
+            cpuData.Format = NRI::ImageFormat::BC4_SNorm;
+            break;
+        case tinyddsloader::DDSFile::DXGIFormat::BC5_Typeless:
+        case tinyddsloader::DDSFile::DXGIFormat::BC5_UNorm:
+            cpuData.Format = NRI::ImageFormat::BC5_UNorm;
+            break;
+        case tinyddsloader::DDSFile::DXGIFormat::BC5_SNorm:
+            cpuData.Format = NRI::ImageFormat::BC5_SNorm;
+            break;
+        case tinyddsloader::DDSFile::DXGIFormat::BC6H_Typeless:
+        case tinyddsloader::DDSFile::DXGIFormat::BC6H_UF16:
+            cpuData.Format = NRI::ImageFormat::BC6H_UF16;
+            break;
+        case tinyddsloader::DDSFile::DXGIFormat::BC6H_SF16:
+            cpuData.Format = NRI::ImageFormat::BC6H_SF16;
+            break;
+        case tinyddsloader::DDSFile::DXGIFormat::BC7_Typeless:
+        case tinyddsloader::DDSFile::DXGIFormat::BC7_UNorm:
             cpuData.Format = NRI::ImageFormat::BC7_UNorm;
-        else if (dds.GetFormat() == tinyddsloader::DDSFile::DXGIFormat::BC7_UNorm_SRGB)
+            break;
+        case tinyddsloader::DDSFile::DXGIFormat::BC7_UNorm_SRGB:
             cpuData.Format = NRI::ImageFormat::BC7_UNorm_SRGB;
+            break;
+        default:
+            NOX_CORE_ERROR("TextureImporter::LoadWithDDS - Unsupported DDS format {} from: {}", static_cast<uint32_t>(dds.GetFormat()), path.string());
+            return Ref<Texture2D>(nullptr);
+        }
         
         size_t currentOffset = 0;
         cpuData.MipOffsets.resize(dds.GetMipCount());

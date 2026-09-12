@@ -31,7 +31,19 @@ namespace NRI
         case ImageFormat::R16G16B16A16_SFLOAT: return vk::Format::eR16G16B16A16Sfloat;
         case ImageFormat::R32G32B32A32_SFLOAT: return vk::Format::eR32G32B32A32Sfloat;
             
-        //tinyddsloader format
+        // tinyddsloader formats
+        case ImageFormat::BC1_UNorm: return vk::Format::eBc1RgbaUnormBlock;
+        case ImageFormat::BC1_UNorm_SRGB: return vk::Format::eBc1RgbaSrgbBlock;
+        case ImageFormat::BC2_UNorm: return vk::Format::eBc2UnormBlock;
+        case ImageFormat::BC2_UNorm_SRGB: return vk::Format::eBc2SrgbBlock;
+        case ImageFormat::BC3_UNorm: return vk::Format::eBc3UnormBlock;
+        case ImageFormat::BC3_UNorm_SRGB: return vk::Format::eBc3SrgbBlock;
+        case ImageFormat::BC4_UNorm: return vk::Format::eBc4UnormBlock;
+        case ImageFormat::BC4_SNorm: return vk::Format::eBc4SnormBlock;
+        case ImageFormat::BC5_UNorm: return vk::Format::eBc5UnormBlock;
+        case ImageFormat::BC5_SNorm: return vk::Format::eBc5SnormBlock;
+        case ImageFormat::BC6H_UF16: return vk::Format::eBc6HUfloatBlock;
+        case ImageFormat::BC6H_SF16: return vk::Format::eBc6HSfloatBlock;
         case ImageFormat::BC7_UNorm: return vk::Format::eBc7UnormBlock;
         case ImageFormat::BC7_UNorm_SRGB: return vk::Format::eBc7SrgbBlock;
             

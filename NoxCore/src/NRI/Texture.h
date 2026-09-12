@@ -28,7 +28,19 @@ namespace NRI
         R16G16B16A16_SFLOAT,
         R32G32B32A32_SFLOAT,
         
-        //tinyddsloader format
+        // tinyddsloader formats
+        BC1_UNorm,
+        BC1_UNorm_SRGB,
+        BC2_UNorm,
+        BC2_UNorm_SRGB,
+        BC3_UNorm,
+        BC3_UNorm_SRGB,
+        BC4_UNorm,
+        BC4_SNorm,
+        BC5_UNorm,
+        BC5_SNorm,
+        BC6H_UF16,
+        BC6H_SF16,
         BC7_UNorm,
         BC7_UNorm_SRGB
     };

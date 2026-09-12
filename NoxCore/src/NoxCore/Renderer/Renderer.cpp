@@ -2686,6 +2686,22 @@ namespace Nox
         }
 
         // =========================================================================
+        // 2.45. NRD PER-FRAME TICK
+        // =========================================================================
+        // NRD's integration layer requires its internal frame counter to advance by exactly 1 every
+        // real frame (see Device::tickNRD). The three evaluate*() calls below each also tick it
+        // internally, but only when they actually run -- which, since they're correctly gated on their
+        // corresponding RT feature being enabled, is no longer guaranteed every frame. Ticking here
+        // unconditionally keeps NRD's counter in sync regardless of which (if any) denoiser runs this
+        // frame; each gated evaluate*() call below still ticks fine too since the tick is idempotent
+        // per unique frameIndex.
+        if (m_device->isNRDInitialized())
+        {
+            m_device->tickNRD(static_cast<uint32_t>(m_sceneFrameCounter), m_isFirstFrame || m_resetNRD,
+                uniformData.view, uniformData.nonJitteredProj, uniformData.prevView, uniformData.prevProj);
+        }
+
+        // =========================================================================
         // 2.5. SHADOW MASK PASS (Evaluates 1-SPP RT Shadow -> m_rawShadowMask, m_viewZ, m_nrdNormalRoughness)
         // =========================================================================
         if (m_shadowMaskPipeline && m_rawShadowMask && m_viewZ && m_nrdNormalRoughness)
@@ -3221,6 +3237,7 @@ namespace Nox
                 sPush.neighborOffsetMask = 127;
                 sPush.enableBoilingFilter = m_restirGIEnableBoilingFilter ? 1 : 0;
                 sPush.boilingFilterStrength = m_restirGIBoilingFilterStrength;
+                sPush.denoiserMode = static_cast<uint32_t>(m_nrdGIDenoiser);
                 m_commandBuffers->pushData(&sPush, sizeof(shaderio::PushConstantReSTIRGISpatial));
 
                 m_commandBuffers->drawMeshTasks(1, 1, 1);
@@ -3404,13 +3421,26 @@ namespace Nox
                 ? m_denoisedShadowMask->GetDescriptorIndexSlot()
                 : (m_rawShadowMask ? m_rawShadowMask->GetDescriptorIndexSlot() : 0);
             uint32_t nrdShadowBit = (m_nrdShadowsEnabled && m_denoisedShadowMask) ? 1 : 0;
-            uint32_t nrdReflMode = static_cast<uint32_t>(m_nrdReflectionDenoiser);
+            // Only report REBLUR/RELAX to the shader when the denoised texture is actually what's
+            // bound below -- if NRD hasn't initialized yet (or the resource is momentarily null during
+            // a resize) this falls back to the raw buffer, which is plain linear RGB either way, so
+            // reporting the denoiser mode in that case would make the shader wrongly YCoCg-decode it.
+            bool reflectionActuallyDenoised = m_nrdReflectionDenoiser != NRI::NRDReflectionDenoiser::Off && m_denoisedReflection;
+            uint32_t nrdReflMode = reflectionActuallyDenoised ? static_cast<uint32_t>(m_nrdReflectionDenoiser) : 0;
             lightingPush.nrdShadowsEnabled = nrdShadowBit | (nrdReflMode << 1);
-            lightingPush.reflectionTextureIndex = (m_nrdReflectionDenoiser != NRI::NRDReflectionDenoiser::Off && m_denoisedReflection)
+            lightingPush.reflectionTextureIndex = reflectionActuallyDenoised
                 ? m_denoisedReflection->GetDescriptorIndexSlot()
                 : (m_rawReflection ? m_rawReflection->GetDescriptorIndexSlot() : 0);
             lightingPush.diffuseGIMode = uniformData.diffuseGIMode;
             lightingPush.restirGIDiffuseTextureIndex = uniformData.restirGIDiffuseTextureIndex;
+            // Only meaningful when the bound texture is actually the denoised one -- if REBLUR/RELAX
+            // is selected but denoising was skipped this frame (e.g. NRD not initialized yet),
+            // uniformData.restirGIDiffuseTextureIndex falls back to the raw buffer, which is already
+            // plain linear RGB, so compare against the denoised texture's own slot rather than trusting
+            // the m_nrdGIDenoiser setting alone.
+            bool restirGIActuallyDenoised = m_denoisedReSTIRGIDiffuse &&
+                uniformData.restirGIDiffuseTextureIndex == m_denoisedReSTIRGIDiffuse->GetDescriptorIndexSlot();
+            lightingPush.restirGIDenoiserMode = restirGIActuallyDenoised ? static_cast<uint32_t>(m_nrdGIDenoiser) : 0;
             m_commandBuffers->pushData(&lightingPush, sizeof(shaderio::PushConstantDeferredLighting));
 
             m_commandBuffers->drawMeshTasks(1, 1, 1);

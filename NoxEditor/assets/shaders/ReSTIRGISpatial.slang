@@ -262,6 +262,19 @@ struct PSOutput
     float4 diffuseIrradiance : SV_Target0;
 };
 
+// NRD REBLUR YCoCg conversion (matching NRD.hlsli:398). REBLUR's internal filtering assumes its
+// IN_DIFF_RADIANCE_HITDIST input is already YCoCg-encoded (see REBLUR_FrontEnd_PackRadianceAndNormHitDist
+// in NRD.hlsli) -- RELAX's front-end pack function takes plain linear RGB directly, no conversion.
+// Skipping this for REBLUR is what produced the reddish/pink tint: REBLUR treats R as luminance (Y)
+// and G/B as signed chroma (Co/Cg), clamping/filtering them very differently than real RGB.
+float3 LinearToYCoCg(float3 color)
+{
+    float Y = dot(color, float3(0.25, 0.5, 0.25));
+    float Co = dot(color, float3(0.5, 0.0, -0.5));
+    float Cg = dot(color, float3(-0.25, 0.5, -0.25));
+    return float3(Y, Co, Cg);
+}
+
 void ApplyGIBoilingFilter(inout RTXDI_GIReservoir reservoir, float filterStrength)
 {
     float reservoirWeight = dot(reservoir.radiance, float3(0.2126, 0.7152, 0.0722)) * reservoir.weightSum;
@@ -414,6 +427,11 @@ PSOutput fragMain(
             if (isnan(weightFactor) || isinf(weightFactor)) weightFactor = 1.0;
             diffuse = resampledReservoir.radiance * weightFactor;
         }
+    }
+
+    if (pushConstant.denoiserMode == 1) // NRD REBLUR
+    {
+        diffuse = LinearToYCoCg(diffuse);
     }
 
     // Alpha carries the hit distance for NRD's REBLUR_DIFFUSE/RELAX_DIFFUSE denoiser.

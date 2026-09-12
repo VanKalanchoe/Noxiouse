@@ -397,6 +397,7 @@ struct PushConstantDeferredLighting
     // read was empirically returning stale/wrong data despite correct C++-side values)
     uint32_t diffuseGIMode;
     uint32_t restirGIDiffuseTextureIndex;
+    uint32_t restirGIDenoiserMode; // 0 = Off, 1 = REBLUR (output is YCoCg, needs decoding), 2 = RELAX (plain RGB)
 };
 
 struct PushConstantPathTracer
@@ -534,6 +535,7 @@ struct PushConstantReSTIRGISpatial
     uint32_t neighborOffsetMask;
     uint32_t enableBoilingFilter;
     float boilingFilterStrength;
+    uint32_t denoiserMode; // 0 = Off, 1 = REBLUR (needs YCoCg-encoded radiance), 2 = RELAX (plain RGB)
 };
 
 struct PushConstantOutline

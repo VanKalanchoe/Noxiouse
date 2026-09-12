@@ -708,6 +708,31 @@ namespace Nox
         return 1.0f; // Default fallback
     };
 
+    static int32_t GetTextureSourceImageIndex(const tg3_texture& texture)
+    {
+        for (uint32_t i = 0; i < texture.ext.extensions_count; i++)
+        {
+            const tg3_extension& ext = texture.ext.extensions[i];
+            if (std::string_view(ext.name.data, ext.name.len) != "MSFT_texture_dds" ||
+                ext.value.type != TG3_VALUE_OBJECT)
+            {
+                continue;
+            }
+
+            for (uint32_t j = 0; j < ext.value.object_count; j++)
+            {
+                const auto& kv = ext.value.object_data[j];
+                if (std::string_view(kv.key.data, kv.key.len) == "source" &&
+                    kv.value.type == TG3_VALUE_INT)
+                {
+                    return static_cast<int32_t>(kv.value.int_val);
+                }
+            }
+        }
+
+        return texture.source;
+    }
+
     static void ExtractNodeTRS(const tg3_node& node, glm::vec3& translation, glm::quat& rotation, glm::vec3& scale)
     {
         if (node.has_matrix)
@@ -1303,7 +1328,7 @@ namespace Nox
                     {
                         if (texIndex >= 0 && texIndex < (int32_t)model.textures_count)
                         {
-                            int32_t imageIndex = model.textures[texIndex].source;
+                            int32_t imageIndex = GetTextureSourceImageIndex(model.textures[texIndex]);
                             if (imageIndex >= 0 && imageIndex < (int32_t)model.images_count)
                             {
                                 std::filesystem::path texPath = ExtractGltfImage(model, model.images[imageIndex], imageIndex, path);
