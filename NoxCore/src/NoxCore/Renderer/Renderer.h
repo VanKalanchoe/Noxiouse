@@ -257,6 +257,20 @@ namespace Nox
         void setNRDGIDenoiser(NRI::NRDDiffuseDenoiser mode) { m_nrdGIDenoiser = mode; }
         Ref<Texture2D> getDenoisedReSTIRGIDiffuse() const { return m_denoisedReSTIRGIDiffuse; }
 
+        // ReSTIR DI (Screen-Space Resampled Direct Lighting via RTXDI)
+        // v1: uniform light sampling only, no RIS/ReGIR buffer yet (see PushConstantReSTIRDIInitial
+        // comment in shaderIO.h) -- that's a follow-up quality/perf layer once this is verified working.
+        uint32_t getDirectLightingMode() const { return m_directLightingMode; }
+        void setDirectLightingMode(uint32_t mode) { m_directLightingMode = mode; }
+        Ref<Texture2D> getReSTIRDIDirectLighting() const { return m_restirDIDirectLighting; }
+        uint32_t& getReSTIRDINumLocalLightSamples() { return m_restirDINumLocalLightSamples; }
+        uint32_t& getReSTIRDINumInfiniteLightSamples() { return m_restirDINumInfiniteLightSamples; }
+        uint32_t& getReSTIRDIMaxHistoryLength() { return m_restirDIMaxHistoryLength; }
+        float& getReSTIRDINormalThreshold() { return m_restirDINormalThreshold; }
+        float& getReSTIRDIDepthThreshold() { return m_restirDIDepthThreshold; }
+        uint32_t& getReSTIRDINumSpatialSamples() { return m_restirDINumSpatialSamples; }
+        float& getReSTIRDISpatialRadius() { return m_restirDISpatialRadius; }
+
         void setCameraJitterEnabled(bool enabled) { m_cameraJitterEnabled = enabled; }
         bool getCameraJitterEnabled() const { return m_cameraJitterEnabled; }
         glm::vec2 getCurrentJitter() const { return m_currentJitter; }
@@ -347,6 +361,10 @@ namespace Nox
         // ReSTIR GI (Screen-Space Diffuse Path Resampling via RTXDI)
         void createReSTIRGIResources();
         void createReSTIRGIPipelines(bool forceCompile = false);
+
+        // ReSTIR DI (Screen-Space Resampled Direct Lighting via RTXDI)
+        void createReSTIRDIResources();
+        void createReSTIRDIPipelines(bool forceCompile = false);
 
         void createTextureImage();
         void initGeometryBuffers();
@@ -506,6 +524,37 @@ namespace Nox
         float m_restirGIBoilingFilterStrength = 0.2f;
         Ref<Texture2D> m_denoisedReSTIRGIDiffuse;
         NRI::NRDDiffuseDenoiser m_nrdGIDenoiser = NRI::NRDDiffuseDenoiser::Off;
+
+        // ReSTIR DI (Screen-Space Resampled Direct Lighting via RTXDI) -- Initial -> Temporal ->
+        // Spatial -> FinalShading, 4 passes matching RTXPT's own DI architecture. Reservoir buffer
+        // rotation is NOT GI's fixed scratch/persistent trick -- RTXDI's own ReSTIRDIContext rotates
+        // through 3 physical buffers every frame (see PushConstantReSTIRDIInitial comment in
+        // shaderIO.h for the exact rotation math); using only 2 here would reintroduce the read/write
+        // race already found and fixed once for GI's spatial pass.
+        std::unique_ptr<NRI::Pipeline> m_restirDIInitialPipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_restirDITemporalPipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_restirDISpatialPipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_restirDIFinalShadingPipeline = nullptr;
+        Ref<Texture2D> m_restirDIDirectLighting;
+        std::unique_ptr<NRI::Buffer> m_restirDIReservoirBuffers[3];
+        uint32_t m_restirDILastFrameOutputReservoir = 0;
+
+        // Local (point/spot) lights and infinite (directional) lights must occupy separate
+        // contiguous regions of the uploaded light buffer for RTXDI_LightBufferRegion -- computed
+        // each frame by partitioning m_lightBufferObjects before upload (see updateUniformBuffer).
+        uint32_t m_restirDIFirstLocalLight = 0;
+        uint32_t m_restirDINumLocalLights = 0;
+        uint32_t m_restirDIFirstInfiniteLight = 0;
+        uint32_t m_restirDINumInfiniteLights = 0;
+
+        uint32_t m_directLightingMode = 0; // 0 = brute-force analytic loop, 1 = ReSTIR DI
+        uint32_t m_restirDINumLocalLightSamples = 4;
+        uint32_t m_restirDINumInfiniteLightSamples = 1;
+        uint32_t m_restirDIMaxHistoryLength = 20;
+        float m_restirDINormalThreshold = 0.6f;
+        float m_restirDIDepthThreshold = 0.1f;
+        uint32_t m_restirDINumSpatialSamples = 4;
+        float m_restirDISpatialRadius = 32.0f;
 
         // Path Tracer Accumulation Ping-Pong
         Ref<Texture2D> m_pathTracerAccum[2];

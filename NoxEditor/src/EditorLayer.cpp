@@ -1228,6 +1228,58 @@ namespace Nox
                     ImGui::Unindent();
                 }
 
+                // Direct Lighting (ReSTIR DI)
+                static const char* directLightingModeNames[] = {
+                    "Brute-Force Analytic Loop (existing)",
+                    "ReSTIR DI (Screen-Space Resampled, RTXDI)"
+                };
+                int currentDirectLightingMode = static_cast<int>(m_Renderer->getDirectLightingMode());
+                if (ImGui::Combo("Direct Lighting", &currentDirectLightingMode, directLightingModeNames, IM_ARRAYSIZE(directLightingModeNames)))
+                {
+                    m_Renderer->setDirectLightingMode(static_cast<uint32_t>(currentDirectLightingMode));
+                }
+                if (ImGui::IsItemHovered())
+                {
+                    ImGui::SetTooltip("Brute-force loop only ray-traces a shadow for light index 0 -- every other point/spot light is unshadowed.\nReSTIR DI resamples down to one light per pixel and shadow-rays it, so every light gets a real shadow.\nSwitch \"PBR Debug View\" to \"8: Direct Lights Only\" to compare the two in isolation.");
+                }
+
+                if (m_Renderer->getDirectLightingMode() == 1)
+                {
+                    ImGui::Indent();
+                    ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f), "ReSTIR DI (RTXDI SDK Active) -- v1: uniform light sampling, no RIS/ReGIR yet");
+
+                    uint32_t& numLocal = m_Renderer->getReSTIRDINumLocalLightSamples();
+                    int numLocalInt = static_cast<int>(numLocal);
+                    if (ImGui::SliderInt("Local Light Samples", &numLocalInt, 1, 16))
+                        numLocal = static_cast<uint32_t>(numLocalInt);
+
+                    uint32_t& numInfinite = m_Renderer->getReSTIRDINumInfiniteLightSamples();
+                    int numInfiniteInt = static_cast<int>(numInfinite);
+                    if (ImGui::SliderInt("Infinite (Directional) Light Samples", &numInfiniteInt, 1, 4))
+                        numInfinite = static_cast<uint32_t>(numInfiniteInt);
+
+                    float& diSpatialRadius = m_Renderer->getReSTIRDISpatialRadius();
+                    ImGui::SliderFloat("Spatial Radius (px)##DI", &diSpatialRadius, 4.0f, 64.0f, "%.1f");
+
+                    uint32_t& diNumSpatialSamples = m_Renderer->getReSTIRDINumSpatialSamples();
+                    int diSpatialInt = static_cast<int>(diNumSpatialSamples);
+                    if (ImGui::SliderInt("Spatial Samples##DI", &diSpatialInt, 1, 8))
+                        diNumSpatialSamples = static_cast<uint32_t>(diSpatialInt);
+
+                    uint32_t& diMaxM = m_Renderer->getReSTIRDIMaxHistoryLength();
+                    int diMaxMInt = static_cast<int>(diMaxM);
+                    if (ImGui::SliderInt("Max History Length (M)##DI", &diMaxMInt, 1, 32))
+                        diMaxM = static_cast<uint32_t>(diMaxMInt);
+
+                    float& diNormalThresh = m_Renderer->getReSTIRDINormalThreshold();
+                    ImGui::SliderFloat("Normal Threshold##DI", &diNormalThresh, 0.1f, 0.99f, "%.2f");
+
+                    float& diDepthThresh = m_Renderer->getReSTIRDIDepthThreshold();
+                    ImGui::SliderFloat("Depth Threshold##DI", &diDepthThresh, 0.01f, 0.5f, "%.2f");
+
+                    ImGui::Unindent();
+                }
+
                 ImGui::Unindent();
             }
         }

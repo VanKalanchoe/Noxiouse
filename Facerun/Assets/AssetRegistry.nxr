@@ -47,6 +47,10 @@ AssetRegistry:
     FilePath: Models/Sponza/Materials/Sponza_Material_7.nmat
     SourceFilePath: Models/Sponza/Materials/Sponza_Material_7.nmat
     Type: AssetType::Material
+  - Handle: 1330868771045340434
+    FilePath: Scenes/ShadowTest.nox
+    SourceFilePath: Scenes/ShadowTest.nox
+    Type: AssetType::Scene
   - Handle: 1508139164721441227
     FilePath: Models/Sponza/Textures/white.ntex
     SourceFilePath: Models/Sponza/white.png
@@ -575,6 +579,10 @@ AssetRegistry:
     FilePath: Scenes/PinkCube1.nox
     SourceFilePath: Scenes/PinkCube1.nox
     Type: AssetType::Scene
+  - Handle: 13799527316107715014
+    FilePath: Models/Box/Materials/Box_Red.nmat
+    SourceFilePath: Models/Box/Materials/Box_Red.nmat
+    Type: AssetType::Material
   - Handle: 13872071982585247212
     FilePath: Models/Sponza/Textures/11968150294050148237.ntex
     SourceFilePath: Models/Sponza/11968150294050148237.jpg
@@ -631,6 +639,10 @@ AssetRegistry:
       Format: RGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 15458754317919879043
+    FilePath: Models/Box/Meshes/Box.nmesh
+    SourceFilePath: Models/Box/Box.glb
+    Type: AssetType::Mesh
   - Handle: 15492727354467459379
     FilePath: Models/Sponza/Textures/4910669866631290573.ntex
     SourceFilePath: Models/Sponza/4910669866631290573.jpg

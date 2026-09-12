@@ -334,8 +334,17 @@
         float NdotV = clamp(dot(n, v), 0.001, 1.0);
         float3 reflection = normalize(reflect(-v, n));
 
-        // 6. Direct Analytical Lighting (Directional, Point, Spot)
-            float3 directLighting = float3(0.0);
+        // 6. Direct Analytical Lighting (Directional, Point, Spot) -- or ReSTIR DI's resampled
+        // result, which shadow-rays every light regardless of count instead of only light index 0
+        // (see the brute-force loop below: only `i == 0` ever gets a real shadow term).
+        float3 directLighting = float3(0.0);
+        if (pushConstant.directLightingMode == 1 && pushConstant.restirDIDirectLightingTextureIndex != 0xFFFFFFFF)
+        {
+            Texture2D restirDITex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.restirDIDirectLightingTextureIndex, 0));
+            directLighting = restirDITex.Load(int3(pixelCoord, 0)).rgb;
+        }
+        else
+        {
             LightData* lights = (LightData*)ubo->lightDataReference;
 
             for (uint i = 0; i < ubo->lightCount; i++)
@@ -436,6 +445,7 @@
                 float3 lightRadiance = light.color.rgb * light.color.w * attenuation * lightShadow;
                 directLighting += NdotL * lightRadiance * (diffuseContrib + specContrib);
             }
+        }
 
         // 7. Image-Based Lighting (IBL) & Decoupled RT Reflections
         PBRInfo iblInputs = PBRInfo(

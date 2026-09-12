@@ -1,0 +1,116 @@
+Scene: Untitled
+Entities:
+  - Entity: 6631254501585647832
+    TagComponent:
+      Tag: Spot Light
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0.94247776, 0]
+      Scale: [1, 1, 1]
+    SpotLightComponent:
+      Color: [0, 0.95366794, 0.08100633]
+      Intensity: 6.5
+      Range: 3.6
+      InnerAngle: 13.5
+      OuterAngle: 33.5
+      Radius: 0.05
+      ShadowSamples: 1
+  - Entity: 3574720283652391323
+    TagComponent:
+      Tag: Node_1 Copy
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 12090905187186341564
+      Children:
+        []
+    MeshComponent:
+      MeshHandle: 15458754317919879043
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    MaterialComponent:
+      MaterialAssets:
+        - 13799527316107715014
+  - Entity: 12090905187186341564
+    TagComponent:
+      Tag: Node_0 Copy
+    TransformComponent:
+      Translation: [-2.2, -0.4, -0.6]
+      Rotation: [0, -0.76969016, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        - 3574720283652391323
+  - Entity: 3078842907689694160
+    TagComponent:
+      Tag: Direct Light
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [1.3543755, 0, 0]
+      Scale: [1, 1, 1]
+    DirectionalLightComponent:
+      Color: [1, 1, 1]
+      Intensity: 1
+      AngularDiameter: 0.5357
+      ShadowSamples: 1
+  - Entity: 8587030819876758099
+    TagComponent:
+      Tag: Node_1 Copy
+    TransformComponent:
+      Translation: [0.8, 1.3, -1.3]
+      Rotation: [0.7330383, 0, 0]
+      Scale: [6.2, 4.4, 1]
+    RelationshipComponent:
+      Parent: 17926057323622931838
+      Children:
+        []
+    MeshComponent:
+      MeshHandle: 15458754317919879043
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    MaterialComponent:
+      MaterialAssets:
+        - 13799527316107715014
+  - Entity: 17926057323622931838
+    TagComponent:
+      Tag: Node_0 Copy
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        - 8587030819876758099
+  - Entity: 6128903582924250201
+    TagComponent:
+      Tag: Node_1
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, -0, 0]
+      Scale: [10, 10, 1]
+    RelationshipComponent:
+      Parent: 5179739116143084628
+      Children:
+        []
+    MeshComponent:
+      MeshHandle: 15458754317919879043
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    MaterialComponent:
+      MaterialAssets:
+        - 13799527316107715014
+  - Entity: 5179739116143084628
+    TagComponent:
+      Tag: Node_0
+    TransformComponent:
+      Translation: [-1.0771543, -1.308609, 0]
+      Rotation: [-1.5707964, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        - 6128903582924250201

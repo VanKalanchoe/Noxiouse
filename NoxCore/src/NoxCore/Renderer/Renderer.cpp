@@ -168,6 +168,10 @@ namespace Nox
         watchShader("assets/shaders/ReSTIRGIInitial.slang", "ReSTIRGIInitial", [this]() { createReSTIRGIPipelines(true); });
         watchShader("assets/shaders/ReSTIRGITemporal.slang", "ReSTIRGITemporal", [this]() { createReSTIRGIPipelines(true); });
         watchShader("assets/shaders/ReSTIRGISpatial.slang", "ReSTIRGISpatial", [this]() { createReSTIRGIPipelines(true); });
+        watchShader("assets/shaders/ReSTIRDIInitial.slang", "ReSTIRDIInitial", [this]() { createReSTIRDIPipelines(true); });
+        watchShader("assets/shaders/ReSTIRDITemporal.slang", "ReSTIRDITemporal", [this]() { createReSTIRDIPipelines(true); });
+        watchShader("assets/shaders/ReSTIRDISpatial.slang", "ReSTIRDISpatial", [this]() { createReSTIRDIPipelines(true); });
+        watchShader("assets/shaders/ReSTIRDIFinalShading.slang", "ReSTIRDIFinalShading", [this]() { createReSTIRDIPipelines(true); });
 
         m_whiteTexture = createSolidColorTexture(255, 255, 255, 255);
 
@@ -244,6 +248,8 @@ namespace Nox
         createDDGIPipelines(false);
         // ReSTIR GI
         createReSTIRGIPipelines(false);
+        // ReSTIR DI
+        createReSTIRDIPipelines(false);
 
         createCommandPool();
         createUniformBuffers();
@@ -268,6 +274,8 @@ namespace Nox
         createDDGIResources();
         // ReSTIR GI
         createReSTIRGIResources();
+        // ReSTIR DI
+        createReSTIRDIResources();
 
         createCommandBuffers();
 
@@ -429,6 +437,7 @@ namespace Nox
         createShadowMaskResources();
         createPathTracerResources();
         createReSTIRGIResources();
+        createReSTIRDIResources();
         m_pathTracerSampleCount = 0;
 
         // NGX's internal DLSS feature is fixed-size once created; it must be explicitly freed here
@@ -799,6 +808,51 @@ namespace Nox
 
     }
 
+    void Renderer::createReSTIRDIResources()
+    {
+        const uint32_t width = m_renderSize.width;
+        const uint32_t height = m_renderSize.height;
+
+        if (width == 0 || height == 0)
+            return;
+
+        // 1. Output Texture: Final Resampled Direct Lighting (R16G16B16A16_SFLOAT)
+        if (m_restirDIDirectLighting)
+        {
+            m_resourceHeap->unregisterTexture(m_restirDIDirectLighting->GetDescriptorIndexSlot());
+        }
+
+        m_restirDIDirectLighting = m_device->createTexture(NRI::TextureDesc{
+            .width = width,
+            .height = height,
+            .mipLevels = 1,
+            .sampleCount = 1,
+            .usage = NRI::TextureUsage::ColorAttachment,
+            .format = NRI::ImageFormat::R16G16B16A16_SFLOAT,
+            .directFormat = UINT32_MAX
+        });
+        m_resourceHeap->registerTexture(*m_restirDIDirectLighting);
+
+        // 2. Reservoir Buffers: 3 physical buffers, rotated every frame (NOT GI's fixed 2-role
+        // scheme -- see the rotation math documented on PushConstantReSTIRDIInitial in shaderIO.h).
+        RTXDI_ReservoirBufferParameters resParams = rtxdi::CalculateReservoirBufferParameters(
+            width, height, rtxdi::CheckerboardMode::Off);
+        uint64_t reservoirBufferSize = static_cast<uint64_t>(resParams.reservoirArrayPitch) * sizeof(RTXDI_PackedDIReservoir);
+
+        for (int i = 0; i < 3; i++)
+        {
+            m_restirDIReservoirBuffers[i] = m_device->createBuffer(NRI::BufferDesc{
+                .size = reservoirBufferSize,
+                .usage = NRI::BufferUsage::Storage
+            });
+            void* mapped = m_restirDIReservoirBuffers[i]->map(0, reservoirBufferSize);
+            memset(mapped, 0, reservoirBufferSize);
+            m_restirDIReservoirBuffers[i]->unmap();
+        }
+
+        m_restirDILastFrameOutputReservoir = 0;
+    }
+
     void Renderer::createDDGIPipelines(bool forceCompile)
     {
         // 1. Radiance Pipeline
@@ -961,6 +1015,101 @@ namespace Nox
                 .sourcePath = "assets/shaders/ReSTIRGISpatial.slang"
             });
             m_restirGISpatialPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        }
+    }
+
+    void Renderer::createReSTIRDIPipelines(bool forceCompile)
+    {
+        // 1. Initial Sampling Pipeline
+        {
+            NRI::PipelineDesc desc{};
+            desc.forceCompile = forceCompile;
+            desc.colorFormats = {NRI::ImageFormat::R16G16B16A16_SFLOAT};
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Task,
+                .entryPoint = "taskMain",
+                .sourcePath = "assets/shaders/ReSTIRDIInitial.slang"
+            });
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Mesh,
+                .entryPoint = "meshMain",
+                .sourcePath = "assets/shaders/ReSTIRDIInitial.slang"
+            });
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Fragment,
+                .entryPoint = "fragMain",
+                .sourcePath = "assets/shaders/ReSTIRDIInitial.slang"
+            });
+            m_restirDIInitialPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        }
+
+        // 2. Temporal Resampling Pipeline
+        {
+            NRI::PipelineDesc desc{};
+            desc.forceCompile = forceCompile;
+            desc.colorFormats = {NRI::ImageFormat::R16G16B16A16_SFLOAT};
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Task,
+                .entryPoint = "taskMain",
+                .sourcePath = "assets/shaders/ReSTIRDITemporal.slang"
+            });
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Mesh,
+                .entryPoint = "meshMain",
+                .sourcePath = "assets/shaders/ReSTIRDITemporal.slang"
+            });
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Fragment,
+                .entryPoint = "fragMain",
+                .sourcePath = "assets/shaders/ReSTIRDITemporal.slang"
+            });
+            m_restirDITemporalPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        }
+
+        // 3. Spatial Resampling Pipeline
+        {
+            NRI::PipelineDesc desc{};
+            desc.forceCompile = forceCompile;
+            desc.colorFormats = {NRI::ImageFormat::R16G16B16A16_SFLOAT};
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Task,
+                .entryPoint = "taskMain",
+                .sourcePath = "assets/shaders/ReSTIRDISpatial.slang"
+            });
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Mesh,
+                .entryPoint = "meshMain",
+                .sourcePath = "assets/shaders/ReSTIRDISpatial.slang"
+            });
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Fragment,
+                .entryPoint = "fragMain",
+                .sourcePath = "assets/shaders/ReSTIRDISpatial.slang"
+            });
+            m_restirDISpatialPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        }
+
+        // 4. Final Shading Pipeline
+        {
+            NRI::PipelineDesc desc{};
+            desc.forceCompile = forceCompile;
+            desc.colorFormats = {NRI::ImageFormat::R16G16B16A16_SFLOAT};
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Task,
+                .entryPoint = "taskMain",
+                .sourcePath = "assets/shaders/ReSTIRDIFinalShading.slang"
+            });
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Mesh,
+                .entryPoint = "meshMain",
+                .sourcePath = "assets/shaders/ReSTIRDIFinalShading.slang"
+            });
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Fragment,
+                .entryPoint = "fragMain",
+                .sourcePath = "assets/shaders/ReSTIRDIFinalShading.slang"
+            });
+            m_restirDIFinalShadingPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
         }
     }
 
@@ -3315,6 +3464,257 @@ namespace Nox
         }
 
         // =========================================================================
+        // 2.95. RESTIR DI (SCREEN-SPACE RESAMPLED DIRECT LIGHTING VIA RTXDI)
+        // =========================================================================
+        // Same master-toggle gating as DDGI/ReSTIR GI (see the master-toggle bug fixed for those
+        // two): ReSTIR DI ray-traces its final shadow against the scene TLAS, so it has no meaning
+        // without ray tracing hardware access.
+        bool runReSTIRDI = m_rayTracingEnabled &&
+                           m_directLightingMode == 1 &&
+                           m_hasTLASBuild && m_sceneTLAS && (uniformData.tlasDeviceAddress != 0) &&
+                           m_restirDIInitialPipeline && m_restirDITemporalPipeline &&
+                           m_restirDISpatialPipeline && m_restirDIFinalShadingPipeline &&
+                           m_restirDIDirectLighting && m_restirGINeighborOffsetsBuffer &&
+                           m_restirDIReservoirBuffers[0] && m_restirDIReservoirBuffers[1] &&
+                           m_restirDIReservoirBuffers[2] && (uniformData.lightDataReference != 0);
+
+        if (runReSTIRDI)
+        {
+            RTXDI_ReservoirBufferParameters diResParams = rtxdi::CalculateReservoirBufferParameters(
+                m_renderSize.width, m_renderSize.height, rtxdi::CheckerboardMode::Off);
+
+            // 3-buffer rotation (NOT GI's fixed 2-role scheme) -- see the rotation math documented
+            // on PushConstantReSTIRDIInitial in shaderIO.h. Using only 2 buffers here would
+            // reintroduce the exact read/write race already found and fixed once for GI's spatial pass.
+            uint32_t diBufferA = (m_restirDILastFrameOutputReservoir + 1) % 3; // Initial writes here, Temporal overwrites in place
+            uint32_t diBufferC = m_restirDILastFrameOutputReservoir;          // Temporal's history (read only)
+            uint32_t diBufferB = (diBufferA + 1) % 3;                         // Spatial's output, FinalShading's input
+
+            // 1. Initial Sampling Pass
+            {
+                std::vector<NRI::RenderAttachDesc> diInitAttachments;
+                diInitAttachments.push_back({
+                    .attachment = m_restirDIDirectLighting.get(),
+                    .loadOP = NRI::LoadOP::dontCare,
+                    .storeOP = NRI::StoreOP::dontCare
+                });
+
+                NRI::RenderDesc diInitDesc = {
+                    .renderArea = renderExtent,
+                    .colorAttachments = diInitAttachments
+                };
+
+                m_commandBuffers->beginRendering(diInitDesc);
+                m_commandBuffers->setViewportWithCount({0.0f, rh, rw, -rh}, 0.0f, 1.0f);
+                m_commandBuffers->setScissorWithCount(renderExtent);
+
+                m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_restirDIInitialPipeline);
+                m_commandBuffers->setCullMode(NRI::CullMode::None);
+                m_commandBuffers->setDepthTestEnable(false);
+                m_commandBuffers->setDepthWriteEnable(false);
+                m_commandBuffers->setColorBlendEnable(0, false);
+                m_commandBuffers->setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G |
+                                                    NRI::ColorComponent::B | NRI::ColorComponent::A);
+
+                shaderio::PushConstantReSTIRDIInitial diInitPush{};
+                diInitPush.invViewProj = uniformData.invViewProj;
+                diInitPush.cameraWorldPos = uniformData.cameraWorldPos;
+                diInitPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                diInitPush.lightDataReference = uniformData.lightDataReference;
+                diInitPush.reservoirBufferReference = m_restirDIReservoirBuffers[diBufferA]->getDeviceAddress();
+                diInitPush.depthTextureIndex = m_depthResource->GetDescriptorIndexSlot();
+                diInitPush.gbufferNormalIndex = m_gbufferNormal->GetDescriptorIndexSlot();
+                diInitPush.gbufferAlbedoIndex = m_gbufferAlbedo->GetDescriptorIndexSlot();
+                diInitPush.gbufferMaterialIndex = m_gbufferMaterial->GetDescriptorIndexSlot();
+                diInitPush.viewportSize = glm::vec2(rw, rh);
+                diInitPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
+                diInitPush.reservoirBlockRowPitch = diResParams.reservoirBlockRowPitch;
+                diInitPush.reservoirArrayPitch = diResParams.reservoirArrayPitch;
+                diInitPush.firstLocalLightIndex = m_restirDIFirstLocalLight;
+                diInitPush.numLocalLights = m_restirDINumLocalLights;
+                diInitPush.firstInfiniteLightIndex = m_restirDIFirstInfiniteLight;
+                diInitPush.numInfiniteLights = m_restirDINumInfiniteLights;
+                diInitPush.numLocalLightSamples = m_restirDINumLocalLightSamples;
+                diInitPush.numInfiniteLightSamples = m_restirDINumInfiniteLightSamples;
+                m_commandBuffers->pushData(&diInitPush, sizeof(shaderio::PushConstantReSTIRDIInitial));
+
+                m_commandBuffers->drawMeshTasks(1, 1, 1);
+                m_commandBuffers->endRendering();
+                m_commandBuffers->executionBarrier();
+            }
+
+            // 2. Temporal Resampling Pass
+            {
+                std::vector<NRI::RenderAttachDesc> diTAttachments;
+                diTAttachments.push_back({
+                    .attachment = m_restirDIDirectLighting.get(),
+                    .loadOP = NRI::LoadOP::dontCare,
+                    .storeOP = NRI::StoreOP::dontCare
+                });
+
+                NRI::RenderDesc diTDesc = {
+                    .renderArea = renderExtent,
+                    .colorAttachments = diTAttachments
+                };
+
+                m_commandBuffers->beginRendering(diTDesc);
+                m_commandBuffers->setViewportWithCount({0.0f, rh, rw, -rh}, 0.0f, 1.0f);
+                m_commandBuffers->setScissorWithCount(renderExtent);
+
+                m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_restirDITemporalPipeline);
+                m_commandBuffers->setCullMode(NRI::CullMode::None);
+                m_commandBuffers->setDepthTestEnable(false);
+                m_commandBuffers->setDepthWriteEnable(false);
+                m_commandBuffers->setColorBlendEnable(0, false);
+                m_commandBuffers->setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G |
+                                                    NRI::ColorComponent::B | NRI::ColorComponent::A);
+
+                shaderio::PushConstantReSTIRDITemporal diTPush{};
+                diTPush.invViewProj = uniformData.invViewProj;
+                diTPush.prevInvViewProj = glm::inverse(uniformData.prevProj * uniformData.prevView);
+                diTPush.cameraWorldPos = uniformData.cameraWorldPos;
+                diTPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                diTPush.lightDataReference = uniformData.lightDataReference;
+                diTPush.currentReservoirReference = m_restirDIReservoirBuffers[diBufferA]->getDeviceAddress();
+                diTPush.previousReservoirReference = m_restirDIReservoirBuffers[diBufferC]->getDeviceAddress();
+                diTPush.depthTextureIndex = m_depthResource->GetDescriptorIndexSlot();
+                diTPush.prevDepthTextureIndex = m_prevDepthResource ? m_prevDepthResource->GetDescriptorIndexSlot() : UINT32_MAX;
+                diTPush.gbufferNormalIndex = m_gbufferNormal->GetDescriptorIndexSlot();
+                diTPush.prevNormalTextureIndex = m_prevGbufferNormal ? m_prevGbufferNormal->GetDescriptorIndexSlot() : UINT32_MAX;
+                diTPush.gbufferVelocityIndex = m_gbufferVelocity->GetDescriptorIndexSlot();
+                diTPush.gbufferMaterialIndex = m_gbufferMaterial->GetDescriptorIndexSlot();
+                diTPush.viewportSize = glm::vec2(rw, rh);
+                diTPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
+                diTPush.reservoirBlockRowPitch = diResParams.reservoirBlockRowPitch;
+                diTPush.reservoirArrayPitch = diResParams.reservoirArrayPitch;
+                diTPush.maxHistoryLength = m_restirDIMaxHistoryLength;
+                diTPush.normalThreshold = m_restirDINormalThreshold;
+                diTPush.depthThreshold = m_restirDIDepthThreshold;
+                diTPush.enablePermutationSampling = 1;
+                m_commandBuffers->pushData(&diTPush, sizeof(shaderio::PushConstantReSTIRDITemporal));
+
+                m_commandBuffers->drawMeshTasks(1, 1, 1);
+                m_commandBuffers->endRendering();
+                m_commandBuffers->executionBarrier();
+            }
+
+            // 3. Spatial Resampling Pass
+            {
+                std::vector<NRI::RenderAttachDesc> diSAttachments;
+                diSAttachments.push_back({
+                    .attachment = m_restirDIDirectLighting.get(),
+                    .loadOP = NRI::LoadOP::dontCare,
+                    .storeOP = NRI::StoreOP::dontCare
+                });
+
+                NRI::RenderDesc diSDesc = {
+                    .renderArea = renderExtent,
+                    .colorAttachments = diSAttachments
+                };
+
+                m_commandBuffers->beginRendering(diSDesc);
+                m_commandBuffers->setViewportWithCount({0.0f, rh, rw, -rh}, 0.0f, 1.0f);
+                m_commandBuffers->setScissorWithCount(renderExtent);
+
+                m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_restirDISpatialPipeline);
+                m_commandBuffers->setCullMode(NRI::CullMode::None);
+                m_commandBuffers->setDepthTestEnable(false);
+                m_commandBuffers->setDepthWriteEnable(false);
+                m_commandBuffers->setColorBlendEnable(0, false);
+                m_commandBuffers->setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G |
+                                                    NRI::ColorComponent::B | NRI::ColorComponent::A);
+
+                shaderio::PushConstantReSTIRDISpatial diSPush{};
+                diSPush.invViewProj = uniformData.invViewProj;
+                diSPush.cameraWorldPos = uniformData.cameraWorldPos;
+                diSPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                diSPush.lightDataReference = uniformData.lightDataReference;
+                diSPush.inputReservoirReference = m_restirDIReservoirBuffers[diBufferA]->getDeviceAddress();
+                diSPush.outputReservoirReference = m_restirDIReservoirBuffers[diBufferB]->getDeviceAddress();
+                diSPush.neighborOffsetsReference = m_restirGINeighborOffsetsBuffer->getDeviceAddress();
+                diSPush.depthTextureIndex = m_depthResource->GetDescriptorIndexSlot();
+                diSPush.gbufferNormalIndex = m_gbufferNormal->GetDescriptorIndexSlot();
+                diSPush.gbufferMaterialIndex = m_gbufferMaterial->GetDescriptorIndexSlot();
+                diSPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
+                diSPush.viewportSize = glm::vec2(rw, rh);
+                diSPush.reservoirBlockRowPitch = diResParams.reservoirBlockRowPitch;
+                diSPush.reservoirArrayPitch = diResParams.reservoirArrayPitch;
+                diSPush.samplingRadius = m_restirDISpatialRadius;
+                diSPush.numSamples = m_restirDINumSpatialSamples;
+                diSPush.normalThreshold = m_restirDINormalThreshold;
+                diSPush.depthThreshold = m_restirDIDepthThreshold;
+                diSPush.neighborOffsetMask = 127;
+                m_commandBuffers->pushData(&diSPush, sizeof(shaderio::PushConstantReSTIRDISpatial));
+
+                m_commandBuffers->drawMeshTasks(1, 1, 1);
+                m_commandBuffers->endRendering();
+                m_commandBuffers->executionBarrier();
+            }
+
+            // 4. Final Shading Pass: exactly one shadow ray per pixel, toward whichever light survived
+            // resampling -- unlike the brute-force loop in DeferredLighting.slang, which only ever
+            // shadows light index 0, every light is properly shadowed here regardless of light count.
+            {
+                std::vector<NRI::RenderAttachDesc> diFAttachments;
+                diFAttachments.push_back({
+                    .attachment = m_restirDIDirectLighting.get(),
+                    .loadOP = NRI::LoadOP::clear,
+                    .storeOP = NRI::StoreOP::store,
+                    .clearColor = {0.0f, 0.0f, 0.0f, 0.0f}
+                });
+
+                NRI::RenderDesc diFDesc = {
+                    .renderArea = renderExtent,
+                    .colorAttachments = diFAttachments
+                };
+
+                m_commandBuffers->beginRendering(diFDesc);
+                m_commandBuffers->setViewportWithCount({0.0f, rh, rw, -rh}, 0.0f, 1.0f);
+                m_commandBuffers->setScissorWithCount(renderExtent);
+
+                m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_restirDIFinalShadingPipeline);
+                m_commandBuffers->setCullMode(NRI::CullMode::None);
+                m_commandBuffers->setDepthTestEnable(false);
+                m_commandBuffers->setDepthWriteEnable(false);
+                m_commandBuffers->setColorBlendEnable(0, false);
+                m_commandBuffers->setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G |
+                                                    NRI::ColorComponent::B | NRI::ColorComponent::A);
+
+                shaderio::PushConstantReSTIRDIFinalShading diFPush{};
+                diFPush.invViewProj = uniformData.invViewProj;
+                diFPush.cameraWorldPos = uniformData.cameraWorldPos;
+                diFPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                diFPush.lightDataReference = uniformData.lightDataReference;
+                diFPush.reservoirReference = m_restirDIReservoirBuffers[diBufferB]->getDeviceAddress();
+                diFPush.depthTextureIndex = m_depthResource->GetDescriptorIndexSlot();
+                diFPush.gbufferNormalIndex = m_gbufferNormal->GetDescriptorIndexSlot();
+                diFPush.gbufferAlbedoIndex = m_gbufferAlbedo->GetDescriptorIndexSlot();
+                diFPush.gbufferMaterialIndex = m_gbufferMaterial->GetDescriptorIndexSlot();
+                diFPush.viewportSize = glm::vec2(rw, rh);
+                diFPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
+                diFPush.reservoirBlockRowPitch = diResParams.reservoirBlockRowPitch;
+                diFPush.reservoirArrayPitch = diResParams.reservoirArrayPitch;
+                m_commandBuffers->pushData(&diFPush, sizeof(shaderio::PushConstantReSTIRDIFinalShading));
+
+                m_commandBuffers->drawMeshTasks(1, 1, 1);
+                m_commandBuffers->endRendering();
+                m_commandBuffers->executionBarrier();
+            }
+
+            m_restirDILastFrameOutputReservoir = diBufferB;
+
+            uniformData.directLightingMode = m_directLightingMode;
+            uniformData.restirDIDirectLightingTextureIndex = m_restirDIDirectLighting->GetDescriptorIndexSlot();
+            memcpy(m_uniformBuffersMapped[frameIndex], &uniformData, sizeof(shaderio::UniformBufferObject));
+        }
+        else
+        {
+            uniformData.directLightingMode = 0; // Fall back to the brute-force loop if ReSTIR DI cannot run yet (e.g. TLAS build pending)
+            uniformData.restirDIDirectLightingTextureIndex = m_restirDIDirectLighting ? m_restirDIDirectLighting->GetDescriptorIndexSlot() : 0xFFFFFFFF;
+            memcpy(m_uniformBuffersMapped[frameIndex], &uniformData, sizeof(shaderio::UniformBufferObject));
+        }
+
+        // =========================================================================
         // 3. LIGHTING PASS: PATH TRACER (Modes 18 & 19) OR DEFERRED LIGHTING
         // =========================================================================
         bool runPathTracer = (m_pathTracingEnabled || m_debugMode == 18 || m_debugMode == 19);
@@ -3441,6 +3841,8 @@ namespace Nox
             bool restirGIActuallyDenoised = m_denoisedReSTIRGIDiffuse &&
                 uniformData.restirGIDiffuseTextureIndex == m_denoisedReSTIRGIDiffuse->GetDescriptorIndexSlot();
             lightingPush.restirGIDenoiserMode = restirGIActuallyDenoised ? static_cast<uint32_t>(m_nrdGIDenoiser) : 0;
+            lightingPush.directLightingMode = uniformData.directLightingMode;
+            lightingPush.restirDIDirectLightingTextureIndex = uniformData.restirDIDirectLightingTextureIndex;
             m_commandBuffers->pushData(&lightingPush, sizeof(shaderio::PushConstantDeferredLighting));
 
             m_commandBuffers->drawMeshTasks(1, 1, 1);
@@ -4062,6 +4464,16 @@ namespace Nox
             m_LightBufferCapacity = sizeof(shaderio::LightData) * 16;
             createLightBuffer(m_LightBufferCapacity);
         }
+
+        // ReSTIR DI needs local (point/spot) and infinite (directional) lights in separate
+        // contiguous regions (RTXDI_LightBufferRegion is just a {firstIndex, count} range) --
+        // partition once here so callers don't need to insert lights in any particular order.
+        auto infiniteStart = std::stable_partition(m_lightBufferObjects.begin(), m_lightBufferObjects.end(),
+            [](const shaderio::LightData& light) { return light.position.w != 0.0f; }); // != Directional
+        m_restirDIFirstLocalLight = 0;
+        m_restirDINumLocalLights = static_cast<uint32_t>(std::distance(m_lightBufferObjects.begin(), infiniteStart));
+        m_restirDIFirstInfiniteLight = m_restirDINumLocalLights;
+        m_restirDINumInfiniteLights = static_cast<uint32_t>(m_lightBufferObjects.size()) - m_restirDINumLocalLights;
 
         uint64_t requiredLightSize = sizeof(shaderio::LightData) * m_lightBufferObjects.size();
         if (requiredLightSize > m_LightBufferCapacity)

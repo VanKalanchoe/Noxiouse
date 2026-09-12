@@ -194,6 +194,12 @@ struct UniformBufferObject
     uint32_t restirGIDiffuseTextureIndex;
     uint32_t restirGIReservoirBufferIndex;
     uint32_t restirGINeighborOffsetsBufferIndex;
+
+    // ReSTIR DI (Screen-Space Resampled Direct Lighting via RTXDI) -- like ReSTIR GI above, the
+    // actually-consumed copy is the PushConstantDeferredLighting one; these UBO fields exist for
+    // parity/other potential consumers, matching the established pattern.
+    uint32_t directLightingMode; // 0 = brute-force analytic loop, 1 = ReSTIR DI
+    uint32_t restirDIDirectLightingTextureIndex;
 };
 
 struct Vertex
@@ -398,6 +404,11 @@ struct PushConstantDeferredLighting
     uint32_t diffuseGIMode;
     uint32_t restirGIDiffuseTextureIndex;
     uint32_t restirGIDenoiserMode; // 0 = Off, 1 = REBLUR (output is YCoCg, needs decoding), 2 = RELAX (plain RGB)
+
+    // ReSTIR DI (screen-space resampled direct lighting, replaces the brute-force light loop below
+    // when active -- see directLightingMode)
+    uint32_t directLightingMode; // 0 = brute-force analytic loop (existing), 1 = ReSTIR DI
+    uint32_t restirDIDirectLightingTextureIndex;
 };
 
 struct PushConstantPathTracer
@@ -536,6 +547,111 @@ struct PushConstantReSTIRGISpatial
     uint32_t enableBoilingFilter;
     float boilingFilterStrength;
     uint32_t denoiserMode; // 0 = Off, 1 = REBLUR (needs YCoCg-encoded radiance), 2 = RELAX (plain RGB)
+};
+
+// ==========================================================================================
+// RESTIR DI (SCREEN-SPACE RESAMPLED DIRECT LIGHTING)
+// ==========================================================================================
+// v1: analytic point/spot/directional lights only (our LightData), uniform light selection --
+// no RIS/ReGIR buffer yet, that's a follow-up quality/perf layer once this is verified working.
+// Reservoir buffer rotation is NOT the fixed scratch/persistent trick used for GI -- RTXDI's own
+// ReSTIRDIContext::UpdateBufferIndices (NoxCore/vendors/RTXDI/Source/ReSTIRDI.cpp) rotates through
+// 3 physical buffers every frame (c_NumReSTIRDIReservoirBuffers = 3):
+//   A = (lastFrameOutput + 1) % 3   -- Initial writes here, Temporal reads+overwrites here in place
+//   C = lastFrameOutput             -- Temporal's history read (read-only)
+//   B = (A + 1) % 3                 -- Spatial reads A (own input + all neighbors), writes here
+// FinalShading reads B; next frame lastFrameOutput = B. Using only 2 buffers here would reintroduce
+// the exact read/write race already hit and fixed once for GI's spatial pass.
+
+struct PushConstantReSTIRDIInitial
+{
+    mat4 invViewProj;
+    vec4 cameraWorldPos;
+    uint64_t matrixReference;
+    uint64_t lightDataReference;
+    uint64_t reservoirBufferReference; // writes to buffer A
+    uint32_t depthTextureIndex;
+    uint32_t gbufferNormalIndex;
+    uint32_t gbufferAlbedoIndex;
+    uint32_t gbufferMaterialIndex;
+    vec2 viewportSize; // offset 120, multiple of 8
+    uint32_t frameIndex;
+    uint32_t reservoirBlockRowPitch;
+    uint32_t reservoirArrayPitch;
+    uint32_t firstLocalLightIndex;
+    uint32_t numLocalLights;
+    uint32_t firstInfiniteLightIndex;
+    uint32_t numInfiniteLights;
+    uint32_t numLocalLightSamples;
+    uint32_t numInfiniteLightSamples;
+};
+
+struct PushConstantReSTIRDITemporal
+{
+    mat4 invViewProj;
+    mat4 prevInvViewProj; // MUST use the actual previous-frame matrix for previous-frame G-buffer
+                          // reconstruction -- using this frame's matrix instead is the exact bug
+                          // that caused ReSTIR GI's camera-motion light leaks, fixed once already.
+    vec4 cameraWorldPos;
+    uint64_t matrixReference;
+    uint64_t lightDataReference;
+    uint64_t currentReservoirReference;  // buffer A: this frame's initial candidate; overwritten
+                                          // in place with the temporal result (safe: own-pixel only)
+    uint64_t previousReservoirReference; // buffer C: history, read-only
+    uint32_t depthTextureIndex;
+    uint32_t prevDepthTextureIndex;
+    uint32_t gbufferNormalIndex;
+    uint32_t prevNormalTextureIndex;
+    uint32_t gbufferVelocityIndex;
+    uint32_t gbufferMaterialIndex;
+    vec2 viewportSize; // offset 200, multiple of 8 -- confirmed via slangc -reflection-json
+    uint32_t frameIndex;
+    uint32_t reservoirBlockRowPitch;
+    uint32_t reservoirArrayPitch;
+    uint32_t maxHistoryLength;
+    float normalThreshold;
+    float depthThreshold;
+    uint32_t enablePermutationSampling;
+};
+
+struct PushConstantReSTIRDISpatial
+{
+    mat4 invViewProj;
+    vec4 cameraWorldPos;
+    uint64_t matrixReference;
+    uint64_t lightDataReference;
+    uint64_t inputReservoirReference;  // buffer A: read only, own-pixel input + every neighbor
+    uint64_t outputReservoirReference; // buffer B: write only, final result
+    uint64_t neighborOffsetsReference; // reuses the same neighbor-offsets buffer/format as GI
+    uint32_t depthTextureIndex;
+    uint32_t gbufferNormalIndex;
+    uint32_t gbufferMaterialIndex;
+    uint32_t frameIndex;
+    vec2 viewportSize; // offset 136, multiple of 8 -- confirmed via slangc -reflection-json
+    uint32_t reservoirBlockRowPitch;
+    uint32_t reservoirArrayPitch;
+    float samplingRadius;
+    uint32_t numSamples;
+    float normalThreshold;
+    float depthThreshold;
+    uint32_t neighborOffsetMask;
+};
+
+struct PushConstantReSTIRDIFinalShading
+{
+    mat4 invViewProj;
+    vec4 cameraWorldPos;
+    uint64_t matrixReference;
+    uint64_t lightDataReference;
+    uint64_t reservoirReference; // buffer B, read only
+    uint32_t depthTextureIndex;
+    uint32_t gbufferNormalIndex;
+    uint32_t gbufferAlbedoIndex;
+    uint32_t gbufferMaterialIndex;
+    vec2 viewportSize; // offset 120, multiple of 8
+    uint32_t frameIndex;
+    uint32_t reservoirBlockRowPitch;
+    uint32_t reservoirArrayPitch;
 };
 
 struct PushConstantOutline
