@@ -469,7 +469,10 @@ namespace Nox
 
             char buffer[256];
             memset(buffer, 0, sizeof(buffer));
-            strcpy_s(buffer, sizeof(buffer), tag.c_str());
+            // Truncate rather than strcpy_s (which aborts the whole editor if tag.c_str() is >= 256
+            // bytes) -- this runs every frame the entity is selected, so any tag that's too long for
+            // any reason (bad scene file, future scripting API, etc.) should never be able to crash it.
+            strncpy_s(buffer, sizeof(buffer), tag.c_str(), _TRUNCATE);
             if (ImGui::InputText("##Tag", buffer, sizeof(buffer)))
             {
                 tag = std::string(buffer);

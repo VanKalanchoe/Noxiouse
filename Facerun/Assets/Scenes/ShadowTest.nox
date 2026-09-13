@@ -114,3 +114,55 @@ Entities:
       Parent: 0
       Children:
         - 6128903582924250201
+  - Entity: 8814402273156094721
+    TagComponent:
+      Tag: Point Light Red
+    TransformComponent:
+      Translation: [2, 1, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    PointLightComponent:
+      Color: [1, 0.2, 0.2]
+      Intensity: 8
+      Range: 5
+      Radius: 0.05
+      ShadowSamples: 1
+  - Entity: 2947183659021845337
+    TagComponent:
+      Tag: Point Light Blue
+    TransformComponent:
+      Translation: [-2, 1.5, 1]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    PointLightComponent:
+      Color: [0.2, 0.3, 1]
+      Intensity: 4
+      Range: 4
+      Radius: 0.05
+      ShadowSamples: 1
+  - Entity: 5502837719463920184
+    TagComponent:
+      Tag: Point Light Yellow (Bright)
+    TransformComponent:
+      Translation: [0, 3, 1]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    PointLightComponent:
+      Color: [1, 0.9, 0.2]
+      Intensity: 12
+      Range: 6
+      Radius: 0.05
+      ShadowSamples: 1
+  - Entity: 3691047825613297840
+    TagComponent:
+      Tag: Point Light Purple (Dim)
+    TransformComponent:
+      Translation: [1.5, -1, -1]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    PointLightComponent:
+      Color: [0.7, 0.2, 1]
+      Intensity: 3
+      Range: 3
+      Radius: 0.05
+      ShadowSamples: 1

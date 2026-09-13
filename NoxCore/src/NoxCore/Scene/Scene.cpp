@@ -404,6 +404,39 @@ namespace Nox
         }
     }
     
+    // Strips a trailing " (N)" suffix (if present) and appends the smallest " (N)" that doesn't collide
+    // with an existing entity name. Replaces the old "always append ' Copy'" scheme, which grew the tag
+    // by 5 characters every time a duplicate was itself duplicated (Ctrl+D repeatedly on the new copy)
+    // -- eventually overflowing the 256-byte tag buffer in SceneHierarchyPanel::DrawComponents and
+    // crashing strcpy_s. Numbering here re-bases off the stripped stem, so it never grows unbounded.
+    std::string Scene::MakeUniqueDuplicateName(const std::string& baseName)
+    {
+        std::string stem = baseName;
+        if (!stem.empty() && stem.back() == ')')
+        {
+            size_t openParen = stem.find_last_of('(');
+            if (openParen != std::string::npos)
+            {
+                std::string inside = stem.substr(openParen + 1, stem.size() - openParen - 2);
+                if (!inside.empty() && inside.find_first_not_of("0123456789") == std::string::npos)
+                {
+                    stem = stem.substr(0, openParen);
+                    while (!stem.empty() && stem.back() == ' ')
+                        stem.pop_back();
+                }
+            }
+        }
+
+        int n = 1;
+        std::string candidate = stem + " (" + std::to_string(n) + ")";
+        while (FindEntityByName(candidate))
+        {
+            n++;
+            candidate = stem + " (" + std::to_string(n) + ")";
+        }
+        return candidate;
+    }
+
     Entity Scene::DuplicateEntity(Entity entity)
     {
         // Relationship links contain entity UUIDs and must be rebuilt. Copying
@@ -418,7 +451,7 @@ namespace Nox
         std::function<Entity(Entity, Entity)> duplicateHierarchy =
             [&](Entity source, Entity parent) -> Entity
         {
-            Entity duplicate = CreateEntity(source.GetName() + " Copy");
+            Entity duplicate = CreateEntity(MakeUniqueDuplicateName(source.GetName()));
             CopyComponentIfExists(DuplicatableComponents{}, duplicate, source);
 
             if (parent || source.HasComponent<RelationshipComponent>())

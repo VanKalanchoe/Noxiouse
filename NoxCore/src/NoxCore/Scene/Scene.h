@@ -66,8 +66,10 @@ namespace Nox
         
         void OnPhysics2DStart();
         void OnPhysics2DStop();
-        
+
         void RenderScene(EditorCamera& camera);
+
+        std::string MakeUniqueDuplicateName(const std::string& baseName);
     private:
         entt::registry m_Registry;
         uint32_t m_ViewportWidth = 0, m_ViewportHeight = 0;

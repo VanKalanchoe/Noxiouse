@@ -13,6 +13,16 @@ static RTXDI_PackedDIReservoir* g_ReservoirBuffer;
 static PushConstantReSTIRDIInitial g_PushConstant;
 static UniformBufferObject* g_UBO;
 static LightData* g_LightData;
+static uint2* g_RISBuffer; // [0, risBufferOffset): plain RIS tiles; [risBufferOffset, end): ReGIR cells
+#define RTXDI_RIS_BUFFER g_RISBuffer
+
+// Grid mode only (== RTXDI_REGIR_GRID, defined in Rtxdi/ReGIR/ReGIRParameters.h) -- our scenes are
+// bounded interiors (like Sponza), never the open/unbounded worlds Onion mode targets. Must be defined
+// before any RTXDI header that checks it -- Rtxdi/DI/ReSTIRDIParameters.h above already transitively
+// pulls in ReGIRParameters.h (via RtxdiParameters.h), which defaults this to RTXDI_REGIR_DISABLED, so
+// undef first to override it cleanly instead of triggering a macro-redefinition warning.
+#undef RTXDI_REGIR_MODE
+#define RTXDI_REGIR_MODE 1
 
 // v1: analytic point/spot/directional lights only -- every light is punctual/delta (no area to
 // integrate over), so RAB_LightInfo is just our existing LightData directly, and RAB_LightSample
@@ -183,6 +193,23 @@ float RAB_GetLightSampleTargetPdfForSurface(RAB_LightSample lightSample, RAB_Sur
 float RAB_LightSampleSolidAnglePdf(RAB_LightSample lightSample) { return lightSample.solidAnglePdf; }
 bool RAB_IsAnalyticLightSample(RAB_LightSample lightSample) { return true; }
 
+// The following 7 stubs exist only because Rtxdi/DI/InitialSampling.hlsli's RTXDI_SampleBrdf /
+// RTXDI_SampleEnvironmentMap reference them unconditionally (Slang compiles every function in an
+// included header regardless of whether it's actually called) -- they are genuinely unreachable given
+// our config: RAB_IsAnalyticLightSample always returns true above (short-circuiting RTXDI_LightBrdfMisWeight
+// before it ever reaches RAB_SurfaceEvaluateBrdfPdf), and we always pass numBrdfSamples = 0 /
+// environmentLightParams.lightPresent = 0 from ReSTIRDIInitial's fragMain, so RTXDI_SampleBrdf's loop
+// never executes and RTXDI_SampleEnvironmentMap returns immediately. We use the SDK's real
+// RTXDI_SampleLightsForSurface (rather than a hand-rolled combine) specifically so this MIS/combine
+// logic matches RTXPT exactly instead of being reimplemented.
+bool RAB_SurfaceImportanceSampleBrdf(RAB_Surface surface, inout RTXDI_RandomSamplerState rng, out float3 dir) { dir = float3(0.0, 1.0, 0.0); return false; }
+float RAB_SurfaceEvaluateBrdfPdf(RAB_Surface surface, float3 dir) { return 0.0; }
+bool RAB_TraceRayForLocalLight(float3 origin, float3 direction, float tMin, float tMax, out uint lightIndex, out float2 randXY) { lightIndex = RTXDI_InvalidLightIndex; randXY = float2(0.0); return false; }
+float RAB_EvaluateLocalLightSourcePdf(uint lightIndex) { return 0.0; }
+float RAB_EvaluateEnvironmentMapSamplingPdf(float3 dir) { return 0.0; }
+float2 RAB_GetEnvironmentMapRandXYFromDir(float3 dir) { return float2(0.0); }
+bool RAB_GetConservativeVisibility(RAB_Surface surface, RAB_LightSample lightSample) { return true; }
+
 RAB_Surface RAB_GetGBufferSurface(int2 pixelPos, bool isPreviousFrame)
 {
     RAB_Surface s = RAB_EmptySurface();
@@ -252,50 +279,47 @@ uint RTXDI_ReservoirPositionToPointer(
 }
 
 #include "Rtxdi/DI/ReservoirStorage.hlsli"
-#include "Rtxdi/LightSampling/UniformSampling.hlsli"
 
-// Hand-rolled initial sampling (mirrors RTXDI_SampleInfiniteLights' body, applied to both light
-// regions) instead of including Rtxdi/DI/InitialSampling.hlsli: that header unconditionally compiles
-// RTXDI_SampleBrdf/RTXDI_SampleEnvironmentMap/ReGIR presampling as part of the same file regardless of
-// whether they're actually called, which would require stubbing out half a dozen RAB_ functions
-// (BRDF importance sampling, environment map PDFs, ReGIR cell lookup) that make no sense for our
-// delta-lights-only, uniform-sampling v1. We don't need MIS blending either (RTXDI_LightBrdfMisWeight
-// is a no-op whenever brdfMisWeight == 0, which is always true here since we have zero BRDF samples),
-// so streaming samples directly via RTXDI_StreamSample is exactly equivalent to the SDK's own path
-// for our case, just without the dead code.
-RTXDI_DIReservoir SampleLightsUniform(
-    inout RTXDI_RandomSamplerState rng,
-    RAB_Surface surface,
-    RTXDI_LightBufferRegion region,
-    uint numSamples,
-    out RAB_LightSample o_selectedSample)
+RAB_LightInfo RAB_LoadCompactLightInfo(uint linearIndex)
 {
-    RTXDI_DIReservoir state = RTXDI_EmptyDIReservoir();
-    o_selectedSample = RAB_EmptyLightSample();
+    // We never use RTXDI's "compact light info" packed format -- RAB_StoreCompactLightInfo (in
+    // ReSTIRDIPresampleReGIR.slang / ReSTIRDIPresample.slang) always returns false, so
+    // RTXDI_LIGHT_COMPACT_BIT is never set and this is genuinely unreachable at runtime; it only needs
+    // to exist because LocalLightSelection.hlsli's RTXDI_UnpackLocalLightFromRISLightData references it.
+    return RAB_EmptyLightInfo();
+}
 
-    if (region.numLights == 0 || numSamples == 0)
-        return state;
+// The real SDK entry point (Rtxdi/DI/InitialSampling.hlsli) -- gives us RTXDI_SampleLightsForSurface,
+// which combines local (RIS/ReGIR) + infinite + environment-map + BRDF sampling with correct MIS
+// weighting, exactly like RTXPT's GenerateInitialSamples.hlsl. We pass numEnvironmentSamples = 0 and
+// numBrdfSamples = 0 from fragMain below, and RAB_IsAnalyticLightSample always returns true above, so
+// the BRDF/environment-map code paths are genuinely dead (their few RAB_ dependencies are stubbed
+// above) -- this is the exact reference combine/MIS logic, not a reimplementation of it.
+#include "Rtxdi/DI/InitialSampling.hlsli"
 
-    for (uint i = 0; i < numSamples; i++)
-    {
-        float rnd = RTXDI_GetNextRandom(rng);
-        RAB_LightInfo lightInfo;
-        uint lightIndex;
-        float invSourcePdf;
-        RTXDI_RandomlySelectLightUniformly(rnd, region, lightInfo, lightIndex, invSourcePdf);
-
-        float2 uv = float2(RTXDI_GetNextRandom(rng), RTXDI_GetNextRandom(rng));
-        RAB_LightSample candidateSample = RAB_SamplePolymorphicLight(lightInfo, surface, uv);
-        float targetPdf = RAB_GetLightSampleTargetPdfForSurface(candidateSample, surface);
-        float risRnd = RTXDI_GetNextRandom(rng);
-        bool selected = RTXDI_StreamSample(state, lightIndex, uv, risRnd, targetPdf, invSourcePdf);
-        if (selected)
-            o_selectedSample = candidateSample;
-    }
-
-    RTXDI_FinalizeResampling(state, 1.0, state.M);
-    state.M = 1;
-    return state;
+// Builds a ReGIR_Parameters struct from our compact push-constant fields. onionParams is left
+// zero-initialized: Grid mode (RTXDI_REGIR_MODE == RTXDI_REGIR_GRID) never reads it -- confirmed
+// directly from ReGIRSampling.hlsli -- so there's nothing gained by transferring it from the CPU side.
+ReGIR_Parameters BuildReGIRParams()
+{
+    ReGIR_Parameters params;
+    params.commonParams.localLightSamplingFallbackMode = ReSTIRDI_LocalLightSamplingMode_POWER_RIS;
+    params.commonParams.centerX = g_PushConstant.gridCenterAndCellSize.x;
+    params.commonParams.centerY = g_PushConstant.gridCenterAndCellSize.y;
+    params.commonParams.centerZ = g_PushConstant.gridCenterAndCellSize.z;
+    params.commonParams.risBufferOffset = g_PushConstant.risBufferOffset;
+    params.commonParams.lightsPerCell = g_PushConstant.lightsPerCell;
+    params.commonParams.cellSize = g_PushConstant.gridCenterAndCellSize.w;
+    params.commonParams.samplingJitter = g_PushConstant.regirSamplingJitter;
+    params.commonParams.localLightPresamplingMode = REGIR_LOCAL_LIGHT_PRESAMPLING_MODE_POWER_RIS;
+    params.commonParams.numRegirBuildSamples = 0; // only meaningful to the presample pass, unused here
+    params.commonParams.pad1 = 0;
+    params.commonParams.pad2 = 0;
+    params.gridParams.cellsX = g_PushConstant.cellsX;
+    params.gridParams.cellsY = g_PushConstant.cellsY;
+    params.gridParams.cellsZ = g_PushConstant.cellsZ;
+    params.gridParams.pad1 = 0;
+    return params;
 }
 
 struct ReSTIRDIInitialPayload
@@ -376,6 +400,7 @@ PSOutput fragMain(
     if (pushConstant.matrixReference == 0 ||
         pushConstant.lightDataReference == 0 ||
         pushConstant.reservoirBufferReference == 0 ||
+        pushConstant.risBufferReference == 0 ||
         pushConstant.depthTextureIndex == 0xFFFFFFFF ||
         pushConstant.gbufferNormalIndex == 0xFFFFFFFF)
     {
@@ -386,6 +411,7 @@ PSOutput fragMain(
     g_UBO = (UniformBufferObject*)pushConstant.matrixReference;
     g_LightData = (LightData*)pushConstant.lightDataReference;
     g_ReservoirBuffer = (RTXDI_PackedDIReservoir*)pushConstant.reservoirBufferReference;
+    g_RISBuffer = (uint2*)pushConstant.risBufferReference;
 
     RTXDI_ReservoirBufferParameters resParams;
     resParams.reservoirBlockRowPitch = pushConstant.reservoirBlockRowPitch;
@@ -401,32 +427,61 @@ PSOutput fragMain(
     }
 
     RTXDI_RandomSamplerState rng = RTXDI_InitRandomSampler(pixelCoord, pushConstant.frameIndex, 0);
+    // "Coherent" across a small pixel tile, matching RTXDI's own convention (RIS tile / ReGIR cell
+    // choice is meant to be shared by nearby pixels for better cache locality when reading the RIS
+    // buffer -- it's not needed for correctness, only performance).
+    RTXDI_RandomSamplerState coherentRng = RTXDI_InitRandomSampler(pixelCoord / 8, pushConstant.frameIndex, 1);
 
-    RTXDI_LightBufferRegion localRegion;
-    localRegion.firstLightIndex = pushConstant.firstLocalLightIndex;
-    localRegion.numLights = pushConstant.numLocalLights;
-    localRegion.pad1 = 0;
-    localRegion.pad2 = 0;
+    RTXDI_DIInitialSamplingParameters sampleParams;
+    sampleParams.numLocalLightSamples = pushConstant.numLocalLightSamples;
+    sampleParams.numInfiniteLightSamples = pushConstant.numInfiniteLightSamples;
+    sampleParams.numEnvironmentSamples = 0; // no environment map in this engine yet
+    sampleParams.numBrdfSamples = 0;        // no BRDF importance sampling for analytic lights
+    sampleParams.brdfCutoff = 0.0;
+    sampleParams.brdfRayMinT = 0.001;
+    sampleParams.localLightSamplingMode = (pushConstant.regirEnabled != 0)
+        ? ReSTIRDI_LocalLightSamplingMode_REGIR_RIS
+        : ReSTIRDI_LocalLightSamplingMode_POWER_RIS;
+    sampleParams.enableInitialVisibility = 0; // FinalShading.slang already traces the one real shadow ray
+    sampleParams.environmentMapImportanceSampling = 0;
+    sampleParams.pad1 = 0;
+    sampleParams.pad2 = 0;
+    sampleParams.pad3 = 0;
 
-    RTXDI_LightBufferRegion infiniteRegion;
-    infiniteRegion.firstLightIndex = pushConstant.firstInfiniteLightIndex;
-    infiniteRegion.numLights = pushConstant.numInfiniteLights;
-    infiniteRegion.pad1 = 0;
-    infiniteRegion.pad2 = 0;
+    RTXDI_LightBufferParameters lightBufferParams;
+    lightBufferParams.localLightBufferRegion.firstLightIndex = pushConstant.firstLocalLightIndex;
+    lightBufferParams.localLightBufferRegion.numLights = pushConstant.numLocalLights;
+    lightBufferParams.localLightBufferRegion.pad1 = 0;
+    lightBufferParams.localLightBufferRegion.pad2 = 0;
+    lightBufferParams.infiniteLightBufferRegion.firstLightIndex = pushConstant.firstInfiniteLightIndex;
+    lightBufferParams.infiniteLightBufferRegion.numLights = pushConstant.numInfiniteLights;
+    lightBufferParams.infiniteLightBufferRegion.pad1 = 0;
+    lightBufferParams.infiniteLightBufferRegion.pad2 = 0;
+    lightBufferParams.environmentLightParams.lightPresent = 0;
+    lightBufferParams.environmentLightParams.lightIndex = 0;
+    lightBufferParams.environmentLightParams.pad1 = 0;
+    lightBufferParams.environmentLightParams.pad2 = 0;
 
-    RAB_LightSample localSample = RAB_EmptyLightSample();
-    RTXDI_DIReservoir localReservoir = SampleLightsUniform(rng, surface, localRegion,
-        pushConstant.numLocalLightSamples, localSample);
+    RTXDI_RISBufferSegmentParameters localLightRISBufferSegmentParams;
+    localLightRISBufferSegmentParams.bufferOffset = 0; // plain RIS tiles occupy [0, risBufferOffset)
+    localLightRISBufferSegmentParams.tileSize = pushConstant.risTileSize;
+    localLightRISBufferSegmentParams.tileCount = pushConstant.risTileCount;
+    localLightRISBufferSegmentParams.pad1 = 0;
 
-    RAB_LightSample infiniteSample = RAB_EmptyLightSample();
-    RTXDI_DIReservoir infiniteReservoir = SampleLightsUniform(rng, surface, infiniteRegion,
-        pushConstant.numInfiniteLightSamples, infiniteSample);
+    RTXDI_RISBufferSegmentParameters environmentLightRISBufferSegmentParams; // unused (no env light)
+    environmentLightRISBufferSegmentParams.bufferOffset = 0;
+    environmentLightRISBufferSegmentParams.tileSize = 0;
+    environmentLightRISBufferSegmentParams.tileCount = 0;
+    environmentLightRISBufferSegmentParams.pad1 = 0;
 
-    RTXDI_DIReservoir state = RTXDI_EmptyDIReservoir();
-    RTXDI_CombineDIReservoirs(state, localReservoir, 0.5, localReservoir.targetPdf);
-    RTXDI_CombineDIReservoirs(state, infiniteReservoir, RTXDI_GetNextRandom(rng), infiniteReservoir.targetPdf);
-    RTXDI_FinalizeResampling(state, 1.0, 1.0);
-    state.M = 1;
+    // The real SDK entry point: combines local (RIS/ReGIR) + infinite light sampling with correct MIS
+    // weighting between the two streams (environment map / BRDF terms are inert given the zeroed
+    // params above) -- exactly RTXPT's own GenerateInitialSamples.hlsl call.
+    RAB_LightSample selectedSample = RAB_EmptyLightSample();
+    RTXDI_DIReservoir state = RTXDI_SampleLightsForSurface(rng, coherentRng, surface,
+        sampleParams, lightBufferParams,
+        localLightRISBufferSegmentParams, environmentLightRISBufferSegmentParams,
+        BuildReGIRParams(), selectedSample);
 
     RTXDI_StoreDIReservoir(state, resParams, pixelCoord, 0);
 

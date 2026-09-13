@@ -342,6 +342,10 @@
         {
             Texture2D restirDITex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.restirDIDirectLightingTextureIndex, 0));
             directLighting = restirDITex.Load(int3(pixelCoord, 0)).rgb;
+            if (pushConstant.restirDIDenoiserMode == 1) // NRD REBLUR outputs in YCoCg
+            {
+                directLighting = YCoCgToLinear(directLighting);
+            }
         }
         else
         {

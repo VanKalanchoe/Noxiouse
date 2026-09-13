@@ -131,6 +131,17 @@ struct PBRInfo
 static const float M_PI = 3.141592653589793;
 static const float c_MinRoughness = 0.04;
 
+// NRD REBLUR YCoCg conversion (matching NRD.hlsli:398, same fix already applied for ReSTIR GI in
+// ReSTIRGISpatial.slang) -- REBLUR's internal filtering assumes IN_DIFF_RADIANCE_HITDIST is already
+// YCoCg-encoded; RELAX takes plain linear RGB directly, no conversion needed.
+float3 LinearToYCoCg(float3 color)
+{
+    float Y = dot(color, float3(0.25, 0.5, 0.25));
+    float Co = dot(color, float3(0.5, 0.0, -0.5));
+    float Cg = dot(color, float3(-0.25, 0.5, -0.25));
+    return float3(Y, Co, Cg);
+}
+
 float3 pbrDiffuse(PBRInfo p) { return p.diffuseColor / M_PI; }
 
 float3 pbrSpecularReflection(PBRInfo p)
@@ -379,6 +390,14 @@ PSOutput fragMain(
         result = float3(0.0);
     }
 
-    outVal.directLighting = float4(result, 1.0);
+    if (pushConstant.denoiserMode == 1) // NRD REBLUR: encode into YCoCg before writing
+    {
+        result = LinearToYCoCg(result);
+    }
+
+    // Alpha carries the shadow ray's traveled distance (to the light, or 1e4 for directional lights)
+    // -- NRD's hit-distance-based blur radius; matches the same raw/unnormalized convention already
+    // used for ReSTIR GI's diffuseIrradiance.a in ReSTIRGISpatial.slang.
+    outVal.directLighting = float4(result, dist);
     return outVal;
 }

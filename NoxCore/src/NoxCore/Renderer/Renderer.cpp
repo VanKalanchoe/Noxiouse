@@ -159,6 +159,7 @@ namespace Nox
         watchShader("assets/shaders/Reflection.slang", "Reflection", [this]() { createReflectionPipeline(true); });
         // Path Tracer
         watchShader("assets/shaders/PathTracer.slang", "PathTracer", [this]() { createPathTracerPipeline(true); });
+        watchShader("assets/shaders/YCoCgDecodeInPlace.slang", "YCoCgDecodeInPlace", [this]() { createPathTracerPipeline(true); });
         // DDGI
         watchShader("assets/shaders/DDGIRadiance.slang", "DDGIRadiance", [this]() { createDDGIPipelines(true); });
         watchShader("assets/shaders/DDGIBlendIrradiance.slang", "DDGIBlendIrradiance", [this]() { createDDGIPipelines(true); });
@@ -168,6 +169,10 @@ namespace Nox
         watchShader("assets/shaders/ReSTIRGIInitial.slang", "ReSTIRGIInitial", [this]() { createReSTIRGIPipelines(true); });
         watchShader("assets/shaders/ReSTIRGITemporal.slang", "ReSTIRGITemporal", [this]() { createReSTIRGIPipelines(true); });
         watchShader("assets/shaders/ReSTIRGISpatial.slang", "ReSTIRGISpatial", [this]() { createReSTIRGIPipelines(true); });
+        watchShader("assets/shaders/ReSTIRDIWriteLightPDF.slang", "ReSTIRDIWriteLightPDF", [this]() { createReSTIRDIPipelines(true); });
+        watchShader("assets/shaders/ReSTIRDIReduceLightPDFMip.slang", "ReSTIRDIReduceLightPDFMip", [this]() { createReSTIRDIPipelines(true); });
+        watchShader("assets/shaders/ReSTIRDIPresample.slang", "ReSTIRDIPresample", [this]() { createReSTIRDIPipelines(true); });
+        watchShader("assets/shaders/ReSTIRDIPresampleReGIR.slang", "ReSTIRDIPresampleReGIR", [this]() { createReSTIRDIPipelines(true); });
         watchShader("assets/shaders/ReSTIRDIInitial.slang", "ReSTIRDIInitial", [this]() { createReSTIRDIPipelines(true); });
         watchShader("assets/shaders/ReSTIRDITemporal.slang", "ReSTIRDITemporal", [this]() { createReSTIRDIPipelines(true); });
         watchShader("assets/shaders/ReSTIRDISpatial.slang", "ReSTIRDISpatial", [this]() { createReSTIRDIPipelines(true); });
@@ -385,12 +390,36 @@ namespace Nox
             m_dlssRayReconstructionEnabled = enabled;
             m_resetDLSS = true; // Signals Streamline to flush history cleanly on the next frame without destroying contexts
 
-            // Mutual Exclusion: DLSS-RR replaces downstream reflection/GI denoisers (NRD REBLUR/RELAX)
-            if (enabled && m_nrdReflectionDenoiser != NRI::NRDReflectionDenoiser::Off)
+            // Mutual Exclusion: DLSS-RR replaces every downstream NRD denoiser (reflections/GI/DI in the
+            // hybrid path, or the whole image in the path tracer) -- running both would double-filter.
+            if (enabled)
             {
-                m_nrdReflectionDenoiser = NRI::NRDReflectionDenoiser::Off;
-                m_resetNRD = true;
-                NOX_CORE_INFO("[Denoising] DLSS Ray Reconstruction activated: NRD REBLUR/RELAX automatically disabled (mutually exclusive).");
+                bool anyDisabled = false;
+                if (m_nrdReflectionDenoiser != NRI::NRDReflectionDenoiser::Off)
+                {
+                    m_nrdReflectionDenoiser = NRI::NRDReflectionDenoiser::Off;
+                    anyDisabled = true;
+                }
+                if (m_nrdGIDenoiser != NRI::NRDDiffuseDenoiser::Off)
+                {
+                    m_nrdGIDenoiser = NRI::NRDDiffuseDenoiser::Off;
+                    anyDisabled = true;
+                }
+                if (m_nrdDIDenoiser != NRI::NRDDiffuseDenoiser::Off)
+                {
+                    m_nrdDIDenoiser = NRI::NRDDiffuseDenoiser::Off;
+                    anyDisabled = true;
+                }
+                if (m_nrdPTDenoiser != NRI::NRDDiffuseDenoiser::Off)
+                {
+                    m_nrdPTDenoiser = NRI::NRDDiffuseDenoiser::Off;
+                    anyDisabled = true;
+                }
+                if (anyDisabled)
+                {
+                    m_resetNRD = true;
+                    NOX_CORE_INFO("[Denoising] DLSS Ray Reconstruction activated: NRD REBLUR/RELAX automatically disabled (mutually exclusive).");
+                }
             }
         }
     }
@@ -408,6 +437,54 @@ namespace Nox
                 m_dlssRayReconstructionEnabled = false;
                 m_resetDLSS = true;
                 NOX_CORE_INFO("[Denoising] NRD Reflection Denoiser activated: DLSS Ray Reconstruction automatically disabled (mutually exclusive).");
+            }
+        }
+    }
+
+    void Renderer::setNRDGIDenoiser(NRI::NRDDiffuseDenoiser mode)
+    {
+        if (m_nrdGIDenoiser != mode)
+        {
+            m_nrdGIDenoiser = mode;
+            m_resetNRD = true;
+
+            if (mode != NRI::NRDDiffuseDenoiser::Off && m_dlssRayReconstructionEnabled)
+            {
+                m_dlssRayReconstructionEnabled = false;
+                m_resetDLSS = true;
+                NOX_CORE_INFO("[Denoising] NRD GI Denoiser activated: DLSS Ray Reconstruction automatically disabled (mutually exclusive).");
+            }
+        }
+    }
+
+    void Renderer::setNRDDIDenoiser(NRI::NRDDiffuseDenoiser mode)
+    {
+        if (m_nrdDIDenoiser != mode)
+        {
+            m_nrdDIDenoiser = mode;
+            m_resetNRD = true;
+
+            if (mode != NRI::NRDDiffuseDenoiser::Off && m_dlssRayReconstructionEnabled)
+            {
+                m_dlssRayReconstructionEnabled = false;
+                m_resetDLSS = true;
+                NOX_CORE_INFO("[Denoising] NRD DI Denoiser activated: DLSS Ray Reconstruction automatically disabled (mutually exclusive).");
+            }
+        }
+    }
+
+    void Renderer::setNRDPTDenoiser(NRI::NRDDiffuseDenoiser mode)
+    {
+        if (m_nrdPTDenoiser != mode)
+        {
+            m_nrdPTDenoiser = mode;
+            m_resetNRD = true;
+
+            if (mode != NRI::NRDDiffuseDenoiser::Off && m_dlssRayReconstructionEnabled)
+            {
+                m_dlssRayReconstructionEnabled = false;
+                m_resetDLSS = true;
+                NOX_CORE_INFO("[Denoising] NRD Path Tracer Denoiser activated: DLSS Ray Reconstruction automatically disabled (mutually exclusive).");
             }
         }
     }
@@ -607,6 +684,22 @@ namespace Nox
             });
             m_resourceHeap->registerTexture(*m_pathTracerAccum[i]);
         }
+
+        // Storage usage (not ColorAttachment): NRD's DenoiseVK call writes this via its own internal
+        // barriers regardless, but the in-place YCoCg decode pass (YCoCgDecodeInPlace.slang, needed
+        // only when REBLUR is selected) also needs a UAV write slot on it -- Storage usage already
+        // includes eSampled (see TextureVK.cpp), so reading it as a normal bindless texture still works.
+        m_denoisedPathTracer = m_device->createTexture(NRI::TextureDesc{
+            .width = width,
+            .height = height,
+            .mipLevels = 1,
+            .sampleCount = 1,
+            .usage = NRI::TextureUsage::Storage,
+            .format = NRI::ImageFormat::R16G16B16A16_SFLOAT,
+            .directFormat = UINT32_MAX
+        });
+        m_resourceHeap->registerTexture(*m_denoisedPathTracer, NRI::TextureUsage::ShaderResource);
+        m_denoisedPathTracerWriteSlot = m_resourceHeap->registerStorageTextureMip(*m_denoisedPathTracer, 0);
     }
 
     void Renderer::createPathTracerPipeline(bool forceCompile)
@@ -632,6 +725,16 @@ namespace Nox
         });
 
         m_pathTracerPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+
+        NRI::PipelineDesc decodeDesc{};
+        decodeDesc.type = NRI::PipelineType::Compute;
+        decodeDesc.forceCompile = forceCompile;
+        decodeDesc.shaders.push_back({
+            .stage = NRI::ShaderStage::Compute,
+            .entryPoint = "compMain",
+            .sourcePath = "assets/shaders/YCoCgDecodeInPlace.slang"
+        });
+        m_ycocgDecodePipeline = m_device->createPipeline(decodeDesc, *m_shaderCompiler);
     }
 
     void Renderer::createDDGIResources()
@@ -833,6 +936,22 @@ namespace Nox
         });
         m_resourceHeap->registerTexture(*m_restirDIDirectLighting);
 
+        if (m_denoisedReSTIRDIDirectLighting)
+        {
+            m_resourceHeap->unregisterTexture(m_denoisedReSTIRDIDirectLighting->GetDescriptorIndexSlot());
+        }
+
+        m_denoisedReSTIRDIDirectLighting = m_device->createTexture(NRI::TextureDesc{
+            .width = width,
+            .height = height,
+            .mipLevels = 1,
+            .sampleCount = 1,
+            .usage = NRI::TextureUsage::ColorAttachment,
+            .format = NRI::ImageFormat::R16G16B16A16_SFLOAT,
+            .directFormat = UINT32_MAX
+        });
+        m_resourceHeap->registerTexture(*m_denoisedReSTIRDIDirectLighting);
+
         // 2. Reservoir Buffers: 3 physical buffers, rotated every frame (NOT GI's fixed 2-role
         // scheme -- see the rotation math documented on PushConstantReSTIRDIInitial in shaderIO.h).
         RTXDI_ReservoirBufferParameters resParams = rtxdi::CalculateReservoirBufferParameters(
@@ -851,6 +970,49 @@ namespace Nox
         }
 
         m_restirDILastFrameOutputReservoir = 0;
+
+        // 3. RIS Buffer (uint2 per element): [0, risBufferOffset) = plain RIS tiles, [risBufferOffset,
+        // end) = ReGIR grid cells. Not render-resolution-dependent -- only (re)created once, like
+        // m_restirGINeighborOffsetsBuffer, not on every resize.
+        if (!m_restirDIRISBuffer)
+        {
+            uint32_t risTileElements = m_restirDIRISTileSize * m_restirDIRISTileCount;
+            uint32_t regirCellCount = m_regirCellsX * m_regirCellsY * m_regirCellsZ;
+            uint32_t regirElements = regirCellCount * m_regirLightsPerCell;
+            uint64_t risBufferSize = static_cast<uint64_t>(risTileElements + regirElements) * sizeof(glm::uvec2);
+
+            m_restirDIRISBuffer = m_device->createBuffer(NRI::BufferDesc{
+                .size = risBufferSize,
+                .usage = NRI::BufferUsage::Storage
+            });
+            void* mapped = m_restirDIRISBuffer->map(0, risBufferSize);
+            memset(mapped, 0, risBufferSize);
+            m_restirDIRISBuffer->unmap();
+        }
+
+        // 4. Local-light PDF mip chain (feeds RTXDI_PresampleLocalLights) -- also created once, not
+        // render-resolution-dependent, exactly like the RIS buffer above.
+        if (!m_lightPDFTexture)
+        {
+            m_lightPDFMipLevels = static_cast<uint32_t>(log2(static_cast<double>(m_lightPDFTextureSize)));
+
+            m_lightPDFTexture = m_device->createTexture(NRI::TextureDesc{
+                .width = m_lightPDFTextureSize,
+                .height = m_lightPDFTextureSize,
+                .mipLevels = m_lightPDFMipLevels,
+                .sampleCount = 1,
+                .usage = NRI::TextureUsage::Storage,
+                .format = NRI::ImageFormat::R16_SFLOAT,
+                .directFormat = UINT32_MAX
+            });
+            m_resourceHeap->registerTexture(*m_lightPDFTexture, NRI::TextureUsage::ShaderResource);
+
+            m_lightPDFMipStorageSlots.clear();
+            for (uint32_t mip = 0; mip < m_lightPDFMipLevels; mip++)
+            {
+                m_lightPDFMipStorageSlots.push_back(m_resourceHeap->registerStorageTextureMip(*m_lightPDFTexture, mip));
+            }
+        }
     }
 
     void Renderer::createDDGIPipelines(bool forceCompile)
@@ -1020,6 +1182,58 @@ namespace Nox
 
     void Renderer::createReSTIRDIPipelines(bool forceCompile)
     {
+        // -1a. Light PDF Mip 0 Write Pipeline (feeds RTXDI_PresampleLocalLights)
+        {
+            NRI::PipelineDesc desc{};
+            desc.type = NRI::PipelineType::Compute;
+            desc.forceCompile = forceCompile;
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Compute,
+                .entryPoint = "compMain",
+                .sourcePath = "assets/shaders/ReSTIRDIWriteLightPDF.slang"
+            });
+            m_restirDIWriteLightPDFPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        }
+
+        // -1b. Light PDF Mip Chain Reduce Pipeline (sum-reduction, dispatched once per mip level)
+        {
+            NRI::PipelineDesc desc{};
+            desc.type = NRI::PipelineType::Compute;
+            desc.forceCompile = forceCompile;
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Compute,
+                .entryPoint = "compMain",
+                .sourcePath = "assets/shaders/ReSTIRDIReduceLightPDFMip.slang"
+            });
+            m_restirDIReduceLightPDFMipPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        }
+
+        // 0a. RIS Presample Pipeline (plain 1D compute, no G-buffer -- see shaderIO.h comment)
+        {
+            NRI::PipelineDesc desc{};
+            desc.type = NRI::PipelineType::Compute;
+            desc.forceCompile = forceCompile;
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Compute,
+                .entryPoint = "compMain",
+                .sourcePath = "assets/shaders/ReSTIRDIPresample.slang"
+            });
+            m_restirDIPresamplePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        }
+
+        // 0b. ReGIR Presample Pipeline (plain 1D compute)
+        {
+            NRI::PipelineDesc desc{};
+            desc.type = NRI::PipelineType::Compute;
+            desc.forceCompile = forceCompile;
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Compute,
+                .entryPoint = "compMain",
+                .sourcePath = "assets/shaders/ReSTIRDIPresampleReGIR.slang"
+            });
+            m_restirDIPresampleReGIRPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        }
+
         // 1. Initial Sampling Pipeline
         {
             NRI::PipelineDesc desc{};
@@ -2947,10 +3161,16 @@ namespace Nox
             m_commandBuffers->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
         }
 
+        // Computed here (rather than down at the lighting-pass switch) so every hybrid-only pass below
+        // (reflections, DDGI, ReSTIR GI, ReSTIR DI) can skip itself entirely while path tracing --
+        // none of their output is ever consumed in that case (the path tracer computes everything
+        // itself from scratch), so running them was pure wasted GPU time every frame.
+        bool runPathTracer = (m_pathTracingEnabled || m_debugMode == 18 || m_debugMode == 19);
+
         // =========================================================================
         // 2.65. RAY TRACED REFLECTION PASS (Evaluates 1-SPP GGX VNDF -> m_rawReflection)
         // =========================================================================
-        if (m_reflectionPipeline && m_rawReflection && (uniformData.enableRTReflections != 0))
+        if (!runPathTracer && m_reflectionPipeline && m_rawReflection && (uniformData.enableRTReflections != 0))
         {
             std::vector<NRI::RenderAttachDesc> reflectionAttachments;
             reflectionAttachments.push_back({
@@ -3001,7 +3221,7 @@ namespace Nox
         // =========================================================================
         // 2.7. NRD REFLECTIONS DENOISING PASS (Denoises 1-SPP Reflections via REBLUR / RELAX)
         // =========================================================================
-        if (m_nrdReflectionDenoiser != NRI::NRDReflectionDenoiser::Off && (uniformData.enableRTReflections != 0) &&
+        if (!runPathTracer && m_nrdReflectionDenoiser != NRI::NRDReflectionDenoiser::Off && (uniformData.enableRTReflections != 0) &&
             m_device->isNRDInitialized() &&
             m_rawReflection && m_denoisedReflection && m_viewZ && m_nrdNormalRoughness)
         {
@@ -3027,7 +3247,13 @@ namespace Nox
             m_commandBuffers->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
         }
 
-        m_resetNRD = false;
+        // NOTE: m_resetNRD is intentionally NOT cleared here anymore -- it used to be reset right after
+        // reflections, which meant DDGI/ReSTIR GI/ReSTIR DI/path-tracer's own NRD passes further below
+        // (all of which also read it for their own resetHistory flag) always saw it as already false,
+        // silently defeating the "flush history on denoiser toggle" mutual-exclusion logic in
+        // setNRDGIDenoiser/setNRDDIDenoiser/setNRDPTDenoiser for anything but shadows/reflections. It's
+        // cleared once, after every NRD consumer this frame has had a chance to read it (see below,
+        // right before the lighting pass switch).
 
         // =========================================================================
         // 2.8. DYNAMIC DIFFUSE GLOBAL ILLUMINATION (DDGI) PASSES
@@ -3036,7 +3262,8 @@ namespace Nox
         // DDGI ray-traces every probe against the scene TLAS (see DDGIRadiance.slang), so it has no
         // meaning without ray tracing hardware access -- gate it on the master toggle too, or turning
         // "Enable Hybrid Ray Tracing" off silently leaves it (and its cost) running.
-        bool runDDGI = m_rayTracingEnabled &&
+        bool runDDGI = !runPathTracer &&
+                       m_rayTracingEnabled &&
                        (m_ddgiEnabled || m_debugMode == 16 || m_debugMode == 17) &&
                        m_ddgiRadiancePipeline && m_ddgiBlendIrradiancePipeline && m_ddgiBlendDistancePipeline &&
                        m_ddgiRayData && m_ddgiIrradiance[0] && m_ddgiIrradiance[1] &&
@@ -3205,7 +3432,8 @@ namespace Nox
         // ReSTIR GI ray-traces its initial candidate against the scene TLAS, so like DDGI it has no
         // meaning without ray tracing hardware access -- gate it on the master toggle too, or turning
         // "Enable Hybrid Ray Tracing" off silently leaves it (and its cost) running.
-        bool runReSTIRGI = m_rayTracingEnabled &&
+        bool runReSTIRGI = !runPathTracer &&
+                           m_rayTracingEnabled &&
                            (m_diffuseGIMode == 2 || (m_debugMode == 16 && m_diffuseGIMode != 1)) &&
                            m_hasTLASBuild && m_sceneTLAS && (uniformData.tlasDeviceAddress != 0) &&
                            (uniformData.instanceLUTReference != 0) &&
@@ -3394,17 +3622,6 @@ namespace Nox
                 m_commandBuffers->executionBarrier();
             }
 
-            // Snapshot this frame's depth/normal into the "previous frame" buffers now that the
-            // temporal pass above has already consumed last frame's snapshot -- these feed next
-            // frame's ReSTIR GI temporal reprojection validity check (see declaration comment on
-            // m_prevDepthResource).
-            if (m_prevDepthResource && m_prevGbufferNormal)
-            {
-                m_commandBuffers->copyTexture(*m_depthResource, *m_prevDepthResource, m_renderSize.width, m_renderSize.height);
-                m_commandBuffers->copyTexture(*m_gbufferNormal, *m_prevGbufferNormal, m_renderSize.width, m_renderSize.height);
-                m_commandBuffers->executionBarrier();
-            }
-
             // =========================================================================
             // NRD DIFFUSE GI DENOISING PASS (Denoises 1-SPP ReSTIR GI via REBLUR / RELAX)
             // =========================================================================
@@ -3463,18 +3680,37 @@ namespace Nox
             memcpy(m_uniformBuffersMapped[frameIndex], &uniformData, sizeof(shaderio::UniformBufferObject));
         }
 
+        // Snapshot this frame's depth/normal into the "previous frame" buffers now that both ReSTIR
+        // GI's and ReSTIR DI's temporal passes have already consumed last frame's snapshot -- these
+        // feed next frame's temporal reprojection validity check (see declaration comment on
+        // m_prevDepthResource). Must run unconditionally here, NOT only inside `if (runReSTIRGI)`:
+        // ReSTIR DI's temporal pass reads these same "prev" textures too, so gating this behind GI
+        // being enabled left DI reprojecting against a permanently stale snapshot whenever GI was off,
+        // producing ghost shadows on camera movement that only "fixed themselves" when GI was toggled
+        // on (which happened to keep this copy running as a side effect).
+        if (m_prevDepthResource && m_prevGbufferNormal)
+        {
+            m_commandBuffers->copyTexture(*m_depthResource, *m_prevDepthResource, m_renderSize.width, m_renderSize.height);
+            m_commandBuffers->copyTexture(*m_gbufferNormal, *m_prevGbufferNormal, m_renderSize.width, m_renderSize.height);
+            m_commandBuffers->executionBarrier();
+        }
+
         // =========================================================================
         // 2.95. RESTIR DI (SCREEN-SPACE RESAMPLED DIRECT LIGHTING VIA RTXDI)
         // =========================================================================
         // Same master-toggle gating as DDGI/ReSTIR GI (see the master-toggle bug fixed for those
         // two): ReSTIR DI ray-traces its final shadow against the scene TLAS, so it has no meaning
         // without ray tracing hardware access.
-        bool runReSTIRDI = m_rayTracingEnabled &&
+        bool runReSTIRDI = !runPathTracer &&
+                           m_rayTracingEnabled &&
                            m_directLightingMode == 1 &&
                            m_hasTLASBuild && m_sceneTLAS && (uniformData.tlasDeviceAddress != 0) &&
                            m_restirDIInitialPipeline && m_restirDITemporalPipeline &&
                            m_restirDISpatialPipeline && m_restirDIFinalShadingPipeline &&
+                           m_restirDIPresamplePipeline && m_restirDIPresampleReGIRPipeline &&
+                           m_restirDIWriteLightPDFPipeline && m_restirDIReduceLightPDFMipPipeline &&
                            m_restirDIDirectLighting && m_restirGINeighborOffsetsBuffer &&
+                           m_restirDIRISBuffer && m_lightPDFTexture &&
                            m_restirDIReservoirBuffers[0] && m_restirDIReservoirBuffers[1] &&
                            m_restirDIReservoirBuffers[2] && (uniformData.lightDataReference != 0);
 
@@ -3489,6 +3725,95 @@ namespace Nox
             uint32_t diBufferA = (m_restirDILastFrameOutputReservoir + 1) % 3; // Initial writes here, Temporal overwrites in place
             uint32_t diBufferC = m_restirDILastFrameOutputReservoir;          // Temporal's history (read only)
             uint32_t diBufferB = (diBufferA + 1) % 3;                         // Spatial's output, FinalShading's input
+
+            uint32_t regirCellCount = m_regirCellsX * m_regirCellsY * m_regirCellsZ;
+            uint32_t risBufferOffset = m_restirDIRISTileSize * m_restirDIRISTileCount; // where ReGIR's segment starts
+
+            // -1. Light PDF Mip Chain Rebuild (feeds RTXDI_PresampleLocalLights below) -- rebuilt every
+            // frame alongside the RIS/ReGIR presample passes, same cadence as the rest of ReSTIR DI's
+            // per-frame light data (lights can move/change color every frame).
+            {
+                m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Compute, *m_restirDIWriteLightPDFPipeline);
+
+                shaderio::PushConstantReSTIRDIWriteLightPDF wPush{};
+                wPush.lightDataReference = uniformData.lightDataReference;
+                wPush.firstLocalLightIndex = m_restirDIFirstLocalLight;
+                wPush.numLocalLights = m_restirDINumLocalLights;
+                wPush.pdfTextureStorageIndex = m_lightPDFMipStorageSlots[0];
+                wPush.pdfTextureSize = m_lightPDFTextureSize;
+                m_commandBuffers->pushData(&wPush, sizeof(shaderio::PushConstantReSTIRDIWriteLightPDF));
+
+                uint32_t pdfGroups = (m_lightPDFTextureSize + 7) / 8;
+                m_commandBuffers->dispatch(pdfGroups, pdfGroups, 1);
+                m_commandBuffers->executionBarrier();
+
+                m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Compute, *m_restirDIReduceLightPDFMipPipeline);
+                for (uint32_t mip = 1; mip < m_lightPDFMipLevels; mip++)
+                {
+                    shaderio::PushConstantReSTIRDIReduceLightPDFMip rPush{};
+                    rPush.srcTextureIndex = m_lightPDFTexture->GetDescriptorIndexSlot();
+                    rPush.dstStorageIndex = m_lightPDFMipStorageSlots[mip];
+                    rPush.srcMip = mip - 1;
+                    rPush.dstSize = m_lightPDFTextureSize >> mip;
+                    m_commandBuffers->pushData(&rPush, sizeof(shaderio::PushConstantReSTIRDIReduceLightPDFMip));
+
+                    uint32_t mipGroups = ((rPush.dstSize > 0 ? rPush.dstSize : 1) + 7) / 8;
+                    m_commandBuffers->dispatch(mipGroups, mipGroups, 1);
+                    m_commandBuffers->executionBarrier();
+                }
+            }
+
+            // 0a. RIS Presample Pass (plain 1D compute -- calls the SDK's real RTXDI_PresampleLocalLights
+            // against the light PDF mip chain above; also serves as ReGIR's fallback for out-of-grid pixels)
+            {
+                m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Compute, *m_restirDIPresamplePipeline);
+
+                shaderio::PushConstantReSTIRDIPresample risPush{};
+                risPush.lightDataReference = uniformData.lightDataReference;
+                risPush.risBufferReference = m_restirDIRISBuffer->getDeviceAddress();
+                risPush.firstLocalLightIndex = m_restirDIFirstLocalLight;
+                risPush.numLocalLights = m_restirDINumLocalLights;
+                risPush.risTileSize = m_restirDIRISTileSize;
+                risPush.risTileCount = m_restirDIRISTileCount;
+                risPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
+                risPush.pdfTextureIndex = m_lightPDFTexture->GetDescriptorIndexSlot();
+                risPush.pdfTextureSize = m_lightPDFTextureSize;
+                m_commandBuffers->pushData(&risPush, sizeof(shaderio::PushConstantReSTIRDIPresample));
+
+                uint32_t risThreads = m_restirDIRISTileSize * m_restirDIRISTileCount;
+                m_commandBuffers->dispatch((risThreads + 63) / 64, 1, 1);
+                m_commandBuffers->executionBarrier();
+            }
+
+            // 0b. ReGIR Presample Pass (plain 1D compute -- one thread per (cell, slot-within-cell))
+            if (m_regirEnabled && regirCellCount > 0)
+            {
+                m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Compute, *m_restirDIPresampleReGIRPipeline);
+
+                shaderio::PushConstantReSTIRDIPresampleReGIR regirPush{};
+                regirPush.lightDataReference = uniformData.lightDataReference;
+                regirPush.risBufferReference = m_restirDIRISBuffer->getDeviceAddress();
+                regirPush.gridCenterAndCellSize = glm::vec4(m_regirGridCenter, m_regirCellSize);
+                regirPush.firstLocalLightIndex = m_restirDIFirstLocalLight;
+                regirPush.numLocalLights = m_restirDINumLocalLights;
+                regirPush.risBufferOffset = risBufferOffset;
+                regirPush.lightsPerCell = m_regirLightsPerCell;
+                regirPush.cellsX = m_regirCellsX;
+                regirPush.cellsY = m_regirCellsY;
+                regirPush.cellsZ = m_regirCellsZ;
+                regirPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
+                regirPush.regirSamplingJitter = m_regirSamplingJitter;
+                regirPush.risTileSize = m_restirDIRISTileSize;
+                regirPush.risTileCount = m_restirDIRISTileCount;
+                regirPush.numRegirBuildSamples = m_regirNumBuildSamples;
+                m_commandBuffers->pushData(&regirPush, sizeof(shaderio::PushConstantReSTIRDIPresampleReGIR));
+
+                uint32_t regirThreads = regirCellCount * m_regirLightsPerCell;
+                m_commandBuffers->dispatch((regirThreads + 63) / 64, 1, 1);
+                m_commandBuffers->executionBarrier();
+            }
+
+            m_commandBuffers->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
 
             // 1. Initial Sampling Pass
             {
@@ -3536,6 +3861,17 @@ namespace Nox
                 diInitPush.numInfiniteLights = m_restirDINumInfiniteLights;
                 diInitPush.numLocalLightSamples = m_restirDINumLocalLightSamples;
                 diInitPush.numInfiniteLightSamples = m_restirDINumInfiniteLightSamples;
+                diInitPush.risBufferReference = m_restirDIRISBuffer->getDeviceAddress();
+                diInitPush.risBufferOffset = risBufferOffset;
+                diInitPush.risTileSize = m_restirDIRISTileSize;
+                diInitPush.risTileCount = m_restirDIRISTileCount;
+                diInitPush.regirEnabled = (m_regirEnabled && regirCellCount > 0) ? 1 : 0;
+                diInitPush.cellsX = m_regirCellsX;
+                diInitPush.cellsY = m_regirCellsY;
+                diInitPush.cellsZ = m_regirCellsZ;
+                diInitPush.lightsPerCell = m_regirLightsPerCell;
+                diInitPush.gridCenterAndCellSize = glm::vec4(m_regirGridCenter, m_regirCellSize);
+                diInitPush.regirSamplingJitter = m_regirSamplingJitter;
                 m_commandBuffers->pushData(&diInitPush, sizeof(shaderio::PushConstantReSTIRDIInitial));
 
                 m_commandBuffers->drawMeshTasks(1, 1, 1);
@@ -3694,6 +4030,7 @@ namespace Nox
                 diFPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
                 diFPush.reservoirBlockRowPitch = diResParams.reservoirBlockRowPitch;
                 diFPush.reservoirArrayPitch = diResParams.reservoirArrayPitch;
+                diFPush.denoiserMode = static_cast<uint32_t>(m_nrdDIDenoiser);
                 m_commandBuffers->pushData(&diFPush, sizeof(shaderio::PushConstantReSTIRDIFinalShading));
 
                 m_commandBuffers->drawMeshTasks(1, 1, 1);
@@ -3703,8 +4040,40 @@ namespace Nox
 
             m_restirDILastFrameOutputReservoir = diBufferB;
 
+            // =========================================================================
+            // NRD DIRECT-LIGHTING DENOISING PASS (Denoises 1-SPP ReSTIR DI via REBLUR / RELAX)
+            // =========================================================================
+            bool restirDIDenoised = false;
+            if (m_nrdDIDenoiser != NRI::NRDDiffuseDenoiser::Off &&
+                m_device->isNRDInitialized() &&
+                m_restirDIDirectLighting && m_denoisedReSTIRDIDirectLighting && m_viewZ && m_nrdNormalRoughness)
+            {
+                NRI::NRDDiffuseParams diDenoiseParams{};
+                diDenoiseParams.inDiffuseRadianceHitDist = m_restirDIDirectLighting.get();
+                diDenoiseParams.inMotionVectors = m_gbufferVelocity.get();
+                diDenoiseParams.inNormalRoughness = m_nrdNormalRoughness.get();
+                diDenoiseParams.inViewZ = m_viewZ.get();
+                diDenoiseParams.outDenoisedDiffuse = m_denoisedReSTIRDIDirectLighting.get();
+                diDenoiseParams.commandBuffer = m_commandBuffers.get();
+
+                diDenoiseParams.view = uniformData.view;
+                diDenoiseParams.proj = uniformData.nonJitteredProj;
+                diDenoiseParams.prevView = uniformData.prevView;
+                diDenoiseParams.prevProj = uniformData.prevProj;
+
+                diDenoiseParams.motionVectorScale = glm::vec2(1.0f, 1.0f);
+                diDenoiseParams.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
+                diDenoiseParams.resetHistory = m_isFirstFrame || m_resetNRD;
+
+                restirDIDenoised = m_device->evaluateNRDDiffuseDI(diDenoiseParams, m_nrdDIDenoiser);
+                m_commandBuffers->executionBarrier();
+                m_commandBuffers->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
+            }
+
             uniformData.directLightingMode = m_directLightingMode;
-            uniformData.restirDIDirectLightingTextureIndex = m_restirDIDirectLighting->GetDescriptorIndexSlot();
+            uniformData.restirDIDirectLightingTextureIndex = restirDIDenoised
+                ? m_denoisedReSTIRDIDirectLighting->GetDescriptorIndexSlot()
+                : m_restirDIDirectLighting->GetDescriptorIndexSlot();
             memcpy(m_uniformBuffersMapped[frameIndex], &uniformData, sizeof(shaderio::UniformBufferObject));
         }
         else
@@ -3717,15 +4086,18 @@ namespace Nox
         // =========================================================================
         // 3. LIGHTING PASS: PATH TRACER (Modes 18 & 19) OR DEFERRED LIGHTING
         // =========================================================================
-        bool runPathTracer = (m_pathTracingEnabled || m_debugMode == 18 || m_debugMode == 19);
+        // runPathTracer computed earlier (before the reflections/DDGI/ReSTIR GI/DI sections) so they
+        // can skip themselves entirely while path tracing is active.
         if (runPathTracer && m_pathTracerPipeline && m_pathTracerAccum[0] && m_pathTracerAccum[1])
         {
             bool dlssRRActive = m_dlssEnabled && (m_dlssMode != NRI::UpscaleMode::Off) && m_dlssRayReconstructionEnabled;
+            bool nrdPTActive = m_nrdPTDenoiser != NRI::NRDDiffuseDenoiser::Off;
             bool cameraMoved = (uniformData.view != m_pathTracerPrevView);
 
-            // If DLSS-RR is active, it denoises 1-SPP per frame via motion vectors.
-            // When DLSS-RR is OFF, accumulate progressively when static!
-            bool accumulate = m_pathTracingAccumulation && (m_debugMode != 18) && !dlssRRActive;
+            // If DLSS-RR or NRD is active, it denoises 1-SPP per frame via motion vectors instead --
+            // running our own progressive accumulation on top would double up on temporal blending.
+            // Accumulate progressively only when neither denoiser is handling that job, and static.
+            bool accumulate = m_pathTracingAccumulation && (m_debugMode != 18) && !dlssRRActive && !nrdPTActive;
             if (cameraMoved || !accumulate)
             {
                 m_pathTracerSampleCount = 0;
@@ -3771,11 +4143,57 @@ namespace Nox
             ptPush.sampleCount = accumulate ? m_pathTracerSampleCount : 1;
             ptPush.debugMode = accumulate ? 19 : 18;
             ptPush.skyboxTextureIndex = m_environmentCubemap ? m_environmentCubemap->GetDescriptorIndexSlot() : 0xFFFFFFFF;
+            ptPush.denoiserMode = static_cast<uint32_t>(m_nrdPTDenoiser);
             m_commandBuffers->pushData(&ptPush, sizeof(shaderio::PushConstantPathTracer));
 
             m_commandBuffers->drawMeshTasks(1, 1, 1);
             m_commandBuffers->endRendering();
             m_commandBuffers->executionBarrier();
+
+            // =========================================================================
+            // NRD PATH TRACER DENOISING PASS (fallback for hardware/preference without DLSS-RR)
+            // =========================================================================
+            m_pathTracerDenoised = false;
+            if (nrdPTActive && m_device->isNRDInitialized() &&
+                m_pathTracerAccum[writeIndex] && m_denoisedPathTracer && m_viewZ && m_nrdNormalRoughness)
+            {
+                NRI::NRDDiffuseParams ptDenoiseParams{};
+                ptDenoiseParams.inDiffuseRadianceHitDist = m_pathTracerAccum[writeIndex].get();
+                ptDenoiseParams.inMotionVectors = m_gbufferVelocity.get();
+                ptDenoiseParams.inNormalRoughness = m_nrdNormalRoughness.get();
+                ptDenoiseParams.inViewZ = m_viewZ.get();
+                ptDenoiseParams.outDenoisedDiffuse = m_denoisedPathTracer.get();
+                ptDenoiseParams.commandBuffer = m_commandBuffers.get();
+
+                ptDenoiseParams.view = uniformData.view;
+                ptDenoiseParams.proj = uniformData.nonJitteredProj;
+                ptDenoiseParams.prevView = uniformData.prevView;
+                ptDenoiseParams.prevProj = uniformData.prevProj;
+
+                ptDenoiseParams.motionVectorScale = glm::vec2(1.0f, 1.0f);
+                ptDenoiseParams.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
+                ptDenoiseParams.resetHistory = m_isFirstFrame || m_resetNRD || cameraMoved;
+
+                m_pathTracerDenoised = m_device->evaluateNRDDiffusePT(ptDenoiseParams, m_nrdPTDenoiser);
+                m_commandBuffers->executionBarrier();
+                m_commandBuffers->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
+
+                // REBLUR's output is still YCoCg-encoded (see LinearToYCoCg in PathTracer.slang) --
+                // decode it back to linear in place before DLSS/tonemapping (which don't know about
+                // YCoCg) ever read it. RELAX never encodes YCoCg, so this is skipped for it.
+                if (m_pathTracerDenoised && m_nrdPTDenoiser == NRI::NRDDiffuseDenoiser::REBLUR && m_ycocgDecodePipeline)
+                {
+                    m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Compute, *m_ycocgDecodePipeline);
+                    shaderio::PushConstantYCoCgDecode decodePush{};
+                    decodePush.readTextureIndex = m_denoisedPathTracer->GetDescriptorIndexSlot();
+                    decodePush.writeTextureIndex = m_denoisedPathTracerWriteSlot;
+                    decodePush.width = m_renderSize.width;
+                    decodePush.height = m_renderSize.height;
+                    m_commandBuffers->pushData(&decodePush, sizeof(shaderio::PushConstantYCoCgDecode));
+                    m_commandBuffers->dispatch((m_renderSize.width + 7) / 8, (m_renderSize.height + 7) / 8, 1);
+                    m_commandBuffers->executionBarrier();
+                }
+            }
         }
         else if (m_deferredLightingPipeline)
         {
@@ -3843,6 +4261,11 @@ namespace Nox
             lightingPush.restirGIDenoiserMode = restirGIActuallyDenoised ? static_cast<uint32_t>(m_nrdGIDenoiser) : 0;
             lightingPush.directLightingMode = uniformData.directLightingMode;
             lightingPush.restirDIDirectLightingTextureIndex = uniformData.restirDIDirectLightingTextureIndex;
+            // Same reasoning as restirGIActuallyDenoised above: only decode YCoCg when the bound
+            // texture is actually the denoised one this frame.
+            bool restirDIActuallyDenoised = m_denoisedReSTIRDIDirectLighting &&
+                uniformData.restirDIDirectLightingTextureIndex == m_denoisedReSTIRDIDirectLighting->GetDescriptorIndexSlot();
+            lightingPush.restirDIDenoiserMode = restirDIActuallyDenoised ? static_cast<uint32_t>(m_nrdDIDenoiser) : 0;
             m_commandBuffers->pushData(&lightingPush, sizeof(shaderio::PushConstantDeferredLighting));
 
             m_commandBuffers->drawMeshTasks(1, 1, 1);
@@ -3964,6 +4387,11 @@ namespace Nox
             m_commandBuffers->executionBarrier();
         }
 
+        // Cleared here, now that every NRD consumer this frame (shadows/reflections above, and
+        // GI/DI/path-tracer's own denoise passes inside the lighting-pass switch just above) has had a
+        // chance to read it as a one-shot "a denoiser was just toggled, flush history" signal.
+        m_resetNRD = false;
+
         // 4.5 DLSS EVALUATION PASS (via NRI Device Abstraction)
         // =========================================================================
         bool dlssActive = false;
@@ -3972,8 +4400,13 @@ namespace Nox
             uint32_t ptWriteIndex = m_pathTracerSampleCount % 2;
 
             NRI::DLSSParams dlssParams{};
-            // Route the noisy 1-SPP Path Tracer buffer to DLSS when Path Tracing is active!
-            dlssParams.inputColor = runPathTracer ? m_pathTracerAccum[ptWriteIndex].get() : m_hdrSceneResource.get();
+            // Route the noisy 1-SPP Path Tracer buffer to DLSS when Path Tracing is active -- unless
+            // NRD already denoised it this frame (mutually exclusive with DLSS-RR, so DLSS here is
+            // acting as pure upscaling), in which case feed it the already-denoised, already-decoded
+            // linear result instead of the raw noisy one.
+            dlssParams.inputColor = runPathTracer
+                ? (m_pathTracerDenoised ? m_denoisedPathTracer.get() : m_pathTracerAccum[ptWriteIndex].get())
+                : m_hdrSceneResource.get();
             dlssParams.outputColor = m_dlssOutputResource.get();
             dlssParams.depth = m_depthResource.get();
             dlssParams.motionVectors = m_gbufferVelocity.get();
@@ -4061,9 +4494,16 @@ namespace Nox
             }
             else if (runPathTracer)
             {
-                uint32_t writeIndex = m_pathTracerSampleCount % 2;
-                if (m_pathTracerAccum[writeIndex])
-                    activeHdrSlot = m_pathTracerAccum[writeIndex]->GetDescriptorIndexSlot();
+                if (m_pathTracerDenoised && m_denoisedPathTracer)
+                {
+                    activeHdrSlot = m_denoisedPathTracer->GetDescriptorIndexSlot();
+                }
+                else
+                {
+                    uint32_t writeIndex = m_pathTracerSampleCount % 2;
+                    if (m_pathTracerAccum[writeIndex])
+                        activeHdrSlot = m_pathTracerAccum[writeIndex]->GetDescriptorIndexSlot();
+                }
             }
 
             postPush.hdrTextureIndex = activeHdrSlot;

@@ -409,6 +409,7 @@ struct PushConstantDeferredLighting
     // when active -- see directLightingMode)
     uint32_t directLightingMode; // 0 = brute-force analytic loop (existing), 1 = ReSTIR DI
     uint32_t restirDIDirectLightingTextureIndex;
+    uint32_t restirDIDenoiserMode; // 0 = Off, 1 = REBLUR (output is YCoCg, needs decoding), 2 = RELAX (plain RGB)
 };
 
 struct PushConstantPathTracer
@@ -422,6 +423,17 @@ struct PushConstantPathTracer
     uint32_t accumulationTextureIndex; // Texture slot for previous accumulation
     uint32_t debugMode;                // 16 = 1-SPP, 17 = Progressive Accumulation
     uint32_t skyboxTextureIndex;       // Environment cubemap slot
+    uint32_t denoiserMode;              // 0 = Off (plain RGB), 1 = NRD REBLUR (needs YCoCg encode), 2 = NRD RELAX (plain RGB)
+};
+
+// Decodes an NRD REBLUR-denoised texture's YCoCg color back to linear RGB in place -- see
+// YCoCgDecodeInPlace.slang. Only needed when denoiserMode == 1 (REBLUR); RELAX never encodes YCoCg.
+struct PushConstantYCoCgDecode
+{
+    uint32_t readTextureIndex;  // bindless ShaderResource slot
+    uint32_t writeTextureIndex; // bindless Storage slot (same underlying texture, mip 0)
+    uint32_t width;
+    uint32_t height;
 };
 
 struct PushConstantPostProcess
@@ -563,6 +575,73 @@ struct PushConstantReSTIRGISpatial
 // FinalShading reads B; next frame lastFrameOutput = B. Using only 2 buffers here would reintroduce
 // the exact read/write race already hit and fixed once for GI's spatial pass.
 
+// RIS presample pass: builds risTileCount tiles of risTileSize power-weighted local-light candidates
+// each (one compute thread per RIS buffer slot). Independent of ReGIR -- also serves as the fallback
+// for pixels whose world position falls outside the ReGIR grid.
+// Writes mip 0 of the light PDF texture: one thread per texel, Z-curve indexed (RTXDI_LinearIndexToZCurve)
+// so RTXDI_ZCurveToLinearIndex can recover the light index later during RTXDI_SamplePdfMipmap's
+// hierarchical descent. Texels beyond numLocalLights are written 0 (unused).
+struct PushConstantReSTIRDIWriteLightPDF
+{
+    uint64_t lightDataReference;
+    uint32_t firstLocalLightIndex;
+    uint32_t numLocalLights;
+    uint32_t pdfTextureStorageIndex; // mip-0 storage (UAV) descriptor slot
+    uint32_t pdfTextureSize;
+};
+
+// Sum-reduces one mip level of the light PDF texture from the previous (finer) mip -- NOT an average:
+// RTXDI_SamplePdfMipmap's hierarchical descent needs each coarser texel to hold the total probability
+// mass of the 4 finer texels it covers, so a plain box-filter average would silently bias the sampling
+// distribution.
+struct PushConstantReSTIRDIReduceLightPDFMip
+{
+    uint32_t srcTextureIndex;  // bindless ShaderResource slot, read via Texture2D<float>.Load(pos, srcMip)
+    uint32_t dstStorageIndex;  // destination mip's storage (UAV) descriptor slot
+    uint32_t srcMip;
+    uint32_t dstSize;
+};
+
+struct PushConstantReSTIRDIPresample
+{
+    uint64_t lightDataReference;
+    uint64_t risBufferReference;
+    uint32_t firstLocalLightIndex;
+    uint32_t numLocalLights;
+    uint32_t risTileSize;
+    uint32_t risTileCount;
+    uint32_t frameIndex;
+    uint32_t pdfTextureIndex; // bindless ShaderResource slot for the light PDF mip chain
+    uint32_t pdfTextureSize;
+};
+
+// ReGIR presample pass: one compute thread per (cell, slot-within-cell), each doing its own
+// power-weighted draw over every local light, weighted by importance to that cell's center rather
+// than to a specific surface point. Writes into a SEPARATE segment of the same RIS buffer, offset by
+// risBufferOffset (grid-mode only -- our scenes are bounded interiors, no need for ReGIR's "Onion"
+// mode meant for open/unbounded worlds).
+struct PushConstantReSTIRDIPresampleReGIR
+{
+    uint64_t lightDataReference;
+    uint64_t risBufferReference;
+    vec4 gridCenterAndCellSize; // xyz: center, w: cell size (meters)
+    uint32_t firstLocalLightIndex;
+    uint32_t numLocalLights;
+    uint32_t risBufferOffset;
+    uint32_t lightsPerCell;
+    uint32_t cellsX;
+    uint32_t cellsY;
+    uint32_t cellsZ;
+    uint32_t frameIndex;
+    float regirSamplingJitter; // 0 = no jitter (fully static cell assignment), 1 = full +/-0.5 cell
+                                // (RTXPT's default); must match ReSTIRDIInitial.slang's lookup jitter
+                                // so the cell's precomputed weighting radius matches what's actually sampled
+    uint32_t risTileSize;   // plain RIS tile segment params (fallback candidate pool for
+    uint32_t risTileCount;  // RTXDI_PresampleLocalLightsForReGIR's Power_RIS presampling mode)
+    uint32_t numRegirBuildSamples; // RTXPT's default: 8 weighted draws combined per cell slot via
+                                    // streaming RIS, not a single full-light-list pass
+};
+
 struct PushConstantReSTIRDIInitial
 {
     mat4 invViewProj;
@@ -584,6 +663,23 @@ struct PushConstantReSTIRDIInitial
     uint32_t numInfiniteLights;
     uint32_t numLocalLightSamples;
     uint32_t numInfiniteLightSamples;
+
+    // RIS + ReGIR (phase 2: power-weighted local-light candidates instead of pure uniform selection)
+    uint64_t risBufferReference;   // shared uint2-per-element buffer: [0, risBufferOffset) = plain RIS
+                                    // tiles (fallback / out-of-grid), [risBufferOffset, end) = ReGIR cells
+    uint32_t risBufferOffset;
+    uint32_t risTileSize;
+    uint32_t risTileCount;
+    uint32_t regirEnabled; // 0 = plain RIS-tile sampling only, 1 = try a ReGIR cell first
+    uint32_t cellsX;
+    uint32_t cellsY;
+    uint32_t cellsZ;
+    uint32_t lightsPerCell;
+    vec4 gridCenterAndCellSize; // xyz: world-space grid center, w: cell size (meters)
+    float regirSamplingJitter; // 0 = no jitter (fully static cell assignment, stable but hard cell-boundary
+                                // edges), 1 = full +/-0.5 cell jitter (RTXPT's default, diffuses cell
+                                // discretization error across frames/pixels at the cost of visible edge
+                                // instability with only a handful of lights and no heavy temporal accumulation)
 };
 
 struct PushConstantReSTIRDITemporal
@@ -652,6 +748,7 @@ struct PushConstantReSTIRDIFinalShading
     uint32_t frameIndex;
     uint32_t reservoirBlockRowPitch;
     uint32_t reservoirArrayPitch;
+    uint32_t denoiserMode; // 0 = Off (plain RGB), 1 = NRD REBLUR (needs YCoCg encode), 2 = NRD RELAX (plain RGB)
 };
 
 struct PushConstantOutline

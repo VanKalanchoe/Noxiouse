@@ -254,12 +254,10 @@ namespace Nox
         bool& getReSTIRGIEnableBoilingFilter() { return m_restirGIEnableBoilingFilter; }
         float& getReSTIRGIBoilingFilterStrength() { return m_restirGIBoilingFilterStrength; }
         NRI::NRDDiffuseDenoiser getNRDGIDenoiser() const { return m_nrdGIDenoiser; }
-        void setNRDGIDenoiser(NRI::NRDDiffuseDenoiser mode) { m_nrdGIDenoiser = mode; }
+        void setNRDGIDenoiser(NRI::NRDDiffuseDenoiser mode);
         Ref<Texture2D> getDenoisedReSTIRGIDiffuse() const { return m_denoisedReSTIRGIDiffuse; }
 
         // ReSTIR DI (Screen-Space Resampled Direct Lighting via RTXDI)
-        // v1: uniform light sampling only, no RIS/ReGIR buffer yet (see PushConstantReSTIRDIInitial
-        // comment in shaderIO.h) -- that's a follow-up quality/perf layer once this is verified working.
         uint32_t getDirectLightingMode() const { return m_directLightingMode; }
         void setDirectLightingMode(uint32_t mode) { m_directLightingMode = mode; }
         Ref<Texture2D> getReSTIRDIDirectLighting() const { return m_restirDIDirectLighting; }
@@ -270,6 +268,17 @@ namespace Nox
         float& getReSTIRDIDepthThreshold() { return m_restirDIDepthThreshold; }
         uint32_t& getReSTIRDINumSpatialSamples() { return m_restirDINumSpatialSamples; }
         float& getReSTIRDISpatialRadius() { return m_restirDISpatialRadius; }
+        bool& getReGIREnabled() { return m_regirEnabled; }
+        float& getReGIRCellSize() { return m_regirCellSize; }
+        glm::vec3& getReGIRGridCenter() { return m_regirGridCenter; }
+        float& getReGIRSamplingJitter() { return m_regirSamplingJitter; }
+        NRI::NRDDiffuseDenoiser getNRDDIDenoiser() const { return m_nrdDIDenoiser; }
+        void setNRDDIDenoiser(NRI::NRDDiffuseDenoiser mode);
+        Ref<Texture2D> getDenoisedReSTIRDIDirectLighting() const { return m_denoisedReSTIRDIDirectLighting; }
+        NRI::NRDDiffuseDenoiser getNRDPTDenoiser() const { return m_nrdPTDenoiser; }
+        void setNRDPTDenoiser(NRI::NRDDiffuseDenoiser mode);
+        Ref<Texture2D> getDenoisedPathTracer() const { return m_denoisedPathTracer; }
+        bool isPathTracerDenoised() const { return m_pathTracerDenoised; }
 
         void setCameraJitterEnabled(bool enabled) { m_cameraJitterEnabled = enabled; }
         bool getCameraJitterEnabled() const { return m_cameraJitterEnabled; }
@@ -536,6 +545,8 @@ namespace Nox
         std::unique_ptr<NRI::Pipeline> m_restirDISpatialPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_restirDIFinalShadingPipeline = nullptr;
         Ref<Texture2D> m_restirDIDirectLighting;
+        Ref<Texture2D> m_denoisedReSTIRDIDirectLighting;
+        NRI::NRDDiffuseDenoiser m_nrdDIDenoiser = NRI::NRDDiffuseDenoiser::Off;
         std::unique_ptr<NRI::Buffer> m_restirDIReservoirBuffers[3];
         uint32_t m_restirDILastFrameOutputReservoir = 0;
 
@@ -547,20 +558,87 @@ namespace Nox
         uint32_t m_restirDIFirstInfiniteLight = 0;
         uint32_t m_restirDINumInfiniteLights = 0;
 
+        // Defaults match RTXPT's own RtxdiApplicationSettings.cpp (getReSTIRDIInitialSamplingParams/
+        // getReSTIRDITemporalResamplingParams/getReSTIRDISpatialResamplingParams) exactly, except
+        // where we deliberately deviate (noted at each dispatch site): BASIC bias correction instead
+        // of Raytraced (avoids extra shadow rays per neighbor/per history sample), and no initial
+        // visibility ray yet (RTXPT's enableInitialVisibility = true).
         uint32_t m_directLightingMode = 0; // 0 = brute-force analytic loop, 1 = ReSTIR DI
-        uint32_t m_restirDINumLocalLightSamples = 4;
+        uint32_t m_restirDINumLocalLightSamples = 8;
         uint32_t m_restirDINumInfiniteLightSamples = 1;
         uint32_t m_restirDIMaxHistoryLength = 20;
-        float m_restirDINormalThreshold = 0.6f;
+        float m_restirDINormalThreshold = 0.5f;
         float m_restirDIDepthThreshold = 0.1f;
-        uint32_t m_restirDINumSpatialSamples = 4;
+        uint32_t m_restirDINumSpatialSamples = 1;
         float m_restirDISpatialRadius = 32.0f;
+
+        // RIS + ReGIR (phase 2 of ReSTIR DI): power-weighted local-light candidates instead of pure
+        // uniform selection. Both presample passes are plain 1D compute dispatches (no G-buffer
+        // involvement, unlike everything else in this engine's mesh-shader-fullscreen-triangle
+        // pattern) -- see createReSTIRDIPipelines. RIS tiles are always built (cheap regardless of
+        // light count, and serve as ReGIR's fallback for pixels outside the grid); ReGIR itself is
+        // independently toggleable since it's a pure quality/perf layer on top.
+        std::unique_ptr<NRI::Pipeline> m_restirDIPresamplePipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_restirDIPresampleReGIRPipeline = nullptr;
+        std::unique_ptr<NRI::Buffer> m_restirDIRISBuffer; // uint2 per element; [0, risBufferOffset) =
+                                                            // RIS tiles, [risBufferOffset, end) = ReGIR cells
+        uint32_t m_restirDIRISTileSize = 256;
+        uint32_t m_restirDIRISTileCount = 8;
+
+        // Local-light PDF mip chain (Rtxdi/LightSampling/PresamplingFunctions.hlsli's real
+        // RTXDI_PresampleLocalLights, not a hand-rolled O(numLights) draw) -- 128x128 supports up to
+        // 16384 lights via Z-curve indexing, comfortably covering "thousands of lights" scenes while
+        // staying cheap (a handful of small mips). Rebuilt every frame alongside the RIS/ReGIR
+        // presample passes, same cadence as the rest of ReSTIR DI's per-frame light data.
+        std::unique_ptr<NRI::Pipeline> m_restirDIWriteLightPDFPipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_restirDIReduceLightPDFMipPipeline = nullptr;
+        Ref<Texture2D> m_lightPDFTexture;
+        uint32_t m_lightPDFTextureSize = 128;
+        uint32_t m_lightPDFMipLevels = 0; // == log2(m_lightPDFTextureSize); RTXDI_SamplePdfMipmap only
+                                            // ever descends to a 2x2 mip, not all the way to 1x1
+        std::vector<uint32_t> m_lightPDFMipStorageSlots; // per-mip UAV descriptor slots, cached once
+
+        bool m_regirEnabled = true;
+        // Grid bounds informed by this scene's existing DDGI probe grid (m_ddgiGridOrigin/Spacing/
+        // ProbeCount*), just generously padded -- ReGIR only needs to roughly cover where local lights
+        // and camera-visible surfaces actually are, not be pixel-perfect.
+        // NOTE: these defaults must roughly match whatever scene is loaded -- ReGIR's whole benefit is
+        // localizing the light candidate list to a small region of world space, so the cell size needs
+        // to be small relative to the scene's actual extent (a handful of meters for a small interior
+        // like ShadowTest.nox, not Sponza's tens-of-meters scale). Too coarse and every surface in the
+        // scene collapses into the same 1-2 cells, which shows up as flicker (cells are rebuilt with
+        // fresh RNG every frame, so a near-tie between lights changes winner frame to frame) and no
+        // noise reduction (no real spatial localization is happening). Retune via the editor's ReGIR
+        // "Cell Size" / "Grid Center" controls to match whatever scene is actually loaded.
+        glm::vec3 m_regirGridCenter = glm::vec3(0.0f, 0.5f, -0.5f);
+        float m_regirCellSize = 0.5f;
+        uint32_t m_regirCellsX = 16;
+        uint32_t m_regirCellsY = 16;
+        uint32_t m_regirCellsZ = 16;
+        uint32_t m_regirLightsPerCell = 8;
+        // 0 = fully static cell assignment (no per-frame randomness -- stable, but visible hard edges
+        // right at grid cell boundaries), 1 = RTXPT's default full +/-0.5 cell jitter (diffuses that
+        // discretization error across frames/pixels, but needs either heavy temporal accumulation or a
+        // LOT of lights before the extra per-frame randomness pays for itself instead of just reading as
+        // instability -- default lower than RTXPT's for small scenes with only a handful of lights).
+        float m_regirSamplingJitter = 0.25f;
+        // RTXPT's default: each cell slot combines this many weighted draws via streaming RIS
+        // (RTXDI_PresampleLocalLightsForReGIR), rather than a single full-light-list pass.
+        uint32_t m_regirNumBuildSamples = 8;
 
         // Path Tracer Accumulation Ping-Pong
         Ref<Texture2D> m_pathTracerAccum[2];
         uint32_t m_pathTracerSampleCount = 0;
         glm::mat4 m_pathTracerPrevView = glm::mat4(1.0f);
-        
+
+        // Path Tracer NRD Denoising (fallback for hardware/preference without DLSS Ray Reconstruction --
+        // mutually exclusive with it, same as GI/DI/reflections; see setNRDPTDenoiser)
+        NRI::NRDDiffuseDenoiser m_nrdPTDenoiser = NRI::NRDDiffuseDenoiser::Off;
+        Ref<Texture2D> m_denoisedPathTracer;
+        uint32_t m_denoisedPathTracerWriteSlot = 0; // storage (UAV) slot for the in-place YCoCg decode pass
+        bool m_pathTracerDenoised = false; // true only when the denoised texture was actually written this frame
+        std::unique_ptr<NRI::Pipeline> m_ycocgDecodePipeline = nullptr;
+
         // Post Process
         Ref<Texture2D> m_hdrSceneResource;
 

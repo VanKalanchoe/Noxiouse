@@ -379,14 +379,14 @@ PSOutput fragMain(
 
     RTXDI_DISpatialResamplingParameters sparams;
     sparams.numSamples = pushConstant.numSamples;
-    sparams.numDisocclusionBoostSamples = pushConstant.numSamples;
+    sparams.numDisocclusionBoostSamples = 8; // matches RTXPT's default; inert while targetHistoryLength == 0 below (matches RTXPT's own default too -- M is unsigned so M < 0 never triggers the boost)
     sparams.samplingRadius = pushConstant.samplingRadius;
     sparams.biasCorrectionMode = RTXDI_BIAS_CORRECTION_BASIC;
     sparams.depthThreshold = pushConstant.depthThreshold;
     sparams.normalThreshold = pushConstant.normalThreshold;
-    sparams.targetHistoryLength = 0; // disocclusion boost never kicks in with numDisocclusionBoostSamples == numSamples anyway
-    sparams.enableMaterialSimilarityTest = 0;
-    sparams.discountNaiveSamples = 0;
+    sparams.targetHistoryLength = 0;
+    sparams.enableMaterialSimilarityTest = 1; // matches RTXPT; currently a no-op here since RAB_GetMaterial always reports materialID 0 (no per-pixel material ID plumbed into the G-buffer yet)
+    sparams.discountNaiveSamples = 1;
     sparams.pad1 = 0;
     sparams.pad2 = 0;
     sparams.pad3 = 0;

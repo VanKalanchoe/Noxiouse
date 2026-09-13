@@ -675,6 +675,10 @@ AssetRegistry:
     FilePath: Models/Sponza/Materials/Sponza_Material_24.nmat
     SourceFilePath: Models/Sponza/Materials/Sponza_Material_24.nmat
     Type: AssetType::Material
+  - Handle: 16143494163989141884
+    FilePath: Models/Box/Materials/Box_Red_Instance_12304871944574759851.nmat
+    SourceFilePath: Models/Box/Materials/Box_Red_Instance_12304871944574759851.nmat
+    Type: AssetType::Material
   - Handle: 16181869151272154084
     FilePath: Models/Sponza/Textures/8503262930880235456.ntex
     SourceFilePath: Models/Sponza/8503262930880235456.jpg

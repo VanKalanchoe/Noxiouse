@@ -61,6 +61,8 @@ namespace NRI
         bool evaluateNRDShadows(const NRDShadowParams& params) override;
         bool evaluateNRDReflections(const NRDReflectionParams& params, NRDReflectionDenoiser denoiser) override;
         bool evaluateNRDDiffuse(const NRDDiffuseParams& params, NRDDiffuseDenoiser denoiser) override;
+        bool evaluateNRDDiffuseDI(const NRDDiffuseParams& params, NRDDiffuseDenoiser denoiser) override;
+        bool evaluateNRDDiffusePT(const NRDDiffuseParams& params, NRDDiffuseDenoiser denoiser) override;
         void destroyNRD() override;
         bool isNRDInitialized() const override;
         

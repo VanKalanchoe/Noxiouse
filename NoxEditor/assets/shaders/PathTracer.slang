@@ -1,5 +1,16 @@
 #include "shaderIO.h"
 
+// NRD REBLUR YCoCg conversion (matching NRD.hlsli:398, same fix already applied to ReSTIR GI/DI) --
+// REBLUR's internal filtering assumes IN_DIFF_RADIANCE_HITDIST is already YCoCg-encoded; RELAX takes
+// plain linear RGB directly, no conversion needed.
+float3 LinearToYCoCg(float3 color)
+{
+    float Y = dot(color, float3(0.25, 0.5, 0.25));
+    float Co = dot(color, float3(0.5, 0.0, -0.5));
+    float Cg = dot(color, float3(-0.25, 0.5, -0.25));
+    return float3(Y, Co, Cg);
+}
+
     struct PTPayload
     {
         uint dummy;
@@ -274,6 +285,9 @@
 
         float3 throughput = float3(1.0, 1.0, 1.0);
         float3 radiance = float3(0.0, 0.0, 0.0);
+        // Primary ray's hit distance, for NRD's hit-distance-based blur radius (same convention already
+        // used for ReSTIR DI/GI's alpha channel) -- 1e4 (the ray's TMax) if the primary ray hit nothing.
+        float primaryHitDist = 1e4;
 
         RaytracingAccelerationStructure as = RaytracingAccelerationStructure(ubo->tlasDeviceAddress);
         InstanceLUT* instanceLUTBuffer = (InstanceLUT*)ubo->instanceLUTReference;
@@ -341,6 +355,8 @@
 
             // Hit geometry
             float hitT = rq.CommittedRayT();
+            if (bounce == 0)
+                primaryHitDist = hitT;
             uint committedInstID = rq.CommittedRayInstanceCustomIndex();
             uint committedPrimIndex = rq.CommittedPrimitiveIndex();
             float2 bary = rq.CommittedTriangleBarycentrics();
@@ -610,7 +626,8 @@
         // Mode 18: 1-SPP Interactive Output
         if (pushConstant.debugMode == 18 || pushConstant.sampleCount <= 1)
         {
-            return float4(radiance, 1.0);
+            float3 outColor = (pushConstant.denoiserMode == 1) ? LinearToYCoCg(radiance) : radiance;
+            return float4(outColor, primaryHitDist);
         }
 
         // Mode 19: Progressive Accumulation (blends previous samples over time)
@@ -620,5 +637,6 @@
         float blendFactor = 1.0 / float(pushConstant.sampleCount);
         float3 accumulated = lerp(prevColor.rgb, radiance, blendFactor);
 
-        return float4(accumulated, 1.0);
+        float3 outColor = (pushConstant.denoiserMode == 1) ? LinearToYCoCg(accumulated) : accumulated;
+        return float4(outColor, primaryHitDist);
     }

@@ -1046,7 +1046,7 @@ namespace Nox
                     }
                     if (ImGui::IsItemHovered())
                     {
-                        ImGui::SetTooltip("AI Neural Reconstruction for reflections & indirect lighting.\nReplaces downstream reflection/GI denoisers (automatically disables NRD REBLUR/RELAX).\nNRD SIGMA shadows remain compatible and independent.");
+                        ImGui::SetTooltip("AI Neural Reconstruction for reflections & indirect lighting (hybrid mode), or the whole\nimage (Path Tracing mode). Replaces downstream NRD denoisers -- automatically disables\nany active NRD REBLUR/RELAX. NRD SIGMA shadows remain compatible and independent.");
                     }
                     if (rrEnabled)
                     {
@@ -1078,6 +1078,31 @@ namespace Nox
             if (ImGui::Checkbox("Progressive Ground Truth (Accumulate when static)", &ptAccum))
             {
                 m_Renderer->setPathTracingAccumulation(ptAccum);
+            }
+
+            bool ptDlssRR = m_Renderer->isDLSSRayReconstructionEnabled();
+            if (ptDlssRR)
+            {
+                ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f), "Denoiser: DLSS Ray Reconstruction (Active)");
+                if (ImGui::IsItemHovered())
+                {
+                    ImGui::SetTooltip("DLSS Ray Reconstruction is active and denoises the whole path-traced image.\nSelect NRD REBLUR or RELAX below to switch to cross-vendor non-AI denoising (auto-disables DLSS-RR).");
+                }
+            }
+
+            static const char* ptDenoiserNames[] = {
+                "Off (Raw 1-SPP / Progressive Accumulation)",
+                "NRD REBLUR (Variance Guided)",
+                "NRD RELAX (A-Trous Wavelet)"
+            };
+            int currentPTDenoiser = static_cast<int>(m_Renderer->getNRDPTDenoiser());
+            if (ImGui::Combo("PT Denoiser", &currentPTDenoiser, ptDenoiserNames, IM_ARRAYSIZE(ptDenoiserNames)))
+            {
+                m_Renderer->setNRDPTDenoiser(static_cast<NRI::NRDDiffuseDenoiser>(currentPTDenoiser));
+            }
+            if (ImGui::IsItemHovered())
+            {
+                ImGui::SetTooltip("Cross-vendor non-AI fallback for hardware/preference without DLSS Ray Reconstruction.\nEnabling REBLUR or RELAX automatically disables DLSS-RR and switches off progressive\naccumulation (the denoiser handles temporal stability instead, via motion vectors).");
             }
             ImGui::Unindent();
         }
@@ -1277,6 +1302,28 @@ namespace Nox
                     float& diDepthThresh = m_Renderer->getReSTIRDIDepthThreshold();
                     ImGui::SliderFloat("Depth Threshold##DI", &diDepthThresh, 0.01f, 0.5f, "%.2f");
 
+                    bool& regirEnabled = m_Renderer->getReGIREnabled();
+                    ImGui::Checkbox("ReGIR (World-Space Light Grid)", &regirEnabled);
+                    if (ImGui::IsItemHovered())
+                    {
+                        ImGui::SetTooltip("Pre-bakes power-weighted local-light candidates into a world-space grid so nearby\npixels draw from lights that actually matter at that location, instead of a uniform screen-wide RIS tile.\nOff falls back to the plain RIS tile for every pixel -- still power-weighted, just not spatially localized.");
+                    }
+                    if (regirEnabled)
+                    {
+                        ImGui::Indent();
+                        float& regirCellSize = m_Renderer->getReGIRCellSize();
+                        ImGui::SliderFloat("Cell Size (m)", &regirCellSize, 0.1f, 8.0f, "%.2f");
+                        glm::vec3& regirCenter = m_Renderer->getReGIRGridCenter();
+                        ImGui::DragFloat3("Grid Center", glm::value_ptr(regirCenter), 0.5f);
+                        float& regirJitter = m_Renderer->getReGIRSamplingJitter();
+                        ImGui::SliderFloat("Cell Jitter", &regirJitter, 0.0f, 1.0f, "%.2f");
+                        if (ImGui::IsItemHovered())
+                        {
+                            ImGui::SetTooltip("How much each cell's sampled position wobbles every frame (as a fraction of cell size).\n0 = fully static cell assignment: perfectly stable per-pixel, but you may see a faint grid pattern at cell boundaries.\n1 = RTXPT's default: diffuses that boundary across frames, but with only a handful of lights and no heavy\ntemporal accumulation this reads as light edges constantly moving/flickering instead. Try lowering this\ntoward 0 if lights feel unstable -- raise it back up once you have many more lights in the scene.");
+                        }
+                        ImGui::Unindent();
+                    }
+
                     ImGui::Unindent();
                 }
 
@@ -1360,12 +1407,31 @@ namespace Nox
                     ImGui::SetTooltip("Denoises the raw 1-SPP ReSTIR GI diffuse output using NRD (same suite already denoising reflections/shadows).\nStabilizes the swimming/rotating artifacts inherent to raw ReSTIR GI under camera motion.");
                 }
             }
+
+            if (m_Renderer->getDirectLightingMode() == 1)
+            {
+                showAnyDenoiserControl = true;
+                static const char* diDenoiserNames[] = {
+                    "Off (Raw 1-SPP)",
+                    "NRD REBLUR Diffuse (Variance Guided)",
+                    "NRD RELAX Diffuse (A-Trous Wavelet)"
+                };
+                int currentDIDenoiser = static_cast<int>(m_Renderer->getNRDDIDenoiser());
+                if (ImGui::Combo("DI Denoiser", &currentDIDenoiser, diDenoiserNames, IM_ARRAYSIZE(diDenoiserNames)))
+                {
+                    m_Renderer->setNRDDIDenoiser(static_cast<NRI::NRDDiffuseDenoiser>(currentDIDenoiser));
+                }
+                if (ImGui::IsItemHovered())
+                {
+                    ImGui::SetTooltip("Denoises the raw 1-SPP ReSTIR DI direct lighting output using NRD (its own separate history from the GI denoiser above).\nStabilizes the light-selection noise from RIS/ReGIR resampling under camera motion.");
+                }
+            }
         }
 
         if (!showAnyDenoiserControl)
         {
             ImGui::TextDisabled(m_Renderer->isPathTracingEnabled()
-                ? "Path Tracer denoises via DLSS Ray Reconstruction / progressive accumulation instead."
+                ? "Path Tracer denoising (DLSS-RR / NRD REBLUR-RELAX / progressive accumulation) is configured under Ray Tracing above."
                 : "Enable Ray Tracing Shadows, Reflections, or ReSTIR GI above to configure their denoisers.");
         }
 

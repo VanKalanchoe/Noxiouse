@@ -191,6 +191,15 @@ namespace NRI
         virtual bool evaluateNRDShadows(const struct NRDShadowParams& params) { return false; }
         virtual bool evaluateNRDReflections(const struct NRDReflectionParams& params, NRDReflectionDenoiser denoiser) { return false; }
         virtual bool evaluateNRDDiffuse(const struct NRDDiffuseParams& params, NRDDiffuseDenoiser denoiser) { return false; }
+        // Same signal shape as evaluateNRDDiffuse (a noisy 1-SPP radiance estimate + a normal/depth/MV
+        // gbuffer to reproject against) but registered against its OWN separate NRD denoiser identifiers
+        // internally -- ReSTIR DI's direct lighting and ReSTIR GI's indirect diffuse are two independent
+        // signals with their own temporal history; reusing evaluateNRDDiffuse's identifiers for both
+        // would have them stomp on each other's accumulated history every frame.
+        virtual bool evaluateNRDDiffuseDI(const struct NRDDiffuseParams& params, NRDDiffuseDenoiser denoiser) { return false; }
+        // Same shape again, for the full path tracer's own combined radiance signal -- its own separate
+        // NRD identifiers/history, independent of GI/DI/reflections.
+        virtual bool evaluateNRDDiffusePT(const struct NRDDiffuseParams& params, NRDDiffuseDenoiser denoiser) { return false; }
         virtual void destroyNRD() {}
         virtual bool isNRDInitialized() const { return false; }
         
