@@ -43,12 +43,20 @@ namespace NRI
             })
         };
         
-        std::array<const char*, 13> searchPaths = 
+        // assets/shaders (+ ../ variants) added when RTXDI-related .slang files were reorganized into
+        // assets/shaders/RTXDI/{DI,GI,Presampling,PT}/ subfolders: Slang implicitly searches an
+        // included file's OWN directory first, but a bare #include "shaderIO.h" from one of those
+        // subfolders no longer finds it that way (shaderIO.h lives in the flat assets/shaders root) --
+        // these explicit entries are the fallback that makes it resolve regardless of subfolder depth.
+        std::array<const char*, 16> searchPaths =
         {
             "../NoxCore/src/NoxCore/Renderer",
             "shaders",
             "../shaders",
             "../../shaders",
+            "assets/shaders",
+            "../assets/shaders",
+            "../../assets/shaders",
             "../NoxCore/vendors/RTXDI/Include",
             "../../NoxCore/vendors/RTXDI/Include",
             "../../../NoxCore/vendors/RTXDI/Include",

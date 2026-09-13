@@ -612,6 +612,7 @@ namespace NRI
                         .multiDrawIndirect = true,
                         .wideLines = true,
                         .samplerAnisotropy = true,
+                        .shaderInt16 = true, // <-- Required by RTXDI PT's uint16_t path-state fields (RTXDI_PathTracerState, packed reservoir)
                         .shaderInt64 = true,
                     }
                 }, // vk::PhysicalDeviceFeatures2
@@ -619,6 +620,7 @@ namespace NRI
                 {
                     .storageBuffer8BitAccess = true,
                     .shaderInt8 = true,
+                    .shaderFloat16 = true, // <-- Required by RTXDI PT's float16_t reservoir packing (Reservoir.hlsli)
                     .shaderSampledImageArrayNonUniformIndexing = true,
                     .shaderStorageBufferArrayNonUniformIndexing = true,
                     .descriptorBindingUniformBufferUpdateAfterBind = true,
@@ -1505,7 +1507,7 @@ namespace NRI
         // IN_MV: motion vectors (RG16F)
         bindVKTexture(snapshot, ::nrd::ResourceType::IN_MV, params.inMotionVectors, ::nri::AccessBits::SHADER_RESOURCE_STORAGE, ::nri::Layout::GENERAL, commonStages);
 
-        // IN_NORMAL_ROUGHNESS: normals (RGB) and roughness (A)
+        // IN_NORMAL_ROUGHNESS: NRD R10G10B10A2 packed normal/roughness
         bindVKTexture(snapshot, ::nrd::ResourceType::IN_NORMAL_ROUGHNESS, params.inNormalRoughness, ::nri::AccessBits::SHADER_RESOURCE_STORAGE, ::nri::Layout::GENERAL, commonStages);
 
         // IN_VIEWZ: linear view depth (R16F / R32F)
@@ -1549,6 +1551,11 @@ namespace NRI
         {
             activeDenoiserId = NRDContext::REBLUR_SPECULAR_DENOISER;
             ::nrd::ReblurSettings reblurSettings{};
+            reblurSettings.enableAntiFirefly = true;
+            reblurSettings.hitDistanceReconstructionMode = ::nrd::HitDistanceReconstructionMode::AREA_5X5;
+            reblurSettings.maxAccumulatedFrameNum = 50;
+            reblurSettings.diffusePrepassBlurRadius = 15.0f;
+            reblurSettings.specularPrepassBlurRadius = 40.0f;
             reblurSettings.planeDistanceSensitivity = 0.02f;
             m_nrdContext->integration.SetDenoiserSettings(activeDenoiserId, &reblurSettings);
         }
@@ -1556,6 +1563,22 @@ namespace NRI
         {
             activeDenoiserId = NRDContext::RELAX_SPECULAR_DENOISER;
             ::nrd::RelaxSettings relaxSettings{};
+            relaxSettings.enableAntiFirefly = true;
+            relaxSettings.hitDistanceReconstructionMode = ::nrd::HitDistanceReconstructionMode::OFF;
+            relaxSettings.diffusePrepassBlurRadius = 0.0f;
+            relaxSettings.specularPrepassBlurRadius = 0.0f;
+            relaxSettings.atrousIterationNum = 5;
+            relaxSettings.lobeAngleFraction = 0.7f;
+            relaxSettings.specularLobeAngleSlack = 0.2f;
+            relaxSettings.depthThreshold = 0.004f;
+            relaxSettings.diffuseMaxAccumulatedFrameNum = 25;
+            relaxSettings.specularMaxAccumulatedFrameNum = 40;
+            relaxSettings.diffuseMaxFastAccumulatedFrameNum = 5;
+            relaxSettings.specularMaxFastAccumulatedFrameNum = 6;
+            relaxSettings.antilagSettings.accelerationAmount = 0.55f;
+            relaxSettings.antilagSettings.spatialSigmaScale = 2.5f;
+            relaxSettings.antilagSettings.temporalSigmaScale = 0.3f;
+            relaxSettings.antilagSettings.resetAmount = 0.5f;
             m_nrdContext->integration.SetDenoiserSettings(activeDenoiserId, &relaxSettings);
         }
 
@@ -1583,7 +1606,7 @@ namespace NRI
         // IN_MV: motion vectors (RG16F)
         bindVKTexture(snapshot, ::nrd::ResourceType::IN_MV, params.inMotionVectors, ::nri::AccessBits::SHADER_RESOURCE_STORAGE, ::nri::Layout::GENERAL, commonStages);
 
-        // IN_NORMAL_ROUGHNESS: normals (RGB) and roughness (A)
+        // IN_NORMAL_ROUGHNESS: NRD R10G10B10A2 packed normal/roughness
         bindVKTexture(snapshot, ::nrd::ResourceType::IN_NORMAL_ROUGHNESS, params.inNormalRoughness, ::nri::AccessBits::SHADER_RESOURCE_STORAGE, ::nri::Layout::GENERAL, commonStages);
 
         // IN_VIEWZ: linear view depth (R16F / R32F)
@@ -1626,6 +1649,11 @@ namespace NRI
         {
             activeDenoiserId = NRDContext::REBLUR_DIFFUSE_DENOISER;
             ::nrd::ReblurSettings reblurSettings{};
+            reblurSettings.enableAntiFirefly = true;
+            reblurSettings.hitDistanceReconstructionMode = ::nrd::HitDistanceReconstructionMode::AREA_5X5;
+            reblurSettings.maxAccumulatedFrameNum = 50;
+            reblurSettings.diffusePrepassBlurRadius = 15.0f;
+            reblurSettings.specularPrepassBlurRadius = 40.0f;
             reblurSettings.planeDistanceSensitivity = 0.02f;
             m_nrdContext->integration.SetDenoiserSettings(activeDenoiserId, &reblurSettings);
         }
@@ -1633,6 +1661,22 @@ namespace NRI
         {
             activeDenoiserId = NRDContext::RELAX_DIFFUSE_DENOISER;
             ::nrd::RelaxSettings relaxSettings{};
+            relaxSettings.enableAntiFirefly = true;
+            relaxSettings.hitDistanceReconstructionMode = ::nrd::HitDistanceReconstructionMode::OFF;
+            relaxSettings.diffusePrepassBlurRadius = 0.0f;
+            relaxSettings.specularPrepassBlurRadius = 0.0f;
+            relaxSettings.atrousIterationNum = 5;
+            relaxSettings.lobeAngleFraction = 0.7f;
+            relaxSettings.specularLobeAngleSlack = 0.2f;
+            relaxSettings.depthThreshold = 0.004f;
+            relaxSettings.diffuseMaxAccumulatedFrameNum = 25;
+            relaxSettings.specularMaxAccumulatedFrameNum = 40;
+            relaxSettings.diffuseMaxFastAccumulatedFrameNum = 5;
+            relaxSettings.specularMaxFastAccumulatedFrameNum = 6;
+            relaxSettings.antilagSettings.accelerationAmount = 0.55f;
+            relaxSettings.antilagSettings.spatialSigmaScale = 2.5f;
+            relaxSettings.antilagSettings.temporalSigmaScale = 0.3f;
+            relaxSettings.antilagSettings.resetAmount = 0.5f;
             m_nrdContext->integration.SetDenoiserSettings(activeDenoiserId, &relaxSettings);
         }
 
@@ -1660,7 +1704,7 @@ namespace NRI
         // IN_MV: motion vectors (RG16F)
         bindVKTexture(snapshot, ::nrd::ResourceType::IN_MV, params.inMotionVectors, ::nri::AccessBits::SHADER_RESOURCE_STORAGE, ::nri::Layout::GENERAL, commonStages);
 
-        // IN_NORMAL_ROUGHNESS: normals (RGB) and roughness (A)
+        // IN_NORMAL_ROUGHNESS: NRD R10G10B10A2 packed normal/roughness
         bindVKTexture(snapshot, ::nrd::ResourceType::IN_NORMAL_ROUGHNESS, params.inNormalRoughness, ::nri::AccessBits::SHADER_RESOURCE_STORAGE, ::nri::Layout::GENERAL, commonStages);
 
         // IN_VIEWZ: linear view depth (R16F / R32F)
@@ -1706,6 +1750,11 @@ namespace NRI
         {
             activeDenoiserId = NRDContext::REBLUR_DIFFUSE_DI_DENOISER;
             ::nrd::ReblurSettings reblurSettings{};
+            reblurSettings.enableAntiFirefly = true;
+            reblurSettings.hitDistanceReconstructionMode = ::nrd::HitDistanceReconstructionMode::AREA_5X5;
+            reblurSettings.maxAccumulatedFrameNum = 50;
+            reblurSettings.diffusePrepassBlurRadius = 15.0f;
+            reblurSettings.specularPrepassBlurRadius = 40.0f;
             reblurSettings.planeDistanceSensitivity = 0.02f;
             m_nrdContext->integration.SetDenoiserSettings(activeDenoiserId, &reblurSettings);
         }
@@ -1713,6 +1762,22 @@ namespace NRI
         {
             activeDenoiserId = NRDContext::RELAX_DIFFUSE_DI_DENOISER;
             ::nrd::RelaxSettings relaxSettings{};
+            relaxSettings.enableAntiFirefly = true;
+            relaxSettings.hitDistanceReconstructionMode = ::nrd::HitDistanceReconstructionMode::OFF;
+            relaxSettings.diffusePrepassBlurRadius = 0.0f;
+            relaxSettings.specularPrepassBlurRadius = 0.0f;
+            relaxSettings.atrousIterationNum = 5;
+            relaxSettings.lobeAngleFraction = 0.7f;
+            relaxSettings.specularLobeAngleSlack = 0.2f;
+            relaxSettings.depthThreshold = 0.004f;
+            relaxSettings.diffuseMaxAccumulatedFrameNum = 25;
+            relaxSettings.specularMaxAccumulatedFrameNum = 40;
+            relaxSettings.diffuseMaxFastAccumulatedFrameNum = 5;
+            relaxSettings.specularMaxFastAccumulatedFrameNum = 6;
+            relaxSettings.antilagSettings.accelerationAmount = 0.55f;
+            relaxSettings.antilagSettings.spatialSigmaScale = 2.5f;
+            relaxSettings.antilagSettings.temporalSigmaScale = 0.3f;
+            relaxSettings.antilagSettings.resetAmount = 0.5f;
             m_nrdContext->integration.SetDenoiserSettings(activeDenoiserId, &relaxSettings);
         }
 
@@ -1740,7 +1805,7 @@ namespace NRI
         // IN_MV: motion vectors (RG16F)
         bindVKTexture(snapshot, ::nrd::ResourceType::IN_MV, params.inMotionVectors, ::nri::AccessBits::SHADER_RESOURCE_STORAGE, ::nri::Layout::GENERAL, commonStages);
 
-        // IN_NORMAL_ROUGHNESS: normals (RGB) and roughness (A)
+        // IN_NORMAL_ROUGHNESS: NRD R10G10B10A2 packed normal/roughness
         bindVKTexture(snapshot, ::nrd::ResourceType::IN_NORMAL_ROUGHNESS, params.inNormalRoughness, ::nri::AccessBits::SHADER_RESOURCE_STORAGE, ::nri::Layout::GENERAL, commonStages);
 
         // IN_VIEWZ: linear view depth (R16F / R32F)
@@ -1786,6 +1851,11 @@ namespace NRI
         {
             activeDenoiserId = NRDContext::REBLUR_DIFFUSE_PT_DENOISER;
             ::nrd::ReblurSettings reblurSettings{};
+            reblurSettings.enableAntiFirefly = true;
+            reblurSettings.hitDistanceReconstructionMode = ::nrd::HitDistanceReconstructionMode::AREA_5X5;
+            reblurSettings.maxAccumulatedFrameNum = 50;
+            reblurSettings.diffusePrepassBlurRadius = 15.0f;
+            reblurSettings.specularPrepassBlurRadius = 40.0f;
             reblurSettings.planeDistanceSensitivity = 0.02f;
             m_nrdContext->integration.SetDenoiserSettings(activeDenoiserId, &reblurSettings);
         }
@@ -1793,6 +1863,22 @@ namespace NRI
         {
             activeDenoiserId = NRDContext::RELAX_DIFFUSE_PT_DENOISER;
             ::nrd::RelaxSettings relaxSettings{};
+            relaxSettings.enableAntiFirefly = true;
+            relaxSettings.hitDistanceReconstructionMode = ::nrd::HitDistanceReconstructionMode::OFF;
+            relaxSettings.diffusePrepassBlurRadius = 0.0f;
+            relaxSettings.specularPrepassBlurRadius = 0.0f;
+            relaxSettings.atrousIterationNum = 5;
+            relaxSettings.lobeAngleFraction = 0.7f;
+            relaxSettings.specularLobeAngleSlack = 0.2f;
+            relaxSettings.depthThreshold = 0.004f;
+            relaxSettings.diffuseMaxAccumulatedFrameNum = 25;
+            relaxSettings.specularMaxAccumulatedFrameNum = 40;
+            relaxSettings.diffuseMaxFastAccumulatedFrameNum = 5;
+            relaxSettings.specularMaxFastAccumulatedFrameNum = 6;
+            relaxSettings.antilagSettings.accelerationAmount = 0.55f;
+            relaxSettings.antilagSettings.spatialSigmaScale = 2.5f;
+            relaxSettings.antilagSettings.temporalSigmaScale = 0.3f;
+            relaxSettings.antilagSettings.resetAmount = 0.5f;
             m_nrdContext->integration.SetDenoiserSettings(activeDenoiserId, &relaxSettings);
         }
 
@@ -1820,7 +1906,7 @@ namespace NRI
         // IN_MV: motion vectors (RG16F)
         bindVKTexture(snapshot, ::nrd::ResourceType::IN_MV, params.inMotionVectors, ::nri::AccessBits::SHADER_RESOURCE_STORAGE, ::nri::Layout::GENERAL, commonStages);
 
-        // IN_NORMAL_ROUGHNESS: normals (RGB) and roughness (A)
+        // IN_NORMAL_ROUGHNESS: NRD R10G10B10A2 packed normal/roughness
         bindVKTexture(snapshot, ::nrd::ResourceType::IN_NORMAL_ROUGHNESS, params.inNormalRoughness, ::nri::AccessBits::SHADER_RESOURCE_STORAGE, ::nri::Layout::GENERAL, commonStages);
 
         // IN_VIEWZ: linear view depth (R16F / R32F)

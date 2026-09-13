@@ -335,6 +335,7 @@
         float4 baseColor;
         float roughness;
         float metallic;
+        float3 f0; // Specular reflectance at normal incidence, for the G-buffer specular target
 
         if (instance.workflow == PBR_WORKFLOW_SPECULAR_GLOSSINESS)
         {
@@ -371,6 +372,12 @@
             float3 baseColorDiffusePart = diffuse.rgb * ((1.0 - maxSpecular) / (1.0 - c_MinRoughness) / max(1.0 - metallic, epsilon));
             float3 baseColorSpecularPart = specular - (float3(c_MinRoughness) * (1.0 - metallic) * (1.0 / max(metallic, epsilon)));
             baseColor = float4(clamp(lerp(baseColorDiffusePart, baseColorSpecularPart, metallic * metallic), float3(0.0), float3(1.0)), diffuse.a);
+
+            // Specular-Glossiness authors 'specular' AS the F0 reflectance directly - use it
+            // as-is instead of re-deriving from the flat 0.04 dielectric assumption below,
+            // otherwise low-reflectance materials (foliage, cloth, etc, often specular ~0.01-0.05)
+            // get over-brightened to a flat 4% in every IBL/RT reflection, reading as a uniform sheen.
+            f0 = specular;
         }
         else
         {
@@ -393,6 +400,7 @@
             }
             roughness = clamp(roughness, 0.0, 1.0);
             metallic  = clamp(metallic, 0.0, 1.0);
+            f0 = lerp(float3(0.04), baseColor.rgb, metallic);
         }
 
         // 3. NORMAL MAPPING (Analytical Tangent Frame from 3D Triangle Geometry)
@@ -488,7 +496,7 @@
         output.velocity = velocity;
 
         // Specular Albedo (F0) for DLSS-RR
-        output.specular = float4(lerp(float3(0.04), baseColor.rgb, metallic), 1.0);
+        output.specular = float4(f0, 1.0);
 
         return output;
     }

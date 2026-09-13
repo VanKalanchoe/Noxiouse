@@ -658,7 +658,7 @@ namespace Nox
             ImGui::Text("Mesh Asset");
         });
 
-        DrawComponent<MaterialComponent>("Material", entity, [](auto& component)
+        DrawComponent<MaterialComponent>("Material", entity, [this, entity](auto& component)
         {
             if (component.MaterialAssets.empty())
             {
@@ -679,9 +679,36 @@ namespace Nox
 
             if (!component.MaterialAssets.empty())
             {
-                ImGui::Text("Material Assets");
+                // This entity's own MeshComponent already knows exactly which submesh it draws
+                // (SubmeshIndex/SubmeshCount) -- no picking needed, it's right here on the same
+                // entity. On a mesh with many submeshes (e.g. one Bistro prop per entity), default
+                // to showing just the one slot that's actually used instead of the whole array.
+                // (Local mutable copy: `entity` was captured by value, so it's const inside this
+                // non-mutable lambda, and HasComponent/GetComponent aren't const member functions.)
+                Entity e = entity;
+                bool hasSubmeshFilter = e.HasComponent<MeshComponent>() &&
+                    e.GetComponent<MeshComponent>().SubmeshIndex < component.MaterialAssets.size();
+                size_t submeshIdx = hasSubmeshFilter ? e.GetComponent<MeshComponent>().SubmeshIndex : 0;
+                bool filterActive = hasSubmeshFilter && !m_MaterialShowAll;
+
+                if (filterActive)
+                {
+                    ImGui::Text("Material (slot %zu of %zu, used by this entity's mesh)", submeshIdx, component.MaterialAssets.size());
+                    if (ImGui::Button("Show All Slots"))
+                        m_MaterialShowAll = true;
+                }
+                else
+                {
+                    ImGui::Text("Material Assets (%zu)", component.MaterialAssets.size());
+                    if (hasSubmeshFilter && ImGui::Button("Show Only This Entity's Slot"))
+                        m_MaterialShowAll = false;
+                }
+
                 for (size_t i = 0; i < component.MaterialAssets.size(); ++i)
                 {
+                    if (filterActive && submeshIdx != i)
+                        continue;
+
                     AssetHandle handle = component.MaterialAssets[i];
                     std::string label = "None";
                     if (handle != 0 && AssetManager::IsAssetHandleValid(handle) &&
@@ -691,6 +718,8 @@ namespace Nox
                         label = metadata.FilePath.filename().string();
                     }
 
+                    if (filterActive)
+                        ImGui::SetNextItemOpen(true, ImGuiCond_Always);
                     if (ImGui::TreeNode((void*)(uintptr_t)i, "%zu: %s", i, label.c_str()))
                     {
                         if (ImGui::BeginDragDropTarget())

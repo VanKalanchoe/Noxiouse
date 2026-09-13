@@ -379,6 +379,40 @@ namespace Nox
                         animatorComp.Animator.UpdateTransforms(*skeleton);
                 }
             }
+
+            // Node/object animations write the evaluated .nanim TRS directly to ECS transforms.
+            if (animatorComp.Skeleton == 0 && !animatorComp.NodeEntities.empty() &&
+                animatorComp.Animation != 0)
+            {
+                Ref<AnimationSequence> animation = AssetManager::GetAsset<AnimationSequence>(animatorComp.Animation);
+                if (animation)
+                {
+                    std::vector<Animator::NodeTransform> nodeTransforms(animatorComp.NodeEntities.size());
+                    for (size_t i = 0; i < animatorComp.NodeEntities.size(); ++i)
+                    {
+                        entt::entity nodeEntity = animatorComp.NodeEntities[i];
+                        if (!m_Registry.valid(nodeEntity) || !m_Registry.all_of<TransformComponent>(nodeEntity))
+                            continue;
+                        const auto& transform = m_Registry.get<TransformComponent>(nodeEntity);
+                        nodeTransforms[i].Translation = transform.Translation;
+                        nodeTransforms[i].Rotation = glm::quat(transform.Rotation);
+                        nodeTransforms[i].Scale = transform.Scale;
+                    }
+
+                    animatorComp.Animator.UpdateNodeAnimation((float)ts, animation, nodeTransforms);
+                    for (size_t i = 0; i < animatorComp.NodeEntities.size(); ++i)
+                    {
+                        entt::entity nodeEntity = animatorComp.NodeEntities[i];
+                        if (!m_Registry.valid(nodeEntity) || !m_Registry.all_of<TransformComponent>(nodeEntity))
+                            continue;
+                        auto& transform = m_Registry.get<TransformComponent>(nodeEntity);
+                        transform.Translation = nodeTransforms[i].Translation;
+                        transform.Rotation = glm::eulerAngles(nodeTransforms[i].Rotation);
+                        transform.Scale = nodeTransforms[i].Scale;
+                        m_Registry.get_or_emplace<DirtyTransformComponent>(nodeEntity);
+                    }
+                }
+            }
         }
 
         RenderScene(camera);

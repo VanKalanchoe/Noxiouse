@@ -284,7 +284,7 @@ struct LightData
     vec4 position;     // xyz: World Position, w: LightType (0 = Directional, 1 = Point, 2 = Spot)
     vec4 direction;    // xyz: Normalized Direction, w: Range (0.0 = infinite)
     vec4 color;        // rgb: Color, w: Intensity
-    vec4 spotParams;   // x: cos(innerAngle), y: cos(outerAngle), z: 0.0, w: 0.0
+    vec4 spotParams;   // x/y: spot cone terms, z: source radius (radians for directional, meters otherwise), w: shadow samples
 };
 
 struct PushConstantMeshlets
@@ -424,6 +424,10 @@ struct PushConstantPathTracer
     uint32_t debugMode;                // 16 = 1-SPP, 17 = Progressive Accumulation
     uint32_t skyboxTextureIndex;       // Environment cubemap slot
     uint32_t denoiserMode;              // 0 = Off (plain RGB), 1 = NRD REBLUR (needs YCoCg encode), 2 = NRD RELAX (plain RGB)
+    uint32_t restirGIDiffuseTextureIndex;
+    uint32_t restirGIDenoiserMode;      // 0 = Off/plain RGB, 1 = REBLUR YCoCg, 2 = RELAX RGB
+    uint32_t restirDIDirectLightingTextureIndex;
+    uint32_t restirDIDenoiserMode;      // 0 = Off/plain RGB, 1 = REBLUR YCoCg, 2 = RELAX RGB
 };
 
 // Decodes an NRD REBLUR-denoised texture's YCoCg color back to linear RGB in place -- see
@@ -824,9 +828,108 @@ struct LineData
     vec3 p0;
     vec3 p1;
     vec4 color;
-    
+
     // Editor-only
     int entityID;
+};
+
+// ReSTIR PT (Screen-Space Path Resampling via RTXDI) -- RIS across numInitialSamples full paths per
+// pixel, optional temporal reuse, RTXDI's default footprint-based reconnection mode, and uniform
+// (not RIS/ReGIR) NEE light sampling -- matches ReSTIR DI's own v1 staging before RIS/ReGIR were added.
+struct PushConstantReSTIRPTInitial
+{
+    mat4 invViewProj;
+    vec4 cameraWorldPos;
+    uint64_t matrixReference;
+    uint64_t lightDataReference;
+    uint64_t reservoirBufferReference; // writes to buffer index 0 (ResamplingMode::None)
+    uint64_t preservedReservoirReference; // optional copy of the unresampled initial reservoir for SDK final-shading decorrelation
+    uint32_t depthTextureIndex;
+    uint32_t gbufferNormalIndex;
+    uint32_t gbufferAlbedoIndex;
+    uint32_t gbufferMaterialIndex;
+    vec2 viewportSize; // offset 128, multiple of 8
+    uint32_t frameIndex;
+    uint32_t reservoirBlockRowPitch;
+    uint32_t reservoirArrayPitch;
+    uint32_t firstLocalLightIndex;
+    uint32_t numLocalLights;
+    uint32_t firstInfiniteLightIndex;
+    uint32_t numInfiniteLights;
+    uint32_t numInitialSamples;  // RTXDI_PTInitialSamplingParameters.numInitialSamples
+    uint32_t maxBounceDepth;
+    uint32_t maxRcVertexLength;
+    uint32_t numNeeSamples;      // NEE draws per bounce (0 disables NEE -> emissive-only sampling)
+    float roughnessThreshold;    // legacy FixedThreshold UI field; Footprint mode uses SDK defaults
+    float distanceThreshold;
+    uint32_t skyboxTextureIndex;
+};
+
+struct PushConstantReSTIRPTFinalShading
+{
+    mat4 invViewProj;
+    vec4 cameraWorldPos;
+    uint64_t matrixReference;
+    uint64_t lightDataReference;
+    uint64_t reservoirReference; // buffer index 0 (ResamplingMode::None), read only
+    uint64_t preservedReservoirReference; // preserved initial-sampling reservoir used by SDK final-shading decorrelation
+    // viewportSize placed right after the uint64_t block (offset 112, already a multiple of 8) rather
+    // than after an odd count of uint32_t fields -- see PushConstantReSTIRGIInitial's note above on why
+    // a vec2 at a non-8-aligned offset is dangerous (SPIR-V silently pads it, C++ doesn't).
+    vec2 viewportSize;
+    uint32_t depthTextureIndex;
+    uint32_t gbufferNormalIndex;
+    uint32_t primaryDirectTextureIndex; // bounce-1 direct lighting from the Initial pass, added to the resampled indirect result
+    uint32_t frameIndex;
+    uint32_t reservoirBlockRowPitch;
+    uint32_t reservoirArrayPitch;
+    uint32_t denoiserMode; // 0 = Off, 1 = NRD REBLUR (YCoCg encode), 2 = NRD RELAX (plain RGB)
+    float decorrelationFactor; // SDK default decorrelation probability; 0 disables preserved-initial replacement
+    uint32_t decorrelationMode; // RTXDI_PT_DECORRELATION_MODE_*; Uniform is usable without the duplication-map pass
+};
+
+struct PushConstantReSTIRPTTemporal
+{
+    // invViewProj deliberately NOT duplicated here (unlike ReSTIRPTInitial/FinalShading) -- this struct
+    // already needed prevInvViewProj + prevCameraWorldPos on top of everything Initial/FinalShading
+    // carry, which pushed it past the device's 256-byte push-constant limit (hit as a real crash:
+    // vkCmdPushDataEXT: data.size 288 > maxPushDataSize 256). g_UBO->invViewProj (read via
+    // matrixReference, already below) is exactly the same value -- computed identically as
+    // glm::inverse(uniformData.proj * uniformData.view) on the C++ side -- so there's nothing lost by
+    // reading it from there instead of duplicating it in every push constant.
+    mat4 prevInvViewProj; // unprojects the PREVIOUS frame's depth/normal textures with the matching matrix
+    vec4 cameraWorldPos;
+    vec4 prevCameraWorldPos;
+    vec4 prevPrevCameraWorldPos;
+    uint64_t matrixReference;
+    uint64_t lightDataReference;
+    uint64_t currentReservoirReference; // this frame's Initial-sampling candidate; overwritten in place with the temporal result
+    uint64_t historyReservoirReference; // previous frame's finalized reservoir, read only
+    vec2 viewportSize; // placed right after the uint64_t block (offset 144, multiple of 8) -- see the
+                        // ReSTIRGIInitial/ReSTIRPTFinalShading structs above for why a vec2 needs an
+                        // 8-aligned offset to avoid a silent C++/SPIR-V padding mismatch.
+    uint32_t depthTextureIndex;
+    uint32_t prevDepthTextureIndex;
+    uint32_t gbufferNormalIndex;
+    uint32_t prevNormalTextureIndex;
+    uint32_t gbufferAlbedoIndex;
+    uint32_t prevAlbedoTextureIndex;
+    uint32_t gbufferMaterialIndex;
+    uint32_t prevMaterialTextureIndex;
+    uint32_t gbufferVelocityIndex;
+    uint32_t frameIndex;
+    uint32_t reservoirBlockRowPitch;
+    uint32_t reservoirArrayPitch;
+    uint32_t maxBounceDepth;
+    uint32_t maxRcVertexLength;
+    float roughnessThreshold;    // legacy FixedThreshold UI field; Footprint mode uses SDK defaults
+    float distanceThreshold;
+    float depthThreshold;        // temporal reprojection validity check
+    float normalThreshold;
+    uint32_t maxHistoryLength;
+    uint32_t maxReservoirAge;
+    uint32_t enablePermutationSampling;
+    uint32_t skyboxTextureIndex;
 };
 
 #endif  // HOST_DEVICE_H

@@ -13,8 +13,11 @@ namespace Nox
         : m_Project(std::move(project)), m_ThumbnailCache(CreateRef<ThumbnailCache>(m_Project)),
           m_BaseDirectory(m_Project->GetAssetDirectory()), m_CurrentDirectory(m_BaseDirectory)
     {
-        m_DirectoryIcon = TextureImporter::LoadTexture2D("assets/Icons/DirectoryIcon.ktx2", {.generateMips = false});
-        m_FileIcon = TextureImporter::LoadTexture2D("assets/Icons/FileIcon.ktx2", {.generateMips = false});
+        // See EditorLayer.cpp's icon loads for why flip=true is needed here - these icon .ktx2
+        // files are tagged bottom-up (Y=up) but their pixel data is actually top-down, so this
+        // cancels out TextureImporter's automatic KTXorientation correction.
+        m_DirectoryIcon = TextureImporter::LoadTexture2D("assets/Icons/DirectoryIcon.ktx2", {.flip = true, .generateMips = false});
+        m_FileIcon = TextureImporter::LoadTexture2D("assets/Icons/FileIcon.ktx2", {.flip = true, .generateMips = false});
         RefreshAssetTree();
     }
 

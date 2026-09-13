@@ -11,6 +11,16 @@ float3 LinearToYCoCg(float3 color)
     return float3(Y, Co, Cg);
 }
 
+float3 YCoCgToLinear(float3 color)
+{
+    float t = color.x - color.z;
+    float3 r;
+    r.y = color.x + color.z;
+    r.x = t + color.y;
+    r.z = t - color.y;
+    return max(r, 0.0);
+}
+
     struct PTPayload
     {
         uint dummy;
@@ -429,117 +439,147 @@ float3 LinearToYCoCg(float3 color)
             // Hit surface emission (e.g. Cornell Box ceiling light)
             radiance += lut.emissiveFactor.rgb * lut.emissiveFactor.a * throughput;
 
-            // --- Next Event Estimation (NEE): Direct Lights ---
-            LightData* lights = (LightData*)ubo->lightDataReference;
-            for (uint i = 0; i < ubo->lightCount; i++)
+            bool primaryReSTIRDIUsed = false;
+            bool primaryReSTIRGIUsed = false;
+            if (bounce == 0)
             {
-                LightData light = lights[i];
-                uint lightType = (uint)light.position.w;
-
-                float3 lightDir;
-                float maxDist = 1e4;
-                float attenuation = 1.0;
-
-                float angularDiameter = light.spotParams.z; // Angular radius (radians) for Directional; Radius (meters) for Point/Spot
-
-                if (lightType == 0) // Directional Light (Sun Cone Sampling)
+                if (ubo->directLightingMode == 1 &&
+                    pushConstant.restirDIDirectLightingTextureIndex != 0xFFFFFFFF)
                 {
-                    float3 unjitteredDir = normalize(light.direction.xyz);
-                    if (angularDiameter > 1e-4)
-                    {
-                        // Sample a random point on the sun disk
-                        float u1 = rand(rngState);
-                        float u2 = rand(rngState);
-                        float r = sqrt(u1) * tan(angularDiameter);
-                        float theta = 2.0 * M_PI * u2;
-
-                        float3 T, B;
-                        build_orthonormal_basis(unjitteredDir, T, B);
-                        lightDir = normalize(unjitteredDir + (cos(theta) * T + sin(theta) * B) * r);
-                    }
-                    else
-                    {
-                        lightDir = unjitteredDir;
-                    }
-                }
-                else // Point / Spot Light (Sphere Source Sampling)
-                {
-                    float3 lightPos = light.position.xyz;
-                    if (angularDiameter > 1e-4)
-                    {
-                        // Jitter light position within source sphere radius
-                        float u1 = rand(rngState);
-                        float u2 = rand(rngState);
-                        float r = sqrt(u1) * angularDiameter;
-                        float theta = 2.0 * M_PI * u2;
-
-                        float3 toLightBase = normalize(lightPos - hitPos);
-                        float3 T, B;
-                        build_orthonormal_basis(toLightBase, T, B);
-                        lightPos += (cos(theta) * T + sin(theta) * B) * r;
-                    }
-
-                    float3 toLight = lightPos - hitPos;
-                    float dist = length(toLight);
-                    lightDir = dist > 1e-4 ? toLight / dist : float3(0, 1, 0);
-                    maxDist = dist;
-
-                    float range = light.direction.w;
-                    if (range > 0.0)
-                    {
-                        float dOverR = dist / range;
-                        float window = max(1.0 - pow(dOverR, 4.0), 0.0);
-                        attenuation = window / (dist * dist);
-                    }
-                    else
-                    {
-                        attenuation = 1.0 / max(dist * dist, 0.001);
-                    }
-
-                    if (lightType == 2) // Spot Cone
-                    {
-                        float cd = dot(normalize(light.direction.xyz), -lightDir);
-                        float lightAngleScale = light.spotParams.x;
-                        float lightAngleOffset = light.spotParams.y;
-
-                        float angularAttenuation = saturate(cd * lightAngleScale + lightAngleOffset);
-                        angularAttenuation *= angularAttenuation;
-                        attenuation *= angularAttenuation;
-                    }
+                    Texture2D restirDITex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.restirDIDirectLightingTextureIndex, 0));
+                    float3 restirDirect = restirDITex.Load(int3(pixelCoord, 0)).rgb;
+                    if (pushConstant.restirDIDenoiserMode == 1)
+                        restirDirect = YCoCgToLinear(restirDirect);
+                    radiance += restirDirect * throughput;
+                    primaryReSTIRDIUsed = true;
                 }
 
-                if (attenuation <= 0.0)
+                if (ubo->diffuseGIMode == 2 &&
+                    pushConstant.restirGIDiffuseTextureIndex != 0xFFFFFFFF)
                 {
-                    continue;
+                    Texture2D restirGITex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.restirGIDiffuseTextureIndex, 0));
+                    float3 restirDiffuseIrradiance = restirGITex.Load(int3(pixelCoord, 0)).rgb;
+                    if (pushConstant.restirGIDenoiserMode == 1)
+                        restirDiffuseIrradiance = YCoCgToLinear(restirDiffuseIrradiance);
+                    radiance += restirDiffuseIrradiance * diffuseColor * throughput;
+                    primaryReSTIRGIUsed = true;
                 }
+            }
 
-                // Always trace shadow rays for direct lights (Next Event Estimation)
-                float NdotL = dot(hitNormal, lightDir);
-                if (NdotL > 0.001)
+            // --- Next Event Estimation (NEE): Direct Lights ---
+            if (!primaryReSTIRDIUsed)
+            {
+                LightData* lights = (LightData*)ubo->lightDataReference;
+                for (uint i = 0; i < ubo->lightCount; i++)
                 {
-                    // Robust offset (0.02) along normal prevents self-shadowing on curved meshes
-                    float3 shadowOrigin = hitPos + hitNormal * 0.02;
-                    bool inShadow = trace_shadow_ray(ubo, shadowOrigin, lightDir, maxDist);
+                    LightData light = lights[i];
+                    uint lightType = (uint)light.position.w;
 
-                    if (!inShadow)
+                    float3 lightDir;
+                    float maxDist = 1e4;
+                    float attenuation = 1.0;
+
+                    float angularDiameter = light.spotParams.z; // Angular radius (radians) for Directional; Radius (meters) for Point/Spot
+
+                    if (lightType == 0) // Directional Light (Sun Cone Sampling)
                     {
-                        // Smooth terminator falloff: eliminates stepped polygon tessellation rings at grazing angles
-                        float terminatorFade = saturate(NdotL * 10.0);
-                        float3 lightRadiance = light.color.rgb * light.color.w * attenuation;
+                        float3 unjitteredDir = normalize(light.direction.xyz);
+                        if (angularDiameter > 1e-4)
+                        {
+                            // Sample a random point on the sun disk
+                            float u1 = rand(rngState);
+                            float u2 = rand(rngState);
+                            float r = sqrt(u1) * tan(angularDiameter);
+                            float theta = 2.0 * M_PI * u2;
 
-                        float3 H = normalize(lightDir + V);
-                        float NdotH = clamp(dot(hitNormal, H), 0.0, 1.0);
-                        float VdotH = clamp(dot(V, H), 0.0, 1.0);
+                            float3 T, B;
+                            build_orthonormal_basis(unjitteredDir, T, B);
+                            lightDir = normalize(unjitteredDir + (cos(theta) * T + sin(theta) * B) * r);
+                        }
+                        else
+                        {
+                            lightDir = unjitteredDir;
+                        }
+                    }
+                    else // Point / Spot Light (Sphere Source Sampling)
+                    {
+                        float3 lightPos = light.position.xyz;
+                        if (angularDiameter > 1e-4)
+                        {
+                            // Jitter light position within source sphere radius
+                            float u1 = rand(rngState);
+                            float u2 = rand(rngState);
+                            float r = sqrt(u1) * angularDiameter;
+                            float theta = 2.0 * M_PI * u2;
 
-                        float3 F_direct = fresnel_schlick(F0, VdotH);
-                        float3 diffuseContrib = (float3(1.0) - F_direct) * diffuseColor / M_PI;
+                            float3 toLightBase = normalize(lightPos - hitPos);
+                            float3 T, B;
+                            build_orthonormal_basis(toLightBase, T, B);
+                            lightPos += (cos(theta) * T + sin(theta) * B) * r;
+                        }
 
-                        float D = eval_ndf_ggx(NdotH, alphaSq);
-                        float G = eval_smith_g2(NdotV, NdotL, alphaSq);
-                        float3 specContrib = (F_direct * G * D) / max(4.0 * NdotL * NdotV, 1e-6);
+                        float3 toLight = lightPos - hitPos;
+                        float dist = length(toLight);
+                        lightDir = dist > 1e-4 ? toLight / dist : float3(0, 1, 0);
+                        maxDist = dist;
 
-                        float3 bsdf = diffuseContrib + specContrib;
-                        radiance += bsdf * lightRadiance * (NdotL * terminatorFade) * throughput;
+                        float range = light.direction.w;
+                        if (range > 0.0)
+                        {
+                            float dOverR = dist / range;
+                            float window = max(1.0 - pow(dOverR, 4.0), 0.0);
+                            attenuation = window / (dist * dist);
+                        }
+                        else
+                        {
+                            attenuation = 1.0 / max(dist * dist, 0.001);
+                        }
+
+                        if (lightType == 2) // Spot Cone
+                        {
+                            float cd = dot(normalize(light.direction.xyz), -lightDir);
+                            float lightAngleScale = light.spotParams.x;
+                            float lightAngleOffset = light.spotParams.y;
+
+                            float angularAttenuation = saturate(cd * lightAngleScale + lightAngleOffset);
+                            angularAttenuation *= angularAttenuation;
+                            attenuation *= angularAttenuation;
+                        }
+                    }
+
+                    if (attenuation <= 0.0)
+                    {
+                        continue;
+                    }
+
+                    // Always trace shadow rays for direct lights (Next Event Estimation)
+                    float NdotL = dot(hitNormal, lightDir);
+                    if (NdotL > 0.001)
+                    {
+                        // Robust offset (0.02) along normal prevents self-shadowing on curved meshes
+                        float3 shadowOrigin = hitPos + hitNormal * 0.02;
+                        bool inShadow = trace_shadow_ray(ubo, shadowOrigin, lightDir, maxDist);
+
+                        if (!inShadow)
+                        {
+                            // Smooth terminator falloff: eliminates stepped polygon tessellation rings at grazing angles
+                            float terminatorFade = saturate(NdotL * 10.0);
+                            float3 lightRadiance = light.color.rgb * light.color.w * attenuation;
+
+                            float3 H = normalize(lightDir + V);
+                            float NdotH = clamp(dot(hitNormal, H), 0.0, 1.0);
+                            float VdotH = clamp(dot(V, H), 0.0, 1.0);
+
+                            float3 F_direct = fresnel_schlick(F0, VdotH);
+                            float3 diffuseContrib = (float3(1.0) - F_direct) * diffuseColor / M_PI;
+
+                            float D = eval_ndf_ggx(NdotH, alphaSq);
+                            float G = eval_smith_g2(NdotV, NdotL, alphaSq);
+                            float3 specContrib = (F_direct * G * D) / max(4.0 * NdotL * NdotV, 1e-6);
+
+                            float3 bsdf = diffuseContrib + specContrib;
+                            radiance += bsdf * lightRadiance * (NdotL * terminatorFade) * throughput;
+                        }
                     }
                 }
             }
@@ -610,6 +650,9 @@ float3 LinearToYCoCg(float3 color)
             }
             else
             {
+                if (primaryReSTIRGIUsed)
+                    break;
+
                 // Diffuse Lobe (Cosine-Weighted Hemisphere Sampling)
                 float3 nextDir = sample_cosine_hemisphere(u1, u2, hitNormal);
                 float NdotL_bounce = clamp(dot(hitNormal, nextDir), 0.0, 1.0);

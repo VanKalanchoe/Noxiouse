@@ -1,8 +1,16 @@
 #pragma once
+#include <chrono>
 #include "Renderer2D.h"
 #include "NoxCore/Core/Window.h"
 #include "Mesh.h"
 #include "PagedAllocator.h"
+
+// Forward declaration only -- the RTXDI SDK must never be #included from this header (it's engine-
+// public, pulled in by EditorLayer.cpp and others). Renderer.cpp is the only place that includes
+// <Rtxdi/PT/ReSTIRPT.h> and touches this type; ~Renderer() is declared here but defined out-of-line in
+// Renderer.cpp, which is what lets std::unique_ptr<rtxdi::ReSTIRPTContext> work with just this forward
+// declaration (same reasoning NRI itself uses to keep Vulkan-specific types out of the engine-facing API).
+namespace rtxdi { class ReSTIRPTContext; }
 
 const std::string MODEL_PATH = "assets/models/viking_room.obj";
 const std::string MODEL_PATH_GLTF = "assets/models/viking_room.glb";
@@ -187,11 +195,43 @@ namespace Nox
         float getScaleIBLAmbient() const { return m_scaleIBLAmbient; }
         void setScaleIBLAmbient(float scale) { m_scaleIBLAmbient = scale; }
         // RayTracing
-        void setRayTracingEnabled(bool enabled) { m_rayTracingEnabled = enabled; }
+        // This master toggle changes the EFFECTIVE state of shadows/reflections too (both are
+        // m_rayTracingEnabled && their own flag), even though it doesn't touch m_rayTracingShadows/
+        // m_rayTracingReflections themselves -- so it needs the same history reset those do.
+        void setRayTracingEnabled(bool enabled)
+        {
+            if (m_rayTracingEnabled != enabled)
+            {
+                m_rayTracingEnabled = enabled;
+                m_resetNRD = true;
+            }
+        }
         bool getRayTracingEnabled() const { return m_rayTracingEnabled; }
-        void setRayTracingShadows(bool enabled) { m_rayTracingShadows = enabled; }
+        // Toggling this changes what the NRD shadow denoiser pass sees frame-to-frame (it's gated on
+        // this flag -- see its call site in Renderer.cpp), so its temporal history needs a clean reset
+        // on every transition, the same way every other denoiser-affecting setter in this file already
+        // does (setNRDGIDenoiser/setNRDDIDenoiser/setNRDPTDenoiser/setDLSSRayReconstructionEnabled).
+        // Without this, re-enabling shadows blended fresh 1-SPP shadow data into old, stale history,
+        // producing visible leaking/ghosting for several frames until the denoiser caught up.
+        void setRayTracingShadows(bool enabled)
+        {
+            if (m_rayTracingShadows != enabled)
+            {
+                m_rayTracingShadows = enabled;
+                m_resetNRD = true;
+            }
+        }
         bool getRayTracingShadows() const { return m_rayTracingShadows; }
-        void setRayTracingReflections(bool enabled) { m_rayTracingReflections = enabled; }
+        // Same reasoning as setRayTracingShadows above -- the NRD reflection denoiser pass is gated on
+        // this flag, so toggling it needs a clean history reset too.
+        void setRayTracingReflections(bool enabled)
+        {
+            if (m_rayTracingReflections != enabled)
+            {
+                m_rayTracingReflections = enabled;
+                m_resetNRD = true;
+            }
+        }
         bool getRayTracingReflections() const { return m_rayTracingReflections; }
         void setPathTracingEnabled(bool enabled) { m_pathTracingEnabled = enabled; }
         bool isPathTracingEnabled() const { return m_pathTracingEnabled; }
@@ -279,6 +319,35 @@ namespace Nox
         void setNRDPTDenoiser(NRI::NRDDiffuseDenoiser mode);
         Ref<Texture2D> getDenoisedPathTracer() const { return m_denoisedPathTracer; }
         bool isPathTracerDenoised() const { return m_pathTracerDenoised; }
+        bool getPathTracerUsesRTXDI() const { return m_pathTracerUsesRTXDI; }
+        void setPathTracerUsesRTXDI(bool enabled) { m_pathTracerUsesRTXDI = enabled; }
+
+        // ReSTIR PT (Screen-Space Path Resampling via RTXDI) -- NOT to be confused with the NRD-PT
+        // denoiser above (getNRDPTDenoiser/setNRDPTDenoiser), which denoises the PLAIN path tracer's
+        // raw output. This is a separate, third path-tracing mode: RTXDI's own path-space resampling
+        // (reuse whole light-carrying paths across pixels/frames via reconnection shift mapping), only
+        // meaningful when Path Tracing is enabled.
+        bool getReSTIRPTEnabled() const { return m_restirPTEnabled; }
+        void setReSTIRPTEnabled(bool enabled) { m_restirPTEnabled = enabled; }
+        Ref<Texture2D> getReSTIRPTDirectLighting() const { return m_restirPTOutput; }
+        // Temporal resampling (hybrid-shift reconnection against last frame's reservoir) currently
+        // produces a visible lighting-rotation artifact under investigation -- defaults OFF so ReSTIR
+        // PT stays in its known-good None-resampling state; flip this on only to test/debug Temporal.
+        // Defined in Renderer.cpp (not inline here) -- it touches rtxdi::ReSTIRPTContext, which this
+        // header only forward-declares (see the RTXDI-stays-behind-NRI rule at the top of this file).
+        bool getReSTIRPTTemporalEnabled() const { return m_restirPTTemporalEnabled; }
+        void setReSTIRPTTemporalEnabled(bool enabled);
+        uint32_t& getReSTIRPTNumInitialSamples() { return m_restirPTNumInitialSamples; }
+        uint32_t& getReSTIRPTMaxBounceDepth() { return m_restirPTMaxBounceDepth; }
+        uint32_t& getReSTIRPTMaxRcVertexLength() { return m_restirPTMaxRcVertexLength; }
+        uint32_t& getReSTIRPTNumNeeSamples() { return m_restirPTNumNeeSamples; }
+        float& getReSTIRPTRoughnessThreshold() { return m_restirPTRoughnessThreshold; }
+        float& getReSTIRPTDistanceThreshold() { return m_restirPTDistanceThreshold; }
+        uint32_t& getReSTIRPTMaxHistoryLength() { return m_restirPTMaxHistoryLength; }
+        uint32_t& getReSTIRPTMaxReservoirAge() { return m_restirPTMaxReservoirAge; }
+        float& getReSTIRPTNormalThreshold() { return m_restirPTNormalThreshold; }
+        float& getReSTIRPTDepthThreshold() { return m_restirPTDepthThreshold; }
+        bool& getReSTIRPTEnablePermutationSampling() { return m_restirPTEnablePermutationSampling; }
 
         void setCameraJitterEnabled(bool enabled) { m_cameraJitterEnabled = enabled; }
         bool getCameraJitterEnabled() const { return m_cameraJitterEnabled; }
@@ -374,6 +443,10 @@ namespace Nox
         // ReSTIR DI (Screen-Space Resampled Direct Lighting via RTXDI)
         void createReSTIRDIResources();
         void createReSTIRDIPipelines(bool forceCompile = false);
+
+        // ReSTIR PT (Screen-Space Path Resampling via RTXDI)
+        void createReSTIRPTResources();
+        void createReSTIRPTPipelines(bool forceCompile = false);
 
         void createTextureImage();
         void initGeometryBuffers();
@@ -477,6 +550,12 @@ namespace Nox
         // surfaces during camera motion (causing bright/incorrect history reuse until motion stops).
         Ref<Texture2D> m_prevDepthResource;
         Ref<Texture2D> m_prevGbufferNormal;
+        // Same reasoning as above, added for ReSTIR PT's temporal resampling: RandomReplay (hybrid-shift
+        // re-tracing) and RAB_AreMaterialsSimilar both need REAL material data (albedo/roughness/metallic)
+        // at a reprojected previous-frame surface, not just its normal/depth -- unlike ReSTIR GI's
+        // simplified RAB_Surface (no material fields at all), PT's carries a full RAB_Material.
+        Ref<Texture2D> m_prevGbufferAlbedo;
+        Ref<Texture2D> m_prevGbufferMaterial;
         Ref<Texture2D> m_gbufferVelocity; // R16G16_SFLOAT: Screen-space motion vectors
 
         // NRD
@@ -525,12 +604,12 @@ namespace Nox
 
         uint32_t m_diffuseGIMode = 0; // 0 = Off (IBL), 1 = DDGI, 2 = ReSTIR GI
         float m_restirGISpatialRadius = 32.0f;
-        uint32_t m_restirGINumSpatialSamples = 4;
-        uint32_t m_restirGIMaxHistoryLength = 20;
+        uint32_t m_restirGINumSpatialSamples = 2;
+        uint32_t m_restirGIMaxHistoryLength = 10;
         float m_restirGINormalThreshold = 0.6f;
         float m_restirGIDepthThreshold = 0.1f;
         bool m_restirGIEnableBoilingFilter = true;
-        float m_restirGIBoilingFilterStrength = 0.2f;
+        float m_restirGIBoilingFilterStrength = 0.35f;
         Ref<Texture2D> m_denoisedReSTIRGIDiffuse;
         NRI::NRDDiffuseDenoiser m_nrdGIDenoiser = NRI::NRDDiffuseDenoiser::Off;
 
@@ -630,6 +709,7 @@ namespace Nox
         Ref<Texture2D> m_pathTracerAccum[2];
         uint32_t m_pathTracerSampleCount = 0;
         glm::mat4 m_pathTracerPrevView = glm::mat4(1.0f);
+        bool m_pathTracerUsesRTXDI = false; // RTXPT-style mode: run ReSTIR DI/GI alongside the plain path tracer
 
         // Path Tracer NRD Denoising (fallback for hardware/preference without DLSS Ray Reconstruction --
         // mutually exclusive with it, same as GI/DI/reflections; see setNRDPTDenoiser)
@@ -638,6 +718,47 @@ namespace Nox
         uint32_t m_denoisedPathTracerWriteSlot = 0; // storage (UAV) slot for the in-place YCoCg decode pass
         bool m_pathTracerDenoised = false; // true only when the denoised texture was actually written this frame
         std::unique_ptr<NRI::Pipeline> m_ycocgDecodePipeline = nullptr;
+
+        // ReSTIR PT (Screen-Space Path Resampling via RTXDI) -- reuses the REAL rtxdi::ReSTIRPTContext
+        // C++ class (Rtxdi/PT/ReSTIRPT.h) directly for buffer-index rotation and default parameters,
+        // rather than hand-rolling an equivalent copy the way DI/GI's state is tracked: Source/ReSTIRPT.cpp
+        // is already compiled into the build (CMakeLists.txt globs every vendors/RTXDI/Source/*.cpp), so
+        // there's no reason to re-derive its switch-case buffer-index logic by hand and risk drifting
+        // from the real thing.
+        bool m_restirPTEnabled = false; // only meaningful while Path Tracing is active
+        bool m_restirPTTemporalEnabled = false; // see getReSTIRPTTemporalEnabled's comment
+        std::unique_ptr<rtxdi::ReSTIRPTContext> m_restirPTContext; // created lazily once render size is known
+        std::unique_ptr<NRI::Buffer> m_restirPTReservoirBuffers[3]; // RTXDI_PackedPTReservoir per element (64 bytes)
+        Ref<Texture2D> m_restirPTOutput; // final-shaded path-traced radiance (RGBA16F)
+        // Primary-surface (bounce-1) direct lighting -- the RTXDI PT SDK's RAB_PathTrace loop starts at
+        // bounceDepth=2 BY DESIGN (see PathTracerState.hlsli:158's own comment: "Starting surface is
+        // primary hit (1), but initialBounce starts at the surface after the scattering event, which is
+        // the secondary surface (2)"), meaning the resampled reservoir only ever contains INDIRECT light
+        // (bounce 2+). The real SDK expects a separate direct-lighting pass (ReSTIR DI, in the FullSample)
+        // to cover the primary surface, then sums the two -- exactly the same split this engine already
+        // uses for ReSTIR GI (indirect only) + DeferredLighting (direct). Written by the Initial Sampling
+        // pass (which already has full G-buffer/TLAS/light access) as a second render target, and added
+        // into the resampled indirect radiance in the Final Shading pass.
+        Ref<Texture2D> m_restirPTPrimaryDirect;
+        std::unique_ptr<NRI::Pipeline> m_restirPTInitialPipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_restirPTTemporalPipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_restirPTFinalShadingPipeline = nullptr;
+        // Numeric defaults match RTXPT's own GetDefaultReSTIRPT*Params() (see ReSTIRPT.cpp)
+        uint32_t m_restirPTNumInitialSamples = 1;
+        uint32_t m_restirPTMaxBounceDepth = 3;
+        uint32_t m_restirPTMaxRcVertexLength = 5;
+        uint32_t m_restirPTNumNeeSamples = 1;
+        float m_restirPTRoughnessThreshold = 0.1f;
+        float m_restirPTDistanceThreshold = 0.0f;
+        // Temporal resampling tunables -- same defaults already established for ReSTIR GI's own
+        // temporal pass (m_restirGiMaxHistoryLength/NormalThreshold/DepthThreshold), reused here since
+        // they represent the same kind of reprojection validity check.
+        uint32_t m_restirPTMaxHistoryLength = 8;
+        uint32_t m_restirPTMaxReservoirAge = 30; // RTXDI_PTRESERVOIR_AGE_MAX caps this at 31
+        float m_restirPTNormalThreshold = 0.6f;
+        float m_restirPTDepthThreshold = 0.1f;
+        bool m_restirPTEnablePermutationSampling = false;
+        bool m_restirPTOutputValid = false; // true only when the ReSTIR PT dispatch actually ran this frame
 
         // Post Process
         Ref<Texture2D> m_hdrSceneResource;
@@ -653,6 +774,7 @@ namespace Nox
         Ref<Texture2D> m_entityResource;
         Ref<Texture2D> m_entityResourceHi;
         std::vector<std::unique_ptr<NRI::Buffer>> m_pickerStagingBuffers;
+        std::vector<PickRequest> m_pickerReadbackRequests;
         PickRequest m_pickRequest;
         std::vector<int32_t> m_SelectedEntityIDs;
 
@@ -695,7 +817,7 @@ namespace Nox
         bool m_rayTracingShadows = false;
         bool m_rayTracingReflections = false;
         bool m_pathTracingEnabled = false;
-        bool m_pathTracingAccumulation = true;
+        bool m_pathTracingAccumulation = false;
 
         std::unique_ptr<NRI::AccelerationStructure> m_sceneTLAS;
         std::unique_ptr<NRI::Buffer> m_tlasBuffer;
@@ -707,6 +829,11 @@ namespace Nox
         uint32_t m_tlasHeapSlot = ~0u;
         bool m_hasTLASBuild = false;
         bool m_tlasNeedFullBuild = false;
+        bool m_tlasNeedUpdate = false;
+        uint64_t m_tlasInstanceSignature = 0;
+        bool m_tlasInstanceSignatureValid = false;
+        uint64_t m_tlasStructureSignature = 0;
+        bool m_tlasStructureSignatureValid = false;
         NRI::AccelerationStructureBuildDesc m_tlasBuildDesc{};
 
         std::vector<std::unique_ptr<NRI::Buffer>> m_vertexPageTableBuffers;
@@ -736,6 +863,13 @@ namespace Nox
         uint32_t frameIndex = 0;
 
         bool framebufferResized = false;
+        // Debounces OS window-resize-driven swapchain recreation the same way m_viewportResizePending
+        // debounces the editor's viewport panel (see that member's comment) -- SDL fires a resize event
+        // per pixel during a live window-border drag, and recreateSwapChain() rebuilds the whole
+        // G-buffer/ShadowMask/NRD-reinit/DDGI/ReSTIR resource stack, so reacting to every event tanks
+        // perf. present() returning ResizeRequired still forces an immediate recreate regardless of this
+        // timer -- this only debounces the proactive path driven by resizeWindow()'s SDL event handler.
+        std::chrono::steady_clock::time_point m_lastWindowResizeRequestTime{};
 
         // Outline
         std::vector<std::unique_ptr<NRI::Buffer>> m_selectedEntityIDBuffers;
@@ -763,6 +897,9 @@ namespace Nox
         glm::mat4 m_prevNonJitteredProj = glm::mat4(1.0f);
         glm::mat4 m_currentNonJitteredProj = glm::mat4(1.0f);
         glm::mat4 m_currentView = glm::mat4(1.0f);
+        glm::vec3 m_prevPrevCameraWorldPos = glm::vec3(0.0f);
+        glm::vec3 m_prevCameraWorldPos = glm::vec3(0.0f);
+        glm::vec3 m_currentCameraWorldPos = glm::vec3(0.0f);
         uint64_t m_sceneFrameCounter = 0;
         uint64_t m_lastSceneFrameCounter = UINT64_MAX;
         bool m_isFirstFrame = true;
@@ -778,6 +915,16 @@ namespace Nox
         bool m_resetDLSS = true;
         bool m_pendingRenderResolutionUpdate = false;
         bool m_dlssRayReconstructionEnabled = false; // Enabled by default when DLSS is on
+
+        // Live viewport-panel resize debounce: EditorLayer calls onViewportSizeChange() every frame the
+        // ImGui panel's pixel size differs from ours, which during a drag is every single frame. Applying
+        // applyRenderResolution() (full G-buffer/ShadowMask/NRD-reinit/DDGI/ReSTIR resource rebuild + a
+        // GPU waitIdle) on every one of those tanks perf and spams NRD reinit logs. Instead we record the
+        // latest requested size and only actually apply it once no new request has arrived for a short
+        // settle window (see applyPendingRenderResolutionIfNeeded()).
+        NRI::Extent2D m_pendingViewportSize{};
+        bool m_viewportResizePending = false;
+        std::chrono::steady_clock::time_point m_lastViewportResizeRequestTime{};
 
         // Camera Cache (Reverse-Z: no far clip)
         glm::vec3 m_cameraPosition{0.0f};

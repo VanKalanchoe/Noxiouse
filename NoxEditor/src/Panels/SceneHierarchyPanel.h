@@ -41,5 +41,6 @@ namespace Nox
         Ref<Scene> m_Context;
         std::vector<Entity> m_SelectionContexts;
         Entity m_SelectionAnchor;
+        bool m_MaterialShowAll = false; // Material component: show every slot instead of just this entity's own submesh
     };
 }

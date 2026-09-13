@@ -1,5 +1,6 @@
 #include "Renderer.h"
 #include <Rtxdi/GI/ReSTIRGI.h>
+#include <Rtxdi/PT/ReSTIRPT.h>
 #include <Rtxdi/RtxdiUtils.h>
 
 #include <iostream>
@@ -17,6 +18,7 @@
 #include "NoxCore/Asset/MeshImporter.h"
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Core/Log.h"
+#include "NoxCore/Core/Hash.h"
 
 namespace Nox
 {
@@ -166,17 +168,20 @@ namespace Nox
         watchShader("assets/shaders/DDGIBlendDistance.slang", "DDGIBlendDistance", [this]() { createDDGIPipelines(true); });
         watchShader("assets/shaders/DDGIProbeSpheres.slang", "DDGIProbeSpheres", [this]() { createDDGIPipelines(true); });
         // ReSTIR GI
-        watchShader("assets/shaders/ReSTIRGIInitial.slang", "ReSTIRGIInitial", [this]() { createReSTIRGIPipelines(true); });
-        watchShader("assets/shaders/ReSTIRGITemporal.slang", "ReSTIRGITemporal", [this]() { createReSTIRGIPipelines(true); });
-        watchShader("assets/shaders/ReSTIRGISpatial.slang", "ReSTIRGISpatial", [this]() { createReSTIRGIPipelines(true); });
-        watchShader("assets/shaders/ReSTIRDIWriteLightPDF.slang", "ReSTIRDIWriteLightPDF", [this]() { createReSTIRDIPipelines(true); });
-        watchShader("assets/shaders/ReSTIRDIReduceLightPDFMip.slang", "ReSTIRDIReduceLightPDFMip", [this]() { createReSTIRDIPipelines(true); });
-        watchShader("assets/shaders/ReSTIRDIPresample.slang", "ReSTIRDIPresample", [this]() { createReSTIRDIPipelines(true); });
-        watchShader("assets/shaders/ReSTIRDIPresampleReGIR.slang", "ReSTIRDIPresampleReGIR", [this]() { createReSTIRDIPipelines(true); });
-        watchShader("assets/shaders/ReSTIRDIInitial.slang", "ReSTIRDIInitial", [this]() { createReSTIRDIPipelines(true); });
-        watchShader("assets/shaders/ReSTIRDITemporal.slang", "ReSTIRDITemporal", [this]() { createReSTIRDIPipelines(true); });
-        watchShader("assets/shaders/ReSTIRDISpatial.slang", "ReSTIRDISpatial", [this]() { createReSTIRDIPipelines(true); });
-        watchShader("assets/shaders/ReSTIRDIFinalShading.slang", "ReSTIRDIFinalShading", [this]() { createReSTIRDIPipelines(true); });
+        watchShader("assets/shaders/RTXDI/GI/ReSTIRGIInitial.slang", "ReSTIRGIInitial", [this]() { createReSTIRGIPipelines(true); });
+        watchShader("assets/shaders/RTXDI/GI/ReSTIRGITemporal.slang", "ReSTIRGITemporal", [this]() { createReSTIRGIPipelines(true); });
+        watchShader("assets/shaders/RTXDI/GI/ReSTIRGISpatial.slang", "ReSTIRGISpatial", [this]() { createReSTIRGIPipelines(true); });
+        watchShader("assets/shaders/RTXDI/Presampling/ReSTIRDIWriteLightPDF.slang", "ReSTIRDIWriteLightPDF", [this]() { createReSTIRDIPipelines(true); });
+        watchShader("assets/shaders/RTXDI/Presampling/ReSTIRDIReduceLightPDFMip.slang", "ReSTIRDIReduceLightPDFMip", [this]() { createReSTIRDIPipelines(true); });
+        watchShader("assets/shaders/RTXDI/Presampling/ReSTIRDIPresample.slang", "ReSTIRDIPresample", [this]() { createReSTIRDIPipelines(true); });
+        watchShader("assets/shaders/RTXDI/Presampling/ReSTIRDIPresampleReGIR.slang", "ReSTIRDIPresampleReGIR", [this]() { createReSTIRDIPipelines(true); });
+        watchShader("assets/shaders/RTXDI/DI/ReSTIRDIInitial.slang", "ReSTIRDIInitial", [this]() { createReSTIRDIPipelines(true); });
+        watchShader("assets/shaders/RTXDI/DI/ReSTIRDITemporal.slang", "ReSTIRDITemporal", [this]() { createReSTIRDIPipelines(true); });
+        watchShader("assets/shaders/RTXDI/DI/ReSTIRDISpatial.slang", "ReSTIRDISpatial", [this]() { createReSTIRDIPipelines(true); });
+        watchShader("assets/shaders/RTXDI/DI/ReSTIRDIFinalShading.slang", "ReSTIRDIFinalShading", [this]() { createReSTIRDIPipelines(true); });
+        watchShader("assets/shaders/RTXDI/PT/ReSTIRPTInitial.slang", "ReSTIRPTInitial", [this]() { createReSTIRPTPipelines(true); });
+        watchShader("assets/shaders/RTXDI/PT/ReSTIRPTTemporal.slang", "ReSTIRPTTemporal", [this]() { createReSTIRPTPipelines(true); });
+        watchShader("assets/shaders/RTXDI/PT/ReSTIRPTFinalShading.slang", "ReSTIRPTFinalShading", [this]() { createReSTIRPTPipelines(true); });
 
         m_whiteTexture = createSolidColorTexture(255, 255, 255, 255);
 
@@ -191,6 +196,7 @@ namespace Nox
                 .usage = NRI::BufferUsage::Staging
             }));
         }
+        m_pickerReadbackRequests.resize(MAX_FRAMES_IN_FLIGHT);
 
         m_renderer2D = std::make_unique<Renderer2D>(isEditor, RendererContext
                                                     {
@@ -226,6 +232,7 @@ namespace Nox
     void Renderer::resizeWindow()
     {
         framebufferResized = true;
+        m_lastWindowResizeRequestTime = std::chrono::steady_clock::now();
     }
 
     void Renderer::initRenderer()
@@ -255,6 +262,8 @@ namespace Nox
         createReSTIRGIPipelines(false);
         // ReSTIR DI
         createReSTIRDIPipelines(false);
+        // ReSTIR PT
+        createReSTIRPTPipelines(false);
 
         createCommandPool();
         createUniformBuffers();
@@ -281,6 +290,8 @@ namespace Nox
         createReSTIRGIResources();
         // ReSTIR DI
         createReSTIRDIResources();
+        // ReSTIR PT
+        createReSTIRPTResources();
 
         createCommandBuffers();
 
@@ -364,8 +375,14 @@ namespace Nox
 
     void Renderer::onViewportSizeChange(NRI::Extent2D size)
     {
-        m_viewportSize = size;
-        applyRenderResolution();
+        // Debounced -- see m_viewportResizePending's declaration in Renderer.h for why this no longer
+        // calls applyRenderResolution() synchronously. EditorLayer.cpp calls this every frame the ImGui
+        // viewport panel's size differs from ours, which during a live drag is every frame; the actual
+        // (expensive) rebuild is deferred to applyPendingRenderResolutionIfNeeded() and only happens once
+        // the size has been stable for a short settle window.
+        m_pendingViewportSize = size;
+        m_viewportResizePending = true;
+        m_lastViewportResizeRequestTime = std::chrono::steady_clock::now();
     }
 
     void Renderer::setDLSSEnabled(bool enabled)
@@ -515,6 +532,7 @@ namespace Nox
         createPathTracerResources();
         createReSTIRGIResources();
         createReSTIRDIResources();
+        createReSTIRPTResources();
         m_pathTracerSampleCount = 0;
 
         // NGX's internal DLSS feature is fixed-size once created; it must be explicitly freed here
@@ -526,6 +544,21 @@ namespace Nox
 
     void Renderer::applyPendingRenderResolutionIfNeeded()
     {
+        // Settle window for live viewport-panel resize drags -- see m_viewportResizePending in Renderer.h.
+        // 120ms is short enough to feel responsive once you stop dragging, but long enough that a
+        // continuous drag (which re-fires onViewportSizeChange every frame) never triggers a rebuild
+        // mid-drag, only once after it stops.
+        if (m_viewportResizePending)
+        {
+            constexpr auto settleDelay = std::chrono::milliseconds(120);
+            if (std::chrono::steady_clock::now() - m_lastViewportResizeRequestTime >= settleDelay)
+            {
+                m_viewportResizePending = false;
+                m_viewportSize = m_pendingViewportSize;
+                applyRenderResolution();
+            }
+        }
+
         if (!m_pendingRenderResolutionUpdate)
             return;
         m_pendingRenderResolutionUpdate = false;
@@ -1015,6 +1048,161 @@ namespace Nox
         }
     }
 
+    void Renderer::setReSTIRPTTemporalEnabled(bool enabled)
+    {
+        m_restirPTTemporalEnabled = enabled;
+        if (m_restirPTContext)
+            m_restirPTContext->SetResamplingMode(enabled ? rtxdi::ReSTIRPT_ResamplingMode::Temporal : rtxdi::ReSTIRPT_ResamplingMode::None);
+    }
+
+    void Renderer::createReSTIRPTResources()
+    {
+        const uint32_t width = m_renderSize.width;
+        const uint32_t height = m_renderSize.height;
+
+        if (width == 0 || height == 0)
+            return;
+
+        // The real SDK context (Source/ReSTIRPT.cpp, already compiled into the build) owns buffer-index
+        // rotation and default parameters -- (re)created here whenever render size changes, mirroring
+        // how DI/GI's resize-dependent state gets rebuilt. Slots 0/1 ping-pong for temporal resampling,
+        // slot 2 preserves the unresampled initial-sampling reservoir for final shading's decorrelation
+        // fallback (see rtxdi::ReSTIRPTContext::UpdateBufferIndices in ReSTIRPT.cpp).
+        rtxdi::ReSTIRPTStaticParameters staticParams{};
+        staticParams.RenderWidth = width;
+        staticParams.RenderHeight = height;
+        staticParams.CheckerboardSamplingMode = rtxdi::CheckerboardMode::Off;
+        m_restirPTContext = std::make_unique<rtxdi::ReSTIRPTContext>(staticParams);
+        // Temporal resampling (RandomReplay/hybrid-shift reconnection, ported into ReSTIRPTTemporal.slang)
+        // currently produces a visible lighting-rotation artifact under investigation -- defaults to
+        // None here (matching the known-good state) and is toggled via setReSTIRPTTemporalEnabled(),
+        // e.g. for a resize-triggered recreation while the toggle was already on.
+        m_restirPTContext->SetResamplingMode(m_restirPTTemporalEnabled ? rtxdi::ReSTIRPT_ResamplingMode::Temporal : rtxdi::ReSTIRPT_ResamplingMode::None);
+
+        RTXDI_ReservoirBufferParameters ptResParams = m_restirPTContext->GetReservoirBufferParameters();
+        uint64_t ptReservoirBufferSize = static_cast<uint64_t>(ptResParams.reservoirArrayPitch) * sizeof(RTXDI_PackedPTReservoir);
+
+        for (int i = 0; i < 3; i++)
+        {
+            m_restirPTReservoirBuffers[i] = m_device->createBuffer(NRI::BufferDesc{
+                .size = ptReservoirBufferSize,
+                .usage = NRI::BufferUsage::Storage
+            });
+            void* mapped = m_restirPTReservoirBuffers[i]->map(0, ptReservoirBufferSize);
+            memset(mapped, 0, ptReservoirBufferSize);
+            m_restirPTReservoirBuffers[i]->unmap();
+        }
+
+        if (m_restirPTOutput)
+        {
+            m_resourceHeap->unregisterTexture(m_restirPTOutput->GetDescriptorIndexSlot());
+        }
+
+        m_restirPTOutput = m_device->createTexture(NRI::TextureDesc{
+            .width = width,
+            .height = height,
+            .mipLevels = 1,
+            .sampleCount = 1,
+            .usage = NRI::TextureUsage::ColorAttachment,
+            .format = NRI::ImageFormat::R16G16B16A16_SFLOAT,
+            .directFormat = UINT32_MAX
+        });
+        m_resourceHeap->registerTexture(*m_restirPTOutput);
+
+        if (m_restirPTPrimaryDirect)
+        {
+            m_resourceHeap->unregisterTexture(m_restirPTPrimaryDirect->GetDescriptorIndexSlot());
+        }
+
+        m_restirPTPrimaryDirect = m_device->createTexture(NRI::TextureDesc{
+            .width = width,
+            .height = height,
+            .mipLevels = 1,
+            .sampleCount = 1,
+            .usage = NRI::TextureUsage::ColorAttachment,
+            .format = NRI::ImageFormat::R16G16B16A16_SFLOAT,
+            .directFormat = UINT32_MAX
+        });
+        m_resourceHeap->registerTexture(*m_restirPTPrimaryDirect);
+    }
+
+    void Renderer::createReSTIRPTPipelines(bool forceCompile)
+    {
+        // 1. Initial Sampling Pipeline (ResamplingMode::None -- generates + RIS-combines
+        // numInitialSamples full paths per pixel, no temporal/spatial reuse yet)
+        {
+            NRI::PipelineDesc desc{};
+            desc.forceCompile = forceCompile;
+            // 2 targets: SV_Target0 is the debug-only combined-radiance preview, SV_Target1 is the
+            // primary-surface direct lighting consumed by the Final Shading pass (see m_restirPTPrimaryDirect).
+            desc.colorFormats = {NRI::ImageFormat::R16G16B16A16_SFLOAT, NRI::ImageFormat::R16G16B16A16_SFLOAT};
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Task,
+                .entryPoint = "taskMain",
+                .sourcePath = "assets/shaders/RTXDI/PT/ReSTIRPTInitial.slang"
+            });
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Mesh,
+                .entryPoint = "meshMain",
+                .sourcePath = "assets/shaders/RTXDI/PT/ReSTIRPTInitial.slang"
+            });
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Fragment,
+                .entryPoint = "fragMain",
+                .sourcePath = "assets/shaders/RTXDI/PT/ReSTIRPTInitial.slang"
+            });
+            m_restirPTInitialPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        }
+
+        // 2. Final Shading Pipeline
+        {
+            NRI::PipelineDesc desc{};
+            desc.forceCompile = forceCompile;
+            desc.colorFormats = {NRI::ImageFormat::R16G16B16A16_SFLOAT};
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Task,
+                .entryPoint = "taskMain",
+                .sourcePath = "assets/shaders/RTXDI/PT/ReSTIRPTFinalShading.slang"
+            });
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Mesh,
+                .entryPoint = "meshMain",
+                .sourcePath = "assets/shaders/RTXDI/PT/ReSTIRPTFinalShading.slang"
+            });
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Fragment,
+                .entryPoint = "fragMain",
+                .sourcePath = "assets/shaders/RTXDI/PT/ReSTIRPTFinalShading.slang"
+            });
+            m_restirPTFinalShadingPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        }
+
+        // 3. Temporal Resampling Pipeline (RandomReplay/hybrid-shift reconnection against last frame's
+        // finalized reservoir) -- runs between Initial Sampling and Final Shading whenever the context's
+        // resampling mode is Temporal (or TemporalAndSpatial once Spatial exists).
+        {
+            NRI::PipelineDesc desc{};
+            desc.forceCompile = forceCompile;
+            desc.colorFormats = {NRI::ImageFormat::R16G16B16A16_SFLOAT};
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Task,
+                .entryPoint = "taskMain",
+                .sourcePath = "assets/shaders/RTXDI/PT/ReSTIRPTTemporal.slang"
+            });
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Mesh,
+                .entryPoint = "meshMain",
+                .sourcePath = "assets/shaders/RTXDI/PT/ReSTIRPTTemporal.slang"
+            });
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Fragment,
+                .entryPoint = "fragMain",
+                .sourcePath = "assets/shaders/RTXDI/PT/ReSTIRPTTemporal.slang"
+            });
+            m_restirPTTemporalPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        }
+    }
+
     void Renderer::createDDGIPipelines(bool forceCompile)
     {
         // 1. Radiance Pipeline
@@ -1118,17 +1306,17 @@ namespace Nox
             desc.shaders.push_back({
                 .stage = NRI::ShaderStage::Task,
                 .entryPoint = "taskMain",
-                .sourcePath = "assets/shaders/ReSTIRGIInitial.slang"
+                .sourcePath = "assets/shaders/RTXDI/GI/ReSTIRGIInitial.slang"
             });
             desc.shaders.push_back({
                 .stage = NRI::ShaderStage::Mesh,
                 .entryPoint = "meshMain",
-                .sourcePath = "assets/shaders/ReSTIRGIInitial.slang"
+                .sourcePath = "assets/shaders/RTXDI/GI/ReSTIRGIInitial.slang"
             });
             desc.shaders.push_back({
                 .stage = NRI::ShaderStage::Fragment,
                 .entryPoint = "fragMain",
-                .sourcePath = "assets/shaders/ReSTIRGIInitial.slang"
+                .sourcePath = "assets/shaders/RTXDI/GI/ReSTIRGIInitial.slang"
             });
             m_restirGIInitialPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
         }
@@ -1141,17 +1329,17 @@ namespace Nox
             desc.shaders.push_back({
                 .stage = NRI::ShaderStage::Task,
                 .entryPoint = "taskMain",
-                .sourcePath = "assets/shaders/ReSTIRGITemporal.slang"
+                .sourcePath = "assets/shaders/RTXDI/GI/ReSTIRGITemporal.slang"
             });
             desc.shaders.push_back({
                 .stage = NRI::ShaderStage::Mesh,
                 .entryPoint = "meshMain",
-                .sourcePath = "assets/shaders/ReSTIRGITemporal.slang"
+                .sourcePath = "assets/shaders/RTXDI/GI/ReSTIRGITemporal.slang"
             });
             desc.shaders.push_back({
                 .stage = NRI::ShaderStage::Fragment,
                 .entryPoint = "fragMain",
-                .sourcePath = "assets/shaders/ReSTIRGITemporal.slang"
+                .sourcePath = "assets/shaders/RTXDI/GI/ReSTIRGITemporal.slang"
             });
             m_restirGITemporalPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
         }
@@ -1164,17 +1352,17 @@ namespace Nox
             desc.shaders.push_back({
                 .stage = NRI::ShaderStage::Task,
                 .entryPoint = "taskMain",
-                .sourcePath = "assets/shaders/ReSTIRGISpatial.slang"
+                .sourcePath = "assets/shaders/RTXDI/GI/ReSTIRGISpatial.slang"
             });
             desc.shaders.push_back({
                 .stage = NRI::ShaderStage::Mesh,
                 .entryPoint = "meshMain",
-                .sourcePath = "assets/shaders/ReSTIRGISpatial.slang"
+                .sourcePath = "assets/shaders/RTXDI/GI/ReSTIRGISpatial.slang"
             });
             desc.shaders.push_back({
                 .stage = NRI::ShaderStage::Fragment,
                 .entryPoint = "fragMain",
-                .sourcePath = "assets/shaders/ReSTIRGISpatial.slang"
+                .sourcePath = "assets/shaders/RTXDI/GI/ReSTIRGISpatial.slang"
             });
             m_restirGISpatialPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
         }
@@ -1190,7 +1378,7 @@ namespace Nox
             desc.shaders.push_back({
                 .stage = NRI::ShaderStage::Compute,
                 .entryPoint = "compMain",
-                .sourcePath = "assets/shaders/ReSTIRDIWriteLightPDF.slang"
+                .sourcePath = "assets/shaders/RTXDI/Presampling/ReSTIRDIWriteLightPDF.slang"
             });
             m_restirDIWriteLightPDFPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
         }
@@ -1203,7 +1391,7 @@ namespace Nox
             desc.shaders.push_back({
                 .stage = NRI::ShaderStage::Compute,
                 .entryPoint = "compMain",
-                .sourcePath = "assets/shaders/ReSTIRDIReduceLightPDFMip.slang"
+                .sourcePath = "assets/shaders/RTXDI/Presampling/ReSTIRDIReduceLightPDFMip.slang"
             });
             m_restirDIReduceLightPDFMipPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
         }
@@ -1216,7 +1404,7 @@ namespace Nox
             desc.shaders.push_back({
                 .stage = NRI::ShaderStage::Compute,
                 .entryPoint = "compMain",
-                .sourcePath = "assets/shaders/ReSTIRDIPresample.slang"
+                .sourcePath = "assets/shaders/RTXDI/Presampling/ReSTIRDIPresample.slang"
             });
             m_restirDIPresamplePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
         }
@@ -1229,7 +1417,7 @@ namespace Nox
             desc.shaders.push_back({
                 .stage = NRI::ShaderStage::Compute,
                 .entryPoint = "compMain",
-                .sourcePath = "assets/shaders/ReSTIRDIPresampleReGIR.slang"
+                .sourcePath = "assets/shaders/RTXDI/Presampling/ReSTIRDIPresampleReGIR.slang"
             });
             m_restirDIPresampleReGIRPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
         }
@@ -1242,17 +1430,17 @@ namespace Nox
             desc.shaders.push_back({
                 .stage = NRI::ShaderStage::Task,
                 .entryPoint = "taskMain",
-                .sourcePath = "assets/shaders/ReSTIRDIInitial.slang"
+                .sourcePath = "assets/shaders/RTXDI/DI/ReSTIRDIInitial.slang"
             });
             desc.shaders.push_back({
                 .stage = NRI::ShaderStage::Mesh,
                 .entryPoint = "meshMain",
-                .sourcePath = "assets/shaders/ReSTIRDIInitial.slang"
+                .sourcePath = "assets/shaders/RTXDI/DI/ReSTIRDIInitial.slang"
             });
             desc.shaders.push_back({
                 .stage = NRI::ShaderStage::Fragment,
                 .entryPoint = "fragMain",
-                .sourcePath = "assets/shaders/ReSTIRDIInitial.slang"
+                .sourcePath = "assets/shaders/RTXDI/DI/ReSTIRDIInitial.slang"
             });
             m_restirDIInitialPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
         }
@@ -1265,17 +1453,17 @@ namespace Nox
             desc.shaders.push_back({
                 .stage = NRI::ShaderStage::Task,
                 .entryPoint = "taskMain",
-                .sourcePath = "assets/shaders/ReSTIRDITemporal.slang"
+                .sourcePath = "assets/shaders/RTXDI/DI/ReSTIRDITemporal.slang"
             });
             desc.shaders.push_back({
                 .stage = NRI::ShaderStage::Mesh,
                 .entryPoint = "meshMain",
-                .sourcePath = "assets/shaders/ReSTIRDITemporal.slang"
+                .sourcePath = "assets/shaders/RTXDI/DI/ReSTIRDITemporal.slang"
             });
             desc.shaders.push_back({
                 .stage = NRI::ShaderStage::Fragment,
                 .entryPoint = "fragMain",
-                .sourcePath = "assets/shaders/ReSTIRDITemporal.slang"
+                .sourcePath = "assets/shaders/RTXDI/DI/ReSTIRDITemporal.slang"
             });
             m_restirDITemporalPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
         }
@@ -1288,17 +1476,17 @@ namespace Nox
             desc.shaders.push_back({
                 .stage = NRI::ShaderStage::Task,
                 .entryPoint = "taskMain",
-                .sourcePath = "assets/shaders/ReSTIRDISpatial.slang"
+                .sourcePath = "assets/shaders/RTXDI/DI/ReSTIRDISpatial.slang"
             });
             desc.shaders.push_back({
                 .stage = NRI::ShaderStage::Mesh,
                 .entryPoint = "meshMain",
-                .sourcePath = "assets/shaders/ReSTIRDISpatial.slang"
+                .sourcePath = "assets/shaders/RTXDI/DI/ReSTIRDISpatial.slang"
             });
             desc.shaders.push_back({
                 .stage = NRI::ShaderStage::Fragment,
                 .entryPoint = "fragMain",
-                .sourcePath = "assets/shaders/ReSTIRDISpatial.slang"
+                .sourcePath = "assets/shaders/RTXDI/DI/ReSTIRDISpatial.slang"
             });
             m_restirDISpatialPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
         }
@@ -1311,17 +1499,17 @@ namespace Nox
             desc.shaders.push_back({
                 .stage = NRI::ShaderStage::Task,
                 .entryPoint = "taskMain",
-                .sourcePath = "assets/shaders/ReSTIRDIFinalShading.slang"
+                .sourcePath = "assets/shaders/RTXDI/DI/ReSTIRDIFinalShading.slang"
             });
             desc.shaders.push_back({
                 .stage = NRI::ShaderStage::Mesh,
                 .entryPoint = "meshMain",
-                .sourcePath = "assets/shaders/ReSTIRDIFinalShading.slang"
+                .sourcePath = "assets/shaders/RTXDI/DI/ReSTIRDIFinalShading.slang"
             });
             desc.shaders.push_back({
                 .stage = NRI::ShaderStage::Fragment,
                 .entryPoint = "fragMain",
-                .sourcePath = "assets/shaders/ReSTIRDIFinalShading.slang"
+                .sourcePath = "assets/shaders/RTXDI/DI/ReSTIRDIFinalShading.slang"
             });
             m_restirDIFinalShadingPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
         }
@@ -1691,6 +1879,30 @@ namespace Nox
             .directFormat = UINT32_MAX
         });
         m_resourceHeap->registerTexture(*m_gbufferMaterial);
+
+        // Previous-frame albedo/material snapshots for ReSTIR PT's temporal resampling (see declaration
+        // comment) -- ReSTIR GI never needed these since its RAB_Surface has no material fields.
+        m_prevGbufferAlbedo = m_device->createTexture(NRI::TextureDesc{
+            .width = width,
+            .height = height,
+            .mipLevels = 1,
+            .sampleCount = 1,
+            .usage = NRI::TextureUsage::ColorAttachment,
+            .format = NRI::ImageFormat::RGBA8,
+            .directFormat = UINT32_MAX
+        });
+        m_resourceHeap->registerTexture(*m_prevGbufferAlbedo);
+
+        m_prevGbufferMaterial = m_device->createTexture(NRI::TextureDesc{
+            .width = width,
+            .height = height,
+            .mipLevels = 1,
+            .sampleCount = 1,
+            .usage = NRI::TextureUsage::ColorAttachment,
+            .format = NRI::ImageFormat::RGBA8,
+            .directFormat = UINT32_MAX
+        });
+        m_resourceHeap->registerTexture(*m_prevGbufferMaterial);
 
         m_gbufferEmission = m_device->createTexture(NRI::TextureDesc{
             .width = width,
@@ -3066,8 +3278,11 @@ namespace Nox
 
         // =========================================================================
         // 2.5. SHADOW MASK PASS (Evaluates 1-SPP RT Shadow -> m_rawShadowMask, m_viewZ, m_nrdNormalRoughness)
+        // This is only needed for the hybrid RT shadow path. ReSTIR DI traces its own selected
+        // light, and basic raster PBR/IBL must not pay for a full-resolution ray-query pass.
         // =========================================================================
-        if (m_shadowMaskPipeline && m_rawShadowMask && m_viewZ && m_nrdNormalRoughness)
+        if ((uniformData.enableRTShadows != 0) &&
+            m_shadowMaskPipeline && m_rawShadowMask && m_viewZ && m_nrdNormalRoughness)
         {
             std::vector<NRI::RenderAttachDesc> shadowAttachments;
             shadowAttachments.push_back({
@@ -3162,10 +3377,11 @@ namespace Nox
         }
 
         // Computed here (rather than down at the lighting-pass switch) so every hybrid-only pass below
-        // (reflections, DDGI, ReSTIR GI, ReSTIR DI) can skip itself entirely while path tracing --
-        // none of their output is ever consumed in that case (the path tracer computes everything
-        // itself from scratch), so running them was pure wasted GPU time every frame.
+        // can skip itself while path tracing. ReSTIR DI/GI are the exception when explicitly requested:
+        // the plain path tracer can consume their primary-surface lighting buffers in an RTXPT-style
+        // hybrid mode.
         bool runPathTracer = (m_pathTracingEnabled || m_debugMode == 18 || m_debugMode == 19);
+        bool pathTracerUsesRTXDI = runPathTracer && m_pathTracerUsesRTXDI;
 
         // =========================================================================
         // 2.65. RAY TRACED REFLECTION PASS (Evaluates 1-SPP GGX VNDF -> m_rawReflection)
@@ -3432,8 +3648,8 @@ namespace Nox
         // ReSTIR GI ray-traces its initial candidate against the scene TLAS, so like DDGI it has no
         // meaning without ray tracing hardware access -- gate it on the master toggle too, or turning
         // "Enable Hybrid Ray Tracing" off silently leaves it (and its cost) running.
-        bool runReSTIRGI = !runPathTracer &&
-                           m_rayTracingEnabled &&
+        bool runReSTIRGI = (!runPathTracer || pathTracerUsesRTXDI) &&
+                           (m_rayTracingEnabled || pathTracerUsesRTXDI) &&
                            (m_diffuseGIMode == 2 || (m_debugMode == 16 && m_diffuseGIMode != 1)) &&
                            m_hasTLASBuild && m_sceneTLAS && (uniformData.tlasDeviceAddress != 0) &&
                            (uniformData.instanceLUTReference != 0) &&
@@ -3692,6 +3908,13 @@ namespace Nox
         {
             m_commandBuffers->copyTexture(*m_depthResource, *m_prevDepthResource, m_renderSize.width, m_renderSize.height);
             m_commandBuffers->copyTexture(*m_gbufferNormal, *m_prevGbufferNormal, m_renderSize.width, m_renderSize.height);
+            // ReSTIR PT's temporal resampling also needs the previous frame's material (see declaration
+            // comment on m_prevGbufferAlbedo) -- same unconditional-copy reasoning as depth/normal above.
+            if (m_prevGbufferAlbedo && m_prevGbufferMaterial)
+            {
+                m_commandBuffers->copyTexture(*m_gbufferAlbedo, *m_prevGbufferAlbedo, m_renderSize.width, m_renderSize.height);
+                m_commandBuffers->copyTexture(*m_gbufferMaterial, *m_prevGbufferMaterial, m_renderSize.width, m_renderSize.height);
+            }
             m_commandBuffers->executionBarrier();
         }
 
@@ -3701,8 +3924,8 @@ namespace Nox
         // Same master-toggle gating as DDGI/ReSTIR GI (see the master-toggle bug fixed for those
         // two): ReSTIR DI ray-traces its final shadow against the scene TLAS, so it has no meaning
         // without ray tracing hardware access.
-        bool runReSTIRDI = !runPathTracer &&
-                           m_rayTracingEnabled &&
+        bool runReSTIRDI = (!runPathTracer || pathTracerUsesRTXDI) &&
+                           (m_rayTracingEnabled || pathTracerUsesRTXDI) &&
                            m_directLightingMode == 1 &&
                            m_hasTLASBuild && m_sceneTLAS && (uniformData.tlasDeviceAddress != 0) &&
                            m_restirDIInitialPipeline && m_restirDITemporalPipeline &&
@@ -4086,9 +4309,274 @@ namespace Nox
         // =========================================================================
         // 3. LIGHTING PASS: PATH TRACER (Modes 18 & 19) OR DEFERRED LIGHTING
         // =========================================================================
-        // runPathTracer computed earlier (before the reflections/DDGI/ReSTIR GI/DI sections) so they
-        // can skip themselves entirely while path tracing is active.
-        if (runPathTracer && m_pathTracerPipeline && m_pathTracerAccum[0] && m_pathTracerAccum[1])
+        // runPathTracer computed earlier (before the reflections/DDGI/ReSTIR GI/DI sections); ReSTIR
+        // DI/GI may still have run above when m_pathTracerUsesRTXDI is enabled.
+        m_restirPTOutputValid = false;
+        if (runPathTracer && m_restirPTEnabled && m_restirPTInitialPipeline && m_restirPTFinalShadingPipeline &&
+            m_restirPTOutput && m_restirPTContext &&
+            m_restirPTReservoirBuffers[0] && m_restirPTReservoirBuffers[1] && m_restirPTReservoirBuffers[2] &&
+            (uniformData.tlasDeviceAddress != 0) && (uniformData.lightDataReference != 0))
+        {
+            m_restirPTContext->SetFrameIndex(static_cast<uint32_t>(m_sceneFrameCounter));
+            RTXDI_PTBufferIndices ptBufferIndices = m_restirPTContext->GetBufferIndices();
+            RTXDI_ReservoirBufferParameters ptResParams = m_restirPTContext->GetReservoirBufferParameters();
+            glm::mat4 ptViewProj = uniformData.proj * uniformData.view;
+
+            // 1. Initial Sampling Pass
+            {
+                std::vector<NRI::RenderAttachDesc> ptiAttachments;
+                ptiAttachments.push_back({
+                    .attachment = m_restirPTOutput.get(), // debug-only output; real result lives in the reservoir buffer
+                    .loadOP = NRI::LoadOP::clear,
+                    .storeOP = NRI::StoreOP::store,
+                    .clearColor = {0.0f, 0.0f, 0.0f, 1.0f}
+                });
+                ptiAttachments.push_back({
+                    .attachment = m_restirPTPrimaryDirect.get(), // bounce-1 direct lighting, added in by Final Shading
+                    .loadOP = NRI::LoadOP::clear,
+                    .storeOP = NRI::StoreOP::store,
+                    .clearColor = {0.0f, 0.0f, 0.0f, 1.0f}
+                });
+
+                NRI::RenderDesc ptiDesc = {
+                    .renderArea = renderExtent,
+                    .colorAttachments = ptiAttachments
+                };
+
+                m_commandBuffers->beginRendering(ptiDesc);
+                m_commandBuffers->setViewportWithCount({0.0f, rh, rw, -rh}, 0.0f, 1.0f);
+                m_commandBuffers->setScissorWithCount(renderExtent);
+
+                m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_restirPTInitialPipeline);
+                m_commandBuffers->setCullMode(NRI::CullMode::None);
+                m_commandBuffers->setDepthTestEnable(false);
+                m_commandBuffers->setDepthWriteEnable(false);
+                for (uint32_t a = 0; a < ptiAttachments.size(); ++a)
+                {
+                    m_commandBuffers->setColorBlendEnable(a, false);
+                    m_commandBuffers->setColorWriteMask(a, NRI::ColorComponent::R | NRI::ColorComponent::G |
+                                                        NRI::ColorComponent::B | NRI::ColorComponent::A);
+                }
+
+                shaderio::PushConstantReSTIRPTInitial ptiPush{};
+                ptiPush.invViewProj = glm::inverse(ptViewProj);
+                ptiPush.cameraWorldPos = uniformData.cameraWorldPos;
+                ptiPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                ptiPush.lightDataReference = uniformData.lightDataReference;
+                ptiPush.reservoirBufferReference = m_restirPTReservoirBuffers[ptBufferIndices.initialPathTracerOutputBufferIndex]->getDeviceAddress();
+                ptiPush.preservedReservoirReference = m_restirPTReservoirBuffers[ptBufferIndices.initialPathTracerPreservedBufferIndex]->getDeviceAddress();
+                ptiPush.depthTextureIndex = m_depthResource->GetDescriptorIndexSlot();
+                ptiPush.gbufferNormalIndex = m_gbufferNormal->GetDescriptorIndexSlot();
+                ptiPush.gbufferAlbedoIndex = m_gbufferAlbedo->GetDescriptorIndexSlot();
+                ptiPush.gbufferMaterialIndex = m_gbufferMaterial->GetDescriptorIndexSlot();
+                ptiPush.viewportSize = glm::vec2(rw, rh);
+                ptiPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
+                ptiPush.reservoirBlockRowPitch = ptResParams.reservoirBlockRowPitch;
+                ptiPush.reservoirArrayPitch = ptResParams.reservoirArrayPitch;
+                ptiPush.firstLocalLightIndex = m_restirDIFirstLocalLight;
+                ptiPush.numLocalLights = m_restirDINumLocalLights;
+                ptiPush.firstInfiniteLightIndex = m_restirDIFirstInfiniteLight;
+                ptiPush.numInfiniteLights = m_restirDINumInfiniteLights;
+                ptiPush.numInitialSamples = m_restirPTNumInitialSamples;
+                ptiPush.maxBounceDepth = m_restirPTMaxBounceDepth;
+                ptiPush.maxRcVertexLength = m_restirPTMaxRcVertexLength;
+                ptiPush.numNeeSamples = m_restirPTNumNeeSamples;
+                ptiPush.roughnessThreshold = m_restirPTRoughnessThreshold;
+                ptiPush.distanceThreshold = m_restirPTDistanceThreshold;
+                ptiPush.skyboxTextureIndex = m_environmentCubemap ? m_environmentCubemap->GetDescriptorIndexSlot() : 0xFFFFFFFF;
+                m_commandBuffers->pushData(&ptiPush, sizeof(shaderio::PushConstantReSTIRPTInitial));
+
+                m_commandBuffers->drawMeshTasks(1, 1, 1);
+                m_commandBuffers->endRendering();
+                m_commandBuffers->executionBarrier();
+            }
+
+            // 2. Temporal Resampling Pass (RandomReplay/hybrid-shift reconnection against last frame's
+            // finalized reservoir) -- only runs once the resampling mode actually needs it, so buffer
+            // indices genuinely differ (None mode leaves both equal to 0, matching Initial's own gate).
+            bool restirPTTemporalActive = m_restirPTTemporalPipeline &&
+                ptBufferIndices.temporalResamplingInputBufferIndex != ptBufferIndices.initialPathTracerOutputBufferIndex;
+            if (restirPTTemporalActive)
+            {
+                std::vector<NRI::RenderAttachDesc> pttAttachments;
+                pttAttachments.push_back({
+                    .attachment = m_restirPTOutput.get(), // debug-only output; real result lives in the reservoir buffer
+                    .loadOP = NRI::LoadOP::clear,
+                    .storeOP = NRI::StoreOP::store,
+                    .clearColor = {0.0f, 0.0f, 0.0f, 1.0f}
+                });
+
+                NRI::RenderDesc pttDesc = {
+                    .renderArea = renderExtent,
+                    .colorAttachments = pttAttachments
+                };
+
+                m_commandBuffers->beginRendering(pttDesc);
+                m_commandBuffers->setViewportWithCount({0.0f, rh, rw, -rh}, 0.0f, 1.0f);
+                m_commandBuffers->setScissorWithCount(renderExtent);
+
+                m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_restirPTTemporalPipeline);
+                m_commandBuffers->setCullMode(NRI::CullMode::None);
+                m_commandBuffers->setDepthTestEnable(false);
+                m_commandBuffers->setDepthWriteEnable(false);
+                m_commandBuffers->setColorBlendEnable(0, false);
+                m_commandBuffers->setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G |
+                                                    NRI::ColorComponent::B | NRI::ColorComponent::A);
+
+                shaderio::PushConstantReSTIRPTTemporal pttPush{};
+                // invViewProj deliberately omitted -- see the struct's own comment in shaderIO.h: the
+                // shader reads it from g_UBO->invViewProj instead (same value, already computed there
+                // as glm::inverse(uniformData.proj * uniformData.view)), which was needed to fit this
+                // struct back under the device's 256-byte push-constant limit.
+                pttPush.prevInvViewProj = glm::inverse(uniformData.prevProj * uniformData.prevView);
+                pttPush.cameraWorldPos = uniformData.cameraWorldPos;
+                pttPush.prevCameraWorldPos = glm::vec4(m_prevCameraWorldPos, 0.0f);
+                pttPush.prevPrevCameraWorldPos = glm::vec4(m_prevPrevCameraWorldPos, 0.0f);
+                pttPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                pttPush.lightDataReference = uniformData.lightDataReference;
+                pttPush.currentReservoirReference = m_restirPTReservoirBuffers[ptBufferIndices.initialPathTracerOutputBufferIndex]->getDeviceAddress();
+                pttPush.historyReservoirReference = m_restirPTReservoirBuffers[ptBufferIndices.temporalResamplingInputBufferIndex]->getDeviceAddress();
+                pttPush.viewportSize = glm::vec2(rw, rh);
+                pttPush.depthTextureIndex = m_depthResource->GetDescriptorIndexSlot();
+                pttPush.prevDepthTextureIndex = m_prevDepthResource ? m_prevDepthResource->GetDescriptorIndexSlot() : 0xFFFFFFFF;
+                pttPush.gbufferNormalIndex = m_gbufferNormal->GetDescriptorIndexSlot();
+                pttPush.prevNormalTextureIndex = m_prevGbufferNormal ? m_prevGbufferNormal->GetDescriptorIndexSlot() : 0xFFFFFFFF;
+                pttPush.gbufferAlbedoIndex = m_gbufferAlbedo->GetDescriptorIndexSlot();
+                pttPush.prevAlbedoTextureIndex = m_prevGbufferAlbedo ? m_prevGbufferAlbedo->GetDescriptorIndexSlot() : 0xFFFFFFFF;
+                pttPush.gbufferMaterialIndex = m_gbufferMaterial->GetDescriptorIndexSlot();
+                pttPush.prevMaterialTextureIndex = m_prevGbufferMaterial ? m_prevGbufferMaterial->GetDescriptorIndexSlot() : 0xFFFFFFFF;
+                pttPush.gbufferVelocityIndex = m_gbufferVelocity ? m_gbufferVelocity->GetDescriptorIndexSlot() : 0xFFFFFFFF;
+                pttPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
+                pttPush.reservoirBlockRowPitch = ptResParams.reservoirBlockRowPitch;
+                pttPush.reservoirArrayPitch = ptResParams.reservoirArrayPitch;
+                pttPush.maxBounceDepth = m_restirPTMaxBounceDepth;
+                pttPush.maxRcVertexLength = m_restirPTMaxRcVertexLength;
+                pttPush.roughnessThreshold = m_restirPTRoughnessThreshold;
+                pttPush.distanceThreshold = m_restirPTDistanceThreshold;
+                pttPush.depthThreshold = m_restirPTDepthThreshold;
+                pttPush.normalThreshold = m_restirPTNormalThreshold;
+                pttPush.maxHistoryLength = m_restirPTMaxHistoryLength;
+                pttPush.maxReservoirAge = m_restirPTMaxReservoirAge;
+                pttPush.enablePermutationSampling = m_restirPTEnablePermutationSampling ? 1u : 0u;
+                pttPush.skyboxTextureIndex = m_environmentCubemap ? m_environmentCubemap->GetDescriptorIndexSlot() : 0xFFFFFFFF;
+                m_commandBuffers->pushData(&pttPush, sizeof(shaderio::PushConstantReSTIRPTTemporal));
+
+                m_commandBuffers->drawMeshTasks(1, 1, 1);
+                m_commandBuffers->endRendering();
+                m_commandBuffers->executionBarrier();
+            }
+
+            // 3. Final Shading Pass
+            {
+                std::vector<NRI::RenderAttachDesc> ptfAttachments;
+                ptfAttachments.push_back({
+                    .attachment = m_restirPTOutput.get(),
+                    .loadOP = NRI::LoadOP::clear,
+                    .storeOP = NRI::StoreOP::store,
+                    .clearColor = {0.0f, 0.0f, 0.0f, 1.0f}
+                });
+
+                NRI::RenderDesc ptfDesc = {
+                    .renderArea = renderExtent,
+                    .colorAttachments = ptfAttachments
+                };
+
+                m_commandBuffers->beginRendering(ptfDesc);
+                m_commandBuffers->setViewportWithCount({0.0f, rh, rw, -rh}, 0.0f, 1.0f);
+                m_commandBuffers->setScissorWithCount(renderExtent);
+
+                m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_restirPTFinalShadingPipeline);
+                m_commandBuffers->setCullMode(NRI::CullMode::None);
+                m_commandBuffers->setDepthTestEnable(false);
+                m_commandBuffers->setDepthWriteEnable(false);
+                m_commandBuffers->setColorBlendEnable(0, false);
+                m_commandBuffers->setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G |
+                                                    NRI::ColorComponent::B | NRI::ColorComponent::A);
+
+                shaderio::PushConstantReSTIRPTFinalShading ptfPush{};
+                ptfPush.invViewProj = glm::inverse(ptViewProj);
+                ptfPush.cameraWorldPos = uniformData.cameraWorldPos;
+                ptfPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                ptfPush.lightDataReference = uniformData.lightDataReference;
+                ptfPush.reservoirReference = m_restirPTReservoirBuffers[ptBufferIndices.finalShadingInputBufferIndex]->getDeviceAddress();
+                ptfPush.preservedReservoirReference = m_restirPTReservoirBuffers[ptBufferIndices.initialPathTracerPreservedBufferIndex]->getDeviceAddress();
+                ptfPush.depthTextureIndex = m_depthResource->GetDescriptorIndexSlot();
+                ptfPush.gbufferNormalIndex = m_gbufferNormal->GetDescriptorIndexSlot();
+                ptfPush.primaryDirectTextureIndex = m_restirPTPrimaryDirect->GetDescriptorIndexSlot();
+                ptfPush.viewportSize = glm::vec2(rw, rh);
+                ptfPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
+                ptfPush.reservoirBlockRowPitch = ptResParams.reservoirBlockRowPitch;
+                ptfPush.reservoirArrayPitch = ptResParams.reservoirArrayPitch;
+                // Shares the same "PT Denoiser" setting/combo as the plain path tracer -- REBLUR needs the
+                // shader's own YCoCg pre-encode (see LinearToYCoCg in ReSTIRPTFinalShading.slang), RELAX
+                // reads plain linear color, matching PathTracer.slang's own convention exactly.
+                ptfPush.denoiserMode = static_cast<uint32_t>(m_nrdPTDenoiser);
+                // RTXDI PT's final-shading decorrelation path: randomly use the preserved, unresampled
+                // initial reservoir to break temporal over-correlation. Stagnancy mode needs the SDK
+                // duplication-map pass; this renderer does not have that pass yet, so use Uniform mode.
+                ptfPush.decorrelationFactor = restirPTTemporalActive ? 0.4f : 0.0f;
+                ptfPush.decorrelationMode = restirPTTemporalActive ? 1u : 0u; // RTXDI_PT_DECORRELATION_MODE_UNIFORM/NONE
+                m_commandBuffers->pushData(&ptfPush, sizeof(shaderio::PushConstantReSTIRPTFinalShading));
+
+                m_commandBuffers->drawMeshTasks(1, 1, 1);
+                m_commandBuffers->endRendering();
+                m_commandBuffers->executionBarrier();
+            }
+
+            m_restirPTOutputValid = true;
+
+            // =========================================================================
+            // NRD DENOISING PASS -- shares m_nrdPTDenoiser/m_denoisedPathTracer/m_pathTracerDenoised
+            // with the plain path tracer (see the `else if` branch below) since the two are mutually
+            // exclusive per frame (only one of them ever runs), so there's no benefit to separate state.
+            // DLSS Ray Reconstruction needs no equivalent block here: dlssParams.inputColor already
+            // prefers m_restirPTOutput whenever m_restirPTOutputValid is true (see evaluateDLSS's call
+            // site below), and DLSS-RR denoises whatever raw HDR color it's given directly -- it doesn't
+            // care which technique produced that color, only that the G-buffer guide textures (normal/
+            // roughness/motion/depth) it also reads are valid, which they already are here.
+            // =========================================================================
+            m_pathTracerDenoised = false;
+            bool restirPTCameraMoved = (uniformData.view != m_pathTracerPrevView);
+            m_pathTracerPrevView = uniformData.view;
+            if (m_nrdPTDenoiser != NRI::NRDDiffuseDenoiser::Off && m_device->isNRDInitialized() &&
+                m_denoisedPathTracer && m_viewZ && m_nrdNormalRoughness)
+            {
+                NRI::NRDDiffuseParams ptDenoiseParams{};
+                ptDenoiseParams.inDiffuseRadianceHitDist = m_restirPTOutput.get();
+                ptDenoiseParams.inMotionVectors = m_gbufferVelocity.get();
+                ptDenoiseParams.inNormalRoughness = m_nrdNormalRoughness.get();
+                ptDenoiseParams.inViewZ = m_viewZ.get();
+                ptDenoiseParams.outDenoisedDiffuse = m_denoisedPathTracer.get();
+                ptDenoiseParams.commandBuffer = m_commandBuffers.get();
+
+                ptDenoiseParams.view = uniformData.view;
+                ptDenoiseParams.proj = uniformData.nonJitteredProj;
+                ptDenoiseParams.prevView = uniformData.prevView;
+                ptDenoiseParams.prevProj = uniformData.prevProj;
+
+                ptDenoiseParams.motionVectorScale = glm::vec2(1.0f, 1.0f);
+                ptDenoiseParams.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
+                ptDenoiseParams.resetHistory = m_isFirstFrame || m_resetNRD || restirPTCameraMoved;
+
+                m_pathTracerDenoised = m_device->evaluateNRDDiffusePT(ptDenoiseParams, m_nrdPTDenoiser);
+                m_commandBuffers->executionBarrier();
+                m_commandBuffers->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
+
+                if (m_pathTracerDenoised && m_nrdPTDenoiser == NRI::NRDDiffuseDenoiser::REBLUR && m_ycocgDecodePipeline)
+                {
+                    m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Compute, *m_ycocgDecodePipeline);
+                    shaderio::PushConstantYCoCgDecode decodePush{};
+                    decodePush.readTextureIndex = m_denoisedPathTracer->GetDescriptorIndexSlot();
+                    decodePush.writeTextureIndex = m_denoisedPathTracerWriteSlot;
+                    decodePush.width = m_renderSize.width;
+                    decodePush.height = m_renderSize.height;
+                    m_commandBuffers->pushData(&decodePush, sizeof(shaderio::PushConstantYCoCgDecode));
+                    m_commandBuffers->dispatch((m_renderSize.width + 7) / 8, (m_renderSize.height + 7) / 8, 1);
+                    m_commandBuffers->executionBarrier();
+                }
+            }
+        }
+        else if (runPathTracer && m_pathTracerPipeline && m_pathTracerAccum[0] && m_pathTracerAccum[1])
         {
             bool dlssRRActive = m_dlssEnabled && (m_dlssMode != NRI::UpscaleMode::Off) && m_dlssRayReconstructionEnabled;
             bool nrdPTActive = m_nrdPTDenoiser != NRI::NRDDiffuseDenoiser::Off;
@@ -4144,6 +4632,14 @@ namespace Nox
             ptPush.debugMode = accumulate ? 19 : 18;
             ptPush.skyboxTextureIndex = m_environmentCubemap ? m_environmentCubemap->GetDescriptorIndexSlot() : 0xFFFFFFFF;
             ptPush.denoiserMode = static_cast<uint32_t>(m_nrdPTDenoiser);
+            ptPush.restirGIDiffuseTextureIndex = uniformData.restirGIDiffuseTextureIndex;
+            bool restirGIActuallyDenoisedForPT = m_denoisedReSTIRGIDiffuse &&
+                uniformData.restirGIDiffuseTextureIndex == m_denoisedReSTIRGIDiffuse->GetDescriptorIndexSlot();
+            ptPush.restirGIDenoiserMode = restirGIActuallyDenoisedForPT ? static_cast<uint32_t>(m_nrdGIDenoiser) : 0u;
+            ptPush.restirDIDirectLightingTextureIndex = uniformData.restirDIDirectLightingTextureIndex;
+            bool restirDIActuallyDenoisedForPT = m_denoisedReSTIRDIDirectLighting &&
+                uniformData.restirDIDirectLightingTextureIndex == m_denoisedReSTIRDIDirectLighting->GetDescriptorIndexSlot();
+            ptPush.restirDIDenoiserMode = restirDIActuallyDenoisedForPT ? static_cast<uint32_t>(m_nrdDIDenoiser) : 0u;
             m_commandBuffers->pushData(&ptPush, sizeof(shaderio::PushConstantPathTracer));
 
             m_commandBuffers->drawMeshTasks(1, 1, 1);
@@ -4235,15 +4731,29 @@ namespace Nox
             lightingPush.debugMode = m_debugMode;
             lightingPush.gbufferVelocityIndex = m_gbufferVelocity->GetDescriptorIndexSlot();
             lightingPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
-            lightingPush.shadowMaskTextureIndex = (m_nrdShadowsEnabled && m_denoisedShadowMask)
+            // m_denoisedShadowMask is only re-evaluated when BOTH m_nrdShadowsEnabled AND
+            // (uniformData.enableRTShadows != 0) are true (see the NRD shadow denoising pass's own
+            // gate) -- checking m_rayTracingShadows alone here isn't enough, because enableRTShadows is
+            // (m_rayTracingEnabled && m_rayTracingShadows): turning off the MASTER "Hybrid Ray Tracing"
+            // toggle leaves m_rayTracingShadows sitting at true (setRayTracingEnabled is a separate,
+            // independent setter), so a m_rayTracingShadows-only check still thought the denoised
+            // texture was fresh even though the denoiser pass had correctly stopped updating it -- same
+            // frozen-shadow-follows-the-camera bug, just reachable through the other toggle too. Using
+            // the same uniformData.enableRTShadows the shadow mask/NRD passes themselves already
+            // computed this frame guarantees this can never drift out of sync with them again.
+            bool shadowDenoisedAvailable = m_nrdShadowsEnabled && (uniformData.enableRTShadows != 0) && m_denoisedShadowMask;
+            lightingPush.shadowMaskTextureIndex = shadowDenoisedAvailable
                 ? m_denoisedShadowMask->GetDescriptorIndexSlot()
                 : (m_rawShadowMask ? m_rawShadowMask->GetDescriptorIndexSlot() : 0);
-            uint32_t nrdShadowBit = (m_nrdShadowsEnabled && m_denoisedShadowMask) ? 1 : 0;
+            uint32_t nrdShadowBit = shadowDenoisedAvailable ? 1 : 0;
             // Only report REBLUR/RELAX to the shader when the denoised texture is actually what's
             // bound below -- if NRD hasn't initialized yet (or the resource is momentarily null during
             // a resize) this falls back to the raw buffer, which is plain linear RGB either way, so
             // reporting the denoiser mode in that case would make the shader wrongly YCoCg-decode it.
-            bool reflectionActuallyDenoised = m_nrdReflectionDenoiser != NRI::NRDReflectionDenoiser::Off && m_denoisedReflection;
+            // Same reasoning as shadowDenoisedAvailable above -- uniformData.enableRTReflections (not
+            // m_rayTracingReflections alone) matches exactly what the NRD reflection denoising pass
+            // itself gates on.
+            bool reflectionActuallyDenoised = m_nrdReflectionDenoiser != NRI::NRDReflectionDenoiser::Off && (uniformData.enableRTReflections != 0) && m_denoisedReflection;
             uint32_t nrdReflMode = reflectionActuallyDenoised ? static_cast<uint32_t>(m_nrdReflectionDenoiser) : 0;
             lightingPush.nrdShadowsEnabled = nrdShadowBit | (nrdReflMode << 1);
             lightingPush.reflectionTextureIndex = reflectionActuallyDenoised
@@ -4403,10 +4913,14 @@ namespace Nox
             // Route the noisy 1-SPP Path Tracer buffer to DLSS when Path Tracing is active -- unless
             // NRD already denoised it this frame (mutually exclusive with DLSS-RR, so DLSS here is
             // acting as pure upscaling), in which case feed it the already-denoised, already-decoded
-            // linear result instead of the raw noisy one.
-            dlssParams.inputColor = runPathTracer
-                ? (m_pathTracerDenoised ? m_denoisedPathTracer.get() : m_pathTracerAccum[ptWriteIndex].get())
-                : m_hdrSceneResource.get();
+            // linear result instead of the raw noisy one. ReSTIR PT's output (already RIS-resampled,
+            // one path per pixel from numInitialSamples candidates) takes priority over the plain path
+            // tracer's raw accumulation buffer when it ran this frame.
+            dlssParams.inputColor = m_restirPTOutputValid
+                ? (m_pathTracerDenoised ? m_denoisedPathTracer.get() : m_restirPTOutput.get())
+                : (runPathTracer
+                    ? (m_pathTracerDenoised ? m_denoisedPathTracer.get() : m_pathTracerAccum[ptWriteIndex].get())
+                    : m_hdrSceneResource.get());
             dlssParams.outputColor = m_dlssOutputResource.get();
             dlssParams.depth = m_depthResource.get();
             dlssParams.motionVectors = m_gbufferVelocity.get();
@@ -4494,7 +5008,15 @@ namespace Nox
             }
             else if (runPathTracer)
             {
-                if (m_pathTracerDenoised && m_denoisedPathTracer)
+                if (m_restirPTOutputValid && m_pathTracerDenoised && m_denoisedPathTracer)
+                {
+                    activeHdrSlot = m_denoisedPathTracer->GetDescriptorIndexSlot();
+                }
+                else if (m_restirPTOutputValid && m_restirPTOutput)
+                {
+                    activeHdrSlot = m_restirPTOutput->GetDescriptorIndexSlot();
+                }
+                else if (m_pathTracerDenoised && m_denoisedPathTracer)
                 {
                     activeHdrSlot = m_denoisedPathTracer->GetDescriptorIndexSlot();
                 }
@@ -4780,6 +5302,9 @@ namespace Nox
                 uint32_t copyHeight = std::min(m_pickRequest.height, height - sampleY);
 
                 m_entityResourceHi->copyImageToBuffer(*m_commandBuffers, *m_pickerStagingBuffers[frameIndex], sampleX, sampleY, copyWidth, copyHeight);
+                m_pickerReadbackRequests[frameIndex] = m_pickRequest;
+                m_pickerReadbackRequests[frameIndex].width = copyWidth;
+                m_pickerReadbackRequests[frameIndex].height = copyHeight;
 
                 m_pickRequest.active = false;
             }
@@ -5053,7 +5578,14 @@ namespace Nox
 
         m_device->submitCommandBuffer(*m_commandBuffers, *m_swapChain, frameIndex, imageIndex);
 
-        if (m_swapChain->present(frameIndex, imageIndex) == NRI::FrameResult::ResizeRequired || framebufferResized)
+        // Debounced -- see m_lastWindowResizeRequestTime's declaration in Renderer.h. A hard
+        // ResizeRequired from present() (swapchain genuinely out of date) always recreates immediately;
+        // the passive framebufferResized flag (set by every SDL resize event during a live window-border
+        // drag) only triggers a recreate once no new resize event has arrived for a short settle window.
+        NRI::FrameResult presentResult = m_swapChain->present(frameIndex, imageIndex);
+        bool windowResizeSettled = framebufferResized &&
+            (std::chrono::steady_clock::now() - m_lastWindowResizeRequestTime >= std::chrono::milliseconds(120));
+        if (presentResult == NRI::FrameResult::ResizeRequired || windowResizeSettled)
         {
             framebufferResized = false;
             recreateSwapChain();
@@ -5092,6 +5624,10 @@ namespace Nox
         if (!isPathTracing && !isDDGI && !isReSTIRGI && !isHybridRT)
         {
             m_hasTLASBuild = false;
+            m_tlasNeedFullBuild = false;
+            m_tlasNeedUpdate = false;
+            m_tlasInstanceSignatureValid = false;
+            m_tlasStructureSignatureValid = false;
             uniformData.tlasDeviceAddress = 0;
             uniformData.instanceLUTReference = 0;
             uniformData.enableRTShadows = 0;
@@ -5179,6 +5715,10 @@ namespace Nox
         if (rtInstances.empty())
         {
             m_hasTLASBuild = false;
+            m_tlasNeedFullBuild = false;
+            m_tlasNeedUpdate = false;
+            m_tlasInstanceSignatureValid = false;
+            m_tlasStructureSignatureValid = false;
             uniformData.enableRTShadows = 0;
             uniformData.enableRTReflections = 0;
             return;
@@ -5192,6 +5732,35 @@ namespace Nox
         uint32_t instanceCount = static_cast<uint32_t>(rtInstances.size());
         uint64_t instanceBufferSize = sizeof(NRI::AccelerationStructureInstance) * instanceCount;
         uint64_t lutBufferSize = sizeof(shaderio::InstanceLUT) * rtInstanceLUTs.size();
+
+        // The ECS queues are the authoritative instance list. Hash the complete TLAS instance
+        // records so additions/removals, transform changes, BLAS replacement, and instance flags
+        // all invalidate the cached build without requiring ECS-specific callbacks here.
+        const uint8_t* instanceBytes = reinterpret_cast<const uint8_t*>(rtInstances.data());
+        uint64_t instanceSignature = Hash::compute(instanceBytes, instanceBufferSize);
+        uint64_t structureSignature = 0;
+        for (size_t i = 0; i < instanceCount; ++i)
+        {
+            const uint8_t* record = instanceBytes + i * sizeof(NRI::AccelerationStructureInstance);
+
+            // The first 48 bytes are the 3x4 transform. The remaining fields describe the
+            // TLAS topology/flags and cannot be changed through a Vulkan AS update.
+            structureSignature = Hash::compute(
+                record + 48,
+                sizeof(NRI::AccelerationStructureInstance) - 48,
+                structureSignature);
+        }
+        structureSignature = Hash::compute(&instanceCount, sizeof(instanceCount), structureSignature);
+        bool instanceListChanged = !m_tlasInstanceSignatureValid ||
+                                   instanceSignature != m_tlasInstanceSignature;
+        bool structureChanged = !m_tlasStructureSignatureValid ||
+                                structureSignature != m_tlasStructureSignature;
+        m_tlasInstanceSignature = instanceSignature;
+        m_tlasInstanceSignatureValid = true;
+        m_tlasStructureSignature = structureSignature;
+        m_tlasStructureSignatureValid = true;
+        m_tlasNeedFullBuild = structureChanged || !m_sceneTLAS;
+        m_tlasNeedUpdate = instanceListChanged && !m_tlasNeedFullBuild;
 
         // 1. Ensure TLAS Instance Buffer is allocated and populated
         if (!m_rtInstanceBuffers[currentFrameIndex] || m_rtInstanceBuffers[currentFrameIndex]->getSize() < instanceBufferSize)
@@ -5263,6 +5832,8 @@ namespace Nox
             // Register TLAS into Descriptor Heap ONLY when newly created or resized
             m_tlasHeapSlot = m_resourceHeap->registerAccelerationStructure(*m_sceneTLAS, m_tlasHeapSlot);
             m_tlasHeapIndex = m_tlasHeapSlot;
+            m_tlasNeedFullBuild = true;
+            m_tlasNeedUpdate = false;
         }
 
         // 4. Update UBO flags (ready for updateUniformBuffer!)
@@ -5276,31 +5847,47 @@ namespace Nox
 
     void Renderer::BuildSceneAccelerationStructure(uint32_t currentFrameIndex)
     {
-        if (!m_hasTLASBuild || !m_sceneTLAS || !m_tlasScratchBuffer)
+        if (!m_hasTLASBuild || !m_sceneTLAS || !m_tlasScratchBuffer ||
+            (!m_tlasNeedFullBuild && !m_tlasNeedUpdate))
             return;
 
         // 1. Pre-build barrier: Host/Transfer instance writes -> AS Build Read
         m_commandBuffers->accelerationStructureBarrier(NRI::AccelerationStructureBarrierType::TransferToBuild);
 
-        // 2. Always BUILD TLAS fresh every frame (matching Khronos tutorial line 1825).
-        // This ensures deleted, swapped, or moved meshes update immediately with zero ghost geometry!
-        m_commandBuffers->buildAccelerationStructure(m_tlasBuildDesc, m_tlasScratchBuffer->getDeviceAddress(), *m_sceneTLAS);
+        if (m_tlasNeedFullBuild)
+        {
+            m_commandBuffers->buildAccelerationStructure(m_tlasBuildDesc, m_tlasScratchBuffer->getDeviceAddress(), *m_sceneTLAS);
+        }
+        else
+        {
+            // Transform-only ECS changes preserve instance count, BLAS addresses, and flags, so
+            // Vulkan's fast AS update path is valid and avoids rebuilding the entire TLAS.
+            m_commandBuffers->updateAccelerationStructure(
+                m_tlasBuildDesc,
+                m_tlasScratchBuffer->getDeviceAddress(),
+                *m_sceneTLAS,
+                *m_sceneTLAS);
+        }
 
         // 3. Post-build barrier: AS Build Write -> Fragment/Compute Shader Read
         m_commandBuffers->accelerationStructureBarrier(NRI::AccelerationStructureBarrierType::BuildToShaderRead);
+        m_tlasNeedFullBuild = false;
+        m_tlasNeedUpdate = false;
     }
 
     int32_t Renderer::getPickedEntityID()
     {
         int32_t clickedEntityID = -1;
 
-        // Map the staging buffer for the current in-flight frame
-        void* mappedMemory = m_pickerStagingBuffers[frameIndex]->map(0, sizeof(int32_t));
+        // frameIndex already points at the next frame to record. The newest completed pick copy
+        // belongs to the frame submitted immediately before it.
+        const uint32_t readbackFrame = (frameIndex + MAX_FRAMES_IN_FLIGHT - 1) % MAX_FRAMES_IN_FLIGHT;
+        void* mappedMemory = m_pickerStagingBuffers[readbackFrame]->map(0, sizeof(int32_t));
 
         if (mappedMemory)
         {
             memcpy(&clickedEntityID, mappedMemory, sizeof(int32_t));
-            m_pickerStagingBuffers[frameIndex]->unmap();
+            m_pickerStagingBuffers[readbackFrame]->unmap();
         }
 
         return clickedEntityID;
@@ -5309,11 +5896,13 @@ namespace Nox
     std::vector<int32_t> Renderer::getPickedEntityIDs()
     {
         std::vector<int32_t> uniqueIDs;
-        size_t pixelCount = static_cast<size_t>(m_pickRequest.width) * m_pickRequest.height;
+        const uint32_t readbackFrame = (frameIndex + MAX_FRAMES_IN_FLIGHT - 1) % MAX_FRAMES_IN_FLIGHT;
+        const PickRequest& readbackRequest = m_pickerReadbackRequests[readbackFrame];
+        size_t pixelCount = static_cast<size_t>(readbackRequest.width) * readbackRequest.height;
         if (pixelCount == 0)
             return uniqueIDs;
 
-        void* mappedMemory = m_pickerStagingBuffers[frameIndex]->map(0, pixelCount * sizeof(int32_t));
+        void* mappedMemory = m_pickerStagingBuffers[readbackFrame]->map(0, pixelCount * sizeof(int32_t));
         if (mappedMemory)
         {
             const int32_t* pixels = static_cast<const int32_t*>(mappedMemory);
@@ -5328,7 +5917,7 @@ namespace Nox
                 }
             }
 
-            m_pickerStagingBuffers[frameIndex]->unmap();
+            m_pickerStagingBuffers[readbackFrame]->unmap();
         }
 
         return uniqueIDs;
@@ -5403,21 +5992,28 @@ namespace Nox
         if (m_lastSceneFrameCounter != m_sceneFrameCounter)
         {
             m_lastSceneFrameCounter = m_sceneFrameCounter;
+            const glm::vec3 newCameraWorldPos = glm::vec3(transform[3]);
 
             if (m_isFirstFrame)
             {
                 m_prevView = glm::scale(glm::mat4(1.0f), glm::vec3(1.0f, 1.0f, -1.0f)) * glm::inverse(transform);
                 m_prevNonJitteredProj = camera.GetProjection();
+                m_prevPrevCameraWorldPos = newCameraWorldPos;
+                m_prevCameraWorldPos = newCameraWorldPos;
+                m_currentCameraWorldPos = newCameraWorldPos;
                 m_isFirstFrame = false;
             }
             else
             {
                 m_prevView = m_currentView;
                 m_prevNonJitteredProj = m_currentNonJitteredProj;
+                m_prevPrevCameraWorldPos = m_prevCameraWorldPos;
+                m_prevCameraWorldPos = m_currentCameraWorldPos;
             }
 
             m_currentView = glm::scale(glm::mat4(1.0f), glm::vec3(1.0f, 1.0f, -1.0f)) * glm::inverse(transform);
             m_currentNonJitteredProj = camera.GetProjection();
+            m_currentCameraWorldPos = newCameraWorldPos;
 
             if (enableJitter)
             {
@@ -5520,21 +6116,28 @@ namespace Nox
         if (m_lastSceneFrameCounter != m_sceneFrameCounter)
         {
             m_lastSceneFrameCounter = m_sceneFrameCounter;
+            const glm::vec3 newCameraWorldPos = camera.GetPosition();
 
             if (m_isFirstFrame)
             {
                 m_prevView = camera.GetViewMatrix();
                 m_prevNonJitteredProj = camera.GetProjection();
+                m_prevPrevCameraWorldPos = newCameraWorldPos;
+                m_prevCameraWorldPos = newCameraWorldPos;
+                m_currentCameraWorldPos = newCameraWorldPos;
                 m_isFirstFrame = false;
             }
             else
             {
                 m_prevView = m_currentView;
                 m_prevNonJitteredProj = m_currentNonJitteredProj;
+                m_prevPrevCameraWorldPos = m_prevCameraWorldPos;
+                m_prevCameraWorldPos = m_currentCameraWorldPos;
             }
 
             m_currentView = camera.GetViewMatrix();
             m_currentNonJitteredProj = camera.GetProjection();
+            m_currentCameraWorldPos = newCameraWorldPos;
 
             m_cameraPosition = camera.GetPosition();
             m_cameraUp = camera.GetUpDirection();
@@ -5933,11 +6536,20 @@ namespace Nox
 
     void Renderer::SubmitLight(const glm::mat4& transform, const DirectionalLightComponent& light)
     {
+        // glTF's KHR_lights_punctual convention defines a light's direction as its local -Z axis
+        // transformed to world space - the direction the light EMITS/travels (matches the Khronos
+        // spec and this node's rotation directly). But every shader in this project (DeferredLighting,
+        // PathTracer, ShadowMask, ReSTIR DI/GI/PT, ...) consumes light.direction.xyz directly as the
+        // surface-to-light vector for NdotL and for the direction of the shadow ray toward the light -
+        // exactly what the Khronos reference shader itself does via `normalize(-light.direction)`.
+        // Negate here, once, at the source, so every consumer's existing (correct) usage lines up
+        // instead of patching light.direction.xyz in a dozen shader files.
         glm::vec3 forward = glm::normalize(glm::vec3(transform * glm::vec4(0.0f, 0.0f, -1.0f, 0.0f)));
+        glm::vec3 towardLight = -forward;
 
         shaderio::LightData l{};
         l.position = glm::vec4(0.0f, 0.0f, 0.0f, (float)shaderio::LightType::Directional);
-        l.direction = glm::vec4(forward, 0.0f);
+        l.direction = glm::vec4(towardLight, 0.0f);
         l.color = glm::vec4(light.Color, light.Intensity);
         // spotParams.z: half-angle angular radius in radians; spotParams.w: shadow samples
         l.spotParams = glm::vec4(0.0f, 0.0f, glm::radians(glm::max(0.0f, light.AngularDiameter) * 0.5f), (float)glm::max(1u, light.ShadowSamples));

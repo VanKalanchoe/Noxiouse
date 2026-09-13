@@ -32,11 +32,15 @@ namespace Nox
 
         m_Font = Font::GetDefault();
 
-        m_IconPlay = TextureImporter::LoadTexture2D("assets/Icons/PlayButton.ktx2", {.generateMips = false});
-        m_IconStop = TextureImporter::LoadTexture2D("assets/Icons/StopButton.ktx2", {.generateMips = false});
-        m_IconPause = TextureImporter::LoadTexture2D("assets/Icons/PauseButton.ktx2", {.generateMips = false});
-        m_IconSimulate = TextureImporter::LoadTexture2D("assets/Icons/SimulateButton.ktx2", {.generateMips = false});
-        m_IconStep = TextureImporter::LoadTexture2D("assets/Icons/StepButton.ktx2", {.generateMips = false});
+        // These editor icon .ktx2 files carry a KTXorientation tag claiming bottom-up (Y=up)
+        // storage even though their actual pixel data is top-down like everything else in this
+        // project - flip=true cancels out TextureImporter's automatic orientation correction so
+        // they render the same as before that correction was added.
+        m_IconPlay = TextureImporter::LoadTexture2D("assets/Icons/PlayButton.ktx2", {.flip = true, .generateMips = false});
+        m_IconStop = TextureImporter::LoadTexture2D("assets/Icons/StopButton.ktx2", {.flip = true, .generateMips = false});
+        m_IconPause = TextureImporter::LoadTexture2D("assets/Icons/PauseButton.ktx2", {.flip = true, .generateMips = false});
+        m_IconSimulate = TextureImporter::LoadTexture2D("assets/Icons/SimulateButton.ktx2", {.flip = true, .generateMips = false});
+        m_IconStep = TextureImporter::LoadTexture2D("assets/Icons/StepButton.ktx2", {.flip = true, .generateMips = false});
 
         m_EditorScene = CreateRef<Scene>();
         m_ActiveScene = m_EditorScene;
@@ -582,13 +586,50 @@ namespace Nox
                             return 0;
                         };
 
+                        // A glTF animation does not imply skinning. Bistro, for example, has a
+                        // node animation for its ceiling fans but no skins at all. Resolve this once
+                        // and only attach an animator when the imported skeleton actually contains
+                        // joints; otherwise every mesh node would run a full skeleton update.
+                        AssetHandle resolvedSkeletonHandle = 0;
+                        Ref<Skeleton> resolvedSkeleton;
+                        bool skeletonResolved = false;
+
                         // Helper to attach AnimatorComponent and load its skeleton
                         auto tryAttachAnimator = [&](Entity entity)
                         {
                             if (!hasSkeleton) return;
 
+                            if (!skeletonResolved)
+                            {
+                                resolvedSkeletonHandle = getOrImportSkeletonHandle(relSkelPath);
+                                if (resolvedSkeletonHandle != 0)
+                                    resolvedSkeleton = AssetManager::GetAsset<Skeleton>(resolvedSkeletonHandle);
+                                skeletonResolved = true;
+                            }
+
+                            if (!resolvedSkeleton || resolvedSkeleton->Skins.empty())
+                                return;
+
                             auto& animatorComp = entity.AddComponent<AnimatorComponent>();
-                            animatorComp.Skeleton = getOrImportSkeletonHandle(relSkelPath);
+                            animatorComp.Skeleton = resolvedSkeletonHandle;
+                        };
+
+                        auto findNodeAnimation = [&]() -> AssetHandle
+                        {
+                            const std::filesystem::path animationDirectory = metadata.FilePath.parent_path();
+                            const std::string animationPrefix = metadata.FilePath.stem().string() + "_";
+                            for (const auto& [animationHandle, animationMetadata] :
+                                 Project::GetActive()->GetEditorAssetManager()->GetAssetRegistry())
+                            {
+                                if (animationMetadata.Type != AssetType::AnimationSequence ||
+                                    animationMetadata.FilePath.parent_path() != animationDirectory)
+                                    continue;
+
+                                const std::string animationStem = animationMetadata.FilePath.stem().string();
+                                if (animationStem.starts_with(animationPrefix))
+                                    return animationHandle;
+                            }
+                            return 0;
                         };
 
                         auto addLightComponent = [&](Entity entity, const LightNodeData& l)
@@ -700,6 +741,21 @@ namespace Nox
                                     addLightComponent(createdNodes[light.NodeIndex], light);
                                 else
                                     spawnGltfLights(importRoot ? importRoot : firstRoot, { light });
+                            }
+
+                            // One clip controller owns the imported hierarchy. Node indices in the
+                            // .nanim channels match this table, so regular object animations can
+                            // update ECS transforms without allocating an animator per mesh node.
+                            AssetHandle nodeAnimation = findNodeAnimation();
+                            Entity animationRoot = importRoot ? importRoot : firstRoot;
+                            if ((type == AssetType::Mesh || type == AssetType::MeshSource) &&
+                                nodeAnimation != 0 && animationRoot)
+                            {
+                                auto& animator = animationRoot.AddComponent<AnimatorComponent>();
+                                animator.Animation = nodeAnimation;
+                                animator.NodeEntities.resize(createdNodes.size(), entt::null);
+                                for (size_t i = 0; i < createdNodes.size(); ++i)
+                                    animator.NodeEntities[i] = static_cast<entt::entity>(createdNodes[i]);
                             }
 
                             if (importRoot)
@@ -1074,10 +1130,125 @@ namespace Nox
         if (ptEnabled)
         {
             ImGui::Indent();
+
+            bool restirPTEnabled = m_Renderer->getReSTIRPTEnabled();
+            if (ImGui::Checkbox("ReSTIR PT (RTXDI Screen-Space Path Resampling) [v1]", &restirPTEnabled))
+            {
+                m_Renderer->setReSTIRPTEnabled(restirPTEnabled);
+            }
+            if (ImGui::IsItemHovered())
+            {
+                ImGui::SetTooltip("Replaces the plain path tracer's own accumulation loop with RTXDI's ReSTIR PT reservoir\nresampling (1 candidate combined via RIS, no temporal/spatial reuse yet -- that's next).\nExpect a noisier but unbiased single-frame result versus multi-frame progressive accumulation;\nthis is the same image every frame (no ground-truth convergence) until temporal reuse lands.");
+            }
+
+            if (restirPTEnabled)
+            {
+                ImGui::Indent();
+                ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f), "ReSTIR PT v1: None resampling mode (initial sample + RIS only)");
+
+                bool ptTemporalEnabled = m_Renderer->getReSTIRPTTemporalEnabled();
+                if (ImGui::Checkbox("Temporal Resampling (Experimental)", &ptTemporalEnabled))
+                {
+                    m_Renderer->setReSTIRPTTemporalEnabled(ptTemporalEnabled);
+                }
+                if (ImGui::IsItemHovered())
+                {
+                    ImGui::SetTooltip("Reuses last frame's resampled path via hybrid-shift reconnection instead of drawing a fresh\ncandidate every frame -- known issue: currently produces a visible lighting-rotation artifact\neven with a static camera. Off by default until this is debugged; leave off for the clean v1 look.");
+                }
+                if (ptTemporalEnabled)
+                {
+                    ImGui::TextColored(ImVec4(0.9f, 0.65f, 0.2f, 1.0f), "Known bug: lighting rotates/swirls -- for testing only");
+                }
+
+                uint32_t& ptInitialSamples = m_Renderer->getReSTIRPTNumInitialSamples();
+                int ptInitialSamplesInt = static_cast<int>(ptInitialSamples);
+                if (ImGui::SliderInt("Initial Samples", &ptInitialSamplesInt, 1, 16))
+                {
+                    ptInitialSamples = static_cast<uint32_t>(ptInitialSamplesInt);
+                }
+                if (ImGui::IsItemHovered())
+                {
+                    ImGui::SetTooltip("How many full candidate paths are traced per pixel and RIS-combined into one reservoir\n(RTXPT's equivalent: \"Samples per pixel\"). Higher = less noise, higher cost -- scales roughly\nlinearly since each sample re-traces bounces from scratch (no reuse across samples yet).");
+                }
+
+                uint32_t& ptMaxBounces = m_Renderer->getReSTIRPTMaxBounceDepth();
+                int ptMaxBouncesInt = static_cast<int>(ptMaxBounces);
+                if (ImGui::SliderInt("Max Bounces", &ptMaxBouncesInt, 1, 16))
+                {
+                    ptMaxBounces = static_cast<uint32_t>(ptMaxBouncesInt);
+                }
+                if (ImGui::IsItemHovered())
+                {
+                    ImGui::SetTooltip("Max indirect bounce depth traced per candidate path (RTXPT's equivalent: \"Max bounces\").\nDoes not include the primary surface's own direct lighting, which is always evaluated\nseparately regardless of this setting. Higher = more light transport (longer indirect\nlight chains, e.g. light bouncing around corners), higher cost.");
+                }
+
+                uint32_t& ptNeeSamples = m_Renderer->getReSTIRPTNumNeeSamples();
+                int ptNeeSamplesInt = static_cast<int>(ptNeeSamples);
+                if (ImGui::SliderInt("NEE Light Samples", &ptNeeSamplesInt, 0, 8))
+                {
+                    ptNeeSamples = static_cast<uint32_t>(ptNeeSamplesInt);
+                }
+                if (ImGui::IsItemHovered())
+                {
+                    ImGui::SetTooltip("Next-event-estimation light samples drawn per bounce surface (and for the primary\nsurface's own direct lighting). Higher = less noise on direct lighting/shadows with many\nlights, higher cost. 0 disables NEE entirely (emissive-hit sampling only).");
+                }
+
+                ImGui::Unindent();
+            }
+
+            bool ptUsesRTXDI = m_Renderer->getPathTracerUsesRTXDI();
+            if (ImGui::Checkbox("Use ReSTIR DI/GI With Path Tracer", &ptUsesRTXDI))
+            {
+                m_Renderer->setPathTracerUsesRTXDI(ptUsesRTXDI);
+            }
+            if (ImGui::IsItemHovered())
+            {
+                ImGui::SetTooltip("RTXPT-style hybrid path tracing: run RTXDI ReSTIR DI/GI before the plain path tracer\nand let the path tracer consume those primary-surface lighting buffers. This is separate\nfrom ReSTIR PT path resampling.");
+            }
+            if (ptUsesRTXDI)
+            {
+                ImGui::Indent();
+
+                static const char* ptGiModeNames[] = {
+                    "Off (Path Tracer Only)",
+                    "ReSTIR GI (Primary Diffuse Indirect)"
+                };
+                int currentPTGIMode = m_Renderer->getDiffuseGIMode() == 2 ? 1 : 0;
+                if (ImGui::Combo("PT Diffuse GI", &currentPTGIMode, ptGiModeNames, IM_ARRAYSIZE(ptGiModeNames)))
+                {
+                    m_Renderer->setDiffuseGIMode(currentPTGIMode == 1 ? 2u : 0u);
+                    m_Renderer->setDDGIEnabled(false);
+                }
+                if (ImGui::IsItemHovered())
+                {
+                    ImGui::SetTooltip("ReSTIR GI is consumed as primary diffuse indirect lighting. The path tracer still traces\nspecular/reflection paths, while diffuse continuation from the primary surface is replaced\nto avoid double counting.");
+                }
+
+                static const char* ptDirectLightingModeNames[] = {
+                    "Path Tracer NEE",
+                    "ReSTIR DI (Primary Direct)"
+                };
+                int currentPTDirectMode = static_cast<int>(m_Renderer->getDirectLightingMode());
+                if (ImGui::Combo("PT Direct Lighting", &currentPTDirectMode, ptDirectLightingModeNames, IM_ARRAYSIZE(ptDirectLightingModeNames)))
+                {
+                    m_Renderer->setDirectLightingMode(static_cast<uint32_t>(currentPTDirectMode));
+                }
+                if (ImGui::IsItemHovered())
+                {
+                    ImGui::SetTooltip("ReSTIR DI replaces the path tracer's primary-bounce direct light loop. Deeper bounce\nsurfaces still use the path tracer's own next-event estimation.");
+                }
+
+                ImGui::Unindent();
+            }
+
             bool ptAccum = m_Renderer->isPathTracingAccumulation();
             if (ImGui::Checkbox("Progressive Ground Truth (Accumulate when static)", &ptAccum))
             {
                 m_Renderer->setPathTracingAccumulation(ptAccum);
+            }
+            if (restirPTEnabled && ImGui::IsItemHovered())
+            {
+                ImGui::SetTooltip("Not used by ReSTIR PT (it has no accumulation buffer yet) -- only affects the plain path tracer path.");
             }
 
             bool ptDlssRR = m_Renderer->isDLSSRayReconstructionEnabled();

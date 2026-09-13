@@ -68,7 +68,7 @@ namespace NRI
     {
         Texture* inShadowData = nullptr;         // Raw 1-SPP shadow mask (R16G16: x = visibility, y = hitDist)
         Texture* inMotionVectors = nullptr;      // Screen-space / UV-space Motion Vectors
-        Texture* inNormalRoughness = nullptr;    // World-space Normal (RGB) and Roughness (A)
+        Texture* inNormalRoughness = nullptr;    // NRD-packed normal/roughness
         Texture* inViewZ = nullptr;              // Linear View-Z (R16_SFLOAT or R32_SFLOAT)
         Texture* outDenoisedShadow = nullptr;    // Denoised Shadow output (R16G16 or R8)
 
@@ -96,7 +96,7 @@ namespace NRI
     {
         Texture* inSpecularRadianceHitDist = nullptr; // Raw 1-SPP reflection radiance + hit distance (RGBA16_SFLOAT)
         Texture* inMotionVectors = nullptr;           // Screen-space Motion Vectors (RG16_SFLOAT)
-        Texture* inNormalRoughness = nullptr;         // World-space Normal (RGB) and Roughness (A) (R10G10B10A2_UNORM)
+        Texture* inNormalRoughness = nullptr;         // NRD-packed normal/roughness (R10G10B10A2_UNORM)
         Texture* inViewZ = nullptr;                   // Linear View-Z (R16_SFLOAT)
         Texture* outDenoisedSpecular = nullptr;       // Denoised reflection output (RGBA16_SFLOAT)
 
@@ -123,7 +123,7 @@ namespace NRI
     {
         Texture* inDiffuseRadianceHitDist = nullptr;  // Raw 1-SPP diffuse GI radiance + hit distance (RGBA16_SFLOAT)
         Texture* inMotionVectors = nullptr;           // Screen-space Motion Vectors (RG16_SFLOAT)
-        Texture* inNormalRoughness = nullptr;         // World-space Normal (RGB) and Roughness (A) (R10G10B10A2_UNORM)
+        Texture* inNormalRoughness = nullptr;         // NRD-packed normal/roughness (R10G10B10A2_UNORM)
         Texture* inViewZ = nullptr;                   // Linear View-Z (R16_SFLOAT)
         Texture* outDenoisedDiffuse = nullptr;        // Denoised diffuse GI output (RGBA16_SFLOAT)
 

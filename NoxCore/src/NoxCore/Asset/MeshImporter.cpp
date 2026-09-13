@@ -65,8 +65,9 @@ namespace Nox
             MeshSerializer::SerializeMesh(cookedPath, meshDataList, materialDataList, lightDataList, nodeDataList);
             Utility::saveHashToFile(hashPath, sourceHash);
 
-            // Save skeleton if present
-            if (!extractedSkeleton.Skins.empty() || !extractedAnimations.empty())
+            // A node/object animation does not require a skeleton. Only write .nskel when the
+            // glTF contains actual skin data; animation clips are serialized independently below.
+            if (!extractedSkeleton.Skins.empty())
             {
                 std::filesystem::path skelPath = cookedPath;
                 skelPath.replace_extension(".nskel");
@@ -790,7 +791,16 @@ namespace Nox
                     static_cast<float>(gltfLight.color[2])
                 );
 
-                l.Intensity = static_cast<float>(gltfLight.intensity);
+                // glTF KHR_lights_punctual intensities are photometric (lux for directional,
+                // candela for point/spot) - real-world values in the hundreds to thousands.
+                // This engine's lighting/tonemap pipeline is calibrated in unitless radiance
+                // multipliers around 1-10 (see DirectionalLightComponent/PointLightComponent's
+                // own defaults), so raw photometric values would blow every surface out to white.
+                // Dividing by 683 lm/W (luminous efficacy of 555nm light - the standard constant
+                // Khronos' own glTF-Sample-Viewer and Filament use for this exact conversion)
+                // brings them into that same range.
+                static constexpr float LUMINOUS_EFFICACY_LM_PER_W = 683.0f;
+                l.Intensity = static_cast<float>(gltfLight.intensity) / LUMINOUS_EFFICACY_LM_PER_W;
                 l.Range = static_cast<float>(gltfLight.range);
 
                 std::string_view typeStr = (gltfLight.type.data && gltfLight.type.len > 0)

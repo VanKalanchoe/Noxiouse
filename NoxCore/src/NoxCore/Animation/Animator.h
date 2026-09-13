@@ -16,6 +16,13 @@ namespace Nox
     class Animator
     {
     public:
+        struct NodeTransform
+        {
+            glm::vec3 Translation{0.0f};
+            glm::quat Rotation{1.0f, 0.0f, 0.0f, 0.0f};
+            glm::vec3 Scale{1.0f};
+        };
+
         Animator() = default;
         explicit Animator(const Ref<AnimationSequence>& animation);
 
@@ -28,6 +35,10 @@ namespace Nox
         // Main evaluation loop
         void Update(float deltaTime, const Skeleton& skeleton);
         void UpdateTransforms(const Skeleton& skeleton);
+        // Evaluates a clip directly into ECS-mapped node transforms. This is for glTF node
+        // animation and does not require skin/joint data.
+        void UpdateNodeAnimation(float deltaTime, const Ref<AnimationSequence>& animation,
+                                 std::vector<NodeTransform>& nodes);
 
         // Parameters & Queries
         void SetLooping(bool loop) { m_IsLooping = loop; }

@@ -162,6 +162,49 @@ namespace Nox
         }
     }
 
+    void Animator::UpdateNodeAnimation(float deltaTime, const Ref<AnimationSequence>& animation,
+                                       std::vector<NodeTransform>& nodes)
+    {
+        if (!animation)
+            return;
+
+        if (m_CurrentAnimation.get() != animation.get())
+            PlayAnimation(animation);
+
+        const AnimationSequence& sequence = *animation;
+
+        if (m_IsPlaying && sequence.Duration > 0.0f)
+        {
+            m_CurrentTime += deltaTime * m_PlaybackSpeed;
+            if (m_IsLooping)
+            {
+                m_CurrentTime = std::fmod(m_CurrentTime, sequence.Duration);
+                if (m_CurrentTime < 0.0f)
+                    m_CurrentTime += sequence.Duration;
+            }
+            else if (m_CurrentTime >= sequence.Duration)
+            {
+                m_CurrentTime = sequence.Duration;
+                m_IsPlaying = false;
+            }
+        }
+
+        for (const auto& channel : sequence.Channels)
+        {
+            if (channel.TargetNodeIndex < 0 ||
+                channel.TargetNodeIndex >= static_cast<int32_t>(nodes.size()))
+                continue;
+
+            NodeTransform& node = nodes[channel.TargetNodeIndex];
+            if (!channel.PositionKeys.empty())
+                node.Translation = InterpolatePosition(m_CurrentTime, channel);
+            if (!channel.RotationKeys.empty())
+                node.Rotation = InterpolateRotation(m_CurrentTime, channel);
+            if (!channel.ScaleKeys.empty())
+                node.Scale = InterpolateScale(m_CurrentTime, channel);
+        }
+    }
+
     template<typename KeyType>
     size_t Animator::FindKeyframeIndex(float time, const std::vector<KeyType>& keys) const
     {

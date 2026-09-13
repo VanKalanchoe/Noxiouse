@@ -386,6 +386,32 @@ namespace Nox
         return texture;   
     }
     
+    // Returns bytes-per-texel for plain (non-block-compressed) VkFormats we might see out of
+    // a KTX2 file, or 0 if the format is block-compressed / unrecognized (unsafe to row-flip).
+    static uint32_t UncompressedVkFormatTexelSize(uint32_t vkFormat)
+    {
+        switch (vkFormat)
+        {
+            case 9:   // VK_FORMAT_R8G8B8_UNORM
+            case 15:  // VK_FORMAT_R8G8B8_SRGB
+            case 16:  // VK_FORMAT_B8G8R8_UNORM
+            case 22:  // VK_FORMAT_B8G8R8_SRGB
+                return 3;
+            case 37:  // VK_FORMAT_R8G8B8A8_UNORM
+            case 43:  // VK_FORMAT_R8G8B8A8_SRGB
+            case 44:  // VK_FORMAT_B8G8R8A8_UNORM
+            case 50:  // VK_FORMAT_B8G8R8A8_SRGB
+                return 4;
+            case 84:  // VK_FORMAT_R16G16B16A16_UNORM
+            case 91:  // VK_FORMAT_R16G16B16A16_SFLOAT
+                return 8;
+            case 109: // VK_FORMAT_R32G32B32A32_SFLOAT
+                return 16;
+            default:
+                return 0;
+        }
+    }
+
     Ref<Texture2D> TextureImporter::LoadWithKTX(const std::filesystem::path& path, const TextureSpecification& spec, Renderer* renderer)
     {
         ktxTexture2* kTexture;
@@ -397,24 +423,35 @@ namespace Nox
         );
         
         if (result != KTX_SUCCESS) NOX_CORE_ASSERT("TextureImporter::LoadWithKTX failed to load ktx texture image!");
-        
+
+        // KTX2's default/assumed row order is top-down (Y=down), matching glTF/PNG/Vulkan - the
+        // convention this engine assumes everywhere else. Some KTX2 encoders instead bake images
+        // bottom-up (Y=up, the classic desktop-GL convention) and record that in the file's own
+        // KTXorientation metadata, which libktx already parses into kTexture->orientation for us.
+        // That mismatch is a property of the FILE, not something the per-asset spec.flip toggle
+        // was meant to express, so correct it unconditionally; spec.flip stacks on top of it for
+        // an artist who additionally wants the (now-correct) image flipped again.
+        bool needsOrientationFix = (kTexture->orientation.y == KTX_ORIENT_Y_UP);
+        bool needsFlip = (needsOrientationFix != spec.flip);
+
         if (ktxTexture2_NeedsTranscoding(kTexture))
         {
-            // Transcode to standard uncompressed RGBA8 so it works on all GPUs.
-            // (If you want block compression, you can look into targeting KTX_TTF_BC7_RGBA instead!)
-            result = ktxTexture2_TranscodeBasis(kTexture, KTX_TTF_BC7_RGBA, 0);
-            
+            // BC7 is block-compressed (4x4 texel blocks) - a plain row-reverse of the compressed
+            // bytes would scramble the blocks instead of flipping the image, so when a flip is
+            // required, transcode to plain RGBA32 instead so the row-flip below is safe. This
+            // costs VRAM only for the textures that actually need correcting.
+            ktx_transcode_fmt_e transcodeTarget = needsFlip ? KTX_TTF_RGBA32 : KTX_TTF_BC7_RGBA;
+            result = ktxTexture2_TranscodeBasis(kTexture, transcodeTarget, 0);
+
             if (result != KTX_SUCCESS) NOX_CORE_ASSERT("TextureImporter::LoadWithKTX failed to transcode Basis texture!");
         }
-        
-        if (spec.flip) NOX_CORE_ERROR("TextureImporter::LoadWithKTX doesnt support flipping pls convert with tool manually");
-        
+
         // Get texture dimensions and data
         TextureData cpuData{};
         cpuData.Width = kTexture->baseWidth;
         cpuData.Height = kTexture->baseHeight;
         cpuData.MipLevels = kTexture->numLevels; // todo:
-        
+
         cpuData.MipOffsets.resize(kTexture->numLevels);
         for (uint32_t level = 0; level < kTexture->numLevels; level++)
         {
@@ -435,7 +472,40 @@ namespace Nox
             // For KTX1 files or if we can't determine the format, use a reasonable default
             cpuData.DirectFormat = directFormat;
         }
-        
+
+        if (needsFlip)
+        {
+            // Block-compressed formats (a natively block-compressed KTX2 that didn't go through
+            // Basis transcoding above) can't be vertically flipped by reversing rows of bytes -
+            // the texel order *inside* each 4x4 block would also need flipping, which needs a
+            // real BC codec. Only flip when we know the data is a plain uncompressed format.
+            uint32_t texelSize = UncompressedVkFormatTexelSize(cpuData.DirectFormat);
+            if (texelSize > 0)
+            {
+                for (uint32_t level = 0; level < kTexture->numLevels; level++)
+                {
+                    uint32_t levelWidth = std::max(1u, kTexture->baseWidth >> level);
+                    uint32_t levelHeight = std::max(1u, kTexture->baseHeight >> level);
+                    uint8_t* levelData = kTexture->pData + cpuData.MipOffsets[level];
+                    size_t rowBytes = static_cast<size_t>(levelWidth) * texelSize;
+
+                    std::vector<uint8_t> rowTemp(rowBytes);
+                    for (uint32_t y = 0; y < levelHeight / 2; y++)
+                    {
+                        uint8_t* rowTop = levelData + static_cast<size_t>(y) * rowBytes;
+                        uint8_t* rowBottom = levelData + static_cast<size_t>(levelHeight - 1 - y) * rowBytes;
+                        memcpy(rowTemp.data(), rowTop, rowBytes);
+                        memcpy(rowTop, rowBottom, rowBytes);
+                        memcpy(rowBottom, rowTemp.data(), rowBytes);
+                    }
+                }
+            }
+            else
+            {
+                NOX_CORE_ERROR("TextureImporter::LoadWithKTX - '{}' is block-compressed, flipping it at load time isn't safe. Flip the source image before baking it to KTX2.", path.string());
+            }
+        }
+
         cpuData.Data = Buffer((void*)kTexture->pData, kTexture->dataSize);
         
         Renderer* targetRenderer = renderer ? renderer : Application::Get().GetRenderer();

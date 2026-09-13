@@ -1,4 +1,5 @@
 #pragma once
+#include <entt/entt.hpp>
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/quaternion.hpp>
 
@@ -146,6 +147,9 @@ namespace Nox
         Animator Animator;
         AssetHandle Animation = 0;
         AssetHandle Skeleton = 0;
+        // For node/object animation, indexed by the source glTF node index. Skeletal animation
+        // leaves this empty and continues to use Skeleton plus bone matrices.
+        std::vector<entt::entity> NodeEntities;
         bool Playing = true;
 
         AnimatorComponent() = default;

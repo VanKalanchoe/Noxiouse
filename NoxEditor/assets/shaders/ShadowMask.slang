@@ -177,7 +177,7 @@
     {
         float2 shadowData         : SV_Target0; // NRD IN_PENUMBRA in R, raw visibility in G
         float  viewZ              : SV_Target1; // linear view depth (positive)
-        float4 nrdNormalRoughness : SV_Target2; // NRD R10_G10_B10_A2_UNORM oct-packed normal + roughness
+        float4 nrdNormalRoughness : SV_Target2; // NRD R10G10B10A2 packed normal + roughness
     };
 
     [shader("fragment")]

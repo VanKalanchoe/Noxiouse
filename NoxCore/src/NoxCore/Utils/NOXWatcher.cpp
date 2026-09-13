@@ -35,7 +35,7 @@ namespace Utils
                     auto& lastTime = m_fileTimestamps[key];
                     auto elapsedTime = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - lastTime).count();
                     
-                    if (elapsedTime < 150) return; 
+                    if (elapsedTime < 300) return; 
                     
                     lastTime = currentTime;
                     
