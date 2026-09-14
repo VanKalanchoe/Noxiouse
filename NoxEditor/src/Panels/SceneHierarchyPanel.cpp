@@ -771,6 +771,8 @@ namespace Nox
                                 changed |= ImGui::ColorEdit3("Emissive", glm::value_ptr(data.EmissiveFactor));
                                 changed |= ImGui::DragFloat("Emissive Strength", &data.emissiveStrength, 0.01f, 0.0f, 100.0f);
                                 changed |= ImGui::DragFloat("Transmission", &data.TransmissionFactor, 0.01f, 0.0f, 1.0f);
+                                changed |= ImGui::DragFloat("IOR", &data.IOR, 0.01f, 1.0f, 3.0f);
+                                changed |= ImGui::DragFloat("Thickness", &data.Thickness, 0.01f, 0.0f, 10.0f);
 
                                 auto drawTextureReference = [&](const char* labelName,
                                                                 const char* id,

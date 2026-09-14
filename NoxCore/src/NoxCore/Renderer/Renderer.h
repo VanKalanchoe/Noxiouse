@@ -113,7 +113,9 @@ namespace Nox
     inline std::vector<RenderPacket> m_unlitQueue;
     inline std::vector<RenderPacket> m_unlitDoubleSidedQueue;
     inline std::vector<RenderPacket> m_transparentQueue;
+    inline std::vector<RenderPacket> m_transparentDoubleSidedQueue;
     inline std::vector<RenderPacket> m_transparentUnlitQueue;
+    inline std::vector<RenderPacket> m_transparentUnlitDoubleSidedQueue;
 
     inline uint32_t m_opaqueCount = 0;
     inline uint32_t m_opaqueDoubleSidedCount = 0;
@@ -122,7 +124,9 @@ namespace Nox
     inline uint32_t m_unlitCount = 0;
     inline uint32_t m_unlitDoubleSidedCount = 0;
     inline uint32_t m_transparentCount = 0;
+    inline uint32_t m_transparentDoubleSidedCount = 0;
     inline uint32_t m_transparentUnlitCount = 0;
+    inline uint32_t m_transparentUnlitDoubleSidedCount = 0;
 
     class Renderer
     {
@@ -396,6 +400,7 @@ namespace Nox
         void watchShader(const std::filesystem::path& path, const std::string& pipelineKey, std::function<void()> reloadFn);
 
         void createUnlitPipeline(bool forceCompile);
+        void createTransparentLitPipeline(bool forceCompile);
         void createPresentPipeline(bool forceCompile);
         void createComputePipeline();
         void createSkyboxPipeline(bool forceCompile);
@@ -490,6 +495,7 @@ namespace Nox
         std::unordered_map<std::string, std::function<void()>> m_pendingReloads;
         std::unique_ptr<NRI::ShaderCompiler> m_shaderCompiler = nullptr;
         std::unique_ptr<NRI::Pipeline> m_unlitPipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_transparentLitPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_presentPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_computePipeline = nullptr;
 

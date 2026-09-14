@@ -122,6 +122,8 @@ struct InstanceLUT
     float transmissionFactor;
     uint32_t transmissionTextureIndex;
     float workflow;                 // 0.0 = MetalRough, 1.0 = SpecGloss
+    float ior;                      // Index of Refraction (KHR_materials_ior), default 1.5
+    float thickness;                // Volume thickness (KHR_materials_volume), default 0.0
 };
 
 struct UniformBufferObject 
@@ -259,7 +261,13 @@ struct InstanceData
     float transmissionFactor;
     uint32_t transmissionTextureIndex;
     int32_t transmissionTextureSet;
-    
+
+    // Index of Refraction (KHR_materials_ior), glTF spec default is 1.5
+    float ior;
+
+    // Volume thickness (KHR_materials_volume), glTF spec default is 0.0 (infinitely thin)
+    float thickness;
+
     uint32_t alphaMode;   // 0 = Opaque, 1 = Mask, 2 = Blend
     float alphaMaskCutoff;
     uint32_t doubleSided; // Use uint32_t instead of bool for GPU alignment

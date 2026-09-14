@@ -70,7 +70,12 @@
     {
         FSOutput output;
 
-        TextureCube texHandle = TextureCube.Handle(uint2(pushConstant.cubemapIndex, 0));
+        // Every other shader in this codebase offsets bindless texture indices by
+        // ubo->imageHeapIndexOffset before constructing a Handle - this one never did, so it was
+        // reading whatever happens to sit at the raw, un-offset slot in the descriptor heap
+        // instead of the actual environment cubemap.
+        UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+        TextureCube texHandle = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.cubemapIndex, 0));
         SamplerState sampHandle = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_PREFILTER, 0));
 
         // Sample the environment cubemap using interpolated 3D world direction

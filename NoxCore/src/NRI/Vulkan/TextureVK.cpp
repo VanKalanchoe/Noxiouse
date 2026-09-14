@@ -436,7 +436,14 @@ namespace NRI
     void TextureVK::generateMipmaps(CommandBuffer& commandBuffer)
     {
         auto* vkCmd = dynamic_cast<CommandBufferVK*>(&commandBuffer);
-        generateMipmaps(vkCmd->getNativeBuffer(0), m_format, m_desc.width, m_desc.height, m_desc.mipLevels);
+        // Must be the CURRENT frame's active command buffer, not always slot 0 - blitTo (right
+        // above) already gets this right via getActiveNativeBuffer(). Recording onto a fixed
+        // slot 0 works by coincidence for a single-time command buffer (always its own slot 0),
+        // but corrupts real frames whenever the multi-buffered main command buffer isn't
+        // currently on frame-in-flight index 0: the barrier lands on a buffer that was never
+        // vkBeginCommandBuffer'd this frame ("was recorded, but vkBeginCommandBuffer() was not
+        // called" validation error).
+        generateMipmaps(vkCmd->getActiveNativeBuffer(), m_format, m_desc.width, m_desc.height, m_desc.mipLevels);
     }
 
     ImTextureID TextureVK::getImTextureID()

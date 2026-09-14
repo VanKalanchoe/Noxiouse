@@ -148,6 +148,9 @@ namespace Nox
         watchShader("assets/shaders/Skybox.slang", "Skybox", [this]() { createSkyboxPipeline(true); });
         // Unlit
         watchShader("assets/shaders/Material_Unlit_Mesh.slang", "Unlit", [this]() { createUnlitPipeline(true); });
+        watchShader("assets/shaders/Material_TransparentLit_Mesh.slang", "TransparentLit", [this]() { createTransparentLitPipeline(true); });
+        watchShader("assets/shaders/PBRLighting.slang", "TransparentLit", [this]() { createTransparentLitPipeline(true); });
+        watchShader("assets/shaders/PBRLighting.slang", "DeferredLighting", [this]() { createDeferredLightingPipeline(true); });
         // Visibility Buffer
         watchShader("assets/shaders/VisibilityBuffer.slang", "VisBuffer", [this]() { createVisibilityPipeline(true); });
         // G-Buffer (Fix watcher to recompile m_gbufferPipeline)
@@ -240,6 +243,7 @@ namespace Nox
         createSwapChain();
         createCompiler();
         createUnlitPipeline(false);
+        createTransparentLitPipeline(false);
         if (!m_isEditor) createPresentPipeline(false);
         createComputePipeline();
         createSkyboxPipeline(false);
@@ -1557,6 +1561,34 @@ namespace Nox
             .sourcePath = "assets/shaders/Material_Unlit_Mesh.slang"
         });
         m_unlitPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+    }
+
+    void Renderer::createTransparentLitPipeline(bool forceCompile)
+    {
+        NRI::PipelineDesc desc{};
+        desc.forceCompile = forceCompile;
+
+        desc.colorFormats =
+        {
+            NRI::ImageFormat::R16G16B16A16_SFLOAT,
+            NRI::ImageFormat::R32SINT
+        };
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Task,
+            .entryPoint = "taskMain",
+            .sourcePath = "assets/shaders/Material_PBR_MeshTask.slang"
+        });
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Mesh,
+            .entryPoint = "meshMain",
+            .sourcePath = "assets/shaders/Material_PBR_Mesh.slang"
+        });
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Fragment,
+            .entryPoint = "fragMain",
+            .sourcePath = "assets/shaders/Material_TransparentLit_Mesh.slang"
+        });
+        m_transparentLitPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
     void Renderer::createPresentPipeline(bool forceCompile)
@@ -4852,7 +4884,9 @@ namespace Nox
             }
 
             // C. TRANSPARENT FORWARD PASS (Back-to-front sorted, Alpha Blending)
-            if (m_unlitPipeline && (m_transparentCount > 0 || m_transparentUnlitCount > 0))
+            bool hasAnyTransparent = m_transparentCount > 0 || m_transparentDoubleSidedCount > 0 ||
+                                      m_transparentUnlitCount > 0 || m_transparentUnlitDoubleSidedCount > 0;
+            if (m_unlitPipeline && m_transparentLitPipeline && hasAnyTransparent)
             {
                 boundPipeline = nullptr;
                 m_commandBuffers->setDepthTestEnable(true);
@@ -4863,8 +4897,20 @@ namespace Nox
                 m_commandBuffers->setColorBlendEnable(1, false);
                 m_commandBuffers->setColorWriteMask(1, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
 
-                drawPass(m_transparentCount, *m_unlitPipeline, NRI::CullMode::None, false, true);
-                drawPass(m_transparentUnlitCount, *m_unlitPipeline, NRI::CullMode::None, false, true);
+                // Non-unlit Blend objects get real shading now (same BRDF/IBL the deferred opaque
+                // path uses, via PBRLighting.slang) instead of a flat baseColor pass-through, so
+                // they don't look like they're glowing/self-lit next to properly shaded Opaque/Mask
+                // geometry. True KHR_materials_unlit objects still use the flat shader, correctly.
+                //
+                // CullMode matches each object's own doubleSided flag (mirroring the opaque/mask
+                // queues) instead of a blanket CullMode::None - a closed, single-sided translucent
+                // shape (a sphere/box shell, not a flat card) needs its own backface actually culled,
+                // or both the near and far hemisphere/wall triangles rasterize and alpha-blend on
+                // top of each other, which washes the result out instead of a clean single surface.
+                drawPass(m_transparentCount, *m_transparentLitPipeline, NRI::CullMode::Back, false, true);
+                drawPass(m_transparentDoubleSidedCount, *m_transparentLitPipeline, NRI::CullMode::None, false, true);
+                drawPass(m_transparentUnlitCount, *m_unlitPipeline, NRI::CullMode::Back, false, true);
+                drawPass(m_transparentUnlitDoubleSidedCount, *m_unlitPipeline, NRI::CullMode::None, false, true);
 
                 m_commandBuffers->setColorBlendEnable(0, false);
                 m_commandBuffers->setDepthWriteEnable(true);
@@ -5608,7 +5654,9 @@ namespace Nox
         m_unlitQueue.clear();
         m_unlitDoubleSidedQueue.clear();
         m_transparentQueue.clear();
+        m_transparentDoubleSidedQueue.clear();
         m_transparentUnlitQueue.clear();
+        m_transparentUnlitDoubleSidedQueue.clear();
     }
 
     void Renderer::updateSceneAccelerationStructure(uint32_t currentFrameIndex)
@@ -5659,7 +5707,7 @@ namespace Nox
                 }
 
                 inst.instanceCustomIndex = static_cast<uint32_t>(rtInstances.size());
-                inst.mask = 0xFF;
+                inst.mask = 0x01;
                 inst.instanceShaderBindingTableRecordOffset = 0;
                 inst.flags = 0;
 
@@ -6276,8 +6324,14 @@ namespace Nox
         sortByDistance(m_transparentQueue);
         packQueue(m_transparentQueue, m_transparentCount);
 
+        sortByDistance(m_transparentDoubleSidedQueue);
+        packQueue(m_transparentDoubleSidedQueue, m_transparentDoubleSidedCount);
+
         sortByDistance(m_transparentUnlitQueue);
         packQueue(m_transparentUnlitQueue, m_transparentUnlitCount);
+
+        sortByDistance(m_transparentUnlitDoubleSidedQueue);
+        packQueue(m_transparentUnlitDoubleSidedQueue, m_transparentUnlitDoubleSidedCount);
     }
 
     void Renderer::DrawMesh(const glm::mat4& transform, Ref<Mesh> mesh, uint32_t submeshIndex, const MaterialComponent& materialOverrides, int entityID, const std::vector<glm::mat4>* boneTransforms)
@@ -6349,10 +6403,26 @@ namespace Nox
             glm::vec3 objPos = glm::vec3(transform[3]);
             packet.distanceToCamera = glm::length(objPos - camPos);
 
+            // A closed, single-sided (doubleSided=false) translucent shape (e.g. the alpha sphere
+            // shell in CompareTransmission) needs its own backface actually culled here, exactly
+            // like the opaque/mask queues already do - with CullMode::None, both the near and far
+            // hemisphere triangles rasterize and alpha-blend on top of each other in whatever order
+            // the meshlets happen to be processed (not depth-sorted per-triangle), which compounds
+            // into a washed-out/flatter look instead of a clean single translucent surface.
             if (isUnlit)
-                m_transparentUnlitQueue.push_back(packet);
+            {
+                if (isDoubleSided)
+                    m_transparentUnlitDoubleSidedQueue.push_back(packet);
+                else
+                    m_transparentUnlitQueue.push_back(packet);
+            }
             else
-                m_transparentQueue.push_back(packet);
+            {
+                if (isDoubleSided)
+                    m_transparentDoubleSidedQueue.push_back(packet);
+                else
+                    m_transparentQueue.push_back(packet);
+            }
         }
         else if (mode == AlphaMode::Mask)
         {
@@ -6447,10 +6517,22 @@ namespace Nox
                 glm::vec3 objPos = glm::vec3(transform[3]);
                 packet.distanceToCamera = glm::length(objPos - camPos);
 
+                // See DrawMesh's identical comment: respect doubleSided so a closed, single-sided
+                // translucent shape doesn't double-blend its near and far hemispheres together.
                 if (isUnlit)
-                    m_transparentUnlitQueue.push_back(packet);
+                {
+                    if (isDoubleSided)
+                        m_transparentUnlitDoubleSidedQueue.push_back(packet);
+                    else
+                        m_transparentUnlitQueue.push_back(packet);
+                }
                 else
-                    m_transparentQueue.push_back(packet);
+                {
+                    if (isDoubleSided)
+                        m_transparentDoubleSidedQueue.push_back(packet);
+                    else
+                        m_transparentQueue.push_back(packet);
+                }
             }
             else if (mode == AlphaMode::Mask)
             {

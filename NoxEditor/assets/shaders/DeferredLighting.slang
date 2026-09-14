@@ -1,5 +1,6 @@
 #include "shaderIO.h"
 #include "DDGICommon.slang"
+#include "PBRLighting.slang"
 
     import Tonemapping;
     import Math;
@@ -59,91 +60,9 @@
         }
     }
 
-    struct PBRInfo
-    {
-        float NdotL;                  // cos angle between normal and light direction
-        float NdotV;                  // cos angle between normal and view direction
-        float NdotH;                  // cos angle between normal and half vector
-        float LdotH;                  // cos angle between light direction and half vector
-        float VdotH;                  // cos angle between view direction and half vector
-        float perceptualRoughness;    // roughness value, as authored by the model creator
-        float metalness;              // metallic value at the surface
-        float3 reflectance0;          // full reflectance color (normal incidence angle)
-        float3 reflectance90;         // reflectance color at grazing angle
-        float alphaRoughness;         // roughness mapped to a more linear change
-        float3 diffuseColor;          // color contribution from diffuse lighting
-        float3 specularColor;         // color contribution from specular lighting
-    };
-
-    static const float M_PI = 3.141592653589793;
-    static const float c_MinRoughness = 0.04;
-
-    // Basic Lambertian diffuse
-    float3 diffuse(PBRInfo pbrInputs)
-    {
-        return pbrInputs.diffuseColor / M_PI;
-    }
-
-    // Fresnel reflectance (Schlick)
-    float3 specularReflection(PBRInfo pbrInputs)
-    {
-        return pbrInputs.reflectance0 + (pbrInputs.reflectance90 - pbrInputs.reflectance0) * pow(clamp(1.0 - pbrInputs.VdotH, 0.0, 1.0), 5.0);
-    }
-
-    // Geometric occlusion (Smith GGX correlated)
-    float geometricOcclusion(PBRInfo pbrInputs)
-    {
-        float NdotL = pbrInputs.NdotL;
-        float NdotV = pbrInputs.NdotV;
-        float r = pbrInputs.alphaRoughness;
-
-        float attenuationL = 2.0 * NdotL / (NdotL + sqrt(r * r + (1.0 - r * r) * (NdotL * NdotL)));
-        float attenuationV = 2.0 * NdotV / (NdotV + sqrt(r * r + (1.0 - r * r) * (NdotV * NdotV)));
-        return attenuationL * attenuationV;
-    }
-
-    // Normal distribution (GGX Trowbridge-Reitz)
-    float microfacetDistribution(PBRInfo pbrInputs)
-    {
-        float roughnessSq = pbrInputs.alphaRoughness * pbrInputs.alphaRoughness;
-        float f = (pbrInputs.NdotH * roughnessSq - pbrInputs.NdotH) * pbrInputs.NdotH + 1.0;
-        return roughnessSq / (M_PI * f * f);
-    }
-
-    struct IBLResult
-    {
-        float3 diffuse;
-        float3 specular;
-    };
-
-    // Image Based Lighting (IBL)
-    IBLResult getIBLContribution(UniformBufferObject* ubo, PBRInfo pbrInputs, float3 n, float3 reflection)
-    {
-        float lod = (pbrInputs.perceptualRoughness * ubo->prefilteredCubeMipLevels);
-
-        SamplerState samplerBrdf = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_BRDFLUT, 0));
-        SamplerState samplerIrradiance = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_IRRADIANCE, 0));
-        SamplerState samplerPrefiltered = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_PREFILTER, 0));
-
-        // Sample BRDF LUT (2D Texture from heap)
-        Texture2D brdfTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->brdfLutIndex, 0));
-        float3 brdf = brdfTex.Sample(samplerBrdf, float2(pbrInputs.NdotV, 1.0 - pbrInputs.perceptualRoughness)).rgb;
-
-        // Sample Irradiance Map (Cube Texture from heap)
-        TextureCube irradianceTex = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + ubo->irradianceMapIndex, 0));
-        float4 irradianceSample = irradianceTex.Sample(samplerIrradiance, n);
-        float3 diffuseLight = irradianceSample.rgb;
-
-        // Sample Prefiltered Environment Map with Mip Level LOD (Cube Texture from heap)
-        TextureCube prefilteredTex = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + ubo->prefilteredMapIndex, 0));
-        float4 prefilteredSample = prefilteredTex.SampleLevel(samplerPrefiltered, reflection, lod);
-        float3 specularLight = prefilteredSample.rgb * ubo->scaleIBLAmbient;
-
-        IBLResult result;
-        result.diffuse = diffuseLight * pbrInputs.diffuseColor * ubo->scaleIBLAmbient;
-        result.specular = specularLight * (pbrInputs.specularColor * brdf.x + brdf.y);
-        return result;
-    }
+    // PBRInfo, IBLResult, diffuse/specularReflection/geometricOcclusion/microfacetDistribution,
+    // evaluateDirectLight and getIBLContribution now live in PBRLighting.slang (included above) -
+    // shared with the forward transparent pass so there's one lighting implementation, not two.
 
     // Generates a distinct, saturated pseudo-random color for each unique entity ID
     float3 idToColor(int id)
@@ -439,15 +358,8 @@
                     specularColor
                 );
 
-                float3 F = specularReflection(pbrInputs);
-                float G = geometricOcclusion(pbrInputs);
-                float D = microfacetDistribution(pbrInputs);
-
-                float3 diffuseContrib = (1.0 - F) * diffuse(pbrInputs);
-                float3 specContrib = F * G * D / (4.0 * NdotL * NdotV);
-
                 float3 lightRadiance = light.color.rgb * light.color.w * attenuation * lightShadow;
-                directLighting += NdotL * lightRadiance * (diffuseContrib + specContrib);
+                directLighting += evaluateDirectLight(pbrInputs, lightRadiance);
             }
         }
 

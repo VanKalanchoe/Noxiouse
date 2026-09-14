@@ -79,7 +79,18 @@ namespace Nox
         float TransmissionFactor = 0.0f;
         std::string TransmissionTexturePath;
         int32_t TransmissionTextureSet = 0;
-        
+
+        // Index of Refraction (KHR_materials_ior), glTF spec default is 1.5
+        float IOR = 1.5f;
+
+        // Volume thickness (KHR_materials_volume), glTF spec default is 0 (infinitely thin).
+        // Used by the hybrid RT transmission path to model this material as a thin slab of this
+        // depth along the refracted ray instead of ray-tracing the mesh's own real back-face/bevel
+        // geometry as the exit surface - the real geometry is fine for a plain box's flat faces but
+        // breaks down near beveled/rounded edges, where the local surface isn't parallel to the
+        // entry face and can bend or total-internal-reflect the ray in unintended directions.
+        float Thickness = 0.0f;
+
         // Alpha properties
         AlphaMode Mode = AlphaMode::Opaque;
         float AlphaMaskCutoff = 0.5f;

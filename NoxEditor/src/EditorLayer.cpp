@@ -1045,6 +1045,14 @@ namespace Nox
             m_Renderer->setGamma(gamma);
         }
 
+        // There was no way to change this without editing the hardcoded constructor value in
+        // EditorLayer's OnAttach and recompiling - this is that missing control.
+        float fov = m_EditorCamera.GetFOV();
+        if (ImGui::SliderFloat("Camera FOV", &fov, 10.0f, 120.0f, "%.1f"))
+        {
+            m_EditorCamera.SetFOV(fov);
+        }
+
         float iblAmbient = m_Renderer->getScaleIBLAmbient();
         if (ImGui::SliderFloat("IBL Ambient Scale", &iblAmbient, 0.0f, 5.0f, "%.2f"))
         {

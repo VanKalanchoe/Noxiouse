@@ -49,6 +49,8 @@ namespace Nox
             uint8_t unlit = material.Unlit ? 1 : 0;
             stream.write(reinterpret_cast<const char*>(&doubleSided), sizeof(uint8_t));
             stream.write(reinterpret_cast<const char*>(&unlit), sizeof(uint8_t));
+            stream.write(reinterpret_cast<const char*>(&material.IOR), sizeof(float));
+            stream.write(reinterpret_cast<const char*>(&material.Thickness), sizeof(float));
             return stream.good();
         }
 
@@ -94,6 +96,8 @@ namespace Nox
             stream.read(reinterpret_cast<char*>(&unlit), sizeof(uint8_t));
             material.DoubleSided = doubleSided != 0;
             material.Unlit = unlit != 0;
+            stream.read(reinterpret_cast<char*>(&material.IOR), sizeof(float));
+            stream.read(reinterpret_cast<char*>(&material.Thickness), sizeof(float));
             return stream.good();
         }
 

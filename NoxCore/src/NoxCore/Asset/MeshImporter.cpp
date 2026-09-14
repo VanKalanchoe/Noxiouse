@@ -1514,6 +1514,42 @@ namespace Nox
                                     }
                                 }
                             }
+
+                        if (std::string_view(ext.name.data, ext.name.len) == "KHR_materials_ior")
+                        {
+                            if (ext.value.type == TG3_VALUE_OBJECT)
+                            {
+                                for (uint32_t j = 0; j < ext.value.object_count; j++)
+                                {
+                                    const auto& kv = ext.value.object_data[j];
+                                    if (std::string_view(kv.key.data, kv.key.len) == "ior")
+                                    {
+                                        if (kv.value.type == TG3_VALUE_REAL)
+                                            materialData.IOR = static_cast<float>(kv.value.real_val);
+                                        else if (kv.value.type == TG3_VALUE_INT)
+                                            materialData.IOR = static_cast<float>(kv.value.int_val);
+                                    }
+                                }
+                            }
+                        }
+
+                        if (std::string_view(ext.name.data, ext.name.len) == "KHR_materials_volume")
+                        {
+                            if (ext.value.type == TG3_VALUE_OBJECT)
+                            {
+                                for (uint32_t j = 0; j < ext.value.object_count; j++)
+                                {
+                                    const auto& kv = ext.value.object_data[j];
+                                    if (std::string_view(kv.key.data, kv.key.len) == "thicknessFactor")
+                                    {
+                                        if (kv.value.type == TG3_VALUE_REAL)
+                                            materialData.Thickness = static_cast<float>(kv.value.real_val);
+                                        else if (kv.value.type == TG3_VALUE_INT)
+                                            materialData.Thickness = static_cast<float>(kv.value.int_val);
+                                    }
+                                }
+                            }
+                        }
                     }
                     materialData.emissiveStrength = emissiveStrength;
                 }
