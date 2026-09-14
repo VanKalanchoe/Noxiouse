@@ -1,8 +1,11 @@
 #include "Utils.h"
 
 #include <atomic>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <mutex>
+#include <unordered_map>
 #include <SDL3/SDL_filesystem.h>
 #include <SDL3/SDL_dialog.h>
 #include <SDL3/SDL_events.h>
@@ -194,6 +197,44 @@ namespace Nox
 
     // xxhash functions ----------------------------------
     XXH128_hash_t Utility::calcul_hash_streaming(const std::string& path)
+    {
+        // One asset load hashed the same source file several times (the importer's cooked-is-current
+        // check, then the asset manager's change-detection baseline) - ~2s of re-reading .dds files
+        // for Bistro. Reuse the result while the file's size and last-write time are unchanged; any
+        // real edit changes the write time and re-hashes.
+        struct CachedHash
+        {
+            std::uintmax_t size = 0;
+            std::filesystem::file_time_type writeTime{};
+            XXH128_hash_t hash{};
+        };
+        static std::mutex cacheMutex;
+        static std::unordered_map<std::string, CachedHash> cache;
+
+        std::error_code statError;
+        const std::uintmax_t fileSize = std::filesystem::file_size(path, statError);
+        const std::filesystem::file_time_type writeTime = statError ? std::filesystem::file_time_type{} : std::filesystem::last_write_time(path, statError);
+        const bool canCache = !statError;
+
+        if (canCache)
+        {
+            std::scoped_lock lock(cacheMutex);
+            auto cached = cache.find(path);
+            if (cached != cache.end() && cached->second.size == fileSize && cached->second.writeTime == writeTime)
+                return cached->second.hash;
+        }
+
+        XXH128_hash_t hash = HashFileContents(path);
+
+        if (canCache)
+        {
+            std::scoped_lock lock(cacheMutex);
+            cache[path] = CachedHash{ fileSize, writeTime, hash };
+        }
+        return hash;
+    }
+
+    XXH128_hash_t Utility::HashFileContents(const std::string& path)
     {
         constexpr size_t bufferSize = 1 * 1024 * 1024; // 1MB
         std::vector<char> buffer(bufferSize); // RAII-safe buffer

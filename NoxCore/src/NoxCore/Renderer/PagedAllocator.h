@@ -42,8 +42,16 @@ namespace Nox
             if (count == 0) return {};
 
             // 1. Try to allocate from existing pages
+            uint32_t freeSlot = UINT32_MAX;
             for (uint32_t i = 0; i < m_pages.size(); ++i)
             {
+                if (!m_pages[i].buffer)
+                {
+                    if (freeSlot == UINT32_MAX)
+                        freeSlot = i;
+                    continue;
+                }
+
                 uint32_t offset = m_pages[i].allocator.Allocate(count);
                 if (offset != UINT32_MAX)
                 {
@@ -57,7 +65,7 @@ namespace Nox
             Page newPage;
             newPage.capacity = pageCapacity;
             newPage.allocator.Init(pageCapacity);
-            
+
             // Matches your EXACT buffer creation code:
             newPage.buffer = m_device->createBuffer(NRI::BufferDesc{
                 .size = sizeof(T) * pageCapacity,
@@ -65,12 +73,22 @@ namespace Nox
             });
 
             uint32_t offset = newPage.allocator.Allocate(count);
-            m_pages.push_back(std::move(newPage));
 
-            uint32_t pageIndex = static_cast<uint32_t>(m_pages.size() - 1);
+            // Reuse a released slot so page indices stay dense.
+            uint32_t pageIndex = freeSlot;
+            if (pageIndex != UINT32_MAX)
+            {
+                m_pages[pageIndex] = std::move(newPage);
+            }
+            else
+            {
+                m_pages.push_back(std::move(newPage));
+                pageIndex = static_cast<uint32_t>(m_pages.size() - 1);
+            }
             return { pageIndex, offset, count };
         }
 
+        // nullptr for a released page slot (its page-table entry must be written as 0).
         NRI::Buffer* GetBuffer(uint32_t pageIndex) const
         {
             if (pageIndex < m_pages.size())
@@ -80,7 +98,7 @@ namespace Nox
 
         bool Free(uint32_t pageIndex, uint32_t offset, uint32_t count, std::unique_ptr<NRI::Buffer>& outEmptyBuffer)
         {
-            if (pageIndex >= m_pages.size()) return false;
+            if (pageIndex >= m_pages.size() || !m_pages[pageIndex].buffer) return false;
 
             auto& page = m_pages[pageIndex];
             page.allocator.Free(offset, count);
@@ -88,9 +106,11 @@ namespace Nox
             // Check if page is completely empty
             if (page.allocator.GetAvailableSpace() == page.capacity)
             {
+                // Release the buffer but keep the slot. Erasing it would shift every later page's
+                // index and silently re-point every other loaded mesh's MeshHandle at the wrong buffer.
                 outEmptyBuffer = std::move(page.buffer);
-                m_pages.erase(m_pages.begin() + pageIndex);
-                return true; // Page was removed!
+                page = Page{};
+                return true;
             }
 
             return false;

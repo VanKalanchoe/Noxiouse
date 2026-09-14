@@ -309,6 +309,10 @@ namespace Nox
             out << YAML::Key << "Playing" << YAML::Value << animatorComponent.Playing;
             out << YAML::Key << "Looping" << YAML::Value << animatorComponent.Animator.IsLooping();
             out << YAML::Key << "PlaybackSpeed" << YAML::Value << animatorComponent.Animator.GetPlaybackSpeed();
+            out << YAML::Key << "NodeEntities" << YAML::Value << YAML::BeginSeq;
+            for (UUID nodeID : animatorComponent.NodeEntities)
+                out << (uint64_t)nodeID;
+            out << YAML::EndSeq;
 
             out << YAML::EndMap; // AnimatorComponent
         }
@@ -680,6 +684,11 @@ namespace Nox
                         ac.Animator.SetLooping(animatorComponent["Looping"].as<bool>());
                     if (animatorComponent["PlaybackSpeed"])
                         ac.Animator.SetPlaybackSpeed(animatorComponent["PlaybackSpeed"].as<float>());
+                    if (auto nodeEntities = animatorComponent["NodeEntities"])
+                    {
+                        for (auto nodeID : nodeEntities)
+                            ac.NodeEntities.push_back(nodeID.as<uint64_t>());
+                    }
                 }
 
                 auto cameraComponent = entity["CameraComponent"];

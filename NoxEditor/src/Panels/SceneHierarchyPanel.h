@@ -41,6 +41,11 @@ namespace Nox
         Ref<Scene> m_Context;
         std::vector<Entity> m_SelectionContexts;
         Entity m_SelectionAnchor;
+
+        // Deletes requested while drawing. Destroying entities inside the registry view being
+        // iterated invalidates it, so they're applied after the loop, resolved by UUID so an entity
+        // already destroyed as a child of another pending delete is skipped.
+        std::vector<UUID> m_PendingDestroy;
         bool m_MaterialShowAll = false; // Material component: show every slot instead of just this entity's own submesh
     };
 }

@@ -7,6 +7,7 @@
 #include <set>
 #include <mutex>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "NoxCore/Utils/NOXWatcher.h"
 #include "NoxCore/Utils/Utils.h"
@@ -39,10 +40,18 @@ namespace Nox
         const AssetRegistry& GetAssetRegistry() const { return m_AssetRegistry; }
 
         void Shutdown();
+
+        // Mark-and-sweep: everything reachable from referencedAssets (the handles live scenes use)
+        // stays loaded, including dependencies (mesh -> materials -> textures). Every other loaded
+        // mesh/material/texture/animation that nothing else holds a Ref to is unloaded, its GPU
+        // resources released once in-flight frames are done. Returns the number unloaded.
+        size_t UnloadUnusedAssets(const std::unordered_set<AssetHandle>& referencedAssets);
         
         void SerializeAssetRegistry();
         bool DeserializeAssetRegistry();
-        void ScanAndRegisterNewAssets();
+        // Registers cooked files (.nanim/.nskel/.nmat/...) that aren't in the registry yet. Scans only
+        // relativeDirectory (relative to the asset directory) when given, the whole asset tree otherwise.
+        void ScanAndRegisterNewAssets(const std::filesystem::path& relativeDirectory = {});
         
     private:
         void OnAssetModifiedOnDisk(const std::filesystem::path& absolutePath);
@@ -61,6 +70,14 @@ namespace Nox
         // on-disk edit apart from a spurious file-watcher event caused by our own cooker writing
         // derived files (extracted textures, .nmesh/.hash/.nmat) into the same watched directory tree.
         std::unordered_map<AssetHandle, XXH128_hash_t> m_LastKnownSourceHash;
+
+        // Material texture path -> texture handle, for UnloadUnusedAssets. Resolving a path needs
+        // std::filesystem::relative (disk access per call); Bistro alone has ~1500 such paths, so
+        // re-resolving them on every sweep froze the editor. Handles are stable, so hits are cached.
+        std::unordered_map<std::string, AssetHandle> m_TexturePathCache;
+        // Paths with no texture asset yet; only valid while the registry hasn't changed size.
+        std::unordered_set<std::string> m_TexturePathMisses;
+        size_t m_TexturePathMissesRegistrySize = 0;
 
         // todo: memory-only assets
     };

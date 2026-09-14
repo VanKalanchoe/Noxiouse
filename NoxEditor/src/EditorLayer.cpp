@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <iostream>
 
 #include <imgui.h>
@@ -105,6 +106,18 @@ namespace Nox
 
     void EditorLayer::OnUpdate(Timestep ts)
     {
+        // Deleting entities, switching scenes, or leaving Play can leave meshes/textures unreferenced.
+        // Sweep at the start of the next frame, before anything re-requests them this frame.
+        if (m_EditorScene && m_EditorScene->ConsumeAssetReferencesChanged())
+            m_UnloadUnusedAssetsRequested = true;
+        if (m_ActiveScene && m_ActiveScene != m_EditorScene && m_ActiveScene->ConsumeAssetReferencesChanged())
+            m_UnloadUnusedAssetsRequested = true;
+        if (m_UnloadUnusedAssetsRequested)
+        {
+            m_UnloadUnusedAssetsRequested = false;
+            UnloadUnusedAssets();
+        }
+
         m_ActiveScene->OnViewportResize(m_ViewportSize.x, m_ViewportSize.y);
 
         // zero sized framebuffer is invalid
@@ -586,8 +599,8 @@ namespace Nox
                             return 0;
                         };
 
-                        // A glTF animation does not imply skinning. Bistro, for example, has a
-                        // node animation for its ceiling fans but no skins at all. Resolve this once
+                        // A glTF animation does not imply skinning. Bistro, for example, has node
+                        // animations (Vespa parts, a basket, a light) but no skins at all. Resolve this once
                         // and only attach an animator when the imported skeleton actually contains
                         // joints; otherwise every mesh node would run a full skeleton update.
                         AssetHandle resolvedSkeletonHandle = 0;
@@ -614,10 +627,13 @@ namespace Nox
                             animatorComp.Skeleton = resolvedSkeletonHandle;
                         };
 
-                        auto findNodeAnimation = [&]() -> AssetHandle
+                        // Every clip cooked from this glTF, sorted by file path so the default clip
+                        // doesn't depend on the registry's unordered_map iteration order.
+                        auto findImportAnimations = [&]() -> std::vector<AssetHandle>
                         {
                             const std::filesystem::path animationDirectory = metadata.FilePath.parent_path();
                             const std::string animationPrefix = metadata.FilePath.stem().string() + "_";
+                            std::vector<std::pair<std::string, AssetHandle>> found;
                             for (const auto& [animationHandle, animationMetadata] :
                                  Project::GetActive()->GetEditorAssetManager()->GetAssetRegistry())
                             {
@@ -627,9 +643,14 @@ namespace Nox
 
                                 const std::string animationStem = animationMetadata.FilePath.stem().string();
                                 if (animationStem.starts_with(animationPrefix))
-                                    return animationHandle;
+                                    found.emplace_back(animationMetadata.FilePath.generic_string(), animationHandle);
                             }
-                            return 0;
+                            std::sort(found.begin(), found.end());
+
+                            std::vector<AssetHandle> handles;
+                            for (const auto& [path, animationHandle] : found)
+                                handles.push_back(animationHandle);
+                            return handles;
                         };
 
                         auto addLightComponent = [&](Entity entity, const LightNodeData& l)
@@ -743,19 +764,127 @@ namespace Nox
                                     spawnGltfLights(importRoot ? importRoot : firstRoot, { light });
                             }
 
-                            // One clip controller owns the imported hierarchy. Node indices in the
-                            // .nanim channels match this table, so regular object animations can
-                            // update ECS transforms without allocating an animator per mesh node.
-                            AssetHandle nodeAnimation = findNodeAnimation();
-                            Entity animationRoot = importRoot ? importRoot : firstRoot;
-                            if ((type == AssetType::Mesh || type == AssetType::MeshSource) &&
-                                nodeAnimation != 0 && animationRoot)
+                            // glTF node index -> entity, shared by the clip and by every skin.
+                            std::vector<UUID> nodeTable(createdNodes.size(), UUID(0));
+                            for (size_t i = 0; i < createdNodes.size(); ++i)
                             {
-                                auto& animator = animationRoot.AddComponent<AnimatorComponent>();
-                                animator.Animation = nodeAnimation;
-                                animator.NodeEntities.resize(createdNodes.size(), entt::null);
-                                for (size_t i = 0; i < createdNodes.size(); ++i)
-                                    animator.NodeEntities[i] = static_cast<entt::entity>(createdNodes[i]);
+                                if (createdNodes[i])
+                                    nodeTable[i] = createdNodes[i].GetUUID();
+                            }
+
+                            // Skinned meshes follow their joint ENTITIES (glTF skinning) instead of
+                            // evaluating a private skeleton copy.
+                            Entity firstSkinnedMesh;
+                            for (Entity node : createdNodes)
+                            {
+                                if (node && node.HasComponent<AnimatorComponent>() &&
+                                    node.GetComponent<AnimatorComponent>().Skeleton != 0)
+                                {
+                                    node.GetComponent<AnimatorComponent>().NodeEntities = nodeTable;
+                                    if (!firstSkinnedMesh)
+                                        firstSkinnedMesh = node;
+                                }
+                            }
+
+                            // glTF animations are independent clips. Blender exports one per animated
+                            // object (Bistro: each fan part has its own), and those all play at once;
+                            // a character's clips (Fox: Survey/Walk/Run) all target the same joints and
+                            // are alternatives. So: clips whose target nodes overlap form one group that
+                            // shares a single animator (first clip plays, the rest are swappable), and
+                            // every disjoint group gets its own animator so they run simultaneously.
+                            if (type == AssetType::Mesh || type == AssetType::MeshSource)
+                            {
+                                struct ClipTargets
+                                {
+                                    AssetHandle Handle = 0;
+                                    std::vector<int32_t> Nodes;
+                                };
+                                std::vector<ClipTargets> clips;
+                                for (AssetHandle clipHandle : findImportAnimations())
+                                {
+                                    Ref<AnimationSequence> clip = AssetManager::GetAsset<AnimationSequence>(clipHandle);
+                                    if (!clip)
+                                        continue;
+                                    ClipTargets targets{ clipHandle, {} };
+                                    for (const auto& channel : clip->Channels)
+                                    {
+                                        if (channel.TargetNodeIndex >= 0 &&
+                                            channel.TargetNodeIndex < static_cast<int32_t>(createdNodes.size()))
+                                            targets.Nodes.push_back(channel.TargetNodeIndex);
+                                    }
+                                    std::sort(targets.Nodes.begin(), targets.Nodes.end());
+                                    targets.Nodes.erase(std::unique(targets.Nodes.begin(), targets.Nodes.end()), targets.Nodes.end());
+                                    if (!targets.Nodes.empty())
+                                        clips.push_back(std::move(targets));
+                                }
+
+                                auto overlaps = [](const std::vector<int32_t>& a, const std::vector<int32_t>& b)
+                                {
+                                    size_t i = 0, j = 0;
+                                    while (i < a.size() && j < b.size())
+                                    {
+                                        if (a[i] == b[j]) return true;
+                                        if (a[i] < b[j]) ++i; else ++j;
+                                    }
+                                    return false;
+                                };
+
+                                // Union-find over clips by shared target nodes.
+                                std::vector<size_t> group(clips.size());
+                                for (size_t i = 0; i < clips.size(); ++i)
+                                    group[i] = i;
+                                std::function<size_t(size_t)> findGroup = [&](size_t i) -> size_t
+                                {
+                                    return group[i] == i ? i : (group[i] = findGroup(group[i]));
+                                };
+                                for (size_t i = 0; i < clips.size(); ++i)
+                                    for (size_t j = i + 1; j < clips.size(); ++j)
+                                        if (overlaps(clips[i].Nodes, clips[j].Nodes))
+                                            group[findGroup(j)] = findGroup(i);
+
+                                std::vector<int32_t> jointIndices;
+                                if (resolvedSkeleton && !resolvedSkeleton->Skins.empty() && resolvedSkeleton->Skins[0])
+                                {
+                                    for (const Node* joint : resolvedSkeleton->Skins[0]->Joints)
+                                        if (joint)
+                                            jointIndices.push_back(joint->Index);
+                                    std::sort(jointIndices.begin(), jointIndices.end());
+                                }
+
+                                std::vector<bool> groupAssigned(clips.size(), false);
+                                for (size_t i = 0; i < clips.size(); ++i)
+                                {
+                                    size_t root = findGroup(i);
+                                    if (groupAssigned[root])
+                                        continue;
+                                    groupAssigned[root] = true;
+
+                                    // Clip i is the group's first (sorted) clip -> the default.
+                                    // Joint clips belong to the skinned mesh (it plays them and skins from
+                                    // them); anything else goes on the node it animates.
+                                    Entity owner;
+                                    if (firstSkinnedMesh && overlaps(clips[i].Nodes, jointIndices))
+                                        owner = firstSkinnedMesh;
+                                    else
+                                        owner = createdNodes[clips[i].Nodes.front()];
+
+                                    if (!owner)
+                                        continue;
+
+                                    if (owner.HasComponent<AnimatorComponent>() &&
+                                        owner.GetComponent<AnimatorComponent>().Animation != 0)
+                                    {
+                                        NOX_WARN("Animation clip {} targets entity '{}' which already plays another clip; skipped.",
+                                                 (uint64_t)clips[i].Handle, owner.GetName());
+                                        continue;
+                                    }
+
+                                    auto& animator = owner.HasComponent<AnimatorComponent>()
+                                        ? owner.GetComponent<AnimatorComponent>()
+                                        : owner.AddComponent<AnimatorComponent>();
+                                    animator.Animation = clips[i].Handle;
+                                    animator.NodeEntities = nodeTable;
+                                }
                             }
 
                             if (importRoot)
@@ -2015,6 +2144,7 @@ namespace Nox
         m_SceneHierarchyPanel.SetContext(m_ActiveScene);
 
         m_EditorScenePath = std::filesystem::path();
+        m_UnloadUnusedAssetsRequested = true;
     }
 
     void EditorLayer::OpenScene()
@@ -2044,6 +2174,7 @@ namespace Nox
 
         m_ActiveScene = m_EditorScene;
         m_EditorScenePath = Project::GetActive()->GetEditorAssetManager()->GetFilePath(handle);
+        m_UnloadUnusedAssetsRequested = true;
     }
 
     void EditorLayer::SaveScene()
@@ -2113,6 +2244,18 @@ namespace Nox
         m_ActiveScene = m_EditorScene;
 
         m_SceneHierarchyPanel.SetContext(m_ActiveScene);
+        m_UnloadUnusedAssetsRequested = true;
+    }
+
+    void EditorLayer::UnloadUnusedAssets()
+    {
+        std::unordered_set<AssetHandle> referencedAssets;
+        if (m_EditorScene)
+            m_EditorScene->CollectAssetReferences(referencedAssets);
+        if (m_ActiveScene && m_ActiveScene != m_EditorScene)
+            m_ActiveScene->CollectAssetReferences(referencedAssets);
+
+        Project::GetActive()->GetEditorAssetManager()->UnloadUnusedAssets(referencedAssets);
     }
 
     void EditorLayer::OnScenePause()

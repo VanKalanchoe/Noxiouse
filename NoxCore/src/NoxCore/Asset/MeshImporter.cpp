@@ -1,5 +1,6 @@
 #include "MeshImporter.h"
 
+#include <chrono>
 #include <string_view>
 #include <vector>
 
@@ -87,6 +88,8 @@ namespace Nox
         Ref<Mesh> meshAsset = CreateRef<Mesh>();
 
         // Upload each sub-mesh independently -> Vector of Handles
+        const auto uploadStart = std::chrono::steady_clock::now();
+        Renderer::BeginUploadBatch();
         for (size_t i = 0; i < meshDataList.size(); ++i)
         {
             bool isOpaque = (i < materialDataList.size()) ? (materialDataList[i].Mode == AlphaMode::Opaque) : true;
@@ -94,6 +97,10 @@ namespace Nox
             meshAsset->m_SubMeshes.push_back(subMeshHandle);
             meshAsset->m_SubmeshNames.push_back(meshDataList[i].Name);
         }
+        Renderer::EndUploadBatch();
+        NOX_CORE_INFO("[AssetLoad] GPU upload of {} submesh(es) (geometry + BLAS) took {:.1f} ms",
+                      meshDataList.size(),
+                      std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - uploadStart).count());
         meshAsset->m_Materials = std::move(materialDataList);
         meshAsset->m_Lights = std::move(lightDataList);
         meshAsset->m_Nodes = std::move(nodeDataList);
@@ -155,6 +162,7 @@ namespace Nox
         }
 
         Ref<StaticMesh> staticMeshAsset = CreateRef<StaticMesh>();
+        Renderer::BeginUploadBatch();
         for (size_t i = 0; i < meshDataList.size(); ++i)
         {
             bool isOpaque = (i < materialDataList.size()) ? (materialDataList[i].Mode == AlphaMode::Opaque) : true;
@@ -162,6 +170,7 @@ namespace Nox
             staticMeshAsset->m_SubMeshes.push_back(subMeshHandle);
             staticMeshAsset->m_SubmeshNames.push_back(meshDataList[i].Name);
         }
+        Renderer::EndUploadBatch();
         staticMeshAsset->m_Materials = std::move(materialDataList);
         staticMeshAsset->m_Lights = std::move(lightDataList);
         staticMeshAsset->m_Nodes = std::move(nodeDataList);

@@ -1,6 +1,7 @@
 #include "Scene.h"
 
 #include <box2d/box2d.h>
+#include <algorithm>
 #include <functional>
 
 #include "Entity.h"
@@ -141,6 +142,31 @@ namespace Nox
         
         m_EntityMap.erase(entity.GetUUID());
         m_Registry.destroy(entity);
+        m_AssetReferencesChanged = true;
+    }
+
+    void Scene::CollectAssetReferences(std::unordered_set<AssetHandle>& outHandles)
+    {
+        for (auto entity : m_Registry.view<MeshComponent>())
+            outHandles.insert(m_Registry.get<MeshComponent>(entity).Mesh);
+
+        for (auto entity : m_Registry.view<MaterialComponent>())
+        {
+            const auto& materials = m_Registry.get<MaterialComponent>(entity).MaterialAssets;
+            outHandles.insert(materials.begin(), materials.end());
+        }
+
+        for (auto entity : m_Registry.view<AnimatorComponent>())
+        {
+            const auto& animator = m_Registry.get<AnimatorComponent>(entity);
+            outHandles.insert(animator.Animation);
+            outHandles.insert(animator.Skeleton);
+        }
+
+        for (auto entity : m_Registry.view<SpriteRendererComponent>())
+            outHandles.insert(m_Registry.get<SpriteRendererComponent>(entity).Texture);
+
+        outHandles.erase(AssetHandle(0));
     }
 
     void Scene::OnRuntimeStart()
@@ -231,8 +257,10 @@ namespace Nox
                     m_Registry.get_or_emplace<DirtyTransformComponent>(e);
                 }
             }
+
+            UpdateAnimators(ts);
         }
-        
+
         SceneGraph::UpdateWorldTransforms(m_Registry, m_EntityMap);
         
        // Render 2D
@@ -269,8 +297,10 @@ namespace Nox
                 
                    MaterialComponent defaultMaterial;
                    MaterialComponent& materialToUse = materialComp ? *materialComp : defaultMaterial;
-                
-                   m_renderer->SubmitMesh(transform.WorldMatrix, mesh, materialToUse, (int)entity);
+
+                   const std::vector<glm::mat4>* boneTransforms = GetBoneTransforms(entity, transform.WorldMatrix);
+
+                   m_renderer->SubmitMesh(transform.WorldMatrix, mesh, materialToUse, (int)entity, boneTransforms);
                }
             }
 
@@ -333,18 +363,25 @@ namespace Nox
                 transform.Translation.x = position.x;
                 transform.Translation.y = position.y;
                 transform.Rotation.z = b2Rot_GetAngle(b2Body_GetRotation(body));
-                
+
                 m_Registry.get_or_emplace<DirtyTransformComponent>(e);
             }
+
+            UpdateAnimators(ts);
         }
-    
+
         // Render
         RenderScene(camera);
     }
 
     void Scene::OnUpdateEditor(Timestep ts, EditorCamera& camera)
     {
-        // --- Update Animations in Editor Preview ---
+        UpdateAnimators(ts);
+        RenderScene(camera);
+    }
+
+    void Scene::UpdateAnimators(Timestep ts)
+    {
         auto view = m_Registry.view<AnimatorComponent>();
         for (auto entity : view)
         {
@@ -367,8 +404,9 @@ namespace Nox
                 }
             }
 
-            // 2. Resolve Skeleton Asset via AssetHandle and update
-            if (animatorComp.Skeleton != 0)
+            // 2. Legacy self-contained skeleton evaluation. Imports with a node table skin from the
+            // joint entities instead (see GetBoneTransforms), so the skeleton isn't evaluated twice.
+            if (animatorComp.Skeleton != 0 && animatorComp.NodeEntities.empty())
             {
                 Ref<Skeleton> skeleton = AssetManager::GetAsset<Skeleton>(animatorComp.Skeleton);
                 if (skeleton && !skeleton->AllNodes.empty())
@@ -381,43 +419,96 @@ namespace Nox
             }
 
             // Node/object animations write the evaluated .nanim TRS directly to ECS transforms.
-            if (animatorComp.Skeleton == 0 && !animatorComp.NodeEntities.empty() &&
-                animatorComp.Animation != 0)
+            if (!animatorComp.NodeEntities.empty() && animatorComp.Animation != 0)
             {
                 Ref<AnimationSequence> animation = AssetManager::GetAsset<AnimationSequence>(animatorComp.Animation);
                 if (animation)
                 {
-                    std::vector<Animator::NodeTransform> nodeTransforms(animatorComp.NodeEntities.size());
-                    for (size_t i = 0; i < animatorComp.NodeEntities.size(); ++i)
+                    // Only the nodes this clip's channels target. The node table covers the whole
+                    // import (thousands of nodes for Bistro); rewriting and dirtying all of them for
+                    // every animator every frame would re-propagate the entire scene graph.
+                    std::vector<std::pair<int32_t, entt::entity>> targets;
+                    targets.reserve(animation->Channels.size());
+                    for (const auto& channel : animation->Channels)
                     {
-                        entt::entity nodeEntity = animatorComp.NodeEntities[i];
-                        if (!m_Registry.valid(nodeEntity) || !m_Registry.all_of<TransformComponent>(nodeEntity))
+                        int32_t nodeIndex = channel.TargetNodeIndex;
+                        if (nodeIndex < 0 || nodeIndex >= static_cast<int32_t>(animatorComp.NodeEntities.size()))
                             continue;
+                        auto it = m_EntityMap.find(animatorComp.NodeEntities[nodeIndex]);
+                        if (it == m_EntityMap.end() || !m_Registry.valid(it->second) ||
+                            !m_Registry.all_of<TransformComponent>(it->second))
+                            continue;
+                        targets.emplace_back(nodeIndex, it->second);
+                    }
+
+                    int32_t maxTarget = -1;
+                    for (const auto& [nodeIndex, nodeEntity] : targets)
+                        maxTarget = std::max(maxTarget, nodeIndex);
+
+                    std::vector<Animator::NodeTransform> nodeTransforms(static_cast<size_t>(maxTarget + 1));
+                    for (const auto& [nodeIndex, nodeEntity] : targets)
+                    {
                         const auto& transform = m_Registry.get<TransformComponent>(nodeEntity);
-                        nodeTransforms[i].Translation = transform.Translation;
-                        nodeTransforms[i].Rotation = glm::quat(transform.Rotation);
-                        nodeTransforms[i].Scale = transform.Scale;
+                        nodeTransforms[nodeIndex].Translation = transform.Translation;
+                        nodeTransforms[nodeIndex].Rotation = glm::quat(transform.Rotation);
+                        nodeTransforms[nodeIndex].Scale = transform.Scale;
                     }
 
                     animatorComp.Animator.UpdateNodeAnimation((float)ts, animation, nodeTransforms);
-                    for (size_t i = 0; i < animatorComp.NodeEntities.size(); ++i)
+                    for (const auto& [nodeIndex, nodeEntity] : targets)
                     {
-                        entt::entity nodeEntity = animatorComp.NodeEntities[i];
-                        if (!m_Registry.valid(nodeEntity) || !m_Registry.all_of<TransformComponent>(nodeEntity))
-                            continue;
                         auto& transform = m_Registry.get<TransformComponent>(nodeEntity);
-                        transform.Translation = nodeTransforms[i].Translation;
-                        transform.Rotation = glm::eulerAngles(nodeTransforms[i].Rotation);
-                        transform.Scale = nodeTransforms[i].Scale;
+                        transform.Translation = nodeTransforms[nodeIndex].Translation;
+                        transform.Rotation = glm::eulerAngles(nodeTransforms[nodeIndex].Rotation);
+                        transform.Scale = nodeTransforms[nodeIndex].Scale;
                         m_Registry.get_or_emplace<DirtyTransformComponent>(nodeEntity);
                     }
                 }
             }
         }
-
-        RenderScene(camera);
     }
     
+    const std::vector<glm::mat4>* Scene::GetBoneTransforms(entt::entity entity, const glm::mat4& meshWorld)
+    {
+        AnimatorComponent* animatorComp = m_Registry.try_get<AnimatorComponent>(entity);
+        if (!animatorComp)
+            return nullptr;
+
+        if (animatorComp->Skeleton == 0 || animatorComp->NodeEntities.empty())
+            return &animatorComp->Animator.GetFinalBoneTransforms();
+
+        Ref<Skeleton> skeleton = AssetManager::GetAsset<Skeleton>(animatorComp->Skeleton);
+        if (!skeleton || skeleton->Skins.empty() || !skeleton->Skins[0])
+            return nullptr;
+
+        // glTF 2.0 skinning: jointMatrix = inverse(globalTransform(meshNode)) *
+        // globalTransform(jointNode) * inverseBindMatrix. The joints are real entities, so whatever
+        // animates them (the root's clip, a script, the gizmo) deforms the mesh.
+        const Skin* skin = skeleton->Skins[0];
+        const glm::mat4 inverseMeshWorld = glm::inverse(meshWorld);
+        animatorComp->SkinMatrices.resize(skin->Joints.size());
+
+        for (size_t i = 0; i < skin->Joints.size(); ++i)
+        {
+            glm::mat4 jointMatrix(1.0f);
+            const Node* joint = skin->Joints[i];
+            if (joint && joint->Index >= 0 && joint->Index < static_cast<int32_t>(animatorComp->NodeEntities.size()))
+            {
+                auto it = m_EntityMap.find(animatorComp->NodeEntities[joint->Index]);
+                if (it != m_EntityMap.end() && m_Registry.valid(it->second) &&
+                    m_Registry.all_of<WorldTransformComponent>(it->second))
+                {
+                    const glm::mat4& inverseBind = i < skin->InverseBindMatrices.size()
+                        ? skin->InverseBindMatrices[i] : glm::mat4(1.0f);
+                    jointMatrix = inverseMeshWorld * m_Registry.get<WorldTransformComponent>(it->second).WorldMatrix * inverseBind;
+                }
+            }
+            animatorComp->SkinMatrices[i] = jointMatrix;
+        }
+
+        return &animatorComp->SkinMatrices;
+    }
+
     void Scene::OnViewportResize(uint32_t width, uint32_t height)
     {
         if (m_ViewportWidth == width && m_ViewportHeight == height)
@@ -482,11 +573,19 @@ namespace Nox
             ScriptComponent, RigidBody2DComponent, BoxCollider2DComponent,
             CircleCollider2DComponent, TextComponent>;
 
+        // Source UUID -> duplicate UUID, so a duplicated animator drives the duplicated nodes
+        // instead of still pointing at the original hierarchy.
+        std::unordered_map<UUID, UUID> duplicatedIDs;
+        std::vector<Entity> duplicatedAnimators;
+
         std::function<Entity(Entity, Entity)> duplicateHierarchy =
             [&](Entity source, Entity parent) -> Entity
         {
             Entity duplicate = CreateEntity(MakeUniqueDuplicateName(source.GetName()));
             CopyComponentIfExists(DuplicatableComponents{}, duplicate, source);
+            duplicatedIDs[source.GetUUID()] = duplicate.GetUUID();
+            if (duplicate.HasComponent<AnimatorComponent>())
+                duplicatedAnimators.push_back(duplicate);
 
             if (parent || source.HasComponent<RelationshipComponent>())
             {
@@ -516,7 +615,19 @@ namespace Nox
         if (entity.HasComponent<RelationshipComponent>())
             parent = GetEntityByUUID(entity.GetComponent<RelationshipComponent>().Parent);
 
-        return duplicateHierarchy(entity, parent);
+        Entity result = duplicateHierarchy(entity, parent);
+
+        for (Entity animatorEntity : duplicatedAnimators)
+        {
+            for (UUID& nodeID : animatorEntity.GetComponent<AnimatorComponent>().NodeEntities)
+            {
+                auto it = duplicatedIDs.find(nodeID);
+                if (it != duplicatedIDs.end())
+                    nodeID = it->second;
+            }
+        }
+
+        return result;
     }
     
     // bad for performance dont use this often
@@ -656,9 +767,8 @@ namespace Nox
                 MaterialComponent defaultMaterial;
                 MaterialComponent& materialToUse = materialComp ? *materialComp : defaultMaterial;
                 
-                AnimatorComponent* animatorComp = m_Registry.try_get<AnimatorComponent>(entity);
-                const std::vector<glm::mat4>* boneTransforms = animatorComp ? &animatorComp->Animator.GetFinalBoneTransforms() : nullptr;
-                
+                const std::vector<glm::mat4>* boneTransforms = GetBoneTransforms(entity, transform.WorldMatrix);
+
                 m_renderer->SubmitMesh(transform.WorldMatrix, mesh, materialToUse, (int)entity, boneTransforms);
             }
         }

@@ -144,6 +144,13 @@ namespace Nox
                     DrawEntityNode(entity);
             });
 
+            for (UUID entityID : m_PendingDestroy)
+            {
+                if (Entity entity = m_Context->GetEntityByUUID(entityID))
+                    m_Context->DestroyEntity(entity);
+            }
+            m_PendingDestroy.clear();
+
             // 1. Deselect entity when left-clicking blank space
             if (ImGui::IsMouseDown(0) && ImGui::IsWindowHovered() && !ImGui::IsAnyItemHovered())
             {
@@ -310,7 +317,7 @@ namespace Nox
                 for (auto e : toDelete)
                 {
                     if (e)
-                        m_Context->DestroyEntity(e);
+                        m_PendingDestroy.push_back(e.GetUUID());
                 }
             }
             else
@@ -318,7 +325,7 @@ namespace Nox
                 if (m_SelectionAnchor == entity)
                     m_SelectionAnchor = {};
 
-                m_Context->DestroyEntity(entity);
+                m_PendingDestroy.push_back(entity.GetUUID());
 
                 auto it = std::find(m_SelectionContexts.begin(), m_SelectionContexts.end(), entity);
                 if (it != m_SelectionContexts.end())

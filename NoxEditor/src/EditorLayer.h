@@ -42,6 +42,9 @@ namespace Nox
         void OnScenePlay();
         void OnSceneSimulate();
         void OnSceneStop();
+
+        // Unloads assets no live scene references anymore (GPU memory freed after in-flight frames).
+        void UnloadUnusedAssets();
         void OnScenePause();
         void OnDuplicateEntity();
         
@@ -86,6 +89,7 @@ namespace Nox
         };
         
         SceneState m_SceneState = SceneState::Edit;
+        bool m_UnloadUnusedAssetsRequested = false;
         
         // Panels
         SceneHierarchyPanel m_SceneHierarchyPanel;

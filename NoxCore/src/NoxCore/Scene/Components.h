@@ -147,10 +147,17 @@ namespace Nox
         Animator Animator;
         AssetHandle Animation = 0;
         AssetHandle Skeleton = 0;
-        // For node/object animation, indexed by the source glTF node index. Skeletal animation
-        // leaves this empty and continues to use Skeleton plus bone matrices.
-        std::vector<entt::entity> NodeEntities;
+        // Entity for every source glTF node, indexed by glTF node index. Stored as UUIDs, not entt
+        // handles, so the mapping survives scene save/load and the Play-mode scene copy.
+        //   Animation set -> the clip drives these node entities' transforms (glTF node animation).
+        //   Skeleton set  -> this entity's skin reads its joints' world transforms from these
+        //                    entities (glTF skinning: inverse(meshWorld) * jointWorld * inverseBind).
+        // Empty means the legacy self-contained skeleton evaluation.
+        std::vector<UUID> NodeEntities;
         bool Playing = true;
+
+        // Runtime only: skinning matrices rebuilt from the joint entities each frame.
+        std::vector<glm::mat4> SkinMatrices;
 
         AnimatorComponent() = default;
         AnimatorComponent(const AnimatorComponent&) = default;

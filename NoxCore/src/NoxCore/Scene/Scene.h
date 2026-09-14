@@ -1,6 +1,8 @@
 #pragma once
 #include <entt/entt.hpp>
 #include <string>
+#include <unordered_set>
+#include <utility>
 #include <box2d/id.h>
 
 #include "NoxCore/Asset/Asset.h"
@@ -60,6 +62,12 @@ namespace Nox
         
         void SetRenderer(Renderer* renderer) { m_renderer = renderer; }
         void SetRenderer2D(Renderer2D* renderer) { m_renderer2D = renderer; }
+
+        // Every asset handle this scene's components reference - the roots for unloading unused assets.
+        void CollectAssetReferences(std::unordered_set<AssetHandle>& outHandles);
+
+        // True once after entities were destroyed since the last call, i.e. assets may have become unused.
+        bool ConsumeAssetReferencesChanged() { return std::exchange(m_AssetReferencesChanged, false); }
     private:
         template<typename T>
         void OnComponentAdded(Entity entity, T& component);
@@ -68,6 +76,8 @@ namespace Nox
         void OnPhysics2DStop();
 
         void RenderScene(EditorCamera& camera);
+        void UpdateAnimators(Timestep ts);
+        const std::vector<glm::mat4>* GetBoneTransforms(entt::entity entity, const glm::mat4& meshWorld);
 
         std::string MakeUniqueDuplicateName(const std::string& baseName);
     private:
@@ -79,6 +89,7 @@ namespace Nox
         bool m_IsRunning = false;
         bool m_IsPaused = false;
         int m_StepFrames = 0;
+        bool m_AssetReferencesChanged = false;
 
         std::unordered_map<UUID, entt::entity> m_EntityMap;
         

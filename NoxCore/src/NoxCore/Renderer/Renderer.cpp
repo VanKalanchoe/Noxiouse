@@ -5,6 +5,7 @@
 
 #include <iostream>
 #include <algorithm> // Necessary for std::clamp
+#include <unordered_set>
 #include <chrono>
 #include <fstream>
 #include <cctype>
@@ -29,17 +30,34 @@ namespace Nox
 
         static std::unordered_map<std::string, AssetHandle> textureCache;
 
+        // Keyed on the raw material path first: the path conversion below can hit the disk, and this
+        // runs for every textured draw whose descriptor slot isn't cached.
+        static std::unordered_map<std::string, AssetHandle> rawPathCache;
+        if (auto rawCached = rawPathCache.find(texturePath); rawCached != rawPathCache.end())
+            return rawCached->second;
+
         std::filesystem::path sourcePath(texturePath);
         if (sourcePath.is_absolute())
         {
-            std::error_code ec;
-            sourcePath = std::filesystem::relative(
-                sourcePath,
-                Project::GetActiveAssetDirectory(),
-                ec
-            );
-            if (ec)
-                return 0;
+            // Material paths are built from the asset directory string, so the lexical form almost
+            // always works; std::filesystem::relative (disk access) is only the fallback.
+            std::filesystem::path lexical = sourcePath.lexically_normal().lexically_relative(
+                Project::GetActiveAssetDirectory().lexically_normal());
+            if (!lexical.empty() && *lexical.begin() != "..")
+            {
+                sourcePath = lexical;
+            }
+            else
+            {
+                std::error_code ec;
+                sourcePath = std::filesystem::relative(
+                    sourcePath,
+                    Project::GetActiveAssetDirectory(),
+                    ec
+                );
+                if (ec)
+                    return 0;
+            }
         }
 
         std::string parentFolder = sourcePath.parent_path().filename().string();
@@ -56,7 +74,10 @@ namespace Nox
         const std::string cacheKey = cookedPath.generic_string();
         auto cached = textureCache.find(cacheKey);
         if (cached != textureCache.end())
+        {
+            rawPathCache.emplace(texturePath, cached->second);
             return cached->second;
+        }
 
         for (const auto& [handle, metadata] : Project::GetActive()->GetEditorAssetManager()->GetAssetRegistry())
         {
@@ -65,10 +86,32 @@ namespace Nox
             if (metadata.FilePath == cookedPath || metadata.SourceFilePath == sourcePath)
             {
                 textureCache.emplace(cacheKey, handle);
+                rawPathCache.emplace(texturePath, handle);
                 return handle;
             }
         }
         return 0;
+    }
+
+    // MaterialData stores source paths, while the renderer needs the bindless descriptor slot.
+    // Resolved once per path. When a texture is unloaded its slot is recycled for the next texture,
+    // so entries pointing at that slot must be dropped or they'd draw the wrong image.
+    static std::unordered_map<std::string, int> s_TextureDescriptorCache;
+
+    // Paths with no texture asset. Without this, every such path re-ran the whole lookup every
+    // frame. Only valid while the asset registry hasn't changed size (a new import may resolve it).
+    static std::unordered_set<std::string> s_TextureDescriptorMisses;
+    static size_t s_TextureDescriptorMissesRegistrySize = 0;
+
+    void Renderer::InvalidateTextureDescriptorSlots(const std::vector<uint32_t>& slots)
+    {
+        if (slots.empty())
+            return;
+
+        std::erase_if(s_TextureDescriptorCache, [&](const auto& entry)
+        {
+            return std::find(slots.begin(), slots.end(), static_cast<uint32_t>(entry.second)) != slots.end();
+        });
     }
 
     static int GetTextureIndex(const std::string& path)
@@ -76,21 +119,33 @@ namespace Nox
         if (path.empty())
             return -1;
 
-        // MaterialData stores source paths, while the renderer needs the bindless
-        // descriptor slot. Resolve that conversion once instead of doing filesystem
-        // and asset-registry work for every draw call on every frame.
-        static std::unordered_map<std::string, int> descriptorCache;
+        auto& descriptorCache = s_TextureDescriptorCache;
         auto cached = descriptorCache.find(path);
         if (cached != descriptorCache.end())
             return cached->second;
 
+        const size_t registrySize = Project::GetActive()->GetEditorAssetManager()->GetAssetRegistry().size();
+        if (registrySize != s_TextureDescriptorMissesRegistrySize)
+        {
+            s_TextureDescriptorMisses.clear();
+            s_TextureDescriptorMissesRegistrySize = registrySize;
+        }
+        if (s_TextureDescriptorMisses.contains(path))
+            return -1;
+
         AssetHandle handle = FindTextureAsset(path);
         if (handle == 0)
+        {
+            s_TextureDescriptorMisses.insert(path);
             return -1;
+        }
 
         Ref<Texture2D> texture = AssetManager::GetAsset<Texture2D>(handle);
         if (!texture)
+        {
+            s_TextureDescriptorMisses.insert(path);
             return -1;
+        }
 
         const int descriptorIndex = static_cast<int>(texture->GetDescriptorIndexSlot());
         descriptorCache.emplace(path, descriptorIndex);
@@ -223,6 +278,11 @@ namespace Nox
     Renderer::~Renderer()
     {
         NOX_CORE_INFO("Renderer Shutdown");
+
+        // Release queued assets while the instance is still reachable: a Mesh destructor calls
+        // Renderer::UnloadMesh, which asserts on s_Instance.
+        m_device->waitIdle();
+        m_deferredAssetReleases.clear();
 
         if (s_Instance == this) s_Instance = nullptr;
 
@@ -384,6 +444,15 @@ namespace Nox
         // viewport panel's size differs from ours, which during a live drag is every frame; the actual
         // (expensive) rebuild is deferred to applyPendingRenderResolutionIfNeeded() and only happens once
         // the size has been stable for a short settle window.
+        //
+        // EditorLayer compares against the APPLIED size (getViewPortSize), so it keeps calling this
+        // every frame with the same value until the apply happens - restarting the timer on those
+        // repeats meant the settle window never elapsed and the render targets never resized, leaving
+        // them at the startup size and offsetting mouse picking toward the top-left.
+        if (m_viewportResizePending &&
+            size.width == m_pendingViewportSize.width && size.height == m_pendingViewportSize.height)
+            return;
+
         m_pendingViewportSize = size;
         m_viewportResizePending = true;
         m_lastViewportResizeRequestTime = std::chrono::steady_clock::now();
@@ -2376,6 +2445,12 @@ namespace Nox
         uint64_t bufferSize = sizeof(T) * elementCount;
         uint64_t dstByteOffset = sizeof(T) * elementOffset;
 
+        if (m_uploadBatch.depth > 0)
+        {
+            uploadBatchCopy(dstBuffer, data, bufferSize, dstByteOffset);
+            return;
+        }
+
         std::unique_ptr<NRI::Buffer> stagingBuffer = m_device->createBuffer(NRI::BufferDesc{
             .size = bufferSize,
             .usage = NRI::BufferUsage::Staging
@@ -2395,6 +2470,108 @@ namespace Nox
         };
         cmd->copyBuffer(*stagingBuffer, dstBuffer, copyRegion);
         endSingleTimeCommands(std::move(cmd));
+    }
+
+    // --- Upload batching ---
+    // Staging and work budgets: bound host memory held by a batch, and keep each submission's GPU
+    // work short (a single submit building thousands of BLASes could exceed the driver timeout).
+    static constexpr uint64_t UPLOAD_BATCH_STAGING_BYTES = 64ull * 1024 * 1024;
+    static constexpr uint64_t UPLOAD_BATCH_RETAINED_BYTES = 256ull * 1024 * 1024;
+    static constexpr uint64_t UPLOAD_BATCH_MAX_PRIMITIVES = 2'000'000;
+    static constexpr uint32_t UPLOAD_BATCH_MAX_BUILDS = 512;
+
+    NRI::CommandBuffer& Renderer::uploadBatchCommandBuffer()
+    {
+        if (!m_uploadBatch.commandBuffer)
+            m_uploadBatch.commandBuffer = beginSingleTimeCommands();
+        return *m_uploadBatch.commandBuffer;
+    }
+
+    void Renderer::uploadBatchCopy(NRI::Buffer& dstBuffer, const void* data, uint64_t byteSize, uint64_t dstByteOffset)
+    {
+        if (byteSize > UPLOAD_BATCH_STAGING_BYTES)
+        {
+            std::unique_ptr<NRI::Buffer> oversizedStaging = m_device->createBuffer(NRI::BufferDesc{
+                .size = byteSize,
+                .usage = NRI::BufferUsage::Staging
+            });
+            void* mapped = oversizedStaging->map(0, byteSize);
+            memcpy(mapped, data, byteSize);
+            oversizedStaging->unmap();
+
+            uploadBatchCommandBuffer().copyBuffer(*oversizedStaging, dstBuffer, NRI::BufferCopyRegion{
+                .srcOffset = 0,
+                .dstOffset = dstByteOffset,
+                .size = byteSize
+            });
+            m_uploadBatch.retainedBuffers.push_back(std::move(oversizedStaging));
+            m_uploadBatch.retainedBytes += byteSize;
+            if (m_uploadBatch.retainedBytes > UPLOAD_BATCH_RETAINED_BYTES)
+                flushUploadBatch();
+            return;
+        }
+
+        // Recorded copies read the staging buffer at submit time, so it can only be reused or
+        // replaced after a flush. It starts at what's needed and grows toward the cap: allocating the
+        // full 64MB up front made every single small mesh upload slower than before batching.
+        if (m_uploadBatch.stagingUsed + byteSize > m_uploadBatch.stagingCapacity)
+        {
+            flushUploadBatch();
+
+            if (byteSize > m_uploadBatch.stagingCapacity || m_uploadBatch.stagingCapacity < UPLOAD_BATCH_STAGING_BYTES)
+            {
+                const uint64_t newCapacity = std::min(UPLOAD_BATCH_STAGING_BYTES,
+                    std::max({ byteSize, m_uploadBatch.stagingCapacity * 2, uint64_t(1024 * 1024) }));
+
+                if (m_uploadBatch.staging)
+                    m_uploadBatch.staging->unmap();
+                m_uploadBatch.staging = m_device->createBuffer(NRI::BufferDesc{
+                    .size = newCapacity,
+                    .usage = NRI::BufferUsage::Staging
+                });
+                m_uploadBatch.stagingMapped = static_cast<uint8_t*>(m_uploadBatch.staging->map(0, newCapacity));
+                m_uploadBatch.stagingCapacity = newCapacity;
+            }
+        }
+
+        memcpy(m_uploadBatch.stagingMapped + m_uploadBatch.stagingUsed, data, byteSize);
+        uploadBatchCommandBuffer().copyBuffer(*m_uploadBatch.staging, dstBuffer, NRI::BufferCopyRegion{
+            .srcOffset = m_uploadBatch.stagingUsed,
+            .dstOffset = dstByteOffset,
+            .size = byteSize
+        });
+        m_uploadBatch.stagingUsed += byteSize;
+    }
+
+    void Renderer::flushUploadBatch()
+    {
+        if (!m_uploadBatch.commandBuffer)
+            return;
+
+        endSingleTimeCommands(std::move(m_uploadBatch.commandBuffer));
+        m_uploadBatch.commandBuffer.reset();
+
+        m_uploadBatch.stagingUsed = 0;
+        m_uploadBatch.retainedBuffers.clear();
+        m_uploadBatch.retainedBytes = 0;
+        m_uploadBatch.pendingPrimitives = 0;
+        m_uploadBatch.pendingBuilds = 0;
+    }
+
+    void Renderer::endUploadBatch()
+    {
+        if (m_uploadBatch.depth == 0 || --m_uploadBatch.depth > 0)
+            return;
+
+        flushUploadBatch();
+
+        if (m_uploadBatch.staging)
+            m_uploadBatch.staging->unmap();
+        m_uploadBatch.staging.reset();
+        m_uploadBatch.stagingMapped = nullptr;
+        m_uploadBatch.stagingCapacity = 0;
+        m_uploadBatch.scratch.reset();
+        m_uploadBatch.scratchCapacity = 0;
     }
 
     void Renderer::initGeometryBuffers()
@@ -2520,27 +2697,70 @@ namespace Nox
                     .size = buildSizes.accelerationStructureSize
                 });
 
-                // 5. Create temporary scratch buffer and build on GPU
-                std::unique_ptr<NRI::Buffer> scratchBuffer = m_device->createBuffer(NRI::BufferDesc{
-                    .size = buildSizes.buildScratchSize,
-                    .usage = NRI::BufferUsage::AccelerationStructureScratch
-                });
+                // 5. Build on GPU
+                if (m_uploadBatch.depth > 0)
+                {
+                    // Builds recorded one after another in the same command buffer can share one
+                    // scratch buffer. Growing it must flush first: recorded builds use the current one.
+                    if (buildSizes.buildScratchSize > m_uploadBatch.scratchCapacity)
+                    {
+                        flushUploadBatch();
+                        m_uploadBatch.scratchCapacity = std::max<uint64_t>(buildSizes.buildScratchSize, m_uploadBatch.scratchCapacity * 2);
+                        m_uploadBatch.scratch = m_device->createBuffer(NRI::BufferDesc{
+                            .size = m_uploadBatch.scratchCapacity,
+                            .usage = NRI::BufferUsage::AccelerationStructureScratch
+                        });
+                    }
 
-                std::unique_ptr<NRI::CommandBuffer> cmd = beginSingleTimeCommands();
-                cmd->buildAccelerationStructure(buildDesc, scratchBuffer->getDeviceAddress(), *blas);
-                cmd->accelerationStructureBarrier(NRI::AccelerationStructureBarrierType::BuildToBuild);
-                endSingleTimeCommands(std::move(cmd));
+                    // This mesh's vertex/index copies were recorded earlier in this same command buffer.
+                    NRI::CommandBuffer& cmd = uploadBatchCommandBuffer();
+                    cmd.accelerationStructureBarrier(NRI::AccelerationStructureBarrierType::TransferToBuild);
+                    cmd.buildAccelerationStructure(buildDesc, m_uploadBatch.scratch->getDeviceAddress(), *blas);
+                    cmd.accelerationStructureBarrier(NRI::AccelerationStructureBarrierType::BuildToBuild);
 
-                // 6. Cache BLAS and store ID in handle
-                handle.blasId = static_cast<uint32_t>(m_meshBLASes.size());
-                m_meshBLASes.push_back(MeshBLAS{
+                    m_uploadBatch.pendingPrimitives += indices.size() / 3;
+                    ++m_uploadBatch.pendingBuilds;
+                }
+                else
+                {
+                    std::unique_ptr<NRI::Buffer> scratchBuffer = m_device->createBuffer(NRI::BufferDesc{
+                        .size = buildSizes.buildScratchSize,
+                        .usage = NRI::BufferUsage::AccelerationStructureScratch
+                    });
+
+                    std::unique_ptr<NRI::CommandBuffer> cmd = beginSingleTimeCommands();
+                    cmd->buildAccelerationStructure(buildDesc, scratchBuffer->getDeviceAddress(), *blas);
+                    cmd->accelerationStructureBarrier(NRI::AccelerationStructureBarrierType::BuildToBuild);
+                    endSingleTimeCommands(std::move(cmd));
+                }
+
+                // 6. Cache BLAS and store ID in handle (reusing ids released by unloaded meshes)
+                MeshBLAS meshBLAS{
                     .storageBuffer = std::move(asBuffer),
                     .as = std::move(blas),
                     .indexBuffer = std::move(indexBuffer),
                     .vertexBufferAddress = vertexBufferBDA,
                     .indexCount = static_cast<uint32_t>(indices.size())
-                });
+                };
+                if (!m_freeBLASIds.empty())
+                {
+                    handle.blasId = m_freeBLASIds.back();
+                    m_freeBLASIds.pop_back();
+                    m_meshBLASes[handle.blasId] = std::move(meshBLAS);
+                }
+                else
+                {
+                    handle.blasId = static_cast<uint32_t>(m_meshBLASes.size());
+                    m_meshBLASes.push_back(std::move(meshBLAS));
+                }
             }
+        }
+
+        // Submit once this batch holds enough BLAS work (all resources above are owned by now).
+        if (m_uploadBatch.depth > 0 &&
+            (m_uploadBatch.pendingPrimitives >= UPLOAD_BATCH_MAX_PRIMITIVES || m_uploadBatch.pendingBuilds >= UPLOAD_BATCH_MAX_BUILDS))
+        {
+            flushUploadBatch();
         }
 
         markPageTablesDirty();
@@ -2684,7 +2904,8 @@ namespace Nox
             bdas.reserve(count);
             for (size_t i = 0; i < count; ++i)
             {
-                bdas.push_back(pageAllocator.GetBuffer(i)->getDeviceAddress());
+                NRI::Buffer* page = pageAllocator.GetBuffer(static_cast<uint32_t>(i));
+                bdas.push_back(page ? page->getDeviceAddress() : 0);
             }
 
             // Instant memcpy, no command buffers, no blocking sync!
@@ -5514,6 +5735,17 @@ namespace Nox
 
     void Renderer::processDeferredDeletions()
     {
+        // Dropping the last Ref here runs the asset's destructor (texture slot release, mesh
+        // geometry free) only after every frame that could still reference it has finished.
+        std::erase_if(m_deferredAssetReleases, [](DeferredAssetRelease& deferred)
+        {
+            if (deferred.framesRemaining == 0)
+                return true;
+
+            deferred.framesRemaining--;
+            return false;
+        });
+
         std::erase_if(m_deferredBufferDeletions, [](DeferredBuffer& deferred)
         {
             if (deferred.framesRemaining == 0)
@@ -5542,6 +5774,20 @@ namespace Nox
                 if (m_meshletDrawPages.Free(h.meshletDraws.pageIndex, h.meshletDraws.offset, h.meshletDraws.count, emptyBuffer))
                 {
                     m_deferredBufferDeletions.push_back({std::move(emptyBuffer), MAX_FRAMES_IN_FLIGHT});
+                }
+
+                // Bounds are allocated 1:1 with draws (same count, same allocation order), so the
+                // draw allocation's page/offset is also the bounds allocation.
+                if (m_meshletBoundsPages.Free(h.meshletDraws.pageIndex, h.meshletDraws.offset, h.meshletDraws.count, emptyBuffer))
+                {
+                    m_deferredBufferDeletions.push_back({std::move(emptyBuffer), MAX_FRAMES_IN_FLIGHT});
+                }
+
+                if (h.blasId != UINT32_MAX && h.blasId < m_meshBLASes.size() && m_meshBLASes[h.blasId].as)
+                {
+                    m_meshBLASes[h.blasId] = MeshBLAS{};
+                    m_freeBLASIds.push_back(h.blasId);
+                    m_tlasNeedFullBuild = true;
                 }
 
                 if (m_meshletVertPages.Free(h.meshletVertices.pageIndex, h.meshletVertices.offset, h.meshletVertices.count, emptyBuffer))

@@ -80,6 +80,12 @@ namespace Nox
         uint32_t framesRemaining = MAX_FRAMES_IN_FLIGHT;
     };
 
+    struct DeferredAssetRelease
+    {
+        Ref<Asset> asset;
+        uint32_t framesRemaining = MAX_FRAMES_IN_FLIGHT;
+    };
+
     struct PickRequest
     {
         int32_t x = -1;
@@ -366,6 +372,21 @@ namespace Nox
 
         MeshHandle UploadMeshGeometry(const MeshData& data, bool isOpaque = true);
 
+        // Bulk-load scope: buffer copies and BLAS builds made between Begin/End are recorded into
+        // shared command buffers (flushed on staging/work budgets) instead of one synchronous
+        // submit-and-wait per slice and per BLAS. Nestable.
+        static void BeginUploadBatch()
+        {
+            if (s_Instance)
+                ++s_Instance->m_uploadBatch.depth;
+        }
+
+        static void EndUploadBatch()
+        {
+            if (s_Instance)
+                s_Instance->endUploadBatch();
+        }
+
         static MeshHandle UploadMesh(const MeshData& data, bool isOpaque = true)
         {
             NOX_CORE_ASSERT(s_Instance, "Renderer instance does not exist!");
@@ -375,6 +396,17 @@ namespace Nox
 
         void UnloadMeshGeometry(const MeshHandle& handle);
         void updatePageTables(uint32_t currentImage);
+
+        // Keeps an unloaded asset alive until in-flight frames can no longer reference its GPU
+        // resources; the asset's destructor (texture slot release, mesh free) runs afterwards.
+        static void DeferAssetRelease(Ref<Asset> asset)
+        {
+            if (s_Instance && asset)
+                s_Instance->m_deferredAssetReleases.push_back({ std::move(asset), MAX_FRAMES_IN_FLIGHT });
+        }
+
+        // Drops cached path -> bindless-slot entries for the given (now freed) texture slots.
+        static void InvalidateTextureDescriptorSlots(const std::vector<uint32_t>& slots);
 
         static void UnloadMesh(const MeshHandle& handle)
         {
@@ -805,6 +837,7 @@ namespace Nox
         // Meshes
         // 2. Queue for sub-allocation range frees
         std::vector<DeferredMeshFree> m_deferredMeshFrees;
+        std::vector<DeferredAssetRelease> m_deferredAssetReleases;
 
         // 3. Queue for whole NRI::Buffer destructions
         std::vector<DeferredBuffer> m_deferredBufferDeletions;
@@ -815,6 +848,34 @@ namespace Nox
         PagedBufferAllocator<uint32_t> m_meshletVertPages;
         PagedBufferAllocator<uint8_t> m_meshletTriPages;
         std::vector<MeshBLAS> m_meshBLASes;
+        std::vector<uint32_t> m_freeBLASIds;
+
+        struct UploadBatchState
+        {
+            uint32_t depth = 0;
+            std::unique_ptr<NRI::CommandBuffer> commandBuffer;
+
+            // One reusable, persistently mapped staging buffer; oversized slices get their own and
+            // are kept alive until the batch is submitted.
+            std::unique_ptr<NRI::Buffer> staging;
+            uint8_t* stagingMapped = nullptr;
+            uint64_t stagingCapacity = 0;
+            uint64_t stagingUsed = 0;
+            std::vector<std::unique_ptr<NRI::Buffer>> retainedBuffers;
+            uint64_t retainedBytes = 0;
+
+            // BLAS builds recorded sequentially in one command buffer can share a scratch buffer.
+            std::unique_ptr<NRI::Buffer> scratch;
+            uint64_t scratchCapacity = 0;
+            uint64_t pendingPrimitives = 0;
+            uint32_t pendingBuilds = 0;
+        };
+        UploadBatchState m_uploadBatch;
+
+        NRI::CommandBuffer& uploadBatchCommandBuffer();
+        void uploadBatchCopy(NRI::Buffer& dstBuffer, const void* data, uint64_t byteSize, uint64_t dstByteOffset);
+        void flushUploadBatch();
+        void endUploadBatch();
         // --- Hardware Ray Tracing: Scene TLAS ---
         void updateSceneAccelerationStructure(uint32_t currentFrameIndex);
         void BuildSceneAccelerationStructure(uint32_t currentFrameIndex);
