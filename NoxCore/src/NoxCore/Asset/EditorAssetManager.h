@@ -21,6 +21,7 @@ namespace Nox
     {
     public:
         virtual Ref<Asset> GetAsset(AssetHandle handle) override;
+        virtual Asset* FindLoadedAsset(AssetHandle handle) const override;
         
         virtual bool IsAssetHandleValid(AssetHandle handle) const override;
         virtual bool IsAssetLoaded(AssetHandle handle) const override;

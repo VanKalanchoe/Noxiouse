@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 #include <chrono>
 #include "Renderer2D.h"
 #include "NoxCore/Core/Window.h"
@@ -93,6 +94,14 @@ namespace Nox
         uint32_t width = 1; // Default 1 for single click
         uint32_t height = 1; // Default 1 for single click
         bool active = false;
+        uint64_t frameNumber = 0; // scene frame whose entity IDs were copied (set when the copy is recorded)
+    };
+
+    // Entity IDs of the newest pick copy whose frame has finished on the GPU (§5.3 frame-ID readbacks).
+    struct PickResult
+    {
+        PickRequest request;
+        std::vector<int32_t> pixels;
     };
 
     struct DrawMeshTasksIndirectCommand
@@ -108,6 +117,30 @@ namespace Nox
         DrawMeshTasksIndirectCommand command;
         float distanceToCamera; // Only really needed for transparent objects now
         uint32_t blasId = UINT32_MAX;
+    };
+
+    enum class RenderQueue : uint32_t
+    {
+        Opaque,
+        OpaqueDoubleSided,
+        Mask,
+        MaskDoubleSided,
+        Unlit,
+        UnlitDoubleSided,
+        Transparent,
+        TransparentDoubleSided,
+        TransparentUnlit,
+        TransparentUnlitDoubleSided,
+        Count
+    };
+
+    // Filled by one mesh submission task; merged into the render queues in chunk order (Renderer::EndMeshSubmission).
+    struct MeshSubmissionChunk
+    {
+        std::array<std::vector<RenderPacket>, static_cast<size_t>(RenderQueue::Count)> queues;
+        std::vector<glm::mat4> boneMatrices;
+        std::vector<AssetHandle> missingAssets;
+        std::vector<std::string> unresolvedTexturePaths;
     };
 
     // The Render Queues
@@ -153,11 +186,13 @@ namespace Nox
             m_pickRequest = {x, y, width, height, true};
         }
 
-        // Call this in drawFrame() or EditorLayer to read the result
-        int32_t getPickedEntityID();
+        // Newest completed pick (1x1 hover or first pixel of a box); reads a CPU copy, never an in-flight GPU buffer.
+        int32_t getPickedEntityID() const;
 
-        // Read back all unique entity IDs in the selected box area
-        std::vector<int32_t> getPickedEntityIDs();
+        // All unique entity IDs of the newest completed pick area
+        std::vector<int32_t> getPickedEntityIDs() const;
+        // Scene frame the newest completed pick was taken in.
+        uint64_t getPickedFrameNumber() const { return m_pickResult.request.frameNumber; }
 
         void SetSelectedEntityID(const std::vector<int32_t>& entityIDs) { m_SelectedEntityIDs = entityIDs; }
 
@@ -173,9 +208,13 @@ namespace Nox
         void EndScene();
         void BuildBuffers();
 
-        void DrawMesh(const glm::mat4& transform, Ref<Mesh> mesh, uint32_t submeshIndex, const MaterialComponent& material, int entityID, const std::vector<glm::mat4>* boneTransforms = nullptr);
-        void DrawStaticMesh(const glm::mat4& transform, Ref<StaticMesh> staticMesh, const MaterialComponent& material, int entityID, uint32_t firstSubmesh = 0, uint32_t submeshCount = UINT32_MAX);
-        void SubmitMesh(const glm::mat4& transform, MeshComponent& src, MaterialComponent& srcMat, int entityID, const std::vector<glm::mat4>* boneTransforms = nullptr);
+        // Parallel mesh submission (§5.2): main thread Begin, one task per chunk calls SubmitMesh with its chunk index, main
+        // thread End merges the chunks in chunk order, so the instance order is the same as a serial loop.
+        void BeginMeshSubmission(uint32_t chunkCount);
+        void SubmitMesh(uint32_t chunkIndex, const glm::mat4& transform, const MeshComponent& mesh, const MaterialComponent* material, int entityID, const std::vector<glm::mat4>* boneTransforms = nullptr);
+        // Also resolves texture paths the tasks could not; handles of assets that are not loaded yet are appended to
+        // outMissingAssets (load them on the main thread; they draw from the next frame).
+        void EndMeshSubmission(std::vector<AssetHandle>& outMissingAssets);
 
         void SubmitLight(const glm::mat4& transform, const DirectionalLightComponent& light);
         void SubmitLight(const glm::mat4& transform, const PointLightComponent& light);
@@ -428,6 +467,14 @@ namespace Nox
         bool isDLSSRayReconstructionSupported() const { return m_device && m_device->isDLSSRayReconstructionSupported(); }
 
     private:
+        template <typename MeshAsset>
+        void submitSubmeshes(MeshSubmissionChunk& chunk, const glm::mat4& transform, const MeshAsset& mesh, const MeshComponent& src,
+                             const MaterialComponent* material, int entityID, const std::vector<glm::mat4>* boneTransforms);
+        void submitSubmesh(MeshSubmissionChunk& chunk, const glm::mat4& transform, const glm::mat4& normalMatrix, const MeshHandle& handle,
+                           const MaterialData& meshMaterial, AssetHandle materialAsset, int entityID, const std::vector<glm::mat4>* boneTransforms);
+        std::vector<RenderPacket>& getRenderQueue(RenderQueue queue);
+        void readPickResult(uint32_t frameSlot);
+
         void initRenderer();
         void cleanupSwapChain();
         void recreateSwapChain();
@@ -823,6 +870,7 @@ namespace Nox
         std::vector<std::unique_ptr<NRI::Buffer>> m_pickerStagingBuffers;
         std::vector<PickRequest> m_pickerReadbackRequests;
         PickRequest m_pickRequest;
+        PickResult m_pickResult;
         std::vector<int32_t> m_SelectedEntityIDs;
 
         // Textures
@@ -833,6 +881,10 @@ namespace Nox
         Ref<Texture2D> m_textureResource2;
         Ref<Texture2D> m_textureResource3;
         uint32_t mipLevels;
+
+        // Parallel mesh submission: chunks keep their capacity across frames.
+        std::vector<MeshSubmissionChunk> m_meshSubmissionChunks;
+        uint32_t m_meshSubmissionChunkCount = 0;
 
         // Animations
         std::vector<glm::mat4> m_boneMatrices;

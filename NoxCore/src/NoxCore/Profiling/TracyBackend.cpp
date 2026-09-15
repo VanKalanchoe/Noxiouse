@@ -33,6 +33,11 @@ namespace Nox::TracyBackend
         return ___tracy_connected() != 0;
     }
 
+    void SetThreadName(const char* name)
+    {
+        ___tracy_set_thread_name(name); // copies the name
+    }
+
     void BeginZone(uint32_t scopeId)
     {
         t_OpenZones.push_back(___tracy_emit_zone_begin(&s_SourceLocations[scopeId], 1));
@@ -102,6 +107,7 @@ namespace Nox::TracyBackend
 {
     void RegisterScope(uint32_t, const ProfileScopeInfo&) {}
     bool IsConnected() { return false; }
+    void SetThreadName(const char*) {}
     void BeginZone(uint32_t) {}
     void EndZone() {}
     void MarkFrame() {}

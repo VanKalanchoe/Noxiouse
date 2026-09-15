@@ -78,6 +78,13 @@ namespace Nox
         ProjectConfig& GetConfig() { return m_Config; }
 
         static Ref<Project> GetActive() { return s_ActiveProject; }
+        // No Ref/shared_ptr copies: asset lookups run from many tasks per frame, and copying those handles writes the
+        // same two reference counts from every thread.
+        static AssetManagerBase& GetActiveAssetManager()
+        {
+            NOX_CORE_ASSERT(s_ActiveProject);
+            return *s_ActiveProject->m_AssetManager;
+        }
         std::shared_ptr<AssetManagerBase> GetAssetManager() { return m_AssetManager; }
         std::shared_ptr<RuntimeAssetManager> GetRuntimeAssetManager() { return std::static_pointer_cast<RuntimeAssetManager>(m_AssetManager); }
         std::shared_ptr<EditorAssetManager> GetEditorAssetManager() { return std::static_pointer_cast<EditorAssetManager>(m_AssetManager); }

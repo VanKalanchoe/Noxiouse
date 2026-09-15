@@ -10,6 +10,7 @@
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Physics/Physics2D.h"
 #include "NoxCore/Profiling/Profiler.h"
+#include "NoxCore/Tasks/JobSystem.h"
 
 namespace Nox
 {
@@ -51,6 +52,33 @@ namespace Nox
     static void CopyComponentIfExists(ComponentGroup<Component...>, Entity dst, Entity src)
     {
         CopyComponentIfExists<Component...>(dst, src);
+    }
+
+    namespace
+    {
+        // Non-component data the submission systems write; named in their declared access.
+        struct MeshSubmission {};
+        struct LightSubmission {};
+        struct Renderer2DSubmission {};
+
+        constexpr uint32_t MeshEntitiesPerChunk = 64;
+    }
+
+    template <typename... Component>
+    static void CreateComponentStorages(ComponentGroup<Component...>, entt::registry& registry)
+    {
+        ((void)registry.storage<Component>(), ...);
+    }
+
+    Scene::Scene()
+    {
+        // A non-const registry creates a component's storage the first time any view/get/try_get names the type, and
+        // that creation is not thread-safe. Systems access the registry from several workers at once, so every storage
+        // exists before the first graph runs (e.g. a scene copied for Play has no sprite storage until something asks).
+        CreateComponentStorages(AllComponents{}, m_Registry);
+        CreateComponentStorages(ComponentGroup<IDComponent, TagComponent>{}, m_Registry);
+
+        RegisterSystems();
     }
 
     Ref<Scene> Scene::Copy(Ref<Scene> other)
@@ -210,135 +238,147 @@ namespace Nox
 
     void Scene::OnUpdateRuntime(Timestep ts)
     {
-        if (!m_IsPaused || m_StepFrames-- > 0)
+        const bool step = !m_IsPaused || m_StepFrames-- > 0;
+        RunUpdateSystems(ts, step, step);
+
+        // The primary camera's world transform is current once the update systems have run.
+        Camera* mainCamera = nullptr;
+        glm::mat4 cameraTransform;
         {
-            /*// Update Scripts
+            auto view = m_Registry.view<WorldTransformComponent, CameraComponent>();
+            for (auto entity : view)
             {
-                // C# Entity OnUpdate
-                auto view = m_Registry.view<ScriptComponent>();
-                for (auto e : view)
+                auto [transform, camera] = view.get<WorldTransformComponent, CameraComponent>(entity);
+                if (camera.Primary)
                 {
-                    Entity entity = { e, this };
-                    ScriptEngine::OnUpdateEntity(entity, ts);
-                }
-                
-                m_Registry.view<NativeScriptComponent>().each([=](auto entity, auto& nsc)
-                {
-                    //todo Move to Scene::OnScenePlay
-                    if (!nsc.Instance)
-                    {
-                        nsc.Instance = nsc.InstantiateScript();
-                        nsc.Instance->m_Entity = Entity{entity, this};
-                        nsc.Instance->OnCreate();
-                    }
-
-                    nsc.Instance->OnUpdate(ts);
-                });
-            }*/
-
-            // Physics
-            {
-                NOX_PROFILE_SCOPE("Physics");
-                int32_t subStepCount = 4;
-                b2World_Step(m_PhysicsWorldID, ts, subStepCount);
-
-                // Retrieve Transform from Box2D
-                auto view = m_Registry.view<RigidBody2DComponent>();
-                for (auto e : view)
-                {
-                    Entity entity = {e, this};
-                    auto& transform = entity.GetComponent<TransformComponent>();
-                    auto& r2bd = entity.GetComponent<RigidBody2DComponent>();
-
-                    b2BodyId body = r2bd.RuntimeBody;
-                    const auto& position = b2Body_GetPosition(body);
-                    transform.Translation.x = position.x;
-                    transform.Translation.y = position.y;
-                    transform.Rotation.z = b2Rot_GetAngle(b2Body_GetRotation(body));
-                    
-                    m_Registry.get_or_emplace<DirtyTransformComponent>(e);
+                    mainCamera = &camera.Camera;
+                    cameraTransform = transform.WorldMatrix;
+                    break;
                 }
             }
-
-            UpdateAnimators(ts);
         }
-
-        {
-            NOX_PROFILE_SCOPE("Transform Propagation");
-            SceneGraph::UpdateWorldTransforms(m_Registry, m_EntityMap);
-        }
-        
-       // Render 2D
-        //changed from transformcomp to worldcomp
-		Camera* mainCamera = nullptr;
-		glm::mat4 cameraTransform;
-		{
-			auto view = m_Registry.view<WorldTransformComponent, CameraComponent>();
-			for (auto entity : view)
-			{
-				auto [transform, camera] = view.get<WorldTransformComponent, CameraComponent>(entity);
-				
-				if (camera.Primary)
-				{
-					mainCamera = &camera.Camera;
-					cameraTransform = transform.WorldMatrix;
-					break;
-				}
-			}
-		}
 
         if (mainCamera)
         {
             m_renderer->BeginScene(*mainCamera, cameraTransform);
-            SubmitRenderables();
+            RunSubmitSystems();
             m_renderer->EndScene();
         }
     }
 
     void Scene::OnUpdateSimulation(Timestep ts, EditorCamera& camera)
     {
-        if (!m_IsPaused || m_StepFrames-- > 0)
-        {
-            // Physics
-            {
-                NOX_PROFILE_SCOPE("Physics");
-                int32_t subStepCount = 4;
-                b2World_Step(m_PhysicsWorldID, ts, subStepCount);
+        const bool step = !m_IsPaused || m_StepFrames-- > 0;
+        RunUpdateSystems(ts, step, step);
 
-                // Retrieve Transform from Box2D
-                auto view = m_Registry.view<RigidBody2DComponent>();
-                for (auto e : view)
-                {
-                    Entity entity = {e, this};
-                    auto& transform = entity.GetComponent<TransformComponent>();
-                    auto& r2bd = entity.GetComponent<RigidBody2DComponent>();
-
-                    b2BodyId body = r2bd.RuntimeBody;
-                    const auto& position = b2Body_GetPosition(body);
-                    transform.Translation.x = position.x;
-                    transform.Translation.y = position.y;
-                    transform.Rotation.z = b2Rot_GetAngle(b2Body_GetRotation(body));
-
-                    m_Registry.get_or_emplace<DirtyTransformComponent>(e);
-                }
-            }
-
-            UpdateAnimators(ts);
-        }
-
-        // Render
-        RenderScene(camera);
+        m_renderer->BeginScene(camera);
+        RunSubmitSystems();
+        m_renderer->EndScene();
     }
 
     void Scene::OnUpdateEditor(Timestep ts, EditorCamera& camera)
     {
-        UpdateAnimators(ts);
-        RenderScene(camera);
+        RunUpdateSystems(ts, false, true);
+
+        m_renderer->BeginScene(camera);
+        RunSubmitSystems();
+        m_renderer->EndScene();
     }
 
-    void Scene::UpdateAnimators(Timestep ts)
+    void Scene::RegisterSystems()
     {
-        NOX_PROFILE_SCOPE("Animation");
+        // Game Update. Declared access orders them: Physics 2D and Animation both write transforms, propagation reads them.
+        m_UpdateSystems.AddSystem("Physics 2D",
+            ComponentAccess().Read<RigidBody2DComponent>().Write<TransformComponent, DirtyTransformComponent>(),
+            [this]() { UpdatePhysics2D(); });
+        m_UpdateSystems.AddSystem("Animation",
+            ComponentAccess().Write<AnimatorComponent, TransformComponent, DirtyTransformComponent>(),
+            [this]() { UpdateAnimators(); });
+        m_UpdateSystems.AddSystem("Transform Propagation",
+            ComponentAccess().Read<TransformComponent, RelationshipComponent>().Write<WorldTransformComponent, DirtyTransformComponent>(),
+            [this]() { SceneGraph::UpdateWorldTransforms(m_Registry, m_EntityMap, m_CommandBuffers); });
+
+        // Submission (after BeginScene). No conflicts: the three run in parallel.
+        m_SubmitSystems.AddSystem("Submit Meshes",
+            ComponentAccess().Read<WorldTransformComponent, MeshComponent, MaterialComponent>().Write<AnimatorComponent, MeshSubmission>(),
+            [this]() { SubmitMeshes(); });
+        m_SubmitSystems.AddSystem("Submit Lights",
+            ComponentAccess().Read<WorldTransformComponent, DirectionalLightComponent, PointLightComponent, SpotLightComponent>().Write<LightSubmission>(),
+            [this]() { SubmitLights(); });
+        m_SubmitSystems.AddSystem("Submit 2D",
+            ComponentAccess().Read<WorldTransformComponent, SpriteRendererComponent, CircleRendererComponent, TextComponent>().Write<Renderer2DSubmission>(),
+            [this]() { Submit2D(); });
+    }
+
+    void Scene::RunUpdateSystems(Timestep ts, bool stepPhysics, bool stepAnimation)
+    {
+        NOX_PROFILE_SCOPE("Scene Update Systems");
+        m_FrameInput = { static_cast<float>(ts), stepPhysics, stepAnimation };
+        m_UpdateSystems.Run();
+        ApplySyncPoint();
+    }
+
+    void Scene::RunSubmitSystems()
+    {
+        NOX_PROFILE_SCOPE("Scene Submit Systems");
+
+        // The renderer sizes its chunks before the tasks write them; the same chunk layout splits the entity list.
+        m_MeshEntities.clear();
+        for (auto entity : m_Registry.view<WorldTransformComponent, MeshComponent>())
+            m_MeshEntities.push_back(entity);
+        m_renderer->BeginMeshSubmission(JobSystem::Get().GetChunkCount(static_cast<uint32_t>(m_MeshEntities.size()), MeshEntitiesPerChunk));
+
+        m_SubmitSystems.Run();
+
+        m_renderer->EndMeshSubmission(m_MissingAssets.Local());
+        ApplySyncPoint();
+    }
+
+    void Scene::ApplySyncPoint()
+    {
+        NOX_PROFILE_SCOPE("Scene Sync Point");
+
+        m_CommandBuffers.ForEach([this](EntityCommandBuffer& commandBuffer) { commandBuffer.Apply(*this); });
+
+        // GetAsset imports on demand, which only the main thread may do. Loaded now, used from the next frame.
+        m_MissingAssets.ForEach([](std::vector<AssetHandle>& handles)
+        {
+            for (AssetHandle handle : handles)
+                AssetManager::GetAsset<Asset>(handle);
+            handles.clear();
+        });
+    }
+
+    void Scene::UpdatePhysics2D()
+    {
+        if (!m_FrameInput.StepPhysics)
+            return;
+
+        constexpr int32_t subStepCount = 4;
+        b2World_Step(m_PhysicsWorldID, m_FrameInput.Timestep, subStepCount);
+
+        // Retrieve Transform from Box2D
+        auto view = m_Registry.view<RigidBody2DComponent, TransformComponent, DirtyTransformComponent>();
+        for (auto entity : view)
+        {
+            auto [rigidBody, transform, dirty] = view.get<RigidBody2DComponent, TransformComponent, DirtyTransformComponent>(entity);
+
+            b2BodyId body = rigidBody.RuntimeBody;
+            const b2Vec2 position = b2Body_GetPosition(body);
+            transform.Translation.x = position.x;
+            transform.Translation.y = position.y;
+            transform.Rotation.z = b2Rot_GetAngle(b2Body_GetRotation(body));
+            dirty.isDirty = true;
+        }
+    }
+
+    void Scene::UpdateAnimators()
+    {
+        if (!m_FrameInput.StepAnimation)
+            return;
+
+        const float ts = m_FrameInput.Timestep;
+        std::vector<AssetHandle>& missingAssets = m_MissingAssets.Local();
         auto view = m_Registry.view<AnimatorComponent>();
         for (auto entity : view)
         {
@@ -350,7 +390,10 @@ namespace Nox
                 Ref<AnimationSequence> currentAnim = animatorComp.Animator.GetCurrentAnimation();
                 if (!currentAnim || currentAnim->Handle != animatorComp.Animation)
                 {
-                    Ref<AnimationSequence> anim = AssetManager::GetAsset<AnimationSequence>(animatorComp.Animation);
+                    // The animator keeps a Ref to the clip it plays.
+                    Ref<AnimationSequence> anim(AssetManager::FindLoadedAsset<AnimationSequence>(animatorComp.Animation));
+                    if (!anim)
+                        missingAssets.push_back(animatorComp.Animation);
                     if (anim)
                     {
                         anim->Handle = animatorComp.Animation;
@@ -365,11 +408,13 @@ namespace Nox
             // joint entities instead (see GetBoneTransforms), so the skeleton isn't evaluated twice.
             if (animatorComp.Skeleton != 0 && animatorComp.NodeEntities.empty())
             {
-                Ref<Skeleton> skeleton = AssetManager::GetAsset<Skeleton>(animatorComp.Skeleton);
+                const Skeleton* skeleton = AssetManager::FindLoadedAsset<Skeleton>(animatorComp.Skeleton);
+                if (!skeleton)
+                    missingAssets.push_back(animatorComp.Skeleton);
                 if (skeleton && !skeleton->AllNodes.empty())
                 {
                     if (animatorComp.Playing)
-                        animatorComp.Animator.Update((float)ts, *skeleton);
+                        animatorComp.Animator.Update(ts, *skeleton);
                     else
                         animatorComp.Animator.UpdateTransforms(*skeleton);
                 }
@@ -378,7 +423,9 @@ namespace Nox
             // Node/object animations write the evaluated .nanim TRS directly to ECS transforms.
             if (!animatorComp.NodeEntities.empty() && animatorComp.Animation != 0)
             {
-                Ref<AnimationSequence> animation = AssetManager::GetAsset<AnimationSequence>(animatorComp.Animation);
+                Ref<AnimationSequence> animation(AssetManager::FindLoadedAsset<AnimationSequence>(animatorComp.Animation));
+                if (!animation)
+                    missingAssets.push_back(animatorComp.Animation);
                 if (animation)
                 {
                     // Only the nodes this clip's channels target. The node table covers the whole
@@ -411,14 +458,15 @@ namespace Nox
                         nodeTransforms[nodeIndex].Scale = transform.Scale;
                     }
 
-                    animatorComp.Animator.UpdateNodeAnimation((float)ts, animation, nodeTransforms);
+                    animatorComp.Animator.UpdateNodeAnimation(ts, animation, nodeTransforms);
                     for (const auto& [nodeIndex, nodeEntity] : targets)
                     {
                         auto& transform = m_Registry.get<TransformComponent>(nodeEntity);
                         transform.Translation = nodeTransforms[nodeIndex].Translation;
                         transform.Rotation = glm::eulerAngles(nodeTransforms[nodeIndex].Rotation);
                         transform.Scale = nodeTransforms[nodeIndex].Scale;
-                        m_Registry.get_or_emplace<DirtyTransformComponent>(nodeEntity);
+                        if (auto* dirty = m_Registry.try_get<DirtyTransformComponent>(nodeEntity))
+                            dirty->isDirty = true;
                     }
                 }
             }
@@ -434,7 +482,9 @@ namespace Nox
         if (animatorComp->Skeleton == 0 || animatorComp->NodeEntities.empty())
             return &animatorComp->Animator.GetFinalBoneTransforms();
 
-        Ref<Skeleton> skeleton = AssetManager::GetAsset<Skeleton>(animatorComp->Skeleton);
+        const Skeleton* skeleton = AssetManager::FindLoadedAsset<Skeleton>(animatorComp->Skeleton);
+        if (!skeleton)
+            m_MissingAssets.Local().push_back(animatorComp->Skeleton);
         if (!skeleton || skeleton->Skins.empty() || !skeleton->Skins[0])
             return nullptr;
 
@@ -707,43 +757,27 @@ namespace Nox
         m_PhysicsWorldID = b2_nullWorldId;
     }
     
-    void Scene::RenderScene(EditorCamera& camera)
+    void Scene::SubmitMeshes()
     {
-        NOX_PROFILE_SCOPE("Render Scene");
-        {
-            NOX_PROFILE_SCOPE("Transform Propagation");
-            SceneGraph::UpdateWorldTransforms(m_Registry, m_EntityMap);
-        }
-        
-        m_renderer->BeginScene(camera);
-        SubmitRenderables();
-        m_renderer->EndScene();
+        // Chunk layout matches Renderer::BeginMeshSubmission (same count and batch size).
+        JobSystem::Get().ParallelFor("Submit Mesh Chunk", static_cast<uint32_t>(m_MeshEntities.size()), MeshEntitiesPerChunk,
+            [this](uint32_t chunk, uint32_t begin, uint32_t end)
+            {
+                for (uint32_t index = begin; index < end; ++index)
+                {
+                    const entt::entity entity = m_MeshEntities[index];
+                    const glm::mat4& worldMatrix = m_Registry.get<WorldTransformComponent>(entity).WorldMatrix;
+                    const MeshComponent& mesh = m_Registry.get<MeshComponent>(entity);
+                    const MaterialComponent* material = m_Registry.try_get<MaterialComponent>(entity);
+                    const std::vector<glm::mat4>* boneTransforms = GetBoneTransforms(entity, worldMatrix);
+
+                    m_renderer->SubmitMesh(chunk, worldMatrix, mesh, material, static_cast<int>(entity), boneTransforms);
+                }
+            });
     }
 
-    // Everything the renderers draw for one frame. Shared by the editor camera and the runtime camera path, so Play
-    // mode renders exactly what the editor shows.
-    void Scene::SubmitRenderables()
+    void Scene::SubmitLights()
     {
-        NOX_PROFILE_SCOPE("Submit Renderables");
-        
-        // Draw 3D Meshes
-        {
-            auto view = m_Registry.view<WorldTransformComponent, MeshComponent>();
-            for (auto entity : view)
-            {
-                auto [transform, mesh] = view.get<WorldTransformComponent, MeshComponent>(entity);
-                
-                MaterialComponent* materialComp = m_Registry.try_get<MaterialComponent>(entity);
-                MaterialComponent defaultMaterial;
-                MaterialComponent& materialToUse = materialComp ? *materialComp : defaultMaterial;
-                
-                const std::vector<glm::mat4>* boneTransforms = GetBoneTransforms(entity, transform.WorldMatrix);
-
-                m_renderer->SubmitMesh(transform.WorldMatrix, mesh, materialToUse, (int)entity, boneTransforms);
-            }
-        }
-        
-        // Submit Directional Lights
         {
             auto view = m_Registry.view<WorldTransformComponent, DirectionalLightComponent>();
             for (auto entity : view)
@@ -752,8 +786,6 @@ namespace Nox
                 m_renderer->SubmitLight(wtc.WorldMatrix, light);
             }
         }
-
-        // Submit Point Lights
         {
             auto view = m_Registry.view<WorldTransformComponent, PointLightComponent>();
             for (auto entity : view)
@@ -762,8 +794,6 @@ namespace Nox
                 m_renderer->SubmitLight(wtc.WorldMatrix, light);
             }
         }
-
-        // Submit Spot Lights
         {
             auto view = m_Registry.view<WorldTransformComponent, SpotLightComponent>();
             for (auto entity : view)
@@ -772,45 +802,65 @@ namespace Nox
                 m_renderer->SubmitLight(wtc.WorldMatrix, light);
             }
         }
-        
-        // Draw Sprites
+    }
+
+    void Scene::Submit2D()
+    {
+        std::vector<AssetHandle>& missingAssets = m_MissingAssets.Local();
+
+        // Sprites
         {
-            auto group = m_Registry.group<WorldTransformComponent>(entt::get<SpriteRendererComponent>);
-            for (auto entity : group)
+            auto view = m_Registry.view<WorldTransformComponent, SpriteRendererComponent>();
+            for (auto entity : view)
             {
-                auto [transform, sprite] = group.get<WorldTransformComponent, SpriteRendererComponent>(entity);
-                //Renderer2D::DrawQuad(transform.Position, transform.Size, transform.Scale, transform.Rotation, sprite.Color);
-                m_renderer2D->DrawSprite(transform.WorldMatrix, sprite, (int)entity);
-                //Renderer2D::DrawRect(transform, sprite, (int)entity);
+                auto [transform, sprite] = view.get<WorldTransformComponent, SpriteRendererComponent>(entity);
+                if (sprite.Texture == 0)
+                {
+                    m_renderer2D->DrawQuad(transform.WorldMatrix, sprite.Color, static_cast<int>(entity));
+                    continue;
+                }
+
+                // Renderer2D::DrawSprite without its on-demand texture import (main thread only). Until the texture is
+                // loaded the sprite draws untextured.
+                Ref<Texture2D> texture(AssetManager::FindLoadedAsset<Texture2D>(sprite.Texture));
+                if (!texture)
+                {
+                    missingAssets.push_back(sprite.Texture);
+                    m_renderer2D->DrawQuad(transform.WorldMatrix, sprite.Color, static_cast<int>(entity));
+                    continue;
+                }
+                m_renderer2D->DrawQuad(transform.WorldMatrix, texture, sprite.TilingFactor, sprite.Color, static_cast<int>(entity));
             }
         }
-        
-        // Draw Circles
+
+        // Circles
         {
             auto view = m_Registry.view<WorldTransformComponent, CircleRendererComponent>();
             for (auto entity : view)
             {
                 auto [transform, circle] = view.get<WorldTransformComponent, CircleRendererComponent>(entity);
-
-                m_renderer2D->DrawCircle(transform.WorldMatrix, circle.Color, circle.Thickness, circle.Fade, (int)entity);
+                m_renderer2D->DrawCircle(transform.WorldMatrix, circle.Color, circle.Thickness, circle.Fade, static_cast<int>(entity));
             }
         }
-        // Draw Text
+
+        // Text
         {
             auto view = m_Registry.view<WorldTransformComponent, TextComponent>();
             for (auto entity : view)
             {
                 auto [transform, text] = view.get<WorldTransformComponent, TextComponent>(entity);
-
-                m_renderer2D->DrawString(text.TextString, transform.WorldMatrix, text, (int)entity);
+                m_renderer2D->DrawString(text.TextString, transform.WorldMatrix, text, static_cast<int>(entity));
             }
         }
-        /*
-        //Renderer2D::DrawLine(glm::vec3(2.0f), glm::vec3(5.0f), glm::vec4(1.0f, 0.0f, 1.0f, 1.0f));
-        //Renderer2D::DrawRect(glm::vec3(0.0f), glm::vec2(1.0f), glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
-        */
     }
-    
+
+    bool Scene::DumpSystemGraphs(const std::filesystem::path& directory)
+    {
+        const bool update = m_UpdateSystems.DumpDot(directory / "SceneUpdate.dot");
+        const bool submit = m_SubmitSystems.DumpDot(directory / "SceneSubmit.dot");
+        return update && submit;
+    }
+
     template <typename T>
     void Scene::OnComponentAdded(Entity entity, T& component)
     {

@@ -13,6 +13,7 @@
 #include "NoxCore/Events/WindowEvents.h"
 #include "NoxCore/Renderer/Renderer.h"
 #include "NoxCore/ImGui/ImGuiLayer.h"
+#include "NoxCore/Tasks/JobSystem.h"
 
 namespace Nox
 {
@@ -23,6 +24,8 @@ namespace Nox
         NOX_CORE_INFO("Application Start");
 
         s_Application = this;
+
+        m_JobSystem = std::make_unique<JobSystem>();
 
         if (!m_Specification.WorkingDirectory.empty())
             std::filesystem::current_path(m_Specification.WorkingDirectory);
@@ -98,6 +101,9 @@ namespace Nox
             }
 
             renderer->drawFrame();
+
+            // Frame sync point (§5.3): no frame graph task runs past this.
+            m_JobSystem->ResetFrameArenas();
         }
 
         NOX_PROFILE_FRAME();

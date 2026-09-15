@@ -275,6 +275,42 @@ Observations for later phases:
 - **Private bytes ~5.4 GB vs ~0.9 GB working set** — committed CPU memory to be explained (retained CPU copies of mesh or
   texture data, driver allocations) in the memory phases (§5.8, §5.9).
 
+#### Phase 1 result — Bistro, Release, 2026-09-15
+
+Same conditions as the Phase 0 baseline except output 1816×916 (editor layout); 15 workers + 2 IO workers
+(16 logical cores). Reports now include the renderer settings: B = RT shadows + SIGMA, reflections + RELAX,
+ReSTIR GI (2 spatial samples, history 10) + RELAX, ReSTIR DI (8 local / 1 infinite samples, 1 spatial, history 20)
++ RELAX; C = same with DLSS Quality + Ray Reconstruction (GI/DI denoisers off).
+
+| Configuration | CPU frame avg ms (Phase 0 → Phase 1) | FPS (Phase 0 → Phase 1) |
+|---|---|---|
+| **A** Raster | 2.83 → 1.56 → 1.37 (refcount fix) → **1.14** (level split) | 228 → 234 → 236 → 240 (GPU-bound) |
+| **B** Hybrid native | 5.84 → **3.07** | 16 → 16 (GPU-bound) |
+| **C** Hybrid + DLSS Quality + RR | 4.72 → **3.09** | 31 → 33 (GPU-bound) |
+
+| CPU work, config A, avg ms | Phase 0 (serial) | Phase 1 wall (main thread) | Phase 1 summed CPU time |
+|---|---|---|---|
+| Mesh submission (Submit Renderables → Scene Submit Systems / Submit Mesh Chunk) | 1.98 | 0.53 → **0.28** after the refcount fix | 5.86 → **2.19** after the refcount fix |
+| Transform propagation | 0.26 | 0.37 → **0.17** after the level split (task wall; top levels 0.05) | 0.28 → 0.39 subtrees |
+
+Load: Bistro GPU upload 852.2 ms (unchanged work, run-to-run variation vs 897.9 ms).
+
+Observations:
+- **Exit criterion met for frame time:** CPU frame −45 % (A), −47 % (B), −35 % (C); work visible on worker threads.
+- **Parallel efficiency in mesh submission — found and fixed (confirmed by measurement):** first capture showed
+  5.86 ms summed CPU time for work that took 1.98 ms serially (≈3× inflation). Cause: every `AssetManager` static
+  call copied `Ref<Project>` and `std::shared_ptr<AssetManagerBase>`, and each submesh copied `Ref<Mesh>` /
+  `Ref<Material>` — atomic reference-count writes on the same few counters from 15 threads (Bistro: one mesh asset,
+  shared materials). Fix: `Project::GetActiveAssetManager()` (no copies) and `AssetManager::FindLoadedAsset<T>`
+  (raw pointer). Re-capture: summed 2.19 ms (≈ serial cost, i.e. near-linear scaling), main-thread wait 0.28 ms.
+  Rule for task code: no shared `Ref`/`shared_ptr` copies in per-item loops.
+- **Transform propagation — lopsided hierarchy, fixed:** splitting at the roots' children gave one subtree almost
+  all of Bistro's ~6000 nodes (0.37 ms, slower than serial 0.26 ms). Now the top levels are updated serially until
+  there are `workers × 16` subtrees, then those run in parallel: 0.17 ms wall (top levels 0.05 ms).
+- **Config A CPU frame after both fixes: 1.14 ms (−60 % vs the Phase 0 baseline).**
+- Dragging in a model loads everything during import (`ImportAsset`) before entities exist, so the one-frame
+  "missing asset" path only applies to assets that were unloaded; asynchronous appearance is Phase 5.
+
 ---
 
 ## 4. Target Architecture Overview
@@ -471,7 +507,9 @@ Process memory stays in `Utils/PlatformUtils.cpp` because SDL3 has no per-proces
 1. **ECS access:** each system task declares the component sets it reads/writes; the frame graph orders
    conflicting systems and runs non-conflicting ones in parallel.
 2. **Structural ECS changes** (create/destroy entities, add/remove components) from tasks are recorded
-   into per-worker command buffers and applied on the main thread at the frame sync point.
+   into per-worker command buffers and applied on the main thread at the frame sync point. State that
+   systems toggle every frame is data, not structure: `DirtyTransformComponent` is present on every entity
+   and marking/clearing writes its flag.
 3. **Vulkan:** queue submit and present only on the main thread; command recording on any worker using
    that worker's pool; NRI resource creation is thread-safe through an allocation lock; GPU object
    release goes through the deferred release queue (§5.8.4) processed at the frame sync point.
@@ -479,6 +517,22 @@ Process memory stays in `Utils/PlatformUtils.cpp` because SDL3 has no per-proces
    frame-in-flight backpressure.
 5. **Cross-task data** flows through graph edges, per-frame snapshot structures, or lock-free queues —
    no shared mutable state without a declared owner.
+6. **Assets from tasks:** `AssetManager::FindLoadedAsset` only (never imports; raw pointer, no reference-count
+   writes, valid while the main thread waits for the graph). Handles that are not loaded
+   are reported (`WorkerLocal` lists) and loaded with `GetAsset` on the main thread at the sync point; they
+   are used from the next frame.
+
+#### 5.2.6 Implementation (Phase 1, September 2026)
+| Piece | Where | Notes |
+|---|---|---|
+| `JobSystem` | `NoxCore/src/NoxCore/Tasks/JobSystem.{h,cpp}` | Owned by `Application` (first member: created first, destroyed last). Main executor: `SDL_GetNumLogicalCPUCores() - 1` workers; IO executor: 2 workers. `ParallelFor` (deterministic chunk layout, cooperative wait on workers via `tf::TaskGroup::corun`), `Async` / `AsyncIO` → `TaskFuture` + `CancellationToken`. Taskflow headers only in `Tasks/*.cpp` and the internal `TaskObserver.h`. |
+| Worker threads | `tf::WorkerInterface::scheduler_prologue` | Assigns the `WorkerLocal` thread slot (CPU workers, IO workers, main thread last) and names the thread for Tracy ("Nox Worker N", "Nox IO N"). |
+| Profiling | `Tasks/TaskObserver.{h,cpp}` | `tf::ObserverInterface` on both executors: `on_entry`/`on_exit` open/close a profiler scope named after the task (thread-local name → scope id cache, `Profiler::RegisterNamedScope`). Covers graph tasks, parallel-for chunks, async and subflow tasks. Taskflow's TFProf (`TF_ENABLE_PROFILER`) still works alongside. |
+| `WorkerLocal<T>` | `Tasks/WorkerLocal.h` | One cache-line-aligned `T` per thread slot. |
+| `FrameArena` | `Tasks/FrameArena.{h,cpp}` | Linear allocator per thread slot, reset by `Application` at the frame sync point after `drawFrame`. Frame graph tasks only (async work outlives the frame). |
+| `SystemGraph` + `ComponentAccess` | `Tasks/SystemGraph.{h,cpp}` | D11 decided: systems declare `Read<...>()` / `Write<...>()` (EnTT `type_hash`; tag types for non-component resources). A system runs after every earlier-registered system it conflicts with; others run in parallel. `RunAfter` for non-data ordering; `DumpDot` via `tf::Taskflow::dump`. |
+| `EntityCommandBuffer` | `Scene/EntityCommandBuffer.{h,cpp}` | Create/destroy entity, add/replace/remove component recorded into the recording thread's frame arena; applied by the Scene on the main thread in slot order. |
+| Worker NRI command pools | Phase 2 | Designed with render-graph partition recording (submit order, per-buffer GPU timestamps, barrier state across partitions); they will live in `WorkerLocal`. |
 
 ### 5.3 Frame Pipeline (Main Thread + Frame Graph)
 
@@ -514,6 +568,19 @@ Async lane  : asset IO → decode → upload staging (tasks outside the frame gr
 - **Editor readbacks** (entity picking, box select) are requests tagged with a frame ID, completed on
   the main thread at frame start once that frame's fence has signaled (replaces the current "previous
   slot" readback, which can read an in-flight buffer).
+- **Phase 1 shape (September 2026).** Render Prepare is still `Renderer::drawFrame` until the render graph
+  (Phase 2), so the scene runs two `SystemGraph`s from its `OnUpdate*`:
+  - **Scene Update:** Physics 2D → Animation → Transform Propagation (roots serial, root-child subtrees
+    in a `ParallelFor`), ordered by declared access; then the scene sync point (command buffers, missing
+    assets).
+  - main thread: primary camera → `Renderer::BeginScene` (may recreate render-resolution resources).
+  - **Scene Submit:** Submit Meshes (`ParallelFor` over mesh entities; each chunk fills its own
+    `MeshSubmissionChunk`, merged in chunk order by `Renderer::EndMeshSubmission`, so instance order equals
+    the serial loop) ‖ Submit Lights ‖ Submit 2D; then the scene sync point.
+  - Application frame sync point after `drawFrame`: frame arenas reset.
+  - Pick results are copied right after `acquireNextImage` waited for the slot's previous submission
+    (`Renderer::readPickResult`); `getPickedEntityID(s)` read that CPU copy.
+  - Phase 2 composes the Render Prepare graph after the scene graphs.
 
 ### 5.4 Render Graph
 
@@ -984,8 +1051,8 @@ flight, targeted texture-slot cache eviction. Future:
 | Phase | Name | Depends on | Key deliverables | Exit criteria (to refine) |
 |---|---|---|---|---|
 | **0** | Profiling | — | Nox instrumentation layer (macros, scope registry, thread buffers), NRI GPU timestamp queries, memory sampler (`VK_EXT_memory_budget`, VMA stats, process RAM), Nox Stats overlay (CPU/GPU min/max/avg, RAM/VRAM), Tracy backend | Overlay shows CPU scopes and all major GPU passes with min/max/avg and RAM/VRAM for Bistro; the same scopes appear in Tracy; no measurable cost with both disabled |
-| **1** | Task system & frame graph | 0 | `Nox::JobSystem` over one Taskflow executor (+ IO executor), frame graph (Game Update → Streaming → Render Prepare), worker-local arenas + NRI command pools, ECS access declarations + deferred structural changes, Taskflow observer → profiling scopes, DOT dump command, frame-ID readbacks | Frame work spreads across all cores (visible in Nox Stats/Tracy); frame graph DOT viewable in GraphViz; no `std::thread` outside `JobSystem`; picking correct |
-| **2** | Render graph | 1 | RG core (declare/compile/execute, pass culling), transient pool + aliasing, history resources, derived pass setup, access-model synchronization with Blanket/Precise strategies, parallel partition recording, per-pass profiling scopes + debug labels, visualizer + texture inspection + validation; full frame ported | Identical images in all debug views; no manual `executionBarrier()` or reset flags left; transient memory reduced vs today; recording parallel; Blanket vs Precise barrier comparison recorded (D13) |
+| **1** | Task system & frame graph | 0 | `Nox::JobSystem` over one Taskflow executor (+ IO executor), frame graph (Game Update → Streaming → Render Prepare; Phase 1: scene update + submit graphs, §5.3), worker-local arenas (`WorkerLocal`, `FrameArena`), ECS access declarations + deferred structural changes, Taskflow observer → profiling scopes, DOT dump command, frame-ID readbacks, parallel transform propagation + deterministic parallel mesh submission. Worker NRI command pools → Phase 2 | Frame work spreads across all cores (visible in Nox Stats/Tracy); Bistro config A CPU frame below the §3b.3 baseline; identical images; frame graph DOT viewable in GraphViz; no `std::thread` outside `JobSystem`; picking correct |
+| **2** | Render graph | 1 | Worker NRI command pools (per worker × frame slot, ordered multi-buffer submit), RG core (declare/compile/execute, pass culling), transient pool + aliasing, history resources, derived pass setup, access-model synchronization with Blanket/Precise strategies, parallel partition recording, per-pass profiling scopes + debug labels, visualizer + texture inspection + validation; full frame ported | Identical images in all debug views; no manual `executionBarrier()` or reset flags left; transient memory reduced vs today; recording parallel; Blanket vs Precise barrier comparison recorded (D13) |
 | **3** | GPU scene & GPU culling | 2 | Persistent instance/transform/material buffers, dirty uploads, **mesh instancing (importer keeps glTF mesh → node sharing; instances reference one `MeshTable` entry, one BLAS per unique mesh — Bistro: 551 meshes for 2909 instances, today uploaded 2909×)**, Hi-Z, GPU instance culling, indirect-count draws, multi-view | CPU per-frame render prep independent of instance count; Bistro frame time improved (target set after Phase 0 baseline) |
 | **4** | Unified geometry memory & budgets | 3 | Base memory system (§5.8.6): unified geometry buffers incl. RT index stream with TLSF range allocation (page tables removed, offsets instead of addresses), grow-and-copy, memory budget polling, category accounting with soft budgets, no per-frame buffer creation, single deferred release queue | Freed geometry is reused by the next load; VRAM per category visible in Nox Stats; no `createBuffer` in a steady-state frame |
 | **5** | Async IO & upload manager | 1, 4 | Request API + state machine, IO threads, decode tasks, transfer queue, staging ring, async editor drag-in | Loading Bistro never stalls the viewport beyond a frame budget |
@@ -1012,7 +1079,7 @@ Phases 1, 2 and 3 are architecture-defining and each gets its own plan-mode desi
 | D8 | RT geometry LOD policy | shared raster LOD vs dedicated coarse RT LOD | self-intersection vs memory trade-off |
 | D9 | Editor vs runtime asset managers | split now vs after async loading | runtime needs containers + handle-based refs |
 | D10 | Budgets & targets | per-category VRAM shares, frame-time targets per reference scene | set after Phase 0 baselines |
-| D11 | ECS parallelism | declared system read/write sets vs coarse phases | affects gameplay code authoring |
+| D11 | ~~ECS parallelism~~ **Decided** | **Declared system read/write sets** (`ComponentAccess` + `SystemGraph`, §5.2.6) | Decided September 2026 (Phase 1) |
 | D12 | Scene file format | per-cell YAML vs binary cooked cells with YAML for editing | version control friendliness |
 | D13 | Barrier strategy | Blanket (today's `executionBarrier`) vs Precise per-resource barriers | Decided by the Phase 2 profiling experiment (§5.4.5); Blanket is the default until then |
 

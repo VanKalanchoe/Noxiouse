@@ -3,9 +3,13 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <deque>
 #include <memory>
 #include <mutex>
 #include <span>
+#include <string>
+#include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include "NRI/NRITypes.h"
@@ -85,6 +89,10 @@ namespace Nox
 
         // Called once per call site (static initialization inside the macros).
         uint32_t RegisterScope(const ProfileScopeInfo& info);
+        // Scopes known only by a runtime name (task system tasks): one id per distinct name, the name is copied.
+        uint32_t RegisterNamedScope(std::string_view name);
+        // Names the calling thread in Tracy (worker threads of the task system).
+        void SetThreadName(const char* name);
 
         // CPU scopes: any thread. Aggregated per frame on the main thread in EndFrame().
         void BeginCpuScope(uint32_t scopeId);
@@ -122,6 +130,7 @@ namespace Nox
 
         Profiler() = default;
 
+        uint32_t RegisterScopeLocked(const ProfileScopeInfo& info);
         ThreadScopeBuffer& GetThreadBuffer();
         void ProcessGpuReadback(GpuFrameRecord& frame);
         void BuildTreeOrder(const std::vector<ScopeHistory>& histories, std::vector<ProfileScopeStats>& outScopes) const;
@@ -179,6 +188,12 @@ namespace Nox
             bool TracyZonesEmitted = false; // zone begins were sent to Tracy, so their times must be too
         };
 
+        struct NamedScope
+        {
+            std::string Name;
+            ProfileScopeInfo Info;
+        };
+
         struct CounterValue
         {
             double Value = 0.0;
@@ -189,6 +204,8 @@ namespace Nox
         std::mutex m_RegistryMutex;
         std::array<const ProfileScopeInfo*, MaxScopes> m_Scopes{};
         std::atomic<uint32_t> m_ScopeCount = 0;
+        std::deque<NamedScope> m_NamedScopes; // deque: registered ProfileScopeInfo/name storage never moves
+        std::unordered_map<std::string, uint32_t> m_NamedScopeIds;
 
         // CPU
         std::mutex m_ThreadBuffersMutex;

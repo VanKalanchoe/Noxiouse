@@ -14,6 +14,7 @@ namespace Nox::TracyBackend
     void RegisterScope(uint32_t scopeId, const ProfileScopeInfo& info);
 
     bool IsConnected();
+    void SetThreadName(const char* name);
 
     void BeginZone(uint32_t scopeId);
     void EndZone();

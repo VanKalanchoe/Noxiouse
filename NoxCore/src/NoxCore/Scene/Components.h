@@ -78,6 +78,8 @@ namespace Nox
     };
 
     // Dirty Transform Tracking
+    // Present on every entity (added at creation). Set instead of added/removed, so marking and clearing are plain
+    // writes that tasks can do without structural registry changes.
     struct DirtyTransformComponent
     {
         bool isDirty = true;

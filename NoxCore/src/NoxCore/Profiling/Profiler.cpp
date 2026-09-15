@@ -35,7 +35,33 @@ namespace Nox
     uint32_t Profiler::RegisterScope(const ProfileScopeInfo& info)
     {
         std::scoped_lock lock(m_RegistryMutex);
+        return RegisterScopeLocked(info);
+    }
 
+    uint32_t Profiler::RegisterNamedScope(std::string_view name)
+    {
+        std::scoped_lock lock(m_RegistryMutex);
+
+        std::string key(name);
+        if (auto found = m_NamedScopeIds.find(key); found != m_NamedScopeIds.end())
+            return found->second;
+
+        NamedScope& scope = m_NamedScopes.emplace_back();
+        scope.Name = std::move(key);
+        scope.Info = { scope.Name.c_str(), "Task", "", 0 };
+
+        const uint32_t scopeId = RegisterScopeLocked(scope.Info);
+        m_NamedScopeIds.emplace(scope.Name, scopeId);
+        return scopeId;
+    }
+
+    void Profiler::SetThreadName(const char* name)
+    {
+        TracyBackend::SetThreadName(name);
+    }
+
+    uint32_t Profiler::RegisterScopeLocked(const ProfileScopeInfo& info)
+    {
         const uint32_t scopeId = m_ScopeCount.load(std::memory_order_relaxed);
         if (scopeId >= MaxScopes)
         {

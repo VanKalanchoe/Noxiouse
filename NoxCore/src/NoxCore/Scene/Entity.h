@@ -82,10 +82,7 @@ namespace Nox
             tc.Scale = scale;
 
             // Mark transform as dirty so the SceneGraph updates immediately
-            if (!HasComponent<DirtyTransformComponent>())
-            {
-                AddComponent<DirtyTransformComponent>();
-            }
+            MarkTransformDirty();
         }
     }
         Entity GetParent()
@@ -128,10 +125,13 @@ namespace Nox
             tc.Scale = scale;
 
             // 4. Mark dirty for the SceneGraph!
-            if (!HasComponent<DirtyTransformComponent>())
-            {
-                AddComponent<DirtyTransformComponent>();
-            }
+            MarkTransformDirty();
+        }
+
+        // The next transform propagation recomputes this entity's world transform and its children's (main thread).
+        void MarkTransformDirty() const
+        {
+            m_Scene->m_Registry.get_or_emplace<DirtyTransformComponent>(m_EntityHandle).isDirty = true;
         }
 
         // Add a component: player.AddComponent<TransformComponent>();

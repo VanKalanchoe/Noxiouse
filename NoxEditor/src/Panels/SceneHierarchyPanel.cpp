@@ -542,7 +542,7 @@ namespace Nox
 
             if (modified)
             {
-                m_Context->m_Registry.emplace_or_replace<DirtyTransformComponent>(entity);
+                entity.MarkTransformDirty();
 
                 // If multiple entities are selected, apply the exact same delta to all other selected entities!
                 if (m_SelectionContexts.size() > 1)
@@ -581,7 +581,7 @@ namespace Nox
                             if (scaleModified)
                                 otherTc.Scale += deltaScale;
 
-                            m_Context->m_Registry.emplace_or_replace<DirtyTransformComponent>(otherEntity);
+                            otherEntity.MarkTransformDirty();
                         }
                     }
                 }

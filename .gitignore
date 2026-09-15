@@ -275,3 +275,7 @@ NoxCore/vendors/*
 *.nanim
 Facerun/Assets/Models
 Facerun/Assets/Models
+
+# Nox Stats reports and frame graph dumps written next to Nox.log
+NoxStats_*.txt
+*.dot

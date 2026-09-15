@@ -10,6 +10,7 @@ namespace Nox
 {
     class Renderer;
     class ImGuiLayer;
+    class JobSystem;
     class Application;
 
     struct ApplicationCommandLineArgs
@@ -109,6 +110,8 @@ namespace Nox
         void setBlockEvents(bool block) { m_BlockEvents = block; }
         bool getBlockEvents() { return m_BlockEvents; }
     private:
+        // First member: created before and destroyed after everything that schedules tasks.
+        std::unique_ptr<JobSystem> m_JobSystem;
         ApplicationSpecification m_Specification;
         bool m_BlockEvents = false;
         std::shared_ptr<Window> m_Window;

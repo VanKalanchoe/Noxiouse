@@ -786,7 +786,7 @@ namespace Nox
                                 tc.Translation = nodes[i].Translation;
                                 tc.Rotation = glm::eulerAngles(nodes[i].Rotation);
                                 tc.Scale = nodes[i].Scale;
-                                createdNodes[i].AddOrReplaceComponent<DirtyTransformComponent>();
+                                createdNodes[i].MarkTransformDirty();
 
                                 if (nodes[i].SubmeshCount > 0)
                                 {
@@ -1063,7 +1063,7 @@ namespace Nox
                                     {
                                         auto& transform = m_PlacementPreview.Root.GetComponent<TransformComponent>();
                                         transform.Translation = rayOrigin + rayDirection * distance;
-                                        m_PlacementPreview.Root.AddOrReplaceComponent<DirtyTransformComponent>();
+                                        m_PlacementPreview.Root.MarkTransformDirty();
                                     }
                                 }
                             }
@@ -1204,6 +1204,15 @@ namespace Nox
             ImGui::Separator();
         }
 #endif
+
+        if (ImGui::Button("Dump Frame Graph"))
+        {
+            // Next to Nox.log (opened relative to the working directory); open the .dot files with GraphViz.
+            const std::filesystem::path directory = std::filesystem::current_path();
+            if (m_ActiveScene && m_ActiveScene->DumpSystemGraphs(directory))
+                NOX_CORE_INFO("Frame graph written: {}", (directory / "SceneUpdate.dot").string());
+        }
+        ImGui::Separator();
         
         static const char* debugModeNames[] = {
             "0: Full PBR Lit",

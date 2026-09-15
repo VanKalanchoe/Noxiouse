@@ -144,6 +144,12 @@ namespace Nox
         return handle != 0 && m_AssetRegistry.find(handle) != m_AssetRegistry.end();
     }
 
+    Asset* EditorAssetManager::FindLoadedAsset(AssetHandle handle) const
+    {
+        auto found = m_LoadedAssets.find(handle);
+        return found != m_LoadedAssets.end() ? found->second.get() : nullptr;
+    }
+
     bool EditorAssetManager::IsAssetLoaded(AssetHandle handle) const
     {
         return m_LoadedAssets.find(handle) != m_LoadedAssets.end();

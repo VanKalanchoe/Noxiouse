@@ -116,6 +116,18 @@ namespace Nox
         });
     }
 
+    // Main thread.
+    static void RefreshTextureDescriptorMisses()
+    {
+        const size_t registrySize = Project::GetActive()->GetEditorAssetManager()->GetAssetRegistry().size();
+        if (registrySize != s_TextureDescriptorMissesRegistrySize)
+        {
+            s_TextureDescriptorMisses.clear();
+            s_TextureDescriptorMissesRegistrySize = registrySize;
+        }
+    }
+
+    // Main thread: resolves (and loads) the texture, filling the caches.
     static int GetTextureIndex(const std::string& path)
     {
         if (path.empty())
@@ -126,12 +138,7 @@ namespace Nox
         if (cached != descriptorCache.end())
             return cached->second;
 
-        const size_t registrySize = Project::GetActive()->GetEditorAssetManager()->GetAssetRegistry().size();
-        if (registrySize != s_TextureDescriptorMissesRegistrySize)
-        {
-            s_TextureDescriptorMisses.clear();
-            s_TextureDescriptorMissesRegistrySize = registrySize;
-        }
+        RefreshTextureDescriptorMisses();
         if (s_TextureDescriptorMisses.contains(path))
             return -1;
 
@@ -154,28 +161,42 @@ namespace Nox
         return descriptorIndex;
     }
 
-    static void PackMaterial(shaderio::InstanceData& instance, const MaterialData& material)
+    // Mesh submission tasks: reads the caches only (the main thread does not write them while tasks run). A path that
+    // is not resolved yet is recorded and resolved by EndMeshSubmission; the instance draws without it for one frame.
+    static int GetCachedTextureIndex(const std::string& path, std::vector<std::string>& unresolvedPaths)
+    {
+        if (path.empty())
+            return -1;
+
+        if (auto cached = s_TextureDescriptorCache.find(path); cached != s_TextureDescriptorCache.end())
+            return cached->second;
+        if (!s_TextureDescriptorMisses.contains(path))
+            unresolvedPaths.push_back(path);
+        return -1;
+    }
+
+    static void PackMaterial(shaderio::InstanceData& instance, const MaterialData& material, std::vector<std::string>& unresolvedPaths)
     {
         instance.workflow = material.Workflow;
         instance.diffuseFactor = material.DiffuseFactor;
         instance.specularFactor = material.SpecularFactor;
         instance.baseColorFactor = (material.Workflow == 1.0f) ? material.DiffuseFactor : material.BaseColorFactor;
-        instance.baseColorTextureIndex = GetTextureIndex(material.BaseColorTexturePath);
+        instance.baseColorTextureIndex = GetCachedTextureIndex(material.BaseColorTexturePath, unresolvedPaths);
         instance.baseColorTextureSet = material.BaseColorTextureSet;
         instance.metallicFactor = material.MetallicFactor;
         instance.roughnessFactor = material.RoughnessFactor;
-        instance.metallicRoughnessTextureIndex = GetTextureIndex(material.MetallicRoughnessTexturePath);
+        instance.metallicRoughnessTextureIndex = GetCachedTextureIndex(material.MetallicRoughnessTexturePath, unresolvedPaths);
         instance.physicalDescriptorTextureSet = material.PhysicalDescriptorTextureSet;
-        instance.normalTextureIndex = GetTextureIndex(material.NormalTexturePath);
+        instance.normalTextureIndex = GetCachedTextureIndex(material.NormalTexturePath, unresolvedPaths);
         instance.normalTextureSet = material.NormalTextureSet;
-        instance.occlusionTextureIndex = GetTextureIndex(material.OcclusionTexturePath);
+        instance.occlusionTextureIndex = GetCachedTextureIndex(material.OcclusionTexturePath, unresolvedPaths);
         instance.occlusionTextureSet = material.OcclusionTextureSet;
         instance.emissiveFactor = material.EmissiveFactor;
-        instance.emissiveTextureIndex = GetTextureIndex(material.EmissiveTexturePath);
+        instance.emissiveTextureIndex = GetCachedTextureIndex(material.EmissiveTexturePath, unresolvedPaths);
         instance.emissiveTextureSet = material.EmissiveTextureSet;
         instance.emissiveStrength = material.emissiveStrength;
         instance.transmissionFactor = material.TransmissionFactor;
-        instance.transmissionTextureIndex = GetTextureIndex(material.TransmissionTexturePath);
+        instance.transmissionTextureIndex = GetCachedTextureIndex(material.TransmissionTexturePath, unresolvedPaths);
         instance.transmissionTextureSet = material.TransmissionTextureSet;
         instance.alphaMode = static_cast<uint32_t>(material.Mode);
         instance.alphaMaskCutoff = material.AlphaMaskCutoff;
@@ -5624,6 +5645,7 @@ namespace Nox
                 m_pickerReadbackRequests[frameIndex] = m_pickRequest;
                 m_pickerReadbackRequests[frameIndex].width = copyWidth;
                 m_pickerReadbackRequests[frameIndex].height = copyHeight;
+                m_pickerReadbackRequests[frameIndex].frameNumber = m_sceneFrameCounter;
 
                 m_pickRequest.active = false;
             }
@@ -5928,6 +5950,12 @@ namespace Nox
         {
             recreateSwapChain();
             return;
+        }
+
+        {
+            // acquireNextImage waited for this slot's previous submission, which recorded the slot's pick copy.
+            NOX_PROFILE_SCOPE("Pick Readback");
+            readPickResult(frameIndex);
         }
 
         {
@@ -6290,51 +6318,41 @@ namespace Nox
         m_tlasNeedUpdate = false;
     }
 
-    int32_t Renderer::getPickedEntityID()
+    void Renderer::readPickResult(uint32_t frameSlot)
     {
-        int32_t clickedEntityID = -1;
+        PickRequest& request = m_pickerReadbackRequests[frameSlot];
+        if (!request.active)
+            return;
+        request.active = false;
 
-        // frameIndex already points at the next frame to record. The newest completed pick copy
-        // belongs to the frame submitted immediately before it.
-        const uint32_t readbackFrame = (frameIndex + MAX_FRAMES_IN_FLIGHT - 1) % MAX_FRAMES_IN_FLIGHT;
-        void* mappedMemory = m_pickerStagingBuffers[readbackFrame]->map(0, sizeof(int32_t));
+        const size_t pixelCount = static_cast<size_t>(request.width) * request.height;
+        if (pixelCount == 0)
+            return;
 
-        if (mappedMemory)
-        {
-            memcpy(&clickedEntityID, mappedMemory, sizeof(int32_t));
-            m_pickerStagingBuffers[readbackFrame]->unmap();
-        }
+        void* mappedMemory = m_pickerStagingBuffers[frameSlot]->map(0, pixelCount * sizeof(int32_t));
+        if (!mappedMemory)
+            return;
 
-        return clickedEntityID;
+        const int32_t* pixels = static_cast<const int32_t*>(mappedMemory);
+        m_pickResult.request = request;
+        m_pickResult.pixels.assign(pixels, pixels + pixelCount);
+        m_pickerStagingBuffers[frameSlot]->unmap();
     }
 
-    std::vector<int32_t> Renderer::getPickedEntityIDs()
+    int32_t Renderer::getPickedEntityID() const
+    {
+        return m_pickResult.pixels.empty() ? -1 : m_pickResult.pixels.front();
+    }
+
+    std::vector<int32_t> Renderer::getPickedEntityIDs() const
     {
         std::vector<int32_t> uniqueIDs;
-        const uint32_t readbackFrame = (frameIndex + MAX_FRAMES_IN_FLIGHT - 1) % MAX_FRAMES_IN_FLIGHT;
-        const PickRequest& readbackRequest = m_pickerReadbackRequests[readbackFrame];
-        size_t pixelCount = static_cast<size_t>(readbackRequest.width) * readbackRequest.height;
-        if (pixelCount == 0)
-            return uniqueIDs;
-
-        void* mappedMemory = m_pickerStagingBuffers[readbackFrame]->map(0, pixelCount * sizeof(int32_t));
-        if (mappedMemory)
+        std::unordered_set<int32_t> seen;
+        for (int32_t id : m_pickResult.pixels)
         {
-            const int32_t* pixels = static_cast<const int32_t*>(mappedMemory);
-            std::unordered_set<int32_t> seen;
-
-            for (size_t i = 0; i < pixelCount; ++i)
-            {
-                int32_t id = pixels[i];
-                if (id >= 0 && seen.insert(id).second)
-                {
-                    uniqueIDs.push_back(id);
-                }
-            }
-
-            m_pickerStagingBuffers[readbackFrame]->unmap();
+            if (id >= 0 && seen.insert(id).second)
+                uniqueIDs.push_back(id);
         }
-
         return uniqueIDs;
     }
 
@@ -6720,286 +6738,206 @@ namespace Nox
         packQueue(m_transparentUnlitDoubleSidedQueue, m_transparentUnlitDoubleSidedCount);
     }
 
-    void Renderer::DrawMesh(const glm::mat4& transform, Ref<Mesh> mesh, uint32_t submeshIndex, const MaterialComponent& materialOverrides, int entityID, const std::vector<glm::mat4>* boneTransforms)
+    namespace
     {
-        const auto& submeshes = mesh->GetSubMeshes();
-        if (submeshIndex >= submeshes.size())
-            return;
+        constexpr uint32_t NoBoneMatrices = 0xFFFFFFFF;
 
-        const MeshHandle& handle = submeshes[submeshIndex];
-
-        MaterialData material = mesh->GetMaterial(submeshIndex);
-        const auto& materialAssets = materialOverrides.MaterialAssets;
-        if (submeshIndex < materialAssets.size() && materialAssets[submeshIndex] != 0)
+        RenderQueue SelectRenderQueue(AlphaMode mode, bool unlit, bool doubleSided)
         {
-            Ref<Material> materialAsset = AssetManager::GetAsset<Material>(materialAssets[submeshIndex]);
-            if (materialAsset)
-                material = materialAsset->GetData();
-        }
-
-        shaderio::InstanceData instance{};
-        instance.modelMatrix = transform;
-        instance.normalMatrix = glm::transpose(glm::inverse(transform));
-
-        // 1. Where do the meshlets live, and how many are there?
-        instance.drawsPageIndex = handle.meshletDraws.pageIndex;
-        instance.drawsOffset = handle.meshletDraws.offset; // (Replaces the old meshletOffset)
-        instance.meshletCount = handle.meshletDraws.count; // (Replaces the old GetMeshletCount)
-
-        // 2. Where do the vertices and triangles live?
-        instance.verticesPageIndex = handle.vertices.pageIndex;
-        instance.meshletVerticesPageIndex = handle.meshletVertices.pageIndex;
-        instance.meshletTrianglesPageIndex = handle.meshletTriangles.pageIndex;
-
-        PackMaterial(instance, material);
-        AlphaMode mode = material.Mode;
-
-        instance.entityID = entityID;
-
-        // --- BONE MATRIX PACKING ---
-        if (boneTransforms && !boneTransforms->empty())
-        {
-            // Store starting index in m_boneMatrices buffer for this instance
-            instance.boneMatrixOffset = static_cast<uint32_t>(m_boneMatrices.size());
-            m_boneMatrices.insert(m_boneMatrices.end(), boneTransforms->begin(), boneTransforms->end());
-        }
-        else
-        {
-            // Sentinel value for static/non-skinned mesh
-            instance.boneMatrixOffset = 0xFFFFFFFF;
-        }
-
-        DrawMeshTasksIndirectCommand command{};
-        command.groupCountX = (handle.GetMeshletCount() + shaderio::TASK_SHADER_DISPATCH_X - 1) / shaderio::TASK_SHADER_DISPATCH_X;
-        command.groupCountY = 1;
-        command.groupCountZ = 1;
-
-        RenderPacket packet{};
-        packet.instance = instance;
-        packet.command = command;
-        packet.blasId = handle.blasId;
-
-        // Route to Render Queues (DO NOT push directly to buffers)
-        bool isDoubleSided = (instance.doubleSided != 0);
-        bool isUnlit = (instance.unlit != 0);
-
-        if (mode == AlphaMode::Blend)
-        {
-            glm::vec3 camPos = glm::vec3(uniformData.cameraWorldPos);
-            glm::vec3 objPos = glm::vec3(transform[3]);
-            packet.distanceToCamera = glm::length(objPos - camPos);
-
-            // A closed, single-sided (doubleSided=false) translucent shape (e.g. the alpha sphere
-            // shell in CompareTransmission) needs its own backface actually culled here, exactly
-            // like the opaque/mask queues already do - with CullMode::None, both the near and far
-            // hemisphere triangles rasterize and alpha-blend on top of each other in whatever order
-            // the meshlets happen to be processed (not depth-sorted per-triangle), which compounds
-            // into a washed-out/flatter look instead of a clean single translucent surface.
-            if (isUnlit)
-            {
-                if (isDoubleSided)
-                    m_transparentUnlitDoubleSidedQueue.push_back(packet);
-                else
-                    m_transparentUnlitQueue.push_back(packet);
-            }
-            else
-            {
-                if (isDoubleSided)
-                    m_transparentDoubleSidedQueue.push_back(packet);
-                else
-                    m_transparentQueue.push_back(packet);
-            }
-        }
-        else if (mode == AlphaMode::Mask)
-        {
-            if (isUnlit)
-            {
-                if (isDoubleSided)
-                    m_unlitDoubleSidedQueue.push_back(packet);
-                else
-                    m_unlitQueue.push_back(packet);
-            }
-            else
-            {
-                if (isDoubleSided)
-                    m_maskDoubleSidedQueue.push_back(packet);
-                else
-                    m_maskQueue.push_back(packet);
-            }
-        }
-        else // AlphaMode::Opaque
-        {
-            if (isUnlit)
-            {
-                if (isDoubleSided)
-                    m_unlitDoubleSidedQueue.push_back(packet);
-                else
-                    m_unlitQueue.push_back(packet);
-            }
-            else
-            {
-                if (isDoubleSided)
-                    m_opaqueDoubleSidedQueue.push_back(packet);
-                else
-                    m_opaqueQueue.push_back(packet);
-            }
-        }
-    }
-
-    void Renderer::DrawStaticMesh(const glm::mat4& transform, Ref<StaticMesh> staticMesh, const MaterialComponent& materialOverrides, int entityID, uint32_t firstSubmesh, uint32_t submeshCount)
-    {
-        uint32_t first = std::min(firstSubmesh, static_cast<uint32_t>(staticMesh->GetSubMeshes().size()));
-        uint32_t count = submeshCount == UINT32_MAX ? static_cast<uint32_t>(staticMesh->GetSubMeshes().size()) : std::max(submeshCount, 1u);
-        uint32_t last = std::min(first + count, static_cast<uint32_t>(staticMesh->GetSubMeshes().size()));
-
-        for (size_t i = first; i < last; ++i)
-        {
-            MeshHandle handle = staticMesh->GetSubMeshes()[i];
-
-            MaterialData material = staticMesh->GetMaterial(i);
-            const auto& materialAssets = materialOverrides.MaterialAssets;
-            if (i < materialAssets.size() && materialAssets[i] != 0)
-            {
-                Ref<Material> materialAsset = AssetManager::GetAsset<Material>(materialAssets[i]);
-                if (materialAsset)
-                    material = materialAsset->GetData();
-            }
-
-            shaderio::InstanceData instance{};
-            instance.modelMatrix = transform;
-            instance.normalMatrix = glm::transpose(glm::inverse(transform));
-
-            // Page Table Info
-            instance.drawsPageIndex = handle.meshletDraws.pageIndex;
-            instance.drawsOffset = handle.meshletDraws.offset;
-            instance.meshletCount = handle.meshletDraws.count;
-
-            instance.verticesPageIndex = handle.vertices.pageIndex;
-            instance.meshletVerticesPageIndex = handle.meshletVertices.pageIndex;
-            instance.meshletTrianglesPageIndex = handle.meshletTriangles.pageIndex;
-
-            PackMaterial(instance, material);
-            AlphaMode mode = material.Mode;
-
-            instance.entityID = entityID;
-
-            DrawMeshTasksIndirectCommand command{};
-            command.groupCountX = (handle.GetMeshletCount() + shaderio::TASK_SHADER_DISPATCH_X - 1) / shaderio::TASK_SHADER_DISPATCH_X;
-            command.groupCountY = 1;
-            command.groupCountZ = 1;
-
-            RenderPacket packet{};
-            packet.instance = instance;
-            packet.command = command;
-            packet.blasId = handle.blasId;
-
-            // 5. Route to Render Queues
-            bool isDoubleSided = (instance.doubleSided != 0);
-            bool isUnlit = (instance.unlit != 0);
-
+            // A closed, single-sided (doubleSided=false) translucent shape (e.g. the alpha sphere shell in
+            // CompareTransmission) needs its own backface actually culled, exactly like the opaque/mask queues
+            // already do - with CullMode::None, both the near and far hemisphere triangles rasterize and alpha-blend
+            // on top of each other in whatever order the meshlets happen to be processed (not depth-sorted
+            // per-triangle), which compounds into a washed-out/flatter look instead of a clean single translucent
+            // surface. So the transparent queues respect doubleSided too.
             if (mode == AlphaMode::Blend)
             {
-                glm::vec3 camPos = glm::vec3(uniformData.cameraWorldPos);
-                glm::vec3 objPos = glm::vec3(transform[3]);
-                packet.distanceToCamera = glm::length(objPos - camPos);
+                if (unlit)
+                    return doubleSided ? RenderQueue::TransparentUnlitDoubleSided : RenderQueue::TransparentUnlit;
+                return doubleSided ? RenderQueue::TransparentDoubleSided : RenderQueue::Transparent;
+            }
 
-                // See DrawMesh's identical comment: respect doubleSided so a closed, single-sided
-                // translucent shape doesn't double-blend its near and far hemispheres together.
-                if (isUnlit)
-                {
-                    if (isDoubleSided)
-                        m_transparentUnlitDoubleSidedQueue.push_back(packet);
-                    else
-                        m_transparentUnlitQueue.push_back(packet);
-                }
-                else
-                {
-                    if (isDoubleSided)
-                        m_transparentDoubleSidedQueue.push_back(packet);
-                    else
-                        m_transparentQueue.push_back(packet);
-                }
-            }
-            else if (mode == AlphaMode::Mask)
-            {
-                if (isUnlit)
-                {
-                    if (isDoubleSided)
-                        m_unlitDoubleSidedQueue.push_back(packet);
-                    else
-                        m_unlitQueue.push_back(packet);
-                }
-                else
-                {
-                    if (isDoubleSided)
-                        m_maskDoubleSidedQueue.push_back(packet);
-                    else
-                        m_maskQueue.push_back(packet);
-                }
-            }
-            else // AlphaMode::Opaque
-            {
-                if (isUnlit)
-                {
-                    if (isDoubleSided)
-                        m_unlitDoubleSidedQueue.push_back(packet);
-                    else
-                        m_unlitQueue.push_back(packet);
-                }
-                else
-                {
-                    if (isDoubleSided)
-                        m_opaqueDoubleSidedQueue.push_back(packet);
-                    else
-                        m_opaqueQueue.push_back(packet);
-                }
-            }
+            // Opaque and alpha-mask unlit materials share the unlit queues.
+            if (unlit)
+                return doubleSided ? RenderQueue::UnlitDoubleSided : RenderQueue::Unlit;
+            if (mode == AlphaMode::Mask)
+                return doubleSided ? RenderQueue::MaskDoubleSided : RenderQueue::Mask;
+            return doubleSided ? RenderQueue::OpaqueDoubleSided : RenderQueue::Opaque;
         }
     }
 
-    void Renderer::SubmitMesh(const glm::mat4& transform, MeshComponent& src, MaterialComponent& srcMat, int entityID, const std::vector<glm::mat4>* boneTransforms)
+    void Renderer::BeginMeshSubmission(uint32_t chunkCount)
+    {
+        if (m_meshSubmissionChunks.size() < chunkCount)
+            m_meshSubmissionChunks.resize(chunkCount);
+        m_meshSubmissionChunkCount = chunkCount;
+
+        for (uint32_t chunkIndex = 0; chunkIndex < chunkCount; ++chunkIndex)
+        {
+            MeshSubmissionChunk& chunk = m_meshSubmissionChunks[chunkIndex];
+            for (std::vector<RenderPacket>& queue : chunk.queues)
+                queue.clear();
+            chunk.boneMatrices.clear();
+            chunk.missingAssets.clear();
+            chunk.unresolvedTexturePaths.clear();
+        }
+
+        // The tasks only read the texture caches; refresh them here, before they run.
+        RefreshTextureDescriptorMisses();
+    }
+
+    void Renderer::SubmitMesh(uint32_t chunkIndex, const glm::mat4& transform, const MeshComponent& src, const MaterialComponent* material,
+                              int entityID, const std::vector<glm::mat4>* boneTransforms)
     {
         if (src.Mesh == 0)
             return;
 
-        AssetType type = AssetManager::GetAssetType(src.Mesh);
+        MeshSubmissionChunk& chunk = m_meshSubmissionChunks[chunkIndex];
+        const AssetType type = AssetManager::GetAssetType(src.Mesh);
 
         if (type == AssetType::Mesh)
         {
-            Ref<Mesh> mesh = AssetManager::GetAsset<Mesh>(src.Mesh);
+            const Mesh* mesh = AssetManager::FindLoadedAsset<Mesh>(src.Mesh);
             if (mesh)
-            {
-                MaterialComponent meshMaterial;
-                const MaterialComponent* material = &srcMat;
-                if (srcMat.MaterialAssets.empty() && !mesh->GetMaterialAssets().empty())
-                {
-                    meshMaterial.MaterialAssets = mesh->GetMaterialAssets();
-                    material = &meshMaterial;
-                }
-
-                uint32_t firstSubmesh = std::min(src.SubmeshIndex, static_cast<uint32_t>(mesh->GetSubMeshCount()));
-                uint32_t submeshCount = std::max(src.SubmeshCount, 1u);
-                uint32_t lastSubmesh = std::min(firstSubmesh + submeshCount, static_cast<uint32_t>(mesh->GetSubMeshCount()));
-
-                for (uint32_t i = firstSubmesh; i < lastSubmesh; i++)
-                    DrawMesh(transform, mesh, i, *material, entityID, boneTransforms);
-            }
+                submitSubmeshes(chunk, transform, *mesh, src, material, entityID, boneTransforms);
+            else
+                chunk.missingAssets.push_back(src.Mesh);
         }
         else if (type == AssetType::StaticMesh)
         {
-            Ref<StaticMesh> staticMesh = AssetManager::GetAsset<StaticMesh>(src.Mesh);
+            const StaticMesh* staticMesh = AssetManager::FindLoadedAsset<StaticMesh>(src.Mesh);
             if (staticMesh)
-            {
-                MaterialComponent meshMaterial;
-                const MaterialComponent* material = &srcMat;
-                if (srcMat.MaterialAssets.empty() && !staticMesh->GetMaterialAssets().empty())
-                {
-                    meshMaterial.MaterialAssets = staticMesh->GetMaterialAssets();
-                    material = &meshMaterial;
-                }
-                DrawStaticMesh(transform, staticMesh, *material, entityID, src.SubmeshIndex, src.SubmeshCount);
-            }
+                submitSubmeshes(chunk, transform, *staticMesh, src, material, entityID, nullptr);
+            else
+                chunk.missingAssets.push_back(src.Mesh);
         }
+    }
+
+    void Renderer::EndMeshSubmission(std::vector<AssetHandle>& outMissingAssets)
+    {
+        NOX_PROFILE_SCOPE("Merge Mesh Submission");
+
+        for (uint32_t chunkIndex = 0; chunkIndex < m_meshSubmissionChunkCount; ++chunkIndex)
+        {
+            MeshSubmissionChunk& chunk = m_meshSubmissionChunks[chunkIndex];
+
+            // Bone offsets were chunk-local.
+            const uint32_t boneBase = static_cast<uint32_t>(m_boneMatrices.size());
+            m_boneMatrices.insert(m_boneMatrices.end(), chunk.boneMatrices.begin(), chunk.boneMatrices.end());
+
+            for (size_t queueIndex = 0; queueIndex < chunk.queues.size(); ++queueIndex)
+            {
+                std::vector<RenderPacket>& target = getRenderQueue(static_cast<RenderQueue>(queueIndex));
+                for (RenderPacket& packet : chunk.queues[queueIndex])
+                {
+                    if (packet.instance.boneMatrixOffset != NoBoneMatrices)
+                        packet.instance.boneMatrixOffset += boneBase;
+                }
+                target.insert(target.end(), chunk.queues[queueIndex].begin(), chunk.queues[queueIndex].end());
+            }
+
+            outMissingAssets.insert(outMissingAssets.end(), chunk.missingAssets.begin(), chunk.missingAssets.end());
+
+            // Resolved (loading the texture if needed) for the next frame's submission.
+            for (const std::string& path : chunk.unresolvedTexturePaths)
+                GetTextureIndex(path);
+        }
+        m_meshSubmissionChunkCount = 0;
+    }
+
+    template <typename MeshAsset>
+    void Renderer::submitSubmeshes(MeshSubmissionChunk& chunk, const glm::mat4& transform, const MeshAsset& mesh, const MeshComponent& src,
+                                   const MaterialComponent* material, int entityID, const std::vector<glm::mat4>* boneTransforms)
+    {
+        // Per-entity overrides win; otherwise the mesh's imported .nmat handles.
+        const std::vector<AssetHandle>& materialAssets = material && !material->MaterialAssets.empty()
+            ? material->MaterialAssets : mesh.GetMaterialAssets();
+
+        const uint64_t submeshTotal = mesh.GetSubMeshCount();
+        const uint64_t first = std::min<uint64_t>(src.SubmeshIndex, submeshTotal);
+        const uint64_t count = src.SubmeshCount == UINT32_MAX ? submeshTotal : std::max(src.SubmeshCount, 1u);
+        const uint64_t last = std::min(first + count, submeshTotal);
+
+        const glm::mat4 normalMatrix = glm::transpose(glm::inverse(transform));
+        for (uint64_t submesh = first; submesh < last; ++submesh)
+        {
+            const AssetHandle materialAsset = submesh < materialAssets.size() ? materialAssets[submesh] : AssetHandle(0);
+            submitSubmesh(chunk, transform, normalMatrix, mesh.GetSubMesh(submesh), mesh.GetMaterial(submesh), materialAsset, entityID, boneTransforms);
+        }
+    }
+
+    void Renderer::submitSubmesh(MeshSubmissionChunk& chunk, const glm::mat4& transform, const glm::mat4& normalMatrix, const MeshHandle& handle,
+                                 const MaterialData& meshMaterial, AssetHandle materialAsset, int entityID, const std::vector<glm::mat4>* boneTransforms)
+    {
+        // The .nmat asset replaces the mesh's embedded material.
+        const MaterialData* material = &meshMaterial;
+        if (materialAsset != 0)
+        {
+            if (const Material* loadedMaterial = AssetManager::FindLoadedAsset<Material>(materialAsset))
+                material = &loadedMaterial->GetData();
+            else
+                chunk.missingAssets.push_back(materialAsset);
+        }
+
+        shaderio::InstanceData instance{};
+        instance.modelMatrix = transform;
+        instance.normalMatrix = normalMatrix;
+
+        // Where do the meshlets live, and how many are there?
+        instance.drawsPageIndex = handle.meshletDraws.pageIndex;
+        instance.drawsOffset = handle.meshletDraws.offset;
+        instance.meshletCount = handle.meshletDraws.count;
+
+        // Where do the vertices and triangles live?
+        instance.verticesPageIndex = handle.vertices.pageIndex;
+        instance.meshletVerticesPageIndex = handle.meshletVertices.pageIndex;
+        instance.meshletTrianglesPageIndex = handle.meshletTriangles.pageIndex;
+
+        PackMaterial(instance, *material, chunk.unresolvedTexturePaths);
+        instance.entityID = entityID;
+
+        if (boneTransforms && !boneTransforms->empty())
+        {
+            // Chunk-local offset, rebased when the chunks are merged.
+            instance.boneMatrixOffset = static_cast<uint32_t>(chunk.boneMatrices.size());
+            chunk.boneMatrices.insert(chunk.boneMatrices.end(), boneTransforms->begin(), boneTransforms->end());
+        }
+        else
+        {
+            instance.boneMatrixOffset = NoBoneMatrices;
+        }
+
+        RenderPacket packet{};
+        packet.instance = instance;
+        packet.command.groupCountX = (handle.GetMeshletCount() + shaderio::TASK_SHADER_DISPATCH_X - 1) / shaderio::TASK_SHADER_DISPATCH_X;
+        packet.command.groupCountY = 1;
+        packet.command.groupCountZ = 1;
+        packet.blasId = handle.blasId;
+
+        const RenderQueue queue = SelectRenderQueue(material->Mode, instance.unlit != 0, instance.doubleSided != 0);
+        if (material->Mode == AlphaMode::Blend)
+            packet.distanceToCamera = glm::length(glm::vec3(transform[3]) - glm::vec3(uniformData.cameraWorldPos));
+
+        chunk.queues[static_cast<size_t>(queue)].push_back(packet);
+    }
+
+    std::vector<RenderPacket>& Renderer::getRenderQueue(RenderQueue queue)
+    {
+        switch (queue)
+        {
+        case RenderQueue::Opaque: return m_opaqueQueue;
+        case RenderQueue::OpaqueDoubleSided: return m_opaqueDoubleSidedQueue;
+        case RenderQueue::Mask: return m_maskQueue;
+        case RenderQueue::MaskDoubleSided: return m_maskDoubleSidedQueue;
+        case RenderQueue::Unlit: return m_unlitQueue;
+        case RenderQueue::UnlitDoubleSided: return m_unlitDoubleSidedQueue;
+        case RenderQueue::Transparent: return m_transparentQueue;
+        case RenderQueue::TransparentDoubleSided: return m_transparentDoubleSidedQueue;
+        case RenderQueue::TransparentUnlit: return m_transparentUnlitQueue;
+        case RenderQueue::TransparentUnlitDoubleSided:
+        case RenderQueue::Count: break;
+        }
+        return m_transparentUnlitDoubleSidedQueue;
     }
 
     void Renderer::SubmitLight(const glm::mat4& transform, const DirectionalLightComponent& light)

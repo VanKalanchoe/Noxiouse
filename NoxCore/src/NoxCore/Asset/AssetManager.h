@@ -13,25 +13,31 @@ namespace Nox
         static Ref<T> GetAsset(AssetHandle handle)
         {
             // Get the base asset
-            Ref<Asset> asset = Project::GetActive()->GetAssetManager()->GetAsset(handle);
+            Ref<Asset> asset = Project::GetActiveAssetManager().GetAsset(handle);
 
             // Cast it to the derived type using Ref's constructor
             return Ref<T>(asset); // uses Ref<T>::Ref(const Ref<U>&)
         }
 
+        template<typename T>
+        static T* FindLoadedAsset(AssetHandle handle)
+        {
+            return static_cast<T*>(Project::GetActiveAssetManager().FindLoadedAsset(handle));
+        }
+
         static bool IsAssetHandleValid(AssetHandle handle)
         {
-            return Project::GetActive()->GetAssetManager()->IsAssetHandleValid(handle);
+            return Project::GetActiveAssetManager().IsAssetHandleValid(handle);
         }
         
         static bool IsAssetLoaded(AssetHandle handle)
         {
-            return Project::GetActive()->GetAssetManager()->IsAssetLoaded(handle);
+            return Project::GetActiveAssetManager().IsAssetLoaded(handle);
         }
         
         static AssetType GetAssetType(AssetHandle handle)
         {
-            return Project::GetActive()->GetAssetManager()->GetAssetType(handle);
+            return Project::GetActiveAssetManager().GetAssetType(handle);
         }
     };
 }
