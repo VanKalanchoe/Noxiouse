@@ -164,3 +164,25 @@ endif()
 
 # Define VULKAN_HPP_HANDLE_ERROR_OUT_OF_DATE_AS_SUCCESS to treat VK_ERROR_OUT_OF_DATE_KHR as a success code
 target_compile_definitions(${PROJECT_NAME} PRIVATE "VULKAN_HPP_HANDLE_ERROR_OUT_OF_DATE_AS_SUCCESS" )
+
+# -----------------------------------------------------------------------------
+# Profiling (docs/Engine_Architecture_Plan_2026.md 5.1)
+# -----------------------------------------------------------------------------
+option(NOX_PROFILE_STATS "Build the in-engine Nox Stats profiler (F3 overlay)" ON)
+option(NOX_ENABLE_TRACY "Build with the Tracy profiler client (connect with Tracy GUI v0.14.1)" OFF)
+
+if(NOX_ENABLE_TRACY)
+    # Tracy's own CMake integration: options are Tracy cache variables, the client is Tracy::TracyClient.
+    set(TRACY_ENABLE ON CACHE BOOL "Enable profiling" FORCE)
+    set(TRACY_ON_DEMAND ON CACHE BOOL "On-demand profiling" FORCE) # nothing is collected until the GUI connects
+    add_subdirectory(vendors/tracy EXCLUDE_FROM_ALL)
+    # PRIVATE: TRACY_* definitions and includes only reach NoxCore (TracyBackend.cpp is the only user).
+    target_link_libraries(${PROJECT_NAME} PRIVATE Tracy::TracyClient)
+endif()
+
+# PUBLIC so NoxCore/Debug/Profiler.h expands the same way in NoxCore and in every application.
+target_compile_definitions(${PROJECT_NAME} PUBLIC
+    NOX_PROFILE_STATS=$<BOOL:${NOX_PROFILE_STATS}>
+    NOX_ENABLE_TRACY=$<BOOL:${NOX_ENABLE_TRACY}>
+    NOX_BUILD_CONFIG="$<CONFIG>"
+)

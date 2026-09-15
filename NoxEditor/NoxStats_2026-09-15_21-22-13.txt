@@ -1,0 +1,67 @@
+Nox Stats report 2026-09-15 21:22:13
+Build Release | VSync OFF | Output 1816x963 | Render 1816x963
+DLSS OFF (Off) | Ray Reconstruction OFF | Ray tracing ON | Direct lighting mode 1 | Diffuse GI mode 2 | ReSTIR PT OFF
+Times in ms over the last 120 frames; peak = maximum since the last stats reset
+
+FPS 16
+Frame            last      avg      min      max     peak
+Wall            61.26    61.17    60.10    62.29    62.57
+CPU              5.77     5.84     5.53     6.62     6.62
+GPU             61.22    61.16    60.28    62.35    62.52
+
+RAM process: working set 924 MB, private 5428 MB / installed 32679 MB
+VRAM heap 0: 4510 / 7249 MB, 6318 allocations
+Host heap 1: 214 / 15572 MB, 4 allocations
+
+GPU passes                   last      avg      min      max     peak
+GPU Frame                   61.22    61.16    60.28    62.35    62.52
+  TLAS Build                 0.04     0.04     0.03     0.04     0.04
+  Visibility                 1.38     1.37     1.10     1.40     1.40
+  G-Buffer                   0.47     0.63     0.47     0.76     0.76
+  Deferred Lighting          0.24     0.25     0.24     0.25     0.25
+  Forward 3D                 0.09     0.09     0.08     0.09     0.09
+  Entity/Depth Blit          0.05     0.05     0.05     0.05     0.43
+  Post Process               0.04     0.04     0.04     0.04     0.04
+  2D Overlay                 0.00     0.00     0.00     0.00     0.00
+  ImGui / Present Pass       0.13     0.13     0.13     0.14     0.14
+  RT Shadows                 1.98     1.82     1.72     2.04     2.08
+  NRD Shadows                0.26     0.26     0.25     0.27     0.27
+  RT Reflections             7.22     7.19     7.01     7.87     7.87
+  ReSTIR GI                 42.84    42.86    42.22    43.74    43.78
+    NRD GI                   1.74     1.77     1.72     2.14     2.14
+  ReSTIR DI                  4.42     4.41     4.35     4.52     4.52
+    NRD DI                   1.33     1.33     1.32     1.35     1.36
+  NRD Reflections            1.90     1.88     1.86     1.92     1.93
+
+CPU scopes                           last      avg      min      max     peak
+Frame                               61.25    61.15    60.09    62.28    62.56
+  Layers OnUpdate                    4.08     4.10     3.88     4.86     4.86
+    Scene Update                     4.07     4.09     3.88     4.85     4.85
+      Animation                      0.04     0.04     0.04     0.06     0.06
+      Submit Renderables             3.46     3.50     3.30     4.21     4.21
+      Physics                        0.00     0.00     0.00     0.01     0.01
+      Transform Propagation          0.57     0.55     0.51     0.69     0.69
+    Asset Manager Update             0.00     0.00     0.00     0.00     0.03
+  Layers OnRender                    0.00     0.00     0.00     0.00     0.00
+  ImGui Build                        0.51     0.45     0.40     0.70     0.70
+  Renderer::drawFrame               56.66    56.60    55.25    57.68    58.02
+    Deferred Deletions               0.00     0.00     0.00     0.00     0.00
+    Wait GPU + Acquire              55.43    55.26    53.98    56.40    56.69
+    Page Tables                      0.00     0.00     0.00     0.00     0.00
+    Entity IDs + Lights              0.00     0.00     0.00     0.01     0.01
+    BuildBuffers                     0.06     0.06     0.06     0.08     0.11
+    Instance + Indirect Upload       0.09     0.08     0.08     0.11     0.11
+    Bones Upload                     0.00     0.00     0.00     0.00     0.00
+    TLAS Prepare                     0.40     0.42     0.39     0.57     0.57
+    Uniforms                         0.00     0.00     0.00     0.00     0.00
+    Renderer2D Update                0.00     0.00     0.00     0.00     0.00
+    Record Commands                  0.52     0.60     0.52     0.74     0.82
+    Submit                           0.08     0.08     0.06     0.11     0.12
+    Present                          0.06     0.07     0.06     0.14     0.14
+
+Counters
+Instances: 2909
+Indirect Draws: 2909
+Transparent Draws: 3
+Lights: 97
+BLAS: 2909

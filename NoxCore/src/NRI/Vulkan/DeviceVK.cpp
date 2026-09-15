@@ -14,6 +14,7 @@
 #include "BufferVK.h"
 #include "DescriptorHeapVK.h"
 #include "AccelerationStructureVK.h"
+#include "GpuProfilerVK.h"
 #include "MemoryAllocatorVK.h"
 #include "NoxCore/Core/core.h"
 #include "NoxCore/Core/Log.h"
@@ -185,6 +186,21 @@ namespace NRI
     std::unique_ptr<AccelerationStructure> DeviceVK::createAccelerationStructure(const AccelerationStructureDesc& desc)
     {
         return std::make_unique<AccelerationStructureVK>(*this, desc);
+    }
+
+    std::unique_ptr<GpuProfiler> DeviceVK::createGpuProfiler(uint32_t framesInFlight)
+    {
+        return std::make_unique<GpuProfilerVK>(*this, framesInFlight);
+    }
+
+    void DeviceVK::beginFrame(uint32_t frameNumber)
+    {
+        m_allocator->setCurrentFrameIndex(frameNumber);
+    }
+
+    void DeviceVK::getMemoryStats(std::vector<MemoryHeapStats>& outHeaps) const
+    {
+        m_allocator->getHeapStats(outHeaps);
     }
 
     std::vector<const char*> requiredDeviceExtension =
@@ -584,6 +600,23 @@ namespace NRI
         auto features = m_physicalDevice.template getFeatures2<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceShaderObjectFeaturesEXT>();
         m_shaderObjectsEnabled = features.template get<vk::PhysicalDeviceShaderObjectFeaturesEXT>().shaderObject;
 
+        // Optional extensions: enabled only when the device reports them.
+        std::vector<const char*> enabledDeviceExtensions = requiredDeviceExtension;
+        const std::vector<vk::ExtensionProperties> availableDeviceExtensions = m_physicalDevice.enumerateDeviceExtensionProperties();
+        auto isExtensionAvailable = [&availableDeviceExtensions](const char* name)
+        {
+            return std::ranges::any_of(availableDeviceExtensions, [name](const vk::ExtensionProperties& extension)
+            {
+                return strcmp(extension.extensionName, name) == 0;
+            });
+        };
+
+        // Real per-heap usage/budget from the OS for VMA (VMA docs: "Staying within budget").
+        // Its instance-level dependency VK_KHR_get_physical_device_properties2 is always enabled.
+        m_memoryBudgetEnabled = isExtensionAvailable(vk::EXTMemoryBudgetExtensionName);
+        if (m_memoryBudgetEnabled)
+            enabledDeviceExtensions.push_back(vk::EXTMemoryBudgetExtensionName);
+
         // query for Vulkan 1.3 features
         vk::StructureChain<vk::PhysicalDeviceFeatures2,
                            vk::PhysicalDeviceVulkan11Features,
@@ -676,8 +709,8 @@ namespace NRI
             .pNext = &featureChain.get<vk::PhysicalDeviceFeatures2>(),
             .queueCreateInfoCount = 1,
             .pQueueCreateInfos = &deviceQueueCreateInfo,
-            .enabledExtensionCount = static_cast<uint32_t>(requiredDeviceExtension.size()),
-            .ppEnabledExtensionNames = requiredDeviceExtension.data()
+            .enabledExtensionCount = static_cast<uint32_t>(enabledDeviceExtensions.size()),
+            .ppEnabledExtensionNames = enabledDeviceExtensions.data()
         };
 
         m_device = vk::raii::Device(m_physicalDevice, deviceCreateInfo);

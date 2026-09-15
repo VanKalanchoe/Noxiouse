@@ -37,6 +37,8 @@ namespace NRI
             allocatorInfo.flags = vma::AllocatorCreateFlagBits::eBufferDeviceAddress |
                 vma::AllocatorCreateFlagBits::eKhrMaintenance4 |
                 vma::AllocatorCreateFlagBits::eKhrMaintenance5;
+            if (m_deviceVK.isMemoryBudgetSupported())
+                allocatorInfo.flags |= vma::AllocatorCreateFlagBits::eExtMemoryBudget;
 
             m_allocator = vma::raii::Allocator(m_deviceVK.getInstance(), m_deviceVK.getDevice(), allocatorInfo);
         }
@@ -202,6 +204,32 @@ namespace NRI
         * exact call stack of the leak. No effect in release builds (no breakpoint).
         -*/
         void setLeakID(uint32_t id) { m_leakID = id; }
+
+        // VMA docs ("Staying within budget"): the budget from VK_EXT_memory_budget is re-queried
+        // inside vmaSetCurrentFrameIndex(), so this must run every frame.
+        void setCurrentFrameIndex(uint32_t frameIndex) { m_allocator->setCurrentFrameIndex(frameIndex); }
+
+        // vmaGetHeapBudgets() is the fast per-frame statistics query (vmaCalculateStatistics() is the slow
+        // debug-only one and is not used here).
+        void getHeapStats(std::vector<MemoryHeapStats>& outHeaps) const
+        {
+            const vk::PhysicalDeviceMemoryProperties* memoryProperties = m_allocator->getMemoryProperties();
+            const std::vector<vma::Budget> budgets = m_allocator->getHeapBudgets();
+
+            outHeaps.resize(memoryProperties->memoryHeapCount);
+            for (uint32_t heapIndex = 0; heapIndex < memoryProperties->memoryHeapCount; ++heapIndex)
+            {
+                const vma::Budget& budget = budgets[heapIndex];
+                outHeaps[heapIndex] = MemoryHeapStats{
+                    .deviceLocal = static_cast<bool>(memoryProperties->memoryHeaps[heapIndex].flags & vk::MemoryHeapFlagBits::eDeviceLocal),
+                    .usage = budget.usage,
+                    .budget = budget.budget,
+                    .blockBytes = budget.statistics.blockBytes,
+                    .allocationBytes = budget.statistics.allocationBytes,
+                    .allocationCount = budget.statistics.allocationCount
+                };
+            }
+        }
 
     private:
         DeviceVK& m_deviceVK;

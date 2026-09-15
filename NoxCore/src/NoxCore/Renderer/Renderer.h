@@ -168,7 +168,7 @@ namespace Nox
         void beginImGui();
         void endImGui();
 
-        void BeginScene(const Camera& camera, const glm::mat4& transform);
+        void BeginScene(const Camera& camera, const glm::mat4& cameraWorldMatrix);
         void BeginScene(const EditorCamera& camera);
         void EndScene();
         void BuildBuffers();
@@ -187,6 +187,10 @@ namespace Nox
         void onViewportSizeChange(NRI::Extent2D size);
         bool getVSync() const { return m_vSync; }
         NRI::Extent2D getViewPortSize() const { return m_viewportSize; }
+        // Final output image size (editor viewport or swapchain), i.e. the 2D overlay pass render area.
+        NRI::Extent2D getOutputSize() const { return m_isEditor ? m_viewportSize : m_swapChainExtent; }
+        // Non-jittered view-projection submitted by this frame's BeginScene (editor or runtime camera).
+        glm::mat4 getViewProjection() const { return m_currentNonJitteredProj * m_currentView; }
         NRI::Extent2D getRenderSize() const { return m_renderSize; }
         Renderer2D* getRenderer2D() const { return m_renderer2D.get(); }
         void setFrozen(bool temp) { m_frozen = temp; }
@@ -506,12 +510,17 @@ namespace Nox
         void createPageTableBuffers(uint64_t elementCapacity);
         void createLightBuffer(uint64_t bufferSize);
         void updateLightBuffer(uint32_t currentImage);
+        void sampleMemoryStats();
 
     private:
         inline static Renderer* s_Instance = nullptr;
         std::unique_ptr<Renderer2D> m_renderer2D;
         std::shared_ptr<Nox::Window> m_window;
         std::unique_ptr<NRI::Device> m_device = nullptr;
+        // Profiling (NOX_PROFILING_ENABLED): timestamp queries for the frame command buffer, memory sampling.
+        std::unique_ptr<NRI::GpuProfiler> m_gpuProfiler = nullptr;
+        std::vector<NRI::MemoryHeapStats> m_memoryHeapStats;
+        std::chrono::steady_clock::time_point m_lastMemoryStatsSample{};
         std::unique_ptr<NRI::Swapchain> m_swapChain = nullptr;
         NRI::Extent2D m_swapChainExtent{640, 480};
         NRI::Extent2D m_viewportSize{640, 480};

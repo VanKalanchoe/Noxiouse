@@ -8,6 +8,7 @@
 #include <mutex>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 #include "NoxCore/Utils/NOXWatcher.h"
 #include "NoxCore/Utils/Utils.h"
@@ -60,7 +61,8 @@ namespace Nox
     private:
         Utils::NOXWatcher m_AssetWatcher;
         
-        std::set<AssetHandle> m_PendingReimports;
+        // Filled by the watcher thread, drained by Update() on the main thread.
+        std::vector<std::filesystem::path> m_PendingModifiedPaths;
         std::mutex m_ReimportMutex;
         
         AssetRegistry m_AssetRegistry;

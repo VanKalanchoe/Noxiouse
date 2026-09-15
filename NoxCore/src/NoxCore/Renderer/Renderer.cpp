@@ -20,6 +20,8 @@
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Core/Hash.h"
+#include "NoxCore/Profiling/Profiler.h"
+#include "NoxCore/Utils/PlatformUtils.h"
 
 namespace Nox
 {
@@ -190,6 +192,13 @@ namespace Nox
         m_device = NRI::Device::create(NRI::GraphicsAPI::Vulkan, *m_window);
         if (!m_device) NOX_CORE_ASSERT("Failed to create NRI device");
 
+#if NOX_PROFILING_ENABLED
+        m_gpuProfiler = m_device->createGpuProfiler(MAX_FRAMES_IN_FLIGHT);
+        Profiler::Get().SetGpuProfiler(m_gpuProfiler.get());
+        if (!m_gpuProfiler->isSupported())
+            NOX_CORE_WARN("GPU timestamp queries are not supported on the render queue; GPU timings are unavailable");
+#endif
+
         initRenderer();
 
         /*
@@ -283,6 +292,10 @@ namespace Nox
         // Renderer::UnloadMesh, which asserts on s_Instance.
         m_device->waitIdle();
         m_deferredAssetReleases.clear();
+
+#if NOX_PROFILING_ENABLED
+        Profiler::Get().SetGpuProfiler(nullptr);
+#endif
 
         if (s_Instance == this) s_Instance = nullptr;
 
@@ -590,6 +603,11 @@ namespace Nox
         NRI::UpscaleMode effectiveMode = m_dlssEnabled ? m_dlssMode : NRI::UpscaleMode::Off;
         auto optimal = m_device->getDLSSOptimalRenderSize(effectiveMode, outputSize);
         m_renderSize = (optimal.size.width > 0 && optimal.size.height > 0) ? optimal.size : outputSize;
+
+#if NOX_PROFILE_STATS
+        // Timings measured at the previous resolution / upscale mode are not comparable anymore.
+        Profiler::Get().ResetStats();
+#endif
 
         m_device->waitIdle();
         createSceneResources();
@@ -3225,10 +3243,16 @@ namespace Nox
     {
         m_commandBuffers->begin(frameIndex, false);
 
+        // Reads this slot's previous GPU timings and resets its timestamp queries (must precede any rendering).
+        NOX_PROFILE_GPU_FRAME_BEGIN(*m_commandBuffers, frameIndex);
+
         m_commandBuffers->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
 
-        // Hardware Ray Tracing: Record TLAS build/update commands on GPU
-        BuildSceneAccelerationStructure(frameIndex);
+        {
+            // Hardware Ray Tracing: Record TLAS build/update commands on GPU
+            NOX_PROFILE_GPU_SCOPE(*m_commandBuffers, "TLAS Build");
+            BuildSceneAccelerationStructure(frameIndex);
+        }
 
         m_commandBuffers->transitionSwapchainLayout(*m_swapChain, imageIndex, NRI::TextureLayout::Undefined, NRI::TextureLayout::ColorAttachment);
 
@@ -3326,6 +3350,7 @@ namespace Nox
             .colorAttachments = colorAttachments,
             .depthAttachment = depthAttachment
         };
+        NOX_PROFILE_GPU_BEGIN(*m_commandBuffers, "Visibility");
         m_commandBuffers->beginRendering(desc);
 
         // Viewport / scissor (counts and values are both dynamic).
@@ -3405,6 +3430,7 @@ namespace Nox
 
         m_commandBuffers->endRendering();
         m_commandBuffers->executionBarrier();
+        NOX_PROFILE_GPU_END(*m_commandBuffers);
 
         // =========================================================================
         // 2. G-BUFFER MATERIAL GENERATION PASS (Decoupled Material Resolve)
@@ -3412,6 +3438,7 @@ namespace Nox
         // =========================================================================
         if (m_gbufferPipeline && baseInstanceAddress != 0)
         {
+            NOX_PROFILE_GPU_SCOPE(*m_commandBuffers, "G-Buffer");
             std::vector<NRI::RenderAttachDesc> gbufferAttachments;
             // 0. Albedo (RGBA8)
             gbufferAttachments.push_back({
@@ -3537,6 +3564,7 @@ namespace Nox
         if ((uniformData.enableRTShadows != 0) &&
             m_shadowMaskPipeline && m_rawShadowMask && m_viewZ && m_nrdNormalRoughness)
         {
+            NOX_PROFILE_GPU_SCOPE(*m_commandBuffers, "RT Shadows");
             std::vector<NRI::RenderAttachDesc> shadowAttachments;
             shadowAttachments.push_back({
                 .attachment = m_rawShadowMask.get(),
@@ -3598,6 +3626,7 @@ namespace Nox
         if (m_nrdShadowsEnabled && (uniformData.enableRTShadows != 0) &&
             m_device->isNRDInitialized() && m_rawShadowMask && m_denoisedShadowMask && m_viewZ && m_nrdNormalRoughness)
         {
+            NOX_PROFILE_GPU_SCOPE(*m_commandBuffers, "NRD Shadows");
             NRI::NRDShadowParams nrdParams{};
             nrdParams.inShadowData = m_rawShadowMask.get();
             nrdParams.inMotionVectors = m_gbufferVelocity.get();
@@ -3641,6 +3670,7 @@ namespace Nox
         // =========================================================================
         if (!runPathTracer && m_reflectionPipeline && m_rawReflection && (uniformData.enableRTReflections != 0))
         {
+            NOX_PROFILE_GPU_SCOPE(*m_commandBuffers, "RT Reflections");
             std::vector<NRI::RenderAttachDesc> reflectionAttachments;
             reflectionAttachments.push_back({
                 .attachment = m_rawReflection.get(),
@@ -3694,6 +3724,7 @@ namespace Nox
             m_device->isNRDInitialized() &&
             m_rawReflection && m_denoisedReflection && m_viewZ && m_nrdNormalRoughness)
         {
+            NOX_PROFILE_GPU_SCOPE(*m_commandBuffers, "NRD Reflections");
             NRI::NRDReflectionParams reflParams{};
             reflParams.inSpecularRadianceHitDist = m_rawReflection.get();
             reflParams.inMotionVectors = m_gbufferVelocity.get();
@@ -3740,6 +3771,7 @@ namespace Nox
 
         if (runDDGI)
         {
+            NOX_PROFILE_GPU_SCOPE(*m_commandBuffers, "DDGI");
             uint32_t probesPerRow = 64;
             uint32_t probeRows = (totalDDGIProbes + probesPerRow - 1) / probesPerRow;
             uint32_t irrWidth = probesPerRow * 10;
@@ -3912,6 +3944,7 @@ namespace Nox
 
         if (runReSTIRGI)
         {
+            NOX_PROFILE_GPU_SCOPE(*m_commandBuffers, "ReSTIR GI");
             RTXDI_ReservoirBufferParameters resParams = rtxdi::CalculateReservoirBufferParameters(
                 m_renderSize.width, m_renderSize.height, rtxdi::CheckerboardMode::Off);
 
@@ -4099,6 +4132,7 @@ namespace Nox
                 m_device->isNRDInitialized() &&
                 m_restirGIRawDiffuse && m_denoisedReSTIRGIDiffuse && m_viewZ && m_nrdNormalRoughness)
             {
+                NOX_PROFILE_GPU_SCOPE(*m_commandBuffers, "NRD GI");
                 NRI::NRDDiffuseParams giDenoiseParams{};
                 giDenoiseParams.inDiffuseRadianceHitDist = m_restirGIRawDiffuse.get();
                 giDenoiseParams.inMotionVectors = m_gbufferVelocity.get();
@@ -4192,6 +4226,7 @@ namespace Nox
 
         if (runReSTIRDI)
         {
+            NOX_PROFILE_GPU_SCOPE(*m_commandBuffers, "ReSTIR DI");
             RTXDI_ReservoirBufferParameters diResParams = rtxdi::CalculateReservoirBufferParameters(
                 m_renderSize.width, m_renderSize.height, rtxdi::CheckerboardMode::Off);
 
@@ -4524,6 +4559,7 @@ namespace Nox
                 m_device->isNRDInitialized() &&
                 m_restirDIDirectLighting && m_denoisedReSTIRDIDirectLighting && m_viewZ && m_nrdNormalRoughness)
             {
+                NOX_PROFILE_GPU_SCOPE(*m_commandBuffers, "NRD DI");
                 NRI::NRDDiffuseParams diDenoiseParams{};
                 diDenoiseParams.inDiffuseRadianceHitDist = m_restirDIDirectLighting.get();
                 diDenoiseParams.inMotionVectors = m_gbufferVelocity.get();
@@ -4570,6 +4606,7 @@ namespace Nox
             m_restirPTReservoirBuffers[0] && m_restirPTReservoirBuffers[1] && m_restirPTReservoirBuffers[2] &&
             (uniformData.tlasDeviceAddress != 0) && (uniformData.lightDataReference != 0))
         {
+            NOX_PROFILE_GPU_SCOPE(*m_commandBuffers, "ReSTIR PT");
             m_restirPTContext->SetFrameIndex(static_cast<uint32_t>(m_sceneFrameCounter));
             RTXDI_PTBufferIndices ptBufferIndices = m_restirPTContext->GetBufferIndices();
             RTXDI_ReservoirBufferParameters ptResParams = m_restirPTContext->GetReservoirBufferParameters();
@@ -4794,6 +4831,7 @@ namespace Nox
             if (m_nrdPTDenoiser != NRI::NRDDiffuseDenoiser::Off && m_device->isNRDInitialized() &&
                 m_denoisedPathTracer && m_viewZ && m_nrdNormalRoughness)
             {
+                NOX_PROFILE_GPU_SCOPE(*m_commandBuffers, "NRD PT");
                 NRI::NRDDiffuseParams ptDenoiseParams{};
                 ptDenoiseParams.inDiffuseRadianceHitDist = m_restirPTOutput.get();
                 ptDenoiseParams.inMotionVectors = m_gbufferVelocity.get();
@@ -4831,6 +4869,7 @@ namespace Nox
         }
         else if (runPathTracer && m_pathTracerPipeline && m_pathTracerAccum[0] && m_pathTracerAccum[1])
         {
+            NOX_PROFILE_GPU_SCOPE(*m_commandBuffers, "Path Tracer");
             bool dlssRRActive = m_dlssEnabled && (m_dlssMode != NRI::UpscaleMode::Off) && m_dlssRayReconstructionEnabled;
             bool nrdPTActive = m_nrdPTDenoiser != NRI::NRDDiffuseDenoiser::Off;
             bool cameraMoved = (uniformData.view != m_pathTracerPrevView);
@@ -4906,6 +4945,7 @@ namespace Nox
             if (nrdPTActive && m_device->isNRDInitialized() &&
                 m_pathTracerAccum[writeIndex] && m_denoisedPathTracer && m_viewZ && m_nrdNormalRoughness)
             {
+                NOX_PROFILE_GPU_SCOPE(*m_commandBuffers, "NRD PT");
                 NRI::NRDDiffuseParams ptDenoiseParams{};
                 ptDenoiseParams.inDiffuseRadianceHitDist = m_pathTracerAccum[writeIndex].get();
                 ptDenoiseParams.inMotionVectors = m_gbufferVelocity.get();
@@ -4946,6 +4986,7 @@ namespace Nox
         }
         else if (m_deferredLightingPipeline)
         {
+            NOX_PROFILE_GPU_SCOPE(*m_commandBuffers, "Deferred Lighting");
             std::vector<NRI::RenderAttachDesc> lightingAttachments;
             lightingAttachments.push_back({
                 .attachment = m_hdrSceneResource.get(),
@@ -5040,6 +5081,7 @@ namespace Nox
         // 4. FORWARD 3D PASS: UNLIT & SKYBOX (Rendered in HDR into m_hdrSceneResource)
         // =========================================================================
         {
+            NOX_PROFILE_GPU_SCOPE(*m_commandBuffers, "Forward 3D");
             std::vector<NRI::RenderAttachDesc> forward3DAttachments;
             forward3DAttachments.push_back({
                 .attachment = m_hdrSceneResource.get(),
@@ -5174,6 +5216,7 @@ namespace Nox
         bool dlssActive = false;
         if (m_dlssEnabled && m_dlssMode != NRI::UpscaleMode::Off && m_device->isDLSSSupported() && m_dlssOutputResource)
         {
+            NOX_PROFILE_GPU_SCOPE(*m_commandBuffers, "DLSS");
             uint32_t ptWriteIndex = m_pathTracerSampleCount % 2;
 
             NRI::DLSSParams dlssParams{};
@@ -5232,15 +5275,18 @@ namespace Nox
         // that without re-rendering the 3D scene a second time at display resolution. Everything
         // downstream reads exclusively from the Hi copies, so this always has to run even at 1:1
         // (DLSS off/DLAA), where it's just a same-size copy.
+        NOX_PROFILE_GPU_BEGIN(*m_commandBuffers, "Entity/Depth Blit");
         m_entityResource->blitTo(*m_commandBuffers, *m_entityResourceHi);
         m_depthResource->blitTo(*m_commandBuffers, *m_depthResourceHi);
         m_commandBuffers->executionBarrier();
+        NOX_PROFILE_GPU_END(*m_commandBuffers);
 
         // =========================================================================
         // 5. POST-PROCESSING & TONEMAPPING (HDR m_hdrSceneResource -> LDR m_sceneResource)
         // =========================================================================
         if (m_postProcessPipeline)
         {
+            NOX_PROFILE_GPU_SCOPE(*m_commandBuffers, "Post Process");
             std::vector<NRI::RenderAttachDesc> postAttachments;
             postAttachments.push_back({
                 .attachment = m_sceneResource.get(),
@@ -5308,6 +5354,7 @@ namespace Nox
         // 6. FORWARD 2D OVERLAYS (Quads, Circles, Text, Gizmos - Rendered on LDR Scene)
         // =========================================================================
         {
+            NOX_PROFILE_GPU_SCOPE(*m_commandBuffers, "2D Overlay");
             std::vector<NRI::RenderAttachDesc> forward2DAttachments;
             forward2DAttachments.push_back({
                 .attachment = m_sceneResource.get(),
@@ -5364,6 +5411,7 @@ namespace Nox
         // --- OUTLINE POST-PROCESS ---
         if (!m_SelectedEntityIDs.empty() && m_outlinePipeline)
         {
+            NOX_PROFILE_GPU_SCOPE(*m_commandBuffers, "Outline");
             std::vector<NRI::RenderAttachDesc> outlineColorAttachments;
             outlineColorAttachments.push_back({
                 .attachment = m_sceneResource.get(),
@@ -5479,6 +5527,7 @@ namespace Nox
             .colorAttachments = imguiColorAttachments,
         };
 
+        NOX_PROFILE_GPU_BEGIN(*m_commandBuffers, "ImGui / Present Pass");
         m_commandBuffers->beginRendering(imguiDesc);
         if (m_isEditor)
             m_commandBuffers->renderImGui();
@@ -5551,8 +5600,11 @@ namespace Nox
             m_commandBuffers->draw(3, 1, 0, 0);
         }
         m_commandBuffers->endRendering();
+        NOX_PROFILE_GPU_END(*m_commandBuffers);
 
         m_commandBuffers->transitionSwapchainLayout(*m_swapChain, imageIndex, NRI::TextureLayout::ColorAttachment, NRI::TextureLayout::Present);
+
+        NOX_PROFILE_GPU_FRAME_END(*m_commandBuffers);
 
         if (m_pickRequest.active && m_pickRequest.x >= 0 && m_pickRequest.y >= 0)
         {
@@ -5810,14 +5862,39 @@ namespace Nox
 
     // with compute there might be a snyc issue idk
     // according to gpt no async since compute and graphics same commandbuffer and executed in order
+    void Renderer::sampleMemoryStats()
+    {
+        // Memory changes slowly compared to frame time; a few samples per second are enough for the overlay/plots.
+        constexpr auto SampleInterval = std::chrono::milliseconds(250);
+        const auto now = std::chrono::steady_clock::now();
+        if (now - m_lastMemoryStatsSample < SampleInterval)
+            return;
+        m_lastMemoryStatsSample = now;
+
+        m_device->getMemoryStats(m_memoryHeapStats);
+        Profiler::Get().SubmitMemoryStats(m_memoryHeapStats, m_device->isMemoryBudgetSupported(), Platform::QueryProcessMemory());
+    }
+
     void Renderer::drawFrame()
     {
-        processDeferredDeletions();
-        processDeferredMeshFrees();
+        NOX_PROFILE_SCOPE("Renderer::drawFrame");
+
+        // Before any allocation of this frame: refreshes the VMA memory budget (VMA "Staying within budget").
+        m_device->beginFrame(static_cast<uint32_t>(m_sceneFrameCounter));
+#if NOX_PROFILING_ENABLED
+        sampleMemoryStats();
+#endif
+
+        {
+            NOX_PROFILE_SCOPE("Deferred Deletions");
+            processDeferredDeletions();
+            processDeferredMeshFrees();
+        }
 
         // Process any queued shader hot-reloads
         if (!m_pendingReloads.empty())
         {
+            NOX_PROFILE_SCOPE("Shader Hot Reload");
             m_device->waitIdle(); // Ensure GPU is idle before destroying and recreating pipelines!
 
             std::unordered_map<std::string, std::function<void()>> reloads;
@@ -5841,40 +5918,84 @@ namespace Nox
 
         uint32_t imageIndex = 0;
 
-        if (m_swapChain->acquireNextImage(frameIndex, imageIndex) == NRI::FrameResult::ResizeRequired)
+        NRI::FrameResult acquireResult;
+        {
+            // Includes waiting for this frame slot's previous submission (in-flight fence).
+            NOX_PROFILE_WAIT_SCOPE("Wait GPU + Acquire");
+            acquireResult = m_swapChain->acquireNextImage(frameIndex, imageIndex);
+        }
+        if (acquireResult == NRI::FrameResult::ResizeRequired)
         {
             recreateSwapChain();
             return;
         }
 
-        updatePageTables(frameIndex);
+        {
+            NOX_PROFILE_SCOPE("Page Tables");
+            updatePageTables(frameIndex);
+        }
 
-        updateEntityIDBuffer(frameIndex);
+        {
+            NOX_PROFILE_SCOPE("Entity IDs + Lights");
+            updateEntityIDBuffer(frameIndex);
+            updateLightBuffer(frameIndex);
+        }
 
-        updateLightBuffer(frameIndex);
+        {
+            NOX_PROFILE_SCOPE("BuildBuffers");
+            BuildBuffers();
+        }
+        NOX_PROFILE_COUNTER("Instances", m_instanceBufferObjects.size());
+        NOX_PROFILE_COUNTER("Indirect Draws", m_drawMeshTasksIndirectCommands.size());
+        NOX_PROFILE_COUNTER("Transparent Draws", m_transparentCount + m_transparentDoubleSidedCount + m_transparentUnlitCount + m_transparentUnlitDoubleSidedCount);
+        NOX_PROFILE_COUNTER("Lights", m_lightBufferObjects.size());
 
-        BuildBuffers();
+        {
+            NOX_PROFILE_SCOPE("Instance + Indirect Upload");
+            updateInstanceAndIndirectBuffer(frameIndex);
+        }
 
-        updateInstanceAndIndirectBuffer(frameIndex);
+        {
+            NOX_PROFILE_SCOPE("Bones Upload");
+            updateBoneBuffer(frameIndex);
+        }
 
-        updateBoneBuffer(frameIndex);
+        {
+            // Hardware Ray Tracing: CPU gathering, instance buffer upload, TLAS heap registration
+            NOX_PROFILE_SCOPE("TLAS Prepare");
+            updateSceneAccelerationStructure(frameIndex);
+        }
+        NOX_PROFILE_COUNTER("BLAS", m_meshBLASes.size() - m_freeBLASIds.size());
 
-        // Hardware Ray Tracing: CPU gathering, instance buffer upload, TLAS heap registration
-        updateSceneAccelerationStructure(frameIndex);
+        {
+            NOX_PROFILE_SCOPE("Uniforms");
+            updateUniformBuffer(frameIndex);
+        }
 
-        updateUniformBuffer(frameIndex);
+        {
+            NOX_PROFILE_SCOPE("Renderer2D Update");
+            m_renderer2D->Update(frameIndex);
+        }
 
-        m_renderer2D->Update(frameIndex);
+        {
+            NOX_PROFILE_SCOPE("Record Commands");
+            recordCommandBuffer(imageIndex);
+        }
 
-        recordCommandBuffer(imageIndex);
-
-        m_device->submitCommandBuffer(*m_commandBuffers, *m_swapChain, frameIndex, imageIndex);
+        {
+            NOX_PROFILE_SCOPE("Submit");
+            m_device->submitCommandBuffer(*m_commandBuffers, *m_swapChain, frameIndex, imageIndex);
+        }
 
         // Debounced -- see m_lastWindowResizeRequestTime's declaration in Renderer.h. A hard
         // ResizeRequired from present() (swapchain genuinely out of date) always recreates immediately;
         // the passive framebufferResized flag (set by every SDL resize event during a live window-border
         // drag) only triggers a recreate once no new resize event has arrived for a short settle window.
-        NRI::FrameResult presentResult = m_swapChain->present(frameIndex, imageIndex);
+        NRI::FrameResult presentResult;
+        {
+            NOX_PROFILE_WAIT_SCOPE("Present");
+            presentResult = m_swapChain->present(frameIndex, imageIndex);
+        }
         bool windowResizeSettled = framebufferResized &&
             (std::chrono::steady_clock::now() - m_lastWindowResizeRequestTime >= std::chrono::milliseconds(120));
         if (presentResult == NRI::FrameResult::ResizeRequired || windowResizeSettled)
@@ -6264,8 +6385,15 @@ namespace Nox
         {0.0625f, 0.8889f}
     };
 
-    void Renderer::BeginScene(const Camera& camera, const glm::mat4& transform)
+    void Renderer::BeginScene(const Camera& camera, const glm::mat4& cameraWorldMatrix)
     {
+        // The view must not inherit scale from the entity hierarchy: rigid camera transform only.
+        glm::mat4 transform(1.0f);
+        transform[0] = glm::vec4(glm::normalize(glm::vec3(cameraWorldMatrix[0])), 0.0f);
+        transform[1] = glm::vec4(glm::normalize(glm::vec3(cameraWorldMatrix[1])), 0.0f);
+        transform[2] = glm::vec4(glm::normalize(glm::vec3(cameraWorldMatrix[2])), 0.0f);
+        transform[3] = glm::vec4(glm::vec3(cameraWorldMatrix[3]), 1.0f);
+
         // DLSS/DLAA cannot function without jitter, so it's forced on whenever DLSS will actually
         // evaluate this frame - matching the exact gate in RecordCommandBuffer's evaluateDLSS() call,
         // not just "DLSS enabled" (mode == Off means evaluateDLSS never runs, so jitter shouldn't
@@ -6308,6 +6436,18 @@ namespace Nox
             m_currentView = glm::scale(glm::mat4(1.0f), glm::vec3(1.0f, 1.0f, -1.0f)) * glm::inverse(transform);
             m_currentNonJitteredProj = camera.GetProjection();
             m_currentCameraWorldPos = newCameraWorldPos;
+
+            // Same camera cache as the EditorCamera overload (DLSS / Ray Reconstruction inputs). Camera looks down -Z.
+            m_cameraPosition = newCameraWorldPos;
+            m_cameraRight = glm::vec3(transform[0]);
+            m_cameraUp = glm::vec3(transform[1]);
+            m_cameraForward = -glm::vec3(transform[2]);
+            if (m_currentNonJitteredProj[2][3] != 0.0f)
+            {
+                // Reverse-Z infinite perspective: [1][1] = 1 / tan(fovY / 2), [3][2] = near.
+                m_cameraFOV = glm::degrees(2.0f * std::atan(1.0f / m_currentNonJitteredProj[1][1]));
+                m_cameraNear = m_currentNonJitteredProj[3][2];
+            }
 
             if (enableJitter)
             {

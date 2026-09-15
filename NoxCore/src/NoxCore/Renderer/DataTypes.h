@@ -121,6 +121,28 @@ namespace Nox
         glm::vec3 Scale = glm::vec3(1.0f);
     };
 
+    enum class GltfCameraType : uint32_t
+    {
+        Perspective = 0,
+        Orthographic = 1
+    };
+
+    // glTF camera attached to a node. The aspect ratio is not stored: scene cameras follow the viewport aspect.
+    struct CameraNodeData
+    {
+        std::string Name;
+        GltfCameraType Type = GltfCameraType::Perspective;
+        int32_t NodeIndex = -1;
+        float VerticalFov = 0.785398f;  // radians (glTF perspective.yfov)
+        float OrthographicSize = 10.0f; // full height (2 * glTF orthographic.ymag)
+        float NearClip = 0.1f;
+        float FarClip = 1000.0f;        // glTF zfar; infinite perspective cameras keep this default
+
+        glm::vec3 Translation = glm::vec3(0.0f);
+        glm::quat Rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+        glm::vec3 Scale = glm::vec3(1.0f);
+    };
+
     struct MeshNodeData
     {
         std::string Name;

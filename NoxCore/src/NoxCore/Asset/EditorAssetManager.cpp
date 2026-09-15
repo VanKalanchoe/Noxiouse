@@ -17,6 +17,7 @@
 #include <yaml-cpp/yaml.h>
 
 #include "NoxCore/Core/Log.h"
+#include "NoxCore/Profiling/Profiler.h"
 
 namespace Nox
 {
@@ -166,13 +167,26 @@ namespace Nox
 
     void EditorAssetManager::Update()
     {
-        std::set<AssetHandle> toReimport;
-        
-        // Quickly copy and clear the queue safely
+        std::vector<std::filesystem::path> modifiedPaths;
         {
             std::lock_guard<std::mutex> lock(m_ReimportMutex);
-            toReimport = m_PendingReimports;
-            m_PendingReimports.clear();
+            modifiedPaths.swap(m_PendingModifiedPaths);
+        }
+
+        // Resolved here and not on the watcher thread: the registry is only ever touched by the main thread.
+        const std::filesystem::path assetDir = Project::GetActiveAssetDirectory();
+        std::set<AssetHandle> toReimport;
+        for (const std::filesystem::path& absolutePath : modifiedPaths)
+        {
+            const std::filesystem::path relativePath = absolutePath.lexically_relative(assetDir).lexically_normal();
+            for (const auto& [handle, metadata] : m_AssetRegistry)
+            {
+                if (metadata.SourceFilePath.lexically_normal() == relativePath)
+                {
+                    toReimport.insert(handle);
+                    break;
+                }
+            }
         }
 
         // Now we are on the MAIN THREAD, we can safely invoke the importer and Vulkan code
@@ -259,33 +273,12 @@ namespace Nox
 
     void EditorAssetManager::OnAssetModifiedOnDisk(const std::filesystem::path& absolutePath)
     {
-        if (!std::filesystem::exists(absolutePath))
-            return;
-        
+        // Runs on the watcher thread: only queue the path, Update() matches it against the registry.
         if (absolutePath.extension() == ".nsmesh" || absolutePath.extension() == ".nmesh")
             return;
-        
-        // Convert to relative path to match our Asset Registry
-        std::filesystem::path relativePath = std::filesystem::relative(absolutePath, Project::GetActiveAssetDirectory());
-        
-        AssetHandle handleToReimport = 0;
 
-        // Search the registry to see if this modified file is a Source file for one of our assets
-        for (const auto& [handle, metadata] : m_AssetRegistry)
-        {
-            if (metadata.SourceFilePath == relativePath)
-            {
-                handleToReimport = handle;
-                break;
-            }
-        }
-
-        // If we found it, safely queue it for the main thread
-        if (handleToReimport != 0)
-        {
-            std::lock_guard<std::mutex> lock(m_ReimportMutex);
-            m_PendingReimports.insert(handleToReimport);
-        }
+        std::lock_guard<std::mutex> lock(m_ReimportMutex);
+        m_PendingModifiedPaths.push_back(absolutePath);
     }
 
     void EditorAssetManager::ImportAsset(const std::filesystem::path& sourcePath, const std::filesystem::path& destPath, AssetType targetType)
@@ -435,7 +428,8 @@ namespace Nox
 
         materialAssets.reserve(materials->size());
 
-        // One registry pass instead of a linear scan per material (254 for Bistro).
+        // Materials come per primitive (Bistro: 2909 entries, 254 unique), so the same .nmat repeats many
+        // times. One registry pass up front; materials registered below are added to the map as well.
         std::unordered_map<std::string, AssetHandle> materialByPath;
         for (const auto& [handle, metadata] : m_AssetRegistry)
         {
@@ -443,6 +437,7 @@ namespace Nox
                 materialByPath.emplace(metadata.FilePath.lexically_normal().generic_string(), handle);
         }
 
+        bool registryChanged = false;
         for (size_t index = 0; index < materials->size(); ++index)
         {
             const MaterialData& material = (*materials)[index];
@@ -453,8 +448,9 @@ namespace Nox
             std::filesystem::path materialPath = meshMetadata.FilePath.parent_path().parent_path() / "Materials" /
                 (meshMetadata.FilePath.stem().string() + "_" + materialName + ".nmat");
 
+            const std::string materialKey = materialPath.lexically_normal().generic_string();
             AssetHandle materialHandle = 0;
-            if (auto found = materialByPath.find(materialPath.lexically_normal().generic_string()); found != materialByPath.end())
+            if (auto found = materialByPath.find(materialKey); found != materialByPath.end())
                 materialHandle = found->second;
 
             const auto fullMaterialPath = Project::GetActiveAssetDirectory() / materialPath;
@@ -469,21 +465,34 @@ namespace Nox
                 }
                 else
                 {
-                    ImportAsset(materialPath, materialPath, AssetType::Material);
-                    for (const auto& [handle, metadata] : m_AssetRegistry)
-                    {
-                        if (metadata.Type == AssetType::Material && metadata.FilePath == materialPath)
-                        {
-                            materialHandle = handle;
-                            break;
-                        }
-                    }
+                    // Registered inline instead of ImportAsset: that scans the model folder and rewrites
+                    // the registry file per call; a material produces nothing else to scan for.
+                    AssetHandle handle;
+                    AssetMetadata metadata;
+                    metadata.FilePath = materialPath;
+                    metadata.SourceFilePath = materialPath;
+                    metadata.Type = AssetType::Material;
+
+                    Ref<Asset> asset = AssetImporter::ImportAsset(handle, metadata);
+                    if (!asset)
+                        continue;
+
+                    asset->Handle = handle;
+                    m_LoadedAssets[handle] = asset;
+                    m_AssetRegistry[handle] = metadata;
+                    m_LastKnownSourceHash[handle] = Utility::calcul_hash_streaming(fullMaterialPath.string());
+                    materialByPath.emplace(materialKey, handle);
+                    materialHandle = handle;
+                    registryChanged = true;
                 }
             }
 
             if (materialHandle != 0)
                 materialAssets.push_back(materialHandle);
         }
+
+        if (registryChanged)
+            SerializeAssetRegistry();
 
         if (meshAsset->GetType() == AssetType::Mesh)
             static_cast<Mesh*>(meshAsset.get())->SetMaterialAssets(std::move(materialAssets));
@@ -554,6 +563,7 @@ namespace Nox
         else
         {
             // load asset
+            NOX_PROFILE_SCOPE("Asset Load");
             using Clock = std::chrono::steady_clock;
             auto elapsedMs = [](Clock::time_point from, Clock::time_point to)
             {
@@ -562,7 +572,10 @@ namespace Nox
             const Clock::time_point loadStart = Clock::now();
 
             const AssetMetadata& metadata = GetMetadata(handle);
-            asset = AssetImporter::ImportAsset(handle, metadata);
+            {
+                NOX_PROFILE_SCOPE("Asset Import");
+                asset = AssetImporter::ImportAsset(handle, metadata);
+            }
             if (!asset)
             {
                 // import failed
@@ -573,6 +586,7 @@ namespace Nox
 
             if (asset && !metadata.SourceFilePath.empty())
             {
+                NOX_PROFILE_SCOPE("Asset Source Hash");
                 auto sourcePath = Project::GetActiveAssetDirectory() / metadata.SourceFilePath;
                 if (std::filesystem::exists(sourcePath))
                     m_LastKnownSourceHash[handle] = Utility::calcul_hash_streaming(sourcePath.string());
@@ -584,11 +598,20 @@ namespace Nox
                           metadata.Type == AssetType::StaticMesh ||
                           metadata.Type == AssetType::MeshSource))
             {
-                ImportMeshTextures(asset);
+                {
+                    NOX_PROFILE_SCOPE("Mesh Textures");
+                    ImportMeshTextures(asset);
+                }
                 texturesDone = Clock::now();
-                ImportMeshMaterials(asset, metadata);
+                {
+                    NOX_PROFILE_SCOPE("Mesh Materials");
+                    ImportMeshMaterials(asset, metadata);
+                }
                 materialsDone = Clock::now();
-                ScanAndRegisterNewAssets(metadata.FilePath.parent_path().parent_path());
+                {
+                    NOX_PROFILE_SCOPE("Asset Folder Scan");
+                    ScanAndRegisterNewAssets(metadata.FilePath.parent_path().parent_path());
+                }
                 scanDone = Clock::now();
             }
 

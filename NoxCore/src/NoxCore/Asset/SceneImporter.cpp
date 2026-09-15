@@ -1,6 +1,6 @@
 #include "SceneImporter.h"
 
-#include "NoxCore/Debug/Instrumentor.h"
+#include "NoxCore/Profiling/Profiler.h"
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Scene/SceneSerializer.h"
 

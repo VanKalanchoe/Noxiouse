@@ -7,6 +7,8 @@
 
 #include <ranges>
 
+#include "NoxCore/Profiling/Profiler.h"
+#include "NoxCore/Profiling/StatsOverlayLayer.h"
 #include "NoxCore/Events/InputEvents.h"
 #include "NoxCore/Events/WindowEvents.h"
 #include "NoxCore/Renderer/Renderer.h"
@@ -35,6 +37,11 @@ namespace Nox
         // ImGui
         if (m_Specification.isEditor)
             m_ImGuiLayer = PushLayer<ImGuiLayer>(*renderer);
+
+#if NOX_PROFILE_STATS
+        // Nox Stats overlay (F3) for every app, drawn with the engine's screen-space text.
+        PushLayer<StatsOverlayLayer>(*renderer);
+#endif
     }
 
     Application::~Application()
@@ -60,27 +67,40 @@ namespace Nox
 
     void Application::Run(AppState& applicationState)
     {
-        float currentTime = GetTime();
-        Timestep timestep = currentTime - m_LastFrameTime ;
-        m_LastFrameTime = currentTime;
-        
-        // Main layer update here
-        for (const std::unique_ptr<Layer>& layer : m_LayerStack)
-            layer->OnUpdate(timestep);
-
-        // NOTE: rendering can be done elsewhere (eg. render thread)
-        for (const std::unique_ptr<Layer>& layer : m_LayerStack)
-            layer->OnRender();
-
-        if (applicationState.app->GetSpecification().isEditor)
         {
-            m_ImGuiLayer->Begin();
-            for (const std::unique_ptr<Layer>& layer : m_LayerStack)
-                layer->OnImGuiRender();
-            m_ImGuiLayer->End();
+            NOX_PROFILE_SCOPE("Frame");
+
+            const double currentTime = GetTime();
+            Timestep timestep = static_cast<float>(currentTime - m_LastFrameTime);
+            m_LastFrameTime = currentTime;
+
+            // Main layer update here
+            {
+                NOX_PROFILE_SCOPE("Layers OnUpdate");
+                for (const std::unique_ptr<Layer>& layer : m_LayerStack)
+                    layer->OnUpdate(timestep);
+            }
+
+            // NOTE: rendering can be done elsewhere (eg. render thread)
+            {
+                NOX_PROFILE_SCOPE("Layers OnRender");
+                for (const std::unique_ptr<Layer>& layer : m_LayerStack)
+                    layer->OnRender();
+            }
+
+            if (applicationState.app->GetSpecification().isEditor)
+            {
+                NOX_PROFILE_SCOPE("ImGui Build");
+                m_ImGuiLayer->Begin();
+                for (const std::unique_ptr<Layer>& layer : m_LayerStack)
+                    layer->OnImGuiRender();
+                m_ImGuiLayer->End();
+            }
+
+            renderer->drawFrame();
         }
 
-        renderer->drawFrame();
+        NOX_PROFILE_FRAME();
     }
 
     Application& Application::Get()
@@ -99,9 +119,11 @@ namespace Nox
         }
     }
 
-    float Application::GetTime()
+    double Application::GetTime()
     {
-        return static_cast<float>(SDL_GetTicks()) / 1000.0f;
+        // Nanosecond ticks in double seconds: SDL_GetTicks() (milliseconds) quantized the frame delta, and float
+        // seconds lose sub-millisecond precision after a few hours of uptime.
+        return static_cast<double>(SDL_GetTicksNS()) / 1'000'000'000.0;
     }
 
     std::string Application::GetExecutableRootPath()

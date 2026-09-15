@@ -9,6 +9,7 @@
 #include "SceneGraph.h"
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Physics/Physics2D.h"
+#include "NoxCore/Profiling/Profiler.h"
 
 namespace Nox
 {
@@ -237,6 +238,7 @@ namespace Nox
 
             // Physics
             {
+                NOX_PROFILE_SCOPE("Physics");
                 int32_t subStepCount = 4;
                 b2World_Step(m_PhysicsWorldID, ts, subStepCount);
 
@@ -261,7 +263,10 @@ namespace Nox
             UpdateAnimators(ts);
         }
 
-        SceneGraph::UpdateWorldTransforms(m_Registry, m_EntityMap);
+        {
+            NOX_PROFILE_SCOPE("Transform Propagation");
+            SceneGraph::UpdateWorldTransforms(m_Registry, m_EntityMap);
+        }
         
        // Render 2D
         //changed from transformcomp to worldcomp
@@ -284,59 +289,8 @@ namespace Nox
 
         if (mainCamera)
         {
-           m_renderer->BeginScene(*mainCamera, cameraTransform);
-            
-            // Draw 3D Meshes
-            {
-               auto view = m_Registry.view<WorldTransformComponent, MeshComponent>();
-               for (auto entity : view)
-               {
-                   auto [transform, mesh] = view.get<WorldTransformComponent, MeshComponent>(entity);
-                
-                   MaterialComponent* materialComp = m_Registry.try_get<MaterialComponent>(entity);
-                
-                   MaterialComponent defaultMaterial;
-                   MaterialComponent& materialToUse = materialComp ? *materialComp : defaultMaterial;
-
-                   const std::vector<glm::mat4>* boneTransforms = GetBoneTransforms(entity, transform.WorldMatrix);
-
-                   m_renderer->SubmitMesh(transform.WorldMatrix, mesh, materialToUse, (int)entity, boneTransforms);
-               }
-            }
-
-            // Draw Sprites
-            {
-                auto group = m_Registry.group<WorldTransformComponent>(entt::get<SpriteRendererComponent>);
-                for (auto entity : group)
-                {
-                    auto [transform, sprite] = group.get<WorldTransformComponent, SpriteRendererComponent>(entity);
-                    //Renderer2D::DrawQuad(transform.Position, transform.Size, transform.Scale, transform.Rotation, sprite.Color);
-                    m_renderer2D->DrawSprite(transform.WorldMatrix, sprite, (int)entity);
-                }
-            }
-             
-            // Draw Circles
-            {
-                auto view = m_Registry.view<WorldTransformComponent, CircleRendererComponent>();
-                for (auto entity : view)
-                {
-                    auto [transform, circle] = view.get<WorldTransformComponent, CircleRendererComponent>(entity);
-
-                    m_renderer2D->DrawCircle(transform.WorldMatrix, circle.Color, circle.Thickness, circle.Fade, (int)entity);
-                }
-            }
-
-            // Draw Text
-            {
-                auto view = m_Registry.view<WorldTransformComponent, TextComponent>();
-                for (auto entity : view)
-                {
-                    auto [transform, text] = view.get<WorldTransformComponent, TextComponent>(entity);
-
-                    m_renderer2D->DrawString(text.TextString, transform.WorldMatrix, text, (int)entity);
-                }
-            }
-            
+            m_renderer->BeginScene(*mainCamera, cameraTransform);
+            SubmitRenderables();
             m_renderer->EndScene();
         }
     }
@@ -346,25 +300,27 @@ namespace Nox
         if (!m_IsPaused || m_StepFrames-- > 0)
         {
             // Physics
-        
-            int32_t subStepCount = 4;
-            b2World_Step(m_PhysicsWorldID, ts, subStepCount);
-
-            // Retrieve Transform from Box2D
-            auto view = m_Registry.view<RigidBody2DComponent>();
-            for (auto e : view)
             {
-                Entity entity = {e, this};
-                auto& transform = entity.GetComponent<TransformComponent>();
-                auto& r2bd = entity.GetComponent<RigidBody2DComponent>();
+                NOX_PROFILE_SCOPE("Physics");
+                int32_t subStepCount = 4;
+                b2World_Step(m_PhysicsWorldID, ts, subStepCount);
 
-                b2BodyId body = r2bd.RuntimeBody;
-                const auto& position = b2Body_GetPosition(body);
-                transform.Translation.x = position.x;
-                transform.Translation.y = position.y;
-                transform.Rotation.z = b2Rot_GetAngle(b2Body_GetRotation(body));
+                // Retrieve Transform from Box2D
+                auto view = m_Registry.view<RigidBody2DComponent>();
+                for (auto e : view)
+                {
+                    Entity entity = {e, this};
+                    auto& transform = entity.GetComponent<TransformComponent>();
+                    auto& r2bd = entity.GetComponent<RigidBody2DComponent>();
 
-                m_Registry.get_or_emplace<DirtyTransformComponent>(e);
+                    b2BodyId body = r2bd.RuntimeBody;
+                    const auto& position = b2Body_GetPosition(body);
+                    transform.Translation.x = position.x;
+                    transform.Translation.y = position.y;
+                    transform.Rotation.z = b2Rot_GetAngle(b2Body_GetRotation(body));
+
+                    m_Registry.get_or_emplace<DirtyTransformComponent>(e);
+                }
             }
 
             UpdateAnimators(ts);
@@ -382,6 +338,7 @@ namespace Nox
 
     void Scene::UpdateAnimators(Timestep ts)
     {
+        NOX_PROFILE_SCOPE("Animation");
         auto view = m_Registry.view<AnimatorComponent>();
         for (auto entity : view)
         {
@@ -752,9 +709,22 @@ namespace Nox
     
     void Scene::RenderScene(EditorCamera& camera)
     {
-        SceneGraph::UpdateWorldTransforms(m_Registry, m_EntityMap);
+        NOX_PROFILE_SCOPE("Render Scene");
+        {
+            NOX_PROFILE_SCOPE("Transform Propagation");
+            SceneGraph::UpdateWorldTransforms(m_Registry, m_EntityMap);
+        }
         
         m_renderer->BeginScene(camera);
+        SubmitRenderables();
+        m_renderer->EndScene();
+    }
+
+    // Everything the renderers draw for one frame. Shared by the editor camera and the runtime camera path, so Play
+    // mode renders exactly what the editor shows.
+    void Scene::SubmitRenderables()
+    {
+        NOX_PROFILE_SCOPE("Submit Renderables");
         
         // Draw 3D Meshes
         {
@@ -839,7 +809,6 @@ namespace Nox
         //Renderer2D::DrawLine(glm::vec3(2.0f), glm::vec3(5.0f), glm::vec4(1.0f, 0.0f, 1.0f, 1.0f));
         //Renderer2D::DrawRect(glm::vec3(0.0f), glm::vec2(1.0f), glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
         */
-        m_renderer->EndScene();
     }
     
     template <typename T>

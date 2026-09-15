@@ -16,7 +16,7 @@
 #include "NoxCore/Core/Application.h"
 #include "NoxCore/Renderer/Renderer.h"
 #include "NoxCore/Core/Buffer.h"
-#include "NoxCore/Debug/Instrumentor.h"
+#include "NoxCore/Profiling/Profiler.h"
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Utils/Utils.h"
 

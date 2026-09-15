@@ -39,6 +39,9 @@ namespace Nox
         // Lights
         const std::vector<LightNodeData>& GetLights() const { return m_Lights; }
 
+        // Cameras
+        const std::vector<CameraNodeData>& GetCameras() const { return m_Cameras; }
+
         // glTF scene hierarchy
         const std::vector<MeshNodeData>& GetNodes() const { return m_Nodes; }
         
@@ -51,6 +54,7 @@ namespace Nox
         std::vector<MaterialData> m_Materials;
         std::vector<AssetHandle> m_MaterialAssets;
         std::vector<LightNodeData> m_Lights;
+        std::vector<CameraNodeData> m_Cameras;
         std::vector<MeshNodeData> m_Nodes;
         std::vector<std::string> m_SubmeshNames;
     };
@@ -87,6 +91,9 @@ namespace Nox
         // Lights
         const std::vector<LightNodeData>& GetLights() const { return m_Lights; }
 
+        // Cameras
+        const std::vector<CameraNodeData>& GetCameras() const { return m_Cameras; }
+
         // glTF scene hierarchy
         const std::vector<MeshNodeData>& GetNodes() const { return m_Nodes; }
         
@@ -99,6 +106,7 @@ namespace Nox
         std::vector<MaterialData> m_Materials;
         std::vector<AssetHandle> m_MaterialAssets;
         std::vector<LightNodeData> m_Lights;
+        std::vector<CameraNodeData> m_Cameras;
         std::vector<MeshNodeData> m_Nodes;
         std::vector<std::string> m_SubmeshNames;
     };

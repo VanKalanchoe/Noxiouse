@@ -37,6 +37,9 @@ namespace NRI
         uint32_t getMSAASampleCount() const override { return static_cast<uint32_t>(m_msaaSamples); }
         vk::raii::Device& getDevice() { return m_device; }
         bool isShaderObjectExtensionEnabled() const { return m_shaderObjectsEnabled; }
+        bool isMemoryBudgetSupported() const override { return m_memoryBudgetEnabled; }
+        // VK_EXT_debug_utils is only enabled on the instance together with the validation layers.
+        bool isDebugUtilsEnabled() const { return enableValidationLayers; }
         uint32_t getQueueIndex() { return m_queueIndex; }
         vk::raii::Queue& getQueue() { return m_queue; }
         vk::raii::SurfaceKHR& getSurface() { return m_surface; }
@@ -86,7 +89,11 @@ namespace NRI
         std::unique_ptr<DescriptorHeap> createDescriptorHeap(const DescriptorHeapDesc& desc) override;
         AccelerationStructureBuildSizes getAccelerationStructureBuildSizes(const AccelerationStructureBuildDesc& desc) override;
         std::unique_ptr<AccelerationStructure> createAccelerationStructure(const AccelerationStructureDesc& desc) override;
-        
+        std::unique_ptr<GpuProfiler> createGpuProfiler(uint32_t framesInFlight) override;
+
+        void beginFrame(uint32_t frameNumber) override;
+        void getMemoryStats(std::vector<MemoryHeapStats>& outHeaps) const override;
+
     private:
         void initVulkan(Nox::Window& window);
         void createInstance();
@@ -118,6 +125,7 @@ namespace NRI
         vk::SampleCountFlagBits m_msaaSamples = vk::SampleCountFlagBits::e1;
         vk::raii::Device m_device = nullptr;
         bool m_shaderObjectsEnabled = false;
+        bool m_memoryBudgetEnabled = false;
         uint32_t m_queueIndex = ~0;
         vk::raii::Queue m_queue = nullptr;
         vk::raii::SurfaceKHR m_surface = nullptr;

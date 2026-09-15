@@ -103,7 +103,7 @@ namespace Nox
         std::shared_ptr<Window> getWindow() { return m_Window; }
         ImGuiLayer* GetImGuiLayer() { return m_ImGuiLayer; }
 
-        static float GetTime();
+        static double GetTime();
         static std::string GetExecutableRootPath();
 
         void setBlockEvents(bool block) { m_BlockEvents = block; }
@@ -117,7 +117,7 @@ namespace Nox
         std::unique_ptr<Renderer> renderer;
         // has to be last otherwise renderer cant free resoruces
         std::vector<std::unique_ptr<Layer>> m_LayerStack;
-        float m_LastFrameTime = 0.0f;
+        double m_LastFrameTime = 0.0;
     };
 
     extern Application* CreateApplication(ApplicationCommandLineArgs args);

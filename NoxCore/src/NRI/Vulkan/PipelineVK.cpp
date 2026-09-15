@@ -63,8 +63,10 @@ namespace NRI
         }
         
         uint64_t sourceHash = Nox::Hash::computeFile(shaderDesc.sourcePath);
-        
-        return folder / (source.stem().string() + "." + stage + "." + std::to_string(sourceHash) +  ".bin");
+
+        // The entry point is part of the key: one .slang file can hold several entry points for the same stage
+        // (e.g. two mesh entry points), and a shader-object binary contains exactly one of them.
+        return folder / (source.stem().string() + "." + stage + "." + shaderDesc.entryPoint + "." + std::to_string(sourceHash) + ".bin");
     }
 
     static std::vector<uint8_t> loadShaderBinary(const std::filesystem::path& path)

@@ -266,6 +266,7 @@ NoxCore/vendors/*
 !NoxCore/vendors/imgui/
 !NoxCore/vendors/tinygltf/
 !NoxCore/vendors/meshoptimizer/
+!NoxCore/vendors/tracy/
 *.ntex
 *.nmesh
 *.hash

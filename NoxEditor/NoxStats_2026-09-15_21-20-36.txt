@@ -1,0 +1,59 @@
+Nox Stats report 2026-09-15 21:20:36
+Build Release | VSync OFF | Output 1816x963 | Render 1816x963
+DLSS OFF (Off) | Ray Reconstruction OFF | Ray tracing OFF | Direct lighting mode 1 | Diffuse GI mode 2 | ReSTIR PT OFF
+Times in ms over the last 120 frames; peak = maximum since the last stats reset
+
+FPS 228
+Frame            last      avg      min      max     peak
+Wall             4.38     4.38     4.25     4.86     6.88
+CPU              2.75     2.83     2.57     3.41     6.74
+GPU              4.39     4.37     4.32     4.84     5.30
+
+RAM process: working set 936 MB, private 5425 MB / installed 32679 MB
+VRAM heap 0: 4510 / 7249 MB, 6318 allocations
+Host heap 1: 214 / 15572 MB, 4 allocations
+
+GPU passes                   last      avg      min      max     peak
+GPU Frame                    4.39     4.37     4.32     4.84     5.30
+  TLAS Build                 0.00     0.00     0.00     0.00     0.00
+  Visibility                 1.37     1.37     1.34     1.65     1.89
+  G-Buffer                   0.46     0.46     0.46     0.47     1.10
+  Deferred Lighting          2.12     2.10     2.08     2.37     2.62
+  Forward 3D                 0.08     0.08     0.08     0.08     0.09
+  Entity/Depth Blit          0.05     0.05     0.05     0.06     0.06
+  Post Process               0.04     0.04     0.04     0.05     0.05
+  2D Overlay                 0.00     0.00     0.00     0.00     0.00
+  ImGui / Present Pass       0.12     0.12     0.12     0.12     0.13
+
+CPU scopes                           last      avg      min      max     peak
+Frame                                4.38     4.37     4.02     4.86     6.87
+  Layers OnUpdate                    2.23     2.27     2.05     2.73     5.43
+    Scene Update                     2.22     2.27     2.05     2.72     5.43
+      Animation                      0.03     0.03     0.02     0.04     0.13
+      Submit Renderables             1.95     1.98     1.82     2.37     4.43
+      Physics                        0.00     0.00     0.00     0.00     0.04
+      Transform Propagation          0.25     0.26     0.20     0.43     1.48
+    Asset Manager Update             0.00     0.00     0.00     0.00     0.02
+  Layers OnRender                    0.00     0.00     0.00     0.00     0.00
+  ImGui Build                        0.28     0.30     0.27     0.41     0.96
+  Renderer::drawFrame                1.86     1.79     1.23     2.21     2.62
+    Deferred Deletions               0.00     0.00     0.00     0.00     0.00
+    Wait GPU + Acquire               1.60     1.51     0.92     1.91     2.31
+    Page Tables                      0.00     0.00     0.00     0.00     0.00
+    Entity IDs + Lights              0.00     0.00     0.00     0.00     0.03
+    BuildBuffers                     0.04     0.04     0.02     0.06     0.17
+    Instance + Indirect Upload       0.08     0.08     0.08     0.09     0.16
+    Bones Upload                     0.00     0.00     0.00     0.00     0.00
+    TLAS Prepare                     0.00     0.00     0.00     0.00     0.00
+    Uniforms                         0.00     0.00     0.00     0.00     0.02
+    Renderer2D Update                0.00     0.00     0.00     0.00     0.01
+    Record Commands                  0.08     0.08     0.07     0.12     0.32
+    Submit                           0.02     0.03     0.02     0.04     0.11
+    Present                          0.03     0.04     0.03     0.06     0.16
+
+Counters
+Instances: 2909
+Indirect Draws: 2909
+Transparent Draws: 3
+Lights: 97
+BLAS: 2909

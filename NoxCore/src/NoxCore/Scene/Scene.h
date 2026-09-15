@@ -76,6 +76,7 @@ namespace Nox
         void OnPhysics2DStop();
 
         void RenderScene(EditorCamera& camera);
+        void SubmitRenderables();
         void UpdateAnimators(Timestep ts);
         const std::vector<glm::mat4>* GetBoneTransforms(entt::entity entity, const glm::mat4& meshWorld);
 

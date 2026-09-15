@@ -12,6 +12,7 @@
 
 #include "meshoptimizer.h"
 #include "NoxCore/Core/Log.h"
+#include "NoxCore/Profiling/Profiler.h"
 
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Asset/MeshSerializer.h"
@@ -19,6 +20,7 @@
 
 namespace Nox
 {
+
     Ref<Mesh> MeshImporter::ImportMesh(AssetHandle handle, const AssetMetadata& metadata)
     {
         std::filesystem::path cookedPath = Project::GetActiveAssetDirectory() / metadata.FilePath;
@@ -30,6 +32,7 @@ namespace Nox
         std::vector<MaterialData> materialDataList;
         std::vector<LightNodeData> lightDataList;
         std::vector<MeshNodeData> nodeDataList;
+        std::vector<CameraNodeData> cameraDataList;
 
         const auto hashPath = cookedPath.string() + ".hash";
         const auto sourceHash = Utility::calcul_hash_streaming(sourcePath.string());
@@ -41,7 +44,7 @@ namespace Nox
         if (cookedIsCurrent)
         {
             NOX_CORE_INFO("Loading cooked dynamic mesh from {}", cookedPath.string());
-            bool success = MeshSerializer::DeserializeMesh(cookedPath, meshDataList, materialDataList, lightDataList, nodeDataList);
+            bool success = MeshSerializer::DeserializeMesh(cookedPath, meshDataList, materialDataList, lightDataList, nodeDataList, cameraDataList);
             if (!success) NOX_CORE_ASSERT(false, "MeshImporter::ImportMesh - Failed to deserialize .nmesh file: {}", cookedPath.string());
         }
         else
@@ -52,7 +55,7 @@ namespace Nox
             Skeleton extractedSkeleton;
             std::vector<Ref<AnimationSequence>> extractedAnimations;
 
-            meshDataList = ParseGltfToMeshData(sourcePath, materialDataList, extractedSkeleton, extractedAnimations, lightDataList, nodeDataList);
+            meshDataList = ParseGltfToMeshData(sourcePath, materialDataList, extractedSkeleton, extractedAnimations, lightDataList, nodeDataList, cameraDataList);
             if (meshDataList.empty())
             {
                 NOX_CORE_WARN("MeshImporter::ImportMesh - Failed to load or empty mesh at source path: {}", sourcePath.string());
@@ -63,7 +66,7 @@ namespace Nox
             if (!std::filesystem::exists(cookedPath.parent_path()))
                 std::filesystem::create_directories(cookedPath.parent_path());
 
-            MeshSerializer::SerializeMesh(cookedPath, meshDataList, materialDataList, lightDataList, nodeDataList);
+            MeshSerializer::SerializeMesh(cookedPath, meshDataList, materialDataList, lightDataList, nodeDataList, cameraDataList);
             Utility::saveHashToFile(hashPath, sourceHash);
 
             // A node/object animation does not require a skeleton. Only write .nskel when the
@@ -89,20 +92,24 @@ namespace Nox
 
         // Upload each sub-mesh independently -> Vector of Handles
         const auto uploadStart = std::chrono::steady_clock::now();
-        Renderer::BeginUploadBatch();
-        for (size_t i = 0; i < meshDataList.size(); ++i)
         {
-            bool isOpaque = (i < materialDataList.size()) ? (materialDataList[i].Mode == AlphaMode::Opaque) : true;
-            MeshHandle subMeshHandle = Renderer::UploadMesh(meshDataList[i], isOpaque);
-            meshAsset->m_SubMeshes.push_back(subMeshHandle);
-            meshAsset->m_SubmeshNames.push_back(meshDataList[i].Name);
+            NOX_PROFILE_SCOPE("Mesh GPU Upload");
+            Renderer::BeginUploadBatch();
+            for (size_t i = 0; i < meshDataList.size(); ++i)
+            {
+                bool isOpaque = (i < materialDataList.size()) ? (materialDataList[i].Mode == AlphaMode::Opaque) : true;
+                MeshHandle subMeshHandle = Renderer::UploadMesh(meshDataList[i], isOpaque);
+                meshAsset->m_SubMeshes.push_back(subMeshHandle);
+                meshAsset->m_SubmeshNames.push_back(meshDataList[i].Name);
+            }
+            Renderer::EndUploadBatch();
         }
-        Renderer::EndUploadBatch();
         NOX_CORE_INFO("[AssetLoad] GPU upload of {} submesh(es) (geometry + BLAS) took {:.1f} ms",
                       meshDataList.size(),
                       std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - uploadStart).count());
         meshAsset->m_Materials = std::move(materialDataList);
         meshAsset->m_Lights = std::move(lightDataList);
+        meshAsset->m_Cameras = std::move(cameraDataList);
         meshAsset->m_Nodes = std::move(nodeDataList);
 
         meshDataList.clear();
@@ -122,6 +129,7 @@ namespace Nox
         std::vector<MaterialData> materialDataList;
         std::vector<LightNodeData> lightDataList;
         std::vector<MeshNodeData> nodeDataList;
+        std::vector<CameraNodeData> cameraDataList;
 
         const auto hashPath = cookedPath.string() + ".hash";
         const auto sourceHash = Utility::calcul_hash_streaming(sourcePath.string());
@@ -133,7 +141,7 @@ namespace Nox
         if (cookedIsCurrent)
         {
             NOX_CORE_INFO("Loading cooked static mesh from {}", cookedPath.string());
-            bool success = MeshSerializer::DeserializeStaticMesh(cookedPath, meshDataList, materialDataList, lightDataList, nodeDataList);
+            bool success = MeshSerializer::DeserializeStaticMesh(cookedPath, meshDataList, materialDataList, lightDataList, nodeDataList, cameraDataList);
             if (!success)
             {
                 NOX_CORE_ASSERT(false, "MeshImporter::ImportStaticMesh - Failed to deserialize .nsmesh file: {}", cookedPath.string());
@@ -147,7 +155,7 @@ namespace Nox
             Skeleton dummySkeleton;
             std::vector<Ref<AnimationSequence>> dummyAnimations;
 
-            meshDataList = ParseGltfToMeshData(sourcePath, materialDataList, dummySkeleton, dummyAnimations, lightDataList, nodeDataList);
+            meshDataList = ParseGltfToMeshData(sourcePath, materialDataList, dummySkeleton, dummyAnimations, lightDataList, nodeDataList, cameraDataList);
             if (meshDataList.empty())
             {
                 NOX_CORE_WARN("No Meshes found in source file: {}", sourcePath.string());
@@ -157,22 +165,26 @@ namespace Nox
             if (!std::filesystem::exists(cookedPath.parent_path()))
                 std::filesystem::create_directories(cookedPath.parent_path());
 
-            MeshSerializer::SerializeStaticMesh(cookedPath, meshDataList, materialDataList, lightDataList, nodeDataList);
+            MeshSerializer::SerializeStaticMesh(cookedPath, meshDataList, materialDataList, lightDataList, nodeDataList, cameraDataList);
             Utility::saveHashToFile(hashPath, sourceHash);
         }
 
         Ref<StaticMesh> staticMeshAsset = CreateRef<StaticMesh>();
-        Renderer::BeginUploadBatch();
-        for (size_t i = 0; i < meshDataList.size(); ++i)
         {
-            bool isOpaque = (i < materialDataList.size()) ? (materialDataList[i].Mode == AlphaMode::Opaque) : true;
-            MeshHandle subMeshHandle = Renderer::UploadMesh(meshDataList[i], isOpaque);
-            staticMeshAsset->m_SubMeshes.push_back(subMeshHandle);
-            staticMeshAsset->m_SubmeshNames.push_back(meshDataList[i].Name);
+            NOX_PROFILE_SCOPE("Static Mesh GPU Upload");
+            Renderer::BeginUploadBatch();
+            for (size_t i = 0; i < meshDataList.size(); ++i)
+            {
+                bool isOpaque = (i < materialDataList.size()) ? (materialDataList[i].Mode == AlphaMode::Opaque) : true;
+                MeshHandle subMeshHandle = Renderer::UploadMesh(meshDataList[i], isOpaque);
+                staticMeshAsset->m_SubMeshes.push_back(subMeshHandle);
+                staticMeshAsset->m_SubmeshNames.push_back(meshDataList[i].Name);
+            }
+            Renderer::EndUploadBatch();
         }
-        Renderer::EndUploadBatch();
         staticMeshAsset->m_Materials = std::move(materialDataList);
         staticMeshAsset->m_Lights = std::move(lightDataList);
+        staticMeshAsset->m_Cameras = std::move(cameraDataList);
         staticMeshAsset->m_Nodes = std::move(nodeDataList);
 
         meshDataList.clear();
@@ -839,6 +851,53 @@ namespace Nox
             }
         }
     
+    // glTF 2.0 cameras look down their node's local -Z with +Y up, the same convention as the engine's cameras,
+    // so the node transform can be used as the camera transform unchanged.
+    static void ParseCamerasFromGltf(const tg3_model& model, std::vector<CameraNodeData>& outCameras)
+    {
+        outCameras.clear();
+        for (uint32_t i = 0; i < model.nodes_count; i++)
+        {
+            const tg3_node& node = model.nodes[i];
+            if (node.camera < 0 || node.camera >= static_cast<int32_t>(model.cameras_count))
+                continue;
+
+            const tg3_camera& gltfCamera = model.cameras[node.camera];
+            CameraNodeData camera{};
+            camera.NodeIndex = static_cast<int32_t>(i);
+
+            if (node.name.data && node.name.len > 0)
+                camera.Name = std::string(node.name.data, node.name.len);
+            else if (gltfCamera.name.data && gltfCamera.name.len > 0)
+                camera.Name = std::string(gltfCamera.name.data, gltfCamera.name.len);
+            else
+                camera.Name = "Camera_" + std::to_string(node.camera);
+
+            std::string_view typeStr = (gltfCamera.type.data && gltfCamera.type.len > 0)
+                ? std::string_view(gltfCamera.type.data, gltfCamera.type.len)
+                : std::string_view("perspective");
+
+            if (typeStr == "orthographic")
+            {
+                camera.Type = GltfCameraType::Orthographic;
+                camera.OrthographicSize = 2.0f * static_cast<float>(gltfCamera.orthographic.ymag);
+                camera.NearClip = static_cast<float>(gltfCamera.orthographic.znear);
+                camera.FarClip = static_cast<float>(gltfCamera.orthographic.zfar);
+            }
+            else // "perspective"
+            {
+                camera.Type = GltfCameraType::Perspective;
+                camera.VerticalFov = static_cast<float>(gltfCamera.perspective.yfov);
+                camera.NearClip = static_cast<float>(gltfCamera.perspective.znear);
+                if (gltfCamera.perspective.zfar > 0.0) // 0 = infinite projection in glTF
+                    camera.FarClip = static_cast<float>(gltfCamera.perspective.zfar);
+            }
+
+            ExtractNodeTRS(node, camera.Translation, camera.Rotation, camera.Scale);
+            outCameras.push_back(camera);
+        }
+    }
+
     std::vector<MeshData> MeshImporter::ParseGltfToMeshData
     (
         const std::filesystem::path& path,
@@ -846,7 +905,8 @@ namespace Nox
         Skeleton& outSkeleton,
         std::vector<Ref<AnimationSequence>>& outAnimations,
         std::vector<LightNodeData>& outLights,
-        std::vector<MeshNodeData>& outNodes
+        std::vector<MeshNodeData>& outNodes,
+        std::vector<CameraNodeData>& outCameras
     )
     {
         /*
@@ -878,6 +938,7 @@ namespace Nox
         ParseSkeletonFromGltf(model, outSkeleton);
         ParseAnimationsFromGltf(model, outSkeleton, outAnimations);
         ParseLightsFromGltf(model, outLights);
+        ParseCamerasFromGltf(model, outCameras);
         outNodes.clear();
 
          // 1. Build parent hierarchy map to resolve accumulated world transforms

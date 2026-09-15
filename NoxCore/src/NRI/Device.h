@@ -1,5 +1,6 @@
 #pragma once
 #include <memory>
+#include <vector>
 
 #include <glm/glm.hpp>
 
@@ -11,6 +12,7 @@
 #include "Buffer.h"
 #include "DescriptorHeap.h"
 #include "AccelerationStructure.h"
+#include "GpuProfiler.h"
 #include "ShaderCompiler.h"
 #include "NoxCore/Core/Window.h"
 
@@ -153,7 +155,13 @@ namespace NRI
         virtual std::unique_ptr<DescriptorHeap> createDescriptorHeap(const DescriptorHeapDesc& desc) = 0;
         virtual AccelerationStructureBuildSizes getAccelerationStructureBuildSizes(const AccelerationStructureBuildDesc& desc) = 0;
         virtual std::unique_ptr<AccelerationStructure> createAccelerationStructure(const AccelerationStructureDesc& desc) = 0;
-        
+        virtual std::unique_ptr<GpuProfiler> createGpuProfiler(uint32_t framesInFlight) = 0;
+
+        // Once per frame before any allocation of that frame; refreshes the memory budget.
+        virtual void beginFrame(uint32_t frameNumber) = 0;
+        virtual bool isMemoryBudgetSupported() const = 0;
+        virtual void getMemoryStats(std::vector<MemoryHeapStats>& outHeaps) const = 0;
+
         virtual bool evaluateDLSS(const DLSSParams& params) { return false; }
         virtual bool isDLSSSupported() const { return false; }
         virtual bool isDLSSRayReconstructionSupported() const { return false; }

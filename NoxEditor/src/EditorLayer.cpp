@@ -18,6 +18,9 @@
 #include "NoxCore/Core/Input.h"
 #include "NoxCore/Events/InputEvents.h"
 #include "NoxCore/ImGui/ImGuiLayer.h"
+#include "NoxCore/Profiling/Profiler.h"
+#include "NoxCore/Profiling/StatsOverlayLayer.h"
+#include "NoxCore/Profiling/StatsReport.h"
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Utils/Utils.h"
 
@@ -114,6 +117,7 @@ namespace Nox
             m_UnloadUnusedAssetsRequested = true;
         if (m_UnloadUnusedAssetsRequested)
         {
+            NOX_PROFILE_SCOPE("Unload Unused Assets");
             m_UnloadUnusedAssetsRequested = false;
             UnloadUnusedAssets();
         }
@@ -135,31 +139,34 @@ namespace Nox
         m_ActiveScene->SetRenderer(m_Renderer);
         m_ActiveScene->SetRenderer2D(m_Renderer->getRenderer2D());
 
-        switch (m_SceneState)
         {
-        case SceneState::Edit:
+            NOX_PROFILE_SCOPE("Scene Update");
+            switch (m_SceneState)
             {
-                if (m_ViewportFocused)
+            case SceneState::Edit:
                 {
-                    /*m_CameraController.OnUpdate(ts);*/
+                    if (m_ViewportFocused)
+                    {
+                        /*m_CameraController.OnUpdate(ts);*/
+                    }
+
+                    m_EditorCamera.OnUpdate(ts);
+
+                    m_ActiveScene->OnUpdateEditor(ts, m_EditorCamera);
+                    break;
                 }
+            case SceneState::Simulate:
+                {
+                    m_EditorCamera.OnUpdate(ts);
 
-                m_EditorCamera.OnUpdate(ts);
-
-                m_ActiveScene->OnUpdateEditor(ts, m_EditorCamera);
-                break;
-            }
-        case SceneState::Simulate:
-            {
-                m_EditorCamera.OnUpdate(ts);
-
-                m_ActiveScene->OnUpdateSimulation(ts, m_EditorCamera);
-                break;
-            }
-        case SceneState::Play:
-            {
-                m_ActiveScene->OnUpdateRuntime(ts);
-                break;
+                    m_ActiveScene->OnUpdateSimulation(ts, m_EditorCamera);
+                    break;
+                }
+            case SceneState::Play:
+                {
+                    m_ActiveScene->OnUpdateRuntime(ts);
+                    break;
+                }
             }
         }
 
@@ -215,7 +222,10 @@ namespace Nox
 
         OnOverlayRender();
 
-        Project::GetActive()->GetEditorAssetManager()->Update();
+        {
+            NOX_PROFILE_SCOPE("Asset Manager Update");
+            Project::GetActive()->GetEditorAssetManager()->Update();
+        }
     }
 
     void EditorLayer::OnRender()
@@ -679,6 +689,42 @@ namespace Nox
                             }
                         };
                         
+                        // glTF cameras: the first imported camera becomes the scene's primary camera (used by Play) unless
+                        // the scene already has one.
+                        bool importedPrimaryCamera = static_cast<bool>(m_ActiveScene->GetPrimaryCameraEntity());
+                        auto addCameraComponent = [&](Entity entity, const CameraNodeData& c)
+                        {
+                            auto& cameraComponent = entity.AddComponent<CameraComponent>();
+                            if (c.Type == GltfCameraType::Orthographic)
+                                cameraComponent.Camera.SetOrthographic(c.OrthographicSize, c.NearClip, c.FarClip);
+                            else
+                                cameraComponent.Camera.SetPerspective(c.VerticalFov, c.NearClip, c.FarClip);
+
+                            // Scene cameras follow the viewport aspect; set it now so the projection is valid immediately.
+                            if (m_ViewportSize.x > 0 && m_ViewportSize.y > 0)
+                                cameraComponent.Camera.SetViewportSize(m_ViewportSize.x, m_ViewportSize.y);
+
+                            cameraComponent.Primary = !importedPrimaryCamera;
+                            importedPrimaryCamera = true;
+                        };
+
+                        auto spawnGltfCameras = [&](Entity parent, const std::vector<CameraNodeData>& cameras)
+                        {
+                            for (const auto& c : cameras)
+                            {
+                                Entity cameraEntity = m_ActiveScene->CreateEntity(c.Name);
+                                if (parent)
+                                    cameraEntity.SetParent(parent);
+
+                                auto& tc = cameraEntity.GetComponent<TransformComponent>();
+                                tc.Translation = c.Translation;
+                                tc.Rotation = glm::eulerAngles(c.Rotation);
+                                tc.Scale = c.Scale;
+
+                                addCameraComponent(cameraEntity, c);
+                            }
+                        };
+
                         // Helper lambda to spawn lights from glTF KHR_lights_punctual
                             auto spawnGltfLights = [&](Entity parent, const std::vector<LightNodeData>& lights)
                             {
@@ -762,6 +808,14 @@ namespace Nox
                                     addLightComponent(createdNodes[light.NodeIndex], light);
                                 else
                                     spawnGltfLights(importRoot ? importRoot : firstRoot, { light });
+                            }
+
+                            for (const auto& camera : meshAsset->GetCameras())
+                            {
+                                if (camera.NodeIndex >= 0 && camera.NodeIndex < static_cast<int32_t>(createdNodes.size()))
+                                    addCameraComponent(createdNodes[camera.NodeIndex], camera);
+                                else
+                                    spawnGltfCameras(importRoot ? importRoot : firstRoot, { camera });
                             }
 
                             // glTF node index -> entity, shared by the clip and by every skin.
@@ -919,7 +973,10 @@ namespace Nox
                                 tryAttachAnimator(newEntity);
                                 
                                 if (meshAsset)
+                                {
                                     spawnGltfLights(newEntity, meshAsset->GetLights());
+                                    spawnGltfCameras(newEntity, meshAsset->GetCameras());
+                                }
 
                                 m_SceneHierarchyPanel.SetSelectedEntity(newEntity);
                                 m_PlacementPreview.Root = newEntity;
@@ -947,7 +1004,10 @@ namespace Nox
                                 matComp.MaterialAssets = staticMeshAsset->GetMaterialAssets();
 
                             if (staticMeshAsset)
+                            {
                                 spawnGltfLights(newEntity, staticMeshAsset->GetLights());
+                                spawnGltfCameras(newEntity, staticMeshAsset->GetCameras());
+                            }
 
                             m_SceneHierarchyPanel.SetSelectedEntity(newEntity);
                             m_PlacementPreview.Root = newEntity;
@@ -1120,6 +1180,30 @@ namespace Nox
         ImGui::End(); // End "right" Window
 
         ImGui::Begin("Settings");
+
+#if NOX_PROFILE_STATS
+        if (StatsOverlayLayer* statsLayer = Application::Get().GetLayer<StatsOverlayLayer>())
+        {
+            bool statsVisible = statsLayer->IsVisible();
+            if (ImGui::Checkbox("Stats Overlay (F3)", &statsVisible))
+                statsLayer->SetVisible(statsVisible);
+
+            ImGui::SameLine();
+            bool statsDetailed = statsLayer->IsDetailed();
+            if (ImGui::Checkbox("Detailed", &statsDetailed))
+                statsLayer->SetDetailed(statsDetailed);
+
+            ImGui::SameLine();
+            if (ImGui::Button("Reset Stats"))
+                Profiler::Get().ResetStats();
+
+            ImGui::SameLine();
+            if (ImGui::Button("Save Report (Ctrl+F3)"))
+                SaveStatsReport(*m_Renderer);
+
+            ImGui::Separator();
+        }
+#endif
         
         static const char* debugModeNames[] = {
             "0: Full PBR Lit",
@@ -2000,7 +2084,7 @@ namespace Nox
             if (!camera)
                 return;
 
-            m_Renderer->BeginScene(camera.GetComponent<CameraComponent>().Camera, camera.GetComponent<TransformComponent>().GetTransform());
+            m_Renderer->BeginScene(camera.GetComponent<CameraComponent>().Camera, camera.GetComponent<WorldTransformComponent>().WorldMatrix);
         }
         else
         {
@@ -2145,6 +2229,9 @@ namespace Nox
 
         m_EditorScenePath = std::filesystem::path();
         m_UnloadUnusedAssetsRequested = true;
+#if NOX_PROFILE_STATS
+        Profiler::Get().ResetStats();
+#endif
     }
 
     void EditorLayer::OpenScene()
@@ -2175,6 +2262,9 @@ namespace Nox
         m_ActiveScene = m_EditorScene;
         m_EditorScenePath = Project::GetActive()->GetEditorAssetManager()->GetFilePath(handle);
         m_UnloadUnusedAssetsRequested = true;
+#if NOX_PROFILE_STATS
+        Profiler::Get().ResetStats();
+#endif
     }
 
     void EditorLayer::SaveScene()

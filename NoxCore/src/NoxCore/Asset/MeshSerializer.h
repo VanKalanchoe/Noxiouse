@@ -487,6 +487,50 @@ static void ReadMaterials(std::ifstream& stream, std::vector<MaterialData>& outM
                 }
             }
 
+            static void WriteCameras(std::ofstream& stream, const std::vector<CameraNodeData>& cameras)
+            {
+                uint32_t count = static_cast<uint32_t>(cameras.size());
+                stream.write(reinterpret_cast<const char*>(&count), sizeof(uint32_t));
+                for (const auto& camera : cameras)
+                {
+                    SerializerUtils::WriteString(stream, camera.Name);
+                    uint32_t type = static_cast<uint32_t>(camera.Type);
+                    stream.write(reinterpret_cast<const char*>(&type), sizeof(uint32_t));
+                    stream.write(reinterpret_cast<const char*>(&camera.NodeIndex), sizeof(int32_t));
+                    stream.write(reinterpret_cast<const char*>(&camera.VerticalFov), sizeof(float));
+                    stream.write(reinterpret_cast<const char*>(&camera.OrthographicSize), sizeof(float));
+                    stream.write(reinterpret_cast<const char*>(&camera.NearClip), sizeof(float));
+                    stream.write(reinterpret_cast<const char*>(&camera.FarClip), sizeof(float));
+                    stream.write(reinterpret_cast<const char*>(&camera.Translation), sizeof(glm::vec3));
+                    stream.write(reinterpret_cast<const char*>(&camera.Rotation), sizeof(glm::quat));
+                    stream.write(reinterpret_cast<const char*>(&camera.Scale), sizeof(glm::vec3));
+                }
+            }
+
+            static void ReadCameras(std::ifstream& stream, std::vector<CameraNodeData>& outCameras)
+            {
+                uint32_t count = 0;
+                stream.read(reinterpret_cast<char*>(&count), sizeof(uint32_t));
+                if (stream.fail()) return;
+
+                outCameras.resize(count);
+                for (uint32_t i = 0; i < count; i++)
+                {
+                    SerializerUtils::ReadString(stream, outCameras[i].Name);
+                    uint32_t type = 0;
+                    stream.read(reinterpret_cast<char*>(&type), sizeof(uint32_t));
+                    outCameras[i].Type = static_cast<GltfCameraType>(type);
+                    stream.read(reinterpret_cast<char*>(&outCameras[i].NodeIndex), sizeof(int32_t));
+                    stream.read(reinterpret_cast<char*>(&outCameras[i].VerticalFov), sizeof(float));
+                    stream.read(reinterpret_cast<char*>(&outCameras[i].OrthographicSize), sizeof(float));
+                    stream.read(reinterpret_cast<char*>(&outCameras[i].NearClip), sizeof(float));
+                    stream.read(reinterpret_cast<char*>(&outCameras[i].FarClip), sizeof(float));
+                    stream.read(reinterpret_cast<char*>(&outCameras[i].Translation), sizeof(glm::vec3));
+                    stream.read(reinterpret_cast<char*>(&outCameras[i].Rotation), sizeof(glm::quat));
+                    stream.read(reinterpret_cast<char*>(&outCameras[i].Scale), sizeof(glm::vec3));
+                }
+            }
+
             static void ReadNodes(std::ifstream& stream, std::vector<MeshNodeData>& outNodes)
             {
                 uint32_t count = 0;
@@ -513,7 +557,8 @@ static void ReadMaterials(std::ifstream& stream, std::vector<MaterialData>& outM
             const std::vector<MeshData>& dataList,
             const std::vector<MaterialData>& materialList,
             const std::vector<LightNodeData>& lightList = {},
-            const std::vector<MeshNodeData>& nodeList = {}
+            const std::vector<MeshNodeData>& nodeList = {},
+            const std::vector<CameraNodeData>& cameraList = {}
         )
         {
             std::ofstream stream(filepath, std::ios::binary | std::ios::trunc);
@@ -531,13 +576,15 @@ static void ReadMaterials(std::ifstream& stream, std::vector<MaterialData>& outM
             WriteMaterials(stream, materialList);
             WriteLights(stream, lightList);
             WriteNodes(stream, nodeList);
+            WriteCameras(stream, cameraList);
         }
 
         static bool DeserializeStaticMesh(const std::filesystem::path& filepath, std::vector<MeshData>& outDataList, std::vector<MaterialData>& outMaterialList)
         {
             std::vector<LightNodeData> dummyLights;
             std::vector<MeshNodeData> dummyNodes;
-            return DeserializeStaticMesh(filepath, outDataList, outMaterialList, dummyLights, dummyNodes);
+            std::vector<CameraNodeData> dummyCameras;
+            return DeserializeStaticMesh(filepath, outDataList, outMaterialList, dummyLights, dummyNodes, dummyCameras);
         }
         
         static bool DeserializeStaticMesh
@@ -549,7 +596,8 @@ static void ReadMaterials(std::ifstream& stream, std::vector<MaterialData>& outM
             )
         {
             std::vector<MeshNodeData> dummyNodes;
-            return DeserializeStaticMesh(filepath, outDataList, outMaterialList, outLightList, dummyNodes);
+            std::vector<CameraNodeData> dummyCameras;
+            return DeserializeStaticMesh(filepath, outDataList, outMaterialList, outLightList, dummyNodes, dummyCameras);
         }
 
         static bool DeserializeStaticMesh
@@ -558,7 +606,8 @@ static void ReadMaterials(std::ifstream& stream, std::vector<MaterialData>& outM
             std::vector<MeshData>& outDataList,
             std::vector<MaterialData>& outMaterialList,
             std::vector<LightNodeData>& outLightList,
-            std::vector<MeshNodeData>& outNodeList
+            std::vector<MeshNodeData>& outNodeList,
+            std::vector<CameraNodeData>& outCameraList
             )
         {
             std::ifstream stream(filepath, std::ios::binary);
@@ -580,6 +629,7 @@ static void ReadMaterials(std::ifstream& stream, std::vector<MaterialData>& outM
             ReadMaterials(stream, outMaterialList);
             ReadLights(stream, outLightList);
             ReadNodes(stream, outNodeList);
+            ReadCameras(stream, outCameraList);
             return true;
         }
 
@@ -589,7 +639,8 @@ static void ReadMaterials(std::ifstream& stream, std::vector<MaterialData>& outM
             const std::vector<MeshData>& dataList,
             const std::vector<MaterialData>& materialList,
             const std::vector<LightNodeData>& lightList = {},
-            const std::vector<MeshNodeData>& nodeList = {}
+            const std::vector<MeshNodeData>& nodeList = {},
+            const std::vector<CameraNodeData>& cameraList = {}
         )
         {
             std::ofstream stream(filepath, std::ios::binary | std::ios::trunc);
@@ -607,13 +658,15 @@ static void ReadMaterials(std::ifstream& stream, std::vector<MaterialData>& outM
             WriteMaterials(stream, materialList);
             WriteLights(stream, lightList);
             WriteNodes(stream, nodeList);
+            WriteCameras(stream, cameraList);
         }
         
         static bool DeserializeMesh(const std::filesystem::path& filepath, std::vector<MeshData>& outDataList, std::vector<MaterialData>& outMaterialList)
         {
             std::vector<LightNodeData> dummyLights;
             std::vector<MeshNodeData> dummyNodes;
-            return DeserializeMesh(filepath, outDataList, outMaterialList, dummyLights, dummyNodes);
+            std::vector<CameraNodeData> dummyCameras;
+            return DeserializeMesh(filepath, outDataList, outMaterialList, dummyLights, dummyNodes, dummyCameras);
         }
 
         static bool DeserializeMesh
@@ -625,7 +678,8 @@ static void ReadMaterials(std::ifstream& stream, std::vector<MaterialData>& outM
         )
         {
             std::vector<MeshNodeData> dummyNodes;
-            return DeserializeMesh(filepath, outDataList, outMaterialList, outLightList, dummyNodes);
+            std::vector<CameraNodeData> dummyCameras;
+            return DeserializeMesh(filepath, outDataList, outMaterialList, outLightList, dummyNodes, dummyCameras);
         }
 
         static bool DeserializeMesh
@@ -634,7 +688,8 @@ static void ReadMaterials(std::ifstream& stream, std::vector<MaterialData>& outM
             std::vector<MeshData>& outDataList,
             std::vector<MaterialData>& outMaterialList,
             std::vector<LightNodeData>& outLightList,
-            std::vector<MeshNodeData>& outNodeList
+            std::vector<MeshNodeData>& outNodeList,
+            std::vector<CameraNodeData>& outCameraList
         )
         {
             std::ifstream stream(filepath, std::ios::binary);
@@ -656,6 +711,7 @@ static void ReadMaterials(std::ifstream& stream, std::vector<MaterialData>& outM
             ReadMaterials(stream, outMaterialList);
             ReadLights(stream, outLightList);
             ReadNodes(stream, outNodeList);
+            ReadCameras(stream, outCameraList);
             return true;
         }
     };
