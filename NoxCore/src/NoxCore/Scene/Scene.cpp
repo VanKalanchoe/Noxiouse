@@ -56,12 +56,13 @@ namespace Nox
 
     namespace
     {
-        // Non-component data the submission systems write; named in their declared access.
-        struct MeshSubmission {};
+        // Non-component data the systems write; named in their declared access.
+        struct MovedEntities {};
         struct LightSubmission {};
         struct Renderer2DSubmission {};
 
-        constexpr uint32_t MeshEntitiesPerChunk = 64;
+        // Identifies the scene that owns the renderer's GPU scene (a scene address can be reused by the next scene).
+        uint64_t s_NextSceneID = 1;
     }
 
     template <typename... Component>
@@ -77,6 +78,17 @@ namespace Nox
         // exists before the first graph runs (e.g. a scene copied for Play has no sprite storage until something asks).
         CreateComponentStorages(AllComponents{}, m_Registry);
         CreateComponentStorages(ComponentGroup<IDComponent, TagComponent>{}, m_Registry);
+
+        // The GPU scene follows mesh entities through their components' signals: added, replaced or patched, removed.
+        m_SceneID = s_NextSceneID++;
+        m_Registry.on_construct<MeshComponent>().connect<&Scene::OnMeshEntityChanged>(*this);
+        m_Registry.on_update<MeshComponent>().connect<&Scene::OnMeshEntityChanged>(*this);
+        m_Registry.on_destroy<MeshComponent>().connect<&Scene::OnMeshEntityChanged>(*this);
+        m_Registry.on_construct<MaterialComponent>().connect<&Scene::OnMeshEntityChanged>(*this);
+        m_Registry.on_update<MaterialComponent>().connect<&Scene::OnMeshEntityChanged>(*this);
+        m_Registry.on_destroy<MaterialComponent>().connect<&Scene::OnMeshEntityChanged>(*this);
+        m_Registry.on_construct<AnimatorComponent>().connect<&Scene::OnMeshEntityChanged>(*this);
+        m_Registry.on_destroy<AnimatorComponent>().connect<&Scene::OnMeshEntityChanged>(*this);
 
         RegisterSystems();
     }
@@ -240,6 +252,7 @@ namespace Nox
     {
         const bool step = !m_IsPaused || m_StepFrames-- > 0;
         RunUpdateSystems(ts, step, step);
+        SyncGpuScene();
 
         // The primary camera's world transform is current once the update systems have run.
         Camera* mainCamera = nullptr;
@@ -270,6 +283,7 @@ namespace Nox
     {
         const bool step = !m_IsPaused || m_StepFrames-- > 0;
         RunUpdateSystems(ts, step, step);
+        SyncGpuScene();
 
         m_renderer->BeginScene(camera);
         RunSubmitSystems();
@@ -279,6 +293,7 @@ namespace Nox
     void Scene::OnUpdateEditor(Timestep ts, EditorCamera& camera)
     {
         RunUpdateSystems(ts, false, true);
+        SyncGpuScene();
 
         m_renderer->BeginScene(camera);
         RunSubmitSystems();
@@ -295,13 +310,11 @@ namespace Nox
             ComponentAccess().Write<AnimatorComponent, TransformComponent, DirtyTransformComponent>(),
             [this]() { UpdateAnimators(); });
         m_UpdateSystems.AddSystem("Transform Propagation",
-            ComponentAccess().Read<TransformComponent, RelationshipComponent>().Write<WorldTransformComponent, DirtyTransformComponent>(),
-            [this]() { SceneGraph::UpdateWorldTransforms(m_Registry, m_EntityMap, m_CommandBuffers); });
+            ComponentAccess().Read<TransformComponent, RelationshipComponent, MeshComponent>().Write<WorldTransformComponent, DirtyTransformComponent, MovedEntities>(),
+            [this]() { SceneGraph::UpdateWorldTransforms(m_Registry, m_EntityMap, m_CommandBuffers, m_MovedEntities); });
 
-        // Submission (after BeginScene). No conflicts: the three run in parallel.
-        m_SubmitSystems.AddSystem("Submit Meshes",
-            ComponentAccess().Read<WorldTransformComponent, MeshComponent, MaterialComponent>().Write<AnimatorComponent, MeshSubmission>(),
-            [this]() { SubmitMeshes(); });
+        // Submission (after BeginScene). No conflicts: they run in parallel. Meshes are not submitted: the GPU scene keeps
+        // them (SyncGpuScene).
         m_SubmitSystems.AddSystem("Submit Lights",
             ComponentAccess().Read<WorldTransformComponent, DirectionalLightComponent, PointLightComponent, SpotLightComponent>().Write<LightSubmission>(),
             [this]() { SubmitLights(); });
@@ -321,17 +334,106 @@ namespace Nox
     void Scene::RunSubmitSystems()
     {
         NOX_PROFILE_SCOPE("Scene Submit Systems");
-
-        // The renderer sizes its chunks before the tasks write them; the same chunk layout splits the entity list.
-        m_MeshEntities.clear();
-        for (auto entity : m_Registry.view<WorldTransformComponent, MeshComponent>())
-            m_MeshEntities.push_back(entity);
-        m_renderer->BeginMeshSubmission(JobSystem::Get().GetChunkCount(static_cast<uint32_t>(m_MeshEntities.size()), MeshEntitiesPerChunk));
-
         m_SubmitSystems.Run();
-
-        m_renderer->EndMeshSubmission(m_MissingAssets.Local());
         ApplySyncPoint();
+    }
+
+    void Scene::OnMeshEntityChanged(entt::registry&, entt::entity entity)
+    {
+        // Components change on the main thread only (directly or at a sync point).
+        m_PendingMeshEntities.push_back(entity);
+    }
+
+    void Scene::SyncGpuScene()
+    {
+        NOX_PROFILE_SCOPE("Sync GPU Scene");
+        std::vector<AssetHandle>& missingAssets = m_MissingAssets.Local();
+
+        // 1. Another scene rendered last (e.g. edit <-> play): register every mesh entity again.
+        if (m_renderer->BindGpuScene(m_SceneID))
+        {
+            m_MeshRegistrations.clear();
+            m_SkinnedMeshEntities.clear();
+            m_PendingMeshEntities.clear();
+            for (auto entity : m_Registry.view<MeshComponent>())
+                m_PendingMeshEntities.push_back(entity);
+        }
+
+        // 2. Entities whose mesh was unloaded under their instances.
+        {
+            std::vector<int32_t> invalidated;
+            m_renderer->ConsumeInvalidatedMeshEntities(invalidated);
+            for (int32_t entityID : invalidated)
+                m_PendingMeshEntities.push_back(static_cast<entt::entity>(entityID));
+        }
+
+        // 3. Added, changed and removed mesh entities. An entity whose assets are not loaded yet stays pending (the
+        // sync point loads them).
+        if (!m_PendingMeshEntities.empty())
+        {
+            NOX_PROFILE_SCOPE("Register Mesh Entities");
+            std::vector<entt::entity> pending;
+            pending.swap(m_PendingMeshEntities);
+            std::sort(pending.begin(), pending.end());
+            pending.erase(std::unique(pending.begin(), pending.end()), pending.end());
+
+            for (entt::entity entity : pending)
+            {
+                if (auto found = m_MeshRegistrations.find(entity); found != m_MeshRegistrations.end())
+                {
+                    m_renderer->RemoveMeshInstances(found->second.Instances);
+                    if (found->second.Skinned)
+                        std::erase(m_SkinnedMeshEntities, entity);
+                    m_MeshRegistrations.erase(found);
+                }
+
+                if (!m_Registry.valid(entity))
+                    continue;
+                const MeshComponent* mesh = m_Registry.try_get<MeshComponent>(entity);
+                if (!mesh)
+                    continue;
+                const WorldTransformComponent* world = m_Registry.try_get<WorldTransformComponent>(entity);
+                if (!world)
+                {
+                    // Added at the sync point by transform propagation.
+                    m_PendingMeshEntities.push_back(entity);
+                    continue;
+                }
+
+                MeshRegistration registration;
+                if (!m_renderer->AddMeshInstances(world->WorldMatrix, *mesh, m_Registry.try_get<MaterialComponent>(entity),
+                                                  static_cast<int32_t>(entity), registration.Instances, missingAssets))
+                    m_PendingMeshEntities.push_back(entity);
+                if (registration.Instances.empty())
+                    continue;
+
+                // Skinning applies to skeletal mesh assets only.
+                registration.Skinned = m_Registry.all_of<AnimatorComponent>(entity) && AssetManager::GetAssetType(mesh->Mesh) == AssetType::Mesh;
+                if (registration.Skinned)
+                    m_SkinnedMeshEntities.push_back(entity);
+                m_MeshRegistrations.emplace(entity, std::move(registration));
+            }
+        }
+
+        // 4. World transforms that changed this frame.
+        m_MovedEntities.ForEach([this](std::vector<entt::entity>& entities)
+        {
+            for (entt::entity entity : entities)
+            {
+                auto found = m_MeshRegistrations.find(entity);
+                if (found != m_MeshRegistrations.end())
+                    m_renderer->SetMeshInstancesTransform(found->second.Instances, m_Registry.get<WorldTransformComponent>(entity).WorldMatrix);
+            }
+            entities.clear();
+        });
+
+        // 5. This frame's joint matrices.
+        for (entt::entity entity : m_SkinnedMeshEntities)
+        {
+            const MeshRegistration& registration = m_MeshRegistrations.at(entity);
+            const std::vector<glm::mat4>* bones = GetBoneTransforms(entity, m_Registry.get<WorldTransformComponent>(entity).WorldMatrix);
+            m_renderer->SetMeshInstancesBones(registration.Instances, bones ? std::span<const glm::mat4>(*bones) : std::span<const glm::mat4>());
+        }
     }
 
     void Scene::ApplySyncPoint()
@@ -757,25 +859,6 @@ namespace Nox
         m_PhysicsWorldID = b2_nullWorldId;
     }
     
-    void Scene::SubmitMeshes()
-    {
-        // Chunk layout matches Renderer::BeginMeshSubmission (same count and batch size).
-        JobSystem::Get().ParallelFor("Submit Mesh Chunk", static_cast<uint32_t>(m_MeshEntities.size()), MeshEntitiesPerChunk,
-            [this](uint32_t chunk, uint32_t begin, uint32_t end)
-            {
-                for (uint32_t index = begin; index < end; ++index)
-                {
-                    const entt::entity entity = m_MeshEntities[index];
-                    const glm::mat4& worldMatrix = m_Registry.get<WorldTransformComponent>(entity).WorldMatrix;
-                    const MeshComponent& mesh = m_Registry.get<MeshComponent>(entity);
-                    const MaterialComponent* material = m_Registry.try_get<MaterialComponent>(entity);
-                    const std::vector<glm::mat4>* boneTransforms = GetBoneTransforms(entity, worldMatrix);
-
-                    m_renderer->SubmitMesh(chunk, worldMatrix, mesh, material, static_cast<int>(entity), boneTransforms);
-                }
-            });
-    }
-
     void Scene::SubmitLights()
     {
         {

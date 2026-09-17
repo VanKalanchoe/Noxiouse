@@ -152,6 +152,14 @@ namespace Nox
             return component;
         }
         
+        // After editing a component's fields in place: notifies whatever tracks that component (EnTT on_update, e.g. the
+        // GPU scene for meshes and materials). Main thread.
+        template<typename T>
+        void PatchComponent() const
+        {
+            m_Scene->m_Registry.patch<T>(m_EntityHandle);
+        }
+
         // Get a component: auto& transform = player.GetComponent<TransformComponent>();
         template<typename T>
         T& GetComponent()

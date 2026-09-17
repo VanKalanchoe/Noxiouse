@@ -17,7 +17,7 @@ namespace Nox
                                  (m_rayTracingEnabled || m_frame.pathTracerUsesRTXDI) &&
                                  (m_diffuseGIMode == 2 || (m_debugMode == 16 && m_diffuseGIMode != 1)) &&
                                  m_hasTLASBuild && m_sceneTLAS && (uniformData.tlasDeviceAddress != 0) &&
-                                 (uniformData.instanceLUTReference != 0) &&
+                                 (uniformData.sceneInstancesReference != 0) &&
                                  m_restirGIInitialPipeline && m_restirGITemporalPipeline && m_restirGISpatialPipeline &&
                                  m_restirGINeighborOffsetsBuffer;
         // When it does not run, resolveFrameUniforms falls back (IBL ambient for GI mode 2).
@@ -56,6 +56,7 @@ namespace Nox
                 builder.Read(resources.GBufferMaterial);
                 builder.Read(resources.Visibility);
                 ReadIfValid(builder, resources.TLAS);
+                ReadGpuScene(builder, resources);
                 builder.Write(resources.ReSTIRGIReservoirs[kScratchBuffer]);
                 builder.ColorTarget(resources.ReSTIRGIRaw, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
                 builder.SetRenderArea(m_frame.renderExtent);
@@ -453,6 +454,7 @@ namespace Nox
                 builder.Read(resources.GBufferMaterial);
                 builder.Read(resources.ReSTIRDIRIS);
                 ReadIfValid(builder, resources.TLAS);
+                ReadGpuScene(builder, resources);
                 builder.Write(resources.ReSTIRDIReservoirs[bufferA]);
                 builder.ColorTarget(resources.ReSTIRDIDirect, NRI::LoadOP::dontCare, NRI::StoreOP::dontCare);
                 builder.SetRenderArea(m_frame.renderExtent);
@@ -630,6 +632,7 @@ namespace Nox
                 builder.Read(resources.GBufferMaterial);
                 builder.Read(resources.ReSTIRDIReservoirs[bufferB]);
                 ReadIfValid(builder, resources.TLAS);
+                ReadGpuScene(builder, resources);
                 builder.ColorTarget(resources.ReSTIRDIDirect, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
                 builder.SetRenderArea(m_frame.renderExtent);
             },
@@ -754,6 +757,7 @@ namespace Nox
                 builder.Read(resources.GBufferAlbedo);
                 builder.Read(resources.GBufferMaterial);
                 ReadIfValid(builder, resources.TLAS);
+                ReadGpuScene(builder, resources);
                 builder.Write(resources.ReSTIRPTReservoirs[frame.ptInitialOutputBuffer]);
                 builder.Write(resources.ReSTIRPTReservoirs[frame.ptInitialPreservedBuffer]);
                 // Debug-only output (the real result lives in the reservoir buffer), bounce-1 direct lighting.

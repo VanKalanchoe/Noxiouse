@@ -740,6 +740,18 @@ persistent buffers. Full rebuild only on scene switch.
 GPU skinning in compute into per-instance deformed vertex ranges (feeds raster and BLAS refit),
 replacing per-frame skinning in the mesh shader for RT correctness.
 
+#### 5.5.4 Implementation (Phase 3, September 2026)
+Decisions: culling per view (N-view infrastructure; a second fully rendered viewport later with per-view graph passes),
+per-object motion vectors (previous world matrix), mesh-shader skinning kept (compute skinning §5.5.3 later), meshlet
+culling off unless captures prove it faster.
+
+| Step | Content | Status |
+|---|---|---|
+| 3a | Mesh instancing: `MeshImporter` cooks each glTF mesh once; nodes share its submesh range (geometry + BLAS once per unique mesh, TLAS places each instance). | **Verified 2026-09-17:** Bistro 551 submeshes/BLAS for 2909 instances, identical images, Debug upload 536 ms (was 850–1360). Release A: VRAM 3641 → 3127 MB with 6283 → 1532 allocations, private bytes 4561 → 3948 MB, GPU frame 4.13 → 3.95 ms, Visibility 1.24 → 0.86 ms (packed geometry). Also fixed: the material panel edited metallic-roughness factors on specular-glossiness materials (no visible effect); it now shows the material's workflow fields. |
+| 3b | GPU scene (`Renderer/GpuScene`): persistent slot tables for instances, transforms (world/normal/previous world), shared materials, meshes and per-instance ray tracing records, CPU mirrors with dirty slots scattered from per-frame-slot staging in the first graph pass ("GPU Scene Update"). Change tracking: EnTT signals on Mesh/Material/Animator components, transform propagation lists moved mesh entities, editor edits patch components / notify material changes, scene switch re-registers. Draw buckets kept incrementally (CPU still builds the per-frame draw list); TLAS from a compact bucket-ordered list, rebuilt when ray traced instances change (NVIDIA: rebuild the TLAS rather than refit). Raster shaders read the tables (visibility stores the instance slot), RT shaders one `GpuRayTracingInstance` record; per-object motion vectors from the previous world matrix. | **Verified 2026-09-17:** identical images, moving/animated objects keep correct shadows and velocity, edits/Play/Stop work. Release A: CPU frame 1.09 → 0.76 ms (Scene Submit Systems 0.25 → 0.01 ms, GPU scene sync ≤ 0.03 ms for 2909 instances), GPU 3.90 ms. B: GPU 56.7 → 56.0 ms, C: 29.3 → 29.0 ms; TLAS rebuild 0.24–0.5 ms per frame while Bistro animates (refit was 0.03 ms). Finding: ray query candidate/hit lookups reading instance → material → mesh → transform from separate tables made ReSTIR GI Initial 35 → 46 ms (same data, same TLAS, same code shape measured); one colocated record per instance restored it. |
+| 3c | RenderView + GPU instance culling + indirect-count draws; lean task shader vs meshlet culling experiment | Pending |
+| 3d | Hi-Z pyramid + occlusion culling | Pending |
+
 ### 5.6 GPU-Driven Culling & Draw Generation
 
 References to consult when this phase starts: Khronos Vulkan tutorial, GPU-driven pipelines (https://docs.vulkan.org/tutorial/latest/Advanced_Vulkan_Compute/07_GPU_Driven_Pipelines/01_introduction.html — indirect dispatch, multi-draw indirect, GPU-side command generation).

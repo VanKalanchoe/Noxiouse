@@ -269,6 +269,21 @@ namespace NRI
         m_commandBuffers[m_currentFrameIndex].copyBuffer(*srcVK->getNativeBuffer(), *dstVK->getNativeBuffer(), copyRegion);
     }
 
+    void CommandBufferVK::copyBuffer(Buffer& srcBuffer, Buffer& dstBuffer, std::span<const BufferCopyRegion> regions)
+    {
+        if (regions.empty())
+            return;
+
+        auto* srcVK = static_cast<BufferVK*>(&srcBuffer);
+        auto* dstVK = static_cast<BufferVK*>(&dstBuffer);
+
+        m_copyRegionScratch.clear();
+        for (const BufferCopyRegion& region : regions)
+            m_copyRegionScratch.push_back(vk::BufferCopy{ .srcOffset = region.srcOffset, .dstOffset = region.dstOffset, .size = region.size });
+
+        m_commandBuffers[m_currentFrameIndex].copyBuffer(*srcVK->getNativeBuffer(), *dstVK->getNativeBuffer(), m_copyRegionScratch);
+    }
+
     void CommandBufferVK::bindPipeline(PipelineBindPoint bindPoint, Pipeline& pipeline)
     {
         auto* vkPip = dynamic_cast<PipelineVK*>(&pipeline);

@@ -1,29 +1,51 @@
-// Raster passes: TLAS build, visibility buffer, G-buffer resolve, forward 3D (unlit, skybox, transparent, DDGI probes).
+// Raster passes: GPU scene update, TLAS build, visibility buffer, G-buffer resolve, forward 3D (unlit, skybox, transparent, DDGI probes).
 #include "NoxCore/Renderer/Renderer.h"
 
 #include "FrameGraphResources.h"
 
 namespace Nox
 {
+    void Renderer::addGpuSceneUpdatePass()
+    {
+        const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
+        if (!m_gpuScene.HasUploads(frameIndex))
+            return;
+
+        // This frame's scene changes, scattered from the frame slot's staging buffers into the persistent tables. Never
+        // culled: the changes are staged once.
+        m_renderGraph.AddPass("GPU Scene Update", RGPassFlags::NeverCull,
+            [&](RGBuilder& builder)
+            {
+                for (RGBuffer table : { resources.SceneInstances, resources.SceneTransforms, resources.SceneMaterials, resources.SceneMeshes,
+                                        resources.SceneRayTracingInstances })
+                {
+                    if (table.IsValid())
+                        builder.Write(table, RGBufferAccess::CopyDestination);
+                }
+            },
+            [this](RGPassContext& context)
+            {
+                m_gpuScene.RecordUploads(context.Cmd(), frameIndex);
+            });
+    }
+
     void Renderer::addTLASBuildPass()
     {
         const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
-        if (!resources.TLAS.IsValid() || !m_hasTLASBuild || !m_sceneTLAS || !m_tlasScratchBuffer || (!m_tlasNeedFullBuild && !m_tlasNeedUpdate))
+        if (!resources.TLAS.IsValid() || !m_hasTLASBuild || !m_sceneTLAS || !m_tlasScratchBuffer || !m_tlasNeedBuild)
             return;
 
         // Consumed here: this frame's command buffers carry the build.
-        const bool fullBuild = m_tlasNeedFullBuild;
-        m_tlasNeedFullBuild = false;
-        m_tlasNeedUpdate = false;
+        m_tlasNeedBuild = false;
 
         m_renderGraph.AddPass("TLAS Build", RGPassFlags::None,
             [&](RGBuilder& builder)
             {
                 builder.Write(resources.TLAS, RGBufferAccess::AccelerationStructureBuild);
             },
-            [this, fullBuild](RGPassContext& context)
+            [this](RGPassContext& context)
             {
-                BuildSceneAccelerationStructure(context.Cmd(), fullBuild);
+                BuildSceneAccelerationStructure(context.Cmd());
             });
     }
 
@@ -38,6 +60,7 @@ namespace Nox
                 // Reverse-Z: clear to 0; stored for every later depth consumer.
                 builder.DepthTarget(resources.Depth, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0 });
                 builder.SetRenderArea(m_frame.renderExtent);
+                ReadGpuScene(builder, resources);
             },
             [this](RGPassContext& context)
             {
@@ -51,14 +74,14 @@ namespace Nox
                 cmd.setColorBlendEnable(0, false);
                 cmd.setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
 
-                if ((!m_instanceBufferObjects.empty() || !m_drawMeshTasksIndirectCommands.empty()) && m_visibilityPipeline)
+                if (!m_drawInstances.empty() && m_visibilityPipeline)
                 {
-                    // All PBR opaque & mask geometry rasterizes to the visibility buffer and depth: the first four queues.
-                    MeshletDrawCursor cursor = beginMeshletDraws(0);
-                    drawMeshletQueue(cmd, cursor, m_opaqueCount, *m_visibilityPipeline, NRI::CullMode::Back, true, false);
-                    drawMeshletQueue(cmd, cursor, m_opaqueDoubleSidedCount, *m_visibilityPipeline, NRI::CullMode::None, true, false);
-                    drawMeshletQueue(cmd, cursor, m_maskCount, *m_visibilityPipeline, NRI::CullMode::Back, true, false);
-                    drawMeshletQueue(cmd, cursor, m_maskDoubleSidedCount, *m_visibilityPipeline, NRI::CullMode::None, true, false);
+                    // All PBR opaque & mask geometry rasterizes to the visibility buffer and depth: the first four buckets.
+                    MeshletDrawCursor cursor = beginMeshletDraws();
+                    drawMeshletBucket(cmd, cursor, RenderBucket::Opaque, *m_visibilityPipeline, NRI::CullMode::Back, true, false);
+                    drawMeshletBucket(cmd, cursor, RenderBucket::OpaqueDoubleSided, *m_visibilityPipeline, NRI::CullMode::None, true, false);
+                    drawMeshletBucket(cmd, cursor, RenderBucket::Mask, *m_visibilityPipeline, NRI::CullMode::Back, true, false);
+                    drawMeshletBucket(cmd, cursor, RenderBucket::MaskDoubleSided, *m_visibilityPipeline, NRI::CullMode::None, true, false);
                 }
             });
     }
@@ -66,7 +89,7 @@ namespace Nox
     void Renderer::addGBufferPass()
     {
         const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
-        const bool resolveMaterials = m_gbufferPipeline && m_frame.baseInstanceAddress != 0;
+        const bool resolveMaterials = m_gbufferPipeline && !m_drawInstances.empty();
 
         // Decoupled material resolve, or only the clears when the scene has no meshes (entity IDs must read -1 for
         // picking, and later passes still find defined G-buffer contents).
@@ -75,6 +98,7 @@ namespace Nox
             {
                 if (resolveMaterials)
                     builder.Read(resources.Visibility);
+                    ReadGpuScene(builder, resources);
                 builder.ColorTarget(resources.GBufferAlbedo, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });   // RGBA8
                 builder.ColorTarget(resources.GBufferNormal, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });   // RGBA16F world normal
                 builder.ColorTarget(resources.GBufferMaterial, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f }); // roughness, metallic, workflow
@@ -107,7 +131,6 @@ namespace Nox
 
                 shaderio::PushConstantVisibilityDebug gbufferPush{};
                 gbufferPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
-                gbufferPush.instanceReference = m_frame.baseInstanceAddress;
 
                 bool hasBoneBuffers = frameIndex < m_boneBuffers.size() && m_boneBuffers[frameIndex] != nullptr;
                 bool hasBones = !m_boneMatrices.empty();
@@ -157,16 +180,16 @@ namespace Nox
                     builder.Read(resources.DDGIDistance[m_frame.ddgiWriteIndex]);
                 }
                 builder.SetRenderArea(m_frame.renderExtent);
+                ReadGpuScene(builder, resources);
             },
             [this, res = &resources, drawProbes](RGPassContext& context)
             {
                 NRI::CommandBuffer& cmd = context.Cmd();
                 const uint32_t totalDDGIProbes = m_frame.totalDDGIProbes;
-                // Unlit and transparent queues follow the four opaque/mask queues in the indirect buffer.
-                MeshletDrawCursor cursor = beginMeshletDraws(m_opaqueCount + m_opaqueDoubleSidedCount + m_maskCount + m_maskDoubleSidedCount);
+                MeshletDrawCursor cursor = beginMeshletDraws();
 
                 // A. UNLIT MESHES
-                if (m_unlitPipeline && (m_unlitCount > 0 || m_unlitDoubleSidedCount > 0))
+                if (m_unlitPipeline && (getBucketDrawCount(RenderBucket::Unlit) > 0 || getBucketDrawCount(RenderBucket::UnlitDoubleSided) > 0))
                 {
                     cursor.boundPipeline = nullptr;
                     cmd.setDepthTestEnable(true);
@@ -177,8 +200,8 @@ namespace Nox
                     cmd.setColorBlendEnable(1, false);
                     cmd.setColorWriteMask(1, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
 
-                    drawMeshletQueue(cmd, cursor, m_unlitCount, *m_unlitPipeline, NRI::CullMode::Back, true, false);
-                    drawMeshletQueue(cmd, cursor, m_unlitDoubleSidedCount, *m_unlitPipeline, NRI::CullMode::None, true, false);
+                    drawMeshletBucket(cmd, cursor, RenderBucket::Unlit, *m_unlitPipeline, NRI::CullMode::Back, true, false);
+                    drawMeshletBucket(cmd, cursor, RenderBucket::UnlitDoubleSided, *m_unlitPipeline, NRI::CullMode::None, true, false);
                 }
 
                 // B. SKYBOX (Tested against depth == 0.0)
@@ -202,8 +225,8 @@ namespace Nox
                 }
 
                 // C. TRANSPARENT FORWARD PASS (Back-to-front sorted, Alpha Blending)
-                bool hasAnyTransparent = m_transparentCount > 0 || m_transparentDoubleSidedCount > 0 ||
-                                          m_transparentUnlitCount > 0 || m_transparentUnlitDoubleSidedCount > 0;
+                bool hasAnyTransparent = getBucketDrawCount(RenderBucket::Transparent) > 0 || getBucketDrawCount(RenderBucket::TransparentDoubleSided) > 0 ||
+                                          getBucketDrawCount(RenderBucket::TransparentUnlit) > 0 || getBucketDrawCount(RenderBucket::TransparentUnlitDoubleSided) > 0;
                 if (m_unlitPipeline && m_transparentLitPipeline && hasAnyTransparent)
                 {
                     cursor.boundPipeline = nullptr;
@@ -222,10 +245,10 @@ namespace Nox
                     // CullMode matches each object's own doubleSided flag (mirroring the opaque/mask queues): a closed,
                     // single-sided translucent shape needs its own backface culled, or both hemispheres blend on top of
                     // each other and wash the result out.
-                    drawMeshletQueue(cmd, cursor, m_transparentCount, *m_transparentLitPipeline, NRI::CullMode::Back, false, true);
-                    drawMeshletQueue(cmd, cursor, m_transparentDoubleSidedCount, *m_transparentLitPipeline, NRI::CullMode::None, false, true);
-                    drawMeshletQueue(cmd, cursor, m_transparentUnlitCount, *m_unlitPipeline, NRI::CullMode::Back, false, true);
-                    drawMeshletQueue(cmd, cursor, m_transparentUnlitDoubleSidedCount, *m_unlitPipeline, NRI::CullMode::None, false, true);
+                    drawMeshletBucket(cmd, cursor, RenderBucket::Transparent, *m_transparentLitPipeline, NRI::CullMode::Back, false, true);
+                    drawMeshletBucket(cmd, cursor, RenderBucket::TransparentDoubleSided, *m_transparentLitPipeline, NRI::CullMode::None, false, true);
+                    drawMeshletBucket(cmd, cursor, RenderBucket::TransparentUnlit, *m_unlitPipeline, NRI::CullMode::Back, false, true);
+                    drawMeshletBucket(cmd, cursor, RenderBucket::TransparentUnlitDoubleSided, *m_unlitPipeline, NRI::CullMode::None, false, true);
 
                     cmd.setColorBlendEnable(0, false);
                     cmd.setDepthWriteEnable(true);

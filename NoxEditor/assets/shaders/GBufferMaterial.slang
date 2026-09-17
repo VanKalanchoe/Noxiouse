@@ -152,13 +152,13 @@
         }
 
         // Decode Visibility Buffer IDs
-        uint drawID = visData.x - 1;
+        uint instanceSlot = visData.x - 1;
         uint meshletID = visData.y >> 8;
         uint primitiveID = visData.y & 0xFF;
 
         // Pull Instance
-        InstanceData* instances = (InstanceData*)pushConstant.instanceReference;
-        InstanceData instance = instances[drawID];
+        SceneInstances instances = SceneInstances(ubo);
+        InstanceData instance = instances[instanceSlot];
 
         // Pull Page Tables
         uint64_t* drawsPageTable  = (uint64_t*)pushConstant.meshletDrawsPageTableReference;
@@ -315,6 +315,10 @@
             float3 geomNormal = (lenNorm > 1e-6) ? (rawGeomNorm / lenNorm) : normalize(triNorm);
 
         float3 worldPos = worldPos0.xyz * w0 + worldPos1.xyz * w1 + worldPos2.xyz * w2;
+        // Where this surface point was last frame (per-object motion; skinning uses this frame's pose).
+        float3 previousWorldPos = mul(instance.previousModelMatrix, localPos0).xyz * w0 +
+                                  mul(instance.previousModelMatrix, localPos1).xyz * w1 +
+                                  mul(instance.previousModelMatrix, localPos2).xyz * w2;
         float3 worldPos_dx = worldPos0.xyz * w0_dx + worldPos1.xyz * w1_dx + worldPos2.xyz * w2_dx;
         float3 worldPos_dy = worldPos0.xyz * w0_dy + worldPos1.xyz * w1_dy + worldPos2.xyz * w2_dy;
         float3 ddx_pos = worldPos_dx - worldPos;
@@ -486,7 +490,7 @@
 
         // --- Screen-Space Motion Vector (Jitter-Free) ---
         float4 currClip = mul(ubo->nonJitteredProj, mul(ubo->view, float4(worldPos, 1.0)));
-        float4 prevClip = mul(ubo->prevProj, mul(ubo->prevView, float4(worldPos, 1.0)));
+        float4 prevClip = mul(ubo->prevProj, mul(ubo->prevView, float4(previousWorldPos, 1.0)));
 
         float2 currNDC = currClip.xy / currClip.w;
         float2 prevNDC = prevClip.xy / prevClip.w;

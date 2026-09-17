@@ -112,7 +112,7 @@ float2 sample_vogel_disk(uint sampleIndex, uint sampleCount, float phiOffset, fl
 }
 
 // Barycentric UV Interpolation for Alpha Testing
-float2 intersection_uv(InstanceLUT lut, uint primIndex, float2 barycentrics)
+float2 intersection_uv(GpuRayTracingInstance lut, uint primIndex, float2 barycentrics)
 {
     if (lut.vertexBufferAddress == 0) return float2(0.0);
     uint32_t* indices = (uint32_t*)lut.indexBufferAddress;
@@ -141,7 +141,7 @@ float2 intersection_uv(InstanceLUT lut, uint primIndex, float2 barycentrics)
 
 bool trace_visibility_alpha(
     UniformBufferObject* ubo,
-    InstanceLUT* instanceLUTBuffer,
+    GpuRayTracingInstance* instanceLUTBuffer,
     SamplerState textureSampler,
     float3 origin,
     float3 direction,
@@ -168,7 +168,7 @@ bool trace_visibility_alpha(
     {
         uint sInst = shadowQuery.CandidateRayInstanceCustomIndex();
         uint sPrim = shadowQuery.CandidatePrimitiveIndex();
-        InstanceLUT sLut = instanceLUTBuffer[sInst];
+        GpuRayTracingInstance sLut = instanceLUTBuffer[sInst];
         if (sLut.alphaMode == 0 || sLut.baseColorTextureIndex == 0xFFFFFFFF)
         {
             shadowQuery.CommitNonOpaqueTriangleHit();
@@ -189,7 +189,7 @@ bool trace_visibility_alpha(
 
 float evaluate_soft_visibility_alpha(
     UniformBufferObject* ubo,
-    InstanceLUT* instanceLUTBuffer,
+    GpuRayTracingInstance* instanceLUTBuffer,
     SamplerState textureSampler,
     LightData light,
     float3 worldPos,
@@ -276,7 +276,7 @@ PSOutput fragMain(
     uint pointer = RTXDI_ReservoirPositionToPointer(resParams, pixelCoord, 0);
     RTXDI_PackedGIReservoir* reservoirBuffer = (RTXDI_PackedGIReservoir*)pushConstant.reservoirBufferReference;
 
-    if (ubo->tlasDeviceAddress == 0 || ubo->instanceLUTReference == 0)
+    if (ubo->tlasDeviceAddress == 0 || ubo->sceneRayTracingInstancesReference == 0)
     {
         reservoirBuffer[pointer] = (RTXDI_PackedGIReservoir)0;
         return outVal;
@@ -339,7 +339,7 @@ PSOutput fragMain(
 
     rq.TraceRayInline(accelerationStructure, rayFlags, 0xFF, diffuseRay);
 
-    InstanceLUT* instanceLUTBuffer = (InstanceLUT*)ubo->instanceLUTReference;
+    GpuRayTracingInstance* instanceLUTBuffer = (GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference;
     SamplerState textureSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
 
     while (rq.Proceed())
@@ -347,7 +347,7 @@ PSOutput fragMain(
         uint instanceID = rq.CandidateRayInstanceCustomIndex();
         uint primIndex = rq.CandidatePrimitiveIndex();
 
-        InstanceLUT lut = instanceLUTBuffer[instanceID];
+        GpuRayTracingInstance lut = instanceLUTBuffer[instanceID];
 
         if (lut.alphaMode == 0 || lut.baseColorTextureIndex == 0xFFFFFFFF)
         {
@@ -395,7 +395,7 @@ PSOutput fragMain(
         uint committedPrimIndex = rq.CommittedPrimitiveIndex();
         float2 committedBary = rq.CommittedTriangleBarycentrics();
 
-        InstanceLUT hitLut = instanceLUTBuffer[committedInstanceID];
+        GpuRayTracingInstance hitLut = instanceLUTBuffer[committedInstanceID];
         if (hitLut.vertexBufferAddress == 0)
         {
             reservoirBuffer[pointer] = (RTXDI_PackedGIReservoir)0;
@@ -567,7 +567,7 @@ PSOutput fragMain(
                 {
                     uint bInst = brq.CandidateRayInstanceCustomIndex();
                     uint bPrim = brq.CandidatePrimitiveIndex();
-                    InstanceLUT bLut = instanceLUTBuffer[bInst];
+                    GpuRayTracingInstance bLut = instanceLUTBuffer[bInst];
                     if (bLut.alphaMode == 0 || bLut.baseColorTextureIndex == 0xFFFFFFFF)
                     {
                         brq.CommitNonOpaqueTriangleHit();
@@ -605,7 +605,7 @@ PSOutput fragMain(
                 float2 cBary = brq.CommittedTriangleBarycentrics();
                 float cT = brq.CommittedRayT();
 
-                InstanceLUT cLut = instanceLUTBuffer[cInst];
+                GpuRayTracingInstance cLut = instanceLUTBuffer[cInst];
                 if (cLut.vertexBufferAddress == 0) break;
 
                 uint32_t* cIndices = (uint32_t*)cLut.indexBufferAddress;

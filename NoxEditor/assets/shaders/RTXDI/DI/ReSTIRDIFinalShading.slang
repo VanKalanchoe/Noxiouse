@@ -197,7 +197,7 @@ void build_orthonormal_basis(float3 n, out float3 b1, out float3 b2)
     b2 = float3(b, sign + n.y * n.y * a, -n.y);
 }
 
-float2 intersection_uv(InstanceLUT lut, uint primIndex, float2 barycentrics)
+float2 intersection_uv(GpuRayTracingInstance lut, uint primIndex, float2 barycentrics)
 {
     if (lut.vertexBufferAddress == 0)
     {
@@ -246,20 +246,20 @@ bool trace_visibility(float3 origin, float3 direction, float maxDist)
         RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH,
         0xFF, shadowRay);
 
-    if (g_UBO->instanceLUTReference == 0)
+    if (g_UBO->sceneRayTracingInstancesReference == 0)
     {
         shadowQuery.Proceed();
         return shadowQuery.CommittedStatus() != COMMITTED_TRIANGLE_HIT;
     }
 
-    InstanceLUT* instanceLUTBuffer = (InstanceLUT*)g_UBO->instanceLUTReference;
+    GpuRayTracingInstance* instanceLUTBuffer = (GpuRayTracingInstance*)g_UBO->sceneRayTracingInstancesReference;
     SamplerState textureSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
 
     while (shadowQuery.Proceed())
     {
         uint instanceID = shadowQuery.CandidateRayInstanceCustomIndex();
         uint primIndex = shadowQuery.CandidatePrimitiveIndex();
-        InstanceLUT lut = instanceLUTBuffer[instanceID];
+        GpuRayTracingInstance lut = instanceLUTBuffer[instanceID];
 
         if (lut.alphaMode == 0 || lut.baseColorTextureIndex == 0xFFFFFFFF)
         {

@@ -5,6 +5,7 @@
 #include "NoxCore/Core/Window.h"
 #include "Mesh.h"
 #include "PagedAllocator.h"
+#include "GpuScene.h"
 #include "NoxCore/RenderGraph/RenderGraph.h"
 
 // Forward declaration only -- the RTXDI SDK must never be #included from this header (it's engine-
@@ -107,69 +108,6 @@ namespace Nox
         std::vector<int32_t> pixels;
     };
 
-    struct DrawMeshTasksIndirectCommand
-    {
-        uint32_t groupCountX;
-        uint32_t groupCountY;
-        uint32_t groupCountZ;
-    };
-
-    struct RenderPacket
-    {
-        shaderio::InstanceData instance;
-        DrawMeshTasksIndirectCommand command;
-        float distanceToCamera; // Only really needed for transparent objects now
-        uint32_t blasId = UINT32_MAX;
-    };
-
-    enum class RenderQueue : uint32_t
-    {
-        Opaque,
-        OpaqueDoubleSided,
-        Mask,
-        MaskDoubleSided,
-        Unlit,
-        UnlitDoubleSided,
-        Transparent,
-        TransparentDoubleSided,
-        TransparentUnlit,
-        TransparentUnlitDoubleSided,
-        Count
-    };
-
-    // Filled by one mesh submission task; merged into the render queues in chunk order (Renderer::EndMeshSubmission).
-    struct MeshSubmissionChunk
-    {
-        std::array<std::vector<RenderPacket>, static_cast<size_t>(RenderQueue::Count)> queues;
-        std::vector<glm::mat4> boneMatrices;
-        std::vector<AssetHandle> missingAssets;
-        std::vector<std::string> unresolvedTexturePaths;
-    };
-
-    // The Render Queues
-    // The Render Queues (Matching Sascha Willems 1:1)
-    inline std::vector<RenderPacket> m_opaqueQueue;
-    inline std::vector<RenderPacket> m_opaqueDoubleSidedQueue;
-    inline std::vector<RenderPacket> m_maskQueue;
-    inline std::vector<RenderPacket> m_maskDoubleSidedQueue;
-    inline std::vector<RenderPacket> m_unlitQueue;
-    inline std::vector<RenderPacket> m_unlitDoubleSidedQueue;
-    inline std::vector<RenderPacket> m_transparentQueue;
-    inline std::vector<RenderPacket> m_transparentDoubleSidedQueue;
-    inline std::vector<RenderPacket> m_transparentUnlitQueue;
-    inline std::vector<RenderPacket> m_transparentUnlitDoubleSidedQueue;
-
-    inline uint32_t m_opaqueCount = 0;
-    inline uint32_t m_opaqueDoubleSidedCount = 0;
-    inline uint32_t m_maskCount = 0;
-    inline uint32_t m_maskDoubleSidedCount = 0;
-    inline uint32_t m_unlitCount = 0;
-    inline uint32_t m_unlitDoubleSidedCount = 0;
-    inline uint32_t m_transparentCount = 0;
-    inline uint32_t m_transparentDoubleSidedCount = 0;
-    inline uint32_t m_transparentUnlitCount = 0;
-    inline uint32_t m_transparentUnlitDoubleSidedCount = 0;
-
     class Renderer
     {
     public:
@@ -239,15 +177,25 @@ namespace Nox
         void BeginScene(const Camera& camera, const glm::mat4& cameraWorldMatrix);
         void BeginScene(const EditorCamera& camera);
         void EndScene();
-        void BuildBuffers();
 
-        // Parallel mesh submission (§5.2): main thread Begin, one task per chunk calls SubmitMesh with its chunk index, main
-        // thread End merges the chunks in chunk order, so the instance order is the same as a serial loop.
-        void BeginMeshSubmission(uint32_t chunkCount);
-        void SubmitMesh(uint32_t chunkIndex, const glm::mat4& transform, const MeshComponent& mesh, const MaterialComponent* material, int entityID, const std::vector<glm::mat4>* boneTransforms = nullptr);
-        // Also resolves texture paths the tasks could not; handles of assets that are not loaded yet are appended to
-        // outMissingAssets (load them on the main thread; they draw from the next frame).
-        void EndMeshSubmission(std::vector<AssetHandle>& outMissingAssets);
+        // GPU scene (§5.5), main thread. Mesh entities live on the GPU until their owner changes them; the renderer
+        // uploads only what changed.
+        // The scene that renders registers its entities. Returns true when sceneID takes over: every instance of the
+        // previous owner is gone and the scene registers all of its entities again.
+        bool BindGpuScene(uint64_t sceneID);
+        // One instance per drawn submesh, appended to outInstances. Returns false when an asset is not loaded yet (appended
+        // to outMissingAssets, load it on the main thread): the entity is registered with what is loaded and has to be
+        // registered again once it is.
+        bool AddMeshInstances(const glm::mat4& world, const MeshComponent& mesh, const MaterialComponent* material, int32_t entityID,
+                              std::vector<uint32_t>& outInstances, std::vector<AssetHandle>& outMissingAssets);
+        void RemoveMeshInstances(std::span<const uint32_t> instances);
+        void SetMeshInstancesTransform(std::span<const uint32_t> instances, const glm::mat4& world);
+        // Skinned instances, every frame: this frame's joint matrices.
+        void SetMeshInstancesBones(std::span<const uint32_t> instances, std::span<const glm::mat4> bones);
+        // Entities whose instances lost their mesh (it was unloaded) since the last call: register them again.
+        void ConsumeInvalidatedMeshEntities(std::vector<int32_t>& outEntityIDs) { outEntityIDs.swap(m_invalidatedMeshEntities); m_invalidatedMeshEntities.clear(); }
+        // A material asset's data was edited: instances using it shade with the new data from this frame.
+        static void MarkMaterialChanged(AssetHandle material);
 
         void SubmitLight(const glm::mat4& transform, const DirectionalLightComponent& light);
         void SubmitLight(const glm::mat4& transform, const PointLightComponent& light);
@@ -489,11 +437,13 @@ namespace Nox
 
     private:
         template <typename MeshAsset>
-        void submitSubmeshes(MeshSubmissionChunk& chunk, const glm::mat4& transform, const MeshAsset& mesh, const MeshComponent& src,
-                             const MaterialComponent* material, int entityID, const std::vector<glm::mat4>* boneTransforms);
-        void submitSubmesh(MeshSubmissionChunk& chunk, const glm::mat4& transform, const glm::mat4& normalMatrix, const MeshHandle& handle,
-                           const MaterialData& meshMaterial, AssetHandle materialAsset, int entityID, const std::vector<glm::mat4>* boneTransforms);
-        std::vector<RenderPacket>& getRenderQueue(RenderQueue queue);
+        bool addSubmeshInstances(const glm::mat4& world, const MeshAsset& mesh, const MeshComponent& component, const MaterialComponent* material,
+                                 int32_t entityID, std::vector<uint32_t>& outInstances, std::vector<AssetHandle>& outMissingAssets);
+        // Shared material record of a submesh: its material asset when loaded, else the mesh's embedded material.
+        uint32_t acquireGpuMaterial(uint64_t meshAsset, uint32_t submesh, const MaterialData& meshMaterial, AssetHandle materialAsset,
+                                    bool& outComplete, std::vector<AssetHandle>& outMissingAssets);
+        // Re-packs materials whose texture slots may have changed (texture imported or unloaded).
+        void refreshGpuMaterials();
         void readPickResult(uint32_t frameSlot);
         void readInspectionProbe(uint32_t frameSlot);
 
@@ -555,7 +505,7 @@ namespace Nox
         void initGeometryBuffers();
         void markPageTablesDirty();
         void createUniformBuffers();
-        void createInstanceBuffer(uint64_t bufferSize);
+        void createDrawInstanceBuffer(uint64_t bufferSize);
         void createIndirectBuffer(uint64_t bufferSize);
         void createSelectedEntityIDBuffers();
         void createDescriptorHeaps();
@@ -569,6 +519,7 @@ namespace Nox
         // Start of every frame command buffer: descriptor heaps and the dynamic state every pass builds on.
         void applyCommandBufferBaseline(NRI::CommandBuffer& cmd) const;
         void prepareFrameGraph(uint32_t imageIndex);
+        void addGpuSceneUpdatePass();
         void addTLASBuildPass();
         void addVisibilityPass();
         void addGBufferPass();
@@ -595,19 +546,21 @@ namespace Nox
         void addTextureInspection();
         // After Compile: writes the bindless slots of graph-owned textures into the uniforms uploaded for this frame.
         void resolveFrameUniforms();
-        // Indirect meshlet draws of consecutive render queues (one indirect command per instance, queues packed in
-        // BuildBuffers order). Each pass keeps its own cursor: passes may record in parallel.
+        // Indirect meshlet draws of the draw list's buckets (one indirect command per instance, buckets in RenderBucket
+        // order). Each pass keeps its own cursor: passes may record in parallel.
         struct MeshletDrawCursor
         {
             shaderio::PushConstantMeshlets references{};
-            uint32_t instanceOffset = 0;
             NRI::Pipeline* boundPipeline = nullptr;
         };
-        MeshletDrawCursor beginMeshletDraws(uint32_t firstInstance) const;
-        void drawMeshletQueue(NRI::CommandBuffer& cmd, MeshletDrawCursor& cursor, uint32_t count, NRI::Pipeline& pipeline, NRI::CullMode cullMode, bool depthWrite, bool blendEnable) const;
+        MeshletDrawCursor beginMeshletDraws() const;
+        void drawMeshletBucket(NRI::CommandBuffer& cmd, MeshletDrawCursor& cursor, RenderBucket bucket, NRI::Pipeline& pipeline, NRI::CullMode cullMode, bool depthWrite, bool blendEnable) const;
+        uint32_t getBucketDrawCount(RenderBucket bucket) const { return m_drawBucketCounts[static_cast<size_t>(bucket)]; }
         void updateEntityIDBuffer(uint32_t currentImage);
         void updateUniformBuffer(uint32_t currentImage);
-        void updateInstanceAndIndirectBuffer(uint32_t currentImage);
+        // This frame's draw lists and GPU scene uploads (staged for the GPU Scene Update pass).
+        void updateGpuScene(uint32_t currentImage);
+        void updateDrawListBuffers(uint32_t currentImage);
         void processDeferredDeletions();
         void processDeferredMeshFrees();
         std::vector<char> readFile(const std::string& filename);
@@ -672,7 +625,6 @@ namespace Nox
             uint32_t imageIndex = 0;
             NRI::Extent2D renderExtent{};  // what DLSS upscales from
             NRI::Extent2D outputExtent{};  // editor viewport / swapchain
-            uint64_t baseInstanceAddress = 0;
             shaderio::PushConstantMeshlets meshletReferences{};
             bool resetNRD = false;
             bool resetDLSS = false;
@@ -933,10 +885,6 @@ namespace Nox
         Ref<Texture2D> m_textureResource3;
         uint32_t mipLevels;
 
-        // Parallel mesh submission: chunks keep their capacity across frames.
-        std::vector<MeshSubmissionChunk> m_meshSubmissionChunks;
-        uint32_t m_meshSubmissionChunkCount = 0;
-
         // Animations
         std::vector<glm::mat4> m_boneMatrices;
         std::vector<std::unique_ptr<NRI::Buffer>> m_boneBuffers;
@@ -990,7 +938,7 @@ namespace Nox
         void endUploadBatch();
         // --- Hardware Ray Tracing: Scene TLAS ---
         void updateSceneAccelerationStructure(uint32_t currentFrameIndex);
-        void BuildSceneAccelerationStructure(NRI::CommandBuffer& cmd, bool fullBuild);
+        void BuildSceneAccelerationStructure(NRI::CommandBuffer& cmd);
 
         bool m_rayTracingEnabled = false;
         bool m_rayTracingShadows = false;
@@ -1001,18 +949,12 @@ namespace Nox
         std::unique_ptr<NRI::AccelerationStructure> m_sceneTLAS;
         std::unique_ptr<NRI::Buffer> m_tlasBuffer;
         std::unique_ptr<NRI::Buffer> m_tlasScratchBuffer;
-        std::vector<std::unique_ptr<NRI::Buffer>> m_instanceLUTBuffers;
-        std::vector<std::unique_ptr<NRI::Buffer>> m_rtInstanceBuffers;
+        std::vector<std::unique_ptr<NRI::Buffer>> m_rtInstanceBuffers; // per frame slot, written when this frame builds
         uint32_t m_sceneTLASCapacity = 0;
         uint32_t m_tlasHeapIndex = 0;
         uint32_t m_tlasHeapSlot = ~0u;
         bool m_hasTLASBuild = false;
-        bool m_tlasNeedFullBuild = false;
-        bool m_tlasNeedUpdate = false;
-        uint64_t m_tlasInstanceSignature = 0;
-        bool m_tlasInstanceSignatureValid = false;
-        uint64_t m_tlasStructureSignature = 0;
-        bool m_tlasStructureSignatureValid = false;
+        bool m_tlasNeedBuild = true; // sticky until a build is recorded (also while ray tracing is off)
         NRI::AccelerationStructureBuildDesc m_tlasBuildDesc{};
 
         std::vector<std::unique_ptr<NRI::Buffer>> m_vertexPageTableBuffers;
@@ -1029,15 +971,22 @@ namespace Nox
         bool m_pageTablesDirty[MAX_FRAMES_IN_FLIGHT] = {true, true, /* add 'true' for however many max frames you have */};
         uint64_t m_PageTableCapacity = 16; // Capacity in number of uint64_t elements
 
-        uint64_t m_IndirectBufferCapacity = 0;
+        // GPU scene and this frame's draw lists (instance slot + indirect command per draw, per frame slot)
+        GpuScene m_gpuScene;
+        uint64_t m_gpuSceneOwner = 0;
+        std::vector<int32_t> m_invalidatedMeshEntities;
+        bool m_gpuMaterialsDirty = false;
+        std::vector<uint32_t> m_drawInstances;
         std::vector<DrawMeshTasksIndirectCommand> m_drawMeshTasksIndirectCommands;
+        std::array<uint32_t, RenderBucketCount> m_drawBucketCounts{};
+
+        uint64_t m_IndirectBufferCapacity = 0;
         std::vector<std::unique_ptr<NRI::Buffer>> m_indirectBuffers;
         std::vector<void*> m_indirectBuffersMapped;
 
-        uint64_t m_InstanceBufferCapacity = 0;
-        std::vector<shaderio::InstanceData> m_instanceBufferObjects;
-        std::vector<std::unique_ptr<NRI::Buffer>> m_instanceBuffers;
-        std::vector<void*> m_instanceBuffersMapped;
+        uint64_t m_DrawInstanceBufferCapacity = 0;
+        std::vector<std::unique_ptr<NRI::Buffer>> m_drawInstanceBuffers;
+        std::vector<void*> m_drawInstanceBuffersMapped;
 
         uint32_t frameIndex = 0;
 

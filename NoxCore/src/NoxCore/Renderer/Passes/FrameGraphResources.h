@@ -63,6 +63,13 @@ namespace Nox
         RGTexture DLSSOutput;
         RGBuffer TLAS;
         RGBuffer PickerStaging;
+
+        // GPU scene tables
+        RGBuffer SceneInstances;
+        RGBuffer SceneTransforms;
+        RGBuffer SceneMaterials;
+        RGBuffer SceneMeshes;
+        RGBuffer SceneRayTracingInstances;
     };
 
     // Declares a read only when the resource exists.
@@ -76,6 +83,16 @@ namespace Nox
     {
         if (buffer.IsValid())
             builder.Read(buffer);
+    }
+
+    // Passes that draw or trace the scene read the GPU scene tables (through the uniforms).
+    inline void ReadGpuScene(RGBuilder& builder, const FrameGraphResources& resources)
+    {
+        ReadIfValid(builder, resources.SceneInstances);
+        ReadIfValid(builder, resources.SceneTransforms);
+        ReadIfValid(builder, resources.SceneMaterials);
+        ReadIfValid(builder, resources.SceneMeshes);
+        ReadIfValid(builder, resources.SceneRayTracingInstances);
     }
 
     // The HDR image this frame's lighting produced (DLSS or post-process input): ReSTIR PT, else the plain path tracer,

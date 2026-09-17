@@ -27,6 +27,7 @@ namespace Nox
         BufferAllocation meshletVertices;
         BufferAllocation meshletTriangles;
         uint32_t blasId = UINT32_MAX;
+        uint32_t gpuSceneMesh = UINT32_MAX; // GPU scene mesh slot
         
         uint32_t GetFirstMeshlet() const { return meshletDraws.offset; }
         uint32_t GetMeshletCount() const { return meshletDraws.count; }

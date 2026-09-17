@@ -588,10 +588,11 @@ namespace Nox
             }
         });
 
-        DrawComponent<MeshComponent>("Mesh", entity, [](auto& component)
+        DrawComponent<MeshComponent>("Mesh", entity, [entity](auto& component)
         {
             std::string label = "None";
             bool isMeshValid = false;
+            bool changed = false;
 
             // 1. Resolve the current mesh name if one is assigned
             if (component.Mesh != 0)
@@ -637,6 +638,7 @@ namespace Nox
                     {
                         component.Mesh = handle;
                         component.SubmeshIndex = 0;
+                        changed = true;
                     }
                     else
                     {
@@ -655,14 +657,19 @@ namespace Nox
                 if (ImGui::Button("X", ImVec2(buttonSize, buttonSize)))
                 {
                     component.Mesh = 0;
+                    changed = true;
                 }
 
-                ImGui::DragScalar("Submesh Index", ImGuiDataType_U32, &component.SubmeshIndex, 0.1f, nullptr, nullptr, "%u");
-                ImGui::DragScalar("Submesh Count", ImGuiDataType_U32, &component.SubmeshCount, 0.1f, nullptr, nullptr, "%u");
+                changed |= ImGui::DragScalar("Submesh Index", ImGuiDataType_U32, &component.SubmeshIndex, 0.1f, nullptr, nullptr, "%u");
+                changed |= ImGui::DragScalar("Submesh Count", ImGuiDataType_U32, &component.SubmeshCount, 0.1f, nullptr, nullptr, "%u");
             }
 
             ImGui::SameLine();
             ImGui::Text("Mesh Asset");
+
+            // The renderer's GPU scene re-registers the entity.
+            if (changed)
+                entity.PatchComponent<MeshComponent>();
         });
 
         DrawComponent<MaterialComponent>("Material", entity, [this, entity](auto& component)
@@ -677,7 +684,10 @@ namespace Nox
                         AssetHandle handle = *(const AssetHandle*)payload->Data;
                         if (AssetManager::IsAssetHandleValid(handle) &&
                             AssetManager::GetAssetType(handle) == AssetType::Material)
+                        {
                             component.MaterialAssets.push_back(handle);
+                            entity.PatchComponent<MaterialComponent>();
+                        }
                     }
                     ImGui::EndDragDropTarget();
                 }
@@ -736,7 +746,10 @@ namespace Nox
                                 AssetHandle droppedHandle = *(const AssetHandle*)payload->Data;
                                 if (AssetManager::IsAssetHandleValid(droppedHandle) &&
                                     AssetManager::GetAssetType(droppedHandle) == AssetType::Material)
+                                {
                                     component.MaterialAssets[i] = droppedHandle;
+                                    entity.PatchComponent<MaterialComponent>();
+                                }
                             }
                             ImGui::EndDragDropTarget();
                         }
@@ -765,6 +778,7 @@ namespace Nox
                                                 uniqueMetadata.FilePath == uniquePath)
                                             {
                                                 component.MaterialAssets[i] = uniqueHandle;
+                                                entity.PatchComponent<MaterialComponent>();
                                                 break;
                                             }
                                         }
@@ -772,9 +786,23 @@ namespace Nox
                                 }
 
                                 bool changed = false;
-                                changed |= ImGui::ColorEdit4("Base Color", glm::value_ptr(data.BaseColorFactor));
-                                changed |= ImGui::DragFloat("Metallic", &data.MetallicFactor, 0.01f, 0.0f, 1.0f);
-                                changed |= ImGui::DragFloat("Roughness", &data.RoughnessFactor, 0.01f, 0.0f, 1.0f);
+                                // The renderer shades with the factors of the material's workflow only (PackMaterial):
+                                // specular-glossiness materials (e.g. Bistro) use Diffuse/Specular/Glossiness.
+                                const bool specularGlossiness = data.Workflow == 1.0f;
+                                if (specularGlossiness)
+                                {
+                                    ImGui::TextDisabled("Workflow: Specular-Glossiness");
+                                    changed |= ImGui::ColorEdit4("Diffuse", glm::value_ptr(data.DiffuseFactor));
+                                    changed |= ImGui::ColorEdit3("Specular", glm::value_ptr(data.SpecularFactor));
+                                    changed |= ImGui::DragFloat("Glossiness", &data.SpecularFactor.a, 0.01f, 0.0f, 1.0f);
+                                }
+                                else
+                                {
+                                    ImGui::TextDisabled("Workflow: Metallic-Roughness");
+                                    changed |= ImGui::ColorEdit4("Base Color", glm::value_ptr(data.BaseColorFactor));
+                                    changed |= ImGui::DragFloat("Metallic", &data.MetallicFactor, 0.01f, 0.0f, 1.0f);
+                                    changed |= ImGui::DragFloat("Roughness", &data.RoughnessFactor, 0.01f, 0.0f, 1.0f);
+                                }
                                 changed |= ImGui::ColorEdit3("Emissive", glm::value_ptr(data.EmissiveFactor));
                                 changed |= ImGui::DragFloat("Emissive Strength", &data.emissiveStrength, 0.01f, 0.0f, 100.0f);
                                 changed |= ImGui::DragFloat("Transmission", &data.TransmissionFactor, 0.01f, 0.0f, 1.0f);
@@ -811,8 +839,8 @@ namespace Nox
                                     }
                                 };
 
-                                drawTextureReference("Base Color Texture", "BaseColor", data.BaseColorTexturePath);
-                                drawTextureReference("Metallic Roughness", "MetallicRoughness", data.MetallicRoughnessTexturePath);
+                                drawTextureReference(specularGlossiness ? "Diffuse Texture" : "Base Color Texture", "BaseColor", data.BaseColorTexturePath);
+                                drawTextureReference(specularGlossiness ? "Specular Glossiness" : "Metallic Roughness", "MetallicRoughness", data.MetallicRoughnessTexturePath);
                                 drawTextureReference("Normal Texture", "Normal", data.NormalTexturePath);
                                 drawTextureReference("Occlusion Texture", "Occlusion", data.OcclusionTexturePath);
                                 drawTextureReference("Emissive Texture", "Emissive", data.EmissiveTexturePath);
@@ -832,6 +860,8 @@ namespace Nox
 
                                 if (changed)
                                 {
+                                    // Every instance using this material shades with the edit from this frame.
+                                    Renderer::MarkMaterialChanged(handle);
                                     const auto& metadata = Project::GetActive()->GetEditorAssetManager()->GetMetadata(handle);
                                     MaterialSerializer::Serialize(
                                         Project::GetActiveAssetDirectory() / metadata.FilePath,

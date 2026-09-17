@@ -46,6 +46,7 @@ namespace Nox
             {
                 builder.Read(resources.PathTracerAccum[readIndex]);
                 ReadIfValid(builder, resources.TLAS);
+                ReadGpuScene(builder, resources);
                 // Optional RTXDI primary-surface lighting (RTXPT-style hybrid).
                 if (frame.restirGIAdded)
                     builder.Read(resources.ReSTIRGIRaw);
@@ -205,6 +206,7 @@ namespace Nox
                     builder.Read(resources.DDGIDistance[frame.ddgiWriteIndex]);
                 }
                 ReadIfValid(builder, resources.TLAS);
+                ReadGpuScene(builder, resources);
                 builder.ColorTarget(resources.HDRScene, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 1.0f });
                 builder.SetRenderArea(frame.renderExtent);
             },

@@ -985,6 +985,15 @@ namespace Nox
 
             uint32_t totalInstances = (model.nodes_count > 0) ? model.nodes_count : model.meshes_count;
 
+            // Instancing: every glTF mesh is cooked once; each node referencing it points at the same submesh range, so
+            // geometry and BLAS exist once per unique mesh (glTF materials belong to primitives, so they are shared too).
+            struct SubmeshRange
+            {
+                uint32_t First = UINT32_MAX;
+                uint32_t Count = 0;
+            };
+            std::vector<SubmeshRange> meshSubmeshes(model.meshes_count);
+
             for (uint32_t instanceIdx = 0; instanceIdx < totalInstances; instanceIdx++)
             {
                 uint32_t meshIndex = 0;
@@ -1007,15 +1016,21 @@ namespace Nox
 
                 const tg3_mesh& mesh = model.meshes[meshIndex];
 
-                if (meshName.empty())
+                MeshNodeData& nodeData = outNodes[instanceIdx];
+                SubmeshRange& sharedRange = meshSubmeshes[meshIndex];
+                if (sharedRange.First != UINT32_MAX)
                 {
-                    if (mesh.name.data && mesh.name.len > 0)
-                        meshName = std::string(mesh.name.data, mesh.name.len);
-                    else
-                        meshName = "Instance_" + std::to_string(instanceIdx);
+                    nodeData.FirstSubmesh = sharedRange.First;
+                    nodeData.SubmeshCount = sharedRange.Count;
+                    continue;
                 }
 
-                MeshNodeData& nodeData = outNodes[instanceIdx];
+                // Submeshes are shared by every node using the mesh: name them after the mesh, not the first node.
+                if (mesh.name.data && mesh.name.len > 0)
+                    meshName = std::string(mesh.name.data, mesh.name.len);
+                else if (meshName.empty())
+                    meshName = "Instance_" + std::to_string(instanceIdx);
+
                 nodeData.FirstSubmesh = static_cast<uint32_t>(result.size());
             
             for (uint32_t primitiveIndex = 0; primitiveIndex < mesh.primitives_count; primitiveIndex++)
@@ -1629,6 +1644,7 @@ namespace Nox
             }
 
             nodeData.SubmeshCount = static_cast<uint32_t>(result.size()) - nodeData.FirstSubmesh;
+            sharedRange = { nodeData.FirstSubmesh, nodeData.SubmeshCount };
         }
 
         tg3_model_free(&model);

@@ -14,7 +14,7 @@ static RTXDI_PackedPTReservoir* g_PreservedReservoirBuffer;
 static PushConstantReSTIRPTInitial g_PushConstant;
 static UniformBufferObject* g_UBO;
 static LightData* g_LightData;
-static InstanceLUT* g_InstanceLUT;
+static GpuRayTracingInstance* g_InstanceLUT;
 
 // =========================================================================
 // RAB_Surface / RAB_Material -- v1: no PSR (Path Space Regularization / DLSS-RR guide) fields, no
@@ -981,7 +981,7 @@ struct RTXDI_InitialSamplingPathTracerContext
 // exactly, just packaged as a function returning RAB_Surface instead of writing loose locals).
 // =========================================================================
 
-float2 intersection_uv(InstanceLUT lut, uint primIndex, float2 barycentrics)
+float2 intersection_uv(GpuRayTracingInstance lut, uint primIndex, float2 barycentrics)
 {
     uint32_t* indices = (uint32_t*)lut.indexBufferAddress;
     uint i0 = indices[primIndex * 3 + 0];
@@ -994,7 +994,7 @@ float2 intersection_uv(InstanceLUT lut, uint primIndex, float2 barycentrics)
     return w0 * vertices[i0].uv0 + w1 * vertices[i1].uv0 + w2 * vertices[i2].uv0;
 }
 
-float3 perturb_normal(InstanceLUT lut, Vertex v0, Vertex v1, Vertex v2, float3 geomNormal, float2 hitUV, SamplerState textureSampler)
+float3 perturb_normal(GpuRayTracingInstance lut, Vertex v0, Vertex v1, Vertex v2, float3 geomNormal, float2 hitUV, SamplerState textureSampler)
 {
     if (lut.normalTextureIndex == 0xFFFFFFFF)
         return geomNormal;
@@ -1030,7 +1030,7 @@ RAB_Surface LoadSurfaceFromRayPayload(RAB_RayPayload rp, float3 rayOrigin, float
 {
     RAB_Surface surface = RAB_EmptySurface();
 
-    InstanceLUT lut = g_InstanceLUT[rp.instanceID];
+    GpuRayTracingInstance lut = g_InstanceLUT[rp.instanceID];
     uint32_t* indices = (uint32_t*)lut.indexBufferAddress;
     uint i0 = indices[rp.primitiveIndex * 3 + 0];
     uint i1 = indices[rp.primitiveIndex * 3 + 1];
@@ -1093,7 +1093,7 @@ float GetSurfaceDiffuseProbability(RAB_Surface surface)
     return sumWeights < 1e-7 ? 1.0 : (diffuseWeight / sumWeights);
 }
 
-float2 intersection_uv_candidate(InstanceLUT lut, uint primIndex, float2 barycentrics)
+float2 intersection_uv_candidate(GpuRayTracingInstance lut, uint primIndex, float2 barycentrics)
 {
     return intersection_uv(lut, primIndex, barycentrics);
 }
@@ -1124,7 +1124,7 @@ RAB_RayPayload TraceNextBounce(RayDesc ray)
     {
         uint instID = rq.CandidateRayInstanceCustomIndex();
         uint primIndex = rq.CandidatePrimitiveIndex();
-        InstanceLUT lut = g_InstanceLUT[instID];
+        GpuRayTracingInstance lut = g_InstanceLUT[instID];
 
         if (lut.alphaMode == 0 || lut.baseColorTextureIndex == 0xFFFFFFFF)
         {
@@ -1553,7 +1553,7 @@ PSOutput fragMain(
     g_PushConstant = pushConstant;
     g_UBO = (UniformBufferObject*)pushConstant.matrixReference;
     g_LightData = (LightData*)pushConstant.lightDataReference;
-    g_InstanceLUT = (InstanceLUT*)g_UBO->instanceLUTReference;
+    g_InstanceLUT = (GpuRayTracingInstance*)g_UBO->sceneRayTracingInstancesReference;
     g_ReservoirBuffer = (RTXDI_PackedPTReservoir*)pushConstant.reservoirBufferReference;
     g_PreservedReservoirBuffer = (RTXDI_PackedPTReservoir*)pushConstant.preservedReservoirReference;
 

@@ -100,30 +100,112 @@ struct Frustum
 #endif
 };
 
-struct InstanceLUT
+// GPU scene (§5.5): persistent tables indexed by slot, updated only where something changed (Renderer GpuScene).
+// An instance slot indexes both GpuInstance and GpuTransform; instances reference shared mesh and material slots.
+struct GpuInstance
+{
+    uint32_t meshIndex;        // GpuMesh slot
+    uint32_t materialIndex;    // GpuMaterial slot
+    uint32_t boneMatrixOffset; // 0xFFFFFFFF: not skinned
+    int32_t entityID;          // editor picking
+};
+
+struct GpuTransform
+{
+    mat4 world;
+    mat4 normal;        // transpose(inverse(world))
+    mat4 previousWorld; // world of the previous frame (per-object motion vectors)
+};
+
+struct GpuMaterial
+{
+    // Material Workflow & SpecGloss properties
+    float workflow; // 0.0 = Metallic-Roughness, 1.0 = Specular-Glossiness
+    vec4 diffuseFactor;
+    vec4 specularFactor; // rgb: specular factor, a: glossiness factor
+
+    vec4 baseColorFactor; // diffuseFactor for Specular-Glossiness
+    uint32_t baseColorTextureIndex;
+    int32_t baseColorTextureSet;
+
+    float metallicFactor;
+    float roughnessFactor;
+    uint32_t metallicRoughnessTextureIndex;
+    int32_t physicalDescriptorTextureSet;
+
+    uint32_t normalTextureIndex;
+    int32_t normalTextureSet;
+
+    uint32_t occlusionTextureIndex;
+    int32_t occlusionTextureSet;
+
+    vec3 emissiveFactor;
+    uint32_t emissiveTextureIndex;
+    int32_t emissiveTextureSet;
+    float emissiveStrength;
+
+    // Transmission (KHR_materials_transmission)
+    float transmissionFactor;
+    uint32_t transmissionTextureIndex;
+    int32_t transmissionTextureSet;
+
+    // Index of Refraction (KHR_materials_ior), glTF spec default is 1.5
+    float ior;
+
+    // Volume thickness (KHR_materials_volume), glTF spec default is 0.0 (infinitely thin)
+    float thickness;
+
+    uint32_t alphaMode;   // 0 = Opaque, 1 = Mask, 2 = Blend
+    float alphaMaskCutoff;
+    uint32_t doubleSided;
+    uint32_t unlit;
+};
+
+// Ray tracing view of an instance (same slot as GpuInstance): everything the ray tracing shaders read at candidates and
+// hits, in one record. Ray queries look instances up per candidate triangle; reading instance -> material -> mesh ->
+// transform from separate tables there made ReSTIR GI ~30% slower than one record (Bistro, §5.5.4).
+struct GpuRayTracingInstance
 {
     uint64_t vertexBufferAddress;
     uint64_t indexBufferAddress;
-    mat4 normalMatrix;              // Transforms local vertex normals to world space
+    mat4 normalMatrix;              // transpose(inverse(world))
     vec4 baseColorFactor;
     vec4 emissiveFactor;            // rgb: color, a: strength
     uint32_t baseColorTextureIndex;
     float alphaCutoff;
     uint32_t alphaMode;             // 0 = Opaque, 1 = Mask, 2 = Blend
-    uint32_t doubleSided;           // 0 = Single-sided, 1 = Double-sided
-
-    // PBR Material & Textures
+    uint32_t doubleSided;
     float metallicFactor;
     float roughnessFactor;
     uint32_t metallicRoughnessTextureIndex;
     uint32_t normalTextureIndex;
-
-    // Transmission & Workflow
     float transmissionFactor;
     uint32_t transmissionTextureIndex;
     float workflow;                 // 0.0 = MetalRough, 1.0 = SpecGloss
-    float ior;                      // Index of Refraction (KHR_materials_ior), default 1.5
-    float thickness;                // Volume thickness (KHR_materials_volume), default 0.0
+    float ior;
+    float thickness;
+};
+
+struct GpuMesh
+{
+    // Geometry pages (page tables until unified geometry buffers, Phase 4)
+    uint32_t drawsPageIndex;            // meshlet draws and bounds (1:1)
+    uint32_t drawsOffset;
+    uint32_t meshletCount;
+    uint32_t verticesPageIndex;
+    uint32_t meshletVerticesPageIndex;
+    uint32_t meshletTrianglesPageIndex;
+
+    // Ray tracing (the BLAS inputs)
+    uint64_t vertexBufferAddress;
+    uint64_t indexBufferAddress;
+
+    // Local bounds (GPU culling)
+    vec4 boundsSphere; // xyz: center, w: radius
+    vec3 boundsMin;
+    float padding0;
+    vec3 boundsMax;
+    float padding1;
 };
 
 struct UniformBufferObject 
@@ -177,7 +259,12 @@ struct UniformBufferObject
     uint64_t tlasDeviceAddress;
     uint32_t tlasHeapIndex;
     uint32_t enableRTReflections;
-    uint64_t instanceLUTReference;
+    // GPU scene tables (GpuInstance, GpuTransform, GpuMaterial, GpuMesh, GpuRayTracingInstance); 0 while the scene is empty
+    uint64_t sceneInstancesReference;
+    uint64_t sceneTransformsReference;
+    uint64_t sceneMaterialsReference;
+    uint64_t sceneMeshesReference;
+    uint64_t sceneRayTracingInstancesReference; // GpuRayTracingInstance per instance slot
 
     // Temporal
     uint32_t frameIndex;
@@ -202,6 +289,7 @@ struct UniformBufferObject
     // parity/other potential consumers, matching the established pattern.
     uint32_t directLightingMode; // 0 = brute-force analytic loop, 1 = ReSTIR DI
     uint32_t restirDIDirectLightingTextureIndex;
+
 };
 
 struct Vertex
@@ -213,71 +301,6 @@ struct Vertex
     
     uvec4 boneIDs;
     vec4 boneWeights;
-};
-
-struct InstanceData
-{
-    // Mesh
-    mat4 modelMatrix;
-    mat4 normalMatrix;
-
-    // --- NEW: Page Information ---
-    uint32_t drawsPageIndex;            // Same index used for meshletBounds (1:1 allocation)
-    uint32_t drawsOffset;               // Where this model's meshlets start in the page
-    uint32_t meshletCount;              // How many meshlets this model has
-    
-    uint32_t verticesPageIndex;
-    uint32_t meshletVerticesPageIndex;
-    uint32_t meshletTrianglesPageIndex;
-    // -----------------------------
-    
-    // Material Workflow & SpecGloss properties
-    float workflow; // 0.0 = Metallic-Roughness, 1.0 = Specular-Glossiness
-    vec4 diffuseFactor;
-    vec4 specularFactor; // rgb: specular factor, a: glossiness factor
-
-    // Material
-    vec4 baseColorFactor;
-    uint32_t baseColorTextureIndex;
-    int32_t baseColorTextureSet;
-    
-    float metallicFactor;
-    float roughnessFactor;
-    uint32_t metallicRoughnessTextureIndex;
-    int32_t physicalDescriptorTextureSet;
-
-    uint32_t normalTextureIndex;
-    int32_t normalTextureSet;
-    
-    uint32_t occlusionTextureIndex;
-    int32_t occlusionTextureSet;
-
-    vec3 emissiveFactor;
-    uint32_t emissiveTextureIndex;
-    int32_t emissiveTextureSet;
-    float emissiveStrength;
-
-    // Transmission (KHR_materials_transmission)
-    float transmissionFactor;
-    uint32_t transmissionTextureIndex;
-    int32_t transmissionTextureSet;
-
-    // Index of Refraction (KHR_materials_ior), glTF spec default is 1.5
-    float ior;
-
-    // Volume thickness (KHR_materials_volume), glTF spec default is 0.0 (infinitely thin)
-    float thickness;
-
-    uint32_t alphaMode;   // 0 = Opaque, 1 = Mask, 2 = Blend
-    float alphaMaskCutoff;
-    uint32_t doubleSided; // Use uint32_t instead of bool for GPU alignment
-    uint32_t unlit; 
-    
-    // MeshAnimation
-    uint32_t boneMatrixOffset = 0xFFFFFFFF;
-
-    // Editor-only
-    int entityID;
 };
 
 enum LightType : uint32_t
@@ -298,7 +321,7 @@ struct LightData
 struct PushConstantMeshlets
 {
     uint64_t matrixReference;
-    uint64_t instanceReference;
+    uint64_t drawInstancesReference; // uint32_t instance slot per indirect draw (instanceBaseIndex + SV_DrawIndex)
     uint64_t boneMatrixReference;
     // These now point to the Page Table buffers (array of uint64_t BDAs)
     uint64_t vertexPageTableReference;
@@ -346,7 +369,6 @@ struct PushConstantSkybox
 struct PushConstantVisibilityDebug
 {
     uint64_t matrixReference;
-    uint64_t instanceReference;
     uint64_t boneMatrixReference;
     uint64_t vertexPageTableReference;
     uint64_t meshletDrawsPageTableReference;
@@ -961,5 +983,128 @@ struct PushConstantReSTIRPTTemporal
     uint32_t enablePermutationSampling;
     uint32_t skyboxTextureIndex;
 };
+
+#ifdef __SLANG__
+// Raster view of one GPU scene instance: the instance record joined with its transform, material and mesh (ray tracing
+// shaders read GpuRayTracingInstance instead).
+struct InstanceData
+{
+    float4x4 modelMatrix;
+    float4x4 normalMatrix;
+    float4x4 previousModelMatrix;
+
+    uint32_t drawsPageIndex;
+    uint32_t drawsOffset;
+    uint32_t meshletCount;
+    uint32_t verticesPageIndex;
+    uint32_t meshletVerticesPageIndex;
+    uint32_t meshletTrianglesPageIndex;
+
+    float workflow;
+    float4 diffuseFactor;
+    float4 specularFactor;
+    float4 baseColorFactor;
+    uint32_t baseColorTextureIndex;
+    int32_t baseColorTextureSet;
+    float metallicFactor;
+    float roughnessFactor;
+    uint32_t metallicRoughnessTextureIndex;
+    int32_t physicalDescriptorTextureSet;
+    uint32_t normalTextureIndex;
+    int32_t normalTextureSet;
+    uint32_t occlusionTextureIndex;
+    int32_t occlusionTextureSet;
+    float3 emissiveFactor;
+    uint32_t emissiveTextureIndex;
+    int32_t emissiveTextureSet;
+    float emissiveStrength;
+    float transmissionFactor;
+    uint32_t transmissionTextureIndex;
+    int32_t transmissionTextureSet;
+    float ior;
+    float thickness;
+    uint32_t alphaMode;
+    float alphaMaskCutoff;
+    uint32_t doubleSided;
+    uint32_t unlit;
+
+    uint32_t boneMatrixOffset;
+    int entityID;
+};
+
+struct SceneInstances
+{
+    GpuInstance* instances;
+    GpuTransform* transforms;
+    GpuMaterial* materials;
+    GpuMesh* meshes;
+
+    __init(UniformBufferObject* ubo)
+    {
+        instances = (GpuInstance*)ubo->sceneInstancesReference;
+        transforms = (GpuTransform*)ubo->sceneTransformsReference;
+        materials = (GpuMaterial*)ubo->sceneMaterialsReference;
+        meshes = (GpuMesh*)ubo->sceneMeshesReference;
+    }
+
+    // Field by field through the pointers: a lookup loads only the fields its caller uses (whole-record loads would
+    // copy transforms, materials and meshes for every candidate).
+    __subscript(uint slot) -> InstanceData
+    {
+        get
+        {
+            GpuInstance* instance = &instances[slot];
+            GpuTransform* transform = &transforms[slot];
+            GpuMaterial* material = &materials[instance.materialIndex];
+            GpuMesh* mesh = &meshes[instance.meshIndex];
+
+            InstanceData data;
+            data.modelMatrix = transform.world;
+            data.normalMatrix = transform.normal;
+            data.previousModelMatrix = transform.previousWorld;
+
+            data.drawsPageIndex = mesh.drawsPageIndex;
+            data.drawsOffset = mesh.drawsOffset;
+            data.meshletCount = mesh.meshletCount;
+            data.verticesPageIndex = mesh.verticesPageIndex;
+            data.meshletVerticesPageIndex = mesh.meshletVerticesPageIndex;
+            data.meshletTrianglesPageIndex = mesh.meshletTrianglesPageIndex;
+
+            data.workflow = material.workflow;
+            data.diffuseFactor = material.diffuseFactor;
+            data.specularFactor = material.specularFactor;
+            data.baseColorFactor = material.baseColorFactor;
+            data.baseColorTextureIndex = material.baseColorTextureIndex;
+            data.baseColorTextureSet = material.baseColorTextureSet;
+            data.metallicFactor = material.metallicFactor;
+            data.roughnessFactor = material.roughnessFactor;
+            data.metallicRoughnessTextureIndex = material.metallicRoughnessTextureIndex;
+            data.physicalDescriptorTextureSet = material.physicalDescriptorTextureSet;
+            data.normalTextureIndex = material.normalTextureIndex;
+            data.normalTextureSet = material.normalTextureSet;
+            data.occlusionTextureIndex = material.occlusionTextureIndex;
+            data.occlusionTextureSet = material.occlusionTextureSet;
+            data.emissiveFactor = material.emissiveFactor;
+            data.emissiveTextureIndex = material.emissiveTextureIndex;
+            data.emissiveTextureSet = material.emissiveTextureSet;
+            data.emissiveStrength = material.emissiveStrength;
+            data.transmissionFactor = material.transmissionFactor;
+            data.transmissionTextureIndex = material.transmissionTextureIndex;
+            data.transmissionTextureSet = material.transmissionTextureSet;
+            data.ior = material.ior;
+            data.thickness = material.thickness;
+            data.alphaMode = material.alphaMode;
+            data.alphaMaskCutoff = material.alphaMaskCutoff;
+            data.doubleSided = material.doubleSided;
+            data.unlit = material.unlit;
+
+            data.boneMatrixOffset = instance.boneMatrixOffset;
+            data.entityID = instance.entityID;
+            return data;
+        }
+    }
+};
+
+#endif
 
 #endif  // HOST_DEVICE_H

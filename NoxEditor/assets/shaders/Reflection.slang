@@ -122,7 +122,7 @@ float3 sample_ggx_vndf(float3 V, float3 N, float roughness, float2 u)
 }
 
 // Intersection UV interpolation
-float2 intersection_uv(InstanceLUT lut, uint primIndex, float2 barycentrics)
+float2 intersection_uv(GpuRayTracingInstance lut, uint primIndex, float2 barycentrics)
 {
     uint32_t* indices = (uint32_t*)lut.indexBufferAddress;
     uint i0, i1, i2;
@@ -244,7 +244,7 @@ float4 fragMain(
 
     rq.TraceRayInline(accelerationStructure, rayFlags, 0xFF, reflectionRayDesc);
 
-    InstanceLUT* instanceLUTBuffer = (InstanceLUT*)ubo->instanceLUTReference;
+    GpuRayTracingInstance* instanceLUTBuffer = (GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference;
     SamplerState textureSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
 
     while (rq.Proceed())
@@ -252,7 +252,7 @@ float4 fragMain(
         uint instanceID = rq.CandidateRayInstanceCustomIndex();
         uint primIndex = rq.CandidatePrimitiveIndex();
 
-        InstanceLUT lut = instanceLUTBuffer[instanceID];
+        GpuRayTracingInstance lut = instanceLUTBuffer[instanceID];
 
         if (lut.alphaMode == 0 || lut.baseColorTextureIndex == 0xFFFFFFFF)
         {
@@ -292,7 +292,7 @@ float4 fragMain(
     uint committedPrimIndex = rq.CommittedPrimitiveIndex();
     float2 committedBary = rq.CommittedTriangleBarycentrics();
 
-    InstanceLUT hitLut = instanceLUTBuffer[committedInstanceID];
+    GpuRayTracingInstance hitLut = instanceLUTBuffer[committedInstanceID];
     uint32_t* indices = (uint32_t*)hitLut.indexBufferAddress;
     Vertex* vertices = (Vertex*)hitLut.vertexBufferAddress;
 

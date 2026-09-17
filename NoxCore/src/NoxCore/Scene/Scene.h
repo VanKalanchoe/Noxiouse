@@ -90,11 +90,14 @@ namespace Nox
         void RunSubmitSystems();
         // Main thread after each graph: deferred structural changes, then loads of assets the systems found unloaded.
         void ApplySyncPoint();
+        // Main thread after the update systems (§5.5): brings the renderer's GPU scene up to date with what changed.
+        void SyncGpuScene();
+        // EnTT signals of the components that decide a mesh entity's GPU instances.
+        void OnMeshEntityChanged(entt::registry& registry, entt::entity entity);
 
         // Systems (run as tasks).
         void UpdatePhysics2D();
         void UpdateAnimators();
-        void SubmitMeshes();
         void SubmitLights();
         void Submit2D();
 
@@ -128,7 +131,18 @@ namespace Nox
         SystemFrameInput m_FrameInput;
         WorkerLocal<EntityCommandBuffer> m_CommandBuffers;
         WorkerLocal<std::vector<AssetHandle>> m_MissingAssets;
-        std::vector<entt::entity> m_MeshEntities; // collected on the main thread, split across the submission tasks
+
+        // GPU scene registration: the renderer's instances of each mesh entity (one per drawn submesh).
+        struct MeshRegistration
+        {
+            std::vector<uint32_t> Instances;
+            bool Skinned = false;
+        };
+        uint64_t m_SceneID = 0;
+        std::unordered_map<entt::entity, MeshRegistration> m_MeshRegistrations;
+        std::vector<entt::entity> m_SkinnedMeshEntities;
+        std::vector<entt::entity> m_PendingMeshEntities; // (re)registered at the next sync
+        WorkerLocal<std::vector<entt::entity>> m_MovedEntities; // world transform changed (transform propagation)
 
         // Allow the Entity class to access m_Registry to add/get components
         friend class Entity;

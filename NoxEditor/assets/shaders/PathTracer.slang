@@ -175,7 +175,7 @@ float3 YCoCgToLinear(float3 color)
     }
 
     // Tangent-space normal mapping helper
-    float3 perturb_normal(InstanceLUT lut, Vertex v0, Vertex v1, Vertex v2, float3 geomNormal, float2 hitUV, SamplerState textureSampler, UniformBufferObject* ubo)
+    float3 perturb_normal(GpuRayTracingInstance lut, Vertex v0, Vertex v1, Vertex v2, float3 geomNormal, float2 hitUV, SamplerState textureSampler, UniformBufferObject* ubo)
     {
         if (lut.normalTextureIndex == 0xFFFFFFFF)
             return geomNormal;
@@ -207,7 +207,7 @@ float3 YCoCgToLinear(float3 color)
         return normalize(mul(tangentNormal, TBN));
     }
 
-    float2 intersection_uv(InstanceLUT lut, uint primIndex, float2 barycentrics)
+    float2 intersection_uv(GpuRayTracingInstance lut, uint primIndex, float2 barycentrics)
     {
         uint32_t* indices = (uint32_t*)lut.indexBufferAddress;
         uint i0 = indices[primIndex * 3 + 0];
@@ -241,14 +241,14 @@ float3 YCoCgToLinear(float3 color)
         RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> sq;
         sq.TraceRayInline(as, RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, 0xFF, shadowRay);
 
-        InstanceLUT* instanceLUTBuffer = (InstanceLUT*)ubo->instanceLUTReference;
+        GpuRayTracingInstance* instanceLUTBuffer = (GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference;
         SamplerState textureSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
 
         while (sq.Proceed())
         {
             uint instID = sq.CandidateRayInstanceCustomIndex();
             uint primIndex = sq.CandidatePrimitiveIndex();
-            InstanceLUT lut = instanceLUTBuffer[instID];
+            GpuRayTracingInstance lut = instanceLUTBuffer[instID];
 
             if (lut.alphaMode == 0 || lut.baseColorTextureIndex == 0xFFFFFFFF)
             {
@@ -300,7 +300,7 @@ float3 YCoCgToLinear(float3 color)
         float primaryHitDist = 1e4;
 
         RaytracingAccelerationStructure as = RaytracingAccelerationStructure(ubo->tlasDeviceAddress);
-        InstanceLUT* instanceLUTBuffer = (InstanceLUT*)ubo->instanceLUTReference;
+        GpuRayTracingInstance* instanceLUTBuffer = (GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference;
         SamplerState textureSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
 
         // Always run full path tracing bounces
@@ -322,7 +322,7 @@ float3 YCoCgToLinear(float3 color)
             {
                 uint instID = rq.CandidateRayInstanceCustomIndex();
                 uint primIndex = rq.CandidatePrimitiveIndex();
-                InstanceLUT lut = instanceLUTBuffer[instID];
+                GpuRayTracingInstance lut = instanceLUTBuffer[instID];
 
                 if (lut.alphaMode == 0 || lut.baseColorTextureIndex == 0xFFFFFFFF)
                 {
@@ -371,7 +371,7 @@ float3 YCoCgToLinear(float3 color)
             uint committedPrimIndex = rq.CommittedPrimitiveIndex();
             float2 bary = rq.CommittedTriangleBarycentrics();
 
-            InstanceLUT lut = instanceLUTBuffer[committedInstID];
+            GpuRayTracingInstance lut = instanceLUTBuffer[committedInstID];
             uint32_t* indices = (uint32_t*)lut.indexBufferAddress;
             Vertex* vertices = (Vertex*)lut.vertexBufferAddress;
 

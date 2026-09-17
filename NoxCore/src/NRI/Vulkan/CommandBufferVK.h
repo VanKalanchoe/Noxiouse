@@ -60,6 +60,7 @@ namespace NRI
         void drawMeshTasksIndirect(uint64_t indirectBufferDeviceAddress, uint64_t offset, uint32_t drawCount, uint32_t stride) override;
 
         void copyBuffer(Buffer& srcBuffer, Buffer& dstBuffer, const BufferCopyRegion& region = {}) override;
+        void copyBuffer(Buffer& srcBuffer, Buffer& dstBuffer, std::span<const BufferCopyRegion> regions) override;
         
         void transitionTextureLayout(Texture& texture, TextureLayout oldLayout, TextureLayout newLayout) override;
         void transitionSwapchainLayout(Swapchain& swapchain, uint32_t imageIndex, TextureLayout oldLayout, TextureLayout newLayout) override;
@@ -91,6 +92,7 @@ namespace NRI
         // resourceBarriers scratch (a command buffer is recorded by one thread at a time)
         std::vector<vk::ImageMemoryBarrier2> m_imageBarrierScratch;
         std::vector<vk::BufferMemoryBarrier2> m_bufferBarrierScratch;
+        std::vector<vk::BufferCopy> m_copyRegionScratch; // copyBuffer(regions)
         // Caches the index passed into the begin method
         uint32_t m_currentFrameIndex = 0;
     };

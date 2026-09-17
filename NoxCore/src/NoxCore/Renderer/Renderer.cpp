@@ -115,17 +115,22 @@ namespace Nox
         {
             return std::find(slots.begin(), slots.end(), static_cast<uint32_t>(entry.second)) != slots.end();
         });
+
+        // GPU materials may still point at the freed slots.
+        if (s_Instance)
+            s_Instance->m_gpuMaterialsDirty = true;
     }
 
-    // Main thread.
-    static void RefreshTextureDescriptorMisses()
+    // Main thread. Returns true when the misses were dropped (the registry changed, a missing texture may exist now).
+    static bool RefreshTextureDescriptorMisses()
     {
         const size_t registrySize = Project::GetActive()->GetEditorAssetManager()->GetAssetRegistry().size();
-        if (registrySize != s_TextureDescriptorMissesRegistrySize)
-        {
-            s_TextureDescriptorMisses.clear();
-            s_TextureDescriptorMissesRegistrySize = registrySize;
-        }
+        if (registrySize == s_TextureDescriptorMissesRegistrySize)
+            return false;
+
+        s_TextureDescriptorMisses.clear();
+        s_TextureDescriptorMissesRegistrySize = registrySize;
+        return true;
     }
 
     // Main thread: resolves (and loads) the texture, filling the caches.
@@ -139,7 +144,7 @@ namespace Nox
         if (cached != descriptorCache.end())
             return cached->second;
 
-        RefreshTextureDescriptorMisses();
+        // Misses are refreshed once per frame (Renderer::BindGpuScene), so re-packing follows a registry change.
         if (s_TextureDescriptorMisses.contains(path))
             return -1;
 
@@ -162,47 +167,38 @@ namespace Nox
         return descriptorIndex;
     }
 
-    // Mesh submission tasks: reads the caches only (the main thread does not write them while tasks run). A path that
-    // is not resolved yet is recorded and resolved by EndMeshSubmission; the instance draws without it for one frame.
-    static int GetCachedTextureIndex(const std::string& path, std::vector<std::string>& unresolvedPaths)
+    // Main thread (resolves and loads textures).
+    static shaderio::GpuMaterial PackMaterial(const MaterialData& material)
     {
-        if (path.empty())
-            return -1;
-
-        if (auto cached = s_TextureDescriptorCache.find(path); cached != s_TextureDescriptorCache.end())
-            return cached->second;
-        if (!s_TextureDescriptorMisses.contains(path))
-            unresolvedPaths.push_back(path);
-        return -1;
-    }
-
-    static void PackMaterial(shaderio::InstanceData& instance, const MaterialData& material, std::vector<std::string>& unresolvedPaths)
-    {
-        instance.workflow = material.Workflow;
-        instance.diffuseFactor = material.DiffuseFactor;
-        instance.specularFactor = material.SpecularFactor;
-        instance.baseColorFactor = (material.Workflow == 1.0f) ? material.DiffuseFactor : material.BaseColorFactor;
-        instance.baseColorTextureIndex = GetCachedTextureIndex(material.BaseColorTexturePath, unresolvedPaths);
-        instance.baseColorTextureSet = material.BaseColorTextureSet;
-        instance.metallicFactor = material.MetallicFactor;
-        instance.roughnessFactor = material.RoughnessFactor;
-        instance.metallicRoughnessTextureIndex = GetCachedTextureIndex(material.MetallicRoughnessTexturePath, unresolvedPaths);
-        instance.physicalDescriptorTextureSet = material.PhysicalDescriptorTextureSet;
-        instance.normalTextureIndex = GetCachedTextureIndex(material.NormalTexturePath, unresolvedPaths);
-        instance.normalTextureSet = material.NormalTextureSet;
-        instance.occlusionTextureIndex = GetCachedTextureIndex(material.OcclusionTexturePath, unresolvedPaths);
-        instance.occlusionTextureSet = material.OcclusionTextureSet;
-        instance.emissiveFactor = material.EmissiveFactor;
-        instance.emissiveTextureIndex = GetCachedTextureIndex(material.EmissiveTexturePath, unresolvedPaths);
-        instance.emissiveTextureSet = material.EmissiveTextureSet;
-        instance.emissiveStrength = material.emissiveStrength;
-        instance.transmissionFactor = material.TransmissionFactor;
-        instance.transmissionTextureIndex = GetCachedTextureIndex(material.TransmissionTexturePath, unresolvedPaths);
-        instance.transmissionTextureSet = material.TransmissionTextureSet;
-        instance.alphaMode = static_cast<uint32_t>(material.Mode);
-        instance.alphaMaskCutoff = material.AlphaMaskCutoff;
-        instance.doubleSided = material.DoubleSided ? 1u : 0u;
-        instance.unlit = material.Unlit ? 1u : 0u;
+        shaderio::GpuMaterial packed{};
+        packed.workflow = material.Workflow;
+        packed.diffuseFactor = material.DiffuseFactor;
+        packed.specularFactor = material.SpecularFactor;
+        packed.baseColorFactor = (material.Workflow == 1.0f) ? material.DiffuseFactor : material.BaseColorFactor;
+        packed.baseColorTextureIndex = GetTextureIndex(material.BaseColorTexturePath);
+        packed.baseColorTextureSet = material.BaseColorTextureSet;
+        packed.metallicFactor = material.MetallicFactor;
+        packed.roughnessFactor = material.RoughnessFactor;
+        packed.metallicRoughnessTextureIndex = GetTextureIndex(material.MetallicRoughnessTexturePath);
+        packed.physicalDescriptorTextureSet = material.PhysicalDescriptorTextureSet;
+        packed.normalTextureIndex = GetTextureIndex(material.NormalTexturePath);
+        packed.normalTextureSet = material.NormalTextureSet;
+        packed.occlusionTextureIndex = GetTextureIndex(material.OcclusionTexturePath);
+        packed.occlusionTextureSet = material.OcclusionTextureSet;
+        packed.emissiveFactor = material.EmissiveFactor;
+        packed.emissiveTextureIndex = GetTextureIndex(material.EmissiveTexturePath);
+        packed.emissiveTextureSet = material.EmissiveTextureSet;
+        packed.emissiveStrength = material.emissiveStrength;
+        packed.transmissionFactor = material.TransmissionFactor;
+        packed.transmissionTextureIndex = GetTextureIndex(material.TransmissionTexturePath);
+        packed.transmissionTextureSet = material.TransmissionTextureSet;
+        packed.ior = material.IOR;
+        packed.thickness = material.Thickness;
+        packed.alphaMode = static_cast<uint32_t>(material.Mode);
+        packed.alphaMaskCutoff = material.AlphaMaskCutoff;
+        packed.doubleSided = material.DoubleSided ? 1u : 0u;
+        packed.unlit = material.Unlit ? 1u : 0u;
+        return packed;
     }
 
     Renderer::Renderer(std::shared_ptr<Window> window, bool isEditor) : m_window(std::move(window)), m_isEditor(isEditor)
@@ -397,8 +393,10 @@ namespace Nox
 
 
         // Allocate baseline capacities for dynamic GPU buffers so vectors are NEVER empty
-        m_InstanceBufferCapacity = sizeof(shaderio::InstanceData) * 64;
-        createInstanceBuffer(m_InstanceBufferCapacity);
+        m_gpuScene.Initialize(*m_device, MAX_FRAMES_IN_FLIGHT);
+
+        m_DrawInstanceBufferCapacity = sizeof(uint32_t) * 1024;
+        createDrawInstanceBuffer(m_DrawInstanceBufferCapacity);
 
         m_IndirectBufferCapacity = sizeof(DrawMeshTasksIndirectCommand) * 64;
         createIndirectBuffer(m_IndirectBufferCapacity);
@@ -2183,6 +2181,44 @@ namespace Nox
             flushUploadBatch();
         }
 
+        // GPU scene mesh record: instances reference it by slot.
+        if (handle.IsValid())
+        {
+            shaderio::GpuMesh gpuMesh{};
+            gpuMesh.drawsPageIndex = handle.meshletDraws.pageIndex;
+            gpuMesh.drawsOffset = handle.meshletDraws.offset;
+            gpuMesh.meshletCount = handle.meshletDraws.count;
+            gpuMesh.verticesPageIndex = handle.vertices.pageIndex;
+            gpuMesh.meshletVerticesPageIndex = handle.meshletVertices.pageIndex;
+            gpuMesh.meshletTrianglesPageIndex = handle.meshletTriangles.pageIndex;
+
+            // Local bounds of the (bind pose) vertices.
+            glm::vec3 boundsMin(std::numeric_limits<float>::max());
+            glm::vec3 boundsMax(std::numeric_limits<float>::lowest());
+            for (const shaderio::Vertex& vertex : data.Vertices)
+            {
+                boundsMin = glm::min(boundsMin, vertex.pos);
+                boundsMax = glm::max(boundsMax, vertex.pos);
+            }
+            const glm::vec3 center = (boundsMin + boundsMax) * 0.5f;
+            float radius = 0.0f;
+            for (const shaderio::Vertex& vertex : data.Vertices)
+                radius = std::max(radius, glm::distance(center, vertex.pos));
+            gpuMesh.boundsSphere = glm::vec4(center, radius);
+            gpuMesh.boundsMin = boundsMin;
+            gpuMesh.boundsMax = boundsMax;
+
+            uint64_t blasAddress = 0;
+            if (handle.blasId != UINT32_MAX)
+            {
+                const MeshBLAS& blas = m_meshBLASes[handle.blasId];
+                gpuMesh.vertexBufferAddress = blas.vertexBufferAddress;
+                gpuMesh.indexBufferAddress = blas.indexBuffer->getDeviceAddress();
+                blasAddress = blas.as->getDeviceAddress();
+            }
+            handle.gpuSceneMesh = m_gpuScene.AddMesh(gpuMesh, blasAddress);
+        }
+
         markPageTablesDirty();
 
         return handle;
@@ -2191,6 +2227,15 @@ namespace Nox
     void Renderer::UnloadMeshGeometry(const MeshHandle& handle)
     {
         if (!handle.IsValid()) return;
+
+        // Instances of this mesh stop drawing now; their entities register again (with the reloaded mesh).
+        if (handle.gpuSceneMesh != GpuScene::InvalidSlot)
+        {
+            std::vector<uint32_t> deactivated;
+            m_gpuScene.RemoveMesh(handle.gpuSceneMesh, deactivated);
+            for (uint32_t instance : deactivated)
+                m_invalidatedMeshEntities.push_back(m_gpuScene.GetInstanceEntity(instance));
+        }
 
         // Defer returning offsets so current frames in flight finish reading
         m_deferredMeshFrees.push_back({
@@ -2364,14 +2409,14 @@ namespace Nox
         }
     }
 
-    void Renderer::createInstanceBuffer(uint64_t bufferSize)
+    void Renderer::createDrawInstanceBuffer(uint64_t bufferSize)
     {
-        m_instanceBuffers.clear();
-        m_instanceBuffersMapped.clear();
+        m_drawInstanceBuffers.clear();
+        m_drawInstanceBuffersMapped.clear();
 
         // Reserve memory in vectors to prevent reallocation overhead
-        m_instanceBuffers.reserve(MAX_FRAMES_IN_FLIGHT);
-        m_instanceBuffersMapped.reserve(MAX_FRAMES_IN_FLIGHT);
+        m_drawInstanceBuffers.reserve(MAX_FRAMES_IN_FLIGHT);
+        m_drawInstanceBuffersMapped.reserve(MAX_FRAMES_IN_FLIGHT);
 
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
         {
@@ -2383,8 +2428,8 @@ namespace Nox
 
             void* mappedMemory = uboBuffer->map(0, bufferSize);
 
-            m_instanceBuffers.emplace_back(std::move(uboBuffer));
-            m_instanceBuffersMapped.emplace_back(mappedMemory);
+            m_drawInstanceBuffers.emplace_back(std::move(uboBuffer));
+            m_drawInstanceBuffersMapped.emplace_back(mappedMemory);
         }
     }
 
@@ -2643,6 +2688,7 @@ namespace Nox
             prepareFrameGraph(imageIndex);
 
             // Frame order (§5.4.8). Each add* contributes its feature's passes only when the feature runs.
+            addGpuSceneUpdatePass();
             addTLASBuildPass();
             addVisibilityPass();
             addGBufferPass();
@@ -2748,14 +2794,11 @@ namespace Nox
         graph.Reset({ m_sceneFrameCounter, frame.renderExtent, frame.outputExtent });
 
         // Shared indirect meshlet drawing state (visibility and forward passes).
-        frame.baseInstanceAddress = (!m_instanceBuffers.empty() && frameIndex < m_instanceBuffers.size() && m_instanceBuffers[frameIndex])
-                                        ? m_instanceBuffers[frameIndex]->getDeviceAddress()
-                                        : 0;
-        if (frame.baseInstanceAddress != 0)
+        if (!m_drawInstances.empty())
         {
             shaderio::PushConstantMeshlets& references = frame.meshletReferences;
             references.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
-            references.instanceReference = frame.baseInstanceAddress;
+            references.drawInstancesReference = m_drawInstanceBuffers[frameIndex]->getDeviceAddress();
             bool hasBoneBuffers = frameIndex < m_boneBuffers.size() && m_boneBuffers[frameIndex] != nullptr;
             bool hasBones = !m_boneMatrices.empty();
             references.boneMatrixReference = (hasBones && hasBoneBuffers) ? m_boneBuffers[frameIndex]->getDeviceAddress() : 0;
@@ -2877,6 +2920,17 @@ namespace Nox
             resources.NeighborOffsets = graph.ImportBuffer("RTXDI Neighbor Offsets", m_restirGINeighborOffsetsBuffer.get(), RGImportAccess::ReadOnly);
         if (m_tlasBuffer)
             resources.TLAS = graph.ImportBuffer("TLAS", m_tlasBuffer.get());
+        // GPU scene tables: written by GPU Scene Update, read through the uniforms by the passes that draw or trace the scene.
+        if (NRI::Buffer* buffer = m_gpuScene.GetInstances().GetBuffer())
+            resources.SceneInstances = graph.ImportBuffer("Scene Instances", buffer);
+        if (NRI::Buffer* buffer = m_gpuScene.GetTransforms().GetBuffer())
+            resources.SceneTransforms = graph.ImportBuffer("Scene Transforms", buffer);
+        if (NRI::Buffer* buffer = m_gpuScene.GetMaterials().GetBuffer())
+            resources.SceneMaterials = graph.ImportBuffer("Scene Materials", buffer);
+        if (NRI::Buffer* buffer = m_gpuScene.GetMeshes().GetBuffer())
+            resources.SceneMeshes = graph.ImportBuffer("Scene Meshes", buffer);
+        if (NRI::Buffer* buffer = m_gpuScene.GetRayTracingInstances().GetBuffer())
+            resources.SceneRayTracingInstances = graph.ImportBuffer("Scene Ray Tracing Instances", buffer);
         if (frameIndex < m_pickerStagingBuffers.size() && m_pickerStagingBuffers[frameIndex])
             resources.PickerStaging = graph.ImportBuffer("Picker Staging", m_pickerStagingBuffers[frameIndex].get());
 
@@ -2932,23 +2986,27 @@ namespace Nox
         }
     }
 
-    Renderer::MeshletDrawCursor Renderer::beginMeshletDraws(uint32_t firstInstance) const
+    Renderer::MeshletDrawCursor Renderer::beginMeshletDraws() const
     {
         MeshletDrawCursor cursor;
         cursor.references = m_frame.meshletReferences;
-        cursor.instanceOffset = firstInstance;
         return cursor;
     }
 
-    void Renderer::drawMeshletQueue(NRI::CommandBuffer& cmd, MeshletDrawCursor& cursor, uint32_t count, NRI::Pipeline& pipeline, NRI::CullMode cullMode, bool depthWrite, bool blendEnable) const
+    void Renderer::drawMeshletBucket(NRI::CommandBuffer& cmd, MeshletDrawCursor& cursor, RenderBucket bucket, NRI::Pipeline& pipeline, NRI::CullMode cullMode, bool depthWrite, bool blendEnable) const
     {
+        const uint32_t count = getBucketDrawCount(bucket);
         if (count == 0 || frameIndex >= m_indirectBuffers.size() || !m_indirectBuffers[frameIndex])
             return;
 
+        // Buckets follow each other in the draw list.
+        uint32_t firstDraw = 0;
+        for (size_t previous = 0; previous < static_cast<size_t>(bucket); ++previous)
+            firstDraw += m_drawBucketCounts[previous];
+
         constexpr uint32_t cmdStride = sizeof(DrawMeshTasksIndirectCommand);
 
-        cursor.references.instanceReference = m_frame.baseInstanceAddress;
-        cursor.references.instanceBaseIndex = cursor.instanceOffset;
+        cursor.references.instanceBaseIndex = firstDraw;
         cmd.pushData(&cursor.references, sizeof(shaderio::PushConstantMeshlets));
 
         if (cursor.boundPipeline != &pipeline)
@@ -2961,8 +3019,7 @@ namespace Nox
         cmd.setDepthWriteEnable(depthWrite);
         cmd.setColorBlendEnable(0, blendEnable);
 
-        cmd.drawMeshTasksIndirect(*m_indirectBuffers[frameIndex], static_cast<uint64_t>(cursor.instanceOffset) * cmdStride, count, cmdStride);
-        cursor.instanceOffset += count;
+        cmd.drawMeshTasksIndirect(*m_indirectBuffers[frameIndex], static_cast<uint64_t>(firstDraw) * cmdStride, count, cmdStride);
     }
 
     void Renderer::updateEntityIDBuffer(uint32_t currentImage)
@@ -3018,33 +3075,45 @@ namespace Nox
         memcpy(m_uniformBuffersMapped[currentImage], &uniformData, sizeof(uniformData));
     }
 
-    void Renderer::updateInstanceAndIndirectBuffer(uint32_t currentImage)
+    void Renderer::updateGpuScene(uint32_t currentImage)
     {
-        //fix maybe dont recreate all buffers only the next frame ?
-        if (m_instanceBufferObjects.empty() || m_drawMeshTasksIndirectCommands.empty())
-        {
+        refreshGpuMaterials();
+
+        m_gpuScene.BuildDrawLists(glm::vec3(uniformData.cameraWorldPos), m_drawInstances, m_drawMeshTasksIndirectCommands, m_drawBucketCounts);
+        updateDrawListBuffers(currentImage);
+
+        std::vector<std::unique_ptr<NRI::Buffer>> releasedBuffers;
+        m_gpuScene.PrepareUploads(currentImage, releasedBuffers);
+        for (std::unique_ptr<NRI::Buffer>& buffer : releasedBuffers)
+            m_deferredBufferDeletions.push_back({ std::move(buffer), MAX_FRAMES_IN_FLIGHT });
+
+        uniformData.sceneInstancesReference = m_gpuScene.GetInstances().GetDeviceAddress();
+        uniformData.sceneTransformsReference = m_gpuScene.GetTransforms().GetDeviceAddress();
+        uniformData.sceneMaterialsReference = m_gpuScene.GetMaterials().GetDeviceAddress();
+        uniformData.sceneMeshesReference = m_gpuScene.GetMeshes().GetDeviceAddress();
+        uniformData.sceneRayTracingInstancesReference = m_gpuScene.GetRayTracingInstances().GetDeviceAddress();
+
+    }
+
+    void Renderer::updateDrawListBuffers(uint32_t currentImage)
+    {
+        if (m_drawInstances.empty())
             return;
-        }
 
-        uint64_t requiredInstanceSize = sizeof(shaderio::InstanceData) * m_instanceBufferObjects.size();
-        if (requiredInstanceSize > m_InstanceBufferCapacity)
+        uint64_t requiredInstanceSize = sizeof(uint32_t) * m_drawInstances.size();
+        if (requiredInstanceSize > m_DrawInstanceBufferCapacity)
         {
-            m_InstanceBufferCapacity = requiredInstanceSize * 2;
+            m_DrawInstanceBufferCapacity = requiredInstanceSize * 2;
 
-            for (auto& oldBuffer : m_instanceBuffers)
+            for (auto& oldBuffer : m_drawInstanceBuffers)
             {
                 if (oldBuffer)
-                {
-                    m_deferredBufferDeletions.push_back({
-                        std::move(oldBuffer),
-                        frameIndex + MAX_FRAMES_IN_FLIGHT
-                    });
-                }
+                    m_deferredBufferDeletions.push_back({ std::move(oldBuffer), MAX_FRAMES_IN_FLIGHT });
             }
 
-            createInstanceBuffer(m_InstanceBufferCapacity);
+            createDrawInstanceBuffer(m_DrawInstanceBufferCapacity);
         }
-        memcpy(m_instanceBuffersMapped[currentImage], m_instanceBufferObjects.data(), requiredInstanceSize);
+        memcpy(m_drawInstanceBuffersMapped[currentImage], m_drawInstances.data(), requiredInstanceSize);
 
         uint64_t requiredIndirectSize = sizeof(DrawMeshTasksIndirectCommand) * m_drawMeshTasksIndirectCommands.size();
         if (requiredIndirectSize > m_IndirectBufferCapacity)
@@ -3054,12 +3123,7 @@ namespace Nox
             for (auto& oldBuffer : m_indirectBuffers)
             {
                 if (oldBuffer)
-                {
-                    m_deferredBufferDeletions.push_back({
-                        std::move(oldBuffer),
-                        frameIndex + MAX_FRAMES_IN_FLIGHT
-                    });
-                }
+                    m_deferredBufferDeletions.push_back({ std::move(oldBuffer), MAX_FRAMES_IN_FLIGHT });
             }
 
             createIndirectBuffer(m_IndirectBufferCapacity);
@@ -3161,11 +3225,11 @@ namespace Nox
                     m_deferredBufferDeletions.push_back({std::move(emptyBuffer), MAX_FRAMES_IN_FLIGHT});
                 }
 
+                // The GPU scene stopped tracing this mesh when it was unloaded.
                 if (h.blasId != UINT32_MAX && h.blasId < m_meshBLASes.size() && m_meshBLASes[h.blasId].as)
                 {
                     m_meshBLASes[h.blasId] = MeshBLAS{};
                     m_freeBLASIds.push_back(h.blasId);
-                    m_tlasNeedFullBuild = true;
                 }
 
                 if (m_meshletVertPages.Free(h.meshletVertices.pageIndex, h.meshletVertices.offset, h.meshletVertices.count, emptyBuffer))
@@ -3275,18 +3339,14 @@ namespace Nox
         }
 
         {
-            NOX_PROFILE_SCOPE("BuildBuffers");
-            BuildBuffers();
+            NOX_PROFILE_SCOPE("GPU Scene");
+            updateGpuScene(frameIndex);
         }
-        NOX_PROFILE_COUNTER("Instances", m_instanceBufferObjects.size());
+        NOX_PROFILE_COUNTER("Instances", m_gpuScene.GetInstanceCount());
         NOX_PROFILE_COUNTER("Indirect Draws", m_drawMeshTasksIndirectCommands.size());
-        NOX_PROFILE_COUNTER("Transparent Draws", m_transparentCount + m_transparentDoubleSidedCount + m_transparentUnlitCount + m_transparentUnlitDoubleSidedCount);
+        NOX_PROFILE_COUNTER("Transparent Draws", getBucketDrawCount(RenderBucket::Transparent) + getBucketDrawCount(RenderBucket::TransparentDoubleSided) +
+                                                 getBucketDrawCount(RenderBucket::TransparentUnlit) + getBucketDrawCount(RenderBucket::TransparentUnlitDoubleSided));
         NOX_PROFILE_COUNTER("Lights", m_lightBufferObjects.size());
-
-        {
-            NOX_PROFILE_SCOPE("Instance + Indirect Upload");
-            updateInstanceAndIndirectBuffer(frameIndex);
-        }
 
         {
             NOX_PROFILE_SCOPE("Bones Upload");
@@ -3343,21 +3403,7 @@ namespace Nox
         frameIndex = (frameIndex + 1) % MAX_FRAMES_IN_FLIGHT;
         m_sceneFrameCounter++;
 
-        m_instanceBufferObjects.clear();
-        m_drawMeshTasksIndirectCommands.clear();
-        m_boneMatrices.clear();
         m_lightBufferObjects.clear();
-
-        m_opaqueQueue.clear();
-        m_opaqueDoubleSidedQueue.clear();
-        m_maskQueue.clear();
-        m_maskDoubleSidedQueue.clear();
-        m_unlitQueue.clear();
-        m_unlitDoubleSidedQueue.clear();
-        m_transparentQueue.clear();
-        m_transparentDoubleSidedQueue.clear();
-        m_transparentUnlitQueue.clear();
-        m_transparentUnlitDoubleSidedQueue.clear();
     }
 
     void Renderer::updateSceneAccelerationStructure(uint32_t currentFrameIndex)
@@ -3372,217 +3418,94 @@ namespace Nox
 
         if (!isPathTracing && !isDDGI && !isReSTIRGI && !isHybridRT)
         {
+            // Built once ray tracing is used again.
             m_hasTLASBuild = false;
-            m_tlasNeedFullBuild = false;
-            m_tlasNeedUpdate = false;
-            m_tlasInstanceSignatureValid = false;
-            m_tlasStructureSignatureValid = false;
+            m_tlasNeedBuild = true;
             uniformData.tlasDeviceAddress = 0;
-            uniformData.instanceLUTReference = 0;
             uniformData.enableRTShadows = 0;
             uniformData.enableRTReflections = 0;
             return;
         }
 
-        // Collect all active render packets that have valid BLASes
-        std::vector<NRI::AccelerationStructureInstance> rtInstances;
-        std::vector<shaderio::InstanceLUT> rtInstanceLUTs;
-
-        auto collectFromQueue = [&](const std::vector<RenderPacket>& queue)
-        {
-            for (const auto& packet : queue)
-            {
-                if (packet.blasId >= m_meshBLASes.size() || !m_meshBLASes[packet.blasId].as)
-                    continue;
-
-                const glm::mat4& model = packet.instance.modelMatrix;
-                NRI::AccelerationStructureInstance inst{};
-
-                // Convert column-major glm::mat4 to row-major 3x4 transform matrix
-                for (int r = 0; r < 3; ++r)
-                {
-                    for (int c = 0; c < 4; ++c)
-                    {
-                        inst.transform.matrix[r][c] = model[c][r];
-                    }
-                }
-
-                inst.instanceCustomIndex = static_cast<uint32_t>(rtInstances.size());
-                inst.mask = 0x01;
-                inst.instanceShaderBindingTableRecordOffset = 0;
-                inst.flags = 0;
-
-                // Dynamic runtime AlphaMode handling:
-                // 0x04 = VK_GEOMETRY_INSTANCE_FORCE_OPAQUE_BIT_KHR
-                // 0x08 = VK_GEOMETRY_INSTANCE_FORCE_NO_OPAQUE_BIT_KHR
-                // 0x01 = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR
-                if (packet.instance.alphaMode == 0)
-                {
-                    inst.flags |= 0x00000004; // Force Opaque in hardware traversal
-                }
-                else if (packet.instance.alphaMode == 1)
-                {
-                    inst.flags |= 0x00000008; // Force Non-Opaque for any-hit alpha testing
-                }
-
-                if (packet.instance.doubleSided != 0)
-                {
-                    inst.flags |= 0x00000001; // Disable face culling
-                }
-
-                inst.accelerationStructureReference = m_meshBLASes[packet.blasId].as->getDeviceAddress();
-
-                rtInstances.push_back(inst);
-
-                // Tutorial TASK09: Store the instance look-up table entry
-                shaderio::InstanceLUT lut{};
-                lut.vertexBufferAddress = m_meshBLASes[packet.blasId].vertexBufferAddress;
-                lut.indexBufferAddress = m_meshBLASes[packet.blasId].indexBuffer ? m_meshBLASes[packet.blasId].indexBuffer->getDeviceAddress() : 0;
-                lut.normalMatrix = packet.instance.normalMatrix;
-                lut.baseColorFactor = packet.instance.baseColorFactor;
-                lut.emissiveFactor = glm::vec4(packet.instance.emissiveFactor, packet.instance.emissiveStrength);
-                lut.baseColorTextureIndex = packet.instance.baseColorTextureIndex;
-                lut.alphaCutoff = packet.instance.alphaMaskCutoff;
-                lut.alphaMode = packet.instance.alphaMode;
-                lut.doubleSided = packet.instance.doubleSided;
-                lut.metallicFactor = packet.instance.metallicFactor;
-                lut.roughnessFactor = packet.instance.roughnessFactor;
-                lut.metallicRoughnessTextureIndex = packet.instance.metallicRoughnessTextureIndex;
-                lut.normalTextureIndex = packet.instance.normalTextureIndex;
-                lut.transmissionFactor = packet.instance.transmissionFactor;
-                lut.transmissionTextureIndex = packet.instance.transmissionTextureIndex;
-                lut.workflow = packet.instance.workflow;
-                rtInstanceLUTs.push_back(lut);
-            }
-        };
-
-        collectFromQueue(m_opaqueQueue);
-        collectFromQueue(m_opaqueDoubleSidedQueue);
-        collectFromQueue(m_maskQueue);
-        collectFromQueue(m_maskDoubleSidedQueue);
-
-        if (rtInstances.empty())
+        // Instance records live in the GPU scene (instanceCustomIndex = instance slot).
+        const uint32_t instanceCount = m_gpuScene.GetTlasInstanceCount();
+        if (instanceCount == 0)
         {
             m_hasTLASBuild = false;
-            m_tlasNeedFullBuild = false;
-            m_tlasNeedUpdate = false;
-            m_tlasInstanceSignatureValid = false;
-            m_tlasStructureSignatureValid = false;
+            m_tlasNeedBuild = true;
             uniformData.enableRTShadows = 0;
             uniformData.enableRTReflections = 0;
             return;
         }
 
-        if (m_rtInstanceBuffers.size() < MAX_FRAMES_IN_FLIGHT)
-            m_rtInstanceBuffers.resize(MAX_FRAMES_IN_FLIGHT);
-        if (m_instanceLUTBuffers.size() < MAX_FRAMES_IN_FLIGHT)
-            m_instanceLUTBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+        // Rebuilt in frames where ray traced instances changed. NVIDIA RT best practices: rebuild the TLAS instead of
+        // refitting it; refits keep the tree of the old placement, so moving instances (Bistro's fans) degrade traversal.
+        m_tlasNeedBuild |= m_gpuScene.ConsumeTlasChanged();
 
-        uint32_t instanceCount = static_cast<uint32_t>(rtInstances.size());
-        uint64_t instanceBufferSize = sizeof(NRI::AccelerationStructureInstance) * instanceCount;
-        uint64_t lutBufferSize = sizeof(shaderio::InstanceLUT) * rtInstanceLUTs.size();
-
-        // The ECS queues are the authoritative instance list. Hash the complete TLAS instance
-        // records so additions/removals, transform changes, BLAS replacement, and instance flags
-        // all invalidate the cached build without requiring ECS-specific callbacks here.
-        const uint8_t* instanceBytes = reinterpret_cast<const uint8_t*>(rtInstances.data());
-        uint64_t instanceSignature = Hash::compute(instanceBytes, instanceBufferSize);
-        uint64_t structureSignature = 0;
-        for (size_t i = 0; i < instanceCount; ++i)
+        if (m_tlasNeedBuild)
         {
-            const uint8_t* record = instanceBytes + i * sizeof(NRI::AccelerationStructureInstance);
+            if (m_rtInstanceBuffers.size() < MAX_FRAMES_IN_FLIGHT)
+                m_rtInstanceBuffers.resize(MAX_FRAMES_IN_FLIGHT);
 
-            // The first 48 bytes are the 3x4 transform. The remaining fields describe the
-            // TLAS topology/flags and cannot be changed through a Vulkan AS update.
-            structureSignature = Hash::compute(
-                record + 48,
-                sizeof(NRI::AccelerationStructureInstance) - 48,
-                structureSignature);
-        }
-        structureSignature = Hash::compute(&instanceCount, sizeof(instanceCount), structureSignature);
-        bool instanceListChanged = !m_tlasInstanceSignatureValid ||
-                                   instanceSignature != m_tlasInstanceSignature;
-        bool structureChanged = !m_tlasStructureSignatureValid ||
-                                structureSignature != m_tlasStructureSignature;
-        m_tlasInstanceSignature = instanceSignature;
-        m_tlasInstanceSignatureValid = true;
-        m_tlasStructureSignature = structureSignature;
-        m_tlasStructureSignatureValid = true;
-        m_tlasNeedFullBuild = structureChanged || !m_sceneTLAS;
-        m_tlasNeedUpdate = instanceListChanged && !m_tlasNeedFullBuild;
+            const uint64_t instanceBufferSize = sizeof(NRI::AccelerationStructureInstance) * instanceCount;
 
-        // 1. Ensure TLAS Instance Buffer is allocated and populated
-        if (!m_rtInstanceBuffers[currentFrameIndex] || m_rtInstanceBuffers[currentFrameIndex]->getSize() < instanceBufferSize)
-        {
-            m_rtInstanceBuffers[currentFrameIndex] = m_device->createBuffer(NRI::BufferDesc{
-                .size = std::max(instanceBufferSize, static_cast<uint64_t>(64 * 1024)),
-                .usage = NRI::BufferUsage::AccelerationStructureInstance
-            });
-        }
-        void* mapped = m_rtInstanceBuffers[currentFrameIndex]->map(0, instanceBufferSize);
-        memcpy(mapped, rtInstances.data(), instanceBufferSize);
-        m_rtInstanceBuffers[currentFrameIndex]->unmap();
-
-        // 2. Ensure Instance LUT Buffer is allocated and populated
-        if (!m_instanceLUTBuffers[currentFrameIndex] || m_instanceLUTBuffers[currentFrameIndex]->getSize() < lutBufferSize)
-        {
-            m_instanceLUTBuffers[currentFrameIndex] = m_device->createBuffer(NRI::BufferDesc{
-                .size = std::max(lutBufferSize, static_cast<uint64_t>(64 * 1024)),
-                .usage = NRI::BufferUsage::Storage
-            });
-        }
-        void* lutMapped = m_instanceLUTBuffers[currentFrameIndex]->map(0, lutBufferSize);
-        memcpy(lutMapped, rtInstanceLUTs.data(), lutBufferSize);
-        m_instanceLUTBuffers[currentFrameIndex]->unmap();
-
-        uniformData.instanceLUTReference = m_instanceLUTBuffers[currentFrameIndex]->getDeviceAddress();
-
-        // 2. Query TLAS build sizes
-        m_tlasBuildDesc = NRI::AccelerationStructureBuildDesc{
-            .type = NRI::AccelerationStructureType::TopLevel,
-            .flags = NRI::AccelerationStructureBuildFlags::PreferFastTrace | NRI::AccelerationStructureBuildFlags::AllowUpdate,
-            .instances = {
-                .instanceBufferAddress = m_rtInstanceBuffers[currentFrameIndex]->getDeviceAddress(),
-                .instanceCount = instanceCount
+            // 1. This frame slot's instance buffer (the build reads it on the GPU)
+            if (!m_rtInstanceBuffers[currentFrameIndex] || m_rtInstanceBuffers[currentFrameIndex]->getSize() < instanceBufferSize)
+            {
+                m_rtInstanceBuffers[currentFrameIndex] = m_device->createBuffer(NRI::BufferDesc{
+                    .size = std::max(instanceBufferSize, static_cast<uint64_t>(64 * 1024)),
+                    .usage = NRI::BufferUsage::AccelerationStructureInstance
+                });
             }
-        };
+            auto* mapped = static_cast<NRI::AccelerationStructureInstance*>(m_rtInstanceBuffers[currentFrameIndex]->map(0, instanceBufferSize));
+            m_gpuScene.WriteTlasInstances({ mapped, instanceCount });
+            m_rtInstanceBuffers[currentFrameIndex]->unmap();
 
-        NRI::AccelerationStructureBuildSizes tlasSizes = m_device->getAccelerationStructureBuildSizes(m_tlasBuildDesc);
-
-        // 3. Allocate / resize TLAS storage and scratch buffers
-        if (!m_sceneTLAS || m_sceneTLASCapacity < instanceCount || !m_tlasBuffer || m_tlasBuffer->getSize() < tlasSizes.accelerationStructureSize)
-        {
-            m_device->waitIdle();
-
-            // CRITICAL ORDER: Destroy VkAccelerationStructureKHR FIRST, then the backing VkBuffer!
-            m_sceneTLAS.reset();
-            m_tlasBuffer.reset();
-            m_tlasScratchBuffer.reset();
-
-            m_sceneTLASCapacity = std::max(instanceCount * 2, 64u);
-
-            m_tlasBuffer = m_device->createBuffer(NRI::BufferDesc{
-                .size = tlasSizes.accelerationStructureSize,
-                .usage = NRI::BufferUsage::AccelerationStructure
-            });
-
-            m_sceneTLAS = m_device->createAccelerationStructure(NRI::AccelerationStructureDesc{
+            // 2. Query TLAS build sizes
+            m_tlasBuildDesc = NRI::AccelerationStructureBuildDesc{
                 .type = NRI::AccelerationStructureType::TopLevel,
-                .storageBuffer = m_tlasBuffer.get(),
-                .bufferOffset = 0,
-                .size = tlasSizes.accelerationStructureSize
-            });
+                .flags = NRI::AccelerationStructureBuildFlags::PreferFastTrace,
+                .instances = {
+                    .instanceBufferAddress = m_rtInstanceBuffers[currentFrameIndex]->getDeviceAddress(),
+                    .instanceCount = instanceCount
+                }
+            };
 
-            m_tlasScratchBuffer = m_device->createBuffer(NRI::BufferDesc{
-                .size = std::max(tlasSizes.buildScratchSize, tlasSizes.updateScratchSize),
-                .usage = NRI::BufferUsage::AccelerationStructureScratch
-            });
+            NRI::AccelerationStructureBuildSizes tlasSizes = m_device->getAccelerationStructureBuildSizes(m_tlasBuildDesc);
 
-            // Register TLAS into Descriptor Heap ONLY when newly created or resized
-            m_tlasHeapSlot = m_resourceHeap->registerAccelerationStructure(*m_sceneTLAS, m_tlasHeapSlot);
-            m_tlasHeapIndex = m_tlasHeapSlot;
-            m_tlasNeedFullBuild = true;
-            m_tlasNeedUpdate = false;
+            // 3. Allocate / resize TLAS storage and scratch buffers
+            if (!m_sceneTLAS || m_sceneTLASCapacity < instanceCount || !m_tlasBuffer || m_tlasBuffer->getSize() < tlasSizes.accelerationStructureSize)
+            {
+                m_device->waitIdle();
+
+                // CRITICAL ORDER: Destroy VkAccelerationStructureKHR FIRST, then the backing VkBuffer!
+                m_sceneTLAS.reset();
+                m_tlasBuffer.reset();
+                m_tlasScratchBuffer.reset();
+
+                m_sceneTLASCapacity = std::max(instanceCount * 2, 64u);
+
+                m_tlasBuffer = m_device->createBuffer(NRI::BufferDesc{
+                    .size = tlasSizes.accelerationStructureSize,
+                    .usage = NRI::BufferUsage::AccelerationStructure
+                });
+
+                m_sceneTLAS = m_device->createAccelerationStructure(NRI::AccelerationStructureDesc{
+                    .type = NRI::AccelerationStructureType::TopLevel,
+                    .storageBuffer = m_tlasBuffer.get(),
+                    .bufferOffset = 0,
+                    .size = tlasSizes.accelerationStructureSize
+                });
+
+                m_tlasScratchBuffer = m_device->createBuffer(NRI::BufferDesc{
+                    .size = tlasSizes.buildScratchSize,
+                    .usage = NRI::BufferUsage::AccelerationStructureScratch
+                });
+
+                // Register TLAS into Descriptor Heap ONLY when newly created or resized
+                m_tlasHeapSlot = m_resourceHeap->registerAccelerationStructure(*m_sceneTLAS, m_tlasHeapSlot);
+                m_tlasHeapIndex = m_tlasHeapSlot;
+            }
         }
 
         // 4. Update UBO flags (ready for updateUniformBuffer!)
@@ -3594,27 +3517,11 @@ namespace Nox
         m_hasTLASBuild = true;
     }
 
-    void Renderer::BuildSceneAccelerationStructure(NRI::CommandBuffer& cmd, bool fullBuild)
+    void Renderer::BuildSceneAccelerationStructure(NRI::CommandBuffer& cmd)
     {
-        // 1. Pre-build barrier: Host/Transfer instance writes -> AS Build Read
+        // Host instance writes -> AS build read, build, AS build write -> shader read.
         cmd.accelerationStructureBarrier(NRI::AccelerationStructureBarrierType::TransferToBuild);
-
-        if (fullBuild)
-        {
-            cmd.buildAccelerationStructure(m_tlasBuildDesc, m_tlasScratchBuffer->getDeviceAddress(), *m_sceneTLAS);
-        }
-        else
-        {
-            // Transform-only ECS changes preserve instance count, BLAS addresses, and flags, so
-            // Vulkan's fast AS update path is valid and avoids rebuilding the entire TLAS.
-            cmd.updateAccelerationStructure(
-                m_tlasBuildDesc,
-                m_tlasScratchBuffer->getDeviceAddress(),
-                *m_sceneTLAS,
-                *m_sceneTLAS);
-        }
-
-        // 3. Post-build barrier: AS Build Write -> Fragment/Compute Shader Read
+        cmd.buildAccelerationStructure(m_tlasBuildDesc, m_tlasScratchBuffer->getDeviceAddress(), *m_sceneTLAS);
         cmd.accelerationStructureBarrier(NRI::AccelerationStructureBarrierType::BuildToShaderRead);
     }
 
@@ -3995,255 +3902,167 @@ namespace Nox
         m_renderer2D->EndScene();
     }
 
-    void Renderer::BuildBuffers()
+    bool Renderer::BindGpuScene(uint64_t sceneID)
     {
-        m_instanceBufferObjects.clear();
-        m_drawMeshTasksIndirectCommands.clear();
+        // Joint matrices are collected again every frame.
+        m_boneMatrices.clear();
+        // A registry change may resolve texture paths that were missing: re-pack the materials.
+        if (RefreshTextureDescriptorMisses())
+            m_gpuMaterialsDirty = true;
 
-        auto packQueue = [this](const std::vector<RenderPacket>& queue, uint32_t& outCount)
-        {
-            outCount = static_cast<uint32_t>(queue.size());
-            for (const auto& packet : queue)
-            {
-                m_instanceBufferObjects.push_back(packet.instance);
-                m_drawMeshTasksIndirectCommands.push_back(packet.command);
-            }
-        };
+        if (m_gpuSceneOwner == sceneID)
+            return false;
 
-        // 1. Opaque PBR (Single-Sided & Double-Sided)
-        packQueue(m_opaqueQueue, m_opaqueCount);
-        packQueue(m_opaqueDoubleSidedQueue, m_opaqueDoubleSidedCount);
-
-        // 2. Alpha Mask PBR (Single-Sided & Double-Sided)
-        packQueue(m_maskQueue, m_maskCount);
-        packQueue(m_maskDoubleSidedQueue, m_maskDoubleSidedCount);
-
-        // 3. Unlit (Single-Sided & Double-Sided)
-        packQueue(m_unlitQueue, m_unlitCount);
-        packQueue(m_unlitDoubleSidedQueue, m_unlitDoubleSidedCount);
-
-        // 4. Transparent (Sorted back-to-front)
-        auto sortByDistance = [](std::vector<RenderPacket>& queue)
-        {
-            std::sort(queue.begin(), queue.end(), [](const RenderPacket& a, const RenderPacket& b)
-            {
-                return a.distanceToCamera > b.distanceToCamera;
-            });
-        };
-
-        sortByDistance(m_transparentQueue);
-        packQueue(m_transparentQueue, m_transparentCount);
-
-        sortByDistance(m_transparentDoubleSidedQueue);
-        packQueue(m_transparentDoubleSidedQueue, m_transparentDoubleSidedCount);
-
-        sortByDistance(m_transparentUnlitQueue);
-        packQueue(m_transparentUnlitQueue, m_transparentUnlitCount);
-
-        sortByDistance(m_transparentUnlitDoubleSidedQueue);
-        packQueue(m_transparentUnlitDoubleSidedQueue, m_transparentUnlitDoubleSidedCount);
+        m_gpuScene.RemoveAllInstances();
+        m_invalidatedMeshEntities.clear();
+        m_gpuSceneOwner = sceneID;
+        return true;
     }
 
-    namespace
+    bool Renderer::AddMeshInstances(const glm::mat4& world, const MeshComponent& component, const MaterialComponent* material, int32_t entityID,
+                                    std::vector<uint32_t>& outInstances, std::vector<AssetHandle>& outMissingAssets)
     {
-        constexpr uint32_t NoBoneMatrices = 0xFFFFFFFF;
+        if (component.Mesh == 0)
+            return true;
 
-        RenderQueue SelectRenderQueue(AlphaMode mode, bool unlit, bool doubleSided)
-        {
-            // A closed, single-sided (doubleSided=false) translucent shape (e.g. the alpha sphere shell in
-            // CompareTransmission) needs its own backface actually culled, exactly like the opaque/mask queues
-            // already do - with CullMode::None, both the near and far hemisphere triangles rasterize and alpha-blend
-            // on top of each other in whatever order the meshlets happen to be processed (not depth-sorted
-            // per-triangle), which compounds into a washed-out/flatter look instead of a clean single translucent
-            // surface. So the transparent queues respect doubleSided too.
-            if (mode == AlphaMode::Blend)
-            {
-                if (unlit)
-                    return doubleSided ? RenderQueue::TransparentUnlitDoubleSided : RenderQueue::TransparentUnlit;
-                return doubleSided ? RenderQueue::TransparentDoubleSided : RenderQueue::Transparent;
-            }
-
-            // Opaque and alpha-mask unlit materials share the unlit queues.
-            if (unlit)
-                return doubleSided ? RenderQueue::UnlitDoubleSided : RenderQueue::Unlit;
-            if (mode == AlphaMode::Mask)
-                return doubleSided ? RenderQueue::MaskDoubleSided : RenderQueue::Mask;
-            return doubleSided ? RenderQueue::OpaqueDoubleSided : RenderQueue::Opaque;
-        }
-    }
-
-    void Renderer::BeginMeshSubmission(uint32_t chunkCount)
-    {
-        if (m_meshSubmissionChunks.size() < chunkCount)
-            m_meshSubmissionChunks.resize(chunkCount);
-        m_meshSubmissionChunkCount = chunkCount;
-
-        for (uint32_t chunkIndex = 0; chunkIndex < chunkCount; ++chunkIndex)
-        {
-            MeshSubmissionChunk& chunk = m_meshSubmissionChunks[chunkIndex];
-            for (std::vector<RenderPacket>& queue : chunk.queues)
-                queue.clear();
-            chunk.boneMatrices.clear();
-            chunk.missingAssets.clear();
-            chunk.unresolvedTexturePaths.clear();
-        }
-
-        // The tasks only read the texture caches; refresh them here, before they run.
-        RefreshTextureDescriptorMisses();
-    }
-
-    void Renderer::SubmitMesh(uint32_t chunkIndex, const glm::mat4& transform, const MeshComponent& src, const MaterialComponent* material,
-                              int entityID, const std::vector<glm::mat4>* boneTransforms)
-    {
-        if (src.Mesh == 0)
-            return;
-
-        MeshSubmissionChunk& chunk = m_meshSubmissionChunks[chunkIndex];
-        const AssetType type = AssetManager::GetAssetType(src.Mesh);
-
+        const AssetType type = AssetManager::GetAssetType(component.Mesh);
         if (type == AssetType::Mesh)
         {
-            const Mesh* mesh = AssetManager::FindLoadedAsset<Mesh>(src.Mesh);
-            if (mesh)
-                submitSubmeshes(chunk, transform, *mesh, src, material, entityID, boneTransforms);
-            else
-                chunk.missingAssets.push_back(src.Mesh);
+            if (const Mesh* mesh = AssetManager::FindLoadedAsset<Mesh>(component.Mesh))
+                return addSubmeshInstances(world, *mesh, component, material, entityID, outInstances, outMissingAssets);
         }
         else if (type == AssetType::StaticMesh)
         {
-            const StaticMesh* staticMesh = AssetManager::FindLoadedAsset<StaticMesh>(src.Mesh);
-            if (staticMesh)
-                submitSubmeshes(chunk, transform, *staticMesh, src, material, entityID, nullptr);
-            else
-                chunk.missingAssets.push_back(src.Mesh);
+            if (const StaticMesh* mesh = AssetManager::FindLoadedAsset<StaticMesh>(component.Mesh))
+                return addSubmeshInstances(world, *mesh, component, material, entityID, outInstances, outMissingAssets);
         }
+        else
+        {
+            return true; // not a drawable mesh asset
+        }
+
+        outMissingAssets.push_back(component.Mesh);
+        return false;
     }
 
-    void Renderer::EndMeshSubmission(std::vector<AssetHandle>& outMissingAssets)
+    void Renderer::RemoveMeshInstances(std::span<const uint32_t> instances)
     {
-        NOX_PROFILE_SCOPE("Merge Mesh Submission");
+        for (uint32_t instance : instances)
+            m_gpuScene.RemoveInstance(instance);
+    }
 
-        for (uint32_t chunkIndex = 0; chunkIndex < m_meshSubmissionChunkCount; ++chunkIndex)
+    void Renderer::SetMeshInstancesTransform(std::span<const uint32_t> instances, const glm::mat4& world)
+    {
+        for (uint32_t instance : instances)
+            m_gpuScene.SetTransform(instance, world);
+    }
+
+    void Renderer::SetMeshInstancesBones(std::span<const uint32_t> instances, std::span<const glm::mat4> bones)
+    {
+        // The entity's submeshes share its joint matrices.
+        uint32_t boneMatrixOffset = GpuScene::NoBoneMatrices;
+        if (!bones.empty())
         {
-            MeshSubmissionChunk& chunk = m_meshSubmissionChunks[chunkIndex];
-
-            // Bone offsets were chunk-local.
-            const uint32_t boneBase = static_cast<uint32_t>(m_boneMatrices.size());
-            m_boneMatrices.insert(m_boneMatrices.end(), chunk.boneMatrices.begin(), chunk.boneMatrices.end());
-
-            for (size_t queueIndex = 0; queueIndex < chunk.queues.size(); ++queueIndex)
-            {
-                std::vector<RenderPacket>& target = getRenderQueue(static_cast<RenderQueue>(queueIndex));
-                for (RenderPacket& packet : chunk.queues[queueIndex])
-                {
-                    if (packet.instance.boneMatrixOffset != NoBoneMatrices)
-                        packet.instance.boneMatrixOffset += boneBase;
-                }
-                target.insert(target.end(), chunk.queues[queueIndex].begin(), chunk.queues[queueIndex].end());
-            }
-
-            outMissingAssets.insert(outMissingAssets.end(), chunk.missingAssets.begin(), chunk.missingAssets.end());
-
-            // Resolved (loading the texture if needed) for the next frame's submission.
-            for (const std::string& path : chunk.unresolvedTexturePaths)
-                GetTextureIndex(path);
+            boneMatrixOffset = static_cast<uint32_t>(m_boneMatrices.size());
+            m_boneMatrices.insert(m_boneMatrices.end(), bones.begin(), bones.end());
         }
-        m_meshSubmissionChunkCount = 0;
+
+        for (uint32_t instance : instances)
+            m_gpuScene.SetBoneMatrixOffset(instance, boneMatrixOffset);
+    }
+
+    void Renderer::MarkMaterialChanged(AssetHandle material)
+    {
+        if (!s_Instance)
+            return;
+
+        GpuScene& gpuScene = s_Instance->m_gpuScene;
+        const uint32_t slot = gpuScene.FindMaterial({ .Asset = static_cast<uint64_t>(material) });
+        if (slot == GpuScene::InvalidSlot)
+            return;
+        if (const Material* loaded = AssetManager::FindLoadedAsset<Material>(material))
+            gpuScene.UpdateMaterial(slot, PackMaterial(loaded->GetData()));
     }
 
     template <typename MeshAsset>
-    void Renderer::submitSubmeshes(MeshSubmissionChunk& chunk, const glm::mat4& transform, const MeshAsset& mesh, const MeshComponent& src,
-                                   const MaterialComponent* material, int entityID, const std::vector<glm::mat4>* boneTransforms)
+    bool Renderer::addSubmeshInstances(const glm::mat4& world, const MeshAsset& mesh, const MeshComponent& component, const MaterialComponent* material,
+                                       int32_t entityID, std::vector<uint32_t>& outInstances, std::vector<AssetHandle>& outMissingAssets)
     {
         // Per-entity overrides win; otherwise the mesh's imported .nmat handles.
         const std::vector<AssetHandle>& materialAssets = material && !material->MaterialAssets.empty()
             ? material->MaterialAssets : mesh.GetMaterialAssets();
 
         const uint64_t submeshTotal = mesh.GetSubMeshCount();
-        const uint64_t first = std::min<uint64_t>(src.SubmeshIndex, submeshTotal);
-        const uint64_t count = src.SubmeshCount == UINT32_MAX ? submeshTotal : std::max(src.SubmeshCount, 1u);
+        const uint64_t first = std::min<uint64_t>(component.SubmeshIndex, submeshTotal);
+        const uint64_t count = component.SubmeshCount == UINT32_MAX ? submeshTotal : std::max(component.SubmeshCount, 1u);
         const uint64_t last = std::min(first + count, submeshTotal);
 
-        const glm::mat4 normalMatrix = glm::transpose(glm::inverse(transform));
+        bool complete = true;
         for (uint64_t submesh = first; submesh < last; ++submesh)
         {
+            const MeshHandle& handle = mesh.GetSubMesh(submesh);
+            if (handle.gpuSceneMesh == GpuScene::InvalidSlot)
+                continue;
+
             const AssetHandle materialAsset = submesh < materialAssets.size() ? materialAssets[submesh] : AssetHandle(0);
-            submitSubmesh(chunk, transform, normalMatrix, mesh.GetSubMesh(submesh), mesh.GetMaterial(submesh), materialAsset, entityID, boneTransforms);
+            const uint32_t materialSlot = acquireGpuMaterial(static_cast<uint64_t>(component.Mesh), static_cast<uint32_t>(submesh), mesh.GetMaterial(submesh),
+                                                             materialAsset, complete, outMissingAssets);
+            outInstances.push_back(m_gpuScene.AddInstance(handle.gpuSceneMesh, materialSlot, world, entityID));
         }
+        return complete;
     }
 
-    void Renderer::submitSubmesh(MeshSubmissionChunk& chunk, const glm::mat4& transform, const glm::mat4& normalMatrix, const MeshHandle& handle,
-                                 const MaterialData& meshMaterial, AssetHandle materialAsset, int entityID, const std::vector<glm::mat4>* boneTransforms)
+    uint32_t Renderer::acquireGpuMaterial(uint64_t meshAsset, uint32_t submesh, const MaterialData& meshMaterial, AssetHandle materialAsset,
+                                          bool& outComplete, std::vector<AssetHandle>& outMissingAssets)
     {
-        // The .nmat asset replaces the mesh's embedded material.
-        const MaterialData* material = &meshMaterial;
-        if (materialAsset != 0)
+        // The .nmat asset replaces the mesh's embedded material, which stands in until the asset is loaded.
+        if (materialAsset != 0 && AssetManager::IsAssetHandleValid(materialAsset))
         {
-            if (const Material* loadedMaterial = AssetManager::FindLoadedAsset<Material>(materialAsset))
-                material = &loadedMaterial->GetData();
-            else
-                chunk.missingAssets.push_back(materialAsset);
+            const GpuMaterialKey key{ .Asset = static_cast<uint64_t>(materialAsset) };
+            if (const uint32_t slot = m_gpuScene.FindMaterial(key); slot != GpuScene::InvalidSlot)
+                return slot;
+            if (const Material* loaded = AssetManager::FindLoadedAsset<Material>(materialAsset))
+                return m_gpuScene.AddMaterial(key, PackMaterial(loaded->GetData()));
+
+            outMissingAssets.push_back(materialAsset);
+            outComplete = false;
         }
 
-        shaderio::InstanceData instance{};
-        instance.modelMatrix = transform;
-        instance.normalMatrix = normalMatrix;
-
-        // Where do the meshlets live, and how many are there?
-        instance.drawsPageIndex = handle.meshletDraws.pageIndex;
-        instance.drawsOffset = handle.meshletDraws.offset;
-        instance.meshletCount = handle.meshletDraws.count;
-
-        // Where do the vertices and triangles live?
-        instance.verticesPageIndex = handle.vertices.pageIndex;
-        instance.meshletVerticesPageIndex = handle.meshletVertices.pageIndex;
-        instance.meshletTrianglesPageIndex = handle.meshletTriangles.pageIndex;
-
-        PackMaterial(instance, *material, chunk.unresolvedTexturePaths);
-        instance.entityID = entityID;
-
-        if (boneTransforms && !boneTransforms->empty())
-        {
-            // Chunk-local offset, rebased when the chunks are merged.
-            instance.boneMatrixOffset = static_cast<uint32_t>(chunk.boneMatrices.size());
-            chunk.boneMatrices.insert(chunk.boneMatrices.end(), boneTransforms->begin(), boneTransforms->end());
-        }
-        else
-        {
-            instance.boneMatrixOffset = NoBoneMatrices;
-        }
-
-        RenderPacket packet{};
-        packet.instance = instance;
-        packet.command.groupCountX = (handle.GetMeshletCount() + shaderio::TASK_SHADER_DISPATCH_X - 1) / shaderio::TASK_SHADER_DISPATCH_X;
-        packet.command.groupCountY = 1;
-        packet.command.groupCountZ = 1;
-        packet.blasId = handle.blasId;
-
-        const RenderQueue queue = SelectRenderQueue(material->Mode, instance.unlit != 0, instance.doubleSided != 0);
-        if (material->Mode == AlphaMode::Blend)
-            packet.distanceToCamera = glm::length(glm::vec3(transform[3]) - glm::vec3(uniformData.cameraWorldPos));
-
-        chunk.queues[static_cast<size_t>(queue)].push_back(packet);
+        const GpuMaterialKey key{ .Asset = meshAsset, .Submesh = submesh };
+        if (const uint32_t slot = m_gpuScene.FindMaterial(key); slot != GpuScene::InvalidSlot)
+            return slot;
+        return m_gpuScene.AddMaterial(key, PackMaterial(meshMaterial));
     }
 
-    std::vector<RenderPacket>& Renderer::getRenderQueue(RenderQueue queue)
+    void Renderer::refreshGpuMaterials()
     {
-        switch (queue)
+        if (!m_gpuMaterialsDirty)
+            return;
+        m_gpuMaterialsDirty = false;
+
+        NOX_PROFILE_SCOPE("Refresh GPU Materials");
+        m_gpuScene.ForEachMaterial([this](uint32_t slot, const GpuMaterialKey& key)
         {
-        case RenderQueue::Opaque: return m_opaqueQueue;
-        case RenderQueue::OpaqueDoubleSided: return m_opaqueDoubleSidedQueue;
-        case RenderQueue::Mask: return m_maskQueue;
-        case RenderQueue::MaskDoubleSided: return m_maskDoubleSidedQueue;
-        case RenderQueue::Unlit: return m_unlitQueue;
-        case RenderQueue::UnlitDoubleSided: return m_unlitDoubleSidedQueue;
-        case RenderQueue::Transparent: return m_transparentQueue;
-        case RenderQueue::TransparentDoubleSided: return m_transparentDoubleSidedQueue;
-        case RenderQueue::TransparentUnlit: return m_transparentUnlitQueue;
-        case RenderQueue::TransparentUnlitDoubleSided:
-        case RenderQueue::Count: break;
-        }
-        return m_transparentUnlitDoubleSidedQueue;
+            const AssetHandle asset(key.Asset);
+            const MaterialData* data = nullptr;
+            if (key.Submesh == GpuMaterialKey::AssetMaterial)
+            {
+                if (const Material* material = AssetManager::FindLoadedAsset<Material>(asset))
+                    data = &material->GetData();
+            }
+            else if (AssetManager::GetAssetType(asset) == AssetType::Mesh)
+            {
+                if (const Mesh* mesh = AssetManager::FindLoadedAsset<Mesh>(asset); mesh && key.Submesh < mesh->GetSubMeshCount())
+                    data = &mesh->GetMaterial(key.Submesh);
+            }
+            else if (const StaticMesh* mesh = AssetManager::FindLoadedAsset<StaticMesh>(asset); mesh && key.Submesh < mesh->GetSubMeshCount())
+            {
+                data = &mesh->GetMaterial(key.Submesh);
+            }
+
+            if (data)
+                m_gpuScene.UpdateMaterial(slot, PackMaterial(*data));
+        });
     }
 
     void Renderer::SubmitLight(const glm::mat4& transform, const DirectionalLightComponent& light)

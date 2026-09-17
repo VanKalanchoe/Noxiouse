@@ -83,7 +83,7 @@ FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform Pu
     FSOutput output;
 
     UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
-    InstanceData* instances = (InstanceData*)pushConstant.instanceReference;
+    SceneInstances instances = SceneInstances(ubo);
     InstanceData instance = instances[vertIn.drawID];
 
     SamplerState sampLinearHandle = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));

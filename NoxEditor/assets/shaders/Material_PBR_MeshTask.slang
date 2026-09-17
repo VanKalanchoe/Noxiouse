@@ -13,13 +13,13 @@ void taskMain
     uniform PushConstantMeshlets pushConstant
 )
 {
-    uint drawIndex = drawID + pushConstant.instanceBaseIndex;
-
-    // 1. Fetch instance data for this draw call via global drawIndex
-    InstanceData* instances = (InstanceData*)pushConstant.instanceReference;
-    InstanceData instance = instances[drawIndex];
-
+    // 1. The draw's instance slot (draw lists hold one GPU scene instance slot per indirect draw)
     UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+    uint32_t* drawInstances = (uint32_t*)pushConstant.drawInstancesReference;
+    uint instanceSlot = drawInstances[pushConstant.instanceBaseIndex + drawID];
+
+    SceneInstances instances = SceneInstances(ubo);
+    InstanceData instance = instances[instanceSlot];
 
     uint32_t totalMeshlets = instance.meshletCount;
     // Base global meshlet index for this Task workgroup
@@ -88,7 +88,7 @@ void taskMain
         {
             // Compact visible meshlets into payload array
             uint index = visibleMeshletCount.add(1);
-            sharedPayload.drawID = drawIndex;
+            sharedPayload.drawID = instanceSlot;
             sharedPayload.meshletIndices[index] = threadOffset;
         }
     }

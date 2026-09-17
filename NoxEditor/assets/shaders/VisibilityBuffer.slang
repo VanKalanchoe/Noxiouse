@@ -33,8 +33,9 @@
     )
     {
         UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
-        InstanceData* instances = (InstanceData*)pushConstant.instanceReference;
+        SceneInstances instances = SceneInstances(ubo);
 
+        // The payload carries the instance slot.
         InstanceData instance = instances[sharedPayload.drawID];
         float4x4 modelMatrix = instance.modelMatrix;
 
@@ -120,12 +121,12 @@
     )
     {
         // Alpha mask discard: prevents transparent quad areas from writing depth & visibility
-        InstanceData* instances = (InstanceData*)pushConstant.instanceReference;
+        UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+        SceneInstances instances = SceneInstances(ubo);
         InstanceData instance = instances[inVert.drawID];
 
         if (instance.alphaMode == 1 && instance.baseColorTextureIndex != 0xFFFFFFFF)
         {
-            UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
             SamplerState samp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
             Texture2D baseColorTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.baseColorTextureIndex, 0));
             float2 uv = (instance.baseColorTextureSet == 0) ? inVert.uv0 : inVert.uv1;
@@ -137,7 +138,7 @@
         }
 
         VisOutput output;
-        // .x = Instance/Draw ID (+ 1 so 0 is reserved strictly for background)
+        // .x = instance slot (+ 1 so 0 is reserved strictly for background)
         // .y = (MeshletID << 8) | (PrimitiveID & 0xFF)
         output.visibility = uint2(inVert.drawID + 1, (inVert.meshletID << 8) | (primitiveID & 0xFF));
         return output;

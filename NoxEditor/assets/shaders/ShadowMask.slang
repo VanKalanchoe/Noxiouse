@@ -58,7 +58,7 @@
     static const float M_PI = 3.141592653589793;
     static const float GOLDEN_ANGLE = 2.399963229728653;
 
-    float2 intersection_uv(InstanceLUT lut, uint primIndex, float2 barycentrics)
+    float2 intersection_uv(GpuRayTracingInstance lut, uint primIndex, float2 barycentrics)
     {
         uint32_t* indices = (uint32_t*)lut.indexBufferAddress;
         uint i0 = indices[primIndex * 3 + 0];
@@ -98,7 +98,7 @@
 
         sq.TraceRayInline(accelerationStructure, rayFlags, 0xFF, shadowRayDesc);
 
-        InstanceLUT* instanceLUTBuffer = (InstanceLUT*)ubo->instanceLUTReference;
+        GpuRayTracingInstance* instanceLUTBuffer = (GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference;
         SamplerState textureSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
 
         while (sq.Proceed())
@@ -106,7 +106,7 @@
             uint instanceID = sq.CandidateRayInstanceCustomIndex();
             uint primIndex = sq.CandidatePrimitiveIndex();
 
-            InstanceLUT lut = instanceLUTBuffer[instanceID];
+            GpuRayTracingInstance lut = instanceLUTBuffer[instanceID];
 
             if (lut.alphaMode == 0 || lut.baseColorTextureIndex == 0xFFFFFFFF)
             {

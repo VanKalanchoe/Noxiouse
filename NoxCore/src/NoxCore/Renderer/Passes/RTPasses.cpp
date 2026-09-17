@@ -22,6 +22,7 @@ namespace Nox
                 builder.Read(resources.Depth);
                 builder.Read(resources.GBufferNormal);
                 ReadIfValid(builder, resources.TLAS);
+                ReadGpuScene(builder, resources);
                 builder.ColorTarget(resources.RawShadowMask, NRI::LoadOP::clear, NRI::StoreOP::store, { 65504.0f, 1.0f, 0.0f, 0.0f });
                 builder.ColorTarget(resources.ViewZ, NRI::LoadOP::clear, NRI::StoreOP::store, { 500000.0f, 0.0f, 0.0f, 0.0f });
                 builder.ColorTarget(resources.NRDNormalRoughness, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
@@ -127,6 +128,7 @@ namespace Nox
                 builder.Read(resources.GBufferMaterial);
                 builder.Read(resources.Visibility);
                 ReadIfValid(builder, resources.TLAS);
+                ReadGpuScene(builder, resources);
                 // Hit shading samples the DDGI atlases (through the uniforms) when DDGI runs.
                 if (m_frame.ddgiAdded)
                 {
@@ -283,6 +285,7 @@ namespace Nox
             [&](RGBuilder& builder)
             {
                 ReadIfValid(builder, resources.TLAS);
+                ReadGpuScene(builder, resources);
                 // Multi-bounce: hits sample the atlases bound in the uniforms.
                 builder.Read(resources.DDGIIrradiance[writeIndex]);
                 builder.Read(resources.DDGIDistance[writeIndex]);

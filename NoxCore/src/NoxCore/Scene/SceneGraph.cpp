@@ -22,7 +22,7 @@ namespace Nox
     }
 
     void SceneGraph::UpdateWorldTransforms(entt::registry& registry, const std::unordered_map<UUID, entt::entity>& entityMap,
-                                           WorkerLocal<EntityCommandBuffer>& commandBuffers)
+                                           WorkerLocal<EntityCommandBuffer>& commandBuffers, WorkerLocal<std::vector<entt::entity>>& movedEntities)
     {
         // Children are found through entityMap, so its size bounds any level's item count. Pointers into component
         // storage stay valid: nothing makes structural changes while the frame graph runs.
@@ -61,6 +61,8 @@ namespace Nox
                 {
                     world.WorldMatrix = view.get<TransformComponent>(entity).GetTransform();
                     dirty->isDirty = false;
+                    if (registry.all_of<MeshComponent>(entity))
+                        movedEntities.Local().push_back(entity);
                 }
 
                 if (relationship)
@@ -78,7 +80,7 @@ namespace Nox
                 {
                     const SubtreeRoot& node = frontier[index];
                     bool wasDirty = false;
-                    const glm::mat4* worldMatrix = UpdateNode(registry, commandBuffers, node.Entity, *node.ParentWorldMatrix, node.ParentWasDirty, wasDirty);
+                    const glm::mat4* worldMatrix = UpdateNode(registry, commandBuffers, movedEntities, node.Entity, *node.ParentWorldMatrix, node.ParentWasDirty, wasDirty);
                     if (!worldMatrix)
                         continue;
                     if (const RelationshipComponent* relationship = registry.try_get<RelationshipComponent>(node.Entity))
@@ -97,12 +99,13 @@ namespace Nox
                 for (uint32_t index = begin; index < end; ++index)
                 {
                     const SubtreeRoot& subtree = frontier[index];
-                    UpdateSubtree(registry, entityMap, commandBuffers, subtree.Entity, *subtree.ParentWorldMatrix, subtree.ParentWasDirty);
+                    UpdateSubtree(registry, entityMap, commandBuffers, movedEntities, subtree.Entity, *subtree.ParentWorldMatrix, subtree.ParentWasDirty);
                 }
             });
     }
 
-    const glm::mat4* SceneGraph::UpdateNode(entt::registry& registry, WorkerLocal<EntityCommandBuffer>& commandBuffers, entt::entity entity,
+    const glm::mat4* SceneGraph::UpdateNode(entt::registry& registry, WorkerLocal<EntityCommandBuffer>& commandBuffers,
+                                            WorkerLocal<std::vector<entt::entity>>& movedEntities, entt::entity entity,
                                             const glm::mat4& parentWorldMatrix, bool parentWasDirty, bool& outWasDirty)
     {
         DirtyTransformComponent* dirty = registry.try_get<DirtyTransformComponent>(entity);
@@ -122,6 +125,8 @@ namespace Nox
         {
             if (const TransformComponent* local = registry.try_get<TransformComponent>(entity))
                 world->WorldMatrix = parentWorldMatrix * local->GetTransform();
+            if (registry.all_of<MeshComponent>(entity))
+                movedEntities.Local().push_back(entity);
         }
         if (dirty)
             dirty->isDirty = false;
@@ -130,11 +135,11 @@ namespace Nox
     }
 
     void SceneGraph::UpdateSubtree(entt::registry& registry, const std::unordered_map<UUID, entt::entity>& entityMap,
-                                   WorkerLocal<EntityCommandBuffer>& commandBuffers, entt::entity entity,
-                                   const glm::mat4& parentWorldMatrix, bool parentWasDirty)
+                                   WorkerLocal<EntityCommandBuffer>& commandBuffers, WorkerLocal<std::vector<entt::entity>>& movedEntities,
+                                   entt::entity entity, const glm::mat4& parentWorldMatrix, bool parentWasDirty)
     {
         bool wasDirty = false;
-        const glm::mat4* worldMatrix = UpdateNode(registry, commandBuffers, entity, parentWorldMatrix, parentWasDirty, wasDirty);
+        const glm::mat4* worldMatrix = UpdateNode(registry, commandBuffers, movedEntities, entity, parentWorldMatrix, parentWasDirty, wasDirty);
         if (!worldMatrix)
             return;
 
@@ -147,7 +152,7 @@ namespace Nox
             auto found = entityMap.find(childUUID);
             if (found == entityMap.end() || !registry.valid(found->second))
                 continue;
-            UpdateSubtree(registry, entityMap, commandBuffers, found->second, *worldMatrix, wasDirty);
+            UpdateSubtree(registry, entityMap, commandBuffers, movedEntities, found->second, *worldMatrix, wasDirty);
         }
     }
 }

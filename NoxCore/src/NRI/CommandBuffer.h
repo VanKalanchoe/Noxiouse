@@ -218,6 +218,8 @@ namespace NRI
         virtual void dispatch(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) = 0;
         
         virtual void copyBuffer(class Buffer& srcBuffer, class Buffer& dstBuffer, const BufferCopyRegion& region = {}) = 0;
+        // Several regions in one copy (e.g. scattering changed records from staging into a persistent buffer).
+        virtual void copyBuffer(class Buffer& srcBuffer, class Buffer& dstBuffer, std::span<const BufferCopyRegion> regions) = 0;
         
         virtual void transitionTextureLayout(Texture& texture, TextureLayout oldLayout, TextureLayout newLayout) = 0;
         virtual void transitionSwapchainLayout(Swapchain& swapchain, uint32_t imageIndex, TextureLayout oldLayout, TextureLayout newLayout) = 0;
