@@ -95,6 +95,7 @@ namespace Nox
             switch (access)
             {
             case RGBufferAccess::Read: return { NRI::AccessBits::ShaderRead, ShaderStages(flags) };
+            case RGBufferAccess::IndirectRead: return { NRI::AccessBits::IndirectRead, NRI::StageBits::Indirect };
             case RGBufferAccess::Write: return { NRI::AccessBits::ShaderWrite, ShaderStages(flags) };
             case RGBufferAccess::AccelerationStructureBuild: return { NRI::AccessBits::AccelerationStructureWrite, NRI::StageBits::AccelerationStructureBuild };
             case RGBufferAccess::AccelerationStructureRead: return { NRI::AccessBits::AccelerationStructureRead | NRI::AccessBits::ShaderRead, ShaderStages(flags) };
@@ -979,6 +980,9 @@ namespace Nox
 #if NOX_PROFILING_ENABLED
         Profiler::Get().BeginCpuScope(pass.ScopeId);
         Profiler::Get().BeginGpuScope(gpuScopes, cmd, pass.ScopeId);
+        // Draw statistics (triangles, fragments, task/mesh shader invocations) of raster passes, when enabled.
+        if (HasFlag(pass.Flags, RGPassFlags::Raster))
+            Profiler::Get().BeginGpuStatistics(gpuScopes, cmd, pass.ScopeId);
 #endif
 
         if (pass.TextureBarrierCount > 0 || pass.BufferBarrierCount > 0)
@@ -1005,6 +1009,7 @@ namespace Nox
             cmd.transitionSwapchainLayout(*pass.Swapchain, pass.SwapchainImage, NRI::TextureLayout::ColorAttachment, NRI::TextureLayout::Present);
 
 #if NOX_PROFILING_ENABLED
+        Profiler::Get().EndGpuStatistics(gpuScopes, cmd);
         Profiler::Get().EndGpuScope(gpuScopes, cmd);
         Profiler::Get().EndCpuScope(pass.ScopeId);
 #endif

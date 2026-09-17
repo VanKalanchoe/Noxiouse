@@ -40,49 +40,27 @@ void taskMain
 
     if (localMeshletIdx < totalMeshlets)
     {
-        uint32_t globalMeshletIndex = groupBaseMeshlet + threadOffset;
-
-        uint64_t* boundsPageTable = (uint64_t*)pushConstant.meshletBoundsPageTableReference;
-        MeshletBounds* meshletBoundsPage = (MeshletBounds*)boundsPageTable[instance.drawsPageIndex];
-        MeshletBounds meshletBounds = meshletBoundsPage[globalMeshletIndex];
-
-        // Transform bounding sphere center to world space
-        float3 worldCenter = mul(instance.modelMatrix, float4(meshletBounds.center, 1.0)).xyz;
-
-        // Account for non-uniform model scaling
-        float maxScale = max(length(instance.modelMatrix[0].xyz), 
-                         max(length(instance.modelMatrix[1].xyz), 
-                             length(instance.modelMatrix[2].xyz)));
-
-        float worldRadius = meshletBounds.radius * maxScale;
-        float4 worldBounds = float4(worldCenter, worldRadius);
-
         bool visible = true;
 
-        // Frustum Cull
-        bool frustumVisible = true;
-     /*    for(uint i = 0; i < 4; i++)
+        // Optional meshlet culling (the instance already passed GPU instance culling); off, no bounds are fetched.
+        if (pushConstant.meshletCulling != 0)
         {
-            float dist = dot(ubo.frozenFrustum.planes[i].xyz, worldBounds.xyz) + ubo.frozenFrustum.planes[i].w;
-            frustumVisible &= (dist >= -worldBounds.w);
-        }
-        visible &= frustumVisible;
-        if(!frustumVisible)
-        { */
-           /*  pushConstant.culledData.frustumCulled.add(1); */
-       /*  } */
+            uint32_t globalMeshletIndex = groupBaseMeshlet + threadOffset;
+            uint64_t* boundsPageTable = (uint64_t*)pushConstant.meshletBoundsPageTableReference;
+            MeshletBounds* meshletBoundsPage = (MeshletBounds*)boundsPageTable[instance.drawsPageIndex];
+            MeshletBounds meshletBounds = meshletBoundsPage[globalMeshletIndex];
 
-        // Backface cull from meshoptimizer.h
-        // visible = dot(center - camera_position, cone_axis) >= cone_cutoff * length(center - camera_position) + radius
-    /*     float3 worldConeAxis = normalize(mul((float3x3)pushConstant.modelMatrix, meshletBounds.coneAxis));
-        float3 cameraToCenter = worldCenter - ubo.frozenCameraWorldPos.xyz;
-        float centerDist = length(cameraToCenter);
-        bool backfaceVisible = dot(cameraToCenter, worldConeAxis) < meshletBounds.coneCutoff * centerDist + meshletBounds.radius;
-        visible &= backfaceVisible;
-        if(!backfaceVisible)
-        { */
-            /* pushConstant.culledData.backfaceCulled.add(1); */
-      /*   } */
+            float3 worldCenter = mul(instance.modelMatrix, float4(meshletBounds.center, 1.0)).xyz;
+            float maxScale = max(length(instance.modelMatrix[0].xyz),
+                             max(length(instance.modelMatrix[1].xyz), length(instance.modelMatrix[2].xyz)));
+            float worldRadius = meshletBounds.radius * maxScale;
+
+            for (uint i = 0; i < 4; i++)
+            {
+                float4 plane = ubo->frozenFrustum.planes[i];
+                visible = visible && dot(plane.xyz, worldCenter) + plane.w >= -worldRadius;
+            }
+        }
 
         if (visible)
         {

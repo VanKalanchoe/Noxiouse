@@ -200,6 +200,8 @@ struct GpuMesh
     uint64_t vertexBufferAddress;
     uint64_t indexBufferAddress;
 
+    uint32_t triangleCount; // of all meshlets (stats)
+
     // Local bounds (GPU culling)
     vec4 boundsSphere; // xyz: center, w: radius
     vec3 boundsMin;
@@ -318,10 +320,95 @@ struct LightData
     vec4 spotParams;   // x/y: spot cone terms, z: source radius (radians for directional, meters otherwise), w: shadow samples
 };
 
+// GPU instance culling (§5.6): per view, the draw list (instance slots in bucket order) is tested against the view and
+// compacted per bucket into the visible instance list and one indirect command per visible instance, without atomics:
+// visibility flags in parallel, visible counts per block of entries, block offsets and bucket counts, then each block
+// writes its entries (entry order, so transparent sorting survives).
+STATIC_CONST uint32_t CULL_BLOCK_SIZE = 256;
+STATIC_CONST uint32_t CULL_BUCKET_COUNT = 10; // RenderBucket::Count
+STATIC_CONST uint32_t CULL_INSTANCES = 1;     // CullView.flags: frustum test (off: every entry is visible)
+STATIC_CONST uint32_t CULL_OCCLUSION = 2;     // CullView.flags: Hi-Z occlusion test (§5.6.4, two phases)
+
+// Written by the CPU per view and frame slot.
+struct CullView
+{
+    Frustum frustum;
+    mat4 viewProj;         // this frame: phase 2 tests against the pyramid built from this frame's depth
+    mat4 previousViewProj; // last frame: phase 1 tests previous transforms against last frame's pyramid
+    uint32_t bucketStart[11]; // CULL_BUCKET_COUNT + 1: entry range of each bucket in the draw list
+    uint32_t entryCount;
+    uint32_t blockCount;
+    uint32_t flags;
+};
+
+// VkDrawIndirectCommand layout of drawMeshTasksIndirect(Count).
+struct MeshTasksIndirectCommand
+{
+    uint32_t groupCountX;
+    uint32_t groupCountY;
+    uint32_t groupCountZ;
+};
+
+// Per block of entries (GPU-written).
+struct CullBlock
+{
+    uint32_t visibleCount;
+    uint32_t visibleBefore;  // visible entries in all earlier blocks
+    uint32_t occludedCount;  // entries that passed the frustum but failed the occlusion test (phase 2 re-tests them)
+    uint32_t occludedBefore;
+    uint32_t visibleTriangles;
+};
+
+// Draw counts per bucket (the count buffer of drawMeshTasksIndirectCount) followed by the visible entries before each
+// bucket start (GPU-written).
+struct CullCounts
+{
+    uint32_t drawCount[10];       // CULL_BUCKET_COUNT: phase 1 draws
+    uint32_t visibleBefore[11];   // CULL_BUCKET_COUNT + 1
+    uint32_t lateDrawCount[10];   // phase 2 candidates per bucket (occluded in phase 1)
+    uint32_t occludedBefore[11];
+    uint32_t visibleTriangles;    // of the instances phase 1 draws (before meshlet and back face culling)
+    uint32_t lateDrawn;           // instances phase 2 draws after re-testing them against this frame's pyramid
+    uint32_t lateTriangles;       // of those instances
+};
+
+struct PushConstantInstanceCulling
+{
+    uint64_t matrixReference;           // UniformBufferObject (GPU scene tables)
+    uint64_t viewReference;             // CullView
+    uint64_t drawListReference;         // uint32_t instance slot per entry
+    uint64_t flagsReference;            // uint32_t visible (0/1) per entry
+    uint64_t blocksReference;           // CullBlock per block
+    uint64_t countsReference;           // CullCounts
+    uint64_t visibleInstancesReference; // uint32_t instance slot per visible entry (bucket start + rank)
+    uint64_t commandsReference;         // MeshTasksIndirectCommand per visible entry
+    uint64_t lateInstancesReference;    // phase 1: the occluded candidates; phase 2 draws them
+    uint64_t lateCommandsReference;     // phase 2: their commands (group count 0 while still occluded)
+    uint32_t hiZTextureIndex;           // depth pyramid (level 0 is half the render size), 0xFFFFFFFF while there is none
+    uint32_t hiZWidth;                  // of level 0
+    uint32_t hiZHeight;
+    uint32_t hiZMipCount;
+};
+
+// Depth pyramid level build (§5.6.4): level 0 reduces the depth buffer, every next level its previous one. Reverse-Z, so
+// a level keeps the FARTHEST (smallest) depth of the texels it covers: an instance is occluded only when it is behind
+// everything drawn in its screen area.
+struct PushConstantHiZBuild
+{
+    uint32_t sourceTextureIndex;
+    uint32_t outputStorageIndex;
+    uint32_t width;       // of the level being written
+    uint32_t height;
+    uint32_t sourceMip;
+    uint32_t sourceIsDepth; // 1: level 0 from the depth buffer
+};
+
+STATIC_CONST uint32_t MESHLET_CULL_FRUSTUM = 1; // PushConstantMeshlets.meshletCulling
+
 struct PushConstantMeshlets
 {
     uint64_t matrixReference;
-    uint64_t drawInstancesReference; // uint32_t instance slot per indirect draw (instanceBaseIndex + SV_DrawIndex)
+    uint64_t drawInstancesReference; // visible instance slots of this view (instanceBaseIndex + SV_DrawIndex)
     uint64_t boneMatrixReference;
     // These now point to the Page Table buffers (array of uint64_t BDAs)
     uint64_t vertexPageTableReference;
@@ -330,6 +417,7 @@ struct PushConstantMeshlets
     uint64_t meshletVerticesPageTableReference;
     uint64_t meshletTrianglesPageTableReference;
     uint32_t instanceBaseIndex;
+    uint32_t meshletCulling; // MESHLET_CULL_FRUSTUM (0: lean task shader, every meshlet of a visible instance is drawn)
 };
 
 // Meshlet Global stores all meshes

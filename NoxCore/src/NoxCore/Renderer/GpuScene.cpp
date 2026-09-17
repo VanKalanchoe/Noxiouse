@@ -347,20 +347,22 @@ namespace Nox
             m_Instances.Edit(instanceSlot).boneMatrixOffset = boneMatrixOffset;
     }
 
-    void GpuScene::BuildDrawLists(const glm::vec3& cameraPosition, std::vector<uint32_t>& outDrawInstances,
-                                  std::vector<DrawMeshTasksIndirectCommand>& outCommands, std::array<uint32_t, RenderBucketCount>& outCounts)
+    bool GpuScene::UpdateDrawList(const glm::vec3& cameraPosition, std::vector<uint32_t>& drawList, std::array<uint32_t, RenderBucketCount + 1>& outBucketStarts)
     {
-        outDrawInstances.clear();
-        outCommands.clear();
+        const bool rebuild = std::exchange(m_BucketsChanged, false);
+        if (rebuild)
+            drawList.clear();
 
+        bool changed = rebuild;
+        uint32_t start = 0;
         for (size_t bucketIndex = 0; bucketIndex < RenderBucketCount; ++bucketIndex)
         {
             const std::vector<uint32_t>& bucket = m_Buckets[bucketIndex];
-            outCounts[bucketIndex] = static_cast<uint32_t>(bucket.size());
+            outBucketStarts[bucketIndex] = start;
 
             if (IsTransparentBucket(static_cast<RenderBucket>(bucketIndex)))
             {
-                // Back to front by instance origin.
+                // Back to front by instance origin, every frame.
                 m_TransparentSort.clear();
                 for (uint32_t instanceSlot : bucket)
                 {
@@ -369,25 +371,25 @@ namespace Nox
                 }
                 std::sort(m_TransparentSort.begin(), m_TransparentSort.end(),
                           [](const auto& a, const auto& b) { return a.first > b.first; });
-                for (const auto& [distance, instanceSlot] : m_TransparentSort)
-                    outDrawInstances.push_back(instanceSlot);
-            }
-            else
-            {
-                outDrawInstances.insert(outDrawInstances.end(), bucket.begin(), bucket.end());
-            }
-        }
 
-        outCommands.reserve(outDrawInstances.size());
-        for (uint32_t instanceSlot : outDrawInstances)
-        {
-            const uint32_t meshletCount = m_Meshes.Get(m_InstanceStates[instanceSlot].Mesh).meshletCount;
-            outCommands.push_back({
-                .groupCountX = (meshletCount + shaderio::TASK_SHADER_DISPATCH_X - 1) / shaderio::TASK_SHADER_DISPATCH_X,
-                .groupCountY = 1,
-                .groupCountZ = 1
-            });
+                if (rebuild)
+                    drawList.resize(start + bucket.size());
+                for (size_t index = 0; index < m_TransparentSort.size(); ++index)
+                {
+                    uint32_t& entry = drawList[start + index];
+                    changed |= entry != m_TransparentSort[index].second;
+                    entry = m_TransparentSort[index].second;
+                }
+            }
+            else if (rebuild)
+            {
+                drawList.insert(drawList.end(), bucket.begin(), bucket.end());
+            }
+
+            start += static_cast<uint32_t>(bucket.size());
         }
+        outBucketStarts[RenderBucketCount] = start;
+        return changed;
     }
 
     void GpuScene::PrepareUploads(uint32_t frameSlot, std::vector<std::unique_ptr<NRI::Buffer>>& outReleased)
@@ -440,6 +442,7 @@ namespace Nox
         std::vector<uint32_t>& bucket = m_Buckets[static_cast<size_t>(state.Bucket)];
         state.BucketIndex = static_cast<uint32_t>(bucket.size());
         bucket.push_back(instanceSlot);
+        m_BucketsChanged = true;
     }
 
     void GpuScene::RemoveFromBucket(uint32_t instanceSlot)
@@ -448,6 +451,7 @@ namespace Nox
         if (state.Bucket == RenderBucket::Count)
             return;
 
+        m_BucketsChanged = true;
         std::vector<uint32_t>& bucket = m_Buckets[static_cast<size_t>(state.Bucket)];
         const uint32_t moved = bucket.back();
         bucket[state.BucketIndex] = moved;

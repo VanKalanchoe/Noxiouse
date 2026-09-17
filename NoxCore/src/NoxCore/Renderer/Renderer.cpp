@@ -242,6 +242,8 @@ namespace Nox
         // Post Process
         watchShader("assets/shaders/PostProcess.slang", "PostProcess", [this]() { createPostProcessPipeline(true); });
         watchShader("assets/shaders/TextureInspect.slang", "TextureInspect", [this]() { createTextureInspectPipeline(true); });
+        watchShader("assets/shaders/InstanceCulling.slang", "InstanceCulling", [this]() { createInstanceCullingPipelines(true); });
+        watchShader("assets/shaders/HiZBuild.slang", "HiZBuild", [this]() { createHiZBuildPipeline(true); });
         // NRD
         watchShader("assets/shaders/ShadowMask.slang", "ShadowMask", [this]() { createShadowMaskPipeline(true); });
         watchShader("assets/shaders/Reflection.slang", "Reflection", [this]() { createReflectionPipeline(true); });
@@ -292,6 +294,18 @@ namespace Nox
             }));
         }
         m_inspectionProbePending.resize(MAX_FRAMES_IN_FLIGHT, 0);
+
+        for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+        {
+            m_cullViewBuffers.emplace_back(m_device->createBuffer(NRI::BufferDesc{
+                .size = sizeof(shaderio::CullView),
+                .usage = NRI::BufferUsage::Storage
+            }));
+            m_cullStatsBuffers.emplace_back(m_device->createBuffer(NRI::BufferDesc{
+                .size = sizeof(shaderio::CullCounts),
+                .usage = NRI::BufferUsage::Staging
+            }));
+        }
 
         m_renderer2D = std::make_unique<Renderer2D>(isEditor, RendererContext
                                                     {
@@ -359,6 +373,8 @@ namespace Nox
         // Post Process
         createPostProcessPipeline(false);
         createTextureInspectPipeline(false);
+        createInstanceCullingPipelines(false);
+        createHiZBuildPipeline(false);
         //NRD
         createShadowMaskPipeline();
         createReflectionPipeline();
@@ -395,11 +411,8 @@ namespace Nox
         // Allocate baseline capacities for dynamic GPU buffers so vectors are NEVER empty
         m_gpuScene.Initialize(*m_device, MAX_FRAMES_IN_FLIGHT);
 
-        m_DrawInstanceBufferCapacity = sizeof(uint32_t) * 1024;
-        createDrawInstanceBuffer(m_DrawInstanceBufferCapacity);
-
-        m_IndirectBufferCapacity = sizeof(DrawMeshTasksIndirectCommand) * 64;
-        createIndirectBuffer(m_IndirectBufferCapacity);
+        m_DrawListBufferCapacity = sizeof(uint32_t) * 1024;
+        createDrawListBuffers(m_DrawListBufferCapacity);
 
         m_BoneBufferCapacity = sizeof(glm::mat4) * 64;
         createBoneBuffer(m_BoneBufferCapacity);
@@ -1506,6 +1519,36 @@ namespace Nox
         m_textureInspectPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
+    void Renderer::createInstanceCullingPipelines(bool forceCompile)
+    {
+        constexpr std::array<const char*, 5> EntryPoints = { "cullMain", "countMain", "offsetMain", "writeMain", "lateMain" };
+        for (size_t index = 0; index < EntryPoints.size(); ++index)
+        {
+            NRI::PipelineDesc desc{};
+            desc.type = NRI::PipelineType::Compute;
+            desc.forceCompile = forceCompile;
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Compute,
+                .entryPoint = EntryPoints[index],
+                .sourcePath = "assets/shaders/InstanceCulling.slang"
+            });
+            m_instanceCullingPipelines[index] = m_device->createPipeline(desc, *m_shaderCompiler);
+        }
+    }
+
+    void Renderer::createHiZBuildPipeline(bool forceCompile)
+    {
+        NRI::PipelineDesc desc{};
+        desc.type = NRI::PipelineType::Compute;
+        desc.forceCompile = forceCompile;
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Compute,
+            .entryPoint = "buildMain",
+            .sourcePath = "assets/shaders/HiZBuild.slang"
+        });
+        m_hiZBuildPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+    }
+
     void Renderer::createPostProcessPipeline(bool forceCompile)
     {
         NRI::PipelineDesc desc{};
@@ -2188,6 +2231,8 @@ namespace Nox
             gpuMesh.drawsPageIndex = handle.meshletDraws.pageIndex;
             gpuMesh.drawsOffset = handle.meshletDraws.offset;
             gpuMesh.meshletCount = handle.meshletDraws.count;
+            for (const shaderio::MeshletDraw& draw : data.Draws)
+                gpuMesh.triangleCount += draw.triangleCount;
             gpuMesh.verticesPageIndex = handle.vertices.pageIndex;
             gpuMesh.meshletVerticesPageIndex = handle.meshletVertices.pageIndex;
             gpuMesh.meshletTrianglesPageIndex = handle.meshletTriangles.pageIndex;
@@ -2409,52 +2454,17 @@ namespace Nox
         }
     }
 
-    void Renderer::createDrawInstanceBuffer(uint64_t bufferSize)
+    void Renderer::createDrawListBuffers(uint64_t bufferSize)
     {
-        m_drawInstanceBuffers.clear();
-        m_drawInstanceBuffersMapped.clear();
-
-        // Reserve memory in vectors to prevent reallocation overhead
-        m_drawInstanceBuffers.reserve(MAX_FRAMES_IN_FLIGHT);
-        m_drawInstanceBuffersMapped.reserve(MAX_FRAMES_IN_FLIGHT);
-
+        m_drawListBuffers.clear();
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
         {
-            std::unique_ptr<NRI::Buffer> uboBuffer = m_device->createBuffer(NRI::BufferDesc
-                {
-                    .size = bufferSize,
-                    .usage = NRI::BufferUsage::Storage
-                });
-
-            void* mappedMemory = uboBuffer->map(0, bufferSize);
-
-            m_drawInstanceBuffers.emplace_back(std::move(uboBuffer));
-            m_drawInstanceBuffersMapped.emplace_back(mappedMemory);
+            m_drawListBuffers.emplace_back(m_device->createBuffer(NRI::BufferDesc{
+                .size = bufferSize,
+                .usage = NRI::BufferUsage::Storage
+            }));
         }
-    }
-
-    void Renderer::createIndirectBuffer(uint64_t bufferSize)
-    {
-        m_indirectBuffers.clear();
-        m_indirectBuffersMapped.clear();
-
-        // Reserve memory in vectors to prevent reallocation overhead
-        m_indirectBuffers.reserve(MAX_FRAMES_IN_FLIGHT);
-        m_indirectBuffersMapped.reserve(MAX_FRAMES_IN_FLIGHT);
-
-        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
-        {
-            std::unique_ptr<NRI::Buffer> uboBuffer = m_device->createBuffer(NRI::BufferDesc
-                {
-                    .size = bufferSize,
-                    .usage = NRI::BufferUsage::Indirect
-                });
-
-            void* mappedMemory = uboBuffer->map(0, bufferSize);
-
-            m_indirectBuffers.emplace_back(std::move(uboBuffer));
-            m_indirectBuffersMapped.emplace_back(mappedMemory);
-        }
+        m_drawListStale.fill(true);
     }
 
     void Renderer::createSelectedEntityIDBuffers()
@@ -2690,7 +2700,11 @@ namespace Nox
             // Frame order (§5.4.8). Each add* contributes its feature's passes only when the feature runs.
             addGpuSceneUpdatePass();
             addTLASBuildPass();
+            addInstanceCullingPass();
             addVisibilityPass();
+            addHiZBuildPass();
+            addInstanceCullingLatePass();
+            addVisibilityLatePass();
             addGBufferPass();
             addRTShadowPasses();
             addRTReflectionPasses();
@@ -2794,11 +2808,11 @@ namespace Nox
         graph.Reset({ m_sceneFrameCounter, frame.renderExtent, frame.outputExtent });
 
         // Shared indirect meshlet drawing state (visibility and forward passes).
-        if (!m_drawInstances.empty())
+        if (!m_drawList.empty())
         {
+            // drawInstancesReference: the view's visible instances, a graph buffer (beginMeshletDraws).
             shaderio::PushConstantMeshlets& references = frame.meshletReferences;
             references.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
-            references.drawInstancesReference = m_drawInstanceBuffers[frameIndex]->getDeviceAddress();
             bool hasBoneBuffers = frameIndex < m_boneBuffers.size() && m_boneBuffers[frameIndex] != nullptr;
             bool hasBones = !m_boneMatrices.empty();
             references.boneMatrixReference = (hasBones && hasBoneBuffers) ? m_boneBuffers[frameIndex]->getDeviceAddress() : 0;
@@ -2918,6 +2932,23 @@ namespace Nox
             resources.EnvironmentCubemap = graph.ImportTexture("Environment", m_environmentCubemap.get(), RGImportAccess::ReadOnly);
         if (m_restirGINeighborOffsetsBuffer)
             resources.NeighborOffsets = graph.ImportBuffer("RTXDI Neighbor Offsets", m_restirGINeighborOffsetsBuffer.get(), RGImportAccess::ReadOnly);
+        // Depth pyramid of the camera view: written from this frame's depth, read by the next frame's phase 1 (§5.6.4).
+        {
+            RGTextureDesc hiZ;
+            hiZ.Size = RGSize::Absolute;
+            hiZ.Width = std::max(frame.renderExtent.width / 2, 1u);
+            hiZ.Height = std::max(frame.renderExtent.height / 2, 1u);
+            hiZ.Format = NRI::ImageFormat::R32_SFLOAT;
+            hiZ.Usage = NRI::TextureUsage::Storage;
+            hiZ.MipLevels = 1;
+            for (uint32_t size = std::max(hiZ.Width, hiZ.Height); size > 1; size >>= 1)
+                ++hiZ.MipLevels;
+
+            const RGTextureHistory history = graph.GetHistoryTexture("Camera Hi-Z", hiZ, 1);
+            resources.CameraHiZ = history.Textures[0];
+            frame.hiZReset = history.WasReset;
+        }
+
         if (m_tlasBuffer)
             resources.TLAS = graph.ImportBuffer("TLAS", m_tlasBuffer.get());
         // GPU scene tables: written by GPU Scene Update, read through the uniforms by the passes that draw or trace the scene.
@@ -2986,27 +3017,27 @@ namespace Nox
         }
     }
 
-    Renderer::MeshletDrawCursor Renderer::beginMeshletDraws() const
+    Renderer::MeshletDrawCursor Renderer::beginMeshletDraws(const RGPassContext& context, const ViewDrawResources& draws, bool late) const
     {
         MeshletDrawCursor cursor;
         cursor.references = m_frame.meshletReferences;
+        cursor.references.drawInstancesReference = context.Buffer(late ? draws.LateInstances : draws.VisibleInstances).getDeviceAddress();
+        cursor.commands = &context.Buffer(late ? draws.LateCommands : draws.Commands);
+        cursor.counts = &context.Buffer(draws.Counts);
+        cursor.late = late;
         return cursor;
     }
 
     void Renderer::drawMeshletBucket(NRI::CommandBuffer& cmd, MeshletDrawCursor& cursor, RenderBucket bucket, NRI::Pipeline& pipeline, NRI::CullMode cullMode, bool depthWrite, bool blendEnable) const
     {
-        const uint32_t count = getBucketDrawCount(bucket);
-        if (count == 0 || frameIndex >= m_indirectBuffers.size() || !m_indirectBuffers[frameIndex])
+        const uint32_t maxDrawCount = getBucketEntryCount(bucket);
+        if (maxDrawCount == 0)
             return;
 
-        // Buckets follow each other in the draw list.
-        uint32_t firstDraw = 0;
-        for (size_t previous = 0; previous < static_cast<size_t>(bucket); ++previous)
-            firstDraw += m_drawBucketCounts[previous];
-
-        constexpr uint32_t cmdStride = sizeof(DrawMeshTasksIndirectCommand);
-
-        cursor.references.instanceBaseIndex = firstDraw;
+        // Visible instances of the bucket start at its draw list start.
+        const uint32_t firstEntry = m_drawBucketStarts[static_cast<size_t>(bucket)];
+        cursor.references.instanceBaseIndex = firstEntry;
+        cursor.references.meshletCulling = m_meshletCulling;
         cmd.pushData(&cursor.references, sizeof(shaderio::PushConstantMeshlets));
 
         if (cursor.boundPipeline != &pipeline)
@@ -3019,7 +3050,10 @@ namespace Nox
         cmd.setDepthWriteEnable(depthWrite);
         cmd.setColorBlendEnable(0, blendEnable);
 
-        cmd.drawMeshTasksIndirect(*m_indirectBuffers[frameIndex], static_cast<uint64_t>(firstDraw) * cmdStride, count, cmdStride);
+        constexpr uint32_t CommandStride = sizeof(shaderio::MeshTasksIndirectCommand);
+        const size_t countArray = cursor.late ? offsetof(shaderio::CullCounts, lateDrawCount) : offsetof(shaderio::CullCounts, drawCount);
+        const uint64_t countOffset = countArray + sizeof(uint32_t) * static_cast<size_t>(bucket);
+        cmd.drawMeshTasksIndirectCount(*cursor.commands, static_cast<uint64_t>(firstEntry) * CommandStride, *cursor.counts, countOffset, maxDrawCount, CommandStride);
     }
 
     void Renderer::updateEntityIDBuffer(uint32_t currentImage)
@@ -3079,8 +3113,24 @@ namespace Nox
     {
         refreshGpuMaterials();
 
-        m_gpuScene.BuildDrawLists(glm::vec3(uniformData.cameraWorldPos), m_drawInstances, m_drawMeshTasksIndirectCommands, m_drawBucketCounts);
+        if (m_gpuScene.UpdateDrawList(glm::vec3(uniformData.cameraWorldPos), m_drawList, m_drawBucketStarts))
+            m_drawListStale.fill(true);
         updateDrawListBuffers(currentImage);
+
+        // The camera view: the frozen frustum while culling is frozen (BeginScene keeps it equal to the camera otherwise).
+        // The occlusion test compares against the pyramid of the previous frame, so it uses that frame's view; while the
+        // culling view is frozen it does not match the drawn depth, so occlusion is skipped.
+        shaderio::CullView view{};
+        view.frustum = uniformData.frozenFrustum;
+        view.viewProj = uniformData.nonJitteredProj * uniformData.view;
+        view.previousViewProj = uniformData.prevProj * uniformData.prevView;
+        std::copy(m_drawBucketStarts.begin(), m_drawBucketStarts.end(), view.bucketStart);
+        view.entryCount = static_cast<uint32_t>(m_drawList.size());
+        view.blockCount = (view.entryCount + shaderio::CULL_BLOCK_SIZE - 1) / shaderio::CULL_BLOCK_SIZE;
+        view.flags = (m_instanceCullingEnabled ? shaderio::CULL_INSTANCES : 0u) |
+                     (m_occlusionCullingEnabled && !m_frozen ? shaderio::CULL_OCCLUSION : 0u);
+        memcpy(m_cullViewBuffers[currentImage]->map(0, sizeof(view)), &view, sizeof(view));
+        m_cullViewBuffers[currentImage]->unmap();
 
         std::vector<std::unique_ptr<NRI::Buffer>> releasedBuffers;
         m_gpuScene.PrepareUploads(currentImage, releasedBuffers);
@@ -3097,38 +3147,22 @@ namespace Nox
 
     void Renderer::updateDrawListBuffers(uint32_t currentImage)
     {
-        if (m_drawInstances.empty())
+        const uint64_t byteCount = sizeof(uint32_t) * m_drawList.size();
+        if (byteCount > m_DrawListBufferCapacity)
+        {
+            m_DrawListBufferCapacity = byteCount * 2;
+            for (std::unique_ptr<NRI::Buffer>& oldBuffer : m_drawListBuffers)
+            {
+                if (oldBuffer)
+                    m_deferredBufferDeletions.push_back({ std::move(oldBuffer), MAX_FRAMES_IN_FLIGHT });
+            }
+            createDrawListBuffers(m_DrawListBufferCapacity);
+        }
+
+        if (!std::exchange(m_drawListStale[currentImage], false) || byteCount == 0)
             return;
-
-        uint64_t requiredInstanceSize = sizeof(uint32_t) * m_drawInstances.size();
-        if (requiredInstanceSize > m_DrawInstanceBufferCapacity)
-        {
-            m_DrawInstanceBufferCapacity = requiredInstanceSize * 2;
-
-            for (auto& oldBuffer : m_drawInstanceBuffers)
-            {
-                if (oldBuffer)
-                    m_deferredBufferDeletions.push_back({ std::move(oldBuffer), MAX_FRAMES_IN_FLIGHT });
-            }
-
-            createDrawInstanceBuffer(m_DrawInstanceBufferCapacity);
-        }
-        memcpy(m_drawInstanceBuffersMapped[currentImage], m_drawInstances.data(), requiredInstanceSize);
-
-        uint64_t requiredIndirectSize = sizeof(DrawMeshTasksIndirectCommand) * m_drawMeshTasksIndirectCommands.size();
-        if (requiredIndirectSize > m_IndirectBufferCapacity)
-        {
-            m_IndirectBufferCapacity = requiredIndirectSize * 2;
-
-            for (auto& oldBuffer : m_indirectBuffers)
-            {
-                if (oldBuffer)
-                    m_deferredBufferDeletions.push_back({ std::move(oldBuffer), MAX_FRAMES_IN_FLIGHT });
-            }
-
-            createIndirectBuffer(m_IndirectBufferCapacity);
-        }
-        memcpy(m_indirectBuffersMapped[currentImage], m_drawMeshTasksIndirectCommands.data(), requiredIndirectSize);
+        memcpy(m_drawListBuffers[currentImage]->map(0, byteCount), m_drawList.data(), byteCount);
+        m_drawListBuffers[currentImage]->unmap();
     }
 
     void Renderer::updateLightBuffer(uint32_t currentImage)
@@ -3325,6 +3359,7 @@ namespace Nox
             NOX_PROFILE_SCOPE("Pick Readback");
             readPickResult(frameIndex);
             readInspectionProbe(frameIndex);
+            readCullStats(frameIndex);
         }
 
         {
@@ -3343,9 +3378,11 @@ namespace Nox
             updateGpuScene(frameIndex);
         }
         NOX_PROFILE_COUNTER("Instances", m_gpuScene.GetInstanceCount());
-        NOX_PROFILE_COUNTER("Indirect Draws", m_drawMeshTasksIndirectCommands.size());
-        NOX_PROFILE_COUNTER("Transparent Draws", getBucketDrawCount(RenderBucket::Transparent) + getBucketDrawCount(RenderBucket::TransparentDoubleSided) +
-                                                 getBucketDrawCount(RenderBucket::TransparentUnlit) + getBucketDrawCount(RenderBucket::TransparentUnlitDoubleSided));
+        NOX_PROFILE_COUNTER("Draw List", m_drawList.size());
+        NOX_PROFILE_COUNTER("Visible Instances", m_visibleInstanceCount);
+        NOX_PROFILE_COUNTER("Occluded Candidates", m_lateCandidateCount);
+        NOX_PROFILE_COUNTER("Phase 2 Drawn", m_lateDrawnCount);
+        NOX_PROFILE_COUNTER("Visible Triangles", m_visibleTriangleCount);
         NOX_PROFILE_COUNTER("Lights", m_lightBufferObjects.size());
 
         {
@@ -3523,6 +3560,23 @@ namespace Nox
         cmd.accelerationStructureBarrier(NRI::AccelerationStructureBarrierType::TransferToBuild);
         cmd.buildAccelerationStructure(m_tlasBuildDesc, m_tlasScratchBuffer->getDeviceAddress(), *m_sceneTLAS);
         cmd.accelerationStructureBarrier(NRI::AccelerationStructureBarrierType::BuildToShaderRead);
+    }
+
+    void Renderer::readCullStats(uint32_t frameSlot)
+    {
+        if (!std::exchange(m_cullStatsPending[frameSlot], false))
+            return;
+
+        const auto* counts = static_cast<const shaderio::CullCounts*>(m_cullStatsBuffers[frameSlot]->map(0, sizeof(shaderio::CullCounts)));
+        m_visibleInstanceCount = 0;
+        m_lateCandidateCount = 0;
+        for (uint32_t drawCount : counts->drawCount)
+            m_visibleInstanceCount += drawCount;
+        for (uint32_t drawCount : counts->lateDrawCount)
+            m_lateCandidateCount += drawCount;
+        m_lateDrawnCount = counts->lateDrawn;
+        m_visibleTriangleCount = counts->visibleTriangles + counts->lateTriangles;
+        m_cullStatsBuffers[frameSlot]->unmap();
     }
 
     void Renderer::readInspectionProbe(uint32_t frameSlot)

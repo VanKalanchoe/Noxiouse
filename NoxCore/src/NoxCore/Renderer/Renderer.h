@@ -63,6 +63,7 @@ inline std::vector<std::string> samplerNames{"Linear", "Nearest"};
 namespace Nox
 {
     struct FrameGraphResources;
+    struct ViewDrawResources;
 
     struct MeshBLAS
     {
@@ -150,6 +151,7 @@ namespace Nox
             uint32_t Mip = 0;
             float Exposure = 1.0f;      // float formats
             uint32_t ChannelMask = 0xF; // bits R, G, B, A
+            bool DepthCurve = false;    // reverse-Z curve, for depth kept in a color format (the Hi-Z pyramid)
             int32_t ProbeX = -1;        // texel in mip coordinates; -1: none
             int32_t ProbeY = -1;
         };
@@ -216,10 +218,29 @@ namespace Nox
         glm::mat4 getViewProjection() const { return m_currentNonJitteredProj * m_currentView; }
         NRI::Extent2D getRenderSize() const { return m_renderSize; }
         Renderer2D* getRenderer2D() const { return m_renderer2D.get(); }
-        void setFrozen(bool temp) { m_frozen = temp; }
-        bool getFrozen() { return m_frozen; }
-        void setFrozenDone(bool temp) { m_frozen = temp; }
+        // Freezes the culling view (frustum and camera position of the moment it is frozen).
+        void setFrozen(bool frozen)
+        {
+            m_frozen = frozen;
+            m_frozenDone = false;
+        }
+        bool getFrozen() const { return m_frozen; }
 
+        // GPU culling (§5.6). Meshlet culling: shaderio::MESHLET_CULL_* flags (0: lean task shader).
+        void setInstanceCullingEnabled(bool enabled) { m_instanceCullingEnabled = enabled; }
+        bool isInstanceCullingEnabled() const { return m_instanceCullingEnabled; }
+        // Hi-Z occlusion culling (§5.6.4): instances hidden behind closer geometry, re-tested in phase 2 so nothing pops.
+        void setOcclusionCullingEnabled(bool enabled) { m_occlusionCullingEnabled = enabled; }
+        bool isOcclusionCullingEnabled() const { return m_occlusionCullingEnabled; }
+        void setMeshletCulling(uint32_t flags) { m_meshletCulling = flags; }
+        uint32_t getMeshletCulling() const { return m_meshletCulling; }
+        // Draw list entries, and of the newest finished frame: the instances drawn in phase 1 and the candidates phase 2
+        // re-tested (some of those draw too, which only the GPU knows).
+        uint32_t getDrawListSize() const { return static_cast<uint32_t>(m_drawList.size()); }
+        uint32_t getVisibleInstanceCount() const { return m_visibleInstanceCount; }
+        uint32_t getLateCandidateCount() const { return m_lateCandidateCount; }
+        uint32_t getLateDrawnCount() const { return m_lateDrawnCount; }
+        uint32_t getVisibleTriangleCount() const { return m_visibleTriangleCount; }
         // EditorLayer Settings
         void setDebugMode(uint32_t mode) { m_debugMode = mode; }
         uint32_t getDebugMode() const { return m_debugMode; }
@@ -446,6 +467,7 @@ namespace Nox
         void refreshGpuMaterials();
         void readPickResult(uint32_t frameSlot);
         void readInspectionProbe(uint32_t frameSlot);
+        void readCullStats(uint32_t frameSlot);
 
         void initRenderer();
         void cleanupSwapChain();
@@ -478,6 +500,9 @@ namespace Nox
         void createPostProcessPipeline(bool forceCompile = false);
         // Render graph texture inspection
         void createTextureInspectPipeline(bool forceCompile = false);
+        // GPU instance culling (InstanceCulling.slang: cull, count, offset, write, late) and the depth pyramid build
+        void createInstanceCullingPipelines(bool forceCompile = false);
+        void createHiZBuildPipeline(bool forceCompile = false);
         
         // NRD
         void createShadowMaskPipeline(bool forceCompile = false);
@@ -505,8 +530,7 @@ namespace Nox
         void initGeometryBuffers();
         void markPageTablesDirty();
         void createUniformBuffers();
-        void createDrawInstanceBuffer(uint64_t bufferSize);
-        void createIndirectBuffer(uint64_t bufferSize);
+        void createDrawListBuffers(uint64_t bufferSize);
         void createSelectedEntityIDBuffers();
         void createDescriptorHeaps();
         std::unique_ptr<NRI::CommandBuffer> beginSingleTimeCommands();
@@ -520,6 +544,13 @@ namespace Nox
         void applyCommandBufferBaseline(NRI::CommandBuffer& cmd) const;
         void prepareFrameGraph(uint32_t imageIndex);
         void addGpuSceneUpdatePass();
+        // Culls the draw list for the camera view into its visible instances, indirect commands and draw counts.
+        void addInstanceCullingPass();
+        // Depth pyramid of this frame's visibility depth, then phase 2: the occluded candidates against it.
+        void addHiZBuildPass();
+        void addInstanceCullingLatePass();
+        // Draws what phase 2 found visible into the visibility buffer and depth.
+        void addVisibilityLatePass();
         void addTLASBuildPass();
         void addVisibilityPass();
         void addGBufferPass();
@@ -546,19 +577,27 @@ namespace Nox
         void addTextureInspection();
         // After Compile: writes the bindless slots of graph-owned textures into the uniforms uploaded for this frame.
         void resolveFrameUniforms();
-        // Indirect meshlet draws of the draw list's buckets (one indirect command per instance, buckets in RenderBucket
-        // order). Each pass keeps its own cursor: passes may record in parallel.
+        // Indirect meshlet draws of a view's visible instances, per bucket with the GPU-written draw count. Each pass keeps
+        // its own cursor: passes may record in parallel.
         struct MeshletDrawCursor
         {
             shaderio::PushConstantMeshlets references{};
+            NRI::Buffer* commands = nullptr;
+            NRI::Buffer* counts = nullptr;
             NRI::Pipeline* boundPipeline = nullptr;
+            bool late = false; // phase 2 draws its candidates with their own commands (empty while still occluded)
         };
-        MeshletDrawCursor beginMeshletDraws() const;
+        MeshletDrawCursor beginMeshletDraws(const RGPassContext& context, const ViewDrawResources& draws, bool late = false) const;
         void drawMeshletBucket(NRI::CommandBuffer& cmd, MeshletDrawCursor& cursor, RenderBucket bucket, NRI::Pipeline& pipeline, NRI::CullMode cullMode, bool depthWrite, bool blendEnable) const;
-        uint32_t getBucketDrawCount(RenderBucket bucket) const { return m_drawBucketCounts[static_cast<size_t>(bucket)]; }
+        // Draw list entries of a bucket (its visible instances are at most that many).
+        uint32_t getBucketEntryCount(RenderBucket bucket) const
+        {
+            const size_t index = static_cast<size_t>(bucket);
+            return m_drawBucketStarts[index + 1] - m_drawBucketStarts[index];
+        }
         void updateEntityIDBuffer(uint32_t currentImage);
         void updateUniformBuffer(uint32_t currentImage);
-        // This frame's draw lists and GPU scene uploads (staged for the GPU Scene Update pass).
+        // This frame's draw list, culling view and GPU scene uploads (staged for the GPU Scene Update pass).
         void updateGpuScene(uint32_t currentImage);
         void updateDrawListBuffers(uint32_t currentImage);
         void processDeferredDeletions();
@@ -626,6 +665,7 @@ namespace Nox
             NRI::Extent2D renderExtent{};  // what DLSS upscales from
             NRI::Extent2D outputExtent{};  // editor viewport / swapchain
             shaderio::PushConstantMeshlets meshletReferences{};
+            bool hiZReset = false; // the pyramid has no usable previous frame: no occlusion test
             bool resetNRD = false;
             bool resetDLSS = false;
             bool runPathTracer = false;
@@ -871,6 +911,8 @@ namespace Nox
 
         // Render graph texture inspection (editor)
         std::unique_ptr<NRI::Pipeline> m_textureInspectPipeline = nullptr;
+        std::array<std::unique_ptr<NRI::Pipeline>, 5> m_instanceCullingPipelines; // cull, count, offset, write, late
+        std::unique_ptr<NRI::Pipeline> m_hiZBuildPipeline = nullptr;
         TextureInspection m_textureInspection;
         Texture2D* m_inspectionImage = nullptr;
         RGTextureKey m_inspectedTextureKey;
@@ -971,22 +1013,29 @@ namespace Nox
         bool m_pageTablesDirty[MAX_FRAMES_IN_FLIGHT] = {true, true, /* add 'true' for however many max frames you have */};
         uint64_t m_PageTableCapacity = 16; // Capacity in number of uint64_t elements
 
-        // GPU scene and this frame's draw lists (instance slot + indirect command per draw, per frame slot)
+        // GPU scene and the draw list every view culls (instance slots in bucket order, uploaded per frame slot when changed)
         GpuScene m_gpuScene;
         uint64_t m_gpuSceneOwner = 0;
         std::vector<int32_t> m_invalidatedMeshEntities;
         bool m_gpuMaterialsDirty = false;
-        std::vector<uint32_t> m_drawInstances;
-        std::vector<DrawMeshTasksIndirectCommand> m_drawMeshTasksIndirectCommands;
-        std::array<uint32_t, RenderBucketCount> m_drawBucketCounts{};
+        std::vector<uint32_t> m_drawList;
+        std::array<uint32_t, RenderBucketCount + 1> m_drawBucketStarts{};
+        uint64_t m_DrawListBufferCapacity = 0;
+        std::vector<std::unique_ptr<NRI::Buffer>> m_drawListBuffers;
+        std::array<bool, MAX_FRAMES_IN_FLIGHT> m_drawListStale{};
 
-        uint64_t m_IndirectBufferCapacity = 0;
-        std::vector<std::unique_ptr<NRI::Buffer>> m_indirectBuffers;
-        std::vector<void*> m_indirectBuffersMapped;
-
-        uint64_t m_DrawInstanceBufferCapacity = 0;
-        std::vector<std::unique_ptr<NRI::Buffer>> m_drawInstanceBuffers;
-        std::vector<void*> m_drawInstanceBuffersMapped;
+        // GPU culling: settings, the camera view's cull parameters and its visible counts (read back a frame late), per
+        // frame slot
+        bool m_instanceCullingEnabled = true;
+        bool m_occlusionCullingEnabled = true;
+        uint32_t m_meshletCulling = 0;
+        std::vector<std::unique_ptr<NRI::Buffer>> m_cullViewBuffers;
+        std::vector<std::unique_ptr<NRI::Buffer>> m_cullStatsBuffers;
+        std::array<bool, MAX_FRAMES_IN_FLIGHT> m_cullStatsPending{};
+        uint32_t m_visibleInstanceCount = 0;
+        uint32_t m_lateCandidateCount = 0;
+        uint32_t m_lateDrawnCount = 0;
+        uint32_t m_visibleTriangleCount = 0;
 
         uint32_t frameIndex = 0;
 

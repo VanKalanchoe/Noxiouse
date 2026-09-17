@@ -6,6 +6,18 @@
 // A handle is invalid when its feature does not run this frame.
 namespace Nox
 {
+    // What one view draws (§5.6): its visible instance slots, one indirect command per visible instance and the draw
+    // count per bucket, written by that view's instance culling.
+    struct ViewDrawResources
+    {
+        RGBuffer VisibleInstances;
+        RGBuffer Commands;
+        RGBuffer Counts;
+        // Phase 2 (§5.6.4): instances the occlusion test rejected, re-tested against this frame's depth pyramid.
+        RGBuffer LateInstances;
+        RGBuffer LateCommands;
+    };
+
     struct FrameGraphResources
     {
         // Raster / G-buffer
@@ -70,6 +82,10 @@ namespace Nox
         RGBuffer SceneMaterials;
         RGBuffer SceneMeshes;
         RGBuffer SceneRayTracingInstances;
+
+        // Views
+        ViewDrawResources CameraDraws;
+        RGTexture CameraHiZ; // depth pyramid of the camera view (history: phase 1 tests against the previous frame)
     };
 
     // Declares a read only when the resource exists.
@@ -83,6 +99,17 @@ namespace Nox
     {
         if (buffer.IsValid())
             builder.Read(buffer);
+    }
+
+    inline void ReadViewDraws(RGBuilder& builder, const ViewDrawResources& draws, bool late = false)
+    {
+        ReadIfValid(builder, late ? draws.LateInstances : draws.VisibleInstances);
+        // The indirect stage fetches the commands and the draw counts.
+        const RGBuffer commands = late ? draws.LateCommands : draws.Commands;
+        if (commands.IsValid())
+            builder.Read(commands, RGBufferAccess::IndirectRead);
+        if (draws.Counts.IsValid())
+            builder.Read(draws.Counts, RGBufferAccess::IndirectRead);
     }
 
     // Passes that draw or trace the scene read the GPU scene tables (through the uniforms).

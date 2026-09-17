@@ -29,6 +29,20 @@ namespace Nox
         constexpr size_t DepthIndent = 2;
         constexpr size_t ValueWidth = 9;
 
+        // Per second, short: 12.34M, 1.25B.
+        std::string FormatRate(double perSecond)
+        {
+            if (perSecond >= 1e12)
+                return std::format("{:.2f}T", perSecond / 1e12);
+            if (perSecond >= 1e9)
+                return std::format("{:.2f}B", perSecond / 1e9);
+            if (perSecond >= 1e6)
+                return std::format("{:.2f}M", perSecond / 1e6);
+            if (perSecond >= 1e3)
+                return std::format("{:.2f}K", perSecond / 1e3);
+            return std::format("{:.0f}", perSecond);
+        }
+
         double ToMegabytes(uint64_t bytes)
         {
             return static_cast<double>(bytes) / BytesPerMegabyte;
@@ -238,12 +252,41 @@ namespace Nox
             report += "GPU timestamp queries are not supported on this queue\n";
         }
 
+        std::vector<ProfilePipelineStatistics> statistics;
+        profiler.GetPipelineStatistics(statistics);
+        if (!statistics.empty())
+        {
+
+            report += "\nGPU pipeline statistics (last frame)       fragments  task invocations  mesh invocations\n";
+            for (const ProfilePipelineStatistics& pass : statistics)
+                std::format_to(std::back_inserter(report), "  {:<34} {:>13} {:>17} {:>17}\n", pass.Name, pass.Fragments,
+                               pass.TaskInvocations, pass.MeshInvocations);
+        }
+
         report += '\n';
         profiler.GetCpuScopes(scopes);
         AppendScopeTable(report, "CPU scopes", scopes);
 
         std::vector<ProfileCounterStats> counters;
         profiler.GetCounters(counters);
+        {
+            // Draws/s: the indirect draws the GPU executed for the camera view (phase 1 plus the phase 2 candidates).
+            const double frameMs = profiler.GetFrameTime().Avg;
+            double draws = 0.0;
+            double triangles = 0.0;
+            for (const ProfileCounterStats& counter : counters)
+            {
+                if (std::string_view(counter.Name) == "Visible Instances" || std::string_view(counter.Name) == "Phase 2 Drawn")
+                    draws += counter.Value;
+                else if (std::string_view(counter.Name) == "Visible Triangles")
+                    triangles = counter.Value;
+            }
+            if (frameMs > 0.0 && draws > 0.0)
+            {
+                std::format_to(std::back_inserter(report), "\nDraws/s: {}\n", FormatRate(draws * 1000.0 / frameMs));
+                std::format_to(std::back_inserter(report), "Triangles/s: {}\n", FormatRate(triangles * 1000.0 / frameMs));
+            }
+        }
         if (!counters.empty())
         {
             report += "\nCounters\n";

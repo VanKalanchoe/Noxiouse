@@ -554,6 +554,14 @@ namespace NRI
         m_commandBuffers[m_currentFrameIndex].drawMeshTasksIndirectEXT(vkBuffer.getNativeBuffer(), offset, drawCount, stride);
     }
     
+    void CommandBufferVK::drawMeshTasksIndirectCount(Buffer& indirectBuffer, uint64_t offset, Buffer& countBuffer, uint64_t countOffset, uint32_t maxDrawCount, uint32_t stride)
+    {
+        auto& vkBuffer = dynamic_cast<BufferVK&>(indirectBuffer);
+        auto& vkCountBuffer = dynamic_cast<BufferVK&>(countBuffer);
+
+        m_commandBuffers[m_currentFrameIndex].drawMeshTasksIndirectCountEXT(vkBuffer.getNativeBuffer(), offset, vkCountBuffer.getNativeBuffer(), countOffset, maxDrawCount, stride);
+    }
+
     void CommandBufferVK::dispatch(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ)
     {
         m_commandBuffers[m_currentFrameIndex].dispatch(groupCountX, groupCountY, groupCountZ);
@@ -956,6 +964,7 @@ vk::AccessFlagBits2::eColorAttachmentWrite | vk::AccessFlagBits2::eDepthStencilA
             if (access & AccessBits::TransferWrite) flags |= vk::AccessFlagBits2::eTransferWrite;
             if (access & AccessBits::AccelerationStructureRead) flags |= vk::AccessFlagBits2::eAccelerationStructureReadKHR;
             if (access & AccessBits::AccelerationStructureWrite) flags |= vk::AccessFlagBits2::eAccelerationStructureWriteKHR;
+            if (access & AccessBits::IndirectRead) flags |= vk::AccessFlagBits2::eIndirectCommandRead;
             return flags;
         }
 
@@ -970,6 +979,7 @@ vk::AccessFlagBits2::eColorAttachmentWrite | vk::AccessFlagBits2::eDepthStencilA
             if (stages & StageBits::FragmentTests) flags |= vk::PipelineStageFlagBits2::eEarlyFragmentTests | vk::PipelineStageFlagBits2::eLateFragmentTests;
             if (stages & StageBits::Transfer) flags |= vk::PipelineStageFlagBits2::eTransfer;
             if (stages & StageBits::AccelerationStructureBuild) flags |= vk::PipelineStageFlagBits2::eAccelerationStructureBuildKHR;
+            if (stages & StageBits::Indirect) flags |= vk::PipelineStageFlagBits2::eDrawIndirect;
             return flags;
         }
     }

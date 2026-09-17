@@ -14,6 +14,7 @@ namespace NRI
         ~SlangCompiler() override = default;
         
         std::vector<char> compile(const std::string& path) override;
+        uint64_t sourceHash(const std::string& path) override;
         
     private:
         Slang::ComPtr<slang::IGlobalSession> m_globalSession;

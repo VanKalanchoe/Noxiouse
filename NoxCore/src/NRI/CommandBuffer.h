@@ -123,6 +123,7 @@ namespace NRI
         constexpr uint32_t TransferWrite = 1 << 7;
         constexpr uint32_t AccelerationStructureRead = 1 << 8;
         constexpr uint32_t AccelerationStructureWrite = 1 << 9;
+        constexpr uint32_t IndirectRead = 1 << 10; // draw/dispatch arguments and draw counts
     }
 
     namespace StageBits
@@ -136,6 +137,7 @@ namespace NRI
         constexpr uint32_t FragmentTests = 1 << 5; // early + late
         constexpr uint32_t Transfer = 1 << 6;      // copies and blits
         constexpr uint32_t AccelerationStructureBuild = 1 << 7;
+        constexpr uint32_t Indirect = 1 << 8; // fetch of indirect arguments and draw counts
     }
 
     struct ResourceState
@@ -215,6 +217,8 @@ namespace NRI
         virtual void drawMeshTasks(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) = 0;
         virtual void drawMeshTasksIndirect(Buffer& indirectBuffer, uint64_t offset, uint32_t drawCount, uint32_t stride) = 0;
         virtual void drawMeshTasksIndirect(uint64_t indirectBufferDeviceAddress, uint64_t offset, uint32_t drawCount, uint32_t stride) = 0;
+        // Draw count read from countBuffer at countOffset (uint32_t, GPU-written), at most maxDrawCount.
+        virtual void drawMeshTasksIndirectCount(Buffer& indirectBuffer, uint64_t offset, Buffer& countBuffer, uint64_t countOffset, uint32_t maxDrawCount, uint32_t stride) = 0;
         virtual void dispatch(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) = 0;
         
         virtual void copyBuffer(class Buffer& srcBuffer, class Buffer& dstBuffer, const BufferCopyRegion& region = {}) = 0;

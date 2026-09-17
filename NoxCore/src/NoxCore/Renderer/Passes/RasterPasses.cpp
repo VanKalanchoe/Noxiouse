@@ -1,4 +1,5 @@
-// Raster passes: GPU scene update, TLAS build, visibility buffer, G-buffer resolve, forward 3D (unlit, skybox, transparent, DDGI probes).
+// Raster passes: GPU scene update, TLAS build, instance culling, visibility buffer, G-buffer resolve, forward 3D (unlit, skybox,
+// transparent, DDGI probes).
 #include "NoxCore/Renderer/Renderer.h"
 
 #include "FrameGraphResources.h"
@@ -49,6 +50,106 @@ namespace Nox
             });
     }
 
+    namespace
+    {
+        // The pyramid a culling phase tests against; without one (first frame, history reset, occlusion off) the shader
+        // skips the test.
+        void fillHiZPushConstants(const RenderGraph& graph, const RGPassContext& context, RGTexture hiZ, shaderio::PushConstantInstanceCulling& push)
+        {
+            push.hiZTextureIndex = 0xFFFFFFFF;
+            if (!hiZ.IsValid())
+                return;
+
+            push.hiZTextureIndex = context.Slot(hiZ);
+            const RGTextureKey& key = graph.GetTextureKey(hiZ);
+            push.hiZWidth = key.Width;
+            push.hiZHeight = key.Height;
+            push.hiZMipCount = key.MipLevels;
+        }
+    }
+
+    void Renderer::addInstanceCullingPass()
+    {
+        FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
+        const uint32_t entryCount = static_cast<uint32_t>(m_drawList.size());
+        const bool pipelinesReady = std::all_of(m_instanceCullingPipelines.begin(), m_instanceCullingPipelines.end(), [](const auto& pipeline) { return pipeline != nullptr; });
+        if (entryCount == 0 || !pipelinesReady)
+            return;
+
+        const uint32_t blockCount = (entryCount + shaderio::CULL_BLOCK_SIZE - 1) / shaderio::CULL_BLOCK_SIZE;
+        ViewDrawResources& draws = resources.CameraDraws;
+        draws.VisibleInstances = m_renderGraph.CreateBuffer("Camera Visible Instances", { sizeof(uint32_t) * entryCount, NRI::BufferUsage::Storage });
+        draws.Commands = m_renderGraph.CreateBuffer("Camera Draw Commands", { sizeof(shaderio::MeshTasksIndirectCommand) * entryCount, NRI::BufferUsage::Indirect });
+        draws.Counts = m_renderGraph.CreateBuffer("Camera Draw Counts", { sizeof(shaderio::CullCounts), NRI::BufferUsage::Indirect });
+        draws.LateInstances = m_renderGraph.CreateBuffer("Camera Late Instances", { sizeof(uint32_t) * entryCount, NRI::BufferUsage::Storage });
+        draws.LateCommands = m_renderGraph.CreateBuffer("Camera Late Commands", { sizeof(shaderio::MeshTasksIndirectCommand) * entryCount, NRI::BufferUsage::Indirect });
+        const RGBuffer flags = m_renderGraph.CreateBuffer("Camera Cull Flags", { sizeof(uint32_t) * entryCount, NRI::BufferUsage::Storage });
+        const RGBuffer blocks = m_renderGraph.CreateBuffer("Camera Cull Blocks", { sizeof(shaderio::CullBlock) * blockCount, NRI::BufferUsage::Storage });
+
+        m_renderGraph.AddPass("Instance Culling", RGPassFlags::None,
+            [&](RGBuilder& builder)
+            {
+                ReadGpuScene(builder, resources);
+                // The pyramid of the previous frame (written later this frame by the Hi-Z build).
+                ReadIfValid(builder, resources.CameraHiZ);
+                builder.Write(flags);
+                builder.Write(blocks);
+                builder.Write(draws.VisibleInstances);
+                builder.Write(draws.Commands);
+                builder.Write(draws.Counts);
+                builder.Write(draws.LateInstances);
+            },
+            [this, draws, flags, blocks, entryCount, blockCount, hiZ = resources.CameraHiZ](RGPassContext& context)
+            {
+                NRI::CommandBuffer& cmd = context.Cmd();
+
+                shaderio::PushConstantInstanceCulling push{};
+                push.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                push.viewReference = m_cullViewBuffers[frameIndex]->getDeviceAddress();
+                push.drawListReference = m_drawListBuffers[frameIndex]->getDeviceAddress();
+                push.flagsReference = context.Buffer(flags).getDeviceAddress();
+                push.blocksReference = context.Buffer(blocks).getDeviceAddress();
+                push.countsReference = context.Buffer(draws.Counts).getDeviceAddress();
+                push.visibleInstancesReference = context.Buffer(draws.VisibleInstances).getDeviceAddress();
+                push.commandsReference = context.Buffer(draws.Commands).getDeviceAddress();
+                push.lateInstancesReference = context.Buffer(draws.LateInstances).getDeviceAddress();
+                fillHiZPushConstants(m_renderGraph, context, hiZ, push);
+
+                // Visibility per entry, visible entries per block, offsets and draw counts, then the compacted writes. Each
+                // step reads what the previous one wrote.
+                const std::array<NRI::BufferBarrierDesc, 3> stepBarriers = {
+                    NRI::BufferBarrierDesc{ &context.Buffer(flags), { NRI::AccessBits::ShaderWrite, NRI::StageBits::Compute }, { NRI::AccessBits::ShaderRead, NRI::StageBits::Compute } },
+                    NRI::BufferBarrierDesc{ &context.Buffer(blocks), { NRI::AccessBits::ShaderWrite, NRI::StageBits::Compute }, { NRI::AccessBits::ShaderRead | NRI::AccessBits::ShaderWrite, NRI::StageBits::Compute } },
+                    NRI::BufferBarrierDesc{ &context.Buffer(draws.Counts), { NRI::AccessBits::ShaderWrite, NRI::StageBits::Compute }, { NRI::AccessBits::ShaderRead, NRI::StageBits::Compute } }
+                };
+
+                const std::array<uint32_t, 4> groupCounts = { (entryCount + 255) / 256, blockCount, 1, blockCount };
+                for (size_t step = 0; step < groupCounts.size(); ++step)
+                {
+                    if (step > 0)
+                        cmd.resourceBarriers({}, std::span<const NRI::BufferBarrierDesc>(stepBarriers).subspan(0, step == 1 ? 1 : (step == 2 ? 2 : 3)));
+
+                    cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *m_instanceCullingPipelines[step]);
+                    cmd.pushData(&push, sizeof(push));
+                    cmd.dispatch(groupCounts[step], 1, 1);
+                }
+            });
+
+        // Visible counts for the stats, read once this frame slot finished (Renderer::readCullStats).
+        const RGBuffer stats = m_renderGraph.ImportBuffer("Cull Stats Staging", m_cullStatsBuffers[frameIndex].get());
+        m_cullStatsPending[frameIndex] = true;
+        m_renderGraph.AddPass("Cull Stats Readback", RGPassFlags::NeverCull,
+            [&](RGBuilder& builder)
+            {
+                builder.Read(draws.Counts, RGBufferAccess::CopySource);
+                builder.Write(stats, RGBufferAccess::CopyDestination);
+            },
+            [counts = draws.Counts, stats](RGPassContext& context)
+            {
+                context.Cmd().copyBuffer(context.Buffer(counts), context.Buffer(stats), NRI::BufferCopyRegion{ .size = sizeof(shaderio::CullCounts) });
+            });
+    }
+
     void Renderer::addVisibilityPass()
     {
         const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
@@ -61,8 +162,9 @@ namespace Nox
                 builder.DepthTarget(resources.Depth, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0 });
                 builder.SetRenderArea(m_frame.renderExtent);
                 ReadGpuScene(builder, resources);
+                ReadViewDraws(builder, resources.CameraDraws);
             },
-            [this](RGPassContext& context)
+            [this, res = &resources](RGPassContext& context)
             {
                 NRI::CommandBuffer& cmd = context.Cmd();
 
@@ -74,10 +176,10 @@ namespace Nox
                 cmd.setColorBlendEnable(0, false);
                 cmd.setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
 
-                if (!m_drawInstances.empty() && m_visibilityPipeline)
+                if (res->CameraDraws.Commands.IsValid() && m_visibilityPipeline)
                 {
                     // All PBR opaque & mask geometry rasterizes to the visibility buffer and depth: the first four buckets.
-                    MeshletDrawCursor cursor = beginMeshletDraws();
+                    MeshletDrawCursor cursor = beginMeshletDraws(context, res->CameraDraws);
                     drawMeshletBucket(cmd, cursor, RenderBucket::Opaque, *m_visibilityPipeline, NRI::CullMode::Back, true, false);
                     drawMeshletBucket(cmd, cursor, RenderBucket::OpaqueDoubleSided, *m_visibilityPipeline, NRI::CullMode::None, true, false);
                     drawMeshletBucket(cmd, cursor, RenderBucket::Mask, *m_visibilityPipeline, NRI::CullMode::Back, true, false);
@@ -86,10 +188,122 @@ namespace Nox
             });
     }
 
+    void Renderer::addHiZBuildPass()
+    {
+        const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
+        if (!resources.CameraHiZ.IsValid() || !m_hiZBuildPipeline)
+            return;
+
+        const RGTextureKey& key = m_renderGraph.GetTextureKey(resources.CameraHiZ);
+        m_renderGraph.AddPass("Hi-Z Build", RGPassFlags::None,
+            [&](RGBuilder& builder)
+            {
+                builder.Read(resources.Depth);
+                builder.Write(resources.CameraHiZ, RGTextureAccess::StorageWrite);
+            },
+            [this, hiZ = resources.CameraHiZ, depth = resources.Depth, key](RGPassContext& context)
+            {
+                NRI::CommandBuffer& cmd = context.Cmd();
+                cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *m_hiZBuildPipeline);
+
+                // Level 0 reduces the depth buffer, every next level the level before it.
+                for (uint32_t mip = 0; mip < key.MipLevels; ++mip)
+                {
+                    if (mip > 0)
+                    {
+                        const NRI::TextureBarrierDesc barrier{ &context.Texture(hiZ),
+                                                               { NRI::AccessBits::ShaderWrite, NRI::StageBits::Compute },
+                                                               { NRI::AccessBits::ShaderRead, NRI::StageBits::Compute } };
+                        cmd.resourceBarriers(std::span<const NRI::TextureBarrierDesc>(&barrier, 1), {});
+                    }
+
+                    shaderio::PushConstantHiZBuild push{};
+                    push.sourceTextureIndex = mip == 0 ? context.Slot(depth) : context.Slot(hiZ);
+                    push.outputStorageIndex = context.StorageSlot(hiZ, mip);
+                    push.width = std::max(key.Width >> mip, 1u);
+                    push.height = std::max(key.Height >> mip, 1u);
+                    push.sourceMip = mip == 0 ? 0 : mip - 1;
+                    push.sourceIsDepth = mip == 0 ? 1 : 0;
+
+                    cmd.pushData(&push, sizeof(push));
+                    cmd.dispatch((push.width + 7) / 8, (push.height + 7) / 8, 1);
+                }
+            });
+    }
+
+    void Renderer::addInstanceCullingLatePass()
+    {
+        const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
+        const ViewDrawResources& draws = resources.CameraDraws;
+        if (!draws.LateCommands.IsValid() || !m_instanceCullingPipelines[4])
+            return;
+
+        const uint32_t entryCount = static_cast<uint32_t>(m_drawList.size());
+        m_renderGraph.AddPass("Instance Culling Late", RGPassFlags::None,
+            [&](RGBuilder& builder)
+            {
+                ReadGpuScene(builder, resources);
+                ReadIfValid(builder, resources.CameraHiZ);
+                builder.Read(draws.Counts);
+                builder.Read(draws.LateInstances);
+                builder.Write(draws.LateCommands);
+            },
+            [this, draws, entryCount, hiZ = resources.CameraHiZ](RGPassContext& context)
+            {
+                shaderio::PushConstantInstanceCulling push{};
+                push.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                push.viewReference = m_cullViewBuffers[frameIndex]->getDeviceAddress();
+                push.countsReference = context.Buffer(draws.Counts).getDeviceAddress();
+                push.lateInstancesReference = context.Buffer(draws.LateInstances).getDeviceAddress();
+                push.lateCommandsReference = context.Buffer(draws.LateCommands).getDeviceAddress();
+                fillHiZPushConstants(m_renderGraph, context, hiZ, push);
+
+                NRI::CommandBuffer& cmd = context.Cmd();
+                cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *m_instanceCullingPipelines[4]);
+                cmd.pushData(&push, sizeof(push));
+                cmd.dispatch((entryCount + 255) / 256, 1, 1);
+            });
+    }
+
+    void Renderer::addVisibilityLatePass()
+    {
+        const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
+        if (!resources.CameraDraws.LateCommands.IsValid() || !m_visibilityPipeline)
+            return;
+
+        // What phase 2 found visible after all: the same targets, loaded (§5.6.4).
+        m_renderGraph.AddPass("Visibility Late", RGPassFlags::Raster,
+            [&](RGBuilder& builder)
+            {
+                builder.ColorTarget(resources.Visibility, NRI::LoadOP::load, NRI::StoreOP::store);
+                builder.DepthTarget(resources.Depth, NRI::LoadOP::load, NRI::StoreOP::store);
+                builder.SetRenderArea(m_frame.renderExtent);
+                ReadGpuScene(builder, resources);
+                ReadViewDraws(builder, resources.CameraDraws, true);
+            },
+            [this, res = &resources](RGPassContext& context)
+            {
+                NRI::CommandBuffer& cmd = context.Cmd();
+
+                cmd.setCullMode(NRI::CullMode::Back);
+                cmd.setDepthTestEnable(true);
+                cmd.setDepthWriteEnable(true);
+                cmd.setDepthCompareOp(NRI::CompareOp::Greater);
+                cmd.setColorBlendEnable(0, false);
+                cmd.setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
+
+                MeshletDrawCursor cursor = beginMeshletDraws(context, res->CameraDraws, true);
+                drawMeshletBucket(cmd, cursor, RenderBucket::Opaque, *m_visibilityPipeline, NRI::CullMode::Back, true, false);
+                drawMeshletBucket(cmd, cursor, RenderBucket::OpaqueDoubleSided, *m_visibilityPipeline, NRI::CullMode::None, true, false);
+                drawMeshletBucket(cmd, cursor, RenderBucket::Mask, *m_visibilityPipeline, NRI::CullMode::Back, true, false);
+                drawMeshletBucket(cmd, cursor, RenderBucket::MaskDoubleSided, *m_visibilityPipeline, NRI::CullMode::None, true, false);
+            });
+    }
+
     void Renderer::addGBufferPass()
     {
         const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
-        const bool resolveMaterials = m_gbufferPipeline && !m_drawInstances.empty();
+        const bool resolveMaterials = m_gbufferPipeline && !m_drawList.empty();
 
         // Decoupled material resolve, or only the clears when the scene has no meshes (entity IDs must read -1 for
         // picking, and later passes still find defined G-buffer contents).
@@ -181,15 +395,18 @@ namespace Nox
                 }
                 builder.SetRenderArea(m_frame.renderExtent);
                 ReadGpuScene(builder, resources);
+                ReadViewDraws(builder, resources.CameraDraws);
+                ReadViewDraws(builder, resources.CameraDraws, true);
             },
             [this, res = &resources, drawProbes](RGPassContext& context)
             {
                 NRI::CommandBuffer& cmd = context.Cmd();
                 const uint32_t totalDDGIProbes = m_frame.totalDDGIProbes;
-                MeshletDrawCursor cursor = beginMeshletDraws();
+                const bool hasDraws = res->CameraDraws.Commands.IsValid();
+                MeshletDrawCursor cursor = hasDraws ? beginMeshletDraws(context, res->CameraDraws) : MeshletDrawCursor{};
 
                 // A. UNLIT MESHES
-                if (m_unlitPipeline && (getBucketDrawCount(RenderBucket::Unlit) > 0 || getBucketDrawCount(RenderBucket::UnlitDoubleSided) > 0))
+                if (hasDraws && m_unlitPipeline && (getBucketEntryCount(RenderBucket::Unlit) > 0 || getBucketEntryCount(RenderBucket::UnlitDoubleSided) > 0))
                 {
                     cursor.boundPipeline = nullptr;
                     cmd.setDepthTestEnable(true);
@@ -202,6 +419,12 @@ namespace Nox
 
                     drawMeshletBucket(cmd, cursor, RenderBucket::Unlit, *m_unlitPipeline, NRI::CullMode::Back, true, false);
                     drawMeshletBucket(cmd, cursor, RenderBucket::UnlitDoubleSided, *m_unlitPipeline, NRI::CullMode::None, true, false);
+
+                    MeshletDrawCursor lateCursor = beginMeshletDraws(context, res->CameraDraws, true);
+                    lateCursor.boundPipeline = cursor.boundPipeline;
+                    drawMeshletBucket(cmd, lateCursor, RenderBucket::Unlit, *m_unlitPipeline, NRI::CullMode::Back, true, false);
+                    drawMeshletBucket(cmd, lateCursor, RenderBucket::UnlitDoubleSided, *m_unlitPipeline, NRI::CullMode::None, true, false);
+                    cursor.boundPipeline = lateCursor.boundPipeline;
                 }
 
                 // B. SKYBOX (Tested against depth == 0.0)
@@ -225,8 +448,8 @@ namespace Nox
                 }
 
                 // C. TRANSPARENT FORWARD PASS (Back-to-front sorted, Alpha Blending)
-                bool hasAnyTransparent = getBucketDrawCount(RenderBucket::Transparent) > 0 || getBucketDrawCount(RenderBucket::TransparentDoubleSided) > 0 ||
-                                          getBucketDrawCount(RenderBucket::TransparentUnlit) > 0 || getBucketDrawCount(RenderBucket::TransparentUnlitDoubleSided) > 0;
+                bool hasAnyTransparent = hasDraws && (getBucketEntryCount(RenderBucket::Transparent) > 0 || getBucketEntryCount(RenderBucket::TransparentDoubleSided) > 0 ||
+                                                      getBucketEntryCount(RenderBucket::TransparentUnlit) > 0 || getBucketEntryCount(RenderBucket::TransparentUnlitDoubleSided) > 0);
                 if (m_unlitPipeline && m_transparentLitPipeline && hasAnyTransparent)
                 {
                     cursor.boundPipeline = nullptr;
@@ -249,6 +472,14 @@ namespace Nox
                     drawMeshletBucket(cmd, cursor, RenderBucket::TransparentDoubleSided, *m_transparentLitPipeline, NRI::CullMode::None, false, true);
                     drawMeshletBucket(cmd, cursor, RenderBucket::TransparentUnlit, *m_unlitPipeline, NRI::CullMode::Back, false, true);
                     drawMeshletBucket(cmd, cursor, RenderBucket::TransparentUnlitDoubleSided, *m_unlitPipeline, NRI::CullMode::None, false, true);
+
+                    MeshletDrawCursor lateCursor = beginMeshletDraws(context, res->CameraDraws, true);
+                    lateCursor.boundPipeline = cursor.boundPipeline;
+                    drawMeshletBucket(cmd, lateCursor, RenderBucket::Transparent, *m_transparentLitPipeline, NRI::CullMode::Back, false, true);
+                    drawMeshletBucket(cmd, lateCursor, RenderBucket::TransparentDoubleSided, *m_transparentLitPipeline, NRI::CullMode::None, false, true);
+                    drawMeshletBucket(cmd, lateCursor, RenderBucket::TransparentUnlit, *m_unlitPipeline, NRI::CullMode::Back, false, true);
+                    drawMeshletBucket(cmd, lateCursor, RenderBucket::TransparentUnlitDoubleSided, *m_unlitPipeline, NRI::CullMode::None, false, true);
+                    cursor.boundPipeline = lateCursor.boundPipeline;
 
                     cmd.setColorBlendEnable(0, false);
                     cmd.setDepthWriteEnable(true);

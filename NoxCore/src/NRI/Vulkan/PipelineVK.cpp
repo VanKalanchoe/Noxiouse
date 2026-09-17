@@ -25,7 +25,7 @@ namespace NRI
         return path;
     }
 
-    static std::filesystem::path shaderBinaryPath(const ShaderStageDesc& shaderDesc)
+    static std::filesystem::path shaderBinaryPath(const ShaderStageDesc& shaderDesc, ShaderCompiler& compiler)
     {
         std::filesystem::path source(shaderDesc.sourcePath);
      
@@ -62,7 +62,9 @@ namespace NRI
             break;
         }
         
-        uint64_t sourceHash = Nox::Hash::computeFile(shaderDesc.sourcePath);
+        // The hash covers the included headers as well: shaderIO.h holds every GPU layout, so a change there must
+        // invalidate the cached binaries of all shaders that include it, not only the ones whose own file changed.
+        uint64_t sourceHash = compiler.sourceHash(shaderDesc.sourcePath);
 
         // The entry point is part of the key: one .slang file can hold several entry points for the same stage
         // (e.g. two mesh entry points), and a shader-object binary contains exactly one of them.
@@ -140,7 +142,7 @@ namespace NRI
                     entryPointNames.push_back(shaderDesc.entryPoint);
                     compiledStages.push_back( translateShaderStage(shaderDesc.stage));
 
-                    auto binaryPath = shaderBinaryPath(shaderDesc);
+                    auto binaryPath = shaderBinaryPath(shaderDesc, compiler);
                     std::string stageKey = shaderDesc.sourcePath + "." + shaderDesc.entryPoint;
 
                     if (std::filesystem::exists(binaryPath) && !desc.forceCompile)
@@ -293,7 +295,7 @@ namespace NRI
                 {
                     if (!loadedFromBinary[i])
                     {
-                        auto path = shaderBinaryPath(desc.shaders[i]);
+                        auto path = shaderBinaryPath(desc.shaders[i], compiler);
 
                         NOX_CORE_INFO("PipelineVK Saving shader binary: {}", path);
 
@@ -495,7 +497,7 @@ namespace NRI
 
             if (useShaderObjects)
             {
-                auto binaryPath = shaderBinaryPath(shaderDesc);
+                auto binaryPath = shaderBinaryPath(shaderDesc, compiler);
                 std::vector<uint8_t> binaryStorage;
                 std::vector<char> spirvStorage;
                 bool loadedFromBinary = false;
@@ -662,6 +664,7 @@ namespace NRI
         case ImageFormat::R32SINT: return vk::Format::eR32Sint;
         case ImageFormat::R32G32_UINT: return vk::Format::eR32G32Uint;
         case ImageFormat::R16_SFLOAT: return vk::Format::eR16Sfloat;
+        case ImageFormat::R32_SFLOAT: return vk::Format::eR32Sfloat;
         case ImageFormat::R10G10B10A2_UNORM: return vk::Format::eA2B10G10R10UnormPack32;
         case ImageFormat::R16G16_SFLOAT: return vk::Format::eR16G16Sfloat;
         case ImageFormat::R16G16B16A16_SFLOAT: return vk::Format::eR16G16B16A16Sfloat;

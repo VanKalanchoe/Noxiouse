@@ -186,6 +186,7 @@ namespace Nox
         ProcessGpuReadback(frame);
 
         frame.Scopes.clear();
+        frame.Statistics.clear();
         // Tracy's manual: read the connection state once and use the same value for a zone's begin and end
         // (and, for GPU zones, for its times).
         frame.TracyZonesEmitted = m_TracyGpuContextCreated && TracyBackend::IsConnected();
@@ -263,6 +264,44 @@ namespace Nox
         }
     }
 
+    bool Profiler::IsPipelineStatisticsSupported() const
+    {
+        return m_GpuProfiler && m_GpuProfiler->isPipelineStatisticsSupported();
+    }
+
+    void Profiler::BeginGpuStatistics(GpuScopeContext& context, NRI::CommandBuffer& cmd, uint32_t scopeId)
+    {
+        if (m_GpuCurrentSlot == NoGpuSlot || scopeId == InvalidScopeId || context.m_OpenStatistics != ~0u || !IsPipelineStatisticsEnabled())
+            return;
+
+        const uint32_t query = m_GpuProfiler->allocateStatisticsQuery();
+        if (query == NRI::GpuProfiler::InvalidQueryId)
+            return;
+
+        m_GpuProfiler->beginStatistics(cmd, query);
+        context.m_OpenStatistics = static_cast<uint32_t>(context.m_Statistics.size());
+        context.m_Statistics.push_back({ scopeId, query });
+    }
+
+    void Profiler::EndGpuStatistics(GpuScopeContext& context, NRI::CommandBuffer& cmd)
+    {
+        if (context.m_OpenStatistics == ~0u)
+            return;
+
+        m_GpuProfiler->endStatistics(cmd, context.m_Statistics[context.m_OpenStatistics].Query);
+        context.m_OpenStatistics = ~0u;
+    }
+
+    void Profiler::GetPipelineStatistics(std::vector<ProfilePipelineStatistics>& outStatistics) const
+    {
+        outStatistics.clear();
+        for (uint32_t scopeId = 0; scopeId < m_GpuStatistics.size(); ++scopeId)
+        {
+            if (m_GpuStatistics[scopeId].LastFrame != 0 && IsRecent(m_GpuStatistics[scopeId].LastFrame))
+                outStatistics.push_back(m_GpuStatistics[scopeId].Values);
+        }
+    }
+
     void Profiler::EndGpuFrame(std::span<GpuScopeContext> contexts)
     {
         if (m_GpuCurrentSlot != NoGpuSlot)
@@ -273,6 +312,7 @@ namespace Nox
                 if (!context.m_OpenScopes.empty())
                     NOX_CORE_ERROR("[Profiler] Unbalanced GPU scopes at the end of a command buffer: {} open", context.m_OpenScopes.size());
                 frame.Scopes.insert(frame.Scopes.end(), context.m_Scopes.begin(), context.m_Scopes.end());
+                frame.Statistics.insert(frame.Statistics.end(), context.m_Statistics.begin(), context.m_Statistics.end());
             }
 
             const uint32_t frameQuery = frame.Scopes.front().BeginQuery;
@@ -284,6 +324,8 @@ namespace Nox
         {
             context.m_Scopes.clear();
             context.m_OpenScopes.clear();
+            context.m_Statistics.clear();
+            context.m_OpenStatistics = ~0u;
         }
         m_GpuCurrentSlot = NoGpuSlot;
     }
@@ -402,6 +444,29 @@ namespace Nox
         }
 
 #if NOX_PROFILE_STATS
+        // Pipeline statistics: a scope measured several times in the frame sums its queries.
+        const std::span<const NRI::GpuPipelineStatistics> statistics = m_GpuProfiler->getReadbackStatistics();
+        if (!frame.Statistics.empty() && !statistics.empty())
+        {
+            const uint32_t scopeCount = m_ScopeCount.load(std::memory_order_relaxed);
+            if (m_GpuStatistics.size() < scopeCount)
+                m_GpuStatistics.resize(scopeCount);
+            for (const GpuScopeContext::Statistics& record : frame.Statistics)
+                m_GpuStatistics[record.ScopeId].Values = { m_Scopes[record.ScopeId]->Name };
+            for (const GpuScopeContext::Statistics& record : frame.Statistics)
+            {
+                const auto it = std::find_if(statistics.begin(), statistics.end(),
+                                             [&record](const NRI::GpuPipelineStatistics& result) { return result.queryId == record.Query; });
+                if (it == statistics.end())
+                    continue;
+                ProfilePipelineStatistics& values = m_GpuStatistics[record.ScopeId].Values;
+                values.Fragments += it->fragments;
+                values.TaskInvocations += it->taskInvocations;
+                values.MeshInvocations += it->meshInvocations;
+                m_GpuStatistics[record.ScopeId].LastFrame = m_FrameNumber;
+            }
+        }
+
         if (frame.Scopes.empty() || timestamps.empty())
             return;
 

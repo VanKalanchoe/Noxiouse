@@ -100,7 +100,8 @@ namespace Nox
 
     enum class RGBufferAccess : uint8_t
     {
-        Read,  // storage/uniform/indirect read through a buffer device address
+        Read,        // storage/uniform read through a buffer device address
+        IndirectRead, // draw arguments and draw counts, fetched by the indirect stage
         Write, // storage write
         AccelerationStructureBuild,
         AccelerationStructureRead,

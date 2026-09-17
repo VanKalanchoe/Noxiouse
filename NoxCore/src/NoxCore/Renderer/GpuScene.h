@@ -22,13 +22,6 @@ namespace NRI
 
 namespace Nox
 {
-    struct DrawMeshTasksIndirectCommand
-    {
-        uint32_t groupCountX;
-        uint32_t groupCountY;
-        uint32_t groupCountZ;
-    };
-
     // Draw buckets in draw-list order (pipeline, cull mode and blending differ per bucket).
     enum class RenderBucket : uint8_t
     {
@@ -46,6 +39,7 @@ namespace Nox
     };
 
     constexpr size_t RenderBucketCount = static_cast<size_t>(RenderBucket::Count);
+    static_assert(RenderBucketCount == shaderio::CULL_BUCKET_COUNT);
 
     // Identity of a shared material record: a material asset (Submesh = AssetMaterial) or the material embedded in a
     // mesh asset's submesh.
@@ -143,9 +137,10 @@ namespace Nox
         uint32_t GetInstanceCount() const { return m_InstanceCount; }
 
         // Per frame, main thread before recording.
-        // Draw lists in bucket order: one instance slot and one indirect command per draw; transparent buckets back to front.
-        void BuildDrawLists(const glm::vec3& cameraPosition, std::vector<uint32_t>& outDrawInstances,
-                            std::vector<DrawMeshTasksIndirectCommand>& outCommands, std::array<uint32_t, RenderBucketCount>& outCounts);
+        // The draw list every view culls: instance slots in bucket order (transparent buckets back to front), outBucketStarts
+        // the entry range of each bucket. Rebuilt when bucket membership changed; otherwise only the transparent entries are
+        // re-sorted. Returns whether the list changed.
+        bool UpdateDrawList(const glm::vec3& cameraPosition, std::vector<uint32_t>& drawList, std::array<uint32_t, RenderBucketCount + 1>& outBucketStarts);
         // Settles the previous transforms of instances that stopped moving, then stages every table's changes.
         void PrepareUploads(uint32_t frameSlot, std::vector<std::unique_ptr<NRI::Buffer>>& outReleased);
         bool HasUploads(uint32_t frameSlot) const;
@@ -192,6 +187,7 @@ namespace Nox
         std::vector<InstanceState> m_InstanceStates;
         uint32_t m_InstanceCount = 0;
         std::array<std::vector<uint32_t>, RenderBucketCount> m_Buckets;
+        bool m_BucketsChanged = true;
         std::vector<std::pair<float, uint32_t>> m_TransparentSort;
 
         std::vector<uint32_t> m_MaterialReferences;

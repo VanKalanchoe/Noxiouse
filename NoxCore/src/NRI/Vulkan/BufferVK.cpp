@@ -54,7 +54,8 @@ namespace NRI
             memoryUsage = vma::MemoryUsage::eAutoPreferDevice;
             break;
         case BufferUsage::Indirect:
-            usageFlags = vk::BufferUsageFlagBits2::eIndirectBuffer | vk::BufferUsageFlagBits2::eTransferDst |
+            // TransferSrc: GPU-written draw arguments/counts are read back for the stats.
+            usageFlags = vk::BufferUsageFlagBits2::eIndirectBuffer | vk::BufferUsageFlagBits2::eTransferDst | vk::BufferUsageFlagBits2::eTransferSrc |
                 vk::BufferUsageFlagBits2::eStorageBuffer | vk::BufferUsageFlagBits2::eShaderDeviceAddress;
             memoryUsage = vma::MemoryUsage::eAutoPreferDevice;
             allocFlags = vma::AllocationCreateFlagBits::eHostAccessSequentialWrite | vma::AllocationCreateFlagBits::eMapped;

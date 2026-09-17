@@ -48,6 +48,20 @@ namespace Nox
             return "";
         }
 
+        // Per second, short: 12.34M, 1.25B.
+        std::string FormatRate(double perSecond)
+        {
+            if (perSecond >= 1e12)
+                return std::format("{:.2f}T", perSecond / 1e12);
+            if (perSecond >= 1e9)
+                return std::format("{:.2f}B", perSecond / 1e9);
+            if (perSecond >= 1e6)
+                return std::format("{:.2f}M", perSecond / 1e6);
+            if (perSecond >= 1e3)
+                return std::format("{:.2f}K", perSecond / 1e3);
+            return std::format("{:.0f}", perSecond);
+        }
+
         std::string FormatBytes(uint64_t bytes)
         {
             if (bytes >= 1024 * 1024)
@@ -150,6 +164,60 @@ namespace Nox
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("Writes RenderGraph.dot next to the editor (GraphViz)");
 
+        // GPU culling (§5.6): instance frustum culling, optional meshlet culling, frozen culling view (also key F).
+        bool instanceCulling = m_Renderer->isInstanceCullingEnabled();
+        if (ImGui::Checkbox("Instance Culling", &instanceCulling))
+            m_Renderer->setInstanceCullingEnabled(instanceCulling);
+
+        ImGui::SameLine();
+        bool occlusionCulling = m_Renderer->isOcclusionCullingEnabled();
+        if (ImGui::Checkbox("Occlusion Culling", &occlusionCulling))
+            m_Renderer->setOcclusionCullingEnabled(occlusionCulling);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Hi-Z: instances hidden behind closer geometry, re-tested in phase 2 (off while the culling view is frozen)");
+
+        ImGui::SameLine();
+        bool meshletFrustum = (m_Renderer->getMeshletCulling() & shaderio::MESHLET_CULL_FRUSTUM) != 0;
+        if (ImGui::Checkbox("Meshlet Frustum", &meshletFrustum))
+            m_Renderer->setMeshletCulling(meshletFrustum ? shaderio::MESHLET_CULL_FRUSTUM : 0u);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Also tests each meshlet of a visible instance against the frustum (the task shader fetches meshlet bounds)");
+
+        ImGui::SameLine();
+        bool frozen = m_Renderer->getFrozen();
+        if (ImGui::Checkbox("Freeze Culling View", &frozen))
+            m_Renderer->setFrozen(frozen);
+
+        ImGui::SameLine();
+        ImGui::Text("| visible %u (+%u of %u re-tested) / %u", m_Renderer->getVisibleInstanceCount(), m_Renderer->getLateDrawnCount(),
+                    m_Renderer->getLateCandidateCount(), m_Renderer->getDrawListSize());
+
+        // Rates of the newest frame, from what the culling pass submitted: throughput, not a score -- culling lowers
+        // them by design, because the same image is drawn with fewer draws and triangles.
+        const double frameMs = Profiler::Get().GetFrameTime().Avg;
+        if (frameMs > 0.0)
+        {
+            const double draws = static_cast<double>(m_Renderer->getVisibleInstanceCount() + m_Renderer->getLateDrawnCount());
+            std::string rates = std::format("| {} draws/s", FormatRate(draws * 1000.0 / frameMs));
+
+            rates += std::format(" | {} tris/s", FormatRate(static_cast<double>(m_Renderer->getVisibleTriangleCount()) * 1000.0 / frameMs));
+
+            ImGui::SameLine();
+            ImGui::TextUnformatted(rates.c_str());
+        }
+
+        // Vulkan pipeline statistics per raster pass (Triangles column, stats report). Costs GPU time: off for timings.
+        Profiler& profiler = Profiler::Get();
+        ImGui::BeginDisabled(!profiler.IsPipelineStatisticsSupported());
+        bool statistics = profiler.IsPipelineStatisticsEnabled();
+        if (ImGui::Checkbox("Pipeline Statistics", &statistics))
+            profiler.SetPipelineStatisticsEnabled(statistics);
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            ImGui::SetTooltip(profiler.IsPipelineStatisticsSupported()
+                                  ? "Fragments and task/mesh shader invocations per raster pass (queries cost GPU time)"
+                                  : "Needs pipeline statistics and mesh shader queries (and a profiling build)");
+
         uint32_t executed = 0;
         for (const RGFrameReport::Pass& pass : report.Passes)
             executed += pass.Culled ? 0 : 1;
@@ -170,6 +238,17 @@ namespace Nox
     void RenderGraphPanel::DrawPasses(const RGFrameReport& report)
     {
         const std::unordered_map<std::string_view, double> gpuTimes = CollectGpuTimes();
+        std::vector<ProfilePipelineStatistics> statistics;
+        Profiler::Get().GetPipelineStatistics(statistics);
+        auto meshInvocations = [&statistics](const char* name) -> std::string
+        {
+            for (const ProfilePipelineStatistics& pass : statistics)
+            {
+                if (std::string_view(pass.Name) == name)
+                    return std::format("{}", pass.MeshInvocations);
+            }
+            return std::string("-");
+        };
         auto gpuTime = [&gpuTimes](const char* name) -> std::string
         {
             const auto found = gpuTimes.find(name);
@@ -178,13 +257,14 @@ namespace Nox
 
         constexpr ImGuiTableFlags tableFlags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_ScrollY | ImGuiTableFlags_Resizable;
         const float tableHeight = m_SelectedPass < report.Passes.size() ? ImGui::GetContentRegionAvail().y * 0.65f : 0.0f;
-        if (ImGui::BeginTable("##Passes", 5, tableFlags, ImVec2(0.0f, tableHeight)))
+        if (ImGui::BeginTable("##Passes", 6, tableFlags, ImVec2(0.0f, tableHeight)))
         {
             ImGui::TableSetupScrollFreeze(0, 1);
             ImGui::TableSetupColumn("Pass", ImGuiTableColumnFlags_WidthStretch);
             ImGui::TableSetupColumn("Command Buffer", ImGuiTableColumnFlags_WidthFixed);
             ImGui::TableSetupColumn("CPU ms", ImGuiTableColumnFlags_WidthFixed);
             ImGui::TableSetupColumn("GPU ms", ImGuiTableColumnFlags_WidthFixed);
+            ImGui::TableSetupColumn("Mesh inv.", ImGuiTableColumnFlags_WidthFixed);
             ImGui::TableSetupColumn("Flags", ImGuiTableColumnFlags_WidthStretch);
             ImGui::TableHeadersRow();
 
@@ -202,6 +282,7 @@ namespace Nox
                     ImGui::TableNextColumn();
                     ImGui::TableNextColumn();
                     ImGui::TextUnformatted(gpuTime(row.Name).c_str());
+                    ImGui::TableNextColumn();
                     ImGui::TableNextColumn();
                     continue;
                 }
@@ -226,6 +307,9 @@ namespace Nox
                 ImGui::TableNextColumn();
                 if (!pass.Culled)
                     ImGui::TextUnformatted(gpuTime(pass.Name).c_str());
+                ImGui::TableNextColumn();
+                if (!pass.Culled && pass.Raster)
+                    ImGui::TextUnformatted(meshInvocations(pass.Name).c_str());
                 ImGui::TableNextColumn();
 
                 std::string flags;
@@ -427,6 +511,10 @@ namespace Nox
                                  key.Usage != NRI::TextureUsage::DepthStencilAttachment;
         if (floatFormat)
         {
+            ImGui::Checkbox("Depth curve", &inspection.DepthCurve);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Reverse-Z curve: depth kept in a color format (the Hi-Z pyramid) reads as black otherwise");
+
             if (ImGui::SliderFloat("Exposure (stops)", &m_ExposureStops, -10.0f, 10.0f, "%.1f"))
                 inspection.Exposure = std::pow(2.0f, m_ExposureStops);
 

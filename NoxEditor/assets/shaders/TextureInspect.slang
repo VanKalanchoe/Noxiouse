@@ -47,7 +47,9 @@ void compMain(uint3 dispatchThreadID : SV_DispatchThreadID, uniform PushConstant
         Texture2D<float> source = Texture2D<float>.Handle(uint2(pushConstant.sourceTextureIndex, 0));
         float depth = source.Load(location);
         raw = float4(depth, 0.0, 0.0, 0.0);
-        color = pow(saturate(depth), 0.2).xxx;
+        color = pow(saturate(depth), 0.2).xxx * float3((pushConstant.channelMask & 1u) != 0 ? 1.0 : 0.0,
+                                                       (pushConstant.channelMask & 2u) != 0 ? 1.0 : 0.0,
+                                                       (pushConstant.channelMask & 4u) != 0 ? 1.0 : 0.0);
     }
     else
     {

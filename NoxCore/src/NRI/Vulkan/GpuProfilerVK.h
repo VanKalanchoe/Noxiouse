@@ -27,11 +27,18 @@ namespace NRI
         uint32_t allocateQueryPair() override;
         void writeTimestamp(CommandBuffer& cmd, uint32_t queryId) override;
 
+        bool isPipelineStatisticsSupported() const override { return m_statisticsSupported; }
+        uint32_t allocateStatisticsQuery() override;
+        void beginStatistics(CommandBuffer& cmd, uint32_t queryId) override;
+        void endStatistics(CommandBuffer& cmd, uint32_t queryId) override;
+        std::span<const GpuPipelineStatistics> getReadbackStatistics() const override { return m_statisticsReadback; }
+
     private:
         void readSlotResults(uint32_t frameSlot);
 
     private:
         static constexpr uint32_t QueriesPerFrame = 256;
+        static constexpr uint32_t StatisticsQueriesPerFrame = 64;
         static constexpr uint32_t NoSlot = ~0u;
 
         struct FrameQueries
@@ -39,12 +46,16 @@ namespace NRI
             vk::raii::QueryPool pool = nullptr;
             // Queries handed out since the last reset (always written in pairs), read back on the next beginFrame.
             std::atomic<uint32_t> allocatedQueries = 0;
+            vk::raii::QueryPool statisticsPool = nullptr;
+            std::atomic<uint32_t> allocatedStatistics = 0;
         };
 
         DeviceVK& m_deviceVK;
         std::unique_ptr<FrameQueries[]> m_frames; // atomics do not move
         uint32_t m_frameCount = 0;
         std::vector<GpuTimestamp> m_readback;
+        std::vector<GpuPipelineStatistics> m_statisticsReadback;
+        bool m_statisticsSupported = false;
         std::vector<uint64_t> m_resultScratch; // (value, availability) pairs for vkGetQueryPoolResults
         uint32_t m_currentSlot = NoSlot;        // written by beginFrame before recording starts
         float m_timestampPeriod = 0.0f;

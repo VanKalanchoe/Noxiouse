@@ -68,6 +68,15 @@ namespace Nox
         double Value = 0.0;
     };
 
+    // Pipeline statistics of a GPU scope in the newest frame that measured it.
+    struct ProfilePipelineStatistics
+    {
+        const char* Name = nullptr;
+        uint64_t Fragments = 0;
+        uint64_t TaskInvocations = 0;
+        uint64_t MeshInvocations = 0;
+    };
+
     struct ProfileMemoryStats
     {
         std::vector<NRI::MemoryHeapStats> Heaps;
@@ -90,9 +99,17 @@ namespace Nox
             uint32_t BeginQuery; // the end timestamp is BeginQuery + 1
         };
 
+        struct Statistics
+        {
+            uint32_t ScopeId;
+            uint32_t Query;
+        };
+
     private:
         std::vector<Scope> m_Scopes;
         std::vector<uint32_t> m_OpenScopes; // indices into m_Scopes
+        std::vector<Statistics> m_Statistics;
+        uint32_t m_OpenStatistics = ~0u; // index into m_Statistics (statistics queries do not nest)
     };
 
     class Profiler
@@ -130,6 +147,13 @@ namespace Nox
         // By the thread recording the context's command buffer; scopes nest within a context under "GPU Frame".
         void BeginGpuScope(GpuScopeContext& context, NRI::CommandBuffer& cmd, uint32_t scopeId);
         void EndGpuScope(GpuScopeContext& context, NRI::CommandBuffer& cmd);
+        // Pipeline statistics (triangles, fragments, task/mesh shader invocations) of a pass, when enabled and supported: by
+        // the recording thread, outside rendering. Off by default: the queries cost GPU time.
+        void SetPipelineStatisticsEnabled(bool enabled) { m_PipelineStatisticsEnabled.store(enabled, std::memory_order_relaxed); }
+        bool IsPipelineStatisticsEnabled() const { return m_PipelineStatisticsEnabled.load(std::memory_order_relaxed); }
+        bool IsPipelineStatisticsSupported() const;
+        void BeginGpuStatistics(GpuScopeContext& context, NRI::CommandBuffer& cmd, uint32_t scopeId);
+        void EndGpuStatistics(GpuScopeContext& context, NRI::CommandBuffer& cmd);
         // Main thread, after recording: takes the contexts' scopes in submission order and closes the frame.
         void EndGpuFrame(std::span<GpuScopeContext> contexts);
 
@@ -146,6 +170,7 @@ namespace Nox
         void GetCpuScopes(std::vector<ProfileScopeStats>& outScopes) const;
         void GetGpuScopes(std::vector<ProfileScopeStats>& outScopes) const;
         void GetCounters(std::vector<ProfileCounterStats>& outCounters) const;
+        void GetPipelineStatistics(std::vector<ProfilePipelineStatistics>& outStatistics) const;
         const ProfileMemoryStats& GetMemoryStats() const { return m_MemoryStats; }
 
     private:
@@ -203,6 +228,7 @@ namespace Nox
         struct GpuFrameRecord
         {
             std::vector<GpuScopeContext::Scope> Scopes; // "GPU Frame" first, then the contexts in submission order
+            std::vector<GpuScopeContext::Statistics> Statistics;
             bool TracyZonesEmitted = false;              // zone begins were sent to Tracy, so their times must be too
         };
 
@@ -245,6 +271,13 @@ namespace Nox
         uint32_t m_GpuFrameScopeId = InvalidScopeId;
         uint32_t m_GpuCurrentSlot = NoGpuSlot; // written on the main thread outside recording, read by recording threads
         bool m_TracyGpuContextCreated = false;
+        std::atomic<bool> m_PipelineStatisticsEnabled = false;
+        struct StatisticsValue
+        {
+            ProfilePipelineStatistics Values;
+            uint64_t LastFrame = 0;
+        };
+        std::vector<StatisticsValue> m_GpuStatistics; // per scope
 
         // Counters + memory
         std::vector<CounterValue> m_Counters;

@@ -179,13 +179,14 @@ namespace Nox
         {
         case NRI::ImageFormat::R32SINT: push.mode = shaderio::TEXTURE_INSPECT_SIGNED_ID; break;
         case NRI::ImageFormat::R32G32_UINT: push.mode = shaderio::TEXTURE_INSPECT_UNSIGNED_PAIR; break;
-        case NRI::ImageFormat::R16_SFLOAT: push.channelCount = 1; break;
+        case NRI::ImageFormat::R16_SFLOAT:
+        case NRI::ImageFormat::R32_SFLOAT: push.channelCount = 1; break;
         case NRI::ImageFormat::R16G16:
         case NRI::ImageFormat::R16G16_SFLOAT:
         case NRI::ImageFormat::R32G32_SFLOAT: push.channelCount = 2; break;
         default: break;
         }
-        if (key.Usage == NRI::TextureUsage::DepthStencilAttachment)
+        if (key.Usage == NRI::TextureUsage::DepthStencilAttachment || settings.DepthCurve)
             push.mode = shaderio::TEXTURE_INSPECT_DEPTH;
         push.mip = mip;
         push.channelMask = settings.ChannelMask;

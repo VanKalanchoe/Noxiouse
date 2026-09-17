@@ -239,9 +239,8 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* currentEvent)
             
             if (currentEvent->key.scancode == SDL_SCANCODE_F)
             {
+                // Freezes the culling view (Renderer::setFrozen captures it again on every freeze).
                 applicationState->app->GetRenderer()->setFrozen(!applicationState->app->GetRenderer()->getFrozen());
-                if (!applicationState->app->GetRenderer()->getFrozen())
-                    applicationState->app->GetRenderer()->setFrozenDone(false);
             }
 
             SDL_Scancode scan = currentEvent->key.scancode; // maybe keycode better ?

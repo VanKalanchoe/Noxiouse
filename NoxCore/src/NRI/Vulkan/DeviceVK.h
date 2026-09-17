@@ -37,6 +37,8 @@ namespace NRI
         uint32_t getMSAASampleCount() const override { return static_cast<uint32_t>(m_msaaSamples); }
         vk::raii::Device& getDevice() { return m_device; }
         bool isShaderObjectExtensionEnabled() const { return m_shaderObjectsEnabled; }
+        // Pipeline statistics queries including task/mesh shader invocations (GpuProfiler).
+        bool isPipelineStatisticsEnabled() const { return m_pipelineStatisticsEnabled; }
         bool isMemoryBudgetSupported() const override { return m_memoryBudgetEnabled; }
         // VK_EXT_debug_utils: required with the validation layers, otherwise enabled whenever the loader offers it so
         // capture tools show debug labels in every build.
@@ -126,6 +128,7 @@ namespace NRI
         vk::SampleCountFlagBits m_msaaSamples = vk::SampleCountFlagBits::e1;
         vk::raii::Device m_device = nullptr;
         bool m_shaderObjectsEnabled = false;
+        bool m_pipelineStatisticsEnabled = false;
         bool m_memoryBudgetEnabled = false;
         bool m_debugUtilsEnabled = false;
         uint32_t m_queueIndex = ~0;

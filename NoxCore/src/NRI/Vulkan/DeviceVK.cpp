@@ -606,8 +606,10 @@ namespace NRI
         {
             throw std::runtime_error("Could not find a queue for graphics and present -> terminating");
         }
-        auto features = m_physicalDevice.template getFeatures2<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceShaderObjectFeaturesEXT>();
+        auto features = m_physicalDevice.template getFeatures2<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceShaderObjectFeaturesEXT, vk::PhysicalDeviceMeshShaderFeaturesEXT>();
         m_shaderObjectsEnabled = features.template get<vk::PhysicalDeviceShaderObjectFeaturesEXT>().shaderObject;
+        m_pipelineStatisticsEnabled = features.template get<vk::PhysicalDeviceFeatures2>().features.pipelineStatisticsQuery &&
+                                      features.template get<vk::PhysicalDeviceMeshShaderFeaturesEXT>().meshShaderQueries;
 
         // Optional extensions: enabled only when the device reports them.
         std::vector<const char*> enabledDeviceExtensions = requiredDeviceExtension;
@@ -654,12 +656,14 @@ namespace NRI
                         .multiDrawIndirect = true,
                         .wideLines = true,
                         .samplerAnisotropy = true,
+                        .pipelineStatisticsQuery = m_pipelineStatisticsEnabled,
                         .shaderInt16 = true, // <-- Required by RTXDI PT's uint16_t path-state fields (RTXDI_PathTracerState, packed reservoir)
                         .shaderInt64 = true,
                     }
                 }, // vk::PhysicalDeviceFeatures2
                 {.shaderDrawParameters = true}, // vk::PhysicalDeviceVulkan11Features
                 {
+                    .drawIndirectCount = true, // drawMeshTasksIndirectCount (GPU culling)
                     .storageBuffer8BitAccess = true,
                     .shaderInt8 = true,
                     .shaderFloat16 = true, // <-- Required by RTXDI PT's float16_t reservoir packing (Reservoir.hlsli)
@@ -703,7 +707,7 @@ namespace NRI
                 {.descriptorHeap = true},
                 {.shaderUntypedPointers = true},
                 {.maintenance5 = true},
-                {.taskShader = true, .meshShader = true},
+                {.taskShader = true, .meshShader = true, .meshShaderQueries = m_pipelineStatisticsEnabled},
                 {.unifiedImageLayouts = true},
                 {.accelerationStructure = true},
                 {.rayQuery = true},
