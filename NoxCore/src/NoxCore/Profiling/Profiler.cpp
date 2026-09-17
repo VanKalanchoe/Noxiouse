@@ -168,21 +168,19 @@ namespace Nox
     {
         m_GpuProfiler = gpuProfiler;
         m_GpuFrames.clear();
-        m_GpuOpenScopes.clear();
         m_GpuCurrentSlot = NoGpuSlot;
     }
 
-    void Profiler::BeginGpuFrame(NRI::CommandBuffer& cmd, uint32_t frameSlot)
+    void Profiler::BeginGpuFrame(uint32_t frameSlot)
     {
         m_GpuCurrentSlot = NoGpuSlot;
-        m_GpuOpenScopes.clear();
         if (!m_GpuProfiler || !m_GpuProfiler->isSupported())
             return;
 
         if (frameSlot >= m_GpuFrames.size())
             m_GpuFrames.resize(frameSlot + 1);
 
-        m_GpuProfiler->beginFrame(cmd, frameSlot);
+        m_GpuProfiler->beginFrame(frameSlot);
 
         GpuFrameRecord& frame = m_GpuFrames[frameSlot];
         ProcessGpuReadback(frame);
@@ -191,63 +189,103 @@ namespace Nox
         // Tracy's manual: read the connection state once and use the same value for a zone's begin and end
         // (and, for GPU zones, for its times).
         frame.TracyZonesEmitted = m_TracyGpuContextCreated && TracyBackend::IsConnected();
-        m_GpuCurrentSlot = frameSlot;
 
         static const ProfileScopeInfo s_GpuFrameScope{ "GPU Frame", __FUNCTION__, __FILE__, static_cast<uint32_t>(__LINE__) };
         if (m_GpuFrameScopeId == InvalidScopeId)
             m_GpuFrameScopeId = RegisterScope(s_GpuFrameScope);
-        BeginGpuScope(cmd, m_GpuFrameScopeId);
+
+        // The frame scope spans every command buffer: its timestamps go into the first and the last one, its Tracy zone
+        // is opened and closed here on the main thread.
+        const uint32_t query = m_GpuProfiler->allocateQueryPair();
+        frame.Scopes.push_back({ m_GpuFrameScopeId, InvalidScopeId, query });
+        if (frame.TracyZonesEmitted && query != NRI::GpuProfiler::InvalidQueryId)
+            TracyBackend::BeginGpuZone(m_GpuFrameScopeId, query);
+
+        m_GpuCurrentSlot = frameSlot;
     }
 
-    void Profiler::EndGpuFrame(NRI::CommandBuffer& cmd)
+    void Profiler::RecordGpuFrameBegin(NRI::CommandBuffer& cmd)
     {
         if (m_GpuCurrentSlot == NoGpuSlot)
             return;
 
-        if (m_GpuOpenScopes.size() != 1)
-            NOX_CORE_ERROR("[Profiler] Unbalanced GPU scopes at the end of the frame: {} open, expected only the frame scope", m_GpuOpenScopes.size());
-
-        // Close everything (the root "GPU Frame" scope last) so every begin timestamp gets its end.
-        while (!m_GpuOpenScopes.empty())
-            EndGpuScope(cmd);
-
-        m_GpuCurrentSlot = NoGpuSlot;
+        m_GpuProfiler->resetQueries(cmd);
+        m_GpuProfiler->writeTimestamp(cmd, m_GpuFrames[m_GpuCurrentSlot].Scopes.front().BeginQuery);
     }
 
-    void Profiler::BeginGpuScope(NRI::CommandBuffer& cmd, uint32_t scopeId)
+    void Profiler::RecordGpuFrameEnd(NRI::CommandBuffer& cmd)
     {
         if (m_GpuCurrentSlot == NoGpuSlot)
             return;
 
-        GpuFrameRecord& frame = m_GpuFrames[m_GpuCurrentSlot];
-        const uint32_t parentId = m_GpuOpenScopes.empty() ? InvalidScopeId : frame.Scopes[m_GpuOpenScopes.back()].ScopeId;
+        const uint32_t beginQuery = m_GpuFrames[m_GpuCurrentSlot].Scopes.front().BeginQuery;
+        if (beginQuery != NRI::GpuProfiler::InvalidQueryId)
+            m_GpuProfiler->writeTimestamp(cmd, beginQuery + 1);
+    }
+
+    void Profiler::BeginGpuScope(GpuScopeContext& context, NRI::CommandBuffer& cmd, uint32_t scopeId)
+    {
+        if (m_GpuCurrentSlot == NoGpuSlot)
+            return;
+
+        const uint32_t parentId = context.m_OpenScopes.empty() ? m_GpuFrameScopeId : context.m_Scopes[context.m_OpenScopes.back()].ScopeId;
 
         // Unregistered scopes still get a record so the matching EndGpuScope stays balanced.
-        const uint32_t beginQuery = scopeId == InvalidScopeId
-            ? NRI::GpuProfiler::InvalidQueryId
-            : m_GpuProfiler->beginScope(cmd, m_Scopes[scopeId]->Name);
+        uint32_t beginQuery = NRI::GpuProfiler::InvalidQueryId;
+        if (scopeId != InvalidScopeId)
+        {
+            beginQuery = m_GpuProfiler->allocateQueryPair();
+            m_GpuProfiler->writeTimestamp(cmd, beginQuery);
+        }
 
-        m_GpuOpenScopes.push_back(static_cast<uint32_t>(frame.Scopes.size()));
-        frame.Scopes.push_back({ scopeId, parentId, beginQuery, NRI::GpuProfiler::InvalidQueryId });
+        context.m_OpenScopes.push_back(static_cast<uint32_t>(context.m_Scopes.size()));
+        context.m_Scopes.push_back({ scopeId, parentId, beginQuery });
 
-        if (frame.TracyZonesEmitted && beginQuery != NRI::GpuProfiler::InvalidQueryId)
+        if (m_GpuFrames[m_GpuCurrentSlot].TracyZonesEmitted && beginQuery != NRI::GpuProfiler::InvalidQueryId)
             TracyBackend::BeginGpuZone(scopeId, beginQuery);
     }
 
-    void Profiler::EndGpuScope(NRI::CommandBuffer& cmd)
+    void Profiler::EndGpuScope(GpuScopeContext& context, NRI::CommandBuffer& cmd)
     {
-        if (m_GpuCurrentSlot == NoGpuSlot || m_GpuOpenScopes.empty())
+        if (m_GpuCurrentSlot == NoGpuSlot || context.m_OpenScopes.empty())
             return;
 
-        GpuFrameRecord& frame = m_GpuFrames[m_GpuCurrentSlot];
-        GpuScopeRecord& record = frame.Scopes[m_GpuOpenScopes.back()];
-        m_GpuOpenScopes.pop_back();
-        if (record.ScopeId == InvalidScopeId)
+        const GpuScopeContext::Scope scope = context.m_Scopes[context.m_OpenScopes.back()];
+        context.m_OpenScopes.pop_back();
+        if (scope.ScopeId == InvalidScopeId)
             return;
 
-        record.EndQuery = m_GpuProfiler->endScope(cmd);
-        if (frame.TracyZonesEmitted && record.EndQuery != NRI::GpuProfiler::InvalidQueryId)
-            TracyBackend::EndGpuZone(record.EndQuery);
+        if (scope.BeginQuery != NRI::GpuProfiler::InvalidQueryId)
+        {
+            m_GpuProfiler->writeTimestamp(cmd, scope.BeginQuery + 1);
+            if (m_GpuFrames[m_GpuCurrentSlot].TracyZonesEmitted)
+                TracyBackend::EndGpuZone(scope.BeginQuery + 1);
+        }
+    }
+
+    void Profiler::EndGpuFrame(std::span<GpuScopeContext> contexts)
+    {
+        if (m_GpuCurrentSlot != NoGpuSlot)
+        {
+            GpuFrameRecord& frame = m_GpuFrames[m_GpuCurrentSlot];
+            for (const GpuScopeContext& context : contexts)
+            {
+                if (!context.m_OpenScopes.empty())
+                    NOX_CORE_ERROR("[Profiler] Unbalanced GPU scopes at the end of a command buffer: {} open", context.m_OpenScopes.size());
+                frame.Scopes.insert(frame.Scopes.end(), context.m_Scopes.begin(), context.m_Scopes.end());
+            }
+
+            const uint32_t frameQuery = frame.Scopes.front().BeginQuery;
+            if (frame.TracyZonesEmitted && frameQuery != NRI::GpuProfiler::InvalidQueryId)
+                TracyBackend::EndGpuZone(frameQuery + 1);
+        }
+
+        for (GpuScopeContext& context : contexts)
+        {
+            context.m_Scopes.clear();
+            context.m_OpenScopes.clear();
+        }
+        m_GpuCurrentSlot = NoGpuSlot;
     }
 
     void Profiler::SetCounter(uint32_t scopeId, double value)
@@ -389,11 +427,12 @@ namespace Nox
         const uint64_t tickMask = validBits >= 64 ? std::numeric_limits<uint64_t>::max() : (uint64_t{1} << validBits) - 1;
         const double millisecondsPerTick = static_cast<double>(m_GpuProfiler->getTimestampPeriod()) / NanosecondsPerMillisecond;
 
-        for (const GpuScopeRecord& record : frame.Scopes)
+        for (const GpuScopeContext::Scope& record : frame.Scopes)
         {
             uint64_t beginTicks = 0;
             uint64_t endTicks = 0;
-            if (record.ScopeId == InvalidScopeId || !findTicks(record.BeginQuery, beginTicks) || !findTicks(record.EndQuery, endTicks))
+            if (record.ScopeId == InvalidScopeId || record.BeginQuery == NRI::GpuProfiler::InvalidQueryId ||
+                !findTicks(record.BeginQuery, beginTicks) || !findTicks(record.BeginQuery + 1, endTicks))
                 continue;
 
             const double scopeMs = static_cast<double>((endTicks - beginTicks) & tickMask) * millisecondsPerTick;
@@ -403,7 +442,7 @@ namespace Nox
             if (record.ScopeId == m_GpuFrameScopeId)
                 PushSample(m_GpuFrameTime, static_cast<float>(scopeMs), m_FrameNumber);
         }
-        for (const GpuScopeRecord& record : frame.Scopes)
+        for (const GpuScopeContext::Scope& record : frame.Scopes)
         {
             if (record.ScopeId == InvalidScopeId)
                 continue;

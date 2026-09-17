@@ -1,4 +1,5 @@
 #pragma once
+#include <span>
 
 #include "NRITypes.h"
 
@@ -107,6 +108,57 @@ namespace NRI
         uint64_t size      = 0;
     };
     
+    // How a resource is used on either side of a barrier (synchronization2 access and pipeline stages). Image layouts stay
+    // General (unified image layouts), so a barrier only tells the driver what changes hands.
+    namespace AccessBits
+    {
+        constexpr uint32_t None = 0;
+        constexpr uint32_t ShaderRead = 1 << 0;                 // sampled or storage read, buffer device address read
+        constexpr uint32_t ShaderWrite = 1 << 1;                // storage write
+        constexpr uint32_t ColorAttachmentRead = 1 << 2;
+        constexpr uint32_t ColorAttachmentWrite = 1 << 3;
+        constexpr uint32_t DepthStencilRead = 1 << 4;
+        constexpr uint32_t DepthStencilWrite = 1 << 5;
+        constexpr uint32_t TransferRead = 1 << 6;
+        constexpr uint32_t TransferWrite = 1 << 7;
+        constexpr uint32_t AccelerationStructureRead = 1 << 8;
+        constexpr uint32_t AccelerationStructureWrite = 1 << 9;
+    }
+
+    namespace StageBits
+    {
+        constexpr uint32_t None = 0;
+        constexpr uint32_t Task = 1 << 0;
+        constexpr uint32_t Mesh = 1 << 1;
+        constexpr uint32_t Fragment = 1 << 2;
+        constexpr uint32_t Compute = 1 << 3;
+        constexpr uint32_t ColorAttachmentOutput = 1 << 4;
+        constexpr uint32_t FragmentTests = 1 << 5; // early + late
+        constexpr uint32_t Transfer = 1 << 6;      // copies and blits
+        constexpr uint32_t AccelerationStructureBuild = 1 << 7;
+    }
+
+    struct ResourceState
+    {
+        uint32_t access = AccessBits::None;
+        uint32_t stages = StageBits::None;
+    };
+
+    // Whole texture (all mips and layers).
+    struct TextureBarrierDesc
+    {
+        Texture* texture = nullptr;
+        ResourceState before;
+        ResourceState after;
+    };
+
+    struct BufferBarrierDesc
+    {
+        Buffer* buffer = nullptr;
+        ResourceState before;
+        ResourceState after;
+    };
+
     enum class AccelerationStructureBarrierType : uint8_t
     {
         BuildToBuild,      // BLAS build write -> TLAS build read
@@ -178,5 +230,11 @@ namespace NRI
         virtual void updateAccelerationStructure(const AccelerationStructureBuildDesc& buildDesc, uint64_t scratchAddress, AccelerationStructure& srcAS, AccelerationStructure& dstAS) = 0;
         virtual void accelerationStructureBarrier(AccelerationStructureBarrierType barrierType = AccelerationStructureBarrierType::BuildToShaderRead) = 0;
         virtual void executionBarrier() = 0;
+        // Barriers scoped to the given resources, recorded as one pipeline barrier.
+        virtual void resourceBarriers(std::span<const TextureBarrierDesc> textures, std::span<const BufferBarrierDesc> buffers) = 0;
+
+        // Named regions for capture tools (RenderDoc, Nsight) and validation messages; no-op without debug utils.
+        virtual void beginDebugLabel(const char* label) = 0;
+        virtual void endDebugLabel() = 0;
     };
 }

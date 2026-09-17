@@ -58,6 +58,10 @@ namespace Nox
         m_FrameArenas = std::make_unique<FrameArena[]>(GetThreadSlotCount());
         t_ThreadSlot = GetThreadSlotCount() - 1;
 
+        m_ExclusiveKeys = std::make_unique<tf::Semaphore[]>(MaxExclusiveKeys);
+        for (uint32_t key = 0; key < MaxExclusiveKeys; ++key)
+            m_ExclusiveKeys[key].reset(1);
+
         m_Executor = std::make_unique<tf::Executor>(m_WorkerCount, std::make_shared<NoxWorkerInterface>("Nox Worker", 0));
         m_IoExecutor = std::make_unique<tf::Executor>(IoWorkerCount, std::make_shared<NoxWorkerInterface>("Nox IO", m_WorkerCount));
 
@@ -129,6 +133,26 @@ namespace Nox
             dispatch();
         else
             m_Executor->async(taskName + " Dispatch", dispatch).get(); // task groups can only be created on a worker
+    }
+
+    void JobSystem::RunTasks(std::string_view name, std::span<const uint32_t> exclusiveMasks, const std::function<void(uint32_t index)>& task)
+    {
+        tf::Taskflow taskflow;
+        const std::string taskName(name);
+        for (uint32_t index = 0; index < exclusiveMasks.size(); ++index)
+        {
+            tf::Task node = taskflow.emplace([&task, index]() { task(index); }).name(taskName);
+            for (uint32_t key = 0; key < MaxExclusiveKeys; ++key)
+            {
+                if ((exclusiveMasks[index] & (1u << key)) != 0)
+                {
+                    // Taskflow acquires all of a task's semaphores at once or none (no lock-order deadlock).
+                    node.acquire(m_ExclusiveKeys[key]);
+                    node.release(m_ExclusiveKeys[key]);
+                }
+            }
+        }
+        RunTaskflow(taskflow);
     }
 
     FrameArena& JobSystem::GetFrameArena()

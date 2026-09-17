@@ -10,15 +10,15 @@ namespace NRI
         const std::vector<vk::QueueFamilyProperties> queueFamilies = m_deviceVK.getPhysicalDevice().getQueueFamilyProperties();
         m_timestampValidBits = queueFamilies[m_deviceVK.getQueueIndex()].timestampValidBits;
         m_timestampPeriod = m_deviceVK.getPhysicalDevice().getProperties().limits.timestampPeriod;
-        m_debugLabels = m_deviceVK.isDebugUtilsEnabled();
 
         if (!isSupported())
             return;
 
-        m_frames.resize(framesInFlight);
-        for (FrameQueries& frame : m_frames)
+        m_frameCount = framesInFlight;
+        m_frames = std::make_unique<FrameQueries[]>(framesInFlight);
+        for (uint32_t slot = 0; slot < framesInFlight; ++slot)
         {
-            frame.pool = vk::raii::QueryPool(m_deviceVK.getDevice(), vk::QueryPoolCreateInfo{
+            m_frames[slot].pool = vk::raii::QueryPool(m_deviceVK.getDevice(), vk::QueryPoolCreateInfo{
                 .queryType = vk::QueryType::eTimestamp,
                 .queryCount = QueriesPerFrame
             });
@@ -28,84 +28,74 @@ namespace NRI
         m_resultScratch.resize(static_cast<size_t>(QueriesPerFrame) * 2);
     }
 
-    void GpuProfilerVK::beginFrame(CommandBuffer& cmd, uint32_t frameSlot)
+    void GpuProfilerVK::beginFrame(uint32_t frameSlot)
     {
         m_readback.clear();
-        m_openScopeHasQuery.clear();
-        m_reservedEndQueries = 0;
         m_currentSlot = NoSlot;
 
-        if (!isSupported() || frameSlot >= m_frames.size())
+        if (!isSupported() || frameSlot >= m_frameCount)
             return;
 
         readSlotResults(frameSlot);
-
-        // Every query must be reset before it is written again (VUID-vkCmdWriteTimestamp2-None-03864),
-        // and the reset must be recorded outside a render pass (VUID-vkCmdResetQueryPool-renderpass).
-        FrameQueries& frame = m_frames[frameSlot];
-        static_cast<CommandBufferVK&>(cmd).getActiveNativeBuffer().resetQueryPool(*frame.pool, 0, QueriesPerFrame);
-        frame.writtenQueries = 0;
+        m_frames[frameSlot].allocatedQueries.store(0, std::memory_order_relaxed);
         m_currentSlot = frameSlot;
     }
 
-    uint32_t GpuProfilerVK::beginScope(CommandBuffer& cmd, const char* label)
+    void GpuProfilerVK::resetQueries(CommandBuffer& cmd)
     {
-        vk::raii::CommandBuffer& native = static_cast<CommandBufferVK&>(cmd).getActiveNativeBuffer();
-        if (m_debugLabels)
-            native.beginDebugUtilsLabelEXT(vk::DebugUtilsLabelEXT{ .pLabelName = label });
+        if (m_currentSlot == NoSlot)
+            return;
 
-        const bool hasRoom = m_currentSlot != NoSlot &&
-            m_frames[m_currentSlot].writtenQueries + m_reservedEndQueries + 2 <= QueriesPerFrame;
-        m_openScopeHasQuery.push_back(hasRoom);
-        if (!hasRoom)
-            return InvalidQueryId;
-
-        FrameQueries& frame = m_frames[m_currentSlot];
-        const uint32_t query = frame.writtenQueries++;
-        ++m_reservedEndQueries;
-        // Single stage bit (VUID-vkCmdWriteTimestamp2-stage-03859); same stage TracyVulkan uses.
-        native.writeTimestamp2(vk::PipelineStageFlagBits2::eBottomOfPipe, *frame.pool, query);
-        return m_currentSlot * QueriesPerFrame + query;
+        // Every query must be reset before it is written again (VUID-vkCmdWriteTimestamp2-None-03864), and the reset
+        // must be recorded outside a render pass (VUID-vkCmdResetQueryPool-renderpass). The command buffer holding it is
+        // submitted first, so it executes before any timestamp of the frame.
+        static_cast<CommandBufferVK&>(cmd).getActiveNativeBuffer().resetQueryPool(*m_frames[m_currentSlot].pool, 0, QueriesPerFrame);
     }
 
-    uint32_t GpuProfilerVK::endScope(CommandBuffer& cmd)
+    uint32_t GpuProfilerVK::allocateQueryPair()
     {
-        vk::raii::CommandBuffer& native = static_cast<CommandBufferVK&>(cmd).getActiveNativeBuffer();
-        if (m_debugLabels)
-            native.endDebugUtilsLabelEXT();
-
-        if (m_openScopeHasQuery.empty())
+        if (m_currentSlot == NoSlot)
             return InvalidQueryId;
 
-        const bool hasQuery = m_openScopeHasQuery.back();
-        m_openScopeHasQuery.pop_back();
-        if (!hasQuery)
-            return InvalidQueryId;
+        std::atomic<uint32_t>& allocated = m_frames[m_currentSlot].allocatedQueries;
+        uint32_t first = allocated.load(std::memory_order_relaxed);
+        do
+        {
+            if (first + 2 > QueriesPerFrame)
+                return InvalidQueryId;
+        } while (!allocated.compare_exchange_weak(first, first + 2, std::memory_order_relaxed));
 
-        FrameQueries& frame = m_frames[m_currentSlot];
-        const uint32_t query = frame.writtenQueries++;
-        --m_reservedEndQueries;
-        native.writeTimestamp2(vk::PipelineStageFlagBits2::eBottomOfPipe, *frame.pool, query);
-        return m_currentSlot * QueriesPerFrame + query;
+        return m_currentSlot * QueriesPerFrame + first;
+    }
+
+    void GpuProfilerVK::writeTimestamp(CommandBuffer& cmd, uint32_t queryId)
+    {
+        if (queryId == InvalidQueryId)
+            return;
+
+        // Single stage bit (VUID-vkCmdWriteTimestamp2-stage-03859); same stage TracyVulkan uses.
+        static_cast<CommandBufferVK&>(cmd).getActiveNativeBuffer().writeTimestamp2(
+            vk::PipelineStageFlagBits2::eBottomOfPipe, *m_frames[queryId / QueriesPerFrame].pool, queryId % QueriesPerFrame);
     }
 
     void GpuProfilerVK::readSlotResults(uint32_t frameSlot)
     {
         FrameQueries& frame = m_frames[frameSlot];
-        if (frame.writtenQueries == 0)
+        const uint32_t queryCount = frame.allocatedQueries.load(std::memory_order_relaxed);
+        if (queryCount == 0)
             return;
 
         // Only queries written since the last reset are read (VUID-vkGetQueryPoolResults-None-09401).
         // No WAIT flag: the slot's fence has already signaled, availability is still checked per query.
         constexpr vk::DeviceSize stride = sizeof(uint64_t) * 2;
-        const vk::Result result = frame.pool.getResults(0, frame.writtenQueries,
-                                                        static_cast<size_t>(frame.writtenQueries) * stride,
+        const vk::Result result = frame.pool.getResults(0, queryCount,
+                                                        static_cast<size_t>(queryCount) * stride,
                                                         m_resultScratch.data(), stride,
                                                         vk::QueryResultFlagBits::e64 | vk::QueryResultFlagBits::eWithAvailability);
         if (result != vk::Result::eSuccess && result != vk::Result::eNotReady)
             return;
 
-        for (uint32_t query = 0; query < frame.writtenQueries; ++query)
+        for (uint32_t query = 0; query < queryCount; ++query)
         {
             const uint64_t value = m_resultScratch[query * 2];
             const uint64_t available = m_resultScratch[query * 2 + 1];

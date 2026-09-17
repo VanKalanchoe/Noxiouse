@@ -75,6 +75,26 @@ namespace Nox
         Platform::ProcessMemory Process;
     };
 
+    // GPU scope state of one command buffer while it is recorded (Profiler::BeginGpuScope). A frame's command buffers can
+    // be recorded on different threads, each with its own context; a context is used by one thread at a time and keeps
+    // its capacity across frames.
+    class alignas(64) GpuScopeContext
+    {
+    private:
+        friend class Profiler;
+
+        struct Scope
+        {
+            uint32_t ScopeId;
+            uint32_t ParentId;
+            uint32_t BeginQuery; // the end timestamp is BeginQuery + 1
+        };
+
+    private:
+        std::vector<Scope> m_Scopes;
+        std::vector<uint32_t> m_OpenScopes; // indices into m_Scopes
+    };
+
     class Profiler
     {
     public:
@@ -99,13 +119,19 @@ namespace Nox
         void EndCpuScope(uint32_t scopeId);
         void EndFrame();
 
-        // GPU scopes: main thread, only between BeginGpuFrame/EndGpuFrame on the frame command buffer.
+        // GPU scopes over the frame's command buffers (submitted together, possibly recorded in parallel).
         void SetGpuProfiler(NRI::GpuProfiler* gpuProfiler);
-        // The frame itself is recorded as the root "GPU Frame" scope (GetGpuFrameTime).
-        void BeginGpuFrame(NRI::CommandBuffer& cmd, uint32_t frameSlot);
-        void EndGpuFrame(NRI::CommandBuffer& cmd);
-        void BeginGpuScope(NRI::CommandBuffer& cmd, uint32_t scopeId);
-        void EndGpuScope(NRI::CommandBuffer& cmd);
+        // Main thread, before recording: collects the slot's previous timings and opens the root "GPU Frame" scope
+        // (GetGpuFrameTime).
+        void BeginGpuFrame(uint32_t frameSlot);
+        // Recorded first into the first submitted command buffer (outside rendering) / last into the last one.
+        void RecordGpuFrameBegin(NRI::CommandBuffer& cmd);
+        void RecordGpuFrameEnd(NRI::CommandBuffer& cmd);
+        // By the thread recording the context's command buffer; scopes nest within a context under "GPU Frame".
+        void BeginGpuScope(GpuScopeContext& context, NRI::CommandBuffer& cmd, uint32_t scopeId);
+        void EndGpuScope(GpuScopeContext& context, NRI::CommandBuffer& cmd);
+        // Main thread, after recording: takes the contexts' scopes in submission order and closes the frame.
+        void EndGpuFrame(std::span<GpuScopeContext> contexts);
 
         // Main thread.
         void SetCounter(uint32_t scopeId, double value);
@@ -174,18 +200,10 @@ namespace Nox
             std::vector<CompletedCpuScope> Completed;
         };
 
-        struct GpuScopeRecord
-        {
-            uint32_t ScopeId;
-            uint32_t ParentId;
-            uint32_t BeginQuery;
-            uint32_t EndQuery;
-        };
-
         struct GpuFrameRecord
         {
-            std::vector<GpuScopeRecord> Scopes;
-            bool TracyZonesEmitted = false; // zone begins were sent to Tracy, so their times must be too
+            std::vector<GpuScopeContext::Scope> Scopes; // "GPU Frame" first, then the contexts in submission order
+            bool TracyZonesEmitted = false;              // zone begins were sent to Tracy, so their times must be too
         };
 
         struct NamedScope
@@ -221,12 +239,11 @@ namespace Nox
         // GPU
         NRI::GpuProfiler* m_GpuProfiler = nullptr;
         std::vector<GpuFrameRecord> m_GpuFrames;
-        std::vector<uint32_t> m_GpuOpenScopes; // indices into the current frame's Scopes
         std::vector<double> m_GpuFrameMs;
         std::vector<ScopeHistory> m_GpuHistories;
         History m_GpuFrameTime;
         uint32_t m_GpuFrameScopeId = InvalidScopeId;
-        uint32_t m_GpuCurrentSlot = NoGpuSlot;
+        uint32_t m_GpuCurrentSlot = NoGpuSlot; // written on the main thread outside recording, read by recording threads
         bool m_TracyGpuContextCreated = false;
 
         // Counters + memory
@@ -247,18 +264,6 @@ namespace Nox
         uint32_t m_ScopeId;
     };
 
-    class GpuProfileScope
-    {
-    public:
-        GpuProfileScope(NRI::CommandBuffer& cmd, uint32_t scopeId) : m_Cmd(cmd) { Profiler::Get().BeginGpuScope(cmd, scopeId); }
-        ~GpuProfileScope() { Profiler::Get().EndGpuScope(m_Cmd); }
-
-        GpuProfileScope(const GpuProfileScope&) = delete;
-        GpuProfileScope& operator=(const GpuProfileScope&) = delete;
-
-    private:
-        NRI::CommandBuffer& m_Cmd;
-    };
 }
 
 #if NOX_PROFILING_ENABLED
@@ -277,28 +282,12 @@ namespace Nox
     // CPU scope for time spent blocked on the GPU or display; excluded from the CPU frame time.
     #define NOX_PROFILE_WAIT_SCOPE(name) NOX_PROFILE_WAIT_SCOPE_LINE(name, __LINE__)
 
-    #define NOX_PROFILE_GPU_SCOPE_LINE2(cmd, name, line) NOX_PROFILE_DECLARE_SITE(noxProfileSite##line, name); ::Nox::GpuProfileScope noxGpuProfileScope##line(cmd, noxProfileSite##line##Id)
-    #define NOX_PROFILE_GPU_SCOPE_LINE(cmd, name, line) NOX_PROFILE_GPU_SCOPE_LINE2(cmd, name, line)
-    // RAII GPU scope for the enclosing block.
-    #define NOX_PROFILE_GPU_SCOPE(cmd, name) NOX_PROFILE_GPU_SCOPE_LINE(cmd, name, __LINE__)
-    // Explicit pair for regions that are not a block of their own (e.g. inside the monolithic frame recorder).
-    #define NOX_PROFILE_GPU_BEGIN(cmd, name) do { NOX_PROFILE_DECLARE_SITE(noxProfileSite, name); ::Nox::Profiler::Get().BeginGpuScope(cmd, noxProfileSiteId); } while (false)
-    #define NOX_PROFILE_GPU_END(cmd) ::Nox::Profiler::Get().EndGpuScope(cmd)
-
-    #define NOX_PROFILE_GPU_FRAME_BEGIN(cmd, frameSlot) ::Nox::Profiler::Get().BeginGpuFrame(cmd, frameSlot)
-    #define NOX_PROFILE_GPU_FRAME_END(cmd) ::Nox::Profiler::Get().EndGpuFrame(cmd)
-
     #define NOX_PROFILE_COUNTER(name, value) do { NOX_PROFILE_DECLARE_SITE(noxProfileSite, name); ::Nox::Profiler::Get().SetCounter(noxProfileSiteId, static_cast<double>(value)); } while (false)
     #define NOX_PROFILE_FRAME() ::Nox::Profiler::Get().EndFrame()
 #else
     #define NOX_PROFILE_SCOPE(name)
     #define NOX_PROFILE_FUNCTION()
     #define NOX_PROFILE_WAIT_SCOPE(name)
-    #define NOX_PROFILE_GPU_SCOPE(cmd, name)
-    #define NOX_PROFILE_GPU_BEGIN(cmd, name)
-    #define NOX_PROFILE_GPU_END(cmd)
-    #define NOX_PROFILE_GPU_FRAME_BEGIN(cmd, frameSlot)
-    #define NOX_PROFILE_GPU_FRAME_END(cmd)
     #define NOX_PROFILE_COUNTER(name, value)
     #define NOX_PROFILE_FRAME()
 #endif

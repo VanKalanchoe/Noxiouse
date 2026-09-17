@@ -22,6 +22,7 @@
 #include "NoxCore/Core/Hash.h"
 #include "NoxCore/Profiling/Profiler.h"
 #include "NoxCore/Utils/PlatformUtils.h"
+#include "Passes/FrameGraphResources.h"
 
 namespace Nox
 {
@@ -244,6 +245,7 @@ namespace Nox
         watchShader("assets/shaders/DeferredLighting.slang", "DeferredLighting", [this]() { createDeferredLightingPipeline(true); });
         // Post Process
         watchShader("assets/shaders/PostProcess.slang", "PostProcess", [this]() { createPostProcessPipeline(true); });
+        watchShader("assets/shaders/TextureInspect.slang", "TextureInspect", [this]() { createTextureInspectPipeline(true); });
         // NRD
         watchShader("assets/shaders/ShadowMask.slang", "ShadowMask", [this]() { createShadowMaskPipeline(true); });
         watchShader("assets/shaders/Reflection.slang", "Reflection", [this]() { createReflectionPipeline(true); });
@@ -286,6 +288,15 @@ namespace Nox
         }
         m_pickerReadbackRequests.resize(MAX_FRAMES_IN_FLIGHT);
 
+        for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+        {
+            m_inspectionProbeBuffers.emplace_back(m_device->createBuffer(NRI::BufferDesc{
+                .size = sizeof(float) * 4,
+                .usage = NRI::BufferUsage::Staging
+            }));
+        }
+        m_inspectionProbePending.resize(MAX_FRAMES_IN_FLIGHT, 0);
+
         m_renderer2D = std::make_unique<Renderer2D>(isEditor, RendererContext
                                                     {
                                                         *m_device,
@@ -321,6 +332,8 @@ namespace Nox
         if (s_Instance == this) s_Instance = nullptr;
 
         m_device->waitIdle();
+        // Before the descriptor heap and device go away.
+        m_renderGraph.ReleaseResources();
         m_device->shutdown(); // needed for texture to not remove imguitexture
         m_renderer2D.reset();
         // Cleanup Vulkan resources here
@@ -349,6 +362,7 @@ namespace Nox
         createGBufferPipeline();
         // Post Process
         createPostProcessPipeline(false);
+        createTextureInspectPipeline(false);
         //NRD
         createShadowMaskPipeline();
         createReflectionPipeline();
@@ -367,31 +381,20 @@ namespace Nox
         createUniformBuffers();
         createSelectedEntityIDBuffers();
         createDescriptorHeaps();
+        m_renderGraph.Initialize(*m_device, *m_resourceHeap, MAX_FRAMES_IN_FLIGHT);
+        m_renderGraph.SetCommandBufferSetup([this](NRI::CommandBuffer& cmd) { applyCommandBufferBaseline(cmd); });
         createTextureImage();
         createSceneResources();
-        createEntityResources();
-        createDepthResources();
-
-        // Visability
-        createVisibilityResources();
-        // G-Buffer
-        createGBufferResources();
         // PBR
         createDeferredLightingPipeline(false);
-        // NRD
-        createShadowMaskResources();
-        // Path Tracer
-        createPathTracerResources();
-        // DDGI
-        createDDGIResources();
-        // ReSTIR GI
-        createReSTIRGIResources();
-        // ReSTIR DI
-        createReSTIRDIResources();
-        // ReSTIR PT
-        createReSTIRPTResources();
+        // NRD keeps size-dependent internal state; its textures are render graph resources.
+        if (m_renderSize.width > 0 && m_renderSize.height > 0)
+            m_device->initNRD(m_renderSize.width, m_renderSize.height);
+        // ReSTIR GI/DI static data, ReSTIR PT context
+        m_lightPDFMipLevels = static_cast<uint32_t>(log2(static_cast<double>(m_lightPDFTextureSize)));
+        createRTXDINeighborOffsets();
+        createReSTIRPTContext();
 
-        createCommandBuffers();
 
         // Allocate baseline capacities for dynamic GPU buffers so vectors are NEVER empty
         m_InstanceBufferCapacity = sizeof(shaderio::InstanceData) * 64;
@@ -441,16 +444,11 @@ namespace Nox
         cleanupSwapChain();
         createSwapChain();
         createSceneResources();
-        createEntityResources();
-        createDepthResources();
 
-        // Visability
-        createVisibilityResources();
-
-        // G-Buffer
-        createGBufferResources();
-        createShadowMaskResources();
-        createPathTracerResources();
+        // Output-resolution graph targets follow the new swapchain size by themselves.
+        if (m_renderSize.width > 0 && m_renderSize.height > 0)
+            m_device->initNRD(m_renderSize.width, m_renderSize.height);
+        m_renderGraph.ResetHistory(NRDHistoryKey);
         m_pathTracerSampleCount = 0;
     }
 
@@ -512,7 +510,7 @@ namespace Nox
         if (m_dlssRayReconstructionEnabled != enabled)
         {
             m_dlssRayReconstructionEnabled = enabled;
-            m_resetDLSS = true; // Signals Streamline to flush history cleanly on the next frame without destroying contexts
+            m_renderGraph.ResetHistory(DLSSHistoryKey); // Streamline flushes its history without destroying contexts
 
             // Mutual Exclusion: DLSS-RR replaces every downstream NRD denoiser (reflections/GI/DI in the
             // hybrid path, or the whole image in the path tracer) -- running both would double-filter.
@@ -541,7 +539,7 @@ namespace Nox
                 }
                 if (anyDisabled)
                 {
-                    m_resetNRD = true;
+                    m_renderGraph.ResetHistory(NRDHistoryKey);
                     NOX_CORE_INFO("[Denoising] DLSS Ray Reconstruction activated: NRD REBLUR/RELAX automatically disabled (mutually exclusive).");
                 }
             }
@@ -553,13 +551,13 @@ namespace Nox
         if (m_nrdReflectionDenoiser != mode)
         {
             m_nrdReflectionDenoiser = mode;
-            m_resetNRD = true;
+            m_renderGraph.ResetHistory(NRDHistoryKey);
 
             // Mutual Exclusion: NRD REBLUR/RELAX conflicts with DLSS Ray Reconstruction
             if (mode != NRI::NRDReflectionDenoiser::Off && m_dlssRayReconstructionEnabled)
             {
                 m_dlssRayReconstructionEnabled = false;
-                m_resetDLSS = true;
+                m_renderGraph.ResetHistory(DLSSHistoryKey);
                 NOX_CORE_INFO("[Denoising] NRD Reflection Denoiser activated: DLSS Ray Reconstruction automatically disabled (mutually exclusive).");
             }
         }
@@ -570,12 +568,12 @@ namespace Nox
         if (m_nrdGIDenoiser != mode)
         {
             m_nrdGIDenoiser = mode;
-            m_resetNRD = true;
+            m_renderGraph.ResetHistory(NRDHistoryKey);
 
             if (mode != NRI::NRDDiffuseDenoiser::Off && m_dlssRayReconstructionEnabled)
             {
                 m_dlssRayReconstructionEnabled = false;
-                m_resetDLSS = true;
+                m_renderGraph.ResetHistory(DLSSHistoryKey);
                 NOX_CORE_INFO("[Denoising] NRD GI Denoiser activated: DLSS Ray Reconstruction automatically disabled (mutually exclusive).");
             }
         }
@@ -586,12 +584,12 @@ namespace Nox
         if (m_nrdDIDenoiser != mode)
         {
             m_nrdDIDenoiser = mode;
-            m_resetNRD = true;
+            m_renderGraph.ResetHistory(NRDHistoryKey);
 
             if (mode != NRI::NRDDiffuseDenoiser::Off && m_dlssRayReconstructionEnabled)
             {
                 m_dlssRayReconstructionEnabled = false;
-                m_resetDLSS = true;
+                m_renderGraph.ResetHistory(DLSSHistoryKey);
                 NOX_CORE_INFO("[Denoising] NRD DI Denoiser activated: DLSS Ray Reconstruction automatically disabled (mutually exclusive).");
             }
         }
@@ -602,12 +600,12 @@ namespace Nox
         if (m_nrdPTDenoiser != mode)
         {
             m_nrdPTDenoiser = mode;
-            m_resetNRD = true;
+            m_renderGraph.ResetHistory(NRDHistoryKey);
 
             if (mode != NRI::NRDDiffuseDenoiser::Off && m_dlssRayReconstructionEnabled)
             {
                 m_dlssRayReconstructionEnabled = false;
-                m_resetDLSS = true;
+                m_renderGraph.ResetHistory(DLSSHistoryKey);
                 NOX_CORE_INFO("[Denoising] NRD Path Tracer Denoiser activated: DLSS Ray Reconstruction automatically disabled (mutually exclusive).");
             }
         }
@@ -632,26 +630,19 @@ namespace Nox
 
         m_device->waitIdle();
         createSceneResources();
-        createEntityResources();
-        createDepthResources();
 
-        //Visability
-        createVisibilityResources();
-
-        // G-Buffer
-        createGBufferResources();
-        createShadowMaskResources();
-        createPathTracerResources();
-        createReSTIRGIResources();
-        createReSTIRDIResources();
-        createReSTIRPTResources();
+        // Graph-owned targets and histories follow the new sizes; with the GPU idle, drop the old-size ones right away
+        // instead of letting them age out, and invalidate every history (reservoirs, accumulation, NRD, DLSS).
+        m_renderGraph.ReleaseResources();
+        m_renderGraph.ResetAllHistory();
+        m_device->initNRD(m_renderSize.width, m_renderSize.height);
+        createReSTIRPTContext();
         m_pathTracerSampleCount = 0;
 
         // NGX's internal DLSS feature is fixed-size once created; it must be explicitly freed here
         // so it gets recreated at the new resolution on the next evaluate, otherwise evaluate silently
         // no-ops forever once our tagged resources no longer match the size it was created with.
         m_device->resetDLSSViewport();
-        m_resetDLSS = true;
     }
 
     void Renderer::applyPendingRenderResolutionIfNeeded()
@@ -675,84 +666,6 @@ namespace Nox
             return;
         m_pendingRenderResolutionUpdate = false;
         applyRenderResolution();
-    }
-
-    void Renderer::createShadowMaskResources()
-    {
-        const uint32_t width = m_renderSize.width;
-        const uint32_t height = m_renderSize.height;
-
-        if (width == 0 || height == 0)
-            return;
-
-        m_rawShadowMask = m_device->createTexture(NRI::TextureDesc{
-            .width = width,
-            .height = height,
-            .mipLevels = 1,
-            .sampleCount = 1,
-            .usage = NRI::TextureUsage::ColorAttachment,
-            .format = NRI::ImageFormat::R16G16_SFLOAT,
-            .directFormat = UINT32_MAX
-        });
-        m_resourceHeap->registerTexture(*m_rawShadowMask);
-
-        m_denoisedShadowMask = m_device->createTexture(NRI::TextureDesc{
-            .width = width,
-            .height = height,
-            .mipLevels = 1,
-            .sampleCount = 1,
-            .usage = NRI::TextureUsage::ColorAttachment,
-            .format = NRI::ImageFormat::R16G16_SFLOAT,
-            .directFormat = UINT32_MAX
-        });
-        m_resourceHeap->registerTexture(*m_denoisedShadowMask);
-
-        m_viewZ = m_device->createTexture(NRI::TextureDesc{
-            .width = width,
-            .height = height,
-            .mipLevels = 1,
-            .sampleCount = 1,
-            .usage = NRI::TextureUsage::ColorAttachment,
-            .format = NRI::ImageFormat::R16_SFLOAT,
-            .directFormat = UINT32_MAX
-        });
-        m_resourceHeap->registerTexture(*m_viewZ);
-
-        m_nrdNormalRoughness = m_device->createTexture(NRI::TextureDesc{
-            .width = width,
-            .height = height,
-            .mipLevels = 1,
-            .sampleCount = 1,
-            .usage = NRI::TextureUsage::ColorAttachment,
-            .format = NRI::ImageFormat::R10G10B10A2_UNORM,
-            .directFormat = UINT32_MAX
-        });
-        m_resourceHeap->registerTexture(*m_nrdNormalRoughness);
-
-        m_rawReflection = m_device->createTexture(NRI::TextureDesc{
-            .width = width,
-            .height = height,
-            .mipLevels = 1,
-            .sampleCount = 1,
-            .usage = NRI::TextureUsage::ColorAttachment,
-            .format = NRI::ImageFormat::R16G16B16A16_SFLOAT,
-            .directFormat = UINT32_MAX
-        });
-        m_resourceHeap->registerTexture(*m_rawReflection);
-
-        m_denoisedReflection = m_device->createTexture(NRI::TextureDesc{
-            .width = width,
-            .height = height,
-            .mipLevels = 1,
-            .sampleCount = 1,
-            .usage = NRI::TextureUsage::ColorAttachment,
-            .format = NRI::ImageFormat::R16G16B16A16_SFLOAT,
-            .directFormat = UINT32_MAX
-        });
-        m_resourceHeap->registerTexture(*m_denoisedReflection);
-
-        m_device->initNRD(width, height);
-        m_resetNRD = true;
     }
 
     void Renderer::createShadowMaskPipeline(bool forceCompile)
@@ -789,7 +702,7 @@ namespace Nox
         NRI::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
         desc.colorFormats = {
-            NRI::ImageFormat::R16G16B16A16_SFLOAT // m_rawReflection (Radiance RGB + HitDist A)
+            NRI::ImageFormat::R16G16B16A16_SFLOAT // Raw Reflection (Radiance RGB + HitDist A)
         };
 
         desc.shaders.push_back({
@@ -809,42 +722,6 @@ namespace Nox
         });
 
         m_reflectionPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
-    }
-
-    void Renderer::createPathTracerResources()
-    {
-        const uint32_t width = m_renderSize.width;
-        const uint32_t height = m_renderSize.height;
-
-        for (int i = 0; i < 2; i++)
-        {
-            m_pathTracerAccum[i] = m_device->createTexture(NRI::TextureDesc{
-                .width = width,
-                .height = height,
-                .mipLevels = 1,
-                .sampleCount = 1,
-                .usage = NRI::TextureUsage::ColorAttachment,
-                .format = NRI::ImageFormat::R16G16B16A16_SFLOAT,
-                .directFormat = UINT32_MAX
-            });
-            m_resourceHeap->registerTexture(*m_pathTracerAccum[i]);
-        }
-
-        // Storage usage (not ColorAttachment): NRD's DenoiseVK call writes this via its own internal
-        // barriers regardless, but the in-place YCoCg decode pass (YCoCgDecodeInPlace.slang, needed
-        // only when REBLUR is selected) also needs a UAV write slot on it -- Storage usage already
-        // includes eSampled (see TextureVK.cpp), so reading it as a normal bindless texture still works.
-        m_denoisedPathTracer = m_device->createTexture(NRI::TextureDesc{
-            .width = width,
-            .height = height,
-            .mipLevels = 1,
-            .sampleCount = 1,
-            .usage = NRI::TextureUsage::Storage,
-            .format = NRI::ImageFormat::R16G16B16A16_SFLOAT,
-            .directFormat = UINT32_MAX
-        });
-        m_resourceHeap->registerTexture(*m_denoisedPathTracer, NRI::TextureUsage::ShaderResource);
-        m_denoisedPathTracerWriteSlot = m_resourceHeap->registerStorageTextureMip(*m_denoisedPathTracer, 0);
     }
 
     void Renderer::createPathTracerPipeline(bool forceCompile)
@@ -882,76 +759,6 @@ namespace Nox
         m_ycocgDecodePipeline = m_device->createPipeline(decodeDesc, *m_shaderCompiler);
     }
 
-    void Renderer::createDDGIResources()
-    {
-        uint32_t totalProbes = m_ddgiProbeCountX * m_ddgiProbeCountY * m_ddgiProbeCountZ;
-        if (totalProbes == 0)
-            return;
-
-        uint32_t probesPerRow = 64;
-        uint32_t probeRows = (totalProbes + probesPerRow - 1) / probesPerRow;
-
-        if (m_ddgiRayData)
-        {
-            m_resourceHeap->unregisterTexture(m_ddgiRayData->GetDescriptorIndexSlot());
-        }
-        for (int i = 0; i < 2; i++)
-        {
-            if (m_ddgiIrradiance[i])
-                m_resourceHeap->unregisterTexture(m_ddgiIrradiance[i]->GetDescriptorIndexSlot());
-            if (m_ddgiDistance[i])
-                m_resourceHeap->unregisterTexture(m_ddgiDistance[i]->GetDescriptorIndexSlot());
-        }
-
-        // 1. Ray Data Buffer (Width = RaysPerProbe, Height = TotalProbes)
-        m_ddgiRayData = m_device->createTexture(NRI::TextureDesc{
-            .width = m_ddgiRaysPerProbe,
-            .height = totalProbes,
-            .mipLevels = 1,
-            .sampleCount = 1,
-            .usage = NRI::TextureUsage::ColorAttachment,
-            .format = NRI::ImageFormat::R16G16B16A16_SFLOAT,
-            .directFormat = UINT32_MAX
-        });
-        m_resourceHeap->registerTexture(*m_ddgiRayData);
-
-        // 2. Irradiance Atlases (Ping-Pong: 8x8 interior + 2 border = 10x10 per probe)
-        uint32_t irrWidth = probesPerRow * 10;
-        uint32_t irrHeight = probeRows * 10;
-        for (int i = 0; i < 2; i++)
-        {
-            m_ddgiIrradiance[i] = m_device->createTexture(NRI::TextureDesc{
-                .width = irrWidth,
-                .height = irrHeight,
-                .mipLevels = 1,
-                .sampleCount = 1,
-                .usage = NRI::TextureUsage::ColorAttachment,
-                .format = NRI::ImageFormat::R16G16B16A16_SFLOAT,
-                .directFormat = UINT32_MAX
-            });
-            m_resourceHeap->registerTexture(*m_ddgiIrradiance[i]);
-        }
-
-        // 3. Distance Atlases (Ping-Pong: 16x16 interior + 2 border = 18x18 per probe)
-        uint32_t distWidth = probesPerRow * 18;
-        uint32_t distHeight = probeRows * 18;
-        for (int i = 0; i < 2; i++)
-        {
-            m_ddgiDistance[i] = m_device->createTexture(NRI::TextureDesc{
-                .width = distWidth,
-                .height = distHeight,
-                .mipLevels = 1,
-                .sampleCount = 1,
-                .usage = NRI::TextureUsage::ColorAttachment,
-                .format = NRI::ImageFormat::R16G16_SFLOAT,
-                .directFormat = UINT32_MAX
-            });
-            m_resourceHeap->registerTexture(*m_ddgiDistance[i]);
-        }
-
-        m_ddgiFirstFrame = true;
-    }
-
     void Renderer::resetDDGIGridToDefaults()
     {
         m_ddgiGridOrigin = glm::vec3(-20.0f, -0.5f, -12.0f);
@@ -959,205 +766,42 @@ namespace Nox
         m_ddgiHysteresis = 0.97f;
         m_ddgiNormalBias = 0.2f;
         m_ddgiDebugSphereRadius = 0.15f;
-        m_ddgiFirstFrame = true;
+        m_renderGraph.ResetHistory(DDGIHistoryKey);
     }
 
-    void Renderer::createReSTIRGIResources()
+    void Renderer::createRTXDINeighborOffsets()
     {
-        const uint32_t width = m_renderSize.width;
-        const uint32_t height = m_renderSize.height;
-
-        if (width == 0 || height == 0)
-            return;
-
-        // 1. Output Texture: Raw Resampled Diffuse Irradiance (R16G16B16A16_SFLOAT)
-        if (m_restirGIRawDiffuse)
+        // 128 offsets within a unit disk ([-1, 1]) for the ReSTIR GI/DI spatial passes. Static data.
+        constexpr uint32_t neighborOffsetCount = 128;
+        glm::vec2 floatOffsets[neighborOffsetCount];
+        const float phi2 = 1.0f / 1.3247179572447f;
+        float u = 0.5f;
+        float v = 0.5f;
+        uint32_t count = 0;
+        while (count < neighborOffsetCount)
         {
-            m_resourceHeap->unregisterTexture(m_restirGIRawDiffuse->GetDescriptorIndexSlot());
-        }
+            u += phi2;
+            v += phi2 * phi2;
+            if (u >= 1.0f) u -= 1.0f;
+            if (v >= 1.0f) v -= 1.0f;
 
-        m_restirGIRawDiffuse = m_device->createTexture(NRI::TextureDesc{
-            .width = width,
-            .height = height,
-            .mipLevels = 1,
-            .sampleCount = 1,
-            .usage = NRI::TextureUsage::ColorAttachment,
-            .format = NRI::ImageFormat::R16G16B16A16_SFLOAT,
-            .directFormat = UINT32_MAX
-        });
-        m_resourceHeap->registerTexture(*m_restirGIRawDiffuse);
-
-        if (m_denoisedReSTIRGIDiffuse)
-        {
-            m_resourceHeap->unregisterTexture(m_denoisedReSTIRGIDiffuse->GetDescriptorIndexSlot());
-        }
-
-        m_denoisedReSTIRGIDiffuse = m_device->createTexture(NRI::TextureDesc{
-            .width = width,
-            .height = height,
-            .mipLevels = 1,
-            .sampleCount = 1,
-            .usage = NRI::TextureUsage::ColorAttachment,
-            .format = NRI::ImageFormat::R16G16B16A16_SFLOAT,
-            .directFormat = UINT32_MAX
-        });
-        m_resourceHeap->registerTexture(*m_denoisedReSTIRGIDiffuse);
-
-        // 2. Reservoir Buffers (Ping-Pong, Block-Linear 16x16 tiles per RTXDI SDK)
-        RTXDI_ReservoirBufferParameters resParams = rtxdi::CalculateReservoirBufferParameters(
-            width, height, rtxdi::CheckerboardMode::Off);
-        uint64_t reservoirBufferSize = static_cast<uint64_t>(resParams.reservoirArrayPitch) * sizeof(RTXDI_PackedGIReservoir);
-
-        for (int i = 0; i < 2; i++)
-        {
-            m_restirGIReservoirBuffers[i] = m_device->createBuffer(NRI::BufferDesc{
-                .size = reservoirBufferSize,
-                .usage = NRI::BufferUsage::Storage
-            });
-            void* mapped = m_restirGIReservoirBuffers[i]->map(0, reservoirBufferSize);
-            memset(mapped, 0, reservoirBufferSize);
-            m_restirGIReservoirBuffers[i]->unmap();
-        }
-
-        // 3. Neighbor Offsets Buffer (128 offsets within a unit disk: [-1.0, 1.0])
-        if (!m_restirGINeighborOffsetsBuffer)
-        {
-            constexpr uint32_t neighborOffsetCount = 128;
-            glm::vec2 floatOffsets[neighborOffsetCount];
-            const float phi2 = 1.0f / 1.3247179572447f;
-            float u = 0.5f;
-            float v = 0.5f;
-            uint32_t count = 0;
-            while (count < neighborOffsetCount)
+            float du = (u - 0.5f) * 2.0f;
+            float dv = (v - 0.5f) * 2.0f;
+            if (du * du + dv * dv <= 1.0f)
             {
-                u += phi2;
-                v += phi2 * phi2;
-                if (u >= 1.0f) u -= 1.0f;
-                if (v >= 1.0f) v -= 1.0f;
-
-                float du = (u - 0.5f) * 2.0f;
-                float dv = (v - 0.5f) * 2.0f;
-                if (du * du + dv * dv <= 1.0f)
-                {
-                    floatOffsets[count++] = glm::vec2(du, dv);
-                }
-            }
-
-            uint64_t offsetsBufferSize = sizeof(floatOffsets);
-            m_restirGINeighborOffsetsBuffer = m_device->createBuffer(NRI::BufferDesc{
-                .size = offsetsBufferSize,
-                .usage = NRI::BufferUsage::Storage
-            });
-
-            void* mapped = m_restirGINeighborOffsetsBuffer->map(0, offsetsBufferSize);
-            memcpy(mapped, floatOffsets, offsetsBufferSize);
-            m_restirGINeighborOffsetsBuffer->unmap();
-        }
-
-    }
-
-    void Renderer::createReSTIRDIResources()
-    {
-        const uint32_t width = m_renderSize.width;
-        const uint32_t height = m_renderSize.height;
-
-        if (width == 0 || height == 0)
-            return;
-
-        // 1. Output Texture: Final Resampled Direct Lighting (R16G16B16A16_SFLOAT)
-        if (m_restirDIDirectLighting)
-        {
-            m_resourceHeap->unregisterTexture(m_restirDIDirectLighting->GetDescriptorIndexSlot());
-        }
-
-        m_restirDIDirectLighting = m_device->createTexture(NRI::TextureDesc{
-            .width = width,
-            .height = height,
-            .mipLevels = 1,
-            .sampleCount = 1,
-            .usage = NRI::TextureUsage::ColorAttachment,
-            .format = NRI::ImageFormat::R16G16B16A16_SFLOAT,
-            .directFormat = UINT32_MAX
-        });
-        m_resourceHeap->registerTexture(*m_restirDIDirectLighting);
-
-        if (m_denoisedReSTIRDIDirectLighting)
-        {
-            m_resourceHeap->unregisterTexture(m_denoisedReSTIRDIDirectLighting->GetDescriptorIndexSlot());
-        }
-
-        m_denoisedReSTIRDIDirectLighting = m_device->createTexture(NRI::TextureDesc{
-            .width = width,
-            .height = height,
-            .mipLevels = 1,
-            .sampleCount = 1,
-            .usage = NRI::TextureUsage::ColorAttachment,
-            .format = NRI::ImageFormat::R16G16B16A16_SFLOAT,
-            .directFormat = UINT32_MAX
-        });
-        m_resourceHeap->registerTexture(*m_denoisedReSTIRDIDirectLighting);
-
-        // 2. Reservoir Buffers: 3 physical buffers, rotated every frame (NOT GI's fixed 2-role
-        // scheme -- see the rotation math documented on PushConstantReSTIRDIInitial in shaderIO.h).
-        RTXDI_ReservoirBufferParameters resParams = rtxdi::CalculateReservoirBufferParameters(
-            width, height, rtxdi::CheckerboardMode::Off);
-        uint64_t reservoirBufferSize = static_cast<uint64_t>(resParams.reservoirArrayPitch) * sizeof(RTXDI_PackedDIReservoir);
-
-        for (int i = 0; i < 3; i++)
-        {
-            m_restirDIReservoirBuffers[i] = m_device->createBuffer(NRI::BufferDesc{
-                .size = reservoirBufferSize,
-                .usage = NRI::BufferUsage::Storage
-            });
-            void* mapped = m_restirDIReservoirBuffers[i]->map(0, reservoirBufferSize);
-            memset(mapped, 0, reservoirBufferSize);
-            m_restirDIReservoirBuffers[i]->unmap();
-        }
-
-        m_restirDILastFrameOutputReservoir = 0;
-
-        // 3. RIS Buffer (uint2 per element): [0, risBufferOffset) = plain RIS tiles, [risBufferOffset,
-        // end) = ReGIR grid cells. Not render-resolution-dependent -- only (re)created once, like
-        // m_restirGINeighborOffsetsBuffer, not on every resize.
-        if (!m_restirDIRISBuffer)
-        {
-            uint32_t risTileElements = m_restirDIRISTileSize * m_restirDIRISTileCount;
-            uint32_t regirCellCount = m_regirCellsX * m_regirCellsY * m_regirCellsZ;
-            uint32_t regirElements = regirCellCount * m_regirLightsPerCell;
-            uint64_t risBufferSize = static_cast<uint64_t>(risTileElements + regirElements) * sizeof(glm::uvec2);
-
-            m_restirDIRISBuffer = m_device->createBuffer(NRI::BufferDesc{
-                .size = risBufferSize,
-                .usage = NRI::BufferUsage::Storage
-            });
-            void* mapped = m_restirDIRISBuffer->map(0, risBufferSize);
-            memset(mapped, 0, risBufferSize);
-            m_restirDIRISBuffer->unmap();
-        }
-
-        // 4. Local-light PDF mip chain (feeds RTXDI_PresampleLocalLights) -- also created once, not
-        // render-resolution-dependent, exactly like the RIS buffer above.
-        if (!m_lightPDFTexture)
-        {
-            m_lightPDFMipLevels = static_cast<uint32_t>(log2(static_cast<double>(m_lightPDFTextureSize)));
-
-            m_lightPDFTexture = m_device->createTexture(NRI::TextureDesc{
-                .width = m_lightPDFTextureSize,
-                .height = m_lightPDFTextureSize,
-                .mipLevels = m_lightPDFMipLevels,
-                .sampleCount = 1,
-                .usage = NRI::TextureUsage::Storage,
-                .format = NRI::ImageFormat::R16_SFLOAT,
-                .directFormat = UINT32_MAX
-            });
-            m_resourceHeap->registerTexture(*m_lightPDFTexture, NRI::TextureUsage::ShaderResource);
-
-            m_lightPDFMipStorageSlots.clear();
-            for (uint32_t mip = 0; mip < m_lightPDFMipLevels; mip++)
-            {
-                m_lightPDFMipStorageSlots.push_back(m_resourceHeap->registerStorageTextureMip(*m_lightPDFTexture, mip));
+                floatOffsets[count++] = glm::vec2(du, dv);
             }
         }
+
+        uint64_t offsetsBufferSize = sizeof(floatOffsets);
+        m_restirGINeighborOffsetsBuffer = m_device->createBuffer(NRI::BufferDesc{
+            .size = offsetsBufferSize,
+            .usage = NRI::BufferUsage::Storage
+        });
+
+        void* mapped = m_restirGINeighborOffsetsBuffer->map(0, offsetsBufferSize);
+        memcpy(mapped, floatOffsets, offsetsBufferSize);
+        m_restirGINeighborOffsetsBuffer->unmap();
     }
 
     void Renderer::setReSTIRPTTemporalEnabled(bool enabled)
@@ -1167,7 +811,7 @@ namespace Nox
             m_restirPTContext->SetResamplingMode(enabled ? rtxdi::ReSTIRPT_ResamplingMode::Temporal : rtxdi::ReSTIRPT_ResamplingMode::None);
     }
 
-    void Renderer::createReSTIRPTResources()
+    void Renderer::createReSTIRPTContext()
     {
         const uint32_t width = m_renderSize.width;
         const uint32_t height = m_renderSize.height;
@@ -1175,67 +819,17 @@ namespace Nox
         if (width == 0 || height == 0)
             return;
 
-        // The real SDK context (Source/ReSTIRPT.cpp, already compiled into the build) owns buffer-index
-        // rotation and default parameters -- (re)created here whenever render size changes, mirroring
-        // how DI/GI's resize-dependent state gets rebuilt. Slots 0/1 ping-pong for temporal resampling,
-        // slot 2 preserves the unresampled initial-sampling reservoir for final shading's decorrelation
-        // fallback (see rtxdi::ReSTIRPTContext::UpdateBufferIndices in ReSTIRPT.cpp).
+        // The real SDK context (Source/ReSTIRPT.cpp) owns buffer-index rotation and default parameters, recreated whenever
+        // the render size changes. Slots 0/1 ping-pong for temporal resampling, slot 2 preserves the unresampled
+        // initial-sampling reservoir for final shading's decorrelation fallback (rtxdi::ReSTIRPTContext::UpdateBufferIndices).
         rtxdi::ReSTIRPTStaticParameters staticParams{};
         staticParams.RenderWidth = width;
         staticParams.RenderHeight = height;
         staticParams.CheckerboardSamplingMode = rtxdi::CheckerboardMode::Off;
         m_restirPTContext = std::make_unique<rtxdi::ReSTIRPTContext>(staticParams);
-        // Temporal resampling (RandomReplay/hybrid-shift reconnection, ported into ReSTIRPTTemporal.slang)
-        // currently produces a visible lighting-rotation artifact under investigation -- defaults to
-        // None here (matching the known-good state) and is toggled via setReSTIRPTTemporalEnabled(),
-        // e.g. for a resize-triggered recreation while the toggle was already on.
+        // Temporal resampling currently produces a visible lighting-rotation artifact under investigation: defaults to
+        // None (the known-good state), toggled via setReSTIRPTTemporalEnabled().
         m_restirPTContext->SetResamplingMode(m_restirPTTemporalEnabled ? rtxdi::ReSTIRPT_ResamplingMode::Temporal : rtxdi::ReSTIRPT_ResamplingMode::None);
-
-        RTXDI_ReservoirBufferParameters ptResParams = m_restirPTContext->GetReservoirBufferParameters();
-        uint64_t ptReservoirBufferSize = static_cast<uint64_t>(ptResParams.reservoirArrayPitch) * sizeof(RTXDI_PackedPTReservoir);
-
-        for (int i = 0; i < 3; i++)
-        {
-            m_restirPTReservoirBuffers[i] = m_device->createBuffer(NRI::BufferDesc{
-                .size = ptReservoirBufferSize,
-                .usage = NRI::BufferUsage::Storage
-            });
-            void* mapped = m_restirPTReservoirBuffers[i]->map(0, ptReservoirBufferSize);
-            memset(mapped, 0, ptReservoirBufferSize);
-            m_restirPTReservoirBuffers[i]->unmap();
-        }
-
-        if (m_restirPTOutput)
-        {
-            m_resourceHeap->unregisterTexture(m_restirPTOutput->GetDescriptorIndexSlot());
-        }
-
-        m_restirPTOutput = m_device->createTexture(NRI::TextureDesc{
-            .width = width,
-            .height = height,
-            .mipLevels = 1,
-            .sampleCount = 1,
-            .usage = NRI::TextureUsage::ColorAttachment,
-            .format = NRI::ImageFormat::R16G16B16A16_SFLOAT,
-            .directFormat = UINT32_MAX
-        });
-        m_resourceHeap->registerTexture(*m_restirPTOutput);
-
-        if (m_restirPTPrimaryDirect)
-        {
-            m_resourceHeap->unregisterTexture(m_restirPTPrimaryDirect->GetDescriptorIndexSlot());
-        }
-
-        m_restirPTPrimaryDirect = m_device->createTexture(NRI::TextureDesc{
-            .width = width,
-            .height = height,
-            .mipLevels = 1,
-            .sampleCount = 1,
-            .usage = NRI::TextureUsage::ColorAttachment,
-            .format = NRI::ImageFormat::R16G16B16A16_SFLOAT,
-            .directFormat = UINT32_MAX
-        });
-        m_resourceHeap->registerTexture(*m_restirPTPrimaryDirect);
     }
 
     void Renderer::createReSTIRPTPipelines(bool forceCompile)
@@ -1246,7 +840,7 @@ namespace Nox
             NRI::PipelineDesc desc{};
             desc.forceCompile = forceCompile;
             // 2 targets: SV_Target0 is the debug-only combined-radiance preview, SV_Target1 is the
-            // primary-surface direct lighting consumed by the Final Shading pass (see m_restirPTPrimaryDirect).
+            // primary-surface direct lighting consumed by the Final Shading pass (the ReSTIR PT Primary Direct graph texture).
             desc.colorFormats = {NRI::ImageFormat::R16G16B16A16_SFLOAT, NRI::ImageFormat::R16G16B16A16_SFLOAT};
             desc.shaders.push_back({
                 .stage = NRI::ShaderStage::Task,
@@ -1386,7 +980,7 @@ namespace Nox
             m_ddgiBlendDistancePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
         }
 
-        // 4. Debug Spheres Pipeline (Rendered in Forward 3D pass into m_hdrSceneResource + m_entityResource)
+        // 4. Debug Spheres Pipeline (Rendered in Forward 3D pass into the HDR scene + entity ID targets)
         {
             NRI::PipelineDesc desc{};
             desc.forceCompile = true;
@@ -1793,12 +1387,13 @@ namespace Nox
 
     void Renderer::createCommandPool()
     {
-        m_commandAllocator = m_device->createCommandAllocator();
+        m_commandAllocator = m_device->createCommandAllocator(NRI::CommandBufferReset::PerCommandBuffer);
     }
 
     void Renderer::createSceneResources()
     {
-        //changed from m_swapChainExtent to m_viewportSize
+        // The final LDR image outlives the frame (the editor's ImGui viewport shows it), so it stays renderer-owned and
+        // is imported into the render graph; every other render target is a graph resource.
         m_sceneResource = m_device->createTexture(NRI::TextureDesc{
             .width = m_isEditor ? m_viewportSize.width : m_swapChainExtent.width,
             .height = m_isEditor ? m_viewportSize.height : m_swapChainExtent.height,
@@ -1815,123 +1410,6 @@ namespace Nox
             uniformData.imageHeapIndexOffset = m_resourceHeap->getImageHeapIndexOffset();
             uniformData.finalImageIndex = m_sceneResource->GetDescriptorIndexSlot();
         }
-
-        // HDR scene target for 3D deferred lighting, skybox, and unlit passes - render resolution,
-        // this is what DLSS reads as its color input.
-        m_hdrSceneResource = m_device->createTexture(NRI::TextureDesc{
-            .width = m_renderSize.width,
-            .height = m_renderSize.height,
-            .mipLevels = 1,
-            .sampleCount = 1,
-            .usage = NRI::TextureUsage::ColorAttachment,
-            .format = NRI::ImageFormat::R16G16B16A16_SFLOAT,
-            .directFormat = UINT32_MAX
-        });
-        m_resourceHeap->registerTexture(*m_hdrSceneResource);
-
-        // DLSS Super Resolution output target (HDR unresolved before tonemapping)
-        m_dlssOutputResource = m_device->createTexture(NRI::TextureDesc{
-            .width = m_isEditor ? m_viewportSize.width : m_swapChainExtent.width,
-            .height = m_isEditor ? m_viewportSize.height : m_swapChainExtent.height,
-            .mipLevels = 1,
-            .sampleCount = 1,
-            .usage = NRI::TextureUsage::ColorAttachment, // <-- Must be ColorAttachment so DescriptorHeap registers it as eSampledImage for PostProcess.slang
-            .format = NRI::ImageFormat::R16G16B16A16_SFLOAT,
-            .directFormat = UINT32_MAX
-        });
-        m_resourceHeap->registerTexture(*m_dlssOutputResource);
-    }
-
-    void Renderer::createEntityResources()
-    {
-        const uint32_t outputWidth = m_isEditor ? m_viewportSize.width : m_swapChainExtent.width;
-        const uint32_t outputHeight = m_isEditor ? m_viewportSize.height : m_swapChainExtent.height;
-
-        // Render-resolution entity IDs, written directly by the G-buffer/unlit/skybox 3D passes.
-        m_entityResource = m_device->createTexture(NRI::TextureDesc{
-            .width = m_renderSize.width,
-            .height = m_renderSize.height,
-            .mipLevels = 1,
-            .sampleCount = 1,
-            .usage = NRI::TextureUsage::ColorAttachment,
-            .format = NRI::ImageFormat::R32SINT,
-            .directFormat = UINT32_MAX
-        });
-        m_resourceHeap->registerTexture(*m_entityResource);
-
-        // Display-resolution copy (nearest-upsampled from m_entityResource each frame - see the blit
-        // right after DLSS evaluate in RecordCommandBuffer) - what the 2D overlay pass, outline effect,
-        // and mouse-pick readback all use so they line up with the final on-screen image.
-        m_entityResourceHi = m_device->createTexture(NRI::TextureDesc{
-            .width = outputWidth,
-            .height = outputHeight,
-            .mipLevels = 1,
-            .sampleCount = 1,
-            .usage = NRI::TextureUsage::ColorAttachment,
-            .format = NRI::ImageFormat::R32SINT,
-            .directFormat = UINT32_MAX
-        });
-        m_resourceHeap->registerTexture(*m_entityResourceHi);
-
-        uniformData.imageHeapIndexOffset = m_resourceHeap->getImageHeapIndexOffset();
-        uniformData.entityTextureIndex = m_entityResourceHi->GetDescriptorIndexSlot();
-        uniformData.entityGBufferTextureIndex = m_entityResource->GetDescriptorIndexSlot();
-    }
-
-    void Renderer::createDepthResources()
-    {
-        const uint32_t outputWidth = m_isEditor ? m_viewportSize.width : m_swapChainExtent.width;
-        const uint32_t outputHeight = m_isEditor ? m_viewportSize.height : m_swapChainExtent.height;
-
-        // Render-resolution depth, written by the visibility/G-buffer/unlit/skybox 3D passes and
-        // tagged directly to DLSS.
-        m_depthResource = m_device->createTexture(NRI::TextureDesc{
-            .width = m_renderSize.width,
-            .height = m_renderSize.height,
-            .mipLevels = 1,
-            .sampleCount = 1,
-            .usage = NRI::TextureUsage::DepthStencilAttachment
-        });
-        m_resourceHeap->registerTexture(*m_depthResource);
-
-        // Previous-frame depth snapshot for ReSTIR GI temporal reprojection (see declaration comment).
-        m_prevDepthResource = m_device->createTexture(NRI::TextureDesc{
-            .width = m_renderSize.width,
-            .height = m_renderSize.height,
-            .mipLevels = 1,
-            .sampleCount = 1,
-            .usage = NRI::TextureUsage::DepthStencilAttachment
-        });
-        m_resourceHeap->registerTexture(*m_prevDepthResource);
-
-        // Display-resolution copy (nearest-upsampled each frame) used only by the 2D overlay pass so
-        // world-space 2D/text content (e.g. in-world signs) still depth-tests correctly against 3D
-        // geometry at full display resolution even while DLSS is rendering the 3D scene smaller.
-        m_depthResourceHi = m_device->createTexture(NRI::TextureDesc{
-            .width = outputWidth,
-            .height = outputHeight,
-            .mipLevels = 1,
-            .sampleCount = 1,
-            .usage = NRI::TextureUsage::DepthStencilAttachment
-        });
-        m_resourceHeap->registerTexture(*m_depthResourceHi);
-    }
-
-    void Renderer::createVisibilityResources()
-    {
-        m_visibilityResource = m_device->createTexture(NRI::TextureDesc{
-            .width = m_renderSize.width,
-            .height = m_renderSize.height,
-            .mipLevels = 1,
-            .sampleCount = 1,
-            .usage = NRI::TextureUsage::ColorAttachment,
-            .format = NRI::ImageFormat::R32G32_UINT,
-            .directFormat = UINT32_MAX
-        });
-
-        // Register with resource heap so fullscreen debug/compute passes can read it bindlessly
-        m_resourceHeap->registerTexture(*m_visibilityResource);
-        uniformData.imageHeapIndexOffset = m_resourceHeap->getImageHeapIndexOffset();
     }
 
     void Renderer::createVisibilityPipeline(bool forceCompile)
@@ -1957,116 +1435,6 @@ namespace Nox
         });
 
         m_visibilityPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
-    }
-
-    void Renderer::createGBufferResources()
-    {
-        const uint32_t width = m_renderSize.width;
-        const uint32_t height = m_renderSize.height;
-
-        m_gbufferAlbedo = m_device->createTexture(NRI::TextureDesc{
-            .width = width,
-            .height = height,
-            .mipLevels = 1,
-            .sampleCount = 1,
-            .usage = NRI::TextureUsage::ColorAttachment,
-            .format = NRI::ImageFormat::RGBA8,
-            .directFormat = UINT32_MAX
-        });
-        m_resourceHeap->registerTexture(*m_gbufferAlbedo);
-
-        m_gbufferSpecular = m_device->createTexture(NRI::TextureDesc{
-            .width = width,
-            .height = height,
-            .mipLevels = 1,
-            .sampleCount = 1,
-            .usage = NRI::TextureUsage::ColorAttachment,
-            .format = NRI::ImageFormat::RGBA8,
-            .directFormat = UINT32_MAX
-        });
-        m_resourceHeap->registerTexture(*m_gbufferSpecular);
-
-        m_gbufferNormal = m_device->createTexture(NRI::TextureDesc{
-            .width = width,
-            .height = height,
-            .mipLevels = 1,
-            .sampleCount = 1,
-            .usage = NRI::TextureUsage::ColorAttachment,
-            .format = NRI::ImageFormat::R16G16B16A16_SFLOAT,
-            .directFormat = UINT32_MAX
-        });
-        m_resourceHeap->registerTexture(*m_gbufferNormal);
-
-        // Previous-frame normal snapshot for ReSTIR GI temporal reprojection (see declaration comment).
-        m_prevGbufferNormal = m_device->createTexture(NRI::TextureDesc{
-            .width = width,
-            .height = height,
-            .mipLevels = 1,
-            .sampleCount = 1,
-            .usage = NRI::TextureUsage::ColorAttachment,
-            .format = NRI::ImageFormat::R16G16B16A16_SFLOAT,
-            .directFormat = UINT32_MAX
-        });
-        m_resourceHeap->registerTexture(*m_prevGbufferNormal);
-
-        m_gbufferMaterial = m_device->createTexture(NRI::TextureDesc{
-            .width = width,
-            .height = height,
-            .mipLevels = 1,
-            .sampleCount = 1,
-            .usage = NRI::TextureUsage::ColorAttachment,
-            .format = NRI::ImageFormat::RGBA8,
-            .directFormat = UINT32_MAX
-        });
-        m_resourceHeap->registerTexture(*m_gbufferMaterial);
-
-        // Previous-frame albedo/material snapshots for ReSTIR PT's temporal resampling (see declaration
-        // comment) -- ReSTIR GI never needed these since its RAB_Surface has no material fields.
-        m_prevGbufferAlbedo = m_device->createTexture(NRI::TextureDesc{
-            .width = width,
-            .height = height,
-            .mipLevels = 1,
-            .sampleCount = 1,
-            .usage = NRI::TextureUsage::ColorAttachment,
-            .format = NRI::ImageFormat::RGBA8,
-            .directFormat = UINT32_MAX
-        });
-        m_resourceHeap->registerTexture(*m_prevGbufferAlbedo);
-
-        m_prevGbufferMaterial = m_device->createTexture(NRI::TextureDesc{
-            .width = width,
-            .height = height,
-            .mipLevels = 1,
-            .sampleCount = 1,
-            .usage = NRI::TextureUsage::ColorAttachment,
-            .format = NRI::ImageFormat::RGBA8,
-            .directFormat = UINT32_MAX
-        });
-        m_resourceHeap->registerTexture(*m_prevGbufferMaterial);
-
-        m_gbufferEmission = m_device->createTexture(NRI::TextureDesc{
-            .width = width,
-            .height = height,
-            .mipLevels = 1,
-            .sampleCount = 1,
-            .usage = NRI::TextureUsage::ColorAttachment,
-            .format = NRI::ImageFormat::R16G16B16A16_SFLOAT,
-            .directFormat = UINT32_MAX
-        });
-        m_resourceHeap->registerTexture(*m_gbufferEmission);
-
-        m_gbufferVelocity = m_device->createTexture(NRI::TextureDesc{
-            .width = width,
-            .height = height,
-            .mipLevels = 1,
-            .sampleCount = 1,
-            .usage = NRI::TextureUsage::ColorAttachment,
-            .format = NRI::ImageFormat::R32G32_SFLOAT,
-            .directFormat = UINT32_MAX
-        });
-        m_resourceHeap->registerTexture(*m_gbufferVelocity);
-
-        uniformData.imageHeapIndexOffset = m_resourceHeap->getImageHeapIndexOffset();
     }
 
     void Renderer::createGBufferPipeline(bool forceCompile)
@@ -2125,6 +1493,19 @@ namespace Nox
         });
 
         m_deferredLightingPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+    }
+
+    void Renderer::createTextureInspectPipeline(bool forceCompile)
+    {
+        NRI::PipelineDesc desc{};
+        desc.type = NRI::PipelineType::Compute;
+        desc.forceCompile = forceCompile;
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Compute,
+            .entryPoint = "compMain",
+            .sourcePath = "assets/shaders/TextureInspect.slang"
+        });
+        m_textureInspectPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
     void Renderer::createPostProcessPipeline(bool forceCompile)
@@ -3255,45 +2636,126 @@ namespace Nox
         m_device->submitAndWait(*commandBuffer, 0);
     }
 
-    void Renderer::createCommandBuffers()
+    std::span<NRI::CommandBuffer* const> Renderer::recordFrame(uint32_t imageIndex)
     {
-        m_commandBuffers = m_commandAllocator->allocateCommandBuffer(MAX_FRAMES_IN_FLIGHT);
-    }
-
-    void Renderer::recordCommandBuffer(uint32_t imageIndex)
-    {
-        m_commandBuffers->begin(frameIndex, false);
-
-        // Reads this slot's previous GPU timings and resets its timestamp queries (must precede any rendering).
-        NOX_PROFILE_GPU_FRAME_BEGIN(*m_commandBuffers, frameIndex);
-
-        m_commandBuffers->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
-
         {
-            // Hardware Ray Tracing: Record TLAS build/update commands on GPU
-            NOX_PROFILE_GPU_SCOPE(*m_commandBuffers, "TLAS Build");
-            BuildSceneAccelerationStructure(frameIndex);
+            NOX_PROFILE_SCOPE("Build Frame Graph");
+            prepareFrameGraph(imageIndex);
+
+            // Frame order (§5.4.8). Each add* contributes its feature's passes only when the feature runs.
+            addTLASBuildPass();
+            addVisibilityPass();
+            addGBufferPass();
+            addRTShadowPasses();
+            addRTReflectionPasses();
+            addDDGIPasses();
+            addReSTIRGIPasses();
+            addPreviousFrameCopyPass();
+            addReSTIRDIPasses();
+            addReSTIRPTPasses();
+            addPathTracerPasses();
+            addDeferredLightingPass();
+            addForward3DPass();
+            addDLSSPass();
+            addEntityDepthBlitPass();
+            addPostProcessPass();
+            addOverlay2DPass();
+            addOutlinePass();
+            addPresentPass();
+            addPickReadbackPass();
+            addTextureInspection();
         }
 
-        m_commandBuffers->transitionSwapchainLayout(*m_swapChain, imageIndex, NRI::TextureLayout::Undefined, NRI::TextureLayout::ColorAttachment);
-
-        // -------------------------------------------------------------
-        // Shared Indirect Meshlet Drawing State (Used by Pass 1 & Pass 4)
-        // -------------------------------------------------------------
-        const uint32_t cmdStride = sizeof(DrawMeshTasksIndirectCommand);
-        const uint32_t instanceStride = sizeof(shaderio::InstanceData);
-        const uint64_t baseInstanceAddress = (!m_instanceBuffers.empty() && frameIndex < m_instanceBuffers.size() && m_instanceBuffers[frameIndex])
-                                                 ? m_instanceBuffers[frameIndex]->getDeviceAddress()
-                                                 : 0;
-
-        uint64_t currentCmdOffset = 0;
-        uint64_t currentInstanceOffset = 0;
-
-        shaderio::PushConstantMeshlets references{};
-        if (baseInstanceAddress != 0)
         {
+            NOX_PROFILE_SCOPE("Compile Frame Graph");
+            m_renderGraph.Compile();
+            resolveFrameUniforms();
+            // Read back only what this frame's inspector actually probes.
+            m_inspectionProbePending[frameIndex] = m_frame.inspectionProbe && m_renderGraph.IsInspecting() ? 1 : 0;
+        }
+
+        // Every value the GPU reads from the uniforms is final once the passes are set up; the GPU reads the buffer only
+        // after submission.
+        memcpy(m_uniformBuffersMapped[frameIndex], &uniformData, sizeof(shaderio::UniformBufferObject));
+
+        std::span<NRI::CommandBuffer* const> commandBuffers;
+        {
+            NOX_PROFILE_SCOPE("Execute Frame Graph");
+            commandBuffers = m_renderGraph.Execute(frameIndex);
+        }
+        NOX_PROFILE_COUNTER("Command Buffers", commandBuffers.size());
+        return commandBuffers;
+    }
+
+    void Renderer::applyCommandBufferBaseline(NRI::CommandBuffer& cmd) const
+    {
+        cmd.bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
+
+        // Rasterization (most of these come from VK_EXT_extended_dynamic_state_3).
+        cmd.setRasterizerDiscardEnable(false);
+        cmd.setPolygonMode(NRI::PolygonMode::Fill);
+        cmd.setCullMode(NRI::CullMode::Back);
+        cmd.setFrontFace(NRI::FrontFace::CounterClockWise);
+        cmd.setDepthBiasEnable(false);
+        cmd.setDepthClampEnable(false);
+        cmd.setLineWidth(1.0f);
+
+        // Multisampling.
+        const uint32_t sampleCount = 1;
+        cmd.setRasterizationSamples(sampleCount);
+        const uint32_t sampleMask = 0xFFFFFFFF;
+        cmd.setSampleMask(sampleCount, sampleMask);
+        cmd.setAlphaToCoverageEnable(false);
+        // alphaToOne is required by the spec when its device feature is enabled and a
+        // shader object is bound, even if we don't actually use it.
+        cmd.setAlphaToOneEnableEXT(false);
+
+        // Depth / stencil.
+        cmd.setDepthTestEnable(true);
+        cmd.setDepthWriteEnable(true);
+        cmd.setDepthCompareOp(NRI::CompareOp::Greater);
+        cmd.setDepthBoundsTestEnable(false);
+        cmd.setStencilTestEnable(false);
+
+        // Color blend (for one color attachment); passes with more targets set theirs.
+        const NRI::ColorBlendEquation blendEquation
+        {
+            .srcColorBlendFactor = NRI::BlendFactor::SrcAlpha,
+            .dstColorBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha,
+            .colorBlendOp = NRI::BlendOp::Add,
+            .srcAlphaBlendFactor = NRI::BlendFactor::SrcAlpha,
+            .dstAlphaBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha,
+            .alphaBlendOp = NRI::BlendOp::Add,
+        };
+        uint32_t colorWriteMask = NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A;
+        cmd.setColorBlendEnable(0, false);
+        cmd.setColorBlendEquation(0, blendEquation);
+        cmd.setColorWriteMask(0, colorWriteMask);
+
+        cmd.setLogicOpEnable(false);
+    }
+
+    void Renderer::prepareFrameGraph(uint32_t imageIndex)
+    {
+        RenderGraph& graph = m_renderGraph;
+
+        FrameGraphState& frame = m_frame;
+        frame = {};
+        frame.imageIndex = imageIndex;
+        frame.renderExtent = m_renderSize;
+        frame.outputExtent = m_isEditor ? m_viewportSize : m_swapChainExtent;
+
+        graph.Reset({ m_sceneFrameCounter, frame.renderExtent, frame.outputExtent });
+
+        // Shared indirect meshlet drawing state (visibility and forward passes).
+        frame.baseInstanceAddress = (!m_instanceBuffers.empty() && frameIndex < m_instanceBuffers.size() && m_instanceBuffers[frameIndex])
+                                        ? m_instanceBuffers[frameIndex]->getDeviceAddress()
+                                        : 0;
+        if (frame.baseInstanceAddress != 0)
+        {
+            shaderio::PushConstantMeshlets& references = frame.meshletReferences;
             references.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
-            references.instanceReference = baseInstanceAddress;
+            references.instanceReference = frame.baseInstanceAddress;
             bool hasBoneBuffers = frameIndex < m_boneBuffers.size() && m_boneBuffers[frameIndex] != nullptr;
             bool hasBones = !m_boneMatrices.empty();
             references.boneMatrixReference = (hasBones && hasBoneBuffers) ? m_boneBuffers[frameIndex]->getDeviceAddress() : 0;
@@ -3314,2348 +2776,193 @@ namespace Nox
                                                                 : 0;
         }
 
-        NRI::Pipeline* boundPipeline = nullptr;
+        // Every hybrid-only feature skips itself while path tracing. ReSTIR DI/GI are the exception when explicitly
+        // requested: the plain path tracer can consume their primary-surface lighting buffers (RTXPT-style hybrid).
+        frame.runPathTracer = (m_pathTracingEnabled || m_debugMode == 18 || m_debugMode == 19);
+        frame.pathTracerUsesRTXDI = frame.runPathTracer && m_pathTracerUsesRTXDI;
+        frame.totalDDGIProbes = m_ddgiProbeCountX * m_ddgiProbeCountY * m_ddgiProbeCountZ;
 
-        auto drawPass = [&](uint32_t count, NRI::Pipeline& pipeline, NRI::CullMode cullMode, bool depthWrite, bool blendEnable)
-        {
-            if (count == 0 || frameIndex >= m_indirectBuffers.size() || !m_indirectBuffers[frameIndex]) return;
+        // "A denoiser was toggled / the resolution changed": every NRD pass of this frame flushes its history.
+        frame.resetNRD = graph.WasHistoryReset(NRDHistoryKey);
 
-            references.instanceReference = baseInstanceAddress;
-            references.instanceBaseIndex = static_cast<uint32_t>(currentInstanceOffset);
-            m_commandBuffers->pushData(&references, sizeof(shaderio::PushConstantMeshlets));
-
-            if (boundPipeline != &pipeline)
-            {
-                m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, pipeline);
-                boundPipeline = &pipeline;
-            }
-
-            m_commandBuffers->setCullMode(cullMode);
-            m_commandBuffers->setDepthWriteEnable(depthWrite);
-            m_commandBuffers->setColorBlendEnable(0, blendEnable);
-
-            m_commandBuffers->drawMeshTasksIndirect(*m_indirectBuffers[frameIndex], currentCmdOffset, count, cmdStride);
-
-            currentCmdOffset += static_cast<uint64_t>(count) * cmdStride;
-            currentInstanceOffset += count;
-        };
-
-        std::vector<NRI::RenderAttachDesc> colorAttachments;
-        // 1. VISIBILITY BUFFER TARGET (R32G32_UINT)
-        colorAttachments.push_back({
-            .attachment = m_visibilityResource.get(),
-            .loadOP = NRI::LoadOP::clear,
-            .storeOP = NRI::StoreOP::store,
-            .clearColor = {0.0f, 0.0f, 0.0f, 0.0f}
-        });
-
-        NRI::RenderAttachDesc depthAttachment =
-        {
-            .attachment = m_depthResource.get(),
-            .loadOP = NRI::LoadOP::clear,
-            .storeOP = NRI::StoreOP::store, // store depth so subsequent passes can read it
-            .clearDepth = {0.0f, 0} // Reverse-Z
-        };
-
-        // renderExtent/rw/rh: render resolution - what DLSS actually upscales from. Used by every
-        // pass through section 4 (visibility, G-buffer, lighting, unlit/skybox forward) plus the DLSS
-        // evaluate itself. outputExtent/ow/oh (computed further down, before section 5) is the final
-        // display/swapchain resolution used by everything after DLSS.
-        NRI::Extent2D renderExtent = m_renderSize;
-        float rw = static_cast<float>(renderExtent.width);
-        float rh = static_cast<float>(renderExtent.height);
-
-        NRI::RenderDesc desc =
-        {
-            .renderArea = renderExtent,
-            .colorAttachments = colorAttachments,
-            .depthAttachment = depthAttachment
-        };
-        NOX_PROFILE_GPU_BEGIN(*m_commandBuffers, "Visibility");
-        m_commandBuffers->beginRendering(desc);
-
-        // Viewport / scissor (counts and values are both dynamic).
-        m_commandBuffers->setViewportWithCount({0.0f, rh, rw, -rh}, 0.0f, 1.0f);
-        m_commandBuffers->setScissorWithCount(renderExtent);
-
-        /*
-        // Vertex input empty since we use vertex fetch BDA but still needs to be called empty
-        m_commandBuffers->setVertexInput();
-        */
-
-        /*// Input assembly.
-        m_commandBuffers->setPrimitiveTopology(NRI::PrimitiveTopology::TriangleList);
-        m_commandBuffers->setPrimitiveRestartEnable(false);*/
-
-        // Rasterization (most of these come from VK_EXT_extended_dynamic_state_3).
-        m_commandBuffers->setRasterizerDiscardEnable(false);
-        m_commandBuffers->setPolygonMode(NRI::PolygonMode::Fill);
-        m_commandBuffers->setCullMode(NRI::CullMode::Back);
-        m_commandBuffers->setFrontFace(NRI::FrontFace::CounterClockWise);
-        m_commandBuffers->setDepthBiasEnable(false);
-        m_commandBuffers->setDepthClampEnable(false); //LineWidth maybe ?
-        m_commandBuffers->setLineWidth(1.0f);
-
-        // Multisampling.
-        uint32_t sampleCount = 1;
-        m_commandBuffers->setRasterizationSamples(sampleCount);
-        const uint32_t sampleMask = 0xFFFFFFFF;
-        m_commandBuffers->setSampleMask(sampleCount, sampleMask);
-        m_commandBuffers->setAlphaToCoverageEnable(false);
-        // alphaToOne is required by the spec when its device feature is enabled and a
-        // shader object is bound, even if we don't actually use it.
-        m_commandBuffers->setAlphaToOneEnableEXT(false);
-
-        // Depth / stencil.
-        m_commandBuffers->setDepthTestEnable(true);
-        m_commandBuffers->setDepthWriteEnable(true);
-        m_commandBuffers->setDepthCompareOp(NRI::CompareOp::Greater);
-        m_commandBuffers->setDepthBoundsTestEnable(false);
-        m_commandBuffers->setStencilTestEnable(false);
-
-        // Color blend (for one color attachment). Match the previous pipeline's
-        // alpha-blend setup; nothing varies between draws so we set it once.
-        {
-            const NRI::ColorBlendEquation blendEquation
-            {
-                .srcColorBlendFactor = NRI::BlendFactor::SrcAlpha,
-                .dstColorBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha,
-                .colorBlendOp = NRI::BlendOp::Add,
-                .srcAlphaBlendFactor = NRI::BlendFactor::SrcAlpha,
-                .dstAlphaBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha,
-                .alphaBlendOp = NRI::BlendOp::Add,
-            };
-            uint32_t colorWriteMask = NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A;
-            m_commandBuffers->setColorBlendEnable(0, false);
-            m_commandBuffers->setColorBlendEquation(0, blendEquation);
-            m_commandBuffers->setColorWriteMask(0, colorWriteMask);
-        }
-
-        m_commandBuffers->setLogicOpEnable(false);
-
-        if ((!m_instanceBufferObjects.empty() || !m_drawMeshTasksIndirectCommands.empty()) && m_visibilityPipeline)
-        {
-            // =========================================================================
-            // 1. ALL PBR OPAQUE & MASK (Rasterizes to Visibility Buffer & Depth)
-            // =========================================================================
-            drawPass(m_opaqueCount, *m_visibilityPipeline, NRI::CullMode::Back, true, false);
-            drawPass(m_opaqueDoubleSidedCount, *m_visibilityPipeline, NRI::CullMode::None, true, false);
-            drawPass(m_maskCount, *m_visibilityPipeline, NRI::CullMode::Back, true, false);
-            drawPass(m_maskDoubleSidedCount, *m_visibilityPipeline, NRI::CullMode::None, true, false);
-
-            // Restore defaults for subsequent passes
-            m_commandBuffers->setCullMode(NRI::CullMode::Back);
-            m_commandBuffers->setDepthWriteEnable(true);
-            m_commandBuffers->setColorBlendEnable(0, false);
-        }
-
-        m_commandBuffers->endRendering();
-        m_commandBuffers->executionBarrier();
-        NOX_PROFILE_GPU_END(*m_commandBuffers);
-
-        // =========================================================================
-        // 2. G-BUFFER MATERIAL GENERATION PASS (Decoupled Material Resolve)
-        // Only run if there are active meshes in the scene!
-        // =========================================================================
-        if (m_gbufferPipeline && baseInstanceAddress != 0)
-        {
-            NOX_PROFILE_GPU_SCOPE(*m_commandBuffers, "G-Buffer");
-            std::vector<NRI::RenderAttachDesc> gbufferAttachments;
-            // 0. Albedo (RGBA8)
-            gbufferAttachments.push_back({
-                .attachment = m_gbufferAlbedo.get(),
-                .loadOP = NRI::LoadOP::clear,
-                .storeOP = NRI::StoreOP::store,
-                .clearColor = {0.0f, 0.0f, 0.0f, 0.0f}
-            });
-            // 1. World Normal (R16G16B16A16_SFLOAT)
-            gbufferAttachments.push_back({
-                .attachment = m_gbufferNormal.get(),
-                .loadOP = NRI::LoadOP::clear,
-                .storeOP = NRI::StoreOP::store,
-                .clearColor = {0.0f, 0.0f, 0.0f, 0.0f}
-            });
-            // 2. Material (RGBA8: Roughness, Metallic, Workflow)
-            gbufferAttachments.push_back({
-                .attachment = m_gbufferMaterial.get(),
-                .loadOP = NRI::LoadOP::clear,
-                .storeOP = NRI::StoreOP::store,
-                .clearColor = {0.0f, 0.0f, 0.0f, 0.0f}
-            });
-            // 3. Emission (R16G16B16A16_SFLOAT)
-            gbufferAttachments.push_back({
-                .attachment = m_gbufferEmission.get(),
-                .loadOP = NRI::LoadOP::clear,
-                .storeOP = NRI::StoreOP::store,
-                .clearColor = {0.0f, 0.0f, 0.0f, 0.0f}
-            });
-            // 4. Entity ID (R32SINT)
-            gbufferAttachments.push_back({
-                .attachment = m_entityResource.get(),
-                .loadOP = NRI::LoadOP::clear,
-                .storeOP = NRI::StoreOP::store,
-                .clearColor = {-1.0f, 0.0f, 0.0f, 0.0f}
-            });
-            // 5. Velocity (R16G16_SFLOAT)
-            gbufferAttachments.push_back({
-                .attachment = m_gbufferVelocity.get(),
-                .loadOP = NRI::LoadOP::clear,
-                .storeOP = NRI::StoreOP::store,
-                .clearColor = {0.0f, 0.0f, 0.0f, 0.0f}
-            });
-            // 6. Specular Albedo (RGBA8)
-            gbufferAttachments.push_back({
-                .attachment = m_gbufferSpecular.get(),
-                .loadOP = NRI::LoadOP::clear,
-                .storeOP = NRI::StoreOP::store,
-                .clearColor = {0.0f, 0.0f, 0.0f, 0.0f}
-            });
-
-            NRI::RenderDesc gbufferDesc = {
-                .renderArea = renderExtent,
-                .colorAttachments = gbufferAttachments
-            };
-
-            m_commandBuffers->beginRendering(gbufferDesc);
-
-            m_commandBuffers->setViewportWithCount({0.0f, rh, rw, -rh}, 0.0f, 1.0f);
-            m_commandBuffers->setScissorWithCount(renderExtent);
-
-            m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_gbufferPipeline);
-            m_commandBuffers->setCullMode(NRI::CullMode::None);
-            m_commandBuffers->setDepthTestEnable(false);
-            m_commandBuffers->setDepthWriteEnable(false);
-
-            for (uint32_t a = 0; a < gbufferAttachments.size(); ++a)
-            {
-                m_commandBuffers->setColorBlendEnable(a, false);
-                m_commandBuffers->setColorWriteMask(a, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
-            }
-
-            shaderio::PushConstantVisibilityDebug gbufferPush{};
-            gbufferPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
-            gbufferPush.instanceReference = baseInstanceAddress;
-
-            bool hasBoneBuffers = frameIndex < m_boneBuffers.size() && m_boneBuffers[frameIndex] != nullptr;
-            bool hasBones = !m_boneMatrices.empty();
-            gbufferPush.boneMatrixReference = (hasBones && hasBoneBuffers) ? m_boneBuffers[frameIndex]->getDeviceAddress() : 0;
-
-            bool hasPageTables = frameIndex < m_vertexPageTableBuffers.size() && m_vertexPageTableBuffers[frameIndex] != nullptr;
-            gbufferPush.vertexPageTableReference = hasPageTables ? m_vertexPageTableBuffers[frameIndex]->getDeviceAddress() : 0;
-            gbufferPush.meshletDrawsPageTableReference = (hasPageTables && frameIndex < m_meshletDrawPageTableBuffers.size() && m_meshletDrawPageTableBuffers[frameIndex])
-                                                             ? m_meshletDrawPageTableBuffers[frameIndex]->getDeviceAddress()
-                                                             : 0;
-            gbufferPush.meshletVerticesPageTableReference = (hasPageTables && frameIndex < m_meshletVertPageTableBuffers.size() && m_meshletVertPageTableBuffers[frameIndex])
-                                                                ? m_meshletVertPageTableBuffers[frameIndex]->getDeviceAddress()
-                                                                : 0;
-            gbufferPush.meshletTrianglesPageTableReference = (hasPageTables && frameIndex < m_meshletTriPageTableBuffers.size() && m_meshletTriPageTableBuffers[frameIndex])
-                                                                 ? m_meshletTriPageTableBuffers[frameIndex]->getDeviceAddress()
-                                                                 : 0;
-            gbufferPush.visibilityTextureIndex = m_visibilityResource->GetDescriptorIndexSlot();
-            gbufferPush.viewportSize = glm::vec2(rw, rh);
-            gbufferPush.debugMode = m_debugMode;
-            m_commandBuffers->pushData(&gbufferPush, sizeof(shaderio::PushConstantVisibilityDebug));
-
-            m_commandBuffers->drawMeshTasks(1, 1, 1);
-            m_commandBuffers->endRendering();
-            m_commandBuffers->executionBarrier();
-        }
-
-        // =========================================================================
-        // 2.45. NRD PER-FRAME TICK
-        // =========================================================================
-        // NRD's integration layer requires its internal frame counter to advance by exactly 1 every
-        // real frame (see Device::tickNRD). The three evaluate*() calls below each also tick it
-        // internally, but only when they actually run -- which, since they're correctly gated on their
-        // corresponding RT feature being enabled, is no longer guaranteed every frame. Ticking here
-        // unconditionally keeps NRD's counter in sync regardless of which (if any) denoiser runs this
-        // frame; each gated evaluate*() call below still ticks fine too since the tick is idempotent
-        // per unique frameIndex.
+        // NRD's integration layer requires its internal frame counter to advance by exactly 1 every real frame (see
+        // Device::tickNRD); the denoise passes only run when their feature does, so tick unconditionally here.
         if (m_device->isNRDInitialized())
         {
-            m_device->tickNRD(static_cast<uint32_t>(m_sceneFrameCounter), m_isFirstFrame || m_resetNRD,
+            m_device->tickNRD(static_cast<uint32_t>(m_sceneFrameCounter), m_isFirstFrame || frame.resetNRD,
                 uniformData.view, uniformData.nonJitteredProj, uniformData.prevView, uniformData.prevProj);
         }
 
-        // =========================================================================
-        // 2.5. SHADOW MASK PASS (Evaluates 1-SPP RT Shadow -> m_rawShadowMask, m_viewZ, m_nrdNormalRoughness)
-        // This is only needed for the hybrid RT shadow path. ReSTIR DI traces its own selected
-        // light, and basic raster PBR/IBL must not pay for a full-resolution ray-query pass.
-        // =========================================================================
-        if ((uniformData.enableRTShadows != 0) &&
-            m_shadowMaskPipeline && m_rawShadowMask && m_viewZ && m_nrdNormalRoughness)
+        auto renderTarget = [](NRI::ImageFormat format)
         {
-            NOX_PROFILE_GPU_SCOPE(*m_commandBuffers, "RT Shadows");
-            std::vector<NRI::RenderAttachDesc> shadowAttachments;
-            shadowAttachments.push_back({
-                .attachment = m_rawShadowMask.get(),
-                .loadOP = NRI::LoadOP::clear,
-                .storeOP = NRI::StoreOP::store,
-                .clearColor = {65504.0f, 1.0f, 0.0f, 0.0f}
-            });
-            shadowAttachments.push_back({
-                .attachment = m_viewZ.get(),
-                .loadOP = NRI::LoadOP::clear,
-                .storeOP = NRI::StoreOP::store,
-                .clearColor = {500000.0f, 0.0f, 0.0f, 0.0f}
-            });
-            shadowAttachments.push_back({
-                .attachment = m_nrdNormalRoughness.get(),
-                .loadOP = NRI::LoadOP::clear,
-                .storeOP = NRI::StoreOP::store,
-                .clearColor = {0.0f, 0.0f, 0.0f, 0.0f}
-            });
+            RGTextureDesc desc;
+            desc.Format = format;
+            return desc;
+        };
+        auto outputTarget = [](NRI::ImageFormat format)
+        {
+            RGTextureDesc desc;
+            desc.Size = RGSize::OutputResolution;
+            desc.Format = format;
+            return desc;
+        };
+        RGTextureDesc renderDepth;
+        renderDepth.Usage = NRI::TextureUsage::DepthStencilAttachment;
+        RGTextureDesc outputDepth = renderDepth;
+        outputDepth.Size = RGSize::OutputResolution;
 
-            NRI::RenderDesc shadowDesc = {
-                .renderArea = renderExtent,
-                .colorAttachments = shadowAttachments
-            };
+        // Frame-lifetime targets (allocated only when an executed pass uses them). Features that add resources of their
+        // own (DDGI, RTXDI reservoirs, path tracer accumulation) create them in their add* functions.
+        FrameGraphResources resources;
+        resources.Visibility = graph.CreateTexture("Visibility", renderTarget(NRI::ImageFormat::R32G32_UINT));
+        resources.Depth = graph.CreateTexture("Depth", renderDepth);
+        resources.DepthHi = graph.CreateTexture("Depth (Display)", outputDepth);
+        resources.Entity = graph.CreateTexture("Entity IDs", renderTarget(NRI::ImageFormat::R32SINT));
+        resources.EntityHi = graph.CreateTexture("Entity IDs (Display)", outputTarget(NRI::ImageFormat::R32SINT));
+        resources.GBufferAlbedo = graph.CreateTexture("GBuffer Albedo", renderTarget(NRI::ImageFormat::RGBA8));
+        resources.GBufferSpecular = graph.CreateTexture("GBuffer Specular", renderTarget(NRI::ImageFormat::RGBA8));
+        resources.GBufferNormal = graph.CreateTexture("GBuffer Normal", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
+        resources.GBufferMaterial = graph.CreateTexture("GBuffer Material", renderTarget(NRI::ImageFormat::RGBA8));
+        resources.GBufferEmission = graph.CreateTexture("GBuffer Emission", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
+        resources.GBufferVelocity = graph.CreateTexture("GBuffer Velocity", renderTarget(NRI::ImageFormat::R32G32_SFLOAT));
+        resources.HDRScene = graph.CreateTexture("HDR Scene", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
+        resources.DLSSOutput = graph.CreateTexture("DLSS Output", outputTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
 
-            m_commandBuffers->beginRendering(shadowDesc);
-            m_commandBuffers->setViewportWithCount({0.0f, rh, rw, -rh}, 0.0f, 1.0f);
-            m_commandBuffers->setScissorWithCount(renderExtent);
+        resources.RawShadowMask = graph.CreateTexture("Raw Shadow Mask", renderTarget(NRI::ImageFormat::R16G16_SFLOAT));
+        resources.DenoisedShadowMask = graph.CreateTexture("Denoised Shadow Mask", renderTarget(NRI::ImageFormat::R16G16_SFLOAT));
+        resources.RawReflection = graph.CreateTexture("Raw Reflection", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
+        resources.DenoisedReflection = graph.CreateTexture("Denoised Reflection", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
+        // NRD's view-Z and packed normal/roughness guides are written by the RT shadow pass but read by every NRD
+        // denoiser, which can run while RT shadows are off. They persist across frames (histories) so those denoisers
+        // keep reading the last guides instead of an unwritten texture.
+        resources.ViewZ = graph.GetHistoryTexture("NRD View Z", renderTarget(NRI::ImageFormat::R16_SFLOAT), 1).Textures[0];
+        resources.NRDNormalRoughness = graph.GetHistoryTexture("NRD Normal Roughness", renderTarget(NRI::ImageFormat::R10G10B10A2_UNORM), 1).Textures[0];
 
-            m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_shadowMaskPipeline);
-            m_commandBuffers->setCullMode(NRI::CullMode::None);
-            m_commandBuffers->setDepthTestEnable(false);
-            m_commandBuffers->setDepthWriteEnable(false);
-            for (uint32_t a = 0; a < shadowAttachments.size(); ++a)
-            {
-                m_commandBuffers->setColorBlendEnable(a, false);
-                m_commandBuffers->setColorWriteMask(a, NRI::ColorComponent::R | NRI::ColorComponent::G |
-                                                    NRI::ColorComponent::B | NRI::ColorComponent::A);
-            }
-
-            glm::mat4 viewProj = uniformData.proj * uniformData.view;
-            shaderio::PushConstantShadowMask shadowPush{};
-            shadowPush.invViewProj = glm::inverse(viewProj);
-            shadowPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
-            shadowPush.depthTextureIndex = m_depthResource->GetDescriptorIndexSlot();
-            shadowPush.gbufferNormalIndex = m_gbufferNormal->GetDescriptorIndexSlot();
-            shadowPush.viewportSize = glm::vec2(rw, rh);
-            shadowPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
-            m_commandBuffers->pushData(&shadowPush, sizeof(shaderio::PushConstantShadowMask));
-
-            m_commandBuffers->drawMeshTasks(1, 1, 1);
-            m_commandBuffers->endRendering();
-            m_commandBuffers->executionBarrier();
+        resources.ReSTIRGIRaw = graph.CreateTexture("ReSTIR GI Diffuse", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
+        resources.ReSTIRGIDenoised = graph.CreateTexture("ReSTIR GI Denoised", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
+        resources.ReSTIRDIDirect = graph.CreateTexture("ReSTIR DI Direct", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
+        resources.ReSTIRDIDenoised = graph.CreateTexture("ReSTIR DI Denoised", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
+        {
+            RGTextureDesc lightPDF;
+            lightPDF.Size = RGSize::Absolute;
+            lightPDF.Width = m_lightPDFTextureSize;
+            lightPDF.Height = m_lightPDFTextureSize;
+            lightPDF.Format = NRI::ImageFormat::R16_SFLOAT;
+            lightPDF.Usage = NRI::TextureUsage::Storage;
+            lightPDF.MipLevels = m_lightPDFMipLevels;
+            resources.LightPDF = graph.CreateTexture("Light PDF", lightPDF);
         }
 
-        // =========================================================================
-        // 2.6. NRD DENOISING PASS (Denoises 1-SPP RT Shadow -> m_denoisedShadowMask)
-        // =========================================================================
-        if (m_nrdShadowsEnabled && (uniformData.enableRTShadows != 0) &&
-            m_device->isNRDInitialized() && m_rawShadowMask && m_denoisedShadowMask && m_viewZ && m_nrdNormalRoughness)
+        resources.ReSTIRPTOutput = graph.CreateTexture("ReSTIR PT Output", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
+        resources.ReSTIRPTPrimaryDirect = graph.CreateTexture("ReSTIR PT Primary Direct", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
         {
-            NOX_PROFILE_GPU_SCOPE(*m_commandBuffers, "NRD Shadows");
-            NRI::NRDShadowParams nrdParams{};
-            nrdParams.inShadowData = m_rawShadowMask.get();
-            nrdParams.inMotionVectors = m_gbufferVelocity.get();
-            nrdParams.inNormalRoughness = m_nrdNormalRoughness.get();
-            nrdParams.inViewZ = m_viewZ.get();
-            nrdParams.outDenoisedShadow = m_denoisedShadowMask.get();
-            nrdParams.commandBuffer = m_commandBuffers.get();
-
-            nrdParams.view = uniformData.view;
-            nrdParams.proj = uniformData.nonJitteredProj;
-            nrdParams.prevView = uniformData.prevView;
-            nrdParams.prevProj = uniformData.prevProj;
-
-            glm::vec3 lightDir = glm::vec3(0.0f, 1.0f, 0.0f);
-            if (!m_lightBufferObjects.empty())
-            {
-                lightDir = glm::normalize(glm::vec3(m_lightBufferObjects[0].direction));
-            }
-            nrdParams.lightDirection[0] = lightDir.x;
-            nrdParams.lightDirection[1] = lightDir.y;
-            nrdParams.lightDirection[2] = lightDir.z;
-
-            nrdParams.motionVectorScale = glm::vec2(1.0f, 1.0f);
-            nrdParams.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
-            nrdParams.resetHistory = m_isFirstFrame || m_resetNRD;
-
-            m_device->evaluateNRDShadows(nrdParams);
-            m_commandBuffers->executionBarrier();
-            m_commandBuffers->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
+            // Storage: NRD writes it, and the in-place YCoCg decode (REBLUR) needs a storage slot on it.
+            RGTextureDesc denoised = renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT);
+            denoised.Usage = NRI::TextureUsage::Storage;
+            resources.PathTracerDenoised = graph.CreateTexture("Path Tracer Denoised", denoised);
         }
 
-        // Computed here (rather than down at the lighting-pass switch) so every hybrid-only pass below
-        // can skip itself while path tracing. ReSTIR DI/GI are the exception when explicitly requested:
-        // the plain path tracer can consume their primary-surface lighting buffers in an RTXPT-style
-        // hybrid mode.
-        bool runPathTracer = (m_pathTracingEnabled || m_debugMode == 18 || m_debugMode == 19);
-        bool pathTracerUsesRTXDI = runPathTracer && m_pathTracerUsesRTXDI;
+        // Previous-frame G-buffer snapshots (depth/normal for ReSTIR GI/DI temporal validity, albedo/material for ReSTIR
+        // PT's RandomReplay / RAB_AreMaterialsSimilar), copied every frame by the Previous Frame Copy pass.
+        resources.PrevDepth = graph.GetHistoryTexture("Previous Depth", renderDepth, 1).Textures[0];
+        resources.PrevNormal = graph.GetHistoryTexture("Previous Normal", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT), 1).Textures[0];
+        resources.PrevAlbedo = graph.GetHistoryTexture("Previous Albedo", renderTarget(NRI::ImageFormat::RGBA8), 1).Textures[0];
+        resources.PrevMaterial = graph.GetHistoryTexture("Previous Material", renderTarget(NRI::ImageFormat::RGBA8), 1).Textures[0];
 
-        // =========================================================================
-        // 2.65. RAY TRACED REFLECTION PASS (Evaluates 1-SPP GGX VNDF -> m_rawReflection)
-        // =========================================================================
-        if (!runPathTracer && m_reflectionPipeline && m_rawReflection && (uniformData.enableRTReflections != 0))
+        // Renderer-owned resources.
+        resources.Scene = graph.ImportTexture("Scene", m_sceneResource.get());
+        if (m_environmentCubemap)
+            resources.EnvironmentCubemap = graph.ImportTexture("Environment", m_environmentCubemap.get(), RGImportAccess::ReadOnly);
+        if (m_restirGINeighborOffsetsBuffer)
+            resources.NeighborOffsets = graph.ImportBuffer("RTXDI Neighbor Offsets", m_restirGINeighborOffsetsBuffer.get(), RGImportAccess::ReadOnly);
+        if (m_tlasBuffer)
+            resources.TLAS = graph.ImportBuffer("TLAS", m_tlasBuffer.get());
+        if (frameIndex < m_pickerStagingBuffers.size() && m_pickerStagingBuffers[frameIndex])
+            resources.PickerStaging = graph.ImportBuffer("Picker Staging", m_pickerStagingBuffers[frameIndex].get());
+
+        prepareDDGIFrame(resources);
+
+        graph.GetBlackboard().Add(resources);
+    }
+
+    void Renderer::resolveFrameUniforms()
+    {
+        const RenderGraph& graph = m_renderGraph;
+        const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
+        const FrameGraphState& frame = m_frame;
+        constexpr uint32_t NoTexture = 0xFFFFFFFF;
+
+        uniformData.entityTextureIndex = graph.GetSlotOr(resources.EntityHi, 0);
+        uniformData.entityGBufferTextureIndex = graph.GetSlotOr(resources.Entity, 0);
+
+        // The atlases this frame's DDGI blend writes (the lighting pass reads them).
+        uniformData.ddgiIrradianceTextureIndex = frame.ddgiAdded ? graph.GetSlotOr(resources.DDGIIrradiance[frame.ddgiWriteIndex], NoTexture) : NoTexture;
+        uniformData.ddgiDistanceTextureIndex = frame.ddgiAdded ? graph.GetSlotOr(resources.DDGIDistance[frame.ddgiWriteIndex], NoTexture) : NoTexture;
+
+        // ReSTIR GI: the denoised result when its NRD pass runs (NRD evaluation cannot fail once initialized), else raw.
+        if (frame.restirGIAdded)
         {
-            NOX_PROFILE_GPU_SCOPE(*m_commandBuffers, "RT Reflections");
-            std::vector<NRI::RenderAttachDesc> reflectionAttachments;
-            reflectionAttachments.push_back({
-                .attachment = m_rawReflection.get(),
-                .loadOP = NRI::LoadOP::clear,
-                .storeOP = NRI::StoreOP::store,
-                .clearColor = {0.0f, 0.0f, 0.0f, 10000.0f}
-            });
-
-            NRI::RenderDesc reflectionDesc = {
-                .renderArea = renderExtent,
-                .colorAttachments = reflectionAttachments
-            };
-
-            m_commandBuffers->beginRendering(reflectionDesc);
-            m_commandBuffers->setViewportWithCount({0.0f, rh, rw, -rh}, 0.0f, 1.0f);
-            m_commandBuffers->setScissorWithCount(renderExtent);
-
-            m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_reflectionPipeline);
-            m_commandBuffers->setCullMode(NRI::CullMode::None);
-            m_commandBuffers->setDepthTestEnable(false);
-            m_commandBuffers->setDepthWriteEnable(false);
-            for (uint32_t a = 0; a < reflectionAttachments.size(); ++a)
-            {
-                m_commandBuffers->setColorBlendEnable(a, false);
-                m_commandBuffers->setColorWriteMask(a, NRI::ColorComponent::R | NRI::ColorComponent::G |
-                                                    NRI::ColorComponent::B | NRI::ColorComponent::A);
-            }
-
-            glm::mat4 viewProj = uniformData.proj * uniformData.view;
-            shaderio::PushConstantReflection reflPush{};
-            reflPush.invViewProj = glm::inverse(viewProj);
-            reflPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
-            reflPush.depthTextureIndex = m_depthResource->GetDescriptorIndexSlot();
-            reflPush.gbufferNormalIndex = m_gbufferNormal->GetDescriptorIndexSlot();
-            reflPush.gbufferMaterialIndex = m_gbufferMaterial->GetDescriptorIndexSlot();
-            reflPush.visibilityTextureIndex = m_visibilityResource->GetDescriptorIndexSlot();
-            reflPush.viewportSize = glm::vec2(rw, rh);
-            reflPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
-            reflPush.denoiserMode = static_cast<uint32_t>(m_nrdReflectionDenoiser);
-            m_commandBuffers->pushData(&reflPush, sizeof(shaderio::PushConstantReflection));
-
-            m_commandBuffers->drawMeshTasks(1, 1, 1);
-            m_commandBuffers->endRendering();
-            m_commandBuffers->executionBarrier();
-        }
-
-        // =========================================================================
-        // 2.7. NRD REFLECTIONS DENOISING PASS (Denoises 1-SPP Reflections via REBLUR / RELAX)
-        // =========================================================================
-        if (!runPathTracer && m_nrdReflectionDenoiser != NRI::NRDReflectionDenoiser::Off && (uniformData.enableRTReflections != 0) &&
-            m_device->isNRDInitialized() &&
-            m_rawReflection && m_denoisedReflection && m_viewZ && m_nrdNormalRoughness)
-        {
-            NOX_PROFILE_GPU_SCOPE(*m_commandBuffers, "NRD Reflections");
-            NRI::NRDReflectionParams reflParams{};
-            reflParams.inSpecularRadianceHitDist = m_rawReflection.get();
-            reflParams.inMotionVectors = m_gbufferVelocity.get();
-            reflParams.inNormalRoughness = m_nrdNormalRoughness.get();
-            reflParams.inViewZ = m_viewZ.get();
-            reflParams.outDenoisedSpecular = m_denoisedReflection.get();
-            reflParams.commandBuffer = m_commandBuffers.get();
-
-            reflParams.view = uniformData.view;
-            reflParams.proj = uniformData.nonJitteredProj;
-            reflParams.prevView = uniformData.prevView;
-            reflParams.prevProj = uniformData.prevProj;
-
-            reflParams.motionVectorScale = glm::vec2(1.0f, 1.0f);
-            reflParams.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
-            reflParams.resetHistory = m_isFirstFrame || m_resetNRD;
-
-            m_device->evaluateNRDReflections(reflParams, m_nrdReflectionDenoiser);
-            m_commandBuffers->executionBarrier();
-            m_commandBuffers->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
-        }
-
-        // NOTE: m_resetNRD is intentionally NOT cleared here anymore -- it used to be reset right after
-        // reflections, which meant DDGI/ReSTIR GI/ReSTIR DI/path-tracer's own NRD passes further below
-        // (all of which also read it for their own resetHistory flag) always saw it as already false,
-        // silently defeating the "flush history on denoiser toggle" mutual-exclusion logic in
-        // setNRDGIDenoiser/setNRDDIDenoiser/setNRDPTDenoiser for anything but shadows/reflections. It's
-        // cleared once, after every NRD consumer this frame has had a chance to read it (see below,
-        // right before the lighting pass switch).
-
-        // =========================================================================
-        // 2.8. DYNAMIC DIFFUSE GLOBAL ILLUMINATION (DDGI) PASSES
-        // =========================================================================
-        uint32_t totalDDGIProbes = m_ddgiProbeCountX * m_ddgiProbeCountY * m_ddgiProbeCountZ;
-        // DDGI ray-traces every probe against the scene TLAS (see DDGIRadiance.slang), so it has no
-        // meaning without ray tracing hardware access -- gate it on the master toggle too, or turning
-        // "Enable Hybrid Ray Tracing" off silently leaves it (and its cost) running.
-        bool runDDGI = !runPathTracer &&
-                       m_rayTracingEnabled &&
-                       (m_ddgiEnabled || m_debugMode == 16 || m_debugMode == 17) &&
-                       m_ddgiRadiancePipeline && m_ddgiBlendIrradiancePipeline && m_ddgiBlendDistancePipeline &&
-                       m_ddgiRayData && m_ddgiIrradiance[0] && m_ddgiIrradiance[1] &&
-                       m_ddgiDistance[0] && m_ddgiDistance[1] && (totalDDGIProbes > 0);
-
-        if (runDDGI)
-        {
-            NOX_PROFILE_GPU_SCOPE(*m_commandBuffers, "DDGI");
-            uint32_t probesPerRow = 64;
-            uint32_t probeRows = (totalDDGIProbes + probesPerRow - 1) / probesPerRow;
-            uint32_t irrWidth = probesPerRow * 10;
-            uint32_t irrHeight = probeRows * 10;
-            uint32_t distWidth = probesPerRow * 18;
-            uint32_t distHeight = probeRows * 18;
-
-            uint32_t writeIndex = 1 - m_ddgiHistoryIndex;
-            uint32_t readIndex = m_ddgiHistoryIndex;
-
-            // 1. Trace DDGI Radiance Rays: (Width = m_ddgiRaysPerProbe, Height = totalDDGIProbes)
-            {
-                NRI::Extent2D radExtent = {m_ddgiRaysPerProbe, totalDDGIProbes};
-                std::vector<NRI::RenderAttachDesc> radAttachments;
-                radAttachments.push_back({
-                    .attachment = m_ddgiRayData.get(),
-                    .loadOP = NRI::LoadOP::clear,
-                    .storeOP = NRI::StoreOP::store,
-                    .clearColor = {0.0f, 0.0f, 0.0f, 1000.0f}
-                });
-
-                NRI::RenderDesc radDesc = {
-                    .renderArea = radExtent,
-                    .colorAttachments = radAttachments
-                };
-
-                m_commandBuffers->beginRendering(radDesc);
-                float radW = static_cast<float>(m_ddgiRaysPerProbe);
-                float radH = static_cast<float>(totalDDGIProbes);
-                m_commandBuffers->setViewportWithCount({0.0f, radH, radW, -radH}, 0.0f, 1.0f);
-                m_commandBuffers->setScissorWithCount(radExtent);
-
-                m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_ddgiRadiancePipeline);
-                m_commandBuffers->setCullMode(NRI::CullMode::None);
-                m_commandBuffers->setDepthTestEnable(false);
-                m_commandBuffers->setDepthWriteEnable(false);
-                m_commandBuffers->setColorBlendEnable(0, false);
-                m_commandBuffers->setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G |
-                                                    NRI::ColorComponent::B | NRI::ColorComponent::A);
-
-                shaderio::PushConstantDDGIRadiance radPush{};
-                radPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
-                radPush.raysPerProbe = m_ddgiRaysPerProbe;
-                radPush.probeCountTotal = totalDDGIProbes;
-                radPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
-                m_commandBuffers->pushData(&radPush, sizeof(shaderio::PushConstantDDGIRadiance));
-
-                m_commandBuffers->drawMeshTasks(1, 1, 1);
-                m_commandBuffers->endRendering();
-                m_commandBuffers->executionBarrier();
-            }
-
-            // 2. Blend Irradiance Atlas: (Width = irrWidth, Height = irrHeight)
-            {
-                NRI::Extent2D irrExtent = {irrWidth, irrHeight};
-                std::vector<NRI::RenderAttachDesc> irrAttachments;
-                irrAttachments.push_back({
-                    .attachment = m_ddgiIrradiance[writeIndex].get(),
-                    .loadOP = NRI::LoadOP::clear,
-                    .storeOP = NRI::StoreOP::store,
-                    .clearColor = {0.0f, 0.0f, 0.0f, 1.0f}
-                });
-
-                NRI::RenderDesc irrDesc = {
-                    .renderArea = irrExtent,
-                    .colorAttachments = irrAttachments
-                };
-
-                m_commandBuffers->beginRendering(irrDesc);
-                float irrW = static_cast<float>(irrWidth);
-                float irrH = static_cast<float>(irrHeight);
-                m_commandBuffers->setViewportWithCount({0.0f, irrH, irrW, -irrH}, 0.0f, 1.0f);
-                m_commandBuffers->setScissorWithCount(irrExtent);
-
-                m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_ddgiBlendIrradiancePipeline);
-                m_commandBuffers->setCullMode(NRI::CullMode::None);
-                m_commandBuffers->setDepthTestEnable(false);
-                m_commandBuffers->setDepthWriteEnable(false);
-                m_commandBuffers->setColorBlendEnable(0, false);
-                m_commandBuffers->setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G |
-                                                    NRI::ColorComponent::B | NRI::ColorComponent::A);
-
-                shaderio::PushConstantDDGIBlend blendIrrPush{};
-                blendIrrPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
-                blendIrrPush.rayDataTextureIndex = m_ddgiRayData->GetDescriptorIndexSlot();
-                blendIrrPush.prevAtlasTextureIndex = m_ddgiIrradiance[readIndex]->GetDescriptorIndexSlot();
-                blendIrrPush.probesPerRow = probesPerRow;
-                blendIrrPush.raysPerProbe = m_ddgiRaysPerProbe;
-                blendIrrPush.probeCountTotal = totalDDGIProbes;
-                blendIrrPush.hysteresis = m_ddgiHysteresis;
-                blendIrrPush.firstFrame = (m_ddgiFirstFrame || m_isFirstFrame) ? 1 : 0;
-                blendIrrPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
-                m_commandBuffers->pushData(&blendIrrPush, sizeof(shaderio::PushConstantDDGIBlend));
-
-                m_commandBuffers->drawMeshTasks(1, 1, 1);
-                m_commandBuffers->endRendering();
-                m_commandBuffers->executionBarrier();
-            }
-
-            // 3. Blend Distance Atlas: (Width = distWidth, Height = distHeight)
-            {
-                NRI::Extent2D distExtent = {distWidth, distHeight};
-                std::vector<NRI::RenderAttachDesc> distAttachments;
-                distAttachments.push_back({
-                    .attachment = m_ddgiDistance[writeIndex].get(),
-                    .loadOP = NRI::LoadOP::clear,
-                    .storeOP = NRI::StoreOP::store,
-                    .clearColor = {0.0f, 0.0f, 0.0f, 0.0f}
-                });
-
-                NRI::RenderDesc distDesc = {
-                    .renderArea = distExtent,
-                    .colorAttachments = distAttachments
-                };
-
-                m_commandBuffers->beginRendering(distDesc);
-                float distW = static_cast<float>(distWidth);
-                float distH = static_cast<float>(distHeight);
-                m_commandBuffers->setViewportWithCount({0.0f, distH, distW, -distH}, 0.0f, 1.0f);
-                m_commandBuffers->setScissorWithCount(distExtent);
-
-                m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_ddgiBlendDistancePipeline);
-                m_commandBuffers->setCullMode(NRI::CullMode::None);
-                m_commandBuffers->setDepthTestEnable(false);
-                m_commandBuffers->setDepthWriteEnable(false);
-                m_commandBuffers->setColorBlendEnable(0, false);
-                m_commandBuffers->setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G);
-
-                shaderio::PushConstantDDGIBlend blendDistPush{};
-                blendDistPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
-                blendDistPush.rayDataTextureIndex = m_ddgiRayData->GetDescriptorIndexSlot();
-                blendDistPush.prevAtlasTextureIndex = m_ddgiDistance[readIndex]->GetDescriptorIndexSlot();
-                blendDistPush.probesPerRow = probesPerRow;
-                blendDistPush.raysPerProbe = m_ddgiRaysPerProbe;
-                blendDistPush.probeCountTotal = totalDDGIProbes;
-                blendDistPush.hysteresis = m_ddgiHysteresis;
-                blendDistPush.firstFrame = (m_ddgiFirstFrame || m_isFirstFrame) ? 1 : 0;
-                blendDistPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
-                m_commandBuffers->pushData(&blendDistPush, sizeof(shaderio::PushConstantDDGIBlend));
-
-                m_commandBuffers->drawMeshTasks(1, 1, 1);
-                m_commandBuffers->endRendering();
-                m_commandBuffers->executionBarrier();
-            }
-
-            // Swap history to writeIndex for subsequent lighting and next frame
-            m_ddgiHistoryIndex = writeIndex;
-            m_ddgiFirstFrame = false;
-
-            // Update UBO so the Deferred Lighting pass in this same frame reads the fresh atlas
-            uniformData.ddgiIrradianceTextureIndex = m_ddgiIrradiance[writeIndex]->GetDescriptorIndexSlot();
-            uniformData.ddgiDistanceTextureIndex = m_ddgiDistance[writeIndex]->GetDescriptorIndexSlot();
-            memcpy(m_uniformBuffersMapped[frameIndex], &uniformData, sizeof(shaderio::UniformBufferObject));
-        }
-
-        // =========================================================================
-        // 2.9. RESTIR GI (SCREEN-SPACE DIFFUSE PATH RESAMPLING VIA RTXDI)
-        // =========================================================================
-        // ReSTIR GI ray-traces its initial candidate against the scene TLAS, so like DDGI it has no
-        // meaning without ray tracing hardware access -- gate it on the master toggle too, or turning
-        // "Enable Hybrid Ray Tracing" off silently leaves it (and its cost) running.
-        bool runReSTIRGI = (!runPathTracer || pathTracerUsesRTXDI) &&
-                           (m_rayTracingEnabled || pathTracerUsesRTXDI) &&
-                           (m_diffuseGIMode == 2 || (m_debugMode == 16 && m_diffuseGIMode != 1)) &&
-                           m_hasTLASBuild && m_sceneTLAS && (uniformData.tlasDeviceAddress != 0) &&
-                           (uniformData.instanceLUTReference != 0) &&
-                           m_restirGIInitialPipeline && m_restirGITemporalPipeline && m_restirGISpatialPipeline &&
-                           m_restirGIRawDiffuse && m_restirGIReservoirBuffers[0] &&
-                           m_restirGIReservoirBuffers[1] && m_restirGINeighborOffsetsBuffer;
-
-        if (runReSTIRGI)
-        {
-            NOX_PROFILE_GPU_SCOPE(*m_commandBuffers, "ReSTIR GI");
-            RTXDI_ReservoirBufferParameters resParams = rtxdi::CalculateReservoirBufferParameters(
-                m_renderSize.width, m_renderSize.height, rtxdi::CheckerboardMode::Off);
-
-            // Fixed buffer roles, matching RTXPT's ReSTIRGIContext::UpdateBufferIndices for
-            // TemporalAndSpatial mode (NOT ping-ponged by frame parity, unlike Temporal-only/Fused
-            // modes): buffer 0 is pure this-frame scratch (Initial writes it, Temporal reads its own
-            // candidate from it and overwrites it in place with the temporal result -- safe because
-            // that read+write only ever touches a single pixel's own slot). Buffer 1 is the
-            // persistent cross-frame result: Temporal reads it as history, and Spatial -- which reads
-            // every neighbor out of buffer 0 -- writes its finished result there, never back into
-            // buffer 0, so it can never race a neighboring pixel's still-in-flight read of buffer 0.
-            constexpr uint32_t kScratchBuffer = 0;
-            constexpr uint32_t kPersistentBuffer = 1;
-
-            // 1. Initial Candidate Generation Pass
-            {
-                std::vector<NRI::RenderAttachDesc> initAttachments;
-                initAttachments.push_back({
-                    .attachment = m_restirGIRawDiffuse.get(),
-                    .loadOP = NRI::LoadOP::clear,
-                    .storeOP = NRI::StoreOP::store,
-                    .clearColor = {0.0f, 0.0f, 0.0f, 0.0f}
-                });
-
-                NRI::RenderDesc initDesc = {
-                    .renderArea = renderExtent,
-                    .colorAttachments = initAttachments
-                };
-
-                m_commandBuffers->beginRendering(initDesc);
-                m_commandBuffers->setViewportWithCount({0.0f, rh, rw, -rh}, 0.0f, 1.0f);
-                m_commandBuffers->setScissorWithCount(renderExtent);
-
-                m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_restirGIInitialPipeline);
-                m_commandBuffers->setCullMode(NRI::CullMode::None);
-                m_commandBuffers->setDepthTestEnable(false);
-                m_commandBuffers->setDepthWriteEnable(false);
-                m_commandBuffers->setColorBlendEnable(0, false);
-                m_commandBuffers->setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G |
-                                                    NRI::ColorComponent::B | NRI::ColorComponent::A);
-
-                shaderio::PushConstantReSTIRGIInitial initPush{};
-                initPush.invViewProj = uniformData.invViewProj;
-                initPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
-                initPush.reservoirBufferReference = m_restirGIReservoirBuffers[kScratchBuffer]->getDeviceAddress();
-                initPush.depthTextureIndex = m_depthResource->GetDescriptorIndexSlot();
-                initPush.gbufferNormalIndex = m_gbufferNormal->GetDescriptorIndexSlot();
-                initPush.gbufferAlbedoIndex = m_gbufferAlbedo->GetDescriptorIndexSlot();
-                initPush.gbufferMaterialIndex = m_gbufferMaterial->GetDescriptorIndexSlot();
-                initPush.visibilityTextureIndex = m_visibilityResource->GetDescriptorIndexSlot();
-                initPush.viewportSize = glm::vec2(rw, rh);
-                initPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
-                initPush.reservoirBlockRowPitch = resParams.reservoirBlockRowPitch;
-                initPush.reservoirArrayPitch = resParams.reservoirArrayPitch;
-                m_commandBuffers->pushData(&initPush, sizeof(shaderio::PushConstantReSTIRGIInitial));
-
-                m_commandBuffers->drawMeshTasks(1, 1, 1);
-                m_commandBuffers->endRendering();
-                m_commandBuffers->executionBarrier();
-            }
-
-            // 2. Temporal Resampling Pass: reads Pass 1's candidate + history, overwrites the
-            // candidate in place with the temporally-resampled result.
-            {
-                std::vector<NRI::RenderAttachDesc> tAttachments;
-                tAttachments.push_back({
-                    .attachment = m_restirGIRawDiffuse.get(),
-                    .loadOP = NRI::LoadOP::dontCare,
-                    .storeOP = NRI::StoreOP::dontCare
-                });
-
-                NRI::RenderDesc tDesc = {
-                    .renderArea = renderExtent,
-                    .colorAttachments = tAttachments
-                };
-
-                m_commandBuffers->beginRendering(tDesc);
-                m_commandBuffers->setViewportWithCount({0.0f, rh, rw, -rh}, 0.0f, 1.0f);
-                m_commandBuffers->setScissorWithCount(renderExtent);
-
-                m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_restirGITemporalPipeline);
-                m_commandBuffers->setCullMode(NRI::CullMode::None);
-                m_commandBuffers->setDepthTestEnable(false);
-                m_commandBuffers->setDepthWriteEnable(false);
-                m_commandBuffers->setColorBlendEnable(0, false);
-                m_commandBuffers->setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G |
-                                                    NRI::ColorComponent::B | NRI::ColorComponent::A);
-
-                shaderio::PushConstantReSTIRGITemporal tPush{};
-                tPush.invViewProj = uniformData.invViewProj;
-                // Last frame's depth/normal snapshot was rendered with last frame's camera matrix --
-                // must unproject it with the SAME matrix, never this frame's, or the reconstructed
-                // previous-frame world position is simply wrong as soon as the camera moves.
-                tPush.prevInvViewProj = glm::inverse(uniformData.prevProj * uniformData.prevView);
-                tPush.cameraWorldPos = uniformData.cameraWorldPos;
-                tPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
-                tPush.currentReservoirReference = m_restirGIReservoirBuffers[kScratchBuffer]->getDeviceAddress();
-                tPush.previousReservoirReference = m_restirGIReservoirBuffers[kPersistentBuffer]->getDeviceAddress();
-                tPush.depthTextureIndex = m_depthResource->GetDescriptorIndexSlot();
-                tPush.prevDepthTextureIndex = m_prevDepthResource ? m_prevDepthResource->GetDescriptorIndexSlot() : UINT32_MAX;
-                tPush.gbufferNormalIndex = m_gbufferNormal->GetDescriptorIndexSlot();
-                tPush.prevNormalTextureIndex = m_prevGbufferNormal ? m_prevGbufferNormal->GetDescriptorIndexSlot() : UINT32_MAX;
-                tPush.gbufferVelocityIndex = m_gbufferVelocity->GetDescriptorIndexSlot();
-                tPush.gbufferMaterialIndex = m_gbufferMaterial->GetDescriptorIndexSlot();
-                tPush.viewportSize = glm::vec2(rw, rh);
-                tPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
-                tPush.reservoirBlockRowPitch = resParams.reservoirBlockRowPitch;
-                tPush.reservoirArrayPitch = resParams.reservoirArrayPitch;
-                tPush.maxHistoryLength = m_restirGIMaxHistoryLength;
-                tPush.normalThreshold = m_restirGINormalThreshold;
-                tPush.depthThreshold = m_restirGIDepthThreshold;
-                tPush.enablePermutationSampling = 1; // matches RTXPT's default (true)
-                tPush.maxReservoirAge = 50; // matches RTXPT's GI-specific default
-                m_commandBuffers->pushData(&tPush, sizeof(shaderio::PushConstantReSTIRGITemporal));
-
-                m_commandBuffers->drawMeshTasks(1, 1, 1);
-                m_commandBuffers->endRendering();
-                m_commandBuffers->executionBarrier();
-            }
-
-            // 3. Spatial Resampling Pass: reads THIS frame's just-temporally-resampled scratch buffer
-            // (for both its own-pixel input and every spatial neighbor) but writes its finished
-            // result into the SEPARATE persistent buffer -- never back into the scratch buffer, since
-            // that is still being read concurrently by other in-flight pixels of this same pass.
-            {
-                std::vector<NRI::RenderAttachDesc> sAttachments;
-                sAttachments.push_back({
-                    .attachment = m_restirGIRawDiffuse.get(),
-                    .loadOP = NRI::LoadOP::clear,
-                    .storeOP = NRI::StoreOP::store,
-                    .clearColor = {0.0f, 0.0f, 0.0f, 0.0f}
-                });
-
-                NRI::RenderDesc sDesc = {
-                    .renderArea = renderExtent,
-                    .colorAttachments = sAttachments
-                };
-
-                m_commandBuffers->beginRendering(sDesc);
-                m_commandBuffers->setViewportWithCount({0.0f, rh, rw, -rh}, 0.0f, 1.0f);
-                m_commandBuffers->setScissorWithCount(renderExtent);
-
-                m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_restirGISpatialPipeline);
-                m_commandBuffers->setCullMode(NRI::CullMode::None);
-                m_commandBuffers->setDepthTestEnable(false);
-                m_commandBuffers->setDepthWriteEnable(false);
-                m_commandBuffers->setColorBlendEnable(0, false);
-                m_commandBuffers->setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G |
-                                                    NRI::ColorComponent::B | NRI::ColorComponent::A);
-
-                shaderio::PushConstantReSTIRGISpatial sPush{};
-                sPush.invViewProj = uniformData.invViewProj;
-                sPush.cameraWorldPos = uniformData.cameraWorldPos;
-                sPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
-                sPush.inputReservoirReference = m_restirGIReservoirBuffers[kScratchBuffer]->getDeviceAddress();
-                sPush.outputReservoirReference = m_restirGIReservoirBuffers[kPersistentBuffer]->getDeviceAddress();
-                sPush.neighborOffsetsReference = m_restirGINeighborOffsetsBuffer->getDeviceAddress();
-                sPush.depthTextureIndex = m_depthResource->GetDescriptorIndexSlot();
-                sPush.gbufferNormalIndex = m_gbufferNormal->GetDescriptorIndexSlot();
-                sPush.gbufferMaterialIndex = m_gbufferMaterial->GetDescriptorIndexSlot();
-                sPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
-                sPush.viewportSize = glm::vec2(rw, rh);
-                sPush.reservoirBlockRowPitch = resParams.reservoirBlockRowPitch;
-                sPush.reservoirArrayPitch = resParams.reservoirArrayPitch;
-                sPush.samplingRadius = m_restirGISpatialRadius;
-                sPush.numSamples = m_restirGINumSpatialSamples;
-                sPush.normalThreshold = m_restirGINormalThreshold;
-                sPush.depthThreshold = m_restirGIDepthThreshold;
-                sPush.neighborOffsetMask = 127;
-                sPush.enableBoilingFilter = m_restirGIEnableBoilingFilter ? 1 : 0;
-                sPush.boilingFilterStrength = m_restirGIBoilingFilterStrength;
-                sPush.denoiserMode = static_cast<uint32_t>(m_nrdGIDenoiser);
-                m_commandBuffers->pushData(&sPush, sizeof(shaderio::PushConstantReSTIRGISpatial));
-
-                m_commandBuffers->drawMeshTasks(1, 1, 1);
-                m_commandBuffers->endRendering();
-                m_commandBuffers->executionBarrier();
-            }
-
-            // =========================================================================
-            // NRD DIFFUSE GI DENOISING PASS (Denoises 1-SPP ReSTIR GI via REBLUR / RELAX)
-            // =========================================================================
-            bool restirGIDenoised = false;
-            if (m_nrdGIDenoiser != NRI::NRDDiffuseDenoiser::Off &&
-                m_device->isNRDInitialized() &&
-                m_restirGIRawDiffuse && m_denoisedReSTIRGIDiffuse && m_viewZ && m_nrdNormalRoughness)
-            {
-                NOX_PROFILE_GPU_SCOPE(*m_commandBuffers, "NRD GI");
-                NRI::NRDDiffuseParams giDenoiseParams{};
-                giDenoiseParams.inDiffuseRadianceHitDist = m_restirGIRawDiffuse.get();
-                giDenoiseParams.inMotionVectors = m_gbufferVelocity.get();
-                giDenoiseParams.inNormalRoughness = m_nrdNormalRoughness.get();
-                giDenoiseParams.inViewZ = m_viewZ.get();
-                giDenoiseParams.outDenoisedDiffuse = m_denoisedReSTIRGIDiffuse.get();
-                giDenoiseParams.commandBuffer = m_commandBuffers.get();
-
-                giDenoiseParams.view = uniformData.view;
-                giDenoiseParams.proj = uniformData.nonJitteredProj;
-                giDenoiseParams.prevView = uniformData.prevView;
-                giDenoiseParams.prevProj = uniformData.prevProj;
-
-                giDenoiseParams.motionVectorScale = glm::vec2(1.0f, 1.0f);
-                giDenoiseParams.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
-                giDenoiseParams.resetHistory = m_isFirstFrame || m_resetNRD;
-
-                restirGIDenoised = m_device->evaluateNRDDiffuse(giDenoiseParams, m_nrdGIDenoiser);
-                m_commandBuffers->executionBarrier();
-                m_commandBuffers->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
-            }
-
-            // Update UBO so Deferred Lighting reads the fresh ReSTIR GI diffuse
             uniformData.diffuseGIMode = m_diffuseGIMode;
-            uniformData.restirGIDiffuseTextureIndex = restirGIDenoised
-                ? m_denoisedReSTIRGIDiffuse->GetDescriptorIndexSlot()
-                : m_restirGIRawDiffuse->GetDescriptorIndexSlot();
+            uniformData.restirGIDiffuseTextureIndex = graph.GetSlotOr(frame.nrdGIAdded ? resources.ReSTIRGIDenoised : resources.ReSTIRGIRaw, NoTexture);
             uniformData.restirGIReservoirBufferIndex = 0;
             uniformData.restirGINeighborOffsetsBufferIndex = 0;
-            memcpy(m_uniformBuffersMapped[frameIndex], &uniformData, sizeof(shaderio::UniformBufferObject));
+        }
+        else if (m_diffuseGIMode == 2)
+        {
+            // Fallback to IBL ambient if ReSTIR GI cannot run yet (e.g. TLAS build pending)
+            uniformData.diffuseGIMode = 0;
+            uniformData.restirGIDiffuseTextureIndex = NoTexture;
         }
         else
         {
-            if (m_diffuseGIMode == 2)
-            {
-                // Fallback to IBL ambient if ReSTIR GI cannot run yet (e.g. TLAS build pending)
-                uniformData.diffuseGIMode = 0;
-                uniformData.restirGIDiffuseTextureIndex = 0xFFFFFFFF;
-            }
-            else
-            {
-                uniformData.diffuseGIMode = m_diffuseGIMode;
-                if (m_restirGIRawDiffuse)
-                    uniformData.restirGIDiffuseTextureIndex = m_restirGIRawDiffuse->GetDescriptorIndexSlot();
-                else
-                    uniformData.restirGIDiffuseTextureIndex = 0xFFFFFFFF;
-            }
-            memcpy(m_uniformBuffersMapped[frameIndex], &uniformData, sizeof(shaderio::UniformBufferObject));
+            uniformData.diffuseGIMode = m_diffuseGIMode;
+            uniformData.restirGIDiffuseTextureIndex = NoTexture;
         }
 
-        // Snapshot this frame's depth/normal into the "previous frame" buffers now that both ReSTIR
-        // GI's and ReSTIR DI's temporal passes have already consumed last frame's snapshot -- these
-        // feed next frame's temporal reprojection validity check (see declaration comment on
-        // m_prevDepthResource). Must run unconditionally here, NOT only inside `if (runReSTIRGI)`:
-        // ReSTIR DI's temporal pass reads these same "prev" textures too, so gating this behind GI
-        // being enabled left DI reprojecting against a permanently stale snapshot whenever GI was off,
-        // producing ghost shadows on camera movement that only "fixed themselves" when GI was toggled
-        // on (which happened to keep this copy running as a side effect).
-        if (m_prevDepthResource && m_prevGbufferNormal)
+        // ReSTIR DI: same pattern; the brute-force loop when it cannot run yet.
+        if (frame.restirDIAdded)
         {
-            m_commandBuffers->copyTexture(*m_depthResource, *m_prevDepthResource, m_renderSize.width, m_renderSize.height);
-            m_commandBuffers->copyTexture(*m_gbufferNormal, *m_prevGbufferNormal, m_renderSize.width, m_renderSize.height);
-            // ReSTIR PT's temporal resampling also needs the previous frame's material (see declaration
-            // comment on m_prevGbufferAlbedo) -- same unconditional-copy reasoning as depth/normal above.
-            if (m_prevGbufferAlbedo && m_prevGbufferMaterial)
-            {
-                m_commandBuffers->copyTexture(*m_gbufferAlbedo, *m_prevGbufferAlbedo, m_renderSize.width, m_renderSize.height);
-                m_commandBuffers->copyTexture(*m_gbufferMaterial, *m_prevGbufferMaterial, m_renderSize.width, m_renderSize.height);
-            }
-            m_commandBuffers->executionBarrier();
-        }
-
-        // =========================================================================
-        // 2.95. RESTIR DI (SCREEN-SPACE RESAMPLED DIRECT LIGHTING VIA RTXDI)
-        // =========================================================================
-        // Same master-toggle gating as DDGI/ReSTIR GI (see the master-toggle bug fixed for those
-        // two): ReSTIR DI ray-traces its final shadow against the scene TLAS, so it has no meaning
-        // without ray tracing hardware access.
-        bool runReSTIRDI = (!runPathTracer || pathTracerUsesRTXDI) &&
-                           (m_rayTracingEnabled || pathTracerUsesRTXDI) &&
-                           m_directLightingMode == 1 &&
-                           m_hasTLASBuild && m_sceneTLAS && (uniformData.tlasDeviceAddress != 0) &&
-                           m_restirDIInitialPipeline && m_restirDITemporalPipeline &&
-                           m_restirDISpatialPipeline && m_restirDIFinalShadingPipeline &&
-                           m_restirDIPresamplePipeline && m_restirDIPresampleReGIRPipeline &&
-                           m_restirDIWriteLightPDFPipeline && m_restirDIReduceLightPDFMipPipeline &&
-                           m_restirDIDirectLighting && m_restirGINeighborOffsetsBuffer &&
-                           m_restirDIRISBuffer && m_lightPDFTexture &&
-                           m_restirDIReservoirBuffers[0] && m_restirDIReservoirBuffers[1] &&
-                           m_restirDIReservoirBuffers[2] && (uniformData.lightDataReference != 0);
-
-        if (runReSTIRDI)
-        {
-            NOX_PROFILE_GPU_SCOPE(*m_commandBuffers, "ReSTIR DI");
-            RTXDI_ReservoirBufferParameters diResParams = rtxdi::CalculateReservoirBufferParameters(
-                m_renderSize.width, m_renderSize.height, rtxdi::CheckerboardMode::Off);
-
-            // 3-buffer rotation (NOT GI's fixed 2-role scheme) -- see the rotation math documented
-            // on PushConstantReSTIRDIInitial in shaderIO.h. Using only 2 buffers here would
-            // reintroduce the exact read/write race already found and fixed once for GI's spatial pass.
-            uint32_t diBufferA = (m_restirDILastFrameOutputReservoir + 1) % 3; // Initial writes here, Temporal overwrites in place
-            uint32_t diBufferC = m_restirDILastFrameOutputReservoir;          // Temporal's history (read only)
-            uint32_t diBufferB = (diBufferA + 1) % 3;                         // Spatial's output, FinalShading's input
-
-            uint32_t regirCellCount = m_regirCellsX * m_regirCellsY * m_regirCellsZ;
-            uint32_t risBufferOffset = m_restirDIRISTileSize * m_restirDIRISTileCount; // where ReGIR's segment starts
-
-            // -1. Light PDF Mip Chain Rebuild (feeds RTXDI_PresampleLocalLights below) -- rebuilt every
-            // frame alongside the RIS/ReGIR presample passes, same cadence as the rest of ReSTIR DI's
-            // per-frame light data (lights can move/change color every frame).
-            {
-                m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Compute, *m_restirDIWriteLightPDFPipeline);
-
-                shaderio::PushConstantReSTIRDIWriteLightPDF wPush{};
-                wPush.lightDataReference = uniformData.lightDataReference;
-                wPush.firstLocalLightIndex = m_restirDIFirstLocalLight;
-                wPush.numLocalLights = m_restirDINumLocalLights;
-                wPush.pdfTextureStorageIndex = m_lightPDFMipStorageSlots[0];
-                wPush.pdfTextureSize = m_lightPDFTextureSize;
-                m_commandBuffers->pushData(&wPush, sizeof(shaderio::PushConstantReSTIRDIWriteLightPDF));
-
-                uint32_t pdfGroups = (m_lightPDFTextureSize + 7) / 8;
-                m_commandBuffers->dispatch(pdfGroups, pdfGroups, 1);
-                m_commandBuffers->executionBarrier();
-
-                m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Compute, *m_restirDIReduceLightPDFMipPipeline);
-                for (uint32_t mip = 1; mip < m_lightPDFMipLevels; mip++)
-                {
-                    shaderio::PushConstantReSTIRDIReduceLightPDFMip rPush{};
-                    rPush.srcTextureIndex = m_lightPDFTexture->GetDescriptorIndexSlot();
-                    rPush.dstStorageIndex = m_lightPDFMipStorageSlots[mip];
-                    rPush.srcMip = mip - 1;
-                    rPush.dstSize = m_lightPDFTextureSize >> mip;
-                    m_commandBuffers->pushData(&rPush, sizeof(shaderio::PushConstantReSTIRDIReduceLightPDFMip));
-
-                    uint32_t mipGroups = ((rPush.dstSize > 0 ? rPush.dstSize : 1) + 7) / 8;
-                    m_commandBuffers->dispatch(mipGroups, mipGroups, 1);
-                    m_commandBuffers->executionBarrier();
-                }
-            }
-
-            // 0a. RIS Presample Pass (plain 1D compute -- calls the SDK's real RTXDI_PresampleLocalLights
-            // against the light PDF mip chain above; also serves as ReGIR's fallback for out-of-grid pixels)
-            {
-                m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Compute, *m_restirDIPresamplePipeline);
-
-                shaderio::PushConstantReSTIRDIPresample risPush{};
-                risPush.lightDataReference = uniformData.lightDataReference;
-                risPush.risBufferReference = m_restirDIRISBuffer->getDeviceAddress();
-                risPush.firstLocalLightIndex = m_restirDIFirstLocalLight;
-                risPush.numLocalLights = m_restirDINumLocalLights;
-                risPush.risTileSize = m_restirDIRISTileSize;
-                risPush.risTileCount = m_restirDIRISTileCount;
-                risPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
-                risPush.pdfTextureIndex = m_lightPDFTexture->GetDescriptorIndexSlot();
-                risPush.pdfTextureSize = m_lightPDFTextureSize;
-                m_commandBuffers->pushData(&risPush, sizeof(shaderio::PushConstantReSTIRDIPresample));
-
-                uint32_t risThreads = m_restirDIRISTileSize * m_restirDIRISTileCount;
-                m_commandBuffers->dispatch((risThreads + 63) / 64, 1, 1);
-                m_commandBuffers->executionBarrier();
-            }
-
-            // 0b. ReGIR Presample Pass (plain 1D compute -- one thread per (cell, slot-within-cell))
-            if (m_regirEnabled && regirCellCount > 0)
-            {
-                m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Compute, *m_restirDIPresampleReGIRPipeline);
-
-                shaderio::PushConstantReSTIRDIPresampleReGIR regirPush{};
-                regirPush.lightDataReference = uniformData.lightDataReference;
-                regirPush.risBufferReference = m_restirDIRISBuffer->getDeviceAddress();
-                regirPush.gridCenterAndCellSize = glm::vec4(m_regirGridCenter, m_regirCellSize);
-                regirPush.firstLocalLightIndex = m_restirDIFirstLocalLight;
-                regirPush.numLocalLights = m_restirDINumLocalLights;
-                regirPush.risBufferOffset = risBufferOffset;
-                regirPush.lightsPerCell = m_regirLightsPerCell;
-                regirPush.cellsX = m_regirCellsX;
-                regirPush.cellsY = m_regirCellsY;
-                regirPush.cellsZ = m_regirCellsZ;
-                regirPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
-                regirPush.regirSamplingJitter = m_regirSamplingJitter;
-                regirPush.risTileSize = m_restirDIRISTileSize;
-                regirPush.risTileCount = m_restirDIRISTileCount;
-                regirPush.numRegirBuildSamples = m_regirNumBuildSamples;
-                m_commandBuffers->pushData(&regirPush, sizeof(shaderio::PushConstantReSTIRDIPresampleReGIR));
-
-                uint32_t regirThreads = regirCellCount * m_regirLightsPerCell;
-                m_commandBuffers->dispatch((regirThreads + 63) / 64, 1, 1);
-                m_commandBuffers->executionBarrier();
-            }
-
-            m_commandBuffers->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
-
-            // 1. Initial Sampling Pass
-            {
-                std::vector<NRI::RenderAttachDesc> diInitAttachments;
-                diInitAttachments.push_back({
-                    .attachment = m_restirDIDirectLighting.get(),
-                    .loadOP = NRI::LoadOP::dontCare,
-                    .storeOP = NRI::StoreOP::dontCare
-                });
-
-                NRI::RenderDesc diInitDesc = {
-                    .renderArea = renderExtent,
-                    .colorAttachments = diInitAttachments
-                };
-
-                m_commandBuffers->beginRendering(diInitDesc);
-                m_commandBuffers->setViewportWithCount({0.0f, rh, rw, -rh}, 0.0f, 1.0f);
-                m_commandBuffers->setScissorWithCount(renderExtent);
-
-                m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_restirDIInitialPipeline);
-                m_commandBuffers->setCullMode(NRI::CullMode::None);
-                m_commandBuffers->setDepthTestEnable(false);
-                m_commandBuffers->setDepthWriteEnable(false);
-                m_commandBuffers->setColorBlendEnable(0, false);
-                m_commandBuffers->setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G |
-                                                    NRI::ColorComponent::B | NRI::ColorComponent::A);
-
-                shaderio::PushConstantReSTIRDIInitial diInitPush{};
-                diInitPush.invViewProj = uniformData.invViewProj;
-                diInitPush.cameraWorldPos = uniformData.cameraWorldPos;
-                diInitPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
-                diInitPush.lightDataReference = uniformData.lightDataReference;
-                diInitPush.reservoirBufferReference = m_restirDIReservoirBuffers[diBufferA]->getDeviceAddress();
-                diInitPush.depthTextureIndex = m_depthResource->GetDescriptorIndexSlot();
-                diInitPush.gbufferNormalIndex = m_gbufferNormal->GetDescriptorIndexSlot();
-                diInitPush.gbufferAlbedoIndex = m_gbufferAlbedo->GetDescriptorIndexSlot();
-                diInitPush.gbufferMaterialIndex = m_gbufferMaterial->GetDescriptorIndexSlot();
-                diInitPush.viewportSize = glm::vec2(rw, rh);
-                diInitPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
-                diInitPush.reservoirBlockRowPitch = diResParams.reservoirBlockRowPitch;
-                diInitPush.reservoirArrayPitch = diResParams.reservoirArrayPitch;
-                diInitPush.firstLocalLightIndex = m_restirDIFirstLocalLight;
-                diInitPush.numLocalLights = m_restirDINumLocalLights;
-                diInitPush.firstInfiniteLightIndex = m_restirDIFirstInfiniteLight;
-                diInitPush.numInfiniteLights = m_restirDINumInfiniteLights;
-                diInitPush.numLocalLightSamples = m_restirDINumLocalLightSamples;
-                diInitPush.numInfiniteLightSamples = m_restirDINumInfiniteLightSamples;
-                diInitPush.risBufferReference = m_restirDIRISBuffer->getDeviceAddress();
-                diInitPush.risBufferOffset = risBufferOffset;
-                diInitPush.risTileSize = m_restirDIRISTileSize;
-                diInitPush.risTileCount = m_restirDIRISTileCount;
-                diInitPush.regirEnabled = (m_regirEnabled && regirCellCount > 0) ? 1 : 0;
-                diInitPush.cellsX = m_regirCellsX;
-                diInitPush.cellsY = m_regirCellsY;
-                diInitPush.cellsZ = m_regirCellsZ;
-                diInitPush.lightsPerCell = m_regirLightsPerCell;
-                diInitPush.gridCenterAndCellSize = glm::vec4(m_regirGridCenter, m_regirCellSize);
-                diInitPush.regirSamplingJitter = m_regirSamplingJitter;
-                m_commandBuffers->pushData(&diInitPush, sizeof(shaderio::PushConstantReSTIRDIInitial));
-
-                m_commandBuffers->drawMeshTasks(1, 1, 1);
-                m_commandBuffers->endRendering();
-                m_commandBuffers->executionBarrier();
-            }
-
-            // 2. Temporal Resampling Pass
-            {
-                std::vector<NRI::RenderAttachDesc> diTAttachments;
-                diTAttachments.push_back({
-                    .attachment = m_restirDIDirectLighting.get(),
-                    .loadOP = NRI::LoadOP::dontCare,
-                    .storeOP = NRI::StoreOP::dontCare
-                });
-
-                NRI::RenderDesc diTDesc = {
-                    .renderArea = renderExtent,
-                    .colorAttachments = diTAttachments
-                };
-
-                m_commandBuffers->beginRendering(diTDesc);
-                m_commandBuffers->setViewportWithCount({0.0f, rh, rw, -rh}, 0.0f, 1.0f);
-                m_commandBuffers->setScissorWithCount(renderExtent);
-
-                m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_restirDITemporalPipeline);
-                m_commandBuffers->setCullMode(NRI::CullMode::None);
-                m_commandBuffers->setDepthTestEnable(false);
-                m_commandBuffers->setDepthWriteEnable(false);
-                m_commandBuffers->setColorBlendEnable(0, false);
-                m_commandBuffers->setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G |
-                                                    NRI::ColorComponent::B | NRI::ColorComponent::A);
-
-                shaderio::PushConstantReSTIRDITemporal diTPush{};
-                diTPush.invViewProj = uniformData.invViewProj;
-                diTPush.prevInvViewProj = glm::inverse(uniformData.prevProj * uniformData.prevView);
-                diTPush.cameraWorldPos = uniformData.cameraWorldPos;
-                diTPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
-                diTPush.lightDataReference = uniformData.lightDataReference;
-                diTPush.currentReservoirReference = m_restirDIReservoirBuffers[diBufferA]->getDeviceAddress();
-                diTPush.previousReservoirReference = m_restirDIReservoirBuffers[diBufferC]->getDeviceAddress();
-                diTPush.depthTextureIndex = m_depthResource->GetDescriptorIndexSlot();
-                diTPush.prevDepthTextureIndex = m_prevDepthResource ? m_prevDepthResource->GetDescriptorIndexSlot() : UINT32_MAX;
-                diTPush.gbufferNormalIndex = m_gbufferNormal->GetDescriptorIndexSlot();
-                diTPush.prevNormalTextureIndex = m_prevGbufferNormal ? m_prevGbufferNormal->GetDescriptorIndexSlot() : UINT32_MAX;
-                diTPush.gbufferVelocityIndex = m_gbufferVelocity->GetDescriptorIndexSlot();
-                diTPush.gbufferMaterialIndex = m_gbufferMaterial->GetDescriptorIndexSlot();
-                diTPush.viewportSize = glm::vec2(rw, rh);
-                diTPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
-                diTPush.reservoirBlockRowPitch = diResParams.reservoirBlockRowPitch;
-                diTPush.reservoirArrayPitch = diResParams.reservoirArrayPitch;
-                diTPush.maxHistoryLength = m_restirDIMaxHistoryLength;
-                diTPush.normalThreshold = m_restirDINormalThreshold;
-                diTPush.depthThreshold = m_restirDIDepthThreshold;
-                diTPush.enablePermutationSampling = 1;
-                m_commandBuffers->pushData(&diTPush, sizeof(shaderio::PushConstantReSTIRDITemporal));
-
-                m_commandBuffers->drawMeshTasks(1, 1, 1);
-                m_commandBuffers->endRendering();
-                m_commandBuffers->executionBarrier();
-            }
-
-            // 3. Spatial Resampling Pass
-            {
-                std::vector<NRI::RenderAttachDesc> diSAttachments;
-                diSAttachments.push_back({
-                    .attachment = m_restirDIDirectLighting.get(),
-                    .loadOP = NRI::LoadOP::dontCare,
-                    .storeOP = NRI::StoreOP::dontCare
-                });
-
-                NRI::RenderDesc diSDesc = {
-                    .renderArea = renderExtent,
-                    .colorAttachments = diSAttachments
-                };
-
-                m_commandBuffers->beginRendering(diSDesc);
-                m_commandBuffers->setViewportWithCount({0.0f, rh, rw, -rh}, 0.0f, 1.0f);
-                m_commandBuffers->setScissorWithCount(renderExtent);
-
-                m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_restirDISpatialPipeline);
-                m_commandBuffers->setCullMode(NRI::CullMode::None);
-                m_commandBuffers->setDepthTestEnable(false);
-                m_commandBuffers->setDepthWriteEnable(false);
-                m_commandBuffers->setColorBlendEnable(0, false);
-                m_commandBuffers->setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G |
-                                                    NRI::ColorComponent::B | NRI::ColorComponent::A);
-
-                shaderio::PushConstantReSTIRDISpatial diSPush{};
-                diSPush.invViewProj = uniformData.invViewProj;
-                diSPush.cameraWorldPos = uniformData.cameraWorldPos;
-                diSPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
-                diSPush.lightDataReference = uniformData.lightDataReference;
-                diSPush.inputReservoirReference = m_restirDIReservoirBuffers[diBufferA]->getDeviceAddress();
-                diSPush.outputReservoirReference = m_restirDIReservoirBuffers[diBufferB]->getDeviceAddress();
-                diSPush.neighborOffsetsReference = m_restirGINeighborOffsetsBuffer->getDeviceAddress();
-                diSPush.depthTextureIndex = m_depthResource->GetDescriptorIndexSlot();
-                diSPush.gbufferNormalIndex = m_gbufferNormal->GetDescriptorIndexSlot();
-                diSPush.gbufferMaterialIndex = m_gbufferMaterial->GetDescriptorIndexSlot();
-                diSPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
-                diSPush.viewportSize = glm::vec2(rw, rh);
-                diSPush.reservoirBlockRowPitch = diResParams.reservoirBlockRowPitch;
-                diSPush.reservoirArrayPitch = diResParams.reservoirArrayPitch;
-                diSPush.samplingRadius = m_restirDISpatialRadius;
-                diSPush.numSamples = m_restirDINumSpatialSamples;
-                diSPush.normalThreshold = m_restirDINormalThreshold;
-                diSPush.depthThreshold = m_restirDIDepthThreshold;
-                diSPush.neighborOffsetMask = 127;
-                m_commandBuffers->pushData(&diSPush, sizeof(shaderio::PushConstantReSTIRDISpatial));
-
-                m_commandBuffers->drawMeshTasks(1, 1, 1);
-                m_commandBuffers->endRendering();
-                m_commandBuffers->executionBarrier();
-            }
-
-            // 4. Final Shading Pass: exactly one shadow ray per pixel, toward whichever light survived
-            // resampling -- unlike the brute-force loop in DeferredLighting.slang, which only ever
-            // shadows light index 0, every light is properly shadowed here regardless of light count.
-            {
-                std::vector<NRI::RenderAttachDesc> diFAttachments;
-                diFAttachments.push_back({
-                    .attachment = m_restirDIDirectLighting.get(),
-                    .loadOP = NRI::LoadOP::clear,
-                    .storeOP = NRI::StoreOP::store,
-                    .clearColor = {0.0f, 0.0f, 0.0f, 0.0f}
-                });
-
-                NRI::RenderDesc diFDesc = {
-                    .renderArea = renderExtent,
-                    .colorAttachments = diFAttachments
-                };
-
-                m_commandBuffers->beginRendering(diFDesc);
-                m_commandBuffers->setViewportWithCount({0.0f, rh, rw, -rh}, 0.0f, 1.0f);
-                m_commandBuffers->setScissorWithCount(renderExtent);
-
-                m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_restirDIFinalShadingPipeline);
-                m_commandBuffers->setCullMode(NRI::CullMode::None);
-                m_commandBuffers->setDepthTestEnable(false);
-                m_commandBuffers->setDepthWriteEnable(false);
-                m_commandBuffers->setColorBlendEnable(0, false);
-                m_commandBuffers->setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G |
-                                                    NRI::ColorComponent::B | NRI::ColorComponent::A);
-
-                shaderio::PushConstantReSTIRDIFinalShading diFPush{};
-                diFPush.invViewProj = uniformData.invViewProj;
-                diFPush.cameraWorldPos = uniformData.cameraWorldPos;
-                diFPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
-                diFPush.lightDataReference = uniformData.lightDataReference;
-                diFPush.reservoirReference = m_restirDIReservoirBuffers[diBufferB]->getDeviceAddress();
-                diFPush.depthTextureIndex = m_depthResource->GetDescriptorIndexSlot();
-                diFPush.gbufferNormalIndex = m_gbufferNormal->GetDescriptorIndexSlot();
-                diFPush.gbufferAlbedoIndex = m_gbufferAlbedo->GetDescriptorIndexSlot();
-                diFPush.gbufferMaterialIndex = m_gbufferMaterial->GetDescriptorIndexSlot();
-                diFPush.viewportSize = glm::vec2(rw, rh);
-                diFPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
-                diFPush.reservoirBlockRowPitch = diResParams.reservoirBlockRowPitch;
-                diFPush.reservoirArrayPitch = diResParams.reservoirArrayPitch;
-                diFPush.denoiserMode = static_cast<uint32_t>(m_nrdDIDenoiser);
-                m_commandBuffers->pushData(&diFPush, sizeof(shaderio::PushConstantReSTIRDIFinalShading));
-
-                m_commandBuffers->drawMeshTasks(1, 1, 1);
-                m_commandBuffers->endRendering();
-                m_commandBuffers->executionBarrier();
-            }
-
-            m_restirDILastFrameOutputReservoir = diBufferB;
-
-            // =========================================================================
-            // NRD DIRECT-LIGHTING DENOISING PASS (Denoises 1-SPP ReSTIR DI via REBLUR / RELAX)
-            // =========================================================================
-            bool restirDIDenoised = false;
-            if (m_nrdDIDenoiser != NRI::NRDDiffuseDenoiser::Off &&
-                m_device->isNRDInitialized() &&
-                m_restirDIDirectLighting && m_denoisedReSTIRDIDirectLighting && m_viewZ && m_nrdNormalRoughness)
-            {
-                NOX_PROFILE_GPU_SCOPE(*m_commandBuffers, "NRD DI");
-                NRI::NRDDiffuseParams diDenoiseParams{};
-                diDenoiseParams.inDiffuseRadianceHitDist = m_restirDIDirectLighting.get();
-                diDenoiseParams.inMotionVectors = m_gbufferVelocity.get();
-                diDenoiseParams.inNormalRoughness = m_nrdNormalRoughness.get();
-                diDenoiseParams.inViewZ = m_viewZ.get();
-                diDenoiseParams.outDenoisedDiffuse = m_denoisedReSTIRDIDirectLighting.get();
-                diDenoiseParams.commandBuffer = m_commandBuffers.get();
-
-                diDenoiseParams.view = uniformData.view;
-                diDenoiseParams.proj = uniformData.nonJitteredProj;
-                diDenoiseParams.prevView = uniformData.prevView;
-                diDenoiseParams.prevProj = uniformData.prevProj;
-
-                diDenoiseParams.motionVectorScale = glm::vec2(1.0f, 1.0f);
-                diDenoiseParams.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
-                diDenoiseParams.resetHistory = m_isFirstFrame || m_resetNRD;
-
-                restirDIDenoised = m_device->evaluateNRDDiffuseDI(diDenoiseParams, m_nrdDIDenoiser);
-                m_commandBuffers->executionBarrier();
-                m_commandBuffers->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
-            }
-
             uniformData.directLightingMode = m_directLightingMode;
-            uniformData.restirDIDirectLightingTextureIndex = restirDIDenoised
-                ? m_denoisedReSTIRDIDirectLighting->GetDescriptorIndexSlot()
-                : m_restirDIDirectLighting->GetDescriptorIndexSlot();
-            memcpy(m_uniformBuffersMapped[frameIndex], &uniformData, sizeof(shaderio::UniformBufferObject));
+            uniformData.restirDIDirectLightingTextureIndex = graph.GetSlotOr(frame.nrdDIAdded ? resources.ReSTIRDIDenoised : resources.ReSTIRDIDirect, NoTexture);
         }
         else
         {
-            uniformData.directLightingMode = 0; // Fall back to the brute-force loop if ReSTIR DI cannot run yet (e.g. TLAS build pending)
-            uniformData.restirDIDirectLightingTextureIndex = m_restirDIDirectLighting ? m_restirDIDirectLighting->GetDescriptorIndexSlot() : 0xFFFFFFFF;
-            memcpy(m_uniformBuffersMapped[frameIndex], &uniformData, sizeof(shaderio::UniformBufferObject));
+            uniformData.directLightingMode = 0;
+            uniformData.restirDIDirectLightingTextureIndex = NoTexture;
+        }
+    }
+
+    Renderer::MeshletDrawCursor Renderer::beginMeshletDraws(uint32_t firstInstance) const
+    {
+        MeshletDrawCursor cursor;
+        cursor.references = m_frame.meshletReferences;
+        cursor.instanceOffset = firstInstance;
+        return cursor;
+    }
+
+    void Renderer::drawMeshletQueue(NRI::CommandBuffer& cmd, MeshletDrawCursor& cursor, uint32_t count, NRI::Pipeline& pipeline, NRI::CullMode cullMode, bool depthWrite, bool blendEnable) const
+    {
+        if (count == 0 || frameIndex >= m_indirectBuffers.size() || !m_indirectBuffers[frameIndex])
+            return;
+
+        constexpr uint32_t cmdStride = sizeof(DrawMeshTasksIndirectCommand);
+
+        cursor.references.instanceReference = m_frame.baseInstanceAddress;
+        cursor.references.instanceBaseIndex = cursor.instanceOffset;
+        cmd.pushData(&cursor.references, sizeof(shaderio::PushConstantMeshlets));
+
+        if (cursor.boundPipeline != &pipeline)
+        {
+            cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, pipeline);
+            cursor.boundPipeline = &pipeline;
         }
 
-        // =========================================================================
-        // 3. LIGHTING PASS: PATH TRACER (Modes 18 & 19) OR DEFERRED LIGHTING
-        // =========================================================================
-        // runPathTracer computed earlier (before the reflections/DDGI/ReSTIR GI/DI sections); ReSTIR
-        // DI/GI may still have run above when m_pathTracerUsesRTXDI is enabled.
-        m_restirPTOutputValid = false;
-        if (runPathTracer && m_restirPTEnabled && m_restirPTInitialPipeline && m_restirPTFinalShadingPipeline &&
-            m_restirPTOutput && m_restirPTContext &&
-            m_restirPTReservoirBuffers[0] && m_restirPTReservoirBuffers[1] && m_restirPTReservoirBuffers[2] &&
-            (uniformData.tlasDeviceAddress != 0) && (uniformData.lightDataReference != 0))
-        {
-            NOX_PROFILE_GPU_SCOPE(*m_commandBuffers, "ReSTIR PT");
-            m_restirPTContext->SetFrameIndex(static_cast<uint32_t>(m_sceneFrameCounter));
-            RTXDI_PTBufferIndices ptBufferIndices = m_restirPTContext->GetBufferIndices();
-            RTXDI_ReservoirBufferParameters ptResParams = m_restirPTContext->GetReservoirBufferParameters();
-            glm::mat4 ptViewProj = uniformData.proj * uniformData.view;
-
-            // 1. Initial Sampling Pass
-            {
-                std::vector<NRI::RenderAttachDesc> ptiAttachments;
-                ptiAttachments.push_back({
-                    .attachment = m_restirPTOutput.get(), // debug-only output; real result lives in the reservoir buffer
-                    .loadOP = NRI::LoadOP::clear,
-                    .storeOP = NRI::StoreOP::store,
-                    .clearColor = {0.0f, 0.0f, 0.0f, 1.0f}
-                });
-                ptiAttachments.push_back({
-                    .attachment = m_restirPTPrimaryDirect.get(), // bounce-1 direct lighting, added in by Final Shading
-                    .loadOP = NRI::LoadOP::clear,
-                    .storeOP = NRI::StoreOP::store,
-                    .clearColor = {0.0f, 0.0f, 0.0f, 1.0f}
-                });
-
-                NRI::RenderDesc ptiDesc = {
-                    .renderArea = renderExtent,
-                    .colorAttachments = ptiAttachments
-                };
-
-                m_commandBuffers->beginRendering(ptiDesc);
-                m_commandBuffers->setViewportWithCount({0.0f, rh, rw, -rh}, 0.0f, 1.0f);
-                m_commandBuffers->setScissorWithCount(renderExtent);
-
-                m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_restirPTInitialPipeline);
-                m_commandBuffers->setCullMode(NRI::CullMode::None);
-                m_commandBuffers->setDepthTestEnable(false);
-                m_commandBuffers->setDepthWriteEnable(false);
-                for (uint32_t a = 0; a < ptiAttachments.size(); ++a)
-                {
-                    m_commandBuffers->setColorBlendEnable(a, false);
-                    m_commandBuffers->setColorWriteMask(a, NRI::ColorComponent::R | NRI::ColorComponent::G |
-                                                        NRI::ColorComponent::B | NRI::ColorComponent::A);
-                }
-
-                shaderio::PushConstantReSTIRPTInitial ptiPush{};
-                ptiPush.invViewProj = glm::inverse(ptViewProj);
-                ptiPush.cameraWorldPos = uniformData.cameraWorldPos;
-                ptiPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
-                ptiPush.lightDataReference = uniformData.lightDataReference;
-                ptiPush.reservoirBufferReference = m_restirPTReservoirBuffers[ptBufferIndices.initialPathTracerOutputBufferIndex]->getDeviceAddress();
-                ptiPush.preservedReservoirReference = m_restirPTReservoirBuffers[ptBufferIndices.initialPathTracerPreservedBufferIndex]->getDeviceAddress();
-                ptiPush.depthTextureIndex = m_depthResource->GetDescriptorIndexSlot();
-                ptiPush.gbufferNormalIndex = m_gbufferNormal->GetDescriptorIndexSlot();
-                ptiPush.gbufferAlbedoIndex = m_gbufferAlbedo->GetDescriptorIndexSlot();
-                ptiPush.gbufferMaterialIndex = m_gbufferMaterial->GetDescriptorIndexSlot();
-                ptiPush.viewportSize = glm::vec2(rw, rh);
-                ptiPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
-                ptiPush.reservoirBlockRowPitch = ptResParams.reservoirBlockRowPitch;
-                ptiPush.reservoirArrayPitch = ptResParams.reservoirArrayPitch;
-                ptiPush.firstLocalLightIndex = m_restirDIFirstLocalLight;
-                ptiPush.numLocalLights = m_restirDINumLocalLights;
-                ptiPush.firstInfiniteLightIndex = m_restirDIFirstInfiniteLight;
-                ptiPush.numInfiniteLights = m_restirDINumInfiniteLights;
-                ptiPush.numInitialSamples = m_restirPTNumInitialSamples;
-                ptiPush.maxBounceDepth = m_restirPTMaxBounceDepth;
-                ptiPush.maxRcVertexLength = m_restirPTMaxRcVertexLength;
-                ptiPush.numNeeSamples = m_restirPTNumNeeSamples;
-                ptiPush.roughnessThreshold = m_restirPTRoughnessThreshold;
-                ptiPush.distanceThreshold = m_restirPTDistanceThreshold;
-                ptiPush.skyboxTextureIndex = m_environmentCubemap ? m_environmentCubemap->GetDescriptorIndexSlot() : 0xFFFFFFFF;
-                m_commandBuffers->pushData(&ptiPush, sizeof(shaderio::PushConstantReSTIRPTInitial));
-
-                m_commandBuffers->drawMeshTasks(1, 1, 1);
-                m_commandBuffers->endRendering();
-                m_commandBuffers->executionBarrier();
-            }
-
-            // 2. Temporal Resampling Pass (RandomReplay/hybrid-shift reconnection against last frame's
-            // finalized reservoir) -- only runs once the resampling mode actually needs it, so buffer
-            // indices genuinely differ (None mode leaves both equal to 0, matching Initial's own gate).
-            bool restirPTTemporalActive = m_restirPTTemporalPipeline &&
-                ptBufferIndices.temporalResamplingInputBufferIndex != ptBufferIndices.initialPathTracerOutputBufferIndex;
-            if (restirPTTemporalActive)
-            {
-                std::vector<NRI::RenderAttachDesc> pttAttachments;
-                pttAttachments.push_back({
-                    .attachment = m_restirPTOutput.get(), // debug-only output; real result lives in the reservoir buffer
-                    .loadOP = NRI::LoadOP::clear,
-                    .storeOP = NRI::StoreOP::store,
-                    .clearColor = {0.0f, 0.0f, 0.0f, 1.0f}
-                });
-
-                NRI::RenderDesc pttDesc = {
-                    .renderArea = renderExtent,
-                    .colorAttachments = pttAttachments
-                };
-
-                m_commandBuffers->beginRendering(pttDesc);
-                m_commandBuffers->setViewportWithCount({0.0f, rh, rw, -rh}, 0.0f, 1.0f);
-                m_commandBuffers->setScissorWithCount(renderExtent);
-
-                m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_restirPTTemporalPipeline);
-                m_commandBuffers->setCullMode(NRI::CullMode::None);
-                m_commandBuffers->setDepthTestEnable(false);
-                m_commandBuffers->setDepthWriteEnable(false);
-                m_commandBuffers->setColorBlendEnable(0, false);
-                m_commandBuffers->setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G |
-                                                    NRI::ColorComponent::B | NRI::ColorComponent::A);
-
-                shaderio::PushConstantReSTIRPTTemporal pttPush{};
-                // invViewProj deliberately omitted -- see the struct's own comment in shaderIO.h: the
-                // shader reads it from g_UBO->invViewProj instead (same value, already computed there
-                // as glm::inverse(uniformData.proj * uniformData.view)), which was needed to fit this
-                // struct back under the device's 256-byte push-constant limit.
-                pttPush.prevInvViewProj = glm::inverse(uniformData.prevProj * uniformData.prevView);
-                pttPush.cameraWorldPos = uniformData.cameraWorldPos;
-                pttPush.prevCameraWorldPos = glm::vec4(m_prevCameraWorldPos, 0.0f);
-                pttPush.prevPrevCameraWorldPos = glm::vec4(m_prevPrevCameraWorldPos, 0.0f);
-                pttPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
-                pttPush.lightDataReference = uniformData.lightDataReference;
-                pttPush.currentReservoirReference = m_restirPTReservoirBuffers[ptBufferIndices.initialPathTracerOutputBufferIndex]->getDeviceAddress();
-                pttPush.historyReservoirReference = m_restirPTReservoirBuffers[ptBufferIndices.temporalResamplingInputBufferIndex]->getDeviceAddress();
-                pttPush.viewportSize = glm::vec2(rw, rh);
-                pttPush.depthTextureIndex = m_depthResource->GetDescriptorIndexSlot();
-                pttPush.prevDepthTextureIndex = m_prevDepthResource ? m_prevDepthResource->GetDescriptorIndexSlot() : 0xFFFFFFFF;
-                pttPush.gbufferNormalIndex = m_gbufferNormal->GetDescriptorIndexSlot();
-                pttPush.prevNormalTextureIndex = m_prevGbufferNormal ? m_prevGbufferNormal->GetDescriptorIndexSlot() : 0xFFFFFFFF;
-                pttPush.gbufferAlbedoIndex = m_gbufferAlbedo->GetDescriptorIndexSlot();
-                pttPush.prevAlbedoTextureIndex = m_prevGbufferAlbedo ? m_prevGbufferAlbedo->GetDescriptorIndexSlot() : 0xFFFFFFFF;
-                pttPush.gbufferMaterialIndex = m_gbufferMaterial->GetDescriptorIndexSlot();
-                pttPush.prevMaterialTextureIndex = m_prevGbufferMaterial ? m_prevGbufferMaterial->GetDescriptorIndexSlot() : 0xFFFFFFFF;
-                pttPush.gbufferVelocityIndex = m_gbufferVelocity ? m_gbufferVelocity->GetDescriptorIndexSlot() : 0xFFFFFFFF;
-                pttPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
-                pttPush.reservoirBlockRowPitch = ptResParams.reservoirBlockRowPitch;
-                pttPush.reservoirArrayPitch = ptResParams.reservoirArrayPitch;
-                pttPush.maxBounceDepth = m_restirPTMaxBounceDepth;
-                pttPush.maxRcVertexLength = m_restirPTMaxRcVertexLength;
-                pttPush.roughnessThreshold = m_restirPTRoughnessThreshold;
-                pttPush.distanceThreshold = m_restirPTDistanceThreshold;
-                pttPush.depthThreshold = m_restirPTDepthThreshold;
-                pttPush.normalThreshold = m_restirPTNormalThreshold;
-                pttPush.maxHistoryLength = m_restirPTMaxHistoryLength;
-                pttPush.maxReservoirAge = m_restirPTMaxReservoirAge;
-                pttPush.enablePermutationSampling = m_restirPTEnablePermutationSampling ? 1u : 0u;
-                pttPush.skyboxTextureIndex = m_environmentCubemap ? m_environmentCubemap->GetDescriptorIndexSlot() : 0xFFFFFFFF;
-                m_commandBuffers->pushData(&pttPush, sizeof(shaderio::PushConstantReSTIRPTTemporal));
-
-                m_commandBuffers->drawMeshTasks(1, 1, 1);
-                m_commandBuffers->endRendering();
-                m_commandBuffers->executionBarrier();
-            }
-
-            // 3. Final Shading Pass
-            {
-                std::vector<NRI::RenderAttachDesc> ptfAttachments;
-                ptfAttachments.push_back({
-                    .attachment = m_restirPTOutput.get(),
-                    .loadOP = NRI::LoadOP::clear,
-                    .storeOP = NRI::StoreOP::store,
-                    .clearColor = {0.0f, 0.0f, 0.0f, 1.0f}
-                });
-
-                NRI::RenderDesc ptfDesc = {
-                    .renderArea = renderExtent,
-                    .colorAttachments = ptfAttachments
-                };
-
-                m_commandBuffers->beginRendering(ptfDesc);
-                m_commandBuffers->setViewportWithCount({0.0f, rh, rw, -rh}, 0.0f, 1.0f);
-                m_commandBuffers->setScissorWithCount(renderExtent);
-
-                m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_restirPTFinalShadingPipeline);
-                m_commandBuffers->setCullMode(NRI::CullMode::None);
-                m_commandBuffers->setDepthTestEnable(false);
-                m_commandBuffers->setDepthWriteEnable(false);
-                m_commandBuffers->setColorBlendEnable(0, false);
-                m_commandBuffers->setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G |
-                                                    NRI::ColorComponent::B | NRI::ColorComponent::A);
-
-                shaderio::PushConstantReSTIRPTFinalShading ptfPush{};
-                ptfPush.invViewProj = glm::inverse(ptViewProj);
-                ptfPush.cameraWorldPos = uniformData.cameraWorldPos;
-                ptfPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
-                ptfPush.lightDataReference = uniformData.lightDataReference;
-                ptfPush.reservoirReference = m_restirPTReservoirBuffers[ptBufferIndices.finalShadingInputBufferIndex]->getDeviceAddress();
-                ptfPush.preservedReservoirReference = m_restirPTReservoirBuffers[ptBufferIndices.initialPathTracerPreservedBufferIndex]->getDeviceAddress();
-                ptfPush.depthTextureIndex = m_depthResource->GetDescriptorIndexSlot();
-                ptfPush.gbufferNormalIndex = m_gbufferNormal->GetDescriptorIndexSlot();
-                ptfPush.primaryDirectTextureIndex = m_restirPTPrimaryDirect->GetDescriptorIndexSlot();
-                ptfPush.viewportSize = glm::vec2(rw, rh);
-                ptfPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
-                ptfPush.reservoirBlockRowPitch = ptResParams.reservoirBlockRowPitch;
-                ptfPush.reservoirArrayPitch = ptResParams.reservoirArrayPitch;
-                // Shares the same "PT Denoiser" setting/combo as the plain path tracer -- REBLUR needs the
-                // shader's own YCoCg pre-encode (see LinearToYCoCg in ReSTIRPTFinalShading.slang), RELAX
-                // reads plain linear color, matching PathTracer.slang's own convention exactly.
-                ptfPush.denoiserMode = static_cast<uint32_t>(m_nrdPTDenoiser);
-                // RTXDI PT's final-shading decorrelation path: randomly use the preserved, unresampled
-                // initial reservoir to break temporal over-correlation. Stagnancy mode needs the SDK
-                // duplication-map pass; this renderer does not have that pass yet, so use Uniform mode.
-                ptfPush.decorrelationFactor = restirPTTemporalActive ? 0.4f : 0.0f;
-                ptfPush.decorrelationMode = restirPTTemporalActive ? 1u : 0u; // RTXDI_PT_DECORRELATION_MODE_UNIFORM/NONE
-                m_commandBuffers->pushData(&ptfPush, sizeof(shaderio::PushConstantReSTIRPTFinalShading));
-
-                m_commandBuffers->drawMeshTasks(1, 1, 1);
-                m_commandBuffers->endRendering();
-                m_commandBuffers->executionBarrier();
-            }
-
-            m_restirPTOutputValid = true;
-
-            // =========================================================================
-            // NRD DENOISING PASS -- shares m_nrdPTDenoiser/m_denoisedPathTracer/m_pathTracerDenoised
-            // with the plain path tracer (see the `else if` branch below) since the two are mutually
-            // exclusive per frame (only one of them ever runs), so there's no benefit to separate state.
-            // DLSS Ray Reconstruction needs no equivalent block here: dlssParams.inputColor already
-            // prefers m_restirPTOutput whenever m_restirPTOutputValid is true (see evaluateDLSS's call
-            // site below), and DLSS-RR denoises whatever raw HDR color it's given directly -- it doesn't
-            // care which technique produced that color, only that the G-buffer guide textures (normal/
-            // roughness/motion/depth) it also reads are valid, which they already are here.
-            // =========================================================================
-            m_pathTracerDenoised = false;
-            bool restirPTCameraMoved = (uniformData.view != m_pathTracerPrevView);
-            m_pathTracerPrevView = uniformData.view;
-            if (m_nrdPTDenoiser != NRI::NRDDiffuseDenoiser::Off && m_device->isNRDInitialized() &&
-                m_denoisedPathTracer && m_viewZ && m_nrdNormalRoughness)
-            {
-                NOX_PROFILE_GPU_SCOPE(*m_commandBuffers, "NRD PT");
-                NRI::NRDDiffuseParams ptDenoiseParams{};
-                ptDenoiseParams.inDiffuseRadianceHitDist = m_restirPTOutput.get();
-                ptDenoiseParams.inMotionVectors = m_gbufferVelocity.get();
-                ptDenoiseParams.inNormalRoughness = m_nrdNormalRoughness.get();
-                ptDenoiseParams.inViewZ = m_viewZ.get();
-                ptDenoiseParams.outDenoisedDiffuse = m_denoisedPathTracer.get();
-                ptDenoiseParams.commandBuffer = m_commandBuffers.get();
-
-                ptDenoiseParams.view = uniformData.view;
-                ptDenoiseParams.proj = uniformData.nonJitteredProj;
-                ptDenoiseParams.prevView = uniformData.prevView;
-                ptDenoiseParams.prevProj = uniformData.prevProj;
-
-                ptDenoiseParams.motionVectorScale = glm::vec2(1.0f, 1.0f);
-                ptDenoiseParams.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
-                ptDenoiseParams.resetHistory = m_isFirstFrame || m_resetNRD || restirPTCameraMoved;
-
-                m_pathTracerDenoised = m_device->evaluateNRDDiffusePT(ptDenoiseParams, m_nrdPTDenoiser);
-                m_commandBuffers->executionBarrier();
-                m_commandBuffers->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
-
-                if (m_pathTracerDenoised && m_nrdPTDenoiser == NRI::NRDDiffuseDenoiser::REBLUR && m_ycocgDecodePipeline)
-                {
-                    m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Compute, *m_ycocgDecodePipeline);
-                    shaderio::PushConstantYCoCgDecode decodePush{};
-                    decodePush.readTextureIndex = m_denoisedPathTracer->GetDescriptorIndexSlot();
-                    decodePush.writeTextureIndex = m_denoisedPathTracerWriteSlot;
-                    decodePush.width = m_renderSize.width;
-                    decodePush.height = m_renderSize.height;
-                    m_commandBuffers->pushData(&decodePush, sizeof(shaderio::PushConstantYCoCgDecode));
-                    m_commandBuffers->dispatch((m_renderSize.width + 7) / 8, (m_renderSize.height + 7) / 8, 1);
-                    m_commandBuffers->executionBarrier();
-                }
-            }
-        }
-        else if (runPathTracer && m_pathTracerPipeline && m_pathTracerAccum[0] && m_pathTracerAccum[1])
-        {
-            NOX_PROFILE_GPU_SCOPE(*m_commandBuffers, "Path Tracer");
-            bool dlssRRActive = m_dlssEnabled && (m_dlssMode != NRI::UpscaleMode::Off) && m_dlssRayReconstructionEnabled;
-            bool nrdPTActive = m_nrdPTDenoiser != NRI::NRDDiffuseDenoiser::Off;
-            bool cameraMoved = (uniformData.view != m_pathTracerPrevView);
-
-            // If DLSS-RR or NRD is active, it denoises 1-SPP per frame via motion vectors instead --
-            // running our own progressive accumulation on top would double up on temporal blending.
-            // Accumulate progressively only when neither denoiser is handling that job, and static.
-            bool accumulate = m_pathTracingAccumulation && (m_debugMode != 18) && !dlssRRActive && !nrdPTActive;
-            if (cameraMoved || !accumulate)
-            {
-                m_pathTracerSampleCount = 0;
-            }
-            m_pathTracerPrevView = uniformData.view;
-            m_pathTracerSampleCount++;
-
-            uint32_t writeIndex = m_pathTracerSampleCount % 2;
-            uint32_t readIndex = 1 - writeIndex;
-
-            std::vector<NRI::RenderAttachDesc> ptAttachments;
-            ptAttachments.push_back({
-                .attachment = m_pathTracerAccum[writeIndex].get(),
-                .loadOP = NRI::LoadOP::clear,
-                .storeOP = NRI::StoreOP::store,
-                .clearColor = {0.0f, 0.0f, 0.0f, 1.0f}
-            });
-
-            NRI::RenderDesc ptDesc = {
-                .renderArea = renderExtent,
-                .colorAttachments = ptAttachments
-            };
-
-            m_commandBuffers->beginRendering(ptDesc);
-            m_commandBuffers->setViewportWithCount({0.0f, rh, rw, -rh}, 0.0f, 1.0f);
-            m_commandBuffers->setScissorWithCount(renderExtent);
-
-            m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_pathTracerPipeline);
-            m_commandBuffers->setCullMode(NRI::CullMode::None);
-            m_commandBuffers->setDepthTestEnable(false);
-            m_commandBuffers->setDepthWriteEnable(false);
-            m_commandBuffers->setColorBlendEnable(0, false);
-            m_commandBuffers->setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
-
-            glm::mat4 viewProj = uniformData.proj * uniformData.view;
-            shaderio::PushConstantPathTracer ptPush{};
-            ptPush.invViewProj = glm::inverse(viewProj);
-            ptPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
-            ptPush.viewportSize = glm::vec2(rw, rh);
-            ptPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
-            ptPush.maxBounces = 3;
-            ptPush.accumulationTextureIndex = m_pathTracerAccum[readIndex]->GetDescriptorIndexSlot();
-            ptPush.sampleCount = accumulate ? m_pathTracerSampleCount : 1;
-            ptPush.debugMode = accumulate ? 19 : 18;
-            ptPush.skyboxTextureIndex = m_environmentCubemap ? m_environmentCubemap->GetDescriptorIndexSlot() : 0xFFFFFFFF;
-            ptPush.denoiserMode = static_cast<uint32_t>(m_nrdPTDenoiser);
-            ptPush.restirGIDiffuseTextureIndex = uniformData.restirGIDiffuseTextureIndex;
-            bool restirGIActuallyDenoisedForPT = m_denoisedReSTIRGIDiffuse &&
-                uniformData.restirGIDiffuseTextureIndex == m_denoisedReSTIRGIDiffuse->GetDescriptorIndexSlot();
-            ptPush.restirGIDenoiserMode = restirGIActuallyDenoisedForPT ? static_cast<uint32_t>(m_nrdGIDenoiser) : 0u;
-            ptPush.restirDIDirectLightingTextureIndex = uniformData.restirDIDirectLightingTextureIndex;
-            bool restirDIActuallyDenoisedForPT = m_denoisedReSTIRDIDirectLighting &&
-                uniformData.restirDIDirectLightingTextureIndex == m_denoisedReSTIRDIDirectLighting->GetDescriptorIndexSlot();
-            ptPush.restirDIDenoiserMode = restirDIActuallyDenoisedForPT ? static_cast<uint32_t>(m_nrdDIDenoiser) : 0u;
-            m_commandBuffers->pushData(&ptPush, sizeof(shaderio::PushConstantPathTracer));
-
-            m_commandBuffers->drawMeshTasks(1, 1, 1);
-            m_commandBuffers->endRendering();
-            m_commandBuffers->executionBarrier();
-
-            // =========================================================================
-            // NRD PATH TRACER DENOISING PASS (fallback for hardware/preference without DLSS-RR)
-            // =========================================================================
-            m_pathTracerDenoised = false;
-            if (nrdPTActive && m_device->isNRDInitialized() &&
-                m_pathTracerAccum[writeIndex] && m_denoisedPathTracer && m_viewZ && m_nrdNormalRoughness)
-            {
-                NOX_PROFILE_GPU_SCOPE(*m_commandBuffers, "NRD PT");
-                NRI::NRDDiffuseParams ptDenoiseParams{};
-                ptDenoiseParams.inDiffuseRadianceHitDist = m_pathTracerAccum[writeIndex].get();
-                ptDenoiseParams.inMotionVectors = m_gbufferVelocity.get();
-                ptDenoiseParams.inNormalRoughness = m_nrdNormalRoughness.get();
-                ptDenoiseParams.inViewZ = m_viewZ.get();
-                ptDenoiseParams.outDenoisedDiffuse = m_denoisedPathTracer.get();
-                ptDenoiseParams.commandBuffer = m_commandBuffers.get();
-
-                ptDenoiseParams.view = uniformData.view;
-                ptDenoiseParams.proj = uniformData.nonJitteredProj;
-                ptDenoiseParams.prevView = uniformData.prevView;
-                ptDenoiseParams.prevProj = uniformData.prevProj;
-
-                ptDenoiseParams.motionVectorScale = glm::vec2(1.0f, 1.0f);
-                ptDenoiseParams.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
-                ptDenoiseParams.resetHistory = m_isFirstFrame || m_resetNRD || cameraMoved;
-
-                m_pathTracerDenoised = m_device->evaluateNRDDiffusePT(ptDenoiseParams, m_nrdPTDenoiser);
-                m_commandBuffers->executionBarrier();
-                m_commandBuffers->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
-
-                // REBLUR's output is still YCoCg-encoded (see LinearToYCoCg in PathTracer.slang) --
-                // decode it back to linear in place before DLSS/tonemapping (which don't know about
-                // YCoCg) ever read it. RELAX never encodes YCoCg, so this is skipped for it.
-                if (m_pathTracerDenoised && m_nrdPTDenoiser == NRI::NRDDiffuseDenoiser::REBLUR && m_ycocgDecodePipeline)
-                {
-                    m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Compute, *m_ycocgDecodePipeline);
-                    shaderio::PushConstantYCoCgDecode decodePush{};
-                    decodePush.readTextureIndex = m_denoisedPathTracer->GetDescriptorIndexSlot();
-                    decodePush.writeTextureIndex = m_denoisedPathTracerWriteSlot;
-                    decodePush.width = m_renderSize.width;
-                    decodePush.height = m_renderSize.height;
-                    m_commandBuffers->pushData(&decodePush, sizeof(shaderio::PushConstantYCoCgDecode));
-                    m_commandBuffers->dispatch((m_renderSize.width + 7) / 8, (m_renderSize.height + 7) / 8, 1);
-                    m_commandBuffers->executionBarrier();
-                }
-            }
-        }
-        else if (m_deferredLightingPipeline)
-        {
-            NOX_PROFILE_GPU_SCOPE(*m_commandBuffers, "Deferred Lighting");
-            std::vector<NRI::RenderAttachDesc> lightingAttachments;
-            lightingAttachments.push_back({
-                .attachment = m_hdrSceneResource.get(),
-                .loadOP = NRI::LoadOP::clear,
-                .storeOP = NRI::StoreOP::store,
-                .clearColor = {0.0f, 0.0f, 0.0f, 1.0f}
-            });
-
-            NRI::RenderDesc lightingDesc = {
-                .renderArea = renderExtent,
-                .colorAttachments = lightingAttachments
-            };
-
-            m_commandBuffers->beginRendering(lightingDesc);
-            m_commandBuffers->setViewportWithCount({0.0f, rh, rw, -rh}, 0.0f, 1.0f);
-            m_commandBuffers->setScissorWithCount(renderExtent);
-
-            m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_deferredLightingPipeline);
-            m_commandBuffers->setCullMode(NRI::CullMode::None);
-            m_commandBuffers->setDepthTestEnable(false);
-            m_commandBuffers->setDepthWriteEnable(false);
-            m_commandBuffers->setColorBlendEnable(0, false);
-            m_commandBuffers->setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
-
-            glm::mat4 viewProj = uniformData.proj * uniformData.view;
-            shaderio::PushConstantDeferredLighting lightingPush{};
-            lightingPush.invViewProj = glm::inverse(viewProj);
-            lightingPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
-            lightingPush.visibilityTextureIndex = m_visibilityResource->GetDescriptorIndexSlot();
-            lightingPush.gbufferAlbedoIndex = m_gbufferAlbedo->GetDescriptorIndexSlot();
-            lightingPush.gbufferNormalIndex = m_gbufferNormal->GetDescriptorIndexSlot();
-            lightingPush.gbufferMaterialIndex = m_gbufferMaterial->GetDescriptorIndexSlot();
-            lightingPush.gbufferEmissionIndex = m_gbufferEmission->GetDescriptorIndexSlot();
-            lightingPush.depthTextureIndex = m_depthResource->GetDescriptorIndexSlot();
-            lightingPush.viewportSize = glm::vec2(rw, rh);
-            lightingPush.debugMode = m_debugMode;
-            lightingPush.gbufferVelocityIndex = m_gbufferVelocity->GetDescriptorIndexSlot();
-            lightingPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
-            // m_denoisedShadowMask is only re-evaluated when BOTH m_nrdShadowsEnabled AND
-            // (uniformData.enableRTShadows != 0) are true (see the NRD shadow denoising pass's own
-            // gate) -- checking m_rayTracingShadows alone here isn't enough, because enableRTShadows is
-            // (m_rayTracingEnabled && m_rayTracingShadows): turning off the MASTER "Hybrid Ray Tracing"
-            // toggle leaves m_rayTracingShadows sitting at true (setRayTracingEnabled is a separate,
-            // independent setter), so a m_rayTracingShadows-only check still thought the denoised
-            // texture was fresh even though the denoiser pass had correctly stopped updating it -- same
-            // frozen-shadow-follows-the-camera bug, just reachable through the other toggle too. Using
-            // the same uniformData.enableRTShadows the shadow mask/NRD passes themselves already
-            // computed this frame guarantees this can never drift out of sync with them again.
-            bool shadowDenoisedAvailable = m_nrdShadowsEnabled && (uniformData.enableRTShadows != 0) && m_denoisedShadowMask;
-            lightingPush.shadowMaskTextureIndex = shadowDenoisedAvailable
-                ? m_denoisedShadowMask->GetDescriptorIndexSlot()
-                : (m_rawShadowMask ? m_rawShadowMask->GetDescriptorIndexSlot() : 0);
-            uint32_t nrdShadowBit = shadowDenoisedAvailable ? 1 : 0;
-            // Only report REBLUR/RELAX to the shader when the denoised texture is actually what's
-            // bound below -- if NRD hasn't initialized yet (or the resource is momentarily null during
-            // a resize) this falls back to the raw buffer, which is plain linear RGB either way, so
-            // reporting the denoiser mode in that case would make the shader wrongly YCoCg-decode it.
-            // Same reasoning as shadowDenoisedAvailable above -- uniformData.enableRTReflections (not
-            // m_rayTracingReflections alone) matches exactly what the NRD reflection denoising pass
-            // itself gates on.
-            bool reflectionActuallyDenoised = m_nrdReflectionDenoiser != NRI::NRDReflectionDenoiser::Off && (uniformData.enableRTReflections != 0) && m_denoisedReflection;
-            uint32_t nrdReflMode = reflectionActuallyDenoised ? static_cast<uint32_t>(m_nrdReflectionDenoiser) : 0;
-            lightingPush.nrdShadowsEnabled = nrdShadowBit | (nrdReflMode << 1);
-            lightingPush.reflectionTextureIndex = reflectionActuallyDenoised
-                ? m_denoisedReflection->GetDescriptorIndexSlot()
-                : (m_rawReflection ? m_rawReflection->GetDescriptorIndexSlot() : 0);
-            lightingPush.diffuseGIMode = uniformData.diffuseGIMode;
-            lightingPush.restirGIDiffuseTextureIndex = uniformData.restirGIDiffuseTextureIndex;
-            // Only meaningful when the bound texture is actually the denoised one -- if REBLUR/RELAX
-            // is selected but denoising was skipped this frame (e.g. NRD not initialized yet),
-            // uniformData.restirGIDiffuseTextureIndex falls back to the raw buffer, which is already
-            // plain linear RGB, so compare against the denoised texture's own slot rather than trusting
-            // the m_nrdGIDenoiser setting alone.
-            bool restirGIActuallyDenoised = m_denoisedReSTIRGIDiffuse &&
-                uniformData.restirGIDiffuseTextureIndex == m_denoisedReSTIRGIDiffuse->GetDescriptorIndexSlot();
-            lightingPush.restirGIDenoiserMode = restirGIActuallyDenoised ? static_cast<uint32_t>(m_nrdGIDenoiser) : 0;
-            lightingPush.directLightingMode = uniformData.directLightingMode;
-            lightingPush.restirDIDirectLightingTextureIndex = uniformData.restirDIDirectLightingTextureIndex;
-            // Same reasoning as restirGIActuallyDenoised above: only decode YCoCg when the bound
-            // texture is actually the denoised one this frame.
-            bool restirDIActuallyDenoised = m_denoisedReSTIRDIDirectLighting &&
-                uniformData.restirDIDirectLightingTextureIndex == m_denoisedReSTIRDIDirectLighting->GetDescriptorIndexSlot();
-            lightingPush.restirDIDenoiserMode = restirDIActuallyDenoised ? static_cast<uint32_t>(m_nrdDIDenoiser) : 0;
-            m_commandBuffers->pushData(&lightingPush, sizeof(shaderio::PushConstantDeferredLighting));
-
-            m_commandBuffers->drawMeshTasks(1, 1, 1);
-            m_commandBuffers->endRendering();
-            m_commandBuffers->executionBarrier();
-        }
-
-        // =========================================================================
-        // 4. FORWARD 3D PASS: UNLIT & SKYBOX (Rendered in HDR into m_hdrSceneResource)
-        // =========================================================================
-        {
-            NOX_PROFILE_GPU_SCOPE(*m_commandBuffers, "Forward 3D");
-            std::vector<NRI::RenderAttachDesc> forward3DAttachments;
-            forward3DAttachments.push_back({
-                .attachment = m_hdrSceneResource.get(),
-                .loadOP = NRI::LoadOP::load,
-                .storeOP = NRI::StoreOP::store
-            });
-            forward3DAttachments.push_back({
-                .attachment = m_entityResource.get(),
-                .loadOP = NRI::LoadOP::load,
-                .storeOP = NRI::StoreOP::store
-            });
-
-            NRI::RenderAttachDesc forwardDepthAttachment = {
-                .attachment = m_depthResource.get(),
-                .loadOP = NRI::LoadOP::load,
-                .storeOP = NRI::StoreOP::store
-            };
-
-            NRI::RenderDesc forward3DDesc = {
-                .renderArea = renderExtent,
-                .colorAttachments = forward3DAttachments,
-                .depthAttachment = forwardDepthAttachment
-            };
-
-            m_commandBuffers->beginRendering(forward3DDesc);
-            m_commandBuffers->setViewportWithCount({0.0f, rh, rw, -rh}, 0.0f, 1.0f);
-            m_commandBuffers->setScissorWithCount(renderExtent);
-
-            // A. UNLIT MESHES
-            if (m_unlitPipeline && (m_unlitCount > 0 || m_unlitDoubleSidedCount > 0))
-            {
-                boundPipeline = nullptr;
-                m_commandBuffers->setDepthTestEnable(true);
-                m_commandBuffers->setDepthWriteEnable(true);
-                m_commandBuffers->setDepthCompareOp(NRI::CompareOp::GreaterOrEqual);
-                m_commandBuffers->setColorBlendEnable(0, false);
-                m_commandBuffers->setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
-                m_commandBuffers->setColorBlendEnable(1, false);
-                m_commandBuffers->setColorWriteMask(1, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
-
-                drawPass(m_unlitCount, *m_unlitPipeline, NRI::CullMode::Back, true, false);
-                drawPass(m_unlitDoubleSidedCount, *m_unlitPipeline, NRI::CullMode::None, true, false);
-            }
-
-            // B. SKYBOX (Tested against depth == 0.0)
-            if (m_skyboxPipeline && m_environmentCubemap && m_debugMode == 0)
-            {
-                m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_skyboxPipeline);
-                m_commandBuffers->setCullMode(NRI::CullMode::None);
-                m_commandBuffers->setDepthTestEnable(true);
-                m_commandBuffers->setDepthWriteEnable(false);
-                m_commandBuffers->setDepthCompareOp(NRI::CompareOp::GreaterOrEqual);
-                m_commandBuffers->setColorBlendEnable(0, false);
-                m_commandBuffers->setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
-                m_commandBuffers->setColorBlendEnable(1, false);
-                m_commandBuffers->setColorWriteMask(1, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
-
-                shaderio::PushConstantSkybox skyboxPush{};
-                skyboxPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
-                skyboxPush.cubemapIndex = m_environmentCubemap->GetDescriptorIndexSlot();
-                m_commandBuffers->pushData(&skyboxPush, sizeof(shaderio::PushConstantSkybox));
-                m_commandBuffers->drawMeshTasks(1, 1, 1);
-            }
-
-            // C. TRANSPARENT FORWARD PASS (Back-to-front sorted, Alpha Blending)
-            bool hasAnyTransparent = m_transparentCount > 0 || m_transparentDoubleSidedCount > 0 ||
-                                      m_transparentUnlitCount > 0 || m_transparentUnlitDoubleSidedCount > 0;
-            if (m_unlitPipeline && m_transparentLitPipeline && hasAnyTransparent)
-            {
-                boundPipeline = nullptr;
-                m_commandBuffers->setDepthTestEnable(true);
-                m_commandBuffers->setDepthWriteEnable(false);
-                m_commandBuffers->setDepthCompareOp(NRI::CompareOp::GreaterOrEqual);
-                m_commandBuffers->setColorBlendEnable(0, true);
-                m_commandBuffers->setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
-                m_commandBuffers->setColorBlendEnable(1, false);
-                m_commandBuffers->setColorWriteMask(1, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
-
-                // Non-unlit Blend objects get real shading now (same BRDF/IBL the deferred opaque
-                // path uses, via PBRLighting.slang) instead of a flat baseColor pass-through, so
-                // they don't look like they're glowing/self-lit next to properly shaded Opaque/Mask
-                // geometry. True KHR_materials_unlit objects still use the flat shader, correctly.
-                //
-                // CullMode matches each object's own doubleSided flag (mirroring the opaque/mask
-                // queues) instead of a blanket CullMode::None - a closed, single-sided translucent
-                // shape (a sphere/box shell, not a flat card) needs its own backface actually culled,
-                // or both the near and far hemisphere/wall triangles rasterize and alpha-blend on
-                // top of each other, which washes the result out instead of a clean single surface.
-                drawPass(m_transparentCount, *m_transparentLitPipeline, NRI::CullMode::Back, false, true);
-                drawPass(m_transparentDoubleSidedCount, *m_transparentLitPipeline, NRI::CullMode::None, false, true);
-                drawPass(m_transparentUnlitCount, *m_unlitPipeline, NRI::CullMode::Back, false, true);
-                drawPass(m_transparentUnlitDoubleSidedCount, *m_unlitPipeline, NRI::CullMode::None, false, true);
-
-                m_commandBuffers->setColorBlendEnable(0, false);
-                m_commandBuffers->setDepthWriteEnable(true);
-            }
-
-            // D. DDGI PROBE SPHERES (Debug Mode 17: Visualizes 3D Probe Grid with Irradiance)
-            if (m_ddgiDebugSpheresPipeline && m_debugMode == 17 && totalDDGIProbes > 0 && m_ddgiIrradiance[m_ddgiHistoryIndex])
-            {
-                m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_ddgiDebugSpheresPipeline);
-                m_commandBuffers->setCullMode(NRI::CullMode::None);
-                m_commandBuffers->setDepthTestEnable(!m_ddgiDebugXRay);
-                m_commandBuffers->setDepthWriteEnable(false);
-                m_commandBuffers->setDepthCompareOp(NRI::CompareOp::GreaterOrEqual);
-                m_commandBuffers->setColorBlendEnable(0, false);
-                m_commandBuffers->setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
-                m_commandBuffers->setColorBlendEnable(1, false);
-                m_commandBuffers->setColorWriteMask(1, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
-
-                shaderio::PushConstantDDGIDebug debugPush{};
-                debugPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
-                debugPush.probeCountTotal = totalDDGIProbes;
-                debugPush.sphereRadius = m_ddgiDebugSphereRadius;
-                debugPush.irradianceAtlasIndex = m_ddgiIrradiance[m_ddgiHistoryIndex]->GetDescriptorIndexSlot();
-                m_commandBuffers->pushData(&debugPush, sizeof(shaderio::PushConstantDDGIDebug));
-
-                m_commandBuffers->drawMeshTasks(totalDDGIProbes, 1, 1);
-            }
-
-            m_commandBuffers->endRendering();
-            m_commandBuffers->executionBarrier();
-        }
-
-        // Cleared here, now that every NRD consumer this frame (shadows/reflections above, and
-        // GI/DI/path-tracer's own denoise passes inside the lighting-pass switch just above) has had a
-        // chance to read it as a one-shot "a denoiser was just toggled, flush history" signal.
-        m_resetNRD = false;
-
-        // 4.5 DLSS EVALUATION PASS (via NRI Device Abstraction)
-        // =========================================================================
-        bool dlssActive = false;
-        if (m_dlssEnabled && m_dlssMode != NRI::UpscaleMode::Off && m_device->isDLSSSupported() && m_dlssOutputResource)
-        {
-            NOX_PROFILE_GPU_SCOPE(*m_commandBuffers, "DLSS");
-            uint32_t ptWriteIndex = m_pathTracerSampleCount % 2;
-
-            NRI::DLSSParams dlssParams{};
-            // Route the noisy 1-SPP Path Tracer buffer to DLSS when Path Tracing is active -- unless
-            // NRD already denoised it this frame (mutually exclusive with DLSS-RR, so DLSS here is
-            // acting as pure upscaling), in which case feed it the already-denoised, already-decoded
-            // linear result instead of the raw noisy one. ReSTIR PT's output (already RIS-resampled,
-            // one path per pixel from numInitialSamples candidates) takes priority over the plain path
-            // tracer's raw accumulation buffer when it ran this frame.
-            dlssParams.inputColor = m_restirPTOutputValid
-                ? (m_pathTracerDenoised ? m_denoisedPathTracer.get() : m_restirPTOutput.get())
-                : (runPathTracer
-                    ? (m_pathTracerDenoised ? m_denoisedPathTracer.get() : m_pathTracerAccum[ptWriteIndex].get())
-                    : m_hdrSceneResource.get());
-            dlssParams.outputColor = m_dlssOutputResource.get();
-            dlssParams.depth = m_depthResource.get();
-            dlssParams.motionVectors = m_gbufferVelocity.get();
-            dlssParams.albedo = m_gbufferAlbedo.get();
-            dlssParams.specularAlbedo = m_gbufferSpecular.get();
-            dlssParams.normal = m_gbufferNormal.get();
-            dlssParams.roughness = m_gbufferMaterial.get();
-            dlssParams.rayReconstruction = m_dlssRayReconstructionEnabled;
-            dlssParams.commandBuffer = m_commandBuffers.get();
-
-            dlssParams.nonJitteredProj = uniformData.nonJitteredProj;
-            dlssParams.view = uniformData.view;
-            dlssParams.prevNonJitteredProj = uniformData.prevProj;
-            dlssParams.prevView = uniformData.prevView;
-
-            dlssParams.jitterOffset = m_currentJitter;
-            dlssParams.cameraPos = m_cameraPosition;
-            dlssParams.cameraUp = m_cameraUp;
-            dlssParams.cameraRight = m_cameraRight;
-            dlssParams.cameraFwd = m_cameraForward;
-            dlssParams.cameraNear = m_cameraNear;
-            dlssParams.cameraFovRad = glm::radians(m_cameraFOV);
-            dlssParams.mode = m_dlssMode;
-            dlssParams.reset = m_isFirstFrame || m_resetDLSS;
-            m_resetDLSS = false;
-
-            dlssActive = m_device->evaluateDLSS(dlssParams);
-        }
-        m_commandBuffers->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
-
-        // outputExtent/ow/oh: final display/swapchain resolution, used by everything from here on
-        // (post-process, 2D overlays, outline, present) - as opposed to renderExtent/rw/rh above,
-        // which is the (possibly smaller, when DLSS is scaling) resolution the 3D scene rendered at.
-        NRI::Extent2D outputExtent = m_isEditor ? m_viewportSize : m_swapChainExtent;
-        float ow = static_cast<float>(outputExtent.width);
-        float oh = static_cast<float>(outputExtent.height);
-
-        // 4.6 Propagate render-resolution entity IDs/depth up to display resolution. The 2D overlay
-        // pass right below composites against the final image and needs to depth-test world-space 2D
-        // content (e.g. in-world text/signs) against the 3D scene, and mouse-picking/the outline effect
-        // need entity IDs at full display resolution - a nearest blit is the cheapest way to give them
-        // that without re-rendering the 3D scene a second time at display resolution. Everything
-        // downstream reads exclusively from the Hi copies, so this always has to run even at 1:1
-        // (DLSS off/DLAA), where it's just a same-size copy.
-        NOX_PROFILE_GPU_BEGIN(*m_commandBuffers, "Entity/Depth Blit");
-        m_entityResource->blitTo(*m_commandBuffers, *m_entityResourceHi);
-        m_depthResource->blitTo(*m_commandBuffers, *m_depthResourceHi);
-        m_commandBuffers->executionBarrier();
-        NOX_PROFILE_GPU_END(*m_commandBuffers);
-
-        // =========================================================================
-        // 5. POST-PROCESSING & TONEMAPPING (HDR m_hdrSceneResource -> LDR m_sceneResource)
-        // =========================================================================
-        if (m_postProcessPipeline)
-        {
-            NOX_PROFILE_GPU_SCOPE(*m_commandBuffers, "Post Process");
-            std::vector<NRI::RenderAttachDesc> postAttachments;
-            postAttachments.push_back({
-                .attachment = m_sceneResource.get(),
-                .loadOP = NRI::LoadOP::clear,
-                .storeOP = NRI::StoreOP::store,
-                .clearColor = {0.0f, 0.0f, 0.0f, 1.0f}
-            });
-
-            NRI::RenderDesc postDesc = {
-                .renderArea = outputExtent,
-                .colorAttachments = postAttachments
-            };
-
-            m_commandBuffers->beginRendering(postDesc);
-            m_commandBuffers->setViewportWithCount({0.0f, oh, ow, -oh}, 0.0f, 1.0f);
-            m_commandBuffers->setScissorWithCount(outputExtent);
-
-            m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_postProcessPipeline);
-            m_commandBuffers->setCullMode(NRI::CullMode::None);
-            m_commandBuffers->setDepthTestEnable(false);
-            m_commandBuffers->setDepthWriteEnable(false);
-            m_commandBuffers->setColorBlendEnable(0, false);
-            m_commandBuffers->setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
-
-            shaderio::PushConstantPostProcess postPush{};
-            postPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
-            uint32_t activeHdrSlot = m_hdrSceneResource->GetDescriptorIndexSlot();
-
-            if (dlssActive && m_dlssOutputResource)
-            {
-                activeHdrSlot = m_dlssOutputResource->GetDescriptorIndexSlot();
-            }
-            else if (runPathTracer)
-            {
-                if (m_restirPTOutputValid && m_pathTracerDenoised && m_denoisedPathTracer)
-                {
-                    activeHdrSlot = m_denoisedPathTracer->GetDescriptorIndexSlot();
-                }
-                else if (m_restirPTOutputValid && m_restirPTOutput)
-                {
-                    activeHdrSlot = m_restirPTOutput->GetDescriptorIndexSlot();
-                }
-                else if (m_pathTracerDenoised && m_denoisedPathTracer)
-                {
-                    activeHdrSlot = m_denoisedPathTracer->GetDescriptorIndexSlot();
-                }
-                else
-                {
-                    uint32_t writeIndex = m_pathTracerSampleCount % 2;
-                    if (m_pathTracerAccum[writeIndex])
-                        activeHdrSlot = m_pathTracerAccum[writeIndex]->GetDescriptorIndexSlot();
-                }
-            }
-
-            postPush.hdrTextureIndex = activeHdrSlot;
-            postPush.debugMode = m_debugMode;
-            postPush.tonemapMode = m_tonemapMode;
-            m_commandBuffers->pushData(&postPush, sizeof(shaderio::PushConstantPostProcess));
-
-            m_commandBuffers->drawMeshTasks(1, 1, 1);
-            m_commandBuffers->endRendering();
-        }
-
-        // =========================================================================
-        // 6. FORWARD 2D OVERLAYS (Quads, Circles, Text, Gizmos - Rendered on LDR Scene)
-        // =========================================================================
-        {
-            NOX_PROFILE_GPU_SCOPE(*m_commandBuffers, "2D Overlay");
-            std::vector<NRI::RenderAttachDesc> forward2DAttachments;
-            forward2DAttachments.push_back({
-                .attachment = m_sceneResource.get(),
-                .loadOP = NRI::LoadOP::load,
-                .storeOP = NRI::StoreOP::store
-            });
-            forward2DAttachments.push_back({
-                .attachment = m_entityResourceHi.get(),
-                .loadOP = NRI::LoadOP::load,
-                .storeOP = NRI::StoreOP::store
-            });
-
-            NRI::RenderAttachDesc forward2DDepth = {
-                .attachment = m_depthResourceHi.get(),
-                .loadOP = NRI::LoadOP::load,
-                .storeOP = NRI::StoreOP::store
-            };
-
-            NRI::RenderDesc forward2DDesc = {
-                .renderArea = outputExtent,
-                .colorAttachments = forward2DAttachments,
-                .depthAttachment = forward2DDepth
-            };
-
-            m_commandBuffers->beginRendering(forward2DDesc);
-            m_commandBuffers->setViewportWithCount({0.0f, oh, ow, -oh}, 0.0f, 1.0f);
-            m_commandBuffers->setScissorWithCount(outputExtent);
-
-            const NRI::ColorBlendEquation blendEquation{
-                .srcColorBlendFactor = NRI::BlendFactor::SrcAlpha,
-                .dstColorBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha,
-                .colorBlendOp = NRI::BlendOp::Add,
-                .srcAlphaBlendFactor = NRI::BlendFactor::Zero,
-                .dstAlphaBlendFactor = NRI::BlendFactor::One,
-                .alphaBlendOp = NRI::BlendOp::Add,
-            };
-
-            m_commandBuffers->setCullMode(NRI::CullMode::None);
-            m_commandBuffers->setDepthTestEnable(true);
-            m_commandBuffers->setDepthWriteEnable(false);
-            m_commandBuffers->setDepthCompareOp(NRI::CompareOp::GreaterOrEqual);
-
-            m_commandBuffers->setColorBlendEnable(0, true);
-            m_commandBuffers->setColorBlendEquation(0, blendEquation);
-            m_commandBuffers->setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
-
-            m_commandBuffers->setColorBlendEnable(1, false);
-            m_commandBuffers->setColorWriteMask(1, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
-
-            m_renderer2D->Flush(*m_commandBuffers, *m_uniformBuffers[frameIndex], frameIndex);
-            m_commandBuffers->endRendering();
-        }
-
-        // --- OUTLINE POST-PROCESS ---
-        if (!m_SelectedEntityIDs.empty() && m_outlinePipeline)
-        {
-            NOX_PROFILE_GPU_SCOPE(*m_commandBuffers, "Outline");
-            std::vector<NRI::RenderAttachDesc> outlineColorAttachments;
-            outlineColorAttachments.push_back({
-                .attachment = m_sceneResource.get(),
-                .loadOP = NRI::LoadOP::load,
-                .storeOP = NRI::StoreOP::store,
-            });
-
-            NRI::RenderDesc outlineDesc =
-            {
-                .renderArea = m_isEditor
-                                  ? m_viewportSize
-                                  : m_swapChainExtent,
-                .colorAttachments = outlineColorAttachments,
-            };
-
-            m_commandBuffers->beginRendering(outlineDesc);
-
-            const NRI::Extent2D locViewportSize =
-                m_isEditor ? m_viewportSize : m_swapChainExtent;
-
-            const float w = static_cast<float>(locViewportSize.width);
-            const float h = static_cast<float>(locViewportSize.height);
-
-            // Same coordinate convention as the main rendering pass.
-            m_commandBuffers->setViewportWithCount(
-                {0.0f, h, w, -h},
-                0.0f,
-                1.0f
-            );
-
-            m_commandBuffers->setScissorWithCount(locViewportSize);
-
-            // Rasterization
-            m_commandBuffers->setRasterizerDiscardEnable(false);
-            m_commandBuffers->setPolygonMode(NRI::PolygonMode::Fill);
-            m_commandBuffers->setCullMode(NRI::CullMode::None);
-            m_commandBuffers->setFrontFace(NRI::FrontFace::CounterClockWise);
-            m_commandBuffers->setDepthBiasEnable(false);
-            m_commandBuffers->setDepthClampEnable(false);
-
-            // This is a fullscreen post-process, so one sample is correct.
-            m_commandBuffers->setRasterizationSamples(1);
-            m_commandBuffers->setSampleMask(1, 0xFFFFFFFF);
-            m_commandBuffers->setAlphaToCoverageEnable(false);
-            m_commandBuffers->setAlphaToOneEnableEXT(false);
-
-            // ------------------------------------------------------------
-            // IMPORTANT:
-            // No depth test/write here.
-            //
-            // The outline is determined entirely from entityResolveResource.
-            // Reverse-Z is therefore irrelevant to this fullscreen pass.
-            // ------------------------------------------------------------
-            m_commandBuffers->setDepthTestEnable(false);
-            m_commandBuffers->setDepthWriteEnable(false);
-            m_commandBuffers->setDepthBoundsTestEnable(false);
-            m_commandBuffers->setStencilTestEnable(false);
-
-            // Alpha blending for the orange outline.
-            const NRI::ColorBlendEquation blendEquation
-            {
-                .srcColorBlendFactor = NRI::BlendFactor::SrcAlpha,
-                .dstColorBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha,
-                .colorBlendOp = NRI::BlendOp::Add,
-
-                .srcAlphaBlendFactor = NRI::BlendFactor::SrcAlpha,
-                .dstAlphaBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha,
-                .alphaBlendOp = NRI::BlendOp::Add,
-            };
-
-            const uint32_t colorWriteMask =
-                NRI::ColorComponent::R |
-                NRI::ColorComponent::G |
-                NRI::ColorComponent::B |
-                NRI::ColorComponent::A;
-
-            m_commandBuffers->setColorBlendEnable(0, true);
-            m_commandBuffers->setColorBlendEquation(0, blendEquation);
-            m_commandBuffers->setColorWriteMask(0, colorWriteMask);
-            m_commandBuffers->setLogicOpEnable(false);
-
-            m_commandBuffers->bindPipeline(
-                NRI::PipelineBindPoint::Graphics,
-                *m_outlinePipeline
-            );
-
-            shaderio::PushConstantOutline references{};
-            references.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
-            references.selectedEntityIDsReference = m_selectedEntityIDBuffers[frameIndex]->getDeviceAddress();
-            references.selectedEntityCount = static_cast<uint32_t>(m_SelectedEntityIDs.size());
-
-            m_commandBuffers->pushData(
-                &references,
-                sizeof(shaderio::PushConstantOutline)
-            );
-
-            m_commandBuffers->drawMeshTasks(1, 1, 1);
-
-            m_commandBuffers->endRendering();
-        }
-
-        std::vector<NRI::RenderAttachDesc> imguiColorAttachments;
-        imguiColorAttachments.push_back({
-            .attachmentSwapchain = m_swapChain.get(),
-            .resolveImageIndex = imageIndex,
-            .loadOP = NRI::LoadOP::load,
-            .storeOP = NRI::StoreOP::store,
-        });
-
-        NRI::RenderDesc imguiDesc =
-        {
-            .renderArea = {m_swapChainExtent.width, m_swapChainExtent.height},
-            .colorAttachments = imguiColorAttachments,
-        };
-
-        NOX_PROFILE_GPU_BEGIN(*m_commandBuffers, "ImGui / Present Pass");
-        m_commandBuffers->beginRendering(imguiDesc);
-        if (m_isEditor)
-            m_commandBuffers->renderImGui();
-        else
-        {
-            // Viewport / scissor (counts and values are both dynamic).
-            float w = static_cast<float>(m_swapChainExtent.width);
-            float h = static_cast<float>(m_swapChainExtent.height);
-            m_commandBuffers->setViewportWithCount({0.0f, 0.0f, w, h}, 0.0f, 1.0f);
-            m_commandBuffers->setScissorWithCount(m_swapChainExtent);
-
-            // Vertex input empty since we use vertex fetch BDA but still needs to be called empty
-            m_commandBuffers->setVertexInput();
-
-            // Input assembly.
-            m_commandBuffers->setPrimitiveTopology(NRI::PrimitiveTopology::TriangleList);
-            m_commandBuffers->setPrimitiveRestartEnable(false);
-
-            // Rasterization (most of these come from VK_EXT_extended_dynamic_state_3).
-            m_commandBuffers->setRasterizerDiscardEnable(false);
-            m_commandBuffers->setPolygonMode(NRI::PolygonMode::Fill);
-            m_commandBuffers->setCullMode(NRI::CullMode::None);
-            m_commandBuffers->setFrontFace(NRI::FrontFace::CounterClockWise);
-            m_commandBuffers->setDepthBiasEnable(false);
-            m_commandBuffers->setDepthClampEnable(false); //LineWidth maybe ?
-
-            // Multisampling.
-            uint32_t sampleCount = 1;
-            m_commandBuffers->setRasterizationSamples(sampleCount);
-            const uint32_t sampleMask = 0xFFFFFFFF;
-            m_commandBuffers->setSampleMask(sampleCount, sampleMask);
-            m_commandBuffers->setAlphaToCoverageEnable(false);
-            // alphaToOne is required by the spec when its device feature is enabled and a
-            // shader object is bound, even if we don't actually use it.
-            m_commandBuffers->setAlphaToOneEnableEXT(false);
-
-            // Depth / stencil.
-            m_commandBuffers->setDepthTestEnable(false);
-            m_commandBuffers->setDepthWriteEnable(false);
-            m_commandBuffers->setDepthCompareOp(NRI::CompareOp::Less);
-            m_commandBuffers->setDepthBoundsTestEnable(false);
-            m_commandBuffers->setStencilTestEnable(false);
-
-            // Color blend (for one color attachment). Match the previous pipeline's
-            // alpha-blend setup; nothing varies between draws so we set it once.
-            const NRI::ColorBlendEquation blendEquation
-            {
-                .srcColorBlendFactor = NRI::BlendFactor::SrcAlpha,
-                .dstColorBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha,
-                .colorBlendOp = NRI::BlendOp::Add,
-                .srcAlphaBlendFactor = NRI::BlendFactor::SrcAlpha,
-                .dstAlphaBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha,
-                .alphaBlendOp = NRI::BlendOp::Add,
-            };
-            uint32_t colorWriteMask = NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A;
-            m_commandBuffers->setColorBlendEnable(0, false);
-            m_commandBuffers->setColorBlendEquation(0, blendEquation);
-            m_commandBuffers->setColorWriteMask(0, colorWriteMask);
-            m_commandBuffers->setLogicOpEnable(false);
-
-            m_commandBuffers->bindPipeline(NRI::PipelineBindPoint::Graphics, *m_presentPipeline);
-
-            PushConstantBlock references{};
-            // Pass pointer to the global matrix via a buffer device address
-            references.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
-            references.vertexReference = -1;
-            references.instanceReference = -1;
-            m_commandBuffers->pushData(&references, sizeof(PushConstantBlock));
-
-            m_commandBuffers->draw(3, 1, 0, 0);
-        }
-        m_commandBuffers->endRendering();
-        NOX_PROFILE_GPU_END(*m_commandBuffers);
-
-        m_commandBuffers->transitionSwapchainLayout(*m_swapChain, imageIndex, NRI::TextureLayout::ColorAttachment, NRI::TextureLayout::Present);
-
-        NOX_PROFILE_GPU_FRAME_END(*m_commandBuffers);
-
-        if (m_pickRequest.active && m_pickRequest.x >= 0 && m_pickRequest.y >= 0)
-        {
-            uint32_t width = m_isEditor ? m_viewportSize.width : m_swapChainExtent.width;
-            uint32_t height = m_isEditor ? m_viewportSize.height : m_swapChainExtent.height;
-
-            // Apply Vulkan negative-height viewport inversion (Top-Left -> Bottom-Left)
-            uint32_t sampleX = static_cast<uint32_t>(m_pickRequest.x);
-            uint32_t sampleY = static_cast<uint32_t>(m_pickRequest.y);
-
-            if (sampleX < width && sampleY < height)
-            {
-                uint32_t copyWidth = std::min(m_pickRequest.width, width - sampleX);
-                uint32_t copyHeight = std::min(m_pickRequest.height, height - sampleY);
-
-                m_entityResourceHi->copyImageToBuffer(*m_commandBuffers, *m_pickerStagingBuffers[frameIndex], sampleX, sampleY, copyWidth, copyHeight);
-                m_pickerReadbackRequests[frameIndex] = m_pickRequest;
-                m_pickerReadbackRequests[frameIndex].width = copyWidth;
-                m_pickerReadbackRequests[frameIndex].height = copyHeight;
-                m_pickerReadbackRequests[frameIndex].frameNumber = m_sceneFrameCounter;
-
-                m_pickRequest.active = false;
-            }
-
-            m_commandBuffers->end(frameIndex);
-        }
-        else
-        {
-            m_commandBuffers->end(frameIndex);
-        }
+        cmd.setCullMode(cullMode);
+        cmd.setDepthWriteEnable(depthWrite);
+        cmd.setColorBlendEnable(0, blendEnable);
+
+        cmd.drawMeshTasksIndirect(*m_indirectBuffers[frameIndex], static_cast<uint64_t>(cursor.instanceOffset) * cmdStride, count, cmdStride);
+        cursor.instanceOffset += count;
     }
 
     void Renderer::updateEntityIDBuffer(uint32_t currentImage)
@@ -5697,9 +3004,6 @@ namespace Nox
         uniformData.jitterOffset = m_currentJitter;
         uniformData.samplerIndex = selectedSampler;
         uniformData.imageHeapIndexOffset = m_resourceHeap->getImageHeapIndexOffset();
-
-        uniformData.entityTextureIndex = m_entityResourceHi->GetDescriptorIndexSlot();
-        uniformData.entityGBufferTextureIndex = m_entityResource->GetDescriptorIndexSlot();
 
         // PBR IBL
         uniformData.irradianceMapIndex = m_irradianceCubemap->GetDescriptorIndexSlot();
@@ -5956,6 +3260,7 @@ namespace Nox
             // acquireNextImage waited for this slot's previous submission, which recorded the slot's pick copy.
             NOX_PROFILE_SCOPE("Pick Readback");
             readPickResult(frameIndex);
+            readInspectionProbe(frameIndex);
         }
 
         {
@@ -6005,14 +3310,15 @@ namespace Nox
             m_renderer2D->Update(frameIndex);
         }
 
+        std::span<NRI::CommandBuffer* const> commandBuffers;
         {
             NOX_PROFILE_SCOPE("Record Commands");
-            recordCommandBuffer(imageIndex);
+            commandBuffers = recordFrame(imageIndex);
         }
 
         {
             NOX_PROFILE_SCOPE("Submit");
-            m_device->submitCommandBuffer(*m_commandBuffers, *m_swapChain, frameIndex, imageIndex);
+            m_device->submitCommandBuffers(commandBuffers, *m_swapChain, frameIndex, imageIndex);
         }
 
         // Debounced -- see m_lastWindowResizeRequestTime's declaration in Renderer.h. A hard
@@ -6288,24 +3594,20 @@ namespace Nox
         m_hasTLASBuild = true;
     }
 
-    void Renderer::BuildSceneAccelerationStructure(uint32_t currentFrameIndex)
+    void Renderer::BuildSceneAccelerationStructure(NRI::CommandBuffer& cmd, bool fullBuild)
     {
-        if (!m_hasTLASBuild || !m_sceneTLAS || !m_tlasScratchBuffer ||
-            (!m_tlasNeedFullBuild && !m_tlasNeedUpdate))
-            return;
-
         // 1. Pre-build barrier: Host/Transfer instance writes -> AS Build Read
-        m_commandBuffers->accelerationStructureBarrier(NRI::AccelerationStructureBarrierType::TransferToBuild);
+        cmd.accelerationStructureBarrier(NRI::AccelerationStructureBarrierType::TransferToBuild);
 
-        if (m_tlasNeedFullBuild)
+        if (fullBuild)
         {
-            m_commandBuffers->buildAccelerationStructure(m_tlasBuildDesc, m_tlasScratchBuffer->getDeviceAddress(), *m_sceneTLAS);
+            cmd.buildAccelerationStructure(m_tlasBuildDesc, m_tlasScratchBuffer->getDeviceAddress(), *m_sceneTLAS);
         }
         else
         {
             // Transform-only ECS changes preserve instance count, BLAS addresses, and flags, so
             // Vulkan's fast AS update path is valid and avoids rebuilding the entire TLAS.
-            m_commandBuffers->updateAccelerationStructure(
+            cmd.updateAccelerationStructure(
                 m_tlasBuildDesc,
                 m_tlasScratchBuffer->getDeviceAddress(),
                 *m_sceneTLAS,
@@ -6313,9 +3615,21 @@ namespace Nox
         }
 
         // 3. Post-build barrier: AS Build Write -> Fragment/Compute Shader Read
-        m_commandBuffers->accelerationStructureBarrier(NRI::AccelerationStructureBarrierType::BuildToShaderRead);
-        m_tlasNeedFullBuild = false;
-        m_tlasNeedUpdate = false;
+        cmd.accelerationStructureBarrier(NRI::AccelerationStructureBarrierType::BuildToShaderRead);
+    }
+
+    void Renderer::readInspectionProbe(uint32_t frameSlot)
+    {
+        if (!m_inspectionProbePending[frameSlot])
+            return;
+        m_inspectionProbePending[frameSlot] = 0;
+
+        void* mappedMemory = m_inspectionProbeBuffers[frameSlot]->map(0, sizeof(float) * 4);
+        if (!mappedMemory)
+            return;
+        memcpy(&m_inspectionProbeValue, mappedMemory, sizeof(float) * 4);
+        m_inspectionProbeBuffers[frameSlot]->unmap();
+        m_inspectionProbeValid = true;
     }
 
     void Renderer::readPickResult(uint32_t frameSlot)
@@ -6508,21 +3822,17 @@ namespace Nox
             m_ddgiHysteresis,
             m_ddgiNormalBias
         );
-        uint32_t ddgiProbesPerRow = 64;
         uint32_t ddgiTotalProbes = m_ddgiProbeCountX * m_ddgiProbeCountY * m_ddgiProbeCountZ;
-        uint32_t ddgiProbeRows = (ddgiTotalProbes + ddgiProbesPerRow - 1) / ddgiProbesPerRow;
+        uint32_t ddgiProbeRows = (ddgiTotalProbes + DDGIProbesPerRow - 1) / DDGIProbesPerRow;
         uniformData.ddgiAtlasParams = glm::vec4(
-            static_cast<float>(ddgiProbesPerRow * 10),
+            static_cast<float>(DDGIProbesPerRow * 10),
             static_cast<float>(ddgiProbeRows * 10),
-            static_cast<float>(ddgiProbesPerRow * 18),
+            static_cast<float>(DDGIProbesPerRow * 18),
             static_cast<float>(ddgiProbeRows * 18)
         );
-        uniformData.ddgiIrradianceTextureIndex = m_ddgiIrradiance[m_ddgiHistoryIndex] ? m_ddgiIrradiance[m_ddgiHistoryIndex]->GetDescriptorIndexSlot() : 0xFFFFFFFF;
-        uniformData.ddgiDistanceTextureIndex = m_ddgiDistance[m_ddgiHistoryIndex] ? m_ddgiDistance[m_ddgiHistoryIndex]->GetDescriptorIndexSlot() : 0xFFFFFFFF;
 
         // ReSTIR GI
         uniformData.diffuseGIMode = m_diffuseGIMode;
-        uniformData.restirGIDiffuseTextureIndex = m_restirGIRawDiffuse ? m_restirGIRawDiffuse->GetDescriptorIndexSlot() : 0xFFFFFFFF;
         uniformData.restirGIReservoirBufferIndex = 0;
         uniformData.restirGINeighborOffsetsBufferIndex = 0;
 
@@ -6642,21 +3952,17 @@ namespace Nox
             m_ddgiHysteresis,
             m_ddgiNormalBias
         );
-        uint32_t ddgiProbesPerRow = 64;
         uint32_t ddgiTotalProbes = m_ddgiProbeCountX * m_ddgiProbeCountY * m_ddgiProbeCountZ;
-        uint32_t ddgiProbeRows = (ddgiTotalProbes + ddgiProbesPerRow - 1) / ddgiProbesPerRow;
+        uint32_t ddgiProbeRows = (ddgiTotalProbes + DDGIProbesPerRow - 1) / DDGIProbesPerRow;
         uniformData.ddgiAtlasParams = glm::vec4(
-            static_cast<float>(ddgiProbesPerRow * 10),
+            static_cast<float>(DDGIProbesPerRow * 10),
             static_cast<float>(ddgiProbeRows * 10),
-            static_cast<float>(ddgiProbesPerRow * 18),
+            static_cast<float>(DDGIProbesPerRow * 18),
             static_cast<float>(ddgiProbeRows * 18)
         );
-        uniformData.ddgiIrradianceTextureIndex = m_ddgiIrradiance[m_ddgiHistoryIndex] ? m_ddgiIrradiance[m_ddgiHistoryIndex]->GetDescriptorIndexSlot() : 0xFFFFFFFF;
-        uniformData.ddgiDistanceTextureIndex = m_ddgiDistance[m_ddgiHistoryIndex] ? m_ddgiDistance[m_ddgiHistoryIndex]->GetDescriptorIndexSlot() : 0xFFFFFFFF;
 
         // ReSTIR GI
         uniformData.diffuseGIMode = m_diffuseGIMode;
-        uniformData.restirGIDiffuseTextureIndex = m_restirGIRawDiffuse ? m_restirGIRawDiffuse->GetDescriptorIndexSlot() : 0xFFFFFFFF;
         uniformData.restirGIReservoirBufferIndex = 0;
         uniformData.restirGINeighborOffsetsBufferIndex = 0;
 

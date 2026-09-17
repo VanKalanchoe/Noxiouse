@@ -73,6 +73,9 @@ namespace NRI
         void updateAccelerationStructure(const AccelerationStructureBuildDesc& buildDesc, uint64_t scratchAddress, AccelerationStructure& srcAS, AccelerationStructure& dstAS) override;
         void accelerationStructureBarrier(AccelerationStructureBarrierType barrierType = AccelerationStructureBarrierType::BuildToShaderRead) override;
         void executionBarrier() override;
+        void resourceBarriers(std::span<const TextureBarrierDesc> textures, std::span<const BufferBarrierDesc> buffers) override;
+        void beginDebugLabel(const char* label) override;
+        void endDebugLabel() override;
 
         vk::raii::CommandBuffer& getNativeBuffer(uint32_t index) { return m_commandBuffers[index]; }
         vk::raii::CommandBuffer& getActiveNativeBuffer() { return m_commandBuffers[m_currentFrameIndex]; }
@@ -84,6 +87,10 @@ namespace NRI
     private:
         DeviceVK& m_deviceVK;
         std::vector<vk::raii::CommandBuffer> m_commandBuffers;
+        bool m_resetOnBegin;
+        // resourceBarriers scratch (a command buffer is recorded by one thread at a time)
+        std::vector<vk::ImageMemoryBarrier2> m_imageBarrierScratch;
+        std::vector<vk::BufferMemoryBarrier2> m_bufferBarrierScratch;
         // Caches the index passed into the begin method
         uint32_t m_currentFrameIndex = 0;
     };

@@ -5,6 +5,7 @@
 #include "NoxCore/Core/Window.h"
 #include "Mesh.h"
 #include "PagedAllocator.h"
+#include "NoxCore/RenderGraph/RenderGraph.h"
 
 // Forward declaration only -- the RTXDI SDK must never be #included from this header (it's engine-
 // public, pulled in by EditorLayer.cpp and others). Renderer.cpp is the only place that includes
@@ -60,6 +61,8 @@ inline std::vector<std::string> samplerNames{"Linear", "Nearest"};
 
 namespace Nox
 {
+    struct FrameGraphResources;
+
     struct MeshBLAS
     {
         std::unique_ptr<NRI::Buffer> storageBuffer;
@@ -196,6 +199,36 @@ namespace Nox
 
         void SetSelectedEntityID(const std::vector<int32_t>& entityIDs) { m_SelectedEntityIDs = entityIDs; }
 
+        // Render graph tooling (editor panel): report, validation, synchronization strategy.
+        RenderGraph& getRenderGraph() { return m_renderGraph; }
+        const RenderGraph& getRenderGraph() const { return m_renderGraph; }
+
+        // Texture inspection: while Name is set, that render graph texture is converted to a displayable image every frame
+        // (RenderGraph::InspectTexture) and the raw value of the probe texel is read back.
+        struct TextureInspection
+        {
+            std::string Name;           // empty: off
+            uint32_t Occurrence = 0;    // n-th texture with that name (history slots share it)
+            uint32_t Mip = 0;
+            float Exposure = 1.0f;      // float formats
+            uint32_t ChannelMask = 0xF; // bits R, G, B, A
+            int32_t ProbeX = -1;        // texel in mip coordinates; -1: none
+            int32_t ProbeY = -1;
+        };
+        void setTextureInspection(const TextureInspection& inspection) { m_textureInspection = inspection; }
+        const TextureInspection& getTextureInspection() const { return m_textureInspection; }
+        // Display image of the last inspected frame, nullptr when nothing is inspected. Stays valid for a few frames after
+        // its size changes (render graph history).
+        Texture2D* getInspectionImage() const { return m_inspectionImage; }
+        // Physical description of the inspected texture (imports: size only).
+        const RGTextureKey& getInspectedTextureKey() const { return m_inspectedTextureKey; }
+        // Raw value of the probe texel from the newest finished frame that probed it.
+        bool getInspectionProbe(glm::vec4& outValue) const
+        {
+            outValue = m_inspectionProbeValue;
+            return m_inspectionProbeValid;
+        }
+
         void drawFrame();
         void resizeWindow();
         void initImGui();
@@ -225,6 +258,9 @@ namespace Nox
         void setVSync(bool enabled);
         void onViewportSizeChange(NRI::Extent2D size);
         bool getVSync() const { return m_vSync; }
+        // Frame command buffers recorded on the JobSystem workers when there is enough work (off: one command buffer).
+        void setParallelCommandRecording(bool enabled) { m_renderGraph.SetParallelRecording(enabled); }
+        bool isParallelCommandRecording() const { return m_renderGraph.IsParallelRecording(); }
         NRI::Extent2D getViewPortSize() const { return m_viewportSize; }
         // Final output image size (editor viewport or swapchain), i.e. the 2D overlay pass render area.
         NRI::Extent2D getOutputSize() const { return m_isEditor ? m_viewportSize : m_swapChainExtent; }
@@ -256,7 +292,7 @@ namespace Nox
             if (m_rayTracingEnabled != enabled)
             {
                 m_rayTracingEnabled = enabled;
-                m_resetNRD = true;
+                m_renderGraph.ResetHistory(NRDHistoryKey);
             }
         }
         bool getRayTracingEnabled() const { return m_rayTracingEnabled; }
@@ -271,7 +307,7 @@ namespace Nox
             if (m_rayTracingShadows != enabled)
             {
                 m_rayTracingShadows = enabled;
-                m_resetNRD = true;
+                m_renderGraph.ResetHistory(NRDHistoryKey);
             }
         }
         bool getRayTracingShadows() const { return m_rayTracingShadows; }
@@ -282,7 +318,7 @@ namespace Nox
             if (m_rayTracingReflections != enabled)
             {
                 m_rayTracingReflections = enabled;
-                m_resetNRD = true;
+                m_renderGraph.ResetHistory(NRDHistoryKey);
             }
         }
         bool getRayTracingReflections() const { return m_rayTracingReflections; }
@@ -290,23 +326,17 @@ namespace Nox
         bool isPathTracingEnabled() const { return m_pathTracingEnabled; }
         void setPathTracingAccumulation(bool enabled) { m_pathTracingAccumulation = enabled; }
         bool isPathTracingAccumulation() const { return m_pathTracingAccumulation; }
-        Ref<Texture2D> getRawShadowMask() const { return m_rawShadowMask; }
-        Ref<Texture2D> getDenoisedShadowMask() const { return m_denoisedShadowMask; }
-        Ref<Texture2D> getViewZ() const { return m_viewZ; }
-        Ref<Texture2D> getNRDNormalRoughness() const { return m_nrdNormalRoughness; }
         void setNRDShadowsEnabled(bool enabled)
         {
             if (m_nrdShadowsEnabled != enabled)
             {
                 m_nrdShadowsEnabled = enabled;
-                m_resetNRD = true;
+                m_renderGraph.ResetHistory(NRDHistoryKey);
             }
         }
         bool getNRDShadowsEnabled() const { return m_nrdShadowsEnabled; }
         NRI::NRDReflectionDenoiser getNRDReflectionDenoiser() const { return m_nrdReflectionDenoiser; }
         void setNRDReflectionDenoiser(NRI::NRDReflectionDenoiser mode);
-        Ref<Texture2D> getRawReflection() const { return m_rawReflection; }
-        Ref<Texture2D> getDenoisedReflection() const { return m_denoisedReflection; }
 
         // DDGI (Dynamic Diffuse Global Illumination)
         bool isDDGIEnabled() const { return m_ddgiEnabled; }
@@ -315,7 +345,7 @@ namespace Nox
             if (m_ddgiEnabled != enabled)
             {
                 m_ddgiEnabled = enabled;
-                m_ddgiFirstFrame = true;
+                m_renderGraph.ResetHistory(DDGIHistoryKey);
             }
         }
         glm::vec3& getDDGIGridOrigin() { return m_ddgiGridOrigin; }
@@ -330,15 +360,12 @@ namespace Nox
         float& getDDGINormalBias() { return m_ddgiNormalBias; }
         float& getDDGIDebugSphereRadius() { return m_ddgiDebugSphereRadius; }
         bool& getDDGIDebugXRay() { return m_ddgiDebugXRay; }
-        void resetDDGIHistory() { m_ddgiFirstFrame = true; }
+        void resetDDGIHistory() { m_renderGraph.ResetHistory(DDGIHistoryKey); }
         void resetDDGIGridToDefaults();
-        Ref<Texture2D> getDDGIIrradianceAtlas() const { return m_ddgiIrradiance[m_ddgiHistoryIndex]; }
-        Ref<Texture2D> getDDGIDistanceAtlas() const { return m_ddgiDistance[m_ddgiHistoryIndex]; }
 
         // ReSTIR GI (Screen-Space Diffuse Indirect Resampling via RTXDI)
         uint32_t getDiffuseGIMode() const { return m_diffuseGIMode; }
         void setDiffuseGIMode(uint32_t mode) { m_diffuseGIMode = mode; }
-        Ref<Texture2D> getReSTIRGIDiffuse() const { return m_restirGIRawDiffuse; }
         float& getReSTIRGISpatialRadius() { return m_restirGISpatialRadius; }
         uint32_t& getReSTIRGINumSpatialSamples() { return m_restirGINumSpatialSamples; }
         uint32_t& getReSTIRGIMaxHistoryLength() { return m_restirGIMaxHistoryLength; }
@@ -348,12 +375,10 @@ namespace Nox
         float& getReSTIRGIBoilingFilterStrength() { return m_restirGIBoilingFilterStrength; }
         NRI::NRDDiffuseDenoiser getNRDGIDenoiser() const { return m_nrdGIDenoiser; }
         void setNRDGIDenoiser(NRI::NRDDiffuseDenoiser mode);
-        Ref<Texture2D> getDenoisedReSTIRGIDiffuse() const { return m_denoisedReSTIRGIDiffuse; }
 
         // ReSTIR DI (Screen-Space Resampled Direct Lighting via RTXDI)
         uint32_t getDirectLightingMode() const { return m_directLightingMode; }
         void setDirectLightingMode(uint32_t mode) { m_directLightingMode = mode; }
-        Ref<Texture2D> getReSTIRDIDirectLighting() const { return m_restirDIDirectLighting; }
         uint32_t& getReSTIRDINumLocalLightSamples() { return m_restirDINumLocalLightSamples; }
         uint32_t& getReSTIRDINumInfiniteLightSamples() { return m_restirDINumInfiniteLightSamples; }
         uint32_t& getReSTIRDIMaxHistoryLength() { return m_restirDIMaxHistoryLength; }
@@ -367,11 +392,8 @@ namespace Nox
         float& getReGIRSamplingJitter() { return m_regirSamplingJitter; }
         NRI::NRDDiffuseDenoiser getNRDDIDenoiser() const { return m_nrdDIDenoiser; }
         void setNRDDIDenoiser(NRI::NRDDiffuseDenoiser mode);
-        Ref<Texture2D> getDenoisedReSTIRDIDirectLighting() const { return m_denoisedReSTIRDIDirectLighting; }
         NRI::NRDDiffuseDenoiser getNRDPTDenoiser() const { return m_nrdPTDenoiser; }
         void setNRDPTDenoiser(NRI::NRDDiffuseDenoiser mode);
-        Ref<Texture2D> getDenoisedPathTracer() const { return m_denoisedPathTracer; }
-        bool isPathTracerDenoised() const { return m_pathTracerDenoised; }
         bool getPathTracerUsesRTXDI() const { return m_pathTracerUsesRTXDI; }
         void setPathTracerUsesRTXDI(bool enabled) { m_pathTracerUsesRTXDI = enabled; }
 
@@ -382,7 +404,6 @@ namespace Nox
         // meaningful when Path Tracing is enabled.
         bool getReSTIRPTEnabled() const { return m_restirPTEnabled; }
         void setReSTIRPTEnabled(bool enabled) { m_restirPTEnabled = enabled; }
-        Ref<Texture2D> getReSTIRPTDirectLighting() const { return m_restirPTOutput; }
         // Temporal resampling (hybrid-shift reconnection against last frame's reservoir) currently
         // produces a visible lighting-rotation artifact under investigation -- defaults OFF so ReSTIR
         // PT stays in its known-good None-resampling state; flip this on only to test/debug Temporal.
@@ -474,6 +495,7 @@ namespace Nox
                            const MaterialData& meshMaterial, AssetHandle materialAsset, int entityID, const std::vector<glm::mat4>* boneTransforms);
         std::vector<RenderPacket>& getRenderQueue(RenderQueue queue);
         void readPickResult(uint32_t frameSlot);
+        void readInspectionProbe(uint32_t frameSlot);
 
         void initRenderer();
         void cleanupSwapChain();
@@ -490,50 +512,43 @@ namespace Nox
         void createCommandPool();
 
         void createSceneResources();
-        void createEntityResources();
-        void createDepthResources();
-        // Recomputes m_renderSize from the current output size + DLSS mode and recreates every
-        // resource whose size depends on it. Called on viewport resize, DLSS enable/disable, and
-        // DLSS mode change - the three things that can change what m_renderSize should be.
+        // Recomputes m_renderSize from the current output size + DLSS mode. Graph-owned render targets follow the new
+        // size by themselves; this resets every history and the size-dependent denoiser/upscaler/RTXDI state. Called on
+        // viewport resize, DLSS enable/disable, and DLSS mode change.
         void applyRenderResolution();
         void applyPendingRenderResolutionIfNeeded();
         
-        // NRD
-        void createShadowMaskResources();
-
         // Visability
-        void createVisibilityResources();
         void createVisibilityPipeline(bool forceCompile);
         // G-Buffer
-        void createGBufferResources();
         void createGBufferPipeline(bool forceCompile = false);
         // PBR
         void createDeferredLightingPipeline(bool forceCompile = false);
         // Post Process
         void createPostProcessPipeline(bool forceCompile = false);
+        // Render graph texture inspection
+        void createTextureInspectPipeline(bool forceCompile = false);
         
         // NRD
         void createShadowMaskPipeline(bool forceCompile = false);
         void createReflectionPipeline(bool forceCompile = false);
         
         // Path Tracer
-        void createPathTracerResources();
         void createPathTracerPipeline(bool forceCompile = false);
 
         // DDGI (Dynamic Diffuse Global Illumination)
-        void createDDGIResources();
         void createDDGIPipelines(bool forceCompile = false);
 
         // ReSTIR GI (Screen-Space Diffuse Path Resampling via RTXDI)
-        void createReSTIRGIResources();
+        void createRTXDINeighborOffsets();
         void createReSTIRGIPipelines(bool forceCompile = false);
 
         // ReSTIR DI (Screen-Space Resampled Direct Lighting via RTXDI)
-        void createReSTIRDIResources();
         void createReSTIRDIPipelines(bool forceCompile = false);
 
         // ReSTIR PT (Screen-Space Path Resampling via RTXDI)
-        void createReSTIRPTResources();
+        // RTXDI's own buffer-index rotation and defaults; recreated with the render size.
+        void createReSTIRPTContext();
         void createReSTIRPTPipelines(bool forceCompile = false);
 
         void createTextureImage();
@@ -546,8 +561,50 @@ namespace Nox
         void createDescriptorHeaps();
         std::unique_ptr<NRI::CommandBuffer> beginSingleTimeCommands();
         void endSingleTimeCommands(std::unique_ptr<NRI::CommandBuffer>&& commandBuffer);
-        void createCommandBuffers();
-        void recordCommandBuffer(uint32_t imageIndex);
+        // Frame render graph (§5.4): recordFrame builds, compiles and executes it and returns the frame's command buffers
+        // in submission order. prepareFrameGraph imports the renderer's resources and resolves this frame's CPU-side
+        // state; the add* functions (Renderer/Passes/*.cpp) contribute each feature's passes in frame order and make every
+        // CPU-side decision there: execute callbacks only record, possibly on worker threads.
+        std::span<NRI::CommandBuffer* const> recordFrame(uint32_t imageIndex);
+        // Start of every frame command buffer: descriptor heaps and the dynamic state every pass builds on.
+        void applyCommandBufferBaseline(NRI::CommandBuffer& cmd) const;
+        void prepareFrameGraph(uint32_t imageIndex);
+        void addTLASBuildPass();
+        void addVisibilityPass();
+        void addGBufferPass();
+        void addRTShadowPasses();
+        void addRTReflectionPasses();
+        // Decides whether DDGI runs and declares its atlases up front: RT reflections and forward shading, which come
+        // earlier in the frame, sample them too.
+        void prepareDDGIFrame(FrameGraphResources& resources);
+        void addDDGIPasses();
+        void addReSTIRGIPasses();
+        void addPreviousFrameCopyPass();
+        void addReSTIRDIPasses();
+        void addReSTIRPTPasses();
+        void addPathTracerPasses();
+        void addDeferredLightingPass();
+        void addForward3DPass();
+        void addDLSSPass();
+        void addEntityDepthBlitPass();
+        void addPostProcessPass();
+        void addOverlay2DPass();
+        void addOutlinePass();
+        void addPresentPass();
+        void addPickReadbackPass();
+        void addTextureInspection();
+        // After Compile: writes the bindless slots of graph-owned textures into the uniforms uploaded for this frame.
+        void resolveFrameUniforms();
+        // Indirect meshlet draws of consecutive render queues (one indirect command per instance, queues packed in
+        // BuildBuffers order). Each pass keeps its own cursor: passes may record in parallel.
+        struct MeshletDrawCursor
+        {
+            shaderio::PushConstantMeshlets references{};
+            uint32_t instanceOffset = 0;
+            NRI::Pipeline* boundPipeline = nullptr;
+        };
+        MeshletDrawCursor beginMeshletDraws(uint32_t firstInstance) const;
+        void drawMeshletQueue(NRI::CommandBuffer& cmd, MeshletDrawCursor& cursor, uint32_t count, NRI::Pipeline& pipeline, NRI::CullMode cullMode, bool depthWrite, bool blendEnable) const;
         void updateEntityIDBuffer(uint32_t currentImage);
         void updateUniformBuffer(uint32_t currentImage);
         void updateInstanceAndIndirectBuffer(uint32_t currentImage);
@@ -606,8 +663,64 @@ namespace Nox
         std::unique_ptr<NRI::Pipeline> m_ddgiBlendDistancePipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_ddgiDebugSpheresPipeline = nullptr;
 
-        std::unique_ptr<NRI::CommandAllocator> m_commandAllocator = nullptr;
-        std::unique_ptr<NRI::CommandBuffer> m_commandBuffers = nullptr;
+        std::unique_ptr<NRI::CommandAllocator> m_commandAllocator = nullptr; // single-time commands
+
+        // Render graph + the frame state its passes share. Resolved in prepareFrameGraph (and by passes that run
+        // earlier in the same frame, e.g. denoiser results consumed by lighting).
+        struct FrameGraphState
+        {
+            uint32_t imageIndex = 0;
+            NRI::Extent2D renderExtent{};  // what DLSS upscales from
+            NRI::Extent2D outputExtent{};  // editor viewport / swapchain
+            uint64_t baseInstanceAddress = 0;
+            shaderio::PushConstantMeshlets meshletReferences{};
+            bool resetNRD = false;
+            bool resetDLSS = false;
+            bool runPathTracer = false;
+            bool pathTracerUsesRTXDI = false;
+            uint32_t totalDDGIProbes = 0;
+            uint32_t ddgiReadIndex = 0;
+            uint32_t ddgiWriteIndex = 0;
+            bool ddgiFirstFrame = false;
+            uint32_t restirDIBufferA = 0;
+            uint32_t restirDIBufferB = 0;
+            uint32_t restirDIBufferC = 0;
+            uint32_t ptInitialOutputBuffer = 0;
+            uint32_t ptInitialPreservedBuffer = 0;
+            uint32_t ptTemporalInputBuffer = 0;
+            uint32_t ptFinalShadingInputBuffer = 0;
+            bool restirPTActive = false;      // ReSTIR PT lighting path taken this frame
+            bool pathTracerActive = false;    // plain path tracer lighting path taken this frame
+            bool restirPTTemporalActive = false;
+            bool restirPTCameraMoved = false;
+            bool pathTracerCameraMoved = false;
+            bool pathTracerAccumulate = false;
+            uint32_t pathTracerReadIndex = 0;
+            uint32_t pathTracerWriteIndex = 0;
+            // Which passes were added this frame: consumers declare (and bind) only outputs that are produced.
+            bool rtShadowsAdded = false;
+            bool nrdShadowsAdded = false;
+            bool rtReflectionsAdded = false;
+            bool nrdReflectionsAdded = false;
+            bool ddgiAdded = false;
+            bool restirGIAdded = false;
+            bool nrdGIAdded = false;
+            bool restirDIAdded = false;
+            bool nrdDIAdded = false;
+            bool ptNRDAdded = false;
+            bool deferredLightingAdded = false;
+            bool dlssAdded = false;
+            bool inspectionProbe = false;
+        };
+        RenderGraph m_renderGraph;
+        FrameGraphState m_frame;
+
+        // History keys: histories that live outside the graph (NRD, DLSS/NGX) are reset through the same keys.
+        static constexpr const char* NRDHistoryKey = "NRD";
+        static constexpr const char* DLSSHistoryKey = "DLSS";
+        static constexpr const char* DDGIHistoryKey = "DDGI";
+        // DDGI atlas layout: probes per atlas row (atlas sizes, uniforms and the blend shaders agree on it).
+        static constexpr uint32_t DDGIProbesPerRow = 64;
 
         //decsriptor
         std::unique_ptr<NRI::DescriptorHeap> m_samplerHeap = nullptr;
@@ -629,46 +742,15 @@ namespace Nox
         float m_scaleIBLAmbient = 1.0f;
 
         // Visability
-        Ref<Texture2D> m_visibilityResource;
 
         // G-Buffer Render Targets (Decoupled Material Pass)
-        Ref<Texture2D> m_gbufferAlbedo; // RGBA8_UNORM: RGB = BaseColor, A = Occlusion
-        Ref<Texture2D> m_gbufferSpecular;
-        Ref<Texture2D> m_gbufferNormal; // R16G16B16A16_SFLOAT: RGB = World Normal
-        Ref<Texture2D> m_gbufferMaterial; // RGBA8_UNORM: R = Roughness, G = Metallic, B = Workflow
-        Ref<Texture2D> m_gbufferEmission; // R16G16B16A16_SFLOAT: RGB = Emissive
-        // Previous-frame snapshots (copied from m_depthResource/m_gbufferNormal at the end of each
-        // frame) used ONLY by ReSTIR GI's temporal reprojection validity check -- without a real
-        // previous-frame buffer, that check was comparing the CURRENT frame's G-buffer at the
-        // reprojected screen position against the current pixel, which is comparing two unrelated
-        // surfaces during camera motion (causing bright/incorrect history reuse until motion stops).
-        Ref<Texture2D> m_prevDepthResource;
-        Ref<Texture2D> m_prevGbufferNormal;
-        // Same reasoning as above, added for ReSTIR PT's temporal resampling: RandomReplay (hybrid-shift
-        // re-tracing) and RAB_AreMaterialsSimilar both need REAL material data (albedo/roughness/metallic)
-        // at a reprojected previous-frame surface, not just its normal/depth -- unlike ReSTIR GI's
-        // simplified RAB_Surface (no material fields at all), PT's carries a full RAB_Material.
-        Ref<Texture2D> m_prevGbufferAlbedo;
-        Ref<Texture2D> m_prevGbufferMaterial;
-        Ref<Texture2D> m_gbufferVelocity; // R16G16_SFLOAT: Screen-space motion vectors
 
         // NRD
-        Ref<Texture2D> m_rawShadowMask;
-        Ref<Texture2D> m_denoisedShadowMask;
-        Ref<Texture2D> m_viewZ;
-        Ref<Texture2D> m_nrdNormalRoughness;
-        Ref<Texture2D> m_rawReflection;
-        Ref<Texture2D> m_denoisedReflection;
         bool m_nrdShadowsEnabled = true;
         NRI::NRDReflectionDenoiser m_nrdReflectionDenoiser = NRI::NRDReflectionDenoiser::Off;
-        bool m_resetNRD = true;
 
         // DDGI (Dynamic Diffuse Global Illumination)
-        Ref<Texture2D> m_ddgiRayData;
-        Ref<Texture2D> m_ddgiIrradiance[2];
-        Ref<Texture2D> m_ddgiDistance[2];
         uint32_t m_ddgiHistoryIndex = 0;
-        bool m_ddgiFirstFrame = true;
 
         bool m_ddgiEnabled = false;
         glm::vec3 m_ddgiGridOrigin = glm::vec3(-20.0f, -0.5f, -12.0f);
@@ -688,13 +770,7 @@ namespace Nox
         std::unique_ptr<NRI::Pipeline> m_restirGIInitialPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_restirGITemporalPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_restirGISpatialPipeline = nullptr;
-        Ref<Texture2D> m_restirGIRawDiffuse;
-        std::unique_ptr<NRI::Buffer> m_restirGIReservoirBuffers[2];
         std::unique_ptr<NRI::Buffer> m_restirGINeighborOffsetsBuffer;
-        // m_restirGIReservoirBuffers[0] is always this-frame scratch (Initial writes it, Temporal
-        // overwrites it in place); m_restirGIReservoirBuffers[1] is always the persistent
-        // cross-frame result (Temporal reads it as history, Spatial writes the final result into
-        // it). Fixed roles, not ping-ponged per frame -- see the runReSTIRGI dispatch code.
 
         uint32_t m_diffuseGIMode = 0; // 0 = Off (IBL), 1 = DDGI, 2 = ReSTIR GI
         float m_restirGISpatialRadius = 32.0f;
@@ -704,7 +780,6 @@ namespace Nox
         float m_restirGIDepthThreshold = 0.1f;
         bool m_restirGIEnableBoilingFilter = true;
         float m_restirGIBoilingFilterStrength = 0.35f;
-        Ref<Texture2D> m_denoisedReSTIRGIDiffuse;
         NRI::NRDDiffuseDenoiser m_nrdGIDenoiser = NRI::NRDDiffuseDenoiser::Off;
 
         // ReSTIR DI (Screen-Space Resampled Direct Lighting via RTXDI) -- Initial -> Temporal ->
@@ -717,10 +792,7 @@ namespace Nox
         std::unique_ptr<NRI::Pipeline> m_restirDITemporalPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_restirDISpatialPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_restirDIFinalShadingPipeline = nullptr;
-        Ref<Texture2D> m_restirDIDirectLighting;
-        Ref<Texture2D> m_denoisedReSTIRDIDirectLighting;
         NRI::NRDDiffuseDenoiser m_nrdDIDenoiser = NRI::NRDDiffuseDenoiser::Off;
-        std::unique_ptr<NRI::Buffer> m_restirDIReservoirBuffers[3];
         uint32_t m_restirDILastFrameOutputReservoir = 0;
 
         // Local (point/spot) lights and infinite (directional) lights must occupy separate
@@ -753,8 +825,6 @@ namespace Nox
         // independently toggleable since it's a pure quality/perf layer on top.
         std::unique_ptr<NRI::Pipeline> m_restirDIPresamplePipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_restirDIPresampleReGIRPipeline = nullptr;
-        std::unique_ptr<NRI::Buffer> m_restirDIRISBuffer; // uint2 per element; [0, risBufferOffset) =
-                                                            // RIS tiles, [risBufferOffset, end) = ReGIR cells
         uint32_t m_restirDIRISTileSize = 256;
         uint32_t m_restirDIRISTileCount = 8;
 
@@ -765,11 +835,9 @@ namespace Nox
         // presample passes, same cadence as the rest of ReSTIR DI's per-frame light data.
         std::unique_ptr<NRI::Pipeline> m_restirDIWriteLightPDFPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_restirDIReduceLightPDFMipPipeline = nullptr;
-        Ref<Texture2D> m_lightPDFTexture;
         uint32_t m_lightPDFTextureSize = 128;
         uint32_t m_lightPDFMipLevels = 0; // == log2(m_lightPDFTextureSize); RTXDI_SamplePdfMipmap only
                                             // ever descends to a 2x2 mip, not all the way to 1x1
-        std::vector<uint32_t> m_lightPDFMipStorageSlots; // per-mip UAV descriptor slots, cached once
 
         bool m_regirEnabled = true;
         // Grid bounds informed by this scene's existing DDGI probe grid (m_ddgiGridOrigin/Spacing/
@@ -800,7 +868,6 @@ namespace Nox
         uint32_t m_regirNumBuildSamples = 8;
 
         // Path Tracer Accumulation Ping-Pong
-        Ref<Texture2D> m_pathTracerAccum[2];
         uint32_t m_pathTracerSampleCount = 0;
         glm::mat4 m_pathTracerPrevView = glm::mat4(1.0f);
         bool m_pathTracerUsesRTXDI = false; // RTXPT-style mode: run ReSTIR DI/GI alongside the plain path tracer
@@ -808,9 +875,6 @@ namespace Nox
         // Path Tracer NRD Denoising (fallback for hardware/preference without DLSS Ray Reconstruction --
         // mutually exclusive with it, same as GI/DI/reflections; see setNRDPTDenoiser)
         NRI::NRDDiffuseDenoiser m_nrdPTDenoiser = NRI::NRDDiffuseDenoiser::Off;
-        Ref<Texture2D> m_denoisedPathTracer;
-        uint32_t m_denoisedPathTracerWriteSlot = 0; // storage (UAV) slot for the in-place YCoCg decode pass
-        bool m_pathTracerDenoised = false; // true only when the denoised texture was actually written this frame
         std::unique_ptr<NRI::Pipeline> m_ycocgDecodePipeline = nullptr;
 
         // ReSTIR PT (Screen-Space Path Resampling via RTXDI) -- reuses the REAL rtxdi::ReSTIRPTContext
@@ -822,18 +886,6 @@ namespace Nox
         bool m_restirPTEnabled = false; // only meaningful while Path Tracing is active
         bool m_restirPTTemporalEnabled = false; // see getReSTIRPTTemporalEnabled's comment
         std::unique_ptr<rtxdi::ReSTIRPTContext> m_restirPTContext; // created lazily once render size is known
-        std::unique_ptr<NRI::Buffer> m_restirPTReservoirBuffers[3]; // RTXDI_PackedPTReservoir per element (64 bytes)
-        Ref<Texture2D> m_restirPTOutput; // final-shaded path-traced radiance (RGBA16F)
-        // Primary-surface (bounce-1) direct lighting -- the RTXDI PT SDK's RAB_PathTrace loop starts at
-        // bounceDepth=2 BY DESIGN (see PathTracerState.hlsli:158's own comment: "Starting surface is
-        // primary hit (1), but initialBounce starts at the surface after the scattering event, which is
-        // the secondary surface (2)"), meaning the resampled reservoir only ever contains INDIRECT light
-        // (bounce 2+). The real SDK expects a separate direct-lighting pass (ReSTIR DI, in the FullSample)
-        // to cover the primary surface, then sums the two -- exactly the same split this engine already
-        // uses for ReSTIR GI (indirect only) + DeferredLighting (direct). Written by the Initial Sampling
-        // pass (which already has full G-buffer/TLAS/light access) as a second render target, and added
-        // into the resampled indirect radiance in the Final Shading pass.
-        Ref<Texture2D> m_restirPTPrimaryDirect;
         std::unique_ptr<NRI::Pipeline> m_restirPTInitialPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_restirPTTemporalPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_restirPTFinalShadingPipeline = nullptr;
@@ -852,31 +904,30 @@ namespace Nox
         float m_restirPTNormalThreshold = 0.6f;
         float m_restirPTDepthThreshold = 0.1f;
         bool m_restirPTEnablePermutationSampling = false;
-        bool m_restirPTOutputValid = false; // true only when the ReSTIR PT dispatch actually ran this frame
 
         // Post Process
-        Ref<Texture2D> m_hdrSceneResource;
 
         Ref<Texture2D> m_whiteTexture;
         Ref<Texture2D> m_sceneResource;
 
-        // Entiity ID + readback
-        // m_entityResource is render-resolution (written directly by the G-buffer/unlit/skybox passes,
-        // alongside m_hdrSceneResource). m_entityResourceHi is a nearest-upsampled display-resolution
-        // copy (see applyRenderResolution's blit step) used by anything compositing against the final
-        // image at full res: the 2D overlay pass, the outline effect, and mouse-pick readback.
-        Ref<Texture2D> m_entityResource;
-        Ref<Texture2D> m_entityResourceHi;
+        // Entity ID readback (entity IDs themselves are render graph textures, see Passes/FrameGraphResources.h)
         std::vector<std::unique_ptr<NRI::Buffer>> m_pickerStagingBuffers;
         std::vector<PickRequest> m_pickerReadbackRequests;
         PickRequest m_pickRequest;
         PickResult m_pickResult;
         std::vector<int32_t> m_SelectedEntityIDs;
 
+        // Render graph texture inspection (editor)
+        std::unique_ptr<NRI::Pipeline> m_textureInspectPipeline = nullptr;
+        TextureInspection m_textureInspection;
+        Texture2D* m_inspectionImage = nullptr;
+        RGTextureKey m_inspectedTextureKey;
+        std::vector<std::unique_ptr<NRI::Buffer>> m_inspectionProbeBuffers; // per frame slot, 1x1 RGBA32F readback
+        std::vector<uint8_t> m_inspectionProbePending;                     // per frame slot
+        glm::vec4 m_inspectionProbeValue{ 0.0f };
+        bool m_inspectionProbeValid = false;
+
         // Textures
-        // Same render-resolution/display-resolution split as m_entityResource above.
-        Ref<Texture2D> m_depthResource;
-        Ref<Texture2D> m_depthResourceHi;
         Ref<Texture2D> m_textureResource;
         Ref<Texture2D> m_textureResource2;
         Ref<Texture2D> m_textureResource3;
@@ -939,7 +990,7 @@ namespace Nox
         void endUploadBatch();
         // --- Hardware Ray Tracing: Scene TLAS ---
         void updateSceneAccelerationStructure(uint32_t currentFrameIndex);
-        void BuildSceneAccelerationStructure(uint32_t currentFrameIndex);
+        void BuildSceneAccelerationStructure(NRI::CommandBuffer& cmd, bool fullBuild);
 
         bool m_rayTracingEnabled = false;
         bool m_rayTracingShadows = false;
@@ -1037,10 +1088,8 @@ namespace Nox
         glm::vec2 m_currentJitter = glm::vec2(0.0f);
         
         // DLSS Super Resolution
-        Ref<Texture2D> m_dlssOutputResource;
         bool m_dlssEnabled = false;
         NRI::UpscaleMode m_dlssMode = NRI::UpscaleMode::Off;
-        bool m_resetDLSS = true;
         bool m_pendingRenderResolutionUpdate = false;
         bool m_dlssRayReconstructionEnabled = false; // Enabled by default when DLSS is on
 

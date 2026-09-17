@@ -438,6 +438,28 @@ struct PushConstantPathTracer
     uint32_t restirDIDenoiserMode;      // 0 = Off/plain RGB, 1 = REBLUR YCoCg, 2 = RELAX RGB
 };
 
+// Render graph texture inspection (TextureInspect.slang): how the source texture is interpreted.
+STATIC_CONST uint32_t TEXTURE_INSPECT_FLOAT         = 0; // color / data, exposure + channel mask
+STATIC_CONST uint32_t TEXTURE_INSPECT_SIGNED_ID     = 1; // R32_SINT ids (entity)
+STATIC_CONST uint32_t TEXTURE_INSPECT_UNSIGNED_PAIR = 2; // R32G32_UINT (visibility buffer)
+STATIC_CONST uint32_t TEXTURE_INSPECT_DEPTH         = 3; // reverse-Z depth
+
+struct PushConstantTextureInspect
+{
+    uint32_t sourceTextureIndex; // bindless sampled slot
+    uint32_t outputStorageIndex; // RGBA8 display image, storage slot
+    uint32_t probeStorageIndex;  // 1x1 RGBA32F, raw value of the probed texel
+    uint32_t mode;               // TEXTURE_INSPECT_*
+    uint32_t mip;
+    uint32_t channelCount;       // float formats: 1 = gray, 2 = RG, 3/4 = RGB
+    uint32_t channelMask;        // bit 0..3 = R, G, B, A shown
+    float exposure;              // multiplier
+    int32_t probeX;              // -1: no probe
+    int32_t probeY;
+    uint32_t width;              // mip size
+    uint32_t height;
+};
+
 // Decodes an NRD REBLUR-denoised texture's YCoCg color back to linear RGB in place -- see
 // YCoCgDecodeInPlace.slang. Only needed when denoiserMode == 1 (REBLUR); RELAX never encodes YCoCg.
 struct PushConstantYCoCgDecode

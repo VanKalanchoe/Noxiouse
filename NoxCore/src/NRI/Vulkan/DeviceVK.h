@@ -38,8 +38,9 @@ namespace NRI
         vk::raii::Device& getDevice() { return m_device; }
         bool isShaderObjectExtensionEnabled() const { return m_shaderObjectsEnabled; }
         bool isMemoryBudgetSupported() const override { return m_memoryBudgetEnabled; }
-        // VK_EXT_debug_utils is only enabled on the instance together with the validation layers.
-        bool isDebugUtilsEnabled() const { return enableValidationLayers; }
+        // VK_EXT_debug_utils: required with the validation layers, otherwise enabled whenever the loader offers it so
+        // capture tools show debug labels in every build.
+        bool isDebugUtilsEnabled() const { return m_debugUtilsEnabled; }
         uint32_t getQueueIndex() { return m_queueIndex; }
         vk::raii::Queue& getQueue() { return m_queue; }
         vk::raii::SurfaceKHR& getSurface() { return m_surface; }
@@ -73,7 +74,7 @@ namespace NRI
         vk::raii::ImageView createImageView(vk::Image const& image, vk::Format format, vk::ImageAspectFlags aspectFlags, uint32_t mipLevels);
         uint32_t findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties);
         void submitAndWait(CommandBuffer& cmdBuffer, uint32_t slotIndex) override;
-        void submitCommandBuffer(CommandBuffer& cmdBuffer, Swapchain& swapchain, uint32_t frameIndex, uint32_t imageIndex) override;
+        void submitCommandBuffers(std::span<CommandBuffer* const> cmdBuffers, Swapchain& swapchain, uint32_t frameIndex, uint32_t imageIndex) override;
         void waitIdle() override;
         void initImGui(Nox::Window& window) override;
         void shutdownImGui() override;
@@ -83,7 +84,7 @@ namespace NRI
         // Factory
         std::unique_ptr<Swapchain> createSwapchain(const SwapchainDesc& desc) override;
         std::unique_ptr<Pipeline> createPipeline(const PipelineDesc& desc, ShaderCompiler& compiler) override;
-        std::unique_ptr<CommandAllocator> createCommandAllocator() override;
+        std::unique_ptr<CommandAllocator> createCommandAllocator(CommandBufferReset resetMode) override;
         Nox::Ref<Texture2D> createTexture(const TextureDesc& desc) override;
         std::unique_ptr<Buffer> createBuffer(const BufferDesc& desc) override;
         std::unique_ptr<DescriptorHeap> createDescriptorHeap(const DescriptorHeapDesc& desc) override;
@@ -126,8 +127,10 @@ namespace NRI
         vk::raii::Device m_device = nullptr;
         bool m_shaderObjectsEnabled = false;
         bool m_memoryBudgetEnabled = false;
+        bool m_debugUtilsEnabled = false;
         uint32_t m_queueIndex = ~0;
         vk::raii::Queue m_queue = nullptr;
+        std::vector<vk::CommandBuffer> m_submitScratch; // submitCommandBuffers
         vk::raii::SurfaceKHR m_surface = nullptr;
         vk::Format m_depthFormat = vk::Format::eUndefined;
         vk::SurfaceFormatKHR m_surfaceFormat = {};

@@ -6,6 +6,7 @@
 #include <functional>
 #include <future>
 #include <memory>
+#include <span>
 #include <string_view>
 #include <thread>
 #include <type_traits>
@@ -16,6 +17,7 @@
 namespace tf
 {
     class Executor;
+    class Semaphore;
     class Taskflow;
 }
 
@@ -61,6 +63,8 @@ namespace Nox
     {
     public:
         static constexpr uint32_t IoWorkerCount = 2;
+        // Distinct exclusivity keys for RunTasks (bit indices of a mask).
+        static constexpr uint32_t MaxExclusiveKeys = 32;
 
         JobSystem();
         ~JobSystem();
@@ -84,6 +88,12 @@ namespace Nox
         // keeps executing other tasks while it waits; from the main thread it blocks.
         void ParallelFor(std::string_view name, uint32_t count, uint32_t minBatchSize,
                          const std::function<void(uint32_t chunk, uint32_t begin, uint32_t end)>& body);
+
+        // Runs task(index) for every index of exclusiveMasks and returns when all are done (from a task the calling worker
+        // helps; from the main thread it blocks). Tasks whose masks share a bit never run at the same time, for work that
+        // calls into libraries that are not thread-safe: a task waiting for a key is parked by the scheduler (tf::Semaphore),
+        // no worker blocks on it.
+        void RunTasks(std::string_view name, std::span<const uint32_t> exclusiveMasks, const std::function<void(uint32_t index)>& task);
 
         // Work outside the frame graph (loading, cooking). The work receives the future's cancellation token.
         template <typename F>
@@ -150,5 +160,6 @@ namespace Nox
         std::unique_ptr<FrameArena[]> m_FrameArenas;
         std::unique_ptr<tf::Executor> m_Executor;
         std::unique_ptr<tf::Executor> m_IoExecutor;
+        std::unique_ptr<tf::Semaphore[]> m_ExclusiveKeys; // one binary semaphore per key, see RunTasks
     };
 }

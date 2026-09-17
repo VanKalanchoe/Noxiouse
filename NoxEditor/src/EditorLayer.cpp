@@ -32,6 +32,7 @@ namespace Nox
 
         auto& app = Application::Get();
         m_Renderer = app.GetRenderer();
+        m_RenderGraphPanel = CreateScope<RenderGraphPanel>(m_Renderer);
         m_Renderer2D = m_Renderer->getRenderer2D();
 
         m_Font = Font::GetDefault();
@@ -302,6 +303,15 @@ namespace Nox
                 ImGui::EndMenu();
             }
 
+
+            if (ImGui::BeginMenu("Window"))
+            {
+                bool renderGraphOpen = m_RenderGraphPanel->IsOpen();
+                if (ImGui::MenuItem("Render Graph", nullptr, &renderGraphOpen))
+                    m_RenderGraphPanel->SetOpen(renderGraphOpen);
+
+                ImGui::EndMenu();
+            }
 
             if (ImGui::BeginMenu("Script"))
             {
@@ -1163,6 +1173,7 @@ namespace Nox
 
         m_SceneHierarchyPanel.OnImGuiRender();
         m_ContentBrowserPanel->OnImGuiRender();
+        m_RenderGraphPanel->OnImGuiRender();
 
         // "Right" Window
         ImGui::Begin("Stats");

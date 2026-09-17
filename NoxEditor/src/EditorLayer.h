@@ -3,6 +3,7 @@
 #include "NoxCore/Events/InputEvents.h"
 #include "Panels/SceneHierarchyPanel.h"
 #include "Panels/ContentBrowserPanel.h"
+#include "Panels/RenderGraphPanel.h"
 #include "NoxCore/Renderer/Font.h"
 #include "NoxCore/Renderer/Renderer.h"
 
@@ -94,6 +95,7 @@ namespace Nox
         // Panels
         SceneHierarchyPanel m_SceneHierarchyPanel;
         Scope<ContentBrowserPanel> m_ContentBrowserPanel;
+        Scope<RenderGraphPanel> m_RenderGraphPanel;
         
         // Editor resources always static
         Ref<Texture2D> m_IconPlay, m_IconPause, m_IconStep, m_IconStop, m_IconSimulate;

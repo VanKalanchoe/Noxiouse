@@ -196,7 +196,9 @@ namespace Nox
         const NRI::Extent2D outputSize = renderer.getOutputSize();
         const NRI::Extent2D renderSize = renderer.getRenderSize();
         std::format_to(std::back_inserter(report), "Nox Stats report {:04}-{:02}-{:02} {:02}:{:02}:{:02}\n", now.year, now.month, now.day, now.hour, now.minute, now.second);
-        std::format_to(std::back_inserter(report), "Build {} | VSync {} | Output {}x{} | Render {}x{}\n", NOX_BUILD_CONFIG, OnOff(renderer.getVSync()),
+        std::format_to(std::back_inserter(report), "Build {} | VSync {} | Parallel recording {} | Sync {} | Output {}x{} | Render {}x{}\n", NOX_BUILD_CONFIG,
+                       OnOff(renderer.getVSync()), OnOff(renderer.isParallelCommandRecording()),
+                       renderer.getRenderGraph().GetSynchronization() == RGSynchronization::Precise ? "Precise" : "Blanket",
                        outputSize.width, outputSize.height, renderSize.width, renderSize.height);
         if (std::string_view(NOX_BUILD_CONFIG) == "Debug")
             report += "Debug build: not for performance numbers\n";

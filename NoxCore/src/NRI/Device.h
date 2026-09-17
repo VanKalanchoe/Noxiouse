@@ -1,5 +1,6 @@
 #pragma once
 #include <memory>
+#include <span>
 #include <vector>
 
 #include <glm/glm.hpp>
@@ -149,7 +150,7 @@ namespace NRI
         
         virtual std::unique_ptr<Swapchain> createSwapchain(const SwapchainDesc& desc) = 0;
         virtual std::unique_ptr<Pipeline> createPipeline(const PipelineDesc& desc, ShaderCompiler& compiler) = 0;
-        virtual std::unique_ptr<CommandAllocator> createCommandAllocator() = 0;
+        virtual std::unique_ptr<CommandAllocator> createCommandAllocator(CommandBufferReset resetMode) = 0;
         virtual Nox::Ref<Texture2D> createTexture(const TextureDesc& desc) = 0;
         virtual std::unique_ptr<Buffer> createBuffer(const BufferDesc& desc) = 0;
         virtual std::unique_ptr<DescriptorHeap> createDescriptorHeap(const DescriptorHeapDesc& desc) = 0;
@@ -214,7 +215,9 @@ namespace NRI
         virtual void shutdown() = 0;
         virtual uint32_t getMSAASampleCount() const = 0;
         virtual void submitAndWait(CommandBuffer& cmdBuffer, uint32_t slotIndex = 0) = 0;
-        virtual void submitCommandBuffer(CommandBuffer& cmdBuffer, Swapchain& swapchain, uint32_t frameIndex, uint32_t imageIndex) = 0;
+        // One queue submission of the frame's command buffers, executed in span order (slot 0 of each buffer), waiting for
+        // the swapchain image and signaling the frame slot's fence.
+        virtual void submitCommandBuffers(std::span<CommandBuffer* const> cmdBuffers, Swapchain& swapchain, uint32_t frameIndex, uint32_t imageIndex) = 0;
         virtual void waitIdle() = 0;
         virtual void initImGui(Nox::Window& window) = 0;
         virtual void shutdownImGui() = 0;

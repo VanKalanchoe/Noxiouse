@@ -69,9 +69,9 @@ namespace NRI
         return std::make_unique<PipelineVK>(*this, desc, compiler);
     }
 
-    std::unique_ptr<CommandAllocator> DeviceVK::createCommandAllocator()
+    std::unique_ptr<CommandAllocator> DeviceVK::createCommandAllocator(CommandBufferReset resetMode)
     {
-        return std::make_unique<CommandAllocatorVK>(*this);
+        return std::make_unique<CommandAllocatorVK>(*this, resetMode);
     }
 
     Nox::Ref<Texture2D> DeviceVK::createTexture(const TextureDesc& desc)
@@ -461,6 +461,15 @@ namespace NRI
         if (unsupportedPropertyIt != requiredExtensions.end())
         {
             throw std::runtime_error("Required extension not supported: " + std::string(*unsupportedPropertyIt));
+        }
+
+        // Debug labels for capture tools: optional outside validation builds.
+        m_debugUtilsEnabled = enableValidationLayers;
+        if (!m_debugUtilsEnabled &&
+            std::ranges::any_of(extensionProperties, [](const auto& property) { return strcmp(property.extensionName, vk::EXTDebugUtilsExtensionName) == 0; }))
+        {
+            requiredExtensions.push_back(vk::EXTDebugUtilsExtensionName);
+            m_debugUtilsEnabled = true;
         }
 
         vk::InstanceCreateInfo createInfo
@@ -1211,18 +1220,22 @@ namespace NRI
         m_queue.waitIdle();
     }
 
-    void DeviceVK::submitCommandBuffer(CommandBuffer& cmdBuffer, Swapchain& swapchain, uint32_t frameIndex, uint32_t imageIndex)
+    void DeviceVK::submitCommandBuffers(std::span<CommandBuffer* const> cmdBuffers, Swapchain& swapchain, uint32_t frameIndex, uint32_t imageIndex)
     {
-        auto* vkCmd = static_cast<CommandBufferVK*>(&cmdBuffer);
         auto* vkSwap = static_cast<SwapchainVK*>(&swapchain);
+
+        // Main thread only (the queue is externally synchronized); the scratch keeps its capacity.
+        m_submitScratch.clear();
+        for (CommandBuffer* cmdBuffer : cmdBuffers)
+            m_submitScratch.push_back(*static_cast<CommandBufferVK*>(cmdBuffer)->getNativeBuffer(0));
 
         vk::PipelineStageFlags waitDestinationStageMask(vk::PipelineStageFlagBits::eColorAttachmentOutput);
         const vk::SubmitInfo submitInfo{
             .waitSemaphoreCount = 1,
             .pWaitSemaphores = &*vkSwap->getPresentCompleteSemaphore(frameIndex),
             .pWaitDstStageMask = &waitDestinationStageMask,
-            .commandBufferCount = 1,
-            .pCommandBuffers = &*vkCmd->getNativeBuffer(frameIndex),
+            .commandBufferCount = static_cast<uint32_t>(m_submitScratch.size()),
+            .pCommandBuffers = m_submitScratch.data(),
             .signalSemaphoreCount = 1,
             .pSignalSemaphores = &*vkSwap->getRenderFinishedSemaphore(imageIndex)
         };

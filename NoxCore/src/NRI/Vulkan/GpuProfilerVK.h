@@ -1,4 +1,6 @@
 #pragma once
+#include <atomic>
+#include <memory>
 #include <vector>
 
 #include "VulkanCommon.h"
@@ -18,11 +20,12 @@ namespace NRI
         float getTimestampPeriod() const override { return m_timestampPeriod; }
         uint32_t getTimestampValidBits() const override { return m_timestampValidBits; }
 
-        void beginFrame(CommandBuffer& cmd, uint32_t frameSlot) override;
+        void beginFrame(uint32_t frameSlot) override;
         std::span<const GpuTimestamp> getReadbackTimestamps() const override { return m_readback; }
+        void resetQueries(CommandBuffer& cmd) override;
 
-        uint32_t beginScope(CommandBuffer& cmd, const char* label) override;
-        uint32_t endScope(CommandBuffer& cmd) override;
+        uint32_t allocateQueryPair() override;
+        void writeTimestamp(CommandBuffer& cmd, uint32_t queryId) override;
 
     private:
         void readSlotResults(uint32_t frameSlot);
@@ -34,18 +37,17 @@ namespace NRI
         struct FrameQueries
         {
             vk::raii::QueryPool pool = nullptr;
-            uint32_t writtenQueries = 0; // queries written since the last reset, read back on the next beginFrame
+            // Queries handed out since the last reset (always written in pairs), read back on the next beginFrame.
+            std::atomic<uint32_t> allocatedQueries = 0;
         };
 
         DeviceVK& m_deviceVK;
-        std::vector<FrameQueries> m_frames;
+        std::unique_ptr<FrameQueries[]> m_frames; // atomics do not move
+        uint32_t m_frameCount = 0;
         std::vector<GpuTimestamp> m_readback;
         std::vector<uint64_t> m_resultScratch; // (value, availability) pairs for vkGetQueryPoolResults
-        std::vector<bool> m_openScopeHasQuery; // per open scope: did its begin get a query (its end then must too)
-        uint32_t m_currentSlot = NoSlot;
-        uint32_t m_reservedEndQueries = 0;
+        uint32_t m_currentSlot = NoSlot;        // written by beginFrame before recording starts
         float m_timestampPeriod = 0.0f;
         uint32_t m_timestampValidBits = 0;
-        bool m_debugLabels = false;
     };
 }

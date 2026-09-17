@@ -86,7 +86,8 @@ namespace NRI
         return vk::BlendOp::eAdd;
     }
     
-    CommandBufferVK::CommandBufferVK(DeviceVK& device, CommandAllocatorVK& allocator, uint32_t cbCount) : m_deviceVK(device)
+    CommandBufferVK::CommandBufferVK(DeviceVK& device, CommandAllocatorVK& allocator, uint32_t cbCount)
+        : m_deviceVK(device), m_resetOnBegin(allocator.getResetMode() == CommandBufferReset::PerCommandBuffer)
     {
         vk::CommandBufferAllocateInfo allocInfo
         {
@@ -101,7 +102,8 @@ namespace NRI
     {
         m_currentFrameIndex = index;
 
-        m_commandBuffers[index].reset();
+        if (m_resetOnBegin)
+            m_commandBuffers[index].reset();
 
         vk::CommandBufferBeginInfo beginInfo{};
         if (oneTimeSubmit) beginInfo.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
@@ -892,7 +894,9 @@ namespace NRI
                 barrier.srcStageMask  = vk::PipelineStageFlagBits2::eTransfer | vk::PipelineStageFlagBits2::eAllCommands;
                 barrier.srcAccessMask = vk::AccessFlagBits2::eTransferWrite | vk::AccessFlagBits2::eMemoryWrite;
                 barrier.dstStageMask  = vk::PipelineStageFlagBits2::eAccelerationStructureBuildKHR;
-                barrier.dstAccessMask = vk::AccessFlagBits2::eAccelerationStructureReadKHR | vk::AccessFlagBits2::eAccelerationStructureWriteKHR;
+                // Build inputs (vertex/index/instance buffers) are read as shader read at the build stage.
+                barrier.dstAccessMask = vk::AccessFlagBits2::eAccelerationStructureReadKHR | vk::AccessFlagBits2::eAccelerationStructureWriteKHR |
+                                        vk::AccessFlagBits2::eShaderRead;
                 break;
             }
 
@@ -920,5 +924,105 @@ vk::AccessFlagBits2::eColorAttachmentWrite | vk::AccessFlagBits2::eDepthStencilA
         };
 
         m_commandBuffers[m_currentFrameIndex].pipelineBarrier2(depInfo);
+    }
+
+    namespace
+    {
+        vk::AccessFlags2 translateAccessBits(uint32_t access)
+        {
+            vk::AccessFlags2 flags = vk::AccessFlagBits2::eNone;
+            if (access & AccessBits::ShaderRead) flags |= vk::AccessFlagBits2::eShaderRead;
+            if (access & AccessBits::ShaderWrite) flags |= vk::AccessFlagBits2::eShaderWrite;
+            if (access & AccessBits::ColorAttachmentRead) flags |= vk::AccessFlagBits2::eColorAttachmentRead;
+            if (access & AccessBits::ColorAttachmentWrite) flags |= vk::AccessFlagBits2::eColorAttachmentWrite;
+            if (access & AccessBits::DepthStencilRead) flags |= vk::AccessFlagBits2::eDepthStencilAttachmentRead;
+            if (access & AccessBits::DepthStencilWrite) flags |= vk::AccessFlagBits2::eDepthStencilAttachmentWrite;
+            if (access & AccessBits::TransferRead) flags |= vk::AccessFlagBits2::eTransferRead;
+            if (access & AccessBits::TransferWrite) flags |= vk::AccessFlagBits2::eTransferWrite;
+            if (access & AccessBits::AccelerationStructureRead) flags |= vk::AccessFlagBits2::eAccelerationStructureReadKHR;
+            if (access & AccessBits::AccelerationStructureWrite) flags |= vk::AccessFlagBits2::eAccelerationStructureWriteKHR;
+            return flags;
+        }
+
+        vk::PipelineStageFlags2 translateStageBits(uint32_t stages)
+        {
+            vk::PipelineStageFlags2 flags = vk::PipelineStageFlagBits2::eNone;
+            if (stages & StageBits::Task) flags |= vk::PipelineStageFlagBits2::eTaskShaderEXT;
+            if (stages & StageBits::Mesh) flags |= vk::PipelineStageFlagBits2::eMeshShaderEXT;
+            if (stages & StageBits::Fragment) flags |= vk::PipelineStageFlagBits2::eFragmentShader;
+            if (stages & StageBits::Compute) flags |= vk::PipelineStageFlagBits2::eComputeShader;
+            if (stages & StageBits::ColorAttachmentOutput) flags |= vk::PipelineStageFlagBits2::eColorAttachmentOutput;
+            if (stages & StageBits::FragmentTests) flags |= vk::PipelineStageFlagBits2::eEarlyFragmentTests | vk::PipelineStageFlagBits2::eLateFragmentTests;
+            if (stages & StageBits::Transfer) flags |= vk::PipelineStageFlagBits2::eTransfer;
+            if (stages & StageBits::AccelerationStructureBuild) flags |= vk::PipelineStageFlagBits2::eAccelerationStructureBuildKHR;
+            return flags;
+        }
+    }
+
+    void CommandBufferVK::resourceBarriers(std::span<const TextureBarrierDesc> textures, std::span<const BufferBarrierDesc> buffers)
+    {
+        m_imageBarrierScratch.clear();
+        for (const TextureBarrierDesc& desc : textures)
+        {
+            auto* texture = static_cast<TextureVK*>(desc.texture);
+            m_imageBarrierScratch.push_back(vk::ImageMemoryBarrier2{
+                .srcStageMask = translateStageBits(desc.before.stages),
+                .srcAccessMask = translateAccessBits(desc.before.access),
+                .dstStageMask = translateStageBits(desc.after.stages),
+                .dstAccessMask = translateAccessBits(desc.after.access),
+                .oldLayout = vk::ImageLayout::eGeneral,
+                .newLayout = vk::ImageLayout::eGeneral,
+                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .image = *texture->getNativeImage(),
+                .subresourceRange = {
+                    .aspectMask = texture->getUsage() == TextureUsage::DepthStencilAttachment ? vk::ImageAspectFlagBits::eDepth : vk::ImageAspectFlagBits::eColor,
+                    .baseMipLevel = 0,
+                    .levelCount = texture->getMipLevels(),
+                    .baseArrayLayer = 0,
+                    .layerCount = texture->getArrayLayers()
+                }
+            });
+        }
+
+        m_bufferBarrierScratch.clear();
+        for (const BufferBarrierDesc& desc : buffers)
+        {
+            auto* buffer = static_cast<BufferVK*>(desc.buffer);
+            m_bufferBarrierScratch.push_back(vk::BufferMemoryBarrier2{
+                .srcStageMask = translateStageBits(desc.before.stages),
+                .srcAccessMask = translateAccessBits(desc.before.access),
+                .dstStageMask = translateStageBits(desc.after.stages),
+                .dstAccessMask = translateAccessBits(desc.after.access),
+                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .buffer = *buffer->getNativeBuffer(),
+                .offset = 0,
+                .size = VK_WHOLE_SIZE
+            });
+        }
+
+        if (m_imageBarrierScratch.empty() && m_bufferBarrierScratch.empty())
+            return;
+
+        const vk::DependencyInfo dependencyInfo{
+            .bufferMemoryBarrierCount = static_cast<uint32_t>(m_bufferBarrierScratch.size()),
+            .pBufferMemoryBarriers = m_bufferBarrierScratch.data(),
+            .imageMemoryBarrierCount = static_cast<uint32_t>(m_imageBarrierScratch.size()),
+            .pImageMemoryBarriers = m_imageBarrierScratch.data()
+        };
+        m_commandBuffers[m_currentFrameIndex].pipelineBarrier2(dependencyInfo);
+    }
+
+    void CommandBufferVK::beginDebugLabel(const char* label)
+    {
+        if (m_deviceVK.isDebugUtilsEnabled())
+            m_commandBuffers[m_currentFrameIndex].beginDebugUtilsLabelEXT(vk::DebugUtilsLabelEXT{ .pLabelName = label });
+    }
+
+    void CommandBufferVK::endDebugLabel()
+    {
+        if (m_deviceVK.isDebugUtilsEnabled())
+            m_commandBuffers[m_currentFrameIndex].endDebugUtilsLabelEXT();
     }
 }
