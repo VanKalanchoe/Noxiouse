@@ -1,4 +1,5 @@
  #include "shaderIO.h"
+#include "MipFeedback.slang"
 
     struct GBufferPayload
     {
@@ -330,6 +331,17 @@
         float2 ddx_mr = (instance.physicalDescriptorTextureSet == 0) ? ddx_uv0 : ddx_uv1;
         float2 ddy_mr = (instance.physicalDescriptorTextureSet == 0) ? ddy_uv0 : ddy_uv1;
 
+        // Texture streaming: the mips this surface's textures need, from the same derivatives the samples use.
+        if (ubo->mipFeedbackReference != 0 && isMipFeedbackPixel(pixelCoord, ubo->mipFeedbackFrame))
+        {
+            reportMipFeedback(ubo, instance.baseColorTextureIndex, ddx_bc, ddy_bc);
+            reportMipFeedback(ubo, instance.metallicRoughnessTextureIndex, ddx_mr, ddy_mr);
+            reportMipFeedback(ubo, instance.normalTextureIndex, instance.normalTextureSet == 0 ? ddx_uv0 : ddx_uv1, instance.normalTextureSet == 0 ? ddy_uv0 : ddy_uv1);
+            reportMipFeedback(ubo, instance.occlusionTextureIndex, instance.occlusionTextureSet == 0 ? ddx_uv0 : ddx_uv1, instance.occlusionTextureSet == 0 ? ddy_uv0 : ddy_uv1);
+            reportMipFeedback(ubo, instance.emissiveTextureIndex, instance.emissiveTextureSet == 0 ? ddx_uv0 : ddx_uv1, instance.emissiveTextureSet == 0 ? ddy_uv0 : ddy_uv1);
+            reportMipFeedback(ubo, instance.transmissionTextureIndex, instance.transmissionTextureSet == 0 ? ddx_uv0 : ddx_uv1, instance.transmissionTextureSet == 0 ? ddy_uv0 : ddy_uv1);
+        }
+
         // 2. PBR MATERIAL EVALUATION (Metallic-Roughness vs Specular-Glossiness)
         float4 baseColor;
         float roughness;
@@ -473,6 +485,13 @@
 
         // Output to MRT
         output.albedo   = float4(baseColor.rgb, occlusion);
+        // Debug view 20: the base color texture's mip residency against what this pixel needs.
+        if (pushConstant.debugMode == 20)
+        {
+            output.albedo.rgb = instance.baseColorTextureIndex != 0xFFFFFFFF
+                ? mipStreamingDebugColor(relativeMipLod(ubo, instance.baseColorTextureIndex, ddx_bc, ddy_bc), baseColor.rgb)
+                : float3(0.3, 0.3, 0.3);
+        }
         output.normal   = (pushConstant.debugMode == 2) ? float4(rawNormalTex, roughness) : float4(finalNormal, roughness);
 
         // Encode unlit flag: 2.0 = UNLIT

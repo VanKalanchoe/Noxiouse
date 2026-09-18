@@ -9,6 +9,7 @@
 #include "MeshImporter.h"
 #include "NoxCore/Renderer/Mesh.h"
 #include "NoxCore/Renderer/Renderer.h"
+#include "NoxCore/Core/Application.h"
 #include "Material.h"
 #include "MaterialSerializer.h"
 
@@ -198,7 +199,8 @@ namespace Nox
     {
         NOX_PROFILE_SCOPE("Publish Loaded Assets");
         std::vector<LoadedAsset> finished;
-        m_Loader.Update(finished);
+        uint64_t uploadBudget = AssetLoader::UploadBytesPerFrame;
+        m_Loader.Update(uploadBudget, finished);
 
         bool texturesLoaded = false;
         for (LoadedAsset& loaded : finished)
@@ -229,17 +231,18 @@ namespace Nox
             m_LoadedAssets[loaded.Handle] = loaded.Loaded;
             if (loaded.SourceHash)
                 m_LastKnownSourceHash[loaded.Handle] = *loaded.SourceHash;
+            if (loaded.Streamed)
+                m_Streamer.Register(loaded.Handle, *loaded.Streamed, loaded.StreamedFirstMip,
+                                    static_cast<Texture2D*>(loaded.Loaded.get())->GetDescriptorIndexSlot());
 
             if (metadata.Type == AssetType::Mesh || metadata.Type == AssetType::StaticMesh || metadata.Type == AssetType::MeshSource)
             {
                 NOX_PROFILE_SCOPE("Register Model Assets");
                 ImportMeshTextures(loaded.Loaded);
                 ImportMeshMaterials(loaded.Loaded, metadata);
-                // New files appear next to a model only when it is cooked (skeleton, clips, extracted textures); a folder
-                // is scanned once per session otherwise, for a registry rebuilt from existing cooked files.
-                const std::filesystem::path modelFolder = metadata.FilePath.parent_path().parent_path();
-                if (m_ScannedModelFolders.insert(modelFolder.generic_string()).second || loaded.Cooked)
-                    ScanAndRegisterNewAssets(modelFolder);
+                // New files appear next to a model only when it is cooked (skeleton, clips, extracted textures).
+                if (loaded.Cooked)
+                    ScanAndRegisterNewAssets(metadata.FilePath.parent_path().parent_path());
                 LinkImportedAssets(loaded.Loaded, metadata);
             }
 
@@ -249,6 +252,26 @@ namespace Nox
 
         if (texturesLoaded)
             Renderer::MarkTexturesLoaded();
+
+        // Textures that moved to a new image (more or fewer mips): swapped in like a reload -- materials resolve to the
+        // new image's slot, the old image leaves once frames in flight are done with it.
+        std::vector<std::pair<AssetHandle, Ref<Texture2D>>> streamed;
+        m_Streamer.Update(*Application::Get().GetRenderer(), uploadBudget, streamed);
+        std::vector<uint32_t> replacedSlots;
+        for (auto& [handle, texture] : streamed)
+        {
+            auto loaded = m_LoadedAssets.find(handle);
+            if (loaded == m_LoadedAssets.end())
+            {
+                Renderer::DeferAssetRelease(Ref<Asset>(texture));
+                continue;
+            }
+            replacedSlots.push_back(static_cast<Texture2D*>(loaded->second.get())->GetDescriptorIndexSlot());
+            Renderer::DeferAssetRelease(std::move(loaded->second));
+            texture->Handle = handle;
+            loaded->second = Ref<Asset>(texture);
+        }
+        Renderer::InvalidateTextureDescriptorSlots(replacedSlots);
     }
     
     void EditorAssetManager::ReimportAsset(AssetHandle handle)
@@ -263,6 +286,7 @@ namespace Nox
             return;
         }
         m_FailedAssets.erase(handle);
+        m_Streamer.Unregister(handle);
 
         // The file watcher can fire on this source file even though its content never actually
         // changed -- e.g. our own cooker rewrites extracted embedded textures unconditionally on
@@ -715,13 +739,14 @@ namespace Nox
 
     void EditorAssetManager::Shutdown()
     {
+        m_Streamer.Shutdown();
         m_Loader.Shutdown();
         m_LoadedAssets.clear();
     }
 
     bool EditorAssetManager::ConsumeLoadsSettledAfterSweep()
     {
-        if (!m_SweepDuringLoads || !m_Loader.IsIdle())
+        if (!m_SweepDuringLoads || !m_Loader.IsIdle() || !m_Streamer.IsIdle())
             return false;
         m_SweepDuringLoads = false;
         return true;
@@ -730,7 +755,8 @@ namespace Nox
     size_t EditorAssetManager::UnloadUnusedAssets(const std::unordered_set<AssetHandle>& referencedAssets)
     {
         // Loads in flight publish after this sweep; they are swept once they have all finished.
-        if (!m_Loader.IsIdle())
+        // (A streamed texture being moved to a new image is held by the move and skipped below.)
+        if (!m_Loader.IsIdle() || !m_Streamer.IsIdle())
             m_SweepDuringLoads = true;
 
         // Materials reference textures by path, not handle. Cached hits skip the filesystem entirely;
@@ -893,6 +919,7 @@ namespace Nox
                 if (auto* texture = dynamic_cast<Texture2D*>(asset.get()))
                     unloadedTextureSlots.push_back(texture->GetDescriptorIndexSlot());
             }
+            m_Streamer.Unregister(it->first);
             Renderer::DeferAssetRelease(asset);
             it = m_LoadedAssets.erase(it);
             ++unloadedCount;

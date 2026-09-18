@@ -45,6 +45,11 @@ namespace Nox
         void CopyToBuffer(const StagingSpan& source, uint64_t sourceOffset, uint64_t size, NRI::Buffer& destination, uint64_t destinationOffset);
         // Every mip of an image created with sharedAcrossQueues; mip i lives at source.offset + mipOffsets[i].
         void CopyToTexture(const StagingSpan& source, NRI::Texture2D& destination, const std::vector<size_t>& mipOffsets);
+        // An image whose mips all come from CopyTextureMips (no staging): only its first transition.
+        void InitializeTexture(NRI::Texture2D& texture);
+        // Whole mips of one image into another (a streamed texture moving to an image with more or fewer mips), after the
+        // destination's first transition (CopyToTexture / InitializeTexture) in the same recording.
+        void CopyTextureMips(NRI::Texture2D& source, uint32_t sourceFirstMip, NRI::Texture2D& destination, uint32_t destinationFirstMip, uint32_t mipCount);
         // A growing stream copies itself over, after every write queued to it so far and before the ones that follow.
         // The next frame reads the new buffer, so it waits for this copy.
         void CopyBuffer(NRI::Buffer& source, NRI::Buffer& destination, uint64_t size);
@@ -52,6 +57,8 @@ namespace Nox
         // frame wait for them (uploads published right away); streamed uploads publish after completion instead.
         // Returns the value the copies complete at.
         uint64_t Commit(const StagingSpan& span, bool nextFrameReads);
+        // Commit for copies that read no staging (CopyTextureMips).
+        uint64_t CommitCopies(bool nextFrameReads);
 
         // Submits the copies queued since the last call; returns the value they complete at.
         uint64_t Flush();

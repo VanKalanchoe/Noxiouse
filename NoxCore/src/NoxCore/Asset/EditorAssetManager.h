@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AssetLoader.h"
+#include "TextureStreamer.h"
 #include "AssetManagerBase.h"
 #include "AssetMetadata.h"
 
@@ -57,7 +58,9 @@ namespace Nox
 
         // For the editor's status bar.
         size_t GetLoadingCount() const { return m_Loader.GetLoadCount(); }
-        uint64_t GetPendingUploadBytes() const { return m_Loader.GetPendingUploadBytes(); }
+        size_t GetStreamingCount() const { return m_Streamer.GetStreamingCount(); }
+        TextureStreamer& GetTextureStreamer() { return m_Streamer; }
+        uint64_t GetPendingUploadBytes() const { return m_Loader.GetPendingUploadBytes() + m_Streamer.GetPendingUploadBytes(); }
         
         void SerializeAssetRegistry();
         bool DeserializeAssetRegistry();
@@ -87,11 +90,12 @@ namespace Nox
 
         // Background loads (RequestAsset) until they are published into m_LoadedAssets.
         AssetLoader m_Loader;
+        // Streamed textures moving between mip residencies (§5.12).
+        TextureStreamer m_Streamer;
         // Loads that failed are not retried on every request (entities keep requesting what they miss); a reimport
         // clears the entry.
         std::unordered_set<AssetHandle> m_FailedAssets;
         bool m_SweepDuringLoads = false;
-        std::unordered_set<std::string> m_ScannedModelFolders;
 
         // Last content-hash seen for each asset's source file. Lets ReimportAsset tell a genuine
         // on-disk edit apart from a spurious file-watcher event caused by our own cooker writing

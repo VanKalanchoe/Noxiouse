@@ -60,6 +60,17 @@ namespace Nox
         destination.recordUpload(recording(), *source.buffer, source.offset, mipOffsets);
     }
 
+    void UploadManager::InitializeTexture(NRI::Texture2D& texture)
+    {
+        texture.recordInitialLayout(recording());
+    }
+
+    void UploadManager::CopyTextureMips(NRI::Texture2D& source, uint32_t sourceFirstMip, NRI::Texture2D& destination, uint32_t destinationFirstMip, uint32_t mipCount)
+    {
+        if (mipCount > 0)
+            recording().copyTextureMips(source, sourceFirstMip, destination, destinationFirstMip, mipCount);
+    }
+
     void UploadManager::CopyBuffer(NRI::Buffer& source, NRI::Buffer& destination, uint64_t size)
     {
         NRI::CommandBuffer& cmd = recording();
@@ -87,6 +98,15 @@ namespace Nox
                 allocation->value = value;
         }
 
+        if (nextFrameReads)
+            m_frameWaitValue = value;
+        return value;
+    }
+
+    uint64_t UploadManager::CommitCopies(bool nextFrameReads)
+    {
+        NOX_CORE_ASSERT(m_recording, "UploadManager::CommitCopies without recorded copies");
+        const uint64_t value = m_submittedValue + 1;
         if (nextFrameReads)
             m_frameWaitValue = value;
         return value;

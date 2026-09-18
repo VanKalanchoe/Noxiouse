@@ -99,6 +99,15 @@ TextureCube envMap = TextureCube.Handle(uint2(pushConstant.envTextureIndex, 0));
 SamplerState linearSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_PREFILTER, 0));
 RWTexture2DArray<float4> prefilteredOutput = RWTexture2DArray<float4>.Handle(uint2(pushConstant.cubemapStorageIndex, 0));
 
+uint3 writePos = uint3(dispatchThreadID.x, dispatchThreadID.y, faceIndex);
+
+// Roughness 0 is a mirror: every GGX sample would be N itself, so one read gives the same result as 1024.
+if (pushConstant.roughness == 0.0)
+{
+    prefilteredOutput[writePos] = float4(envMap.SampleLevel(linearSampler, N, 0.0).rgb, 1.0);
+    return;
+}
+
 const uint SAMPLE_COUNT = 1024u;
 float totalWeight = 0.0;
 float3 prefilteredColor = float3(0.0);
@@ -127,6 +136,5 @@ for (uint i = 0u; i < SAMPLE_COUNT; ++i)
 
 prefilteredColor = totalWeight > 0.0 ? prefilteredColor / totalWeight : float3(0.0);
 
-uint3 writePos = uint3(dispatchThreadID.x, dispatchThreadID.y, faceIndex);
 prefilteredOutput[writePos] = float4(prefilteredColor, 1.0);
 }

@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstring>
 #include <fstream>
+#include <mutex>
 
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
@@ -19,6 +20,9 @@
 #include "NoxCore/Profiling/Profiler.h"
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Utils/Utils.h"
+#include "NoxCore/Tasks/JobSystem.h"
+
+#include <bc7enc.h>
 
 namespace Nox
 {
@@ -63,6 +67,65 @@ namespace Nox
         cookSettings.generateMips = static_cast<uint8_t>(spec.generateMips);
         cookSettings.format = static_cast<uint16_t>(spec.format);
         return XXH3_128bits(&cookSettings, sizeof(cookSettings));
+    }
+
+    // An RGBA8 mip chain to BC7 (1 byte per texel instead of 4): every mip encoded by bc7enc, blocks spread over the
+    // workers (a 2048² texture is 262 k blocks). Perceptual weights for color, linear ones for data (normals,
+    // roughness/metalness, occlusion). Edge texels are repeated into the blocks of mips smaller than 4x4 or not a multiple.
+    static void EncodeBC7(TextureData& cpuData)
+    {
+        static std::once_flag s_EncoderInit;
+        std::call_once(s_EncoderInit, [] { bc7enc_compress_block_init(); });
+
+        const bool srgb = cpuData.Format == NRI::ImageFormat::SRGBA8;
+        bc7enc_compress_block_params params;
+        bc7enc_compress_block_params_init(&params);
+        if (!srgb)
+            bc7enc_compress_block_params_init_linear_weights(&params);
+
+        std::vector<size_t> offsets;
+        size_t total = 0;
+        for (uint32_t mip = 0; mip < cpuData.MipLevels; ++mip)
+        {
+            const uint32_t blocksX = (std::max(cpuData.Width >> mip, 1u) + 3) / 4;
+            const uint32_t blocksY = (std::max(cpuData.Height >> mip, 1u) + 3) / 4;
+            offsets.push_back(total);
+            total += static_cast<size_t>(blocksX) * blocksY * BC7ENC_BLOCK_SIZE;
+        }
+
+        Buffer encoded(total);
+        for (uint32_t mip = 0; mip < cpuData.MipLevels; ++mip)
+        {
+            const uint32_t width = std::max(cpuData.Width >> mip, 1u);
+            const uint32_t height = std::max(cpuData.Height >> mip, 1u);
+            const uint32_t blocksX = (width + 3) / 4;
+            const uint32_t blocksY = (height + 3) / 4;
+            const uint8_t* source = cpuData.Data.Data + cpuData.MipOffsets[mip];
+            uint8_t* destination = encoded.Data + offsets[mip];
+
+            JobSystem::Get().ParallelFor("Encode BC7", blocksY, 4, [&](uint32_t, uint32_t begin, uint32_t end)
+            {
+                color_rgba block[16];
+                for (uint32_t blockY = begin; blockY < end; ++blockY)
+                {
+                    for (uint32_t blockX = 0; blockX < blocksX; ++blockX)
+                    {
+                        for (uint32_t texel = 0; texel < 16; ++texel)
+                        {
+                            const uint32_t x = std::min(blockX * 4 + texel % 4, width - 1);
+                            const uint32_t y = std::min(blockY * 4 + texel / 4, height - 1);
+                            memcpy(block[texel].m_c, source + (static_cast<size_t>(y) * width + x) * 4, 4);
+                        }
+                        bc7enc_compress_block(destination + (static_cast<size_t>(blockY) * blocksX + blockX) * BC7ENC_BLOCK_SIZE, block, &params);
+                    }
+                }
+            });
+        }
+
+        cpuData.Data.Release();
+        cpuData.Data = encoded;
+        cpuData.MipOffsets = std::move(offsets);
+        cpuData.Format = srgb ? NRI::ImageFormat::BC7_UNorm_SRGB : NRI::ImageFormat::BC7_UNorm;
     }
 
     static void GenerateRGBA8MipChain(TextureData& cpuData)
@@ -167,13 +230,19 @@ namespace Nox
         return header;
     }
 
-    bool TextureImporter::ReadCookedTextureData(const CookedTextureHeader& header, uint8_t* destination)
+    bool TextureImporter::ReadCookedTextureMips(const CookedTextureHeader& header, uint32_t firstMip, uint32_t mipCount, uint8_t* destination)
     {
+        // Mips are stored largest first: a run of them is one range of the file.
+        const std::vector<size_t>& offsets = header.Texture.MipOffsets;
+        const uint32_t endMip = firstMip + mipCount;
+        const uint64_t begin = offsets.empty() ? 0 : offsets[firstMip];
+        const uint64_t end = endMip < offsets.size() ? offsets[endMip] : header.DataSize;
+
         std::ifstream stream(header.Path, std::ios::binary);
         if (!stream.is_open())
             return false;
-        stream.seekg(static_cast<std::streamoff>(header.DataOffset));
-        stream.read(reinterpret_cast<char*>(destination), static_cast<std::streamsize>(header.DataSize));
+        stream.seekg(static_cast<std::streamoff>(header.DataOffset + begin));
+        stream.read(reinterpret_cast<char*>(destination), static_cast<std::streamsize>(end - begin));
         return !stream.fail();
     }
 
@@ -223,6 +292,9 @@ namespace Nox
             decoded = DecodeSTB(sourcePath, metadata.TextureSpec, cpuData);
         if (!decoded)
             return false;
+        // PNG/JPG decode to RGBA8 with generated mips; DDS and KTX2 keep the format they ship in.
+        if (cpuData.Format == NRI::ImageFormat::SRGBA8 || cpuData.Format == NRI::ImageFormat::RGBA8)
+            EncodeBC7(cpuData);
 
         std::error_code error;
         std::filesystem::create_directories(cookedPath.parent_path(), error);
@@ -623,8 +695,23 @@ namespace Nox
             }
         }
 
-        // Owned: the KTX texture's memory goes away with it.
-        cpuData.Data = Buffer::Copy(Buffer(kTexture->pData, kTexture->dataSize));
+        // Owned (the KTX texture's memory goes away with it), and largest mip first like every other texture: KTX2 stores
+        // the smallest first, and a run of mips has to be one range of a cooked file for texture streaming.
+        std::vector<size_t> levelSizes(kTexture->numLevels);
+        size_t totalSize = 0;
+        for (uint32_t level = 0; level < kTexture->numLevels; level++)
+        {
+            levelSizes[level] = ktxTexture_GetImageSize(reinterpret_cast<ktxTexture*>(kTexture), level);
+            totalSize += levelSizes[level];
+        }
+        cpuData.Data.Allocate(totalSize);
+        size_t cursor = 0;
+        for (uint32_t level = 0; level < kTexture->numLevels; level++)
+        {
+            memcpy(cpuData.Data.Data + cursor, kTexture->pData + cpuData.MipOffsets[level], levelSizes[level]);
+            cpuData.MipOffsets[level] = cursor;
+            cursor += levelSizes[level];
+        }
         ktxTexture2_Destroy(kTexture);
         return true;
     }

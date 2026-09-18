@@ -75,6 +75,7 @@ namespace Nox
         RGTexture DLSSOutput;
         RGBuffer TLAS;
         RGBuffer PickerStaging;
+        RGBuffer MipFeedback; // texture streaming feedback (§5.12)
 
         // GPU scene tables
         RGBuffer SceneInstances;

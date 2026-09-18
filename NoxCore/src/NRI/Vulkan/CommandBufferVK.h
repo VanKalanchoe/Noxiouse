@@ -67,6 +67,8 @@ namespace NRI
         void transitionSwapchainLayout(Swapchain& swapchain, uint32_t imageIndex, TextureLayout oldLayout, TextureLayout newLayout) override;
         void resolveImage(Texture& srcTexture, Texture& dstTexture, uint32_t width, uint32_t height) override;
         void copyTexture(Texture& srcTexture, Texture& dstTexture, uint32_t width, uint32_t height) override;
+        void fillBuffer(Buffer& buffer, uint64_t offset, uint64_t size, uint32_t value) override;
+        void copyTextureMips(Texture& srcTexture, uint32_t srcFirstMip, Texture& dstTexture, uint32_t dstFirstMip, uint32_t mipCount) override;
         void submitImageBarrier(vk::Image image, TextureLayout oldLayout, TextureLayout newLayout, vk::ImageAspectFlags aspectFlags, uint32_t arrayLayers, uint32_t mipLevels);
         void getSyncFlags(TextureLayout layout, bool isSource, vk::PipelineStageFlags2& stageMask, vk::AccessFlags2& accessMask) const;
         vk::ImageLayout translateLayoutToVk(TextureLayout layout) const;

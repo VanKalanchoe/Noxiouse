@@ -641,6 +641,40 @@ namespace NRI
         );
     }
 
+    void CommandBufferVK::fillBuffer(Buffer& buffer, uint64_t offset, uint64_t size, uint32_t value)
+    {
+        m_commandBuffers[m_currentFrameIndex].fillBuffer(dynamic_cast<BufferVK&>(buffer).getNativeBuffer(), offset, size, value);
+    }
+
+    void CommandBufferVK::copyTextureMips(Texture& srcTexture, uint32_t srcFirstMip, Texture& dstTexture, uint32_t dstFirstMip, uint32_t mipCount)
+    {
+        auto* vkSrc = dynamic_cast<TextureVK*>(&srcTexture);
+        auto* vkDst = dynamic_cast<TextureVK*>(&dstTexture);
+
+        std::vector<vk::ImageCopy2> regions;
+        regions.reserve(mipCount);
+        for (uint32_t mip = 0; mip < mipCount; ++mip)
+        {
+            const uint32_t srcMip = srcFirstMip + mip;
+            regions.push_back(vk::ImageCopy2{
+                .srcSubresource = { .aspectMask = vk::ImageAspectFlagBits::eColor, .mipLevel = srcMip, .baseArrayLayer = 0, .layerCount = 1 },
+                .srcOffset = { 0, 0, 0 },
+                .dstSubresource = { .aspectMask = vk::ImageAspectFlagBits::eColor, .mipLevel = dstFirstMip + mip, .baseArrayLayer = 0, .layerCount = 1 },
+                .dstOffset = { 0, 0, 0 },
+                .extent = { std::max(1u, srcTexture.GetWidth() >> srcMip), std::max(1u, srcTexture.GetHeight() >> srcMip), 1 }
+            });
+        }
+
+        m_commandBuffers[m_currentFrameIndex].copyImage2(vk::CopyImageInfo2{
+            .srcImage = vkSrc->getNativeImage(),
+            .srcImageLayout = vk::ImageLayout::eGeneral,
+            .dstImage = vkDst->getNativeImage(),
+            .dstImageLayout = vk::ImageLayout::eGeneral,
+            .regionCount = static_cast<uint32_t>(regions.size()),
+            .pRegions = regions.data()
+        });
+    }
+
     void CommandBufferVK::copyTexture(Texture& srcTexture, Texture& dstTexture, uint32_t width, uint32_t height)
     {
         auto* vkSrc = dynamic_cast<TextureVK*>(&srcTexture);

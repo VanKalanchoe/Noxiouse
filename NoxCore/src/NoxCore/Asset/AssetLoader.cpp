@@ -7,6 +7,7 @@
 #include "AssetImporter.h"
 #include "MeshImporter.h"
 #include "TextureImporter.h"
+#include "TextureStreamer.h"
 #include "NoxCore/Core/Application.h"
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Profiling/Profiler.h"
@@ -50,9 +51,6 @@ namespace Nox
 
     namespace
     {
-        // Staging bytes handed to loads per frame: one frame's copies stay small next to the transfer queue's bandwidth,
-        // and the host memory held by staging stays bounded.
-        constexpr uint64_t UploadBytesPerFrame = 64ull * 1024 * 1024;
         // Submeshes a mesh publishes per frame: each creates its BLAS buffer and acceleration structure object, and a
         // batch holds a whole frame's staging worth of them (Bistro: ~180, which made one frame 35 ms).
         constexpr size_t MeshPublishesPerFrame = 64;
@@ -60,7 +58,7 @@ namespace Nox
         // A frame whose budget is untouched takes any single upload, so one larger than the budget still goes through.
         bool fitsBudget(uint64_t budget, uint64_t bytes)
         {
-            return bytes <= budget || budget == UploadBytesPerFrame;
+            return bytes <= budget || budget == AssetLoader::UploadBytesPerFrame;
         }
 
         void takeBudget(uint64_t& budget, uint64_t bytes)
@@ -160,18 +158,23 @@ namespace Nox
                 }
                 case Stage::Staging:
                 {
-                    if (!fitsBudget(uploadBudget, m_Cooked.DataSize))
+                    // Only the mip tail: the texture streams the rest in as it is wanted (TextureStreamer).
+                    const uint32_t mipLevels = std::max(m_Cooked.Texture.MipLevels, 1u);
+                    m_FirstMip = TextureStreamer::TailFirstMip(m_Cooked.Texture);
+                    const uint64_t bytes = uploadBytes();
+                    if (!fitsBudget(uploadBudget, bytes))
                         return false;
-                    m_Upload = renderer.BeginTextureUpload(m_Cooked.Texture, m_Cooked.DataSize, false);
+                    m_Upload = renderer.BeginTextureUpload(m_Cooked.Texture, m_FirstMip, mipLevels - m_FirstMip, m_Cooked.DataSize, false);
                     if (!m_Upload)
                         return false;
-                    takeBudget(uploadBudget, m_Cooked.DataSize);
+                    takeBudget(uploadBudget, bytes);
 
                     // From the file straight into staging: the texels are never copied on the CPU.
-                    m_Read = JobSystem::Get().AsyncIO("Read Texture Data", [cooked = m_Cooked, destination = m_Upload->Staging.data](const CancellationToken&)
-                    {
-                        return TextureImporter::ReadCookedTextureData(cooked, destination);
-                    });
+                    m_Read = JobSystem::Get().AsyncIO("Read Texture Data",
+                        [cooked = m_Cooked, firstMip = m_FirstMip, mipCount = mipLevels - m_FirstMip, destination = m_Upload->Staging.data](const CancellationToken&)
+                        {
+                            return TextureImporter::ReadCookedTextureMips(cooked, firstMip, mipCount, destination);
+                        });
                     m_Stage = Stage::Reading;
                     return false;
                 }
@@ -197,6 +200,11 @@ namespace Nox
                         return false;
                     renderer.PublishTexture(*m_Upload->Texture);
                     m_Result.Loaded = Ref<Asset>(m_Upload->Texture);
+                    if (m_FirstMip > 0)
+                    {
+                        m_Result.Streamed = m_Cooked;
+                        m_Result.StreamedFirstMip = m_FirstMip;
+                    }
                     m_Upload.reset();
                     return true;
                 }
@@ -220,7 +228,7 @@ namespace Nox
 
             uint64_t PendingUploadBytes() const override
             {
-                return m_Stage == Stage::Header ? 0 : m_Cooked.DataSize;
+                return m_Stage == Stage::Header ? 0 : uploadBytes();
             }
 
         private:
@@ -238,7 +246,14 @@ namespace Nox
                 std::optional<XXH128_hash_t> SourceHash;
             };
 
+            // The file range of the mips the load uploads (from m_FirstMip on).
+            uint64_t uploadBytes() const
+            {
+                return m_Cooked.DataSize - (m_Cooked.Texture.MipOffsets.empty() ? 0 : m_Cooked.Texture.MipOffsets[m_FirstMip]);
+            }
+
             std::filesystem::path m_AssetDirectory;
+            uint32_t m_FirstMip = 0;
             Stage m_Stage = Stage::Header;
             TaskFuture<Header> m_Header;
             bool m_CookStarted = false;
@@ -524,14 +539,13 @@ namespace Nox
         m_Loading.insert(handle);
     }
 
-    void AssetLoader::Update(std::vector<LoadedAsset>& outFinished)
+    void AssetLoader::Update(uint64_t& uploadBudget, std::vector<LoadedAsset>& outFinished)
     {
         if (m_Loads.empty())
             return;
 
         NOX_PROFILE_SCOPE("Asset Loads");
         Renderer& renderer = *Application::Get().GetRenderer();
-        uint64_t uploadBudget = UploadBytesPerFrame;
         std::erase_if(m_Loads, [&](const std::unique_ptr<Load>& load)
         {
             if (!load->Advance(renderer, uploadBudget))

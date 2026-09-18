@@ -353,14 +353,33 @@ namespace Nox
         const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
         const bool resolveMaterials = m_gbufferPipeline && !m_drawList.empty();
 
+        // Texture streaming feedback starts empty every frame; the material resolve and the transparent pass fill it.
+        if (resolveMaterials)
+        {
+            m_renderGraph.AddPass("Mip Feedback Clear", RGPassFlags::None,
+                [&](RGBuilder& builder)
+                {
+                    builder.Write(resources.MipFeedback, RGBufferAccess::CopyDestination);
+                },
+                [feedback = resources.MipFeedback](RGPassContext& context)
+                {
+                    context.Cmd().fillBuffer(context.Buffer(feedback), 0, sizeof(uint32_t) * shaderio::MipFeedbackSlots, shaderio::MipFeedbackNone);
+                });
+        }
+
         // Decoupled material resolve, or only the clears when the scene has no meshes (entity IDs must read -1 for
         // picking, and later passes still find defined G-buffer contents).
         m_renderGraph.AddPass(resolveMaterials ? "G-Buffer" : "G-Buffer Clear", RGPassFlags::Raster,
             [&](RGBuilder& builder)
             {
                 if (resolveMaterials)
+                {
                     builder.Read(resources.Visibility);
-                    ReadGpuScene(builder, resources);
+                    // Read and written: the shader skips the atomic when the slot already holds its mip.
+                    builder.Read(resources.MipFeedback);
+                    builder.Write(resources.MipFeedback);
+                }
+                ReadGpuScene(builder, resources);
                 builder.ColorTarget(resources.GBufferAlbedo, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });   // RGBA8
                 builder.ColorTarget(resources.GBufferNormal, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });   // RGBA16F world normal
                 builder.ColorTarget(resources.GBufferMaterial, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f }); // roughness, metallic, workflow
@@ -407,6 +426,28 @@ namespace Nox
             });
     }
 
+    void Renderer::addMipFeedbackReadbackPass()
+    {
+        // Read once this frame slot finished (Renderer::readMipFeedback); only frames that cleared it have feedback.
+        if (!m_gbufferPipeline || m_drawList.empty())
+            return;
+
+        const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
+        const RGBuffer staging = m_renderGraph.ImportBuffer("Mip Feedback Staging", m_mipFeedbackReadback[frameIndex].get());
+        m_mipFeedbackPending[frameIndex] = true;
+        m_renderGraph.AddPass("Mip Feedback Readback", RGPassFlags::NeverCull,
+            [&](RGBuilder& builder)
+            {
+                builder.Read(resources.MipFeedback, RGBufferAccess::CopySource);
+                builder.Write(staging, RGBufferAccess::CopyDestination);
+            },
+            [feedback = resources.MipFeedback, staging](RGPassContext& context)
+            {
+                context.Cmd().copyBuffer(context.Buffer(feedback), context.Buffer(staging),
+                                         NRI::BufferCopyRegion{ .size = sizeof(uint32_t) * shaderio::MipFeedbackSlots });
+            });
+    }
+
     void Renderer::addForward3DPass()
     {
         const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
@@ -434,6 +475,9 @@ namespace Nox
                 ReadGpuScene(builder, resources);
                 ReadViewDraws(builder, resources.CameraDraws);
                 ReadViewDraws(builder, resources.CameraDraws, true);
+                // Transparent surfaces report the mips their textures need (texture streaming feedback): read and written.
+                builder.Read(resources.MipFeedback);
+                builder.Write(resources.MipFeedback);
             },
             [this, res = &resources, drawProbes](RGPassContext& context)
             {

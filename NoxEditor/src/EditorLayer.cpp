@@ -709,12 +709,27 @@ namespace Nox
             "16: Indirect Diffuse GI Only (DDGI / ReSTIR GI)",
             "17: DDGI Probe Grid Spheres",
             "18: Path Tracer (1-SPP Raw)",
-            "19: Path Tracer (Progressive Ground Truth)"
+            "19: Path Tracer (Progressive Ground Truth)",
+            "20: Texture Streaming Mips (red: needs more, green: as needed, blue: more than needed)"
         };
         int currentMode = static_cast<int>(m_Renderer->getDebugMode());
         if (ImGui::Combo("PBR Debug View", &currentMode, debugModeNames, IM_ARRAYSIZE(debugModeNames)))
         {
             m_Renderer->setDebugMode(static_cast<uint32_t>(currentMode));
+        }
+
+        // Texture streaming (§5.12): what the streamed textures hold and want, and a smaller pool to force mip reduction.
+        if (ImGui::CollapsingHeader("Texture Streaming"))
+        {
+            TextureStreamer& streamer = Project::GetActive()->GetEditorAssetManager()->GetTextureStreamer();
+            const TextureStreamer::Stats& stats = streamer.GetStats();
+            constexpr double MB = 1024.0 * 1024.0;
+            ImGui::Text("Streamed textures: %zu", stats.Textures);
+            ImGui::Text("Resident %.0f MB | wanted %.0f MB | pool %.0f MB", stats.ResidentBytes / MB, stats.WantedBytes / MB,
+                        stats.PoolBytes == UINT64_MAX ? 0.0 : stats.PoolBytes / MB);
+            int poolOverrideMB = static_cast<int>(streamer.GetPoolOverride() / (1024 * 1024));
+            if (ImGui::SliderInt("Pool Override (MB, 0 = budget)", &poolOverrideMB, 0, 4096))
+                streamer.SetPoolOverride(static_cast<uint64_t>(poolOverrideMB) * 1024 * 1024);
         }
         
         static const char* tonemapModeNames[] = {
@@ -1760,14 +1775,23 @@ namespace Nox
         {
             if (ImGui::BeginMenuBar())
             {
-                const auto assetManager = Project::GetActive()->GetEditorAssetManager();
-                const size_t loading = assetManager->GetLoadingCount();
-                const double pendingMB = static_cast<double>(assetManager->GetPendingUploadBytes()) / (1024.0 * 1024.0);
-                const size_t blasBuilds = m_Renderer->GetPendingBlasBuilds();
-                if (loading == 0 && blasBuilds == 0)
+                if (ImGui::GetTime() - m_StatusBarRefreshTime >= StatusBarRefreshSeconds)
+                {
+                    const auto assetManager = Project::GetActive()->GetEditorAssetManager();
+                    m_StatusBarCounts = {
+                        .Loading = assetManager->GetLoadingCount(),
+                        .Streaming = assetManager->GetStreamingCount(),
+                        .PendingMB = static_cast<double>(assetManager->GetPendingUploadBytes()) / (1024.0 * 1024.0),
+                        .BlasBuilds = m_Renderer->GetPendingBlasBuilds()
+                    };
+                    m_StatusBarRefreshTime = ImGui::GetTime();
+                }
+                const StatusBarCounts& counts = m_StatusBarCounts;
+                if (counts.Loading == 0 && counts.Streaming == 0 && counts.BlasBuilds == 0)
                     ImGui::TextDisabled("Ready");
                 else
-                    ImGui::Text("Loading %zu asset(s)  |  %.1f MB to upload  |  %zu BLAS build(s) pending", loading, pendingMB, blasBuilds);
+                    ImGui::Text("Loading %zu asset(s)  |  Streaming %zu texture(s)  |  %.1f MB to upload  |  %zu BLAS build(s) pending",
+                                counts.Loading, counts.Streaming, counts.PendingMB, counts.BlasBuilds);
                 ImGui::EndMenuBar();
             }
         }

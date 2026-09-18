@@ -313,7 +313,15 @@ namespace Nox
                 .size = sizeof(shaderio::CullCounts),
                 .usage = NRI::BufferUsage::Staging
             }));
+            m_mipFeedbackReadback.emplace_back(m_device->createBuffer(NRI::BufferDesc{
+                .size = sizeof(uint32_t) * shaderio::MipFeedbackSlots,
+                .usage = NRI::BufferUsage::Staging
+            }));
         }
+        m_mipFeedbackBuffer = m_device->createBuffer(NRI::BufferDesc{
+            .size = sizeof(uint32_t) * shaderio::MipFeedbackSlots,
+            .usage = NRI::BufferUsage::StorageStatic
+        });
 
         m_renderer2D = std::make_unique<Renderer2D>(isEditor, RendererContext
                                                     {
@@ -1600,7 +1608,7 @@ namespace Nox
                               (cpuData.MipLevels <= 1 || cpuData.MipOffsets.size() == cpuData.MipLevels);
         if (copyOnly)
         {
-            const TextureUpload upload = *BeginTextureUpload(cpuData, cpuData.Data.Size, true);
+            const TextureUpload upload = *BeginTextureUpload(cpuData, 0, std::max(cpuData.MipLevels, 1u), cpuData.Data.Size, true);
             memcpy(upload.Staging.data, cpuData.Data.Data, cpuData.Data.Size);
             EndTextureUpload(upload, true);
             PublishTexture(*upload.Texture);
@@ -1636,22 +1644,36 @@ namespace Nox
         return textureResource;
     }
 
-    std::optional<TextureUpload> Renderer::BeginTextureUpload(const TextureData& texture, uint64_t dataSize, bool wait)
+    std::optional<TextureUpload> Renderer::BeginTextureUpload(const TextureData& texture, uint32_t firstMip, uint32_t uploadMipCount, uint64_t dataSize, bool wait)
     {
         NOX_PROFILE_SCOPE("Begin Texture Upload");
-        std::optional<StagingSpan> staging = wait ? m_uploads.ReserveStaging(dataSize) : m_uploads.TryReserveStaging(dataSize);
-        if (!staging)
-            return std::nullopt;
+        const uint32_t mipLevels = std::max(texture.MipLevels, 1u);
+        const std::vector<size_t> mipOffsets = texture.MipOffsets.empty() ? std::vector<size_t>{ 0 } : texture.MipOffsets;
 
         TextureUpload upload;
-        upload.Staging = *staging;
-        upload.MipOffsets = texture.MipOffsets.empty() ? std::vector<size_t>{ 0 } : texture.MipOffsets;
+        upload.FirstMip = firstMip;
+        if (uploadMipCount > 0)
+        {
+            // All mips: the whole block, in whatever order it holds them. A run of mips (streaming): one range, as cooked
+            // textures store mips largest first.
+            const uint32_t endMip = firstMip + uploadMipCount;
+            const bool allMips = firstMip == 0 && endMip >= mipLevels;
+            const uint64_t begin = allMips ? 0 : mipOffsets[firstMip];
+            const uint64_t size = (allMips || endMip >= mipLevels ? dataSize : mipOffsets[endMip]) - begin;
+            std::optional<StagingSpan> staging = wait ? m_uploads.ReserveStaging(size) : m_uploads.TryReserveStaging(size);
+            if (!staging)
+                return std::nullopt;
+            upload.Staging = *staging;
+            for (uint32_t mip = firstMip; mip < endMip; ++mip)
+                upload.MipOffsets.push_back(mipOffsets[mip] - begin);
+        }
+
         upload.Texture = m_device->createTexture(NRI::TextureDesc
             {
-                .width = texture.Width,
-                .height = texture.Height,
+                .width = std::max(texture.Width >> firstMip, 1u),
+                .height = std::max(texture.Height >> firstMip, 1u),
                 .arrayLayers = 1,
-                .mipLevels = texture.MipLevels,
+                .mipLevels = mipLevels - firstMip,
                 .sampleCount = 1,
                 .usage = texture.Usage,
                 .format = texture.Format,
@@ -1661,10 +1683,15 @@ namespace Nox
         return upload;
     }
 
-    uint64_t Renderer::EndTextureUpload(const TextureUpload& upload, bool nextFrameReads)
+    uint64_t Renderer::EndTextureUpload(const TextureUpload& upload, bool nextFrameReads, NRI::Texture2D* keptFrom, uint32_t keptFromMip, uint32_t keptMipCount)
     {
-        m_uploads.CopyToTexture(upload.Staging, *upload.Texture, upload.MipOffsets);
-        return m_uploads.Commit(upload.Staging, nextFrameReads);
+        if (upload.MipOffsets.empty())
+            m_uploads.InitializeTexture(*upload.Texture);
+        else
+            m_uploads.CopyToTexture(upload.Staging, *upload.Texture, upload.MipOffsets);
+        if (keptFrom)
+            m_uploads.CopyTextureMips(*keptFrom, keptFromMip, *upload.Texture, static_cast<uint32_t>(upload.MipOffsets.size()), keptMipCount);
+        return upload.MipOffsets.empty() ? m_uploads.CommitCopies(nextFrameReads) : m_uploads.Commit(upload.Staging, nextFrameReads);
     }
 
     void Renderer::PublishTexture(Texture2D& texture)
@@ -1877,15 +1904,15 @@ namespace Nox
             float roughness;
         } prefilterData;
 
-        std::unique_ptr<NRI::CommandBuffer> prefCmd = beginSingleTimeCommands();
-        prefCmd->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
-
-        prefCmd->bindPipeline(NRI::PipelineBindPoint::Compute, *prefilterPipeline);
-
         std::vector<uint32_t> tempMipSlots;
-        // Loop through each roughness mip level
+        // Loop through each roughness mip level, one submission each: all of them in one ran for seconds under a capture
+        // tool, past the 2 s GPU timeout (device lost).
         for (uint32_t mip = 0; mip < prefilterCubeMipLevels; ++mip)
         {
+            std::unique_ptr<NRI::CommandBuffer> prefCmd = beginSingleTimeCommands();
+            prefCmd->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
+            prefCmd->bindPipeline(NRI::PipelineBindPoint::Compute, *prefilterPipeline);
+
             uint32_t mipWidth = prefilteredSize >> mip;
             uint32_t mipHeight = prefilteredSize >> mip;
             float roughness = (float)mip / (float)(prefilterCubeMipLevels - 1);
@@ -1904,9 +1931,9 @@ namespace Nox
             uint32_t groupX = (mipWidth + 15) / 16;
             uint32_t groupY = (mipHeight + 15) / 16;
             prefCmd->dispatch(groupX, groupY, 6);
+            endSingleTimeCommands(std::move(prefCmd));
         }
 
-        endSingleTimeCommands(std::move(prefCmd));
         // Free the temporary per-mip storage descriptor slots
         for (uint32_t slot : tempMipSlots)
         {
@@ -2554,7 +2581,7 @@ namespace Nox
         m_resourceHeap = m_device->createDescriptorHeap(NRI::DescriptorHeapDesc{
             .type = NRI::DescriptorHeapType::Resource,
             .maxBufferDescriptors = 128,
-            .maxImageDescriptors = 1000
+            .maxImageDescriptors = 4096 // a streamed texture's old and new image coexist until the old one is released
         });
 
         /*
@@ -2630,6 +2657,7 @@ namespace Nox
             addPathTracerPasses();
             addDeferredLightingPass();
             addForward3DPass();
+            addMipFeedbackReadbackPass();
             addDLSSPass();
             addEntityDepthBlitPass();
             addPostProcessPass();
@@ -2864,6 +2892,7 @@ namespace Nox
             resources.SceneRayTracingInstances = graph.ImportBuffer("Scene Ray Tracing Instances", buffer);
         if (frameIndex < m_pickerStagingBuffers.size() && m_pickerStagingBuffers[frameIndex])
             resources.PickerStaging = graph.ImportBuffer("Picker Staging", m_pickerStagingBuffers[frameIndex].get());
+        resources.MipFeedback = graph.ImportBuffer("Mip Feedback", m_mipFeedbackBuffer.get());
 
         prepareDDGIFrame(resources);
 
@@ -2995,6 +3024,8 @@ namespace Nox
         uniformData.jitterOffset = m_currentJitter;
         uniformData.samplerIndex = selectedSampler;
         uniformData.imageHeapIndexOffset = m_resourceHeap->getImageHeapIndexOffset();
+        uniformData.mipFeedbackReference = m_mipFeedbackBuffer->getDeviceAddress();
+        uniformData.mipFeedbackFrame = static_cast<uint32_t>(m_sceneFrameCounter);
 
         // PBR IBL
         uniformData.irradianceMapIndex = m_irradianceCubemap->GetDescriptorIndexSlot();
@@ -3230,8 +3261,10 @@ namespace Nox
 
         m_device->getMemoryStats(m_memoryHeapStats);
         updateMemoryBudget();
+#if NOX_PROFILING_ENABLED
         Profiler::Get().SubmitMemoryStats(m_memoryHeapStats, m_device->isMemoryBudgetSupported(), Platform::QueryProcessMemory(),
                                           m_memoryBudget.GetCategories());
+#endif
     }
 
     void Renderer::drawFrame()
@@ -3240,9 +3273,8 @@ namespace Nox
 
         // Before any allocation of this frame: refreshes the VMA memory budget (VMA "Staying within budget").
         m_device->beginFrame(static_cast<uint32_t>(m_sceneFrameCounter));
-#if NOX_PROFILING_ENABLED
+        // Every build: the texture streaming pool is a share of the budget.
         sampleMemoryStats();
-#endif
 
         // Process any queued shader hot-reloads
         if (!m_pendingReloads.empty())
@@ -3298,6 +3330,7 @@ namespace Nox
             readPickResult(frameIndex);
             readInspectionProbe(frameIndex);
             readCullStats(frameIndex);
+            readMipFeedback(frameIndex);
         }
 
         {
@@ -3516,6 +3549,17 @@ namespace Nox
         m_lateDrawnCount = counts->lateDrawn;
         m_visibleTriangleCount = counts->visibleTriangles + counts->lateTriangles;
         m_cullStatsBuffers[frameSlot]->unmap();
+    }
+
+    void Renderer::readMipFeedback(uint32_t frameSlot)
+    {
+        if (!std::exchange(m_mipFeedbackPending[frameSlot], false))
+            return;
+
+        const auto* feedback = static_cast<const uint32_t*>(m_mipFeedbackReadback[frameSlot]->map(0, sizeof(uint32_t) * shaderio::MipFeedbackSlots));
+        m_mipFeedback.assign(feedback, feedback + shaderio::MipFeedbackSlots);
+        m_mipFeedbackReadback[frameSlot]->unmap();
+        ++m_mipFeedbackSerial;
     }
 
     void Renderer::readInspectionProbe(uint32_t frameSlot)

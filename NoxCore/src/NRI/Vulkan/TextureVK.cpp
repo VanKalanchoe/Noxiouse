@@ -109,7 +109,7 @@ namespace NRI
             format = desc.directFormat == UINT32_MAX ? MapToVulkanFormat(desc.format) : MapToVulkanFormat(desc.directFormat);
             aspectFlags = vk::ImageAspectFlagBits::eColor;
             usageFlags = vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc |
-                         vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eColorAttachment;
+                         vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled;
         }
         
         m_format = format;
@@ -255,6 +255,26 @@ namespace NRI
         vk::raii::CommandBuffer& cb = static_cast<CommandBufferVK&>(cmdBuffer).getNativeBuffer(0);
         const vk::raii::Buffer& source = static_cast<BufferVK&>(stagingBuffer).getNativeBuffer();
 
+        recordInitialLayout(cmdBuffer);
+
+        std::vector<vk::BufferImageCopy> regions;
+        regions.reserve(mipOffsets.size());
+        for (uint32_t mip = 0; mip < mipOffsets.size(); ++mip)
+        {
+            regions.push_back(vk::BufferImageCopy{
+                .bufferOffset = stagingOffset + mipOffsets[mip],
+                .imageSubresource = { .aspectMask = vk::ImageAspectFlagBits::eColor, .mipLevel = mip, .baseArrayLayer = 0,
+                                      .layerCount = m_desc.arrayLayers },
+                .imageExtent = { std::max(1u, m_desc.width >> mip), std::max(1u, m_desc.height >> mip), 1 }
+            });
+        }
+        cb.copyBufferToImage(*source, *m_imageResource.image, vk::ImageLayout::eGeneral, regions);
+    }
+
+    void TextureVK::recordInitialLayout(CommandBuffer& cmdBuffer)
+    {
+        vk::raii::CommandBuffer& cb = static_cast<CommandBufferVK&>(cmdBuffer).getNativeBuffer(0);
+
         // Out of the initial layout, into the one every later use reads in (VK_KHR_unified_image_layouts).
         const vk::ImageMemoryBarrier2 toGeneral{
             .srcStageMask = vk::PipelineStageFlagBits2::eNone,
@@ -270,19 +290,6 @@ namespace NRI
                                   .baseArrayLayer = 0, .layerCount = m_desc.arrayLayers }
         };
         cb.pipelineBarrier2(vk::DependencyInfo{ .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &toGeneral });
-
-        std::vector<vk::BufferImageCopy> regions;
-        regions.reserve(mipOffsets.size());
-        for (uint32_t mip = 0; mip < mipOffsets.size(); ++mip)
-        {
-            regions.push_back(vk::BufferImageCopy{
-                .bufferOffset = stagingOffset + mipOffsets[mip],
-                .imageSubresource = { .aspectMask = vk::ImageAspectFlagBits::eColor, .mipLevel = mip, .baseArrayLayer = 0,
-                                      .layerCount = m_desc.arrayLayers },
-                .imageExtent = { std::max(1u, m_desc.width >> mip), std::max(1u, m_desc.height >> mip), 1 }
-            });
-        }
-        cb.copyBufferToImage(*source, *m_imageResource.image, vk::ImageLayout::eGeneral, regions);
     }
 
     void TextureVK::uploadFromBuffer(CommandBuffer& cmdBuffer, Buffer& stagingBuffer, uint32_t width, uint32_t height, uint32_t mipLevels, const std::vector<size_t>& mipOffsets)

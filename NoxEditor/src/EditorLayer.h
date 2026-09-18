@@ -107,5 +107,17 @@ namespace Nox
         bool m_IsBoxSelecting = false;
         glm::vec2 m_BoxSelectStart = { 0.0f, 0.0f };
         glm::vec2 m_BoxSelectEnd = { 0.0f, 0.0f };
+
+        // What the status bar shows, taken once per StatusBarRefreshSeconds so the counts stay readable.
+        struct StatusBarCounts
+        {
+            size_t Loading = 0;
+            size_t Streaming = 0;
+            double PendingMB = 0.0;
+            size_t BlasBuilds = 0;
+        };
+        static constexpr double StatusBarRefreshSeconds = 1.0;
+        StatusBarCounts m_StatusBarCounts;
+        double m_StatusBarRefreshTime = -StatusBarRefreshSeconds;
     };
 }

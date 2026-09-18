@@ -32,6 +32,7 @@ namespace NRI
         
         void uploadFromBuffer(CommandBuffer& cmdBuffer, Buffer& stagingBuffer, uint32_t width, uint32_t height, uint32_t mipLevels, const std::vector<size_t>& mipOffsets) override;
         void recordUpload(CommandBuffer& cmdBuffer, Buffer& stagingBuffer, uint64_t stagingOffset, const std::vector<size_t>& mipOffsets) override;
+        void recordInitialLayout(CommandBuffer& cmdBuffer) override;
         void copyImageToBuffer(CommandBuffer& commandBuffer, Buffer& dstBuffer, uint32_t x, uint32_t y, uint32_t width, uint32_t height) override;
         void blitTo(CommandBuffer& commandBuffer, Texture2D& dst) override;
         void generateMipmaps(CommandBuffer& commandBuffer) override;

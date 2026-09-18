@@ -77,12 +77,14 @@ namespace Nox
     };
 
     // A texture on its way to the GPU (§5.11.4): created with staging on the main thread, its texels written into the
-    // staging from any thread, copied and published on the main thread.
+    // staging from any thread, copied and published on the main thread. A streamed texture's image holds only its
+    // resident mips (§5.12): image mip 0 is the texture's mip FirstMip.
     struct TextureUpload
     {
         Ref<Texture2D> Texture;
-        StagingSpan Staging;
-        std::vector<size_t> MipOffsets;
+        StagingSpan Staging;            // the uploaded mips (image mips 0..MipOffsets.size()-1), empty when none
+        std::vector<size_t> MipOffsets; // of each uploaded mip in Staging
+        uint32_t FirstMip = 0;
     };
 
     // One submesh's geometry on its way to the GPU: ranges and staging on the main thread, the staging written from
@@ -414,8 +416,12 @@ namespace Nox
         // and returns the value they complete at; Publish* hands the resource to frames once that value has passed
         // (GetCompletedUploadValue). With nextFrameReads the next frame waits for the copies instead, so the resource
         // can be published right away (synchronous loads).
-        std::optional<TextureUpload> BeginTextureUpload(const TextureData& texture, uint64_t dataSize, bool wait);
-        uint64_t EndTextureUpload(const TextureUpload& upload, bool nextFrameReads);
+        // The image for the texture's mips [firstMip, last] with staging for the first uploadMipCount of them, laid out
+        // as in the cooked file (dataSize: the whole texture's texel bytes).
+        std::optional<TextureUpload> BeginTextureUpload(const TextureData& texture, uint32_t firstMip, uint32_t uploadMipCount, uint64_t dataSize, bool wait);
+        // The uploaded mips, then keptMipCount mips of keptFrom (from its mip keptFromMip) into the image mips after them.
+        uint64_t EndTextureUpload(const TextureUpload& upload, bool nextFrameReads, NRI::Texture2D* keptFrom = nullptr, uint32_t keptFromMip = 0,
+                                  uint32_t keptMipCount = 0);
         void PublishTexture(Texture2D& texture);
         std::optional<MeshUpload> BeginMeshUpload(const MeshData& data, bool isOpaque, bool wait);
         // Any thread: the submesh's streams into its staging, with the offsets of its ranges, and its counts and bounds.
@@ -428,6 +434,18 @@ namespace Nox
         uint64_t GetCompletedUploadValue() const { return m_uploads.GetCompletedValue(); }
         // Meshes that draw but are not ray traced yet (their BLAS waits for a frame's build budget).
         size_t GetPendingBlasBuilds() const { return m_blasBuilds.size(); }
+        // What a memory category holds and may hold (§5.8.3); the budget is 0 until the first sample.
+        const MemoryCategoryStats& GetMemoryCategory(MemoryCategory category) const
+        {
+            return m_memoryBudget.GetCategories()[static_cast<size_t>(category)];
+        }
+        // The newest texture streaming feedback (one entry per image slot, MipFeedback.slang) and a number that changes
+        // with every readback.
+        const std::vector<uint32_t>& GetMipFeedback(uint64_t& outSerial) const
+        {
+            outSerial = m_mipFeedbackSerial;
+            return m_mipFeedback;
+        }
         // Textures finished loading: materials resolve their texture paths again (they drew without them so far).
         static void MarkTexturesLoaded();
         Ref<Texture2D> createSolidColorTexture(uint8_t r, uint8_t g, uint8_t b, uint8_t a);
@@ -488,6 +506,7 @@ namespace Nox
         void readPickResult(uint32_t frameSlot);
         void readInspectionProbe(uint32_t frameSlot);
         void readCullStats(uint32_t frameSlot);
+        void readMipFeedback(uint32_t frameSlot);
 
         void initRenderer();
         void cleanupSwapChain();
@@ -574,6 +593,7 @@ namespace Nox
         void addTLASBuildPass();
         void addVisibilityPass();
         void addGBufferPass();
+        void addMipFeedbackReadbackPass();
         void addRTShadowPasses();
         void addRTReflectionPasses();
         // Decides whether DDGI runs and declares its atlases up front: RT reflections and forward shading, which come
@@ -636,8 +656,9 @@ namespace Nox
         std::unique_ptr<Renderer2D> m_renderer2D;
         std::shared_ptr<Nox::Window> m_window;
         std::unique_ptr<NRI::Device> m_device = nullptr;
-        // Profiling (NOX_PROFILING_ENABLED): timestamp queries for the frame command buffer, memory sampling.
+        // Profiling (NOX_PROFILING_ENABLED): timestamp queries for the frame command buffer.
         std::unique_ptr<NRI::GpuProfiler> m_gpuProfiler = nullptr;
+        // Sampled a few times a second in every build: the memory budget (texture streaming pool) and the stats.
         std::vector<NRI::MemoryHeapStats> m_memoryHeapStats;
         std::chrono::steady_clock::time_point m_lastMemoryStatsSample{};
         std::unique_ptr<NRI::Swapchain> m_swapChain = nullptr;
@@ -1038,6 +1059,14 @@ namespace Nox
         std::vector<std::unique_ptr<NRI::Buffer>> m_cullViewBuffers;
         std::vector<std::unique_ptr<NRI::Buffer>> m_cullStatsBuffers;
         std::array<bool, MAX_FRAMES_IN_FLIGHT> m_cullStatsPending{};
+
+        // Texture streaming feedback (§5.12): cleared each frame, written by the G-buffer and transparent passes, read back
+        // per frame slot into m_mipFeedback.
+        std::unique_ptr<NRI::Buffer> m_mipFeedbackBuffer;
+        std::vector<std::unique_ptr<NRI::Buffer>> m_mipFeedbackReadback;
+        std::array<bool, MAX_FRAMES_IN_FLIGHT> m_mipFeedbackPending{};
+        std::vector<uint32_t> m_mipFeedback;
+        uint64_t m_mipFeedbackSerial = 0;
         uint32_t m_visibleInstanceCount = 0;
         uint32_t m_lateCandidateCount = 0;
         uint32_t m_lateDrawnCount = 0;

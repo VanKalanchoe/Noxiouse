@@ -52,9 +52,16 @@ TextureCube envCubemap = TextureCube.Handle(uint2(pushConstant.hdrTextureIndex, 
 SamplerState linearSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_PREFILTER, 0));
 RWTexture2DArray<float4> irradianceOutput = RWTexture2DArray<float4>.Handle(uint2(pushConstant.cubemapStorageIndex, 0));
 
-// 4. Riemann sum integral over the hemisphere
+// 4. Riemann sum integral over the hemisphere. Irradiance is very low frequency: a coarse grid of samples, each read
+// from the environment mip whose texels are about as wide as the grid spacing, so every sample already averages what
+// lies between it and its neighbours (filtered sampling, as UE's and Filament's IBL filtering do). A full-resolution
+// read per 0.025 rad took ~390 M samples in one submission, past the 2 s GPU timeout under a capture tool.
 float3 irradiance = float3(0.0);
-float sampleDelta = 0.025;
+const float sampleDelta = 0.1;
+uint envWidth, envHeight, envMips;
+envCubemap.GetDimensions(0, envWidth, envHeight, envMips);
+// A cube face spans PI/2 radians over envWidth texels.
+const float sampleMip = clamp(log2(float(envWidth) * sampleDelta / (0.5 * PI)), 0.0, float(envMips - 1));
 uint nrSamples = 0;
 
 for (float phi = 0.0; phi < 2.0 * PI; phi += sampleDelta)
@@ -68,7 +75,7 @@ for (float phi = 0.0; phi < 2.0 * PI; phi += sampleDelta)
         float3 sampleVec = tangentSample.x * right + tangentSample.y * up + tangentSample.z * N;
 
         // Sample input HDR environment cubemap using direction vector
-        irradiance += envCubemap.SampleLevel(linearSampler, sampleVec, 0.0).rgb * cos(theta) * sin(theta);
+        irradiance += envCubemap.SampleLevel(linearSampler, sampleVec, sampleMip).rgb * cos(theta) * sin(theta);
         nrSamples++;
     }
 }

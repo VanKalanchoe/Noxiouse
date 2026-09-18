@@ -222,6 +222,8 @@ namespace NRI
         virtual void dispatch(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) = 0;
         
         virtual void copyBuffer(class Buffer& srcBuffer, class Buffer& dstBuffer, const BufferCopyRegion& region = {}) = 0;
+        // Repeats a 32-bit value over a range (a transfer write).
+        virtual void fillBuffer(class Buffer& buffer, uint64_t offset, uint64_t size, uint32_t value) = 0;
         // Several regions in one copy (e.g. scattering changed records from staging into a persistent buffer).
         virtual void copyBuffer(class Buffer& srcBuffer, class Buffer& dstBuffer, std::span<const BufferCopyRegion> regions) = 0;
         
@@ -231,6 +233,9 @@ namespace NRI
         // Direct (non-MSAA) same-format image copy, e.g. snapshotting the current G-buffer into a
         // "previous frame" texture for temporal reprojection validity checks.
         virtual void copyTexture(Texture& srcTexture, Texture& dstTexture, uint32_t width, uint32_t height) = 0;
+        // Whole mips from one image to another of the same format (a streamed texture moving to a new image): source mip
+        // srcFirstMip + i to destination mip dstFirstMip + i, both in the general layout. Copy work only (transfer queue).
+        virtual void copyTextureMips(Texture& srcTexture, uint32_t srcFirstMip, Texture& dstTexture, uint32_t dstFirstMip, uint32_t mipCount) = 0;
         
         virtual void buildAccelerationStructure(const AccelerationStructureBuildDesc& buildDesc, uint64_t scratchAddress, AccelerationStructure& dstAS) = 0;
         virtual void updateAccelerationStructure(const AccelerationStructureBuildDesc& buildDesc, uint64_t scratchAddress, AccelerationStructure& srcAS, AccelerationStructure& dstAS) = 0;

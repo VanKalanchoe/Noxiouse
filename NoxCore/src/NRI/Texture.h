@@ -152,6 +152,9 @@ namespace NRI
         // ordered after it by the submission's timeline point, not by a barrier here.
         virtual void recordUpload(class CommandBuffer& cmdBuffer, class Buffer& stagingBuffer, uint64_t stagingOffset,
                                   const std::vector<size_t>& mipOffsets) = 0;
+        // The first transition alone, for an image created with sharedAcrossQueues whose mips all come from copies of
+        // another image (a streamed texture shrinking).
+        virtual void recordInitialLayout(class CommandBuffer& cmdBuffer) = 0;
         virtual void copyImageToBuffer(CommandBuffer& commandBuffer, Buffer& dstBuffer, uint32_t x, uint32_t y, uint32_t width, uint32_t height) = 0;
         // Nearest-filtered resize copy into dst (dst may be a different resolution than this texture).
         // Used to propagate render-resolution G-buffer data (entity IDs, depth) up to display

@@ -26,3 +26,6 @@
 [submodule "NoxCore/vendors/OffsetAllocator"]
 	path = NoxCore/vendors/OffsetAllocator
 	url = https://github.com/sebbbi/OffsetAllocator
+[submodule "NoxCore/vendors/bc7enc_rdo"]
+	path = NoxCore/vendors/bc7enc_rdo
+	url = https://github.com/richgel999/bc7enc_rdo

@@ -298,6 +298,10 @@ struct UniformBufferObject
     uint32_t directLightingMode; // 0 = brute-force analytic loop, 1 = ReSTIR DI
     uint32_t restirDIDirectLightingTextureIndex;
 
+    // Texture streaming feedback (MipFeedback.slang): the buffer, and the frame counter that picks which pixel of each
+    // 8x8 tile reports.
+    uint64_t mipFeedbackReference;
+    uint32_t mipFeedbackFrame;
 };
 
 struct Vertex
@@ -331,6 +335,12 @@ struct LightData
 // visibility flags in parallel, visible counts per block of entries, block offsets and bucket counts, then each block
 // writes its entries (entry order, so transparent sorting survives).
 STATIC_CONST uint32_t NoGeometryRange = 0xFFFFFFFF; // GpuMesh offsets: this mesh has no range in that stream
+
+// Texture streaming feedback (§5.12): one entry per bindless image slot, the finest mip a frame's pixels asked of that
+// image, biased so "finer than the image holds" stays representable; MipFeedbackNone when nothing sampled it.
+STATIC_CONST uint32_t MipFeedbackSlots = 4096; // the resource heap's image capacity
+STATIC_CONST uint32_t MipFeedbackBias = 16;
+STATIC_CONST uint32_t MipFeedbackNone = 0xFFFFFFFF;
 
 STATIC_CONST uint32_t CULL_BLOCK_SIZE = 256;
 STATIC_CONST uint32_t CULL_BUCKET_COUNT = 10; // RenderBucket::Count

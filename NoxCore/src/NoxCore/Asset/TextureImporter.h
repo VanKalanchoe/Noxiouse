@@ -43,8 +43,8 @@ namespace Nox
         // Any thread. The header of the asset's cooked .ntex when it is current; empty when the asset has to be cooked
         // first or is not cooked at all (those load synchronously).
         static std::optional<CookedTextureHeader> ReadCookedTextureHeader(const std::filesystem::path& assetDirectory, const AssetMetadata& metadata);
-        // Any thread.
-        static bool ReadCookedTextureData(const CookedTextureHeader& header, uint8_t* destination);
+        // Any thread. The texels of mips [firstMip, firstMip + mipCount), as they lie in the file.
+        static bool ReadCookedTextureMips(const CookedTextureHeader& header, uint32_t firstMip, uint32_t mipCount, uint8_t* destination);
         // Any thread. Cooks a PNG / JPG / DDS / KTX2 source into the asset's .ntex (and its .hash); false for other
         // sources or when it fails.
         static bool CookTexture(const std::filesystem::path& assetDirectory, const AssetMetadata& metadata);
