@@ -11,6 +11,7 @@ namespace NRI
     class DescriptorHeap;
     class Buffer;
     class AccelerationStructure;
+    class QueryPool;
     struct AccelerationStructureBuildDesc;
     
     enum class TextureLayout : uint8_t;
@@ -240,6 +241,12 @@ namespace NRI
         virtual void buildAccelerationStructure(const AccelerationStructureBuildDesc& buildDesc, uint64_t scratchAddress, AccelerationStructure& dstAS) = 0;
         virtual void updateAccelerationStructure(const AccelerationStructureBuildDesc& buildDesc, uint64_t scratchAddress, AccelerationStructure& srcAS, AccelerationStructure& dstAS) = 0;
         virtual void accelerationStructureBarrier(AccelerationStructureBarrierType barrierType = AccelerationStructureBarrierType::BuildToShaderRead) = 0;
+        // Compaction: the compacted size of each structure (built with AllowCompaction, a BuildToBuild barrier after the
+        // build) into consecutive queries, reset first; then a copy into a structure created with that size. A copy runs
+        // at the build stage: a BuildToBuild barrier orders it before the builds and traces that read the copy.
+        virtual void resetQueries(QueryPool& pool, uint32_t first, uint32_t count) = 0;
+        virtual void writeCompactedSizes(std::span<AccelerationStructure* const> structures, QueryPool& pool, uint32_t firstQuery) = 0;
+        virtual void copyAccelerationStructure(AccelerationStructure& src, AccelerationStructure& dst, bool compact) = 0;
         virtual void executionBarrier() = 0;
         // Copies after this start once the copies before it have written (transfer stages only, so a transfer queue can
         // record it where executionBarrier's attachment accesses are not supported).

@@ -19,6 +19,7 @@
 #include "NoxCore/Core/core.h"
 #include "NoxCore/Core/Log.h"
 #include "TimelineSemaphoreVK.h"
+#include "QueryPoolVK.h"
 
 // NVIDIA Real-Time Denoisers (NRD)
 #include "NRD.h"
@@ -97,15 +98,8 @@ namespace NRI
 
     AccelerationStructureBuildSizes DeviceVK::getAccelerationStructureBuildSizes(const AccelerationStructureBuildDesc& desc)
     {
-        vk::BuildAccelerationStructureFlagsKHR vkFlags{};
-        if (desc.flags & AccelerationStructureBuildFlags::AllowUpdate)
-            vkFlags |= vk::BuildAccelerationStructureFlagBitsKHR::eAllowUpdate;
-        if (desc.flags & AccelerationStructureBuildFlags::PreferFastTrace)
-            vkFlags |= vk::BuildAccelerationStructureFlagBitsKHR::ePreferFastTrace;
-        if (desc.flags & AccelerationStructureBuildFlags::PreferFastBuild)
-            vkFlags |= vk::BuildAccelerationStructureFlagBitsKHR::ePreferFastBuild;
-        if (desc.flags & AccelerationStructureBuildFlags::LowMemory)
-            vkFlags |= vk::BuildAccelerationStructureFlagBitsKHR::eLowMemory;
+        // The same flags as the build (CommandBufferVK), or the sizes do not match it.
+        const vk::BuildAccelerationStructureFlagsKHR vkFlags = toVkBuildFlags(desc.flags);
 
         if (desc.type == AccelerationStructureType::BottomLevel)
         {
@@ -192,6 +186,11 @@ namespace NRI
     std::unique_ptr<AccelerationStructure> DeviceVK::createAccelerationStructure(const AccelerationStructureDesc& desc)
     {
         return std::make_unique<AccelerationStructureVK>(*this, desc);
+    }
+
+    std::unique_ptr<QueryPool> DeviceVK::createQueryPool(const QueryPoolDesc& desc)
+    {
+        return std::make_unique<QueryPoolVK>(*this, desc);
     }
 
     std::unique_ptr<GpuProfiler> DeviceVK::createGpuProfiler(uint32_t framesInFlight)

@@ -321,6 +321,10 @@ namespace Nox
                 .size = sizeof(shaderio::ClusterStats),
                 .usage = NRI::BufferUsage::Staging
             }));
+            m_blasCompactionQueryPools.emplace_back(m_device->createQueryPool(NRI::QueryPoolDesc{
+                .type = NRI::QueryType::AccelerationStructureCompactedSize,
+                .capacity = BlasCompactionQueriesPerFrame
+            }));
         }
         m_mipFeedbackBuffer = m_device->createBuffer(NRI::BufferDesc{
             .size = sizeof(uint32_t) * shaderio::MipFeedbackSlots,
@@ -2264,7 +2268,8 @@ namespace Nox
             // Reusing ids released by unloaded meshes
             MeshBLAS meshBLAS{
                 .storageBuffer = std::move(asBuffer),
-                .as = std::move(blas)
+                .as = std::move(blas),
+                .serial = ++m_blasSerial
             };
             if (!m_freeBLASIds.empty())
             {
@@ -2296,7 +2301,7 @@ namespace Nox
     {
         return NRI::AccelerationStructureBuildDesc{
             .type = NRI::AccelerationStructureType::BottomLevel,
-            .flags = NRI::AccelerationStructureBuildFlags::PreferFastTrace,
+            .flags = NRI::AccelerationStructureBuildFlags::PreferFastTrace | NRI::AccelerationStructureBuildFlags::AllowCompaction,
             .triangles = {
                 NRI::AccelerationStructureTrianglesDesc{
                     .vertexBufferAddress = m_vertexStream.GetDeviceAddress() + sizeof(shaderio::Vertex) * uint64_t(build.vertices.offset),
@@ -3355,6 +3360,7 @@ namespace Nox
             readPickResult(frameIndex);
             readInspectionProbe(frameIndex);
             readCullStats(frameIndex);
+            readBlasCompactedSizes(frameIndex);
             readMipFeedback(frameIndex);
             readClusterStats(frameIndex);
         }
@@ -3560,6 +3566,41 @@ namespace Nox
         cmd.accelerationStructureBarrier(NRI::AccelerationStructureBarrierType::TransferToBuild);
         cmd.buildAccelerationStructure(m_tlasBuildDesc, m_tlasScratchBuffer->getDeviceAddress(), *m_sceneTLAS);
         cmd.accelerationStructureBarrier(NRI::AccelerationStructureBarrierType::BuildToShaderRead);
+    }
+
+    void Renderer::readBlasCompactedSizes(uint32_t frameSlot)
+    {
+        std::vector<BlasCompactionQuery> queries = std::exchange(m_blasCompactionQueries[frameSlot], {});
+        if (queries.empty())
+            return;
+
+        std::vector<uint64_t> sizes(queries.size());
+        if (!m_blasCompactionQueryPools[frameSlot]->getResults(0, sizes))
+            return;
+
+        for (size_t index = 0; index < queries.size(); ++index)
+        {
+            const BlasCompactionQuery& query = queries[index];
+            // Unloaded (or its id reused) meanwhile, or nothing to gain.
+            if (query.blasId >= m_meshBLASes.size() || m_meshBLASes[query.blasId].serial != query.serial || !m_meshBLASes[query.blasId].as)
+                continue;
+            if (sizes[index] == 0 || sizes[index] >= m_meshBLASes[query.blasId].as->getSize())
+                continue;
+
+            BlasCompaction compaction{ .blasId = query.blasId, .meshSlot = query.meshSlot };
+            compaction.compacted.storageBuffer = m_device->createBuffer(NRI::BufferDesc{
+                .size = sizes[index],
+                .usage = NRI::BufferUsage::AccelerationStructure
+            });
+            compaction.compacted.as = m_device->createAccelerationStructure(NRI::AccelerationStructureDesc{
+                .type = NRI::AccelerationStructureType::BottomLevel,
+                .storageBuffer = compaction.compacted.storageBuffer.get(),
+                .bufferOffset = 0,
+                .size = sizes[index]
+            });
+            compaction.compacted.serial = query.serial;
+            m_blasCompactions.push_back(std::move(compaction));
+        }
     }
 
     void Renderer::readCullStats(uint32_t frameSlot)

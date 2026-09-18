@@ -787,7 +787,17 @@ occlusion with conservative reprojection to avoid disocclusion popping.
   without per-object discrete LOD pops.
 - **Paging:** clusters are packed into fixed-size streaming pages (§5.9); root pages always resident.
 - **Fallback path:** meshes that are too small or non-manifold use discrete LODs from `meshopt_simplify`.
-- **Ray tracing geometry** uses a coarser, resident fallback LOD per mesh (§5.14).
+- **Ray tracing geometry** uses a coarser, resident fallback LOD per mesh (§5.14). **Tried in 6b-2 and reverted**, see
+  §5.7.1 and D8.
+
+#### 5.7.1 Implementation (Phase 6b, September 2026)
+| Step | What was built | Result |
+|---|---|---|
+| 6b-1 | Cluster LOD DAG cooked with meshoptimizer's own builder (`demo/clusterlod.h`, `clodBuild`, implemented in `MeshImporter.cpp`), set up as its `nanite.cpp` demo: 64-vertex / 64-triangle clusters, attribute-aware (normal weights 0.5), every shading seam protected in permissive mode (normals, uv0, uv1 -- the header asks for it; unprotected hard edges came out smoothed), **no sloppy fallback** (it ignores orientation: flipped triangles on flat streets cost no error and were back face culled as holes). Skinned meshes keep one level. Per cluster in `MeshletBounds`: own and parent group bounds + error, LOD level, triangle count. The task shader draws the cut (clusterlod's rule, `nanite.cpp`'s `boundsError` ported) before frustum culling, bounds to world by the instance's largest scale, with the culling view's (frozen) camera. BLAS and "Visible Triangles" use the original clusters only. Cluster stats buffer (drawn clusters / triangles of the visibility passes, the mip feedback pattern), LOD error slider and Full Detail toggle (Render Graph panel), debug view 21 (LOD level). Also: a reimport now only refreshes loaded assets (a model copied in and imported at once was cooked a second time on the main thread, and its 263 .nmat auto-reimported). | **Verified 2026-09-18:** Full Detail identical to before; at 1 px no visible change, LOD level rises with distance. Bistro Release, 1816x948: 2.32M -> 1.40M triangles drawn (-40 %), Visibility 0.49 -> 0.39 ms, GPU frame 3.93 -> 3.82 ms; Geometry used 154 -> 172 MB (LOD levels +18 MB). |
+| 6b-2 | *Reverted.* RT fallback per static mesh (the DAG cut at a fixed object-space error, own vertices, the BLAS built from it) plus ray origin offsets where rays leave the raster surface (first the error bound at the pixel's distance, then the drawn cluster's error through the G-buffer). | Pure path tracing sees the BLAS as primary visibility: 5 mm dropped thin detail (holes on the bike and street); the offsets cost contact shadows in every mode. Every fix needed another offset: the mismatch between traced and rasterized geometry is the approach's own problem (UE's Nanite fallback meshes have it too). Reverted to the 6b-1 state: ray tracing uses the original clusters. |
+
+Page streaming (6b-3/6b-4) is **paused**: ray tracing keeps the original geometry resident, so streaming would only move
+the LOD levels (+18 MB for Bistro). It returns with a scene that does not fit, together with D8.
 
 ### 5.8 GPU Memory & Buffer System
 
@@ -1076,7 +1086,8 @@ Baseline before 6a: every texture is resident at full resolution once loaded -- 
 - **BLAS per mesh/LOD** (shared across instances), built through the upload manager queue with
   per-frame budgets; **compaction** after build; refit for skinned/deforming meshes.
 - **RT LOD:** coarse resident fallback geometry for off-screen/secondary rays; visible-surface
-  consistency handled by ray origin offsets / matching LOD near the camera (Open Decision D8).
+  consistency handled by ray origin offsets / matching LOD near the camera (Open Decision D8). Tried in 6b-2 and
+  reverted (§5.7.1): until cluster acceleration structures, the BLAS holds the original clusters.
 - **Memory:** RT category budget; eviction of BLAS for far/invisible meshes, rebuild on demand.
 - Lighting/GI features and their arbitration remain defined by the RT plan.
 
@@ -1115,7 +1126,7 @@ flight, targeted texture-slot cache eviction. Future:
 | **4** | Unified geometry memory & budgets | 3 | Base memory system (§5.8.6): unified geometry buffers incl. RT index stream with TLSF range allocation (page tables removed, offsets instead of addresses), grow-and-copy, memory budget polling, category accounting with soft budgets, no per-frame buffer creation, single deferred release queue | Freed geometry is reused by the next load; VRAM per category visible in Nox Stats; no `createBuffer` in a steady-state frame |
 | **5** | Async IO & upload manager | 1, 4 | Request API + state machine, IO threads, decode tasks, transfer queue, staging ring, async editor drag-in | Loading Bistro never stalls the viewport beyond a frame budget |
 | **6a** | Texture streaming | 5 | BC cooking for all sources, mip tail, GPU mip feedback, residency + eviction | Scene textures exceeding the texture budget render correctly with mip reduction |
-| **6b** | Geometry streaming & LOD | 5 | Cluster hierarchy cook, GPU cut selection, page streaming pool, RT fallback LOD | Geometry exceeding the geometry budget renders with streaming; no popping beyond threshold |
+| **6b** | Geometry streaming & LOD | 5 | Cluster hierarchy cook, GPU cut selection (**done, 6b-1**), page streaming pool (paused, §5.7.1), RT fallback LOD (reverted, D8) | Geometry exceeding the geometry budget renders with streaming; no popping beyond threshold |
 | **6c** | World streaming | 6a, 6b | World partition cooking, cell streaming, HLOD, per-cell serialization | Test world larger than RAM/VRAM traversable without stalls |
 | **7** | Continuous optimization | all | Profile-driven work, VT, DirectStorage, async compute expansion | Ongoing |
 
@@ -1130,11 +1141,11 @@ Phases 1, 2 and 3 are architecture-defining and each gets its own plan-mode desi
 | D1 | ~~Render thread model~~ **Decided** | **Main thread (window, input, submit/present) + Taskflow task graph for everything else; no dedicated render thread.** Frame pipelining stays available as a graph shape (§5.3). | Decided September 2026 — see §5.2.1 |
 | D2 | ~~RG resource naming/API style~~ **Decided** | **Typed handles returned by the builder + typed blackboard structs** (§5.4.11) | Decided September 2026 (Phase 2) |
 | D3 | ~~Texture streaming~~ **Decided** | **Mip streaming first** (reallocation into a new image, GPU feedback, §5.12.3); virtual texturing later (§5.12.2) | Decided September 2026 (Phase 6a) |
-| D4 | Geometry LOD | Nanite-like cluster DAG vs discrete LODs first | DAG is more work; discrete LODs as stepping stone? |
+| D4 | ~~Geometry LOD~~ **Decided** | **Cluster DAG** with meshoptimizer's clusterlod (§5.7.1) | Decided September 2026 (Phase 6b) |
 | D5 | Geometry buffer growth | grow-and-copy vs sparse binding reserve/commit | Base (Phase 4) uses grow-and-copy at load boundaries; sparse evaluated later, needs driver support validation |
 | D6 | Additional queues (**transfer decided**) | ~~one combined graphics/compute queue~~ · **dedicated transfer queue for uploads (Phase 5a, §5.11.6)** · async compute queue(s) for culling/RT/denoising still open | Transfer: multi-queue device creation, queue-family detection, timeline semaphores and per-queue command pools in NRI; concurrent sharing instead of ownership transfers |
 | D7 | IO backend | IoRing/overlapped IO vs DirectStorage | DirectStorage enables GPU decompression |
-| D8 | RT geometry LOD policy | shared raster LOD vs dedicated coarse RT LOD | self-intersection vs memory trade-off |
+| D8 | RT geometry LOD policy | ~~dedicated coarse RT LOD~~ (tried in 6b-2, reverted: holes in the path tracer, shadows lost to ray offsets) · RT from the same clusters as raster: cluster acceleration structures per frame (nvpro-samples vk_lod_clusters, `VK_NV_cluster_acceleration_structure`, NVIDIA only for now) | Until then ray tracing uses the original clusters (resident, full detail) |
 | D9 | Editor vs runtime asset managers | split now vs after async loading | runtime needs containers + handle-based refs |
 | D10 | Budgets & targets | per-category VRAM shares, frame-time targets per reference scene | set after Phase 0 baselines |
 | D11 | ~~ECS parallelism~~ **Decided** | **Declared system read/write sets** (`ComponentAccess` + `SystemGraph`, §5.2.6) | Decided September 2026 (Phase 1) |

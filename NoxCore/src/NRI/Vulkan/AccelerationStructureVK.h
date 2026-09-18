@@ -17,6 +17,8 @@ namespace NRI
             vkFlags |= vk::BuildAccelerationStructureFlagBitsKHR::ePreferFastBuild;
         if (flags & AccelerationStructureBuildFlags::LowMemory)
             vkFlags |= vk::BuildAccelerationStructureFlagBitsKHR::eLowMemory;
+        if (flags & AccelerationStructureBuildFlags::AllowCompaction)
+            vkFlags |= vk::BuildAccelerationStructureFlagBitsKHR::eAllowCompaction;
         return vkFlags;
     }
 

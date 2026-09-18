@@ -19,7 +19,8 @@
             AllowUpdate     = 1 << 0,
             PreferFastTrace = 1 << 1,
             PreferFastBuild = 1 << 2,
-            LowMemory       = 1 << 3
+            LowMemory       = 1 << 3,
+            AllowCompaction = 1 << 4 // its compacted size can be queried and it can be copied into that much memory
         };
 
         inline AccelerationStructureBuildFlags operator|(AccelerationStructureBuildFlags a, AccelerationStructureBuildFlags b)

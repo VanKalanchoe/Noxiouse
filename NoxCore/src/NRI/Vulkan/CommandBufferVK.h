@@ -74,6 +74,9 @@ namespace NRI
         vk::ImageLayout translateLayoutToVk(TextureLayout layout) const;
         
         void buildAccelerationStructure(const AccelerationStructureBuildDesc& buildDesc, uint64_t scratchAddress, AccelerationStructure& dstAS) override;
+        void resetQueries(QueryPool& pool, uint32_t first, uint32_t count) override;
+        void writeCompactedSizes(std::span<AccelerationStructure* const> structures, QueryPool& pool, uint32_t firstQuery) override;
+        void copyAccelerationStructure(AccelerationStructure& src, AccelerationStructure& dst, bool compact) override;
         void updateAccelerationStructure(const AccelerationStructureBuildDesc& buildDesc, uint64_t scratchAddress, AccelerationStructure& srcAS, AccelerationStructure& dstAS) override;
         void accelerationStructureBarrier(AccelerationStructureBarrierType barrierType = AccelerationStructureBarrierType::BuildToShaderRead) override;
         void executionBarrier() override;

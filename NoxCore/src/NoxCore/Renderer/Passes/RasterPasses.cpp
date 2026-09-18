@@ -32,28 +32,51 @@ namespace Nox
 
     void Renderer::addBLASBuildPass()
     {
-        if (m_blasBuilds.empty())
+        if (m_blasBuilds.empty() && m_blasCompactions.empty())
             return;
+
+        // Compactions measured in an earlier frame: the copy into the compacted structure, recorded before this frame's
+        // builds; the GPU scene points at the compacted BLAS (the old one stays until frames tracing it are done -- one
+        // frame more, as this frame's instance list may already reference it).
+        std::vector<std::pair<NRI::AccelerationStructure*, NRI::AccelerationStructure*>> copies;
+        for (BlasCompaction& compaction : m_blasCompactions)
+        {
+            MeshBLAS& blas = m_meshBLASes[compaction.blasId];
+            if (blas.serial != compaction.compacted.serial || !blas.as)
+                continue;
+            copies.emplace_back(blas.as.get(), compaction.compacted.as.get());
+            m_gpuScene.SetMeshBlas(compaction.meshSlot, compaction.compacted.as->getDeviceAddress());
+            {
+                std::scoped_lock lock(m_deferredReleasesMutex);
+                m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT + 1, std::move(blas) });
+            }
+            blas = std::move(compaction.compacted);
+        }
+        m_blasCompactions.clear();
 
         // The frame's share of queued builds, chosen here on the main thread: the scratch buffer grows and the GPU scene
         // learns the new BLAS (its TLAS records reference them from the next frame's instance list, after this build).
+        // Each build's compacted size is queried into this frame slot's pool (Renderer::readBlasCompactedSizes).
         uint64_t primitives = 0;
         size_t count = 0;
         uint64_t scratchSize = 0;
         std::vector<std::pair<NRI::AccelerationStructureBuildDesc, NRI::AccelerationStructure*>> builds;
-        for (; count < m_blasBuilds.size() && primitives < BlasBuildPrimitivesPerFrame; ++count)
+        std::vector<BlasCompactionQuery>& queries = m_blasCompactionQueries[frameIndex];
+        queries.clear();
+        for (; count < m_blasBuilds.size() && primitives < BlasBuildPrimitivesPerFrame && count < BlasCompactionQueriesPerFrame; ++count)
         {
             const BlasBuild& build = m_blasBuilds[count];
             MeshBLAS& blas = m_meshBLASes[build.blasId];
             const NRI::AccelerationStructureBuildDesc desc = blasBuildDesc(build);
             scratchSize = std::max(scratchSize, m_device->getAccelerationStructureBuildSizes(desc).buildScratchSize);
             builds.emplace_back(desc, blas.as.get());
+            queries.push_back({ build.blasId, build.meshSlot, blas.serial });
             m_gpuScene.SetMeshBlas(build.meshSlot, blas.as->getDeviceAddress());
             primitives += build.indices.count / 3;
         }
         m_blasBuilds.erase(m_blasBuilds.begin(), m_blasBuilds.begin() + static_cast<std::ptrdiff_t>(count));
 
-        if (!m_blasScratch || m_blasScratch->getSize() < scratchSize)
+        if (scratchSize > 0 && (!m_blasScratch || m_blasScratch->getSize() < scratchSize))
         {
             if (m_blasScratch)
             {
@@ -66,15 +89,27 @@ namespace Nox
         // Reads the geometry streams, which the frame's submission waits on the upload timeline for.
         m_renderGraph.AddPass("BLAS Build", RGPassFlags::NeverCull,
             [&](RGBuilder&) {},
-            [this, builds = std::move(builds)](RGPassContext& context)
+            [this, copies = std::move(copies), builds = std::move(builds), queryPool = m_blasCompactionQueryPools[frameIndex].get()](RGPassContext& context)
             {
                 NRI::CommandBuffer& cmd = context.Cmd();
+                for (const auto& [source, compacted] : copies)
+                    cmd.copyAccelerationStructure(*source, *compacted, true);
+                if (!copies.empty())
+                    cmd.accelerationStructureBarrier(NRI::AccelerationStructureBarrierType::BuildToBuild);
+
+                if (builds.empty())
+                    return;
+                cmd.resetQueries(*queryPool, 0, static_cast<uint32_t>(builds.size()));
+                std::vector<NRI::AccelerationStructure*> built;
+                built.reserve(builds.size());
                 for (const auto& [desc, blas] : builds)
                 {
                     // One scratch buffer for all of them: each build waits for the one before.
                     cmd.buildAccelerationStructure(desc, m_blasScratch->getDeviceAddress(), *blas);
                     cmd.accelerationStructureBarrier(NRI::AccelerationStructureBarrierType::BuildToBuild);
+                    built.push_back(blas);
                 }
+                cmd.writeCompactedSizes(built, *queryPool, 0);
             });
     }
 

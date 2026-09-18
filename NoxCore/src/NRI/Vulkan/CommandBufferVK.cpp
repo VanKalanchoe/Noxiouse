@@ -10,6 +10,7 @@
 #include "SwapchainVK.h"
 #include "PipelineVK.h"
 #include "DescriptorHeapVK.h"
+#include "QueryPoolVK.h"
 #include "AccelerationStructureVK.h"
 #include "NoxCore/Core/core.h"
 
@@ -925,6 +926,32 @@ namespace NRI
         void CommandBufferVK::updateAccelerationStructure(const AccelerationStructureBuildDesc& buildDesc, uint64_t scratchAddress, AccelerationStructure& srcAS, AccelerationStructure& dstAS)
         {
             buildOrUpdateAccelerationStructure(vk::BuildAccelerationStructureModeKHR::eUpdate, buildDesc, scratchAddress, &srcAS, dstAS);
+        }
+
+        void CommandBufferVK::resetQueries(QueryPool& pool, uint32_t first, uint32_t count)
+        {
+            m_commandBuffers[m_currentFrameIndex].resetQueryPool(*static_cast<QueryPoolVK&>(pool).getNativePool(), first, count);
+        }
+
+        void CommandBufferVK::writeCompactedSizes(std::span<AccelerationStructure* const> structures, QueryPool& pool, uint32_t firstQuery)
+        {
+            std::vector<vk::AccelerationStructureKHR> handles;
+            handles.reserve(structures.size());
+            for (AccelerationStructure* structure : structures)
+                handles.push_back(*static_cast<AccelerationStructureVK*>(structure)->getNativeHandle());
+
+            const QueryPoolVK& poolVK = static_cast<QueryPoolVK&>(pool);
+            m_commandBuffers[m_currentFrameIndex].writeAccelerationStructuresPropertiesKHR(handles, vk::QueryType::eAccelerationStructureCompactedSizeKHR,
+                                                                                           *poolVK.getNativePool(), firstQuery);
+        }
+
+        void CommandBufferVK::copyAccelerationStructure(AccelerationStructure& src, AccelerationStructure& dst, bool compact)
+        {
+            m_commandBuffers[m_currentFrameIndex].copyAccelerationStructureKHR(vk::CopyAccelerationStructureInfoKHR{
+                .src = *static_cast<AccelerationStructureVK&>(src).getNativeHandle(),
+                .dst = *static_cast<AccelerationStructureVK&>(dst).getNativeHandle(),
+                .mode = compact ? vk::CopyAccelerationStructureModeKHR::eCompact : vk::CopyAccelerationStructureModeKHR::eClone
+            });
         }
 
         void CommandBufferVK::accelerationStructureBarrier(AccelerationStructureBarrierType barrierType)

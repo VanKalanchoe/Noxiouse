@@ -102,6 +102,7 @@ namespace NRI
         std::unique_ptr<DescriptorHeap> createDescriptorHeap(const DescriptorHeapDesc& desc) override;
         AccelerationStructureBuildSizes getAccelerationStructureBuildSizes(const AccelerationStructureBuildDesc& desc) override;
         std::unique_ptr<AccelerationStructure> createAccelerationStructure(const AccelerationStructureDesc& desc) override;
+        std::unique_ptr<QueryPool> createQueryPool(const QueryPoolDesc& desc) override;
         std::unique_ptr<GpuProfiler> createGpuProfiler(uint32_t framesInFlight) override;
 
         void beginFrame(uint32_t frameNumber) override;

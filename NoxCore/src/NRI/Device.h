@@ -15,6 +15,7 @@
 #include "AccelerationStructure.h"
 #include "GpuProfiler.h"
 #include "TimelineSemaphore.h"
+#include "QueryPool.h"
 #include "ShaderCompiler.h"
 #include "NoxCore/Core/Window.h"
 
@@ -160,6 +161,7 @@ namespace NRI
         virtual std::unique_ptr<DescriptorHeap> createDescriptorHeap(const DescriptorHeapDesc& desc) = 0;
         virtual AccelerationStructureBuildSizes getAccelerationStructureBuildSizes(const AccelerationStructureBuildDesc& desc) = 0;
         virtual std::unique_ptr<AccelerationStructure> createAccelerationStructure(const AccelerationStructureDesc& desc) = 0;
+        virtual std::unique_ptr<QueryPool> createQueryPool(const QueryPoolDesc& desc) = 0;
         virtual std::unique_ptr<GpuProfiler> createGpuProfiler(uint32_t framesInFlight) = 0;
 
         // Once per frame before any allocation of that frame; refreshes the memory budget.

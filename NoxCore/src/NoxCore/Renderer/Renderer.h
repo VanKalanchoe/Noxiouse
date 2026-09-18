@@ -74,6 +74,7 @@ namespace Nox
     {
         std::unique_ptr<NRI::Buffer> storageBuffer;
         std::unique_ptr<NRI::AccelerationStructure> as;
+        uint64_t serial = 0; // which mesh's BLAS this is: ids are reused, a compaction must find the BLAS it measured
     };
 
     // A texture on its way to the GPU (§5.11.4): created with staging on the main thread, its texels written into the
@@ -102,7 +103,7 @@ namespace Nox
     struct DeferredRelease
     {
         uint32_t framesRemaining = MAX_FRAMES_IN_FLIGHT;
-        std::variant<std::unique_ptr<NRI::Buffer>, Ref<Asset>, MeshHandle> payload;
+        std::variant<std::unique_ptr<NRI::Buffer>, Ref<Asset>, MeshHandle, MeshBLAS> payload;
     };
 
     struct PickRequest
@@ -514,6 +515,7 @@ namespace Nox
         void readPickResult(uint32_t frameSlot);
         void readInspectionProbe(uint32_t frameSlot);
         void readCullStats(uint32_t frameSlot);
+        void readBlasCompactedSizes(uint32_t frameSlot);
         void readMipFeedback(uint32_t frameSlot);
         void readClusterStats(uint32_t frameSlot);
 
@@ -1029,6 +1031,27 @@ namespace Nox
         // could exceed the driver timeout). 2M made a 42 ms GPU frame on Bistro (RTX, Release); a quarter keeps a
         // loading frame near a normal one and Bistro still ray traces within ~15 frames.
         static constexpr uint64_t BlasBuildPrimitivesPerFrame = 500'000;
+
+        // BLAS compaction (§5.14, NVIDIA RT best practices): a frame's builds write their compacted sizes into its slot's
+        // query pool; once the slot is done the compacted structures are created, and the next BLAS pass copies each BLAS
+        // into its compacted one and hands the old one to the deferred release.
+        struct BlasCompactionQuery
+        {
+            uint32_t blasId = UINT32_MAX;
+            uint32_t meshSlot = UINT32_MAX;
+            uint64_t serial = 0;
+        };
+        struct BlasCompaction
+        {
+            uint32_t blasId = UINT32_MAX;
+            uint32_t meshSlot = UINT32_MAX;
+            MeshBLAS compacted;
+        };
+        static constexpr uint32_t BlasCompactionQueriesPerFrame = 1024; // also caps the builds of one frame
+        std::vector<std::unique_ptr<NRI::QueryPool>> m_blasCompactionQueryPools; // per frame slot
+        std::array<std::vector<BlasCompactionQuery>, MAX_FRAMES_IN_FLIGHT> m_blasCompactionQueries;
+        std::vector<BlasCompaction> m_blasCompactions;
+        uint64_t m_blasSerial = 0;
         NRI::AccelerationStructureBuildDesc blasBuildDesc(const BlasBuild& build) const;
         // --- Hardware Ray Tracing: Scene TLAS ---
         void updateSceneAccelerationStructure(uint32_t currentFrameIndex);
