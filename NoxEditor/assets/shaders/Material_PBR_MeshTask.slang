@@ -2,6 +2,15 @@
 
 groupshared MeshletPayload sharedPayload;
 groupshared Atomic<uint32_t> visibleMeshletCount;
+groupshared Atomic<uint32_t> visibleTriangleCount;
+
+// Screen-space error of a cluster LOD bound (fraction of the screen height), meshoptimizer demo/nanite.cpp boundsError:
+// perspective distortion ignored (rotation invariant), so it is monotonic along the DAG and the cut is consistent.
+float lodBoundsError(float3 center, float radius, float error, float3 cameraPosition, float cameraProj, float cameraNear)
+{
+    float d = length(center - cameraPosition) - radius;
+    return error / (d > cameraNear ? d : cameraNear) * (cameraProj * 0.5);
+}
 
 [shader("task")]
 [numthreads(TASK_SHADER_DISPATCH_X, 1, 1)]
@@ -29,6 +38,7 @@ void taskMain
     if (gtid.x == 0)
     {
         visibleMeshletCount.store(0);
+        visibleTriangleCount.store(0);
         sharedPayload.groupMeshletOffset = groupBaseMeshlet;
     }
 
@@ -40,18 +50,35 @@ void taskMain
 
     if (localMeshletIdx < totalMeshlets)
     {
-        bool visible = true;
+        // The bounds stream holds this mesh's meshlets in the same order as its draws, from its own offset.
+        MeshletBounds* meshletBounds = &((MeshletBounds*)ubo->geometryMeshletBoundsReference)[instance.boundsOffset + localMeshletIdx];
+        float maxScale = max(length(instance.modelMatrix[0].xyz),
+                         max(length(instance.modelMatrix[1].xyz), length(instance.modelMatrix[2].xyz)));
 
-        // Optional meshlet culling (the instance already passed GPU instance culling); off, no bounds are fetched.
-        if (pushConstant.meshletCulling != 0)
+        // 1. The LOD cut (clusterlod's rule): the coarser version is too coarse, this cluster is fine enough. The bounds go
+        //    to world space with the instance's largest scale; the culling view's camera (frozen with it).
+        bool visible;
+        if (ubo->lodFullDetail != 0)
         {
-            // The bounds stream holds this mesh's meshlets in the same order as its draws, from its own offset.
-            MeshletBounds* meshletBoundsStream = (MeshletBounds*)ubo->geometryMeshletBoundsReference;
-            MeshletBounds meshletBounds = meshletBoundsStream[instance.boundsOffset + localMeshletIdx];
+            visible = meshletBounds.lodLevel == 0;
+        }
+        else
+        {
+            float3 cameraPosition = ubo->frozenCameraWorldPos.xyz;
+            float cameraProj = ubo->frozenProj[1][1];
+            float3 parentCenter = mul(instance.modelMatrix, float4(meshletBounds.parentCenter, 1.0)).xyz;
+            float3 lodCenter = mul(instance.modelMatrix, float4(meshletBounds.lodCenter, 1.0)).xyz;
+            float parentError = meshletBounds.parentError >= ClusterTerminalError
+                ? ClusterTerminalError
+                : lodBoundsError(parentCenter, meshletBounds.parentRadius * maxScale, meshletBounds.parentError * maxScale, cameraPosition, cameraProj, ubo->lodCameraNear);
+            float selfError = lodBoundsError(lodCenter, meshletBounds.lodRadius * maxScale, meshletBounds.lodError * maxScale, cameraPosition, cameraProj, ubo->lodCameraNear);
+            visible = parentError > ubo->lodErrorThreshold && selfError <= ubo->lodErrorThreshold;
+        }
 
+        // 2. Optional meshlet frustum culling (the instance already passed GPU instance culling).
+        if (visible && (pushConstant.meshletCulling & MESHLET_CULL_FRUSTUM) != 0)
+        {
             float3 worldCenter = mul(instance.modelMatrix, float4(meshletBounds.center, 1.0)).xyz;
-            float maxScale = max(length(instance.modelMatrix[0].xyz),
-                             max(length(instance.modelMatrix[1].xyz), length(instance.modelMatrix[2].xyz)));
             float worldRadius = meshletBounds.radius * maxScale;
 
             for (uint i = 0; i < 4; i++)
@@ -67,6 +94,8 @@ void taskMain
             uint index = visibleMeshletCount.add(1);
             sharedPayload.drawID = instanceSlot;
             sharedPayload.meshletIndices[index] = threadOffset;
+            if ((pushConstant.meshletCulling & MESHLET_COUNT_TRIANGLES) != 0)
+                visibleTriangleCount.add(meshletBounds.triangleCount);
         }
     }
 
@@ -76,6 +105,12 @@ void taskMain
     if (gtid.x == 0)
     {
         uint count = visibleMeshletCount.load();
+        if ((pushConstant.meshletCulling & MESHLET_COUNT_TRIANGLES) != 0 && count > 0)
+        {
+            ClusterStats* stats = (ClusterStats*)ubo->clusterStatsReference;
+            InterlockedAdd(stats->drawnClusters, count);
+            InterlockedAdd(stats->drawnTriangles, visibleTriangleCount.load());
+        }
         DispatchMesh(count, 1, 1, sharedPayload);
     }
 }

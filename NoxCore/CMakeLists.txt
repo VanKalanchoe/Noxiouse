@@ -90,6 +90,8 @@ set(TINYGLTF_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendors/tinygltf")
 
 set(MESHOPTIMIZER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendors/meshoptimizer/src")
 file(GLOB MESHOPTIMIZER_SOURCES "${MESHOPTIMIZER_DIR}/*.cpp")
+# meshoptimizer's cluster LOD builder (header-only, implemented in Asset/MeshImporter.cpp)
+set(CLUSTERLOD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendors/meshoptimizer/demo")
 
 # Range allocator for the unified geometry buffers (its tests are not part of the build)
 set(OFFSETALLOCATOR_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendors/OffsetAllocator")
@@ -164,6 +166,7 @@ target_include_directories (${PROJECT_NAME} SYSTEM PUBLIC ${IMGUI_DIR} ${IMGUIZM
 
 # Sysmtem means supress warnings from the include directories, so we don't get warnings from external libraries.
 target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/NoxEditor/assets/shaders ${TINYGLTF_DIR} ${MESHOPTIMIZER_DIR} ${OFFSETALLOCATOR_DIR} ${BC7ENC_DIR} ${STREAMLINE_INCLUDE_DIR} ${NRD_INCLUDE_DIR} ${NRD_INTEGRATION_DIR} ${RTXDI_INCLUDE_DIR} ${RTXDI_SHADERS_DIR})
+target_include_directories(${PROJECT_NAME} PRIVATE ${CLUSTERLOD_DIR})
 
 # Add compile definition if C++ 20 module is enabled
 if(ENABLE_CPP20_MODULE)

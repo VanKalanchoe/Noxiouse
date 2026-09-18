@@ -285,7 +285,15 @@ namespace Nox
             NOX_CORE_WARN("Skipping auto-reimport: source file no longer exists: {}", sourcePath.string());
             return;
         }
+        // A reimport refreshes what is loaded. An asset not loaded yet (or still loading) reads its source when it loads,
+        // and its cook is checked against the source then: a watcher event for it changes nothing (the files of a model
+        // copied in and imported at once, the .nmat files its cook writes), and reimporting it here cooked it a second
+        // time on the main thread next to its background load. One that failed to load is tried again on its next request.
         m_FailedAssets.erase(handle);
+        
+        if (!m_LoadedAssets.contains(handle))
+            return;
+
         m_Streamer.Unregister(handle);
 
         // The file watcher can fire on this source file even though its content never actually

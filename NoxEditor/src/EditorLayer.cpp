@@ -710,7 +710,8 @@ namespace Nox
             "17: DDGI Probe Grid Spheres",
             "18: Path Tracer (1-SPP Raw)",
             "19: Path Tracer (Progressive Ground Truth)",
-            "20: Texture Streaming Mips (red: needs more, green: as needed, blue: more than needed)"
+            "20: Texture Streaming Mips (red: needs more, green: as needed, blue: more than needed)",
+            "21: Cluster LOD Level (green: original, then yellow, orange, red, magenta, blue)"
         };
         int currentMode = static_cast<int>(m_Renderer->getDebugMode());
         if (ImGui::Combo("PBR Debug View", &currentMode, debugModeNames, IM_ARRAYSIZE(debugModeNames)))

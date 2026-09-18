@@ -492,6 +492,14 @@
                 ? mipStreamingDebugColor(relativeMipLod(ubo, instance.baseColorTextureIndex, ddx_bc, ddy_bc), baseColor.rgb)
                 : float3(0.3, 0.3, 0.3);
         }
+        // Debug view 21: the cluster's LOD level (original geometry green, then yellow, orange, red, magenta, blue).
+        if (pushConstant.debugMode == 21)
+        {
+            MeshletBounds* bounds = &((MeshletBounds*)ubo->geometryMeshletBoundsReference)[instance.boundsOffset + (meshletID - instance.drawsOffset)];
+            const float3 levelColors[6] = { float3(0.2, 0.85, 0.2), float3(0.95, 0.9, 0.2), float3(1.0, 0.55, 0.1),
+                                            float3(0.95, 0.15, 0.1), float3(0.85, 0.2, 0.85), float3(0.25, 0.35, 1.0) };
+            output.albedo.rgb = levelColors[min(bounds.lodLevel, 5u)] * (0.35 + 0.65 * dot(baseColor.rgb, float3(0.2126, 0.7152, 0.0722)));
+        }
         output.normal   = (pushConstant.debugMode == 2) ? float4(rawNormalTex, roughness) : float4(finalNormal, roughness);
 
         // Encode unlit flag: 2.0 = UNLIT

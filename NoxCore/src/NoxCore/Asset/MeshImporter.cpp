@@ -1,5 +1,6 @@
 #include "MeshImporter.h"
 
+#include <array>
 #include <chrono>
 #include <cstring>
 #include <string_view>
@@ -12,6 +13,9 @@
 #include "tiny_gltf_v3.h"
 
 #include "meshoptimizer.h"
+// meshoptimizer's cluster LOD builder (demo/clusterlod.h), implemented in this file as its header asks.
+#define CLUSTERLOD_IMPLEMENTATION
+#include "clusterlod.h"
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Profiling/Profiler.h"
 
@@ -37,6 +41,125 @@ namespace Nox
             lights = std::move(cooked.Lights);
             cameras = std::move(cooked.Cameras);
             nodes = std::move(cooked.Nodes);
+        }
+
+        // Culling bounds of one cluster from its local indices.
+        shaderio::MeshletBounds clusterBounds(const MeshData& data, const unsigned int* vertices, const unsigned char* triangles, size_t triangleCount)
+        {
+            const meshopt_Bounds bounds = meshopt_computeMeshletBounds(vertices, triangles, triangleCount, &data.Vertices[0].pos.x,
+                                                                       data.Vertices.size(), sizeof(shaderio::Vertex));
+            shaderio::MeshletBounds result{};
+            result.center = glm::vec3(bounds.center[0], bounds.center[1], bounds.center[2]);
+            result.radius = bounds.radius;
+            result.coneApex = glm::vec3(bounds.cone_apex[0], bounds.cone_apex[1], bounds.cone_apex[2]);
+            result.coneCutoff = bounds.cone_cutoff;
+            result.coneAxis = glm::vec3(bounds.cone_axis[0], bounds.cone_axis[1], bounds.cone_axis[2]);
+            result.triangleCount = static_cast<uint32_t>(triangleCount);
+            return result;
+        }
+
+        // Appends one cluster: its local vertices and triangles, draw record and bounds.
+        void appendCluster(MeshData& data, const shaderio::MeshletBounds& bounds, const unsigned int* vertices, size_t vertexCount,
+                           const unsigned char* triangles, size_t triangleCount)
+        {
+            shaderio::MeshletDraw draw{};
+            draw.vertexOffset = static_cast<uint32_t>(data.MeshletVertices.size());
+            draw.triangleOffset = static_cast<uint32_t>(data.MeshletTriangles.size());
+            draw.vertexCount = static_cast<uint32_t>(vertexCount);
+            draw.triangleCount = static_cast<uint32_t>(triangleCount);
+            draw.globalVertexOffset = 0;
+            data.Draws.push_back(draw);
+            data.Bounds.push_back(bounds);
+            data.MeshletVertices.insert(data.MeshletVertices.end(), vertices, vertices + vertexCount);
+            data.MeshletTriangles.insert(data.MeshletTriangles.end(), triangles, triangles + triangleCount * 3);
+        }
+
+        // One level of clusters, always drawn (no coarser version).
+        void buildMeshlets(MeshData& data, const std::vector<uint32_t>& indices)
+        {
+            std::vector<meshopt_Meshlet> meshlets(meshopt_buildMeshletsBound(indices.size(), shaderio::MAX_VERTICES, shaderio::MAX_PRIMITIVES));
+            std::vector<unsigned int> meshletVertices(indices.size());
+            std::vector<unsigned char> meshletTriangles(indices.size());
+            meshlets.resize(meshopt_buildMeshlets(meshlets.data(), meshletVertices.data(), meshletTriangles.data(), indices.data(), indices.size(),
+                                                  &data.Vertices[0].pos.x, data.Vertices.size(), sizeof(shaderio::Vertex),
+                                                  shaderio::MAX_VERTICES, shaderio::MAX_PRIMITIVES, 0.0f));
+
+            for (const meshopt_Meshlet& meshlet : meshlets)
+            {
+                unsigned int* vertices = &meshletVertices[meshlet.vertex_offset];
+                unsigned char* triangles = &meshletTriangles[meshlet.triangle_offset];
+                meshopt_optimizeMeshlet(vertices, triangles, meshlet.triangle_count, meshlet.vertex_count);
+
+                shaderio::MeshletBounds bounds = clusterBounds(data, vertices, triangles, meshlet.triangle_count);
+                bounds.lodCenter = bounds.center;
+                bounds.lodRadius = bounds.radius;
+                bounds.lodError = 0.0f;
+                bounds.parentCenter = bounds.center;
+                bounds.parentRadius = bounds.radius;
+                bounds.parentError = shaderio::ClusterTerminalError;
+                bounds.lodLevel = 0;
+                appendCluster(data, bounds, vertices, meshlet.vertex_count, triangles, meshlet.triangle_count);
+            }
+        }
+
+        // The cluster LOD DAG (§5.7) with meshoptimizer's clusterlod, set up as its demo/nanite.cpp: clusters of the
+        // original geometry are merged into groups and simplified, level after level, until one cluster is left. Every
+        // cluster keeps the bounds and error of the group it came from and of the group it went into, so the task shader
+        // can pick the cut. Clusters index the submesh's vertices, like the meshlets.
+        void buildClusterLod(MeshData& data, const std::vector<uint32_t>& indices)
+        {
+            clodConfig config = clodDefaultConfig(shaderio::MAX_PRIMITIVES);
+            config.max_vertices = shaderio::MAX_VERTICES;
+            // No sloppy fallback when regular simplification gets stuck: sloppy ignores topology and orientation, and a
+            // flipped triangle on a flat surface (a street) costs almost no error, so it was drawn at a distance and back
+            // face culled (holes). A stuck group stays at its level instead.
+            config.simplify_fallback_sloppy = false;
+
+            // Attribute-aware: the normal (weights as the demo). Permissive simplification may collapse across any
+            // attribute discontinuity it is not told about (clusterlod.h: attribute_protect_mask), so every seam the
+            // shading uses is protected: hard edges (normal, attributes 0-2) and both UV sets (uv0 3-4, uv1 5-6), in
+            // Vertex order from the normal on.
+            const float attributeWeights[3] = { 0.5f, 0.5f, 0.5f };
+            clodMesh mesh{};
+            mesh.indices = indices.data();
+            mesh.index_count = indices.size();
+            mesh.vertex_count = data.Vertices.size();
+            mesh.vertex_positions = &data.Vertices[0].pos.x;
+            mesh.vertex_positions_stride = sizeof(shaderio::Vertex);
+            mesh.vertex_attributes = &data.Vertices[0].normal.x;
+            mesh.vertex_attributes_stride = sizeof(shaderio::Vertex);
+            mesh.attribute_weights = attributeWeights;
+            mesh.attribute_count = std::size(attributeWeights);
+            mesh.attribute_protect_mask = 0b1111111;
+
+            std::vector<clodGroup> groups;
+            std::array<unsigned int, shaderio::MAX_VERTICES> vertices{};
+            std::array<unsigned char, shaderio::MAX_PRIMITIVES * 3> triangles{};
+            clodBuild(config, mesh, [&](clodGroup group, const clodCluster* clusters, size_t clusterCount) -> int
+            {
+                for (size_t index = 0; index < clusterCount; ++index)
+                {
+                    const clodCluster& cluster = clusters[index];
+                    const size_t triangleCount = cluster.index_count / 3;
+                    const size_t vertexCount = clodLocalIndices(vertices.data(), triangles.data(), cluster.indices, cluster.index_count);
+
+                    shaderio::MeshletBounds bounds = clusterBounds(data, vertices.data(), triangles.data(), triangleCount);
+                    // The group this cluster was simplified from; the original clusters have no error.
+                    const clodBounds& self = cluster.refined < 0 ? cluster.bounds : groups[cluster.refined].simplified;
+                    bounds.lodCenter = glm::vec3(self.center[0], self.center[1], self.center[2]);
+                    bounds.lodRadius = self.radius;
+                    bounds.lodError = cluster.refined < 0 ? 0.0f : self.error;
+                    // The group it went into (FLT_MAX error: never simplified further).
+                    bounds.parentCenter = glm::vec3(group.simplified.center[0], group.simplified.center[1], group.simplified.center[2]);
+                    bounds.parentRadius = group.simplified.radius;
+                    bounds.parentError = group.simplified.error;
+                    bounds.lodLevel = cluster.refined < 0 ? 0u : static_cast<uint32_t>(groups[cluster.refined].depth + 1);
+                    appendCluster(data, bounds, vertices.data(), vertexCount, triangles.data(), triangleCount);
+                }
+
+                groups.push_back(group);
+                return static_cast<int>(groups.size() - 1);
+            });
         }
     }
 
@@ -1335,81 +1458,12 @@ namespace Nox
                     }
                 }
 
-                // Recommended limits for Vulkan mesh shaders
-                const size_t maxVertices = 64;
-                const size_t maxTriangles = 64; //124
-
-                // Generate meshlets with meshoptimizer
-                size_t maxMeshlets = meshopt_buildMeshletsBound(primitiveIndices.size(), maxVertices, maxTriangles);
-                std::vector<meshopt_Meshlet> localMeshlets(maxMeshlets);
-                std::vector<unsigned int> localMeshletVertices(primitiveIndices.size());
-                std::vector<unsigned char> localMeshletTriangles(primitiveIndices.size());
-
-                size_t meshletCount = meshopt_buildMeshlets(
-                    localMeshlets.data(),
-                    localMeshletVertices.data(),
-                    localMeshletTriangles.data(),
-                    primitiveIndices.data(),
-                    primitiveIndices.size(),
-                    &primitiveData.Vertices[0].pos.x,
-                    primitiveVertexCount,
-                    sizeof(shaderio::Vertex),
-                    maxVertices,
-                    maxTriangles,
-                    0.0f
-                );
-
-                localMeshlets.resize(meshletCount);
-
-                for (auto& meshlet : localMeshlets)
-                {
-                    meshopt_optimizeMeshlet(
-                        &localMeshletVertices[meshlet.vertex_offset],
-                        &localMeshletTriangles[meshlet.triangle_offset],
-                        meshlet.triangle_count,
-                        meshlet.vertex_count
-                    );
-                }
-
-                const meshopt_Meshlet& last = localMeshlets.back();
-                localMeshletVertices.resize(last.vertex_offset + last.vertex_count);
-                localMeshletTriangles.resize(last.triangle_offset + (last.triangle_count * 3));
-
-                uint32_t meshletVertexOffset = static_cast<uint32_t>(primitiveData.MeshletVertices.size());
-                uint32_t meshletTrianglesOffset = static_cast<uint32_t>(primitiveData.MeshletTriangles.size());
-
-                for (const auto& meshlet : localMeshlets)
-                {
-                    meshopt_Bounds bounds = meshopt_computeMeshletBounds(
-                        &localMeshletVertices[meshlet.vertex_offset],
-                        &localMeshletTriangles[meshlet.triangle_offset],
-                        meshlet.triangle_count,
-                        &primitiveData.Vertices[0].pos.x,
-                        primitiveVertexCount,
-                        sizeof(shaderio::Vertex)
-                    );
-
-                    // Buffer 1: Tasl Shader Culling Data
-                    shaderio::MeshletBounds b{};
-                    b.center = glm::vec3(bounds.center[0], bounds.center[1], bounds.center[2]);
-                    b.radius = bounds.radius;
-                    b.coneApex = glm::vec3(bounds.cone_apex[0], bounds.cone_apex[1], bounds.cone_apex[2]);
-                    b.coneCutoff = bounds.cone_cutoff;
-                    b.coneAxis = glm::vec3(bounds.cone_axis[0], bounds.cone_axis[1], bounds.cone_axis[2]);
-                    primitiveData.Bounds.push_back(b);
-
-                    // Buffer 2: Mesh Shader Drawing Data
-                    shaderio::MeshletDraw d{};
-                    d.vertexOffset = meshletVertexOffset + meshlet.vertex_offset;
-                    d.triangleOffset = meshletTrianglesOffset + meshlet.triangle_offset;
-                    d.vertexCount = meshlet.vertex_count;
-                    d.triangleCount = meshlet.triangle_count;
-                    d.globalVertexOffset = 0;
-                    primitiveData.Draws.push_back(d);
-                }
-
-                primitiveData.MeshletVertices.insert(primitiveData.MeshletVertices.end(), localMeshletVertices.begin(), localMeshletVertices.end());
-                primitiveData.MeshletTriangles.insert(primitiveData.MeshletTriangles.end(), localMeshletTriangles.begin(), localMeshletTriangles.end());
+                // Clusters (§5.7): static geometry gets the cluster LOD DAG; skinned geometry one level (simplified in the bind
+                // pose, it would deform wrongly).
+                if (hasSkinning)
+                    buildMeshlets(primitiveData, primitiveIndices);
+                else
+                    buildClusterLod(primitiveData, primitiveIndices);
 
                 MaterialData materialData{};
 

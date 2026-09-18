@@ -302,6 +302,13 @@ struct UniformBufferObject
     // 8x8 tile reports.
     uint64_t mipFeedbackReference;
     uint32_t mipFeedbackFrame;
+
+    // Cluster LOD (§5.7): the screen-space error a cluster may have (fraction of the render height), the camera's near
+    // plane for the error projection, 1 to draw only the original clusters; ClusterStats of the visibility passes.
+    float lodErrorThreshold;
+    float lodCameraNear;
+    uint32_t lodFullDetail;
+    uint64_t clusterStatsReference;
 };
 
 struct Vertex
@@ -421,7 +428,8 @@ struct PushConstantHiZBuild
     uint32_t sourceIsDepth; // 1: level 0 from the depth buffer
 };
 
-STATIC_CONST uint32_t MESHLET_CULL_FRUSTUM = 1; // PushConstantMeshlets.meshletCulling
+STATIC_CONST uint32_t MESHLET_CULL_FRUSTUM = 1;     // PushConstantMeshlets.meshletCulling
+STATIC_CONST uint32_t MESHLET_COUNT_TRIANGLES = 2;  // PushConstantMeshlets.meshletCulling: add the drawn clusters to ClusterStats
 
 struct PushConstantMeshlets
 {
@@ -429,11 +437,21 @@ struct PushConstantMeshlets
     uint64_t drawInstancesReference; // visible instance slots of this view (instanceBaseIndex + SV_DrawIndex)
     uint64_t boneMatrixReference;
     uint32_t instanceBaseIndex;
-    uint32_t meshletCulling; // MESHLET_CULL_FRUSTUM (0: lean task shader, every meshlet of a visible instance is drawn)
+    uint32_t meshletCulling; // MESHLET_* flags (MESHLET_CULL_FRUSTUM off: every cluster of the LOD cut is drawn)
 };
 
-// Meshlet Global stores all meshes
-// Buffer 1: Read ONLY by Task Shader (32 Bytes -> 2 fit in 1 cache line!)
+// What the visibility passes drew after the LOD cut (cleared every frame, read back per frame slot).
+struct ClusterStats
+{
+    uint32_t drawnClusters;
+    uint32_t drawnTriangles;
+};
+
+STATIC_CONST float ClusterTerminalError = 3.402823466e+38f; // a cluster with no coarser version (FLT_MAX)
+
+// Per cluster (meshlet), read by the task shader. Culling bounds, and the cluster LOD DAG (§5.7, meshoptimizer
+// clusterlod): a cluster is drawn when its parent (the coarser version of its group) is too coarse and the cluster
+// itself is fine enough -- both errors projected to the screen from the group bounds they were measured on.
 struct MeshletBounds
 {
     vec3 center;
@@ -441,6 +459,15 @@ struct MeshletBounds
     vec3 coneApex;
     float coneCutoff;
     vec3 coneAxis;
+
+    vec3 lodCenter;        // bounds of the group this cluster was simplified from (the original clusters: error 0)
+    float lodRadius;
+    float lodError;
+    vec3 parentCenter;     // bounds of the group this cluster was merged into and simplified (ClusterTerminalError: none)
+    float parentRadius;
+    float parentError;
+    uint32_t lodLevel;     // 0: original geometry, n: simplified n times
+    uint32_t triangleCount;
 };
 
 // Buffer 2: Read ONLY by Mesh Shader (24 Bytes)

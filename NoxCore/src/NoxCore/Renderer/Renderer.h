@@ -247,6 +247,11 @@ namespace Nox
         bool isOcclusionCullingEnabled() const { return m_occlusionCullingEnabled; }
         void setMeshletCulling(uint32_t flags) { m_meshletCulling = flags; }
         uint32_t getMeshletCulling() const { return m_meshletCulling; }
+        // Cluster LOD (§5.7): the screen-space error in pixels a drawn cluster may have, or the original clusters only.
+        void setLodErrorPixels(float pixels) { m_lodErrorPixels = pixels; }
+        float getLodErrorPixels() const { return m_lodErrorPixels; }
+        void setLodFullDetail(bool fullDetail) { m_lodFullDetail = fullDetail; }
+        bool getLodFullDetail() const { return m_lodFullDetail; }
         // Draw list entries, and of the newest finished frame: the instances drawn in phase 1 and the candidates phase 2
         // re-tested (some of those draw too, which only the GPU knows).
         uint32_t getDrawListSize() const { return static_cast<uint32_t>(m_drawList.size()); }
@@ -254,6 +259,9 @@ namespace Nox
         uint32_t getLateCandidateCount() const { return m_lateCandidateCount; }
         uint32_t getLateDrawnCount() const { return m_lateDrawnCount; }
         uint32_t getVisibleTriangleCount() const { return m_visibleTriangleCount; }
+        // What the visibility passes of the newest finished frame drew after the LOD cut (opaque and masked geometry).
+        uint32_t getDrawnClusterCount() const { return m_clusterStats.drawnClusters; }
+        uint32_t getDrawnTriangleCount() const { return m_clusterStats.drawnTriangles; }
         // EditorLayer Settings
         void setDebugMode(uint32_t mode) { m_debugMode = mode; }
         uint32_t getDebugMode() const { return m_debugMode; }
@@ -507,6 +515,7 @@ namespace Nox
         void readInspectionProbe(uint32_t frameSlot);
         void readCullStats(uint32_t frameSlot);
         void readMipFeedback(uint32_t frameSlot);
+        void readClusterStats(uint32_t frameSlot);
 
         void initRenderer();
         void cleanupSwapChain();
@@ -594,6 +603,7 @@ namespace Nox
         void addVisibilityPass();
         void addGBufferPass();
         void addMipFeedbackReadbackPass();
+        void addClusterStatsReadbackPass();
         void addRTShadowPasses();
         void addRTReflectionPasses();
         // Decides whether DDGI runs and declares its atlases up front: RT reflections and forward shading, which come
@@ -626,6 +636,7 @@ namespace Nox
             NRI::Buffer* counts = nullptr;
             NRI::Pipeline* boundPipeline = nullptr;
             bool late = false; // phase 2 draws its candidates with their own commands (empty while still occluded)
+            uint32_t taskFlags = 0; // shaderio::MESHLET_* for PushConstantMeshlets::meshletCulling
         };
         MeshletDrawCursor beginMeshletDraws(const RGPassContext& context, const ViewDrawResources& draws, bool late = false) const;
         void drawMeshletBucket(NRI::CommandBuffer& cmd, MeshletDrawCursor& cursor, RenderBucket bucket, NRI::Pipeline& pipeline, NRI::CullMode cullMode, bool depthWrite, bool blendEnable) const;
@@ -1067,6 +1078,14 @@ namespace Nox
         std::array<bool, MAX_FRAMES_IN_FLIGHT> m_mipFeedbackPending{};
         std::vector<uint32_t> m_mipFeedback;
         uint64_t m_mipFeedbackSerial = 0;
+
+        // Cluster LOD (§5.7), and what the visibility passes drew with it: cleared each frame, read back per frame slot.
+        float m_lodErrorPixels = 1.0f;
+        bool m_lodFullDetail = false;
+        std::unique_ptr<NRI::Buffer> m_clusterStatsBuffer;
+        std::vector<std::unique_ptr<NRI::Buffer>> m_clusterStatsReadback;
+        std::array<bool, MAX_FRAMES_IN_FLIGHT> m_clusterStatsPending{};
+        shaderio::ClusterStats m_clusterStats{};
         uint32_t m_visibleInstanceCount = 0;
         uint32_t m_lateCandidateCount = 0;
         uint32_t m_lateDrawnCount = 0;

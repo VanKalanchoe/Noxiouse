@@ -206,6 +206,22 @@ namespace Nox
             ImGui::TextUnformatted(rates.c_str());
         }
 
+        // Cluster LOD (§5.7): the DAG cut the task shader draws, and what the visibility passes drew with it against the
+        // original triangles of the visible instances.
+        float lodErrorPixels = m_Renderer->getLodErrorPixels();
+        ImGui::SetNextItemWidth(160.0f);
+        if (ImGui::SliderFloat("LOD Error (px)", &lodErrorPixels, 0.0f, 8.0f, "%.2f"))
+            m_Renderer->setLodErrorPixels(lodErrorPixels);
+        ImGui::SameLine();
+        bool lodFullDetail = m_Renderer->getLodFullDetail();
+        if (ImGui::Checkbox("Full Detail", &lodFullDetail))
+            m_Renderer->setLodFullDetail(lodFullDetail);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Draws only the original clusters (no LOD), for comparison");
+        ImGui::SameLine();
+        ImGui::Text("| drawn %u clusters, %u of %u triangles", m_Renderer->getDrawnClusterCount(), m_Renderer->getDrawnTriangleCount(),
+                    m_Renderer->getVisibleTriangleCount());
+
         // Vulkan pipeline statistics per raster pass (Triangles column, stats report). Costs GPU time: off for timings.
         Profiler& profiler = Profiler::Get();
         ImGui::BeginDisabled(!profiler.IsPipelineStatisticsSupported());

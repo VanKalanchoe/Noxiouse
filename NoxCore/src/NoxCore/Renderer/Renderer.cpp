@@ -317,9 +317,17 @@ namespace Nox
                 .size = sizeof(uint32_t) * shaderio::MipFeedbackSlots,
                 .usage = NRI::BufferUsage::Staging
             }));
+            m_clusterStatsReadback.emplace_back(m_device->createBuffer(NRI::BufferDesc{
+                .size = sizeof(shaderio::ClusterStats),
+                .usage = NRI::BufferUsage::Staging
+            }));
         }
         m_mipFeedbackBuffer = m_device->createBuffer(NRI::BufferDesc{
             .size = sizeof(uint32_t) * shaderio::MipFeedbackSlots,
+            .usage = NRI::BufferUsage::StorageStatic
+        });
+        m_clusterStatsBuffer = m_device->createBuffer(NRI::BufferDesc{
+            .size = sizeof(shaderio::ClusterStats),
             .usage = NRI::BufferUsage::StorageStatic
         });
 
@@ -2103,8 +2111,11 @@ namespace Nox
         uint32_t rtIndexCount = 0;
         if (vertCount > 0)
         {
-            for (const shaderio::MeshletDraw& draw : data.Draws)
-                rtIndexCount += draw.triangleCount * 3;
+            for (size_t index = 0; index < data.Draws.size(); ++index)
+            {
+                if (data.Bounds[index].lodLevel == 0)
+                    rtIndexCount += data.Draws[index].triangleCount * 3;
+            }
         }
 
         MeshUpload upload;
@@ -2154,9 +2165,13 @@ namespace Nox
         gpuMesh = {};
         if (handle.rtIndices.IsValid())
         {
+            // The original clusters: the other LOD levels cover the same surface.
             uint8_t* indices = staging + layout.rtIndices;
-            for (const shaderio::MeshletDraw& draw : data.Draws)
+            for (size_t index = 0; index < data.Draws.size(); ++index)
             {
+                if (data.Bounds[index].lodLevel != 0)
+                    continue;
+                const shaderio::MeshletDraw& draw = data.Draws[index];
                 for (uint32_t triangle = 0; triangle < draw.triangleCount; ++triangle)
                 {
                     const uint32_t triBase = draw.triangleOffset + triangle * 3;
@@ -2177,8 +2192,11 @@ namespace Nox
         gpuMesh.verticesOffset = handle.vertices.offset;
         gpuMesh.indicesOffset = handle.rtIndices.IsValid() ? handle.rtIndices.offset : shaderio::NoGeometryRange;
         gpuMesh.meshletCount = handle.meshletDraws.count;
-        for (const shaderio::MeshletDraw& draw : data.Draws)
-            gpuMesh.triangleCount += draw.triangleCount;
+        for (size_t index = 0; index < data.Draws.size(); ++index)
+        {
+            if (data.Bounds[index].lodLevel == 0)
+                gpuMesh.triangleCount += data.Draws[index].triangleCount;
+        }
 
         // Local bounds of the (bind pose) vertices.
         glm::vec3 boundsMin(std::numeric_limits<float>::max());
@@ -2646,6 +2664,7 @@ namespace Nox
             addHiZBuildPass();
             addInstanceCullingLatePass();
             addVisibilityLatePass();
+            addClusterStatsReadbackPass();
             addGBufferPass();
             addRTShadowPasses();
             addRTReflectionPasses();
@@ -2893,6 +2912,7 @@ namespace Nox
         if (frameIndex < m_pickerStagingBuffers.size() && m_pickerStagingBuffers[frameIndex])
             resources.PickerStaging = graph.ImportBuffer("Picker Staging", m_pickerStagingBuffers[frameIndex].get());
         resources.MipFeedback = graph.ImportBuffer("Mip Feedback", m_mipFeedbackBuffer.get());
+        resources.ClusterStats = graph.ImportBuffer("Cluster Stats", m_clusterStatsBuffer.get());
 
         prepareDDGIFrame(resources);
 
@@ -2954,6 +2974,7 @@ namespace Nox
         cursor.commands = &context.Buffer(late ? draws.LateCommands : draws.Commands);
         cursor.counts = &context.Buffer(draws.Counts);
         cursor.late = late;
+        cursor.taskFlags = m_meshletCulling;
         return cursor;
     }
 
@@ -2966,7 +2987,7 @@ namespace Nox
         // Visible instances of the bucket start at its draw list start.
         const uint32_t firstEntry = m_drawBucketStarts[static_cast<size_t>(bucket)];
         cursor.references.instanceBaseIndex = firstEntry;
-        cursor.references.meshletCulling = m_meshletCulling;
+        cursor.references.meshletCulling = cursor.taskFlags;
         cmd.pushData(&cursor.references, sizeof(shaderio::PushConstantMeshlets));
 
         if (cursor.boundPipeline != &pipeline)
@@ -3026,6 +3047,10 @@ namespace Nox
         uniformData.imageHeapIndexOffset = m_resourceHeap->getImageHeapIndexOffset();
         uniformData.mipFeedbackReference = m_mipFeedbackBuffer->getDeviceAddress();
         uniformData.mipFeedbackFrame = static_cast<uint32_t>(m_sceneFrameCounter);
+        uniformData.lodErrorThreshold = m_lodErrorPixels / static_cast<float>(std::max(m_renderSize.height, 1u));
+        uniformData.lodCameraNear = m_cameraNear;
+        uniformData.lodFullDetail = m_lodFullDetail ? 1u : 0u;
+        uniformData.clusterStatsReference = m_clusterStatsBuffer->getDeviceAddress();
 
         // PBR IBL
         uniformData.irradianceMapIndex = m_irradianceCubemap->GetDescriptorIndexSlot();
@@ -3331,6 +3356,7 @@ namespace Nox
             readInspectionProbe(frameIndex);
             readCullStats(frameIndex);
             readMipFeedback(frameIndex);
+            readClusterStats(frameIndex);
         }
 
         {
@@ -3349,6 +3375,8 @@ namespace Nox
         NOX_PROFILE_COUNTER("Occluded Candidates", m_lateCandidateCount);
         NOX_PROFILE_COUNTER("Phase 2 Drawn", m_lateDrawnCount);
         NOX_PROFILE_COUNTER("Visible Triangles", m_visibleTriangleCount);
+        NOX_PROFILE_COUNTER("Drawn Clusters", m_clusterStats.drawnClusters);
+        NOX_PROFILE_COUNTER("Drawn Triangles", m_clusterStats.drawnTriangles);
         NOX_PROFILE_COUNTER("Lights", m_lightBufferObjects.size());
 
         {
@@ -3549,6 +3577,15 @@ namespace Nox
         m_lateDrawnCount = counts->lateDrawn;
         m_visibleTriangleCount = counts->visibleTriangles + counts->lateTriangles;
         m_cullStatsBuffers[frameSlot]->unmap();
+    }
+
+    void Renderer::readClusterStats(uint32_t frameSlot)
+    {
+        if (!std::exchange(m_clusterStatsPending[frameSlot], false))
+            return;
+
+        m_clusterStats = *static_cast<const shaderio::ClusterStats*>(m_clusterStatsReadback[frameSlot]->map(0, sizeof(shaderio::ClusterStats)));
+        m_clusterStatsReadback[frameSlot]->unmap();
     }
 
     void Renderer::readMipFeedback(uint32_t frameSlot)

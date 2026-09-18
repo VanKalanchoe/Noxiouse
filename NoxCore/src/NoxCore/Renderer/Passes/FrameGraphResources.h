@@ -76,6 +76,7 @@ namespace Nox
         RGBuffer TLAS;
         RGBuffer PickerStaging;
         RGBuffer MipFeedback; // texture streaming feedback (§5.12)
+        RGBuffer ClusterStats; // what the visibility passes drew after the LOD cut (§5.7)
 
         // GPU scene tables
         RGBuffer SceneInstances;

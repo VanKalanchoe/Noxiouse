@@ -202,6 +202,21 @@ namespace Nox
     {
         const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
 
+        // The visibility passes count what they draw after the LOD cut (Renderer::readClusterStats).
+        const bool drawsGeometry = resources.CameraDraws.Commands.IsValid() && m_visibilityPipeline;
+        if (drawsGeometry)
+        {
+            m_renderGraph.AddPass("Cluster Stats Clear", RGPassFlags::None,
+                [&](RGBuilder& builder)
+                {
+                    builder.Write(resources.ClusterStats, RGBufferAccess::CopyDestination);
+                },
+                [stats = resources.ClusterStats](RGPassContext& context)
+                {
+                    context.Cmd().fillBuffer(context.Buffer(stats), 0, sizeof(shaderio::ClusterStats), 0);
+                });
+        }
+
         m_renderGraph.AddPass("Visibility", RGPassFlags::Raster,
             [&](RGBuilder& builder)
             {
@@ -211,6 +226,8 @@ namespace Nox
                 builder.SetRenderArea(m_frame.renderExtent);
                 ReadGpuScene(builder, resources);
                 ReadViewDraws(builder, resources.CameraDraws);
+                if (drawsGeometry)
+                    builder.Write(resources.ClusterStats);
             },
             [this, res = &resources](RGPassContext& context)
             {
@@ -228,6 +245,7 @@ namespace Nox
                 {
                     // All PBR opaque & mask geometry rasterizes to the visibility buffer and depth: the first four buckets.
                     MeshletDrawCursor cursor = beginMeshletDraws(context, res->CameraDraws);
+                    cursor.taskFlags |= shaderio::MESHLET_COUNT_TRIANGLES;
                     drawMeshletBucket(cmd, cursor, RenderBucket::Opaque, *m_visibilityPipeline, NRI::CullMode::Back, true, false);
                     drawMeshletBucket(cmd, cursor, RenderBucket::OpaqueDoubleSided, *m_visibilityPipeline, NRI::CullMode::None, true, false);
                     drawMeshletBucket(cmd, cursor, RenderBucket::Mask, *m_visibilityPipeline, NRI::CullMode::Back, true, false);
@@ -328,6 +346,7 @@ namespace Nox
                 builder.SetRenderArea(m_frame.renderExtent);
                 ReadGpuScene(builder, resources);
                 ReadViewDraws(builder, resources.CameraDraws, true);
+                builder.Write(resources.ClusterStats);
             },
             [this, res = &resources](RGPassContext& context)
             {
@@ -341,6 +360,7 @@ namespace Nox
                 cmd.setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
 
                 MeshletDrawCursor cursor = beginMeshletDraws(context, res->CameraDraws, true);
+                cursor.taskFlags |= shaderio::MESHLET_COUNT_TRIANGLES;
                 drawMeshletBucket(cmd, cursor, RenderBucket::Opaque, *m_visibilityPipeline, NRI::CullMode::Back, true, false);
                 drawMeshletBucket(cmd, cursor, RenderBucket::OpaqueDoubleSided, *m_visibilityPipeline, NRI::CullMode::None, true, false);
                 drawMeshletBucket(cmd, cursor, RenderBucket::Mask, *m_visibilityPipeline, NRI::CullMode::Back, true, false);
@@ -423,6 +443,27 @@ namespace Nox
                 cmd.pushData(&gbufferPush, sizeof(shaderio::PushConstantVisibilityDebug));
 
                 cmd.drawMeshTasks(1, 1, 1);
+            });
+    }
+
+    void Renderer::addClusterStatsReadbackPass()
+    {
+        // After both visibility passes, read once this frame slot finished (Renderer::readClusterStats).
+        const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
+        if (!resources.CameraDraws.Commands.IsValid() || !m_visibilityPipeline)
+            return;
+
+        const RGBuffer staging = m_renderGraph.ImportBuffer("Cluster Stats Staging", m_clusterStatsReadback[frameIndex].get());
+        m_clusterStatsPending[frameIndex] = true;
+        m_renderGraph.AddPass("Cluster Stats Readback", RGPassFlags::NeverCull,
+            [&](RGBuilder& builder)
+            {
+                builder.Read(resources.ClusterStats, RGBufferAccess::CopySource);
+                builder.Write(staging, RGBufferAccess::CopyDestination);
+            },
+            [stats = resources.ClusterStats, staging](RGPassContext& context)
+            {
+                context.Cmd().copyBuffer(context.Buffer(stats), context.Buffer(staging), NRI::BufferCopyRegion{ .size = sizeof(shaderio::ClusterStats) });
             });
     }
 
