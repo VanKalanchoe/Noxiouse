@@ -30,8 +30,9 @@ namespace NRI
             memoryUsage = vma::MemoryUsage::eAutoPreferDevice;
             break;
         case BufferUsage::Index:
-            // GPU-only local index allocations (populated via staging copy commands)
+            // GPU-only local index allocations (populated via staging copy commands); TransferSrc for stream growth.
             usageFlags = vk::BufferUsageFlagBits2::eIndexBuffer | vk::BufferUsageFlagBits2::eTransferDst |
+                vk::BufferUsageFlagBits2::eTransferSrc |
                 vk::BufferUsageFlagBits2::eShaderDeviceAddress | vk::BufferUsageFlagBits2::eStorageBuffer |
                 vk::BufferUsageFlagBits2::eAccelerationStructureBuildInputReadOnlyKHR;
             memoryUsage = vma::MemoryUsage::eAutoPreferDevice;
@@ -49,7 +50,9 @@ namespace NRI
             allocFlags = vma::AllocationCreateFlagBits::eHostAccessSequentialWrite | vma::AllocationCreateFlagBits::eMapped;
             break;
         case BufferUsage::StorageStatic:
+            // TransferSrc: a geometry stream that grows copies itself into the larger buffer (GeometryArena).
             usageFlags = vk::BufferUsageFlagBits2::eStorageBuffer | vk::BufferUsageFlagBits2::eTransferDst |
+                vk::BufferUsageFlagBits2::eTransferSrc |
                 vk::BufferUsageFlagBits2::eShaderDeviceAddress | vk::BufferUsageFlagBits2::eAccelerationStructureBuildInputReadOnlyKHR;
             memoryUsage = vma::MemoryUsage::eAutoPreferDevice;
             break;

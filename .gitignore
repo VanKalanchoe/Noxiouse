@@ -267,6 +267,7 @@ NoxCore/vendors/*
 !NoxCore/vendors/tinygltf/
 !NoxCore/vendors/meshoptimizer/
 !NoxCore/vendors/tracy/
+!NoxCore/vendors/OffsetAllocator/
 *.ntex
 *.nmesh
 *.hash

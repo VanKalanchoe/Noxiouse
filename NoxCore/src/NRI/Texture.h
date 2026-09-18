@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include <cstdint>
 
 #include <imgui.h>
@@ -80,6 +81,54 @@ namespace NRI
         ImageFormat format = ImageFormat::None;
         uint32_t directFormat = UINT32_MAX;
     };
+
+    // What a texture costs in device memory: the mip chain of every layer, without the driver's alignment (images are
+    // their own allocations, so this is what the memory categories account for).
+    inline uint64_t estimateTextureBytes(const TextureDesc& desc)
+    {
+        uint64_t blockBytes = 4;  // bytes per pixel, or per 4x4 block for the BC formats
+        uint32_t blockSize = 1;
+        switch (desc.format)
+        {
+        case ImageFormat::R16_SFLOAT: blockBytes = 2; break;
+        case ImageFormat::R16G16:
+        case ImageFormat::R16G16_SFLOAT: blockBytes = 4; break;
+        case ImageFormat::R32G32_UINT:
+        case ImageFormat::R32G32_SFLOAT:
+        case ImageFormat::R16G16B16A16_SFLOAT: blockBytes = 8; break;
+        case ImageFormat::R32G32B32A32_SFLOAT: blockBytes = 16; break;
+        case ImageFormat::BC1_UNorm:
+        case ImageFormat::BC1_UNorm_SRGB:
+        case ImageFormat::BC4_UNorm:
+        case ImageFormat::BC4_SNorm: blockBytes = 8; blockSize = 4; break;
+        case ImageFormat::BC2_UNorm:
+        case ImageFormat::BC2_UNorm_SRGB:
+        case ImageFormat::BC3_UNorm:
+        case ImageFormat::BC3_UNorm_SRGB:
+        case ImageFormat::BC5_UNorm:
+        case ImageFormat::BC5_SNorm:
+        case ImageFormat::BC6H_UF16:
+        case ImageFormat::BC6H_SF16:
+        case ImageFormat::BC7_UNorm:
+        case ImageFormat::BC7_UNorm_SRGB: blockBytes = 16; blockSize = 4; break;
+        default: break;
+        }
+
+        uint64_t bytes = 0;
+        uint64_t width = desc.width;
+        uint64_t height = desc.height;
+        for (uint32_t mip = 0; mip < desc.mipLevels; ++mip)
+        {
+            const uint64_t blocksX = (std::max<uint64_t>(width, 1) + blockSize - 1) / blockSize;
+            const uint64_t blocksY = (std::max<uint64_t>(height, 1) + blockSize - 1) / blockSize;
+            bytes += blocksX * blocksY * blockBytes;
+            width /= 2;
+            height /= 2;
+        }
+
+        const uint64_t layers = desc.isCubeMap ? 6u * desc.arrayLayers : desc.arrayLayers;
+        return bytes * std::max<uint64_t>(layers, 1);
+    }
 
     class Texture : public Nox::Asset
     {

@@ -330,10 +330,18 @@ namespace Nox
     {
         NOX_CORE_INFO("Renderer Shutdown");
 
-        // Release queued assets while the instance is still reachable: a Mesh destructor calls
-        // Renderer::UnloadMesh, which asserts on s_Instance.
+        // Release queued assets while the instance is still reachable: a Mesh destructor calls Renderer::UnloadMesh,
+        // which asserts on s_Instance and queues its geometry, so this drains in rounds -- clearing the vector in place
+        // would push into it while its elements are being destroyed.
         m_device->waitIdle();
-        m_deferredAssetReleases.clear();
+        while (!m_deferredReleases.empty())
+        {
+            std::vector<DeferredRelease> releasing;
+            {
+                std::scoped_lock lock(m_deferredReleasesMutex);
+                releasing.swap(m_deferredReleases);
+            }
+        }
 
 #if NOX_PROFILING_ENABLED
         Profiler::Get().SetGpuProfiler(nullptr);
@@ -416,9 +424,6 @@ namespace Nox
 
         m_BoneBufferCapacity = sizeof(glm::mat4) * 64;
         createBoneBuffer(m_BoneBufferCapacity);
-
-        m_PageTableCapacity = 64;
-        createPageTableBuffers(m_PageTableCapacity);
 
         initGeometryBuffers();
 
@@ -2042,19 +2047,39 @@ namespace Nox
         constexpr uint32_t INITIAL_VERTS = 500'000;
         constexpr uint32_t INITIAL_TRIS = 1'500'000;
 
-        m_vertexPages.Init(m_device.get(), INITIAL_VERTICES);
-        m_meshletDrawPages.Init(m_device.get(), INITIAL_DRAWS);
-        m_meshletBoundsPages.Init(m_device.get(), INITIAL_DRAWS);
-        m_meshletVertPages.Init(m_device.get(), INITIAL_VERTS);
-        m_meshletTriPages.Init(m_device.get(), INITIAL_TRIS);
+        // Each stream starts at the size a page used to have and grows by copying itself; the ceiling is the element
+        // space its allocator hands offsets out of, so it is set well above what a scene is expected to need.
+        constexpr uint32_t MAX_ELEMENTS = 1u << 28;
+        m_vertexStream.Init(*m_device, sizeof(shaderio::Vertex), INITIAL_VERTICES, MAX_ELEMENTS);
+        m_meshletDrawStream.Init(*m_device, sizeof(shaderio::MeshletDraw), INITIAL_DRAWS, MAX_ELEMENTS);
+        m_meshletBoundsStream.Init(*m_device, sizeof(shaderio::MeshletBounds), INITIAL_DRAWS, MAX_ELEMENTS);
+        m_meshletVertexStream.Init(*m_device, sizeof(uint32_t), INITIAL_VERTS, MAX_ELEMENTS);
+        m_meshletTriangleStream.Init(*m_device, sizeof(uint8_t), INITIAL_TRIS, MAX_ELEMENTS);
+        m_rtIndexStream.Init(*m_device, sizeof(uint32_t), INITIAL_TRIS, MAX_ELEMENTS, NRI::BufferUsage::Index);
     }
 
-    void Renderer::markPageTablesDirty()
+    GeometryRange Renderer::allocateGeometry(GeometryArena& stream, uint32_t count)
     {
-        for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+        std::unique_ptr<NRI::Buffer> grownFrom;
+        const GeometryRange range = stream.Allocate(count, grownFrom);
+
+        // The stream grew: its content moves to the larger buffer unchanged (offsets stay valid, the address changes).
+        if (grownFrom)
         {
-            m_pageTablesDirty[i] = true;
+            // Copies recorded into the buffer it grew from must land before its contents are copied over.
+            flushUploadBatch();
+
+            const uint64_t size = grownFrom->getSize();
+            std::unique_ptr<NRI::CommandBuffer> cmd = beginSingleTimeCommands();
+            cmd->copyBuffer(*grownFrom, stream.GetBuffer(), NRI::BufferCopyRegion{ .srcOffset = 0, .dstOffset = 0, .size = size });
+            endSingleTimeCommands(std::move(cmd));
+
+            {
+                std::scoped_lock lock(m_deferredReleasesMutex);
+                m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, std::move(grownFrom) });
+            }
         }
+        return range;
     }
 
     MeshHandle Renderer::UploadMeshGeometry(const MeshData& data, bool isOpaque)
@@ -2066,17 +2091,12 @@ namespace Nox
         uint32_t meshVertCount = static_cast<uint32_t>(data.MeshletVertices.size());
         uint32_t meshTriCount = static_cast<uint32_t>(data.MeshletTriangles.size());
 
-        // Allocate across pages (creates a new page if full or oversized)
-        PageAllocation vertAlloc = m_vertexPages.Allocate(vertCount);
-        PageAllocation drawAlloc = m_meshletDrawPages.Allocate(drawCount);
-        PageAllocation boundAlloc = m_meshletBoundsPages.Allocate(drawCount);
-        PageAllocation mvertAlloc = m_meshletVertPages.Allocate(meshVertCount);
-        PageAllocation mtriAlloc = m_meshletTriPages.Allocate(meshTriCount);
-
-        handle.vertices = {vertAlloc.pageIndex, vertAlloc.offset, vertAlloc.count};
-        handle.meshletDraws = {drawAlloc.pageIndex, drawAlloc.offset, drawAlloc.count};
-        handle.meshletVertices = {mvertAlloc.pageIndex, mvertAlloc.offset, mvertAlloc.count};
-        handle.meshletTriangles = {mtriAlloc.pageIndex, mtriAlloc.offset, mtriAlloc.count};
+        // One range per stream (a stream grows first when the allocation no longer fits)
+        handle.vertices = allocateGeometry(m_vertexStream, vertCount);
+        handle.meshletDraws = allocateGeometry(m_meshletDrawStream, drawCount);
+        handle.meshletBounds = allocateGeometry(m_meshletBoundsStream, drawCount);
+        handle.meshletVertices = allocateGeometry(m_meshletVertexStream, meshVertCount);
+        handle.meshletTriangles = allocateGeometry(m_meshletTriangleStream, meshTriCount);
 
         // Patch meshlet local offsets
         std::vector<shaderio::MeshletDraw> adjustedDraws = data.Draws;
@@ -2087,12 +2107,12 @@ namespace Nox
             draw.globalVertexOffset += handle.vertices.offset;
         }
 
-        // Upload slice directly to target page buffers
-        UploadBufferSlice(*m_vertexPages.GetBuffer(vertAlloc.pageIndex), data.Vertices.data(), vertAlloc.offset, vertAlloc.count);
-        UploadBufferSlice(*m_meshletDrawPages.GetBuffer(drawAlloc.pageIndex), adjustedDraws.data(), drawAlloc.offset, drawAlloc.count);
-        UploadBufferSlice(*m_meshletBoundsPages.GetBuffer(boundAlloc.pageIndex), data.Bounds.data(), boundAlloc.offset, boundAlloc.count);
-        UploadBufferSlice(*m_meshletVertPages.GetBuffer(mvertAlloc.pageIndex), data.MeshletVertices.data(), mvertAlloc.offset, mvertAlloc.count);
-        UploadBufferSlice(*m_meshletTriPages.GetBuffer(mtriAlloc.pageIndex), data.MeshletTriangles.data(), mtriAlloc.offset, mtriAlloc.count);
+        // Upload each slice into its stream's range
+        UploadBufferSlice(m_vertexStream.GetBuffer(), data.Vertices.data(), handle.vertices.offset, handle.vertices.count);
+        UploadBufferSlice(m_meshletDrawStream.GetBuffer(), adjustedDraws.data(), handle.meshletDraws.offset, handle.meshletDraws.count);
+        UploadBufferSlice(m_meshletBoundsStream.GetBuffer(), data.Bounds.data(), handle.meshletBounds.offset, handle.meshletBounds.count);
+        UploadBufferSlice(m_meshletVertexStream.GetBuffer(), data.MeshletVertices.data(), handle.meshletVertices.offset, handle.meshletVertices.count);
+        UploadBufferSlice(m_meshletTriangleStream.GetBuffer(), data.MeshletTriangles.data(), handle.meshletTriangles.offset, handle.meshletTriangles.count);
 
         // --- Hardware Ray Tracing: Build BLAS ---
         if (vertCount > 0 && !data.Draws.empty())
@@ -2115,16 +2135,13 @@ namespace Nox
 
             if (!indices.empty())
             {
-                // 2. Upload dedicated index buffer for AS build and shader lookup
-                uint64_t indexBufferSize = sizeof(uint32_t) * indices.size();
-                std::unique_ptr<NRI::Buffer> indexBuffer = m_device->createBuffer(NRI::BufferDesc{
-                    .size = indexBufferSize,
-                    .usage = NRI::BufferUsage::Index
-                });
-                UploadBufferSlice(*indexBuffer, indices.data(), 0, static_cast<uint32_t>(indices.size()));
+                // 2. The flat triangle list goes into the RT index stream (AS build input and hit shading)
+                handle.rtIndices = allocateGeometry(m_rtIndexStream, static_cast<uint32_t>(indices.size()));
+                UploadBufferSlice(m_rtIndexStream.GetBuffer(), indices.data(), handle.rtIndices.offset, handle.rtIndices.count);
 
                 // 3. Query BLAS build sizes
-                uint64_t vertexBufferBDA = m_vertexPages.GetBuffer(vertAlloc.pageIndex)->getDeviceAddress() + (sizeof(shaderio::Vertex) * vertAlloc.offset);
+                uint64_t vertexBufferBDA = m_vertexStream.GetDeviceAddress() + (sizeof(shaderio::Vertex) * handle.vertices.offset);
+                uint64_t indexBufferBDA = m_rtIndexStream.GetDeviceAddress() + (sizeof(uint32_t) * handle.rtIndices.offset);
 
                 NRI::AccelerationStructureBuildDesc buildDesc{
                     .type = NRI::AccelerationStructureType::BottomLevel,
@@ -2134,7 +2151,7 @@ namespace Nox
                             .vertexBufferAddress = vertexBufferBDA,
                             .vertexStride = sizeof(shaderio::Vertex),
                             .maxVertex = vertCount - 1,
-                            .indexBufferAddress = indexBuffer->getDeviceAddress(),
+                            .indexBufferAddress = indexBufferBDA,
                             .primitiveCount = static_cast<uint32_t>(indices.size() / 3),
                             .primitiveOffset = 0,
                             .firstVertex = 0,
@@ -2198,10 +2215,7 @@ namespace Nox
                 // 6. Cache BLAS and store ID in handle (reusing ids released by unloaded meshes)
                 MeshBLAS meshBLAS{
                     .storageBuffer = std::move(asBuffer),
-                    .as = std::move(blas),
-                    .indexBuffer = std::move(indexBuffer),
-                    .vertexBufferAddress = vertexBufferBDA,
-                    .indexCount = static_cast<uint32_t>(indices.size())
+                    .as = std::move(blas)
                 };
                 if (!m_freeBLASIds.empty())
                 {
@@ -2228,14 +2242,13 @@ namespace Nox
         if (handle.IsValid())
         {
             shaderio::GpuMesh gpuMesh{};
-            gpuMesh.drawsPageIndex = handle.meshletDraws.pageIndex;
             gpuMesh.drawsOffset = handle.meshletDraws.offset;
+            gpuMesh.boundsOffset = handle.meshletBounds.offset;
+            gpuMesh.verticesOffset = handle.vertices.offset;
+            gpuMesh.indicesOffset = handle.rtIndices.IsValid() ? handle.rtIndices.offset : shaderio::NoGeometryRange;
             gpuMesh.meshletCount = handle.meshletDraws.count;
             for (const shaderio::MeshletDraw& draw : data.Draws)
                 gpuMesh.triangleCount += draw.triangleCount;
-            gpuMesh.verticesPageIndex = handle.vertices.pageIndex;
-            gpuMesh.meshletVerticesPageIndex = handle.meshletVertices.pageIndex;
-            gpuMesh.meshletTrianglesPageIndex = handle.meshletTriangles.pageIndex;
 
             // Local bounds of the (bind pose) vertices.
             glm::vec3 boundsMin(std::numeric_limits<float>::max());
@@ -2257,16 +2270,18 @@ namespace Nox
             if (handle.blasId != UINT32_MAX)
             {
                 const MeshBLAS& blas = m_meshBLASes[handle.blasId];
-                gpuMesh.vertexBufferAddress = blas.vertexBufferAddress;
-                gpuMesh.indexBufferAddress = blas.indexBuffer->getDeviceAddress();
                 blasAddress = blas.as->getDeviceAddress();
             }
             handle.gpuSceneMesh = m_gpuScene.AddMesh(gpuMesh, blasAddress);
         }
 
-        markPageTablesDirty();
-
         return handle;
+    }
+
+    void Renderer::deferAssetRelease(Ref<Asset> asset)
+    {
+        std::scoped_lock lock(m_deferredReleasesMutex);
+        m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, std::move(asset) });
     }
 
     void Renderer::UnloadMeshGeometry(const MeshHandle& handle)
@@ -2282,42 +2297,12 @@ namespace Nox
                 m_invalidatedMeshEntities.push_back(m_gpuScene.GetInstanceEntity(instance));
         }
 
-        // Defer returning offsets so current frames in flight finish reading
-        m_deferredMeshFrees.push_back({
-            .handle = handle,
-            .framesRemaining = MAX_FRAMES_IN_FLIGHT
-        });
-
-        markPageTablesDirty();
-    }
-
-    void Renderer::createPageTableBuffers(uint64_t elementCapacity)
-    {
-        uint64_t bufferSize = elementCapacity * sizeof(uint64_t);
-
-        auto initMappedBuffer = [&](std::vector<std::unique_ptr<NRI::Buffer>>& buffers, std::vector<void*>& mapped)
+        // Defer returning the ranges so frames in flight finish reading them
         {
-            buffers.clear();
-            mapped.clear();
-            buffers.reserve(MAX_FRAMES_IN_FLIGHT);
-            mapped.reserve(MAX_FRAMES_IN_FLIGHT);
+            std::scoped_lock lock(m_deferredReleasesMutex);
+            m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, handle });
+        }
 
-            for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
-            {
-                std::unique_ptr<NRI::Buffer> buf = m_device->createBuffer(NRI::BufferDesc{
-                    .size = bufferSize,
-                    .usage = NRI::BufferUsage::Storage // Just like your instance buffers
-                });
-                mapped.push_back(buf->map(0, bufferSize));
-                buffers.push_back(std::move(buf));
-            }
-        };
-
-        initMappedBuffer(m_vertexPageTableBuffers, m_vertexPageTableBuffersMapped);
-        initMappedBuffer(m_meshletDrawPageTableBuffers, m_meshletDrawPageTableBuffersMapped);
-        initMappedBuffer(m_meshletBoundPageTableBuffers, m_meshletBoundPageTableBuffersMapped);
-        initMappedBuffer(m_meshletVertPageTableBuffers, m_meshletVertPageTableBuffersMapped);
-        initMappedBuffer(m_meshletTriPageTableBuffers, m_meshletTriPageTableBuffersMapped);
     }
 
     void Renderer::updateBoneBuffer(uint32_t currentImage)
@@ -2334,10 +2319,10 @@ namespace Nox
             {
                 if (oldBuffer)
                 {
-                    m_deferredBufferDeletions.push_back({
-                        std::move(oldBuffer),
-                        frameIndex + MAX_FRAMES_IN_FLIGHT
-                    });
+                    {
+                        std::scoped_lock lock(m_deferredReleasesMutex);
+                        m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, std::move(oldBuffer) });
+                    }
                 }
             }
 
@@ -2369,67 +2354,6 @@ namespace Nox
             m_boneBuffers.emplace_back(std::move(uboBuffer));
             m_boneBuffersMapped.emplace_back(mappedMemory);
         }
-    }
-
-    void Renderer::updatePageTables(uint32_t currentImage)
-    {
-        // SKIP entirely if nothing has changed!
-        if (!m_pageTablesDirty[currentImage])
-        {
-            return;
-        }
-
-        // Find the maximum page count across all allocators to ensure capacity
-        uint64_t maxPagesRequired = std::max({
-            m_vertexPages.GetPageCount(),
-            m_meshletDrawPages.GetPageCount(),
-            m_meshletBoundsPages.GetPageCount(),
-            m_meshletVertPages.GetPageCount(),
-            m_meshletTriPages.GetPageCount()
-        });
-
-        if (maxPagesRequired == 0)
-        {
-            m_pageTablesDirty[currentImage] = false;
-            return;
-        }
-
-        // Resize if we don't have enough capacity
-        if (maxPagesRequired > m_PageTableCapacity || m_vertexPageTableBuffers.empty())
-        {
-            m_PageTableCapacity = maxPagesRequired * 2; // double it to avoid frequent resizes
-
-            // Note: Just like your instance buffers, you should add old buffers to m_deferredBufferDeletions here
-
-            createPageTableBuffers(m_PageTableCapacity);
-        }
-
-        // Helper to gather BDAs and memcpy them directly into mapped memory
-        auto uploadBDAs = [](const auto& pageAllocator, void* mappedPtr)
-        {
-            uint32_t count = pageAllocator.GetPageCount();
-            if (count == 0) return;
-
-            std::vector<uint64_t> bdas;
-            bdas.reserve(count);
-            for (size_t i = 0; i < count; ++i)
-            {
-                NRI::Buffer* page = pageAllocator.GetBuffer(static_cast<uint32_t>(i));
-                bdas.push_back(page ? page->getDeviceAddress() : 0);
-            }
-
-            // Instant memcpy, no command buffers, no blocking sync!
-            memcpy(mappedPtr, bdas.data(), count * sizeof(uint64_t));
-        };
-
-        uploadBDAs(m_vertexPages, m_vertexPageTableBuffersMapped[currentImage]);
-        uploadBDAs(m_meshletDrawPages, m_meshletDrawPageTableBuffersMapped[currentImage]);
-        uploadBDAs(m_meshletBoundsPages, m_meshletBoundPageTableBuffersMapped[currentImage]);
-        uploadBDAs(m_meshletVertPages, m_meshletVertPageTableBuffersMapped[currentImage]);
-        uploadBDAs(m_meshletTriPages, m_meshletTriPageTableBuffersMapped[currentImage]);
-
-        // Mark as clean for this frame
-        m_pageTablesDirty[currentImage] = false;
     }
 
     void Renderer::createUniformBuffers()
@@ -2817,20 +2741,6 @@ namespace Nox
             bool hasBones = !m_boneMatrices.empty();
             references.boneMatrixReference = (hasBones && hasBoneBuffers) ? m_boneBuffers[frameIndex]->getDeviceAddress() : 0;
 
-            bool hasPageTables = frameIndex < m_vertexPageTableBuffers.size() && m_vertexPageTableBuffers[frameIndex] != nullptr;
-            references.vertexPageTableReference = hasPageTables ? m_vertexPageTableBuffers[frameIndex]->getDeviceAddress() : 0;
-            references.meshletBoundsPageTableReference = (hasPageTables && frameIndex < m_meshletBoundPageTableBuffers.size() && m_meshletBoundPageTableBuffers[frameIndex])
-                                                             ? m_meshletBoundPageTableBuffers[frameIndex]->getDeviceAddress()
-                                                             : 0;
-            references.meshletDrawsPageTableReference = (hasPageTables && frameIndex < m_meshletDrawPageTableBuffers.size() && m_meshletDrawPageTableBuffers[frameIndex])
-                                                            ? m_meshletDrawPageTableBuffers[frameIndex]->getDeviceAddress()
-                                                            : 0;
-            references.meshletVerticesPageTableReference = (hasPageTables && frameIndex < m_meshletVertPageTableBuffers.size() && m_meshletVertPageTableBuffers[frameIndex])
-                                                               ? m_meshletVertPageTableBuffers[frameIndex]->getDeviceAddress()
-                                                               : 0;
-            references.meshletTrianglesPageTableReference = (hasPageTables && frameIndex < m_meshletTriPageTableBuffers.size() && m_meshletTriPageTableBuffers[frameIndex])
-                                                                ? m_meshletTriPageTableBuffers[frameIndex]->getDeviceAddress()
-                                                                : 0;
         }
 
         // Every hybrid-only feature skips itself while path tracing. ReSTIR DI/GI are the exception when explicitly
@@ -3112,6 +3022,7 @@ namespace Nox
     void Renderer::updateGpuScene(uint32_t currentImage)
     {
         refreshGpuMaterials();
+        m_gpuScene.SetGeometryBases(m_vertexStream.GetDeviceAddress(), m_rtIndexStream.GetDeviceAddress());
 
         if (m_gpuScene.UpdateDrawList(glm::vec3(uniformData.cameraWorldPos), m_drawList, m_drawBucketStarts))
             m_drawListStale.fill(true);
@@ -3135,13 +3046,22 @@ namespace Nox
         std::vector<std::unique_ptr<NRI::Buffer>> releasedBuffers;
         m_gpuScene.PrepareUploads(currentImage, releasedBuffers);
         for (std::unique_ptr<NRI::Buffer>& buffer : releasedBuffers)
-            m_deferredBufferDeletions.push_back({ std::move(buffer), MAX_FRAMES_IN_FLIGHT });
+            {
+                std::scoped_lock lock(m_deferredReleasesMutex);
+                m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, std::move(buffer) });
+            }
 
         uniformData.sceneInstancesReference = m_gpuScene.GetInstances().GetDeviceAddress();
         uniformData.sceneTransformsReference = m_gpuScene.GetTransforms().GetDeviceAddress();
         uniformData.sceneMaterialsReference = m_gpuScene.GetMaterials().GetDeviceAddress();
         uniformData.sceneMeshesReference = m_gpuScene.GetMeshes().GetDeviceAddress();
         uniformData.sceneRayTracingInstancesReference = m_gpuScene.GetRayTracingInstances().GetDeviceAddress();
+
+        uniformData.geometryVerticesReference = m_vertexStream.GetDeviceAddress();
+        uniformData.geometryMeshletDrawsReference = m_meshletDrawStream.GetDeviceAddress();
+        uniformData.geometryMeshletBoundsReference = m_meshletBoundsStream.GetDeviceAddress();
+        uniformData.geometryMeshletVerticesReference = m_meshletVertexStream.GetDeviceAddress();
+        uniformData.geometryMeshletTrianglesReference = m_meshletTriangleStream.GetDeviceAddress();
 
     }
 
@@ -3154,7 +3074,10 @@ namespace Nox
             for (std::unique_ptr<NRI::Buffer>& oldBuffer : m_drawListBuffers)
             {
                 if (oldBuffer)
-                    m_deferredBufferDeletions.push_back({ std::move(oldBuffer), MAX_FRAMES_IN_FLIGHT });
+                    {
+                        std::scoped_lock lock(m_deferredReleasesMutex);
+                        m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, std::move(oldBuffer) });
+                    }
             }
             createDrawListBuffers(m_DrawListBufferCapacity);
         }
@@ -3191,10 +3114,10 @@ namespace Nox
             {
                 if (oldBuffer)
                 {
-                    m_deferredBufferDeletions.push_back({
-                        std::move(oldBuffer),
-                        frameIndex + MAX_FRAMES_IN_FLIGHT
-                    });
+                    {
+                        std::scoped_lock lock(m_deferredReleasesMutex);
+                        m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, std::move(oldBuffer) });
+                    }
                 }
             }
             createLightBuffer(m_LightBufferCapacity);
@@ -3209,83 +3132,103 @@ namespace Nox
         uniformData.lightCount = static_cast<uint32_t>(m_lightBufferObjects.size());
     }
 
-    void Renderer::processDeferredDeletions()
+    void Renderer::processDeferredReleases()
     {
-        // Dropping the last Ref here runs the asset's destructor (texture slot release, mesh
-        // geometry free) only after every frame that could still reference it has finished.
-        std::erase_if(m_deferredAssetReleases, [](DeferredAssetRelease& deferred)
+        // Releasing one entry can queue another: dropping the last reference to a mesh asset runs its destructor, which
+        // unloads its geometry and pushes that onto this queue. So the due entries are moved out first and released
+        // afterwards, with nothing iterating the queue.
+        std::vector<DeferredRelease> due;
         {
-            if (deferred.framesRemaining == 0)
-                return true;
-
-            deferred.framesRemaining--;
-            return false;
-        });
-
-        std::erase_if(m_deferredBufferDeletions, [](DeferredBuffer& deferred)
-        {
-            if (deferred.framesRemaining == 0)
-                return true; // Deletes unique_ptr
-
-            deferred.framesRemaining--;
-            return false;
-        });
-    }
-
-    void Renderer::processDeferredMeshFrees()
-    {
-        std::erase_if(m_deferredMeshFrees, [this](DeferredMeshFree& deferred)
-        {
-            if (deferred.framesRemaining == 0)
+            std::scoped_lock lock(m_deferredReleasesMutex);
+            for (DeferredRelease& release : m_deferredReleases)
             {
-                const auto& h = deferred.handle;
-                std::unique_ptr<NRI::Buffer> emptyBuffer;
+                if (release.framesRemaining > 0)
+                    --release.framesRemaining;
 
-                // Free slots. If page becomes 100% empty, emptyBuffer is populated for deletion!
-                if (m_vertexPages.Free(h.vertices.pageIndex, h.vertices.offset, h.vertices.count, emptyBuffer))
-                {
-                    m_deferredBufferDeletions.push_back({std::move(emptyBuffer), MAX_FRAMES_IN_FLIGHT});
-                }
-
-                if (m_meshletDrawPages.Free(h.meshletDraws.pageIndex, h.meshletDraws.offset, h.meshletDraws.count, emptyBuffer))
-                {
-                    m_deferredBufferDeletions.push_back({std::move(emptyBuffer), MAX_FRAMES_IN_FLIGHT});
-                }
-
-                // Bounds are allocated 1:1 with draws (same count, same allocation order), so the
-                // draw allocation's page/offset is also the bounds allocation.
-                if (m_meshletBoundsPages.Free(h.meshletDraws.pageIndex, h.meshletDraws.offset, h.meshletDraws.count, emptyBuffer))
-                {
-                    m_deferredBufferDeletions.push_back({std::move(emptyBuffer), MAX_FRAMES_IN_FLIGHT});
-                }
-
-                // The GPU scene stopped tracing this mesh when it was unloaded.
-                if (h.blasId != UINT32_MAX && h.blasId < m_meshBLASes.size() && m_meshBLASes[h.blasId].as)
-                {
-                    m_meshBLASes[h.blasId] = MeshBLAS{};
-                    m_freeBLASIds.push_back(h.blasId);
-                }
-
-                if (m_meshletVertPages.Free(h.meshletVertices.pageIndex, h.meshletVertices.offset, h.meshletVertices.count, emptyBuffer))
-                {
-                    m_deferredBufferDeletions.push_back({std::move(emptyBuffer), MAX_FRAMES_IN_FLIGHT});
-                }
-
-                if (m_meshletTriPages.Free(h.meshletTriangles.pageIndex, h.meshletTriangles.offset, h.meshletTriangles.count, emptyBuffer))
-                {
-                    m_deferredBufferDeletions.push_back({std::move(emptyBuffer), MAX_FRAMES_IN_FLIGHT});
-                }
-
-                return true; // Done freeing mesh
+                // Checked after the decrement, not as its else: an entry reaching 0 in this pass must be moved out too,
+                // or the erase below destroys it under the lock (a Mesh destructor queuing its geometry would then
+                // lock this mutex again).
+                if (release.framesRemaining == 0)
+                    due.push_back(std::move(release));
             }
+            std::erase_if(m_deferredReleases, [](const DeferredRelease& release) { return release.framesRemaining == 0; });
+        }
 
-            deferred.framesRemaining--;
-            return false;
-        });
+        // A mesh hands its ranges back to the streams (the next load reuses them) and frees its BLAS id; buffers and
+        // asset references are released when `due` goes out of scope.
+        for (DeferredRelease& release : due)
+        {
+            const MeshHandle* mesh = std::get_if<MeshHandle>(&release.payload);
+            if (!mesh)
+                continue;
+
+            m_vertexStream.Free(mesh->vertices);
+            m_meshletDrawStream.Free(mesh->meshletDraws);
+            m_meshletBoundsStream.Free(mesh->meshletBounds);
+            m_meshletVertexStream.Free(mesh->meshletVertices);
+            m_meshletTriangleStream.Free(mesh->meshletTriangles);
+            m_rtIndexStream.Free(mesh->rtIndices);
+
+            // The GPU scene stopped tracing this mesh when it was unloaded.
+            if (mesh->blasId != UINT32_MAX && mesh->blasId < m_meshBLASes.size() && m_meshBLASes[mesh->blasId].as)
+            {
+                m_meshBLASes[mesh->blasId] = MeshBLAS{};
+                m_freeBLASIds.push_back(mesh->blasId);
+            }
+        }
     }
 
     // with compute there might be a snyc issue idk
     // according to gpt no async since compute and graphics same commandbuffer and executed in order
+    void Renderer::updateMemoryBudget()
+    {
+        m_memoryBudget.Update(m_memoryHeapStats);
+
+        // Geometry: the streams hold their capacity, of which the live ranges are in use.
+        uint64_t geometryCommitted = 0;
+        uint64_t geometryUsed = 0;
+        for (const GeometryArena* stream : { &m_vertexStream, &m_meshletDrawStream, &m_meshletBoundsStream,
+                                             &m_meshletVertexStream, &m_meshletTriangleStream, &m_rtIndexStream })
+        {
+            geometryCommitted += stream->GetCapacityBytes();
+            geometryUsed += stream->GetUsedBytes();
+        }
+        m_memoryBudget.SetCommitted(MemoryCategory::Geometry, geometryCommitted, geometryUsed);
+
+        // Ray tracing: the acceleration structures and what builds them.
+        uint64_t rayTracing = 0;
+        for (const MeshBLAS& blas : m_meshBLASes)
+        {
+            if (blas.storageBuffer)
+                rayTracing += blas.storageBuffer->getSize();
+        }
+        if (m_tlasBuffer)
+            rayTracing += m_tlasBuffer->getSize();
+        if (m_tlasScratchBuffer)
+            rayTracing += m_tlasScratchBuffer->getSize();
+        for (const std::unique_ptr<NRI::Buffer>& buffer : m_rtInstanceBuffers)
+        {
+            if (buffer)
+                rayTracing += buffer->getSize();
+        }
+        m_memoryBudget.SetCommitted(MemoryCategory::RayTracing, rayTracing, rayTracing);
+
+        // Scene: the GPU scene tables.
+        const uint64_t scene = m_gpuScene.GetDeviceBytes();
+        m_memoryBudget.SetCommitted(MemoryCategory::Scene, scene, scene);
+
+        // Transient: the render graph pool.
+        const RGResourcePool& pool = m_renderGraph.GetResourcePool();
+        const uint64_t transient = pool.GetTextureMemory() + pool.GetBufferMemory();
+        m_memoryBudget.SetCommitted(MemoryCategory::Transient, transient, transient);
+
+        // Textures: every image the device holds, minus the render graph's share of them.
+        const uint64_t textures = m_device->getTextureBytes();
+        m_memoryBudget.SetCommitted(MemoryCategory::Textures,
+                                    textures > pool.GetTextureMemory() ? textures - pool.GetTextureMemory() : 0,
+                                    textures > pool.GetTextureMemory() ? textures - pool.GetTextureMemory() : 0);
+    }
+
     void Renderer::sampleMemoryStats()
     {
         // Memory changes slowly compared to frame time; a few samples per second are enough for the overlay/plots.
@@ -3296,7 +3239,9 @@ namespace Nox
         m_lastMemoryStatsSample = now;
 
         m_device->getMemoryStats(m_memoryHeapStats);
-        Profiler::Get().SubmitMemoryStats(m_memoryHeapStats, m_device->isMemoryBudgetSupported(), Platform::QueryProcessMemory());
+        updateMemoryBudget();
+        Profiler::Get().SubmitMemoryStats(m_memoryHeapStats, m_device->isMemoryBudgetSupported(), Platform::QueryProcessMemory(),
+                                          m_memoryBudget.GetCategories());
     }
 
     void Renderer::drawFrame()
@@ -3311,8 +3256,7 @@ namespace Nox
 
         {
             NOX_PROFILE_SCOPE("Deferred Deletions");
-            processDeferredDeletions();
-            processDeferredMeshFrees();
+            processDeferredReleases();
         }
 
         // Process any queued shader hot-reloads
@@ -3360,11 +3304,6 @@ namespace Nox
             readPickResult(frameIndex);
             readInspectionProbe(frameIndex);
             readCullStats(frameIndex);
-        }
-
-        {
-            NOX_PROFILE_SCOPE("Page Tables");
-            updatePageTables(frameIndex);
         }
 
         {

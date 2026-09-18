@@ -23,3 +23,6 @@
 [submodule "NoxCore/vendors/tracy"]
 	path = NoxCore/vendors/tracy
 	url = https://github.com/wolfpld/tracy.git
+[submodule "NoxCore/vendors/OffsetAllocator"]
+	path = NoxCore/vendors/OffsetAllocator
+	url = https://github.com/sebbbi/OffsetAllocator

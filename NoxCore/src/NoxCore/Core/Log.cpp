@@ -24,5 +24,10 @@ namespace Nox
         s_ClientLogger = std::make_shared<spdlog::logger>("APP", logSinks.begin(), logSinks.end());
         spdlog::register_logger(s_ClientLogger);
         s_ClientLogger->set_level(spdlog::level::trace);
+
+        // Warnings and errors are written through (a buffered tail is lost in a crash); flushing every info line made
+        // asset loads crawl.
+        s_CoreLogger->flush_on(spdlog::level::warn);
+        s_ClientLogger->flush_on(spdlog::level::warn);
     }
 }

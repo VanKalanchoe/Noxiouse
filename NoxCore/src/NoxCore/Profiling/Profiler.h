@@ -14,6 +14,7 @@
 
 #include "NRI/NRITypes.h"
 #include "NoxCore/Utils/PlatformUtils.h"
+#include "NoxCore/Renderer/MemoryBudget.h"
 
 // Engine instrumentation layer (docs/Engine_Architecture_Plan_2026.md 5.1). Engine code only uses the
 // NOX_PROFILE_* macros below; they feed the in-engine Nox Stats (NOX_PROFILE_STATS) and Tracy
@@ -82,6 +83,7 @@ namespace Nox
         std::vector<NRI::MemoryHeapStats> Heaps;
         bool BudgetFromDriver = false; // false: the allocator estimates usage/budget itself
         Platform::ProcessMemory Process;
+        std::vector<MemoryCategoryStats> Categories; // what each part of the engine holds of the device budget (§5.8.3)
     };
 
     // GPU scope state of one command buffer while it is recorded (Profiler::BeginGpuScope). A frame's command buffers can
@@ -159,7 +161,8 @@ namespace Nox
 
         // Main thread.
         void SetCounter(uint32_t scopeId, double value);
-        void SubmitMemoryStats(std::span<const NRI::MemoryHeapStats> heaps, bool budgetFromDriver, const Platform::ProcessMemory& process);
+        void SubmitMemoryStats(std::span<const NRI::MemoryHeapStats> heaps, bool budgetFromDriver, const Platform::ProcessMemory& process,
+                               std::span<const MemoryCategoryStats> categories);
         void ResetStats();
 
         // Nox Stats readers (main thread). Scopes come in tree order: parents before their children.

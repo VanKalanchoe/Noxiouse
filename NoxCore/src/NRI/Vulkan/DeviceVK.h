@@ -1,4 +1,6 @@
 #pragma once
+#include <atomic>
+
 #include "VulkanCommon.h"
 
 #ifdef NDEBUG
@@ -96,6 +98,9 @@ namespace NRI
 
         void beginFrame(uint32_t frameNumber) override;
         void getMemoryStats(std::vector<MemoryHeapStats>& outHeaps) const override;
+        uint64_t getTextureBytes() const override { return m_textureBytes.load(std::memory_order_relaxed); }
+        // TextureVK reports itself here, so the count follows every texture no matter who created it.
+        void addTextureBytes(int64_t bytes) { m_textureBytes.fetch_add(static_cast<uint64_t>(bytes), std::memory_order_relaxed); }
 
     private:
         void initVulkan(Nox::Window& window);
@@ -130,6 +135,7 @@ namespace NRI
         bool m_shaderObjectsEnabled = false;
         bool m_pipelineStatisticsEnabled = false;
         bool m_memoryBudgetEnabled = false;
+        std::atomic<uint64_t> m_textureBytes{ 0 };
         bool m_debugUtilsEnabled = false;
         uint32_t m_queueIndex = ~0;
         vk::raii::Queue m_queue = nullptr;

@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include "GeometryArena.h"
 #include <glm/glm.hpp>
 #include <glm/detail/type_quat.hpp>
 
@@ -11,21 +12,14 @@ namespace shaderio // Shader IO namespace -- shared layout between C++ and shade
 
 namespace Nox
 {
-    struct BufferAllocation
-    {
-        uint32_t pageIndex = UINT32_MAX;
-        uint32_t offset = 0;
-        uint32_t count = 0;
-        
-        bool IsValid() const { return count > 0; };
-    };
-    
     struct MeshHandle
     {
-        BufferAllocation vertices;
-        BufferAllocation meshletDraws; // Also used for bounds (1:1 ratio)
-        BufferAllocation meshletVertices;
-        BufferAllocation meshletTriangles;
+        GeometryRange vertices;
+        GeometryRange meshletDraws;
+        GeometryRange meshletBounds; // one per meshlet, in draw order
+        GeometryRange meshletVertices;
+        GeometryRange meshletTriangles;
+        GeometryRange rtIndices; // flat triangle list for the BLAS build and hit shading
         uint32_t blasId = UINT32_MAX;
         uint32_t gpuSceneMesh = UINT32_MAX; // GPU scene mesh slot
         

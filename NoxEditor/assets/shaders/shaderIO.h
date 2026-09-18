@@ -188,17 +188,15 @@ struct GpuRayTracingInstance
 
 struct GpuMesh
 {
-    // Geometry pages (page tables until unified geometry buffers, Phase 4)
-    uint32_t drawsPageIndex;            // meshlet draws and bounds (1:1)
+    // Ranges inside the unified geometry streams (§5.8.2). The vertex, meshlet vertex and meshlet triangle offsets are
+    // baked into this mesh's MeshletDraw records at upload, so only these two are needed per mesh.
     uint32_t drawsOffset;
+    uint32_t boundsOffset;
     uint32_t meshletCount;
-    uint32_t verticesPageIndex;
-    uint32_t meshletVerticesPageIndex;
-    uint32_t meshletTrianglesPageIndex;
-
-    // Ray tracing (the BLAS inputs)
-    uint64_t vertexBufferAddress;
-    uint64_t indexBufferAddress;
+    // Ray tracing (the BLAS inputs): offsets into the vertex and RT index streams, 0xFFFFFFFF when the mesh has none.
+    // The instance records the hit shaders read hold the resulting addresses (one flat record, §5.5.4 3b).
+    uint32_t verticesOffset;
+    uint32_t indicesOffset;
 
     uint32_t triangleCount; // of all meshlets (stats)
 
@@ -261,6 +259,14 @@ struct UniformBufferObject
     uint64_t tlasDeviceAddress;
     uint32_t tlasHeapIndex;
     uint32_t enableRTReflections;
+    // Unified geometry streams (§5.8.2): one buffer per stream, the mesh table and the meshlet draw records index into
+    // them with offsets, so growing a stream only changes these addresses.
+    uint64_t geometryVerticesReference;
+    uint64_t geometryMeshletDrawsReference;
+    uint64_t geometryMeshletBoundsReference;
+    uint64_t geometryMeshletVerticesReference;
+    uint64_t geometryMeshletTrianglesReference;
+
     // GPU scene tables (GpuInstance, GpuTransform, GpuMaterial, GpuMesh, GpuRayTracingInstance); 0 while the scene is empty
     uint64_t sceneInstancesReference;
     uint64_t sceneTransformsReference;
@@ -324,6 +330,8 @@ struct LightData
 // compacted per bucket into the visible instance list and one indirect command per visible instance, without atomics:
 // visibility flags in parallel, visible counts per block of entries, block offsets and bucket counts, then each block
 // writes its entries (entry order, so transparent sorting survives).
+STATIC_CONST uint32_t NoGeometryRange = 0xFFFFFFFF; // GpuMesh offsets: this mesh has no range in that stream
+
 STATIC_CONST uint32_t CULL_BLOCK_SIZE = 256;
 STATIC_CONST uint32_t CULL_BUCKET_COUNT = 10; // RenderBucket::Count
 STATIC_CONST uint32_t CULL_INSTANCES = 1;     // CullView.flags: frustum test (off: every entry is visible)
@@ -410,12 +418,6 @@ struct PushConstantMeshlets
     uint64_t matrixReference;
     uint64_t drawInstancesReference; // visible instance slots of this view (instanceBaseIndex + SV_DrawIndex)
     uint64_t boneMatrixReference;
-    // These now point to the Page Table buffers (array of uint64_t BDAs)
-    uint64_t vertexPageTableReference;
-    uint64_t meshletBoundsPageTableReference;
-    uint64_t meshletDrawsPageTableReference;
-    uint64_t meshletVerticesPageTableReference;
-    uint64_t meshletTrianglesPageTableReference;
     uint32_t instanceBaseIndex;
     uint32_t meshletCulling; // MESHLET_CULL_FRUSTUM (0: lean task shader, every meshlet of a visible instance is drawn)
 };
@@ -458,10 +460,6 @@ struct PushConstantVisibilityDebug
 {
     uint64_t matrixReference;
     uint64_t boneMatrixReference;
-    uint64_t vertexPageTableReference;
-    uint64_t meshletDrawsPageTableReference;
-    uint64_t meshletVerticesPageTableReference;
-    uint64_t meshletTrianglesPageTableReference;
     uint32_t visibilityTextureIndex;
     uint32_t debugMode; // 0 = Albedo, 1 = Normal, 2 = Roughness, 3 = Metallic, 4 = Emission, 5 = Occlusion, 6 = Colored Meshlets
     vec2 viewportSize;
@@ -1081,12 +1079,9 @@ struct InstanceData
     float4x4 normalMatrix;
     float4x4 previousModelMatrix;
 
-    uint32_t drawsPageIndex;
     uint32_t drawsOffset;
+    uint32_t boundsOffset;
     uint32_t meshletCount;
-    uint32_t verticesPageIndex;
-    uint32_t meshletVerticesPageIndex;
-    uint32_t meshletTrianglesPageIndex;
 
     float workflow;
     float4 diffuseFactor;
@@ -1151,12 +1146,9 @@ struct SceneInstances
             data.normalMatrix = transform.normal;
             data.previousModelMatrix = transform.previousWorld;
 
-            data.drawsPageIndex = mesh.drawsPageIndex;
             data.drawsOffset = mesh.drawsOffset;
+            data.boundsOffset = mesh.boundsOffset;
             data.meshletCount = mesh.meshletCount;
-            data.verticesPageIndex = mesh.verticesPageIndex;
-            data.meshletVerticesPageIndex = mesh.meshletVerticesPageIndex;
-            data.meshletTrianglesPageIndex = mesh.meshletTrianglesPageIndex;
 
             data.workflow = material.workflow;
             data.diffuseFactor = material.diffuseFactor;

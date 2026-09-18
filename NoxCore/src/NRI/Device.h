@@ -162,6 +162,8 @@ namespace NRI
         virtual void beginFrame(uint32_t frameNumber) = 0;
         virtual bool isMemoryBudgetSupported() const = 0;
         virtual void getMemoryStats(std::vector<MemoryHeapStats>& outHeaps) const = 0;
+        // Estimated device memory of every live texture (§5.8.3 accounts for images through their descriptions).
+        virtual uint64_t getTextureBytes() const = 0;
 
         virtual bool evaluateDLSS(const DLSSParams& params) { return false; }
         virtual bool isDLSSSupported() const { return false; }

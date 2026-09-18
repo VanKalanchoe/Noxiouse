@@ -285,28 +285,12 @@ namespace Nox
 
     uint64_t RGResourcePool::EstimateTextureBytes(const RGTextureKey& key)
     {
-        uint64_t bytesPerPixel = 4;
-        switch (key.Format)
-        {
-        case NRI::ImageFormat::R16_SFLOAT: bytesPerPixel = 2; break;
-        case NRI::ImageFormat::R16G16:
-        case NRI::ImageFormat::R16G16_SFLOAT: bytesPerPixel = 4; break;
-        case NRI::ImageFormat::R32G32_UINT:
-        case NRI::ImageFormat::R32G32_SFLOAT:
-        case NRI::ImageFormat::R16G16B16A16_SFLOAT: bytesPerPixel = 8; break;
-        case NRI::ImageFormat::R32G32B32A32_SFLOAT: bytesPerPixel = 16; break;
-        default: break;
-        }
-
-        uint64_t bytes = 0;
-        uint64_t width = key.Width;
-        uint64_t height = key.Height;
-        for (uint32_t mip = 0; mip < key.MipLevels; ++mip)
-        {
-            bytes += std::max<uint64_t>(width, 1) * std::max<uint64_t>(height, 1) * bytesPerPixel;
-            width /= 2;
-            height /= 2;
-        }
-        return bytes;
+        return NRI::estimateTextureBytes(NRI::TextureDesc{
+            .width = key.Width,
+            .height = key.Height,
+            .mipLevels = key.MipLevels,
+            .usage = key.Usage,
+            .format = key.Format
+        });
     }
 }

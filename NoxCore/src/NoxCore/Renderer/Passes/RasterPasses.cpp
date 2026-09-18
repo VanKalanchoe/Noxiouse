@@ -350,17 +350,6 @@ namespace Nox
                 bool hasBones = !m_boneMatrices.empty();
                 gbufferPush.boneMatrixReference = (hasBones && hasBoneBuffers) ? m_boneBuffers[frameIndex]->getDeviceAddress() : 0;
 
-                bool hasPageTables = frameIndex < m_vertexPageTableBuffers.size() && m_vertexPageTableBuffers[frameIndex] != nullptr;
-                gbufferPush.vertexPageTableReference = hasPageTables ? m_vertexPageTableBuffers[frameIndex]->getDeviceAddress() : 0;
-                gbufferPush.meshletDrawsPageTableReference = (hasPageTables && frameIndex < m_meshletDrawPageTableBuffers.size() && m_meshletDrawPageTableBuffers[frameIndex])
-                                                                 ? m_meshletDrawPageTableBuffers[frameIndex]->getDeviceAddress()
-                                                                 : 0;
-                gbufferPush.meshletVerticesPageTableReference = (hasPageTables && frameIndex < m_meshletVertPageTableBuffers.size() && m_meshletVertPageTableBuffers[frameIndex])
-                                                                    ? m_meshletVertPageTableBuffers[frameIndex]->getDeviceAddress()
-                                                                    : 0;
-                gbufferPush.meshletTrianglesPageTableReference = (hasPageTables && frameIndex < m_meshletTriPageTableBuffers.size() && m_meshletTriPageTableBuffers[frameIndex])
-                                                                     ? m_meshletTriPageTableBuffers[frameIndex]->getDeviceAddress()
-                                                                     : 0;
                 gbufferPush.visibilityTextureIndex = context.Slot(res->Visibility);
                 gbufferPush.viewportSize = glm::vec2(rw, rh);
                 gbufferPush.debugMode = m_debugMode;

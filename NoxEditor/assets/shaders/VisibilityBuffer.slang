@@ -39,20 +39,15 @@
         InstanceData instance = instances[sharedPayload.drawID];
         float4x4 modelMatrix = instance.modelMatrix;
 
-        uint64_t* drawsPageTable  = (uint64_t*)pushConstant.meshletDrawsPageTableReference;
-        uint64_t* vertsPageTable  = (uint64_t*)pushConstant.vertexPageTableReference;
-        uint64_t* mVertsPageTable = (uint64_t*)pushConstant.meshletVerticesPageTableReference;
-        uint64_t* mTrisPageTable  = (uint64_t*)pushConstant.meshletTrianglesPageTableReference;
-
-        MeshletDraw* meshletDrawPage = (MeshletDraw*)drawsPageTable[instance.drawsPageIndex];
-        Vertex* vertexPage = (Vertex*)vertsPageTable[instance.verticesPageIndex];
-        uint32_t* meshletVerticesPage = (uint32_t*)mVertsPageTable[instance.meshletVerticesPageIndex];
-        uint8_t* meshletTrianglePage = (uint8_t*)mTrisPageTable[instance.meshletTrianglesPageIndex];
+        MeshletDraw* meshletDrawStream = (MeshletDraw*)ubo->geometryMeshletDrawsReference;
+        Vertex* vertexStream = (Vertex*)ubo->geometryVerticesReference;
+        uint32_t* meshletVertexStream = (uint32_t*)ubo->geometryMeshletVerticesReference;
+        uint8_t* meshletTriangleStream = (uint8_t*)ubo->geometryMeshletTrianglesReference;
 
         uint8_t localMeshletOffset = sharedPayload.meshletIndices[groupId.x];
         uint globalMeshletIdx = sharedPayload.groupMeshletOffset + localMeshletOffset;
 
-        MeshletDraw meshlet = meshletDrawPage[globalMeshletIdx];
+        MeshletDraw meshlet = meshletDrawStream[globalMeshletIdx];
         float4x4 viewProj = mul(ubo.proj, ubo.view);
 
         SetMeshOutputCounts(meshlet.vertexCount, meshlet.triangleCount);
@@ -60,8 +55,8 @@
         // Process vertices (Position, UVs & IDs)
         for (uint i = gtid.x; i < meshlet.vertexCount; i += MESH_SHADER_DISPATCH_X)
         {
-            uint localVertexIndex = meshletVerticesPage[meshlet.vertexOffset + i];
-            Vertex vert = vertexPage[meshlet.globalVertexOffset + localVertexIndex];
+            uint localVertexIndex = meshletVertexStream[meshlet.vertexOffset + i];
+            Vertex vert = vertexStream[meshlet.globalVertexOffset + localVertexIndex];
 
             float4 localPos = float4(vert.pos, 1.0);
 
@@ -93,9 +88,9 @@
         for (uint i = gtid.x; i < meshlet.triangleCount; i += MESH_SHADER_DISPATCH_X)
         {
             uint triBase = meshlet.triangleOffset + (i * 3);
-            uint idx0 = meshletTrianglePage[triBase];
-            uint idx1 = meshletTrianglePage[triBase + 1];
-            uint idx2 = meshletTrianglePage[triBase + 2];
+            uint idx0 = meshletTriangleStream[triBase];
+            uint idx1 = meshletTriangleStream[triBase + 1];
+            uint idx2 = meshletTriangleStream[triBase + 2];
 
             triangles[i] = uint3(idx0, idx1, idx2);
             primitives[i].primitiveID = i;

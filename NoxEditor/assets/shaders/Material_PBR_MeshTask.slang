@@ -45,10 +45,9 @@ void taskMain
         // Optional meshlet culling (the instance already passed GPU instance culling); off, no bounds are fetched.
         if (pushConstant.meshletCulling != 0)
         {
-            uint32_t globalMeshletIndex = groupBaseMeshlet + threadOffset;
-            uint64_t* boundsPageTable = (uint64_t*)pushConstant.meshletBoundsPageTableReference;
-            MeshletBounds* meshletBoundsPage = (MeshletBounds*)boundsPageTable[instance.drawsPageIndex];
-            MeshletBounds meshletBounds = meshletBoundsPage[globalMeshletIndex];
+            // The bounds stream holds this mesh's meshlets in the same order as its draws, from its own offset.
+            MeshletBounds* meshletBoundsStream = (MeshletBounds*)ubo->geometryMeshletBoundsReference;
+            MeshletBounds meshletBounds = meshletBoundsStream[instance.boundsOffset + localMeshletIdx];
 
             float3 worldCenter = mul(instance.modelMatrix, float4(meshletBounds.center, 1.0)).xyz;
             float maxScale = max(length(instance.modelMatrix[0].xyz),

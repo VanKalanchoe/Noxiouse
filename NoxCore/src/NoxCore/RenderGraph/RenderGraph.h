@@ -160,6 +160,8 @@ namespace Nox
         void PopGroup();
 
         RGBlackboard& GetBlackboard() { return m_Blackboard; }
+        // Pooled transient memory (the transient budget category).
+        const RGResourcePool& GetResourcePool() const { return m_Pool; }
 
         void Compile();
         // Records the compiled frame for a frame-in-flight slot whose previous submission has finished. The returned

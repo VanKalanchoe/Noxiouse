@@ -160,34 +160,29 @@
         SceneInstances instances = SceneInstances(ubo);
         InstanceData instance = instances[instanceSlot];
 
-        // Pull Page Tables
-        uint64_t* drawsPageTable  = (uint64_t*)pushConstant.meshletDrawsPageTableReference;
-        uint64_t* vertsPageTable  = (uint64_t*)pushConstant.vertexPageTableReference;
-        uint64_t* mVertsPageTable = (uint64_t*)pushConstant.meshletVerticesPageTableReference;
-        uint64_t* mTrisPageTable  = (uint64_t*)pushConstant.meshletTrianglesPageTableReference;
+        // Pull the geometry streams
+        MeshletDraw* meshletDrawStream = (MeshletDraw*)ubo->geometryMeshletDrawsReference;
+        Vertex* vertexStream = (Vertex*)ubo->geometryVerticesReference;
+        uint32_t* meshletVertexStream = (uint32_t*)ubo->geometryMeshletVerticesReference;
+        uint8_t* meshletTriangleStream = (uint8_t*)ubo->geometryMeshletTrianglesReference;
 
-        MeshletDraw* meshletDrawPage = (MeshletDraw*)drawsPageTable[instance.drawsPageIndex];
-        Vertex* vertexPage = (Vertex*)vertsPageTable[instance.verticesPageIndex];
-        uint32_t* meshletVerticesPage = (uint32_t*)mVertsPageTable[instance.meshletVerticesPageIndex];
-        uint8_t* meshletTrianglePage = (uint8_t*)mTrisPageTable[instance.meshletTrianglesPageIndex];
-
-        MeshletDraw meshlet = meshletDrawPage[meshletID];
+        MeshletDraw meshlet = meshletDrawStream[meshletID];
 
         // Fetch Triangle Indices
         uint triBase = meshlet.triangleOffset + (primitiveID * 3);
-        uint i0 = meshletTrianglePage[triBase];
-        uint i1 = meshletTrianglePage[triBase + 1];
-        uint i2 = meshletTrianglePage[triBase + 2];
+        uint i0 = meshletTriangleStream[triBase];
+        uint i1 = meshletTriangleStream[triBase + 1];
+        uint i2 = meshletTriangleStream[triBase + 2];
 
         // Fetch Local Vertex Indices
-        uint vIdx0 = meshletVerticesPage[meshlet.vertexOffset + i0];
-        uint vIdx1 = meshletVerticesPage[meshlet.vertexOffset + i1];
-        uint vIdx2 = meshletVerticesPage[meshlet.vertexOffset + i2];
+        uint vIdx0 = meshletVertexStream[meshlet.vertexOffset + i0];
+        uint vIdx1 = meshletVertexStream[meshlet.vertexOffset + i1];
+        uint vIdx2 = meshletVertexStream[meshlet.vertexOffset + i2];
 
         // Fetch the 3 Vertices via BDA
-        Vertex v0 = vertexPage[meshlet.globalVertexOffset + vIdx0];
-        Vertex v1 = vertexPage[meshlet.globalVertexOffset + vIdx1];
-        Vertex v2 = vertexPage[meshlet.globalVertexOffset + vIdx2];
+        Vertex v0 = vertexStream[meshlet.globalVertexOffset + vIdx0];
+        Vertex v1 = vertexStream[meshlet.globalVertexOffset + vIdx1];
+        Vertex v2 = vertexStream[meshlet.globalVertexOffset + vIdx2];
 
         // Skinning
         float4 localPos0 = float4(v0.pos, 1.0);

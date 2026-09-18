@@ -116,6 +116,9 @@ namespace Nox
 
         // Meshes: one per uploaded submesh. blasAddress 0: not ray traced.
         uint32_t AddMesh(const shaderio::GpuMesh& mesh, uint64_t blasAddress);
+        // Where the geometry streams live now: the ray tracing records hold absolute addresses (the hit lookups read one
+        // flat record), so they are rewritten whenever a stream that grew moved its contents.
+        void SetGeometryBases(uint64_t vertexBase, uint64_t indexBase);
         // Instances still using the mesh stop drawing and tracing; their slots are reported so the owner registers them
         // again (with the reloaded mesh).
         void RemoveMesh(uint32_t meshSlot, std::vector<uint32_t>& outDeactivatedInstances);
@@ -150,6 +153,8 @@ namespace Nox
         const GpuSceneTable<shaderio::GpuTransform>& GetTransforms() const { return m_Transforms; }
         const GpuSceneTable<shaderio::GpuMaterial>& GetMaterials() const { return m_Materials; }
         const GpuSceneTable<shaderio::GpuMesh>& GetMeshes() const { return m_Meshes; }
+        // Device bytes of the tables (the memory category the scene owns).
+        uint64_t GetDeviceBytes() const;
         const GpuSceneTable<shaderio::GpuRayTracingInstance>& GetRayTracingInstances() const { return m_RayTracingInstances; }
 
         // Ray traced instances (opaque/mask buckets with a BLAS; instanceCustomIndex = instance slot). The TLAS is built
@@ -195,6 +200,8 @@ namespace Nox
         std::unordered_map<GpuMaterialKey, uint32_t, GpuMaterialKeyHash> m_MaterialByKey;
 
         std::vector<uint64_t> m_MeshBlasAddresses;
+        uint64_t m_GeometryVertexBase = 0;
+        uint64_t m_GeometryIndexBase = 0;
 
         std::vector<NRI::AccelerationStructureInstance> m_TlasInstances; // by instance slot, inactive: no BLAS reference
         uint32_t m_TlasInstanceCount = 0;

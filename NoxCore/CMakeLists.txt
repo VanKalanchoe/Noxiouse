@@ -91,6 +91,10 @@ set(TINYGLTF_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendors/tinygltf")
 set(MESHOPTIMIZER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendors/meshoptimizer/src")
 file(GLOB MESHOPTIMIZER_SOURCES "${MESHOPTIMIZER_DIR}/*.cpp")
 
+# Range allocator for the unified geometry buffers (its tests are not part of the build)
+set(OFFSETALLOCATOR_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendors/OffsetAllocator")
+set(OFFSETALLOCATOR_SOURCES "${OFFSETALLOCATOR_DIR}/offsetAllocator.cpp")
+
 # Set up Vulkan C++ module only if enabled
 if(ENABLE_CPP20_MODULE)
   add_library(VulkanCppModule)
@@ -145,7 +149,7 @@ file(GLOB_RECURSE NOXCORE_FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
 )
 
-add_library(${PROJECT_NAME} STATIC ${NOXCORE_FILES} ${IMGUI_SOURCES} ${IMGUIZMO_SOURCES} ${TINYGLTF_SOURCE} ${MESHOPTIMIZER_SOURCES} ${RTXDI_SOURCES}) #main file here
+add_library(${PROJECT_NAME} STATIC ${NOXCORE_FILES} ${IMGUI_SOURCES} ${IMGUIZMO_SOURCES} ${TINYGLTF_SOURCE} ${MESHOPTIMIZER_SOURCES} ${OFFSETALLOCATOR_SOURCES} ${RTXDI_SOURCES}) #main file here
 
 target_link_libraries (${PROJECT_NAME} PUBLIC Vulkan::cppm SDL3::SDL3 glm::glm spdlog::spdlog Slang::slang EnTT::EnTT xxHash::xxhash yaml-cpp::yaml-cpp box2d::box2d msdf-atlas-gen::msdf-atlas-gen tinyobjloader::tinyobjloader "${STREAMLINE_LIB}" ${NRD_LIBS})
 # Add here vendors
@@ -155,7 +159,7 @@ target_include_directories (${PROJECT_NAME} SYSTEM PRIVATE ${STB_INCLUDEDIR} ${C
 target_include_directories (${PROJECT_NAME} SYSTEM PUBLIC ${IMGUI_DIR} ${IMGUIZMO_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/vendors/filewatch)
 
 # Sysmtem means supress warnings from the include directories, so we don't get warnings from external libraries.
-target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/NoxEditor/assets/shaders ${TINYGLTF_DIR} ${MESHOPTIMIZER_DIR} ${STREAMLINE_INCLUDE_DIR} ${NRD_INCLUDE_DIR} ${NRD_INTEGRATION_DIR} ${RTXDI_INCLUDE_DIR} ${RTXDI_SHADERS_DIR})
+target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/NoxEditor/assets/shaders ${TINYGLTF_DIR} ${MESHOPTIMIZER_DIR} ${OFFSETALLOCATOR_DIR} ${STREAMLINE_INCLUDE_DIR} ${NRD_INCLUDE_DIR} ${NRD_INTEGRATION_DIR} ${RTXDI_INCLUDE_DIR} ${RTXDI_SHADERS_DIR})
 
 # Add compile definition if C++ 20 module is enabled
 if(ENABLE_CPP20_MODULE)

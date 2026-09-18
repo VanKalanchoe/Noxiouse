@@ -4,6 +4,7 @@
 #include <cstring>
 
 #include "NRI/Device.h"
+#include "NoxCore/Core/Log.h"
 
 namespace Nox
 {
@@ -196,6 +197,32 @@ namespace Nox
         return slot;
     }
 
+    uint64_t GpuScene::GetDeviceBytes() const
+    {
+        uint64_t bytes = 0;
+        for (const NRI::Buffer* buffer : { m_Instances.GetBuffer(), m_Transforms.GetBuffer(), m_Materials.GetBuffer(),
+                                           m_Meshes.GetBuffer(), m_RayTracingInstances.GetBuffer() })
+        {
+            if (buffer)
+                bytes += buffer->getSize();
+        }
+        return bytes;
+    }
+
+    void GpuScene::SetGeometryBases(uint64_t vertexBase, uint64_t indexBase)
+    {
+        if (m_GeometryVertexBase == vertexBase && m_GeometryIndexBase == indexBase)
+            return;
+        m_GeometryVertexBase = vertexBase;
+        m_GeometryIndexBase = indexBase;
+
+        for (uint32_t instanceSlot = 0; instanceSlot < static_cast<uint32_t>(m_InstanceStates.size()); ++instanceSlot)
+        {
+            if (m_InstanceStates[instanceSlot].Mesh != InvalidSlot)
+                WriteRayTracingInstance(instanceSlot);
+        }
+    }
+
     void GpuScene::RemoveMesh(uint32_t meshSlot, std::vector<uint32_t>& outDeactivatedInstances)
     {
         for (uint32_t instanceSlot = 0; instanceSlot < m_InstanceStates.size(); ++instanceSlot)
@@ -302,7 +329,15 @@ namespace Nox
 
     void GpuScene::RemoveInstance(uint32_t instanceSlot)
     {
+        if (instanceSlot >= m_InstanceStates.size())
+            return;
+
+        // Removing the same instance twice (the entity is destroyed and its mesh component's signal fires) must not
+        // release its material a second time: a free slot holds InvalidSlot for both.
         InstanceState& state = m_InstanceStates[instanceSlot];
+        if (state.Mesh == InvalidSlot && state.Material == InvalidSlot)
+            return;
+
         RemoveFromBucket(instanceSlot);
         ReleaseMaterial(state.Material);
         state = InstanceState{};
@@ -511,8 +546,17 @@ namespace Nox
             for (uint32_t instanceSlot : m_Buckets[bucketIndex])
             {
                 const NRI::AccelerationStructureInstance& record = m_TlasInstances[instanceSlot];
-                if (record.accelerationStructureReference != 0)
-                    outInstances[written++] = record;
+                if (record.accelerationStructureReference == 0)
+                    continue;
+
+                // The buffer is sized from the running count; writing past it would run into whatever follows the
+                // mapping, so a drift is reported and dropped instead.
+                if (written >= outInstances.size())
+                {
+                    NOX_CORE_ERROR("TLAS instance count {} is below the ray traced instances in the buckets", outInstances.size());
+                    return;
+                }
+                outInstances[written++] = record;
             }
         }
     }
@@ -524,8 +568,11 @@ namespace Nox
         const shaderio::GpuMesh& mesh = m_Meshes.Get(instance.meshIndex);
 
         shaderio::GpuRayTracingInstance& record = m_RayTracingInstances.Edit(instanceSlot);
-        record.vertexBufferAddress = mesh.vertexBufferAddress;
-        record.indexBufferAddress = mesh.indexBufferAddress;
+        record.vertexBufferAddress = m_GeometryVertexBase + uint64_t(mesh.verticesOffset) * sizeof(shaderio::Vertex);
+        // Hit shading treats 0 as "no index buffer" (it then reads the vertices in triangle order).
+        record.indexBufferAddress = mesh.indicesOffset == shaderio::NoGeometryRange
+                                        ? 0
+                                        : m_GeometryIndexBase + uint64_t(mesh.indicesOffset) * sizeof(uint32_t);
         record.normalMatrix = m_Transforms.Get(instanceSlot).normal;
         record.baseColorFactor = material.baseColorFactor;
         record.emissiveFactor = glm::vec4(material.emissiveFactor, material.emissiveStrength);
@@ -546,6 +593,10 @@ namespace Nox
 
     void GpuScene::ReleaseMaterial(uint32_t materialSlot)
     {
+        // A free instance slot has no material; releasing one would decrement far outside the reference table.
+        if (materialSlot == InvalidSlot || materialSlot >= m_MaterialReferences.size())
+            return;
+
         if (--m_MaterialReferences[materialSlot] != 0)
             return;
 

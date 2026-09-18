@@ -234,11 +234,27 @@ namespace Nox
         for (size_t heapIndex = 0; heapIndex < memory.Heaps.size(); ++heapIndex)
         {
             const NRI::MemoryHeapStats& heap = memory.Heaps[heapIndex];
-            std::format_to(std::back_inserter(report), "{} heap {}: {:.0f} / {:.0f} MB, {} allocations\n", heap.deviceLocal ? "VRAM" : "Host", heapIndex,
-                           ToMegabytes(heap.usage), ToMegabytes(heap.budget), heap.allocationCount);
+            // usage is what the process holds of the heap (driver, swapchain and Streamline included); blocks are what
+            // the allocator took from the driver, of which allocations are what it handed to our resources.
+            std::format_to(std::back_inserter(report), "{} heap {}: {:.0f} / {:.0f} MB, {} allocations ({:.0f} MB in {:.0f} MB of blocks)\n",
+                           heap.deviceLocal ? "VRAM" : "Host", heapIndex, ToMegabytes(heap.usage), ToMegabytes(heap.budget),
+                           heap.allocationCount, ToMegabytes(heap.allocationBytes), ToMegabytes(heap.blockBytes));
         }
         if (!memory.Heaps.empty() && !memory.BudgetFromDriver)
             report += "VK_EXT_memory_budget unavailable: usage and budget are estimated\n";
+
+        // What the engine itself holds, by category: committed is what the category occupies, used what is live in
+        // it (a geometry stream keeps capacity beyond its ranges). Soft budgets: over budget is reported, not enforced.
+        if (!memory.Categories.empty())
+        {
+            report += "\nVRAM by category (committed / used / budget MB)\n";
+            for (const MemoryCategoryStats& category : memory.Categories)
+            {
+                std::format_to(std::back_inserter(report), "  {:<12} {:8.0f} {:8.0f} {:8.0f}{}\n", category.Name,
+                               ToMegabytes(category.Committed), ToMegabytes(category.Used), ToMegabytes(category.Budget),
+                               category.Budget > 0 && category.Committed > category.Budget ? "  OVER BUDGET" : "");
+            }
+        }
 
         std::vector<ProfileScopeStats> scopes;
         report += '\n';

@@ -775,6 +775,14 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 3731375185689694220
+    FilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_1.ntex
+    SourceFilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_1.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
   - Handle: 3823638809435826858
     FilePath: Models/bistro/objects/props/street/paris_mainbalcony_01/Textures/paris_doors_03a_diff.ntex
     SourceFilePath: Models/bistro/objects/props/street/paris_mainbalcony_01/paris_doors_03a_diff.dds
@@ -1011,6 +1019,14 @@ AssetRegistry:
     FilePath: Models/bistro/Materials/bistro_LMBR_00000a6_leaf_b.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_00000a6_leaf_b.nmat
     Type: AssetType::Material
+  - Handle: 5324738521026734895
+    FilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_2.ntex
+    SourceFilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_2.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
   - Handle: 5374037391890471294
     FilePath: Models/bistro/Materials/bistro_LMBR_0000017_concrete_grooved_02.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_0000017_concrete_grooved_02.nmat
@@ -1323,6 +1339,14 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 6758924843548505141
+    FilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_3.ntex
+    SourceFilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_3.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
   - Handle: 6879780797525865865
     FilePath: Models/bistro/Materials/bistro_LMBR_000008b_Paris_LiquorBottle_01_Caps.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_000008b_Paris_LiquorBottle_01_Caps.nmat
@@ -1547,6 +1571,14 @@ AssetRegistry:
     FilePath: Models/bistro/Materials/bistro_LMBR_00000aa_Leaves.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_00000aa_Leaves.nmat
     Type: AssetType::Material
+  - Handle: 7961634024358985856
+    FilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_4.ntex
+    SourceFilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_4.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
   - Handle: 7980837317438428366
     FilePath: Models/bistro/objects/structures/buildings/paris_building_09/Textures/paris_building_09_details_spec.ntex
     SourceFilePath: Models/bistro/objects/structures/buildings/paris_building_09/paris_building_09_details_spec.dds
@@ -2851,6 +2883,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 13994479136610412028
+    FilePath: Models/DamagedHelmet/Materials/DamagedHelmet_Material_MR.nmat
+    SourceFilePath: Models/DamagedHelmet/Materials/DamagedHelmet_Material_MR.nmat
+    Type: AssetType::Material
   - Handle: 14074859510474095709
     FilePath: Models/bistro/objects/structures/buildings/paris_building_09/Textures/windows_curtains_diff.ntex
     SourceFilePath: Models/bistro/objects/structures/buildings/paris_building_09/windows_curtains_diff.dds
@@ -3234,6 +3270,14 @@ AssetRegistry:
   - Handle: 15995307157326133336
     FilePath: Models/bistro/objects/props/bistro/paris_ceilingfan_01/Textures/paris_ceilingfan_01a_diff.ntex
     SourceFilePath: Models/bistro/objects/props/bistro/paris_ceilingfan_01/paris_ceilingfan_01a_diff.dds
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 16013121594303716314
+    FilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_0.ntex
+    SourceFilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_0.png
     Type: AssetType::Texture2D
     TextureSpec:
       Format: SRGBA8
@@ -3623,6 +3667,10 @@ AssetRegistry:
       Format: RGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 17737513014416319113
+    FilePath: Models/DamagedHelmet/Meshes/DamagedHelmet.nmesh
+    SourceFilePath: Models/DamagedHelmet/DamagedHelmet.gltf
+    Type: AssetType::Mesh
   - Handle: 17738368018302838807
     FilePath: Models/bistro/objects/props/bistro/paris_napkinholder_01/Textures/paris_napkinholder_01_ddna.ntex
     SourceFilePath: Models/bistro/objects/props/bistro/paris_napkinholder_01/paris_napkinholder_01_ddna.dds

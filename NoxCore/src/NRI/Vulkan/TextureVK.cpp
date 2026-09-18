@@ -68,6 +68,7 @@ namespace NRI
     TextureVK::TextureVK(DeviceVK& device, const TextureDesc& desc) : m_deviceVK(device)
     {
         m_desc = desc; // used for image transition layout in commandbuffer colorattachments
+        m_deviceVK.addTextureBytes(static_cast<int64_t>(estimateTextureBytes(desc)));
 
         // Assumes there is only color depth and shader aka png textures
         vk::Format format;
@@ -223,6 +224,10 @@ namespace NRI
 
     TextureVK::~TextureVK()
     {
+        // Same guard as below: a texture can outlive the device on shutdown.
+        if (!Nox::IsEngineShuttingDown && m_deviceVK.isDeviceInit())
+            m_deviceVK.addTextureBytes(-static_cast<int64_t>(estimateTextureBytes(m_desc)));
+
         if (m_boundHeap && m_imageResource.descriptorIndexSlot != ~0u)
         {
             m_boundHeap->unregisterTexture(m_imageResource.descriptorIndexSlot);

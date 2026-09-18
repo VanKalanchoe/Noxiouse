@@ -343,7 +343,8 @@ namespace Nox
 #endif
     }
 
-    void Profiler::SubmitMemoryStats(std::span<const NRI::MemoryHeapStats> heaps, bool budgetFromDriver, const Platform::ProcessMemory& process)
+    void Profiler::SubmitMemoryStats(std::span<const NRI::MemoryHeapStats> heaps, bool budgetFromDriver, const Platform::ProcessMemory& process,
+                                     std::span<const MemoryCategoryStats> categories)
     {
         uint64_t deviceLocalUsage = 0;
         for (const NRI::MemoryHeapStats& heap : heaps)
@@ -358,6 +359,7 @@ namespace Nox
         m_MemoryStats.Heaps.assign(heaps.begin(), heaps.end());
         m_MemoryStats.BudgetFromDriver = budgetFromDriver;
         m_MemoryStats.Process = process;
+        m_MemoryStats.Categories.assign(categories.begin(), categories.end());
 #endif
     }
 

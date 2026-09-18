@@ -801,7 +801,14 @@ namespace NRI
                                                              const vk::DebugUtilsMessengerCallbackDataEXT* pCallbackData,
                                                              void* pUserData)
     {
-        std::cerr << "validation layer: type " << to_string(type) << " msg: " << pCallbackData->pMessage << std::endl;
+        // Through the logger, not std::cerr: validation output belongs in Nox.log next to everything else that
+        // happened, and the log is written through on every message, so it survives a crash.
+        if (severity >= vk::DebugUtilsMessageSeverityFlagBitsEXT::eError)
+            NOX_CORE_ERROR("Vulkan validation ({}): {}", to_string(type), pCallbackData->pMessage);
+        else if (severity >= vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning)
+            NOX_CORE_WARN("Vulkan validation ({}): {}", to_string(type), pCallbackData->pMessage);
+        else
+            NOX_CORE_INFO("Vulkan validation ({}): {}", to_string(type), pCallbackData->pMessage);
 
         return vk::False;
     }

@@ -4,7 +4,11 @@
 #include "Renderer2D.h"
 #include "NoxCore/Core/Window.h"
 #include "Mesh.h"
-#include "PagedAllocator.h"
+#include <mutex>
+#include <variant>
+
+#include "GeometryArena.h"
+#include "MemoryBudget.h"
 #include "GpuScene.h"
 #include "NoxCore/RenderGraph/RenderGraph.h"
 
@@ -69,27 +73,14 @@ namespace Nox
     {
         std::unique_ptr<NRI::Buffer> storageBuffer;
         std::unique_ptr<NRI::AccelerationStructure> as;
-        std::unique_ptr<NRI::Buffer> indexBuffer;
-        uint64_t vertexBufferAddress = 0;
-        uint32_t indexCount = 0;
     };
 
-    struct DeferredBuffer
+    // Everything whose release must wait for the frames that could still reference it (§5.8.4): a GPU buffer to
+    // destroy, the last reference to an asset to drop, or a mesh's geometry ranges and BLAS id to return.
+    struct DeferredRelease
     {
-        std::unique_ptr<NRI::Buffer> buffer;
         uint32_t framesRemaining = MAX_FRAMES_IN_FLIGHT;
-    };
-
-    struct DeferredMeshFree
-    {
-        MeshHandle handle;
-        uint32_t framesRemaining = MAX_FRAMES_IN_FLIGHT;
-    };
-
-    struct DeferredAssetRelease
-    {
-        Ref<Asset> asset;
-        uint32_t framesRemaining = MAX_FRAMES_IN_FLIGHT;
+        std::variant<std::unique_ptr<NRI::Buffer>, Ref<Asset>, MeshHandle> payload;
     };
 
     struct PickRequest
@@ -428,14 +419,16 @@ namespace Nox
         }
 
         void UnloadMeshGeometry(const MeshHandle& handle);
-        void updatePageTables(uint32_t currentImage);
+        void deferAssetRelease(Ref<Asset> asset);
 
         // Keeps an unloaded asset alive until in-flight frames can no longer reference its GPU
         // resources; the asset's destructor (texture slot release, mesh free) runs afterwards.
         static void DeferAssetRelease(Ref<Asset> asset)
         {
+            // Through a function, never into the members: inline access here bakes the renderer's layout into every
+            // translation unit that includes this header.
             if (s_Instance && asset)
-                s_Instance->m_deferredAssetReleases.push_back({ std::move(asset), MAX_FRAMES_IN_FLIGHT });
+                s_Instance->deferAssetRelease(std::move(asset));
         }
 
         // Drops cached path -> bindless-slot entries for the given (now freed) texture slots.
@@ -528,7 +521,6 @@ namespace Nox
 
         void createTextureImage();
         void initGeometryBuffers();
-        void markPageTablesDirty();
         void createUniformBuffers();
         void createDrawListBuffers(uint64_t bufferSize);
         void createSelectedEntityIDBuffers();
@@ -600,13 +592,16 @@ namespace Nox
         // This frame's draw list, culling view and GPU scene uploads (staged for the GPU Scene Update pass).
         void updateGpuScene(uint32_t currentImage);
         void updateDrawListBuffers(uint32_t currentImage);
-        void processDeferredDeletions();
-        void processDeferredMeshFrees();
+        // Releases whose wait has passed; a mesh returns its ranges to the streams, the others die with their entry.
+        void processDeferredReleases();
         std::vector<char> readFile(const std::string& filename);
-        void createPageTableBuffers(uint64_t elementCapacity);
+        // Sub-allocates from a geometry stream, copying the stream into a larger buffer first when it no longer fits.
+        GeometryRange allocateGeometry(GeometryArena& stream, uint32_t count);
         void createLightBuffer(uint64_t bufferSize);
         void updateLightBuffer(uint32_t currentImage);
         void sampleMemoryStats();
+        // What each category holds of the device budget, from the systems that own the memory (§5.8.3).
+        void updateMemoryBudget();
 
     private:
         inline static Renderer* s_Instance = nullptr;
@@ -937,18 +932,20 @@ namespace Nox
         void createBoneBuffer(uint64_t size);
 
         // Meshes
-        // 2. Queue for sub-allocation range frees
-        std::vector<DeferredMeshFree> m_deferredMeshFrees;
-        std::vector<DeferredAssetRelease> m_deferredAssetReleases;
+        // Buffers, assets and geometry ranges wait here until no frame in flight can reference them (§5.8.4).
+        // Guarded: an asset destructor queues its geometry, and the last reference to an asset can be dropped on any
+        // thread (loader tasks included), while the main thread drains at the frame sync point.
+        std::vector<DeferredRelease> m_deferredReleases;
+        std::mutex m_deferredReleasesMutex;
 
-        // 3. Queue for whole NRI::Buffer destructions
-        std::vector<DeferredBuffer> m_deferredBufferDeletions;
-
-        PagedBufferAllocator<shaderio::Vertex> m_vertexPages;
-        PagedBufferAllocator<shaderio::MeshletDraw> m_meshletDrawPages;
-        PagedBufferAllocator<shaderio::MeshletBounds> m_meshletBoundsPages;
-        PagedBufferAllocator<uint32_t> m_meshletVertPages;
-        PagedBufferAllocator<uint8_t> m_meshletTriPages;
+        // Unified geometry streams (§5.8.2): one buffer each, sub-allocated per mesh, addressed by offset.
+        GeometryArena m_vertexStream;
+        GeometryArena m_meshletDrawStream;
+        GeometryArena m_meshletBoundsStream;
+        GeometryArena m_meshletVertexStream;
+        GeometryArena m_meshletTriangleStream;
+        GeometryArena m_rtIndexStream;
+        MemoryBudget m_memoryBudget;
         std::vector<MeshBLAS> m_meshBLASes;
         std::vector<uint32_t> m_freeBLASIds;
 
@@ -998,20 +995,6 @@ namespace Nox
         bool m_hasTLASBuild = false;
         bool m_tlasNeedBuild = true; // sticky until a build is recorded (also while ray tracing is off)
         NRI::AccelerationStructureBuildDesc m_tlasBuildDesc{};
-
-        std::vector<std::unique_ptr<NRI::Buffer>> m_vertexPageTableBuffers;
-        std::vector<std::unique_ptr<NRI::Buffer>> m_meshletDrawPageTableBuffers;
-        std::vector<std::unique_ptr<NRI::Buffer>> m_meshletBoundPageTableBuffers;
-        std::vector<std::unique_ptr<NRI::Buffer>> m_meshletVertPageTableBuffers;
-        std::vector<std::unique_ptr<NRI::Buffer>> m_meshletTriPageTableBuffers;
-
-        std::vector<void*> m_vertexPageTableBuffersMapped;
-        std::vector<void*> m_meshletDrawPageTableBuffersMapped;
-        std::vector<void*> m_meshletBoundPageTableBuffersMapped;
-        std::vector<void*> m_meshletVertPageTableBuffersMapped;
-        std::vector<void*> m_meshletTriPageTableBuffersMapped;
-        bool m_pageTablesDirty[MAX_FRAMES_IN_FLIGHT] = {true, true, /* add 'true' for however many max frames you have */};
-        uint64_t m_PageTableCapacity = 16; // Capacity in number of uint64_t elements
 
         // GPU scene and the draw list every view culls (instance slots in bucket order, uploaded per frame slot when changed)
         GpuScene m_gpuScene;

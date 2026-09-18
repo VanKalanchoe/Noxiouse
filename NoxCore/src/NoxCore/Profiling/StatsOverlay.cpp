@@ -161,11 +161,27 @@ namespace Nox
         for (size_t heapIndex = 0; heapIndex < memory.Heaps.size(); ++heapIndex)
         {
             const NRI::MemoryHeapStats& heap = memory.Heaps[heapIndex];
-            DrawLabelLine(Format("{} heap {}: {:.0f} / {:.0f} MB, {} allocations", heap.deviceLocal ? "VRAM" : "Host", heapIndex,
-                                 ToMegabytes(heap.usage), ToMegabytes(heap.budget), heap.allocationCount), TextColor);
+            DrawLabelLine(Format("{} heap {}: {:.0f} / {:.0f} MB, {} allocations ({:.0f} in {:.0f} MB of blocks)",
+                                 heap.deviceLocal ? "VRAM" : "Host", heapIndex, ToMegabytes(heap.usage), ToMegabytes(heap.budget),
+                                 heap.allocationCount, ToMegabytes(heap.allocationBytes), ToMegabytes(heap.blockBytes)), TextColor);
         }
         if (!memory.Heaps.empty() && !memory.BudgetFromDriver)
             DrawLabelLine("VK_EXT_memory_budget unavailable: estimated", DimColor);
+
+        // What the engine holds of that budget: committed is what the category occupies, used what is live inside it
+        // (a geometry stream keeps capacity beyond its ranges). Over budget is shown, never enforced (soft budget).
+        if (!memory.Categories.empty())
+        {
+            m_Cursor.y += SectionGap;
+            DrawLabelLine("VRAM by category (committed / used / budget MB)", DimColor);
+            for (const MemoryCategoryStats& category : memory.Categories)
+            {
+                const bool overBudget = category.Budget > 0 && category.Committed > category.Budget;
+                DrawLabelLine(Format("  {:<12} {:6.0f} {:6.0f} {:6.0f}{}", category.Name, ToMegabytes(category.Committed),
+                                     ToMegabytes(category.Used), ToMegabytes(category.Budget), overBudget ? "  OVER" : ""),
+                              overBudget ? WarningColor : TextColor);
+            }
+        }
 
         profiler.GetCounters(m_Counters);
         if (!m_Counters.empty())
