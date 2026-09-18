@@ -9,6 +9,7 @@
 #include "NoxCore/Asset/Material.h"
 #include "NoxCore/Asset/MaterialSerializer.h"
 #include "NoxCore/Renderer/Mesh.h"
+#include "NoxCore/Scene/ModelInstance.h"
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Animation/Animator.h"
 #include "NoxCore/Project/Project.h"
@@ -586,6 +587,24 @@ namespace Nox
                         }
                     }
                 }
+            }
+        });
+
+        DrawComponent<ModelInstanceComponent>("Model Instance", entity, [this, entity](auto& component)
+        {
+            // Removing this component unpacks the instance: its nodes stay and are saved as ordinary entities.
+            std::string label = "None";
+            if (AssetManager::IsAssetHandleValid(component.Model))
+                label = Project::GetActive()->GetEditorAssetManager()->GetMetadata(component.Model).FilePath.filename().string();
+            ImGui::Text("Model: %s", label.c_str());
+            if (!component.Spawned)
+                ImGui::TextDisabled("Loading...");
+
+            if (!component.RemovedNodes.empty())
+            {
+                ImGui::Text("Removed nodes: %zu", component.RemovedNodes.size());
+                if (ImGui::Button("Restore Removed Nodes"))
+                    ModelInstance::Respawn(*m_Context, entity);
             }
         });
 

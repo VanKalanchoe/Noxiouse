@@ -28,6 +28,7 @@ namespace Nox
         bool IsButtonHovered() const;
         bool OnMouseButtonPressed(MouseButtonPressedEvent& event);
         void OnOverlayRender();
+        void UI_StatusBar();
 
         void NewProject();
         bool OpenProject();

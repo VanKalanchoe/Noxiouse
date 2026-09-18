@@ -1638,6 +1638,7 @@ namespace Nox
 
     std::optional<TextureUpload> Renderer::BeginTextureUpload(const TextureData& texture, uint64_t dataSize, bool wait)
     {
+        NOX_PROFILE_SCOPE("Begin Texture Upload");
         std::optional<StagingSpan> staging = wait ? m_uploads.ReserveStaging(dataSize) : m_uploads.TryReserveStaging(dataSize);
         if (!staging)
             return std::nullopt;
@@ -2066,6 +2067,7 @@ namespace Nox
 
     std::optional<MeshUpload> Renderer::BeginMeshUpload(const MeshData& data, bool isOpaque, bool wait)
     {
+        NOX_PROFILE_SCOPE("Begin Mesh Upload");
         const uint32_t vertCount = static_cast<uint32_t>(data.Vertices.size());
         const uint32_t drawCount = static_cast<uint32_t>(data.Draws.size());
         const uint32_t meshVertCount = static_cast<uint32_t>(data.MeshletVertices.size());
@@ -2192,6 +2194,7 @@ namespace Nox
 
     MeshHandle Renderer::PublishMesh(const MeshUpload& upload)
     {
+        NOX_PROFILE_SCOPE("Publish Mesh");
         MeshHandle handle = upload.Handle;
         if (!handle.IsValid())
             return handle;

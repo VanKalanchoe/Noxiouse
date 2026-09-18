@@ -199,6 +199,18 @@ namespace Nox
         if (!IsCookableTextureSource(sourcePath))
             return LoadTexture2D(sourcePath, metadata.TextureSpec);
 
+        if (!CookTexture(assetDirectory, metadata))
+            return Ref<Texture2D>(nullptr);
+        return LoadTexture2D(cookedPath, metadata.TextureSpec);
+    }
+
+    bool TextureImporter::CookTexture(const std::filesystem::path& assetDirectory, const AssetMetadata& metadata)
+    {
+        const std::filesystem::path cookedPath = GetCookedTexturePath(assetDirectory, metadata);
+        const std::filesystem::path sourcePath = GetTextureSourcePath(assetDirectory, metadata);
+        if (!IsCookableTextureSource(sourcePath))
+            return false;
+
         // Cook once into the GPU-ready .ntex: PNG/JPG get their mip chain generated here, DDS and KTX2 keep the mips
         // and block compression they ship with (a Basis KTX2 is transcoded here, not on every load).
         TextureData cpuData{};
@@ -210,22 +222,25 @@ namespace Nox
         else
             decoded = DecodeSTB(sourcePath, metadata.TextureSpec, cpuData);
         if (!decoded)
-            return Ref<Texture2D>(nullptr);
+            return false;
 
-        if (!std::filesystem::exists(cookedPath.parent_path()))
-            std::filesystem::create_directories(cookedPath.parent_path());
-        SaveNTEX(cookedPath, cpuData);
-        Utility::saveHashToFile(hashPath, sourceHash);
-
-        Renderer* targetRenderer = Application::Get().GetRenderer();
-        Ref<Texture2D> texture = targetRenderer->UploadTexture(cpuData);
+        std::error_code error;
+        std::filesystem::create_directories(cookedPath.parent_path(), error);
+        const bool saved = SaveNTEX(cookedPath, cpuData);
         cpuData.Data.Release();
-        return texture;
+        if (!saved)
+        {
+            NOX_CORE_ERROR("TextureImporter::CookTexture - could not write {}", cookedPath.string());
+            return false;
+        }
+        // Last: a crash before this leaves no hash, so the texture is cooked again.
+        Utility::saveHashToFile(cookedPath.string() + ".hash", TextureCookHash(sourcePath, metadata.TextureSpec));
+        return true;
     }
 
     bool TextureImporter::DecodeSTB(const std::filesystem::path& path, const TextureSpecification& spec, TextureData& cpuData)
     {
-        stbi_set_flip_vertically_on_load(spec.flip);
+        stbi_set_flip_vertically_on_load_thread(spec.flip);
 
         int texWidth, texHeight, texChannels;
         stbi_uc* pixels = stbi_load(path.string().c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
@@ -278,9 +293,9 @@ namespace Nox
     Ref<Texture2D> TextureImporter::LoadWithSTB(const std::filesystem::path& path, const TextureSpecification& spec, Renderer* renderer)
     {
         if (spec.flip)
-            stbi_set_flip_vertically_on_load(true);
+            stbi_set_flip_vertically_on_load_thread(true);
         else
-            stbi_set_flip_vertically_on_load(false);
+            stbi_set_flip_vertically_on_load_thread(false);
         
         int texWidth, texHeight, texChannels;
         stbi_uc* pixels = stbi_load(path.string().c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
@@ -320,9 +335,9 @@ namespace Nox
     Ref<Texture2D> TextureImporter::LoadWithSTBHDR(const std::filesystem::path& path, const TextureSpecification& spec, Renderer* renderer)
     {
         if (spec.flip)
-            stbi_set_flip_vertically_on_load(true);
+            stbi_set_flip_vertically_on_load_thread(true);
         else
-            stbi_set_flip_vertically_on_load(false);
+            stbi_set_flip_vertically_on_load_thread(false);
         
         int texWidth, texHeight, texChannels;
         float* pixels = stbi_loadf(path.string().c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);

@@ -1,4 +1,5 @@
 #include "Scene.h"
+#include "ModelInstance.h"
 
 #include <box2d/box2d.h>
 #include <algorithm>
@@ -150,6 +151,15 @@ namespace Nox
     {
         if (!entity)
             return;
+
+        // A node deleted from a model instance stays deleted when the instance spawns again (it is saved as removed).
+        if (entity.HasComponent<ModelNodeComponent>())
+        {
+            const ModelNodeComponent& node = entity.GetComponent<ModelNodeComponent>();
+            Entity root = GetEntityByUUID(node.Instance);
+            if (root && root.HasComponent<ModelInstanceComponent>())
+                root.GetComponent<ModelInstanceComponent>().RemovedNodes.push_back(node.NodeIndex);
+        }
         
         // 1. Unlink this entity from its parent (if it has one)
         if (entity.HasComponent<RelationshipComponent>())
@@ -190,6 +200,10 @@ namespace Nox
     {
         for (auto entity : m_Registry.view<MeshComponent>())
             outHandles.insert(m_Registry.get<MeshComponent>(entity).Mesh);
+
+        // Before they spawn, instances reference their model only.
+        for (auto entity : m_Registry.view<ModelInstanceComponent>())
+            outHandles.insert(m_Registry.get<ModelInstanceComponent>(entity).Model);
 
         for (auto entity : m_Registry.view<MaterialComponent>())
         {
@@ -349,6 +363,12 @@ namespace Nox
         NOX_PROFILE_SCOPE("Sync GPU Scene");
         std::vector<AssetHandle>& missingAssets = m_MissingAssets.Local();
 
+        // 0. Model instances whose model finished loading get their node entities (registered below as new meshes).
+        {
+            NOX_PROFILE_SCOPE("Spawn Model Instances");
+            ModelInstance::SpawnPending(*this);
+        }
+
         // 1. Another scene rendered last (e.g. edit <-> play): register every mesh entity again.
         if (m_renderer->BindGpuScene(m_SceneID))
         {
@@ -377,6 +397,10 @@ namespace Nox
             std::sort(pending.begin(), pending.end());
             pending.erase(std::unique(pending.begin(), pending.end()), pending.end());
 
+            // New instances are spread over frames: a model's thousands of entities arrive in one frame (Bistro: 2909,
+            // 14.5 ms). Removals are never delayed.
+            constexpr size_t RegistrationsPerFrame = 512;
+            size_t registrationBudget = RegistrationsPerFrame;
             for (entt::entity entity : pending)
             {
                 if (auto found = m_MeshRegistrations.find(entity); found != m_MeshRegistrations.end())
@@ -399,6 +423,12 @@ namespace Nox
                     m_PendingMeshEntities.push_back(entity);
                     continue;
                 }
+                if (registrationBudget == 0)
+                {
+                    m_PendingMeshEntities.push_back(entity);
+                    continue;
+                }
+                --registrationBudget;
 
                 MeshRegistration registration;
                 if (!m_renderer->AddMeshInstances(world->WorldMatrix, *mesh, m_Registry.try_get<MaterialComponent>(entity),
@@ -676,7 +706,7 @@ namespace Nox
         // Relationship links contain entity UUIDs and must be rebuilt. Copying
         // them directly makes duplicated glTF hierarchies share their children.
         using DuplicatableComponents = ComponentGroup<
-            MeshComponent, MaterialComponent, DirectionalLightComponent,
+            MeshComponent, MaterialComponent, ModelInstanceComponent, DirectionalLightComponent,
             PointLightComponent, SpotLightComponent, AnimatorComponent,
             SpriteRendererComponent, CircleRendererComponent, CameraComponent,
             ScriptComponent, RigidBody2DComponent, BoxCollider2DComponent,
@@ -693,6 +723,14 @@ namespace Nox
             Entity duplicate = CreateEntity(MakeUniqueDuplicateName(source.GetName()));
             CopyComponentIfExists(DuplicatableComponents{}, duplicate, source);
             duplicatedIDs[source.GetUUID()] = duplicate.GetUUID();
+            // A duplicated model instance spawns its own nodes (their UUIDs derive from its own), with the original's
+            // overrides; the original's nodes are not copied.
+            if (duplicate.HasComponent<ModelInstanceComponent>())
+            {
+                auto& instance = duplicate.GetComponent<ModelInstanceComponent>();
+                instance.Overrides = ModelInstance::CollectOverrides(*this, source);
+                instance.Spawned = false;
+            }
             if (duplicate.HasComponent<AnimatorComponent>())
                 duplicatedAnimators.push_back(duplicate);
 
@@ -713,7 +751,7 @@ namespace Nox
             for (UUID childUUID : children)
             {
                 Entity child = GetEntityByUUID(childUUID);
-                if (child)
+                if (child && !(child.HasComponent<ModelNodeComponent>() && source.HasComponent<ModelInstanceComponent>()))
                     duplicateHierarchy(child, duplicate);
             }
 
@@ -988,6 +1026,16 @@ namespace Nox
     
     template <>
     void Scene::OnComponentAdded<MaterialComponent>(Entity entity, MaterialComponent& component)
+    {
+    }
+
+    template <>
+    void Scene::OnComponentAdded<ModelInstanceComponent>(Entity entity, ModelInstanceComponent& component)
+    {
+    }
+
+    template <>
+    void Scene::OnComponentAdded<ModelNodeComponent>(Entity entity, ModelNodeComponent& component)
     {
     }
     

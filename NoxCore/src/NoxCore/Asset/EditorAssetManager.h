@@ -54,6 +54,10 @@ namespace Nox
         // True once when the background loads a sweep ran during have all finished: what they loaded may be unused
         // already (e.g. Bistro deleted while it streamed in), so the caller sweeps again.
         bool ConsumeLoadsSettledAfterSweep();
+
+        // For the editor's status bar.
+        size_t GetLoadingCount() const { return m_Loader.GetLoadCount(); }
+        uint64_t GetPendingUploadBytes() const { return m_Loader.GetPendingUploadBytes(); }
         
         void SerializeAssetRegistry();
         bool DeserializeAssetRegistry();
@@ -66,6 +70,11 @@ namespace Nox
         void ImportMeshTextures(const Ref<Asset>& meshAsset);
         void ImportMeshMaterials(const Ref<Asset>& meshAsset, const AssetMetadata& meshMetadata);
         void PublishLoadedAssets();
+        // Adds a registry entry without loading anything (the caller writes the registry file).
+        AssetHandle RegisterAsset(const AssetMetadata& metadata);
+        static AssetMetadata TextureMetadata(const std::filesystem::path& sourcePath, const TextureSpecification& spec, const std::filesystem::path& destPath);
+        // The skeleton and clips cooked from the same glTF, for model instances to animate with.
+        void LinkImportedAssets(const Ref<Asset>& meshAsset, const AssetMetadata& meshMetadata);
     private:
         Utils::NOXWatcher m_AssetWatcher;
         
@@ -82,6 +91,7 @@ namespace Nox
         // clears the entry.
         std::unordered_set<AssetHandle> m_FailedAssets;
         bool m_SweepDuringLoads = false;
+        std::unordered_set<std::string> m_ScannedModelFolders;
 
         // Last content-hash seen for each asset's source file. Lets ReimportAsset tell a genuine
         // on-disk edit apart from a spurious file-watcher event caused by our own cooker writing

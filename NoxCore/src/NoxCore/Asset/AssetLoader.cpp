@@ -32,6 +32,7 @@ namespace Nox
         virtual void WaitForJobs() = 0;
         // After WaitForJobs, while the renderer exists: returns the GPU objects and geometry the load still holds.
         virtual void Release() = 0;
+        virtual uint64_t PendingUploadBytes() const = 0;
 
         LoadedAsset TakeResult()
         {
@@ -52,6 +53,9 @@ namespace Nox
         // Staging bytes handed to loads per frame: one frame's copies stay small next to the transfer queue's bandwidth,
         // and the host memory held by staging stays bounded.
         constexpr uint64_t UploadBytesPerFrame = 64ull * 1024 * 1024;
+        // Submeshes a mesh publishes per frame: each creates its BLAS buffer and acceleration structure object, and a
+        // batch holds a whole frame's staging worth of them (Bistro: ~180, which made one frame 35 ms).
+        constexpr size_t MeshPublishesPerFrame = 64;
 
         // A frame whose budget is untouched takes any single upload, so one larger than the budget still goes through.
         bool fitsBudget(uint64_t budget, uint64_t bytes)
@@ -101,11 +105,13 @@ namespace Nox
                    sizeof(uint32_t) * data.MeshletVertices.size() + data.MeshletTriangles.size() + sizeof(uint32_t) * 3 * triangles;
         }
 
-        // Cooked .ntex: header read, texel read straight into staging, copy, publish.
+        // Texture: .ntex header read (cooked from the source on a CPU worker first when it is missing or stale), texels
+        // read from the file straight into staging, copy, publish.
         class TextureLoad final : public AssetLoader::Load
         {
         public:
-            TextureLoad(AssetHandle handle, const AssetMetadata& metadata, const std::filesystem::path& assetDirectory) : Load(handle, metadata)
+            TextureLoad(AssetHandle handle, const AssetMetadata& metadata, const std::filesystem::path& assetDirectory)
+                : Load(handle, metadata), m_AssetDirectory(assetDirectory)
             {
                 m_Header = JobSystem::Get().AsyncIO("Read Texture Header", [assetDirectory, metadata](const CancellationToken&)
                 {
@@ -127,9 +133,24 @@ namespace Nox
                     std::optional<Header> header = takeJobResult(m_Header, m_Metadata);
                     if (!header)
                         return true;
-                    m_Result.SourceHash = header->SourceHash;
+                    if (header->SourceHash)
+                        m_Result.SourceHash = header->SourceHash;
+                    if (!header->Cooked && !m_CookStarted)
+                    {
+                        // First import or a changed source: cooked (decode, mips, write) as a CPU job, then read.
+                        m_CookStarted = true;
+                        m_Header = JobSystem::Get().Async("Cook Texture", [assetDirectory = m_AssetDirectory, metadata = m_Metadata](const CancellationToken&)
+                        {
+                            Header cooked;
+                            if (TextureImporter::CookTexture(assetDirectory, metadata))
+                                cooked.Cooked = TextureImporter::ReadCookedTextureHeader(assetDirectory, metadata);
+                            return cooked;
+                        });
+                        return false;
+                    }
                     if (!header->Cooked)
                     {
+                        // Not cookable (e.g. .hdr): the synchronous importer loads it.
                         m_Result.NeedsImport = true;
                         return true;
                     }
@@ -197,6 +218,11 @@ namespace Nox
                 m_Upload.reset();
             }
 
+            uint64_t PendingUploadBytes() const override
+            {
+                return m_Stage == Stage::Header ? 0 : m_Cooked.DataSize;
+            }
+
         private:
             enum class Stage
             {
@@ -212,20 +238,24 @@ namespace Nox
                 std::optional<XXH128_hash_t> SourceHash;
             };
 
+            std::filesystem::path m_AssetDirectory;
             Stage m_Stage = Stage::Header;
             TaskFuture<Header> m_Header;
+            bool m_CookStarted = false;
             CookedTextureHeader m_Cooked;
             std::optional<TextureUpload> m_Upload;
             TaskFuture<bool> m_Read;
             uint64_t m_CompleteValue = 0;
         };
 
-        // Cooked .nmesh / .nsmesh: read and parsed on an IO worker, then the submeshes in batches as staging allows:
-        // ranges and staging on the main thread, written by a job, copied, published in order.
+        // .nmesh / .nsmesh: read and parsed on an IO worker (cooked from the glTF on a CPU worker first when it is missing
+        // or stale), then the submeshes in batches as staging allows: ranges and staging on the main thread, written by a
+        // job, copied, published in order.
         class MeshLoad final : public AssetLoader::Load
         {
         public:
-            MeshLoad(AssetHandle handle, const AssetMetadata& metadata, const std::filesystem::path& assetDirectory) : Load(handle, metadata)
+            MeshLoad(AssetHandle handle, const AssetMetadata& metadata, const std::filesystem::path& assetDirectory)
+                : Load(handle, metadata), m_AssetDirectory(assetDirectory)
             {
                 m_Parse = JobSystem::Get().AsyncIO("Read Mesh", [assetDirectory, metadata](const CancellationToken&)
                 {
@@ -245,15 +275,30 @@ namespace Nox
                     std::optional<Parsed> parsed = takeJobResult(m_Parse, m_Metadata);
                     if (!parsed)
                         return true;
-                    m_Result.SourceHash = parsed->SourceHash;
-                    if (!parsed->Mesh)
+                    if (parsed->SourceHash)
+                        m_Result.SourceHash = parsed->SourceHash;
+                    if (!parsed->Mesh && !m_CookStarted)
                     {
-                        m_Result.NeedsImport = true;
-                        return true;
+                        // First import or a changed source: cooked (glTF parse, meshlets, clips, materials) as a CPU job.
+                        m_CookStarted = true;
+                        m_Parse = JobSystem::Get().Async("Cook Mesh", [assetDirectory = m_AssetDirectory, metadata = m_Metadata](const CancellationToken&)
+                        {
+                            Parsed cooked;
+                            if (MeshImporter::CookMesh(assetDirectory, metadata))
+                                cooked.Mesh = MeshImporter::ReadCookedMesh(assetDirectory, metadata);
+                            return cooked;
+                        });
+                        return false;
                     }
+                    if (!parsed->Mesh)
+                        return true; // the source could not be read: failed
+                    m_Result.Cooked = m_CookStarted;
                     m_Cooked = std::move(*parsed->Mesh);
                     for (size_t index = 0; index < m_Cooked.Submeshes.size(); ++index)
+                    {
                         m_Opaque.push_back(index < m_Cooked.Materials.size() ? m_Cooked.Materials[index].Mode == AlphaMode::Opaque : true);
+                        m_PendingBytes += uploadBytes(m_Cooked.Submeshes[index]);
+                    }
                     m_Mesh = MeshImporter::CreateMeshAsset(m_Metadata.Type, m_Cooked);
                 }
 
@@ -269,12 +314,19 @@ namespace Nox
                     batch->Recorded = true;
                 }
 
-                while (!m_Batches.empty() && m_Batches.front()->Recorded && renderer.GetCompletedUploadValue() >= m_Batches.front()->CompleteValue)
+                size_t publishBudget = MeshPublishesPerFrame;
+                while (publishBudget > 0 && !m_Batches.empty() && m_Batches.front()->Recorded &&
+                       renderer.GetCompletedUploadValue() >= m_Batches.front()->CompleteValue)
                 {
-                    const Batch& batch = *m_Batches.front();
-                    for (size_t index = 0; index < batch.Uploads.size(); ++index)
-                        MeshImporter::SetSubMesh(*m_Mesh, batch.First + index, renderer.PublishMesh(batch.Uploads[index]));
-                    m_Batches.pop_front();
+                    Batch& batch = *m_Batches.front();
+                    for (; batch.Published < batch.Uploads.size() && publishBudget > 0; ++batch.Published, --publishBudget)
+                    {
+                        const MeshUpload& upload = batch.Uploads[batch.Published];
+                        MeshImporter::SetSubMesh(*m_Mesh, batch.First + batch.Published, renderer.PublishMesh(upload));
+                        m_PendingBytes -= std::min(m_PendingBytes, upload.Staging.size);
+                    }
+                    if (batch.Published == batch.Uploads.size())
+                        m_Batches.pop_front();
                 }
 
                 if (m_NextSubmesh < m_Cooked.Submeshes.size() || !m_Batches.empty())
@@ -295,12 +347,17 @@ namespace Nox
                 // Unpublished ranges go back through the deferred release queue; the published ones leave with the mesh.
                 for (const std::unique_ptr<Batch>& batch : m_Batches)
                 {
-                    for (const MeshUpload& upload : batch->Uploads)
-                        Renderer::UnloadMesh(upload.Handle);
+                    for (size_t index = batch->Published; index < batch->Uploads.size(); ++index)
+                        Renderer::UnloadMesh(batch->Uploads[index].Handle);
                 }
                 m_Batches.clear();
                 if (m_Mesh)
                     Renderer::DeferAssetRelease(std::move(m_Mesh));
+            }
+
+            uint64_t PendingUploadBytes() const override
+            {
+                return m_PendingBytes;
             }
 
         private:
@@ -318,6 +375,7 @@ namespace Nox
                 TaskFuture<bool> Write;
                 uint64_t CompleteValue = 0;
                 bool Recorded = false;
+                size_t Published = 0; // uploads handed to the mesh so far (a few per frame)
             };
 
             void admit(Renderer& renderer, uint64_t& uploadBudget)
@@ -356,8 +414,11 @@ namespace Nox
                 m_Batches.push_back(std::move(batch));
             }
 
+            std::filesystem::path m_AssetDirectory;
             TaskFuture<Parsed> m_Parse;
+            bool m_CookStarted = false;
             CookedMesh m_Cooked;
+            uint64_t m_PendingBytes = 0;
             std::vector<bool> m_Opaque;
             Ref<Asset> m_Mesh;
             size_t m_NextSubmesh = 0;
@@ -398,6 +459,11 @@ namespace Nox
 
             void Release() override
             {
+            }
+
+            uint64_t PendingUploadBytes() const override
+            {
+                return 0;
             }
 
         private:
@@ -474,6 +540,14 @@ namespace Nox
             m_Loading.erase(outFinished.back().Handle);
             return true;
         });
+    }
+
+    uint64_t AssetLoader::GetPendingUploadBytes() const
+    {
+        uint64_t bytes = 0;
+        for (const std::unique_ptr<Load>& load : m_Loads)
+            bytes += load->PendingUploadBytes();
+        return bytes;
     }
 
     void AssetLoader::Shutdown()

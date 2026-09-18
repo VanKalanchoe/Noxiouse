@@ -1,6 +1,7 @@
 #include "MeshImporter.h"
 
 #include <chrono>
+#include <cstring>
 #include <string_view>
 #include <vector>
 
@@ -16,6 +17,7 @@
 
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Asset/MeshSerializer.h"
+#include "NoxCore/Asset/MaterialSerializer.h"
 #include "NoxCore/Utils/Utils.h"
 
 namespace Nox
@@ -82,56 +84,53 @@ namespace Nox
             static_cast<Mesh&>(mesh).m_SubMeshes[index] = handle;
     }
 
-    Ref<Mesh> MeshImporter::ImportMesh(AssetHandle handle, const AssetMetadata& metadata)
+    std::filesystem::path MeshImporter::MaterialAssetPath(const std::filesystem::path& meshFilePath, const MaterialData& material, size_t index)
     {
-        std::filesystem::path cookedPath = Project::GetActiveAssetDirectory() / metadata.FilePath;
-        std::filesystem::path sourcePath = Project::GetActiveAssetDirectory() / metadata.SourceFilePath;
+        std::string name = material.Name;
+        constexpr const char* invalid = "<>:\"/\\|?*";
+        for (char& character : name)
+        {
+            if (std::strchr(invalid, character) != nullptr)
+                character = '_';
+        }
+        if (name.empty())
+            name = "Material_" + std::to_string(index);
+        return meshFilePath.parent_path().parent_path() / "Materials" / (meshFilePath.stem().string() + "_" + name + ".nmat");
+    }
 
-        NOX_CORE_INFO("MeshImporter::ImportMesh loading mesh from {}", cookedPath.string());
+    bool MeshImporter::CookMesh(const std::filesystem::path& assetDirectory, const AssetMetadata& metadata)
+    {
+        const std::filesystem::path cookedPath = assetDirectory / metadata.FilePath;
+        const std::filesystem::path sourcePath = assetDirectory / metadata.SourceFilePath;
+        const bool isStatic = metadata.Type == AssetType::StaticMesh;
+        NOX_CORE_INFO("Cooking GLTF from {} to {}", sourcePath.string(), cookedPath.string());
 
-        std::vector<MeshData> meshDataList;
         std::vector<MaterialData> materialDataList;
         std::vector<LightNodeData> lightDataList;
         std::vector<MeshNodeData> nodeDataList;
         std::vector<CameraNodeData> cameraDataList;
+        Skeleton extractedSkeleton;
+        std::vector<Ref<AnimationSequence>> extractedAnimations;
 
-        const auto hashPath = cookedPath.string() + ".hash";
-        const auto sourceHash = Utility::calcul_hash_streaming(sourcePath.string());
-        XXH128_hash_t cookedHash{};
-        const bool cookedIsCurrent = std::filesystem::exists(cookedPath) &&
-            Utility::loadHashFromFile(hashPath, cookedHash) &&
-            XXH128_isEqual(sourceHash, cookedHash);
-
-        if (cookedIsCurrent)
+        const std::vector<MeshData> meshDataList = ParseGltfToMeshData(sourcePath, materialDataList, extractedSkeleton, extractedAnimations,
+                                                                       lightDataList, nodeDataList, cameraDataList);
+        if (meshDataList.empty())
         {
-            NOX_CORE_INFO("Loading cooked dynamic mesh from {}", cookedPath.string());
-            bool success = MeshSerializer::DeserializeMesh(cookedPath, meshDataList, materialDataList, lightDataList, nodeDataList, cameraDataList);
-            if (!success) NOX_CORE_ASSERT(false, "MeshImporter::ImportMesh - Failed to deserialize .nmesh file: {}", cookedPath.string());
+            NOX_CORE_WARN("MeshImporter::CookMesh - Failed to load or empty mesh at source path: {}", sourcePath.string());
+            return false;
         }
+
+        std::error_code error;
+        std::filesystem::create_directories(cookedPath.parent_path(), error);
+        if (isStatic)
+            MeshSerializer::SerializeStaticMesh(cookedPath, meshDataList, materialDataList, lightDataList, nodeDataList, cameraDataList);
         else
-        {
-            // It doesn't exist, cook it from the source!
-            NOX_CORE_INFO("Cooking GLTF from {} to {}", sourcePath.string(), cookedPath.string());
-
-            Skeleton extractedSkeleton;
-            std::vector<Ref<AnimationSequence>> extractedAnimations;
-
-            meshDataList = ParseGltfToMeshData(sourcePath, materialDataList, extractedSkeleton, extractedAnimations, lightDataList, nodeDataList, cameraDataList);
-            if (meshDataList.empty())
-            {
-                NOX_CORE_WARN("MeshImporter::ImportMesh - Failed to load or empty mesh at source path: {}", sourcePath.string());
-                return Ref<Mesh>(nullptr);
-            }
-
-            // Ensure the directory for the cooked path actually exists before saving!
-            if (!std::filesystem::exists(cookedPath.parent_path()))
-                std::filesystem::create_directories(cookedPath.parent_path());
-
             MeshSerializer::SerializeMesh(cookedPath, meshDataList, materialDataList, lightDataList, nodeDataList, cameraDataList);
-            Utility::saveHashToFile(hashPath, sourceHash);
 
-            // A node/object animation does not require a skeleton. Only write .nskel when the
-            // glTF contains actual skin data; animation clips are serialized independently below.
+        if (!isStatic)
+        {
+            // A node/object animation does not require a skeleton. Only write .nskel when the glTF contains actual skin
+            // data; animation clips are serialized independently below.
             if (!extractedSkeleton.Skins.empty())
             {
                 std::filesystem::path skelPath = cookedPath;
@@ -140,114 +139,81 @@ namespace Nox
                 NOX_CORE_INFO("[Importer] Extracted and cooked Skeleton ({} nodes) to {}", extractedSkeleton.AllNodes.size(), skelPath.string());
             }
 
-            // Save animation clips if present
-            for (size_t i = 0; i < extractedAnimations.size(); i++)
+            for (const Ref<AnimationSequence>& animation : extractedAnimations)
             {
-                std::filesystem::path animPath = cookedPath.parent_path() / (cookedPath.stem().string() + "_" + extractedAnimations[i]->Name + ".nanim");
-                AnimationSerializer::Serialize(animPath, *extractedAnimations[i]);
-                NOX_CORE_INFO("[Importer] Extracted and cooked Animation Sequence '{}' to {}", extractedAnimations[i]->Name, animPath.string());
+                std::filesystem::path animPath = cookedPath.parent_path() / (cookedPath.stem().string() + "_" + animation->Name + ".nanim");
+                AnimationSerializer::Serialize(animPath, *animation);
+                NOX_CORE_INFO("[Importer] Extracted and cooked Animation Sequence '{}' to {}", animation->Name, animPath.string());
             }
         }
 
-        Ref<Mesh> meshAsset = CreateRef<Mesh>();
-
-        // Upload each sub-mesh independently -> Vector of Handles
-        const auto uploadStart = std::chrono::steady_clock::now();
+        // One .nmat per material, written once: edits made to it later survive a recook of the model.
+        for (size_t index = 0; index < materialDataList.size(); ++index)
         {
-            NOX_PROFILE_SCOPE("Mesh GPU Upload");
-            for (size_t i = 0; i < meshDataList.size(); ++i)
+            const std::filesystem::path materialPath = assetDirectory / MaterialAssetPath(metadata.FilePath, materialDataList[index], index);
+            if (!std::filesystem::exists(materialPath, error))
             {
-                bool isOpaque = (i < materialDataList.size()) ? (materialDataList[i].Mode == AlphaMode::Opaque) : true;
-                MeshHandle subMeshHandle = Renderer::UploadMesh(meshDataList[i], isOpaque);
-                meshAsset->m_SubMeshes.push_back(subMeshHandle);
-                meshAsset->m_SubmeshNames.push_back(meshDataList[i].Name);
+                std::filesystem::create_directories(materialPath.parent_path(), error);
+                MaterialSerializer::Serialize(materialPath, materialDataList[index]);
             }
         }
-        NOX_CORE_INFO("[AssetLoad] GPU upload of {} submesh(es) (geometry + BLAS) took {:.1f} ms",
-                      meshDataList.size(),
-                      std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - uploadStart).count());
-        meshAsset->m_Materials = std::move(materialDataList);
-        meshAsset->m_Lights = std::move(lightDataList);
-        meshAsset->m_Cameras = std::move(cameraDataList);
-        meshAsset->m_Nodes = std::move(nodeDataList);
 
-        meshDataList.clear();
-        materialDataList.clear();
+        // Last: an interrupted cook leaves no hash, so the model is cooked again.
+        Utility::saveHashToFile(cookedPath.string() + ".hash", Utility::calcul_hash_streaming(sourcePath.string()));
+        return true;
+    }
 
-        return meshAsset;
+    Ref<Mesh> MeshImporter::ImportMesh(AssetHandle handle, const AssetMetadata& metadata)
+    {
+        const std::filesystem::path assetDirectory = Project::GetActiveAssetDirectory();
+        NOX_CORE_INFO("MeshImporter::ImportMesh loading mesh from {}", (assetDirectory / metadata.FilePath).string());
+
+        std::optional<CookedMesh> cooked = ReadCookedMesh(assetDirectory, metadata);
+        if (!cooked && CookMesh(assetDirectory, metadata))
+            cooked = ReadCookedMesh(assetDirectory, metadata);
+        if (!cooked)
+        {
+            NOX_CORE_ERROR("MeshImporter::ImportMesh - could not load {}", metadata.FilePath.generic_string());
+            return Ref<Mesh>(nullptr);
+        }
+        return Ref<Mesh>(uploadMeshAsset(AssetType::Mesh, *cooked));
     }
 
     Ref<StaticMesh> MeshImporter::ImportStaticMesh(AssetHandle handle, const AssetMetadata& metadata)
     {
-        std::filesystem::path cookedPath = Project::GetActiveAssetDirectory() / metadata.FilePath;
-        std::filesystem::path sourcePath = Project::GetActiveAssetDirectory() / metadata.SourceFilePath;
+        const std::filesystem::path assetDirectory = Project::GetActiveAssetDirectory();
+        NOX_CORE_INFO("MeshImporter::ImportStaticMesh loading static mesh from {}", (assetDirectory / metadata.FilePath).string());
 
-        NOX_CORE_INFO("MeshImporter::ImportStaticMesh loading static mesh from {}", cookedPath.string());
-
-        std::vector<MeshData> meshDataList;
-        std::vector<MaterialData> materialDataList;
-        std::vector<LightNodeData> lightDataList;
-        std::vector<MeshNodeData> nodeDataList;
-        std::vector<CameraNodeData> cameraDataList;
-
-        const auto hashPath = cookedPath.string() + ".hash";
-        const auto sourceHash = Utility::calcul_hash_streaming(sourcePath.string());
-        XXH128_hash_t cookedHash{};
-        const bool cookedIsCurrent = std::filesystem::exists(cookedPath) &&
-            Utility::loadHashFromFile(hashPath, cookedHash) &&
-            XXH128_isEqual(sourceHash, cookedHash);
-
-        if (cookedIsCurrent)
+        std::optional<CookedMesh> cooked = ReadCookedMesh(assetDirectory, metadata);
+        if (!cooked && CookMesh(assetDirectory, metadata))
+            cooked = ReadCookedMesh(assetDirectory, metadata);
+        if (!cooked)
         {
-            NOX_CORE_INFO("Loading cooked static mesh from {}", cookedPath.string());
-            bool success = MeshSerializer::DeserializeStaticMesh(cookedPath, meshDataList, materialDataList, lightDataList, nodeDataList, cameraDataList);
-            if (!success)
-            {
-                NOX_CORE_ASSERT(false, "MeshImporter::ImportStaticMesh - Failed to deserialize .nsmesh file: {}", cookedPath.string());
-            }
+            NOX_CORE_ERROR("MeshImporter::ImportStaticMesh - could not load {}", metadata.FilePath.generic_string());
+            return Ref<StaticMesh>(nullptr);
         }
-        else
+        return Ref<StaticMesh>(uploadMeshAsset(AssetType::StaticMesh, *cooked));
+    }
+
+    Ref<Asset> MeshImporter::uploadMeshAsset(AssetType type, CookedMesh& cooked)
+    {
+        // Synchronous: every submesh uploaded and published now (the frame waits for the copies).
+        std::vector<bool> opaque;
+        for (size_t index = 0; index < cooked.Submeshes.size(); ++index)
+            opaque.push_back(index < cooked.Materials.size() ? cooked.Materials[index].Mode == AlphaMode::Opaque : true);
+
+        Ref<Asset> mesh = CreateMeshAsset(type, cooked);
+        const std::vector<MeshData>& submeshes = cooked.Submeshes;
+
+        const auto uploadStart = std::chrono::steady_clock::now();
         {
-            NOX_CORE_INFO("Cooking GLTF from {} to {}", sourcePath.string(), cookedPath.string());
-
-            // Dummy parameters for unused skeleton/animations in static mesh import
-            Skeleton dummySkeleton;
-            std::vector<Ref<AnimationSequence>> dummyAnimations;
-
-            meshDataList = ParseGltfToMeshData(sourcePath, materialDataList, dummySkeleton, dummyAnimations, lightDataList, nodeDataList, cameraDataList);
-            if (meshDataList.empty())
-            {
-                NOX_CORE_WARN("No Meshes found in source file: {}", sourcePath.string());
-                return Ref<StaticMesh>(nullptr);
-            }
-
-            if (!std::filesystem::exists(cookedPath.parent_path()))
-                std::filesystem::create_directories(cookedPath.parent_path());
-
-            MeshSerializer::SerializeStaticMesh(cookedPath, meshDataList, materialDataList, lightDataList, nodeDataList, cameraDataList);
-            Utility::saveHashToFile(hashPath, sourceHash);
+            NOX_PROFILE_SCOPE("Mesh GPU Upload");
+            for (size_t index = 0; index < submeshes.size(); ++index)
+                SetSubMesh(*mesh, index, Renderer::UploadMesh(submeshes[index], opaque[index]));
         }
-
-        Ref<StaticMesh> staticMeshAsset = CreateRef<StaticMesh>();
-        {
-            NOX_PROFILE_SCOPE("Static Mesh GPU Upload");
-            for (size_t i = 0; i < meshDataList.size(); ++i)
-            {
-                bool isOpaque = (i < materialDataList.size()) ? (materialDataList[i].Mode == AlphaMode::Opaque) : true;
-                MeshHandle subMeshHandle = Renderer::UploadMesh(meshDataList[i], isOpaque);
-                staticMeshAsset->m_SubMeshes.push_back(subMeshHandle);
-                staticMeshAsset->m_SubmeshNames.push_back(meshDataList[i].Name);
-            }
-        }
-        staticMeshAsset->m_Materials = std::move(materialDataList);
-        staticMeshAsset->m_Lights = std::move(lightDataList);
-        staticMeshAsset->m_Cameras = std::move(cameraDataList);
-        staticMeshAsset->m_Nodes = std::move(nodeDataList);
-
-        meshDataList.clear();
-        materialDataList.clear();
-
-        return staticMeshAsset;
+        NOX_CORE_INFO("[AssetLoad] GPU upload of {} submesh(es) (geometry + BLAS) took {:.1f} ms", submeshes.size(),
+                      std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - uploadStart).count());
+        return mesh;
     }
 
     Ref<Mesh> MeshImporter::LoadMesh(const std::filesystem::path& path)

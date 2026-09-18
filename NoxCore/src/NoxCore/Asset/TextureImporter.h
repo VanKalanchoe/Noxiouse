@@ -45,6 +45,9 @@ namespace Nox
         static std::optional<CookedTextureHeader> ReadCookedTextureHeader(const std::filesystem::path& assetDirectory, const AssetMetadata& metadata);
         // Any thread.
         static bool ReadCookedTextureData(const CookedTextureHeader& header, uint8_t* destination);
+        // Any thread. Cooks a PNG / JPG / DDS / KTX2 source into the asset's .ntex (and its .hash); false for other
+        // sources or when it fails.
+        static bool CookTexture(const std::filesystem::path& assetDirectory, const AssetMetadata& metadata);
 
         // AssetMetadata filepath is relative to project asset directory
         static Ref<Texture2D> ImportTexture2D(AssetHandle handle, const AssetMetadata& metadata);

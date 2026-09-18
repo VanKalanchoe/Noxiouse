@@ -30,6 +30,11 @@ namespace Nox
         // submesh is set once its upload is published.
         static Ref<Asset> CreateMeshAsset(AssetType type, CookedMesh& cooked);
         static void SetSubMesh(Asset& mesh, size_t index, const MeshHandle& handle);
+        // Any thread. Cooks the asset's glTF source into its .nmesh / .nsmesh (with .hash), the skeleton and clips, and
+        // one .nmat per material that does not exist yet; false when the source cannot be read.
+        static bool CookMesh(const std::filesystem::path& assetDirectory, const AssetMetadata& metadata);
+        // Where a model's material asset lives (relative to the asset directory), from the model's cooked file path.
+        static std::filesystem::path MaterialAssetPath(const std::filesystem::path& meshFilePath, const MaterialData& material, size_t index);
 
         // AssetMetadata filepath is relative to project asset directory
         static Ref<Mesh> ImportMesh(AssetHandle handle, const AssetMetadata& metadata);
@@ -40,6 +45,8 @@ namespace Nox
         static Ref<Mesh> LoadMesh(const std::filesystem::path& path);
         
     private:
+        // Main thread: uploads every submesh now (synchronous loads).
+        static Ref<Asset> uploadMeshAsset(AssetType type, CookedMesh& cooked);
         static std::vector<MeshData> ParseGltfToMeshData(const std::filesystem::path& path, std::vector<MaterialData>& outMaterials, Skeleton& outSkeleton, std::vector<Ref<AnimationSequence>>& outAnimations, std::vector<LightNodeData>& outLights, std::vector<MeshNodeData>& outNodes, std::vector<CameraNodeData>& outCameras);
     };
 }

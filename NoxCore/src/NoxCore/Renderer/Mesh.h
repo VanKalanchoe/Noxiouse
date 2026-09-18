@@ -35,6 +35,15 @@ namespace Nox
         }
         const std::vector<AssetHandle>& GetMaterialAssets() const { return m_MaterialAssets; }
         void SetMaterialAssets(std::vector<AssetHandle> assets) { m_MaterialAssets = std::move(assets); }
+
+        // Assets cooked from the same glTF (0 / empty when it has none): what a model instance's nodes animate with.
+        AssetHandle GetSkeletonAsset() const { return m_SkeletonAsset; }
+        const std::vector<AssetHandle>& GetAnimationAssets() const { return m_AnimationAssets; }
+        void SetImportedAssets(AssetHandle skeleton, std::vector<AssetHandle> animations)
+        {
+            m_SkeletonAsset = skeleton;
+            m_AnimationAssets = std::move(animations);
+        }
         
         // Lights
         const std::vector<LightNodeData>& GetLights() const { return m_Lights; }
@@ -53,6 +62,8 @@ namespace Nox
         std::vector<MeshHandle> m_SubMeshes;
         std::vector<MaterialData> m_Materials;
         std::vector<AssetHandle> m_MaterialAssets;
+        AssetHandle m_SkeletonAsset = 0;
+        std::vector<AssetHandle> m_AnimationAssets;
         std::vector<LightNodeData> m_Lights;
         std::vector<CameraNodeData> m_Cameras;
         std::vector<MeshNodeData> m_Nodes;
@@ -87,6 +98,15 @@ namespace Nox
         }
         const std::vector<AssetHandle>& GetMaterialAssets() const { return m_MaterialAssets; }
         void SetMaterialAssets(std::vector<AssetHandle> assets) { m_MaterialAssets = std::move(assets); }
+
+        // Assets cooked from the same glTF (0 / empty when it has none): what a model instance's nodes animate with.
+        AssetHandle GetSkeletonAsset() const { return m_SkeletonAsset; }
+        const std::vector<AssetHandle>& GetAnimationAssets() const { return m_AnimationAssets; }
+        void SetImportedAssets(AssetHandle skeleton, std::vector<AssetHandle> animations)
+        {
+            m_SkeletonAsset = skeleton;
+            m_AnimationAssets = std::move(animations);
+        }
         
         // Lights
         const std::vector<LightNodeData>& GetLights() const { return m_Lights; }
@@ -105,6 +125,8 @@ namespace Nox
         std::vector<MeshHandle> m_SubMeshes;
         std::vector<MaterialData> m_Materials;
         std::vector<AssetHandle> m_MaterialAssets;
+        AssetHandle m_SkeletonAsset = 0;
+        std::vector<AssetHandle> m_AnimationAssets;
         std::vector<LightNodeData> m_Lights;
         std::vector<CameraNodeData> m_Cameras;
         std::vector<MeshNodeData> m_Nodes;

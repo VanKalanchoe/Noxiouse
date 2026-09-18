@@ -15,6 +15,7 @@
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Scene/Entity.h"
 #include "NoxCore/Scene/Components.h"
+#include "NoxCore/Scene/ModelInstance.h"
 #include "NoxCore/Renderer/Mesh.h"
 
 namespace YAML
@@ -177,7 +178,17 @@ namespace Nox
     {
     }
 
-    static void SerializeEntity(YAML::Emitter& out, Entity entity)
+    // A node spawned by a model instance that still exists: saved through the instance (overrides), never itself.
+    static bool IsSpawnedModelNode(Scene& scene, UUID id)
+    {
+        Entity entity = scene.GetEntityByUUID(id);
+        if (!entity || !entity.HasComponent<ModelNodeComponent>())
+            return false;
+        Entity root = scene.GetEntityByUUID(entity.GetComponent<ModelNodeComponent>().Instance);
+        return root && root.HasComponent<ModelInstanceComponent>();
+    }
+
+    static void SerializeEntity(YAML::Emitter& out, Scene& scene, Entity entity)
     {
         NOX_CORE_ASSERT(entity.HasComponent<IDComponent>(), "Entity does not have an ID component!");
 
@@ -218,7 +229,10 @@ namespace Nox
             out << YAML::Key << "Children" << YAML::Value;
             out << YAML::BeginSeq;
             for (auto childID : relationship.Children)
-                out << childID;
+            {
+                if (!IsSpawnedModelNode(scene, childID))
+                    out << childID;
+            }
             out << YAML::EndSeq;
 
             out << YAML::EndMap; // RelationshipComponent
@@ -235,6 +249,52 @@ namespace Nox
             out << YAML::Key << "SubmeshCount" << YAML::Value << meshComponent.SubmeshCount;
 
             out << YAML::EndMap; // MeshComponent
+        }
+
+        if (entity.HasComponent<ModelInstanceComponent>())
+        {
+            out << YAML::Key << "ModelInstanceComponent";
+            out << YAML::BeginMap;
+
+            const auto& instance = entity.GetComponent<ModelInstanceComponent>();
+            out << YAML::Key << "Model" << YAML::Value << static_cast<uint64_t>(instance.Model);
+            if (!instance.RemovedNodes.empty())
+            {
+                out << YAML::Key << "RemovedNodes" << YAML::Value << YAML::Flow << YAML::BeginSeq;
+                for (uint32_t node : instance.RemovedNodes)
+                    out << node;
+                out << YAML::EndSeq;
+            }
+
+            const std::vector<ModelNodeOverride> overrides = ModelInstance::CollectOverrides(scene, entity);
+            if (!overrides.empty())
+            {
+                out << YAML::Key << "Overrides" << YAML::Value << YAML::BeginSeq;
+                for (const ModelNodeOverride& nodeOverride : overrides)
+                {
+                    out << YAML::BeginMap;
+                    out << YAML::Key << "Node" << YAML::Value << nodeOverride.NodeIndex;
+                    if (nodeOverride.Name)
+                        out << YAML::Key << "Name" << YAML::Value << *nodeOverride.Name;
+                    if (nodeOverride.Transform)
+                    {
+                        out << YAML::Key << "Translation" << YAML::Value << nodeOverride.Transform->Translation;
+                        out << YAML::Key << "Rotation" << YAML::Value << nodeOverride.Transform->Rotation;
+                        out << YAML::Key << "Scale" << YAML::Value << nodeOverride.Transform->Scale;
+                    }
+                    if (!nodeOverride.MaterialAssets.empty())
+                    {
+                        out << YAML::Key << "MaterialAssets" << YAML::Value << YAML::Flow << YAML::BeginSeq;
+                        for (AssetHandle handle : nodeOverride.MaterialAssets)
+                            out << static_cast<uint64_t>(handle);
+                        out << YAML::EndSeq;
+                    }
+                    out << YAML::EndMap;
+                }
+                out << YAML::EndSeq;
+            }
+
+            out << YAML::EndMap;
         }
 
         if (entity.HasComponent<MaterialComponent>())
@@ -499,10 +559,10 @@ namespace Nox
         m_Scene->m_Registry.view<TagComponent>().each([&](auto entityID, TagComponent&)
         {
             Entity entity(entityID, m_Scene.get());
-            if (!entity)
+            if (!entity || IsSpawnedModelNode(*m_Scene, entity.GetUUID()))
                 return;
 
-            SerializeEntity(out, entity);
+            SerializeEntity(out, *m_Scene, entity);
         });
         out << YAML::EndSeq; // Corrected: No parentheses
         out << YAML::EndMap; // Corrected: No parentheses
@@ -599,6 +659,40 @@ namespace Nox
                         mc.SubmeshIndex = meshComponent["SubmeshIndex"].as<uint32_t>();
                     if (meshComponent["SubmeshCount"])
                         mc.SubmeshCount = meshComponent["SubmeshCount"].as<uint32_t>();
+                }
+
+                if (auto modelInstance = entity["ModelInstanceComponent"])
+                {
+                    auto& instance = deserializedEntity.AddComponent<ModelInstanceComponent>();
+                    instance.Model = modelInstance["Model"].as<uint64_t>();
+                    if (auto removedNodes = modelInstance["RemovedNodes"])
+                    {
+                        for (auto node : removedNodes)
+                            instance.RemovedNodes.push_back(node.as<uint32_t>());
+                    }
+                    if (auto overrides = modelInstance["Overrides"])
+                    {
+                        for (auto node : overrides)
+                        {
+                            ModelNodeOverride& nodeOverride = instance.Overrides.emplace_back();
+                            nodeOverride.NodeIndex = node["Node"].as<uint32_t>();
+                            if (node["Name"])
+                                nodeOverride.Name = node["Name"].as<std::string>();
+                            if (node["Translation"])
+                            {
+                                TransformComponent transform;
+                                transform.Translation = node["Translation"].as<glm::vec3>();
+                                transform.Rotation = node["Rotation"].as<glm::vec3>();
+                                transform.Scale = node["Scale"].as<glm::vec3>();
+                                nodeOverride.Transform = transform;
+                            }
+                            if (auto materials = node["MaterialAssets"])
+                            {
+                                for (auto material : materials)
+                                    nodeOverride.MaterialAssets.push_back(material.as<uint64_t>());
+                            }
+                        }
+                    }
                 }
 
                 auto materialComponent = entity["MaterialComponent"];

@@ -426,6 +426,8 @@ namespace Nox
         // Staging of a Begin* whose copies were never recorded.
         void AbandonUpload(const StagingSpan& staging) { m_uploads.ReleaseStaging(staging); }
         uint64_t GetCompletedUploadValue() const { return m_uploads.GetCompletedValue(); }
+        // Meshes that draw but are not ray traced yet (their BLAS waits for a frame's build budget).
+        size_t GetPendingBlasBuilds() const { return m_blasBuilds.size(); }
         // Textures finished loading: materials resolve their texture paths again (they drew without them so far).
         static void MarkTexturesLoaded();
         Ref<Texture2D> createSolidColorTexture(uint8_t r, uint8_t g, uint8_t b, uint8_t a);
@@ -992,8 +994,9 @@ namespace Nox
         std::vector<BlasBuild> m_blasBuilds;
         std::unique_ptr<NRI::Buffer> m_blasScratch; // shared by the builds of one frame, recorded one after another
         // Bounds each frame's build work while a large load streams in (one submission building thousands of BLAS
-        // could exceed the driver timeout).
-        static constexpr uint64_t BlasBuildPrimitivesPerFrame = 2'000'000;
+        // could exceed the driver timeout). 2M made a 42 ms GPU frame on Bistro (RTX, Release); a quarter keeps a
+        // loading frame near a normal one and Bistro still ray traces within ~15 frames.
+        static constexpr uint64_t BlasBuildPrimitivesPerFrame = 500'000;
         NRI::AccelerationStructureBuildDesc blasBuildDesc(const BlasBuild& build) const;
         // --- Hardware Ray Tracing: Scene TLAS ---
         void updateSceneAccelerationStructure(uint32_t currentFrameIndex);

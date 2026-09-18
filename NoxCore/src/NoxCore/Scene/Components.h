@@ -3,6 +3,7 @@
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/quaternion.hpp>
 
+#include <optional>
 #include "string"
 
 #include "SceneCamera.h"
@@ -106,6 +107,39 @@ namespace Nox
         MaterialComponent(const MaterialComponent&) = default;
     };
     
+    // What a model instance changed on one of its nodes; everything else comes from the model's cooked node data.
+    struct ModelNodeOverride
+    {
+        uint32_t NodeIndex = 0;
+        std::optional<TransformComponent> Transform;
+        std::optional<std::string> Name;
+        std::vector<AssetHandle> MaterialAssets; // MaterialComponent overrides, empty for none
+    };
+
+    // Root of an imported model placed in a scene (UE's Packed Level Actor / Unity's model prefab instance): its node
+    // entities are spawned from the model's cooked node data once the model is loaded, and only this component is saved
+    // for them -- removed nodes and per-node overrides (§5.11.5).
+    struct ModelInstanceComponent
+    {
+        AssetHandle Model = 0;
+        std::vector<uint32_t> RemovedNodes;       // glTF node indices deleted from this instance
+        std::vector<ModelNodeOverride> Overrides; // to apply at spawn; the node entities hold them once spawned
+        bool Spawned = false;                     // runtime only
+
+        ModelInstanceComponent() = default;
+        ModelInstanceComponent(const ModelInstanceComponent&) = default;
+    };
+
+    // A node entity spawned from a model instance (never saved: it is spawned again on load).
+    struct ModelNodeComponent
+    {
+        UUID Instance = 0; // the instance root
+        uint32_t NodeIndex = 0;
+
+        ModelNodeComponent() = default;
+        ModelNodeComponent(const ModelNodeComponent&) = default;
+    };
+
     // Following KHR_Punctual
     struct DirectionalLightComponent
     {
@@ -293,7 +327,7 @@ namespace Nox
 
     using AllComponents = 
         ComponentGroup<TransformComponent, WorldTransformComponent, RelationshipComponent, DirtyTransformComponent,
-        MeshComponent, MaterialComponent, DirectionalLightComponent, PointLightComponent, SpotLightComponent, AnimatorComponent,
+        MeshComponent, MaterialComponent, ModelInstanceComponent, ModelNodeComponent, DirectionalLightComponent, PointLightComponent, SpotLightComponent, AnimatorComponent,
         SpriteRendererComponent,
             CircleRendererComponent, CameraComponent, ScriptComponent,
             /*NativeScriptComponent,*/ RigidBody2DComponent, BoxCollider2DComponent,
