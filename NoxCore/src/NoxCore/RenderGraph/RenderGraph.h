@@ -420,8 +420,25 @@ namespace Nox
         // Compile scratch (capacity reused)
         std::vector<bool> m_ResourceRead;
         std::vector<uint32_t> m_LastWriterScratch;
-        std::vector<NRI::ResourceState> m_LastStateScratch;
+        // Precise synchronization, per resource: the last write, every read since it, and what that write has already
+        // been made visible to.
+        std::vector<NRI::ResourceState> m_LastWriteScratch;
+        std::vector<NRI::ResourceState> m_ReadsSinceWriteScratch;
+        std::vector<NRI::ResourceState> m_VisibleScratch;
         std::vector<bool> m_AccessedScratch;
+        std::vector<bool> m_WrittenScratch;
+
+        // What the previous frame left each physical resource in, so the first access of a frame is ordered after it (a
+        // barrier reaches across submissions on the queue). One frame is enough: the frame after it is recorded only
+        // once that frame's fence has signalled.
+        struct CarriedState
+        {
+            NRI::ResourceState LastWrite;
+            NRI::ResourceState ReadsSinceWrite;
+            NRI::ResourceState Visible;
+            bool Written = false;
+        };
+        std::unordered_map<const void*, CarriedState> m_CarriedStates;
         std::vector<std::pair<uint32_t, NRI::ResourceState>> m_PassStatesScratch;
         std::vector<uint32_t> m_AllocationOrderScratch;
         std::vector<uint32_t> m_PlanStackScratch;

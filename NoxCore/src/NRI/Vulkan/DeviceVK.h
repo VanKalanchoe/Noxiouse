@@ -47,6 +47,10 @@ namespace NRI
         bool isDebugUtilsEnabled() const { return m_debugUtilsEnabled; }
         uint32_t getQueueIndex() { return m_queueIndex; }
         vk::raii::Queue& getQueue() { return m_queue; }
+        uint32_t getQueueFamily(QueueType queue) const { return queue == QueueType::Transfer ? m_transferQueueIndex : m_queueIndex; }
+        // The families a concurrently shared resource names (one when there is no dedicated transfer family).
+        std::span<const uint32_t> getSharedQueueFamilies() const { return { m_sharedQueueFamilies.data(), m_sharedQueueFamilyCount }; }
+        bool hasDedicatedTransferQueue() const override { return m_transferQueueIndex != m_queueIndex; }
         vk::raii::SurfaceKHR& getSurface() { return m_surface; }
         vk::Format& getDepthFormat() { return m_depthFormat; }
         vk::SurfaceFormatKHR& getSurfaceFormat() { return m_surfaceFormat; }
@@ -78,7 +82,10 @@ namespace NRI
         vk::raii::ImageView createImageView(vk::Image const& image, vk::Format format, vk::ImageAspectFlags aspectFlags, uint32_t mipLevels);
         uint32_t findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties);
         void submitAndWait(CommandBuffer& cmdBuffer, uint32_t slotIndex) override;
-        void submitCommandBuffers(std::span<CommandBuffer* const> cmdBuffers, Swapchain& swapchain, uint32_t frameIndex, uint32_t imageIndex) override;
+        void submitCommandBuffers(std::span<CommandBuffer* const> cmdBuffers, Swapchain& swapchain, uint32_t frameIndex,
+                                  uint32_t imageIndex, std::span<const TimelinePoint> timelineWaits) override;
+        void submit(QueueType queue, std::span<CommandBuffer* const> cmdBuffers, std::span<const TimelinePoint> waits,
+                    std::span<const TimelinePoint> signals) override;
         void waitIdle() override;
         void initImGui(Nox::Window& window) override;
         void shutdownImGui() override;
@@ -88,7 +95,8 @@ namespace NRI
         // Factory
         std::unique_ptr<Swapchain> createSwapchain(const SwapchainDesc& desc) override;
         std::unique_ptr<Pipeline> createPipeline(const PipelineDesc& desc, ShaderCompiler& compiler) override;
-        std::unique_ptr<CommandAllocator> createCommandAllocator(CommandBufferReset resetMode) override;
+        std::unique_ptr<CommandAllocator> createCommandAllocator(CommandBufferReset resetMode, QueueType queue) override;
+        std::unique_ptr<TimelineSemaphore> createTimelineSemaphore(uint64_t initialValue) override;
         Nox::Ref<Texture2D> createTexture(const TextureDesc& desc) override;
         std::unique_ptr<Buffer> createBuffer(const BufferDesc& desc) override;
         std::unique_ptr<DescriptorHeap> createDescriptorHeap(const DescriptorHeapDesc& desc) override;
@@ -139,7 +147,15 @@ namespace NRI
         bool m_debugUtilsEnabled = false;
         uint32_t m_queueIndex = ~0;
         vk::raii::Queue m_queue = nullptr;
-        std::vector<vk::CommandBuffer> m_submitScratch; // submitCommandBuffers
+        // A family with transfer but neither graphics nor compute (a copy engine), else the graphics family.
+        uint32_t m_transferQueueIndex = ~0;
+        vk::raii::Queue m_transferQueue = nullptr;
+        std::array<uint32_t, 2> m_sharedQueueFamilies{};
+        uint32_t m_sharedQueueFamilyCount = 1;
+        vk::raii::Fence m_submitFence = nullptr; // submitAndWait
+        std::vector<vk::CommandBufferSubmitInfo> m_submitScratch; // submissions (main thread)
+        std::vector<vk::SemaphoreSubmitInfo> m_waitScratch;
+        std::vector<vk::SemaphoreSubmitInfo> m_signalScratch;
         vk::raii::SurfaceKHR m_surface = nullptr;
         vk::Format m_depthFormat = vk::Format::eUndefined;
         vk::SurfaceFormatKHR m_surfaceFormat = {};

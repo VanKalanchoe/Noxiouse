@@ -25,6 +25,8 @@ namespace NRI
     {
         uint64_t size = 0;
         BufferUsage usage;
+        // Written on the transfer queue while the graphics queue reads it (concurrent sharing, no ownership transfers).
+        bool sharedAcrossQueues = false;
     };
     
     class Buffer

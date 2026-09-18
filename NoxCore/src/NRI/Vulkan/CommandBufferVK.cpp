@@ -900,10 +900,12 @@ namespace NRI
             switch (barrierType)
             {
             case AccelerationStructureBarrierType::BuildToBuild:
+                // The next build reads what this one built (a TLAS over its BLAS) or writes memory this one wrote (builds
+                // recorded one after another share a scratch buffer): both directions.
                 barrier.srcStageMask  = vk::PipelineStageFlagBits2::eAccelerationStructureBuildKHR;
                 barrier.srcAccessMask = vk::AccessFlagBits2::eAccelerationStructureWriteKHR;
                 barrier.dstStageMask  = vk::PipelineStageFlagBits2::eAccelerationStructureBuildKHR;
-                barrier.dstAccessMask = vk::AccessFlagBits2::eAccelerationStructureReadKHR;
+                barrier.dstAccessMask = vk::AccessFlagBits2::eAccelerationStructureReadKHR | vk::AccessFlagBits2::eAccelerationStructureWriteKHR;
                 break;
 
             case AccelerationStructureBarrierType::BuildToShaderRead:
@@ -930,6 +932,17 @@ namespace NRI
 
             m_commandBuffers[m_currentFrameIndex].pipelineBarrier2(depInfo);
         }
+
+    void CommandBufferVK::transferBarrier()
+    {
+        const vk::MemoryBarrier2 barrier{
+            .srcStageMask = vk::PipelineStageFlagBits2::eAllTransfer,
+            .srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
+            .dstStageMask = vk::PipelineStageFlagBits2::eAllTransfer,
+            .dstAccessMask = vk::AccessFlagBits2::eTransferRead | vk::AccessFlagBits2::eTransferWrite
+        };
+        m_commandBuffers[m_currentFrameIndex].pipelineBarrier2(vk::DependencyInfo{ .memoryBarrierCount = 1, .pMemoryBarriers = &barrier });
+    }
 
     void CommandBufferVK::executionBarrier()
     {

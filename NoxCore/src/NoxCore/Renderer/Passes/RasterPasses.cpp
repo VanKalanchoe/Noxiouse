@@ -30,6 +30,54 @@ namespace Nox
             });
     }
 
+    void Renderer::addBLASBuildPass()
+    {
+        if (m_blasBuilds.empty())
+            return;
+
+        // The frame's share of queued builds, chosen here on the main thread: the scratch buffer grows and the GPU scene
+        // learns the new BLAS (its TLAS records reference them from the next frame's instance list, after this build).
+        uint64_t primitives = 0;
+        size_t count = 0;
+        uint64_t scratchSize = 0;
+        std::vector<std::pair<NRI::AccelerationStructureBuildDesc, NRI::AccelerationStructure*>> builds;
+        for (; count < m_blasBuilds.size() && primitives < BlasBuildPrimitivesPerFrame; ++count)
+        {
+            const BlasBuild& build = m_blasBuilds[count];
+            MeshBLAS& blas = m_meshBLASes[build.blasId];
+            const NRI::AccelerationStructureBuildDesc desc = blasBuildDesc(build);
+            scratchSize = std::max(scratchSize, m_device->getAccelerationStructureBuildSizes(desc).buildScratchSize);
+            builds.emplace_back(desc, blas.as.get());
+            m_gpuScene.SetMeshBlas(build.meshSlot, blas.as->getDeviceAddress());
+            primitives += build.indices.count / 3;
+        }
+        m_blasBuilds.erase(m_blasBuilds.begin(), m_blasBuilds.begin() + static_cast<std::ptrdiff_t>(count));
+
+        if (!m_blasScratch || m_blasScratch->getSize() < scratchSize)
+        {
+            if (m_blasScratch)
+            {
+                std::scoped_lock lock(m_deferredReleasesMutex);
+                m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, std::move(m_blasScratch) });
+            }
+            m_blasScratch = m_device->createBuffer(NRI::BufferDesc{ .size = scratchSize, .usage = NRI::BufferUsage::AccelerationStructureScratch });
+        }
+
+        // Reads the geometry streams, which the frame's submission waits on the upload timeline for.
+        m_renderGraph.AddPass("BLAS Build", RGPassFlags::NeverCull,
+            [&](RGBuilder&) {},
+            [this, builds = std::move(builds)](RGPassContext& context)
+            {
+                NRI::CommandBuffer& cmd = context.Cmd();
+                for (const auto& [desc, blas] : builds)
+                {
+                    // One scratch buffer for all of them: each build waits for the one before.
+                    cmd.buildAccelerationStructure(desc, m_blasScratch->getDeviceAddress(), *blas);
+                    cmd.accelerationStructureBarrier(NRI::AccelerationStructureBarrierType::BuildToBuild);
+                }
+            });
+    }
+
     void Renderer::addTLASBuildPass()
     {
         const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();

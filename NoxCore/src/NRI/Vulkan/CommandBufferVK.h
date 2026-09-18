@@ -75,6 +75,7 @@ namespace NRI
         void updateAccelerationStructure(const AccelerationStructureBuildDesc& buildDesc, uint64_t scratchAddress, AccelerationStructure& srcAS, AccelerationStructure& dstAS) override;
         void accelerationStructureBarrier(AccelerationStructureBarrierType barrierType = AccelerationStructureBarrierType::BuildToShaderRead) override;
         void executionBarrier() override;
+        void transferBarrier() override;
         void resourceBarriers(std::span<const TextureBarrierDesc> textures, std::span<const BufferBarrierDesc> buffers) override;
         void beginDebugLabel(const char* label) override;
         void endDebugLabel() override;

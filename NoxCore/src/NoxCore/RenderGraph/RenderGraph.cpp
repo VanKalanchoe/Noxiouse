@@ -594,17 +594,57 @@ namespace Nox
 
     void RenderGraph::PlanPreciseSynchronization()
     {
-        // Front to back: every resource a pass accesses gets a barrier from the state the previous executed pass left it
-        // in, when either of them writes it (read -> read needs none). All of a pass's accesses to one resource merge into
-        // one state. Recorded at the start of the consuming pass, in whichever command buffer records it.
+        // Front to back, per resource. A write waits for the last write and for every read since it (write after read
+        // needs all readers, not only the most recent one). A read waits for the last write unless that write was
+        // already made visible to its stages: several readers after one write can each need their own barrier (the
+        // Hi-Z build reads depth in compute, the previous-frame copy reads it as a transfer). Read after read with no
+        // write between needs none. All of a pass's accesses to one resource merge into one state; the barriers are
+        // recorded at the start of the consuming pass, in whichever command buffer records it.
         m_TextureBarriers.clear();
         m_BufferBarriers.clear();
 
         const size_t textureCount = m_Textures.size();
-        std::vector<NRI::ResourceState>& lastState = m_LastStateScratch;
+        const size_t resourceCount = textureCount + m_Buffers.size();
+        std::vector<NRI::ResourceState>& lastWrite = m_LastWriteScratch;
+        std::vector<NRI::ResourceState>& readsSinceWrite = m_ReadsSinceWriteScratch;
+        std::vector<NRI::ResourceState>& visible = m_VisibleScratch;
         std::vector<bool>& accessed = m_AccessedScratch;
-        lastState.assign(textureCount + m_Buffers.size(), NRI::ResourceState{});
-        accessed.assign(textureCount + m_Buffers.size(), false);
+        std::vector<bool>& written = m_WrittenScratch;
+        lastWrite.assign(resourceCount, NRI::ResourceState{});
+        readsSinceWrite.assign(resourceCount, NRI::ResourceState{});
+        visible.assign(resourceCount, NRI::ResourceState{});
+        accessed.assign(resourceCount, false);
+        written.assign(resourceCount, false);
+
+        auto physical = [&](size_t key) -> const void*
+        {
+            return key < textureCount ? static_cast<const void*>(m_Textures[key].Texture)
+                                      : static_cast<const void*>(m_Buffers[key - textureCount].Buffer);
+        };
+
+        // Start where the previous frame left each resource: its first access this frame is ordered after that.
+        for (size_t key = 0; key < resourceCount; ++key)
+        {
+            const void* resource = physical(key);
+            auto carried = resource ? m_CarriedStates.find(resource) : m_CarriedStates.end();
+            if (carried == m_CarriedStates.end())
+                continue;
+            lastWrite[key] = carried->second.LastWrite;
+            readsSinceWrite[key] = carried->second.ReadsSinceWrite;
+            visible[key] = carried->second.Visible;
+            written[key] = carried->second.Written;
+            accessed[key] = true;
+        }
+
+        auto merge = [](NRI::ResourceState& into, const NRI::ResourceState& state)
+        {
+            into.access |= state.access;
+            into.stages |= state.stages;
+        };
+        auto covers = [](const NRI::ResourceState& covered, const NRI::ResourceState& state)
+        {
+            return (covered.access & state.access) == state.access && (covered.stages & state.stages) == state.stages;
+        };
 
         for (uint32_t index = 0; index < m_PassCount; ++index)
         {
@@ -631,18 +671,48 @@ namespace Nox
             pass.FirstBufferBarrier = static_cast<uint32_t>(m_BufferBarriers.size());
             for (const auto& [key, state] : passStates)
             {
-                if (accessed[key] && (HasWriteAccess(lastState[key]) || HasWriteAccess(state)))
+                auto addBarrier = [&](const NRI::ResourceState& before)
                 {
                     if (key < textureCount)
-                        m_TextureBarriers.push_back({ m_Textures[key].Texture, lastState[key], state });
+                        m_TextureBarriers.push_back({ m_Textures[key].Texture, before, state });
                     else
-                        m_BufferBarriers.push_back({ m_Buffers[key - textureCount].Buffer, lastState[key], state });
+                        m_BufferBarriers.push_back({ m_Buffers[key - textureCount].Buffer, before, state });
+                };
+
+                if (HasWriteAccess(state))
+                {
+                    if (accessed[key])
+                    {
+                        NRI::ResourceState before = lastWrite[key];
+                        merge(before, readsSinceWrite[key]);
+                        addBarrier(before);
+                    }
+                    lastWrite[key] = state;
+                    readsSinceWrite[key] = {};
+                    visible[key] = state;
+                    written[key] = true;
                 }
-                lastState[key] = state;
+                else
+                {
+                    if (written[key] && !covers(visible[key], state))
+                    {
+                        addBarrier(lastWrite[key]);
+                        merge(visible[key], state);
+                    }
+                    merge(readsSinceWrite[key], state);
+                }
                 accessed[key] = true;
             }
             pass.TextureBarrierCount = static_cast<uint32_t>(m_TextureBarriers.size()) - pass.FirstTextureBarrier;
             pass.BufferBarrierCount = static_cast<uint32_t>(m_BufferBarriers.size()) - pass.FirstBufferBarrier;
+        }
+
+        m_CarriedStates.clear();
+        for (size_t key = 0; key < resourceCount; ++key)
+        {
+            const void* resource = physical(key);
+            if (resource && accessed[key])
+                m_CarriedStates[resource] = CarriedState{ lastWrite[key], readsSinceWrite[key], visible[key], written[key] };
         }
     }
 

@@ -163,7 +163,7 @@ namespace NRI
 
     enum class AccelerationStructureBarrierType : uint8_t
     {
-        BuildToBuild,      // BLAS build write -> TLAS build read
+        BuildToBuild,      // build write -> the next build's read (TLAS over BLAS) or write (shared scratch)
         BuildToShaderRead, // TLAS build/update write -> Fragment/Compute shader ray query read
         TransferToBuild    // Instance buffer transfer/write -> TLAS build read
     };
@@ -236,6 +236,9 @@ namespace NRI
         virtual void updateAccelerationStructure(const AccelerationStructureBuildDesc& buildDesc, uint64_t scratchAddress, AccelerationStructure& srcAS, AccelerationStructure& dstAS) = 0;
         virtual void accelerationStructureBarrier(AccelerationStructureBarrierType barrierType = AccelerationStructureBarrierType::BuildToShaderRead) = 0;
         virtual void executionBarrier() = 0;
+        // Copies after this start once the copies before it have written (transfer stages only, so a transfer queue can
+        // record it where executionBarrier's attachment accesses are not supported).
+        virtual void transferBarrier() = 0;
         // Barriers scoped to the given resources, recorded as one pipeline barrier.
         virtual void resourceBarriers(std::span<const TextureBarrierDesc> textures, std::span<const BufferBarrierDesc> buffers) = 0;
 

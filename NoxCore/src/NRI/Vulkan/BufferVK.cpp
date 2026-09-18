@@ -88,7 +88,8 @@ namespace NRI
             break;
         }
 
-        m_allocatedBuffer = m_deviceVK.getAllocator().createBuffer(desc.size, usageFlags, memoryUsage, allocFlags);
+        m_allocatedBuffer = m_deviceVK.getAllocator().createBuffer(desc.size, usageFlags, memoryUsage, allocFlags, {},
+            desc.sharedAcrossQueues ? m_deviceVK.getSharedQueueFamilies() : std::span<const uint32_t>{});
     }
 
     void* BufferVK::map(uint64_t offset, uint64_t size)

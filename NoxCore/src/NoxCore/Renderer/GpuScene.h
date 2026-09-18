@@ -116,6 +116,8 @@ namespace Nox
 
         // Meshes: one per uploaded submesh. blasAddress 0: not ray traced.
         uint32_t AddMesh(const shaderio::GpuMesh& mesh, uint64_t blasAddress);
+        // The mesh's BLAS is built (it is ray traced from the next TLAS on).
+        void SetMeshBlas(uint32_t meshSlot, uint64_t blasAddress);
         // Where the geometry streams live now: the ray tracing records hold absolute addresses (the hit lookups read one
         // flat record), so they are rewritten whenever a stream that grew moved its contents.
         void SetGeometryBases(uint64_t vertexBase, uint64_t indexBase);

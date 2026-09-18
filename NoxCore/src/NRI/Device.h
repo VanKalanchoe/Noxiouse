@@ -14,6 +14,7 @@
 #include "DescriptorHeap.h"
 #include "AccelerationStructure.h"
 #include "GpuProfiler.h"
+#include "TimelineSemaphore.h"
 #include "ShaderCompiler.h"
 #include "NoxCore/Core/Window.h"
 
@@ -150,7 +151,10 @@ namespace NRI
         
         virtual std::unique_ptr<Swapchain> createSwapchain(const SwapchainDesc& desc) = 0;
         virtual std::unique_ptr<Pipeline> createPipeline(const PipelineDesc& desc, ShaderCompiler& compiler) = 0;
-        virtual std::unique_ptr<CommandAllocator> createCommandAllocator(CommandBufferReset resetMode) = 0;
+        virtual std::unique_ptr<CommandAllocator> createCommandAllocator(CommandBufferReset resetMode, QueueType queue = QueueType::Graphics) = 0;
+        virtual std::unique_ptr<TimelineSemaphore> createTimelineSemaphore(uint64_t initialValue = 0) = 0;
+        // Whether Transfer is its own queue family (a copy engine running beside graphics) or the graphics queue.
+        virtual bool hasDedicatedTransferQueue() const = 0;
         virtual Nox::Ref<Texture2D> createTexture(const TextureDesc& desc) = 0;
         virtual std::unique_ptr<Buffer> createBuffer(const BufferDesc& desc) = 0;
         virtual std::unique_ptr<DescriptorHeap> createDescriptorHeap(const DescriptorHeapDesc& desc) = 0;
@@ -219,7 +223,13 @@ namespace NRI
         virtual void submitAndWait(CommandBuffer& cmdBuffer, uint32_t slotIndex = 0) = 0;
         // One queue submission of the frame's command buffers, executed in span order (slot 0 of each buffer), waiting for
         // the swapchain image and signaling the frame slot's fence.
-        virtual void submitCommandBuffers(std::span<CommandBuffer* const> cmdBuffers, Swapchain& swapchain, uint32_t frameIndex, uint32_t imageIndex) = 0;
+        // The frame: waits on the swapchain image and on timelineWaits (uploads it reads), signals presentation.
+        virtual void submitCommandBuffers(std::span<CommandBuffer* const> cmdBuffers, Swapchain& swapchain, uint32_t frameIndex,
+                                          uint32_t imageIndex, std::span<const TimelinePoint> timelineWaits = {}) = 0;
+        // Work outside the frame: starts after every wait is reached, signals every point when done. Main thread only
+        // (queues are externally synchronized).
+        virtual void submit(QueueType queue, std::span<CommandBuffer* const> cmdBuffers, std::span<const TimelinePoint> waits,
+                            std::span<const TimelinePoint> signals) = 0;
         virtual void waitIdle() = 0;
         virtual void initImGui(Nox::Window& window) = 0;
         virtual void shutdownImGui() = 0;

@@ -133,6 +133,13 @@ namespace NRI
             .usage = usageFlags,
             .sharingMode = vk::SharingMode::eExclusive
         };
+        const std::span<const uint32_t> sharedFamilies = m_deviceVK.getSharedQueueFamilies();
+        if (desc.sharedAcrossQueues && sharedFamilies.size() > 1)
+        {
+            imageInfo.sharingMode = vk::SharingMode::eConcurrent;
+            imageInfo.queueFamilyIndexCount = static_cast<uint32_t>(sharedFamilies.size());
+            imageInfo.pQueueFamilyIndices = sharedFamilies.data();
+        }
         m_imageResource.image = m_deviceVK.getAllocator().createImage(imageInfo).image;
 
         vk::ImageViewType viewType = vk::ImageViewType::e2D;
@@ -168,7 +175,9 @@ namespace NRI
         }
         
         // VK_KHR_unified_image_layouts:
-            // Automatically initialize attachment and storage textures to eGeneral upon creation!
+            // Automatically initialize attachment and storage textures to eGeneral upon creation! An uploaded image
+            // (sharedAcrossQueues) records that transition in its upload instead, so creating it submits nothing.
+            if (!desc.sharedAcrossQueues)
             {
                 vk::CommandPoolCreateInfo poolInfo{
                     .flags = vk::CommandPoolCreateFlagBits::eTransient,
@@ -239,6 +248,41 @@ namespace NRI
             ImGui_ImplVulkan_RemoveTexture(m_imGuiHandle);
             m_imGuiHandle = VK_NULL_HANDLE;
         }
+    }
+
+    void TextureVK::recordUpload(CommandBuffer& cmdBuffer, Buffer& stagingBuffer, uint64_t stagingOffset, const std::vector<size_t>& mipOffsets)
+    {
+        vk::raii::CommandBuffer& cb = static_cast<CommandBufferVK&>(cmdBuffer).getNativeBuffer(0);
+        const vk::raii::Buffer& source = static_cast<BufferVK&>(stagingBuffer).getNativeBuffer();
+
+        // Out of the initial layout, into the one every later use reads in (VK_KHR_unified_image_layouts).
+        const vk::ImageMemoryBarrier2 toGeneral{
+            .srcStageMask = vk::PipelineStageFlagBits2::eNone,
+            .srcAccessMask = {},
+            .dstStageMask = vk::PipelineStageFlagBits2::eCopy,
+            .dstAccessMask = vk::AccessFlagBits2::eTransferWrite,
+            .oldLayout = vk::ImageLayout::eUndefined,
+            .newLayout = vk::ImageLayout::eGeneral,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .image = *m_imageResource.image,
+            .subresourceRange = { .aspectMask = vk::ImageAspectFlagBits::eColor, .baseMipLevel = 0, .levelCount = m_desc.mipLevels,
+                                  .baseArrayLayer = 0, .layerCount = m_desc.arrayLayers }
+        };
+        cb.pipelineBarrier2(vk::DependencyInfo{ .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &toGeneral });
+
+        std::vector<vk::BufferImageCopy> regions;
+        regions.reserve(mipOffsets.size());
+        for (uint32_t mip = 0; mip < mipOffsets.size(); ++mip)
+        {
+            regions.push_back(vk::BufferImageCopy{
+                .bufferOffset = stagingOffset + mipOffsets[mip],
+                .imageSubresource = { .aspectMask = vk::ImageAspectFlagBits::eColor, .mipLevel = mip, .baseArrayLayer = 0,
+                                      .layerCount = m_desc.arrayLayers },
+                .imageExtent = { std::max(1u, m_desc.width >> mip), std::max(1u, m_desc.height >> mip), 1 }
+            });
+        }
+        cb.copyBufferToImage(*source, *m_imageResource.image, vk::ImageLayout::eGeneral, regions);
     }
 
     void TextureVK::uploadFromBuffer(CommandBuffer& cmdBuffer, Buffer& stagingBuffer, uint32_t width, uint32_t height, uint32_t mipLevels, const std::vector<size_t>& mipOffsets)

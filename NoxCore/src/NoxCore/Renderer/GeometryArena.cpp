@@ -68,7 +68,8 @@ namespace Nox
     {
         return m_device->createBuffer(NRI::BufferDesc{
             .size = uint64_t(capacity) * m_elementSize,
-            .usage = m_usage
+            .usage = m_usage,
+            .sharedAcrossQueues = true // new ranges are copied on the transfer queue while graphics reads the others
         });
     }
 }

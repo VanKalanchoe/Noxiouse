@@ -9,6 +9,7 @@
 
 #include "GeometryArena.h"
 #include "MemoryBudget.h"
+#include "UploadManager.h"
 #include "GpuScene.h"
 #include "NoxCore/RenderGraph/RenderGraph.h"
 
@@ -396,21 +397,6 @@ namespace Nox
 
         MeshHandle UploadMeshGeometry(const MeshData& data, bool isOpaque = true);
 
-        // Bulk-load scope: buffer copies and BLAS builds made between Begin/End are recorded into
-        // shared command buffers (flushed on staging/work budgets) instead of one synchronous
-        // submit-and-wait per slice and per BLAS. Nestable.
-        static void BeginUploadBatch()
-        {
-            if (s_Instance)
-                ++s_Instance->m_uploadBatch.depth;
-        }
-
-        static void EndUploadBatch()
-        {
-            if (s_Instance)
-                s_Instance->endUploadBatch();
-        }
-
         static MeshHandle UploadMesh(const MeshData& data, bool isOpaque = true)
         {
             NOX_CORE_ASSERT(s_Instance, "Renderer instance does not exist!");
@@ -543,6 +529,7 @@ namespace Nox
         void addInstanceCullingLatePass();
         // Draws what phase 2 found visible into the visibility buffer and depth.
         void addVisibilityLatePass();
+        void addBLASBuildPass();
         void addTLASBuildPass();
         void addVisibilityPass();
         void addGBufferPass();
@@ -949,32 +936,26 @@ namespace Nox
         std::vector<MeshBLAS> m_meshBLASes;
         std::vector<uint32_t> m_freeBLASIds;
 
-        struct UploadBatchState
+        // Uploads run on the transfer queue (§5.11.4); frames wait on the GPU for what they read.
+        UploadManager m_uploads;
+
+        // A mesh draws once its geometry is copied and is ray traced once its BLAS is built: builds wait here and run
+        // in frames under a primitive budget, on the graphics queue (transfer queues cannot build acceleration
+        // structures). Ranges, not addresses: a stream can grow before the build is recorded.
+        struct BlasBuild
         {
-            uint32_t depth = 0;
-            std::unique_ptr<NRI::CommandBuffer> commandBuffer;
-
-            // One reusable, persistently mapped staging buffer; oversized slices get their own and
-            // are kept alive until the batch is submitted.
-            std::unique_ptr<NRI::Buffer> staging;
-            uint8_t* stagingMapped = nullptr;
-            uint64_t stagingCapacity = 0;
-            uint64_t stagingUsed = 0;
-            std::vector<std::unique_ptr<NRI::Buffer>> retainedBuffers;
-            uint64_t retainedBytes = 0;
-
-            // BLAS builds recorded sequentially in one command buffer can share a scratch buffer.
-            std::unique_ptr<NRI::Buffer> scratch;
-            uint64_t scratchCapacity = 0;
-            uint64_t pendingPrimitives = 0;
-            uint32_t pendingBuilds = 0;
+            uint32_t blasId = UINT32_MAX;
+            uint32_t meshSlot = UINT32_MAX;
+            GeometryRange vertices;
+            GeometryRange indices;
+            bool isOpaque = true;
         };
-        UploadBatchState m_uploadBatch;
-
-        NRI::CommandBuffer& uploadBatchCommandBuffer();
-        void uploadBatchCopy(NRI::Buffer& dstBuffer, const void* data, uint64_t byteSize, uint64_t dstByteOffset);
-        void flushUploadBatch();
-        void endUploadBatch();
+        std::vector<BlasBuild> m_blasBuilds;
+        std::unique_ptr<NRI::Buffer> m_blasScratch; // shared by the builds of one frame, recorded one after another
+        // Bounds each frame's build work while a large load streams in (one submission building thousands of BLAS
+        // could exceed the driver timeout).
+        static constexpr uint64_t BlasBuildPrimitivesPerFrame = 2'000'000;
+        NRI::AccelerationStructureBuildDesc blasBuildDesc(const BlasBuild& build) const;
         // --- Hardware Ray Tracing: Scene TLAS ---
         void updateSceneAccelerationStructure(uint32_t currentFrameIndex);
         void BuildSceneAccelerationStructure(NRI::CommandBuffer& cmd);

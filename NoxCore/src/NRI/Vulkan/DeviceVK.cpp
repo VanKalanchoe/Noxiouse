@@ -18,6 +18,7 @@
 #include "MemoryAllocatorVK.h"
 #include "NoxCore/Core/core.h"
 #include "NoxCore/Core/Log.h"
+#include "TimelineSemaphoreVK.h"
 
 // NVIDIA Real-Time Denoisers (NRD)
 #include "NRD.h"
@@ -69,9 +70,14 @@ namespace NRI
         return std::make_unique<PipelineVK>(*this, desc, compiler);
     }
 
-    std::unique_ptr<CommandAllocator> DeviceVK::createCommandAllocator(CommandBufferReset resetMode)
+    std::unique_ptr<CommandAllocator> DeviceVK::createCommandAllocator(CommandBufferReset resetMode, QueueType queue)
     {
-        return std::make_unique<CommandAllocatorVK>(*this, resetMode);
+        return std::make_unique<CommandAllocatorVK>(*this, resetMode, getQueueFamily(queue));
+    }
+
+    std::unique_ptr<TimelineSemaphore> DeviceVK::createTimelineSemaphore(uint64_t initialValue)
+    {
+        return std::make_unique<TimelineSemaphoreVK>(*this, initialValue);
     }
 
     Nox::Ref<Texture2D> DeviceVK::createTexture(const TextureDesc& desc)
@@ -606,6 +612,21 @@ namespace NRI
         {
             throw std::runtime_error("Could not find a queue for graphics and present -> terminating");
         }
+
+        // Uploads prefer a copy engine: a family that transfers but neither draws nor computes (Vulkan Tutorial,
+        // Transfer Queues & Asset Streaming). Without one they go to the graphics queue.
+        m_transferQueueIndex = m_queueIndex;
+        for (uint32_t qfpIndex = 0; qfpIndex < queueFamilyProperties.size(); qfpIndex++)
+        {
+            const vk::QueueFlags flags = queueFamilyProperties[qfpIndex].queueFlags;
+            if ((flags & vk::QueueFlagBits::eTransfer) && !(flags & vk::QueueFlagBits::eGraphics) && !(flags & vk::QueueFlagBits::eCompute))
+            {
+                m_transferQueueIndex = qfpIndex;
+                break;
+            }
+        }
+        m_sharedQueueFamilies = { m_queueIndex, m_transferQueueIndex };
+        m_sharedQueueFamilyCount = m_transferQueueIndex != m_queueIndex ? 2 : 1;
         auto features = m_physicalDevice.template getFeatures2<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceShaderObjectFeaturesEXT, vk::PhysicalDeviceMeshShaderFeaturesEXT>();
         m_shaderObjectsEnabled = features.template get<vk::PhysicalDeviceShaderObjectFeaturesEXT>().shaderObject;
         m_pipelineStatisticsEnabled = features.template get<vk::PhysicalDeviceFeatures2>().features.pipelineStatisticsQuery &&
@@ -717,17 +738,23 @@ namespace NRI
 
         // create a Device
         float queuePriority = 0.5f;
-        vk::DeviceQueueCreateInfo deviceQueueCreateInfo{.queueFamilyIndex = m_queueIndex, .queueCount = 1, .pQueuePriorities = &queuePriority};
+        const std::array<vk::DeviceQueueCreateInfo, 2> deviceQueueCreateInfos{
+            vk::DeviceQueueCreateInfo{.queueFamilyIndex = m_queueIndex, .queueCount = 1, .pQueuePriorities = &queuePriority},
+            vk::DeviceQueueCreateInfo{.queueFamilyIndex = m_transferQueueIndex, .queueCount = 1, .pQueuePriorities = &queuePriority}
+        };
         vk::DeviceCreateInfo deviceCreateInfo{
             .pNext = &featureChain.get<vk::PhysicalDeviceFeatures2>(),
-            .queueCreateInfoCount = 1,
-            .pQueueCreateInfos = &deviceQueueCreateInfo,
+            .queueCreateInfoCount = m_sharedQueueFamilyCount,
+            .pQueueCreateInfos = deviceQueueCreateInfos.data(),
             .enabledExtensionCount = static_cast<uint32_t>(enabledDeviceExtensions.size()),
             .ppEnabledExtensionNames = enabledDeviceExtensions.data()
         };
 
         m_device = vk::raii::Device(m_physicalDevice, deviceCreateInfo);
         m_queue = vk::raii::Queue(m_device, m_queueIndex, 0);
+        m_transferQueue = vk::raii::Queue(m_device, m_transferQueueIndex, 0);
+        m_submitFence = vk::raii::Fence(m_device, vk::FenceCreateInfo{});
+        NOX_CORE_INFO("Transfer queue: {}", hasDedicatedTransferQueue() ? "dedicated family" : "graphics queue");
 
         // Load device-level function pointers for Vulkan-Hpp wrappers.
         // Before we only loaded the function pointers for the instance-level functions.
@@ -1227,30 +1254,77 @@ namespace NRI
 
         vk::raii::CommandBuffer& nativeCB = cmdBufferVK->getNativeBuffer(slotIndex);
         vk::SubmitInfo submitInfo{.commandBufferCount = 1, .pCommandBuffers = &*nativeCB};
-        m_queue.submit(submitInfo, nullptr);
-        m_queue.waitIdle();
+
+        // Waits for this submission only; idling the queue would also wait for every frame in flight.
+        m_device.resetFences(*m_submitFence);
+        m_queue.submit(submitInfo, *m_submitFence);
+        (void)m_device.waitForFences(*m_submitFence, vk::True, UINT64_MAX);
     }
 
-    void DeviceVK::submitCommandBuffers(std::span<CommandBuffer* const> cmdBuffers, Swapchain& swapchain, uint32_t frameIndex, uint32_t imageIndex)
+    void DeviceVK::submitCommandBuffers(std::span<CommandBuffer* const> cmdBuffers, Swapchain& swapchain, uint32_t frameIndex,
+                                        uint32_t imageIndex, std::span<const TimelinePoint> timelineWaits)
     {
         auto* vkSwap = static_cast<SwapchainVK*>(&swapchain);
 
         // Main thread only (the queue is externally synchronized); the scratch keeps its capacity.
         m_submitScratch.clear();
         for (CommandBuffer* cmdBuffer : cmdBuffers)
-            m_submitScratch.push_back(*static_cast<CommandBufferVK*>(cmdBuffer)->getNativeBuffer(0));
+            m_submitScratch.push_back(vk::CommandBufferSubmitInfo{ .commandBuffer = *static_cast<CommandBufferVK*>(cmdBuffer)->getNativeBuffer(0) });
 
-        vk::PipelineStageFlags waitDestinationStageMask(vk::PipelineStageFlagBits::eColorAttachmentOutput);
-        const vk::SubmitInfo submitInfo{
-            .waitSemaphoreCount = 1,
-            .pWaitSemaphores = &*vkSwap->getPresentCompleteSemaphore(frameIndex),
-            .pWaitDstStageMask = &waitDestinationStageMask,
-            .commandBufferCount = static_cast<uint32_t>(m_submitScratch.size()),
-            .pCommandBuffers = m_submitScratch.data(),
-            .signalSemaphoreCount = 1,
-            .pSignalSemaphores = &*vkSwap->getRenderFinishedSemaphore(imageIndex)
+        // Acquire and present still take binary semaphores (WSI); uploads the frame reads are timeline points. Their
+        // values are reached before the frame is built, so those waits order the transfer writes without stalling.
+        m_waitScratch.clear();
+        m_waitScratch.push_back(vk::SemaphoreSubmitInfo{ .semaphore = *vkSwap->getPresentCompleteSemaphore(frameIndex),
+                                                         .stageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput });
+        for (const TimelinePoint& point : timelineWaits)
+        {
+            m_waitScratch.push_back(vk::SemaphoreSubmitInfo{ .semaphore = *static_cast<TimelineSemaphoreVK*>(point.semaphore)->getNativeSemaphore(),
+                                                             .value = point.value,
+                                                             .stageMask = vk::PipelineStageFlagBits2::eAllCommands });
+        }
+
+        const vk::SemaphoreSubmitInfo renderFinished{ .semaphore = *vkSwap->getRenderFinishedSemaphore(imageIndex),
+                                                      .stageMask = vk::PipelineStageFlagBits2::eAllCommands };
+        const vk::SubmitInfo2 submitInfo{
+            .waitSemaphoreInfoCount = static_cast<uint32_t>(m_waitScratch.size()),
+            .pWaitSemaphoreInfos = m_waitScratch.data(),
+            .commandBufferInfoCount = static_cast<uint32_t>(m_submitScratch.size()),
+            .pCommandBufferInfos = m_submitScratch.data(),
+            .signalSemaphoreInfoCount = 1,
+            .pSignalSemaphoreInfos = &renderFinished
         };
-        m_queue.submit(submitInfo, *vkSwap->getInFlightFence(frameIndex));
+        m_queue.submit2(submitInfo, *vkSwap->getInFlightFence(frameIndex));
+    }
+
+    void DeviceVK::submit(QueueType queue, std::span<CommandBuffer* const> cmdBuffers, std::span<const TimelinePoint> waits,
+                          std::span<const TimelinePoint> signals)
+    {
+        m_submitScratch.clear();
+        for (CommandBuffer* cmdBuffer : cmdBuffers)
+            m_submitScratch.push_back(vk::CommandBufferSubmitInfo{ .commandBuffer = *static_cast<CommandBufferVK*>(cmdBuffer)->getNativeBuffer(0) });
+
+        auto toSubmitInfo = [](const TimelinePoint& point)
+        {
+            return vk::SemaphoreSubmitInfo{ .semaphore = *static_cast<TimelineSemaphoreVK*>(point.semaphore)->getNativeSemaphore(),
+                                            .value = point.value,
+                                            .stageMask = vk::PipelineStageFlagBits2::eAllCommands };
+        };
+        m_waitScratch.clear();
+        for (const TimelinePoint& point : waits)
+            m_waitScratch.push_back(toSubmitInfo(point));
+        m_signalScratch.clear();
+        for (const TimelinePoint& point : signals)
+            m_signalScratch.push_back(toSubmitInfo(point));
+
+        const vk::SubmitInfo2 submitInfo{
+            .waitSemaphoreInfoCount = static_cast<uint32_t>(m_waitScratch.size()),
+            .pWaitSemaphoreInfos = m_waitScratch.data(),
+            .commandBufferInfoCount = static_cast<uint32_t>(m_submitScratch.size()),
+            .pCommandBufferInfos = m_submitScratch.data(),
+            .signalSemaphoreInfoCount = static_cast<uint32_t>(m_signalScratch.size()),
+            .pSignalSemaphoreInfos = m_signalScratch.data()
+        };
+        (queue == QueueType::Transfer ? m_transferQueue : m_queue).submit2(submitInfo);
     }
 
     void DeviceVK::waitIdle()

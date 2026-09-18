@@ -40,6 +40,7 @@
 6. [Roadmap](#6-roadmap)
 7. [Open Decisions](#7-open-decisions)
 8. [References](#8-references)
+9. [Deferred Work](#9-deferred-work)
 
 ---
 
@@ -1007,13 +1008,23 @@ textures still streaming (mip tails first).
 #### 5.11.4 Upload manager
 - Dedicated **transfer queue** (fallback: graphics queue) with its own command pools.
 - **Staging ring buffer** (persistent mapped); copies batched per frame under a byte budget.
-- Completion tracked with fences polled on the main thread at frame start — no `submitAndWait` on hot paths
-  (today's single-time command buffers remain only for startup/tools).
+- Completion tracked with a **timeline semaphore** (the upload clock) polled on the main thread at frame start; the
+  frame submission waits on the last signalled value — no `submitAndWait` on hot paths (single-time command buffers
+  remain only for startup/tools).
 - BLAS builds queued with per-frame primitive budgets (generalizing this session's upload batching).
 
 #### 5.11.5 Editor integration
 Drag-and-drop import/load becomes asynchronous: the entity hierarchy is created immediately with
 placeholder bounds; geometry/textures appear when ready; progress shown in a status bar.
+
+#### 5.11.6 Implementation (Phase 5, September 2026)
+Baseline before 5a (Release, no debugger, Bistro dragged into an empty scene): the whole load runs in one frame of
+3427 ms; 196 assets sum to 3285 ms, of which the mesh 377 ms (GPU upload + BLAS 238 ms) and 195 textures 2908 ms
+(~15 ms each). Frame times once loaded: A GPU 3.96 / CPU 0.77 ms, B 56.12 / 1.62 ms, C 28.05 / 1.30 ms.
+
+| Step | What was built | Result |
+|---|---|---|
+| 5a | NRI multi-queue: `DeviceVK` picks a dedicated transfer family (transfer, neither graphics nor compute; fallback the graphics queue), `NRI::QueueType`, `createCommandAllocator(resetMode, QueueType)`, `NRI::TimelineSemaphore` (`createTimelineSemaphore`, `getValue`, `wait`) and `Device::submit(queue, commandBuffers, waits, signals)` on `vkQueueSubmit2`; the frame submission also moved to `vkQueueSubmit2` and takes timeline waits next to its binary swapchain semaphores. `submitAndWait` waits on its own fence instead of idling the queue. `sharedAcrossQueues` on buffer and texture descs gives concurrent sharing (geometry streams and uploaded asset textures; images stay in `eGeneral`, so no ownership or layout handoff). `Renderer/UploadManager`: transfer command allocator, upload timeline, one persistently mapped 64 MB staging ring (oversized uploads get a retained buffer of their own); `ReserveStaging`, `CopyToBuffer`, `CopyToTexture` (`Texture2D::recordUpload`), `CopyBuffer`; `Flush` submits and signals the next timeline value, `Poll` returns completed ring space. It replaces the upload batch, the per-texture staging buffer and every upload `submitAndWait`; stream growth copies through it too. BLAS builds left the load: queued per mesh and built by a "BLAS Build" graph pass under 2M primitives per frame with one reusable scratch buffer; `GpuScene::SetMeshBlas` puts the mesh into the TLAS. Precise synchronization now tracks per resource the last write, the reads since it and the stages already made visible, and carries that state across frames by physical resource (the multi-reader depth hazards and cross-frame write-after-write that synchronization validation reported). | **Verified 2026-09-18:** synchronization validation clean (NGX aside), images identical, ray tracing of freshly loaded Bistro fills in, load -> delete -> reload fine. Release (log: transfer queue on a dedicated family): longest load frame 3427 -> 3070 ms, mesh GPU upload + BLAS 238 -> 39 ms (mesh asset 377 -> 162 ms), textures 2908 -> 2689 ms (14.0 each: file read and decode on the main thread dominate, 5b's work), all assets 3285 -> 2851 ms. Frame times unchanged: A GPU 3.82 / CPU 0.77, B 55.38 / 1.63, C 28.56 / 1.31 ms. Measurement note: a Vulkan Configurator layer override applies to Release builds too (first 5a run: recording 10-50x slower per pass, CPU B 6.6 ms); close it before measuring. |
 
 ### 5.12 Texture Streaming
 
@@ -1106,7 +1117,7 @@ Phases 1, 2 and 3 are architecture-defining and each gets its own plan-mode desi
 | D3 | Texture streaming | mip streaming first vs virtual texturing first | recommendation: mip streaming first |
 | D4 | Geometry LOD | Nanite-like cluster DAG vs discrete LODs first | DAG is more work; discrete LODs as stepping stone? |
 | D5 | Geometry buffer growth | grow-and-copy vs sparse binding reserve/commit | Base (Phase 4) uses grow-and-copy at load boundaries; sparse evaluated later, needs driver support validation |
-| D6 | Additional queues | today: one combined graphics/compute queue (§3.1) · add dedicated transfer queue for uploads · add async compute queue(s) for culling/RT/denoising | requires multi-queue device creation in NRI, queue-family detection, cross-queue sync2 barriers, per-queue command pools |
+| D6 | Additional queues (**transfer decided**) | ~~one combined graphics/compute queue~~ · **dedicated transfer queue for uploads (Phase 5a, §5.11.6)** · async compute queue(s) for culling/RT/denoising still open | Transfer: multi-queue device creation, queue-family detection, timeline semaphores and per-queue command pools in NRI; concurrent sharing instead of ownership transfers |
 | D7 | IO backend | IoRing/overlapped IO vs DirectStorage | DirectStorage enables GPU decompression |
 | D8 | RT geometry LOD policy | shared raster LOD vs dedicated coarse RT LOD | self-intersection vs memory trade-off |
 | D9 | Editor vs runtime asset managers | split now vs after async loading | runtime needs containers + handle-based refs |
@@ -1133,3 +1144,22 @@ Phases 1, 2 and 3 are architecture-defining and each gets its own plan-mode desi
 - Tracy Profiler: https://github.com/wolfpld/tracy
 - meshoptimizer (meshlets, simplification, clusterization): https://github.com/zeux/meshoptimizer
 - Sebastian Aaltonen — OffsetAllocator (TLSF-style offset allocator): https://github.com/sebbbi/OffsetAllocator
+- Vulkan Tutorial — Synchronization (Synchronization 2, timeline semaphores, frames in flight, async compute, transfer
+  queues, host image copies, synchronization validation): https://docs.vulkan.org/tutorial/latest/Synchronization/introduction.html
+- Vulkan Tutorial — Transfer Queues & Asset Streaming: https://docs.vulkan.org/tutorial/latest/Synchronization/Transfer_Queues_Streaming/01_introduction.html
+- Vulkan Tutorial — Asynchronous Compute & Execution Overlap (for moving compute work such as culling, Hi-Z or skinning
+  to a compute queue later): https://docs.vulkan.org/tutorial/latest/Synchronization/Async_Compute_Overlap/01_introduction.html
+
+---
+
+## 9. Deferred Work
+
+Deliverables that were deliberately left out of the phase they belong to, so they are not lost. Each names why it waited
+and what it needs; pick one up whenever its trigger is reached or it blocks something else.
+
+| Item | From | Why it waited | What it needs | Pick up when |
+|---|---|---|---|---|
+| **Compute skinning** (§5.5.3) | Phase 3 | Mesh-shader skinning kept working; the instance layout already reserves a stable bone range, so nothing gets rewritten by doing it later. | A compute pass writing each skinned instance's deformed vertices into its own vertex stream range (§5.8.2), raster reading those instead of skinning per meshlet, and a per-frame BLAS refit of the deformed range. | Ray tracing must see animated poses (today the BLAS holds the bind pose, so shadows and reflections of a skinned mesh lag its drawn pose), or skinned instances need culling (they are never culled: their bounds are bind pose). |
+| **A second real view** (§5.6) | Phase 3 | Culling and draws are per view already (`CullView`, `ViewDrawResources`, parameterised passes), but only the camera view is instantiated; the frozen culling view is a flag on that same view. | A second `CullView` with its own draw resources and graph passes, driven by its first real consumer. | A shadow-map view, a game-camera preview viewport, or reflection/probe capture needs its own culled draws. |
+| **Geometry stream sizing** (§5.8.2) | Phase 4 | Streams start at the old page sizes and double; Bistro holds 259 MB committed for 154 MB used, which is 18 % of the geometry budget, so there is no pressure. | Initial capacities from the geometry category budget, or a trim to the used size after a load (one copy at a load boundary). | Geometry committed approaches its budget, or a scene loads with many grow-and-copy steps. |
+

@@ -80,6 +80,9 @@ namespace NRI
         TextureUsage usage;
         ImageFormat format = ImageFormat::None;
         uint32_t directFormat = UINT32_MAX;
+        // Uploaded on the transfer queue and sampled on the graphics queue (concurrent sharing). Such an image is left in
+        // its initial layout: the upload records the transition, so creating it submits nothing.
+        bool sharedAcrossQueues = false;
     };
 
     // What a texture costs in device memory: the mip chain of every layer, without the driver's alignment (images are
@@ -144,6 +147,11 @@ namespace NRI
     {
     public:
         virtual void uploadFromBuffer(class CommandBuffer& cmdBuffer, class Buffer& stagingBuffer, uint32_t width, uint32_t height, uint32_t mipLevels, const std::vector<size_t>& mipOffsets) = 0;
+        // Every mip from staging (mip i at stagingOffset + mipOffsets[i]), for an image created with sharedAcrossQueues:
+        // records its first transition, then the copies. Only copy work, so the transfer queue can run it; readers are
+        // ordered after it by the submission's timeline point, not by a barrier here.
+        virtual void recordUpload(class CommandBuffer& cmdBuffer, class Buffer& stagingBuffer, uint64_t stagingOffset,
+                                  const std::vector<size_t>& mipOffsets) = 0;
         virtual void copyImageToBuffer(CommandBuffer& commandBuffer, Buffer& dstBuffer, uint32_t x, uint32_t y, uint32_t width, uint32_t height) = 0;
         // Nearest-filtered resize copy into dst (dst may be a different resolution than this texture).
         // Used to propagate render-resolution G-buffer data (entity IDs, depth) up to display

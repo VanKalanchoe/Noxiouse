@@ -9,7 +9,7 @@ namespace NRI
     class CommandAllocatorVK final : public CommandAllocator
     {
     public:
-        CommandAllocatorVK(DeviceVK& device, CommandBufferReset resetMode);
+        CommandAllocatorVK(DeviceVK& device, CommandBufferReset resetMode, uint32_t queueFamily);
         ~CommandAllocatorVK() override = default;
 
         std::unique_ptr<CommandBuffer> allocateCommandBuffer(uint32_t cbCount) override;

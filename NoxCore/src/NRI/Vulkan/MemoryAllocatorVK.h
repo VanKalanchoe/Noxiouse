@@ -58,7 +58,8 @@ namespace NRI
             vk::BufferUsageFlags2 usage,
             vma::MemoryUsage memoryUsage = vma::MemoryUsage::eAuto,
             vma::AllocationCreateFlags flags = {},
-            vk::DeviceSize minAlignment = {}
+            vk::DeviceSize minAlignment = {},
+            std::span<const uint32_t> concurrentQueueFamilies = {}
         )
         {
             const bool wantsAddress = (usage & vk::BufferUsageFlagBits2::eShaderDeviceAddress) != vk::BufferUsageFlags2{};
@@ -74,7 +75,10 @@ namespace NRI
                 .pNext = &bufferUsageFlags2CreateInfo,
                 .size = size,
                 .usage = vk::BufferUsageFlags{},
-                .sharingMode = vk::SharingMode::eExclusive // Only one queue family will access it
+                // Exclusive unless several queue families use it at once (uploads written beside graphics reads).
+                .sharingMode = concurrentQueueFamilies.size() > 1 ? vk::SharingMode::eConcurrent : vk::SharingMode::eExclusive,
+                .queueFamilyIndexCount = concurrentQueueFamilies.size() > 1 ? static_cast<uint32_t>(concurrentQueueFamilies.size()) : 0u,
+                .pQueueFamilyIndices = concurrentQueueFamilies.size() > 1 ? concurrentQueueFamilies.data() : nullptr
             };
 
             vma::AllocationCreateInfo allocInfo{.flags = flags, .usage = memoryUsage};

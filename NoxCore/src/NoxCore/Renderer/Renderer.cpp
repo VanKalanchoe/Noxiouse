@@ -210,6 +210,10 @@ namespace Nox
         m_device = NRI::Device::create(NRI::GraphicsAPI::Vulkan, *m_window);
         if (!m_device) NOX_CORE_ASSERT("Failed to create NRI device");
 
+        // Staging for every upload, right after the device: startup already uploads (textures, IBL inputs). A ring on
+        // the transfer queue; oversized uploads get their own buffer.
+        m_uploads.Init(*m_device, 64ull * 1024 * 1024);
+
 #if NOX_PROFILING_ENABLED
         m_gpuProfiler = m_device->createGpuProfiler(MAX_FRAMES_IN_FLIGHT);
         Profiler::Get().SetGpuProfiler(m_gpuProfiler.get());
@@ -1586,14 +1590,10 @@ namespace Nox
 
     Ref<Texture2D> Renderer::UploadTexture(const TextureData& cpuData)
     {
-        std::unique_ptr<NRI::Buffer> stagingBuffer = m_device->createBuffer(NRI::BufferDesc{
-            .size = cpuData.Data.Size,
-            .usage = NRI::BufferUsage::Staging
-        });
-
-        void* data = stagingBuffer->map(0, cpuData.Data.Size);
-        memcpy(data, cpuData.Data.Data, cpuData.Data.Size);
-        stagingBuffer->unmap();
+        // A complete mip chain of one 2D layer (every cooked texture) is plain copies and goes to the transfer queue.
+        // Mips generated here need blits, and arrays/cubes a different staging layout: those keep the graphics path.
+        const bool copyOnly = cpuData.ArrayLayers == 1 && !cpuData.IsCubeMap &&
+                              (cpuData.MipLevels <= 1 || cpuData.MipOffsets.size() == cpuData.MipLevels);
 
         Ref<Texture2D> textureResource = m_device->createTexture(NRI::TextureDesc
             {
@@ -1605,12 +1605,30 @@ namespace Nox
                 .sampleCount = 1,
                 .usage = cpuData.Usage,
                 .format = cpuData.Format,
-                .directFormat = cpuData.DirectFormat
+                .directFormat = cpuData.DirectFormat,
+                .sharedAcrossQueues = copyOnly
             });
 
-        std::unique_ptr<NRI::CommandBuffer> commandBuffer = beginSingleTimeCommands();
-        textureResource->uploadFromBuffer(*commandBuffer, *stagingBuffer, cpuData.Width, cpuData.Height, cpuData.MipLevels, cpuData.MipOffsets);
-        endSingleTimeCommands(std::move(commandBuffer));
+        if (copyOnly)
+        {
+            const StagingSpan staging = m_uploads.ReserveStaging(cpuData.Data.Size);
+            memcpy(staging.data, cpuData.Data.Data, cpuData.Data.Size);
+            m_uploads.CopyToTexture(staging, *textureResource, cpuData.MipOffsets.empty() ? std::vector<size_t>{ 0 } : cpuData.MipOffsets);
+        }
+        else
+        {
+            std::unique_ptr<NRI::Buffer> stagingBuffer = m_device->createBuffer(NRI::BufferDesc{
+                .size = cpuData.Data.Size,
+                .usage = NRI::BufferUsage::Staging
+            });
+            void* data = stagingBuffer->map(0, cpuData.Data.Size);
+            memcpy(data, cpuData.Data.Data, cpuData.Data.Size);
+            stagingBuffer->unmap();
+
+            std::unique_ptr<NRI::CommandBuffer> commandBuffer = beginSingleTimeCommands();
+            textureResource->uploadFromBuffer(*commandBuffer, *stagingBuffer, cpuData.Width, cpuData.Height, cpuData.MipLevels, cpuData.MipOffsets);
+            endSingleTimeCommands(std::move(commandBuffer));
+        }
 
         m_resourceHeap->registerTexture(*textureResource);
         uniformData.imageHeapIndexOffset = m_resourceHeap->getImageHeapIndexOffset();
@@ -1908,136 +1926,10 @@ namespace Nox
     {
         if (elementCount == 0) return;
 
-        uint64_t bufferSize = sizeof(T) * elementCount;
-        uint64_t dstByteOffset = sizeof(T) * elementOffset;
-
-        if (m_uploadBatch.depth > 0)
-        {
-            uploadBatchCopy(dstBuffer, data, bufferSize, dstByteOffset);
-            return;
-        }
-
-        std::unique_ptr<NRI::Buffer> stagingBuffer = m_device->createBuffer(NRI::BufferDesc{
-            .size = bufferSize,
-            .usage = NRI::BufferUsage::Staging
-        });
-
-        void* mappedMemory = stagingBuffer->map(0, bufferSize);
-        memcpy(mappedMemory, data, bufferSize);
-        stagingBuffer->unmap();
-
-        std::unique_ptr<NRI::CommandBuffer> cmd = beginSingleTimeCommands();
-        // Construct the copy region struct
-        NRI::BufferCopyRegion copyRegion
-        {
-            .srcOffset = 0,
-            .dstOffset = dstByteOffset,
-            .size = bufferSize
-        };
-        cmd->copyBuffer(*stagingBuffer, dstBuffer, copyRegion);
-        endSingleTimeCommands(std::move(cmd));
-    }
-
-    // --- Upload batching ---
-    // Staging and work budgets: bound host memory held by a batch, and keep each submission's GPU
-    // work short (a single submit building thousands of BLASes could exceed the driver timeout).
-    static constexpr uint64_t UPLOAD_BATCH_STAGING_BYTES = 64ull * 1024 * 1024;
-    static constexpr uint64_t UPLOAD_BATCH_RETAINED_BYTES = 256ull * 1024 * 1024;
-    static constexpr uint64_t UPLOAD_BATCH_MAX_PRIMITIVES = 2'000'000;
-    static constexpr uint32_t UPLOAD_BATCH_MAX_BUILDS = 512;
-
-    NRI::CommandBuffer& Renderer::uploadBatchCommandBuffer()
-    {
-        if (!m_uploadBatch.commandBuffer)
-            m_uploadBatch.commandBuffer = beginSingleTimeCommands();
-        return *m_uploadBatch.commandBuffer;
-    }
-
-    void Renderer::uploadBatchCopy(NRI::Buffer& dstBuffer, const void* data, uint64_t byteSize, uint64_t dstByteOffset)
-    {
-        if (byteSize > UPLOAD_BATCH_STAGING_BYTES)
-        {
-            std::unique_ptr<NRI::Buffer> oversizedStaging = m_device->createBuffer(NRI::BufferDesc{
-                .size = byteSize,
-                .usage = NRI::BufferUsage::Staging
-            });
-            void* mapped = oversizedStaging->map(0, byteSize);
-            memcpy(mapped, data, byteSize);
-            oversizedStaging->unmap();
-
-            uploadBatchCommandBuffer().copyBuffer(*oversizedStaging, dstBuffer, NRI::BufferCopyRegion{
-                .srcOffset = 0,
-                .dstOffset = dstByteOffset,
-                .size = byteSize
-            });
-            m_uploadBatch.retainedBuffers.push_back(std::move(oversizedStaging));
-            m_uploadBatch.retainedBytes += byteSize;
-            if (m_uploadBatch.retainedBytes > UPLOAD_BATCH_RETAINED_BYTES)
-                flushUploadBatch();
-            return;
-        }
-
-        // Recorded copies read the staging buffer at submit time, so it can only be reused or
-        // replaced after a flush. It starts at what's needed and grows toward the cap: allocating the
-        // full 64MB up front made every single small mesh upload slower than before batching.
-        if (m_uploadBatch.stagingUsed + byteSize > m_uploadBatch.stagingCapacity)
-        {
-            flushUploadBatch();
-
-            if (byteSize > m_uploadBatch.stagingCapacity || m_uploadBatch.stagingCapacity < UPLOAD_BATCH_STAGING_BYTES)
-            {
-                const uint64_t newCapacity = std::min(UPLOAD_BATCH_STAGING_BYTES,
-                    std::max({ byteSize, m_uploadBatch.stagingCapacity * 2, uint64_t(1024 * 1024) }));
-
-                if (m_uploadBatch.staging)
-                    m_uploadBatch.staging->unmap();
-                m_uploadBatch.staging = m_device->createBuffer(NRI::BufferDesc{
-                    .size = newCapacity,
-                    .usage = NRI::BufferUsage::Staging
-                });
-                m_uploadBatch.stagingMapped = static_cast<uint8_t*>(m_uploadBatch.staging->map(0, newCapacity));
-                m_uploadBatch.stagingCapacity = newCapacity;
-            }
-        }
-
-        memcpy(m_uploadBatch.stagingMapped + m_uploadBatch.stagingUsed, data, byteSize);
-        uploadBatchCommandBuffer().copyBuffer(*m_uploadBatch.staging, dstBuffer, NRI::BufferCopyRegion{
-            .srcOffset = m_uploadBatch.stagingUsed,
-            .dstOffset = dstByteOffset,
-            .size = byteSize
-        });
-        m_uploadBatch.stagingUsed += byteSize;
-    }
-
-    void Renderer::flushUploadBatch()
-    {
-        if (!m_uploadBatch.commandBuffer)
-            return;
-
-        endSingleTimeCommands(std::move(m_uploadBatch.commandBuffer));
-        m_uploadBatch.commandBuffer.reset();
-
-        m_uploadBatch.stagingUsed = 0;
-        m_uploadBatch.retainedBuffers.clear();
-        m_uploadBatch.retainedBytes = 0;
-        m_uploadBatch.pendingPrimitives = 0;
-        m_uploadBatch.pendingBuilds = 0;
-    }
-
-    void Renderer::endUploadBatch()
-    {
-        if (m_uploadBatch.depth == 0 || --m_uploadBatch.depth > 0)
-            return;
-
-        flushUploadBatch();
-
-        if (m_uploadBatch.staging)
-            m_uploadBatch.staging->unmap();
-        m_uploadBatch.staging.reset();
-        m_uploadBatch.stagingMapped = nullptr;
-        m_uploadBatch.stagingCapacity = 0;
-        m_uploadBatch.scratch.reset();
-        m_uploadBatch.scratchCapacity = 0;
+        const uint64_t bytes = sizeof(T) * uint64_t(elementCount);
+        const StagingSpan staging = m_uploads.ReserveStaging(bytes);
+        memcpy(staging.data, data, bytes);
+        m_uploads.CopyToBuffer(staging, dstBuffer, sizeof(T) * uint64_t(elementOffset));
     }
 
     void Renderer::initGeometryBuffers()
@@ -2066,13 +1958,10 @@ namespace Nox
         // The stream grew: its content moves to the larger buffer unchanged (offsets stay valid, the address changes).
         if (grownFrom)
         {
-            // Copies recorded into the buffer it grew from must land before its contents are copied over.
-            flushUploadBatch();
-
-            const uint64_t size = grownFrom->getSize();
-            std::unique_ptr<NRI::CommandBuffer> cmd = beginSingleTimeCommands();
-            cmd->copyBuffer(*grownFrom, stream.GetBuffer(), NRI::BufferCopyRegion{ .srcOffset = 0, .dstOffset = 0, .size = size });
-            endSingleTimeCommands(std::move(cmd));
+            // Ordered after every write already queued to the old buffer and before the new range's writes (same transfer
+            // submission). Frames in flight keep reading the old buffer, so it is released after them; the next frame
+            // waits for this copy on the GPU.
+            m_uploads.CopyBuffer(*grownFrom, stream.GetBuffer(), grownFrom->getSize());
 
             {
                 std::scoped_lock lock(m_deferredReleasesMutex);
@@ -2175,43 +2064,6 @@ namespace Nox
                     .size = buildSizes.accelerationStructureSize
                 });
 
-                // 5. Build on GPU
-                if (m_uploadBatch.depth > 0)
-                {
-                    // Builds recorded one after another in the same command buffer can share one
-                    // scratch buffer. Growing it must flush first: recorded builds use the current one.
-                    if (buildSizes.buildScratchSize > m_uploadBatch.scratchCapacity)
-                    {
-                        flushUploadBatch();
-                        m_uploadBatch.scratchCapacity = std::max<uint64_t>(buildSizes.buildScratchSize, m_uploadBatch.scratchCapacity * 2);
-                        m_uploadBatch.scratch = m_device->createBuffer(NRI::BufferDesc{
-                            .size = m_uploadBatch.scratchCapacity,
-                            .usage = NRI::BufferUsage::AccelerationStructureScratch
-                        });
-                    }
-
-                    // This mesh's vertex/index copies were recorded earlier in this same command buffer.
-                    NRI::CommandBuffer& cmd = uploadBatchCommandBuffer();
-                    cmd.accelerationStructureBarrier(NRI::AccelerationStructureBarrierType::TransferToBuild);
-                    cmd.buildAccelerationStructure(buildDesc, m_uploadBatch.scratch->getDeviceAddress(), *blas);
-                    cmd.accelerationStructureBarrier(NRI::AccelerationStructureBarrierType::BuildToBuild);
-
-                    m_uploadBatch.pendingPrimitives += indices.size() / 3;
-                    ++m_uploadBatch.pendingBuilds;
-                }
-                else
-                {
-                    std::unique_ptr<NRI::Buffer> scratchBuffer = m_device->createBuffer(NRI::BufferDesc{
-                        .size = buildSizes.buildScratchSize,
-                        .usage = NRI::BufferUsage::AccelerationStructureScratch
-                    });
-
-                    std::unique_ptr<NRI::CommandBuffer> cmd = beginSingleTimeCommands();
-                    cmd->buildAccelerationStructure(buildDesc, scratchBuffer->getDeviceAddress(), *blas);
-                    cmd->accelerationStructureBarrier(NRI::AccelerationStructureBarrierType::BuildToBuild);
-                    endSingleTimeCommands(std::move(cmd));
-                }
-
                 // 6. Cache BLAS and store ID in handle (reusing ids released by unloaded meshes)
                 MeshBLAS meshBLAS{
                     .storageBuffer = std::move(asBuffer),
@@ -2229,13 +2081,6 @@ namespace Nox
                     m_meshBLASes.push_back(std::move(meshBLAS));
                 }
             }
-        }
-
-        // Submit once this batch holds enough BLAS work (all resources above are owned by now).
-        if (m_uploadBatch.depth > 0 &&
-            (m_uploadBatch.pendingPrimitives >= UPLOAD_BATCH_MAX_PRIMITIVES || m_uploadBatch.pendingBuilds >= UPLOAD_BATCH_MAX_BUILDS))
-        {
-            flushUploadBatch();
         }
 
         // GPU scene mesh record: instances reference it by slot.
@@ -2266,13 +2111,10 @@ namespace Nox
             gpuMesh.boundsMin = boundsMin;
             gpuMesh.boundsMax = boundsMax;
 
-            uint64_t blasAddress = 0;
+            // Not ray traced until its BLAS is built in a frame (SetMeshBlas).
+            handle.gpuSceneMesh = m_gpuScene.AddMesh(gpuMesh, 0);
             if (handle.blasId != UINT32_MAX)
-            {
-                const MeshBLAS& blas = m_meshBLASes[handle.blasId];
-                blasAddress = blas.as->getDeviceAddress();
-            }
-            handle.gpuSceneMesh = m_gpuScene.AddMesh(gpuMesh, blasAddress);
+                m_blasBuilds.push_back({ handle.blasId, handle.gpuSceneMesh, handle.vertices, handle.rtIndices, isOpaque });
         }
 
         return handle;
@@ -2284,9 +2126,31 @@ namespace Nox
         m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, std::move(asset) });
     }
 
+    NRI::AccelerationStructureBuildDesc Renderer::blasBuildDesc(const BlasBuild& build) const
+    {
+        return NRI::AccelerationStructureBuildDesc{
+            .type = NRI::AccelerationStructureType::BottomLevel,
+            .flags = NRI::AccelerationStructureBuildFlags::PreferFastTrace,
+            .triangles = {
+                NRI::AccelerationStructureTrianglesDesc{
+                    .vertexBufferAddress = m_vertexStream.GetDeviceAddress() + sizeof(shaderio::Vertex) * uint64_t(build.vertices.offset),
+                    .vertexStride = sizeof(shaderio::Vertex),
+                    .maxVertex = build.vertices.count - 1,
+                    .indexBufferAddress = m_rtIndexStream.GetDeviceAddress() + sizeof(uint32_t) * uint64_t(build.indices.offset),
+                    .primitiveCount = build.indices.count / 3,
+                    .primitiveOffset = 0,
+                    .firstVertex = 0,
+                    .isOpaque = build.isOpaque
+                }
+            }
+        };
+    }
+
     void Renderer::UnloadMeshGeometry(const MeshHandle& handle)
     {
         if (!handle.IsValid()) return;
+
+        std::erase_if(m_blasBuilds, [&](const BlasBuild& build) { return build.blasId == handle.blasId; });
 
         // Instances of this mesh stop drawing now; their entities register again (with the reloaded mesh).
         if (handle.gpuSceneMesh != GpuScene::InvalidSlot)
@@ -2612,6 +2476,10 @@ namespace Nox
     void Renderer::endSingleTimeCommands(std::unique_ptr<NRI::CommandBuffer>&& commandBuffer)
     {
         commandBuffer->end(0);
+
+        // Startup and tool work that may read what was just uploaded on the transfer queue (IBL precompute reads the
+        // environment texture): it already blocks, so it waits for pending uploads first.
+        m_uploads.GetTimeline().wait(m_uploads.Flush());
         m_device->submitAndWait(*commandBuffer, 0);
     }
 
@@ -2623,6 +2491,7 @@ namespace Nox
 
             // Frame order (§5.4.8). Each add* contributes its feature's passes only when the feature runs.
             addGpuSceneUpdatePass();
+            addBLASBuildPass();
             addTLASBuildPass();
             addInstanceCullingPass();
             addVisibilityPass();
@@ -3257,6 +3126,7 @@ namespace Nox
         {
             NOX_PROFILE_SCOPE("Deferred Deletions");
             processDeferredReleases();
+            m_uploads.Poll();
         }
 
         // Process any queued shader hot-reloads
@@ -3354,7 +3224,11 @@ namespace Nox
 
         {
             NOX_PROFILE_SCOPE("Submit");
-            m_device->submitCommandBuffers(commandBuffers, *m_swapChain, frameIndex, imageIndex);
+            // Everything uploaded so far (this frame's loads, stream growth, BLAS inputs) is copied before the frame
+            // reads it. Values already reached cost nothing: the wait only orders the transfer writes.
+            const NRI::TimelinePoint uploads{ &m_uploads.GetTimeline(), m_uploads.Flush() };
+            m_device->submitCommandBuffers(commandBuffers, *m_swapChain, frameIndex, imageIndex,
+                                           std::span<const NRI::TimelinePoint>(&uploads, 1));
         }
 
         // Debounced -- see m_lastWindowResizeRequestTime's declaration in Renderer.h. A hard

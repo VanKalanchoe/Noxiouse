@@ -5,13 +5,13 @@
 
 namespace NRI
 {
-    CommandAllocatorVK::CommandAllocatorVK(DeviceVK& device, CommandBufferReset resetMode) : m_deviceVK(device), m_resetMode(resetMode)
+    CommandAllocatorVK::CommandAllocatorVK(DeviceVK& device, CommandBufferReset resetMode, uint32_t queueFamily) : m_deviceVK(device), m_resetMode(resetMode)
     {
         vk::CommandPoolCreateInfo poolInfo
         {
             // Individual resets need the flag; whole-pool resets are cheaper and do not.
             .flags = resetMode == CommandBufferReset::PerCommandBuffer ? vk::CommandPoolCreateFlagBits::eResetCommandBuffer : vk::CommandPoolCreateFlags{},
-            .queueFamilyIndex = m_deviceVK.getQueueIndex()
+            .queueFamilyIndex = queueFamily
         };
         m_commandPool = vk::raii::CommandPool(m_deviceVK.getDevice(), poolInfo);
     }

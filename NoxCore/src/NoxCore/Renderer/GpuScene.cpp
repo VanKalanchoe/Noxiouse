@@ -197,6 +197,19 @@ namespace Nox
         return slot;
     }
 
+    void GpuScene::SetMeshBlas(uint32_t meshSlot, uint64_t blasAddress)
+    {
+        if (meshSlot >= m_MeshBlasAddresses.size())
+            return;
+
+        m_MeshBlasAddresses[meshSlot] = blasAddress;
+        for (uint32_t instanceSlot = 0; instanceSlot < static_cast<uint32_t>(m_InstanceStates.size()); ++instanceSlot)
+        {
+            if (m_InstanceStates[instanceSlot].Mesh == meshSlot)
+                WriteTlasInstance(instanceSlot);
+        }
+    }
+
     uint64_t GpuScene::GetDeviceBytes() const
     {
         uint64_t bytes = 0;
