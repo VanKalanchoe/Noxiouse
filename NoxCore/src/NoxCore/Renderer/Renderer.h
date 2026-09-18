@@ -76,6 +76,25 @@ namespace Nox
         std::unique_ptr<NRI::AccelerationStructure> as;
     };
 
+    // A texture on its way to the GPU (§5.11.4): created with staging on the main thread, its texels written into the
+    // staging from any thread, copied and published on the main thread.
+    struct TextureUpload
+    {
+        Ref<Texture2D> Texture;
+        StagingSpan Staging;
+        std::vector<size_t> MipOffsets;
+    };
+
+    // One submesh's geometry on its way to the GPU: ranges and staging on the main thread, the staging written from
+    // any thread (Renderer::WriteMeshUpload), copies recorded and the mesh published on the main thread.
+    struct MeshUpload
+    {
+        MeshHandle Handle;
+        StagingSpan Staging;
+        shaderio::GpuMesh GpuMesh{}; // counts and bounds, filled by WriteMeshUpload
+        bool IsOpaque = true;
+    };
+
     // Everything whose release must wait for the frames that could still reference it (§5.8.4): a GPU buffer to
     // destroy, the last reference to an asset to drop, or a mesh's geometry ranges and BLAS id to return.
     struct DeferredRelease
@@ -178,7 +197,7 @@ namespace Nox
         // previous owner is gone and the scene registers all of its entities again.
         bool BindGpuScene(uint64_t sceneID);
         // One instance per drawn submesh, appended to outInstances. Returns false when an asset is not loaded yet (appended
-        // to outMissingAssets, load it on the main thread): the entity is registered with what is loaded and has to be
+        // to outMissingAssets, request it on the main thread): the entity is registered with what is loaded and has to be
         // registered again once it is.
         bool AddMeshInstances(const glm::mat4& world, const MeshComponent& mesh, const MaterialComponent* material, int32_t entityID,
                               std::vector<uint32_t>& outInstances, std::vector<AssetHandle>& outMissingAssets);
@@ -389,6 +408,26 @@ namespace Nox
         glm::vec2 getCurrentJitter() const { return m_currentJitter; }
 
         Ref<Texture2D> UploadTexture(const TextureData& cpuData);
+
+        // Streamed uploads (§5.11.4), main thread unless noted. Begin* creates the resource with staging for it (empty
+        // when wait is false and staging has no room this frame); once the staging is written, End* records the copies
+        // and returns the value they complete at; Publish* hands the resource to frames once that value has passed
+        // (GetCompletedUploadValue). With nextFrameReads the next frame waits for the copies instead, so the resource
+        // can be published right away (synchronous loads).
+        std::optional<TextureUpload> BeginTextureUpload(const TextureData& texture, uint64_t dataSize, bool wait);
+        uint64_t EndTextureUpload(const TextureUpload& upload, bool nextFrameReads);
+        void PublishTexture(Texture2D& texture);
+        std::optional<MeshUpload> BeginMeshUpload(const MeshData& data, bool isOpaque, bool wait);
+        // Any thread: the submesh's streams into its staging, with the offsets of its ranges, and its counts and bounds.
+        static void WriteMeshUpload(const MeshData& data, MeshUpload& upload);
+        uint64_t EndMeshUpload(const MeshUpload& upload, bool nextFrameReads);
+        // Draws from now on, ray traced once its BLAS is built in a frame.
+        MeshHandle PublishMesh(const MeshUpload& upload);
+        // Staging of a Begin* whose copies were never recorded.
+        void AbandonUpload(const StagingSpan& staging) { m_uploads.ReleaseStaging(staging); }
+        uint64_t GetCompletedUploadValue() const { return m_uploads.GetCompletedValue(); }
+        // Textures finished loading: materials resolve their texture paths again (they drew without them so far).
+        static void MarkTexturesLoaded();
         Ref<Texture2D> createSolidColorTexture(uint8_t r, uint8_t g, uint8_t b, uint8_t a);
         void initPBR();
 

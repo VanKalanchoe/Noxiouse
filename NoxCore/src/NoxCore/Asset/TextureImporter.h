@@ -1,5 +1,7 @@
 #pragma once
 #include <filesystem>
+#include <iosfwd>
+#include <optional>
 #include <vector>
 
 #include "Asset.h"
@@ -24,11 +26,26 @@ namespace Nox
         std::vector<size_t> MipOffsets;
     };
     
+    // A cooked texture as a background load reads it: the header first, the texels later straight into staging.
+    struct CookedTextureHeader
+    {
+        std::filesystem::path Path;
+        TextureData Texture;     // everything but the texels (Data stays empty)
+        uint64_t DataOffset = 0; // of the texels in the file
+        uint64_t DataSize = 0;
+    };
+
     class Renderer;
-    
+
     class TextureImporter
     {
     public:
+        // Any thread. The header of the asset's cooked .ntex when it is current; empty when the asset has to be cooked
+        // first or is not cooked at all (those load synchronously).
+        static std::optional<CookedTextureHeader> ReadCookedTextureHeader(const std::filesystem::path& assetDirectory, const AssetMetadata& metadata);
+        // Any thread.
+        static bool ReadCookedTextureData(const CookedTextureHeader& header, uint8_t* destination);
+
         // AssetMetadata filepath is relative to project asset directory
         static Ref<Texture2D> ImportTexture2D(AssetHandle handle, const AssetMetadata& metadata);
 
@@ -41,9 +58,15 @@ namespace Nox
         static Ref<Texture2D> LoadWithSTB(const std::filesystem::path& path, const TextureSpecification& spec, Renderer* renderer);
         static Ref<Texture2D> LoadWithSTBHDR(const std::filesystem::path& path, const TextureSpecification& spec, Renderer* renderer);
         static Ref<Texture2D> LoadWithDDS(const std::filesystem::path& path, const TextureSpecification& spec, Renderer* renderer);
+        // The file's texels (all mips) in memory cpuData owns.
+        static bool DecodeSTB(const std::filesystem::path& path, const TextureSpecification& spec, TextureData& cpuData);
+        static bool DecodeDDS(const std::filesystem::path& path, TextureData& cpuData);
+        static bool DecodeKTX(const std::filesystem::path& path, const TextureSpecification& spec, TextureData& cpuData);
         static Ref<Texture2D> LoadWithKTX(const std::filesystem::path& path, const TextureSpecification& spec, Renderer* renderer);
         static Ref<Texture2D> LoadWithNTEX(const std::filesystem::path& path, Renderer* renderer);
         static bool SaveNTEX(const std::filesystem::path& path, const TextureData& cpuData);
         static bool ReadNTEX(const std::filesystem::path& path, TextureData& outData);
+        // Everything up to the texels; the stream is left at the first texel.
+        static bool ReadNTEXHeader(std::istream& stream, TextureData& outData, uint64_t& outDataSize);
     };
 }

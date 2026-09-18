@@ -368,7 +368,7 @@ namespace Nox
         }
 
         // 3. Added, changed and removed mesh entities. An entity whose assets are not loaded yet stays pending (the
-        // sync point loads them).
+        // sync point requests them).
         if (!m_PendingMeshEntities.empty())
         {
             NOX_PROFILE_SCOPE("Register Mesh Entities");
@@ -442,11 +442,11 @@ namespace Nox
 
         m_CommandBuffers.ForEach([this](EntityCommandBuffer& commandBuffer) { commandBuffer.Apply(*this); });
 
-        // GetAsset imports on demand, which only the main thread may do. Loaded now, used from the next frame.
+        // Requests happen on the main thread; the entities stay pending until their assets are Ready.
         m_MissingAssets.ForEach([](std::vector<AssetHandle>& handles)
         {
             for (AssetHandle handle : handles)
-                AssetManager::GetAsset<Asset>(handle);
+                AssetManager::RequestAsset(handle);
             handles.clear();
         });
     }

@@ -98,7 +98,8 @@ namespace Nox
     
     struct MaterialComponent
     {
-        // Per-entity material overrides. A zero handle uses the mesh primitive's default .nmat.
+        // Per-slot overrides of the mesh's materials (indexed by submesh, UE's OverrideMaterials). A zero handle, or no
+        // entry, uses the mesh primitive's own .nmat; without overrides the list is empty and nothing is serialized.
         std::vector<AssetHandle> MaterialAssets;
 
         MaterialComponent() = default;

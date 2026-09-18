@@ -24,6 +24,15 @@ namespace Nox
         SkeletalMesh
     };
 
+    // Where an asset is on its way into memory (§5.11.2). A request starts the load once; the asset is usable when Ready.
+    enum class AssetState : uint8_t
+    {
+        Unloaded,
+        Loading, // reading, decoding and uploading in the background
+        Ready,
+        Failed
+    };
+
     std::string_view AssetTypeToString(AssetType type);
     AssetType AssetTypeFromString(std::string_view assetType);
 

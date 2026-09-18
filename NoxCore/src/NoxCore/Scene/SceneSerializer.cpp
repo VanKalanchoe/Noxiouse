@@ -244,9 +244,13 @@ namespace Nox
 
             auto& mc = entity.GetComponent<MaterialComponent>();
 
-            out << YAML::Key << "MaterialAssets" << YAML::Value << YAML::BeginSeq;
-            for (auto handle : mc.MaterialAssets) out << (uint64_t)handle;
-            out << YAML::EndSeq;
+            // Overrides only (a zero entry keeps the mesh's material); none, and the key is left out.
+            if (!mc.MaterialAssets.empty())
+            {
+                out << YAML::Key << "MaterialAssets" << YAML::Value << YAML::BeginSeq;
+                for (auto handle : mc.MaterialAssets) out << (uint64_t)handle;
+                out << YAML::EndSeq;
+            }
 
 
             out << YAML::EndMap; // MaterialComponent
@@ -557,8 +561,6 @@ namespace Nox
                 if (tagComponent)
                     name = tagComponent["Tag"].as<std::string>();
 
-                NOX_CORE_TRACE("Deserialized entity with ID = {0}, name = {1}", uuid, name);
-
                 Entity deserializedEntity = m_Scene->CreateEntityWithUUID(uuid, name);
 
                 auto transformComponent = entity["TransformComponent"];
@@ -610,23 +612,6 @@ namespace Nox
                         mc.MaterialAssets.clear();
                         for (auto node : materialAssetsSeq)
                             mc.MaterialAssets.push_back(node.as<uint64_t>());
-                    }
-
-                    if (mc.MaterialAssets.empty() && deserializedEntity.HasComponent<MeshComponent>())
-                    {
-                        const AssetHandle meshHandle = deserializedEntity.GetComponent<MeshComponent>().Mesh;
-                        if (AssetManager::GetAssetType(meshHandle) == AssetType::Mesh)
-                        {
-                            Ref<Mesh> mesh = AssetManager::GetAsset<Mesh>(meshHandle);
-                            if (mesh)
-                                mc.MaterialAssets = mesh->GetMaterialAssets();
-                        }
-                        else if (AssetManager::GetAssetType(meshHandle) == AssetType::StaticMesh)
-                        {
-                            Ref<StaticMesh> mesh = AssetManager::GetAsset<StaticMesh>(meshHandle);
-                            if (mesh)
-                                mc.MaterialAssets = mesh->GetMaterialAssets();
-                        }
                     }
                 }
 

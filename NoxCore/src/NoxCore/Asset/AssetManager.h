@@ -19,6 +19,11 @@ namespace Nox
             return Ref<T>(asset); // uses Ref<T>::Ref(const Ref<U>&)
         }
 
+        static AssetState RequestAsset(AssetHandle handle)
+        {
+            return Project::GetActiveAssetManager().RequestAsset(handle);
+        }
+
         template<typename T>
         static T* FindLoadedAsset(AssetHandle handle)
         {

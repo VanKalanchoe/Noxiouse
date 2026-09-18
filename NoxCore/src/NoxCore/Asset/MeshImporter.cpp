@@ -20,6 +20,67 @@
 
 namespace Nox
 {
+    namespace
+    {
+        // The members of Mesh and StaticMesh are the same.
+        void fillMeshAsset(CookedMesh& cooked, std::vector<MeshHandle>& subMeshes, std::vector<std::string>& names,
+                           std::vector<MaterialData>& materials, std::vector<LightNodeData>& lights, std::vector<CameraNodeData>& cameras,
+                           std::vector<MeshNodeData>& nodes)
+        {
+            subMeshes.resize(cooked.Submeshes.size());
+            names.reserve(cooked.Submeshes.size());
+            for (const MeshData& submesh : cooked.Submeshes)
+                names.push_back(submesh.Name);
+            materials = std::move(cooked.Materials);
+            lights = std::move(cooked.Lights);
+            cameras = std::move(cooked.Cameras);
+            nodes = std::move(cooked.Nodes);
+        }
+    }
+
+    std::optional<CookedMesh> MeshImporter::ReadCookedMesh(const std::filesystem::path& assetDirectory, const AssetMetadata& metadata)
+    {
+        const std::filesystem::path cookedPath = assetDirectory / metadata.FilePath;
+        const std::filesystem::path sourcePath = assetDirectory / metadata.SourceFilePath;
+
+        // Same test as ImportMesh / ImportStaticMesh.
+        XXH128_hash_t cookedHash{};
+        if (!std::filesystem::exists(cookedPath) || !Utility::loadHashFromFile(cookedPath.string() + ".hash", cookedHash) ||
+            !XXH128_isEqual(Utility::calcul_hash_streaming(sourcePath.string()), cookedHash))
+        {
+            return std::nullopt;
+        }
+
+        CookedMesh cooked;
+        const bool success = metadata.Type == AssetType::StaticMesh
+            ? MeshSerializer::DeserializeStaticMesh(cookedPath, cooked.Submeshes, cooked.Materials, cooked.Lights, cooked.Nodes, cooked.Cameras)
+            : MeshSerializer::DeserializeMesh(cookedPath, cooked.Submeshes, cooked.Materials, cooked.Lights, cooked.Nodes, cooked.Cameras);
+        if (!success)
+            return std::nullopt;
+        return cooked;
+    }
+
+    Ref<Asset> MeshImporter::CreateMeshAsset(AssetType type, CookedMesh& cooked)
+    {
+        if (type == AssetType::StaticMesh)
+        {
+            Ref<StaticMesh> mesh = CreateRef<StaticMesh>();
+            fillMeshAsset(cooked, mesh->m_SubMeshes, mesh->m_SubmeshNames, mesh->m_Materials, mesh->m_Lights, mesh->m_Cameras, mesh->m_Nodes);
+            return Ref<Asset>(mesh);
+        }
+
+        Ref<Mesh> mesh = CreateRef<Mesh>();
+        fillMeshAsset(cooked, mesh->m_SubMeshes, mesh->m_SubmeshNames, mesh->m_Materials, mesh->m_Lights, mesh->m_Cameras, mesh->m_Nodes);
+        return Ref<Asset>(mesh);
+    }
+
+    void MeshImporter::SetSubMesh(Asset& mesh, size_t index, const MeshHandle& handle)
+    {
+        if (mesh.GetType() == AssetType::StaticMesh)
+            static_cast<StaticMesh&>(mesh).m_SubMeshes[index] = handle;
+        else
+            static_cast<Mesh&>(mesh).m_SubMeshes[index] = handle;
+    }
 
     Ref<Mesh> MeshImporter::ImportMesh(AssetHandle handle, const AssetMetadata& metadata)
     {

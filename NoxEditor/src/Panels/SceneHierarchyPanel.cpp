@@ -8,6 +8,7 @@
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Asset/Material.h"
 #include "NoxCore/Asset/MaterialSerializer.h"
+#include "NoxCore/Renderer/Mesh.h"
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Animation/Animator.h"
 #include "NoxCore/Project/Project.h"
@@ -674,7 +675,52 @@ namespace Nox
 
         DrawComponent<MaterialComponent>("Material", entity, [this, entity](auto& component)
         {
-            if (component.MaterialAssets.empty())
+            // Per-slot overrides of the mesh's materials (UE's OverrideMaterials): a zero handle, or no entry, keeps the
+            // mesh's own .nmat, and only real overrides are stored. The entries past the last override are dropped.
+            auto setOverride = [&](size_t slot, AssetHandle material)
+            {
+                if (component.MaterialAssets.size() <= slot)
+                    component.MaterialAssets.resize(slot + 1, AssetHandle(0));
+                component.MaterialAssets[slot] = material;
+                while (!component.MaterialAssets.empty() && component.MaterialAssets.back() == 0)
+                    component.MaterialAssets.pop_back();
+                entity.PatchComponent<MaterialComponent>();
+            };
+
+            // The slots are the mesh's (only this entity's submeshes unless all are shown); an entity without a loaded
+            // mesh lists its own materials. (Local copy: `entity` is const in this lambda.)
+            Entity e = entity;
+            const std::vector<AssetHandle>* meshMaterials = nullptr;
+            size_t firstSlot = 0;
+            size_t slotEnd = component.MaterialAssets.size();
+            if (e.HasComponent<MeshComponent>())
+            {
+                const MeshComponent& meshComponent = e.GetComponent<MeshComponent>();
+                const AssetType meshType = AssetManager::GetAssetType(meshComponent.Mesh);
+                if (meshType == AssetType::StaticMesh)
+                {
+                    if (const StaticMesh* mesh = AssetManager::FindLoadedAsset<StaticMesh>(meshComponent.Mesh))
+                        meshMaterials = &mesh->GetMaterialAssets();
+                }
+                else if (meshType == AssetType::Mesh || meshType == AssetType::MeshSource)
+                {
+                    if (const Mesh* mesh = AssetManager::FindLoadedAsset<Mesh>(meshComponent.Mesh))
+                        meshMaterials = &mesh->GetMaterialAssets();
+                }
+
+                if (meshMaterials)
+                {
+                    slotEnd = meshMaterials->size();
+                    if (!m_MaterialShowAll)
+                    {
+                        firstSlot = std::min<size_t>(meshComponent.SubmeshIndex, slotEnd);
+                        if (meshComponent.SubmeshCount != UINT32_MAX)
+                            slotEnd = std::min<size_t>(firstSlot + std::max(meshComponent.SubmeshCount, 1u), slotEnd);
+                    }
+                }
+            }
+
+            if (!meshMaterials && component.MaterialAssets.empty())
             {
                 ImGui::TextDisabled("Drop a material asset here");
                 if (ImGui::BeginDragDropTarget())
@@ -685,8 +731,7 @@ namespace Nox
                         if (AssetManager::IsAssetHandleValid(handle) &&
                             AssetManager::GetAssetType(handle) == AssetType::Material)
                         {
-                            component.MaterialAssets.push_back(handle);
-                            entity.PatchComponent<MaterialComponent>();
+                            setOverride(0, handle);
                         }
                     }
                     ImGui::EndDragDropTarget();
@@ -694,186 +739,173 @@ namespace Nox
                 return;
             }
 
-            if (!component.MaterialAssets.empty())
+            if (meshMaterials)
             {
-                // This entity's own MeshComponent already knows exactly which submesh it draws
-                // (SubmeshIndex/SubmeshCount) -- no picking needed, it's right here on the same
-                // entity. On a mesh with many submeshes (e.g. one Bistro prop per entity), default
-                // to showing just the one slot that's actually used instead of the whole array.
-                // (Local mutable copy: `entity` was captured by value, so it's const inside this
-                // non-mutable lambda, and HasComponent/GetComponent aren't const member functions.)
-                Entity e = entity;
-                bool hasSubmeshFilter = e.HasComponent<MeshComponent>() &&
-                    e.GetComponent<MeshComponent>().SubmeshIndex < component.MaterialAssets.size();
-                size_t submeshIdx = hasSubmeshFilter ? e.GetComponent<MeshComponent>().SubmeshIndex : 0;
-                bool filterActive = hasSubmeshFilter && !m_MaterialShowAll;
+                ImGui::Text("Material slots %zu-%zu of %zu", firstSlot, slotEnd > 0 ? slotEnd - 1 : 0, meshMaterials->size());
+                if (ImGui::Button(m_MaterialShowAll ? "Show Only This Entity's Slots" : "Show All Slots"))
+                    m_MaterialShowAll = !m_MaterialShowAll;
+            }
+            else
+            {
+                ImGui::Text("Material Assets (%zu)", component.MaterialAssets.size());
+            }
 
-                if (filterActive)
+            for (size_t i = firstSlot; i < slotEnd; ++i)
+            {
+                const AssetHandle overrideHandle = i < component.MaterialAssets.size() ? component.MaterialAssets[i] : AssetHandle(0);
+                AssetHandle handle = overrideHandle;
+                if (handle == 0 && meshMaterials && i < meshMaterials->size())
+                    handle = (*meshMaterials)[i];
+                const bool overridden = meshMaterials && overrideHandle != 0;
+
+                std::string label = "None";
+                if (handle != 0 && AssetManager::IsAssetHandleValid(handle) &&
+                    AssetManager::GetAssetType(handle) == AssetType::Material)
                 {
-                    ImGui::Text("Material (slot %zu of %zu, used by this entity's mesh)", submeshIdx, component.MaterialAssets.size());
-                    if (ImGui::Button("Show All Slots"))
-                        m_MaterialShowAll = true;
+                    const auto& metadata = Project::GetActive()->GetEditorAssetManager()->GetMetadata(handle);
+                    label = metadata.FilePath.filename().string();
                 }
-                else
-                {
-                    ImGui::Text("Material Assets (%zu)", component.MaterialAssets.size());
-                    if (hasSubmeshFilter && ImGui::Button("Show Only This Entity's Slot"))
-                        m_MaterialShowAll = false;
-                }
+                if (overridden)
+                    label += " (override)";
 
-                for (size_t i = 0; i < component.MaterialAssets.size(); ++i)
+                if (slotEnd - firstSlot == 1)
+                    ImGui::SetNextItemOpen(true, ImGuiCond_Always);
+                if (ImGui::TreeNode((void*)(uintptr_t)i, "%zu: %s", i, label.c_str()))
                 {
-                    if (filterActive && submeshIdx != i)
-                        continue;
+                    if (ImGui::BeginDragDropTarget())
+                    {
+                        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEM"))
+                        {
+                            AssetHandle droppedHandle = *(const AssetHandle*)payload->Data;
+                            if (AssetManager::IsAssetHandleValid(droppedHandle) &&
+                                AssetManager::GetAssetType(droppedHandle) == AssetType::Material)
+                            {
+                                setOverride(i, droppedHandle);
+                            }
+                        }
+                        ImGui::EndDragDropTarget();
+                    }
 
-                    AssetHandle handle = component.MaterialAssets[i];
-                    std::string label = "None";
+                    if (overridden && ImGui::Button(("Use Mesh Material##" + std::to_string(i)).c_str()))
+                        setOverride(i, 0);
+
                     if (handle != 0 && AssetManager::IsAssetHandleValid(handle) &&
                         AssetManager::GetAssetType(handle) == AssetType::Material)
                     {
-                        const auto& metadata = Project::GetActive()->GetEditorAssetManager()->GetMetadata(handle);
-                        label = metadata.FilePath.filename().string();
-                    }
-
-                    if (filterActive)
-                        ImGui::SetNextItemOpen(true, ImGuiCond_Always);
-                    if (ImGui::TreeNode((void*)(uintptr_t)i, "%zu: %s", i, label.c_str()))
-                    {
-                        if (ImGui::BeginDragDropTarget())
+                        Ref<Material> material = AssetManager::GetAsset<Material>(handle);
+                        if (material)
                         {
-                            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEM"))
+                            MaterialData& data = material->GetData();
+                            if (ImGui::Button(("Make Unique##" + std::to_string(i)).c_str()))
                             {
-                                AssetHandle droppedHandle = *(const AssetHandle*)payload->Data;
-                                if (AssetManager::IsAssetHandleValid(droppedHandle) &&
-                                    AssetManager::GetAssetType(droppedHandle) == AssetType::Material)
+                                auto manager = Project::GetActive()->GetEditorAssetManager();
+                                const auto& metadata = manager->GetMetadata(handle);
+                                std::filesystem::path uniquePath = metadata.FilePath.parent_path() /
+                                (metadata.FilePath.stem().string() + "_Instance_" +
+                                    std::to_string(static_cast<uint64_t>(AssetHandle())) + ".nmat");
+                                if (MaterialSerializer::Serialize(
+                                    Project::GetActiveAssetDirectory() / uniquePath, data))
                                 {
-                                    component.MaterialAssets[i] = droppedHandle;
-                                    entity.PatchComponent<MaterialComponent>();
-                                }
-                            }
-                            ImGui::EndDragDropTarget();
-                        }
-
-                        if (handle != 0 && AssetManager::IsAssetHandleValid(handle) &&
-                            AssetManager::GetAssetType(handle) == AssetType::Material)
-                        {
-                            Ref<Material> material = AssetManager::GetAsset<Material>(handle);
-                            if (material)
-                            {
-                                MaterialData& data = material->GetData();
-                                if (ImGui::Button(("Make Unique##" + std::to_string(i)).c_str()))
-                                {
-                                    auto manager = Project::GetActive()->GetEditorAssetManager();
-                                    const auto& metadata = manager->GetMetadata(handle);
-                                    std::filesystem::path uniquePath = metadata.FilePath.parent_path() /
-                                    (metadata.FilePath.stem().string() + "_Instance_" +
-                                        std::to_string(static_cast<uint64_t>(AssetHandle())) + ".nmat");
-                                    if (MaterialSerializer::Serialize(
-                                        Project::GetActiveAssetDirectory() / uniquePath, data))
+                                    manager->ImportAsset(uniquePath, uniquePath, AssetType::Material);
+                                    for (const auto& [uniqueHandle, uniqueMetadata] : manager->GetAssetRegistry())
                                     {
-                                        manager->ImportAsset(uniquePath, uniquePath, AssetType::Material);
-                                        for (const auto& [uniqueHandle, uniqueMetadata] : manager->GetAssetRegistry())
+                                        if (uniqueMetadata.Type == AssetType::Material &&
+                                            uniqueMetadata.FilePath == uniquePath)
                                         {
-                                            if (uniqueMetadata.Type == AssetType::Material &&
-                                                uniqueMetadata.FilePath == uniquePath)
-                                            {
-                                                component.MaterialAssets[i] = uniqueHandle;
-                                                entity.PatchComponent<MaterialComponent>();
-                                                break;
-                                            }
+                                            setOverride(i, uniqueHandle);
+                                            break;
                                         }
                                     }
                                 }
+                            }
 
-                                bool changed = false;
-                                // The renderer shades with the factors of the material's workflow only (PackMaterial):
-                                // specular-glossiness materials (e.g. Bistro) use Diffuse/Specular/Glossiness.
-                                const bool specularGlossiness = data.Workflow == 1.0f;
-                                if (specularGlossiness)
-                                {
-                                    ImGui::TextDisabled("Workflow: Specular-Glossiness");
-                                    changed |= ImGui::ColorEdit4("Diffuse", glm::value_ptr(data.DiffuseFactor));
-                                    changed |= ImGui::ColorEdit3("Specular", glm::value_ptr(data.SpecularFactor));
-                                    changed |= ImGui::DragFloat("Glossiness", &data.SpecularFactor.a, 0.01f, 0.0f, 1.0f);
-                                }
-                                else
-                                {
-                                    ImGui::TextDisabled("Workflow: Metallic-Roughness");
-                                    changed |= ImGui::ColorEdit4("Base Color", glm::value_ptr(data.BaseColorFactor));
-                                    changed |= ImGui::DragFloat("Metallic", &data.MetallicFactor, 0.01f, 0.0f, 1.0f);
-                                    changed |= ImGui::DragFloat("Roughness", &data.RoughnessFactor, 0.01f, 0.0f, 1.0f);
-                                }
-                                changed |= ImGui::ColorEdit3("Emissive", glm::value_ptr(data.EmissiveFactor));
-                                changed |= ImGui::DragFloat("Emissive Strength", &data.emissiveStrength, 0.01f, 0.0f, 100.0f);
-                                changed |= ImGui::DragFloat("Transmission", &data.TransmissionFactor, 0.01f, 0.0f, 1.0f);
-                                changed |= ImGui::DragFloat("IOR", &data.IOR, 0.01f, 1.0f, 3.0f);
-                                changed |= ImGui::DragFloat("Thickness", &data.Thickness, 0.01f, 0.0f, 10.0f);
+                            bool changed = false;
+                            // The renderer shades with the factors of the material's workflow only (PackMaterial):
+                            // specular-glossiness materials (e.g. Bistro) use Diffuse/Specular/Glossiness.
+                            const bool specularGlossiness = data.Workflow == 1.0f;
+                            if (specularGlossiness)
+                            {
+                                ImGui::TextDisabled("Workflow: Specular-Glossiness");
+                                changed |= ImGui::ColorEdit4("Diffuse", glm::value_ptr(data.DiffuseFactor));
+                                changed |= ImGui::ColorEdit3("Specular", glm::value_ptr(data.SpecularFactor));
+                                changed |= ImGui::DragFloat("Glossiness", &data.SpecularFactor.a, 0.01f, 0.0f, 1.0f);
+                            }
+                            else
+                            {
+                                ImGui::TextDisabled("Workflow: Metallic-Roughness");
+                                changed |= ImGui::ColorEdit4("Base Color", glm::value_ptr(data.BaseColorFactor));
+                                changed |= ImGui::DragFloat("Metallic", &data.MetallicFactor, 0.01f, 0.0f, 1.0f);
+                                changed |= ImGui::DragFloat("Roughness", &data.RoughnessFactor, 0.01f, 0.0f, 1.0f);
+                            }
+                            changed |= ImGui::ColorEdit3("Emissive", glm::value_ptr(data.EmissiveFactor));
+                            changed |= ImGui::DragFloat("Emissive Strength", &data.emissiveStrength, 0.01f, 0.0f, 100.0f);
+                            changed |= ImGui::DragFloat("Transmission", &data.TransmissionFactor, 0.01f, 0.0f, 1.0f);
+                            changed |= ImGui::DragFloat("IOR", &data.IOR, 0.01f, 1.0f, 3.0f);
+                            changed |= ImGui::DragFloat("Thickness", &data.Thickness, 0.01f, 0.0f, 10.0f);
 
-                                auto drawTextureReference = [&](const char* labelName,
-                                                                const char* id,
-                                                                std::string& texturePath)
-                                {
-                                    std::string label = texturePath.empty()
-                                                            ? "None"
-                                                            : std::filesystem::path(texturePath).filename().string();
-                                    ImGui::Text("%s", labelName);
-                                    ImGui::SameLine();
-                                    ImGui::Button((label + "##" + id).c_str(), ImVec2(150.0f, 0.0f));
+                            auto drawTextureReference = [&](const char* labelName,
+                                                            const char* id,
+                                                            std::string& texturePath)
+                            {
+                                std::string label = texturePath.empty()
+                                                        ? "None"
+                                                        : std::filesystem::path(texturePath).filename().string();
+                                ImGui::Text("%s", labelName);
+                                ImGui::SameLine();
+                                ImGui::Button((label + "##" + id).c_str(), ImVec2(150.0f, 0.0f));
 
-                                    if (ImGui::BeginDragDropTarget())
+                                if (ImGui::BeginDragDropTarget())
+                                {
+                                    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEM"))
                                     {
-                                        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEM"))
+                                        AssetHandle textureHandle = *(const AssetHandle*)payload->Data;
+                                        if (AssetManager::GetAssetType(textureHandle) == AssetType::Texture2D)
                                         {
-                                            AssetHandle textureHandle = *(const AssetHandle*)payload->Data;
-                                            if (AssetManager::GetAssetType(textureHandle) == AssetType::Texture2D)
-                                            {
-                                                const auto& textureMetadata =
-                                                    Project::GetActive()->GetEditorAssetManager()->GetMetadata(textureHandle);
-                                                texturePath = textureMetadata.SourceFilePath.empty()
-                                                                  ? textureMetadata.FilePath.generic_string()
-                                                                  : textureMetadata.SourceFilePath.generic_string();
-                                                changed = true;
-                                            }
+                                            const auto& textureMetadata =
+                                                Project::GetActive()->GetEditorAssetManager()->GetMetadata(textureHandle);
+                                            texturePath = textureMetadata.SourceFilePath.empty()
+                                                              ? textureMetadata.FilePath.generic_string()
+                                                              : textureMetadata.SourceFilePath.generic_string();
+                                            changed = true;
                                         }
-                                        ImGui::EndDragDropTarget();
                                     }
-                                };
-
-                                drawTextureReference(specularGlossiness ? "Diffuse Texture" : "Base Color Texture", "BaseColor", data.BaseColorTexturePath);
-                                drawTextureReference(specularGlossiness ? "Specular Glossiness" : "Metallic Roughness", "MetallicRoughness", data.MetallicRoughnessTexturePath);
-                                drawTextureReference("Normal Texture", "Normal", data.NormalTexturePath);
-                                drawTextureReference("Occlusion Texture", "Occlusion", data.OcclusionTexturePath);
-                                drawTextureReference("Emissive Texture", "Emissive", data.EmissiveTexturePath);
-                                drawTextureReference("Transmission Texture", "Transmission", data.TransmissionTexturePath);
-
-                                int alphaMode = static_cast<int>(data.Mode);
-                                const char* alphaModes[] = {"Opaque", "Mask", "Blend"};
-                                if (ImGui::Combo("Alpha Mode", &alphaMode, alphaModes, 3))
-                                {
-                                    data.Mode = static_cast<AlphaMode>(alphaMode);
-                                    changed = true;
+                                    ImGui::EndDragDropTarget();
                                 }
-                                if (data.Mode == AlphaMode::Mask)
-                                    changed |= ImGui::DragFloat("Alpha Cutoff", &data.AlphaMaskCutoff, 0.005f, 0.0f, 1.0f);
-                                changed |= ImGui::Checkbox("Double Sided", &data.DoubleSided);
-                                changed |= ImGui::Checkbox("Unlit", &data.Unlit);
+                            };
 
-                                if (changed)
-                                {
-                                    // Every instance using this material shades with the edit from this frame.
-                                    Renderer::MarkMaterialChanged(handle);
-                                    const auto& metadata = Project::GetActive()->GetEditorAssetManager()->GetMetadata(handle);
-                                    MaterialSerializer::Serialize(
-                                        Project::GetActiveAssetDirectory() / metadata.FilePath,
-                                        data
-                                    );
-                                }
+                            drawTextureReference(specularGlossiness ? "Diffuse Texture" : "Base Color Texture", "BaseColor", data.BaseColorTexturePath);
+                            drawTextureReference(specularGlossiness ? "Specular Glossiness" : "Metallic Roughness", "MetallicRoughness", data.MetallicRoughnessTexturePath);
+                            drawTextureReference("Normal Texture", "Normal", data.NormalTexturePath);
+                            drawTextureReference("Occlusion Texture", "Occlusion", data.OcclusionTexturePath);
+                            drawTextureReference("Emissive Texture", "Emissive", data.EmissiveTexturePath);
+                            drawTextureReference("Transmission Texture", "Transmission", data.TransmissionTexturePath);
+
+                            int alphaMode = static_cast<int>(data.Mode);
+                            const char* alphaModes[] = {"Opaque", "Mask", "Blend"};
+                            if (ImGui::Combo("Alpha Mode", &alphaMode, alphaModes, 3))
+                            {
+                                data.Mode = static_cast<AlphaMode>(alphaMode);
+                                changed = true;
+                            }
+                            if (data.Mode == AlphaMode::Mask)
+                                changed |= ImGui::DragFloat("Alpha Cutoff", &data.AlphaMaskCutoff, 0.005f, 0.0f, 1.0f);
+                            changed |= ImGui::Checkbox("Double Sided", &data.DoubleSided);
+                            changed |= ImGui::Checkbox("Unlit", &data.Unlit);
+
+                            if (changed)
+                            {
+                                // Every instance using this material shades with the edit from this frame.
+                                Renderer::MarkMaterialChanged(handle);
+                                const auto& metadata = Project::GetActive()->GetEditorAssetManager()->GetMetadata(handle);
+                                MaterialSerializer::Serialize(
+                                    Project::GetActiveAssetDirectory() / metadata.FilePath,
+                                    data
+                                );
                             }
                         }
-                        ImGui::TreePop();
                     }
+                    ImGui::TreePop();
                 }
-                return;
             }
         });
 

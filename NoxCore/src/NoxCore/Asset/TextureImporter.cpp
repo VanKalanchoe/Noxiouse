@@ -22,12 +22,47 @@
 
 namespace Nox
 {
-    static std::filesystem::path GetCookedTexturePath(const AssetMetadata& metadata)
+    static std::filesystem::path GetCookedTexturePath(const std::filesystem::path& assetDirectory, const AssetMetadata& metadata)
     {
-        std::filesystem::path path = Project::GetActiveAssetDirectory() / metadata.FilePath;
+        std::filesystem::path path = assetDirectory / metadata.FilePath;
         if (path.extension() != ".ntex")
             path.replace_extension(".ntex");
         return path;
+    }
+
+    static std::filesystem::path GetTextureSourcePath(const std::filesystem::path& assetDirectory, const AssetMetadata& metadata)
+    {
+        return assetDirectory / (metadata.SourceFilePath.empty() ? metadata.FilePath : metadata.SourceFilePath);
+    }
+
+    static bool IsCookedTextureSource(const std::filesystem::path& sourcePath)
+    {
+        return sourcePath.extension() == ".ntex";
+    }
+
+    // Sources cooked into .ntex on import.
+    static bool IsCookableTextureSource(const std::filesystem::path& sourcePath)
+    {
+        const std::filesystem::path extension = sourcePath.extension();
+        return extension == ".png" || extension == ".jpg" || extension == ".jpeg" || extension == ".dds" || extension == ".ktx2";
+    }
+
+    // Identifies what a cooked texture was made from: the source content and the import settings.
+    static XXH128_hash_t TextureCookHash(const std::filesystem::path& sourcePath, const TextureSpecification& spec)
+    {
+        struct TextureCookSettings
+        {
+            XXH128_hash_t source;
+            uint8_t flip;
+            uint8_t generateMips;
+            uint16_t format;
+        };
+        TextureCookSettings cookSettings{};
+        cookSettings.source = Utility::calcul_hash_streaming(sourcePath.string());
+        cookSettings.flip = static_cast<uint8_t>(spec.flip);
+        cookSettings.generateMips = static_cast<uint8_t>(spec.generateMips);
+        cookSettings.format = static_cast<uint16_t>(spec.format);
+        return XXH3_128bits(&cookSettings, sizeof(cookSettings));
     }
 
     static void GenerateRGBA8MipChain(TextureData& cpuData)
@@ -99,30 +134,59 @@ namespace Nox
         memcpy(cpuData.Data.Data, mipData.data(), mipData.size());
     }
 
+    std::optional<CookedTextureHeader> TextureImporter::ReadCookedTextureHeader(const std::filesystem::path& assetDirectory, const AssetMetadata& metadata)
+    {
+        const std::filesystem::path cookedPath = GetCookedTexturePath(assetDirectory, metadata);
+        const std::filesystem::path sourcePath = GetTextureSourcePath(assetDirectory, metadata);
+
+        // Same test as ImportTexture2D: a cooked source is its own cook, anything else must match the recorded hash.
+        if (!IsCookedTextureSource(sourcePath))
+        {
+            XXH128_hash_t cookedHash{};
+            if (!std::filesystem::exists(sourcePath) || !Utility::loadHashFromFile(cookedPath.string() + ".hash", cookedHash) ||
+                !XXH128_isEqual(TextureCookHash(sourcePath, metadata.TextureSpec), cookedHash))
+            {
+                return std::nullopt;
+            }
+        }
+
+        std::ifstream stream(cookedPath, std::ios::binary);
+        if (!stream.is_open())
+            return std::nullopt;
+
+        CookedTextureHeader header;
+        header.Path = cookedPath;
+        if (!ReadNTEXHeader(stream, header.Texture, header.DataSize))
+            return std::nullopt;
+        header.DataOffset = static_cast<uint64_t>(stream.tellg());
+
+        // Streamed textures are plain copies of one 2D layer with a complete mip chain (UploadTexture's transfer path).
+        const TextureData& texture = header.Texture;
+        if (texture.ArrayLayers != 1 || texture.IsCubeMap || (texture.MipLevels > 1 && texture.MipOffsets.size() != texture.MipLevels))
+            return std::nullopt;
+        return header;
+    }
+
+    bool TextureImporter::ReadCookedTextureData(const CookedTextureHeader& header, uint8_t* destination)
+    {
+        std::ifstream stream(header.Path, std::ios::binary);
+        if (!stream.is_open())
+            return false;
+        stream.seekg(static_cast<std::streamoff>(header.DataOffset));
+        stream.read(reinterpret_cast<char*>(destination), static_cast<std::streamsize>(header.DataSize));
+        return !stream.fail();
+    }
+
     Ref<Texture2D> TextureImporter::ImportTexture2D(AssetHandle handle, const AssetMetadata& metadata)
     {
-        std::filesystem::path cookedPath = GetCookedTexturePath(metadata);
-        std::filesystem::path sourcePath = Project::GetActiveAssetDirectory() / metadata.SourceFilePath;
-        if (metadata.SourceFilePath.empty())
-            sourcePath = Project::GetActiveAssetDirectory() / metadata.FilePath;
+        const std::filesystem::path assetDirectory = Project::GetActiveAssetDirectory();
+        std::filesystem::path cookedPath = GetCookedTexturePath(assetDirectory, metadata);
+        std::filesystem::path sourcePath = GetTextureSourcePath(assetDirectory, metadata);
 
-        const bool sourceIsCooked = sourcePath.extension() == ".ntex" || sourcePath.extension() == ".ktx2";
+        const bool sourceIsCooked = IsCookedTextureSource(sourcePath);
         const auto hashPath = cookedPath.string() + ".hash";
-        XXH128_hash_t sourceHash{};
+        const XXH128_hash_t sourceHash = sourceIsCooked ? XXH128_hash_t{} : TextureCookHash(sourcePath, metadata.TextureSpec);
         XXH128_hash_t cookedHash{};
-        struct TextureCookSettings
-        {
-            XXH128_hash_t source;
-            uint8_t flip;
-            uint8_t generateMips;
-            uint16_t format;
-        };
-        TextureCookSettings cookSettings{};
-        cookSettings.source = Utility::calcul_hash_streaming(sourcePath.string());
-        cookSettings.flip = static_cast<uint8_t>(metadata.TextureSpec.flip);
-        cookSettings.generateMips = static_cast<uint8_t>(metadata.TextureSpec.generateMips);
-        cookSettings.format = static_cast<uint16_t>(metadata.TextureSpec.format);
-        sourceHash = XXH3_128bits(&cookSettings, sizeof(cookSettings));
         const bool cookedIsCurrent = sourceIsCooked ||
             (std::filesystem::exists(sourcePath) &&
              (Utility::loadHashFromFile(hashPath, cookedHash) &&
@@ -131,49 +195,59 @@ namespace Nox
         if (std::filesystem::exists(cookedPath) && cookedIsCurrent)
             return LoadTexture2D(cookedPath, metadata.TextureSpec);
 
-        if (sourcePath.extension() == ".png" || sourcePath.extension() == ".jpg" || sourcePath.extension() == ".jpeg")
+        // Other formats (e.g. .hdr) load from the source every time.
+        if (!IsCookableTextureSource(sourcePath))
+            return LoadTexture2D(sourcePath, metadata.TextureSpec);
+
+        // Cook once into the GPU-ready .ntex: PNG/JPG get their mip chain generated here, DDS and KTX2 keep the mips
+        // and block compression they ship with (a Basis KTX2 is transcoded here, not on every load).
+        TextureData cpuData{};
+        bool decoded = false;
+        if (sourcePath.extension() == ".dds")
+            decoded = DecodeDDS(sourcePath, cpuData);
+        else if (sourcePath.extension() == ".ktx2")
+            decoded = DecodeKTX(sourcePath, metadata.TextureSpec, cpuData);
+        else
+            decoded = DecodeSTB(sourcePath, metadata.TextureSpec, cpuData);
+        if (!decoded)
+            return Ref<Texture2D>(nullptr);
+
+        if (!std::filesystem::exists(cookedPath.parent_path()))
+            std::filesystem::create_directories(cookedPath.parent_path());
+        SaveNTEX(cookedPath, cpuData);
+        Utility::saveHashToFile(hashPath, sourceHash);
+
+        Renderer* targetRenderer = Application::Get().GetRenderer();
+        Ref<Texture2D> texture = targetRenderer->UploadTexture(cpuData);
+        cpuData.Data.Release();
+        return texture;
+    }
+
+    bool TextureImporter::DecodeSTB(const std::filesystem::path& path, const TextureSpecification& spec, TextureData& cpuData)
+    {
+        stbi_set_flip_vertically_on_load(spec.flip);
+
+        int texWidth, texHeight, texChannels;
+        stbi_uc* pixels = stbi_load(path.string().c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+        if (!pixels)
         {
-            if (metadata.TextureSpec.flip)
-                stbi_set_flip_vertically_on_load(true);
-            else
-                stbi_set_flip_vertically_on_load(false);
-
-            int texWidth, texHeight, texChannels;
-            stbi_uc* pixels = stbi_load(sourcePath.string().c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
-            if (!pixels)
-            {
-                NOX_CORE_ERROR("TextureImporter::ImportTexture2D - Could not load texture from filepath: {}", sourcePath.string());
-                return Ref<Texture2D>(nullptr);
-            }
-
-            TextureData cpuData{};
-            cpuData.Width = texWidth;
-            cpuData.Height = texHeight;
-            cpuData.MipLevels = metadata.TextureSpec.generateMips
-                                    ? static_cast<uint32_t>(std::floor(std::log2(std::max(texWidth, texHeight)))) + 1
-                                    : 1;
-            cpuData.Data = Buffer::Copy(Buffer(pixels, static_cast<uint64_t>(texWidth) * texHeight * 4));
-            cpuData.Format = metadata.TextureSpec.format;
-            cpuData.MipOffsets = { 0 };
-
-            stbi_image_free(pixels);
-
-            GenerateRGBA8MipChain(cpuData);
-
-            if (!std::filesystem::exists(cookedPath.parent_path()))
-                std::filesystem::create_directories(cookedPath.parent_path());
-            SaveNTEX(cookedPath, cpuData);
-            if (!sourceIsCooked)
-                Utility::saveHashToFile(hashPath, sourceHash);
-
-            Renderer* targetRenderer = Application::Get().GetRenderer();
-            Ref<Texture2D> texture = targetRenderer->UploadTexture(cpuData);
-            cpuData.Data.Release();
-            return texture;
+            NOX_CORE_ERROR("TextureImporter::DecodeSTB - Could not load texture from filepath: {}", path.string());
+            return false;
         }
 
-        Ref<Texture2D> texture = LoadTexture2D(sourcePath, metadata.TextureSpec);
-        return texture;
+        cpuData.Width = texWidth;
+        cpuData.Height = texHeight;
+        cpuData.MipLevels = spec.generateMips
+                                ? static_cast<uint32_t>(std::floor(std::log2(std::max(texWidth, texHeight)))) + 1
+                                : 1;
+        cpuData.Data = Buffer::Copy(Buffer(pixels, static_cast<uint64_t>(texWidth) * texHeight * 4));
+        cpuData.Format = spec.format;
+        cpuData.MipOffsets = { 0 };
+
+        stbi_image_free(pixels);
+
+        GenerateRGBA8MipChain(cpuData);
+        return true;
     }
 
     Ref<Texture2D> TextureImporter::LoadTexture2D(const std::filesystem::path& path, const TextureSpecification& spec, Renderer* renderer)
@@ -296,20 +370,32 @@ namespace Nox
     
     Ref<Texture2D> TextureImporter::LoadWithDDS(const std::filesystem::path& path, const TextureSpecification& spec, Renderer* renderer)
     {
-        tinyddsloader::DDSFile dds;
-        
-        auto result = dds.Load(path.string().c_str());
-        
-        if (result != tinyddsloader::Result::Success) 
-        {
-            NOX_CORE_ASSERT("TextureImporter::LoadWithDDS - Failed to load DDS from: {} Result: {}", path.string(), std::to_string(result));
-        }
-        
         TextureData cpuData{};
+        if (!DecodeDDS(path, cpuData))
+            return Ref<Texture2D>(nullptr);
+
+        Renderer* targetRenderer = renderer ? renderer : Application::Get().GetRenderer();
+        Ref<Texture2D> texture = targetRenderer->UploadTexture(cpuData);
+        cpuData.Data.Release();
+        return texture;
+    }
+
+    bool TextureImporter::DecodeDDS(const std::filesystem::path& path, TextureData& cpuData)
+    {
+        tinyddsloader::DDSFile dds;
+
+        auto result = dds.Load(path.string().c_str());
+
+        if (result != tinyddsloader::Result::Success)
+        {
+            NOX_CORE_ERROR("TextureImporter::DecodeDDS - Failed to load DDS from: {} Result: {}", path.string(), static_cast<int>(result));
+            return false;
+        }
+
         cpuData.Width = dds.GetWidth();
         cpuData.Height = dds.GetHeight();
         cpuData.MipLevels = dds.GetMipCount();
-        
+
         switch (dds.GetFormat())
         {
         case tinyddsloader::DDSFile::DXGIFormat::BC1_Typeless:
@@ -362,30 +448,26 @@ namespace Nox
             cpuData.Format = NRI::ImageFormat::BC7_UNorm_SRGB;
             break;
         default:
-            NOX_CORE_ERROR("TextureImporter::LoadWithDDS - Unsupported DDS format {} from: {}", static_cast<uint32_t>(dds.GetFormat()), path.string());
-            return Ref<Texture2D>(nullptr);
+            NOX_CORE_ERROR("TextureImporter::DecodeDDS - Unsupported DDS format {} from: {}", static_cast<uint32_t>(dds.GetFormat()), path.string());
+            return false;
         }
-        
+
         size_t currentOffset = 0;
         cpuData.MipOffsets.resize(dds.GetMipCount());
-        
+
         for (uint32_t level = 0; level < dds.GetMipCount(); level++)
         {
             cpuData.MipOffsets[level] = currentOffset;
-            
+
             const auto* imageData = dds.GetImageData(level, 0);
             currentOffset += imageData->m_memSlicePitch;
         }
-        
-        cpuData.Data = Buffer((void*)dds.GetImageData()->m_mem, currentOffset);
-        
-        Renderer* targetRenderer = renderer ? renderer : Application::Get().GetRenderer();
-        
-        Ref<Texture2D> texture = targetRenderer->UploadTexture(cpuData);
-        
-        return texture;   
+
+        // Owned: the DDS file's memory goes away with it.
+        cpuData.Data = Buffer::Copy(Buffer(dds.GetImageData()->m_mem, currentOffset));
+        return true;
     }
-    
+
     // Returns bytes-per-texel for plain (non-block-compressed) VkFormats we might see out of
     // a KTX2 file, or 0 if the format is block-compressed / unrecognized (unsafe to row-flip).
     static uint32_t UncompressedVkFormatTexelSize(uint32_t vkFormat)
@@ -414,6 +496,18 @@ namespace Nox
 
     Ref<Texture2D> TextureImporter::LoadWithKTX(const std::filesystem::path& path, const TextureSpecification& spec, Renderer* renderer)
     {
+        TextureData cpuData{};
+        if (!DecodeKTX(path, spec, cpuData))
+            return Ref<Texture2D>(nullptr);
+
+        Renderer* targetRenderer = renderer ? renderer : Application::Get().GetRenderer();
+        Ref<Texture2D> texture = targetRenderer->UploadTexture(cpuData);
+        cpuData.Data.Release();
+        return texture;
+    }
+
+    bool TextureImporter::DecodeKTX(const std::filesystem::path& path, const TextureSpecification& spec, TextureData& cpuData)
+    {
         ktxTexture2* kTexture;
         KTX_error_code result = ktxTexture2_CreateFromNamedFile
         (
@@ -421,8 +515,12 @@ namespace Nox
             KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT,
             &kTexture
         );
-        
-        if (result != KTX_SUCCESS) NOX_CORE_ASSERT("TextureImporter::LoadWithKTX failed to load ktx texture image!");
+
+        if (result != KTX_SUCCESS)
+        {
+            NOX_CORE_ERROR("TextureImporter::DecodeKTX - failed to load ktx texture image: {}", path.string());
+            return false;
+        }
 
         // KTX2's default/assumed row order is top-down (Y=down), matching glTF/PNG/Vulkan - the
         // convention this engine assumes everywhere else. Some KTX2 encoders instead bake images
@@ -443,11 +541,15 @@ namespace Nox
             ktx_transcode_fmt_e transcodeTarget = needsFlip ? KTX_TTF_RGBA32 : KTX_TTF_BC7_RGBA;
             result = ktxTexture2_TranscodeBasis(kTexture, transcodeTarget, 0);
 
-            if (result != KTX_SUCCESS) NOX_CORE_ASSERT("TextureImporter::LoadWithKTX failed to transcode Basis texture!");
+            if (result != KTX_SUCCESS)
+            {
+                NOX_CORE_ERROR("TextureImporter::DecodeKTX - failed to transcode Basis texture: {}", path.string());
+                ktxTexture2_Destroy(kTexture);
+                return false;
+            }
         }
 
         // Get texture dimensions and data
-        TextureData cpuData{};
         cpuData.Width = kTexture->baseWidth;
         cpuData.Height = kTexture->baseHeight;
         cpuData.MipLevels = kTexture->numLevels; // todo:
@@ -502,19 +604,14 @@ namespace Nox
             }
             else
             {
-                NOX_CORE_ERROR("TextureImporter::LoadWithKTX - '{}' is block-compressed, flipping it at load time isn't safe. Flip the source image before baking it to KTX2.", path.string());
+                NOX_CORE_ERROR("TextureImporter::DecodeKTX - '{}' is block-compressed, flipping it at load time isn't safe. Flip the source image before baking it to KTX2.", path.string());
             }
         }
 
-        cpuData.Data = Buffer((void*)kTexture->pData, kTexture->dataSize);
-        
-        Renderer* targetRenderer = renderer ? renderer : Application::Get().GetRenderer();
-        
-        Ref<Texture2D> texture = targetRenderer->UploadTexture(cpuData);
-        
+        // Owned: the KTX texture's memory goes away with it.
+        cpuData.Data = Buffer::Copy(Buffer(kTexture->pData, kTexture->dataSize));
         ktxTexture2_Destroy(kTexture);
-        
-        return texture;
+        return true;
     }
 
     Ref<Texture2D> TextureImporter::LoadWithNTEX(const std::filesystem::path& path, Renderer* renderer)
@@ -576,6 +673,19 @@ namespace Nox
         if (!stream.is_open())
             return false;
 
+        uint64_t dataSize = 0;
+        if (!ReadNTEXHeader(stream, outData, dataSize))
+            return false;
+
+        outData.Data.Allocate(dataSize);
+        if (dataSize > 0)
+            stream.read(reinterpret_cast<char*>(outData.Data.Data), dataSize);
+
+        return !stream.fail();
+    }
+
+    bool TextureImporter::ReadNTEXHeader(std::istream& stream, TextureData& outData, uint64_t& outDataSize)
+    {
         char magic[5] = {};
         stream.read(magic, 4);
         if (strcmp(magic, "NTX1") != 0)
@@ -584,7 +694,6 @@ namespace Nox
         uint32_t format = 0;
         uint32_t directFormat = UINT32_MAX;
         uint32_t usage = 0;
-        uint64_t dataSize = 0;
         uint32_t mipOffsetCount = 0;
 
         stream.read(reinterpret_cast<char*>(&outData.Width), sizeof(uint32_t));
@@ -609,11 +718,7 @@ namespace Nox
             outData.MipOffsets[i] = static_cast<size_t>(storedOffset);
         }
 
-        stream.read(reinterpret_cast<char*>(&dataSize), sizeof(uint64_t));
-        outData.Data.Allocate(dataSize);
-        if (dataSize > 0)
-            stream.read(reinterpret_cast<char*>(outData.Data.Data), dataSize);
-
+        stream.read(reinterpret_cast<char*>(&outDataSize), sizeof(uint64_t));
         return !stream.fail();
     }
     

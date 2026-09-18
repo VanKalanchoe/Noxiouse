@@ -133,7 +133,7 @@ namespace Nox
         return true;
     }
 
-    // Main thread: resolves (and loads) the texture, filling the caches.
+    // Main thread: resolves the texture (requesting its load), filling the caches.
     static int GetTextureIndex(const std::string& path)
     {
         if (path.empty())
@@ -155,7 +155,11 @@ namespace Nox
             return -1;
         }
 
-        Ref<Texture2D> texture = AssetManager::GetAsset<Texture2D>(handle);
+        // Loads in the background: the material draws without it until Renderer::MarkTexturesLoaded re-packs it.
+        const AssetState state = AssetManager::RequestAsset(handle);
+        if (state == AssetState::Loading)
+            return -1;
+        const Texture2D* texture = state == AssetState::Ready ? AssetManager::FindLoadedAsset<Texture2D>(handle) : nullptr;
         if (!texture)
         {
             s_TextureDescriptorMisses.insert(path);
@@ -167,7 +171,7 @@ namespace Nox
         return descriptorIndex;
     }
 
-    // Main thread (resolves and loads textures).
+    // Main thread (resolves textures and requests their loads).
     static shaderio::GpuMaterial PackMaterial(const MaterialData& material)
     {
         shaderio::GpuMaterial packed{};
@@ -211,8 +215,8 @@ namespace Nox
         if (!m_device) NOX_CORE_ASSERT("Failed to create NRI device");
 
         // Staging for every upload, right after the device: startup already uploads (textures, IBL inputs). A ring on
-        // the transfer queue; oversized uploads get their own buffer.
-        m_uploads.Init(*m_device, 64ull * 1024 * 1024);
+        // the transfer queue that streamed loads fill over several frames; oversized uploads get their own buffer.
+        m_uploads.Init(*m_device, 128ull * 1024 * 1024);
 
 #if NOX_PROFILING_ENABLED
         m_gpuProfiler = m_device->createGpuProfiler(MAX_FRAMES_IN_FLIGHT);
@@ -1594,6 +1598,14 @@ namespace Nox
         // Mips generated here need blits, and arrays/cubes a different staging layout: those keep the graphics path.
         const bool copyOnly = cpuData.ArrayLayers == 1 && !cpuData.IsCubeMap &&
                               (cpuData.MipLevels <= 1 || cpuData.MipOffsets.size() == cpuData.MipLevels);
+        if (copyOnly)
+        {
+            const TextureUpload upload = *BeginTextureUpload(cpuData, cpuData.Data.Size, true);
+            memcpy(upload.Staging.data, cpuData.Data.Data, cpuData.Data.Size);
+            EndTextureUpload(upload, true);
+            PublishTexture(*upload.Texture);
+            return upload.Texture;
+        }
 
         Ref<Texture2D> textureResource = m_device->createTexture(NRI::TextureDesc
             {
@@ -1605,35 +1617,65 @@ namespace Nox
                 .sampleCount = 1,
                 .usage = cpuData.Usage,
                 .format = cpuData.Format,
-                .directFormat = cpuData.DirectFormat,
-                .sharedAcrossQueues = copyOnly
+                .directFormat = cpuData.DirectFormat
             });
 
-        if (copyOnly)
-        {
-            const StagingSpan staging = m_uploads.ReserveStaging(cpuData.Data.Size);
-            memcpy(staging.data, cpuData.Data.Data, cpuData.Data.Size);
-            m_uploads.CopyToTexture(staging, *textureResource, cpuData.MipOffsets.empty() ? std::vector<size_t>{ 0 } : cpuData.MipOffsets);
-        }
-        else
-        {
-            std::unique_ptr<NRI::Buffer> stagingBuffer = m_device->createBuffer(NRI::BufferDesc{
-                .size = cpuData.Data.Size,
-                .usage = NRI::BufferUsage::Staging
-            });
-            void* data = stagingBuffer->map(0, cpuData.Data.Size);
-            memcpy(data, cpuData.Data.Data, cpuData.Data.Size);
-            stagingBuffer->unmap();
+        std::unique_ptr<NRI::Buffer> stagingBuffer = m_device->createBuffer(NRI::BufferDesc{
+            .size = cpuData.Data.Size,
+            .usage = NRI::BufferUsage::Staging
+        });
+        void* data = stagingBuffer->map(0, cpuData.Data.Size);
+        memcpy(data, cpuData.Data.Data, cpuData.Data.Size);
+        stagingBuffer->unmap();
 
-            std::unique_ptr<NRI::CommandBuffer> commandBuffer = beginSingleTimeCommands();
-            textureResource->uploadFromBuffer(*commandBuffer, *stagingBuffer, cpuData.Width, cpuData.Height, cpuData.MipLevels, cpuData.MipOffsets);
-            endSingleTimeCommands(std::move(commandBuffer));
-        }
+        std::unique_ptr<NRI::CommandBuffer> commandBuffer = beginSingleTimeCommands();
+        textureResource->uploadFromBuffer(*commandBuffer, *stagingBuffer, cpuData.Width, cpuData.Height, cpuData.MipLevels, cpuData.MipOffsets);
+        endSingleTimeCommands(std::move(commandBuffer));
 
-        m_resourceHeap->registerTexture(*textureResource);
-        uniformData.imageHeapIndexOffset = m_resourceHeap->getImageHeapIndexOffset();
-
+        PublishTexture(*textureResource);
         return textureResource;
+    }
+
+    std::optional<TextureUpload> Renderer::BeginTextureUpload(const TextureData& texture, uint64_t dataSize, bool wait)
+    {
+        std::optional<StagingSpan> staging = wait ? m_uploads.ReserveStaging(dataSize) : m_uploads.TryReserveStaging(dataSize);
+        if (!staging)
+            return std::nullopt;
+
+        TextureUpload upload;
+        upload.Staging = *staging;
+        upload.MipOffsets = texture.MipOffsets.empty() ? std::vector<size_t>{ 0 } : texture.MipOffsets;
+        upload.Texture = m_device->createTexture(NRI::TextureDesc
+            {
+                .width = texture.Width,
+                .height = texture.Height,
+                .arrayLayers = 1,
+                .mipLevels = texture.MipLevels,
+                .sampleCount = 1,
+                .usage = texture.Usage,
+                .format = texture.Format,
+                .directFormat = texture.DirectFormat,
+                .sharedAcrossQueues = true
+            });
+        return upload;
+    }
+
+    uint64_t Renderer::EndTextureUpload(const TextureUpload& upload, bool nextFrameReads)
+    {
+        m_uploads.CopyToTexture(upload.Staging, *upload.Texture, upload.MipOffsets);
+        return m_uploads.Commit(upload.Staging, nextFrameReads);
+    }
+
+    void Renderer::PublishTexture(Texture2D& texture)
+    {
+        m_resourceHeap->registerTexture(texture);
+        uniformData.imageHeapIndexOffset = m_resourceHeap->getImageHeapIndexOffset();
+    }
+
+    void Renderer::MarkTexturesLoaded()
+    {
+        if (s_Instance)
+            s_Instance->m_gpuMaterialsDirty = true;
     }
 
     Ref<Texture2D> Renderer::createSolidColorTexture(uint8_t r, uint8_t g, uint8_t b, uint8_t a)
@@ -1929,7 +1971,8 @@ namespace Nox
         const uint64_t bytes = sizeof(T) * uint64_t(elementCount);
         const StagingSpan staging = m_uploads.ReserveStaging(bytes);
         memcpy(staging.data, data, bytes);
-        m_uploads.CopyToBuffer(staging, dstBuffer, sizeof(T) * uint64_t(elementOffset));
+        m_uploads.CopyToBuffer(staging, 0, bytes, dstBuffer, sizeof(T) * uint64_t(elementOffset));
+        m_uploads.Commit(staging, true);
     }
 
     void Renderer::initGeometryBuffers()
@@ -1959,164 +2002,239 @@ namespace Nox
         if (grownFrom)
         {
             // Ordered after every write already queued to the old buffer and before the new range's writes (same transfer
-            // submission). Frames in flight keep reading the old buffer, so it is released after them; the next frame
-            // waits for this copy on the GPU.
+            // submission). Frames in flight keep reading the old buffer, and the next frame to be submitted waits for
+            // this copy, which reads it too: one frame longer than a release made during recording, as a load grows
+            // the stream before that frame starts (and counts down) -- without it the buffer died under the copy.
             m_uploads.CopyBuffer(*grownFrom, stream.GetBuffer(), grownFrom->getSize());
 
             {
                 std::scoped_lock lock(m_deferredReleasesMutex);
-                m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, std::move(grownFrom) });
+                m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT + 1, std::move(grownFrom) });
             }
         }
         return range;
     }
 
+    namespace
+    {
+        // Where each stream's data sits in a submesh's staging (16-byte aligned blocks, in stream order).
+        struct MeshStagingLayout
+        {
+            uint64_t vertices = 0;
+            uint64_t draws = 0;
+            uint64_t bounds = 0;
+            uint64_t meshletVertices = 0;
+            uint64_t meshletTriangles = 0;
+            uint64_t rtIndices = 0;
+            uint64_t size = 0;
+        };
+
+        MeshStagingLayout meshStagingLayout(uint64_t vertices, uint64_t draws, uint64_t meshletVertices, uint64_t meshletTriangles, uint64_t rtIndices)
+        {
+            MeshStagingLayout layout;
+            uint64_t cursor = 0;
+            auto place = [&cursor](uint64_t bytes)
+            {
+                const uint64_t offset = cursor;
+                cursor = (cursor + bytes + 15) / 16 * 16;
+                return offset;
+            };
+            layout.vertices = place(sizeof(shaderio::Vertex) * vertices);
+            layout.draws = place(sizeof(shaderio::MeshletDraw) * draws);
+            layout.bounds = place(sizeof(shaderio::MeshletBounds) * draws);
+            layout.meshletVertices = place(sizeof(uint32_t) * meshletVertices);
+            layout.meshletTriangles = place(sizeof(uint8_t) * meshletTriangles);
+            layout.rtIndices = place(sizeof(uint32_t) * rtIndices);
+            layout.size = cursor;
+            return layout;
+        }
+
+        MeshStagingLayout meshStagingLayout(const MeshHandle& handle)
+        {
+            return meshStagingLayout(handle.vertices.count, handle.meshletDraws.count, handle.meshletVertices.count,
+                                     handle.meshletTriangles.count, handle.rtIndices.count);
+        }
+    }
+
     MeshHandle Renderer::UploadMeshGeometry(const MeshData& data, bool isOpaque)
     {
-        MeshHandle handle{};
+        MeshUpload upload = *BeginMeshUpload(data, isOpaque, true);
+        WriteMeshUpload(data, upload);
+        EndMeshUpload(upload, true);
+        return PublishMesh(upload);
+    }
 
-        uint32_t vertCount = static_cast<uint32_t>(data.Vertices.size());
-        uint32_t drawCount = static_cast<uint32_t>(data.Draws.size());
-        uint32_t meshVertCount = static_cast<uint32_t>(data.MeshletVertices.size());
-        uint32_t meshTriCount = static_cast<uint32_t>(data.MeshletTriangles.size());
+    std::optional<MeshUpload> Renderer::BeginMeshUpload(const MeshData& data, bool isOpaque, bool wait)
+    {
+        const uint32_t vertCount = static_cast<uint32_t>(data.Vertices.size());
+        const uint32_t drawCount = static_cast<uint32_t>(data.Draws.size());
+        const uint32_t meshVertCount = static_cast<uint32_t>(data.MeshletVertices.size());
+        const uint32_t meshTriCount = static_cast<uint32_t>(data.MeshletTriangles.size());
+        // The flat triangle list rebuilt from the meshlets: BLAS build input and hit shading.
+        uint32_t rtIndexCount = 0;
+        if (vertCount > 0)
+        {
+            for (const shaderio::MeshletDraw& draw : data.Draws)
+                rtIndexCount += draw.triangleCount * 3;
+        }
+
+        MeshUpload upload;
+        upload.IsOpaque = isOpaque;
+        const MeshStagingLayout layout = meshStagingLayout(vertCount, drawCount, meshVertCount, meshTriCount, rtIndexCount);
+        if (layout.size > 0)
+        {
+            std::optional<StagingSpan> staging = wait ? m_uploads.ReserveStaging(layout.size) : m_uploads.TryReserveStaging(layout.size);
+            if (!staging)
+                return std::nullopt;
+            upload.Staging = *staging;
+        }
 
         // One range per stream (a stream grows first when the allocation no longer fits)
-        handle.vertices = allocateGeometry(m_vertexStream, vertCount);
-        handle.meshletDraws = allocateGeometry(m_meshletDrawStream, drawCount);
-        handle.meshletBounds = allocateGeometry(m_meshletBoundsStream, drawCount);
-        handle.meshletVertices = allocateGeometry(m_meshletVertexStream, meshVertCount);
-        handle.meshletTriangles = allocateGeometry(m_meshletTriangleStream, meshTriCount);
+        upload.Handle.vertices = allocateGeometry(m_vertexStream, vertCount);
+        upload.Handle.meshletDraws = allocateGeometry(m_meshletDrawStream, drawCount);
+        upload.Handle.meshletBounds = allocateGeometry(m_meshletBoundsStream, drawCount);
+        upload.Handle.meshletVertices = allocateGeometry(m_meshletVertexStream, meshVertCount);
+        upload.Handle.meshletTriangles = allocateGeometry(m_meshletTriangleStream, meshTriCount);
+        upload.Handle.rtIndices = allocateGeometry(m_rtIndexStream, rtIndexCount);
+        return upload;
+    }
 
-        // Patch meshlet local offsets
-        std::vector<shaderio::MeshletDraw> adjustedDraws = data.Draws;
-        for (auto& draw : adjustedDraws)
+    void Renderer::WriteMeshUpload(const MeshData& data, MeshUpload& upload)
+    {
+        const MeshHandle& handle = upload.Handle;
+        const MeshStagingLayout layout = meshStagingLayout(handle);
+        uint8_t* staging = upload.Staging.data;
+
+        // Staging memory is written front to back and never read (it may be write-combined). Exactly the ranges'
+        // counts: a block holds no more, and the bounds are one per draw.
+        memcpy(staging + layout.vertices, data.Vertices.data(), sizeof(shaderio::Vertex) * handle.vertices.count);
+        for (size_t index = 0; index < handle.meshletDraws.count; ++index)
         {
+            // Meshlet offsets become stream offsets.
+            shaderio::MeshletDraw draw = data.Draws[index];
             draw.vertexOffset += handle.meshletVertices.offset;
             draw.triangleOffset += handle.meshletTriangles.offset;
             draw.globalVertexOffset += handle.vertices.offset;
+            memcpy(staging + layout.draws + index * sizeof(draw), &draw, sizeof(draw));
         }
+        memcpy(staging + layout.bounds, data.Bounds.data(), sizeof(shaderio::MeshletBounds) * std::min<size_t>(data.Bounds.size(), handle.meshletBounds.count));
+        memcpy(staging + layout.meshletVertices, data.MeshletVertices.data(), sizeof(uint32_t) * handle.meshletVertices.count);
+        memcpy(staging + layout.meshletTriangles, data.MeshletTriangles.data(), handle.meshletTriangles.count);
 
-        // Upload each slice into its stream's range
-        UploadBufferSlice(m_vertexStream.GetBuffer(), data.Vertices.data(), handle.vertices.offset, handle.vertices.count);
-        UploadBufferSlice(m_meshletDrawStream.GetBuffer(), adjustedDraws.data(), handle.meshletDraws.offset, handle.meshletDraws.count);
-        UploadBufferSlice(m_meshletBoundsStream.GetBuffer(), data.Bounds.data(), handle.meshletBounds.offset, handle.meshletBounds.count);
-        UploadBufferSlice(m_meshletVertexStream.GetBuffer(), data.MeshletVertices.data(), handle.meshletVertices.offset, handle.meshletVertices.count);
-        UploadBufferSlice(m_meshletTriangleStream.GetBuffer(), data.MeshletTriangles.data(), handle.meshletTriangles.offset, handle.meshletTriangles.count);
-
-        // --- Hardware Ray Tracing: Build BLAS ---
-        if (vertCount > 0 && !data.Draws.empty())
+        shaderio::GpuMesh& gpuMesh = upload.GpuMesh;
+        gpuMesh = {};
+        if (handle.rtIndices.IsValid())
         {
-            // 1. Reconstruct flat index buffer from meshlets (compatible with glTF, OBJ, and .nmesh)
-            std::vector<uint32_t> indices;
-            for (const auto& draw : data.Draws)
+            uint8_t* indices = staging + layout.rtIndices;
+            for (const shaderio::MeshletDraw& draw : data.Draws)
             {
-                for (uint32_t t = 0; t < draw.triangleCount; t++)
+                for (uint32_t triangle = 0; triangle < draw.triangleCount; ++triangle)
                 {
-                    uint32_t triBase = draw.triangleOffset + t * 3;
-                    uint32_t i0 = data.MeshletVertices[draw.vertexOffset + data.MeshletTriangles[triBase + 0]];
-                    uint32_t i1 = data.MeshletVertices[draw.vertexOffset + data.MeshletTriangles[triBase + 1]];
-                    uint32_t i2 = data.MeshletVertices[draw.vertexOffset + data.MeshletTriangles[triBase + 2]];
-                    indices.push_back(i0);
-                    indices.push_back(i1);
-                    indices.push_back(i2);
-                }
-            }
-
-            if (!indices.empty())
-            {
-                // 2. The flat triangle list goes into the RT index stream (AS build input and hit shading)
-                handle.rtIndices = allocateGeometry(m_rtIndexStream, static_cast<uint32_t>(indices.size()));
-                UploadBufferSlice(m_rtIndexStream.GetBuffer(), indices.data(), handle.rtIndices.offset, handle.rtIndices.count);
-
-                // 3. Query BLAS build sizes
-                uint64_t vertexBufferBDA = m_vertexStream.GetDeviceAddress() + (sizeof(shaderio::Vertex) * handle.vertices.offset);
-                uint64_t indexBufferBDA = m_rtIndexStream.GetDeviceAddress() + (sizeof(uint32_t) * handle.rtIndices.offset);
-
-                NRI::AccelerationStructureBuildDesc buildDesc{
-                    .type = NRI::AccelerationStructureType::BottomLevel,
-                    .flags = NRI::AccelerationStructureBuildFlags::PreferFastTrace,
-                    .triangles = {
-                        NRI::AccelerationStructureTrianglesDesc{
-                            .vertexBufferAddress = vertexBufferBDA,
-                            .vertexStride = sizeof(shaderio::Vertex),
-                            .maxVertex = vertCount - 1,
-                            .indexBufferAddress = indexBufferBDA,
-                            .primitiveCount = static_cast<uint32_t>(indices.size() / 3),
-                            .primitiveOffset = 0,
-                            .firstVertex = 0,
-                            .isOpaque = isOpaque
-                        }
-                    }
-                };
-
-                NRI::AccelerationStructureBuildSizes buildSizes = m_device->getAccelerationStructureBuildSizes(buildDesc);
-
-                // 4. Create storage buffer and BLAS
-                std::unique_ptr<NRI::Buffer> asBuffer = m_device->createBuffer(NRI::BufferDesc{
-                    .size = buildSizes.accelerationStructureSize,
-                    .usage = NRI::BufferUsage::AccelerationStructure
-                });
-
-                std::unique_ptr<NRI::AccelerationStructure> blas = m_device->createAccelerationStructure(NRI::AccelerationStructureDesc{
-                    .type = NRI::AccelerationStructureType::BottomLevel,
-                    .storageBuffer = asBuffer.get(),
-                    .bufferOffset = 0,
-                    .size = buildSizes.accelerationStructureSize
-                });
-
-                // 6. Cache BLAS and store ID in handle (reusing ids released by unloaded meshes)
-                MeshBLAS meshBLAS{
-                    .storageBuffer = std::move(asBuffer),
-                    .as = std::move(blas)
-                };
-                if (!m_freeBLASIds.empty())
-                {
-                    handle.blasId = m_freeBLASIds.back();
-                    m_freeBLASIds.pop_back();
-                    m_meshBLASes[handle.blasId] = std::move(meshBLAS);
-                }
-                else
-                {
-                    handle.blasId = static_cast<uint32_t>(m_meshBLASes.size());
-                    m_meshBLASes.push_back(std::move(meshBLAS));
+                    const uint32_t triBase = draw.triangleOffset + triangle * 3;
+                    const uint32_t corners[3] = {
+                        data.MeshletVertices[draw.vertexOffset + data.MeshletTriangles[triBase + 0]],
+                        data.MeshletVertices[draw.vertexOffset + data.MeshletTriangles[triBase + 1]],
+                        data.MeshletVertices[draw.vertexOffset + data.MeshletTriangles[triBase + 2]]
+                    };
+                    memcpy(indices, corners, sizeof(corners));
+                    indices += sizeof(corners);
                 }
             }
         }
 
         // GPU scene mesh record: instances reference it by slot.
-        if (handle.IsValid())
+        gpuMesh.drawsOffset = handle.meshletDraws.offset;
+        gpuMesh.boundsOffset = handle.meshletBounds.offset;
+        gpuMesh.verticesOffset = handle.vertices.offset;
+        gpuMesh.indicesOffset = handle.rtIndices.IsValid() ? handle.rtIndices.offset : shaderio::NoGeometryRange;
+        gpuMesh.meshletCount = handle.meshletDraws.count;
+        for (const shaderio::MeshletDraw& draw : data.Draws)
+            gpuMesh.triangleCount += draw.triangleCount;
+
+        // Local bounds of the (bind pose) vertices.
+        glm::vec3 boundsMin(std::numeric_limits<float>::max());
+        glm::vec3 boundsMax(std::numeric_limits<float>::lowest());
+        for (const shaderio::Vertex& vertex : data.Vertices)
         {
-            shaderio::GpuMesh gpuMesh{};
-            gpuMesh.drawsOffset = handle.meshletDraws.offset;
-            gpuMesh.boundsOffset = handle.meshletBounds.offset;
-            gpuMesh.verticesOffset = handle.vertices.offset;
-            gpuMesh.indicesOffset = handle.rtIndices.IsValid() ? handle.rtIndices.offset : shaderio::NoGeometryRange;
-            gpuMesh.meshletCount = handle.meshletDraws.count;
-            for (const shaderio::MeshletDraw& draw : data.Draws)
-                gpuMesh.triangleCount += draw.triangleCount;
+            boundsMin = glm::min(boundsMin, vertex.pos);
+            boundsMax = glm::max(boundsMax, vertex.pos);
+        }
+        const glm::vec3 center = (boundsMin + boundsMax) * 0.5f;
+        float radius = 0.0f;
+        for (const shaderio::Vertex& vertex : data.Vertices)
+            radius = std::max(radius, glm::distance(center, vertex.pos));
+        gpuMesh.boundsSphere = glm::vec4(center, radius);
+        gpuMesh.boundsMin = boundsMin;
+        gpuMesh.boundsMax = boundsMax;
+    }
 
-            // Local bounds of the (bind pose) vertices.
-            glm::vec3 boundsMin(std::numeric_limits<float>::max());
-            glm::vec3 boundsMax(std::numeric_limits<float>::lowest());
-            for (const shaderio::Vertex& vertex : data.Vertices)
+    uint64_t Renderer::EndMeshUpload(const MeshUpload& upload, bool nextFrameReads)
+    {
+        if (upload.Staging.size == 0)
+            return 0;
+
+        // Into each stream's current buffer: it may have grown since the ranges were allocated.
+        const MeshHandle& handle = upload.Handle;
+        const MeshStagingLayout layout = meshStagingLayout(handle);
+        auto copy = [&](GeometryArena& stream, const GeometryRange& range, uint64_t elementSize, uint64_t stagingOffset)
+        {
+            if (range.count > 0)
+                m_uploads.CopyToBuffer(upload.Staging, stagingOffset, elementSize * range.count, stream.GetBuffer(), elementSize * range.offset);
+        };
+        copy(m_vertexStream, handle.vertices, sizeof(shaderio::Vertex), layout.vertices);
+        copy(m_meshletDrawStream, handle.meshletDraws, sizeof(shaderio::MeshletDraw), layout.draws);
+        copy(m_meshletBoundsStream, handle.meshletBounds, sizeof(shaderio::MeshletBounds), layout.bounds);
+        copy(m_meshletVertexStream, handle.meshletVertices, sizeof(uint32_t), layout.meshletVertices);
+        copy(m_meshletTriangleStream, handle.meshletTriangles, sizeof(uint8_t), layout.meshletTriangles);
+        copy(m_rtIndexStream, handle.rtIndices, sizeof(uint32_t), layout.rtIndices);
+        return m_uploads.Commit(upload.Staging, nextFrameReads);
+    }
+
+    MeshHandle Renderer::PublishMesh(const MeshUpload& upload)
+    {
+        MeshHandle handle = upload.Handle;
+        if (!handle.IsValid())
+            return handle;
+
+        if (handle.rtIndices.IsValid())
+        {
+            // The BLAS object now, its build in a frame (addBLASBuildPass).
+            const NRI::AccelerationStructureBuildDesc buildDesc = blasBuildDesc({ .vertices = handle.vertices, .indices = handle.rtIndices, .isOpaque = upload.IsOpaque });
+            const NRI::AccelerationStructureBuildSizes buildSizes = m_device->getAccelerationStructureBuildSizes(buildDesc);
+
+            std::unique_ptr<NRI::Buffer> asBuffer = m_device->createBuffer(NRI::BufferDesc{
+                .size = buildSizes.accelerationStructureSize,
+                .usage = NRI::BufferUsage::AccelerationStructure
+            });
+            std::unique_ptr<NRI::AccelerationStructure> blas = m_device->createAccelerationStructure(NRI::AccelerationStructureDesc{
+                .type = NRI::AccelerationStructureType::BottomLevel,
+                .storageBuffer = asBuffer.get(),
+                .bufferOffset = 0,
+                .size = buildSizes.accelerationStructureSize
+            });
+
+            // Reusing ids released by unloaded meshes
+            MeshBLAS meshBLAS{
+                .storageBuffer = std::move(asBuffer),
+                .as = std::move(blas)
+            };
+            if (!m_freeBLASIds.empty())
             {
-                boundsMin = glm::min(boundsMin, vertex.pos);
-                boundsMax = glm::max(boundsMax, vertex.pos);
+                handle.blasId = m_freeBLASIds.back();
+                m_freeBLASIds.pop_back();
+                m_meshBLASes[handle.blasId] = std::move(meshBLAS);
             }
-            const glm::vec3 center = (boundsMin + boundsMax) * 0.5f;
-            float radius = 0.0f;
-            for (const shaderio::Vertex& vertex : data.Vertices)
-                radius = std::max(radius, glm::distance(center, vertex.pos));
-            gpuMesh.boundsSphere = glm::vec4(center, radius);
-            gpuMesh.boundsMin = boundsMin;
-            gpuMesh.boundsMax = boundsMax;
-
-            // Not ray traced until its BLAS is built in a frame (SetMeshBlas).
-            handle.gpuSceneMesh = m_gpuScene.AddMesh(gpuMesh, 0);
-            if (handle.blasId != UINT32_MAX)
-                m_blasBuilds.push_back({ handle.blasId, handle.gpuSceneMesh, handle.vertices, handle.rtIndices, isOpaque });
+            else
+            {
+                handle.blasId = static_cast<uint32_t>(m_meshBLASes.size());
+                m_meshBLASes.push_back(std::move(meshBLAS));
+            }
         }
 
+        // Not ray traced until its BLAS is built in a frame (SetMeshBlas).
+        handle.gpuSceneMesh = m_gpuScene.AddMesh(upload.GpuMesh, 0);
+        if (handle.blasId != UINT32_MAX)
+            m_blasBuilds.push_back({ handle.blasId, handle.gpuSceneMesh, handle.vertices, handle.rtIndices, upload.IsOpaque });
         return handle;
     }
 
@@ -3123,12 +3241,6 @@ namespace Nox
         sampleMemoryStats();
 #endif
 
-        {
-            NOX_PROFILE_SCOPE("Deferred Deletions");
-            processDeferredReleases();
-            m_uploads.Poll();
-        }
-
         // Process any queued shader hot-reloads
         if (!m_pendingReloads.empty())
         {
@@ -3166,6 +3278,15 @@ namespace Nox
         {
             recreateSwapChain();
             return;
+        }
+
+        {
+            // After the in-flight wait, so only the previous frame can still be on the GPU: a release that waits
+            // MAX_FRAMES_IN_FLIGHT frames outlives every frame that used it. (Before the wait, two frames could still run
+            // and a release came one frame early -- in Release builds the GPU was still reading freed stream buffers.)
+            NOX_PROFILE_SCOPE("Deferred Deletions");
+            processDeferredReleases();
+            m_uploads.Poll();
         }
 
         {
@@ -3224,9 +3345,11 @@ namespace Nox
 
         {
             NOX_PROFILE_SCOPE("Submit");
-            // Everything uploaded so far (this frame's loads, stream growth, BLAS inputs) is copied before the frame
-            // reads it. Values already reached cost nothing: the wait only orders the transfer writes.
-            const NRI::TimelinePoint uploads{ &m_uploads.GetTimeline(), m_uploads.Flush() };
+            // What the frame reads is copied before it runs: uploads published right away and stream growth wait on
+            // the GPU; streamed loads were published after their copies completed, so their wait costs nothing and
+            // only orders the transfer writes. Streamed copies still in flight are not waited for.
+            m_uploads.Flush();
+            const NRI::TimelinePoint uploads{ &m_uploads.GetTimeline(), m_uploads.GetFrameWaitValue() };
             m_device->submitCommandBuffers(commandBuffers, *m_swapChain, frameIndex, imageIndex,
                                            std::span<const NRI::TimelinePoint>(&uploads, 1));
         }
@@ -3855,9 +3978,8 @@ namespace Nox
     bool Renderer::addSubmeshInstances(const glm::mat4& world, const MeshAsset& mesh, const MeshComponent& component, const MaterialComponent* material,
                                        int32_t entityID, std::vector<uint32_t>& outInstances, std::vector<AssetHandle>& outMissingAssets)
     {
-        // Per-entity overrides win; otherwise the mesh's imported .nmat handles.
-        const std::vector<AssetHandle>& materialAssets = material && !material->MaterialAssets.empty()
-            ? material->MaterialAssets : mesh.GetMaterialAssets();
+        // Per slot: the entity's override when it has one, the mesh's imported .nmat otherwise.
+        const std::vector<AssetHandle>& meshMaterials = mesh.GetMaterialAssets();
 
         const uint64_t submeshTotal = mesh.GetSubMeshCount();
         const uint64_t first = std::min<uint64_t>(component.SubmeshIndex, submeshTotal);
@@ -3871,7 +3993,9 @@ namespace Nox
             if (handle.gpuSceneMesh == GpuScene::InvalidSlot)
                 continue;
 
-            const AssetHandle materialAsset = submesh < materialAssets.size() ? materialAssets[submesh] : AssetHandle(0);
+            AssetHandle materialAsset = material && submesh < material->MaterialAssets.size() ? material->MaterialAssets[submesh] : AssetHandle(0);
+            if (materialAsset == 0 && submesh < meshMaterials.size())
+                materialAsset = meshMaterials[submesh];
             const uint32_t materialSlot = acquireGpuMaterial(static_cast<uint64_t>(component.Mesh), static_cast<uint32_t>(submesh), mesh.GetMaterial(submesh),
                                                              materialAsset, complete, outMissingAssets);
             outInstances.push_back(m_gpuScene.AddInstance(handle.gpuSceneMesh, materialSlot, world, entityID));

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AssetLoader.h"
 #include "AssetManagerBase.h"
 #include "AssetMetadata.h"
 
@@ -21,6 +22,7 @@ namespace Nox
     {
     public:
         virtual Ref<Asset> GetAsset(AssetHandle handle) override;
+        virtual AssetState RequestAsset(AssetHandle handle) override;
         virtual Asset* FindLoadedAsset(AssetHandle handle) const override;
         
         virtual bool IsAssetHandleValid(AssetHandle handle) const override;
@@ -29,6 +31,7 @@ namespace Nox
 
         static AssetType GetAssetTypeFromExtension(const std::filesystem::path& extension);
         void Init();
+        // Once per frame, main thread: reimports edited sources and publishes the background loads that finished.
         void Update();
         void ReimportAsset(AssetHandle handle);
         
@@ -48,6 +51,9 @@ namespace Nox
         // mesh/material/texture/animation that nothing else holds a Ref to is unloaded, its GPU
         // resources released once in-flight frames are done. Returns the number unloaded.
         size_t UnloadUnusedAssets(const std::unordered_set<AssetHandle>& referencedAssets);
+        // True once when the background loads a sweep ran during have all finished: what they loaded may be unused
+        // already (e.g. Bistro deleted while it streamed in), so the caller sweeps again.
+        bool ConsumeLoadsSettledAfterSweep();
         
         void SerializeAssetRegistry();
         bool DeserializeAssetRegistry();
@@ -59,6 +65,7 @@ namespace Nox
         void OnAssetModifiedOnDisk(const std::filesystem::path& absolutePath);
         void ImportMeshTextures(const Ref<Asset>& meshAsset);
         void ImportMeshMaterials(const Ref<Asset>& meshAsset, const AssetMetadata& meshMetadata);
+        void PublishLoadedAssets();
     private:
         Utils::NOXWatcher m_AssetWatcher;
         
@@ -68,6 +75,13 @@ namespace Nox
         
         AssetRegistry m_AssetRegistry;
         AssetMap m_LoadedAssets;
+
+        // Background loads (RequestAsset) until they are published into m_LoadedAssets.
+        AssetLoader m_Loader;
+        // Loads that failed are not retried on every request (entities keep requesting what they miss); a reimport
+        // clears the entry.
+        std::unordered_set<AssetHandle> m_FailedAssets;
+        bool m_SweepDuringLoads = false;
 
         // Last content-hash seen for each asset's source file. Lets ReimportAsset tell a genuine
         // on-disk edit apart from a spurious file-watcher event caused by our own cooker writing

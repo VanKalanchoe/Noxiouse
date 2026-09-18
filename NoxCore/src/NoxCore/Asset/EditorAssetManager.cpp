@@ -200,6 +200,58 @@ namespace Nox
         {
             ReimportAsset(handle);
         }
+
+        PublishLoadedAssets();
+    }
+
+    void EditorAssetManager::PublishLoadedAssets()
+    {
+        std::vector<LoadedAsset> finished;
+        m_Loader.Update(finished);
+
+        bool texturesLoaded = false;
+        for (LoadedAsset& loaded : finished)
+        {
+            const AssetMetadata& metadata = m_AssetRegistry.at(loaded.Handle);
+            // However it ends, materials that asked for the texture while it loaded drew without it: re-pack them.
+            texturesLoaded |= metadata.Type == AssetType::Texture2D;
+            if (loaded.NeedsImport)
+            {
+                // No current cooked data: cooked and loaded here, synchronously (cooking moves to workers in 5c).
+                GetAsset(loaded.Handle);
+                continue;
+            }
+            if (!loaded.Loaded)
+            {
+                NOX_CORE_ERROR("EditorAssetManager: loading {} failed", metadata.FilePath.generic_string());
+                m_FailedAssets.insert(loaded.Handle);
+                continue;
+            }
+            if (IsAssetLoaded(loaded.Handle))
+            {
+                // Loaded synchronously meanwhile (GetAsset): that copy stays, this one goes once frames are done with it.
+                Renderer::DeferAssetRelease(std::move(loaded.Loaded));
+                continue;
+            }
+
+            loaded.Loaded->Handle = loaded.Handle;
+            m_LoadedAssets[loaded.Handle] = loaded.Loaded;
+            if (loaded.SourceHash)
+                m_LastKnownSourceHash[loaded.Handle] = *loaded.SourceHash;
+
+            if (metadata.Type == AssetType::Mesh || metadata.Type == AssetType::StaticMesh || metadata.Type == AssetType::MeshSource)
+            {
+                ImportMeshTextures(loaded.Loaded);
+                ImportMeshMaterials(loaded.Loaded, metadata);
+                ScanAndRegisterNewAssets(metadata.FilePath.parent_path().parent_path());
+            }
+
+            NOX_CORE_INFO("[AssetLoad] {} ({}) streamed in {:.1f} ms", metadata.FilePath.generic_string(), AssetTypeToString(metadata.Type),
+                          loaded.Milliseconds);
+        }
+
+        if (texturesLoaded)
+            Renderer::MarkTexturesLoaded();
     }
     
     void EditorAssetManager::ReimportAsset(AssetHandle handle)
@@ -213,6 +265,7 @@ namespace Nox
             NOX_CORE_WARN("Skipping auto-reimport: source file no longer exists: {}", sourcePath.string());
             return;
         }
+        m_FailedAssets.erase(handle);
 
         // The file watcher can fire on this source file even though its content never actually
         // changed -- e.g. our own cooker rewrites extracted embedded textures unconditionally on
@@ -636,13 +689,48 @@ namespace Nox
         return asset;
     }
 
+    AssetState EditorAssetManager::RequestAsset(AssetHandle handle)
+    {
+        if (!IsAssetHandleValid(handle))
+            return AssetState::Failed;
+        if (IsAssetLoaded(handle))
+            return AssetState::Ready;
+        if (m_Loader.IsLoading(handle))
+            return AssetState::Loading;
+        if (m_FailedAssets.contains(handle))
+            return AssetState::Failed;
+
+        const AssetMetadata& metadata = m_AssetRegistry.at(handle);
+        if (AssetLoader::IsStreamable(metadata.Type))
+        {
+            m_Loader.Begin(handle, metadata);
+            return AssetState::Loading;
+        }
+
+        // The other types import right here.
+        return GetAsset(handle) ? AssetState::Ready : AssetState::Failed;
+    }
+
     void EditorAssetManager::Shutdown()
     {
+        m_Loader.Shutdown();
         m_LoadedAssets.clear();
+    }
+
+    bool EditorAssetManager::ConsumeLoadsSettledAfterSweep()
+    {
+        if (!m_SweepDuringLoads || !m_Loader.IsIdle())
+            return false;
+        m_SweepDuringLoads = false;
+        return true;
     }
 
     size_t EditorAssetManager::UnloadUnusedAssets(const std::unordered_set<AssetHandle>& referencedAssets)
     {
+        // Loads in flight publish after this sweep; they are swept once they have all finished.
+        if (!m_Loader.IsIdle())
+            m_SweepDuringLoads = true;
+
         // Materials reference textures by path, not handle. Cached hits skip the filesystem entirely;
         // the registry index is only built if some path isn't cached yet.
         std::unordered_map<std::string, AssetHandle> textureByPath;

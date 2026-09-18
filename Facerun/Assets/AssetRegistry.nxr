@@ -527,6 +527,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 2353504363807074778
+    FilePath: Scenes/noxtest.nox
+    SourceFilePath: Scenes/noxtest.nox
+    Type: AssetType::Scene
   - Handle: 2375161944157962350
     FilePath: Models/bistro/textures/shared/tiling/rubber_bar_mat_01/Textures/rubber_bar_mat_01_diff.ntex
     SourceFilePath: Models/bistro/textures/shared/tiling/rubber_bar_mat_01/rubber_bar_mat_01_diff.dds
@@ -1163,6 +1167,10 @@ AssetRegistry:
       Format: RGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 5957683492857037400
+    FilePath: Scenes/PinkCube1.nox
+    SourceFilePath: Scenes/PinkCube1.nox
+    Type: AssetType::Scene
   - Handle: 5979047229153819321
     FilePath: Models/bistro/objects/props/bistro/paris_radiator_01/Textures/paris_radiator_01_diff.ntex
     SourceFilePath: Models/bistro/objects/props/bistro/paris_radiator_01/paris_radiator_01_diff.dds
@@ -1239,6 +1247,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 6296389281718209680
+    FilePath: Scenes/ShadowTest.nox
+    SourceFilePath: Scenes/ShadowTest.nox
+    Type: AssetType::Scene
   - Handle: 6298559708988773583
     FilePath: Models/bistro/textures/shared/tiling/ground_wet_01/Textures/ground_wet_01_diff.ntex
     SourceFilePath: Models/bistro/textures/shared/tiling/ground_wet_01/ground_wet_01_diff.dds
@@ -1399,6 +1411,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 7212631777148595660
+    FilePath: Scenes/Sponza.nox
+    SourceFilePath: Scenes/Sponza.nox
+    Type: AssetType::Scene
   - Handle: 7213899356528429353
     FilePath: Models/bistro/textures/shared/tiling/Trim_cornice_01/Textures/Trim_cornice_01_diff.ntex
     SourceFilePath: Models/bistro/textures/shared/tiling/Trim_cornice_01/Trim_cornice_01_diff.dds
@@ -1955,6 +1971,10 @@ AssetRegistry:
       Format: RGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 9781385879467367091
+    FilePath: Scenes/Physics2D.nox
+    SourceFilePath: Scenes/Physics2D.nox
+    Type: AssetType::Scene
   - Handle: 9818921752693781700
     FilePath: Models/bistro/Materials/bistro_LMBR_00001b5_Wood_painted_01.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_00001b5_Wood_painted_01.nmat
@@ -2323,6 +2343,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 11703921053594705222
+    FilePath: Scenes/lol.nox
+    SourceFilePath: Scenes/lol.nox
+    Type: AssetType::Scene
   - Handle: 11713475409700279156
     FilePath: Models/bistro/objects/props/bistro/paris_radiator_01/Textures/paris_radiator_01_ddna.ntex
     SourceFilePath: Models/bistro/objects/props/bistro/paris_radiator_01/paris_radiator_01_ddna.dds
@@ -2575,6 +2599,10 @@ AssetRegistry:
     FilePath: Models/bistro/Materials/bistro_LMBR_000003b_Brick_Large_blend_02.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_000003b_Brick_Large_blend_02.nmat
     Type: AssetType::Material
+  - Handle: 12803072729745323190
+    FilePath: Scenes/flat.nox
+    SourceFilePath: Scenes/flat.nox
+    Type: AssetType::Scene
   - Handle: 12855407041511040263
     FilePath: Models/bistro/objects/props/bistro/paris_painting_01/Textures/paris_painting_01_spec.ntex
     SourceFilePath: Models/bistro/objects/props/bistro/paris_painting_01/paris_painting_01_spec.dds
@@ -3415,6 +3443,10 @@ AssetRegistry:
       Format: RGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 16604106488562432149
+    FilePath: Scenes/Texture.nox
+    SourceFilePath: Scenes/Texture.nox
+    Type: AssetType::Scene
   - Handle: 16628368643599108081
     FilePath: Models/bistro/textures/shared/tiling/brick_small_02/Textures/brick_small_02_ddna.ntex
     SourceFilePath: Models/bistro/textures/shared/tiling/brick_small_02/brick_small_02_ddna.dds

@@ -116,6 +116,9 @@ namespace Nox
             m_UnloadUnusedAssetsRequested = true;
         if (m_ActiveScene && m_ActiveScene != m_EditorScene && m_ActiveScene->ConsumeAssetReferencesChanged())
             m_UnloadUnusedAssetsRequested = true;
+        // Loads still streaming in during the last sweep have finished: what nothing uses any more goes too.
+        if (Project::GetActive()->GetEditorAssetManager()->ConsumeLoadsSettledAfterSweep())
+            m_UnloadUnusedAssetsRequested = true;
         if (m_UnloadUnusedAssetsRequested)
         {
             NOX_PROFILE_SCOPE("Unload Unused Assets");
@@ -805,8 +808,8 @@ namespace Nox
                                     meshComp.SubmeshIndex = nodes[i].FirstSubmesh;
                                     meshComp.SubmeshCount = nodes[i].SubmeshCount;
 
-                                    auto& matComp = createdNodes[i].AddComponent<MaterialComponent>();
-                                    matComp.MaterialAssets = meshAsset->GetMaterialAssets();
+                                    // No overrides: the entity uses the mesh's materials.
+                                    createdNodes[i].AddComponent<MaterialComponent>();
 
                                     tryAttachAnimator(createdNodes[i]);
                                 }
@@ -976,9 +979,7 @@ namespace Nox
                                 meshComp.SubmeshIndex = 0;
                                 meshComp.SubmeshCount = meshAsset ? static_cast<uint32_t>(meshAsset->GetSubMeshCount()) : 1;
 
-                                auto& matComp = newEntity.AddComponent<MaterialComponent>();
-                                if (meshAsset)
-                                    matComp.MaterialAssets = meshAsset->GetMaterialAssets();
+                                newEntity.AddComponent<MaterialComponent>();
 
                                 tryAttachAnimator(newEntity);
                                 
@@ -1009,9 +1010,7 @@ namespace Nox
                             meshComp.SubmeshIndex = 0;
                             meshComp.SubmeshCount = staticMeshAsset ? static_cast<uint32_t>(staticMeshAsset->GetSubMeshCount()) : 1;
 
-                            auto& matComp = newEntity.AddComponent<MaterialComponent>();
-                            if (staticMeshAsset)
-                                matComp.MaterialAssets = staticMeshAsset->GetMaterialAssets();
+                            newEntity.AddComponent<MaterialComponent>();
 
                             if (staticMeshAsset)
                             {

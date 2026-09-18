@@ -48,6 +48,8 @@ namespace Nox
         bool IsValid() const { return m_Future.valid(); }
         bool IsReady() const { return m_Future.valid() && m_Future.wait_for(std::chrono::seconds(0)) == std::future_status::ready; }
         T Get() { return m_Future.get(); }
+        // Blocks until the work is done, without taking its result (e.g. before freeing memory the work writes).
+        void Wait() const { if (m_Future.valid()) m_Future.wait(); }
         void Cancel() const { m_Token.Cancel(); }
         const CancellationToken& GetToken() const { return m_Token; }
 
