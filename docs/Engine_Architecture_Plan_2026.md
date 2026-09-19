@@ -741,6 +741,11 @@ persistent buffers. Full rebuild only on scene switch.
 GPU skinning in compute into per-instance deformed vertex ranges (feeds raster and BLAS refit),
 replacing per-frame skinning in the mesh shader for RT correctness.
 
+Stage 1 is implemented pending capture verification: `ComputeSkinning.slang` writes a per-frame-ring local-space
+position/normal cache for opaque and masked skinned instances. Visibility and G-buffer material resolve share that
+cache, and the previous ring slot supplies skeletal motion vectors. Stage 2 remains the per-instance animated BLAS
+update/refit that makes ray queries see the deformed pose.
+
 #### 5.5.4 Implementation (Phase 3, September 2026)
 Decisions: culling per view (N-view infrastructure; a second fully rendered viewport later with per-view graph passes),
 per-object motion vectors (previous world matrix), mesh-shader skinning kept (compute skinning §5.5.3 later), meshlet
@@ -1185,7 +1190,6 @@ and what it needs; pick one up whenever its trigger is reached or it blocks some
 
 | Item | From | Why it waited | What it needs | Pick up when |
 |---|---|---|---|---|
-| **Compute skinning** (§5.5.3) | Phase 3 | Mesh-shader skinning kept working; the instance layout already reserves a stable bone range, so nothing gets rewritten by doing it later. | A compute pass writing each skinned instance's deformed vertices into its own vertex stream range (§5.8.2), raster reading those instead of skinning per meshlet, and a per-frame BLAS refit of the deformed range. | Ray tracing must see animated poses (today the BLAS holds the bind pose, so shadows and reflections of a skinned mesh lag its drawn pose), or skinned instances need culling (they are never culled: their bounds are bind pose). |
+| **Animated skinned BLAS** (§5.5.3) | Phase 3 | Compute skinning Stage 1 now writes per-instance current/previous position-normal caches and raster consumes them; capture verification is pending. | Give each ray-traced skinned instance dynamic BLAS state and update/refit it from the current compute-skinned range after the skinning pass. | Stage 1 is verified and its measured cost/reuse benefit is acceptable. |
 | **A second real view** (§5.6) | Phase 3 | Culling and draws are per view already (`CullView`, `ViewDrawResources`, parameterised passes), but only the camera view is instantiated; the frozen culling view is a flag on that same view. | A second `CullView` with its own draw resources and graph passes, driven by its first real consumer. | A shadow-map view, a game-camera preview viewport, or reflection/probe capture needs its own culled draws. |
 | **Geometry stream sizing** (§5.8.2) | Phase 4 | Streams start at the old page sizes and double; Bistro holds 259 MB committed for 154 MB used, which is 18 % of the geometry budget, so there is no pressure. | Initial capacities from the geometry category budget, or a trim to the used size after a load (one copy at a load boundary). | Geometry committed approaches its budget, or a scene loads with many grow-and-copy steps. |
-

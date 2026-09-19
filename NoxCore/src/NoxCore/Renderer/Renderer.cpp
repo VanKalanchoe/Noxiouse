@@ -243,6 +243,7 @@ namespace Nox
         watchShader("assets/shaders/PBRLighting.slang", "DeferredLighting", [this]() { createDeferredLightingPipeline(true); });
         // Visibility Buffer
         watchShader("assets/shaders/VisibilityBuffer.slang", "VisBuffer", [this]() { createVisibilityPipeline(true); });
+        watchShader("assets/shaders/ComputeSkinning.slang", "ComputeSkinning", [this]() { createComputeSkinningPipeline(true); });
         // G-Buffer (Fix watcher to recompile m_gbufferPipeline)
         watchShader("assets/shaders/GBufferMaterial.slang", "GBuffer", [this]() { createGBufferPipeline(true); });
         // Deferred PBR Lighting
@@ -407,6 +408,7 @@ namespace Nox
 
         // Visability
         createVisibilityPipeline(false); // <--- ADD THIS
+        createComputeSkinningPipeline(false);
         // G-Buffer
         createGBufferPipeline();
         // Post Process
@@ -1504,6 +1506,19 @@ namespace Nox
         m_visibilityPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
+    void Renderer::createComputeSkinningPipeline(bool forceCompile)
+    {
+        NRI::PipelineDesc desc{};
+        desc.type = NRI::PipelineType::Compute;
+        desc.forceCompile = forceCompile;
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Compute,
+            .entryPoint = "compMain",
+            .sourcePath = "assets/shaders/ComputeSkinning.slang"
+        });
+        m_computeSkinningPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+    }
+
     void Renderer::createGBufferPipeline(bool forceCompile)
     {
         NRI::PipelineDesc desc{};
@@ -1534,6 +1549,12 @@ namespace Nox
         });
 
         m_gbufferPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+
+        // Native raster frames do not need motion vectors. A matching five-target variant avoids both
+        // the RG32F attachment bandwidth and the per-pixel reprojection work in that case.
+        desc.colorFormats.pop_back();
+        desc.shaders.back().entryPoint = "fragMainNoVelocity";
+        m_gbufferPipelineNoVelocity = m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
     void Renderer::createDeferredLightingPipeline(bool forceCompile)
@@ -2229,6 +2250,7 @@ namespace Nox
         gpuMesh.drawsOffset = handle.meshletDraws.offset;
         gpuMesh.boundsOffset = handle.meshletBounds.offset;
         gpuMesh.verticesOffset = handle.vertices.offset;
+        gpuMesh.vertexCount = handle.vertices.count;
         gpuMesh.indicesOffset = handle.rtIndices.IsValid() ? handle.rtIndices.offset : shaderio::NoGeometryRange;
         gpuMesh.meshletCount = handle.meshletDraws.count;
         for (size_t index = 0; index < data.Draws.size(); ++index)
@@ -2423,6 +2445,124 @@ namespace Nox
 
             m_boneBuffers.emplace_back(std::move(uboBuffer));
             m_boneBuffersMapped.emplace_back(mappedMemory);
+        }
+    }
+
+    void Renderer::createSkinningBuffers(uint64_t skinnedVertexSize, uint64_t workItemSize)
+    {
+        m_skinnedVertexBuffers.clear();
+        m_skinningWorkItemBuffers.clear();
+        m_skinningWorkItemBuffersMapped.clear();
+        m_skinnedVertexBuffers.reserve(MAX_FRAMES_IN_FLIGHT);
+        m_skinningWorkItemBuffers.reserve(MAX_FRAMES_IN_FLIGHT);
+        m_skinningWorkItemBuffersMapped.reserve(MAX_FRAMES_IN_FLIGHT);
+
+        for (uint32_t slot = 0; slot < MAX_FRAMES_IN_FLIGHT; ++slot)
+        {
+            m_skinnedVertexBuffers.emplace_back(m_device->createBuffer(NRI::BufferDesc{
+                .size = skinnedVertexSize,
+                .usage = NRI::BufferUsage::StorageStatic
+            }));
+
+            std::unique_ptr<NRI::Buffer> workItems = m_device->createBuffer(NRI::BufferDesc{
+                .size = workItemSize,
+                .usage = NRI::BufferUsage::Storage
+            });
+            m_skinningWorkItemBuffersMapped.push_back(workItems->map(0, workItemSize));
+            m_skinningWorkItemBuffers.emplace_back(std::move(workItems));
+        }
+    }
+
+    void Renderer::updateSkinningLayout(uint32_t currentImage)
+    {
+        // Offsets are meaningful only for the visibility/G-buffer buckets. Forward unlit/transparent shaders retain
+        // their existing direct skinning path and therefore must not make this compute pass do unused work.
+        const size_t opaqueEnd = std::min<size_t>(
+            m_drawBucketStarts[static_cast<size_t>(RenderBucket::MaskDoubleSided) + 1], m_drawList.size());
+        for (size_t entry = opaqueEnd; entry < m_drawList.size(); ++entry)
+            m_gpuScene.SetSkinnedVertexOffset(m_drawList[entry], shaderio::NoSkinnedVertices);
+
+        std::vector<uint32_t> instanceSlots(m_drawList.begin(), m_drawList.begin() + opaqueEnd);
+        std::sort(instanceSlots.begin(), instanceSlots.end());
+
+        std::vector<SkinningLayoutEntry> layout;
+        std::vector<shaderio::SkinningWorkItem> workItems;
+        layout.reserve(instanceSlots.size());
+        workItems.reserve(instanceSlots.size());
+
+        uint32_t destinationVertexOffset = 0;
+        for (uint32_t instanceSlot : instanceSlots)
+        {
+            const shaderio::GpuInstance& instance = m_gpuScene.GetInstances().Get(instanceSlot);
+            if (instance.boneMatrixOffset == GpuScene::NoBoneMatrices)
+            {
+                m_gpuScene.SetSkinnedVertexOffset(instanceSlot, shaderio::NoSkinnedVertices);
+                continue;
+            }
+
+            const shaderio::GpuMesh& mesh = m_gpuScene.GetMeshes().Get(instance.meshIndex);
+            if (mesh.vertexCount == 0 || mesh.verticesOffset == shaderio::NoGeometryRange)
+            {
+                m_gpuScene.SetSkinnedVertexOffset(instanceSlot, shaderio::NoSkinnedVertices);
+                continue;
+            }
+
+            layout.push_back({ instanceSlot, mesh.verticesOffset, destinationVertexOffset, mesh.vertexCount });
+            for (uint32_t firstVertex = 0; firstVertex < mesh.vertexCount; firstVertex += shaderio::SKINNING_VERTICES_PER_WORK_ITEM)
+            {
+                const uint32_t vertexCount = std::min(shaderio::SKINNING_VERTICES_PER_WORK_ITEM, mesh.vertexCount - firstVertex);
+                workItems.push_back({ mesh.verticesOffset + firstVertex, destinationVertexOffset + firstVertex,
+                                      vertexCount, instance.boneMatrixOffset });
+            }
+            m_gpuScene.SetSkinnedVertexOffset(instanceSlot, destinationVertexOffset);
+            destinationVertexOffset += mesh.vertexCount;
+        }
+
+        const bool sameLayout = layout == m_skinningLayout;
+        const uint64_t requiredVertexBytes = uint64_t(destinationVertexOffset) * sizeof(shaderio::SkinnedVertex);
+        const uint64_t requiredWorkBytes = uint64_t(workItems.size()) * sizeof(shaderio::SkinningWorkItem);
+        bool buffersRecreated = false;
+        if (requiredVertexBytes > 0 &&
+            (requiredVertexBytes > m_skinnedVertexBufferCapacity || requiredWorkBytes > m_skinningWorkItemBufferCapacity))
+        {
+            for (std::unique_ptr<NRI::Buffer>& buffer : m_skinnedVertexBuffers)
+            {
+                if (buffer)
+                {
+                    std::scoped_lock lock(m_deferredReleasesMutex);
+                    m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, std::move(buffer) });
+                }
+            }
+            for (std::unique_ptr<NRI::Buffer>& buffer : m_skinningWorkItemBuffers)
+            {
+                if (buffer)
+                {
+                    std::scoped_lock lock(m_deferredReleasesMutex);
+                    m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, std::move(buffer) });
+                }
+            }
+
+            m_skinnedVertexBufferCapacity = std::max<uint64_t>(requiredVertexBytes * 2, sizeof(shaderio::SkinnedVertex));
+            m_skinningWorkItemBufferCapacity = std::max<uint64_t>(requiredWorkBytes * 2, sizeof(shaderio::SkinningWorkItem));
+            createSkinningBuffers(m_skinnedVertexBufferCapacity, m_skinningWorkItemBufferCapacity);
+            buffersRecreated = true;
+        }
+
+        const bool buffersReady = currentImage < m_skinnedVertexBuffers.size() && m_skinnedVertexBuffers[currentImage] &&
+                                  currentImage < m_skinningWorkItemBuffers.size() && m_skinningWorkItemBuffers[currentImage];
+        m_skinnedVertexHistoryValid = m_hasSkinnedVertexHistory && sameLayout && !buffersRecreated && buffersReady;
+
+        m_skinningLayout = std::move(layout);
+        m_skinningWorkItems = std::move(workItems);
+        if (buffersReady && !m_skinningWorkItems.empty())
+        {
+            memcpy(m_skinningWorkItemBuffersMapped[currentImage], m_skinningWorkItems.data(), requiredWorkBytes);
+            m_hasSkinnedVertexHistory = m_computeSkinningPipeline != nullptr;
+        }
+        else
+        {
+            m_hasSkinnedVertexHistory = false;
+            m_skinnedVertexHistoryValid = false;
         }
     }
 
@@ -2697,6 +2837,7 @@ namespace Nox
 
             // Frame order (§5.4.8). Each add* contributes its feature's passes only when the feature runs.
             addGpuSceneUpdatePass();
+            addComputeSkinningPass();
             addBLASBuildPass();
             addTLASBuildPass();
             addInstanceCullingPass();
@@ -2712,9 +2853,10 @@ namespace Nox
             addDDGIPasses();
             addLightPresamplingPasses();
             addReSTIRGIPasses();
-            addPreviousFrameCopyPass();
             addReSTIRDIPasses();
             addReSTIRPTPasses();
+            // All ReSTIR temporal passes must read the previous snapshot before this frame replaces it.
+            addPreviousFrameCopyPass();
             addPathTracerPasses();
             addDeferredLightingPass();
             addForward3DPass();
@@ -2819,8 +2961,13 @@ namespace Nox
             bool hasBoneBuffers = frameIndex < m_boneBuffers.size() && m_boneBuffers[frameIndex] != nullptr;
             bool hasBones = !m_boneMatrices.empty();
             references.boneMatrixReference = (hasBones && hasBoneBuffers) ? m_boneBuffers[frameIndex]->getDeviceAddress() : 0;
+            const bool hasSkinnedVertices = m_computeSkinningPipeline && !m_skinningWorkItems.empty() && frameIndex < m_skinnedVertexBuffers.size() &&
+                                            m_skinnedVertexBuffers[frameIndex] != nullptr;
+            references.skinnedVertexReference = hasSkinnedVertices ? m_skinnedVertexBuffers[frameIndex]->getDeviceAddress() : 0;
 
         }
+        frame.skinningWorkCount = static_cast<uint32_t>(m_skinningWorkItems.size());
+        frame.skinnedHistoryValid = frame.skinningWorkCount > 0 && m_skinnedVertexHistoryValid;
 
         // Every hybrid-only feature skips itself while path tracing. ReSTIR DI/GI are the exception when explicitly
         // requested: the plain path tracer can consume their primary-surface lighting buffers (RTXPT-style hybrid).
@@ -2966,6 +3113,17 @@ namespace Nox
             resources.SceneMeshes = graph.ImportBuffer("Scene Meshes", buffer);
         if (NRI::Buffer* buffer = m_gpuScene.GetRayTracingInstances().GetBuffer())
             resources.SceneRayTracingInstances = graph.ImportBuffer("Scene Ray Tracing Instances", buffer);
+        if (frame.skinningWorkCount > 0 && frameIndex < m_skinnedVertexBuffers.size() &&
+            frameIndex < m_skinningWorkItemBuffers.size() && frameIndex < m_boneBuffers.size())
+        {
+            const uint32_t previousFrame = (frameIndex + MAX_FRAMES_IN_FLIGHT - 1) % MAX_FRAMES_IN_FLIGHT;
+            resources.SkinningSourceVertices = graph.ImportBuffer("Skinning Source Vertices", &m_vertexStream.GetBuffer(), RGImportAccess::ReadOnly);
+            resources.SkinningBoneMatrices = graph.ImportBuffer("Skinning Bone Matrices", m_boneBuffers[frameIndex].get(), RGImportAccess::ReadOnly);
+            resources.SkinningWorkItems = graph.ImportBuffer("Skinning Work Items", m_skinningWorkItemBuffers[frameIndex].get(), RGImportAccess::ReadOnly);
+            resources.SkinnedVertices = graph.ImportBuffer("Skinned Vertices", m_skinnedVertexBuffers[frameIndex].get());
+            if (previousFrame < m_skinnedVertexBuffers.size())
+                resources.PreviousSkinnedVertices = graph.ImportBuffer("Previous Skinned Vertices", m_skinnedVertexBuffers[previousFrame].get(), RGImportAccess::ReadOnly);
+        }
         if (frameIndex < m_pickerStagingBuffers.size() && m_pickerStagingBuffers[frameIndex])
             resources.PickerStaging = graph.ImportBuffer("Picker Staging", m_pickerStagingBuffers[frameIndex].get());
         resources.MipFeedback = graph.ImportBuffer("Mip Feedback", m_mipFeedbackBuffer.get());
@@ -3132,6 +3290,7 @@ namespace Nox
         if (m_gpuScene.UpdateDrawList(glm::vec3(uniformData.cameraWorldPos), m_drawList, m_drawBucketStarts))
             m_drawListStale.fill(true);
         updateDrawListBuffers(currentImage);
+        updateSkinningLayout(currentImage);
 
         // The camera view: the frozen frustum while culling is frozen (BeginScene keeps it equal to the camera otherwise).
         // The occlusion test compares against the pyramid of the previous frame, so it uses that frame's view; while the
@@ -3298,6 +3457,24 @@ namespace Nox
             geometryCommitted += stream->GetCapacityBytes();
             geometryUsed += stream->GetUsedBytes();
         }
+        for (const std::unique_ptr<NRI::Buffer>& buffer : m_skinnedVertexBuffers)
+        {
+            if (buffer)
+                geometryCommitted += buffer->getSize();
+        }
+        for (const std::unique_ptr<NRI::Buffer>& buffer : m_skinningWorkItemBuffers)
+        {
+            if (buffer)
+                geometryCommitted += buffer->getSize();
+        }
+        uint64_t skinnedVerticesInUse = 0;
+        if (!m_skinningLayout.empty())
+        {
+            const SkinningLayoutEntry& last = m_skinningLayout.back();
+            skinnedVerticesInUse = uint64_t(last.destinationVertexOffset + last.vertexCount) * sizeof(shaderio::SkinnedVertex);
+        }
+        geometryUsed += (skinnedVerticesInUse + uint64_t(m_skinningWorkItems.size()) * sizeof(shaderio::SkinningWorkItem)) *
+                        MAX_FRAMES_IN_FLIGHT;
         m_memoryBudget.SetCommitted(MemoryCategory::Geometry, geometryCommitted, geometryUsed);
 
         // Ray tracing: the acceleration structures and what builds them.
@@ -3438,6 +3615,8 @@ namespace Nox
         NOX_PROFILE_COUNTER("Drawn Clusters", m_clusterStats.drawnClusters);
         NOX_PROFILE_COUNTER("Drawn Triangles", m_clusterStats.drawnTriangles);
         NOX_PROFILE_COUNTER("Lights", m_lightBufferObjects.size());
+        NOX_PROFILE_COUNTER("Skinned Instances", m_skinningLayout.size());
+        NOX_PROFILE_COUNTER("Skinning Workgroups", m_skinningWorkItems.size());
 
         {
             NOX_PROFILE_SCOPE("Bones Upload");

@@ -542,6 +542,7 @@ namespace Nox
         
         // Visability
         void createVisibilityPipeline(bool forceCompile);
+        void createComputeSkinningPipeline(bool forceCompile = false);
         // G-Buffer
         void createGBufferPipeline(bool forceCompile = false);
         // PBR
@@ -595,6 +596,7 @@ namespace Nox
         void applyCommandBufferBaseline(NRI::CommandBuffer& cmd) const;
         void prepareFrameGraph(uint32_t imageIndex);
         void addGpuSceneUpdatePass();
+        void addComputeSkinningPass();
         // Culls the draw list for the camera view into its visible instances, indirect commands and draw counts.
         void addInstanceCullingPass();
         // Depth pyramid of this frame's visibility depth, then phase 2: the occluded candidates against it.
@@ -658,6 +660,7 @@ namespace Nox
         void updateUniformBuffer(uint32_t currentImage);
         // This frame's draw list, culling view and GPU scene uploads (staged for the GPU Scene Update pass).
         void updateGpuScene(uint32_t currentImage);
+        void updateSkinningLayout(uint32_t currentImage);
         void updateDrawListBuffers(uint32_t currentImage);
         // Releases whose wait has passed; a mesh returns its ranges to the streams, the others die with their entry.
         void processDeferredReleases();
@@ -701,8 +704,10 @@ namespace Nox
 
         // Visability
         std::unique_ptr<NRI::Pipeline> m_visibilityPipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_computeSkinningPipeline = nullptr;
         // G-Buffer
         std::unique_ptr<NRI::Pipeline> m_gbufferPipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_gbufferPipelineNoVelocity = nullptr;
         // PBR
         std::unique_ptr<NRI::Pipeline> m_deferredLightingPipeline = nullptr;
         // Post Process
@@ -770,6 +775,10 @@ namespace Nox
             bool ptNRDAdded = false;
             bool deferredLightingAdded = false;
             bool dlssAdded = false;
+            bool gbufferVelocityWritten = false;
+            bool computeSkinningAdded = false;
+            bool skinnedHistoryValid = false;
+            uint32_t skinningWorkCount = 0;
             bool inspectionProbe = false;
         };
         RenderGraph m_renderGraph;
@@ -1003,8 +1012,27 @@ namespace Nox
         std::vector<void*> m_boneBuffersMapped;
         uint64_t m_BoneBufferCapacity = 0;
 
+        struct SkinningLayoutEntry
+        {
+            uint32_t instanceSlot = 0;
+            uint32_t sourceVertexOffset = 0;
+            uint32_t destinationVertexOffset = 0;
+            uint32_t vertexCount = 0;
+            bool operator==(const SkinningLayoutEntry&) const = default;
+        };
+        std::vector<shaderio::SkinningWorkItem> m_skinningWorkItems;
+        std::vector<SkinningLayoutEntry> m_skinningLayout;
+        std::vector<std::unique_ptr<NRI::Buffer>> m_skinnedVertexBuffers;
+        std::vector<std::unique_ptr<NRI::Buffer>> m_skinningWorkItemBuffers;
+        std::vector<void*> m_skinningWorkItemBuffersMapped;
+        uint64_t m_skinnedVertexBufferCapacity = 0;
+        uint64_t m_skinningWorkItemBufferCapacity = 0;
+        bool m_hasSkinnedVertexHistory = false;
+        bool m_skinnedVertexHistoryValid = false;
+
         void updateBoneBuffer(uint32_t currentImage);
         void createBoneBuffer(uint64_t size);
+        void createSkinningBuffers(uint64_t skinnedVertexSize, uint64_t workItemSize);
 
         // Meshes
         // Buffers, assets and geometry ranges wait here until no frame in flight can reference them (§5.8.4).

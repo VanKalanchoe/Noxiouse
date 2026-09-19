@@ -270,8 +270,11 @@ namespace Nox
     void Renderer::addPreviousFrameCopyPass()
     {
         // Snapshot this frame's depth/normal (and albedo/material for ReSTIR PT) as next frame's "previous" G-buffer
-        // for temporal reprojection validity checks. Unconditional: ReSTIR DI and PT temporal passes read these too,
-        // gating it on GI left them reprojecting against a stale snapshot (ghost shadows on camera movement).
+        // for temporal reprojection validity checks. This pass is added after every ReSTIR consumer has read the old
+        // snapshot, and is omitted when no ReSTIR lighting path needs that history.
+        if (!m_frame.restirGIAdded && !m_frame.restirDIAdded && !m_frame.restirPTActive)
+            return;
+
         const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
 
         m_renderGraph.AddPass("Previous Frame Copy", RGPassFlags::None,

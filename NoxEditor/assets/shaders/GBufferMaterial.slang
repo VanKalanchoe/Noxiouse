@@ -67,6 +67,15 @@
         float2 velocity : SV_Target5; // Screen-Space Motion Vectors (RG32F)
     };
 
+    struct GBufferOutputNoVelocity
+    {
+        float4 albedo   : SV_Target0;
+        float4 normal   : SV_Target1;
+        float4 material : SV_Target2;
+        float4 emission : SV_Target3;
+        int    entityID : SV_Target4;
+    };
+
     float4 computeBarycentric3D(float3 rayOrigin, float3 rayDir, float3 v0, float3 e1, float3 e2, float3 triNorm, float d00, float d01, float d11, float invDenom)
     {
         float normDotRay = dot(triNorm, rayDir);
@@ -108,10 +117,10 @@
         return clamp((-b + sqrt(D)) / (2.0 * a), 0.0, 1.0);
     }
 
-    [shader("fragment")]
-    GBufferOutput fragMain(
+    GBufferOutput evaluateGBuffer(
         MSOutput input,
-        uniform PushConstantVisibilityDebug pushConstant
+        uniform PushConstantVisibilityDebug pushConstant,
+        bool writeVelocity
     )
     {
         GBufferOutput output;
@@ -131,24 +140,28 @@
             output.material = float4(0.0, 0.0, 0.0, 0.0);
             output.emission = float4(0.0, 0.0, 0.0, 0.0);
             output.entityID = -1;
+            output.velocity = float2(0.0, 0.0);
 
             // Compute camera background motion vector (rotation-only, jitter-free like the geometry path below)
-        float2 uv = (input.pos.xy / pushConstant.viewportSize) * 2.0 - 1.0;
-        float4 currClipJittered = float4(uv, 1.0, 1.0);
-        // Reconstruct the actual world-space point along this (jittered) pixel's view ray.
-        // ubo->invViewProj is jittered on purpose here: it must match the matrix the pixel was rasterized with.
-        float4 worldPos4 = mul(ubo->invViewProj, currClipJittered);
-        float3 worldPos = worldPos4.xyz / worldPos4.w;
+            if (writeVelocity)
+            {
+                float2 uv = (input.pos.xy / pushConstant.viewportSize) * 2.0 - 1.0;
+                float4 currClipJittered = float4(uv, 1.0, 1.0);
+                // Reconstruct the actual world-space point along this (jittered) pixel's view ray.
+                // ubo->invViewProj is jittered on purpose here: it must match the matrix the pixel was rasterized with.
+                float4 worldPos4 = mul(ubo->invViewProj, currClipJittered);
+                float3 worldPos = worldPos4.xyz / worldPos4.w;
 
-        // Re-project that same world point with the CLEAN (non-jittered) matrices for both frames,
-        // exactly like the geometry path does, so background pixels use the same jitter-free convention.
-        float4 currClip = mul(ubo->nonJitteredProj, mul(ubo->view, float4(worldPos, 1.0)));
-        float4 prevClip = mul(ubo->prevProj, mul(ubo->prevView, float4(worldPos, 1.0)));
-        float2 currNDC = currClip.xy / currClip.w;
-        float2 prevNDC = prevClip.xy / prevClip.w;
+                // Re-project that same world point with the CLEAN (non-jittered) matrices for both frames,
+                // exactly like the geometry path does, so background pixels use the same jitter-free convention.
+                float4 currClip = mul(ubo->nonJitteredProj, mul(ubo->view, float4(worldPos, 1.0)));
+                float4 prevClip = mul(ubo->prevProj, mul(ubo->prevView, float4(worldPos, 1.0)));
+                float2 currNDC = currClip.xy / currClip.w;
+                float2 prevNDC = prevClip.xy / prevClip.w;
 
-        output.velocity = (prevNDC - currNDC) * float2(0.5, -0.5);
-        return output;
+                output.velocity = (prevNDC - currNDC) * float2(0.5, -0.5);
+            }
+            return output;
         }
 
         // Decode Visibility Buffer IDs
@@ -191,8 +204,36 @@
         float3 localNorm0 = v0.normal;
         float3 localNorm1 = v1.normal;
         float3 localNorm2 = v2.normal;
+        float4 previousLocalPos0 = localPos0;
+        float4 previousLocalPos1 = localPos1;
+        float4 previousLocalPos2 = localPos2;
 
-        if (instance.boneMatrixOffset != 0xFFFFFFFF && pushConstant.boneMatrixReference != 0)
+        if (instance.skinnedVertexOffset != NoSkinnedVertices && pushConstant.skinnedVertexReference != 0)
+        {
+            SkinnedVertex* skinnedVertices = (SkinnedVertex*)pushConstant.skinnedVertexReference;
+            const uint skinnedBase = instance.skinnedVertexOffset;
+            SkinnedVertex skinned0 = skinnedVertices[skinnedBase + vIdx0];
+            SkinnedVertex skinned1 = skinnedVertices[skinnedBase + vIdx1];
+            SkinnedVertex skinned2 = skinnedVertices[skinnedBase + vIdx2];
+            localPos0 = skinned0.position;
+            localPos1 = skinned1.position;
+            localPos2 = skinned2.position;
+            localNorm0 = skinned0.normal.xyz;
+            localNorm1 = skinned1.normal.xyz;
+            localNorm2 = skinned2.normal.xyz;
+
+            previousLocalPos0 = localPos0;
+            previousLocalPos1 = localPos1;
+            previousLocalPos2 = localPos2;
+            if (pushConstant.skinnedHistoryValid != 0 && pushConstant.previousSkinnedVertexReference != 0)
+            {
+                SkinnedVertex* previousSkinnedVertices = (SkinnedVertex*)pushConstant.previousSkinnedVertexReference;
+                previousLocalPos0 = previousSkinnedVertices[skinnedBase + vIdx0].position;
+                previousLocalPos1 = previousSkinnedVertices[skinnedBase + vIdx1].position;
+                previousLocalPos2 = previousSkinnedVertices[skinnedBase + vIdx2].position;
+            }
+        }
+        else if (instance.boneMatrixOffset != 0xFFFFFFFF && pushConstant.boneMatrixReference != 0)
         {
             float4x4* boneMatrices = (float4x4*)pushConstant.boneMatrixReference;
             uint baseOffset = instance.boneMatrixOffset;
@@ -217,6 +258,11 @@
                              boneMatrices[baseOffset + v2.boneIDs.w] * v2.boneWeights.w;
             localPos2 = mul(skin2, localPos2);
             localNorm2 = mul((float3x3)skin2, localNorm2);
+
+            // The direct fallback has no earlier pose cache; avoid inventing skeletal velocity for that one frame.
+            previousLocalPos0 = localPos0;
+            previousLocalPos1 = localPos1;
+            previousLocalPos2 = localPos2;
         }
 
         // World & Screen Clip Space
@@ -310,10 +356,10 @@
             float3 geomNormal = (lenNorm > 1e-6) ? (rawGeomNorm / lenNorm) : normalize(triNorm);
 
         float3 worldPos = worldPos0.xyz * w0 + worldPos1.xyz * w1 + worldPos2.xyz * w2;
-        // Where this surface point was last frame (per-object motion; skinning uses this frame's pose).
-        float3 previousWorldPos = mul(instance.previousModelMatrix, localPos0).xyz * w0 +
-                                  mul(instance.previousModelMatrix, localPos1).xyz * w1 +
-                                  mul(instance.previousModelMatrix, localPos2).xyz * w2;
+        // Where this surface point was last frame, including the previous skeletal pose when its cache is valid.
+        float3 previousWorldPos = mul(instance.previousModelMatrix, previousLocalPos0).xyz * w0 +
+                                  mul(instance.previousModelMatrix, previousLocalPos1).xyz * w1 +
+                                  mul(instance.previousModelMatrix, previousLocalPos2).xyz * w2;
         float3 worldPos_dx = worldPos0.xyz * w0_dx + worldPos1.xyz * w1_dx + worldPos2.xyz * w2_dx;
         float3 worldPos_dy = worldPos0.xyz * w0_dy + worldPos1.xyz * w1_dy + worldPos2.xyz * w2_dy;
         float3 ddx_pos = worldPos_dx - worldPos;
@@ -412,8 +458,10 @@
         if (instance.normalTextureIndex != 0xFFFFFFFF)
         {
             float2 normalUV = (instance.normalTextureSet == 0) ? uv0 : uv1;
+            float2 ddx_normal = (instance.normalTextureSet == 0) ? ddx_uv0 : ddx_uv1;
+            float2 ddy_normal = (instance.normalTextureSet == 0) ? ddy_uv0 : ddy_uv1;
             Texture2D normalTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.normalTextureIndex, 0));
-            rawNormalTex = normalTex.SampleLevel(samp, normalUV, 0.0).xyz;
+            rawNormalTex = normalTex.SampleGrad(samp, normalUV, ddx_normal, ddy_normal).xyz;
             float3 tangentNormal = rawNormalTex * 2.0 - 1.0;
 
             // Compute triangle edge vectors in world space and UV space
@@ -502,16 +550,42 @@
         output.emission = float4(emission, 1.0);
         output.entityID = instance.entityID;
 
-        // --- Screen-Space Motion Vector (Jitter-Free) ---
-        float4 currClip = mul(ubo->nonJitteredProj, mul(ubo->view, float4(worldPos, 1.0)));
-        float4 prevClip = mul(ubo->prevProj, mul(ubo->prevView, float4(previousWorldPos, 1.0)));
+        output.velocity = float2(0.0, 0.0);
+        if (writeVelocity)
+        {
+            // --- Screen-Space Motion Vector (Jitter-Free) ---
+            float4 currClip = mul(ubo->nonJitteredProj, mul(ubo->view, float4(worldPos, 1.0)));
+            float4 prevClip = mul(ubo->prevProj, mul(ubo->prevView, float4(previousWorldPos, 1.0)));
 
-        float2 currNDC = currClip.xy / currClip.w;
-        float2 prevNDC = prevClip.xy / prevClip.w;
+            float2 currNDC = currClip.xy / currClip.w;
+            float2 prevNDC = prevClip.xy / prevClip.w;
 
-        // NVIDIA Streamline / DLSS standard: delta in UV space [0, 1]
-        float2 velocity = (prevNDC - currNDC) * float2(0.5, -0.5);
-        output.velocity = velocity;
+            // NVIDIA Streamline / DLSS standard: delta in UV space [0, 1]
+            output.velocity = (prevNDC - currNDC) * float2(0.5, -0.5);
+        }
 
+        return output;
+    }
+
+    [shader("fragment")]
+    GBufferOutput fragMain(
+        MSOutput input,
+        uniform PushConstantVisibilityDebug pushConstant)
+    {
+        return evaluateGBuffer(input, pushConstant, true);
+    }
+
+    [shader("fragment")]
+    GBufferOutputNoVelocity fragMainNoVelocity(
+        MSOutput input,
+        uniform PushConstantVisibilityDebug pushConstant)
+    {
+        GBufferOutput full = evaluateGBuffer(input, pushConstant, false);
+        GBufferOutputNoVelocity output;
+        output.albedo = full.albedo;
+        output.normal = full.normal;
+        output.material = full.material;
+        output.emission = full.emission;
+        output.entityID = full.entityID;
         return output;
     }

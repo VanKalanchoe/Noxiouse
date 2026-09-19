@@ -138,6 +138,7 @@ namespace Nox
         void RemoveAllInstances();
         void SetTransform(uint32_t instanceSlot, const glm::mat4& world);
         void SetBoneMatrixOffset(uint32_t instanceSlot, uint32_t boneMatrixOffset);
+        void SetSkinnedVertexOffset(uint32_t instanceSlot, uint32_t skinnedVertexOffset);
         int32_t GetInstanceEntity(uint32_t instanceSlot) const { return m_Instances.Get(instanceSlot).entityID; }
         uint32_t GetInstanceCount() const { return m_InstanceCount; }
 

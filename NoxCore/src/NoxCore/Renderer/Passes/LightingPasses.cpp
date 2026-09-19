@@ -220,7 +220,8 @@ namespace Nox
                 builder.Read(resources.GBufferMaterial);
                 builder.Read(resources.GBufferEmission);
                 builder.Read(resources.Depth);
-                builder.Read(resources.GBufferVelocity);
+                if (frame.gbufferVelocityWritten && m_debugMode == 15)
+                    builder.Read(resources.GBufferVelocity);
                 // Entity ID debug view (through the uniforms).
                 builder.Read(resources.Entity);
                 // Only the outputs of features that run this frame.
@@ -282,7 +283,9 @@ namespace Nox
                 lightingPush.depthTextureIndex = context.Slot(res->Depth);
                 lightingPush.viewportSize = glm::vec2(rw, rh);
                 lightingPush.debugMode = m_debugMode;
-                lightingPush.gbufferVelocityIndex = context.Slot(res->GBufferVelocity);
+                lightingPush.gbufferVelocityIndex = frame.gbufferVelocityWritten && m_debugMode == 15
+                    ? context.Slot(res->GBufferVelocity)
+                    : 0xFFFFFFFF;
                 lightingPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
                 // The denoised shadow mask / reflection is bound only when its NRD pass ran this frame (it runs only
                 // together with its RT pass, e.g. not when the master hybrid RT toggle is off); otherwise the raw result.

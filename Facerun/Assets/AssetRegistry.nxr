@@ -19,6 +19,10 @@ AssetRegistry:
     FilePath: Models/bistro/Materials/bistro_LMBR_00000c7_wheel_rim.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_00000c7_wheel_rim.nmat
     Type: AssetType::Material
+  - Handle: 113668514977193437
+    FilePath: Scenes/ShadowTest.nox
+    SourceFilePath: Scenes/ShadowTest.nox
+    Type: AssetType::Scene
   - Handle: 123748521163749339
     FilePath: Models/bistro/objects/props/natural/paris_flowers_01a/Textures/paris_foliage_01a_ddna.ntex
     SourceFilePath: Models/bistro/objects/props/natural/paris_flowers_01a/paris_foliage_01a_ddna.dds
@@ -141,6 +145,14 @@ AssetRegistry:
     Type: AssetType::Texture2D
     TextureSpec:
       Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 526707391607628468
+    FilePath: Models/pilot_avatar/textures/pilot_avatar_tex_0.ntex
+    SourceFilePath: Models/pilot_avatar/textures/pilot_avatar_tex_0.ntex
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
       GenerateMips: true
       Flip: false
   - Handle: 539936714742491388
@@ -479,6 +491,10 @@ AssetRegistry:
       Format: RGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 2231834688421122492
+    FilePath: Models/dancing_stormtrooper/Materials/dancing_stormtrooper_Stormtroopermat.nmat
+    SourceFilePath: Models/dancing_stormtrooper/Materials/dancing_stormtrooper_Stormtroopermat.nmat
+    Type: AssetType::Material
   - Handle: 2277345252012741846
     FilePath: Models/bistro/Materials/bistro_LMBR_0000149_Wheels_01.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_0000149_Wheels_01.nmat
@@ -663,6 +679,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 3201999581847225132
+    FilePath: Scenes/flat.nox
+    SourceFilePath: Scenes/flat.nox
+    Type: AssetType::Scene
   - Handle: 3241637437167396316
     FilePath: Models/bistro/objects/props/street/paris_trashcan_01/Textures/paris_trashcan_01_diff.ntex
     SourceFilePath: Models/bistro/objects/props/street/paris_trashcan_01/paris_trashcan_01_diff.dds
@@ -919,6 +939,10 @@ AssetRegistry:
       Format: RGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 4478752070221183051
+    FilePath: Scenes/Sponza.nox
+    SourceFilePath: Scenes/Sponza.nox
+    Type: AssetType::Scene
   - Handle: 4546850339412781439
     FilePath: Models/bistro/textures/decals/bottomdirt_01/Textures/bottomdirt_01_diff.ntex
     SourceFilePath: Models/bistro/textures/decals/bottomdirt_01/bottomdirt_01_diff.dds
@@ -939,6 +963,14 @@ AssetRegistry:
     FilePath: Models/bistro/Materials/bistro_LMBR_000012d_Paris_Glass_Detailed_Liquid_01.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_000012d_Paris_Glass_Detailed_Liquid_01.nmat
     Type: AssetType::Material
+  - Handle: 4570571869329257404
+    FilePath: Models/pilot_avatar/Textures/pilot_avatar_tex_2.ntex
+    SourceFilePath: Models/pilot_avatar/Textures/pilot_avatar_tex_2.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
   - Handle: 4588002036198269016
     FilePath: Models/bistro/textures/decals/plastercracks_02/Textures/plastercracks_02_diff.ntex
     SourceFilePath: Models/bistro/textures/decals/plastercracks_02/plastercracks_02_diff.dds
@@ -983,10 +1015,26 @@ AssetRegistry:
       Format: RGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 4690918837911283378
+    FilePath: Models/dancing_stormtrooper/Textures/dancing_stormtrooper_tex_0.ntex
+    SourceFilePath: Models/dancing_stormtrooper/Textures/dancing_stormtrooper_tex_0.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
   - Handle: 4718518115434812100
     FilePath: Models/bistro/Materials/bistro_LMBR_0000056_Roofing_Shingle_01.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_0000056_Roofing_Shingle_01.nmat
     Type: AssetType::Material
+  - Handle: 4744008478877211813
+    FilePath: Models/pilot_avatar/textures/pilot_avatar_tex_2.ntex
+    SourceFilePath: Models/pilot_avatar/textures/pilot_avatar_tex_2.ntex
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
   - Handle: 4751636329913276729
     FilePath: Models/bistro/objects/props/bistro/paris_ceilingfan_01/Textures/paris_ceilingfan_01a_diff.ntex
     SourceFilePath: Models/bistro/objects/props/bistro/paris_ceilingfan_01/paris_ceilingfan_01a_diff.dds
@@ -1035,10 +1083,22 @@ AssetRegistry:
       Format: RGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 5101376773505957270
+    FilePath: Models/CesiumMan/Meshes/CesiumMan.nskel
+    SourceFilePath: Models/CesiumMan/Meshes/CesiumMan.nskel
+    Type: AssetType::Skeleton
   - Handle: 5118205769905631361
     FilePath: Models/bistro/Materials/bistro_LMBR_00001a9_letters.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_00001a9_letters.nmat
     Type: AssetType::Material
+  - Handle: 5150794089531743497
+    FilePath: Models/pilot_avatar/Textures/pilot_avatar_tex_1.ntex
+    SourceFilePath: Models/pilot_avatar/Textures/pilot_avatar_tex_1.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
   - Handle: 5200319187240342009
     FilePath: Models/bistro/textures/shared/tiling/metal_rolldoor_01/Textures/metal_rolldoor_01_ddna.ntex
     SourceFilePath: Models/bistro/textures/shared/tiling/metal_rolldoor_01/metal_rolldoor_01_ddna.dds
@@ -1158,6 +1218,10 @@ AssetRegistry:
   - Handle: 5801321656242225464
     FilePath: Models/bistro/Materials/bistro_LMBR_00001ba_Paris_MenuSign_01.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_00001ba_Paris_MenuSign_01.nmat
+    Type: AssetType::Material
+  - Handle: 5821802713265204165
+    FilePath: Models/CesiumMan/Materials/CesiumMan_Cesium_Man-effect.nmat
+    SourceFilePath: Models/CesiumMan/Materials/CesiumMan_Cesium_Man-effect.nmat
     Type: AssetType::Material
   - Handle: 5823889403159552806
     FilePath: Models/bistro/objects/props/natural/linden/Textures/linden_bark_a_diff.ntex
@@ -1279,6 +1343,10 @@ AssetRegistry:
     FilePath: Models/bistro/Materials/bistro_LMBR_00000db_Plastic_blue.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_00000db_Plastic_blue.nmat
     Type: AssetType::Material
+  - Handle: 6320332933909881530
+    FilePath: Models/Fox/Meshes/Fox.nskel
+    SourceFilePath: Models/Fox/Meshes/Fox.nskel
+    Type: AssetType::Skeleton
   - Handle: 6327159945812592498
     FilePath: Models/bistro/objects/props/bistro/paris_table_01/Textures/paris_table_01a_ddna.ntex
     SourceFilePath: Models/bistro/objects/props/bistro/paris_table_01/paris_table_01a_ddna.dds
@@ -1327,6 +1395,10 @@ AssetRegistry:
       Format: RGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 6526845394868794755
+    FilePath: Scenes/noxtest.nox
+    SourceFilePath: Scenes/noxtest.nox
+    Type: AssetType::Scene
   - Handle: 6578996066658217464
     FilePath: Models/bistro/Materials/bistro_LMBR_0000199_Paris_StringLights_01_Green_Color.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_0000199_Paris_StringLights_01_Green_Color.nmat
@@ -1369,6 +1441,14 @@ AssetRegistry:
     Type: AssetType::Texture2D
     TextureSpec:
       Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 6815339142408373480
+    FilePath: Models/pilot_avatar/textures/pilot_avatar_tex_1.ntex
+    SourceFilePath: Models/pilot_avatar/textures/pilot_avatar_tex_1.ntex
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
       GenerateMips: true
       Flip: false
   - Handle: 6828933273009485582
@@ -1487,6 +1567,14 @@ AssetRegistry:
     FilePath: Models/bistro/Materials/bistro_LMBR_000016a_Cobble_01_Leaves.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_000016a_Cobble_01_Leaves.nmat
     Type: AssetType::Material
+  - Handle: 7351718446417134266
+    FilePath: Models/CesiumMan/textures/CesiumMan_tex_0.ntex
+    SourceFilePath: Models/CesiumMan/textures/CesiumMan_tex_0.ntex
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
   - Handle: 7360065171589443759
     FilePath: Models/bistro/textures/shared/tiling/metal_rolldoor_01/Textures/metal_rolldoor_01_spec.ntex
     SourceFilePath: Models/bistro/textures/shared/tiling/metal_rolldoor_01/metal_rolldoor_01_spec.dds
@@ -1535,6 +1623,14 @@ AssetRegistry:
       Format: RGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 7496738172010168645
+    FilePath: Scenes/Physics2D.nox
+    SourceFilePath: Scenes/Physics2D.nox
+    Type: AssetType::Scene
+  - Handle: 7502146576795303697
+    FilePath: Models/Fox/Materials/Fox_fox_material.nmat
+    SourceFilePath: Models/Fox/Materials/Fox_fox_material.nmat
+    Type: AssetType::Material
   - Handle: 7507295707690476463
     FilePath: Models/bistro/textures/shared/tiling/wood_planks_01/Textures/wood_planks_01_diff.ntex
     SourceFilePath: Models/bistro/textures/shared/tiling/wood_planks_01/wood_planks_01_diff.dds
@@ -1971,6 +2067,14 @@ AssetRegistry:
       Format: RGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 9952910146189852809
+    FilePath: Models/CesiumMan/Textures/CesiumMan_tex_0.ntex
+    SourceFilePath: Models/CesiumMan/Textures/CesiumMan_tex_0.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
   - Handle: 9979693937071215882
     FilePath: Models/bistro/objects/props/street/paris_sidewalkbarrier_01/Textures/paris_sidewalkbarrier_01_ddna.ntex
     SourceFilePath: Models/bistro/objects/props/street/paris_sidewalkbarrier_01/paris_sidewalkbarrier_01_ddna.dds
@@ -2027,6 +2131,14 @@ AssetRegistry:
     FilePath: Models/bistro/Materials/bistro_LMBR_0000058_Wood_Polished_01.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_0000058_Wood_Polished_01.nmat
     Type: AssetType::Material
+  - Handle: 10164192970087240682
+    FilePath: Models/pilot_avatar/Textures/pilot_avatar_tex_0.ntex
+    SourceFilePath: Models/pilot_avatar/Textures/pilot_avatar_tex_0.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
   - Handle: 10175702949470481442
     FilePath: Models/bistro/objects/props/street/paris_streetlight_01/Textures/paris_streetlight_bulb_01_emmitance.ntex
     SourceFilePath: Models/bistro/objects/props/street/paris_streetlight_01/paris_streetlight_bulb_01_emmitance.dds
@@ -2059,6 +2171,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 10255925154581678698
+    FilePath: Scenes/Texture.nox
+    SourceFilePath: Scenes/Texture.nox
+    Type: AssetType::Scene
   - Handle: 10311799931258152708
     FilePath: Models/bistro/objects/props/natural/linden/Textures/leaves_a_diff.ntex
     SourceFilePath: Models/bistro/objects/props/natural/linden/leaves_a_diff.dds
@@ -2087,6 +2203,10 @@ AssetRegistry:
     FilePath: Models/bistro/Materials/bistro_LMBR_00000c3_headlight.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_00000c3_headlight.nmat
     Type: AssetType::Material
+  - Handle: 10507827348304814923
+    FilePath: Models/CesiumMan/Meshes/CesiumMan_Anim_0.nanim
+    SourceFilePath: Models/CesiumMan/Meshes/CesiumMan_Anim_0.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 10546826813338971590
     FilePath: Models/bistro/Materials/bistro_LMBR_0000003_noname.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_0000003_noname.nmat
@@ -2139,6 +2259,10 @@ AssetRegistry:
     FilePath: Models/bistro/Materials/bistro_LMBR_00000e9_mesh.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_00000e9_mesh.nmat
     Type: AssetType::Material
+  - Handle: 10829813381381201025
+    FilePath: Scenes/lol.nox
+    SourceFilePath: Scenes/lol.nox
+    Type: AssetType::Scene
   - Handle: 10862395464320009765
     FilePath: Models/bistro/Materials/bistro_LMBR_00000cb_glass_ornament.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_00000cb_glass_ornament.nmat
@@ -2167,6 +2291,10 @@ AssetRegistry:
       Format: RGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 10930603326297920162
+    FilePath: Models/dancing_stormtrooper/Meshes/dancing_stormtrooper.nmesh
+    SourceFilePath: Models/dancing_stormtrooper/dancing_stormtrooper.glb
+    Type: AssetType::Mesh
   - Handle: 10931032957965630003
     FilePath: Models/bistro/Materials/bistro_LMBR_00000e0_main.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_00000e0_main.nmat
@@ -2251,6 +2379,10 @@ AssetRegistry:
       Format: RGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 11246495944099860770
+    FilePath: Scenes/PinkCube1.nox
+    SourceFilePath: Scenes/PinkCube1.nox
+    Type: AssetType::Scene
   - Handle: 11260192038817409862
     FilePath: Models/bistro/objects/props/street/paris_mainbalcony_01/Textures/paris_doors_04a_spec.ntex
     SourceFilePath: Models/bistro/objects/props/street/paris_mainbalcony_01/paris_doors_04a_spec.dds
@@ -2627,6 +2759,10 @@ AssetRegistry:
       Format: RGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 12622080703281613817
+    FilePath: Models/Fox/Meshes/Fox_Walk.nanim
+    SourceFilePath: Models/Fox/Meshes/Fox_Walk.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 12626314590997807015
     FilePath: Models/bistro/objects/props/street/paris_vespascooter_01/Textures/paris_vespascooter_01_odometer_ddna.ntex
     SourceFilePath: Models/bistro/objects/props/street/paris_vespascooter_01/paris_vespascooter_01_odometer_ddna.dds
@@ -2679,6 +2815,10 @@ AssetRegistry:
     FilePath: Models/bistro/Materials/bistro_LMBR_000004b_Concrete_Yellow.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_000004b_Concrete_Yellow.nmat
     Type: AssetType::Material
+  - Handle: 12959947614915160188
+    FilePath: Models/pilot_avatar/Meshes/pilot_avatar.nmesh
+    SourceFilePath: Models/pilot_avatar/pilot_avatar.glb
+    Type: AssetType::Mesh
   - Handle: 12973125982132413252
     FilePath: Models/bistro/objects/props/street/paris_bistroawning_02/Textures/paris_bistroawning_02_ddna.ntex
     SourceFilePath: Models/bistro/objects/props/street/paris_bistroawning_02/paris_bistroawning_02_ddna.dds
@@ -2887,6 +3027,10 @@ AssetRegistry:
     FilePath: Models/bistro/Materials/bistro_LMBR_0000168_Cobblestone_Wet_Leaves.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_0000168_Cobblestone_Wet_Leaves.nmat
     Type: AssetType::Material
+  - Handle: 13889883625999130679
+    FilePath: Models/dancing_stormtrooper/Meshes/dancing_stormtrooper_mixamo.com.nanim
+    SourceFilePath: Models/dancing_stormtrooper/Meshes/dancing_stormtrooper_mixamo.com.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 13904476764757818500
     FilePath: Models/bistro/Materials/bistro_LMBR_0000034_wood_painted_red_bright.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_0000034_wood_painted_red_bright.nmat
@@ -2903,6 +3047,10 @@ AssetRegistry:
     FilePath: Models/bistro/Materials/bistro_LMBR_0000197_Paris_StringLights_01_Red_Color.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_0000197_Paris_StringLights_01_Red_Color.nmat
     Type: AssetType::Material
+  - Handle: 14081161483211166418
+    FilePath: Models/dancing_stormtrooper/Meshes/dancing_stormtrooper.nskel
+    SourceFilePath: Models/dancing_stormtrooper/Meshes/dancing_stormtrooper.nskel
+    Type: AssetType::Skeleton
   - Handle: 14099820204994334312
     FilePath: Models/bistro/textures/shared/tiling/ceramic_01/Textures/ceramic_01_diff.ntex
     SourceFilePath: Models/bistro/textures/shared/tiling/ceramic_01/ceramic_01_diff.dds
@@ -3015,6 +3163,10 @@ AssetRegistry:
     FilePath: Models/bistro/Materials/bistro_LMBR_000000e_ornament.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_000000e_ornament.nmat
     Type: AssetType::Material
+  - Handle: 14769244622884448047
+    FilePath: Models/CesiumMan/Meshes/CesiumMan.nmesh
+    SourceFilePath: Models/CesiumMan/CesiumMan.glb
+    Type: AssetType::Mesh
   - Handle: 14785587727608414521
     FilePath: Models/bistro/Materials/bistro_LMBR_00001ad_Brushed_Metal.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_00001ad_Brushed_Metal.nmat
@@ -3091,14 +3243,30 @@ AssetRegistry:
     FilePath: Models/bistro/Materials/bistro_LMBR_000004c_Concrete_Grooved_02.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_000004c_Concrete_Grooved_02.nmat
     Type: AssetType::Material
+  - Handle: 15261202815399592827
+    FilePath: Models/pilot_avatar/Meshes/pilot_avatar_Idle Loop.nanim
+    SourceFilePath: Models/pilot_avatar/Meshes/pilot_avatar_Idle Loop.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 15288374796302860798
     FilePath: Models/bistro/Materials/bistro_LMBR_00000ec_Paris_LiquorBottle_01_Caps.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_00000ec_Paris_LiquorBottle_01_Caps.nmat
     Type: AssetType::Material
+  - Handle: 15363367892154962322
+    FilePath: Models/Fox/Meshes/Fox_Survey.nanim
+    SourceFilePath: Models/Fox/Meshes/Fox_Survey.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 15395072855472287011
     FilePath: Models/bistro/Materials/bistro_LMBR_00000af_Orange_Leaves.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_00000af_Orange_Leaves.nmat
     Type: AssetType::Material
+  - Handle: 15455584313086184863
+    FilePath: Models/dancing_stormtrooper/textures/dancing_stormtrooper_tex_0.ntex
+    SourceFilePath: Models/dancing_stormtrooper/textures/dancing_stormtrooper_tex_0.ntex
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
   - Handle: 15459672939599039865
     FilePath: Models/bistro/Materials/bistro_LMBR_00001af_Plaster.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_00001af_Plaster.nmat
@@ -3107,6 +3275,10 @@ AssetRegistry:
     FilePath: Models/bistro/Materials/bistro_LMBR_0000028_brick_small_red_02.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_0000028_brick_small_red_02.nmat
     Type: AssetType::Material
+  - Handle: 15466860455941274793
+    FilePath: Models/Fox/Meshes/Fox.nmesh
+    SourceFilePath: Models/Fox/Fox.gltf
+    Type: AssetType::Mesh
   - Handle: 15467443918134175687
     FilePath: Models/bistro/objects/props/street/paris_shopsign_01/Textures/paris_shopsign_bakery_diff.ntex
     SourceFilePath: Models/bistro/objects/props/street/paris_shopsign_01/paris_shopsign_bakery_diff.dds
@@ -3387,6 +3559,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 16460606173311145019
+    FilePath: Models/Fox/Meshes/Fox_Run.nanim
+    SourceFilePath: Models/Fox/Meshes/Fox_Run.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 16540113387654507041
     FilePath: Models/bistro/Materials/bistro_LMBR_0000097_mesh.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_0000097_mesh.nmat
@@ -3447,6 +3623,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 16759700418496109171
+    FilePath: Models/pilot_avatar/Materials/pilot_avatar_Scene_-_Root.nmat
+    SourceFilePath: Models/pilot_avatar/Materials/pilot_avatar_Scene_-_Root.nmat
+    Type: AssetType::Material
   - Handle: 16777265453981838437
     FilePath: Models/bistro/Materials/bistro_LMBR_000018a_chains.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_000018a_chains.nmat
@@ -3583,6 +3763,10 @@ AssetRegistry:
       Format: RGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 17355128226320572437
+    FilePath: Models/pilot_avatar/Meshes/pilot_avatar.nskel
+    SourceFilePath: Models/pilot_avatar/Meshes/pilot_avatar.nskel
+    Type: AssetType::Skeleton
   - Handle: 17366252598999954879
     FilePath: Models/bistro/Materials/bistro_LMBR_0000054_Trim_Cornice.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_0000054_Trim_Cornice.nmat
@@ -3627,6 +3811,14 @@ AssetRegistry:
     FilePath: Models/bistro/Materials/bistro_LMBR_000006b_bulb_light.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_000006b_bulb_light.nmat
     Type: AssetType::Material
+  - Handle: 17725057340964025076
+    FilePath: Models/Fox/Textures/Texture.ntex
+    SourceFilePath: Models/Fox/Texture.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
   - Handle: 17797040058395163851
     FilePath: Models/bistro/Materials/bistro_LMBR_0000061_Decal_Crack.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_0000061_Decal_Crack.nmat

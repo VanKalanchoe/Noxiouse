@@ -1,1 +1,821 @@
-Scene: Untitled
+Scene: Animation Stress
+Entities:
+  - Entity: 18009900000000000001
+    TagComponent:
+      Tag: Animation_Fox
+    TransformComponent:
+      Translation: [-3, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 15466860455941274793
+  - Entity: 18009900000000000002
+    TagComponent:
+      Tag: Animation_Stormtrooper
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 10930603326297920162
+  - Entity: 18009900000000000003
+    TagComponent:
+      Tag: Animation_CesiumMan
+    TransformComponent:
+      Translation: [3, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 14769244622884448047
+  - Entity: 18010000000000000001
+    TagComponent:
+      Tag: SkinStress_Fox_01
+    TransformComponent:
+      Translation: [-8.8, 0, -2]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 15466860455941274793
+  - Entity: 18010000000000000002
+    TagComponent:
+      Tag: SkinStress_Stormtrooper_01
+    TransformComponent:
+      Translation: [-7.2, 0, -2]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 10930603326297920162
+  - Entity: 18010000000000000003
+    TagComponent:
+      Tag: SkinStress_CesiumMan_01
+    TransformComponent:
+      Translation: [-5.6, 0, -2]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 14769244622884448047
+  - Entity: 18010000000000000004
+    TagComponent:
+      Tag: SkinStress_Fox_02
+    TransformComponent:
+      Translation: [-4, 0, -2]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 15466860455941274793
+  - Entity: 18010000000000000005
+    TagComponent:
+      Tag: SkinStress_Stormtrooper_02
+    TransformComponent:
+      Translation: [-2.4, 0, -2]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 10930603326297920162
+  - Entity: 18010000000000000006
+    TagComponent:
+      Tag: SkinStress_CesiumMan_02
+    TransformComponent:
+      Translation: [-0.8, 0, -2]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 14769244622884448047
+  - Entity: 18010000000000000007
+    TagComponent:
+      Tag: SkinStress_Fox_03
+    TransformComponent:
+      Translation: [0.8, 0, -2]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 15466860455941274793
+  - Entity: 18010000000000000008
+    TagComponent:
+      Tag: SkinStress_Stormtrooper_03
+    TransformComponent:
+      Translation: [2.4, 0, -2]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 10930603326297920162
+  - Entity: 18010000000000000009
+    TagComponent:
+      Tag: SkinStress_CesiumMan_03
+    TransformComponent:
+      Translation: [4, 0, -2]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 14769244622884448047
+  - Entity: 18010000000000000010
+    TagComponent:
+      Tag: SkinStress_Fox_04
+    TransformComponent:
+      Translation: [5.6, 0, -2]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 15466860455941274793
+  - Entity: 18010000000000000011
+    TagComponent:
+      Tag: SkinStress_Stormtrooper_04
+    TransformComponent:
+      Translation: [7.2, 0, -2]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 10930603326297920162
+  - Entity: 18010000000000000012
+    TagComponent:
+      Tag: SkinStress_CesiumMan_04
+    TransformComponent:
+      Translation: [8.8, 0, -2]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 14769244622884448047
+  - Entity: 18010000000000000013
+    TagComponent:
+      Tag: SkinStress_Fox_05
+    TransformComponent:
+      Translation: [-8.8, 0, -4]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 15466860455941274793
+  - Entity: 18010000000000000014
+    TagComponent:
+      Tag: SkinStress_Stormtrooper_05
+    TransformComponent:
+      Translation: [-7.2, 0, -4]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 10930603326297920162
+  - Entity: 18010000000000000015
+    TagComponent:
+      Tag: SkinStress_CesiumMan_05
+    TransformComponent:
+      Translation: [-5.6, 0, -4]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 14769244622884448047
+  - Entity: 18010000000000000016
+    TagComponent:
+      Tag: SkinStress_Fox_06
+    TransformComponent:
+      Translation: [-4, 0, -4]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 15466860455941274793
+  - Entity: 18010000000000000017
+    TagComponent:
+      Tag: SkinStress_Stormtrooper_06
+    TransformComponent:
+      Translation: [-2.4, 0, -4]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 10930603326297920162
+  - Entity: 18010000000000000018
+    TagComponent:
+      Tag: SkinStress_CesiumMan_06
+    TransformComponent:
+      Translation: [-0.8, 0, -4]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 14769244622884448047
+  - Entity: 18010000000000000019
+    TagComponent:
+      Tag: SkinStress_Fox_07
+    TransformComponent:
+      Translation: [0.8, 0, -4]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 15466860455941274793
+  - Entity: 18010000000000000020
+    TagComponent:
+      Tag: SkinStress_Stormtrooper_07
+    TransformComponent:
+      Translation: [2.4, 0, -4]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 10930603326297920162
+  - Entity: 18010000000000000021
+    TagComponent:
+      Tag: SkinStress_CesiumMan_07
+    TransformComponent:
+      Translation: [4, 0, -4]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 14769244622884448047
+  - Entity: 18010000000000000022
+    TagComponent:
+      Tag: SkinStress_Fox_08
+    TransformComponent:
+      Translation: [5.6, 0, -4]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 15466860455941274793
+  - Entity: 18010000000000000023
+    TagComponent:
+      Tag: SkinStress_Stormtrooper_08
+    TransformComponent:
+      Translation: [7.2, 0, -4]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 10930603326297920162
+  - Entity: 18010000000000000024
+    TagComponent:
+      Tag: SkinStress_CesiumMan_08
+    TransformComponent:
+      Translation: [8.8, 0, -4]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 14769244622884448047
+  - Entity: 18010000000000000025
+    TagComponent:
+      Tag: SkinStress_Fox_09
+    TransformComponent:
+      Translation: [-8.8, 0, -6]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 15466860455941274793
+  - Entity: 18010000000000000026
+    TagComponent:
+      Tag: SkinStress_Stormtrooper_09
+    TransformComponent:
+      Translation: [-7.2, 0, -6]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 10930603326297920162
+  - Entity: 18010000000000000027
+    TagComponent:
+      Tag: SkinStress_CesiumMan_09
+    TransformComponent:
+      Translation: [-5.6, 0, -6]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 14769244622884448047
+  - Entity: 18010000000000000028
+    TagComponent:
+      Tag: SkinStress_Fox_10
+    TransformComponent:
+      Translation: [-4, 0, -6]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 15466860455941274793
+  - Entity: 18010000000000000029
+    TagComponent:
+      Tag: SkinStress_Stormtrooper_10
+    TransformComponent:
+      Translation: [-2.4, 0, -6]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 10930603326297920162
+  - Entity: 18010000000000000030
+    TagComponent:
+      Tag: SkinStress_CesiumMan_10
+    TransformComponent:
+      Translation: [-0.8, 0, -6]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 14769244622884448047
+  - Entity: 18010000000000000031
+    TagComponent:
+      Tag: SkinStress_Fox_11
+    TransformComponent:
+      Translation: [0.8, 0, -6]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 15466860455941274793
+  - Entity: 18010000000000000032
+    TagComponent:
+      Tag: SkinStress_Stormtrooper_11
+    TransformComponent:
+      Translation: [2.4, 0, -6]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 10930603326297920162
+  - Entity: 18010000000000000033
+    TagComponent:
+      Tag: SkinStress_CesiumMan_11
+    TransformComponent:
+      Translation: [4, 0, -6]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 14769244622884448047
+  - Entity: 18010000000000000034
+    TagComponent:
+      Tag: SkinStress_Fox_12
+    TransformComponent:
+      Translation: [5.6, 0, -6]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 15466860455941274793
+  - Entity: 18010000000000000035
+    TagComponent:
+      Tag: SkinStress_Stormtrooper_12
+    TransformComponent:
+      Translation: [7.2, 0, -6]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 10930603326297920162
+  - Entity: 18010000000000000036
+    TagComponent:
+      Tag: SkinStress_CesiumMan_12
+    TransformComponent:
+      Translation: [8.8, 0, -6]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 14769244622884448047
+  - Entity: 18010000000000000037
+    TagComponent:
+      Tag: SkinStress_Fox_13
+    TransformComponent:
+      Translation: [-8.8, 0, -8]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 15466860455941274793
+  - Entity: 18010000000000000038
+    TagComponent:
+      Tag: SkinStress_Stormtrooper_13
+    TransformComponent:
+      Translation: [-7.2, 0, -8]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 10930603326297920162
+  - Entity: 18010000000000000039
+    TagComponent:
+      Tag: SkinStress_CesiumMan_13
+    TransformComponent:
+      Translation: [-5.6, 0, -8]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 14769244622884448047
+  - Entity: 18010000000000000040
+    TagComponent:
+      Tag: SkinStress_Fox_14
+    TransformComponent:
+      Translation: [-4, 0, -8]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 15466860455941274793
+  - Entity: 18010000000000000041
+    TagComponent:
+      Tag: SkinStress_Stormtrooper_14
+    TransformComponent:
+      Translation: [-2.4, 0, -8]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 10930603326297920162
+  - Entity: 18010000000000000042
+    TagComponent:
+      Tag: SkinStress_CesiumMan_14
+    TransformComponent:
+      Translation: [-0.8, 0, -8]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 14769244622884448047
+  - Entity: 18010000000000000043
+    TagComponent:
+      Tag: SkinStress_Fox_15
+    TransformComponent:
+      Translation: [0.8, 0, -8]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 15466860455941274793
+  - Entity: 18010000000000000044
+    TagComponent:
+      Tag: SkinStress_Stormtrooper_15
+    TransformComponent:
+      Translation: [2.4, 0, -8]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 10930603326297920162
+  - Entity: 18010000000000000045
+    TagComponent:
+      Tag: SkinStress_CesiumMan_15
+    TransformComponent:
+      Translation: [4, 0, -8]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 14769244622884448047
+  - Entity: 18010000000000000046
+    TagComponent:
+      Tag: SkinStress_Fox_16
+    TransformComponent:
+      Translation: [5.6, 0, -8]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 15466860455941274793
+  - Entity: 18010000000000000047
+    TagComponent:
+      Tag: SkinStress_Stormtrooper_16
+    TransformComponent:
+      Translation: [7.2, 0, -8]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 10930603326297920162
+  - Entity: 18010000000000000048
+    TagComponent:
+      Tag: SkinStress_CesiumMan_16
+    TransformComponent:
+      Translation: [8.8, 0, -8]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 14769244622884448047
+  - Entity: 18010000000000000049
+    TagComponent:
+      Tag: SkinStress_Fox_17
+    TransformComponent:
+      Translation: [-8.8, 0, -10]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 15466860455941274793
+  - Entity: 18010000000000000050
+    TagComponent:
+      Tag: SkinStress_Stormtrooper_17
+    TransformComponent:
+      Translation: [-7.2, 0, -10]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 10930603326297920162
+  - Entity: 18010000000000000051
+    TagComponent:
+      Tag: SkinStress_CesiumMan_17
+    TransformComponent:
+      Translation: [-5.6, 0, -10]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 14769244622884448047
+  - Entity: 18010000000000000052
+    TagComponent:
+      Tag: SkinStress_Fox_18
+    TransformComponent:
+      Translation: [-4, 0, -10]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 15466860455941274793
+  - Entity: 18010000000000000053
+    TagComponent:
+      Tag: SkinStress_Stormtrooper_18
+    TransformComponent:
+      Translation: [-2.4, 0, -10]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 10930603326297920162
+  - Entity: 18010000000000000054
+    TagComponent:
+      Tag: SkinStress_CesiumMan_18
+    TransformComponent:
+      Translation: [-0.8, 0, -10]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 14769244622884448047
+  - Entity: 18010000000000000055
+    TagComponent:
+      Tag: SkinStress_Fox_19
+    TransformComponent:
+      Translation: [0.8, 0, -10]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 15466860455941274793
+  - Entity: 18010000000000000056
+    TagComponent:
+      Tag: SkinStress_Stormtrooper_19
+    TransformComponent:
+      Translation: [2.4, 0, -10]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 10930603326297920162
+  - Entity: 18010000000000000057
+    TagComponent:
+      Tag: SkinStress_CesiumMan_19
+    TransformComponent:
+      Translation: [4, 0, -10]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 14769244622884448047
+  - Entity: 18010000000000000058
+    TagComponent:
+      Tag: SkinStress_Fox_20
+    TransformComponent:
+      Translation: [5.6, 0, -10]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 15466860455941274793
+  - Entity: 18010000000000000059
+    TagComponent:
+      Tag: SkinStress_Stormtrooper_20
+    TransformComponent:
+      Translation: [7.2, 0, -10]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 10930603326297920162
+  - Entity: 18010000000000000060
+    TagComponent:
+      Tag: SkinStress_CesiumMan_20
+    TransformComponent:
+      Translation: [8.8, 0, -10]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 14769244622884448047

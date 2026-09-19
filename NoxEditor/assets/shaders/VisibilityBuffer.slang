@@ -60,8 +60,14 @@
 
             float4 localPos = float4(vert.pos, 1.0);
 
-            // Bone animation (if applicable)
-            if (instance.boneMatrixOffset != 0xFFFFFFFF)
+            // Compute-skinned geometry is shared with the G-buffer resolve. Keep direct skinning as a safe fallback for
+            // a frame where the cache is unavailable (for example immediately after shader hot reload).
+            if (instance.skinnedVertexOffset != NoSkinnedVertices && pushConstant.skinnedVertexReference != 0)
+            {
+                SkinnedVertex* skinnedVertices = (SkinnedVertex*)pushConstant.skinnedVertexReference;
+                localPos = skinnedVertices[instance.skinnedVertexOffset + localVertexIndex].position;
+            }
+            else if (instance.boneMatrixOffset != 0xFFFFFFFF && pushConstant.boneMatrixReference != 0)
             {
                 float4x4* boneMatrices = (float4x4*)pushConstant.boneMatrixReference;
                 uint baseOffset = instance.boneMatrixOffset;

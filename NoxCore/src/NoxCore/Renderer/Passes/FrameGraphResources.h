@@ -93,6 +93,13 @@ namespace Nox
         RGBuffer SceneMeshes;
         RGBuffer SceneRayTracingInstances;
 
+        // Compute-skinned local-space positions/normals. The previous ring slot supplies true skeletal motion vectors.
+        RGBuffer SkinningSourceVertices;
+        RGBuffer SkinningBoneMatrices;
+        RGBuffer SkinningWorkItems;
+        RGBuffer SkinnedVertices;
+        RGBuffer PreviousSkinnedVertices;
+
         // Views
         ViewDrawResources CameraDraws;
         RGTexture CameraHiZ; // depth pyramid of the camera view (history: phase 1 tests against the previous frame)

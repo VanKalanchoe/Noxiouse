@@ -107,6 +107,7 @@ struct GpuInstance
     uint32_t meshIndex;        // GpuMesh slot
     uint32_t materialIndex;    // GpuMaterial slot
     uint32_t boneMatrixOffset; // 0xFFFFFFFF: not skinned
+    uint32_t skinnedVertexOffset; // 0xFFFFFFFF: no compute-skinned vertex cache
     int32_t entityID;          // editor picking
 };
 
@@ -196,6 +197,7 @@ struct GpuMesh
     // Ray tracing (the BLAS inputs): offsets into the vertex and RT index streams, 0xFFFFFFFF when the mesh has none.
     // The instance records the hit shaders read hold the resulting addresses (one flat record, §5.5.4 3b).
     uint32_t verticesOffset;
+    uint32_t vertexCount;
     uint32_t indicesOffset;
 
     uint32_t triangleCount; // of all meshlets (stats)
@@ -323,6 +325,24 @@ struct Vertex
     vec4 boneWeights;
 };
 
+// Per-instance output of the compute skinning pass. Position and normal stay in mesh-local space so every raster
+// consumer can apply the instance transform, and the previous frame remains usable when only that transform changes.
+struct SkinnedVertex
+{
+    vec4 position;
+    vec4 normal;
+};
+
+// One compute workgroup owns one skinned mesh instance and walks all of its vertices.
+struct SkinningWorkItem
+{
+    uint32_t sourceVertexOffset;
+    uint32_t destinationVertexOffset;
+    uint32_t vertexCount;
+    uint32_t boneMatrixOffset;
+};
+STATIC_CONST uint32_t SKINNING_VERTICES_PER_WORK_ITEM = 256;
+
 enum LightType : uint32_t
 {
     Directional = 0,
@@ -343,6 +363,7 @@ struct LightData
 // visibility flags in parallel, visible counts per block of entries, block offsets and bucket counts, then each block
 // writes its entries (entry order, so transparent sorting survives).
 STATIC_CONST uint32_t NoGeometryRange = 0xFFFFFFFF; // GpuMesh offsets: this mesh has no range in that stream
+STATIC_CONST uint32_t NoSkinnedVertices = 0xFFFFFFFF;
 
 // Texture streaming feedback (§5.12): one entry per bindless image slot, the finest mip a frame's pixels asked of that
 // image, biased so "finer than the image holds" stays representable; MipFeedbackNone when nothing sampled it.
@@ -453,8 +474,17 @@ struct PushConstantMeshlets
     uint64_t matrixReference;
     uint64_t drawInstancesReference; // visible instance slots of this view (instanceBaseIndex + SV_DrawIndex)
     uint64_t boneMatrixReference;
+    uint64_t skinnedVertexReference;
     uint32_t instanceBaseIndex;
     uint32_t meshletCulling; // MESHLET_* flags (MESHLET_CULL_FRUSTUM off: every cluster of the LOD cut is drawn)
+};
+
+struct PushConstantSkinning
+{
+    uint64_t sourceVerticesReference;
+    uint64_t skinnedVerticesReference;
+    uint64_t boneMatricesReference;
+    uint64_t workItemsReference;
 };
 
 // What the visibility passes drew after the LOD cut (cleared every frame, read back per frame slot).
@@ -514,9 +544,12 @@ struct PushConstantVisibilityDebug
 {
     uint64_t matrixReference;
     uint64_t boneMatrixReference;
+    uint64_t skinnedVertexReference;
+    uint64_t previousSkinnedVertexReference;
     uint32_t visibilityTextureIndex;
     uint32_t debugMode; // 0 = Albedo, 1 = Normal, 2 = Roughness, 3 = Metallic, 4 = Emission, 5 = Occlusion, 6 = Colored Meshlets
     vec2 viewportSize;
+    uint32_t skinnedHistoryValid;
     uint32_t gbufferAlbedoIndex;
     uint32_t gbufferNormalIndex;
     uint32_t gbufferMaterialIndex;
@@ -1210,6 +1243,7 @@ struct InstanceData
     uint32_t unlit;
 
     uint32_t boneMatrixOffset;
+    uint32_t skinnedVertexOffset;
     int entityID;
 };
 
@@ -1277,6 +1311,7 @@ struct SceneInstances
             data.unlit = material.unlit;
 
             data.boneMatrixOffset = instance.boneMatrixOffset;
+            data.skinnedVertexOffset = instance.skinnedVertexOffset;
             data.entityID = instance.entityID;
             return data;
         }

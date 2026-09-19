@@ -319,6 +319,7 @@ namespace Nox
         instance.meshIndex = meshSlot;
         instance.materialIndex = materialSlot;
         instance.boneMatrixOffset = NoBoneMatrices;
+        instance.skinnedVertexOffset = shaderio::NoSkinnedVertices;
         instance.entityID = entityID;
 
         shaderio::GpuTransform& transform = m_Transforms.Edit(slot);
@@ -393,6 +394,12 @@ namespace Nox
     {
         if (m_Instances.Get(instanceSlot).boneMatrixOffset != boneMatrixOffset)
             m_Instances.Edit(instanceSlot).boneMatrixOffset = boneMatrixOffset;
+    }
+
+    void GpuScene::SetSkinnedVertexOffset(uint32_t instanceSlot, uint32_t skinnedVertexOffset)
+    {
+        if (m_Instances.Get(instanceSlot).skinnedVertexOffset != skinnedVertexOffset)
+            m_Instances.Edit(instanceSlot).skinnedVertexOffset = skinnedVertexOffset;
     }
 
     bool GpuScene::UpdateDrawList(const glm::vec3& cameraPosition, std::vector<uint32_t>& drawList, std::array<uint32_t, RenderBucketCount + 1>& outBucketStarts)

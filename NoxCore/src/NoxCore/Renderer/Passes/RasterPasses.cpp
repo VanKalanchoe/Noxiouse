@@ -30,6 +30,38 @@ namespace Nox
             });
     }
 
+    void Renderer::addComputeSkinningPass()
+    {
+        const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
+        if (!m_computeSkinningPipeline || m_frame.skinningWorkCount == 0 ||
+            !resources.SkinningSourceVertices.IsValid() || !resources.SkinningBoneMatrices.IsValid() ||
+            !resources.SkinningWorkItems.IsValid() || !resources.SkinnedVertices.IsValid())
+            return;
+
+        m_frame.computeSkinningAdded = true;
+        m_renderGraph.AddPass("Compute Skinning", RGPassFlags::None,
+            [&](RGBuilder& builder)
+            {
+                builder.Read(resources.SkinningSourceVertices);
+                builder.Read(resources.SkinningBoneMatrices);
+                builder.Read(resources.SkinningWorkItems);
+                builder.Write(resources.SkinnedVertices);
+            },
+            [this, res = &resources](RGPassContext& context)
+            {
+                shaderio::PushConstantSkinning push{};
+                push.sourceVerticesReference = context.Buffer(res->SkinningSourceVertices).getDeviceAddress();
+                push.skinnedVerticesReference = context.Buffer(res->SkinnedVertices).getDeviceAddress();
+                push.boneMatricesReference = context.Buffer(res->SkinningBoneMatrices).getDeviceAddress();
+                push.workItemsReference = context.Buffer(res->SkinningWorkItems).getDeviceAddress();
+
+                NRI::CommandBuffer& cmd = context.Cmd();
+                cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *m_computeSkinningPipeline);
+                cmd.pushData(&push, sizeof(push));
+                cmd.dispatch(m_frame.skinningWorkCount, 1, 1);
+            });
+    }
+
     void Renderer::addBLASBuildPass()
     {
         if (m_blasBuilds.empty() && m_blasCompactions.empty())
@@ -260,6 +292,7 @@ namespace Nox
                 builder.DepthTarget(resources.Depth, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0 });
                 builder.SetRenderArea(m_frame.renderExtent);
                 ReadGpuScene(builder, resources);
+                ReadIfValid(builder, resources.SkinnedVertices);
                 ReadViewDraws(builder, resources.CameraDraws);
                 if (drawsGeometry)
                     builder.Write(resources.ClusterStats);
@@ -380,6 +413,7 @@ namespace Nox
                 builder.DepthTarget(resources.Depth, NRI::LoadOP::load, NRI::StoreOP::store);
                 builder.SetRenderArea(m_frame.renderExtent);
                 ReadGpuScene(builder, resources);
+                ReadIfValid(builder, resources.SkinnedVertices);
                 ReadViewDraws(builder, resources.CameraDraws, true);
                 builder.Write(resources.ClusterStats);
             },
@@ -406,7 +440,27 @@ namespace Nox
     void Renderer::addGBufferPass()
     {
         const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
-        const bool resolveMaterials = m_gbufferPipeline && !m_drawList.empty();
+        const bool nrdAvailable = m_device->isNRDInitialized();
+        const bool dlssNeedsVelocity = m_dlssEnabled && m_dlssMode != NRI::UpscaleMode::Off && m_device->isDLSSSupported();
+        const bool nrdShadowsNeedVelocity = uniformData.enableRTShadows != 0 && m_shadowMaskPipeline &&
+                                            m_nrdShadowsEnabled && nrdAvailable;
+        const bool nrdReflectionsNeedVelocity = !m_frame.runPathTracer && uniformData.enableRTReflections != 0 &&
+                                                m_reflectionPipeline &&
+                                                m_nrdReflectionDenoiser != NRI::NRDReflectionDenoiser::Off && nrdAvailable;
+        const bool restirGINeedsVelocity = (!m_frame.runPathTracer || m_frame.pathTracerUsesRTXDI) &&
+                                           (m_diffuseGIMode == 2 || (m_debugMode == 16 && m_diffuseGIMode != 1));
+        const bool restirDINeedsVelocity = (!m_frame.runPathTracer || m_frame.pathTracerUsesRTXDI) && m_directLightingMode == 1;
+        const bool restirPTNeedsVelocity = m_frame.runPathTracer && m_restirPTEnabled && m_restirPTTemporalEnabled;
+        const bool pathTracerNRDNeedsVelocity = m_frame.runPathTracer &&
+                                                m_nrdPTDenoiser != NRI::NRDDiffuseDenoiser::Off && nrdAvailable;
+        const bool inspectVelocity = m_textureInspection.Name == "GBuffer Velocity";
+        const bool writeVelocity = dlssNeedsVelocity || nrdShadowsNeedVelocity || nrdReflectionsNeedVelocity ||
+                                   restirGINeedsVelocity || restirDINeedsVelocity || restirPTNeedsVelocity ||
+                                   pathTracerNRDNeedsVelocity || m_debugMode == 15 || inspectVelocity;
+        m_frame.gbufferVelocityWritten = writeVelocity;
+
+        NRI::Pipeline* gbufferPipeline = writeVelocity ? m_gbufferPipeline.get() : m_gbufferPipelineNoVelocity.get();
+        const bool resolveMaterials = gbufferPipeline && !m_drawList.empty();
 
         // Texture streaming feedback starts empty every frame; the material resolve and the transparent pass fill it.
         if (resolveMaterials)
@@ -435,25 +489,41 @@ namespace Nox
                     builder.Write(resources.MipFeedback);
                 }
                 ReadGpuScene(builder, resources);
+                ReadIfValid(builder, resources.SkinnedVertices);
+                if (m_frame.skinnedHistoryValid)
+                    ReadIfValid(builder, resources.PreviousSkinnedVertices);
                 builder.ColorTarget(resources.GBufferAlbedo, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });   // RGBA8
                 builder.ColorTarget(resources.GBufferNormal, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });   // RGBA16F world normal
                 builder.ColorTarget(resources.GBufferMaterial, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f }); // roughness, metallic, workflow
                 builder.ColorTarget(resources.GBufferEmission, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f }); // RGBA16F
                 builder.ColorTarget(resources.Entity, NRI::LoadOP::clear, NRI::StoreOP::store, { -1.0f, 0.0f, 0.0f, 0.0f });         // R32SINT
-                builder.ColorTarget(resources.GBufferVelocity, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f }); // RG32F
+                if (writeVelocity)
+                    builder.ColorTarget(resources.GBufferVelocity, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f }); // RG32F
                 builder.SetRenderArea(m_frame.renderExtent);
             },
-            [this, res = &resources, resolveMaterials](RGPassContext& context)
+            [this, res = &resources, resolveMaterials, writeVelocity, gbufferPipeline](RGPassContext& context)
             {
                 if (!resolveMaterials)
                     return;
 
                 NRI::CommandBuffer& cmd = context.Cmd();
-                constexpr uint32_t attachmentCount = 7;
+                const uint32_t attachmentCount = writeVelocity ? 6u : 5u;
                 const float rw = static_cast<float>(m_frame.renderExtent.width);
                 const float rh = static_cast<float>(m_frame.renderExtent.height);
 
-                cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_gbufferPipeline);
+                // The render graph starts fresh each frame, so explicitly make the previous submission's compute
+                // writes visible before the fragment shader reads the previous ring slot for skeletal velocity.
+                if (m_frame.skinnedHistoryValid && res->PreviousSkinnedVertices.IsValid())
+                {
+                    const NRI::BufferBarrierDesc historyBarrier{
+                        &context.Buffer(res->PreviousSkinnedVertices),
+                        { NRI::AccessBits::ShaderWrite, NRI::StageBits::Compute },
+                        { NRI::AccessBits::ShaderRead, NRI::StageBits::Fragment }
+                    };
+                    cmd.resourceBarriers({}, std::span<const NRI::BufferBarrierDesc>(&historyBarrier, 1));
+                }
+
+                cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *gbufferPipeline);
                 cmd.setCullMode(NRI::CullMode::None);
                 cmd.setDepthTestEnable(false);
                 cmd.setDepthWriteEnable(false);
@@ -470,6 +540,14 @@ namespace Nox
                 bool hasBoneBuffers = frameIndex < m_boneBuffers.size() && m_boneBuffers[frameIndex] != nullptr;
                 bool hasBones = !m_boneMatrices.empty();
                 gbufferPush.boneMatrixReference = (hasBones && hasBoneBuffers) ? m_boneBuffers[frameIndex]->getDeviceAddress() : 0;
+
+                if (m_frame.computeSkinningAdded && res->SkinnedVertices.IsValid())
+                    gbufferPush.skinnedVertexReference = context.Buffer(res->SkinnedVertices).getDeviceAddress();
+                if (m_frame.skinnedHistoryValid && res->PreviousSkinnedVertices.IsValid())
+                {
+                    gbufferPush.previousSkinnedVertexReference = context.Buffer(res->PreviousSkinnedVertices).getDeviceAddress();
+                    gbufferPush.skinnedHistoryValid = 1;
+                }
 
                 gbufferPush.visibilityTextureIndex = context.Slot(res->Visibility);
                 gbufferPush.viewportSize = glm::vec2(rw, rh);
