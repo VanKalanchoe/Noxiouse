@@ -1172,7 +1172,7 @@ namespace Nox
 
                     uint32_t& numInfinite = m_Renderer->getReSTIRDINumInfiniteLightSamples();
                     int numInfiniteInt = static_cast<int>(numInfinite);
-                    if (ImGui::SliderInt("Infinite (Directional) Light Samples", &numInfiniteInt, 1, 4))
+                    if (ImGui::SliderInt("Infinite (Directional) Light Samples", &numInfiniteInt, 1, 2))
                         numInfinite = static_cast<uint32_t>(numInfiniteInt);
 
                     float& diSpatialRadius = m_Renderer->getReSTIRDISpatialRadius();

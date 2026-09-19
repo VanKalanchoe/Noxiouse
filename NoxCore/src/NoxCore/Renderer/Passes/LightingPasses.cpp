@@ -22,7 +22,8 @@ namespace Nox
         resources.PathTracerAccum[1] = accumulation.Textures[1];
 
         const bool dlssRRActive = m_dlssEnabled && (m_dlssMode != NRI::UpscaleMode::Off) && m_dlssRayReconstructionEnabled;
-        const bool nrdPTActive = m_nrdPTDenoiser != NRI::NRDDiffuseDenoiser::Off;
+        // NRD denoises the path tracer's output this frame: it is packed for it (and decoded after), plain without it.
+        const bool nrdPTActive = m_nrdPTDenoiser != NRI::NRDDiffuseDenoiser::Off && m_device->isNRDInitialized();
         frame.pathTracerCameraMoved = (uniformData.view != m_pathTracerPrevView);
 
         // With DLSS-RR or NRD denoising 1-SPP per frame via motion vectors, our own progressive accumulation would double
@@ -53,13 +54,26 @@ namespace Nox
                 if (frame.nrdGIAdded)
                     builder.Read(resources.ReSTIRGIDenoised);
                 if (frame.restirDIAdded)
-                    builder.Read(resources.ReSTIRDIDirect);
+                {
+                    builder.Read(resources.ReSTIRDIDiffuse);
+                    builder.Read(resources.ReSTIRDISpecular);
+                }
                 if (frame.nrdDIAdded)
-                    builder.Read(resources.ReSTIRDIDenoised);
+                {
+                    builder.Read(resources.ReSTIRDIDiffuseDenoised);
+                    builder.Read(resources.ReSTIRDISpecularDenoised);
+                }
+                // The G-buffer surface the NRD signals are de-modulated by.
+                builder.Read(resources.Depth);
+                builder.Read(resources.GBufferAlbedo);
+                builder.Read(resources.GBufferNormal);
+                builder.Read(resources.GBufferMaterial);
                 builder.ColorTarget(resources.PathTracerAccum[writeIndex], NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 1.0f });
+                builder.ColorTarget(resources.PathTracerDiffuse, NRI::LoadOP::dontCare, NRI::StoreOP::store);
+                builder.ColorTarget(resources.PathTracerSpecular, NRI::LoadOP::dontCare, NRI::StoreOP::store);
                 builder.SetRenderArea(frame.renderExtent);
             },
-            [this, res = &resources, readIndex](RGPassContext& context)
+            [this, res = &resources, readIndex, nrdPTActive](RGPassContext& context)
             {
                 NRI::CommandBuffer& cmd = context.Cmd();
                 const float rw = static_cast<float>(m_frame.renderExtent.width);
@@ -69,8 +83,11 @@ namespace Nox
                 cmd.setCullMode(NRI::CullMode::None);
                 cmd.setDepthTestEnable(false);
                 cmd.setDepthWriteEnable(false);
-                cmd.setColorBlendEnable(0, false);
-                cmd.setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
+                for (uint32_t attachment = 0; attachment < 3; ++attachment) // color, NRD diffuse, NRD specular
+                {
+                    cmd.setColorBlendEnable(attachment, false);
+                    cmd.setColorWriteMask(attachment, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
+                }
 
                 glm::mat4 viewProj = uniformData.proj * uniformData.view;
                 shaderio::PushConstantPathTracer ptPush{};
@@ -83,42 +100,51 @@ namespace Nox
                 ptPush.sampleCount = m_frame.pathTracerAccumulate ? m_pathTracerSampleCount : 1;
                 ptPush.debugMode = m_frame.pathTracerAccumulate ? 19 : 18;
                 ptPush.skyboxTextureIndex = m_environmentCubemap ? m_environmentCubemap->GetDescriptorIndexSlot() : 0xFFFFFFFF;
-                ptPush.denoiserMode = static_cast<uint32_t>(m_nrdPTDenoiser);
+                ptPush.denoiserMode = nrdPTActive ? static_cast<uint32_t>(m_nrdPTDenoiser) : 0u;
                 // resolveFrameUniforms binds the denoised GI/DI results when their NRD passes run.
                 ptPush.restirGIDiffuseTextureIndex = uniformData.restirGIDiffuseTextureIndex;
                 ptPush.restirGIDenoiserMode = m_frame.nrdGIAdded ? static_cast<uint32_t>(m_nrdGIDenoiser) : 0u;
-                ptPush.restirDIDirectLightingTextureIndex = uniformData.restirDIDirectLightingTextureIndex;
+                ptPush.restirDIDiffuseTextureIndex = uniformData.restirDIDiffuseTextureIndex;
+                ptPush.restirDISpecularTextureIndex = uniformData.restirDISpecularTextureIndex;
                 ptPush.restirDIDenoiserMode = m_frame.nrdDIAdded ? static_cast<uint32_t>(m_nrdDIDenoiser) : 0u;
+                ptPush.depthTextureIndex = context.Slot(res->Depth);
+                ptPush.gbufferAlbedoIndex = context.Slot(res->GBufferAlbedo);
+                ptPush.gbufferNormalIndex = context.Slot(res->GBufferNormal);
+                ptPush.gbufferMaterialIndex = context.Slot(res->GBufferMaterial);
                 cmd.pushData(&ptPush, sizeof(shaderio::PushConstantPathTracer));
 
                 cmd.drawMeshTasks(1, 1, 1);
             });
 
         // NRD path tracer denoising (fallback for hardware/preference without DLSS-RR).
-        if (nrdPTActive && m_device->isNRDInitialized())
+        if (nrdPTActive)
         {
             frame.ptNRDAdded = true;
 
             m_renderGraph.AddPass("NRD PT", RGPassFlags::None,
                 [&](RGBuilder& builder)
                 {
-                    builder.Read(resources.PathTracerAccum[writeIndex]);
+                    builder.Read(resources.PathTracerDiffuse);
+                    builder.Read(resources.PathTracerSpecular);
                     builder.Read(resources.GBufferVelocity);
                     builder.Read(resources.NRDNormalRoughness);
                     builder.Read(resources.ViewZ);
-                    builder.Write(resources.PathTracerDenoised);
+                    builder.Write(resources.PathTracerDiffuseDenoised);
+                    builder.Write(resources.PathTracerSpecularDenoised);
                     builder.RecordExclusive("NRD");
                 },
-                [this, res = &resources, writeIndex](RGPassContext& context)
+                [this, res = &resources](RGPassContext& context)
                 {
                     NRI::CommandBuffer& cmd = context.Cmd();
 
                     NRI::NRDDiffuseParams ptDenoiseParams{};
-                    ptDenoiseParams.inDiffuseRadianceHitDist = &context.Texture(res->PathTracerAccum[writeIndex]);
+                    ptDenoiseParams.inDiffuseRadianceHitDist = &context.Texture(res->PathTracerDiffuse);
+                    ptDenoiseParams.inSpecularRadianceHitDist = &context.Texture(res->PathTracerSpecular);
                     ptDenoiseParams.inMotionVectors = &context.Texture(res->GBufferVelocity);
                     ptDenoiseParams.inNormalRoughness = &context.Texture(res->NRDNormalRoughness);
                     ptDenoiseParams.inViewZ = &context.Texture(res->ViewZ);
-                    ptDenoiseParams.outDenoisedDiffuse = &context.Texture(res->PathTracerDenoised);
+                    ptDenoiseParams.outDenoisedDiffuse = &context.Texture(res->PathTracerDiffuseDenoised);
+                    ptDenoiseParams.outDenoisedSpecular = &context.Texture(res->PathTracerSpecularDenoised);
                     ptDenoiseParams.commandBuffer = &cmd;
 
                     ptDenoiseParams.view = uniformData.view;
@@ -130,31 +156,45 @@ namespace Nox
                     ptDenoiseParams.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
                     ptDenoiseParams.resetHistory = m_isFirstFrame || m_frame.resetNRD || m_frame.pathTracerCameraMoved;
 
-                    m_device->evaluateNRDDiffusePT(ptDenoiseParams, m_nrdPTDenoiser);
+                    m_device->evaluateNRDPathTracing(ptDenoiseParams, m_nrdPTDenoiser);
                     cmd.bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
                 });
 
-            if (m_nrdPTDenoiser == NRI::NRDDiffuseDenoiser::REBLUR && m_ycocgDecodePipeline)
+            // The pixel back from its denoised signals: primary emission + diffuse / specular modulated by the G-buffer surface.
+            if (m_ptCompositePipeline)
             {
-                // REBLUR's output is still YCoCg-encoded (LinearToYCoCg in PathTracer.slang): decode in place before
-                // DLSS/tonemapping read it. RELAX never encodes YCoCg.
-                m_renderGraph.AddPass("PT YCoCg Decode", RGPassFlags::None,
+                m_renderGraph.AddPass("PT Composite", RGPassFlags::None,
                     [&](RGBuilder& builder)
                     {
-                        builder.Read(resources.PathTracerDenoised);
-                        builder.Write(resources.PathTracerDenoised);
+                        builder.Read(resources.PathTracerAccum[writeIndex]);
+                        builder.Read(resources.PathTracerDiffuseDenoised);
+                        builder.Read(resources.PathTracerSpecularDenoised);
+                        builder.Read(resources.Depth);
+                        builder.Read(resources.GBufferAlbedo);
+                        builder.Read(resources.GBufferNormal);
+                        builder.Read(resources.GBufferMaterial);
+                        builder.Write(resources.PathTracerDenoised, RGTextureAccess::StorageWrite);
                     },
-                    [this, res = &resources](RGPassContext& context)
+                    [this, res = &resources, writeIndex](RGPassContext& context)
                     {
+                        shaderio::PushConstantPTComposite push{};
+                        push.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                        push.emissionTextureIndex = context.Slot(res->PathTracerAccum[writeIndex]);
+                        push.diffuseTextureIndex = context.Slot(res->PathTracerDiffuseDenoised);
+                        push.specularTextureIndex = context.Slot(res->PathTracerSpecularDenoised);
+                        push.depthTextureIndex = context.Slot(res->Depth);
+                        push.gbufferAlbedoIndex = context.Slot(res->GBufferAlbedo);
+                        push.gbufferNormalIndex = context.Slot(res->GBufferNormal);
+                        push.gbufferMaterialIndex = context.Slot(res->GBufferMaterial);
+                        push.outputStorageIndex = context.StorageSlot(res->PathTracerDenoised);
+                        push.denoiserMode = static_cast<uint32_t>(m_nrdPTDenoiser);
+                        push.width = m_frame.renderExtent.width;
+                        push.height = m_frame.renderExtent.height;
+
                         NRI::CommandBuffer& cmd = context.Cmd();
-                        cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *m_ycocgDecodePipeline);
-                        shaderio::PushConstantYCoCgDecode decodePush{};
-                        decodePush.readTextureIndex = context.Slot(res->PathTracerDenoised);
-                        decodePush.writeTextureIndex = context.StorageSlot(res->PathTracerDenoised);
-                        decodePush.width = m_frame.renderExtent.width;
-                        decodePush.height = m_frame.renderExtent.height;
-                        cmd.pushData(&decodePush, sizeof(shaderio::PushConstantYCoCgDecode));
-                        cmd.dispatch((decodePush.width + 7) / 8, (decodePush.height + 7) / 8, 1);
+                        cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *m_ptCompositePipeline);
+                        cmd.pushData(&push, sizeof(push));
+                        cmd.dispatch((push.width + 7) / 8, (push.height + 7) / 8, 1);
                     });
             }
         }
@@ -197,9 +237,15 @@ namespace Nox
                 if (frame.nrdGIAdded)
                     builder.Read(resources.ReSTIRGIDenoised);
                 if (frame.restirDIAdded)
-                    builder.Read(resources.ReSTIRDIDirect);
+                {
+                    builder.Read(resources.ReSTIRDIDiffuse);
+                    builder.Read(resources.ReSTIRDISpecular);
+                }
                 if (frame.nrdDIAdded)
-                    builder.Read(resources.ReSTIRDIDenoised);
+                {
+                    builder.Read(resources.ReSTIRDIDiffuseDenoised);
+                    builder.Read(resources.ReSTIRDISpecularDenoised);
+                }
                 if (frame.ddgiAdded)
                 {
                     builder.Read(resources.DDGIIrradiance[frame.ddgiWriteIndex]);
@@ -256,7 +302,8 @@ namespace Nox
                 // The denoiser mode only when the denoised texture is bound (the raw result is plain linear color).
                 lightingPush.restirGIDenoiserMode = frame.nrdGIAdded ? static_cast<uint32_t>(m_nrdGIDenoiser) : 0;
                 lightingPush.directLightingMode = uniformData.directLightingMode;
-                lightingPush.restirDIDirectLightingTextureIndex = uniformData.restirDIDirectLightingTextureIndex;
+                lightingPush.restirDIDiffuseTextureIndex = uniformData.restirDIDiffuseTextureIndex;
+                lightingPush.restirDISpecularTextureIndex = uniformData.restirDISpecularTextureIndex;
                 lightingPush.restirDIDenoiserMode = frame.nrdDIAdded ? static_cast<uint32_t>(m_nrdDIDenoiser) : 0;
                 cmd.pushData(&lightingPush, sizeof(shaderio::PushConstantDeferredLighting));
 

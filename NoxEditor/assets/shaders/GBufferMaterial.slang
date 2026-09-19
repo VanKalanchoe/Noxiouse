@@ -56,15 +56,15 @@
         }
     }
 
+    // Slang assigns the output locations in member order (the pipeline's color formats and the pass's targets follow it).
     struct GBufferOutput
     {
         float4 albedo   : SV_Target0; // RGB: BaseColor, A: Occlusion
-        float4 normal   : SV_Target2; // RGB: World Normal, A: 1.0
-        float4 material : SV_Target3; // R: Roughness, G: Metallic, B: Workflow, A: 1.0
-        float4 emission : SV_Target4; // RGB: Emissive, A: 1.0
-        int    entityID : SV_Target5; // Editor Entity Picking ID
-        float2 velocity : SV_Target6; // Screen-Space Motion Vectors (RG16F)
-        float4 specular : SV_Target1; // RGB: Specular Albedo (F0), A: 1.0
+        float4 normal   : SV_Target1; // RGB: World Normal, A: Roughness
+        float4 material : SV_Target2; // R: Roughness, G: Metallic, B: Workflow, A: double sided
+        float4 emission : SV_Target3; // RGB: Emissive, A: 1.0
+        int    entityID : SV_Target4; // Editor Entity Picking ID
+        float2 velocity : SV_Target5; // Screen-Space Motion Vectors (RG32F)
     };
 
     float4 computeBarycentric3D(float3 rayOrigin, float3 rayDir, float3 v0, float3 e1, float3 e2, float3 triNorm, float d00, float d01, float d11, float invDenom)
@@ -131,7 +131,6 @@
             output.material = float4(0.0, 0.0, 0.0, 0.0);
             output.emission = float4(0.0, 0.0, 0.0, 0.0);
             output.entityID = -1;
-            output.specular = float4(0.0, 0.0, 0.0, 0.0);
 
             // Compute camera background motion vector (rotation-only, jitter-free like the geometry path below)
         float2 uv = (input.pos.xy / pushConstant.viewportSize) * 2.0 - 1.0;
@@ -346,7 +345,6 @@
         float4 baseColor;
         float roughness;
         float metallic;
-        float3 f0; // Specular reflectance at normal incidence, for the G-buffer specular target
 
         if (instance.workflow == PBR_WORKFLOW_SPECULAR_GLOSSINESS)
         {
@@ -384,11 +382,6 @@
             float3 baseColorSpecularPart = specular - (float3(c_MinRoughness) * (1.0 - metallic) * (1.0 / max(metallic, epsilon)));
             baseColor = float4(clamp(lerp(baseColorDiffusePart, baseColorSpecularPart, metallic * metallic), float3(0.0), float3(1.0)), diffuse.a);
 
-            // Specular-Glossiness authors 'specular' AS the F0 reflectance directly - use it
-            // as-is instead of re-deriving from the flat 0.04 dielectric assumption below,
-            // otherwise low-reflectance materials (foliage, cloth, etc, often specular ~0.01-0.05)
-            // get over-brightened to a flat 4% in every IBL/RT reflection, reading as a uniform sheen.
-            f0 = specular;
         }
         else
         {
@@ -411,7 +404,6 @@
             }
             roughness = clamp(roughness, 0.0, 1.0);
             metallic  = clamp(metallic, 0.0, 1.0);
-            f0 = lerp(float3(0.04), baseColor.rgb, metallic);
         }
 
         // 3. NORMAL MAPPING (Analytical Tangent Frame from 3D Triangle Geometry)
@@ -520,9 +512,6 @@
         // NVIDIA Streamline / DLSS standard: delta in UV space [0, 1]
         float2 velocity = (prevNDC - currNDC) * float2(0.5, -0.5);
         output.velocity = velocity;
-
-        // Specular Albedo (F0) for DLSS-RR
-        output.specular = float4(f0, 1.0);
 
         return output;
     }

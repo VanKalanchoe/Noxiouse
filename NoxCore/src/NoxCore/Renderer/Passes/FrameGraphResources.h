@@ -31,7 +31,9 @@ namespace Nox
         RGTexture GBufferMaterial;
         RGTexture GBufferEmission;
         RGTexture GBufferVelocity;
-        RGTexture GBufferSpecular;
+        RGTexture RRDiffuseAlbedo;  // DLSS Ray Reconstruction guides (RRGuides.slang)
+        RGTexture RRSpecularAlbedo;
+        RGTexture RRSpecularHitDistance;
         RGTexture PrevDepth;
         RGTexture PrevNormal;
         RGTexture PrevAlbedo;
@@ -56,8 +58,10 @@ namespace Nox
         // ReSTIR GI / DI
         RGTexture ReSTIRGIRaw;
         RGTexture ReSTIRGIDenoised;
-        RGTexture ReSTIRDIDirect;
-        RGTexture ReSTIRDIDenoised;
+        RGTexture ReSTIRDIDiffuse;  // de-modulated direct lighting (NRDFrontEnd.slang), raw and NRD-denoised
+        RGTexture ReSTIRDISpecular;
+        RGTexture ReSTIRDIDiffuseDenoised;
+        RGTexture ReSTIRDISpecularDenoised;
         RGTexture LightPDF;
         RGBuffer ReSTIRGIReservoirs[2];
         RGBuffer NeighborOffsets;
@@ -67,6 +71,10 @@ namespace Nox
         // Path tracing
         RGTexture PathTracerAccum[2];
         RGTexture PathTracerDenoised;
+        RGTexture PathTracerDiffuse;  // NRD signals of the path tracer (PathTracerSignals.slang), raw and denoised
+        RGTexture PathTracerSpecular;
+        RGTexture PathTracerDiffuseDenoised;
+        RGTexture PathTracerSpecularDenoised;
         RGTexture ReSTIRPTOutput;
         RGTexture ReSTIRPTPrimaryDirect;
         RGBuffer ReSTIRPTReservoirs[3];

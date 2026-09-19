@@ -155,29 +155,11 @@
         b2 = float3(b, sign + n.y * n.y * a, -n.y);
     }
 
-    float3 encode_normal_roughness_101010(float3 n, float roughness)
-    {
-        n /= max(abs(n.x) + abs(n.y) + abs(n.z), 1e-6);
-
-        float3 r;
-        r.y = n.y * 0.5 + 0.5;
-        r.x = n.x * 0.5 + r.y;
-        r.y -= n.x * 0.5;
-
-        roughness = clamp(roughness, 1.5 / 512.0, 1.0);
-        float s = n.z < 0.0 ? -roughness : roughness;
-        r.z = s * 0.5 + 0.5;
-
-        return r;
-    }
-
     static const float NRD_FP16_MAX = 65504.0;
 
     struct ShadowMaskOutput
     {
-        float2 shadowData         : SV_Target0; // NRD IN_PENUMBRA in R, raw visibility in G
-        float  viewZ              : SV_Target1; // linear view depth (positive)
-        float4 nrdNormalRoughness : SV_Target2; // NRD R10G10B10A2 packed normal + roughness
+        float2 shadowData         : SV_Target0; // NRD IN_PENUMBRA in R, raw visibility in G (NRD's guides: NRDGuides.slang)
     };
 
     [shader("fragment")]
@@ -193,12 +175,10 @@
         Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
         float rawDepth = depthTex.Load(int3(pixelCoord, 0)).r;
 
-        // Reverse-Z: 0.0 is sky/background -> fully lit, maximum distance, infinite viewZ
+        // Reverse-Z: 0.0 is sky/background -> fully lit, maximum distance
         if (rawDepth <= 0.0)
         {
             output.shadowData = float2(NRD_FP16_MAX, 1.0);
-            output.viewZ = 500000.0;
-            output.nrdNormalRoughness = float4(encode_normal_roughness_101010(float3(0.0, 1.0, 0.0), 1.0), 0.0);
             return output;
         }
 
@@ -208,16 +188,10 @@
         float4 worldPosH = mul(pushConstant.invViewProj, ndc);
         float3 worldPos = worldPosH.xyz / worldPosH.w;
 
-        // Linear View-Z (depth from camera along view direction)
-        float4 viewPosH = mul(ubo->view, float4(worldPos, 1.0));
-        output.viewZ = abs(viewPosH.z);
-
         Texture2D normalTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.gbufferNormalIndex, 0));
         float4 normalSample = normalTex.Load(int3(pixelCoord, 0));
         float lenSqN = dot(normalSample.rgb, normalSample.rgb);
         float3 normal = lenSqN > 1e-6 ? normalSample.rgb * rsqrt(lenSqN) : float3(0.0, 1.0, 0.0);
-        float roughness = clamp(normalSample.a, 0.01, 1.0);
-        output.nrdNormalRoughness = float4(encode_normal_roughness_101010(normal, roughness), 0.0);
 
         if (ubo->lightCount == 0 || ubo->enableRTShadows == 0 || ubo->tlasDeviceAddress == 0)
         {

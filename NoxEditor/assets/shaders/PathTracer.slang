@@ -1,25 +1,10 @@
 #include "shaderIO.h"
+#include "PathTracerSignals.slang"
 
 // NRD REBLUR YCoCg conversion (matching NRD.hlsli:398, same fix already applied to ReSTIR GI/DI) --
 // REBLUR's internal filtering assumes IN_DIFF_RADIANCE_HITDIST is already YCoCg-encoded; RELAX takes
 // plain linear RGB directly, no conversion needed.
-float3 LinearToYCoCg(float3 color)
-{
-    float Y = dot(color, float3(0.25, 0.5, 0.25));
-    float Co = dot(color, float3(0.5, 0.0, -0.5));
-    float Cg = dot(color, float3(-0.25, 0.5, -0.25));
-    return float3(Y, Co, Cg);
-}
 
-float3 YCoCgToLinear(float3 color)
-{
-    float t = color.x - color.z;
-    float3 r;
-    r.y = color.x + color.z;
-    r.x = t + color.y;
-    r.z = t - color.y;
-    return max(r, 0.0);
-}
 
     struct PTPayload
     {
@@ -269,11 +254,19 @@ float3 YCoCgToLinear(float3 color)
         return (sq.CommittedStatus() == COMMITTED_TRIANGLE_HIT);
     }
 
+    // color: the pixel (raw mode), or its primary emission beside the NRD signals (PathTracerSignals.slang).
+    struct PTOutput
+    {
+        float4 color : SV_Target0;
+        float4 diffuse : SV_Target1;
+        float4 specular : SV_Target2;
+    };
+
     [shader("fragment")]
-    float4 fragMain(
+    PTOutput fragMain(
         MSOutput input,
         uniform PushConstantPathTracer pushConstant
-    ) : SV_Target0
+    )
     {
         int2 pixelCoord = int2(input.pos.xy);
         UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
@@ -294,10 +287,19 @@ float3 YCoCgToLinear(float3 color)
         float3 rayDir = normalize(nearPos - rayOrigin);
 
         float3 throughput = float3(1.0, 1.0, 1.0);
-        float3 radiance = float3(0.0, 0.0, 0.0);
-        // Primary ray's hit distance, for NRD's hit-distance-based blur radius (same convention already
-        // used for ReSTIR DI/GI's alpha channel) -- 1e4 (the ray's TMax) if the primary ray hit nothing.
-        float primaryHitDist = 1e4;
+        // The light, split for NRD (PathTracerSignals.slang): primary emission, diffuse and specular.
+        float3 emissionRadiance = float3(0.0);
+        float3 diffuseRadiance = float3(0.0);
+        float3 specularRadiance = float3(0.0);
+        uint lobe = PT_LOBE_NONE;
+        float3 surfaceDiffFactor, surfaceSpecFactor;
+        float surfaceRoughness;
+        PT_SurfaceFactors(ubo, pixelCoord, pushConstant.depthTextureIndex, pushConstant.gbufferAlbedoIndex, pushConstant.gbufferNormalIndex,
+                          pushConstant.gbufferMaterialIndex, surfaceDiffFactor, surfaceSpecFactor, surfaceRoughness);
+        // NRD (NRDFrontEnd.slang): the hit distance of the first bounce -- from the primary surface, never including the
+        // primary hit -- and the primary surface's view Z to normalize it. 0: no bounce left the primary surface.
+        float bounceHitDist = 0.0;
+        float primaryViewZ = NRD_FP16_MAX;
 
         RaytracingAccelerationStructure as = RaytracingAccelerationStructure(ubo->tlasDeviceAddress);
         GpuRayTracingInstance* instanceLUTBuffer = (GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference;
@@ -343,6 +345,8 @@ float3 YCoCgToLinear(float3 color)
             // Miss: Sample Environment Map / Skybox
             if (rq.CommittedStatus() != COMMITTED_TRIANGLE_HIT)
             {
+                if (bounce == 1)
+                    bounceHitDist = NRD_FP16_MAX; // the first bounce escaped
                 float3 skyRadiance = float3(0.0);
                 if (pushConstant.skyboxTextureIndex != 0xFFFFFFFF)
                 {
@@ -359,14 +363,16 @@ float3 YCoCgToLinear(float3 color)
                 // Scale ambient environment light by IBL Ambient Scale
                 skyRadiance *= ubo->scaleIBLAmbient;
 
-                radiance += skyRadiance * throughput;
+                PT_AddRadiance(lobe, skyRadiance * throughput, emissionRadiance, diffuseRadiance, specularRadiance);
                 break;
             }
 
             // Hit geometry
             float hitT = rq.CommittedRayT();
             if (bounce == 0)
-                primaryHitDist = hitT;
+                primaryViewZ = abs(mul(ubo->view, float4(rayOrigin + rayDir * hitT, 1.0)).z);
+            else if (bounce == 1)
+                bounceHitDist = hitT;
             uint committedInstID = rq.CommittedRayInstanceCustomIndex();
             uint committedPrimIndex = rq.CommittedPrimitiveIndex();
             float2 bary = rq.CommittedTriangleBarycentrics();
@@ -437,20 +443,20 @@ float3 YCoCgToLinear(float3 color)
             float NdotV = clamp(dot(hitNormal, V), 0.001, 1.0);
 
             // Hit surface emission (e.g. Cornell Box ceiling light)
-            radiance += lut.emissiveFactor.rgb * lut.emissiveFactor.a * throughput;
+            PT_AddRadiance(lobe, lut.emissiveFactor.rgb * lut.emissiveFactor.a * throughput, emissionRadiance, diffuseRadiance, specularRadiance);
 
             bool primaryReSTIRDIUsed = false;
             bool primaryReSTIRGIUsed = false;
             if (bounce == 0)
             {
                 if (ubo->directLightingMode == 1 &&
-                    pushConstant.restirDIDirectLightingTextureIndex != 0xFFFFFFFF)
+                    pushConstant.restirDIDiffuseTextureIndex != 0xFFFFFFFF)
                 {
-                    Texture2D restirDITex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.restirDIDirectLightingTextureIndex, 0));
-                    float3 restirDirect = restirDITex.Load(int3(pixelCoord, 0)).rgb;
-                    if (pushConstant.restirDIDenoiserMode == 1)
-                        restirDirect = YCoCgToLinear(restirDirect);
-                    radiance += restirDirect * throughput;
+                    // De-modulated by the same G-buffer factors as this pixel's own signals (ReSTIRDIFinalShading.slang).
+                    Texture2D diffuseDITex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.restirDIDiffuseTextureIndex, 0));
+                    Texture2D specularDITex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.restirDISpecularTextureIndex, 0));
+                    diffuseRadiance += NRD_UnpackSignal(pushConstant.restirDIDenoiserMode, diffuseDITex.Load(int3(pixelCoord, 0))) * surfaceDiffFactor;
+                    specularRadiance += NRD_UnpackSignal(pushConstant.restirDIDenoiserMode, specularDITex.Load(int3(pixelCoord, 0))) * surfaceSpecFactor;
                     primaryReSTIRDIUsed = true;
                 }
 
@@ -458,10 +464,8 @@ float3 YCoCgToLinear(float3 color)
                     pushConstant.restirGIDiffuseTextureIndex != 0xFFFFFFFF)
                 {
                     Texture2D restirGITex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.restirGIDiffuseTextureIndex, 0));
-                    float3 restirDiffuseIrradiance = restirGITex.Load(int3(pixelCoord, 0)).rgb;
-                    if (pushConstant.restirGIDenoiserMode == 1)
-                        restirDiffuseIrradiance = YCoCgToLinear(restirDiffuseIrradiance);
-                    radiance += restirDiffuseIrradiance * diffuseColor * throughput;
+                    float3 restirDiffuseIrradiance = NRD_UnpackSignal(pushConstant.restirGIDenoiserMode, restirGITex.Load(int3(pixelCoord, 0)));
+                    diffuseRadiance += restirDiffuseIrradiance * diffuseColor;
                     primaryReSTIRGIUsed = true;
                 }
             }
@@ -577,8 +581,17 @@ float3 YCoCgToLinear(float3 color)
                             float G = eval_smith_g2(NdotV, NdotL, alphaSq);
                             float3 specContrib = (F_direct * G * D) / max(4.0 * NdotL * NdotV, 1e-6);
 
-                            float3 bsdf = diffuseContrib + specContrib;
-                            radiance += bsdf * lightRadiance * (NdotL * terminatorFade) * throughput;
+                            // At the primary vertex by its own lobes, after it on the lobe the path took.
+                            float3 incoming = lightRadiance * (NdotL * terminatorFade) * throughput;
+                            if (lobe == PT_LOBE_NONE)
+                            {
+                                diffuseRadiance += diffuseContrib * incoming;
+                                specularRadiance += specContrib * incoming;
+                            }
+                            else
+                            {
+                                PT_AddRadiance(lobe, (diffuseContrib + specContrib) * incoming, emissionRadiance, diffuseRadiance, specularRadiance);
+                            }
                         }
                     }
                 }
@@ -609,6 +622,8 @@ float3 YCoCgToLinear(float3 color)
                     rayOrigin = hitPos - refrNormal * 0.02; // Step through geometry
                     rayDir = normalize(refrDir);
                     throughput *= albedo;
+                    if (lobe == PT_LOBE_NONE)
+                        lobe = PT_LOBE_DIFFUSE; // denoised with the diffuse light
                     continue;
                 }
             }
@@ -647,6 +662,8 @@ float3 YCoCgToLinear(float3 color)
 
                 rayOrigin = hitPos + hitNormal * 0.02;
                 rayDir = nextDir;
+                if (lobe == PT_LOBE_NONE)
+                    lobe = PT_LOBE_SPECULAR;
             }
             else
             {
@@ -663,14 +680,31 @@ float3 YCoCgToLinear(float3 color)
 
                 rayOrigin = hitPos + hitNormal * 0.02;
                 rayDir = nextDir;
+                if (lobe == PT_LOBE_NONE)
+                    lobe = PT_LOBE_DIFFUSE;
             }
             }
+
+        // The NRD signals: de-modulated by the pixel's surface, the first bounce's hit distance on the lobe it took and
+        // "no data" (0) on the other. With NRD the color target holds the primary emission (PTComposite.slang adds it).
+        PTOutput output;
+        output.diffuse = NRD_PackSignal(pushConstant.denoiserMode, diffuseRadiance / surfaceDiffFactor,
+                                        lobe == PT_LOBE_DIFFUSE ? bounceHitDist : 0.0, primaryViewZ, 1.0);
+        output.specular = NRD_PackSignal(pushConstant.denoiserMode, specularRadiance / surfaceSpecFactor,
+                                         lobe == PT_LOBE_SPECULAR ? bounceHitDist : 0.0, primaryViewZ, surfaceRoughness);
+        if (pushConstant.denoiserMode != NRD_SIGNAL_RAW)
+        {
+            output.color = float4(emissionRadiance, 1.0);
+            return output;
+        }
+
+        float3 radiance = emissionRadiance + diffuseRadiance + specularRadiance;
 
         // Mode 18: 1-SPP Interactive Output
         if (pushConstant.debugMode == 18 || pushConstant.sampleCount <= 1)
         {
-            float3 outColor = (pushConstant.denoiserMode == 1) ? LinearToYCoCg(radiance) : radiance;
-            return float4(outColor, primaryHitDist);
+            output.color = float4(radiance, 1.0);
+            return output;
         }
 
         // Mode 19: Progressive Accumulation (blends previous samples over time)
@@ -678,8 +712,6 @@ float3 YCoCgToLinear(float3 color)
         float4 prevColor = accumTex.Load(int3(pixelCoord, 0));
 
         float blendFactor = 1.0 / float(pushConstant.sampleCount);
-        float3 accumulated = lerp(prevColor.rgb, radiance, blendFactor);
-
-        float3 outColor = (pushConstant.denoiserMode == 1) ? LinearToYCoCg(accumulated) : accumulated;
-        return float4(outColor, primaryHitDist);
+        output.color = float4(lerp(prevColor.rgb, radiance, blendFactor), 1.0);
+        return output;
     }

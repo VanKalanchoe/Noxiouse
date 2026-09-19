@@ -553,9 +553,11 @@ namespace Nox
         // GPU instance culling (InstanceCulling.slang: cull, count, offset, write, late) and the depth pyramid build
         void createInstanceCullingPipelines(bool forceCompile = false);
         void createHiZBuildPipeline(bool forceCompile = false);
+        void createRRGuidesPipeline(bool forceCompile = false);
         
         // NRD
         void createShadowMaskPipeline(bool forceCompile = false);
+        void createNRDGuidesPipeline(bool forceCompile = false);
         void createReflectionPipeline(bool forceCompile = false);
         
         // Path Tracer
@@ -604,6 +606,7 @@ namespace Nox
         void addTLASBuildPass();
         void addVisibilityPass();
         void addGBufferPass();
+        void addNRDGuidesPass();
         void addMipFeedbackReadbackPass();
         void addClusterStatsReadbackPass();
         void addRTShadowPasses();
@@ -612,6 +615,9 @@ namespace Nox
         // earlier in the frame, sample them too.
         void prepareDDGIFrame(FrameGraphResources& resources);
         void addDDGIPasses();
+        void addLightPresamplingPasses();
+        // RTXDI light sampling over this frame's presampled lights (RTXDILightSampling.slang), for ReSTIR DI and GI.
+        shaderio::RTXDILightSamplingParams lightSamplingParams(const RGPassContext& context, RGBuffer risBuffer) const;
         void addReSTIRGIPasses();
         void addPreviousFrameCopyPass();
         void addReSTIRDIPasses();
@@ -703,6 +709,7 @@ namespace Nox
         std::unique_ptr<NRI::Pipeline> m_postProcessPipeline = nullptr;
         // NRD
         std::unique_ptr<NRI::Pipeline> m_shadowMaskPipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_nrdGuidesPipeline = nullptr; // NRD view Z + normal/roughness (NRDGuides.slang)
         std::unique_ptr<NRI::Pipeline> m_reflectionPipeline = nullptr;
         // Path Tracer
         std::unique_ptr<NRI::Pipeline> m_pathTracerPipeline = nullptr;
@@ -755,6 +762,10 @@ namespace Nox
             bool restirGIAdded = false;
             bool nrdGIAdded = false;
             bool restirDIAdded = false;
+            // RTXDI light presampling of this frame (addLightPresamplingPasses): ReSTIR DI and ReSTIR GI sample from it.
+            bool lightPresamplingAdded = false;
+            uint32_t risBufferOffset = 0; // where the ReGIR cells start in the RIS buffer
+            bool regirActive = false;
             bool nrdDIAdded = false;
             bool ptNRDAdded = false;
             bool deferredLightingAdded = false;
@@ -858,7 +869,7 @@ namespace Nox
         // of Raytraced (avoids extra shadow rays per neighbor/per history sample), and no initial
         // visibility ray yet (RTXPT's enableInitialVisibility = true).
         uint32_t m_directLightingMode = 0; // 0 = brute-force analytic loop, 1 = ReSTIR DI
-        uint32_t m_restirDINumLocalLightSamples = 8;
+        uint32_t m_restirDINumLocalLightSamples = 2;
         uint32_t m_restirDINumInfiniteLightSamples = 1;
         uint32_t m_restirDIMaxHistoryLength = 20;
         float m_restirDINormalThreshold = 0.5f;
@@ -925,6 +936,7 @@ namespace Nox
         // mutually exclusive with it, same as GI/DI/reflections; see setNRDPTDenoiser)
         NRI::NRDDiffuseDenoiser m_nrdPTDenoiser = NRI::NRDDiffuseDenoiser::Off;
         std::unique_ptr<NRI::Pipeline> m_ycocgDecodePipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_ptCompositePipeline = nullptr; // path tracer NRD composite (PTComposite.slang)
 
         // ReSTIR PT (Screen-Space Path Resampling via RTXDI) -- reuses the REAL rtxdi::ReSTIRPTContext
         // C++ class (Rtxdi/PT/ReSTIRPT.h) directly for buffer-index rotation and default parameters,
@@ -970,6 +982,7 @@ namespace Nox
         std::unique_ptr<NRI::Pipeline> m_textureInspectPipeline = nullptr;
         std::array<std::unique_ptr<NRI::Pipeline>, 5> m_instanceCullingPipelines; // cull, count, offset, write, late
         std::unique_ptr<NRI::Pipeline> m_hiZBuildPipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_rrGuidesPipeline = nullptr; // DLSS Ray Reconstruction albedo guides
         TextureInspection m_textureInspection;
         Texture2D* m_inspectionImage = nullptr;
         RGTextureKey m_inspectedTextureKey;

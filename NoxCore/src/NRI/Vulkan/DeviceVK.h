@@ -73,7 +73,8 @@ namespace NRI
         bool evaluateNRDShadows(const NRDShadowParams& params) override;
         bool evaluateNRDReflections(const NRDReflectionParams& params, NRDReflectionDenoiser denoiser) override;
         bool evaluateNRDDiffuse(const NRDDiffuseParams& params, NRDDiffuseDenoiser denoiser) override;
-        bool evaluateNRDDiffuseDI(const NRDDiffuseParams& params, NRDDiffuseDenoiser denoiser) override;
+        bool evaluateNRDDirectLighting(const NRDDiffuseParams& params, NRDDiffuseDenoiser denoiser) override;
+        bool evaluateNRDPathTracing(const NRDDiffuseParams& params, NRDDiffuseDenoiser denoiser) override;
         bool evaluateNRDDiffusePT(const NRDDiffuseParams& params, NRDDiffuseDenoiser denoiser) override;
         void destroyNRD() override;
         bool isNRDInitialized() const override;
@@ -132,6 +133,8 @@ namespace NRI
             const glm::mat4& proj, const glm::mat4& prevProj,
             const glm::mat4& view, const glm::mat4& prevView,
             const glm::vec2& mvScale);
+        // A de-modulated diffuse + specular signal (NRD REBLUR / RELAX_DIFFUSE_SPECULAR) under the given identifiers.
+        bool evaluateNRDDiffuseSpecular(const NRDDiffuseParams& params, NRDDiffuseDenoiser denoiser, uint32_t reblurIdentifier, uint32_t relaxIdentifier);
         
     private:
         bool m_deviceInitialized = false;

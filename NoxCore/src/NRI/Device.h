@@ -51,6 +51,7 @@ namespace NRI
         Texture* specularAlbedo = nullptr;
         Texture* normal = nullptr;
         Texture* roughness = nullptr;
+        Texture* specularHitDistance = nullptr; // world-space primary surface -> reflection hit (optional)
 
         glm::mat4 nonJitteredProj{ 1.0f };
         glm::mat4 view{ 1.0f };
@@ -127,10 +128,12 @@ namespace NRI
     struct NRDDiffuseParams
     {
         Texture* inDiffuseRadianceHitDist = nullptr;  // Raw 1-SPP diffuse GI radiance + hit distance (RGBA16_SFLOAT)
+        Texture* inSpecularRadianceHitDist = nullptr; // diffuse-specular signals only (direct lighting, path tracing)
         Texture* inMotionVectors = nullptr;           // Screen-space Motion Vectors (RG16_SFLOAT)
         Texture* inNormalRoughness = nullptr;         // NRD-packed normal/roughness (R10G10B10A2_UNORM)
         Texture* inViewZ = nullptr;                   // Linear View-Z (R16_SFLOAT)
         Texture* outDenoisedDiffuse = nullptr;        // Denoised diffuse GI output (RGBA16_SFLOAT)
+        Texture* outDenoisedSpecular = nullptr;       // diffuse-specular signals only
 
         CommandBuffer* commandBuffer = nullptr;
 
@@ -208,14 +211,12 @@ namespace NRI
         virtual bool evaluateNRDShadows(const struct NRDShadowParams& params) { return false; }
         virtual bool evaluateNRDReflections(const struct NRDReflectionParams& params, NRDReflectionDenoiser denoiser) { return false; }
         virtual bool evaluateNRDDiffuse(const struct NRDDiffuseParams& params, NRDDiffuseDenoiser denoiser) { return false; }
-        // Same signal shape as evaluateNRDDiffuse (a noisy 1-SPP radiance estimate + a normal/depth/MV
-        // gbuffer to reproject against) but registered against its OWN separate NRD denoiser identifiers
-        // internally -- ReSTIR DI's direct lighting and ReSTIR GI's indirect diffuse are two independent
-        // signals with their own temporal history; reusing evaluateNRDDiffuse's identifiers for both
-        // would have them stomp on each other's accumulated history every frame.
-        virtual bool evaluateNRDDiffuseDI(const struct NRDDiffuseParams& params, NRDDiffuseDenoiser denoiser) { return false; }
-        // Same shape again, for the full path tracer's own combined radiance signal -- its own separate
-        // NRD identifiers/history, independent of GI/DI/reflections.
+        // ReSTIR DI's direct lighting: de-modulated diffuse and specular (both inputs and outputs of the params), denoised
+        // together by NRD's diffuse-specular denoiser under its own identifiers (its own temporal history, apart from GI's).
+        virtual bool evaluateNRDDirectLighting(const struct NRDDiffuseParams& params, NRDDiffuseDenoiser denoiser) { return false; }
+        // The path tracer's de-modulated diffuse and specular (both inputs and outputs), under its own identifiers.
+        virtual bool evaluateNRDPathTracing(const struct NRDDiffuseParams& params, NRDDiffuseDenoiser denoiser) { return false; }
+        // ReSTIR PT's combined radiance signal: one diffuse denoiser, its own identifiers.
         virtual bool evaluateNRDDiffusePT(const struct NRDDiffuseParams& params, NRDDiffuseDenoiser denoiser) { return false; }
         virtual void destroyNRD() {}
         virtual bool isNRDInitialized() const { return false; }

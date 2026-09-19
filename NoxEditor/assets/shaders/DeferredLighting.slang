@@ -1,4 +1,5 @@
 #include "shaderIO.h"
+#include "NRDFrontEnd.slang"
 #include "DDGICommon.slang"
 #include "PBRLighting.slang"
 
@@ -75,16 +76,6 @@
         return rgb * 0.85 + 0.1;
     }
 
-    // NRD REBLUR YCoCg to Linear RGB conversion (matching NRD.hlsli:407)
-    float3 YCoCgToLinear(float3 color)
-    {
-        float t = color.x - color.z;
-        float3 r;
-        r.y = color.x + color.z;
-        r.x = t + color.y;
-        r.z = t - color.y;
-        return max(r, 0.0);
-    }
 
 
     [shader("fragment")]
@@ -143,11 +134,7 @@
                     if (pushConstant.diffuseGIMode == 2 && pushConstant.restirGIDiffuseTextureIndex != 0xFFFFFFFF)
                     {
                         Texture2D restirTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.restirGIDiffuseTextureIndex, 0));
-                        float3 restirDiffuse = restirTex.Load(int3(pixelCoord, 0)).rgb;
-                        if (pushConstant.restirGIDenoiserMode == 1) // NRD REBLUR outputs in YCoCg
-                        {
-                            restirDiffuse = YCoCgToLinear(restirDiffuse);
-                        }
+                        float3 restirDiffuse = NRD_UnpackSignal(pushConstant.restirGIDenoiserMode, restirTex.Load(int3(pixelCoord, 0)));
                         return float4(restirDiffuse, 1.0);
                     }
                     else if (ubo->ddgiIrradianceTextureIndex != 0xFFFFFFFF && ubo->ddgiDistanceTextureIndex != 0xFFFFFFFF)
@@ -257,14 +244,15 @@
         // result, which shadow-rays every light regardless of count instead of only light index 0
         // (see the brute-force loop below: only `i == 0` ever gets a real shadow term).
         float3 directLighting = float3(0.0);
-        if (pushConstant.directLightingMode == 1 && pushConstant.restirDIDirectLightingTextureIndex != 0xFFFFFFFF)
+        if (pushConstant.directLightingMode == 1 && pushConstant.restirDIDiffuseTextureIndex != 0xFFFFFFFF)
         {
-            Texture2D restirDITex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.restirDIDirectLightingTextureIndex, 0));
-            directLighting = restirDITex.Load(int3(pixelCoord, 0)).rgb;
-            if (pushConstant.restirDIDenoiserMode == 1) // NRD REBLUR outputs in YCoCg
-            {
-                directLighting = YCoCgToLinear(directLighting);
-            }
+            // De-modulated diffuse and specular (ReSTIRDIFinalShading.slang): modulated back with the same factors.
+            Texture2D diffuseDITex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.restirDIDiffuseTextureIndex, 0));
+            Texture2D specularDITex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.restirDISpecularTextureIndex, 0));
+            float3 diffFactor, specFactor;
+            NRD_MaterialFactors(n, v, diffuseColor, specularColor, perceptualRoughness, diffFactor, specFactor);
+            directLighting = NRD_UnpackSignal(pushConstant.restirDIDenoiserMode, diffuseDITex.Load(int3(pixelCoord, 0))) * diffFactor +
+                             NRD_UnpackSignal(pushConstant.restirDIDenoiserMode, specularDITex.Load(int3(pixelCoord, 0))) * specFactor;
         }
         else
         {
@@ -387,11 +375,7 @@
         if ((pushConstant.diffuseGIMode == 2 || pushConstant.debugMode == 16) && pushConstant.restirGIDiffuseTextureIndex != 0xFFFFFFFF)
         {
             Texture2D restirTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.restirGIDiffuseTextureIndex, 0));
-            float3 restirDiffuse = restirTex.Load(int3(pixelCoord, 0)).rgb;
-            if (pushConstant.restirGIDenoiserMode == 1) // NRD REBLUR outputs in YCoCg
-            {
-                restirDiffuse = YCoCgToLinear(restirDiffuse);
-            }
+            float3 restirDiffuse = NRD_UnpackSignal(pushConstant.restirGIDenoiserMode, restirTex.Load(int3(pixelCoord, 0)));
             ambientDiffuse = restirDiffuse * diffuseColor;
 
             // Prevent outdoor skybox specular from leaking onto dark indoor surfaces
@@ -423,13 +407,8 @@
         {
             Texture2D reflTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.reflectionTextureIndex, 0));
             float4 reflSample = reflTex.Load(int3(pixelCoord, 0));
-            reflColor = reflSample.rgb;
-
             uint reflDenoiserMode = (pushConstant.nrdShadowsEnabled >> 1) & 3;
-            if (reflDenoiserMode == 1) // NRD REBLUR outputs in YCoCg
-            {
-                reflColor = YCoCgToLinear(reflColor);
-            }
+            reflColor = NRD_UnpackSignal(reflDenoiserMode, reflSample);
 
             SamplerState samplerBrdf = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_BRDFLUT, 0));
             Texture2D brdfTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->brdfLutIndex, 0));

@@ -441,7 +441,6 @@ namespace Nox
                 builder.ColorTarget(resources.GBufferEmission, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f }); // RGBA16F
                 builder.ColorTarget(resources.Entity, NRI::LoadOP::clear, NRI::StoreOP::store, { -1.0f, 0.0f, 0.0f, 0.0f });         // R32SINT
                 builder.ColorTarget(resources.GBufferVelocity, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f }); // RG32F
-                builder.ColorTarget(resources.GBufferSpecular, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f }); // RGBA8
                 builder.SetRenderArea(m_frame.renderExtent);
             },
             [this, res = &resources, resolveMaterials](RGPassContext& context)

@@ -1,4 +1,5 @@
 #include "shaderIO.h"
+#include "NRDFrontEnd.slang"
 #include "Rtxdi/GI/ReSTIRGIParameters.h"
 
 #ifndef RTXDI_RESERVOIR_BLOCK_SIZE
@@ -262,19 +263,6 @@ struct PSOutput
     float4 diffuseIrradiance : SV_Target0;
 };
 
-// NRD REBLUR YCoCg conversion (matching NRD.hlsli:398). REBLUR's internal filtering assumes its
-// IN_DIFF_RADIANCE_HITDIST input is already YCoCg-encoded (see REBLUR_FrontEnd_PackRadianceAndNormHitDist
-// in NRD.hlsli) -- RELAX's front-end pack function takes plain linear RGB directly, no conversion.
-// Skipping this for REBLUR is what produced the reddish/pink tint: REBLUR treats R as luminance (Y)
-// and G/B as signed chroma (Co/Cg), clamping/filtering them very differently than real RGB.
-float3 LinearToYCoCg(float3 color)
-{
-    float Y = dot(color, float3(0.25, 0.5, 0.25));
-    float Co = dot(color, float3(0.5, 0.0, -0.5));
-    float Cg = dot(color, float3(-0.25, 0.5, -0.25));
-    return float3(Y, Co, Cg);
-}
-
 void ApplyGIBoilingFilter(inout RTXDI_GIReservoir reservoir, float filterStrength)
 {
     float reservoirWeight = dot(reservoir.radiance, float3(0.2126, 0.7152, 0.0722)) * reservoir.weightSum;
@@ -409,7 +397,6 @@ PSOutput fragMain(
             visRay.Direction = L;
             visRay.TMin = 0.005;
             visRay.TMax = max(0.01, hitDist - 0.02);
-
             RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE> visQuery;
             visQuery.TraceRayInline(accelerationStructure,
                 RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE,
@@ -423,18 +410,15 @@ PSOutput fragMain(
             // In RTXDI, resampledReservoir.weightSum represents 1.0 / targetPdf. Multiplying by
             // (NdotL / PI) cancels the geometric factor and yields physical diffuse radiance.
             float demodulatedDiffuse = NdotL / 3.14159265359;
-            float weightFactor = clamp(demodulatedDiffuse * resampledReservoir.weightSum, 0.0, 50.0);
-            if (isnan(weightFactor) || isinf(weightFactor)) weightFactor = 1.0;
+            float weightFactor = max(demodulatedDiffuse * resampledReservoir.weightSum, 0.0);
+            if (isnan(weightFactor) || isinf(weightFactor)) weightFactor = 0.0;
             diffuse = resampledReservoir.radiance * weightFactor;
         }
     }
 
-    if (pushConstant.denoiserMode == 1) // NRD REBLUR
-    {
-        diffuse = LinearToYCoCg(diffuse);
-    }
-
-    // Alpha carries the hit distance for NRD's REBLUR_DIFFUSE/RELAX_DIFFUSE denoiser.
-    outVal.diffuseIrradiance = float4(diffuse, hitDist);
+    // NRD expects normalized hit distance (and REBLUR-specific YCoCg), not raw world distance.
+    float viewZ = abs(mul(g_UBO->view, float4(surface.worldPos, 1.0)).z);
+    outVal.diffuseIrradiance = NRD_PackSignal(
+        pushConstant.denoiserMode, diffuse, hitDist, viewZ, 1.0);
     return outVal;
 }

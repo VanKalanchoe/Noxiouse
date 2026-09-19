@@ -1113,7 +1113,7 @@ namespace NRI
         tags.push_back(sl::ResourceTag(&mvec, sl::kBufferTypeMotionVectors, sl::ResourceLifecycle::eValidUntilEvaluate, &mvecExtent));
 
         // When Ray Reconstruction is enabled, tag G-Buffer Albedo, Specular Albedo, Normals, and Roughness
-        sl::Resource albedoRes{}, specularAlbedoRes{}, normalRes{}, roughnessRes{};
+        sl::Resource albedoRes{}, specularAlbedoRes{}, normalRes{}, roughnessRes{}, hitDistanceRes{};
         if (useRayReconstruction && params.albedo && params.normal && params.roughness)
         {
             auto wrapTex = [](TextureVK* t) -> sl::Resource
@@ -1141,6 +1141,13 @@ namespace NRI
             tags.push_back(sl::ResourceTag(&specularAlbedoRes, sl::kBufferTypeSpecularAlbedo, sl::ResourceLifecycle::eValidUntilEvaluate, &inputExtent));
             tags.push_back(sl::ResourceTag(&normalRes, sl::kBufferTypeNormals, sl::ResourceLifecycle::eValidUntilEvaluate, &inputExtent));
             tags.push_back(sl::ResourceTag(&roughnessRes, sl::kBufferTypeRoughness, sl::ResourceLifecycle::eValidUntilEvaluate, &inputExtent));
+
+            // With the world-to-view and view-to-clip matrices (DLSSDOptions, Constants), RR moves reflections by it.
+            if (params.specularHitDistance)
+            {
+                hitDistanceRes = wrapTex(dynamic_cast<TextureVK*>(params.specularHitDistance));
+                tags.push_back(sl::ResourceTag(&hitDistanceRes, sl::kBufferTypeSpecularHitDistance, sl::ResourceLifecycle::eValidUntilEvaluate, &inputExtent));
+            }
         }
 
         sl::Result tagRes = slSetTagForFrame(*frameToken, viewport, tags.data(), static_cast<uint32_t>(tags.size()),
@@ -1440,16 +1447,41 @@ namespace NRI
         static constexpr ::nrd::Identifier RELAX_SPECULAR_DENOISER = 2;
         static constexpr ::nrd::Identifier REBLUR_DIFFUSE_DENOISER = 3;
         static constexpr ::nrd::Identifier RELAX_DIFFUSE_DENOISER = 4;
-        // Separate identifiers for ReSTIR DI's direct lighting signal -- must not share GI's
-        // REBLUR/RELAX_DIFFUSE_DENOISER identifiers above, since each NRD identifier keeps its own
-        // temporal history and DI/GI are two independently-noisy 1-SPP signals reprojected every frame.
-        static constexpr ::nrd::Identifier REBLUR_DIFFUSE_DI_DENOISER = 5;
-        static constexpr ::nrd::Identifier RELAX_DIFFUSE_DI_DENOISER = 6;
-        // Separate identifiers again for the full path tracer's own combined radiance signal -- same
-        // reasoning as DI above: its own independent temporal history, never shared with GI/DI/reflections.
+        // ReSTIR DI's direct lighting, diffuse and specular: its own identifiers, since each keeps its own temporal history.
+        static constexpr ::nrd::Identifier REBLUR_DIRECT_LIGHTING_DENOISER = 5;
+        static constexpr ::nrd::Identifier RELAX_DIRECT_LIGHTING_DENOISER = 6;
+        // ReSTIR PT's combined radiance signal: its own identifiers (its own temporal history).
         static constexpr ::nrd::Identifier REBLUR_DIFFUSE_PT_DENOISER = 7;
         static constexpr ::nrd::Identifier RELAX_DIFFUSE_PT_DENOISER = 8;
+        // The path tracer's de-modulated diffuse and specular: its own identifiers too.
+        static constexpr ::nrd::Identifier REBLUR_PATH_TRACING_DENOISER = 9;
+        static constexpr ::nrd::Identifier RELAX_PATH_TRACING_DENOISER = 10;
         uint32_t currentEngineFrameIndex = 0xFFFFFFFF;
+        // This frame's common settings, and the denoisers dispatched since the instance was (re)created: a denoiser's
+        // resources hold garbage until its first dispatch clears them (Denoise).
+        ::nrd::CommonSettings commonSettings{};
+        std::vector<::nrd::Identifier> clearedDenoisers;
+
+        // One dispatch. NRD allocates every denoiser's resources when the instance is (re)created and leaves them
+        // unwritten: a denoiser's first dispatch since then clears them (AccumulationMode::CLEAR_AND_RESTART), or it reads
+        // garbage history.
+        void Denoise(::nrd::Identifier denoiser, const ::nri::CommandBufferVKDesc& commandBuffer, ::nrd::ResourceSnapshot& snapshot)
+        {
+            const bool firstDispatch = std::find(clearedDenoisers.begin(), clearedDenoisers.end(), denoiser) == clearedDenoisers.end();
+            if (firstDispatch)
+            {
+                ::nrd::CommonSettings clearing = commonSettings;
+                clearing.accumulationMode = ::nrd::AccumulationMode::CLEAR_AND_RESTART;
+                integration.SetCommonSettings(clearing);
+                clearedDenoisers.push_back(denoiser);
+            }
+
+            integration.DenoiseVK(&denoiser, 1, commandBuffer, snapshot);
+
+            // The frame's own mode for the denoisers dispatched after this one.
+            if (firstDispatch)
+                integration.SetCommonSettings(commonSettings);
+        }
     };
 
     void DeviceVK::updateNRDCommonSettings(uint32_t frameIndex, bool resetHistory,
@@ -1486,6 +1518,7 @@ namespace NRI
             commonSettings.frameIndex = frameIndex;
             commonSettings.accumulationMode = resetHistory ? ::nrd::AccumulationMode::RESTART : ::nrd::AccumulationMode::CONTINUE;
 
+            m_nrdContext->commonSettings = commonSettings;
             m_nrdContext->integration.SetCommonSettings(commonSettings);
         }
     }
@@ -1517,6 +1550,7 @@ namespace NRI
         m_nrdContext->width = width;
         m_nrdContext->height = height;
         m_nrdContext->currentEngineFrameIndex = 0xFFFFFFFF;
+        m_nrdContext->clearedDenoisers.clear();
 
         // 1. Integration Creation Desc
         ::nrd::IntegrationCreationDesc integrationDesc{};
@@ -1528,8 +1562,8 @@ namespace NRI
         integrationDesc.autoWaitForIdle = true;
 
         // 2. Denoiser Instance Descs: SIGMA_SHADOW, REBLUR_SPECULAR, RELAX_SPECULAR, REBLUR_DIFFUSE,
-        //    RELAX_DIFFUSE, REBLUR_DIFFUSE_DI, RELAX_DIFFUSE_DI, REBLUR_DIFFUSE_PT, RELAX_DIFFUSE_PT
-        ::nrd::DenoiserDesc denoiserDescs[9]{};
+        //    RELAX_DIFFUSE, REBLUR/RELAX_DIFFUSE_SPECULAR (direct lighting), REBLUR_DIFFUSE_PT, RELAX_DIFFUSE_PT
+        ::nrd::DenoiserDesc denoiserDescs[11]{};
         denoiserDescs[0].identifier = NRDContext::SIGMA_DENOISER;
         denoiserDescs[0].denoiser = ::nrd::Denoiser::SIGMA_SHADOW;
 
@@ -1545,11 +1579,11 @@ namespace NRI
         denoiserDescs[4].identifier = NRDContext::RELAX_DIFFUSE_DENOISER;
         denoiserDescs[4].denoiser = ::nrd::Denoiser::RELAX_DIFFUSE;
 
-        denoiserDescs[5].identifier = NRDContext::REBLUR_DIFFUSE_DI_DENOISER;
-        denoiserDescs[5].denoiser = ::nrd::Denoiser::REBLUR_DIFFUSE;
+        denoiserDescs[5].identifier = NRDContext::REBLUR_DIRECT_LIGHTING_DENOISER;
+        denoiserDescs[5].denoiser = ::nrd::Denoiser::REBLUR_DIFFUSE_SPECULAR;
 
-        denoiserDescs[6].identifier = NRDContext::RELAX_DIFFUSE_DI_DENOISER;
-        denoiserDescs[6].denoiser = ::nrd::Denoiser::RELAX_DIFFUSE;
+        denoiserDescs[6].identifier = NRDContext::RELAX_DIRECT_LIGHTING_DENOISER;
+        denoiserDescs[6].denoiser = ::nrd::Denoiser::RELAX_DIFFUSE_SPECULAR;
 
         denoiserDescs[7].identifier = NRDContext::REBLUR_DIFFUSE_PT_DENOISER;
         denoiserDescs[7].denoiser = ::nrd::Denoiser::REBLUR_DIFFUSE;
@@ -1557,9 +1591,15 @@ namespace NRI
         denoiserDescs[8].identifier = NRDContext::RELAX_DIFFUSE_PT_DENOISER;
         denoiserDescs[8].denoiser = ::nrd::Denoiser::RELAX_DIFFUSE;
 
+        denoiserDescs[9].identifier = NRDContext::REBLUR_PATH_TRACING_DENOISER;
+        denoiserDescs[9].denoiser = ::nrd::Denoiser::REBLUR_DIFFUSE_SPECULAR;
+
+        denoiserDescs[10].identifier = NRDContext::RELAX_PATH_TRACING_DENOISER;
+        denoiserDescs[10].denoiser = ::nrd::Denoiser::RELAX_DIFFUSE_SPECULAR;
+
         ::nrd::InstanceCreationDesc instanceDesc{};
         instanceDesc.denoisers = denoiserDescs;
-        instanceDesc.denoisersNum = 9;
+        instanceDesc.denoisersNum = 11;
 
         // 3. Native Vulkan Device Creation Desc
         ::nri::QueueFamilyVKDesc queueFamily{};
@@ -1652,7 +1692,7 @@ namespace NRI
         cmdDesc.queueType = ::nri::QueueType::GRAPHICS;
 
         const ::nrd::Identifier denoiserId = NRDContext::SIGMA_DENOISER;
-        m_nrdContext->integration.DenoiseVK(&denoiserId, 1, cmdDesc, snapshot);
+        m_nrdContext->Denoise(denoiserId, cmdDesc, snapshot);
 
         return true;
     }
@@ -1750,7 +1790,7 @@ namespace NRI
         cmdDesc.vkCommandBuffer = static_cast<VKHandle>(vkCmd);
         cmdDesc.queueType = ::nri::QueueType::GRAPHICS;
 
-        m_nrdContext->integration.DenoiseVK(&activeDenoiserId, 1, cmdDesc, snapshot);
+        m_nrdContext->Denoise(activeDenoiserId, cmdDesc, snapshot);
 
         return true;
     }
@@ -1848,15 +1888,24 @@ namespace NRI
         cmdDesc.vkCommandBuffer = static_cast<VKHandle>(vkCmd);
         cmdDesc.queueType = ::nri::QueueType::GRAPHICS;
 
-        m_nrdContext->integration.DenoiseVK(&activeDenoiserId, 1, cmdDesc, snapshot);
+        m_nrdContext->Denoise(activeDenoiserId, cmdDesc, snapshot);
 
         return true;
     }
 
-    // Identical shape to evaluateNRDDiffuse (ReSTIR DI's direct lighting is, like ReSTIR GI's indirect
-    // diffuse, a noisy 1-SPP radiance estimate reprojected the same way), but dispatched against the
-    // REBLUR/RELAX_DIFFUSE_DI_DENOISER identifiers so its temporal history never collides with GI's.
-    bool DeviceVK::evaluateNRDDiffuseDI(const NRDDiffuseParams& params, NRDDiffuseDenoiser denoiser)
+    // ReSTIR DI's direct lighting: its own identifiers (its temporal history never collides with GI's).
+    bool DeviceVK::evaluateNRDDirectLighting(const NRDDiffuseParams& params, NRDDiffuseDenoiser denoiser)
+    {
+        return evaluateNRDDiffuseSpecular(params, denoiser, NRDContext::REBLUR_DIRECT_LIGHTING_DENOISER, NRDContext::RELAX_DIRECT_LIGHTING_DENOISER);
+    }
+
+    bool DeviceVK::evaluateNRDPathTracing(const NRDDiffuseParams& params, NRDDiffuseDenoiser denoiser)
+    {
+        return evaluateNRDDiffuseSpecular(params, denoiser, NRDContext::REBLUR_PATH_TRACING_DENOISER, NRDContext::RELAX_PATH_TRACING_DENOISER);
+    }
+
+    // A de-modulated diffuse + specular signal (NRDFrontEnd.slang), one diffuse-specular denoiser.
+    bool DeviceVK::evaluateNRDDiffuseSpecular(const NRDDiffuseParams& params, NRDDiffuseDenoiser denoiser, uint32_t reblurIdentifier, uint32_t relaxIdentifier)
     {
         if (!m_nrdContext || !m_nrdContext->initialized)
             return false;
@@ -1864,7 +1913,8 @@ namespace NRI
         if (denoiser == NRDDiffuseDenoiser::Off)
             return false;
 
-        if (!params.commandBuffer || !params.inDiffuseRadianceHitDist || !params.outDenoisedDiffuse)
+        if (!params.commandBuffer || !params.inDiffuseRadianceHitDist || !params.outDenoisedDiffuse ||
+            !params.inSpecularRadianceHitDist || !params.outDenoisedSpecular)
             return false;
 
         auto* cmdBufferVK = static_cast<CommandBufferVK*>(params.commandBuffer);
@@ -1875,10 +1925,10 @@ namespace NRI
             params.proj, params.prevProj, params.view, params.prevView, params.motionVectorScale);
 
         // 2. Set Denoiser Settings
-        ::nrd::Identifier activeDenoiserId = NRDContext::REBLUR_DIFFUSE_DI_DENOISER;
+        ::nrd::Identifier activeDenoiserId = reblurIdentifier;
         if (denoiser == NRDDiffuseDenoiser::REBLUR)
         {
-            activeDenoiserId = NRDContext::REBLUR_DIFFUSE_DI_DENOISER;
+            activeDenoiserId = reblurIdentifier;
             ::nrd::ReblurSettings reblurSettings{};
             reblurSettings.enableAntiFirefly = true;
             reblurSettings.hitDistanceReconstructionMode = ::nrd::HitDistanceReconstructionMode::AREA_5X5;
@@ -1890,7 +1940,7 @@ namespace NRI
         }
         else if (denoiser == NRDDiffuseDenoiser::RELAX)
         {
-            activeDenoiserId = NRDContext::RELAX_DIFFUSE_DI_DENOISER;
+            activeDenoiserId = relaxIdentifier;
             ::nrd::RelaxSettings relaxSettings{};
             relaxSettings.enableAntiFirefly = true;
             relaxSettings.hitDistanceReconstructionMode = ::nrd::HitDistanceReconstructionMode::OFF;
@@ -1929,8 +1979,9 @@ namespace NRI
 
         constexpr auto commonStages = ::nri::StageBits::COMPUTE_SHADER | ::nri::StageBits::FRAGMENT_SHADER | ::nri::StageBits::COLOR_ATTACHMENT;
 
-        // IN_DIFF_RADIANCE_HITDIST: raw 1-SPP ReSTIR DI direct lighting + normalized hit distance (RGBA16F)
+        // IN_DIFF / IN_SPEC_RADIANCE_HITDIST: de-modulated 1-SPP signal + hit distance (RGBA16F, NRDFrontEnd.slang)
         bindVKTexture(snapshot, ::nrd::ResourceType::IN_DIFF_RADIANCE_HITDIST, params.inDiffuseRadianceHitDist, ::nri::AccessBits::SHADER_RESOURCE_STORAGE, ::nri::Layout::GENERAL, commonStages);
+        bindVKTexture(snapshot, ::nrd::ResourceType::IN_SPEC_RADIANCE_HITDIST, params.inSpecularRadianceHitDist, ::nri::AccessBits::SHADER_RESOURCE_STORAGE, ::nri::Layout::GENERAL, commonStages);
 
         // IN_MV: motion vectors (RG16F)
         bindVKTexture(snapshot, ::nrd::ResourceType::IN_MV, params.inMotionVectors, ::nri::AccessBits::SHADER_RESOURCE_STORAGE, ::nri::Layout::GENERAL, commonStages);
@@ -1941,22 +1992,22 @@ namespace NRI
         // IN_VIEWZ: linear view depth (R16F / R32F)
         bindVKTexture(snapshot, ::nrd::ResourceType::IN_VIEWZ, params.inViewZ, ::nri::AccessBits::SHADER_RESOURCE_STORAGE, ::nri::Layout::GENERAL, commonStages);
 
-        // OUT_DIFF_RADIANCE_HITDIST: denoised ReSTIR DI direct lighting
+        // OUT_DIFF / OUT_SPEC_RADIANCE_HITDIST: the denoised signal
         bindVKTexture(snapshot, ::nrd::ResourceType::OUT_DIFF_RADIANCE_HITDIST, params.outDenoisedDiffuse, ::nri::AccessBits::SHADER_RESOURCE_STORAGE, ::nri::Layout::GENERAL, commonStages);
+        bindVKTexture(snapshot, ::nrd::ResourceType::OUT_SPEC_RADIANCE_HITDIST, params.outDenoisedSpecular, ::nri::AccessBits::SHADER_RESOURCE_STORAGE, ::nri::Layout::GENERAL, commonStages);
 
         // 4. Dispatch NRD DenoiseVK
         ::nri::CommandBufferVKDesc cmdDesc{};
         cmdDesc.vkCommandBuffer = static_cast<VKHandle>(vkCmd);
         cmdDesc.queueType = ::nri::QueueType::GRAPHICS;
 
-        m_nrdContext->integration.DenoiseVK(&activeDenoiserId, 1, cmdDesc, snapshot);
+        m_nrdContext->Denoise(activeDenoiserId, cmdDesc, snapshot);
 
         return true;
     }
 
-    // Identical shape again (see evaluateNRDDiffuseDI's comment) -- the full path tracer's combined
-    // radiance output is, like ReSTIR DI/GI, a noisy 1-SPP-per-frame estimate reprojected the same way,
-    // just dispatched against its own REBLUR/RELAX_DIFFUSE_PT_DENOISER identifiers.
+    // Identical shape to evaluateNRDDiffuse -- ReSTIR PT's combined radiance output, a noisy 1-SPP-per-frame estimate
+    // reprojected the same way, dispatched against its own REBLUR/RELAX_DIFFUSE_PT_DENOISER identifiers.
     bool DeviceVK::evaluateNRDDiffusePT(const NRDDiffuseParams& params, NRDDiffuseDenoiser denoiser)
     {
         if (!m_nrdContext || !m_nrdContext->initialized)
@@ -2050,7 +2101,7 @@ namespace NRI
         cmdDesc.vkCommandBuffer = static_cast<VKHandle>(vkCmd);
         cmdDesc.queueType = ::nri::QueueType::GRAPHICS;
 
-        m_nrdContext->integration.DenoiseVK(&activeDenoiserId, 1, cmdDesc, snapshot);
+        m_nrdContext->Denoise(activeDenoiserId, cmdDesc, snapshot);
 
         return true;
     }

@@ -16,20 +16,69 @@ namespace Nox
         // NGX keeps the history: resets (resize, mode change) arrive through the render graph's history key.
         frame.resetDLSS = m_isFirstFrame || m_renderGraph.WasHistoryReset(DLSSHistoryKey);
 
+        // Ray Reconstruction divides the image by the albedo it was shaded with (diffuse and pre-integrated specular):
+        // built from the G-buffer the way the lighting shades it.
+        const bool rayReconstruction = m_dlssRayReconstructionEnabled && m_device->isDLSSRayReconstructionSupported() && m_rrGuidesPipeline;
+        // The specular hit distance comes from the RT reflection rays (hybrid); the path tracers do not produce one yet.
+        const bool hitDistance = rayReconstruction && frame.rtReflectionsAdded && !frame.restirPTActive && !frame.pathTracerActive;
+        if (rayReconstruction)
+        {
+            m_renderGraph.AddPass("RR Guides", RGPassFlags::None,
+                [&](RGBuilder& builder)
+                {
+                    builder.Read(resources.Depth);
+                    builder.Read(resources.GBufferAlbedo);
+                    builder.Read(resources.GBufferNormal);
+                    builder.Read(resources.GBufferMaterial);
+                    builder.Write(resources.RRDiffuseAlbedo, RGTextureAccess::StorageWrite);
+                    builder.Write(resources.RRSpecularAlbedo, RGTextureAccess::StorageWrite);
+                    if (hitDistance)
+                    {
+                        builder.Read(resources.RawReflection);
+                        builder.Write(resources.RRSpecularHitDistance, RGTextureAccess::StorageWrite);
+                    }
+                },
+                [this, res = &resources, hitDistance](RGPassContext& context)
+                {
+                    shaderio::PushConstantRRGuides push{};
+                    push.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                    push.depthTextureIndex = context.Slot(res->Depth);
+                    push.gbufferAlbedoIndex = context.Slot(res->GBufferAlbedo);
+                    push.gbufferNormalIndex = context.Slot(res->GBufferNormal);
+                    push.gbufferMaterialIndex = context.Slot(res->GBufferMaterial);
+                    push.diffuseAlbedoStorageIndex = context.StorageSlot(res->RRDiffuseAlbedo);
+                    push.specularAlbedoStorageIndex = context.StorageSlot(res->RRSpecularAlbedo);
+                    push.rawReflectionIndex = hitDistance ? context.Slot(res->RawReflection) : 0xFFFFFFFF;
+                    push.hitDistanceStorageIndex = hitDistance ? context.StorageSlot(res->RRSpecularHitDistance) : 0xFFFFFFFF;
+                    push.width = m_frame.renderExtent.width;
+                    push.height = m_frame.renderExtent.height;
+
+                    NRI::CommandBuffer& cmd = context.Cmd();
+                    cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *m_rrGuidesPipeline);
+                    cmd.pushData(&push, sizeof(push));
+                    cmd.dispatch((push.width + 7) / 8, (push.height + 7) / 8, 1);
+                });
+        }
+
         m_renderGraph.AddPass("DLSS", RGPassFlags::None,
             [&](RGBuilder& builder)
             {
                 ReadLitScene(builder, resources, frame.restirPTActive, frame.pathTracerActive, frame.ptNRDAdded, frame.pathTracerWriteIndex);
                 builder.Read(resources.Depth);
                 builder.Read(resources.GBufferVelocity);
-                builder.Read(resources.GBufferAlbedo);
-                builder.Read(resources.GBufferSpecular);
                 builder.Read(resources.GBufferNormal);
                 builder.Read(resources.GBufferMaterial);
+                if (rayReconstruction)
+                {
+                    builder.Read(resources.RRDiffuseAlbedo);
+                    builder.Read(resources.RRSpecularAlbedo);
+                }
+                if (hitDistance)
+                    builder.Read(resources.RRSpecularHitDistance);
                 builder.Write(resources.DLSSOutput);
                 builder.RecordExclusive("Streamline");
             },
-            [this, res = &resources](RGPassContext& context)
+            [this, res = &resources, rayReconstruction, hitDistance](RGPassContext& context)
             {
                 NRI::CommandBuffer& cmd = context.Cmd();
                 const FrameGraphState& frame = m_frame;
@@ -49,11 +98,16 @@ namespace Nox
                 dlssParams.outputColor = &outputColor;
                 dlssParams.depth = &context.Texture(res->Depth);
                 dlssParams.motionVectors = &context.Texture(res->GBufferVelocity);
-                dlssParams.albedo = &context.Texture(res->GBufferAlbedo);
-                dlssParams.specularAlbedo = &context.Texture(res->GBufferSpecular);
-                dlssParams.normal = &context.Texture(res->GBufferNormal);
-                dlssParams.roughness = &context.Texture(res->GBufferMaterial);
-                dlssParams.rayReconstruction = m_dlssRayReconstructionEnabled;
+                if (rayReconstruction)
+                {
+                    dlssParams.albedo = &context.Texture(res->RRDiffuseAlbedo);
+                    dlssParams.specularAlbedo = &context.Texture(res->RRSpecularAlbedo);
+                    dlssParams.normal = &context.Texture(res->GBufferNormal);
+                    dlssParams.roughness = &context.Texture(res->GBufferMaterial);
+                }
+                if (hitDistance)
+                    dlssParams.specularHitDistance = &context.Texture(res->RRSpecularHitDistance);
+                dlssParams.rayReconstruction = rayReconstruction;
                 dlssParams.commandBuffer = &cmd;
 
                 dlssParams.nonJitteredProj = uniformData.nonJitteredProj;

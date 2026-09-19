@@ -252,12 +252,15 @@ namespace Nox
         watchShader("assets/shaders/TextureInspect.slang", "TextureInspect", [this]() { createTextureInspectPipeline(true); });
         watchShader("assets/shaders/InstanceCulling.slang", "InstanceCulling", [this]() { createInstanceCullingPipelines(true); });
         watchShader("assets/shaders/HiZBuild.slang", "HiZBuild", [this]() { createHiZBuildPipeline(true); });
+        watchShader("assets/shaders/RRGuides.slang", "RRGuides", [this]() { createRRGuidesPipeline(true); });
         // NRD
         watchShader("assets/shaders/ShadowMask.slang", "ShadowMask", [this]() { createShadowMaskPipeline(true); });
+        watchShader("assets/shaders/NRDGuides.slang", "NRDGuides", [this]() { createNRDGuidesPipeline(true); });
         watchShader("assets/shaders/Reflection.slang", "Reflection", [this]() { createReflectionPipeline(true); });
         // Path Tracer
         watchShader("assets/shaders/PathTracer.slang", "PathTracer", [this]() { createPathTracerPipeline(true); });
         watchShader("assets/shaders/YCoCgDecodeInPlace.slang", "YCoCgDecodeInPlace", [this]() { createPathTracerPipeline(true); });
+        watchShader("assets/shaders/PTComposite.slang", "PTComposite", [this]() { createPathTracerPipeline(true); });
         // DDGI
         watchShader("assets/shaders/DDGIRadiance.slang", "DDGIRadiance", [this]() { createDDGIPipelines(true); });
         watchShader("assets/shaders/DDGIBlendIrradiance.slang", "DDGIBlendIrradiance", [this]() { createDDGIPipelines(true); });
@@ -411,8 +414,10 @@ namespace Nox
         createTextureInspectPipeline(false);
         createInstanceCullingPipelines(false);
         createHiZBuildPipeline(false);
+        createRRGuidesPipeline(false);
         //NRD
         createShadowMaskPipeline();
+        createNRDGuidesPipeline();
         createReflectionPipeline();
         // Path Tracer
         createPathTracerPipeline(false);
@@ -716,11 +721,7 @@ namespace Nox
     {
         NRI::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
-        desc.colorFormats = {
-            NRI::ImageFormat::R16G16_SFLOAT,
-            NRI::ImageFormat::R16_SFLOAT,
-            NRI::ImageFormat::R10G10B10A2_UNORM
-        };
+        desc.colorFormats = { NRI::ImageFormat::R16G16_SFLOAT };
 
         desc.shaders.push_back({
             .stage = NRI::ShaderStage::Task,
@@ -739,6 +740,17 @@ namespace Nox
         });
 
         m_shadowMaskPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+    }
+
+    void Renderer::createNRDGuidesPipeline(bool forceCompile)
+    {
+        NRI::PipelineDesc desc{};
+        desc.forceCompile = forceCompile;
+        desc.colorFormats = { NRI::ImageFormat::R16_SFLOAT, NRI::ImageFormat::R10G10B10A2_UNORM }; // view Z, normal + roughness
+        for (const auto& [stage, entryPoint] : { std::pair{ NRI::ShaderStage::Task, "taskMain" }, std::pair{ NRI::ShaderStage::Mesh, "meshMain" },
+                                                 std::pair{ NRI::ShaderStage::Fragment, "fragMain" } })
+            desc.shaders.push_back({ .stage = stage, .entryPoint = entryPoint, .sourcePath = "assets/shaders/NRDGuides.slang" });
+        m_nrdGuidesPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
     void Renderer::createReflectionPipeline(bool forceCompile)
@@ -772,7 +784,8 @@ namespace Nox
     {
         NRI::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
-        desc.colorFormats = {NRI::ImageFormat::R16G16B16A16_SFLOAT};
+        // color (raw pixel or primary emission), NRD diffuse, NRD specular (PathTracerSignals.slang)
+        desc.colorFormats = {NRI::ImageFormat::R16G16B16A16_SFLOAT, NRI::ImageFormat::R16G16B16A16_SFLOAT, NRI::ImageFormat::R16G16B16A16_SFLOAT};
 
         desc.shaders.push_back({
             .stage = NRI::ShaderStage::Task,
@@ -801,6 +814,16 @@ namespace Nox
             .sourcePath = "assets/shaders/YCoCgDecodeInPlace.slang"
         });
         m_ycocgDecodePipeline = m_device->createPipeline(decodeDesc, *m_shaderCompiler);
+
+        NRI::PipelineDesc compositeDesc{};
+        compositeDesc.type = NRI::PipelineType::Compute;
+        compositeDesc.forceCompile = forceCompile;
+        compositeDesc.shaders.push_back({
+            .stage = NRI::ShaderStage::Compute,
+            .entryPoint = "compositeMain",
+            .sourcePath = "assets/shaders/PTComposite.slang"
+        });
+        m_ptCompositePipeline = m_device->createPipeline(compositeDesc, *m_shaderCompiler);
     }
 
     void Renderer::resetDDGIGridToDefaults()
@@ -1245,7 +1268,7 @@ namespace Nox
         {
             NRI::PipelineDesc desc{};
             desc.forceCompile = forceCompile;
-            desc.colorFormats = {NRI::ImageFormat::R16G16B16A16_SFLOAT};
+            desc.colorFormats = {NRI::ImageFormat::R16G16B16A16_SFLOAT, NRI::ImageFormat::R16G16B16A16_SFLOAT}; // diffuse, specular
             desc.shaders.push_back({
                 .stage = NRI::ShaderStage::Task,
                 .entryPoint = "taskMain",
@@ -1491,8 +1514,7 @@ namespace Nox
             NRI::ImageFormat::RGBA8, // 2: SV_Target2 (Material)
             NRI::ImageFormat::R16G16B16A16_SFLOAT, // 3: SV_Target3 (Emission)
             NRI::ImageFormat::R32SINT, // 4: SV_Target4 (Entity ID)
-            NRI::ImageFormat::R32G32_SFLOAT, // 5: SV_Target5 (Velocity)
-            NRI::ImageFormat::RGBA8 // 6: SV_Target6 (Specular Albedo)
+            NRI::ImageFormat::R32G32_SFLOAT // 5: SV_Target5 (Velocity)
         };
 
         desc.shaders.push_back({
@@ -1567,6 +1589,19 @@ namespace Nox
             });
             m_instanceCullingPipelines[index] = m_device->createPipeline(desc, *m_shaderCompiler);
         }
+    }
+
+    void Renderer::createRRGuidesPipeline(bool forceCompile)
+    {
+        NRI::PipelineDesc desc{};
+        desc.type = NRI::PipelineType::Compute;
+        desc.forceCompile = forceCompile;
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Compute,
+            .entryPoint = "guidesMain",
+            .sourcePath = "assets/shaders/RRGuides.slang"
+        });
+        m_rrGuidesPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
     void Renderer::createHiZBuildPipeline(bool forceCompile)
@@ -2671,9 +2706,11 @@ namespace Nox
             addVisibilityLatePass();
             addClusterStatsReadbackPass();
             addGBufferPass();
+            addNRDGuidesPass();
             addRTShadowPasses();
             addRTReflectionPasses();
             addDDGIPasses();
+            addLightPresamplingPasses();
             addReSTIRGIPasses();
             addPreviousFrameCopyPass();
             addReSTIRDIPasses();
@@ -2829,7 +2866,16 @@ namespace Nox
         resources.Entity = graph.CreateTexture("Entity IDs", renderTarget(NRI::ImageFormat::R32SINT));
         resources.EntityHi = graph.CreateTexture("Entity IDs (Display)", outputTarget(NRI::ImageFormat::R32SINT));
         resources.GBufferAlbedo = graph.CreateTexture("GBuffer Albedo", renderTarget(NRI::ImageFormat::RGBA8));
-        resources.GBufferSpecular = graph.CreateTexture("GBuffer Specular", renderTarget(NRI::ImageFormat::RGBA8));
+        {
+            // DLSS Ray Reconstruction guides (addDLSSPass): written by a compute pass, only allocated when it runs.
+            RGTextureDesc guide = renderTarget(NRI::ImageFormat::RGBA8);
+            guide.Usage = NRI::TextureUsage::Storage;
+            resources.RRDiffuseAlbedo = graph.CreateTexture("RR Diffuse Albedo", guide);
+            guide.Format = NRI::ImageFormat::R16G16B16A16_SFLOAT; // dielectric specular albedo is a few percent
+            resources.RRSpecularAlbedo = graph.CreateTexture("RR Specular Albedo", guide);
+            guide.Format = NRI::ImageFormat::R16_SFLOAT;
+            resources.RRSpecularHitDistance = graph.CreateTexture("RR Specular Hit Distance", guide);
+        }
         resources.GBufferNormal = graph.CreateTexture("GBuffer Normal", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
         resources.GBufferMaterial = graph.CreateTexture("GBuffer Material", renderTarget(NRI::ImageFormat::RGBA8));
         resources.GBufferEmission = graph.CreateTexture("GBuffer Emission", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
@@ -2841,16 +2887,16 @@ namespace Nox
         resources.DenoisedShadowMask = graph.CreateTexture("Denoised Shadow Mask", renderTarget(NRI::ImageFormat::R16G16_SFLOAT));
         resources.RawReflection = graph.CreateTexture("Raw Reflection", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
         resources.DenoisedReflection = graph.CreateTexture("Denoised Reflection", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
-        // NRD's view-Z and packed normal/roughness guides are written by the RT shadow pass but read by every NRD
-        // denoiser, which can run while RT shadows are off. They persist across frames (histories) so those denoisers
-        // keep reading the last guides instead of an unwritten texture.
-        resources.ViewZ = graph.GetHistoryTexture("NRD View Z", renderTarget(NRI::ImageFormat::R16_SFLOAT), 1).Textures[0];
-        resources.NRDNormalRoughness = graph.GetHistoryTexture("NRD Normal Roughness", renderTarget(NRI::ImageFormat::R10G10B10A2_UNORM), 1).Textures[0];
+        // NRD's view-Z and packed normal/roughness guides, written each frame any NRD denoiser runs (addNRDGuidesPass).
+        resources.ViewZ = graph.CreateTexture("NRD View Z", renderTarget(NRI::ImageFormat::R16_SFLOAT));
+        resources.NRDNormalRoughness = graph.CreateTexture("NRD Normal Roughness", renderTarget(NRI::ImageFormat::R10G10B10A2_UNORM));
 
         resources.ReSTIRGIRaw = graph.CreateTexture("ReSTIR GI Diffuse", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
         resources.ReSTIRGIDenoised = graph.CreateTexture("ReSTIR GI Denoised", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
-        resources.ReSTIRDIDirect = graph.CreateTexture("ReSTIR DI Direct", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
-        resources.ReSTIRDIDenoised = graph.CreateTexture("ReSTIR DI Denoised", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
+        resources.ReSTIRDIDiffuse = graph.CreateTexture("ReSTIR DI Diffuse", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
+        resources.ReSTIRDISpecular = graph.CreateTexture("ReSTIR DI Specular", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
+        resources.ReSTIRDIDiffuseDenoised = graph.CreateTexture("ReSTIR DI Diffuse Denoised", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
+        resources.ReSTIRDISpecularDenoised = graph.CreateTexture("ReSTIR DI Specular Denoised", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
         {
             RGTextureDesc lightPDF;
             lightPDF.Size = RGSize::Absolute;
@@ -2865,11 +2911,17 @@ namespace Nox
         resources.ReSTIRPTOutput = graph.CreateTexture("ReSTIR PT Output", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
         resources.ReSTIRPTPrimaryDirect = graph.CreateTexture("ReSTIR PT Primary Direct", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
         {
-            // Storage: NRD writes it, and the in-place YCoCg decode (REBLUR) needs a storage slot on it.
+            // Storage: NRD writes it (ReSTIR PT), the in-place YCoCg decode and the path tracer's composite (PTComposite.slang)
+            // write it through a storage slot.
             RGTextureDesc denoised = renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT);
             denoised.Usage = NRI::TextureUsage::Storage;
             resources.PathTracerDenoised = graph.CreateTexture("Path Tracer Denoised", denoised);
         }
+        // The path tracer's NRD signals (PathTracerSignals.slang) and their denoised versions.
+        resources.PathTracerDiffuse = graph.CreateTexture("Path Tracer Diffuse", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
+        resources.PathTracerSpecular = graph.CreateTexture("Path Tracer Specular", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
+        resources.PathTracerDiffuseDenoised = graph.CreateTexture("Path Tracer Diffuse Denoised", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
+        resources.PathTracerSpecularDenoised = graph.CreateTexture("Path Tracer Specular Denoised", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
 
         // Previous-frame G-buffer snapshots (depth/normal for ReSTIR GI/DI temporal validity, albedo/material for ReSTIR
         // PT's RandomReplay / RAB_AreMaterialsSimilar), copied every frame by the Previous Frame Copy pass.
@@ -2962,12 +3014,14 @@ namespace Nox
         if (frame.restirDIAdded)
         {
             uniformData.directLightingMode = m_directLightingMode;
-            uniformData.restirDIDirectLightingTextureIndex = graph.GetSlotOr(frame.nrdDIAdded ? resources.ReSTIRDIDenoised : resources.ReSTIRDIDirect, NoTexture);
+            uniformData.restirDIDiffuseTextureIndex = graph.GetSlotOr(frame.nrdDIAdded ? resources.ReSTIRDIDiffuseDenoised : resources.ReSTIRDIDiffuse, NoTexture);
+            uniformData.restirDISpecularTextureIndex = graph.GetSlotOr(frame.nrdDIAdded ? resources.ReSTIRDISpecularDenoised : resources.ReSTIRDISpecular, NoTexture);
         }
         else
         {
             uniformData.directLightingMode = 0;
-            uniformData.restirDIDirectLightingTextureIndex = NoTexture;
+            uniformData.restirDIDiffuseTextureIndex = NoTexture;
+            uniformData.restirDISpecularTextureIndex = NoTexture;
         }
     }
 
@@ -3819,8 +3873,10 @@ namespace Nox
         glm::mat4 rasterProj = m_currentNonJitteredProj;
         if (enableJitter)
         {
-            float deltaNdcX = (2.0f * m_currentJitter.x) / static_cast<float>(m_viewportSize.width);
-            float deltaNdcY = (2.0f * m_currentJitter.y) / static_cast<float>(m_viewportSize.height);
+            // The jitter is a pixel offset of the render resolution (x right, y down) -- what DLSS is told. The viewport is
+            // flipped (RGViewport::FlippedY): NDC y points up, so a pixel offset down is a negative NDC y offset.
+            float deltaNdcX = (2.0f * m_currentJitter.x) / static_cast<float>(m_renderSize.width);
+            float deltaNdcY = (-2.0f * m_currentJitter.y) / static_cast<float>(m_renderSize.height);
             rasterProj[2][0] += deltaNdcX;
             rasterProj[2][1] += deltaNdcY;
         }
@@ -3947,8 +4003,10 @@ namespace Nox
         glm::mat4 rasterProj = m_currentNonJitteredProj;
         if (enableJitter)
         {
-            float deltaNdcX = (2.0f * m_currentJitter.x) / static_cast<float>(m_viewportSize.width);
-            float deltaNdcY = (2.0f * m_currentJitter.y) / static_cast<float>(m_viewportSize.height);
+            // The jitter is a pixel offset of the render resolution (x right, y down) -- what DLSS is told. The viewport is
+            // flipped (RGViewport::FlippedY): NDC y points up, so a pixel offset down is a negative NDC y offset.
+            float deltaNdcX = (2.0f * m_currentJitter.x) / static_cast<float>(m_renderSize.width);
+            float deltaNdcY = (-2.0f * m_currentJitter.y) / static_cast<float>(m_renderSize.height);
             rasterProj[2][0] += deltaNdcX;
             rasterProj[2][1] += deltaNdcY;
         }

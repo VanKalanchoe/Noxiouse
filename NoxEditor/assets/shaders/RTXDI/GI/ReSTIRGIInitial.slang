@@ -5,6 +5,7 @@
 RWStructuredBuffer<RTXDI_PackedGIReservoir> g_DummyReservoirBuffer;
 #include "Rtxdi/GI/Reservoir.hlsli"
 #include "Rtxdi/Utils/Math.hlsli"
+#include "RTXDI/RTXDILightSampling.slang"
 
 static const float M_PI = 3.141592653589793;
 static const float GOLDEN_ANGLE = 2.399963229728653;
@@ -187,6 +188,75 @@ bool trace_visibility_alpha(
     return shadowQuery.CommittedStatus() != COMMITTED_TRIANGLE_HIT;
 }
 
+// Sample analytic lighting through RTXDI instead of walking every scene light at every GI vertex.
+// The selected sample's reservoir inverse PDF reconstructs the complete-light estimate.
+float3 sample_direct_light(
+    UniformBufferObject* ubo,
+    GpuRayTracingInstance* instanceLUTBuffer,
+    SamplerState textureSampler,
+    RTXDILightSamplingParams lightSampling,
+    float3 worldPos,
+    float3 normal,
+    bool doubleSided,
+    uint2 pixelCoord,
+    uint frameIndex,
+    uint sampleIndex)
+{
+    if (lightSampling.lightDataReference == 0 ||
+        (lightSampling.numLocalLights == 0 && lightSampling.numInfiniteLights == 0))
+    {
+        return float3(0.0);
+    }
+
+    RAB_Surface surface;
+    surface.worldPos = worldPos;
+    surface.normal = normal;
+    surface.linearDepth = 0.0;
+    surface.valid = true;
+
+    RTXDI_RandomSamplerState rng = RTXDI_InitRandomSampler(pixelCoord, frameIndex, sampleIndex * 2u);
+    RTXDI_RandomSamplerState coherentRng = RTXDI_InitRandomSampler(pixelCoord / 8u, frameIndex, sampleIndex * 2u + 1u);
+    RAB_LightSample lightSample;
+    RTXDI_DIReservoir reservoir = RTXDI_SampleLightsAt(surface, rng, coherentRng, lightSampling, lightSample);
+    if (!RTXDI_IsValidDIReservoir(reservoir) || dot(lightSample.radiance, lightSample.radiance) <= 1e-8)
+    {
+        return float3(0.0);
+    }
+
+    float3 lightDir;
+    float lightDist;
+    if (lightSample.lightType == 0)
+    {
+        lightDir = normalize(lightSample.normal);
+        lightDist = 1e4;
+    }
+    else
+    {
+        float3 toLight = lightSample.position - worldPos;
+        lightDist = length(toLight);
+        lightDir = lightDist > 1e-4 ? toLight / lightDist : float3(0.0, 1.0, 0.0);
+    }
+
+    float signedNdotL = dot(normal, lightDir);
+    float NdotL = doubleSided ? abs(signedNdotL) : max(signedNdotL, 0.0);
+    if (NdotL <= 0.0)
+    {
+        return float3(0.0);
+    }
+
+    float3 shadowNormal = doubleSided && signedNdotL < 0.0 ? -normal : normal;
+    bool visible = trace_visibility_alpha(
+        ubo, instanceLUTBuffer, textureSampler,
+        worldPos + shadowNormal * 0.02, lightDir, lightDist - 0.02);
+    if (!visible)
+    {
+        return float3(0.0);
+    }
+
+    float terminatorFade = saturate(NdotL * 10.0);
+    return lightSample.radiance * (NdotL * terminatorFade * RTXDI_GetDIReservoirInvPdf(reservoir));
+}
+
 float evaluate_soft_visibility_alpha(
     UniformBufferObject* ubo,
     GpuRayTracingInstance* instanceLUTBuffer,
@@ -315,15 +385,9 @@ PSOutput fragMain(
     float2 rngSample = pcg2d(pixelCoord, pushConstant.frameIndex);
     float3 rayDir = sample_cosine_hemisphere(normal, rngSample);
     float NdotL = max(dot(normal, rayDir), 0.0);
-    // Floor raised from 1e-4 to 0.05: a near-grazing sample at the old floor could produce a
-    // reservoir weight (1/rayPdf) up to ~10,000x. Under a static camera that's invisible because M
-    // grows large over many accumulated frames, diluting any single frame's rare outlier via 1/M
-    // normalization. Under camera motion, temporal reprojection fails more often (disocclusion), M
-    // collapses back toward 1 far more frequently, and that single frame's extreme-weight sample
-    // becomes the ENTIRE displayed value, undiluted -- a visible flare that clears once M rebuilds.
-    // 0.05 caps the maximum reservoir weight at 20x, which is still enough range for legitimate
-    // near-grazing contributions without letting the RIS selection get dominated by an outlier.
-    float rayPdf = max(NdotL / 3.14159265359, 0.05);
+    // This must remain the actual solid-angle PDF of the cosine sample. A large floor biases
+    // grazing samples dark and makes the reservoir systematically lose indirect energy.
+    float rayPdf = max(NdotL / 3.14159265359, 1e-6);
 
     // 5. Trace Indirect Diffuse Ray against TLAS
     float3 rayOrigin = worldPos + normal * 0.01;
@@ -444,257 +508,17 @@ PSOutput fragMain(
 
         float3 emissive = hitLut.emissiveFactor.rgb * hitLut.emissiveFactor.a;
 
-        // Direct analytical lighting at secondary hit
-        float3 directLight = float3(0.0);
-        if (ubo->lightDataReference != 0)
-        {
-            LightData* lights = (LightData*)ubo->lightDataReference;
-            for (uint i = 0; i < ubo->lightCount; i++)
-        {
-            LightData light = lights[i];
-            uint lightType = (uint)light.position.w;
+        // Direct analytical lighting at the secondary hit, selected with the same RTXDI
+        // importance distribution used by ReSTIR DI.
+        float3 directLight = sample_direct_light(
+            ubo, instanceLUTBuffer, textureSampler, pushConstant.lightSampling,
+            hitPos, hitNormal, hitLut.doubleSided != 0,
+            pixelCoord, pushConstant.frameIndex, 2u);
 
-            float3 l;
-            float dist = 1000.0;
-            float attenuation = 1.0;
-
-            if (lightType == 0) // Directional
-            {
-                l = normalize(light.direction.xyz);
-            }
-            else // Point or Spot
-            {
-                float3 lightVec = light.position.xyz - hitPos;
-                dist = length(lightVec);
-                l = dist > 0.0001 ? lightVec / dist : float3(0.0, 1.0, 0.0);
-
-                float range = light.direction.w;
-                if (range > 0.0)
-                {
-                    if (dist > range) continue;
-                    float dOverR = dist / range;
-                    float window = max(1.0 - pow(dOverR, 4.0), 0.0);
-                    attenuation = window / (dist * dist);
-                }
-                else
-                {
-                    attenuation = 1.0 / (dist * dist);
-                }
-
-                if (lightType == 2) // Spot Cone
-                {
-                    float cd = dot(normalize(light.direction.xyz), -l);
-                    float lightAngleScale = light.spotParams.x;
-                    float lightAngleOffset = light.spotParams.y;
-                    float angularAttenuation = saturate(cd * lightAngleScale + lightAngleOffset);
-                    angularAttenuation *= angularAttenuation;
-                    attenuation *= angularAttenuation;
-                }
-            }
-
-            if (attenuation <= 0.0) continue;
-
-            float NdotL_hit = dot(hitNormal, l);
-            if (hitLut.doubleSided != 0)
-            {
-                NdotL_hit = abs(NdotL_hit);
-            }
-
-            if (NdotL_hit <= 0.0) continue;
-
-            float3 shadowNormal = hitNormal;
-            if (hitLut.doubleSided != 0 && dot(hitNormal, l) < 0.0)
-            {
-                shadowNormal = -hitNormal;
-            }
-            float visibility = evaluate_soft_visibility_alpha(
-                ubo,
-                instanceLUTBuffer,
-                textureSampler,
-                light,
-                hitPos,
-                shadowNormal,
-                l,
-                (lightType == 0) ? 1000.0 : dist,
-                pixelCoord + uint2(i * 13u, i * 29u),
-                pushConstant.frameIndex);
-
-            if (visibility > 0.0)
-            {
-                directLight += visibility * light.color.rgb * light.color.w * NdotL_hit * attenuation;
-            }
-        }
-    }
-
-        // Continue the path beyond the secondary hit, matching RTXPT's ReSTIR GI integration: the
-        // full path tracer keeps running past the primary GI vertex (this secondary hit) with its
-        // usual NEE + Russian roulette, and everything collected from here onward becomes the
-        // reservoir's radiance. albedo/PI * directLight above is this vertex's own NEE contribution
-        // (unchanged); indirectLight below is vertex2+ (throughput starts at this vertex's albedo,
-        // since the primary GI ray's own BRDF/pdf weighting is applied later by the reservoir weight
-        // and, at composite time, by the PRIMARY surface's own albedo -- see RTXPT GIFinalShading.hlsl:
-        // "the PDF component is applied here, the BRDF component is applied in final shading").
-        float3 indirectLight = float3(0.0);
-        {
-            float3 throughput = albedo;
-            float3 curPos = hitPos;
-            float3 curNormal = hitNormal;
-
-            const uint MAX_EXTRA_BOUNCES = 4;
-            for (uint b = 0; b < MAX_EXTRA_BOUNCES; b++)
-            {
-                if (b >= 2)
-                {
-                    float2 rrU = pcg2d(pixelCoord + uint2(9001u + b * 97u, 5003u + b * 131u), pushConstant.frameIndex);
-                    float p = clamp(max(throughput.r, max(throughput.g, throughput.b)), 0.05, 0.95);
-                    if (rrU.x >= p) break;
-                    throughput /= p;
-                }
-
-                float2 rngB = pcg2d(pixelCoord + uint2(1337u * (b + 1u), 7331u * (b + 1u)), pushConstant.frameIndex);
-                float3 bounceDir = sample_cosine_hemisphere(curNormal, rngB);
-
-                RayDesc bRay;
-                bRay.Origin = curPos + curNormal * 0.02;
-                bRay.Direction = bounceDir;
-                bRay.TMin = 0.005;
-                bRay.TMax = 1e4;
-
-                RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> brq;
-                brq.TraceRayInline(accelerationStructure, RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES, 0xFF, bRay);
-
-                while (brq.Proceed())
-                {
-                    uint bInst = brq.CandidateRayInstanceCustomIndex();
-                    uint bPrim = brq.CandidatePrimitiveIndex();
-                    GpuRayTracingInstance bLut = instanceLUTBuffer[bInst];
-                    if (bLut.alphaMode == 0 || bLut.baseColorTextureIndex == 0xFFFFFFFF)
-                    {
-                        brq.CommitNonOpaqueTriangleHit();
-                    }
-                    else
-                    {
-                        float2 bUV = intersection_uv(bLut, bPrim, brq.CandidateTriangleBarycentrics());
-                        Texture2D bTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + bLut.baseColorTextureIndex, 0));
-                        if (bTex.SampleLevel(textureSampler, bUV, 0).a >= bLut.alphaCutoff)
-                        {
-                            brq.CommitNonOpaqueTriangleHit();
-                        }
-                    }
-                }
-
-                if (brq.CommittedStatus() != COMMITTED_TRIANGLE_HIT)
-                {
-                    float3 skyCol;
-                    if (ubo->prefilteredMapIndex != 0xFFFFFFFF)
-                    {
-                        TextureCube prefilteredTex = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + ubo->prefilteredMapIndex, 0));
-                        SamplerState samplerPrefiltered = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_PREFILTER, 0));
-                        skyCol = prefilteredTex.SampleLevel(samplerPrefiltered, bounceDir, 0).rgb * ubo->scaleIBLAmbient;
-                    }
-                    else
-                    {
-                        skyCol = lerp(float3(0.08, 0.08, 0.12), float3(0.4, 0.6, 0.95), saturate(bounceDir.y * 0.5 + 0.5)) * ubo->scaleIBLAmbient;
-                    }
-                    indirectLight += throughput * skyCol;
-                    break;
-                }
-
-                uint cInst = brq.CommittedRayInstanceCustomIndex();
-                uint cPrim = brq.CommittedPrimitiveIndex();
-                float2 cBary = brq.CommittedTriangleBarycentrics();
-                float cT = brq.CommittedRayT();
-
-                GpuRayTracingInstance cLut = instanceLUTBuffer[cInst];
-                if (cLut.vertexBufferAddress == 0) break;
-
-                uint32_t* cIndices = (uint32_t*)cLut.indexBufferAddress;
-                Vertex* cVertices = (Vertex*)cLut.vertexBufferAddress;
-                uint ci0 = (cLut.indexBufferAddress != 0) ? cIndices[cPrim * 3 + 0] : (cPrim * 3 + 0);
-                uint ci1 = (cLut.indexBufferAddress != 0) ? cIndices[cPrim * 3 + 1] : (cPrim * 3 + 1);
-                uint ci2 = (cLut.indexBufferAddress != 0) ? cIndices[cPrim * 3 + 2] : (cPrim * 3 + 2);
-
-                float cw0 = 1.0 - cBary.x - cBary.y;
-                float2 cUV = cw0 * cVertices[ci0].uv0 + cBary.x * cVertices[ci1].uv0 + cBary.y * cVertices[ci2].uv0;
-                float3 cLocalNormal = normalize(cw0 * cVertices[ci0].normal + cBary.x * cVertices[ci1].normal + cBary.y * cVertices[ci2].normal);
-                float3 cNormal = normalize(mul((float3x3)cLut.normalMatrix, cLocalNormal));
-                if (cLut.doubleSided != 0 && dot(cNormal, -bounceDir) < 0.0) cNormal = -cNormal;
-
-                float3 cPos = bRay.Origin + bounceDir * cT;
-                float3 cAlbedo = cLut.baseColorFactor.rgb;
-                if (cLut.baseColorTextureIndex != 0xFFFFFFFF)
-                {
-                    Texture2D cTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + cLut.baseColorTextureIndex, 0));
-                    cAlbedo *= cTex.SampleLevel(textureSampler, cUV, 0).rgb;
-                }
-
-                float3 cDirect = float3(0.0);
-                if (ubo->lightDataReference != 0)
-                {
-                    LightData* lights = (LightData*)ubo->lightDataReference;
-                    for (uint li = 0; li < ubo->lightCount; li++)
-                    {
-                        LightData light = lights[li];
-                        uint lightType = (uint)light.position.w;
-                        float3 l2 = (lightType == 0) ? normalize(light.direction.xyz) : normalize(light.position.xyz - cPos);
-                        float dist2 = (lightType == 0) ? 1000.0 : length(light.position.xyz - cPos);
-                        float attenuation = 1.0;
-                        if (lightType != 0)
-                        {
-                            float range = light.direction.w;
-                            attenuation = (range > 0.0)
-                                ? (max(1.0 - pow(dist2 / range, 4.0), 0.0) / max(dist2 * dist2, 0.001))
-                                : (1.0 / max(dist2 * dist2, 0.001));
-                            if (lightType == 2)
-                            {
-                                float cd = dot(normalize(light.direction.xyz), -l2);
-                                float angScale = light.spotParams.x;
-                                float angOffset = light.spotParams.y;
-                                float ang = saturate(cd * angScale + angOffset);
-                                attenuation *= ang * ang;
-                            }
-                        }
-
-                        float cNdotL = dot(cNormal, l2);
-                        if (cLut.doubleSided != 0) cNdotL = abs(cNdotL);
-                        if (cNdotL <= 0.001 || attenuation <= 0.0) continue;
-
-                        float3 cShadowNormal = cNormal;
-                        if (cLut.doubleSided != 0 && dot(cNormal, l2) < 0.0)
-                        {
-                            cShadowNormal = -cNormal;
-                        }
-
-                        float visibility = evaluate_soft_visibility_alpha(
-                            ubo,
-                            instanceLUTBuffer,
-                            textureSampler,
-                            light,
-                            cPos,
-                            cShadowNormal,
-                            l2,
-                            (lightType == 0) ? 1000.0 : dist2,
-                            pixelCoord + uint2(li * 17u + b * 43u, li * 31u + b * 59u),
-                            pushConstant.frameIndex);
-
-                        if (visibility > 0.0)
-                        {
-                            cDirect += visibility * light.color.rgb * light.color.w * attenuation * cNdotL;
-                        }
-                    }
-                }
-
-                float3 cEmissive = cLut.emissiveFactor.rgb * cLut.emissiveFactor.a;
-                indirectLight += throughput * ((cAlbedo / 3.14159265359) * cDirect + cEmissive);
-
-                throughput *= cAlbedo;
-                curPos = cPos;
-                curNormal = cNormal;
-            }
-        }
-
-        // Reflected radiance from the secondary surface towards the primary hit
-        hitRadiance = (albedo / 3.14159265359) * directLight + indirectLight + emissive;
+        // One-bounce real-time GI candidate: one diffuse ray plus one direct-light shadow ray.
+        // Deeper paths belong to RTXPT; tracing four additional bounces per screen pixel made this
+        // pass substantially more expensive than the ground-truth renderer it was approximating.
+        hitRadiance = (albedo / 3.14159265359) * directLight + emissive;
     }
 
     // 6. Pack Initial Reservoir (M = 1, weightSum = 1.0 / rayPdf, age = 0)

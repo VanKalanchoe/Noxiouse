@@ -57,6 +57,9 @@ namespace Nox
                 builder.Read(resources.Visibility);
                 ReadIfValid(builder, resources.TLAS);
                 ReadGpuScene(builder, resources);
+                // The path vertices' direct light samples this frame's presampled lights.
+                if (m_frame.lightPresamplingAdded)
+                    builder.Read(resources.ReSTIRDIRIS);
                 builder.Write(resources.ReSTIRGIReservoirs[kScratchBuffer]);
                 builder.ColorTarget(resources.ReSTIRGIRaw, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
                 builder.SetRenderArea(m_frame.renderExtent);
@@ -88,6 +91,18 @@ namespace Nox
                 initPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
                 initPush.reservoirBlockRowPitch = blockRowPitch;
                 initPush.reservoirArrayPitch = arrayPitch;
+                // Infinite lights do not need a RIS buffer. Populate the directional-light region
+                // even when local-light presampling was skipped (sun-only scenes such as Bistro).
+                initPush.lightSampling.lightDataReference = uniformData.lightDataReference;
+                initPush.lightSampling.firstInfiniteLightIndex = m_restirDIFirstInfiniteLight;
+                initPush.lightSampling.numInfiniteLights = m_restirDINumInfiniteLights;
+                initPush.lightSampling.numInfiniteLightSamples = 1;
+                if (m_frame.lightPresamplingAdded)
+                {
+                    initPush.lightSampling = lightSamplingParams(context, res->ReSTIRDIRIS);
+                    initPush.lightSampling.numLocalLightSamples = 1;
+                    initPush.lightSampling.numInfiniteLightSamples = 1;
+                }
                 cmd.pushData(&initPush, sizeof(shaderio::PushConstantReSTIRGIInitial));
 
                 cmd.drawMeshTasks(1, 1, 1);
@@ -153,6 +168,7 @@ namespace Nox
             });
 
         // 3. Spatial resampling: reads this frame's scratch buffer (own pixel and neighbors), writes the persistent one.
+        const bool denoiseGI = m_nrdGIDenoiser != NRI::NRDDiffuseDenoiser::Off && m_device->isNRDInitialized();
         m_renderGraph.AddPass("ReSTIR GI Spatial", RGPassFlags::Raster,
             [&](RGBuilder& builder)
             {
@@ -165,7 +181,7 @@ namespace Nox
                 builder.ColorTarget(resources.ReSTIRGIRaw, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
                 builder.SetRenderArea(m_frame.renderExtent);
             },
-            [this, res = &resources, blockRowPitch, arrayPitch](RGPassContext& context)
+            [this, res = &resources, blockRowPitch, arrayPitch, denoiseGI](RGPassContext& context)
             {
                 NRI::CommandBuffer& cmd = context.Cmd();
                 const float rw = static_cast<float>(m_frame.renderExtent.width);
@@ -200,14 +216,15 @@ namespace Nox
                 sPush.neighborOffsetMask = 127;
                 sPush.enableBoilingFilter = m_restirGIEnableBoilingFilter ? 1 : 0;
                 sPush.boilingFilterStrength = m_restirGIBoilingFilterStrength;
-                sPush.denoiserMode = static_cast<uint32_t>(m_nrdGIDenoiser);
+                // Packed for the NRD pass that runs (the lighting unpacks the same way), plain without one.
+                sPush.denoiserMode = denoiseGI ? static_cast<uint32_t>(m_nrdGIDenoiser) : 0u;
                 cmd.pushData(&sPush, sizeof(shaderio::PushConstantReSTIRGISpatial));
 
                 cmd.drawMeshTasks(1, 1, 1);
             });
 
         // 4. NRD diffuse (REBLUR / RELAX) of the 1-SPP GI.
-        if (m_nrdGIDenoiser != NRI::NRDDiffuseDenoiser::Off && m_device->isNRDInitialized())
+        if (denoiseGI)
         {
             m_frame.nrdGIAdded = true;
             m_renderGraph.AddPass("NRD GI", RGPassFlags::None,
@@ -281,53 +298,33 @@ namespace Nox
             });
     }
 
-    void Renderer::addReSTIRDIPasses()
+    void Renderer::addLightPresamplingPasses()
     {
-        // ReSTIR DI ray-traces its final shadow against the scene TLAS, so it needs ray tracing access.
-        const bool runReSTIRDI = (!m_frame.runPathTracer || m_frame.pathTracerUsesRTXDI) &&
-                                 (m_rayTracingEnabled || m_frame.pathTracerUsesRTXDI) &&
-                                 m_directLightingMode == 1 &&
-                                 m_hasTLASBuild && m_sceneTLAS && (uniformData.tlasDeviceAddress != 0) &&
-                                 m_restirDIInitialPipeline && m_restirDITemporalPipeline &&
-                                 m_restirDISpatialPipeline && m_restirDIFinalShadingPipeline &&
-                                 m_restirDIPresamplePipeline && m_restirDIPresampleReGIRPipeline &&
-                                 m_restirDIWriteLightPDFPipeline && m_restirDIReduceLightPDFMipPipeline &&
-                                 m_restirGINeighborOffsetsBuffer && (uniformData.lightDataReference != 0);
-        // When it does not run, resolveFrameUniforms falls back to the brute-force loop (e.g. TLAS build pending).
-        if (!runReSTIRDI)
+        // RTXDI's light presampling (light PDF mip chain, RIS tiles, ReGIR cells), once per frame for everything that samples
+        // lights through it: ReSTIR DI's primary surfaces and ReSTIR GI's path vertices (RTXDILightSampling.slang).
+        const bool rtxdiLighting = m_directLightingMode == 1 || m_diffuseGIMode == 2 || (m_debugMode == 16 && m_diffuseGIMode != 1);
+        const bool runPresampling = rtxdiLighting && m_restirDINumLocalLights > 0 &&
+                                    (!m_frame.runPathTracer || m_frame.pathTracerUsesRTXDI) &&
+                                    (m_rayTracingEnabled || m_frame.pathTracerUsesRTXDI) &&
+                                    m_restirDIPresamplePipeline && m_restirDIPresampleReGIRPipeline &&
+                                    m_restirDIWriteLightPDFPipeline && m_restirDIReduceLightPDFMipPipeline &&
+                                    (uniformData.lightDataReference != 0);
+        if (!runPresampling)
             return;
 
         FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
-        m_frame.restirDIAdded = true;
-
-        const RTXDI_ReservoirBufferParameters diResParams = rtxdi::CalculateReservoirBufferParameters(
-            m_renderSize.width, m_renderSize.height, rtxdi::CheckerboardMode::Off);
-        const uint32_t blockRowPitch = diResParams.reservoirBlockRowPitch;
-        const uint32_t arrayPitch = diResParams.reservoirArrayPitch;
-
-        const RGBufferHistory reservoirs = m_renderGraph.GetHistoryBuffer("ReSTIR DI Reservoirs",
-            RGBufferDesc{ static_cast<uint64_t>(arrayPitch) * sizeof(RTXDI_PackedDIReservoir) }, 3);
-        for (uint32_t i = 0; i < 3; ++i)
-            resources.ReSTIRDIReservoirs[i] = reservoirs.Buffers[i];
-        if (reservoirs.WasReset)
-            m_restirDILastFrameOutputReservoir = 0;
-
-        // 3-buffer rotation (NOT GI's fixed 2-role scheme) - see the rotation math documented on
-        // PushConstantReSTIRDIInitial in shaderIO.h. Only 2 buffers would reintroduce the read/write race fixed for GI.
-        const uint32_t bufferA = (m_restirDILastFrameOutputReservoir + 1) % 3; // Initial writes, Temporal overwrites in place
-        const uint32_t bufferC = m_restirDILastFrameOutputReservoir;          // Temporal's history (read only)
-        const uint32_t bufferB = (bufferA + 1) % 3;                            // Spatial's output, Final Shading's input
-        m_restirDILastFrameOutputReservoir = bufferB;
 
         const uint32_t regirCellCount = m_regirCellsX * m_regirCellsY * m_regirCellsZ;
         const uint32_t risBufferOffset = m_restirDIRISTileSize * m_restirDIRISTileCount; // where ReGIR's segment starts
-        const bool regirActive = m_regirEnabled && regirCellCount > 0;
+        // ReGIR only contains local lights. Building all grid cells when the scene has only a sun
+        // performs hundreds of thousands of useless RIS iterations and can dominate the frame.
+        const bool regirActive = m_regirEnabled && regirCellCount > 0 && m_restirDINumLocalLights > 0;
 
         // uint2 per element: [0, risBufferOffset) = RIS tiles, [risBufferOffset, end) = ReGIR cells. Rebuilt every frame.
         const uint64_t risElements = static_cast<uint64_t>(risBufferOffset) + static_cast<uint64_t>(regirCellCount) * m_regirLightsPerCell;
         resources.ReSTIRDIRIS = m_renderGraph.CreateBuffer("ReSTIR DI RIS", RGBufferDesc{ risElements * sizeof(glm::uvec2) });
 
-        m_renderGraph.PushGroup("ReSTIR DI");
+        m_renderGraph.PushGroup("Light Presampling");
 
         // -1. Light PDF mip chain rebuild (feeds RTXDI_PresampleLocalLights), every frame: lights can change every frame.
         m_renderGraph.AddPass("Light PDF Write", RGPassFlags::None,
@@ -444,6 +441,77 @@ namespace Nox
                 });
         }
 
+        m_frame.lightPresamplingAdded = true;
+        m_frame.risBufferOffset = risBufferOffset;
+        m_frame.regirActive = regirActive;
+        m_renderGraph.PopGroup();
+    }
+
+    shaderio::RTXDILightSamplingParams Renderer::lightSamplingParams(const RGPassContext& context, RGBuffer risBuffer) const
+    {
+        shaderio::RTXDILightSamplingParams params{};
+        params.lightDataReference = uniformData.lightDataReference;
+        params.risBufferReference = context.Buffer(risBuffer).getDeviceAddress();
+        params.gridCenterAndCellSize = glm::vec4(m_regirGridCenter, m_regirCellSize);
+        params.firstLocalLightIndex = m_restirDIFirstLocalLight;
+        params.numLocalLights = m_restirDINumLocalLights;
+        params.firstInfiniteLightIndex = m_restirDIFirstInfiniteLight;
+        params.numInfiniteLights = m_restirDINumInfiniteLights;
+        params.numLocalLightSamples = m_restirDINumLocalLightSamples;
+        params.numInfiniteLightSamples = m_restirDINumInfiniteLightSamples;
+        params.risBufferOffset = m_frame.risBufferOffset;
+        params.risTileSize = m_restirDIRISTileSize;
+        params.risTileCount = m_restirDIRISTileCount;
+        params.regirEnabled = m_frame.regirActive ? 1u : 0u;
+        params.cellsX = m_regirCellsX;
+        params.cellsY = m_regirCellsY;
+        params.cellsZ = m_regirCellsZ;
+        params.lightsPerCell = m_regirLightsPerCell;
+        params.regirSamplingJitter = m_regirSamplingJitter;
+        return params;
+    }
+
+    void Renderer::addReSTIRDIPasses()
+    {
+        // ReSTIR DI ray-traces its final shadow against the scene TLAS, so it needs ray tracing access.
+        const bool runReSTIRDI = (!m_frame.runPathTracer || m_frame.pathTracerUsesRTXDI) &&
+                                 (m_rayTracingEnabled || m_frame.pathTracerUsesRTXDI) &&
+                                 m_directLightingMode == 1 &&
+                                 m_hasTLASBuild && m_sceneTLAS && (uniformData.tlasDeviceAddress != 0) &&
+                                 m_restirDIInitialPipeline && m_restirDITemporalPipeline &&
+                                 m_restirDISpatialPipeline && m_restirDIFinalShadingPipeline &&
+                                 m_restirGINeighborOffsetsBuffer && (uniformData.lightDataReference != 0);
+        // When it does not run, resolveFrameUniforms falls back to the brute-force loop (e.g. TLAS build pending).
+        if (!runReSTIRDI)
+            return;
+
+        FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
+        m_frame.restirDIAdded = true;
+
+        const RTXDI_ReservoirBufferParameters diResParams = rtxdi::CalculateReservoirBufferParameters(
+            m_renderSize.width, m_renderSize.height, rtxdi::CheckerboardMode::Off);
+        const uint32_t blockRowPitch = diResParams.reservoirBlockRowPitch;
+        const uint32_t arrayPitch = diResParams.reservoirArrayPitch;
+
+        const RGBufferHistory reservoirs = m_renderGraph.GetHistoryBuffer("ReSTIR DI Reservoirs",
+            RGBufferDesc{ static_cast<uint64_t>(arrayPitch) * sizeof(RTXDI_PackedDIReservoir) }, 3);
+        for (uint32_t i = 0; i < 3; ++i)
+            resources.ReSTIRDIReservoirs[i] = reservoirs.Buffers[i];
+        if (reservoirs.WasReset)
+            m_restirDILastFrameOutputReservoir = 0;
+
+        // 3-buffer rotation (NOT GI's fixed 2-role scheme) - see the rotation math documented on
+        // PushConstantReSTIRDIInitial in shaderIO.h. Only 2 buffers would reintroduce the read/write race fixed for GI.
+        const uint32_t bufferA = (m_restirDILastFrameOutputReservoir + 1) % 3; // Initial writes, Temporal overwrites in place
+        const uint32_t bufferC = m_restirDILastFrameOutputReservoir;          // Temporal's history (read only)
+        const uint32_t bufferB = (bufferA + 1) % 3;                            // Spatial's output, Final Shading's input
+        m_restirDILastFrameOutputReservoir = bufferB;
+        const bool hasLocalLights = m_restirDINumLocalLights > 0;
+
+        m_renderGraph.PushGroup("ReSTIR DI");
+
+        if (hasLocalLights)
+        {
         // 1. Initial sampling.
         m_renderGraph.AddPass("ReSTIR DI Initial", RGPassFlags::Raster,
             [&](RGBuilder& builder)
@@ -456,10 +524,10 @@ namespace Nox
                 ReadIfValid(builder, resources.TLAS);
                 ReadGpuScene(builder, resources);
                 builder.Write(resources.ReSTIRDIReservoirs[bufferA]);
-                builder.ColorTarget(resources.ReSTIRDIDirect, NRI::LoadOP::dontCare, NRI::StoreOP::dontCare);
+                builder.ColorTarget(resources.ReSTIRDIDiffuse, NRI::LoadOP::dontCare, NRI::StoreOP::dontCare);
                 builder.SetRenderArea(m_frame.renderExtent);
             },
-            [this, res = &resources, bufferA, blockRowPitch, arrayPitch, risBufferOffset, regirActive](RGPassContext& context)
+            [this, res = &resources, bufferA, blockRowPitch, arrayPitch](RGPassContext& context)
             {
                 NRI::CommandBuffer& cmd = context.Cmd();
                 const float rw = static_cast<float>(m_frame.renderExtent.width);
@@ -480,7 +548,6 @@ namespace Nox
                 diInitPush.invViewProj = uniformData.invViewProj;
                 diInitPush.cameraWorldPos = uniformData.cameraWorldPos;
                 diInitPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
-                diInitPush.lightDataReference = uniformData.lightDataReference;
                 diInitPush.reservoirBufferReference = context.Buffer(res->ReSTIRDIReservoirs[bufferA]).getDeviceAddress();
                 diInitPush.depthTextureIndex = context.Slot(res->Depth);
                 diInitPush.gbufferNormalIndex = context.Slot(res->GBufferNormal);
@@ -490,23 +557,11 @@ namespace Nox
                 diInitPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
                 diInitPush.reservoirBlockRowPitch = blockRowPitch;
                 diInitPush.reservoirArrayPitch = arrayPitch;
-                diInitPush.firstLocalLightIndex = m_restirDIFirstLocalLight;
-                diInitPush.numLocalLights = m_restirDINumLocalLights;
-                diInitPush.firstInfiniteLightIndex = m_restirDIFirstInfiniteLight;
-                diInitPush.numInfiniteLights = m_restirDINumInfiniteLights;
-                diInitPush.numLocalLightSamples = m_restirDINumLocalLightSamples;
-                diInitPush.numInfiniteLightSamples = m_restirDINumInfiniteLightSamples;
-                diInitPush.risBufferReference = context.Buffer(res->ReSTIRDIRIS).getDeviceAddress();
-                diInitPush.risBufferOffset = risBufferOffset;
-                diInitPush.risTileSize = m_restirDIRISTileSize;
-                diInitPush.risTileCount = m_restirDIRISTileCount;
-                diInitPush.regirEnabled = regirActive ? 1 : 0;
-                diInitPush.cellsX = m_regirCellsX;
-                diInitPush.cellsY = m_regirCellsY;
-                diInitPush.cellsZ = m_regirCellsZ;
-                diInitPush.lightsPerCell = m_regirLightsPerCell;
-                diInitPush.gridCenterAndCellSize = glm::vec4(m_regirGridCenter, m_regirCellSize);
-                diInitPush.regirSamplingJitter = m_regirSamplingJitter;
+                diInitPush.lightSampling = lightSamplingParams(context, res->ReSTIRDIRIS);
+                // Directional lights (especially the sun) are cheap and must never disappear due
+                // to stochastic reservoir selection. Final shading evaluates them directly with
+                // one shadow ray each; the ReSTIR reservoir is reserved for local lights.
+                diInitPush.lightSampling.numInfiniteLightSamples = 0;
                 cmd.pushData(&diInitPush, sizeof(shaderio::PushConstantReSTIRDIInitial));
 
                 cmd.drawMeshTasks(1, 1, 1);
@@ -525,7 +580,7 @@ namespace Nox
                 builder.Read(resources.ReSTIRDIReservoirs[bufferC]);
                 builder.Read(resources.ReSTIRDIReservoirs[bufferA]);
                 builder.Write(resources.ReSTIRDIReservoirs[bufferA]);
-                builder.ColorTarget(resources.ReSTIRDIDirect, NRI::LoadOP::dontCare, NRI::StoreOP::dontCare);
+                builder.ColorTarget(resources.ReSTIRDIDiffuse, NRI::LoadOP::dontCare, NRI::StoreOP::dontCare);
                 builder.SetRenderArea(m_frame.renderExtent);
             },
             [this, res = &resources, bufferA, bufferC, blockRowPitch, arrayPitch](RGPassContext& context)
@@ -579,7 +634,7 @@ namespace Nox
                 builder.Read(resources.ReSTIRDIReservoirs[bufferA]);
                 builder.Read(resources.NeighborOffsets);
                 builder.Write(resources.ReSTIRDIReservoirs[bufferB]);
-                builder.ColorTarget(resources.ReSTIRDIDirect, NRI::LoadOP::dontCare, NRI::StoreOP::dontCare);
+                builder.ColorTarget(resources.ReSTIRDIDiffuse, NRI::LoadOP::dontCare, NRI::StoreOP::dontCare);
                 builder.SetRenderArea(m_frame.renderExtent);
             },
             [this, res = &resources, bufferA, bufferB, blockRowPitch, arrayPitch](RGPassContext& context)
@@ -621,6 +676,11 @@ namespace Nox
                 cmd.drawMeshTasks(1, 1, 1);
             });
 
+        }
+
+        // Whether NRD denoises the result this frame: final shading packs for it, the lighting unpacks the same way.
+        const bool denoiseDI = m_nrdDIDenoiser != NRI::NRDDiffuseDenoiser::Off && m_device->isNRDInitialized();
+
         // 4. Final shading: one shadow ray per pixel toward whichever light survived resampling (the brute-force loop in
         // DeferredLighting.slang only shadows light 0).
         m_renderGraph.AddPass("ReSTIR DI Final Shading", RGPassFlags::Raster,
@@ -633,10 +693,11 @@ namespace Nox
                 builder.Read(resources.ReSTIRDIReservoirs[bufferB]);
                 ReadIfValid(builder, resources.TLAS);
                 ReadGpuScene(builder, resources);
-                builder.ColorTarget(resources.ReSTIRDIDirect, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
+                builder.ColorTarget(resources.ReSTIRDIDiffuse, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
+                builder.ColorTarget(resources.ReSTIRDISpecular, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
                 builder.SetRenderArea(m_frame.renderExtent);
             },
-            [this, res = &resources, bufferB, blockRowPitch, arrayPitch](RGPassContext& context)
+            [this, res = &resources, bufferB, blockRowPitch, arrayPitch, denoiseDI](RGPassContext& context)
             {
                 NRI::CommandBuffer& cmd = context.Cmd();
                 const float rw = static_cast<float>(m_frame.renderExtent.width);
@@ -646,9 +707,13 @@ namespace Nox
                 cmd.setCullMode(NRI::CullMode::None);
                 cmd.setDepthTestEnable(false);
                 cmd.setDepthWriteEnable(false);
-                cmd.setColorBlendEnable(0, false);
-                cmd.setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G |
-                                         NRI::ColorComponent::B | NRI::ColorComponent::A);
+                // Both targets: diffuse and specular.
+                for (uint32_t attachment = 0; attachment < 2; ++attachment)
+                {
+                    cmd.setColorBlendEnable(attachment, false);
+                    cmd.setColorWriteMask(attachment, NRI::ColorComponent::R | NRI::ColorComponent::G |
+                                                      NRI::ColorComponent::B | NRI::ColorComponent::A);
+                }
 
                 shaderio::PushConstantReSTIRDIFinalShading diFPush{};
                 diFPush.invViewProj = uniformData.invViewProj;
@@ -664,24 +729,29 @@ namespace Nox
                 diFPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
                 diFPush.reservoirBlockRowPitch = blockRowPitch;
                 diFPush.reservoirArrayPitch = arrayPitch;
-                diFPush.denoiserMode = static_cast<uint32_t>(m_nrdDIDenoiser);
+                // Packed for the denoiser that runs (the lighting unpacks with the same mode), plain without one.
+                diFPush.denoiserMode = denoiseDI ? static_cast<uint32_t>(m_nrdDIDenoiser) : 0u;
+                diFPush.firstInfiniteLightIndex = m_restirDIFirstInfiniteLight;
+                diFPush.numInfiniteLights = m_restirDINumInfiniteLights;
                 cmd.pushData(&diFPush, sizeof(shaderio::PushConstantReSTIRDIFinalShading));
 
                 cmd.drawMeshTasks(1, 1, 1);
             });
 
-        // 5. NRD diffuse (REBLUR / RELAX) of the 1-SPP direct lighting.
-        if (m_nrdDIDenoiser != NRI::NRDDiffuseDenoiser::Off && m_device->isNRDInitialized())
+        // 5. NRD diffuse + specular (REBLUR / RELAX) of the 1-SPP direct lighting.
+        if (denoiseDI)
         {
             m_frame.nrdDIAdded = true;
             m_renderGraph.AddPass("NRD DI", RGPassFlags::None,
                 [&](RGBuilder& builder)
                 {
-                    builder.Read(resources.ReSTIRDIDirect);
+                    builder.Read(resources.ReSTIRDIDiffuse);
+                    builder.Read(resources.ReSTIRDISpecular);
                     builder.Read(resources.GBufferVelocity);
                     builder.Read(resources.NRDNormalRoughness);
                     builder.Read(resources.ViewZ);
-                    builder.Write(resources.ReSTIRDIDenoised);
+                    builder.Write(resources.ReSTIRDIDiffuseDenoised);
+                    builder.Write(resources.ReSTIRDISpecularDenoised);
                     builder.RecordExclusive("NRD");
                 },
                 [this, res = &resources](RGPassContext& context)
@@ -689,11 +759,13 @@ namespace Nox
                     NRI::CommandBuffer& cmd = context.Cmd();
 
                     NRI::NRDDiffuseParams diDenoiseParams{};
-                    diDenoiseParams.inDiffuseRadianceHitDist = &context.Texture(res->ReSTIRDIDirect);
+                    diDenoiseParams.inDiffuseRadianceHitDist = &context.Texture(res->ReSTIRDIDiffuse);
+                    diDenoiseParams.inSpecularRadianceHitDist = &context.Texture(res->ReSTIRDISpecular);
                     diDenoiseParams.inMotionVectors = &context.Texture(res->GBufferVelocity);
                     diDenoiseParams.inNormalRoughness = &context.Texture(res->NRDNormalRoughness);
                     diDenoiseParams.inViewZ = &context.Texture(res->ViewZ);
-                    diDenoiseParams.outDenoisedDiffuse = &context.Texture(res->ReSTIRDIDenoised);
+                    diDenoiseParams.outDenoisedDiffuse = &context.Texture(res->ReSTIRDIDiffuseDenoised);
+                    diDenoiseParams.outDenoisedSpecular = &context.Texture(res->ReSTIRDISpecularDenoised);
                     diDenoiseParams.commandBuffer = &cmd;
 
                     diDenoiseParams.view = uniformData.view;
@@ -706,7 +778,7 @@ namespace Nox
                     diDenoiseParams.resetHistory = m_isFirstFrame || m_frame.resetNRD;
 
                     // Lighting reads the denoised result (resolveFrameUniforms): evaluation only fails without NRD.
-                    m_device->evaluateNRDDiffuseDI(diDenoiseParams, m_nrdDIDenoiser);
+                    m_device->evaluateNRDDirectLighting(diDenoiseParams, m_nrdDIDenoiser);
                     cmd.bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
                 });
         }
@@ -891,6 +963,7 @@ namespace Nox
         }
 
         // 3. Final shading.
+        const bool denoiseReSTIRPT = m_nrdPTDenoiser != NRI::NRDDiffuseDenoiser::Off && m_device->isNRDInitialized();
         m_renderGraph.AddPass("ReSTIR PT Final Shading", RGPassFlags::Raster,
             [&](RGBuilder& builder)
             {
@@ -902,7 +975,7 @@ namespace Nox
                 builder.ColorTarget(resources.ReSTIRPTOutput, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 1.0f });
                 builder.SetRenderArea(frame.renderExtent);
             },
-            [this, res = &resources, blockRowPitch, arrayPitch](RGPassContext& context)
+            [this, res = &resources, blockRowPitch, arrayPitch, denoiseReSTIRPT](RGPassContext& context)
             {
                 NRI::CommandBuffer& cmd = context.Cmd();
                 const float rw = static_cast<float>(m_frame.renderExtent.width);
@@ -933,7 +1006,7 @@ namespace Nox
                 ptfPush.reservoirArrayPitch = arrayPitch;
                 // Shares the "PT Denoiser" setting with the plain path tracer: REBLUR needs the shader's own YCoCg
                 // pre-encode (LinearToYCoCg in ReSTIRPTFinalShading.slang), RELAX reads plain linear color.
-                ptfPush.denoiserMode = static_cast<uint32_t>(m_nrdPTDenoiser);
+                ptfPush.denoiserMode = denoiseReSTIRPT ? static_cast<uint32_t>(m_nrdPTDenoiser) : 0u;
                 // RTXDI PT's final-shading decorrelation: randomly use the preserved, unresampled initial reservoir to break
                 // temporal over-correlation. Stagnancy mode needs the SDK duplication-map pass, so Uniform mode here.
                 ptfPush.decorrelationFactor = m_frame.restirPTTemporalActive ? 0.4f : 0.0f;
@@ -946,7 +1019,7 @@ namespace Nox
         // Shares m_nrdPTDenoiser and the denoised path tracer texture with the plain path tracer: only one of the two runs
         // per frame. DLSS-RR needs nothing extra: it takes the ReSTIR PT output as its input color.
 
-        if (m_nrdPTDenoiser != NRI::NRDDiffuseDenoiser::Off && m_device->isNRDInitialized())
+        if (denoiseReSTIRPT)
         {
             frame.ptNRDAdded = true;
             m_renderGraph.AddPass("NRD PT", RGPassFlags::None,

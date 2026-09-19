@@ -5,6 +5,51 @@
 
 namespace Nox
 {
+    void Renderer::addNRDGuidesPass()
+    {
+        // NRD's view Z and packed normal/roughness, once for every NRD denoiser of the frame (shadows, reflections, GI, direct
+        // lighting, path tracing): whichever of them runs reads guides from this frame's G-buffer.
+        const bool anyDenoiser = m_nrdShadowsEnabled || m_nrdReflectionDenoiser != NRI::NRDReflectionDenoiser::Off ||
+                                 m_nrdGIDenoiser != NRI::NRDDiffuseDenoiser::Off || m_nrdDIDenoiser != NRI::NRDDiffuseDenoiser::Off ||
+                                 m_nrdPTDenoiser != NRI::NRDDiffuseDenoiser::Off;
+        if (!anyDenoiser || !m_device->isNRDInitialized() || !m_nrdGuidesPipeline)
+            return;
+
+        const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
+        m_renderGraph.AddPass("NRD Guides", RGPassFlags::Raster,
+            [&](RGBuilder& builder)
+            {
+                builder.Read(resources.Depth);
+                builder.Read(resources.GBufferNormal);
+                builder.ColorTarget(resources.ViewZ, NRI::LoadOP::dontCare, NRI::StoreOP::store);
+                builder.ColorTarget(resources.NRDNormalRoughness, NRI::LoadOP::dontCare, NRI::StoreOP::store);
+                builder.SetRenderArea(m_frame.renderExtent);
+            },
+            [this, res = &resources](RGPassContext& context)
+            {
+                NRI::CommandBuffer& cmd = context.Cmd();
+                cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_nrdGuidesPipeline);
+                cmd.setCullMode(NRI::CullMode::None);
+                cmd.setDepthTestEnable(false);
+                cmd.setDepthWriteEnable(false);
+                for (uint32_t attachment = 0; attachment < 2; ++attachment)
+                {
+                    cmd.setColorBlendEnable(attachment, false);
+                    cmd.setColorWriteMask(attachment, NRI::ColorComponent::R | NRI::ColorComponent::G |
+                                                      NRI::ColorComponent::B | NRI::ColorComponent::A);
+                }
+
+                shaderio::PushConstantNRDGuides push{};
+                push.invViewProj = uniformData.invViewProj;
+                push.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                push.depthTextureIndex = context.Slot(res->Depth);
+                push.gbufferNormalIndex = context.Slot(res->GBufferNormal);
+                push.viewportSize = glm::vec2(static_cast<float>(m_frame.renderExtent.width), static_cast<float>(m_frame.renderExtent.height));
+                cmd.pushData(&push, sizeof(push));
+                cmd.drawMeshTasks(1, 1, 1);
+            });
+    }
+
     void Renderer::addRTShadowPasses()
     {
         // Only the hybrid RT shadow path needs this; ReSTIR DI traces its own selected light, and raster PBR/IBL must not
@@ -15,7 +60,7 @@ namespace Nox
         const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
         m_frame.rtShadowsAdded = true;
 
-        // 1-SPP RT shadow -> raw shadow mask, plus NRD's view Z and packed normal/roughness guides.
+        // 1-SPP RT shadow -> raw shadow mask (NRD's guides: addNRDGuidesPass).
         m_renderGraph.AddPass("RT Shadows", RGPassFlags::Raster,
             [&](RGBuilder& builder)
             {
@@ -24,14 +69,12 @@ namespace Nox
                 ReadIfValid(builder, resources.TLAS);
                 ReadGpuScene(builder, resources);
                 builder.ColorTarget(resources.RawShadowMask, NRI::LoadOP::clear, NRI::StoreOP::store, { 65504.0f, 1.0f, 0.0f, 0.0f });
-                builder.ColorTarget(resources.ViewZ, NRI::LoadOP::clear, NRI::StoreOP::store, { 500000.0f, 0.0f, 0.0f, 0.0f });
-                builder.ColorTarget(resources.NRDNormalRoughness, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
                 builder.SetRenderArea(m_frame.renderExtent);
             },
             [this, res = &resources](RGPassContext& context)
             {
                 NRI::CommandBuffer& cmd = context.Cmd();
-                constexpr uint32_t attachmentCount = 3;
+                constexpr uint32_t attachmentCount = 1;
                 const float rw = static_cast<float>(m_frame.renderExtent.width);
                 const float rh = static_cast<float>(m_frame.renderExtent.height);
 
@@ -120,6 +163,7 @@ namespace Nox
         m_frame.rtReflectionsAdded = true;
 
         // 1-SPP GGX VNDF reflection -> raw reflection (radiance + hit distance).
+        const bool denoiseReflections = m_nrdReflectionDenoiser != NRI::NRDReflectionDenoiser::Off && m_device->isNRDInitialized();
         m_renderGraph.AddPass("RT Reflections", RGPassFlags::Raster,
             [&](RGBuilder& builder)
             {
@@ -138,7 +182,7 @@ namespace Nox
                 builder.ColorTarget(resources.RawReflection, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 10000.0f });
                 builder.SetRenderArea(m_frame.renderExtent);
             },
-            [this, res = &resources](RGPassContext& context)
+            [this, res = &resources, denoiseReflections](RGPassContext& context)
             {
                 NRI::CommandBuffer& cmd = context.Cmd();
                 const float rw = static_cast<float>(m_frame.renderExtent.width);
@@ -162,13 +206,14 @@ namespace Nox
                 reflPush.visibilityTextureIndex = context.Slot(res->Visibility);
                 reflPush.viewportSize = glm::vec2(rw, rh);
                 reflPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
-                reflPush.denoiserMode = static_cast<uint32_t>(m_nrdReflectionDenoiser);
+                // Packed for the NRD pass that runs (the lighting unpacks the same way), plain without one.
+                reflPush.denoiserMode = denoiseReflections ? static_cast<uint32_t>(m_nrdReflectionDenoiser) : 0u;
                 cmd.pushData(&reflPush, sizeof(shaderio::PushConstantReflection));
 
                 cmd.drawMeshTasks(1, 1, 1);
             });
 
-        if (m_nrdReflectionDenoiser == NRI::NRDReflectionDenoiser::Off || !m_device->isNRDInitialized())
+        if (!denoiseReflections)
             return;
 
         m_frame.nrdReflectionsAdded = true;

@@ -296,7 +296,8 @@ struct UniformBufferObject
     // actually-consumed copy is the PushConstantDeferredLighting one; these UBO fields exist for
     // parity/other potential consumers, matching the established pattern.
     uint32_t directLightingMode; // 0 = brute-force analytic loop, 1 = ReSTIR DI
-    uint32_t restirDIDirectLightingTextureIndex;
+    uint32_t restirDIDiffuseTextureIndex;  // de-modulated diffuse / specular direct lighting (NRDFrontEnd.slang)
+    uint32_t restirDISpecularTextureIndex;
 
     // Texture streaming feedback (MipFeedback.slang): the buffer, and the frame counter that picks which pixel of each
     // 8x8 tile reports.
@@ -418,6 +419,22 @@ struct PushConstantInstanceCulling
 // Depth pyramid level build (§5.6.4): level 0 reduces the depth buffer, every next level its previous one. Reverse-Z, so
 // a level keeps the FARTHEST (smallest) depth of the texels it covers: an instance is occluded only when it is behind
 // everything drawn in its screen area.
+// DLSS Ray Reconstruction guides (RRGuides.slang): the diffuse and specular albedo the lit image was shaded with.
+struct PushConstantRRGuides
+{
+    uint64_t matrixReference; // UniformBufferObject
+    uint32_t depthTextureIndex;
+    uint32_t gbufferAlbedoIndex;
+    uint32_t gbufferNormalIndex;
+    uint32_t gbufferMaterialIndex;
+    uint32_t diffuseAlbedoStorageIndex;
+    uint32_t specularAlbedoStorageIndex;
+    uint32_t rawReflectionIndex;      // RT reflections (alpha: hit distance), 0xFFFFFFFF when they did not run
+    uint32_t hitDistanceStorageIndex; // specular hit distance guide, written when rawReflectionIndex is valid
+    uint32_t width;
+    uint32_t height;
+};
+
 struct PushConstantHiZBuild
 {
     uint32_t sourceTextureIndex;
@@ -506,6 +523,16 @@ struct PushConstantVisibilityDebug
     uint32_t gbufferEmissionIndex;
 };
 
+// NRD's view Z and packed normal/roughness guides (NRDGuides.slang).
+struct PushConstantNRDGuides
+{
+    mat4 invViewProj;
+    uint64_t matrixReference;
+    uint32_t depthTextureIndex;
+    uint32_t gbufferNormalIndex;
+    vec2 viewportSize;
+};
+
 struct PushConstantShadowMask
 {
     mat4 invViewProj;
@@ -561,8 +588,9 @@ struct PushConstantDeferredLighting
     // ReSTIR DI (screen-space resampled direct lighting, replaces the brute-force light loop below
     // when active -- see directLightingMode)
     uint32_t directLightingMode; // 0 = brute-force analytic loop (existing), 1 = ReSTIR DI
-    uint32_t restirDIDirectLightingTextureIndex;
-    uint32_t restirDIDenoiserMode; // 0 = Off, 1 = REBLUR (output is YCoCg, needs decoding), 2 = RELAX (plain RGB)
+    uint32_t restirDIDiffuseTextureIndex;  // de-modulated diffuse / specular direct lighting (NRDFrontEnd.slang)
+    uint32_t restirDISpecularTextureIndex;
+    uint32_t restirDIDenoiserMode; // how both were packed: NRD_SIGNAL_RAW / REBLUR / RELAX
 };
 
 struct PushConstantPathTracer
@@ -579,8 +607,31 @@ struct PushConstantPathTracer
     uint32_t denoiserMode;              // 0 = Off (plain RGB), 1 = NRD REBLUR (needs YCoCg encode), 2 = NRD RELAX (plain RGB)
     uint32_t restirGIDiffuseTextureIndex;
     uint32_t restirGIDenoiserMode;      // 0 = Off/plain RGB, 1 = REBLUR YCoCg, 2 = RELAX RGB
-    uint32_t restirDIDirectLightingTextureIndex;
-    uint32_t restirDIDenoiserMode;      // 0 = Off/plain RGB, 1 = REBLUR YCoCg, 2 = RELAX RGB
+    uint32_t restirDIDiffuseTextureIndex;  // de-modulated diffuse / specular direct lighting (NRDFrontEnd.slang)
+    uint32_t restirDISpecularTextureIndex;
+    uint32_t restirDIDenoiserMode;      // how both were packed: NRD_SIGNAL_RAW / REBLUR / RELAX
+    // The G-buffer surface the NRD signals are de-modulated by (PathTracerSignals.slang).
+    uint32_t depthTextureIndex;
+    uint32_t gbufferAlbedoIndex;
+    uint32_t gbufferNormalIndex;
+    uint32_t gbufferMaterialIndex;
+};
+
+// The path tracer's NRD composite (PTComposite.slang): emission + denoised diffuse / specular, modulated back.
+struct PushConstantPTComposite
+{
+    uint64_t matrixReference;
+    uint32_t emissionTextureIndex;
+    uint32_t diffuseTextureIndex;
+    uint32_t specularTextureIndex;
+    uint32_t depthTextureIndex;
+    uint32_t gbufferAlbedoIndex;
+    uint32_t gbufferNormalIndex;
+    uint32_t gbufferMaterialIndex;
+    uint32_t outputStorageIndex;
+    uint32_t denoiserMode;
+    uint32_t width;
+    uint32_t height;
 };
 
 // Render graph texture inspection (TextureInspect.slang): how the source texture is interpreted.
@@ -652,6 +703,31 @@ struct PushConstantDDGIDebug
     uint32_t irradianceAtlasIndex;
 };
 
+// RTXDI light sampling of an arbitrary surface (RTXDI/RTXDILightSampling.slang): this frame's presampled RIS tiles and
+// ReGIR cells over the light buffer. ReSTIR DI's initial pass and ReSTIR GI's path vertices sample with it.
+struct RTXDILightSamplingParams
+{
+    uint64_t lightDataReference;
+    uint64_t risBufferReference;   // uint2 per element: [0, risBufferOffset) = plain RIS tiles (fallback / out-of-grid),
+                                   // [risBufferOffset, end) = ReGIR cells
+    vec4 gridCenterAndCellSize;    // xyz: world-space ReGIR grid center, w: cell size (meters)
+    uint32_t firstLocalLightIndex;
+    uint32_t numLocalLights;
+    uint32_t firstInfiniteLightIndex;
+    uint32_t numInfiniteLights;
+    uint32_t numLocalLightSamples;
+    uint32_t numInfiniteLightSamples;
+    uint32_t risBufferOffset;
+    uint32_t risTileSize;
+    uint32_t risTileCount;
+    uint32_t regirEnabled;         // 0 = plain RIS-tile sampling only, 1 = try a ReGIR cell first
+    uint32_t cellsX;
+    uint32_t cellsY;
+    uint32_t cellsZ;
+    uint32_t lightsPerCell;
+    float regirSamplingJitter;     // 0 = static cell assignment, 1 = full +/-0.5 cell jitter (RTXPT's default)
+};
+
 struct PushConstantReSTIRGIInitial
 {
     mat4 invViewProj;
@@ -673,6 +749,8 @@ struct PushConstantReSTIRGIInitial
     uint32_t frameIndex;
     uint32_t reservoirBlockRowPitch;
     uint32_t reservoirArrayPitch;
+    // Lighting of the path vertices (RTXDI/RTXDILightSampling.slang); 8-aligned after the 8 uint32_t above.
+    RTXDILightSamplingParams lightSampling;
 };
 
 // ReSTIR GI is now a proper two-pass pipeline (Temporal, then Spatial), matching RTXPT's actual
@@ -821,44 +899,23 @@ struct PushConstantReSTIRDIPresampleReGIR
                                     // streaming RIS, not a single full-light-list pass
 };
 
+
 struct PushConstantReSTIRDIInitial
 {
     mat4 invViewProj;
     vec4 cameraWorldPos;
     uint64_t matrixReference;
-    uint64_t lightDataReference;
     uint64_t reservoirBufferReference; // writes to buffer A
     uint32_t depthTextureIndex;
     uint32_t gbufferNormalIndex;
     uint32_t gbufferAlbedoIndex;
     uint32_t gbufferMaterialIndex;
-    vec2 viewportSize; // offset 120, multiple of 8
+    vec2 viewportSize; // offset 112, multiple of 8
     uint32_t frameIndex;
     uint32_t reservoirBlockRowPitch;
     uint32_t reservoirArrayPitch;
-    uint32_t firstLocalLightIndex;
-    uint32_t numLocalLights;
-    uint32_t firstInfiniteLightIndex;
-    uint32_t numInfiniteLights;
-    uint32_t numLocalLightSamples;
-    uint32_t numInfiniteLightSamples;
-
-    // RIS + ReGIR (phase 2: power-weighted local-light candidates instead of pure uniform selection)
-    uint64_t risBufferReference;   // shared uint2-per-element buffer: [0, risBufferOffset) = plain RIS
-                                    // tiles (fallback / out-of-grid), [risBufferOffset, end) = ReGIR cells
-    uint32_t risBufferOffset;
-    uint32_t risTileSize;
-    uint32_t risTileCount;
-    uint32_t regirEnabled; // 0 = plain RIS-tile sampling only, 1 = try a ReGIR cell first
-    uint32_t cellsX;
-    uint32_t cellsY;
-    uint32_t cellsZ;
-    uint32_t lightsPerCell;
-    vec4 gridCenterAndCellSize; // xyz: world-space grid center, w: cell size (meters)
-    float regirSamplingJitter; // 0 = no jitter (fully static cell assignment, stable but hard cell-boundary
-                                // edges), 1 = full +/-0.5 cell jitter (RTXPT's default, diffuses cell
-                                // discretization error across frames/pixels at the cost of visible edge
-                                // instability with only a handful of lights and no heavy temporal accumulation)
+    uint32_t pad0; // the struct below starts 8-aligned
+    RTXDILightSamplingParams lightSampling;
 };
 
 struct PushConstantReSTIRDITemporal
@@ -927,7 +984,11 @@ struct PushConstantReSTIRDIFinalShading
     uint32_t frameIndex;
     uint32_t reservoirBlockRowPitch;
     uint32_t reservoirArrayPitch;
-    uint32_t denoiserMode; // 0 = Off (plain RGB), 1 = NRD REBLUR (needs YCoCg encode), 2 = NRD RELAX (plain RGB)
+    uint32_t denoiserMode; // NRD_SIGNAL_RAW / REBLUR / RELAX: how the diffuse and specular outputs are packed
+    uint32_t firstInfiniteLightIndex;
+    uint32_t numInfiniteLights;
+    uint32_t pad0;
+    uint32_t pad1;
 };
 
 struct PushConstantOutline

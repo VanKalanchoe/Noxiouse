@@ -1,4 +1,5 @@
 #include "shaderIO.h"
+#include "NRDFrontEnd.slang"
 #include "Rtxdi/DI/ReSTIRDIParameters.h"
 
 #ifndef RTXDI_RESERVOIR_BLOCK_SIZE
@@ -403,7 +404,8 @@ void meshMain(
 
 struct PSOutput
 {
-    float4 directLighting : SV_Target0;
+    float4 diffuse : SV_Target0;
+    float4 specular : SV_Target1;
 };
 
 [shader("fragment")]
@@ -413,7 +415,8 @@ PSOutput fragMain(
 )
 {
     PSOutput outVal;
-    outVal.directLighting = float4(0.0);
+    outVal.diffuse = float4(0.0);
+    outVal.specular = float4(0.0);
 
     uint2 pixelCoord = uint2(input.pos.xy);
     if (pixelCoord.x >= uint(pushConstant.viewportSize.x) || pixelCoord.y >= uint(pushConstant.viewportSize.y))
@@ -460,36 +463,6 @@ PSOutput fragMain(
     resParams.pad2 = 0;
 
     RTXDI_DIReservoir reservoir = RTXDI_LoadDIReservoir(resParams, pixelCoord, 0);
-    if (!RTXDI_IsValidDIReservoir(reservoir))
-    {
-        return outVal;
-    }
-
-    RAB_LightInfo light = RAB_LoadLightInfo(RTXDI_GetDIReservoirLightIndex(reservoir), false);
-    RAB_LightSample lightSample = RAB_SamplePolymorphicLight(light, worldPos, RTXDI_GetDIReservoirSampleUV(reservoir));
-
-    float3 dir;
-    float dist;
-    if (lightSample.lightType == 0)
-    {
-        dir = lightSample.normal;
-        dist = 1e4;
-    }
-    else
-    {
-        float3 toLight = lightSample.position - worldPos;
-        dist = length(toLight);
-        dir = dist > 0.0001 ? (toLight / dist) : float3(0.0, 1.0, 0.0);
-    }
-
-    float NdotL_raw = dot(n, dir);
-    if (NdotL_raw <= 0.0) return outVal;
-
-    float visibility = evaluate_soft_visibility(light, worldPos, n, dir, dist, pixelCoord, pushConstant.frameIndex);
-    if (visibility <= 0.0)
-    {
-        return outVal;
-    }
 
     Texture2D albedoTex = Texture2D.Handle(uint2(g_UBO->imageHeapIndexOffset + pushConstant.gbufferAlbedoIndex, 0));
     Texture2D materialTex = Texture2D.Handle(uint2(g_UBO->imageHeapIndexOffset + pushConstant.gbufferMaterialIndex, 0));
@@ -515,52 +488,107 @@ PSOutput fragMain(
 
     float3 v = normalize(g_UBO->cameraWorldPos.xyz - worldPos);
     float NdotV = clamp(dot(n, v), 0.001, 1.0);
-    float3 h = normalize(dir + v);
 
-    float NdotL = clamp(NdotL_raw, 0.001, 1.0);
-    float NdotH = clamp(dot(n, h), 0.0, 1.0);
-    float LdotH = clamp(dot(dir, h), 0.0, 1.0);
-    float VdotH = clamp(dot(v, h), 0.0, 1.0);
+    float3 diffuseLighting = float3(0.0);
+    float3 specularLighting = float3(0.0);
+    float signalHitDistance = 0.0;
+    uint reservoirLightIndex = RTXDI_GetDIReservoirLightIndex(reservoir);
+    bool hasLocalReservoir = RTXDI_IsValidDIReservoir(reservoir) &&
+        reservoirLightIndex < g_UBO->lightCount &&
+        (uint)g_LightData[reservoirLightIndex].position.w != 0u;
 
-    PBRInfo pbrInputs;
-    pbrInputs.NdotL = NdotL;
-    pbrInputs.NdotV = NdotV;
-    pbrInputs.NdotH = NdotH;
-    pbrInputs.LdotH = LdotH;
-    pbrInputs.VdotH = VdotH;
-    pbrInputs.perceptualRoughness = perceptualRoughness;
-    pbrInputs.metalness = metallic;
-    pbrInputs.reflectance0 = specularEnvironmentR0;
-    pbrInputs.reflectance90 = specularEnvironmentR90;
-    pbrInputs.alphaRoughness = alphaRoughness;
-    pbrInputs.diffuseColor = diffuseColor;
-    pbrInputs.specularColor = specularColor;
-
-    float3 F = pbrSpecularReflection(pbrInputs);
-    float G = pbrGeometricOcclusion(pbrInputs);
-    float D = pbrMicrofacetDistribution(pbrInputs);
-
-    float3 diffuseContrib = (1.0 - F) * pbrDiffuse(pbrInputs);
-    float3 specContrib = F * G * D / (4.0 * NdotL * NdotV);
-
-    // reservoir.weightSum (post-FinalizeResampling) is the RIS inverse-PDF: multiplying the selected
-    // sample's already-attenuated radiance by it reconstructs the unbiased resampled estimate.
-    float3 lightRadiance = lightSample.radiance * RTXDI_GetDIReservoirInvPdf(reservoir);
-    float3 result = visibility * NdotL * lightRadiance * (diffuseContrib + specContrib);
-
-    if (any(isnan(result)) || any(isinf(result)))
+    // Candidate zero is the single resampled LOCAL light. Directional lights are evaluated
+    // deterministically afterwards: there are normally only one or two, and allowing the sun to
+    // lose a stochastic reservoir selection made the entire outdoor scene go dark.
+    for (uint candidate = 0; candidate <= pushConstant.numInfiniteLights; ++candidate)
     {
-        result = float3(0.0);
+        bool isReservoirCandidate = candidate == 0;
+        if (isReservoirCandidate && !hasLocalReservoir)
+            continue;
+
+        uint lightIndex = isReservoirCandidate
+            ? reservoirLightIndex
+            : pushConstant.firstInfiniteLightIndex + candidate - 1u;
+        RAB_LightInfo light = RAB_LoadLightInfo(lightIndex, false);
+        bool isDirectional = ((uint)light.position.w == 0u);
+        if ((isReservoirCandidate && isDirectional) || (!isReservoirCandidate && !isDirectional))
+            continue;
+
+        float2 sampleUV = isReservoirCandidate
+            ? RTXDI_GetDIReservoirSampleUV(reservoir)
+            : random2(pixelCoord, pushConstant.frameIndex, lightIndex * 0x9e3779b9u);
+        RAB_LightSample lightSample = RAB_SamplePolymorphicLight(light, worldPos, sampleUV);
+        if (dot(lightSample.radiance, lightSample.radiance) <= 1e-8)
+            continue;
+
+        float3 dir;
+        float dist;
+        if (isDirectional)
+        {
+            dir = normalize(lightSample.normal);
+            dist = 1e4;
+        }
+        else
+        {
+            float3 toLight = lightSample.position - worldPos;
+            dist = length(toLight);
+            dir = dist > 0.0001 ? toLight / dist : float3(0.0, 1.0, 0.0);
+        }
+
+        float NdotLRaw = dot(n, dir);
+        float3 shadowNormal = n;
+        if (materialSample.a > 0.5 && NdotLRaw < 0.0)
+        {
+            NdotLRaw = -NdotLRaw * 0.6;
+            shadowNormal = -n;
+        }
+        if (NdotLRaw <= 0.0)
+            continue;
+
+        // One stochastic shadow ray, matching RTXPT. The old soft-shadow loop issued up to 16
+        // rays per light per pixel and was the source of the severe Bistro regression.
+        if (!trace_visibility(worldPos + shadowNormal * 0.02, dir, dist - 0.02))
+            continue;
+
+        float NdotL = clamp(NdotLRaw, 0.001, 1.0);
+        float3 h = normalize(dir + v);
+        PBRInfo pbrInputs;
+        pbrInputs.NdotL = NdotL;
+        pbrInputs.NdotV = NdotV;
+        pbrInputs.NdotH = clamp(dot(n, h), 0.0, 1.0);
+        pbrInputs.LdotH = clamp(dot(dir, h), 0.0, 1.0);
+        pbrInputs.VdotH = clamp(dot(v, h), 0.0, 1.0);
+        pbrInputs.perceptualRoughness = perceptualRoughness;
+        pbrInputs.metalness = metallic;
+        pbrInputs.reflectance0 = specularEnvironmentR0;
+        pbrInputs.reflectance90 = specularEnvironmentR90;
+        pbrInputs.alphaRoughness = alphaRoughness;
+        pbrInputs.diffuseColor = diffuseColor;
+        pbrInputs.specularColor = specularColor;
+
+        float3 F = pbrSpecularReflection(pbrInputs);
+        float G = pbrGeometricOcclusion(pbrInputs);
+        float D = pbrMicrofacetDistribution(pbrInputs);
+        float3 diffuseContrib = (1.0 - F) * pbrDiffuse(pbrInputs);
+        float3 specContrib = F * G * D / max(4.0 * NdotL * NdotV, 1e-6);
+        float invPdf = isReservoirCandidate ? RTXDI_GetDIReservoirInvPdf(reservoir) : 1.0;
+        float terminatorFade = saturate(NdotL * 10.0);
+        float3 incoming = lightSample.radiance * (invPdf * NdotL * terminatorFade);
+        diffuseLighting += incoming * diffuseContrib;
+        specularLighting += incoming * specContrib;
+        signalHitDistance = signalHitDistance == 0.0 ? dist : min(signalHitDistance, dist);
     }
 
-    if (pushConstant.denoiserMode == 1) // NRD REBLUR: encode into YCoCg before writing
-    {
-        result = LinearToYCoCg(result);
-    }
-
-    // Alpha carries the shadow ray's traveled distance (to the light, or 1e4 for directional lights)
-    // -- NRD's hit-distance-based blur radius; matches the same raw/unnormalized convention already
-    // used for ReSTIR GI's diffuseIrradiance.a in ReSTIRGISpatial.slang.
-    outVal.directLighting = float4(result, dist);
+    // NRD's diffuse/specular denoisers consume separate, de-modulated signals. DeferredLighting
+    // multiplies these same material factors back after denoising; feeding it the old combined,
+    // already-modulated target made the result get modulated twice and appear uniformly dim.
+    float3 diffuseFactor, specularFactor;
+    NRD_MaterialFactors(n, v, diffuseColor, specularColor, perceptualRoughness,
+                        diffuseFactor, specularFactor);
+    float viewZ = abs(mul(g_UBO->view, float4(worldPos, 1.0)).z);
+    outVal.diffuse = NRD_PackSignal(pushConstant.denoiserMode,
+        diffuseLighting / diffuseFactor, signalHitDistance, viewZ, 1.0);
+    outVal.specular = NRD_PackSignal(pushConstant.denoiserMode,
+        specularLighting / specularFactor, signalHitDistance, viewZ, perceptualRoughness);
     return outVal;
 }
