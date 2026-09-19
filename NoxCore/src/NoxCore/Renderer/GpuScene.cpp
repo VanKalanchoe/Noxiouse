@@ -402,6 +402,26 @@ namespace Nox
             m_Instances.Edit(instanceSlot).skinnedVertexOffset = skinnedVertexOffset;
     }
 
+    void GpuScene::SetInstanceRayTracingGeometry(uint32_t instanceSlot, uint64_t blasAddressOverride, uint64_t skinnedVertexAddress)
+    {
+        if (instanceSlot >= m_InstanceStates.size())
+            return;
+        InstanceState& state = m_InstanceStates[instanceSlot];
+        if (state.Mesh == InvalidSlot || state.Material == InvalidSlot)
+            return;
+
+        if (state.BlasAddressOverride != blasAddressOverride)
+        {
+            state.BlasAddressOverride = blasAddressOverride;
+            WriteTlasInstance(instanceSlot);
+        }
+        if (state.SkinnedVertexAddress != skinnedVertexAddress)
+        {
+            state.SkinnedVertexAddress = skinnedVertexAddress;
+            WriteRayTracingInstance(instanceSlot);
+        }
+    }
+
     bool GpuScene::UpdateDrawList(const glm::vec3& cameraPosition, std::vector<uint32_t>& drawList, std::array<uint32_t, RenderBucketCount + 1>& outBucketStarts)
     {
         const bool rebuild = std::exchange(m_BucketsChanged, false);
@@ -522,7 +542,9 @@ namespace Nox
 
         const InstanceState& state = m_InstanceStates[instanceSlot];
         NRI::AccelerationStructureInstance record{};
-        const uint64_t blasAddress = state.Mesh != InvalidSlot ? m_MeshBlasAddresses[state.Mesh] : 0;
+        const uint64_t blasAddress = state.Mesh != InvalidSlot
+                                         ? (state.BlasAddressOverride != 0 ? state.BlasAddressOverride : m_MeshBlasAddresses[state.Mesh])
+                                         : 0;
         if (blasAddress != 0 && IsRayTracedBucket(state.Bucket))
         {
             // Column-major world matrix -> row-major 3x4.
@@ -593,6 +615,7 @@ namespace Nox
         record.indexBufferAddress = mesh.indicesOffset == shaderio::NoGeometryRange
                                         ? 0
                                         : m_GeometryIndexBase + uint64_t(mesh.indicesOffset) * sizeof(uint32_t);
+        record.skinnedVertexBufferAddress = m_InstanceStates[instanceSlot].SkinnedVertexAddress;
         record.normalMatrix = m_Transforms.Get(instanceSlot).normal;
         record.baseColorFactor = material.baseColorFactor;
         record.emissiveFactor = glm::vec4(material.emissiveFactor, material.emissiveStrength);

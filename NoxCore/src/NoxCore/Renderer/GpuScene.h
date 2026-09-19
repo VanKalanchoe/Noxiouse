@@ -139,6 +139,9 @@ namespace Nox
         void SetTransform(uint32_t instanceSlot, const glm::mat4& world);
         void SetBoneMatrixOffset(uint32_t instanceSlot, uint32_t boneMatrixOffset);
         void SetSkinnedVertexOffset(uint32_t instanceSlot, uint32_t skinnedVertexOffset);
+        // A skinned instance owns a dynamic BLAS while ray tracing is active. A zero override restores its mesh's
+        // shared static BLAS; the optional skinned vertex address is used only by hit shading.
+        void SetInstanceRayTracingGeometry(uint32_t instanceSlot, uint64_t blasAddressOverride, uint64_t skinnedVertexAddress);
         int32_t GetInstanceEntity(uint32_t instanceSlot) const { return m_Instances.Get(instanceSlot).entityID; }
         uint32_t GetInstanceCount() const { return m_InstanceCount; }
 
@@ -176,6 +179,8 @@ namespace Nox
             RenderBucket Bucket = RenderBucket::Count; // Count: not drawn
             uint32_t BucketIndex = 0;
             uint64_t LastMovedFrame = ~0ull;
+            uint64_t BlasAddressOverride = 0;
+            uint64_t SkinnedVertexAddress = 0;
         };
 
         void InsertIntoBucket(uint32_t instanceSlot);

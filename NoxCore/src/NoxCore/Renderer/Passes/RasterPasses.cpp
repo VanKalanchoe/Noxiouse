@@ -62,6 +62,49 @@ namespace Nox
             });
     }
 
+    void Renderer::addAnimatedBLASPass()
+    {
+        const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
+        if (m_animatedBLASUpdates.empty() || !m_animatedBLASScratch || !resources.SkinnedVertices.IsValid())
+            return;
+
+        const bool buildsTLAS = m_tlasNeedBuild && m_hasTLASBuild && m_sceneTLAS && m_tlasScratchBuffer;
+        m_frame.animatedBLASAdded = true;
+        m_renderGraph.AddPass("Animated BLAS Update", RGPassFlags::NeverCull,
+            [&](RGBuilder& builder)
+            {
+                // Compute skinning writes this buffer immediately before the BLAS update. The build-input access gives
+                // the graph the compute-write -> acceleration-structure-read dependency with the correct stages.
+                builder.Read(resources.SkinnedVertices, RGBufferAccess::AccelerationStructureBuildInput);
+            },
+            [this, buildsTLAS](RGPassContext& context)
+            {
+                NRI::CommandBuffer& cmd = context.Cmd();
+                const uint64_t scratchAddress = m_animatedBLASScratch->getDeviceAddress();
+                for (size_t index = 0; index < m_animatedBLASUpdates.size(); ++index)
+                {
+                    const AnimatedBLASUpdate& update = m_animatedBLASUpdates[index];
+                    AnimatedBLAS& animated = m_animatedBLASes[update.instanceSlot];
+                    if (update.rebuild)
+                        cmd.buildAccelerationStructure(update.desc, scratchAddress, *animated.Resource.as);
+                    else
+                        cmd.updateAccelerationStructure(update.desc, scratchAddress, *animated.Resource.as, *animated.Resource.as);
+
+                    // Every animated BLAS shares one scratch buffer, so the next update must wait for this one.
+                    if (index + 1 < m_animatedBLASUpdates.size())
+                        cmd.accelerationStructureBarrier(NRI::AccelerationStructureBarrierType::BuildToBuild);
+                }
+
+                // A changed BLAS address is consumed by this frame's TLAS build. In steady state the TLAS address stays
+                // unchanged and ray queries consume the updated BLAS directly.
+                cmd.accelerationStructureBarrier(buildsTLAS ? NRI::AccelerationStructureBarrierType::BuildToBuild
+                                                            : NRI::AccelerationStructureBarrierType::BuildToShaderRead);
+            });
+
+        for (const AnimatedBLASUpdate& update : m_animatedBLASUpdates)
+            m_animatedBLASes[update.instanceSlot].built = true;
+    }
+
     void Renderer::addBLASBuildPass()
     {
         if (m_blasBuilds.empty() && m_blasCompactions.empty())

@@ -2566,6 +2566,147 @@ namespace Nox
         }
     }
 
+    void Renderer::updateAnimatedBLAS(uint32_t currentImage)
+    {
+        m_animatedBLASUpdates.clear();
+
+        const bool isPathTracing = m_pathTracingEnabled || m_debugMode == 18 || m_debugMode == 19;
+        const bool isDDGI = m_rayTracingEnabled && (m_ddgiEnabled || m_debugMode == 16 || m_debugMode == 17);
+        const bool isReSTIRGI = m_rayTracingEnabled && (m_diffuseGIMode == 2 || (m_debugMode == 16 && m_diffuseGIMode != 1));
+        const bool isHybridRT = m_rayTracingEnabled && (m_rayTracingShadows || m_rayTracingReflections);
+        if (!isPathTracing && !isDDGI && !isReSTIRGI && !isHybridRT)
+            return;
+
+        auto retire = [this](uint32_t instanceSlot, AnimatedBLAS& animated)
+        {
+            m_gpuScene.SetInstanceRayTracingGeometry(instanceSlot, 0, 0);
+            if (animated.Resource.as || animated.Resource.storageBuffer)
+            {
+                std::scoped_lock lock(m_deferredReleasesMutex);
+                m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, std::move(animated.Resource) });
+            }
+            animated = {};
+        };
+
+        const bool buffersReady = m_computeSkinningPipeline && currentImage < m_skinnedVertexBuffers.size() &&
+                                  m_skinnedVertexBuffers[currentImage] && !m_skinningLayout.empty();
+        if (!buffersReady)
+        {
+            for (uint32_t instanceSlot = 0; instanceSlot < m_animatedBLASes.size(); ++instanceSlot)
+            {
+                if (m_animatedBLASes[instanceSlot].Resource.as)
+                    retire(instanceSlot, m_animatedBLASes[instanceSlot]);
+            }
+            return;
+        }
+
+        uint32_t maximumInstanceSlot = 0;
+        for (const SkinningLayoutEntry& layout : m_skinningLayout)
+            maximumInstanceSlot = std::max(maximumInstanceSlot, layout.instanceSlot);
+        if (m_animatedBLASes.size() <= maximumInstanceSlot)
+            m_animatedBLASes.resize(size_t(maximumInstanceSlot) + 1);
+        for (AnimatedBLAS& animated : m_animatedBLASes)
+            animated.active = false;
+
+        const uint64_t skinnedVertexBase = m_skinnedVertexBuffers[currentImage]->getDeviceAddress();
+        const uint64_t indexBase = m_rtIndexStream.GetDeviceAddress();
+        uint64_t requiredScratchSize = 0;
+
+        for (const SkinningLayoutEntry& layout : m_skinningLayout)
+        {
+            const shaderio::GpuInstance& instance = m_gpuScene.GetInstances().Get(layout.instanceSlot);
+            const shaderio::GpuMesh& mesh = m_gpuScene.GetMeshes().Get(instance.meshIndex);
+            if (mesh.vertexCount == 0 || mesh.indicesOffset == shaderio::NoGeometryRange || mesh.triangleCount == 0)
+                continue;
+
+            const shaderio::GpuMaterial& material = m_gpuScene.GetMaterials().Get(instance.materialIndex);
+            const bool isOpaque = material.alphaMode == static_cast<uint32_t>(AlphaMode::Opaque);
+            const uint64_t skinnedVertexAddress = skinnedVertexBase +
+                                                  uint64_t(layout.destinationVertexOffset) * sizeof(shaderio::SkinnedVertex);
+            NRI::AccelerationStructureBuildDesc buildDesc{
+                .type = NRI::AccelerationStructureType::BottomLevel,
+                .flags = NRI::AccelerationStructureBuildFlags::AllowUpdate | NRI::AccelerationStructureBuildFlags::PreferFastBuild,
+                .triangles = {
+                    NRI::AccelerationStructureTrianglesDesc{
+                        .vertexBufferAddress = skinnedVertexAddress,
+                        .vertexStride = sizeof(shaderio::SkinnedVertex),
+                        .maxVertex = mesh.vertexCount - 1,
+                        .indexBufferAddress = indexBase + uint64_t(mesh.indicesOffset) * sizeof(uint32_t),
+                        .primitiveCount = mesh.triangleCount,
+                        .primitiveOffset = 0,
+                        .firstVertex = 0,
+                        .isOpaque = isOpaque
+                    }
+                }
+            };
+
+            AnimatedBLAS& animated = m_animatedBLASes[layout.instanceSlot];
+            const bool incompatible = !animated.Resource.as || animated.meshSlot != instance.meshIndex ||
+                                      animated.vertexCount != mesh.vertexCount || animated.indexOffset != mesh.indicesOffset ||
+                                      animated.triangleCount != mesh.triangleCount || animated.isOpaque != isOpaque;
+            if (incompatible)
+            {
+                if (animated.Resource.as || animated.Resource.storageBuffer)
+                    retire(layout.instanceSlot, animated);
+
+                const NRI::AccelerationStructureBuildSizes sizes = m_device->getAccelerationStructureBuildSizes(buildDesc);
+                std::unique_ptr<NRI::Buffer> storage = m_device->createBuffer(NRI::BufferDesc{
+                    .size = sizes.accelerationStructureSize,
+                    .usage = NRI::BufferUsage::AccelerationStructure
+                });
+                std::unique_ptr<NRI::AccelerationStructure> accelerationStructure =
+                    m_device->createAccelerationStructure(NRI::AccelerationStructureDesc{
+                        .type = NRI::AccelerationStructureType::BottomLevel,
+                        .storageBuffer = storage.get(),
+                        .bufferOffset = 0,
+                        .size = sizes.accelerationStructureSize
+                    });
+
+                animated.Resource = {
+                    .storageBuffer = std::move(storage),
+                    .as = std::move(accelerationStructure),
+                    .serial = ++m_blasSerial
+                };
+                animated.meshSlot = instance.meshIndex;
+                animated.vertexCount = mesh.vertexCount;
+                animated.indexOffset = mesh.indicesOffset;
+                animated.triangleCount = mesh.triangleCount;
+                animated.buildScratchSize = sizes.buildScratchSize;
+                animated.updateScratchSize = sizes.updateScratchSize;
+                animated.isOpaque = isOpaque;
+                animated.built = false;
+            }
+
+            animated.destinationVertexOffset = layout.destinationVertexOffset;
+            animated.active = true;
+            m_gpuScene.SetInstanceRayTracingGeometry(layout.instanceSlot, animated.Resource.as->getDeviceAddress(), skinnedVertexAddress);
+            m_animatedBLASUpdates.push_back({ layout.instanceSlot, std::move(buildDesc), !animated.built });
+            requiredScratchSize = std::max(requiredScratchSize,
+                                           animated.built ? animated.updateScratchSize : animated.buildScratchSize);
+        }
+
+        for (uint32_t instanceSlot = 0; instanceSlot < m_animatedBLASes.size(); ++instanceSlot)
+        {
+            AnimatedBLAS& animated = m_animatedBLASes[instanceSlot];
+            if (animated.Resource.as && !animated.active)
+                retire(instanceSlot, animated);
+        }
+
+        if (requiredScratchSize > m_animatedBLASScratchCapacity)
+        {
+            if (m_animatedBLASScratch)
+            {
+                std::scoped_lock lock(m_deferredReleasesMutex);
+                m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, std::move(m_animatedBLASScratch) });
+            }
+            m_animatedBLASScratch = m_device->createBuffer(NRI::BufferDesc{
+                .size = requiredScratchSize,
+                .usage = NRI::BufferUsage::AccelerationStructureScratch
+            });
+            m_animatedBLASScratchCapacity = requiredScratchSize;
+        }
+    }
+
     void Renderer::createUniformBuffers()
     {
         uint64_t bufferSize = sizeof(shaderio::UniformBufferObject);
@@ -2838,6 +2979,7 @@ namespace Nox
             // Frame order (§5.4.8). Each add* contributes its feature's passes only when the feature runs.
             addGpuSceneUpdatePass();
             addComputeSkinningPass();
+            addAnimatedBLASPass();
             addBLASBuildPass();
             addTLASBuildPass();
             addInstanceCullingPass();
@@ -3291,6 +3433,7 @@ namespace Nox
             m_drawListStale.fill(true);
         updateDrawListBuffers(currentImage);
         updateSkinningLayout(currentImage);
+        updateAnimatedBLAS(currentImage);
 
         // The camera view: the frozen frustum while culling is frozen (BeginScene keeps it equal to the camera otherwise).
         // The occlusion test compares against the pyramid of the previous frame, so it uses that frame's view; while the
@@ -3484,6 +3627,13 @@ namespace Nox
             if (blas.storageBuffer)
                 rayTracing += blas.storageBuffer->getSize();
         }
+        for (const AnimatedBLAS& animated : m_animatedBLASes)
+        {
+            if (animated.Resource.storageBuffer)
+                rayTracing += animated.Resource.storageBuffer->getSize();
+        }
+        if (m_animatedBLASScratch)
+            rayTracing += m_animatedBLASScratch->getSize();
         if (m_tlasBuffer)
             rayTracing += m_tlasBuffer->getSize();
         if (m_tlasScratchBuffer)
@@ -3617,6 +3767,7 @@ namespace Nox
         NOX_PROFILE_COUNTER("Lights", m_lightBufferObjects.size());
         NOX_PROFILE_COUNTER("Skinned Instances", m_skinningLayout.size());
         NOX_PROFILE_COUNTER("Skinning Workgroups", m_skinningWorkItems.size());
+        NOX_PROFILE_COUNTER("Animated BLAS", m_animatedBLASUpdates.size());
 
         {
             NOX_PROFILE_SCOPE("Bones Upload");

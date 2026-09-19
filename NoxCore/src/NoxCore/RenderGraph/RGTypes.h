@@ -104,6 +104,7 @@ namespace Nox
         IndirectRead, // draw arguments and draw counts, fetched by the indirect stage
         Write, // storage write
         AccelerationStructureBuild,
+        AccelerationStructureBuildInput,
         AccelerationStructureRead,
         CopySource,
         CopyDestination // e.g. image -> staging buffer readback

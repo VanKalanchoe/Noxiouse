@@ -597,6 +597,7 @@ namespace Nox
         void prepareFrameGraph(uint32_t imageIndex);
         void addGpuSceneUpdatePass();
         void addComputeSkinningPass();
+        void addAnimatedBLASPass();
         // Culls the draw list for the camera view into its visible instances, indirect commands and draw counts.
         void addInstanceCullingPass();
         // Depth pyramid of this frame's visibility depth, then phase 2: the occluded candidates against it.
@@ -661,6 +662,7 @@ namespace Nox
         // This frame's draw list, culling view and GPU scene uploads (staged for the GPU Scene Update pass).
         void updateGpuScene(uint32_t currentImage);
         void updateSkinningLayout(uint32_t currentImage);
+        void updateAnimatedBLAS(uint32_t currentImage);
         void updateDrawListBuffers(uint32_t currentImage);
         // Releases whose wait has passed; a mesh returns its ranges to the streams, the others die with their entry.
         void processDeferredReleases();
@@ -779,6 +781,7 @@ namespace Nox
             bool computeSkinningAdded = false;
             bool skinnedHistoryValid = false;
             uint32_t skinningWorkCount = 0;
+            bool animatedBLASAdded = false;
             bool inspectionProbe = false;
         };
         RenderGraph m_renderGraph;
@@ -1051,6 +1054,31 @@ namespace Nox
         MemoryBudget m_memoryBudget;
         std::vector<MeshBLAS> m_meshBLASes;
         std::vector<uint32_t> m_freeBLASIds;
+
+        struct AnimatedBLAS
+        {
+            MeshBLAS Resource;
+            uint32_t meshSlot = UINT32_MAX;
+            uint32_t destinationVertexOffset = 0;
+            uint32_t vertexCount = 0;
+            uint32_t indexOffset = 0;
+            uint32_t triangleCount = 0;
+            uint64_t buildScratchSize = 0;
+            uint64_t updateScratchSize = 0;
+            bool isOpaque = true;
+            bool built = false;
+            bool active = false;
+        };
+        struct AnimatedBLASUpdate
+        {
+            uint32_t instanceSlot = UINT32_MAX;
+            NRI::AccelerationStructureBuildDesc desc;
+            bool rebuild = false;
+        };
+        std::vector<AnimatedBLAS> m_animatedBLASes; // indexed by GPU scene instance slot
+        std::vector<AnimatedBLASUpdate> m_animatedBLASUpdates;
+        std::unique_ptr<NRI::Buffer> m_animatedBLASScratch;
+        uint64_t m_animatedBLASScratchCapacity = 0;
 
         // Uploads run on the transfer queue (§5.11.4); frames wait on the GPU for what they read.
         UploadManager m_uploads;

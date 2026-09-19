@@ -98,6 +98,8 @@ namespace Nox
             case RGBufferAccess::IndirectRead: return { NRI::AccessBits::IndirectRead, NRI::StageBits::Indirect };
             case RGBufferAccess::Write: return { NRI::AccessBits::ShaderWrite, ShaderStages(flags) };
             case RGBufferAccess::AccelerationStructureBuild: return { NRI::AccessBits::AccelerationStructureWrite, NRI::StageBits::AccelerationStructureBuild };
+            case RGBufferAccess::AccelerationStructureBuildInput: return { NRI::AccessBits::AccelerationStructureRead,
+                                                                           NRI::StageBits::AccelerationStructureBuild };
             case RGBufferAccess::AccelerationStructureRead: return { NRI::AccessBits::AccelerationStructureRead | NRI::AccessBits::ShaderRead, ShaderStages(flags) };
             case RGBufferAccess::CopySource: return { NRI::AccessBits::TransferRead, NRI::StageBits::Transfer };
             case RGBufferAccess::CopyDestination: return { NRI::AccessBits::TransferWrite, NRI::StageBits::Transfer };

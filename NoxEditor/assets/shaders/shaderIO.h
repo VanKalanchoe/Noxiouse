@@ -169,6 +169,7 @@ struct GpuRayTracingInstance
 {
     uint64_t vertexBufferAddress;
     uint64_t indexBufferAddress;
+    uint64_t skinnedVertexBufferAddress; // 0 for rigid instances; local-space SkinnedVertex stream otherwise
     mat4 normalMatrix;              // transpose(inverse(world))
     vec4 baseColorFactor;
     vec4 emissiveFactor;            // rgb: color, a: strength
@@ -342,6 +343,21 @@ struct SkinningWorkItem
     uint32_t boneMatrixOffset;
 };
 STATIC_CONST uint32_t SKINNING_VERTICES_PER_WORK_ITEM = 256;
+
+#ifdef __SLANG__
+// Ray traversal can use compact deformed positions while hit shading retains the base vertex's UVs and material data.
+Vertex LoadRayTracingVertex(GpuRayTracingInstance instance, uint vertexIndex)
+{
+    Vertex vertex = ((Vertex*)instance.vertexBufferAddress)[vertexIndex];
+    if (instance.skinnedVertexBufferAddress != 0)
+    {
+        SkinnedVertex skinned = ((SkinnedVertex*)instance.skinnedVertexBufferAddress)[vertexIndex];
+        vertex.pos = skinned.position.xyz;
+        vertex.normal = skinned.normal.xyz;
+    }
+    return vertex;
+}
+#endif
 
 enum LightType : uint32_t
 {

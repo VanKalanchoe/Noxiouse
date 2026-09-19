@@ -1174,14 +1174,16 @@ RAB_Surface LoadSurfaceFromRayPayload(RAB_RayPayload rp, float3 rayOrigin, float
     uint i0 = indices[rp.primitiveIndex * 3 + 0];
     uint i1 = indices[rp.primitiveIndex * 3 + 1];
     uint i2 = indices[rp.primitiveIndex * 3 + 2];
-    Vertex* vertices = (Vertex*)lut.vertexBufferAddress;
+    Vertex vertex0 = LoadRayTracingVertex(lut, i0);
+    Vertex vertex1 = LoadRayTracingVertex(lut, i1);
+    Vertex vertex2 = LoadRayTracingVertex(lut, i2);
 
     float w0 = 1.0 - rp.barycentrics.x - rp.barycentrics.y;
     float w1 = rp.barycentrics.x;
     float w2 = rp.barycentrics.y;
-    float2 hitUV = w0 * vertices[i0].uv0 + w1 * vertices[i1].uv0 + w2 * vertices[i2].uv0;
+    float2 hitUV = w0 * vertex0.uv0 + w1 * vertex1.uv0 + w2 * vertex2.uv0;
 
-    float3 localNormal = normalize(w0 * vertices[i0].normal + w1 * vertices[i1].normal + w2 * vertices[i2].normal);
+    float3 localNormal = normalize(w0 * vertex0.normal + w1 * vertex1.normal + w2 * vertex2.normal);
     float3 hitNormal = normalize(mul((float3x3)lut.normalMatrix, localNormal));
     if (lut.doubleSided != 0 && dot(hitNormal, -rayDir) < 0.0)
         hitNormal = -hitNormal;
@@ -1207,7 +1209,7 @@ RAB_Surface LoadSurfaceFromRayPayload(RAB_RayPayload rp, float3 rayOrigin, float
         metallic = clamp(metallic * mrSample.b, 0.0, 1.0);
     }
 
-    hitNormal = perturb_normal(lut, vertices[i0], vertices[i1], vertices[i2], hitNormal, hitUV, textureSampler);
+    hitNormal = perturb_normal(lut, vertex0, vertex1, vertex2, hitNormal, hitUV, textureSampler);
 
     surface.worldPos = hitPos;
     surface.geoNormal = normalize(mul((float3x3)lut.normalMatrix, localNormal));
