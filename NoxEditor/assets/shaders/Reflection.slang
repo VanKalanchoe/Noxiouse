@@ -189,8 +189,8 @@ float4 fragMain(
     float3 normal = normalSample.rgb * rsqrt(lenSqN);
     float roughness = clamp(materialSample.r, 0.001, 1.0);
 
-    // Skip very rough surfaces (roughness > 0.85) to conserve ray tracing performance
-    if (roughness > 0.85 || ubo->enableRTReflections == 0 || ubo->tlasDeviceAddress == 0)
+    float maxTraceRoughness = (pushConstant.denoiserMode != 0) ? 0.85 : 0.55;
+    if (roughness > maxTraceRoughness || ubo->enableRTReflections == 0 || ubo->tlasDeviceAddress == 0)
     {
         return noReflection(pushConstant.denoiserMode);
     }
@@ -210,14 +210,14 @@ float4 fragMain(
 
     // 4. GGX VNDF Importance-Sampled Reflection Direction
     float3 R;
-    if (roughness < 0.01)
+    if (roughness < 0.01 || pushConstant.denoiserMode == 0)
     {
-        // Smooth mirror surface: exact reflection
+        // Smooth mirror surface or raw mode without denoiser: exact reflection without stochastic noise
         R = reflect(-V, normal);
     }
     else
     {
-        // Glossy surface: GGX VNDF jitter
+        // Glossy surface with active denoiser (NRD / DLSS-RR): GGX VNDF jitter
         float ign = interleaved_gradient_noise(float2(pixelCoord), pushConstant.frameIndex);
         float2 u = float2(ign, frac(ign * 1.6180339887 + 0.314159));
         float3 M = sample_ggx_vndf(V, normal, roughness, u);
@@ -274,7 +274,7 @@ float4 fragMain(
     bool hit = (rq.CommittedStatus() == COMMITTED_TRIANGLE_HIT);
 
     // 6. Evaluate Reflected Radiance
-    if (!hit)
+    if (!hit && ubo->prefilteredMapIndex != 0xFFFFFFFF)
     {
         // Ray Miss: Sample skybox environment cubemap
         TextureCube prefilteredTex = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + ubo->prefilteredMapIndex, 0));
@@ -282,6 +282,8 @@ float4 fragMain(
         float3 skyColor = prefilteredTex.SampleLevel(samplerPrefiltered, R, 0).rgb * ubo->scaleIBLAmbient;
         return NRD_PackSignal(pushConstant.denoiserMode, skyColor, ReflectionMissDistance, abs(mul(ubo->view, float4(worldPos, 1.0)).z), roughness);
     }
+    if (!hit)
+        return NRD_PackSignal(pushConstant.denoiserMode, float3(0.0), ReflectionMissDistance, abs(mul(ubo->view, float4(worldPos, 1.0)).z), roughness);
 
     // Ray Hit: Query closest committed hit
     uint committedInstanceID = rq.CommittedRayInstanceCustomIndex();

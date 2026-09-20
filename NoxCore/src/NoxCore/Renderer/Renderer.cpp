@@ -463,7 +463,6 @@ namespace Nox
         initGeometryBuffers();
 
         // Create every resource needed for PBR
-        initPBR();
     }
 
     void Renderer::cleanupSwapChain()
@@ -1791,11 +1790,64 @@ namespace Nox
         return UploadTexture(cpuData);
     }
 
-    void Renderer::initPBR()
+    void Renderer::SetEnvironmentMap(const std::filesystem::path& path)
     {
-        // 1. Load temporary 2D HDR panorama
-        Ref<Texture2D> enviromentHDR = TextureImporter::LoadTexture2D("assets/enviroments/papermill/khronos_papermill.hdr", {}, this);
+        if ((!path.empty() && path == m_environmentPath) ||
+            (path.empty() && m_environmentPath.empty() && !m_environmentCubemap))
+            return;
+        if (!path.empty() && !std::filesystem::exists(path))
+        {
+            NOX_CORE_WARN("Renderer::SetEnvironmentMap - environment file not found: {}", path.string());
+            return;
+        }
 
+        // The environment textures are imported into the bindless heap and may still be
+        // referenced by the current frame. Wait before replacing their descriptors.
+        m_device->waitIdle();
+        auto releaseEnvironmentTexture = [this](Ref<Texture2D>& texture)
+        {
+            if (texture)
+                m_resourceHeap->unregisterTexture(texture->GetDescriptorIndexSlot());
+            texture = nullptr;
+        };
+        releaseEnvironmentTexture(m_environmentCubemap);
+        releaseEnvironmentTexture(m_irradianceCubemap);
+        releaseEnvironmentTexture(m_prefilteredEnvMap);
+        releaseEnvironmentTexture(m_brdfLUT);
+
+        if (!path.empty())
+        {
+            InitializeEnvironmentLighting(path);
+            m_environmentPath = path;
+        }
+        else
+        {
+            m_environmentPath.clear();
+        }
+        m_renderGraph.ResetHistory(NRDHistoryKey);
+    }
+
+    void Renderer::InitializeEnvironmentLighting(const std::filesystem::path& environmentPath)
+    {
+        // 1. Load either an equirectangular HDR panorama or a DDS cubemap.
+        Ref<Texture2D> enviromentHDR = TextureImporter::LoadTexture2D(environmentPath, {}, this);
+        const bool environmentIsCube = enviromentHDR && enviromentHDR->getArrayLayers() == 6;
+
+        // DDS cubemaps (for example RTXPT's Bistro environment) are already in the
+        // representation used by the lighting shaders. Keep them intact; only an
+        // equirectangular HDR needs the conversion pass below.
+        if (environmentIsCube)
+            m_environmentCubemap = enviromentHDR;
+
+        struct EquirectPushConstants
+        {
+            uint32_t hdrTextureIndex;
+            uint32_t cubemapStorageIndex;
+            uint32_t cubemapSize;
+        } pushData;
+
+        if (!environmentIsCube)
+        {
         // 2. Create the permanent Cubemap Texture (512x512 per face, 6 array layers)
         constexpr uint32_t cubemapSize = 512;
         uint32_t cubemapNumMips = static_cast<uint32_t>(floor(log2(cubemapSize))) + 1;
@@ -1825,13 +1877,6 @@ namespace Nox
         std::unique_ptr<NRI::Pipeline> equirectPipeline = m_device->createPipeline(computeDesc, *m_shaderCompiler);
 
         // 5. Structure for Push Constants to pass descriptor slots to Slang
-        struct EquirectPushConstants
-        {
-            uint32_t hdrTextureIndex;
-            uint32_t cubemapStorageIndex;
-            uint32_t cubemapSize;
-        } pushData;
-
         pushData.hdrTextureIndex = enviromentHDR->GetDescriptorIndexSlot();
         pushData.cubemapStorageIndex = m_environmentCubemap->GetDescriptorIndexSlot();
         pushData.cubemapSize = cubemapSize;
@@ -1865,6 +1910,7 @@ namespace Nox
 
         // 7. Overwrite descriptor slot in heap with Sampled Image Descriptor
         m_resourceHeap->registerTexture(*m_environmentCubemap, NRI::TextureUsage::ShaderResource);
+        }
 
         // equiRectPipeline and enviromentHDR cleanly go out of scope and release temporary resources
 
@@ -2057,6 +2103,7 @@ namespace Nox
 
         endSingleTimeCommands(std::move(brdfCmd));
         m_resourceHeap->registerTexture(*m_brdfLUT, NRI::TextureUsage::ShaderResource);
+        m_environmentPath = environmentPath;
     }
 
     template <typename T>
@@ -3412,10 +3459,10 @@ namespace Nox
         uniformData.clusterStatsReference = m_clusterStatsBuffer->getDeviceAddress();
 
         // PBR IBL
-        uniformData.irradianceMapIndex = m_irradianceCubemap->GetDescriptorIndexSlot();
-        uniformData.prefilteredMapIndex = m_prefilteredEnvMap->GetDescriptorIndexSlot();
-        uniformData.prefilteredCubeMipLevels = static_cast<float>(prefilterCubeMipLevels);
-        uniformData.brdfLutIndex = m_brdfLUT->GetDescriptorIndexSlot();
+        uniformData.irradianceMapIndex = m_irradianceCubemap ? m_irradianceCubemap->GetDescriptorIndexSlot() : ~0u;
+        uniformData.prefilteredMapIndex = m_prefilteredEnvMap ? m_prefilteredEnvMap->GetDescriptorIndexSlot() : ~0u;
+        uniformData.prefilteredCubeMipLevels = m_prefilteredEnvMap ? static_cast<float>(prefilterCubeMipLevels) : 0.0f;
+        uniformData.brdfLutIndex = m_brdfLUT ? m_brdfLUT->GetDescriptorIndexSlot() : ~0u;
         uniformData.exposure = m_exposure; // slider in the future in imgui
         uniformData.gamma = m_gamma; // slider in the future in imgui
         uniformData.scaleIBLAmbient = m_scaleIBLAmbient; // slider in the future in imgui

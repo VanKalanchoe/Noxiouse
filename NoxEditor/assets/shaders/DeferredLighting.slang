@@ -76,7 +76,74 @@
         return rgb * 0.85 + 0.1;
     }
 
+    float2 intersection_uv(GpuRayTracingInstance lut, uint primIndex, float2 barycentrics)
+    {
+        uint32_t* indices = (uint32_t*)lut.indexBufferAddress;
+        uint i0 = indices[primIndex * 3 + 0];
+        uint i1 = indices[primIndex * 3 + 1];
+        uint i2 = indices[primIndex * 3 + 2];
 
+        Vertex* vertices = (Vertex*)lut.vertexBufferAddress;
+        float2 uv0 = vertices[i0].uv0;
+        float2 uv1 = vertices[i1].uv0;
+        float2 uv2 = vertices[i2].uv0;
+
+        float w0 = 1.0 - barycentrics.x - barycentrics.y;
+        float w1 = barycentrics.x;
+        float w2 = barycentrics.y;
+
+        return w0 * uv0 + w1 * uv1 + w2 * uv2;
+    }
+
+    bool trace_shadow_ray(UniformBufferObject* ubo, float3 rayOrigin, float3 rayDir, float maxDist)
+    {
+        if (ubo->enableRTShadows == 0 || ubo->tlasDeviceAddress == 0)
+            return false;
+
+        RayDesc shadowRayDesc;
+        shadowRayDesc.Origin = rayOrigin;
+        shadowRayDesc.Direction = rayDir;
+        shadowRayDesc.TMin = 0.005;
+        shadowRayDesc.TMax = maxDist;
+
+        RaytracingAccelerationStructure accelerationStructure = RaytracingAccelerationStructure(ubo->tlasDeviceAddress);
+
+        RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES |
+                 RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> sq;
+        let rayFlags = RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES |
+                       RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH;
+
+        sq.TraceRayInline(accelerationStructure, rayFlags, 0xFF, shadowRayDesc);
+
+        GpuRayTracingInstance* instanceLUTBuffer = (GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference;
+        SamplerState textureSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
+
+        while (sq.Proceed())
+        {
+            uint instanceID = sq.CandidateRayInstanceCustomIndex();
+            uint primIndex = sq.CandidatePrimitiveIndex();
+
+            GpuRayTracingInstance lut = instanceLUTBuffer[instanceID];
+
+            if (lut.alphaMode == 0 || lut.baseColorTextureIndex == 0xFFFFFFFF)
+            {
+                sq.CommitNonOpaqueTriangleHit();
+            }
+            else
+            {
+                float2 uv = intersection_uv(lut, primIndex, sq.CandidateTriangleBarycentrics());
+                Texture2D tex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + lut.baseColorTextureIndex, 0));
+                float4 intersectionColor = tex.SampleLevel(textureSampler, uv, 0);
+
+                if (intersectionColor.a >= lut.alphaCutoff)
+                {
+                    sq.CommitNonOpaqueTriangleHit();
+                }
+            }
+        }
+
+        return (sq.CommittedStatus() == COMMITTED_TRIANGLE_HIT);
+    }
 
     [shader("fragment")]
     float4 fragMain(
@@ -186,18 +253,21 @@
         float4 materialSample = materialTex.Load(int3(pixelCoord, 0));
         float4 emissionSample = emissionTex.Load(int3(pixelCoord, 0));
 
-        // Fetch Decoupled RT Shadow Mask (computed in Pass 2.5 / 2.6)
-        Texture2D shadowMaskTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.shadowMaskTextureIndex, 0));
-        float2 shadowData = shadowMaskTex.Load(int3(pixelCoord, 0)).rg;
-        float shadowFactor;
-        if ((pushConstant.nrdShadowsEnabled & 1) != 0)
+        // Fetch Decoupled RT Shadow Mask (computed in Pass 2.5 / 2.6 for primary sun)
+        float shadowFactor = 1.0;
+        if (ubo->enableRTShadows != 0 && pushConstant.shadowMaskTextureIndex != 0 && pushConstant.shadowMaskTextureIndex != 0xFFFFFFFF)
         {
-            float s = shadowData.r;
-            shadowFactor = clamp(s * s, 0.0, 1.0);
-        }
-        else
-        {
-            shadowFactor = clamp(shadowData.g, 0.0, 1.0);
+            Texture2D shadowMaskTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.shadowMaskTextureIndex, 0));
+            float2 shadowData = shadowMaskTex.Load(int3(pixelCoord, 0)).rg;
+            if ((pushConstant.nrdShadowsEnabled & 1) != 0)
+            {
+                float s = shadowData.r;
+                shadowFactor = clamp(s * s, 0.0, 1.0);
+            }
+            else
+            {
+                shadowFactor = clamp(shadowData.g, 0.0, 1.0);
+            }
         }
 
         // 3. Reconstruct World Position from Depth
@@ -321,8 +391,25 @@
                     continue;
                 }
 
-                // Comes from 2.5 ShadowMask Pass
-                float lightShadow = (i == 0) ? shadowFactor : 1.0;
+                float lightShadow = 1.0;
+                if (ubo->enableRTShadows != 0 && ubo->tlasDeviceAddress != 0)
+                {
+                    if (i == 0 && pushConstant.shadowMaskTextureIndex != 0 && pushConstant.shadowMaskTextureIndex != 0xFFFFFFFF)
+                    {
+                        // Primary directional light uses the decoupled shadow mask / NRD SIGMA if available
+                        lightShadow = shadowFactor;
+                    }
+                    else if (lightType == 0 || (attenuation * light.color.w > 0.001))
+                    {
+                        // Any additional directional lights (moon, secondary suns) or any punctual light within range
+                        float3 shadowNormal = (dot(n, l) < 0.0) ? -n : n;
+                        float3 shadowOrigin = worldPos + shadowNormal * 0.02;
+                        if (trace_shadow_ray(ubo, shadowOrigin, l, maxDist))
+                        {
+                            lightShadow = 0.0;
+                        }
+                    }
+                }
 
                 float3 h = normalize(l + v);
 
@@ -402,12 +489,13 @@
 
         // Sample Decoupled RT Reflection (Denoised via NRD REBLUR/RELAX or Raw 1-SPP)
         float3 reflColor = float3(0.0);
-        bool hasRTReflection = (ubo->enableRTReflections != 0 && perceptualRoughness < 0.85);
+        uint reflDenoiserMode = (pushConstant.nrdShadowsEnabled >> 1) & 3;
+        float maxRoughness = (reflDenoiserMode != 0) ? 0.85 : 0.55;
+        bool hasRTReflection = (ubo->enableRTReflections != 0 && perceptualRoughness < maxRoughness && ubo->brdfLutIndex != 0xFFFFFFFF);
         if (hasRTReflection)
         {
             Texture2D reflTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.reflectionTextureIndex, 0));
             float4 reflSample = reflTex.Load(int3(pixelCoord, 0));
-            uint reflDenoiserMode = (pushConstant.nrdShadowsEnabled >> 1) & 3;
             reflColor = NRD_UnpackSignal(reflDenoiserMode, reflSample);
 
             SamplerState samplerBrdf = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_BRDFLUT, 0));
@@ -425,8 +513,8 @@
                 rtSpecular *= specularOcclusion;
             }
 
-            // Smooth fade out into environment IBL as roughness reaches 0.85
-            float rtWeight = saturate((0.85 - perceptualRoughness) / 0.15);
+            // Smooth fade out into environment IBL as roughness reaches maxRoughness
+            float rtWeight = saturate((maxRoughness - perceptualRoughness) / 0.15);
             ambientSpecular = lerp(ambientSpecular, rtSpecular, rtWeight);
         }
 

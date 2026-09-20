@@ -471,6 +471,7 @@
                     diffuseRadiance += restirDiffuseIrradiance * diffuseColor;
                     primaryReSTIRGIUsed = true;
                 }
+
             }
 
             // --- Next Event Estimation (NEE): Direct Lights ---

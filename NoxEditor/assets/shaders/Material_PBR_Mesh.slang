@@ -158,6 +158,8 @@ float3 getNormal(UniformBufferObject* ubo, InstanceData instance, VSOutput vertI
 // See our README.md on Environment Maps [3] for additional discussion.
 float3 getIBLContribution(UniformBufferObject* ubo, PBRInfo pbrInputs, vec3 n, vec3 reflection)
 {
+	if (ubo->irradianceMapIndex == 0xFFFFFFFF || ubo->prefilteredMapIndex == 0xFFFFFFFF || ubo->brdfLutIndex == 0xFFFFFFFF)
+		return float3(0.0);
 	float lod = (pbrInputs.perceptualRoughness * ubo->prefilteredCubeMipLevels);
 
     SamplerState samplerBrdf = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_BRDFLUT, 0));

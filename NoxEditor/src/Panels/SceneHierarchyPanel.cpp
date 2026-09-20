@@ -13,6 +13,7 @@
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Animation/Animator.h"
 #include "NoxCore/Project/Project.h"
+#include "NoxCore/Utils/Utils.h"
 
 namespace Nox
 {
@@ -504,6 +505,7 @@ namespace Nox
             DisplayAddComponentEntry<DirectionalLightComponent>("Directional Light");
             DisplayAddComponentEntry<PointLightComponent>("Point Light");
             DisplayAddComponentEntry<SpotLightComponent>("Spot Light");
+            DisplayAddComponentEntry<EnvironmentLightComponent>("Environment Light");
 
             DisplayAddComponentEntry<AnimatorComponent>("Animator");
 
@@ -957,6 +959,61 @@ namespace Nox
             ImGui::DragFloat("Source Radius", &component.Radius, 0.01f, 0.0f, 10.0f, "%.2f m");
             uint32_t minSamples = 1, maxSamples = 16;
             ImGui::DragScalar("Shadow Samples", ImGuiDataType_U32, &component.ShadowSamples, 0.1f, &minSamples, &maxSamples);
+        });
+
+        DrawComponent<EnvironmentLightComponent>("Environment Light", entity, [](auto& component)
+        {
+            ImGui::Checkbox("Enabled", &component.Enabled);
+            ImGui::DragFloat3("Radiance Scale", glm::value_ptr(component.RadianceScale), 0.01f, 0.0f, 100.0f);
+            ImGui::DragFloat("Rotation", &component.Rotation, 0.01f, -glm::radians(180.0f), glm::radians(180.0f), "%.3f rad");
+            auto manager = Project::GetActive()->GetEditorAssetManager();
+            const auto& registry = manager->GetAssetRegistry();
+            std::string selectedEnvironment = component.TexturePath.empty() ? "No environment selected" : component.TexturePath;
+            if (ImGui::BeginCombo("Environment", selectedEnvironment.c_str()))
+            {
+                if (ImGui::Selectable("None", component.TexturePath.empty()))
+                    component.TexturePath.clear();
+                for (const auto& [handle, metadata] : registry)
+                {
+                    if (metadata.Type != AssetType::Texture2D)
+                        continue;
+                    const auto source = metadata.SourceFilePath.empty() ? metadata.FilePath : metadata.SourceFilePath;
+                    const auto extension = source.extension().string();
+                    if (extension != ".hdr" && extension != ".dds")
+                        continue;
+                    const auto normalizedSource = source.lexically_normal();
+                    if (normalizedSource.empty() || normalizedSource.begin()->generic_string() != "EnvironmentMaps")
+                        continue;
+                    const std::string path = source.generic_string();
+                    if (ImGui::Selectable(path.c_str(), component.TexturePath == path))
+                        component.TexturePath = path;
+                }
+                ImGui::EndCombo();
+            }
+            if (ImGui::Button("Import HDR / DDS Environment"))
+            {
+                static constexpr char filter[] = "Environment maps\0hdr;dds\0";
+                const std::string selectedFile = Utility::OpenFile(filter);
+                if (!selectedFile.empty())
+                {
+                    const std::filesystem::path sourcePath = selectedFile;
+                    const std::filesystem::path relativePath = std::filesystem::path("EnvironmentMaps") / sourcePath.filename();
+                    const std::filesystem::path destination = Project::GetActiveAssetDirectory() / relativePath;
+                    std::error_code error;
+                    std::filesystem::create_directories(destination.parent_path(), error);
+                    std::filesystem::copy_file(sourcePath, destination,
+                        std::filesystem::copy_options::overwrite_existing, error);
+                    if (!error)
+                    {
+                        manager->ImportAsset(relativePath, relativePath, AssetType::Texture2D);
+                        component.TexturePath = relativePath.generic_string();
+                    }
+                    else
+                    {
+                        NOX_CORE_ERROR("Environment import failed: {}", error.message());
+                    }
+                }
+            }
         });
 
         DrawComponent<AnimatorComponent>("Animator", entity, [](auto& component)

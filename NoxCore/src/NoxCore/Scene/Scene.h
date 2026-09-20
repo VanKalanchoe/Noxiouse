@@ -66,7 +66,7 @@ namespace Nox
             return m_Registry.view<Components...>();
         }
 
-        void SetRenderer(Renderer* renderer) { m_renderer = renderer; }
+        void SetRenderer(Renderer* renderer);
         void SetRenderer2D(Renderer2D* renderer) { m_renderer2D = renderer; }
 
         // Every asset handle this scene's components reference - the roots for unloading unused assets.

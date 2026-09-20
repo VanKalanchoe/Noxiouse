@@ -81,6 +81,13 @@ float3 evaluateDirectLight(PBRInfo pbrInputs, float3 lightRadiance)
 // cubemap + split-sum BRDF LUT. Exactly DeferredLighting.slang's own getIBLContribution.
 IBLResult getIBLContribution(UniformBufferObject* ubo, PBRInfo pbrInputs, float3 n, float3 reflection)
 {
+    if (ubo->irradianceMapIndex == 0xFFFFFFFF || ubo->prefilteredMapIndex == 0xFFFFFFFF || ubo->brdfLutIndex == 0xFFFFFFFF)
+    {
+        IBLResult empty;
+        empty.diffuse = float3(0.0);
+        empty.specular = float3(0.0);
+        return empty;
+    }
     float lod = (pbrInputs.perceptualRoughness * ubo->prefilteredCubeMipLevels);
 
     SamplerState samplerBrdf = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_BRDFLUT, 0));

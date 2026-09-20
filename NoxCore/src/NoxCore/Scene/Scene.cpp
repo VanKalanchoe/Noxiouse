@@ -11,10 +11,35 @@
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Physics/Physics2D.h"
 #include "NoxCore/Profiling/Profiler.h"
+#include "NoxCore/Project/Project.h"
 #include "NoxCore/Tasks/JobSystem.h"
 
 namespace Nox
 {
+    void Scene::SetRenderer(Renderer* renderer)
+    {
+        m_renderer = renderer;
+        if (!m_renderer)
+            return;
+
+        // Environment settings are scene data, not global renderer defaults. The first
+        // enabled component owns the scene environment; multiple environments are not
+        // physically meaningful for the current IBL pipeline.
+        auto view = m_Registry.view<EnvironmentLightComponent>();
+        bool environmentSelected = false;
+        for (auto entity : view)
+        {
+            const auto& environment = view.get<EnvironmentLightComponent>(entity);
+            if (!environment.Enabled || environment.TexturePath.empty())
+                continue;
+            m_renderer->SetEnvironmentMap(Project::GetActiveAssetDirectory() / environment.TexturePath);
+            environmentSelected = true;
+            break;
+        }
+        if (!environmentSelected)
+            m_renderer->SetEnvironmentMap({});
+    }
+
     template <typename... Component>
     static void CopyComponent(entt::registry& dst, const entt::registry& src,
                               const std::unordered_map<UUID, entt::entity>& enttMap)
@@ -707,7 +732,7 @@ namespace Nox
         // them directly makes duplicated glTF hierarchies share their children.
         using DuplicatableComponents = ComponentGroup<
             MeshComponent, MaterialComponent, ModelInstanceComponent, DirectionalLightComponent,
-            PointLightComponent, SpotLightComponent, AnimatorComponent,
+            PointLightComponent, SpotLightComponent, EnvironmentLightComponent, AnimatorComponent,
             SpriteRendererComponent, CircleRendererComponent, CameraComponent,
             ScriptComponent, RigidBody2DComponent, BoxCollider2DComponent,
             CircleCollider2DComponent, TextComponent>;
@@ -1051,6 +1076,11 @@ namespace Nox
     
     template <>
     void Scene::OnComponentAdded<SpotLightComponent>(Entity entity, SpotLightComponent& component)
+    {
+    }
+
+    template <>
+    void Scene::OnComponentAdded<EnvironmentLightComponent>(Entity entity, EnvironmentLightComponent& component)
     {
     }
     

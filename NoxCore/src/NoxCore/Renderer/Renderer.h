@@ -1,6 +1,7 @@
 #pragma once
 #include <array>
 #include <chrono>
+#include <filesystem>
 #include "Renderer2D.h"
 #include "NoxCore/Core/Window.h"
 #include "Mesh.h"
@@ -193,6 +194,10 @@ namespace Nox
         void BeginScene(const Camera& camera, const glm::mat4& cameraWorldMatrix);
         void BeginScene(const EditorCamera& camera);
         void EndScene();
+
+        // Rebuild the image-based lighting set for a scene environment. Equirectangular
+        // HDR files are converted to a cubemap; DDS cubemaps are uploaded directly.
+        void SetEnvironmentMap(const std::filesystem::path& path);
 
         // GPU scene (§5.5), main thread. Mesh entities live on the GPU until their owner changes them; the renderer
         // uploads only what changed.
@@ -458,7 +463,7 @@ namespace Nox
         // Textures finished loading: materials resolve their texture paths again (they drew without them so far).
         static void MarkTexturesLoaded();
         Ref<Texture2D> createSolidColorTexture(uint8_t r, uint8_t g, uint8_t b, uint8_t a);
-        void initPBR();
+        void InitializeEnvironmentLighting(const std::filesystem::path& environmentPath);
 
         template <class T>
         void UploadBufferSlice(NRI::Buffer& dstBuffer, const T* data, uint32_t elementOffset, uint32_t elementCount);
@@ -1203,6 +1208,7 @@ namespace Nox
 
         // PBR stuff
         Ref<Texture2D> m_environmentCubemap;
+        std::filesystem::path m_environmentPath;
         std::unique_ptr<NRI::Pipeline> m_skyboxPipeline = nullptr;
         Ref<Texture2D> m_irradianceCubemap;
         Ref<Texture2D> m_prefilteredEnvMap;

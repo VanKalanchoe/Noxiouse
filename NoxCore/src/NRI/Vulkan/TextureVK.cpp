@@ -302,7 +302,31 @@ namespace NRI
         
         std::vector<vk::BufferImageCopy> copyRegions;
         
-        if (mipOffsets.empty() || mipOffsets.size() <= 1)
+        if (m_desc.arrayLayers > 1 && !mipOffsets.empty())
+        {
+            // Array/cubemap uploads are packed mip-major, layer-contiguous. The
+            // importer provides one offset per mip, so derive each layer's stride
+            // from the next mip boundary (or the staging buffer size for the last).
+            for (uint32_t i = 0; i < mipOffsets.size(); ++i)
+            {
+                const size_t mipBegin = mipOffsets[i];
+                const size_t mipEnd = i + 1 < mipOffsets.size() ? mipOffsets[i + 1] : stagingBuffer.getSize();
+                const size_t layerSize = (mipEnd - mipBegin) / m_desc.arrayLayers;
+                for (uint32_t layer = 0; layer < m_desc.arrayLayers; ++layer)
+                {
+                    copyRegions.push_back(vk::BufferImageCopy
+                    {
+                        .bufferOffset = mipBegin + layerSize * layer,
+                        .bufferRowLength = 0,
+                        .bufferImageHeight = 0,
+                        .imageSubresource = { .aspectMask = vk::ImageAspectFlagBits::eColor, .mipLevel = i, .baseArrayLayer = layer, .layerCount = 1 },
+                        .imageOffset = {0, 0, 0},
+                        .imageExtent = { std::max(1u, width >> i), std::max(1u, height >> i), 1 }
+                    });
+                }
+            }
+        }
+        else if (mipOffsets.empty() || mipOffsets.size() <= 1)
         {
             // STB Fallback: Only one base level provided
             copyRegions.push_back(vk::BufferImageCopy

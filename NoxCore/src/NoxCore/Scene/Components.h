@@ -177,6 +177,20 @@ namespace Nox
         SpotLightComponent() = default;
         SpotLightComponent(const SpotLightComponent&) = default;
     };
+
+    // Image-based environment lighting. The renderer will preprocess TexturePath into its
+    // diffuse irradiance/specular IBL maps; this is deliberately separate from punctual
+    // directional/point/spot lights.
+    struct EnvironmentLightComponent
+    {
+        std::string TexturePath;
+        glm::vec3 RadianceScale{ 1.0f, 1.0f, 1.0f };
+        float Rotation = 0.0f; // radians around the world Y axis
+        bool Enabled = true;
+
+        EnvironmentLightComponent() = default;
+        EnvironmentLightComponent(const EnvironmentLightComponent&) = default;
+    };
     
     // Holds runtime animation state (tracks current time, playing animation, bone matrices)
     struct AnimatorComponent
@@ -327,7 +341,7 @@ namespace Nox
 
     using AllComponents = 
         ComponentGroup<TransformComponent, WorldTransformComponent, RelationshipComponent, DirtyTransformComponent,
-        MeshComponent, MaterialComponent, ModelInstanceComponent, ModelNodeComponent, DirectionalLightComponent, PointLightComponent, SpotLightComponent, AnimatorComponent,
+        MeshComponent, MaterialComponent, ModelInstanceComponent, ModelNodeComponent, DirectionalLightComponent, PointLightComponent, SpotLightComponent, EnvironmentLightComponent, AnimatorComponent,
         SpriteRendererComponent,
             CircleRendererComponent, CameraComponent, ScriptComponent,
             /*NativeScriptComponent,*/ RigidBody2DComponent, BoxCollider2DComponent,

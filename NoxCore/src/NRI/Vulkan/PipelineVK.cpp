@@ -107,6 +107,17 @@ namespace NRI
     
     PipelineVK::PipelineVK(DeviceVK& device, const PipelineDesc& desc, ShaderCompiler& compiler) : m_deviceVK(device)
     {
+        if (desc.shaders.empty())
+            throw std::runtime_error("PipelineVK requires at least one shader stage");
+        if (desc.type == PipelineType::Compute &&
+            (desc.shaders.size() != 1 || desc.shaders.front().stage != ShaderStage::Compute))
+            throw std::runtime_error("PipelineVK compute pipeline requires exactly one compute shader");
+        for (const ShaderStageDesc& shader : desc.shaders)
+        {
+            if (desc.type == PipelineType::Graphics && shader.stage == ShaderStage::Compute)
+                throw std::runtime_error("PipelineVK graphics pipeline contains a compute shader: " + shader.sourcePath);
+        }
+
         std::vector<std::vector<char>> tempBytecodeStorage(desc.shaders.size());
         bool useShaderObjects = m_deviceVK.isShaderObjectExtensionEnabled();
 

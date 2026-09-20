@@ -482,6 +482,8 @@ namespace Nox
         cpuData.Width = dds.GetWidth();
         cpuData.Height = dds.GetHeight();
         cpuData.MipLevels = dds.GetMipCount();
+        cpuData.IsCubeMap = dds.IsCubemap();
+        cpuData.ArrayLayers = dds.GetArraySize();
 
         switch (dds.GetFormat())
         {
@@ -539,19 +541,35 @@ namespace Nox
             return false;
         }
 
+        // Keep the payload mip-major, with all array/cubemap layers contiguous inside
+        // each mip. TextureVK uses these offsets to emit one copy region per layer.
         size_t currentOffset = 0;
         cpuData.MipOffsets.resize(dds.GetMipCount());
 
         for (uint32_t level = 0; level < dds.GetMipCount(); level++)
         {
             cpuData.MipOffsets[level] = currentOffset;
-
-            const auto* imageData = dds.GetImageData(level, 0);
-            currentOffset += imageData->m_memSlicePitch;
+            for (uint32_t layer = 0; layer < cpuData.ArrayLayers; ++layer)
+            {
+                const auto* imageData = dds.GetImageData(level, layer);
+                currentOffset += imageData->m_memSlicePitch;
+            }
         }
 
-        // Owned: the DDS file's memory goes away with it.
-        cpuData.Data = Buffer::Copy(Buffer(dds.GetImageData()->m_mem, currentOffset));
+        // tinyddsloader stores subresources in layer-major order. Repack them into
+        // mip-major order expected by TextureVK's upload path.
+        Buffer packed(currentOffset);
+        size_t packedOffset = 0;
+        for (uint32_t level = 0; level < dds.GetMipCount(); ++level)
+        {
+            for (uint32_t layer = 0; layer < cpuData.ArrayLayers; ++layer)
+            {
+                const auto* imageData = dds.GetImageData(level, layer);
+                memcpy(static_cast<uint8_t*>(packed.Data) + packedOffset, imageData->m_mem, imageData->m_memSlicePitch);
+                packedOffset += imageData->m_memSlicePitch;
+            }
+        }
+        cpuData.Data = std::move(packed);
         return true;
     }
 

@@ -362,6 +362,20 @@ namespace Nox
             out << YAML::EndMap;
         }
 
+        if (entity.HasComponent<EnvironmentLightComponent>())
+        {
+            out << YAML::Key << "EnvironmentLightComponent";
+            out << YAML::BeginMap;
+
+            auto& elc = entity.GetComponent<EnvironmentLightComponent>();
+            out << YAML::Key << "TexturePath" << YAML::Value << elc.TexturePath;
+            out << YAML::Key << "RadianceScale" << YAML::Value << elc.RadianceScale;
+            out << YAML::Key << "Rotation" << YAML::Value << elc.Rotation;
+            out << YAML::Key << "Enabled" << YAML::Value << elc.Enabled;
+
+            out << YAML::EndMap;
+        }
+
         if (entity.HasComponent<AnimatorComponent>())
         {
             out << YAML::Key << "AnimatorComponent";
@@ -747,6 +761,20 @@ namespace Nox
                         slc.Radius = spotLightComponent["Radius"].as<float>();
                     if (spotLightComponent["ShadowSamples"])
                         slc.ShadowSamples = spotLightComponent["ShadowSamples"].as<uint32_t>();
+                }
+
+                auto environmentLightComponent = entity["EnvironmentLightComponent"];
+                if (environmentLightComponent)
+                {
+                    auto& elc = deserializedEntity.AddComponent<EnvironmentLightComponent>();
+                    if (environmentLightComponent["TexturePath"])
+                        elc.TexturePath = environmentLightComponent["TexturePath"].as<std::string>();
+                    if (environmentLightComponent["RadianceScale"])
+                        elc.RadianceScale = environmentLightComponent["RadianceScale"].as<glm::vec3>();
+                    if (environmentLightComponent["Rotation"])
+                        elc.Rotation = environmentLightComponent["Rotation"].as<float>();
+                    if (environmentLightComponent["Enabled"])
+                        elc.Enabled = environmentLightComponent["Enabled"].as<bool>();
                 }
 
                 auto animatorComponent = entity["AnimatorComponent"];
