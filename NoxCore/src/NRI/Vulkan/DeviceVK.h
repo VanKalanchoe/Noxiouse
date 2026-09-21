@@ -61,7 +61,8 @@ namespace NRI
         bool isDLSSRayReconstructionSupported() const override { return m_slDLSS_RRSupported; }
         bool evaluateDLSS(const DLSSParams& params) override;
         void resetDLSSViewport() override;
-        DLSSRenderExtent getDLSSOptimalRenderSize(UpscaleMode mode, Extent2D outputSize) override;
+        DLSSRenderExtent getDLSSOptimalRenderSize(UpscaleMode mode, Extent2D outputSize,
+            bool rayReconstruction = false) override;
         PFN_vkQueuePresentKHR getStreamlinePresentFn() const { return m_slQueuePresentKHR; }
         
         // NRD
@@ -69,7 +70,9 @@ namespace NRI
         bool tickNRD(uint32_t frameIndex, bool resetHistory,
             const glm::mat4& view, const glm::mat4& proj,
             const glm::mat4& prevView, const glm::mat4& prevProj,
-            const glm::vec2& motionVectorScale = glm::vec2(1.0f, 1.0f)) override;
+            const glm::vec2& motionVectorScale = glm::vec2(1.0f, 1.0f),
+            const glm::vec2& cameraJitter = glm::vec2(0.0f),
+            const glm::vec2& cameraJitterPrev = glm::vec2(0.0f)) override;
         bool evaluateNRDShadows(const NRDShadowParams& params) override;
         bool evaluateNRDReflections(const NRDReflectionParams& params, NRDReflectionDenoiser denoiser) override;
         bool evaluateNRDDiffuse(const NRDDiffuseParams& params, NRDDiffuseDenoiser denoiser) override;
@@ -88,6 +91,9 @@ namespace NRI
         void submit(QueueType queue, std::span<CommandBuffer* const> cmdBuffers, std::span<const TimelinePoint> waits,
                     std::span<const TimelinePoint> signals) override;
         void waitIdle() override;
+        uint32_t getShaderGroupHandleSize() const override { return m_rtPipelineProperties.shaderGroupHandleSize; }
+        uint32_t getShaderGroupBaseAlignment() const override { return m_rtPipelineProperties.shaderGroupBaseAlignment; }
+        const vk::PhysicalDeviceRayTracingPipelinePropertiesKHR& getRayTracingPipelineProperties() const { return m_rtPipelineProperties; }
         void initImGui(Nox::Window& window) override;
         void shutdownImGui() override;
         void beginImGui() override;
@@ -132,7 +138,9 @@ namespace NRI
         void updateNRDCommonSettings(uint32_t frameIndex, bool resetHistory,
             const glm::mat4& proj, const glm::mat4& prevProj,
             const glm::mat4& view, const glm::mat4& prevView,
-            const glm::vec2& mvScale);
+            const glm::vec2& mvScale,
+            const glm::vec2& cameraJitter = glm::vec2(0.0f),
+            const glm::vec2& cameraJitterPrev = glm::vec2(0.0f));
         // A de-modulated diffuse + specular signal (NRD REBLUR / RELAX_DIFFUSE_SPECULAR) under the given identifiers.
         bool evaluateNRDDiffuseSpecular(const NRDDiffuseParams& params, NRDDiffuseDenoiser denoiser, uint32_t reblurIdentifier, uint32_t relaxIdentifier);
         
@@ -199,5 +207,8 @@ namespace NRI
         // NRD (Real-Time Denoisers)
         struct NRDContext;
         std::unique_ptr<NRDContext> m_nrdContext;
+
+        // Hardware Ray Tracing Pipeline properties
+        vk::PhysicalDeviceRayTracingPipelinePropertiesKHR m_rtPipelineProperties{};
     };
 }

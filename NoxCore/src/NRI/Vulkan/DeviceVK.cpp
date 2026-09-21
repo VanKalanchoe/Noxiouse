@@ -767,6 +767,14 @@ namespace NRI
     {
         m_depthFormat = findDepthFormat();
         m_surfaceFormat = chooseSurfaceFormat();
+
+        auto rtProps = m_physicalDevice.template getProperties2<vk::PhysicalDeviceProperties2, vk::PhysicalDeviceRayTracingPipelinePropertiesKHR>();
+        m_rtPipelineProperties = rtProps.template get<vk::PhysicalDeviceRayTracingPipelinePropertiesKHR>();
+        NOX_CORE_INFO("RT Pipeline Properties: handleSize={}, baseAlignment={}, handleAlignment={}, maxStride={}",
+            m_rtPipelineProperties.shaderGroupHandleSize,
+            m_rtPipelineProperties.shaderGroupBaseAlignment,
+            m_rtPipelineProperties.shaderGroupHandleAlignment,
+            m_rtPipelineProperties.maxShaderGroupStride);
     }
 
     vk::SampleCountFlagBits DeviceVK::getMaxUsableSampleCount()
@@ -864,7 +872,8 @@ namespace NRI
         }
     }
 
-    Device::DLSSRenderExtent DeviceVK::getDLSSOptimalRenderSize(UpscaleMode mode, Extent2D outputSize)
+    Device::DLSSRenderExtent DeviceVK::getDLSSOptimalRenderSize(UpscaleMode mode, Extent2D outputSize,
+        bool rayReconstruction)
     {
         if (!m_streamlineInitialized || !m_slDLSSSupported || mode == UpscaleMode::Off ||
             outputSize.width == 0 || outputSize.height == 0)
@@ -872,20 +881,42 @@ namespace NRI
             return {outputSize, 0.0f};
         }
 
-        sl::DLSSOptions opts{};
-        opts.mode = ToSLDLSSMode(mode);
-        opts.outputWidth = outputSize.width;
-        opts.outputHeight = outputSize.height;
-
-        sl::DLSSOptimalSettings settings{};
-        sl::Result res = slDLSSGetOptimalSettings(opts, settings);
-        if (res != sl::Result::eOk || settings.optimalRenderWidth == 0 || settings.optimalRenderHeight == 0)
+        uint32_t renderWidth = 0;
+        uint32_t renderHeight = 0;
+        float optimalSharpness = 0.0f;
+        sl::Result res = sl::Result::eErrorIO;
+        if (rayReconstruction && m_slDLSS_RRSupported)
         {
-            NOX_CORE_WARN("[Streamline] slDLSSGetOptimalSettings failed: {}", (int)res);
+            sl::DLSSDOptions opts{};
+            opts.mode = ToSLDLSSMode(mode);
+            opts.outputWidth = outputSize.width;
+            opts.outputHeight = outputSize.height;
+            sl::DLSSDOptimalSettings settings{};
+            res = slDLSSDGetOptimalSettings(opts, settings);
+            renderWidth = settings.optimalRenderWidth;
+            renderHeight = settings.optimalRenderHeight;
+            optimalSharpness = settings.optimalSharpness;
+        }
+        else
+        {
+            sl::DLSSOptions opts{};
+            opts.mode = ToSLDLSSMode(mode);
+            opts.outputWidth = outputSize.width;
+            opts.outputHeight = outputSize.height;
+            sl::DLSSOptimalSettings settings{};
+            res = slDLSSGetOptimalSettings(opts, settings);
+            renderWidth = settings.optimalRenderWidth;
+            renderHeight = settings.optimalRenderHeight;
+            optimalSharpness = settings.optimalSharpness;
+        }
+        if (res != sl::Result::eOk || renderWidth == 0 || renderHeight == 0)
+        {
+            NOX_CORE_WARN("[Streamline] {}GetOptimalSettings failed: {}",
+                rayReconstruction ? "slDLSSD" : "slDLSS", (int)res);
             return {outputSize, 0.0f};
         }
 
-        return {Extent2D{settings.optimalRenderWidth, settings.optimalRenderHeight}, settings.optimalSharpness};
+        return {Extent2D{renderWidth, renderHeight}, optimalSharpness};
     }
 
     void DeviceVK::ensureDummyDescriptorSet()
@@ -1007,9 +1038,18 @@ namespace NRI
             dlssdOptions.colorBuffersHDR = sl::Boolean::eTrue;
             dlssdOptions.preExposure = 1.0f;
             dlssdOptions.exposureScale = 1.0f;
-            dlssdOptions.normalRoughnessMode = sl::DLSSDNormalRoughnessMode::eUnpacked;
+            dlssdOptions.normalRoughnessMode = params.normalRoughnessPacked
+                ? sl::DLSSDNormalRoughnessMode::ePacked
+                : sl::DLSSDNormalRoughnessMode::eUnpacked;
+            dlssdOptions.alphaUpscalingEnabled = sl::Boolean::eFalse;
             dlssdOptions.worldToCameraView = glmToSl(params.view);
             dlssdOptions.cameraViewToWorld = glmToSl(glm::inverse(params.view));
+            // Match the RTXPT reference configuration. That sample exposes presets only through E and defaults to E.
+            dlssdOptions.dlaaPreset = sl::DLSSDPreset::ePresetE;
+            dlssdOptions.qualityPreset = sl::DLSSDPreset::ePresetE;
+            dlssdOptions.balancedPreset = sl::DLSSDPreset::ePresetE;
+            dlssdOptions.performancePreset = sl::DLSSDPreset::ePresetE;
+            dlssdOptions.ultraPerformancePreset = sl::DLSSDPreset::ePresetE;
 
             sl::Result optRes = slDLSSDSetOptions(viewport, dlssdOptions);
             if (optRes != sl::Result::eOk)
@@ -1028,7 +1068,7 @@ namespace NRI
             dlssOptions.preExposure = 1.0f;
             dlssOptions.exposureScale = 1.0f;
             dlssOptions.useAutoExposure = sl::Boolean::eTrue;
-            dlssOptions.dlaaPreset = sl::DLSSPreset::ePresetF;
+            dlssOptions.dlaaPreset = sl::DLSSPreset::ePresetK;
             dlssOptions.qualityPreset = sl::DLSSPreset::ePresetK;
             dlssOptions.balancedPreset = sl::DLSSPreset::ePresetK;
             dlssOptions.performancePreset = sl::DLSSPreset::ePresetM;
@@ -1070,14 +1110,18 @@ namespace NRI
         colorOut.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
 
         sl::SubresourceRange depthRange{};
-        depthRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-        depthRange.baseMipLevel = 0;
-        depthRange.levelCount = 1;
-        depthRange.baseArrayLayer = 0;
-        depthRange.layerCount = 1;
+        const bool nativeDepthImage = depthVK->getFormat() != vk::Format::eR32Sfloat;
+        if (nativeDepthImage)
+        {
+            depthRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+            depthRange.baseMipLevel = 0;
+            depthRange.levelCount = 1;
+            depthRange.baseArrayLayer = 0;
+            depthRange.layerCount = 1;
+        }
 
         sl::Resource depth{};
-        depth.next = &depthRange;
+        depth.next = nativeDepthImage ? &depthRange : nullptr;
         depth.type = sl::ResourceType::eTex2d;
         depth.native = static_cast<VkImage>(*depthVK->getNativeImage());
         depth.view = static_cast<VkImageView>(*depthVK->getNativeView());
@@ -1087,7 +1131,9 @@ namespace NRI
         depth.state = VK_IMAGE_LAYOUT_GENERAL;
         depth.mipLevels = 1;
         depth.arrayLayers = 1;
-        depth.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        depth.usage = nativeDepthImage
+            ? (VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT)
+            : (VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
 
         sl::Resource mvec{};
         mvec.type = sl::ResourceType::eTex2d;
@@ -1113,8 +1159,9 @@ namespace NRI
         tags.push_back(sl::ResourceTag(&mvec, sl::kBufferTypeMotionVectors, sl::ResourceLifecycle::eValidUntilEvaluate, &mvecExtent));
 
         // When Ray Reconstruction is enabled, tag G-Buffer Albedo, Specular Albedo, Normals, and Roughness
-        sl::Resource albedoRes{}, specularAlbedoRes{}, normalRes{}, roughnessRes{}, hitDistanceRes{};
-        if (useRayReconstruction && params.albedo && params.normal && params.roughness)
+        sl::Resource albedoRes{}, specularAlbedoRes{}, normalRes{}, roughnessRes{}, hitDistanceRes{}, specMotionRes{};
+        if (useRayReconstruction && params.albedo && params.normal &&
+            (params.normalRoughnessPacked || params.roughness))
         {
             auto wrapTex = [](TextureVK* t) -> sl::Resource
             {
@@ -1135,18 +1182,27 @@ namespace NRI
             albedoRes = wrapTex(dynamic_cast<TextureVK*>(params.albedo));
             specularAlbedoRes = wrapTex(dynamic_cast<TextureVK*>(params.specularAlbedo ? params.specularAlbedo : params.albedo));
             normalRes = wrapTex(dynamic_cast<TextureVK*>(params.normal));
-            roughnessRes = wrapTex(dynamic_cast<TextureVK*>(params.roughness));
+            if (!params.normalRoughnessPacked)
+                roughnessRes = wrapTex(dynamic_cast<TextureVK*>(params.roughness));
 
             tags.push_back(sl::ResourceTag(&albedoRes, sl::kBufferTypeAlbedo, sl::ResourceLifecycle::eValidUntilEvaluate, &inputExtent));
             tags.push_back(sl::ResourceTag(&specularAlbedoRes, sl::kBufferTypeSpecularAlbedo, sl::ResourceLifecycle::eValidUntilEvaluate, &inputExtent));
-            tags.push_back(sl::ResourceTag(&normalRes, sl::kBufferTypeNormals, sl::ResourceLifecycle::eValidUntilEvaluate, &inputExtent));
-            tags.push_back(sl::ResourceTag(&roughnessRes, sl::kBufferTypeRoughness, sl::ResourceLifecycle::eValidUntilEvaluate, &inputExtent));
+            tags.push_back(sl::ResourceTag(&normalRes,
+                params.normalRoughnessPacked ? sl::kBufferTypeNormalRoughness : sl::kBufferTypeNormals,
+                sl::ResourceLifecycle::eValidUntilEvaluate, &inputExtent));
+            if (!params.normalRoughnessPacked)
+                tags.push_back(sl::ResourceTag(&roughnessRes, sl::kBufferTypeRoughness, sl::ResourceLifecycle::eValidUntilEvaluate, &inputExtent));
 
             // With the world-to-view and view-to-clip matrices (DLSSDOptions, Constants), RR moves reflections by it.
             if (params.specularHitDistance)
             {
                 hitDistanceRes = wrapTex(dynamic_cast<TextureVK*>(params.specularHitDistance));
                 tags.push_back(sl::ResourceTag(&hitDistanceRes, sl::kBufferTypeSpecularHitDistance, sl::ResourceLifecycle::eValidUntilEvaluate, &inputExtent));
+            }
+            else if (params.specularMotionVectors)
+            {
+                specMotionRes = wrapTex(dynamic_cast<TextureVK*>(params.specularMotionVectors));
+                tags.push_back(sl::ResourceTag(&specMotionRes, sl::kBufferTypeSpecularMotionVectors, sl::ResourceLifecycle::eValidUntilEvaluate, &inputExtent));
             }
         }
 
@@ -1487,7 +1543,8 @@ namespace NRI
     void DeviceVK::updateNRDCommonSettings(uint32_t frameIndex, bool resetHistory,
         const glm::mat4& proj, const glm::mat4& prevProj,
         const glm::mat4& view, const glm::mat4& prevView,
-        const glm::vec2& mvScale)
+        const glm::vec2& mvScale, const glm::vec2& cameraJitter,
+        const glm::vec2& cameraJitterPrev)
     {
         if (!m_nrdContext) return;
 
@@ -1505,6 +1562,12 @@ namespace NRI
             commonSettings.motionVectorScale[0] = mvScale.x;
             commonSettings.motionVectorScale[1] = mvScale.y;
             commonSettings.motionVectorScale[2] = 0.0f;
+            // NRD expects the projection matrices without jitter and the subpixel offsets separately,
+            // in pixel units in [-0.5, 0.5].
+            commonSettings.cameraJitter[0] = cameraJitter.x;
+            commonSettings.cameraJitter[1] = cameraJitter.y;
+            commonSettings.cameraJitterPrev[0] = cameraJitterPrev.x;
+            commonSettings.cameraJitterPrev[1] = cameraJitterPrev.y;
 
             commonSettings.resourceSize[0] = static_cast<uint16_t>(m_nrdContext->width);
             commonSettings.resourceSize[1] = static_cast<uint16_t>(m_nrdContext->height);
@@ -1526,12 +1589,14 @@ namespace NRI
     bool DeviceVK::tickNRD(uint32_t frameIndex, bool resetHistory,
         const glm::mat4& view, const glm::mat4& proj,
         const glm::mat4& prevView, const glm::mat4& prevProj,
-        const glm::vec2& motionVectorScale)
+        const glm::vec2& motionVectorScale, const glm::vec2& cameraJitter,
+        const glm::vec2& cameraJitterPrev)
     {
         if (!m_nrdContext || !m_nrdContext->initialized)
             return false;
 
-        updateNRDCommonSettings(frameIndex, resetHistory, proj, prevProj, view, prevView, motionVectorScale);
+        updateNRDCommonSettings(frameIndex, resetHistory, proj, prevProj, view, prevView,
+            motionVectorScale, cameraJitter, cameraJitterPrev);
         return true;
     }
 

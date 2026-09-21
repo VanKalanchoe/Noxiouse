@@ -77,9 +77,18 @@ import Tonemapping;
 
         // Mode 0 (Full Lit PBR): Apply Tonemapping (Exposure + Khronos PBR Neutral + Gamma)
         TonemapParameters tonemapParams;
-        tonemapParams.exposure = ubo->exposure;
+        float exposureScale = exp2(pushConstant.exposureCompensation);
+        if (pushConstant.autoExposureEnabled != 0)
+        {
+            Texture2D<float> exposureTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.autoExposureTextureIndex, 0));
+            float averageLuminance = exp2(exposureTex.Load(int3(0, 0, 8)));
+            exposureScale *= clamp(0.042 / max(averageLuminance, 1e-6),
+                                   exp2(pushConstant.autoExposureMinEV), exp2(pushConstant.autoExposureMaxEV));
+        }
+        tonemapParams.exposure = ubo->exposure * exposureScale;
         tonemapParams.gamma = ubo->gamma;
         tonemapParams.mode = (int)pushConstant.tonemapMode;;
+
 
         float3 ldrColor = toneMap(hdrColor.rgb, tonemapParams);
         return float4(ldrColor, 1.0);

@@ -18,19 +18,12 @@ Entities:
         OrthographicFar: 1
       Primary: true
       FixedAspectRatio: false
-  - Entity: 17795200648077078827
-    TagComponent:
-      Tag: bistro
-    TransformComponent:
-      Translation: [-2.4046352, -1.2538456, 0]
-      Rotation: [0, 0, 0]
-      Scale: [1, 1, 1]
-    RelationshipComponent:
-      Parent: 0
-      Children:
-        []
-    ModelInstanceComponent:
-      Model: 4858027711956786253
+      # RTXPT Bistro reference defaults: auto exposure enabled, EV clamp [-4, 6].
+      AutoExposure: true
+      # RTXPT bistro-programmer-art.scene.json uses +0.6 EV compensation.
+      ExposureCompensation: 0.6
+      AutoExposureMinEV: -4
+      AutoExposureMaxEV: 6
   - Entity: 17392118452064603301
     TagComponent:
       Tag: Bistro Environment
@@ -40,6 +33,7 @@ Entities:
       Scale: [1, 1, 1]
     EnvironmentLightComponent:
       TexturePath: EnvironmentMaps/shanghai_bund_4k_cube_bc6u.dds
-      RadianceScale: [1, 1, 1]
+      # RTXPT's BC6U environment baker stores radiance at 1/4 and applies x4 at runtime.
+      RadianceScale: [4, 4, 4]
       Rotation: 0
       Enabled: true

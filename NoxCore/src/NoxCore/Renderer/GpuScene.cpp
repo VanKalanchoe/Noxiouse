@@ -40,10 +40,12 @@ namespace Nox
             return bucket >= RenderBucket::Transparent && bucket < RenderBucket::Count;
         }
 
-        // Ray tracing sees opaque and alpha-mask geometry.
+        // Ray tracing sees every raster bucket. Alpha-blended geometry uses the same any-hit group as masks,
+        // with stochastic alpha in PathTracerBridge::AlphaTest; excluding these buckets made decals, foliage,
+        // and transparent surfaces disappear entirely from path-traced primary and shadow rays.
         bool IsRayTracedBucket(RenderBucket bucket)
         {
-            return bucket <= RenderBucket::MaskDoubleSided;
+            return bucket < RenderBucket::Count;
         }
 
         bool SameBucketInputs(const shaderio::GpuMaterial& a, const shaderio::GpuMaterial& b)
@@ -558,12 +560,14 @@ namespace Nox
             const shaderio::GpuMaterial& material = m_Materials.Get(state.Material);
             record.instanceCustomIndex = instanceSlot;
             record.mask = 0x01;
-            record.instanceShaderBindingTableRecordOffset = 0;
+            record.instanceShaderBindingTableRecordOffset =
+                (material.alphaMode == static_cast<uint32_t>(AlphaMode::Opaque)) ? 0 : 1;
             record.flags = 0;
-            // Opaque geometry skips any-hit (FORCE_OPAQUE), alpha-mask geometry gets alpha testing (FORCE_NO_OPAQUE).
+            // Opaque geometry skips any-hit. Mask and blend geometry both require any-hit; blend uses stochastic
+            // coverage rather than a fixed cutoff so it remains unbiased in a path tracer.
             if (material.alphaMode == static_cast<uint32_t>(AlphaMode::Opaque))
                 record.flags |= 0x04;
-            else if (material.alphaMode == static_cast<uint32_t>(AlphaMode::Mask))
+            else
                 record.flags |= 0x08;
             if (material.doubleSided != 0)
                 record.flags |= 0x01; // TRIANGLE_FACING_CULL_DISABLE
@@ -583,7 +587,7 @@ namespace Nox
     void GpuScene::WriteTlasInstances(std::span<NRI::AccelerationStructureInstance> outInstances) const
     {
         size_t written = 0;
-        for (size_t bucketIndex = 0; bucketIndex <= static_cast<size_t>(RenderBucket::MaskDoubleSided); ++bucketIndex)
+        for (size_t bucketIndex = 0; bucketIndex < static_cast<size_t>(RenderBucket::Count); ++bucketIndex)
         {
             for (uint32_t instanceSlot : m_Buckets[bucketIndex])
             {
@@ -618,7 +622,10 @@ namespace Nox
         record.skinnedVertexBufferAddress = m_InstanceStates[instanceSlot].SkinnedVertexAddress;
         record.normalMatrix = m_Transforms.Get(instanceSlot).normal;
         record.baseColorFactor = material.baseColorFactor;
+        record.diffuseFactor = material.diffuseFactor;
+        record.specularFactor = material.specularFactor;
         record.emissiveFactor = glm::vec4(material.emissiveFactor, material.emissiveStrength);
+        record.emissiveTextureIndex = material.emissiveTextureIndex;
         record.baseColorTextureIndex = material.baseColorTextureIndex;
         record.alphaCutoff = material.alphaMaskCutoff;
         record.alphaMode = material.alphaMode;

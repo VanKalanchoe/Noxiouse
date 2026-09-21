@@ -123,7 +123,8 @@ namespace Nox
         // The graph begins/ends rendering with the pass's declared color/depth targets.
         Raster = 1 << 0,
         // Kept even when nothing consumes its outputs (presentation, readbacks, CPU-visible side effects).
-        NeverCull = 1 << 1
+        NeverCull = 1 << 1,
+        RayTracing = 1 << 2
     };
 
     inline RGPassFlags operator|(RGPassFlags a, RGPassFlags b)

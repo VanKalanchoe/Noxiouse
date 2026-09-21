@@ -738,7 +738,12 @@ namespace Nox
             "1: ACES (Narkowicz)",
             "2: ACES (Hill)",
             "3: ACES (Hill + Exposure Boost)",
-            "4: Khronos PBR Neutral"
+            "4: Khronos PBR Neutral",
+            "5: Reinhard",
+            "6: Reinhard Modified",
+            "7: Heji Hable ALU",
+            "8: Hable UC2 (RTXPT Standard)",
+            "9: ACES (RTXPT Standard)"
         };
         int currentTonemap = static_cast<int>(m_Renderer->getTonemapMode());
         if (ImGui::Combo("Tonemapping Mode", &currentTonemap, tonemapModeNames, IM_ARRAYSIZE(tonemapModeNames)))
@@ -747,7 +752,7 @@ namespace Nox
         }
         
         float exposure = m_Renderer->getExposure();
-        if (ImGui::SliderFloat("Exposure", &exposure, 0.0f, 5.0f, "%.2f"))
+        if (ImGui::SliderFloat("Exposure", &exposure, 0.0f, 10.0f, "%.2f"))
         {
             m_Renderer->setExposure(exposure);
         }
@@ -773,7 +778,7 @@ namespace Nox
         }
         
         bool jitter = m_Renderer->getCameraJitterEnabled();
-        if (ImGui::Checkbox("Camera Subpixel Jitter (Halton 2,3)", &jitter))
+        if (ImGui::Checkbox("Camera Subpixel Jitter (R2)", &jitter))
         {
             m_Renderer->setCameraJitterEnabled(jitter);
         }

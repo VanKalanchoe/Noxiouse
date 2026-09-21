@@ -31,14 +31,19 @@ namespace Nox
         RGTexture GBufferMaterial;
         RGTexture GBufferEmission;
         RGTexture GBufferVelocity;
-        RGTexture RRDiffuseAlbedo;  // DLSS Ray Reconstruction guides (RRGuides.slang)
+        RGTexture RRDiffuseAlbedo;  // DLSS-RR guides: RRGuides.slang or the path tracer's primary hit
         RGTexture RRSpecularAlbedo;
+        RGTexture RRNormalRoughness; // path-traced world normal.rgb + linear roughness.a
         RGTexture RRSpecularHitDistance;
+        RGTexture RRPathDepth;
+        RGTexture RRPathMotionVectors;
+        RGTexture RRSpecularMotionVectors;
         RGTexture PrevDepth;
         RGTexture PrevNormal;
         RGTexture PrevAlbedo;
         RGTexture PrevMaterial;
         RGTexture HDRScene;
+        RGTexture AutoExposure;
         RGTexture Scene;
         RGTexture EnvironmentCubemap;
 

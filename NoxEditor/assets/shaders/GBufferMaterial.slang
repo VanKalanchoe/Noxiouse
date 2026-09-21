@@ -462,7 +462,12 @@
             float2 ddy_normal = (instance.normalTextureSet == 0) ? ddy_uv0 : ddy_uv1;
             Texture2D normalTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.normalTextureIndex, 0));
             rawNormalTex = normalTex.SampleGrad(samp, normalUV, ddx_normal, ddy_normal).xyz;
-            float3 tangentNormal = rawNormalTex * 2.0 - 1.0;
+            float3 tangentNormal;
+            tangentNormal.xy = rawNormalTex.xy * 2.0 - 1.0;
+            tangentNormal.z = rawNormalTex.z <= 0.0
+                ? sqrt(saturate(1.0 - dot(tangentNormal.xy, tangentNormal.xy)))
+                : abs(rawNormalTex.z * 2.0 - 1.0);
+            tangentNormal = dot(tangentNormal, tangentNormal) > 1e-12 ? normalize(tangentNormal) : float3(0.0, 0.0, 1.0);
 
             // Compute triangle edge vectors in world space and UV space
             float3 dp1 = worldPos1.xyz - worldPos0.xyz;

@@ -15,13 +15,49 @@ namespace Nox
         FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
         frame.pathTracerActive = true;
 
+        RGTextureDesc importanceDesc;
+        importanceDesc.Size = RGSize::Absolute;
+        importanceDesc.Width = importanceDesc.Height = 512;
+        importanceDesc.Format = NRI::ImageFormat::R32_SFLOAT;
+        importanceDesc.Usage = NRI::TextureUsage::Storage;
+        importanceDesc.MipLevels = 10;
+        const auto importanceHistory = m_renderGraph.GetHistoryTexture("PT Environment Importance", importanceDesc, 1);
+        const RGTexture environmentImportance = importanceHistory.Textures[0];
+        if (importanceHistory.WasReset && m_environmentCubemap)
+        {
+            for (uint32_t mip = 0; mip < 10; ++mip)
+            {
+                m_renderGraph.AddPass(mip == 0 ? "PT Environment Importance" : "PT Environment Reduce", RGPassFlags::None,
+                    [&, mip](RGBuilder& builder)
+                    {
+                        if (mip > 0) builder.Read(environmentImportance);
+                        builder.Write(environmentImportance, RGTextureAccess::StorageWrite);
+                    },
+                    [this, environmentImportance, mip](RGPassContext& context)
+                    {
+                        auto& cmd = context.Cmd();
+                        cmd.bindPipeline(NRI::PipelineBindPoint::Compute, mip == 0 ? *m_ptEnvironmentBuildPipeline : *m_ptEnvironmentReducePipeline);
+                        shaderio::PushConstantPTEnvironment pc{};
+                        pc.sourceIndex = uniformData.imageHeapIndexOffset + (mip == 0 ? m_environmentCubemap->GetDescriptorIndexSlot() : context.Slot(environmentImportance));
+                        pc.outputIndex = context.StorageSlot(environmentImportance, mip);
+                        pc.sourceMip = mip == 0 ? 0 : mip - 1;
+                        pc.dimension = 512 >> mip;
+                        cmd.pushData(&pc, sizeof(pc));
+                        cmd.dispatch((pc.dimension + 7) / 8, (pc.dimension + 7) / 8, 1);
+                    });
+            }
+        }
+
         RGTextureDesc accumulationDesc;
         accumulationDesc.Format = NRI::ImageFormat::R16G16B16A16_SFLOAT;
+        accumulationDesc.Usage = NRI::TextureUsage::Storage;
         const RGTextureHistory accumulation = m_renderGraph.GetHistoryTexture("Path Tracer Accumulation", accumulationDesc, 2);
         resources.PathTracerAccum[0] = accumulation.Textures[0];
         resources.PathTracerAccum[1] = accumulation.Textures[1];
 
-        const bool dlssRRActive = m_dlssEnabled && (m_dlssMode != NRI::UpscaleMode::Off) && m_dlssRayReconstructionEnabled;
+        const bool dlssRRActive = m_dlssEnabled && (m_dlssMode != NRI::UpscaleMode::Off) &&
+            m_dlssRayReconstructionEnabled && m_device->isDLSSRayReconstructionSupported() && m_rrGuidesPipeline;
+        const bool dlssActive = m_dlssEnabled && (m_dlssMode != NRI::UpscaleMode::Off) && m_device->isDLSSSupported();
         // NRD denoises the path tracer's output this frame: it is packed for it (and decoded after), plain without it.
         const bool nrdPTActive = m_nrdPTDenoiser != NRI::NRDDiffuseDenoiser::Off && m_device->isNRDInitialized();
         frame.pathTracerCameraMoved = (uniformData.view != m_pathTracerPrevView);
@@ -42,10 +78,11 @@ namespace Nox
 
         m_renderGraph.PushGroup("Path Tracer");
 
-        m_renderGraph.AddPass("Path Trace", RGPassFlags::Raster,
+        m_renderGraph.AddPass("Path Trace", RGPassFlags::RayTracing,
             [&](RGBuilder& builder)
             {
                 builder.Read(resources.PathTracerAccum[readIndex]);
+                if (m_environmentCubemap) builder.Read(environmentImportance);
                 ReadIfValid(builder, resources.TLAS);
                 ReadGpuScene(builder, resources);
                 // Optional RTXDI primary-surface lighting (RTXPT-style hybrid).
@@ -68,26 +105,28 @@ namespace Nox
                 builder.Read(resources.GBufferAlbedo);
                 builder.Read(resources.GBufferNormal);
                 builder.Read(resources.GBufferMaterial);
-                builder.ColorTarget(resources.PathTracerAccum[writeIndex], NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 1.0f });
-                builder.ColorTarget(resources.PathTracerDiffuse, NRI::LoadOP::dontCare, NRI::StoreOP::store);
-                builder.ColorTarget(resources.PathTracerSpecular, NRI::LoadOP::dontCare, NRI::StoreOP::store);
-                builder.SetRenderArea(frame.renderExtent);
+
+                builder.Write(resources.PathTracerAccum[writeIndex], RGTextureAccess::StorageWrite);
+                builder.Write(resources.PathTracerDiffuse, RGTextureAccess::StorageWrite);
+                builder.Write(resources.PathTracerSpecular, RGTextureAccess::StorageWrite);
+                if (dlssRRActive)
+                {
+                    builder.Write(resources.RRDiffuseAlbedo, RGTextureAccess::StorageWrite);
+                    builder.Write(resources.RRSpecularAlbedo, RGTextureAccess::StorageWrite);
+                    builder.Write(resources.RRNormalRoughness, RGTextureAccess::StorageWrite);
+                    builder.Write(resources.RRPathDepth, RGTextureAccess::StorageWrite);
+                    builder.Write(resources.RRPathMotionVectors, RGTextureAccess::StorageWrite);
+                    builder.Write(resources.RRSpecularMotionVectors, RGTextureAccess::StorageWrite);
+                    builder.Write(resources.RRSpecularHitDistance, RGTextureAccess::StorageWrite);
+                }
             },
-            [this, res = &resources, readIndex, nrdPTActive](RGPassContext& context)
+            [this, res = &resources, readIndex, writeIndex, nrdPTActive, dlssRRActive, dlssActive, environmentImportance](RGPassContext& context)
             {
                 NRI::CommandBuffer& cmd = context.Cmd();
                 const float rw = static_cast<float>(m_frame.renderExtent.width);
                 const float rh = static_cast<float>(m_frame.renderExtent.height);
 
-                cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_pathTracerPipeline);
-                cmd.setCullMode(NRI::CullMode::None);
-                cmd.setDepthTestEnable(false);
-                cmd.setDepthWriteEnable(false);
-                for (uint32_t attachment = 0; attachment < 3; ++attachment) // color, NRD diffuse, NRD specular
-                {
-                    cmd.setColorBlendEnable(attachment, false);
-                    cmd.setColorWriteMask(attachment, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
-                }
+                cmd.bindPipeline(NRI::PipelineBindPoint::RayTracing, *m_pathTracerPipeline);
 
                 glm::mat4 viewProj = uniformData.proj * uniformData.view;
                 shaderio::PushConstantPathTracer ptPush{};
@@ -95,7 +134,13 @@ namespace Nox
                 ptPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
                 ptPush.viewportSize = glm::vec2(rw, rh);
                 ptPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
-                ptPush.maxBounces = 3;
+                // RTXPT applies its Balanced preset on startup (18 total, 2 diffuse).
+                ptPush.maxBounces = 18;
+                ptPush.maxDiffuseBounces = 2;
+                // RTXPT realtime default: 0.10 * sqrt(pre-exposed middle gray) * 1000.
+                // Nox does not pre-expose the path buffers, so use middle gray directly.
+                ptPush.fireflyFilterThreshold = 0.10f * std::sqrt(0.18f) * 1000.0f;
+                ptPush.environmentImportanceIndex = m_environmentCubemap ? context.Slot(environmentImportance) : 0xFFFFFFFF;
                 ptPush.accumulationTextureIndex = context.Slot(res->PathTracerAccum[readIndex]);
                 ptPush.sampleCount = m_frame.pathTracerAccumulate ? m_pathTracerSampleCount : 1;
                 ptPush.debugMode = m_frame.pathTracerAccumulate ? 19 : 18;
@@ -111,9 +156,34 @@ namespace Nox
                 ptPush.gbufferAlbedoIndex = context.Slot(res->GBufferAlbedo);
                 ptPush.gbufferNormalIndex = context.Slot(res->GBufferNormal);
                 ptPush.gbufferMaterialIndex = context.Slot(res->GBufferMaterial);
+
+                ptPush.outputAccumIndex = context.StorageSlot(res->PathTracerAccum[writeIndex]);
+                ptPush.outputDiffuseIndex = context.StorageSlot(res->PathTracerDiffuse);
+                ptPush.outputSpecularIndex = context.StorageSlot(res->PathTracerSpecular);
+                ptPush.rrDiffuseAlbedoStorageIndex = dlssRRActive ? context.StorageSlot(res->RRDiffuseAlbedo) : 0xFFFFFFFF;
+                ptPush.rrSpecularAlbedoStorageIndex = dlssRRActive ? context.StorageSlot(res->RRSpecularAlbedo) : 0xFFFFFFFF;
+                ptPush.rrNormalRoughnessStorageIndex = dlssRRActive ? context.StorageSlot(res->RRNormalRoughness) : 0xFFFFFFFF;
+                ptPush.rrDepthStorageIndex = dlssRRActive ? context.StorageSlot(res->RRPathDepth) : 0xFFFFFFFF;
+                ptPush.rrMotionStorageIndex = dlssRRActive ? context.StorageSlot(res->RRPathMotionVectors) : 0xFFFFFFFF;
+                ptPush.rrSpecularMotionStorageIndex = dlssRRActive ? context.StorageSlot(res->RRSpecularMotionVectors) : 0xFFFFFFFF;
+                ptPush.rrSpecularHitDistanceStorageIndex = dlssRRActive ? context.StorageSlot(res->RRSpecularHitDistance) : 0xFFFFFFFF;
+                // RTXPT uses a small stochastic camera-ray offset with RR, no undisclosed offset with DLSS-SR.
+                ptPush.cameraRayJitterScale = dlssRRActive ? 0.1f : (dlssActive ? 0.0f : 1.0f);
+                ptPush.neeCandidateSamples = 5;
+                ptPush.neeFullSamples = 1;
+                ptPush.environmentDiffuseMip = 2;
                 cmd.pushData(&ptPush, sizeof(shaderio::PushConstantPathTracer));
 
-                cmd.drawMeshTasks(1, 1, 1);
+                cmd.traceRays(
+                    m_pathTracerSBTState.rayGen,
+                    m_pathTracerSBTState.miss,
+                    m_pathTracerSBTState.hitGroups,
+                    m_pathTracerSBTState.callable,
+                    m_frame.renderExtent.width,
+                    m_frame.renderExtent.height,
+                    1
+                );
+
             });
 
         // NRD path tracer denoising (fallback for hardware/preference without DLSS-RR).

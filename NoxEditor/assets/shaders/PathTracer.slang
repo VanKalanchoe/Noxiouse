@@ -159,6 +159,27 @@
         return eval_smith_g1(NdotV, alphaSq) * eval_smith_g1(NdotL, alphaSq);
     }
 
+    // RTXPT treats the environment as a real light source, not only as a
+    // miss shader.  A uniform-sphere sample keeps this path unbiased with the
+    // existing BSDF sampling and works with every cubemap format.
+    float3 sample_uniform_sphere(float2 u)
+    {
+        float z = 1.0 - 2.0 * u.x;
+        float r = sqrt(max(0.0, 1.0 - z * z));
+        float phi = 2.0 * M_PI * u.y;
+        return float3(r * cos(phi), r * sin(phi), z);
+    }
+
+    float3 sample_environment(UniformBufferObject* ubo, PushConstantPathTracer pushConstant, float3 direction)
+    {
+        if (pushConstant.skyboxTextureIndex == 0xFFFFFFFF)
+            return lerp(float3(0.08, 0.08, 0.12), float3(0.4, 0.6, 0.95), saturate(direction.y * 0.5 + 0.5)) * ubo->scaleIBLAmbient;
+
+        TextureCube skyTex = TextureCube.Handle(uint2(pushConstant.skyboxTextureIndex, 0));
+        SamplerState skySamp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_PREFILTER, 0));
+        return skyTex.SampleLevel(skySamp, direction, 0.0).rgb * ubo->scaleIBLAmbient;
+    }
+
     // Tangent-space normal mapping helper
     float3 perturb_normal(GpuRayTracingInstance lut, Vertex v0, Vertex v1, Vertex v2, float3 geomNormal, float2 hitUV, SamplerState textureSampler, UniformBufferObject* ubo)
     {
@@ -212,7 +233,7 @@
     }
 
     // Ray query shadow test for direct analytical lights (Next Event Estimation)
-    bool trace_shadow_ray(UniformBufferObject* ubo, float3 rayOrigin, float3 rayDir, float maxDist)
+    bool trace_shadow_ray(UniformBufferObject* ubo, float3 rayOrigin, float3 rayDir, float maxDist, inout uint rngState)
     {
         if (ubo->tlasDeviceAddress == 0) return false;
 
@@ -244,7 +265,8 @@
                 float2 uv = intersection_uv(lut, primIndex, sq.CandidateTriangleBarycentrics());
                 Texture2D tex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + lut.baseColorTextureIndex, 0));
                 float4 col = tex.SampleLevel(textureSampler, uv, 0);
-                if (col.a >= lut.alphaCutoff)
+                if ((lut.alphaMode == 2 && rand(rngState) < saturate(col.a)) ||
+                    (lut.alphaMode != 2 && col.a >= lut.alphaCutoff))
                 {
                     sq.CommitNonOpaqueTriangleHit();
                 }
@@ -335,7 +357,8 @@
                     float2 uvSample = intersection_uv(lut, primIndex, rq.CandidateTriangleBarycentrics());
                     Texture2D tex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + lut.baseColorTextureIndex, 0));
                     float4 col = tex.SampleLevel(textureSampler, uvSample, 0);
-                    if (col.a >= lut.alphaCutoff)
+                    if ((lut.alphaMode == 2 && rand(rngState) < saturate(col.a)) ||
+                        (lut.alphaMode != 2 && col.a >= lut.alphaCutoff))
                     {
                         rq.CommitNonOpaqueTriangleHit();
                     }
@@ -347,21 +370,7 @@
             {
                 if (bounce == 1)
                     bounceHitDist = NRD_FP16_MAX; // the first bounce escaped
-                float3 skyRadiance = float3(0.0);
-                if (pushConstant.skyboxTextureIndex != 0xFFFFFFFF)
-                {
-                    TextureCube skyTex = TextureCube.Handle(uint2(pushConstant.skyboxTextureIndex, 0));
-                    SamplerState skySamp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_PREFILTER, 0));
-                    skyRadiance = skyTex.SampleLevel(skySamp, rayDir, 0.0).rgb;
-                }
-                else
-                {
-                    // Smooth physical sky gradient if no cubemap is loaded
-                    skyRadiance = lerp(float3(0.08, 0.08, 0.12), float3(0.4, 0.6, 0.95), saturate(rayDir.y * 0.5 + 0.5));
-                }
-
-                // Scale ambient environment light by IBL Ambient Scale
-                skyRadiance *= ubo->scaleIBLAmbient;
+                float3 skyRadiance = sample_environment(ubo, pushConstant, rayDir);
 
                 PT_AddRadiance(lobe, skyRadiance * throughput, emissionRadiance, diffuseRadiance, specularRadiance);
                 break;
@@ -566,7 +575,7 @@
                     {
                         // Robust offset (0.02) along normal prevents self-shadowing on curved meshes
                         float3 shadowOrigin = hitPos + hitNormal * 0.02;
-                        bool inShadow = trace_shadow_ray(ubo, shadowOrigin, lightDir, maxDist);
+                        bool inShadow = trace_shadow_ray(ubo, shadowOrigin, lightDir, maxDist, rngState);
 
                         if (!inShadow)
                         {
@@ -601,6 +610,52 @@
                 }
             }
 
+            // Environment next-event estimation.  RTXPT's light sampler
+            // includes the HDR environment in the direct-light candidates;
+            // without this, a sky contributes only after a random path escapes
+            // and Bistro interiors become dramatically darker than RTXPT.
+            if (!primaryReSTIRDIUsed)
+            {
+                float3 envDir = sample_uniform_sphere(float2(rand(rngState), rand(rngState)));
+                float NdotL = dot(hitNormal, envDir);
+                if (NdotL > 0.0)
+                {
+                    float envPdf = 1.0 / (4.0 * M_PI);
+                    float3 shadowOrigin = hitPos + hitNormal * 0.02;
+                    bool envOccluded = trace_shadow_ray(ubo, shadowOrigin, envDir, 1e4, rngState);
+                    if (!envOccluded)
+                    {
+                        float3 Henv = normalize(envDir + V);
+                        float NdotHenv = clamp(dot(hitNormal, Henv), 0.0, 1.0);
+                        float VdotHenv = clamp(dot(V, Henv), 0.0, 1.0);
+                        float3 Fenv = fresnel_schlick(F0, VdotHenv);
+                        float Denv = eval_ndf_ggx(NdotHenv, alphaSq);
+                        float Genv = eval_smith_g2(NdotV, NdotL, alphaSq);
+                        float3 diffuseEnv = (float3(1.0) - Fenv) * diffuseColor / M_PI;
+                        float3 specEnv = (Fenv * Genv * Denv) / max(4.0 * NdotL * NdotV, 1e-6);
+                        float fLumEnv = dot(F0, float3(0.2126, 0.7152, 0.0722));
+                        float dLumEnv = dot(diffuseColor, float3(0.2126, 0.7152, 0.0722));
+                        float specProbEnv = clamp(fLumEnv / max(fLumEnv + dLumEnv, 1e-5), 0.05, 0.98);
+                        if (metallic > 0.9) specProbEnv = 0.98;
+                        float specPdfEnv = Denv * NdotHenv / max(4.0 * VdotHenv, 1e-6);
+                        float diffusePdfEnv = NdotL / M_PI;
+                        float bsdfPdfEnv = specProbEnv * specPdfEnv + (1.0 - specProbEnv) * diffusePdfEnv;
+                        float misWeightEnv = (envPdf * envPdf) / max(envPdf * envPdf + bsdfPdfEnv * bsdfPdfEnv, 1e-8);
+                        float3 envIncoming = sample_environment(ubo, pushConstant, envDir) * (NdotL / envPdf) * misWeightEnv * throughput;
+                        if (lobe == PT_LOBE_NONE)
+                        {
+                            diffuseRadiance += diffuseEnv * envIncoming;
+                            specularRadiance += specEnv * envIncoming;
+                        }
+                        else
+                        {
+                            PT_AddRadiance(lobe, (diffuseEnv + specEnv) * envIncoming,
+                                           emissionRadiance, diffuseRadiance, specularRadiance);
+                        }
+                    }
+                }
+            }
+
             // --- Russian Roulette Ray Termination ---
             if (bounce >= 2)
             {
@@ -613,11 +668,17 @@
             // --- Multi-Lobe Indirect Ray Generation (Transmission vs Specular vs Diffuse) ---
             float u_trans = rand(rngState);
             float transFactor = lut.transmissionFactor;
+            if (lut.transmissionTextureIndex != 0xFFFFFFFF)
+            {
+                Texture2D transmissionTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + lut.transmissionTextureIndex, 0));
+                transFactor *= transmissionTex.SampleLevel(textureSampler, hitUV, 0).r;
+            }
 
             // Branch 1: Transmission (Glass / Refraction)
             if (transFactor > 0.0 && u_trans < transFactor)
             {
-                float eta = (dot(hitNormal, rayDir) < 0.0) ? (1.0 / 1.5) : (1.5 / 1.0); // Air <-> Glass (IOR 1.5)
+                float materialIor = clamp(lut.ior, 1.001, 3.0);
+                float eta = (dot(hitNormal, rayDir) < 0.0) ? (1.0 / materialIor) : (materialIor / 1.0);
                 float3 refrNormal = (dot(hitNormal, rayDir) < 0.0) ? hitNormal : -hitNormal;
                 float3 refrDir = refract(rayDir, refrNormal, eta);
 

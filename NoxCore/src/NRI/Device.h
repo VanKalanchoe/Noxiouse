@@ -51,7 +51,9 @@ namespace NRI
         Texture* specularAlbedo = nullptr;
         Texture* normal = nullptr;
         Texture* roughness = nullptr;
+        bool normalRoughnessPacked = false; // normal.rgb + linear roughness.a in one texture
         Texture* specularHitDistance = nullptr; // world-space primary surface -> reflection hit (optional)
+        Texture* specularMotionVectors = nullptr; // mutually exclusive with hit distance; UV-space prev-current motion
 
         glm::mat4 nonJitteredProj{ 1.0f };
         glm::mat4 view{ 1.0f };
@@ -192,7 +194,8 @@ namespace NRI
         // For a given upscale mode and desired output size, returns the resolution the scene should
         // actually be rendered at (DLSS then upscales render size -> outputSize). UpscaleMode::Off or
         // a backend without DLSS just returns outputSize back unchanged (1:1, no scaling).
-        virtual DLSSRenderExtent getDLSSOptimalRenderSize(UpscaleMode mode, Extent2D outputSize) { return {outputSize, 0.0f}; }
+        virtual DLSSRenderExtent getDLSSOptimalRenderSize(UpscaleMode mode, Extent2D outputSize,
+            bool rayReconstruction = false) { return {outputSize, 0.0f}; }
         
         // NRD (NVIDIA Real-Time Denoisers)
         virtual bool initNRD(uint32_t width, uint32_t height) { return false; }
@@ -207,7 +210,9 @@ namespace NRI
         virtual bool tickNRD(uint32_t frameIndex, bool resetHistory,
             const glm::mat4& view, const glm::mat4& proj,
             const glm::mat4& prevView, const glm::mat4& prevProj,
-            const glm::vec2& motionVectorScale = glm::vec2(1.0f, 1.0f)) { return false; }
+            const glm::vec2& motionVectorScale = glm::vec2(1.0f, 1.0f),
+            const glm::vec2& cameraJitter = glm::vec2(0.0f),
+            const glm::vec2& cameraJitterPrev = glm::vec2(0.0f)) { return false; }
         virtual bool evaluateNRDShadows(const struct NRDShadowParams& params) { return false; }
         virtual bool evaluateNRDReflections(const struct NRDReflectionParams& params, NRDReflectionDenoiser denoiser) { return false; }
         virtual bool evaluateNRDDiffuse(const struct NRDDiffuseParams& params, NRDDiffuseDenoiser denoiser) { return false; }
@@ -238,6 +243,9 @@ namespace NRI
         virtual void shutdownImGui() = 0;
         virtual void beginImGui() = 0;
         virtual void endImGui() = 0;
+        
+        virtual uint32_t getShaderGroupHandleSize() const { return 32; }
+        virtual uint32_t getShaderGroupBaseAlignment() const { return 64; }
         
         virtual ~Device() = default;
     };

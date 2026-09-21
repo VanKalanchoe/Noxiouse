@@ -1186,6 +1186,13 @@ namespace Nox
             auto& camera = component.Camera;
 
             ImGui::Checkbox("Primary", &component.Primary);
+            ImGui::Checkbox("Auto Exposure", &component.AutoExposure);
+            ImGui::DragFloat("Exposure Compensation", &component.ExposureCompensation, 0.05f, -12.0f, 12.0f);
+            if (component.AutoExposure)
+            {
+                ImGui::DragFloat("Auto Exposure Min EV", &component.AutoExposureMinEV, 0.1f, -16.0f, component.AutoExposureMaxEV);
+                ImGui::DragFloat("Auto Exposure Max EV", &component.AutoExposureMaxEV, 0.1f, component.AutoExposureMinEV, 16.0f);
+            }
 
             const char* projectionTypesStrings[] = {"Perspective", "Orthographic"};
             const char* currentProjectionTypeString = projectionTypesStrings[(int)camera.GetProjectionType()];

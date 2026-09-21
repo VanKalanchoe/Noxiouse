@@ -163,8 +163,8 @@ namespace Nox
         uint64_t GetDeviceBytes() const;
         const GpuSceneTable<shaderio::GpuRayTracingInstance>& GetRayTracingInstances() const { return m_RayTracingInstances; }
 
-        // Ray traced instances (opaque/mask buckets with a BLAS; instanceCustomIndex = instance slot). The TLAS is built
-        // from a compact list in bucket order.
+        // Ray traced instances (all render buckets with a BLAS; instanceCustomIndex = instance slot). Opaque geometry
+        // skips any-hit, while mask/blend geometry uses the alpha-aware hit group. The TLAS is compacted in bucket order.
         uint32_t GetTlasInstanceCount() const { return m_TlasInstanceCount; }
         void WriteTlasInstances(std::span<NRI::AccelerationStructureInstance> outInstances) const;
         // Whether any ray traced instance was added, removed, moved or re-flagged since the last call (the TLAS is rebuilt,

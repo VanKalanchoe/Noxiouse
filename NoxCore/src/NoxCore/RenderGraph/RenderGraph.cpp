@@ -72,6 +72,7 @@ namespace Nox
         {
             // Raster passes draw with task/mesh + fragment shaders (fullscreen passes included); others dispatch compute
             // or call libraries that do.
+            if (HasFlag(flags, RGPassFlags::RayTracing)) return NRI::StageBits::RayTracing;
             return HasFlag(flags, RGPassFlags::Raster) ? NRI::StageBits::Task | NRI::StageBits::Mesh | NRI::StageBits::Fragment : NRI::StageBits::Compute;
         }
 

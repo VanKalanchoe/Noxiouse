@@ -285,7 +285,7 @@ namespace Nox
         TextureData cpuData{};
         bool decoded = false;
         if (sourcePath.extension() == ".dds")
-            decoded = DecodeDDS(sourcePath, cpuData);
+            decoded = DecodeDDS(sourcePath, metadata.TextureSpec, cpuData);
         else if (sourcePath.extension() == ".ktx2")
             decoded = DecodeKTX(sourcePath, metadata.TextureSpec, cpuData);
         else
@@ -458,7 +458,7 @@ namespace Nox
     Ref<Texture2D> TextureImporter::LoadWithDDS(const std::filesystem::path& path, const TextureSpecification& spec, Renderer* renderer)
     {
         TextureData cpuData{};
-        if (!DecodeDDS(path, cpuData))
+        if (!DecodeDDS(path, spec, cpuData))
             return Ref<Texture2D>(nullptr);
 
         Renderer* targetRenderer = renderer ? renderer : Application::Get().GetRenderer();
@@ -467,7 +467,7 @@ namespace Nox
         return texture;
     }
 
-    bool TextureImporter::DecodeDDS(const std::filesystem::path& path, TextureData& cpuData)
+    bool TextureImporter::DecodeDDS(const std::filesystem::path& path, const TextureSpecification& spec, TextureData& cpuData)
     {
         tinyddsloader::DDSFile dds;
 
@@ -485,28 +485,28 @@ namespace Nox
         cpuData.IsCubeMap = dds.IsCubemap();
         cpuData.ArrayLayers = dds.GetArraySize();
 
+        // Legacy Bistro DDS files generally use BC*_UNORM even for textures that glTF declares as
+        // color data. RTXPT/Donut creates an sRGB view from the material texture role instead of
+        // trusting that legacy header. Do the same here. Hardware sRGB decoding affects RGB only,
+        // leaving alpha linear for the glossiness channel in specular-glossiness textures.
+        const bool useSRGB = spec.format == NRI::ImageFormat::SRGBA8;
+
         switch (dds.GetFormat())
         {
         case tinyddsloader::DDSFile::DXGIFormat::BC1_Typeless:
         case tinyddsloader::DDSFile::DXGIFormat::BC1_UNorm:
-            cpuData.Format = NRI::ImageFormat::BC1_UNorm;
-            break;
         case tinyddsloader::DDSFile::DXGIFormat::BC1_UNorm_SRGB:
-            cpuData.Format = NRI::ImageFormat::BC1_UNorm_SRGB;
+            cpuData.Format = useSRGB ? NRI::ImageFormat::BC1_UNorm_SRGB : NRI::ImageFormat::BC1_UNorm;
             break;
         case tinyddsloader::DDSFile::DXGIFormat::BC2_Typeless:
         case tinyddsloader::DDSFile::DXGIFormat::BC2_UNorm:
-            cpuData.Format = NRI::ImageFormat::BC2_UNorm;
-            break;
         case tinyddsloader::DDSFile::DXGIFormat::BC2_UNorm_SRGB:
-            cpuData.Format = NRI::ImageFormat::BC2_UNorm_SRGB;
+            cpuData.Format = useSRGB ? NRI::ImageFormat::BC2_UNorm_SRGB : NRI::ImageFormat::BC2_UNorm;
             break;
         case tinyddsloader::DDSFile::DXGIFormat::BC3_Typeless:
         case tinyddsloader::DDSFile::DXGIFormat::BC3_UNorm:
-            cpuData.Format = NRI::ImageFormat::BC3_UNorm;
-            break;
         case tinyddsloader::DDSFile::DXGIFormat::BC3_UNorm_SRGB:
-            cpuData.Format = NRI::ImageFormat::BC3_UNorm_SRGB;
+            cpuData.Format = useSRGB ? NRI::ImageFormat::BC3_UNorm_SRGB : NRI::ImageFormat::BC3_UNorm;
             break;
         case tinyddsloader::DDSFile::DXGIFormat::BC4_Typeless:
         case tinyddsloader::DDSFile::DXGIFormat::BC4_UNorm:
@@ -531,10 +531,8 @@ namespace Nox
             break;
         case tinyddsloader::DDSFile::DXGIFormat::BC7_Typeless:
         case tinyddsloader::DDSFile::DXGIFormat::BC7_UNorm:
-            cpuData.Format = NRI::ImageFormat::BC7_UNorm;
-            break;
         case tinyddsloader::DDSFile::DXGIFormat::BC7_UNorm_SRGB:
-            cpuData.Format = NRI::ImageFormat::BC7_UNorm_SRGB;
+            cpuData.Format = useSRGB ? NRI::ImageFormat::BC7_UNorm_SRGB : NRI::ImageFormat::BC7_UNorm;
             break;
         default:
             NOX_CORE_ERROR("TextureImporter::DecodeDDS - Unsupported DDS format {} from: {}", static_cast<uint32_t>(dds.GetFormat()), path.string());

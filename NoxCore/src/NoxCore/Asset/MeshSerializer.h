@@ -422,6 +422,17 @@ static void ReadMaterials(std::ifstream& stream, std::vector<MaterialData>& outM
         uint8_t unlitVal = 0;
         stream.read(reinterpret_cast<char*>(&unlitVal), sizeof(uint8_t));
         outMaterialList[i].Unlit = (unlitVal != 0);
+
+        // Compatibility with textureless transmission-only materials that inherited the glTF parser's synthetic
+        // 1/1 PBR defaults (see MaterialSerializer). Keep the repair in Nox, not the vendored parser.
+        MaterialData& material = outMaterialList[i];
+        if (material.TransmissionFactor > 0.0f && material.MetallicFactor == 1.0f &&
+            material.RoughnessFactor == 1.0f && material.BaseColorTexturePath.empty() &&
+            material.MetallicRoughnessTexturePath.empty())
+        {
+            material.MetallicFactor = 0.0f;
+            material.RoughnessFactor = 0.0f;
+        }
     }
 }
         

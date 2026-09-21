@@ -244,6 +244,10 @@ namespace Nox
         SceneCamera Camera;
         bool Primary = true; // todo think about moving to scene
         bool FixedAspectRatio = false;
+        bool AutoExposure = false;
+        float ExposureCompensation = 0.0f;
+        float AutoExposureMinEV = -16.0f;
+        float AutoExposureMaxEV = 16.0f;
 
         CameraComponent() = default;
         CameraComponent(const CameraComponent&) = default;

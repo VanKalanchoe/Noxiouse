@@ -7,11 +7,44 @@ namespace Nox
 {
     void Renderer::addPostProcessPass()
     {
-        if (!m_postProcessPipeline)
+        if (!m_postProcessPipeline || !m_autoExposureBuildPipeline || !m_autoExposureReducePipeline)
             return;
 
         const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
         const FrameGraphState& frame = m_frame;
+
+        RGTexture hdrSource = resources.HDRScene;
+        if (frame.dlssAdded)
+            hdrSource = resources.DLSSOutput;
+        else if (frame.restirPTActive)
+            hdrSource = frame.ptNRDAdded ? resources.PathTracerDenoised : resources.ReSTIRPTOutput;
+        else if (frame.pathTracerActive)
+            hdrSource = frame.ptNRDAdded ? resources.PathTracerDenoised : resources.PathTracerAccum[frame.pathTracerWriteIndex];
+
+        if (m_autoExposure)
+        for (uint32_t mip = 0; mip < 9; ++mip)
+        {
+            m_renderGraph.AddPass(mip == 0 ? "Auto Exposure" : "Auto Exposure Reduce", RGPassFlags::None,
+                [&, mip, hdrSource](RGBuilder& builder)
+                {
+                    builder.Read(mip == 0 ? hdrSource : resources.AutoExposure);
+                    builder.Write(resources.AutoExposure, RGTextureAccess::StorageWrite);
+                },
+                [this, res = &resources, mip, hdrSource](RGPassContext& context)
+                {
+                    NRI::CommandBuffer& cmd = context.Cmd();
+                    cmd.bindPipeline(NRI::PipelineBindPoint::Compute,
+                                     mip == 0 ? *m_autoExposureBuildPipeline : *m_autoExposureReducePipeline);
+
+                    shaderio::PushConstantAutoExposure push{};
+                    push.sourceIndex = uniformData.imageHeapIndexOffset + context.Slot(mip == 0 ? hdrSource : res->AutoExposure);
+                    push.outputIndex = context.StorageSlot(res->AutoExposure, mip);
+                    push.sourceMip = mip == 0 ? 0 : mip - 1;
+                    push.dimension = 256u >> mip;
+                    cmd.pushData(&push, sizeof(push));
+                    cmd.dispatch((push.dimension + 7) / 8, (push.dimension + 7) / 8, 1);
+                });
+        }
 
         // HDR scene (or DLSS output / path tracer result) -> LDR scene.
         m_renderGraph.AddPass("Post Process", RGPassFlags::Raster,
@@ -21,6 +54,8 @@ namespace Nox
                     builder.Read(resources.DLSSOutput);
                 else
                     ReadLitScene(builder, resources, frame.restirPTActive, frame.pathTracerActive, frame.ptNRDAdded, frame.pathTracerWriteIndex);
+                if (m_autoExposure)
+                    builder.Read(resources.AutoExposure);
                 builder.ColorTarget(resources.Scene, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 1.0f });
                 builder.SetRenderArea(frame.outputExtent);
             },
@@ -50,8 +85,13 @@ namespace Nox
                     activeHdrSlot = context.Slot(res->HDRScene);
 
                 postPush.hdrTextureIndex = activeHdrSlot;
+                postPush.autoExposureTextureIndex = m_autoExposure ? context.Slot(res->AutoExposure) : 0xFFFFFFFF;
                 postPush.debugMode = m_debugMode;
                 postPush.tonemapMode = m_tonemapMode;
+                postPush.autoExposureEnabled = m_autoExposure ? 1u : 0u;
+                postPush.exposureCompensation = m_exposureCompensation;
+                postPush.autoExposureMinEV = m_autoExposureMinEV;
+                postPush.autoExposureMaxEV = m_autoExposureMaxEV;
                 cmd.pushData(&postPush, sizeof(shaderio::PushConstantPostProcess));
 
                 cmd.drawMeshTasks(1, 1, 1);

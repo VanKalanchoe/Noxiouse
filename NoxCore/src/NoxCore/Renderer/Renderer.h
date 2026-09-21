@@ -13,6 +13,7 @@
 #include "UploadManager.h"
 #include "GpuScene.h"
 #include "NoxCore/RenderGraph/RenderGraph.h"
+#include "NRI/ShaderBindingTable.h"
 
 // Forward declaration only -- the RTXDI SDK must never be #included from this header (it's engine-
 // public, pulled in by EditorLayer.cpp and others). Renderer.cpp is the only place that includes
@@ -275,6 +276,13 @@ namespace Nox
         uint32_t getTonemapMode() const { return m_tonemapMode; }
         float getExposure() const { return m_exposure; }
         void setExposure(float exposure) { m_exposure = exposure; }
+        void setAutoExposure(bool enabled, float compensation, float minEV, float maxEV)
+        {
+            m_autoExposure = enabled;
+            m_exposureCompensation = compensation;
+            m_autoExposureMinEV = minEV;
+            m_autoExposureMaxEV = maxEV;
+        }
         float getGamma() const { return m_gamma; }
         void setGamma(float gamma) { m_gamma = gamma; }
         float getScaleIBLAmbient() const { return m_scaleIBLAmbient; }
@@ -554,6 +562,7 @@ namespace Nox
         void createDeferredLightingPipeline(bool forceCompile = false);
         // Post Process
         void createPostProcessPipeline(bool forceCompile = false);
+        void createAutoExposurePipelines(bool forceCompile = false);
         // Render graph texture inspection
         void createTextureInspectPipeline(bool forceCompile = false);
         // GPU instance culling (InstanceCulling.slang: cull, count, offset, write, late) and the depth pyramid build
@@ -719,12 +728,18 @@ namespace Nox
         std::unique_ptr<NRI::Pipeline> m_deferredLightingPipeline = nullptr;
         // Post Process
         std::unique_ptr<NRI::Pipeline> m_postProcessPipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_autoExposureBuildPipeline;
+        std::unique_ptr<NRI::Pipeline> m_autoExposureReducePipeline;
         // NRD
         std::unique_ptr<NRI::Pipeline> m_shadowMaskPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_nrdGuidesPipeline = nullptr; // NRD view Z + normal/roughness (NRDGuides.slang)
         std::unique_ptr<NRI::Pipeline> m_reflectionPipeline = nullptr;
         // Path Tracer
         std::unique_ptr<NRI::Pipeline> m_pathTracerPipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_ptEnvironmentBuildPipeline;
+        std::unique_ptr<NRI::Pipeline> m_ptEnvironmentReducePipeline;
+        std::unique_ptr<NRI::Buffer> m_pathTracerSBTBuffer = nullptr;
+        NRI::ShaderTableState m_pathTracerSBTState{};
         // DDGI
         std::unique_ptr<NRI::Pipeline> m_ddgiRadiancePipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_ddgiBlendIrradiancePipeline = nullptr;
@@ -813,8 +828,12 @@ namespace Nox
 
         // EditorLayer Settings
         uint32_t m_debugMode = 0;
-        uint32_t m_tonemapMode = 4; // Default: KhronosPbrNeutral
+        uint32_t m_tonemapMode = 8; // RTXPT SampleUI explicitly defaults to Hable UC2
         float m_exposure = 1.0f;
+        bool m_autoExposure = false;
+        float m_exposureCompensation = 0.0f;
+        float m_autoExposureMinEV = -16.0f;
+        float m_autoExposureMaxEV = 16.0f;
         float m_gamma = 2.2f;
         float m_scaleIBLAmbient = 1.0f;
 
@@ -1236,12 +1255,14 @@ namespace Nox
         bool m_cameraJitterEnabled = false;
         uint32_t m_jitterPhase = 0;
         glm::vec2 m_currentJitter = glm::vec2(0.0f);
+        glm::vec2 m_prevJitter = glm::vec2(0.0f);
         
         // DLSS Super Resolution
         bool m_dlssEnabled = false;
-        NRI::UpscaleMode m_dlssMode = NRI::UpscaleMode::Off;
+        // RTXPT realtime defaults to DLSS-RR at Balanced resolution. DLSS itself remains opt-in in Nox.
+        NRI::UpscaleMode m_dlssMode = NRI::UpscaleMode::Balanced;
         bool m_pendingRenderResolutionUpdate = false;
-        bool m_dlssRayReconstructionEnabled = false; // Enabled by default when DLSS is on
+        bool m_dlssRayReconstructionEnabled = true;
 
         // Live viewport-panel resize debounce: EditorLayer calls onViewportSizeChange() every frame the
         // ImGui panel's pixel size differs from ours, which during a drag is every single frame. Applying

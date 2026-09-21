@@ -63,7 +63,7 @@ namespace Nox
         static Ref<Texture2D> LoadWithDDS(const std::filesystem::path& path, const TextureSpecification& spec, Renderer* renderer);
         // The file's texels (all mips) in memory cpuData owns.
         static bool DecodeSTB(const std::filesystem::path& path, const TextureSpecification& spec, TextureData& cpuData);
-        static bool DecodeDDS(const std::filesystem::path& path, TextureData& cpuData);
+        static bool DecodeDDS(const std::filesystem::path& path, const TextureSpecification& spec, TextureData& cpuData);
         static bool DecodeKTX(const std::filesystem::path& path, const TextureSpecification& spec, TextureData& cpuData);
         static Ref<Texture2D> LoadWithKTX(const std::filesystem::path& path, const TextureSpecification& spec, Renderer* renderer);
         static Ref<Texture2D> LoadWithNTEX(const std::filesystem::path& path, Renderer* renderer);

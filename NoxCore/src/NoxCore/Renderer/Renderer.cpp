@@ -7,6 +7,7 @@
 #include <algorithm> // Necessary for std::clamp
 #include <unordered_set>
 #include <chrono>
+#include <cmath>
 #include <fstream>
 #include <cctype>
 #include <unordered_map>
@@ -250,6 +251,7 @@ namespace Nox
         watchShader("assets/shaders/DeferredLighting.slang", "DeferredLighting", [this]() { createDeferredLightingPipeline(true); });
         // Post Process
         watchShader("assets/shaders/PostProcess.slang", "PostProcess", [this]() { createPostProcessPipeline(true); });
+        watchShader("assets/shaders/AutoExposure.slang", "AutoExposure", [this]() { createAutoExposurePipelines(true); });
         watchShader("assets/shaders/TextureInspect.slang", "TextureInspect", [this]() { createTextureInspectPipeline(true); });
         watchShader("assets/shaders/InstanceCulling.slang", "InstanceCulling", [this]() { createInstanceCullingPipelines(true); });
         watchShader("assets/shaders/HiZBuild.slang", "HiZBuild", [this]() { createHiZBuildPipeline(true); });
@@ -413,6 +415,7 @@ namespace Nox
         createGBufferPipeline();
         // Post Process
         createPostProcessPipeline(false);
+        createAutoExposurePipelines(false);
         createTextureInspectPipeline(false);
         createInstanceCullingPipelines(false);
         createHiZBuildPipeline(false);
@@ -561,6 +564,9 @@ namespace Nox
         {
             m_dlssRayReconstructionEnabled = enabled;
             m_renderGraph.ResetHistory(DLSSHistoryKey); // Streamline flushes its history without destroying contexts
+            // RR has its own optimal-settings query and can select a different input extent than DLSS-SR.
+            if (m_dlssEnabled)
+                m_pendingRenderResolutionUpdate = true;
 
             // Mutual Exclusion: DLSS-RR replaces every downstream NRD denoiser (reflections/GI/DI in the
             // hybrid path, or the whole image in the path tracer) -- running both would double-filter.
@@ -608,6 +614,8 @@ namespace Nox
             {
                 m_dlssRayReconstructionEnabled = false;
                 m_renderGraph.ResetHistory(DLSSHistoryKey);
+                if (m_dlssEnabled)
+                    m_pendingRenderResolutionUpdate = true;
                 NOX_CORE_INFO("[Denoising] NRD Reflection Denoiser activated: DLSS Ray Reconstruction automatically disabled (mutually exclusive).");
             }
         }
@@ -624,6 +632,8 @@ namespace Nox
             {
                 m_dlssRayReconstructionEnabled = false;
                 m_renderGraph.ResetHistory(DLSSHistoryKey);
+                if (m_dlssEnabled)
+                    m_pendingRenderResolutionUpdate = true;
                 NOX_CORE_INFO("[Denoising] NRD GI Denoiser activated: DLSS Ray Reconstruction automatically disabled (mutually exclusive).");
             }
         }
@@ -640,6 +650,8 @@ namespace Nox
             {
                 m_dlssRayReconstructionEnabled = false;
                 m_renderGraph.ResetHistory(DLSSHistoryKey);
+                if (m_dlssEnabled)
+                    m_pendingRenderResolutionUpdate = true;
                 NOX_CORE_INFO("[Denoising] NRD DI Denoiser activated: DLSS Ray Reconstruction automatically disabled (mutually exclusive).");
             }
         }
@@ -656,6 +668,8 @@ namespace Nox
             {
                 m_dlssRayReconstructionEnabled = false;
                 m_renderGraph.ResetHistory(DLSSHistoryKey);
+                if (m_dlssEnabled)
+                    m_pendingRenderResolutionUpdate = true;
                 NOX_CORE_INFO("[Denoising] NRD Path Tracer Denoiser activated: DLSS Ray Reconstruction automatically disabled (mutually exclusive).");
             }
         }
@@ -670,7 +684,9 @@ namespace Nox
         // While DLSS is disabled we always render 1:1 regardless of the remembered mode, so turning
         // it back on later doesn't require the user to also re-pick a mode.
         NRI::UpscaleMode effectiveMode = m_dlssEnabled ? m_dlssMode : NRI::UpscaleMode::Off;
-        auto optimal = m_device->getDLSSOptimalRenderSize(effectiveMode, outputSize);
+        const bool useRayReconstruction = m_dlssRayReconstructionEnabled &&
+            m_device->isDLSSRayReconstructionSupported() && m_rrGuidesPipeline;
+        auto optimal = m_device->getDLSSOptimalRenderSize(effectiveMode, outputSize, useRayReconstruction);
         m_renderSize = (optimal.size.width > 0 && optimal.size.height > 0) ? optimal.size : outputSize;
 
 #if NOX_PROFILE_STATS
@@ -784,27 +800,104 @@ namespace Nox
     void Renderer::createPathTracerPipeline(bool forceCompile)
     {
         NRI::PipelineDesc desc{};
+        desc.type = NRI::PipelineType::RayTracing;
         desc.forceCompile = forceCompile;
-        // color (raw pixel or primary emission), NRD diffuse, NRD specular (PathTracerSignals.slang)
-        desc.colorFormats = {NRI::ImageFormat::R16G16B16A16_SFLOAT, NRI::ImageFormat::R16G16B16A16_SFLOAT, NRI::ImageFormat::R16G16B16A16_SFLOAT};
+        desc.maxRecursionDepth = 1;
 
+        // Stage 0: RayGen
         desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Task,
-            .entryPoint = "taskMain",
-            .sourcePath = "assets/shaders/PathTracer.slang"
+            .stage = NRI::ShaderStage::RayGen,
+            .entryPoint = "rayGenMain",
+            .sourcePath = "assets/shaders/PathTracer/PathTracerRayGen.slang"
         });
+
+        // Stage 1: Miss
         desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Mesh,
-            .entryPoint = "meshMain",
-            .sourcePath = "assets/shaders/PathTracer.slang"
+            .stage = NRI::ShaderStage::Miss,
+            .entryPoint = "missMain",
+            .sourcePath = "assets/shaders/PathTracer/PathTracerMiss.slang"
         });
+
+        // Stage 2: ClosestHit
         desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Fragment,
-            .entryPoint = "fragMain",
-            .sourcePath = "assets/shaders/PathTracer.slang"
+            .stage = NRI::ShaderStage::ClosestHit,
+            .entryPoint = "closestHitMain",
+            .sourcePath = "assets/shaders/PathTracer/PathTracerHit.slang"
+        });
+
+        // Stage 3: AnyHit
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::AnyHit,
+            .entryPoint = "anyHitMain",
+            .sourcePath = "assets/shaders/PathTracer/PathTracerAnyHit.slang"
+        });
+
+        // HitGroup 0: Opaque (no anyhit)
+        desc.hitGroups.push_back({
+            .closestHitShaderIndex = 2,
+            .anyHitShaderIndex = ~0u,
+            .intersectionShaderIndex = ~0u
+        });
+
+        // HitGroup 1: Alpha-Tested (closestHit + anyHit)
+        desc.hitGroups.push_back({
+            .closestHitShaderIndex = 2,
+            .anyHitShaderIndex = 3,
+            .intersectionShaderIndex = ~0u
         });
 
         m_pathTracerPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+
+        // Bake Shader Binding Table using RTXPT / NVRHI ShaderTable::bake replication
+        uint32_t handleSize = m_pathTracerPipeline->getShaderGroupHandleSize();
+        if (handleSize == 0) handleSize = m_device->getShaderGroupHandleSize();
+        uint32_t baseAlignment = m_pathTracerPipeline->getShaderGroupBaseAlignment();
+        if (baseAlignment == 0) baseAlignment = m_device->getShaderGroupBaseAlignment();
+
+        const uint32_t numRayGen = 1;
+        const uint32_t numMiss = static_cast<uint32_t>(m_pathTracerPipeline->getMissShaderGroupIndices().size());
+        const uint32_t numHit = static_cast<uint32_t>(m_pathTracerPipeline->getHitShaderGroupIndices().size());
+        const uint32_t numCallable = 0;
+
+        const uint64_t sbtSize = NRI::calculateShaderTableSize(numRayGen, numMiss, numHit, numCallable, baseAlignment);
+
+        m_pathTracerSBTBuffer = m_device->createBuffer(NRI::BufferDesc{
+            .size = sbtSize,
+            .usage = NRI::BufferUsage::ShaderBindingTable
+        });
+
+        uint8_t* mappedCpuVA = static_cast<uint8_t*>(m_pathTracerSBTBuffer->map(0, sbtSize));
+        uint64_t gpuVA = m_pathTracerSBTBuffer->getDeviceAddress();
+
+        const std::vector<uint8_t>& handles = m_pathTracerPipeline->getShaderGroupHandles();
+
+        NRI::bakeShaderTable(
+            mappedCpuVA,
+            gpuVA,
+            handles.data(),
+            handleSize,
+            baseAlignment,
+            m_pathTracerPipeline->getRayGenShaderGroupIndex(),
+            m_pathTracerPipeline->getMissShaderGroupIndices(),
+            m_pathTracerPipeline->getHitShaderGroupIndices(),
+            {},
+            m_pathTracerSBTState
+        );
+
+        m_pathTracerSBTBuffer->unmap();
+
+        NRI::PipelineDesc environmentDesc{};
+        environmentDesc.type = NRI::PipelineType::Compute;
+        environmentDesc.forceCompile = forceCompile;
+        environmentDesc.shaders.push_back({ NRI::ShaderStage::Compute, "buildMain", "assets/shaders/PathTracer/EnvironmentImportance.slang" });
+        m_ptEnvironmentBuildPipeline = m_device->createPipeline(environmentDesc, *m_shaderCompiler);
+        environmentDesc.shaders.front().entryPoint = "reduceMain";
+        m_ptEnvironmentReducePipeline = m_device->createPipeline(environmentDesc, *m_shaderCompiler);
+
+        watchShader("assets/shaders/PathTracer/PathTracerRayGen.slang", "PathTracer", [this]() { createPathTracerPipeline(true); });
+        watchShader("assets/shaders/PathTracer/PathTracerMiss.slang", "PathTracer", [this]() { createPathTracerPipeline(true); });
+        watchShader("assets/shaders/PathTracer/PathTracerHit.slang", "PathTracer", [this]() { createPathTracerPipeline(true); });
+        watchShader("assets/shaders/PathTracer/PathTracerAnyHit.slang", "PathTracer", [this]() { createPathTracerPipeline(true); });
 
         NRI::PipelineDesc decodeDesc{};
         decodeDesc.type = NRI::PipelineType::Compute;
@@ -825,6 +918,8 @@ namespace Nox
             .sourcePath = "assets/shaders/PTComposite.slang"
         });
         m_ptCompositePipeline = m_device->createPipeline(compositeDesc, *m_shaderCompiler);
+
+
     }
 
     void Renderer::resetDDGIGridToDefaults()
@@ -1662,6 +1757,17 @@ namespace Nox
         m_postProcessPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
+    void Renderer::createAutoExposurePipelines(bool forceCompile)
+    {
+        NRI::PipelineDesc desc{};
+        desc.type = NRI::PipelineType::Compute;
+        desc.forceCompile = forceCompile;
+        desc.shaders.push_back({ NRI::ShaderStage::Compute, "buildMain", "assets/shaders/AutoExposure.slang" });
+        m_autoExposureBuildPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        desc.shaders.front().entryPoint = "reduceMain";
+        m_autoExposureReducePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+    }
+
     void Renderer::createTextureImage()
     {
         m_textureResource = TextureImporter::LoadTexture2D(TEXTURE_PATH_FOX, {}, this);
@@ -1811,6 +1917,7 @@ namespace Nox
             texture = nullptr;
         };
         releaseEnvironmentTexture(m_environmentCubemap);
+        m_renderGraph.ResetHistory("PT Environment Importance");
         releaseEnvironmentTexture(m_irradianceCubemap);
         releaseEnvironmentTexture(m_prefilteredEnvMap);
         releaseEnvironmentTexture(m_brdfLUT);
@@ -2954,6 +3061,23 @@ namespace Nox
             .borderColor = NRI::BorderColor::FloatOpaqueWhite
         };
 
+        samplers[shaderio::SAMPLER_NEAREST_CLAMP] = NRI::SamplerDesc
+        {
+            .magFilter = NRI::Filter::Nearest,
+            .minFilter = NRI::Filter::Nearest,
+            .mipmapMode = NRI::SamplerMipmapMode::Nearest,
+            .addressModeU = NRI::SamplerAddressMode::ClampToEdge,
+            .addressModeV = NRI::SamplerAddressMode::ClampToEdge,
+            .addressModeW = NRI::SamplerAddressMode::ClampToEdge,
+            .mipLodBias = 0.0f,
+            .maxAnisotropy = 1.0f,
+            .compareEnable = false,
+            .compareOp = NRI::CompareOp::Never,
+            .minLod = 0.0f,
+            .maxLod = 1000.0f,
+            .borderColor = NRI::BorderColor::FloatOpaqueWhite
+        };
+
         // todo: imgui needs more space to if you want to register it
         // currently 1000 in initimgui devicevk.cpp
 
@@ -3172,7 +3296,8 @@ namespace Nox
         if (m_device->isNRDInitialized())
         {
             m_device->tickNRD(static_cast<uint32_t>(m_sceneFrameCounter), m_isFirstFrame || frame.resetNRD,
-                uniformData.view, uniformData.nonJitteredProj, uniformData.prevView, uniformData.prevProj);
+                uniformData.view, uniformData.nonJitteredProj, uniformData.prevView, uniformData.prevProj,
+                glm::vec2(1.0f), m_currentJitter, m_prevJitter);
         }
 
         auto renderTarget = [](NRI::ImageFormat format)
@@ -3209,14 +3334,27 @@ namespace Nox
             resources.RRDiffuseAlbedo = graph.CreateTexture("RR Diffuse Albedo", guide);
             guide.Format = NRI::ImageFormat::R16G16B16A16_SFLOAT; // dielectric specular albedo is a few percent
             resources.RRSpecularAlbedo = graph.CreateTexture("RR Specular Albedo", guide);
+            resources.RRNormalRoughness = graph.CreateTexture("RR Normal Roughness", guide);
             guide.Format = NRI::ImageFormat::R16_SFLOAT;
             resources.RRSpecularHitDistance = graph.CreateTexture("RR Specular Hit Distance", guide);
+            guide.Format = NRI::ImageFormat::R32_SFLOAT;
+            resources.RRPathDepth = graph.CreateTexture("RR Path Depth", guide);
+            guide.Format = NRI::ImageFormat::R16G16_SFLOAT;
+            resources.RRPathMotionVectors = graph.CreateTexture("RR Path Motion Vectors", guide);
+            resources.RRSpecularMotionVectors = graph.CreateTexture("RR Specular Motion Vectors", guide);
         }
         resources.GBufferNormal = graph.CreateTexture("GBuffer Normal", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
         resources.GBufferMaterial = graph.CreateTexture("GBuffer Material", renderTarget(NRI::ImageFormat::RGBA8));
         resources.GBufferEmission = graph.CreateTexture("GBuffer Emission", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
         resources.GBufferVelocity = graph.CreateTexture("GBuffer Velocity", renderTarget(NRI::ImageFormat::R32G32_SFLOAT));
         resources.HDRScene = graph.CreateTexture("HDR Scene", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
+        RGTextureDesc autoExposureDesc;
+        autoExposureDesc.Size = RGSize::Absolute;
+        autoExposureDesc.Width = autoExposureDesc.Height = 256;
+        autoExposureDesc.Format = NRI::ImageFormat::R32_SFLOAT;
+        autoExposureDesc.Usage = NRI::TextureUsage::Storage;
+        autoExposureDesc.MipLevels = 9;
+        resources.AutoExposure = graph.CreateTexture("Auto Exposure", autoExposureDesc);
         resources.DLSSOutput = graph.CreateTexture("DLSS Output", outputTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
 
         resources.RawShadowMask = graph.CreateTexture("Raw Shadow Mask", renderTarget(NRI::ImageFormat::R16G16_SFLOAT));
@@ -3254,8 +3392,10 @@ namespace Nox
             resources.PathTracerDenoised = graph.CreateTexture("Path Tracer Denoised", denoised);
         }
         // The path tracer's NRD signals (PathTracerSignals.slang) and their denoised versions.
-        resources.PathTracerDiffuse = graph.CreateTexture("Path Tracer Diffuse", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
-        resources.PathTracerSpecular = graph.CreateTexture("Path Tracer Specular", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
+        RGTextureDesc ptSignal = renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT);
+        ptSignal.Usage = NRI::TextureUsage::Storage;
+        resources.PathTracerDiffuse = graph.CreateTexture("Path Tracer Diffuse", ptSignal);
+        resources.PathTracerSpecular = graph.CreateTexture("Path Tracer Specular", ptSignal);
         resources.PathTracerDiffuseDenoised = graph.CreateTexture("Path Tracer Diffuse Denoised", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
         resources.PathTracerSpecularDenoised = graph.CreateTexture("Path Tracer Specular Denoised", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
 
@@ -4158,17 +4298,17 @@ namespace Nox
         m_device->endImGui();
     }
 
-    // 8-Phase Halton(2, 3) sequence for subpixel jitter
-    static constexpr glm::vec2 s_Halton8[8] = {
-        {0.5000f, 0.3333f},
-        {0.2500f, 0.6667f},
-        {0.7500f, 0.1111f},
-        {0.1250f, 0.4444f},
-        {0.6250f, 0.7778f},
-        {0.3750f, 0.2222f},
-        {0.8750f, 0.5556f},
-        {0.0625f, 0.8889f}
-    };
+    // RTXPT defaults to Donut's non-repeating R2 camera-jitter sequence because it is more stable
+    // with DLSS Ray Reconstruction than the short Halton cycle previously used here.
+    static glm::vec2 R2Jitter(uint32_t phase)
+    {
+        constexpr float g = 1.32471795724474602596f;
+        constexpr float a1 = 1.0f / g;
+        constexpr float a2 = 1.0f / (g * g);
+        return glm::vec2(
+            std::fmod(static_cast<float>(phase) * a1, 1.0f),
+            std::fmod(static_cast<float>(phase) * a2, 1.0f)) - 0.5f;
+    }
 
     void Renderer::BeginScene(const Camera& camera, const glm::mat4& cameraWorldMatrix)
     {
@@ -4234,11 +4374,11 @@ namespace Nox
                 m_cameraNear = m_currentNonJitteredProj[3][2];
             }
 
+            m_prevJitter = m_currentJitter;
             if (enableJitter)
             {
-                m_jitterPhase = (m_jitterPhase + 1) % 8;
-                glm::vec2 halton = s_Halton8[m_jitterPhase];
-                m_currentJitter = halton - 0.5f;
+                ++m_jitterPhase;
+                m_currentJitter = R2Jitter(m_jitterPhase);
             }
             else
             {
@@ -4364,11 +4504,11 @@ namespace Nox
             m_cameraFOV = camera.GetFOV();
 
             // Apply subpixel jitter to the rasterization projection matrix
+            m_prevJitter = m_currentJitter;
             if (enableJitter)
             {
-                m_jitterPhase = (m_jitterPhase + 1) % 8;
-                glm::vec2 halton = s_Halton8[m_jitterPhase];
-                m_currentJitter = halton - 0.5f;
+                ++m_jitterPhase;
+                m_currentJitter = R2Jitter(m_jitterPhase);
             }
             else
             {

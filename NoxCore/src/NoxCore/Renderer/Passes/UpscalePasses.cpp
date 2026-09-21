@@ -16,12 +16,19 @@ namespace Nox
         // NGX keeps the history: resets (resize, mode change) arrive through the render graph's history key.
         frame.resetDLSS = m_isFirstFrame || m_renderGraph.WasHistoryReset(DLSSHistoryKey);
 
-        // Ray Reconstruction divides the image by the albedo it was shaded with (diffuse and pre-integrated specular):
-        // built from the G-buffer the way the lighting shades it.
+        // Ray Reconstruction divides the image by the albedo it was shaded with (diffuse and pre-integrated specular).
+        // The path tracer writes these from its primary hit; raster/deferred paths derive them from the G-buffer.
         const bool rayReconstruction = m_dlssRayReconstructionEnabled && m_device->isDLSSRayReconstructionSupported() && m_rrGuidesPipeline;
-        // The specular hit distance comes from the RT reflection rays (hybrid); the path tracers do not produce one yet.
-        const bool hitDistance = rayReconstruction && frame.rtReflectionsAdded && !frame.restirPTActive && !frame.pathTracerActive;
-        if (rayReconstruction)
+        // The plain path tracer writes guides from its actual primary surface and the first specular/transmission segment.
+        // Raster/deferred rendering still prepares guides from the G-buffer here.
+        const bool pathTracerGuides = rayReconstruction && frame.pathTracerActive && !frame.restirPTActive;
+        // Match RTXPT's shipping/default DLSS-RR path: its sample deliberately disables SpecularHitDistance
+        // ("it's buggy") and supplies SpecularMotionVectors for path tracing instead. A single stochastic path
+        // cannot provide a dense, stable hit-distance field; tagging it makes static glass retain the reflected
+        // history until motion happens to invalidate it. Hybrid reflections still have a dense hit-distance buffer.
+        const bool hitDistance = rayReconstruction && frame.rtReflectionsAdded &&
+            !frame.restirPTActive && !frame.pathTracerActive;
+        if (rayReconstruction && !pathTracerGuides)
         {
             m_renderGraph.AddPass("RR Guides", RGPassFlags::None,
                 [&](RGBuilder& builder)
@@ -66,19 +73,29 @@ namespace Nox
                 ReadLitScene(builder, resources, frame.restirPTActive, frame.pathTracerActive, frame.ptNRDAdded, frame.pathTracerWriteIndex);
                 builder.Read(resources.Depth);
                 builder.Read(resources.GBufferVelocity);
-                builder.Read(resources.GBufferNormal);
-                builder.Read(resources.GBufferMaterial);
                 if (rayReconstruction)
                 {
                     builder.Read(resources.RRDiffuseAlbedo);
                     builder.Read(resources.RRSpecularAlbedo);
+                    if (pathTracerGuides)
+                    {
+                        builder.Read(resources.RRNormalRoughness);
+                        builder.Read(resources.RRPathDepth);
+                        builder.Read(resources.RRPathMotionVectors);
+                        builder.Read(resources.RRSpecularMotionVectors);
+                    }
+                    else
+                    {
+                        builder.Read(resources.GBufferNormal);
+                        builder.Read(resources.GBufferMaterial);
+                    }
                 }
                 if (hitDistance)
                     builder.Read(resources.RRSpecularHitDistance);
                 builder.Write(resources.DLSSOutput);
                 builder.RecordExclusive("Streamline");
             },
-            [this, res = &resources, rayReconstruction, hitDistance](RGPassContext& context)
+            [this, res = &resources, rayReconstruction, pathTracerGuides, hitDistance](RGPassContext& context)
             {
                 NRI::CommandBuffer& cmd = context.Cmd();
                 const FrameGraphState& frame = m_frame;
@@ -96,14 +113,23 @@ namespace Nox
                 NRI::DLSSParams dlssParams{};
                 dlssParams.inputColor = &inputColor;
                 dlssParams.outputColor = &outputColor;
-                dlssParams.depth = &context.Texture(res->Depth);
-                dlssParams.motionVectors = &context.Texture(res->GBufferVelocity);
+                dlssParams.depth = &context.Texture(pathTracerGuides ? res->RRPathDepth : res->Depth);
+                dlssParams.motionVectors = &context.Texture(pathTracerGuides ? res->RRPathMotionVectors : res->GBufferVelocity);
                 if (rayReconstruction)
                 {
                     dlssParams.albedo = &context.Texture(res->RRDiffuseAlbedo);
                     dlssParams.specularAlbedo = &context.Texture(res->RRSpecularAlbedo);
-                    dlssParams.normal = &context.Texture(res->GBufferNormal);
-                    dlssParams.roughness = &context.Texture(res->GBufferMaterial);
+                    if (pathTracerGuides)
+                    {
+                        dlssParams.normal = &context.Texture(res->RRNormalRoughness);
+                        dlssParams.normalRoughnessPacked = true;
+                        dlssParams.specularMotionVectors = &context.Texture(res->RRSpecularMotionVectors);
+                    }
+                    else
+                    {
+                        dlssParams.normal = &context.Texture(res->GBufferNormal);
+                        dlssParams.roughness = &context.Texture(res->GBufferMaterial);
+                    }
                 }
                 if (hitDistance)
                     dlssParams.specularHitDistance = &context.Texture(res->RRSpecularHitDistance);

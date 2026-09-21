@@ -416,6 +416,10 @@ namespace Nox
 
             out << YAML::Key << "Primary" << YAML::Value << cameraComponent.Primary;
             out << YAML::Key << "FixedAspectRatio" << YAML::Value << cameraComponent.FixedAspectRatio;
+            out << YAML::Key << "AutoExposure" << YAML::Value << cameraComponent.AutoExposure;
+            out << YAML::Key << "ExposureCompensation" << YAML::Value << cameraComponent.ExposureCompensation;
+            out << YAML::Key << "AutoExposureMinEV" << YAML::Value << cameraComponent.AutoExposureMinEV;
+            out << YAML::Key << "AutoExposureMaxEV" << YAML::Value << cameraComponent.AutoExposureMaxEV;
 
             out << YAML::EndMap; // CameraComponent
         }
@@ -817,6 +821,14 @@ namespace Nox
 
                     cc.Primary = cameraComponent["Primary"].as<bool>();
                     cc.FixedAspectRatio = cameraComponent["FixedAspectRatio"].as<bool>();
+                    if (cameraComponent["AutoExposure"])
+                        cc.AutoExposure = cameraComponent["AutoExposure"].as<bool>();
+                    if (cameraComponent["ExposureCompensation"])
+                        cc.ExposureCompensation = cameraComponent["ExposureCompensation"].as<float>();
+                    if (cameraComponent["AutoExposureMinEV"])
+                        cc.AutoExposureMinEV = cameraComponent["AutoExposureMinEV"].as<float>();
+                    if (cameraComponent["AutoExposureMaxEV"])
+                        cc.AutoExposureMaxEV = cameraComponent["AutoExposureMaxEV"].as<float>();
                 }
 
                 /*auto scriptComponent = entity["ScriptComponent"];

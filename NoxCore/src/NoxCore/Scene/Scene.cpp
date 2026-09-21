@@ -355,7 +355,7 @@ namespace Nox
         // Submission (after BeginScene). No conflicts: they run in parallel. Meshes are not submitted: the GPU scene keeps
         // them (SyncGpuScene).
         m_SubmitSystems.AddSystem("Submit Lights",
-            ComponentAccess().Read<WorldTransformComponent, DirectionalLightComponent, PointLightComponent, SpotLightComponent>().Write<LightSubmission>(),
+            ComponentAccess().Read<WorldTransformComponent, CameraComponent, DirectionalLightComponent, PointLightComponent, SpotLightComponent>().Write<LightSubmission>(),
             [this]() { SubmitLights(); });
         m_SubmitSystems.AddSystem("Submit 2D",
             ComponentAccess().Read<WorldTransformComponent, SpriteRendererComponent, CircleRendererComponent, TextComponent>().Write<Renderer2DSubmission>(),
@@ -924,6 +924,21 @@ namespace Nox
     
     void Scene::SubmitLights()
     {
+        // Presentation settings belong to the scene camera even while the editor viewport supplies
+        // the view transform. This keeps imported RTXPT scenes visually consistent in both modes.
+        bool foundPrimaryCamera = false;
+        for (auto entity : m_Registry.view<CameraComponent>())
+        {
+            const auto& camera = m_Registry.get<CameraComponent>(entity);
+            if (!camera.Primary) continue;
+            m_renderer->setAutoExposure(camera.AutoExposure, camera.ExposureCompensation,
+                                        camera.AutoExposureMinEV, camera.AutoExposureMaxEV);
+            foundPrimaryCamera = true;
+            break;
+        }
+        if (!foundPrimaryCamera)
+            m_renderer->setAutoExposure(false, 0.0f, -16.0f, 16.0f);
+
         {
             auto view = m_Registry.view<WorldTransformComponent, DirectionalLightComponent>();
             for (auto entity : view)
@@ -946,6 +961,18 @@ namespace Nox
             {
                 auto [wtc, light] = view.get<WorldTransformComponent, SpotLightComponent>(entity);
                 m_renderer->SubmitLight(wtc.WorldMatrix, light);
+            }
+        }
+        {
+            auto view = m_Registry.view<EnvironmentLightComponent>();
+            for (auto entity : view)
+            {
+                const auto& environment = view.get<EnvironmentLightComponent>(entity);
+                if (!environment.Enabled || environment.TexturePath.empty())
+                    continue;
+                m_renderer->SetEnvironmentMap(Project::GetActiveAssetDirectory() / environment.TexturePath);
+                m_renderer->setScaleIBLAmbient(environment.RadianceScale.x);
+                break;
             }
         }
     }

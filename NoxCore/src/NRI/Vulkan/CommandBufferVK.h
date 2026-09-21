@@ -57,6 +57,7 @@ namespace NRI
         void drawMeshTasks(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) override;
         void drawMeshTasksIndirect(Buffer& indirectBuffer, uint64_t offset, uint32_t drawCount, uint32_t stride) override;
         void dispatch(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) override;
+        void traceRays(const StridedDeviceAddressRegion& rayGen, const StridedDeviceAddressRegion& miss, const StridedDeviceAddressRegion& hitGroup, const StridedDeviceAddressRegion& callable, uint32_t width, uint32_t height, uint32_t depth = 1) override;
         void drawMeshTasksIndirect(uint64_t indirectBufferDeviceAddress, uint64_t offset, uint32_t drawCount, uint32_t stride) override;
         void drawMeshTasksIndirectCount(Buffer& indirectBuffer, uint64_t offset, Buffer& countBuffer, uint64_t countOffset, uint32_t maxDrawCount, uint32_t stride) override;
 

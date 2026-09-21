@@ -86,6 +86,13 @@ namespace NRI
             memoryUsage = vma::MemoryUsage::eAuto;
             allocFlags = vma::AllocationCreateFlagBits::eHostAccessSequentialWrite | vma::AllocationCreateFlagBits::eMapped;
             break;
+        case BufferUsage::ShaderBindingTable:
+            // Shader Binding Table (SBT) buffer: host-written, device-addressed for vkCmdTraceRaysKHR
+            usageFlags = vk::BufferUsageFlagBits2::eShaderBindingTableKHR | vk::BufferUsageFlagBits2::eShaderDeviceAddress |
+                vk::BufferUsageFlagBits2::eTransferDst;
+            memoryUsage = vma::MemoryUsage::eAuto;
+            allocFlags = vma::AllocationCreateFlagBits::eHostAccessSequentialWrite | vma::AllocationCreateFlagBits::eMapped;
+            break;
         }
 
         m_allocatedBuffer = m_deviceVK.getAllocator().createBuffer(desc.size, usageFlags, memoryUsage, allocFlags, {},

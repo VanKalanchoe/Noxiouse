@@ -34,7 +34,7 @@ namespace Nox
         void Init();
         // Once per frame, main thread: reimports edited sources and publishes the background loads that finished.
         void Update();
-        void ReimportAsset(AssetHandle handle);
+        void ReimportAsset(AssetHandle handle, bool force = false);
         
         void ImportAsset(const std::filesystem::path& sourcePath, const std::filesystem::path& destPath, AssetType targetType = AssetType::None);
         // New overload for textures with custom spec (also void)

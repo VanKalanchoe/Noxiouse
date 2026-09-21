@@ -57,6 +57,30 @@ namespace NRI
             stage = "mesh";
             break;
 
+        case ShaderStage::RayGen:
+            stage = "rgen";
+            break;
+
+        case ShaderStage::Miss:
+            stage = "rmiss";
+            break;
+
+        case ShaderStage::ClosestHit:
+            stage = "rchit";
+            break;
+
+        case ShaderStage::AnyHit:
+            stage = "rahit";
+            break;
+
+        case ShaderStage::Intersection:
+            stage = "rint";
+            break;
+
+        case ShaderStage::Callable:
+            stage = "rcall";
+            break;
+
         default:
             stage = "unknown";
             break;
@@ -592,39 +616,130 @@ namespace NRI
         m_pipeline = vk::raii::Pipeline(m_deviceVK.getDevice(), nullptr, pipelineCreateInfoChain.get<vk::ComputePipelineCreateInfo>());
     }
 }
-        /*else if (desc.type == PipelineType::Compute)
+        else if (desc.type == PipelineType::RayTracing)
         {
-            /#1#/ Verify we have exactly one compute shader
             if (desc.shaders.empty())
             {
-                throw std::runtime_error("Compute pipeline requires a shader stage.");
+                NOX_CORE_ASSERT("PipelineVK: RayTracing pipeline requires shader stages!");
             }
 
-            /*vk::raii::ShaderModule shaderModule = createShaderModule(readFile("../../shaders/slang.spv"));
+            std::vector<vk::raii::ShaderModule> shaderModules;
+            std::vector<vk::PipelineShaderStageCreateInfo> shaderStageCreateInfos;
+            shaderModules.reserve(desc.shaders.size());
+            shaderStageCreateInfos.reserve(desc.shaders.size());
 
-            vk::PipelineShaderStageCreateInfo computeShaderStageInfo{.stage = vk::ShaderStageFlagBits::eCompute, .module = shaderModule, .pName = "compMain"};#2#
+            int32_t rayGenShaderIdx = -1;
+            std::vector<uint32_t> missShaderIndices;
+            std::vector<uint32_t> closestHitShaderIndices;
+            std::vector<uint32_t> anyHitShaderIndices;
 
-            const auto& computeShaderDesc = desc.shaders[0];
-            auto shaderModule = createShaderModule(computeShaderDesc.bytecode);
-
-            vk::PipelineShaderStageCreateInfo computeShaderStageInfo
+            for (size_t i = 0; i < desc.shaders.size(); ++i)
             {
-                .stage = vk::ShaderStageFlagBits::eCompute,
-                .module = *shaderModule,
-                .pName = computeShaderDesc.entryPoint.c_str()
+                const auto& shaderDesc = desc.shaders[i];
+                std::vector<char> spirvStorage = compiler.compile(shaderDesc.sourcePath);
+                shaderModules.push_back(createShaderModule(spirvStorage));
+
+                vk::ShaderStageFlagBits vkStage = translateShaderStage(shaderDesc.stage);
+                shaderStageCreateInfos.push_back(vk::PipelineShaderStageCreateInfo{
+                    .stage = vkStage,
+                    .module = *shaderModules.back(),
+                    .pName = shaderDesc.entryPoint.c_str()
+                });
+
+                if (shaderDesc.stage == ShaderStage::RayGen)
+                    rayGenShaderIdx = static_cast<int32_t>(i);
+                else if (shaderDesc.stage == ShaderStage::Miss)
+                    missShaderIndices.push_back(static_cast<uint32_t>(i));
+                else if (shaderDesc.stage == ShaderStage::ClosestHit)
+                    closestHitShaderIndices.push_back(static_cast<uint32_t>(i));
+                else if (shaderDesc.stage == ShaderStage::AnyHit)
+                    anyHitShaderIndices.push_back(static_cast<uint32_t>(i));
+            }
+
+            if (rayGenShaderIdx < 0)
+                throw std::runtime_error("PipelineVK: RayTracing pipeline missing RayGen shader!");
+
+            std::vector<vk::RayTracingShaderGroupCreateInfoKHR> groups;
+
+            // 1. RayGen group
+            m_rayGenShaderGroupIndex = static_cast<uint32_t>(groups.size());
+            groups.push_back(vk::RayTracingShaderGroupCreateInfoKHR{
+                .type = vk::RayTracingShaderGroupTypeKHR::eGeneral,
+                .generalShader = static_cast<uint32_t>(rayGenShaderIdx),
+                .closestHitShader = VK_SHADER_UNUSED_KHR,
+                .anyHitShader = VK_SHADER_UNUSED_KHR,
+                .intersectionShader = VK_SHADER_UNUSED_KHR
+            });
+
+            // 2. Miss groups
+            for (uint32_t missIdx : missShaderIndices)
+            {
+                m_missShaderGroupIndices.push_back(static_cast<uint32_t>(groups.size()));
+                groups.push_back(vk::RayTracingShaderGroupCreateInfoKHR{
+                    .type = vk::RayTracingShaderGroupTypeKHR::eGeneral,
+                    .generalShader = missIdx,
+                    .closestHitShader = VK_SHADER_UNUSED_KHR,
+                    .anyHitShader = VK_SHADER_UNUSED_KHR,
+                    .intersectionShader = VK_SHADER_UNUSED_KHR
+                });
+            }
+
+            // 3. Hit groups
+            if (!desc.hitGroups.empty())
+            {
+                for (const auto& hg : desc.hitGroups)
+                {
+                    m_hitShaderGroupIndices.push_back(static_cast<uint32_t>(groups.size()));
+                    groups.push_back(vk::RayTracingShaderGroupCreateInfoKHR{
+                        .type = vk::RayTracingShaderGroupTypeKHR::eTrianglesHitGroup,
+                        .generalShader = VK_SHADER_UNUSED_KHR,
+                        .closestHitShader = (hg.closestHitShaderIndex != ~0u) ? hg.closestHitShaderIndex : VK_SHADER_UNUSED_KHR,
+                        .anyHitShader = (hg.anyHitShaderIndex != ~0u) ? hg.anyHitShaderIndex : VK_SHADER_UNUSED_KHR,
+                        .intersectionShader = (hg.intersectionShaderIndex != ~0u) ? hg.intersectionShaderIndex : VK_SHADER_UNUSED_KHR
+                    });
+                }
+            }
+            else
+            {
+                // Default: one hit group per closest hit shader
+                for (size_t i = 0; i < closestHitShaderIndices.size(); ++i)
+                {
+                    uint32_t chit = closestHitShaderIndices[i];
+                    uint32_t ahit = (i < anyHitShaderIndices.size()) ? anyHitShaderIndices[i] : VK_SHADER_UNUSED_KHR;
+                    m_hitShaderGroupIndices.push_back(static_cast<uint32_t>(groups.size()));
+                    groups.push_back(vk::RayTracingShaderGroupCreateInfoKHR{
+                        .type = vk::RayTracingShaderGroupTypeKHR::eTrianglesHitGroup,
+                        .generalShader = VK_SHADER_UNUSED_KHR,
+                        .closestHitShader = chit,
+                        .anyHitShader = ahit,
+                        .intersectionShader = VK_SHADER_UNUSED_KHR
+                    });
+                }
+            }
+
+            vk::RayTracingPipelineCreateInfoKHR rayTracingPipelineCreateInfo{
+                .stageCount = static_cast<uint32_t>(shaderStageCreateInfos.size()),
+                .pStages = shaderStageCreateInfos.data(),
+                .groupCount = static_cast<uint32_t>(groups.size()),
+                .pGroups = groups.data(),
+                .maxPipelineRayRecursionDepth = std::max(1u, desc.maxRecursionDepth),
+                .layout = nullptr
             };
 
-            vk::StructureChain<vk::ComputePipelineCreateInfo, vk::PipelineCreateFlags2CreateInfo> pipelineCreateInfoChain = {
-                {
-                    .stage = computeShaderStageInfo,
-                    .layout = nullptr
-                },
-                // With descriptor heaps we no longer need a pipeline layout
-                // This struct must be chained into pipeline creation to enable the use of heaps (allowing us to leave pipelineLayout empty)
-                {.flags = vk::PipelineCreateFlagBits2::eDescriptorHeapEXT},
+            vk::StructureChain<vk::RayTracingPipelineCreateInfoKHR, vk::PipelineCreateFlags2CreateInfo> chain{
+                rayTracingPipelineCreateInfo,
+                { .flags = vk::PipelineCreateFlagBits2::eDescriptorHeapEXT }
             };
-            m_pipeline = vk::raii::Pipeline(m_deviceVK.getDevice(), nullptr, pipelineCreateInfoChain.get<vk::ComputePipelineCreateInfo>());#1#
-        }*/
+
+            m_pipeline = vk::raii::Pipeline(m_deviceVK.getDevice(), nullptr, nullptr, chain.get<vk::RayTracingPipelineCreateInfoKHR>());
+
+            const auto& rtProps = m_deviceVK.getRayTracingPipelineProperties();
+            m_shaderGroupHandleSize = rtProps.shaderGroupHandleSize;
+            m_shaderGroupBaseAlignment = rtProps.shaderGroupBaseAlignment;
+            uint32_t totalGroups = static_cast<uint32_t>(groups.size());
+            uint32_t dataSize = totalGroups * m_shaderGroupHandleSize;
+            m_shaderGroupHandles = m_pipeline.getRayTracingShaderGroupHandlesKHR<uint8_t>(0, totalGroups, dataSize);
+        }
     }
 
     [[nodiscard]] vk::raii::ShaderModule PipelineVK::createShaderModule(const std::vector<char>& code) const
@@ -644,6 +759,12 @@ namespace NRI
         case ShaderStage::Compute: return vk::ShaderStageFlagBits::eCompute;
         case ShaderStage::Task:     return vk::ShaderStageFlagBits::eTaskEXT;
         case ShaderStage::Mesh:     return vk::ShaderStageFlagBits::eMeshEXT;
+        case ShaderStage::RayGen:   return vk::ShaderStageFlagBits::eRaygenKHR;
+        case ShaderStage::Miss:     return vk::ShaderStageFlagBits::eMissKHR;
+        case ShaderStage::ClosestHit: return vk::ShaderStageFlagBits::eClosestHitKHR;
+        case ShaderStage::AnyHit:   return vk::ShaderStageFlagBits::eAnyHitKHR;
+        case ShaderStage::Intersection: return vk::ShaderStageFlagBits::eIntersectionKHR;
+        case ShaderStage::Callable: return vk::ShaderStageFlagBits::eCallableKHR;
 
         default:
             NOX_CORE_ASSERT("PipelineVK::translateShaderStage unsupported shader stage passed to Vulkan backend!");

@@ -22,6 +22,7 @@ enum SamplerIndex : uint32_t
     SAMPLER_IRRADIANCE = 3,
     SAMPLER_PREFILTER = 4,
     SAMPLER_LINEAR_CLAMP = 5,
+    SAMPLER_NEAREST_CLAMP = 6,
 
     SamplerCount
 };
@@ -172,7 +173,10 @@ struct GpuRayTracingInstance
     uint64_t skinnedVertexBufferAddress; // 0 for rigid instances; local-space SkinnedVertex stream otherwise
     mat4 normalMatrix;              // transpose(inverse(world))
     vec4 baseColorFactor;
+    vec4 diffuseFactor;             // KHR_materials_pbrSpecularGlossiness
+    vec4 specularFactor;            // rgb: F0, a: glossiness
     vec4 emissiveFactor;            // rgb: color, a: strength
+    uint32_t emissiveTextureIndex;
     uint32_t baseColorTextureIndex;
     float alphaCutoff;
     uint32_t alphaMode;             // 0 = Opaque, 1 = Mask, 2 = Blend
@@ -664,6 +668,34 @@ struct PushConstantPathTracer
     uint32_t gbufferAlbedoIndex;
     uint32_t gbufferNormalIndex;
     uint32_t gbufferMaterialIndex;
+    // RT Pipeline output storage slots
+    uint32_t outputAccumIndex;
+    uint32_t outputDiffuseIndex;
+    uint32_t outputSpecularIndex;
+    uint32_t environmentImportanceIndex;
+    uint32_t maxDiffuseBounces;
+    float fireflyFilterThreshold;      // RTXPT adaptive cap; 0 disables it
+    // DLSS Ray Reconstruction guides written from the actual primary path-traced surface.
+    // All are 0xFFFFFFFF when RR is inactive.
+    uint32_t rrDiffuseAlbedoStorageIndex;
+    uint32_t rrSpecularAlbedoStorageIndex;
+    uint32_t rrNormalRoughnessStorageIndex;
+    uint32_t rrDepthStorageIndex;
+    uint32_t rrMotionStorageIndex;
+    uint32_t rrSpecularMotionStorageIndex;
+    uint32_t rrSpecularHitDistanceStorageIndex;
+    float cameraRayJitterScale; // RTXPT: 0.1 for RR micro-jitter, 0 for DLSS-SR, 1 for native accumulation
+    uint32_t neeCandidateSamples; // RTXPT realtime NEE-AT default: 5
+    uint32_t neeFullSamples;      // RTXPT realtime NEE-AT default: 1
+    uint32_t environmentDiffuseMip; // RTXPT default: 2
+};
+
+struct PushConstantPTEnvironment
+{
+    uint32_t sourceIndex;
+    uint32_t outputIndex;
+    uint32_t sourceMip;
+    uint32_t dimension;
 };
 
 // The path tracer's NRD composite (PTComposite.slang): emission + denoised diffuse / specular, modulated back.
@@ -719,8 +751,21 @@ struct PushConstantPostProcess
 {
     uint64_t matrixReference;
     uint32_t hdrTextureIndex;
+    uint32_t autoExposureTextureIndex;
     uint32_t debugMode;
-    uint32_t tonemapMode; // 0 = None, 1 = ACES Narkowicz, 2 = ACES Hill, 3 = ACES Hill Exp, 4 = Khronos PBR Neutral
+    uint32_t tonemapMode; // 0 = None, 1 = ACES Narkowicz, 2 = ACES Hill, 3 = ACES Hill Exp, 4 = Khronos PBR Neutral, 5 = Reinhard, 6 = Reinhard Mod, 7 = Heji Hable ALU, 8 = Hable UC2 (RTXPT), 9 = ACES (RTXPT)
+    uint32_t autoExposureEnabled;
+    float exposureCompensation;
+    float autoExposureMinEV;
+    float autoExposureMaxEV;
+};
+
+struct PushConstantAutoExposure
+{
+    uint32_t sourceIndex;
+    uint32_t outputIndex;
+    uint32_t sourceMip;
+    uint32_t dimension;
 };
 
 struct PushConstantDDGIRadiance

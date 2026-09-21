@@ -18,7 +18,8 @@ namespace NRI
         IndirectStatic,
         AccelerationStructure,        // DeviceLocal, AS storage (BLAS/TLAS backing)
         AccelerationStructureScratch, // DeviceLocal, Scratch buffer for AS build/update
-        AccelerationStructureInstance // HostVisible | Mapped, TLAS instance records
+        AccelerationStructureInstance, // HostVisible | Mapped, TLAS instance records
+        ShaderBindingTable            // HostVisible | Mapped | DeviceAddress, SBT backing
     };
 
     struct BufferDesc

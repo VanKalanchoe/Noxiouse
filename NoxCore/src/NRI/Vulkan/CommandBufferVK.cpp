@@ -306,6 +306,9 @@ namespace NRI
 
                 case PipelineBindPoint::Compute:
                     return vk::PipelineBindPoint::eCompute;
+
+                case PipelineBindPoint::RayTracing:
+                    return vk::PipelineBindPoint::eRayTracingKHR;
                 }
 
                 throw std::runtime_error("Unknown PipelineBindPoint");
@@ -566,6 +569,32 @@ namespace NRI
     void CommandBufferVK::dispatch(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ)
     {
         m_commandBuffers[m_currentFrameIndex].dispatch(groupCountX, groupCountY, groupCountZ);
+    }
+
+    void CommandBufferVK::traceRays(const StridedDeviceAddressRegion& rayGen, const StridedDeviceAddressRegion& miss, const StridedDeviceAddressRegion& hitGroup, const StridedDeviceAddressRegion& callable, uint32_t width, uint32_t height, uint32_t depth)
+    {
+        vk::StridedDeviceAddressRegionKHR vkRaygen{
+            .deviceAddress = rayGen.deviceAddress,
+            .stride = rayGen.stride,
+            .size = rayGen.size,
+        };
+        vk::StridedDeviceAddressRegionKHR vkMiss{
+            .deviceAddress = miss.deviceAddress,
+            .stride = miss.stride,
+            .size = miss.size,
+        };
+        vk::StridedDeviceAddressRegionKHR vkHitGroup{
+            .deviceAddress = hitGroup.deviceAddress,
+            .stride = hitGroup.stride,
+            .size = hitGroup.size,
+        };
+        vk::StridedDeviceAddressRegionKHR vkCallable{
+            .deviceAddress = callable.deviceAddress,
+            .stride = callable.stride,
+            .size = callable.size,
+        };
+
+        m_commandBuffers[m_currentFrameIndex].traceRaysKHR(vkRaygen, vkMiss, vkHitGroup, vkCallable, width, height, depth);
     }
     
     void CommandBufferVK::drawMeshTasksIndirect(uint64_t indirectBufferDeviceAddress, uint64_t offset, uint32_t drawCount, uint32_t stride)
@@ -1049,6 +1078,7 @@ vk::AccessFlagBits2::eColorAttachmentWrite | vk::AccessFlagBits2::eDepthStencilA
             if (stages & StageBits::Mesh) flags |= vk::PipelineStageFlagBits2::eMeshShaderEXT;
             if (stages & StageBits::Fragment) flags |= vk::PipelineStageFlagBits2::eFragmentShader;
             if (stages & StageBits::Compute) flags |= vk::PipelineStageFlagBits2::eComputeShader;
+            if (stages & StageBits::RayTracing) flags |= vk::PipelineStageFlagBits2::eRayTracingShaderKHR;
             if (stages & StageBits::ColorAttachmentOutput) flags |= vk::PipelineStageFlagBits2::eColorAttachmentOutput;
             if (stages & StageBits::FragmentTests) flags |= vk::PipelineStageFlagBits2::eEarlyFragmentTests | vk::PipelineStageFlagBits2::eLateFragmentTests;
             if (stages & StageBits::Transfer) flags |= vk::PipelineStageFlagBits2::eTransfer;

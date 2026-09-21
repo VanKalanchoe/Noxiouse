@@ -45,7 +45,15 @@ namespace NRI
     enum class PipelineBindPoint
     {
         Graphics,
-        Compute
+        Compute,
+        RayTracing
+    };
+
+    struct StridedDeviceAddressRegion
+    {
+        uint64_t deviceAddress = 0;
+        uint64_t stride = 0;
+        uint64_t size = 0;
     };
     
     enum class PrimitiveTopology
@@ -139,6 +147,7 @@ namespace NRI
         constexpr uint32_t Transfer = 1 << 6;      // copies and blits
         constexpr uint32_t AccelerationStructureBuild = 1 << 7;
         constexpr uint32_t Indirect = 1 << 8; // fetch of indirect arguments and draw counts
+        constexpr uint32_t RayTracing = 1 << 9;
     }
 
     struct ResourceState
@@ -221,6 +230,7 @@ namespace NRI
         // Draw count read from countBuffer at countOffset (uint32_t, GPU-written), at most maxDrawCount.
         virtual void drawMeshTasksIndirectCount(Buffer& indirectBuffer, uint64_t offset, Buffer& countBuffer, uint64_t countOffset, uint32_t maxDrawCount, uint32_t stride) = 0;
         virtual void dispatch(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) = 0;
+        virtual void traceRays(const StridedDeviceAddressRegion& rayGen, const StridedDeviceAddressRegion& miss, const StridedDeviceAddressRegion& hitGroup, const StridedDeviceAddressRegion& callable, uint32_t width, uint32_t height, uint32_t depth = 1) = 0;
         
         virtual void copyBuffer(class Buffer& srcBuffer, class Buffer& dstBuffer, const BufferCopyRegion& region = {}) = 0;
         // Repeats a 32-bit value over a range (a transfer write).

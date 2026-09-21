@@ -98,6 +98,17 @@ namespace Nox
             material.Unlit = unlit != 0;
             stream.read(reinterpret_cast<char*>(&material.IOR), sizeof(float));
             stream.read(reinterpret_cast<char*>(&material.Thickness), sizeof(float));
+
+            // Older transmission-only imports inherited the glTF parser's synthetic 1/1 PBR defaults. RTXPT/Donut
+            // uses 0/0 when the PBR object is absent. A fully metallic material cannot transmit, so repair this exact
+            // textureless legacy combination in Nox without changing the vendored parser.
+            if (material.TransmissionFactor > 0.0f && material.MetallicFactor == 1.0f &&
+                material.RoughnessFactor == 1.0f && material.BaseColorTexturePath.empty() &&
+                material.MetallicRoughnessTexturePath.empty())
+            {
+                material.MetallicFactor = 0.0f;
+                material.RoughnessFactor = 0.0f;
+            }
             return stream.good();
         }
 

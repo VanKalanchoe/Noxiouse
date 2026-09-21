@@ -274,7 +274,7 @@ namespace Nox
         Renderer::InvalidateTextureDescriptorSlots(replacedSlots);
     }
     
-    void EditorAssetManager::ReimportAsset(AssetHandle handle)
+    void EditorAssetManager::ReimportAsset(AssetHandle handle, bool force)
     {
         if (!IsAssetHandleValid(handle)) return;
 
@@ -302,7 +302,7 @@ namespace Nox
         // last known content hash before doing anything destructive; a spurious event is a no-op.
         XXH128_hash_t currentHash = Utility::calcul_hash_streaming(sourcePath.string());
         auto knownHashIt = m_LastKnownSourceHash.find(handle);
-        if (knownHashIt != m_LastKnownSourceHash.end() && XXH128_isEqual(currentHash, knownHashIt->second))
+        if (!force && knownHashIt != m_LastKnownSourceHash.end() && XXH128_isEqual(currentHash, knownHashIt->second))
         {
             NOX_CORE_INFO("Skipping auto-reimport, source content unchanged: {}", metadata.SourceFilePath.string());
             return;
@@ -412,16 +412,21 @@ namespace Nox
         // with std::filesystem::relative + a linear registry scan measured 2.1s per load. Index the
         // registry once, resolve paths lexically, and handle each distinct path only once.
         const std::filesystem::path assetDirectory = Project::GetActiveAssetDirectory();
-        std::unordered_set<std::string> registeredTexturePaths;
+        std::unordered_map<std::string, AssetHandle> registeredTextureHandles;
         for (const auto& [textureHandle, metadata] : m_AssetRegistry)
         {
             if (metadata.Type != AssetType::Texture2D)
                 continue;
-            registeredTexturePaths.insert(metadata.FilePath.lexically_normal().generic_string());
+            const std::string cookedKey = metadata.FilePath.lexically_normal().generic_string();
+            registeredTextureHandles[cookedKey] = textureHandle;
             if (!metadata.SourceFilePath.empty())
-                registeredTexturePaths.insert(metadata.SourceFilePath.lexically_normal().generic_string());
+            {
+                const std::string sourceKey = metadata.SourceFilePath.lexically_normal().generic_string();
+                registeredTextureHandles[sourceKey] = textureHandle;
+            }
         }
         std::unordered_set<std::string> processedPaths;
+        std::vector<AssetHandle> texturesNeedingRecook;
         bool registryChanged = false;
 
         auto importTexture = [&](const std::string& texturePath, bool sRGB)
@@ -449,32 +454,60 @@ namespace Nox
 
             std::filesystem::path cookedPath = GeneratedAssetPath(relativePath, "Textures", ".ntex");
 
-            if (registeredTexturePaths.contains(cookedPath.lexically_normal().generic_string()) ||
-                registeredTexturePaths.contains(relativePath.lexically_normal().generic_string()))
+            const std::string cookedKey = cookedPath.lexically_normal().generic_string();
+            const std::string sourceKey = relativePath.lexically_normal().generic_string();
+            auto registered = registeredTextureHandles.find(cookedKey);
+            if (registered == registeredTextureHandles.end())
+                registered = registeredTextureHandles.find(sourceKey);
+            if (registered != registeredTextureHandles.end())
             {
+                AssetMetadata& metadata = m_AssetRegistry.at(registered->second);
+                const NRI::ImageFormat expectedFormat = sRGB ? NRI::ImageFormat::SRGBA8 : NRI::ImageFormat::RGBA8;
+                if (metadata.TextureSpec.format != expectedFormat)
+                {
+                    metadata.TextureSpec.format = expectedFormat;
+                    texturesNeedingRecook.push_back(registered->second);
+                    registryChanged = true;
+                }
                 return;
             }
 
             std::filesystem::path fullSourcePath =
                 Project::GetActiveAssetDirectory() / relativePath;
             if (!std::filesystem::exists(fullSourcePath))
-                return;
+            {
+                // Donut/RTXPT searches for a same-name DDS whenever an uncompressed glTF image is absent.
+                // Do this here too so already-cooked meshes/materials repair themselves when linked, without
+                // requiring hand edits to the registry or every existing .nmat file.
+                std::filesystem::path ddsRelativePath = relativePath;
+                ddsRelativePath.replace_extension(".dds");
+                const std::filesystem::path ddsSourcePath = Project::GetActiveAssetDirectory() / ddsRelativePath;
+                if (!std::filesystem::exists(ddsSourcePath))
+                    return;
+
+                relativePath = std::move(ddsRelativePath);
+                fullSourcePath = ddsSourcePath;
+                cookedPath = GeneratedAssetPath(relativePath, "Textures", ".ntex");
+            }
 
             // Registered only: it is cooked and loaded in the background when a material first requests it.
             TextureSpecification spec;
             spec.format = sRGB ? NRI::ImageFormat::SRGBA8 : NRI::ImageFormat::RGBA8;
-            RegisterAsset(TextureMetadata(relativePath, spec, {}));
+            const AssetHandle newHandle = RegisterAsset(TextureMetadata(relativePath, spec, {}));
+            registeredTextureHandles[cookedKey] = newHandle;
+            registeredTextureHandles[sourceKey] = newHandle;
+            registeredTextureHandles[relativePath.lexically_normal().generic_string()] = newHandle;
             registryChanged = true;
 
-            // Keep the index current so another path spelling of the same file isn't imported twice.
-            registeredTexturePaths.insert(cookedPath.lexically_normal().generic_string());
-            registeredTexturePaths.insert(relativePath.lexically_normal().generic_string());
         };
 
         for (const MaterialData& material : *materials)
         {
             importTexture(material.BaseColorTexturePath, true);
-            importTexture(material.MetallicRoughnessTexturePath, false);
+            // In the legacy specular-glossiness workflow this slot contains sRGB specular color
+            // in RGB and linear glossiness in alpha. An sRGB image view decodes RGB only, which is
+            // exactly what KHR_materials_pbrSpecularGlossiness requires.
+            importTexture(material.MetallicRoughnessTexturePath, material.Workflow == 1.0f);
             importTexture(material.NormalTexturePath, false);
             importTexture(material.OcclusionTexturePath, false);
             importTexture(material.EmissiveTexturePath, true);
@@ -483,6 +516,25 @@ namespace Nox
 
         if (registryChanged)
             SerializeAssetRegistry();
+
+        // Import settings are part of the cooked texture. A content hash cannot detect a color-space
+        // correction, so explicitly force a recook for already loaded textures whose role changed.
+        for (AssetHandle handle : texturesNeedingRecook)
+        {
+            if (m_LoadedAssets.contains(handle))
+            {
+                ReimportAsset(handle, true);
+                continue;
+            }
+
+            // An unloaded texture will be cooked on demand. Remove only its derived cache so the
+            // corrected registry format is used when that happens; the source asset is untouched.
+            const AssetMetadata& metadata = m_AssetRegistry.at(handle);
+            const std::filesystem::path cookedPath = Project::GetActiveAssetDirectory() / metadata.FilePath;
+            std::error_code ec;
+            std::filesystem::remove(cookedPath, ec);
+            std::filesystem::remove(cookedPath.string() + ".hash", ec);
+        }
     }
 
     void EditorAssetManager::ImportMeshMaterials(const Ref<Asset>& meshAsset, const AssetMetadata& meshMetadata)

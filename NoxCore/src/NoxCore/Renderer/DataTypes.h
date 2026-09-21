@@ -52,8 +52,10 @@ namespace Nox
         int32_t BaseColorTextureSet = 0;
         
         // PBR Properties (Metallic-Roughness)
-        float MetallicFactor = 1.0f;
-        float RoughnessFactor = 1.0f;
+        // Match RTXPT/Donut engine defaults. MeshImporter also corrects the vendored parser's synthetic 1/1 values
+        // for textureless transmission-only materials without changing the vendor library.
+        float MetallicFactor = 0.0f;
+        float RoughnessFactor = 0.0f;
         std::string MetallicRoughnessTexturePath;
         int32_t PhysicalDescriptorTextureSet = 0;
         

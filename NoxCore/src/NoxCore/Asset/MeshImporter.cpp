@@ -801,7 +801,19 @@ namespace Nox
             // 2. Normal external URI
             // ------------------------------------------------------------
 
-            return modelPath.parent_path() / uri;
+            std::filesystem::path sourcePath = modelPath.parent_path() / uri;
+            if (std::filesystem::exists(sourcePath))
+                return sourcePath;
+
+            // Match Donut's glTF importer: Bistro contains a few malformed MSFT_texture_dds entries whose
+            // extension points at another missing PNG. The matching DDS is present beside it and is what RTXPT
+            // loads. This fallback also handles ordinary glTF PNG references distributed with DDS replacements.
+            std::filesystem::path ddsPath = sourcePath;
+            ddsPath.replace_extension(".dds");
+            if (std::filesystem::exists(ddsPath))
+                return ddsPath;
+
+            return sourcePath;
         }
 
         // ------------------------------------------------------------
@@ -1510,7 +1522,6 @@ namespace Nox
                         return "";
                     };
 
-                    // Base Color Factor
                     materialData.BaseColorFactor = glm::vec4(
                         static_cast<float>(gltfMaterial.pbr_metallic_roughness.base_color_factor[0]),
                         static_cast<float>(gltfMaterial.pbr_metallic_roughness.base_color_factor[1]),
@@ -1520,12 +1531,10 @@ namespace Nox
                     materialData.BaseColorTexturePath = GetTexturePath(gltfMaterial.pbr_metallic_roughness.base_color_texture.index);
                     materialData.BaseColorTextureSet = gltfMaterial.pbr_metallic_roughness.base_color_texture.tex_coord;
 
-                    // Metallic & Roughness Factors
                     materialData.MetallicFactor = static_cast<float>(gltfMaterial.pbr_metallic_roughness.metallic_factor);
                     materialData.RoughnessFactor = static_cast<float>(gltfMaterial.pbr_metallic_roughness.roughness_factor);
 
-                    // Metallic-Roughness Texture
-                    // (Note: glTF packs Roughness in the Green channel, Metallic in the Blue channel)
+                    // glTF packs roughness in G and metallic in B.
                     materialData.MetallicRoughnessTexturePath = GetTexturePath(gltfMaterial.pbr_metallic_roughness.metallic_roughness_texture.index);
                     materialData.PhysicalDescriptorTextureSet = gltfMaterial.pbr_metallic_roughness.metallic_roughness_texture.tex_coord;
 
@@ -1712,6 +1721,19 @@ namespace Nox
                                 }
                             }
                         }
+                    }
+
+                    // tiny_gltf_v3 exposes initialized metallic/roughness values but not whether the optional
+                    // pbrMetallicRoughness object existed. Its synthetic 1/1 defaults make a textureless
+                    // KHR_materials_transmission material fully metallic, which removes the entire transmission lobe.
+                    // Donut/RTXPT leaves such transmission-only materials at its engine defaults (0/0). Keep this
+                    // compatibility in Nox instead of modifying the vendored parser.
+                    if (materialData.TransmissionFactor > 0.0f && materialData.Workflow == 0.0f &&
+                        materialData.MetallicFactor == 1.0f && materialData.RoughnessFactor == 1.0f &&
+                        materialData.BaseColorTexturePath.empty() && materialData.MetallicRoughnessTexturePath.empty())
+                    {
+                        materialData.MetallicFactor = 0.0f;
+                        materialData.RoughnessFactor = 0.0f;
                     }
                     materialData.emissiveStrength = emissiveStrength;
                 }
