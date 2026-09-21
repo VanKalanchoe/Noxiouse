@@ -20,12 +20,13 @@
 namespace Nox
 {
     class Entity; // Forward declaration
+    class IPhysics3DScene;
 
     class Scene : public Asset
     {
     public:
         Scene();
-        ~Scene() = default;
+        ~Scene();
 
         static Ref<Scene> Copy(Ref<Scene> other);
 
@@ -66,6 +67,9 @@ namespace Nox
             return m_Registry.view<Components...>();
         }
 
+        entt::registry& GetRegistry() { return m_Registry; }
+        const entt::registry& GetRegistry() const { return m_Registry; }
+
         void SetRenderer(Renderer* renderer);
         void SetRenderer2D(Renderer2D* renderer) { m_renderer2D = renderer; }
 
@@ -77,12 +81,17 @@ namespace Nox
 
         // Writes the scene's system graphs as GraphViz DOT files (SceneUpdate.dot, SceneSubmit.dot) into directory.
         bool DumpSystemGraphs(const std::filesystem::path& directory);
+
+        IPhysics3DScene* GetPhysics3DScene() { return m_Physics3DScene.get(); }
     private:
         template<typename T>
         void OnComponentAdded(Entity entity, T& component);
 
         void OnPhysics2DStart();
         void OnPhysics2DStop();
+
+        void OnPhysics3DStart();
+        void OnPhysics3DStop();
 
         // Frame graph (§5.3): Game Update systems, then (after BeginScene on the main thread) the submission systems.
         void RegisterSystems();
@@ -97,6 +106,7 @@ namespace Nox
 
         // Systems (run as tasks).
         void UpdatePhysics2D();
+        void UpdatePhysics3D();
         void UpdateAnimators();
         void SubmitLights();
         void Submit2D();
@@ -118,6 +128,7 @@ namespace Nox
         float nearPlane, farPlane;
 
         b2WorldId m_PhysicsWorldID;
+        std::unique_ptr<IPhysics3DScene> m_Physics3DScene;
         bool m_IsRunning = false;
         bool m_IsPaused = false;
         int m_StepFrames = 0;

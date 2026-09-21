@@ -516,6 +516,10 @@ namespace Nox
             DisplayAddComponentEntry<RigidBody2DComponent>("Rigidbody 2D");
             DisplayAddComponentEntry<BoxCollider2DComponent>("Box Collider 2D");
             DisplayAddComponentEntry<CircleCollider2DComponent>("Circle Collider 2D");
+            DisplayAddComponentEntry<RigidBody3DComponent>("Rigidbody 3D");
+            DisplayAddComponentEntry<BoxCollider3DComponent>("Box Collider 3D");
+            DisplayAddComponentEntry<SphereCollider3DComponent>("Sphere Collider 3D");
+            DisplayAddComponentEntry<CapsuleCollider3DComponent>("Capsule Collider 3D");
             DisplayAddComponentEntry<TextComponent>("Text Component");
 
             ImGui::EndPopup();
@@ -1447,6 +1451,77 @@ namespace Nox
             ImGui::DragFloat("Friction", &component.Friction, 0.01f, 0.0f, 1.0f);
             ImGui::DragFloat("Restitution", &component.Restitution, 0.01f, 0.0f, 1.0f);
             ImGui::DragFloat("RestitutionThreshold", &component.RestitutionThreshold, 0.01f, 0.0f);
+        });
+
+        DrawComponent<RigidBody3DComponent>("Rigidbody 3D", entity, [](auto& component)
+        {
+            const char* bodyTypeStrings[] = { "Static", "Dynamic", "Kinematic" };
+            const char* currentBodyTypeString = bodyTypeStrings[(int)component.Type];
+            if (ImGui::BeginCombo("Body Type", currentBodyTypeString))
+            {
+                for (int i = 0; i < 3; i++)
+                {
+                    bool isSelected = currentBodyTypeString == bodyTypeStrings[i];
+                    if (ImGui::Selectable(bodyTypeStrings[i], isSelected))
+                    {
+                        currentBodyTypeString = bodyTypeStrings[i];
+                        component.Type = (RigidBody3DComponent::BodyType)i;
+                    }
+                    if (isSelected)
+                        ImGui::SetItemDefaultFocus();
+                }
+                ImGui::EndCombo();
+            }
+
+            const char* motionQualityStrings[] = { "Discrete", "LinearCast" };
+            const char* currentQualityString = motionQualityStrings[(int)component.Quality];
+            if (ImGui::BeginCombo("Collision Detection", currentQualityString))
+            {
+                for (int i = 0; i < 2; i++)
+                {
+                    bool isSelected = currentQualityString == motionQualityStrings[i];
+                    if (ImGui::Selectable(motionQualityStrings[i], isSelected))
+                    {
+                        currentQualityString = motionQualityStrings[i];
+                        component.Quality = (RigidBody3DComponent::MotionQuality)i;
+                    }
+                    if (isSelected)
+                        ImGui::SetItemDefaultFocus();
+                }
+                ImGui::EndCombo();
+            }
+
+            ImGui::DragFloat("Mass", &component.Mass, 0.1f, 0.001f, 10000.0f);
+            ImGui::DragFloat("Linear Damping", &component.LinearDamping, 0.01f, 0.0f, 10.0f);
+            ImGui::DragFloat("Angular Damping", &component.AngularDamping, 0.01f, 0.0f, 10.0f);
+            ImGui::DragFloat("Gravity Factor", &component.GravityFactor, 0.05f, -10.0f, 10.0f);
+            ImGui::Checkbox("Allow Sleeping", &component.AllowSleeping);
+            ImGui::Checkbox("Is Sensor", &component.IsSensor);
+        });
+
+        DrawComponent<BoxCollider3DComponent>("Box Collider 3D", entity, [](auto& component)
+        {
+            ImGui::DragFloat3("Half Extents", glm::value_ptr(component.HalfExtents), 0.05f, 0.001f, 1000.0f);
+            ImGui::DragFloat3("Offset", glm::value_ptr(component.Offset), 0.05f);
+            ImGui::DragFloat("Friction", &component.Friction, 0.01f, 0.0f, 1.0f);
+            ImGui::DragFloat("Restitution", &component.Restitution, 0.01f, 0.0f, 1.0f);
+        });
+
+        DrawComponent<SphereCollider3DComponent>("Sphere Collider 3D", entity, [](auto& component)
+        {
+            ImGui::DragFloat("Radius", &component.Radius, 0.05f, 0.001f, 1000.0f);
+            ImGui::DragFloat3("Offset", glm::value_ptr(component.Offset), 0.05f);
+            ImGui::DragFloat("Friction", &component.Friction, 0.01f, 0.0f, 1.0f);
+            ImGui::DragFloat("Restitution", &component.Restitution, 0.01f, 0.0f, 1.0f);
+        });
+
+        DrawComponent<CapsuleCollider3DComponent>("Capsule Collider 3D", entity, [](auto& component)
+        {
+            ImGui::DragFloat("Half Height", &component.HalfHeight, 0.05f, 0.001f, 1000.0f);
+            ImGui::DragFloat("Radius", &component.Radius, 0.05f, 0.001f, 1000.0f);
+            ImGui::DragFloat3("Offset", glm::value_ptr(component.Offset), 0.05f);
+            ImGui::DragFloat("Friction", &component.Friction, 0.01f, 0.0f, 1.0f);
+            ImGui::DragFloat("Restitution", &component.Restitution, 0.01f, 0.0f, 1.0f);
         });
 
         DrawComponent<TextComponent>("Text Renderer", entity, [](auto& component)

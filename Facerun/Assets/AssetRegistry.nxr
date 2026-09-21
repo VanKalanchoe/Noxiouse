@@ -187,6 +187,10 @@ AssetRegistry:
     FilePath: Models/bistro/Materials/bistro_LMBR_00001ad_Brushed_Metal.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_00001ad_Brushed_Metal.nmat
     Type: AssetType::Material
+  - Handle: 877947360057422372
+    FilePath: Models/DamagedHelmet/Materials/DamagedHelmet_Material_MR.nmat
+    SourceFilePath: Models/DamagedHelmet/Materials/DamagedHelmet_Material_MR.nmat
+    Type: AssetType::Material
   - Handle: 881640586537819156
     FilePath: Models/bistro/Materials/bistro_LMBR_0000034_wood_painted_red_bright.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_0000034_wood_painted_red_bright.nmat
@@ -275,6 +279,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 1234398083274900934
+    FilePath: Scenes/PinkCube1.nox
+    SourceFilePath: Scenes/PinkCube1.nox
+    Type: AssetType::Scene
   - Handle: 1253001061202009545
     FilePath: Models/bistro/objects/props/street/paris_stringlights_01/Textures/Paris_StringLights_01_spec.ntex
     SourceFilePath: Models/bistro/objects/props/street/paris_stringlights_01/Paris_StringLights_01_spec.dds
@@ -378,6 +386,10 @@ AssetRegistry:
   - Handle: 1636834280968946813
     FilePath: Models/bistro/Materials/bistro_LMBR_000009e_Glass.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_000009e_Glass.nmat
+    Type: AssetType::Material
+  - Handle: 1646749876385670687
+    FilePath: Models/BlenderBox/Materials/BlenderBox_Material.nmat
+    SourceFilePath: Models/BlenderBox/Materials/BlenderBox_Material.nmat
     Type: AssetType::Material
   - Handle: 1647768045424394028
     FilePath: Models/bistro/objects/props/bistro/paris_cashregister_01/Textures/paris_cashregister_buttons_01_ddna.ntex
@@ -593,6 +605,14 @@ AssetRegistry:
     Type: AssetType::Texture2D
     TextureSpec:
       Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 2968198516547220179
+    FilePath: EnvironmentMaps/shanghai_bund_4k_cube_bc6u.ntex
+    SourceFilePath: EnvironmentMaps/shanghai_bund_4k_cube_bc6u.ntex
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
       GenerateMips: true
       Flip: false
   - Handle: 3032361258545094408
@@ -835,6 +855,10 @@ AssetRegistry:
       Format: RGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 4479430644468698853
+    FilePath: Scenes/Sponza.nox
+    SourceFilePath: Scenes/Sponza.nox
+    Type: AssetType::Scene
   - Handle: 4498419739788744115
     FilePath: Models/bistro/Materials/bistro_LMBR_0000191_book_store.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_0000191_book_store.nmat
@@ -911,6 +935,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 4919497850191754476
+    FilePath: Models/BlenderBox/Meshes/BlenderBox.nmesh
+    SourceFilePath: Models/BlenderBox/BlenderBox.glb
+    Type: AssetType::Mesh
   - Handle: 4964566502457877956
     FilePath: Models/bistro/Materials/bistro_LMBR_000001f_concrete_smooth_02.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_000001f_concrete_smooth_02.nmat
@@ -1035,6 +1063,14 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 5516408533626223410
+    FilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_0.ntex
+    SourceFilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_0.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
   - Handle: 5575408787796586157
     FilePath: Models/bistro/textures/shared/tiling/pavement_cobblestone_02/Textures/cobble_02b_diff.ntex
     SourceFilePath: Models/bistro/textures/shared/tiling/pavement_cobblestone_02/cobble_02b_diff.dds
@@ -1059,6 +1095,10 @@ AssetRegistry:
     FilePath: Models/bistro/Materials/bistro_LMBR_00000a4_branches.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_00000a4_branches.nmat
     Type: AssetType::Material
+  - Handle: 5734910559290309323
+    FilePath: Scenes/AnimationTest.nox
+    SourceFilePath: Scenes/AnimationTest.nox
+    Type: AssetType::Scene
   - Handle: 5773137731117453669
     FilePath: Models/bistro/Materials/bistro_LMBR_0000148_Plastic_01.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_0000148_Plastic_01.nmat
@@ -1307,6 +1347,14 @@ AssetRegistry:
     FilePath: Models/bistro/Materials/bistro_LMBR_0000010_concrete.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_0000010_concrete.nmat
     Type: AssetType::Material
+  - Handle: 6836092634320526579
+    FilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_3.ntex
+    SourceFilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_3.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
   - Handle: 6855604565478961715
     FilePath: Models/bistro/Materials/bistro_LMBR_0000030_doors.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_0000030_doors.nmat
@@ -1319,6 +1367,10 @@ AssetRegistry:
     FilePath: Models/bistro/Materials/bistro_LMBR_0000196_fixtures.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_0000196_fixtures.nmat
     Type: AssetType::Material
+  - Handle: 6878158574345118519
+    FilePath: Scenes/Physics2D.nox
+    SourceFilePath: Scenes/Physics2D.nox
+    Type: AssetType::Scene
   - Handle: 6934977511427294311
     FilePath: Models/bistro/Materials/bistro_LMBR_000002f_bronze_01.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_000002f_bronze_01.nmat
@@ -1871,6 +1923,10 @@ AssetRegistry:
       Format: RGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 9981188124857255084
+    FilePath: Scenes/noxtest.nox
+    SourceFilePath: Scenes/noxtest.nox
+    Type: AssetType::Scene
   - Handle: 10002936036092355942
     FilePath: Models/bistro/Materials/bistro_LMBR_00000bf_Mesh.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_00000bf_Mesh.nmat
@@ -2331,6 +2387,14 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 12258341974996211322
+    FilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_2.ntex
+    SourceFilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_2.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
   - Handle: 12270079265049011008
     FilePath: Models/bistro/Materials/bistro_LMBR_0000082_Mesh.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_0000082_Mesh.nmat
@@ -2563,6 +2627,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 13311052582760913474
+    FilePath: Scenes/flat.nox
+    SourceFilePath: Scenes/flat.nox
+    Type: AssetType::Scene
   - Handle: 13341325133468084450
     FilePath: Models/bistro/Materials/bistro_LMBR_00000aa_Leaves.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_00000aa_Leaves.nmat
@@ -2687,6 +2755,14 @@ AssetRegistry:
     FilePath: Models/bistro/Materials/bistro_LMBR_0000149_Wheels_01.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_0000149_Wheels_01.nmat
     Type: AssetType::Material
+  - Handle: 13904574359743611589
+    FilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_4.ntex
+    SourceFilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_4.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
   - Handle: 13909165853060609615
     FilePath: Models/bistro/Materials/bistro_LMBR_00001ba_Paris_MenuSign_01.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_00001ba_Paris_MenuSign_01.nmat
@@ -2811,6 +2887,10 @@ AssetRegistry:
       Format: RGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 14324097489016979466
+    FilePath: Scenes/Texture.nox
+    SourceFilePath: Scenes/Texture.nox
+    Type: AssetType::Scene
   - Handle: 14330656126451119797
     FilePath: Models/bistro/textures/shared/tiling/pavement_cobblestone_03/Textures/pavement_cobblestone_03_diff.ntex
     SourceFilePath: Models/bistro/textures/shared/tiling/pavement_cobblestone_03/pavement_cobblestone_03_diff.dds
@@ -3087,6 +3167,14 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 15409548439614076777
+    FilePath: Scenes/lol.nox
+    SourceFilePath: Scenes/lol.nox
+    Type: AssetType::Scene
+  - Handle: 15453439469917328936
+    FilePath: Models/Box/Meshes/Box.nmesh
+    SourceFilePath: Models/Box/Box.glb
+    Type: AssetType::Mesh
   - Handle: 15463095652031595090
     FilePath: Models/bistro/Materials/bistro_LMBR_0000070_concrete_grooved.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_0000070_concrete_grooved.nmat
@@ -3407,6 +3495,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 16999452546101312315
+    FilePath: Models/Box/Materials/Box_Red.nmat
+    SourceFilePath: Models/Box/Materials/Box_Red.nmat
+    Type: AssetType::Material
   - Handle: 16999961553585349040
     FilePath: Models/bistro/Materials/bistro_LMBR_00001a8_Main.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_00001a8_Main.nmat
@@ -3603,6 +3695,14 @@ AssetRegistry:
       Format: RGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 17904947785449248306
+    FilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_1.ntex
+    SourceFilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_1.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
   - Handle: 17922403100958417819
     FilePath: Models/bistro/objects/props/bistro/paris_cotton_placemat_01/Textures/paris_cotton_placemat_01_spec.ntex
     SourceFilePath: Models/bistro/objects/props/bistro/paris_cotton_placemat_01/paris_cotton_placemat_01_spec.dds
@@ -3615,6 +3715,10 @@ AssetRegistry:
     FilePath: Models/bistro/Materials/bistro_LMBR_0000154_plants.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_0000154_plants.nmat
     Type: AssetType::Material
+  - Handle: 17999152237798768265
+    FilePath: Scenes/ShadowTest.nox
+    SourceFilePath: Scenes/ShadowTest.nox
+    Type: AssetType::Scene
   - Handle: 18010367682745357737
     FilePath: Models/bistro/Materials/bistro_LMBR_00001b1_Paris_Bartrim_01.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_00001b1_Paris_Bartrim_01.nmat
@@ -3715,6 +3819,10 @@ AssetRegistry:
     FilePath: Models/bistro/Materials/bistro_LMBR_00000b3_Foliage.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_00000b3_Foliage.nmat
     Type: AssetType::Material
+  - Handle: 18356751907954042576
+    FilePath: Models/DamagedHelmet/Meshes/DamagedHelmet.nmesh
+    SourceFilePath: Models/DamagedHelmet/DamagedHelmet.gltf
+    Type: AssetType::Mesh
   - Handle: 18359238702249507998
     FilePath: Models/bistro/Materials/bistro_LMBR_0000101_Paris_Painting_01.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_0000101_Paris_Painting_01.nmat

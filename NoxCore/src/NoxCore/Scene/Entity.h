@@ -193,6 +193,7 @@ namespace Nox
                 m_Scene != nullptr && // added myself
             m_Scene->m_Registry.valid(m_EntityHandle);// added myself
         }
+        bool IsValid() const { return (bool)*this; }
         operator entt::entity() const { return m_EntityHandle; }
         operator uint32_t() const { return (uint32_t)m_EntityHandle; }
         

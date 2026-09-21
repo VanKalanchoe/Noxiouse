@@ -29,3 +29,6 @@
 [submodule "NoxCore/vendors/bc7enc_rdo"]
 	path = NoxCore/vendors/bc7enc_rdo
 	url = https://github.com/richgel999/bc7enc_rdo
+[submodule "NoxCore/vendors/JoltPhysics"]
+	path = NoxCore/vendors/JoltPhysics
+	url = https://github.com/jrouwe/JoltPhysics.git

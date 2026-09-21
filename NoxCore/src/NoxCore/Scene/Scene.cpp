@@ -10,6 +10,7 @@
 #include "SceneGraph.h"
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Physics/Physics2D.h"
+#include "NoxCore/Physics/Physics3DScene.h"
 #include "NoxCore/Profiling/Profiler.h"
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Tasks/JobSystem.h"
@@ -96,6 +97,8 @@ namespace Nox
     {
         ((void)registry.storage<Component>(), ...);
     }
+
+    Scene::~Scene() = default;
 
     Scene::Scene()
     {
@@ -253,6 +256,7 @@ namespace Nox
     {
         m_IsRunning = true;
         OnPhysics2DStart();
+        OnPhysics3DStart();
         
         /*// Scripting
         {
@@ -273,6 +277,7 @@ namespace Nox
         m_IsRunning = false;
         
         OnPhysics2DStop();
+        OnPhysics3DStop();
         
         /*ScriptEngine::OnRuntimeStop();*/
     }
@@ -280,11 +285,13 @@ namespace Nox
     void Scene::OnSimulationStart()
     {
         OnPhysics2DStart();
+        OnPhysics3DStart();
     }
 
     void Scene::OnSimulationStop()
     {
         OnPhysics2DStop();
+        OnPhysics3DStop();
     }
 
     void Scene::OnUpdateRuntime(Timestep ts)
@@ -341,10 +348,13 @@ namespace Nox
 
     void Scene::RegisterSystems()
     {
-        // Game Update. Declared access orders them: Physics 2D and Animation both write transforms, propagation reads them.
+        // Game Update. Declared access orders them: Physics 2D/3D and Animation write transforms, propagation reads them.
         m_UpdateSystems.AddSystem("Physics 2D",
             ComponentAccess().Read<RigidBody2DComponent>().Write<TransformComponent, DirtyTransformComponent>(),
             [this]() { UpdatePhysics2D(); });
+        m_UpdateSystems.AddSystem("Physics 3D",
+            ComponentAccess().Read<RigidBody3DComponent>().Write<TransformComponent, DirtyTransformComponent>(),
+            [this]() { UpdatePhysics3D(); });
         m_UpdateSystems.AddSystem("Animation",
             ComponentAccess().Write<AnimatorComponent, TransformComponent, DirtyTransformComponent>(),
             [this]() { UpdateAnimators(); });
@@ -527,6 +537,14 @@ namespace Nox
             transform.Rotation.z = b2Rot_GetAngle(b2Body_GetRotation(body));
             dirty.isDirty = true;
         }
+    }
+
+    void Scene::UpdatePhysics3D()
+    {
+        if (!m_FrameInput.StepPhysics || !m_Physics3DScene)
+            return;
+
+        m_Physics3DScene->Step(m_FrameInput.Timestep);
     }
 
     void Scene::UpdateAnimators()
@@ -920,6 +938,17 @@ namespace Nox
     {
         b2DestroyWorld(m_PhysicsWorldID);
         m_PhysicsWorldID = b2_nullWorldId;
+    }
+
+    void Scene::OnPhysics3DStart()
+    {
+        m_Physics3DScene = IPhysics3DScene::Create(this);
+        m_Physics3DScene->Init();
+    }
+
+    void Scene::OnPhysics3DStop()
+    {
+        m_Physics3DScene.reset();
     }
     
     void Scene::SubmitLights()

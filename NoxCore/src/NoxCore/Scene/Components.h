@@ -329,6 +329,69 @@ namespace Nox
         CircleCollider2DComponent(const CircleCollider2DComponent&) = default;
     };
 
+    // 3D Physics
+
+    struct RigidBody3DComponent
+    {
+        enum class BodyType { Static = 0, Dynamic, Kinematic };
+        enum class MotionQuality { Discrete = 0, LinearCast };
+
+        BodyType Type = BodyType::Dynamic;
+        MotionQuality Quality = MotionQuality::Discrete;
+
+        float Mass = 1.0f;
+        float LinearDamping = 0.05f;
+        float AngularDamping = 0.05f;
+        float GravityFactor = 1.0f;
+
+        bool AllowSleeping = true;
+        bool IsSensor = false;
+        uint16_t Layer = 1; // Default to MOVING
+
+        // Storage for runtime (invalid in editor mode)
+        uint32_t RuntimeBodyID = 0xFFFFFFFF; // JPH::BodyID::cInvalidBodyID
+
+        RigidBody3DComponent() = default;
+        RigidBody3DComponent(const RigidBody3DComponent&) = default;
+    };
+
+    struct BoxCollider3DComponent
+    {
+        glm::vec3 HalfExtents = { 0.5f, 0.5f, 0.5f };
+        glm::vec3 Offset = { 0.0f, 0.0f, 0.0f };
+
+        float Friction = 0.5f;
+        float Restitution = 0.0f;
+
+        BoxCollider3DComponent() = default;
+        BoxCollider3DComponent(const BoxCollider3DComponent&) = default;
+    };
+
+    struct SphereCollider3DComponent
+    {
+        float Radius = 0.5f;
+        glm::vec3 Offset = { 0.0f, 0.0f, 0.0f };
+
+        float Friction = 0.5f;
+        float Restitution = 0.0f;
+
+        SphereCollider3DComponent() = default;
+        SphereCollider3DComponent(const SphereCollider3DComponent&) = default;
+    };
+
+    struct CapsuleCollider3DComponent
+    {
+        float HalfHeight = 0.5f;
+        float Radius = 0.5f;
+        glm::vec3 Offset = { 0.0f, 0.0f, 0.0f };
+
+        float Friction = 0.5f;
+        float Restitution = 0.0f;
+
+        CapsuleCollider3DComponent() = default;
+        CapsuleCollider3DComponent(const CapsuleCollider3DComponent&) = default;
+    };
+
     struct TextComponent
     {
         std::string TextString;
@@ -349,5 +412,6 @@ namespace Nox
         SpriteRendererComponent,
             CircleRendererComponent, CameraComponent, ScriptComponent,
             /*NativeScriptComponent,*/ RigidBody2DComponent, BoxCollider2DComponent,
-            CircleCollider2DComponent, TextComponent>;
+            CircleCollider2DComponent, RigidBody3DComponent, BoxCollider3DComponent,
+            SphereCollider3DComponent, CapsuleCollider3DComponent, TextComponent>;
 }

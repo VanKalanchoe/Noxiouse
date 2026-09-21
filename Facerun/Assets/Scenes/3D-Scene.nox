@@ -1,5 +1,36 @@
 Scene: Untitled
 Entities:
+  - Entity: 10901150202096118365
+    TagComponent:
+      Tag: Box
+    TransformComponent:
+      Translation: [-0.68438274, -1.1831706, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 15453439469917328936
+      Overrides:
+        - Node: 1
+          Translation: [-2.3465424, -0.09443661, 0.9455299]
+          Rotation: [-5.7417387e-12, 0, 0]
+          Scale: [1, 0.9999036, 0.9999036]
+  - Entity: 4789979932285905924
+    TagComponent:
+      Tag: Box
+    TransformComponent:
+      Translation: [-3.0913227, -1.4267642, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 15453439469917328936
   - Entity: 4510381988304553934
     TagComponent:
       Tag: Scene Camera
@@ -18,9 +49,7 @@ Entities:
         OrthographicFar: 1
       Primary: true
       FixedAspectRatio: false
-      # RTXPT Bistro reference defaults: auto exposure enabled, EV clamp [-4, 6].
       AutoExposure: true
-      # RTXPT bistro-programmer-art.scene.json uses +0.6 EV compensation.
       ExposureCompensation: 0.6
       AutoExposureMinEV: -4
       AutoExposureMaxEV: 6
@@ -33,7 +62,6 @@ Entities:
       Scale: [1, 1, 1]
     EnvironmentLightComponent:
       TexturePath: EnvironmentMaps/shanghai_bund_4k_cube_bc6u.dds
-      # RTXPT's BC6U environment baker stores radiance at 1/4 and applies x4 at runtime.
       RadianceScale: [4, 4, 4]
       Rotation: 0
       Enabled: true

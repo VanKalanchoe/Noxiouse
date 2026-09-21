@@ -269,6 +269,7 @@ NoxCore/vendors/*
 !NoxCore/vendors/tracy/
 !NoxCore/vendors/OffsetAllocator/
 !NoxCore/vendors/bc7enc_rdo/
+!NoxCore/vendors/JoltPhysics/
 *.ntex
 *.nmesh
 *.hash
