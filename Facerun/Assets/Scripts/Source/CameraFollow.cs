@@ -5,7 +5,7 @@ namespace Facerun;
 
 public sealed class CameraFollow : EntityBehaviour
 {
-    [Expose] public Entity Target;
+    [Expose, DisallowSelf] public Entity Target;
     [Expose] public float Distance = 10.0f;
     [Expose] public float Height = 0.0f;
 
@@ -14,6 +14,11 @@ public sealed class CameraFollow : EntityBehaviour
         if (!Target.IsValid)
         {
             Log.Info("CameraFollow has no Target assigned");
+            return;
+        }
+        if (Target.ID == EntityID)
+        {
+            Log.Info("CameraFollow cannot target its own entity");
             return;
         }
 
@@ -28,13 +33,15 @@ public sealed class CameraFollow : EntityBehaviour
 
     private void UpdateCamera()
     {
-        if (!Target.IsValid)
+        if (!Target.IsValid || Target.ID == EntityID)
             return;
 
-        Vector3 targetPosition = Target.WorldTransform.Position;
+        TransformComponent targetTransform = Target.GetComponent<TransformComponent>();
+        TransformComponent cameraTransform = GetComponent<TransformComponent>();
+        Vector3 targetPosition = targetTransform.World.Position;
         Vector3 cameraPosition = targetPosition + new Vector3(0.0f, Height, Distance);
-        Transform cameraTransform = WorldTransform;
-        cameraTransform.Position = cameraPosition;
+        Transform cameraWorld = cameraTransform.World;
+        cameraWorld.Position = cameraPosition;
 
         // Gameplay camera math stays in managed script code. Nox cameras look
         // along local -Z and use local +Y as up.
@@ -47,9 +54,9 @@ public sealed class CameraFollow : EntityBehaviour
             direction *= (1.0f / length);
             float pitch = MathF.Asin(Math.Clamp(direction.Y, -1.0f, 1.0f));
             float yaw = MathF.Atan2(-direction.X, -direction.Z);
-            cameraTransform.Rotation = new Vector3(pitch, yaw, 0.0f);
+            cameraWorld.Rotation = new Vector3(pitch, yaw, 0.0f);
         }
 
-        WorldTransform = cameraTransform;
+        cameraTransform.World = cameraWorld;
     }
 }

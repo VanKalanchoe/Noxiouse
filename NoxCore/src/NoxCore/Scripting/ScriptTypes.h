@@ -29,5 +29,6 @@ namespace Nox
         std::string Name;
         ScriptFieldType Type;
         ScriptValue DefaultValue;
+        bool DisallowSelf = false;
     };
 }

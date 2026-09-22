@@ -117,7 +117,11 @@ Implemented calls:
 
 - `Log.Info`
 - `Input.IsKeyDown`
-- `EntityBehaviour.LocalTransform` and `WorldTransform` get/set
+- Generic `GetComponent<T>()`, `HasComponent<T>()`, and `TryGetComponent<T>()`
+  access from both `EntityBehaviour` and `Entity`
+- `TransformComponent` explicit `Local`/`World` state and
+  `LocalPosition`/`WorldPosition`, `LocalRotation`/`WorldRotation`, and
+  `LocalScale`/`WorldScale` properties
 - Relative child lookup with `FindChild("Node")` or `FindChild("Body/Door")`
 - Exposed entity references with `[Expose] public Entity Target;`
   - The Script inspector discovers exposed `Entity` fields through Coral reflection.
@@ -145,14 +149,26 @@ public sealed class HouseController : EntityBehaviour
         if (!Door.IsValid)
             return;
 
-        Transform transform = Door.LocalTransform;
-        transform.Rotation.Y += deltaTime;
-        Door.LocalTransform = transform;
+            TransformComponent doorTransform = Door.GetComponent<TransformComponent>();
+            Transform transform = doorTransform.Local;
+            transform.Rotation.Y += deltaTime;
+            doorTransform.Local = transform;
     }
 }
 ```
 
 Assign `Door` from the Script component using its entity combo, or drag an entity from the Scene Hierarchy onto the field.
+
+Entity fields may opt out of self-reference:
+
+```csharp
+[Expose, DisallowSelf] public Entity Target;
+```
+
+The inspector disables the behaviour's own entity for that field, rejects a
+self drag/drop, and displays existing invalid self-references as an error.
+Scripts must still validate semantic requirements at runtime; `CameraFollow`
+does so before reading or changing transforms.
 
 Ordinary values work the same way:
 
@@ -179,6 +195,12 @@ public sealed class DoorController : EntityBehaviour
 Coral binds native calls to private static C# function-pointer fields
 (`delegate*`), not to `[MethodImpl(InternalCall)]` extern methods. Managed
 wrappers own string conversion and expose ordinary safe methods to game code.
+
+`GetComponent<T>()` is the required-component path and throws a clear exception
+when the component is absent. Use `TryGetComponent<T>()` for optional
+components. Managed component objects are lightweight entity-ID wrappers; ECS
+storage remains native. New script component APIs extend this common mechanism
+instead of adding component-specific methods directly to `EntityBehaviour`.
 
 Transform mutation marks the scene graph transform dirty. `Vector3` uses an
 explicit sequential layout compatible with the native three-float struct.

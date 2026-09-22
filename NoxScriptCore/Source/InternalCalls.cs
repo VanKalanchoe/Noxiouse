@@ -9,6 +9,7 @@ internal static unsafe class InternalCalls
     private static delegate*<int, uint> Input_IsKeyDown;
     private static delegate*<NativeString, ulong> Entity_FindByName;
     private static delegate*<ulong, NativeString, ulong> Entity_FindChild;
+    private static delegate*<ulong, int, uint> Entity_HasComponent;
     private static delegate*<ulong, Transform*, void> Transform_GetLocal;
     private static delegate*<ulong, Transform*, void> Transform_SetLocal;
     private static delegate*<ulong, Transform*, void> Transform_GetWorld;
@@ -34,6 +35,9 @@ internal static unsafe class InternalCalls
         using NativeString nativePath = new(path);
         return Entity_FindChild(entityID, nativePath);
     }
+
+    internal static bool HasComponent(ulong entityID, ComponentType type) =>
+        Entity_HasComponent(entityID, (int)type) != 0;
 
     internal static Transform GetLocalTransform(ulong entityID)
     {

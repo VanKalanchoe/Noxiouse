@@ -17,8 +17,7 @@ public sealed class WASDMovement : EntityBehaviour
         if (Input.IsKeyDown(KeyCode.A)) direction.X -= 1.0f;
         if (Input.IsKeyDown(KeyCode.D)) direction.X += 1.0f;
 
-        Transform transform = LocalTransform;
-        transform.Position += direction * (Speed * deltaTime);
-        LocalTransform = transform;
+        TransformComponent transform = GetComponent<TransformComponent>();
+        transform.LocalPosition += direction * (Speed * deltaTime);
     }
 }

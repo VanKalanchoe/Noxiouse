@@ -1265,7 +1265,7 @@ namespace Nox
             }
         });
 
-        DrawComponent<ScriptComponent>("Script", entity, [this](auto& component)
+        DrawComponent<ScriptComponent>("Script", entity, [this, entity](auto& component)
         {
             for (size_t index = 0; index < component.ClassNames.size(); ++index)
             {
@@ -1325,7 +1325,10 @@ namespace Nox
                         else if (reference.Entity != 0)
                             referencedEntity = m_Context->GetEntityByUUID(reference.Entity);
 
-                        const std::string preview = referencedEntity ? referencedEntity.GetName() : "None";
+                        const bool invalidSelfReference = field.DisallowSelf && referencedEntity == entity;
+                        const std::string preview = invalidSelfReference
+                            ? "Self (not allowed)"
+                            : (referencedEntity ? referencedEntity.GetName() : "None");
                         ImGui::TextUnformatted(fieldName.c_str());
                         ImGui::SameLine(110.0f);
                         ImGui::SetNextItemWidth(-55.0f);
@@ -1335,6 +1338,8 @@ namespace Nox
                             {
                                 Entity candidate(handle, m_Context.get());
                                 ImGui::PushID(static_cast<int>(static_cast<uint32_t>(handle)));
+                                const bool rejectCandidate = field.DisallowSelf && candidate == entity;
+                                if (rejectCandidate) ImGui::BeginDisabled();
                                 if (ImGui::Selectable(candidate.GetName().c_str(), candidate == referencedEntity))
                                 {
                                     reference = {};
@@ -1349,6 +1354,7 @@ namespace Nox
                                         reference.Entity = candidate.GetUUID();
                                     }
                                 }
+                                if (rejectCandidate) ImGui::EndDisabled();
                                 ImGui::PopID();
                             }
                             ImGui::EndCombo();
@@ -1359,6 +1365,11 @@ namespace Nox
                             if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("SCENE_HIERARCHY_ENTITY"))
                             {
                                 Entity candidate = m_Context->GetEntityByUUID(*static_cast<const UUID*>(payload->Data));
+                                if (field.DisallowSelf && candidate == entity)
+                                {
+                                    ImGui::EndDragDropTarget();
+                                    continue;
+                                }
                                 reference = {};
                                 if (candidate && candidate.HasComponent<ModelNodeComponent>())
                                 {
@@ -1373,6 +1384,9 @@ namespace Nox
                             }
                             ImGui::EndDragDropTarget();
                         }
+
+                        if (invalidSelfReference)
+                            ImGui::TextColored({0.9f, 0.2f, 0.3f, 1.0f}, "Target cannot reference this entity");
 
                         ImGui::SameLine();
                         if (ImGui::SmallButton(("X##" + fieldName).c_str()))

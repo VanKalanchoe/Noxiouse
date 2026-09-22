@@ -71,6 +71,19 @@ namespace Nox
             return current ? static_cast<uint64_t>(current.GetUUID()) : 0;
         }
 
+        Coral::Bool32 HasComponent(uint64_t entityID, int32_t componentType)
+        {
+            if (!s_Scene) return false;
+            Entity entity = s_Scene->GetEntityByUUID(UUID(entityID));
+            if (!entity) return false;
+
+            switch (componentType)
+            {
+                case 1: return entity.HasComponent<TransformComponent>();
+                default: return false;
+            }
+        }
+
         ManagedTransform ToManagedTransform(const TransformComponent& transform)
         {
             return {
@@ -185,13 +198,20 @@ namespace Nox
             for (Coral::FieldInfo field : type->GetFields())
             {
                 bool isExposed = false;
+                bool disallowSelf = false;
                 for (Coral::Attribute attribute : field.GetAttributes())
-                    if (attribute.GetType().GetFullName() == "Nox.ExposeAttribute")
+                {
+                    const std::string attributeName(attribute.GetType().GetFullName());
+                    if (attributeName == "Nox.ExposeAttribute")
                         isExposed = true;
+                    else if (attributeName == "Nox.DisallowSelfAttribute")
+                        disallowSelf = true;
+                }
                 if (!isExposed) continue;
 
                 const std::string name(field.GetName());
                 const std::string fieldType(field.GetType().GetFullName());
+                const size_t fieldCountBefore = exposed.size();
                 if (fieldType == "System.Boolean") exposed.push_back({name, ScriptFieldType::Bool, defaults.GetFieldValue<bool>(name)});
                 else if (fieldType == "System.Int32") exposed.push_back({name, ScriptFieldType::Int, defaults.GetFieldValue<int32_t>(name)});
                 else if (fieldType == "System.UInt32") exposed.push_back({name, ScriptFieldType::UInt, defaults.GetFieldValue<uint32_t>(name)});
@@ -207,6 +227,8 @@ namespace Nox
                 }
                 else if (fieldType == "Nox.Entity") exposed.push_back({name, ScriptFieldType::Entity, UUID(0)});
                 else NOX_CORE_WARN("Unsupported [Expose] field '{}.{}' of type '{}'", className, name, fieldType);
+                if (exposed.size() != fieldCountBefore)
+                    exposed.back().DisallowSelf = disallowSelf;
             }
             defaults.Destroy();
         }
@@ -242,6 +264,7 @@ namespace Nox
         assembly.AddInternalCall("Nox.InternalCalls", "Input_IsKeyDown", reinterpret_cast<void*>(&IsKeyDown));
         assembly.AddInternalCall("Nox.InternalCalls", "Entity_FindByName", reinterpret_cast<void*>(&FindEntityByName));
         assembly.AddInternalCall("Nox.InternalCalls", "Entity_FindChild", reinterpret_cast<void*>(&FindChild));
+        assembly.AddInternalCall("Nox.InternalCalls", "Entity_HasComponent", reinterpret_cast<void*>(&HasComponent));
         assembly.AddInternalCall("Nox.InternalCalls", "Transform_GetLocal", reinterpret_cast<void*>(&GetLocalTransform));
         assembly.AddInternalCall("Nox.InternalCalls", "Transform_SetLocal", reinterpret_cast<void*>(&SetLocalTransform));
         assembly.AddInternalCall("Nox.InternalCalls", "Transform_GetWorld", reinterpret_cast<void*>(&GetWorldTransform));
