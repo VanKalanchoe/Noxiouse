@@ -13,6 +13,7 @@
 #include "NoxCore/Physics/Physics3DScene.h"
 #include "NoxCore/Profiling/Profiler.h"
 #include "NoxCore/Project/Project.h"
+#include "NoxCore/Scripting/ScriptEngine.h"
 #include "NoxCore/Tasks/JobSystem.h"
 
 namespace Nox
@@ -258,7 +259,7 @@ namespace Nox
         OnPhysics2DStart();
         OnPhysics3DStart();
         
-        /*// Scripting
+        // Scripting
         {
             ScriptEngine::OnRuntimeStart(this);
             // Instantiate all script entities
@@ -269,17 +270,16 @@ namespace Nox
                 Entity entity = { e, this };
                 ScriptEngine::OnCreateEntity(entity);
             }
-        }*/
+        }
     }
 
     void Scene::OnRuntimeStop()
     {
         m_IsRunning = false;
         
+        ScriptEngine::OnRuntimeStop();
         OnPhysics2DStop();
         OnPhysics3DStop();
-        
-        /*ScriptEngine::OnRuntimeStop();*/
     }
 
     void Scene::OnSimulationStart()
@@ -297,6 +297,12 @@ namespace Nox
     void Scene::OnUpdateRuntime(Timestep ts)
     {
         const bool step = !m_IsPaused || m_StepFrames-- > 0;
+        if (step)
+        {
+            auto scripts = m_Registry.view<ScriptComponent>();
+            for (auto entity : scripts)
+                ScriptEngine::OnUpdateEntity(Entity(entity, this), static_cast<float>(ts));
+        }
         RunUpdateSystems(ts, step, step);
         SyncGpuScene();
 

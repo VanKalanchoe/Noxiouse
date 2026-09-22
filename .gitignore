@@ -166,6 +166,7 @@ $RECYCLE.BIN/
 
 # CMake build directories
 cmake-build-*/
+Facerun/Assets/Scripts/Binaries/
 
 # File-based project format
 *.iws

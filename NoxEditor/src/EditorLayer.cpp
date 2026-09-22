@@ -8,6 +8,7 @@
 #include <imgui.h>
 #include <imgui_internal.h>// For Docking
 #include <ImGuizmo.h>
+#include <SDL3/SDL_filesystem.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/type_ptr.hpp>  // for pointer to matrix or vector
 
@@ -22,6 +23,7 @@
 #include "NoxCore/Profiling/StatsOverlayLayer.h"
 #include "NoxCore/Profiling/StatsReport.h"
 #include "NoxCore/Project/Project.h"
+#include "NoxCore/Scripting/ScriptEngine.h"
 #include "NoxCore/Utils/Utils.h"
 
 namespace Nox
@@ -75,11 +77,16 @@ namespace Nox
         m_EditorCamera = EditorCamera(30.0f, 1.778f, 0.01f, 1000.0f);
 
         Project::GetActive()->GetEditorAssetManager()->Init();
+
+        if (!ScriptEngine::Initialize(SDL_GetBasePath()))
+            NOX_CORE_ERROR("Failed to initialize the .NET scripting backend");
     }
 
     EditorLayer::~EditorLayer()
     {
         NOX_CORE_INFO("EditorLayer Shutdown");
+
+        ScriptEngine::Shutdown();
 
         m_Font->ReleaseDefault(); // Since Editor Layer since static dies After renderer not needed for components
 
@@ -323,7 +330,7 @@ namespace Nox
             {
                 if (ImGui::MenuItem("Reload assembly", "Ctrl+R"))
                 {
-                    /*ScriptEngine::ReloadAssembly();*/ // otherwise it thinkgs its exectuing endmenu if you dont use {}
+                    ScriptEngine::ReloadAssembly();
                 }
 
                 ImGui::EndMenu();
@@ -1517,7 +1524,7 @@ namespace Nox
         case SDL_SCANCODE_R:
             if (control)
             {
-                /*ScriptEngine::ReloadAssembly();*/
+                ScriptEngine::ReloadAssembly();
             }
             else
             {
@@ -1707,8 +1714,6 @@ namespace Nox
     {
         if (Project::Load(path))
         {
-            /*ScriptEngine::Init();*/
-
             AssetHandle startScene = Project::GetActive()->GetConfig().StartScene;
             if (startScene)
                 OpenScene(startScene);

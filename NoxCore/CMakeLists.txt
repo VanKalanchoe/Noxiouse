@@ -157,7 +157,7 @@ file(GLOB_RECURSE NOXCORE_FILES
 
 add_library(${PROJECT_NAME} STATIC ${NOXCORE_FILES} ${IMGUI_SOURCES} ${IMGUIZMO_SOURCES} ${TINYGLTF_SOURCE} ${MESHOPTIMIZER_SOURCES} ${OFFSETALLOCATOR_SOURCES} ${BC7ENC_SOURCES} ${RTXDI_SOURCES}) #main file here
 
-target_link_libraries (${PROJECT_NAME} PUBLIC Vulkan::cppm SDL3::SDL3 glm::glm spdlog::spdlog Slang::slang EnTT::EnTT xxHash::xxhash yaml-cpp::yaml-cpp box2d::box2d msdf-atlas-gen::msdf-atlas-gen tinyobjloader::tinyobjloader "${STREAMLINE_LIB}" ${NRD_LIBS} Jolt)
+target_link_libraries (${PROJECT_NAME} PUBLIC Coral.Native Vulkan::cppm SDL3::SDL3 glm::glm spdlog::spdlog Slang::slang EnTT::EnTT xxHash::xxhash yaml-cpp::yaml-cpp box2d::box2d msdf-atlas-gen::msdf-atlas-gen tinyobjloader::tinyobjloader "${STREAMLINE_LIB}" ${NRD_LIBS} Jolt)
 # Add here vendors
 target_include_directories (${PROJECT_NAME} SYSTEM PRIVATE ${STB_INCLUDEDIR} ${CMAKE_CURRENT_SOURCE_DIR}/vendors/taskflow ${CMAKE_CURRENT_SOURCE_DIR}/vendors/VulkanMemoryAllocator-Hpp/include ${CMAKE_CURRENT_SOURCE_DIR}/vendors/VulkanMemoryAllocator-Hpp/VulkanMemoryAllocator/include ${IMGUI_DIR}/backends)
 

@@ -2395,6 +2395,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 12260817611834909638
+    FilePath: Scenes/ScriptTest.nox
+    SourceFilePath: Scenes/ScriptTest.nox
+    Type: AssetType::Scene
   - Handle: 12270079265049011008
     FilePath: Models/bistro/Materials/bistro_LMBR_0000082_Mesh.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_0000082_Mesh.nmat
@@ -2675,6 +2679,10 @@ AssetRegistry:
     FilePath: Models/bistro/Materials/bistro_LMBR_000013e_Metal_Chrome_01.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_000013e_Metal_Chrome_01.nmat
     Type: AssetType::Material
+  - Handle: 13653599223583175047
+    FilePath: Models/Box/Materials/Box_Red_Instance_7482883849215952778.nmat
+    SourceFilePath: Models/Box/Materials/Box_Red_Instance_7482883849215952778.nmat
+    Type: AssetType::Material
   - Handle: 13677563370493825299
     FilePath: Models/bistro/Materials/bistro_LMBR_0000020_glass_clean_01.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_0000020_glass_clean_01.nmat
@@ -2867,6 +2875,14 @@ AssetRegistry:
     FilePath: Models/bistro/Materials/bistro_LMBR_0000106_Ceramic.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_0000106_Ceramic.nmat
     Type: AssetType::Material
+  - Handle: 14258130214984109518
+    FilePath: EnvironmentMaps/shanghai_bund_4k_cube_bc6u.dds
+    SourceFilePath: EnvironmentMaps/shanghai_bund_4k_cube_bc6u.dds
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
   - Handle: 14260579344708758621
     FilePath: Models/bistro/textures/shared/tiling/ground_wet_01/Textures/ground_wet_01_ddna.ntex
     SourceFilePath: Models/bistro/textures/shared/tiling/ground_wet_01/ground_wet_01_ddna.dds

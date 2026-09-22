@@ -1,0 +1,17 @@
+using Nox;
+
+namespace {{NAMESPACE}};
+
+/// <summary>
+/// A behaviour attached to an entity in a Nox scene.
+/// </summary>
+public sealed class {{CLASS_NAME}} : EntityBehaviour
+{
+    protected override void OnCreate()
+    {
+    }
+
+    protected override void OnUpdate(float deltaTime)
+    {
+    }
+}

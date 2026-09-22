@@ -1,10 +1,16 @@
 #include "ContentBrowserPanel.h"
 
+#include <fstream>
+#include <iterator>
+
 #include <algorithm>
+#include <cctype>
 #include <cstring>
 
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Asset/TextureImporter.h"
+#include "NoxCore/Core/Application.h"
+#include "NoxCore/Core/Log.h"
 #include "NoxCore/Utils/Utils.h"
 
 namespace Nox
@@ -141,6 +147,9 @@ namespace Nox
             }
         }
         ImGui::SameLine();
+        if (ImGui::Button("New C# Script"))
+            m_ShowCreateScriptModal = true;
+        ImGui::SameLine();
         if (m_CurrentDirectory != m_BaseDirectory)
         {
             if (ImGui::Button("<"))
@@ -216,6 +225,95 @@ namespace Nox
         ImGui::Columns(1);
         ImGui::SliderFloat("Thumbnail Size", &thumbnailSize, 48.0f, 256.0f);
         ImGui::SliderFloat("Padding", &padding, 0.0f, 32.0f);
+
+        if (m_ShowCreateScriptModal)
+        {
+            ImGui::OpenPopup("Create C# Script");
+            m_ShowCreateScriptModal = false;
+        }
+        if (ImGui::BeginPopupModal("Create C# Script", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+        {
+            ImGui::InputText("Class name", m_NewScriptName, sizeof(m_NewScriptName));
+            const std::string className = m_NewScriptName;
+            std::string scriptNamespace = m_Project->GetConfig().Name;
+            std::replace_if(scriptNamespace.begin(), scriptNamespace.end(), [](unsigned char character)
+            {
+                return !std::isalnum(character) && character != '_';
+            }, '_');
+            if (scriptNamespace.empty()) scriptNamespace = "Game";
+            if (std::isdigit(static_cast<unsigned char>(scriptNamespace.front())))
+                scriptNamespace.insert(scriptNamespace.begin(), '_');
+            const bool validName = !className.empty() &&
+                (std::isalpha(static_cast<unsigned char>(className[0])) || className[0] == '_') &&
+                std::all_of(className.begin() + 1, className.end(), [](unsigned char character)
+                {
+                    return std::isalnum(character) || character == '_';
+                });
+            const std::filesystem::path sourceDirectory = m_BaseDirectory / "Scripts/Source";
+            const std::filesystem::path scriptPath = sourceDirectory / (className + ".cs");
+            const bool scriptAlreadyExists = std::filesystem::exists(scriptPath);
+            const bool disableCreate = !validName || scriptAlreadyExists;
+            if (!validName)
+                ImGui::TextColored({0.9f, 0.2f, 0.3f, 1.0f}, "Enter a valid C# class name");
+            else if (scriptAlreadyExists)
+                ImGui::TextColored({0.9f, 0.2f, 0.3f, 1.0f}, "A script with this name already exists");
+
+            if (disableCreate) ImGui::BeginDisabled();
+            if (ImGui::Button("Create"))
+            {
+                std::error_code error;
+                std::filesystem::create_directories(sourceDirectory, error);
+                const std::filesystem::path projectTemplate =
+                    m_BaseDirectory / "Scripts/Templates/CSharpBehaviour.cs.template";
+                const std::filesystem::path editorTemplate =
+                    std::filesystem::path(Application::GetExecutableRootPath()) /
+                    "assets/Templates/CSharpBehaviour.cs.template";
+                const std::filesystem::path workingDirectoryTemplate =
+                    "assets/Templates/CSharpBehaviour.cs.template";
+                const std::filesystem::path templatePath = std::filesystem::exists(projectTemplate)
+                    ? projectTemplate
+                    : (std::filesystem::exists(editorTemplate) ? editorTemplate : workingDirectoryTemplate);
+
+                std::ifstream templateFile(templatePath, std::ios::binary);
+                const bool templateLoaded = templateFile.is_open();
+                std::string contents((std::istreambuf_iterator<char>(templateFile)),
+                                     std::istreambuf_iterator<char>());
+                const auto replaceAll = [](std::string& text, std::string_view token, std::string_view replacement)
+                {
+                    for (size_t position = 0; (position = text.find(token, position)) != std::string::npos;)
+                    {
+                        text.replace(position, token.size(), replacement);
+                        position += replacement.size();
+                    }
+                };
+                replaceAll(contents, "{{NAMESPACE}}", scriptNamespace);
+                replaceAll(contents, "{{CLASS_NAME}}", className);
+
+                std::ofstream output(scriptPath, std::ios::binary);
+                if (templateLoaded && output)
+                    output.write(contents.data(), static_cast<std::streamsize>(contents.size()));
+                output.close();
+                if (templateLoaded && output)
+                {
+                    NOX_CORE_INFO("Created C# script '{}' from template '{}'",
+                                  scriptPath.string(), templatePath.string());
+                    RefreshAssetTree();
+                    constexpr char defaultScriptName[] = "NewBehaviour";
+                    std::copy_n(defaultScriptName, sizeof(defaultScriptName), m_NewScriptName);
+                    ImGui::CloseCurrentPopup();
+                }
+                else
+                {
+                    std::filesystem::remove(scriptPath, error);
+                    NOX_CORE_ERROR("Failed to create C# script '{}' from template '{}'",
+                                   scriptPath.string(), templatePath.string());
+                }
+            }
+            if (disableCreate) ImGui::EndDisabled();
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+        }
 
         if (m_ShowImportModal)
         {

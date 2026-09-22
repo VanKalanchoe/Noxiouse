@@ -1,0 +1,64 @@
+Scene: Untitled
+Entities:
+  - Entity: 18029916803228656875
+    TagComponent:
+      Tag: Scene Camera
+    TransformComponent:
+      Translation: [0, 0, 10]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    EnvironmentLightComponent:
+      TexturePath: EnvironmentMaps/shanghai_bund_4k_cube_bc6u.dds
+      RadianceScale: [1, 1, 1]
+      Rotation: 0
+      Enabled: true
+    CameraComponent:
+      Camera:
+        ProjectionType: 0
+        PerspectiveFOV: 0.5235988
+        PerspectiveNear: 0.1
+        PerspectiveFar: 1000
+        OrthographicSize: 10
+        OrthographicNear: -1
+        OrthographicFar: 1
+      Primary: true
+      FixedAspectRatio: false
+      AutoExposure: false
+      ExposureCompensation: 0
+      AutoExposureMinEV: -16
+      AutoExposureMaxEV: 16
+    ScriptComponent:
+      Classes:
+        - Facerun.CameraFollow
+      EntityReferences:
+        []
+      FieldOverrides:
+        []
+  - Entity: 6937070449808736981
+    TagComponent:
+      Tag: BlenderBox
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    ModelInstanceComponent:
+      Model: 4919497850191754476
+      Overrides:
+        - Node: 0
+          Translation: [-2.165097, 0, 0]
+          Rotation: [0, 0, 0]
+          Scale: [1, 1, 1]
+    ScriptComponent:
+      Classes:
+        - Facerun.WASDMovement
+      EntityReferences:
+        []
+      FieldOverrides:
+        - Class: Facerun.WASDMovement
+          Field: Speed
+          Type: Float
+          Value: 10

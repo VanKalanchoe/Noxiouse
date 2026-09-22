@@ -459,6 +459,66 @@ namespace Nox
             out << YAML::EndMap; // CameraComponent
         }
 
+        if (entity.HasComponent<ScriptComponent>())
+        {
+            const auto& scriptComponent = entity.GetComponent<ScriptComponent>();
+            out << YAML::Key << "ScriptComponent";
+            out << YAML::BeginMap;
+            out << YAML::Key << "Classes" << YAML::Value << YAML::BeginSeq;
+            for (const std::string& className : scriptComponent.ClassNames)
+                out << className;
+            out << YAML::EndSeq;
+
+            out << YAML::Key << "EntityReferences" << YAML::Value << YAML::BeginSeq;
+            for (const auto& [className, fields] : scriptComponent.EntityReferences)
+            {
+                for (const auto& [fieldName, reference] : fields)
+                {
+                    out << YAML::BeginMap;
+                    out << YAML::Key << "Class" << YAML::Value << className;
+                    out << YAML::Key << "Field" << YAML::Value << fieldName;
+                    if (reference.IsModelNode())
+                    {
+                        out << YAML::Key << "ModelInstance" << YAML::Value << reference.ModelInstance;
+                        out << YAML::Key << "ModelNode" << YAML::Value << reference.ModelNodeIndex;
+                    }
+                    else
+                    {
+                        out << YAML::Key << "Entity" << YAML::Value << reference.Entity;
+                    }
+                    out << YAML::EndMap;
+                }
+            }
+            out << YAML::EndSeq;
+
+            out << YAML::Key << "FieldOverrides" << YAML::Value << YAML::BeginSeq;
+            for (const auto& [className, fields] : scriptComponent.FieldOverrides)
+            {
+                for (const auto& [fieldName, value] : fields)
+                {
+                    out << YAML::BeginMap;
+                    out << YAML::Key << "Class" << YAML::Value << className;
+                    out << YAML::Key << "Field" << YAML::Value << fieldName;
+                    std::visit([&](const auto& data)
+                    {
+                        using T = std::decay_t<decltype(data)>;
+                        if constexpr (std::is_same_v<T, bool>) out << YAML::Key << "Type" << YAML::Value << "Bool" << YAML::Key << "Value" << YAML::Value << data;
+                        else if constexpr (std::is_same_v<T, int32_t>) out << YAML::Key << "Type" << YAML::Value << "Int" << YAML::Key << "Value" << YAML::Value << data;
+                        else if constexpr (std::is_same_v<T, uint32_t>) out << YAML::Key << "Type" << YAML::Value << "UInt" << YAML::Key << "Value" << YAML::Value << data;
+                        else if constexpr (std::is_same_v<T, int64_t>) out << YAML::Key << "Type" << YAML::Value << "Long" << YAML::Key << "Value" << YAML::Value << data;
+                        else if constexpr (std::is_same_v<T, uint64_t>) out << YAML::Key << "Type" << YAML::Value << "ULong" << YAML::Key << "Value" << YAML::Value << data;
+                        else if constexpr (std::is_same_v<T, float>) out << YAML::Key << "Type" << YAML::Value << "Float" << YAML::Key << "Value" << YAML::Value << data;
+                        else if constexpr (std::is_same_v<T, double>) out << YAML::Key << "Type" << YAML::Value << "Double" << YAML::Key << "Value" << YAML::Value << data;
+                        else if constexpr (std::is_same_v<T, std::string>) out << YAML::Key << "Type" << YAML::Value << "String" << YAML::Key << "Value" << YAML::Value << data;
+                        else if constexpr (std::is_same_v<T, glm::vec3>) out << YAML::Key << "Type" << YAML::Value << "Vector3" << YAML::Key << "Value" << YAML::Value << data;
+                    }, value);
+                    out << YAML::EndMap;
+                }
+            }
+            out << YAML::EndSeq;
+            out << YAML::EndMap;
+        }
+
         /*if (entity.HasComponent<ScriptComponent>())
         {
             auto& scriptComponent = entity.GetComponent<ScriptComponent>();
@@ -668,6 +728,8 @@ namespace Nox
     void SceneSerializer::Serialize(const std::filesystem::path& filepath)
     {
         YAML::Emitter out;
+        size_t scriptComponentCount = 0;
+        size_t scriptClassCount = 0;
         out << YAML::BeginMap; // Corrected: No parentheses
         out << YAML::Key << "Scene" << YAML::Value << "Untitled";
         out << YAML::Key << "Entities" << YAML::Value << YAML::BeginSeq; // Corrected: No parentheses
@@ -677,21 +739,35 @@ namespace Nox
             if (!entity || IsSpawnedModelNode(*m_Scene, entity.GetUUID()))
                 return;
 
+            if (entity.HasComponent<ScriptComponent>())
+            {
+                ++scriptComponentCount;
+                scriptClassCount += entity.GetComponent<ScriptComponent>().ClassNames.size();
+            }
+
             SerializeEntity(out, *m_Scene, entity);
         });
         out << YAML::EndSeq; // Corrected: No parentheses
         out << YAML::EndMap; // Corrected: No parentheses
 
-        std::filesystem::path file_path(filepath);
-        std::cout << file_path << std::endl;
-        std::ofstream fout(file_path);
+        const std::filesystem::path filePath(filepath);
+        std::ofstream fout(filePath);
         if (!fout)
         {
-            std::cerr << "Failed to open file: " << file_path << std::endl;
-            return; // Return or handle the error
+            NOX_CORE_ERROR("Failed to save scene '{}': could not open the file", filePath.string());
+            return;
         }
 
         fout << out.c_str();
+        fout.close();
+        if (!fout)
+        {
+            NOX_CORE_ERROR("Failed to save scene '{}': write failed", filePath.string());
+            return;
+        }
+
+        NOX_CORE_INFO("Saved scene '{}' with {} script component(s) and {} script class assignment(s)",
+                      filePath.string(), scriptComponentCount, scriptClassCount);
     }
 
     void SceneSerializer::SerializeRuntime(const std::filesystem::path& filepath)
@@ -926,6 +1002,48 @@ namespace Nox
                         cc.AutoExposureMinEV = cameraComponent["AutoExposureMinEV"].as<float>();
                     if (cameraComponent["AutoExposureMaxEV"])
                         cc.AutoExposureMaxEV = cameraComponent["AutoExposureMaxEV"].as<float>();
+                }
+
+                auto scriptComponent = entity["ScriptComponent"];
+                if (scriptComponent)
+                {
+                    auto& sc = deserializedEntity.AddComponent<ScriptComponent>();
+                    for (const auto& classNode : scriptComponent["Classes"])
+                        sc.ClassNames.push_back(classNode.as<std::string>());
+
+                    for (const auto& referenceNode : scriptComponent["EntityReferences"])
+                    {
+                        const std::string className = referenceNode["Class"].as<std::string>();
+                        const std::string fieldName = referenceNode["Field"].as<std::string>();
+                        auto& reference = sc.EntityReferences[className][fieldName];
+                        if (referenceNode["ModelInstance"])
+                        {
+                            reference.ModelInstance = referenceNode["ModelInstance"].as<UUID>();
+                            reference.ModelNodeIndex = referenceNode["ModelNode"].as<uint32_t>();
+                        }
+                        else
+                        {
+                            reference.Entity = referenceNode["Entity"].as<UUID>();
+                        }
+                    }
+
+                    for (const auto& fieldNode : scriptComponent["FieldOverrides"])
+                    {
+                        const std::string className = fieldNode["Class"].as<std::string>();
+                        const std::string fieldName = fieldNode["Field"].as<std::string>();
+                        const std::string type = fieldNode["Type"].as<std::string>();
+                        const YAML::Node value = fieldNode["Value"];
+                        auto& overrideValue = sc.FieldOverrides[className][fieldName];
+                        if (type == "Bool") overrideValue = value.as<bool>();
+                        else if (type == "Int") overrideValue = value.as<int32_t>();
+                        else if (type == "UInt") overrideValue = value.as<uint32_t>();
+                        else if (type == "Long") overrideValue = value.as<int64_t>();
+                        else if (type == "ULong") overrideValue = value.as<uint64_t>();
+                        else if (type == "Float") overrideValue = value.as<float>();
+                        else if (type == "Double") overrideValue = value.as<double>();
+                        else if (type == "String") overrideValue = value.as<std::string>();
+                        else if (type == "Vector3") overrideValue = value.as<glm::vec3>();
+                    }
                 }
 
                 /*auto scriptComponent = entity["ScriptComponent"];

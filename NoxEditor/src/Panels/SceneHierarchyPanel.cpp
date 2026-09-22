@@ -13,6 +13,7 @@
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Animation/Animator.h"
 #include "NoxCore/Project/Project.h"
+#include "NoxCore/Scripting/ScriptEngine.h"
 #include "NoxCore/Utils/Utils.h"
 
 namespace Nox
@@ -1264,22 +1265,129 @@ namespace Nox
             }
         });
 
-        DrawComponent<ScriptComponent>("Script", entity, [entity, scene = m_Context](auto& component) mutable
+        DrawComponent<ScriptComponent>("Script", entity, [this](auto& component)
         {
-            /*bool scriptClassExists = ScriptEngine::EntityClassExists(component.ClassName);
-
-            static char buffer[64];
-            strcpy_s(buffer, sizeof(buffer), component.ClassName.c_str());
-
-            UI::ScopedStyleColor textColor(ImGuiCol_Text, ImVec4(0.9f, 0.2f, 0.3f, 1.0f), !scriptClassExists);
-
-            if (ImGui::InputText("Class", buffer, sizeof(buffer)))
+            for (size_t index = 0; index < component.ClassNames.size(); ++index)
             {
-                component.ClassName = buffer;
-                return;
+                ImGui::PushID(static_cast<int>(index));
+                ImGui::SetNextItemWidth(-32.0f);
+                ImGui::InputText("##Class", &component.ClassNames[index]);
+                ImGui::SameLine();
+                const bool remove = ImGui::Button("-");
+
+                const bool scriptClassExists =
+                    ScriptEngine::EntityClassExists(component.ClassNames[index]);
+                if (!component.ClassNames[index].empty() && !scriptClassExists)
+                    ImGui::TextColored(ImVec4(0.9f, 0.2f, 0.3f, 1.0f), "Class not found");
+
+                if (remove)
+                {
+                    component.EntityReferences.erase(component.ClassNames[index]);
+                    component.FieldOverrides.erase(component.ClassNames[index]);
+                    component.ClassNames.erase(component.ClassNames.begin() + index);
+                    ImGui::PopID();
+                    break;
+                }
+
+                if (scriptClassExists)
+                {
+                    const std::string& className = component.ClassNames[index];
+                    for (const ScriptFieldInfo& field : ScriptEngine::GetExposedFields(className))
+                    {
+                        const std::string& fieldName = field.Name;
+                        if (field.Type != ScriptFieldType::Entity)
+                        {
+                            auto& overrides = component.FieldOverrides[className];
+                            ScriptValue value = overrides.contains(fieldName) ? overrides[fieldName] : field.DefaultValue;
+                            bool changed = false;
+                            switch (field.Type)
+                            {
+                                case ScriptFieldType::Bool: changed = ImGui::Checkbox(fieldName.c_str(), &std::get<bool>(value)); break;
+                                case ScriptFieldType::Int: changed = ImGui::DragScalar(fieldName.c_str(), ImGuiDataType_S32, &std::get<int32_t>(value), 1.0f); break;
+                                case ScriptFieldType::UInt: changed = ImGui::DragScalar(fieldName.c_str(), ImGuiDataType_U32, &std::get<uint32_t>(value), 1.0f); break;
+                                case ScriptFieldType::Long: changed = ImGui::DragScalar(fieldName.c_str(), ImGuiDataType_S64, &std::get<int64_t>(value), 1.0f); break;
+                                case ScriptFieldType::ULong: changed = ImGui::DragScalar(fieldName.c_str(), ImGuiDataType_U64, &std::get<uint64_t>(value), 1.0f); break;
+                                case ScriptFieldType::Float: changed = ImGui::DragFloat(fieldName.c_str(), &std::get<float>(value), 0.1f); break;
+                                case ScriptFieldType::Double: changed = ImGui::DragScalar(fieldName.c_str(), ImGuiDataType_Double, &std::get<double>(value), 0.1f); break;
+                                case ScriptFieldType::String: changed = ImGui::InputText(fieldName.c_str(), &std::get<std::string>(value)); break;
+                                case ScriptFieldType::Vector3: changed = ImGui::DragFloat3(fieldName.c_str(), glm::value_ptr(std::get<glm::vec3>(value)), 0.1f); break;
+                                case ScriptFieldType::Entity: break;
+                            }
+                            if (changed) overrides[fieldName] = std::move(value);
+                            continue;
+                        }
+
+                        auto& reference = component.EntityReferences[className][fieldName];
+                        Entity referencedEntity;
+                        if (reference.IsModelNode())
+                            referencedEntity = m_Context->GetEntityByUUID(
+                                ModelInstance::NodeUUID(reference.ModelInstance, reference.ModelNodeIndex));
+                        else if (reference.Entity != 0)
+                            referencedEntity = m_Context->GetEntityByUUID(reference.Entity);
+
+                        const std::string preview = referencedEntity ? referencedEntity.GetName() : "None";
+                        ImGui::TextUnformatted(fieldName.c_str());
+                        ImGui::SameLine(110.0f);
+                        ImGui::SetNextItemWidth(-55.0f);
+                        if (ImGui::BeginCombo(("##" + fieldName).c_str(), preview.c_str()))
+                        {
+                            for (auto handle : m_Context->GetAllEntitiesWith<TagComponent>())
+                            {
+                                Entity candidate(handle, m_Context.get());
+                                ImGui::PushID(static_cast<int>(static_cast<uint32_t>(handle)));
+                                if (ImGui::Selectable(candidate.GetName().c_str(), candidate == referencedEntity))
+                                {
+                                    reference = {};
+                                    if (candidate.HasComponent<ModelNodeComponent>())
+                                    {
+                                        const auto& node = candidate.GetComponent<ModelNodeComponent>();
+                                        reference.ModelInstance = node.Instance;
+                                        reference.ModelNodeIndex = node.NodeIndex;
+                                    }
+                                    else
+                                    {
+                                        reference.Entity = candidate.GetUUID();
+                                    }
+                                }
+                                ImGui::PopID();
+                            }
+                            ImGui::EndCombo();
+                        }
+
+                        if (ImGui::BeginDragDropTarget())
+                        {
+                            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("SCENE_HIERARCHY_ENTITY"))
+                            {
+                                Entity candidate = m_Context->GetEntityByUUID(*static_cast<const UUID*>(payload->Data));
+                                reference = {};
+                                if (candidate && candidate.HasComponent<ModelNodeComponent>())
+                                {
+                                    const auto& node = candidate.GetComponent<ModelNodeComponent>();
+                                    reference.ModelInstance = node.Instance;
+                                    reference.ModelNodeIndex = node.NodeIndex;
+                                }
+                                else if (candidate)
+                                {
+                                    reference.Entity = candidate.GetUUID();
+                                }
+                            }
+                            ImGui::EndDragDropTarget();
+                        }
+
+                        ImGui::SameLine();
+                        if (ImGui::SmallButton(("X##" + fieldName).c_str()))
+                            reference = {};
+                    }
+                }
+                ImGui::PopID();
             }
 
+            if (ImGui::Button("Add Script"))
+                component.ClassNames.emplace_back();
+            ImGui::TextDisabled("Example: Facerun.WASDMovement");
+
             // Fields
+            /* Field metadata/inspection is tracked in the scripting roadmap.
             bool sceneRunning = scene->IsRunning();
             if (sceneRunning)
             {
@@ -1339,7 +1447,7 @@ namespace Nox
                         }
                     }
                 }
-            }*/
+            } */
         });
 
         DrawComponent<SpriteRendererComponent>("Sprite Renderer", entity, [](auto& component)

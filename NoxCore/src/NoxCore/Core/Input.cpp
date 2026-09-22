@@ -8,7 +8,7 @@ namespace Nox
     float Input::x = 0.0f;  // Initializing static variable 'x'
     float Input::y = 0.0f;  // Initializing static variable 'y'
     
-    bool Input::IsKeyPressed(SDL_Keycode key)
+    bool Input::IsKeyPressed(SDL_Scancode key)
     {
         auto state = SDL_GetKeyboardState(NULL);
         return state[key];

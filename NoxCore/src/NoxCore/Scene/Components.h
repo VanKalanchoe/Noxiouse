@@ -5,6 +5,7 @@
 
 #include <optional>
 #include "string"
+#include <unordered_map>
 
 #include "SceneCamera.h"
 
@@ -16,6 +17,7 @@
 #include "NoxCore/Renderer/Font.h"
 
 #include "NoxCore/Asset/Asset.h"
+#include "NoxCore/Scripting/ScriptTypes.h"
 #include "NoxCore/Renderer/DataTypes.h"
 
 namespace Nox
@@ -255,7 +257,18 @@ namespace Nox
     
     struct ScriptComponent
     {
-        std::string ClassName; // 32 bytes
+        struct EntityReference
+        {
+            UUID Entity = 0;
+            UUID ModelInstance = 0;
+            uint32_t ModelNodeIndex = 0;
+
+            bool IsModelNode() const { return ModelInstance != 0; }
+        };
+
+        std::vector<std::string> ClassNames;
+        std::unordered_map<std::string, std::unordered_map<std::string, EntityReference>> EntityReferences;
+        std::unordered_map<std::string, std::unordered_map<std::string, ScriptValue>> FieldOverrides;
         
         ScriptComponent() = default;
         ScriptComponent(const ScriptComponent&) = default;

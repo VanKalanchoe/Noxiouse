@@ -43,5 +43,7 @@ namespace Nox
         bool m_ShowImportModal = false;
         bool m_ImportAsStaticMesh = false;
         bool m_WindowHovered = false;
+        bool m_ShowCreateScriptModal = false;
+        char m_NewScriptName[128] = "NewBehaviour";
     };
 };
