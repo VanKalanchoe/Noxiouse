@@ -1,4 +1,6 @@
 #pragma once
+#include <functional>
+
 #include "ThumbnailCache.h"
 
 namespace Nox
@@ -10,6 +12,9 @@ namespace Nox
         
         void OnImGuiRender();
         void OnExternalFileDrop(const std::filesystem::path& path);
+        // Called with an asset's handle when it's double-clicked (or just created); EditorLayer decides what
+        // opening means per AssetType, so this panel doesn't need to know about any editor window.
+        void SetOpenAssetCallback(std::function<void(AssetHandle)> callback) { m_OpenAsset = std::move(callback); }
     private:
         void RefreshAssetTree();
         AssetHandle FindAssetHandle(const std::filesystem::path& relativePath) const;
@@ -45,5 +50,8 @@ namespace Nox
         bool m_WindowHovered = false;
         bool m_ShowCreateScriptModal = false;
         char m_NewScriptName[128] = "NewBehaviour";
+        bool m_ShowCreateGraphModal = false;
+        char m_NewGraphName[128] = "NewAnimationGraph";
+        std::function<void(AssetHandle)> m_OpenAsset;
     };
 };

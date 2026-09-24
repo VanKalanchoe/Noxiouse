@@ -13,6 +13,7 @@
 #include "NoxCore/Core/UUID.h"
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Asset/AssetManager.h"
+#include "NoxCore/Asset/NodeGraphSerializer.h"
 #include "NoxCore/Scene/Entity.h"
 #include "NoxCore/Scene/Components.h"
 #include "NoxCore/Scene/ModelInstance.h"
@@ -427,6 +428,19 @@ namespace Nox
                 out << (uint64_t)nodeID;
             out << YAML::EndSeq;
 
+            // Graph mode (docs/Animation_Graph_Architecture_Plan_2026.md); 0 = single-clip mode above.
+            out << YAML::Key << "Graph" << YAML::Value << animatorComponent.Graph;
+            out << YAML::Key << "GraphParameters" << YAML::Value << YAML::BeginSeq;
+            for (const auto& [name, value] : animatorComponent.GraphInstance.Parameters)
+            {
+                out << YAML::BeginMap;
+                out << YAML::Key << "Name" << YAML::Value << name;
+                out << YAML::Key << "Value";
+                NodeGraphSerializer::EmitValue(out, value);
+                out << YAML::EndMap;
+            }
+            out << YAML::EndSeq;
+
             out << YAML::EndMap; // AnimatorComponent
         }
 
@@ -707,6 +721,22 @@ namespace Nox
             out << YAML::EndMap; // CapsuleCollider3DComponent
         }
 
+        if (entity.HasComponent<CharacterController3DComponent>())
+        {
+            out << YAML::Key << "CharacterController3DComponent";
+            out << YAML::BeginMap; // CharacterController3DComponent
+
+            auto& cct = entity.GetComponent<CharacterController3DComponent>();
+            out << YAML::Key << "Radius" << YAML::Value << cct.Radius;
+            out << YAML::Key << "Height" << YAML::Value << cct.Height;
+            out << YAML::Key << "StepHeight" << YAML::Value << cct.StepHeight;
+            out << YAML::Key << "MaxSlopeDegrees" << YAML::Value << cct.MaxSlopeDegrees;
+            out << YAML::Key << "GravityScale" << YAML::Value << cct.GravityScale;
+            out << YAML::Key << "AirControl" << YAML::Value << cct.AirControl;
+
+            out << YAML::EndMap; // CharacterController3DComponent
+        }
+
         if (entity.HasComponent<TextComponent>())
         {
             out << YAML::Key << "TextComponent";
@@ -973,6 +1003,18 @@ namespace Nox
                         for (auto nodeID : nodeEntities)
                             ac.NodeEntities.push_back(nodeID.as<uint64_t>());
                     }
+                    if (animatorComponent["Graph"])
+                        ac.Graph = animatorComponent["Graph"].as<AssetHandle>();
+                    if (auto parameters = animatorComponent["GraphParameters"])
+                    {
+                        for (const auto& paramData : parameters)
+                        {
+                            std::string name = paramData["Name"].as<std::string>();
+                            NodeGraphValue value;
+                            if (paramData["Value"] && NodeGraphSerializer::ReadValue(paramData["Value"], value))
+                                ac.GraphInstance.Parameters[name] = value;
+                        }
+                    }
                 }
 
                 auto cameraComponent = entity["CameraComponent"];
@@ -1230,6 +1272,24 @@ namespace Nox
                         cc3d.Friction = capsuleCollider3DComponent["Friction"].as<float>();
                     if (capsuleCollider3DComponent["Restitution"])
                         cc3d.Restitution = capsuleCollider3DComponent["Restitution"].as<float>();
+                }
+
+                auto characterController3DComponent = entity["CharacterController3DComponent"];
+                if (characterController3DComponent)
+                {
+                    auto& cct = deserializedEntity.AddComponent<CharacterController3DComponent>();
+                    if (characterController3DComponent["Radius"])
+                        cct.Radius = characterController3DComponent["Radius"].as<float>();
+                    if (characterController3DComponent["Height"])
+                        cct.Height = characterController3DComponent["Height"].as<float>();
+                    if (characterController3DComponent["StepHeight"])
+                        cct.StepHeight = characterController3DComponent["StepHeight"].as<float>();
+                    if (characterController3DComponent["MaxSlopeDegrees"])
+                        cct.MaxSlopeDegrees = characterController3DComponent["MaxSlopeDegrees"].as<float>();
+                    if (characterController3DComponent["GravityScale"])
+                        cct.GravityScale = characterController3DComponent["GravityScale"].as<float>();
+                    if (characterController3DComponent["AirControl"])
+                        cct.AirControl = characterController3DComponent["AirControl"].as<float>();
                 }
 
                 auto textComponent = entity["TextComponent"];

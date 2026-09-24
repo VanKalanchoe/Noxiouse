@@ -110,7 +110,8 @@ namespace Nox
         
         { ".nskel",   AssetType::Skeleton },
         { ".nanim",   AssetType::AnimationSequence },
-        { ".nskmesh", AssetType::SkeletalMesh }
+        { ".nskmesh", AssetType::SkeletalMesh },
+        { ".nanimgraph", AssetType::AnimationGraph }
     };
 
     AssetType EditorAssetManager::GetAssetTypeFromExtension(const std::filesystem::path& extension)
@@ -1066,7 +1067,7 @@ namespace Nox
 
             std::filesystem::path ext = entry.path().extension();
             if (ext == ".nox" || ext == ".nanim" || ext == ".nskel" || ext == ".nmat" ||
-                ext == ".ntex" || ext == ".nmesh" || ext == ".nsmesh")
+                ext == ".ntex" || ext == ".nmesh" || ext == ".nsmesh" || ext == ".nanimgraph")
             {
                 std::filesystem::path relativePath = entry.path().lexically_relative(assetDir).lexically_normal();
 

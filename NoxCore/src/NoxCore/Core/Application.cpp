@@ -14,6 +14,7 @@
 #include "NoxCore/Renderer/Renderer.h"
 #include "NoxCore/ImGui/ImGuiLayer.h"
 #include "NoxCore/Tasks/JobSystem.h"
+#include "NoxCore/Animation/AnimationGraphNodes.h"
 
 namespace Nox
 {
@@ -146,6 +147,10 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[])
     SDL_SetAppMetadata("Nox Engine", "1.0", "com.example.renderer-clear");
 
     Nox::Log::Init(); // todo: make it disalable when shipping
+
+    // Node-graph domains register their node types once, here, regardless of editor vs. future standalone
+    // runtime (NodeTypeRegistry has no de-duplication, so this must run exactly once).
+    Nox::RegisterAnimationGraphNodeTypes();
 
     Nox::ApplicationCommandLineArgs args;
     args.Count = argc;

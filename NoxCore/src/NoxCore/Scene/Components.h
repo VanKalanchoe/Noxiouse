@@ -13,6 +13,7 @@
 
 #include "box2d/box2d.h"
 #include "NoxCore/Animation/Animator.h"
+#include "NoxCore/Animation/AnimationGraphInstance.h"
 
 #include "NoxCore/Renderer/Font.h"
 
@@ -209,15 +210,27 @@ namespace Nox
         std::vector<UUID> NodeEntities;
         bool Playing = true;
 
+        // Drives the skeleton through a compiled NodeGraph (.nanimgraph) instead of Animator's single clip --
+        // see docs/Animation_Graph_Architecture_Plan_2026.md. A mode on this component rather than a separate
+        // component type (matching UE5's AnimationSingleNode/AnimationBlueprint split on USkeletalMeshComponent):
+        // it needs the exact same Skeleton/NodeEntities/Playing/SkinMatrices machinery Animator already has,
+        // including the joint-entity-driven skinning path real imported skeletal meshes use, so duplicating all
+        // of that into a second component both bloats the ECS and silently drops that path. 0 = single-clip mode.
+        AssetHandle Graph = 0;
+        AnimationGraphInstance GraphInstance; // runtime only: node playheads, parameter overrides, last evaluated pose
+
         // Runtime only: skinning matrices rebuilt from the joint entities each frame.
         std::vector<glm::mat4> SkinMatrices;
+        // Runtime only: final bone matrices for Graph mode's self-contained path (Skeleton set, NodeEntities
+        // empty) -- Animator's own GetFinalBoneTransforms() serves the equivalent single-clip case.
+        std::vector<glm::mat4> GraphFinalBoneTransforms;
 
         AnimatorComponent() = default;
         AnimatorComponent(const AnimatorComponent&) = default;
         AnimatorComponent(const Ref<AnimationSequence>& animation)
             : Animator(animation) {}
     };
-    
+
     struct SpriteRendererComponent
     {
         glm::vec4 Color{ 1.0f, 1.0f, 1.0f, 1.0f };
@@ -405,6 +418,30 @@ namespace Nox
         CapsuleCollider3DComponent(const CapsuleCollider3DComponent&) = default;
     };
 
+    // A kinematic capsule character (Jolt CharacterVirtual): slides along walls, climbs steps and slopes, sticks to
+    // the floor, rides moving platforms. It owns the entity translation (entity origin = feet); rotation is left to
+    // scripts. Scripts drive it through the input fields, the physics step fills the runtime state.
+    struct CharacterController3DComponent
+    {
+        float Radius = 0.3f;
+        float Height = 1.0f; // length of the straight part between the two caps; total height = Height + 2 * Radius
+        float StepHeight = 0.4f;
+        float MaxSlopeDegrees = 50.0f;
+        float GravityScale = 1.0f;
+        float AirControl = 0.3f; // fraction of MoveVelocity applied while not supported
+
+        // Input, set by scripts each frame
+        glm::vec3 MoveVelocity = { 0.0f, 0.0f, 0.0f }; // desired horizontal world velocity (m/s)
+        float JumpSpeed = 0.0f;                        // upward speed to apply on the next fixed step, then cleared
+
+        // Runtime state, written by the physics step
+        bool IsGrounded = false;
+        glm::vec3 Velocity = { 0.0f, 0.0f, 0.0f };
+
+        CharacterController3DComponent() = default;
+        CharacterController3DComponent(const CharacterController3DComponent&) = default;
+    };
+
     struct TextComponent
     {
         std::string TextString;
@@ -426,5 +463,5 @@ namespace Nox
             CircleRendererComponent, CameraComponent, ScriptComponent,
             /*NativeScriptComponent,*/ RigidBody2DComponent, BoxCollider2DComponent,
             CircleCollider2DComponent, RigidBody3DComponent, BoxCollider3DComponent,
-            SphereCollider3DComponent, CapsuleCollider3DComponent, TextComponent>;
+            SphereCollider3DComponent, CapsuleCollider3DComponent, CharacterController3DComponent, TextComponent>;
 }

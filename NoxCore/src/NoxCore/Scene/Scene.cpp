@@ -8,6 +8,7 @@
 #include "Entity.h"
 #include "Components.h"
 #include "SceneGraph.h"
+#include "NoxCore/Animation/AnimPose.h"
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Physics/Physics2D.h"
 #include "NoxCore/Physics/Physics3DScene.h"
@@ -245,6 +246,7 @@ namespace Nox
             const auto& animator = m_Registry.get<AnimatorComponent>(entity);
             outHandles.insert(animator.Animation);
             outHandles.insert(animator.Skeleton);
+            outHandles.insert(animator.Graph);
         }
 
         for (auto entity : m_Registry.view<SpriteRendererComponent>())
@@ -359,7 +361,7 @@ namespace Nox
             ComponentAccess().Read<RigidBody2DComponent>().Write<TransformComponent, DirtyTransformComponent>(),
             [this]() { UpdatePhysics2D(); });
         m_UpdateSystems.AddSystem("Physics 3D",
-            ComponentAccess().Read<RigidBody3DComponent>().Write<TransformComponent, DirtyTransformComponent>(),
+            ComponentAccess().Read<RigidBody3DComponent>().Write<CharacterController3DComponent, TransformComponent, DirtyTransformComponent>(),
             [this]() { UpdatePhysics3D(); });
         m_UpdateSystems.AddSystem("Animation",
             ComponentAccess().Write<AnimatorComponent, TransformComponent, DirtyTransformComponent>(),
@@ -585,6 +587,11 @@ namespace Nox
                 }
             }
 
+            // 1b. Sync the graph asset if assigned (graph mode). Animation and Graph are meant to be mutually
+            // exclusive per entity; if both are set, Graph takes precedence below.
+            if (animatorComp.Graph != 0)
+                animatorComp.GraphInstance.Sync(animatorComp.Graph, missingAssets);
+
             // 2. Legacy self-contained skeleton evaluation. Imports with a node table skin from the
             // joint entities instead (see GetBoneTransforms), so the skeleton isn't evaluated twice.
             if (animatorComp.Skeleton != 0 && animatorComp.NodeEntities.empty())
@@ -594,15 +601,53 @@ namespace Nox
                     missingAssets.push_back(animatorComp.Skeleton);
                 if (skeleton && !skeleton->AllNodes.empty())
                 {
-                    if (animatorComp.Playing)
+                    if (animatorComp.Graph != 0)
+                    {
+                        if (const AnimPose* pose = animatorComp.GraphInstance.Evaluate(ts, animatorComp.Playing, *skeleton))
+                            ApplyPoseToSkeleton(*pose, *skeleton, animatorComp.GraphFinalBoneTransforms);
+                    }
+                    else if (animatorComp.Playing)
                         animatorComp.Animator.Update(ts, *skeleton);
                     else
                         animatorComp.Animator.UpdateTransforms(*skeleton);
                 }
             }
 
+            // Graph mode's node-table skinning path: the whole evaluated pose (every joint, not just one
+            // clip's channels) written straight to ECS transforms -- the same joint-entity path
+            // Animation/NodeEntities already drives, so GetBoneTransforms doesn't need to know which mode
+            // produced them.
+            if (!animatorComp.NodeEntities.empty() && animatorComp.Graph != 0 && animatorComp.Skeleton != 0)
+            {
+                const Skeleton* skeleton = AssetManager::FindLoadedAsset<Skeleton>(animatorComp.Skeleton);
+                if (!skeleton)
+                    missingAssets.push_back(animatorComp.Skeleton);
+                if (skeleton && !skeleton->AllNodes.empty())
+                {
+                    if (const AnimPose* pose = animatorComp.GraphInstance.Evaluate(ts, animatorComp.Playing, *skeleton))
+                    {
+                        size_t nodeCount = std::min(animatorComp.NodeEntities.size(), pose->LocalTransforms.size());
+                        for (size_t nodeIndex = 0; nodeIndex < nodeCount; nodeIndex++)
+                        {
+                            auto it = m_EntityMap.find(animatorComp.NodeEntities[nodeIndex]);
+                            if (it == m_EntityMap.end() || !m_Registry.valid(it->second) ||
+                                !m_Registry.all_of<TransformComponent>(it->second))
+                                continue;
+
+                            auto& transform = m_Registry.get<TransformComponent>(it->second);
+                            const Animator::NodeTransform& t = pose->LocalTransforms[nodeIndex];
+                            transform.Translation = t.Translation;
+                            transform.Rotation = glm::eulerAngles(t.Rotation);
+                            transform.Scale = t.Scale;
+                            if (auto* dirty = m_Registry.try_get<DirtyTransformComponent>(it->second))
+                                dirty->isDirty = true;
+                        }
+                    }
+                }
+            }
+
             // Node/object animations write the evaluated .nanim TRS directly to ECS transforms.
-            if (!animatorComp.NodeEntities.empty() && animatorComp.Animation != 0)
+            if (!animatorComp.NodeEntities.empty() && animatorComp.Graph == 0 && animatorComp.Animation != 0)
             {
                 Ref<AnimationSequence> animation(AssetManager::FindLoadedAsset<AnimationSequence>(animatorComp.Animation));
                 if (!animation)
@@ -653,7 +698,7 @@ namespace Nox
             }
         }
     }
-    
+
     const std::vector<glm::mat4>* Scene::GetBoneTransforms(entt::entity entity, const glm::mat4& meshWorld)
     {
         AnimatorComponent* animatorComp = m_Registry.try_get<AnimatorComponent>(entity);
@@ -661,7 +706,11 @@ namespace Nox
             return nullptr;
 
         if (animatorComp->Skeleton == 0 || animatorComp->NodeEntities.empty())
-            return &animatorComp->Animator.GetFinalBoneTransforms();
+        {
+            // Self-contained: either the plain Animator, or (Graph mode) the graph's pose applied directly.
+            return animatorComp->Graph != 0 ? &animatorComp->GraphFinalBoneTransforms
+                                            : &animatorComp->Animator.GetFinalBoneTransforms();
+        }
 
         const Skeleton* skeleton = AssetManager::FindLoadedAsset<Skeleton>(animatorComp->Skeleton);
         if (!skeleton)
@@ -1150,7 +1199,7 @@ namespace Nox
     void Scene::OnComponentAdded<AnimatorComponent>(Entity entity, AnimatorComponent& component)
     {
     }
-    
+
     template <>
     void Scene::OnComponentAdded<CameraComponent>(Entity entity, CameraComponent& component)
     {

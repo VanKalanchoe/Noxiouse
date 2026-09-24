@@ -1,9 +1,13 @@
 #pragma once
+#include <functional>
+#include <unordered_map>
+
 #include "NoxCore/Core/Layer.h"
 #include "NoxCore/Events/InputEvents.h"
 #include "Panels/SceneHierarchyPanel.h"
 #include "Panels/ContentBrowserPanel.h"
 #include "Panels/RenderGraphPanel.h"
+#include "Panels/NodeGraphEditorPanel.h"
 #include "NoxCore/Renderer/Font.h"
 #include "NoxCore/Renderer/Renderer.h"
 
@@ -52,6 +56,17 @@ namespace Nox
         
         void SerializeScene(Ref<Scene> scene, const std::filesystem::path& path);
 
+        // Focuses an already-open editor for handle, or opens a new one (docs/Animation_Graph_Architecture_Plan_2026.md Step 3).
+        void OpenNodeGraphEditor(AssetHandle handle);
+
+        // Opens whatever editor window is registered for handle's AssetType (m_AssetOpeners); does nothing for
+        // types with none. What double-clicking an asset in the Content Browser or an inspector reference calls.
+        void OpenAsset(AssetHandle handle);
+
+        // Any open node-graph editor window focused or hovered: the scene's shortcuts and picking must ignore input.
+        bool AnyNodeGraphEditorWantsInput() const;
+        bool AnyNodeGraphEditorHovered() const; // mouse only: focus alone must not swallow a click elsewhere
+
     private:
         Renderer* m_Renderer;
         Renderer2D* m_Renderer2D;
@@ -97,7 +112,13 @@ namespace Nox
         SceneHierarchyPanel m_SceneHierarchyPanel;
         Scope<ContentBrowserPanel> m_ContentBrowserPanel;
         Scope<RenderGraphPanel> m_RenderGraphPanel;
-        
+        // Open node-graph editors (docs/Animation_Graph_Architecture_Plan_2026.md Step 3), one per opened graph
+        // asset; OpenNodeGraphEditor focuses an already-open one instead of duplicating it.
+        std::vector<Scope<NodeGraphEditorPanel>> m_NodeGraphEditors;
+        // AssetType -> "open its editor window", so a new asset editor is one entry here rather than new
+        // double-click handling in every panel that shows asset references.
+        std::unordered_map<AssetType, std::function<void(AssetHandle)>> m_AssetOpeners;
+
         // Editor resources always static
         Ref<Texture2D> m_IconPlay, m_IconPause, m_IconStep, m_IconStop, m_IconSimulate;
         

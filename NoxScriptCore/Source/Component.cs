@@ -2,7 +2,9 @@ namespace Nox;
 
 internal enum ComponentType
 {
-    Transform = 1
+    Transform = 1,
+    Animator = 2,
+    CharacterController = 3
 }
 
 public abstract class Component

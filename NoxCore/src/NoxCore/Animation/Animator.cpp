@@ -206,7 +206,7 @@ namespace Nox
     }
 
     template<typename KeyType>
-    size_t Animator::FindKeyframeIndex(float time, const std::vector<KeyType>& keys) const
+    size_t Animator::FindKeyframeIndex(float time, const std::vector<KeyType>& keys)
     {
         auto it = std::upper_bound(keys.begin(), keys.end(), time,
             [](float t, const KeyType& key) {

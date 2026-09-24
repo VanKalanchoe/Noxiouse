@@ -6,11 +6,13 @@
 #include <Jolt/Jolt.h>
 #include <Jolt/Physics/PhysicsSystem.h>
 #include <Jolt/Core/TempAllocator.h>
+#include <Jolt/Physics/Character/CharacterVirtual.h>
 
 #include <memory>
 #include <unordered_map>
 
-namespace Nox {
+namespace Nox 
+{
 
     class Scene;
 
@@ -26,6 +28,9 @@ namespace Nox {
 
         virtual void CreateBody(Entity entity) override;
         virtual void DestroyBody(Entity entity) override;
+
+        virtual void CreateCharacter(Entity entity) override;
+        virtual void DestroyCharacter(Entity entity) override;
 
         virtual bool RayCast(const glm::vec3& origin, const glm::vec3& direction, float maxDistance,
                              RayCastHit& outHit, uint16_t layerMask = PhysicsLayers::MASK_ALL) override;
@@ -47,6 +52,9 @@ namespace Nox {
         const JPH::PhysicsSystem& GetPhysicsSystem() const { return *m_PhysicsSystem; }
 
     private:
+        void StepCharacters(float dt);
+        void SyncCharactersToTransforms();
+
         Scene* m_Scene = nullptr;
 
         std::unique_ptr<JPH::TempAllocatorImpl> m_TempAllocator;
@@ -58,6 +66,8 @@ namespace Nox {
 
         std::unordered_map<uint32_t, JPH::BodyID> m_EntityToBodyMap;
         std::unordered_map<uint32_t, Entity> m_BodyToEntityMap;
+        std::unordered_map<uint32_t, JPH::Ref<JPH::CharacterVirtual>> m_EntityToCharacterMap;
+
 
         float m_Accumulator = 0.0f;
         static constexpr float c_FixedDeltaTime = 1.0f / 60.0f;

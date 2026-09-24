@@ -21,7 +21,9 @@ namespace Nox
         
         Skeleton,
         AnimationSequence,
-        SkeletalMesh
+        SkeletalMesh,
+
+        AnimationGraph // NodeGraph/NodeGraphAsset.h wrapping a NodeGraph whose Domain is "AnimationGraph" (.nanimgraph)
     };
 
     // Where an asset is on its way into memory (§5.11.2). A request starts the load once; the asset is usable when Ready.

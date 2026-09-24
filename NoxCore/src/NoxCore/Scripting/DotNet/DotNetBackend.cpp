@@ -80,8 +80,77 @@ namespace Nox
             switch (componentType)
             {
                 case 1: return entity.HasComponent<TransformComponent>();
+                case 2: return entity.HasComponent<AnimatorComponent>();
+                case 3: return entity.HasComponent<CharacterController3DComponent>();
                 default: return false;
             }
+        }
+
+        // The Animator's graph parameters (Nox.AnimatorComponent.SetFloat/SetBool/...). Written into the
+        // component's GraphInstance.Parameters, which the animation graph's GetParameter nodes read next frame.
+        AnimatorComponent* FindAnimator(uint64_t entityID)
+        {
+            if (!s_Scene) return nullptr;
+            Entity entity = s_Scene->GetEntityByUUID(UUID(entityID));
+            return entity && entity.HasComponent<AnimatorComponent>() ? &entity.GetComponent<AnimatorComponent>() : nullptr;
+        }
+
+        void AnimatorSetFloat(uint64_t entityID, Coral::String name, float value)
+        {
+            if (AnimatorComponent* animator = FindAnimator(entityID))
+                animator->GraphInstance.SetFloat(std::string(name), value);
+        }
+
+        float AnimatorGetFloat(uint64_t entityID, Coral::String name)
+        {
+            AnimatorComponent* animator = FindAnimator(entityID);
+            return animator ? animator->GraphInstance.GetFloat(std::string(name)) : 0.0f;
+        }
+
+        void AnimatorSetBool(uint64_t entityID, Coral::String name, Coral::Bool32 value)
+        {
+            if (AnimatorComponent* animator = FindAnimator(entityID))
+                animator->GraphInstance.SetBool(std::string(name), value != 0);
+        }
+
+        Coral::Bool32 AnimatorGetBool(uint64_t entityID, Coral::String name)
+        {
+            AnimatorComponent* animator = FindAnimator(entityID);
+            return animator && animator->GraphInstance.GetBool(std::string(name));
+        }
+
+        // The Character Controller 3D (Nox.CharacterControllerComponent): inputs are read by the next fixed physics
+        // step, state is what the last step produced.
+        CharacterController3DComponent* FindCharacter(uint64_t entityID)
+        {
+            if (!s_Scene) return nullptr;
+            Entity entity = s_Scene->GetEntityByUUID(UUID(entityID));
+            return entity && entity.HasComponent<CharacterController3DComponent>() ? &entity.GetComponent<CharacterController3DComponent>() : nullptr;
+        }
+
+        void CharacterSetMoveVelocity(uint64_t entityID, float x, float y, float z)
+        {
+            if (CharacterController3DComponent* character = FindCharacter(entityID))
+                character->MoveVelocity = { x, y, z };
+        }
+
+        void CharacterJump(uint64_t entityID, float speed)
+        {
+            if (CharacterController3DComponent* character = FindCharacter(entityID))
+                character->JumpSpeed = speed;
+        }
+
+        Coral::Bool32 CharacterIsGrounded(uint64_t entityID)
+        {
+            CharacterController3DComponent* character = FindCharacter(entityID);
+            return character && character->IsGrounded;
+        }
+
+        void CharacterGetVelocity(uint64_t entityID, ManagedVector3* outVelocity)
+        {
+            CharacterController3DComponent* character = FindCharacter(entityID);
+            const glm::vec3 velocity = character ? character->Velocity : glm::vec3(0.0f);
+            *outVelocity = { velocity.x, velocity.y, velocity.z };
         }
 
         ManagedTransform ToManagedTransform(const TransformComponent& transform)
@@ -265,6 +334,14 @@ namespace Nox
         assembly.AddInternalCall("Nox.InternalCalls", "Entity_FindByName", reinterpret_cast<void*>(&FindEntityByName));
         assembly.AddInternalCall("Nox.InternalCalls", "Entity_FindChild", reinterpret_cast<void*>(&FindChild));
         assembly.AddInternalCall("Nox.InternalCalls", "Entity_HasComponent", reinterpret_cast<void*>(&HasComponent));
+        assembly.AddInternalCall("Nox.InternalCalls", "Animator_SetFloat", reinterpret_cast<void*>(&AnimatorSetFloat));
+        assembly.AddInternalCall("Nox.InternalCalls", "Animator_GetFloat", reinterpret_cast<void*>(&AnimatorGetFloat));
+        assembly.AddInternalCall("Nox.InternalCalls", "Animator_SetBool", reinterpret_cast<void*>(&AnimatorSetBool));
+        assembly.AddInternalCall("Nox.InternalCalls", "Animator_GetBool", reinterpret_cast<void*>(&AnimatorGetBool));
+        assembly.AddInternalCall("Nox.InternalCalls", "Character_SetMoveVelocity", reinterpret_cast<void*>(&CharacterSetMoveVelocity));
+        assembly.AddInternalCall("Nox.InternalCalls", "Character_Jump", reinterpret_cast<void*>(&CharacterJump));
+        assembly.AddInternalCall("Nox.InternalCalls", "Character_IsGrounded", reinterpret_cast<void*>(&CharacterIsGrounded));
+        assembly.AddInternalCall("Nox.InternalCalls", "Character_GetVelocity", reinterpret_cast<void*>(&CharacterGetVelocity));
         assembly.AddInternalCall("Nox.InternalCalls", "Transform_GetLocal", reinterpret_cast<void*>(&GetLocalTransform));
         assembly.AddInternalCall("Nox.InternalCalls", "Transform_SetLocal", reinterpret_cast<void*>(&SetLocalTransform));
         assembly.AddInternalCall("Nox.InternalCalls", "Transform_GetWorld", reinterpret_cast<void*>(&GetWorldTransform));

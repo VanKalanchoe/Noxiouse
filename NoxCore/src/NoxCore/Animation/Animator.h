@@ -58,15 +58,16 @@ namespace Nox
         // Returns unskinned global transforms for bone debug drawing
         const std::vector<glm::mat4>& GetGlobalBoneTransforms() const { return m_GlobalBoneTransforms; }
 
-    private:
-        // Keyframe sampling helpers using NodeAnimationChannel
-        glm::vec3 InterpolatePosition(float time, const NodeAnimationChannel& channel);
-        glm::quat InterpolateRotation(float time, const NodeAnimationChannel& channel);
-        glm::vec3 InterpolateScale(float time, const NodeAnimationChannel& channel);
+        // Keyframe sampling helpers using NodeAnimationChannel. Static and public so anything sampling a clip
+        // outside of a full Animator playback state can reuse the exact same interpolation (e.g. AnimPose.h's
+        // SampleClipPose, used by the animation graph's Clip node) instead of duplicating it.
+        static glm::vec3 InterpolatePosition(float time, const NodeAnimationChannel& channel);
+        static glm::quat InterpolateRotation(float time, const NodeAnimationChannel& channel);
+        static glm::vec3 InterpolateScale(float time, const NodeAnimationChannel& channel);
 
         // O(log N) Binary search for keyframe lookup
         template<typename KeyType>
-        size_t FindKeyframeIndex(float time, const std::vector<KeyType>& keys) const;
+        static size_t FindKeyframeIndex(float time, const std::vector<KeyType>& keys);
 
     private:
         Ref<AnimationSequence> m_CurrentAnimation;

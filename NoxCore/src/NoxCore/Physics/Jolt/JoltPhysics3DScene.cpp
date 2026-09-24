@@ -17,6 +17,9 @@
 #include <Jolt/Physics/Collision/ShapeCast.h>
 #include <Jolt/Physics/Collision/CastResult.h>
 #include <Jolt/Physics/Collision/CollisionCollectorImpl.h>
+#include <Jolt/Physics/Collision/BroadPhase/BroadPhaseLayer.h>
+#include <Jolt/Physics/Collision/ShapeFilter.h>
+#include <Jolt/Physics/Body/BodyFilter.h>
 
 #include <spdlog/spdlog.h>
 #define GLM_ENABLE_EXPERIMENTAL
@@ -141,6 +144,7 @@ namespace Nox {
                 }
             }
             m_EntityToBodyMap.clear();
+            m_EntityToCharacterMap.clear();
             m_BodyToEntityMap.clear();
         }
     }
@@ -180,6 +184,9 @@ namespace Nox {
                 Entity entity{ entityID, m_Scene };
                 CreateBody(entity);
             }
+
+            for (auto entityID : m_Scene->GetRegistry().view<CharacterController3DComponent, TransformComponent>())
+                CreateCharacter(Entity{ entityID, m_Scene });
         }
 
         OptimizeBroadPhase();
@@ -390,6 +397,133 @@ namespace Nox {
             entity.GetComponent<RigidBody3DComponent>().RuntimeBodyID = 0xFFFFFFFF;
     }
 
+    // Ported from Jolt's Samples/Tests/Character/CharacterVirtualTest.cpp: the capsule shape is offset so the
+    // character position is at the feet, the supporting volume is the lower sphere cap.
+    void JoltPhysics3DScene::CreateCharacter(Entity entity)
+    {
+        if (!m_PhysicsSystem || !entity)
+            return;
+
+        const auto& controller = entity.GetComponent<CharacterController3DComponent>();
+        const auto& transform = entity.GetComponent<TransformComponent>();
+
+        glm::vec3 worldPos = transform.Translation;
+        if (entity.HasComponent<WorldTransformComponent>())
+            worldPos = glm::vec3(entity.GetComponent<WorldTransformComponent>().WorldMatrix[3]);
+
+        const float radius = std::max(controller.Radius, 0.01f);
+        const float halfHeight = std::max(controller.Height, 0.0f) * 0.5f;
+
+        JPH::RefConst<JPH::Shape> shape = JPH::RotatedTranslatedShapeSettings(
+            JPH::Vec3(0.0f, halfHeight + radius, 0.0f), JPH::Quat::sIdentity(), new JPH::CapsuleShape(halfHeight, radius)).Create().Get();
+
+        JPH::Ref<JPH::CharacterVirtualSettings> settings = new JPH::CharacterVirtualSettings();
+        settings->mMaxSlopeAngle = glm::radians(controller.MaxSlopeDegrees);
+        settings->mMaxStrength = 100.0f;
+        settings->mShape = shape;
+        settings->mBackFaceMode = JPH::EBackFaceMode::CollideWithBackFaces;
+        settings->mCharacterPadding = 0.02f;
+        settings->mPenetrationRecoverySpeed = 1.0f;
+        settings->mPredictiveContactDistance = 0.1f;
+        settings->mSupportingVolume = JPH::Plane(JPH::Vec3::sAxisY(), -radius);
+        settings->mEnhancedInternalEdgeRemoval = false;
+
+        JPH::Ref<JPH::CharacterVirtual> character = new JPH::CharacterVirtual(
+            settings, JoltUtils::ToJolt(worldPos), JPH::Quat::sIdentity(), static_cast<uint64_t>(static_cast<uint32_t>(entity)), m_PhysicsSystem.get());
+
+        m_EntityToCharacterMap[static_cast<uint32_t>(entity)] = character;
+    }
+
+    void JoltPhysics3DScene::DestroyCharacter(Entity entity)
+    {
+        if (entity)
+            m_EntityToCharacterMap.erase(static_cast<uint32_t>(entity));
+    }
+
+    void JoltPhysics3DScene::StepCharacters(float dt)
+    {
+        if (!m_Scene)
+            return;
+
+        const JPH::Vec3 gravity = m_PhysicsSystem->GetGravity();
+        const JPH::Vec3 up = JPH::Vec3::sAxisY();
+
+        for (auto& [entityId, character] : m_EntityToCharacterMap)
+        {
+            Entity entity{ static_cast<entt::entity>(entityId), m_Scene };
+            if (!entity.IsValid() || !entity.HasComponent<CharacterController3DComponent>())
+                continue;
+
+            auto& controller = entity.GetComponent<CharacterController3DComponent>();
+
+            character->UpdateGroundVelocity();
+            const JPH::Vec3 groundVelocity = character->GetGroundVelocity();
+            const JPH::Vec3 currentVelocity = character->GetLinearVelocity();
+            const bool onGround = character->GetGroundState() == JPH::CharacterVirtual::EGroundState::OnGround;
+            const bool movingTowardsGround = (currentVelocity.GetY() - groundVelocity.GetY()) <= 0.1f;
+
+            JPH::Vec3 velocity;
+            if (onGround && movingTowardsGround)
+            {
+                velocity = groundVelocity;
+                if (controller.JumpSpeed > 0.0f)
+                    velocity += up * controller.JumpSpeed;
+            }
+            else
+            {
+                velocity = JPH::Vec3(0.0f, currentVelocity.GetY(), 0.0f);
+            }
+            controller.JumpSpeed = 0.0f;
+
+            velocity += gravity * controller.GravityScale * dt;
+            velocity += JoltUtils::ToJolt(controller.MoveVelocity) * (character->IsSupported() ? 1.0f : controller.AirControl);
+
+            character->SetLinearVelocity(velocity);
+
+            JPH::CharacterVirtual::ExtendedUpdateSettings updateSettings;
+            updateSettings.mStickToFloorStepDown = -up * 0.5f;
+            updateSettings.mWalkStairsStepUp = up * controller.StepHeight;
+
+            character->ExtendedUpdate(dt, -up * gravity.Length(), updateSettings,
+                m_PhysicsSystem->GetDefaultBroadPhaseLayerFilter(PhysicsLayers::CHARACTER),
+                m_PhysicsSystem->GetDefaultLayerFilter(PhysicsLayers::CHARACTER),
+                {}, {}, *m_TempAllocator);
+        }
+    }
+
+    // The controller owns the entity's translation (like a dynamic body does); rotation stays with scripts.
+    void JoltPhysics3DScene::SyncCharactersToTransforms()
+    {
+        if (!m_Scene)
+            return;
+
+        for (auto& [entityId, character] : m_EntityToCharacterMap)
+        {
+            Entity entity{ static_cast<entt::entity>(entityId), m_Scene };
+            if (!entity.IsValid() || !entity.HasComponent<CharacterController3DComponent>())
+                continue;
+
+            auto& controller = entity.GetComponent<CharacterController3DComponent>();
+            controller.IsGrounded = character->GetGroundState() == JPH::CharacterVirtual::EGroundState::OnGround;
+            controller.Velocity = JoltUtils::ToGLM(character->GetLinearVelocity());
+
+            glm::vec3 position = JoltUtils::ToGLM(character->GetPosition());
+            if (entity.HasComponent<RelationshipComponent>())
+            {
+                UUID parentUUID = entity.GetComponent<RelationshipComponent>().Parent;
+                if (parentUUID != 0)
+                {
+                    Entity parentEntity = m_Scene->GetEntityByUUID(parentUUID);
+                    if (parentEntity && parentEntity.HasComponent<WorldTransformComponent>())
+                        position = glm::vec3(glm::inverse(parentEntity.GetComponent<WorldTransformComponent>().WorldMatrix) * glm::vec4(position, 1.0f));
+                }
+            }
+
+            entity.GetComponent<TransformComponent>().Translation = position;
+            entity.GetComponent<DirtyTransformComponent>().isDirty = true;
+        }
+    }
+
     void JoltPhysics3DScene::Step(float dt)
     {
         if (!m_PhysicsSystem)
@@ -401,10 +535,13 @@ namespace Nox {
 
         while (m_Accumulator >= c_FixedDeltaTime && steps < maxSubSteps)
         {
+            StepCharacters(c_FixedDeltaTime);
             m_PhysicsSystem->Update(c_FixedDeltaTime, 1, m_TempAllocator.get(), m_JobSystem.get());
             m_Accumulator -= c_FixedDeltaTime;
             steps++;
         }
+
+        SyncCharactersToTransforms();
 
         // Synchronize positions and rotations back to ECS TransformComponent
         if (m_Scene)

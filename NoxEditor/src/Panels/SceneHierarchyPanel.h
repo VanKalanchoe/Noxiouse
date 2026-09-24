@@ -1,4 +1,6 @@
 #pragma once
+#include <functional>
+
 #include <imgui.h>
 
 #include "NoxCore/Core/core.h"
@@ -25,7 +27,11 @@ namespace Nox
         void ToggleSelectedEntity(Entity entity);
         void ClearSelection();
         void SelectRange(Entity entity);
-      
+
+        // Called with an asset's handle when its reference field in the inspector is double-clicked (e.g. the
+        // Animator's Graph); EditorLayer decides what opening means per AssetType.
+        void SetOpenAssetCallback(std::function<void(AssetHandle)> callback) { m_OpenAsset = std::move(callback); }
+
         ImVec2 left;
         bool leftFocused;
         bool leftHovered;
@@ -47,5 +53,6 @@ namespace Nox
         // already destroyed as a child of another pending delete is skipped.
         std::vector<UUID> m_PendingDestroy;
         bool m_MaterialShowAll = false; // Material component: show every slot instead of just this entity's own submesh
+        std::function<void(AssetHandle)> m_OpenAsset;
     };
 }

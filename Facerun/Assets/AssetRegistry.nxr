@@ -187,6 +187,10 @@ AssetRegistry:
     FilePath: Models/bistro/Materials/bistro_LMBR_00001ad_Brushed_Metal.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_00001ad_Brushed_Metal.nmat
     Type: AssetType::Material
+  - Handle: 861554421640736247
+    FilePath: Models/CesiumMan/Materials/CesiumMan_Cesium_Man-effect.nmat
+    SourceFilePath: Models/CesiumMan/Materials/CesiumMan_Cesium_Man-effect.nmat
+    Type: AssetType::Material
   - Handle: 877947360057422372
     FilePath: Models/DamagedHelmet/Materials/DamagedHelmet_Material_MR.nmat
     SourceFilePath: Models/DamagedHelmet/Materials/DamagedHelmet_Material_MR.nmat
@@ -211,6 +215,10 @@ AssetRegistry:
       Format: RGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 968633255987199283
+    FilePath: Models/Fox/Meshes/Fox_Survey.nanim
+    SourceFilePath: Models/Fox/Meshes/Fox_Survey.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 974618094791631738
     FilePath: Models/bistro/objects/props/street/paris_bistroawning_02/Textures/paris_bistroawning_02_spec.ntex
     SourceFilePath: Models/bistro/objects/props/street/paris_bistroawning_02/paris_bistroawning_02_spec.dds
@@ -507,6 +515,14 @@ AssetRegistry:
     FilePath: Models/bistro/Materials/bistro_LMBR_00000e3_metal.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_00000e3_metal.nmat
     Type: AssetType::Material
+  - Handle: 2568586408588632385
+    FilePath: Models/CesiumMan/textures/CesiumMan_tex_0.ntex
+    SourceFilePath: Models/CesiumMan/textures/CesiumMan_tex_0.ntex
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
   - Handle: 2596562716288403654
     FilePath: Models/bistro/Materials/bistro_LMBR_0000147_Wood_Painted.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_0000147_Wood_Painted.nmat
@@ -771,6 +787,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 3844362363654293447
+    FilePath: Models/Fox/Meshes/Fox.nskel
+    SourceFilePath: Models/Fox/Meshes/Fox.nskel
+    Type: AssetType::Skeleton
   - Handle: 3876850980011196200
     FilePath: Models/bistro/objects/props/street/paris_bistroawning_01/Textures/paris_bistroawning_beams_01a_diff.ntex
     SourceFilePath: Models/bistro/objects/props/street/paris_bistroawning_01/paris_bistroawning_beams_01a_diff.dds
@@ -869,6 +889,14 @@ AssetRegistry:
     Type: AssetType::Texture2D
     TextureSpec:
       Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 4525613946637340145
+    FilePath: Models/Fox/Textures/Texture.ntex
+    SourceFilePath: Models/Fox/Texture.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
       GenerateMips: true
       Flip: false
   - Handle: 4534251048344403716
@@ -1139,6 +1167,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 5992010660269548329
+    FilePath: Models/Fox/Meshes/Fox.nmesh
+    SourceFilePath: Models/Fox/Fox.gltf
+    Type: AssetType::Mesh
   - Handle: 6015352002722865919
     FilePath: Models/bistro/Materials/bistro_LMBR_0000162_Paris_Curbstones_01.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_0000162_Paris_Curbstones_01.nmat
@@ -1242,6 +1274,10 @@ AssetRegistry:
   - Handle: 6497277109760554780
     FilePath: Models/bistro/Materials/bistro_LMBR_00000f1_Paris_LiquorBottle_03_Glass.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_00000f1_Paris_LiquorBottle_03_Glass.nmat
+    Type: AssetType::Material
+  - Handle: 6518188972562360993
+    FilePath: Models/Fox/Materials/Fox_fox_material.nmat
+    SourceFilePath: Models/Fox/Materials/Fox_fox_material.nmat
     Type: AssetType::Material
   - Handle: 6558958609419807630
     FilePath: Models/bistro/textures/shared/tiling/bronze_01/Textures/bronze_01_spec.ntex
@@ -1375,6 +1411,10 @@ AssetRegistry:
     FilePath: Models/bistro/Materials/bistro_LMBR_000002f_bronze_01.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_000002f_bronze_01.nmat
     Type: AssetType::Material
+  - Handle: 6982408203583889678
+    FilePath: Models/Fox/Meshes/Fox_Walk.nanim
+    SourceFilePath: Models/Fox/Meshes/Fox_Walk.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 6995239069718787638
     FilePath: Models/bistro/objects/props/street/paris_stringlights_01/Textures/Paris_StringLights_01_diff.ntex
     SourceFilePath: Models/bistro/objects/props/street/paris_stringlights_01/Paris_StringLights_01_diff.dds
@@ -1691,6 +1731,10 @@ AssetRegistry:
     FilePath: Models/bistro/Materials/bistro_LMBR_0000172_Paris_Streetpivot.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_0000172_Paris_Streetpivot.nmat
     Type: AssetType::Material
+  - Handle: 8834217459903361042
+    FilePath: Models/Fox/Fox_WalkRun.nanimgraph
+    SourceFilePath: Models/Fox/Fox_WalkRun.nanimgraph
+    Type: AssetType::AnimationGraph
   - Handle: 8859703044667136037
     FilePath: Models/bistro/objects/props/bistro/paris_barstool_01/Textures/paris_barstool_01a_diff.ntex
     SourceFilePath: Models/bistro/objects/props/bistro/paris_barstool_01/paris_barstool_01a_diff.dds
@@ -1923,6 +1967,10 @@ AssetRegistry:
       Format: RGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 9971158481077126827
+    FilePath: Models/Fox/Meshes/Fox_Run.nanim
+    SourceFilePath: Models/Fox/Meshes/Fox_Run.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 9981188124857255084
     FilePath: Scenes/noxtest.nox
     SourceFilePath: Scenes/noxtest.nox
@@ -1967,6 +2015,10 @@ AssetRegistry:
     FilePath: Models/bistro/Materials/bistro_LMBR_00001aa_Metal.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_00001aa_Metal.nmat
     Type: AssetType::Material
+  - Handle: 10158151390607676106
+    FilePath: Models/CesiumMan/Meshes/CesiumMan_Anim_0.nanim
+    SourceFilePath: Models/CesiumMan/Meshes/CesiumMan_Anim_0.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 10173764916423155017
     FilePath: Models/bistro/Materials/bistro_LMBR_00000dd_Plastic.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_00000dd_Plastic.nmat
@@ -2287,6 +2339,10 @@ AssetRegistry:
     FilePath: Models/bistro/Materials/bistro_LMBR_000014e_Metal.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_000014e_Metal.nmat
     Type: AssetType::Material
+  - Handle: 11786932700393995421
+    FilePath: Models/CesiumMan/Meshes/CesiumMan.nskel
+    SourceFilePath: Models/CesiumMan/Meshes/CesiumMan.nskel
+    Type: AssetType::Skeleton
   - Handle: 11836443682467016515
     FilePath: Models/bistro/textures/shared/tiling/concrete_smooth_01/Textures/concrete_smooth_01_ddna.ntex
     SourceFilePath: Models/bistro/textures/shared/tiling/concrete_smooth_01/concrete_smooth_01_ddna.dds
@@ -3367,6 +3423,10 @@ AssetRegistry:
       Format: RGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 16255053351223477361
+    FilePath: Models/CesiumMan/Meshes/CesiumMan.nmesh
+    SourceFilePath: Models/CesiumMan/CesiumMan.glb
+    Type: AssetType::Mesh
   - Handle: 16265665862649660886
     FilePath: Models/bistro/objects/props/street/paris_bollard_01/Textures/paris_bollard_01a_diff.ntex
     SourceFilePath: Models/bistro/objects/props/street/paris_bollard_01/paris_bollard_01a_diff.dds
@@ -3413,6 +3473,14 @@ AssetRegistry:
     Type: AssetType::Texture2D
     TextureSpec:
       Format: RGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 16413064732691229295
+    FilePath: Models/CesiumMan/Textures/CesiumMan_tex_0.ntex
+    SourceFilePath: Models/CesiumMan/Textures/CesiumMan_tex_0.jpg
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
       GenerateMips: true
       Flip: false
   - Handle: 16426713142696359733

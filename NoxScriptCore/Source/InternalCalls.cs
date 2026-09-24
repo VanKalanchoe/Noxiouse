@@ -10,6 +10,14 @@ internal static unsafe class InternalCalls
     private static delegate*<NativeString, ulong> Entity_FindByName;
     private static delegate*<ulong, NativeString, ulong> Entity_FindChild;
     private static delegate*<ulong, int, uint> Entity_HasComponent;
+    private static delegate*<ulong, NativeString, float, void> Animator_SetFloat;
+    private static delegate*<ulong, NativeString, float> Animator_GetFloat;
+    private static delegate*<ulong, NativeString, uint, void> Animator_SetBool;
+    private static delegate*<ulong, NativeString, uint> Animator_GetBool;
+    private static delegate*<ulong, float, float, float, void> Character_SetMoveVelocity;
+    private static delegate*<ulong, float, void> Character_Jump;
+    private static delegate*<ulong, uint> Character_IsGrounded;
+    private static delegate*<ulong, Vector3*, void> Character_GetVelocity;
     private static delegate*<ulong, Transform*, void> Transform_GetLocal;
     private static delegate*<ulong, Transform*, void> Transform_SetLocal;
     private static delegate*<ulong, Transform*, void> Transform_GetWorld;
@@ -38,6 +46,44 @@ internal static unsafe class InternalCalls
 
     internal static bool HasComponent(ulong entityID, ComponentType type) =>
         Entity_HasComponent(entityID, (int)type) != 0;
+
+    internal static void SetAnimatorFloat(ulong entityID, string name, float value)
+    {
+        using NativeString nativeName = new(name);
+        Animator_SetFloat(entityID, nativeName, value);
+    }
+
+    internal static float GetAnimatorFloat(ulong entityID, string name)
+    {
+        using NativeString nativeName = new(name);
+        return Animator_GetFloat(entityID, nativeName);
+    }
+
+    internal static void SetAnimatorBool(ulong entityID, string name, bool value)
+    {
+        using NativeString nativeName = new(name);
+        Animator_SetBool(entityID, nativeName, value ? 1u : 0u);
+    }
+
+    internal static bool GetAnimatorBool(ulong entityID, string name)
+    {
+        using NativeString nativeName = new(name);
+        return Animator_GetBool(entityID, nativeName) != 0;
+    }
+
+    internal static void SetCharacterMoveVelocity(ulong entityID, Vector3 velocity) =>
+        Character_SetMoveVelocity(entityID, velocity.X, velocity.Y, velocity.Z);
+
+    internal static void CharacterJump(ulong entityID, float speed) => Character_Jump(entityID, speed);
+
+    internal static bool IsCharacterGrounded(ulong entityID) => Character_IsGrounded(entityID) != 0;
+
+    internal static Vector3 GetCharacterVelocity(ulong entityID)
+    {
+        Vector3 velocity;
+        Character_GetVelocity(entityID, &velocity);
+        return velocity;
+    }
 
     internal static Transform GetLocalTransform(ulong entityID)
     {

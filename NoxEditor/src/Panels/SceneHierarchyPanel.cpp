@@ -521,6 +521,7 @@ namespace Nox
             DisplayAddComponentEntry<BoxCollider3DComponent>("Box Collider 3D");
             DisplayAddComponentEntry<SphereCollider3DComponent>("Sphere Collider 3D");
             DisplayAddComponentEntry<CapsuleCollider3DComponent>("Capsule Collider 3D");
+            DisplayAddComponentEntry<CharacterController3DComponent>("Character Controller 3D");
             DisplayAddComponentEntry<TextComponent>("Text Component");
 
             ImGui::EndPopup();
@@ -1021,7 +1022,7 @@ namespace Nox
             }
         });
 
-        DrawComponent<AnimatorComponent>("Animator", entity, [](auto& component)
+        DrawComponent<AnimatorComponent>("Animator", entity, [this](auto& component)
         {
             Ref<AnimationSequence> currentAnim = component.Animator.GetCurrentAnimation();
 
@@ -1183,6 +1184,67 @@ namespace Nox
             if (ImGui::SliderFloat("Time (Ticks)", &currentTime, 0.0f, maxDuration, "%.2f"))
             {
                 component.Animator.SetCurrentTime(currentTime);
+            }
+
+            // Graph mode (docs/Animation_Graph_Architecture_Plan_2026.md): drives the same Skeleton/NodeEntities
+            // above through a compiled .nanimgraph instead of the single clip. The node-canvas editor (Step 3/4
+            // of that plan) is a separate window that edits the .nanimgraph asset itself, opened by double-
+            // clicking the Graph field once that exists; this is the permanent parameter-tweaking counterpart.
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Text("Animation Graph");
+
+            std::string currentGraphName = "None";
+            if (component.Graph != 0 && registry.contains(component.Graph))
+                currentGraphName = registry.at(component.Graph).FilePath.stem().string();
+
+            const bool graphComboOpen = ImGui::BeginCombo("Graph", currentGraphName.c_str());
+            // Double-clicking the reference opens its editor window (checked right after BeginCombo, while the
+            // combo is still the last item -- inside the popup body it no longer is).
+            if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) &&
+                component.Graph != 0 && m_OpenAsset)
+                m_OpenAsset(component.Graph);
+            if (graphComboOpen)
+            {
+                if (ImGui::Selectable("None", component.Graph == 0))
+                    component.Graph = 0;
+
+                for (const auto& [handle, metadata] : registry)
+                {
+                    if (metadata.Type != AssetType::AnimationGraph)
+                        continue;
+                    std::string name = metadata.FilePath.stem().string();
+                    if (ImGui::Selectable(name.c_str(), component.Graph == handle))
+                        component.Graph = handle;
+                }
+                ImGui::EndCombo();
+            }
+
+            if (ImGui::BeginDragDropTarget())
+            {
+                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEM"))
+                {
+                    AssetHandle dropped = *(AssetHandle*)payload->Data;
+                    if (AssetManager::GetAssetType(dropped) == AssetType::AnimationGraph)
+                        component.Graph = dropped;
+                    else
+                        NOX_CORE_WARN("Wrong Asset Type - Expected an AnimationGraph");
+                }
+                ImGui::EndDragDropTarget();
+            }
+
+            if (component.Graph != 0)
+            {
+                ImGui::Text("Parameters");
+                for (auto& [name, value] : component.GraphInstance.Parameters)
+                {
+                    if (float* f = std::get_if<float>(&value))
+                        ImGui::DragFloat(name.c_str(), f, 0.01f); // not clamped: a parameter can be a speed, not just a 0-1 blend
+                    else if (bool* b = std::get_if<bool>(&value))
+                        ImGui::Checkbox(name.c_str(), b);
+                    else if (int32_t* i = std::get_if<int32_t>(&value))
+                        ImGui::DragInt(name.c_str(), i);
+                }
             }
         });
 
@@ -1644,6 +1706,21 @@ namespace Nox
             ImGui::DragFloat3("Offset", glm::value_ptr(component.Offset), 0.05f);
             ImGui::DragFloat("Friction", &component.Friction, 0.01f, 0.0f, 1.0f);
             ImGui::DragFloat("Restitution", &component.Restitution, 0.01f, 0.0f, 1.0f);
+        });
+
+        DrawComponent<CharacterController3DComponent>("Character Controller 3D", entity, [](auto& component)
+        {
+            ImGui::DragFloat("Radius", &component.Radius, 0.01f, 0.01f, 10.0f);
+            ImGui::DragFloat("Height", &component.Height, 0.05f, 0.0f, 20.0f);
+            ImGui::DragFloat("Step Height", &component.StepHeight, 0.01f, 0.0f, 2.0f);
+            ImGui::DragFloat("Max Slope", &component.MaxSlopeDegrees, 0.5f, 0.0f, 89.0f, "%.1f deg");
+            ImGui::DragFloat("Gravity Scale", &component.GravityScale, 0.05f, 0.0f, 10.0f);
+            ImGui::DragFloat("Air Control", &component.AirControl, 0.01f, 0.0f, 1.0f);
+            ImGui::Separator();
+            ImGui::BeginDisabled();
+            ImGui::Checkbox("Grounded", &component.IsGrounded);
+            ImGui::DragFloat3("Velocity", glm::value_ptr(component.Velocity));
+            ImGui::EndDisabled();
         });
 
         DrawComponent<TextComponent>("Text Renderer", entity, [](auto& component)

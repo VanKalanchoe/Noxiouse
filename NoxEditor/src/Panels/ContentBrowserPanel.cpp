@@ -7,7 +7,10 @@
 #include <cctype>
 #include <cstring>
 
+#include "NoxCore/Animation/AnimationGraphNodes.h"
 #include "NoxCore/Asset/AssetManager.h"
+#include "NoxCore/Asset/EditorAssetManager.h"
+#include "NoxCore/Asset/NodeGraphSerializer.h"
 #include "NoxCore/Asset/TextureImporter.h"
 #include "NoxCore/Core/Application.h"
 #include "NoxCore/Core/Log.h"
@@ -150,6 +153,9 @@ namespace Nox
         if (ImGui::Button("New C# Script"))
             m_ShowCreateScriptModal = true;
         ImGui::SameLine();
+        if (ImGui::Button("New Animation Graph"))
+            m_ShowCreateGraphModal = true;
+        ImGui::SameLine();
         if (m_CurrentDirectory != m_BaseDirectory)
         {
             if (ImGui::Button("<"))
@@ -209,14 +215,20 @@ namespace Nox
                 ImGui::EndDragDropSource();
             }
 
-            if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) &&
-                metadata.Type == AssetType::MeshSource)
+            if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
             {
-                m_PendingImportPath = metadata.FilePath;
-                m_ShowImportModal = true;
-                const auto defaultDest = m_PendingImportPath.parent_path() / "Meshes" /
-                    (m_PendingImportPath.stem().string() + (m_ImportAsStaticMesh ? ".nsmesh" : ".nmesh"));
-                SetImportDestination(defaultDest);
+                if (metadata.Type == AssetType::MeshSource)
+                {
+                    m_PendingImportPath = metadata.FilePath;
+                    m_ShowImportModal = true;
+                    const auto defaultDest = m_PendingImportPath.parent_path() / "Meshes" /
+                        (m_PendingImportPath.stem().string() + (m_ImportAsStaticMesh ? ".nsmesh" : ".nmesh"));
+                    SetImportDestination(defaultDest);
+                }
+                else if (m_OpenAsset)
+                {
+                    m_OpenAsset(handle); // EditorLayer ignores types it has no editor window for
+                }
             }
             ImGui::TextWrapped("%s", metadata.FilePath.filename().string().c_str());
             ImGui::NextColumn();
@@ -307,6 +319,56 @@ namespace Nox
                     std::filesystem::remove(scriptPath, error);
                     NOX_CORE_ERROR("Failed to create C# script '{}' from template '{}'",
                                    scriptPath.string(), templatePath.string());
+                }
+            }
+            if (disableCreate) ImGui::EndDisabled();
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+        }
+
+        if (m_ShowCreateGraphModal)
+        {
+            ImGui::OpenPopup("Create Animation Graph");
+            m_ShowCreateGraphModal = false;
+        }
+        if (ImGui::BeginPopupModal("Create Animation Graph", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+        {
+            ImGui::InputText("Name", m_NewGraphName, sizeof(m_NewGraphName));
+            const std::string graphName = m_NewGraphName;
+            const std::filesystem::path graphPath = m_CurrentDirectory / (graphName + ".nanimgraph");
+            const bool validName = !graphName.empty() && graphName.find_first_of("\\/:*?\"<>|") == std::string::npos;
+            const bool graphAlreadyExists = std::filesystem::exists(graphPath);
+            if (!validName)
+                ImGui::TextColored({0.9f, 0.2f, 0.3f, 1.0f}, "Enter a valid file name");
+            else if (graphAlreadyExists)
+                ImGui::TextColored({0.9f, 0.2f, 0.3f, 1.0f}, "A graph with this name already exists here");
+
+            const bool disableCreate = !validName || graphAlreadyExists;
+            if (disableCreate) ImGui::BeginDisabled();
+            if (ImGui::Button("Create"))
+            {
+                if (NodeGraphSerializer::Serialize(graphPath, CreateEmptyAnimationGraph()))
+                {
+                    // Writing the file isn't enough: the registry (and so the Content Browser, the Animator's
+                    // Graph combo and everything else keyed by AssetHandle) only knows registered assets.
+                    std::filesystem::path relativeDirectory = m_CurrentDirectory.lexically_relative(m_BaseDirectory);
+                    if (relativeDirectory == ".")
+                        relativeDirectory.clear(); // asset root: same as scanning everything
+                    m_Project->GetEditorAssetManager()->ScanAndRegisterNewAssets(relativeDirectory);
+                    RefreshAssetTree();
+
+                    const AssetHandle handle = FindAssetHandle(graphPath.lexically_relative(m_BaseDirectory));
+                    if (handle != 0 && m_OpenAsset)
+                        m_OpenAsset(handle);
+
+                    constexpr char defaultGraphName[] = "NewAnimationGraph";
+                    std::copy_n(defaultGraphName, sizeof(defaultGraphName), m_NewGraphName);
+                    ImGui::CloseCurrentPopup();
+                }
+                else
+                {
+                    NOX_CORE_ERROR("Failed to create animation graph '{}'", graphPath.string());
                 }
             }
             if (disableCreate) ImGui::EndDisabled();

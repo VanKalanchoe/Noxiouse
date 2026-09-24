@@ -519,6 +519,32 @@ namespace Nox
                 });
         }
 
+        // The render graph starts fresh each frame, so it has no record of last frame's compute-skinning writes to
+        // this ring slot; make them visible to the G-Buffer's fragment shader read with its own pass (RGPassFlags::
+        // None, no dynamic rendering scope) instead of a manual barrier inside G-Buffer's Execute -- vkCmdPipelineBarrier2
+        // is illegal between vkCmdBeginRendering/vkCmdEndRendering without VK_KHR_dynamic_rendering_local_read/
+        // VK_EXT_shader_tile_image, which this device doesn't enable (validation: "can not be called inside a
+        // dynamic rendering instance", first hit once a skinned mesh -- e.g. Fox -- made skinnedHistoryValid true).
+        if (resolveMaterials && m_frame.skinnedHistoryValid)
+        {
+            m_renderGraph.AddPass("Skinned History Barrier", RGPassFlags::None,
+                [&](RGBuilder& builder)
+                {
+                    ReadIfValid(builder, resources.PreviousSkinnedVertices);
+                },
+                [res = &resources](RGPassContext& context)
+                {
+                    if (!res->PreviousSkinnedVertices.IsValid())
+                        return;
+                    const NRI::BufferBarrierDesc historyBarrier{
+                        &context.Buffer(res->PreviousSkinnedVertices),
+                        { NRI::AccessBits::ShaderWrite, NRI::StageBits::Compute },
+                        { NRI::AccessBits::ShaderRead, NRI::StageBits::Fragment }
+                    };
+                    context.Cmd().resourceBarriers({}, std::span<const NRI::BufferBarrierDesc>(&historyBarrier, 1));
+                });
+        }
+
         // Decoupled material resolve, or only the clears when the scene has no meshes (entity IDs must read -1 for
         // picking, and later passes still find defined G-buffer contents).
         m_renderGraph.AddPass(resolveMaterials ? "G-Buffer" : "G-Buffer Clear", RGPassFlags::Raster,
@@ -553,18 +579,6 @@ namespace Nox
                 const uint32_t attachmentCount = writeVelocity ? 6u : 5u;
                 const float rw = static_cast<float>(m_frame.renderExtent.width);
                 const float rh = static_cast<float>(m_frame.renderExtent.height);
-
-                // The render graph starts fresh each frame, so explicitly make the previous submission's compute
-                // writes visible before the fragment shader reads the previous ring slot for skeletal velocity.
-                if (m_frame.skinnedHistoryValid && res->PreviousSkinnedVertices.IsValid())
-                {
-                    const NRI::BufferBarrierDesc historyBarrier{
-                        &context.Buffer(res->PreviousSkinnedVertices),
-                        { NRI::AccessBits::ShaderWrite, NRI::StageBits::Compute },
-                        { NRI::AccessBits::ShaderRead, NRI::StageBits::Fragment }
-                    };
-                    cmd.resourceBarriers({}, std::span<const NRI::BufferBarrierDesc>(&historyBarrier, 1));
-                }
 
                 cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *gbufferPipeline);
                 cmd.setCullMode(NRI::CullMode::None);

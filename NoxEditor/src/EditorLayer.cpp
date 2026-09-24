@@ -37,6 +37,9 @@ namespace Nox
         m_RenderGraphPanel = CreateScope<RenderGraphPanel>(m_Renderer);
         m_Renderer2D = m_Renderer->getRenderer2D();
 
+        m_AssetOpeners[AssetType::AnimationGraph] = [this](AssetHandle handle) { OpenNodeGraphEditor(handle); };
+        m_SceneHierarchyPanel.SetOpenAssetCallback([this](AssetHandle handle) { OpenAsset(handle); });
+
         m_Font = Font::GetDefault();
 
         // These editor icon .ktx2 files carry a KTXorientation tag claiming bottom-up (Y=up)
@@ -322,6 +325,26 @@ namespace Nox
                 bool renderGraphOpen = m_RenderGraphPanel->IsOpen();
                 if (ImGui::MenuItem("Render Graph", nullptr, &renderGraphOpen))
                     m_RenderGraphPanel->SetOpen(renderGraphOpen);
+
+                // Temporary entry point (docs/Animation_Graph_Architecture_Plan_2026.md Step 3); Step 4 replaces
+                // this with double-clicking a graph asset reference.
+                if (ImGui::BeginMenu("Animation Graphs"))
+                {
+                    auto assetManager = Project::GetActive()->GetEditorAssetManager();
+                    const auto& registry = assetManager->GetAssetRegistry();
+                    bool any = false;
+                    for (const auto& [handle, metadata] : registry)
+                    {
+                        if (metadata.Type != AssetType::AnimationGraph)
+                            continue;
+                        any = true;
+                        if (ImGui::MenuItem(metadata.FilePath.stem().string().c_str()))
+                            OpenNodeGraphEditor(handle);
+                    }
+                    if (!any)
+                        ImGui::TextDisabled("No .nanimgraph assets found");
+                    ImGui::EndMenu();
+                }
 
                 ImGui::EndMenu();
             }
@@ -645,6 +668,10 @@ namespace Nox
         m_SceneHierarchyPanel.OnImGuiRender();
         m_ContentBrowserPanel->OnImGuiRender();
         m_RenderGraphPanel->OnImGuiRender();
+
+        for (auto& panel : m_NodeGraphEditors)
+            panel->OnImGuiRender();
+        std::erase_if(m_NodeGraphEditors, [](const Scope<NodeGraphEditorPanel>& panel) { return !panel->IsOpen(); });
 
         // "Right" Window
         ImGui::Begin("Stats");
@@ -1446,10 +1473,27 @@ namespace Nox
         ImGui::End();
     }
 
+    bool EditorLayer::AnyNodeGraphEditorWantsInput() const
+    {
+        return std::any_of(m_NodeGraphEditors.begin(), m_NodeGraphEditors.end(),
+            [](const Scope<NodeGraphEditorPanel>& panel) { return panel->WantsInput(); });
+    }
+
+    bool EditorLayer::AnyNodeGraphEditorHovered() const
+    {
+        return std::any_of(m_NodeGraphEditors.begin(), m_NodeGraphEditors.end(),
+            [](const Scope<NodeGraphEditorPanel>& panel) { return panel->IsHovered(); });
+    }
+
     bool EditorLayer::OnKeyPressed(KeyPressedEvent& e)
     {
         // 1. Abort if the user is typing in an ImGui text field
         if (ImGui::GetIO().WantTextInput)
+            return false;
+
+        // A graph editor window owns the keyboard while it's focused or hovered (Delete removes its selected
+        // node, not the scene entity selected elsewhere; Q/W/E/R aren't gizmo switches there).
+        if (AnyNodeGraphEditorWantsInput())
             return false;
 
         // Shortcuts
@@ -1558,6 +1602,9 @@ namespace Nox
 
     bool EditorLayer::OnMouseButtonPressed(MouseButtonPressedEvent& event)
     {
+        if (AnyNodeGraphEditorHovered())
+            return false; // a click in the graph window must not also pick the scene entity under the viewport
+
         if (event.GetMouseButton() == SDL_BUTTON_LEFT)
         {
             if (m_ViewportHovered && !ImGuizmo::IsOver() && !Input::IsKeyPressed(SDL_SCANCODE_LALT))
@@ -1719,6 +1766,7 @@ namespace Nox
                 OpenScene(startScene);
 
             m_ContentBrowserPanel = CreateScope<ContentBrowserPanel>(Project::GetActive());
+            m_ContentBrowserPanel->SetOpenAssetCallback([this](AssetHandle handle) { OpenAsset(handle); });
         }
     }
 
@@ -1836,6 +1884,26 @@ namespace Nox
         SceneImporter::SaveScene(scene, path);
     }
 
+    void EditorLayer::OpenAsset(AssetHandle handle)
+    {
+        auto opener = m_AssetOpeners.find(AssetManager::GetAssetType(handle));
+        if (opener != m_AssetOpeners.end())
+            opener->second(handle);
+    }
+
+    void EditorLayer::OpenNodeGraphEditor(AssetHandle handle)
+    {
+        for (auto& panel : m_NodeGraphEditors)
+        {
+            if (panel->GetGraphAsset() == handle)
+            {
+                panel->SetOpen(true);
+                return;
+            }
+        }
+        m_NodeGraphEditors.push_back(CreateScope<NodeGraphEditorPanel>(handle));
+    }
+
     void EditorLayer::OnScenePlay()
     {
         if (m_SceneState == SceneState::Simulate)
@@ -1843,6 +1911,7 @@ namespace Nox
 
         m_SceneState = SceneState::Play;
 
+        m_HoveredEntity = Entity(); // points into the scene being replaced
         m_ActiveScene = Scene::Copy(m_EditorScene);
         m_ActiveScene->OnRuntimeStart();
 
@@ -1856,6 +1925,7 @@ namespace Nox
 
         m_SceneState = SceneState::Simulate;
 
+        m_HoveredEntity = Entity(); // points into the scene being replaced
         m_ActiveScene = Scene::Copy(m_EditorScene);
         m_ActiveScene->OnSimulationStart();
 
@@ -1873,6 +1943,7 @@ namespace Nox
 
         m_SceneState = SceneState::Edit;
 
+        m_HoveredEntity = Entity(); // points into the play scene that is destroyed here
         m_ActiveScene = m_EditorScene;
 
         m_SceneHierarchyPanel.SetContext(m_ActiveScene);
