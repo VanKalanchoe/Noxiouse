@@ -39,6 +39,11 @@ namespace Nox
 
         m_AssetOpeners[AssetType::AnimationGraph] = [this](AssetHandle handle) { OpenNodeGraphEditor(handle); };
         m_SceneHierarchyPanel.SetOpenAssetCallback([this](AssetHandle handle) { OpenAsset(handle); });
+        m_SceneHierarchyPanel.SetPlaceAssetsCallback([this](const std::vector<AssetHandle>& handles, const std::string& folder)
+        {
+            // No viewport point for a drop on the hierarchy: at the point the editor camera orbits (in front of it).
+            PlaceAssets(handles, m_EditorCamera.GetPosition() + m_EditorCamera.GetForwardDirection() * m_EditorCamera.GetDistance(), folder);
+        });
 
         m_Font = Font::GetDefault();
 
@@ -136,6 +141,17 @@ namespace Nox
             UnloadUnusedAssets();
         }
 
+
+        // Import Into Level requests whose assets finished cooking: their scene goes into the level being edited.
+        for (const ModelInstance::LevelDescription& level : Project::GetActive()->GetEditorAssetManager()->ConsumeLevelImports())
+        {
+            if (m_EditorScene)
+            {
+                Entity imported = ModelInstance::SpawnLevel(*m_EditorScene, level);
+                if (m_ActiveScene == m_EditorScene)
+                    m_SceneHierarchyPanel.SetSelectedEntity(imported);
+            }
+        }
         m_ActiveScene->OnViewportResize(m_ViewportSize.x, m_ViewportSize.y);
 
         // zero sized framebuffer is invalid
@@ -627,32 +643,8 @@ namespace Nox
                         }
                     }
 
-                    Entity group = m_ActiveScene->CreateEntity("Placed Assets");
-                    size_t placed = 0;
-                    for (size_t i = 0; i < count; ++i)
-                    {
-                        const AssetType type = AssetManager::GetAssetType(handles[i]);
-                        if (type != AssetType::Mesh && type != AssetType::StaticMesh)
-                            continue;
-
-                        const AssetMetadata& metadata = Project::GetActive()->GetEditorAssetManager()->GetMetadata(handles[i]);
-                        std::string entityName = metadata.FilePath.filename().stem().string();
-                        Entity root = m_ActiveScene->CreateEntity(entityName.empty() ? "Model" : entityName);
-                        auto& instance = root.AddComponent<ModelInstanceComponent>();
-                        instance.Model = handles[i];
-                        instance.AtFileLayout = true;
-                        if (metadata.MeshSettings.ImportScale > 0.0f)
-                            root.GetComponent<TransformComponent>().Scale = glm::vec3(metadata.MeshSettings.ImportScale);
-                        AssetManager::RequestAsset(handles[i]);
-                        root.SetParent(group);
-                        ++placed;
-                    }
-                    group.GetComponent<TransformComponent>().Translation = dropPoint;
-                    group.MarkTransformDirty();
-                    if (placed > 0)
-                        m_SceneHierarchyPanel.SetSelectedEntity(group);
-                    else
-                        m_ActiveScene->DestroyEntity(group);
+                    // Like Unreal: no group entity, no folder -- every piece lands at the top level of the outliner.
+                    PlaceAssets(std::vector<AssetHandle>(handles, handles + count), dropPoint, std::string());
                 }
                 ImGui::EndDragDropTarget();
             }
@@ -1653,11 +1645,19 @@ namespace Nox
             {
                 if (Application::Get().GetLayer<ImGuiLayer>()->GetActiveWidgetID() == 0)
                 {
-                    Entity selectedEntity = m_SceneHierarchyPanel.GetSelectedEntity();
-                    if (selectedEntity)
+                    // Everything selected, not just the last one. Resolved by UUID: deleting a parent already removes its
+                    // selected children.
+                    std::vector<UUID> toDelete;
+                    for (Entity selected : m_SceneHierarchyPanel.GetSelectedEntities())
                     {
-                        m_SceneHierarchyPanel.SetSelectedEntity({});
-                        m_ActiveScene->DestroyEntity(selectedEntity);
+                        if (selected)
+                            toDelete.push_back(selected.GetUUID());
+                    }
+                    m_SceneHierarchyPanel.ClearSelection();
+                    for (UUID id : toDelete)
+                    {
+                        if (Entity entity = m_ActiveScene->GetEntityByUUID(id))
+                            m_ActiveScene->DestroyEntity(entity);
                     }
                 }
                 break;
@@ -1942,6 +1942,34 @@ namespace Nox
             }
         }
         ImGui::End();
+    }
+
+    // Places model assets into the scene being edited at `point`, filed under `folder` ("" = the top level): a single asset is
+    // one model instance, several use each asset's file layout (per-mesh assets) -- either way the instance turns into plain
+    // flat entities once loaded. Used by the viewport (drop point on the ray) and the hierarchy panel (a folder row).
+    void EditorLayer::PlaceAssets(const std::vector<AssetHandle>& handles, const glm::vec3& point, const std::string& folder)
+    {
+        m_SceneHierarchyPanel.ClearSelection();
+        for (AssetHandle handle : handles)
+        {
+            const AssetType type = AssetManager::GetAssetType(handle);
+            if (type != AssetType::Mesh && type != AssetType::StaticMesh)
+                continue;
+
+            const AssetMetadata& metadata = Project::GetActive()->GetEditorAssetManager()->GetMetadata(handle);
+            std::string entityName = metadata.FilePath.filename().stem().string();
+            Entity root = m_ActiveScene->CreateEntity(entityName.empty() ? "Model" : entityName);
+            auto& instance = root.AddComponent<ModelInstanceComponent>();
+            instance.Model = handle;
+            instance.AtFileLayout = false; // one entity per dragged asset, like UE5
+            auto& rootTransform = root.GetComponent<TransformComponent>();
+            rootTransform.Translation = point;
+            if (metadata.MeshSettings.ImportScale > 0.0f)
+                rootTransform.Scale = glm::vec3(metadata.MeshSettings.ImportScale);
+            if (!folder.empty())
+                root.AddComponent<FolderComponent>(folder);
+            AssetManager::RequestAsset(handle);
+        }
     }
 
     void EditorLayer::SaveScene()

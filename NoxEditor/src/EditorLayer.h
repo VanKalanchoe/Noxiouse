@@ -42,6 +42,7 @@ namespace Nox
         void NewScene();
         void OpenScene();
         void OpenScene(AssetHandle handle);
+        void PlaceAssets(const std::vector<AssetHandle>& handles, const glm::vec3& point, const std::string& folder);
         void SaveScene();
         void SaveSceneAs();
         

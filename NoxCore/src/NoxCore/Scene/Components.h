@@ -81,6 +81,17 @@ namespace Nox
         RelationshipComponent(const RelationshipComponent&) = default;
     };
 
+    // The outliner folder an entity is filed under, like Unreal's: a path ("Bistro/Props") that only groups rows in the
+    // hierarchy panel. Not an entity, no transform, no parenting. Empty / absent = the top level.
+    struct FolderComponent
+    {
+        std::string Path;
+
+        FolderComponent() = default;
+        FolderComponent(const FolderComponent&) = default;
+        FolderComponent(const std::string& path) : Path(path) {}
+    };
+
     // Dirty Transform Tracking
     // Present on every entity (added at creation). Set instead of added/removed, so marking and clearing are plain
     // writes that tasks can do without structural registry changes.
@@ -462,7 +473,7 @@ namespace Nox
     };
 
     using AllComponents = 
-        ComponentGroup<TransformComponent, WorldTransformComponent, RelationshipComponent, DirtyTransformComponent,
+        ComponentGroup<TransformComponent, WorldTransformComponent, RelationshipComponent, DirtyTransformComponent, FolderComponent,
         MeshComponent, MaterialComponent, ModelInstanceComponent, ModelNodeComponent, DirectionalLightComponent, PointLightComponent, SpotLightComponent, EnvironmentLightComponent, AnimatorComponent,
         SpriteRendererComponent,
             CircleRendererComponent, CameraComponent, ScriptComponent,

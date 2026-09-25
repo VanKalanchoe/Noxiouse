@@ -1,4 +1,6 @@
 #pragma once
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "Components.h"
@@ -27,5 +29,27 @@ namespace Nox
         // Destroys the spawned nodes, keeping their overrides and any children the user attached, and brings back the
         // removed ones: the instance spawns again from the model.
         void Respawn(Scene& scene, Entity root);
+
+        // Unreal's Import Into Level: a glTF's scene as entities that keep its structure -- one root, every node an entity under
+        // its parent with its local transform, lights and cameras on their nodes. Mesh nodes reference the per-mesh static mesh
+        // assets (MeshAssets: glTF mesh index -> asset); skinned nodes become model instances of SkeletalAsset (one animated
+        // entity on load) when there is one. Content Browser imports and drag-in stay flat: only this makes hierarchy.
+        struct LevelDescription
+        {
+            std::string Name;
+            float Scale = 1.0f; // Import Scale, on the root
+            std::vector<MeshNodeData> Nodes;
+            std::vector<LightNodeData> Lights;
+            std::vector<CameraNodeData> Cameras;
+            std::unordered_map<int32_t, AssetHandle> MeshAssets;
+            AssetHandle SkeletalAsset = 0;
+            struct Clip
+            {
+                AssetHandle Handle = 0;
+                std::vector<int32_t> Nodes; // the nodes it animates
+            };
+            std::vector<Clip> Clips; // node animations of the file
+        };
+        Entity SpawnLevel(Scene& scene, const LevelDescription& level);
     }
 }

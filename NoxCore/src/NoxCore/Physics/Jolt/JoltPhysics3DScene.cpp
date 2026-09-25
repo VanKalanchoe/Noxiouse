@@ -144,6 +144,7 @@ namespace Nox {
                 }
             }
             m_EntityToBodyMap.clear();
+            m_BodyPoses.clear();
             m_EntityToCharacterMap.clear();
             m_BodyToEntityMap.clear();
         }
@@ -391,6 +392,7 @@ namespace Nox {
                 m_BodyToEntityMap.erase(bodyId.GetIndexAndSequenceNumber());
             }
             m_EntityToBodyMap.erase(it);
+            m_BodyPoses.erase(entIdVal);
         }
 
         if (entity.HasComponent<RigidBody3DComponent>())
@@ -544,6 +546,37 @@ namespace Nox {
         }
     }
 
+    // Called after every fixed step: the pose before it is the one the entity is drawn from, the new one the one it moves to.
+    void JoltPhysics3DScene::CaptureBodyPoses()
+    {
+        JPH::BodyInterface& bodyInterface = m_PhysicsSystem->GetBodyInterface();
+        for (const auto& [entityId, bodyId] : m_EntityToBodyMap)
+        {
+            if (bodyId.IsInvalid() || bodyInterface.GetMotionType(bodyId) == JPH::EMotionType::Static)
+                continue;
+
+            const glm::vec3 position = JoltUtils::ToGLM(bodyInterface.GetPosition(bodyId));
+            const glm::quat rotation = JoltUtils::ToGLM(bodyInterface.GetRotation(bodyId));
+            auto [pose, isNew] = m_BodyPoses.try_emplace(entityId);
+            if (isNew)
+            {
+                // Nothing to interpolate from yet: the first step is drawn as it is.
+                pose->second.Previous = pose->second.Current = position;
+                pose->second.PreviousRotation = pose->second.CurrentRotation = rotation;
+                pose->second.NeedsSync = true;
+                continue;
+            }
+
+            BodyPose& stored = pose->second;
+            stored.Previous = stored.Current;
+            stored.PreviousRotation = stored.CurrentRotation;
+            if (position != stored.Current || rotation != stored.CurrentRotation)
+                stored.NeedsSync = true;
+            stored.Current = position;
+            stored.CurrentRotation = rotation;
+        }
+    }
+
     void JoltPhysics3DScene::Step(float dt)
     {
         if (!m_PhysicsSystem)
@@ -557,6 +590,7 @@ namespace Nox {
         {
             StepCharacters(c_FixedDeltaTime);
             m_PhysicsSystem->Update(c_FixedDeltaTime, 1, m_TempAllocator.get(), m_JobSystem.get());
+            CaptureBodyPoses();
             m_Accumulator -= c_FixedDeltaTime;
             steps++;
         }
@@ -584,16 +618,31 @@ namespace Nox {
                 if (rb.Type == RigidBody3DComponent::BodyType::Static)
                     continue; // Static bodies do not move
 
-                if (bodyInterface.IsActive(bodyId))
+                // A body that fell asleep is synced once more after its last step, so it ends on its final pose.
+                auto poseIt = m_BodyPoses.find(entityId);
+                BodyPose* pose = poseIt != m_BodyPoses.end() ? &poseIt->second : nullptr;
+                const bool active = bodyInterface.IsActive(bodyId);
+                if (active || (pose && pose->NeedsSync))
                 {
                     auto& transform = entity.GetComponent<TransformComponent>();
                     auto& dirty = entity.GetComponent<DirtyTransformComponent>();
 
-                    JPH::RVec3 pos = bodyInterface.GetPosition(bodyId);
-                    JPH::Quat rot = bodyInterface.GetRotation(bodyId);
-
-                    glm::vec3 worldPos = JoltUtils::ToGLM(pos);
-                    glm::quat worldRot = JoltUtils::ToGLM(rot);
+                    glm::vec3 worldPos;
+                    glm::quat worldRot;
+                    if (pose)
+                    {
+                        // Drawn between the last two fixed steps by how far the accumulator is into the next one.
+                        const float alpha = glm::clamp(m_Accumulator / c_FixedDeltaTime, 0.0f, 1.0f);
+                        worldPos = glm::mix(pose->Previous, pose->Current, alpha);
+                        worldRot = glm::slerp(pose->PreviousRotation, pose->CurrentRotation, alpha);
+                        if (!active && pose->Previous == pose->Current && pose->PreviousRotation == pose->CurrentRotation)
+                            pose->NeedsSync = false; // settled: this frame writes the final pose
+                    }
+                    else
+                    {
+                        worldPos = JoltUtils::ToGLM(bodyInterface.GetPosition(bodyId));
+                        worldRot = JoltUtils::ToGLM(bodyInterface.GetRotation(bodyId));
+                    }
 
                     bool hasParent = false;
                     glm::mat4 parentWorldInv(1.0f);

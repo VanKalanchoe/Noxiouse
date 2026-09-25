@@ -98,6 +98,42 @@ namespace Nox
             parent.GetComponent<RelationshipComponent>().Children.push_back(child.GetUUID());
         }
 
+        // Sets a transform from a matrix without glm::decompose (its orientation has been unreliable in this codebase): scale =
+        // column lengths, rotation = the normalized basis (a mirrored transform flips one axis), translation = the last column.
+        void setFromMatrix(TransformComponent& transform, const glm::mat4& matrix)
+        {
+            glm::vec3 scale(glm::length(glm::vec3(matrix[0])), glm::length(glm::vec3(matrix[1])), glm::length(glm::vec3(matrix[2])));
+            transform.Translation = glm::vec3(matrix[3]);
+            if (scale.x < 1e-8f || scale.y < 1e-8f || scale.z < 1e-8f)
+            {
+                transform.Rotation = glm::vec3(0.0f);
+                transform.Scale = glm::max(scale, glm::vec3(1e-4f));
+                return;
+            }
+
+            glm::mat3 basis(glm::vec3(matrix[0]) / scale.x, glm::vec3(matrix[1]) / scale.y, glm::vec3(matrix[2]) / scale.z);
+            if (glm::determinant(basis) < 0.0f)
+            {
+                scale.x = -scale.x;
+                basis[0] = -basis[0];
+            }
+            transform.Rotation = glm::eulerAngles(glm::quat_cast(basis));
+            transform.Scale = scale;
+        }
+
+        // True when the entity carries nothing but what a fresh model instance root has, so destroying it loses nothing.
+        bool onlyInstanceComponents(Scene& scene, Entity root)
+        {
+            size_t count = 0;
+            for (auto [id, storage] : scene.GetRegistry().storage())
+            {
+                if (storage.contains(static_cast<entt::entity>(root)))
+                    ++count;
+            }
+            // ID, Tag, Transform, WorldTransform, DirtyTransform, ModelInstance (+ Relationship with a parent, Folder).
+            return count <= 8; // + a FolderComponent
+        }
+
         void addLight(Entity entity, const LightNodeData& light)
         {
             if (light.Type == GltfLightType::Directional)
@@ -136,6 +172,55 @@ namespace Nox
             component.Primary = primary;
         }
 
+        struct ClipTargets
+        {
+            AssetHandle Handle = 0;
+            std::vector<int32_t> Nodes; // sorted, unique
+        };
+
+        bool sharesNode(const std::vector<int32_t>& a, const std::vector<int32_t>& b)
+        {
+            size_t i = 0, j = 0;
+            while (i < a.size() && j < b.size())
+            {
+                if (a[i] == b[j])
+                    return true;
+                if (a[i] < b[j])
+                    ++i;
+                else
+                    ++j;
+            }
+            return false;
+        }
+
+        // Clips whose target nodes overlap form one group (union-find); returns the first clip of every group.
+        std::vector<size_t> clipGroupLeaders(const std::vector<ClipTargets>& clips)
+        {
+            std::vector<size_t> group(clips.size());
+            for (size_t i = 0; i < clips.size(); ++i)
+                group[i] = i;
+            std::function<size_t(size_t)> findGroup = [&](size_t i) -> size_t
+            {
+                return group[i] == i ? i : (group[i] = findGroup(group[i]));
+            };
+            for (size_t i = 0; i < clips.size(); ++i)
+                for (size_t j = i + 1; j < clips.size(); ++j)
+                    if (sharesNode(clips[i].Nodes, clips[j].Nodes))
+                        group[findGroup(j)] = findGroup(i);
+
+            std::vector<size_t> leaders;
+            std::vector<bool> groupAssigned(clips.size(), false);
+            for (size_t i = 0; i < clips.size(); ++i)
+            {
+                const size_t root = findGroup(i);
+                if (groupAssigned[root])
+                    continue;
+                groupAssigned[root] = true;
+                leaders.push_back(i);
+            }
+            return leaders;
+        }
+
         // glTF animations are independent clips. Blender exports one per animated object (Bistro: each fan part has its
         // own), and those all play at once; a character's clips (Fox: Survey/Walk/Run) all target the same joints and are
         // alternatives. So: clips whose target nodes overlap form one group that shares a single animator (first clip
@@ -158,11 +243,6 @@ namespace Nox
                 }
             }
 
-            struct ClipTargets
-            {
-                AssetHandle Handle = 0;
-                std::vector<int32_t> Nodes;
-            };
             std::vector<ClipTargets> clips;
             for (AssetHandle clipHandle : mesh.GetAnimationAssets())
             {
@@ -181,34 +261,6 @@ namespace Nox
                     clips.push_back(std::move(targets));
             }
 
-            auto overlaps = [](const std::vector<int32_t>& a, const std::vector<int32_t>& b)
-            {
-                size_t i = 0, j = 0;
-                while (i < a.size() && j < b.size())
-                {
-                    if (a[i] == b[j])
-                        return true;
-                    if (a[i] < b[j])
-                        ++i;
-                    else
-                        ++j;
-                }
-                return false;
-            };
-
-            // Union-find over clips by shared target nodes.
-            std::vector<size_t> group(clips.size());
-            for (size_t i = 0; i < clips.size(); ++i)
-                group[i] = i;
-            std::function<size_t(size_t)> findGroup = [&](size_t i) -> size_t
-            {
-                return group[i] == i ? i : (group[i] = findGroup(group[i]));
-            };
-            for (size_t i = 0; i < clips.size(); ++i)
-                for (size_t j = i + 1; j < clips.size(); ++j)
-                    if (overlaps(clips[i].Nodes, clips[j].Nodes))
-                        group[findGroup(j)] = findGroup(i);
-
             std::vector<int32_t> jointIndices;
             if (skeleton && !skeleton->Skins.empty() && skeleton->Skins[0])
             {
@@ -218,17 +270,11 @@ namespace Nox
                 std::sort(jointIndices.begin(), jointIndices.end());
             }
 
-            std::vector<bool> groupAssigned(clips.size(), false);
-            for (size_t i = 0; i < clips.size(); ++i)
+            for (const size_t i : clipGroupLeaders(clips))
             {
-                const size_t root = findGroup(i);
-                if (groupAssigned[root])
-                    continue;
-                groupAssigned[root] = true;
-
                 // Clip i is the group's first (sorted) clip -> the default. Joint clips belong to the skinned mesh (it
                 // plays them and skins from them); anything else goes on the node it animates.
-                Entity owner = firstSkinnedMesh && overlaps(clips[i].Nodes, jointIndices) ? firstSkinnedMesh : spawned[clips[i].Nodes.front()];
+                Entity owner = firstSkinnedMesh && sharesNode(clips[i].Nodes, jointIndices) ? firstSkinnedMesh : spawned[clips[i].Nodes.front()];
                 if (!owner)
                     continue;
 
@@ -291,6 +337,133 @@ namespace Nox
 
                 root.RemoveComponent<ModelInstanceComponent>(); // `instance` is gone
                 return true;
+            }
+
+            // A model that is one plain mesh node -- a per-mesh asset, a single Blender cube -- is just a mesh entity (like an
+            // Unreal static mesh actor), not a root with one child. Lights, cameras, animations, several nodes or a
+            // hierarchy keep the instance/node structure. A per-mesh asset dropped with the file layout has one node per
+            // place the file used the mesh: exactly one place flattens too.
+            if (mesh.GetLights().empty() && mesh.GetCameras().empty() && mesh.GetAnimationAssets().empty() && instance.Overrides.empty())
+            {
+                const MeshNodeData* only = nullptr;
+                size_t active = 0;
+                for (size_t slot = 0; slot < nodes.size(); ++slot)
+                {
+                    if (removed.contains(static_cast<uint32_t>(slot)) ||
+                        (hasLayoutNodes && (nodes[slot].Parent == MeshNodeData::FileLayoutParent) != atFileLayout))
+                        continue;
+                    ++active;
+                    only = &nodes[slot];
+                }
+
+                auto& rootTransform = root.GetComponent<TransformComponent>();
+                if (active == 1 && only->SubmeshCount > 0 && (only->Parent == -1 || only->Parent == MeshNodeData::FileLayoutParent) &&
+                    rootTransform.Rotation == glm::vec3(0.0f))
+                {
+                    const AssetHandle model = instance.Model;
+                    const TransformComponent placed = makeTransform(only->Translation, only->Rotation, only->Scale);
+                    rootTransform.Translation += rootTransform.Scale * placed.Translation;
+                    rootTransform.Rotation = placed.Rotation;
+                    rootTransform.Scale *= placed.Scale;
+                    root.MarkTransformDirty();
+
+                    auto& meshComponent = root.AddComponent<MeshComponent>();
+                    meshComponent.Mesh = model;
+                    meshComponent.SubmeshIndex = only->FirstSubmesh;
+                    meshComponent.SubmeshCount = only->SubmeshCount;
+                    root.AddComponent<MaterialComponent>();
+                    root.RemoveComponent<ModelInstanceComponent>(); // `instance` is gone
+                    return true;
+                }
+            }
+
+            // Importing never makes hierarchy (Unreal's outliner is a flat list of actors): every mesh node, light and camera of
+            // the model becomes an entity of its own, side by side under the instance's parent, at its world transform; empty
+            // grouping nodes vanish. Hierarchy stays where it is needed: animated models (a node animation moves parent-relative
+            // transforms), models with overrides, and roots that carry other components.
+            if (mesh.GetAnimationAssets().empty() && instance.Overrides.empty() && onlyInstanceComponents(scene, root))
+            {
+                std::vector<size_t> meshSlots;
+                for (size_t slot = 0; slot < nodes.size(); ++slot)
+                {
+                    if (!removed.contains(static_cast<uint32_t>(slot)) && nodes[slot].SubmeshCount > 0 &&
+                        !(hasLayoutNodes && (nodes[slot].Parent == MeshNodeData::FileLayoutParent) != atFileLayout))
+                        meshSlots.push_back(slot);
+                }
+
+                if (meshSlots.size() + mesh.GetLights().size() + mesh.GetCameras().size() > 0)
+                {
+                    const AssetHandle model = instance.Model;
+                    const glm::mat4 rootLocal = root.GetComponent<TransformComponent>().GetTransform();
+                    const std::string baseName = root.GetName();
+                    Entity parent;
+                    if (root.HasComponent<RelationshipComponent>() && root.GetComponent<RelationshipComponent>().Parent != 0)
+                        parent = scene.GetEntityByUUID(root.GetComponent<RelationshipComponent>().Parent);
+
+                    // World matrix of every node (model space): parents before children through the chain of Parent indices.
+                    std::vector<glm::mat4> world(nodes.size(), glm::mat4(1.0f));
+                    std::vector<bool> done(nodes.size(), false);
+                    std::function<const glm::mat4&(size_t)> worldOf = [&](size_t index) -> const glm::mat4&
+                    {
+                        if (done[index])
+                            return world[index];
+                        const MeshNodeData& node = nodes[index];
+                        const glm::mat4 local = makeTransform(node.Translation, node.Rotation, node.Scale).GetTransform();
+                        const bool hasParent = node.Parent >= 0 && node.Parent < static_cast<int32_t>(nodes.size()) && node.Parent != static_cast<int32_t>(index);
+                        world[index] = hasParent ? worldOf(static_cast<size_t>(node.Parent)) * local : local;
+                        done[index] = true;
+                        return world[index];
+                    };
+
+                    const std::string rootFolder = root.HasComponent<FolderComponent>() ? root.GetComponent<FolderComponent>().Path : std::string();
+                    auto place = [&](Entity entity, const glm::mat4& modelSpace)
+                    {
+                        setFromMatrix(entity.GetComponent<TransformComponent>(), rootLocal * modelSpace);
+                        if (!rootFolder.empty())
+                            entity.AddComponent<FolderComponent>(rootFolder);
+                        if (parent)
+                            attach(entity, parent);
+                    };
+
+                    const bool perMeshAsset = hasLayoutNodes;
+                    for (size_t i = 0; i < meshSlots.size(); ++i)
+                    {
+                        const MeshNodeData& node = nodes[meshSlots[i]];
+                        std::string name = (perMeshAsset || node.Name.empty()) ? baseName : node.Name;
+                        if (perMeshAsset && meshSlots.size() > 1)
+                            name += "_" + std::to_string(i + 1);
+
+                        Entity piece = scene.CreateEntity(name);
+                        auto& meshComponent = piece.AddComponent<MeshComponent>();
+                        meshComponent.Mesh = model;
+                        meshComponent.SubmeshIndex = node.FirstSubmesh;
+                        meshComponent.SubmeshCount = node.SubmeshCount;
+                        piece.AddComponent<MaterialComponent>();
+                        place(piece, worldOf(meshSlots[i]));
+                    }
+
+                    for (size_t i = 0; i < mesh.GetLights().size(); ++i)
+                    {
+                        const LightNodeData& light = mesh.GetLights()[i];
+                        const bool onNode = light.NodeIndex >= 0 && light.NodeIndex < static_cast<int32_t>(nodes.size());
+                        Entity lightEntity = scene.CreateEntity(light.Name.empty() ? "Light " + std::to_string(i) : light.Name);
+                        addLight(lightEntity, light);
+                        place(lightEntity, onNode ? worldOf(static_cast<size_t>(light.NodeIndex))
+                                                  : makeTransform(light.Translation, light.Rotation, light.Scale).GetTransform());
+                    }
+                    for (size_t i = 0; i < mesh.GetCameras().size(); ++i)
+                    {
+                        const CameraNodeData& camera = mesh.GetCameras()[i];
+                        const bool onNode = camera.NodeIndex >= 0 && camera.NodeIndex < static_cast<int32_t>(nodes.size());
+                        Entity cameraEntity = scene.CreateEntity(camera.Name.empty() ? "Camera " + std::to_string(i) : camera.Name);
+                        addCamera(scene, cameraEntity, camera);
+                        place(cameraEntity, onNode ? worldOf(static_cast<size_t>(camera.NodeIndex))
+                                                   : makeTransform(camera.Translation, camera.Rotation, camera.Scale).GetTransform());
+                    }
+
+                    scene.DestroyEntity(root); // `instance` is gone
+                    return true;
+                }
             }
 
             std::vector<Entity> spawned(slotCount(mesh));
@@ -548,5 +721,127 @@ namespace Nox
         instance.RemovedNodes.clear();
         instance.Overrides = std::move(overrides);
         instance.Spawned = false;
+    }
+
+    Entity ModelInstance::SpawnLevel(Scene& scene, const LevelDescription& level)
+    {
+        Entity root = scene.CreateEntity(level.Name.empty() ? "Imported Scene" : level.Name);
+        if (level.Scale > 0.0f && level.Scale != 1.0f)
+            root.GetComponent<TransformComponent>().Scale = glm::vec3(level.Scale);
+
+        // Every node first, then the parent links (a child may come before its parent in the file).
+        std::vector<Entity> entities(level.Nodes.size());
+        for (size_t i = 0; i < level.Nodes.size(); ++i)
+        {
+            const MeshNodeData& node = level.Nodes[i];
+            entities[i] = scene.CreateEntity(node.Name.empty() ? "Node " + std::to_string(i) : node.Name);
+            entities[i].GetComponent<TransformComponent>() = makeTransform(node.Translation, node.Rotation, node.Scale);
+        }
+        for (size_t i = 0; i < level.Nodes.size(); ++i)
+        {
+            const int32_t parent = level.Nodes[i].Parent;
+            const bool hasParent = parent >= 0 && parent < static_cast<int32_t>(entities.size()) && parent != static_cast<int32_t>(i);
+            attach(entities[i], hasParent ? entities[parent] : root);
+        }
+
+        bool skeletalPlaced = false;
+        for (size_t i = 0; i < level.Nodes.size(); ++i)
+        {
+            const MeshNodeData& node = level.Nodes[i];
+            if (node.MeshIndex < 0 || node.SubmeshCount == 0)
+                continue;
+
+            if (node.Skinned)
+            {
+                // A per-mesh skeletal asset when the skinned meshes were imported separately; otherwise the whole-file
+                // skeletal asset (it holds every skinned mesh, so it is placed once).
+                auto perMesh = level.MeshAssets.find(node.MeshIndex);
+                if (perMesh != level.MeshAssets.end())
+                {
+                    entities[i].AddComponent<ModelInstanceComponent>().Model = perMesh->second;
+                }
+                else if (level.SkeletalAsset != 0 && !skeletalPlaced)
+                {
+                    entities[i].AddComponent<ModelInstanceComponent>().Model = level.SkeletalAsset;
+                    skeletalPlaced = true;
+                }
+                continue;
+            }
+
+            auto found = level.MeshAssets.find(node.MeshIndex);
+            if (found == level.MeshAssets.end())
+                continue;
+            auto& meshComponent = entities[i].AddComponent<MeshComponent>();
+            meshComponent.Mesh = found->second;
+            meshComponent.SubmeshIndex = 0;
+            meshComponent.SubmeshCount = UINT32_MAX;
+            entities[i].AddComponent<MaterialComponent>();
+        }
+
+        // Node animations: clips that animate the same nodes are alternatives and share one animator (the first plays); every
+        // other group gets its own, so a level's fans and doors all run at once.
+        {
+            std::vector<UUID> nodeTable(entities.size());
+            for (size_t i = 0; i < entities.size(); ++i)
+                nodeTable[i] = entities[i].GetUUID();
+
+            std::vector<ClipTargets> clips;
+            for (const ModelInstance::LevelDescription::Clip& clip : level.Clips)
+            {
+                ClipTargets targets{ clip.Handle, {} };
+                for (const int32_t node : clip.Nodes)
+                {
+                    if (node >= 0 && node < static_cast<int32_t>(entities.size()))
+                        targets.Nodes.push_back(node);
+                }
+                if (!targets.Nodes.empty())
+                    clips.push_back(std::move(targets));
+            }
+            for (const size_t i : clipGroupLeaders(clips))
+            {
+                Entity owner = entities[clips[i].Nodes.front()];
+                if (owner.HasComponent<AnimatorComponent>())
+                    continue;
+                auto& animator = owner.AddComponent<AnimatorComponent>();
+                animator.Animation = clips[i].Handle;
+                animator.NodeEntities = nodeTable;
+            }
+        }
+
+        // Lights and cameras sit on their node; ones without a node get an entity under the root.
+        for (size_t i = 0; i < level.Lights.size(); ++i)
+        {
+            const LightNodeData& light = level.Lights[i];
+            Entity target;
+            if (light.NodeIndex >= 0 && light.NodeIndex < static_cast<int32_t>(entities.size()))
+            {
+                target = entities[light.NodeIndex];
+            }
+            else
+            {
+                target = scene.CreateEntity(light.Name.empty() ? "Light " + std::to_string(i) : light.Name);
+                target.GetComponent<TransformComponent>() = makeTransform(light.Translation, light.Rotation, light.Scale);
+                attach(target, root);
+            }
+            addLight(target, light);
+        }
+        for (size_t i = 0; i < level.Cameras.size(); ++i)
+        {
+            const CameraNodeData& camera = level.Cameras[i];
+            Entity target;
+            if (camera.NodeIndex >= 0 && camera.NodeIndex < static_cast<int32_t>(entities.size()))
+            {
+                target = entities[camera.NodeIndex];
+            }
+            else
+            {
+                target = scene.CreateEntity(camera.Name.empty() ? "Camera " + std::to_string(i) : camera.Name);
+                target.GetComponent<TransformComponent>() = makeTransform(camera.Translation, camera.Rotation, camera.Scale);
+                attach(target, root);
+            }
+            addCamera(scene, target, camera);
+        }
+
+        return root;
     }
 }

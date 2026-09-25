@@ -15,6 +15,7 @@
 
 #include "NoxCore/Tasks/JobSystem.h"
 #include "MeshImporter.h"
+#include "NoxCore/Scene/ModelInstance.h"
 #include "NoxCore/Utils/NOXWatcher.h"
 #include "NoxCore/Utils/Utils.h"
 
@@ -73,6 +74,8 @@ namespace Nox
             uint32_t Total = 0;
         };
         ImportProgress GetImportProgress() const;
+        // Import Into Level requests whose meshes are cooked and registered: the editor places each in its scene (once).
+        std::vector<ModelInstance::LevelDescription> ConsumeLevelImports() { return std::exchange(m_FinishedLevelImports, {}); }
         size_t GetStreamingCount() const { return m_Streamer.GetStreamingCount(); }
         TextureStreamer& GetTextureStreamer() { return m_Streamer; }
         uint64_t GetPendingUploadBytes() const { return m_Loader.GetPendingUploadBytes() + m_Streamer.GetPendingUploadBytes(); }
@@ -102,6 +105,13 @@ namespace Nox
         std::vector<std::filesystem::path> m_PendingModifiedPaths;
         std::mutex m_ReimportMutex;
 
+        struct LevelGroup
+        {
+            uint32_t Remaining = 0; // jobs still to finish
+            bool HasStructure = false; // the level's nodes, lights and cameras are filled in
+            ModelInstance::LevelDescription Level;
+        };
+
         // Do Not Combine imports cooking every static mesh of a file into its own asset in the background.
         struct PendingSplitImport
         {
@@ -109,8 +119,15 @@ namespace Nox
             AssetMetadata MaterialBase; // only its path (the .nmat files are named after it) and source are used
             std::shared_ptr<std::atomic<uint32_t>> Total; // meshes to cook (0 while the glTF is still being parsed)
             std::shared_ptr<std::atomic<uint32_t>> Done;
+            bool Skinned = false; // the meshes being split are skinned ones (skeletal meshes)
+            AssetHandle SkeletalAsset = 0;
+            std::shared_ptr<MeshImporter::SplitLevel> Level;
+            // Import Into Level: the static and the skinned jobs of one file share a group, and the level is placed when the
+            // last of them has finished (each adds its per-mesh assets to it).
+            std::shared_ptr<LevelGroup> Group;
         };
         std::vector<PendingSplitImport> m_PendingSplitImports;
+        std::vector<ModelInstance::LevelDescription> m_FinishedLevelImports;
         
         AssetRegistry m_AssetRegistry;
         // Normalized file / source path -> handle, for every registry entry, kept in step with the registry. A model load

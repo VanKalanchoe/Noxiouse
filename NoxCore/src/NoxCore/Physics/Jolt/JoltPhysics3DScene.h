@@ -54,6 +54,7 @@ namespace Nox
     private:
         void StepCharacters(float dt);
         void SyncCharactersToTransforms();
+        void CaptureBodyPoses();
 
         Scene* m_Scene = nullptr;
 
@@ -76,6 +77,18 @@ namespace Nox
             glm::vec3 Horizontal{ 0.0f }; // the horizontal velocity the controller has accelerated to (x, z)
         };
         std::unordered_map<uint32_t, CharacterState> m_EntityToCharacterMap;
+
+        // A moving body and its pose after the last two fixed steps: drawn interpolated between them, like a character, so it
+        // moves smoothly at any frame rate instead of in 60 Hz jumps.
+        struct BodyPose
+        {
+            glm::vec3 Previous{ 0.0f };
+            glm::vec3 Current{ 0.0f };
+            glm::quat PreviousRotation{ 1.0f, 0.0f, 0.0f, 0.0f };
+            glm::quat CurrentRotation{ 1.0f, 0.0f, 0.0f, 0.0f };
+            bool NeedsSync = false; // the entity does not show the final pose yet
+        };
+        std::unordered_map<uint32_t, BodyPose> m_BodyPoses;
 
 
         float m_Accumulator = 0.0f;

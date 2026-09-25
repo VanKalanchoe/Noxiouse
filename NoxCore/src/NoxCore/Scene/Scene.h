@@ -83,6 +83,14 @@ namespace Nox
         bool DumpSystemGraphs(const std::filesystem::path& directory);
 
         IPhysics3DScene* GetPhysics3DScene() { return m_Physics3DScene.get(); }
+
+        // Outliner folders (FolderComponent paths). Folders that hold entities exist through them; this list keeps the ones the
+        // user made and left empty. Paths use '/' for nesting.
+        const std::vector<std::string>& GetFolders() const { return m_Folders; }
+        void AddFolder(const std::string& path);
+        // Removes the folder and its subfolders; their entities go back to the top level.
+        void RemoveFolder(const std::string& path);
+        void RenameFolder(const std::string& from, const std::string& to);
     private:
         template<typename T>
         void OnComponentAdded(Entity entity, T& component);
@@ -129,6 +137,7 @@ namespace Nox
 
         b2WorldId m_PhysicsWorldID;
         std::unique_ptr<IPhysics3DScene> m_Physics3DScene;
+        std::vector<std::string> m_Folders;
         bool m_IsRunning = false;
         bool m_IsPaused = false;
         int m_StepFrames = 0;

@@ -482,7 +482,17 @@ namespace Nox
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("Skinned meshes and their skeleton (characters).");
             if (m_ImportSettings.ImportSkeletalMeshes)
-                combineCombo("Combine Skeletal Meshes", m_ImportSettings.SkeletalCombine, "Merge the skinned meshes (they share the file's skeleton) into one submesh per material.");
+            {
+                ImGui::Checkbox("Import Skin Weights", &m_ImportSettings.ImportSkinWeights);
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Off (Unreal's Geometry Only): skinned meshes come in as plain static geometry, without skeleton or animations from them.");
+                if (m_ImportSettings.ImportSkinWeights)
+                    combineCombo("Combine Skeletal Meshes", m_ImportSettings.SkeletalCombine, "Skinned meshes (they share the file's skeleton): Do Not Combine gives every skinned mesh its own asset when there are several; Combine merges them into one submesh per material.");
+            }
+            ImGui::SeparatorText("Scene");
+            ImGui::Checkbox("Import Into Level", &m_ImportSettings.ImportIntoLevel);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Unreal's File > Import into Level: also place the whole glTF scene in the open level, keeping its node hierarchy, lights and cameras. Meshes are still imported as assets (per-mesh) and the level references them. Off: assets only, no hierarchy.");
             ImGui::SeparatorText("Transform");
             ImGui::DragFloat("Import Scale", &m_ImportSettings.ImportScale, 0.001f, 0.0001f, 1000.0f, "%.4f");
             if (ImGui::IsItemHovered())

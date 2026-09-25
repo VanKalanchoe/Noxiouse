@@ -435,24 +435,61 @@ namespace Nox
             }
 
             const std::vector<MeshImporter::SplitMesh> meshes = it->Job.Get();
+            std::unordered_map<int32_t, AssetHandle> handleOfMesh;
             for (const MeshImporter::SplitMesh& mesh : meshes)
             {
                 AssetMetadata metadata;
-                metadata.Type = AssetType::StaticMesh;
+                metadata.Type = it->Skinned ? AssetType::Mesh : AssetType::StaticMesh;
                 metadata.FilePath = mesh.FilePath;
                 metadata.SourceFilePath = it->MaterialBase.SourceFilePath;
-                metadata.MeshSettings.ImportStaticMeshes = true;
-                metadata.MeshSettings.ImportSkeletalMeshes = false;
+                metadata.MeshSettings.ImportStaticMeshes = !it->Skinned;
+                metadata.MeshSettings.ImportSkeletalMeshes = it->Skinned;
                 metadata.MeshSettings.ImportAnimations = false;
                 metadata.MeshSettings.SourceMeshIndex = mesh.MeshIndex;
                 metadata.MeshSettings.MaterialBasePath = it->MaterialBase.FilePath;
                 metadata.MeshSettings.ImportScale = it->MaterialBase.MeshSettings.ImportScale;
-                RegisterAsset(metadata);
+                handleOfMesh[mesh.MeshIndex] = RegisterAsset(metadata);
                 registryChanged = true;
             }
-            // The job also wrote the shared .nmat files (and they are not registered by loading a mesh that was cooked here).
+            // The job also wrote the shared .nmat files and the clips (they are not registered by loading a mesh that was
+            // cooked here).
             ScanAndRegisterNewAssets(it->MaterialBase.FilePath.parent_path().parent_path());
-            NOX_CORE_INFO("[EditorAssetManager] Registered {} static mesh assets cooked from {}", meshes.size(), it->MaterialBase.SourceFilePath.generic_string());
+            if (it->Group)
+            {
+                LevelGroup& group = *it->Group;
+                ModelInstance::LevelDescription& level = group.Level;
+                if (!group.HasStructure && it->Level)
+                {
+                    group.HasStructure = true;
+                    level.Name = it->MaterialBase.SourceFilePath.stem().string();
+                    level.Scale = it->MaterialBase.MeshSettings.ImportScale;
+                    level.Nodes = it->Level->Nodes;
+                    level.Lights = it->Level->Lights;
+                    level.Cameras = it->Level->Cameras;
+                }
+                if (it->SkeletalAsset != 0)
+                    level.SkeletalAsset = it->SkeletalAsset;
+                // Static and skinned meshes are entries of one glTF mesh list, so one map holds both kinds.
+                for (const MeshImporter::SplitMesh& mesh : meshes)
+                {
+                    auto handle = handleOfMesh.find(mesh.MeshIndex);
+                    if (handle != handleOfMesh.end())
+                        level.MeshAssets[mesh.MeshIndex] = handle->second;
+                }
+                if (it->Level)
+                {
+                    for (const MeshImporter::SplitLevel::Clip& clip : it->Level->Clips)
+                    {
+                        const AssetHandle handle = FindHandleByPath(clip.FilePath, AssetType::AnimationSequence);
+                        if (handle != 0)
+                            level.Clips.push_back({ handle, clip.Nodes });
+                    }
+                }
+                if (--group.Remaining == 0)
+                    m_FinishedLevelImports.push_back(std::move(level));
+            }
+
+            NOX_CORE_INFO("[EditorAssetManager] Registered {} {} mesh assets cooked from {}", meshes.size(), it->Skinned ? "skeletal" : "static", it->MaterialBase.SourceFilePath.generic_string());
             it = m_PendingSplitImports.erase(it);
         }
         if (registryChanged)
@@ -462,8 +499,12 @@ namespace Nox
     bool EditorAssetManager::ImportModel(const std::filesystem::path& sourcePath, const std::filesystem::path& destPath, const MeshImportSettings& settings)
     {
         const MeshImporter::GltfContent content = MeshImporter::InspectGltf(Project::GetActiveAssetDirectory() / sourcePath);
-        const bool skeletal = settings.ImportSkeletalMeshes && content.HasSkinnedMeshes;
-        const bool statics = settings.ImportStaticMeshes && content.HasStaticMeshes;
+        // Geometry Only: skinned meshes count as static ones (and there is no skeleton).
+        const bool skinnedAsStatic = !settings.ImportSkinWeights && settings.ImportSkeletalMeshes && content.HasSkinnedMeshes;
+        const bool skeletal = settings.ImportSkeletalMeshes && settings.ImportSkinWeights && content.HasSkinnedMeshes;
+        // Import Into Level places every mesh node, so it needs the static meshes as per-mesh assets whatever the toggles say.
+        const bool intoLevel = settings.ImportIntoLevel;
+        const bool statics = (settings.ImportStaticMeshes && content.HasStaticMeshes) || skinnedAsStatic || (intoLevel && content.HasStaticMeshes);
         if (!skeletal && !statics)
         {
             NOX_CORE_WARN("[EditorAssetManager] Nothing to import from {} with these settings (skinned meshes: {}, static meshes: {})",
@@ -471,7 +512,7 @@ namespace Nox
             return false;
         }
 
-        auto registerAsset = [&](AssetType type, const char* extension, const MeshImportSettings& assetSettings)
+        auto registerAsset = [&](AssetType type, const char* extension, const MeshImportSettings& assetSettings) -> AssetHandle
         {
             AssetMetadata metadata;
             metadata.Type = type;
@@ -482,46 +523,74 @@ namespace Nox
             const AssetHandle handle = RegisterAsset(metadata);
             SerializeAssetRegistry();
             RequestAsset(handle);
+            return handle;
+        };
+
+        // Do Not Combine (Unreal): every mesh of that kind is an asset of its own -- import the meshes, drag them in. No
+        // whole-file asset. Cooked in one background job, registered when it is done. `materialBase` only names the shared
+        // .nmat files (and, for skinned meshes, the skeleton and clips written next to them). With `intoLevel` the job also
+        // hands back the file's node structure, and the finished import places it in the level (ConsumeLevelImports).
+        auto startSplit = [&](AssetType type, const char* extension, const MeshImportSettings& assetSettings, bool skinnedMeshes,
+                              const std::shared_ptr<LevelGroup>& levelGroup, AssetHandle skeletalAsset)
+        {
+            AssetMetadata materialBase;
+            materialBase.Type = type;
+            materialBase.FilePath = destPath;
+            materialBase.FilePath.replace_extension(extension);
+            materialBase.SourceFilePath = sourcePath;
+            materialBase.MeshSettings = assetSettings;
+            const std::filesystem::path directory = destPath.parent_path();
+            auto total = std::make_shared<std::atomic<uint32_t>>(0);
+            auto done = std::make_shared<std::atomic<uint32_t>>(0);
+            auto level = std::make_shared<MeshImporter::SplitLevel>();
+            const bool placeInLevel = levelGroup != nullptr;
+            if (levelGroup)
+                ++levelGroup->Remaining;
+            PendingSplitImport pending;
+            pending.Job = JobSystem::Get().Async("Cook Split Meshes",
+                [assetDirectory = Project::GetActiveAssetDirectory(), materialBase, directory, skinnedMeshes, total, done, level, placeInLevel](const CancellationToken&)
+                {
+                    return MeshImporter::CookSplitMeshes(assetDirectory, materialBase, directory, skinnedMeshes, total.get(), done.get(),
+                                                         placeInLevel ? level.get() : nullptr);
+                });
+            pending.MaterialBase = materialBase;
+            pending.Total = total;
+            pending.Done = done;
+            pending.Skinned = skinnedMeshes;
+            pending.Group = levelGroup;
+            pending.Level = level;
+            pending.SkeletalAsset = skeletalAsset;
+            m_PendingSplitImports.push_back(std::move(pending));
         };
 
         // Clips are cooked by one of the two, so recooking never has both write the same files.
+        const auto levelGroup = intoLevel ? std::make_shared<LevelGroup>() : std::shared_ptr<LevelGroup>();
+        AssetHandle skeletalAsset = 0;
         if (skeletal)
         {
             MeshImportSettings skeletalSettings = settings;
             skeletalSettings.ImportStaticMeshes = false;
-            registerAsset(AssetType::Mesh, ".nmesh", skeletalSettings);
+            // One skinned mesh is just the asset itself; several become one asset each, sharing the skeleton and clips.
+            if (settings.SkeletalCombine == MeshCombineMode::DoNotCombine && content.SkinnedMeshCount >= 2)
+                startSplit(AssetType::Mesh, ".nmesh", skeletalSettings, true, levelGroup, 0);
+            else
+                skeletalAsset = registerAsset(AssetType::Mesh, ".nmesh", skeletalSettings);
         }
-        if (statics)
+        // A file with only skinned meshes still needs the level job (the file's nodes, lights and cameras) when it is placed
+        // as a level and the whole-file skeletal asset is what the skinned nodes use.
+        const bool levelOnly = intoLevel && !statics && skeletalAsset != 0;
+        if (statics || levelOnly)
         {
             MeshImportSettings staticSettings = settings;
             staticSettings.ImportSkeletalMeshes = false;
+            if (skinnedAsStatic)
+                staticSettings.ImportStaticMeshes = true; // the skinned meshes are what it holds
             staticSettings.ImportAnimations = settings.ImportAnimations && !skeletal;
 
-            if (settings.StaticCombine != MeshCombineMode::DoNotCombine)
-            {
+            if (settings.StaticCombine != MeshCombineMode::DoNotCombine && !intoLevel)
                 registerAsset(AssetType::StaticMesh, ".nsmesh", staticSettings);
-            }
             else
-            {
-                // Do Not Combine (Unreal): every static mesh of the file is an asset of its own -- import the meshes, drag them
-                // in. No whole-file asset. Cooked in one background job, registered when it is done. `materialBase` only names
-                // the shared .nmat files.
-                AssetMetadata materialBase;
-                materialBase.Type = AssetType::StaticMesh;
-                materialBase.FilePath = destPath;
-                materialBase.FilePath.replace_extension(".nsmesh");
-                materialBase.SourceFilePath = sourcePath;
-                materialBase.MeshSettings = staticSettings;
-                const std::filesystem::path directory = destPath.parent_path();
-                auto total = std::make_shared<std::atomic<uint32_t>>(0);
-                auto done = std::make_shared<std::atomic<uint32_t>>(0);
-                m_PendingSplitImports.push_back({
-                    JobSystem::Get().Async("Cook Split Meshes", [assetDirectory = Project::GetActiveAssetDirectory(), materialBase, directory, total, done](const CancellationToken&)
-                    {
-                        return MeshImporter::CookSplitMeshes(assetDirectory, materialBase, directory, total.get(), done.get());
-                    }),
-                    materialBase, total, done });
-            }
+                startSplit(AssetType::StaticMesh, ".nsmesh", staticSettings, false, levelGroup, skeletalAsset);
         }
         return true;
     }
@@ -771,10 +840,12 @@ namespace Nox
     {
         // Cooked next to the model: <Model>/Meshes/<model>.nskel and <model>_<clip>.nanim (sorted by path, so the default
         // clip does not depend on the registry's order).
-        std::filesystem::path skeletonPath = meshMetadata.FilePath;
+        // Per-mesh assets (Do Not Combine) share the whole file's skeleton and clips, named after MaterialBasePath.
+        const std::filesystem::path& base = meshMetadata.MeshSettings.MaterialBasePath.empty() ? meshMetadata.FilePath : meshMetadata.MeshSettings.MaterialBasePath;
+        std::filesystem::path skeletonPath = base;
         skeletonPath.replace_extension(".nskel");
-        const std::filesystem::path animationDirectory = meshMetadata.FilePath.parent_path();
-        const std::string animationPrefix = meshMetadata.FilePath.stem().string() + "_";
+        const std::filesystem::path animationDirectory = base.parent_path();
+        const std::string animationPrefix = base.stem().string() + "_";
 
         AssetHandle skeleton = 0;
         std::vector<std::pair<std::string, AssetHandle>> animations;
@@ -1159,6 +1230,7 @@ namespace Nox
                     out << YAML::Key << "ImportStaticMeshes" << YAML::Value << metadata.MeshSettings.ImportStaticMeshes;
                     out << YAML::Key << "ImportSkeletalMeshes" << YAML::Value << metadata.MeshSettings.ImportSkeletalMeshes;
                     out << YAML::Key << "ImportAnimations" << YAML::Value << metadata.MeshSettings.ImportAnimations;
+                    out << YAML::Key << "ImportSkinWeights" << YAML::Value << metadata.MeshSettings.ImportSkinWeights;
                     out << YAML::Key << "StaticCombine" << YAML::Value << static_cast<int>(metadata.MeshSettings.StaticCombine);
                     out << YAML::Key << "SkeletalCombine" << YAML::Value << static_cast<int>(metadata.MeshSettings.SkeletalCombine);
                     out << YAML::Key << "SourceMeshIndex" << YAML::Value << metadata.MeshSettings.SourceMeshIndex;
@@ -1288,6 +1360,8 @@ namespace Nox
                     metadata.MeshSettings.ImportSkeletalMeshes = settingsNode["ImportSkeletalMeshes"].as<bool>();
                 if (settingsNode["ImportAnimations"])
                     metadata.MeshSettings.ImportAnimations = settingsNode["ImportAnimations"].as<bool>();
+                if (settingsNode["ImportSkinWeights"])
+                    metadata.MeshSettings.ImportSkinWeights = settingsNode["ImportSkinWeights"].as<bool>();
                 if (settingsNode["StaticCombine"])
                     metadata.MeshSettings.StaticCombine = static_cast<MeshCombineMode>(settingsNode["StaticCombine"].as<int>());
                 if (settingsNode["SkeletalCombine"])

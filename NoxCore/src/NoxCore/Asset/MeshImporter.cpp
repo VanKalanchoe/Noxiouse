@@ -1,5 +1,7 @@
 #include "MeshImporter.h"
 
+#include <algorithm>
+
 #include <array>
 #include <chrono>
 #include <cstring>
@@ -294,8 +296,7 @@ namespace Nox
     // Import settings "Combine": merges the subset's submeshes into one per material. Static meshes get their node's world
     // transform baked into the vertices (a mesh used by several nodes is copied per node -- what merging costs); skinned
     // meshes stay in the bind pose (glTF ignores the mesh node's transform for them). Every submesh must be of the kind
-    // `skinned` (an asset never mixes kinds). The nodes that owned submeshes lose them; one new node at the end owns the
-    // merged ones, so node indices that lights, cameras and animation clips use stay valid.
+    // `skinned` (an asset never mixes kinds). The node table is replaced by one node that owns the merged submeshes.
     static void CombineSubmeshes(MeshSubset& subset, bool skinned)
     {
         std::vector<glm::mat4> world(subset.Nodes.size(), glm::mat4(1.0f));
@@ -380,11 +381,9 @@ namespace Nox
             subset.Pending.push_back(std::move(group.Geometry));
         }
 
-        for (MeshNodeData& node : subset.Nodes)
-        {
-            node.FirstSubmesh = UINT32_MAX;
-            node.SubmeshCount = 0;
-        }
+        // The file's node structure is gone with the baked geometry: the merged asset is one node (importing never makes
+        // hierarchy; Import Into Level is what keeps the scene structure, lights and cameras).
+        subset.Nodes.clear();
         MeshNodeData& combined = subset.Nodes.emplace_back();
         combined.Name = skinned ? "Combined Skeletal Meshes" : "Combined Static Meshes";
         combined.Parent = -1;
@@ -396,6 +395,8 @@ namespace Nox
     MeshImporter::GltfContent MeshImporter::InspectGltf(const std::filesystem::path& sourcePath)
     {
         GltfContent content;
+        std::unordered_set<int32_t> skinnedMeshes;
+        std::unordered_set<int32_t> staticMeshes;
 
         tg3_parse_options options;
         tg3_error_stack errors;
@@ -415,14 +416,26 @@ namespace Nox
             if (node.mesh < 0 || node.mesh >= static_cast<int32_t>(model.meshes_count))
                 continue;
             (node.skin >= 0 ? content.HasSkinnedMeshes : content.HasStaticMeshes) = true;
+            (node.skin >= 0 ? skinnedMeshes : staticMeshes).insert(node.mesh);
         }
         // A file without nodes draws its meshes as they are.
         if (model.nodes_count == 0 && model.meshes_count > 0)
             content.HasStaticMeshes = true;
+        content.SkinnedMeshCount = static_cast<uint32_t>(skinnedMeshes.size());
+        content.StaticMeshCount = model.nodes_count == 0 ? model.meshes_count : static_cast<uint32_t>(staticMeshes.size());
 
         tg3_model_free(&model);
         tg3_error_stack_free(&errors);
         return content;
+    }
+
+    // Import setting "Import Skin Weights" off: the file's skinned meshes are treated as plain geometry.
+    static void ConvertSkinnedToStatic(std::vector<MeshNodeData>& nodes, std::vector<PendingGeometry>& pending)
+    {
+        for (MeshNodeData& node : nodes)
+            node.Skinned = false;
+        for (PendingGeometry& geometry : pending)
+            geometry.Skinned = false;
     }
 
     // Clusters (§5.7): static geometry gets the cluster LOD DAG; skinned geometry one level (simplified in the bind pose,
@@ -484,12 +497,12 @@ namespace Nox
     static bool CopySingleMesh(const std::vector<MeshData>& meshes, const std::vector<MaterialData>& materials,
                                const std::vector<PendingGeometry>& pending, const std::vector<MeshNodeData>& nodes,
                                const std::vector<glm::mat4>& worlds,
-                               int32_t meshIndex, MeshSubset& out)
+                               int32_t meshIndex, bool skinned, MeshSubset& out)
     {
         const MeshNodeData* user = nullptr;
         for (const MeshNodeData& node : nodes)
         {
-            if (node.MeshIndex == meshIndex && !node.Skinned && node.SubmeshCount > 0)
+            if (node.MeshIndex == meshIndex && node.Skinned == skinned && node.SubmeshCount > 0)
             {
                 user = &node;
                 break;
@@ -517,7 +530,7 @@ namespace Nox
         for (size_t index = 0; index < nodes.size(); ++index)
         {
             const MeshNodeData& instance = nodes[index];
-            if (instance.MeshIndex != meshIndex || instance.Skinned || instance.SubmeshCount == 0)
+            if (instance.MeshIndex != meshIndex || instance.Skinned != skinned || instance.SubmeshCount == 0)
                 continue;
 
             MeshNodeData& placed = out.Nodes.emplace_back();
@@ -559,12 +572,14 @@ namespace Nox
         // (.nmesh) the skinned meshes, a static mesh (.nsmesh) the rest. Lights and cameras belong to static meshes.
         // A per-mesh asset (SourceMeshIndex) holds one glTF mesh and nothing else.
         const MeshImportSettings& importSettings = metadata.MeshSettings;
+        if (!importSettings.ImportSkinWeights)
+            ConvertSkinnedToStatic(nodeDataList, pendingGeometry);
         const bool isStatic = metadata.Type == AssetType::StaticMesh;
         const bool singleMesh = importSettings.SourceMeshIndex >= 0;
         MeshSubset subset;
         if (singleMesh)
         {
-            if (!CopySingleMesh(meshDataList, materialDataList, pendingGeometry, nodeDataList, NodeWorldMatrices(nodeDataList), importSettings.SourceMeshIndex, subset))
+            if (!CopySingleMesh(meshDataList, materialDataList, pendingGeometry, nodeDataList, NodeWorldMatrices(nodeDataList), importSettings.SourceMeshIndex, metadata.Type == AssetType::Mesh, subset))
             {
                 NOX_CORE_WARN("MeshImporter::CookMesh - glTF mesh {} of {} has no static geometry", importSettings.SourceMeshIndex, sourcePath.string());
                 return false;
@@ -587,8 +602,14 @@ namespace Nox
         // Combine (Unreal): only for an asset that holds one kind, which the import always gives it.
         const bool onlyStatic = importSettings.ImportStaticMeshes && !importSettings.ImportSkeletalMeshes;
         const bool onlySkeletal = importSettings.ImportSkeletalMeshes && !importSettings.ImportStaticMeshes;
+        bool bakedStatic = false; // merged static geometry: no node structure, lights, cameras or node animations survive
         if (!singleMesh && onlyStatic && importSettings.StaticCombine != MeshCombineMode::DoNotCombine)
+        {
             CombineSubmeshes(subset, false);
+            bakedStatic = true;
+            lightDataList.clear();
+            cameraDataList.clear();
+        }
         else if (!singleMesh && onlySkeletal && importSettings.SkeletalCombine != MeshCombineMode::DoNotCombine)
             CombineSubmeshes(subset, true);
 
@@ -603,7 +624,7 @@ namespace Nox
 
         // The skeleton goes with skeletal meshes, clips with whichever asset the import gave "Import Animations" (node
         // animations of a level, e.g. Bistro's fans, have no skeleton).
-        if (importSettings.ImportSkeletalMeshes && !extractedSkeleton.Skins.empty())
+        if (!singleMesh && importSettings.ImportSkeletalMeshes && !extractedSkeleton.Skins.empty())
         {
             std::filesystem::path skelPath = cookedPath;
             skelPath.replace_extension(".nskel");
@@ -611,7 +632,7 @@ namespace Nox
             NOX_CORE_INFO("[Importer] Extracted and cooked Skeleton ({} nodes) to {}", extractedSkeleton.AllNodes.size(), skelPath.string());
         }
 
-        if (importSettings.ImportAnimations)
+        if (!singleMesh && !bakedStatic && importSettings.ImportAnimations)
         {
             for (const Ref<AnimationSequence>& animation : extractedAnimations)
             {
@@ -629,11 +650,11 @@ namespace Nox
     }
 
     std::vector<MeshImporter::SplitMesh> MeshImporter::CookSplitMeshes(const std::filesystem::path& assetDirectory, const AssetMetadata& wholeFile,
-                                                                       const std::filesystem::path& directory, std::atomic<uint32_t>* total,
-                                                                       std::atomic<uint32_t>* done)
+                                                                       const std::filesystem::path& directory, bool skinned, std::atomic<uint32_t>* total,
+                                                                       std::atomic<uint32_t>* done, SplitLevel* level)
     {
         const std::filesystem::path sourcePath = assetDirectory / wholeFile.SourceFilePath;
-        NOX_CORE_INFO("Cooking every static mesh of {} into {}", sourcePath.string(), directory.generic_string());
+        NOX_CORE_INFO("Cooking every {} mesh of {} into {}", skinned ? "skinned" : "static", sourcePath.string(), directory.generic_string());
 
         std::vector<MaterialData> materialDataList;
         std::vector<LightNodeData> lightDataList;
@@ -644,6 +665,16 @@ namespace Nox
         std::vector<PendingGeometry> pendingGeometry;
         std::vector<MeshData> meshDataList = ParseGltfToMeshData(sourcePath, materialDataList, extractedSkeleton, extractedAnimations,
                                                                  lightDataList, nodeDataList, cameraDataList, &pendingGeometry);
+
+        if (!wholeFile.MeshSettings.ImportSkinWeights)
+            ConvertSkinnedToStatic(nodeDataList, pendingGeometry);
+
+        if (level)
+        {
+            level->Nodes = nodeDataList;
+            level->Lights = lightDataList;
+            level->Cameras = cameraDataList;
+        }
 
         std::vector<SplitMesh> result;
         if (meshDataList.empty())
@@ -658,7 +689,7 @@ namespace Nox
             std::unordered_set<int32_t> unique;
             for (const MeshNodeData& node : nodeDataList)
             {
-                if (!node.Skinned && node.SubmeshCount > 0 && node.MeshIndex >= 0)
+                if (node.Skinned == skinned && node.SubmeshCount > 0 && node.MeshIndex >= 0)
                     unique.insert(node.MeshIndex);
             }
             total->store(static_cast<uint32_t>(unique.size()));
@@ -669,11 +700,11 @@ namespace Nox
         std::unordered_set<std::string> usedNames;
         for (const MeshNodeData& node : nodeDataList)
         {
-            if (node.Skinned || node.SubmeshCount == 0 || node.MeshIndex < 0 || !seenMeshes.insert(node.MeshIndex).second)
+            if (node.Skinned != skinned || node.SubmeshCount == 0 || node.MeshIndex < 0 || !seenMeshes.insert(node.MeshIndex).second)
                 continue;
 
             MeshSubset subset;
-            if (!CopySingleMesh(meshDataList, materialDataList, pendingGeometry, nodeDataList, worlds, node.MeshIndex, subset))
+            if (!CopySingleMesh(meshDataList, materialDataList, pendingGeometry, nodeDataList, worlds, node.MeshIndex, skinned, subset))
                 continue;
             BuildClusters(subset);
 
@@ -689,14 +720,59 @@ namespace Nox
             SplitMesh split;
             split.Name = name;
             split.MeshIndex = node.MeshIndex;
-            split.FilePath = directory / (name + ".nsmesh");
+            split.FilePath = directory / (name + (skinned ? ".nmesh" : ".nsmesh"));
             const std::filesystem::path cookedPath = assetDirectory / split.FilePath;
-            MeshSerializer::SerializeStaticMesh(cookedPath, subset.Meshes, subset.Materials, {}, subset.Nodes, {});
+            if (skinned)
+                MeshSerializer::SerializeMesh(cookedPath, subset.Meshes, subset.Materials, {}, subset.Nodes, {});
+            else
+                MeshSerializer::SerializeStaticMesh(cookedPath, subset.Meshes, subset.Materials, {}, subset.Nodes, {});
             WriteMaterials(assetDirectory, wholeFile.FilePath, subset);
             Utility::saveHashToFile(cookedPath.string() + ".hash", sourceHash);
             result.push_back(std::move(split));
             if (done)
                 done->fetch_add(1);
+        }
+        // Skinned meshes share the file's skeleton and clips, written once, named after the whole-file base path (what
+        // LinkImportedAssets looks for through MaterialBasePath).
+        if (skinned)
+        {
+            const std::filesystem::path base = assetDirectory / wholeFile.FilePath;
+            if (!extractedSkeleton.Skins.empty())
+            {
+                std::filesystem::path skelPath = base;
+                skelPath.replace_extension(".nskel");
+                SkeletonSerializer::Serialize(skelPath, extractedSkeleton);
+            }
+            if (wholeFile.MeshSettings.ImportAnimations)
+            {
+                for (const Ref<AnimationSequence>& animation : extractedAnimations)
+                {
+                    const std::filesystem::path animPath = base.parent_path() / (base.stem().string() + "_" + animation->Name + ".nanim");
+                    AnimationSerializer::Serialize(animPath, *animation);
+                }
+            }
+        }
+        // Import Into Level: the file's node animations (Bistro's fans, a door) go with the level, named after the whole-file
+        // base path like a skeletal model's clips.
+        if (!skinned && level && wholeFile.MeshSettings.ImportAnimations)
+        {
+            for (const Ref<AnimationSequence>& animation : extractedAnimations)
+            {
+                const std::filesystem::path relativePath = wholeFile.FilePath.parent_path() / (wholeFile.FilePath.stem().string() + "_" + animation->Name + ".nanim");
+                AnimationSerializer::Serialize(assetDirectory / relativePath, *animation);
+
+                SplitLevel::Clip clip;
+                clip.FilePath = relativePath;
+                for (const auto& channel : animation->Channels)
+                {
+                    if (channel.TargetNodeIndex >= 0)
+                        clip.Nodes.push_back(channel.TargetNodeIndex);
+                }
+                std::sort(clip.Nodes.begin(), clip.Nodes.end());
+                clip.Nodes.erase(std::unique(clip.Nodes.begin(), clip.Nodes.end()), clip.Nodes.end());
+                if (!clip.Nodes.empty())
+                    level->Clips.push_back(std::move(clip));
+            }
         }
         return result;
     }

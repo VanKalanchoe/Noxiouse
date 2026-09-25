@@ -16,8 +16,8 @@ Entities:
     TagComponent:
       Tag: Scene Camera
     TransformComponent:
-      Translation: [-3.312414, 225.61789, 88.93275]
-      Rotation: [-1.1481273, 0, 0]
+      Translation: [0, 3.3, 0]
+      Rotation: [0, 0, 0]
       Scale: [1, 1, 1]
     CameraComponent:
       Camera:
@@ -40,102 +40,13 @@ Entities:
       EntityReferences:
         - Class: Facerun.CameraFollow
           Field: Target
-          Entity: 16317179970463840243
+          Entity: 6787496459119117713
       FieldOverrides:
         - Class: Facerun.CameraFollow
           Field: Distance
           Type: Float
-          Value: 101.2
+          Value: 0.6
         - Class: Facerun.CameraFollow
           Field: Height
           Type: Float
-          Value: 225
-  - Entity: 16317179970463840243
-    TagComponent:
-      Tag: Fox
-    TransformComponent:
-      Translation: [-3.312414, 0.6178889, -12.267248]
-      Rotation: [0, 10.989734, 0]
-      Scale: [1, 1, 1]
-    MeshComponent:
-      MeshHandle: 14849445868554977383
-      SubmeshIndex: 0
-      SubmeshCount: 4294967295
-    MaterialComponent:
-      {}
-    AnimatorComponent:
-      Animation: 10202690733250719913
-      Skeleton: 12141878353093600673
-      Playing: true
-      Looping: true
-      PlaybackSpeed: 1
-      NodeEntities:
-        []
-      Graph: 4817263940125348171
-      GraphParameters:
-        - Name: Speed
-          Value:
-            Float: 0
-        - Name: IsGrounded
-          Value:
-            Bool: true
-    ScriptComponent:
-      Classes:
-        - Facerun.CharacterMovement
-      EntityReferences:
-        []
-      FieldOverrides:
-        []
-    CharacterController3DComponent:
-      Radius: 0.3
-      Height: 1
-      StepHeight: 0.4
-      MaxSlopeDegrees: 50
-      GravityScale: 1
-      AirControl: 0.3
-  - Entity: 1011616398401538981
-    TagComponent:
-      Tag: Cube
-    TransformComponent:
-      Translation: [-62.16223, 0, -80.74106]
-      Rotation: [0, 0, 0]
-      Scale: [1000, 1, 1000]
-    RelationshipComponent:
-      Parent: 0
-      Children:
-        []
-    ModelInstanceComponent:
-      Model: 4932532875476519039
-    RigidBody3DComponent:
-      BodyType: Static
-      MotionQuality: Discrete
-      Mass: 1
-      LinearDamping: 0.05
-      AngularDamping: 0.05
-      GravityFactor: 1
-      AllowSleeping: true
-      IsSensor: false
-      Layer: 1
-    BoxCollider3DComponent:
-      HalfExtents: [1000, 0.5, 1000]
-      Offset: [0, 0, 0]
-      Friction: 0.5
-      Restitution: 0
-  - Entity: 15093684824616915117
-    TagComponent:
-      Tag: Cube
-    TransformComponent:
-      Translation: [-6.472702, -19.476086, -22.758392]
-      Rotation: [0, 0, 0]
-      Scale: [33.7, 32.3, 22.6]
-    RelationshipComponent:
-      Parent: 0
-      Children:
-        []
-    ModelInstanceComponent:
-      Model: 4932532875476519039
-      Overrides:
-        - Node: 0
-          Translation: [0, 2, 0]
-          Rotation: [0, -0, 0]
-          Scale: [1, 1, 1]
+          Value: 4.3

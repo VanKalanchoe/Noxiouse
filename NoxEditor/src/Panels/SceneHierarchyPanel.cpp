@@ -126,6 +126,24 @@ namespace Nox
         m_SelectionAnchor = {};
     }
 
+    namespace
+    {
+        std::string FolderLeaf(const std::string& path)
+        {
+            const size_t slash = path.rfind('/');
+            return slash == std::string::npos ? path : path.substr(slash + 1);
+        }
+
+        std::string UniqueFolderPath(const std::set<std::string>& existing, const std::string& parent, const std::string& base)
+        {
+            const std::string prefix = parent.empty() ? std::string() : parent + "/";
+            std::string candidate = prefix + base;
+            for (int suffix = 2; existing.contains(candidate); ++suffix)
+                candidate = prefix + base + " " + std::to_string(suffix);
+            return candidate;
+        }
+    }
+
     void SceneHierarchyPanel::OnImGuiRender()
     {
         ImGui::Begin("Scene Hierarchy");
@@ -135,6 +153,23 @@ namespace Nox
 
         if (m_Context)
         {
+            // Folders first (explicit ones plus those entities are filed under, with their parents), then the entities that are
+            // at the top level: no parent and no folder.
+            std::set<std::string> folders(m_Context->GetFolders().begin(), m_Context->GetFolders().end());
+            for (auto handle : m_Context->m_Registry.view<FolderComponent>())
+                folders.insert(m_Context->m_Registry.get<FolderComponent>(handle).Path);
+            for (const std::string& path : std::set<std::string>(folders))
+            {
+                for (size_t slash = path.find('/'); slash != std::string::npos; slash = path.find('/', slash + 1))
+                    folders.insert(path.substr(0, slash));
+            }
+            folders.erase(std::string());
+            for (const std::string& path : folders)
+            {
+                if (path.find('/') == std::string::npos)
+                    DrawFolderNode(path, folders);
+            }
+
             m_Context->m_Registry.view<TagComponent>().each([&](auto entityID, TagComponent&)
             {
                 Entity entity(entityID, m_Context.get());
@@ -143,10 +178,43 @@ namespace Nox
                 if (entity.HasComponent<RelationshipComponent>())
                     if (entity.GetComponent<RelationshipComponent>().Parent != 0)
                         isRoot = false;
+                if (entity.HasComponent<FolderComponent>() && !entity.GetComponent<FolderComponent>().Path.empty())
+                    isRoot = false; // drawn inside its folder
 
                 if (isRoot)
                     DrawEntityNode(entity);
             });
+
+            if (!m_PendingFolderDelete.empty())
+            {
+                m_Context->RemoveFolder(m_PendingFolderDelete);
+                m_PendingFolderDelete.clear();
+            }
+
+            if (m_OpenFolderRename)
+            {
+                ImGui::OpenPopup("RenameFolder");
+                m_OpenFolderRename = false;
+            }
+            if (ImGui::BeginPopupModal("RenameFolder", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+            {
+                ImGui::InputText("Folder name", m_FolderNameBuffer, sizeof(m_FolderNameBuffer));
+                if (ImGui::Button("OK"))
+                {
+                    const std::string leaf = m_FolderNameBuffer;
+                    if (!leaf.empty() && leaf.find('/') == std::string::npos)
+                    {
+                        const size_t slash = m_RenameFolderPath.rfind('/');
+                        const std::string parent = slash == std::string::npos ? std::string() : m_RenameFolderPath.substr(0, slash + 1);
+                        m_Context->RenameFolder(m_RenameFolderPath, parent + leaf);
+                    }
+                    ImGui::CloseCurrentPopup();
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Cancel"))
+                    ImGui::CloseCurrentPopup();
+                ImGui::EndPopup();
+            }
 
             for (UUID entityID : m_PendingDestroy)
             {
@@ -156,12 +224,13 @@ namespace Nox
             m_PendingDestroy.clear();
 
             // 1. Deselect entity when left-clicking blank space
-            if (ImGui::IsMouseDown(0) && ImGui::IsWindowHovered() && !ImGui::IsAnyItemHovered())
-            {
-                ClearSelection();
-            }
 
-            // 2. Window-level Drag and Drop Target for root entity unparenting
+            // 2. Blank-space Drag and Drop Target (entity unparenting, assets dropped at the top level). BeginDragDropTarget
+            // binds to the last item, so a filler item spans the free space below the list to make all of it a target.
+            const ImVec2 free = ImGui::GetContentRegionAvail();
+            ImGui::InvisibleButton("##hierarchy_blank", ImVec2(free.x, free.y > 24.0f ? free.y : 24.0f));
+            if (ImGui::IsItemHovered() && ImGui::IsMouseDown(0))
+                ClearSelection(); // left-click on blank space deselects
             if (ImGui::BeginDragDropTarget())
             {
                 if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("SCENE_HIERARCHY_ENTITY"))
@@ -171,14 +240,23 @@ namespace Nox
                     if (droppedEntity)
                     {
                         droppedEntity.SetParent({}); // Make root
+                        if (droppedEntity.HasComponent<FolderComponent>())
+                            droppedEntity.RemoveComponent<FolderComponent>(); // and back out of any folder
                     }
                 }
+                AcceptAssetDrop(std::string());
                 ImGui::EndDragDropTarget();
             }
 
             // 3. Right-click context menu on blank space
-            if (ImGui::BeginPopupContextWindow(0, ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems))
+            const bool blankContext = ImGui::BeginPopupContextItem("##hierarchy_blank_context", ImGuiPopupFlags_MouseButtonRight);
+            if (blankContext)
             {
+                if (ImGui::MenuItem("New Folder"))
+                {
+                    std::set<std::string> existing(m_Context->GetFolders().begin(), m_Context->GetFolders().end());
+                    m_Context->AddFolder(UniqueFolderPath(existing, std::string(), "New Folder"));
+                }
                 if (ImGui::MenuItem("Create Empty Entity"))
                 {
                     m_Context->CreateEntity("Empty Entity");
@@ -200,6 +278,127 @@ namespace Nox
         ImGui::End();
     }
 
+
+    // Files the dragged entity (and the whole selection when it is part of it) under `path`; "" = back to the top level. A
+    // folder is only a label for the outliner, so nothing about the entities' transforms changes.
+    void SceneHierarchyPanel::FileEntities(UUID dragged, const std::string& path)
+    {
+        std::vector<Entity> entities;
+        Entity draggedEntity = m_Context->GetEntityByUUID(dragged);
+        if (!draggedEntity)
+            return;
+        if (IsSelected(draggedEntity))
+            entities = m_SelectionContexts;
+        else
+            entities.push_back(draggedEntity);
+
+        for (Entity entity : entities)
+        {
+            if (!entity)
+                continue;
+            if (entity.HasComponent<RelationshipComponent>() && entity.GetComponent<RelationshipComponent>().Parent != 0)
+                entity.SetParent({}); // a folder holds top-level entities; the parenting is what put it below another one
+            if (path.empty())
+            {
+                if (entity.HasComponent<FolderComponent>())
+                    entity.RemoveComponent<FolderComponent>();
+            }
+            else if (entity.HasComponent<FolderComponent>())
+            {
+                entity.GetComponent<FolderComponent>().Path = path;
+            }
+            else
+            {
+                entity.AddComponent<FolderComponent>(path);
+            }
+        }
+    }
+
+    // Inside a drag-drop target: Content Browser assets (one, or a multi-selection) dropped here are placed in `folder`.
+    void SceneHierarchyPanel::AcceptAssetDrop(const std::string& folder)
+    {
+        std::vector<AssetHandle> handles;
+        if (const ImGuiPayload* multiple = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEMS"))
+        {
+            const AssetHandle* data = static_cast<const AssetHandle*>(multiple->Data);
+            handles.assign(data, data + multiple->DataSize / sizeof(AssetHandle));
+        }
+        else if (const ImGuiPayload* single = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEM"))
+        {
+            handles.push_back(*static_cast<const AssetHandle*>(single->Data));
+        }
+        if (!handles.empty() && m_PlaceAssets)
+            m_PlaceAssets(handles, folder);
+    }
+
+    void SceneHierarchyPanel::DrawFolderNode(const std::string& path, const std::set<std::string>& allFolders)
+    {
+        ImGui::PushID(path.c_str());
+        ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_DefaultOpen;
+        const std::string label = "[Folder]  " + FolderLeaf(path);
+        const bool opened = ImGui::TreeNodeEx("##folder", flags, "%s", label.c_str());
+
+        // Entities dragged onto the folder are filed in it.
+        if (ImGui::BeginDragDropTarget())
+        {
+            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("SCENE_HIERARCHY_ENTITY"))
+                FileEntities(*static_cast<const UUID*>(payload->Data), path);
+            AcceptAssetDrop(path);
+            ImGui::EndDragDropTarget();
+        }
+
+        bool deleteFolder = false;
+        if (ImGui::BeginPopupContextItem())
+        {
+            if (ImGui::MenuItem("New Folder"))
+                m_Context->AddFolder(UniqueFolderPath(allFolders, path, "New Folder"));
+            if (ImGui::MenuItem("Rename"))
+            {
+                m_RenameFolderPath = path;
+                strncpy_s(m_FolderNameBuffer, FolderLeaf(path).c_str(), sizeof(m_FolderNameBuffer) - 1);
+                m_OpenFolderRename = true;
+            }
+            if (ImGui::MenuItem("Select Contents"))
+            {
+                ClearSelection();
+                for (auto handle : m_Context->m_Registry.view<FolderComponent>())
+                {
+                    Entity entity(handle, m_Context.get());
+                    if (entity.GetComponent<FolderComponent>().Path == path)
+                        ToggleSelectedEntity(entity);
+                }
+            }
+            if (ImGui::MenuItem("Delete Folder"))
+                deleteFolder = true;
+            ImGui::EndPopup();
+        }
+
+        if (opened)
+        {
+            for (const std::string& other : allFolders)
+            {
+                if (other.size() > path.size() + 1 && other.rfind(path + "/", 0) == 0 && other.find('/', path.size() + 1) == std::string::npos)
+                    DrawFolderNode(other, allFolders);
+            }
+
+            std::vector<Entity> inside;
+            for (auto handle : m_Context->m_Registry.view<FolderComponent>())
+            {
+                Entity entity(handle, m_Context.get());
+                const bool hasParent = entity.HasComponent<RelationshipComponent>() && entity.GetComponent<RelationshipComponent>().Parent != 0;
+                if (!hasParent && entity.GetComponent<FolderComponent>().Path == path)
+                    inside.push_back(entity);
+            }
+            for (Entity entity : inside)
+                DrawEntityNode(entity);
+            ImGui::TreePop();
+        }
+        ImGui::PopID();
+
+        if (deleteFolder)
+            m_PendingFolderDelete = path;
+    }
+
     void SceneHierarchyPanel::DrawEntityNode(Entity entity)
     {
         auto& tag = entity.GetComponent<TagComponent>().Tag;
@@ -210,8 +409,10 @@ namespace Nox
             ImGuiTreeNodeFlags_OpenOnArrow;
         flags |= ImGuiTreeNodeFlags_SpanAvailWidth;
 
-        const std::vector<UUID> visibleChildren = VisibleChildren(entity);
-        const bool hasChildren = !visibleChildren.empty();
+        bool hasChildren = false;
+        if (entity.HasComponent<RelationshipComponent>())
+            if (!entity.GetComponent<RelationshipComponent>().Children.empty())
+                hasChildren = true;
 
         if (!hasChildren)
             flags |= ImGuiTreeNodeFlags_Leaf;
@@ -232,8 +433,20 @@ namespace Nox
             }
             else // Normal Click: Select single entity
             {
-                SetSelectedEntity(entity);
+                // Pressing on something that is already selected must not drop the rest of the selection: that would make
+                // dragging a multi-selection impossible. It narrows on release, if the mouse did not drag.
+                if (IsSelected(entity) && m_SelectionContexts.size() > 1)
+                    m_PendingSingleSelect = entity;
+                else
+                    SetSelectedEntity(entity);
             }
+        }
+
+        if (m_PendingSingleSelect == entity && ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+        {
+            if (ImGui::IsItemHovered() && ImGui::GetIO().MouseDragMaxDistanceSqr[0] < 16.0f)
+                SetSelectedEntity(entity);
+            m_PendingSingleSelect = {};
         }
 
         // --- 1. DRAG SOURCE: Pick up this entity to drag it ---
@@ -292,7 +505,7 @@ namespace Nox
         {
             if (hasChildren)
             {
-                const std::vector<UUID>& children = visibleChildren;
+                auto children = entity.GetComponent<RelationshipComponent>().Children;
                 for (UUID childID : children)
                 {
                     Entity childEntity = m_Context->GetEntityByUUID(childID);
@@ -758,6 +971,10 @@ namespace Nox
                         {
                             setOverride(0, handle);
                         }
+                        else
+                        {
+                            NOX_CORE_WARN("Wrong Asset Type - Expected a Material (.nmat)");
+                        }
                     }
                     ImGui::EndDragDropTarget();
                 }
@@ -806,6 +1023,10 @@ namespace Nox
                                 AssetManager::GetAssetType(droppedHandle) == AssetType::Material)
                             {
                                 setOverride(i, droppedHandle);
+                            }
+                            else
+                            {
+                                NOX_CORE_WARN("Wrong Asset Type - Expected a Material (.nmat)");
                             }
                         }
                         ImGui::EndDragDropTarget();
@@ -892,6 +1113,10 @@ namespace Nox
                                                               ? textureMetadata.FilePath.generic_string()
                                                               : textureMetadata.SourceFilePath.generic_string();
                                             changed = true;
+                                        }
+                                        else
+                                        {
+                                            NOX_CORE_WARN("Wrong Asset Type - Expected a Texture (this slot takes a texture, not a material)");
                                         }
                                     }
                                     ImGui::EndDragDropTarget();

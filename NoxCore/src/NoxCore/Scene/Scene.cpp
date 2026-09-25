@@ -147,10 +147,50 @@ namespace Nox
 
         // Copy components (except IDComponent and TagComponent)
         CopyComponent(AllComponents{}, dstSceneRegistry, srcSceneRegistry, enttMap);
+        newScene->m_Folders = other->m_Folders;
 
         return newScene;
     }
     
+    void Scene::AddFolder(const std::string& path)
+    {
+        if (!path.empty() && std::find(m_Folders.begin(), m_Folders.end(), path) == m_Folders.end())
+            m_Folders.push_back(path);
+    }
+
+    void Scene::RemoveFolder(const std::string& path)
+    {
+        auto inside = [&](const std::string& other) { return other == path || other.rfind(path + "/", 0) == 0; };
+        std::erase_if(m_Folders, inside);
+        for (auto entity : m_Registry.view<FolderComponent>())
+        {
+            if (inside(m_Registry.get<FolderComponent>(entity).Path))
+                m_Registry.remove<FolderComponent>(entity);
+        }
+    }
+
+    void Scene::RenameFolder(const std::string& from, const std::string& to)
+    {
+        if (from.empty() || to.empty() || from == to)
+            return;
+        // "a/b" -> "c" also moves "a/b/x" to "c/x".
+        auto renamed = [&](const std::string& other) -> std::string
+        {
+            if (other == from)
+                return to;
+            if (other.rfind(from + "/", 0) == 0)
+                return to + other.substr(from.size());
+            return other;
+        };
+        for (std::string& folder : m_Folders)
+            folder = renamed(folder);
+        for (auto entity : m_Registry.view<FolderComponent>())
+        {
+            std::string& path = m_Registry.get<FolderComponent>(entity).Path;
+            path = renamed(path);
+        }
+    }
+
     Entity Scene::CreateEntity(const std::string& name)
     {
         return CreateEntityWithUUID(UUID(), name); // Generate a new random UUID
@@ -805,7 +845,7 @@ namespace Nox
         // them directly makes duplicated glTF hierarchies share their children.
         using DuplicatableComponents = ComponentGroup<
             MeshComponent, MaterialComponent, ModelInstanceComponent, DirectionalLightComponent,
-            PointLightComponent, SpotLightComponent, EnvironmentLightComponent, AnimatorComponent,
+            PointLightComponent, SpotLightComponent, EnvironmentLightComponent, AnimatorComponent, FolderComponent,
             SpriteRendererComponent, CircleRendererComponent, CameraComponent,
             ScriptComponent, RigidBody2DComponent, BoxCollider2DComponent,
             CircleCollider2DComponent, TextComponent>;
@@ -1172,6 +1212,11 @@ namespace Nox
 
     template <>
     void Scene::OnComponentAdded<ModelNodeComponent>(Entity entity, ModelNodeComponent& component)
+    {
+    }
+
+    template <>
+    void Scene::OnComponentAdded<FolderComponent>(Entity entity, FolderComponent& component)
     {
     }
     

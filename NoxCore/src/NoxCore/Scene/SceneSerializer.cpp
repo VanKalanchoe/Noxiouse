@@ -287,6 +287,14 @@ namespace Nox
             out << YAML::EndMap; // MeshComponent
         }
 
+        if (entity.HasComponent<FolderComponent>() && !entity.GetComponent<FolderComponent>().Path.empty())
+        {
+            out << YAML::Key << "FolderComponent";
+            out << YAML::BeginMap;
+            out << YAML::Key << "Path" << YAML::Value << entity.GetComponent<FolderComponent>().Path;
+            out << YAML::EndMap;
+        }
+
         if (entity.HasComponent<ModelInstanceComponent>())
         {
             out << YAML::Key << "ModelInstanceComponent";
@@ -782,6 +790,13 @@ namespace Nox
             SerializeEntity(out, *m_Scene, entity);
         });
         out << YAML::EndSeq; // Corrected: No parentheses
+        if (!m_Scene->m_Folders.empty())
+        {
+            out << YAML::Key << "Folders" << YAML::Value << YAML::BeginSeq;
+            for (const std::string& folder : m_Scene->m_Folders)
+                out << folder;
+            out << YAML::EndSeq;
+        }
         out << YAML::EndMap; // Corrected: No parentheses
 
         const std::filesystem::path filePath(filepath);
@@ -834,6 +849,12 @@ namespace Nox
         std::string sceneName = data["Scene"].as<std::string>();
         NOX_CORE_TRACE("Deserializing scene '{0}'", sceneName);
 
+        if (auto folders = data["Folders"])
+        {
+            for (const auto& folder : folders)
+                m_Scene->AddFolder(folder.as<std::string>());
+        }
+
         auto entities = data["Entities"];
         if (entities)
         {
@@ -884,6 +905,12 @@ namespace Nox
                         mc.SubmeshIndex = meshComponent["SubmeshIndex"].as<uint32_t>();
                     if (meshComponent["SubmeshCount"])
                         mc.SubmeshCount = meshComponent["SubmeshCount"].as<uint32_t>();
+                }
+
+                if (auto folderComponent = entity["FolderComponent"])
+                {
+                    if (folderComponent["Path"])
+                        deserializedEntity.AddComponent<FolderComponent>(folderComponent["Path"].as<std::string>());
                 }
 
                 if (auto modelInstance = entity["ModelInstanceComponent"])

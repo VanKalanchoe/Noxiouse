@@ -28,6 +28,9 @@ namespace Nox
         bool ImportStaticMeshes = true;   // meshes not skinned by a glTF skin
         bool ImportSkeletalMeshes = true; // skinned meshes, plus the skeleton
         bool ImportAnimations = true;     // animation clips
+        // Unreal's content type "Geometry Only": off, skinned meshes are imported as plain geometry (static meshes, no skeleton,
+        // no skinning). ("Skin Weights Only" needs an existing mesh to apply them to; there is no such import.)
+        bool ImportSkinWeights = true;
         MeshCombineMode StaticCombine = MeshCombineMode::DoNotCombine;   // static meshes: merged with their node transforms baked in
         MeshCombineMode SkeletalCombine = MeshCombineMode::DoNotCombine; // skinned meshes (same skeleton): merged in bind pose
         // One glTF mesh of the file as its own static mesh (Do Not Combine gives every mesh an asset); -1 = the whole file.
@@ -35,6 +38,9 @@ namespace Nox
         // claims meters too and comes in 100x too big -- nothing in the file says so, you tell the importer. Applied as the
         // scale of the entity a drag-in creates (the model itself is untouched).
         float ImportScale = 1.0f;
+        // Unreal's Import into Level: also place the file's scene (node hierarchy, lights, cameras) in the level. An action of
+        // this import, not a property of the assets, so it is not saved with them.
+        bool ImportIntoLevel = false;
         int32_t SourceMeshIndex = -1;
         // file's materials): the whole-file mesh path; empty = this asset's own path.
         std::filesystem::path MaterialBasePath;

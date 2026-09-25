@@ -44,6 +44,8 @@ namespace Nox
         {
             bool HasSkinnedMeshes = false;   // a node with a mesh and a skin
             bool HasStaticMeshes = false;    // a node with a mesh and no skin (or a mesh no node uses)
+            uint32_t SkinnedMeshCount = 0;   // distinct glTF meshes skinned by a skin
+            uint32_t StaticMeshCount = 0;    // distinct glTF meshes without one
         };
         static GltfContent InspectGltf(const std::filesystem::path& sourcePath);
 
@@ -58,10 +60,28 @@ namespace Nox
             std::filesystem::path FilePath; // relative to the asset directory
             int32_t MeshIndex = -1;
         };
+        // `skinned`: split the skinned meshes (each becomes a .nmesh, with the skeleton and clips written once next to them)
+        // instead of the static ones.
+        // What Import Into Level needs of the file: its nodes (hierarchy, transforms, which glTF mesh each holds), lights, cameras.
+        struct SplitLevel
+        {
+            std::vector<MeshNodeData> Nodes;
+            std::vector<LightNodeData> Lights;
+            std::vector<CameraNodeData> Cameras;
+            // The file's node animation clips, cooked next to the meshes: where they are (relative to the asset directory)
+            // and which nodes each one animates, so the level can attach them without loading them first.
+            struct Clip
+            {
+                std::filesystem::path FilePath;
+                std::vector<int32_t> Nodes;
+            };
+            std::vector<Clip> Clips;
+        };
+
         // `total` / `done` (optional) report progress in meshes: total is set once the file is parsed.
         static std::vector<SplitMesh> CookSplitMeshes(const std::filesystem::path& assetDirectory, const AssetMetadata& materialBase,
-                                                      const std::filesystem::path& directory, std::atomic<uint32_t>* total = nullptr,
-                                                      std::atomic<uint32_t>* done = nullptr);
+                                                      const std::filesystem::path& directory, bool skinned, std::atomic<uint32_t>* total = nullptr,
+                                                      std::atomic<uint32_t>* done = nullptr, SplitLevel* level = nullptr);
         // Where a model's material asset lives (relative to the asset directory), from the model's cooked file path.
         static std::filesystem::path MaterialAssetPath(const std::filesystem::path& meshFilePath, const MaterialData& material, size_t index);
 

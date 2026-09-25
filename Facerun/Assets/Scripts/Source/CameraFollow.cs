@@ -35,6 +35,8 @@ public sealed class CameraFollow : EntityBehaviour
     {
         if (!Target.IsValid || Target.ID == EntityID)
             return;
+        if (!Target.HasComponent<TransformComponent>())
+            return; // the target was deleted (the entity id is still set)
 
         TransformComponent targetTransform = Target.GetComponent<TransformComponent>();
         TransformComponent cameraTransform = GetComponent<TransformComponent>();
