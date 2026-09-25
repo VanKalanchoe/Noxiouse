@@ -127,6 +127,7 @@ namespace Nox
         AssetHandle Model = 0;
         std::vector<uint32_t> RemovedNodes;       // glTF node indices deleted from this instance
         std::vector<ModelNodeOverride> Overrides; // to apply at spawn; the node entities hold them once spawned
+        bool AtFileLayout = false;                // a per-mesh asset: spawn the file's instances of it, each where the file had it
         bool Spawned = false;                     // runtime only
 
         ModelInstanceComponent() = default;
@@ -423,12 +424,16 @@ namespace Nox
     // scripts. Scripts drive it through the input fields, the physics step fills the runtime state.
     struct CharacterController3DComponent
     {
-        float Radius = 0.3f;
-        float Height = 1.0f; // length of the straight part between the two caps; total height = Height + 2 * Radius
-        float StepHeight = 0.4f;
-        float MaxSlopeDegrees = 50.0f;
-        float GravityScale = 1.0f;
-        float AirControl = 0.3f; // fraction of MoveVelocity applied while not supported
+        // Defaults follow Unreal's third-person character (its centimeters as meters): capsule 34 cm x 176 cm, 45 cm steps,
+        // 44.8 degree slopes, gravity x1.75, air control 0.35, 20.5 m/s^2 acceleration (2048 cm/s^2) and 20 m/s^2 braking.
+        float Radius = 0.34f;
+        float Height = 1.08f; // length of the straight part between the two caps; total height = Height + 2 * Radius
+        float StepHeight = 0.45f;
+        float MaxSlopeDegrees = 44.8f;
+        float GravityScale = 1.75f;
+        float AirControl = 0.35f;          // fraction of the ground acceleration available in the air
+        float MaxAcceleration = 20.48f;    // m/s^2 towards the wanted horizontal velocity: movement ramps up instead of snapping
+        float BrakingDeceleration = 20.0f; // m/s^2 when no movement is wanted
 
         // Input, set by scripts each frame
         glm::vec3 MoveVelocity = { 0.0f, 0.0f, 0.0f }; // desired horizontal world velocity (m/s)

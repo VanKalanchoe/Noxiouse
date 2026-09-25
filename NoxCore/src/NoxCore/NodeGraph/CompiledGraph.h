@@ -19,6 +19,8 @@ namespace Nox
         uint32_t OutputSlot = kInvalidGraphIndex;
     };
 
+    struct CompiledSubGraph;
+
     struct CompiledNode
     {
         const NodeTypeDesc* Type = nullptr; // permanent-lifetime pointer into NodeTypeRegistry
@@ -26,6 +28,9 @@ namespace Nox
         std::unordered_map<std::string, NodeGraphValue> Properties;
         std::vector<CompiledPin> Inputs;    // parallel to Type->Inputs
         uint32_t OutputSlotBase = 0;        // this node's outputs live at PinValues[OutputSlotBase, OutputSlotBase + Type->Outputs.size())
+        // A state machine node's states (each compiled on its own) and the transitions between them; empty otherwise.
+        std::vector<CompiledSubGraph> SubGraphs;
+        std::vector<NodeTransition> Transitions;
     };
 
     // GraphCompiler's output: a NodeGraph flattened into evaluation order with every link resolved to direct
@@ -39,5 +44,12 @@ namespace Nox
         std::vector<GraphParameter> Parameters;
 
         bool IsValid() const { return !Nodes.empty() && OutputNodeIndex != kInvalidGraphIndex; }
+    };
+
+    struct CompiledSubGraph
+    {
+        uint32_t Id = 0; // NodeSubGraph::Id, what NodeTransition refers to
+        std::string Name;
+        CompiledGraph Graph;
     };
 }

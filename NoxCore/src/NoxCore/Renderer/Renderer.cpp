@@ -534,6 +534,10 @@ namespace Nox
         // every frame with the same value until the apply happens - restarting the timer on those
         // repeats meant the settle window never elapsed and the render targets never resized, leaving
         // them at the startup size and offsetting mouse picking toward the top-left.
+        // Nothing to do when it is the size already in use and no other resize is waiting.
+        if (!m_viewportResizePending && size.width == m_viewportSize.width && size.height == m_viewportSize.height)
+            return;
+
         if (m_viewportResizePending &&
             size.width == m_pendingViewportSize.width && size.height == m_pendingViewportSize.height)
             return;
@@ -3284,7 +3288,9 @@ namespace Nox
 
         // Every hybrid-only feature skips itself while path tracing. ReSTIR DI/GI are the exception when explicitly
         // requested: the plain path tracer can consume their primary-surface lighting buffers (RTXPT-style hybrid).
-        frame.runPathTracer = (m_pathTracingEnabled || m_debugMode == 18 || m_debugMode == 19);
+        // Not without a TLAS: an empty scene (everything deleted) has none, and tracing a null or freed acceleration
+        // structure is a device loss. The TLAS is prepared before the graph is built (drawFrame).
+        frame.runPathTracer = (m_pathTracingEnabled || m_debugMode == 18 || m_debugMode == 19) && uniformData.tlasDeviceAddress != 0;
         frame.pathTracerUsesRTXDI = frame.runPathTracer && m_pathTracerUsesRTXDI;
         frame.totalDDGIProbes = m_ddgiProbeCountX * m_ddgiProbeCountY * m_ddgiProbeCountZ;
 
@@ -4045,8 +4051,11 @@ namespace Nox
         const uint32_t instanceCount = m_gpuScene.GetTlasInstanceCount();
         if (instanceCount == 0)
         {
+            // Nothing left to trace (the scene was deleted): the old TLAS still points at BLASes that are freed, so no pass
+            // may keep using it -- the path tracer and ReSTIR only run with a non-zero address.
             m_hasTLASBuild = false;
             m_tlasNeedBuild = true;
+            uniformData.tlasDeviceAddress = 0;
             uniformData.enableRTShadows = 0;
             uniformData.enableRTReflections = 0;
             return;
@@ -4298,6 +4307,16 @@ namespace Nox
         m_device->endImGui();
     }
 
+    // Inverse of proj * view, computed in double precision from the two matrices themselves. Shaders unproject the near
+    // plane with it (the sky's ray direction, camera rays, world positions from depth); the reverse-Z projection makes
+    // proj * view badly conditioned (entries from ~1e-5 to ~1e3), and inverting the float product lost enough digits that
+    // the result changed by up to a pixel from one frame to the next while the camera moved -- steady when still, so the
+    // image only jittered during camera motion.
+    static glm::mat4 InvertViewProjection(const glm::mat4& proj, const glm::mat4& view)
+    {
+        return glm::mat4(glm::inverse(glm::dmat4(view)) * glm::inverse(glm::dmat4(proj)));
+    }
+
     // RTXPT defaults to Donut's non-repeating R2 camera-jitter sequence because it is more stable
     // with DLSS Ray Reconstruction than the short Halton cycle previously used here.
     static glm::vec2 R2Jitter(uint32_t phase)
@@ -4403,7 +4422,7 @@ namespace Nox
         uniformData.nonJitteredProj = m_currentNonJitteredProj;
         uniformData.prevProj = m_prevNonJitteredProj;
         uniformData.prevView = m_prevView;
-        uniformData.invViewProj = glm::inverse(uniformData.proj * uniformData.view);
+        uniformData.invViewProj = InvertViewProjection(uniformData.proj, uniformData.view);
         uniformData.cameraWorldPos = glm::vec4(glm::vec3(transform[3]), 0.0f);
         uniformData.frustum = shaderio::Frustum{uniformData.proj * uniformData.view};
 
@@ -4534,7 +4553,7 @@ namespace Nox
         uniformData.prevProj = m_prevNonJitteredProj;
         uniformData.prevView = m_prevView;
 
-        uniformData.invViewProj = glm::inverse(uniformData.proj * uniformData.view);
+        uniformData.invViewProj = InvertViewProjection(uniformData.proj, uniformData.view);
         uniformData.cameraWorldPos = {camera.GetPosition(), 0.0f};
         uniformData.frustum = shaderio::Frustum{uniformData.proj * uniformData.view};
         uniformData.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);

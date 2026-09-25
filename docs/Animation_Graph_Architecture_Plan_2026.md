@@ -143,7 +143,7 @@ performance measurement). The points that matter most for this plan:
   feeding Speed/IsGrounded/MoveDirection into the graph's parameters.
   **Test:** walk a physics character around the level, idle/walk/run blending live from real movement.
 
-- [ ] **Step 7 — State Machine node.**
+- [~] **Step 7 — State Machine node.** (7a runtime + file format tested with the Fox; 7b/7c editor built 2026-09-25, untested)
   Nested sub-graphs per state, transitions with conditions/blend duration/curve, breadcrumb editing.
   **Test:** Idle↔Walk↔Run↔Jump state machine driven by real movement, smooth blended transitions.
 
@@ -607,3 +607,156 @@ performance measurement). The points that matter most for this plan:
   - **Test:** put `CharacterController3DComponent` + `CharacterMovement` script on the Fox entity (Animator graph
     needs a `Speed` parameter; `Fox_WalkRun` has it), with a static box collider floor; Play; walk/run/jump. Tune
     `ModelYawOffset` if the Fox faces the wrong way. C# is not compiled by me -- rebuild the script projects.
+
+## 7. Import & scene restructure -- UE5 style (Stage A done, Stage B mostly done, Stage C open -- see "Status and backlog" at the end)
+
+Trigger: with Step 6 the Fox exposed that the current model spawn puts the Animator on an internal glTF node that is
+never saved. Survey: a glTF becomes one `.nmesh` (all submeshes + node table) -> `ModelInstanceComponent` root ->
+spawned node entities (Engine plan §5.11.6 5c, deliberately: Bistro's scene file holds one root instead of 6007
+entities). Asset types `StaticMesh`, `SkeletalMesh`, `Skeleton`, `AnimationSequence` already exist in `AssetType`,
+`SkeletalMesh.h`/`SkeletalMeshImporter` exist but the model path does not use them.
+
+UE5 reference (verified by the user in the Interchange dialog): content type (geometry / skin weights / both),
+combine skeletal meshes (do not combine / all visible with same skeleton / all with same skeleton), combine static
+meshes (do not combine / visible / all). Skinned content -> Skeletal Mesh + Skeleton + Physics Asset + Sequences; one
+skeletal mesh = one skeleton = one component; bones are data, not actors, attached to by socket. UEFN prefabs /
+UE Level Instances / Packed Level Actors cover "a group of things placed as one".
+
+- [x] **Stage A -- Skeletal mesh (character). Confirmed working.** Model instances whose skeleton has exactly one skin now convert at spawn (`ModelInstance.cpp` `spawn`) into ONE entity: MeshComponent(all submeshes) + MaterialComponent + AnimatorComponent(Skeleton, first clip), ModelInstanceComponent removed; import-option dialog and SkeletalMesh asset type still to do. Import option: skinned content becomes a `SkeletalMesh` asset (+ its
+  skeleton, clips). Dropping it creates ONE entity with `MeshComponent` + `AnimatorComponent` (graph, parameters,
+  saved as ordinary components); no child node entities, no joint entities; pose -> skinning matrices through the
+  existing self-contained path (`GraphFinalBoneTransforms`); clip/graph selection filtered to that skeleton. Scripts,
+  CharacterController and colliders sit on that entity. Sockets (attach to a bone by name) only when first needed.
+- [~] **Stage B -- Static/scene models (decided).** Import options for static content (do not combine / visible / all). A model
+  that stays a hierarchy keeps `ModelInstance` (it is the Packed-Level-Actor equivalent and what keeps Bistro at one
+  scene root) with internals collapsed by default and viewport picks resolving to the root; per-node overrides stay.
+  Explicit "unpack to entities" already exists (remove the component).
+
+Open decisions (asked of the user before Stage A starts): (1) Stage B keeps `ModelInstance` as the prefab mechanism vs
+a new saved-entities prefab asset (would put Bistro back to ~6000 saved entities); (2) where the import options
+live: the existing MeshSource import dialog (double-click a `.gltf` in the Content Browser).
+- [ ] **Stage C -- Prefab asset (later).** A saved template of authored entities + components (door with collider/script,
+  enemy with weapon), instanced in scenes with overrides. Complements `ModelInstance` (imported-file expansion):
+  prefabs may reference model instances instead of expanding them, so big imports never become thousands of saved
+  entities.
+
+- **Import options -- UE5 Interchange style (decided 2026-09-24, in progress; supersedes an earlier note that dropped the
+  combine options: they stay, for draw-call/instance/BLAS-count savings).** Built so far (**I1**): `MeshImportSettings`
+  (`ImportStaticMeshes`, `ImportSkeletalMeshes`, `ImportAnimations`) on `AssetMetadata`, saved in the registry, chosen
+  in the existing import dialog; the cook drops submeshes/materials of unwanted nodes (`FilterMeshesByImportSettings`,
+  nodes know `Skinned`), skeleton only with skeletal meshes, clips only with animations; no skeletal meshes ->
+  geometry-only `.nsmesh`. Still to do, in this order: **I2** static and skeletal results as SEPARATE assets from one import
+  (BUILT, untested: `Name.nmesh` = the skeletal mesh (skinned meshes + skeleton .nskel + clips .nanim), `Name.nsmesh` = the static mesh (unskinned meshes, lights, cameras); both registered and draggable. Only files with BOTH kinds split; single-kind files stay one asset as before);
+  **I3** combine modes (static: do not combine / combine visible / combine all -- merge submeshes baked with node
+  world transforms; skeletal: do not combine / all visible same skeleton / all same skeleton) plus the content-type
+  option (geometry + skin weights / geometry only); **I4** per-mesh assets for "do not combine". Then Step 7.
+  Stage C (prefab asset) stays later. `ModelInstance` remains the scene-model mechanism.
+  **I2 revised (2026-09-24): content decides, like Unreal.** `MeshImporter::InspectGltf` reads the glTF first;
+  `EditorAssetManager::ImportModel` then registers what the file holds and the settings allow: skinned meshes ->
+  `Name.nmesh` (skeletal mesh; its cook writes `.nskel`, and clips), everything else -> `Name.nsmesh` (static mesh,
+  lights, cameras); a file with both gets both entries, each cooking only its own subset (settings per entry).
+  Bistro (no skins) is now a `.nsmesh`, the Fox a `.nmesh`. `.nmesh` is therefore the skeletal-mesh file (a later cosmetic
+  rename to `SkeletalMesh`/`.nskmesh` is possible; the legacy unused `SkeletalMesh` type is the same idea). Clips ride with the
+  skeletal entry, or with the static entry when the file has no skinned meshes.
+  **I3 built (2026-09-24, untested): combine modes.** `MeshImportSettings::StaticCombine/SkeletalCombine`
+  (`DoNotCombine / CombineVisible / CombineAll`, saved in the registry, in the import dialog). Meshlets/clusters are no longer built
+  inside the glTF parse: it returns each submesh's triangles (`PendingGeometry`) and `CookMesh` builds clusters after the
+  import settings picked the meshes and, when combining, merged them (`CombineSubmeshes`: one submesh per material, static
+  ones with their node world matrix baked into positions/normals and winding fixed for mirrored transforms, skinned ones in
+  bind pose; a repeated mesh is copied per node instead of instanced -- the price of merging, default is Do Not Combine;
+  one new node at the end owns the merged submeshes so light/camera/clip node indices stay valid). glTF has no
+  visibility flag, so Combine Visible = Combine All. Content type (geometry / skin weights) and per-mesh "do not combine"
+  assets (I4) remain.
+  **I4 built (2026-09-24, untested): Do Not Combine = one asset per mesh.** With Combine Static Meshes = Do Not Combine the
+  import still registers the whole-file `Name.nsmesh` (keeps the file's scene layout for placing it as a `ModelInstance`) and
+  additionally cooks EVERY unique static glTF mesh into `Name_Meshes/<MeshName>.nsmesh` in one background job
+  (`MeshImporter::CookSplitMeshes`, one glTF parse), registered when it finishes (`EditorAssetManager::PublishSplitImports`).
+  Per-mesh assets hold the mesh's submeshes under one identity node, share the whole-file asset's `.nmat` files
+  (`MeshImportSettings::MaterialBasePath`), and remember which glTF mesh they are (`SourceMeshIndex`) so a stale one recooks
+  correctly. Skeletal meshes keep one asset per file for now. What is NOT there: a level/scene asset that places the
+  per-mesh assets like the file's layout (Unreal's "import into level") -- that is Stage C (prefab/scene asset).
+  **I4 revised (2026-09-24 22:xx, after user test):** (1) Bug: `ScanAndRegisterNewAssets` auto-registered the per-mesh
+  `.nsmesh` files (source = itself) while the split job was still writing them, so they failed to cook ("Failed to parse
+  JSON"); the scan no longer auto-registers `.nmesh`/`.nsmesh` (cooked meshes are always registered by their import).
+  (2) Do Not Combine no longer registers a whole-file asset and no longer makes a subfolder: the per-mesh `.nsmesh` files go
+  in the import destination folder and the file's layout becomes a generated scene `<gltf folder>/<name>.nox` (one entity
+  per unskinned node with a mesh, world transform, `MeshComponent` -> its mesh asset) -- Unreal's "import into level".
+  Not in that scene yet: lights, cameras, node animations/clips (they rode with the whole-file asset), node hierarchy
+  (flattened to world transforms). (3) Content Browser: opening a folder matched each file against the whole registry
+  (two path normalizations per registry entry, per file -> seconds for hundreds of files); it now builds one path->handle
+  table per refresh.
+  **Correction:** the generated layout scene is optional (`MeshImportSettings::CreateLayoutScene`, dialog checkbox "Create scene from the file's layout", off by default) -- Unreal's Content Browser import makes only assets; only Import into Level places them.
+  **Correction 2 (2026-09-24): the layout scene was removed entirely** (generation, checkbox, placements). Unreal's Content
+  Browser import produces only assets that you drag into the viewport; that is what Do Not Combine now does (per-mesh
+  `.nsmesh` files in the import folder, sharing the materials, no whole-file asset). Not built and not planned unless asked:
+  Unreal's separate "Import into Level".
+  **Multi-select + place-in-layout (2026-09-24, untested).** Content Browser: click / Ctrl+click / Shift+click / Ctrl+A select
+  assets, dragging a selected one drags the selection (`CONTENT_BROWSER_ITEMS` payload; a single drag is unchanged).
+  Per-mesh assets now also carry the file's instances of their mesh as extra nodes (`MeshNodeData::FileLayoutParent = -2`, world
+  transforms; no cook-format change, reimport Do Not Combine meshes once). `ModelInstanceComponent::AtFileLayout` (saved) picks
+  which kind of node spawns: the identity node (single drag: one copy at the cursor) or the file's instances (multi drag: every
+  mesh at its place under one "Placed Assets" group at the drop point). No scene file involved.
+  **Streaming regression fix (2026-09-24, untested):** hundreds of per-mesh loads exposed per-load costs that were invisible
+  with one whole-file asset. (1) Every load that registered a texture/material rewrote the whole asset-registry file
+  synchronously (registry changes made while loading now just set `m_RegistryDirty`; `Update()` writes it at most once a
+  second, `Shutdown()` flushes). (2) `ImportMeshTextures/Materials` rebuilt a path->handle map from the whole registry per load;
+  `EditorAssetManager::m_HandleByPath` is now kept current by every registration (`IndexPath`, `FindHandleByPath`). The
+  "clumped" placement seen in the test was stale data: per-mesh files cooked before the layout nodes existed
+  (file time older than the importer change) carry no layout, so multi-drag stacks them at the group origin; reimport.
+
+### Step 7a -- State Machine runtime + format (built 2026-09-24, untested)
+- **Model (UE5 AnimBP state machine, Unity-style conditions):** a `StateMachine` node (Category "State Machines", one Pose
+  output) owns **states = sub graphs** (each a full graph of the same domain ending in its own `Output` node) and
+  **transitions** (`NodeTransition`: From/To state id, Duration, EaseInOut, and `Rules`: a list of
+  `Parameter <Compare> Value` that must ALL hold). Conditions are parameter-comparison lists (Unity's Animator), not graphs
+  (UE): far simpler to author and to edit in a table, and the runtime needs no per-transition graph. Sub graphs share the
+  root graph's parameters, so `GetParameter` inside a state works.
+- **Core (domain-agnostic):** `GraphNode::SubGraphs` (`NodeSubGraph{Id, Name, EditorPosition, NodeGraph}`) and
+  `GraphNode::Transitions`; `GraphCompiler` compiles each sub graph recursively (`CompiledNode::SubGraphs`, `Transitions`); a bad
+  sub graph fails the whole compile with a log line. `NodeGraphSerializer` writes/reads `SubGraphs` and `Transitions`
+  recursively (shared `EmitGraph/ReadGraph`), so the canvas editor saving a graph keeps its states.
+- **Runtime (`EvaluateStateMachine`):** per node, `StateMachineRuntime` in the node's eval-context slot: one
+  `GraphEvalContext` per state (its own playheads), active state, and during a transition the target state, elapsed time,
+  duration and curve. Each frame: if idle, transitions from the active state are checked in order and the first whose rules
+  hold starts (the entered state's context is re-`Init`ed, so it plays from its start); the active state (and the target
+  during a transition) is evaluated and the two poses blended by smoothstep/linear progress with `BlendPoses`; when
+  progress reaches 1 the target becomes active. `EntryState` (int32 property) is the state id it starts in.
+- **Test asset:** `Facerun/Assets/AnimationGraphs/Fox_Locomotion.nanimgraph` (registered by hand in AssetRegistry.nxr,
+  handle 4817263940125348171): Idle(Survey) / Walk / Run driven by `Speed` in m/s (Idle->Walk > 0.1, Walk->Idle < 0.1, Walk->Run > 3.5,
+  Run->Walk < 3). The three Clip handles are placeholders (`U64: 0`): after reimporting the Fox, copy Fox_Survey / Fox_Walk / Fox_Run
+  handles from AssetRegistry.nxr into the file. `CharacterMovement.cs` now sends `Speed` in m/s (no script smoothing: transitions blend).
+- **Not yet:** editing states/transitions in the canvas (7b: state view with breadcrumb, 7c: transition rules table).
+
+### Movement feel + import scale (2026-09-25, untested)
+- **Units:** the engine is meters (Jolt). Character controller defaults now follow Unreal's third-person character with its cm as m:
+  capsule 0.34 x 1.08 (+caps = 1.76 m), step 0.45, slope 44.8, gravity x1.75, air control 0.35, `MaxAcceleration` 20.48 and
+  `BrakingDeceleration` 20 m/s^2 (Unreal 2048 / 2000 cm/s^2). Horizontal velocity now RAMPS to the wanted velocity in
+  `StepCharacters` (`CharacterState::Horizontal`) instead of snapping -- the main source of Unreal's smooth start/stop. Script
+  defaults: walk 2, run 5, jump 7 m/s, turn 12. The characters are drawn interpolated between fixed steps.
+- **Import Scale** (`MeshImportSettings::ImportScale`, dialog "Transform": m / cm / in presets): nothing in a glTF says it was
+  authored in centimeters, so the importer is told, like Unreal's Import Uniform Scale. Applied as the entity scale of the
+  entity a drag-in creates (single and multi drag); the asset itself is unchanged. The Khronos Fox needs 0.01.
+
+### Step 7b/7c -- State machine editing (built 2026-09-25, untested)
+- **Navigation:** the graph panel keeps a path (`m_Path`: node id, state id, node id, ...) and a breadcrumb ("Graph > StateMachine > Walk", each name clickable). Double-clicking a node whose type `OwnsSubGraphs` (the State Machine) opens its **state view**; double-clicking a state opens **that state's own graph** in the normal canvas (a state can contain another state machine).
+- **State view** (`ThedmdCanvasBackend::DrawStateMachine`, its own ax::NodeEditor context): states are boxes (entry state green), transitions are arrows. Right-click the canvas -> Add State (new state = an empty graph with an Output node); drag from a state's right pin to another's left pin -> a transition (with a default rule on the graph's first parameter, since a rule-less transition fires immediately); Delete removes states / transitions; right-click a state -> Set as Entry.
+- **Inspector** under the view (`NodeGraphEditorPanel::DrawStateMachineInspector`): a selected arrow shows Blend Time, Ease In/Out and the rules table (parameter dropdown from the graph's parameters, `== != > >= < <= is true / is false`, value, remove, add); a selected state shows its name, Set as Entry and Open State Graph. Every edit recompiles the asset (running scenes pick it up live).
+- **Interface:** `INodeGraphCanvasBackend` gained `DrawStateMachine`, `ResetView`, and an `outOpenNode` out-parameter on `Draw`; `NodeTypeDesc::OwnsSubGraphs` marks node types with sub graphs.
+
+---
+
+## 8. Status and backlog (written 2026-09-25)
+
+**Animation plan (section 5):** Steps 1-7 are built (7a runtime confirmed on the Fox; 7b/7c state machine editor confirmed opening and editing; rule/blend behaviour in Play still to be checked by the user). Step 8 (audio graph) is future.
+
+**UE5-style import/scene restructure (section 7)**
+- **Stage A (skeletal mesh as ONE entity):** DONE. A skinned model drops in as a single entity with Mesh + Animator; import splits by content (`.nmesh` skeletal + `.nskel` + `.nanim`, `.nsmesh` static); `MeshImportSettings` (import static / skeletal / animations, import scale).
+- **Stage B (static / scene models):** MOSTLY DONE. Built: static combine modes (do not combine / visible / all), skeletal combine modes, per-mesh assets for Do Not Combine (one `.nsmesh` per mesh in the import folder, shared materials), multi-select in the Content Browser and multi-drag placing every mesh at its file position (`FileLayoutParent` nodes + `AtFileLayout`), import progress bar, path index + batched registry writes for big imports. STILL OPEN: (1) UE's "content type" option (geometry + skin weights / geometry only / skin weights only); (2) per-mesh assets for skinned meshes (skeletal "do not combine": one asset per skinned mesh sharing the skeleton); (3) `ModelInstance` internals collapsed by default with viewport picks resolving to the root ("Editable Children" toggle) -- planned in Stage B, not built; (4) cosmetic rename `Mesh`/`.nmesh` -> `SkeletalMesh`/`.nskmesh` (the legacy unused `SkeletalMesh` asset type is the same idea); (5) the layout scene for Do Not Combine was tried and removed by decision (Unreal's Content Browser import makes only assets).
+- **Stage C (prefab asset):** OPEN, later. A saved template of authored entities + components with per-instance overrides; may reference `ModelInstance`s instead of expanding them, so big imports never become thousands of saved entities.
+
+**Backlog / possible next steps (not started unless stated)**
+1. **Character polish:** a jump/fall state using `IsGrounded` (the Fox has no jump clip); a late-update phase for scripts (the follow camera has a constant one-frame lag because scripts run before physics); physics render interpolation for rigid bodies (characters already interpolate); Stats overlay columns after long-running Peak values (reported broken-looking after the resize-loop fix; cause not confirmed).
+2. **Step 8, audio graph:** a second node-graph domain reusing the core and editor panel unchanged (proves the "reusable graph compiler" goal).
+3. **Stage C prefab asset** (above).
+4. **Engine roadmap Phase 6b (Engine_Architecture_Plan_2026.md, §5.7/5.9/5.14): geometry streaming and LOD:** cluster DAG cook (meshoptimizer `clodBuild`), GPU cut selection, page streaming pool, coarse RT fallback LOD; exit: geometry exceeding the geometry budget renders with streaming, no popping beyond threshold. Its step-by-step plan is in `C:\Users\YA\.claude\plans\swift-sauteeing-puzzle.md` (6b-1 cluster DAG cook + GPU cut, 6b-2 RT fallback LOD, 6b-3 cluster pages, 6b-4 page streaming).
+5. **Known leftovers from this session:** the Fox's `Speed` thresholds in `Fox_Locomotion` assume walk 2 / run 5 m/s; skeletal meshes with several skins or unskinned meshes next to the skin still spawn as nodes (not the single-entity path); DoNotCombine drops the file's lights, cameras and node animations (they lived with the whole-file asset).

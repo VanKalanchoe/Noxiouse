@@ -261,13 +261,43 @@ namespace Nox
             const UUID rootID = root.GetUUID();
             const auto& nodes = mesh.GetNodes();
             const std::unordered_set<uint32_t> removed(instance.RemovedNodes.begin(), instance.RemovedNodes.end());
+            // A per-mesh asset holds an identity node (a plain drag places that) and the file's instances of the mesh
+            // (placed by dragging several assets together): one of the two kinds spawns, never both.
+            const bool hasLayoutNodes = std::any_of(nodes.begin(), nodes.end(), [](const MeshNodeData& node) { return node.Parent == MeshNodeData::FileLayoutParent; });
+            const bool atFileLayout = instance.AtFileLayout;
             const Skeleton* skeleton = mesh.GetSkeletonAsset() != 0 ? AssetManager::FindLoadedAsset<Skeleton>(mesh.GetSkeletonAsset()) : nullptr;
             const bool skinned = skeleton && !skeleton->Skins.empty();
+
+            // A skinned character is a skeletal mesh (UE5): one entity holding the mesh and its animator, no node or
+            // joint entities -- the pose goes straight into skinning matrices (Scene::UpdateAnimators' self-contained
+            // path), bones are data. It stops being a model instance, so everything on it saves as ordinary
+            // components. Lights and cameras in such a file are not spawned. Models with several skins or with
+            // unskinned meshes next to the skin are not handled yet and spawn as nodes below.
+            if (skinned && skeleton->Skins.size() == 1)
+            {
+                const AssetHandle model = instance.Model;
+                const auto& clips = mesh.GetAnimationAssets();
+
+                auto& meshComponent = root.AddComponent<MeshComponent>();
+                meshComponent.Mesh = model;
+                meshComponent.SubmeshIndex = 0;
+                meshComponent.SubmeshCount = UINT32_MAX;
+                root.AddComponent<MaterialComponent>();
+
+                auto& animator = root.AddComponent<AnimatorComponent>();
+                animator.Skeleton = mesh.GetSkeletonAsset();
+                if (!clips.empty())
+                    animator.Animation = clips.front();
+
+                root.RemoveComponent<ModelInstanceComponent>(); // `instance` is gone
+                return true;
+            }
 
             std::vector<Entity> spawned(slotCount(mesh));
             auto spawnSlot = [&](size_t slot) -> Entity
             {
-                if (removed.contains(static_cast<uint32_t>(slot)))
+                if (removed.contains(static_cast<uint32_t>(slot)) ||
+                    (hasLayoutNodes && slot < nodes.size() && (nodes[slot].Parent == MeshNodeData::FileLayoutParent) != atFileLayout))
                     return {};
                 const SlotDefaults defaults = slotDefaults(mesh, slot);
                 Entity entity = scene.CreateEntityWithUUID(ModelInstance::NodeUUID(rootID, static_cast<uint32_t>(slot)), defaults.Name);

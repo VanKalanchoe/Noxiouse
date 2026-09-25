@@ -85,16 +85,12 @@ namespace Nox
         return false;
     }
 
-    bool NodeGraphSerializer::Serialize(const std::filesystem::path& path, const NodeGraph& graph)
+    namespace
     {
-        YAML::Emitter out;
-        out << YAML::BeginMap;
-        out << YAML::Key << "Domain" << YAML::Value << graph.Domain;
-        out << YAML::Key << "OutputNode" << YAML::Value << graph.OutputNode;
-        out << YAML::Key << "NextNodeId" << YAML::Value << graph.NextNodeId;
+        void EmitGraph(YAML::Emitter& out, const NodeGraph& graph);
+        void ReadGraph(const YAML::Node& data, NodeGraph& graph);
 
-        out << YAML::Key << "Nodes" << YAML::Value << YAML::BeginSeq;
-        for (const GraphNode& node : graph.Nodes)
+        void EmitNode(YAML::Emitter& out, const GraphNode& node)
         {
             out << YAML::BeginMap;
             out << YAML::Key << "Id" << YAML::Value << node.Id;
@@ -107,68 +103,159 @@ namespace Nox
                 out << YAML::BeginMap;
                 out << YAML::Key << "Name" << YAML::Value << name;
                 out << YAML::Key << "Value";
-                EmitValue(out, value);
+                NodeGraphSerializer::EmitValue(out, value);
+                out << YAML::EndMap;
+            }
+            out << YAML::EndSeq;
+
+            // A state machine's states and the transitions between them; absent for ordinary nodes.
+            if (!node.SubGraphs.empty())
+            {
+                out << YAML::Key << "SubGraphs" << YAML::Value << YAML::BeginSeq;
+                for (const NodeSubGraph& subGraph : node.SubGraphs)
+                {
+                    out << YAML::BeginMap;
+                    out << YAML::Key << "Id" << YAML::Value << subGraph.Id;
+                    out << YAML::Key << "Name" << YAML::Value << subGraph.Name;
+                    out << YAML::Key << "Position" << YAML::Value << subGraph.EditorPosition;
+                    out << YAML::Key << "Graph" << YAML::Value;
+                    EmitGraph(out, subGraph.Graph);
+                    out << YAML::EndMap;
+                }
+                out << YAML::EndSeq;
+            }
+            if (!node.Transitions.empty())
+            {
+                out << YAML::Key << "Transitions" << YAML::Value << YAML::BeginSeq;
+                for (const NodeTransition& transition : node.Transitions)
+                {
+                    out << YAML::BeginMap;
+                    out << YAML::Key << "From" << YAML::Value << transition.FromState;
+                    out << YAML::Key << "To" << YAML::Value << transition.ToState;
+                    out << YAML::Key << "Duration" << YAML::Value << transition.Duration;
+                    out << YAML::Key << "EaseInOut" << YAML::Value << transition.EaseInOut;
+                    out << YAML::Key << "Rules" << YAML::Value << YAML::BeginSeq;
+                    for (const TransitionRule& rule : transition.Rules)
+                    {
+                        out << YAML::BeginMap;
+                        out << YAML::Key << "Parameter" << YAML::Value << rule.Parameter;
+                        out << YAML::Key << "Compare" << YAML::Value << static_cast<int>(rule.Compare);
+                        out << YAML::Key << "Value";
+                        NodeGraphSerializer::EmitValue(out, rule.Value);
+                        out << YAML::EndMap;
+                    }
+                    out << YAML::EndSeq;
+                    out << YAML::EndMap;
+                }
+                out << YAML::EndSeq;
+            }
+
+            out << YAML::EndMap;
+        }
+
+        // One graph as a YAML map (the file's root, or a state machine state's nested graph).
+        void EmitGraph(YAML::Emitter& out, const NodeGraph& graph)
+        {
+            out << YAML::BeginMap;
+            out << YAML::Key << "Domain" << YAML::Value << graph.Domain;
+            out << YAML::Key << "OutputNode" << YAML::Value << graph.OutputNode;
+            out << YAML::Key << "NextNodeId" << YAML::Value << graph.NextNodeId;
+
+            out << YAML::Key << "Nodes" << YAML::Value << YAML::BeginSeq;
+            for (const GraphNode& node : graph.Nodes)
+                EmitNode(out, node);
+            out << YAML::EndSeq;
+
+            out << YAML::Key << "Links" << YAML::Value << YAML::BeginSeq;
+            for (const GraphLink& link : graph.Links)
+            {
+                out << YAML::BeginMap;
+                out << YAML::Key << "FromNode" << YAML::Value << link.FromNode;
+                out << YAML::Key << "FromPin" << YAML::Value << link.FromPin;
+                out << YAML::Key << "ToNode" << YAML::Value << link.ToNode;
+                out << YAML::Key << "ToPin" << YAML::Value << link.ToPin;
+                out << YAML::EndMap;
+            }
+            out << YAML::EndSeq;
+
+            out << YAML::Key << "Parameters" << YAML::Value << YAML::BeginSeq;
+            for (const GraphParameter& param : graph.Parameters)
+            {
+                out << YAML::BeginMap;
+                out << YAML::Key << "Name" << YAML::Value << param.Name;
+                out << YAML::Key << "Default";
+                NodeGraphSerializer::EmitValue(out, param.DefaultValue);
                 out << YAML::EndMap;
             }
             out << YAML::EndSeq;
 
             out << YAML::EndMap;
         }
-        out << YAML::EndSeq;
 
-        out << YAML::Key << "Links" << YAML::Value << YAML::BeginSeq;
-        for (const GraphLink& link : graph.Links)
+        void ReadNode(const YAML::Node& nodeData, GraphNode& node)
         {
-            out << YAML::BeginMap;
-            out << YAML::Key << "FromNode" << YAML::Value << link.FromNode;
-            out << YAML::Key << "FromPin" << YAML::Value << link.FromPin;
-            out << YAML::Key << "ToNode" << YAML::Value << link.ToNode;
-            out << YAML::Key << "ToPin" << YAML::Value << link.ToPin;
-            out << YAML::EndMap;
-        }
-        out << YAML::EndSeq;
+            node.Id = nodeData["Id"].as<uint32_t>();
+            node.TypeName = nodeData["Type"].as<std::string>();
+            if (nodeData["Position"])
+                node.EditorPosition = nodeData["Position"].as<glm::vec2>();
 
-        out << YAML::Key << "Parameters" << YAML::Value << YAML::BeginSeq;
-        for (const GraphParameter& param : graph.Parameters)
-        {
-            out << YAML::BeginMap;
-            out << YAML::Key << "Name" << YAML::Value << param.Name;
-            out << YAML::Key << "Default";
-            EmitValue(out, param.DefaultValue);
-            out << YAML::EndMap;
-        }
-        out << YAML::EndSeq;
+            if (auto props = nodeData["Properties"])
+            {
+                for (const auto& propData : props)
+                {
+                    std::string name = propData["Name"].as<std::string>();
+                    NodeGraphValue value;
+                    if (propData["Value"] && NodeGraphSerializer::ReadValue(propData["Value"], value))
+                        node.Properties[name] = value;
+                }
+            }
 
-        out << YAML::EndMap;
-
-        std::ofstream fout(path);
-        if (!fout.is_open())
-        {
-            NOX_CORE_ERROR("NodeGraphSerializer::Serialize - could not open {} for writing", path.string());
-            return false;
+            if (auto subGraphs = nodeData["SubGraphs"])
+            {
+                for (const auto& subData : subGraphs)
+                {
+                    NodeSubGraph subGraph;
+                    subGraph.Id = subData["Id"].as<uint32_t>();
+                    if (subData["Name"])
+                        subGraph.Name = subData["Name"].as<std::string>();
+                    if (subData["Position"])
+                        subGraph.EditorPosition = subData["Position"].as<glm::vec2>();
+                    if (subData["Graph"])
+                        ReadGraph(subData["Graph"], subGraph.Graph);
+                    node.SubGraphs.push_back(std::move(subGraph));
+                }
+            }
+            if (auto transitions = nodeData["Transitions"])
+            {
+                for (const auto& transitionData : transitions)
+                {
+                    NodeTransition transition;
+                    transition.FromState = transitionData["From"].as<uint32_t>();
+                    transition.ToState = transitionData["To"].as<uint32_t>();
+                    if (transitionData["Duration"])
+                        transition.Duration = transitionData["Duration"].as<float>();
+                    if (transitionData["EaseInOut"])
+                        transition.EaseInOut = transitionData["EaseInOut"].as<bool>();
+                    if (auto rules = transitionData["Rules"])
+                    {
+                        for (const auto& ruleData : rules)
+                        {
+                            TransitionRule rule;
+                            rule.Parameter = ruleData["Parameter"].as<std::string>();
+                            if (ruleData["Compare"])
+                                rule.Compare = static_cast<TransitionCompare>(ruleData["Compare"].as<int>());
+                            if (ruleData["Value"])
+                                NodeGraphSerializer::ReadValue(ruleData["Value"], rule.Value);
+                            transition.Rules.push_back(std::move(rule));
+                        }
+                    }
+                    node.Transitions.push_back(std::move(transition));
+                }
+            }
         }
-        fout << out.c_str();
-        return true;
-    }
 
-    bool NodeGraphSerializer::Deserialize(const std::filesystem::path& path, NodeGraph& graph)
-    {
-        YAML::Node data;
-        try
-        {
-            data = YAML::LoadFile(path.string());
-        }
-        catch (const YAML::Exception& e)
-        {
-            NOX_CORE_ERROR("NodeGraphSerializer::Deserialize - failed to parse {}: {}", path.string(), e.what());
-            return false;
-        }
-
-        // Every .as<T>() below can throw YAML::TypedBadConversion (e.g. a corrupted or hand-edited field) --
-        // caught the same way as the LoadFile parse above, so a bad file logs an error instead of crashing
-        // whatever triggered the load (an auto-reimport off the asset watcher, in particular, runs with nothing
-        // upstream expecting an exception to escape).
-        try
+        // Can throw YAML::Exception (a bad field); the callers catch it.
+        void ReadGraph(const YAML::Node& data, NodeGraph& graph)
         {
             graph = NodeGraph{};
             if (data["Domain"])
@@ -183,21 +270,7 @@ namespace Nox
                 for (const auto& nodeData : nodes)
                 {
                     GraphNode node;
-                    node.Id = nodeData["Id"].as<uint32_t>();
-                    node.TypeName = nodeData["Type"].as<std::string>();
-                    if (nodeData["Position"])
-                        node.EditorPosition = nodeData["Position"].as<glm::vec2>();
-
-                    if (auto props = nodeData["Properties"])
-                    {
-                        for (const auto& propData : props)
-                        {
-                            std::string name = propData["Name"].as<std::string>();
-                            NodeGraphValue value;
-                            if (propData["Value"] && ReadValue(propData["Value"], value))
-                                node.Properties[name] = value;
-                        }
-                    }
+                    ReadNode(nodeData, node);
                     graph.Nodes.push_back(std::move(node));
                 }
             }
@@ -222,10 +295,47 @@ namespace Nox
                     GraphParameter param;
                     param.Name = paramData["Name"].as<std::string>();
                     if (paramData["Default"])
-                        ReadValue(paramData["Default"], param.DefaultValue);
+                        NodeGraphSerializer::ReadValue(paramData["Default"], param.DefaultValue);
                     graph.Parameters.push_back(std::move(param));
                 }
             }
+        }
+    }
+
+    bool NodeGraphSerializer::Serialize(const std::filesystem::path& path, const NodeGraph& graph)
+    {
+        YAML::Emitter out;
+        EmitGraph(out, graph);
+
+        std::ofstream fout(path);
+        if (!fout.is_open())
+        {
+            NOX_CORE_ERROR("NodeGraphSerializer::Serialize - could not open {} for writing", path.string());
+            return false;
+        }
+        fout << out.c_str();
+        return true;
+    }
+
+    bool NodeGraphSerializer::Deserialize(const std::filesystem::path& path, NodeGraph& graph)
+    {
+        YAML::Node data;
+        try
+        {
+            data = YAML::LoadFile(path.string());
+        }
+        catch (const YAML::Exception& e)
+        {
+            NOX_CORE_ERROR("NodeGraphSerializer::Deserialize - failed to parse {}: {}", path.string(), e.what());
+            return false;
+        }
+
+        // Every .as<T>() can throw YAML::TypedBadConversion (e.g. a corrupted or hand-edited field) -- caught the same
+        // way as the LoadFile parse above, so a bad file logs an error instead of crashing whatever triggered the load
+        // (an auto-reimport off the asset watcher, in particular, runs with nothing upstream expecting an exception).
+        try
+        {
+            ReadGraph(data, graph);
         }
         catch (const YAML::Exception& e)
         {

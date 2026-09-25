@@ -27,7 +27,10 @@ namespace Nox
         ThedmdCanvasBackend(const ThedmdCanvasBackend&) = delete;
         ThedmdCanvasBackend& operator=(const ThedmdCanvasBackend&) = delete;
 
-        void Draw(NodeGraph& graph, const std::function<void()>& onGraphEdited) override;
+        void Draw(NodeGraph& graph, const std::function<void()>& onGraphEdited, uint32_t* outOpenNode = nullptr) override;
+        void DrawStateMachine(GraphNode& machine, const NodeGraph& rootGraph, const std::function<void()>& onGraphEdited,
+                              uint32_t& outOpenState, StateMachineSelection& selection) override;
+        void ResetView() override;
 
     private:
         void DrawNode(NodeGraph& graph, GraphNode& node, const NodeTypeDesc& type, const std::function<void()>& onGraphEdited);
@@ -56,6 +59,11 @@ namespace Nox
 
     private:
         ed::EditorContext* m_Context = nullptr;
+        ed::EditorContext* m_StateContext = nullptr; // the state-machine view has its own canvas (own pan / zoom)
+        std::unordered_set<uint32_t> m_SeededStatePositions;
+        bool m_FitStatesOnNextFrame = true;
+        uint32_t m_ContextStateId = 0;
+        ImVec2 m_AddStateScreenPos{0.0f, 0.0f};
         std::unordered_set<uint32_t> m_SeededPositions; // node ids whose ed:: position has been seeded from GraphNode::EditorPosition
         ImVec2 m_CreateNodeScreenPos{0.0f, 0.0f};
         uint32_t m_ContextNodeId = 0;

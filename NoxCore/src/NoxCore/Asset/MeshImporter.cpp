@@ -3,6 +3,9 @@
 #include <array>
 #include <chrono>
 #include <cstring>
+#include <functional>
+#include <unordered_map>
+#include <unordered_set>
 #include <string_view>
 #include <vector>
 
@@ -221,11 +224,319 @@ namespace Nox
         return meshFilePath.parent_path().parent_path() / "Materials" / (meshFilePath.stem().string() + "_" + name + ".nmat");
     }
 
+    // The part of an import that one asset holds: submeshes with their materials (1:1) and triangles not yet built
+    // into clusters (also 1:1), and the node table pointing at them (nodes of the other kind keep no submeshes).
+    struct MeshSubset
+    {
+        std::vector<MeshData> Meshes;
+        std::vector<MaterialData> Materials;
+        std::vector<PendingGeometry> Pending;
+        std::vector<MeshNodeData> Nodes;
+    };
+
+    // Import settings (Unreal's static / skeletal split): takes the submeshes of the nodes `wanted` accepts -- a submesh
+    // shared by several nodes stays while any wanted node uses it -- and renumbers what the nodes point at. The
+    // arguments are consumed.
+    template <typename Wanted>
+    static MeshSubset ExtractSubset(std::vector<MeshData>& meshes, std::vector<MaterialData>& materials,
+                                    std::vector<PendingGeometry>& pending, const std::vector<MeshNodeData>& nodes, Wanted wanted)
+    {
+        std::vector<bool> keep(meshes.size(), false);
+        for (const MeshNodeData& node : nodes)
+        {
+            if (node.SubmeshCount == 0 || !wanted(node))
+                continue;
+            for (uint32_t i = node.FirstSubmesh; i < node.FirstSubmesh + node.SubmeshCount && i < keep.size(); ++i)
+                keep[i] = true;
+        }
+
+        MeshSubset subset;
+        std::vector<uint32_t> newIndex(meshes.size(), UINT32_MAX);
+        for (size_t i = 0; i < meshes.size(); ++i)
+        {
+            if (!keep[i])
+                continue;
+            newIndex[i] = static_cast<uint32_t>(subset.Meshes.size());
+            subset.Meshes.push_back(std::move(meshes[i]));
+            if (i < materials.size())
+                subset.Materials.push_back(std::move(materials[i]));
+            if (i < pending.size())
+                subset.Pending.push_back(std::move(pending[i]));
+        }
+
+        subset.Nodes = nodes;
+        for (MeshNodeData& node : subset.Nodes)
+        {
+            if (node.SubmeshCount == 0)
+                continue;
+            if (!wanted(node))
+            {
+                node.FirstSubmesh = UINT32_MAX;
+                node.SubmeshCount = 0;
+            }
+            else
+            {
+                node.FirstSubmesh = newIndex[node.FirstSubmesh];
+            }
+        }
+        return subset;
+    }
+
+    // Two submeshes merge when they draw the same way: same material values and textures.
+    static std::string MaterialKey(const MaterialData& material)
+    {
+        return material.Name + '|' + material.BaseColorTexturePath + '|' + material.MetallicRoughnessTexturePath + '|' +
+               material.NormalTexturePath + '|' + material.OcclusionTexturePath + '|' + material.EmissiveTexturePath + '|' +
+               material.TransmissionTexturePath + '|' + std::to_string(static_cast<int>(material.Mode)) + '|' +
+               std::to_string(material.DoubleSided);
+    }
+
+    // Import settings "Combine": merges the subset's submeshes into one per material. Static meshes get their node's world
+    // transform baked into the vertices (a mesh used by several nodes is copied per node -- what merging costs); skinned
+    // meshes stay in the bind pose (glTF ignores the mesh node's transform for them). Every submesh must be of the kind
+    // `skinned` (an asset never mixes kinds). The nodes that owned submeshes lose them; one new node at the end owns the
+    // merged ones, so node indices that lights, cameras and animation clips use stay valid.
+    static void CombineSubmeshes(MeshSubset& subset, bool skinned)
+    {
+        std::vector<glm::mat4> world(subset.Nodes.size(), glm::mat4(1.0f));
+        std::vector<bool> done(subset.Nodes.size(), false);
+        std::function<const glm::mat4&(size_t)> worldOf = [&](size_t index) -> const glm::mat4&
+        {
+            if (done[index])
+                return world[index];
+            const MeshNodeData& node = subset.Nodes[index];
+            const glm::mat4 local = glm::translate(glm::mat4(1.0f), node.Translation) * glm::mat4_cast(node.Rotation) *
+                                    glm::scale(glm::mat4(1.0f), node.Scale);
+            const bool hasParent = node.Parent >= 0 && node.Parent < static_cast<int32_t>(subset.Nodes.size()) &&
+                                   node.Parent != static_cast<int32_t>(index);
+            world[index] = hasParent ? worldOf(static_cast<size_t>(node.Parent)) * local : local;
+            done[index] = true;
+            return world[index];
+        };
+
+        struct Group
+        {
+            MeshData Data;
+            PendingGeometry Geometry;
+            MaterialData Material;
+        };
+        std::vector<Group> groups;
+        std::unordered_map<std::string, size_t> groupOfMaterial;
+
+        for (size_t nodeIndex = 0; nodeIndex < subset.Nodes.size(); ++nodeIndex)
+        {
+            const MeshNodeData& node = subset.Nodes[nodeIndex];
+            if (node.SubmeshCount == 0)
+                continue;
+
+            const glm::mat4 transform = skinned ? glm::mat4(1.0f) : worldOf(nodeIndex);
+            const glm::mat3 normalMatrix = glm::transpose(glm::inverse(glm::mat3(transform)));
+            const bool flipWinding = glm::determinant(glm::mat3(transform)) < 0.0f;
+
+            for (uint32_t i = node.FirstSubmesh; i < node.FirstSubmesh + node.SubmeshCount && i < subset.Meshes.size(); ++i)
+            {
+                const std::string key = MaterialKey(subset.Materials[i]);
+                auto found = groupOfMaterial.find(key);
+                if (found == groupOfMaterial.end())
+                {
+                    found = groupOfMaterial.emplace(key, groups.size()).first;
+                    Group& created = groups.emplace_back();
+                    created.Material = subset.Materials[i];
+                    created.Data.Name = subset.Materials[i].Name.empty() ? "Combined_" + std::to_string(groups.size() - 1) : subset.Materials[i].Name;
+                    created.Geometry.Skinned = skinned;
+                }
+                Group& group = groups[found->second];
+
+                const uint32_t baseVertex = static_cast<uint32_t>(group.Data.Vertices.size());
+                for (shaderio::Vertex vertex : subset.Meshes[i].Vertices)
+                {
+                    if (!skinned)
+                    {
+                        vertex.pos = glm::vec3(transform * glm::vec4(vertex.pos, 1.0f));
+                        const glm::vec3 normal = normalMatrix * vertex.normal;
+                        vertex.normal = glm::length(normal) > 0.0f ? glm::normalize(normal) : vertex.normal;
+                    }
+                    group.Data.Vertices.push_back(vertex);
+                }
+
+                const size_t first = group.Geometry.Indices.size();
+                for (uint32_t index : subset.Pending[i].Indices)
+                    group.Geometry.Indices.push_back(baseVertex + index);
+                if (flipWinding)
+                {
+                    for (size_t t = first; t + 2 < group.Geometry.Indices.size(); t += 3)
+                        std::swap(group.Geometry.Indices[t + 1], group.Geometry.Indices[t + 2]);
+                }
+            }
+        }
+
+        subset.Meshes.clear();
+        subset.Materials.clear();
+        subset.Pending.clear();
+        for (Group& group : groups)
+        {
+            subset.Meshes.push_back(std::move(group.Data));
+            subset.Materials.push_back(std::move(group.Material));
+            subset.Pending.push_back(std::move(group.Geometry));
+        }
+
+        for (MeshNodeData& node : subset.Nodes)
+        {
+            node.FirstSubmesh = UINT32_MAX;
+            node.SubmeshCount = 0;
+        }
+        MeshNodeData& combined = subset.Nodes.emplace_back();
+        combined.Name = skinned ? "Combined Skeletal Meshes" : "Combined Static Meshes";
+        combined.Parent = -1;
+        combined.FirstSubmesh = 0;
+        combined.SubmeshCount = static_cast<uint32_t>(subset.Meshes.size());
+        combined.Skinned = skinned;
+    }
+
+    MeshImporter::GltfContent MeshImporter::InspectGltf(const std::filesystem::path& sourcePath)
+    {
+        GltfContent content;
+
+        tg3_parse_options options;
+        tg3_error_stack errors;
+        tg3_model model;
+        tg3_parse_options_init(&options);
+        tg3_error_stack_init(&errors);
+        options.images_as_is = 1;
+        if (tg3_parse_file(&model, &errors, sourcePath.string().c_str(), sourcePath.string().size(), &options) != TG3_OK)
+        {
+            tg3_error_stack_free(&errors);
+            return content;
+        }
+
+        for (uint32_t i = 0; i < model.nodes_count; ++i)
+        {
+            const tg3_node& node = model.nodes[i];
+            if (node.mesh < 0 || node.mesh >= static_cast<int32_t>(model.meshes_count))
+                continue;
+            (node.skin >= 0 ? content.HasSkinnedMeshes : content.HasStaticMeshes) = true;
+        }
+        // A file without nodes draws its meshes as they are.
+        if (model.nodes_count == 0 && model.meshes_count > 0)
+            content.HasStaticMeshes = true;
+
+        tg3_model_free(&model);
+        tg3_error_stack_free(&errors);
+        return content;
+    }
+
+    // Clusters (§5.7): static geometry gets the cluster LOD DAG; skinned geometry one level (simplified in the bind pose,
+    // it would deform wrongly).
+    static void BuildClusters(MeshSubset& subset)
+    {
+        for (size_t i = 0; i < subset.Meshes.size(); ++i)
+        {
+            if (subset.Pending[i].Skinned)
+                buildMeshlets(subset.Meshes[i], subset.Pending[i].Indices);
+            else
+                buildClusterLod(subset.Meshes[i], subset.Pending[i].Indices);
+        }
+        subset.Pending.clear();
+    }
+
+    // One .nmat per material, written once: edits made to it later survive a recook of the model. `materialBase` is the
+    // mesh path the material names derive from.
+    static void WriteMaterials(const std::filesystem::path& assetDirectory, const std::filesystem::path& materialBase, const MeshSubset& subset)
+    {
+        std::error_code error;
+        for (size_t index = 0; index < subset.Materials.size(); ++index)
+        {
+            const std::filesystem::path materialPath = assetDirectory / MeshImporter::MaterialAssetPath(materialBase, subset.Materials[index], index);
+            if (!std::filesystem::exists(materialPath, error))
+            {
+                std::filesystem::create_directories(materialPath.parent_path(), error);
+                MaterialSerializer::Serialize(materialPath, subset.Materials[index]);
+            }
+        }
+    }
+
+    // World matrix of every node of the file (parents before children).
+    static std::vector<glm::mat4> NodeWorldMatrices(const std::vector<MeshNodeData>& nodes)
+    {
+        std::vector<glm::mat4> world(nodes.size(), glm::mat4(1.0f));
+        std::vector<bool> done(nodes.size(), false);
+        std::function<const glm::mat4&(size_t)> worldOf = [&](size_t index) -> const glm::mat4&
+        {
+            if (done[index])
+                return world[index];
+            const MeshNodeData& node = nodes[index];
+            const glm::mat4 local = glm::translate(glm::mat4(1.0f), node.Translation) * glm::mat4_cast(node.Rotation) *
+                                    glm::scale(glm::mat4(1.0f), node.Scale);
+            const bool hasParent = node.Parent >= 0 && node.Parent < static_cast<int32_t>(nodes.size()) &&
+                                   node.Parent != static_cast<int32_t>(index);
+            world[index] = hasParent ? worldOf(static_cast<size_t>(node.Parent)) * local : local;
+            done[index] = true;
+            return world[index];
+        };
+        for (size_t index = 0; index < nodes.size(); ++index)
+            worldOf(index);
+        return world;
+    }
+
+    // A glTF mesh as an asset of its own (Do Not Combine): its submeshes, copied, under one identity node (what a drag places).
+    // After it come the file's instances of the mesh, one node each at its world transform (FileLayoutParent): dragging
+    // several assets together places all of them where the file had them. False when no unskinned node uses the mesh.
+    static bool CopySingleMesh(const std::vector<MeshData>& meshes, const std::vector<MaterialData>& materials,
+                               const std::vector<PendingGeometry>& pending, const std::vector<MeshNodeData>& nodes,
+                               const std::vector<glm::mat4>& worlds,
+                               int32_t meshIndex, MeshSubset& out)
+    {
+        const MeshNodeData* user = nullptr;
+        for (const MeshNodeData& node : nodes)
+        {
+            if (node.MeshIndex == meshIndex && !node.Skinned && node.SubmeshCount > 0)
+            {
+                user = &node;
+                break;
+            }
+        }
+        if (!user)
+            return false;
+
+        for (uint32_t i = user->FirstSubmesh; i < user->FirstSubmesh + user->SubmeshCount && i < meshes.size(); ++i)
+        {
+            out.Meshes.push_back(meshes[i]);
+            if (i < materials.size())
+                out.Materials.push_back(materials[i]);
+            if (i < pending.size())
+                out.Pending.push_back(pending[i]);
+        }
+
+        MeshNodeData& node = out.Nodes.emplace_back();
+        node.Name = user->MeshName;
+        node.FirstSubmesh = 0;
+        node.SubmeshCount = static_cast<uint32_t>(out.Meshes.size());
+        node.MeshIndex = meshIndex;
+
+        const uint32_t submeshCount = static_cast<uint32_t>(out.Meshes.size());
+        for (size_t index = 0; index < nodes.size(); ++index)
+        {
+            const MeshNodeData& instance = nodes[index];
+            if (instance.MeshIndex != meshIndex || instance.Skinned || instance.SubmeshCount == 0)
+                continue;
+
+            MeshNodeData& placed = out.Nodes.emplace_back();
+            placed.Name = instance.Name;
+            placed.Parent = MeshNodeData::FileLayoutParent;
+            glm::vec3 skew;
+            glm::vec4 perspective;
+            glm::decompose(worlds[index], placed.Scale, placed.Rotation, placed.Translation, skew, perspective);
+            placed.FirstSubmesh = 0;
+            placed.SubmeshCount = submeshCount;
+            placed.MeshIndex = meshIndex;
+        }
+        return !out.Meshes.empty();
+    }
+
     bool MeshImporter::CookMesh(const std::filesystem::path& assetDirectory, const AssetMetadata& metadata)
     {
         const std::filesystem::path cookedPath = assetDirectory / metadata.FilePath;
         const std::filesystem::path sourcePath = assetDirectory / metadata.SourceFilePath;
-        const bool isStatic = metadata.Type == AssetType::StaticMesh;
         NOX_CORE_INFO("Cooking GLTF from {} to {}", sourcePath.string(), cookedPath.string());
 
         std::vector<MaterialData> materialDataList;
@@ -235,33 +546,73 @@ namespace Nox
         Skeleton extractedSkeleton;
         std::vector<Ref<AnimationSequence>> extractedAnimations;
 
-        const std::vector<MeshData> meshDataList = ParseGltfToMeshData(sourcePath, materialDataList, extractedSkeleton, extractedAnimations,
-                                                                       lightDataList, nodeDataList, cameraDataList);
+        std::vector<PendingGeometry> pendingGeometry; // clusters are built below, after the import settings picked and merged the meshes
+        std::vector<MeshData> meshDataList = ParseGltfToMeshData(sourcePath, materialDataList, extractedSkeleton, extractedAnimations,
+                                                                 lightDataList, nodeDataList, cameraDataList, &pendingGeometry);
         if (meshDataList.empty())
         {
             NOX_CORE_WARN("MeshImporter::CookMesh - Failed to load or empty mesh at source path: {}", sourcePath.string());
             return false;
         }
 
+        // Import settings decide which meshes this asset holds (Unreal's static / skeletal split): a skeletal mesh
+        // (.nmesh) the skinned meshes, a static mesh (.nsmesh) the rest. Lights and cameras belong to static meshes.
+        // A per-mesh asset (SourceMeshIndex) holds one glTF mesh and nothing else.
+        const MeshImportSettings& importSettings = metadata.MeshSettings;
+        const bool isStatic = metadata.Type == AssetType::StaticMesh;
+        const bool singleMesh = importSettings.SourceMeshIndex >= 0;
+        MeshSubset subset;
+        if (singleMesh)
+        {
+            if (!CopySingleMesh(meshDataList, materialDataList, pendingGeometry, nodeDataList, NodeWorldMatrices(nodeDataList), importSettings.SourceMeshIndex, subset))
+            {
+                NOX_CORE_WARN("MeshImporter::CookMesh - glTF mesh {} of {} has no static geometry", importSettings.SourceMeshIndex, sourcePath.string());
+                return false;
+            }
+            lightDataList.clear();
+            cameraDataList.clear();
+        }
+        else
+        {
+            subset = ExtractSubset(meshDataList, materialDataList, pendingGeometry, nodeDataList,
+                [&](const MeshNodeData& node) { return node.Skinned ? importSettings.ImportSkeletalMeshes : importSettings.ImportStaticMeshes; });
+        }
+        if (subset.Meshes.empty())
+        {
+            NOX_CORE_WARN("MeshImporter::CookMesh - the import settings leave no meshes in {} (static: {}, skeletal: {})",
+                          sourcePath.string(), importSettings.ImportStaticMeshes, importSettings.ImportSkeletalMeshes);
+            return false;
+        }
+
+        // Combine (Unreal): only for an asset that holds one kind, which the import always gives it.
+        const bool onlyStatic = importSettings.ImportStaticMeshes && !importSettings.ImportSkeletalMeshes;
+        const bool onlySkeletal = importSettings.ImportSkeletalMeshes && !importSettings.ImportStaticMeshes;
+        if (!singleMesh && onlyStatic && importSettings.StaticCombine != MeshCombineMode::DoNotCombine)
+            CombineSubmeshes(subset, false);
+        else if (!singleMesh && onlySkeletal && importSettings.SkeletalCombine != MeshCombineMode::DoNotCombine)
+            CombineSubmeshes(subset, true);
+
+        BuildClusters(subset);
+
         std::error_code error;
         std::filesystem::create_directories(cookedPath.parent_path(), error);
         if (isStatic)
-            MeshSerializer::SerializeStaticMesh(cookedPath, meshDataList, materialDataList, lightDataList, nodeDataList, cameraDataList);
+            MeshSerializer::SerializeStaticMesh(cookedPath, subset.Meshes, subset.Materials, lightDataList, subset.Nodes, cameraDataList);
         else
-            MeshSerializer::SerializeMesh(cookedPath, meshDataList, materialDataList, lightDataList, nodeDataList, cameraDataList);
+            MeshSerializer::SerializeMesh(cookedPath, subset.Meshes, subset.Materials, lightDataList, subset.Nodes, cameraDataList);
 
-        if (!isStatic)
+        // The skeleton goes with skeletal meshes, clips with whichever asset the import gave "Import Animations" (node
+        // animations of a level, e.g. Bistro's fans, have no skeleton).
+        if (importSettings.ImportSkeletalMeshes && !extractedSkeleton.Skins.empty())
         {
-            // A node/object animation does not require a skeleton. Only write .nskel when the glTF contains actual skin
-            // data; animation clips are serialized independently below.
-            if (!extractedSkeleton.Skins.empty())
-            {
-                std::filesystem::path skelPath = cookedPath;
-                skelPath.replace_extension(".nskel");
-                SkeletonSerializer::Serialize(skelPath, extractedSkeleton);
-                NOX_CORE_INFO("[Importer] Extracted and cooked Skeleton ({} nodes) to {}", extractedSkeleton.AllNodes.size(), skelPath.string());
-            }
+            std::filesystem::path skelPath = cookedPath;
+            skelPath.replace_extension(".nskel");
+            SkeletonSerializer::Serialize(skelPath, extractedSkeleton);
+            NOX_CORE_INFO("[Importer] Extracted and cooked Skeleton ({} nodes) to {}", extractedSkeleton.AllNodes.size(), skelPath.string());
+        }
 
+        if (importSettings.ImportAnimations)
+        {
             for (const Ref<AnimationSequence>& animation : extractedAnimations)
             {
                 std::filesystem::path animPath = cookedPath.parent_path() / (cookedPath.stem().string() + "_" + animation->Name + ".nanim");
@@ -270,21 +621,86 @@ namespace Nox
             }
         }
 
-        // One .nmat per material, written once: edits made to it later survive a recook of the model.
-        for (size_t index = 0; index < materialDataList.size(); ++index)
-        {
-            const std::filesystem::path materialPath = assetDirectory / MaterialAssetPath(metadata.FilePath, materialDataList[index], index);
-            if (!std::filesystem::exists(materialPath, error))
-            {
-                std::filesystem::create_directories(materialPath.parent_path(), error);
-                MaterialSerializer::Serialize(materialPath, materialDataList[index]);
-            }
-        }
+        WriteMaterials(assetDirectory, importSettings.MaterialBasePath.empty() ? metadata.FilePath : importSettings.MaterialBasePath, subset);
 
         // Last: an interrupted cook leaves no hash, so the model is cooked again.
         Utility::saveHashToFile(cookedPath.string() + ".hash", Utility::calcul_hash_streaming(sourcePath.string()));
         return true;
     }
+
+    std::vector<MeshImporter::SplitMesh> MeshImporter::CookSplitMeshes(const std::filesystem::path& assetDirectory, const AssetMetadata& wholeFile,
+                                                                       const std::filesystem::path& directory, std::atomic<uint32_t>* total,
+                                                                       std::atomic<uint32_t>* done)
+    {
+        const std::filesystem::path sourcePath = assetDirectory / wholeFile.SourceFilePath;
+        NOX_CORE_INFO("Cooking every static mesh of {} into {}", sourcePath.string(), directory.generic_string());
+
+        std::vector<MaterialData> materialDataList;
+        std::vector<LightNodeData> lightDataList;
+        std::vector<MeshNodeData> nodeDataList;
+        std::vector<CameraNodeData> cameraDataList;
+        Skeleton extractedSkeleton;
+        std::vector<Ref<AnimationSequence>> extractedAnimations;
+        std::vector<PendingGeometry> pendingGeometry;
+        std::vector<MeshData> meshDataList = ParseGltfToMeshData(sourcePath, materialDataList, extractedSkeleton, extractedAnimations,
+                                                                 lightDataList, nodeDataList, cameraDataList, &pendingGeometry);
+
+        std::vector<SplitMesh> result;
+        if (meshDataList.empty())
+            return result;
+
+        const XXH128_hash_t sourceHash = Utility::calcul_hash_streaming(sourcePath.string());
+        std::error_code error;
+        std::filesystem::create_directories(assetDirectory / directory, error);
+
+        if (total)
+        {
+            std::unordered_set<int32_t> unique;
+            for (const MeshNodeData& node : nodeDataList)
+            {
+                if (!node.Skinned && node.SubmeshCount > 0 && node.MeshIndex >= 0)
+                    unique.insert(node.MeshIndex);
+            }
+            total->store(static_cast<uint32_t>(unique.size()));
+        }
+
+        const std::vector<glm::mat4> worlds = NodeWorldMatrices(nodeDataList);
+        std::unordered_set<int32_t> seenMeshes;
+        std::unordered_set<std::string> usedNames;
+        for (const MeshNodeData& node : nodeDataList)
+        {
+            if (node.Skinned || node.SubmeshCount == 0 || node.MeshIndex < 0 || !seenMeshes.insert(node.MeshIndex).second)
+                continue;
+
+            MeshSubset subset;
+            if (!CopySingleMesh(meshDataList, materialDataList, pendingGeometry, nodeDataList, worlds, node.MeshIndex, subset))
+                continue;
+            BuildClusters(subset);
+
+            std::string name = node.MeshName.empty() ? "Mesh_" + std::to_string(node.MeshIndex) : node.MeshName;
+            for (char& character : name)
+            {
+                if (std::strchr("<>:\"/\\|?*", character) != nullptr)
+                    character = '_';
+            }
+            if (!usedNames.insert(name).second)
+                name += "_" + std::to_string(node.MeshIndex);
+
+            SplitMesh split;
+            split.Name = name;
+            split.MeshIndex = node.MeshIndex;
+            split.FilePath = directory / (name + ".nsmesh");
+            const std::filesystem::path cookedPath = assetDirectory / split.FilePath;
+            MeshSerializer::SerializeStaticMesh(cookedPath, subset.Meshes, subset.Materials, {}, subset.Nodes, {});
+            WriteMaterials(assetDirectory, wholeFile.FilePath, subset);
+            Utility::saveHashToFile(cookedPath.string() + ".hash", sourceHash);
+            result.push_back(std::move(split));
+            if (done)
+                done->fetch_add(1);
+        }
+        return result;
+    }
+
 
     Ref<Mesh> MeshImporter::ImportMesh(AssetHandle handle, const AssetMetadata& metadata)
     {
@@ -1064,7 +1480,8 @@ namespace Nox
         std::vector<Ref<AnimationSequence>>& outAnimations,
         std::vector<LightNodeData>& outLights,
         std::vector<MeshNodeData>& outNodes,
-        std::vector<CameraNodeData>& outCameras
+        std::vector<CameraNodeData>& outCameras,
+        std::vector<PendingGeometry>* outPending
     )
     {
         /*
@@ -1125,6 +1542,7 @@ namespace Nox
                                         ? std::string(node.name.data, node.name.len)
                                         : ("Node_" + std::to_string(i));
                     nodeData.Parent = parentMap[i];
+                    nodeData.Skinned = node.skin >= 0;
                     ExtractNodeTRS(node, nodeData.Translation, nodeData.Rotation, nodeData.Scale);
                 }
             }
@@ -1175,6 +1593,9 @@ namespace Nox
                 const tg3_mesh& mesh = model.meshes[meshIndex];
 
                 MeshNodeData& nodeData = outNodes[instanceIdx];
+                nodeData.MeshIndex = static_cast<int32_t>(meshIndex);
+                nodeData.MeshName = (mesh.name.data && mesh.name.len > 0) ? std::string(mesh.name.data, mesh.name.len)
+                                                                          : (meshName.empty() ? "Mesh_" + std::to_string(meshIndex) : meshName);
                 SubmeshRange& sharedRange = meshSubmeshes[meshIndex];
                 if (sharedRange.First != UINT32_MAX)
                 {
@@ -1472,7 +1893,9 @@ namespace Nox
 
                 // Clusters (§5.7): static geometry gets the cluster LOD DAG; skinned geometry one level (simplified in the bind
                 // pose, it would deform wrongly).
-                if (hasSkinning)
+                if (outPending)
+                    outPending->push_back({ std::move(primitiveIndices), hasSkinning });
+                else if (hasSkinning)
                     buildMeshlets(primitiveData, primitiveIndices);
                 else
                     buildClusterLod(primitiveData, primitiveIndices);

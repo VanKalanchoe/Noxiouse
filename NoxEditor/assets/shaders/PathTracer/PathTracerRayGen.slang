@@ -39,8 +39,13 @@ void rayGenMain()
         rrSpecular[pixelPos] = float4(0.0);
         rrNormalRoughness[pixelPos] = float4(0.0, 0.0, 1.0, 0.0);
         rrDepth[pixelPos] = 0.0; // reverse-Z invalid/background value
-        rrMotion[pixelPos] = float2(0.0);
-        rrSpecularMotion[pixelPos] = float2(0.0);
+        // A primary miss is the sky: it moves with the camera's ROTATION only (a direction, w = 0), not its position.
+        // Zero here told DLSS-RR the sky never moves, so it smeared and shimmered whenever the camera turned.
+        const float4 skyCurrClip = mul(ubo->nonJitteredProj, mul(ubo->view, float4(cameraRay.dir, 0.0)));
+        const float4 skyPrevClip = mul(ubo->prevProj, mul(ubo->prevView, float4(cameraRay.dir, 0.0)));
+        const float2 skyMotion = (skyPrevClip.xy / skyPrevClip.w - skyCurrClip.xy / skyCurrClip.w) * float2(0.5, -0.5);
+        rrMotion[pixelPos] = skyMotion;
+        rrSpecularMotion[pixelPos] = skyMotion;
         rrSpecularHitDistance[pixelPos] = 65504.0;
     }
 

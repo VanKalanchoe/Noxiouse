@@ -143,6 +143,9 @@ namespace Nox
     struct MeshNodeData
     {
         std::string Name;
+        // -1: a root. FileLayoutParent: a per-mesh asset's "where the file put this mesh" instance (world transform); those
+        // nodes only spawn when the model instance asks for the file layout (ModelInstanceComponent::AtFileLayout).
+        static constexpr int32_t FileLayoutParent = -2;
         int32_t Parent = -1;
 
         glm::vec3 Translation = glm::vec3(0.0f);
@@ -151,6 +154,9 @@ namespace Nox
 
         uint32_t FirstSubmesh = UINT32_MAX;
         uint32_t SubmeshCount = 0;
+        bool Skinned = false; // import time only (not cooked): the node's mesh is skinned by a glTF skin
+        int32_t MeshIndex = -1;  // import time only: the glTF mesh this node instances
+        std::string MeshName;    // import time only: that mesh's name
     };
     
     struct MeshData

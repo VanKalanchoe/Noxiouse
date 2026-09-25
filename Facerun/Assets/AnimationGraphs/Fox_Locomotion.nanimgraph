@@ -1,0 +1,158 @@
+# Idle / Walk / Run state machine driven by the "Speed" parameter (horizontal speed in m/s, set by CharacterMovement).
+# Before use: put the Fox clips' asset handles (see AssetRegistry.nxr: Fox_Survey / Fox_Walk / Fox_Run) into the three
+# "Clip" U64 values below. Survey stands in for Idle (the Fox has no idle clip).
+Domain: AnimationGraph
+OutputNode: 2
+NextNodeId: 3
+Nodes:
+  - Id: 1
+    Type: StateMachine
+    Position: [200, 100]
+    Properties:
+      - Name: EntryState
+        Value:
+          Int: 1
+    SubGraphs:
+    - Id: 1
+      Name: Idle
+      Position: [0, 0]
+      Graph:
+        Domain: AnimationGraph
+        OutputNode: 2
+        NextNodeId: 3
+        Nodes:
+          - Id: 1
+            Type: Clip
+            Position: [0, 0]
+            Properties:
+              - Name: Clip
+                Value:
+                  U64: 7921684845634806075 # Fox_Survey
+              - Name: Loop
+                Value:
+                  Bool: true
+              - Name: Speed
+                Value:
+                  Float: 1
+          - Id: 2
+            Type: Output
+            Position: [300, 0]
+            Properties: []
+        Links:
+          - FromNode: 1
+            FromPin: 0
+            ToNode: 2
+            ToPin: 0
+        Parameters: []
+    - Id: 2
+      Name: Walk
+      Position: [200, 0]
+      Graph:
+        Domain: AnimationGraph
+        OutputNode: 2
+        NextNodeId: 3
+        Nodes:
+          - Id: 1
+            Type: Clip
+            Position: [0, 0]
+            Properties:
+              - Name: Clip
+                Value:
+                  U64: 17685122652314375488 # Fox_Walk
+              - Name: Loop
+                Value:
+                  Bool: true
+              - Name: Speed
+                Value:
+                  Float: 1
+          - Id: 2
+            Type: Output
+            Position: [300, 0]
+            Properties: []
+        Links:
+          - FromNode: 1
+            FromPin: 0
+            ToNode: 2
+            ToPin: 0
+        Parameters: []
+    - Id: 3
+      Name: Run
+      Position: [400, 0]
+      Graph:
+        Domain: AnimationGraph
+        OutputNode: 2
+        NextNodeId: 3
+        Nodes:
+          - Id: 1
+            Type: Clip
+            Position: [0, 0]
+            Properties:
+              - Name: Clip
+                Value:
+                  U64: 10202690733250719913 # Fox_Run
+              - Name: Loop
+                Value:
+                  Bool: true
+              - Name: Speed
+                Value:
+                  Float: 1
+          - Id: 2
+            Type: Output
+            Position: [300, 0]
+            Properties: []
+        Links:
+          - FromNode: 1
+            FromPin: 0
+            ToNode: 2
+            ToPin: 0
+        Parameters: []
+    Transitions:
+      - From: 1
+        To: 2
+        Duration: 0.25
+        EaseInOut: true
+        Rules:
+          - Parameter: Speed
+            Compare: 2
+            Value:
+              Float: 0.1
+      - From: 2
+        To: 1
+        Duration: 0.25
+        EaseInOut: true
+        Rules:
+          - Parameter: Speed
+            Compare: 4
+            Value:
+              Float: 0.1
+      - From: 2
+        To: 3
+        Duration: 0.3
+        EaseInOut: true
+        Rules:
+          - Parameter: Speed
+            Compare: 2
+            Value:
+              Float: 3.5
+      - From: 3
+        To: 2
+        Duration: 0.3
+        EaseInOut: true
+        Rules:
+          - Parameter: Speed
+            Compare: 4
+            Value:
+              Float: 3
+  - Id: 2
+    Type: Output
+    Position: [500, 100]
+    Properties: []
+Links:
+  - FromNode: 1
+    FromPin: 0
+    ToNode: 2
+    ToPin: 0
+Parameters:
+  - Name: Speed
+    Default:
+      Float: 0

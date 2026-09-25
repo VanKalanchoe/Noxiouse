@@ -1,6 +1,7 @@
 #include "AnimationGraphInstance.h"
 
 #include <algorithm>
+#include <functional>
 
 #include "AnimationGraphNodes.h"
 #include "NoxCore/Asset/AssetManager.h"
@@ -25,6 +26,31 @@ namespace Nox
         }
         if (!m_Graph)
             return;
+
+        // Assets the graph's nodes reference (a Clip node's clip, also inside a state machine's states) aren't loaded by
+        // anything else, e.g. after a scene reload: report the ones not resident yet so Scene::ApplySyncPoint requests them.
+        std::function<void(const NodeGraph&)> collectMissing = [&](const NodeGraph& graph)
+        {
+            for (const GraphNode& node : graph.Nodes)
+            {
+                if (const NodeTypeDesc* type = NodeTypeRegistry::Find(graph.Domain, node.TypeName))
+                {
+                    for (const auto& [propertyName, typeHint] : type->PropertyAssetTypeHints)
+                    {
+                        auto property = node.Properties.find(propertyName);
+                        if (property == node.Properties.end())
+                            continue;
+                        const auto* handle = std::get_if<uint64_t>(&property->second);
+                        if (handle && *handle != 0 && AssetManager::IsAssetHandleValid(AssetHandle(*handle)) &&
+                            !AssetManager::IsAssetLoaded(AssetHandle(*handle)))
+                            missingAssets.push_back(AssetHandle(*handle));
+                    }
+                }
+                for (const NodeSubGraph& subGraph : node.SubGraphs)
+                    collectMissing(subGraph.Graph);
+            }
+        };
+        collectMissing(m_Graph->Graph);
 
         // The graph was recompiled since m_EvalContext was sized against it (the editor recompiles live after
         // every edit, adding/removing nodes changes the buffer sizes): start over against the new one. Node

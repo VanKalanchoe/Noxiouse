@@ -431,7 +431,9 @@ namespace Nox {
         JPH::Ref<JPH::CharacterVirtual> character = new JPH::CharacterVirtual(
             settings, JoltUtils::ToJolt(worldPos), JPH::Quat::sIdentity(), static_cast<uint64_t>(static_cast<uint32_t>(entity)), m_PhysicsSystem.get());
 
-        m_EntityToCharacterMap[static_cast<uint32_t>(entity)] = character;
+        CharacterState& state = m_EntityToCharacterMap[static_cast<uint32_t>(entity)];
+        state.Character = character;
+        state.Previous = state.Current = worldPos;
     }
 
     void JoltPhysics3DScene::DestroyCharacter(Entity entity)
@@ -448,14 +450,16 @@ namespace Nox {
         const JPH::Vec3 gravity = m_PhysicsSystem->GetGravity();
         const JPH::Vec3 up = JPH::Vec3::sAxisY();
 
-        for (auto& [entityId, character] : m_EntityToCharacterMap)
+        for (auto& [entityId, state] : m_EntityToCharacterMap)
         {
             Entity entity{ static_cast<entt::entity>(entityId), m_Scene };
             if (!entity.IsValid() || !entity.HasComponent<CharacterController3DComponent>())
                 continue;
 
             auto& controller = entity.GetComponent<CharacterController3DComponent>();
+            JPH::CharacterVirtual* character = state.Character.GetPtr();
 
+            state.Previous = state.Current;
             character->UpdateGroundVelocity();
             const JPH::Vec3 groundVelocity = character->GetGroundVelocity();
             const JPH::Vec3 currentVelocity = character->GetLinearVelocity();
@@ -476,7 +480,19 @@ namespace Nox {
             controller.JumpSpeed = 0.0f;
 
             velocity += gravity * controller.GravityScale * dt;
-            velocity += JoltUtils::ToJolt(controller.MoveVelocity) * (character->IsSupported() ? 1.0f : controller.AirControl);
+            // Horizontal velocity ramps towards the wanted one (Unreal's MaxAcceleration / BrakingDeceleration) instead of
+            // snapping to it -- most of what makes its character start and stop smoothly. Less acceleration in the air.
+            {
+                const glm::vec3 wanted(controller.MoveVelocity.x, 0.0f, controller.MoveVelocity.z);
+                const glm::vec3 toWanted = wanted - state.Horizontal;
+                const float distance = glm::length(toWanted);
+                const bool wantsToMove = glm::length(wanted) > 0.001f;
+                const float rate = (wantsToMove ? controller.MaxAcceleration : controller.BrakingDeceleration) *
+                                   (character->IsSupported() ? 1.0f : std::max(controller.AirControl, 0.0f));
+                const float step = rate * dt;
+                state.Horizontal = distance <= step || distance < 1e-5f ? wanted : state.Horizontal + toWanted * (step / distance);
+            }
+            velocity += JPH::Vec3(state.Horizontal.x, 0.0f, state.Horizontal.z);
 
             character->SetLinearVelocity(velocity);
 
@@ -488,6 +504,7 @@ namespace Nox {
                 m_PhysicsSystem->GetDefaultBroadPhaseLayerFilter(PhysicsLayers::CHARACTER),
                 m_PhysicsSystem->GetDefaultLayerFilter(PhysicsLayers::CHARACTER),
                 {}, {}, *m_TempAllocator);
+            state.Current = JoltUtils::ToGLM(character->GetPosition());
         }
     }
 
@@ -497,17 +514,20 @@ namespace Nox {
         if (!m_Scene)
             return;
 
-        for (auto& [entityId, character] : m_EntityToCharacterMap)
+        for (auto& [entityId, state] : m_EntityToCharacterMap)
         {
             Entity entity{ static_cast<entt::entity>(entityId), m_Scene };
             if (!entity.IsValid() || !entity.HasComponent<CharacterController3DComponent>())
                 continue;
 
             auto& controller = entity.GetComponent<CharacterController3DComponent>();
+            JPH::CharacterVirtual* character = state.Character.GetPtr();
             controller.IsGrounded = character->GetGroundState() == JPH::CharacterVirtual::EGroundState::OnGround;
             controller.Velocity = JoltUtils::ToGLM(character->GetLinearVelocity());
 
-            glm::vec3 position = JoltUtils::ToGLM(character->GetPosition());
+            // Drawn between the last two fixed steps by how far the accumulator is into the next one.
+            const float alpha = glm::clamp(m_Accumulator / c_FixedDeltaTime, 0.0f, 1.0f);
+            glm::vec3 position = glm::mix(state.Previous, state.Current, alpha);
             if (entity.HasComponent<RelationshipComponent>())
             {
                 UUID parentUUID = entity.GetComponent<RelationshipComponent>().Parent;
@@ -530,7 +550,7 @@ namespace Nox {
             return;
 
         m_Accumulator += dt;
-        constexpr int maxSubSteps = 4;
+        constexpr int maxSubSteps = 8; // below ~8 fps the simulation runs slower than real time instead of spiralling
         int steps = 0;
 
         while (m_Accumulator >= c_FixedDeltaTime && steps < maxSubSteps)
@@ -540,6 +560,9 @@ namespace Nox {
             m_Accumulator -= c_FixedDeltaTime;
             steps++;
         }
+
+        // Time the step cap could not simulate is dropped, not carried: a backlog would keep the simulation behind forever.
+        m_Accumulator = std::min(m_Accumulator, c_FixedDeltaTime);
 
         SyncCharactersToTransforms();
 

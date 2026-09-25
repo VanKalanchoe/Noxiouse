@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <unordered_map>
 #include <cstring>
 
 #include "NoxCore/Animation/AnimationGraphNodes.h"
@@ -125,7 +126,7 @@ namespace Nox
         }
 
         m_PendingImportPath = relativeSource;
-        m_ImportAsStaticMesh = false;
+        m_ImportSettings = {};
         const auto defaultDest = relativeSource.parent_path() / "Meshes" /
             (relativeSource.stem().string() + ".nmesh");
         SetImportDestination(defaultDest);
@@ -171,70 +172,145 @@ namespace Nox
         const float cellSize = thumbnailSize + padding;
         int columnCount = static_cast<int>(ImGui::GetContentRegionAvail().x / cellSize);
         columnCount = std::max(columnCount, 1);
-        ImGui::Columns(columnCount, nullptr, false);
-
         if (m_EntriesDirectory != m_CurrentDirectory)
             RefreshAssetTree();
 
-        for (const auto& browserEntry : m_CurrentEntries)
+        // Only the visible rows are built (a folder of hundreds of meshes cost milliseconds per frame otherwise); the ids
+        // and names are prepared once per refresh.
+        // Ctrl+A selects every asset of the folder.
+        if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && ImGui::GetIO().KeyCtrl &&
+            ImGui::IsKeyPressed(ImGuiKey_A, false) && !ImGui::GetIO().WantTextInput)
         {
-            const auto& path = browserEntry.Path;
-            const auto relativePath = path.lexically_relative(m_BaseDirectory);
-
-            if (browserEntry.IsDirectory)
+            m_Selected.clear();
+            for (const BrowserEntry& entry : m_CurrentEntries)
             {
-                const std::string id = "##directory_" + relativePath.generic_string();
-                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
-                ImGui::ImageButton(id.c_str(), m_DirectoryIcon->getImTextureID(),
-                    {thumbnailSize, thumbnailSize}, {0, 1}, {1, 0});
-                ImGui::PopStyleColor();
-                if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
-                    m_CurrentDirectory = path;
-                ImGui::TextWrapped("%s", path.filename().string().c_str());
-                ImGui::NextColumn();
-                continue;
+                if (!entry.IsDirectory)
+                    m_Selected.insert(entry.Handle);
             }
-
-            const AssetHandle handle = browserEntry.Handle;
-            const auto& metadata = browserEntry.Metadata;
-
-            Ref<Texture2D> thumbnail = GetThumbnail(handle, metadata);
-            if (!thumbnail)
-                thumbnail = m_FileIcon;
-
-            const std::string id = "##asset_" + relativePath.generic_string();
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
-            ImGui::ImageButton(id.c_str(), thumbnail->getImTextureID(),
-                {thumbnailSize, thumbnailSize}, {0, 1}, {1, 0});
-            ImGui::PopStyleColor();
-
-            if (ImGui::BeginDragDropSource())
-            {
-                ImGui::SetDragDropPayload("CONTENT_BROWSER_ITEM", &handle, sizeof(AssetHandle));
-                ImGui::TextUnformatted(metadata.FilePath.filename().string().c_str());
-                ImGui::EndDragDropSource();
-            }
-
-            if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
-            {
-                if (metadata.Type == AssetType::MeshSource)
-                {
-                    m_PendingImportPath = metadata.FilePath;
-                    m_ShowImportModal = true;
-                    const auto defaultDest = m_PendingImportPath.parent_path() / "Meshes" /
-                        (m_PendingImportPath.stem().string() + (m_ImportAsStaticMesh ? ".nsmesh" : ".nmesh"));
-                    SetImportDestination(defaultDest);
-                }
-                else if (m_OpenAsset)
-                {
-                    m_OpenAsset(handle); // EditorLayer ignores types it has no editor window for
-                }
-            }
-            ImGui::TextWrapped("%s", metadata.FilePath.filename().string().c_str());
-            ImGui::NextColumn();
         }
 
-        ImGui::Columns(1);
+        const int rowCount = (static_cast<int>(m_CurrentEntries.size()) + columnCount - 1) / columnCount;
+        const float rowStartX = ImGui::GetCursorPosX();
+        ImGuiListClipper clipper;
+        clipper.Begin(rowCount);
+        while (clipper.Step())
+        {
+            for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row)
+            {
+                for (int column = 0; column < columnCount; ++column)
+                {
+                    const size_t index = static_cast<size_t>(row) * columnCount + column;
+                    if (index >= m_CurrentEntries.size())
+                        break;
+                    const BrowserEntry& browserEntry = m_CurrentEntries[index];
+
+                    if (column > 0)
+                        ImGui::SameLine(rowStartX + column * cellSize);
+                    ImGui::BeginGroup();
+
+                    if (browserEntry.IsDirectory)
+                    {
+                        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
+                        ImGui::ImageButton(browserEntry.Id.c_str(), m_DirectoryIcon->getImTextureID(),
+                            {thumbnailSize, thumbnailSize}, {0, 1}, {1, 0});
+                        ImGui::PopStyleColor();
+                        if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+                            m_CurrentDirectory = browserEntry.Path;
+                    }
+                    else
+                    {
+                        const AssetHandle handle = browserEntry.Handle;
+                        const auto& metadata = browserEntry.Metadata;
+
+                        Ref<Texture2D> thumbnail = GetThumbnail(handle, metadata);
+                        if (!thumbnail)
+                            thumbnail = m_FileIcon;
+
+                        const bool selected = m_Selected.contains(handle);
+                        ImGui::PushStyleColor(ImGuiCol_Button, selected ? ImVec4(0.26f, 0.45f, 0.75f, 0.55f) : ImVec4(0, 0, 0, 0));
+                        const bool clicked = ImGui::ImageButton(browserEntry.Id.c_str(), thumbnail->getImTextureID(),
+                            {thumbnailSize, thumbnailSize}, {0, 1}, {1, 0});
+                        ImGui::PopStyleColor();
+
+                        if (clicked)
+                        {
+                            const ImGuiIO& io = ImGui::GetIO();
+                            if (io.KeyCtrl)
+                            {
+                                if (!m_Selected.erase(handle))
+                                    m_Selected.insert(handle);
+                            }
+                            else if (io.KeyShift)
+                            {
+                                const size_t from = std::min(m_LastClickedEntry, index);
+                                const size_t to = std::max(m_LastClickedEntry, index);
+                                for (size_t i = from; i <= to && i < m_CurrentEntries.size(); ++i)
+                                {
+                                    if (!m_CurrentEntries[i].IsDirectory)
+                                        m_Selected.insert(m_CurrentEntries[i].Handle);
+                                }
+                            }
+                            else
+                            {
+                                m_Selected.clear();
+                                m_Selected.insert(handle);
+                            }
+                            m_LastClickedEntry = index;
+                        }
+
+                        if (ImGui::BeginDragDropSource())
+                        {
+                            // Dragging something outside the selection drags just that; inside it, the whole selection.
+                            if (!selected)
+                            {
+                                m_Selected.clear();
+                                m_Selected.insert(handle);
+                            }
+                            if (m_Selected.size() > 1)
+                            {
+                                const std::vector<AssetHandle> handles(m_Selected.begin(), m_Selected.end());
+                                ImGui::SetDragDropPayload("CONTENT_BROWSER_ITEMS", handles.data(), handles.size() * sizeof(AssetHandle));
+                                ImGui::Text("%zu assets", handles.size());
+                            }
+                            else
+                            {
+                                ImGui::SetDragDropPayload("CONTENT_BROWSER_ITEM", &handle, sizeof(AssetHandle));
+                                ImGui::TextUnformatted(browserEntry.Name.c_str());
+                            }
+                            ImGui::EndDragDropSource();
+                        }
+
+                        if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+                        {
+                            if (metadata.Type == AssetType::MeshSource)
+                            {
+                                m_PendingImportPath = metadata.FilePath;
+                                m_ShowImportModal = true;
+                                const auto defaultDest = m_PendingImportPath.parent_path() / "Meshes" /
+                                    (m_PendingImportPath.stem().string() + ".nmesh");
+                                SetImportDestination(defaultDest);
+                            }
+                            else if (m_OpenAsset)
+                            {
+                                m_OpenAsset(handle); // EditorLayer ignores types it has no editor window for
+                            }
+                        }
+                    }
+
+                    // One line, cut at the thumbnail's width; the full name is in the tooltip.
+                    const ImVec2 nameMin = ImGui::GetCursorScreenPos();
+                    ImGui::PushClipRect(nameMin, ImVec2(nameMin.x + thumbnailSize, nameMin.y + ImGui::GetTextLineHeight()), true);
+                    ImGui::TextUnformatted(browserEntry.Name.c_str());
+                    ImGui::PopClipRect();
+                    if (ImGui::IsItemHovered())
+                        ImGui::SetTooltip("%s", browserEntry.Name.c_str());
+
+                    ImGui::EndGroup();
+                }
+            }
+        }
+        clipper.End();
+
         ImGui::SliderFloat("Thumbnail Size", &thumbnailSize, 48.0f, 256.0f);
         ImGui::SliderFloat("Padding", &padding, 0.0f, 32.0f);
 
@@ -385,19 +461,54 @@ namespace Nox
         if (ImGui::BeginPopupModal("Import Settings", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
         {
             ImGui::Text("Importing: %s", m_PendingImportPath.filename().string().c_str());
-            if (ImGui::Checkbox("Import as Static Mesh (.nsmesh)", &m_ImportAsStaticMesh))
+            // Mirrors Unreal's Interchange import options. Skinned meshes become one character entity when placed;
+            // the file's content decides the assets: skinned meshes -> <name>.nmesh (skeletal mesh + .nskel + clips), the rest -> <name>.nsmesh (static mesh).
+            auto combineCombo = [](const char* label, MeshCombineMode& mode, const char* tooltip)
             {
-                std::filesystem::path destination = m_ImportDestPathBuffer;
-                destination.replace_extension(m_ImportAsStaticMesh ? ".nsmesh" : ".nmesh");
-                SetImportDestination(destination);
-            }
+                const char* names[] = { "Do Not Combine", "Combine Visible", "Combine All" };
+                int current = static_cast<int>(mode);
+                if (ImGui::Combo(label, &current, names, 3))
+                    mode = static_cast<MeshCombineMode>(current);
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("%s", tooltip);
+            };
+            ImGui::SeparatorText("Meshes");
+            ImGui::Checkbox("Import Static Meshes", &m_ImportSettings.ImportStaticMeshes);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Meshes that are not skinned (level geometry, props).");
+            if (m_ImportSettings.ImportStaticMeshes)
+                combineCombo("Combine Static Meshes", m_ImportSettings.StaticCombine, "Merge all static meshes into one submesh per material, node transforms baked in. Saves draw calls and instances; repeated meshes are copied instead of instanced. glTF has no visibility flag, so Visible = All.");
+            ImGui::Checkbox("Import Skeletal Meshes", &m_ImportSettings.ImportSkeletalMeshes);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Skinned meshes and their skeleton (characters).");
+            if (m_ImportSettings.ImportSkeletalMeshes)
+                combineCombo("Combine Skeletal Meshes", m_ImportSettings.SkeletalCombine, "Merge the skinned meshes (they share the file's skeleton) into one submesh per material.");
+            ImGui::SeparatorText("Transform");
+            ImGui::DragFloat("Import Scale", &m_ImportSettings.ImportScale, 0.001f, 0.0001f, 1000.0f, "%.4f");
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Size of the model when placed. glTF is in meters; a model authored in centimeters (it looks 100x too big) needs 0.01.");
+            ImGui::SameLine();
+            if (ImGui::SmallButton("m"))
+                m_ImportSettings.ImportScale = 1.0f;
+            ImGui::SameLine();
+            if (ImGui::SmallButton("cm"))
+                m_ImportSettings.ImportScale = 0.01f;
+            ImGui::SameLine();
+            if (ImGui::SmallButton("in"))
+                m_ImportSettings.ImportScale = 0.0254f;
+            ImGui::SeparatorText("Animation");
+            ImGui::Checkbox("Import Animations", &m_ImportSettings.ImportAnimations);
+            if (!m_ImportSettings.ImportStaticMeshes && !m_ImportSettings.ImportSkeletalMeshes)
+                ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "Nothing to import: enable static or skeletal meshes.");
+
 
             ImGui::TextUnformatted("Destination:");
             ImGui::SameLine();
             std::filesystem::path destinationPath = m_ImportDestPathBuffer;
             ImGui::TextDisabled("%s", destinationPath.parent_path().generic_string().c_str());
             ImGui::InputText("File name", m_ImportFileNameBuffer, sizeof(m_ImportFileNameBuffer));
-            if (ImGui::Button("Cook & Import"))
+            const bool nothingToImport = !m_ImportSettings.ImportStaticMeshes && !m_ImportSettings.ImportSkeletalMeshes;
+            if (ImGui::Button("Cook & Import") && !nothingToImport)
             {
                 if (!m_PendingExternalSourcePath.empty())
                 {
@@ -425,9 +536,8 @@ namespace Nox
                     }
                 }
 
-                const AssetType type = m_ImportAsStaticMesh ? AssetType::StaticMesh : AssetType::Mesh;
                 const auto finalDestination = destinationPath.parent_path() / m_ImportFileNameBuffer;
-                m_Project->GetEditorAssetManager()->ImportAsset(m_PendingImportPath, finalDestination, type);
+                m_Project->GetEditorAssetManager()->ImportModel(m_PendingImportPath, finalDestination, m_ImportSettings);
                 m_PendingExternalSourcePath.clear();
                 m_PendingPackageDirectory.clear();
                 RefreshAssetTree();
@@ -449,6 +559,17 @@ namespace Nox
     {
         m_ThumbnailCache = CreateRef<ThumbnailCache>(m_Project);
         m_CurrentEntries.clear();
+        m_Selected.clear();
+
+        // One lookup table for the whole folder: matching every file against the whole registry (two path normalizations
+        // per entry) took seconds for a folder of hundreds of meshes.
+        std::unordered_map<std::string, AssetHandle> handleOfPath;
+        for (const auto& [handle, metadata] : m_Project->GetEditorAssetManager()->GetAssetRegistry())
+        {
+            handleOfPath.emplace(metadata.FilePath.lexically_normal().generic_string(), handle);
+            if (!metadata.SourceFilePath.empty())
+                handleOfPath.emplace(metadata.SourceFilePath.lexically_normal().generic_string(), handle);
+        }
 
         std::error_code error;
         for (const auto& entry : std::filesystem::directory_iterator(m_CurrentDirectory, error))
@@ -457,11 +578,12 @@ namespace Nox
             const auto relativePath = path.lexically_relative(m_BaseDirectory);
             if (entry.is_directory())
             {
-                m_CurrentEntries.push_back({path, {}, 0, true});
+                m_CurrentEntries.push_back({path, {}, 0, true, "##directory_" + relativePath.generic_string(), path.filename().string()});
                 continue;
             }
 
-            const AssetHandle handle = FindAssetHandle(relativePath);
+            const auto foundHandle = handleOfPath.find(relativePath.lexically_normal().generic_string());
+            const AssetHandle handle = foundHandle != handleOfPath.end() ? foundHandle->second : AssetHandle(0);
             if (handle == 0)
                 continue;
 
@@ -471,7 +593,7 @@ namespace Nox
             // Texture.png/Texture.ntex do not appear twice.
             if (metadata.FilePath.lexically_normal() != relativePath.lexically_normal())
                 continue;
-            m_CurrentEntries.push_back({path, metadata, handle, false});
+            m_CurrentEntries.push_back({path, metadata, handle, false, "##asset_" + relativePath.generic_string(), metadata.FilePath.filename().string()});
         }
         m_EntriesDirectory = m_CurrentDirectory;
     }

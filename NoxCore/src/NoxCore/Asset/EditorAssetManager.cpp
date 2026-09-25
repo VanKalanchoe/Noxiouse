@@ -8,6 +8,10 @@
 #include "AssetImporter.h"
 #include "MeshImporter.h"
 #include "NoxCore/Renderer/Mesh.h"
+#include "NoxCore/Scene/Scene.h"
+#include "NoxCore/Scene/Entity.h"
+#include "NoxCore/Scene/Components.h"
+#include "NoxCore/Scene/SceneSerializer.h"
 #include "NoxCore/Renderer/Renderer.h"
 #include "NoxCore/Core/Application.h"
 #include "Material.h"
@@ -194,6 +198,14 @@ namespace Nox
         }
 
         PublishLoadedAssets();
+        PublishSplitImports();
+
+        if (m_RegistryDirty && std::chrono::steady_clock::now() - m_RegistryWritten >= std::chrono::seconds(1))
+        {
+            SerializeAssetRegistry();
+            m_RegistryDirty = false;
+            m_RegistryWritten = std::chrono::steady_clock::now();
+        }
     }
 
     void EditorAssetManager::PublishLoadedAssets()
@@ -370,11 +382,12 @@ namespace Nox
         m_PendingModifiedPaths.push_back(absolutePath);
     }
 
-    void EditorAssetManager::ImportAsset(const std::filesystem::path& sourcePath, const std::filesystem::path& destPath, AssetType targetType)
+    void EditorAssetManager::ImportAsset(const std::filesystem::path& sourcePath, const std::filesystem::path& destPath, AssetType targetType, const MeshImportSettings& meshSettings)
     {
         AssetMetadata metadata;
         metadata.FilePath = destPath.empty() ? sourcePath : destPath;
         metadata.SourceFilePath = sourcePath;
+        metadata.MeshSettings = meshSettings;
 
         // If a target type was provided (e.g. from a UI menu), use it.
         // Otherwise, fall back to whatever the file extension is.
@@ -398,6 +411,121 @@ namespace Nox
             RequestAsset(handle);
     }
 
+    EditorAssetManager::ImportProgress EditorAssetManager::GetImportProgress() const
+    {
+        ImportProgress progress;
+        for (const PendingSplitImport& pending : m_PendingSplitImports)
+        {
+            ++progress.Imports;
+            progress.Total += pending.Total->load();
+            progress.Done += pending.Done->load();
+        }
+        return progress;
+    }
+
+    void EditorAssetManager::PublishSplitImports()
+    {
+        bool registryChanged = false;
+        for (auto it = m_PendingSplitImports.begin(); it != m_PendingSplitImports.end();)
+        {
+            if (!it->Job.IsReady())
+            {
+                ++it;
+                continue;
+            }
+
+            const std::vector<MeshImporter::SplitMesh> meshes = it->Job.Get();
+            for (const MeshImporter::SplitMesh& mesh : meshes)
+            {
+                AssetMetadata metadata;
+                metadata.Type = AssetType::StaticMesh;
+                metadata.FilePath = mesh.FilePath;
+                metadata.SourceFilePath = it->MaterialBase.SourceFilePath;
+                metadata.MeshSettings.ImportStaticMeshes = true;
+                metadata.MeshSettings.ImportSkeletalMeshes = false;
+                metadata.MeshSettings.ImportAnimations = false;
+                metadata.MeshSettings.SourceMeshIndex = mesh.MeshIndex;
+                metadata.MeshSettings.MaterialBasePath = it->MaterialBase.FilePath;
+                metadata.MeshSettings.ImportScale = it->MaterialBase.MeshSettings.ImportScale;
+                RegisterAsset(metadata);
+                registryChanged = true;
+            }
+            // The job also wrote the shared .nmat files (and they are not registered by loading a mesh that was cooked here).
+            ScanAndRegisterNewAssets(it->MaterialBase.FilePath.parent_path().parent_path());
+            NOX_CORE_INFO("[EditorAssetManager] Registered {} static mesh assets cooked from {}", meshes.size(), it->MaterialBase.SourceFilePath.generic_string());
+            it = m_PendingSplitImports.erase(it);
+        }
+        if (registryChanged)
+            m_RegistryDirty = true; // written by Update(), not per load
+    }
+
+    bool EditorAssetManager::ImportModel(const std::filesystem::path& sourcePath, const std::filesystem::path& destPath, const MeshImportSettings& settings)
+    {
+        const MeshImporter::GltfContent content = MeshImporter::InspectGltf(Project::GetActiveAssetDirectory() / sourcePath);
+        const bool skeletal = settings.ImportSkeletalMeshes && content.HasSkinnedMeshes;
+        const bool statics = settings.ImportStaticMeshes && content.HasStaticMeshes;
+        if (!skeletal && !statics)
+        {
+            NOX_CORE_WARN("[EditorAssetManager] Nothing to import from {} with these settings (skinned meshes: {}, static meshes: {})",
+                          sourcePath.generic_string(), content.HasSkinnedMeshes, content.HasStaticMeshes);
+            return false;
+        }
+
+        auto registerAsset = [&](AssetType type, const char* extension, const MeshImportSettings& assetSettings)
+        {
+            AssetMetadata metadata;
+            metadata.Type = type;
+            metadata.FilePath = destPath;
+            metadata.FilePath.replace_extension(extension);
+            metadata.SourceFilePath = sourcePath;
+            metadata.MeshSettings = assetSettings;
+            const AssetHandle handle = RegisterAsset(metadata);
+            SerializeAssetRegistry();
+            RequestAsset(handle);
+        };
+
+        // Clips are cooked by one of the two, so recooking never has both write the same files.
+        if (skeletal)
+        {
+            MeshImportSettings skeletalSettings = settings;
+            skeletalSettings.ImportStaticMeshes = false;
+            registerAsset(AssetType::Mesh, ".nmesh", skeletalSettings);
+        }
+        if (statics)
+        {
+            MeshImportSettings staticSettings = settings;
+            staticSettings.ImportSkeletalMeshes = false;
+            staticSettings.ImportAnimations = settings.ImportAnimations && !skeletal;
+
+            if (settings.StaticCombine != MeshCombineMode::DoNotCombine)
+            {
+                registerAsset(AssetType::StaticMesh, ".nsmesh", staticSettings);
+            }
+            else
+            {
+                // Do Not Combine (Unreal): every static mesh of the file is an asset of its own -- import the meshes, drag them
+                // in. No whole-file asset. Cooked in one background job, registered when it is done. `materialBase` only names
+                // the shared .nmat files.
+                AssetMetadata materialBase;
+                materialBase.Type = AssetType::StaticMesh;
+                materialBase.FilePath = destPath;
+                materialBase.FilePath.replace_extension(".nsmesh");
+                materialBase.SourceFilePath = sourcePath;
+                materialBase.MeshSettings = staticSettings;
+                const std::filesystem::path directory = destPath.parent_path();
+                auto total = std::make_shared<std::atomic<uint32_t>>(0);
+                auto done = std::make_shared<std::atomic<uint32_t>>(0);
+                m_PendingSplitImports.push_back({
+                    JobSystem::Get().Async("Cook Split Meshes", [assetDirectory = Project::GetActiveAssetDirectory(), materialBase, directory, total, done](const CancellationToken&)
+                    {
+                        return MeshImporter::CookSplitMeshes(assetDirectory, materialBase, directory, total.get(), done.get());
+                    }),
+                    materialBase, total, done });
+            }
+        }
+        return true;
+    }
+
     void EditorAssetManager::ImportMeshTextures(const Ref<Asset>& meshAsset)
     {
         const std::vector<MaterialData>* materials = nullptr;
@@ -413,19 +541,7 @@ namespace Nox
         // with std::filesystem::relative + a linear registry scan measured 2.1s per load. Index the
         // registry once, resolve paths lexically, and handle each distinct path only once.
         const std::filesystem::path assetDirectory = Project::GetActiveAssetDirectory();
-        std::unordered_map<std::string, AssetHandle> registeredTextureHandles;
-        for (const auto& [textureHandle, metadata] : m_AssetRegistry)
-        {
-            if (metadata.Type != AssetType::Texture2D)
-                continue;
-            const std::string cookedKey = metadata.FilePath.lexically_normal().generic_string();
-            registeredTextureHandles[cookedKey] = textureHandle;
-            if (!metadata.SourceFilePath.empty())
-            {
-                const std::string sourceKey = metadata.SourceFilePath.lexically_normal().generic_string();
-                registeredTextureHandles[sourceKey] = textureHandle;
-            }
-        }
+        // (Registered textures are found through m_HandleByPath, which every registration keeps current.)
         std::unordered_set<std::string> processedPaths;
         std::vector<AssetHandle> texturesNeedingRecook;
         bool registryChanged = false;
@@ -455,19 +571,17 @@ namespace Nox
 
             std::filesystem::path cookedPath = GeneratedAssetPath(relativePath, "Textures", ".ntex");
 
-            const std::string cookedKey = cookedPath.lexically_normal().generic_string();
-            const std::string sourceKey = relativePath.lexically_normal().generic_string();
-            auto registered = registeredTextureHandles.find(cookedKey);
-            if (registered == registeredTextureHandles.end())
-                registered = registeredTextureHandles.find(sourceKey);
-            if (registered != registeredTextureHandles.end())
+            AssetHandle registered = FindHandleByPath(cookedPath, AssetType::Texture2D);
+            if (registered == 0)
+                registered = FindHandleByPath(relativePath, AssetType::Texture2D);
+            if (registered != 0)
             {
-                AssetMetadata& metadata = m_AssetRegistry.at(registered->second);
+                AssetMetadata& metadata = m_AssetRegistry.at(registered);
                 const NRI::ImageFormat expectedFormat = sRGB ? NRI::ImageFormat::SRGBA8 : NRI::ImageFormat::RGBA8;
                 if (metadata.TextureSpec.format != expectedFormat)
                 {
                     metadata.TextureSpec.format = expectedFormat;
-                    texturesNeedingRecook.push_back(registered->second);
+                    texturesNeedingRecook.push_back(registered);
                     registryChanged = true;
                 }
                 return;
@@ -495,9 +609,6 @@ namespace Nox
             TextureSpecification spec;
             spec.format = sRGB ? NRI::ImageFormat::SRGBA8 : NRI::ImageFormat::RGBA8;
             const AssetHandle newHandle = RegisterAsset(TextureMetadata(relativePath, spec, {}));
-            registeredTextureHandles[cookedKey] = newHandle;
-            registeredTextureHandles[sourceKey] = newHandle;
-            registeredTextureHandles[relativePath.lexically_normal().generic_string()] = newHandle;
             registryChanged = true;
 
         };
@@ -516,7 +627,7 @@ namespace Nox
         }
 
         if (registryChanged)
-            SerializeAssetRegistry();
+            m_RegistryDirty = true; // written by Update(), not per load
 
         // Import settings are part of the cooked texture. A content hash cannot detect a color-space
         // correction, so explicitly force a recook for already loaded textures whose role changed.
@@ -560,13 +671,7 @@ namespace Nox
         materialAssets.reserve(materials->size());
 
         // Materials come per primitive (Bistro: 2909 entries, 254 unique), so the same .nmat repeats many
-        // times. One registry pass up front; materials registered below are added to the map as well.
-        std::unordered_map<std::string, AssetHandle> materialByPath;
-        for (const auto& [handle, metadata] : m_AssetRegistry)
-        {
-            if (metadata.Type == AssetType::Material)
-                materialByPath.emplace(metadata.FilePath.lexically_normal().generic_string(), handle);
-        }
+        // times; a material is found through m_HandleByPath (kept current by every registration).
 
         bool registryChanged = false;
         // Per primitive, but each .nmat is checked on disk once (a check per entry cost Bistro ~2909 file system calls).
@@ -574,12 +679,10 @@ namespace Nox
         for (size_t index = 0; index < materials->size(); ++index)
         {
             const MaterialData& material = (*materials)[index];
-            const std::filesystem::path materialPath = MeshImporter::MaterialAssetPath(meshMetadata.FilePath, material, index);
+            const std::filesystem::path materialPath = MeshImporter::MaterialAssetPath(meshMetadata.MeshSettings.MaterialBasePath.empty() ? meshMetadata.FilePath : meshMetadata.MeshSettings.MaterialBasePath, material, index);
 
             const std::string materialKey = materialPath.lexically_normal().generic_string();
-            AssetHandle materialHandle = 0;
-            if (auto found = materialByPath.find(materialKey); found != materialByPath.end())
-                materialHandle = found->second;
+            AssetHandle materialHandle = FindHandleByPath(materialPath, AssetType::Material);
 
             const auto fullMaterialPath = Project::GetActiveAssetDirectory() / materialPath;
             if (materialHandle == 0 || (checkedPaths.insert(materialKey).second && !std::filesystem::exists(fullMaterialPath)))
@@ -600,7 +703,6 @@ namespace Nox
                     metadata.SourceFilePath = materialPath;
                     metadata.Type = AssetType::Material;
                     materialHandle = RegisterAsset(metadata);
-                    materialByPath.emplace(materialKey, materialHandle);
                     registryChanged = true;
                 }
             }
@@ -610,7 +712,7 @@ namespace Nox
         }
 
         if (registryChanged)
-            SerializeAssetRegistry();
+            m_RegistryDirty = true; // written by Update(), not per load
 
         if (meshAsset->GetType() == AssetType::Mesh)
             static_cast<Mesh*>(meshAsset.get())->SetMaterialAssets(std::move(materialAssets));
@@ -640,10 +742,28 @@ namespace Nox
         return metadata;
     }
 
+    void EditorAssetManager::IndexPath(AssetHandle handle, const AssetMetadata& metadata)
+    {
+        if (!metadata.FilePath.empty())
+            m_HandleByPath[metadata.FilePath.lexically_normal().generic_string()] = handle;
+        if (!metadata.SourceFilePath.empty())
+            m_HandleByPath[metadata.SourceFilePath.lexically_normal().generic_string()] = handle;
+    }
+
+    AssetHandle EditorAssetManager::FindHandleByPath(const std::filesystem::path& path, AssetType type) const
+    {
+        const auto found = m_HandleByPath.find(path.lexically_normal().generic_string());
+        if (found == m_HandleByPath.end())
+            return 0;
+        const auto entry = m_AssetRegistry.find(found->second);
+        return entry != m_AssetRegistry.end() && entry->second.Type == type ? found->second : AssetHandle(0);
+    }
+
     AssetHandle EditorAssetManager::RegisterAsset(const AssetMetadata& metadata)
     {
         AssetHandle handle;
         m_AssetRegistry[handle] = metadata;
+        IndexPath(handle, metadata);
         return handle;
     }
 
@@ -800,6 +920,11 @@ namespace Nox
 
     void EditorAssetManager::Shutdown()
     {
+        if (m_RegistryDirty)
+        {
+            SerializeAssetRegistry();
+            m_RegistryDirty = false;
+        }
         m_Streamer.Shutdown();
         m_Loader.Shutdown();
         m_LoadedAssets.clear();
@@ -1026,6 +1151,22 @@ namespace Nox
                     out << YAML::Key << "Flip" << YAML::Value << metadata.TextureSpec.flip;
                     out << YAML::EndMap;
                 }
+
+                if (metadata.Type == AssetType::Mesh || metadata.Type == AssetType::StaticMesh)
+                {
+                    out << YAML::Key << "MeshSettings" << YAML::Value;
+                    out << YAML::BeginMap;
+                    out << YAML::Key << "ImportStaticMeshes" << YAML::Value << metadata.MeshSettings.ImportStaticMeshes;
+                    out << YAML::Key << "ImportSkeletalMeshes" << YAML::Value << metadata.MeshSettings.ImportSkeletalMeshes;
+                    out << YAML::Key << "ImportAnimations" << YAML::Value << metadata.MeshSettings.ImportAnimations;
+                    out << YAML::Key << "StaticCombine" << YAML::Value << static_cast<int>(metadata.MeshSettings.StaticCombine);
+                    out << YAML::Key << "SkeletalCombine" << YAML::Value << static_cast<int>(metadata.MeshSettings.SkeletalCombine);
+                    out << YAML::Key << "SourceMeshIndex" << YAML::Value << metadata.MeshSettings.SourceMeshIndex;
+                    out << YAML::Key << "ImportScale" << YAML::Value << metadata.MeshSettings.ImportScale;
+                    if (!metadata.MeshSettings.MaterialBasePath.empty())
+                        out << YAML::Key << "MaterialBasePath" << YAML::Value << metadata.MeshSettings.MaterialBasePath.generic_string();
+                    out << YAML::EndMap;
+                }
                 
                 out << YAML::EndMap;
             }
@@ -1067,7 +1208,7 @@ namespace Nox
 
             std::filesystem::path ext = entry.path().extension();
             if (ext == ".nox" || ext == ".nanim" || ext == ".nskel" || ext == ".nmat" ||
-                ext == ".ntex" || ext == ".nmesh" || ext == ".nsmesh" || ext == ".nanimgraph")
+                ext == ".ntex" || ext == ".nanimgraph")
             {
                 std::filesystem::path relativePath = entry.path().lexically_relative(assetDir).lexically_normal();
 
@@ -1081,6 +1222,7 @@ namespace Nox
                     metadata.Type = GetAssetTypeFromExtension(ext);
 
                     m_AssetRegistry[newHandle] = metadata;
+                    IndexPath(newHandle, metadata);
                     registryChanged = true;
                     NOX_CORE_INFO("[EditorAssetManager] Auto-registered newly discovered asset: {}", relativePath.string());
                 }
@@ -1089,7 +1231,7 @@ namespace Nox
 
         if (registryChanged)
         {
-            SerializeAssetRegistry();
+            m_RegistryDirty = true; // written by Update(), not per load
         }
     }
 
@@ -1137,7 +1279,31 @@ namespace Nox
                 if (specNode["Flip"])
                     metadata.TextureSpec.flip = specNode["Flip"].as<bool>();
             }
+
+            if (auto settingsNode = node["MeshSettings"])
+            {
+                if (settingsNode["ImportStaticMeshes"])
+                    metadata.MeshSettings.ImportStaticMeshes = settingsNode["ImportStaticMeshes"].as<bool>();
+                if (settingsNode["ImportSkeletalMeshes"])
+                    metadata.MeshSettings.ImportSkeletalMeshes = settingsNode["ImportSkeletalMeshes"].as<bool>();
+                if (settingsNode["ImportAnimations"])
+                    metadata.MeshSettings.ImportAnimations = settingsNode["ImportAnimations"].as<bool>();
+                if (settingsNode["StaticCombine"])
+                    metadata.MeshSettings.StaticCombine = static_cast<MeshCombineMode>(settingsNode["StaticCombine"].as<int>());
+                if (settingsNode["SkeletalCombine"])
+                    metadata.MeshSettings.SkeletalCombine = static_cast<MeshCombineMode>(settingsNode["SkeletalCombine"].as<int>());
+                if (settingsNode["SourceMeshIndex"])
+                    metadata.MeshSettings.SourceMeshIndex = settingsNode["SourceMeshIndex"].as<int32_t>();
+                if (settingsNode["ImportScale"])
+                    metadata.MeshSettings.ImportScale = settingsNode["ImportScale"].as<float>();
+                if (settingsNode["MaterialBasePath"])
+                    metadata.MeshSettings.MaterialBasePath = settingsNode["MaterialBasePath"].as<std::string>();
+            }
         }
+
+        m_HandleByPath.clear();
+        for (const auto& [indexedHandle, indexedMetadata] : m_AssetRegistry)
+            IndexPath(indexedHandle, indexedMetadata);
 
         return true;
     }

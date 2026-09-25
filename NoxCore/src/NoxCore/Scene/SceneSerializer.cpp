@@ -294,6 +294,8 @@ namespace Nox
 
             const auto& instance = entity.GetComponent<ModelInstanceComponent>();
             out << YAML::Key << "Model" << YAML::Value << static_cast<uint64_t>(instance.Model);
+            if (instance.AtFileLayout)
+                out << YAML::Key << "AtFileLayout" << YAML::Value << true;
             if (!instance.RemovedNodes.empty())
             {
                 out << YAML::Key << "RemovedNodes" << YAML::Value << YAML::Flow << YAML::BeginSeq;
@@ -733,6 +735,8 @@ namespace Nox
             out << YAML::Key << "MaxSlopeDegrees" << YAML::Value << cct.MaxSlopeDegrees;
             out << YAML::Key << "GravityScale" << YAML::Value << cct.GravityScale;
             out << YAML::Key << "AirControl" << YAML::Value << cct.AirControl;
+            out << YAML::Key << "MaxAcceleration" << YAML::Value << cct.MaxAcceleration;
+            out << YAML::Key << "BrakingDeceleration" << YAML::Value << cct.BrakingDeceleration;
 
             out << YAML::EndMap; // CharacterController3DComponent
         }
@@ -886,6 +890,8 @@ namespace Nox
                 {
                     auto& instance = deserializedEntity.AddComponent<ModelInstanceComponent>();
                     instance.Model = modelInstance["Model"].as<uint64_t>();
+                    if (modelInstance["AtFileLayout"])
+                        instance.AtFileLayout = modelInstance["AtFileLayout"].as<bool>();
                     if (auto removedNodes = modelInstance["RemovedNodes"])
                     {
                         for (auto node : removedNodes)
@@ -1290,6 +1296,10 @@ namespace Nox
                         cct.GravityScale = characterController3DComponent["GravityScale"].as<float>();
                     if (characterController3DComponent["AirControl"])
                         cct.AirControl = characterController3DComponent["AirControl"].as<float>();
+                    if (characterController3DComponent["MaxAcceleration"])
+                        cct.MaxAcceleration = characterController3DComponent["MaxAcceleration"].as<float>();
+                    if (characterController3DComponent["BrakingDeceleration"])
+                        cct.BrakingDeceleration = characterController3DComponent["BrakingDeceleration"].as<float>();
                 }
 
                 auto textComponent = entity["TextComponent"];

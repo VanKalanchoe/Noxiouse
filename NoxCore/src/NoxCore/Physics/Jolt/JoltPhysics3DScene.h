@@ -66,7 +66,16 @@ namespace Nox
 
         std::unordered_map<uint32_t, JPH::BodyID> m_EntityToBodyMap;
         std::unordered_map<uint32_t, Entity> m_BodyToEntityMap;
-        std::unordered_map<uint32_t, JPH::Ref<JPH::CharacterVirtual>> m_EntityToCharacterMap;
+        // A character and its positions at the last two fixed steps: the entity is drawn interpolated between them, so
+        // motion is smooth however many steps a frame ran (0, 1 or 2 -- unevenly stepped movement made a follow camera flicker).
+        struct CharacterState
+        {
+            JPH::Ref<JPH::CharacterVirtual> Character;
+            glm::vec3 Previous{ 0.0f };
+            glm::vec3 Current{ 0.0f };
+            glm::vec3 Horizontal{ 0.0f }; // the horizontal velocity the controller has accelerated to (x, z)
+        };
+        std::unordered_map<uint32_t, CharacterState> m_EntityToCharacterMap;
 
 
         float m_Accumulator = 0.0f;

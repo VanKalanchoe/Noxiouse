@@ -1,6 +1,8 @@
 #include "NoxCore//Core/core.h"
 #include "EditorCamera.h"
 
+#include <cmath>
+
 #include "NoxCore/Core/Input.h"
 
 #define GLM_ENABLE_EXPERIMENTAL
@@ -82,6 +84,15 @@ namespace Nox
 
 	void EditorCamera::OnUpdate(Timestep ts)
 	{
+		if (!m_TargetsValid)
+		{
+			m_TargetFocalPoint = m_FocalPoint;
+			m_TargetDistance = m_Distance;
+			m_TargetPitch = m_Pitch;
+			m_TargetYaw = m_Yaw;
+			m_TargetsValid = true;
+		}
+
 		if (Input::IsKeyPressed(SDL_SCANCODE_LALT))
 		{
 			const glm::vec2& mouse{ Input::GetMouseX(), Input::GetMouseY() };
@@ -96,6 +107,13 @@ namespace Nox
 				MouseZoom(delta.y);
 		}
 
+
+		// Ease towards the input-driven targets, by time, so the motion is even at any frame rate (time constant 40 ms).
+		const float blend = 1.0f - std::exp(-25.0f * static_cast<float>(ts));
+		m_FocalPoint += (m_TargetFocalPoint - m_FocalPoint) * blend;
+		m_Distance += (m_TargetDistance - m_Distance) * blend;
+		m_Pitch += (m_TargetPitch - m_Pitch) * blend;
+		m_Yaw += (m_TargetYaw - m_Yaw) * blend;
 		UpdateView();
 	}
 
@@ -116,25 +134,25 @@ namespace Nox
 	void EditorCamera::MousePan(const glm::vec2& delta)
 	{
 		auto [xSpeed, ySpeed] = PanSpeed();
-		m_FocalPoint += -GetRightDirection() * delta.x * xSpeed * m_Distance;
-		m_FocalPoint += GetUpDirection() * delta.y * ySpeed * m_Distance;
+		m_TargetFocalPoint += -GetRightDirection() * delta.x * xSpeed * m_Distance;
+		m_TargetFocalPoint += GetUpDirection() * delta.y * ySpeed * m_Distance;
 	}
 
 	void EditorCamera::MouseRotate(const glm::vec2& delta)
 	{
 		float yawSign = GetUpDirection().y < 0 ? -1.0f : 1.0f;
-		m_Yaw += yawSign * delta.x * RotationSpeed();
-		m_Pitch += delta.y * RotationSpeed();
+		m_TargetYaw += yawSign * delta.x * RotationSpeed();
+		m_TargetPitch += delta.y * RotationSpeed();
 	}
 
 	void EditorCamera::MouseZoom(float delta)
 	{
-		m_Distance -= delta * ZoomSpeed();
+		m_TargetDistance -= delta * ZoomSpeed();
 		constexpr float minimumDistance = 1.0f;
-		if (m_Distance < minimumDistance)
+		if (m_TargetDistance < minimumDistance)
 		{
-			m_FocalPoint += GetForwardDirection() * (minimumDistance - m_Distance);
-			m_Distance = minimumDistance;
+			m_TargetFocalPoint += GetForwardDirection() * (minimumDistance - m_TargetDistance);
+			m_TargetDistance = minimumDistance;
 		}
 	}
 

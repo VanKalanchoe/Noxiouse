@@ -146,7 +146,7 @@
             if (writeVelocity)
             {
                 float2 uv = (input.pos.xy / pushConstant.viewportSize) * 2.0 - 1.0;
-                float4 currClipJittered = float4(uv, 1.0, 1.0);
+                float4 currClipJittered = float4(uv, 0.001, 1.0); // far along the ray: a precise direction (see Skybox.slang)
                 // Reconstruct the actual world-space point along this (jittered) pixel's view ray.
                 // ubo->invViewProj is jittered on purpose here: it must match the matrix the pixel was rasterized with.
                 float4 worldPos4 = mul(ubo->invViewProj, currClipJittered);
@@ -154,8 +154,13 @@
 
                 // Re-project that same world point with the CLEAN (non-jittered) matrices for both frames,
                 // exactly like the geometry path does, so background pixels use the same jitter-free convention.
-                float4 currClip = mul(ubo->nonJitteredProj, mul(ubo->view, float4(worldPos, 1.0)));
-                float4 prevClip = mul(ubo->prevProj, mul(ubo->prevView, float4(worldPos, 1.0)));
+                // The background is at infinity: only the ray DIRECTION (w = 0) moves it, not the eye. Reprojecting the
+                // unprojected near-plane point instead (w = 1, as this did) treated every sky pixel as 0.01 units from
+                // the eye, so any camera translation -- an orbiting editor camera moves its eye all the time -- gave
+                // it large false motion and DLSS / temporal filters smeared and shimmered the image.
+                float3 rayDirection = worldPos - ubo->cameraWorldPos.xyz;
+                float4 currClip = mul(ubo->nonJitteredProj, mul(ubo->view, float4(rayDirection, 0.0)));
+                float4 prevClip = mul(ubo->prevProj, mul(ubo->prevView, float4(rayDirection, 0.0)));
                 float2 currNDC = currClip.xy / currClip.w;
                 float2 prevNDC = prevClip.xy / prevClip.w;
 

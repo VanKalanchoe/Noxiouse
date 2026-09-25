@@ -210,10 +210,8 @@ namespace Nox
             ImGuiTreeNodeFlags_OpenOnArrow;
         flags |= ImGuiTreeNodeFlags_SpanAvailWidth;
 
-        bool hasChildren = false;
-        if (entity.HasComponent<RelationshipComponent>())
-            if (!entity.GetComponent<RelationshipComponent>().Children.empty())
-                hasChildren = true;
+        const std::vector<UUID> visibleChildren = VisibleChildren(entity);
+        const bool hasChildren = !visibleChildren.empty();
 
         if (!hasChildren)
             flags |= ImGuiTreeNodeFlags_Leaf;
@@ -294,7 +292,7 @@ namespace Nox
         {
             if (hasChildren)
             {
-                auto children = entity.GetComponent<RelationshipComponent>().Children;
+                const std::vector<UUID>& children = visibleChildren;
                 for (UUID childID : children)
                 {
                     Entity childEntity = m_Context->GetEntityByUUID(childID);
@@ -1716,6 +1714,8 @@ namespace Nox
             ImGui::DragFloat("Max Slope", &component.MaxSlopeDegrees, 0.5f, 0.0f, 89.0f, "%.1f deg");
             ImGui::DragFloat("Gravity Scale", &component.GravityScale, 0.05f, 0.0f, 10.0f);
             ImGui::DragFloat("Air Control", &component.AirControl, 0.01f, 0.0f, 1.0f);
+            ImGui::DragFloat("Max Acceleration", &component.MaxAcceleration, 0.1f, 0.1f, 200.0f, "%.1f m/s^2");
+            ImGui::DragFloat("Braking Deceleration", &component.BrakingDeceleration, 0.1f, 0.1f, 200.0f, "%.1f m/s^2");
             ImGui::Separator();
             ImGui::BeginDisabled();
             ImGui::Checkbox("Grounded", &component.IsGrounded);

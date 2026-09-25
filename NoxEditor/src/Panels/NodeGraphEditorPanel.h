@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include "NoxCore/Asset/Asset.h"
 #include "NoxCore/Core/Core.h"
@@ -45,6 +46,8 @@ namespace Nox
         // The graph's declared parameters (add / rename / retype / default / delete), above the canvas. Backend-
         // independent: it edits NodeGraph::Parameters, which every canvas backend draws its own nodes from.
         void DrawParametersPanel();
+        // Below a state machine's state view: the selected state (name, entry) or transition (blend, rules).
+        void DrawStateMachineInspector(GraphNode& machine);
 
     private:
         AssetHandle m_GraphHandle;
@@ -54,6 +57,13 @@ namespace Nox
         bool m_Dirty = false;
         bool m_WantsInput = false;
         bool m_Hovered = false;
+
+        // Which graph is on the canvas: ids alternating node (a state machine in the current graph) / state (one of its
+        // states), so [] = the root graph, [n] = n's state view, [n, s] = state s's own graph, and so on.
+        std::vector<uint32_t> m_Path;
+        std::vector<uint32_t> m_ShownPath; // what the backend was last reset for
+        int m_SelectedTransition = -1;
+        uint32_t m_SelectedState = 0;
 
         Scope<INodeGraphCanvasBackend> m_Backend;
     };

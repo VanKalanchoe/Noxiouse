@@ -302,7 +302,7 @@
         float2 ndc_xy = float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
 
         // Primary pinhole camera ray reconstruction (near plane is depth = 1.0 in Reverse-Z)
-        float4 nearPosH = mul(pushConstant.invViewProj, float4(ndc_xy, 1.0, 1.0));
+        float4 nearPosH = mul(pushConstant.invViewProj, float4(ndc_xy, 0.001, 1.0)); // far enough along the ray for a precise direction (see PathTracerBridge)
         float3 nearPos = nearPosH.xyz / nearPosH.w;
 
         float3 rayOrigin = ubo->cameraWorldPos.xyz;

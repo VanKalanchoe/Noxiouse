@@ -5,14 +5,14 @@ namespace Facerun;
 
 /// <summary>
 /// Walks a Character Controller 3D with WASD (Shift = run, Space = jump), turns it towards its movement direction and
-/// feeds the animation graph the parameters "Speed" (float, m/s) and "IsGrounded" (bool).
+/// feeds the animation graph the parameters "Speed" (float, horizontal m/s) and "IsGrounded" (bool).
 /// </summary>
 public sealed class CharacterMovement : EntityBehaviour
 {
-    [Expose] public float WalkSpeed = 2.0f;
-    [Expose] public float RunSpeed = 5.0f;
-    [Expose] public float JumpSpeed = 4.0f;
-    [Expose] public float TurnSpeed = 10.0f;
+    [Expose] public float WalkSpeed = 2.0f; // m/s
+    [Expose] public float RunSpeed = 5.0f; // m/s (Unreal template: 500 cm/s)
+    [Expose] public float JumpSpeed = 7.0f; // Unreal's third-person template: 700 cm/s with gravity x1.75
+    [Expose] public float TurnSpeed = 12.0f;
     [Expose] public float ModelYawOffset = 0.0f; // radians; the model's forward axis relative to +Z
 
     private float _yaw;
@@ -54,6 +54,7 @@ public sealed class CharacterMovement : EntityBehaviour
             character.Jump(JumpSpeed);
 
         Vector3 velocity = character.Velocity;
+        // "Speed": horizontal speed in m/s -- the animation graph's state machine picks Idle / Walk / Run from it.
         animator?.SetFloat("Speed", MathF.Sqrt(velocity.X * velocity.X + velocity.Z * velocity.Z));
         animator?.SetBool("IsGrounded", character.IsGrounded);
     }

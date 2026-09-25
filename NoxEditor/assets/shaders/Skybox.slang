@@ -49,7 +49,9 @@
             vertices[threadID].pos = float4(screenPos, 0.0, 1.0);
 
             // Unproject near-plane point (depth = 1.0 in Reverse-Z) to world space
-            float4 unprojected = mul(ubo->invViewProj, float4(screenPos, 1.0, 1.0));
+            // Unproject far along the ray (reverse-Z depth 0.001), not at the near plane: minus the camera position, a near-plane
+            // point (0.01 units away) loses most of its float digits and the sky direction wobbled by up to a pixel per frame.
+            float4 unprojected = mul(ubo->invViewProj, float4(screenPos, 0.001, 1.0));
             vertices[threadID].worldRay = unprojected.xyz / unprojected.w - ubo->cameraWorldPos.xyz;
         }
 
@@ -78,8 +80,25 @@
         TextureCube texHandle = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.cubemapIndex, 0));
         SamplerState sampHandle = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_PREFILTER, 0));
 
-        // Sample the environment cubemap using interpolated 3D world direction
-        float3 envColor = texHandle.SampleLevel(sampHandle, normalize(input.worldRay), 0.0).rgb * ubo->scaleIBLAmbient;
+        // The environment cubemap is a 4k BC6H DDS with NO mip chain: sampled once at level 0 it is minified 3-4x on screen
+        // with no filtering, so its texels crawl and its bright HDR details flicker whenever the camera turns (jitter that
+        // only shows while moving). Average a 4x4 grid across the pixel's footprint in direction space instead.
+        float3 ray = input.worldRay;
+        float3 rayDx = ddx(ray);
+        float3 rayDy = ddy(ray);
+        float3 envSum = float3(0.0, 0.0, 0.0);
+        [unroll]
+        for (int y = 0; y < 4; y++)
+        {
+            [unroll]
+            for (int x = 0; x < 4; x++)
+            {
+                float2 offset = (float2(x, y) + 0.5) / 4.0 - 0.5;
+                float3 direction = normalize(ray + rayDx * offset.x + rayDy * offset.y);
+                envSum += texHandle.SampleLevel(sampHandle, direction, 0.0).rgb;
+            }
+        }
+        float3 envColor = (envSum / 16.0) * ubo->scaleIBLAmbient;
 
         output.color = float4(envColor, 1.0);
         output.entityID = -1;

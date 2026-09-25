@@ -91,7 +91,7 @@ namespace Nox
 
                 glm::mat4 viewProj = uniformData.proj * uniformData.view;
                 shaderio::PushConstantShadowMask shadowPush{};
-                shadowPush.invViewProj = glm::inverse(viewProj);
+                shadowPush.invViewProj = uniformData.invViewProj;
                 shadowPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
                 shadowPush.depthTextureIndex = context.Slot(res->Depth);
                 shadowPush.gbufferNormalIndex = context.Slot(res->GBufferNormal);
@@ -198,7 +198,7 @@ namespace Nox
 
                 glm::mat4 viewProj = uniformData.proj * uniformData.view;
                 shaderio::PushConstantReflection reflPush{};
-                reflPush.invViewProj = glm::inverse(viewProj);
+                reflPush.invViewProj = uniformData.invViewProj;
                 reflPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
                 reflPush.depthTextureIndex = context.Slot(res->Depth);
                 reflPush.gbufferNormalIndex = context.Slot(res->GBufferNormal);

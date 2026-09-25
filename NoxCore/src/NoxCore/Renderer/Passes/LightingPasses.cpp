@@ -130,7 +130,7 @@ namespace Nox
 
                 glm::mat4 viewProj = uniformData.proj * uniformData.view;
                 shaderio::PushConstantPathTracer ptPush{};
-                ptPush.invViewProj = glm::inverse(viewProj);
+                ptPush.invViewProj = uniformData.invViewProj;
                 ptPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
                 ptPush.viewportSize = glm::vec2(rw, rh);
                 ptPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
@@ -343,7 +343,7 @@ namespace Nox
 
                 glm::mat4 viewProj = uniformData.proj * uniformData.view;
                 shaderio::PushConstantDeferredLighting lightingPush{};
-                lightingPush.invViewProj = glm::inverse(viewProj);
+                lightingPush.invViewProj = uniformData.invViewProj;
                 lightingPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
                 lightingPush.visibilityTextureIndex = context.Slot(res->Visibility);
                 lightingPush.gbufferAlbedoIndex = context.Slot(res->GBufferAlbedo);

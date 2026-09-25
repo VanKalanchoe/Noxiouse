@@ -23,7 +23,7 @@ namespace Nox
         void OnEvent(Event& e);
 
         inline float GetDistance() const { return m_Distance; }
-        inline void SetDistance(float distance) { m_Distance = distance; }
+        inline void SetDistance(float distance) { m_Distance = m_TargetDistance = distance; }
 
         inline void SetViewportSize(float width, float height) { m_ViewportWidth = width; m_ViewportHeight = height; UpdateProjection(); }
 
@@ -68,6 +68,13 @@ namespace Nox
         glm::vec2 m_InitialMousePosition = { 0.0f, 0.0f };
 
         float m_Distance = 10.0f;
+        // Mouse input moves these; OnUpdate eases the real values towards them over a few frames. The mouse reports at
+        // 125-1000 Hz, far below the frame rate of a light scene, so most frames saw no movement and a few saw all of it --
+        // fast camera motion stuttered in bursts. Time-based easing turns that into steady motion.
+        glm::vec3 m_TargetFocalPoint = { 0.0f, 0.0f, 0.0f };
+        float m_TargetDistance = 10.0f;
+        float m_TargetPitch = 0.0f, m_TargetYaw = 0.0f;
+        bool m_TargetsValid = false;
         float m_Pitch = 0.0f, m_Yaw = 0.0f;
 
         float m_ViewportWidth = 1280, m_ViewportHeight = 720;

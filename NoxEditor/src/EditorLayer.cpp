@@ -142,11 +142,16 @@ namespace Nox
         if (m_ViewportSize.x > 0.0f && m_ViewportSize.y > 0.0f)
         {
             // Verify if the viewport has a new size and resize the RenderTarget accordingly.
+            // Whole pixels: the panel's size is a float (docking and DPI scaling make it fractional), and comparing it with
+            // the renderer's integer size was never equal, so the viewport "changed" every frame and the renderer rebuilt
+            // its targets, dropped every history and flushed the GPU again and again (every ~120 ms), which showed up as
+            // jitter while the camera moved -- timings looked fine because the profiler stats reset with each rebuild.
+            const NRI::Extent2D wantedSize{ static_cast<uint32_t>(m_ViewportSize.x), static_cast<uint32_t>(m_ViewportSize.y) };
             NRI::Extent2D viewportSize = m_Renderer->getViewPortSize();
-            if (m_ViewportSize.x != viewportSize.width || m_ViewportSize.y != viewportSize.height)
+            if (wantedSize.width != viewportSize.width || wantedSize.height != viewportSize.height)
             {
-                m_Renderer->onViewportSizeChange({m_ViewportSize.x, m_ViewportSize.y});
-                m_EditorCamera.SetViewportSize(m_ViewportSize.x, m_ViewportSize.y);
+                m_Renderer->onViewportSizeChange(wantedSize);
+                m_EditorCamera.SetViewportSize(static_cast<float>(wantedSize.width), static_cast<float>(wantedSize.height));
             }
         }
 
@@ -407,7 +412,8 @@ namespace Nox
                 if (textureID)
                 {
                     // !!! This is where the RenderTarget image is displayed !!!
-                    ImGui::Image(textureID, viewportPanelSize);
+                    // Whole pixels, like the render target: a fractional size resamples the image by a fraction of a pixel.
+                    ImGui::Image(textureID, ImVec2(std::floor(viewportPanelSize.x), std::floor(viewportPanelSize.y)));
                 }
             }
                ImVec2 mousePos = ImGui::GetMousePos();
@@ -514,6 +520,11 @@ namespace Nox
                                 entityName = "Model";
                             Entity root = m_ActiveScene->CreateEntity(entityName);
                             root.AddComponent<ModelInstanceComponent>().Model = handle;
+                            {
+                                const float importScale = metadata.MeshSettings.ImportScale;
+                                if (importScale > 0.0f && importScale != 1.0f)
+                                    root.GetComponent<TransformComponent>().Scale = glm::vec3(importScale);
+                            }
                             AssetManager::RequestAsset(handle);
                             m_SceneHierarchyPanel.SetSelectedEntity(root);
                             m_PlacementPreview.Root = root;
@@ -579,6 +590,69 @@ namespace Nox
                             }
                         }
                     }
+                }
+
+                // Several assets dragged together (Ctrl+A in the Content Browser): every model lands under one group at the
+                // drop point, each at the place its file had it (per-mesh assets carry the file's instance transforms).
+                if (const ImGuiPayload* multiPayload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEMS"))
+                {
+                    const size_t count = multiPayload->DataSize / sizeof(AssetHandle);
+                    const AssetHandle* handles = static_cast<const AssetHandle*>(multiPayload->Data);
+
+                    glm::vec3 dropPoint(0.0f);
+                    const glm::vec2 viewportSize = m_ViewportBounds[1] - m_ViewportBounds[0];
+                    if (viewportSize.x > 0.0f && viewportSize.y > 0.0f)
+                    {
+                        const ImVec2 imguiMouse = ImGui::GetMousePos();
+                        const glm::vec2 ndc = {
+                            ((imguiMouse.x - m_ViewportBounds[0].x) / viewportSize.x) * 2.0f - 1.0f,
+                            1.0f - ((imguiMouse.y - m_ViewportBounds[0].y) / viewportSize.y) * 2.0f
+                        };
+                        const glm::mat4 inverseViewProjection = glm::inverse(m_EditorCamera.GetGizmoProjection() * m_EditorCamera.GetGizmoView());
+                        glm::vec4 nearPoint = inverseViewProjection * glm::vec4(ndc, -1.0f, 1.0f);
+                        glm::vec4 farPoint = inverseViewProjection * glm::vec4(ndc, 1.0f, 1.0f);
+                        nearPoint /= nearPoint.w;
+                        farPoint /= farPoint.w;
+                        const glm::vec3 rayOrigin = glm::vec3(nearPoint);
+                        const glm::vec3 rayDirection = glm::normalize(glm::vec3(farPoint - nearPoint));
+
+                        // Same plane as a single drop: through the origin, facing the editor camera.
+                        const glm::vec3 planeNormal = m_EditorCamera.GetForwardDirection();
+                        const float denominator = glm::dot(rayDirection, planeNormal);
+                        if (std::abs(denominator) > 0.0001f)
+                        {
+                            const float distance = glm::dot(-rayOrigin, planeNormal) / denominator;
+                            if (distance >= 0.0f)
+                                dropPoint = rayOrigin + rayDirection * distance;
+                        }
+                    }
+
+                    Entity group = m_ActiveScene->CreateEntity("Placed Assets");
+                    size_t placed = 0;
+                    for (size_t i = 0; i < count; ++i)
+                    {
+                        const AssetType type = AssetManager::GetAssetType(handles[i]);
+                        if (type != AssetType::Mesh && type != AssetType::StaticMesh)
+                            continue;
+
+                        const AssetMetadata& metadata = Project::GetActive()->GetEditorAssetManager()->GetMetadata(handles[i]);
+                        std::string entityName = metadata.FilePath.filename().stem().string();
+                        Entity root = m_ActiveScene->CreateEntity(entityName.empty() ? "Model" : entityName);
+                        auto& instance = root.AddComponent<ModelInstanceComponent>();
+                        instance.Model = handles[i];
+                        instance.AtFileLayout = true;
+                        if (metadata.MeshSettings.ImportScale > 0.0f)
+                            root.GetComponent<TransformComponent>().Scale = glm::vec3(metadata.MeshSettings.ImportScale);
+                        AssetManager::RequestAsset(handles[i]);
+                        root.SetParent(group);
+                        ++placed;
+                    }
+                    group.GetComponent<TransformComponent>().Translation = dropPoint;
+                    group.MarkTransformDirty();
+                    if (placed > 0)
+                        m_SceneHierarchyPanel.SetSelectedEntity(group);
+                    else
+                        m_ActiveScene->DestroyEntity(group);
                 }
                 ImGui::EndDragDropTarget();
             }
@@ -1845,8 +1919,21 @@ namespace Nox
                     };
                     m_StatusBarRefreshTime = ImGui::GetTime();
                 }
+                // Model imports cooking in the background (Do Not Combine): a progress bar until the last mesh is done.
+                const EditorAssetManager::ImportProgress import = Project::GetActive()->GetEditorAssetManager()->GetImportProgress();
+                if (import.Imports > 0)
+                {
+                    char overlay[64];
+                    if (import.Total == 0)
+                        snprintf(overlay, sizeof(overlay), "Importing: reading the file...");
+                    else
+                        snprintf(overlay, sizeof(overlay), "Importing meshes %u / %u", import.Done, import.Total);
+                    ImGui::ProgressBar(import.Total == 0 ? 0.0f : static_cast<float>(import.Done) / static_cast<float>(import.Total),
+                                       ImVec2(220.0f, 0.0f), overlay);
+                    ImGui::SameLine();
+                }
                 const StatusBarCounts& counts = m_StatusBarCounts;
-                if (counts.Loading == 0 && counts.Streaming == 0 && counts.BlasBuilds == 0)
+                if (counts.Loading == 0 && counts.Streaming == 0 && counts.BlasBuilds == 0 && import.Imports == 0)
                     ImGui::TextDisabled("Ready");
                 else
                     ImGui::Text("Loading %zu asset(s)  |  Streaming %zu texture(s)  |  %.1f MB to upload  |  %zu BLAS build(s) pending",

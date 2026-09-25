@@ -1,5 +1,6 @@
 #include "AnimationGraphNodes.h"
 
+#include <algorithm>
 #include <cmath>
 
 #include "NoxCore/Asset/AssetManager.h"
@@ -98,6 +99,135 @@ namespace Nox
             ctx.SetOutput(nodeIndex, 0, value);
         }
 
+        // True when every rule of a transition holds against the instance's parameters.
+        bool TransitionRulesHold(const std::vector<TransitionRule>& rules, const AnimGraphEvalData& data)
+        {
+            for (const TransitionRule& rule : rules)
+            {
+                const float parameter = NodeGraphValueToFloat(data.GetParameter(rule.Parameter, 0.0f));
+                const float value = NodeGraphValueToFloat(rule.Value);
+                bool holds = false;
+                switch (rule.Compare)
+                {
+                case TransitionCompare::Equal:        holds = std::abs(parameter - value) < 1e-4f; break;
+                case TransitionCompare::NotEqual:     holds = std::abs(parameter - value) >= 1e-4f; break;
+                case TransitionCompare::Greater:      holds = parameter > value; break;
+                case TransitionCompare::GreaterEqual: holds = parameter >= value; break;
+                case TransitionCompare::Less:         holds = parameter < value; break;
+                case TransitionCompare::LessEqual:    holds = parameter <= value; break;
+                case TransitionCompare::IsTrue:       holds = parameter != 0.0f; break;
+                case TransitionCompare::IsFalse:      holds = parameter == 0.0f; break;
+                }
+                if (!holds)
+                    return false;
+            }
+            return true;
+        }
+
+        // A state machine's running state, kept in the node's GraphEvalContext slot: one evaluation context per state (each
+        // state's own playheads), which state is active and, during a transition, which one it is blending to.
+        struct StateMachineRuntime
+        {
+            std::vector<GraphEvalContext> States;
+            int Current = -1;
+            int Next = -1;
+            float Elapsed = 0.0f;
+            float Duration = 0.0f;
+            bool EaseInOut = true;
+        };
+
+        // The State Machine node: outputs the active state's pose, and while a transition runs the blend of the old and
+        // new state (each evaluated every frame, blended by the eased progress). Transitions are checked in order from
+        // the active state; the first whose rules hold starts. The entered state starts from its beginning.
+        // Properties: "EntryState" (int32, the NodeSubGraph::Id the machine starts in).
+        void EvaluateStateMachine(GraphEvalContext& ctx, uint32_t nodeIndex)
+        {
+            auto* data = static_cast<AnimGraphEvalData*>(ctx.UserData);
+            const CompiledNode& node = ctx.Graph().Nodes[nodeIndex];
+            AnimPose result;
+            if (!data || !data->TargetSkeleton || node.SubGraphs.empty())
+            {
+                ctx.SetOutput(nodeIndex, 0, std::move(result));
+                return;
+            }
+
+            StateMachineRuntime& runtime = ctx.GetState<StateMachineRuntime>(nodeIndex);
+            auto indexOfState = [&](uint32_t id) -> int
+            {
+                for (size_t i = 0; i < node.SubGraphs.size(); ++i)
+                {
+                    if (node.SubGraphs[i].Id == id)
+                        return static_cast<int>(i);
+                }
+                return -1;
+            };
+
+            if (runtime.States.size() != node.SubGraphs.size())
+            {
+                runtime.States.assign(node.SubGraphs.size(), GraphEvalContext{});
+                for (size_t i = 0; i < node.SubGraphs.size(); ++i)
+                    runtime.States[i].Init(node.SubGraphs[i].Graph);
+                const int entry = indexOfState(static_cast<uint32_t>(ctx.GetProperty<int32_t>(nodeIndex, "EntryState", 0)));
+                runtime.Current = entry >= 0 ? entry : 0;
+                runtime.Next = -1;
+            }
+
+            if (runtime.Next < 0)
+            {
+                for (const NodeTransition& transition : node.Transitions)
+                {
+                    if (indexOfState(transition.FromState) != runtime.Current || !TransitionRulesHold(transition.Rules, *data))
+                        continue;
+                    const int to = indexOfState(transition.ToState);
+                    if (to < 0 || to == runtime.Current)
+                        continue;
+
+                    runtime.Next = to;
+                    runtime.Elapsed = 0.0f;
+                    runtime.Duration = std::max(transition.Duration, 0.0f);
+                    runtime.EaseInOut = transition.EaseInOut;
+                    runtime.States[to].Init(node.SubGraphs[to].Graph); // starts from its beginning
+                    break;
+                }
+            }
+
+            auto evaluateState = [&](int index, AnimPose& out)
+            {
+                GraphEvalContext& state = runtime.States[index];
+                const CompiledGraph& graph = node.SubGraphs[index].Graph;
+                state.UserData = ctx.UserData;
+                EvaluateGraph(state, graph);
+                out = state.GetInput<AnimPose>(graph.OutputNodeIndex, 0);
+            };
+
+            AnimPose current;
+            evaluateState(runtime.Current, current);
+            if (runtime.Next >= 0)
+            {
+                AnimPose next;
+                evaluateState(runtime.Next, next);
+
+                runtime.Elapsed += data->DeltaTime;
+                const float t = runtime.Duration > 0.0f ? glm::clamp(runtime.Elapsed / runtime.Duration, 0.0f, 1.0f) : 1.0f;
+                const float weight = runtime.EaseInOut ? t * t * (3.0f - 2.0f * t) : t;
+                if (current.LocalTransforms.empty() || next.LocalTransforms.empty())
+                    result = current.LocalTransforms.empty() ? std::move(next) : std::move(current);
+                else
+                    BlendPoses(current, next, weight, result);
+
+                if (t >= 1.0f)
+                {
+                    runtime.Current = runtime.Next;
+                    runtime.Next = -1;
+                }
+            }
+            else
+            {
+                result = std::move(current);
+            }
+            ctx.SetOutput(nodeIndex, 0, std::move(result));
+        }
+
         // Sink: no outputs. AnimationGraphInstance reads the graph's result with
         // ctx.GetInput<AnimPose>(compiled.OutputNodeIndex, 0) after EvaluateGraph, so this has nothing to do.
         void EvaluateOutput(GraphEvalContext&, uint32_t) {}
@@ -142,6 +272,21 @@ namespace Nox
             /* PropertyAssetTypeHints */ {},
             /* PropertyRanges    */ {},
             /* Evaluate          */ &EvaluateGetParameter
+        });
+
+        // Its states are its sub graphs (each ends in its own Output node) and the transitions between them; both live
+        // on the node, not in properties (NodeGraph::GraphNode::SubGraphs / Transitions). No editor UI for them yet.
+        NodeTypeRegistry::Register({
+            /* TypeName          */ "StateMachine",
+            /* Domain            */ kAnimationGraphDomain,
+            /* Category          */ "State Machines",
+            /* Inputs            */ {},
+            /* Outputs           */ { { "Pose", "Pose" } },
+            /* DefaultProperties */ { { "EntryState", int32_t(0) } },
+            /* PropertyAssetTypeHints */ {},
+            /* PropertyRanges    */ {},
+            /* Evaluate          */ &EvaluateStateMachine,
+            /* OwnsSubGraphs     */ true
         });
 
         NodeTypeRegistry::Register({

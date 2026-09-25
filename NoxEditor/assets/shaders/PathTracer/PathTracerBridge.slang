@@ -81,14 +81,17 @@ namespace Bridge
         float2 ndc_xy = float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
 
         // Near plane in Reverse-Z is 1.0
-        float4 nearPosH = mul(pc.invViewProj, float4(ndc_xy, 1.0, 1.0));
+        // A point 1000x the near distance away along the ray (reverse-Z depth 0.001, not the near plane): subtracting the
+        // camera position from a near-plane point (0.01 units away) cancelled away most float digits, so the ray direction
+        // wobbled by up to a pixel between frames while the camera moved.
+        float4 nearPosH = mul(pc.invViewProj, float4(ndc_xy, 0.001, 1.0));
         float3 nearPos = nearPosH.xyz / nearPosH.w;
 
         float3 rayOrigin = ubo->cameraWorldPos.xyz;
         float3 rayDir = normalize(nearPos - rayOrigin);
 
         float2 adjacentNdc = ndc_xy + float2(2.0 / pc.viewportSize.x, 0.0);
-        float4 adjacentH = mul(pc.invViewProj, float4(adjacentNdc, 1.0, 1.0));
+        float4 adjacentH = mul(pc.invViewProj, float4(adjacentNdc, 0.001, 1.0));
         float3 adjacentDir = normalize(adjacentH.xyz / adjacentH.w - rayOrigin);
         pixelSpreadAngle = acos(clamp(dot(rayDir, adjacentDir), -1.0, 1.0));
 

@@ -139,6 +139,18 @@ namespace Nox
             compiled.Type = types[sourceIndex];
             compiled.SourceNodeId = graph.Nodes[sourceIndex].Id;
             compiled.Properties = graph.Nodes[sourceIndex].Properties;
+            compiled.Transitions = graph.Nodes[sourceIndex].Transitions;
+            for (const NodeSubGraph& subGraph : graph.Nodes[sourceIndex].SubGraphs)
+            {
+                CompiledSubGraph compiledSub{ subGraph.Id, subGraph.Name, Compile(subGraph.Graph) };
+                if (!compiledSub.Graph.IsValid())
+                {
+                    NOX_CORE_ERROR("GraphCompiler::Compile - sub graph '{}' of node {} in graph '{}' does not compile", subGraph.Name,
+                                   graph.Nodes[sourceIndex].Id, graph.Domain);
+                    return CompiledGraph{};
+                }
+                compiled.SubGraphs.push_back(std::move(compiledSub));
+            }
             compiled.Inputs.resize(compiled.Type->Inputs.size());
             compiled.OutputSlotBase = nextOutputSlot;
             nextOutputSlot += (uint32_t)compiled.Type->Outputs.size();

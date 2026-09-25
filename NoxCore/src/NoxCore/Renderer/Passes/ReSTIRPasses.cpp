@@ -860,7 +860,7 @@ namespace Nox
                 }
 
                 shaderio::PushConstantReSTIRPTInitial ptiPush{};
-                ptiPush.invViewProj = glm::inverse(ptViewProj);
+                ptiPush.invViewProj = uniformData.invViewProj;
                 ptiPush.cameraWorldPos = uniformData.cameraWorldPos;
                 ptiPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
                 ptiPush.lightDataReference = uniformData.lightDataReference;
@@ -994,7 +994,7 @@ namespace Nox
                                          NRI::ColorComponent::B | NRI::ColorComponent::A);
 
                 shaderio::PushConstantReSTIRPTFinalShading ptfPush{};
-                ptfPush.invViewProj = glm::inverse(ptViewProj);
+                ptfPush.invViewProj = uniformData.invViewProj;
                 ptfPush.cameraWorldPos = uniformData.cameraWorldPos;
                 ptfPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
                 ptfPush.lightDataReference = uniformData.lightDataReference;

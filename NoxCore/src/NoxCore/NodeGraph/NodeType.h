@@ -40,6 +40,8 @@ namespace Nox
         // clamped to it instead of an open-ended drag box. Absent = unbounded.
         std::unordered_map<std::string, std::pair<float, float>> PropertyRanges;
         NodeEvaluateFn Evaluate;
+        // The node owns sub graphs (GraphNode::SubGraphs) -- a state machine -- and an editor opens them on double-click.
+        bool OwnsSubGraphs = false;
     };
 
     // Process-wide registry of node types, shared by every domain. Domain-agnostic: it only stores and looks up

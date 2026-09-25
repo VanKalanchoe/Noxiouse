@@ -9,6 +9,7 @@
 
 #include "NodeGraphPropertyEditor.h"
 #include "NoxCore/Asset/Asset.h"
+#include "NoxCore/Animation/AnimationGraphNodes.h"
 #include "NoxCore/Asset/EditorAssetManager.h"
 #include "NoxCore/NodeGraph/NodeType.h"
 #include "NoxCore/Project/Project.h"
@@ -45,6 +46,7 @@ namespace Nox
             if (category == "Blending") return IM_COL32(170, 110, 40, 255); // orange
             if (category == "Sinks")    return IM_COL32(55, 135, 90, 255);  // green
             if (category == "Inputs")   return IM_COL32(130, 75, 150, 255); // purple
+            if (category == "State Machines") return IM_COL32(150, 60, 60, 255); // red
             return IM_COL32(90, 90, 90, 255);
         }
 
@@ -64,15 +66,18 @@ namespace Nox
         // separate settings file next to the executable.
         config.SettingsFile = nullptr;
         m_Context = ed::CreateEditor(&config);
+        m_StateContext = ed::CreateEditor(&config);
     }
 
     ThedmdCanvasBackend::~ThedmdCanvasBackend()
     {
         if (m_Context)
             ed::DestroyEditor(m_Context);
+        if (m_StateContext)
+            ed::DestroyEditor(m_StateContext);
     }
 
-    void ThedmdCanvasBackend::Draw(NodeGraph& graph, const std::function<void()>& onGraphEdited)
+    void ThedmdCanvasBackend::Draw(NodeGraph& graph, const std::function<void()>& onGraphEdited, uint32_t* outOpenNode)
     {
         ed::SetCurrentEditor(m_Context);
         ed::Begin("Canvas");
@@ -93,6 +98,19 @@ namespace Nox
 
         HandleLinkCreation(graph, onGraphEdited);
         HandleDeletion(graph, onGraphEdited);
+
+        // Double-clicking a node that owns sub graphs (a state machine) asks the panel to open its state view.
+        if (outOpenNode)
+        {
+            const ed::NodeId doubleClicked = ed::GetDoubleClickedNode();
+            if (doubleClicked)
+            {
+                GraphNode* clickedNode = FindNodeById(graph, static_cast<uint32_t>(doubleClicked.Get()));
+                const NodeTypeDesc* clickedType = clickedNode ? TypeOf(graph, *clickedNode) : nullptr;
+                if (clickedType && clickedType->OwnsSubGraphs)
+                    *outOpenNode = clickedNode->Id;
+            }
+        }
 
         if (m_FitViewOnNextFrame && !graph.Nodes.empty())
         {
@@ -203,11 +221,24 @@ namespace Nox
             ImGui::EndGroup();
         }
 
-        if (!node.Properties.empty())
+        if (type.OwnsSubGraphs)
+        {
+            ImGui::TextDisabled("%zu states", node.SubGraphs.size());
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Double-click to edit the states and transitions");
+        }
+
+        // Properties a state machine sets from its own view are not drawn; a separator with nothing under it would stretch
+        // the node to the canvas width.
+        const bool hasVisibleProperties = std::any_of(node.Properties.begin(), node.Properties.end(),
+            [&](const auto& property) { return !(type.OwnsSubGraphs && property.first == "EntryState"); });
+        if (hasVisibleProperties)
         {
             ImGui::Separator();
             for (auto& [name, value] : node.Properties)
             {
+                if (type.OwnsSubGraphs && name == "EntryState")
+                    continue; // set from the state view
                 if (uint64_t* handle = std::get_if<uint64_t>(&value))
                 {
                     auto hintIt = type.PropertyAssetTypeHints.find(name);
@@ -601,5 +632,237 @@ namespace Nox
     const NodeTypeDesc* ThedmdCanvasBackend::TypeOf(const NodeGraph& graph, const GraphNode& node)
     {
         return NodeTypeRegistry::Find(graph.Domain, node.TypeName);
+    }
+
+    void ThedmdCanvasBackend::ResetView()
+    {
+        m_SeededPositions.clear();
+        m_SeededStatePositions.clear();
+        m_FitViewOnNextFrame = true;
+        m_FitStatesOnNextFrame = true;
+    }
+
+    namespace
+    {
+        // A state's pins: id = state id * 2 (+1 for the output side), so an id decodes back to (state, side).
+        // Nodes, pins and links share one numeric id space in the node editor: states use their own ids, pins 2^32 + .., links 2^33 + ..
+        constexpr uint64_t kStatePinBase = 1ull << 32;
+        constexpr uint64_t kStateLinkBase = 1ull << 33;
+        ed::PinId StateInputPin(uint32_t stateId) { return ed::PinId(kStatePinBase + static_cast<uint64_t>(stateId) * 2); }
+        ed::PinId StateOutputPin(uint32_t stateId) { return ed::PinId(kStatePinBase + static_cast<uint64_t>(stateId) * 2 + 1); }
+        uint32_t PinState(ed::PinId pin) { return static_cast<uint32_t>((pin.Get() - kStatePinBase) >> 1); }
+        bool PinIsOutput(ed::PinId pin) { return ((pin.Get() - kStatePinBase) & 1) != 0; }
+
+        NodeGraph MakeEmptyStateGraph(const std::string& domain)
+        {
+            if (domain == kAnimationGraphDomain)
+                return CreateEmptyAnimationGraph();
+            NodeGraph graph;
+            graph.Domain = domain;
+            return graph;
+        }
+    }
+
+    void ThedmdCanvasBackend::DrawStateMachine(GraphNode& machine, const NodeGraph& rootGraph, const std::function<void()>& onGraphEdited,
+                                               uint32_t& outOpenState, StateMachineSelection& selection)
+    {
+        constexpr ImVec2 kPinIconSize(16.0f, 16.0f);
+        const uint32_t entryState = static_cast<uint32_t>([&]
+        {
+            auto entry = machine.Properties.find("EntryState");
+            const int32_t* value = entry != machine.Properties.end() ? std::get_if<int32_t>(&entry->second) : nullptr;
+            return value ? *value : 0;
+        }());
+
+        ed::SetCurrentEditor(m_StateContext);
+        ed::Begin("States");
+
+        for (NodeSubGraph& state : machine.SubGraphs)
+        {
+            const ed::NodeId nodeId(state.Id);
+            if (m_SeededStatePositions.insert(state.Id).second)
+                ed::SetNodePosition(nodeId, ImVec2(state.EditorPosition.x, state.EditorPosition.y));
+
+            ed::BeginNode(nodeId);
+            ImGui::PushID("state");
+            ImGui::PushID(static_cast<int>(state.Id));
+
+            const bool isEntry = state.Id == entryState;
+            ImGui::TextUnformatted(state.Name.empty() ? "State" : state.Name.c_str());
+            const ImVec2 headerMin = ImGui::GetItemRectMin();
+            const ImVec2 headerMax = ImGui::GetItemRectMax();
+            ImGui::Dummy(ImVec2(0.0f, 4.0f));
+
+            ed::BeginPin(StateInputPin(state.Id), ed::PinKind::Input);
+            ax::Widgets::Icon(kPinIconSize, ax::Drawing::IconType::Circle, false, ImVec4(0.9f, 0.9f, 0.9f, 1.0f));
+            ed::EndPin();
+            ImGui::SameLine();
+            ImGui::TextDisabled(isEntry ? "entry" : "     ");
+            ImGui::SameLine();
+            ed::BeginPin(StateOutputPin(state.Id), ed::PinKind::Output);
+            ax::Widgets::Icon(kPinIconSize, ax::Drawing::IconType::Circle, false, ImVec4(0.9f, 0.9f, 0.9f, 1.0f));
+            ed::EndPin();
+
+            ImGui::PopID();
+            ImGui::PopID();
+            ed::EndNode();
+
+            if (ImGui::IsItemVisible())
+            {
+                ImDrawList* backgroundDrawList = ed::GetNodeBackgroundDrawList(nodeId);
+                const float pad = 8.0f;
+                backgroundDrawList->AddRectFilled(
+                    ImVec2(headerMin.x - pad, headerMin.y - pad), ImVec2(headerMax.x + pad, headerMax.y + pad),
+                    isEntry ? IM_COL32(55, 135, 90, 255) : IM_COL32(150, 60, 60, 255), ed::GetStyle().NodeRounding, ImDrawFlags_RoundCornersTop);
+            }
+
+            const ImVec2 position = ed::GetNodePosition(nodeId);
+            state.EditorPosition = { position.x, position.y };
+        }
+
+        for (size_t i = 0; i < machine.Transitions.size(); ++i)
+        {
+            const NodeTransition& transition = machine.Transitions[i];
+            ed::Link(ed::LinkId(kStateLinkBase + i), StateOutputPin(transition.FromState), StateInputPin(transition.ToState), ImVec4(1.0f, 1.0f, 1.0f, 1.0f), 2.0f);
+        }
+
+        // Connecting an output pin to another state's input makes a transition (rules are edited in the panel below).
+        if (ed::BeginCreate())
+        {
+            ed::PinId startPin, endPin;
+            if (ed::QueryNewLink(&startPin, &endPin))
+            {
+                uint32_t fromState = PinState(startPin);
+                uint32_t toState = PinState(endPin);
+                if (!PinIsOutput(startPin))
+                {
+                    std::swap(fromState, toState);
+                    std::swap(startPin, endPin);
+                }
+
+                if (PinIsOutput(startPin) == PinIsOutput(endPin) || fromState == toState)
+                {
+                    ed::RejectNewItem();
+                }
+                else if (ed::AcceptNewItem())
+                {
+                    NodeTransition transition;
+                    transition.FromState = fromState;
+                    transition.ToState = toState;
+                    // A transition with no rule fires the moment its state is active: start with the first parameter.
+                    if (!rootGraph.Parameters.empty())
+                        transition.Rules.push_back({ rootGraph.Parameters.front().Name, TransitionCompare::Greater, 0.0f });
+                    machine.Transitions.push_back(std::move(transition));
+                    onGraphEdited();
+                }
+            }
+        }
+        ed::EndCreate();
+
+        if (ed::BeginDelete())
+        {
+            ed::LinkId linkId;
+            std::vector<size_t> deletedTransitions;
+            while (ed::QueryDeletedLink(&linkId))
+            {
+                if (ed::AcceptDeletedItem() && linkId.Get() >= kStateLinkBase && linkId.Get() - kStateLinkBase < machine.Transitions.size())
+                    deletedTransitions.push_back(static_cast<size_t>(linkId.Get() - kStateLinkBase));
+            }
+
+            ed::NodeId nodeId;
+            std::vector<uint32_t> deletedStates;
+            while (ed::QueryDeletedNode(&nodeId))
+            {
+                if (ed::AcceptDeletedItem())
+                    deletedStates.push_back(static_cast<uint32_t>(nodeId.Get()));
+            }
+
+            if (!deletedTransitions.empty() || !deletedStates.empty())
+            {
+                std::sort(deletedTransitions.begin(), deletedTransitions.end(), std::greater<size_t>());
+                for (size_t index : deletedTransitions)
+                    machine.Transitions.erase(machine.Transitions.begin() + index);
+                for (uint32_t stateId : deletedStates)
+                {
+                    machine.SubGraphs.erase(std::remove_if(machine.SubGraphs.begin(), machine.SubGraphs.end(),
+                        [&](const NodeSubGraph& s) { return s.Id == stateId; }), machine.SubGraphs.end());
+                    machine.Transitions.erase(std::remove_if(machine.Transitions.begin(), machine.Transitions.end(),
+                        [&](const NodeTransition& t) { return t.FromState == stateId || t.ToState == stateId; }), machine.Transitions.end());
+                    m_SeededStatePositions.erase(stateId);
+                    if (stateId == entryState && !machine.SubGraphs.empty())
+                        machine.Properties["EntryState"] = static_cast<int32_t>(machine.SubGraphs.front().Id);
+                }
+                onGraphEdited();
+            }
+        }
+        ed::EndDelete();
+
+        // Selection and double-click, for the panel.
+        selection = StateMachineSelection{};
+        ed::LinkId selectedLink;
+        if (ed::GetSelectedLinks(&selectedLink, 1) > 0 && selectedLink.Get() >= kStateLinkBase && selectedLink.Get() - kStateLinkBase < machine.Transitions.size())
+            selection.Transition = static_cast<int>(selectedLink.Get() - kStateLinkBase);
+        ed::NodeId selectedNode;
+        if (ed::GetSelectedNodes(&selectedNode, 1) > 0)
+            selection.State = static_cast<uint32_t>(selectedNode.Get());
+
+        const ed::NodeId doubleClicked = ed::GetDoubleClickedNode();
+        if (doubleClicked)
+            outOpenState = static_cast<uint32_t>(doubleClicked.Get());
+
+        if (m_FitStatesOnNextFrame && !machine.SubGraphs.empty())
+        {
+            ed::NavigateToContent(0.0f);
+            m_FitStatesOnNextFrame = false;
+        }
+
+        ed::Suspend();
+
+        ed::NodeId contextNode;
+        if (ed::ShowNodeContextMenu(&contextNode))
+        {
+            m_ContextStateId = static_cast<uint32_t>(contextNode.Get());
+            ImGui::OpenPopup("StateContext");
+        }
+        if (ed::ShowBackgroundContextMenu())
+        {
+            m_AddStateScreenPos = ImGui::GetMousePos();
+            ImGui::OpenPopup("AddState");
+        }
+
+        if (ImGui::BeginPopup("StateContext"))
+        {
+            if (ImGui::MenuItem("Set as Entry State"))
+            {
+                machine.Properties["EntryState"] = static_cast<int32_t>(m_ContextStateId);
+                onGraphEdited();
+            }
+            ImGui::EndPopup();
+        }
+
+        if (ImGui::BeginPopup("AddState"))
+        {
+            if (ImGui::MenuItem("Add State"))
+            {
+                NodeSubGraph state;
+                for (const NodeSubGraph& existing : machine.SubGraphs)
+                    state.Id = std::max(state.Id, existing.Id);
+                state.Id += 1;
+                state.Name = "State " + std::to_string(state.Id);
+                state.Graph = MakeEmptyStateGraph(rootGraph.Domain);
+                const ImVec2 canvasPos = ed::ScreenToCanvas(m_AddStateScreenPos);
+                state.EditorPosition = { canvasPos.x, canvasPos.y };
+                if (machine.SubGraphs.empty())
+                    machine.Properties["EntryState"] = static_cast<int32_t>(state.Id);
+                machine.SubGraphs.push_back(std::move(state));
+                onGraphEdited();
+            }
+            ImGui::EndPopup();
+        }
+
+        ed::Resume();
+
+        ed::End();
+        ed::SetCurrentEditor(nullptr);
     }
 }
