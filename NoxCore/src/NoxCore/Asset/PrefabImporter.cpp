@@ -47,7 +47,7 @@ namespace Nox
         return prefab;
     }
 
-    bool PrefabImporter::SavePrefab(const Prefab& prefab, const std::filesystem::path& absolutePath)
+    std::string PrefabImporter::PrefabToText(const Prefab& prefab)
     {
         YAML::Emitter out;
         out << YAML::BeginMap;
@@ -65,10 +65,15 @@ namespace Nox
             out << YAML::BeginSeq << YAML::EndSeq;
         out << YAML::EndMap;
 
+        return out.c_str();
+    }
+
+    bool PrefabImporter::SavePrefab(const Prefab& prefab, const std::filesystem::path& absolutePath)
+    {
         std::ofstream fout(absolutePath);
         if (!fout)
             return false;
-        fout << out.c_str();
+        fout << PrefabToText(prefab);
         fout.close();
         return static_cast<bool>(fout);
     }

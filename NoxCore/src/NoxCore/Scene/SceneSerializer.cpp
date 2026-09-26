@@ -915,7 +915,7 @@ namespace Nox
         return YAML::Load(out.c_str());
     }
 
-    bool SceneSerializer::SerializePrefab(Scene& scene, const std::vector<Entity>& entities, const std::string& name, const std::filesystem::path& filepath)
+    std::string SceneSerializer::PrefabToText(Scene& scene, const std::vector<Entity>& entities, const std::string& name)
     {
         std::unordered_set<UUID> chosen;
         for (Entity entity : entities)
@@ -935,7 +935,7 @@ namespace Nox
                 tops.push_back(entity);
         }
         if (tops.empty())
-            return false;
+            return std::string();
 
         std::vector<Entity> written; // depth first, parents before children
         std::function<void(Entity)> collect = [&](Entity entity)
@@ -991,6 +991,35 @@ namespace Nox
             out << YAML::EndMap;
         }
 
+        // Script fields that point at an entity which does not end up in the file would point into the scene the prefab was made from: they are
+        // cleared in the file (the scene's entity keeps its reference).
+        std::unordered_set<UUID> inPrefab;
+        for (Entity entity : written)
+            inPrefab.insert(entity.GetUUID());
+        inPrefab.insert(rootID);
+        auto serializeEntry = [&](Entity entity)
+        {
+            if (!entity.HasComponent<ScriptComponent>())
+            {
+                SerializeEntity(out, scene, entity);
+                return;
+            }
+            auto& references = entity.GetComponent<ScriptComponent>().EntityReferences;
+            const auto saved = references;
+            for (auto& [className, fields] : references)
+            {
+                for (auto& [fieldName, reference] : fields)
+                {
+                    if (reference.IsModelNode() || reference.Entity == 0 || inPrefab.contains(reference.Entity))
+                        continue;
+                    NOX_CORE_INFO("Prefab '{}': {}.{} of '{}' points at an entity outside the prefab; it is cleared in the file", name, className, fieldName, entity.GetName());
+                    reference.Entity = 0;
+                }
+            }
+            SerializeEntity(out, scene, entity);
+            references = saved;
+        };
+
         for (Entity entity : written)
         {
             const bool isTop = std::find(tops.begin(), tops.end(), entity) != tops.end();
@@ -1000,15 +1029,23 @@ namespace Nox
                 auto& transform = entity.GetComponent<TransformComponent>();
                 const glm::vec3 original = transform.Translation;
                 transform.Translation = worldPosition(entity) - pivot;
-                SerializeEntity(out, scene, entity);
+                serializeEntry(entity);
                 transform.Translation = original;
             }
             else
             {
-                SerializeEntity(out, scene, entity);
+                serializeEntry(entity);
             }
         }
         out << YAML::EndSeq << YAML::EndMap;
+        return out.c_str();
+    }
+
+    bool SceneSerializer::SerializePrefab(Scene& scene, const std::vector<Entity>& entities, const std::string& name, const std::filesystem::path& filepath)
+    {
+        const std::string text = PrefabToText(scene, entities, name);
+        if (text.empty())
+            return false;
 
         std::error_code error;
         std::filesystem::create_directories(filepath.parent_path(), error);
@@ -1018,7 +1055,7 @@ namespace Nox
             NOX_CORE_ERROR("Failed to save prefab '{}': could not open the file", filepath.string());
             return false;
         }
-        fout << out.c_str();
+        fout << text;
         fout.close();
         if (!fout)
         {
@@ -1026,7 +1063,7 @@ namespace Nox
             return false;
         }
 
-        NOX_CORE_INFO("Saved prefab '{}' with {} entit{}", filepath.string(), written.size() + (synthesizedRoot ? 1 : 0), written.size() + (synthesizedRoot ? 1 : 0) == 1 ? "y" : "ies");
+        NOX_CORE_INFO("Saved prefab '{}'", filepath.string());
         return true;
     }
 

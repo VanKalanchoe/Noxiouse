@@ -75,6 +75,11 @@ namespace Nox
         // instances keep the differences they had.
         bool ApplyOverride(Scene& scene, Entity root, const OverrideEntry& entry);
 
+        // For an instance that sits inside another one (a nested instance): writes one of its changes into the OUTER prefab's text of it
+        // (its Overrides / Structure, or the variant's record of it) instead of the inner prefab; every instance of the outer prefab
+        // spawns again. Not offered for entities added below the nested instance.
+        bool ApplyOverrideToOuter(Scene& scene, Entity innerRoot, const OverrideEntry& entry);
+
         // Turns the instance into ordinary entities: the link to the prefab is cut and the spawned entities are saved with the
         // scene from now on (Unity's Unpack Completely).
         void Unpack(Scene& scene, Entity root);
@@ -83,6 +88,8 @@ namespace Nox
         // the variant adds attached below it. Editing it is editing an instance; SaveVariant writes the changes back into the variant.
         Entity LoadVariantForEditing(Scene& scene, const Prefab& variant);
         bool SaveVariant(Scene& scene, Entity root, Prefab& variant, const std::filesystem::path& absolutePath);
+        // What SaveVariant would write, without writing: `variant` gets the instance's changes and the entities attached below it.
+        bool BuildVariant(Scene& scene, Entity root, Prefab& variant);
 
         // Prefab Mode: the prefab's entities as ordinary entities of `scene` (each keeps its id from the file as its UUID, the
         // root is at the origin). Returns the root; entities whose parent is not in the file hang from it.

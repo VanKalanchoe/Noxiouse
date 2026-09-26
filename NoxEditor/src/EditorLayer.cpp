@@ -130,6 +130,8 @@ namespace Nox
 
     void EditorLayer::OnUpdate(Timestep ts)
     {
+        UpdatePrefabModeDirty();
+
         // Game scripts read the mouse only over the viewport and the keys only while it is the target: a click in the hierarchy
         // or a key typed in a text field is not the game's.
         Input::SetGameInputEnabled(m_ViewportFocused || m_ViewportHovered, m_ViewportHovered);
@@ -289,6 +291,7 @@ namespace Nox
 
         // Before the dockspace, which fits above it.
         UI_StatusBar();
+        UI_PrefabExitPrompt();
 
         // 1. Grab the style and save the default minimum size
         ImGuiStyle& style = ImGui::GetStyle();
@@ -1485,7 +1488,8 @@ namespace Nox
         if (m_PrefabMode.Active)
         {
             ImGui::SetCursorPos(ImVec2(10.0f, 10.0f));
-            ImGui::TextColored(ImVec4(0.45f, 0.7f, 1.0f, 1.0f), "Prefab Mode: %s%s", m_PrefabMode.Name.c_str(), m_PrefabMode.Variant ? " (variant)" : "");
+            ImGui::TextColored(ImVec4(0.45f, 0.7f, 1.0f, 1.0f), "Prefab Mode: %s%s%s", m_PrefabMode.Name.c_str(), m_PrefabMode.Variant ? " (variant)" : "",
+                               m_PrefabMode.Dirty ? "  *" : "");
             ImGui::SameLine();
             ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.35f, 0.55f, 1.0f));
             if (ImGui::Button("Save"))
@@ -1497,8 +1501,8 @@ namespace Nox
                 ExitPrefabMode();
             }
             ImGui::SameLine();
-            if (ImGui::Button("Exit (discard changes)"))
-                ExitPrefabMode();
+            if (ImGui::Button("Exit"))
+                RequestExitPrefabMode(); // asks first when there are unsaved changes
             ImGui::PopStyleColor();
         }
 
@@ -1891,6 +1895,16 @@ namespace Nox
             m_ContentBrowserPanel = CreateScope<ContentBrowserPanel>(Project::GetActive());
             m_ContentBrowserPanel->SetOpenAssetCallback([this](AssetHandle handle) { OpenAsset(handle); });
             m_ContentBrowserPanel->SetCreatePrefabCallback([this](UUID dragged, const std::filesystem::path& folder) { return CreatePrefab(dragged, folder); });
+            m_SceneHierarchyPanel.SetCreatePrefabCallback([this](UUID entity)
+            {
+                // Into the folder the Content Browser shows, like a prefab dragged into it.
+                if (m_ContentBrowserPanel)
+                {
+                    const AssetHandle created = CreatePrefab(entity, m_ContentBrowserPanel->CurrentFolder());
+                    if (created != 0)
+                        m_ContentBrowserPanel->ShowNewAsset(created);
+                }
+            });
             m_ContentBrowserPanel->SetCreateVariantCallback([this](AssetHandle base, const std::filesystem::path& folder) { return CreateVariant(base, folder); });
         }
     }
@@ -1932,7 +1946,11 @@ namespace Nox
         NOX_CORE_ASSERT(handle);
 
         if (m_PrefabMode.Active)
-            ExitPrefabMode();
+        {
+            // Asks first when the prefab has unsaved changes, then opens the scene.
+            RequestExitPrefabMode([this, handle]() { OpenScene(handle); });
+            return;
+        }
         if (m_SceneState != SceneState::Edit)
         {
             OnSceneStop();
@@ -2254,6 +2272,121 @@ namespace Nox
         }
         if (m_PrefabMode.ReturnScene)
             PrefabInstance::RespawnAll(*m_PrefabMode.ReturnScene, m_PrefabMode.Prefab);
+
+        // Saved: what is in the scene now is the reference.
+        m_PrefabMode.Snapshot = CurrentPrefabText();
+        m_PrefabMode.SnapshotTaken = !m_PrefabMode.Snapshot.empty();
+        m_PrefabMode.Dirty = false;
+    }
+
+    std::string EditorLayer::CurrentPrefabText()
+    {
+        if (!m_PrefabMode.Active)
+            return {};
+        Entity root = m_EditorScene->GetEntityByUUID(m_PrefabMode.Root);
+        if (!root)
+            return {};
+
+        if (m_PrefabMode.Variant)
+        {
+            Prefab variant;
+            variant.Name = m_PrefabMode.Name;
+            return PrefabInstance::BuildVariant(*m_EditorScene, root, variant) ? PrefabImporter::PrefabToText(variant) : std::string();
+        }
+        return SceneSerializer::PrefabToText(*m_EditorScene, { root }, m_PrefabMode.Name);
+    }
+
+    // Every frame in Prefab Mode: the reference text is taken once everything in the scene has spawned (an instance spawns a frame after
+    // it is placed, the ones inside it a frame later); after that the text is compared every few frames for the "modified" mark.
+    void EditorLayer::UpdatePrefabModeDirty()
+    {
+        if (!m_PrefabMode.Active)
+            return;
+
+        if (!m_PrefabMode.SnapshotTaken)
+        {
+            // A few frames pass first: components settle in their first updates (a camera takes the viewport's aspect ratio).
+            if (m_PrefabMode.FramesSinceCheck++ < 5)
+                return;
+            for (auto handle : m_EditorScene->GetAllEntitiesWith<PrefabInstanceComponent>())
+            {
+                if (!m_EditorScene->GetAllEntitiesWith<PrefabInstanceComponent>().get<PrefabInstanceComponent>(handle).Spawned)
+                    return;
+            }
+            m_PrefabMode.Snapshot = CurrentPrefabText();
+            m_PrefabMode.SnapshotTaken = !m_PrefabMode.Snapshot.empty();
+            m_PrefabMode.FramesSinceCheck = 0;
+            return;
+        }
+
+        if (++m_PrefabMode.FramesSinceCheck >= 20)
+        {
+            m_PrefabMode.FramesSinceCheck = 0;
+            m_PrefabMode.Dirty = CurrentPrefabText() != m_PrefabMode.Snapshot;
+        }
+    }
+
+    void EditorLayer::RequestExitPrefabMode(std::function<void()> afterwards)
+    {
+        if (!m_PrefabMode.Active)
+        {
+            if (afterwards)
+                afterwards();
+            return;
+        }
+
+        // Compared now, not by the last periodic check: a change made a moment ago counts.
+        const bool dirty = m_PrefabMode.SnapshotTaken && CurrentPrefabText() != m_PrefabMode.Snapshot;
+        if (!dirty)
+        {
+            ExitPrefabMode();
+            if (afterwards)
+                afterwards();
+            return;
+        }
+        m_AfterPrefabExit = std::move(afterwards);
+        m_ShowPrefabExitPrompt = true;
+    }
+
+    void EditorLayer::UI_PrefabExitPrompt()
+    {
+        if (m_ShowPrefabExitPrompt)
+        {
+            ImGui::OpenPopup("Unsaved prefab changes");
+            m_ShowPrefabExitPrompt = false;
+        }
+        if (!ImGui::BeginPopupModal("Unsaved prefab changes", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+            return;
+
+        ImGui::Text("'%s' has changes that are not saved.", m_PrefabMode.Name.c_str());
+        ImGui::Separator();
+        if (ImGui::Button("Save"))
+        {
+            SavePrefabMode();
+            ExitPrefabMode();
+            std::function<void()> afterwards = std::move(m_AfterPrefabExit);
+            m_AfterPrefabExit = nullptr;
+            ImGui::CloseCurrentPopup();
+            if (afterwards)
+                afterwards();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Don't Save"))
+        {
+            ExitPrefabMode();
+            std::function<void()> afterwards = std::move(m_AfterPrefabExit);
+            m_AfterPrefabExit = nullptr;
+            ImGui::CloseCurrentPopup();
+            if (afterwards)
+                afterwards();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel"))
+        {
+            m_AfterPrefabExit = nullptr;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
     }
 
     void EditorLayer::ExitPrefabMode()

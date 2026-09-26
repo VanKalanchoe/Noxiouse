@@ -45,6 +45,10 @@ namespace Nox
         static YAML::Node PrefabChangesToNode(const std::vector<PrefabPropertyOverride>& overrides, const std::vector<PrefabStructureChange>& structure,
                                               const std::vector<PrefabNestedChange>& nested);
 
+        // The text SerializePrefab would write (empty when there is nothing to write): Prefab Mode compares it with the text at the time it
+        // was opened to know whether the prefab was changed.
+        static std::string PrefabToText(Scene& scene, const std::vector<Entity>& entities, const std::string& name);
+
         // Writes a prefab file (.nprefab) from scene entities: one entity becomes the prefab root with its whole hierarchy, several
         // become the children of a new empty root named `name`, positioned relative to the first one. Modified nowhere: the scene
         // is left as it is. Returns false when the file cannot be written.

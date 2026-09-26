@@ -1268,7 +1268,7 @@ namespace Nox
         return root;
     }
 
-    bool PrefabInstance::SaveVariant(Scene& scene, Entity root, Prefab& variant, const std::filesystem::path& absolutePath)
+    bool PrefabInstance::BuildVariant(Scene& scene, Entity root, Prefab& variant)
     {
         if (!root || !root.HasComponent<PrefabInstanceComponent>())
             return false;
@@ -1287,6 +1287,119 @@ namespace Nox
         for (auto [child, parent] : attachedEntities(scene, root))
             appendAddedSubtree(scene, child, localIdOf(parent, root, *base), base->Root, entities);
         variant.Entities = std::make_shared<YAML::Node>(entities);
-        return PrefabImporter::SavePrefab(variant, absolutePath);
+        return true;
+    }
+
+    bool PrefabInstance::SaveVariant(Scene& scene, Entity root, Prefab& variant, const std::filesystem::path& absolutePath)
+    {
+        return BuildVariant(scene, root, variant) && PrefabImporter::SavePrefab(variant, absolutePath);
+    }
+
+    bool PrefabInstance::ApplyOverrideToOuter(Scene& scene, Entity innerRoot, const OverrideEntry& entry)
+    {
+        if (!innerRoot || !innerRoot.HasComponent<PrefabNodeComponent>() || !innerRoot.HasComponent<PrefabInstanceComponent>())
+            return false;
+        if (entry.Kind == OverrideEntry::EntryKind::AddedEntity)
+        {
+            NOX_CORE_WARN("An entity added below a nested instance cannot be applied to the outer prefab yet");
+            return false;
+        }
+
+        const PrefabNodeComponent placement = innerRoot.GetComponent<PrefabNodeComponent>();
+        Entity outer = scene.GetEntityByUUID(placement.Instance);
+        if (!outer || !outer.HasComponent<PrefabInstanceComponent>())
+            return false;
+        const AssetHandle outerHandle = outer.GetComponent<PrefabInstanceComponent>().Prefab;
+        Prefab* outerPrefab = AssetManager::FindLoadedAsset<Prefab>(outerHandle);
+        if (!outerPrefab)
+            return false;
+
+        // The instances take their differences first: the outer prefab's text is about to change.
+        CaptureOverrides(scene, outerHandle);
+
+        // The nested instance's changes as the outer prefab has them now: in its own text of it, else (the outer prefab is a variant and
+        // the instance belongs to its base) in the variant's record of it, else in the base's text.
+        std::vector<PrefabPropertyOverride> properties;
+        std::vector<PrefabStructureChange> structure;
+        std::vector<PrefabNestedChange> nested;
+        YAML::Node ownEntities = outerPrefab->Entities ? *outerPrefab->Entities : YAML::Node(YAML::NodeType::Sequence);
+        bool ownNode = false;
+        size_t ownIndex = 0;
+        for (size_t i = 0; i < ownEntities.size(); ++i)
+        {
+            if (ownEntities[i]["Entity"].as<uint64_t>() == placement.LocalId)
+            {
+                ownNode = true;
+                ownIndex = i;
+            }
+        }
+
+        if (ownNode)
+        {
+            if (const auto component = ownEntities[ownIndex]["PrefabInstanceComponent"])
+                SceneSerializer::ReadPrefabChanges(component, properties, structure, nested);
+        }
+        else
+        {
+            bool found = false;
+            for (const PrefabNestedChange& change : outerPrefab->Nested)
+            {
+                if (change.Entity == placement.LocalId)
+                {
+                    properties = change.Overrides;
+                    structure = change.Structure;
+                    nested = change.Nested;
+                    found = true;
+                }
+            }
+            if (!found)
+            {
+                for (const YAML::Node node : effectiveNodes(*outerPrefab))
+                {
+                    if (node["Entity"].as<uint64_t>() != placement.LocalId)
+                        continue;
+                    if (const auto component = node["PrefabInstanceComponent"])
+                        SceneSerializer::ReadPrefabChanges(component, properties, structure, nested);
+                    break;
+                }
+            }
+        }
+
+        // The change goes in (an earlier one for the same field is replaced).
+        if (entry.Kind == OverrideEntry::EntryKind::Property)
+        {
+            std::erase_if(properties, [&](const PrefabPropertyOverride& o) { return o.Entity == entry.Entity && o.Component == entry.Component && o.Field == entry.Field; });
+            properties.push_back({ entry.Entity, entry.Component, entry.Field, entry.Value });
+        }
+        else
+        {
+            const PrefabStructureChange::ChangeKind kind = entry.Kind == OverrideEntry::EntryKind::RemovedEntity ? PrefabStructureChange::ChangeKind::RemovedEntity
+                                                         : entry.Kind == OverrideEntry::EntryKind::RemovedComponent ? PrefabStructureChange::ChangeKind::RemovedComponent
+                                                                                                                    : PrefabStructureChange::ChangeKind::AddedComponent;
+            std::erase_if(structure, [&](const PrefabStructureChange& c) { return c.Kind == kind && c.Entity == entry.Entity && c.Component == entry.Component; });
+            structure.push_back({ kind, entry.Entity, entry.Component, entry.Kind == OverrideEntry::EntryKind::AddedComponent ? entry.Value : std::string() });
+        }
+
+        // Written back: into the outer prefab's own node (a new entity list: nothing is assigned over shared yaml data), or the variant's record.
+        const PrefabNestedChange record{ placement.LocalId, properties, structure, nested };
+        if (ownNode)
+        {
+            YAML::Node rebuilt(YAML::NodeType::Sequence);
+            for (size_t i = 0; i < ownEntities.size(); ++i)
+                rebuilt.push_back(i == ownIndex ? withNestedChange(ownEntities[i], record) : ownEntities[i]);
+            outerPrefab->Entities = std::make_shared<YAML::Node>(rebuilt);
+        }
+        else
+        {
+            std::erase_if(outerPrefab->Nested, [&](const PrefabNestedChange& c) { return c.Entity == placement.LocalId; });
+            outerPrefab->Nested.push_back(record);
+        }
+
+        const AssetMetadata metadata = Project::GetActive()->GetEditorAssetManager()->GetMetadata(outerHandle);
+        if (!PrefabImporter::SavePrefab(*outerPrefab, Project::GetActiveAssetDirectory() / metadata.FilePath))
+            NOX_CORE_ERROR("Could not write prefab '{}'", metadata.FilePath.generic_string());
+
+        RespawnAll(scene, outerHandle);
+        return true;
     }
 }

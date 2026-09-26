@@ -75,6 +75,11 @@ namespace Nox
         void OpenPrefabMode(AssetHandle handle);
         void SavePrefabMode();
         void ExitPrefabMode();
+        // Leaves Prefab Mode; with unsaved changes asks first (Save / Don't Save / Cancel) and then runs `afterwards` (opening a scene).
+        void RequestExitPrefabMode(std::function<void()> afterwards = {});
+        std::string CurrentPrefabText();
+        void UpdatePrefabModeDirty();
+        void UI_PrefabExitPrompt();
 
         // Any open node-graph editor window focused or hovered: the scene's shortcuts and picking must ignore input.
         bool AnyNodeGraphEditorWantsInput() const;
@@ -97,8 +102,15 @@ namespace Nox
             std::filesystem::path ReturnScenePath;
             UUID Root = 0;                         // the prefab's root entity in the prefab scene
             bool Variant = false;                  // a variant: the scene holds an instance of its base carrying the variant's changes
+            // Unsaved changes: the prefab's text once everything in the scene had spawned, against the text now.
+            std::string Snapshot;
+            bool SnapshotTaken = false;
+            bool Dirty = false;
+            int FramesSinceCheck = 0;
         };
         PrefabModeState m_PrefabMode;
+        bool m_ShowPrefabExitPrompt = false;
+        std::function<void()> m_AfterPrefabExit;
         
         Entity m_HoveredEntity;
 

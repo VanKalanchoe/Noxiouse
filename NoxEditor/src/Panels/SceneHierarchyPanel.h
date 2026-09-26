@@ -33,6 +33,8 @@ namespace Nox
         // Animator's Graph); EditorLayer decides what opening means per AssetType.
         void SetOpenAssetCallback(std::function<void(AssetHandle)> callback) { m_OpenAsset = std::move(callback); }
         // Model assets dropped from the Content Browser onto a folder row (folder path) or blank space (""): EditorLayer places them.
+        // "Create Prefab" in an entity's right-click menu: EditorLayer creates the prefab from it (or from the selection it is part of).
+        void SetCreatePrefabCallback(std::function<void(UUID)> callback) { m_CreatePrefabFromEntity = std::move(callback); }
         void SetPlaceAssetsCallback(std::function<void(const std::vector<AssetHandle>&, const std::string&)> callback) { m_PlaceAssets = std::move(callback); }
 
         ImVec2 left;
@@ -67,5 +69,6 @@ namespace Nox
         bool m_MaterialShowAll = false; // Material component: show every slot instead of just this entity's own submesh
         std::function<void(AssetHandle)> m_OpenAsset;
         std::function<void(const std::vector<AssetHandle>&, const std::string&)> m_PlaceAssets;
+        std::function<void(UUID)> m_CreatePrefabFromEntity;
     };
 }

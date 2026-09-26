@@ -208,6 +208,17 @@ namespace Nox
             }
         }
 
+        // An asset created from elsewhere (the hierarchy's Create Prefab): shown, selected, its name in rename mode.
+        if (m_PendingShowAsset != 0)
+        {
+            const AssetHandle created = m_PendingShowAsset;
+            m_PendingShowAsset = 0;
+            RefreshAssetTree();
+            m_Selected.clear();
+            m_Selected.insert(created);
+            BeginRename(created);
+        }
+
         // Create Variant (right-click on a prefab): the variant appears next to it and its name goes into rename mode.
         if (m_HasVariantRequest)
         {

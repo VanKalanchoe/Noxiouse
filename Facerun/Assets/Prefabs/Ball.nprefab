@@ -22,8 +22,8 @@ Entities:
       BodyType: Dynamic
       MotionQuality: Discrete
       Mass: 1
-      LinearDamping: 0.1
-      AngularDamping: 1
+      LinearDamping: 0.25
+      AngularDamping: 0.5
       GravityFactor: 1
       AllowSleeping: true
       IsSensor: false

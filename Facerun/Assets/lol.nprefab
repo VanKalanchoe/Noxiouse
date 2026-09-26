@@ -1,0 +1,10 @@
+Prefab: Empty Entity
+Root: 4908419140448934424
+Entities:
+  - Entity: 4908419140448934424
+    TagComponent:
+      Tag: Empty Entity
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]

@@ -540,6 +540,8 @@ namespace Nox
         bool entityDeleted = false;
         if (ImGui::BeginPopupContextItem())
         {
+            if (ImGui::MenuItem("Create Prefab") && m_CreatePrefabFromEntity)
+                m_CreatePrefabFromEntity(entity.GetUUID()); // this entity, or the selection when it is part of it
             if (ImGui::MenuItem("Delete Entity"))
             {
                 entityDeleted = true;
@@ -872,6 +874,18 @@ namespace Nox
                     }
                     if (ImGui::IsItemHovered())
                         ImGui::SetTooltip("Apply writes this change into the prefab: every instance takes it.");
+                    if (entity.HasComponent<PrefabNodeComponent>() && entry.Kind != Kind::AddedEntity)
+                    {
+                        // This instance sits inside another prefab: the change can also become part of THAT prefab's text of it.
+                        ImGui::SameLine();
+                        if (ImGui::SmallButton("Apply to Outer"))
+                        {
+                            PrefabInstance::ApplyOverrideToOuter(*m_Context, entity, entry);
+                            changedInstance = true;
+                        }
+                        if (ImGui::IsItemHovered())
+                            ImGui::SetTooltip("Writes this change into the prefab this instance is part of (its own prefab stays as it is).");
+                    }
                     ImGui::PopID();
                 }
                 if (!changedInstance && !overrides.empty() && ImGui::Button("Revert All"))

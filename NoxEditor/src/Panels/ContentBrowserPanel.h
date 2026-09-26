@@ -19,6 +19,14 @@ namespace Nox
         // Called with an asset's handle when it's double-clicked (or just created); EditorLayer decides what
         // opening means per AssetType, so this panel doesn't need to know about any editor window.
         void SetOpenAssetCallback(std::function<void(AssetHandle)> callback) { m_OpenAsset = std::move(callback); }
+        // The folder being shown (relative to the asset directory; empty for the root), and "this asset was just created": the browser
+        // shows it, selects it and puts its name into rename mode (next frame).
+        std::filesystem::path CurrentFolder() const
+        {
+            const std::filesystem::path relative = m_CurrentDirectory.lexically_relative(m_BaseDirectory);
+            return relative == "." ? std::filesystem::path() : relative;
+        }
+        void ShowNewAsset(AssetHandle handle) { m_PendingShowAsset = handle; }
         // Called when entities are dragged from the hierarchy onto the browser: creates the prefab in the given folder (relative
         // to the asset directory) and returns its handle, 0 on failure. The new asset then goes into rename mode.
         void SetCreatePrefabCallback(std::function<AssetHandle(UUID, const std::filesystem::path&)> callback) { m_CreatePrefab = std::move(callback); }
@@ -73,6 +81,7 @@ namespace Nox
         std::function<void(AssetHandle)> m_OpenAsset;
         std::function<AssetHandle(UUID, const std::filesystem::path&)> m_CreatePrefab;
         std::function<AssetHandle(AssetHandle, const std::filesystem::path&)> m_CreateVariant;
+        AssetHandle m_PendingShowAsset = 0;
         bool m_HasVariantRequest = false;
         AssetHandle m_VariantBase = 0;
         // Handled at the start of the next frame (the entry list must not change while it is being drawn).

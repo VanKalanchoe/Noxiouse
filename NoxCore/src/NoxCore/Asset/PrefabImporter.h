@@ -15,6 +15,9 @@ namespace Nox
         // AssetMetadata FilePath is relative to the project asset directory (.nprefab)
         static Ref<Prefab> ImportPrefab(AssetHandle handle, const AssetMetadata& metadata);
 
+        // The text of a prefab file (a variant with its base and its changes).
+        static std::string PrefabToText(const Prefab& prefab);
+
         // Writes the prefab's current content back to its file (a variant with its base and its changes).
         static bool SavePrefab(const Prefab& prefab, const std::filesystem::path& absolutePath);
 

@@ -11,6 +11,14 @@ AssetRegistry:
     FilePath: Models/Sphere/Materials/Sphere_Material_0_Instance_10259240139944286235.nmat
     SourceFilePath: Models/Sphere/Materials/Sphere_Material_0_Instance_10259240139944286235.nmat
     Type: AssetType::Material
+  - Handle: 2033450643673281839
+    FilePath: ddd.nprefab
+    SourceFilePath: ddd.nprefab
+    Type: AssetType::Prefab
+  - Handle: 2320929871626643658
+    FilePath: Models/BlenderBox/Meshes/SceneCamera.nprefab
+    SourceFilePath: Models/BlenderBox/Meshes/SceneCamera.nprefab
+    Type: AssetType::Prefab
   - Handle: 2611261257249010592
     FilePath: Models/BlenderBox/Meshes/Cube.nsmesh
     SourceFilePath: Models/BlenderBox/BlenderBox.glb
@@ -28,6 +36,10 @@ AssetRegistry:
   - Handle: 3309431264496079634
     FilePath: Prefabs/Bistro Environment.nprefab
     SourceFilePath: Prefabs/Bistro Environment.nprefab
+    Type: AssetType::Prefab
+  - Handle: 3850519122063966268
+    FilePath: New Prefab.nprefab
+    SourceFilePath: New Prefab.nprefab
     Type: AssetType::Prefab
   - Handle: 4161907531116903059
     FilePath: AnimationGraphs/Fox_Locomotion.nanimgraph
@@ -112,6 +124,14 @@ AssetRegistry:
     FilePath: Prefabs/BallBox.nprefab
     SourceFilePath: Prefabs/BallBox.nprefab
     Type: AssetType::Prefab
+  - Handle: 13958696170853745725
+    FilePath: EnvironmentMaps/shanghai_bund_4k_cube_bc6u.dds
+    SourceFilePath: EnvironmentMaps/shanghai_bund_4k_cube_bc6u.dds
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
   - Handle: 14478842509020943149
     FilePath: Models/Fox/Meshes/Fox_Survey.nanim
     SourceFilePath: Models/Fox/Meshes/Fox_Survey.nanim
@@ -120,9 +140,17 @@ AssetRegistry:
     FilePath: Models/Fox/Meshes/Fox_Walk.nanim
     SourceFilePath: Models/Fox/Meshes/Fox_Walk.nanim
     Type: AssetType::AnimationSequence
+  - Handle: 15897872714063868942
+    FilePath: lol.nprefab
+    SourceFilePath: lol.nprefab
+    Type: AssetType::Prefab
   - Handle: 16789595406821293292
     FilePath: Models/Fox/Materials/Fox_fox_material.nmat
     SourceFilePath: Models/Fox/Materials/Fox_fox_material.nmat
+    Type: AssetType::Material
+  - Handle: 17740100503127588797
+    FilePath: Models/Sphere/Materials/Sphere_Material_0_Instance_8791825873381034861.nmat
+    SourceFilePath: Models/Sphere/Materials/Sphere_Material_0_Instance_8791825873381034861.nmat
     Type: AssetType::Material
   - Handle: 17831513696398634384
     FilePath: Models/Sphere/Materials/Sphere_Material_0_Instance_16849778697578787442.nmat

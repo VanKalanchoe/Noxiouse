@@ -268,7 +268,7 @@ Missing script API this needs: `Input` mouse buttons, rigid body velocity/force,
 1. **Apply of a nested instance's change into the OUTER prefab.** A change made on an inner instance (the Weapon inside a placed Player) is kept on the outer instance (`Nested`); Apply on the inner instance's own Overrides list writes into the INNER prefab. Writing it into the outer prefab's text of the inner instance (its `PrefabInstanceComponent` Overrides/Structure/Nested) is not offered yet. (Found 2026-09-26, deliberately left when P6b was built.)
 2. Hierarchy right-click **Create Prefab...** menu variant (dragging into the Content Browser is the way today).
 3. Clearing script entity references that point outside the dragged set when a prefab is created (they keep their UUID).
-4. **Prefab Mode save prompt:** unsaved edits are lost silently on Exit or when another scene is opened.
+4. ~~Prefab Mode save prompt~~ **Built 2026-09-26 (untested):** Prefab Mode compares the prefab's text with the text taken once everything in its scene had spawned (`*` in the toolbar; periodic check every 20 frames, exact check when leaving); **Exit** and opening another scene ask Save / Don't Save / Cancel first.
 5. Re-parenting a spawned entity is not tracked as an override; entities attached directly below an instance root also show as `+ Entity`.
 6. Overrides on an instance's entity that was DELETED are dropped with it (only its name is remembered, and put back on Revert).
 7. Exported games need their own prefab lookup for `Scene.Instantiate` (it resolves paths through the editor asset registry).
