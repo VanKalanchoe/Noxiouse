@@ -1153,6 +1153,17 @@ struct PushConstantLine
     uint64_t lineDataReference;
     uint numOfElements;
 };
+struct PushConstantGrid
+{
+    uint64_t matrixReference;
+    float centerX;       // where the lines are centered (multiples of the large step around the camera)
+    float centerZ;
+    float smallStep;     // distance between two lines
+    float gridFadeSize;  // distance at which the grid has faded out
+    float decimals;      // fractional part of the division level: blends primary and secondary lines
+    int steps;           // every steps-th line is a primary line
+    int gridSize;        // lines each way from the center
+};
 struct LineData
 {
     vec3 p0;

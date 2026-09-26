@@ -10,6 +10,8 @@
 #include "NoxCore/Asset/Material.h"
 #include "NoxCore/Asset/MaterialSerializer.h"
 #include "NoxCore/Renderer/Mesh.h"
+#include "NoxCore/Core/WorldUnits.h"
+#include "NoxCore/Scene/EntityBounds.h"
 #include "NoxCore/Scene/ModelInstance.h"
 #include "NoxCore/Scene/Prefab.h"
 #include "NoxCore/Scene/PrefabInstance.h"
@@ -927,6 +929,18 @@ namespace Nox
             }
 
             bool scaleModified = DrawVec3Control("Scale", component.Scale, 1.0f);
+
+            // How big it really is (the meshes below this entity, with its scale): the check that a model came in at the right size.
+            {
+                const WorldBounds bounds = ComputeWorldBounds(*m_Context, entity);
+                if (bounds.Valid)
+                {
+                    const glm::vec3 size = bounds.Size();
+                    ImGui::TextDisabled("Size: %s x %s x %s", WorldUnits::Format(size.x).c_str(), WorldUnits::Format(size.y).c_str(), WorldUnits::Format(size.z).c_str());
+                    if (ImGui::IsItemHovered())
+                        ImGui::SetTooltip("Width x height x depth of the meshes of this entity and its children, in world axes.");
+                }
+            }
 
             bool modified = posModified || rotModified || scaleModified;
 

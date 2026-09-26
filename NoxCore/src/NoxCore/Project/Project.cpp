@@ -1,6 +1,7 @@
 #include "Project.h"
 
 #include "ProjectSerializer.h"
+#include "NoxCore/Core/WorldUnits.h"
 
 namespace Nox
 {
@@ -24,6 +25,7 @@ namespace Nox
         {
             project->m_ProjectDirectory = path.parent_path();
             s_ActiveProject = project;
+            WorldUnits::SetPerMeter(project->GetConfig().WorldUnitsPerMeter);
             std::shared_ptr<EditorAssetManager> editorAssetManager = std::make_shared<EditorAssetManager>();
             s_ActiveProject->m_AssetManager = editorAssetManager;
             editorAssetManager->DeserializeAssetRegistry();

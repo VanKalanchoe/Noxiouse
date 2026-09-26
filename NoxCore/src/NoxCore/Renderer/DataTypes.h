@@ -22,6 +22,10 @@ namespace Nox
         GeometryRange rtIndices; // flat triangle list for the BLAS build and hit shading
         uint32_t blasId = UINT32_MAX;
         uint32_t gpuSceneMesh = UINT32_MAX; // GPU scene mesh slot
+        // Local axis-aligned bounds of the vertices, worked out at upload (not saved): the editor's size readout and measuring use them.
+        glm::vec3 boundsMin{ 0.0f };
+        glm::vec3 boundsMax{ 0.0f };
+        bool hasBounds = false;
         
         uint32_t GetFirstMeshlet() const { return meshletDraws.offset; }
         uint32_t GetMeshletCount() const { return meshletDraws.count; }

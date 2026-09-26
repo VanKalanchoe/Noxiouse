@@ -8,15 +8,13 @@
 
 | # | Item | Notes |
 |---|---|---|
-| N3 | Prefab leftovers: hierarchy **Create Prefab** context menu (P2) and clearing script references that point outside the created prefab (P3) | **built 2026-09-26, untested**: right-click an entity -> Create Prefab (this entity, or the selection it is part of) into the folder the Content Browser shows, name in rename mode; script entity references that point outside the prefab are cleared in the file (logged), the scene keeps them |
+| N4 | **World units and world tools** (grid, snap, ortho views, measure, bounds readout, unit conversion at the boundaries, physics unit interface) | plan written 2026-09-26: `Units_And_World_Tools_Plan_2026.md`; decisions taken 2026-09-26 (cm, tools first); **U1 (WorldUnits) and the first part of U2 (Inspector size readout, snap toolbar) built, untested**; world grid (Godot port) + snap feedback line built, being tuned; next: Measure tool, reference figure, then U3 ortho views. Replaces the old E1 idea of a bare "model size in the import dialog" (that is phase U4 of the plan) |
 
 ## Prefabs (plan: `Prefab_Architecture_Plan_2026.md`, section 8)
 
 | # | Item |
 |---|---|
 | P1 | **Apply of a nested instance's change into the OUTER prefab** (today Apply on the inner instance writes into the inner prefab) |
-| P2 | Hierarchy right-click **Create Prefab...** menu (dragging into the Content Browser is the way today) |
-| P3 | Clear script entity references that point outside the dragged set when a prefab is created (they keep their UUID) |
 | P4 | Re-parenting a spawned entity is not tracked as an override; entities attached directly below an instance root also show as `+ Entity` |
 | P5 | Overrides on a deleted instance entity are dropped with it (only its name is remembered) |
 | P6 | Exported games need their own prefab lookup for `Scene.Instantiate` (it resolves paths through the editor asset registry) |
@@ -66,6 +64,8 @@
 - Rigid body interpolation (built 2026-09-26, tested by the user: works)
 
 ## Done (recent)
+
+- 2026-09-26: Hierarchy Create Prefab menu and clearing script references that point outside a new prefab (N3) -- tested by the user
 
 - 2026-09-26: Apply to Outer for nested instances (N2) -- tested by the user
 

@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <cstring>
 #include <cmath>
+#include <cstdio>
+#include <iterator>
+#include <unordered_set>
 #include <functional>
 #include <iostream>
 
@@ -18,6 +21,8 @@
 #include "NoxCore/Asset/SceneImporter.h"
 #include "NoxCore/Core/Application.h"
 #include "NoxCore/Core/Input.h"
+#include "NoxCore/Core/WorldUnits.h"
+#include "NoxCore/Scene/EntityBounds.h"
 #include "NoxCore/Events/InputEvents.h"
 #include "NoxCore/ImGui/ImGuiLayer.h"
 #include "NoxCore/Profiling/Profiler.h"
@@ -32,6 +37,15 @@
 
 namespace Nox
 {
+
+    namespace
+    {
+        // Unreal's snap steps: location in cm, rotation in degrees, scale as a factor.
+        constexpr float kLocationSnapsCm[] = { 1.0f, 5.0f, 10.0f, 50.0f, 100.0f, 500.0f, 1000.0f, 5000.0f, 10000.0f };
+        constexpr float kRotationSnaps[] = { 5.0f, 10.0f, 15.0f, 30.0f, 45.0f, 60.0f, 90.0f, 120.0f };
+        constexpr float kScaleSnaps[] = { 0.1f, 0.25f, 0.5f, 1.0f };
+    }
+
     EditorLayer::EditorLayer() : Layer("EditorLayer")
     {
         NOX_INFO("EditorLayer Start");
@@ -612,7 +626,7 @@ namespace Nox
                                     if (distance >= 0.0f)
                                     {
                                         auto& transform = m_PlacementPreview.Root.GetComponent<TransformComponent>();
-                                        transform.Translation = rayOrigin + rayDirection * distance;
+                                        transform.Translation = SnapLocation(rayOrigin + rayDirection * distance);
                                         m_PlacementPreview.Root.MarkTransformDirty();
                                     }
                                 }
@@ -658,7 +672,7 @@ namespace Nox
                         {
                             const float distance = glm::dot(-rayOrigin, planeNormal) / denominator;
                             if (distance >= 0.0f)
-                                dropPoint = rayOrigin + rayDirection * distance;
+                                dropPoint = SnapLocation(rayOrigin + rayDirection * distance);
                         }
                     }
 
@@ -694,21 +708,30 @@ namespace Nox
                 glm::mat4 worldTransform = selectedEntity.GetComponent<WorldTransformComponent>().WorldMatrix;
 
                 // Snapping
-                bool snap = Input::IsKeyPressed(SDL_SCANCODE_LCTRL);
-                float snapValue = 0.5f; // Snap to 0.5m for translation/scale
-                // Snap to 45 degrees for rotation
+                // The toolbar switch, inverted while Ctrl is held; the steps are the ones chosen there.
+                const bool snap = m_SnapEnabled != Input::IsKeyPressed(SDL_SCANCODE_LCTRL);
+                float snapValue = LocationSnapWorldUnits();
                 if (m_GizmoType == ImGuizmo::OPERATION::ROTATE)
-                {
-                    snapValue = 45.0f;
-                }
+                    snapValue = kRotationSnaps[m_RotationSnapIndex];
+                else if (m_GizmoType == ImGuizmo::OPERATION::SCALE)
+                    snapValue = kScaleSnaps[m_ScaleSnapIndex];
 
                 float snapValues[3] = {snapValue, snapValue, snapValue};
 
                 glm::mat4 deltaMatrix(1.0f);
-                
+                const glm::mat4 beforeManipulate = worldTransform;
+
                 ImGuizmo::Manipulate(glm::value_ptr(cameraView), glm::value_ptr(cameraProjection),
                                      static_cast<ImGuizmo::OPERATION>(m_GizmoType), ImGuizmo::LOCAL,
                                      glm::value_ptr(worldTransform), glm::value_ptr(deltaMatrix), snap ? snapValues : nullptr);
+
+                // Snapping feedback while a translation is dragged (the drag's start is the pose in its first frame).
+                const bool usingGizmo = ImGuizmo::IsUsing();
+                if (usingGizmo && !m_GizmoWasUsing)
+                    m_GizmoDragStart = beforeManipulate;
+                m_GizmoWasUsing = usingGizmo;
+                if (usingGizmo && snap && m_GizmoType == ImGuizmo::OPERATION::TRANSLATE)
+                    DrawTranslationSnapFeedback(cameraView, cameraProjection, worldTransform);
 
                 if (ImGuizmo::IsUsing())
                 {
@@ -746,6 +769,7 @@ namespace Nox
             ImGui::End(); // End viewport
             ImGui::PopStyleVar();
         }
+        UI_ViewportOverlay();
 
         // Extra ImGui windows can be added in OnImGuiRender() layer, like the demo window.
         // ImGui::ShowDemoWindow();
@@ -1682,6 +1706,13 @@ namespace Nox
                 m_GizmoType = ImGuizmo::OPERATION::SCALE;
             }
             break;
+        case SDL_SCANCODE_END:
+            {
+                // Unreal's "Snap to Floor".
+                if (Application::Get().GetLayer<ImGuiLayer>()->GetActiveWidgetID() == 0)
+                    SnapSelectionToFloor();
+                break;
+            }
         case SDL_SCANCODE_DELETE:
             {
                 if (Application::Get().GetLayer<ImGuiLayer>()->GetActiveWidgetID() == 0)
@@ -1776,6 +1807,9 @@ namespace Nox
         {
             m_Renderer->BeginScene(m_EditorCamera);
         }
+
+        if (m_SceneState != SceneState::Play && m_ShowGrid)
+            DrawWorldGrid();
 
         if (m_ShowPhysicsColliders)
         {
@@ -2018,6 +2052,209 @@ namespace Nox
     // Places model assets into the scene being edited at `point`, filed under `folder` ("" = the top level): a single asset is
     // one model instance, several use each asset's file layout (per-mesh assets) -- either way the instance turns into plain
     // flat entities once loaded. Used by the viewport (drop point on the ray) and the hierarchy panel (a folder row).
+    float EditorLayer::LocationSnapWorldUnits() const
+    {
+        return WorldUnits::FromCentimeters(kLocationSnapsCm[m_LocationSnapIndex]);
+    }
+
+    glm::vec3 EditorLayer::SnapLocation(const glm::vec3& point) const
+    {
+        if (!m_SnapEnabled)
+            return point;
+        const float step = LocationSnapWorldUnits();
+        return glm::round(point / step) * step;
+    }
+
+    // The snap switch and steps, floating at the top left of the viewport (its own window: a click on it is not a click in the scene).
+    void EditorLayer::UI_ViewportOverlay()
+    {
+        ImGui::SetNextWindowPos(ImVec2(m_ViewportBounds[0].x + 10.0f, m_ViewportBounds[0].y + 10.0f));
+        ImGui::SetNextWindowBgAlpha(0.65f);
+        const ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings |
+                                       ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoDocking;
+        if (!ImGui::Begin("##ViewportOverlay", nullptr, flags))
+        {
+            ImGui::End();
+            return;
+        }
+
+        ImGui::Checkbox("Snap", &m_SnapEnabled);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Snap moving, rotating, scaling and placing to the steps on the right. Hold Ctrl to switch it for one move.");
+
+        auto stepCombo = [](const char* id, int& index, const auto& values, const char* format, float width)
+        {
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(width);
+            char preview[32];
+            snprintf(preview, sizeof(preview), format, values[index]);
+            if (ImGui::BeginCombo(id, preview))
+            {
+                for (int i = 0; i < static_cast<int>(std::size(values)); ++i)
+                {
+                    char label[32];
+                    snprintf(label, sizeof(label), format, values[i]);
+                    if (ImGui::Selectable(label, i == index))
+                        index = i;
+                }
+                ImGui::EndCombo();
+            }
+        };
+        stepCombo("##locationSnap", m_LocationSnapIndex, kLocationSnapsCm, "%g cm", 90.0f);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Location step");
+        stepCombo("##rotationSnap", m_RotationSnapIndex, kRotationSnaps, "%g deg", 80.0f);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Rotation step");
+        stepCombo("##scaleSnap", m_ScaleSnapIndex, kScaleSnaps, "%g", 60.0f);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Scale step");
+
+        ImGui::SameLine();
+        ImGui::Checkbox("Grid", &m_ShowGrid);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("The world grid, with the cells of the location step");
+        ImGui::SameLine();
+        if (ImGui::SmallButton("To Floor"))
+            SnapSelectionToFloor();
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Drop the selection onto the surface below it (End)");
+
+        // How lengths are written (sizes in the Inspector, later the measure tool).
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(70.0f);
+        const char* displayNames[] = { "cm", "m", "auto" };
+        int display = static_cast<int>(WorldUnits::GetDisplayUnit());
+        if (ImGui::Combo("##displayUnit", &display, displayNames, 3))
+            WorldUnits::SetDisplayUnit(static_cast<WorldUnits::DisplayUnit>(display));
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Unit lengths are shown in");
+
+        ImGui::End();
+    }
+
+    void EditorLayer::DrawWorldGrid()
+    {
+        // Godot's editor grid (GridMesh.slang). Its smallest cell is one meter (Godot's 1 m) or the snap step when that is bigger, so a
+        // 10 cm snap does not turn the grid into a haze; the cell size does not change while you zoom (only in far jumps).
+        m_Renderer2D->DrawGrid(m_EditorCamera.GetPosition(), std::max(LocationSnapWorldUnits(), WorldUnits::FromMeters(1.0f)));
+    }
+
+    void EditorLayer::DrawTranslationSnapFeedback(const glm::mat4& view, const glm::mat4& projection, const glm::mat4& current)
+    {
+        // A measuring line from where the drag began to where the object is now, an end mark (a short bar across) at both ends and the
+        // distance in the middle. It grows while dragging and jumps by the snap step.
+        const glm::vec3 start = glm::vec3(m_GizmoDragStart[3]);
+        const glm::vec3 end = glm::vec3(current[3]);
+        const float distance = glm::length(end - start);
+        if (distance < LocationSnapWorldUnits() * 0.05f)
+            return;
+
+        const glm::mat4 viewProjection = projection * view;
+        const float width = m_ViewportBounds[1].x - m_ViewportBounds[0].x;
+        const float height = m_ViewportBounds[1].y - m_ViewportBounds[0].y;
+        auto project = [&](const glm::vec3& point, ImVec2& out) -> bool
+        {
+            const glm::vec4 clip = viewProjection * glm::vec4(point, 1.0f);
+            if (clip.w <= 0.05f)
+                return false;
+            const glm::vec2 ndc = glm::vec2(clip.x, clip.y) / clip.w;
+            out = ImVec2(m_ViewportBounds[0].x + (ndc.x * 0.5f + 0.5f) * width, m_ViewportBounds[0].y + (1.0f - (ndc.y * 0.5f + 0.5f)) * height);
+            return true;
+        };
+
+        ImVec2 a, b;
+        if (!project(start, a) || !project(end, b))
+            return;
+        ImVec2 direction(b.x - a.x, b.y - a.y);
+        const float length = std::sqrt(direction.x * direction.x + direction.y * direction.y);
+        if (length < 1.0f)
+            return;
+        direction = ImVec2(direction.x / length, direction.y / length);
+        const ImVec2 across(-direction.y * 9.0f, direction.x * 9.0f);
+
+        ImDrawList* draw = ImGui::GetWindowDrawList();
+        const ImU32 color = IM_COL32(255, 225, 70, 255);
+        draw->AddLine(a, b, color, 2.0f);
+        draw->AddLine(ImVec2(a.x - across.x, a.y - across.y), ImVec2(a.x + across.x, a.y + across.y), color, 2.0f);
+        draw->AddLine(ImVec2(b.x - across.x, b.y - across.y), ImVec2(b.x + across.x, b.y + across.y), color, 2.0f);
+
+        const std::string text = WorldUnits::Format(distance);
+        const ImVec2 size = ImGui::CalcTextSize(text.c_str());
+        const ImVec2 middle((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f);
+        const ImVec2 min(middle.x - size.x * 0.5f - 4.0f, middle.y - size.y * 0.5f - 2.0f);
+        const ImVec2 max(middle.x + size.x * 0.5f + 4.0f, middle.y + size.y * 0.5f + 2.0f);
+        draw->AddRectFilled(min, max, IM_COL32(0, 0, 0, 190), 3.0f);
+        draw->AddText(ImVec2(min.x + 4.0f, min.y + 2.0f), color, text.c_str());
+    }
+
+    void EditorLayer::SnapSelectionToFloor()
+    {
+        const auto& selection = m_SceneHierarchyPanel.GetSelectedEntities();
+        if (selection.empty())
+            return;
+
+        // The tops of the selection (an entity whose parent is selected moves with it) and everything below them: none of it is floor.
+        std::vector<Entity> tops;
+        for (Entity entity : selection)
+        {
+            if (!entity)
+                continue;
+            const bool parentSelected = entity.HasComponent<RelationshipComponent>() && entity.GetComponent<RelationshipComponent>().Parent != 0 &&
+                                        m_SceneHierarchyPanel.IsSelected(m_ActiveScene->GetEntityByUUID(entity.GetComponent<RelationshipComponent>().Parent));
+            if (!parentSelected)
+                tops.push_back(entity);
+        }
+        std::unordered_set<UUID> excluded;
+        std::function<void(Entity)> exclude = [&](Entity entity)
+        {
+            excluded.insert(entity.GetUUID());
+            if (!entity.HasComponent<RelationshipComponent>())
+                return;
+            for (UUID childID : entity.GetComponent<RelationshipComponent>().Children)
+            {
+                if (Entity child = m_ActiveScene->GetEntityByUUID(childID))
+                    exclude(child);
+            }
+        };
+        for (Entity top : tops)
+            exclude(top);
+
+        for (Entity top : tops)
+        {
+            const WorldBounds mover = ComputeWorldBounds(*m_ActiveScene, top);
+            if (!mover.Valid)
+                continue;
+            const float centreY = 0.5f * (mover.Min.y + mover.Max.y);
+
+            // The surface below: the highest top of another mesh that overlaps this one in the ground plane and lies below its middle
+            // (bounding boxes: right for floors, tables, boxes; a slope or a curved surface counts as its flat top).
+            float floorY = 0.0f; // nothing below: the world ground
+            bool found = false;
+            for (auto handle : m_ActiveScene->GetAllEntitiesWith<MeshComponent, WorldTransformComponent>())
+            {
+                Entity candidate(handle, m_ActiveScene.get());
+                if (excluded.contains(candidate.GetUUID()))
+                    continue;
+                const WorldBounds bounds = ComputeWorldBounds(*m_ActiveScene, candidate, false);
+                if (!bounds.Valid)
+                    continue;
+                const bool overlapsX = bounds.Min.x < mover.Max.x && bounds.Max.x > mover.Min.x;
+                const bool overlapsZ = bounds.Min.z < mover.Max.z && bounds.Max.z > mover.Min.z;
+                if (!overlapsX || !overlapsZ || bounds.Max.y > centreY)
+                    continue;
+                if (!found || bounds.Max.y > floorY)
+                {
+                    floorY = bounds.Max.y;
+                    found = true;
+                }
+            }
+
+            const float drop = floorY - mover.Min.y;
+            top.SetWorldTransform(glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, drop, 0.0f)) * top.GetComponent<WorldTransformComponent>().WorldMatrix);
+        }
+    }
+
     AssetHandle EditorLayer::CreateVariant(AssetHandle baseHandle, const std::filesystem::path& relativeFolder)
     {
         Ref<Prefab> base = AssetManager::GetAsset<Prefab>(baseHandle);

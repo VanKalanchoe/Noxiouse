@@ -82,6 +82,10 @@ namespace Nox
         void DrawString(const std::string& string, const glm::mat4& transform, const TextComponent& component, int entityID = -1);
         
         void DrawLine(const glm::vec3& p0, const glm::vec3& p1, const glm::vec4& color, int entityID = -1);
+        // One pixel wide (DrawLine's are thick): the editor's world grid, measuring lines. Same pass, depth tested.
+        void DrawThinLine(const glm::vec3& p0, const glm::vec3& p1, const glm::vec4& color);
+        // The editor's world grid on y = 0 (GridMesh.slang): computed per pixel, so it costs nothing per line. cell = smallest cell size.
+        void DrawGrid(const glm::vec3& cameraPosition, float cell);
         void DrawRect(const glm::vec3& position, const glm::vec2& size, const glm::vec4& color, int entityID = -1);
         void DrawRect(const glm::mat4& transform, const glm::vec4& color, int entityID = -1);
         
@@ -102,6 +106,7 @@ namespace Nox
         
         // Line
         void createLineMeshPipeline(bool forceCompile);
+        void createGridMeshPipeline(bool forceCompile);
         void createLineStorageBuffers();
 
     private:
@@ -126,6 +131,7 @@ namespace Nox
             
             // Line
             std::vector<shaderio::LineData> lineDatas;
+            std::vector<shaderio::LineData> thinLineDatas; // stored after the thick ones in the same buffer
             std::vector<std::unique_ptr<NRI::Buffer>> lineStorageBuffers;
             std::vector<void*> lineStorageBuffersMapped;
         };
@@ -139,5 +145,8 @@ namespace Nox
         std::unique_ptr<NRI::Pipeline> m_CircleMeshPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_TextMeshPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_LineMeshPipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_GridMeshPipeline = nullptr;
+        shaderio::PushConstantGrid m_Grid{};
+        bool m_GridDraw = false; // set by DrawGrid, one frame
     };   
 }

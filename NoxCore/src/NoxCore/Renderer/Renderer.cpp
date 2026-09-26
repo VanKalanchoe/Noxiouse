@@ -6,6 +6,7 @@
 #include <iostream>
 #include <algorithm> // Necessary for std::clamp
 #include <unordered_set>
+#include <cfloat>
 #include <chrono>
 #include <cmath>
 #include <fstream>
@@ -2338,6 +2339,19 @@ namespace Nox
 
         MeshUpload upload;
         upload.IsOpaque = isOpaque;
+        if (!data.Vertices.empty())
+        {
+            glm::vec3 lowest(FLT_MAX), highest(-FLT_MAX);
+            for (const shaderio::Vertex& vertex : data.Vertices)
+            {
+                const glm::vec3 position(vertex.pos.x, vertex.pos.y, vertex.pos.z);
+                lowest = glm::min(lowest, position);
+                highest = glm::max(highest, position);
+            }
+            upload.Handle.boundsMin = lowest;
+            upload.Handle.boundsMax = highest;
+            upload.Handle.hasBounds = true;
+        }
         const MeshStagingLayout layout = meshStagingLayout(vertCount, drawCount, meshVertCount, meshTriCount, rtIndexCount);
         if (layout.size > 0)
         {

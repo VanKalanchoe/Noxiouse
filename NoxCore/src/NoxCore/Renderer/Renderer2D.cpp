@@ -1,5 +1,8 @@
 #include "Renderer2D.h"
 
+#include <algorithm>
+#include <cmath>
+
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Core/Log.h"
 #include "MSDFData.h"
@@ -15,6 +18,7 @@ namespace Nox
         initRenderer2D();
 
         m_context.fileWatcher.watch(std::filesystem::path("assets/shaders/QuadMesh.slang"), [this](auto path) { m_reloadShader = true; });
+        m_context.fileWatcher.watch(std::filesystem::path("assets/shaders/GridMesh.slang"), [this](auto path) { m_reloadShader = true; });
     }
 
     Renderer2D::~Renderer2D()
@@ -39,6 +43,7 @@ namespace Nox
         // Text
         createLineMeshPipeline(false);
         createLineStorageBuffers();
+        createGridMeshPipeline(false);
     }
 
     // needed for pipeline management you cant run this inside a commandbuffer that already started
@@ -52,18 +57,28 @@ namespace Nox
             createCircleMeshPipeline(true);
             createTextMeshPipeline(true);
             createLineMeshPipeline(true);
+            createGridMeshPipeline(true);
             return m_reloadShader;
         }
 
         return m_reloadShader;
     }
     
+    namespace
+    {
+        constexpr size_t kMaxLines = 10000; // the line storage buffer holds this many, thick and thin together
+    }
+
     void Renderer2D::Update(uint32_t currentImage)
     {
         memcpy(m_data.quadStorageBuffersMapped[currentImage], m_data.quadDatas.data(), m_data.quadDatas.size() * sizeof(shaderio::QuadData));
         memcpy(m_data.circleStorageBuffersMapped[currentImage], m_data.circleDatas.data(), m_data.circleDatas.size() * sizeof(shaderio::CircleData));
         memcpy(m_data.textStorageBuffersMapped[currentImage], m_data.textDatas.data(), m_data.textDatas.size() * sizeof(shaderio::TextData));
-        memcpy(m_data.lineStorageBuffersMapped[currentImage], m_data.lineDatas.data(), m_data.lineDatas.size() * sizeof(shaderio::LineData));
+        const size_t thickCount = std::min(m_data.lineDatas.size(), kMaxLines);
+        const size_t thinCount = std::min(m_data.thinLineDatas.size(), kMaxLines - thickCount);
+        auto* lines = static_cast<shaderio::LineData*>(m_data.lineStorageBuffersMapped[currentImage]);
+        memcpy(lines, m_data.lineDatas.data(), thickCount * sizeof(shaderio::LineData));
+        memcpy(lines + thickCount, m_data.thinLineDatas.data(), thinCount * sizeof(shaderio::LineData));
     }
 
     // Runs inside a Begin rendering
@@ -111,6 +126,19 @@ namespace Nox
             commandBuffer.drawMeshTasks(1, 1, 1);
         }
         
+        // Grid (Godot's editor grid, see GridMesh.slang): real one pixel lines, one mesh shader group each
+        if (m_GridDraw)
+        {
+            commandBuffer.setLineWidth(1.0f);
+            commandBuffer.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_GridMeshPipeline);
+
+            shaderio::PushConstantGrid gridReferences = m_Grid;
+            gridReferences.matrixReference = currentUniformBuffer.getDeviceAddress();
+            commandBuffer.pushData(&gridReferences, sizeof(shaderio::PushConstantGrid));
+
+            commandBuffer.drawMeshTasks(1, 1, 1);
+        }
+
         // LineMesh
         if (!m_data.lineDatas.empty())
         {
@@ -120,10 +148,29 @@ namespace Nox
             shaderio::PushConstantLine circleReferences;
             circleReferences.matrixReference = currentUniformBuffer.getDeviceAddress();
             circleReferences.lineDataReference = m_data.lineStorageBuffers[frameIndex]->getDeviceAddress();
-            circleReferences.numOfElements = m_data.lineDatas.size();
+            circleReferences.numOfElements = std::min(m_data.lineDatas.size(), kMaxLines);
             commandBuffer.pushData(&circleReferences, sizeof(shaderio::PushConstantLine));
             
             commandBuffer.drawMeshTasks(1, 1, 1);
+        }
+
+        // Thin lines: the same pipeline drawn one pixel wide, from the same buffer behind the thick lines (an address offset).
+        {
+            const size_t thickCount = std::min(m_data.lineDatas.size(), kMaxLines);
+            const size_t thinCount = std::min(m_data.thinLineDatas.size(), kMaxLines - thickCount);
+            if (thinCount > 0)
+            {
+                commandBuffer.setLineWidth(1.0f);
+                commandBuffer.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_LineMeshPipeline);
+
+                shaderio::PushConstantLine thinReferences;
+                thinReferences.matrixReference = currentUniformBuffer.getDeviceAddress();
+                thinReferences.lineDataReference = m_data.lineStorageBuffers[frameIndex]->getDeviceAddress() + thickCount * sizeof(shaderio::LineData);
+                thinReferences.numOfElements = thinCount;
+                commandBuffer.pushData(&thinReferences, sizeof(shaderio::PushConstantLine));
+
+                commandBuffer.drawMeshTasks(1, 1, 1);
+            }
         }
     }
 
@@ -133,6 +180,8 @@ namespace Nox
         m_data.circleDatas.clear();
         m_data.textDatas.clear();
         m_data.lineDatas.clear();
+        m_data.thinLineDatas.clear();
+        m_GridDraw = false;
     }
 
     // Runs outside of any rendering call whenever you want
@@ -474,6 +523,21 @@ namespace Nox
         m_LineMeshPipeline = m_context.device.createPipeline(desc, m_context.shaderCompiler);
     }
     
+    void Renderer2D::createGridMeshPipeline(bool forceCompile)
+    {
+        NRI::PipelineDesc desc{};
+        desc.forceCompile = forceCompile;
+        desc.colorFormats =
+        {
+            NRI::ImageFormat::Surface,
+            NRI::ImageFormat::R32SINT
+        };
+        desc.shaders.push_back({ .stage = NRI::ShaderStage::Task, .entryPoint = "taskMain", .sourcePath = "assets/shaders/GridMesh.slang" });
+        desc.shaders.push_back({ .stage = NRI::ShaderStage::Mesh, .entryPoint = "meshMain", .sourcePath = "assets/shaders/GridMesh.slang" });
+        desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "fragMain", .sourcePath = "assets/shaders/GridMesh.slang" });
+        m_GridMeshPipeline = m_context.device.createPipeline(desc, m_context.shaderCompiler);
+    }
+
     void Renderer2D::createLineStorageBuffers()
     {
         uint64_t bufferSize = 10000 * sizeof(shaderio::LineData);
@@ -505,6 +569,50 @@ namespace Nox
         instance.entityID = entityID;
 
         m_data.lineDatas.emplace_back(instance);
+    }
+
+    // Godot's Node3DEditor::_init_grid with Godot's defaults (8 steps, levels 0..2, bias -0.2), the numbers it works out on the CPU.
+    // `cell` is the smallest step (Godot's 1 m): the cell size stays the same while you zoom, it only steps up 8x when the camera is
+    // far enough that the cells would be too small.
+    void Renderer2D::DrawGrid(const glm::vec3& cameraPosition, float cell)
+    {
+        constexpr int steps = 8;
+        constexpr int gridSize = 200;
+        constexpr float divisionLevelBias = -0.2f;
+        constexpr float divisionLevelMin = 0.0f;
+        constexpr float divisionLevelMax = 2.0f;
+
+        const float cameraDistance = std::max(std::abs(cameraPosition.y), 1e-6f);
+        const float divisionLevel = std::log(cameraDistance / cell) / std::log(static_cast<float>(steps)) + divisionLevelBias;
+        const float clampedLevel = std::clamp(divisionLevel, divisionLevelMin, divisionLevelMax);
+        const float flooredLevel = std::floor(clampedLevel);
+        const float decimals = clampedLevel - flooredLevel;
+
+        const float smallStep = cell * std::pow(static_cast<float>(steps), flooredLevel);
+        const float largeStep = smallStep * steps;
+
+        float fadeSize = cell * std::pow(static_cast<float>(steps), divisionLevel - 1.0f);
+        fadeSize = std::clamp(fadeSize, cell * std::pow(static_cast<float>(steps), divisionLevelMin), cell * std::pow(static_cast<float>(steps), divisionLevelMax));
+
+        m_Grid.centerX = largeStep * std::trunc(cameraPosition.x / largeStep);
+        m_Grid.centerZ = largeStep * std::trunc(cameraPosition.z / largeStep);
+        m_Grid.smallStep = smallStep;
+        m_Grid.gridFadeSize = (gridSize - steps) * fadeSize;
+        m_Grid.decimals = decimals;
+        m_Grid.steps = steps;
+        m_Grid.gridSize = gridSize;
+        m_GridDraw = true;
+    }
+
+    void Renderer2D::DrawThinLine(const glm::vec3& p0, const glm::vec3& p1, const glm::vec4& color)
+    {
+        shaderio::LineData instance;
+        instance.p0 = p0;
+        instance.p1 = p1;
+        instance.color = color;
+        instance.entityID = -1;
+
+        m_data.thinLineDatas.emplace_back(instance);
     }
 
     void Renderer2D::DrawRect(const glm::vec3& position, const glm::vec2& size, const glm::vec4& color, int entityID)

@@ -18,6 +18,9 @@ namespace Nox
         std::filesystem::path AssetDirectory;
         std::filesystem::path AssetRegistryPath; // Relative to AssetDirectory
         std::filesystem::path ScriptModulePath;
+
+        // World units per meter (docs/Units_And_World_Tools_Plan_2026.md): 1 = meters (today), 100 = 1 unit is 1 cm.
+        float WorldUnitsPerMeter = 1.0f;
     };
     
     class Project : public RefCounted

@@ -73,6 +73,22 @@ namespace Nox
         // isolation. The level is kept aside and comes back on exit; Save writes the .nprefab, reloads the asset and spawns every
         // instance in the level again.
         void OpenPrefabMode(AssetHandle handle);
+        // Snapping (like Unreal's viewport toolbar): one switch, and a step each for location (in cm), rotation (degrees) and scale.
+        // Ctrl inverts it while held. The location step is in cm whatever the world unit is (WorldUnits converts).
+        void UI_ViewportOverlay();
+        // The world grid on the ground plane (y = 0): cells of the snap step (sparser far from the ground), every tenth line stronger, the
+        // axes coloured, fading out with distance. Thin lines of the 2D overlay pass, so it is depth tested.
+        void DrawWorldGrid();
+        // Drops every selected top entity straight down until its bounds' bottom rests on the surface below (the top of the highest
+        // other mesh whose bounds overlap it from above), or on the ground plane when there is none.
+        void SnapSelectionToFloor();
+        // While a translation snaps: tick marks at every step along the axis being dragged (the current one lit), or a checkerboard of
+        // snap-sized squares on the plane being dragged (the current cell lit), so the steps can be seen. ImGui draw list, inside the
+        // viewport window.
+        void DrawTranslationSnapFeedback(const glm::mat4& view, const glm::mat4& projection, const glm::mat4& current);
+        float LocationSnapWorldUnits() const;
+        glm::vec3 SnapLocation(const glm::vec3& point) const; // the point itself while snapping is off
+
         void SavePrefabMode();
         void ExitPrefabMode();
         // Leaves Prefab Mode; with unsaved changes asks first (Save / Don't Save / Cancel) and then runs `afterwards` (opening a scene).
@@ -109,6 +125,14 @@ namespace Nox
             int FramesSinceCheck = 0;
         };
         PrefabModeState m_PrefabMode;
+
+        bool m_SnapEnabled = false;
+        int m_LocationSnapIndex = 2; // 10 cm
+        int m_RotationSnapIndex = 2; // 15 degrees
+        int m_ScaleSnapIndex = 1;    // 0.25
+        bool m_ShowGrid = true;
+        bool m_GizmoWasUsing = false;
+        glm::mat4 m_GizmoDragStart{ 1.0f }; // the dragged entity's world transform when the drag began
         bool m_ShowPrefabExitPrompt = false;
         std::function<void()> m_AfterPrefabExit;
         
