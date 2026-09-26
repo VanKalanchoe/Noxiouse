@@ -41,6 +41,14 @@ namespace Nox
         void ReimportAsset(AssetHandle handle, bool force = false);
         
         void ImportAsset(const std::filesystem::path& sourcePath, const std::filesystem::path& destPath, AssetType targetType = AssetType::None, const MeshImportSettings& meshSettings = {});
+        // Registers an asset file that already exists (relative to the asset directory) and returns its handle.
+        AssetHandle RegisterExistingFile(const std::filesystem::path& relativePath, AssetType type);
+        // Renames a self-contained asset's file (same folder, same extension), keeping its handle. False when the name is invalid
+        // or taken, or when the asset has cooked companions named after it (meshes).
+        bool RenameAsset(AssetHandle handle, const std::string& newName);
+        bool CanRename(AssetHandle handle) const;
+        // The registered asset of this type at a path under the asset directory (or as its source), 0 when there is none.
+        AssetHandle FindHandleByPath(const std::filesystem::path& path, AssetType type) const;
         // Imports a glTF like Unreal: the file's content decides the assets -- skinned meshes become a skeletal mesh
         // (destPath with .nmesh, plus skeleton and clips), the rest a static mesh (.nsmesh); a file with both gets both.
         // False when the settings leave nothing to import. Cooking and loading happen in the background.
@@ -139,7 +147,6 @@ namespace Nox
         bool m_RegistryDirty = false;
         std::chrono::steady_clock::time_point m_RegistryWritten = std::chrono::steady_clock::now();
         void IndexPath(AssetHandle handle, const AssetMetadata& metadata);
-        AssetHandle FindHandleByPath(const std::filesystem::path& path, AssetType type) const;
         AssetMap m_LoadedAssets;
 
         // Background loads (RequestAsset) until they are published into m_LoadedAssets.

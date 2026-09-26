@@ -1,6 +1,7 @@
 #include "EditorLayer.h"
 
 #include <algorithm>
+#include <cstring>
 #include <cmath>
 #include <functional>
 #include <iostream>
@@ -23,6 +24,9 @@
 #include "NoxCore/Profiling/StatsOverlayLayer.h"
 #include "NoxCore/Profiling/StatsReport.h"
 #include "NoxCore/Project/Project.h"
+#include "NoxCore/Asset/PrefabImporter.h"
+#include "NoxCore/Scene/PrefabInstance.h"
+#include "NoxCore/Scene/SceneSerializer.h"
 #include "NoxCore/Scripting/ScriptEngine.h"
 #include "NoxCore/Utils/Utils.h"
 
@@ -38,6 +42,7 @@ namespace Nox
         m_Renderer2D = m_Renderer->getRenderer2D();
 
         m_AssetOpeners[AssetType::AnimationGraph] = [this](AssetHandle handle) { OpenNodeGraphEditor(handle); };
+        m_AssetOpeners[AssetType::Prefab] = [this](AssetHandle handle) { OpenPrefabMode(handle); };
         m_SceneHierarchyPanel.SetOpenAssetCallback([this](AssetHandle handle) { OpenAsset(handle); });
         m_SceneHierarchyPanel.SetPlaceAssetsCallback([this](const std::vector<AssetHandle>& handles, const std::string& folder)
         {
@@ -125,6 +130,10 @@ namespace Nox
 
     void EditorLayer::OnUpdate(Timestep ts)
     {
+        // Game scripts read the mouse only over the viewport and the keys only while it is the target: a click in the hierarchy
+        // or a key typed in a text field is not the game's.
+        Input::SetGameInputEnabled(m_ViewportFocused || m_ViewportHovered, m_ViewportHovered);
+
         // Deleting entities, switching scenes, or leaving Play can leave meshes/textures unreferenced.
         // Sweep at the start of the next frame, before anything re-requests them this frame.
         if (m_EditorScene && m_EditorScene->ConsumeAssetReferencesChanged())
@@ -515,7 +524,7 @@ namespace Nox
                     auto type = AssetManager::GetAssetType(handle);
                     if (type == AssetType::Scene && payload->Delivery)
                         OpenScene(handle);
-                    else if (type == AssetType::Mesh || type == AssetType::StaticMesh || type == AssetType::MeshSource)
+                    else if (type == AssetType::Mesh || type == AssetType::StaticMesh || type == AssetType::MeshSource || type == AssetType::Prefab)
                     {
                         if (!m_PlacementPreview.Active || m_PlacementPreview.Handle != handle)
                         {
@@ -535,7 +544,14 @@ namespace Nox
                             if (entityName.empty())
                                 entityName = "Model";
                             Entity root = m_ActiveScene->CreateEntity(entityName);
-                            root.AddComponent<ModelInstanceComponent>().Model = handle;
+                            if (type == AssetType::Prefab)
+                            {
+                                auto& prefabInstance = root.AddComponent<PrefabInstanceComponent>();
+                                prefabInstance.Prefab = handle;
+                                prefabInstance.InitTransform = true;
+                            }
+                            else
+                                root.AddComponent<ModelInstanceComponent>().Model = handle;
                             {
                                 const float importScale = metadata.MeshSettings.ImportScale;
                                 if (importScale > 0.0f && importScale != 1.0f)
@@ -1465,9 +1481,30 @@ namespace Nox
         float size = ImGui::GetWindowHeight() - 4.0f;
         ImGui::SetCursorPosX((ImGui::GetWindowContentRegionMax().x * 0.5f) - (size * 0.5f));
 
-        bool hasPlayButton = m_SceneState == SceneState::Edit || m_SceneState == SceneState::Play;
-        bool hasSimulateButton = m_SceneState == SceneState::Edit || m_SceneState == SceneState::Simulate;
-        bool hasPauseButton = m_SceneState != SceneState::Edit;
+        // Prefab Mode: the prefab's name and its Save / Exit buttons take the toolbar (nothing plays while a prefab is edited).
+        if (m_PrefabMode.Active)
+        {
+            ImGui::SetCursorPos(ImVec2(10.0f, 10.0f));
+            ImGui::TextColored(ImVec4(0.45f, 0.7f, 1.0f, 1.0f), "Prefab Mode: %s%s", m_PrefabMode.Name.c_str(), m_PrefabMode.Variant ? " (variant)" : "");
+            ImGui::SameLine();
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.35f, 0.55f, 1.0f));
+            if (ImGui::Button("Save"))
+                SavePrefabMode();
+            ImGui::SameLine();
+            if (ImGui::Button("Save & Exit"))
+            {
+                SavePrefabMode();
+                ExitPrefabMode();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Exit (discard changes)"))
+                ExitPrefabMode();
+            ImGui::PopStyleColor();
+        }
+
+        bool hasPlayButton = !m_PrefabMode.Active && (m_SceneState == SceneState::Edit || m_SceneState == SceneState::Play);
+        bool hasSimulateButton = !m_PrefabMode.Active && (m_SceneState == SceneState::Edit || m_SceneState == SceneState::Simulate);
+        bool hasPauseButton = !m_PrefabMode.Active && m_SceneState != SceneState::Edit;
 
         if (hasPlayButton)
         {
@@ -1650,6 +1687,7 @@ namespace Nox
                     std::vector<UUID> toDelete;
                     for (Entity selected : m_SceneHierarchyPanel.GetSelectedEntities())
                     {
+                        // An entity of a prefab instance can be deleted too: the instance remembers it (an override).
                         if (selected)
                             toDelete.push_back(selected.GetUUID());
                     }
@@ -1686,14 +1724,25 @@ namespace Nox
                 bool shift = Input::IsKeyPressed(SDL_SCANCODE_LSHIFT) || Input::IsKeyPressed(SDL_SCANCODE_RSHIFT);
                 bool control = Input::IsKeyPressed(SDL_SCANCODE_LCTRL) || Input::IsKeyPressed(SDL_SCANCODE_RCTRL);
 
-                if (m_HoveredEntity)
+                // A click on an entity of a prefab instance picks the instance -- the outermost one when instances sit inside each other
+                // (Ctrl+click picks the entity itself).
+                Entity picked = m_HoveredEntity;
+                while (picked && !control && picked.HasComponent<PrefabNodeComponent>())
+                {
+                    Entity instance = m_ActiveScene->GetEntityByUUID(picked.GetComponent<PrefabNodeComponent>().Instance);
+                    if (!instance)
+                        break;
+                    picked = instance;
+                }
+
+                if (picked)
                 {
                     if (shift)
-                        m_SceneHierarchyPanel.SelectRange(m_HoveredEntity);
+                        m_SceneHierarchyPanel.SelectRange(picked);
                     else if (control)
-                        m_SceneHierarchyPanel.ToggleSelectedEntity(m_HoveredEntity);
+                        m_SceneHierarchyPanel.ToggleSelectedEntity(picked);
                     else
-                        m_SceneHierarchyPanel.SetSelectedEntity(m_HoveredEntity);
+                        m_SceneHierarchyPanel.SetSelectedEntity(picked);
                 }
                 else
                 {
@@ -1841,6 +1890,8 @@ namespace Nox
 
             m_ContentBrowserPanel = CreateScope<ContentBrowserPanel>(Project::GetActive());
             m_ContentBrowserPanel->SetOpenAssetCallback([this](AssetHandle handle) { OpenAsset(handle); });
+            m_ContentBrowserPanel->SetCreatePrefabCallback([this](UUID dragged, const std::filesystem::path& folder) { return CreatePrefab(dragged, folder); });
+            m_ContentBrowserPanel->SetCreateVariantCallback([this](AssetHandle base, const std::filesystem::path& folder) { return CreateVariant(base, folder); });
         }
     }
 
@@ -1880,6 +1931,8 @@ namespace Nox
     {
         NOX_CORE_ASSERT(handle);
 
+        if (m_PrefabMode.Active)
+            ExitPrefabMode();
         if (m_SceneState != SceneState::Edit)
         {
             OnSceneStop();
@@ -1947,12 +2000,90 @@ namespace Nox
     // Places model assets into the scene being edited at `point`, filed under `folder` ("" = the top level): a single asset is
     // one model instance, several use each asset's file layout (per-mesh assets) -- either way the instance turns into plain
     // flat entities once loaded. Used by the viewport (drop point on the ray) and the hierarchy panel (a folder row).
+    AssetHandle EditorLayer::CreateVariant(AssetHandle baseHandle, const std::filesystem::path& relativeFolder)
+    {
+        Ref<Prefab> base = AssetManager::GetAsset<Prefab>(baseHandle);
+        if (!base)
+            return 0;
+
+        // "<Base> Variant": the name the Content Browser then lets the user change.
+        std::string name = base->Name + " Variant";
+        constexpr char forbidden[] = { 92, 47, 58, 42, 63, 34, 60, 62, 124, 0 }; // \ / : * ? " < > |
+        for (char& character : name)
+        {
+            if (std::strchr(forbidden, character) != nullptr)
+                character = '_';
+        }
+
+        const std::filesystem::path assetDirectory = Project::GetActiveAssetDirectory();
+        std::filesystem::path relativePath = relativeFolder / (name + ".nprefab");
+        for (int suffix = 2; std::filesystem::exists(assetDirectory / relativePath); ++suffix)
+            relativePath = relativeFolder / (name + " " + std::to_string(suffix) + ".nprefab");
+
+        if (!PrefabImporter::CreateVariantFile(relativePath.stem().string(), base->Root, baseHandle, assetDirectory / relativePath))
+            return 0;
+        return Project::GetActive()->GetEditorAssetManager()->RegisterExistingFile(relativePath, AssetType::Prefab);
+    }
+
+    AssetHandle EditorLayer::CreatePrefab(UUID dragged, const std::filesystem::path& relativeFolder)
+    {
+        Entity draggedEntity = m_ActiveScene->GetEntityByUUID(dragged);
+        if (!draggedEntity)
+            return 0;
+
+        // The dragged entity, or the whole selection when it is part of it. The dragged one goes first: it is the pivot the
+        // others are positioned against.
+        std::vector<Entity> entities{ draggedEntity };
+        if (m_SceneHierarchyPanel.IsSelected(draggedEntity))
+        {
+            for (Entity selected : m_SceneHierarchyPanel.GetSelectedEntities())
+            {
+                if (selected && !(selected == draggedEntity))
+                    entities.push_back(selected);
+            }
+        }
+
+        // The default name the Content Browser then lets the user change (like a new file in Windows).
+        std::string name = entities.size() == 1 ? draggedEntity.GetName() : std::string("New Prefab");
+        for (char& character : name)
+        {
+            if (std::strchr("\\/:*?\"<>|", character) != nullptr)
+                character = '_';
+        }
+        if (name.empty())
+            name = "New Prefab";
+
+        const std::filesystem::path assetDirectory = Project::GetActiveAssetDirectory();
+        std::filesystem::path relativePath = relativeFolder / (name + ".nprefab");
+        for (int suffix = 2; std::filesystem::exists(assetDirectory / relativePath); ++suffix)
+            relativePath = relativeFolder / (name + " " + std::to_string(suffix) + ".nprefab");
+
+        if (!SceneSerializer::SerializePrefab(*m_ActiveScene, entities, relativePath.stem().string(), assetDirectory / relativePath))
+            return 0;
+        return Project::GetActive()->GetEditorAssetManager()->RegisterExistingFile(relativePath, AssetType::Prefab);
+    }
+
     void EditorLayer::PlaceAssets(const std::vector<AssetHandle>& handles, const glm::vec3& point, const std::string& folder)
     {
         m_SceneHierarchyPanel.ClearSelection();
         for (AssetHandle handle : handles)
         {
             const AssetType type = AssetManager::GetAssetType(handle);
+            if (type == AssetType::Prefab)
+            {
+                // A prefab instance: its entities spawn from the .nprefab once it is loaded (PrefabInstance::SpawnPending).
+                const AssetMetadata& prefabMetadata = Project::GetActive()->GetEditorAssetManager()->GetMetadata(handle);
+                std::string prefabName = prefabMetadata.FilePath.filename().stem().string();
+                Entity prefabRoot = m_ActiveScene->CreateEntity(prefabName.empty() ? "Prefab" : prefabName);
+                auto& prefabInstance = prefabRoot.AddComponent<PrefabInstanceComponent>();
+                prefabInstance.Prefab = handle;
+                prefabInstance.InitTransform = true;
+                prefabRoot.GetComponent<TransformComponent>().Translation = point;
+                if (!folder.empty())
+                    prefabRoot.AddComponent<FolderComponent>(folder);
+                AssetManager::RequestAsset(handle);
+                continue;
+            }
             if (type != AssetType::Mesh && type != AssetType::StaticMesh)
                 continue;
 
@@ -1974,6 +2105,11 @@ namespace Nox
 
     void EditorLayer::SaveScene()
     {
+        if (m_PrefabMode.Active)
+        {
+            SavePrefabMode(); // Ctrl+S in Prefab Mode saves the prefab, never the level
+            return;
+        }
         if (!m_EditorScenePath.empty())
         {
             SerializeScene(m_ActiveScene, m_EditorScenePath);
@@ -1986,6 +2122,11 @@ namespace Nox
 
     void EditorLayer::SaveSceneAs()
     {
+        if (m_PrefabMode.Active)
+        {
+            SavePrefabMode();
+            return;
+        }
         std::string filepath = Utility::SaveFile("Nox Scene *.nox\0nox\0");
         if (!filepath.empty())
         {
@@ -1997,6 +2138,137 @@ namespace Nox
     void EditorLayer::SerializeScene(Ref<Scene> scene, const std::filesystem::path& path)
     {
         SceneImporter::SaveScene(scene, path);
+    }
+
+    void EditorLayer::OpenPrefabMode(AssetHandle handle)
+    {
+        if (m_PrefabMode.Active)
+        {
+            NOX_CORE_WARN("Prefab Mode is already open for '{}': exit it first", m_PrefabMode.Name);
+            return;
+        }
+        if (m_SceneState != SceneState::Edit)
+            OnSceneStop();
+
+        const AssetMetadata metadata = Project::GetActive()->GetEditorAssetManager()->GetMetadata(handle);
+        Ref<Prefab> prefab = PrefabImporter::ImportPrefab(handle, metadata);
+        if (!prefab)
+            return;
+
+        Ref<Scene> prefabScene = CreateRef<Scene>();
+        // A variant is edited as an instance of its base carrying the variant's changes; any other prefab as its own entities.
+        const bool isVariant = prefab->Base != 0;
+        Entity root = isVariant ? PrefabInstance::LoadVariantForEditing(*prefabScene, *prefab) : PrefabInstance::LoadForEditing(*prefabScene, *prefab);
+        if (!root)
+        {
+            NOX_CORE_ERROR("Prefab '{}' has no root entity", metadata.FilePath.generic_string());
+            return;
+        }
+
+        // Light for the isolated scene: the level's environment and sun, as preview entities. They are not below the root, so
+        // they are never saved into the prefab. A level without an environment gets the project's default one.
+        bool hasEnvironment = false;
+        if (m_EditorScene)
+        {
+            for (auto handleInLevel : m_EditorScene->GetAllEntitiesWith<EnvironmentLightComponent>())
+            {
+                Entity source(handleInLevel, m_EditorScene.get());
+                Entity preview = prefabScene->CreateEntity("Preview Environment");
+                preview.AddComponent<EnvironmentLightComponent>(source.GetComponent<EnvironmentLightComponent>());
+                hasEnvironment = true;
+            }
+            for (auto handleInLevel : m_EditorScene->GetAllEntitiesWith<DirectionalLightComponent>())
+            {
+                Entity source(handleInLevel, m_EditorScene.get());
+                Entity preview = prefabScene->CreateEntity("Preview Sun");
+                preview.GetComponent<TransformComponent>() = source.GetComponent<TransformComponent>();
+                preview.AddComponent<DirectionalLightComponent>(source.GetComponent<DirectionalLightComponent>());
+            }
+        }
+        if (!hasEnvironment)
+        {
+            Entity preview = prefabScene->CreateEntity("Preview Environment");
+            preview.AddComponent<EnvironmentLightComponent>().TexturePath = "EnvironmentMaps/shanghai_bund_4k_cube_bc6u.dds";
+        }
+
+        m_PrefabMode.Active = true;
+        m_PrefabMode.Variant = isVariant;
+        m_PrefabMode.Prefab = handle;
+        m_PrefabMode.Name = metadata.FilePath.stem().string();
+        m_PrefabMode.ReturnScene = m_EditorScene;
+        m_PrefabMode.ReturnScenePath = m_EditorScenePath;
+        m_PrefabMode.Root = root.GetUUID();
+
+        m_HoveredEntity = Entity();
+        m_EditorScene = prefabScene;
+        m_ActiveScene = prefabScene;
+        m_EditorScenePath.clear(); // nothing saves the level over the prefab
+        m_SceneHierarchyPanel.SetContext(m_EditorScene);
+        m_SceneHierarchyPanel.SetSelectedEntity(root);
+        m_UnloadUnusedAssetsRequested = true;
+    }
+
+    void EditorLayer::SavePrefabMode()
+    {
+        if (!m_PrefabMode.Active)
+            return;
+        Entity root = m_EditorScene->GetEntityByUUID(m_PrefabMode.Root);
+        if (!root)
+        {
+            NOX_CORE_ERROR("Prefab '{}': its root entity was deleted, nothing to save", m_PrefabMode.Name);
+            return;
+        }
+
+        const AssetMetadata metadata = Project::GetActive()->GetEditorAssetManager()->GetMetadata(m_PrefabMode.Prefab);
+        if (m_PrefabMode.Variant)
+        {
+            // The variant file holds what this instance of its base differs in, and the entities added below it.
+            Ref<Prefab> variantFile = PrefabImporter::ImportPrefab(m_PrefabMode.Prefab, metadata);
+            if (!variantFile || !PrefabInstance::SaveVariant(*m_EditorScene, root, *variantFile, Project::GetActiveAssetDirectory() / metadata.FilePath))
+            {
+                NOX_CORE_ERROR("Could not save the variant '{}' (its base has to be loaded)", m_PrefabMode.Name);
+                return;
+            }
+        }
+        else if (!SceneSerializer::SerializePrefab(*m_EditorScene, { root }, m_PrefabMode.Name, Project::GetActiveAssetDirectory() / metadata.FilePath))
+        {
+            return;
+        }
+
+        // The instances take their differences from the prefab first (they are told apart against the old content), then the loaded
+        // asset takes the new content (spawns read it on the main thread) and every instance in the level spawns again from it.
+        if (m_PrefabMode.ReturnScene)
+            PrefabInstance::CaptureOverrides(*m_PrefabMode.ReturnScene, m_PrefabMode.Prefab);
+        if (Ref<Prefab> fresh = PrefabImporter::ImportPrefab(m_PrefabMode.Prefab, metadata))
+        {
+            if (Prefab* loaded = AssetManager::FindLoadedAsset<Prefab>(m_PrefabMode.Prefab))
+            {
+                loaded->Name = fresh->Name;
+                loaded->Root = fresh->Root;
+                loaded->Entities = fresh->Entities;
+                loaded->Base = fresh->Base;
+                loaded->Overrides = fresh->Overrides;
+                loaded->Structure = fresh->Structure;
+                loaded->Nested = fresh->Nested;
+            }
+        }
+        if (m_PrefabMode.ReturnScene)
+            PrefabInstance::RespawnAll(*m_PrefabMode.ReturnScene, m_PrefabMode.Prefab);
+    }
+
+    void EditorLayer::ExitPrefabMode()
+    {
+        if (!m_PrefabMode.Active)
+            return;
+
+        m_HoveredEntity = Entity();
+        m_EditorScene = m_PrefabMode.ReturnScene;
+        m_ActiveScene = m_EditorScene;
+        m_EditorScenePath = m_PrefabMode.ReturnScenePath;
+        m_PrefabMode = {};
+        m_SceneHierarchyPanel.SetContext(m_EditorScene);
+        m_SceneHierarchyPanel.ClearSelection();
+        m_UnloadUnusedAssetsRequested = true;
     }
 
     void EditorLayer::OpenAsset(AssetHandle handle)
@@ -2072,6 +2344,8 @@ namespace Nox
             m_EditorScene->CollectAssetReferences(referencedAssets);
         if (m_ActiveScene && m_ActiveScene != m_EditorScene)
             m_ActiveScene->CollectAssetReferences(referencedAssets);
+        if (m_PrefabMode.ReturnScene) // the level waits while a prefab is edited: its assets stay
+            m_PrefabMode.ReturnScene->CollectAssetReferences(referencedAssets);
 
         Project::GetActive()->GetEditorAssetManager()->UnloadUnusedAssets(referencedAssets);
     }

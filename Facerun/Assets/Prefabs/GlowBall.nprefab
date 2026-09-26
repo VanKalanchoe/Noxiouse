@@ -1,0 +1,60 @@
+Prefab: GlowBall
+Root: 1
+Entities:
+  - Entity: 1
+    TagComponent:
+      Tag: GlowBall
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        - 2
+    MeshComponent:
+      MeshHandle: 11677936640255171373
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    MaterialComponent:
+      MaterialAssets:
+        - 7554340089682047465
+    ScriptComponent:
+      Classes:
+        - Facerun.Projectile
+      EntityReferences:
+        []
+      FieldOverrides:
+        []
+    RigidBody3DComponent:
+      BodyType: Dynamic
+      MotionQuality: Discrete
+      Mass: 1
+      LinearDamping: 0.05
+      AngularDamping: 0.5
+      GravityFactor: 1
+      AllowSleeping: true
+      IsSensor: false
+      Layer: 1
+    SphereCollider3DComponent:
+      Radius: 1
+      Offset: [0, 0, 0]
+      Friction: 0.5
+      Restitution: 0.3
+  - Entity: 2
+    TagComponent:
+      Tag: Glow
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 1
+      Children:
+        []
+    PointLightComponent:
+      Color: [1, 0.55, 0.15]
+      Intensity: 870.5
+      Range: 8
+      Radius: 0.1
+      ShadowSamples: 1

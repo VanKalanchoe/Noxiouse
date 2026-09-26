@@ -1,0 +1,94 @@
+Prefab: Bistro Environment 2
+Root: 17392118452064603301
+Entities:
+  - Entity: 17392118452064603301
+    TagComponent:
+      Tag: Bistro Environment
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        - 4510381988304553934
+        - 17915434994704116659
+    EnvironmentLightComponent:
+      TexturePath: EnvironmentMaps/shanghai_bund_4k_cube_bc6u.dds
+      RadianceScale: [4, 4, 4]
+      Rotation: 0
+      Enabled: true
+  - Entity: 4510381988304553934
+    TagComponent:
+      Tag: Scene Camera
+    TransformComponent:
+      Translation: [0, 3.3, 37.8]
+      Rotation: [0, -0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 17392118452064603301
+      Children:
+        []
+    CameraComponent:
+      Camera:
+        ProjectionType: 0
+        PerspectiveFOV: 1.04
+        PerspectiveNear: 0.001
+        PerspectiveFar: 1000
+        OrthographicSize: 10
+        OrthographicNear: -1
+        OrthographicFar: 1
+      Primary: true
+      FixedAspectRatio: false
+      AutoExposure: true
+      ExposureCompensation: 0.6
+      AutoExposureMinEV: -4
+      AutoExposureMaxEV: 6
+    ScriptComponent:
+      Classes:
+        - Facerun.CameraFollow
+      EntityReferences:
+        - Class: Facerun.CameraFollow
+          Field: Target
+          Entity: 6787496459119117713
+      FieldOverrides:
+        - Class: Facerun.CameraFollow
+          Field: Distance
+          Type: Float
+          Value: 149.9
+        - Class: Facerun.CameraFollow
+          Field: Height
+          Type: Float
+          Value: 98.1
+  - Entity: 17915434994704116659
+    TagComponent:
+      Tag: Cube
+    TransformComponent:
+      Translation: [2.9997818, -2.0276215, 0.059326187]
+      Rotation: [0, -0, 0]
+      Scale: [100, 1, 100]
+    RelationshipComponent:
+      Parent: 17392118452064603301
+      Children:
+        []
+    MeshComponent:
+      MeshHandle: 2611261257249010592
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    MaterialComponent:
+      {}
+    RigidBody3DComponent:
+      BodyType: Static
+      MotionQuality: Discrete
+      Mass: 1
+      LinearDamping: 0.05
+      AngularDamping: 0.05
+      GravityFactor: 1
+      AllowSleeping: true
+      IsSensor: false
+      Layer: 1
+    BoxCollider3DComponent:
+      HalfExtents: [1, 1, 1]
+      Offset: [0, 0, 0]
+      Friction: 0.5
+      Restitution: 0

@@ -11,6 +11,7 @@
 #include "SkeletonImporter.h"
 #include "MaterialImporter.h"
 #include "NodeGraphImporter.h"
+#include "PrefabImporter.h"
 #include "NoxCore/Core/Log.h"
 
 namespace Nox
@@ -56,6 +57,9 @@ namespace Nox
         }},
         { AssetType::AnimationGraph, [](AssetHandle h, const AssetMetadata& meta) -> Ref<Asset> {
             return Ref<Asset>(NodeGraphImporter::ImportNodeGraph(h, meta));
+        }},
+        { AssetType::Prefab, [](AssetHandle h, const AssetMetadata& meta) -> Ref<Asset> {
+            return Ref<Asset>(PrefabImporter::ImportPrefab(h, meta));
         }}
     };
     

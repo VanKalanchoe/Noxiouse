@@ -1,0 +1,22 @@
+Prefab: Ball Variant
+Root: 1
+Base: 7311209448126535121
+Overrides:
+  - Entity: 1
+    Component: MaterialComponent
+    Field: MaterialAssets
+    Value: "[1548153807058576111]"
+  - Entity: 9902072197686504228
+    Component: PointLightComponent
+    Field: Color
+    Value: "[0.7258687, 0, 1]"
+  - Entity: 9902072197686504228
+    Component: PointLightComponent
+    Field: Intensity
+    Value: 83
+  - Entity: 9902072197686504228
+    Component: PointLightComponent
+    Field: Range
+    Value: 22.1
+Entities:
+  []

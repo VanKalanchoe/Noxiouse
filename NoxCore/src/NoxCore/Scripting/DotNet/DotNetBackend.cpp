@@ -4,7 +4,11 @@
 #include <Coral/String.hpp>
 #include <SDL3/SDL_scancode.h>
 
+#include "NoxCore/Asset/AssetManager.h"
+#include "NoxCore/Asset/EditorAssetManager.h"
 #include "NoxCore/Core/Input.h"
+#include "NoxCore/Physics/Physics3DScene.h"
+#include "NoxCore/Project/Project.h"
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Math/Math.h"
 #include "NoxCore/Scene/Entity.h"
@@ -29,7 +33,67 @@ namespace Nox
 
         Coral::Bool32 IsKeyDown(int32_t keycode)
         {
-            return Input::IsKeyPressed(static_cast<SDL_Scancode>(keycode));
+            return Input::GameKeysEnabled() && Input::IsKeyPressed(static_cast<SDL_Scancode>(keycode));
+        }
+
+        Coral::Bool32 IsMouseButtonDown(int32_t button)
+        {
+            // 1 = left, 2 = middle, 3 = right
+            return Input::GameMouseEnabled() && Input::IsMouseButtonPressed(static_cast<SDL_MouseButtonFlags>(button));
+        }
+
+        // Scene.Instantiate("Prefabs/Ball.nprefab", x, y, z): the prefab by its path under the asset directory.
+        uint64_t SceneInstantiate(Coral::String path, float x, float y, float z)
+        {
+            if (!s_Scene) return 0;
+            const AssetHandle prefab = Project::GetActive()->GetEditorAssetManager()->FindHandleByPath(std::filesystem::path(std::string(path)), AssetType::Prefab);
+            if (prefab == 0)
+            {
+                NOX_CORE_ERROR("[C#] Scene.Instantiate: no prefab '{}' in the asset registry", std::string(path));
+                return 0;
+            }
+            Entity root = s_Scene->Instantiate(prefab, { x, y, z });
+            return root ? static_cast<uint64_t>(root.GetUUID()) : 0;
+        }
+
+        void SceneDestroy(uint64_t entityID)
+        {
+            if (!s_Scene) return;
+            if (Entity entity = s_Scene->GetEntityByUUID(UUID(entityID)))
+                s_Scene->QueueDestroy(entity);
+        }
+
+        // Nox.RigidBody3DComponent: forces and velocities of the entity's physics body (Play / Simulate only).
+        template <typename Function>
+        void WithRigidBody(uint64_t entityID, Function function)
+        {
+            if (!s_Scene) return;
+            IPhysics3DScene* physics = s_Scene->GetPhysics3DScene();
+            Entity entity = s_Scene->GetEntityByUUID(UUID(entityID));
+            if (physics && entity && entity.HasComponent<RigidBody3DComponent>())
+                function(*physics, entity);
+        }
+
+        void RigidBodySetLinearVelocity(uint64_t entityID, float x, float y, float z)
+        {
+            WithRigidBody(entityID, [&](IPhysics3DScene& physics, Entity entity) { physics.SetLinearVelocity(entity, { x, y, z }); });
+        }
+
+        void RigidBodyAddForce(uint64_t entityID, float x, float y, float z)
+        {
+            WithRigidBody(entityID, [&](IPhysics3DScene& physics, Entity entity) { physics.AddForce(entity, { x, y, z }); });
+        }
+
+        void RigidBodyAddImpulse(uint64_t entityID, float x, float y, float z)
+        {
+            WithRigidBody(entityID, [&](IPhysics3DScene& physics, Entity entity) { physics.AddImpulse(entity, { x, y, z }); });
+        }
+
+        void RigidBodyGetLinearVelocity(uint64_t entityID, ManagedVector3* outVelocity)
+        {
+            glm::vec3 velocity(0.0f);
+            WithRigidBody(entityID, [&](IPhysics3DScene& physics, Entity entity) { velocity = physics.GetLinearVelocity(entity); });
+            *outVelocity = { velocity.x, velocity.y, velocity.z };
         }
 
         uint64_t FindEntityByName(Coral::String name)
@@ -82,6 +146,7 @@ namespace Nox
                 case 1: return entity.HasComponent<TransformComponent>();
                 case 2: return entity.HasComponent<AnimatorComponent>();
                 case 3: return entity.HasComponent<CharacterController3DComponent>();
+                case 4: return entity.HasComponent<RigidBody3DComponent>();
                 default: return false;
             }
         }
@@ -331,6 +396,13 @@ namespace Nox
     {
         assembly.AddInternalCall("Nox.InternalCalls", "Log_Info", reinterpret_cast<void*>(&LogInfo));
         assembly.AddInternalCall("Nox.InternalCalls", "Input_IsKeyDown", reinterpret_cast<void*>(&IsKeyDown));
+        assembly.AddInternalCall("Nox.InternalCalls", "Input_IsMouseButtonDown", reinterpret_cast<void*>(&IsMouseButtonDown));
+        assembly.AddInternalCall("Nox.InternalCalls", "Scene_Instantiate", reinterpret_cast<void*>(&SceneInstantiate));
+        assembly.AddInternalCall("Nox.InternalCalls", "Scene_Destroy", reinterpret_cast<void*>(&SceneDestroy));
+        assembly.AddInternalCall("Nox.InternalCalls", "RigidBody_SetLinearVelocity", reinterpret_cast<void*>(&RigidBodySetLinearVelocity));
+        assembly.AddInternalCall("Nox.InternalCalls", "RigidBody_AddForce", reinterpret_cast<void*>(&RigidBodyAddForce));
+        assembly.AddInternalCall("Nox.InternalCalls", "RigidBody_AddImpulse", reinterpret_cast<void*>(&RigidBodyAddImpulse));
+        assembly.AddInternalCall("Nox.InternalCalls", "RigidBody_GetLinearVelocity", reinterpret_cast<void*>(&RigidBodyGetLinearVelocity));
         assembly.AddInternalCall("Nox.InternalCalls", "Entity_FindByName", reinterpret_cast<void*>(&FindEntityByName));
         assembly.AddInternalCall("Nox.InternalCalls", "Entity_FindChild", reinterpret_cast<void*>(&FindChild));
         assembly.AddInternalCall("Nox.InternalCalls", "Entity_HasComponent", reinterpret_cast<void*>(&HasComponent));

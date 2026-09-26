@@ -1,0 +1,52 @@
+Prefab: Ball
+Root: 1
+Entities:
+  - Entity: 1
+    TagComponent:
+      Tag: Ball
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        - 9902072197686504228
+    MeshComponent:
+      MeshHandle: 11677936640255171373
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    MaterialComponent:
+      {}
+    RigidBody3DComponent:
+      BodyType: Dynamic
+      MotionQuality: Discrete
+      Mass: 1
+      LinearDamping: 0.1
+      AngularDamping: 1
+      GravityFactor: 1
+      AllowSleeping: true
+      IsSensor: false
+      Layer: 1
+    SphereCollider3DComponent:
+      Radius: 1
+      Offset: [0, 0, 0]
+      Friction: 0.5
+      Restitution: 0
+  - Entity: 9902072197686504228
+    TagComponent:
+      Tag: Empty Entity
+    TransformComponent:
+      Translation: [29.560274, -1.2063942, -0.1880188]
+      Rotation: [0, -0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 1
+      Children:
+        []
+    PointLightComponent:
+      Color: [1, 0.996139, 0]
+      Intensity: 500
+      Range: 210.1
+      Radius: 0.05
+      ShadowSamples: 1

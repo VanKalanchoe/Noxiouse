@@ -1,0 +1,15 @@
+Prefab: Bistro Environment
+Root: 17392118452064603301
+Entities:
+  - Entity: 17392118452064603301
+    TagComponent:
+      Tag: Bistro Environment
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    EnvironmentLightComponent:
+      TexturePath: EnvironmentMaps/shanghai_bund_4k_cube_bc6u.dds
+      RadianceScale: [4, 4, 4]
+      Rotation: 0
+      Enabled: true

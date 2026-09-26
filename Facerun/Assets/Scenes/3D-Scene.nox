@@ -1,52 +1,107 @@
 Scene: Untitled
 Entities:
-  - Entity: 17392118452064603301
+  - Entity: 8346448430269037553
     TagComponent:
-      Tag: Bistro Environment
+      Tag: BallBox
+    TransformComponent:
+      Translation: [2.8498209, -0.7201991, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    PrefabInstanceComponent:
+      Prefab: 13390120076805450648
+  - Entity: 16676101204237086316
+    TagComponent:
+      Tag: BallBox
+    TransformComponent:
+      Translation: [-3.430627, -0.5730617, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    PrefabInstanceComponent:
+      Prefab: 13390120076805450648
+      Nested:
+        - Entity: 16939849262732444458
+          Structure:
+            - Kind: RemovedEntity
+              Entity: 9902072197686504228
+              Component: ""
+              Value: Empty Entity
+  - Entity: 16939849262732444458
+    TagComponent:
+      Tag: Ball
     TransformComponent:
       Translation: [0, 0, 0]
       Rotation: [0, 0, 0]
       Scale: [1, 1, 1]
-    EnvironmentLightComponent:
-      TexturePath: EnvironmentMaps/shanghai_bund_4k_cube_bc6u.dds
-      RadianceScale: [4, 4, 4]
-      Rotation: 0
-      Enabled: true
-  - Entity: 4510381988304553934
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    PrefabInstanceComponent:
+      Prefab: 7311209448126535121
+      Overrides:
+        - Entity: 9902072197686504228
+          Component: PointLightComponent
+          Field: Color
+          Value: "[0, 1, 0.22393823]"
+  - Entity: 1274543216364832366
     TagComponent:
-      Tag: Scene Camera
+      Tag: Ball
     TransformComponent:
-      Translation: [0, 3.3, 0]
+      Translation: [0, 0, 0]
       Rotation: [0, 0, 0]
       Scale: [1, 1, 1]
-    CameraComponent:
-      Camera:
-        ProjectionType: 0
-        PerspectiveFOV: 1.04
-        PerspectiveNear: 0.001
-        PerspectiveFar: 1000
-        OrthographicSize: 10
-        OrthographicNear: -1
-        OrthographicFar: 1
-      Primary: true
-      FixedAspectRatio: false
-      AutoExposure: true
-      ExposureCompensation: 0.6
-      AutoExposureMinEV: -4
-      AutoExposureMaxEV: 6
-    ScriptComponent:
-      Classes:
-        - Facerun.CameraFollow
-      EntityReferences:
-        - Class: Facerun.CameraFollow
-          Field: Target
-          Entity: 6787496459119117713
-      FieldOverrides:
-        - Class: Facerun.CameraFollow
-          Field: Distance
-          Type: Float
-          Value: 0.6
-        - Class: Facerun.CameraFollow
-          Field: Height
-          Type: Float
-          Value: 4.3
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    PrefabInstanceComponent:
+      Prefab: 7311209448126535121
+      Overrides:
+        - Entity: 9902072197686504228
+          Component: TagComponent
+          Field: Tag
+          Value: Glow
+  - Entity: 6300395266454845038
+    TagComponent:
+      Tag: Ball
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    PrefabInstanceComponent:
+      Prefab: 7311209448126535121
+      Structure:
+        - Kind: RemovedEntity
+          Entity: 9902072197686504228
+          Component: ""
+          Value: Empty Entity
+  - Entity: 2185388781940527173
+    TagComponent:
+      Tag: s
+    TransformComponent:
+      Translation: [-2.7336595, -1.5410717, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    PrefabInstanceComponent:
+      Prefab: 18022752891400794819
+      Overrides:
+        - Entity: 4510381988304553934
+          Component: ScriptComponent
+          Field: FieldOverrides
+          Value: "[{Class: Facerun.CameraFollow, Field: Height, Type: Float, Value: 98.1}, {Class: Facerun.CameraFollow, Field: Distance, Type: Float, Value: 149.9}]"

@@ -155,6 +155,83 @@ namespace Nox
         ModelNodeComponent(const ModelNodeComponent&) = default;
     };
 
+    // One field of one component of one entity of a prefab instance that differs from the prefab (docs/Prefab_Architecture_Plan_2026.md
+    // P5). Found by comparing the entity's serialized components with the prefab's, so it works for every component; applied by
+    // patching the prefab's text before the entities are built.
+    struct PrefabPropertyOverride
+    {
+        uint64_t Entity = 0;   // the entity's id in the prefab file
+        std::string Component; // the component's YAML key, e.g. "RigidBody3DComponent"
+        std::string Field;     // a field of it, e.g. "AngularDamping"
+        std::string Value;     // its value as YAML text, e.g. "0.9" or "[1, 0, 0]"
+
+        bool SameField(const PrefabPropertyOverride& other) const
+        {
+            return Entity == other.Entity && Component == other.Component && Field == other.Field;
+        }
+    };
+
+    // A change to the STRUCTURE of a prefab instance (P6a): an entity of the prefab that was deleted on this instance, a component of
+    // one of its entities that was removed, or one that was added. (Added entities are ordinary scene entities below the spawned
+    // ones and save with the scene.) Found by comparing the entity's serialized component keys with the prefab's.
+    struct PrefabStructureChange
+    {
+        enum class ChangeKind : uint8_t { RemovedEntity, RemovedComponent, AddedComponent };
+
+        ChangeKind Kind = ChangeKind::RemovedEntity;
+        uint64_t Entity = 0;   // the entity's id in the prefab file
+        std::string Component; // the component's YAML key (unused for a removed entity)
+        std::string Value;     // an added component: its fields as YAML text
+
+        bool SameChange(const PrefabStructureChange& other) const
+        {
+            return Kind == other.Kind && Entity == other.Entity && Component == other.Component;
+        }
+    };
+
+    // The differences of a prefab instance that sits INSIDE another prefab's instance (nested prefabs, P6b). The inner instance's own
+    // entities are spawned, not saved, so the outer instance saves what differs from what the prefab file says about the inner one.
+    struct PrefabNestedChange
+    {
+        uint64_t Entity = 0; // the inner instance's root: its id in the outer prefab's file
+        std::vector<PrefabPropertyOverride> Overrides;
+        std::vector<PrefabStructureChange> Structure;
+        std::vector<PrefabNestedChange> Nested; // instances inside the inner one
+    };
+
+    // Root of a prefab instance placed in a scene (Stage C, docs/Prefab_Architecture_Plan_2026.md): the entities of the
+    // prefab (.nprefab) are spawned from the asset once it is loaded (PrefabInstance::SpawnPending), and only this component,
+    // the root's own name/transform/parent/folder are saved for them.
+    struct PrefabInstanceComponent
+    {
+        AssetHandle Prefab = 0;
+        bool Spawned = false; // runtime only
+        // A freshly placed instance takes the rotation and scale of the prefab's root when it spawns (its position is where it
+        // was placed); saved instances keep their own. Runtime only, cleared by the spawn.
+        bool InitTransform = false;
+        // What differs from the prefab: applied when the instance spawns. Once it is spawned the entities hold the values and this
+        // is only what was captured last (PrefabInstance::CollectOverrides works it out from the entities).
+        std::vector<PrefabPropertyOverride> Overrides;
+        std::vector<PrefabStructureChange> Structure; // deleted entities, removed and added components (same rule as Overrides)
+        // The name a spawned entity had when it was deleted on this instance (prefab file id -> name): shown for the deletion, since the
+        // entity itself is gone. Filled by Scene::DestroyEntity and from `Structure` when the instance spawns.
+        std::unordered_map<uint64_t, std::string> RemovedNames;
+        std::vector<PrefabNestedChange> Nested; // prefab instances inside this one that differ from the prefab's own text of them
+
+        PrefabInstanceComponent() = default;
+        PrefabInstanceComponent(const PrefabInstanceComponent&) = default;
+    };
+
+    // An entity spawned from a prefab instance (never saved: it is spawned again on load).
+    struct PrefabNodeComponent
+    {
+        UUID Instance = 0;    // the instance root
+        uint64_t LocalId = 0; // the entity's id in the prefab file
+
+        PrefabNodeComponent() = default;
+        PrefabNodeComponent(const PrefabNodeComponent&) = default;
+    };
+
     // Following KHR_Punctual
     struct DirectionalLightComponent
     {
@@ -474,7 +551,7 @@ namespace Nox
 
     using AllComponents = 
         ComponentGroup<TransformComponent, WorldTransformComponent, RelationshipComponent, DirtyTransformComponent, FolderComponent,
-        MeshComponent, MaterialComponent, ModelInstanceComponent, ModelNodeComponent, DirectionalLightComponent, PointLightComponent, SpotLightComponent, EnvironmentLightComponent, AnimatorComponent,
+        MeshComponent, MaterialComponent, ModelInstanceComponent, ModelNodeComponent, PrefabInstanceComponent, PrefabNodeComponent, DirectionalLightComponent, PointLightComponent, SpotLightComponent, EnvironmentLightComponent, AnimatorComponent,
         SpriteRendererComponent,
             CircleRendererComponent, CameraComponent, ScriptComponent,
             /*NativeScriptComponent,*/ RigidBody2DComponent, BoxCollider2DComponent,

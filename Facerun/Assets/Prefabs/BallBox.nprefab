@@ -1,0 +1,32 @@
+Prefab: Ball 2
+Root: 237968215358581139
+Entities:
+  - Entity: 237968215358581139
+    TagComponent:
+      Tag: Ball 2
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        - 16939849262732444458
+  - Entity: 16939849262732444458
+    TagComponent:
+      Tag: Ball
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RelationshipComponent:
+      Parent: 0
+      Children:
+        []
+    PrefabInstanceComponent:
+      Prefab: 7311209448126535121
+      Overrides:
+        - Entity: 9902072197686504228
+          Component: PointLightComponent
+          Field: Color
+          Value: "[0, 1, 0.22393823]"

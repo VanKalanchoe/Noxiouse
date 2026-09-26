@@ -1,5 +1,6 @@
 #include "SceneHierarchyPanel.h"
 
+#include <cctype>
 #include <imgui.h>
 #include <imgui_internal.h>
 #include "misc/cpp/imgui_stdlib.h"
@@ -10,6 +11,8 @@
 #include "NoxCore/Asset/MaterialSerializer.h"
 #include "NoxCore/Renderer/Mesh.h"
 #include "NoxCore/Scene/ModelInstance.h"
+#include "NoxCore/Scene/Prefab.h"
+#include "NoxCore/Scene/PrefabInstance.h"
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Animation/Animator.h"
 #include "NoxCore/Project/Project.h"
@@ -399,6 +402,43 @@ namespace Nox
             m_PendingFolderDelete = path;
     }
 
+    // An override's value for display: the numbers that are asset handles (a material, a mesh, a clip) become the asset's file name.
+    static std::string PrettyOverrideValue(const std::string& text)
+    {
+        std::string result;
+        for (size_t i = 0; i < text.size();)
+        {
+            if (!std::isdigit(static_cast<unsigned char>(text[i])))
+            {
+                result += text[i++];
+                continue;
+            }
+            size_t end = i;
+            while (end < text.size() && std::isdigit(static_cast<unsigned char>(text[end])))
+                ++end;
+            const std::string digits = text.substr(i, end - i);
+            i = end;
+
+            if (digits.size() >= 10 && digits.size() <= 20)
+            {
+                try
+                {
+                    const AssetHandle handle(std::stoull(digits));
+                    if (AssetManager::IsAssetHandleValid(handle))
+                    {
+                        result += Project::GetActive()->GetEditorAssetManager()->GetMetadata(handle).FilePath.filename().string();
+                        continue;
+                    }
+                }
+                catch (...)
+                {
+                }
+            }
+            result += digits;
+        }
+        return result;
+    }
+
     void SceneHierarchyPanel::DrawEntityNode(Entity entity)
     {
         auto& tag = entity.GetComponent<TagComponent>().Tag;
@@ -417,7 +457,14 @@ namespace Nox
         if (!hasChildren)
             flags |= ImGuiTreeNodeFlags_Leaf;
 
+        // Prefab instances are blue (Unity's convention); the entities spawned from the prefab are a dimmer blue.
+        const bool prefabRoot = entity.HasComponent<PrefabInstanceComponent>();
+        const bool prefabNode = entity.HasComponent<PrefabNodeComponent>();
+        if (prefabRoot || prefabNode)
+            ImGui::PushStyleColor(ImGuiCol_Text, prefabRoot ? ImVec4(0.45f, 0.7f, 1.0f, 1.0f) : ImVec4(0.45f, 0.7f, 1.0f, 0.6f));
         bool opened = ImGui::TreeNodeEx((void*)(uint64_t)(uint32_t)entity, flags, tag.c_str());
+        if (prefabRoot || prefabNode)
+            ImGui::PopStyleColor();
 
         // --- Multi-selection click handling ---
         if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen())
@@ -449,8 +496,8 @@ namespace Nox
             m_PendingSingleSelect = {};
         }
 
-        // --- 1. DRAG SOURCE: Pick up this entity to drag it ---
-        if (ImGui::BeginDragDropSource())
+        // --- 1. DRAG SOURCE: Pick up this entity to drag it (not the entities of a prefab instance: they belong to it) ---
+        if (!prefabNode && ImGui::BeginDragDropSource())
         {
             UUID entityID = entity.GetUUID();
             ImGui::SetDragDropPayload("SCENE_HIERARCHY_ENTITY", &entityID, sizeof(UUID));
@@ -652,6 +699,9 @@ namespace Nox
             bool open = ImGui::TreeNodeEx((void*)typeid(T).hash_code(), treeNodeFlags, name.c_str());
             ImGui::PopStyleVar();
             ImGui::SameLine(contentRegionAvailable.x - lineHeight * 0.5f);
+            // Every component has a "+" button and a settings popup: without a scope of its own per component they all share
+            // one ID ("+", "ComponentSettings") and ImGui reports conflicting IDs.
+            ImGui::PushID(reinterpret_cast<void*>(typeid(T).hash_code()));
             if (ImGui::Button("+", ImVec2{lineHeight, lineHeight}))
             {
                 ImGui::OpenPopup("ComponentSettings");
@@ -666,6 +716,7 @@ namespace Nox
                 }
                 ImGui::EndPopup();
             }
+            ImGui::PopID();
 
             if (open)
             {
@@ -739,6 +790,110 @@ namespace Nox
         }
 
         ImGui::PopItemWidth();
+
+        // A prefab instance root: where it comes from, and the way out (Unpack turns it into ordinary entities).
+        if (entity.HasComponent<PrefabInstanceComponent>())
+        {
+            const AssetHandle prefabHandle = entity.GetComponent<PrefabInstanceComponent>().Prefab;
+            std::string prefabName = "(missing asset)";
+            if (AssetManager::IsAssetHandleValid(prefabHandle))
+                prefabName = Project::GetActive()->GetEditorAssetManager()->GetMetadata(prefabHandle).FilePath.filename().string();
+            ImGui::TextColored(ImVec4(0.45f, 0.7f, 1.0f, 1.0f), "Prefab: %s", prefabName.c_str());
+            if (const Prefab* prefabAsset = AssetManager::FindLoadedAsset<Prefab>(prefabHandle);
+                prefabAsset && prefabAsset->Base != 0 && AssetManager::IsAssetHandleValid(prefabAsset->Base))
+            {
+                ImGui::SameLine();
+                ImGui::TextDisabled("(variant of %s)", Project::GetActive()->GetEditorAssetManager()->GetMetadata(prefabAsset->Base).FilePath.filename().string().c_str());
+            }
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Open") && m_OpenAsset)
+                m_OpenAsset(prefabHandle);
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Unpack"))
+                PrefabInstance::Unpack(*m_Context, entity);
+            ImGui::TextDisabled("What you change here (fields, components, entities) is kept on this instance as an override; Apply writes it into the prefab.");
+
+            // Overrides: everything that differs from the prefab (worked out from the spawned entities): fields, deleted entities,
+            // removed and added components, entities attached below.
+            const std::vector<PrefabInstance::OverrideEntry> overrides = PrefabInstance::ListOverrides(*m_Context, entity);
+            const std::string overridesHeader = "Overrides (" + std::to_string(overrides.size()) + ")###PrefabOverrides";
+            if (ImGui::CollapsingHeader(overridesHeader.c_str()))
+            {
+                if (overrides.empty())
+                    ImGui::TextDisabled("Nothing differs from the prefab.");
+
+                using Kind = PrefabInstance::OverrideEntry::EntryKind;
+                auto componentName = [](std::string name)
+                {
+                    if (name.size() > 9 && name.compare(name.size() - 9, 9, "Component") == 0)
+                        name.resize(name.size() - 9);
+                    return name;
+                };
+
+                bool changedInstance = false;
+                for (size_t i = 0; i < overrides.size() && !changedInstance; ++i)
+                {
+                    const PrefabInstance::OverrideEntry& entry = overrides[i];
+                    const std::string targetName = entry.TargetName.empty() ? std::string("?") : entry.TargetName;
+
+                    std::string label;
+                    switch (entry.Kind)
+                    {
+                    case Kind::Property:
+                        label = targetName + ": " + componentName(entry.Component) + "." + entry.Field + " = " + PrettyOverrideValue(entry.Value);
+                        break;
+                    case Kind::RemovedEntity:
+                        label = "- Entity: " + targetName + " (deleted)";
+                        break;
+                    case Kind::RemovedComponent:
+                        label = "- Component: " + targetName + " / " + componentName(entry.Component);
+                        break;
+                    case Kind::AddedComponent:
+                        label = "+ Component: " + targetName + " / " + componentName(entry.Component);
+                        break;
+                    case Kind::AddedEntity:
+                        label = "+ Entity: " + entry.Name + " (below " + targetName + ")";
+                        break;
+                    }
+
+                    ImGui::PushID(static_cast<int>(i));
+                    ImGui::TextColored(ImVec4(0.45f, 0.7f, 1.0f, 1.0f), "%s", label.c_str());
+                    ImGui::SameLine();
+                    if (ImGui::SmallButton("Revert"))
+                    {
+                        PrefabInstance::RevertOverride(*m_Context, entity, &entry);
+                        changedInstance = true;
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::SmallButton("Apply"))
+                    {
+                        PrefabInstance::ApplyOverride(*m_Context, entity, entry);
+                        changedInstance = true;
+                    }
+                    if (ImGui::IsItemHovered())
+                        ImGui::SetTooltip("Apply writes this change into the prefab: every instance takes it.");
+                    ImGui::PopID();
+                }
+                if (!changedInstance && !overrides.empty() && ImGui::Button("Revert All"))
+                {
+                    PrefabInstance::RevertOverride(*m_Context, entity, nullptr);
+                    changedInstance = true;
+                }
+
+                // The spawned entities are made again: what was selected below the instance is gone.
+                if (changedInstance)
+                    SetSelectedEntity(entity);
+            }
+        }
+
+        if (entity.HasComponent<PrefabNodeComponent>())
+        {
+            Entity instance = m_Context->GetEntityByUUID(entity.GetComponent<PrefabNodeComponent>().Instance);
+            ImGui::TextColored(ImVec4(0.45f, 0.7f, 1.0f, 0.8f), "Part of prefab instance '%s'.", instance ? instance.GetName().c_str() : "?");
+            ImGui::TextDisabled("Changes here are kept as overrides on the instance (listed there); Apply writes them into the prefab.");
+            if (instance && ImGui::SmallButton("Select Instance"))
+                SetSelectedEntity(instance);
+        }
 
         DrawComponent<TransformComponent>("Transform", entity, [this, entity](auto& component)
         {

@@ -1,5 +1,6 @@
 #include "Scene.h"
 #include "ModelInstance.h"
+#include "PrefabInstance.h"
 
 #include <box2d/box2d.h>
 #include <algorithm>
@@ -222,6 +223,15 @@ namespace Nox
         if (!entity)
             return;
 
+        // A spawned entity deleted on a prefab instance: the instance remembers its name (the deletion is listed under it).
+        if (entity.HasComponent<PrefabNodeComponent>())
+        {
+            const PrefabNodeComponent& node = entity.GetComponent<PrefabNodeComponent>();
+            Entity instanceRoot = GetEntityByUUID(node.Instance);
+            if (instanceRoot && instanceRoot.HasComponent<PrefabInstanceComponent>())
+                instanceRoot.GetComponent<PrefabInstanceComponent>().RemovedNames[node.LocalId] = entity.GetName();
+        }
+
         // A node deleted from a model instance stays deleted when the instance spawns again (it is saved as removed).
         if (entity.HasComponent<ModelNodeComponent>())
         {
@@ -261,6 +271,17 @@ namespace Nox
             }
         }
         
+        // Running: its physics body, character and script instances go with it.
+        if (m_Physics3DScene)
+        {
+            if (entity.HasComponent<RigidBody3DComponent>())
+                m_Physics3DScene->DestroyBody(entity);
+            if (entity.HasComponent<CharacterController3DComponent>())
+                m_Physics3DScene->DestroyCharacter(entity);
+        }
+        if (m_IsRunning && entity.HasComponent<ScriptComponent>())
+            ScriptEngine::OnDestroyEntity(entity);
+
         m_EntityMap.erase(entity.GetUUID());
         m_Registry.destroy(entity);
         m_AssetReferencesChanged = true;
@@ -274,6 +295,10 @@ namespace Nox
         // Before they spawn, instances reference their model only.
         for (auto entity : m_Registry.view<ModelInstanceComponent>())
             outHandles.insert(m_Registry.get<ModelInstanceComponent>(entity).Model);
+
+        // The prefab asset of an instance; its spawned entities are ordinary entities and are collected like any other.
+        for (auto entity : m_Registry.view<PrefabInstanceComponent>())
+            outHandles.insert(m_Registry.get<PrefabInstanceComponent>(entity).Prefab);
 
         for (auto entity : m_Registry.view<MaterialComponent>())
         {
@@ -293,6 +318,66 @@ namespace Nox
             outHandles.insert(m_Registry.get<SpriteRendererComponent>(entity).Texture);
 
         outHandles.erase(AssetHandle(0));
+    }
+
+    Entity Scene::Instantiate(AssetHandle prefab, const glm::vec3& position)
+    {
+        std::vector<Entity> spawned;
+        Entity root = PrefabInstance::Instantiate(*this, prefab, position, spawned);
+        if (!root)
+            return {};
+
+        // The entities of a prefab placed while the scene runs start like the ones it began with.
+        if (m_Physics3DScene)
+        {
+            for (Entity entity : spawned)
+            {
+                if (entity.HasComponent<RigidBody3DComponent>())
+                    m_Physics3DScene->CreateBody(entity);
+                if (entity.HasComponent<CharacterController3DComponent>())
+                    m_Physics3DScene->CreateCharacter(entity);
+            }
+        }
+        // Their scripts start after the script loop, not here: Instantiate is called from a script (managed code), and native code
+        // called from managed code must not call back into managed code (the runtime aborts).
+        if (m_IsRunning)
+        {
+            for (Entity entity : spawned)
+            {
+                if (entity.HasComponent<ScriptComponent>())
+                    m_PendingScriptStart.push_back(entity.GetUUID());
+            }
+        }
+        return root;
+    }
+
+    void Scene::QueueDestroy(Entity entity)
+    {
+        if (entity)
+            m_PendingDestroy.push_back(entity.GetUUID());
+    }
+
+    void Scene::StartPendingScripts()
+    {
+        std::vector<UUID> pending = std::move(m_PendingScriptStart);
+        m_PendingScriptStart.clear();
+        for (UUID id : pending)
+        {
+            Entity entity = GetEntityByUUID(id);
+            if (entity && entity.HasComponent<ScriptComponent>())
+                ScriptEngine::OnCreateEntity(entity);
+        }
+    }
+
+    void Scene::FlushPendingDestroy()
+    {
+        std::vector<UUID> pending = std::move(m_PendingDestroy);
+        m_PendingDestroy.clear();
+        for (UUID id : pending)
+        {
+            if (Entity entity = GetEntityByUUID(id))
+                DestroyEntity(entity);
+        }
     }
 
     void Scene::OnRuntimeStart()
@@ -341,9 +426,20 @@ namespace Nox
         const bool step = !m_IsPaused || m_StepFrames-- > 0;
         if (step)
         {
-            auto scripts = m_Registry.view<ScriptComponent>();
-            for (auto entity : scripts)
-                ScriptEngine::OnUpdateEntity(Entity(entity, this), static_cast<float>(ts));
+            // Collected first: a script may instantiate prefabs (new entities, new script components) or destroy entities.
+            std::vector<entt::entity> scriptEntities;
+            {
+                auto scripts = m_Registry.view<ScriptComponent>();
+                scriptEntities.assign(scripts.begin(), scripts.end());
+            }
+            for (entt::entity handle : scriptEntities)
+            {
+                if (m_Registry.valid(handle))
+                    ScriptEngine::OnUpdateEntity(Entity(handle, this), static_cast<float>(ts));
+            }
+            // Both run here, outside every script call: they call into managed code (OnCreate / OnDestroy).
+            StartPendingScripts();
+            FlushPendingDestroy();
         }
         RunUpdateSystems(ts, step, step);
         SyncGpuScene();
@@ -450,6 +546,7 @@ namespace Nox
         {
             NOX_PROFILE_SCOPE("Spawn Model Instances");
             ModelInstance::SpawnPending(*this);
+            PrefabInstance::SpawnPending(*this);
         }
 
         // 1. Another scene rendered last (e.g. edit <-> play): register every mesh entity again.
@@ -844,7 +941,7 @@ namespace Nox
         // Relationship links contain entity UUIDs and must be rebuilt. Copying
         // them directly makes duplicated glTF hierarchies share their children.
         using DuplicatableComponents = ComponentGroup<
-            MeshComponent, MaterialComponent, ModelInstanceComponent, DirectionalLightComponent,
+            MeshComponent, MaterialComponent, ModelInstanceComponent, PrefabInstanceComponent, DirectionalLightComponent,
             PointLightComponent, SpotLightComponent, EnvironmentLightComponent, AnimatorComponent, FolderComponent,
             SpriteRendererComponent, CircleRendererComponent, CameraComponent,
             ScriptComponent, RigidBody2DComponent, BoxCollider2DComponent,
@@ -869,6 +966,15 @@ namespace Nox
                 instance.Overrides = ModelInstance::CollectOverrides(*this, source);
                 instance.Spawned = false;
             }
+            // A duplicated prefab instance spawns its own entities from the prefab.
+            if (duplicate.HasComponent<PrefabInstanceComponent>())
+            {
+                auto& instance = duplicate.GetComponent<PrefabInstanceComponent>();
+                instance.Overrides = PrefabInstance::CollectOverrides(*this, source);
+                instance.Structure = PrefabInstance::CollectStructureChanges(*this, source);
+                instance.Nested = PrefabInstance::CollectNested(*this, source);
+                instance.Spawned = false;
+            }
             if (duplicate.HasComponent<AnimatorComponent>())
                 duplicatedAnimators.push_back(duplicate);
 
@@ -889,7 +995,8 @@ namespace Nox
             for (UUID childUUID : children)
             {
                 Entity child = GetEntityByUUID(childUUID);
-                if (child && !(child.HasComponent<ModelNodeComponent>() && source.HasComponent<ModelInstanceComponent>()))
+                if (child && !(child.HasComponent<ModelNodeComponent>() && source.HasComponent<ModelInstanceComponent>()) &&
+                    !(child.HasComponent<PrefabNodeComponent>() && source.HasComponent<PrefabInstanceComponent>()))
                     duplicateHierarchy(child, duplicate);
             }
 
@@ -1217,6 +1324,16 @@ namespace Nox
 
     template <>
     void Scene::OnComponentAdded<FolderComponent>(Entity entity, FolderComponent& component)
+    {
+    }
+
+    template <>
+    void Scene::OnComponentAdded<PrefabInstanceComponent>(Entity entity, PrefabInstanceComponent& component)
+    {
+    }
+
+    template <>
+    void Scene::OnComponentAdded<PrefabNodeComponent>(Entity entity, PrefabNodeComponent& component)
     {
     }
     

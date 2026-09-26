@@ -635,7 +635,7 @@ UE Level Instances / Packed Level Actors cover "a group of things placed as one"
 Open decisions (asked of the user before Stage A starts): (1) Stage B keeps `ModelInstance` as the prefab mechanism vs
 a new saved-entities prefab asset (would put Bistro back to ~6000 saved entities); (2) where the import options
 live: the existing MeshSource import dialog (double-click a `.gltf` in the Content Browser).
-- [ ] **Stage C -- Prefab asset (later).** A saved template of authored entities + components (door with collider/script,
+- [ ] **Stage C -- Prefab asset (planned 2026-09-26, see `Prefab_Architecture_Plan_2026.md`).** A saved template of authored entities + components (door with collider/script,
   enemy with weapon), instanced in scenes with overrides. Complements `ModelInstance` (imported-file expansion):
   prefabs may reference model instances instead of expanding them, so big imports never become thousands of saved
   entities.

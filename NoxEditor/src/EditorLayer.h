@@ -43,6 +43,11 @@ namespace Nox
         void OpenScene();
         void OpenScene(AssetHandle handle);
         void PlaceAssets(const std::vector<AssetHandle>& handles, const glm::vec3& point, const std::string& folder);
+        // Writes a prefab from the dragged hierarchy entity (or the whole selection when it is part of it) into the Content
+        // Browser folder (relative to the asset directory) and registers it. The scene is not changed. 0 on failure.
+        AssetHandle CreatePrefab(UUID dragged, const std::filesystem::path& relativeFolder);
+        // A new variant of a prefab in the Content Browser folder (relative to the asset directory), registered; 0 on failure.
+        AssetHandle CreateVariant(AssetHandle base, const std::filesystem::path& relativeFolder);
         void SaveScene();
         void SaveSceneAs();
         
@@ -64,6 +69,13 @@ namespace Nox
         // types with none. What double-clicking an asset in the Content Browser or an inspector reference calls.
         void OpenAsset(AssetHandle handle);
 
+        // Prefab Mode (docs/Prefab_Architecture_Plan_2026.md P3): the prefab's entities as a scene of their own, edited in
+        // isolation. The level is kept aside and comes back on exit; Save writes the .nprefab, reloads the asset and spawns every
+        // instance in the level again.
+        void OpenPrefabMode(AssetHandle handle);
+        void SavePrefabMode();
+        void ExitPrefabMode();
+
         // Any open node-graph editor window focused or hovered: the scene's shortcuts and picking must ignore input.
         bool AnyNodeGraphEditorWantsInput() const;
         bool AnyNodeGraphEditorHovered() const; // mouse only: focus alone must not swallow a click elsewhere
@@ -75,6 +87,18 @@ namespace Nox
         Ref<Scene> m_ActiveScene;
         Ref<Scene> m_EditorScene;
         std::filesystem::path m_EditorScenePath;
+
+        struct PrefabModeState
+        {
+            bool Active = false;
+            AssetHandle Prefab = 0;
+            std::string Name;
+            Ref<Scene> ReturnScene;                // the level being edited before Prefab Mode
+            std::filesystem::path ReturnScenePath;
+            UUID Root = 0;                         // the prefab's root entity in the prefab scene
+            bool Variant = false;                  // a variant: the scene holds an instance of its base carrying the variant's changes
+        };
+        PrefabModeState m_PrefabMode;
         
         Entity m_HoveredEntity;
 

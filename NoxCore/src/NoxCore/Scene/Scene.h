@@ -84,6 +84,13 @@ namespace Nox
 
         IPhysics3DScene* GetPhysics3DScene() { return m_Physics3DScene.get(); }
 
+        // Runtime: places a prefab in the scene and spawns it at once (see PrefabInstance::Instantiate); physics bodies and scripts
+        // of its entities start as if the scene had begun with them. Returns the instance root (invalid when it fails).
+        Entity Instantiate(AssetHandle prefab, const glm::vec3& position);
+        // Destroys the entity at the end of the script update (a script may destroy itself: nothing in the middle of a frame's
+        // script loop is removed).
+        void QueueDestroy(Entity entity);
+
         // Outliner folders (FolderComponent paths). Folders that hold entities exist through them; this list keeps the ones the
         // user made and left empty. Paths use '/' for nesting.
         const std::vector<std::string>& GetFolders() const { return m_Folders; }
@@ -103,6 +110,8 @@ namespace Nox
 
         // Frame graph (§5.3): Game Update systems, then (after BeginScene on the main thread) the submission systems.
         void RegisterSystems();
+        void FlushPendingDestroy();
+        void StartPendingScripts();
         void RunUpdateSystems(Timestep ts, bool stepPhysics, bool stepAnimation);
         void RunSubmitSystems();
         // Main thread after each graph: deferred structural changes, then loads of assets the systems found unloaded.
@@ -139,6 +148,8 @@ namespace Nox
         std::unique_ptr<IPhysics3DScene> m_Physics3DScene;
         std::vector<std::string> m_Folders;
         bool m_IsRunning = false;
+        std::vector<UUID> m_PendingDestroy;
+        std::vector<UUID> m_PendingScriptStart;
         bool m_IsPaused = false;
         int m_StepFrames = 0;
         bool m_AssetReferencesChanged = false;

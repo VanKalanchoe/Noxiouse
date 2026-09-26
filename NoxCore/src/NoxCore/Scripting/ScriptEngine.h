@@ -22,6 +22,7 @@ namespace Nox
         static void OnRuntimeStart(Scene* scene);
         static void OnRuntimeStop();
         static void OnCreateEntity(Entity entity);
+        static void OnDestroyEntity(Entity entity);
         static void OnUpdateEntity(Entity entity, float deltaTime);
         static bool EntityClassExists(std::string_view fullName);
         static std::vector<ScriptFieldInfo> GetExposedFields(std::string_view fullName);

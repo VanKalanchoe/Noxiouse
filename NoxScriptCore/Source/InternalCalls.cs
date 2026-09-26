@@ -7,6 +7,13 @@ internal static unsafe class InternalCalls
 #pragma warning disable CS0649 // Assigned by Coral when the assembly is loaded.
     private static delegate*<NativeString, void> Log_Info;
     private static delegate*<int, uint> Input_IsKeyDown;
+    private static delegate*<int, uint> Input_IsMouseButtonDown;
+    private static delegate*<NativeString, float, float, float, ulong> Scene_Instantiate;
+    private static delegate*<ulong, void> Scene_Destroy;
+    private static delegate*<ulong, float, float, float, void> RigidBody_SetLinearVelocity;
+    private static delegate*<ulong, float, float, float, void> RigidBody_AddForce;
+    private static delegate*<ulong, float, float, float, void> RigidBody_AddImpulse;
+    private static delegate*<ulong, Vector3*, void> RigidBody_GetLinearVelocity;
     private static delegate*<NativeString, ulong> Entity_FindByName;
     private static delegate*<ulong, NativeString, ulong> Entity_FindChild;
     private static delegate*<ulong, int, uint> Entity_HasComponent;
@@ -31,6 +38,32 @@ internal static unsafe class InternalCalls
     }
 
     internal static bool IsKeyDown(int keycode) => Input_IsKeyDown(keycode) != 0;
+
+    internal static bool IsMouseButtonDown(int button) => Input_IsMouseButtonDown(button) != 0;
+
+    internal static ulong InstantiatePrefab(string prefabPath, Vector3 position)
+    {
+        using NativeString nativePath = new(prefabPath);
+        return Scene_Instantiate(nativePath, position.X, position.Y, position.Z);
+    }
+
+    internal static void DestroyEntity(ulong entityID) => Scene_Destroy(entityID);
+
+    internal static void SetRigidBodyVelocity(ulong entityID, Vector3 velocity) =>
+        RigidBody_SetLinearVelocity(entityID, velocity.X, velocity.Y, velocity.Z);
+
+    internal static void AddRigidBodyForce(ulong entityID, Vector3 force) =>
+        RigidBody_AddForce(entityID, force.X, force.Y, force.Z);
+
+    internal static void AddRigidBodyImpulse(ulong entityID, Vector3 impulse) =>
+        RigidBody_AddImpulse(entityID, impulse.X, impulse.Y, impulse.Z);
+
+    internal static Vector3 GetRigidBodyVelocity(ulong entityID)
+    {
+        Vector3 value = default;
+        RigidBody_GetLinearVelocity(entityID, &value);
+        return value;
+    }
 
     internal static ulong FindEntityByName(string name)
     {

@@ -5,6 +5,9 @@ public abstract class EntityBehaviour
     // Assigned by the native runtime immediately after construction.
     public ulong EntityID;
 
+    /// <summary>The entity this script is on.</summary>
+    public Entity Self => new(EntityID);
+
     public bool HasComponent<T>() where T : Component, new() =>
         new Entity(EntityID).HasComponent<T>();
 

@@ -133,6 +133,25 @@ namespace Nox
         m_ShowImportModal = true;
     }
 
+    void ContentBrowserPanel::BeginRename(AssetHandle handle)
+    {
+        if (handle == 0 || !m_Project->GetEditorAssetManager()->CanRename(handle))
+            return;
+        const AssetMetadata metadata = m_Project->GetEditorAssetManager()->GetMetadata(handle);
+        strncpy_s(m_RenameBuffer, metadata.FilePath.stem().string().c_str(), sizeof(m_RenameBuffer) - 1);
+        m_RenameHandle = handle;
+        m_RenameFocus = true;
+    }
+
+    void ContentBrowserPanel::RequestPrefabFromDrop(const ImGuiPayload* payload, const std::filesystem::path& folder)
+    {
+        if (!payload || payload->DataSize != sizeof(UUID) || !m_CreatePrefab)
+            return;
+        m_HasPrefabDrop = true;
+        m_PrefabDropEntity = *static_cast<const UUID*>(payload->Data);
+        m_PrefabDropFolder = folder;
+    }
+
     void ContentBrowserPanel::OnImGuiRender()
     {
         ImGui::Begin("Content Browser");
@@ -172,6 +191,53 @@ namespace Nox
         const float cellSize = thumbnailSize + padding;
         int columnCount = static_cast<int>(ImGui::GetContentRegionAvail().x / cellSize);
         columnCount = std::max(columnCount, 1);
+        // Entities dropped from the hierarchy: the prefab is created in the folder they were dropped on, and its name goes into
+        // rename mode (in a folder tile's folder: the browser opens it).
+        if (m_HasPrefabDrop)
+        {
+            m_HasPrefabDrop = false;
+            const std::filesystem::path relativeFolder = m_PrefabDropFolder.lexically_relative(m_BaseDirectory);
+            const AssetHandle created = m_CreatePrefab ? m_CreatePrefab(m_PrefabDropEntity, relativeFolder == "." ? std::filesystem::path() : relativeFolder) : AssetHandle(0);
+            if (created != 0)
+            {
+                m_CurrentDirectory = m_PrefabDropFolder;
+                RefreshAssetTree();
+                m_Selected.clear();
+                m_Selected.insert(created);
+                BeginRename(created);
+            }
+        }
+
+        // Create Variant (right-click on a prefab): the variant appears next to it and its name goes into rename mode.
+        if (m_HasVariantRequest)
+        {
+            m_HasVariantRequest = false;
+            const std::filesystem::path relativeFolder = m_CurrentDirectory.lexically_relative(m_BaseDirectory);
+            const AssetHandle created = m_CreateVariant ? m_CreateVariant(m_VariantBase, relativeFolder == "." ? std::filesystem::path() : relativeFolder) : AssetHandle(0);
+            if (created != 0)
+            {
+                RefreshAssetTree();
+                m_Selected.clear();
+                m_Selected.insert(created);
+                BeginRename(created);
+            }
+        }
+
+        // A finished rename (Enter, or clicking elsewhere; Escape leaves the default name).
+        if (m_RenameCommit)
+        {
+            m_RenameCommit = false;
+            if (m_RenameHandle != 0)
+            {
+                auto* assets = m_Project->GetEditorAssetManager().get();
+                const std::string current = assets->GetMetadata(m_RenameHandle).FilePath.stem().string();
+                if (!m_RenameCommitText.empty() && m_RenameCommitText != current && !assets->RenameAsset(m_RenameHandle, m_RenameCommitText))
+                    NOX_CORE_WARN("Could not rename '{}' to '{}' (the name is taken or has invalid characters)", current, m_RenameCommitText);
+            }
+            m_RenameHandle = 0;
+            RefreshAssetTree();
+        }
+
         if (m_EntriesDirectory != m_CurrentDirectory)
             RefreshAssetTree();
 
@@ -187,6 +253,12 @@ namespace Nox
                 if (!entry.IsDirectory)
                     m_Selected.insert(entry.Handle);
             }
+        }
+
+        if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && ImGui::IsKeyPressed(ImGuiKey_F2, false) &&
+            !ImGui::GetIO().WantTextInput && m_Selected.size() == 1)
+        {
+            BeginRename(*m_Selected.begin());
         }
 
         const int rowCount = (static_cast<int>(m_CurrentEntries.size()) + columnCount - 1) / columnCount;
@@ -216,6 +288,12 @@ namespace Nox
                         ImGui::PopStyleColor();
                         if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
                             m_CurrentDirectory = browserEntry.Path;
+                        if (ImGui::BeginDragDropTarget())
+                        {
+                            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("SCENE_HIERARCHY_ENTITY"))
+                                RequestPrefabFromDrop(payload, browserEntry.Path);
+                            ImGui::EndDragDropTarget();
+                        }
                     }
                     else
                     {
@@ -228,8 +306,11 @@ namespace Nox
 
                         const bool selected = m_Selected.contains(handle);
                         ImGui::PushStyleColor(ImGuiCol_Button, selected ? ImVec4(0.26f, 0.45f, 0.75f, 0.55f) : ImVec4(0, 0, 0, 0));
+                        // Prefabs are blue (icon and name), like prefab instances in the hierarchy.
+                        const bool isPrefab = metadata.Type == AssetType::Prefab;
                         const bool clicked = ImGui::ImageButton(browserEntry.Id.c_str(), thumbnail->getImTextureID(),
-                            {thumbnailSize, thumbnailSize}, {0, 1}, {1, 0});
+                            {thumbnailSize, thumbnailSize}, {0, 1}, {1, 0}, ImVec4(0, 0, 0, 0),
+                            isPrefab ? ImVec4(0.45f, 0.7f, 1.0f, 1.0f) : ImVec4(1, 1, 1, 1));
                         ImGui::PopStyleColor();
 
                         if (clicked)
@@ -280,6 +361,16 @@ namespace Nox
                             ImGui::EndDragDropSource();
                         }
 
+                        if (metadata.Type == AssetType::Prefab && ImGui::BeginPopupContextItem())
+                        {
+                            if (ImGui::MenuItem("Create Variant"))
+                            {
+                                m_HasVariantRequest = true;
+                                m_VariantBase = handle;
+                            }
+                            ImGui::EndPopup();
+                        }
+
                         if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
                         {
                             if (metadata.Type == AssetType::MeshSource)
@@ -298,18 +389,59 @@ namespace Nox
                     }
 
                     // One line, cut at the thumbnail's width; the full name is in the tooltip.
-                    const ImVec2 nameMin = ImGui::GetCursorScreenPos();
-                    ImGui::PushClipRect(nameMin, ImVec2(nameMin.x + thumbnailSize, nameMin.y + ImGui::GetTextLineHeight()), true);
-                    ImGui::TextUnformatted(browserEntry.Name.c_str());
-                    ImGui::PopClipRect();
-                    if (ImGui::IsItemHovered())
-                        ImGui::SetTooltip("%s", browserEntry.Name.c_str());
+                    if (!browserEntry.IsDirectory && browserEntry.Handle != 0 && browserEntry.Handle == m_RenameHandle)
+                    {
+                        ImGui::SetNextItemWidth(thumbnailSize);
+                        if (m_RenameFocus)
+                        {
+                            ImGui::SetKeyboardFocusHere();
+                            ImGui::SetScrollHereY(0.5f);
+                            m_RenameFocus = false;
+                        }
+                        const bool entered = ImGui::InputText("##rename", m_RenameBuffer, sizeof(m_RenameBuffer),
+                            ImGuiInputTextFlags_AutoSelectAll | ImGuiInputTextFlags_EnterReturnsTrue);
+                        if (entered || ImGui::IsItemDeactivated())
+                        {
+                            m_RenameCommit = true;
+                            m_RenameCommitText = m_RenameBuffer;
+                        }
+                    }
+                    else
+                    {
+                        const bool bluePrefabName = !browserEntry.IsDirectory && browserEntry.Metadata.Type == AssetType::Prefab;
+                        if (bluePrefabName)
+                            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.45f, 0.7f, 1.0f, 1.0f));
+                        const ImVec2 nameMin = ImGui::GetCursorScreenPos();
+                        ImGui::PushClipRect(nameMin, ImVec2(nameMin.x + thumbnailSize, nameMin.y + ImGui::GetTextLineHeight()), true);
+                        ImGui::TextUnformatted(browserEntry.Name.c_str());
+                        ImGui::PopClipRect();
+                        if (bluePrefabName)
+                            ImGui::PopStyleColor();
+                        if (ImGui::IsItemHovered())
+                            ImGui::SetTooltip("%s", browserEntry.Name.c_str());
+                    }
 
                     ImGui::EndGroup();
                 }
             }
         }
         clipper.End();
+
+        // The free space below the tiles takes entities dragged from the hierarchy (a new prefab in this folder). An item is
+        // needed for the drop target: BeginDragDropTarget binds to the last item.
+        {
+            const float reserved = ImGui::GetFrameHeightWithSpacing() * 2.0f;
+            const ImVec2 available = ImGui::GetContentRegionAvail();
+            ImGui::InvisibleButton("##content_browser_blank", ImVec2(available.x, std::max(available.y - reserved, 24.0f)));
+            if (ImGui::IsItemClicked())
+                m_Selected.clear();
+            if (ImGui::BeginDragDropTarget())
+            {
+                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("SCENE_HIERARCHY_ENTITY"))
+                    RequestPrefabFromDrop(payload, m_CurrentDirectory);
+                ImGui::EndDragDropTarget();
+            }
+        }
 
         ImGui::SliderFloat("Thumbnail Size", &thumbnailSize, 48.0f, 256.0f);
         ImGui::SliderFloat("Padding", &padding, 0.0f, 32.0f);

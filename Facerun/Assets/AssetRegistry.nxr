@@ -3,6 +3,40 @@ AssetRegistry:
     FilePath: Scenes/3D-Scene.nox
     SourceFilePath: Scenes/3D-Scene.nox
     Type: AssetType::Scene
+  - Handle: 793188436833368581
+    FilePath: Models/Sphere/Materials/Sphere_Material_0.nmat
+    SourceFilePath: Models/Sphere/Materials/Sphere_Material_0.nmat
+    Type: AssetType::Material
+  - Handle: 1548153807058576111
+    FilePath: Models/Sphere/Materials/Sphere_Material_0_Instance_10259240139944286235.nmat
+    SourceFilePath: Models/Sphere/Materials/Sphere_Material_0_Instance_10259240139944286235.nmat
+    Type: AssetType::Material
+  - Handle: 2611261257249010592
+    FilePath: Models/BlenderBox/Meshes/Cube.nsmesh
+    SourceFilePath: Models/BlenderBox/BlenderBox.glb
+    Type: AssetType::StaticMesh
+    MeshSettings:
+      ImportStaticMeshes: true
+      ImportSkeletalMeshes: false
+      ImportAnimations: false
+      ImportSkinWeights: true
+      StaticCombine: 0
+      SkeletalCombine: 0
+      SourceMeshIndex: 0
+      ImportScale: 1
+      MaterialBasePath: Models/BlenderBox/Meshes/BlenderBox.nsmesh
+  - Handle: 3309431264496079634
+    FilePath: Prefabs/Bistro Environment.nprefab
+    SourceFilePath: Prefabs/Bistro Environment.nprefab
+    Type: AssetType::Prefab
+  - Handle: 4161907531116903059
+    FilePath: AnimationGraphs/Fox_Locomotion.nanimgraph
+    SourceFilePath: AnimationGraphs/Fox_Locomotion.nanimgraph
+    Type: AssetType::AnimationGraph
+  - Handle: 4602662942619275579
+    FilePath: Models/Sphere/Materials/Sphere_Material_0_Instance_11052034753801396132.nmat
+    SourceFilePath: Models/Sphere/Materials/Sphere_Material_0_Instance_11052034753801396132.nmat
+    Type: AssetType::Material
   - Handle: 5289311689001640713
     FilePath: Models/Fox/Meshes/Fox.nmesh
     SourceFilePath: Models/Fox/Fox.gltf
@@ -16,10 +50,52 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 5757279013993788272
+    FilePath: Models/BlenderBox/Materials/BlenderBox_Material.nmat
+    SourceFilePath: Models/BlenderBox/Materials/BlenderBox_Material.nmat
+    Type: AssetType::Material
+  - Handle: 6110225243526503807
+    FilePath: Prefabs/GlowBall.nprefab
+    SourceFilePath: Prefabs/GlowBall.nprefab
+    Type: AssetType::Prefab
+  - Handle: 7279465476767119538
+    FilePath: Prefabs/RedBall.nprefab
+    SourceFilePath: Prefabs/RedBall.nprefab
+    Type: AssetType::Prefab
+  - Handle: 7311209448126535121
+    FilePath: Prefabs/Ball.nprefab
+    SourceFilePath: Prefabs/Ball.nprefab
+    Type: AssetType::Prefab
+  - Handle: 7346874100133270634
+    FilePath: EnvironmentMaps/shanghai_bund_4k_cube_bc6u.ntex
+    SourceFilePath: EnvironmentMaps/shanghai_bund_4k_cube_bc6u.ntex
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 7554340089682047465
+    FilePath: Prefabs/GlowBall_Material.nmat
+    SourceFilePath: Prefabs/GlowBall_Material.nmat
+    Type: AssetType::Material
   - Handle: 11384202972249433657
     FilePath: Models/Fox/Meshes/Fox_Run.nanim
     SourceFilePath: Models/Fox/Meshes/Fox_Run.nanim
     Type: AssetType::AnimationSequence
+  - Handle: 11677936640255171373
+    FilePath: Models/Sphere/Meshes/Sphere.nsmesh
+    SourceFilePath: Models/Sphere/Sphere.glb
+    Type: AssetType::StaticMesh
+    MeshSettings:
+      ImportStaticMeshes: true
+      ImportSkeletalMeshes: false
+      ImportAnimations: false
+      ImportSkinWeights: true
+      StaticCombine: 0
+      SkeletalCombine: 0
+      SourceMeshIndex: 0
+      ImportScale: 1
+      MaterialBasePath: Models/Sphere/Meshes/Sphere.nsmesh
   - Handle: 12548745303945773038
     FilePath: Models/Fox/Meshes/Fox.nskel
     SourceFilePath: Models/Fox/Meshes/Fox.nskel
@@ -32,6 +108,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 13390120076805450648
+    FilePath: Prefabs/BallBox.nprefab
+    SourceFilePath: Prefabs/BallBox.nprefab
+    Type: AssetType::Prefab
   - Handle: 14478842509020943149
     FilePath: Models/Fox/Meshes/Fox_Survey.nanim
     SourceFilePath: Models/Fox/Meshes/Fox_Survey.nanim
@@ -44,3 +124,15 @@ AssetRegistry:
     FilePath: Models/Fox/Materials/Fox_fox_material.nmat
     SourceFilePath: Models/Fox/Materials/Fox_fox_material.nmat
     Type: AssetType::Material
+  - Handle: 17831513696398634384
+    FilePath: Models/Sphere/Materials/Sphere_Material_0_Instance_16849778697578787442.nmat
+    SourceFilePath: Models/Sphere/Materials/Sphere_Material_0_Instance_16849778697578787442.nmat
+    Type: AssetType::Material
+  - Handle: 17879682194759269016
+    FilePath: Models/Sphere/Materials/Sphere_Material_0_Instance_3232873758316274739.nmat
+    SourceFilePath: Models/Sphere/Materials/Sphere_Material_0_Instance_3232873758316274739.nmat
+    Type: AssetType::Material
+  - Handle: 18022752891400794819
+    FilePath: Prefabs/s.nprefab
+    SourceFilePath: Prefabs/s.nprefab
+    Type: AssetType::Prefab

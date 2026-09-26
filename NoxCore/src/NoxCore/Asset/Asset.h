@@ -23,7 +23,9 @@ namespace Nox
         AnimationSequence,
         SkeletalMesh,
 
-        AnimationGraph // NodeGraph/NodeGraphAsset.h wrapping a NodeGraph whose Domain is "AnimationGraph" (.nanimgraph)
+        AnimationGraph, // NodeGraph/NodeGraphAsset.h wrapping a NodeGraph whose Domain is "AnimationGraph" (.nanimgraph)
+
+        Prefab // Scene/Prefab.h: a saved recipe of entities (.nprefab), instanced in scenes by PrefabInstanceComponent
     };
 
     // Where an asset is on its way into memory (§5.11.2). A request starts the load once; the asset is usable when Ready.

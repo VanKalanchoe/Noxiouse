@@ -19,6 +19,7 @@ namespace Nox
         case AssetType::SkeletalMesh: return "AssetType::SkeletalMesh";
 
         case AssetType::AnimationGraph: return "AssetType::AnimationGraph";
+        case AssetType::Prefab: return "AssetType::Prefab";
         }
 
         return "AssetType::<Invalid>";
@@ -39,6 +40,7 @@ namespace Nox
         if (assetType == "AssetType::SkeletalMesh") return AssetType::SkeletalMesh;
 
         if (assetType == "AssetType::AnimationGraph") return AssetType::AnimationGraph;
+        if (assetType == "AssetType::Prefab") return AssetType::Prefab;
 
         return AssetType::None;
     }

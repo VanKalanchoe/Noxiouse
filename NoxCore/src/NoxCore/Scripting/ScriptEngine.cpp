@@ -217,6 +217,16 @@ namespace Nox
         if (instances.empty()) s_Instances.erase(entity.GetUUID());
     }
 
+    void ScriptEngine::OnDestroyEntity(Entity entity)
+    {
+        auto it = s_Instances.find(entity.GetUUID());
+        if (!s_Backend || it == s_Instances.end())
+            return;
+        for (auto instance : it->second)
+            s_Backend->DestroyInstance(instance);
+        s_Instances.erase(it);
+    }
+
     void ScriptEngine::OnUpdateEntity(Entity entity, float deltaTime)
     {
         auto it = s_Instances.find(entity.GetUUID());

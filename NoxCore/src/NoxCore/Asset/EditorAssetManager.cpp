@@ -115,7 +115,8 @@ namespace Nox
         { ".nskel",   AssetType::Skeleton },
         { ".nanim",   AssetType::AnimationSequence },
         { ".nskmesh", AssetType::SkeletalMesh },
-        { ".nanimgraph", AssetType::AnimationGraph }
+        { ".nanimgraph", AssetType::AnimationGraph },
+        { ".nprefab", AssetType::Prefab }
     };
 
     AssetType EditorAssetManager::GetAssetTypeFromExtension(const std::filesystem::path& extension)
@@ -828,6 +829,54 @@ namespace Nox
         return entry != m_AssetRegistry.end() && entry->second.Type == type ? found->second : AssetHandle(0);
     }
 
+    AssetHandle EditorAssetManager::RegisterExistingFile(const std::filesystem::path& relativePath, AssetType type)
+    {
+        AssetMetadata metadata;
+        metadata.Type = type;
+        metadata.FilePath = relativePath;
+        metadata.SourceFilePath = relativePath;
+        const AssetHandle handle = RegisterAsset(metadata);
+        SerializeAssetRegistry();
+        return handle;
+    }
+
+    bool EditorAssetManager::CanRename(AssetHandle handle) const
+    {
+        const auto found = m_AssetRegistry.find(handle);
+        if (found == m_AssetRegistry.end())
+            return false;
+        const AssetMetadata& metadata = found->second;
+        // Cooked assets (meshes, textures) have files named after them; only self-contained ones are renamed.
+        return metadata.Type == AssetType::Prefab && (metadata.SourceFilePath.empty() || metadata.SourceFilePath == metadata.FilePath);
+    }
+
+    bool EditorAssetManager::RenameAsset(AssetHandle handle, const std::string& newName)
+    {
+        if (!CanRename(handle) || newName.empty() || newName.find_first_of("\\/:*?\"<>|") != std::string::npos)
+            return false;
+
+        AssetMetadata& metadata = m_AssetRegistry.find(handle)->second;
+        const std::filesystem::path oldPath = metadata.FilePath;
+        const std::filesystem::path newPath = oldPath.parent_path() / (newName + oldPath.extension().string());
+        if (newPath == oldPath)
+            return true;
+
+        const std::filesystem::path assetDirectory = Project::GetActiveAssetDirectory();
+        std::error_code error;
+        if (std::filesystem::exists(assetDirectory / newPath, error))
+            return false;
+        std::filesystem::rename(assetDirectory / oldPath, assetDirectory / newPath, error);
+        if (error)
+            return false;
+
+        m_HandleByPath.erase(oldPath.lexically_normal().generic_string());
+        metadata.FilePath = newPath;
+        metadata.SourceFilePath = newPath;
+        IndexPath(handle, metadata);
+        SerializeAssetRegistry();
+        return true;
+    }
+
     AssetHandle EditorAssetManager::RegisterAsset(const AssetMetadata& metadata)
     {
         AssetHandle handle;
@@ -1280,7 +1329,7 @@ namespace Nox
 
             std::filesystem::path ext = entry.path().extension();
             if (ext == ".nox" || ext == ".nanim" || ext == ".nskel" || ext == ".nmat" ||
-                ext == ".ntex" || ext == ".nanimgraph")
+                ext == ".ntex" || ext == ".nanimgraph" || ext == ".nprefab")
             {
                 std::filesystem::path relativePath = entry.path().lexically_relative(assetDir).lexically_normal();
 
