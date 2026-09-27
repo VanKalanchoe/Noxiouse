@@ -116,6 +116,11 @@ namespace Nox
         uint32_t height = 1; // Default 1 for single click
         bool active = false;
         uint64_t frameNumber = 0; // scene frame whose entity IDs were copied (set when the copy is recorded)
+        // The block of depth values copied around the first pixel (the measure tool looks for the nearest drawn pixel in it).
+        int32_t patchX = 0;
+        int32_t patchY = 0;
+        uint32_t patchWidth = 1;
+        uint32_t patchHeight = 1;
     };
 
     // Entity IDs of the newest pick copy whose frame has finished on the GPU (§5.3 frame-ID readbacks).
@@ -123,6 +128,8 @@ namespace Nox
     {
         PickRequest request;
         std::vector<int32_t> pixels;
+        std::vector<float> depthPatch; // reverse-Z depths around the first pixel, row by row (0 = nothing drawn there)
+        bool hasDepth = false;
     };
 
     class Renderer
@@ -151,6 +158,10 @@ namespace Nox
         std::vector<int32_t> getPickedEntityIDs() const;
         // Scene frame the newest completed pick was taken in.
         uint64_t getPickedFrameNumber() const { return m_pickResult.request.frameNumber; }
+        // Depth near the first pixel of the newest completed pick: the pixel itself when something is drawn there, else the closest drawn
+        // pixel within `radius` pixels (x, y = that pixel; depth 0 when nothing is drawn near). Reverse-Z infinite projection: depth = near /
+        // view depth. False before the first pick completed.
+        bool getPickedDepth(int32_t& x, int32_t& y, float& depth, int32_t radius = 0) const;
 
         void SetSelectedEntityID(const std::vector<int32_t>& entityIDs) { m_SelectedEntityIDs = entityIDs; }
 
@@ -1008,7 +1019,9 @@ namespace Nox
         Ref<Texture2D> m_sceneResource;
 
         // Entity ID readback (entity IDs themselves are render graph textures, see Passes/FrameGraphResources.h)
+        bool m_orthographic = false; // the editor camera is in an ortho view (no jitter, no upscaling, full mesh detail)
         std::vector<std::unique_ptr<NRI::Buffer>> m_pickerStagingBuffers;
+        std::vector<std::unique_ptr<NRI::Buffer>> m_pickerDepthStagingBuffers;
         std::vector<PickRequest> m_pickerReadbackRequests;
         PickRequest m_pickRequest;
         PickResult m_pickResult;

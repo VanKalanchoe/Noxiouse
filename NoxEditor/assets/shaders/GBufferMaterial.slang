@@ -76,6 +76,8 @@
         int    entityID : SV_Target4;
     };
 
+    // Ray/triangle-plane intersection, for the derivative samples (below) only: they need a barycentric solve for a
+    // NEARBY screen pixel, which the main hit position (found from ITS OWN depth) doesn't give directly.
     float4 computeBarycentric3D(float3 rayOrigin, float3 rayDir, float3 v0, float3 e1, float3 e2, float3 triNorm, float d00, float d01, float d11, float invDenom)
     {
         float normDotRay = dot(triNorm, rayDir);
@@ -90,16 +92,22 @@
         return float4(bw0, bw1, bw2, t);
     }
 
+    // Barycentric solve for a point ALREADY known to be on the triangle's plane --
+    // no ray/plane intersection (no division by dot(triNorm, rayDir), which is the part that goes numerically unstable
+    // for a triangle seen at a grazing angle to the view ray).
+    float3 barycentricOfPoint(float3 point, float3 v0, float3 e1, float3 e2, float d00, float d01, float d11, float invDenom)
+    {
+        float3 dp = point - v0;
+        float d20 = dot(dp, e1);
+        float d21 = dot(dp, e2);
+        float bw1 = (d11 * d20 - d01 * d21) * invDenom;
+        float bw2 = (d00 * d21 - d01 * d20) * invDenom;
+        return float3(1.0 - bw1 - bw2, bw1, bw2);
+    }
+
     static const float c_MinRoughness = 0.04;
     static const float PBR_WORKFLOW_METALLIC_ROUGHNESS = 0.0;
     static const float PBR_WORKFLOW_SPECULAR_GLOSSINESS = 1.0;
-
-    // Convert sRGB color to linear RGB (Khronos IEC 61966-2-1 transfer function)
-    float3 srgbToLinear(float3 c)
-    {
-        float3 bLess = step(c, float3(0.04045));
-        return lerp(pow((c + 0.055) / 1.055, float3(2.4)), c / 12.92, bLess);
-    }
 
     // Gets metallic factor from specular glossiness workflow inputs (Khronos / Sascha Willems PBR formula)
     float convertMetallic(float3 diffuse, float3 specular, float maxSpecular)
@@ -209,6 +217,9 @@
         float3 localNorm0 = v0.normal;
         float3 localNorm1 = v1.normal;
         float3 localNorm2 = v2.normal;
+        float4 localTangent0 = v0.tangent;
+        float4 localTangent1 = v1.tangent;
+        float4 localTangent2 = v2.tangent;
         float4 previousLocalPos0 = localPos0;
         float4 previousLocalPos1 = localPos1;
         float4 previousLocalPos2 = localPos2;
@@ -226,6 +237,9 @@
             localNorm0 = skinned0.normal.xyz;
             localNorm1 = skinned1.normal.xyz;
             localNorm2 = skinned2.normal.xyz;
+            localTangent0 = skinned0.tangent;
+            localTangent1 = skinned1.tangent;
+            localTangent2 = skinned2.tangent;
 
             previousLocalPos0 = localPos0;
             previousLocalPos1 = localPos1;
@@ -249,6 +263,7 @@
                              boneMatrices[baseOffset + v0.boneIDs.w] * v0.boneWeights.w;
             localPos0 = mul(skin0, localPos0);
             localNorm0 = mul((float3x3)skin0, localNorm0);
+            localTangent0 = float4(mul((float3x3)skin0, localTangent0.xyz), localTangent0.w);
 
             float4x4 skin1 = boneMatrices[baseOffset + v1.boneIDs.x] * v1.boneWeights.x +
                              boneMatrices[baseOffset + v1.boneIDs.y] * v1.boneWeights.y +
@@ -256,6 +271,7 @@
                              boneMatrices[baseOffset + v1.boneIDs.w] * v1.boneWeights.w;
             localPos1 = mul(skin1, localPos1);
             localNorm1 = mul((float3x3)skin1, localNorm1);
+            localTangent1 = float4(mul((float3x3)skin1, localTangent1.xyz), localTangent1.w);
 
             float4x4 skin2 = boneMatrices[baseOffset + v2.boneIDs.x] * v2.boneWeights.x +
                              boneMatrices[baseOffset + v2.boneIDs.y] * v2.boneWeights.y +
@@ -263,6 +279,7 @@
                              boneMatrices[baseOffset + v2.boneIDs.w] * v2.boneWeights.w;
             localPos2 = mul(skin2, localPos2);
             localNorm2 = mul((float3x3)skin2, localNorm2);
+            localTangent2 = float4(mul((float3x3)skin2, localTangent2.xyz), localTangent2.w);
 
             // The direct fallback has no earlier pose cache; avoid inventing skeletal velocity for that one frame.
             previousLocalPos0 = localPos0;
@@ -276,24 +293,10 @@
             float4 worldPos1 = mul(instance.modelMatrix, localPos1);
             float4 worldPos2 = mul(instance.modelMatrix, localPos2);
 
-            // 3D World-Space Ray-Triangle Intersection & Barycentric Reconstruction
-            // Immune to near-plane clipping singularities (avoids 2D perspective divide by clip.w <= 0)
+            // 3D World-Space Barycentric Reconstruction
             float2 invViewport = 1.0 / pushConstant.viewportSize;
             float2 uvScreen = (float2(pixelCoord) + 0.5) * invViewport;
             float2 ndc = float2(uvScreen.x * 2.0 - 1.0, 1.0 - uvScreen.y * 2.0);
-
-            float4 targetH    = mul(ubo->invViewProj, float4(ndc, 1.0, 1.0));
-            float4 targetH_dx = mul(ubo->invViewProj, float4(ndc + float2(2.0 * invViewport.x, 0.0), 1.0, 1.0));
-            float4 targetH_dy = mul(ubo->invViewProj, float4(ndc - float2(0.0, 2.0 * invViewport.y), 1.0, 1.0));
-
-            float3 pNear    = targetH.xyz / targetH.w;
-            float3 pNear_dx = targetH_dx.xyz / targetH_dx.w;
-            float3 pNear_dy = targetH_dy.xyz / targetH_dy.w;
-
-            float3 rayOrigin = ubo->cameraWorldPos.xyz;
-            float3 rayDir    = normalize(pNear - rayOrigin);
-            float3 rayDir_dx = normalize(pNear_dx - rayOrigin);
-            float3 rayDir_dy = normalize(pNear_dy - rayOrigin);
 
             float3 e1 = worldPos1.xyz - worldPos0.xyz;
             float3 e2 = worldPos2.xyz - worldPos0.xyz;
@@ -305,19 +308,53 @@
             float denom = d00 * d11 - d01 * d01;
             float invDenom = (abs(denom) > 1e-12) ? (1.0 / denom) : 0.0;
 
-            float4 bary4 = computeBarycentric3D(rayOrigin, rayDir, worldPos0.xyz, e1, e2, triNorm, d00, d01, d11, invDenom);
-                if (bary4.w <= 0.0)
-                {
-                    output.albedo = float4(0.0, 0.0, 0.0, 0.0);
-                    output.normal = float4(0.0, 0.0, 0.0, 0.0);
-                    output.material = float4(0.0, 0.0, 0.0, 0.0);
-                    output.emission = float4(0.0, 0.0, 0.0, 0.0);
-                    output.entityID = -1;
-                    return output;
-                }
-                float3 bary    = bary4.xyz;
-                float3 bary_dx = computeBarycentric3D(rayOrigin, rayDir_dx, worldPos0.xyz, e1, e2, triNorm, d00, d01, d11, invDenom).xyz;
-                float3 bary_dy = computeBarycentric3D(rayOrigin, rayDir_dy, worldPos0.xyz, e1, e2, triNorm, d00, d01, d11, invDenom).xyz;
+            // The main barycentric weights: from THIS pixel's own depth, already resolved exactly by hardware rasterization
+            // in the Visibility pass, unprojected the same reliable way DeferredLighting.slang gets a world position from
+            // depth. Not from a world-space ray/triangle-plane intersection (what this used to do, and what the derivative
+            // samples below still do): that intersection divides by dot(triNorm, rayDir), which loses precision fast wherever
+            // the triangle is seen at a grazing angle to the view ray -- everywhere on a curved surface, nowhere on a flat
+            // one, which is exactly the "fine on a cube, speckled on a sphere, in every view including the path tracer's
+            // separate (unaffected) hardware ray intersection" pattern this turned out to cause.
+            Texture2D<float> gbufferDepthTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
+            float pixelDepth = gbufferDepthTex.Load(int3(pixelCoord, 0)).r;
+            if (pixelDepth <= 0.0)
+            {
+                output.albedo = float4(0.0, 0.0, 0.0, 0.0);
+                output.normal = float4(0.0, 0.0, 0.0, 0.0);
+                output.material = float4(0.0, 0.0, 0.0, 0.0);
+                output.emission = float4(0.0, 0.0, 0.0, 0.0);
+                output.entityID = -1;
+                return output;
+            }
+            float4 hitPosH = mul(ubo->invViewProj, float4(ndc, pixelDepth, 1.0));
+            float3 hitPos = hitPosH.xyz / hitPosH.w;
+            float3 bary = barycentricOfPoint(hitPos, worldPos0.xyz, e1, e2, d00, d01, d11, invDenom);
+            // Camera-to-surface direction (double-sided normal flip, below), from the same accurate hit position.
+            float3 viewDir = normalize(hitPos - ubo->cameraWorldPos.xyz);
+
+            // Derivatives (texture LOD only, not the normal/position above): an analytic ray/triangle-plane solve
+            // against THIS pixel's own triangle, like the main bary above used to be -- not a hardware ddx/ddy of the
+            // per-pixel-independently-computed bary. A visibility buffer's neighbouring screen pixel can belong to a
+            // completely different triangle (a different mesh, even); a hardware quad derivative doesn't know that and
+            // differences two unrelated barycentric spaces, which showed up as a visible seam anywhere a mip picked on
+            // one side of a mesh/UV boundary didn't match the other (a balcony floor looking like two different
+            // textures meeting in the middle, sharp and continuous in the path tracer's own, separate intersection).
+            // The neighbour ray unprojects at THIS pixel's own depth, not the near plane (what the version before this
+            // one did, and the one before ddx/ddy did too): unprojecting at the near plane forces the point to within
+            // about 0.1 units of the camera regardless of what is actually being rendered, so subtracting the camera's
+            // position from it recovers a tiny delta from two large, nearly-equal floats -- precision loss growing
+            // directly with distance from the world origin, which was the original "blurry far from the origin" bug.
+            // Unprojecting at this pixel's own depth instead recovers a delta on the same scale as the real distance to
+            // the surface (the same reason hitPos above is precise), at any distance from the origin.
+            float4 targetH_dx = mul(ubo->invViewProj, float4(ndc + float2(2.0 * invViewport.x, 0.0), pixelDepth, 1.0));
+            float4 targetH_dy = mul(ubo->invViewProj, float4(ndc - float2(0.0, 2.0 * invViewport.y), pixelDepth, 1.0));
+            float3 pAtDepth_dx = targetH_dx.xyz / targetH_dx.w;
+            float3 pAtDepth_dy = targetH_dy.xyz / targetH_dy.w;
+            float3 rayOrigin = ubo->cameraWorldPos.xyz;
+            float3 rayDir_dx = normalize(pAtDepth_dx - rayOrigin);
+            float3 rayDir_dy = normalize(pAtDepth_dy - rayOrigin);
+            float3 bary_dx = computeBarycentric3D(rayOrigin, rayDir_dx, worldPos0.xyz, e1, e2, triNorm, d00, d01, d11, invDenom).xyz;
+            float3 bary_dy = computeBarycentric3D(rayOrigin, rayDir_dy, worldPos0.xyz, e1, e2, triNorm, d00, d01, d11, invDenom).xyz;
 
             float w0 = clamp(bary.x, 0.0, 1.0);
             float w1 = clamp(bary.y, 0.0, 1.0);
@@ -359,6 +396,17 @@
             float3 rawGeomNorm = worldNorm0 * w0 + worldNorm1 * w1 + worldNorm2 * w2;
             float lenNorm = length(rawGeomNorm);
             float3 geomNormal = (lenNorm > 1e-6) ? (rawGeomNorm / lenNorm) : normalize(triNorm);
+
+            // Tangent, like position, transforms with the model matrix directly (not the inverse-transpose normal
+            // matrix -- it is a direction ALONG the surface, not perpendicular to it, so an inverse-transpose would be
+            // wrong under non-uniform scale). Handedness (w) is a fixed sign, the same for all three corners of a
+            // triangle by construction (MeshImporter::GenerateMissingTangents keeps every triangle's corners on one
+            // side of any duplicate split), so any one of the three is as good as any other -- not something to blend.
+            float3 worldTangent0 = mul((float3x3)instance.modelMatrix, localTangent0.xyz);
+            float3 worldTangent1 = mul((float3x3)instance.modelMatrix, localTangent1.xyz);
+            float3 worldTangent2 = mul((float3x3)instance.modelMatrix, localTangent2.xyz);
+            float3 rawGeomTangent = worldTangent0 * w0 + worldTangent1 * w1 + worldTangent2 * w2;
+            float tangentHandedness = localTangent0.w;
 
         float3 worldPos = worldPos0.xyz * w0 + worldPos1.xyz * w1 + worldPos2.xyz * w2;
         // Where this surface point was last frame, including the previous skeletal pose when its cache is valid.
@@ -415,9 +463,13 @@
             {
                 Texture2D specGlossTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.metallicRoughnessTextureIndex, 0));
                 float4 specGlossSample = specGlossTex.SampleGrad(samp, mrUV, ddx_mr, ddy_mr);
-                // Specular texture RGB is authored in sRGB (imported as UNORM), decode to linear RGB:
-                float3 linearSpec = srgbToLinear(specGlossSample.rgb);
-                specular = linearSpec * instance.specularFactor.rgb;
+                // The specular-glossiness texture is imported as SRGBA8 (EditorAssetManager::ImportMeshTextures), which
+                // hardware-decodes the RGB (specular color, authored sRGB) through the sRGB curve on every sample while
+                // always leaving alpha (glossiness, authored linear) untouched -- exactly this extension's mixed encoding.
+                // Decoding RGB a second time here (this used to call srgbToLinear on it, on top of that) compounded the
+                // gamma curve, darkening/skewing specular color -- and therefore the metallic/base-color reconstruction
+                // below -- for every specular-glossiness material (Bistro; never DamagedHelmet's plain metallic-roughness).
+                specular = specGlossSample.rgb * instance.specularFactor.rgb;
                 glossiness = specGlossSample.a * instance.specularFactor.a;
             }
 
@@ -457,7 +509,7 @@
             metallic  = clamp(metallic, 0.0, 1.0);
         }
 
-        // 3. NORMAL MAPPING (Analytical Tangent Frame from 3D Triangle Geometry)
+        // 3. NORMAL MAPPING (stored per-vertex tangent, not a per-pixel analytic reconstruction)
         float3 finalNormal = geomNormal;
         float3 rawNormalTex = geomNormal * 0.5 + 0.5; // fallback matching Sascha's normalize(inNormal)
         if (instance.normalTextureIndex != 0xFFFFFFFF)
@@ -474,28 +526,21 @@
                 : abs(rawNormalTex.z * 2.0 - 1.0);
             tangentNormal = dot(tangentNormal, tangentNormal) > 1e-12 ? normalize(tangentNormal) : float3(0.0, 0.0, 1.0);
 
-            // Compute triangle edge vectors in world space and UV space
-            float3 dp1 = worldPos1.xyz - worldPos0.xyz;
-            float3 dp2 = worldPos2.xyz - worldPos0.xyz;
-            float2 duv1 = (instance.normalTextureSet == 0) ? (v1.uv0 - v0.uv0) : (v1.uv1 - v0.uv1);
-            float2 duv2 = (instance.normalTextureSet == 0) ? (v2.uv0 - v0.uv0) : (v2.uv1 - v0.uv1);
-
-            float detUV = duv1.x * duv2.y - duv2.x * duv1.y;
-            float3 T = dp1 * duv2.y - dp2 * duv1.y;
-            float3 B = dp2 * duv1.x - dp1 * duv2.x;
-
+            // Gram-Schmidt re-orthonormalize the stored tangent against the (interpolated, possibly non-uniformly
+            // scaled) geometric normal -- it does not have to stay exactly perpendicular through that -- then derive
+            // the bitangent as cross(N, T) * handedness, the standard glTF/MikkTSpace convention the stored w means.
+            // This used to be reconstructed per pixel from the triangle's own world-space/UV derivatives instead (no
+            // stored tangent existed): correct in principle, but numerically ambiguous on a UV-mirrored seam without
+            // the handedness a stored tangent carries -- right on one side, flipped on the other, a visible seam in
+            // specular response on an otherwise perfectly continuous surface (never in diffuse, which is why it only
+            // showed up under lighting, never in the raw albedo or normal-map-texture debug views).
             float3 N = geomNormal;
-            float lenT = length(T);
-            if (lenT > 1e-12 && abs(detUV) > 1e-12)
+            float lenGeomTangent = length(rawGeomTangent);
+            if (lenGeomTangent > 1e-12)
             {
-                // Gram-Schmidt orthonormalization
-                T = normalize(T - N * dot(N, T));
-                float3 B_ortho = normalize(cross(N, T));
-                if (dot(B_ortho, B) < 0.0)
-                {
-                    B_ortho = -B_ortho;
-                }
-                float3x3 TBN = float3x3(T, B_ortho, N);
+                float3 T = normalize(rawGeomTangent - N * dot(N, rawGeomTangent));
+                float3 B = cross(N, T) * tangentHandedness;
+                float3x3 TBN = float3x3(T, B, N);
                 finalNormal = normalize(mul(tangentNormal, TBN));
             }
         }
@@ -506,7 +551,7 @@
         }
 
         // Only flip normal if the material is explicitly DOUBLE-SIDED (e.g. foliage/cloth)
-        if (instance.doubleSided != 0 && dot(finalNormal, -rayDir) < 0.0)
+        if (instance.doubleSided != 0 && dot(finalNormal, -viewDir) < 0.0)
         {
             finalNormal = -finalNormal;
         }

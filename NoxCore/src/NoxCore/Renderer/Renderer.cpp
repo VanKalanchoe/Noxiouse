@@ -8,6 +8,7 @@
 #include <unordered_set>
 #include <cfloat>
 #include <chrono>
+#include "NoxCore/Core/WorldUnits.h"
 #include <cmath>
 #include <fstream>
 #include <cctype>
@@ -296,6 +297,14 @@ namespace Nox
         {
             m_pickerStagingBuffers.emplace_back(m_device->createBuffer(NRI::BufferDesc{
                 .size = maxPickerBufferSize,
+                .usage = NRI::BufferUsage::Staging
+            }));
+        }
+        m_pickerDepthStagingBuffers.reserve(MAX_FRAMES_IN_FLIGHT);
+        for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+        {
+            m_pickerDepthStagingBuffers.emplace_back(m_device->createBuffer(NRI::BufferDesc{
+                .size = 1024, // up to a 9 x 9 block of floats
                 .usage = NRI::BufferUsage::Staging
             }));
         }
@@ -1945,12 +1954,19 @@ namespace Nox
         Ref<Texture2D> enviromentHDR = TextureImporter::LoadTexture2D(environmentPath, {}, this);
         const bool environmentIsCube = enviromentHDR && enviromentHDR->getArrayLayers() == 6;
 
-        // DDS cubemaps (for example RTXPT's Bistro environment) are already in the
-        // representation used by the lighting shaders. Keep them intact; only an
-        // equirectangular HDR needs the conversion pass below.
-        if (environmentIsCube)
-            m_environmentCubemap = enviromentHDR;
-
+        // A DDS cubemap (e.g. RTXPT's environment assets) ships as a single block-compressed mip
+        // (mipmapcount=1 -- compressed formats generally can't have mips blitted into them
+        // afterward, BC6H/BC7 don't support VK_FORMAT_FEATURE_BLIT_SRC/DST_BIT). Without a mip
+        // chain, IrradianceConvolution.slang and PrefilterEnv.slang's "read the environment through
+        // an already-blurred mip so a coarse sample grid doesn't need to be enormous" trick reads
+        // the full-resolution, unfiltered image at every sample instead -- a handful of discrete
+        // samples over a sharp 4K HDRI aliases badly, which was the faceted/"disco ball" look on
+        // diffuse and specular IBL, only ever with a DDS environment (an equirectangular .hdr
+        // always gets a generated mip chain via the conversion pass below). So a DDS cubemap goes
+        // through the same kind of conversion an equirectangular HDR does here (CubemapResample.slang
+        // instead of EquirectToCubemap.slang: it samples a cubemap by direction, decoding the
+        // compressed source in hardware, instead of reading an equirectangular panorama by UV) --
+        // ending up an uncompressed, mip-chained copy either way.
         struct EquirectPushConstants
         {
             uint32_t hdrTextureIndex;
@@ -1958,7 +1974,6 @@ namespace Nox
             uint32_t cubemapSize;
         } pushData;
 
-        if (!environmentIsCube)
         {
         // 2. Create the permanent Cubemap Texture (512x512 per face, 6 array layers)
         constexpr uint32_t cubemapSize = 512;
@@ -1978,13 +1993,13 @@ namespace Nox
         // 3. Register slot X as eStorageImage (writes Storage Descriptor to memory)
         m_resourceHeap->registerTexture(*m_environmentCubemap, NRI::TextureUsage::Storage);
 
-        // 4. Create local Equirect-to-Cubemap compute pipeline
+        // 4. Create local resample compute pipeline (cube-to-cube for a DDS source, equirect-to-cube for a panorama)
         NRI::PipelineDesc computeDesc{};
         computeDesc.type = NRI::PipelineType::Compute;
         computeDesc.shaders.push_back({
             .stage = NRI::ShaderStage::Compute,
             .entryPoint = "compMain",
-            .sourcePath = "assets/shaders/EquirectToCubemap.slang"
+            .sourcePath = environmentIsCube ? "assets/shaders/CubemapResample.slang" : "assets/shaders/EquirectToCubemap.slang"
         });
         std::unique_ptr<NRI::Pipeline> equirectPipeline = m_device->createPipeline(computeDesc, *m_shaderCompiler);
 
@@ -3475,6 +3490,8 @@ namespace Nox
         }
         if (frameIndex < m_pickerStagingBuffers.size() && m_pickerStagingBuffers[frameIndex])
             resources.PickerStaging = graph.ImportBuffer("Picker Staging", m_pickerStagingBuffers[frameIndex].get());
+        if (frameIndex < m_pickerDepthStagingBuffers.size() && m_pickerDepthStagingBuffers[frameIndex])
+            resources.PickerDepthStaging = graph.ImportBuffer("Picker Depth Staging", m_pickerDepthStagingBuffers[frameIndex].get());
         resources.MipFeedback = graph.ImportBuffer("Mip Feedback", m_mipFeedbackBuffer.get());
         resources.ClusterStats = graph.ImportBuffer("Cluster Stats", m_clusterStatsBuffer.get());
 
@@ -3615,8 +3632,9 @@ namespace Nox
         uniformData.mipFeedbackFrame = static_cast<uint32_t>(m_sceneFrameCounter);
         uniformData.lodErrorThreshold = m_lodErrorPixels / static_cast<float>(std::max(m_renderSize.height, 1u));
         uniformData.lodCameraNear = m_cameraNear;
-        uniformData.lodFullDetail = m_lodFullDetail ? 1u : 0u;
+        uniformData.lodFullDetail = (m_lodFullDetail || m_orthographic) ? 1u : 0u; // the LOD cut assumes a perspective camera
         uniformData.clusterStatsReference = m_clusterStatsBuffer->getDeviceAddress();
+        uniformData.unitsPerMeter = WorldUnits::PerMeter();
 
         // PBR IBL
         uniformData.irradianceMapIndex = m_irradianceCubemap ? m_irradianceCubemap->GetDescriptorIndexSlot() : ~0u;
@@ -4267,6 +4285,63 @@ namespace Nox
         m_pickResult.request = request;
         m_pickResult.pixels.assign(pixels, pixels + pixelCount);
         m_pickerStagingBuffers[frameSlot]->unmap();
+
+        m_pickResult.hasDepth = false;
+        const size_t patchCount = static_cast<size_t>(request.patchWidth) * request.patchHeight;
+        if (patchCount > 0 && patchCount * sizeof(float) <= 1024 && frameSlot < m_pickerDepthStagingBuffers.size() && m_pickerDepthStagingBuffers[frameSlot])
+        {
+            void* depthMemory = m_pickerDepthStagingBuffers[frameSlot]->map(0, patchCount * sizeof(float));
+            if (depthMemory)
+            {
+                const float* values = static_cast<const float*>(depthMemory);
+                m_pickResult.depthPatch.assign(values, values + patchCount);
+                m_pickResult.hasDepth = true;
+                m_pickerDepthStagingBuffers[frameSlot]->unmap();
+            }
+        }
+    }
+
+    bool Renderer::getPickedDepth(int32_t& x, int32_t& y, float& depth, int32_t radius) const
+    {
+        if (!m_pickResult.hasDepth)
+            return false;
+        const PickRequest& request = m_pickResult.request;
+
+        auto at = [&](int32_t px, int32_t py) -> float
+        {
+            const int32_t localX = px - request.patchX;
+            const int32_t localY = py - request.patchY;
+            if (localX < 0 || localY < 0 || localX >= static_cast<int32_t>(request.patchWidth) || localY >= static_cast<int32_t>(request.patchHeight))
+                return 0.0f;
+            return m_pickResult.depthPatch[static_cast<size_t>(localY) * request.patchWidth + localX];
+        };
+
+        x = request.x;
+        y = request.y;
+        depth = at(x, y);
+        if (depth > 0.0f || radius <= 0)
+            return true;
+
+        // Nothing drawn under the cursor: the closest drawn pixel nearby (the silhouette of an object the cursor just missed).
+        int32_t bestDistance = radius * radius + 1;
+        for (int32_t dy = -radius; dy <= radius; ++dy)
+        {
+            for (int32_t dx = -radius; dx <= radius; ++dx)
+            {
+                const int32_t distance = dx * dx + dy * dy;
+                if (distance >= bestDistance)
+                    continue;
+                const float candidate = at(request.x + dx, request.y + dy);
+                if (candidate > 0.0f)
+                {
+                    bestDistance = distance;
+                    x = request.x + dx;
+                    y = request.y + dy;
+                    depth = candidate;
+                }
+            }
+        }
+        return true;
     }
 
     int32_t Renderer::getPickedEntityID() const
@@ -4345,6 +4420,7 @@ namespace Nox
 
     void Renderer::BeginScene(const Camera& camera, const glm::mat4& cameraWorldMatrix)
     {
+        m_orthographic = false;
         // The view must not inherit scale from the entity hierarchy: rigid camera transform only.
         glm::mat4 transform(1.0f);
         transform[0] = glm::vec4(glm::normalize(glm::vec3(cameraWorldMatrix[0])), 0.0f);
@@ -4490,6 +4566,7 @@ namespace Nox
 
     void Renderer::BeginScene(const EditorCamera& camera)
     {
+        m_orthographic = camera.IsOrthographic();
         // See comment in the other BeginScene overload - must run before this frame's Viewport
         // ImGui::Image() call, which happens during OnUpdate() -> BeginScene(), before OnImGuiRender().
         applyPendingRenderResolutionIfNeeded();
@@ -4498,6 +4575,7 @@ namespace Nox
         // == Off) - DLSS/DLAA cannot function without jitter, so it's forced on whenever evaluateDLSS()
         // will actually run this frame, matching that exact gate in RecordCommandBuffer.
         const bool enableJitter =
+            !m_orthographic && // the jitter offsets the projection's perspective terms, which an ortho projection does not have
             (m_cameraJitterEnabled ||
                 (m_dlssEnabled && m_dlssMode != NRI::UpscaleMode::Off && m_device->isDLSSSupported()))
             && m_viewportSize.width > 0

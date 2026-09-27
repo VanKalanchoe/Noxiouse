@@ -22,6 +22,8 @@ namespace Nox
         explicit JoltPhysics3DScene(Scene* scene);
         virtual ~JoltPhysics3DScene() override;
 
+        virtual float NativeUnitsPerMeter() const override { return 1.0f; } // Jolt works in meters
+
         virtual void Init() override;
         virtual void Step(float dt) override;
         virtual void OptimizeBroadPhase() override;

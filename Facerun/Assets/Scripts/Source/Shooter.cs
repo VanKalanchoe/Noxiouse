@@ -9,8 +9,9 @@ namespace Facerun;
 public sealed class Shooter : EntityBehaviour
 {
     [Expose] public string Prefab = "Prefabs/GlowBall.nprefab"; // path under the asset directory
-    [Expose] public float Speed = 20.0f;                        // m/s
-    [Expose] public float SpawnDistance = 1.5f;                 // m in front of the camera
+    // Stored in cm / cm/s (the project's world unit), but Unit shows and edits the Inspector fields in m / m/s.
+    [Expose(Unit = "m/s")] public float Speed = 2000.0f;          // 20 m/s
+    [Expose(Unit = "m")] public float SpawnDistance = 150.0f;     // 1.5 m in front of the camera
 
     private bool _wasDown;
 

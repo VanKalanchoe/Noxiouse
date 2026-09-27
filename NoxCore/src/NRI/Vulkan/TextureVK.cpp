@@ -477,7 +477,8 @@ namespace NRI
             .bufferOffset = 0,
             .bufferRowLength = 0,
             .bufferImageHeight = 0,
-            .imageSubresource = { .aspectMask = vk::ImageAspectFlagBits::eColor, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1 },
+            .imageSubresource = { .aspectMask = getUsage() == TextureUsage::DepthStencilAttachment ? vk::ImageAspectFlagBits::eDepth : vk::ImageAspectFlagBits::eColor,
+                                  .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1 },
             .imageOffset = { static_cast<int32_t>(x), static_cast<int32_t>(y), 0 },
             .imageExtent = { width, height, 1 }
         };

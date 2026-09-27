@@ -46,6 +46,11 @@ namespace Nox
             bool HasStaticMeshes = false;    // a node with a mesh and no skin (or a mesh no node uses)
             uint32_t SkinnedMeshCount = 0;   // distinct glTF meshes skinned by a skin
             uint32_t StaticMeshCount = 0;    // distinct glTF meshes without one
+            // The size of what the default scene draws, in the file's own units (glTF says meters, a model from a cm-based tool
+            // is 100x that): the meshes' POSITION accessor bounds through the node transforms. The import dialog shows it.
+            bool HasBounds = false;
+            glm::vec3 BoundsMin{ 0.0f };
+            glm::vec3 BoundsMax{ 0.0f };
         };
         static GltfContent InspectGltf(const std::filesystem::path& sourcePath);
 

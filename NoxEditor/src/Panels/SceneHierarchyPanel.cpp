@@ -1,5 +1,6 @@
 #include "SceneHierarchyPanel.h"
 
+#include <algorithm>
 #include <cctype>
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -468,6 +469,11 @@ namespace Nox
         if (prefabRoot || prefabNode)
             ImGui::PopStyleColor();
 
+        // Double-click: frame the editor camera on this entity (UE5's Outliner). Checked before the single/multi-select
+        // handling below, which a double-click's first click also triggers (harmless: it just selects it too).
+        if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && !ImGui::IsItemToggledOpen() && m_FocusEntity)
+            m_FocusEntity(entity);
+
         // --- Multi-selection click handling ---
         if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen())
         {
@@ -602,7 +608,7 @@ namespace Nox
 
     //styling maybe in the future different clas
     static bool DrawVec3Control(const std::string& label, glm::vec3& values, float resetValue = 0.0f,
-                                float columnWidth = 100.0f)
+                                float columnWidth = 100.0f, float dragSpeed = 0.1f)
     {
         bool valueChanged = false;
         ImGuiIO& io = ImGui::GetIO();
@@ -634,7 +640,7 @@ namespace Nox
         ImGui::PopFont();
 
         ImGui::SameLine();
-        if (ImGui::DragFloat("##X", &values.x, 0.1f, 0.0f, 0.0f, "%.2f"))
+        if (ImGui::DragFloat("##X", &values.x, dragSpeed, 0.0f, 0.0f, "%.2f"))
             valueChanged = true;
         // the last 3 paramater force it to be only show 2dec
         ImGui::PopItemWidth();
@@ -653,7 +659,7 @@ namespace Nox
         ImGui::PopFont();
 
         ImGui::SameLine();
-        if (ImGui::DragFloat("##Y", &values.y, 0.1f, 0.0f, 0.0f, "%.2f"))
+        if (ImGui::DragFloat("##Y", &values.y, dragSpeed, 0.0f, 0.0f, "%.2f"))
             valueChanged = true;
         // the last 3 paramater force it to be only show 2dec
         ImGui::PopItemWidth();
@@ -672,7 +678,7 @@ namespace Nox
         ImGui::PopFont();
 
         ImGui::SameLine();
-        if (ImGui::DragFloat("##Z", &values.z, 0.1f, 0.0f, 0.0f, "%.2f"))
+        if (ImGui::DragFloat("##Z", &values.z, dragSpeed, 0.0f, 0.0f, "%.2f"))
             valueChanged = true;
         // the last 3 paramater force it to be only show 2dec
         ImGui::PopItemWidth();
@@ -683,6 +689,66 @@ namespace Nox
         ImGui::PopID();
 
         return valueChanged;
+    }
+
+    // [Expose(Unit = "...")] (docs/Units_And_World_Tools_Plan_2026.md): a script float field tagged "cm", "m", "cm/s", "m/s" or
+    // "km/h" is shown and edited in that unit; the underlying value stays in world units (or world units per second) either way.
+    // Unlisted/empty units (an angle, a fraction, a count, ...) fall through unconverted.
+    static bool ScriptUnitFactor(const std::string& unit, float& worldUnitsPerDisplayUnit)
+    {
+        if (unit == "cm" || unit == "cm/s") { worldUnitsPerDisplayUnit = WorldUnits::FromCentimeters(1.0f); return true; }
+        if (unit == "m" || unit == "m/s") { worldUnitsPerDisplayUnit = WorldUnits::FromMeters(1.0f); return true; }
+        if (unit == "mm") { worldUnitsPerDisplayUnit = WorldUnits::FromMeters(0.001f); return true; }
+        if (unit == "km/h") { worldUnitsPerDisplayUnit = WorldUnits::FromMeters(1000.0f) / 3600.0f; return true; }
+        return false;
+    }
+
+    // Like UE5's per-property "Units" metadata: a length field is shown and typed in the display unit (Settings: cm / m / auto),
+    // not raw world units, and converted back on write. Any component field that is a physical length -- or a length per second,
+    // like an acceleration or a velocity -- goes through this, not just Transform's Position: collider Half Extents/Radius/Offset,
+    // light Range/Source Radius, camera clip planes, the character controller's Radius/Height/Step/accelerations. A rotation is an
+    // angle and a Scale a ratio, neither a length, so those stay plain numbers.
+    struct LengthUnit { float Factor; const char* Suffix; bool Meters; };
+    static LengthUnit GetLengthUnit(float representativeWorldValue)
+    {
+        WorldUnits::DisplayUnit displayUnit = WorldUnits::GetDisplayUnit();
+        bool useMeters = displayUnit == WorldUnits::DisplayUnit::Meters;
+        if (displayUnit == WorldUnits::DisplayUnit::Auto)
+            useMeters = WorldUnits::ToMeters(std::abs(representativeWorldValue)) >= 1.0f;
+        return useMeters
+            ? LengthUnit{ WorldUnits::FromMeters(1.0f), "m", true }
+            : LengthUnit{ WorldUnits::FromCentimeters(1.0f), "cm", false };
+    }
+
+    // A scalar length (Radius, Range, Height, a clip plane, ...). `rateSuffix` appends e.g. "/s^2" for an acceleration -- still a
+    // length, just per second squared, so it converts the same way; min/max are raw world-unit bounds (0, 0 = unbounded).
+    static bool DrawLengthControl(const std::string& label, float& worldValue, float minWorld = 0.0f, float maxWorld = 0.0f, const char* rateSuffix = "")
+    {
+        const LengthUnit unit = GetLengthUnit(worldValue);
+        float display = worldValue / unit.Factor;
+        // A fixed step doesn't suit both a 0.05 m light bulb radius and a 1000 m light range: scale the step with the value itself.
+        const float dragSpeed = std::max(unit.Meters ? 0.005f : 0.5f, std::abs(display) * 0.02f);
+        if (!ImGui::DragFloat((label + " (" + unit.Suffix + rateSuffix + ")").c_str(), &display, dragSpeed, minWorld / unit.Factor, maxWorld / unit.Factor, "%.3f"))
+            return false;
+        worldValue = display * unit.Factor;
+        return true;
+    }
+
+    // A vec3 length (Position, Half Extents, a collider Offset, ...).
+    static bool DrawLengthVec3Control(const std::string& label, glm::vec3& worldValue)
+    {
+        const float largest = std::max({ std::abs(worldValue.x), std::abs(worldValue.y), std::abs(worldValue.z) });
+        const LengthUnit unit = GetLengthUnit(largest);
+        // 0.1 per pixel of drag felt right when a world unit was a meter; scaled to the display unit, it keeps that feel
+        // (0.1 m or 10 cm per pixel) however large the display unit's numbers are.
+        const float dragSpeed = unit.Meters ? 0.1f : 10.0f;
+
+        glm::vec3 display = worldValue / unit.Factor;
+        if (!DrawVec3Control(label + " (" + unit.Suffix + ")", display, 0.0f, 100.0f, dragSpeed))
+            return false;
+
+        worldValue = display * unit.Factor;
+        return true;
     }
 
     template <typename T, typename UIFunction>
@@ -918,7 +984,7 @@ namespace Nox
             glm::vec3 oldRotation = component.Rotation;
             glm::vec3 oldScale = component.Scale;
 
-            bool posModified = DrawVec3Control("Position", component.Translation);
+            bool posModified = DrawLengthVec3Control("Position", component.Translation);
 
             bool rotModified = false;
             glm::vec3 rotation = glm::degrees(component.Rotation);
@@ -1355,8 +1421,8 @@ namespace Nox
         {
             ImGui::ColorEdit3("Color", glm::value_ptr(component.Color));
             ImGui::DragFloat("Intensity", &component.Intensity, 0.5f, 0.0f, 1000.0f);
-            ImGui::DragFloat("Range", &component.Range, 0.5f, 0.1f, 1000.0f);
-            ImGui::DragFloat("Source Radius", &component.Radius, 0.01f, 0.0f, 10.0f, "%.2f m");
+            DrawLengthControl("Range", component.Range, 0.0f, 0.0f);
+            DrawLengthControl("Source Radius", component.Radius, 0.0f, 0.0f);
             uint32_t minSamples = 1, maxSamples = 16;
             ImGui::DragScalar("Shadow Samples", ImGuiDataType_U32, &component.ShadowSamples, 0.1f, &minSamples, &maxSamples);
         });
@@ -1365,10 +1431,10 @@ namespace Nox
         {
             ImGui::ColorEdit3("Color", glm::value_ptr(component.Color));
             ImGui::DragFloat("Intensity", &component.Intensity, 0.5f, 0.0f, 1000.0f);
-            ImGui::DragFloat("Range", &component.Range, 0.5f, 0.1f, 1000.0f);
+            DrawLengthControl("Range", component.Range, 0.0f, 0.0f);
             ImGui::DragFloat("Inner Angle", &component.InnerAngle, 0.5f, 0.0f, component.OuterAngle);
             ImGui::DragFloat("Outer Angle", &component.OuterAngle, 0.5f, component.InnerAngle, 89.0f);
-            ImGui::DragFloat("Source Radius", &component.Radius, 0.01f, 0.0f, 10.0f, "%.2f m");
+            DrawLengthControl("Source Radius", component.Radius, 0.0f, 0.0f);
             uint32_t minSamples = 1, maxSamples = 16;
             ImGui::DragScalar("Shadow Samples", ImGuiDataType_U32, &component.ShadowSamples, 0.1f, &minSamples, &maxSamples);
         });
@@ -1697,19 +1763,21 @@ namespace Nox
                     camera.SetPerspectiveVerticalFOV(glm::radians(verticalFov));
                 }
 
-                float orthoNear = camera.GetPerspectiveNearClip();
-                if (ImGui::DragFloat("Near", &orthoNear))
+                float perspectiveNear = camera.GetPerspectiveNearClip();
+                if (DrawLengthControl("Near", perspectiveNear))
                 {
-                    camera.SetPerspectiveNearClip(orthoNear);
+                    camera.SetPerspectiveNearClip(perspectiveNear);
                 }
 
-                float orthoFar = camera.GetPerspectiveFarClip();
-                if (ImGui::DragFloat("Far", &orthoFar))
+                float perspectiveFar = camera.GetPerspectiveFarClip();
+                if (DrawLengthControl("Far", perspectiveFar))
                 {
-                    camera.SetPerspectiveFarClip(orthoFar);
+                    camera.SetPerspectiveFarClip(perspectiveFar);
                 }
             }
 
+            // Orthographic near/far/size are a 2D-camera convention (a small fixed range around 0), not physical lengths in the
+            // world's unit -- unlike the perspective clip planes above, left as plain numbers.
             if (camera.GetProjectionType() == SceneCamera::ProjectionType::Orthographic)
             {
                 float orthoSize = camera.GetOrthographicSize();
@@ -1775,7 +1843,24 @@ namespace Nox
                                 case ScriptFieldType::UInt: changed = ImGui::DragScalar(fieldName.c_str(), ImGuiDataType_U32, &std::get<uint32_t>(value), 1.0f); break;
                                 case ScriptFieldType::Long: changed = ImGui::DragScalar(fieldName.c_str(), ImGuiDataType_S64, &std::get<int64_t>(value), 1.0f); break;
                                 case ScriptFieldType::ULong: changed = ImGui::DragScalar(fieldName.c_str(), ImGuiDataType_U64, &std::get<uint64_t>(value), 1.0f); break;
-                                case ScriptFieldType::Float: changed = ImGui::DragFloat(fieldName.c_str(), &std::get<float>(value), 0.1f); break;
+                                case ScriptFieldType::Float:
+                                {
+                                    float worldUnitsPerDisplay;
+                                    if (!field.Unit.empty() && ScriptUnitFactor(field.Unit, worldUnitsPerDisplay))
+                                    {
+                                        float display = std::get<float>(value) / worldUnitsPerDisplay;
+                                        if (ImGui::DragFloat((fieldName + " (" + field.Unit + ")").c_str(), &display, 0.1f))
+                                        {
+                                            value = display * worldUnitsPerDisplay;
+                                            changed = true;
+                                        }
+                                    }
+                                    else
+                                    {
+                                        changed = ImGui::DragFloat(fieldName.c_str(), &std::get<float>(value), 0.1f);
+                                    }
+                                    break;
+                                }
                                 case ScriptFieldType::Double: changed = ImGui::DragScalar(fieldName.c_str(), ImGuiDataType_Double, &std::get<double>(value), 0.1f); break;
                                 case ScriptFieldType::String: changed = ImGui::InputText(fieldName.c_str(), &std::get<std::string>(value)); break;
                                 case ScriptFieldType::Vector3: changed = ImGui::DragFloat3(fieldName.c_str(), glm::value_ptr(std::get<glm::vec3>(value)), 0.1f); break;
@@ -2091,43 +2176,43 @@ namespace Nox
 
         DrawComponent<BoxCollider3DComponent>("Box Collider 3D", entity, [](auto& component)
         {
-            ImGui::DragFloat3("Half Extents", glm::value_ptr(component.HalfExtents), 0.05f, 0.001f, 1000.0f);
-            ImGui::DragFloat3("Offset", glm::value_ptr(component.Offset), 0.05f);
+            DrawLengthVec3Control("Half Extents", component.HalfExtents);
+            DrawLengthVec3Control("Offset", component.Offset);
             ImGui::DragFloat("Friction", &component.Friction, 0.01f, 0.0f, 1.0f);
             ImGui::DragFloat("Restitution", &component.Restitution, 0.01f, 0.0f, 1.0f);
         });
 
         DrawComponent<SphereCollider3DComponent>("Sphere Collider 3D", entity, [](auto& component)
         {
-            ImGui::DragFloat("Radius", &component.Radius, 0.05f, 0.001f, 1000.0f);
-            ImGui::DragFloat3("Offset", glm::value_ptr(component.Offset), 0.05f);
+            DrawLengthControl("Radius", component.Radius);
+            DrawLengthVec3Control("Offset", component.Offset);
             ImGui::DragFloat("Friction", &component.Friction, 0.01f, 0.0f, 1.0f);
             ImGui::DragFloat("Restitution", &component.Restitution, 0.01f, 0.0f, 1.0f);
         });
 
         DrawComponent<CapsuleCollider3DComponent>("Capsule Collider 3D", entity, [](auto& component)
         {
-            ImGui::DragFloat("Half Height", &component.HalfHeight, 0.05f, 0.001f, 1000.0f);
-            ImGui::DragFloat("Radius", &component.Radius, 0.05f, 0.001f, 1000.0f);
-            ImGui::DragFloat3("Offset", glm::value_ptr(component.Offset), 0.05f);
+            DrawLengthControl("Half Height", component.HalfHeight);
+            DrawLengthControl("Radius", component.Radius);
+            DrawLengthVec3Control("Offset", component.Offset);
             ImGui::DragFloat("Friction", &component.Friction, 0.01f, 0.0f, 1.0f);
             ImGui::DragFloat("Restitution", &component.Restitution, 0.01f, 0.0f, 1.0f);
         });
 
         DrawComponent<CharacterController3DComponent>("Character Controller 3D", entity, [](auto& component)
         {
-            ImGui::DragFloat("Radius", &component.Radius, 0.01f, 0.01f, 10.0f);
-            ImGui::DragFloat("Height", &component.Height, 0.05f, 0.0f, 20.0f);
-            ImGui::DragFloat("Step Height", &component.StepHeight, 0.01f, 0.0f, 2.0f);
+            DrawLengthControl("Radius", component.Radius);
+            DrawLengthControl("Height", component.Height);
+            DrawLengthControl("Step Height", component.StepHeight);
             ImGui::DragFloat("Max Slope", &component.MaxSlopeDegrees, 0.5f, 0.0f, 89.0f, "%.1f deg");
             ImGui::DragFloat("Gravity Scale", &component.GravityScale, 0.05f, 0.0f, 10.0f);
             ImGui::DragFloat("Air Control", &component.AirControl, 0.01f, 0.0f, 1.0f);
-            ImGui::DragFloat("Max Acceleration", &component.MaxAcceleration, 0.1f, 0.1f, 200.0f, "%.1f m/s^2");
-            ImGui::DragFloat("Braking Deceleration", &component.BrakingDeceleration, 0.1f, 0.1f, 200.0f, "%.1f m/s^2");
+            DrawLengthControl("Max Acceleration", component.MaxAcceleration, 0.0f, 0.0f, "/s^2");
+            DrawLengthControl("Braking Deceleration", component.BrakingDeceleration, 0.0f, 0.0f, "/s^2");
             ImGui::Separator();
             ImGui::BeginDisabled();
             ImGui::Checkbox("Grounded", &component.IsGrounded);
-            ImGui::DragFloat3("Velocity", glm::value_ptr(component.Velocity));
+            DrawLengthVec3Control("Velocity", component.Velocity);
             ImGui::EndDisabled();
         });
 

@@ -103,7 +103,7 @@ namespace Nox
     void Renderer::addPickReadbackPass()
     {
         const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
-        if (!m_pickRequest.active || m_pickRequest.x < 0 || m_pickRequest.y < 0 || !resources.PickerStaging.IsValid())
+        if (!m_pickRequest.active || m_pickRequest.x < 0 || m_pickRequest.y < 0 || !resources.PickerStaging.IsValid() || !resources.PickerDepthStaging.IsValid())
             return;
 
         const uint32_t sampleX = static_cast<uint32_t>(m_pickRequest.x);
@@ -117,6 +117,16 @@ namespace Nox
         readback.width = std::min(m_pickRequest.width, m_frame.outputExtent.width - sampleX);
         readback.height = std::min(m_pickRequest.height, m_frame.outputExtent.height - sampleY);
         readback.frameNumber = m_sceneFrameCounter;
+        // The depth block around the pixel, up to 9 x 9 (the measure tool snaps to a drawn pixel close to the cursor).
+        constexpr int32_t kDepthRadius = 4;
+        const int32_t patchX0 = std::max(0, static_cast<int32_t>(sampleX) - kDepthRadius);
+        const int32_t patchY0 = std::max(0, static_cast<int32_t>(sampleY) - kDepthRadius);
+        const int32_t patchX1 = std::min(static_cast<int32_t>(m_frame.outputExtent.width) - 1, static_cast<int32_t>(sampleX) + kDepthRadius);
+        const int32_t patchY1 = std::min(static_cast<int32_t>(m_frame.outputExtent.height) - 1, static_cast<int32_t>(sampleY) + kDepthRadius);
+        readback.patchX = patchX0;
+        readback.patchY = patchY0;
+        readback.patchWidth = static_cast<uint32_t>(patchX1 - patchX0 + 1);
+        readback.patchHeight = static_cast<uint32_t>(patchY1 - patchY0 + 1);
         m_pickRequest.active = false;
 
         // Copies the requested entity-ID area into this slot's staging buffer; read back once the slot's fence signaled
@@ -125,11 +135,17 @@ namespace Nox
             [&](RGBuilder& builder)
             {
                 builder.Read(resources.EntityHi, RGTextureAccess::CopySource);
+                builder.Read(resources.DepthHi, RGTextureAccess::CopySource);
                 builder.Write(resources.PickerStaging, RGBufferAccess::CopyDestination);
+                builder.Write(resources.PickerDepthStaging, RGBufferAccess::CopyDestination);
             },
-            [res = &resources, sampleX, sampleY, width = readback.width, height = readback.height](RGPassContext& context)
+            [res = &resources, sampleX, sampleY, width = readback.width, height = readback.height, patchX0, patchY0,
+             patchWidth = readback.patchWidth, patchHeight = readback.patchHeight](RGPassContext& context)
             {
                 context.Texture(res->EntityHi).copyImageToBuffer(context.Cmd(), context.Buffer(res->PickerStaging), sampleX, sampleY, width, height);
+                // The depths around the same first pixel (the measure tool turns one into a world point).
+                context.Texture(res->DepthHi).copyImageToBuffer(context.Cmd(), context.Buffer(res->PickerDepthStaging),
+                                                                static_cast<uint32_t>(patchX0), static_cast<uint32_t>(patchY0), patchWidth, patchHeight);
             });
     }
 

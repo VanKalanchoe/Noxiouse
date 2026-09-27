@@ -240,7 +240,7 @@
         RayDesc shadowRay;
         shadowRay.Origin = rayOrigin;
         shadowRay.Direction = rayDir;
-        shadowRay.TMin = 0.01;
+        shadowRay.TMin = 0.01 * ubo->unitsPerMeter;
         shadowRay.TMax = maxDist;
 
         RaytracingAccelerationStructure as = RaytracingAccelerationStructure(ubo->tlasDeviceAddress);
@@ -336,7 +336,7 @@
             RayDesc ray;
             ray.Origin = rayOrigin;
             ray.Direction = rayDir;
-            ray.TMin = 0.005;
+            ray.TMin = 0.005 * ubo->unitsPerMeter;
             ray.TMax = 1e4;
 
             RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> rq;
@@ -573,8 +573,8 @@
                     float NdotL = dot(hitNormal, lightDir);
                     if (NdotL > 0.001)
                     {
-                        // Robust offset (0.02) along normal prevents self-shadowing on curved meshes
-                        float3 shadowOrigin = hitPos + hitNormal * 0.02;
+                        // Robust offset along normal prevents self-shadowing on curved meshes (a world-unit-scaled 0.02 m)
+                        float3 shadowOrigin = hitPos + hitNormal * (0.02 * ubo->unitsPerMeter);
                         bool inShadow = trace_shadow_ray(ubo, shadowOrigin, lightDir, maxDist, rngState);
 
                         if (!inShadow)
@@ -621,7 +621,7 @@
                 if (NdotL > 0.0)
                 {
                     float envPdf = 1.0 / (4.0 * M_PI);
-                    float3 shadowOrigin = hitPos + hitNormal * 0.02;
+                    float3 shadowOrigin = hitPos + hitNormal * (0.02 * ubo->unitsPerMeter);
                     bool envOccluded = trace_shadow_ray(ubo, shadowOrigin, envDir, 1e4, rngState);
                     if (!envOccluded)
                     {
@@ -684,7 +684,7 @@
 
                 if (length(refrDir) > 1e-4)
                 {
-                    rayOrigin = hitPos - refrNormal * 0.02; // Step through geometry
+                    rayOrigin = hitPos - refrNormal * (0.02 * ubo->unitsPerMeter); // Step through geometry
                     rayDir = normalize(refrDir);
                     throughput *= albedo;
                     if (lobe == PT_LOBE_NONE)
@@ -725,7 +725,7 @@
                 float G1_L = eval_smith_g1(NdotL_bounce, alphaSq);
                 throughput *= (F_bounce * G1_L) / specProb;
 
-                rayOrigin = hitPos + hitNormal * 0.02;
+                rayOrigin = hitPos + hitNormal * (0.02 * ubo->unitsPerMeter);
                 rayDir = nextDir;
                 if (lobe == PT_LOBE_NONE)
                     lobe = PT_LOBE_SPECULAR;
@@ -743,7 +743,7 @@
                 // Exact Cosine Importance Sampling weight: (1 - F) * diffuseColor / (1 - specProb)
                 throughput *= ((float3(1.0) - F_diffuse) * diffuseColor) / (1.0 - specProb);
 
-                rayOrigin = hitPos + hitNormal * 0.02;
+                rayOrigin = hitPos + hitNormal * (0.02 * ubo->unitsPerMeter);
                 rayDir = nextDir;
                 if (lobe == PT_LOBE_NONE)
                     lobe = PT_LOBE_DIFFUSE;

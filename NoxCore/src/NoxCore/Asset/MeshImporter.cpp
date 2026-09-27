@@ -1,6 +1,7 @@
 #include "MeshImporter.h"
 
 #include <algorithm>
+#include <cfloat>
 
 #include <array>
 #include <chrono>
@@ -14,6 +15,8 @@
 #define TINYGLTF3_IMPLEMENTATION
 #define TINYGLTF3_ENABLE_FS 
 #include <glm/gtx/matrix_decompose.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 #include "tiny_gltf_v3.h"
 
@@ -410,6 +413,101 @@ namespace Nox
             return content;
         }
 
+        // The size: every mesh of the default scene, its POSITION accessor's min / max box through the node transforms.
+        {
+            glm::vec3 lowest(FLT_MAX), highest(-FLT_MAX);
+            auto meshBounds = [&](int32_t meshIndex, const glm::mat4& world)
+            {
+                const tg3_mesh& mesh = model.meshes[meshIndex];
+                for (uint32_t p = 0; p < mesh.primitives_count; ++p)
+                {
+                    const tg3_primitive& primitive = mesh.primitives[p];
+                    for (uint32_t a = 0; a < primitive.attributes_count; ++a)
+                    {
+                        const tg3_str_int_pair& attribute = primitive.attributes[a];
+                        if (attribute.key.len != 8 || std::strncmp(attribute.key.data, "POSITION", 8) != 0)
+                            continue;
+                        if (attribute.value < 0 || attribute.value >= static_cast<int32_t>(model.accessors_count))
+                            continue;
+                        const tg3_accessor& accessor = model.accessors[attribute.value];
+                        if (accessor.min_values_count < 3 || accessor.max_values_count < 3)
+                            continue;
+                        for (int corner = 0; corner < 8; ++corner)
+                        {
+                            const glm::vec3 point(
+                                static_cast<float>((corner & 1) ? accessor.max_values[0] : accessor.min_values[0]),
+                                static_cast<float>((corner & 2) ? accessor.max_values[1] : accessor.min_values[1]),
+                                static_cast<float>((corner & 4) ? accessor.max_values[2] : accessor.min_values[2]));
+                            const glm::vec3 transformed = glm::vec3(world * glm::vec4(point, 1.0f));
+                            lowest = glm::min(lowest, transformed);
+                            highest = glm::max(highest, transformed);
+                        }
+                    }
+                }
+            };
+
+            auto localMatrix = [](const tg3_node& node)
+            {
+                if (node.has_matrix)
+                {
+                    glm::mat4 matrix(1.0f);
+                    for (int column = 0; column < 4; ++column)
+                        for (int row = 0; row < 4; ++row)
+                            matrix[column][row] = static_cast<float>(node.matrix[column * 4 + row]);
+                    return matrix;
+                }
+                const glm::quat rotation(static_cast<float>(node.rotation[3]), static_cast<float>(node.rotation[0]),
+                                         static_cast<float>(node.rotation[1]), static_cast<float>(node.rotation[2]));
+                return glm::translate(glm::mat4(1.0f), glm::vec3(static_cast<float>(node.translation[0]), static_cast<float>(node.translation[1]), static_cast<float>(node.translation[2])))
+                     * glm::mat4_cast(rotation)
+                     * glm::scale(glm::mat4(1.0f), glm::vec3(static_cast<float>(node.scale[0]), static_cast<float>(node.scale[1]), static_cast<float>(node.scale[2])));
+            };
+
+            std::function<void(int32_t, const glm::mat4&, int)> visit = [&](int32_t nodeIndex, const glm::mat4& parent, int depth)
+            {
+                if (nodeIndex < 0 || nodeIndex >= static_cast<int32_t>(model.nodes_count) || depth > 64)
+                    return;
+                const tg3_node& node = model.nodes[nodeIndex];
+                const glm::mat4 world = parent * localMatrix(node);
+                if (node.mesh >= 0 && node.mesh < static_cast<int32_t>(model.meshes_count))
+                    meshBounds(node.mesh, world);
+                for (uint32_t c = 0; c < node.children_count; ++c)
+                    visit(node.children[c], world, depth + 1);
+            };
+
+            if (model.nodes_count == 0)
+            {
+                for (uint32_t m = 0; m < model.meshes_count; ++m)
+                    meshBounds(static_cast<int32_t>(m), glm::mat4(1.0f));
+            }
+            else if (model.scenes_count > 0)
+            {
+                const int32_t sceneIndex = model.default_scene >= 0 && model.default_scene < static_cast<int32_t>(model.scenes_count) ? model.default_scene : 0;
+                const tg3_scene& scene = model.scenes[sceneIndex];
+                for (uint32_t n = 0; n < scene.nodes_count; ++n)
+                    visit(scene.nodes[n], glm::mat4(1.0f), 0);
+            }
+            else
+            {
+                // No scene: the nodes nobody lists as a child are the roots.
+                std::vector<bool> isChild(model.nodes_count, false);
+                for (uint32_t n = 0; n < model.nodes_count; ++n)
+                    for (uint32_t c = 0; c < model.nodes[n].children_count; ++c)
+                        if (model.nodes[n].children[c] >= 0 && model.nodes[n].children[c] < static_cast<int32_t>(model.nodes_count))
+                            isChild[model.nodes[n].children[c]] = true;
+                for (uint32_t n = 0; n < model.nodes_count; ++n)
+                    if (!isChild[n])
+                        visit(static_cast<int32_t>(n), glm::mat4(1.0f), 0);
+            }
+
+            if (lowest.x <= highest.x)
+            {
+                content.HasBounds = true;
+                content.BoundsMin = lowest;
+                content.BoundsMax = highest;
+            }
+        }
+
         for (uint32_t i = 0; i < model.nodes_count; ++i)
         {
             const tg3_node& node = model.nodes[i];
@@ -440,6 +538,62 @@ namespace Nox
 
     // Clusters (§5.7): static geometry gets the cluster LOD DAG; skinned geometry one level (simplified in the bind pose,
     // it would deform wrongly).
+    // Like Unreal's Import Uniform Scale: baked into the cooked geometry once, at cook time, instead of a per-placement multiplier
+    // (docs/Units_And_World_Tools_Plan_2026.md, U4 follow-up). Every vertex position, and every node's local translation (so a
+    // multi-node file's meshes keep their relative positions), are scaled; rotations and node/vertex-normal directions are unaffected
+    // by a uniform scale. An entity this asset is attached to then defaults to Scale 1.0 -- "as authored" -- not a unit-conversion
+    // multiplier the Inspector has to show and the reset button has to know about.
+    static void ApplyImportScale(MeshSubset& subset, float scale)
+    {
+        if (std::abs(scale - 1.0f) < 1e-6f)
+            return;
+        for (MeshData& mesh : subset.Meshes)
+            for (shaderio::Vertex& vertex : mesh.Vertices)
+                vertex.pos *= scale;
+        for (MeshNodeData& node : subset.Nodes)
+            node.Translation *= scale;
+    }
+
+    // The skeleton (bone rest poses) and its animation clips need the same uniform scale as the mesh they drive, or a scaled-up
+    // character's bones stay at their old (too small) positions relative to the now-larger geometry. Node::RestTranslation is
+    // translation-only, like a MeshNodeData's, for the same reason (a rotation-preserving uniform scale of a whole TRS chain only
+    // ever needs each level's own translation scaled -- see ApplyImportScale). Skin::InverseBindMatrices is different: it is the
+    // inverse of a bind-pose world matrix, and (Scale(S) * M)^-1 = M^-1 * Scale(1/S), which -- multiplying on the right -- scales
+    // only the matrix's rotation/scale columns (0-2) by 1/S and leaves its translation column (3) alone.
+    static void ApplySkeletonScale(Skeleton& skeleton, float scale)
+    {
+        if (std::abs(scale - 1.0f) < 1e-6f)
+            return;
+        for (Node* node : skeleton.AllNodes)
+        {
+            if (!node)
+                continue;
+            node->RestTranslation *= scale;
+            if (node->HasRestMatrix)
+                node->RestMatrix[3] = glm::vec4(glm::vec3(node->RestMatrix[3]) * scale, node->RestMatrix[3].w);
+        }
+        for (Skin* skin : skeleton.Skins)
+        {
+            if (!skin)
+                continue;
+            for (glm::mat4& inverseBind : skin->InverseBindMatrices)
+            {
+                inverseBind[0] /= scale;
+                inverseBind[1] /= scale;
+                inverseBind[2] /= scale;
+            }
+        }
+    }
+
+    static void ApplyAnimationScale(AnimationSequence& animation, float scale)
+    {
+        if (std::abs(scale - 1.0f) < 1e-6f)
+            return;
+        for (NodeAnimationChannel& channel : animation.Channels)
+            for (Keyframe<glm::vec3>& key : channel.PositionKeys)
+                key.Value *= scale;
+    }
+
     static void BuildClusters(MeshSubset& subset)
     {
         for (size_t i = 0; i < subset.Meshes.size(); ++i)
@@ -613,6 +767,10 @@ namespace Nox
         else if (!singleMesh && onlySkeletal && importSettings.SkeletalCombine != MeshCombineMode::DoNotCombine)
             CombineSubmeshes(subset, true);
 
+        // The mesh's own geometry and node structure, whatever kind: baked in either way, so a skeletal instance no longer needs
+        // ImportScale applied through its placement Transform.Scale either (matches the static path -- see EditorLayer's drag-in).
+        ApplyImportScale(subset, importSettings.ImportScale);
+
         BuildClusters(subset);
 
         std::error_code error;
@@ -626,6 +784,7 @@ namespace Nox
         // animations of a level, e.g. Bistro's fans, have no skeleton).
         if (!singleMesh && importSettings.ImportSkeletalMeshes && !extractedSkeleton.Skins.empty())
         {
+            ApplySkeletonScale(extractedSkeleton, importSettings.ImportScale);
             std::filesystem::path skelPath = cookedPath;
             skelPath.replace_extension(".nskel");
             SkeletonSerializer::Serialize(skelPath, extractedSkeleton);
@@ -636,6 +795,7 @@ namespace Nox
         {
             for (const Ref<AnimationSequence>& animation : extractedAnimations)
             {
+                ApplyAnimationScale(*animation, importSettings.ImportScale);
                 std::filesystem::path animPath = cookedPath.parent_path() / (cookedPath.stem().string() + "_" + animation->Name + ".nanim");
                 AnimationSerializer::Serialize(animPath, *animation);
                 NOX_CORE_INFO("[Importer] Extracted and cooked Animation Sequence '{}' to {}", animation->Name, animPath.string());
@@ -706,6 +866,12 @@ namespace Nox
             MeshSubset subset;
             if (!CopySingleMesh(meshDataList, materialDataList, pendingGeometry, nodeDataList, worlds, node.MeshIndex, skinned, subset))
                 continue;
+            // Not for Import Into Level (level != nullptr): that path scales the whole placed scene -- meshes, lights, cameras --
+            // uniformly through the level root's own Transform.Scale (ModelInstance::SpawnLevel), unrelated to this baking; baking
+            // it into the geometry here too would scale it twice. Only the plain "drag this cooked mesh in on its own" case gets it
+            // (static or skeletal alike -- see the matching skeleton/animation scaling below for the skinned case).
+            if (!level)
+                ApplyImportScale(subset, wholeFile.MeshSettings.ImportScale);
             BuildClusters(subset);
 
             std::string name = node.MeshName.empty() ? "Mesh_" + std::to_string(node.MeshIndex) : node.MeshName;
@@ -736,9 +902,12 @@ namespace Nox
         // LinkImportedAssets looks for through MaterialBasePath).
         if (skinned)
         {
+            // Same "not for Import Into Level" reasoning as the geometry above.
+            const float scale = level ? 1.0f : wholeFile.MeshSettings.ImportScale;
             const std::filesystem::path base = assetDirectory / wholeFile.FilePath;
             if (!extractedSkeleton.Skins.empty())
             {
+                ApplySkeletonScale(extractedSkeleton, scale);
                 std::filesystem::path skelPath = base;
                 skelPath.replace_extension(".nskel");
                 SkeletonSerializer::Serialize(skelPath, extractedSkeleton);
@@ -747,6 +916,7 @@ namespace Nox
             {
                 for (const Ref<AnimationSequence>& animation : extractedAnimations)
                 {
+                    ApplyAnimationScale(*animation, scale);
                     const std::filesystem::path animPath = base.parent_path() / (base.stem().string() + "_" + animation->Name + ".nanim");
                     AnimationSerializer::Serialize(animPath, *animation);
                 }
@@ -1548,6 +1718,74 @@ namespace Nox
         }
     }
 
+    // Fills in vertex.tangent for a primitive whose file didn't provide a TANGENT attribute, via meshoptimizer's
+    // MikkTSpace-compatible generator (meshopt_TangentCompatible: normal maps are near-universally baked assuming
+    // MikkTSpace tangents, so matching it at runtime is what makes the baked detail line up with the lighting).
+    // meshopt_generateTangents outputs one tangent per triangle CORNER, not per vertex: a vertex shared by corners
+    // whose tangents genuinely disagree (a mirrored UV island's seam, most often) needs to become two vertices, one per
+    // side, each keeping its own -- exactly like a hard vertex normal, just for tangent space instead. Collapsing that
+    // disagreement into one shared, wrong-on-one-side vertex (or discarding it and reconstructing a tangent frame from
+    // scratch per pixel, at runtime, from raw UV/position derivatives, which is what GBufferMaterial.slang used to
+    // fall back to for every mesh) is exactly what produced a visible seam in specular response, right where such a
+    // mirror seam actually is, on an otherwise perfectly continuous surface.
+    static void GenerateMissingTangents(std::vector<shaderio::Vertex>& vertices, std::vector<uint32_t>& indices)
+    {
+        if (vertices.empty() || indices.empty())
+            return;
+
+        std::vector<float> cornerTangents(indices.size() * 4);
+        meshopt_generateTangents(cornerTangents.data(), indices.data(), indices.size(),
+                                  &vertices[0].pos.x, vertices.size(), sizeof(shaderio::Vertex),
+                                  &vertices[0].normal.x, sizeof(shaderio::Vertex),
+                                  &vertices[0].uv0.x, sizeof(shaderio::Vertex),
+                                  meshopt_TangentCompatible);
+
+        auto tangentsMatch = [](const glm::vec4& a, const glm::vec4& b)
+        {
+            return a.w == b.w && glm::dot(glm::vec3(a), glm::vec3(b)) > 0.9999f;
+        };
+
+        // Every vertex's first-seen tangent goes straight onto it; a later corner with a different tangent gets a new,
+        // duplicate vertex (reusing an already-made duplicate if this exact tangent already showed up before).
+        const size_t originalVertexCount = vertices.size();
+        std::vector<uint8_t> assigned(originalVertexCount, 0);
+        std::vector<std::vector<std::pair<glm::vec4, uint32_t>>> variantsOf(originalVertexCount);
+
+        for (size_t corner = 0; corner < indices.size(); ++corner)
+        {
+            const uint32_t originalIndex = indices[corner];
+            const glm::vec4 tangent(cornerTangents[corner * 4 + 0], cornerTangents[corner * 4 + 1],
+                                     cornerTangents[corner * 4 + 2], cornerTangents[corner * 4 + 3]);
+
+            if (!assigned[originalIndex])
+            {
+                vertices[originalIndex].tangent = tangent;
+                assigned[originalIndex] = 1;
+                variantsOf[originalIndex].push_back({ tangent, originalIndex });
+                continue;
+            }
+
+            uint32_t target = UINT32_MAX;
+            for (const auto& variant : variantsOf[originalIndex])
+            {
+                if (tangentsMatch(variant.first, tangent))
+                {
+                    target = variant.second;
+                    break;
+                }
+            }
+            if (target == UINT32_MAX)
+            {
+                shaderio::Vertex duplicate = vertices[originalIndex];
+                duplicate.tangent = tangent;
+                target = static_cast<uint32_t>(vertices.size());
+                vertices.push_back(duplicate);
+                variantsOf[originalIndex].push_back({ tangent, target });
+            }
+            indices[corner] = target;
+        }
+    }
+
     std::vector<MeshData> MeshImporter::ParseGltfToMeshData
     (
         const std::filesystem::path& path,
@@ -1762,6 +2000,20 @@ namespace Nox
                     texCoord1Buffer = &model.buffers[texCoord1BufferView->buffer];
                 }
 
+                // Authored tangent (xyz + handedness w): read directly when the file provides one. When it doesn't,
+                // GenerateMissingTangents fills every vertex.tangent in below, after the vertex/index lists are complete.
+                bool hasTangents = FindAttribute(primitive, "TANGENT") != -1;
+                const tg3_accessor* tangentAccessor = nullptr;
+                const tg3_buffer_view* tangentBufferView = nullptr;
+                const tg3_buffer* tangentBuffer = nullptr;
+
+                if (hasTangents)
+                {
+                    tangentAccessor = &model.accessors[FindAttribute(primitive, "TANGENT")];
+                    tangentBufferView = &model.buffer_views[tangentAccessor->buffer_view];
+                    tangentBuffer = &model.buffers[tangentBufferView->buffer];
+                }
+
                 bool hasSkinning = (FindAttribute(primitive, "JOINTS_0") != -1 && FindAttribute(primitive, "WEIGHTS_0") != -1);
                 const tg3_accessor* jointsAccessor = nullptr;
                 const tg3_buffer_view* jointsBufferView = nullptr;
@@ -1845,6 +2097,17 @@ namespace Nox
                     else
                     {
                         vertex.uv1 = {0.0f, 0.0f};
+                    }
+
+                    if (hasTangents)
+                    {
+                        uint32_t tangentStride = tangentBufferView->byte_stride ? tangentBufferView->byte_stride : 16;
+                        const float* tan = reinterpret_cast<const float*>(&tangentBuffer->data.data[tangentBufferView->byte_offset + tangentAccessor->byte_offset + (i * tangentStride)]);
+                        vertex.tangent = {tan[0], tan[1], tan[2], tan[3]};
+                    }
+                    else
+                    {
+                        vertex.tangent = {0.0f, 0.0f, 0.0f, 0.0f}; // sentinel: GenerateMissingTangents fills this in below
                     }
 
                     if (hasSkinning)
@@ -1966,6 +2229,9 @@ namespace Nox
                         primitiveIndices.push_back(static_cast<uint32_t>(i));
                     }
                 }
+
+                if (!hasTangents && hasTexCoords)
+                    GenerateMissingTangents(primitiveData.Vertices, primitiveIndices);
 
                 // Clusters (§5.7): static geometry gets the cluster LOD DAG; skinned geometry one level (simplified in the bind
                 // pose, it would deform wrongly).

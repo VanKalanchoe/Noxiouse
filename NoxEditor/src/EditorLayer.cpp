@@ -14,6 +14,7 @@
 #include <ImGuizmo.h>
 #include <SDL3/SDL_filesystem.h>
 #include <glm/glm.hpp>
+#include <glm/gtc/constants.hpp>
 #include <glm/gtc/type_ptr.hpp>  // for pointer to matrix or vector
 
 #include "NoxCore/Asset/AssetManager.h"
@@ -58,6 +59,7 @@ namespace Nox
         m_AssetOpeners[AssetType::AnimationGraph] = [this](AssetHandle handle) { OpenNodeGraphEditor(handle); };
         m_AssetOpeners[AssetType::Prefab] = [this](AssetHandle handle) { OpenPrefabMode(handle); };
         m_SceneHierarchyPanel.SetOpenAssetCallback([this](AssetHandle handle) { OpenAsset(handle); });
+        m_SceneHierarchyPanel.SetFocusEntityCallback([this](Entity entity) { FocusOnEntity(entity); });
         m_SceneHierarchyPanel.SetPlaceAssetsCallback([this](const std::vector<AssetHandle>& handles, const std::string& folder)
         {
             // No viewport point for a drop on the hierarchy: at the point the editor camera orbits (in front of it).
@@ -294,6 +296,13 @@ namespace Nox
 
     void EditorLayer::OnImGuiRender()
     {
+        // Through ImGui's own cursor state instead of raw SDL calls (Input::SetCursorVisible): those fought
+        // ImGui_ImplSDL3_NewFrame's own per-frame cursor update and lost unpredictably (flicker). Telling ImGui itself
+        // "no cursor" for this frame is the way the backend expects to be told, so there is nothing left to race against.
+        // ShouldHideCursor(), not just "is flying": UE5 doesn't hide it on the click alone, only once the mouse actually moves.
+        if (m_EditorCamera.ShouldHideCursor())
+            ImGui::SetMouseCursor(ImGuiMouseCursor_None);
+
         /*--
         * IMGUI Docking
         * Create a dockspace and dock the viewport and settings window.
@@ -569,11 +578,9 @@ namespace Nox
                             }
                             else
                                 root.AddComponent<ModelInstanceComponent>().Model = handle;
-                            {
-                                const float importScale = metadata.MeshSettings.ImportScale;
-                                if (importScale > 0.0f && importScale != 1.0f)
-                                    root.GetComponent<TransformComponent>().Scale = glm::vec3(importScale);
-                            }
+                            // A mesh's import scale (static or skeletal) is baked into its cooked geometry, bind pose and animation
+                            // clips (MeshImporter::ApplyImportScale / ApplySkeletonScale / ApplyAnimationScale, like Unreal's Import
+                            // Uniform Scale): the entity starts at Scale 1.0, "as authored".
                             AssetManager::RequestAsset(handle);
                             m_SceneHierarchyPanel.SetSelectedEntity(root);
                             m_PlacementPreview.Root = root;
@@ -687,7 +694,7 @@ namespace Nox
             Entity selectedEntity = m_SceneHierarchyPanel.GetSelectedEntity();
             if (selectedEntity && m_GizmoType != -1)
             {
-                ImGuizmo::SetOrthographic(false); // maybe needed later for setortho camera
+                ImGuizmo::SetOrthographic(m_EditorCamera.IsOrthographic());
                 ImGuizmo::SetDrawlist();
 
                 ImGuizmo::SetRect(m_ViewportBounds[0].x, m_ViewportBounds[0].y, m_ViewportBounds[1].x - m_ViewportBounds[0].x, m_ViewportBounds[1].y - m_ViewportBounds[0].y);
@@ -765,6 +772,8 @@ namespace Nox
                     }
                 }
             }
+
+            UI_MeasureOverlay();
 
             ImGui::End(); // End viewport
             ImGui::PopStyleVar();
@@ -908,10 +917,16 @@ namespace Nox
 
         // There was no way to change this without editing the hardcoded constructor value in
         // EditorLayer's OnAttach and recompiling - this is that missing control.
-        float fov = m_EditorCamera.GetFOV();
-        if (ImGui::SliderFloat("Camera FOV", &fov, 10.0f, 120.0f, "%.1f"))
+        // The slider is horizontal FOV (Unreal's convention -- its CameraComponent FOV is horizontal): at a wide aspect ratio,
+        // the same *vertical* FOV number covers a much wider horizontal angle, which is what made 120 look so extreme (that was
+        // ~144 degrees horizontal on a 16:9 view, an actual fisheye, not a bug). EditorCamera itself still works in vertical FOV
+        // throughout (the projection matrix, DLSS, the gizmo) -- only this slider converts, through the current aspect ratio.
+        const float aspect = std::max(m_EditorCamera.GetAspectRatio(), 0.01f);
+        float horizontalFov = glm::degrees(2.0f * std::atan(std::tan(glm::radians(m_EditorCamera.GetFOV()) * 0.5f) * aspect));
+        if (ImGui::SliderFloat("Camera FOV", &horizontalFov, 10.0f, 120.0f, "%.1f"))
         {
-            m_EditorCamera.SetFOV(fov);
+            const float verticalFov = glm::degrees(2.0f * std::atan(std::tan(glm::radians(horizontalFov) * 0.5f) / aspect));
+            m_EditorCamera.SetFOV(verticalFov);
         }
 
         float iblAmbient = m_Renderer->getScaleIBLAmbient();
@@ -1677,40 +1692,64 @@ namespace Nox
                 break;
             }
 
-        // Gizmos
-        case SDL_SCANCODE_Q:
-            {
-                if (m_ViewportHovered)
-                    m_GizmoType = -1;
-                break;
-            }
-        case SDL_SCANCODE_W:
-            {
-                if (m_ViewportHovered)
-                    m_GizmoType = ImGuizmo::OPERATION::TRANSLATE;
-                break;
-            }
-        case SDL_SCANCODE_E:
-            {
-                if (m_ViewportHovered)
-                    m_GizmoType = ImGuizmo::OPERATION::ROTATE;
-                break;
-            }
+        // The gizmo mode is a toolbar button now (UI_ViewportOverlay), not Q/W/E/R: those double as WASD-fly's strafe/forward and
+        // the fly-up key, so a key held to move the camera can no longer also switch what the gizmo does.
         case SDL_SCANCODE_R:
             if (control)
             {
                 ScriptEngine::ReloadAssembly();
             }
-            else
-            {
-                m_GizmoType = ImGuizmo::OPERATION::SCALE;
-            }
             break;
+        case SDL_SCANCODE_KP_1:
+            if (m_ViewportHovered)
+                SetViewMode(control ? EditorViewMode::Back : EditorViewMode::Front);
+            break;
+        case SDL_SCANCODE_KP_3:
+            if (m_ViewportHovered)
+                SetViewMode(control ? EditorViewMode::Left : EditorViewMode::Right);
+            break;
+        case SDL_SCANCODE_KP_7:
+            if (m_ViewportHovered)
+                SetViewMode(control ? EditorViewMode::Bottom : EditorViewMode::Top);
+            break;
+        case SDL_SCANCODE_KP_5:
+            if (m_ViewportHovered)
+                SetViewMode(EditorViewMode::Perspective);
+            break;
+        case SDL_SCANCODE_M:
+            {
+                if (m_ViewportHovered && !control)
+                {
+                    m_MeasureTool = !m_MeasureTool;
+                    if (!m_MeasureTool)
+                        m_MeasureStage = 0;
+                }
+                break;
+            }
+        case SDL_SCANCODE_ESCAPE:
+            {
+                // Esc: first drops the line being measured, then leaves the tool.
+                if (m_MeasureTool)
+                {
+                    if (m_MeasureStage != 0)
+                        m_MeasureStage = 0;
+                    else
+                        m_MeasureTool = false;
+                }
+                break;
+            }
         case SDL_SCANCODE_END:
             {
                 // Unreal's "Snap to Floor".
                 if (Application::Get().GetLayer<ImGuiLayer>()->GetActiveWidgetID() == 0)
                     SnapSelectionToFloor();
+                break;
+            }
+        case SDL_SCANCODE_F:
+            {
+                // Unreal's "Frame Selected" -- the same thing double-clicking an entity in the Outliner does.
+                if (m_ViewportHovered && !control)
+                    FocusOnEntity(m_SceneHierarchyPanel.GetSelectedEntity());
                 break;
             }
         case SDL_SCANCODE_DELETE:
@@ -1754,6 +1793,13 @@ namespace Nox
 
         if (event.GetMouseButton() == SDL_BUTTON_LEFT)
         {
+            // The measure tool takes the clicks (no selecting) while it is on.
+            if (m_MeasureTool && m_ViewportHovered && !Input::IsKeyPressed(SDL_SCANCODE_LALT))
+            {
+                MeasureClick();
+                return false;
+            }
+
             if (m_ViewportHovered && !ImGuizmo::IsOver() && !Input::IsKeyPressed(SDL_SCANCODE_LALT))
             {
                 bool shift = Input::IsKeyPressed(SDL_SCANCODE_LSHIFT) || Input::IsKeyPressed(SDL_SCANCODE_RSHIFT);
@@ -1810,6 +1856,8 @@ namespace Nox
 
         if (m_SceneState != SceneState::Play && m_ShowGrid)
             DrawWorldGrid();
+        if (m_SceneState != SceneState::Play && m_ShowReferenceFigure)
+            DrawReferenceFigure();
 
         if (m_ShowPhysicsColliders)
         {
@@ -1856,6 +1904,7 @@ namespace Nox
                     m_Renderer2D->DrawCircle(transform, glm::vec4(0, 1, 0, 1), 0.01f);
                 }
             }
+            DrawPhysicsColliders3D();
         }
 
         // Draw selected entity outline 2D and 3D
@@ -1922,6 +1971,8 @@ namespace Nox
     {
         if (Project::Load(path))
         {
+            m_EditorCamera.ApplyWorldUnitDefaults(); // the project's world unit is only known now (U6)
+
             AssetHandle startScene = Project::GetActive()->GetConfig().StartScene;
             if (startScene)
                 OpenScene(startScene);
@@ -2078,6 +2129,28 @@ namespace Nox
             return;
         }
 
+        // The gizmo mode: buttons, not Q/W/E/R (WASD-fly needs those keys for movement instead -- see EditorCamera::OnUpdate).
+        {
+            auto gizmoButton = [this](const char* label, const char* tooltip, int mode)
+            {
+                const bool active = m_GizmoType == mode;
+                if (active)
+                    ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyle().Colors[ImGuiCol_ButtonActive]);
+                if (ImGui::Button(label, ImVec2(28.0f, 0.0f)))
+                    m_GizmoType = mode;
+                if (active)
+                    ImGui::PopStyleColor();
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("%s", tooltip);
+                ImGui::SameLine();
+            };
+            gizmoButton("Sel", "Select only, no gizmo", -1);
+            gizmoButton("Mov", "Move", ImGuizmo::OPERATION::TRANSLATE);
+            gizmoButton("Rot", "Rotate", ImGuizmo::OPERATION::ROTATE);
+            gizmoButton("Scl", "Scale", ImGuizmo::OPERATION::SCALE);
+            ImGui::NewLine();
+        }
+
         ImGui::Checkbox("Snap", &m_SnapEnabled);
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("Snap moving, rotating, scaling and placing to the steps on the right. Hold Ctrl to switch it for one move.");
@@ -2110,6 +2183,20 @@ namespace Nox
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("Scale step");
 
+        {
+            const char* viewNames[] = { "Perspective", "Top", "Bottom", "Front", "Back", "Left", "Right" };
+            int view = static_cast<int>(m_EditorCamera.GetViewMode());
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(100.0f);
+            if (ImGui::Combo("##viewMode", &view, viewNames, 7))
+                SetViewMode(static_cast<EditorViewMode>(view));
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("View: Perspective, or an orthographic view along an axis (raster only). Numpad 7 / 1 / 3 (Ctrl: the opposite side), 5 = perspective");
+        }
+        ImGui::SameLine();
+        ImGui::Checkbox("Figure", &m_ShowReferenceFigure);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("A 180 cm figure at the world origin, to judge sizes");
         ImGui::SameLine();
         ImGui::Checkbox("Grid", &m_ShowGrid);
         if (ImGui::IsItemHovered())
@@ -2120,7 +2207,13 @@ namespace Nox
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("Drop the selection onto the surface below it (End)");
 
-        // How lengths are written (sizes in the Inspector, later the measure tool).
+        ImGui::SameLine();
+        if (ImGui::Checkbox("Measure", &m_MeasureTool) && !m_MeasureTool)
+            m_MeasureStage = 0;
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Measure (M): click two points, the distance is written on the line. Esc leaves it.");
+
+        // How lengths are written (sizes in the Inspector, the measure tool).
         ImGui::SameLine();
         ImGui::SetNextItemWidth(70.0f);
         const char* displayNames[] = { "cm", "m", "auto" };
@@ -2133,21 +2226,220 @@ namespace Nox
         ImGui::End();
     }
 
+    void EditorLayer::DrawReferenceFigure()
+    {
+        // Sizes in cm, converted to world units; the figure stands on y = 0 at the origin, facing -Z, 180 cm tall.
+        auto cm = [](float centimeters) { return WorldUnits::FromCentimeters(centimeters); };
+        const glm::vec4 color(1.0f, 0.62f, 0.2f, 0.9f);
+
+        auto box = [&](float minX, float maxX, float minY, float maxY, float minZ, float maxZ)
+        {
+            const glm::vec3 low(cm(minX), cm(minY), cm(minZ));
+            const glm::vec3 high(cm(maxX), cm(maxY), cm(maxZ));
+            const glm::vec3 corners[8] = {
+                { low.x, low.y, low.z }, { high.x, low.y, low.z }, { high.x, low.y, high.z }, { low.x, low.y, high.z },
+                { low.x, high.y, low.z }, { high.x, high.y, low.z }, { high.x, high.y, high.z }, { low.x, high.y, high.z } };
+            constexpr int edges[12][2] = { {0,1},{1,2},{2,3},{3,0}, {4,5},{5,6},{6,7},{7,4}, {0,4},{1,5},{2,6},{3,7} };
+            for (const auto& edge : edges)
+                m_Renderer2D->DrawThinLine(corners[edge[0]], corners[edge[1]], color);
+        };
+
+        box(-18.0f, -1.0f, 0.0f, 88.0f, -10.0f, 10.0f);   // legs
+        box(1.0f, 18.0f, 0.0f, 88.0f, -10.0f, 10.0f);
+        box(-22.0f, 22.0f, 88.0f, 143.0f, -11.0f, 11.0f); // torso
+        box(-31.0f, -22.0f, 83.0f, 143.0f, -5.0f, 5.0f);  // arms
+        box(22.0f, 31.0f, 83.0f, 143.0f, -5.0f, 5.0f);
+        box(-4.0f, 4.0f, 143.0f, 151.0f, -4.0f, 4.0f);    // neck
+        box(-10.0f, 10.0f, 151.0f, 180.0f, -12.0f, 12.0f); // head, the top at 180 cm
+    }
+
+    // Decomposes a world matrix's scale the same way JoltPhysics3DScene::CreateBody does, so a collider's wireframe here is sized
+    // exactly like the shape Jolt actually simulates (a non-uniform scale on a box collider shows as a non-uniform box; a sphere or
+    // a capsule's radius, which Jolt cannot scale non-uniformly, uses the largest axis, matching CreateBody's own formula).
+    static glm::vec3 DecomposeWorldScale(const glm::mat4& worldMatrix)
+    {
+        return glm::vec3(
+            glm::length(glm::vec3(worldMatrix[0])),
+            glm::length(glm::vec3(worldMatrix[1])),
+            glm::length(glm::vec3(worldMatrix[2])));
+    }
+
+    // The entity's world position and rotation, without its scale (a collider's own Offset is a fixed world-unit distance from the
+    // body's origin, not stretched by the entity's Scale -- JoltPhysics3DScene::CreateBody never multiplies Offset by worldScale,
+    // only the shape's own extents/radius). Assumes no shear (an ordinary Translate * Rotate * Scale world matrix).
+    static glm::mat4 RigidPart(const glm::mat4& worldMatrix)
+    {
+        glm::mat4 result = worldMatrix;
+        result[0] = glm::vec4(glm::normalize(glm::vec3(worldMatrix[0])), 0.0f);
+        result[1] = glm::vec4(glm::normalize(glm::vec3(worldMatrix[1])), 0.0f);
+        result[2] = glm::vec4(glm::normalize(glm::vec3(worldMatrix[2])), 0.0f);
+        return result;
+    }
+
+    void EditorLayer::DrawPhysicsColliders3D()
+    {
+        constexpr glm::vec4 kColliderColor(0.2f, 1.0f, 0.3f, 0.9f);
+        constexpr int kCircleSegments = 24;
+
+        // `transform` is the rigid (no-scale) part of an entity's world matrix; `radius`/`local` are already in world-unit length
+        // (the shape's own extent x worldScale, done by the caller -- see JoltPhysics3DScene::CreateBody for the same math).
+        auto drawCircle = [this, kColliderColor](const glm::mat4& transform, const glm::vec3& localCentre, float radius, int axis)
+        {
+            const int a = (axis + 1) % 3, b = (axis + 2) % 3;
+            glm::vec3 previous(0.0f);
+            for (int i = 0; i <= kCircleSegments; ++i)
+            {
+                const float t = glm::two_pi<float>() * static_cast<float>(i) / kCircleSegments;
+                glm::vec3 local = localCentre;
+                local[a] += std::cos(t) * radius;
+                local[b] += std::sin(t) * radius;
+                const glm::vec3 point = glm::vec3(transform * glm::vec4(local, 1.0f));
+                if (i > 0)
+                    m_Renderer2D->DrawXRayLine(previous, point, kColliderColor);
+                previous = point;
+            }
+        };
+
+        // Box: a non-uniform Scale shears the half extents (matching Jolt's box shape, which can be non-uniform) but never the Offset.
+        auto boxView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, BoxCollider3DComponent>();
+        for (auto entity : boxView)
+        {
+            auto [wtc, box] = boxView.get<WorldTransformComponent, BoxCollider3DComponent>(entity);
+            const glm::vec3 halfExtents = box.HalfExtents * DecomposeWorldScale(wtc.WorldMatrix);
+            const glm::mat4 transform = RigidPart(wtc.WorldMatrix);
+            glm::vec3 corners[8];
+            for (int i = 0; i < 8; ++i)
+            {
+                const glm::vec3 sign((i & 1) ? 1.0f : -1.0f, (i & 2) ? 1.0f : -1.0f, (i & 4) ? 1.0f : -1.0f);
+                corners[i] = glm::vec3(transform * glm::vec4(box.Offset + sign * halfExtents, 1.0f));
+            }
+            constexpr int edges[12][2] = { {0,1},{2,3},{4,5},{6,7}, {0,2},{1,3},{4,6},{5,7}, {0,4},{1,5},{2,6},{3,7} };
+            for (const auto& edge : edges)
+                m_Renderer2D->DrawXRayLine(corners[edge[0]], corners[edge[1]], kColliderColor);
+        }
+
+        // Sphere: Jolt's sphere shape is always uniform, sized by the largest axis of the entity's scale (JoltPhysics3DScene::CreateBody).
+        auto sphereView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, SphereCollider3DComponent>();
+        for (auto entity : sphereView)
+        {
+            auto [wtc, sphere] = sphereView.get<WorldTransformComponent, SphereCollider3DComponent>(entity);
+            const glm::vec3 worldScale = DecomposeWorldScale(wtc.WorldMatrix);
+            const float radius = sphere.Radius * std::max({ worldScale.x, worldScale.y, worldScale.z });
+            const glm::mat4 transform = RigidPart(wtc.WorldMatrix);
+            for (int axis = 0; axis < 3; ++axis)
+                drawCircle(transform, sphere.Offset, radius, axis);
+        }
+
+        // Capsule: two circles at the cap centres plus four verticals along the entity's local Y (JoltPhysics3DScene::CreateCharacter
+        // does the equivalent for the character controller, not a component here -- this is CapsuleCollider3DComponent only).
+        auto capsuleView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, CapsuleCollider3DComponent>();
+        for (auto entity : capsuleView)
+        {
+            auto [wtc, capsule] = capsuleView.get<WorldTransformComponent, CapsuleCollider3DComponent>(entity);
+            const glm::vec3 worldScale = DecomposeWorldScale(wtc.WorldMatrix);
+            const float halfHeight = capsule.HalfHeight * worldScale.y;
+            const float radius = capsule.Radius * std::max(worldScale.x, worldScale.z);
+            const glm::mat4 transform = RigidPart(wtc.WorldMatrix);
+            const glm::vec3 topCentre = capsule.Offset + glm::vec3(0.0f, halfHeight, 0.0f);
+            const glm::vec3 bottomCentre = capsule.Offset - glm::vec3(0.0f, halfHeight, 0.0f);
+            drawCircle(transform, topCentre, radius, 1);
+            drawCircle(transform, bottomCentre, radius, 1);
+            for (int i = 0; i < 4; ++i)
+            {
+                const float t = glm::half_pi<float>() * static_cast<float>(i);
+                const glm::vec3 rim(std::cos(t) * radius, 0.0f, std::sin(t) * radius);
+                m_Renderer2D->DrawXRayLine(glm::vec3(transform * glm::vec4(topCentre + rim, 1.0f)), glm::vec3(transform * glm::vec4(bottomCentre + rim, 1.0f)), kColliderColor);
+            }
+        }
+
+        // A terrain/heightfield collider goes here later, as its own block: read its component, draw a wireframe grid of its sampled
+        // heights (or its own bounds) the same way, no changes needed above.
+    }
+
+    void EditorLayer::FocusOnEntity(Entity entity)
+    {
+        if (!entity)
+            return;
+
+        glm::vec3 centre;
+        float radius;
+        const WorldBounds bounds = ComputeWorldBounds(*m_ActiveScene, entity);
+        if (bounds.Valid)
+        {
+            centre = (bounds.Min + bounds.Max) * 0.5f;
+            radius = glm::length(bounds.Size()) * 0.5f;
+        }
+        else if (entity.HasComponent<WorldTransformComponent>())
+        {
+            centre = glm::vec3(entity.GetComponent<WorldTransformComponent>().WorldMatrix[3]);
+            radius = 0.0f; // Focus() floors this to a sensible minimum
+        }
+        else
+            return;
+
+        m_EditorCamera.Focus(centre, radius);
+    }
+
     void EditorLayer::DrawWorldGrid()
     {
         // Godot's editor grid (GridMesh.slang). Its smallest cell is one meter (Godot's 1 m) or the snap step when that is bigger, so a
         // 10 cm snap does not turn the grid into a haze; the cell size does not change while you zoom (only in far jumps).
-        m_Renderer2D->DrawGrid(m_EditorCamera.GetPosition(), std::max(LocationSnapWorldUnits(), WorldUnits::FromMeters(1.0f)));
+        // In an ortho view the grid lies on the plane the view looks at and the level follows the ortho size (Godot does the same).
+        const float cell = std::max(LocationSnapWorldUnits(), WorldUnits::FromMeters(1.0f));
+        if (m_EditorCamera.IsOrthographic())
+            m_Renderer2D->DrawGrid(m_EditorCamera.GetFocalPoint(), cell, GridPlaneAxis(), m_EditorCamera.GetOrthoHalfHeight());
+        else
+            // The orbit distance, not the camera's height above the ground: height alone jumps just from tilting to look straight
+            // down (position.y then equals the orbit distance instead of ~0), which made the grid collapse to its coarsest cells
+            // on nothing more than a rotation. Orbit distance only changes when you actually zoom, so the grid now looks the same
+            // however you're angled at it, like UE5's.
+            m_Renderer2D->DrawGrid(m_EditorCamera.GetPosition(), cell, 1, m_EditorCamera.GetDistance());
+    }
+
+    int EditorLayer::GridPlaneAxis() const
+    {
+        switch (m_EditorCamera.GetViewMode())
+        {
+        case EditorViewMode::Front:
+        case EditorViewMode::Back: return 2;
+        case EditorViewMode::Left:
+        case EditorViewMode::Right: return 0;
+        default: return 1;
+        }
+    }
+
+    void EditorLayer::SetViewMode(EditorViewMode mode)
+    {
+        const bool wasOrthographic = m_EditorCamera.IsOrthographic();
+        m_EditorCamera.SetViewMode(mode);
+        const bool isOrthographic = m_EditorCamera.IsOrthographic();
+
+        if (isOrthographic && !wasOrthographic)
+        {
+            m_OrthoSaved = { true, m_Renderer->isDLSSEnabled(), m_Renderer->getRayTracingEnabled(), m_Renderer->isPathTracingEnabled() };
+            m_Renderer->setDLSSEnabled(false);
+            m_Renderer->setRayTracingEnabled(false);
+            m_Renderer->setPathTracingEnabled(false);
+        }
+        else if (!isOrthographic && wasOrthographic && m_OrthoSaved.Valid)
+        {
+            m_Renderer->setDLSSEnabled(m_OrthoSaved.Dlss);
+            m_Renderer->setRayTracingEnabled(m_OrthoSaved.RayTracing);
+            m_Renderer->setPathTracingEnabled(m_OrthoSaved.PathTracing);
+            m_OrthoSaved.Valid = false;
+        }
     }
 
     void EditorLayer::DrawTranslationSnapFeedback(const glm::mat4& view, const glm::mat4& projection, const glm::mat4& current)
     {
-        // A measuring line from where the drag began to where the object is now, an end mark (a short bar across) at both ends and the
-        // distance in the middle. It grows while dragging and jumps by the snap step.
-        const glm::vec3 start = glm::vec3(m_GizmoDragStart[3]);
-        const glm::vec3 end = glm::vec3(current[3]);
+        // A measuring line from where the drag began to where the object is now; it grows while dragging and jumps by the snap step.
+        DrawMeasureLine(view, projection, glm::vec3(m_GizmoDragStart[3]), glm::vec3(current[3]), LocationSnapWorldUnits() * 0.05f);
+    }
+
+    void EditorLayer::DrawMeasureLine(const glm::mat4& view, const glm::mat4& projection, const glm::vec3& start, const glm::vec3& end, float minimumLength)
+    {
         const float distance = glm::length(end - start);
-        if (distance < LocationSnapWorldUnits() * 0.05f)
+        if (distance < minimumLength)
             return;
 
         const glm::mat4 viewProjection = projection * view;
@@ -2175,6 +2467,7 @@ namespace Nox
 
         ImDrawList* draw = ImGui::GetWindowDrawList();
         const ImU32 color = IM_COL32(255, 225, 70, 255);
+        draw->AddLine(a, b, IM_COL32(0, 0, 0, 160), 4.0f);
         draw->AddLine(a, b, color, 2.0f);
         draw->AddLine(ImVec2(a.x - across.x, a.y - across.y), ImVec2(a.x + across.x, a.y + across.y), color, 2.0f);
         draw->AddLine(ImVec2(b.x - across.x, b.y - across.y), ImVec2(b.x + across.x, b.y + across.y), color, 2.0f);
@@ -2186,6 +2479,132 @@ namespace Nox
         const ImVec2 max(middle.x + size.x * 0.5f + 4.0f, middle.y + size.y * 0.5f + 2.0f);
         draw->AddRectFilled(min, max, IM_COL32(0, 0, 0, 190), 3.0f);
         draw->AddText(ImVec2(min.x + 4.0f, min.y + 2.0f), color, text.c_str());
+    }
+
+    // The world point under the cursor: the depth the renderer read back for the picked pixel (reverse-Z), unprojected like the lighting
+    // shaders do, else the ground plane.
+    bool EditorLayer::PickWorldPoint(glm::vec3& out) const
+    {
+        // The pixel -> NDC mapping uses the size the renderer draws at (what the shaders divide the pixel by), not the ImGui panel.
+        const NRI::Extent2D outputSize = m_Renderer->getViewPortSize();
+        const glm::vec2 viewportSize(static_cast<float>(outputSize.width), static_cast<float>(outputSize.height));
+        if (viewportSize.x <= 0.0f || viewportSize.y <= 0.0f)
+            return false;
+
+        int32_t pickedX = 0, pickedY = 0;
+        float depth = 0.0f;
+        const bool hasDepth = m_Renderer->getPickedDepth(pickedX, pickedY, depth, 4);
+
+        glm::vec2 pixel;
+        if (hasDepth)
+            pixel = glm::vec2(static_cast<float>(pickedX) + 0.5f, static_cast<float>(pickedY) + 0.5f);
+        else
+        {
+            const ImVec2 mouse = ImGui::GetMousePos();
+            pixel = glm::vec2(mouse.x - m_ViewportBounds[0].x, mouse.y - m_ViewportBounds[0].y);
+        }
+
+        const glm::vec2 ndc = glm::vec2((pixel.x / viewportSize.x) * 2.0f - 1.0f, 1.0f - (pixel.y / viewportSize.y) * 2.0f);
+        const glm::mat4 inverseViewProjection = glm::inverse(m_EditorCamera.GetGizmoProjection() * m_EditorCamera.GetGizmoView());
+        glm::vec4 nearPoint = inverseViewProjection * glm::vec4(ndc, -1.0f, 1.0f);
+        glm::vec4 farPoint = inverseViewProjection * glm::vec4(ndc, 1.0f, 1.0f);
+        nearPoint /= nearPoint.w;
+        farPoint /= farPoint.w;
+
+        const glm::vec3 origin = glm::vec3(nearPoint);
+        const glm::vec3 direction = glm::normalize(glm::vec3(farPoint - nearPoint));
+
+        if (hasDepth && depth > 0.0f)
+        {
+            // The way the lighting shaders do it: the pixel's NDC position with the stored depth through the inverse of the renderer's own
+            // projection * view (not the gizmo's), in double precision.
+            const glm::dmat4 inverse = glm::inverse(glm::dmat4(m_EditorCamera.GetProjection()) * glm::dmat4(m_EditorCamera.GetViewMatrix()));
+            glm::dvec4 world = inverse * glm::dvec4(ndc.x, ndc.y, depth, 1.0);
+            if (std::abs(world.w) > 1e-12)
+            {
+                out = glm::vec3(world / world.w);
+                return true;
+            }
+        }
+
+        // Nothing drawn: the plane the grid lies on.
+        const int axis = GridPlaneAxis();
+        if (std::abs(direction[axis]) > 1e-4f)
+        {
+            const float distance = -origin[axis] / direction[axis];
+            if (distance > 0.0f)
+            {
+                out = origin + direction * distance;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void EditorLayer::MeasureClick()
+    {
+        glm::vec3 point;
+        if (!PickWorldPoint(point))
+            return;
+        if (m_SnapEnabled != Input::IsKeyPressed(SDL_SCANCODE_LCTRL))
+        {
+            const float step = LocationSnapWorldUnits();
+            point = glm::round(point / step) * step;
+        }
+
+        if (m_MeasureStage == 1)
+        {
+            m_MeasureB = point;
+            m_MeasureStage = 2;
+        }
+        else
+        {
+            m_MeasureA = point;
+            m_MeasureStage = 1;
+        }
+    }
+
+    // Inside the viewport window: the line being measured, a ring where the cursor's point is.
+    void EditorLayer::UI_MeasureOverlay()
+    {
+        if (!m_MeasureTool && m_MeasureStage == 0)
+            return;
+
+        const glm::mat4 view = m_EditorCamera.GetGizmoView();
+        const glm::mat4 projection = m_EditorCamera.GetGizmoProjection();
+
+        glm::vec3 cursor{ 0.0f };
+        bool hasCursor = false;
+        if (m_MeasureTool && m_ViewportHovered)
+        {
+            hasCursor = PickWorldPoint(cursor);
+            if (hasCursor && m_SnapEnabled != Input::IsKeyPressed(SDL_SCANCODE_LCTRL))
+            {
+                const float step = LocationSnapWorldUnits();
+                cursor = glm::round(cursor / step) * step;
+            }
+        }
+
+        if (m_MeasureStage == 1 && hasCursor)
+            DrawMeasureLine(view, projection, m_MeasureA, cursor, 0.0f);
+        else if (m_MeasureStage == 2)
+            DrawMeasureLine(view, projection, m_MeasureA, m_MeasureB, 0.0f);
+
+        if (hasCursor)
+        {
+            const glm::vec4 clip = projection * view * glm::vec4(cursor, 1.0f);
+            if (clip.w > 0.05f)
+            {
+                const glm::vec2 ndc = glm::vec2(clip.x, clip.y) / clip.w;
+                const float width = m_ViewportBounds[1].x - m_ViewportBounds[0].x;
+                const float height = m_ViewportBounds[1].y - m_ViewportBounds[0].y;
+                const ImVec2 screen(m_ViewportBounds[0].x + (ndc.x * 0.5f + 0.5f) * width, m_ViewportBounds[0].y + (1.0f - (ndc.y * 0.5f + 0.5f)) * height);
+                ImDrawList* draw = ImGui::GetWindowDrawList();
+                draw->AddCircle(screen, 6.0f, IM_COL32(0, 0, 0, 200), 16, 3.0f);
+                draw->AddCircle(screen, 6.0f, IM_COL32(255, 225, 70, 255), 16, 1.5f);
+
+            }
+        }
     }
 
     void EditorLayer::SnapSelectionToFloor()
@@ -2347,11 +2766,13 @@ namespace Nox
             Entity root = m_ActiveScene->CreateEntity(entityName.empty() ? "Model" : entityName);
             auto& instance = root.AddComponent<ModelInstanceComponent>();
             instance.Model = handle;
-            instance.AtFileLayout = false; // one entity per dragged asset, like UE5
+            // Several assets dragged together (this function): each keeps its own baked position from the source file,
+            // offset by the shared drop point (ModelInstance combines them: rootLocal * modelSpace) -- reconstructing
+            // the file's original relative layout, not stacking every dragged piece on the exact same point.
+            instance.AtFileLayout = true;
             auto& rootTransform = root.GetComponent<TransformComponent>();
             rootTransform.Translation = point;
-            if (metadata.MeshSettings.ImportScale > 0.0f)
-                rootTransform.Scale = glm::vec3(metadata.MeshSettings.ImportScale);
+            // Baked into the cooked geometry now, static or skeletal alike (see the other drag-in path above).
             if (!folder.empty())
                 root.AddComponent<FolderComponent>(folder);
             AssetManager::RequestAsset(handle);
@@ -2663,6 +3084,7 @@ namespace Nox
 
     void EditorLayer::OnScenePlay()
     {
+        SetViewMode(EditorViewMode::Perspective);
         if (m_SceneState == SceneState::Simulate)
             OnSceneStop();
 

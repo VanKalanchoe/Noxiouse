@@ -174,7 +174,7 @@ namespace Nox {
             m_FilterData->ObjectPairFilter
         );
 
-        m_PhysicsSystem->SetGravity(JPH::Vec3(0.0f, -9.81f, 0.0f));
+        m_PhysicsSystem->SetGravity(JPH::Vec3(0.0f, -9.81f, 0.0f)); // Jolt's own native unit (meters/s^2): not a world-unit value, untouched
 
         // Create bodies for all entities currently possessing RigidBody3DComponent
         if (m_Scene)
@@ -235,16 +235,16 @@ namespace Nox {
         // Create collision shape based on attached collider components
         JPH::Ref<JPH::Shape> shape;
 
+        // Collider sizes are world-unit lengths (the component fields); Jolt wants its own native unit -> ToNative at the shape.
         if (entity.HasComponent<BoxCollider3DComponent>())
         {
             const auto& box = entity.GetComponent<BoxCollider3DComponent>();
-            glm::vec3 halfExtents = glm::max(box.HalfExtents * worldScale, glm::vec3(0.001f));
+            glm::vec3 halfExtents = ToNative(glm::max(box.HalfExtents * worldScale, glm::vec3(0.001f)));
             JPH::BoxShapeSettings shapeSettings(JoltUtils::ToJolt(halfExtents));
-            shapeSettings.mDensity = rb.Mass;
 
             if (box.Offset != glm::vec3(0.0f))
             {
-                JPH::RotatedTranslatedShapeSettings offsetShape(JoltUtils::ToJolt(box.Offset), JPH::Quat::sIdentity(), &shapeSettings);
+                JPH::RotatedTranslatedShapeSettings offsetShape(JoltUtils::ToJolt(ToNative(box.Offset)), JPH::Quat::sIdentity(), &shapeSettings);
                 shape = offsetShape.Create().Get();
             }
             else
@@ -255,13 +255,12 @@ namespace Nox {
         else if (entity.HasComponent<SphereCollider3DComponent>())
         {
             const auto& sphere = entity.GetComponent<SphereCollider3DComponent>();
-            float radius = std::max(sphere.Radius * std::max(worldScale.x, std::max(worldScale.y, worldScale.z)), 0.001f);
+            float radius = ToNative(std::max(sphere.Radius * std::max(worldScale.x, std::max(worldScale.y, worldScale.z)), 0.001f));
             JPH::SphereShapeSettings shapeSettings(radius);
-            shapeSettings.mDensity = rb.Mass;
 
             if (sphere.Offset != glm::vec3(0.0f))
             {
-                JPH::RotatedTranslatedShapeSettings offsetShape(JoltUtils::ToJolt(sphere.Offset), JPH::Quat::sIdentity(), &shapeSettings);
+                JPH::RotatedTranslatedShapeSettings offsetShape(JoltUtils::ToJolt(ToNative(sphere.Offset)), JPH::Quat::sIdentity(), &shapeSettings);
                 shape = offsetShape.Create().Get();
             }
             else
@@ -272,14 +271,13 @@ namespace Nox {
         else if (entity.HasComponent<CapsuleCollider3DComponent>())
         {
             const auto& capsule = entity.GetComponent<CapsuleCollider3DComponent>();
-            float halfHeight = std::max(capsule.HalfHeight * worldScale.y, 0.001f);
-            float radius = std::max(capsule.Radius * std::max(worldScale.x, worldScale.z), 0.001f);
+            float halfHeight = ToNative(std::max(capsule.HalfHeight * worldScale.y, 0.001f));
+            float radius = ToNative(std::max(capsule.Radius * std::max(worldScale.x, worldScale.z), 0.001f));
             JPH::CapsuleShapeSettings shapeSettings(halfHeight, radius);
-            shapeSettings.mDensity = rb.Mass;
 
             if (capsule.Offset != glm::vec3(0.0f))
             {
-                JPH::RotatedTranslatedShapeSettings offsetShape(JoltUtils::ToJolt(capsule.Offset), JPH::Quat::sIdentity(), &shapeSettings);
+                JPH::RotatedTranslatedShapeSettings offsetShape(JoltUtils::ToJolt(ToNative(capsule.Offset)), JPH::Quat::sIdentity(), &shapeSettings);
                 shape = offsetShape.Create().Get();
             }
             else
@@ -290,7 +288,7 @@ namespace Nox {
         else
         {
             // Default fallback shape: 1x1x1 unit box
-            glm::vec3 halfExtents = glm::max(0.5f * worldScale, glm::vec3(0.001f));
+            glm::vec3 halfExtents = ToNative(glm::max(0.5f * worldScale, glm::vec3(0.001f)));
             JPH::BoxShapeSettings shapeSettings(JoltUtils::ToJolt(halfExtents));
             shape = shapeSettings.Create().Get();
         }
@@ -336,7 +334,7 @@ namespace Nox {
 
         JPH::BodyCreationSettings bodySettings(
             shape,
-            JoltUtils::ToJolt(worldPos),
+            JoltUtils::ToJolt(ToNative(worldPos)),
             JoltUtils::ToJolt(worldRot),
             motionType,
             objectLayer
@@ -354,6 +352,12 @@ namespace Nox {
             : JPH::EMotionQuality::Discrete;
 
         bodySettings.mUserData = static_cast<uint64_t>(static_cast<uint32_t>(entity));
+
+        // rb.Mass is the body's mass (kg), independent of the shape's native-unit volume: set it directly instead of through density
+        // (mDensity x volume), so a collider's mass no longer changes when the world unit -- and so the native geometry's size --
+        // changes (U6). CalculateInertia takes only the mass from here and works out the inertia tensor from the shape and it.
+        bodySettings.mOverrideMassProperties = JPH::EOverrideMassProperties::CalculateInertia;
+        bodySettings.mMassPropertiesOverride.mMass = rb.Mass;
 
         JPH::BodyInterface& bodyInterface = m_PhysicsSystem->GetBodyInterface();
         JPH::Body* body = bodyInterface.CreateBody(bodySettings);
@@ -413,8 +417,10 @@ namespace Nox {
         if (entity.HasComponent<WorldTransformComponent>())
             worldPos = glm::vec3(entity.GetComponent<WorldTransformComponent>().WorldMatrix[3]);
 
-        const float radius = std::max(controller.Radius, 0.01f);
-        const float halfHeight = std::max(controller.Height, 0.0f) * 0.5f;
+        // controller.Radius / Height are world-unit lengths (script-facing); the shape and every native tolerance below are Jolt's own
+        // unit -> ToNative once here.
+        const float radius = ToNative(std::max(controller.Radius, 0.01f));
+        const float halfHeight = ToNative(std::max(controller.Height, 0.0f) * 0.5f);
 
         JPH::RefConst<JPH::Shape> shape = JPH::RotatedTranslatedShapeSettings(
             JPH::Vec3(0.0f, halfHeight + radius, 0.0f), JPH::Quat::sIdentity(), new JPH::CapsuleShape(halfHeight, radius)).Create().Get();
@@ -431,7 +437,7 @@ namespace Nox {
         settings->mEnhancedInternalEdgeRemoval = false;
 
         JPH::Ref<JPH::CharacterVirtual> character = new JPH::CharacterVirtual(
-            settings, JoltUtils::ToJolt(worldPos), JPH::Quat::sIdentity(), static_cast<uint64_t>(static_cast<uint32_t>(entity)), m_PhysicsSystem.get());
+            settings, JoltUtils::ToJolt(ToNative(worldPos)), JPH::Quat::sIdentity(), static_cast<uint64_t>(static_cast<uint32_t>(entity)), m_PhysicsSystem.get());
 
         CharacterState& state = m_EntityToCharacterMap[static_cast<uint32_t>(entity)];
         state.Character = character;
@@ -468,12 +474,15 @@ namespace Nox {
             const bool onGround = character->GetGroundState() == JPH::CharacterVirtual::EGroundState::OnGround;
             const bool movingTowardsGround = (currentVelocity.GetY() - groundVelocity.GetY()) <= 0.1f;
 
+            // controller.JumpSpeed / MoveVelocity / StepHeight are world-unit lengths (script-facing); the velocity math below stays
+            // entirely in Jolt's native unit (like groundVelocity / currentVelocity / gravity, all read from Jolt already), so each is
+            // converted with ToNative at the one place it enters the math. state.Horizontal is therefore a native-unit velocity.
             JPH::Vec3 velocity;
             if (onGround && movingTowardsGround)
             {
                 velocity = groundVelocity;
                 if (controller.JumpSpeed > 0.0f)
-                    velocity += up * controller.JumpSpeed;
+                    velocity += up * ToNative(controller.JumpSpeed);
             }
             else
             {
@@ -485,11 +494,11 @@ namespace Nox {
             // Horizontal velocity ramps towards the wanted one (Unreal's MaxAcceleration / BrakingDeceleration) instead of
             // snapping to it -- most of what makes its character start and stop smoothly. Less acceleration in the air.
             {
-                const glm::vec3 wanted(controller.MoveVelocity.x, 0.0f, controller.MoveVelocity.z);
+                const glm::vec3 wanted = ToNative(glm::vec3(controller.MoveVelocity.x, 0.0f, controller.MoveVelocity.z));
                 const glm::vec3 toWanted = wanted - state.Horizontal;
                 const float distance = glm::length(toWanted);
                 const bool wantsToMove = glm::length(wanted) > 0.001f;
-                const float rate = (wantsToMove ? controller.MaxAcceleration : controller.BrakingDeceleration) *
+                const float rate = ToNative(wantsToMove ? controller.MaxAcceleration : controller.BrakingDeceleration) *
                                    (character->IsSupported() ? 1.0f : std::max(controller.AirControl, 0.0f));
                 const float step = rate * dt;
                 state.Horizontal = distance <= step || distance < 1e-5f ? wanted : state.Horizontal + toWanted * (step / distance);
@@ -499,14 +508,14 @@ namespace Nox {
             character->SetLinearVelocity(velocity);
 
             JPH::CharacterVirtual::ExtendedUpdateSettings updateSettings;
-            updateSettings.mStickToFloorStepDown = -up * 0.5f;
-            updateSettings.mWalkStairsStepUp = up * controller.StepHeight;
+            updateSettings.mStickToFloorStepDown = -up * 0.5f; // Jolt's own tolerance (Samples/CharacterVirtualTest.cpp): native, untouched
+            updateSettings.mWalkStairsStepUp = up * ToNative(controller.StepHeight);
 
             character->ExtendedUpdate(dt, -up * gravity.Length(), updateSettings,
                 m_PhysicsSystem->GetDefaultBroadPhaseLayerFilter(PhysicsLayers::CHARACTER),
                 m_PhysicsSystem->GetDefaultLayerFilter(PhysicsLayers::CHARACTER),
                 {}, {}, *m_TempAllocator);
-            state.Current = JoltUtils::ToGLM(character->GetPosition());
+            state.Current = ToWorld(JoltUtils::ToGLM(character->GetPosition()));
         }
     }
 
@@ -525,7 +534,7 @@ namespace Nox {
             auto& controller = entity.GetComponent<CharacterController3DComponent>();
             JPH::CharacterVirtual* character = state.Character.GetPtr();
             controller.IsGrounded = character->GetGroundState() == JPH::CharacterVirtual::EGroundState::OnGround;
-            controller.Velocity = JoltUtils::ToGLM(character->GetLinearVelocity());
+            controller.Velocity = ToWorld(JoltUtils::ToGLM(character->GetLinearVelocity())); // script-facing: world units
 
             // Drawn between the last two fixed steps by how far the accumulator is into the next one.
             const float alpha = glm::clamp(m_Accumulator / c_FixedDeltaTime, 0.0f, 1.0f);
@@ -555,7 +564,7 @@ namespace Nox {
             if (bodyId.IsInvalid() || bodyInterface.GetMotionType(bodyId) == JPH::EMotionType::Static)
                 continue;
 
-            const glm::vec3 position = JoltUtils::ToGLM(bodyInterface.GetPosition(bodyId));
+            const glm::vec3 position = ToWorld(JoltUtils::ToGLM(bodyInterface.GetPosition(bodyId)));
             const glm::quat rotation = JoltUtils::ToGLM(bodyInterface.GetRotation(bodyId));
             auto [pose, isNew] = m_BodyPoses.try_emplace(entityId);
             if (isNew)
@@ -640,7 +649,7 @@ namespace Nox {
                     }
                     else
                     {
-                        worldPos = JoltUtils::ToGLM(bodyInterface.GetPosition(bodyId));
+                        worldPos = ToWorld(JoltUtils::ToGLM(bodyInterface.GetPosition(bodyId)));
                         worldRot = JoltUtils::ToGLM(bodyInterface.GetRotation(bodyId));
                     }
 
@@ -691,7 +700,9 @@ namespace Nox {
         if (!m_PhysicsSystem)
             return false;
 
-        JPH::RRayCast ray(JoltUtils::ToJolt(origin), JoltUtils::ToJolt(direction * maxDistance));
+        // origin / maxDistance are world-unit (the caller's, e.g. a script); Jolt sees native. direction is a unit vector: not a length,
+        // never scaled. outHit.Distance / Position are worked out from the world-unit inputs, so they come out in world units already.
+        JPH::RRayCast ray(JoltUtils::ToJolt(ToNative(origin)), JoltUtils::ToJolt(direction * ToNative(maxDistance)));
         JPH::RayCastResult hit;
 
         if (m_PhysicsSystem->GetNarrowPhaseQuery().CastRay(ray, hit))
@@ -724,8 +735,8 @@ namespace Nox {
         if (!m_PhysicsSystem)
             return false;
 
-        JPH::SphereShape sphere(radius);
-        JPH::RShapeCast shapeCast(&sphere, JPH::Vec3::sReplicate(1.0f), JPH::RMat44::sTranslation(JoltUtils::ToJolt(origin)), JoltUtils::ToJolt(direction * maxDistance));
+        JPH::SphereShape sphere(ToNative(radius));
+        JPH::RShapeCast shapeCast(&sphere, JPH::Vec3::sReplicate(1.0f), JPH::RMat44::sTranslation(JoltUtils::ToJolt(ToNative(origin))), JoltUtils::ToJolt(direction * ToNative(maxDistance)));
 
         JPH::ClosestHitCollisionCollector<JPH::CastShapeCollector> collector;
         m_PhysicsSystem->GetNarrowPhaseQuery().CastShape(shapeCast, JPH::ShapeCastSettings(), JPH::RVec3::sZero(), collector);
@@ -736,7 +747,7 @@ namespace Nox {
             outHit.Hit = true;
             outHit.Fraction = hit.mFraction;
             outHit.Distance = hit.mFraction * maxDistance;
-            outHit.ContactPosition = JoltUtils::ToGLM(hit.mContactPointOn2);
+            outHit.ContactPosition = ToWorld(JoltUtils::ToGLM(hit.mContactPointOn2));
             outHit.ContactNormal = JoltUtils::ToGLM(-hit.mPenetrationAxis.Normalized());
 
             auto it = m_BodyToEntityMap.find(hit.mBodyID2.GetIndexAndSequenceNumber());
@@ -756,9 +767,9 @@ namespace Nox {
         if (!m_PhysicsSystem)
             return results;
 
-        JPH::SphereShape sphere(radius);
+        JPH::SphereShape sphere(ToNative(radius));
         JPH::AllHitCollisionCollector<JPH::CollideShapeCollector> collector;
-        m_PhysicsSystem->GetNarrowPhaseQuery().CollideShape(&sphere, JPH::Vec3::sReplicate(1.0f), JPH::RMat44::sTranslation(JoltUtils::ToJolt(center)), JPH::CollideShapeSettings(), JPH::RVec3::sZero(), collector);
+        m_PhysicsSystem->GetNarrowPhaseQuery().CollideShape(&sphere, JPH::Vec3::sReplicate(1.0f), JPH::RMat44::sTranslation(JoltUtils::ToJolt(ToNative(center))), JPH::CollideShapeSettings(), JPH::RVec3::sZero(), collector);
 
         results.reserve(collector.mHits.size());
         for (const JPH::CollideShapeResult& hit : collector.mHits)
@@ -780,8 +791,9 @@ namespace Nox {
         auto it = m_EntityToBodyMap.find(entIdVal);
         if (it != m_EntityToBodyMap.end())
         {
+            // force = mass x acceleration (length / time^2): mass is unaffected by the world unit, so only the length side scales.
             JPH::BodyInterface& bodyInterface = m_PhysicsSystem->GetBodyInterface();
-            bodyInterface.AddForce(it->second, JoltUtils::ToJolt(force));
+            bodyInterface.AddForce(it->second, JoltUtils::ToJolt(ToNative(force)));
         }
     }
 
@@ -794,8 +806,9 @@ namespace Nox {
         auto it = m_EntityToBodyMap.find(entIdVal);
         if (it != m_EntityToBodyMap.end())
         {
+            // impulse = mass x velocity: same reasoning as AddForce.
             JPH::BodyInterface& bodyInterface = m_PhysicsSystem->GetBodyInterface();
-            bodyInterface.AddImpulse(it->second, JoltUtils::ToJolt(impulse));
+            bodyInterface.AddImpulse(it->second, JoltUtils::ToJolt(ToNative(impulse)));
         }
     }
 
@@ -809,7 +822,7 @@ namespace Nox {
         if (it != m_EntityToBodyMap.end())
         {
             JPH::BodyInterface& bodyInterface = m_PhysicsSystem->GetBodyInterface();
-            bodyInterface.SetLinearVelocity(it->second, JoltUtils::ToJolt(velocity));
+            bodyInterface.SetLinearVelocity(it->second, JoltUtils::ToJolt(ToNative(velocity)));
         }
     }
 
@@ -823,11 +836,12 @@ namespace Nox {
         if (it != m_EntityToBodyMap.end())
         {
             const JPH::BodyInterface& bodyInterface = m_PhysicsSystem->GetBodyInterface();
-            return JoltUtils::ToGLM(bodyInterface.GetLinearVelocity(it->second));
+            return ToWorld(JoltUtils::ToGLM(bodyInterface.GetLinearVelocity(it->second)));
         }
         return glm::vec3(0.0f);
     }
 
+    // Angular velocity is radians / second, not a length: never scaled by the physics unit boundary.
     void JoltPhysics3DScene::SetAngularVelocity(Entity entity, const glm::vec3& velocity)
     {
         if (!m_PhysicsSystem || !entity)

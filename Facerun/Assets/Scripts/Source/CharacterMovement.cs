@@ -9,9 +9,10 @@ namespace Facerun;
 /// </summary>
 public sealed class CharacterMovement : EntityBehaviour
 {
-    [Expose] public float WalkSpeed = 2.0f; // m/s
-    [Expose] public float RunSpeed = 5.0f; // m/s (Unreal template: 500 cm/s)
-    [Expose] public float JumpSpeed = 7.0f; // Unreal's third-person template: 700 cm/s with gravity x1.75
+    // Stored in cm/s (the project's world unit), but Unit = "m/s" shows and edits the Inspector field in m/s -- type 2, not 200.
+    [Expose(Unit = "m/s")] public float WalkSpeed = 200.0f; // 2 m/s
+    [Expose(Unit = "m/s")] public float RunSpeed = 500.0f; // 5 m/s (Unreal template)
+    [Expose(Unit = "m/s")] public float JumpSpeed = 700.0f; // Unreal's third-person template, with gravity x1.75
     [Expose] public float TurnSpeed = 12.0f;
     [Expose] public float ModelYawOffset = 0.0f; // radians; the model's forward axis relative to +Z
 

@@ -10,6 +10,7 @@
 #include "SceneCamera.h"
 
 #include "NoxCore/Core/UUID.h"
+#include "NoxCore/Core/WorldUnits.h"
 
 #include "box2d/box2d.h"
 #include "NoxCore/Animation/Animator.h"
@@ -248,8 +249,8 @@ namespace Nox
     {
         glm::vec3 Color{ 1.0f, 1.0f, 1.0f };
         float Intensity = 5.0f;
-        float Range = 10.0f;
-        float Radius = 0.05f;         // Light source radius in meters (UE5 default: 0.05m = 5cm bulb)
+        float Range = WorldUnits::FromMeters(10.0f);
+        float Radius = WorldUnits::FromMeters(0.05f); // light source radius (UE5 default: 0.05 m = 5 cm bulb)
         uint32_t ShadowSamples = 1;
 
         PointLightComponent() = default;
@@ -260,10 +261,10 @@ namespace Nox
     {
         glm::vec3 Color{ 1.0f, 1.0f, 1.0f };
         float Intensity = 10.0f;
-        float Range = 15.0f;
+        float Range = WorldUnits::FromMeters(15.0f);
         float InnerAngle = 20.0f; // degrees
         float OuterAngle = 35.0f; // degrees
-        float Radius = 0.05f;         // Light source radius in meters (UE5 default: 0.05m = 5cm bulb)
+        float Radius = WorldUnits::FromMeters(0.05f); // light source radius (UE5 default: 0.05 m = 5 cm bulb)
         uint32_t ShadowSamples = 1;
 
         SpotLightComponent() = default;
@@ -514,14 +515,15 @@ namespace Nox
     {
         // Defaults follow Unreal's third-person character (its centimeters as meters): capsule 34 cm x 176 cm, 45 cm steps,
         // 44.8 degree slopes, gravity x1.75, air control 0.35, 20.5 m/s^2 acceleration (2048 cm/s^2) and 20 m/s^2 braking.
-        float Radius = 0.34f;
-        float Height = 1.08f; // length of the straight part between the two caps; total height = Height + 2 * Radius
-        float StepHeight = 0.45f;
+        // Lengths go through WorldUnits so this stays the same real-world size whatever the project's world unit is (docs/Units_And_World_Tools_Plan_2026.md, U6).
+        float Radius = WorldUnits::FromMeters(0.34f);
+        float Height = WorldUnits::FromMeters(1.08f); // length of the straight part between the two caps; total height = Height + 2 * Radius
+        float StepHeight = WorldUnits::FromMeters(0.45f);
         float MaxSlopeDegrees = 44.8f;
         float GravityScale = 1.75f;
         float AirControl = 0.35f;          // fraction of the ground acceleration available in the air
-        float MaxAcceleration = 20.48f;    // m/s^2 towards the wanted horizontal velocity: movement ramps up instead of snapping
-        float BrakingDeceleration = 20.0f; // m/s^2 when no movement is wanted
+        float MaxAcceleration = WorldUnits::FromMeters(20.48f); // m/s^2 towards the wanted horizontal velocity: movement ramps up instead of snapping
+        float BrakingDeceleration = WorldUnits::FromMeters(20.0f); // m/s^2 when no movement is wanted
 
         // Input, set by scripts each frame
         glm::vec3 MoveVelocity = { 0.0f, 0.0f, 0.0f }; // desired horizontal world velocity (m/s)

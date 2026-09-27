@@ -231,11 +231,11 @@ float4 fragMain(
     }
 
     // 5. Trace Reflection Ray against TLAS
-    float3 rayOrigin = worldPos + normal * 0.002;
+    float3 rayOrigin = worldPos + normal * (0.002 * ubo->unitsPerMeter);
     RayDesc reflectionRayDesc;
     reflectionRayDesc.Origin = rayOrigin;
     reflectionRayDesc.Direction = R;
-    reflectionRayDesc.TMin = 0.005;
+    reflectionRayDesc.TMin = 0.005 * ubo->unitsPerMeter;
     reflectionRayDesc.TMax = 1e4;
 
     RaytracingAccelerationStructure accelerationStructure = RaytracingAccelerationStructure(ubo->tlasDeviceAddress);
@@ -402,10 +402,10 @@ float4 fragMain(
         {
             // Shadow test: Ensure reflected surface is truly lit and not in shadow
             RayDesc shadowRay;
-            shadowRay.Origin = hitPos + shadowNormal * 0.02;
+            shadowRay.Origin = hitPos + shadowNormal * (0.02 * ubo->unitsPerMeter);
             shadowRay.Direction = l;
-            shadowRay.TMin = 0.005;
-            shadowRay.TMax = (lightType == 0) ? 1000.0 : dist;
+            shadowRay.TMin = 0.005 * ubo->unitsPerMeter;
+            shadowRay.TMax = (lightType == 0) ? 1000.0 * ubo->unitsPerMeter : dist;
 
             RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> shadowRq;
             shadowRq.TraceRayInline(accelerationStructure, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES, 0xFF, shadowRay);

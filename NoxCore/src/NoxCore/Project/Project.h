@@ -19,8 +19,10 @@ namespace Nox
         std::filesystem::path AssetRegistryPath; // Relative to AssetDirectory
         std::filesystem::path ScriptModulePath;
 
-        // World units per meter (docs/Units_And_World_Tools_Plan_2026.md): 1 = meters (today), 100 = 1 unit is 1 cm.
-        float WorldUnitsPerMeter = 1.0f;
+        // World units per meter (docs/Units_And_World_Tools_Plan_2026.md, U6): 100 = 1 unit is 1 cm (like UE5), the project default.
+        // 1 (meters) was the default through U1-U5 while the tools were being built; existing scenes/prefabs built under it are not
+        // converted (no compatibility tooling) -- re-place / re-tune them by hand after re-importing assets.
+        float WorldUnitsPerMeter = 100.0f;
     };
     
     class Project : public RefCounted

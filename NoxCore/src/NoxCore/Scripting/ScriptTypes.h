@@ -30,5 +30,8 @@ namespace Nox
         ScriptFieldType Type;
         ScriptValue DefaultValue;
         bool DisallowSelf = false;
+        // [Expose(Unit = "...")] (docs/Units_And_World_Tools_Plan_2026.md): "cm", "m", "cm/s", "m/s", "km/h", or empty for a value
+        // that is not a length/speed. The Inspector shows and edits the field in this unit; the script still sees the raw value.
+        std::string Unit;
     };
 }

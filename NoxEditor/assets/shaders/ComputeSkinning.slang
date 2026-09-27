@@ -27,6 +27,9 @@ void compMain(
         SkinnedVertex output;
         output.position = mul(skinTransform, float4(vertex.pos, 1.0));
         output.normal = float4(mul((float3x3)skinTransform, vertex.normal), 0.0);
+        // Handedness (w) is a fixed sign describing the tangent/bitangent/normal triple's winding, not a direction:
+        // skin it like the normal (rotation only, no translation) and carry the sign through unchanged.
+        output.tangent = float4(mul((float3x3)skinTransform, vertex.tangent.xyz), vertex.tangent.w);
         skinnedVertices[work.destinationVertexOffset + vertexIndex] = output;
     }
 }

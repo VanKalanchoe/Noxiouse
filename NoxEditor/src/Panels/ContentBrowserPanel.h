@@ -73,6 +73,13 @@ namespace Nox
         std::filesystem::path m_PendingPackageDirectory;
         bool m_ShowImportModal = false;
         MeshImportSettings m_ImportSettings; // the import dialog's Static / Skeletal / Animations options
+        // What the dialog shows about the file (read when it opens): its size in the file's own units, and the unit the user picked.
+        void ReadImportFileInfo(const std::filesystem::path& absoluteSource);
+        bool m_ImportHasBounds = false;
+        glm::vec3 m_ImportBoundsMin{ 0.0f };
+        glm::vec3 m_ImportBoundsMax{ 0.0f };
+        int m_ImportSourceUnit = 0;         // WorldUnits::SourceUnit, or 5 = custom scale
+        float m_ImportFitHeightCm = 0.0f; // "Fit to height"; 0 = not set yet, and it is remembered across imports once you do
         bool m_WindowHovered = false;
         bool m_ShowCreateScriptModal = false;
         char m_NewScriptName[128] = "NewBehaviour";

@@ -11,6 +11,9 @@
 #include "NoxCore/Animation/AnimationGraphNodes.h"
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Asset/EditorAssetManager.h"
+#include "NoxCore/Asset/MeshImporter.h"
+#include "NoxCore/Core/WorldUnits.h"
+#include "NoxCore/Project/Project.h"
 #include "NoxCore/Asset/NodeGraphSerializer.h"
 #include "NoxCore/Asset/TextureImporter.h"
 #include "NoxCore/Core/Application.h"
@@ -127,10 +130,25 @@ namespace Nox
 
         m_PendingImportPath = relativeSource;
         m_ImportSettings = {};
+        ReadImportFileInfo(sourcePath);
         const auto defaultDest = relativeSource.parent_path() / "Meshes" /
             (relativeSource.stem().string() + ".nmesh");
         SetImportDestination(defaultDest);
         m_ShowImportModal = true;
+    }
+
+    // The file's size for the import dialog (the whole file is parsed once, like the import itself does).
+    void ContentBrowserPanel::ReadImportFileInfo(const std::filesystem::path& absoluteSource)
+    {
+        const MeshImporter::GltfContent content = MeshImporter::InspectGltf(absoluteSource);
+        m_ImportHasBounds = content.HasBounds;
+        m_ImportBoundsMin = content.BoundsMin;
+        m_ImportBoundsMax = content.BoundsMax;
+        // Meters (glTF's own default) unless picked otherwise; applied right away, not only once the combo is touched -- the combo
+        // showing "Meters" must mean the scale actually reads as meters, not silently stay 1.0 (raw file units = world units).
+        m_ImportSourceUnit = 0;
+        m_ImportSettings.ImportScale = WorldUnits::PerSourceUnit(WorldUnits::SourceUnit::Meters);
+        // m_ImportFitHeightCm is left as it was: it remembers the last height you fit to, instead of defaulting to a human's 180 cm.
     }
 
     void ContentBrowserPanel::BeginRename(AssetHandle handle)
@@ -388,6 +406,7 @@ namespace Nox
                             {
                                 m_PendingImportPath = metadata.FilePath;
                                 m_ShowImportModal = true;
+                                ReadImportFileInfo(Project::GetActiveAssetDirectory() / metadata.FilePath);
                                 const auto defaultDest = m_PendingImportPath.parent_path() / "Meshes" /
                                     (m_PendingImportPath.stem().string() + ".nmesh");
                                 SetImportDestination(defaultDest);
@@ -637,18 +656,50 @@ namespace Nox
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("Unreal's File > Import into Level: also place the whole glTF scene in the open level, keeping its node hierarchy, lights and cameras. Meshes are still imported as assets (per-mesh) and the level references them. Off: assets only, no hierarchy.");
             ImGui::SeparatorText("Transform");
-            ImGui::DragFloat("Import Scale", &m_ImportSettings.ImportScale, 0.001f, 0.0001f, 1000.0f, "%.4f");
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Size of the model when placed. glTF is in meters; a model authored in centimeters (it looks 100x too big) needs 0.01.");
-            ImGui::SameLine();
-            if (ImGui::SmallButton("m"))
-                m_ImportSettings.ImportScale = 1.0f;
-            ImGui::SameLine();
-            if (ImGui::SmallButton("cm"))
-                m_ImportSettings.ImportScale = 0.01f;
-            ImGui::SameLine();
-            if (ImGui::SmallButton("in"))
-                m_ImportSettings.ImportScale = 0.0254f;
+            // The unit the file was authored in (glTF says meters; a model from a centimeter tool claims meters too and comes in 100x too
+            // big). The scale is world units per file unit, through WorldUnits, so it stays right after the switch to centimeters.
+            {
+                const char* unitNames[] = { "Meters (glTF default)", "Centimeters", "Millimeters", "Inches", "Feet", "Custom scale" };
+                if (ImGui::Combo("Source Unit", &m_ImportSourceUnit, unitNames, 6) && m_ImportSourceUnit < 5)
+                    m_ImportSettings.ImportScale = WorldUnits::PerSourceUnit(static_cast<WorldUnits::SourceUnit>(m_ImportSourceUnit));
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("The unit the numbers in the file mean. Nothing in a glTF says it is not meters, so tell the importer: a model that looks 100x too big was authored in centimeters.");
+
+                if (ImGui::DragFloat("Import Scale", &m_ImportSettings.ImportScale, 0.001f, 0.0001f, 1000.0f, "%.4f"))
+                    m_ImportSourceUnit = 5;
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("World units per unit of the file. Applied to the entity a drag-in creates (the model itself is untouched).");
+            }
+
+            // How big it will be, and a way to say how big it should be.
+            if (m_ImportHasBounds)
+            {
+                const glm::vec3 fileSize = m_ImportBoundsMax - m_ImportBoundsMin;
+                const glm::vec3 size = fileSize * m_ImportSettings.ImportScale;
+                ImGui::Text("Size: %s x %s x %s  (W x H x D)", WorldUnits::Format(size.x).c_str(), WorldUnits::Format(size.y).c_str(), WorldUnits::Format(size.z).c_str());
+
+                const float largest = std::max({ size.x, size.y, size.z });
+                const float largestCm = WorldUnits::ToCentimeters(largest);
+                if (largestCm > 10000.0f)
+                    ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "That is over 100 m: the file is probably authored in centimeters (or millimeters).");
+                else if (largestCm < 2.0f)
+                    ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "That is under 2 cm: the file is probably authored in meters, or the unit is set too small.");
+
+                ImGui::SetNextItemWidth(100.0f);
+                ImGui::DragFloat("Fit to height (cm)##value", &m_ImportFitHeightCm, 1.0f, 0.0f, 100000.0f, m_ImportFitHeightCm > 0.0f ? "%.0f" : "type a height");
+                ImGui::SameLine();
+                if (ImGui::Button("Fit") && fileSize.y > 1e-6f && m_ImportFitHeightCm > 0.0f)
+                {
+                    m_ImportSettings.ImportScale = WorldUnits::FromCentimeters(m_ImportFitHeightCm) / fileSize.y;
+                    m_ImportSourceUnit = 5;
+                }
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Sets the scale so the model is this tall (its height in the file, Y). 180 = a person.");
+            }
+            else
+            {
+                ImGui::TextDisabled("Size: unknown (the file does not say)");
+            }
             ImGui::SeparatorText("Animation");
             ImGui::Checkbox("Import Animations", &m_ImportSettings.ImportAnimations);
             if (!m_ImportSettings.ImportStaticMeshes && !m_ImportSettings.ImportSkeletalMeshes)

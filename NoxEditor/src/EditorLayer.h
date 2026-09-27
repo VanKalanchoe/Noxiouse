@@ -79,6 +79,18 @@ namespace Nox
         // The world grid on the ground plane (y = 0): cells of the snap step (sparser far from the ground), every tenth line stronger, the
         // axes coloured, fading out with distance. Thin lines of the 2D overlay pass, so it is depth tested.
         void DrawWorldGrid();
+        // UE5's "Frame Selected" (F) / double-clicking an entity in the Outliner: re-centres the editor camera on it, sized to
+        // its world bounds (its meshes and everything below it), falling back to its Position alone when it has no mesh.
+        void FocusOnEntity(Entity entity);
+        // 3D physics collider wireframes (thin lines, depth tested), toolbar "Show physics collider". One block per shape kind, so a
+        // future collider kind (a terrain/heightfield) is just another block reading its own component the same way.
+        void DrawPhysicsColliders3D();
+        // Ortho views (Top / Bottom / Front / Back / Left / Right, numpad 7 / 1 / 3, Ctrl for the opposite side, numpad 5 = perspective).
+        // They are raster only: entering one turns DLSS, ray tracing and path tracing off (what they were is put back when leaving).
+        void SetViewMode(EditorViewMode mode);
+        int GridPlaneAxis() const; // the normal of the plane the grid lies on: 1 (the ground) in perspective / Top / Bottom, 2 Front / Back, 0 Left / Right
+        // A 180 cm blocky figure standing at the world origin (a size reference, like UE's mannequin); toolbar "Figure".
+        void DrawReferenceFigure();
         // Drops every selected top entity straight down until its bounds' bottom rests on the surface below (the top of the highest
         // other mesh whose bounds overlap it from above), or on the ground plane when there is none.
         void SnapSelectionToFloor();
@@ -86,6 +98,14 @@ namespace Nox
         // snap-sized squares on the plane being dragged (the current cell lit), so the steps can be seen. ImGui draw list, inside the
         // viewport window.
         void DrawTranslationSnapFeedback(const glm::mat4& view, const glm::mat4& projection, const glm::mat4& current);
+
+        // Measure tool (UE / Godot's ruler): M, click a first point, a line follows the cursor, click the second; it stays until the next click.
+        // Points come from the depth under the cursor (perspective), the ground plane where nothing is drawn; they snap like everything else.
+        bool PickWorldPoint(glm::vec3& out) const;
+        void MeasureClick();
+        void UI_MeasureOverlay();
+        // A measuring line in the viewport window: a bar across at both ends, the distance in the middle.
+        void DrawMeasureLine(const glm::mat4& view, const glm::mat4& projection, const glm::vec3& start, const glm::vec3& end, float minimumLength);
         float LocationSnapWorldUnits() const;
         glm::vec3 SnapLocation(const glm::vec3& point) const; // the point itself while snapping is off
 
@@ -131,7 +151,19 @@ namespace Nox
         int m_RotationSnapIndex = 2; // 15 degrees
         int m_ScaleSnapIndex = 1;    // 0.25
         bool m_ShowGrid = true;
+        struct OrthoSavedSettings
+        {
+            bool Valid = false;
+            bool Dlss = false;
+            bool RayTracing = false;
+            bool PathTracing = false;
+        } m_OrthoSaved;
+        bool m_ShowReferenceFigure = false;
         bool m_GizmoWasUsing = false;
+        bool m_MeasureTool = false;
+        int m_MeasureStage = 0; // 0 nothing, 1 first point set (line follows the cursor), 2 both set (kept until the next click)
+        glm::vec3 m_MeasureA{ 0.0f };
+        glm::vec3 m_MeasureB{ 0.0f };
         glm::mat4 m_GizmoDragStart{ 1.0f }; // the dragged entity's world transform when the drag began
         bool m_ShowPrefabExitPrompt = false;
         std::function<void()> m_AfterPrefabExit;

@@ -108,8 +108,8 @@ float4 fragMain(
     RayDesc rayDesc;
     rayDesc.Origin = probePos;
     rayDesc.Direction = rayDir;
-    rayDesc.TMin = 0.01;
-    rayDesc.TMax = 100.0;
+    rayDesc.TMin = 0.01 * ubo->unitsPerMeter;
+    rayDesc.TMax = 100.0 * ubo->unitsPerMeter;
 
     RaytracingAccelerationStructure accelerationStructure = RaytracingAccelerationStructure(ubo->tlasDeviceAddress);
     RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> rq;
@@ -272,10 +272,10 @@ float4 fragMain(
         {
             // Simple shadow test for direct light
             RayDesc shadowRay;
-            shadowRay.Origin = hitPos + shadowNormal * 0.02;
+            shadowRay.Origin = hitPos + shadowNormal * (0.02 * ubo->unitsPerMeter);
             shadowRay.Direction = l;
-            shadowRay.TMin = 0.005;
-            shadowRay.TMax = (lightType == 0) ? 1000.0 : dist;
+            shadowRay.TMin = 0.005 * ubo->unitsPerMeter;
+            shadowRay.TMax = (lightType == 0) ? 1000.0 * ubo->unitsPerMeter : dist;
 
             RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> shadowRq;
             shadowRq.TraceRayInline(accelerationStructure, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES, 0xFF, shadowRay);

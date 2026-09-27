@@ -70,12 +70,15 @@ namespace Nox
         const char* filterName = filter;
         const char* filterPattern = filter + strlen(filter) + 1;  // Move the pointer to the pattern part
 
-        // Define the filter array
-        static const SDL_DialogFileFilter filters[] = {
+        // Define the filter array. Not `static`: a static local's initializer only runs on the very first call this
+        // function ever makes, so every OpenFile call after the first kept showing whichever filter (e.g. "*.hdr")
+        // happened to be passed in that very first call, no matter what filter later callers (Import Model, etc.)
+        // actually asked for. This array only needs to live for this call, so a plain local is correct here.
+        const SDL_DialogFileFilter filters[] = {
             { filterName, filterPattern },  // Use the parts from the split filter string
             { "All files", "*" }
         };
-        
+
         // Show the open file dialog
         SDL_ShowOpenFileDialog(callback, (void*)filters, Application::Get().getWindow()->getHandle(), filters, SDL_arraysize(filters), SDL_GetBasePath(), false);
         
@@ -99,14 +102,14 @@ namespace Nox
         const char* filterName = filter;
         const char* filterPattern = filter + strlen(filter) + 1;  // Move the pointer to the pattern part
 
-        // Define the filter array
-        static const SDL_DialogFileFilter filters[] = {
+        // Define the filter array. Not `static` -- see the matching comment in OpenFile above; same bug, same fix.
+        const SDL_DialogFileFilter filters[] = {
             { filterName, filterPattern },  // Use the parts from the split filter string
             { "All files", "*" }
         };
-        
+
         // Show the open file dialog
-        
+
         SDL_ShowSaveFileDialog(callback, nullptr, Application::Get().getWindow()->getHandle(), filters, SDL_arraysize(filters), nullptr);
         
         // Loop until the callback is done (the user has made a selection)

@@ -553,6 +553,13 @@ namespace Nox
                 if (resolveMaterials)
                 {
                     builder.Read(resources.Visibility);
+                    // The Visibility pass already wrote this pixel's exact, hardware-rasterized depth: used to reconstruct this
+                    // pixel's world position directly, instead of re-deriving it from a world-space ray/triangle-plane
+                    // intersection whose division becomes numerically unstable for triangles seen at a grazing angle to the
+                    // view ray -- common all over a curved surface (a sphere), rare on a flat one (a cube), which is why the
+                    // resolved normal looked speckled/noisy only on curved geometry (docs/Backlog_2026.md, ortho sphere entry;
+                    // this turned out to affect perspective too, since the instability has nothing to do with the projection).
+                    builder.Read(resources.Depth);
                     // Read and written: the shader skips the atomic when the slot already holds its mip.
                     builder.Read(resources.MipFeedback);
                     builder.Write(resources.MipFeedback);
@@ -607,6 +614,7 @@ namespace Nox
                 }
 
                 gbufferPush.visibilityTextureIndex = context.Slot(res->Visibility);
+                gbufferPush.depthTextureIndex = context.Slot(res->Depth);
                 gbufferPush.viewportSize = glm::vec2(rw, rh);
                 gbufferPush.debugMode = m_debugMode;
                 cmd.pushData(&gbufferPush, sizeof(shaderio::PushConstantVisibilityDebug));

@@ -147,26 +147,34 @@ FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform Pu
     }
     else // PBR_WORKFLOW_SPECULAR_GLOSSINESS
     {
-        perceptualRoughness = 0.0;
+        // The factor is the baseline (a material with no specular-glossiness texture at all -- e.g. Bistro's flat-color
+        // decals -- authors its roughness through glossinessFactor alone); a texture, where present, modulates it. This
+        // used to default perceptualRoughness to a hardcoded 0.0 (mirror-smooth) and only ever replace it, never
+        // combine it with the factor, so any material without a texture (glossinessFactor 0.0 = fully rough, matte)
+        // rendered as a perfect mirror regardless of what it actually authored -- Bistro's dirt/decal walls reflecting
+        // the environment instead of looking like flat dirty concrete, the one thing every one of them has in common.
+        float glossiness = instance.specularFactor.a;
+        float3 specular = instance.specularFactor.rgb;
         if (instance.metallicRoughnessTextureIndex != 0xFFFFFFFF)
         {
+            // Imported as SRGBA8 (EditorAssetManager::ImportMeshTextures): RGB (specular color) is hardware sRGB-decoded
+            // on sample, alpha (glossiness) is always left linear by that format -- decoding either manually here on top
+            // would be a double decode.
             Texture2D specGlossTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.metallicRoughnessTextureIndex, 0));
-            perceptualRoughness = 1.0 - specGlossTex.Sample(sampLinearHandle, instance.physicalDescriptorTextureSet == 0 ? vertIn.uv0 : vertIn.uv1).a;
+            float4 specGlossSample = specGlossTex.Sample(sampLinearHandle, instance.physicalDescriptorTextureSet == 0 ? vertIn.uv0 : vertIn.uv1);
+            glossiness *= specGlossSample.a;
+            specular *= specGlossSample.rgb;
         }
+        perceptualRoughness = clamp(1.0 - glossiness, 0.0, 1.0);
 
         const float epsilon = 1e-6;
         float4 diffuseSample = instance.diffuseFactor;
         if (instance.baseColorTextureIndex != 0xFFFFFFFF)
         {
+            // Imported as SRGBA8 (EditorAssetManager::ImportMeshTextures: importTexture(BaseColorTexturePath, true)),
+            // already hardware sRGB-decoded on sample -- decoding it again here was a double decode.
             Texture2D colorMap = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.baseColorTextureIndex, 0));
-            diffuseSample = SRGBtoLINEAR(colorMap.Sample(sampLinearHandle, vertIn.uv0)) * instance.diffuseFactor;
-        }
-
-        float3 specular = instance.specularFactor.rgb;
-        if (instance.metallicRoughnessTextureIndex != 0xFFFFFFFF)
-        {
-            Texture2D specGlossTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.metallicRoughnessTextureIndex, 0));
-            specular *= SRGBtoLINEAR(specGlossTex.Sample(sampLinearHandle, vertIn.uv0)).rgb;
+            diffuseSample = colorMap.Sample(sampLinearHandle, vertIn.uv0) * instance.diffuseFactor;
         }
 
         float maxSpecular = max(max(specular.r, specular.g), specular.b);

@@ -1,5 +1,6 @@
 #pragma once
 #include "NoxCore/Renderer/Camera.h"
+#include "NoxCore/Core/WorldUnits.h"
 
 namespace Nox
 {
@@ -40,7 +41,9 @@ namespace Nox
         ProjectionType m_ProjectionType = ProjectionType::Orthographic;
         
         float m_PerspectiveFOV = glm::radians(45.0f);
-        float m_PerspectiveNear = 0.1f, m_PerspectiveFar = 1000.0f;
+        // Real 3D lengths (U6): go through WorldUnits so a gameplay camera's clip planes stay the same real distance whatever the
+        // project's world unit is. The orthographic values below are 2D/sprite-camera conventions, not physical lengths -- untouched.
+        float m_PerspectiveNear = WorldUnits::FromMeters(0.1f), m_PerspectiveFar = WorldUnits::FromMeters(1000.0f);
         
         float m_OrthographicSize = 10.0f;
         float m_OrthographicNear = -1.0f, m_OrthographicFar = 1.0f;

@@ -55,11 +55,16 @@ namespace Nox
         std::string BaseColorTexturePath;
         int32_t BaseColorTextureSet = 0;
         
-        // PBR Properties (Metallic-Roughness)
-        // Match RTXPT/Donut engine defaults. MeshImporter also corrects the vendored parser's synthetic 1/1 values
-        // for textureless transmission-only materials without changing the vendor library.
+        // PBR Properties (Metallic-Roughness). MeshImporter only reads a primitive's actual glTF material when one is
+        // assigned (primitive.material >= 0); a primitive with none stays at these defaults. RoughnessFactor = 0.0
+        // used to mean every such primitive rendered as a perfect mirror instead of a plain matte surface -- any mesh
+        // exported without an explicit material (an easy thing to miss in Blender) turned into a "disco ball"
+        // reflecting the environment. 1.0 (fully rough) is glTF's own spec default for roughnessFactor and the sane
+        // fallback either way. MetallicFactor stays 0 (a non-metal fallback, also matching RTXPT/Donut's convention);
+        // MeshImporter also corrects the vendored parser's synthetic 1/1 values for textureless transmission-only
+        // materials without changing the vendor library.
         float MetallicFactor = 0.0f;
-        float RoughnessFactor = 0.0f;
+        float RoughnessFactor = 1.0f;
         std::string MetallicRoughnessTexturePath;
         int32_t PhysicalDescriptorTextureSet = 0;
         

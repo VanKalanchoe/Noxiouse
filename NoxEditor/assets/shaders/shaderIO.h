@@ -317,6 +317,11 @@ struct UniformBufferObject
     float lodCameraNear;
     uint32_t lodFullDetail;
     uint64_t clusterStatsReference;
+
+    // World units per meter (docs/Units_And_World_Tools_Plan_2026.md, U6): 1 while the project is in meters, 100 for a centimeter
+    // project. Every shader-side distance that is a physical length in meters (self-shadowing ray offsets, TMin epsilons, ...)
+    // multiplies its literal by this instead of assuming meters.
+    float unitsPerMeter;
 };
 
 struct Vertex
@@ -325,7 +330,15 @@ struct Vertex
     vec3 normal;
     vec2 uv0;
 	vec2 uv1;
-    
+    // xyz: tangent direction, w: bitangent handedness sign (+1/-1); bitangent = cross(normal, tangent.xyz) * tangent.w.
+    // Either the glTF file's own authored TANGENT attribute, or meshopt_generateTangents (MikkTSpace-compatible) when a
+    // primitive doesn't have one -- see MeshImporter::GenerateMissingTangents. Every cooked mesh has one of the two:
+    // GBufferMaterial.slang uses it directly instead of reconstructing a tangent frame per pixel from UV/position
+    // derivatives, which -- lacking the handedness this carries -- picked the wrong sign on some UV-mirrored geometry
+    // (a symmetric moulding profile, mirrored down the middle to save the artist re-authoring half of it, being the
+    // case that actually surfaced it: correct on one half, flipped on the other, a visible seam in specular only).
+    vec4 tangent;
+
     uvec4 boneIDs;
     vec4 boneWeights;
 };
@@ -336,6 +349,7 @@ struct SkinnedVertex
 {
     vec4 position;
     vec4 normal;
+    vec4 tangent; // xyz skinned like normal (bone matrix, no translation); w (handedness) carried through unchanged.
 };
 
 // One compute workgroup owns one skinned mesh instance and walks all of its vertices.
@@ -574,6 +588,10 @@ struct PushConstantVisibilityDebug
     uint32_t gbufferNormalIndex;
     uint32_t gbufferMaterialIndex;
     uint32_t gbufferEmissionIndex;
+    // This pixel's own depth, already resolved by hardware rasterization in the Visibility pass: the G-Buffer resolve
+    // reconstructs its world position (and so its barycentric weights) from it, not a world-space ray/triangle-plane
+    // intersection (numerically unstable at grazing angles -- see GBufferMaterial.slang).
+    uint32_t depthTextureIndex;
 };
 
 // NRD's view Z and packed normal/roughness guides (NRDGuides.slang).
@@ -1156,13 +1174,14 @@ struct PushConstantLine
 struct PushConstantGrid
 {
     uint64_t matrixReference;
-    float centerX;       // where the lines are centered (multiples of the large step around the camera)
-    float centerZ;
+    float centerA;       // where the lines are centered on the grid plane (multiples of the large step around the camera), along axis a
+    float centerB;       // and along axis b (the plane's normal is axis c: a = (c + 1) % 3, b = (c + 2) % 3)
     float smallStep;     // distance between two lines
     float gridFadeSize;  // distance at which the grid has faded out
     float decimals;      // fractional part of the division level: blends primary and secondary lines
     int steps;           // every steps-th line is a primary line
     int gridSize;        // lines each way from the center
+    int planeAxis;       // c: 0 = the plane x = 0, 1 = y = 0 (the ground), 2 = z = 0
 };
 struct LineData
 {

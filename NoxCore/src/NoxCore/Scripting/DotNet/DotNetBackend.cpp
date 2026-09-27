@@ -333,11 +333,15 @@ namespace Nox
             {
                 bool isExposed = false;
                 bool disallowSelf = false;
+                std::string unit;
                 for (Coral::Attribute attribute : field.GetAttributes())
                 {
                     const std::string attributeName(attribute.GetType().GetFullName());
                     if (attributeName == "Nox.ExposeAttribute")
+                    {
                         isExposed = true;
+                        unit = attribute.GetFieldValue<std::string>("Unit");
+                    }
                     else if (attributeName == "Nox.DisallowSelfAttribute")
                         disallowSelf = true;
                 }
@@ -362,7 +366,10 @@ namespace Nox
                 else if (fieldType == "Nox.Entity") exposed.push_back({name, ScriptFieldType::Entity, UUID(0)});
                 else NOX_CORE_WARN("Unsupported [Expose] field '{}.{}' of type '{}'", className, name, fieldType);
                 if (exposed.size() != fieldCountBefore)
+                {
                     exposed.back().DisallowSelf = disallowSelf;
+                    exposed.back().Unit = unit;
+                }
             }
             defaults.Destroy();
         }

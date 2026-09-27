@@ -76,9 +76,11 @@ namespace Nox
         memcpy(m_data.textStorageBuffersMapped[currentImage], m_data.textDatas.data(), m_data.textDatas.size() * sizeof(shaderio::TextData));
         const size_t thickCount = std::min(m_data.lineDatas.size(), kMaxLines);
         const size_t thinCount = std::min(m_data.thinLineDatas.size(), kMaxLines - thickCount);
+        const size_t xrayCount = std::min(m_data.xrayLineDatas.size(), kMaxLines - thickCount - thinCount);
         auto* lines = static_cast<shaderio::LineData*>(m_data.lineStorageBuffersMapped[currentImage]);
         memcpy(lines, m_data.lineDatas.data(), thickCount * sizeof(shaderio::LineData));
         memcpy(lines + thickCount, m_data.thinLineDatas.data(), thinCount * sizeof(shaderio::LineData));
+        memcpy(lines + thickCount + thinCount, m_data.xrayLineDatas.data(), xrayCount * sizeof(shaderio::LineData));
     }
 
     // Runs inside a Begin rendering
@@ -155,9 +157,10 @@ namespace Nox
         }
 
         // Thin lines: the same pipeline drawn one pixel wide, from the same buffer behind the thick lines (an address offset).
+        size_t thinCount = 0;
         {
             const size_t thickCount = std::min(m_data.lineDatas.size(), kMaxLines);
-            const size_t thinCount = std::min(m_data.thinLineDatas.size(), kMaxLines - thickCount);
+            thinCount = std::min(m_data.thinLineDatas.size(), kMaxLines - thickCount);
             if (thinCount > 0)
             {
                 commandBuffer.setLineWidth(1.0f);
@@ -172,6 +175,28 @@ namespace Nox
                 commandBuffer.drawMeshTasks(1, 1, 1);
             }
         }
+
+        // X-ray lines: depth testing off for this batch only, so a collider wireframe stays visible embedded inside its mesh
+        // instead of mostly hidden behind it; restored afterwards since this is not necessarily the pass's last draw.
+        {
+            const size_t thickCount = std::min(m_data.lineDatas.size(), kMaxLines);
+            const size_t xrayCount = std::min(m_data.xrayLineDatas.size(), kMaxLines - thickCount - thinCount);
+            if (xrayCount > 0)
+            {
+                commandBuffer.setLineWidth(1.5f);
+                commandBuffer.setDepthTestEnable(false);
+                commandBuffer.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_LineMeshPipeline);
+
+                shaderio::PushConstantLine xrayReferences;
+                xrayReferences.matrixReference = currentUniformBuffer.getDeviceAddress();
+                xrayReferences.lineDataReference = m_data.lineStorageBuffers[frameIndex]->getDeviceAddress() + (thickCount + thinCount) * sizeof(shaderio::LineData);
+                xrayReferences.numOfElements = xrayCount;
+                commandBuffer.pushData(&xrayReferences, sizeof(shaderio::PushConstantLine));
+
+                commandBuffer.drawMeshTasks(1, 1, 1);
+                commandBuffer.setDepthTestEnable(true);
+            }
+        }
     }
 
     void Renderer2D::EndFrame()
@@ -181,6 +206,7 @@ namespace Nox
         m_data.textDatas.clear();
         m_data.lineDatas.clear();
         m_data.thinLineDatas.clear();
+        m_data.xrayLineDatas.clear();
         m_GridDraw = false;
     }
 
@@ -574,7 +600,7 @@ namespace Nox
     // Godot's Node3DEditor::_init_grid with Godot's defaults (8 steps, levels 0..2, bias -0.2), the numbers it works out on the CPU.
     // `cell` is the smallest step (Godot's 1 m): the cell size stays the same while you zoom, it only steps up 8x when the camera is
     // far enough that the cells would be too small.
-    void Renderer2D::DrawGrid(const glm::vec3& cameraPosition, float cell)
+    void Renderer2D::DrawGrid(const glm::vec3& focus, float cell, int planeAxis, float cameraDistance)
     {
         constexpr int steps = 8;
         constexpr int gridSize = 200;
@@ -582,8 +608,11 @@ namespace Nox
         constexpr float divisionLevelMin = 0.0f;
         constexpr float divisionLevelMax = 2.0f;
 
-        const float cameraDistance = std::max(std::abs(cameraPosition.y), 1e-6f);
-        const float divisionLevel = std::log(cameraDistance / cell) / std::log(static_cast<float>(steps)) + divisionLevelBias;
+        const int axisA = (planeAxis + 1) % 3;
+        const int axisB = (planeAxis + 2) % 3;
+
+        const float distance = std::max(std::abs(cameraDistance), 1e-6f);
+        const float divisionLevel = std::log(distance / cell) / std::log(static_cast<float>(steps)) + divisionLevelBias;
         const float clampedLevel = std::clamp(divisionLevel, divisionLevelMin, divisionLevelMax);
         const float flooredLevel = std::floor(clampedLevel);
         const float decimals = clampedLevel - flooredLevel;
@@ -594,13 +623,14 @@ namespace Nox
         float fadeSize = cell * std::pow(static_cast<float>(steps), divisionLevel - 1.0f);
         fadeSize = std::clamp(fadeSize, cell * std::pow(static_cast<float>(steps), divisionLevelMin), cell * std::pow(static_cast<float>(steps), divisionLevelMax));
 
-        m_Grid.centerX = largeStep * std::trunc(cameraPosition.x / largeStep);
-        m_Grid.centerZ = largeStep * std::trunc(cameraPosition.z / largeStep);
+        m_Grid.centerA = largeStep * std::trunc(focus[axisA] / largeStep);
+        m_Grid.centerB = largeStep * std::trunc(focus[axisB] / largeStep);
         m_Grid.smallStep = smallStep;
         m_Grid.gridFadeSize = (gridSize - steps) * fadeSize;
         m_Grid.decimals = decimals;
         m_Grid.steps = steps;
         m_Grid.gridSize = gridSize;
+        m_Grid.planeAxis = planeAxis;
         m_GridDraw = true;
     }
 
@@ -613,6 +643,17 @@ namespace Nox
         instance.entityID = -1;
 
         m_data.thinLineDatas.emplace_back(instance);
+    }
+
+    void Renderer2D::DrawXRayLine(const glm::vec3& p0, const glm::vec3& p1, const glm::vec4& color)
+    {
+        shaderio::LineData instance;
+        instance.p0 = p0;
+        instance.p1 = p1;
+        instance.color = color;
+        instance.entityID = -1;
+
+        m_data.xrayLineDatas.emplace_back(instance);
     }
 
     void Renderer2D::DrawRect(const glm::vec3& position, const glm::vec2& size, const glm::vec4& color, int entityID)

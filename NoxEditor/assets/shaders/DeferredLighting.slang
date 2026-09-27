@@ -103,7 +103,7 @@
         RayDesc shadowRayDesc;
         shadowRayDesc.Origin = rayOrigin;
         shadowRayDesc.Direction = rayDir;
-        shadowRayDesc.TMin = 0.005;
+        shadowRayDesc.TMin = 0.005 * ubo->unitsPerMeter;
         shadowRayDesc.TMax = maxDist;
 
         RaytracingAccelerationStructure accelerationStructure = RaytracingAccelerationStructure(ubo->tlasDeviceAddress);
@@ -303,10 +303,36 @@
         float3 specularColor = lerp(f0, baseColor, metallic);
         float reflectance = max(max(specularColor.r, specularColor.g), specularColor.b);
         float3 specularEnvironmentR0 = specularColor;
-        float3 specularEnvironmentR90 = clamp(float3(reflectance * 50.0), 0.0, 1.0);
+        // The grazing-angle Fresnel reflectance (F90): Sascha Willems' reference glTF PBR shader (and every other copy of
+        // this same formula, e.g. Khronos' own glTF-WebGL-PBR/gltf-viewer) uses `reflectance * 25.0` here -- this had
+        // `* 50.0`, which saturates F90 to full white reflectance at half the reflectance value it should, making the
+        // Fresnel rim/edge highlight ramp up far too aggressively on ordinary (low-reflectance, non-metal) surfaces --
+        // cobblestones, fabric, wood, painted walls -- giving the whole scene a "wet"/polished look, while the path
+        // tracer's separate, simpler Schlick Fresnel (fresnel_schlick in PathTracer.slang: no F90 term at all,
+        // equivalent to always using the correct F90 = 1) was never affected.
+        float3 specularEnvironmentR90 = clamp(float3(reflectance * 25.0), 0.0, 1.0);
 
         // 5. Vectors
-        float3 v = normalize(ubo->cameraWorldPos.xyz - worldPos);
+        // "Camera position to surface" only diverges correctly for a real point (perspective) camera; the editor's orthographic
+        // views fake a point camera very far back along a true parallel-ray projection matrix, and cameraWorldPos - worldPos does
+        // NOT recover that projection's actual (constant, parallel) view direction -- it recovers the true per-pixel direction
+        // only when the camera really is a point close enough for the difference to matter, which an ortho scene's geometry
+        // (comparable in size to how far "far enough away" needs to be) usually isn't. A sphere near the focal point showed this
+        // as almost the whole visible surface reading a wrong, steeply-diverging V and going black from the NdotV clamp below,
+        // with a small correct patch only where the true and approximated V happened to agree.
+        // Fixed the general way instead of special-casing orthographic: unproject the SAME pixel at two different depths through
+        // the actual projection matrix (like Skybox.slang's ray direction) and take the direction between them. That is exactly
+        // the view ray this pixel was rasterized along, for whatever projection matrix produced it -- perspective or orthographic.
+        // The second point used to be unprojected at depth 0.001 (reverse-Z: practically the far/infinite plane), whose w is
+        // then near zero, so dividing by it produces an enormous xyz -- subtracting the near point (a comparatively tiny, finite
+        // number) from that loses almost all of the near point's precision, and how badly depends on the exact floating-point
+        // bit pattern involved, which can differ pixel to pixel: on a large, uniformly-lit surface this can show as a visible
+        // seam of noisy/inconsistent specular response (direct light's NdotV/half-vector both use v) between two regions with no
+        // other difference at all, worse the larger the scene is. worldPos (this pixel's own depth, already reconstructed above)
+        // is a point on the SAME ray as nearH, at a finite, normal-scene-scale distance from the camera instead of near-infinity,
+        // so the same direction comes out of a numerically well-behaved subtraction.
+        float4 nearH = mul(pushConstant.invViewProj, float4(ndc_xy, 1.0, 1.0)); // reverse-Z: 1.0 = near
+        float3 v = normalize(nearH.xyz / nearH.w - worldPos);
         float NdotV = clamp(dot(n, v), 0.001, 1.0);
         float3 reflection = normalize(reflect(-v, n));
 
@@ -403,7 +429,7 @@
                     {
                         // Any additional directional lights (moon, secondary suns) or any punctual light within range
                         float3 shadowNormal = (dot(n, l) < 0.0) ? -n : n;
-                        float3 shadowOrigin = worldPos + shadowNormal * 0.02;
+                        float3 shadowOrigin = worldPos + shadowNormal * (0.02 * ubo->unitsPerMeter);
                         if (trace_shadow_ray(ubo, shadowOrigin, l, maxDist))
                         {
                             lightShadow = 0.0;

@@ -88,6 +88,7 @@ namespace Nox
         RGTexture DLSSOutput;
         RGBuffer TLAS;
         RGBuffer PickerStaging;
+        RGBuffer PickerDepthStaging; // the depth of the picked pixel (the editor's measure tool)
         RGBuffer MipFeedback; // texture streaming feedback (§5.12)
         RGBuffer ClusterStats; // what the visibility passes drew after the LOD cut (§5.7)
 

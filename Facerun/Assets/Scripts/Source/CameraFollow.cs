@@ -6,8 +6,9 @@ namespace Facerun;
 public sealed class CameraFollow : EntityBehaviour
 {
     [Expose, DisallowSelf] public Entity Target;
-    [Expose] public float Distance = 10.0f;
-    [Expose] public float Height = 0.0f;
+    // Stored in cm (the project's world unit), but Unit = "m" shows and edits the Inspector field in meters.
+    [Expose(Unit = "m")] public float Distance = 1000.0f; // 10 m
+    [Expose(Unit = "m")] public float Height = 0.0f;
 
     protected override void OnCreate()
     {

@@ -84,8 +84,14 @@ namespace Nox
         void DrawLine(const glm::vec3& p0, const glm::vec3& p1, const glm::vec4& color, int entityID = -1);
         // One pixel wide (DrawLine's are thick): the editor's world grid, measuring lines. Same pass, depth tested.
         void DrawThinLine(const glm::vec3& p0, const glm::vec3& p1, const glm::vec4& color);
+        // A thin line drawn with depth testing off, so it stays visible even embedded inside opaque geometry (a physics collider
+        // wireframe is usually about the same size as the mesh it wraps, so a depth-tested line would mostly be hidden behind it --
+        // UE5/Godot draw collision debug shapes the same "always on top" way).
+        void DrawXRayLine(const glm::vec3& p0, const glm::vec3& p1, const glm::vec4& color);
         // The editor's world grid on y = 0 (GridMesh.slang): computed per pixel, so it costs nothing per line. cell = smallest cell size.
-        void DrawGrid(const glm::vec3& cameraPosition, float cell);
+        // planeAxis: the plane's normal (1 = the ground, y = 0); focus: where the grid is centered; cameraDistance: how far the camera is
+        // from the plane (the ortho size in an ortho view).
+        void DrawGrid(const glm::vec3& focus, float cell, int planeAxis, float cameraDistance);
         void DrawRect(const glm::vec3& position, const glm::vec2& size, const glm::vec4& color, int entityID = -1);
         void DrawRect(const glm::mat4& transform, const glm::vec4& color, int entityID = -1);
         
@@ -132,6 +138,7 @@ namespace Nox
             // Line
             std::vector<shaderio::LineData> lineDatas;
             std::vector<shaderio::LineData> thinLineDatas; // stored after the thick ones in the same buffer
+            std::vector<shaderio::LineData> xrayLineDatas; // stored after the thin ones; drawn with depth testing off
             std::vector<std::unique_ptr<NRI::Buffer>> lineStorageBuffers;
             std::vector<void*> lineStorageBuffersMapped;
         };

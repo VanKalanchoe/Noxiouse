@@ -86,7 +86,7 @@
         RayDesc shadowRayDesc;
         shadowRayDesc.Origin = rayOrigin;
         shadowRayDesc.Direction = rayDir;
-        shadowRayDesc.TMin = 0.005;
+        shadowRayDesc.TMin = 0.005 * ubo->unitsPerMeter;
         shadowRayDesc.TMax = maxDist;
 
         RaytracingAccelerationStructure accelerationStructure = RaytracingAccelerationStructure(ubo->tlasDeviceAddress);
@@ -229,7 +229,7 @@
             return output;
         }
 
-        float3 rayOrigin = worldPos + normal * 0.02;
+        float3 rayOrigin = worldPos + normal * (0.02 * ubo->unitsPerMeter);
 
         if (sourceRadius <= 1e-4)
         {
