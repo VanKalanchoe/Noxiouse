@@ -41,6 +41,9 @@ namespace Nox
 
         // The material on a sphere, square at `size` pixels, null until the first image is drawn. Call every frame it is shown.
         Texture2D* GetLivePreview(AssetHandle material, uint32_t size);
+        // A skeletal mesh posed by a clip at `time` seconds (the Animation Clip window), square at `size` pixels, null until the first
+        // image is drawn. Call every frame it is shown.
+        Texture2D* GetAnimationPreview(AssetHandle mesh, AssetHandle skeleton, AssetHandle clip, float time, uint32_t size);
         // The assets on the stage right now (EditorLayer::UnloadUnusedAssets keeps them loaded).
         void CollectAssetReferences(std::unordered_set<AssetHandle>& out) const;
 
@@ -59,7 +62,7 @@ namespace Nox
         // (allowStandIns: the mesh's embedded materials may stand in for .nmat files still loading).
         bool Place(AssetHandle asset, const glm::vec3& origin, Placement& out, bool allowStandIns);
         void Remove(Placement& placement);
-        void Submit(uint32_t view, const Placement& placement, uint32_t size);
+        void Submit(uint32_t view, const Placement& placement, uint32_t size, float framing = 1.0f);
 
         struct Job
         {
@@ -79,6 +82,10 @@ namespace Nox
 
         Placement m_Live;
         uint64_t m_LiveRequestedFrame = 0;
+        Placement m_Animated;
+        std::vector<AssetHandle> m_AnimatedSources; // its skeleton and clip
+        std::vector<glm::mat4> m_AnimatedBones;
+        uint64_t m_AnimatedRequestedFrame = 0;
         uint64_t m_Frame = 0;
     };
 }

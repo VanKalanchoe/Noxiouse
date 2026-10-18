@@ -7,6 +7,7 @@
 
 #include <glm/gtc/matrix_transform.hpp>
 
+#include "NoxCore/Animation/AnimPose.h"
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Core/Application.h"
 #include "NoxCore/Core/WorldUnits.h"
@@ -31,6 +32,7 @@ namespace Nox
         // The preview stage: 10 km below the world's origin (whatever the project's unit), thumbnails and the live preview 2 km apart.
         glm::vec3 ThumbnailStage() { return glm::vec3(0.0f, -WorldUnits::FromMeters(10000.0f), 0.0f); }
         glm::vec3 LiveStage() { return glm::vec3(WorldUnits::FromMeters(2000.0f), -WorldUnits::FromMeters(10000.0f), 0.0f); }
+        glm::vec3 AnimationStage() { return glm::vec3(WorldUnits::FromMeters(4000.0f), -WorldUnits::FromMeters(10000.0f), 0.0f); }
 
         Renderer* GetRenderer() { return Application::Get().GetRenderer(); }
     }
@@ -91,6 +93,41 @@ namespace Nox
         return renderer->GetExtraViewTexture(Renderer::LivePreviewView);
     }
 
+    Texture2D* AssetPreviewRenderer::GetAnimationPreview(AssetHandle mesh, AssetHandle skeleton, AssetHandle clip, float time, uint32_t size)
+    {
+        Renderer* renderer = GetRenderer();
+        if (!renderer || mesh == 0 || size == 0)
+            return nullptr;
+
+        m_AnimatedRequestedFrame = m_Frame;
+        if (m_Animated.Asset != mesh)
+        {
+            Remove(m_Animated);
+            renderer->ReleaseExtraView(Renderer::AnimationPreviewView);
+            if (!Place(mesh, AnimationStage(), m_Animated, true))
+                return nullptr;
+        }
+        m_AnimatedSources = { skeleton, clip };
+
+        // The clip's pose at `time`, skinned like an Animator without joint entities does (bone matrices in the mesh's space); the
+        // rest pose until the skeleton and the clip have loaded.
+        const Skeleton* loadedSkeleton = skeleton != 0 && AssetManager::RequestAsset(skeleton) == AssetState::Ready ? AssetManager::FindLoadedAsset<Skeleton>(skeleton) : nullptr;
+        const AnimationSequence* loadedClip = clip != 0 && AssetManager::RequestAsset(clip) == AssetState::Ready ? AssetManager::FindLoadedAsset<AnimationSequence>(clip) : nullptr;
+        if (loadedSkeleton && loadedClip && !loadedSkeleton->AllNodes.empty())
+        {
+            AnimPose pose;
+            SampleClipPose(*loadedClip, time, *loadedSkeleton, pose);
+            ApplyPoseToSkeleton(pose, *loadedSkeleton, m_AnimatedBones);
+            renderer->SetMeshInstancesBones(m_Animated.Instances, m_AnimatedBones);
+        }
+        else
+            renderer->SetMeshInstancesBones(m_Animated.Instances, {});
+
+        // Framed a little wider than the rest pose's bounds: the animation moves out of them.
+        Submit(Renderer::AnimationPreviewView, m_Animated, size, 1.3f);
+        return renderer->GetExtraViewTexture(Renderer::AnimationPreviewView);
+    }
+
     void AssetPreviewRenderer::CollectAssetReferences(std::unordered_set<AssetHandle>& out) const
     {
         auto add = [&](const Placement& placement)
@@ -101,6 +138,12 @@ namespace Nox
         if (m_Job)
             add(m_Job->Placed);
         add(m_Live);
+        if (m_Animated.Asset != 0)
+        {
+            add(m_Animated);
+            for (AssetHandle asset : m_AnimatedSources)
+                out.insert(asset);
+        }
     }
 
     void AssetPreviewRenderer::Update()
@@ -115,6 +158,14 @@ namespace Nox
         {
             Remove(m_Live);
             renderer->ReleaseExtraView(Renderer::LivePreviewView);
+        }
+        // The animation preview likewise. It goes before this frame's renderer update reads its bone matrices: they are set
+        // again every frame it is shown, and a skinned instance must not keep last frame's offset into them.
+        if (m_Animated.Asset != 0 && m_AnimatedRequestedFrame + 1 < m_Frame)
+        {
+            Remove(m_Animated);
+            m_AnimatedSources.clear();
+            renderer->ReleaseExtraView(Renderer::AnimationPreviewView);
         }
 
         if (!m_Job)
@@ -188,6 +239,8 @@ namespace Nox
     void AssetPreviewRenderer::Clear()
     {
         Remove(m_Live);
+        Remove(m_Animated);
+        m_AnimatedSources.clear();
         if (m_Job)
             Remove(m_Job->Placed);
         m_Job.reset();
@@ -201,6 +254,7 @@ namespace Nox
         {
             renderer->ReleaseExtraView(Renderer::ThumbnailView);
             renderer->ReleaseExtraView(Renderer::LivePreviewView);
+            renderer->ReleaseExtraView(Renderer::AnimationPreviewView);
         }
     }
 
@@ -293,7 +347,7 @@ namespace Nox
         placement = Placement{};
     }
 
-    void AssetPreviewRenderer::Submit(uint32_t view, const Placement& placement, uint32_t size)
+    void AssetPreviewRenderer::Submit(uint32_t view, const Placement& placement, uint32_t size, float framing)
     {
         Renderer* renderer = GetRenderer();
         if (!renderer)
@@ -301,7 +355,7 @@ namespace Nox
 
         // From the front right and a little above, framed so the bounds' sphere fills the 30 degree view.
         constexpr float FieldOfView = 30.0f;
-        const float distance = placement.Radius / std::sin(glm::radians(FieldOfView * 0.5f)) * 1.08f;
+        const float distance = placement.Radius * framing / std::sin(glm::radians(FieldOfView * 0.5f)) * 1.08f;
         const float nearClip = std::min(WorldUnits::FromMeters(0.01f), distance * 0.1f);
         EditorCamera camera(FieldOfView, 1.0f, nearClip, distance * 4.0f);
         camera.SetViewportSize(static_cast<float>(size), static_cast<float>(size));

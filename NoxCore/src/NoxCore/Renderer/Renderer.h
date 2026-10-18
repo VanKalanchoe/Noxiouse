@@ -291,9 +291,10 @@ namespace Nox
         // the last image drawn completely (after a resize the old one, until the new size has been drawn once; null before the first).
         // grid: the view's world grid (Renderer2D::MakeGrid), or null.
         // Slots 0-3 are the editor's viewports; the asset previews use their own (preview: no shadow rays, no DDGI, fixed exposure).
-        static constexpr uint32_t MaxExtraViews = 6;
+        static constexpr uint32_t MaxExtraViews = 7;
         static constexpr uint32_t ThumbnailView = 4;
         static constexpr uint32_t LivePreviewView = 5;
+        static constexpr uint32_t AnimationPreviewView = 6;
         void SubmitExtraView(uint32_t index, const EditorCamera& camera, NRI::Extent2D size, const shaderio::PushConstantGrid* grid, bool preview = false);
         Texture2D* GetExtraViewTexture(uint32_t index) const { return index < MaxExtraViews ? m_extraViews[index].Shown.get() : nullptr; }
         // Drops a view's texture (its viewport closed).
