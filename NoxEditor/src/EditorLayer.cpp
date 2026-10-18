@@ -1721,8 +1721,11 @@ namespace Nox
         }
 
 
-        bool control = (Input::IsKeyPressed(SDL_SCANCODE_LCTRL) || Input::IsKeyPressed(SDL_SCANCODE_RCTRL));
-        bool shift = (Input::IsKeyPressed(SDL_SCANCODE_LSHIFT) || Input::IsKeyPressed(SDL_SCANCODE_RSHIFT));
+        // The modifiers held when the key went down, not the live keyboard state: by the time the event is handled (once per
+        // frame) a fast Ctrl+Shift+Z can already have let go of Shift, which read as Ctrl+Z and undid instead of redoing.
+        const uint16_t modifiers = e.GetModifiers();
+        bool control = (modifiers & SDL_KMOD_CTRL) != 0;
+        bool shift = (modifiers & SDL_KMOD_SHIFT) != 0;
 
         // Shortcuts change the scene outside any ImGui item (Delete, Ctrl+D, End): the history looks for a change this frame.
         m_HistoryCheckRequested = true;

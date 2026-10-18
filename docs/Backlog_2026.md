@@ -17,7 +17,7 @@
 | F1 | Docs audit | done: `Status_Audit_2026-10.md` |
 | F2 | Modern content browser, material window | first part **built, untested** (tree, path, search, type filter, Material Editor); rendered thumbnails: `Editor_Features_Plan_2026-10.md` §2 |
 | F3 | Animation player node, sequencer, editing | first part **built, untested** (Clip = Sequence Player with Speed pin + Start Position, BlendSpace1D); rest: same plan §3 |
-| F4 | Hybrid renderer near the path tracer, RT fallbacks, DLSS edge jitter, transparency / transmission | DLSS outline jitter **built, untested** (non-jittered selection mask, `Hybrid_Renderer_Plan_2026-10.md` §3); grid/overlay depth jitter, fallbacks and transparency planned (§1-4) |
+| F4 | Hybrid renderer near the path tracer, RT fallbacks, DLSS edge jitter, transparency / transmission | DLSS outline jitter **fixed, confirmed by the user** (non-jittered selection mask, `Hybrid_Renderer_Plan_2026-10.md` §3); grid/overlay depth jitter, fallbacks and transparency planned (§1-4) |
 | F5 | Up to four viewports with layout presets | planned: `Editor_Features_Plan_2026-10.md` §4 |
 | F6 | Procedural sky (Hillaire / UE SkyAtmosphere recommended over Hosek-Wilkie) | planned: `Hybrid_Renderer_Plan_2026-10.md` §5 |
 | F7 | Runtime asset manager + runtime player | planned: `Runtime_And_Packaging_Plan_2026-10.md` R1-R2 |
@@ -25,8 +25,9 @@
 | F9 | Stats overlay text broken | **fixed, confirmed by the user**: drawn in screen space (was world-space quads: inside the scene in ortho views, float precision far from the origin); replaces R4 |
 | F10 | Basic shapes | **built, untested**: Create > Shapes / hierarchy right-click > Shapes |
 | F11 | Minecraft-style game: script or C++? | answered: `Runtime_And_Packaging_Plan_2026-10.md` §4 (C++ voxel module + C# gameplay) |
-| F12 | Undo / redo | **built, tested by the user** (works); 2026-10-18: shortcuts follow the keyboard layout (Z/Y were swapped on QWERTZ) |
+| F12 | Undo / redo | **built, tested by the user** (works); 2026-10-18: shortcuts follow the keyboard layout (Z/Y were swapped on QWERTZ) and read the modifiers of the key event (Ctrl+Shift+Z read as Ctrl+Z when Shift was let go before the frame handled the key) |
 | F13 | VFX, particles, clouds | answered + planned: `Hybrid_Renderer_Plan_2026-10.md` §6 |
+| F14 | Unregister a mesh when its entity is deleted? | answered: no (`Status_Audit_2026-10.md`, F14 answer); stale registry entries (files gone) are removed at load: **built, untested**; asset Delete with reference check + unused-asset report: `Editor_Features_Plan_2026-10.md` B3 |
 
 ## Prefabs (plan: `Prefab_Architecture_Plan_2026.md`, section 8)
 

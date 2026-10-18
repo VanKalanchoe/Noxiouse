@@ -1424,10 +1424,53 @@ namespace Nox
             }
         }
 
+        // Stale entries (docs/Future.md item 14): neither the asset's file nor its source exists any more -- deleted in the file
+        // explorer, or left behind by an older import. Dropped, so the registry does not keep handles nothing can load. Deleting an
+        // entity never unregisters its assets (other entities, scenes, prefabs and the undo history may use them; their memory is
+        // freed by UnloadUnusedAssets). When most of the registry is missing, that is a moved or unreachable asset folder, not
+        // deleted assets: the registry is left as it is. The file before the clean-up is kept next to it as .bak.
+        bool registryPruned = false;
+        {
+            const std::filesystem::path assetDirectory = Project::GetActiveAssetDirectory();
+            std::vector<AssetHandle> stale;
+            for (const auto& [handle, metadata] : m_AssetRegistry)
+            {
+                std::error_code error;
+                const bool fileExists = !metadata.FilePath.empty() && std::filesystem::exists(assetDirectory / metadata.FilePath, error);
+                const bool sourceExists = !metadata.SourceFilePath.empty() && std::filesystem::exists(assetDirectory / metadata.SourceFilePath, error);
+                if (!fileExists && !sourceExists)
+                    stale.push_back(handle);
+            }
+
+            if (!stale.empty() && stale.size() * 2 > m_AssetRegistry.size())
+            {
+                NOX_CORE_WARN("Asset registry: {} of {} entries have no file in '{}' -- is the asset folder moved? Nothing was removed.",
+                              stale.size(), m_AssetRegistry.size(), assetDirectory.generic_string());
+            }
+            else if (!stale.empty())
+            {
+                std::error_code error;
+                std::filesystem::path backup = path;
+                backup += ".bak";
+                std::filesystem::copy_file(path, backup, std::filesystem::copy_options::overwrite_existing, error);
+                for (size_t i = 0; i < stale.size(); ++i)
+                {
+                    if (i < 20)
+                        NOX_CORE_INFO("Asset registry: removed '{}' (its file no longer exists)", m_AssetRegistry[stale[i]].FilePath.generic_string());
+                    m_AssetRegistry.erase(stale[i]);
+                }
+                NOX_CORE_INFO("Asset registry: removed {} entries whose files no longer exist (previous registry kept as {})",
+                              stale.size(), backup.filename().string());
+                registryPruned = true;
+            }
+        }
+
         m_HandleByPath.clear();
         for (const auto& [indexedHandle, indexedMetadata] : m_AssetRegistry)
             IndexPath(indexedHandle, indexedMetadata);
 
+        if (registryPruned)
+            SerializeAssetRegistry();
         return true;
     }
 }

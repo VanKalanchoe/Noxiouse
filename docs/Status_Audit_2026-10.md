@@ -2,7 +2,7 @@
 
 > Item 1 of `Future.md`: "check first all docs md files where we are currently, what's missing". Every `.md` in the repo
 > was read and its claims checked against the code at commit `509dd11` ("before unleashing claude"). This file is the
-> snapshot; `Backlog_2026.md` stays the living index (the Future.md items are now in it as F1-F13).
+> snapshot; `Backlog_2026.md` stays the living index (the Future.md items are now in it as F1-F14).
 
 ## 1. The docs, one by one
 
@@ -59,6 +59,28 @@
 | F11 | Minecraft clone: script or C++? | no voxel/job API exposed | -- | answered in `Runtime_And_Packaging_Plan_2026-10.md` §4 |
 | F12 | Undo / redo | none | M | **built this round** |
 | F13 | VFX, particles, clouds | none | L | answered and planned in `Hybrid_Renderer_Plan_2026-10.md` §6 |
+| F14 | Unregister a mesh when its entity is deleted? (added 2026-10-18) | registry never shrinks; files deleted outside the editor leave entries behind | S | answered below; stale-entry clean-up **built** |
+
+### F14 answer: deleting an entity should not unregister its mesh
+
+The registry is the list of the project's **asset files**, not of what a scene uses -- like UE's Content Browser or
+Unity's AssetDatabase. Unregistering a mesh because one entity using it was deleted would break:
+- every other entity, scene and prefab that uses the same mesh (they reference it by handle),
+- undo: Ctrl+Z brings the entity back with the same handle, which must still resolve,
+- dragging the mesh into the scene again from the Content Browser.
+
+The memory side is already handled: `EditorLayer::UnloadUnusedAssets` (mark and sweep) unloads meshes, materials and
+textures no live scene references, and frees their GPU memory a few frames later. An unused asset costs one registry
+line and its files on disk, nothing at run time.
+
+What *is* pollution, and what to do about it:
+1. **Entries whose files are gone** (deleted in the file explorer, leftovers of older imports): **built** -- when the
+   registry loads, entries whose file and source file both no longer exist are removed (logged; the previous registry is
+   kept as `.bak`; nothing is removed when more than half of the registry is missing, which means a moved asset folder).
+2. **Deleting an asset on purpose**: Content Browser right-click > Delete, with a reference check (UE shows what uses the
+   asset and offers Force Delete / Replace References): planned as B3 in `Editor_Features_Plan_2026-10.md`.
+3. **Finding unused assets**: a report of registered assets no scene or prefab references (UE: the Reference Viewer /
+   size map), so they can be deleted on purpose: planned with B3.
 
 ### F9 root cause (stats overlay)
 

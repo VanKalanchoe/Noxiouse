@@ -23,3 +23,5 @@
 12. add history so if i make a mistake i just ctrl + z revert changes like all engines and editors do it you know
 
 13. if token left then add support for vfx, particle and cloud rendering. i think vfx is done in a program and then imported into engines i believe not sure how it actually works.
+
+14. if delete a enity mesh then it should unregister it so it doesnt stay poluted in registry or bad idea ?

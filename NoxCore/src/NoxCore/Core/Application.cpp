@@ -251,7 +251,7 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* currentEvent)
             SDL_Scancode scan = currentEvent->key.scancode; // maybe keycode better ?
             bool repeat = (currentEvent->key.repeat != 0);
 
-            Nox::KeyPressedEvent event(scan, repeat);
+            Nox::KeyPressedEvent event(scan, repeat, currentEvent->key.mod);
             applicationState->app->RaiseEvent(event);
 
             return SDL_APP_CONTINUE;

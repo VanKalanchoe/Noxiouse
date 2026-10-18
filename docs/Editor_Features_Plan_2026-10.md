@@ -7,7 +7,8 @@
 ## 1. Built this round (2026-10-18, untested)
 
 ### F12 Undo / redo -- `NoxEditor/src/EditorHistory.{h,cpp}`
-- **Ctrl+Z** undo, **Ctrl+Y** / **Ctrl+Shift+Z** redo, and **Edit > Undo / Redo** with the step's name ("Undo Delete
+- **Ctrl+Z** undo, **Ctrl+Y** / **Ctrl+Shift+Z** redo (both redo: Ctrl+Y is the Windows / UE / Visual Studio habit,
+  Ctrl+Shift+Z the Blender / Photoshop / Godot one), and **Edit > Undo / Redo** with the step's name ("Undo Delete
   Entity", "Undo Edit Cube", "Undo Transform"). Text fields keep their own Ctrl+Z while typing. Letter shortcuts follow the
   keyboard layout (2026-10-18 fix: they read physical US positions, so on a German QWERTZ keyboard Z and Y were swapped).
 - **How:** every step is the whole scene as its scene-file text (`SceneSerializer::SerializeToText`, new); undoing loads
@@ -60,7 +61,7 @@
 |---|---|
 | B1 | Thumbnail renderer: a preview view (camera, one directional light, the project's default environment) rendered offscreen at 256 x 256 into the thumbnail cache (`ThumbnailCache` already has a cache path). Meshes: framed by their bounds. Materials: on a sphere (the Sphere shape from F10). Prefabs: their entities. Rendered a few per frame in the background, saved as `.ntex` next to the cache so they survive restarts |
 | B2 | The Material Editor shows a live preview sphere (same preview view, re-rendered on change) instead of the color swatch |
-| B3 | Asset context menu: rename for every type (E2), delete, show in explorer, reimport; drag assets onto folders to move them (registry paths updated) |
+| B3 | Asset context menu: rename for every type (E2), **delete with a reference check** (what in the open scene, other scenes and prefabs uses it; Force Delete / Replace References like UE), show in explorer, reimport; drag assets onto folders to move them (registry paths updated); an **unused assets** report (registered, referenced by no scene or prefab). Deleting an entity never unregisters its assets (Future.md item 14, answered in `Status_Audit_2026-10.md`) |
 
 B1 needs the renderer to draw more than one view per frame, the same work as F5's M2 (§4); do M2 first.
 

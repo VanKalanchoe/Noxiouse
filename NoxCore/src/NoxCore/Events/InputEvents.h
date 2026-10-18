@@ -2,6 +2,7 @@
 
 #include "Event.h"
 
+#include <cstdint>
 #include <format>
 #include <utility>
 
@@ -41,10 +42,14 @@ namespace Nox {
 	class KeyPressedEvent : public KeyEvent
 	{
 	public:
-		KeyPressedEvent(int keycode, bool isRepeat)
-			: KeyEvent(keycode), m_IsRepeat(isRepeat) {}
+		KeyPressedEvent(int keycode, bool isRepeat, uint16_t modifiers = 0)
+			: KeyEvent(keycode), m_IsRepeat(isRepeat), m_Modifiers(modifiers) {}
 
 		inline bool IsRepeat() const { return m_IsRepeat; }
+		// The modifier keys held when this key went down (SDL_Keymod bits: SDL_KMOD_CTRL, SDL_KMOD_SHIFT, ...). Shortcuts read
+		// these, not the live keyboard state: events are handled once per frame, and at a low frame rate a modifier can already
+		// be released by then (Ctrl+Shift+Z read as Ctrl+Z).
+		inline uint16_t GetModifiers() const { return m_Modifiers; }
 
 		std::string ToString() const override
 		{
@@ -54,6 +59,7 @@ namespace Nox {
 		EVENT_CLASS_TYPE(KeyPressed)
 	private:
 		bool m_IsRepeat;
+		uint16_t m_Modifiers;
 	};
 
 	class KeyReleasedEvent : public KeyEvent

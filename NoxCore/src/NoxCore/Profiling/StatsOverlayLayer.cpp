@@ -34,7 +34,7 @@ namespace Nox
         if (event.IsRepeat() || event.GetKeyCode() != SDL_SCANCODE_F3)
             return false;
 
-        const SDL_Keymod modifiers = SDL_GetModState();
+        const uint16_t modifiers = event.GetModifiers(); // held when F3 went down (see KeyPressedEvent::GetModifiers)
         if (modifiers & SDL_KMOD_CTRL)
             SaveStatsReport(m_Renderer);
         else if (modifiers & SDL_KMOD_SHIFT)
