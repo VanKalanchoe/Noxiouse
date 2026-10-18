@@ -28,7 +28,9 @@ namespace Nox
         // whatever unit was live at app start. Call this once a project has loaded instead (docs/Units_And_World_Tools_Plan_2026.md, U6).
         void ApplyWorldUnitDefaults();
 
-        void OnUpdate(Timestep ts);
+        // acceptInput false: no new mouse navigation starts (the mouse went down outside this camera's viewport); a fly that is
+        // already going keeps going until the button is let go. The easing runs either way.
+        void OnUpdate(Timestep ts, bool acceptInput = true);
         void OnEvent(Event& e);
 
         inline float GetDistance() const { return m_Distance; }

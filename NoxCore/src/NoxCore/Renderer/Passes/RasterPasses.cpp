@@ -226,30 +226,16 @@ namespace Nox
         }
     }
 
-    void Renderer::addInstanceCullingPass()
+    void Renderer::addCullingDispatchPass(const char* name, const ViewDrawResources& draws, RGBuffer flags, RGBuffer blocks, uint32_t entryCount,
+                                          RGTexture hiZ, NRI::Buffer* uniformBuffer, NRI::Buffer* cullViewBuffer)
     {
-        FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
-        const uint32_t entryCount = static_cast<uint32_t>(m_drawList.size());
-        const bool pipelinesReady = std::all_of(m_instanceCullingPipelines.begin(), m_instanceCullingPipelines.end(), [](const auto& pipeline) { return pipeline != nullptr; });
-        if (entryCount == 0 || !pipelinesReady)
-            return;
-
+        const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
         const uint32_t blockCount = (entryCount + shaderio::CULL_BLOCK_SIZE - 1) / shaderio::CULL_BLOCK_SIZE;
-        ViewDrawResources& draws = resources.CameraDraws;
-        draws.VisibleInstances = m_renderGraph.CreateBuffer("Camera Visible Instances", { sizeof(uint32_t) * entryCount, NRI::BufferUsage::Storage });
-        draws.Commands = m_renderGraph.CreateBuffer("Camera Draw Commands", { sizeof(shaderio::MeshTasksIndirectCommand) * entryCount, NRI::BufferUsage::Indirect });
-        draws.Counts = m_renderGraph.CreateBuffer("Camera Draw Counts", { sizeof(shaderio::CullCounts), NRI::BufferUsage::Indirect });
-        draws.LateInstances = m_renderGraph.CreateBuffer("Camera Late Instances", { sizeof(uint32_t) * entryCount, NRI::BufferUsage::Storage });
-        draws.LateCommands = m_renderGraph.CreateBuffer("Camera Late Commands", { sizeof(shaderio::MeshTasksIndirectCommand) * entryCount, NRI::BufferUsage::Indirect });
-        const RGBuffer flags = m_renderGraph.CreateBuffer("Camera Cull Flags", { sizeof(uint32_t) * entryCount, NRI::BufferUsage::Storage });
-        const RGBuffer blocks = m_renderGraph.CreateBuffer("Camera Cull Blocks", { sizeof(shaderio::CullBlock) * blockCount, NRI::BufferUsage::Storage });
-
-        m_renderGraph.AddPass("Instance Culling", RGPassFlags::None,
+        m_renderGraph.AddPass(name, RGPassFlags::None,
             [&](RGBuilder& builder)
             {
                 ReadGpuScene(builder, resources);
-                // The pyramid of the previous frame (written later this frame by the Hi-Z build).
-                ReadIfValid(builder, resources.CameraHiZ);
+                ReadIfValid(builder, hiZ);
                 builder.Write(flags);
                 builder.Write(blocks);
                 builder.Write(draws.VisibleInstances);
@@ -257,13 +243,13 @@ namespace Nox
                 builder.Write(draws.Counts);
                 builder.Write(draws.LateInstances);
             },
-            [this, draws, flags, blocks, entryCount, blockCount, hiZ = resources.CameraHiZ](RGPassContext& context)
+            [this, draws, flags, blocks, entryCount, blockCount, hiZ, uniformBuffer, cullViewBuffer](RGPassContext& context)
             {
                 NRI::CommandBuffer& cmd = context.Cmd();
 
                 shaderio::PushConstantInstanceCulling push{};
-                push.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
-                push.viewReference = m_cullViewBuffers[frameIndex]->getDeviceAddress();
+                push.matrixReference = uniformBuffer->getDeviceAddress();
+                push.viewReference = cullViewBuffer->getDeviceAddress();
                 push.drawListReference = m_drawListBuffers[frameIndex]->getDeviceAddress();
                 push.flagsReference = context.Buffer(flags).getDeviceAddress();
                 push.blocksReference = context.Buffer(blocks).getDeviceAddress();
@@ -292,6 +278,29 @@ namespace Nox
                     cmd.dispatch(groupCounts[step], 1, 1);
                 }
             });
+    }
+
+    void Renderer::addInstanceCullingPass()
+    {
+        FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
+        const uint32_t entryCount = static_cast<uint32_t>(m_drawList.size());
+        const bool pipelinesReady = std::all_of(m_instanceCullingPipelines.begin(), m_instanceCullingPipelines.end(), [](const auto& pipeline) { return pipeline != nullptr; });
+        if (entryCount == 0 || !pipelinesReady)
+            return;
+
+        const uint32_t blockCount = (entryCount + shaderio::CULL_BLOCK_SIZE - 1) / shaderio::CULL_BLOCK_SIZE;
+        ViewDrawResources& draws = resources.CameraDraws;
+        draws.VisibleInstances = m_renderGraph.CreateBuffer("Camera Visible Instances", { sizeof(uint32_t) * entryCount, NRI::BufferUsage::Storage });
+        draws.Commands = m_renderGraph.CreateBuffer("Camera Draw Commands", { sizeof(shaderio::MeshTasksIndirectCommand) * entryCount, NRI::BufferUsage::Indirect });
+        draws.Counts = m_renderGraph.CreateBuffer("Camera Draw Counts", { sizeof(shaderio::CullCounts), NRI::BufferUsage::Indirect });
+        draws.LateInstances = m_renderGraph.CreateBuffer("Camera Late Instances", { sizeof(uint32_t) * entryCount, NRI::BufferUsage::Storage });
+        draws.LateCommands = m_renderGraph.CreateBuffer("Camera Late Commands", { sizeof(shaderio::MeshTasksIndirectCommand) * entryCount, NRI::BufferUsage::Indirect });
+        const RGBuffer flags = m_renderGraph.CreateBuffer("Camera Cull Flags", { sizeof(uint32_t) * entryCount, NRI::BufferUsage::Storage });
+        const RGBuffer blocks = m_renderGraph.CreateBuffer("Camera Cull Blocks", { sizeof(shaderio::CullBlock) * blockCount, NRI::BufferUsage::Storage });
+
+        // The pyramid of the previous frame (written later this frame by the Hi-Z build).
+        addCullingDispatchPass("Instance Culling", draws, flags, blocks, entryCount, resources.CameraHiZ, m_uniformBuffers[frameIndex].get(),
+                               m_cullViewBuffers[frameIndex].get());
 
         // Visible counts for the stats, read once this frame slot finished (Renderer::readCullStats).
         const RGBuffer stats = m_renderGraph.ImportBuffer("Cull Stats Staging", m_cullStatsBuffers[frameIndex].get());
@@ -666,12 +675,8 @@ namespace Nox
             });
     }
 
-    void Renderer::addForward3DPass()
+    shaderio::PushConstantSkybox Renderer::makeSkyboxSunPush() const
     {
-        const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
-        // Debug mode 17 draws the DDGI irradiance atlas written this frame on the probe spheres.
-        const bool drawProbes = m_ddgiDebugSpheresPipeline && m_debugMode == 17 && m_frame.ddgiAdded;
-
         // The sun's disc over a procedural sky (an HDR map has its own sun in the image).
         shaderio::PushConstantSkybox skyboxSun{};
         skyboxSun.skyTransmittanceIndex = ~0u;
@@ -689,6 +694,16 @@ namespace Nox
             skyboxSun.sunCosAngularRadius = std::cos(radius);
             skyboxSun.skyAltitudeKm = glm::clamp(sky.AltitudeKm, 0.0f, 99.0f);
         }
+        return skyboxSun;
+    }
+
+    void Renderer::addForward3DPass()
+    {
+        const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
+        // Debug mode 17 draws the DDGI irradiance atlas written this frame on the probe spheres.
+        const bool drawProbes = m_ddgiDebugSpheresPipeline && m_debugMode == 17 && m_frame.ddgiAdded;
+
+        const shaderio::PushConstantSkybox skyboxSun = makeSkyboxSunPush();
 
         // Unlit & skybox & transparent geometry rendered in HDR on top of the lit scene.
         m_renderGraph.AddPass("Forward 3D", RGPassFlags::Raster,

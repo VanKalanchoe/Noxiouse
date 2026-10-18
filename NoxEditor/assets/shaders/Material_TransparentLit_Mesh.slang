@@ -191,6 +191,13 @@ FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform Pu
         Texture2D transTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.transmissionTextureIndex, 0));
         transmission *= transTex.Sample(sampLinearHandle, instance.transmissionTextureSet == 0 ? vertIn.uv0 : vertIn.uv1).r;
     }
+    // Opaque and masked surfaces drawn with this shader (the editor's extra views have no G-buffer, Renderer::addExtraViewPasses):
+    // nothing shows through, whatever the base color's alpha or the transmission says.
+    if ((pushConstant.meshletCulling & MESHLET_SHADE_OPAQUE) != 0)
+    {
+        transmission = 0.0;
+        baseColor.a = 1.0;
+    }
     float diffuseAlpha = baseColor.a * (1.0 - transmission);
     baseColor.a = diffuseAlpha;
 

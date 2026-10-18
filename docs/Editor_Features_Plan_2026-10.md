@@ -140,6 +140,29 @@ NRD, ReSTIR reservoirs, path tracer accumulation, Hi-Z) exists once, sized to th
 Exit test M1+M2: four viewports (perspective + top + front + side) each orbit / select / move independently; the
 perspective one keeps DLSS and ray tracing while the others are raster.
 
+**Built (2026-10-18, untested): M1, and M2 + M3 in their cheaper form.**
+
+- Window > Viewports: presets 1, 2 side by side, 2 stacked, 3 (big left + two stacked), 4 (2 x 2), and Viewport 2 / 3 / 4
+  on their own. The viewports dock inside a dockspace of their own (the "Viewports" area in the middle of the editor), so a
+  preset rebuilds only that area; a viewport's tab can be dragged anywhere (also out of the area) and the splitters resized.
+  Which viewports are open and their views are kept in imgui.ini (`[NoxViewports][State]`).
+- Each viewport has its own `EditorCamera`. The **active** one (the last clicked, scrolled or dragged an asset over; framed
+  in orange when several are open) is the full render with every tool: gizmo, picking, box select, placement, measure, grid,
+  shortcuts, DLSS / ray tracing / path tracing. Activating another swaps its camera in (`EditorLayer::ActivateViewport`), the
+  main render follows its size and ortho raster-only settings, and the temporal histories restart
+  (`Renderer::ResetCameraHistory`). The activating click does nothing else (no selection change).
+- The other viewports are **extra views** (`Renderer::SubmitExtraView`, `Passes/ExtraViewPasses.cpp`): their own uniforms
+  and `CullView`, frustum culling (no Hi-Z), one forward pass (opaque / masked surfaces lit by `Material_TransparentLit_Mesh`
+  with the new `MESHLET_SHADE_OPAQUE` flag, unlit, sky, transparent), tonemapping with the main view's exposure, and the 2D
+  overlay's world-space batch with their own grid (`Renderer2D::FlushWorld` / `MakeGrid`). No G-buffer, shadows, RT, DLSS
+  or history: cheap, and the active view is untouched. A resize keeps the old image on screen until the new size is drawn.
+- Camera input: the viewport a mouse button went down in keeps the mouse until all buttons are up
+  (`EditorCamera::OnUpdate(ts, acceptInput)`), so a right-click in another panel no longer flies the camera.
+
+Open: shadows in extra views (comes with item 4's ray-query lighting in the forward shader, H2), selection outline and
+gizmo in extra views, per-viewport show flags (M4), lower resolution / "realtime off" (rest of M3), the main camera
+itself is not saved between sessions.
+
 ## 5. Order
 
 F12 / F10 / F2 / F3 first parts -> user tests -> M1 -> M2 -> B1 / B2 -> A2 -> A7 -> A4 / A5 -> A3 / A6 -> A8 -> M3 / M4 -> B3.

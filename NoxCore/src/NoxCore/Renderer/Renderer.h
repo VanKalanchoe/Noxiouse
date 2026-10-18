@@ -285,6 +285,26 @@ namespace Nox
 
         Texture2D* GetSceneResource() const { return m_sceneResource.get(); }
 
+        // Extra editor views (docs/Future.md item 5: the viewports besides the active one). Each draws another camera raster only --
+        // forward-lit opaque, unlit, sky and transparent geometry, tonemapped, with the 2D overlay's world lines and its own grid -- into
+        // a texture of its own. Submit it every frame it should draw, from OnUpdate (before ImGui shows the texture). GetExtraViewTexture is
+        // the last image drawn completely (after a resize the old one, until the new size has been drawn once; null before the first).
+        // grid: the view's world grid (Renderer2D::MakeGrid), or null.
+        static constexpr uint32_t MaxExtraViews = 4;
+        void SubmitExtraView(uint32_t index, const EditorCamera& camera, NRI::Extent2D size, const shaderio::PushConstantGrid* grid);
+        Texture2D* GetExtraViewTexture(uint32_t index) const { return index < MaxExtraViews ? m_extraViews[index].Shown.get() : nullptr; }
+        // Drops a view's texture (its viewport closed).
+        void ReleaseExtraView(uint32_t index);
+        // The camera jumped (the editor's active viewport changed): the temporal histories start over from the next frame (DLSS,
+        // the denoisers, path tracer accumulation, the occlusion test's depth pyramid of the old view).
+        void ResetCameraHistory()
+        {
+            m_renderGraph.ResetHistory(DLSSHistoryKey);
+            m_renderGraph.ResetHistory(NRDHistoryKey);
+            m_renderGraph.ResetHistory("Path Tracer Accumulation");
+            m_renderGraph.ResetHistory("Camera Hi-Z");
+        }
+
         void setVSync(bool enabled);
         void onViewportSizeChange(NRI::Extent2D size);
         bool getVSync() const { return m_vSync; }
@@ -701,6 +721,14 @@ namespace Nox
         void addAnimatedBLASPass();
         // Culls the draw list for the camera view into its visible instances, indirect commands and draw counts.
         void addInstanceCullingPass();
+        // The culling dispatches of one view (the camera, or an extra view): its uniforms and CullView, the Hi-Z it tests against
+        // (none: no occlusion test).
+        void addCullingDispatchPass(const char* name, const ViewDrawResources& draws, RGBuffer flags, RGBuffer blocks, uint32_t entryCount,
+                                    RGTexture hiZ, NRI::Buffer* uniformBuffer, NRI::Buffer* cullViewBuffer);
+        // The editor's extra views (SubmitExtraView): culling, one forward raster pass, tonemapping and the world overlay each.
+        void addExtraViewPasses();
+        // After resolveFrameUniforms: each extra view's copy of the frame's uniforms with its own camera.
+        void updateExtraViewUniforms();
         // Depth pyramid of this frame's visibility depth, then phase 2: the occluded candidates against it.
         void addHiZBuildPass();
         void addInstanceCullingLatePass();
@@ -729,6 +757,8 @@ namespace Nox
         void addPathTracerPasses();
         void addDeferredLightingPass();
         void addForward3DPass();
+        // The skybox push constants of the sun's disc (procedural sky), without the uniforms and cubemap.
+        shaderio::PushConstantSkybox makeSkyboxSunPush() const;
         void addDLSSPass();
         void addEntityDepthBlitPass();
         void addPostProcessPass();
@@ -1111,6 +1141,26 @@ namespace Nox
 
         Ref<Texture2D> m_whiteTexture;
         Ref<Texture2D> m_sceneResource;
+
+        struct ExtraView
+        {
+            bool Submitted = false; // this frame (SubmitExtraView); cleared once the frame is recorded
+            bool Recorded = false;  // its passes are in this frame's graph
+            glm::mat4 View{ 1.0f };
+            glm::mat4 Projection{ 1.0f };
+            glm::vec3 Position{ 0.0f };
+            float NearClip = 0.01f;
+            bool Orthographic = false;
+            NRI::Extent2D Size{ 0, 0 };
+            bool HasGrid = false;
+            shaderio::PushConstantGrid Grid{};
+            Ref<Texture2D> Output; // LDR (Surface format) this frame draws into
+            Ref<Texture2D> Shown;  // the last texture drawn completely: what the viewport window shows
+            std::vector<std::unique_ptr<NRI::Buffer>> UniformBuffers; // per frame slot, persistently mapped
+            std::vector<void*> UniformBuffersMapped;
+            std::vector<std::unique_ptr<NRI::Buffer>> CullViewBuffers;
+        };
+        std::array<ExtraView, MaxExtraViews> m_extraViews;
 
         // Entity ID readback (entity IDs themselves are render graph textures, see Passes/FrameGraphResources.h)
         bool m_orthographic = false; // the editor camera is in an ortho view (no jitter, no upscaling, full mesh detail)

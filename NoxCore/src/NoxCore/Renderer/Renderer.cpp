@@ -3767,6 +3767,7 @@ namespace Nox
             addOverlay2DPass();
             addSelectionMaskPass();
             addOutlinePass();
+            addExtraViewPasses();
             addPresentPass();
             addPickReadbackPass();
             addTextureInspection();
@@ -3776,6 +3777,7 @@ namespace Nox
             NOX_PROFILE_SCOPE("Compile Frame Graph");
             m_renderGraph.Compile();
             resolveFrameUniforms();
+            updateExtraViewUniforms();
             // Read back only what this frame's inspector actually probes.
             m_inspectionProbePending[frameIndex] = m_frame.inspectionProbe && m_renderGraph.IsInspecting() ? 1 : 0;
         }
@@ -3790,6 +3792,18 @@ namespace Nox
             commandBuffers = m_renderGraph.Execute(frameIndex);
         }
         NOX_PROFILE_COUNTER("Command Buffers", commandBuffers.size());
+        // An extra view draws in the frames it is submitted in. What it drew is shown from the next frame on (this frame's ImGui
+        // still shows the previous texture, released once the frames in flight are done with it).
+        for (ExtraView& view : m_extraViews)
+        {
+            view.Submitted = false;
+            if (view.Recorded && view.Shown != view.Output)
+            {
+                if (view.Shown)
+                    deferAssetRelease(view.Shown);
+                view.Shown = view.Output;
+            }
+        }
         return commandBuffers;
     }
 
@@ -5282,6 +5296,102 @@ namespace Nox
     void Renderer::EndScene()
     {
         m_renderer2D->EndScene();
+    }
+
+    void Renderer::SubmitExtraView(uint32_t index, const EditorCamera& camera, NRI::Extent2D size, const shaderio::PushConstantGrid* grid)
+    {
+        if (!m_isEditor || index >= MaxExtraViews || size.width == 0 || size.height == 0)
+            return;
+
+        ExtraView& view = m_extraViews[index];
+        if (view.UniformBuffers.empty())
+        {
+            for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+            {
+                std::unique_ptr<NRI::Buffer> uniforms = m_device->createBuffer(NRI::BufferDesc{
+                    .size = sizeof(shaderio::UniformBufferObject),
+                    .usage = NRI::BufferUsage::Uniform
+                });
+                view.UniformBuffersMapped.push_back(uniforms->map(0, sizeof(shaderio::UniformBufferObject)));
+                view.UniformBuffers.push_back(std::move(uniforms));
+                view.CullViewBuffers.push_back(m_device->createBuffer(NRI::BufferDesc{
+                    .size = sizeof(shaderio::CullView),
+                    .usage = NRI::BufferUsage::Storage
+                }));
+            }
+        }
+
+        // A new size is a new texture; the old one stays on screen until the new one has been drawn (recordFrame swaps them).
+        if (!view.Output || view.Size.width != size.width || view.Size.height != size.height)
+        {
+            if (view.Output && view.Output != view.Shown)
+                deferAssetRelease(view.Output);
+            view.Output = m_device->createTexture(NRI::TextureDesc{
+                .width = size.width,
+                .height = size.height,
+                .mipLevels = 1,
+                .sampleCount = 1,
+                .usage = NRI::TextureUsage::ColorAttachment,
+                .format = NRI::ImageFormat::Surface,
+                .directFormat = UINT32_MAX
+            });
+            view.Size = size;
+        }
+
+        view.View = camera.GetViewMatrix();
+        view.Projection = camera.GetProjection();
+        view.Position = camera.GetPosition();
+        view.NearClip = camera.GetNearClip();
+        view.Orthographic = camera.IsOrthographic();
+        view.HasGrid = grid != nullptr;
+        if (grid)
+            view.Grid = *grid;
+        view.Submitted = true;
+    }
+
+    void Renderer::ReleaseExtraView(uint32_t index)
+    {
+        if (index >= MaxExtraViews)
+            return;
+        ExtraView& view = m_extraViews[index];
+        if (view.Output)
+            deferAssetRelease(view.Output);
+        if (view.Shown && view.Shown != view.Output)
+            deferAssetRelease(view.Shown);
+        view.Output = nullptr;
+        view.Shown = nullptr;
+        view.Size = { 0, 0 };
+        view.Submitted = false;
+    }
+
+    void Renderer::updateExtraViewUniforms()
+    {
+        for (ExtraView& view : m_extraViews)
+        {
+            if (!view.Recorded)
+                continue;
+
+            // The frame's uniforms (lights, scene tables, environment, the bindless slots resolveFrameUniforms just wrote) with
+            // this view's camera: no jitter, no history (previous = current), the live frustum even while culling is frozen.
+            shaderio::UniformBufferObject uniforms = uniformData;
+            uniforms.view = uniforms.prevView = uniforms.frozenView = view.View;
+            uniforms.proj = uniforms.nonJitteredProj = uniforms.prevProj = uniforms.frozenProj = view.Projection;
+            uniforms.invViewProj = InvertViewProjection(view.Projection, view.View);
+            uniforms.cameraWorldPos = uniforms.frozenCameraWorldPos = glm::vec4(view.Position, 0.0f);
+            uniforms.frustum = uniforms.frozenFrustum = shaderio::Frustum{ view.Projection * view.View };
+            uniforms.jitterOffset = glm::vec2(0.0f);
+            uniforms.prevJitterOffset = glm::vec2(0.0f);
+            uniforms.lodErrorThreshold = m_lodErrorPixels / static_cast<float>(std::max(view.Size.height, 1u));
+            uniforms.lodCameraNear = view.NearClip;
+            uniforms.lodFullDetail = (m_lodFullDetail || view.Orthographic) ? 1u : 0u;
+            // Texture streaming feedback and cluster statistics are the camera's.
+            uniforms.mipFeedbackReference = 0;
+            uniforms.clusterStatsReference = 0;
+            // The atlases are only read (and declared) when DDGI ran this frame.
+            if (!m_frame.ddgiAdded)
+                uniforms.enableDDGI = 0;
+            memcpy(view.UniformBuffersMapped[frameIndex], &uniforms, sizeof(shaderio::UniformBufferObject));
+        }
     }
 
     bool Renderer::BindGpuScene(uint64_t sceneID)

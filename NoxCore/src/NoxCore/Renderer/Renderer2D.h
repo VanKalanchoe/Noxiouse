@@ -60,6 +60,9 @@ namespace Nox
         // output pixels instead.
         void Update(uint32_t currentImage, const shaderio::UniformBufferObject& frameUniforms);
         void Flush(NRI::CommandBuffer& commandBuffer, const NRI::Buffer& currentUniformBuffer, uint32_t frameIndex);
+        // The world-space batch alone (no screen-space content) with the given camera uniforms and grid (none when null): the
+        // editor's extra views draw the same lines, sprites and text with their own camera (Renderer::addExtraViewPasses).
+        void FlushWorld(NRI::CommandBuffer& commandBuffer, const NRI::Buffer& currentUniformBuffer, uint32_t frameIndex, const shaderio::PushConstantGrid* grid);
         void EndFrame();
 
         // Screen space: DrawQuad / DrawString calls between these two record positions in output pixels (origin top left,
@@ -101,6 +104,8 @@ namespace Nox
         // planeAxis: the plane's normal (1 = the ground, y = 0); focus: where the grid is centered; cameraDistance: how far the camera is
         // from the plane (the ortho size in an ortho view).
         void DrawGrid(const glm::vec3& focus, float cell, int planeAxis, float cameraDistance);
+        // DrawGrid's numbers without drawing it (an extra view's own grid, Renderer::SubmitExtraView).
+        static shaderio::PushConstantGrid MakeGrid(const glm::vec3& focus, float cell, int planeAxis, float cameraDistance);
         void DrawRect(const glm::vec3& position, const glm::vec2& size, const glm::vec4& color, int entityID = -1);
         void DrawRect(const glm::mat4& transform, const glm::vec4& color, int entityID = -1);
         

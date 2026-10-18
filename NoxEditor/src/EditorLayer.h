@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 #include <functional>
 #include <unordered_map>
 
@@ -132,6 +133,26 @@ namespace Nox
         void UpdatePrefabModeDirty();
         void UI_PrefabExitPrompt();
 
+        // Multi-viewport (docs/Future.md item 5). The viewports dock inside a dockspace of their own ("Viewports", in the middle of the
+        // editor), so a layout preset can rebuild just that area: 1, 2 side by side, 2 stacked, 3, or 4 (2x2). They can still be dragged
+        // anywhere and resized. The active viewport (the last one clicked or scrolled in) is the full render and takes every tool;
+        // the others draw their own camera raster only (Renderer::SubmitExtraView).
+        enum class ViewportLayout : int { One, TwoSideBySide, TwoStacked, Three, Four };
+        void UI_Viewports();
+        void UI_ActiveViewport();
+        void UI_ExtraViewport(int index);
+        void ApplyViewportLayout(ViewportLayout layout, ImGuiID dockSpace, ImVec2 size);
+        // Makes a viewport the active one: its camera becomes m_EditorCamera (the old one goes back into its slot) and the main render
+        // follows it (size, raster-only settings of an ortho view).
+        void ActivateViewport(int index);
+        void OpenViewport(int index);
+        int HoveredViewport() const;
+        int OpenViewportCount() const;
+        // The extra views' renders for this frame (Renderer::SubmitExtraView), with their own grid.
+        void SubmitExtraViewports(Timestep ts);
+        // Ortho views are raster only: entering one turns DLSS, ray tracing and path tracing off, leaving it puts them back.
+        void SyncOrthoRenderSettings(bool wasOrthographic);
+
         // Any open node-graph editor window focused or hovered: the scene's shortcuts and picking must ignore input.
         bool AnyNodeGraphEditorWantsInput() const;
         bool AnyNodeGraphEditorHovered() const; // mouse only: focus alone must not swallow a click elsewhere
@@ -197,8 +218,25 @@ namespace Nox
         
         bool m_PrimaryCamera = true;
         
-        EditorCamera m_EditorCamera;
+        EditorCamera m_EditorCamera; // the active viewport's camera
         
+        static constexpr int kMaxViewports = 4;
+        struct ViewportSlot
+        {
+            const char* Title = "Viewport";
+            bool Open = false;
+            bool CameraSet = false;  // the camera was given its starting view (a copy of the active one, in the slot's default view)
+            EditorCamera Camera;     // while the slot is not the active one
+            glm::vec2 Bounds[2] = { glm::vec2(0.0f), glm::vec2(0.0f) };
+            glm::uvec2 Size = { 0, 0 };
+            bool Hovered = false;
+            bool Submitted = false;  // its image was submitted to the renderer this frame (an extra view)
+        };
+        std::array<ViewportSlot, kMaxViewports> m_Viewports;
+        int m_ActiveViewport = 0;
+        int m_MouseCaptureViewport = -1; // the viewport a mouse button went down in, until every button is up again
+        int m_PendingViewportLayout = -1; // a Window > Viewports preset, applied before the viewport dockspace is drawn
+
         bool m_ViewportFocused = false, m_ViewportHovered = false;
         glm::uvec2 m_ViewportSize = { 0.0f, 0.0f };
         glm::uvec2 lastViewportExtent = {0, 0};

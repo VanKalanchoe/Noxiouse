@@ -109,7 +109,7 @@ namespace Nox
 		return speed;
 	}
 
-	void EditorCamera::OnUpdate(Timestep ts)
+	void EditorCamera::OnUpdate(Timestep ts, bool acceptInput)
 	{
 		if (!m_TargetsValid)
 		{
@@ -122,7 +122,7 @@ namespace Nox
 
 		const bool altHeld = Input::IsKeyPressed(SDL_SCANCODE_LALT);
 		// Godot / UE5: plain right mouse button (no Alt) flies with WASD instead of Blender-style Alt+drag orbiting.
-		const bool flying = !altHeld && !IsOrthographic() && Input::IsMouseButtonPressed(SDL_BUTTON_RIGHT);
+		const bool flying = !altHeld && !IsOrthographic() && Input::IsMouseButtonPressed(SDL_BUTTON_RIGHT) && (acceptInput || m_WasFlying);
 
 		// Where the click happened: restored on release, so the cursor reappears exactly where it went missing instead of
 		// wherever it ended up. The cursor's ICON is still hidden through ImGui's own cursor state (EditorLayer's
@@ -171,7 +171,7 @@ namespace Nox
 		}
 		else
 		{
-			if (altHeld)
+			if (altHeld && acceptInput)
 			{
 				if (Input::IsMouseButtonPressed(SDL_BUTTON_MIDDLE))
 					MousePan(delta);

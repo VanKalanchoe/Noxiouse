@@ -1,6 +1,8 @@
 // Final passes: ImGui / present to the swapchain, the entity-picking readback copy and render graph texture inspection.
 #include "NoxCore/Renderer/Renderer.h"
 
+#include <array>
+
 #include "FrameGraphResources.h"
 
 namespace Nox
@@ -9,11 +11,21 @@ namespace Nox
     {
         const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
 
+        // The editor's extra viewports show their own images (addExtraViewPasses draws them; importing again returns the same handle).
+        std::array<RGTexture, MaxExtraViews> extraViewImages{};
+        for (uint32_t index = 0; index < MaxExtraViews; ++index)
+        {
+            if (m_extraViews[index].Shown)
+                extraViewImages[index] = m_renderGraph.ImportTexture("Extra View Image", m_extraViews[index].Shown.get());
+        }
+
         // Editor: ImGui (its viewport window shows the scene image). Runtime: fullscreen present of the scene image.
         m_renderGraph.AddPass("ImGui / Present Pass", RGPassFlags::Raster,
             [&](RGBuilder& builder)
             {
                 builder.Read(resources.Scene);
+                for (const RGTexture image : extraViewImages)
+                    ReadIfValid(builder, image);
                 // The image arrives from an Undefined transition (contents discarded) and ImGui / the present triangle cover
                 // all of it: clear, never load.
                 builder.SwapchainTarget(*m_swapChain, m_frame.imageIndex, NRI::LoadOP::clear, NRI::StoreOP::store);

@@ -48,6 +48,48 @@ namespace Nox
         constexpr float kScaleSnaps[] = { 0.1f, 0.25f, 0.5f, 1.0f };
     }
 
+    namespace
+    {
+        constexpr const char* kViewModeNames[] = { "Perspective", "Top", "Bottom", "Front", "Back", "Left", "Right" };
+
+        // Which viewports were open and their views, kept in imgui.ini next to the layout they dock into ("[NoxViewports][State]").
+        // Static, not the layer's: ImGui writes the file once more when its context goes away, after the layer.
+        struct ViewportIniState
+        {
+            bool Loaded = false;
+            bool Open[4] = { true, false, false, false };
+            int View[4] = { 0, 1, 3, 6 };
+        };
+        ViewportIniState s_ViewportIni;
+
+        void RegisterViewportIniHandler()
+        {
+            ImGuiSettingsHandler handler;
+            handler.TypeName = "NoxViewports";
+            handler.TypeHash = ImHashStr("NoxViewports");
+            handler.ReadOpenFn = [](ImGuiContext*, ImGuiSettingsHandler*, const char*) -> void* { return &s_ViewportIni; };
+            handler.ReadLineFn = [](ImGuiContext*, ImGuiSettingsHandler*, void*, const char* line)
+            {
+                int index = 0, open = 0, view = 0;
+                if (sscanf(line, "Viewport%d=%d,%d", &index, &open, &view) == 3 && index >= 0 && index < 4 &&
+                    view >= 0 && view <= static_cast<int>(EditorViewMode::Right))
+                {
+                    s_ViewportIni.Open[index] = index == 0 || open != 0;
+                    s_ViewportIni.View[index] = view;
+                    s_ViewportIni.Loaded = true;
+                }
+            };
+            handler.WriteAllFn = [](ImGuiContext*, ImGuiSettingsHandler* self, ImGuiTextBuffer* buffer)
+            {
+                buffer->appendf("[%s][State]\n", self->TypeName);
+                for (int index = 0; index < 4; ++index)
+                    buffer->appendf("Viewport%d=%d,%d\n", index, s_ViewportIni.Open[index] ? 1 : 0, s_ViewportIni.View[index]);
+                buffer->append("\n");
+            };
+            ImGui::AddSettingsHandler(&handler);
+        }
+    }
+
     EditorLayer::EditorLayer() : Layer("EditorLayer")
     {
         NOX_INFO("EditorLayer Start");
@@ -119,6 +161,13 @@ namespace Nox
         }
 
         m_EditorCamera = EditorCamera(30.0f, 1.778f, 0.01f, 1000.0f);
+        constexpr const char* kViewportTitles[kMaxViewports] = { "Viewport", "Viewport 2", "Viewport 3", "Viewport 4" };
+        for (int index = 0; index < kMaxViewports; ++index)
+            m_Viewports[index].Title = kViewportTitles[index];
+        m_Viewports[0].Open = true;
+        m_Viewports[0].CameraSet = true;
+        // Before ImGui's first frame, which reads imgui.ini.
+        RegisterViewportIniHandler();
 
         Project::GetActive()->GetEditorAssetManager()->Init();
 
@@ -145,6 +194,19 @@ namespace Nox
     {
         //std::println("{}", event.ToString());
 
+        // A click or a scroll in another viewport makes it the active one first, so its camera and the tools get the input. Not while
+        // a button is held: a drag that began in the active viewport keeps it.
+        bool activatedViewport = false;
+        if ((event.GetEventType() == EventType::MouseButtonPressed || event.GetEventType() == EventType::MouseScrolled) && m_MouseCaptureViewport < 0)
+        {
+            const int hovered = HoveredViewport();
+            if (hovered >= 0 && hovered != m_ActiveViewport)
+            {
+                ActivateViewport(hovered);
+                activatedViewport = true;
+            }
+        }
+
         if (m_SceneState == SceneState::Edit && m_ViewportHovered)
             m_EditorCamera.OnEvent(event);
 
@@ -156,7 +218,9 @@ namespace Nox
             return false;
         });
         dispatcher.Dispatch<KeyPressedEvent>(Nox_BIND_EVENT_FN(EditorLayer::OnKeyPressed));
-        dispatcher.Dispatch<MouseButtonPressedEvent>(Nox_BIND_EVENT_FN(EditorLayer::OnMouseButtonPressed));
+        // The click that activated a viewport only does that (its picking under the cursor is not there yet).
+        if (!activatedViewport)
+            dispatcher.Dispatch<MouseButtonPressedEvent>(Nox_BIND_EVENT_FN(EditorLayer::OnMouseButtonPressed));
     }
 
     void EditorLayer::OnUpdate(Timestep ts)
@@ -227,14 +291,14 @@ namespace Nox
                         /*m_CameraController.OnUpdate(ts);*/
                     }
 
-                    m_EditorCamera.OnUpdate(ts);
+                    m_EditorCamera.OnUpdate(ts, m_MouseCaptureViewport == m_ActiveViewport);
 
                     m_ActiveScene->OnUpdateEditor(ts, m_EditorCamera);
                     break;
                 }
             case SceneState::Simulate:
                 {
-                    m_EditorCamera.OnUpdate(ts);
+                    m_EditorCamera.OnUpdate(ts, m_MouseCaptureViewport == m_ActiveViewport);
 
                     m_ActiveScene->OnUpdateSimulation(ts, m_EditorCamera);
                     break;
@@ -298,6 +362,8 @@ namespace Nox
         }
 
         OnOverlayRender();
+        // The other viewports' cameras, drawn after the main view this frame.
+        SubmitExtraViewports(ts);
 
         {
             NOX_PROFILE_SCOPE("Asset Manager Update");
@@ -347,12 +413,19 @@ namespace Nox
         style.WindowMinSize.y = minWinSizeY;
 
         // Docking layout, must be done only if it doesn't exist
-        if (!ImGui::DockBuilderGetNode(dockID)->IsSplitNode() && !ImGui::FindWindowByName("Viewport"))
+        if (!ImGui::DockBuilderGetNode(dockID)->IsSplitNode() && !ImGui::FindWindowByName("Viewports"))
         {
-            ImGui::DockBuilderDockWindow("Viewport", dockID); // Dock "Viewport" to  central node
+            ImGui::DockBuilderDockWindow("Viewports", dockID); // Dock the viewport area (UI_Viewports) to the central node
             ImGui::DockBuilderGetCentralNode(dockID)->LocalFlags |= ImGuiDockNodeFlags_NoTabBar; // Remove "Tab" from the central node
             ImGuiID leftID = ImGui::DockBuilderSplitNode(dockID, ImGuiDir_Left, 0.2f, nullptr, &dockID); // Split the central node
             ImGui::DockBuilderDockWindow("Settings", leftID); // Dock "Settings" to the left node
+        }
+        // A layout saved before the viewport area existed (the one "Viewport" window sat in the central node): the area takes that
+        // place, and UI_Viewports moves the viewport into it (the one-viewport layout, applied while the area's dockspace is new).
+        else if (!ImGui::FindWindowByName("Viewports") && !ImGui::FindWindowSettingsByID(ImHashStr("Viewports")))
+        {
+            if (ImGuiDockNode* central = ImGui::DockBuilderGetCentralNode(dockID))
+                ImGui::DockBuilderDockWindow("Viewports", central->ID);
         }
 
         // [optional] Show the menu bar
@@ -428,6 +501,37 @@ namespace Nox
                 if (ImGui::MenuItem("Render Graph", nullptr, &renderGraphOpen))
                     m_RenderGraphPanel->SetOpen(renderGraphOpen);
 
+                // Up to four viewports, each with its own camera (docs/Future.md item 5). A layout snaps them into place; a
+                // viewport's tab can then be dragged anywhere and the splitters resized.
+                if (ImGui::BeginMenu("Viewports"))
+                {
+                    if (ImGui::MenuItem("1 Viewport"))
+                        m_PendingViewportLayout = static_cast<int>(ViewportLayout::One);
+                    if (ImGui::MenuItem("2 Side by Side"))
+                        m_PendingViewportLayout = static_cast<int>(ViewportLayout::TwoSideBySide);
+                    if (ImGui::MenuItem("2 Stacked"))
+                        m_PendingViewportLayout = static_cast<int>(ViewportLayout::TwoStacked);
+                    if (ImGui::MenuItem("3 Viewports"))
+                        m_PendingViewportLayout = static_cast<int>(ViewportLayout::Three);
+                    if (ImGui::MenuItem("4 Viewports (2 x 2)"))
+                        m_PendingViewportLayout = static_cast<int>(ViewportLayout::Four);
+                    ImGui::Separator();
+                    for (int index = 1; index < kMaxViewports; ++index)
+                    {
+                        bool open = m_Viewports[index].Open;
+                        if (ImGui::MenuItem(m_Viewports[index].Title, nullptr, &open))
+                        {
+                            if (open)
+                                OpenViewport(index);
+                            else
+                                m_Viewports[index].Open = false;
+                        }
+                    }
+                    ImGui::Separator();
+                    ImGui::TextDisabled("Click a viewport to use it; drag its tab to move it");
+                    ImGui::EndMenu();
+                }
+
                 // Temporary entry point (docs/Animation_Graph_Architecture_Plan_2026.md Step 3); Step 4 replaces
                 // this with double-clicking a graph asset reference.
                 if (ImGui::BeginMenu("Animation Graphs"))
@@ -473,358 +577,7 @@ namespace Nox
 
         /* END Docking */
 
-        // We define "viewport" with no padding an retrieve the rendering area
-        // Using the dock "Viewport", this sets the window to cover the entire central viewport
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-        if (ImGui::Begin("Viewport"))
-        {
-            auto viewportMinRegion = ImGui::GetWindowContentRegionMin();
-            auto viewportMaxRegion = ImGui::GetWindowContentRegionMax();
-            auto viewportOffset = ImGui::GetWindowPos();
-            m_ViewportBounds[0] = {viewportMinRegion.x + viewportOffset.x, viewportMinRegion.y + viewportOffset.y};
-            m_ViewportBounds[1] = {viewportMaxRegion.x + viewportOffset.x, viewportMaxRegion.y + viewportOffset.y};
-
-            m_ViewportFocused = ImGui::IsWindowFocused();
-            m_ViewportHovered = ImGui::IsWindowHovered();
-
-            Application::Get().GetImGuiLayer()->BlockEvents(!m_ViewportHovered);
-
-            ImVec2 viewportPanelSize = ImGui::GetContentRegionAvail();
-            m_ViewportSize = {viewportPanelSize.x, viewportPanelSize.y};
-
-            // A cancelled drag has no delivery callback, so remove its temporary entity here.
-            if (m_PlacementPreview.Active && !ImGui::IsDragDropActive())
-            {
-                if (m_SceneHierarchyPanel.GetSelectedEntity() == m_PlacementPreview.Root)
-                    m_SceneHierarchyPanel.ClearSelection();
-                if (m_PlacementPreview.Root)
-                    m_ActiveScene->DestroyEntity(m_PlacementPreview.Root);
-                m_PlacementPreview = {};
-            }
-
-            auto* texture = m_Renderer->GetSceneResource();
-            if (texture)
-            {
-                auto textureID = texture->getImTextureID();
-                if (textureID)
-                {
-                    // !!! This is where the RenderTarget image is displayed !!!
-                    // Whole pixels, like the render target: a fractional size resamples the image by a fraction of a pixel.
-                    ImGui::Image(textureID, ImVec2(std::floor(viewportPanelSize.x), std::floor(viewportPanelSize.y)));
-                }
-            }
-               ImVec2 mousePos = ImGui::GetMousePos();
-
-            // Only initiate box select when dragging on viewport and not using gizmos/alt-orbit
-            if (m_ViewportHovered && !ImGuizmo::IsUsing() && !Input::IsKeyPressed(SDL_SCANCODE_LALT))
-            {
-                if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
-                {
-                    m_BoxSelectStart = { mousePos.x, mousePos.y };
-                    m_BoxSelectEnd = m_BoxSelectStart;
-                }
-
-                if (ImGui::IsMouseDragging(ImGuiMouseButton_Left, 4.0f) && !m_IsBoxSelecting)
-                {
-                    if (!ImGuizmo::IsOver())
-                    {
-                        m_IsBoxSelecting = true;
-                    }
-                }
-            }
-
-            // Draw visual marquee box using ImGui DrawList while dragging
-            if (m_IsBoxSelecting)
-            {
-                m_BoxSelectEnd = { mousePos.x, mousePos.y };
-
-                ImDrawList* drawList = ImGui::GetWindowDrawList();
-
-                ImVec2 pMin = ImVec2(std::min(m_BoxSelectStart.x, m_BoxSelectEnd.x), std::min(m_BoxSelectStart.y, m_BoxSelectEnd.y));
-                ImVec2 pMax = ImVec2(std::max(m_BoxSelectStart.x, m_BoxSelectEnd.x), std::max(m_BoxSelectStart.y, m_BoxSelectEnd.y));
-
-                // Semi-transparent box fill
-                drawList->AddRectFilled(pMin, pMax, IM_COL32(230, 140, 30, 40));
-                // Solid border outline
-                drawList->AddRect(pMin, pMax, IM_COL32(255, 160, 40, 220), 0.0f, 0, 1.5f);
-            }
-
-            // Commit selection when mouse button is released
-            if (m_IsBoxSelecting && ImGui::IsMouseReleased(ImGuiMouseButton_Left))
-            {
-                m_IsBoxSelecting = false;
-
-                bool shift = Input::IsKeyPressed(SDL_SCANCODE_LSHIFT) || Input::IsKeyPressed(SDL_SCANCODE_RSHIFT);
-                bool ctrl = Input::IsKeyPressed(SDL_SCANCODE_LCTRL) || Input::IsKeyPressed(SDL_SCANCODE_RCTRL);
-
-                // If neither Shift nor Ctrl is held, clear previous selection
-                if (!shift && !ctrl)
-                {
-                    m_SceneHierarchyPanel.ClearSelection();
-                }
-
-                // Read all unique entity IDs directly from the GPU entity resolve texture
-                std::vector<int32_t> pickedIDs = m_Renderer->getPickedEntityIDs();
-
-                for (int32_t id : pickedIDs)
-                {
-                    if (id >= 0)
-                    {
-                        Entity entity{ static_cast<entt::entity>(id), m_ActiveScene.get() };
-                        if (entity)
-                        {
-                            if (ctrl)
-                            {
-                                m_SceneHierarchyPanel.ToggleSelectedEntity(entity);
-                            }
-                            else if (!m_SceneHierarchyPanel.IsSelected(entity))
-                            {
-                                auto& list = const_cast<std::vector<Entity>&>(m_SceneHierarchyPanel.GetSelectedEntities());
-                                list.push_back(entity);
-                            }
-                        }
-                    }
-                }
-            }
-
-            if (ImGui::BeginDragDropTarget())
-            {
-                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(
-                        "CONTENT_BROWSER_ITEM", ImGuiDragDropFlags_AcceptBeforeDelivery))
-                {
-                    AssetHandle handle = *(const AssetHandle*)payload->Data;
-                    auto type = AssetManager::GetAssetType(handle);
-                    if (type == AssetType::Scene && payload->Delivery)
-                        OpenScene(handle);
-                    else if (type == AssetType::Mesh || type == AssetType::StaticMesh || type == AssetType::MeshSource || type == AssetType::Prefab)
-                    {
-                        if (!m_PlacementPreview.Active || m_PlacementPreview.Handle != handle)
-                        {
-                            if (m_PlacementPreview.Active &&
-                                m_SceneHierarchyPanel.GetSelectedEntity() == m_PlacementPreview.Root)
-                            {
-                                m_SceneHierarchyPanel.ClearSelection();
-                            }
-                            if (m_PlacementPreview.Active && m_PlacementPreview.Root)
-                                m_ActiveScene->DestroyEntity(m_PlacementPreview.Root);
-                            m_PlacementPreview = {};
-
-                            // The model instance appears at once; its nodes spawn once the model has loaded (and
-                            // been cooked, on a first import) in the background (§5.11.5).
-                            const AssetMetadata& metadata = Project::GetActive()->GetEditorAssetManager()->GetMetadata(handle);
-                            std::string entityName = metadata.FilePath.filename().stem().string();
-                            if (entityName.empty())
-                                entityName = "Model";
-                            Entity root = m_ActiveScene->CreateEntity(entityName);
-                            if (type == AssetType::Prefab)
-                            {
-                                auto& prefabInstance = root.AddComponent<PrefabInstanceComponent>();
-                                prefabInstance.Prefab = handle;
-                                prefabInstance.InitTransform = true;
-                            }
-                            else
-                                root.AddComponent<ModelInstanceComponent>().Model = handle;
-                            // A mesh's import scale (static or skeletal) is baked into its cooked geometry, bind pose and animation
-                            // clips (MeshImporter::ApplyImportScale / ApplySkeletonScale / ApplyAnimationScale, like Unreal's Import
-                            // Uniform Scale): the entity starts at Scale 1.0, "as authored".
-                            AssetManager::RequestAsset(handle);
-                            m_SceneHierarchyPanel.SetSelectedEntity(root);
-                            m_PlacementPreview.Root = root;
-
-                            m_PlacementPreview.Handle = handle;
-                            if (m_PlacementPreview.Root)
-                            {
-                                m_PlacementPreview.InitialTranslation =
-                                    m_PlacementPreview.Root.GetComponent<TransformComponent>().Translation;
-                            }
-                            m_PlacementPreview.Active = static_cast<bool>(m_PlacementPreview.Root);
-                        }
-
-                        if (m_PlacementPreview.Active && m_PlacementPreview.Root)
-                        {
-                            ImVec2 imguiMouse = ImGui::GetMousePos();
-                            glm::vec2 mouse = {
-                                imguiMouse.x - m_ViewportBounds[0].x,
-                                imguiMouse.y - m_ViewportBounds[0].y
-                            };
-                            glm::vec2 viewportSize = m_ViewportBounds[1] - m_ViewportBounds[0];
-
-                            if (viewportSize.x > 0.0f && viewportSize.y > 0.0f)
-                            {
-                                glm::vec2 ndc = {
-                                    (mouse.x / viewportSize.x) * 2.0f - 1.0f,
-                                    1.0f - (mouse.y / viewportSize.y) * 2.0f
-                                };
-
-                                glm::mat4 inverseViewProjection = glm::inverse(
-                                    m_EditorCamera.GetGizmoProjection() * m_EditorCamera.GetGizmoView());
-                                glm::vec4 nearPoint = inverseViewProjection * glm::vec4(ndc, -1.0f, 1.0f);
-                                glm::vec4 farPoint = inverseViewProjection * glm::vec4(ndc, 1.0f, 1.0f);
-                                nearPoint /= nearPoint.w;
-                                farPoint /= farPoint.w;
-
-                                glm::vec3 rayOrigin = glm::vec3(nearPoint);
-                                glm::vec3 rayDirection = glm::normalize(glm::vec3(farPoint - nearPoint));
-
-                                // Keep the preview on a plane facing the editor camera. A horizontal
-                                // ground plane becomes parallel to the ray in a level side view.
-                                glm::vec3 planeNormal = m_EditorCamera.GetForwardDirection();
-                                float rayPlaneDenominator = glm::dot(rayDirection, planeNormal);
-                                if (std::abs(rayPlaneDenominator) > 0.0001f)
-                                {
-                                    float distance = glm::dot(
-                                        m_PlacementPreview.InitialTranslation - rayOrigin,
-                                        planeNormal
-                                    ) / rayPlaneDenominator;
-                                    if (distance >= 0.0f)
-                                    {
-                                        auto& transform = m_PlacementPreview.Root.GetComponent<TransformComponent>();
-                                        transform.Translation = SnapLocation(rayOrigin + rayDirection * distance);
-                                        m_PlacementPreview.Root.MarkTransformDirty();
-                                    }
-                                }
-                            }
-
-                            if (payload->Delivery)
-                            {
-                                m_SceneHierarchyPanel.SetSelectedEntity(m_PlacementPreview.Root);
-                                m_PlacementPreview = {};
-                            }
-                        }
-                    }
-                }
-
-                // Several assets dragged together (Ctrl+A in the Content Browser): every model lands under one group at the
-                // drop point, each at the place its file had it (per-mesh assets carry the file's instance transforms).
-                if (const ImGuiPayload* multiPayload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEMS"))
-                {
-                    const size_t count = multiPayload->DataSize / sizeof(AssetHandle);
-                    const AssetHandle* handles = static_cast<const AssetHandle*>(multiPayload->Data);
-
-                    glm::vec3 dropPoint(0.0f);
-                    const glm::vec2 viewportSize = m_ViewportBounds[1] - m_ViewportBounds[0];
-                    if (viewportSize.x > 0.0f && viewportSize.y > 0.0f)
-                    {
-                        const ImVec2 imguiMouse = ImGui::GetMousePos();
-                        const glm::vec2 ndc = {
-                            ((imguiMouse.x - m_ViewportBounds[0].x) / viewportSize.x) * 2.0f - 1.0f,
-                            1.0f - ((imguiMouse.y - m_ViewportBounds[0].y) / viewportSize.y) * 2.0f
-                        };
-                        const glm::mat4 inverseViewProjection = glm::inverse(m_EditorCamera.GetGizmoProjection() * m_EditorCamera.GetGizmoView());
-                        glm::vec4 nearPoint = inverseViewProjection * glm::vec4(ndc, -1.0f, 1.0f);
-                        glm::vec4 farPoint = inverseViewProjection * glm::vec4(ndc, 1.0f, 1.0f);
-                        nearPoint /= nearPoint.w;
-                        farPoint /= farPoint.w;
-                        const glm::vec3 rayOrigin = glm::vec3(nearPoint);
-                        const glm::vec3 rayDirection = glm::normalize(glm::vec3(farPoint - nearPoint));
-
-                        // Same plane as a single drop: through the origin, facing the editor camera.
-                        const glm::vec3 planeNormal = m_EditorCamera.GetForwardDirection();
-                        const float denominator = glm::dot(rayDirection, planeNormal);
-                        if (std::abs(denominator) > 0.0001f)
-                        {
-                            const float distance = glm::dot(-rayOrigin, planeNormal) / denominator;
-                            if (distance >= 0.0f)
-                                dropPoint = SnapLocation(rayOrigin + rayDirection * distance);
-                        }
-                    }
-
-                    // Like Unreal: no group entity, no folder -- every piece lands at the top level of the outliner.
-                    PlaceAssets(std::vector<AssetHandle>(handles, handles + count), dropPoint, std::string());
-                }
-                ImGui::EndDragDropTarget();
-            }
-
-            // Gizmos
-            //maybe be a callback you subscribe to instead
-            Entity selectedEntity = m_SceneHierarchyPanel.GetSelectedEntity();
-            if (selectedEntity && m_GizmoType != -1)
-            {
-                ImGuizmo::SetOrthographic(m_EditorCamera.IsOrthographic());
-                ImGuizmo::SetDrawlist();
-
-                ImGuizmo::SetRect(m_ViewportBounds[0].x, m_ViewportBounds[0].y, m_ViewportBounds[1].x - m_ViewportBounds[0].x, m_ViewportBounds[1].y - m_ViewportBounds[0].y);
-
-                // Camera
-
-                // Runtime camera from entity
-                // auto cameraEntity = m_ActiveScene->GetPrimaryCameraEntity();
-                // const auto& camera = cameraEntity.GetComponent<CameraComponent>().Camera;
-                // const glm::mat4& cameraProjection = camera.GetProjection();
-                // glm::mat4 cameraView = glm::inverse(cameraEntity.GetComponent<TransformComponent>().GetTransform());
-
-                // Editor camera
-                const glm::mat4& cameraProjection = m_EditorCamera.GetGizmoProjection();
-                glm::mat4 cameraView = m_EditorCamera.GetGizmoView();
-
-                // Grab the WORLD transform for ImGuizmo
-                glm::mat4 worldTransform = selectedEntity.GetComponent<WorldTransformComponent>().WorldMatrix;
-
-                // Snapping
-                // The toolbar switch, inverted while Ctrl is held; the steps are the ones chosen there.
-                const bool snap = m_SnapEnabled != Input::IsKeyPressed(SDL_SCANCODE_LCTRL);
-                float snapValue = LocationSnapWorldUnits();
-                if (m_GizmoType == ImGuizmo::OPERATION::ROTATE)
-                    snapValue = kRotationSnaps[m_RotationSnapIndex];
-                else if (m_GizmoType == ImGuizmo::OPERATION::SCALE)
-                    snapValue = kScaleSnaps[m_ScaleSnapIndex];
-
-                float snapValues[3] = {snapValue, snapValue, snapValue};
-
-                glm::mat4 deltaMatrix(1.0f);
-                const glm::mat4 beforeManipulate = worldTransform;
-
-                ImGuizmo::Manipulate(glm::value_ptr(cameraView), glm::value_ptr(cameraProjection),
-                                     static_cast<ImGuizmo::OPERATION>(m_GizmoType), ImGuizmo::LOCAL,
-                                     glm::value_ptr(worldTransform), glm::value_ptr(deltaMatrix), snap ? snapValues : nullptr);
-
-                // Snapping feedback while a translation is dragged (the drag's start is the pose in its first frame).
-                const bool usingGizmo = ImGuizmo::IsUsing();
-                if (usingGizmo && !m_GizmoWasUsing)
-                    m_GizmoDragStart = beforeManipulate;
-                m_GizmoWasUsing = usingGizmo;
-                if (usingGizmo && snap && m_GizmoType == ImGuizmo::OPERATION::TRANSLATE)
-                    DrawTranslationSnapFeedback(cameraView, cameraProjection, worldTransform);
-
-                if (ImGuizmo::IsUsing())
-                {
-                    const auto& selectedEntities = m_SceneHierarchyPanel.GetSelectedEntities();
-                    if (selectedEntities.size() > 1)
-                    {
-                        for (auto entity : selectedEntities)
-                        {
-                            if (!entity) continue;
-
-                            // If this entity's parent is ALSO selected, skip it (the parent moving will already move it)
-                            if (entity.HasComponent<RelationshipComponent>())
-                            {
-                                UUID parentUUID = entity.GetComponent<RelationshipComponent>().Parent;
-                                if (parentUUID != 0)
-                                {
-                                    Entity parent = m_ActiveScene->GetEntityByUUID(parentUUID);
-                                    if (parent && m_SceneHierarchyPanel.IsSelected(parent))
-                                        continue;
-                                }
-                            }
-
-                            glm::mat4 currentWorld = entity.GetComponent<WorldTransformComponent>().WorldMatrix;
-                            entity.SetWorldTransform(deltaMatrix * currentWorld);
-                        }
-                    }
-                    else
-                    {
-                        // One single line does all the math, finds the parent, and marks it dirty!
-                        selectedEntity.SetWorldTransform(worldTransform);
-                    }
-                }
-            }
-
-            UI_MeasureOverlay();
-
-            ImGui::End(); // End viewport
-            ImGui::PopStyleVar();
-        }
-        UI_ViewportOverlay();
+        UI_Viewports();
 
         // Extra ImGui windows can be added in OnImGuiRender() layer, like the demo window.
         // ImGui::ShowDemoWindow();
@@ -2245,8 +1998,691 @@ namespace Nox
     }
 
     // The snap switch and steps, floating at the top left of the viewport (its own window: a click on it is not a click in the scene).
+
+    void EditorLayer::UI_Viewports()
+    {
+        // The area the viewports dock into: a window in the middle of the editor with a dockspace of its own, so a layout preset
+        // rebuilds only this area and the other panels keep their places.
+        const ImGuiID viewportDockSpace = ImHashStr("NoxViewportDockSpace");
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+        ImGui::Begin("Viewports", nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoCollapse);
+        ImGui::PopStyleVar();
+        if (m_PendingViewportLayout >= 0 || !ImGui::DockBuilderGetNode(viewportDockSpace))
+        {
+            const int layout = m_PendingViewportLayout >= 0 ? m_PendingViewportLayout : static_cast<int>(ViewportLayout::One);
+            m_PendingViewportLayout = -1;
+            ApplyViewportLayout(static_cast<ViewportLayout>(layout), viewportDockSpace, ImGui::GetContentRegionAvail());
+        }
+        ImGui::DockSpace(viewportDockSpace, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_None);
+        ImGui::End();
+
+        // The viewports open last session (once imgui.ini was read, before the first frame), then what to write back.
+        if (s_ViewportIni.Loaded)
+        {
+            s_ViewportIni.Loaded = false;
+            for (int index = 1; index < kMaxViewports; ++index)
+            {
+                if (s_ViewportIni.Open[index])
+                    OpenViewport(index);
+            }
+        }
+        for (int index = 0; index < kMaxViewports; ++index)
+        {
+            const ViewportSlot& slot = m_Viewports[index];
+            s_ViewportIni.Open[index] = slot.Open;
+            if (index == m_ActiveViewport)
+                s_ViewportIni.View[index] = static_cast<int>(m_EditorCamera.GetViewMode());
+            else if (slot.CameraSet)
+                s_ViewportIni.View[index] = static_cast<int>(slot.Camera.GetViewMode());
+        }
+
+        // A closed viewport hands the tools back to the first one.
+        if (!m_Viewports[m_ActiveViewport].Open)
+            ActivateViewport(0);
+
+        for (int index = 0; index < kMaxViewports; ++index)
+        {
+            if (!m_Viewports[index].Open)
+                continue;
+            if (index == m_ActiveViewport)
+                UI_ActiveViewport();
+            else
+                UI_ExtraViewport(index);
+        }
+        for (int index = 0; index < kMaxViewports; ++index)
+        {
+            if (!m_Viewports[index].Open)
+            {
+                m_Viewports[index].Hovered = false;
+                m_Viewports[index].Size = { 0, 0 };
+                if (m_Renderer->GetExtraViewTexture(static_cast<uint32_t>(index)))
+                    m_Renderer->ReleaseExtraView(static_cast<uint32_t>(index));
+            }
+        }
+
+        // Input reaches the layer (the camera, picking, the click that activates another viewport) while a viewport is under the mouse.
+        Application::Get().GetImGuiLayer()->BlockEvents(HoveredViewport() < 0);
+
+        // Assets dragged from the Content Browser over another viewport: it becomes the active one, so the drop lands in it.
+        if (const ImGuiPayload* payload = ImGui::GetDragDropPayload())
+        {
+            const int hovered = HoveredViewport();
+            if (hovered >= 0 && hovered != m_ActiveViewport && (payload->IsDataType("CONTENT_BROWSER_ITEM") || payload->IsDataType("CONTENT_BROWSER_ITEMS")))
+                ActivateViewport(hovered);
+        }
+
+        // The viewport a mouse button went down in keeps the mouse until every button is up again: a drag that leaves it still
+        // steers its camera, and a right-click in another panel never flies the camera.
+        const bool anyButtonDown = ImGui::IsMouseDown(ImGuiMouseButton_Left) || ImGui::IsMouseDown(ImGuiMouseButton_Right) ||
+                                   ImGui::IsMouseDown(ImGuiMouseButton_Middle);
+        const bool anyButtonClicked = ImGui::IsMouseClicked(ImGuiMouseButton_Left) || ImGui::IsMouseClicked(ImGuiMouseButton_Right) ||
+                                      ImGui::IsMouseClicked(ImGuiMouseButton_Middle);
+        if (!anyButtonDown)
+            m_MouseCaptureViewport = -1;
+        else if (m_MouseCaptureViewport < 0 && anyButtonClicked)
+            m_MouseCaptureViewport = HoveredViewport();
+
+        UI_ViewportOverlay();
+    }
+
+    void EditorLayer::UI_ActiveViewport()
+    {
+        ViewportSlot& slot = m_Viewports[m_ActiveViewport];
+        // We define "viewport" with no padding an retrieve the rendering area
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+        const bool visible = ImGui::Begin(slot.Title, m_ActiveViewport == 0 ? nullptr : &slot.Open, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+        ImGui::PopStyleVar();
+        if (!visible)
+        {
+            // Behind another tab: nothing of it is shown, hovered or picked.
+            m_ViewportFocused = m_ViewportHovered = false;
+            slot.Hovered = false;
+            slot.Size = { 0, 0 };
+            ImGui::End();
+            return;
+        }
+
+        auto viewportMinRegion = ImGui::GetWindowContentRegionMin();
+        auto viewportMaxRegion = ImGui::GetWindowContentRegionMax();
+        auto viewportOffset = ImGui::GetWindowPos();
+        m_ViewportBounds[0] = {viewportMinRegion.x + viewportOffset.x, viewportMinRegion.y + viewportOffset.y};
+        m_ViewportBounds[1] = {viewportMaxRegion.x + viewportOffset.x, viewportMaxRegion.y + viewportOffset.y};
+
+        m_ViewportFocused = ImGui::IsWindowFocused();
+        m_ViewportHovered = ImGui::IsWindowHovered();
+
+        ImVec2 viewportPanelSize = ImGui::GetContentRegionAvail();
+        m_ViewportSize = {viewportPanelSize.x, viewportPanelSize.y};
+
+        // A cancelled drag has no delivery callback, so remove its temporary entity here.
+        if (m_PlacementPreview.Active && !ImGui::IsDragDropActive())
+        {
+            if (m_SceneHierarchyPanel.GetSelectedEntity() == m_PlacementPreview.Root)
+                m_SceneHierarchyPanel.ClearSelection();
+            if (m_PlacementPreview.Root)
+                m_ActiveScene->DestroyEntity(m_PlacementPreview.Root);
+            m_PlacementPreview = {};
+        }
+
+        auto* texture = m_Renderer->GetSceneResource();
+        if (texture)
+        {
+            auto textureID = texture->getImTextureID();
+            if (textureID)
+            {
+                // !!! This is where the RenderTarget image is displayed !!!
+                // Whole pixels, like the render target: a fractional size resamples the image by a fraction of a pixel.
+                ImGui::Image(textureID, ImVec2(std::floor(viewportPanelSize.x), std::floor(viewportPanelSize.y)));
+            }
+        }
+        ImVec2 mousePos = ImGui::GetMousePos();
+
+        // Only initiate box select when dragging on viewport and not using gizmos/alt-orbit
+        if (m_ViewportHovered && !ImGuizmo::IsUsing() && !Input::IsKeyPressed(SDL_SCANCODE_LALT))
+        {
+            if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+            {
+                m_BoxSelectStart = { mousePos.x, mousePos.y };
+                m_BoxSelectEnd = m_BoxSelectStart;
+            }
+
+            if (ImGui::IsMouseDragging(ImGuiMouseButton_Left, 4.0f) && !m_IsBoxSelecting)
+            {
+                if (!ImGuizmo::IsOver())
+                {
+                    m_IsBoxSelecting = true;
+                }
+            }
+        }
+
+        // Draw visual marquee box using ImGui DrawList while dragging
+        if (m_IsBoxSelecting)
+        {
+            m_BoxSelectEnd = { mousePos.x, mousePos.y };
+
+            ImDrawList* drawList = ImGui::GetWindowDrawList();
+
+            ImVec2 pMin = ImVec2(std::min(m_BoxSelectStart.x, m_BoxSelectEnd.x), std::min(m_BoxSelectStart.y, m_BoxSelectEnd.y));
+            ImVec2 pMax = ImVec2(std::max(m_BoxSelectStart.x, m_BoxSelectEnd.x), std::max(m_BoxSelectStart.y, m_BoxSelectEnd.y));
+
+            // Semi-transparent box fill
+            drawList->AddRectFilled(pMin, pMax, IM_COL32(230, 140, 30, 40));
+            // Solid border outline
+            drawList->AddRect(pMin, pMax, IM_COL32(255, 160, 40, 220), 0.0f, 0, 1.5f);
+        }
+
+        // Commit selection when mouse button is released
+        if (m_IsBoxSelecting && ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+        {
+            m_IsBoxSelecting = false;
+
+            bool shift = Input::IsKeyPressed(SDL_SCANCODE_LSHIFT) || Input::IsKeyPressed(SDL_SCANCODE_RSHIFT);
+            bool ctrl = Input::IsKeyPressed(SDL_SCANCODE_LCTRL) || Input::IsKeyPressed(SDL_SCANCODE_RCTRL);
+
+            // If neither Shift nor Ctrl is held, clear previous selection
+            if (!shift && !ctrl)
+            {
+                m_SceneHierarchyPanel.ClearSelection();
+            }
+
+            // Read all unique entity IDs directly from the GPU entity resolve texture
+            std::vector<int32_t> pickedIDs = m_Renderer->getPickedEntityIDs();
+
+            for (int32_t id : pickedIDs)
+            {
+                if (id >= 0)
+                {
+                    Entity entity{ static_cast<entt::entity>(id), m_ActiveScene.get() };
+                    if (entity)
+                    {
+                        if (ctrl)
+                        {
+                            m_SceneHierarchyPanel.ToggleSelectedEntity(entity);
+                        }
+                        else if (!m_SceneHierarchyPanel.IsSelected(entity))
+                        {
+                            auto& list = const_cast<std::vector<Entity>&>(m_SceneHierarchyPanel.GetSelectedEntities());
+                            list.push_back(entity);
+                        }
+                    }
+                }
+            }
+        }
+
+        if (ImGui::BeginDragDropTarget())
+        {
+            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(
+                    "CONTENT_BROWSER_ITEM", ImGuiDragDropFlags_AcceptBeforeDelivery))
+            {
+                AssetHandle handle = *(const AssetHandle*)payload->Data;
+                auto type = AssetManager::GetAssetType(handle);
+                if (type == AssetType::Scene && payload->Delivery)
+                    OpenScene(handle);
+                else if (type == AssetType::Mesh || type == AssetType::StaticMesh || type == AssetType::MeshSource || type == AssetType::Prefab)
+                {
+                    if (!m_PlacementPreview.Active || m_PlacementPreview.Handle != handle)
+                    {
+                        if (m_PlacementPreview.Active &&
+                            m_SceneHierarchyPanel.GetSelectedEntity() == m_PlacementPreview.Root)
+                        {
+                            m_SceneHierarchyPanel.ClearSelection();
+                        }
+                        if (m_PlacementPreview.Active && m_PlacementPreview.Root)
+                            m_ActiveScene->DestroyEntity(m_PlacementPreview.Root);
+                        m_PlacementPreview = {};
+
+                        // The model instance appears at once; its nodes spawn once the model has loaded (and
+                        // been cooked, on a first import) in the background (§5.11.5).
+                        const AssetMetadata& metadata = Project::GetActive()->GetEditorAssetManager()->GetMetadata(handle);
+                        std::string entityName = metadata.FilePath.filename().stem().string();
+                        if (entityName.empty())
+                            entityName = "Model";
+                        Entity root = m_ActiveScene->CreateEntity(entityName);
+                        if (type == AssetType::Prefab)
+                        {
+                            auto& prefabInstance = root.AddComponent<PrefabInstanceComponent>();
+                            prefabInstance.Prefab = handle;
+                            prefabInstance.InitTransform = true;
+                        }
+                        else
+                            root.AddComponent<ModelInstanceComponent>().Model = handle;
+                        // A mesh's import scale (static or skeletal) is baked into its cooked geometry, bind pose and animation
+                        // clips (MeshImporter::ApplyImportScale / ApplySkeletonScale / ApplyAnimationScale, like Unreal's Import
+                        // Uniform Scale): the entity starts at Scale 1.0, "as authored".
+                        AssetManager::RequestAsset(handle);
+                        m_SceneHierarchyPanel.SetSelectedEntity(root);
+                        m_PlacementPreview.Root = root;
+
+                        m_PlacementPreview.Handle = handle;
+                        if (m_PlacementPreview.Root)
+                        {
+                            m_PlacementPreview.InitialTranslation =
+                                m_PlacementPreview.Root.GetComponent<TransformComponent>().Translation;
+                        }
+                        m_PlacementPreview.Active = static_cast<bool>(m_PlacementPreview.Root);
+                    }
+
+                    if (m_PlacementPreview.Active && m_PlacementPreview.Root)
+                    {
+                        ImVec2 imguiMouse = ImGui::GetMousePos();
+                        glm::vec2 mouse = {
+                            imguiMouse.x - m_ViewportBounds[0].x,
+                            imguiMouse.y - m_ViewportBounds[0].y
+                        };
+                        glm::vec2 viewportSize = m_ViewportBounds[1] - m_ViewportBounds[0];
+
+                        if (viewportSize.x > 0.0f && viewportSize.y > 0.0f)
+                        {
+                            glm::vec2 ndc = {
+                                (mouse.x / viewportSize.x) * 2.0f - 1.0f,
+                                1.0f - (mouse.y / viewportSize.y) * 2.0f
+                            };
+
+                            glm::mat4 inverseViewProjection = glm::inverse(
+                                m_EditorCamera.GetGizmoProjection() * m_EditorCamera.GetGizmoView());
+                            glm::vec4 nearPoint = inverseViewProjection * glm::vec4(ndc, -1.0f, 1.0f);
+                            glm::vec4 farPoint = inverseViewProjection * glm::vec4(ndc, 1.0f, 1.0f);
+                            nearPoint /= nearPoint.w;
+                            farPoint /= farPoint.w;
+
+                            glm::vec3 rayOrigin = glm::vec3(nearPoint);
+                            glm::vec3 rayDirection = glm::normalize(glm::vec3(farPoint - nearPoint));
+
+                            // Keep the preview on a plane facing the editor camera. A horizontal
+                            // ground plane becomes parallel to the ray in a level side view.
+                            glm::vec3 planeNormal = m_EditorCamera.GetForwardDirection();
+                            float rayPlaneDenominator = glm::dot(rayDirection, planeNormal);
+                            if (std::abs(rayPlaneDenominator) > 0.0001f)
+                            {
+                                float distance = glm::dot(
+                                    m_PlacementPreview.InitialTranslation - rayOrigin,
+                                    planeNormal
+                                ) / rayPlaneDenominator;
+                                if (distance >= 0.0f)
+                                {
+                                    auto& transform = m_PlacementPreview.Root.GetComponent<TransformComponent>();
+                                    transform.Translation = SnapLocation(rayOrigin + rayDirection * distance);
+                                    m_PlacementPreview.Root.MarkTransformDirty();
+                                }
+                            }
+                        }
+
+                        if (payload->Delivery)
+                        {
+                            m_SceneHierarchyPanel.SetSelectedEntity(m_PlacementPreview.Root);
+                            m_PlacementPreview = {};
+                        }
+                    }
+                }
+            }
+
+            // Several assets dragged together (Ctrl+A in the Content Browser): every model lands under one group at the
+            // drop point, each at the place its file had it (per-mesh assets carry the file's instance transforms).
+            if (const ImGuiPayload* multiPayload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEMS"))
+            {
+                const size_t count = multiPayload->DataSize / sizeof(AssetHandle);
+                const AssetHandle* handles = static_cast<const AssetHandle*>(multiPayload->Data);
+
+                glm::vec3 dropPoint(0.0f);
+                const glm::vec2 viewportSize = m_ViewportBounds[1] - m_ViewportBounds[0];
+                if (viewportSize.x > 0.0f && viewportSize.y > 0.0f)
+                {
+                    const ImVec2 imguiMouse = ImGui::GetMousePos();
+                    const glm::vec2 ndc = {
+                        ((imguiMouse.x - m_ViewportBounds[0].x) / viewportSize.x) * 2.0f - 1.0f,
+                        1.0f - ((imguiMouse.y - m_ViewportBounds[0].y) / viewportSize.y) * 2.0f
+                    };
+                    const glm::mat4 inverseViewProjection = glm::inverse(m_EditorCamera.GetGizmoProjection() * m_EditorCamera.GetGizmoView());
+                    glm::vec4 nearPoint = inverseViewProjection * glm::vec4(ndc, -1.0f, 1.0f);
+                    glm::vec4 farPoint = inverseViewProjection * glm::vec4(ndc, 1.0f, 1.0f);
+                    nearPoint /= nearPoint.w;
+                    farPoint /= farPoint.w;
+                    const glm::vec3 rayOrigin = glm::vec3(nearPoint);
+                    const glm::vec3 rayDirection = glm::normalize(glm::vec3(farPoint - nearPoint));
+
+                    // Same plane as a single drop: through the origin, facing the editor camera.
+                    const glm::vec3 planeNormal = m_EditorCamera.GetForwardDirection();
+                    const float denominator = glm::dot(rayDirection, planeNormal);
+                    if (std::abs(denominator) > 0.0001f)
+                    {
+                        const float distance = glm::dot(-rayOrigin, planeNormal) / denominator;
+                        if (distance >= 0.0f)
+                            dropPoint = SnapLocation(rayOrigin + rayDirection * distance);
+                    }
+                }
+
+                // Like Unreal: no group entity, no folder -- every piece lands at the top level of the outliner.
+                PlaceAssets(std::vector<AssetHandle>(handles, handles + count), dropPoint, std::string());
+            }
+            ImGui::EndDragDropTarget();
+        }
+
+        // Gizmos
+        //maybe be a callback you subscribe to instead
+        Entity selectedEntity = m_SceneHierarchyPanel.GetSelectedEntity();
+        if (selectedEntity && m_GizmoType != -1)
+        {
+            ImGuizmo::SetOrthographic(m_EditorCamera.IsOrthographic());
+            ImGuizmo::SetDrawlist();
+
+            ImGuizmo::SetRect(m_ViewportBounds[0].x, m_ViewportBounds[0].y, m_ViewportBounds[1].x - m_ViewportBounds[0].x, m_ViewportBounds[1].y - m_ViewportBounds[0].y);
+
+            // Camera
+
+            // Runtime camera from entity
+            // auto cameraEntity = m_ActiveScene->GetPrimaryCameraEntity();
+            // const auto& camera = cameraEntity.GetComponent<CameraComponent>().Camera;
+            // const glm::mat4& cameraProjection = camera.GetProjection();
+            // glm::mat4 cameraView = glm::inverse(cameraEntity.GetComponent<TransformComponent>().GetTransform());
+
+            // Editor camera
+            const glm::mat4& cameraProjection = m_EditorCamera.GetGizmoProjection();
+            glm::mat4 cameraView = m_EditorCamera.GetGizmoView();
+
+            // Grab the WORLD transform for ImGuizmo
+            glm::mat4 worldTransform = selectedEntity.GetComponent<WorldTransformComponent>().WorldMatrix;
+
+            // Snapping
+            // The toolbar switch, inverted while Ctrl is held; the steps are the ones chosen there.
+            const bool snap = m_SnapEnabled != Input::IsKeyPressed(SDL_SCANCODE_LCTRL);
+            float snapValue = LocationSnapWorldUnits();
+            if (m_GizmoType == ImGuizmo::OPERATION::ROTATE)
+                snapValue = kRotationSnaps[m_RotationSnapIndex];
+            else if (m_GizmoType == ImGuizmo::OPERATION::SCALE)
+                snapValue = kScaleSnaps[m_ScaleSnapIndex];
+
+            float snapValues[3] = {snapValue, snapValue, snapValue};
+
+            glm::mat4 deltaMatrix(1.0f);
+            const glm::mat4 beforeManipulate = worldTransform;
+
+            ImGuizmo::Manipulate(glm::value_ptr(cameraView), glm::value_ptr(cameraProjection),
+                                 static_cast<ImGuizmo::OPERATION>(m_GizmoType), ImGuizmo::LOCAL,
+                                 glm::value_ptr(worldTransform), glm::value_ptr(deltaMatrix), snap ? snapValues : nullptr);
+
+            // Snapping feedback while a translation is dragged (the drag's start is the pose in its first frame).
+            const bool usingGizmo = ImGuizmo::IsUsing();
+            if (usingGizmo && !m_GizmoWasUsing)
+                m_GizmoDragStart = beforeManipulate;
+            m_GizmoWasUsing = usingGizmo;
+            if (usingGizmo && snap && m_GizmoType == ImGuizmo::OPERATION::TRANSLATE)
+                DrawTranslationSnapFeedback(cameraView, cameraProjection, worldTransform);
+
+            if (ImGuizmo::IsUsing())
+            {
+                const auto& selectedEntities = m_SceneHierarchyPanel.GetSelectedEntities();
+                if (selectedEntities.size() > 1)
+                {
+                    for (auto entity : selectedEntities)
+                    {
+                        if (!entity) continue;
+
+                        // If this entity's parent is ALSO selected, skip it (the parent moving will already move it)
+                        if (entity.HasComponent<RelationshipComponent>())
+                        {
+                            UUID parentUUID = entity.GetComponent<RelationshipComponent>().Parent;
+                            if (parentUUID != 0)
+                            {
+                                Entity parent = m_ActiveScene->GetEntityByUUID(parentUUID);
+                                if (parent && m_SceneHierarchyPanel.IsSelected(parent))
+                                    continue;
+                            }
+                        }
+
+                        glm::mat4 currentWorld = entity.GetComponent<WorldTransformComponent>().WorldMatrix;
+                        entity.SetWorldTransform(deltaMatrix * currentWorld);
+                    }
+                }
+                else
+                {
+                    // One single line does all the math, finds the parent, and marks it dirty!
+                    selectedEntity.SetWorldTransform(worldTransform);
+                }
+            }
+        }
+
+        UI_MeasureOverlay();
+
+        slot.Bounds[0] = m_ViewportBounds[0];
+        slot.Bounds[1] = m_ViewportBounds[1];
+        slot.Size = m_ViewportSize;
+        slot.Hovered = m_ViewportHovered;
+
+        // With more than one viewport the active one is framed (Unreal's highlight).
+        if (OpenViewportCount() > 1)
+        {
+            ImGui::GetWindowDrawList()->AddRect(ImVec2(m_ViewportBounds[0].x + 1.0f, m_ViewportBounds[0].y + 1.0f),
+                                                ImVec2(m_ViewportBounds[1].x - 1.0f, m_ViewportBounds[1].y - 1.0f), IM_COL32(255, 170, 40, 255), 0.0f, 0, 2.0f);
+        }
+
+        ImGui::End(); // End viewport
+    }
+
+    void EditorLayer::UI_ExtraViewport(int index)
+    {
+        ViewportSlot& slot = m_Viewports[index];
+        ImGui::SetNextWindowSize(ImVec2(640.0f, 400.0f), ImGuiCond_FirstUseEver);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+        const bool visible = ImGui::Begin(slot.Title, index == 0 ? nullptr : &slot.Open, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+        ImGui::PopStyleVar();
+        slot.Hovered = false;
+        if (!visible)
+        {
+            slot.Size = { 0, 0 };
+            ImGui::End();
+            return;
+        }
+
+        const ImVec2 origin = ImGui::GetCursorScreenPos();
+        const ImVec2 available = ImGui::GetContentRegionAvail();
+        slot.Bounds[0] = { origin.x, origin.y };
+        slot.Bounds[1] = { origin.x + available.x, origin.y + available.y };
+        slot.Size = { static_cast<uint32_t>(std::max(available.x, 0.0f)), static_cast<uint32_t>(std::max(available.y, 0.0f)) };
+        // Also while something is dragged (an asset from the Content Browser activates the viewport it is dragged over).
+        slot.Hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
+
+        // Rendered this frame by the renderer (SubmitExtraViewports, in OnUpdate) at the size the window had last frame.
+        auto* texture = slot.Submitted ? m_Renderer->GetExtraViewTexture(static_cast<uint32_t>(index)) : nullptr;
+        if (texture && texture->getImTextureID() && available.x >= 1.0f && available.y >= 1.0f)
+            ImGui::Image(texture->getImTextureID(), ImVec2(std::floor(available.x), std::floor(available.y)));
+
+        // Its view in the corner. A click or a scroll in it makes it the active viewport (OnEvent), with every tool.
+        const char* viewName = kViewModeNames[static_cast<int>(slot.Camera.GetViewMode())];
+        ImDrawList* draw = ImGui::GetWindowDrawList();
+        const ImVec2 textSize = ImGui::CalcTextSize(viewName);
+        const ImVec2 labelMin(origin.x + 8.0f, origin.y + 8.0f);
+        draw->AddRectFilled(labelMin, ImVec2(labelMin.x + textSize.x + 12.0f, labelMin.y + textSize.y + 6.0f), IM_COL32(0, 0, 0, 160), 3.0f);
+        draw->AddText(ImVec2(labelMin.x + 6.0f, labelMin.y + 3.0f), IM_COL32(230, 230, 230, 255), viewName);
+
+        ImGui::End();
+    }
+
+    void EditorLayer::ApplyViewportLayout(ViewportLayout layout, ImGuiID dockSpace, ImVec2 size)
+    {
+        // Everything docked in the area is undocked, the area split for the layout, and each viewport docked into its cell. The
+        // first viewport keeps the area's central node (the splits put the new cells right / below), so it is never left empty.
+        int count = 1;
+        switch (layout)
+        {
+        case ViewportLayout::One: count = 1; break;
+        case ViewportLayout::TwoSideBySide:
+        case ViewportLayout::TwoStacked: count = 2; break;
+        case ViewportLayout::Three: count = 3; break;
+        case ViewportLayout::Four: count = 4; break;
+        }
+
+        ImGui::DockBuilderRemoveNode(dockSpace);
+        ImGui::DockBuilderAddNode(dockSpace, ImGuiDockNodeFlags_DockSpace);
+        ImGui::DockBuilderSetNodeSize(dockSpace, ImVec2(std::max(size.x, 64.0f), std::max(size.y, 64.0f)));
+
+        ImGuiID cells[kMaxViewports] = { dockSpace, 0, 0, 0 };
+        switch (layout)
+        {
+        case ViewportLayout::One:
+            break;
+        case ViewportLayout::TwoSideBySide:
+            ImGui::DockBuilderSplitNode(dockSpace, ImGuiDir_Right, 0.5f, &cells[1], &cells[0]);
+            break;
+        case ViewportLayout::TwoStacked:
+            ImGui::DockBuilderSplitNode(dockSpace, ImGuiDir_Down, 0.5f, &cells[1], &cells[0]);
+            break;
+        case ViewportLayout::Three:
+        {
+            // A big one on the left, two stacked on the right.
+            ImGuiID right = 0;
+            ImGui::DockBuilderSplitNode(dockSpace, ImGuiDir_Right, 0.4f, &right, &cells[0]);
+            ImGui::DockBuilderSplitNode(right, ImGuiDir_Down, 0.5f, &cells[2], &cells[1]);
+            break;
+        }
+        case ViewportLayout::Four:
+        {
+            // 2 x 2: 1 2 on top, 3 4 below.
+            ImGuiID left = 0, right = 0;
+            ImGui::DockBuilderSplitNode(dockSpace, ImGuiDir_Right, 0.5f, &right, &left);
+            ImGui::DockBuilderSplitNode(left, ImGuiDir_Down, 0.5f, &cells[2], &cells[0]);
+            ImGui::DockBuilderSplitNode(right, ImGuiDir_Down, 0.5f, &cells[3], &cells[1]);
+            break;
+        }
+        }
+
+        for (int index = 0; index < kMaxViewports; ++index)
+        {
+            if (index < count)
+            {
+                OpenViewport(index);
+                ImGui::DockBuilderDockWindow(m_Viewports[index].Title, cells[index]);
+            }
+            else
+                m_Viewports[index].Open = false;
+        }
+        // A single viewport has no tab bar, like the editor always had.
+        if (layout == ViewportLayout::One)
+        {
+            if (ImGuiDockNode* node = ImGui::DockBuilderGetNode(dockSpace))
+                node->LocalFlags |= ImGuiDockNodeFlags_NoTabBar;
+        }
+        ImGui::DockBuilderFinish(dockSpace);
+    }
+
+    void EditorLayer::OpenViewport(int index)
+    {
+        ViewportSlot& slot = m_Viewports[index];
+        if (!slot.CameraSet)
+        {
+            // A new viewport starts from the active camera, in a view of its own: perspective, top, front, right (or the one it had
+            // last session).
+            slot.Camera = m_EditorCamera;
+            slot.Camera.SetViewMode(static_cast<EditorViewMode>(s_ViewportIni.View[index]));
+            slot.CameraSet = true;
+        }
+        slot.Open = true;
+    }
+
+    void EditorLayer::ActivateViewport(int index)
+    {
+        if (index < 0 || index >= kMaxViewports || index == m_ActiveViewport)
+            return;
+
+        ViewportSlot& previous = m_Viewports[m_ActiveViewport];
+        ViewportSlot& next = m_Viewports[index];
+        if (!next.CameraSet)
+            OpenViewport(index);
+
+        const bool wasOrthographic = m_EditorCamera.IsOrthographic();
+        previous.Camera = m_EditorCamera;
+        previous.CameraSet = true;
+        m_EditorCamera = next.Camera;
+        m_ActiveViewport = index;
+
+        // The tools follow at once: this frame's update runs before the window is drawn again.
+        m_ViewportBounds[0] = next.Bounds[0];
+        m_ViewportBounds[1] = next.Bounds[1];
+        if (next.Size.x > 0 && next.Size.y > 0)
+        {
+            m_ViewportSize = next.Size;
+            m_EditorCamera.SetViewportSize(static_cast<float>(next.Size.x), static_cast<float>(next.Size.y));
+        }
+        m_ViewportHovered = next.Hovered;
+        m_HoveredEntity = Entity();
+        m_IsBoxSelecting = false;
+        SyncOrthoRenderSettings(wasOrthographic);
+        m_Renderer->ResetCameraHistory();
+    }
+
+    int EditorLayer::HoveredViewport() const
+    {
+        for (int index = 0; index < kMaxViewports; ++index)
+        {
+            if (m_Viewports[index].Open && m_Viewports[index].Hovered)
+                return index;
+        }
+        return -1;
+    }
+
+    int EditorLayer::OpenViewportCount() const
+    {
+        int count = 0;
+        for (const ViewportSlot& slot : m_Viewports)
+            count += slot.Open ? 1 : 0;
+        return count;
+    }
+
+    void EditorLayer::SubmitExtraViewports(Timestep ts)
+    {
+        const float cell = std::max(LocationSnapWorldUnits(), WorldUnits::FromMeters(1.0f));
+        for (int index = 0; index < kMaxViewports; ++index)
+        {
+            ViewportSlot& slot = m_Viewports[index];
+            slot.Submitted = false;
+            if (index == m_ActiveViewport || !slot.Open || slot.Size.x == 0 || slot.Size.y == 0)
+                continue;
+
+            const float width = static_cast<float>(slot.Size.x);
+            const float height = static_cast<float>(slot.Size.y);
+            if (slot.Camera.GetAspectRatio() != width / height)
+                slot.Camera.SetViewportSize(width, height);
+            // Its own easing (an ortho zoom set before it was put aside); no mouse input reaches it.
+            slot.Camera.OnUpdate(ts, false);
+
+            // The grid as DrawWorldGrid would draw it for this camera.
+            shaderio::PushConstantGrid grid{};
+            const bool showGrid = m_SceneState != SceneState::Play && m_ShowGrid;
+            if (showGrid)
+            {
+                const EditorViewMode mode = slot.Camera.GetViewMode();
+                const int axis = (mode == EditorViewMode::Front || mode == EditorViewMode::Back) ? 2 : (mode == EditorViewMode::Left || mode == EditorViewMode::Right) ? 0 : 1;
+                grid = slot.Camera.IsOrthographic() ? Renderer2D::MakeGrid(slot.Camera.GetFocalPoint(), cell, axis, slot.Camera.GetOrthoHalfHeight())
+                                                    : Renderer2D::MakeGrid(slot.Camera.GetPosition(), cell, 1, slot.Camera.GetDistance());
+            }
+            m_Renderer->SubmitExtraView(static_cast<uint32_t>(index), slot.Camera, NRI::Extent2D{ slot.Size.x, slot.Size.y }, showGrid ? &grid : nullptr);
+            slot.Submitted = true;
+        }
+    }
+
+    void EditorLayer::SyncOrthoRenderSettings(bool wasOrthographic)
+    {
+        const bool isOrthographic = m_EditorCamera.IsOrthographic();
+        if (isOrthographic && !wasOrthographic)
+        {
+            m_OrthoSaved = { true, m_Renderer->isDLSSEnabled(), m_Renderer->getRayTracingEnabled(), m_Renderer->isPathTracingEnabled() };
+            m_Renderer->setDLSSEnabled(false);
+            m_Renderer->setRayTracingEnabled(false);
+            m_Renderer->setPathTracingEnabled(false);
+        }
+        else if (!isOrthographic && wasOrthographic && m_OrthoSaved.Valid)
+        {
+            m_Renderer->setDLSSEnabled(m_OrthoSaved.Dlss);
+            m_Renderer->setRayTracingEnabled(m_OrthoSaved.RayTracing);
+            m_Renderer->setPathTracingEnabled(m_OrthoSaved.PathTracing);
+            m_OrthoSaved.Valid = false;
+        }
+    }
+
     void EditorLayer::UI_ViewportOverlay()
     {
+        // On the active viewport, while it shows.
+        if (m_Viewports[m_ActiveViewport].Size.x == 0 || m_Viewports[m_ActiveViewport].Size.y == 0)
+            return;
         ImGui::SetNextWindowPos(ImVec2(m_ViewportBounds[0].x + 10.0f, m_ViewportBounds[0].y + 10.0f));
         ImGui::SetNextWindowBgAlpha(0.65f);
         const ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings |
@@ -2540,22 +2976,7 @@ namespace Nox
     {
         const bool wasOrthographic = m_EditorCamera.IsOrthographic();
         m_EditorCamera.SetViewMode(mode);
-        const bool isOrthographic = m_EditorCamera.IsOrthographic();
-
-        if (isOrthographic && !wasOrthographic)
-        {
-            m_OrthoSaved = { true, m_Renderer->isDLSSEnabled(), m_Renderer->getRayTracingEnabled(), m_Renderer->isPathTracingEnabled() };
-            m_Renderer->setDLSSEnabled(false);
-            m_Renderer->setRayTracingEnabled(false);
-            m_Renderer->setPathTracingEnabled(false);
-        }
-        else if (!isOrthographic && wasOrthographic && m_OrthoSaved.Valid)
-        {
-            m_Renderer->setDLSSEnabled(m_OrthoSaved.Dlss);
-            m_Renderer->setRayTracingEnabled(m_OrthoSaved.RayTracing);
-            m_Renderer->setPathTracingEnabled(m_OrthoSaved.PathTracing);
-            m_OrthoSaved.Valid = false;
-        }
+        SyncOrthoRenderSettings(wasOrthographic);
     }
 
     void EditorLayer::DrawTranslationSnapFeedback(const glm::mat4& view, const glm::mat4& projection, const glm::mat4& current)

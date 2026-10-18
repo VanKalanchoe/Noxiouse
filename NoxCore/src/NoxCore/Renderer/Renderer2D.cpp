@@ -124,8 +124,7 @@ namespace Nox
         memcpy(lines + thickCount + thinCount, m_data.xrayLineDatas.data(), xrayCount * sizeof(shaderio::LineData));
     }
 
-    // Runs inside a Begin rendering
-    void Renderer2D::Flush(NRI::CommandBuffer& commandBuffer, const NRI::Buffer& currentUniformBuffer, uint32_t frameIndex)
+    void Renderer2D::FlushWorld(NRI::CommandBuffer& commandBuffer, const NRI::Buffer& currentUniformBuffer, uint32_t frameIndex, const shaderio::PushConstantGrid* grid)
     {
         // QuadMesh
         if (!m_data.quadDatas.empty())
@@ -170,12 +169,12 @@ namespace Nox
         }
         
         // Grid (Godot's editor grid, see GridMesh.slang): real one pixel lines, one mesh shader group each
-        if (m_GridDraw)
+        if (grid)
         {
             commandBuffer.setLineWidth(1.0f);
             commandBuffer.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_GridMeshPipeline);
 
-            shaderio::PushConstantGrid gridReferences = m_Grid;
+            shaderio::PushConstantGrid gridReferences = *grid;
             gridReferences.matrixReference = currentUniformBuffer.getDeviceAddress();
             commandBuffer.pushData(&gridReferences, sizeof(shaderio::PushConstantGrid));
 
@@ -238,6 +237,12 @@ namespace Nox
                 commandBuffer.setDepthTestEnable(true);
             }
         }
+    }
+
+    // Runs inside a Begin rendering
+    void Renderer2D::Flush(NRI::CommandBuffer& commandBuffer, const NRI::Buffer& currentUniformBuffer, uint32_t frameIndex)
+    {
+        FlushWorld(commandBuffer, currentUniformBuffer, frameIndex, m_GridDraw ? &m_Grid : nullptr);
 
         // Screen space last, so it lands on top of the world-space 2D content too: panels before their text, same
         // pipelines, the pixel-projection uniforms instead of the camera's, depth testing off (nothing may hide it).
@@ -716,6 +721,12 @@ namespace Nox
     // far enough that the cells would be too small.
     void Renderer2D::DrawGrid(const glm::vec3& focus, float cell, int planeAxis, float cameraDistance)
     {
+        m_Grid = MakeGrid(focus, cell, planeAxis, cameraDistance);
+        m_GridDraw = true;
+    }
+
+    shaderio::PushConstantGrid Renderer2D::MakeGrid(const glm::vec3& focus, float cell, int planeAxis, float cameraDistance)
+    {
         constexpr int steps = 8;
         constexpr int gridSize = 200;
         constexpr float divisionLevelBias = -0.2f;
@@ -737,15 +748,16 @@ namespace Nox
         float fadeSize = cell * std::pow(static_cast<float>(steps), divisionLevel - 1.0f);
         fadeSize = std::clamp(fadeSize, cell * std::pow(static_cast<float>(steps), divisionLevelMin), cell * std::pow(static_cast<float>(steps), divisionLevelMax));
 
-        m_Grid.centerA = largeStep * std::trunc(focus[axisA] / largeStep);
-        m_Grid.centerB = largeStep * std::trunc(focus[axisB] / largeStep);
-        m_Grid.smallStep = smallStep;
-        m_Grid.gridFadeSize = (gridSize - steps) * fadeSize;
-        m_Grid.decimals = decimals;
-        m_Grid.steps = steps;
-        m_Grid.gridSize = gridSize;
-        m_Grid.planeAxis = planeAxis;
-        m_GridDraw = true;
+        shaderio::PushConstantGrid grid{};
+        grid.centerA = largeStep * std::trunc(focus[axisA] / largeStep);
+        grid.centerB = largeStep * std::trunc(focus[axisB] / largeStep);
+        grid.smallStep = smallStep;
+        grid.gridFadeSize = (gridSize - steps) * fadeSize;
+        grid.decimals = decimals;
+        grid.steps = steps;
+        grid.gridSize = gridSize;
+        grid.planeAxis = planeAxis;
+        return grid;
     }
 
     void Renderer2D::DrawThinLine(const glm::vec3& p0, const glm::vec3& p1, const glm::vec4& color)
