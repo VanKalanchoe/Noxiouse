@@ -237,7 +237,8 @@ namespace Nox
         */
 
         // Outline
-        watchShader("assets/shaders/Outline.slang", "Skybox", [this]() { createOutlinePipeline(true); });
+        watchShader("assets/shaders/Outline.slang", "Outline", [this]() { createOutlinePipeline(true); });
+        watchShader("assets/shaders/SelectionMask.slang", "SelectionMask", [this]() { createSelectionMaskPipeline(true); });
         // Skybox
         watchShader("assets/shaders/Skybox.slang", "Skybox", [this]() { createSkyboxPipeline(true); });
         // Unlit
@@ -422,6 +423,8 @@ namespace Nox
         createComputePipeline();
         createSkyboxPipeline(false);
         createOutlinePipeline(false);
+        if (m_isEditor)
+            createSelectionMaskPipeline(false);
 
         // Visability
         createVisibilityPipeline(false); // <--- ADD THIS
@@ -1598,6 +1601,18 @@ namespace Nox
             .sourcePath = "assets/shaders/Outline.slang"
         });
         m_outlinePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+    }
+
+    void Renderer::createSelectionMaskPipeline(bool forceCompile)
+    {
+        NRI::PipelineDesc desc{};
+        desc.forceCompile = forceCompile;
+        desc.colorFormats = { NRI::ImageFormat::R16_SFLOAT };
+        // The visibility pass's task stage (LOD cut, meshlet culling); SelectionMask.slang projects without the jitter.
+        desc.shaders.push_back({ .stage = NRI::ShaderStage::Task, .entryPoint = "taskMain", .sourcePath = "assets/shaders/Material_PBR_MeshTask.slang" });
+        desc.shaders.push_back({ .stage = NRI::ShaderStage::Mesh, .entryPoint = "meshMain", .sourcePath = "assets/shaders/SelectionMask.slang" });
+        desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "fragMain", .sourcePath = "assets/shaders/SelectionMask.slang" });
+        m_selectionMaskPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
     void Renderer::createCommandPool()
@@ -3065,6 +3080,11 @@ namespace Nox
 
             m_selectedEntityIDBuffers.emplace_back(std::move(buffer));
             m_selectedEntityIDBuffersMapped.emplace_back(mapped);
+
+            // The selection mask's draw list: GPU scene instance slots of the selected entities (as many as entity IDs).
+            auto instances = m_device->createBuffer(NRI::BufferDesc{ .size = maxSelectedEntities * sizeof(uint32_t), .usage = NRI::BufferUsage::Storage });
+            m_selectionInstanceBuffersMapped.emplace_back(instances->map(0, maxSelectedEntities * sizeof(uint32_t)));
+            m_selectionInstanceBuffers.emplace_back(std::move(instances));
         }
     }
 
@@ -3327,6 +3347,7 @@ namespace Nox
             addEntityDepthBlitPass();
             addPostProcessPass();
             addOverlay2DPass();
+            addSelectionMaskPass();
             addOutlinePass();
             addPresentPass();
             addPickReadbackPass();

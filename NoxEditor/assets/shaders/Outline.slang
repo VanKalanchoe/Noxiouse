@@ -83,6 +83,34 @@ float4 fragMain(
     if (pushConstant.selectedEntityCount == 0)
         discard;
 
+    int2 maskPixel = int2(input.pos.xy);
+
+    // The selection mask (SelectionMask.slang): drawn without the camera jitter, so the outline stays still with DLSS on.
+    // An outline pixel is outside the selection with a selected pixel within `radius`.
+    if (pushConstant.selectionMaskTextureIndex != 0xFFFFFFFF)
+    {
+        Texture2D<float> maskTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.selectionMaskTextureIndex, 0));
+        uint maskWidth, maskHeight;
+        maskTex.GetDimensions(maskWidth, maskHeight);
+
+        if (maskTex.Load(int3(maskPixel, 0)) > 0.5)
+            discard;
+
+        const int maskRadius = 2;
+        for (int y = -maskRadius; y <= maskRadius; ++y)
+        {
+            for (int x = -maskRadius; x <= maskRadius; ++x)
+            {
+                int2 p = maskPixel + int2(x, y);
+                if (p.x < 0 || p.y < 0 || p.x >= int(maskWidth) || p.y >= int(maskHeight))
+                    continue;
+                if (maskTex.Load(int3(p, 0)) > 0.5)
+                    return float4(1.0, 0.5, 0.0, 1.0);
+            }
+        }
+        discard;
+    }
+
     Texture2D<int4> entityTex =
         Texture2D<int4>.Handle(
             uint2(

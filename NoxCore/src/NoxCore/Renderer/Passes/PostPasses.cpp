@@ -1,6 +1,8 @@
 // Display-resolution passes: tonemapping/post-process, 2D overlays, selection outline.
 #include "NoxCore/Renderer/Renderer.h"
 
+#include <algorithm>
+
 #include "FrameGraphResources.h"
 
 namespace Nox
@@ -140,6 +142,75 @@ namespace Nox
             });
     }
 
+    void Renderer::addSelectionMaskPass()
+    {
+        if (m_SelectedEntityIDs.empty() || !m_outlinePipeline || !m_selectionMaskPipeline)
+            return;
+
+        // The selected entities' instances in the draw list (every bucket: the outline is about the shape, not the shading),
+        // each with the task workgroups that cover its meshlets. Written into this frame slot's buffer, which the GPU is done
+        // with (its fence was waited for at the frame start).
+        constexpr size_t MaxSelectedInstances = 4096; // the buffer's size (createSelectedEntityIDBuffers)
+        std::vector<int32_t> selected(m_SelectedEntityIDs);
+        std::sort(selected.begin(), selected.end());
+        auto* slots = static_cast<uint32_t*>(m_selectionInstanceBuffersMapped[frameIndex]);
+        m_selectionTaskGroups.clear();
+        for (uint32_t instanceSlot : m_drawList)
+        {
+            if (m_selectionTaskGroups.size() == MaxSelectedInstances)
+                break;
+            if (!std::binary_search(selected.begin(), selected.end(), m_gpuScene.GetInstanceEntity(instanceSlot)))
+                continue;
+            const uint32_t meshSlot = m_gpuScene.GetInstances().Get(instanceSlot).meshIndex;
+            const uint32_t meshletCount = m_gpuScene.GetMeshes().Get(meshSlot).meshletCount;
+            if (meshletCount == 0)
+                continue;
+            slots[m_selectionTaskGroups.size()] = instanceSlot;
+            m_selectionTaskGroups.push_back((meshletCount + shaderio::TASK_SHADER_DISPATCH_X - 1) / shaderio::TASK_SHADER_DISPATCH_X);
+        }
+        if (m_selectionTaskGroups.empty())
+            return;
+
+        FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
+        RGTextureDesc maskDesc;
+        maskDesc.Size = RGSize::OutputResolution;
+        maskDesc.Format = NRI::ImageFormat::R16_SFLOAT;
+        resources.SelectionMask = m_renderGraph.CreateTexture("Selection Mask", maskDesc);
+
+        // Display resolution and the non-jittered projection: the outline that reads it holds still with DLSS on.
+        m_renderGraph.AddPass("Selection Mask", RGPassFlags::Raster,
+            [&](RGBuilder& builder)
+            {
+                builder.ColorTarget(resources.SelectionMask, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
+                builder.SetRenderArea(m_frame.outputExtent);
+                ReadGpuScene(builder, resources);
+                ReadIfValid(builder, resources.SkinnedVertices);
+            },
+            [this](RGPassContext& context)
+            {
+                NRI::CommandBuffer& cmd = context.Cmd();
+
+                // Every covered pixel counts, front or back face, in front of or behind other geometry: no culling, no depth.
+                cmd.setCullMode(NRI::CullMode::None);
+                cmd.setDepthTestEnable(false);
+                cmd.setDepthWriteEnable(false);
+                cmd.setColorBlendEnable(0, false);
+                cmd.setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
+                cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_selectionMaskPipeline);
+
+                // One direct draw per instance: SV_DrawIndex is 0, so instanceBaseIndex picks the slot in the selection list.
+                shaderio::PushConstantMeshlets references = m_frame.meshletReferences;
+                references.drawInstancesReference = m_selectionInstanceBuffers[frameIndex]->getDeviceAddress();
+                references.meshletCulling = m_meshletCulling & ~shaderio::MESHLET_COUNT_TRIANGLES; // not counted in the stats
+                for (uint32_t index = 0; index < static_cast<uint32_t>(m_selectionTaskGroups.size()); ++index)
+                {
+                    references.instanceBaseIndex = index;
+                    cmd.pushData(&references, sizeof(shaderio::PushConstantMeshlets));
+                    cmd.drawMeshTasks(m_selectionTaskGroups[index], 1, 1);
+                }
+            });
+    }
+
     void Renderer::addOutlinePass()
     {
         if (m_SelectedEntityIDs.empty() || !m_outlinePipeline)
@@ -147,15 +218,17 @@ namespace Nox
 
         const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
 
-        // Selection outline from the display-resolution entity IDs.
+        // Selection outline from the selection mask (not jittered); without one, from the display-resolution entity IDs.
+        const RGTexture mask = resources.SelectionMask;
         m_renderGraph.AddPass("Outline", RGPassFlags::Raster,
             [&](RGBuilder& builder)
             {
                 builder.Read(resources.EntityHi);
+                ReadIfValid(builder, mask);
                 builder.ColorTarget(resources.Scene, NRI::LoadOP::load, NRI::StoreOP::store);
                 builder.SetRenderArea(m_frame.outputExtent);
             },
-            [this](RGPassContext& context)
+            [this, mask](RGPassContext& context)
             {
                 NRI::CommandBuffer& cmd = context.Cmd();
 
@@ -208,6 +281,7 @@ namespace Nox
                 references.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
                 references.selectedEntityIDsReference = m_selectedEntityIDBuffers[frameIndex]->getDeviceAddress();
                 references.selectedEntityCount = static_cast<uint32_t>(m_SelectedEntityIDs.size());
+                references.selectionMaskTextureIndex = context.SlotOr(mask, 0xFFFFFFFF);
                 cmd.pushData(&references, sizeof(shaderio::PushConstantOutline));
 
                 cmd.drawMeshTasks(1, 1, 1);

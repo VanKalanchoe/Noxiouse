@@ -48,19 +48,21 @@ jittered render-resolution `Entity` and `Depth` targets to display resolution wi
 lines and collider wireframes) therefore shifts by the camera's sub-pixel jitter every frame. DLSS off = no jitter = no
 problem, which is exactly what the user sees.
 
-**Fix options, in the order they should be tried:**
+**Fix (built 2026-10-18, untested): the outline reads a non-jittered selection mask.** `Renderer::addSelectionMaskPass`
+(`PostPasses.cpp`) draws only the selected entities' instances again, at display resolution, with `nonJitteredProj`
+(`SelectionMask.slang`; the task stage is the visibility pass's own `Material_PBR_MeshTask.slang`, one direct draw per
+selected instance, its GPU scene slot read from a small per-frame list). `Outline.slang` finds its edges in that mask
+instead of `EntityHi`; with no mask (nothing selected in the draw list) it falls back to the entity IDs. The mask covers
+the selection's whole silhouette, hidden parts included (UE also outlines selected objects behind others).
 
-1. **Editor outline from a non-jittered pass (recommended, UE/Godot do this).** A small raster pass at display
-   resolution that draws only the selected instances (the GPU scene already knows them: `m_SelectedEntityIDs`) with
-   `nonJitteredProj` into a selection-ID / depth target. The outline reads that instead of `EntityHi`. Cost: only the
-   selected meshes are drawn again. Picking can keep reading `EntityHi` (a one-pixel jitter there is invisible).
-2. **De-jittered blit.** Replace the nearest blit with a compute pass that samples `Entity` / `Depth` at the
-   display pixel's position shifted by the current jitter (`m_currentJitter`, in render-resolution pixels). Removes the
-   per-frame shift at DLAA (1:1); with upscaling the edges still step at render resolution, but no longer move.
-3. **Depth for the 2D overlay from the upscaler.** DLSS does not output depth; keep option 2 for the overlay depth.
+Why not a "de-jittered blit" (shifting the nearest blit by the jitter, the first idea here): at DLAA (1:1) the nearest
+jittered sample of a pixel is the same one with or without the shift, so it changes nothing; with upscaling it halves the
+error but edges still move. Only geometry rendered without jitter holds still.
 
-Phase H1 = option 1 for the outline + option 2 for the overlay depth. Test: DLSS on, select an object, the outline is
-still; the grid does not crawl along geometry edges.
+**Still open:** picking and the 2D overlay's depth test (grid, gizmo lines, collider wireframes) keep reading the jittered
+`EntityHi` / `DepthHi`. A one-pixel jitter in picking is invisible; the grid crawling along geometry edges with DLSS on is
+the remaining visible part (fix: a non-jittered depth of the scene for the overlay, or depth testing the grid in the shader
+against a stabilized depth).
 
 ## 4. Transparency and transmission that hold up
 
@@ -114,4 +116,4 @@ EmberGen / Blender, meshes for mesh particles, and sometimes baked simulations (
 
 ## 7. Order
 
-H1 (DLSS jitter, small) -> S1-S4 (sky) -> H2/H3b (transparency) -> preset ladder (§2) -> H3 -> V1/V2 -> S5 + V4 -> V3, V5.
+H1 outline (built) -> H1 overlay depth -> S1-S4 (sky) -> H2/H3b (transparency) -> preset ladder (§2) -> H3 -> V1/V2 -> S5 + V4 -> V3, V5.

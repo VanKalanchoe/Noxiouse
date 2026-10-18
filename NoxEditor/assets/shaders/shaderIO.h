@@ -1161,6 +1161,9 @@ struct PushConstantOutline
     uint64_t matrixReference; // BDA to UniformBufferObject
     uint64_t selectedEntityIDsReference;
     uint32_t selectedEntityCount;
+    // SelectionMask.slang's display-resolution, non-jittered mask of the selection (bindless slot); 0xFFFFFFFF: none this
+    // frame, the outline falls back to the (jittered) entity IDs.
+    uint32_t selectionMaskTextureIndex;
 };
 
 struct PushConstantQuad

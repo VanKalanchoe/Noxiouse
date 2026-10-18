@@ -677,6 +677,8 @@ namespace Nox
         void addEntityDepthBlitPass();
         void addPostProcessPass();
         void addOverlay2DPass();
+        // Editor: the selected instances drawn again without camera jitter into a display-resolution mask the outline reads.
+        void addSelectionMaskPass();
         void addOutlinePass();
         void addPresentPass();
         void addPickReadbackPass();
@@ -1271,8 +1273,15 @@ namespace Nox
         std::vector<std::unique_ptr<NRI::Buffer>> m_selectedEntityIDBuffers;
         std::vector<void*> m_selectedEntityIDBuffersMapped;
         std::unique_ptr<NRI::Pipeline> m_outlinePipeline = nullptr;
+        // Selection mask (SelectionMask.slang): the selected instances' GPU scene slots for this frame slot (the task stage
+        // reads them as its draw list) and one direct draw per slot.
+        std::unique_ptr<NRI::Pipeline> m_selectionMaskPipeline = nullptr;
+        std::vector<std::unique_ptr<NRI::Buffer>> m_selectionInstanceBuffers;
+        std::vector<void*> m_selectionInstanceBuffersMapped;
+        std::vector<uint32_t> m_selectionTaskGroups; // per selected instance: task workgroups to cover its meshlets
 
         void createOutlinePipeline(bool forceCompile = false);
+        void createSelectionMaskPipeline(bool forceCompile = false);
 
         // PBR stuff
         Ref<Texture2D> m_environmentCubemap;

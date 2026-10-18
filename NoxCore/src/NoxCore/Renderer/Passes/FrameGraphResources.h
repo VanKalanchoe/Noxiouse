@@ -26,6 +26,7 @@ namespace Nox
         RGTexture DepthHi;
         RGTexture Entity;
         RGTexture EntityHi;
+        RGTexture SelectionMask; // editor: the selection at display resolution, not jittered (addSelectionMaskPass)
         RGTexture GBufferAlbedo;
         RGTexture GBufferNormal;
         RGTexture GBufferMaterial;
