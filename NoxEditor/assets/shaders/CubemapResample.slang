@@ -21,6 +21,14 @@ float3 getCubemapVector(uint face, float2 uv)
     return normalize(dir);
 }
 
+// The environment turned by `angle` around world +Y: the source is read at the direction that lands on `dir`.
+float3 rotateEnvironmentDirection(float3 dir, float angle)
+{
+    float c = cos(angle);
+    float s = sin(angle);
+    return float3(dir.x * c - dir.z * s, dir.y, dir.x * s + dir.z * c);
+}
+
 // Re-samples a source cubemap (any format/resolution the sampler can read, including a
 // block-compressed one like BC6H -- sampling decodes it in hardware, unlike a blit) into a
 // smaller, uncompressed, mip-chainable destination. A block-compressed cubemap loaded straight
@@ -46,7 +54,7 @@ void compMain(
     float2 pixelCenter = float2(dispatchThreadID.xy) + 0.5;
     float2 st = (pixelCenter / float(pushConstant.cubemapSize)) * 2.0 - 1.0;
 
-    float3 dir = getCubemapVector(faceIndex, st);
+    float3 dir = rotateEnvironmentDirection(getCubemapVector(faceIndex, st), pushConstant.rotation);
 
     TextureCube sourceCubemap = TextureCube.Handle(uint2(pushConstant.hdrTextureIndex, 0));
     SamplerState linearSampler = SamplerState.Handle(uint2(0, 0));

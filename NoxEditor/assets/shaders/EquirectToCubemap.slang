@@ -39,6 +39,14 @@ float3 getCubemapVector(uint face, float2 uv)
         return normalize(dir);
     }
 
+// The environment turned by `angle` around world +Y: the source is read at the direction that lands on `dir`.
+float3 rotateEnvironmentDirection(float3 dir, float angle)
+{
+    float c = cos(angle);
+    float s = sin(angle);
+    return float3(dir.x * c - dir.z * s, dir.y, dir.x * s + dir.z * c);
+}
+
 [shader("compute")]
 [numthreads(16, 16, 1)]
 void compMain(
@@ -56,7 +64,7 @@ void compMain(
     float2 st = (pixelCenter / float(pushConstant.cubemapSize)) * 2.0 - 1.0;
 
     // 1. Calculate 3D direction vector from center of cube face
-    float3 dir = getCubemapVector(faceIndex, st);
+    float3 dir = rotateEnvironmentDirection(getCubemapVector(faceIndex, st), pushConstant.rotation);
 
     // 2. Convert 3D direction vector into 2D equirectangular UV coordinates
     float2 equirectUV = sampleSphericalMap(dir);

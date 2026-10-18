@@ -2189,11 +2189,28 @@ namespace Nox
         return UploadTexture(cpuData);
     }
 
-    void Renderer::SetEnvironmentMap(const std::filesystem::path& path)
+    void Renderer::SetEnvironmentMap(const std::filesystem::path& path, float rotation)
     {
-        if (!m_proceduralSkyActive &&
-            ((!path.empty() && path == m_environmentPath) ||
-             (path.empty() && m_environmentPath.empty() && !m_environmentCubemap)))
+        if (!m_proceduralSkyActive && !path.empty() && path == m_environmentPath)
+        {
+            if (rotation == m_environmentRotation)
+            {
+                m_environmentRotationPending = false;
+                return;
+            }
+            // Turned: rebuilt from the file once the angle has held for a quarter second.
+            const auto now = std::chrono::steady_clock::now();
+            if (!m_environmentRotationPending || rotation != m_pendingEnvironmentRotation)
+            {
+                m_environmentRotationPending = true;
+                m_pendingEnvironmentRotation = rotation;
+                m_environmentRotationChanged = now;
+                return;
+            }
+            if (now - m_environmentRotationChanged < std::chrono::milliseconds(250))
+                return;
+        }
+        else if (!m_proceduralSkyActive && path.empty() && m_environmentPath.empty() && !m_environmentCubemap)
             return;
         if (!path.empty() && !std::filesystem::exists(path))
         {
@@ -2208,15 +2225,18 @@ namespace Nox
         m_proceduralSkyActive = false;
         m_skyLutsDirty = false;
         m_skyDirty = false;
+        m_environmentRotationPending = false;
 
         if (!path.empty())
         {
-            InitializeEnvironmentLighting(path);
+            InitializeEnvironmentLighting(path, rotation);
             m_environmentPath = path;
+            m_environmentRotation = rotation;
         }
         else
         {
             m_environmentPath.clear();
+            m_environmentRotation = 0.0f;
         }
         m_renderGraph.ResetHistory(NRDHistoryKey);
     }
@@ -2281,7 +2301,7 @@ namespace Nox
             releaseEnvironmentTexture(m_brdfLUT);
     }
 
-    void Renderer::InitializeEnvironmentLighting(const std::filesystem::path& environmentPath)
+    void Renderer::InitializeEnvironmentLighting(const std::filesystem::path& environmentPath, float rotation)
     {
         // 1. Load either an equirectangular HDR panorama or a DDS cubemap.
         Ref<Texture2D> enviromentHDR = TextureImporter::LoadTexture2D(environmentPath, {}, this);
@@ -2305,6 +2325,7 @@ namespace Nox
             uint32_t hdrTextureIndex;
             uint32_t cubemapStorageIndex;
             uint32_t cubemapSize;
+            float rotation = 0.0f;
         } pushData;
 
         {
@@ -2326,6 +2347,7 @@ namespace Nox
         pushData.hdrTextureIndex = enviromentHDR->GetDescriptorIndexSlot();
         pushData.cubemapStorageIndex = m_environmentCubemap->GetDescriptorIndexSlot();
         pushData.cubemapSize = cubemapSize;
+        pushData.rotation = rotation;
 
         // 5. Record and dispatch the compute work
 
@@ -2399,6 +2421,7 @@ namespace Nox
             uint32_t hdrTextureIndex;
             uint32_t cubemapStorageIndex;
             uint32_t cubemapSize;
+            float rotation = 0.0f;
         } pushData;
 
         {

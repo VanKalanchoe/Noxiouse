@@ -252,7 +252,9 @@ namespace Nox
 
         // Rebuild the image-based lighting set for a scene environment. Equirectangular
         // HDR files are converted to a cubemap; DDS cubemaps are uploaded directly.
-        void SetEnvironmentMap(const std::filesystem::path& path);
+        // `rotation` turns the map around world +Y (radians), baked into the cubemap so the skybox, IBL, reflections, DDGI
+        // and the path tracer all see it; a new angle on the same map is applied once it has stopped changing for a moment.
+        void SetEnvironmentMap(const std::filesystem::path& path, float rotation = 0.0f);
         // Use the procedural sky as the scene environment (skybox with the sun's disc, IBL, reflections, DDGI, path tracer
         // misses). Called every frame while the scene wants it; a frame in which the settings changed updates the sky and
         // its IBL inside the frame (a few compute passes, no wait). SetEnvironmentMap switches back to a texture or none.
@@ -590,7 +592,7 @@ namespace Nox
         // Textures finished loading: materials resolve their texture paths again (they drew without them so far).
         static void MarkTexturesLoaded();
         Ref<Texture2D> createSolidColorTexture(uint8_t r, uint8_t g, uint8_t b, uint8_t a);
-        void InitializeEnvironmentLighting(const std::filesystem::path& environmentPath);
+        void InitializeEnvironmentLighting(const std::filesystem::path& environmentPath, float rotation);
         void releaseEnvironmentTextures(bool keepBrdfLut);
         Ref<Texture2D> createEnvironmentCube(uint32_t size, NRI::ImageFormat format);
         void createIBLPipelines();
@@ -1437,6 +1439,11 @@ namespace Nox
         // PBR stuff
         Ref<Texture2D> m_environmentCubemap;
         std::filesystem::path m_environmentPath;
+        float m_environmentRotation = 0.0f;
+        // A new angle for the same map waits until it holds still (dragging it would reload and refilter every frame).
+        bool m_environmentRotationPending = false;
+        float m_pendingEnvironmentRotation = 0.0f;
+        std::chrono::steady_clock::time_point m_environmentRotationChanged{};
         std::unique_ptr<NRI::Pipeline> m_skyboxPipeline = nullptr;
         Ref<Texture2D> m_irradianceCubemap;
         Ref<Texture2D> m_prefilteredEnvMap;

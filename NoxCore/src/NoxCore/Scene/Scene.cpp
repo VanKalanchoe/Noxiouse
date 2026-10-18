@@ -101,7 +101,7 @@ namespace Nox
         else if (environment->Source == EnvironmentSource::ProceduralSky)
             m_renderer->SetProceduralSky(MakeSkyAtmosphereSettings(m_Registry, *environment));
         else
-            m_renderer->SetEnvironmentMap(Project::GetActiveAssetDirectory() / environment->TexturePath);
+            m_renderer->SetEnvironmentMap(Project::GetActiveAssetDirectory() / environment->TexturePath, environment->Rotation);
 
         HeightFogSettings fog;
         if (environment && environment->HeightFog)

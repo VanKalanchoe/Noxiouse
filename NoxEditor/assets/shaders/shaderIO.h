@@ -589,6 +589,7 @@ struct PushConstantEquirect
     uint32_t hdrTextureIndex;
     uint32_t cubemapStorageIndex;
     uint32_t cubemapSize;
+    float rotation; // EquirectToCubemap / CubemapResample: the environment's turn around world +Y (radians), baked in
 };
 
 // SkyAtmosphere.slang, the procedural sky (Hillaire 2020, UE's SkyAtmosphere): one struct for its three compute passes
