@@ -26,6 +26,11 @@ namespace Nox
         bool Deserialize(const std::filesystem::path& filepath);
         bool DeserializeRuntime(const std::filesystem::path& filepath);
 
+        // The scene file's text without the file: exactly what Serialize writes and Deserialize reads (the editor's undo history
+        // keeps scene states this way, so restoring one is the same as saving and reopening the scene).
+        std::string SerializeToText();
+        bool DeserializeText(const std::string& text);
+
         // Reads the components of one serialized entity (a scene file's entity, or a prefab file's) onto `target`. With
         // `keepPlacement` the target keeps its own transform and parent (the root of a prefab instance).
         static void DeserializeEntityComponents(Scene& scene, const YAML::Node& node, Entity target, bool keepPlacement);
@@ -39,6 +44,8 @@ namespace Nox
         // One entity as it would be saved (the components as YAML), including the components of a prefab instance root that a
         // scene file leaves to the prefab. Prefab overrides are the difference between this and the prefab's own text.
         static YAML::Node EntityToNode(Scene& scene, Entity entity);
+        // The same entity as text, without parsing it back (cheap enough to compare every frame).
+        static std::string EntityToText(Scene& scene, Entity entity);
 
         // The overrides, structure changes and nested changes of an instance as a YAML map, in the form they are saved: what a nested
         // instance's changes are compared in against the prefab file's text of it.
@@ -53,6 +60,9 @@ namespace Nox
         // become the children of a new empty root named `name`, positioned relative to the first one. Modified nowhere: the scene
         // is left as it is. Returns false when the file cannot be written.
         static bool SerializePrefab(Scene& scene, const std::vector<Entity>& entities, const std::string& name, const std::filesystem::path& filepath);
+    private:
+        std::string EmitScene(size_t& scriptComponentCount, size_t& scriptClassCount);
+        bool ReadScene(const YAML::Node& data);
     private:
         Ref<Scene> m_Scene;
     };

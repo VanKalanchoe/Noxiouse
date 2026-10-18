@@ -41,6 +41,18 @@ namespace Nox
         // Windows-style rename: the asset's name becomes a text field with the whole name selected.
         void BeginRename(AssetHandle handle);
         void RequestPrefabFromDrop(const ImGuiPayload* payload, const std::filesystem::path& folder);
+
+        // The modern layout (docs/Future.md item 2): a toolbar with the add/import buttons, a clickable path, search, a type filter
+        // and the tile size; the folder tree on the left; the tiles of the folder (or the search results) on the right.
+        void DrawToolbar();
+        void DrawBreadcrumb();
+        void RebuildFolderTree();
+        struct FolderNode;
+        void DrawFolderTree(const FolderNode& node);
+        void DrawTiles();
+        // m_VisibleEntries for the current folder, search text and type filter (rebuilt when one of them or the folder changes).
+        void UpdateVisibleEntries();
+        bool PassesTypeFilter(AssetType type) const;
     private:
         Ref<Project> m_Project;
         Ref<ThumbnailCache> m_ThumbnailCache;
@@ -61,6 +73,26 @@ namespace Nox
             std::string Name; // file name shown under it
         };
         std::vector<BrowserEntry> m_CurrentEntries;
+        // What the tiles show: the folder's entries, or with a search every matching asset below the folder; filtered by type.
+        std::vector<BrowserEntry> m_VisibleEntries;
+        std::string m_VisibleKey; // the inputs m_VisibleEntries was built from
+        uint64_t m_EntriesVersion = 0; // bumped by every RefreshAssetTree
+
+        struct FolderNode
+        {
+            std::filesystem::path Path; // absolute
+            std::string Name;
+            std::vector<FolderNode> Children;
+        };
+        FolderNode m_FolderTree;
+        bool m_FolderTreeDirty = true;
+        double m_FolderTreeTime = 0.0; // ImGui time of the last rebuild
+        std::filesystem::path m_TreeRevealedDirectory; // the folder the tree was last unfolded to
+
+        char m_SearchBuffer[128] = {0};
+        int m_TypeFilter = 0; // index into the toolbar's type list, 0 = all
+        float m_ThumbnailSize = 96.0f;
+        float m_Padding = 16.0f;
         // Selected assets of the folder (click, Ctrl+click, Shift+click, Ctrl+A): dragging one of them drags all.
         std::unordered_set<AssetHandle> m_Selected;
         size_t m_LastClickedEntry = 0;

@@ -4,10 +4,12 @@
 
 #include "NoxCore/Core/Layer.h"
 #include "NoxCore/Events/InputEvents.h"
+#include "EditorHistory.h"
 #include "Panels/SceneHierarchyPanel.h"
 #include "Panels/ContentBrowserPanel.h"
 #include "Panels/RenderGraphPanel.h"
 #include "Panels/NodeGraphEditorPanel.h"
+#include "Panels/MaterialEditorPanel.h"
 #include "NoxCore/Renderer/Font.h"
 #include "NoxCore/Renderer/Renderer.h"
 
@@ -43,6 +45,10 @@ namespace Nox
         void OpenScene();
         void OpenScene(AssetHandle handle);
         void PlaceAssets(const std::vector<AssetHandle>& handles, const glm::vec3& point, const std::string& folder);
+        // Basic shapes (docs/Future.md item 10): the static mesh asset of a shape, written into the project's Shapes folder and
+        // imported the first time it is asked for (0 on failure); CreateShape places it where the editor camera looks.
+        AssetHandle GetShapeAsset(PrimitiveShape shape);
+        void CreateShape(PrimitiveShape shape, const std::string& folder);
         // Writes a prefab from the dragged hierarchy entity (or the whole selection when it is part of it) into the Content
         // Browser folder (relative to the asset directory) and registers it. The scene is not changed. 0 on failure.
         AssetHandle CreatePrefab(UUID dragged, const std::filesystem::path& relativeFolder);
@@ -50,6 +56,13 @@ namespace Nox
         AssetHandle CreateVariant(AssetHandle base, const std::filesystem::path& relativeFolder);
         void SaveScene();
         void SaveSceneAs();
+
+        // Undo / redo (EditorHistory): UpdateHistory runs at the end of every ImGui frame, after the panels made their changes.
+        void UpdateHistory();
+        void Undo();
+        void Redo();
+        // Makes a history state (scene text) the edited scene; the selection is kept by UUID.
+        void RestoreHistoryState(const std::string& text);
         
         void OnScenePlay();
         void OnSceneSimulate();
@@ -64,6 +77,7 @@ namespace Nox
 
         // Focuses an already-open editor for handle, or opens a new one (docs/Animation_Graph_Architecture_Plan_2026.md Step 3).
         void OpenNodeGraphEditor(AssetHandle handle);
+        void OpenMaterialEditor(AssetHandle handle);
 
         // Opens whatever editor window is registered for handle's AssetType (m_AssetOpeners); does nothing for
         // types with none. What double-clicking an asset in the Content Browser or an inspector reference calls.
@@ -199,6 +213,12 @@ namespace Nox
         };
         
         SceneState m_SceneState = SceneState::Edit;
+
+        EditorHistory m_History;
+        EditorHistory m_LevelHistory; // the level's history, put aside while Prefab Mode edits the prefab
+        bool m_HistoryItemWasActive = false;
+        bool m_HistoryGizmoWasUsing = false;
+        bool m_HistoryCheckRequested = false; // an editor shortcut ran (Delete, Ctrl+D, End, ...)
         bool m_UnloadUnusedAssetsRequested = false;
         
         // Panels
@@ -208,6 +228,7 @@ namespace Nox
         // Open node-graph editors (docs/Animation_Graph_Architecture_Plan_2026.md Step 3), one per opened graph
         // asset; OpenNodeGraphEditor focuses an already-open one instead of duplicating it.
         std::vector<Scope<NodeGraphEditorPanel>> m_NodeGraphEditors;
+        std::vector<Scope<MaterialEditorPanel>> m_MaterialEditors;
         // AssetType -> "open its editor window", so a new asset editor is one entry here rather than new
         // double-click handling in every panel that shows asset references.
         std::unordered_map<AssetType, std::function<void(AssetHandle)>> m_AssetOpeners;

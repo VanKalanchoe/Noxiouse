@@ -173,42 +173,10 @@ namespace Nox
     void ContentBrowserPanel::OnImGuiRender()
     {
         ImGui::Begin("Content Browser");
-        m_WindowHovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByPopup);
+        m_WindowHovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByPopup | ImGuiHoveredFlags_ChildWindows);
 
-        if (ImGui::Button("Import"))
-        {
-            static constexpr char filter[] = "Scene and glTF files\0nox;gltf;glb";
-            const std::string selectedFile = Utility::OpenFile(filter);
-            if (!selectedFile.empty())
-            {
-                const bool wasHovered = m_WindowHovered;
-                m_WindowHovered = true;
-                OnExternalFileDrop(selectedFile);
-                m_WindowHovered = wasHovered;
-            }
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("New C# Script"))
-            m_ShowCreateScriptModal = true;
-        ImGui::SameLine();
-        if (ImGui::Button("New Animation Graph"))
-            m_ShowCreateGraphModal = true;
-        ImGui::SameLine();
-        if (m_CurrentDirectory != m_BaseDirectory)
-        {
-            if (ImGui::Button("<"))
-                m_CurrentDirectory = m_CurrentDirectory.parent_path();
-            ImGui::SameLine();
-        }
-        const std::string breadcrumb = std::filesystem::relative(m_CurrentDirectory, m_BaseDirectory).generic_string();
-        ImGui::TextUnformatted(breadcrumb.empty() ? "Assets" : breadcrumb.c_str());
-        ImGui::Separator();
+        DrawToolbar();
 
-        static float padding = 16.0f;
-        static float thumbnailSize = 96.0f;
-        const float cellSize = thumbnailSize + padding;
-        int columnCount = static_cast<int>(ImGui::GetContentRegionAvail().x / cellSize);
-        columnCount = std::max(columnCount, 1);
         // Entities dropped from the hierarchy: the prefab is created in the folder they were dropped on, and its name goes into
         // rename mode (in a folder tile's folder: the browser opens it).
         if (m_HasPrefabDrop)
@@ -269,6 +237,10 @@ namespace Nox
 
         if (m_EntriesDirectory != m_CurrentDirectory)
             RefreshAssetTree();
+        // Folders made outside the editor show up within a couple of seconds.
+        if (m_FolderTreeDirty || ImGui::GetTime() - m_FolderTreeTime > 2.0)
+            RebuildFolderTree();
+        UpdateVisibleEntries();
 
         // Only the visible rows are built (a folder of hundreds of meshes cost milliseconds per frame otherwise); the ids
         // and names are prepared once per refresh.
@@ -277,7 +249,7 @@ namespace Nox
             ImGui::IsKeyPressed(ImGuiKey_A, false) && !ImGui::GetIO().WantTextInput)
         {
             m_Selected.clear();
-            for (const BrowserEntry& entry : m_CurrentEntries)
+            for (const BrowserEntry& entry : m_VisibleEntries)
             {
                 if (!entry.IsDirectory)
                     m_Selected.insert(entry.Handle);
@@ -290,191 +262,29 @@ namespace Nox
             BeginRename(*m_Selected.begin());
         }
 
-        const int rowCount = (static_cast<int>(m_CurrentEntries.size()) + columnCount - 1) / columnCount;
-        const float rowStartX = ImGui::GetCursorPosX();
-        ImGuiListClipper clipper;
-        clipper.Begin(rowCount);
-        while (clipper.Step())
+        // Folder tree | tiles, each scrolling on its own, with a draggable splitter between them (UE's sources panel).
+        // The table does not limit its cells' height: the two children get it explicitly, leaving one line for the status below.
+        const float bodyHeight = std::max(ImGui::GetContentRegionAvail().y - ImGui::GetFrameHeightWithSpacing(), 64.0f);
+        if (ImGui::BeginTable("##content_layout", 2, ImGuiTableFlags_Resizable | ImGuiTableFlags_BordersInnerV))
         {
-            for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row)
-            {
-                for (int column = 0; column < columnCount; ++column)
-                {
-                    const size_t index = static_cast<size_t>(row) * columnCount + column;
-                    if (index >= m_CurrentEntries.size())
-                        break;
-                    const BrowserEntry& browserEntry = m_CurrentEntries[index];
-
-                    if (column > 0)
-                        ImGui::SameLine(rowStartX + column * cellSize);
-                    ImGui::BeginGroup();
-
-                    if (browserEntry.IsDirectory)
-                    {
-                        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
-                        ImGui::ImageButton(browserEntry.Id.c_str(), m_DirectoryIcon->getImTextureID(),
-                            {thumbnailSize, thumbnailSize}, {0, 1}, {1, 0});
-                        ImGui::PopStyleColor();
-                        if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
-                            m_CurrentDirectory = browserEntry.Path;
-                        if (ImGui::BeginDragDropTarget())
-                        {
-                            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("SCENE_HIERARCHY_ENTITY"))
-                                RequestPrefabFromDrop(payload, browserEntry.Path);
-                            ImGui::EndDragDropTarget();
-                        }
-                    }
-                    else
-                    {
-                        const AssetHandle handle = browserEntry.Handle;
-                        const auto& metadata = browserEntry.Metadata;
-
-                        Ref<Texture2D> thumbnail = GetThumbnail(handle, metadata);
-                        if (!thumbnail)
-                            thumbnail = m_FileIcon;
-
-                        const bool selected = m_Selected.contains(handle);
-                        ImGui::PushStyleColor(ImGuiCol_Button, selected ? ImVec4(0.26f, 0.45f, 0.75f, 0.55f) : ImVec4(0, 0, 0, 0));
-                        // Prefabs are blue (icon and name), like prefab instances in the hierarchy.
-                        const bool isPrefab = metadata.Type == AssetType::Prefab;
-                        const bool clicked = ImGui::ImageButton(browserEntry.Id.c_str(), thumbnail->getImTextureID(),
-                            {thumbnailSize, thumbnailSize}, {0, 1}, {1, 0}, ImVec4(0, 0, 0, 0),
-                            isPrefab ? ImVec4(0.45f, 0.7f, 1.0f, 1.0f) : ImVec4(1, 1, 1, 1));
-                        ImGui::PopStyleColor();
-
-                        if (clicked)
-                        {
-                            const ImGuiIO& io = ImGui::GetIO();
-                            if (io.KeyCtrl)
-                            {
-                                if (!m_Selected.erase(handle))
-                                    m_Selected.insert(handle);
-                            }
-                            else if (io.KeyShift)
-                            {
-                                const size_t from = std::min(m_LastClickedEntry, index);
-                                const size_t to = std::max(m_LastClickedEntry, index);
-                                for (size_t i = from; i <= to && i < m_CurrentEntries.size(); ++i)
-                                {
-                                    if (!m_CurrentEntries[i].IsDirectory)
-                                        m_Selected.insert(m_CurrentEntries[i].Handle);
-                                }
-                            }
-                            else
-                            {
-                                m_Selected.clear();
-                                m_Selected.insert(handle);
-                            }
-                            m_LastClickedEntry = index;
-                        }
-
-                        if (ImGui::BeginDragDropSource())
-                        {
-                            // Dragging something outside the selection drags just that; inside it, the whole selection.
-                            if (!selected)
-                            {
-                                m_Selected.clear();
-                                m_Selected.insert(handle);
-                            }
-                            if (m_Selected.size() > 1)
-                            {
-                                const std::vector<AssetHandle> handles(m_Selected.begin(), m_Selected.end());
-                                ImGui::SetDragDropPayload("CONTENT_BROWSER_ITEMS", handles.data(), handles.size() * sizeof(AssetHandle));
-                                ImGui::Text("%zu assets", handles.size());
-                            }
-                            else
-                            {
-                                ImGui::SetDragDropPayload("CONTENT_BROWSER_ITEM", &handle, sizeof(AssetHandle));
-                                ImGui::TextUnformatted(browserEntry.Name.c_str());
-                            }
-                            ImGui::EndDragDropSource();
-                        }
-
-                        if (metadata.Type == AssetType::Prefab && ImGui::BeginPopupContextItem())
-                        {
-                            if (ImGui::MenuItem("Create Variant"))
-                            {
-                                m_HasVariantRequest = true;
-                                m_VariantBase = handle;
-                            }
-                            ImGui::EndPopup();
-                        }
-
-                        if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
-                        {
-                            if (metadata.Type == AssetType::MeshSource)
-                            {
-                                m_PendingImportPath = metadata.FilePath;
-                                m_ShowImportModal = true;
-                                ReadImportFileInfo(Project::GetActiveAssetDirectory() / metadata.FilePath);
-                                const auto defaultDest = m_PendingImportPath.parent_path() / "Meshes" /
-                                    (m_PendingImportPath.stem().string() + ".nmesh");
-                                SetImportDestination(defaultDest);
-                            }
-                            else if (m_OpenAsset)
-                            {
-                                m_OpenAsset(handle); // EditorLayer ignores types it has no editor window for
-                            }
-                        }
-                    }
-
-                    // One line, cut at the thumbnail's width; the full name is in the tooltip.
-                    if (!browserEntry.IsDirectory && browserEntry.Handle != 0 && browserEntry.Handle == m_RenameHandle)
-                    {
-                        ImGui::SetNextItemWidth(thumbnailSize);
-                        if (m_RenameFocus)
-                        {
-                            ImGui::SetKeyboardFocusHere();
-                            ImGui::SetScrollHereY(0.5f);
-                            m_RenameFocus = false;
-                        }
-                        const bool entered = ImGui::InputText("##rename", m_RenameBuffer, sizeof(m_RenameBuffer),
-                            ImGuiInputTextFlags_AutoSelectAll | ImGuiInputTextFlags_EnterReturnsTrue);
-                        if (entered || ImGui::IsItemDeactivated())
-                        {
-                            m_RenameCommit = true;
-                            m_RenameCommitText = m_RenameBuffer;
-                        }
-                    }
-                    else
-                    {
-                        const bool bluePrefabName = !browserEntry.IsDirectory && browserEntry.Metadata.Type == AssetType::Prefab;
-                        if (bluePrefabName)
-                            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.45f, 0.7f, 1.0f, 1.0f));
-                        const ImVec2 nameMin = ImGui::GetCursorScreenPos();
-                        ImGui::PushClipRect(nameMin, ImVec2(nameMin.x + thumbnailSize, nameMin.y + ImGui::GetTextLineHeight()), true);
-                        ImGui::TextUnformatted(browserEntry.Name.c_str());
-                        ImGui::PopClipRect();
-                        if (bluePrefabName)
-                            ImGui::PopStyleColor();
-                        if (ImGui::IsItemHovered())
-                            ImGui::SetTooltip("%s", browserEntry.Name.c_str());
-                    }
-
-                    ImGui::EndGroup();
-                }
-            }
+            ImGui::TableSetupColumn("Folders", ImGuiTableColumnFlags_WidthFixed, 200.0f);
+            ImGui::TableSetupColumn("Assets", ImGuiTableColumnFlags_WidthStretch);
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            if (ImGui::BeginChild("##folder_tree", ImVec2(0.0f, bodyHeight)))
+                DrawFolderTree(m_FolderTree);
+            ImGui::EndChild();
+            ImGui::TableSetColumnIndex(1);
+            if (ImGui::BeginChild("##tiles", ImVec2(0.0f, bodyHeight)))
+                DrawTiles();
+            ImGui::EndChild();
+            ImGui::EndTable();
         }
-        clipper.End();
-
-        // The free space below the tiles takes entities dragged from the hierarchy (a new prefab in this folder). An item is
-        // needed for the drop target: BeginDragDropTarget binds to the last item.
-        {
-            const float reserved = ImGui::GetFrameHeightWithSpacing() * 2.0f;
-            const ImVec2 available = ImGui::GetContentRegionAvail();
-            ImGui::InvisibleButton("##content_browser_blank", ImVec2(available.x, std::max(available.y - reserved, 24.0f)));
-            if (ImGui::IsItemClicked())
-                m_Selected.clear();
-            if (ImGui::BeginDragDropTarget())
-            {
-                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("SCENE_HIERARCHY_ENTITY"))
-                    RequestPrefabFromDrop(payload, m_CurrentDirectory);
-                ImGui::EndDragDropTarget();
-            }
-        }
-
-        ImGui::SliderFloat("Thumbnail Size", &thumbnailSize, 48.0f, 256.0f);
-        ImGui::SliderFloat("Padding", &padding, 0.0f, 32.0f);
+        if (m_SearchBuffer[0] != '\0')
+            ImGui::TextDisabled("%zu results below %s, %zu selected", m_VisibleEntries.size(),
+                                CurrentFolder().empty() ? "Assets" : CurrentFolder().generic_string().c_str(), m_Selected.size());
+        else
+            ImGui::TextDisabled("%zu items, %zu selected", m_VisibleEntries.size(), m_Selected.size());
 
         if (m_ShowCreateScriptModal)
         {
@@ -759,6 +569,432 @@ namespace Nox
         ImGui::End();
     }
 
+    void ContentBrowserPanel::DrawTiles()
+    {
+        const float cellSize = m_ThumbnailSize + m_Padding;
+        const int columnCount = std::max(static_cast<int>(ImGui::GetContentRegionAvail().x / cellSize), 1);
+
+        const int rowCount = (static_cast<int>(m_VisibleEntries.size()) + columnCount - 1) / columnCount;
+        const float rowStartX = ImGui::GetCursorPosX();
+        ImGuiListClipper clipper;
+        clipper.Begin(rowCount);
+        while (clipper.Step())
+        {
+            for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row)
+            {
+                for (int column = 0; column < columnCount; ++column)
+                {
+                    const size_t index = static_cast<size_t>(row) * columnCount + column;
+                    if (index >= m_VisibleEntries.size())
+                        break;
+                    const BrowserEntry& browserEntry = m_VisibleEntries[index];
+
+                    if (column > 0)
+                        ImGui::SameLine(rowStartX + column * cellSize);
+                    ImGui::BeginGroup();
+
+                    if (browserEntry.IsDirectory)
+                    {
+                        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
+                        ImGui::ImageButton(browserEntry.Id.c_str(), m_DirectoryIcon->getImTextureID(),
+                            {m_ThumbnailSize, m_ThumbnailSize}, {0, 1}, {1, 0});
+                        ImGui::PopStyleColor();
+                        if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+                            m_CurrentDirectory = browserEntry.Path;
+                        if (ImGui::BeginDragDropTarget())
+                        {
+                            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("SCENE_HIERARCHY_ENTITY"))
+                                RequestPrefabFromDrop(payload, browserEntry.Path);
+                            ImGui::EndDragDropTarget();
+                        }
+                    }
+                    else
+                    {
+                        const AssetHandle handle = browserEntry.Handle;
+                        const auto& metadata = browserEntry.Metadata;
+
+                        Ref<Texture2D> thumbnail = GetThumbnail(handle, metadata);
+                        if (!thumbnail)
+                            thumbnail = m_FileIcon;
+
+                        const bool selected = m_Selected.contains(handle);
+                        ImGui::PushStyleColor(ImGuiCol_Button, selected ? ImVec4(0.26f, 0.45f, 0.75f, 0.55f) : ImVec4(0, 0, 0, 0));
+                        // Prefabs are blue (icon and name), like prefab instances in the hierarchy.
+                        const bool isPrefab = metadata.Type == AssetType::Prefab;
+                        const bool clicked = ImGui::ImageButton(browserEntry.Id.c_str(), thumbnail->getImTextureID(),
+                            {m_ThumbnailSize, m_ThumbnailSize}, {0, 1}, {1, 0}, ImVec4(0, 0, 0, 0),
+                            isPrefab ? ImVec4(0.45f, 0.7f, 1.0f, 1.0f) : ImVec4(1, 1, 1, 1));
+                        ImGui::PopStyleColor();
+
+                        if (clicked)
+                        {
+                            const ImGuiIO& io = ImGui::GetIO();
+                            if (io.KeyCtrl)
+                            {
+                                if (!m_Selected.erase(handle))
+                                    m_Selected.insert(handle);
+                            }
+                            else if (io.KeyShift)
+                            {
+                                const size_t from = std::min(m_LastClickedEntry, index);
+                                const size_t to = std::max(m_LastClickedEntry, index);
+                                for (size_t i = from; i <= to && i < m_VisibleEntries.size(); ++i)
+                                {
+                                    if (!m_VisibleEntries[i].IsDirectory)
+                                        m_Selected.insert(m_VisibleEntries[i].Handle);
+                                }
+                            }
+                            else
+                            {
+                                m_Selected.clear();
+                                m_Selected.insert(handle);
+                            }
+                            m_LastClickedEntry = index;
+                        }
+
+                        if (ImGui::BeginDragDropSource())
+                        {
+                            // Dragging something outside the selection drags just that; inside it, the whole selection.
+                            if (!selected)
+                            {
+                                m_Selected.clear();
+                                m_Selected.insert(handle);
+                            }
+                            if (m_Selected.size() > 1)
+                            {
+                                const std::vector<AssetHandle> handles(m_Selected.begin(), m_Selected.end());
+                                ImGui::SetDragDropPayload("CONTENT_BROWSER_ITEMS", handles.data(), handles.size() * sizeof(AssetHandle));
+                                ImGui::Text("%zu assets", handles.size());
+                            }
+                            else
+                            {
+                                ImGui::SetDragDropPayload("CONTENT_BROWSER_ITEM", &handle, sizeof(AssetHandle));
+                                ImGui::TextUnformatted(browserEntry.Name.c_str());
+                            }
+                            ImGui::EndDragDropSource();
+                        }
+
+                        if (metadata.Type == AssetType::Prefab && ImGui::BeginPopupContextItem())
+                        {
+                            if (ImGui::MenuItem("Create Variant"))
+                            {
+                                m_HasVariantRequest = true;
+                                m_VariantBase = handle;
+                            }
+                            ImGui::EndPopup();
+                        }
+
+                        if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+                        {
+                            if (metadata.Type == AssetType::MeshSource)
+                            {
+                                m_PendingImportPath = metadata.FilePath;
+                                m_ShowImportModal = true;
+                                ReadImportFileInfo(Project::GetActiveAssetDirectory() / metadata.FilePath);
+                                const auto defaultDest = m_PendingImportPath.parent_path() / "Meshes" /
+                                    (m_PendingImportPath.stem().string() + ".nmesh");
+                                SetImportDestination(defaultDest);
+                            }
+                            else if (m_OpenAsset)
+                            {
+                                m_OpenAsset(handle); // EditorLayer ignores types it has no editor window for
+                            }
+                        }
+                    }
+
+                    // One line, cut at the thumbnail's width; the full name is in the tooltip.
+                    if (!browserEntry.IsDirectory && browserEntry.Handle != 0 && browserEntry.Handle == m_RenameHandle)
+                    {
+                        ImGui::SetNextItemWidth(m_ThumbnailSize);
+                        if (m_RenameFocus)
+                        {
+                            ImGui::SetKeyboardFocusHere();
+                            ImGui::SetScrollHereY(0.5f);
+                            m_RenameFocus = false;
+                        }
+                        const bool entered = ImGui::InputText("##rename", m_RenameBuffer, sizeof(m_RenameBuffer),
+                            ImGuiInputTextFlags_AutoSelectAll | ImGuiInputTextFlags_EnterReturnsTrue);
+                        if (entered || ImGui::IsItemDeactivated())
+                        {
+                            m_RenameCommit = true;
+                            m_RenameCommitText = m_RenameBuffer;
+                        }
+                    }
+                    else
+                    {
+                        const bool bluePrefabName = !browserEntry.IsDirectory && browserEntry.Metadata.Type == AssetType::Prefab;
+                        if (bluePrefabName)
+                            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.45f, 0.7f, 1.0f, 1.0f));
+                        const ImVec2 nameMin = ImGui::GetCursorScreenPos();
+                        ImGui::PushClipRect(nameMin, ImVec2(nameMin.x + m_ThumbnailSize, nameMin.y + ImGui::GetTextLineHeight()), true);
+                        ImGui::TextUnformatted(browserEntry.Name.c_str());
+                        ImGui::PopClipRect();
+                        if (bluePrefabName)
+                            ImGui::PopStyleColor();
+                        if (ImGui::IsItemHovered())
+                            ImGui::SetTooltip("%s", browserEntry.Name.c_str());
+                    }
+
+                    ImGui::EndGroup();
+                }
+            }
+        }
+        clipper.End();
+
+        // The free space below the tiles takes entities dragged from the hierarchy (a new prefab in this folder). An item is
+        // needed for the drop target: BeginDragDropTarget binds to the last item.
+        {
+            const ImVec2 available = ImGui::GetContentRegionAvail();
+            ImGui::InvisibleButton("##content_browser_blank", ImVec2(std::max(available.x, 1.0f), std::max(available.y, 24.0f)));
+            if (ImGui::IsItemClicked())
+                m_Selected.clear();
+            if (ImGui::BeginDragDropTarget())
+            {
+                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("SCENE_HIERARCHY_ENTITY"))
+                    RequestPrefabFromDrop(payload, m_CurrentDirectory);
+                ImGui::EndDragDropTarget();
+            }
+        }
+
+    }
+
+    namespace
+    {
+        constexpr const char* kTypeFilterNames[] = { "All types", "Meshes", "Materials", "Textures", "Prefabs", "Scenes", "Animation" };
+
+        std::string ToLower(std::string_view text)
+        {
+            std::string lower(text);
+            std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char character) { return static_cast<char>(std::tolower(character)); });
+            return lower;
+        }
+
+        // `path` is `folder` or somewhere below it.
+        bool IsInside(const std::filesystem::path& path, const std::filesystem::path& folder)
+        {
+            const std::filesystem::path relative = path.lexically_relative(folder);
+            return !relative.empty() && *relative.begin() != "..";
+        }
+    }
+
+    void ContentBrowserPanel::DrawToolbar()
+    {
+        if (ImGui::Button("+ Add"))
+            ImGui::OpenPopup("##content_add");
+        if (ImGui::BeginPopup("##content_add"))
+        {
+            if (ImGui::MenuItem("C# Script"))
+                m_ShowCreateScriptModal = true;
+            if (ImGui::MenuItem("Animation Graph"))
+                m_ShowCreateGraphModal = true;
+            ImGui::EndPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Import"))
+        {
+            static constexpr char filter[] = "Scene and glTF files\0nox;gltf;glb";
+            const std::string selectedFile = Utility::OpenFile(filter);
+            if (!selectedFile.empty())
+            {
+                const bool wasHovered = m_WindowHovered;
+                m_WindowHovered = true;
+                OnExternalFileDrop(selectedFile);
+                m_WindowHovered = wasHovered;
+            }
+        }
+        ImGui::SameLine();
+        ImGui::BeginDisabled(m_CurrentDirectory == m_BaseDirectory);
+        if (ImGui::ArrowButton("##parent_folder", ImGuiDir_Up))
+            m_CurrentDirectory = m_CurrentDirectory.parent_path();
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        DrawBreadcrumb();
+
+        // Search, type filter and tile size on the right; on the next line when the window is too narrow.
+        const ImGuiStyle& style = ImGui::GetStyle();
+        constexpr float searchWidth = 180.0f;
+        constexpr float typeWidth = 110.0f;
+        constexpr float sizeWidth = 90.0f;
+        const float rightWidth = searchWidth + typeWidth + sizeWidth + 2.0f * style.ItemSpacing.x;
+        ImGui::SameLine();
+        const float available = ImGui::GetContentRegionAvail().x;
+        if (available >= rightWidth)
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + available - rightWidth);
+        else
+            ImGui::NewLine();
+        ImGui::SetNextItemWidth(searchWidth);
+        ImGui::InputTextWithHint("##search", "Search (this folder and below)", m_SearchBuffer, sizeof(m_SearchBuffer));
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(typeWidth);
+        ImGui::Combo("##type_filter", &m_TypeFilter, kTypeFilterNames, IM_ARRAYSIZE(kTypeFilterNames));
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(sizeWidth);
+        ImGui::SliderFloat("##tile_size", &m_ThumbnailSize, 48.0f, 256.0f, "%.0f px");
+        ImGui::Separator();
+    }
+
+    void ContentBrowserPanel::DrawBreadcrumb()
+    {
+        // Assets > Models > Fox: every part opens its folder and takes entities dragged from the hierarchy (a prefab there).
+        std::filesystem::path target;
+        auto crumb = [&](const std::string& label, const std::filesystem::path& folder, size_t index)
+        {
+            if (index > 0)
+            {
+                ImGui::SameLine(0.0f, 2.0f);
+                ImGui::TextDisabled(">");
+                ImGui::SameLine(0.0f, 2.0f);
+            }
+            ImGui::PushID(static_cast<int>(index));
+            if (ImGui::SmallButton(label.c_str()))
+                target = folder;
+            if (ImGui::BeginDragDropTarget())
+            {
+                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("SCENE_HIERARCHY_ENTITY"))
+                    RequestPrefabFromDrop(payload, folder);
+                ImGui::EndDragDropTarget();
+            }
+            ImGui::PopID();
+        };
+
+        crumb("Assets", m_BaseDirectory, 0);
+        std::filesystem::path folder = m_BaseDirectory;
+        size_t index = 1;
+        for (const std::filesystem::path& part : m_CurrentDirectory.lexically_relative(m_BaseDirectory))
+        {
+            if (part.empty() || part == ".")
+                continue;
+            folder /= part;
+            crumb(part.string(), folder, index++);
+        }
+        if (!target.empty())
+            m_CurrentDirectory = target;
+    }
+
+    void ContentBrowserPanel::RebuildFolderTree()
+    {
+        m_FolderTreeDirty = false;
+        m_FolderTreeTime = ImGui::GetTime();
+
+        std::function<void(FolderNode&)> fill = [&](FolderNode& node)
+        {
+            std::error_code error;
+            for (const auto& entry : std::filesystem::directory_iterator(node.Path, error))
+            {
+                std::error_code typeError;
+                const std::string name = entry.path().filename().string();
+                if (!entry.is_directory(typeError) || name.empty() || name.front() == '.')
+                    continue;
+                FolderNode child{ entry.path(), name, {} };
+                fill(child);
+                node.Children.push_back(std::move(child));
+            }
+            std::sort(node.Children.begin(), node.Children.end(),
+                      [](const FolderNode& a, const FolderNode& b) { return ToLower(a.Name) < ToLower(b.Name); });
+        };
+
+        m_FolderTree = FolderNode{ m_BaseDirectory, "Assets", {} };
+        fill(m_FolderTree);
+    }
+
+    void ContentBrowserPanel::DrawFolderTree(const FolderNode& node)
+    {
+        ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_OpenOnDoubleClick | ImGuiTreeNodeFlags_SpanAvailWidth;
+        if (node.Children.empty())
+            flags |= ImGuiTreeNodeFlags_Leaf;
+        if (node.Path == m_CurrentDirectory)
+            flags |= ImGuiTreeNodeFlags_Selected;
+        if (node.Path == m_BaseDirectory)
+            flags |= ImGuiTreeNodeFlags_DefaultOpen;
+        // Opening a folder elsewhere (a tile, the path above) unfolds the tree down to it once; it can be folded again after.
+        if (m_TreeRevealedDirectory != m_CurrentDirectory && node.Path != m_CurrentDirectory && IsInside(m_CurrentDirectory, node.Path))
+            ImGui::SetNextItemOpen(true);
+
+        ImGui::PushID(node.Path.generic_string().c_str());
+        const bool open = ImGui::TreeNodeEx("##folder", flags, "%s", node.Name.c_str());
+        if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen())
+            m_CurrentDirectory = node.Path;
+        if (ImGui::BeginDragDropTarget())
+        {
+            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("SCENE_HIERARCHY_ENTITY"))
+                RequestPrefabFromDrop(payload, node.Path);
+            ImGui::EndDragDropTarget();
+        }
+        if (open)
+        {
+            for (const FolderNode& child : node.Children)
+                DrawFolderTree(child);
+            ImGui::TreePop();
+        }
+        ImGui::PopID();
+
+        if (node.Path == m_BaseDirectory)
+            m_TreeRevealedDirectory = m_CurrentDirectory;
+    }
+
+    bool ContentBrowserPanel::PassesTypeFilter(AssetType type) const
+    {
+        switch (m_TypeFilter)
+        {
+        case 1: return type == AssetType::Mesh || type == AssetType::StaticMesh || type == AssetType::MeshSource || type == AssetType::SkeletalMesh;
+        case 2: return type == AssetType::Material;
+        case 3: return type == AssetType::Texture2D;
+        case 4: return type == AssetType::Prefab;
+        case 5: return type == AssetType::Scene;
+        case 6: return type == AssetType::AnimationSequence || type == AssetType::Skeleton || type == AssetType::AnimationGraph;
+        default: return true;
+        }
+    }
+
+    void ContentBrowserPanel::UpdateVisibleEntries()
+    {
+        const std::string search = ToLower(m_SearchBuffer);
+        std::string key = search;
+        key += '\x1f';
+        key += std::to_string(m_TypeFilter);
+        key += '\x1f';
+        key += std::to_string(m_EntriesVersion);
+        key += '\x1f';
+        key += m_CurrentDirectory.generic_string();
+        if (key == m_VisibleKey)
+            return;
+        m_VisibleKey = std::move(key);
+        m_VisibleEntries.clear();
+
+        if (search.empty())
+        {
+            // Folders stay visible with a type filter (so the filter can be used while browsing), assets must match it.
+            for (const BrowserEntry& entry : m_CurrentEntries)
+            {
+                if (entry.IsDirectory || PassesTypeFilter(entry.Metadata.Type))
+                    m_VisibleEntries.push_back(entry);
+            }
+            return;
+        }
+
+        // Like UE's Content Browser: every registered asset in this folder and below whose name contains the text.
+        const std::filesystem::path folder = CurrentFolder();
+        const std::string folderPrefix = folder.empty() ? std::string() : folder.generic_string() + "/";
+        for (const auto& [handle, metadata] : m_Project->GetEditorAssetManager()->GetAssetRegistry())
+        {
+            if (!PassesTypeFilter(metadata.Type))
+                continue;
+            const std::string relative = metadata.FilePath.lexically_normal().generic_string();
+            if (!folderPrefix.empty() && relative.rfind(folderPrefix, 0) != 0)
+                continue;
+            const std::string name = metadata.FilePath.filename().string();
+            if (ToLower(name).find(search) == std::string::npos)
+                continue;
+            std::error_code error;
+            const std::filesystem::path path = m_BaseDirectory / metadata.FilePath;
+            if (!std::filesystem::exists(path, error)) // registered but not cooked yet (or deleted)
+                continue;
+            m_VisibleEntries.push_back({ path, metadata, handle, false, "##asset_" + relative, name });
+        }
+        std::sort(m_VisibleEntries.begin(), m_VisibleEntries.end(),
+                  [](const BrowserEntry& a, const BrowserEntry& b) { return ToLower(a.Name) < ToLower(b.Name); });
+    }
+
     void ContentBrowserPanel::RefreshAssetTree()
     {
         m_ThumbnailCache = CreateRef<ThumbnailCache>(m_Project);
@@ -800,5 +1036,7 @@ namespace Nox
             m_CurrentEntries.push_back({path, metadata, handle, false, "##asset_" + relativePath.generic_string(), metadata.FilePath.filename().string()});
         }
         m_EntriesDirectory = m_CurrentDirectory;
+        ++m_EntriesVersion;
+        m_FolderTreeDirty = true;
     }
 }

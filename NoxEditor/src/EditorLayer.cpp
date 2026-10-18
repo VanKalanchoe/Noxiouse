@@ -58,6 +58,7 @@ namespace Nox
 
         m_AssetOpeners[AssetType::AnimationGraph] = [this](AssetHandle handle) { OpenNodeGraphEditor(handle); };
         m_AssetOpeners[AssetType::Prefab] = [this](AssetHandle handle) { OpenPrefabMode(handle); };
+        m_AssetOpeners[AssetType::Material] = [this](AssetHandle handle) { OpenMaterialEditor(handle); };
         m_SceneHierarchyPanel.SetOpenAssetCallback([this](AssetHandle handle) { OpenAsset(handle); });
         m_SceneHierarchyPanel.SetFocusEntityCallback([this](Entity entity) { FocusOnEntity(entity); });
         m_SceneHierarchyPanel.SetPlaceAssetsCallback([this](const std::vector<AssetHandle>& handles, const std::string& folder)
@@ -65,6 +66,7 @@ namespace Nox
             // No viewport point for a drop on the hierarchy: at the point the editor camera orbits (in front of it).
             PlaceAssets(handles, m_EditorCamera.GetPosition() + m_EditorCamera.GetForwardDirection() * m_EditorCamera.GetDistance(), folder);
         });
+        m_SceneHierarchyPanel.SetCreateShapeCallback([this](PrimitiveShape shape, const std::string& folder) { CreateShape(shape, folder); });
 
         m_Font = Font::GetDefault();
 
@@ -375,6 +377,37 @@ namespace Nox
                 ImGui::EndMenu();
             }
 
+            if (ImGui::BeginMenu("Edit"))
+            {
+                const bool editing = m_SceneState == SceneState::Edit;
+                const std::string undoLabel = m_History.CanUndo() ? "Undo " + m_History.GetUndoName() : std::string("Undo");
+                const std::string redoLabel = m_History.CanRedo() ? "Redo " + m_History.GetRedoName() : std::string("Redo");
+                if (ImGui::MenuItem(undoLabel.c_str(), "Ctrl+Z", false, editing && m_History.CanUndo()))
+                    Undo();
+                if (ImGui::MenuItem(redoLabel.c_str(), "Ctrl+Y", false, editing && m_History.CanRedo()))
+                    Redo();
+                ImGui::Separator();
+                ImGui::TextDisabled("History: %zu steps, %.1f MB", m_History.GetStateCount() > 0 ? m_History.GetStateCount() - 1 : 0,
+                                    static_cast<double>(m_History.GetMemoryBytes()) / (1024.0 * 1024.0));
+                ImGui::EndMenu();
+            }
+
+            if (ImGui::BeginMenu("Create"))
+            {
+                if (ImGui::MenuItem("Empty Entity") && m_ActiveScene)
+                    m_ActiveScene->CreateEntity("Empty Entity");
+                if (ImGui::BeginMenu("Shapes"))
+                {
+                    for (uint8_t index = 0; index < static_cast<uint8_t>(PrimitiveShape::Count); ++index)
+                    {
+                        const PrimitiveShape shape = static_cast<PrimitiveShape>(index);
+                        if (ImGui::MenuItem(PrimitiveShapes::GetName(shape)))
+                            CreateShape(shape, std::string());
+                    }
+                    ImGui::EndMenu();
+                }
+                ImGui::EndMenu();
+            }
 
             if (ImGui::BeginMenu("Window"))
             {
@@ -790,6 +823,9 @@ namespace Nox
         for (auto& panel : m_NodeGraphEditors)
             panel->OnImGuiRender();
         std::erase_if(m_NodeGraphEditors, [](const Scope<NodeGraphEditorPanel>& panel) { return !panel->IsOpen(); });
+        for (auto& panel : m_MaterialEditors)
+            panel->OnImGuiRender();
+        std::erase_if(m_MaterialEditors, [](const Scope<MaterialEditorPanel>& panel) { return !panel->IsOpen(); });
 
         // "Right" Window
         ImGui::Begin("Stats");
@@ -1530,6 +1566,8 @@ namespace Nox
         ImGui::End(); // End Settings
         
         UI_ToolBar();
+
+        UpdateHistory();
     }
 
     void EditorLayer::UI_ToolBar()
@@ -1685,8 +1723,29 @@ namespace Nox
         bool control = (Input::IsKeyPressed(SDL_SCANCODE_LCTRL) || Input::IsKeyPressed(SDL_SCANCODE_RCTRL));
         bool shift = (Input::IsKeyPressed(SDL_SCANCODE_LSHIFT) || Input::IsKeyPressed(SDL_SCANCODE_RSHIFT));
 
+        // Shortcuts change the scene outside any ImGui item (Delete, Ctrl+D, End): the history looks for a change this frame.
+        m_HistoryCheckRequested = true;
+
         switch (e.GetKeyCode())
         {
+        case SDL_SCANCODE_Z:
+            {
+                // Ctrl+Z undo, Ctrl+Shift+Z redo (text fields keep their own undo: WantTextInput returned above).
+                if (control)
+                {
+                    if (shift)
+                        Redo();
+                    else
+                        Undo();
+                }
+                break;
+            }
+        case SDL_SCANCODE_Y:
+            {
+                if (control)
+                    Redo();
+                break;
+            }
         case SDL_SCANCODE_N:
             {
                 if (control)
@@ -2812,6 +2871,131 @@ namespace Nox
         }
     }
 
+    AssetHandle EditorLayer::GetShapeAsset(PrimitiveShape shape)
+    {
+        Ref<Project> project = Project::GetActive();
+        if (!project)
+            return 0;
+
+        // Like UE's engine BasicShapes, but in the project: one asset per shape, shared by every placement, whose material can
+        // be edited like any imported one. A glTF already in the folder (made earlier) is imported again rather than rewritten.
+        auto assetManager = project->GetEditorAssetManager();
+        const std::string name = PrimitiveShapes::GetName(shape);
+        const std::filesystem::path meshPath = std::filesystem::path("Shapes") / (name + ".nsmesh");
+        if (const AssetHandle existing = assetManager->FindHandleByPath(meshPath, AssetType::StaticMesh); existing != 0)
+            return existing;
+
+        const std::filesystem::path sourcePath = std::filesystem::path("Shapes") / (name + ".gltf");
+        const std::filesystem::path assetDirectory = Project::GetActiveAssetDirectory();
+        if (!std::filesystem::exists(assetDirectory / sourcePath) && PrimitiveShapes::WriteGltf(shape, assetDirectory / "Shapes").empty())
+        {
+            NOX_CORE_ERROR("Could not write the {} shape into {}", name, (assetDirectory / "Shapes").generic_string());
+            return 0;
+        }
+
+        MeshImportSettings settings;
+        settings.ImportSkeletalMeshes = false;
+        settings.ImportAnimations = false;
+        settings.StaticCombine = MeshCombineMode::CombineAll; // one asset, registered right away (Do Not Combine registers when its cook ends)
+        settings.ImportScale = WorldUnits::PerSourceUnit(WorldUnits::SourceUnit::Meters); // the glTF is in meters, baked at cook time
+        if (!assetManager->ImportModel(sourcePath, meshPath, settings))
+            return 0;
+        return assetManager->FindHandleByPath(meshPath, AssetType::StaticMesh);
+    }
+
+    void EditorLayer::CreateShape(PrimitiveShape shape, const std::string& folder)
+    {
+        if (!m_ActiveScene)
+            return;
+        const AssetHandle mesh = GetShapeAsset(shape);
+        if (mesh == 0)
+            return;
+        // Placed like a model dropped on the hierarchy: at the point the editor camera orbits. One mesh node, so it spawns as a
+        // plain mesh entity named after the shape once the asset has loaded.
+        PlaceAssets({ mesh }, m_EditorCamera.GetPosition() + m_EditorCamera.GetForwardDirection() * m_EditorCamera.GetDistance(), folder);
+    }
+
+    void EditorLayer::UpdateHistory()
+    {
+        // An interaction ends when the ImGui item that was held (a drag, a text field, a button, a menu item, a drag-drop source)
+        // lets go, when the gizmo is released, or when a shortcut ran: that is when an edit is complete and becomes one step.
+        const bool itemActive = ImGui::IsAnyItemActive();
+        const bool gizmoUsing = ImGuizmo::IsUsing();
+        EditorHistory::FrameInfo frame;
+        frame.InteractionActive = itemActive || gizmoUsing;
+        frame.GizmoEnded = m_HistoryGizmoWasUsing && !gizmoUsing;
+        // A key pressed during a drag (Ctrl toggles snapping) waits for the drag to end, so the drag stays one step.
+        frame.InteractionEnded = !frame.InteractionActive &&
+                                 ((m_HistoryItemWasActive && !itemActive) || frame.GizmoEnded || m_HistoryCheckRequested);
+        m_HistoryItemWasActive = itemActive;
+        m_HistoryGizmoWasUsing = gizmoUsing;
+        if (!frame.InteractionActive)
+            m_HistoryCheckRequested = false;
+
+        // Play and Simulate change a copy of the scene that is thrown away on Stop: nothing to undo there.
+        if (m_SceneState != SceneState::Edit || !m_ActiveScene || !Project::GetActive())
+            return;
+
+        frame.AssetsLoading = Project::GetActive()->GetEditorAssetManager()->GetLoadingCount() > 0;
+        if (Entity selected = m_SceneHierarchyPanel.GetSelectedEntity())
+            frame.Watched = selected.GetUUID();
+        m_History.Update(m_ActiveScene, frame);
+    }
+
+    void EditorLayer::Undo()
+    {
+        // Not in the middle of a drag: the step being dragged is not taken yet.
+        if (m_SceneState != SceneState::Edit || !m_History.CanUndo() || ImGuizmo::IsUsing() || ImGui::IsAnyItemActive())
+            return;
+        const std::string name = m_History.GetUndoName();
+        RestoreHistoryState(m_History.StepBack());
+        NOX_CORE_INFO("Undo: {}", name);
+    }
+
+    void EditorLayer::Redo()
+    {
+        if (m_SceneState != SceneState::Edit || !m_History.CanRedo() || ImGuizmo::IsUsing() || ImGui::IsAnyItemActive())
+            return;
+        const std::string name = m_History.GetRedoName();
+        RestoreHistoryState(m_History.StepForward());
+        NOX_CORE_INFO("Redo: {}", name);
+    }
+
+    void EditorLayer::RestoreHistoryState(const std::string& text)
+    {
+        NOX_PROFILE_SCOPE("Undo Restore");
+
+        // Loaded like a scene file into a new scene, which replaces the edited one (what OpenScene does): every entity keeps its
+        // UUID, model and prefab instances spawn again from their (already loaded) assets.
+        Ref<Scene> restored = CreateRef<Scene>();
+        SceneSerializer serializer(restored);
+        if (!serializer.DeserializeText(text))
+        {
+            NOX_CORE_ERROR("Undo / redo: the history state could not be read; the scene is left as it is");
+            return;
+        }
+
+        std::vector<UUID> selection;
+        for (Entity selected : m_SceneHierarchyPanel.GetSelectedEntities())
+        {
+            if (selected)
+                selection.push_back(selected.GetUUID());
+        }
+
+        m_HoveredEntity = Entity();
+        restored->OnViewportResize(static_cast<uint32_t>(m_ViewportSize.x), static_cast<uint32_t>(m_ViewportSize.y));
+        m_EditorScene = restored;
+        m_ActiveScene = restored;
+        m_SceneHierarchyPanel.SetContext(restored);
+        for (UUID id : selection)
+        {
+            if (Entity entity = restored->GetEntityByUUID(id))
+                m_SceneHierarchyPanel.ToggleSelectedEntity(entity);
+        }
+        m_UnloadUnusedAssetsRequested = true;
+        m_History.OnSceneRestored(restored);
+    }
+
     void EditorLayer::SaveScene()
     {
         if (m_PrefabMode.Active)
@@ -2911,6 +3095,9 @@ namespace Nox
         m_HoveredEntity = Entity();
         m_EditorScene = prefabScene;
         m_ActiveScene = prefabScene;
+        // Prefab Mode gets its own history; the level's waits until it is back.
+        m_LevelHistory = std::move(m_History);
+        m_History.Clear();
         m_EditorScenePath.clear(); // nothing saves the level over the prefab
         m_SceneHierarchyPanel.SetContext(m_EditorScene);
         m_SceneHierarchyPanel.SetSelectedEntity(root);
@@ -3088,6 +3275,8 @@ namespace Nox
         m_HoveredEntity = Entity();
         m_EditorScene = m_PrefabMode.ReturnScene;
         m_ActiveScene = m_EditorScene;
+        m_History = std::move(m_LevelHistory);
+        m_LevelHistory.Clear();
         m_EditorScenePath = m_PrefabMode.ReturnScenePath;
         m_PrefabMode = {};
         m_SceneHierarchyPanel.SetContext(m_EditorScene);
@@ -3113,6 +3302,19 @@ namespace Nox
             }
         }
         m_NodeGraphEditors.push_back(CreateScope<NodeGraphEditorPanel>(handle));
+    }
+
+    void EditorLayer::OpenMaterialEditor(AssetHandle handle)
+    {
+        for (auto& panel : m_MaterialEditors)
+        {
+            if (panel->GetMaterial() == handle)
+            {
+                ImGui::SetWindowFocus(panel->GetTitle().c_str()); // already open: bring it to the front
+                return;
+            }
+        }
+        m_MaterialEditors.push_back(CreateScope<MaterialEditorPanel>(handle));
     }
 
     void EditorLayer::OnScenePlay()

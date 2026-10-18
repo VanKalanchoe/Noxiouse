@@ -5,6 +5,7 @@
 
 #include <imgui.h>
 
+#include "NoxCore/Asset/PrimitiveShapes.h"
 #include "NoxCore/Core/core.h"
 #include "NoxCore/Scene/Entity.h"
 #include "NoxCore/Scene/Scene.h"
@@ -38,6 +39,8 @@ namespace Nox
         void SetPlaceAssetsCallback(std::function<void(const std::vector<AssetHandle>&, const std::string&)> callback) { m_PlaceAssets = std::move(callback); }
         // Double-clicking an entity's row (not its rename/arrow): EditorLayer frames the editor camera on it, like UE5's Outliner.
         void SetFocusEntityCallback(std::function<void(Entity)> callback) { m_FocusEntity = std::move(callback); }
+        // Right-click > Shapes > Cube / Sphere / ...: EditorLayer places the shape, in the folder (or "" for the top level).
+        void SetCreateShapeCallback(std::function<void(PrimitiveShape, const std::string&)> callback) { m_CreateShape = std::move(callback); }
 
         ImVec2 left;
         bool leftFocused;
@@ -54,6 +57,8 @@ namespace Nox
         void DrawFolderNode(const std::string& path, const std::set<std::string>& allFolders);
         void FileEntities(UUID dragged, const std::string& path);
         void AcceptAssetDrop(const std::string& folder);
+        // The "Shapes" submenu of a right-click menu; shapes made from it are filed in `folder` ("" = top level).
+        void DrawCreateShapeMenu(const std::string& folder);
     private:
         Ref<Scene> m_Context;
         std::vector<Entity> m_SelectionContexts;
@@ -73,5 +78,6 @@ namespace Nox
         std::function<void(const std::vector<AssetHandle>&, const std::string&)> m_PlaceAssets;
         std::function<void(UUID)> m_CreatePrefabFromEntity;
         std::function<void(Entity)> m_FocusEntity;
+        std::function<void(PrimitiveShape, const std::string&)> m_CreateShape;
     };
 }

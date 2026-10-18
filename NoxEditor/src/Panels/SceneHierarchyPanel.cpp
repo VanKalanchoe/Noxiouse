@@ -21,6 +21,7 @@
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Scripting/ScriptEngine.h"
 #include "NoxCore/Utils/Utils.h"
+#include "MaterialEditorPanel.h"
 
 namespace Nox
 {
@@ -267,6 +268,7 @@ namespace Nox
                 {
                     m_Context->CreateEntity("Empty Entity");
                 }
+                DrawCreateShapeMenu(std::string());
 
                 ImGui::EndPopup();
             }
@@ -337,6 +339,19 @@ namespace Nox
             m_PlaceAssets(handles, folder);
     }
 
+    void SceneHierarchyPanel::DrawCreateShapeMenu(const std::string& folder)
+    {
+        if (!m_CreateShape || !ImGui::BeginMenu("Shapes"))
+            return;
+        for (uint8_t index = 0; index < static_cast<uint8_t>(PrimitiveShape::Count); ++index)
+        {
+            const PrimitiveShape shape = static_cast<PrimitiveShape>(index);
+            if (ImGui::MenuItem(PrimitiveShapes::GetName(shape)))
+                m_CreateShape(shape, folder);
+        }
+        ImGui::EndMenu();
+    }
+
     void SceneHierarchyPanel::DrawFolderNode(const std::string& path, const std::set<std::string>& allFolders)
     {
         ImGui::PushID(path.c_str());
@@ -376,6 +391,8 @@ namespace Nox
             }
             if (ImGui::MenuItem("Delete Folder"))
                 deleteFolder = true;
+            ImGui::Separator();
+            DrawCreateShapeMenu(path);
             ImGui::EndPopup();
         }
 
@@ -1314,92 +1331,14 @@ namespace Nox
                                 }
                             }
 
-                            bool changed = false;
-                            // The renderer shades with the factors of the material's workflow only (PackMaterial):
-                            // specular-glossiness materials (e.g. Bistro) use Diffuse/Specular/Glossiness.
-                            const bool specularGlossiness = data.Workflow == 1.0f;
-                            if (specularGlossiness)
+                            // Edited in the Material Editor window (Edit), or right here under Quick Edit.
+                            ImGui::SameLine();
+                            if (ImGui::Button(("Edit##" + std::to_string(i)).c_str()) && m_OpenAsset)
+                                m_OpenAsset(handle);
+                            if (ImGui::TreeNode(("Quick Edit##" + std::to_string(i)).c_str()))
                             {
-                                ImGui::TextDisabled("Workflow: Specular-Glossiness");
-                                changed |= ImGui::ColorEdit4("Diffuse", glm::value_ptr(data.DiffuseFactor));
-                                changed |= ImGui::ColorEdit3("Specular", glm::value_ptr(data.SpecularFactor));
-                                changed |= ImGui::DragFloat("Glossiness", &data.SpecularFactor.a, 0.01f, 0.0f, 1.0f);
-                            }
-                            else
-                            {
-                                ImGui::TextDisabled("Workflow: Metallic-Roughness");
-                                changed |= ImGui::ColorEdit4("Base Color", glm::value_ptr(data.BaseColorFactor));
-                                changed |= ImGui::DragFloat("Metallic", &data.MetallicFactor, 0.01f, 0.0f, 1.0f);
-                                changed |= ImGui::DragFloat("Roughness", &data.RoughnessFactor, 0.01f, 0.0f, 1.0f);
-                            }
-                            changed |= ImGui::ColorEdit3("Emissive", glm::value_ptr(data.EmissiveFactor));
-                            changed |= ImGui::DragFloat("Emissive Strength", &data.emissiveStrength, 0.01f, 0.0f, 100.0f);
-                            changed |= ImGui::DragFloat("Transmission", &data.TransmissionFactor, 0.01f, 0.0f, 1.0f);
-                            changed |= ImGui::DragFloat("IOR", &data.IOR, 0.01f, 1.0f, 3.0f);
-                            changed |= ImGui::DragFloat("Thickness", &data.Thickness, 0.01f, 0.0f, 10.0f);
-
-                            auto drawTextureReference = [&](const char* labelName,
-                                                            const char* id,
-                                                            std::string& texturePath)
-                            {
-                                std::string label = texturePath.empty()
-                                                        ? "None"
-                                                        : std::filesystem::path(texturePath).filename().string();
-                                ImGui::Text("%s", labelName);
-                                ImGui::SameLine();
-                                ImGui::Button((label + "##" + id).c_str(), ImVec2(150.0f, 0.0f));
-
-                                if (ImGui::BeginDragDropTarget())
-                                {
-                                    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEM"))
-                                    {
-                                        AssetHandle textureHandle = *(const AssetHandle*)payload->Data;
-                                        if (AssetManager::GetAssetType(textureHandle) == AssetType::Texture2D)
-                                        {
-                                            const auto& textureMetadata =
-                                                Project::GetActive()->GetEditorAssetManager()->GetMetadata(textureHandle);
-                                            texturePath = textureMetadata.SourceFilePath.empty()
-                                                              ? textureMetadata.FilePath.generic_string()
-                                                              : textureMetadata.SourceFilePath.generic_string();
-                                            changed = true;
-                                        }
-                                        else
-                                        {
-                                            NOX_CORE_WARN("Wrong Asset Type - Expected a Texture (this slot takes a texture, not a material)");
-                                        }
-                                    }
-                                    ImGui::EndDragDropTarget();
-                                }
-                            };
-
-                            drawTextureReference(specularGlossiness ? "Diffuse Texture" : "Base Color Texture", "BaseColor", data.BaseColorTexturePath);
-                            drawTextureReference(specularGlossiness ? "Specular Glossiness" : "Metallic Roughness", "MetallicRoughness", data.MetallicRoughnessTexturePath);
-                            drawTextureReference("Normal Texture", "Normal", data.NormalTexturePath);
-                            drawTextureReference("Occlusion Texture", "Occlusion", data.OcclusionTexturePath);
-                            drawTextureReference("Emissive Texture", "Emissive", data.EmissiveTexturePath);
-                            drawTextureReference("Transmission Texture", "Transmission", data.TransmissionTexturePath);
-
-                            int alphaMode = static_cast<int>(data.Mode);
-                            const char* alphaModes[] = {"Opaque", "Mask", "Blend"};
-                            if (ImGui::Combo("Alpha Mode", &alphaMode, alphaModes, 3))
-                            {
-                                data.Mode = static_cast<AlphaMode>(alphaMode);
-                                changed = true;
-                            }
-                            if (data.Mode == AlphaMode::Mask)
-                                changed |= ImGui::DragFloat("Alpha Cutoff", &data.AlphaMaskCutoff, 0.005f, 0.0f, 1.0f);
-                            changed |= ImGui::Checkbox("Double Sided", &data.DoubleSided);
-                            changed |= ImGui::Checkbox("Unlit", &data.Unlit);
-
-                            if (changed)
-                            {
-                                // Every instance using this material shades with the edit from this frame.
-                                Renderer::MarkMaterialChanged(handle);
-                                const auto& metadata = Project::GetActive()->GetEditorAssetManager()->GetMetadata(handle);
-                                MaterialSerializer::Serialize(
-                                    Project::GetActiveAssetDirectory() / metadata.FilePath,
-                                    data
-                                );
+                                MaterialEditorPanel::DrawProperties(handle, data);
+                                ImGui::TreePop();
                             }
                         }
                     }

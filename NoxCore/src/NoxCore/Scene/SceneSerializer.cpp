@@ -856,11 +856,11 @@ namespace Nox
         out << YAML::EndMap; // Corrected: No parentheses
     }
 
-    void SceneSerializer::Serialize(const std::filesystem::path& filepath)
+    std::string SceneSerializer::EmitScene(size_t& scriptComponentCount, size_t& scriptClassCount)
     {
         YAML::Emitter out;
-        size_t scriptComponentCount = 0;
-        size_t scriptClassCount = 0;
+        scriptComponentCount = 0;
+        scriptClassCount = 0;
         out << YAML::BeginMap; // Corrected: No parentheses
         out << YAML::Key << "Scene" << YAML::Value << "Untitled";
         out << YAML::Key << "Entities" << YAML::Value << YAML::BeginSeq; // Corrected: No parentheses
@@ -887,6 +887,21 @@ namespace Nox
             out << YAML::EndSeq;
         }
         out << YAML::EndMap; // Corrected: No parentheses
+        return std::string(out.c_str(), out.size());
+    }
+
+    std::string SceneSerializer::SerializeToText()
+    {
+        size_t scriptComponentCount = 0;
+        size_t scriptClassCount = 0;
+        return EmitScene(scriptComponentCount, scriptClassCount);
+    }
+
+    void SceneSerializer::Serialize(const std::filesystem::path& filepath)
+    {
+        size_t scriptComponentCount = 0;
+        size_t scriptClassCount = 0;
+        const std::string text = EmitScene(scriptComponentCount, scriptClassCount);
 
         const std::filesystem::path filePath(filepath);
         std::ofstream fout(filePath);
@@ -896,7 +911,7 @@ namespace Nox
             return;
         }
 
-        fout << out.c_str();
+        fout << text;
         fout.close();
         if (!fout)
         {
@@ -913,6 +928,13 @@ namespace Nox
         YAML::Emitter out;
         SerializeEntity(out, scene, entity, true);
         return YAML::Load(out.c_str());
+    }
+
+    std::string SceneSerializer::EntityToText(Scene& scene, Entity entity)
+    {
+        YAML::Emitter out;
+        SerializeEntity(out, scene, entity, true);
+        return std::string(out.c_str(), out.size());
     }
 
     std::string SceneSerializer::PrefabToText(Scene& scene, const std::vector<Entity>& entities, const std::string& name)
@@ -1621,6 +1643,27 @@ namespace Nox
             return false;
         }
 
+        return ReadScene(data);
+    }
+
+    bool SceneSerializer::DeserializeText(const std::string& text)
+    {
+        YAML::Node data;
+        try
+        {
+            data = YAML::Load(text);
+        }
+        catch (YAML::ParserException& e)
+        {
+            NOX_CORE_ERROR("Failed to read scene text\n       {0}", e.what());
+            return false;
+        }
+
+        return ReadScene(data);
+    }
+
+    bool SceneSerializer::ReadScene(const YAML::Node& data)
+    {
         if (!data["Scene"])
             return false;
 
