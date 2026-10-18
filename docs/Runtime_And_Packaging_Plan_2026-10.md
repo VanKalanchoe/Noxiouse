@@ -63,6 +63,14 @@ headers; measure the build time before and after), but it is unrelated to packag
   model loads; a runtime manager needs the cooked set and runtime registry of R3 to know everything up front, and the pack
   reader of R4 to read it. Until then the player uses the editor's manager, which works because the editor has cooked
   everything once.
+- **`RuntimeAssetManager` built (2026-10-18, untested):** the editor's loading pipeline in read-only mode
+  (`EditorAssetManager(ReadOnlyTag)`; `Project::Load(path, true)`, which NoxRuntime uses). Same background loads, uploads,
+  texture streaming, unused-asset sweep and memory assets; off: the file watcher and reimports, source hashing after a load,
+  folder scans for new cooked files, registry writes (and the start-up check that drops entries without files, with its
+  `.bak`), writing a missing `.nmat` (the mesh's embedded material is used), and the texture color-space correction (which
+  deletes and recooks a `.ntex`). So the player never changes the project or a packaged game's folder on disk. Engine code
+  keeps reaching both through `GetEditorAssetManager()` (the runtime one is a subclass); the pack reader (R4) replaces its
+  file reads.
 
 ## 2d. R3 + R6 + a first R7 built (2026-10-18, untested): File > Package Game
 

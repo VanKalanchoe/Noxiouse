@@ -182,6 +182,8 @@ namespace Nox
 
     void EditorAssetManager::Init()
     {
+        if (m_ReadOnly)
+            return;
         m_AssetWatcher.watch(Project::GetActiveAssetDirectory(), [this](const std::filesystem::path& path) 
         {
             OnAssetModifiedOnDisk(path);
@@ -221,7 +223,7 @@ namespace Nox
         PublishLoadedAssets();
         PublishSplitImports();
 
-        if (m_RegistryDirty && std::chrono::steady_clock::now() - m_RegistryWritten >= std::chrono::seconds(1))
+        if (m_RegistryDirty && !m_ReadOnly && std::chrono::steady_clock::now() - m_RegistryWritten >= std::chrono::seconds(1))
         {
             SerializeAssetRegistry();
             m_RegistryDirty = false;
@@ -275,7 +277,7 @@ namespace Nox
                 ImportMeshTextures(loaded.Loaded);
                 ImportMeshMaterials(loaded.Loaded, metadata);
                 // New files appear next to a model only when it is cooked (skeleton, clips, extracted textures).
-                if (loaded.Cooked)
+                if (loaded.Cooked && !m_ReadOnly)
                     ScanAndRegisterNewAssets(metadata.FilePath.parent_path().parent_path());
                 LinkImportedAssets(loaded.Loaded, metadata);
             }
@@ -310,7 +312,7 @@ namespace Nox
     
     void EditorAssetManager::ReimportAsset(AssetHandle handle, bool force)
     {
-        if (!IsAssetHandleValid(handle) || m_MemoryAssets.contains(handle)) return;
+        if (m_ReadOnly || !IsAssetHandleValid(handle) || m_MemoryAssets.contains(handle)) return;
 
         const AssetMetadata& metadata = GetMetadata(handle);
         auto sourcePath = Project::GetActiveAssetDirectory() / metadata.SourceFilePath;
@@ -668,7 +670,8 @@ namespace Nox
             {
                 AssetMetadata& metadata = m_AssetRegistry.at(registered);
                 const NRI::ImageFormat expectedFormat = sRGB ? NRI::ImageFormat::SRGBA8 : NRI::ImageFormat::RGBA8;
-                if (metadata.TextureSpec.format != expectedFormat)
+                // (Read-only: the cooked texture is taken as it is; correcting it means cooking again.)
+                if (metadata.TextureSpec.format != expectedFormat && !m_ReadOnly)
                 {
                     metadata.TextureSpec.format = expectedFormat;
                     texturesNeedingRecook.push_back(registered);
@@ -777,6 +780,12 @@ namespace Nox
             const auto fullMaterialPath = Project::GetActiveAssetDirectory() / materialPath;
             if (materialHandle == 0 || (checkedPaths.insert(materialKey).second && !std::filesystem::exists(fullMaterialPath)))
             {
+                // Read-only: a material file that is not there leaves the slot to the mesh's embedded material.
+                if (m_ReadOnly)
+                {
+                    materialAssets.push_back(AssetHandle(0));
+                    continue;
+                }
                 // The cook writes the .nmat files (MeshImporter::CookMesh); one deleted since is written again here.
                 if (!std::filesystem::exists(fullMaterialPath) && !MaterialSerializer::Serialize(fullMaterialPath, material))
                     continue;
@@ -1360,7 +1369,7 @@ namespace Nox
             m_LoadedAssets[handle] = asset;
             const Clock::time_point importDone = Clock::now();
 
-            if (asset && !metadata.SourceFilePath.empty())
+            if (asset && !metadata.SourceFilePath.empty() && !m_ReadOnly)
             {
                 NOX_PROFILE_SCOPE("Asset Source Hash");
                 auto sourcePath = Project::GetActiveAssetDirectory() / metadata.SourceFilePath;
@@ -1384,6 +1393,7 @@ namespace Nox
                     ImportMeshMaterials(asset, metadata);
                 }
                 materialsDone = Clock::now();
+                if (!m_ReadOnly)
                 {
                     NOX_PROFILE_SCOPE("Asset Folder Scan");
                     ScanAndRegisterNewAssets(metadata.FilePath.parent_path().parent_path());
@@ -1431,7 +1441,7 @@ namespace Nox
 
     void EditorAssetManager::Shutdown()
     {
-        if (m_RegistryDirty)
+        if (m_RegistryDirty && !m_ReadOnly)
         {
             SerializeAssetRegistry();
             m_RegistryDirty = false;
@@ -1829,6 +1839,7 @@ namespace Nox
         // freed by UnloadUnusedAssets). When most of the registry is missing, that is a moved or unreachable asset folder, not
         // deleted assets: the registry is left as it is. The file before the clean-up is kept next to it as .bak.
         bool registryPruned = false;
+        if (!m_ReadOnly)
         {
             const std::filesystem::path assetDirectory = Project::GetActiveAssetDirectory();
             std::vector<AssetHandle> stale;

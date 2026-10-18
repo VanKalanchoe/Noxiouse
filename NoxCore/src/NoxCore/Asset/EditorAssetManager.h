@@ -26,6 +26,8 @@ namespace Nox
     class EditorAssetManager : public AssetManagerBase
     {
     public:
+        EditorAssetManager() = default;
+
         virtual Ref<Asset> GetAsset(AssetHandle handle) override;
         virtual AssetState RequestAsset(AssetHandle handle) override;
         virtual Asset* FindLoadedAsset(AssetHandle handle) const override;
@@ -115,6 +117,13 @@ namespace Nox
         // Registers cooked files (.nanim/.nskel/.nmat/...) that aren't in the registry yet. Scans only
         // relativeDirectory (relative to the asset directory) when given, the whole asset tree otherwise.
         void ScanAndRegisterNewAssets(const std::filesystem::path& relativeDirectory = {});
+
+        // RuntimeAssetManager: loads only, never writes or watches the project.
+        bool IsReadOnly() const { return m_ReadOnly; }
+
+    protected:
+        struct ReadOnlyTag {};
+        explicit EditorAssetManager(ReadOnlyTag) : m_ReadOnly(true) {}
         
     private:
         void OnAssetModifiedOnDisk(const std::filesystem::path& absolutePath);
@@ -194,6 +203,6 @@ namespace Nox
         std::unordered_set<std::string> m_TexturePathMisses;
         size_t m_TexturePathMissesRegistrySize = 0;
 
-        // todo: memory-only assets
+        bool m_ReadOnly = false;
     };
 }

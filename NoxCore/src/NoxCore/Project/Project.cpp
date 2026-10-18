@@ -16,7 +16,7 @@ namespace Nox
         return s_ActiveProject;
     }
 
-    Ref<Project> Project::Load(const std::filesystem::path& path)
+    Ref<Project> Project::Load(const std::filesystem::path& path, bool runtime)
     {
         Ref<Project> project = CreateRef<Project>();
         
@@ -27,9 +27,10 @@ namespace Nox
             project->m_ProjectFile = path;
             s_ActiveProject = project;
             WorldUnits::SetPerMeter(project->GetConfig().WorldUnitsPerMeter);
-            std::shared_ptr<EditorAssetManager> editorAssetManager = std::make_shared<EditorAssetManager>();
-            s_ActiveProject->m_AssetManager = editorAssetManager;
-            editorAssetManager->DeserializeAssetRegistry();
+            // RuntimeAssetManager is the editor's pipeline in read-only mode, so both are reached through GetEditorAssetManager().
+            std::shared_ptr<EditorAssetManager> assetManager = runtime ? std::make_shared<RuntimeAssetManager>() : std::make_shared<EditorAssetManager>();
+            s_ActiveProject->m_AssetManager = assetManager;
+            assetManager->DeserializeAssetRegistry();
             return s_ActiveProject;
         }
         

@@ -44,7 +44,7 @@ namespace Nox
         m_Renderer = Application::Get().GetRenderer();
 
         const std::filesystem::path projectFile = FindProjectFile();
-        if (projectFile.empty() || !Project::Load(projectFile))
+        if (projectFile.empty() || !Project::Load(projectFile, true))
         {
             NOX_CORE_ERROR("NoxRuntime: no project to play ({}). Usage: NoxRuntime <project.nproj>",
                            projectFile.empty() ? std::string("none found") : projectFile.generic_string());
@@ -55,8 +55,7 @@ namespace Nox
         // The project's quality preset ("Auto": the one this GPU should run, the fallback on smaller RT cards).
         m_Renderer->ApplyQualitySetting(Project::GetActive()->GetConfig().RenderQuality);
 
-        // The editor's asset manager, read-only: assets are already cooked by the editor, and no file watcher runs (Init is not
-        // called). R2 replaces it with a RuntimeAssetManager reading the runtime registry / pack files.
+        // The RuntimeAssetManager (Project::Load(path, true)): the cooked assets as they are, nothing on disk is ever written.
         if (!ScriptEngine::Initialize(SDL_GetBasePath()))
             NOX_CORE_ERROR("NoxRuntime: failed to initialize the .NET scripting backend (scripts will not run)");
 

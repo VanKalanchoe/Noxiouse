@@ -99,7 +99,8 @@ namespace Nox
         std::shared_ptr<EditorAssetManager> GetEditorAssetManager() { return std::static_pointer_cast<EditorAssetManager>(m_AssetManager); }
 
         static Ref<Project> New();
-        static Ref<Project> Load(const std::filesystem::path& path);
+        // `runtime`: the player's read-only RuntimeAssetManager instead of the editor's.
+        static Ref<Project> Load(const std::filesystem::path& path, bool runtime = false);
         static bool SaveActive(const std::filesystem::path& path);
         // Back into the file it was loaded from.
         static bool SaveActive();
