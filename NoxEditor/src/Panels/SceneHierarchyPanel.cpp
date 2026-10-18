@@ -1378,7 +1378,7 @@ namespace Nox
             ImGui::DragScalar("Shadow Samples", ImGuiDataType_U32, &component.ShadowSamples, 0.1f, &minSamples, &maxSamples);
         });
 
-        DrawComponent<EnvironmentLightComponent>("Environment Light", entity, [](auto& component)
+        DrawComponent<EnvironmentLightComponent>("Environment Light", entity, [this](auto& component)
         {
             ImGui::Checkbox("Enabled", &component.Enabled);
             ImGui::DragFloat3("Radiance Scale", glm::value_ptr(component.RadianceScale), 0.01f, 0.0f, 100.0f);
@@ -1390,7 +1390,56 @@ namespace Nox
 
             if (component.Source == EnvironmentSource::ProceduralSky)
             {
-                ImGui::TextDisabled("Sun: the scene's first Directional Light (its rotation, color and intensity).");
+                // The sun is the scene's first directional light (Scene picks it the same way): where it stands decides
+                // between day and sunset, so it is shown, and can be moved, here.
+                Entity sun;
+                for (auto handle : m_Context->GetAllEntitiesWith<WorldTransformComponent, DirectionalLightComponent>())
+                {
+                    sun = Entity(handle, m_Context.get());
+                    break;
+                }
+                if (!sun)
+                {
+                    ImGui::TextWrapped("No Directional Light: a default sun stands at 54 degrees. Add one to move the sun.");
+                }
+                else
+                {
+                    const glm::mat4& world = sun.GetComponent<WorldTransformComponent>().WorldMatrix;
+                    // Renderer::SubmitLight's convention: the light shines along its local -Z, the sun is the other way.
+                    const glm::vec3 toSun = -glm::normalize(glm::vec3(world * glm::vec4(0.0f, 0.0f, -1.0f, 0.0f)));
+                    float elevation = glm::degrees(std::asin(glm::clamp(toSun.y, -1.0f, 1.0f)));
+                    float azimuth = glm::degrees(std::atan2(toSun.x, toSun.z));
+                    ImGui::TextDisabled("Sun: %s (its color and intensity light the sky)", sun.GetName().c_str());
+
+                    if (sun.GetParent())
+                    {
+                        ImGui::TextDisabled("Elevation %.1f deg, azimuth %.1f deg (rotate the light to move the sun).", elevation, azimuth);
+                    }
+                    else
+                    {
+                        bool moved = ImGui::DragFloat("Sun Elevation", &elevation, 0.25f, -90.0f, 90.0f, "%.1f deg");
+                        ImGui::SetItemTooltip("Height of the sun above the horizon: 90 = noon overhead, 0 = sunset, below 0 = night.\nRotates the Directional Light.");
+                        moved |= ImGui::DragFloat("Sun Azimuth", &azimuth, 0.5f, -180.0f, 180.0f, "%.1f deg");
+                        ImGui::SetItemTooltip("Compass direction of the sun (0 = towards +Z). Rotates the Directional Light.");
+                        if (moved)
+                        {
+                            const float e = glm::radians(glm::clamp(elevation, -89.9f, 89.9f));
+                            const float a = glm::radians(azimuth);
+                            const glm::vec3 wanted(std::cos(e) * std::sin(a), std::sin(e), std::cos(e) * std::cos(a));
+                            // The light's -Z along the sunlight (towards the ground); stored as Euler angles like the gizmo.
+                            const glm::quat rotation = glm::quatLookAt(-wanted, glm::vec3(0.0f, 1.0f, 0.0f));
+                            sun.GetComponent<TransformComponent>().Rotation = glm::eulerAngles(rotation);
+                            sun.MarkTransformDirty();
+                        }
+                    }
+                    if (elevation < 8.0f)
+                    {
+                        ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), elevation < 0.0f
+                            ? "The sun is below the horizon: a night sky (dark)."
+                            : "The sun is low: a sunset sky (dark above, orange at the horizon).");
+                    }
+                }
+
                 ImGui::DragFloat("Air (Rayleigh)", &component.RayleighScale, 0.01f, 0.0f, 10.0f, "%.2f x");
                 ImGui::SetItemTooltip("Scattering by air: the blue of the sky and the red of sunsets. 1 = Earth.");
                 ImGui::DragFloat("Haze (Mie)", &component.MieScale, 0.01f, 0.0f, 50.0f, "%.2f x");

@@ -1,4 +1,5 @@
 #include "shaderIO.h"
+#include "SkyAtmosphereCommon.slang"
 
     struct SkyboxPayload
     {
@@ -61,6 +62,27 @@
         }
     }
 
+    // The sun's disc over a procedural sky: the directional light's sun, dimmed and reddened by the air in front of it, with
+    // limb darkening (the real sun's edge is darker than its centre). None for an HDR environment or behind the planet.
+    float3 sunDisc(PushConstantSkybox pushConstant, float3 direction)
+    {
+        if (pushConstant.skyTransmittanceIndex == 0xFFFFFFFF)
+            return float3(0.0);
+        const float cosAngle = dot(direction, pushConstant.sunDirection);
+        if (cosAngle < pushConstant.sunCosAngularRadius)
+            return float3(0.0);
+        const float r = BottomRadius + max(pushConstant.skyAltitudeKm, 0.01);
+        if (raySphere(float3(0.0, r, 0.0), direction, BottomRadius) >= 0.0)
+            return float3(0.0);
+
+        const float sinAngle = sqrt(max(0.0, 1.0 - cosAngle * cosAngle));
+        const float sinRadius = sqrt(max(1e-8, 1.0 - pushConstant.sunCosAngularRadius * pushConstant.sunCosAngularRadius));
+        const float fromCentre = saturate(sinAngle / sinRadius);
+        const float limb = 1.0 - 0.6 * (1.0 - sqrt(1.0 - fromCentre * fromCentre));
+        // The camera stands at the planet's pole (+Y up): the direction's y is the cosine of its zenith angle.
+        return pushConstant.sunDiscRadiance * limb * sampleSkyTransmittance(pushConstant.skyTransmittanceIndex, r, direction.y);
+    }
+
     struct FSOutput
     {
         float4 color : SV_TARGET0;
@@ -87,6 +109,7 @@
         float3 rayDx = ddx(ray);
         float3 rayDy = ddy(ray);
         float3 envSum = float3(0.0, 0.0, 0.0);
+        float3 sunSum = float3(0.0, 0.0, 0.0); // the disc's edge is antialiased by the same 16 directions
         [unroll]
         for (int y = 0; y < 4; y++)
         {
@@ -96,9 +119,11 @@
                 float2 offset = (float2(x, y) + 0.5) / 4.0 - 0.5;
                 float3 direction = normalize(ray + rayDx * offset.x + rayDy * offset.y);
                 envSum += texHandle.SampleLevel(sampHandle, direction, 0.0).rgb;
+                sunSum += sunDisc(pushConstant, direction);
             }
         }
-        float3 envColor = (envSum / 16.0) * ubo->scaleIBLAmbient;
+        // Radiance Scale (scaleIBLAmbient) scales the environment, not the sun: that is the directional light's intensity.
+        float3 envColor = (envSum / 16.0) * ubo->scaleIBLAmbient + sunSum / 16.0;
 
         output.color = float4(envColor, 1.0);
         output.entityID = -1;

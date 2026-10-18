@@ -145,6 +145,7 @@ namespace Nox
         float OzoneScale = 1.0f;                    // the blue tint of twilight
         float MieAnisotropy = 0.8f;                 // how strongly haze scatters forward (0 = evenly)
         float AltitudeKm = 0.0f;                    // the viewer's height above the ground
+        float SunAngularRadius = 0.004675f;         // radians: the disc the skybox draws (the light's angular diameter / 2)
 
         bool operator==(const SkyAtmosphereSettings&) const = default;
     };
@@ -227,9 +228,9 @@ namespace Nox
         // Rebuild the image-based lighting set for a scene environment. Equirectangular
         // HDR files are converted to a cubemap; DDS cubemaps are uploaded directly.
         void SetEnvironmentMap(const std::filesystem::path& path);
-        // Use the procedural sky as the scene environment (skybox, IBL, reflections, DDGI, path tracer misses). Called
-        // every frame while the scene wants it; a change is rebuilt once the settings have been still for a moment
-        // (rebuilding the IBL set takes tens of ms). SetEnvironmentMap switches back to a texture or to none.
+        // Use the procedural sky as the scene environment (skybox with the sun's disc, IBL, reflections, DDGI, path tracer
+        // misses). Called every frame while the scene wants it; a frame in which the settings changed updates the sky and
+        // its IBL inside the frame (a few compute passes, no wait). SetEnvironmentMap switches back to a texture or none.
         void SetProceduralSky(const SkyAtmosphereSettings& settings);
 
         // GPU scene (§5.5), main thread. Mesh entities live on the GPU until their owner changes them; the renderer
@@ -516,9 +517,12 @@ namespace Nox
         Ref<Texture2D> createSolidColorTexture(uint8_t r, uint8_t g, uint8_t b, uint8_t a);
         void InitializeEnvironmentLighting(const std::filesystem::path& environmentPath);
         void releaseEnvironmentTextures(bool keepBrdfLut);
-        void createEnvironmentCubemap();
+        Ref<Texture2D> createEnvironmentCube(uint32_t size, NRI::ImageFormat format);
+        void createIBLPipelines();
         void generateEnvironmentLighting();
-        void renderProceduralSky(const SkyAtmosphereSettings& settings);
+        void createBRDFLut();
+        void createProceduralSkyResources();
+        void addProceduralSkyPass();
 
         template <class T>
         void UploadBufferSlice(NRI::Buffer& dstBuffer, const T* data, uint32_t elementOffset, uint32_t elementCount);
@@ -1317,15 +1321,24 @@ namespace Nox
         Ref<Texture2D> m_brdfLUT;
 
         // Procedural sky: the settings the environment shows, and the newest request waiting for its rebuild.
+        // IBL filters (IrradianceConvolution / PrefilterEnv.slang), created once: for an HDR map and the procedural sky.
+        std::unique_ptr<NRI::Pipeline> m_irradiancePipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_prefilterPipeline = nullptr;
+
+        // Procedural sky (SkyAtmosphere.slang): while it is the environment its textures stay (the environment, irradiance and
+        // pre-filtered cubemaps, smaller than an HDR map's: the sky is smooth) and a frame whose settings changed rewrites
+        // them in addProceduralSkyPass. The two atmosphere LUTs only change with the atmosphere, not with the sun.
         std::unique_ptr<NRI::Pipeline> m_skyTransmittancePipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_skyMultiScatteringPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_skyCubemapPipeline = nullptr;
+        Ref<Texture2D> m_skyTransmittanceLut;
+        Ref<Texture2D> m_skyMultiScatteringLut;
+        // Per-mip storage slots of the sky's cubemaps: [environment mips..., irradiance mips..., prefiltered mips...].
+        std::vector<uint32_t> m_skyStorageSlots;
         bool m_proceduralSkyActive = false;
-        bool m_proceduralSkyPending = false;
-        SkyAtmosphereSettings m_proceduralSkyBuilt;
-        SkyAtmosphereSettings m_proceduralSkyWanted;
-        std::chrono::steady_clock::time_point m_proceduralSkyChanged{};      // when the wanted settings last changed
-        std::chrono::steady_clock::time_point m_proceduralSkyPendingSince{}; // when they first differed from the built ones
+        bool m_skyLutsDirty = false;
+        bool m_skyDirty = false;
+        SkyAtmosphereSettings m_proceduralSky;
 
         // Lighting
         std::vector<shaderio::LightData> m_lightBufferObjects;

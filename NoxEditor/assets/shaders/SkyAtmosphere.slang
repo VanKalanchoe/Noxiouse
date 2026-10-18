@@ -1,18 +1,16 @@
 #include "shaderIO.h"
+#include "SkyAtmosphereCommon.slang"
 
 // Procedural sky: Sebastien Hillaire, "A Scalable and Production Ready Sky and Atmosphere Rendering Technique" (EGSR 2020),
 // the model behind Unreal's SkyAtmosphere, after the paper's reference implementation (github.com/sebh/UnrealEngineSkyAtmosphere).
 // Earth's atmosphere as Rayleigh (air), Mie (aerosols) and ozone layers over a spherical planet, lengths in km. Three passes:
 //   1. transmittanceMain:   transmittance from a height towards the top of the atmosphere, for every height and zenith angle.
 //   2. multiScatteringMain: the paper's multiple-scattering approximation (Psi_ms, eq. 10), per height and sun angle.
-//   3. skyCubemapMain:      the sky radiance seen from the ground in every direction, written into the environment cubemap.
+//   3. skyCubemapMain:      the sky radiance seen from the ground in every direction, written into one mip of the
+//                           environment cubemap per dispatch (every mip raymarched directly: the sky is smooth).
 // The cubemap is the scene's environment like an HDR map would be (skybox, IBL, reflections, DDGI and path tracer misses),
-// so raster and path tracer see the same sky. The sun itself (its disc) is not in it: the directional light is the sun.
-
-static const float PI = 3.14159265358979;
-
-static const float BottomRadius = 6360.0; // km
-static const float TopRadius = 6460.0;    // km: 100 km of atmosphere
+// so raster and path tracer see the same sky. The sun's disc is not in it (the directional light already lights the scene
+// with the sun, IBL would count it twice): Skybox.slang draws the disc.
 
 // Earth (the paper's / sebh's defaults), per km at sea level.
 static const float3 RayleighScattering = float3(5.802, 13.558, 33.1) * 1e-3;
@@ -50,65 +48,22 @@ Medium sampleMedium(float heightKm, PushConstantSkyAtmosphere push)
     return medium;
 }
 
-// Distance along the ray to the sphere of `radius` around the planet's center (the origin): the nearest hit in front, or -1.
-float raySphere(float3 origin, float3 direction, float radius)
-{
-    const float b = dot(origin, direction);
-    const float c = dot(origin, origin) - radius * radius;
-    const float discriminant = b * b - c;
-    if (discriminant < 0.0)
-        return -1.0;
-    const float s = sqrt(discriminant);
-    const float nearT = -b - s;
-    const float farT = -b + s;
-    if (nearT >= 0.0)
-        return nearT;
-    return farT >= 0.0 ? farT : -1.0;
-}
-
 float rayleighPhase(float cosTheta)
 {
-    return 3.0 / (16.0 * PI) * (1.0 + cosTheta * cosTheta);
+    return 3.0 / (16.0 * SkyPI) * (1.0 + cosTheta * cosTheta);
 }
 
 // Cornette-Shanks: Henyey-Greenstein with the Rayleigh-like (1 + cos^2) term; peaks looking towards the sun for g > 0.
 float miePhase(float g, float cosTheta)
 {
     const float g2 = g * g;
-    const float k = 3.0 / (8.0 * PI) * (1.0 - g2) / (2.0 + g2);
+    const float k = 3.0 / (8.0 * SkyPI) * (1.0 - g2) / (2.0 + g2);
     return k * (1.0 + cosTheta * cosTheta) / pow(max(1.0 + g2 - 2.0 * g * cosTheta, 1e-4), 1.5);
-}
-
-// Transmittance LUT parametrization (Bruneton 2017, also used by the paper): a height r and the cosine mu of the zenith
-// angle <-> uv, spending the resolution near the horizon where transmittance changes fastest.
-void transmittanceUvToRMu(float2 uv, out float r, out float mu)
-{
-    const float H = sqrt(TopRadius * TopRadius - BottomRadius * BottomRadius);
-    const float rho = H * uv.y;
-    r = sqrt(rho * rho + BottomRadius * BottomRadius);
-    const float dMin = TopRadius - r;
-    const float dMax = rho + H;
-    const float d = dMin + uv.x * (dMax - dMin);
-    mu = d == 0.0 ? 1.0 : (H * H - rho * rho - d * d) / (2.0 * r * d);
-    mu = clamp(mu, -1.0, 1.0);
-}
-
-float2 transmittanceRMuToUv(float r, float mu)
-{
-    const float H = sqrt(TopRadius * TopRadius - BottomRadius * BottomRadius);
-    const float rho = sqrt(max(0.0, r * r - BottomRadius * BottomRadius));
-    const float discriminant = r * r * (mu * mu - 1.0) + TopRadius * TopRadius;
-    const float d = max(0.0, -r * mu + sqrt(max(0.0, discriminant)));
-    const float dMin = TopRadius - r;
-    const float dMax = rho + H;
-    return float2((d - dMin) / (dMax - dMin), rho / H);
 }
 
 float3 sampleTransmittance(PushConstantSkyAtmosphere push, float r, float mu)
 {
-    Texture2D lut = Texture2D.Handle(uint2(push.transmittanceTextureIndex, 0));
-    SamplerState linearClamp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
-    return lut.SampleLevel(linearClamp, transmittanceRMuToUv(r, mu), 0.0).rgb;
+    return sampleSkyTransmittance(push.transmittanceTextureIndex, r, mu);
 }
 
 // The multiple-scattering LUT: x = cos(sun zenith) in [-1, 1], y = height in the atmosphere.
@@ -149,8 +104,8 @@ ScatteringResult integrateScatteredLuminance(PushConstantSkyAtmosphere push, flo
     const float tMax = hitsGround ? tBottom : tTop;
 
     const float cosTheta = dot(direction, sunDirection);
-    const float phaseRayleigh = uniformPhase ? 1.0 / (4.0 * PI) : rayleighPhase(cosTheta);
-    const float phaseMie = uniformPhase ? 1.0 / (4.0 * PI) : miePhase(push.mieAnisotropy, cosTheta);
+    const float phaseRayleigh = uniformPhase ? 1.0 / (4.0 * SkyPI) : rayleighPhase(cosTheta);
+    const float phaseMie = uniformPhase ? 1.0 / (4.0 * SkyPI) : miePhase(push.mieAnisotropy, cosTheta);
 
     float3 throughput = float3(1.0);
     float segmentStart = 0.0;
@@ -175,7 +130,10 @@ ScatteringResult integrateScatteredLuminance(PushConstantSkyAtmosphere push, flo
         // Sun light reaching this point: through the atmosphere above it, unless the planet is in the way.
         const float3 sunTransmittance = sampleTransmittance(push, r, cosSunZenith);
         const float planetShadow = raySphere(position, sunDirection, BottomRadius) >= 0.0 ? 0.0 : 1.0;
-        const float3 multiScattered = uniformPhase ? float3(0.0) : sampleMultiScattering(push, r, cosSunZenith);
+        // Not a ?: : both sides of one may run, and the multiple-scattering LUT pass has that LUT bound for writing.
+        float3 multiScattered = float3(0.0);
+        if (!uniformPhase)
+            multiScattered = sampleMultiScattering(push, r, cosSunZenith);
 
         const float3 phaseTimesScattering = medium.rayleigh * phaseRayleigh + medium.mie * phaseMie;
         const float3 inScattered = planetShadow * sunTransmittance * phaseTimesScattering + multiScattered * medium.scattering;
@@ -195,7 +153,7 @@ ScatteringResult integrateScatteredLuminance(PushConstantSkyAtmosphere push, flo
         const float3 up = groundPosition / r;
         const float cosSunZenith = dot(sunDirection, up);
         const float3 sunTransmittance = sampleTransmittance(push, r, cosSunZenith);
-        result.luminance += throughput * sunTransmittance * saturate(cosSunZenith) * push.groundAlbedo / PI;
+        result.luminance += throughput * sunTransmittance * saturate(cosSunZenith) * push.groundAlbedo / SkyPI;
     }
     return result;
 }
@@ -225,8 +183,9 @@ void transmittanceMain(uint3 id : SV_DispatchThreadID, uniform PushConstantSkyAt
         opticalDepth += sampleMedium(height, push).extinction * (tMax / float(sampleCount));
     }
 
-    RWTexture2D<float4> output = RWTexture2D<float4>.Handle(uint2(push.outputStorageIndex, 0));
-    output[id.xy] = float4(exp(-opticalDepth), 1.0);
+    // A storage slot from registerStorageTextureMip: a one-layer 2D array view.
+    RWTexture2DArray<float4> output = RWTexture2DArray<float4>.Handle(uint2(push.outputStorageIndex, 0));
+    output[uint3(id.xy, 0)] = float4(exp(-opticalDepth), 1.0);
 }
 
 [shader("compute")]
@@ -245,14 +204,14 @@ void multiScatteringMain(uint3 id : SV_DispatchThreadID, uniform PushConstantSky
     // The paper's eq. 5 and 7: second-order luminance and the transfer f_ms, integrated over the sphere of directions with an
     // isotropic phase (64 directions, a uniform grid in solid angle).
     const int sqrtSamples = 8;
-    const float sphereSolidAngle = 4.0 * PI;
+    const float sphereSolidAngle = 4.0 * SkyPI;
     float3 luminance = float3(0.0);
     float3 multiScatterAs1 = float3(0.0);
     for (int i = 0; i < sqrtSamples; ++i)
     {
         for (int j = 0; j < sqrtSamples; ++j)
         {
-            const float phi = 2.0 * PI * (float(i) + 0.5) / float(sqrtSamples);
+            const float phi = 2.0 * SkyPI * (float(i) + 0.5) / float(sqrtSamples);
             const float cosTheta = 1.0 - 2.0 * (float(j) + 0.5) / float(sqrtSamples);
             const float sinTheta = sqrt(max(0.0, 1.0 - cosTheta * cosTheta));
             const float3 direction = float3(cos(phi) * sinTheta, cosTheta, sin(phi) * sinTheta);
@@ -262,15 +221,15 @@ void multiScatteringMain(uint3 id : SV_DispatchThreadID, uniform PushConstantSky
             multiScatterAs1 += result.multiScatterAs1;
         }
     }
-    const float weight = sphereSolidAngle / float(sqrtSamples * sqrtSamples) / (4.0 * PI); // times the isotropic phase
+    const float weight = sphereSolidAngle / float(sqrtSamples * sqrtSamples) / (4.0 * SkyPI); // times the isotropic phase
     luminance *= weight;
     multiScatterAs1 *= weight;
 
     // Eq. 9 / 10: every further scattering order is f_ms times the one before, a geometric series.
     const float3 psi = luminance / max(float3(1.0) - multiScatterAs1, float3(1e-4));
 
-    RWTexture2D<float4> output = RWTexture2D<float4>.Handle(uint2(push.outputStorageIndex, 0));
-    output[id.xy] = float4(psi, 1.0);
+    RWTexture2DArray<float4> output = RWTexture2DArray<float4>.Handle(uint2(push.outputStorageIndex, 0));
+    output[uint3(id.xy, 0)] = float4(psi, 1.0);
 }
 
 // Same face layout as EquirectToCubemap.slang (the environment cubemap's convention).

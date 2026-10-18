@@ -672,6 +672,24 @@ namespace Nox
         // Debug mode 17 draws the DDGI irradiance atlas written this frame on the probe spheres.
         const bool drawProbes = m_ddgiDebugSpheresPipeline && m_debugMode == 17 && m_frame.ddgiAdded;
 
+        // The sun's disc over a procedural sky (an HDR map has its own sun in the image).
+        shaderio::PushConstantSkybox skyboxSun{};
+        skyboxSun.skyTransmittanceIndex = ~0u;
+        if (m_proceduralSkyActive && m_skyTransmittanceLut)
+        {
+            const SkyAtmosphereSettings& sky = m_proceduralSky;
+            const float sunLength = glm::length(sky.SunDirection);
+            const float radius = glm::clamp(sky.SunAngularRadius, 0.0005f, 0.2f);
+            // Radiance = illuminance / the disc's solid angle (2 pi (1 - cos r)), capped: the real ratio (~15000x for the
+            // sun's 0.27 degrees) only saturates the tonemapper harder, and a few pixels that bright skew auto exposure.
+            const float solidAngle = 2.0f * glm::pi<float>() * (1.0f - std::cos(radius));
+            skyboxSun.skyTransmittanceIndex = m_skyTransmittanceLut->GetDescriptorIndexSlot();
+            skyboxSun.sunDirection = sunLength > 1e-6f ? sky.SunDirection / sunLength : glm::vec3(0.0f, 1.0f, 0.0f);
+            skyboxSun.sunDiscRadiance = glm::max(sky.SunIlluminance, glm::vec3(0.0f)) * std::min(1.0f / solidAngle, 64.0f);
+            skyboxSun.sunCosAngularRadius = std::cos(radius);
+            skyboxSun.skyAltitudeKm = glm::clamp(sky.AltitudeKm, 0.0f, 99.0f);
+        }
+
         // Unlit & skybox & transparent geometry rendered in HDR on top of the lit scene.
         m_renderGraph.AddPass("Forward 3D", RGPassFlags::Raster,
             [&](RGBuilder& builder)
@@ -700,7 +718,7 @@ namespace Nox
                 builder.Read(resources.MipFeedback);
                 builder.Write(resources.MipFeedback);
             },
-            [this, res = &resources, drawProbes](RGPassContext& context)
+            [this, res = &resources, drawProbes, skyboxSun](RGPassContext& context)
             {
                 NRI::CommandBuffer& cmd = context.Cmd();
                 const uint32_t totalDDGIProbes = m_frame.totalDDGIProbes;
@@ -742,7 +760,7 @@ namespace Nox
                     cmd.setColorBlendEnable(1, false);
                     cmd.setColorWriteMask(1, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
 
-                    shaderio::PushConstantSkybox skyboxPush{};
+                    shaderio::PushConstantSkybox skyboxPush = skyboxSun;
                     skyboxPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
                     skyboxPush.cubemapIndex = m_environmentCubemap->GetDescriptorIndexSlot();
                     cmd.pushData(&skyboxPush, sizeof(shaderio::PushConstantSkybox));

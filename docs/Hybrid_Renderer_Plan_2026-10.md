@@ -97,34 +97,51 @@ The user means one of the analytic / physically based sky models. Options:
 Exit test per phase: sun at noon / sunset / below the horizon looks right in raster and path tracer alike, and the
 path tracer and raster agree on the sky color.
 
-### 5b. Built (2026-10-18, untested): S1, S2 and S4
+### 5b. Built (2026-10-18, untested): S1, S2, S4 and the sun disc
 
 - **Use:** Environment Light component -> **Source: Procedural Sky**. The sun is the scene's first Directional Light (its
-  rotation, color and intensity); without one a default sun stands at ~54 degrees. Controls: Air (Rayleigh), Haze (Mie),
-  Haze Forward (Mie anisotropy), Ozone (scales of Earth's values, 1 = Earth), Ground Albedo, Altitude (km). Radiance Scale
-  still scales the environment's light as for an HDR map. Saved in the scene file, undoable.
+  rotation, color and intensity); without one a default sun stands at ~54 degrees. The panel shows that light and its
+  **Sun Elevation / Sun Azimuth** (dragging them rotates the light; not for a light with a parent), and warns when the sun
+  is low (below 8 degrees: a sunset sky, dark above and orange at the horizon -- a new Directional Light with rotation 0
+  shines horizontally, which is exactly that). Atmosphere: Air (Rayleigh), Haze (Mie), Haze Forward (Mie anisotropy), Ozone
+  (scales of Earth's values, 1 = Earth), Ground Albedo, Altitude (km). Radiance Scale scales the sky's light as for an HDR
+  map (not the sun's disc). Saved in the scene file, undoable.
 - **`SkyAtmosphere.slang`**, after the paper's reference implementation: transmittance LUT (256 x 64, Bruneton's
-  parametrization), multiple-scattering LUT (32 x 32, the paper's Psi_ms), then the sky raymarched into the environment
-  cubemap itself (512 per face, 32 samples per ray on quadratically growing segments, planet shadow, ground bounce below the
+  parametrization), multiple-scattering LUT (32 x 32, the paper's Psi_ms), then the sky raymarched into every mip of the
+  environment cubemap (32 samples per ray on quadratically growing segments, planet shadow, ground bounce below the
   horizon). Earth constants: radii 6360 / 6460 km, Rayleigh (5.802, 13.558, 33.1)e-3 / km over 8 km, Mie 3.996e-3
   scattering + 0.444e-3 absorption over 1.2 km, ozone (0.650, 1.881, 0.085)e-3 in a tent at 25 +- 15 km.
-- **One environment for everything:** the cubemap goes through the same mips / irradiance / prefilter passes as an HDR
-  map, so skybox, raster IBL, reflections, DDGI and the path tracer's misses all see the same sky (S4 without a sky-view
-  LUT: the sky is smooth, so the cubemap is drawn as the skybox directly).
-- **Rebuilds** (`Renderer::SetProceduralSky`): when the sun or a setting changes, once they have been still for 150 ms, at
-  least once a second while they keep changing (a sun being dragged, a scripted day cycle). A rebuild waits for the GPU and
-  costs tens of ms (the 1024-sample prefilter dominates): a hitch, not a frame-rate cost. Applied only from
-  `Scene::SetRenderer` (main thread, every frame); the Submit Lights system, which may run on a worker, only reads the scale.
-- **Checked here:** all three entry points compile with slangc; a numpy port of the passes gives a blue zenith (blue / red
-  ~4.9, ~3 % of the sun's illuminance per steradian at noon), a red-orange horizon towards the sun at 2 degrees elevation, and a
-  dark sky after sunset; 32 quadratic steps stay within ~6 % of 512 steps.
-- **Brightness:** the sky is physically relative to the sun -- with a sun of intensity 1 the noon zenith is ~0.03. Auto
-  exposure (camera) or Radiance Scale bring it up; a sunlit white wall stays ~8x brighter than the zenith, as outside.
-- **Still open:** S3's sun disc (the directional light is the sun's light; there is no visible disc yet) and a per-frame
-  sky-view LUT (needed for a moving sun without rebuild hitches: time-slice the IBL update like UE's real-time sky
-  capture); S5 aerial perspective; night (no moon / stars, the sky just goes dark); the viewer's altitude comes from the
-  component, not the camera. Found while here: the component's **Rotation** is drawn in the UI but no shader applies it
-  (HDR maps too); the fix is to rotate the direction in the resample pass.
+  `SkyAtmosphereCommon.slang` holds what the skybox shares (planet, transmittance lookup).
+- **One environment for everything:** the cubemap goes through the same irradiance / prefilter shaders as an HDR map, so
+  skybox, raster IBL, reflections, DDGI and the path tracer's misses all see the same sky.
+- **Sun disc** (`Skybox.slang`): the directional light's direction and angular diameter, dimmed and reddened by the
+  transmittance in front of it, limb-darkened, antialiased by the skybox's 16 directions per pixel, hidden behind the
+  planet. Its radiance is the illuminance over the disc's solid angle, capped at 64x the illuminance (the real ~15000x only
+  saturates harder, and those pixels would skew auto exposure). Not in the IBL (the directional light already lights the
+  scene; it would count twice) nor in the path tracer's view of the sky.
+- **Updates inside the frame** (`Renderer::addProceduralSkyPass`, first pass of the frame graph): while the sky is the
+  environment its textures stay -- environment 256, irradiance 32, pre-filtered 128 per face (an HDR map gets 512 / 64 /
+  512; the sky has no sharp detail) -- and a frame whose settings changed rewrites them with compute passes: the LUTs only
+  when the atmosphere changed, then the cubemap's mips, then irradiance and prefilter. Estimated ~1-2 ms in that frame, no
+  CPU wait; full barriers before (frames in flight still read the textures) and after (the uniforms' IBL slots are not
+  tracked by the graph). A dragged sun updates the sky every frame. The path tracer's environment importance map and
+  accumulation restart after an update. Switching to the sky creates its textures and pipelines once (a short wait).
+  **2026-10-18 fix:** the first version rebuilt an HDR-sized IBL set (512 prefilter at 1024 samples, ~550 M texture reads)
+  with a GPU wait per step and pipelines created each time, debounced 150 ms after the last change: the ~1 s freeze after
+  letting go of the sun. The IBL filter pipelines are now created once, for HDR maps too.
+- **Applied** only from `Scene::SetRenderer` (main thread, every frame); the Submit Lights system, which may run on a
+  worker, only reads the scale.
+- **Checked here:** every entry point compiles with slangc; push-constant offsets match between C++ and Slang's
+  reflection; a numpy port of the passes gives a blue zenith at noon (blue / red ~4.9), a red-orange horizon towards the sun
+  at 2 degrees elevation and a dark sky after sunset; 32 quadratic steps stay within ~6 % of 512 steps; the sun controls'
+  rotation round-trips through the Euler angles the transform stores (error < 1e-5).
+- **Brightness:** the sky is physically relative to the sun: at noon the zenith is ~0.03 x the sun's illuminance in blue
+  (~0.013 in luminance), a sunlit white wall ~20x brighter, as outside. Auto exposure (camera) or Radiance Scale bring the
+  sky up when it reads too dark next to an exposure tuned for a bright HDR map.
+- **Still open:** time-slicing the update over a few frames (UE's real-time sky capture) if 1-2 ms per changing frame
+  shows; S5 aerial perspective; night (no moon / stars, the sky just goes dark); the viewer's altitude comes from the
+  component, not the camera; the sun disc in path-traced views. Found while here: the component's **Rotation** is drawn
+  in the UI but no shader applies it (HDR maps too); the fix is to rotate the direction in the resample pass.
 
 ## 6. VFX, particles and clouds (Future.md item 13)
 

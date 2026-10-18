@@ -596,6 +596,13 @@ struct PushConstantSkybox
 {
     uint64_t matrixReference; // BDA to UniformBufferObject
     uint32_t cubemapIndex;     // Index in descriptor heap
+    // The sun's disc over a procedural sky (SkyAtmosphere.slang); skyTransmittanceIndex is ~0 for an HDR environment, whose
+    // image has its own sun.
+    uint32_t skyTransmittanceIndex; // sampled slot of the sky's transmittance LUT
+    vec3 sunDirection;              // world space, towards the sun
+    vec3 sunDiscRadiance;           // at the disc's center above the atmosphere: illuminance / solid angle (capped)
+    float sunCosAngularRadius;
+    float skyAltitudeKm;            // the viewer's height in the sky model
 };
 
 struct PushConstantVisibilityDebug

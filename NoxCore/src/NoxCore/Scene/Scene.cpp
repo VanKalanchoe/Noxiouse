@@ -34,6 +34,7 @@ namespace Nox
             // Renderer::SubmitLight's convention: the light shines along its local -Z, the sun is the other way.
             settings.SunDirection = -glm::vec3(wtc.WorldMatrix * glm::vec4(0.0f, 0.0f, -1.0f, 0.0f));
             settings.SunIlluminance = light.Color * light.Intensity;
+            settings.SunAngularRadius = glm::radians(glm::max(light.AngularDiameter, 0.0f)) * 0.5f;
             break;
         }
         settings.GroundAlbedo = environment.GroundAlbedo;
