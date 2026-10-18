@@ -1,7 +1,9 @@
 #include "AnimationGraphNodes.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <string>
 
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/NodeGraph/GraphEvalContext.h"
@@ -19,9 +21,18 @@ namespace Nox
 
     namespace
     {
-        // Leaf: samples a .nanim clip at its own persistent playhead (GraphEvalContext::GetState), advanced by
-        // this evaluation's DeltaTime. Properties: "Clip" (uint64_t AssetHandle), "Loop" (bool, default true),
-        // "Speed" (float, default 1).
+        // A Clip node's playhead: where it is in the clip, and whether it has started (so it starts at "StartPosition").
+        struct ClipPlayhead
+        {
+            float Time = 0.0f;
+            bool Started = false;
+        };
+
+        // Leaf, UE's Sequence Player: samples a .nanim clip at its own persistent playhead (GraphEvalContext::GetState),
+        // advanced by this evaluation's DeltaTime. Properties: "Clip" (uint64_t AssetHandle), "Loop" (bool, default true),
+        // "StartPosition" (float seconds, default 0: where the playhead starts, again each time a state machine enters the
+        // node's state). Input pin "Speed" (play rate, default 1): wire a parameter in to drive it, or leave it unconnected
+        // to use the property of the same name.
         void EvaluateClip(GraphEvalContext& ctx, uint32_t nodeIndex)
         {
             auto* data = static_cast<AnimGraphEvalData*>(ctx.UserData);
@@ -43,9 +54,16 @@ namespace Nox
             }
 
             bool loop = ctx.GetProperty<bool>(nodeIndex, "Loop", true);
-            float speed = ctx.GetProperty<float>(nodeIndex, "Speed", 1.0f);
+            // Graphs saved before "Speed" became a pin keep it as a property; GetInput falls back to that property.
+            float speed = ctx.GetInput<float>(nodeIndex, 0);
 
-            float& time = ctx.GetState<float>(nodeIndex); // this node's playhead, persists across evaluations
+            ClipPlayhead& playhead = ctx.GetState<ClipPlayhead>(nodeIndex); // persists across evaluations
+            if (!playhead.Started)
+            {
+                playhead.Started = true;
+                playhead.Time = ctx.GetProperty<float>(nodeIndex, "StartPosition", 0.0f);
+            }
+            float& time = playhead.Time;
             time += data->DeltaTime * speed;
             if (loop)
             {
@@ -83,6 +101,88 @@ namespace Nox
             AnimPose out;
             BlendPoses(a, b, ctx.GetInput<float>(nodeIndex, 2), out);
             ctx.SetOutput(nodeIndex, 0, std::move(out));
+        }
+
+        // UE's Blend Space 1D: up to four clips ("Clip0".."Clip3") placed along one axis ("Position0".."Position3"); the
+        // "Value" pin (or, unconnected, the property of the same name) picks the point, e.g. Speed for idle / walk / run.
+        // The two clips around the value play in step -- one shared normalized phase, advanced at the rate of their blended
+        // duration -- so a walk and a run blend with their feet together (sync by normalized time; UE's sync markers are
+        // the refinement). Unassigned clips are skipped. "Loop" (default true), "Speed" (play rate, default 1).
+        void EvaluateBlendSpace1D(GraphEvalContext& ctx, uint32_t nodeIndex)
+        {
+            auto* data = static_cast<AnimGraphEvalData*>(ctx.UserData);
+            AnimPose pose;
+            if (!data || !data->TargetSkeleton)
+            {
+                ctx.SetOutput(nodeIndex, 0, std::move(pose));
+                return;
+            }
+
+            struct BlendSample
+            {
+                AnimationSequence* Clip = nullptr;
+                float Position = 0.0f;
+            };
+            std::array<BlendSample, 4> samples;
+            size_t count = 0;
+            for (int i = 0; i < 4; ++i)
+            {
+                const std::string index = std::to_string(i);
+                const uint64_t clipHandle = ctx.GetProperty<uint64_t>(nodeIndex, "Clip" + index, 0);
+                AnimationSequence* clip = clipHandle != 0 ? AssetManager::FindLoadedAsset<AnimationSequence>(clipHandle) : nullptr;
+                if (clip && clip->Duration > 0.0f)
+                    samples[count++] = { clip, ctx.GetProperty<float>(nodeIndex, "Position" + index, static_cast<float>(i)) };
+            }
+            if (count == 0)
+            {
+                pose.ResetToRestPose(*data->TargetSkeleton);
+                ctx.SetOutput(nodeIndex, 0, std::move(pose));
+                return;
+            }
+            std::stable_sort(samples.begin(), samples.begin() + count,
+                             [](const BlendSample& a, const BlendSample& b) { return a.Position < b.Position; });
+
+            // The two samples around the value and how far it is from the first to the second; clamped at the ends.
+            const float value = ctx.GetInput<float>(nodeIndex, 0);
+            size_t first = 0;
+            size_t second = 0;
+            float weight = 0.0f;
+            if (value >= samples[count - 1].Position)
+            {
+                first = second = count - 1;
+            }
+            else if (value > samples[0].Position)
+            {
+                for (size_t i = 0; i + 1 < count; ++i)
+                {
+                    if (value <= samples[i + 1].Position)
+                    {
+                        first = i;
+                        second = i + 1;
+                        const float span = samples[second].Position - samples[first].Position;
+                        weight = span > 1e-6f ? (value - samples[first].Position) / span : 0.0f;
+                        break;
+                    }
+                }
+            }
+
+            const bool loop = ctx.GetProperty<bool>(nodeIndex, "Loop", true);
+            const float speed = ctx.GetProperty<float>(nodeIndex, "Speed", 1.0f);
+            const float duration = glm::mix(samples[first].Clip->Duration, samples[second].Clip->Duration, weight);
+            float& phase = ctx.GetState<float>(nodeIndex); // normalized 0..1, shared by every clip of the space
+            phase += data->DeltaTime * speed / std::max(duration, 1e-4f);
+            phase = loop ? phase - std::floor(phase) : glm::clamp(phase, 0.0f, 1.0f);
+
+            SampleClipPose(*samples[first].Clip, phase * samples[first].Clip->Duration, *data->TargetSkeleton, pose);
+            if (second != first && weight > 0.0f)
+            {
+                AnimPose other;
+                SampleClipPose(*samples[second].Clip, phase * samples[second].Clip->Duration, *data->TargetSkeleton, other);
+                AnimPose blended;
+                BlendPoses(pose, other, weight, blended);
+                pose = std::move(blended);
+            }
+            ctx.SetOutput(nodeIndex, 0, std::move(pose));
         }
 
         // Reads one of the instance's graph parameters onto a Float pin: the parameter is named by the string
@@ -239,10 +339,10 @@ namespace Nox
             /* TypeName          */ "Clip",
             /* Domain            */ kAnimationGraphDomain,
             /* Category          */ "Sources",
-            /* Inputs            */ {},
+            /* Inputs            */ { { "Speed", "Float" } },
             /* Outputs           */ { { "Pose", "Pose" } },
             // "Clip" starts at 0 (no clip assigned) -- pick one via the editor's asset picker on this property.
-            /* DefaultProperties */ { { "Clip", uint64_t(0) }, { "Loop", true }, { "Speed", 1.0f } },
+            /* DefaultProperties */ { { "Clip", uint64_t(0) }, { "Loop", true }, { "Speed", 1.0f }, { "StartPosition", 0.0f } },
             /* PropertyAssetTypeHints */ { { "Clip", "AssetType::AnimationSequence" } },
             /* PropertyRanges    */ {},
             /* Evaluate          */ &EvaluateClip
@@ -261,6 +361,23 @@ namespace Nox
             /* Evaluate          */ &EvaluateBlend2D
         });
 
+        NodeTypeRegistry::Register({
+            /* TypeName          */ "BlendSpace1D",
+            /* Domain            */ kAnimationGraphDomain,
+            /* Category          */ "Blending",
+            /* Inputs            */ { { "Value", "Float" } },
+            /* Outputs           */ { { "Pose", "Pose" } },
+            /* DefaultProperties */ { { "Value", 0.0f },
+                                      { "Clip0", uint64_t(0) }, { "Position0", 0.0f },
+                                      { "Clip1", uint64_t(0) }, { "Position1", 1.0f },
+                                      { "Clip2", uint64_t(0) }, { "Position2", 2.0f },
+                                      { "Clip3", uint64_t(0) }, { "Position3", 3.0f },
+                                      { "Loop", true }, { "Speed", 1.0f } },
+            /* PropertyAssetTypeHints */ { { "Clip0", "AssetType::AnimationSequence" }, { "Clip1", "AssetType::AnimationSequence" },
+                                           { "Clip2", "AssetType::AnimationSequence" }, { "Clip3", "AssetType::AnimationSequence" } },
+            /* PropertyRanges    */ {},
+            /* Evaluate          */ &EvaluateBlendSpace1D
+        });
         NodeTypeRegistry::Register({
             /* TypeName          */ "GetParameter",
             /* Domain            */ kAnimationGraphDomain,

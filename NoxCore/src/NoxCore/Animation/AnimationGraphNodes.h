@@ -28,7 +28,8 @@ namespace Nox
         NodeGraphValue GetParameter(const std::string& name, const NodeGraphValue& fallback) const;
     };
 
-    // Registers "Clip", "Blend2D" and "Output" under kAnimationGraphDomain into NodeTypeRegistry. Call exactly
+    // Registers "Clip", "Blend2D", "BlendSpace1D", "GetParameter", "StateMachine" and "Output" under kAnimationGraphDomain
+    // into NodeTypeRegistry. Call exactly
     // once at startup (NodeTypeRegistry has no de-duplication, so calling it twice duplicates every entry).
     void RegisterAnimationGraphNodeTypes();
 
