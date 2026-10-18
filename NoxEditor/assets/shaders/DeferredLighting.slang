@@ -280,7 +280,24 @@
 
         // 4. Material Attributes
         float3 baseColor = albedoSample.rgb;
+        // Combined with the baked occlusion map (when a material has one; most Bistro materials here don't, hence
+        // the flat, un-occluded look the crevices between cobblestones had until this): SSAO/RTAO (mutually
+        // exclusive producers of the same pushConstant.ssaoTextureIndex slot -- see PushConstantSSAO in shaderIO.h)
+        // is screen-space/geometric contact darkening, a texture's own baked AO is per-material, and they multiply.
         float occlusion = albedoSample.a;
+        float rawAmbientOcclusion = 1.0; // SSAO/RTAO alone (debug mode 22), not combined with a material's own baked AO
+        if (pushConstant.ssaoTextureIndex != 0xFFFFFFFF)
+        {
+            Texture2D<float> ssaoTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.ssaoTextureIndex, 0));
+            rawAmbientOcclusion = ssaoTex.Load(int3(pixelCoord, 0)).r;
+            occlusion *= rawAmbientOcclusion;
+        }
+        // Mode 22: SSAO/RTAO alone, bypassing all lighting -- whether the currently-active occlusion technique is
+        // producing any variation at all (a bug making every ray/sample report "unoccluded" reads back as flat white).
+        if (pushConstant.debugMode == 22)
+        {
+            return float4(rawAmbientOcclusion, rawAmbientOcclusion, rawAmbientOcclusion, 1.0);
+        }
         float lenSqN = dot(normalSample.rgb, normalSample.rgb);
             float3 n = lenSqN > 1e-6 ? normalSample.rgb * rsqrt(lenSqN) : float3(0.0, 1.0, 0.0);
         float perceptualRoughness = clamp(materialSample.r, c_MinRoughness, 1.0);
@@ -479,7 +496,7 @@
             diffuseColor,
             specularColor
         );
-        IBLResult ibl = getIBLContribution(ubo, iblInputs, n, reflection);
+        IBLResult ibl = getIBLContribution(ubo, iblInputs, n, reflection, occlusion);
         float3 ambientDiffuse = ibl.diffuse;
         float3 ambientSpecular = ibl.specular;
 

@@ -272,6 +272,162 @@ namespace Nox
         m_renderGraph.PopGroup();
     }
 
+    // Shared by SSAO and RTAO: both write their raw, noisy occlusion into resources.SSAORaw (only one of them ever
+    // runs in a frame -- see the mutual-exclusion checks in addSSAOPass/addRTAOPass), and this denoises it into
+    // resources.SSAO the same way regardless of which one produced it. DeferredLighting.slang only ever reads the
+    // final, blurred result, so neither it nor this pass cares which occlusion technique is actually active.
+    void Renderer::addOcclusionBlurPass()
+    {
+        if (!m_frame.occlusionRawAdded || !m_ssaoBlurPipeline)
+            return;
+
+        const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
+        const FrameGraphState& frame = m_frame;
+        m_frame.ssaoAdded = true;
+
+        m_renderGraph.AddPass("Occlusion Blur", RGPassFlags::Raster,
+            [&](RGBuilder& builder)
+            {
+                builder.Read(resources.SSAORaw);
+                builder.Read(resources.Depth);
+                builder.ColorTarget(resources.SSAO, NRI::LoadOP::clear, NRI::StoreOP::store, { 1.0f, 0.0f, 0.0f, 0.0f });
+                builder.SetRenderArea(frame.renderExtent);
+            },
+            [this, res = &resources](RGPassContext& context)
+            {
+                NRI::CommandBuffer& cmd = context.Cmd();
+                const FrameGraphState& frame = m_frame;
+                const float rw = static_cast<float>(frame.renderExtent.width);
+                const float rh = static_cast<float>(frame.renderExtent.height);
+
+                cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_ssaoBlurPipeline);
+                cmd.setCullMode(NRI::CullMode::None);
+                cmd.setDepthTestEnable(false);
+                cmd.setDepthWriteEnable(false);
+                cmd.setColorBlendEnable(0, false);
+                cmd.setColorWriteMask(0, NRI::ColorComponent::R);
+
+                shaderio::PushConstantSSAOBlur blurPush{};
+                blurPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                blurPush.ssaoTextureIndex = context.Slot(res->SSAORaw);
+                blurPush.depthTextureIndex = context.Slot(res->Depth);
+                blurPush.viewportSize = glm::vec2(rw, rh);
+                cmd.pushData(&blurPush, sizeof(shaderio::PushConstantSSAOBlur));
+
+                cmd.drawMeshTasks(1, 1, 1);
+            });
+    }
+
+    void Renderer::addSSAOPass()
+    {
+        // Mutually exclusive with RTAO: both only ever produce resources.SSAORaw, never together (see the comment on
+        // m_ssaoEnabled in Renderer.h).
+        if (m_frame.restirPTActive || m_frame.pathTracerActive || !m_ssaoEnabled || m_rtaoEnabled ||
+            !m_ssaoPipeline || !m_ssaoBlurPipeline || !m_ssaoKernelBuffer)
+            return;
+
+        const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
+        const FrameGraphState& frame = m_frame;
+        m_frame.occlusionRawAdded = true;
+
+        m_renderGraph.AddPass("SSAO", RGPassFlags::Raster,
+            [&](RGBuilder& builder)
+            {
+                builder.Read(resources.GBufferNormal);
+                builder.Read(resources.Depth);
+                builder.Read(resources.SSAOKernel);
+                builder.ColorTarget(resources.SSAORaw, NRI::LoadOP::clear, NRI::StoreOP::store, { 1.0f, 0.0f, 0.0f, 0.0f });
+                builder.SetRenderArea(frame.renderExtent);
+            },
+            [this, res = &resources](RGPassContext& context)
+            {
+                NRI::CommandBuffer& cmd = context.Cmd();
+                const FrameGraphState& frame = m_frame;
+                const float rw = static_cast<float>(frame.renderExtent.width);
+                const float rh = static_cast<float>(frame.renderExtent.height);
+
+                cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_ssaoPipeline);
+                cmd.setCullMode(NRI::CullMode::None);
+                cmd.setDepthTestEnable(false);
+                cmd.setDepthWriteEnable(false);
+                cmd.setColorBlendEnable(0, false);
+                cmd.setColorWriteMask(0, NRI::ColorComponent::R);
+
+                shaderio::PushConstantSSAO ssaoPush{};
+                ssaoPush.invViewProj = uniformData.invViewProj;
+                ssaoPush.view = uniformData.view;
+                ssaoPush.proj = uniformData.proj;
+                ssaoPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                ssaoPush.kernelReference = context.Buffer(res->SSAOKernel).getDeviceAddress();
+                ssaoPush.depthTextureIndex = context.Slot(res->Depth);
+                ssaoPush.normalTextureIndex = context.Slot(res->GBufferNormal);
+                ssaoPush.kernelSize = static_cast<uint32_t>(m_ssaoKernelSize);
+                ssaoPush.radius = getSSAORadius();
+                ssaoPush.bias = WorldUnits::FromMeters(m_ssaoBiasMeters);
+                ssaoPush.power = m_ssaoPower;
+                ssaoPush.viewportSize = glm::vec2(rw, rh);
+                cmd.pushData(&ssaoPush, sizeof(shaderio::PushConstantSSAO));
+
+                cmd.drawMeshTasks(1, 1, 1);
+            });
+    }
+
+    void Renderer::addRTAOPass()
+    {
+        // RTAO requires the hybrid RT scene and the shared blur pass. Its shader
+        // handles an empty TLAS by returning unoccluded pixels.
+        if (m_frame.restirPTActive || m_frame.pathTracerActive || !m_rayTracingEnabled || !m_rtaoEnabled || m_ssaoEnabled ||
+            !m_rtaoPipeline || !m_ssaoBlurPipeline || !m_ssaoKernelBuffer)
+            return;
+
+        const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
+        const FrameGraphState& frame = m_frame;
+        m_frame.occlusionRawAdded = true;
+
+        m_renderGraph.AddPass("RTAO", RGPassFlags::Raster,
+            [&](RGBuilder& builder)
+            {
+                builder.Read(resources.GBufferNormal);
+                builder.Read(resources.Depth);
+                builder.Read(resources.SSAOKernel);
+                // Ray queries read an acceleration structure, not ordinary shader
+                // storage. Make the TLAS build visible to fragment traversal.
+                if (resources.TLAS.IsValid())
+                    builder.Read(resources.TLAS, RGBufferAccess::AccelerationStructureRead);
+                ReadGpuScene(builder, resources);
+                builder.ColorTarget(resources.SSAORaw, NRI::LoadOP::clear, NRI::StoreOP::store, { 1.0f, 0.0f, 0.0f, 0.0f });
+                builder.SetRenderArea(frame.renderExtent);
+            },
+            [this, res = &resources](RGPassContext& context)
+            {
+                NRI::CommandBuffer& cmd = context.Cmd();
+                const FrameGraphState& frame = m_frame;
+                const float rw = static_cast<float>(frame.renderExtent.width);
+                const float rh = static_cast<float>(frame.renderExtent.height);
+
+                cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_rtaoPipeline);
+                cmd.setCullMode(NRI::CullMode::None);
+                cmd.setDepthTestEnable(false);
+                cmd.setDepthWriteEnable(false);
+                cmd.setColorBlendEnable(0, false);
+                cmd.setColorWriteMask(0, NRI::ColorComponent::R);
+
+                shaderio::PushConstantRTAO rtaoPush{};
+                rtaoPush.invViewProj = uniformData.invViewProj;
+                rtaoPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                rtaoPush.kernelReference = context.Buffer(res->SSAOKernel).getDeviceAddress();
+                rtaoPush.depthTextureIndex = context.Slot(res->Depth);
+                rtaoPush.normalTextureIndex = context.Slot(res->GBufferNormal);
+                rtaoPush.kernelSize = static_cast<uint32_t>(m_ssaoKernelSize);
+                rtaoPush.radius = getSSAORadius();
+                rtaoPush.power = m_ssaoPower;
+                rtaoPush.viewportSize = glm::vec2(rw, rh);
+                cmd.pushData(&rtaoPush, sizeof(shaderio::PushConstantRTAO));
+
+                cmd.drawMeshTasks(1, 1, 1);
+            });
+    }
+
     void Renderer::addDeferredLightingPass()
     {
         if (m_frame.restirPTActive || m_frame.pathTracerActive || !m_deferredLightingPipeline)
@@ -322,6 +478,8 @@ namespace Nox
                     builder.Read(resources.DDGIIrradiance[frame.ddgiWriteIndex]);
                     builder.Read(resources.DDGIDistance[frame.ddgiWriteIndex]);
                 }
+                if (frame.ssaoAdded)
+                    builder.Read(resources.SSAO);
                 ReadIfValid(builder, resources.TLAS);
                 ReadGpuScene(builder, resources);
                 builder.ColorTarget(resources.HDRScene, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 1.0f });
@@ -378,6 +536,7 @@ namespace Nox
                 lightingPush.restirDIDiffuseTextureIndex = uniformData.restirDIDiffuseTextureIndex;
                 lightingPush.restirDISpecularTextureIndex = uniformData.restirDISpecularTextureIndex;
                 lightingPush.restirDIDenoiserMode = frame.nrdDIAdded ? static_cast<uint32_t>(m_nrdDIDenoiser) : 0;
+                lightingPush.ssaoTextureIndex = frame.ssaoAdded ? context.Slot(res->SSAO) : 0xFFFFFFFF;
                 cmd.pushData(&lightingPush, sizeof(shaderio::PushConstantDeferredLighting));
 
                 cmd.drawMeshTasks(1, 1, 1);

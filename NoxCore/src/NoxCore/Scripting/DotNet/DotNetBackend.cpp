@@ -1,6 +1,6 @@
 #include "DotNetBackend.h"
 
-#include <Coral/Attribute.hpp>
+#include "CoralCompat.h"
 #include <Coral/String.hpp>
 #include <SDL3/SDL_scancode.h>
 

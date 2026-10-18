@@ -15,6 +15,14 @@ target_link_libraries(${PROJECT_NAME} PRIVATE NoxCore)
 set(NOX_SCRIPT_CORE_OUTPUT "${CMAKE_BINARY_DIR}/managed/Nox.ScriptCore")
 set(NOX_FACERUN_SCRIPT_OUTPUT "${CMAKE_BINARY_DIR}/managed/Facerun")
 add_custom_target(NoxManagedScripts ALL
+    # A fresh/clean build can run this target's commands before NoxEditor's own compile step has created its output
+    # directory at all (add_dependencies below only orders this before NoxEditor's LINK, not after its output
+    # directory exists) -- the copy_if_different/copy_directory commands further down all target
+    # $<TARGET_FILE_DIR:${PROJECT_NAME}>, which then doesn't exist yet ("Target ... is not a directory"). A build
+    # where it happens to already exist from an earlier build never showed this. make_directory is a no-op when the
+    # directory is already there, so this is safe to run unconditionally, every time.
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+        "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
     COMMAND dotnet build "${CMAKE_SOURCE_DIR}/NoxScriptCore/Nox.ScriptCore.csproj"
         --configuration $<CONFIG>
         --output "${NOX_SCRIPT_CORE_OUTPUT}"

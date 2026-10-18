@@ -20,7 +20,15 @@ namespace Nox
             // A closed, single-sided translucent shape needs its backface culled like the opaque buckets do; otherwise
             // both hemispheres blend on top of each other (meshlets are not depth-sorted), so transparent buckets respect
             // doubleSided too.
-            if (material.alphaMode == static_cast<uint32_t>(AlphaMode::Blend))
+            //
+            // KHR_materials_transmission is orthogonal to alphaMode in the glTF spec -- real glass is standardly
+            // authored as alphaMode OPAQUE with a transmissionFactor, not alphaMode BLEND (transmission through a
+            // material isn't the same thing as the material's own coverage being partial). Without this check, glass
+            // authored that way -- Bistro's windows -- landed in the opaque bucket, rendered through the deferred
+            // G-buffer path, which has no transmission handling at all: a solid, bright panel instead of glass.
+            // Material_TransparentLit_Mesh.slang already reads transmissionFactor and reduces alpha for it correctly;
+            // it was just never getting these materials routed to it.
+            if (material.alphaMode == static_cast<uint32_t>(AlphaMode::Blend) || material.transmissionFactor > 0.0f)
             {
                 if (unlit)
                     return doubleSided ? RenderBucket::TransparentUnlitDoubleSided : RenderBucket::TransparentUnlit;

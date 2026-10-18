@@ -511,6 +511,11 @@ struct PushConstantMeshlets
     uint64_t skinnedVertexReference;
     uint32_t instanceBaseIndex;
     uint32_t meshletCulling; // MESHLET_* flags (MESHLET_CULL_FRUSTUM off: every cluster of the LOD cut is drawn)
+    // Only meaningful to Material_TransparentLit_Mesh.slang's fragment stage (the forward pass has no G-buffer for
+    // DeferredLighting.slang to read this from instead): set once per pass, after SSAO/RTAO have run, by
+    // Renderer::addForward3DPass -- every other consumer of this struct (task/mesh stages, the opaque G-buffer
+    // resolve) leaves it unread. 0xFFFFFFFF when neither SSAO nor RTAO ran this frame.
+    uint32_t ssaoTextureIndex;
 };
 
 struct PushConstantSkinning
@@ -662,6 +667,54 @@ struct PushConstantDeferredLighting
     uint32_t restirDIDiffuseTextureIndex;  // de-modulated diffuse / specular direct lighting (NRDFrontEnd.slang)
     uint32_t restirDISpecularTextureIndex;
     uint32_t restirDIDenoiserMode; // how both were packed: NRD_SIGNAL_RAW / REBLUR / RELAX
+
+    uint32_t ssaoTextureIndex; // 0xFFFFFFFF when SSAO didn't run this frame (disabled, or RTAO owns occlusion instead)
+};
+
+// Raster-only ambient occlusion (SSAO.slang): hemisphere-kernel, world-space reprojection, one fullscreen pass.
+// Deliberately not RTAO -- both are meant to feed the SAME ssaoTextureIndex slot in PushConstantDeferredLighting and
+// never run in the same frame (Renderer::m_ssaoEnabled / a future m_rtaoEnabled are mutually exclusive), so adding
+// RTAO later is a second producer of that slot, not a second, separately-consumed occlusion term to reconcile.
+struct PushConstantSSAO
+{
+    mat4 invViewProj;
+    mat4 view;
+    mat4 proj; // Jittered: must match the projection the depth buffer being sampled was rasterized with.
+    uint64_t matrixReference;
+    uint64_t kernelReference; // BDA to float4[kernelSize] hemisphere sample directions (tangent space, +Z up)
+    uint32_t depthTextureIndex;
+    uint32_t normalTextureIndex;
+    uint32_t kernelSize;
+    float radius;   // world units
+    float bias;     // world units: shrugs off self-occlusion from the surface's own micro-slope / depth precision
+    float power;    // contrast (pow(ao, power) after averaging)
+    vec2 viewportSize;
+};
+
+struct PushConstantSSAOBlur
+{
+    uint64_t matrixReference;
+    uint32_t ssaoTextureIndex; // the raw (unblurred) AO this pass reads
+    uint32_t depthTextureIndex;
+    vec2 viewportSize;
+};
+
+// Ray-traced ambient occlusion: same hemisphere kernel and per-pixel rotation as PushConstantSSAO (SSAOKernel is
+// shared), but each sample is a real traced ray instead of a screen-space reprojection -- no radius/bias tradeoff
+// against depth-buffer precision, no missed occluders outside the screen or behind other geometry, at the cost of
+// a TLAS trace per sample instead of a texture read. Writes the same resources.SSAORaw slot SSAO does (see the
+// comment on PushConstantSSAO): consumers never need to know which of the two actually ran.
+struct PushConstantRTAO
+{
+    mat4 invViewProj;
+    uint64_t matrixReference;
+    uint64_t kernelReference;
+    uint32_t depthTextureIndex;
+    uint32_t normalTextureIndex;
+    uint32_t kernelSize;
+    float radius;
+    vec2 viewportSize;
+    float power;
 };
 
 struct PushConstantPathTracer

@@ -799,6 +799,10 @@ AssetRegistry:
       SourceMeshIndex: 117
       ImportScale: 100
       MaterialBasePath: Models/bistro/Meshes/bistro.nsmesh
+  - Handle: 1480378140219616192
+    FilePath: Models/bistro/Materials/bistro_LMBR_0000002_Mesh_Instance_2927079199513853512_Instance_4926635340727823246.nmat
+    SourceFilePath: Models/bistro/Materials/bistro_LMBR_0000002_Mesh_Instance_2927079199513853512_Instance_4926635340727823246.nmat
+    Type: AssetType::Material
   - Handle: 1491202444561414912
     FilePath: Models/bistro/objects/structures/modular/windows/paris_building01_window/Textures/paris_building01_window_01_ddna.ntex
     SourceFilePath: Models/bistro/objects/structures/modular/windows/paris_building01_window/paris_building01_window_01_ddna.dds
@@ -4185,6 +4189,10 @@ AssetRegistry:
       SourceMeshIndex: 102
       ImportScale: 100
       MaterialBasePath: Models/bistro/Meshes/bistro.nsmesh
+  - Handle: 6351662810347764728
+    FilePath: Models/bistro/Materials/bistro_LMBR_0000002_Mesh_Instance_2927079199513853512.nmat
+    SourceFilePath: Models/bistro/Materials/bistro_LMBR_0000002_Mesh_Instance_2927079199513853512.nmat
+    Type: AssetType::Material
   - Handle: 6357503348632464220
     FilePath: Models/bistro/Materials/bistro_LMBR_0000049_Concrete_Plaster.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_0000049_Concrete_Plaster.nmat
@@ -4799,6 +4807,20 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 7425696612397979067
+    FilePath: Models/BlenderBox/Meshes/Cube.nsmesh
+    SourceFilePath: Models/BlenderBox/BlenderBox.glb
+    Type: AssetType::StaticMesh
+    MeshSettings:
+      ImportStaticMeshes: true
+      ImportSkeletalMeshes: false
+      ImportAnimations: false
+      ImportSkinWeights: true
+      StaticCombine: 0
+      SkeletalCombine: 0
+      SourceMeshIndex: 0
+      ImportScale: 50
+      MaterialBasePath: Models/BlenderBox/Meshes/BlenderBox.nsmesh
   - Handle: 7428005653166430612
     FilePath: Models/bistro/Meshes/subset_9_24.nsmesh
     SourceFilePath: Models/bistro/bistro.gltf
@@ -8603,6 +8625,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 13733284959293884773
+    FilePath: Models/BlenderBox/Materials/BlenderBox_Material.nmat
+    SourceFilePath: Models/BlenderBox/Materials/BlenderBox_Material.nmat
+    Type: AssetType::Material
   - Handle: 13744102522482018488
     FilePath: Models/bistro/Materials/bistro_LMBR_0000131_Paris_Coasters_01.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_0000131_Paris_Coasters_01.nmat
@@ -8815,6 +8841,10 @@ AssetRegistry:
       SourceMeshIndex: 58
       ImportScale: 100
       MaterialBasePath: Models/bistro/Meshes/bistro.nsmesh
+  - Handle: 14120964357876992296
+    FilePath: Models/bistro/Materials/bistro_LMBR_0000002_Mesh_Instance_7815456113422771259.nmat
+    SourceFilePath: Models/bistro/Materials/bistro_LMBR_0000002_Mesh_Instance_7815456113422771259.nmat
+    Type: AssetType::Material
   - Handle: 14156711091482004935
     FilePath: Models/bistro/Materials/bistro_LMBR_0000045_Concrete_Striped.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_0000045_Concrete_Striped.nmat
@@ -10085,6 +10115,14 @@ AssetRegistry:
       SourceMeshIndex: 389
       ImportScale: 100
       MaterialBasePath: Models/bistro/Meshes/bistro.nsmesh
+  - Handle: 16313533316506729033
+    FilePath: EnvironmentMaps/shanghai_bund_4k_cube_bc6u.ntex
+    SourceFilePath: EnvironmentMaps/shanghai_bund_4k_cube_bc6u.ntex
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
   - Handle: 16318588824225598267
     FilePath: Models/bistro/Materials/bistro_LMBR_0000180_leaf.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_0000180_leaf.nmat

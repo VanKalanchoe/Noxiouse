@@ -210,9 +210,9 @@ float4 fragMain(
 
     // 4. GGX VNDF Importance-Sampled Reflection Direction
     float3 R;
-    if (roughness < 0.01 || pushConstant.denoiserMode == 0)
+    if (roughness < 0.01)
     {
-        // Smooth mirror surface or raw mode without denoiser: exact reflection without stochastic noise
+        // Smooth mirror surface: exact reflection without stochastic noise
         R = reflect(-V, normal);
     }
     else
@@ -231,7 +231,8 @@ float4 fragMain(
     }
 
     // 5. Trace Reflection Ray against TLAS
-    float3 rayOrigin = worldPos + normal * (0.002 * ubo->unitsPerMeter);
+    // Use robust bias to prevent depth-buffer precision self-intersection (same as DeferredLighting)
+    float3 rayOrigin = worldPos + normal * (0.01 * ubo->unitsPerMeter);
     RayDesc reflectionRayDesc;
     reflectionRayDesc.Origin = rayOrigin;
     reflectionRayDesc.Direction = R;
@@ -276,10 +277,11 @@ float4 fragMain(
     // 6. Evaluate Reflected Radiance
     if (!hit && ubo->prefilteredMapIndex != 0xFFFFFFFF)
     {
-        // Ray Miss: Sample skybox environment cubemap
+        // Ray Miss: Sample skybox environment cubemap at the correct roughness mip level
         TextureCube prefilteredTex = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + ubo->prefilteredMapIndex, 0));
         SamplerState samplerPrefiltered = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_PREFILTER, 0));
-        float3 skyColor = prefilteredTex.SampleLevel(samplerPrefiltered, R, 0).rgb * ubo->scaleIBLAmbient;
+        float lod = roughness * ubo->prefilteredCubeMipLevels;
+        float3 skyColor = prefilteredTex.SampleLevel(samplerPrefiltered, R, lod).rgb * ubo->scaleIBLAmbient;
         return NRD_PackSignal(pushConstant.denoiserMode, skyColor, ReflectionMissDistance, abs(mul(ubo->view, float4(worldPos, 1.0)).z), roughness);
     }
     if (!hit)
@@ -409,7 +411,29 @@ float4 fragMain(
 
             RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> shadowRq;
             shadowRq.TraceRayInline(accelerationStructure, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES, 0xFF, shadowRay);
-            shadowRq.Proceed();
+            
+            while (shadowRq.Proceed())
+            {
+                uint shadowInstanceID = shadowRq.CandidateRayInstanceCustomIndex();
+                uint shadowPrimIndex = shadowRq.CandidatePrimitiveIndex();
+                GpuRayTracingInstance shadowLut = instanceLUTBuffer[shadowInstanceID];
+
+                if (shadowLut.alphaMode == 0 || shadowLut.baseColorTextureIndex == 0xFFFFFFFF)
+                {
+                    shadowRq.CommitNonOpaqueTriangleHit();
+                }
+                else
+                {
+                    float2 shadowUV = intersection_uv(shadowLut, shadowPrimIndex, shadowRq.CandidateTriangleBarycentrics());
+                    Texture2D tex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + shadowLut.baseColorTextureIndex, 0));
+                    float4 intersectionColor = tex.SampleLevel(textureSampler, shadowUV, 0);
+
+                    if (intersectionColor.a >= shadowLut.alphaCutoff)
+                    {
+                        shadowRq.CommitNonOpaqueTriangleHit();
+                    }
+                }
+            }
 
             if (shadowRq.CommittedStatus() != COMMITTED_TRIANGLE_HIT)
             {
@@ -434,7 +458,13 @@ float4 fragMain(
     {
         TextureCube irradianceTex = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + ubo->irradianceMapIndex, 0));
         SamplerState samplerIrradiance = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_IRRADIANCE, 0));
-        ambientLight = irradianceTex.SampleLevel(samplerIrradiance, hitNormal, 0).rgb * (albedo / 3.14159265) * ubo->scaleIBLAmbient * 0.2;
+        // Matches getIBLContribution's diffuse term in PBRLighting.slang exactly (the same irradiance cubemap, the
+        // same scaleIBLAmbient, no extra factor) -- this used to have an additional, undocumented * 0.2 here, making
+        // a reflected surface's ambient lighting five times dimmer than the exact same surface lit directly. Never
+        // visible in a scene with strong direct lights (they dominate the sum below); in an environment-only scene
+        // (Bistro, no direct light does anything on its own) that dim ambient term was the reflection's entire
+        // radiance, reading as almost black.
+        ambientLight = irradianceTex.SampleLevel(samplerIrradiance, hitNormal, 0).rgb * (albedo / 3.14159265) * ubo->scaleIBLAmbient;
     }
     else
     {

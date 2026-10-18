@@ -863,7 +863,8 @@ namespace Nox
             "18: Path Tracer (1-SPP Raw)",
             "19: Path Tracer (Progressive Ground Truth)",
             "20: Texture Streaming Mips (red: needs more, green: as needed, blue: more than needed)",
-            "21: Cluster LOD Level (green: original, then yellow, orange, red, magenta, blue)"
+            "21: Cluster LOD Level (green: original, then yellow, orange, red, magenta, blue)",
+            "22: Ambient Occlusion (SSAO/RTAO, white = unoccluded)"
         };
         int currentMode = static_cast<int>(m_Renderer->getDebugMode());
         if (ImGui::Combo("PBR Debug View", &currentMode, debugModeNames, IM_ARRAYSIZE(debugModeNames)))
@@ -1163,6 +1164,30 @@ namespace Nox
         }
         else
         {
+            // Ambient Occlusion: SSAO (raster-only) and RTAO (needs Hybrid Ray Tracing, below) both only ever feed
+            // the same occlusion term -- see the comment on Renderer::m_ssaoEnabled -- so this is one set of controls
+            // for whichever is active, not two separate sections to keep in sync.
+            ImGui::SeparatorText("Ambient Occlusion");
+            bool ssaoEnabled = m_Renderer->getSSAOEnabled();
+            if (ImGui::Checkbox("SSAO", &ssaoEnabled))
+                m_Renderer->setSSAOEnabled(ssaoEnabled);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Screen-space contact/ambient occlusion. Mutually exclusive with RTAO (below, under Hybrid Ray Tracing).");
+            if (m_Renderer->getSSAOEnabled() || m_Renderer->getRTAOEnabled())
+            {
+                ImGui::Indent();
+                float aoRadius = WorldUnits::ToCentimeters(m_Renderer->getSSAORadius());
+                ImGui::SetNextItemWidth(160.0f);
+                if (ImGui::SliderFloat("Radius (cm)", &aoRadius, 1.0f, 200.0f, "%.1f"))
+                    m_Renderer->setSSAORadius(WorldUnits::FromCentimeters(aoRadius));
+                float aoPower = m_Renderer->getSSAOPower();
+                ImGui::SetNextItemWidth(160.0f);
+                if (ImGui::SliderFloat("Power", &aoPower, 0.5f, 4.0f, "%.2f"))
+                    m_Renderer->setSSAOPower(aoPower);
+                ImGui::Unindent();
+            }
+            ImGui::Separator();
+
             // Hybrid Ray Tracing options (only visible when not in full Path Tracing)
             bool rtEnabled = m_Renderer->getRayTracingEnabled();
             if (ImGui::Checkbox("Enable Hybrid Ray Tracing", &rtEnabled))
@@ -1184,6 +1209,14 @@ namespace Nox
                 {
                     m_Renderer->setRayTracingReflections(rtReflections);
                 }
+
+                bool rtaoEnabled = m_Renderer->getRTAOEnabled();
+                if (ImGui::Checkbox("Ray Tracing Ambient Occlusion (RTAO)", &rtaoEnabled))
+                {
+                    m_Renderer->setRTAOEnabled(rtaoEnabled);
+                }
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Traces real rays for ambient occlusion instead of SSAO's screen-space reprojection -- turning this on turns SSAO off (see Ambient Occlusion, above). Same radius/power settings, so the two are directly comparable.");
 
                 // Diffuse Global Illumination (GI)
                 static const char* giModeNames[] = {

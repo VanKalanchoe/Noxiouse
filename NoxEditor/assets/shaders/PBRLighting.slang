@@ -77,9 +77,24 @@ float3 evaluateDirectLight(PBRInfo pbrInputs, float3 lightRadiance)
     return pbrInputs.NdotL * lightRadiance * (diffuseContrib + specContrib);
 }
 
-// Image-based lighting: diffuse from the irradiance cubemap, specular from the prefiltered
-// cubemap + split-sum BRDF LUT. Exactly DeferredLighting.slang's own getIBLContribution.
-IBLResult getIBLContribution(UniformBufferObject* ubo, PBRInfo pbrInputs, float3 n, float3 reflection)
+// Specular occlusion (Lagarde & de Rousiers, "Moving Frostbite to PBR", 2014): a flat AO value describes how much
+// of the sky a point sees in EVERY direction, but specular reflection only cares about one -- the reflection
+// vector. Multiplying specular by the same diffuse `ao` either over-darkens a rough surface (whose wide lobe
+// really does see roughly what diffuse AO measures) or under-darkens a smooth one at a grazing angle (a narrow
+// lobe pointed past whatever is occluding the wider diffuse hemisphere). This derives a separate curve from the
+// same `ao` input, view angle and roughness instead of reusing diffuse's own attenuation as-is.
+float iblSpecularOcclusion(float NdotV, float ao, float roughness)
+{
+    return saturate(pow(NdotV + ao, exp2(-16.0 * roughness - 1.0)) - 1.0 + ao);
+}
+
+// Image-based lighting: diffuse from the irradiance cubemap, specular from the prefiltered cubemap + split-sum BRDF
+// LUT. Exactly DeferredLighting.slang's own getIBLContribution. `ao` is whatever ambient occlusion the caller
+// already has for this pixel (SSAO/RTAO/a baked texture, or 1.0 -- fully visible -- when none ran this frame);
+// only the specular term uses it here, through iblSpecularOcclusion above -- diffuse AO is applied once, by the
+// caller, the same way it always was (baked-texture AO folded into occlusion further up, multiplied into the
+// pixel's whole lit result at the very end).
+IBLResult getIBLContribution(UniformBufferObject* ubo, PBRInfo pbrInputs, float3 n, float3 reflection, float ao)
 {
     if (ubo->irradianceMapIndex == 0xFFFFFFFF || ubo->prefilteredMapIndex == 0xFFFFFFFF || ubo->brdfLutIndex == 0xFFFFFFFF)
     {
@@ -107,6 +122,7 @@ IBLResult getIBLContribution(UniformBufferObject* ubo, PBRInfo pbrInputs, float3
 
     IBLResult result;
     result.diffuse = diffuseLight * pbrInputs.diffuseColor * ubo->scaleIBLAmbient;
-    result.specular = specularLight * (pbrInputs.specularColor * brdf.x + brdf.y);
+    result.specular = specularLight * (pbrInputs.specularColor * brdf.x + brdf.y) *
+                      iblSpecularOcclusion(pbrInputs.NdotV, ao, pbrInputs.perceptualRoughness);
     return result;
 }

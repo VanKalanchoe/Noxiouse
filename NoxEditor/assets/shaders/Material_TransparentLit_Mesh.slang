@@ -185,7 +185,16 @@ FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform Pu
         baseColor = float4(lerp(baseColorDiffusePart, baseColorSpecularPart, metallic * metallic), diffuseSample.a);
     }
 
-    float3 diffuseColor = baseColor.rgb * (1.0 - metallic);
+    float transmission = instance.transmissionFactor;
+    if (instance.transmissionTextureIndex != 0xFFFFFFFF)
+    {
+        Texture2D transTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.transmissionTextureIndex, 0));
+        transmission *= transTex.Sample(sampLinearHandle, instance.transmissionTextureSet == 0 ? vertIn.uv0 : vertIn.uv1).r;
+    }
+    float diffuseAlpha = baseColor.a * (1.0 - transmission);
+    baseColor.a = diffuseAlpha;
+
+    float3 diffuseColor = baseColor.rgb * (1.0 - metallic) * diffuseAlpha;
     float3 specularColor = lerp(f0, baseColor.rgb, metallic);
     float alphaRoughness = perceptualRoughness * perceptualRoughness;
     float reflectance = max(max(specularColor.r, specularColor.g), specularColor.b);
@@ -266,7 +275,25 @@ FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform Pu
         specularEnvironmentR0, specularEnvironmentR90, alphaRoughness,
         diffuseColor, specularColor
     );
-    IBLResult ibl = getIBLContribution(ubo, iblInputs, n, reflection);
+    // Read ahead of getIBLContribution: it needs this for the specular occlusion approximation (see
+    // iblSpecularOcclusion in PBRLighting.slang), not just to darken the final color the way it used to be used below.
+    // Combined with SSAO/RTAO (whichever ran this frame -- set by Renderer::addForward3DPass, after the opaque
+    // G-buffer path's own occlusion pass; this shader has no G-buffer to read it from the way DeferredLighting.slang
+    // does): a material's own baked AO map is per-material detail no screen-space pass will ever pick up (grout
+    // lines in a tile texture); SSAO/RTAO is contact/geometric occlusion no baked texture accounts for either.
+    float ao = 1.0;
+    if (instance.occlusionTextureIndex != 0xFFFFFFFF)
+    {
+        Texture2D occlusionTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.occlusionTextureIndex, 0));
+        ao = occlusionTex.Sample(sampLinearHandle, instance.occlusionTextureSet == 0 ? vertIn.uv0 : vertIn.uv1).r;
+    }
+    if (pushConstant.ssaoTextureIndex != 0xFFFFFFFF)
+    {
+        Texture2D<float> ssaoTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.ssaoTextureIndex, 0));
+        ao *= ssaoTex.Load(int3(int2(vertIn.pos.xy), 0)).r;
+    }
+
+    IBLResult ibl = getIBLContribution(ubo, iblInputs, n, reflection, ao);
     float3 ambientDiffuse = ibl.diffuse;
 
     if (ubo->enableDDGI != 0 && ubo->ddgiIrradianceTextureIndex != 0xFFFFFFFF && ubo->ddgiDistanceTextureIndex != 0xFFFFFFFF)
@@ -278,14 +305,7 @@ FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform Pu
         ambientDiffuse = ddgiIrradiance * diffuseColor;
     }
 
-    float3 color = directLighting + ambientDiffuse + ibl.specular;
-
-    if (instance.occlusionTextureIndex != 0xFFFFFFFF)
-    {
-        Texture2D occlusionTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.occlusionTextureIndex, 0));
-        float ao = occlusionTex.Sample(sampLinearHandle, instance.occlusionTextureSet == 0 ? vertIn.uv0 : vertIn.uv1).r;
-        color *= ao;
-    }
+    float3 color = (directLighting + ambientDiffuse + ibl.specular) * ao;
 
     float3 emissive = instance.emissiveFactor.rgb * instance.emissiveStrength;
     if (instance.emissiveTextureIndex != 0xFFFFFFFF)

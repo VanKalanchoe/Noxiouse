@@ -11,6 +11,7 @@
 #include "GeometryArena.h"
 #include "MemoryBudget.h"
 #include "UploadManager.h"
+#include "NoxCore/Core/WorldUnits.h"
 #include "GpuScene.h"
 #include "NoxCore/RenderGraph/RenderGraph.h"
 #include "NRI/ShaderBindingTable.h"
@@ -268,6 +269,17 @@ namespace Nox
         // Cluster LOD (§5.7): the screen-space error in pixels a drawn cluster may have, or the original clusters only.
         void setLodErrorPixels(float pixels) { m_lodErrorPixels = pixels; }
         float getLodErrorPixels() const { return m_lodErrorPixels; }
+
+        // SSAO / RTAO (mutually exclusive occlusion producers, one shared set of radius/power settings -- see the
+        // comment on m_ssaoEnabled in the private section below)
+        void setSSAOEnabled(bool enabled) { m_ssaoEnabled = enabled; if (enabled) m_rtaoEnabled = false; }
+        bool getSSAOEnabled() const { return m_ssaoEnabled; }
+        void setRTAOEnabled(bool enabled) { m_rtaoEnabled = enabled; if (enabled) m_ssaoEnabled = false; }
+        bool getRTAOEnabled() const { return m_rtaoEnabled; }
+        void setSSAORadius(float radius) { m_ssaoRadiusMeters = std::max(WorldUnits::ToMeters(radius), 0.0001f); }
+        float getSSAORadius() const { return WorldUnits::FromMeters(m_ssaoRadiusMeters); }
+        void setSSAOPower(float power) { m_ssaoPower = power; }
+        float getSSAOPower() const { return m_ssaoPower; }
         void setLodFullDetail(bool fullDetail) { m_lodFullDetail = fullDetail; }
         bool getLodFullDetail() const { return m_lodFullDetail; }
         // Draw list entries, and of the newest finished frame: the instances drawn in phase 1 and the candidates phase 2
@@ -571,6 +583,14 @@ namespace Nox
         void createGBufferPipeline(bool forceCompile = false);
         // PBR
         void createDeferredLightingPipeline(bool forceCompile = false);
+        // SSAO / RTAO
+        void createSSAOPipeline(bool forceCompile = false);
+        void createSSAOBlurPipeline(bool forceCompile = false);
+        void createRTAOPipeline(bool forceCompile = false);
+        void createSSAOKernel();
+        void addSSAOPass();
+        void addRTAOPass();
+        void addOcclusionBlurPass();
         // Post Process
         void createPostProcessPipeline(bool forceCompile = false);
         void createAutoExposurePipelines(bool forceCompile = false);
@@ -737,6 +757,20 @@ namespace Nox
         std::unique_ptr<NRI::Pipeline> m_gbufferPipelineNoVelocity = nullptr;
         // PBR
         std::unique_ptr<NRI::Pipeline> m_deferredLightingPipeline = nullptr;
+        // SSAO: mutually exclusive with a future RTAO (both would only ever feed the same occlusion slot -- see
+        // PushConstantSSAO's comment in shaderIO.h), so this is a plain toggle, not an enum with only one real member.
+        std::unique_ptr<NRI::Pipeline> m_ssaoPipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_ssaoBlurPipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_rtaoPipeline = nullptr;
+        std::unique_ptr<NRI::Buffer> m_ssaoKernelBuffer; // shared: both SSAO and RTAO sample the same hemisphere kernel
+        bool m_ssaoEnabled = true;
+        bool m_rtaoEnabled = false;
+        int m_ssaoKernelSize = 16;
+        // Renderer is constructed before Project::Load sets WorldUnits. Keep
+        // physical lengths in meters and convert when filling each frame's data.
+        float m_ssaoRadiusMeters = 0.5f;
+        float m_ssaoBiasMeters = 0.025f;
+        float m_ssaoPower = 1.5f;
         // Post Process
         std::unique_ptr<NRI::Pipeline> m_postProcessPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_autoExposureBuildPipeline;
@@ -807,6 +841,8 @@ namespace Nox
             bool nrdDIAdded = false;
             bool ptNRDAdded = false;
             bool deferredLightingAdded = false;
+            bool occlusionRawAdded = false; // SSAO or RTAO wrote resources.SSAORaw this frame (never both)
+            bool ssaoAdded = false;         // resources.SSAO (the blurred result) is valid this frame
             bool dlssAdded = false;
             bool gbufferVelocityWritten = false;
             bool computeSkinningAdded = false;

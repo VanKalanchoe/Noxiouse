@@ -46,6 +46,8 @@ namespace Nox
         RGTexture AutoExposure;
         RGTexture Scene;
         RGTexture EnvironmentCubemap;
+        RGTexture SSAORaw;  // SSAO.slang's hash-dithered output, before SSAOBlur.slang denoises it
+        RGTexture SSAO;
 
         // Hybrid RT + NRD
         RGTexture RawShadowMask;
@@ -105,6 +107,9 @@ namespace Nox
         RGBuffer SkinningWorkItems;
         RGBuffer SkinnedVertices;
         RGBuffer PreviousSkinnedVertices;
+
+        // SSAO
+        RGBuffer SSAOKernel; // static, generated once at startup (Renderer::createSSAOKernel)
 
         // Views
         ViewDrawResources CameraDraws;

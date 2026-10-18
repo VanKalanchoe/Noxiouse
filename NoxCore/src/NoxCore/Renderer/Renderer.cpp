@@ -13,6 +13,7 @@
 #include <fstream>
 #include <cctype>
 #include <unordered_map>
+#include <random>
 
 #define TINYOBJLOADER_IMPLEMENTATION
 #include <tiny_obj_loader.h>
@@ -251,6 +252,10 @@ namespace Nox
         watchShader("assets/shaders/GBufferMaterial.slang", "GBuffer", [this]() { createGBufferPipeline(true); });
         // Deferred PBR Lighting
         watchShader("assets/shaders/DeferredLighting.slang", "DeferredLighting", [this]() { createDeferredLightingPipeline(true); });
+        // SSAO
+        watchShader("assets/shaders/SSAO.slang", "SSAO", [this]() { createSSAOPipeline(true); });
+        watchShader("assets/shaders/SSAOBlur.slang", "SSAOBlur", [this]() { createSSAOBlurPipeline(true); });
+        watchShader("assets/shaders/RTAO.slang", "RTAO", [this]() { createRTAOPipeline(true); });
         // Post Process
         watchShader("assets/shaders/PostProcess.slang", "PostProcess", [this]() { createPostProcessPipeline(true); });
         watchShader("assets/shaders/AutoExposure.slang", "AutoExposure", [this]() { createAutoExposurePipelines(true); });
@@ -455,6 +460,10 @@ namespace Nox
         createSceneResources();
         // PBR
         createDeferredLightingPipeline(false);
+        createSSAOPipeline(false);
+        createSSAOBlurPipeline(false);
+        createRTAOPipeline(false);
+        createSSAOKernel();
         // NRD keeps size-dependent internal state; its textures are render graph resources.
         if (m_renderSize.width > 0 && m_renderSize.height > 0)
             m_device->initNRD(m_renderSize.width, m_renderSize.height);
@@ -979,6 +988,35 @@ namespace Nox
         void* mapped = m_restirGINeighborOffsetsBuffer->map(0, offsetsBufferSize);
         memcpy(mapped, floatOffsets, offsetsBufferSize);
         m_restirGINeighborOffsetsBuffer->unmap();
+    }
+
+    void Renderer::createSSAOKernel()
+    {
+        // Hemisphere sample directions in tangent space (+Z is "up", away from the surface), the classic SSAO kernel
+        // distribution (John Chapman / LearnOpenGL): more samples close to the origin than far from it, so most of the
+        // kernel's resolution is spent near the surface where occlusion actually happens. Static data, generated once.
+        std::vector<glm::vec4> kernel(m_ssaoKernelSize);
+        std::mt19937 rng(1337u); // fixed seed: a stable, reproducible kernel: nothing about "how SSAO looks" should
+                                  // depend on when in the program's lifetime this constructor happened to run.
+        std::uniform_real_distribution<float> unit(0.0f, 1.0f);
+        std::uniform_real_distribution<float> signedUnit(-1.0f, 1.0f);
+        for (int i = 0; i < m_ssaoKernelSize; ++i)
+        {
+            glm::vec3 sample(signedUnit(rng), signedUnit(rng), unit(rng));
+            sample = glm::normalize(sample) * unit(rng);
+            float scale = static_cast<float>(i) / static_cast<float>(m_ssaoKernelSize);
+            scale = glm::mix(0.1f, 1.0f, scale * scale);
+            kernel[i] = glm::vec4(sample * scale, 0.0f);
+        }
+
+        const uint64_t kernelBufferSize = sizeof(glm::vec4) * kernel.size();
+        m_ssaoKernelBuffer = m_device->createBuffer(NRI::BufferDesc{
+            .size = kernelBufferSize,
+            .usage = NRI::BufferUsage::Storage
+        });
+        void* mapped = m_ssaoKernelBuffer->map(0, kernelBufferSize);
+        memcpy(mapped, kernel.data(), kernelBufferSize);
+        m_ssaoKernelBuffer->unmap();
     }
 
     void Renderer::setReSTIRPTTemporalEnabled(bool enabled)
@@ -1688,6 +1726,81 @@ namespace Nox
         });
 
         m_deferredLightingPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+    }
+
+    void Renderer::createSSAOPipeline(bool forceCompile)
+    {
+        NRI::PipelineDesc desc{};
+        desc.forceCompile = forceCompile;
+        desc.colorFormats = {NRI::ImageFormat::R16_SFLOAT};
+
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Task,
+            .entryPoint = "taskMain",
+            .sourcePath = "assets/shaders/SSAO.slang"
+        });
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Mesh,
+            .entryPoint = "meshMain",
+            .sourcePath = "assets/shaders/SSAO.slang"
+        });
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Fragment,
+            .entryPoint = "fragMain",
+            .sourcePath = "assets/shaders/SSAO.slang"
+        });
+
+        m_ssaoPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+    }
+
+    void Renderer::createSSAOBlurPipeline(bool forceCompile)
+    {
+        NRI::PipelineDesc desc{};
+        desc.forceCompile = forceCompile;
+        desc.colorFormats = {NRI::ImageFormat::R16_SFLOAT};
+
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Task,
+            .entryPoint = "taskMain",
+            .sourcePath = "assets/shaders/SSAOBlur.slang"
+        });
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Mesh,
+            .entryPoint = "meshMain",
+            .sourcePath = "assets/shaders/SSAOBlur.slang"
+        });
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Fragment,
+            .entryPoint = "fragMain",
+            .sourcePath = "assets/shaders/SSAOBlur.slang"
+        });
+
+        m_ssaoBlurPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+    }
+
+    void Renderer::createRTAOPipeline(bool forceCompile)
+    {
+        NRI::PipelineDesc desc{};
+        desc.forceCompile = forceCompile;
+        desc.colorFormats = {NRI::ImageFormat::R16_SFLOAT};
+
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Task,
+            .entryPoint = "taskMain",
+            .sourcePath = "assets/shaders/RTAO.slang"
+        });
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Mesh,
+            .entryPoint = "meshMain",
+            .sourcePath = "assets/shaders/RTAO.slang"
+        });
+        desc.shaders.push_back({
+            .stage = NRI::ShaderStage::Fragment,
+            .entryPoint = "fragMain",
+            .sourcePath = "assets/shaders/RTAO.slang"
+        });
+
+        m_rtaoPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
     void Renderer::createTextureInspectPipeline(bool forceCompile)
@@ -2760,7 +2873,7 @@ namespace Nox
         const bool isPathTracing = m_pathTracingEnabled || m_debugMode == 18 || m_debugMode == 19;
         const bool isDDGI = m_rayTracingEnabled && (m_ddgiEnabled || m_debugMode == 16 || m_debugMode == 17);
         const bool isReSTIRGI = m_rayTracingEnabled && (m_diffuseGIMode == 2 || (m_debugMode == 16 && m_diffuseGIMode != 1));
-        const bool isHybridRT = m_rayTracingEnabled && (m_rayTracingShadows || m_rayTracingReflections);
+        const bool isHybridRT = m_rayTracingEnabled && (m_rayTracingShadows || m_rayTracingReflections || m_rtaoEnabled);
         if (!isPathTracing && !isDDGI && !isReSTIRGI && !isHybridRT)
             return;
 
@@ -3193,6 +3306,9 @@ namespace Nox
             addVisibilityLatePass();
             addClusterStatsReadbackPass();
             addGBufferPass();
+            addSSAOPass();
+            addRTAOPass();
+            addOcclusionBlurPass();
             addNRDGuidesPass();
             addRTShadowPasses();
             addRTReflectionPasses();
@@ -3310,7 +3426,8 @@ namespace Nox
             const bool hasSkinnedVertices = m_computeSkinningPipeline && !m_skinningWorkItems.empty() && frameIndex < m_skinnedVertexBuffers.size() &&
                                             m_skinnedVertexBuffers[frameIndex] != nullptr;
             references.skinnedVertexReference = hasSkinnedVertices ? m_skinnedVertexBuffers[frameIndex]->getDeviceAddress() : 0;
-
+            // Real value (or left at "none") set later, in addForward3DPass, once SSAO/RTAO's result actually exists.
+            references.ssaoTextureIndex = 0xFFFFFFFF;
         }
         frame.skinningWorkCount = static_cast<uint32_t>(m_skinningWorkItems.size());
         frame.skinnedHistoryValid = frame.skinningWorkCount > 0 && m_skinnedVertexHistoryValid;
@@ -3383,6 +3500,8 @@ namespace Nox
         resources.GBufferEmission = graph.CreateTexture("GBuffer Emission", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
         resources.GBufferVelocity = graph.CreateTexture("GBuffer Velocity", renderTarget(NRI::ImageFormat::R32G32_SFLOAT));
         resources.HDRScene = graph.CreateTexture("HDR Scene", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
+        resources.SSAORaw = graph.CreateTexture("SSAO Raw", renderTarget(NRI::ImageFormat::R16_SFLOAT));
+        resources.SSAO = graph.CreateTexture("SSAO", renderTarget(NRI::ImageFormat::R16_SFLOAT));
         RGTextureDesc autoExposureDesc;
         autoExposureDesc.Size = RGSize::Absolute;
         autoExposureDesc.Width = autoExposureDesc.Height = 256;
@@ -3447,6 +3566,8 @@ namespace Nox
             resources.EnvironmentCubemap = graph.ImportTexture("Environment", m_environmentCubemap.get(), RGImportAccess::ReadOnly);
         if (m_restirGINeighborOffsetsBuffer)
             resources.NeighborOffsets = graph.ImportBuffer("RTXDI Neighbor Offsets", m_restirGINeighborOffsetsBuffer.get(), RGImportAccess::ReadOnly);
+        if (m_ssaoKernelBuffer)
+            resources.SSAOKernel = graph.ImportBuffer("SSAO Kernel", m_ssaoKernelBuffer.get(), RGImportAccess::ReadOnly);
         // Depth pyramid of the camera view: written from this frame's depth, read by the next frame's phase 1 (§5.6.4).
         {
             RGTextureDesc hiZ;
@@ -4066,7 +4187,12 @@ namespace Nox
         // so disabling "Enable Hybrid Ray Tracing" actually stops the TLAS rebuild cost as well.
         bool isDDGI = m_rayTracingEnabled && (m_ddgiEnabled || m_debugMode == 16 || m_debugMode == 17);
         bool isReSTIRGI = m_rayTracingEnabled && (m_diffuseGIMode == 2 || (m_debugMode == 16 && m_diffuseGIMode != 1));
-        bool isHybridRT = m_rayTracingEnabled && (m_rayTracingShadows || m_rayTracingReflections);
+        // RTAO traces its own rays too (RTAO.slang), same as shadows/reflections do -- without it here, enabling
+        // only RTAO (shadows and reflections both off) took the early-out below every frame, which explicitly
+        // zeroes uniformData.tlasDeviceAddress: RTAO's own trace_occlusion_ray checks that and silently reports "no
+        // hit" for every ray, which read as "RTAO does nothing" even though the TLAS itself was never the problem
+        // (turning shadows or reflections on happened to keep a valid TLAS around for RTAO to piggyback on).
+        bool isHybridRT = m_rayTracingEnabled && (m_rayTracingShadows || m_rayTracingReflections || m_rtaoEnabled);
 
         if (!isPathTracing && !isDDGI && !isReSTIRGI && !isHybridRT)
         {

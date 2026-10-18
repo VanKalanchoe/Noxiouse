@@ -689,6 +689,9 @@ namespace Nox
                     builder.Read(resources.DDGIIrradiance[m_frame.ddgiWriteIndex]);
                     builder.Read(resources.DDGIDistance[m_frame.ddgiWriteIndex]);
                 }
+                // Transparent lit shading's specular occlusion approximation (Material_TransparentLit_Mesh.slang).
+                if (m_frame.ssaoAdded)
+                    builder.Read(resources.SSAO);
                 builder.SetRenderArea(m_frame.renderExtent);
                 ReadGpuScene(builder, resources);
                 ReadViewDraws(builder, resources.CameraDraws);
@@ -756,9 +759,24 @@ namespace Nox
                     cmd.setDepthWriteEnable(false);
                     cmd.setDepthCompareOp(NRI::CompareOp::GreaterOrEqual);
                     cmd.setColorBlendEnable(0, true);
+                    const NRI::ColorBlendEquation blendEquation
+                    {
+                        .srcColorBlendFactor = NRI::BlendFactor::One,
+                        .dstColorBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha,
+                        .colorBlendOp = NRI::BlendOp::Add,
+                        .srcAlphaBlendFactor = NRI::BlendFactor::One,
+                        .dstAlphaBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha,
+                        .alphaBlendOp = NRI::BlendOp::Add,
+                    };
+                    cmd.setColorBlendEquation(0, blendEquation);
                     cmd.setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
                     cmd.setColorBlendEnable(1, false);
                     cmd.setColorWriteMask(1, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
+
+                    // Whichever of SSAO/RTAO ran this frame (never both -- see Renderer::m_ssaoEnabled), for the
+                    // specular occlusion approximation in Material_TransparentLit_Mesh.slang; every other consumer
+                    // of this cursor's push constant (unlit, skybox, opaque) never reads the field.
+                    cursor.references.ssaoTextureIndex = m_frame.ssaoAdded ? context.Slot(res->SSAO) : 0xFFFFFFFF;
 
                     // Non-unlit Blend objects get real shading (same BRDF/IBL as the deferred opaque path, via
                     // PBRLighting.slang) instead of a flat baseColor pass-through, so they don't look self-lit next to
@@ -774,6 +792,7 @@ namespace Nox
 
                     MeshletDrawCursor lateCursor = beginMeshletDraws(context, res->CameraDraws, true);
                     lateCursor.boundPipeline = cursor.boundPipeline;
+                    lateCursor.references.ssaoTextureIndex = cursor.references.ssaoTextureIndex;
                     drawMeshletBucket(cmd, lateCursor, RenderBucket::Transparent, *m_transparentLitPipeline, NRI::CullMode::Back, false, true);
                     drawMeshletBucket(cmd, lateCursor, RenderBucket::TransparentDoubleSided, *m_transparentLitPipeline, NRI::CullMode::None, false, true);
                     drawMeshletBucket(cmd, lateCursor, RenderBucket::TransparentUnlit, *m_unlitPipeline, NRI::CullMode::Back, false, true);
