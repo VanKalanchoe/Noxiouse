@@ -12,6 +12,7 @@
 #include "Panels/NodeGraphEditorPanel.h"
 #include "Panels/MaterialEditorPanel.h"
 #include "Panels/AnimationClipPanel.h"
+#include "Panels/TimelinePanel.h"
 #include "NoxCore/Renderer/Font.h"
 #include "NoxCore/Renderer/Renderer.h"
 
@@ -269,6 +270,10 @@ namespace Nox
         std::vector<Scope<NodeGraphEditorPanel>> m_NodeGraphEditors;
         std::vector<Scope<MaterialEditorPanel>> m_MaterialEditors;
         std::vector<Scope<AnimationClipPanel>> m_AnimationClipPanels;
+        // Sequencer timelines (Future.md item 3, A8), one window per open .ntimeline.
+        std::vector<Scope<TimelinePanel>> m_TimelinePanels;
+        // Puts back what the timeline previews posed (before saving, playing, or another scene).
+        void EndTimelinePreviews();
         // AssetType -> "open its editor window", so a new asset editor is one entry here rather than new
         // double-click handling in every panel that shows asset references.
         std::unordered_map<AssetType, std::function<void(AssetHandle)>> m_AssetOpeners;

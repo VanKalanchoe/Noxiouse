@@ -10,6 +10,7 @@
 #include "Components.h"
 #include "SceneGraph.h"
 #include "NoxCore/Animation/AnimPose.h"
+#include "NoxCore/Animation/Timeline.h"
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Physics/Physics2D.h"
 #include "NoxCore/Physics/Physics3DScene.h"
@@ -391,6 +392,9 @@ namespace Nox
             outHandles.insert(animator.Graph);
         }
 
+        for (auto entity : m_Registry.view<TimelinePlayerComponent>())
+            outHandles.insert(m_Registry.get<TimelinePlayerComponent>(entity).Timeline);
+
         for (auto entity : m_Registry.view<SpriteRendererComponent>())
             outHandles.insert(m_Registry.get<SpriteRendererComponent>(entity).Texture);
 
@@ -462,6 +466,7 @@ namespace Nox
         m_IsRunning = true;
         OnPhysics2DStart();
         OnPhysics3DStart();
+        StartTimelines();
         
         // Scripting
         {
@@ -480,6 +485,7 @@ namespace Nox
     void Scene::OnRuntimeStop()
     {
         m_IsRunning = false;
+        m_TimelinesRunning = false;
         
         ScriptEngine::OnRuntimeStop();
         OnPhysics2DStop();
@@ -490,10 +496,12 @@ namespace Nox
     {
         OnPhysics2DStart();
         OnPhysics3DStart();
+        StartTimelines();
     }
 
     void Scene::OnSimulationStop()
     {
+        m_TimelinesRunning = false;
         OnPhysics2DStop();
         OnPhysics3DStop();
     }
@@ -521,11 +529,17 @@ namespace Nox
         RunUpdateSystems(ts, step, step);
         if (step)
         {
-            // Animation notifies the animators crossed this frame, to the entity's scripts (main thread: managed code).
+            // Animation notifies the animators crossed this frame, and the timelines' event keys, to the entity's scripts (main
+            // thread: managed code).
             std::vector<std::pair<entt::entity, std::string>> notifies;
             for (auto entity : m_Registry.view<AnimatorComponent, ScriptComponent>())
             {
                 for (const std::string& name : m_Registry.get<AnimatorComponent>(entity).FiredNotifies)
+                    notifies.emplace_back(entity, name);
+            }
+            for (auto entity : m_Registry.view<TimelinePlayerComponent, ScriptComponent>())
+            {
+                for (const std::string& name : m_Registry.get<TimelinePlayerComponent>(entity).FiredEvents)
                     notifies.emplace_back(entity, name);
             }
             for (const auto& [entity, name] : notifies)
@@ -594,6 +608,10 @@ namespace Nox
         m_UpdateSystems.AddSystem("Animation",
             ComponentAccess().Write<AnimatorComponent, TransformComponent, DirtyTransformComponent>(),
             [this]() { UpdateAnimators(); });
+        m_UpdateSystems.AddSystem("Timelines",
+            ComponentAccess().Read<RelationshipComponent, TagComponent>()
+                .Write<TimelinePlayerComponent, TransformComponent, DirtyTransformComponent, DirectionalLightComponent, PointLightComponent, SpotLightComponent, CameraComponent>(),
+            [this]() { UpdateTimelines(); });
         m_UpdateSystems.AddSystem("Transform Propagation",
             ComponentAccess().Read<TransformComponent, RelationshipComponent, MeshComponent>().Write<WorldTransformComponent, DirtyTransformComponent, MovedEntities>(),
             [this]() { SceneGraph::UpdateWorldTransforms(m_Registry, m_EntityMap, m_CommandBuffers, m_MovedEntities); });
@@ -782,6 +800,161 @@ namespace Nox
             return;
 
         m_Physics3DScene->Step(m_FrameInput.Timestep);
+    }
+
+    void Scene::StartTimelines()
+    {
+        m_TimelinesRunning = true;
+        for (auto entity : m_Registry.view<TimelinePlayerComponent>())
+        {
+            auto& player = m_Registry.get<TimelinePlayerComponent>(entity);
+            player.Time = 0.0f;
+            player.Playing = player.PlayOnStart;
+            player.FiredEvents.clear();
+        }
+    }
+
+    Entity Scene::FindTimelineTarget(Entity player, const std::string& path)
+    {
+        // Names separated by '/', each one a child of the one before ("" = the player).
+        Entity current = player;
+        size_t start = 0;
+        while (current && start < path.size())
+        {
+            const size_t end = std::min(path.find('/', start), path.size());
+            const std::string name = path.substr(start, end - start);
+            start = end + 1;
+            if (name.empty())
+                continue;
+            Entity found;
+            if (current.HasComponent<RelationshipComponent>())
+            {
+                for (UUID childID : current.GetComponent<RelationshipComponent>().Children)
+                {
+                    Entity child = GetEntityByUUID(childID);
+                    if (child && child.HasComponent<TagComponent>() && child.GetComponent<TagComponent>().Tag == name)
+                    {
+                        found = child;
+                        break;
+                    }
+                }
+            }
+            current = found;
+        }
+        return current;
+    }
+
+    void Scene::ApplyTimeline(Entity player, const Timeline& timeline, float time)
+    {
+        for (const TimelineTrack& track : timeline.Tracks)
+        {
+            if (track.Muted || track.Keys.empty() || track.Property == TimelineProperty::Event)
+                continue;
+            Entity target = FindTimelineTarget(player, track.Target);
+            if (!target)
+                continue;
+
+            const glm::vec4 value = TimelineEvaluation::Evaluate(track, time);
+            switch (track.Property)
+            {
+            case TimelineProperty::Translation:
+            case TimelineProperty::Rotation:
+            case TimelineProperty::Scale:
+            {
+                if (!target.HasComponent<TransformComponent>())
+                    break;
+                auto& transform = target.GetComponent<TransformComponent>();
+                if (track.Property == TimelineProperty::Translation)
+                    transform.Translation = glm::vec3(value);
+                else if (track.Property == TimelineProperty::Rotation)
+                    transform.Rotation = glm::radians(glm::vec3(value));
+                else
+                    transform.Scale = glm::vec3(value);
+                // Every entity has one from its creation: no component is added from this (possibly worker) thread.
+                if (auto* dirty = m_Registry.try_get<DirtyTransformComponent>(target))
+                    dirty->isDirty = true;
+                break;
+            }
+            case TimelineProperty::LightColor:
+                if (target.HasComponent<DirectionalLightComponent>())
+                    target.GetComponent<DirectionalLightComponent>().Color = glm::vec3(value);
+                if (target.HasComponent<PointLightComponent>())
+                    target.GetComponent<PointLightComponent>().Color = glm::vec3(value);
+                if (target.HasComponent<SpotLightComponent>())
+                    target.GetComponent<SpotLightComponent>().Color = glm::vec3(value);
+                break;
+            case TimelineProperty::LightIntensity:
+                if (target.HasComponent<DirectionalLightComponent>())
+                    target.GetComponent<DirectionalLightComponent>().Intensity = value.x;
+                if (target.HasComponent<PointLightComponent>())
+                    target.GetComponent<PointLightComponent>().Intensity = value.x;
+                if (target.HasComponent<SpotLightComponent>())
+                    target.GetComponent<SpotLightComponent>().Intensity = value.x;
+                break;
+            case TimelineProperty::CameraFOV:
+                if (target.HasComponent<CameraComponent>())
+                    target.GetComponent<CameraComponent>().Camera.SetPerspectiveVerticalFOV(glm::radians(glm::clamp(value.x, 1.0f, 179.0f)));
+                break;
+            default:
+                break;
+            }
+        }
+    }
+
+    void Scene::PreviewTimeline(Entity player, float time)
+    {
+        if (!player || !player.HasComponent<TimelinePlayerComponent>())
+            return;
+        if (const Timeline* timeline = AssetManager::FindLoadedAsset<Timeline>(player.GetComponent<TimelinePlayerComponent>().Timeline))
+            ApplyTimeline(player, *timeline, time);
+    }
+
+    void Scene::UpdateTimelines()
+    {
+        if (!m_TimelinesRunning || !m_FrameInput.StepAnimation)
+            return;
+
+        const float ts = m_FrameInput.Timestep;
+        std::vector<AssetHandle>& missingAssets = m_MissingAssets.Local();
+        for (auto handle : m_Registry.view<TimelinePlayerComponent>())
+        {
+            auto& player = m_Registry.get<TimelinePlayerComponent>(handle);
+            player.FiredEvents.clear();
+            if (player.Timeline == 0)
+                continue;
+            const Timeline* timeline = AssetManager::FindLoadedAsset<Timeline>(player.Timeline);
+            if (!timeline)
+            {
+                missingAssets.push_back(player.Timeline);
+                continue;
+            }
+
+            // Advance (looping, or stopping at either end), then pose everything the tracks drive.
+            const float previous = player.Time;
+            bool wrapped = false;
+            if (player.Playing)
+            {
+                const float duration = std::max(timeline->Duration, 0.01f);
+                player.Time += ts * player.Speed;
+                if (player.Time > duration || player.Time < 0.0f)
+                {
+                    if (timeline->Loop)
+                    {
+                        player.Time = std::fmod(std::fmod(player.Time, duration) + duration, duration);
+                        wrapped = true;
+                    }
+                    else
+                    {
+                        player.Time = std::clamp(player.Time, 0.0f, duration);
+                        player.Playing = false;
+                    }
+                }
+                for (const TimelineTrack& track : timeline->Tracks)
+                    TimelineEvaluation::CollectEvents(track, previous, player.Time, wrapped, player.FiredEvents);
+            }
+
+            ApplyTimeline(Entity(handle, this), *timeline, player.Time);
+        }
     }
 
     void Scene::UpdateAnimators()
@@ -1054,7 +1227,7 @@ namespace Nox
         // them directly makes duplicated glTF hierarchies share their children.
         using DuplicatableComponents = ComponentGroup<
             MeshComponent, MaterialComponent, ModelInstanceComponent, PrefabInstanceComponent, DirectionalLightComponent,
-            PointLightComponent, SpotLightComponent, EnvironmentLightComponent, AnimatorComponent, FolderComponent,
+            PointLightComponent, SpotLightComponent, EnvironmentLightComponent, AnimatorComponent, TimelinePlayerComponent, FolderComponent,
             SpriteRendererComponent, CircleRendererComponent, CameraComponent,
             ScriptComponent, RigidBody2DComponent, BoxCollider2DComponent,
             CircleCollider2DComponent, TextComponent>;
@@ -1473,6 +1646,11 @@ namespace Nox
     
     template <>
     void Scene::OnComponentAdded<AnimatorComponent>(Entity entity, AnimatorComponent& component)
+    {
+    }
+
+    template <>
+    void Scene::OnComponentAdded<TimelinePlayerComponent>(Entity entity, TimelinePlayerComponent& component)
     {
     }
 

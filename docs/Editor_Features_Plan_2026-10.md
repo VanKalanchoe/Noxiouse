@@ -125,8 +125,27 @@ What was built:
   re-cook keeps them). Raised when a playhead crosses one -- Clip nodes, a blend space's leading clip, montages -- forward,
   backward and across the loop point; scripts receive `OnAnimationEvent(string name)` (new virtual on `EntityBehaviour`),
   after the animation update on the main thread. Sync markers (blend spaces syncing by marker) are not done.
-- **A7 start, the Animation Clip window:** double-click a clip: its length and channels, a timeline (playhead + a marker per
-  notify), add / edit / delete notifies; saved at once. No 3D preview (needs M2's second view).
+- **A7, the Animation Clip window:** double-click a clip: its length and channels, a timeline (playhead + a marker per
+  notify), add / edit / delete notifies; saved at once. **3D preview (2026-10-18, untested):** the skeletal mesh cooked from the
+  clip's model (else one in its folder; any skeletal mesh can be picked) plays the clip on the preview stage (B1's), with
+  play / pause, loop, speed (also backwards), scrubbing, and the notifies flashing as they pass (`AssetPreviewRenderer::
+  GetAnimationPreview`: the clip sampled at the playhead, skinned like an Animator without joint entities, its own extra view).
+  Not yet: previewing an animation graph, loop ranges.
+- **A8 Sequencer (2026-10-18, untested):** a **Timeline** asset (`.ntimeline`, YAML; Content Browser + Add > Timeline) of
+  tracks, each a target entity (by name path from the player: "" the player, "Door/Hinge" below it -- so one timeline drives
+  every copy of a prefab) and a property: Translation, Rotation (degrees), Scale, Light Color / Intensity, Camera FOV, Event.
+  Keys are Constant, Linear or Smooth (cubic through the neighbours, flat at the ends). A **Timeline Player** component plays it
+  in Play and Simulate (Play On Start, Speed; negative plays backwards; a looping timeline wraps), posing the targets before
+  transform propagation; event keys reach the player's scripts as `OnAnimationEvent(name)`. Scripts:
+  `TimelinePlayerComponent.Play(fromStart)`, `Stop()`, `IsPlaying`, `Time`, `Speed`. The **Timeline window** (double-click the
+  asset, or Open on the player): ruler + playhead (click / drag), Play / Pause / back to start, duration, loop, zoom; + Track
+  (the player and every entity below it, with the properties their components have); a lane per track with key diamonds
+  (select, drag to move -- snapped to 0.01 s, Ctrl free --, Del deletes), **Key** records the target's current value at the
+  playhead (pose it with the gizmo first), mute, remove; the selected key's time, value, interpolation or event name. It
+  previews on the entity whose player uses it (the selected one first): its targets take the pose at the playhead, and
+  what they had comes back when Preview is unticked, the window closes, the scene is saved, Play / Simulate start or another
+  scene opens -- the undo history waits while it previews. Not yet: curve editor, material parameter tracks, auto-key,
+  sub-sequences / camera cuts.
 - **A3:** **LayeredBlend** node (Base, Blend, Alpha; "Bone" = the branch root, e.g. spine_02; "BlendDepth" fades in over
   that many bones) and **ApplyAdditive** node (Base, Additive, Reference -- unconnected = rest pose -- and Alpha; rotation
   delta additive * inverse(reference) applied before the base rotation, translation offset, scale ratio).

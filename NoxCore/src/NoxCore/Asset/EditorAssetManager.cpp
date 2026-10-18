@@ -117,7 +117,8 @@ namespace Nox
         { ".nanim",   AssetType::AnimationSequence },
         { ".nskmesh", AssetType::SkeletalMesh },
         { ".nanimgraph", AssetType::AnimationGraph },
-        { ".nprefab", AssetType::Prefab }
+        { ".nprefab", AssetType::Prefab },
+        { ".ntimeline", AssetType::Timeline }
     };
 
     AssetType EditorAssetManager::GetAssetTypeFromExtension(const std::filesystem::path& extension)
@@ -850,7 +851,7 @@ namespace Nox
         // Cooked assets (meshes, textures) have files named after them, and materials name textures by path: only
         // self-contained assets that everything names by handle are renamed (and moved). Not scenes: the editor keeps the
         // open scene's path.
-        return (metadata.Type == AssetType::Prefab || metadata.Type == AssetType::AnimationGraph) &&
+        return (metadata.Type == AssetType::Prefab || metadata.Type == AssetType::AnimationGraph || metadata.Type == AssetType::Timeline) &&
                (metadata.SourceFilePath.empty() || metadata.SourceFilePath == metadata.FilePath);
     }
 

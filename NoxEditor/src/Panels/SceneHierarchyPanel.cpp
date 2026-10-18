@@ -884,6 +884,7 @@ namespace Nox
             DisplayAddComponentEntry<EnvironmentLightComponent>("Environment Light");
 
             DisplayAddComponentEntry<AnimatorComponent>("Animator");
+            DisplayAddComponentEntry<TimelinePlayerComponent>("Timeline Player");
 
             DisplayAddComponentEntry<CameraComponent>("Camera");
             DisplayAddComponentEntry<ScriptComponent>("Script");
@@ -1796,6 +1797,48 @@ namespace Nox
                         ImGui::DragInt(name.c_str(), i);
                 }
             }
+        });
+
+        DrawComponent<TimelinePlayerComponent>("Timeline Player", entity, [this](auto& component)
+        {
+            // The timeline (a sequencer asset: keyed properties of this entity and the ones below it, by name path).
+            const auto& registry = Project::GetActive()->GetEditorAssetManager()->GetAssetRegistry();
+            const std::string current = component.Timeline != 0 && registry.contains(component.Timeline)
+                ? registry.at(component.Timeline).FilePath.stem().string() : std::string("None");
+            if (ImGui::BeginCombo("Timeline", current.c_str()))
+            {
+                if (ImGui::Selectable("None", component.Timeline == 0))
+                    component.Timeline = 0;
+                for (const auto& [handle, metadata] : registry)
+                {
+                    if (metadata.Type != AssetType::Timeline)
+                        continue;
+                    if (ImGui::Selectable(metadata.FilePath.stem().string().c_str(), component.Timeline == handle))
+                        component.Timeline = handle;
+                }
+                ImGui::EndCombo();
+            }
+            if (ImGui::BeginDragDropTarget())
+            {
+                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEM"))
+                {
+                    const AssetHandle handle = *static_cast<const AssetHandle*>(payload->Data);
+                    if (AssetManager::GetAssetType(handle) == AssetType::Timeline)
+                        component.Timeline = handle;
+                }
+                ImGui::EndDragDropTarget();
+            }
+            if (component.Timeline != 0)
+            {
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Open") && m_OpenAsset)
+                    m_OpenAsset(component.Timeline);
+            }
+            ImGui::Checkbox("Play On Start", &component.PlayOnStart);
+            ImGui::SetItemTooltip("Starts from the beginning when Play or Simulate starts (else a script calls Play).");
+            ImGui::DragFloat("Speed", &component.Speed, 0.01f, -10.0f, 10.0f, "%.2fx");
+            if (component.Playing)
+                ImGui::TextDisabled("Playing: %.2f s", component.Time);
         });
 
         DrawComponent<CameraComponent>("Camera", entity, [](auto& component)

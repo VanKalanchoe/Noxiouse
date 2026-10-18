@@ -12,6 +12,7 @@
 #include "MaterialImporter.h"
 #include "NodeGraphImporter.h"
 #include "PrefabImporter.h"
+#include "TimelineImporter.h"
 #include "NoxCore/Core/Log.h"
 
 namespace Nox
@@ -60,6 +61,9 @@ namespace Nox
         }},
         { AssetType::Prefab, [](AssetHandle h, const AssetMetadata& meta) -> Ref<Asset> {
             return Ref<Asset>(PrefabImporter::ImportPrefab(h, meta));
+        }},
+        { AssetType::Timeline, [](AssetHandle h, const AssetMetadata& meta) -> Ref<Asset> {
+            return Ref<Asset>(TimelineImporter::ImportTimeline(h, meta));
         }}
     };
     

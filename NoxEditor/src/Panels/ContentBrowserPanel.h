@@ -54,6 +54,7 @@ namespace Nox
         // The modern layout (docs/Future.md item 2): a toolbar with the add/import buttons, a clickable path, search, a type filter
         // and the tile size; the folder tree on the left; the tiles of the folder (or the search results) on the right.
         void DrawToolbar();
+        void CreateTimeline();
         void DrawBreadcrumb();
         void RebuildFolderTree();
         struct FolderNode;

@@ -24,6 +24,12 @@ internal static unsafe class InternalCalls
     private static delegate*<ulong, NativeString, NativeString, float, float, float, uint> Animator_PlayMontage;
     private static delegate*<ulong, NativeString, float, void> Animator_StopMontage;
     private static delegate*<ulong, NativeString, uint> Animator_IsMontagePlaying;
+    private static delegate*<ulong, uint, void> Timeline_Play;
+    private static delegate*<ulong, void> Timeline_Stop;
+    private static delegate*<ulong, uint> Timeline_IsPlaying;
+    private static delegate*<ulong, float> Timeline_GetTime;
+    private static delegate*<ulong, float, void> Timeline_SetTime;
+    private static delegate*<ulong, float, void> Timeline_SetSpeed;
     private static delegate*<ulong, float, float, float, void> Character_SetMoveVelocity;
     private static delegate*<ulong, float, void> Character_Jump;
     private static delegate*<ulong, uint> Character_IsGrounded;
@@ -125,6 +131,18 @@ internal static unsafe class InternalCalls
         using NativeString nativeSlot = new(slot);
         return Animator_IsMontagePlaying(entityID, nativeSlot) != 0;
     }
+
+    internal static void PlayTimeline(ulong entityID, bool fromStart) => Timeline_Play(entityID, fromStart ? 1u : 0u);
+
+    internal static void StopTimeline(ulong entityID) => Timeline_Stop(entityID);
+
+    internal static bool IsTimelinePlaying(ulong entityID) => Timeline_IsPlaying(entityID) != 0;
+
+    internal static float GetTimelineTime(ulong entityID) => Timeline_GetTime(entityID);
+
+    internal static void SetTimelineTime(ulong entityID, float time) => Timeline_SetTime(entityID, time);
+
+    internal static void SetTimelineSpeed(ulong entityID, float speed) => Timeline_SetSpeed(entityID, speed);
 
     internal static void SetCharacterMoveVelocity(ulong entityID, Vector3 velocity) =>
         Character_SetMoveVelocity(entityID, velocity.X, velocity.Y, velocity.Z);

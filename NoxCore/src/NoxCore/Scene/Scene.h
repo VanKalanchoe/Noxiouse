@@ -21,6 +21,7 @@ namespace Nox
 {
     class Entity; // Forward declaration
     class IPhysics3DScene;
+    class Timeline;
 
     class Scene : public Asset
     {
@@ -75,6 +76,11 @@ namespace Nox
 
         // Every asset handle this scene's components reference - the roots for unloading unused assets.
         void CollectAssetReferences(std::unordered_set<AssetHandle>& outHandles);
+        // The Timeline window's preview while editing: the player's timeline posed at `time` seconds on its targets (written into
+        // their components, like a Play frame would).
+        void PreviewTimeline(Entity player, float time);
+        // A timeline track's target: the entity reached from the player by a path of child names ("" = the player itself).
+        Entity FindTimelineTarget(Entity player, const std::string& path);
 
         // True once after entities were destroyed since the last call, i.e. assets may have become unused.
         bool ConsumeAssetReferencesChanged() { return std::exchange(m_AssetReferencesChanged, false); }
@@ -125,6 +131,10 @@ namespace Nox
         void UpdatePhysics2D();
         void UpdatePhysics3D();
         void UpdateAnimators();
+        // Sequencer timelines (TimelinePlayerComponent): played in Play and Simulate from their start.
+        void StartTimelines();
+        void UpdateTimelines();
+        void ApplyTimeline(Entity player, const Timeline& timeline, float time);
         void SubmitLights();
         void Submit2D();
 
@@ -148,6 +158,7 @@ namespace Nox
         std::unique_ptr<IPhysics3DScene> m_Physics3DScene;
         std::vector<std::string> m_Folders;
         bool m_IsRunning = false;
+        bool m_TimelinesRunning = false; // Play or Simulate
         std::vector<UUID> m_PendingDestroy;
         std::vector<UUID> m_PendingScriptStart;
         bool m_IsPaused = false;

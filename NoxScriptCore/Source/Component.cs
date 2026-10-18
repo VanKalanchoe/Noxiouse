@@ -5,7 +5,8 @@ internal enum ComponentType
     Transform = 1,
     Animator = 2,
     CharacterController = 3,
-    RigidBody3D = 4
+    RigidBody3D = 4,
+    TimelinePlayer = 5
 }
 
 public abstract class Component

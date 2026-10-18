@@ -115,6 +115,18 @@ namespace Nox
             }
             m_AnimationClipPanels.push_back(CreateScope<AnimationClipPanel>(handle));
         };
+        m_AssetOpeners[AssetType::Timeline] = [this](AssetHandle handle)
+        {
+            for (auto& panel : m_TimelinePanels)
+            {
+                if (panel->GetTimeline() == handle)
+                {
+                    ImGui::SetWindowFocus(panel->GetTitle().c_str());
+                    return;
+                }
+            }
+            m_TimelinePanels.push_back(CreateScope<TimelinePanel>(handle));
+        };
         m_SceneHierarchyPanel.SetOpenAssetCallback([this](AssetHandle handle) { OpenAsset(handle); });
         m_SceneHierarchyPanel.SetFocusEntityCallback([this](Entity entity) { FocusOnEntity(entity); });
         m_SceneHierarchyPanel.SetPlaceAssetsCallback([this](const std::vector<AssetHandle>& handles, const std::string& folder)
@@ -600,6 +612,15 @@ namespace Nox
         for (auto& panel : m_AnimationClipPanels)
             panel->OnImGuiRender();
         std::erase_if(m_AnimationClipPanels, [](const Scope<AnimationClipPanel>& panel) { return !panel->IsOpen(); });
+        for (auto& panel : m_TimelinePanels)
+            panel->OnImGuiRender(m_ActiveScene, m_SceneHierarchyPanel.GetSelectedEntity(), m_SceneState == SceneState::Edit);
+        std::erase_if(m_TimelinePanels, [](const Scope<TimelinePanel>& panel)
+        {
+            if (panel->IsOpen())
+                return false;
+            panel->EndPreview(); // what the targets had comes back
+            return true;
+        });
 
         // "Right" Window
         ImGui::Begin("Stats");
@@ -1965,6 +1986,7 @@ namespace Nox
 
     void EditorLayer::NewScene()
     {
+        EndTimelinePreviews();
         m_HoveredEntity = Entity();
         m_SceneHierarchyPanel.SetSelectedEntity(Entity());
 
@@ -1993,6 +2015,7 @@ namespace Nox
     void EditorLayer::OpenScene(AssetHandle handle)
     {
         NOX_CORE_ASSERT(handle);
+        EndTimelinePreviews();
 
         if (m_PrefabMode.Active)
         {
@@ -3455,6 +3478,12 @@ namespace Nox
         PlaceAssets({ mesh }, m_EditorCamera.GetPosition() + m_EditorCamera.GetForwardDirection() * m_EditorCamera.GetDistance(), folder);
     }
 
+    void EditorLayer::EndTimelinePreviews()
+    {
+        for (auto& panel : m_TimelinePanels)
+            panel->EndPreview();
+    }
+
     void EditorLayer::UpdateHistory()
     {
         // An interaction ends when the ImGui item that was held (a drag, a text field, a button, a menu item, a drag-drop source)
@@ -3475,6 +3504,13 @@ namespace Nox
         // Play and Simulate change a copy of the scene that is thrown away on Stop: nothing to undo there.
         if (m_SceneState != SceneState::Edit || !m_ActiveScene || !Project::GetActive())
             return;
+
+        // A timeline preview poses its targets without editing the scene: nothing to record until it ends (and puts them back).
+        for (const auto& panel : m_TimelinePanels)
+        {
+            if (panel->IsPreviewing())
+                return;
+        }
 
         frame.AssetsLoading = Project::GetActive()->GetEditorAssetManager()->GetLoadingCount() > 0;
         if (Entity selected = m_SceneHierarchyPanel.GetSelectedEntity())
@@ -3538,6 +3574,7 @@ namespace Nox
 
     void EditorLayer::SaveScene()
     {
+        EndTimelinePreviews(); // the scene as it is, not posed by a preview (which resumes next frame)
         if (m_PrefabMode.Active)
         {
             SavePrefabMode(); // Ctrl+S in Prefab Mode saves the prefab, never the level
@@ -3555,6 +3592,7 @@ namespace Nox
 
     void EditorLayer::SaveSceneAs()
     {
+        EndTimelinePreviews();
         if (m_PrefabMode.Active)
         {
             SavePrefabMode();
@@ -3859,6 +3897,7 @@ namespace Nox
 
     void EditorLayer::OnScenePlay()
     {
+        EndTimelinePreviews(); // Play copies the scene as it is
         SetViewMode(EditorViewMode::Perspective);
         if (m_SceneState == SceneState::Simulate)
             OnSceneStop();
@@ -3874,6 +3913,7 @@ namespace Nox
 
     void EditorLayer::OnSceneSimulate()
     {
+        EndTimelinePreviews();
         if (m_SceneState == SceneState::Play)
             OnSceneStop();
 

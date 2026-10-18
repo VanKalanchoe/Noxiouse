@@ -25,7 +25,9 @@ namespace Nox
 
         AnimationGraph, // NodeGraph/NodeGraphAsset.h wrapping a NodeGraph whose Domain is "AnimationGraph" (.nanimgraph)
 
-        Prefab // Scene/Prefab.h: a saved recipe of entities (.nprefab), instanced in scenes by PrefabInstanceComponent
+        Prefab, // Scene/Prefab.h: a saved recipe of entities (.nprefab), instanced in scenes by PrefabInstanceComponent
+
+        Timeline // Animation/Timeline.h: a sequencer timeline (.ntimeline), played by TimelinePlayerComponent
     };
 
     // Where an asset is on its way into memory (§5.11.2). A request starts the load once; the asset is usable when Ready.

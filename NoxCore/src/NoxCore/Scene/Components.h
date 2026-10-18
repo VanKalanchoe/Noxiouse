@@ -371,6 +371,24 @@ namespace Nox
             : Animator(animation) {}
     };
 
+    // Plays a sequencer timeline (Animation/Timeline.h) on this entity and the entities below it: its tracks name their targets
+    // by path from here. Plays in Play and Simulate (PlayOnStart, or scripts: Play / Stop); the Timeline window previews it while
+    // editing.
+    struct TimelinePlayerComponent
+    {
+        AssetHandle Timeline = 0;
+        bool PlayOnStart = true;
+        float Speed = 1.0f;
+
+        // Runtime only.
+        float Time = 0.0f;
+        bool Playing = false;
+        std::vector<std::string> FiredEvents; // the event keys the last update passed, handed to the scripts as OnAnimationEvent(name)
+
+        TimelinePlayerComponent() = default;
+        TimelinePlayerComponent(const TimelinePlayerComponent&) = default;
+    };
+
     struct SpriteRendererComponent
     {
         glm::vec4 Color{ 1.0f, 1.0f, 1.0f, 1.0f };
@@ -604,7 +622,7 @@ namespace Nox
     using AllComponents = 
         ComponentGroup<TransformComponent, WorldTransformComponent, RelationshipComponent, DirtyTransformComponent, FolderComponent,
         MeshComponent, MaterialComponent, ModelInstanceComponent, ModelNodeComponent, PrefabInstanceComponent, PrefabNodeComponent, DirectionalLightComponent, PointLightComponent, SpotLightComponent, EnvironmentLightComponent, AnimatorComponent,
-        SpriteRendererComponent,
+        TimelinePlayerComponent, SpriteRendererComponent,
             CircleRendererComponent, CameraComponent, ScriptComponent,
             /*NativeScriptComponent,*/ RigidBody2DComponent, BoxCollider2DComponent,
             CircleCollider2DComponent, RigidBody3DComponent, BoxCollider3DComponent,

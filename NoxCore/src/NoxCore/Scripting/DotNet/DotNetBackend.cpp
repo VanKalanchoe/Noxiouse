@@ -147,6 +147,7 @@ namespace Nox
                 case 2: return entity.HasComponent<AnimatorComponent>();
                 case 3: return entity.HasComponent<CharacterController3DComponent>();
                 case 4: return entity.HasComponent<RigidBody3DComponent>();
+                case 5: return entity.HasComponent<TimelinePlayerComponent>();
                 default: return false;
             }
         }
@@ -212,6 +213,54 @@ namespace Nox
         {
             AnimatorComponent* animator = FindAnimator(entityID);
             return animator && animator->GraphInstance.IsMontagePlaying(std::string(slot));
+        }
+
+        // The Timeline Player (Nox.TimelinePlayerComponent): the next update plays from Time (Scene::UpdateTimelines).
+        TimelinePlayerComponent* FindTimelinePlayer(uint64_t entityID)
+        {
+            if (!s_Scene) return nullptr;
+            Entity entity = s_Scene->GetEntityByUUID(UUID(entityID));
+            return entity && entity.HasComponent<TimelinePlayerComponent>() ? &entity.GetComponent<TimelinePlayerComponent>() : nullptr;
+        }
+
+        void TimelinePlay(uint64_t entityID, Coral::Bool32 fromStart)
+        {
+            if (TimelinePlayerComponent* player = FindTimelinePlayer(entityID))
+            {
+                if (fromStart)
+                    player->Time = 0.0f;
+                player->Playing = true;
+            }
+        }
+
+        void TimelineStop(uint64_t entityID)
+        {
+            if (TimelinePlayerComponent* player = FindTimelinePlayer(entityID))
+                player->Playing = false;
+        }
+
+        Coral::Bool32 TimelineIsPlaying(uint64_t entityID)
+        {
+            TimelinePlayerComponent* player = FindTimelinePlayer(entityID);
+            return player && player->Playing;
+        }
+
+        float TimelineGetTime(uint64_t entityID)
+        {
+            TimelinePlayerComponent* player = FindTimelinePlayer(entityID);
+            return player ? player->Time : 0.0f;
+        }
+
+        void TimelineSetTime(uint64_t entityID, float time)
+        {
+            if (TimelinePlayerComponent* player = FindTimelinePlayer(entityID))
+                player->Time = std::max(time, 0.0f);
+        }
+
+        void TimelineSetSpeed(uint64_t entityID, float speed)
+        {
+            if (TimelinePlayerComponent* player = FindTimelinePlayer(entityID))
+                player->Speed = speed;
         }
 
         // The Character Controller 3D (Nox.CharacterControllerComponent): inputs are read by the next fixed physics
@@ -450,6 +499,12 @@ namespace Nox
         assembly.AddInternalCall("Nox.InternalCalls", "Animator_PlayMontage", reinterpret_cast<void*>(&AnimatorPlayMontage));
         assembly.AddInternalCall("Nox.InternalCalls", "Animator_StopMontage", reinterpret_cast<void*>(&AnimatorStopMontage));
         assembly.AddInternalCall("Nox.InternalCalls", "Animator_IsMontagePlaying", reinterpret_cast<void*>(&AnimatorIsMontagePlaying));
+        assembly.AddInternalCall("Nox.InternalCalls", "Timeline_Play", reinterpret_cast<void*>(&TimelinePlay));
+        assembly.AddInternalCall("Nox.InternalCalls", "Timeline_Stop", reinterpret_cast<void*>(&TimelineStop));
+        assembly.AddInternalCall("Nox.InternalCalls", "Timeline_IsPlaying", reinterpret_cast<void*>(&TimelineIsPlaying));
+        assembly.AddInternalCall("Nox.InternalCalls", "Timeline_GetTime", reinterpret_cast<void*>(&TimelineGetTime));
+        assembly.AddInternalCall("Nox.InternalCalls", "Timeline_SetTime", reinterpret_cast<void*>(&TimelineSetTime));
+        assembly.AddInternalCall("Nox.InternalCalls", "Timeline_SetSpeed", reinterpret_cast<void*>(&TimelineSetSpeed));
         assembly.AddInternalCall("Nox.InternalCalls", "Character_SetMoveVelocity", reinterpret_cast<void*>(&CharacterSetMoveVelocity));
         assembly.AddInternalCall("Nox.InternalCalls", "Character_Jump", reinterpret_cast<void*>(&CharacterJump));
         assembly.AddInternalCall("Nox.InternalCalls", "Character_IsGrounded", reinterpret_cast<void*>(&CharacterIsGrounded));

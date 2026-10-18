@@ -16,6 +16,7 @@
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Asset/NodeGraphSerializer.h"
 #include "NoxCore/Asset/TextureImporter.h"
+#include "NoxCore/Asset/TimelineImporter.h"
 #include "NoxCore/Core/Application.h"
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Utils/Utils.h"
@@ -793,6 +794,24 @@ namespace Nox
         }
     }
 
+    void ContentBrowserPanel::CreateTimeline()
+    {
+        // NewTimeline, NewTimeline 2, ... in the folder shown; registered, then its name goes into rename mode.
+        std::filesystem::path path = m_CurrentDirectory / "NewTimeline.ntimeline";
+        for (int index = 2; std::filesystem::exists(path); ++index)
+            path = m_CurrentDirectory / ("NewTimeline " + std::to_string(index) + ".ntimeline");
+        Timeline timeline;
+        if (!TimelineImporter::Serialize(path, timeline))
+            return;
+        std::filesystem::path relativeDirectory = m_CurrentDirectory.lexically_relative(m_BaseDirectory);
+        if (relativeDirectory == ".")
+            relativeDirectory.clear();
+        m_Project->GetEditorAssetManager()->ScanAndRegisterNewAssets(relativeDirectory);
+        RefreshAssetTree();
+        if (const AssetHandle handle = FindAssetHandle(path.lexically_relative(m_BaseDirectory)); handle != 0)
+            ShowNewAsset(handle);
+    }
+
     void ContentBrowserPanel::DrawToolbar()
     {
         if (ImGui::Button("+ Add"))
@@ -803,6 +822,10 @@ namespace Nox
                 m_ShowCreateScriptModal = true;
             if (ImGui::MenuItem("Animation Graph"))
                 m_ShowCreateGraphModal = true;
+            if (ImGui::MenuItem("Timeline"))
+                CreateTimeline();
+            ImGui::SetItemTooltip("A sequencer timeline: keyed positions, rotations, lights, camera FOV and events over time,\n"
+                                  "played by a Timeline Player on an entity (doors, elevators, light flicker, cutscenes).");
             ImGui::EndPopup();
         }
         ImGui::SameLine();

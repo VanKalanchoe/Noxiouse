@@ -570,6 +570,17 @@ namespace Nox
             out << YAML::EndMap; // AnimatorComponent
         }
 
+        if (entity.HasComponent<TimelinePlayerComponent>())
+        {
+            const auto& player = entity.GetComponent<TimelinePlayerComponent>();
+            out << YAML::Key << "TimelinePlayerComponent";
+            out << YAML::BeginMap;
+            out << YAML::Key << "Timeline" << YAML::Value << player.Timeline;
+            out << YAML::Key << "PlayOnStart" << YAML::Value << player.PlayOnStart;
+            out << YAML::Key << "Speed" << YAML::Value << player.Speed;
+            out << YAML::EndMap;
+        }
+
         if (entity.HasComponent<CameraComponent>())
         {
             out << YAML::Key << "CameraComponent";
@@ -1376,6 +1387,17 @@ namespace Nox
                 elc.FogSunScattering = environmentLightComponent["FogSunScattering"].as<float>();
             if (environmentLightComponent["FogSunExponent"])
                 elc.FogSunExponent = environmentLightComponent["FogSunExponent"].as<float>();
+        }
+
+        if (auto timelinePlayer = entity["TimelinePlayerComponent"])
+        {
+            auto& player = deserializedEntity.AddComponent<TimelinePlayerComponent>();
+            if (timelinePlayer["Timeline"])
+                player.Timeline = timelinePlayer["Timeline"].as<AssetHandle>();
+            if (timelinePlayer["PlayOnStart"])
+                player.PlayOnStart = timelinePlayer["PlayOnStart"].as<bool>();
+            if (timelinePlayer["Speed"])
+                player.Speed = timelinePlayer["Speed"].as<float>();
         }
 
         auto animatorComponent = entity["AnimatorComponent"];
