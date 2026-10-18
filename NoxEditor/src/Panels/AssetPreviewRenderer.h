@@ -1,4 +1,5 @@
 #pragma once
+#include <filesystem>
 #include <functional>
 #include <optional>
 #include <unordered_map>
@@ -18,7 +19,8 @@ namespace Nox
     // camera's sight, and the preview views trace no shadow rays, so the scene above casts nothing on it -- and a camera framing it
     // from the front right draws it raster only, lit by the scene's lights and environment.
     //  - Thumbnails of meshes, static meshes and materials (on a sphere), one at a time over a few frames, kept as textures
-    //    for the session (the Content Browser's tiles).
+    //    for the session (the Content Browser's tiles) and on disk in the project's Cache/Thumbnails (read back from the GPU),
+    //    so the next session shows them at once; one older than its asset's file is drawn again.
     //  - The Material Editor's live sphere, drawn every frame it is shown, so edits show at once.
     class AssetPreviewRenderer
     {
@@ -64,6 +66,13 @@ namespace Nox
         void Remove(Placement& placement);
         void Submit(uint32_t view, const Placement& placement, uint32_t size, float framing = 1.0f);
 
+        // The thumbnail cache on disk: <project>/Cache/Thumbnails/<handle>.nthumb (width, height, the image's 4-byte texels).
+        static std::filesystem::path CachePath(AssetHandle handle);
+        // The cached image as a texture, when the file is there and newer than the asset's own file.
+        bool LoadCached(AssetHandle handle);
+        // Written once the GPU has copied the image back (a few frames later), unless the asset changed meanwhile.
+        void SaveCached(AssetHandle handle, Ref<Texture2D> image);
+
         struct Job
         {
             Placement Placed;
@@ -78,6 +87,9 @@ namespace Nox
         std::unordered_map<AssetHandle, uint64_t> m_LastUsed;   // frame of the last request, for eviction
         std::unordered_map<AssetHandle, uint64_t> m_Requests;   // waiting thumbnails and the frame they were last asked for
         std::unordered_map<AssetHandle, bool> m_Failed;          // could not be drawn (no geometry, never loaded)
+        std::unordered_set<AssetHandle> m_DiskChecked;           // looked for on disk already (this session)
+        std::vector<AssetHandle> m_DiskQueue;                    // to look for on disk (a few a frame)
+        std::unordered_map<AssetHandle, uint32_t> m_Generations; // bumped by Invalidate: a readback of an older image is not saved
         std::optional<Job> m_Job;
 
         Placement m_Live;

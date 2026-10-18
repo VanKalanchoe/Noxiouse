@@ -283,3 +283,8 @@ Facerun/Assets/Models
 # Nox Stats reports and frame graph dumps written next to Nox.log
 NoxStats_*.txt
 *.dot
+
+# Editor caches and packaged builds inside projects (thumbnail cache, File > Package Game's default output)
+Facerun/Cache/
+Facerun/Build/
+*.nthumb

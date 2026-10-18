@@ -95,7 +95,12 @@
   view), so every edit shows at once. A second Material Editor shown at the same time shows its thumbnail.
 - The assets on the stage are reported to the unused-asset sweep (`CollectAssetReferences`).
 
-Not yet: saving thumbnails to disk (they are drawn again each session), texture streaming feedback from the preview views
+**Thumbnail cache on disk (2026-10-18, untested):** a drawn thumbnail is copied back from the GPU (`Renderer::ReadbackTexture`, a copy
+pass in the next frame, the pixels on the main thread once that frame is done) and written to `<project>/Cache/Thumbnails/<handle>.nthumb`;
+the next session uploads it (four a frame) instead of drawing it, unless the asset's file is newer. Editing a material deletes its
+cached image.
+
+Not yet: texture streaming feedback from the preview views
 (their textures stay at the mips the scene asked for), prefab and model (.gltf) thumbnails, a neutral backdrop instead of the
 sky.
 

@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
+#include <cstring>
+#include <fstream>
 #include <unordered_set>
 
 #include <glm/gtc/matrix_transform.hpp>
@@ -11,6 +13,7 @@
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Core/Application.h"
 #include "NoxCore/Core/WorldUnits.h"
+#include "NoxCore/Project/Project.h"
 #include "NoxCore/Renderer/EditorCamera.h"
 #include "NoxCore/Renderer/Mesh.h"
 #include "NoxCore/Renderer/Renderer.h"
@@ -28,6 +31,9 @@ namespace Nox
         constexpr uint32_t StandInFrames = 120;
         constexpr uint32_t GiveUpFrames = 600;
         constexpr size_t MaxThumbnails = 512;
+        // Cached thumbnails uploaded per frame (each a small synchronous upload).
+        constexpr size_t DiskLoadsPerFrame = 4;
+        constexpr char CacheMagic[4] = { 'N', 'T', 'H', '1' };
 
         // The preview stage: 10 km below the world's origin (whatever the project's unit), thumbnails and the live preview 2 km apart.
         glm::vec3 ThumbnailStage() { return glm::vec3(0.0f, -WorldUnits::FromMeters(10000.0f), 0.0f); }
@@ -55,9 +61,87 @@ namespace Nox
         m_LastUsed[handle] = m_Frame;
         if (auto found = m_Thumbnails.find(handle); found != m_Thumbnails.end())
             return found->second;
+        // Drawn in an earlier session: read from the cache on disk first (Update), drawn only when it is not there.
+        if (m_DiskChecked.insert(handle).second)
+        {
+            m_DiskQueue.push_back(handle);
+            return nullptr;
+        }
         if (!m_Failed.contains(handle))
             m_Requests[handle] = m_Frame;
         return nullptr;
+    }
+
+    std::filesystem::path AssetPreviewRenderer::CachePath(AssetHandle handle)
+    {
+        return Project::GetProjectDirectory() / "Cache" / "Thumbnails" / (std::to_string(static_cast<uint64_t>(handle)) + ".nthumb");
+    }
+
+    bool AssetPreviewRenderer::LoadCached(AssetHandle handle)
+    {
+        Renderer* renderer = GetRenderer();
+        if (!renderer || !Project::GetActive() || !AssetManager::IsAssetHandleValid(handle))
+            return false;
+        const std::filesystem::path path = CachePath(handle);
+        const std::filesystem::path assetPath = Project::GetActiveAssetDirectory() / AssetManager::GetMetadata(handle).FilePath;
+        std::error_code error;
+        const auto cachedTime = std::filesystem::last_write_time(path, error);
+        if (error)
+            return false;
+        const auto assetTime = std::filesystem::last_write_time(assetPath, error);
+        if (error || cachedTime < assetTime)
+            return false;
+
+        std::ifstream file(path, std::ios::binary);
+        char magic[4] = {};
+        uint32_t width = 0, height = 0;
+        file.read(magic, sizeof(magic));
+        file.read(reinterpret_cast<char*>(&width), sizeof(width));
+        file.read(reinterpret_cast<char*>(&height), sizeof(height));
+        if (!file || std::memcmp(magic, CacheMagic, sizeof(magic)) != 0 || width == 0 || height == 0 || width > 1024 || height > 1024)
+            return false;
+        std::vector<uint8_t> pixels(static_cast<size_t>(width) * height * 4);
+        file.read(reinterpret_cast<char*>(pixels.data()), static_cast<std::streamsize>(pixels.size()));
+        if (!file)
+            return false;
+
+        // The extra views' image format (the surface's), the order the texels were read back in.
+        TextureData data;
+        data.Width = width;
+        data.Height = height;
+        data.MipLevels = 1;
+        data.Format = NRI::ImageFormat::Surface;
+        data.DirectFormat = UINT32_MAX;
+        data.Data.Data = pixels.data();
+        data.Data.Size = pixels.size();
+        data.MipOffsets = { 0 };
+        Ref<Texture2D> texture = renderer->UploadTexture(data);
+        if (!texture)
+            return false;
+        m_Thumbnails[handle] = texture;
+        return true;
+    }
+
+    void AssetPreviewRenderer::SaveCached(AssetHandle handle, Ref<Texture2D> image)
+    {
+        Renderer* renderer = GetRenderer();
+        if (!renderer || !image || !Project::GetActive())
+            return;
+        const std::filesystem::path path = CachePath(handle);
+        const uint32_t generation = m_Generations[handle];
+        renderer->ReadbackTexture(std::move(image), [path, handle, generation](std::vector<uint8_t> pixels, uint32_t width, uint32_t height)
+        {
+            AssetPreviewRenderer& previews = AssetPreviewRenderer::Get();
+            if (pixels.size() != static_cast<size_t>(width) * height * 4 || previews.m_Generations[handle] != generation)
+                return;
+            std::error_code error;
+            std::filesystem::create_directories(path.parent_path(), error);
+            std::ofstream file(path, std::ios::binary | std::ios::trunc);
+            file.write(CacheMagic, sizeof(CacheMagic));
+            file.write(reinterpret_cast<const char*>(&width), sizeof(width));
+            file.write(reinterpret_cast<const char*>(&height), sizeof(height));
+            file.write(reinterpret_cast<const char*>(pixels.data()), static_cast<std::streamsize>(pixels.size()));
+        });
     }
 
     void AssetPreviewRenderer::Invalidate(AssetHandle handle)
@@ -69,6 +153,14 @@ namespace Nox
             m_Thumbnails.erase(found);
         }
         m_Failed.erase(handle);
+        // The cached image is out of date too (and one still being read back is not saved).
+        ++m_Generations[handle];
+        m_DiskChecked.insert(handle);
+        if (Project::GetActive())
+        {
+            std::error_code error;
+            std::filesystem::remove(CachePath(handle), error);
+        }
     }
 
     Texture2D* AssetPreviewRenderer::GetLivePreview(AssetHandle material, uint32_t size)
@@ -168,6 +260,19 @@ namespace Nox
             renderer->ReleaseExtraView(Renderer::AnimationPreviewView);
         }
 
+        // Thumbnails from the cache on disk, a few a frame; what is not there (or is older than its asset) is drawn.
+        for (size_t loads = 0; loads < DiskLoadsPerFrame && !m_DiskQueue.empty(); ++loads)
+        {
+            const AssetHandle asset = m_DiskQueue.back();
+            m_DiskQueue.pop_back();
+            if (m_Thumbnails.contains(asset))
+                continue;
+            if (LoadCached(asset))
+                m_Requests.erase(asset);
+            else if (!m_Failed.contains(asset))
+                m_Requests[asset] = m_Frame;
+        }
+
         if (!m_Job)
         {
             // The thumbnail asked for most recently (the tiles on screen now) goes first.
@@ -215,6 +320,7 @@ namespace Nox
         if (image)
         {
             m_Thumbnails[job.Asset] = image;
+            SaveCached(job.Asset, image);
             if (m_Thumbnails.size() > MaxThumbnails)
             {
                 // The one not asked for the longest goes (its tile draws it again when it is back on screen).
@@ -229,6 +335,7 @@ namespace Nox
                 if (oldest != m_Thumbnails.end())
                 {
                     Renderer::DeferAssetRelease(oldest->second);
+                    m_DiskChecked.erase(oldest->first); // back from the disk cache when it is asked for again
                     m_Thumbnails.erase(oldest);
                 }
             }
@@ -250,6 +357,8 @@ namespace Nox
         m_Requests.clear();
         m_Failed.clear();
         m_LastUsed.clear();
+        m_DiskChecked.clear();
+        m_DiskQueue.clear();
         if (Renderer* renderer = GetRenderer())
         {
             renderer->ReleaseExtraView(Renderer::ThumbnailView);

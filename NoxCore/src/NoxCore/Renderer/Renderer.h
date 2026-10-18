@@ -2,6 +2,7 @@
 #include <array>
 #include <chrono>
 #include <filesystem>
+#include <functional>
 #include "Renderer2D.h"
 #include "NoxCore/Core/Window.h"
 #include "Mesh.h"
@@ -305,6 +306,11 @@ namespace Nox
         void ReleaseExtraView(uint32_t index);
         // Hands the view's last drawn image over for good (an asset thumbnail): the view starts a new texture at its next submit.
         Ref<Texture2D> TakeExtraViewTexture(uint32_t index);
+        // Copies a texture's first mip to the CPU (4 bytes a texel: RGBA8 / BGRA8, the surface format of the extra views' images):
+        // copied in the next recorded frame, `done` runs on the main thread once that frame has finished on the GPU, with tightly
+        // packed rows (empty when the copy could not be mapped). A few per frame; the rest wait. Main thread.
+        using TextureReadbackCallback = std::function<void(std::vector<uint8_t> pixels, uint32_t width, uint32_t height)>;
+        void ReadbackTexture(Ref<Texture2D> texture, TextureReadbackCallback done);
         // The camera jumped (the editor's active viewport changed): the temporal histories start over from the next frame (DLSS,
         // the denoisers, path tracer accumulation, the occlusion test's depth pyramid of the old view).
         void ResetCameraHistory()
@@ -661,6 +667,7 @@ namespace Nox
         // Re-packs materials whose texture slots may have changed (texture imported or unloaded).
         void refreshGpuMaterials();
         void readPickResult(uint32_t frameSlot);
+        void readTextureReadbacks(uint32_t frameSlot);
         void readInspectionProbe(uint32_t frameSlot);
         void readCullStats(uint32_t frameSlot);
         void readBlasCompactedSizes(uint32_t frameSlot);
@@ -809,6 +816,7 @@ namespace Nox
         void addOutlinePass();
         void addPresentPass();
         void addPickReadbackPass();
+        void addTextureReadbackPasses();
         void addTextureInspection();
         // After Compile: writes the bindless slots of graph-owned textures into the uniforms uploaded for this frame.
         void resolveFrameUniforms();
@@ -1219,6 +1227,17 @@ namespace Nox
         std::vector<std::unique_ptr<NRI::Buffer>> m_pickerStagingBuffers;
         std::vector<std::unique_ptr<NRI::Buffer>> m_pickerDepthStagingBuffers;
         std::vector<PickRequest> m_pickerReadbackRequests;
+        // ReadbackTexture: waiting (FrameSlot UINT32_MAX) or copied in the frame of that slot.
+        struct TextureReadback
+        {
+            Ref<Texture2D> Texture;
+            std::unique_ptr<NRI::Buffer> Staging;
+            TextureReadbackCallback Done;
+            uint32_t Width = 0;
+            uint32_t Height = 0;
+            uint32_t FrameSlot = UINT32_MAX;
+        };
+        std::vector<TextureReadback> m_textureReadbacks;
         PickRequest m_pickRequest;
         PickResult m_pickResult;
         std::vector<int32_t> m_SelectedEntityIDs;

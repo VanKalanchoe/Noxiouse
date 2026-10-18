@@ -115,6 +115,33 @@ namespace Nox
             });
     }
 
+    void Renderer::addTextureReadbackPasses()
+    {
+        // ReadbackTexture: each waiting texture copied into its staging buffer (read in readTextureReadbacks once this frame is done).
+        static constexpr std::array<const char*, 4> kNames = { "Texture Readback 1", "Texture Readback 2", "Texture Readback 3", "Texture Readback 4" };
+        size_t recorded = 0;
+        for (TextureReadback& readback : m_textureReadbacks)
+        {
+            if (readback.FrameSlot != UINT32_MAX)
+                continue;
+            if (recorded == kNames.size())
+                break;
+            const RGTexture texture = m_renderGraph.ImportTexture(kNames[recorded], readback.Texture.get());
+            NRI::Buffer* staging = readback.Staging.get();
+            m_renderGraph.AddPass(kNames[recorded], RGPassFlags::NeverCull,
+                [&](RGBuilder& builder)
+                {
+                    builder.Read(texture, RGTextureAccess::CopySource);
+                },
+                [texture, staging, width = readback.Width, height = readback.Height](RGPassContext& context)
+                {
+                    context.Texture(texture).copyImageToBuffer(context.Cmd(), *staging, 0, 0, width, height);
+                });
+            readback.FrameSlot = frameIndex;
+            ++recorded;
+        }
+    }
+
     void Renderer::addPickReadbackPass()
     {
         const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();

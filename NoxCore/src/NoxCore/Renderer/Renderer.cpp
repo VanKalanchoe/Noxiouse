@@ -3954,6 +3954,7 @@ namespace Nox
             addExtraViewPasses();
             addPresentPass();
             addPickReadbackPass();
+            addTextureReadbackPasses();
             addTextureInspection();
         }
 
@@ -4741,6 +4742,7 @@ namespace Nox
             // acquireNextImage waited for this slot's previous submission, which recorded the slot's pick copy.
             NOX_PROFILE_SCOPE("Pick Readback");
             readPickResult(frameIndex);
+            readTextureReadbacks(frameIndex);
             readInspectionProbe(frameIndex);
             readCullStats(frameIndex);
             readBlasCompactedSizes(frameIndex);
@@ -5032,6 +5034,50 @@ namespace Nox
         m_mipFeedback.assign(feedback, feedback + shaderio::MipFeedbackSlots);
         m_mipFeedbackReadback[frameSlot]->unmap();
         ++m_mipFeedbackSerial;
+    }
+
+    void Renderer::ReadbackTexture(Ref<Texture2D> texture, TextureReadbackCallback done)
+    {
+        if (!texture || !done || texture->GetWidth() == 0 || texture->GetHeight() == 0)
+            return;
+        TextureReadback readback;
+        readback.Width = texture->GetWidth();
+        readback.Height = texture->GetHeight();
+        readback.Staging = m_device->createBuffer(NRI::BufferDesc{
+            .size = static_cast<uint64_t>(readback.Width) * readback.Height * 4,
+            .usage = NRI::BufferUsage::Staging
+        });
+        readback.Texture = std::move(texture);
+        readback.Done = std::move(done);
+        m_textureReadbacks.push_back(std::move(readback));
+    }
+
+    void Renderer::readTextureReadbacks(uint32_t frameSlot)
+    {
+        // This slot's previous frame has finished (the in-flight wait): its copies are complete. Taken out first, the callbacks
+        // may ask for more.
+        std::vector<TextureReadback> finished;
+        for (auto it = m_textureReadbacks.begin(); it != m_textureReadbacks.end();)
+        {
+            if (it->FrameSlot == frameSlot)
+            {
+                finished.push_back(std::move(*it));
+                it = m_textureReadbacks.erase(it);
+            }
+            else
+                ++it;
+        }
+        for (TextureReadback& readback : finished)
+        {
+            const size_t size = static_cast<size_t>(readback.Width) * readback.Height * 4;
+            std::vector<uint8_t> pixels;
+            if (const void* mapped = readback.Staging->map(0, size))
+            {
+                pixels.assign(static_cast<const uint8_t*>(mapped), static_cast<const uint8_t*>(mapped) + size);
+                readback.Staging->unmap();
+            }
+            readback.Done(std::move(pixels), readback.Width, readback.Height);
+        }
     }
 
     void Renderer::readInspectionProbe(uint32_t frameSlot)
