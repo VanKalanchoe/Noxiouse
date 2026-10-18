@@ -850,6 +850,17 @@ namespace Nox
             ImGui::SetTooltip("Transmissive materials (glass) show the scene behind them bent by their IOR and thickness and blurred\n"
                               "by their roughness (a copy of the lit scene with blur mips, only while glass is in view).\n"
                               "Off: transmission only makes them see-through.");
+        ImGui::BeginDisabled(!refraction);
+        ImGui::Indent();
+        bool rtRefraction = m_Renderer->getRTRefractionEnabled();
+        if (ImGui::Checkbox("Ray Traced Glass", &rtRefraction))
+            m_Renderer->setRTRefractionEnabled(rtRefraction);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Smooth glass traces what is behind it like the path tracer: bent in at the surface and out at the\n"
+                              "mesh's far side (glass with a volume thickness), then through the scene, so objects off screen or\n"
+                              "hidden behind others show too. Rough glass keeps the blurred screen-space refraction. Needs ray tracing.");
+        ImGui::Unindent();
+        ImGui::EndDisabled();
         
         bool jitter = m_Renderer->getCameraJitterEnabled();
         if (ImGui::Checkbox("Camera Subpixel Jitter (R2)", &jitter))

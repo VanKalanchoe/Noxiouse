@@ -552,6 +552,10 @@ namespace Nox
         // the scene with blur mips; transparent surfaces then draw in a pass of their own). Off: transmission only lowers the alpha.
         void setRefractionEnabled(bool enabled) { m_refractionEnabled = enabled; }
         bool getRefractionEnabled() const { return m_refractionEnabled; }
+        // Smooth glass traces its refraction (Hybrid_Renderer_Plan_2026-10.md §4 H3) while ray tracing is on; rough glass and
+        // this off use the screen-space refraction.
+        void setRTRefractionEnabled(bool enabled) { m_rtRefractionEnabled = enabled; }
+        bool getRTRefractionEnabled() const { return m_rtRefractionEnabled; }
         glm::vec2 getCurrentJitter() const { return m_currentJitter; }
 
         Ref<Texture2D> UploadTexture(const TextureData& cpuData);
@@ -906,6 +910,7 @@ namespace Nox
         std::unique_ptr<NRI::Pipeline> m_colorPyramidCopyPipeline;
         std::unique_ptr<NRI::Pipeline> m_colorPyramidDownsamplePipeline;
         bool m_refractionEnabled = true;
+        bool m_rtRefractionEnabled = true;
         // NRD
         std::unique_ptr<NRI::Pipeline> m_shadowMaskPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_nrdGuidesPipeline = nullptr; // NRD view Z + normal/roughness (NRDGuides.slang)

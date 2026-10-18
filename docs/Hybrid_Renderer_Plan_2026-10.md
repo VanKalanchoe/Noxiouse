@@ -102,8 +102,17 @@ pass of the scene, editor only).
   (`KHR_materials_volume` thickness x model scale; 0 = thin-walled, no bending), offsets the lookup by the exit point's screen
   offset, reads the mip `log2(size) * roughness * clamp(2 ior - 2)` (the Khronos viewer's rule), tints by the base color and
   takes out the Fresnel reflectance; it covers what is behind it by its alpha alone. Settings > **Glass Refraction**. Without
-  glass in view the frame is unchanged. Not yet: volume absorption (attenuation color / distance are not imported), the RT
-  rung (H3), OIT (H4), denoising of the forward shadows (H5).
+  glass in view the frame is unchanged. Not yet: volume absorption (attenuation color / distance are not imported), OIT (H4),
+  denoising of the forward shadows (H5).
+- **H3 (2026-10-18, untested):** in the Forward Transparent pass, smooth glass (roughness up to 0.08, fading into H3b by 0.2)
+  traces what is behind it (`tracedRefraction` in `Material_TransparentLit_Mesh.slang`, flag `MESHLET_RT_REFRACTION`). Thin-walled
+  glass (thickness 0) passes the view ray on unbent; glass with a volume thickness bends it in at the surface and out at the
+  mesh's own far side, found with a ray that only accepts this instance (TLAS custom index = the GPU scene instance slot =
+  `drawID`), with total internal reflection mirroring it; an open mesh falls back to the thickness slab. The ray then goes on
+  through the scene past blended / transmissive surfaces (alpha-masked ones cut out) and the hit is shaded by `shadeRayHit`,
+  the RT reflections' hit shading moved into `RayHitShading.slang` (base color, every light with a shadow ray, DDGI or
+  irradiance, emission); a miss reads the environment. So glass shows what is off screen or hidden behind other objects, and
+  solid glass bends like a lens. On in the High preset, Settings > **Ray Traced Glass** (under Glass Refraction).
 
 ## 5. Procedural sky (Future.md item 6: "hazemut or something")
 

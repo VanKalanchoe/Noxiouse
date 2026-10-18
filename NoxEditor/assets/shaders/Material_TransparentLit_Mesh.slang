@@ -15,11 +15,15 @@
 //
 // Shadows: no G-buffer for the RT shadow pass to run against, so this shader traces its own (forwardShadowed below): the
 // strongest few lights of each pixel get one hard shadow ray through a ray query, while RT shadows are on.
+//
+// Refraction: what is behind glass comes from the lit scene's color pyramid (screen space, any roughness), and for smooth glass
+// on the high rung from a traced ray (tracedRefraction below: through the mesh's own volume, then the scene).
 
 #include "shaderIO.h"
 #include "DDGICommon.slang"
 #include "PBRLighting.slang"
 #include "MipFeedback.slang"
+#include "RayHitShading.slang"
 
 import Math;
 
@@ -81,6 +85,130 @@ bool forwardShadowed(UniformBufferObject* ubo, float3 origin, float3 direction, 
         query.CommitNonOpaqueTriangleHit();
     }
     return query.CommittedStatus() == COMMITTED_TRIANGLE_HIT;
+}
+
+// Ray traced refraction (Hybrid_Renderer_Plan_2026-10.md §4 H3) for glass up to this roughness, fading into the screen-space one
+// over the band below it: a single sharp ray stands for a rough lobe badly, the blurred pyramid does that better.
+static const float RTRefractionFullRoughness = 0.08;
+static const float RTRefractionMaxRoughness = 0.2;
+
+// The closest hit along the ray. With `self` >= 0 only that instance counts (the glass's own far side); otherwise surfaces that
+// let light through are passed (blended, transmissive) and alpha-masked ones cut out, as the shadow rays do.
+bool traceRefractionRay(UniformBufferObject* ubo, float3 origin, float3 direction, float maxDistance, int self, out uint instanceSlot,
+                        out uint primitive, out float2 barycentrics, out float hitT)
+{
+    instanceSlot = 0;
+    primitive = 0;
+    barycentrics = float2(0.0);
+    hitT = 0.0;
+
+    RayDesc ray;
+    ray.Origin = origin;
+    ray.Direction = direction;
+    ray.TMin = 0.0;
+    ray.TMax = maxDistance;
+
+    RaytracingAccelerationStructure tlas = RaytracingAccelerationStructure(ubo->tlasDeviceAddress);
+    RayQuery<RAY_FLAG_FORCE_NON_OPAQUE | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> query;
+    query.TraceRayInline(tlas, RAY_FLAG_FORCE_NON_OPAQUE | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES, 0xFF, ray);
+
+    GpuRayTracingInstance* rtInstances = (GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference;
+    SamplerState samp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
+    while (query.Proceed())
+    {
+        const uint candidate = query.CandidateRayInstanceCustomIndex();
+        if (self >= 0)
+        {
+            if (candidate == uint(self))
+                query.CommitNonOpaqueTriangleHit();
+            continue;
+        }
+        GpuRayTracingInstance surface = rtInstances[candidate];
+        if (surface.alphaMode == 2 || surface.transmissionFactor > 0.0)
+            continue;
+        if (surface.alphaMode == 1 && surface.baseColorTextureIndex != 0xFFFFFFFF)
+        {
+            const float2 uv = intersection_uv(surface, query.CandidatePrimitiveIndex(), query.CandidateTriangleBarycentrics());
+            Texture2D baseColorTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + surface.baseColorTextureIndex, 0));
+            if (baseColorTex.SampleLevel(samp, uv, 0).a * surface.baseColorFactor.a < surface.alphaCutoff)
+                continue;
+        }
+        query.CommitNonOpaqueTriangleHit();
+    }
+    if (query.CommittedStatus() != COMMITTED_TRIANGLE_HIT)
+        return false;
+    instanceSlot = query.CommittedRayInstanceCustomIndex();
+    primitive = query.CommittedPrimitiveIndex();
+    barycentrics = query.CommittedTriangleBarycentrics();
+    hitT = query.CommittedRayT();
+    return true;
+}
+
+// The world-space normal of a hit, interpolated from its vertices.
+float3 rayHitNormal(GpuRayTracingInstance surface, uint primitive, float2 barycentrics)
+{
+    uint i0 = primitive * 3 + 0, i1 = primitive * 3 + 1, i2 = primitive * 3 + 2;
+    if (surface.indexBufferAddress != 0)
+    {
+        uint* indices = (uint*)surface.indexBufferAddress;
+        i0 = indices[i0];
+        i1 = indices[i1];
+        i2 = indices[i2];
+    }
+    const float3 local = LoadRayTracingVertex(surface, i0).normal * (1.0 - barycentrics.x - barycentrics.y) +
+                         LoadRayTracingVertex(surface, i1).normal * barycentrics.x + LoadRayTracingVertex(surface, i2).normal * barycentrics.y;
+    return normalize(mul((float3x3)surface.normalMatrix, local));
+}
+
+// What is seen through the glass at `position`, like the path tracer sees it for a smooth surface. A thin-walled material
+// (thickness 0) passes the view ray on unbent. A volume (KHR_materials_volume) bends it in here and out where it leaves the
+// mesh -- the glass's own far side, found with a second ray that only sees this instance (total internal reflection mirrors it
+// back instead); a mesh that is not closed falls back to a slab of the given thickness (out parallel to the way in). The ray
+// then goes on through the scene, past other see-through surfaces; a miss is the environment.
+float3 tracedRefraction(UniformBufferObject* ubo, InstanceData instance, uint selfSlot, float3 position, float3 n, float3 v, float ior, float modelScale)
+{
+    const float bias = 0.002 * ubo->unitsPerMeter;
+    const float maxDistance = 1000.0 * ubo->unitsPerMeter;
+    float3 origin = position - v * bias;
+    float3 direction = -v;
+
+    if (instance.thickness > 0.0)
+    {
+        float3 inside = refract(-v, n, 1.0 / ior);
+        inside = dot(inside, inside) > 1e-6 ? normalize(inside) : -v;
+        const float3 entry = position - n * bias;
+
+        uint slot, primitive;
+        float2 barycentrics;
+        float hitT;
+        if (traceRefractionRay(ubo, entry, inside, maxDistance, int(selfSlot), slot, primitive, barycentrics, hitT))
+        {
+            GpuRayTracingInstance* rtInstances = (GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference;
+            float3 outward = rayHitNormal(rtInstances[slot], primitive, barycentrics);
+            if (dot(outward, inside) < 0.0)
+                outward = -outward;
+            const float3 exitPoint = entry + inside * hitT;
+            float3 outside = refract(inside, -outward, ior);
+            direction = dot(outside, outside) > 1e-6 ? normalize(outside) : reflect(inside, -outward);
+            origin = exitPoint + direction * bias;
+        }
+        else
+        {
+            origin = entry + inside * (instance.thickness * modelScale / max(dot(inside, -n), 0.1)) - v * bias;
+        }
+    }
+
+    uint slot, primitive;
+    float2 barycentrics;
+    float hitT;
+    if (traceRefractionRay(ubo, origin, direction, maxDistance, -1, slot, primitive, barycentrics, hitT))
+        return shadeRayHit(ubo, slot, primitive, barycentrics, origin, direction, hitT);
+
+    if (ubo->prefilteredMapIndex == 0xFFFFFFFF)
+        return float3(0.0);
+    TextureCube environment = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + ubo->prefilteredMapIndex, 0));
+    SamplerState samplerPrefiltered = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_PREFILTER, 0));
+    return environment.SampleLevel(samplerPrefiltered, direction, 0.0).rgb * ubo->scaleIBLAmbient;
 }
 
 float3 getNormal(UniformBufferObject* ubo, InstanceData instance, VSOutput vertIn, SamplerState samplerState)
@@ -424,31 +552,43 @@ FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform Pu
         // units, so scaled with the model; 0 = thin-walled, no bending), blurred by the roughness the IOR leaves (as the Khronos
         // glTF viewer does), tinted by the base color, less what the surface reflects (Fresnel). Rough or thick glass reads a
         // blurrier mip; what is outside the screen is clamped to its edge.
-        Texture2D refractionSource = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.refractionTextureIndex, 0));
-        uint sourceWidth, sourceHeight, sourceLevels;
-        refractionSource.GetDimensions(0, sourceWidth, sourceHeight, sourceLevels);
-
         const float ior = max(instance.ior, 1.0);
-        float3 refracted = refract(-v, n, 1.0 / ior);
-        if (dot(refracted, refracted) < 1e-6)
-            refracted = -v;
         const float4x4 model = instance.modelMatrix;
         const float modelScale = (length(float3(model[0][0], model[1][0], model[2][0])) + length(float3(model[0][1], model[1][1], model[2][1])) +
                                   length(float3(model[0][2], model[1][2], model[2][2]))) / 3.0;
-        const float3 exitPoint = vertIn.worldPos + normalize(refracted) * instance.thickness * modelScale;
 
-        // The exit point's offset on screen from the surface's own pixel (the same projection the HDR image was drawn with).
-        const float4x4 viewProjection = mul(ubo->proj, ubo->view);
-        const float4 surfaceClip = mul(viewProjection, float4(vertIn.worldPos, 1.0));
-        const float4 exitClip = mul(viewProjection, float4(exitPoint, 1.0));
-        float2 offset = float2(0.0);
-        if (surfaceClip.w > 1e-5 && exitClip.w > 1e-5)
-            offset = (exitClip.xy / exitClip.w - surfaceClip.xy / surfaceClip.w) * float2(0.5, -0.5);
-        const float2 uv = saturate(vertIn.pos.xy / float2(sourceWidth, sourceHeight) + offset);
+        // Smooth glass on the high rung: traced (H3); rougher glass, or the lower rungs: the color pyramid (H3b), both in between.
+        float tracedWeight = 0.0;
+        if ((pushConstant.meshletCulling & MESHLET_RT_REFRACTION) != 0 && ubo->tlasDeviceAddress != 0)
+            tracedWeight = saturate((RTRefractionMaxRoughness - perceptualRoughness) / (RTRefractionMaxRoughness - RTRefractionFullRoughness));
 
-        const float lod = log2(float(max(sourceWidth, sourceHeight))) * perceptualRoughness * saturate(ior * 2.0 - 2.0);
-        SamplerState linearClamp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
-        const float3 behind = refractionSource.SampleLevel(linearClamp, uv, min(lod, float(sourceLevels - 1))).rgb;
+        float3 behind = float3(0.0);
+        if (tracedWeight > 0.0)
+            behind = tracedRefraction(ubo, instance, vertIn.drawID, vertIn.worldPos, n, v, ior, modelScale) * tracedWeight;
+        if (tracedWeight < 1.0)
+        {
+            Texture2D refractionSource = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.refractionTextureIndex, 0));
+            uint sourceWidth, sourceHeight, sourceLevels;
+            refractionSource.GetDimensions(0, sourceWidth, sourceHeight, sourceLevels);
+
+            float3 refracted = refract(-v, n, 1.0 / ior);
+            if (dot(refracted, refracted) < 1e-6)
+                refracted = -v;
+            const float3 exitPoint = vertIn.worldPos + normalize(refracted) * instance.thickness * modelScale;
+
+            // The exit point's offset on screen from the surface's own pixel (the same projection the HDR image was drawn with).
+            const float4x4 viewProjection = mul(ubo->proj, ubo->view);
+            const float4 surfaceClip = mul(viewProjection, float4(vertIn.worldPos, 1.0));
+            const float4 exitClip = mul(viewProjection, float4(exitPoint, 1.0));
+            float2 offset = float2(0.0);
+            if (surfaceClip.w > 1e-5 && exitClip.w > 1e-5)
+                offset = (exitClip.xy / exitClip.w - surfaceClip.xy / surfaceClip.w) * float2(0.5, -0.5);
+            const float2 uv = saturate(vertIn.pos.xy / float2(sourceWidth, sourceHeight) + offset);
+
+            const float lod = log2(float(max(sourceWidth, sourceHeight))) * perceptualRoughness * saturate(ior * 2.0 - 2.0);
+            SamplerState linearClamp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
+            behind += refractionSource.SampleLevel(linearClamp, uv, min(lod, float(sourceLevels - 1))).rgb * (1.0 - tracedWeight);
+        }
 
         const float3 fresnel = specularEnvironmentR0 + (1.0 - specularEnvironmentR0) * pow(1.0 - NdotV, 5.0);
         color += behind * baseColor.rgb * (transmission * (1.0 - metallic)) * (1.0 - fresnel);

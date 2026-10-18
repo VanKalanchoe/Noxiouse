@@ -954,6 +954,8 @@ namespace Nox
                 MeshletDrawCursor cursor = beginMeshletDraws(context, res->CameraDraws);
                 cursor.references.ssaoTextureIndex = m_frame.ssaoAdded ? context.Slot(res->SSAO) : 0xFFFFFFFF;
                 cursor.references.refractionTextureIndex = context.Slot(res->RefractionSource);
+                if (m_rtRefractionEnabled && m_rayTracingEnabled)
+                    cursor.taskFlags |= shaderio::MESHLET_RT_REFRACTION;
                 drawForwardTransparent(cmd, context, res->CameraDraws, cursor);
             });
     }

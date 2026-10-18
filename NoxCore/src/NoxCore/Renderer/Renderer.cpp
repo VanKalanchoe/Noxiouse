@@ -583,15 +583,16 @@ namespace Nox
             uint32_t DiffuseGI;      // 1 DDGI, 2 ReSTIR GI
             uint32_t DirectLighting; // 0 the loop (the first light shadowed), 1 ReSTIR DI (every light shadowed)
             NRI::UpscaleMode Upscale;
+            bool RTRefraction;       // smooth glass traced (H3); else the screen-space refraction only
         };
 
         QualityPresetSettings GetQualityPresetSettings(Renderer::RenderQuality quality)
         {
             switch (quality)
             {
-            case Renderer::RenderQuality::Low: return { true, false, false, 1, 0, NRI::UpscaleMode::Performance };
-            case Renderer::RenderQuality::Medium: return { true, true, false, 1, 1, NRI::UpscaleMode::Balanced };
-            default: return { true, true, true, 2, 1, NRI::UpscaleMode::Quality };
+            case Renderer::RenderQuality::Low: return { true, false, false, 1, 0, NRI::UpscaleMode::Performance, false };
+            case Renderer::RenderQuality::Medium: return { true, true, false, 1, 1, NRI::UpscaleMode::Balanced, false };
+            default: return { true, true, true, 2, 1, NRI::UpscaleMode::Quality, true };
             }
         }
     }
@@ -626,6 +627,7 @@ namespace Nox
             setUpscaleMode(preset.Upscale);
         }
         setRefractionEnabled(true);
+        setRTRefractionEnabled(preset.RTRefraction);
         NOX_CORE_INFO("Render quality: {}", GetQualityName(quality));
     }
 
@@ -637,7 +639,7 @@ namespace Nox
             const bool upscaleMatches = !isDLSSSupported() || (m_dlssEnabled && m_dlssMode == preset.Upscale);
             if (!m_pathTracingEnabled && m_rayTracingEnabled && m_rayTracingShadows == preset.RTShadows &&
                 m_rayTracingReflections == preset.RTReflections && m_rtaoEnabled == preset.RTAO && m_diffuseGIMode == preset.DiffuseGI &&
-                m_directLightingMode == preset.DirectLighting && upscaleMatches)
+                m_directLightingMode == preset.DirectLighting && m_rtRefractionEnabled == preset.RTRefraction && upscaleMatches)
                 return quality;
         }
         return RenderQuality::Custom;

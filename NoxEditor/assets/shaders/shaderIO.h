@@ -517,6 +517,7 @@ struct PushConstantHiZBuild
 STATIC_CONST uint32_t MESHLET_CULL_FRUSTUM = 1;     // PushConstantMeshlets.meshletCulling
 STATIC_CONST uint32_t MESHLET_COUNT_TRIANGLES = 2;  // PushConstantMeshlets.meshletCulling: add the drawn clusters to ClusterStats
 STATIC_CONST uint32_t MESHLET_SHADE_OPAQUE = 4;     // PushConstantMeshlets.meshletCulling: Material_TransparentLit_Mesh shades an opaque / masked surface (alpha 1, no transmission; the editor's extra views)
+STATIC_CONST uint32_t MESHLET_RT_REFRACTION = 8;    // PushConstantMeshlets.meshletCulling: Material_TransparentLit_Mesh traces refraction rays for smooth glass (Hybrid_Renderer_Plan H3)
 
 struct PushConstantMeshlets
 {
