@@ -20,7 +20,7 @@
 | F4 | Hybrid renderer near the path tracer, RT fallbacks, DLSS edge jitter, transparency / transmission | DLSS outline jitter **fixed, confirmed by the user** (non-jittered selection mask, `Hybrid_Renderer_Plan_2026-10.md` §3); grid/overlay depth jitter, fallbacks and transparency planned (§1-4) |
 | F5 | Up to four viewports with layout presets | planned: `Editor_Features_Plan_2026-10.md` §4 |
 | F6 | Procedural sky (Hillaire / UE SkyAtmosphere recommended over Hosek-Wilkie) | planned: `Hybrid_Renderer_Plan_2026-10.md` §5 |
-| F7 | Runtime asset manager + runtime player | planned: `Runtime_And_Packaging_Plan_2026-10.md` R1-R2 |
+| F7 | Runtime asset manager + runtime player | R1 runtime player **built, untested** (`NoxRuntime`, CMake `-DNOX_BUILD_RUNTIME=ON`); R2 runtime asset manager planned: `Runtime_And_Packaging_Plan_2026-10.md` |
 | F8 | Packaging a distribution build | answered + planned: same doc §2, R3-R7 (a PCH is a build-speed tool, not packaging) |
 | F9 | Stats overlay text broken | **fixed, confirmed by the user**: drawn in screen space (was world-space quads: inside the scene in ortho views, float precision far from the origin); replaces R4 |
 | F10 | Basic shapes | **built, untested**: Create > Shapes / hierarchy right-click > Shapes |

@@ -23,3 +23,9 @@ add_subdirectory(NoxCore/vendors/JoltPhysics/Build NoxCore/vendors/JoltPhysics/B
 
 add_subdirectory(NoxCore)
 add_subdirectory(NoxEditor)
+
+# The standalone player (docs/Runtime_And_Packaging_Plan_2026-10.md, R1). Off by default until it has been built and tried.
+option(NOX_BUILD_RUNTIME "Build NoxRuntime, the standalone player (no editor)" OFF)
+if(NOX_BUILD_RUNTIME)
+    add_subdirectory(NoxRuntime)
+endif()

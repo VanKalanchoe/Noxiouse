@@ -36,6 +36,21 @@ A distribution build is **three things**, none of which is a precompiled header:
 not what ships. It is worth adding separately (`target_precompile_headers` on NoxCore with the STL, glm, EnTT, spdlog
 headers; measure the build time before and after), but it is unrelated to packaging.
 
+## 2b. R1 built (2026-10-18, untested)
+
+- `NoxRuntime/` (`Main.cpp`, `RuntimeLayer.{h,cpp}`), built when CMake gets **`-DNOX_BUILD_RUNTIME=ON`** (off by default
+  until it has been tried, so it cannot break the editor build). The exe is placed next to `NoxEditor.exe`, which already
+  has the managed scripts, Coral, slang, Streamline and NRD binaries; building NoxRuntime builds NoxEditor first for that.
+- Run: `NoxRuntime <project.nproj>`; without an argument it looks for a `.nproj` in the working directory, next to the exe,
+  then in `../Facerun` (in Visual Studio the debugger is set up to start it in `NoxEditor/` with the Facerun project).
+  Working directory: `NoxEditor/` like the editor (engine shaders and fonts are found from there).
+- What it does: loads the project, plays `StartScene` exactly like the editor's Play (a copy of the scene asset,
+  `OnRuntimeStart`, `OnUpdateRuntime`), the window is the viewport, F3 stats overlay, Esc quits. No ImGui, no editor
+  camera, no picking / outline / grid, no undo snapshots, no file watcher.
+- Still the editor's asset manager underneath (read-only, assets must have been cooked by the editor once); renderer
+  settings are the renderer's defaults (the editor's Settings panel choices are not saved anywhere yet).
+- To compare: Play in the editor vs NoxRuntime on the same scene, both with F3 (Ctrl+F3 writes a stats report).
+
 ## 3. Phases
 
 | Phase | What | Exit test |
