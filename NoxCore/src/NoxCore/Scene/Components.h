@@ -280,6 +280,13 @@ namespace Nox
         ProceduralSky, // Earth's atmosphere lit by the scene's first directional light (the sun)
     };
 
+    // The procedural sky's own sun while the scene has no Directional Light: the sky draws it and it lights the scene, so
+    // choosing Procedural Sky alone gives daylight. ~54 degrees up; intensity 10 gives a daylight sky at exposure 1.
+    inline glm::vec3 DefaultSkySunDirection() { return glm::normalize(glm::vec3(0.3f, 0.8f, 0.5f)); }
+    inline constexpr float DefaultSkySunIntensity = 10.0f;
+    // A light's rotation whose -Z (the way it shines) points down from that sun.
+    inline glm::quat DefaultSkySunRotation() { return glm::quatLookAt(-DefaultSkySunDirection(), glm::vec3(0.0f, 1.0f, 0.0f)); }
+
     struct EnvironmentLightComponent
     {
         EnvironmentSource Source = EnvironmentSource::Texture;

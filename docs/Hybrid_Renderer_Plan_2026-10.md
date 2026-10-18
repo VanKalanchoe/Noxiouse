@@ -99,8 +99,11 @@ path tracer and raster agree on the sky color.
 
 ### 5b. Built (2026-10-18, untested): S1, S2, S4 and the sun disc
 
-- **Use:** Environment Light component -> **Source: Procedural Sky**. The sun is the scene's first Directional Light (its
-  rotation, color and intensity); without one a default sun stands at ~54 degrees. The panel shows that light and its
+- **Use:** Environment Light component -> **Source: Procedural Sky** is all it takes: without a Directional Light the sky's
+  own sun (~54 degrees up, intensity 10 -- a daylight sky at exposure 1) is drawn and also submitted as the scene's
+  directional light (direct light, shadows); **Add Sun Light** in the panel turns it into a real "Sun" entity. With a
+  Directional Light, the first one is the sun (its rotation, color and intensity; the panel warns when it is weak -- a
+  sun of intensity 1 gives a dark navy sky at exposure 1). The panel shows that light and its
   **Sun Elevation / Sun Azimuth** (dragging them rotates the light; not for a light with a parent), and warns when the sun
   is low (below 8 degrees: a sunset sky, dark above and orange at the horizon -- a new Directional Light with rotation 0
   shines horizontally, which is exactly that). Atmosphere: Air (Rayleigh), Haze (Mie), Haze Forward (Mie anisotropy), Ozone
@@ -131,8 +134,19 @@ path tracer and raster agree on the sky color.
   letting go of the sun. The IBL filter pipelines are now created once, for HDR maps too.
 - **Applied** only from `Scene::SetRenderer` (main thread, every frame); the Submit Lights system, which may run on a
   worker, only reads the scale.
-- **Checked here:** every entry point compiles with slangc; push-constant offsets match between C++ and Slang's
-  reflection; a numpy port of the passes gives a blue zenith at noon (blue / red ~4.9), a red-orange horizon towards the sun
+- **2026-10-18 fix 2, the wrong colors** ("light yellow above, brown-green below, a black cut"): push constants compile
+  with **std430** rules in the engine (`SlangCompiler` sets GLSLForceScalarLayout, which does not reach push constants),
+  so a `vec3` member starts on 16 bytes; the C++ structs were packed (scalar). From the first `vec3` on, the sky pass read
+  every field shifted: the sun's color as its direction, the ground albedo as the sun's color, and the Rayleigh / Mie /
+  ozone scales and altitude past the end of what C++ pushed (zero or garbage: no blue, the black regions); the skybox read
+  the disc's angular radius from the altitude (cos = 0: a "disc" over half the sky, with a hard edge). Both structs now
+  put each `vec3` on a 16-byte boundary followed by a float, so std430 and C++ agree, with `static_assert`s on the C++
+  offsets; checked against the SPIR-V of the engine's own compile path (whole module, same options). Rule for new push
+  constants: no `vec3` unless 16-byte aligned and followed by a 4-byte member.
+- **Checked here:** every entry point compiles with slangc; push-constant offsets of the engine's compile path match C++;
+  a float32 port of the passes renders the expected panoramas through the engine's tonemap (UC2, exposure 1): sun 10 at
+  54 degrees a blue sky with a bright horizon and a glow round the sun, at 20 degrees deeper blue, at 4 degrees an orange
+  band at the horizon; a numpy port of the passes gives a blue zenith at noon (blue / red ~4.9), a red-orange horizon towards the sun
   at 2 degrees elevation and a dark sky after sunset; 32 quadratic steps stay within ~6 % of 512 steps; the sun controls'
   rotation round-trips through the Euler angles the transform stores (error < 1e-5).
 - **Brightness:** the sky is physically relative to the sun: at noon the zenith is ~0.03 x the sun's illuminance in blue

@@ -1400,7 +1400,15 @@ namespace Nox
                 }
                 if (!sun)
                 {
-                    ImGui::TextWrapped("No Directional Light: a default sun stands at 54 degrees. Add one to move the sun.");
+                    ImGui::TextWrapped("No Directional Light: the sky's own sun (54 degrees up, intensity %.0f) lights the scene. "
+                                       "Add a sun light to move it or change its color and intensity.", DefaultSkySunIntensity);
+                    if (ImGui::Button("Add Sun Light"))
+                    {
+                        Entity light = m_Context->CreateEntity("Sun");
+                        light.AddComponent<DirectionalLightComponent>().Intensity = DefaultSkySunIntensity;
+                        light.GetComponent<TransformComponent>().Rotation = glm::eulerAngles(DefaultSkySunRotation());
+                        light.MarkTransformDirty();
+                    }
                 }
                 else
                 {
@@ -1409,7 +1417,10 @@ namespace Nox
                     const glm::vec3 toSun = -glm::normalize(glm::vec3(world * glm::vec4(0.0f, 0.0f, -1.0f, 0.0f)));
                     float elevation = glm::degrees(std::asin(glm::clamp(toSun.y, -1.0f, 1.0f)));
                     float azimuth = glm::degrees(std::atan2(toSun.x, toSun.z));
-                    ImGui::TextDisabled("Sun: %s (its color and intensity light the sky)", sun.GetName().c_str());
+                    const auto& sunLight = sun.GetComponent<DirectionalLightComponent>();
+                    ImGui::TextDisabled("Sun: %s, intensity %.1f (its color and intensity light the sky)", sun.GetName().c_str(), sunLight.Intensity);
+                    if (sunLight.Intensity * std::max({ sunLight.Color.r, sunLight.Color.g, sunLight.Color.b }) < 3.0f)
+                        ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "A weak sun gives a dark sky: daylight is about %.0f at exposure 1.", DefaultSkySunIntensity);
 
                     if (sun.GetParent())
                     {

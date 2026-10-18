@@ -577,19 +577,22 @@ struct PushConstantEquirect
 // (transmittance LUT, multiple-scattering LUT, environment cubemap). Lengths in km inside the shader.
 struct PushConstantSkyAtmosphere
 {
+    // Push constants compile with std430 rules (GLSLForceScalarLayout does not reach them): a vec3 sits on a 16-byte
+    // boundary. Each vec3 here is placed there and followed by a 4-byte member, so std430 and the C++ struct agree.
     uint32_t outputStorageIndex;          // what this pass writes (storage slot): a LUT, or the environment cubemap
     uint32_t transmittanceTextureIndex;   // sampled slot of the transmittance LUT (read by the two later passes)
     uint32_t multiScatteringTextureIndex; // sampled slot of the multiple-scattering LUT (read by the cubemap pass)
     uint32_t outputSize;                  // width of what is written (LUT width, or the cubemap face size)
-    uint32_t outputHeight;                // LUT height (unused by the cubemap pass)
     vec3 sunDirection;                    // world space, toward the sun
+    uint32_t outputHeight;                // LUT height (unused by the cubemap pass)
     vec3 sunIlluminance;                  // the sun's color * intensity (the scene's directional light)
-    vec3 groundAlbedo;
     float rayleighScale;                  // 1 = Earth: the blue of the sky
+    vec3 groundAlbedo;
     float mieScale;                       // 1 = Earth: haze
     float ozoneScale;                     // 1 = Earth: the deep blue at the zenith / purple at dusk
     float mieAnisotropy;                  // Mie phase g (0.8: forward-scattering glow around the sun)
     float cameraAltitudeKm;               // where the sky is seen from, above the ground
+    float padding;                        // std430 rounds the block up to 16 bytes
 };
 
 struct PushConstantSkybox
@@ -597,13 +600,23 @@ struct PushConstantSkybox
     uint64_t matrixReference; // BDA to UniformBufferObject
     uint32_t cubemapIndex;     // Index in descriptor heap
     // The sun's disc over a procedural sky (SkyAtmosphere.slang); skyTransmittanceIndex is ~0 for an HDR environment, whose
-    // image has its own sun.
+    // image has its own sun. Each vec3 on a 16-byte boundary followed by a float (std430 push constants, see above).
     uint32_t skyTransmittanceIndex; // sampled slot of the sky's transmittance LUT
     vec3 sunDirection;              // world space, towards the sun
-    vec3 sunDiscRadiance;           // at the disc's center above the atmosphere: illuminance / solid angle (capped)
     float sunCosAngularRadius;
+    vec3 sunDiscRadiance;           // at the disc's center above the atmosphere: illuminance / solid angle (capped)
     float skyAltitudeKm;            // the viewer's height in the sky model
 };
+
+#ifndef __SLANG__
+// The std430 offsets the shaders read (checked against the SPIR-V of the engine's own compile path).
+static_assert(offsetof(PushConstantSkyAtmosphere, sunDirection) == 16 && offsetof(PushConstantSkyAtmosphere, sunIlluminance) == 32 &&
+              offsetof(PushConstantSkyAtmosphere, groundAlbedo) == 48 && offsetof(PushConstantSkyAtmosphere, cameraAltitudeKm) == 72 &&
+              sizeof(PushConstantSkyAtmosphere) == 80, "PushConstantSkyAtmosphere must match its std430 layout");
+static_assert(offsetof(PushConstantSkybox, sunDirection) == 16 && offsetof(PushConstantSkybox, sunDiscRadiance) == 32 &&
+              offsetof(PushConstantSkybox, skyAltitudeKm) == 44 && sizeof(PushConstantSkybox) == 48,
+              "PushConstantSkybox must match its std430 layout");
+#endif
 
 struct PushConstantVisibilityDebug
 {

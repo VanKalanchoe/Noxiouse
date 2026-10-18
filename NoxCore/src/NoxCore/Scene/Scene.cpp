@@ -21,12 +21,12 @@
 namespace Nox
 {
     // The procedural sky's settings: the atmosphere from the component, the sun from the scene's first directional light
-    // (a default sun when there is none).
+    // (the sky's own sun when there is none, which SubmitLights also submits as the scene's light).
     static SkyAtmosphereSettings MakeSkyAtmosphereSettings(entt::registry& registry, const EnvironmentLightComponent& environment)
     {
         SkyAtmosphereSettings settings;
-        settings.SunDirection = glm::normalize(glm::vec3(0.3f, 0.8f, 0.5f));
-        settings.SunIlluminance = glm::vec3(1.0f);
+        settings.SunDirection = DefaultSkySunDirection();
+        settings.SunIlluminance = glm::vec3(DefaultSkySunIntensity);
         auto lights = registry.view<WorldTransformComponent, DirectionalLightComponent>();
         for (auto entity : lights)
         {
@@ -1205,13 +1205,24 @@ namespace Nox
         if (!foundPrimaryCamera)
             m_renderer->setAutoExposure(false, 0.0f, -16.0f, 16.0f);
 
+        bool hasDirectionalLight = false;
         {
             auto view = m_Registry.view<WorldTransformComponent, DirectionalLightComponent>();
             for (auto entity : view)
             {
                 auto [wtc, light] = view.get<WorldTransformComponent, DirectionalLightComponent>(entity);
                 m_renderer->SubmitLight(wtc.WorldMatrix, light);
+                hasDirectionalLight = true;
             }
+        }
+        const EnvironmentLightComponent* environment = FindEnvironment(m_Registry);
+        // A procedural sky without a Directional Light: the sun it draws also lights the scene (direct light, shadows).
+        // A Directional Light added later is the sun from then on.
+        if (!hasDirectionalLight && environment && environment->Source == EnvironmentSource::ProceduralSky)
+        {
+            DirectionalLightComponent skySun;
+            skySun.Intensity = DefaultSkySunIntensity;
+            m_renderer->SubmitLight(glm::toMat4(DefaultSkySunRotation()), skySun);
         }
         {
             auto view = m_Registry.view<WorldTransformComponent, PointLightComponent>();
@@ -1230,7 +1241,7 @@ namespace Nox
             }
         }
         // The environment itself is applied by SetRenderer (main thread); this system may run on a worker.
-        if (const EnvironmentLightComponent* environment = FindEnvironment(m_Registry))
+        if (environment)
             m_renderer->setScaleIBLAmbient(environment->RadianceScale.x);
     }
 
