@@ -237,6 +237,7 @@ namespace Nox
         // Outline
         watchShader("assets/shaders/Outline.slang", "Outline", [this]() { createOutlinePipeline(true); });
         watchShader("assets/shaders/SelectionMask.slang", "SelectionMask", [this]() { createSelectionMaskPipeline(true); });
+        watchShader("assets/shaders/EditorStableDepth.slang", "EditorStableDepth", [this]() { createStableEntityDepthPipeline(true); });
         // Skybox
         watchShader("assets/shaders/Skybox.slang", "Skybox", [this]() { createSkyboxPipeline(true); });
         // Unlit
@@ -422,7 +423,10 @@ namespace Nox
         createSkyboxPipeline(false);
         createOutlinePipeline(false);
         if (m_isEditor)
+        {
             createSelectionMaskPipeline(false);
+            createStableEntityDepthPipeline(false);
+        }
 
         // Visability
         createVisibilityPipeline(false); // <--- ADD THIS
@@ -1611,6 +1615,18 @@ namespace Nox
         desc.shaders.push_back({ .stage = NRI::ShaderStage::Mesh, .entryPoint = "meshMain", .sourcePath = "assets/shaders/SelectionMask.slang" });
         desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "fragMain", .sourcePath = "assets/shaders/SelectionMask.slang" });
         m_selectionMaskPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+    }
+
+    void Renderer::createStableEntityDepthPipeline(bool forceCompile)
+    {
+        NRI::PipelineDesc desc{};
+        desc.forceCompile = forceCompile;
+        desc.colorFormats = { NRI::ImageFormat::R32SINT };
+        // The visibility pass's task stage (LOD cut, meshlet culling); EditorStableDepth.slang projects without the jitter.
+        desc.shaders.push_back({ .stage = NRI::ShaderStage::Task, .entryPoint = "taskMain", .sourcePath = "assets/shaders/Material_PBR_MeshTask.slang" });
+        desc.shaders.push_back({ .stage = NRI::ShaderStage::Mesh, .entryPoint = "meshMain", .sourcePath = "assets/shaders/EditorStableDepth.slang" });
+        desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "fragMain", .sourcePath = "assets/shaders/EditorStableDepth.slang" });
+        m_stableEntityDepthPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
     void Renderer::createCommandPool()

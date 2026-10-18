@@ -782,6 +782,14 @@ namespace Nox
                 {
                     m_Renderer->setUpscaleMode(static_cast<NRI::UpscaleMode>(currentUpscaleMode));
                 }
+
+                bool stableDepth = m_Renderer->getStableEditorDepth();
+                if (ImGui::Checkbox("Stable Overlays", &stableDepth))
+                    m_Renderer->setStableEditorDepth(stableDepth);
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Draws the scene's depth and entity IDs again without the camera jitter, so the grid, gizmo lines,\n"
+                                      "collider wireframes and picking hold still while DLSS is on (a depth-only pass of the scene).\n"
+                                      "Off: they come from the jittered render and crawl along edges.");
                 
                 if (m_Renderer->isDLSSRayReconstructionSupported())
                 {

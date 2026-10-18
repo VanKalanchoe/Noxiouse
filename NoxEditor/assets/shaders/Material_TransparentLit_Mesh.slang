@@ -13,8 +13,8 @@
 // lighting math), which made them look like they were glowing/self-lit next to properly shaded
 // Opaque/Mask geometry.
 //
-// Lights here are unshadowed (no per-object G-buffer to run the RT shadow pass against) - direct
-// lights + IBL/DDGI ambient only. Plain alpha blending, no transmission.
+// Shadows: no G-buffer for the RT shadow pass to run against, so this shader traces its own (forwardShadowed below): the
+// strongest few lights of each pixel get one hard shadow ray through a ray query, while RT shadows are on.
 
 #include "shaderIO.h"
 #include "DDGICommon.slang"
@@ -38,6 +38,50 @@ struct VSOutput
 
 static const float PBR_WORKFLOW_METALLIC_ROUGHNESS = 0.0;
 static const float PBR_WORKFLOW_SPECULAR_GLOSSINESS = 1.0;
+
+// The lights of a pixel that get a shadow ray: the strongest ones (every light would be a ray per light per pixel, and scenes
+// have hundreds); the rest stay unshadowed.
+static const uint ShadowedLightCount = 4;
+
+// One shadow ray against the TLAS (ray query). Alpha-masked occluders are cut out like ShadowMask.slang does; blended and
+// transmissive ones let the light through, so glass neither throws a black shadow nor shadows itself. Every candidate is
+// decided here (the ray forces non-opaque: opaque-mode glass with transmission is a FORCE_OPAQUE instance in the TLAS).
+bool forwardShadowed(UniformBufferObject* ubo, float3 origin, float3 direction, float maxDistance)
+{
+    RayDesc ray;
+    ray.Origin = origin;
+    ray.Direction = direction;
+    ray.TMin = 0.005 * ubo->unitsPerMeter;
+    ray.TMax = maxDistance;
+
+    RaytracingAccelerationStructure tlas = RaytracingAccelerationStructure(ubo->tlasDeviceAddress);
+    RayQuery<RAY_FLAG_FORCE_NON_OPAQUE | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> query;
+    query.TraceRayInline(tlas, RAY_FLAG_FORCE_NON_OPAQUE | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, 0xFF, ray);
+
+    GpuRayTracingInstance* rtInstances = (GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference;
+    SamplerState samp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
+    while (query.Proceed())
+    {
+        GpuRayTracingInstance occluder = rtInstances[query.CandidateRayInstanceCustomIndex()];
+        if (occluder.alphaMode == 2 || occluder.transmissionFactor > 0.0)
+            continue;
+        if (occluder.alphaMode == 1 && occluder.baseColorTextureIndex != 0xFFFFFFFF)
+        {
+            uint* indices = (uint*)occluder.indexBufferAddress;
+            Vertex* vertices = (Vertex*)occluder.vertexBufferAddress;
+            uint primitive = query.CandidatePrimitiveIndex();
+            float2 barycentrics = query.CandidateTriangleBarycentrics();
+            float2 uv = vertices[indices[primitive * 3 + 0]].uv0 * (1.0 - barycentrics.x - barycentrics.y) +
+                        vertices[indices[primitive * 3 + 1]].uv0 * barycentrics.x +
+                        vertices[indices[primitive * 3 + 2]].uv0 * barycentrics.y;
+            Texture2D baseColorTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + occluder.baseColorTextureIndex, 0));
+            if (baseColorTex.SampleLevel(samp, uv, 0).a * occluder.baseColorFactor.a < occluder.alphaCutoff)
+                continue;
+        }
+        query.CommitNonOpaqueTriangleHit();
+    }
+    return query.CommittedStatus() == COMMITTED_TRIANGLE_HIT;
+}
 
 float3 getNormal(UniformBufferObject* ubo, InstanceData instance, VSOutput vertIn, SamplerState samplerState)
 {
@@ -217,10 +261,22 @@ FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform Pu
     float3 reflection = normalize(reflect(-v, n));
     float NdotV = clamp(dot(n, v), 0.001, 1.0);
 
-    // Direct analytic lights - unshadowed (see file header: no G-buffer here for the RT shadow
-    // pass to run against). Same evaluateDirectLight the deferred opaque path uses.
+    // Direct analytic lights, the same evaluateDirectLight the deferred opaque path uses. The strongest ShadowedLightCount of them
+    // get a shadow ray once all are summed (see file header).
     float3 directLighting = float3(0.0);
     LightData* lights = (LightData*)ubo->lightDataReference;
+    const bool traceShadows = ubo->enableRTShadows != 0 && ubo->tlasDeviceAddress != 0;
+    float3 shadowedContribution[ShadowedLightCount];
+    float3 shadowedDirection[ShadowedLightCount];
+    float shadowedDistance[ShadowedLightCount];
+    float shadowedWeight[ShadowedLightCount];
+    for (uint slot = 0; slot < ShadowedLightCount; ++slot)
+    {
+        shadowedContribution[slot] = float3(0.0);
+        shadowedDirection[slot] = float3(0.0, 1.0, 0.0);
+        shadowedDistance[slot] = 0.0;
+        shadowedWeight[slot] = 0.0;
+    }
 
     for (uint i = 0; i < ubo->lightCount; i++)
     {
@@ -229,6 +285,7 @@ FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform Pu
 
         float3 l;
         float attenuation = 1.0;
+        float lightDistance = 100000.0 * ubo->unitsPerMeter; // a directional light: as far as a shadow ray needs to go
 
         if (lightType == 0)
         {
@@ -238,6 +295,7 @@ FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform Pu
         {
             float3 lightVec = light.position.xyz - vertIn.worldPos;
             float distance = length(lightVec);
+            lightDistance = distance;
             l = distance > 0.0001 ? lightVec / distance : float3(0.0, 1.0, 0.0);
 
             float range = light.direction.w;
@@ -273,7 +331,40 @@ FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform Pu
         );
 
         float3 lightRadiance = light.color.rgb * light.color.w * attenuation;
-        directLighting += evaluateDirectLight(pbrInputs, lightRadiance);
+        float3 contribution = evaluateDirectLight(pbrInputs, lightRadiance);
+        directLighting += contribution;
+
+        if (traceShadows)
+        {
+            float weight = dot(contribution, float3(0.2126, 0.7152, 0.0722));
+            uint weakest = 0;
+            for (uint slot = 1; slot < ShadowedLightCount; ++slot)
+            {
+                if (shadowedWeight[slot] < shadowedWeight[weakest])
+                    weakest = slot;
+            }
+            if (weight > shadowedWeight[weakest])
+            {
+                shadowedContribution[weakest] = contribution;
+                shadowedDirection[weakest] = l;
+                shadowedDistance[weakest] = lightDistance;
+                shadowedWeight[weakest] = weight;
+            }
+        }
+    }
+
+    // A light hidden from this point takes its share back out. The ray leaves a little above the surface (the normal faces every
+    // light that was summed: the loop skips the others).
+    if (traceShadows)
+    {
+        float3 shadowOrigin = vertIn.worldPos + n * (0.01 * ubo->unitsPerMeter);
+        for (uint slot = 0; slot < ShadowedLightCount; ++slot)
+        {
+            if (shadowedWeight[slot] > 0.0 &&
+                forwardShadowed(ubo, shadowOrigin, shadowedDirection[slot], max(shadowedDistance[slot] - 0.01 * ubo->unitsPerMeter, 0.0)))
+                directLighting -= shadowedContribution[slot];
+        }
+        directLighting = max(directLighting, float3(0.0));
     }
 
     PBRInfo iblInputs = PBRInfo(

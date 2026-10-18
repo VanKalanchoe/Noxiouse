@@ -725,6 +725,9 @@ namespace Nox
                 // Transparent lit shading's specular occlusion approximation (Material_TransparentLit_Mesh.slang).
                 if (m_frame.ssaoAdded)
                     builder.Read(resources.SSAO);
+                // Transparent lit shading traces its own shadow rays (ray query) against the scene.
+                if (resources.TLAS.IsValid())
+                    builder.Read(resources.TLAS, RGBufferAccess::AccelerationStructureRead);
                 builder.SetRenderArea(m_frame.renderExtent);
                 ReadGpuScene(builder, resources);
                 ReadViewDraws(builder, resources.CameraDraws);

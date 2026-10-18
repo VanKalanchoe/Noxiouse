@@ -162,6 +162,14 @@ namespace Nox
     {
         const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
 
+        // Editor with a jittered camera: drawn again without the jitter instead, so what reads them holds still.
+        if (m_isEditor && m_stableEditorDepth && m_stableEntityDepthPipeline && m_currentJitter != glm::vec2(0.0f) &&
+            resources.CameraDraws.Commands.IsValid())
+        {
+            addStableEntityDepthPass();
+            return;
+        }
+
         // Render-resolution entity IDs/depth -> display resolution. The 2D overlay depth-tests world-space 2D content
         // against the 3D scene, and picking/outline need entity IDs at full display resolution; a nearest blit avoids
         // re-rendering the scene. Everything downstream reads the display copies, so this also runs at 1:1.
@@ -180,6 +188,65 @@ namespace Nox
                 cmd.bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
                 context.Texture(res->Entity).blitTo(cmd, context.Texture(res->EntityHi));
                 context.Texture(res->Depth).blitTo(cmd, context.Texture(res->DepthHi));
+            });
+    }
+
+    void Renderer::addStableEntityDepthPass()
+    {
+        const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
+
+        // The camera's visible instances at display resolution with the non-jittered projection (EditorStableDepth.slang): what the
+        // blit would give without the jitter. Depth-writing surfaces first, then transparent ones (entity IDs over them, depth tested,
+        // like the forward pass writes them).
+        m_renderGraph.AddPass("Stable Entity/Depth", RGPassFlags::Raster,
+            [&](RGBuilder& builder)
+            {
+                builder.ColorTarget(resources.EntityHi, NRI::LoadOP::clear, NRI::StoreOP::store, { -1.0f, 0.0f, 0.0f, 0.0f }); // R32SINT
+                builder.DepthTarget(resources.DepthHi, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0 });                    // reverse Z
+                builder.SetRenderArea(m_frame.outputExtent);
+                ReadGpuScene(builder, resources);
+                ReadIfValid(builder, resources.SkinnedVertices);
+                ReadViewDraws(builder, resources.CameraDraws);
+                ReadViewDraws(builder, resources.CameraDraws, true);
+            },
+            [this, res = &resources](RGPassContext& context)
+            {
+                NRI::CommandBuffer& cmd = context.Cmd();
+                cmd.setDepthTestEnable(true);
+                cmd.setDepthCompareOp(NRI::CompareOp::GreaterOrEqual);
+                cmd.setColorBlendEnable(0, false);
+                cmd.setColorWriteMask(0, NRI::ColorComponent::All);
+
+                NRI::Pipeline& pipeline = *m_stableEntityDepthPipeline;
+                struct BucketDraw
+                {
+                    RenderBucket Bucket;
+                    NRI::CullMode Cull;
+                };
+                constexpr BucketDraw solid[] = {
+                    { RenderBucket::Opaque, NRI::CullMode::Back }, { RenderBucket::OpaqueDoubleSided, NRI::CullMode::None },
+                    { RenderBucket::Mask, NRI::CullMode::Back }, { RenderBucket::MaskDoubleSided, NRI::CullMode::None },
+                    { RenderBucket::Unlit, NRI::CullMode::Back }, { RenderBucket::UnlitDoubleSided, NRI::CullMode::None } };
+                constexpr BucketDraw transparent[] = {
+                    { RenderBucket::Transparent, NRI::CullMode::Back }, { RenderBucket::TransparentDoubleSided, NRI::CullMode::None },
+                    { RenderBucket::TransparentUnlit, NRI::CullMode::Back }, { RenderBucket::TransparentUnlitDoubleSided, NRI::CullMode::None } };
+
+                NRI::Pipeline* bound = nullptr;
+                auto drawBuckets = [&](std::span<const BucketDraw> buckets, bool depthWrite)
+                {
+                    // Both culling phases: the instances found visible at once, then the ones phase 2 found behind the old depth.
+                    for (int late = 0; late < 2; ++late)
+                    {
+                        MeshletDrawCursor cursor = beginMeshletDraws(context, res->CameraDraws, late == 1);
+                        cursor.taskFlags &= ~shaderio::MESHLET_COUNT_TRIANGLES; // the stats count the camera's passes
+                        cursor.boundPipeline = bound;
+                        for (const BucketDraw& draw : buckets)
+                            drawMeshletBucket(cmd, cursor, draw.Bucket, pipeline, draw.Cull, depthWrite, false);
+                        bound = cursor.boundPipeline;
+                    }
+                };
+                drawBuckets(solid, true);
+                drawBuckets(transparent, false);
             });
     }
 }

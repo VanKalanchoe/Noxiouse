@@ -520,6 +520,10 @@ namespace Nox
 
         void setCameraJitterEnabled(bool enabled) { m_cameraJitterEnabled = enabled; }
         bool getCameraJitterEnabled() const { return m_cameraJitterEnabled; }
+        // Editor, while the camera is jittered (DLSS / DLAA): the display-resolution entity IDs and depth are drawn again without the
+        // jitter instead of blitted, so the grid, gizmo lines, collider wireframes and picking hold still. Costs a depth-only pass.
+        void setStableEditorDepth(bool enabled) { m_stableEditorDepth = enabled; }
+        bool getStableEditorDepth() const { return m_stableEditorDepth; }
         glm::vec2 getCurrentJitter() const { return m_currentJitter; }
 
         Ref<Texture2D> UploadTexture(const TextureData& cpuData);
@@ -761,6 +765,8 @@ namespace Nox
         shaderio::PushConstantSkybox makeSkyboxSunPush() const;
         void addDLSSPass();
         void addEntityDepthBlitPass();
+        // The blit's replacement in the editor while the camera is jittered (setStableEditorDepth).
+        void addStableEntityDepthPass();
         void addPostProcessPass();
         void addOverlay2DPass();
         // Editor: the selected instances drawn again without camera jitter into a display-resolution mask the outline reads.
@@ -1382,12 +1388,14 @@ namespace Nox
         // Selection mask (SelectionMask.slang): the selected instances' GPU scene slots for this frame slot (the task stage
         // reads them as its draw list) and one direct draw per slot.
         std::unique_ptr<NRI::Pipeline> m_selectionMaskPipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_stableEntityDepthPipeline = nullptr; // EditorStableDepth.slang
         std::vector<std::unique_ptr<NRI::Buffer>> m_selectionInstanceBuffers;
         std::vector<void*> m_selectionInstanceBuffersMapped;
         std::vector<uint32_t> m_selectionTaskGroups; // per selected instance: task workgroups to cover its meshlets
 
         void createOutlinePipeline(bool forceCompile = false);
         void createSelectionMaskPipeline(bool forceCompile = false);
+        void createStableEntityDepthPipeline(bool forceCompile = false);
 
         // PBR stuff
         Ref<Texture2D> m_environmentCubemap;
@@ -1446,6 +1454,7 @@ namespace Nox
         bool m_isFirstFrame = true;
 
         bool m_cameraJitterEnabled = false;
+        bool m_stableEditorDepth = true;
         uint32_t m_jitterPhase = 0;
         glm::vec2 m_currentJitter = glm::vec2(0.0f);
         glm::vec2 m_prevJitter = glm::vec2(0.0f);

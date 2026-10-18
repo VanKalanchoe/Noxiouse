@@ -1,7 +1,8 @@
 // The editor's extra views (docs/Future.md item 5): the viewports besides the active one. Each is a camera of its own drawn
 // raster only after the main view -- frustum culling, one forward pass (opaque and masked surfaces lit by
-// Material_TransparentLit_Mesh, unlit, the sky, transparent surfaces), tonemapping into the view's texture, then the 2D
-// overlay's world-space batch with the view's own grid. No G-buffer, ray tracing, upscaling or history of its own.
+// Material_TransparentLit_Mesh, with its ray-query shadows of the strongest lights, unlit, the sky, transparent surfaces),
+// tonemapping into the view's texture, then the 2D overlay's world-space batch with the view's own grid. No G-buffer, RT
+// reflections / GI passes, upscaling or history of its own.
 #include "NoxCore/Renderer/Renderer.h"
 
 #include <algorithm>
@@ -105,6 +106,9 @@ namespace Nox
                         builder.Read(resources.DDGIIrradiance[ddgiIndex]);
                         builder.Read(resources.DDGIDistance[ddgiIndex]);
                     }
+                    // The forward shading's shadow rays (ray query).
+                    if (resources.TLAS.IsValid())
+                        builder.Read(resources.TLAS, RGBufferAccess::AccelerationStructureRead);
                     builder.SetRenderArea(extent);
                     ReadGpuScene(builder, resources);
                     ReadViewDraws(builder, draws);
