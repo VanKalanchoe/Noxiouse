@@ -184,6 +184,36 @@ namespace Nox
             return animator && animator->GraphInstance.GetBool(std::string(name));
         }
 
+        // Montages (Nox.AnimatorComponent.PlayMontage): the clip by its path relative to the asset folder.
+        Coral::Bool32 AnimatorPlayMontage(uint64_t entityID, Coral::String clipPath, Coral::String slot, float blendIn, float blendOut, float rate)
+        {
+            AnimatorComponent* animator = FindAnimator(entityID);
+            if (!animator)
+                return false;
+            const std::string path = std::string(clipPath);
+            const AssetHandle clip = AssetManager::FindHandleByPath(path, AssetType::AnimationSequence);
+            if (clip == 0)
+            {
+                NOX_CORE_WARN("PlayMontage: no animation clip at '{}'", path);
+                return false;
+            }
+            AssetManager::RequestAsset(clip);
+            animator->GraphInstance.PlayMontage(clip, std::string(slot), rate, blendIn, blendOut);
+            return true;
+        }
+
+        void AnimatorStopMontage(uint64_t entityID, Coral::String slot, float blendOut)
+        {
+            if (AnimatorComponent* animator = FindAnimator(entityID))
+                animator->GraphInstance.StopMontage(std::string(slot), blendOut);
+        }
+
+        Coral::Bool32 AnimatorIsMontagePlaying(uint64_t entityID, Coral::String slot)
+        {
+            AnimatorComponent* animator = FindAnimator(entityID);
+            return animator && animator->GraphInstance.IsMontagePlaying(std::string(slot));
+        }
+
         // The Character Controller 3D (Nox.CharacterControllerComponent): inputs are read by the next fixed physics
         // step, state is what the last step produced.
         CharacterController3DComponent* FindCharacter(uint64_t entityID)
@@ -417,6 +447,9 @@ namespace Nox
         assembly.AddInternalCall("Nox.InternalCalls", "Animator_GetFloat", reinterpret_cast<void*>(&AnimatorGetFloat));
         assembly.AddInternalCall("Nox.InternalCalls", "Animator_SetBool", reinterpret_cast<void*>(&AnimatorSetBool));
         assembly.AddInternalCall("Nox.InternalCalls", "Animator_GetBool", reinterpret_cast<void*>(&AnimatorGetBool));
+        assembly.AddInternalCall("Nox.InternalCalls", "Animator_PlayMontage", reinterpret_cast<void*>(&AnimatorPlayMontage));
+        assembly.AddInternalCall("Nox.InternalCalls", "Animator_StopMontage", reinterpret_cast<void*>(&AnimatorStopMontage));
+        assembly.AddInternalCall("Nox.InternalCalls", "Animator_IsMontagePlaying", reinterpret_cast<void*>(&AnimatorIsMontagePlaying));
         assembly.AddInternalCall("Nox.InternalCalls", "Character_SetMoveVelocity", reinterpret_cast<void*>(&CharacterSetMoveVelocity));
         assembly.AddInternalCall("Nox.InternalCalls", "Character_Jump", reinterpret_cast<void*>(&CharacterJump));
         assembly.AddInternalCall("Nox.InternalCalls", "Character_IsGrounded", reinterpret_cast<void*>(&CharacterIsGrounded));
@@ -496,6 +529,15 @@ namespace Nox
             case ScriptCallback::Destroy: it->second->Object.InvokeMethod("OnDestroy"); break;
             case ScriptCallback::AfterReload: it->second->Object.InvokeMethod("OnAfterReload"); break;
         }
+    }
+
+    void DotNetBackend::InvokeWithString(ScriptInstanceHandle handle, std::string_view method, std::string_view argument)
+    {
+        auto it = m_Instances.find(handle.ID);
+        if (it == m_Instances.end() || handle.Generation != m_Generation) return;
+        Coral::String value = Coral::String::New(argument);
+        it->second->Object.InvokeMethod(method, value);
+        Coral::String::Free(value);
     }
 
     void DotNetBackend::SetSceneContext(Scene* scene)

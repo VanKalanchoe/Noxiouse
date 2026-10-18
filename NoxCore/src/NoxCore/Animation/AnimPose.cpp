@@ -65,6 +65,118 @@ namespace Nox
         out.LocalTransforms = std::move(blended); // built into a temporary so out may alias a or b
     }
 
+    void BlendPosesWeighted(const std::vector<const AnimPose*>& poses, const std::vector<float>& weights, AnimPose& out)
+    {
+        size_t count = 0;
+        float total = 0.0f;
+        const AnimPose* first = nullptr;
+        for (size_t i = 0; i < poses.size() && i < weights.size(); ++i)
+        {
+            if (!poses[i] || poses[i]->LocalTransforms.empty() || weights[i] <= 0.0f)
+                continue;
+            count = first ? std::min(count, poses[i]->LocalTransforms.size()) : poses[i]->LocalTransforms.size();
+            first = first ? first : poses[i];
+            total += weights[i];
+        }
+        if (!first)
+        {
+            out.LocalTransforms.clear();
+            return;
+        }
+
+        std::vector<Animator::NodeTransform> blended(count);
+        for (size_t node = 0; node < count; ++node)
+        {
+            glm::vec3 translation(0.0f);
+            glm::vec3 scale(0.0f);
+            glm::quat rotation(0.0f, 0.0f, 0.0f, 0.0f);
+            const glm::quat reference = first->LocalTransforms[node].Rotation;
+            for (size_t i = 0; i < poses.size() && i < weights.size(); ++i)
+            {
+                if (!poses[i] || poses[i]->LocalTransforms.size() <= node || weights[i] <= 0.0f)
+                    continue;
+                const float w = weights[i] / total;
+                const Animator::NodeTransform& t = poses[i]->LocalTransforms[node];
+                translation += t.Translation * w;
+                scale += t.Scale * w;
+                glm::quat q = t.Rotation;
+                if (glm::dot(q, reference) < 0.0f)
+                    q = -q;
+                rotation.x += q.x * w;
+                rotation.y += q.y * w;
+                rotation.z += q.z * w;
+                rotation.w += q.w * w;
+            }
+            blended[node].Translation = translation;
+            blended[node].Scale = scale;
+            blended[node].Rotation = glm::length(rotation) > 1e-6f ? glm::normalize(rotation) : reference;
+        }
+        out.LocalTransforms = std::move(blended);
+    }
+
+    void BlendPosesPerNode(const AnimPose& base, const AnimPose& blend, const std::vector<float>& weights, AnimPose& out)
+    {
+        const size_t count = std::min(base.LocalTransforms.size(), blend.LocalTransforms.size());
+        std::vector<Animator::NodeTransform> result = base.LocalTransforms;
+        for (size_t i = 0; i < count && i < weights.size(); ++i)
+        {
+            const float alpha = glm::clamp(weights[i], 0.0f, 1.0f);
+            if (alpha <= 0.0f)
+                continue;
+            const Animator::NodeTransform& ta = base.LocalTransforms[i];
+            const Animator::NodeTransform& tb = blend.LocalTransforms[i];
+            glm::quat qb = tb.Rotation;
+            if (glm::dot(ta.Rotation, qb) < 0.0f)
+                qb = -qb;
+            result[i].Translation = glm::mix(ta.Translation, tb.Translation, alpha);
+            result[i].Rotation = glm::normalize(glm::slerp(ta.Rotation, qb, alpha));
+            result[i].Scale = glm::mix(ta.Scale, tb.Scale, alpha);
+        }
+        out.LocalTransforms = std::move(result);
+    }
+
+    void ApplyAdditivePose(const AnimPose& base, const AnimPose& additive, const AnimPose& reference, float alpha, AnimPose& out)
+    {
+        const size_t count = std::min({ base.LocalTransforms.size(), additive.LocalTransforms.size(), reference.LocalTransforms.size() });
+        std::vector<Animator::NodeTransform> result = base.LocalTransforms;
+        alpha = glm::max(alpha, 0.0f);
+        const glm::quat identity(1.0f, 0.0f, 0.0f, 0.0f);
+        for (size_t i = 0; i < count; ++i)
+        {
+            const Animator::NodeTransform& b = base.LocalTransforms[i];
+            const Animator::NodeTransform& a = additive.LocalTransforms[i];
+            const Animator::NodeTransform& r = reference.LocalTransforms[i];
+            glm::quat delta = glm::normalize(a.Rotation * glm::inverse(r.Rotation));
+            if (delta.w < 0.0f)
+                delta = -delta; // the short way round
+            const glm::quat scaledDelta = glm::normalize(glm::slerp(identity, delta, alpha));
+            result[i].Translation = b.Translation + (a.Translation - r.Translation) * alpha;
+            result[i].Rotation = glm::normalize(scaledDelta * b.Rotation);
+            const glm::vec3 ratio = a.Scale / glm::max(glm::abs(r.Scale), glm::vec3(1e-6f)) * glm::sign(r.Scale + glm::vec3(1e-12f));
+            result[i].Scale = b.Scale * glm::mix(glm::vec3(1.0f), ratio, alpha);
+        }
+        out.LocalTransforms = std::move(result);
+    }
+
+    void CollectCrossedNotifies(const AnimationSequence& clip, float from, float to, bool wrapped, std::vector<std::string>& out)
+    {
+        if (clip.Notifies.empty() || (from == to && !wrapped))
+            return;
+        // Forward: (from, to], or (from, end] and [0, to] across the end. Backward: [to, from), or [0, from) and [to, end].
+        const bool forward = wrapped ? to < from : to > from;
+        for (const AnimationNotify& notify : clip.Notifies)
+        {
+            const float t = notify.Time;
+            bool crossed = false;
+            if (forward)
+                crossed = wrapped ? (t > from || t <= to) : (t > from && t <= to);
+            else
+                crossed = wrapped ? (t < from || t >= to) : (t < from && t >= to);
+            if (crossed)
+                out.push_back(notify.Name);
+        }
+    }
+
     void ApplyPoseToSkeleton(const AnimPose& pose, const Skeleton& skeleton, std::vector<glm::mat4>& outFinalBoneTransforms)
     {
         for (Node* node : skeleton.AllNodes)

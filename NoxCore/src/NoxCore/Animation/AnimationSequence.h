@@ -37,6 +37,14 @@ namespace Nox
         AnimationInterpolation Interpolation = AnimationInterpolation::Linear;
     };
 
+    // A named moment of a clip (UE's anim notify): "FootL" at 0.25 s. Raised when a playhead crosses it -- by a Clip node, a
+    // blend space's leading clip or a montage -- and handed to the entity's scripts as OnAnimationEvent(name).
+    struct AnimationNotify
+    {
+        float Time = 0.0f;
+        std::string Name;
+    };
+
     class AnimationSequence : public Asset
     {
     public:
@@ -53,6 +61,8 @@ namespace Nox
         float Duration = 0.0f;
         float TicksPerSecond = 24.0f;
         std::vector<NodeAnimationChannel> Channels;
+        // Kept next to the cooked clip in <clip>.nanim.notifies (YAML), so a re-cook of the clip keeps them.
+        std::vector<AnimationNotify> Notifies;
 
         static AssetType GetStaticType() { return AssetType::AnimationSequence; }
         virtual AssetType GetType() const override { return GetStaticType(); }

@@ -21,6 +21,9 @@ internal static unsafe class InternalCalls
     private static delegate*<ulong, NativeString, float> Animator_GetFloat;
     private static delegate*<ulong, NativeString, uint, void> Animator_SetBool;
     private static delegate*<ulong, NativeString, uint> Animator_GetBool;
+    private static delegate*<ulong, NativeString, NativeString, float, float, float, uint> Animator_PlayMontage;
+    private static delegate*<ulong, NativeString, float, void> Animator_StopMontage;
+    private static delegate*<ulong, NativeString, uint> Animator_IsMontagePlaying;
     private static delegate*<ulong, float, float, float, void> Character_SetMoveVelocity;
     private static delegate*<ulong, float, void> Character_Jump;
     private static delegate*<ulong, uint> Character_IsGrounded;
@@ -102,6 +105,25 @@ internal static unsafe class InternalCalls
     {
         using NativeString nativeName = new(name);
         return Animator_GetBool(entityID, nativeName) != 0;
+    }
+
+    internal static bool PlayAnimatorMontage(ulong entityID, string clipPath, string slot, float blendIn, float blendOut, float rate)
+    {
+        using NativeString nativePath = new(clipPath);
+        using NativeString nativeSlot = new(slot);
+        return Animator_PlayMontage(entityID, nativePath, nativeSlot, blendIn, blendOut, rate) != 0;
+    }
+
+    internal static void StopAnimatorMontage(ulong entityID, string slot, float blendOut)
+    {
+        using NativeString nativeSlot = new(slot);
+        Animator_StopMontage(entityID, nativeSlot, blendOut);
+    }
+
+    internal static bool IsAnimatorMontagePlaying(ulong entityID, string slot)
+    {
+        using NativeString nativeSlot = new(slot);
+        return Animator_IsMontagePlaying(entityID, nativeSlot) != 0;
     }
 
     internal static void SetCharacterMoveVelocity(ulong entityID, Vector3 velocity) =>

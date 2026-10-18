@@ -2,6 +2,7 @@
 
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "AnimPose.h"
 #include "NoxCore/NodeGraph/NodeGraph.h"
@@ -10,6 +11,15 @@
 namespace Nox
 {
     class Skeleton;
+    class AnimationSequence;
+
+    // A montage playing in a slot, as Slot nodes see it (AnimationGraphInstance runs the montages).
+    struct MontageSlotState
+    {
+        const AnimationSequence* Clip = nullptr;
+        float Time = 0.0f;   // seconds into the clip
+        float Weight = 0.0f; // 0..1, blending in and out
+    };
 
     // NodeGraph::Domain / NodeTypeDesc::Domain every animation-graph node type registers under.
     inline constexpr const char* kAnimationGraphDomain = "AnimationGraph";
@@ -26,9 +36,15 @@ namespace Nox
         const std::unordered_map<std::string, NodeGraphValue>* Parameters = nullptr;
 
         NodeGraphValue GetParameter(const std::string& name, const NodeGraphValue& fallback) const;
+
+        // Notifies the playheads crossed this evaluation (null: nobody listens).
+        std::vector<std::string>* FiredNotifies = nullptr;
+        // Montages by slot name (null or empty: none playing).
+        const std::unordered_map<std::string, MontageSlotState>* Montages = nullptr;
     };
 
-    // Registers "Clip", "Blend2D", "BlendSpace1D", "GetParameter", "StateMachine" and "Output" under kAnimationGraphDomain
+    // Registers "Clip", "Blend2D", "BlendSpace1D", "BlendSpace2D", "LayeredBlend", "ApplyAdditive", "Slot", "GetParameter",
+    // "StateMachine" and "Output" under kAnimationGraphDomain
     // into NodeTypeRegistry. Call exactly
     // once at startup (NodeTypeRegistry has no de-duplication, so calling it twice duplicates every entry).
     void RegisterAnimationGraphNodeTypes();

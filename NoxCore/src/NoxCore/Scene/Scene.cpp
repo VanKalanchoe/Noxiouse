@@ -519,6 +519,21 @@ namespace Nox
             FlushPendingDestroy();
         }
         RunUpdateSystems(ts, step, step);
+        if (step)
+        {
+            // Animation notifies the animators crossed this frame, to the entity's scripts (main thread: managed code).
+            std::vector<std::pair<entt::entity, std::string>> notifies;
+            for (auto entity : m_Registry.view<AnimatorComponent, ScriptComponent>())
+            {
+                for (const std::string& name : m_Registry.get<AnimatorComponent>(entity).FiredNotifies)
+                    notifies.emplace_back(entity, name);
+            }
+            for (const auto& [entity, name] : notifies)
+            {
+                if (m_Registry.valid(entity))
+                    ScriptEngine::OnAnimationEvent(Entity(entity, this), name);
+            }
+        }
         SyncGpuScene();
 
         // The primary camera's world transform is current once the update systems have run.
@@ -803,8 +818,13 @@ namespace Nox
 
             // 1b. Sync the graph asset if assigned (graph mode). Animation and Graph are meant to be mutually
             // exclusive per entity; if both are set, Graph takes precedence below.
+            animatorComp.FiredNotifies.clear();
             if (animatorComp.Graph != 0)
+            {
                 animatorComp.GraphInstance.Sync(animatorComp.Graph, missingAssets);
+                animatorComp.GraphInstance.RootMotion = animatorComp.RootMotion;
+                animatorComp.GraphInstance.RootBone = animatorComp.RootBone;
+            }
 
             // 2. Legacy self-contained skeleton evaluation. Imports with a node table skin from the
             // joint entities instead (see GetBoneTransforms), so the skeleton isn't evaluated twice.
@@ -857,6 +877,21 @@ namespace Nox
                                 dirty->isDirty = true;
                         }
                     }
+                }
+            }
+
+            // What the graph's evaluation produced besides the pose: notifies for the scripts, and root motion moving this
+            // entity (the skeleton's model space is this entity's: rotate and scale the step into its parent's space).
+            if (animatorComp.Graph != 0 && animatorComp.Playing)
+            {
+                animatorComp.FiredNotifies = animatorComp.GraphInstance.GetFiredNotifies();
+                const glm::vec3 rootMotion = animatorComp.GraphInstance.ConsumeRootMotion();
+                if (rootMotion != glm::vec3(0.0f) && m_Registry.all_of<TransformComponent>(entity))
+                {
+                    auto& transform = m_Registry.get<TransformComponent>(entity);
+                    transform.Translation += glm::mat3(transform.GetTransform()) * rootMotion;
+                    if (auto* dirty = m_Registry.try_get<DirtyTransformComponent>(entity))
+                        dirty->isDirty = true;
                 }
             }
 

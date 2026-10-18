@@ -25,6 +25,7 @@ namespace Nox
         void SetFieldValue(ScriptInstanceHandle instance, std::string_view fieldName, const ScriptValue& value) override;
         void DestroyInstance(ScriptInstanceHandle instance) override;
         void Invoke(ScriptInstanceHandle instance, ScriptCallback callback, float argument = 0.0f) override;
+        void InvokeWithString(ScriptInstanceHandle instance, std::string_view method, std::string_view argument) override;
         void SetSceneContext(Scene* scene) override;
 
     private:

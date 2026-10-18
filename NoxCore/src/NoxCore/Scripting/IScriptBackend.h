@@ -27,6 +27,8 @@ namespace Nox
         virtual void SetFieldValue(ScriptInstanceHandle instance, std::string_view fieldName, const ScriptValue& value) = 0;
         virtual void DestroyInstance(ScriptInstanceHandle instance) = 0;
         virtual void Invoke(ScriptInstanceHandle instance, ScriptCallback callback, float argument = 0.0f) = 0;
+        // A method of the script taking one string (e.g. OnAnimationEvent(string name)).
+        virtual void InvokeWithString(ScriptInstanceHandle instance, std::string_view method, std::string_view argument) = 0;
         virtual void SetSceneContext(Scene* scene) = 0;
     };
 }

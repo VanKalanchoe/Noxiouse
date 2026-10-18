@@ -554,6 +554,8 @@ namespace Nox
 
             // Graph mode (docs/Animation_Graph_Architecture_Plan_2026.md); 0 = single-clip mode above.
             out << YAML::Key << "Graph" << YAML::Value << animatorComponent.Graph;
+            out << YAML::Key << "RootMotion" << YAML::Value << animatorComponent.RootMotion;
+            out << YAML::Key << "RootBone" << YAML::Value << animatorComponent.RootBone;
             out << YAML::Key << "GraphParameters" << YAML::Value << YAML::BeginSeq;
             for (const auto& [name, value] : animatorComponent.GraphInstance.Parameters)
             {
@@ -1397,6 +1399,10 @@ namespace Nox
             }
             if (animatorComponent["Graph"])
                 ac.Graph = animatorComponent["Graph"].as<AssetHandle>();
+            if (animatorComponent["RootMotion"])
+                ac.RootMotion = animatorComponent["RootMotion"].as<bool>();
+            if (animatorComponent["RootBone"])
+                ac.RootBone = animatorComponent["RootBone"].as<std::string>();
             if (auto parameters = animatorComponent["GraphParameters"])
             {
                 for (const auto& paramData : parameters)

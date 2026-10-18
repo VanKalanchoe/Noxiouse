@@ -235,6 +235,14 @@ namespace Nox
                 s_Backend->Invoke(instance, ScriptCallback::Update, deltaTime);
     }
 
+    void ScriptEngine::OnAnimationEvent(Entity entity, const std::string& name)
+    {
+        auto it = s_Instances.find(entity.GetUUID());
+        if (s_Backend && it != s_Instances.end())
+            for (auto instance : it->second)
+                s_Backend->InvokeWithString(instance, "OnAnimationEvent", name);
+    }
+
     bool ScriptEngine::EntityClassExists(std::string_view fullName)
     {
         return s_Backend && s_Backend->HasType(fullName);

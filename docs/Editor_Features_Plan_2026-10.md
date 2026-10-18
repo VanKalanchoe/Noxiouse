@@ -90,6 +90,8 @@ which is used for 3D as much as 2D) keyframes properties of entities for doors, 
 cutscenes. Authoring skeletal clips themselves (keyframing bones) stays in Blender / Maya in every engine; engines edit
 clips' metadata (notifies, curves, trims) and retarget.
 
+**Built 2026-10-18 (untested):** A2 notifies, A3, A4, A5, A6, and the start of A7 -- see below the table.
+
 | Phase | What |
 |---|---|
 | A2 | **Notifies and sync markers** on clips (time-stamped names: "FootL", "Hit"), raised as script callbacks (`OnAnimationEvent(name)`) and used to sync blend-space clips by marker instead of normalized time |
@@ -100,6 +102,27 @@ clips' metadata (notifies, curves, trims) and retarget.
 | A7 | **Animation preview window**: double-click a clip / skeletal mesh -> the model in an isolated preview view (B1's preview renderer), scrub, play rate, loop range, notify editing |
 | A8 | **Sequencer**: `TimelineAsset` (tracks of keyframed entity properties: transform, light color / intensity, camera FOV, material parameters, events), a Timeline panel with keys and curves, a `TimelinePlayerComponent`, scripting `Timeline.Play()` |
 | A9 | Audio graph (the plan's step 8), on the same node-graph core |
+
+What was built:
+- **A2 Notifies:** `AnimationSequence::Notifies` (time + name), kept beside the clip in `<clip>.nanim.notifies` (YAML, so a
+  re-cook keeps them). Raised when a playhead crosses one -- Clip nodes, a blend space's leading clip, montages -- forward,
+  backward and across the loop point; scripts receive `OnAnimationEvent(string name)` (new virtual on `EntityBehaviour`),
+  after the animation update on the main thread. Sync markers (blend spaces syncing by marker) are not done.
+- **A7 start, the Animation Clip window:** double-click a clip: its length and channels, a timeline (playhead + a marker per
+  notify), add / edit / delete notifies; saved at once. No 3D preview (needs M2's second view).
+- **A3:** **LayeredBlend** node (Base, Blend, Alpha; "Bone" = the branch root, e.g. spine_02; "BlendDepth" fades in over
+  that many bones) and **ApplyAdditive** node (Base, Additive, Reference -- unconnected = rest pose -- and Alpha; rotation
+  delta additive * inverse(reference) applied before the base rotation, translation offset, scale ratio).
+- **A4 Montages:** **Slot** node ("SlotName", default DefaultSlot) passes its source through unless a montage plays there;
+  scripts: `Animator.PlayMontage("path/to/clip.nanim", slot, blendIn, blendOut, rate)`, `StopMontage(slot, blendOut)`,
+  `IsMontagePlaying(slot)`. Blends in and out, fires the clip's notifies, a new one replaces the slot's current one.
+- **A5 Root motion** (graph mode): Animator **Root Motion** + **Root Bone** (empty = the skin's first joint). The root
+  bone's horizontal movement (the skeleton's model space) is taken out of the pose and added to the entity's translation
+  (rotated / scaled by the entity), its height and rotation stay animated; a looping clip's jump back to its start is
+  detected (a large backward step) and replaced by the recent motion. Not routed into the character controller yet.
+- **A6 BlendSpace2D** node: up to eight clips at (X, Y) points (a locomotion layout by default), "X" / "Y" pins, gradient
+  band weights (exact at the samples, no triangulation), clips in step by normalized phase. Checked with a standalone
+  test of the weights and of the notify crossing rules.
 
 ## 4. F5: up to four viewports
 

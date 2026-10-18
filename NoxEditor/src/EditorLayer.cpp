@@ -60,6 +60,18 @@ namespace Nox
         m_AssetOpeners[AssetType::AnimationGraph] = [this](AssetHandle handle) { OpenNodeGraphEditor(handle); };
         m_AssetOpeners[AssetType::Prefab] = [this](AssetHandle handle) { OpenPrefabMode(handle); };
         m_AssetOpeners[AssetType::Material] = [this](AssetHandle handle) { OpenMaterialEditor(handle); };
+        m_AssetOpeners[AssetType::AnimationSequence] = [this](AssetHandle handle)
+        {
+            for (auto& panel : m_AnimationClipPanels)
+            {
+                if (panel->GetClip() == handle)
+                {
+                    ImGui::SetWindowFocus(panel->GetTitle().c_str());
+                    return;
+                }
+            }
+            m_AnimationClipPanels.push_back(CreateScope<AnimationClipPanel>(handle));
+        };
         m_SceneHierarchyPanel.SetOpenAssetCallback([this](AssetHandle handle) { OpenAsset(handle); });
         m_SceneHierarchyPanel.SetFocusEntityCallback([this](Entity entity) { FocusOnEntity(entity); });
         m_SceneHierarchyPanel.SetPlaceAssetsCallback([this](const std::vector<AssetHandle>& handles, const std::string& folder)
@@ -827,6 +839,9 @@ namespace Nox
         for (auto& panel : m_MaterialEditors)
             panel->OnImGuiRender();
         std::erase_if(m_MaterialEditors, [](const Scope<MaterialEditorPanel>& panel) { return !panel->IsOpen(); });
+        for (auto& panel : m_AnimationClipPanels)
+            panel->OnImGuiRender();
+        std::erase_if(m_AnimationClipPanels, [](const Scope<AnimationClipPanel>& panel) { return !panel->IsOpen(); });
 
         // "Right" Window
         ImGui::Begin("Stats");

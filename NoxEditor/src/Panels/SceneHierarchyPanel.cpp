@@ -1777,6 +1777,14 @@ namespace Nox
 
             if (component.Graph != 0)
             {
+                ImGui::Checkbox("Root Motion", &component.RootMotion);
+                ImGui::SetItemTooltip("The root bone's movement moves this entity (walks and runs that travel), and the skeleton stays in place.");
+                if (component.RootMotion)
+                {
+                    ImGui::InputTextWithHint("Root Bone", "first joint of the skin", &component.RootBone);
+                    ImGui::SetItemTooltip("The bone whose horizontal movement is taken (e.g. \"root\" or \"Hips\"); empty = the skin's first joint.");
+                }
+
                 ImGui::Text("Parameters");
                 for (auto& [name, value] : component.GraphInstance.Parameters)
                 {

@@ -352,6 +352,13 @@ namespace Nox
         AssetHandle Graph = 0;
         AnimationGraphInstance GraphInstance; // runtime only: node playheads, parameter overrides, last evaluated pose
 
+        // Graph mode: the root bone's horizontal movement moves this entity instead of the skeleton (walk / run clips that
+        // move forward). RootBone empty = the skin's first joint.
+        bool RootMotion = false;
+        std::string RootBone;
+        // Runtime only: the notifies the last animation update crossed, handed to the scripts as OnAnimationEvent(name).
+        std::vector<std::string> FiredNotifies;
+
         // Runtime only: skinning matrices rebuilt from the joint entities each frame.
         std::vector<glm::mat4> SkinMatrices;
         // Runtime only: final bone matrices for Graph mode's self-contained path (Skeleton set, NodeEntities

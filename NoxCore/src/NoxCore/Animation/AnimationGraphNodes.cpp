@@ -64,9 +64,12 @@ namespace Nox
                 playhead.Time = ctx.GetProperty<float>(nodeIndex, "StartPosition", 0.0f);
             }
             float& time = playhead.Time;
+            const float previousTime = time;
             time += data->DeltaTime * speed;
+            bool wrapped = false;
             if (loop)
             {
+                wrapped = time >= clip->Duration || time < 0.0f;
                 time = std::fmod(time, clip->Duration);
                 if (time < 0.0f)
                     time += clip->Duration;
@@ -75,6 +78,8 @@ namespace Nox
             {
                 time = glm::clamp(time, 0.0f, clip->Duration);
             }
+            if (data->FiredNotifies)
+                CollectCrossedNotifies(*clip, previousTime, time, wrapped, *data->FiredNotifies);
 
             SampleClipPose(*clip, time, *data->TargetSkeleton, pose);
             ctx.SetOutput(nodeIndex, 0, std::move(pose));
@@ -170,8 +175,17 @@ namespace Nox
             const float speed = ctx.GetProperty<float>(nodeIndex, "Speed", 1.0f);
             const float duration = glm::mix(samples[first].Clip->Duration, samples[second].Clip->Duration, weight);
             float& phase = ctx.GetState<float>(nodeIndex); // normalized 0..1, shared by every clip of the space
+            const float previousPhase = phase;
             phase += data->DeltaTime * speed / std::max(duration, 1e-4f);
+            const bool wrapped = loop && (phase >= 1.0f || phase < 0.0f);
             phase = loop ? phase - std::floor(phase) : glm::clamp(phase, 0.0f, 1.0f);
+            if (data->FiredNotifies)
+            {
+                // The leading clip's notifies (UE fires the notifies of the clips weighted above a threshold; one is enough
+                // for footsteps and keeps them from doubling).
+                const AnimationSequence& leading = *samples[weight < 0.5f ? first : second].Clip;
+                CollectCrossedNotifies(leading, previousPhase * leading.Duration, phase * leading.Duration, wrapped, *data->FiredNotifies);
+            }
 
             SampleClipPose(*samples[first].Clip, phase * samples[first].Clip->Duration, *data->TargetSkeleton, pose);
             if (second != first && weight > 0.0f)
@@ -183,6 +197,227 @@ namespace Nox
                 pose = std::move(blended);
             }
             ctx.SetOutput(nodeIndex, 0, std::move(pose));
+        }
+
+        // UE's Blend Space (2D), e.g. direction x speed: up to eight clips ("Clip0".."Clip7") placed at ("X0", "Y0")..("X7", "Y7");
+        // the "X" and "Y" pins pick the point. Weights by gradient band interpolation (Johansen 2009, Unity's freeform
+        // cartesian blend tree): a sample's weight falls off linearly towards each other sample and is the smallest of
+        // those, then all are normalized -- exact at the samples, smooth between, no triangulation needed. The clips play
+        // in step (one normalized phase at their weighted duration), like BlendSpace1D. "Loop", "Speed".
+        void EvaluateBlendSpace2D(GraphEvalContext& ctx, uint32_t nodeIndex)
+        {
+            auto* data = static_cast<AnimGraphEvalData*>(ctx.UserData);
+            AnimPose pose;
+            if (!data || !data->TargetSkeleton)
+            {
+                ctx.SetOutput(nodeIndex, 0, std::move(pose));
+                return;
+            }
+
+            struct BlendSample
+            {
+                AnimationSequence* Clip = nullptr;
+                glm::vec2 Position{ 0.0f };
+            };
+            std::array<BlendSample, 8> samples;
+            size_t count = 0;
+            for (int i = 0; i < 8; ++i)
+            {
+                const std::string index = std::to_string(i);
+                const uint64_t clipHandle = ctx.GetProperty<uint64_t>(nodeIndex, "Clip" + index, 0);
+                AnimationSequence* clip = clipHandle != 0 ? AssetManager::FindLoadedAsset<AnimationSequence>(clipHandle) : nullptr;
+                if (clip && clip->Duration > 0.0f)
+                    samples[count++] = { clip, { ctx.GetProperty<float>(nodeIndex, "X" + index, 0.0f), ctx.GetProperty<float>(nodeIndex, "Y" + index, 0.0f) } };
+            }
+            if (count == 0)
+            {
+                pose.ResetToRestPose(*data->TargetSkeleton);
+                ctx.SetOutput(nodeIndex, 0, std::move(pose));
+                return;
+            }
+
+            const glm::vec2 point(ctx.GetInput<float>(nodeIndex, 0), ctx.GetInput<float>(nodeIndex, 1));
+            std::array<float, 8> weights{};
+            float total = 0.0f;
+            for (size_t i = 0; i < count; ++i)
+            {
+                float weight = 1.0f;
+                for (size_t j = 0; j < count; ++j)
+                {
+                    if (j == i)
+                        continue;
+                    const glm::vec2 edge = samples[j].Position - samples[i].Position;
+                    const float lengthSquared = glm::dot(edge, edge);
+                    if (lengthSquared < 1e-8f)
+                        continue; // two samples at one place share it
+                    weight = std::min(weight, std::max(1.0f - glm::dot(point - samples[i].Position, edge) / lengthSquared, 0.0f));
+                }
+                weights[i] = weight;
+                total += weight;
+            }
+            if (total <= 1e-6f)
+            {
+                // Outside every band (far beyond the samples): the nearest one.
+                size_t nearest = 0;
+                for (size_t i = 1; i < count; ++i)
+                {
+                    if (glm::distance(point, samples[i].Position) < glm::distance(point, samples[nearest].Position))
+                        nearest = i;
+                }
+                weights[nearest] = total = 1.0f;
+            }
+
+            float duration = 0.0f;
+            size_t leading = 0;
+            for (size_t i = 0; i < count; ++i)
+            {
+                weights[i] /= total;
+                duration += weights[i] * samples[i].Clip->Duration;
+                if (weights[i] > weights[leading])
+                    leading = i;
+            }
+
+            const bool loop = ctx.GetProperty<bool>(nodeIndex, "Loop", true);
+            const float speed = ctx.GetProperty<float>(nodeIndex, "Speed", 1.0f);
+            float& phase = ctx.GetState<float>(nodeIndex);
+            const float previousPhase = phase;
+            phase += data->DeltaTime * speed / std::max(duration, 1e-4f);
+            const bool wrapped = loop && (phase >= 1.0f || phase < 0.0f);
+            phase = loop ? phase - std::floor(phase) : glm::clamp(phase, 0.0f, 1.0f);
+            if (data->FiredNotifies)
+            {
+                const AnimationSequence& clip = *samples[leading].Clip;
+                CollectCrossedNotifies(clip, previousPhase * clip.Duration, phase * clip.Duration, wrapped, *data->FiredNotifies);
+            }
+
+            std::array<AnimPose, 8> sampled;
+            std::vector<const AnimPose*> poses;
+            std::vector<float> poseWeights;
+            for (size_t i = 0; i < count; ++i)
+            {
+                if (weights[i] < 0.001f)
+                    continue;
+                SampleClipPose(*samples[i].Clip, phase * samples[i].Clip->Duration, *data->TargetSkeleton, sampled[i]);
+                poses.push_back(&sampled[i]);
+                poseWeights.push_back(weights[i]);
+            }
+            BlendPosesWeighted(poses, poseWeights, pose);
+            ctx.SetOutput(nodeIndex, 0, std::move(pose));
+        }
+
+        // UE's Layered Blend per Bone: "Blend" replaces "Base" from the bone named "Bone" (e.g. "spine_02") down its whole
+        // branch, by "Alpha" -- upper body from one animation, legs from another. "BlendDepth" > 0 fades in over that many
+        // bones down the branch (1 = full weight right at the bone). An empty or unknown bone blends the whole pose.
+        struct LayeredBlendMask
+        {
+            const Skeleton* ForSkeleton = nullptr;
+            std::string Bone;
+            int32_t Depth = -1;
+            std::vector<float> Weights; // per node, at Alpha 1
+        };
+
+        void EvaluateLayeredBlend(GraphEvalContext& ctx, uint32_t nodeIndex)
+        {
+            auto* data = static_cast<AnimGraphEvalData*>(ctx.UserData);
+            AnimPose base = ctx.GetInput<AnimPose>(nodeIndex, 0);
+            AnimPose blend = ctx.GetInput<AnimPose>(nodeIndex, 1);
+            const float alpha = glm::clamp(ctx.GetInput<float>(nodeIndex, 2), 0.0f, 1.0f);
+            if (base.LocalTransforms.empty() || blend.LocalTransforms.empty() || !data || !data->TargetSkeleton)
+            {
+                ctx.SetOutput(nodeIndex, 0, base.LocalTransforms.empty() ? std::move(blend) : std::move(base));
+                return;
+            }
+
+            const std::string bone = ctx.GetProperty<std::string>(nodeIndex, "Bone", std::string());
+            const int32_t depth = std::max(ctx.GetProperty<int32_t>(nodeIndex, "BlendDepth", 0), 0);
+            LayeredBlendMask& mask = ctx.GetState<LayeredBlendMask>(nodeIndex);
+            if (mask.ForSkeleton != data->TargetSkeleton || mask.Bone != bone || mask.Depth != depth)
+            {
+                mask.ForSkeleton = data->TargetSkeleton;
+                mask.Bone = bone;
+                mask.Depth = depth;
+                const Skeleton& skeleton = *data->TargetSkeleton;
+                const Node* root = nullptr;
+                for (const Node* node : skeleton.AllNodes)
+                {
+                    if (node && !bone.empty() && node->Name == bone)
+                    {
+                        root = node;
+                        break;
+                    }
+                }
+                mask.Weights.assign(skeleton.AllNodes.size(), root ? 0.0f : 1.0f);
+                if (root)
+                {
+                    auto mark = [&](auto& self, const Node* node, int32_t level) -> void
+                    {
+                        if (node->Index >= 0 && node->Index < static_cast<int32_t>(mask.Weights.size()))
+                            mask.Weights[node->Index] = depth > 0 ? std::min(1.0f, float(level + 1) / float(depth)) : 1.0f;
+                        for (const Node* child : node->Children)
+                            self(self, child, level + 1);
+                    };
+                    mark(mark, root, 0);
+                }
+            }
+
+            std::vector<float> weights = mask.Weights;
+            for (float& weight : weights)
+                weight *= alpha;
+            AnimPose out;
+            BlendPosesPerNode(base, blend, weights, out);
+            ctx.SetOutput(nodeIndex, 0, std::move(out));
+        }
+
+        // UE's Apply Additive: "Additive" relative to "Reference" put on top of "Base", by "Alpha" (breathing, aim offsets,
+        // leaning, hit reactions over any base animation). "Reference" unconnected = the skeleton's rest pose; for an additive
+        // clip made from a normal one, wire the same clip at time 0 (a Clip node with Speed 0) into it.
+        void EvaluateApplyAdditive(GraphEvalContext& ctx, uint32_t nodeIndex)
+        {
+            auto* data = static_cast<AnimGraphEvalData*>(ctx.UserData);
+            AnimPose base = ctx.GetInput<AnimPose>(nodeIndex, 0);
+            AnimPose additive = ctx.GetInput<AnimPose>(nodeIndex, 1);
+            AnimPose reference = ctx.GetInput<AnimPose>(nodeIndex, 2);
+            const float alpha = ctx.GetInput<float>(nodeIndex, 3);
+            if (base.LocalTransforms.empty() || additive.LocalTransforms.empty() || !data || !data->TargetSkeleton)
+            {
+                ctx.SetOutput(nodeIndex, 0, std::move(base));
+                return;
+            }
+            if (reference.LocalTransforms.empty())
+                reference.ResetToRestPose(*data->TargetSkeleton);
+            AnimPose out;
+            ApplyAdditivePose(base, additive, reference, alpha, out);
+            ctx.SetOutput(nodeIndex, 0, std::move(out));
+        }
+
+        // UE's Slot: passes "Source" through, unless a montage plays in the slot named "SlotName" (AnimationGraphInstance::
+        // PlayMontage, scripts' Animator.PlayMontage): then the montage's clip over it, blended by the montage's weight.
+        void EvaluateSlot(GraphEvalContext& ctx, uint32_t nodeIndex)
+        {
+            auto* data = static_cast<AnimGraphEvalData*>(ctx.UserData);
+            AnimPose source = ctx.GetInput<AnimPose>(nodeIndex, 0);
+            if (!data || !data->TargetSkeleton || !data->Montages || data->Montages->empty())
+            {
+                ctx.SetOutput(nodeIndex, 0, std::move(source));
+                return;
+            }
+            const std::string slot = ctx.GetProperty<std::string>(nodeIndex, "SlotName", std::string("DefaultSlot"));
+            const auto montage = data->Montages->find(slot);
+            if (montage == data->Montages->end() || !montage->second.Clip || montage->second.Weight <= 0.0f)
+            {
+                ctx.SetOutput(nodeIndex, 0, std::move(source));
+                return;
+            }
+            AnimPose montagePose;
+            SampleClipPose(*montage->second.Clip, montage->second.Time, *data->TargetSkeleton, montagePose);
+            if (source.LocalTransforms.empty())
+            {
+                ctx.SetOutput(nodeIndex, 0, std::move(montagePose));
+                return;
+            }
+            AnimPose out;
+            BlendPoses(source, montagePose, montage->second.Weight, out);
+            ctx.SetOutput(nodeIndex, 0, std::move(out));
         }
 
         // Reads one of the instance's graph parameters onto a Float pin: the parameter is named by the string
@@ -378,6 +613,72 @@ namespace Nox
             /* PropertyRanges    */ {},
             /* Evaluate          */ &EvaluateBlendSpace1D
         });
+        {
+            // Interleaved per sample so the editor shows each clip with its point. A locomotion layout to start from:
+            // idle in the middle, forward walk / run up, back down, strafes left and right, forward diagonals.
+            const std::array<glm::vec2, 8> layout = { glm::vec2(0, 0), glm::vec2(0, 1), glm::vec2(0, 2), glm::vec2(0, -1),
+                                                      glm::vec2(-1, 0), glm::vec2(1, 0), glm::vec2(-1, 1), glm::vec2(1, 1) };
+            std::vector<std::pair<std::string, NodeGraphValue>> properties = { { "X", 0.0f }, { "Y", 0.0f } };
+            std::vector<std::pair<std::string, std::string>> clipHints;
+            for (int i = 0; i < 8; ++i)
+            {
+                const std::string index = std::to_string(i);
+                properties.push_back({ "Clip" + index, uint64_t(0) });
+                properties.push_back({ "X" + index, layout[i].x });
+                properties.push_back({ "Y" + index, layout[i].y });
+                clipHints.push_back({ "Clip" + index, "AssetType::AnimationSequence" });
+            }
+            properties.push_back({ "Loop", true });
+            properties.push_back({ "Speed", 1.0f });
+            NodeTypeRegistry::Register({
+                /* TypeName          */ "BlendSpace2D",
+                /* Domain            */ kAnimationGraphDomain,
+                /* Category          */ "Blending",
+                /* Inputs            */ { { "X", "Float" }, { "Y", "Float" } },
+                /* Outputs           */ { { "Pose", "Pose" } },
+                /* DefaultProperties */ { properties.begin(), properties.end() },
+                /* PropertyAssetTypeHints */ { clipHints.begin(), clipHints.end() },
+                /* PropertyRanges    */ {},
+                /* Evaluate          */ &EvaluateBlendSpace2D
+            });
+        }
+
+        NodeTypeRegistry::Register({
+            /* TypeName          */ "LayeredBlend",
+            /* Domain            */ kAnimationGraphDomain,
+            /* Category          */ "Blending",
+            /* Inputs            */ { { "Base", "Pose" }, { "Blend", "Pose" }, { "Alpha", "Float" } },
+            /* Outputs           */ { { "Pose", "Pose" } },
+            /* DefaultProperties */ { { "Alpha", 1.0f }, { "Bone", std::string("spine_02") }, { "BlendDepth", int32_t(0) } },
+            /* PropertyAssetTypeHints */ {},
+            /* PropertyRanges    */ { { "Alpha", { 0.0f, 1.0f } } },
+            /* Evaluate          */ &EvaluateLayeredBlend
+        });
+
+        NodeTypeRegistry::Register({
+            /* TypeName          */ "ApplyAdditive",
+            /* Domain            */ kAnimationGraphDomain,
+            /* Category          */ "Blending",
+            /* Inputs            */ { { "Base", "Pose" }, { "Additive", "Pose" }, { "Reference", "Pose" }, { "Alpha", "Float" } },
+            /* Outputs           */ { { "Pose", "Pose" } },
+            /* DefaultProperties */ { { "Alpha", 1.0f } },
+            /* PropertyAssetTypeHints */ {},
+            /* PropertyRanges    */ { { "Alpha", { 0.0f, 1.0f } } },
+            /* Evaluate          */ &EvaluateApplyAdditive
+        });
+
+        NodeTypeRegistry::Register({
+            /* TypeName          */ "Slot",
+            /* Domain            */ kAnimationGraphDomain,
+            /* Category          */ "Montages",
+            /* Inputs            */ { { "Source", "Pose" } },
+            /* Outputs           */ { { "Pose", "Pose" } },
+            /* DefaultProperties */ { { "SlotName", std::string("DefaultSlot") } },
+            /* PropertyAssetTypeHints */ {},
+            /* PropertyRanges    */ {},
+            /* Evaluate          */ &EvaluateSlot
+        });
+
         NodeTypeRegistry::Register({
             /* TypeName          */ "GetParameter",
             /* Domain            */ kAnimationGraphDomain,

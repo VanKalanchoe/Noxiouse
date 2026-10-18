@@ -23,4 +23,9 @@ public abstract class EntityBehaviour
     protected virtual void OnUpdate(float deltaTime) { }
     protected virtual void OnDestroy() { }
     protected virtual void OnAfterReload() { }
+    /// <summary>
+    /// An animation notify this entity's animator crossed this frame (a named moment of a clip, set in the clip's window:
+    /// "FootL", "Hit"), from clips, blend spaces and montages.
+    /// </summary>
+    protected virtual void OnAnimationEvent(string name) { }
 }
