@@ -581,6 +581,47 @@ namespace Nox
             out << YAML::EndMap;
         }
 
+        if (entity.HasComponent<ParticleEmitterComponent>())
+        {
+            const auto& emitter = entity.GetComponent<ParticleEmitterComponent>();
+            static const char* shapeNames[] = { "Point", "Sphere", "Box", "Cone" };
+            out << YAML::Key << "ParticleEmitterComponent";
+            out << YAML::BeginMap;
+            out << YAML::Key << "Emitting" << YAML::Value << emitter.Emitting;
+            out << YAML::Key << "Looping" << YAML::Value << emitter.Looping;
+            out << YAML::Key << "Duration" << YAML::Value << emitter.Duration;
+            out << YAML::Key << "SpawnRate" << YAML::Value << emitter.SpawnRate;
+            out << YAML::Key << "Burst" << YAML::Value << emitter.Burst;
+            out << YAML::Key << "MaxParticles" << YAML::Value << emitter.MaxParticles;
+            out << YAML::Key << "Shape" << YAML::Value << shapeNames[static_cast<int>(emitter.Shape)];
+            out << YAML::Key << "ShapeSize" << YAML::Value << emitter.ShapeSize;
+            out << YAML::Key << "ConeAngle" << YAML::Value << emitter.ConeAngle;
+            out << YAML::Key << "LifetimeMin" << YAML::Value << emitter.LifetimeMin;
+            out << YAML::Key << "LifetimeMax" << YAML::Value << emitter.LifetimeMax;
+            out << YAML::Key << "Velocity" << YAML::Value << emitter.Velocity;
+            out << YAML::Key << "VelocityRandom" << YAML::Value << emitter.VelocityRandom;
+            out << YAML::Key << "Gravity" << YAML::Value << emitter.Gravity;
+            out << YAML::Key << "Drag" << YAML::Value << emitter.Drag;
+            out << YAML::Key << "SpinMin" << YAML::Value << emitter.SpinMin;
+            out << YAML::Key << "SpinMax" << YAML::Value << emitter.SpinMax;
+            out << YAML::Key << "SizeStart" << YAML::Value << emitter.SizeStart;
+            out << YAML::Key << "SizeEnd" << YAML::Value << emitter.SizeEnd;
+            out << YAML::Key << "SizeRandom" << YAML::Value << emitter.SizeRandom;
+            out << YAML::Key << "ColorStart" << YAML::Value << emitter.ColorStart;
+            out << YAML::Key << "ColorEnd" << YAML::Value << emitter.ColorEnd;
+            out << YAML::Key << "Intensity" << YAML::Value << emitter.Intensity;
+            out << YAML::Key << "Texture" << YAML::Value << emitter.Texture;
+            out << YAML::Key << "FlipbookColumns" << YAML::Value << emitter.FlipbookColumns;
+            out << YAML::Key << "FlipbookRows" << YAML::Value << emitter.FlipbookRows;
+            out << YAML::Key << "FlipbookFPS" << YAML::Value << emitter.FlipbookFPS;
+            out << YAML::Key << "Blend" << YAML::Value << (emitter.Blend == ParticleBlend::Additive ? "Additive" : "Alpha");
+            out << YAML::Key << "Lit" << YAML::Value << emitter.Lit;
+            out << YAML::Key << "SoftParticles" << YAML::Value << emitter.SoftParticles;
+            out << YAML::Key << "SoftDistance" << YAML::Value << emitter.SoftDistance;
+            out << YAML::Key << "LocalSpace" << YAML::Value << emitter.LocalSpace;
+            out << YAML::EndMap;
+        }
+
         if (entity.HasComponent<CameraComponent>())
         {
             out << YAML::Key << "CameraComponent";
@@ -1398,6 +1439,53 @@ namespace Nox
                 player.PlayOnStart = timelinePlayer["PlayOnStart"].as<bool>();
             if (timelinePlayer["Speed"])
                 player.Speed = timelinePlayer["Speed"].as<float>();
+        }
+
+        if (auto particleEmitter = entity["ParticleEmitterComponent"])
+        {
+            auto& emitter = deserializedEntity.AddComponent<ParticleEmitterComponent>();
+            auto read = [&particleEmitter](const char* key, auto& value)
+            {
+                if (particleEmitter[key])
+                    value = particleEmitter[key].as<std::remove_reference_t<decltype(value)>>();
+            };
+            read("Emitting", emitter.Emitting);
+            read("Looping", emitter.Looping);
+            read("Duration", emitter.Duration);
+            read("SpawnRate", emitter.SpawnRate);
+            read("Burst", emitter.Burst);
+            read("MaxParticles", emitter.MaxParticles);
+            if (particleEmitter["Shape"])
+            {
+                const std::string shape = particleEmitter["Shape"].as<std::string>();
+                emitter.Shape = shape == "Sphere" ? ParticleShape::Sphere : shape == "Box" ? ParticleShape::Box : shape == "Cone" ? ParticleShape::Cone : ParticleShape::Point;
+            }
+            read("ShapeSize", emitter.ShapeSize);
+            read("ConeAngle", emitter.ConeAngle);
+            read("LifetimeMin", emitter.LifetimeMin);
+            read("LifetimeMax", emitter.LifetimeMax);
+            read("Velocity", emitter.Velocity);
+            read("VelocityRandom", emitter.VelocityRandom);
+            read("Gravity", emitter.Gravity);
+            read("Drag", emitter.Drag);
+            read("SpinMin", emitter.SpinMin);
+            read("SpinMax", emitter.SpinMax);
+            read("SizeStart", emitter.SizeStart);
+            read("SizeEnd", emitter.SizeEnd);
+            read("SizeRandom", emitter.SizeRandom);
+            read("ColorStart", emitter.ColorStart);
+            read("ColorEnd", emitter.ColorEnd);
+            read("Intensity", emitter.Intensity);
+            read("Texture", emitter.Texture);
+            read("FlipbookColumns", emitter.FlipbookColumns);
+            read("FlipbookRows", emitter.FlipbookRows);
+            read("FlipbookFPS", emitter.FlipbookFPS);
+            if (particleEmitter["Blend"])
+                emitter.Blend = particleEmitter["Blend"].as<std::string>() == "Alpha" ? ParticleBlend::Alpha : ParticleBlend::Additive;
+            read("Lit", emitter.Lit);
+            read("SoftParticles", emitter.SoftParticles);
+            read("SoftDistance", emitter.SoftDistance);
+            read("LocalSpace", emitter.LocalSpace);
         }
 
         auto animatorComponent = entity["AnimatorComponent"];

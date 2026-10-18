@@ -137,6 +137,10 @@ namespace Nox
         void ApplyTimeline(Entity player, const Timeline& timeline, float time);
         void SubmitLights();
         void Submit2D();
+        // Particle emitters (ParticleSystem.h): simulated every frame the scene steps (the editor's too), restarted by Play / Simulate.
+        void StartParticles();
+        void UpdateParticles();
+        void SubmitParticles();
 
         const std::vector<glm::mat4>* GetBoneTransforms(entt::entity entity, const glm::mat4& meshWorld);
 

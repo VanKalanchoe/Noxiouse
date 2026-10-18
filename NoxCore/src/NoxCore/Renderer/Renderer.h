@@ -284,6 +284,19 @@ namespace Nox
         // A mesh's own (embedded) material data changed in place (DynamicMeshes::SetColor): every GPU material is packed again.
         static void MarkMeshMaterialsChanged();
 
+        // Per frame, from the scene's submit systems (one call at a time): an emitter's particles, drawn after the forward pass
+        // (Particles.slang; docs/Hybrid_Renderer_Plan_2026-10.md §6). Alpha-blended emitters are sorted back to front here.
+        struct ParticleBatchSettings
+        {
+            uint32_t TextureSlot = UINT32_MAX; // the flipbook sheet's bindless slot, UINT32_MAX: soft round dots
+            uint32_t FlipbookColumns = 1;
+            uint32_t FlipbookRows = 1;
+            bool Additive = true;
+            bool Lit = false;
+            bool Soft = true;
+            float SoftDistance = 0.0f;         // world units
+        };
+        void SubmitParticles(const ParticleBatchSettings& settings, std::span<const shaderio::GpuParticle> particles);
         void SubmitLight(const glm::mat4& transform, const DirectionalLightComponent& light);
         void SubmitLight(const glm::mat4& transform, const PointLightComponent& light);
         void SubmitLight(const glm::mat4& transform, const SpotLightComponent& light);
@@ -714,6 +727,7 @@ namespace Nox
         void createPostProcessPipeline(bool forceCompile = false);
         void createAutoExposurePipelines(bool forceCompile = false);
         void createColorPyramidPipelines(bool forceCompile = false);
+        void createParticlePipeline(bool forceCompile = false);
         // Render graph texture inspection
         void createTextureInspectPipeline(bool forceCompile = false);
         // GPU instance culling (InstanceCulling.slang: cull, count, offset, write, late) and the depth pyramid build
@@ -801,6 +815,7 @@ namespace Nox
         void addPathTracerPasses();
         void addDeferredLightingPass();
         void addForward3DPass();
+        void addParticlePass();
         // Lit transparent draws whose material transmits (glass) in this frame's draw list.
         bool hasTransmissiveDraws() const;
         // The skybox push constants of the sun's disc (procedural sky), without the uniforms and cubemap.
@@ -916,6 +931,20 @@ namespace Nox
         std::unique_ptr<NRI::Pipeline> m_autoExposureReducePipeline;
         // ColorPyramid.slang: the refraction source of glass (copy, downsample).
         std::unique_ptr<NRI::Pipeline> m_colorPyramidCopyPipeline;
+        // Particles (SubmitParticles): this frame's, uploaded into a host-visible buffer per frame in flight.
+        struct ParticleBatch
+        {
+            ParticleBatchSettings Settings;
+            uint32_t First = 0;
+            uint32_t Count = 0;
+            float Distance = 0.0f; // of its center from the camera: emitters draw far to near
+        };
+        std::vector<shaderio::GpuParticle> m_particles;
+        std::vector<ParticleBatch> m_particleBatches;
+        std::vector<std::unique_ptr<NRI::Buffer>> m_particleBuffers;
+        std::vector<void*> m_particleBuffersMapped;
+        uint64_t m_particleBufferCapacity = 0;
+        std::unique_ptr<NRI::Pipeline> m_particlePipeline;
         std::unique_ptr<NRI::Pipeline> m_colorPyramidDownsamplePipeline;
         bool m_refractionEnabled = true;
         bool m_rtRefractionEnabled = true;
@@ -1286,6 +1315,7 @@ namespace Nox
         bool m_skinnedVertexHistoryValid = false;
 
         void updateBoneBuffer(uint32_t currentImage);
+        void updateParticleBuffer(uint32_t currentImage);
         void createBoneBuffer(uint64_t size);
         void createSkinningBuffers(uint64_t skinnedVertexSize, uint64_t workItemSize);
 

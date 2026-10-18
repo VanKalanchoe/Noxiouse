@@ -766,6 +766,95 @@ namespace Nox
         cmd.setDepthWriteEnable(true);
     }
 
+    void Renderer::addParticlePass()
+    {
+        if (m_particleBatches.empty() || !m_particlePipeline || m_particleBuffers.size() <= frameIndex || !m_particleBuffers[frameIndex] ||
+            m_frame.renderExtent.width == 0 || m_frame.renderExtent.height == 0)
+            return;
+        FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
+
+        // Emitters far to near (each alpha-blended one is sorted inside already, SubmitParticles).
+        std::vector<ParticleBatch> batches = m_particleBatches;
+        std::stable_sort(batches.begin(), batches.end(), [](const ParticleBatch& a, const ParticleBatch& b) { return a.Distance > b.Distance; });
+        bool lit = false;
+        for (const ParticleBatch& batch : batches)
+            lit |= batch.Settings.Lit;
+        const bool shadows = lit && m_rayTracingEnabled && m_rayTracingShadows;
+        const uint64_t particles = m_particleBuffers[frameIndex]->getDeviceAddress();
+        const uint64_t uniforms = m_uniformBuffers[frameIndex]->getDeviceAddress();
+
+        m_renderGraph.AddPass("Particles", RGPassFlags::Raster,
+            [&](RGBuilder& builder)
+            {
+                builder.ColorTarget(resources.HDRScene, NRI::LoadOP::load, NRI::StoreOP::store);
+                builder.Read(resources.Depth); // each fragment tests and fades against it
+                if (lit)
+                {
+                    if (m_frame.ddgiAdded)
+                    {
+                        builder.Read(resources.DDGIIrradiance[m_frame.ddgiWriteIndex]);
+                        builder.Read(resources.DDGIDistance[m_frame.ddgiWriteIndex]);
+                    }
+                    if (shadows && resources.TLAS.IsValid())
+                    {
+                        builder.Read(resources.TLAS, RGBufferAccess::AccelerationStructureRead);
+                        ReadGpuScene(builder, resources);
+                    }
+                }
+                builder.SetRenderArea(m_frame.renderExtent);
+            },
+            [this, res = &resources, batches = std::move(batches), particles, uniforms, shadows](RGPassContext& context)
+            {
+                NRI::CommandBuffer& cmd = context.Cmd();
+                cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_particlePipeline);
+                cmd.setCullMode(NRI::CullMode::None);
+                cmd.setDepthTestEnable(false);
+                cmd.setDepthWriteEnable(false);
+                cmd.setColorBlendEnable(0, true);
+                cmd.setColorWriteMask(0, NRI::ColorComponent::All);
+                const uint32_t depthSlot = context.Slot(res->Depth);
+
+                // Premultiplied colors: additive adds them and keeps what is behind; alpha covers it by their alpha.
+                const NRI::ColorBlendEquation additive
+                {
+                    .srcColorBlendFactor = NRI::BlendFactor::One,
+                    .dstColorBlendFactor = NRI::BlendFactor::One,
+                    .colorBlendOp = NRI::BlendOp::Add,
+                    .srcAlphaBlendFactor = NRI::BlendFactor::Zero,
+                    .dstAlphaBlendFactor = NRI::BlendFactor::One,
+                    .alphaBlendOp = NRI::BlendOp::Add,
+                };
+                const NRI::ColorBlendEquation covering
+                {
+                    .srcColorBlendFactor = NRI::BlendFactor::One,
+                    .dstColorBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha,
+                    .colorBlendOp = NRI::BlendOp::Add,
+                    .srcAlphaBlendFactor = NRI::BlendFactor::One,
+                    .dstAlphaBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha,
+                    .alphaBlendOp = NRI::BlendOp::Add,
+                };
+                for (const ParticleBatch& batch : batches)
+                {
+                    cmd.setColorBlendEquation(0, batch.Settings.Additive ? additive : covering);
+                    shaderio::PushConstantParticles push{};
+                    push.matrixReference = uniforms;
+                    push.particlesReference = particles;
+                    push.firstParticle = batch.First;
+                    push.particleCount = batch.Count;
+                    push.textureIndex = batch.Settings.TextureSlot;
+                    push.flipbookColumns = std::max(batch.Settings.FlipbookColumns, 1u);
+                    push.flipbookRows = std::max(batch.Settings.FlipbookRows, 1u);
+                    push.flags = (batch.Settings.Lit ? shaderio::PARTICLE_LIT : 0u) | (batch.Settings.Soft ? shaderio::PARTICLE_SOFT : 0u) |
+                                 (batch.Settings.Additive ? shaderio::PARTICLE_ADDITIVE : 0u) | (batch.Settings.Lit && shadows ? shaderio::PARTICLE_SHADOW : 0u);
+                    push.depthTextureIndex = depthSlot;
+                    push.softDistance = batch.Settings.SoftDistance;
+                    cmd.pushData(&push, sizeof(push));
+                    cmd.drawMeshTasks((batch.Count + 31) / 32, 1, 1);
+                }
+                cmd.setColorBlendEnable(0, false);
+            });
+    }
+
     void Renderer::addForward3DPass()
     {
         FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();

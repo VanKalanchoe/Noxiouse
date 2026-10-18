@@ -389,6 +389,93 @@ namespace Nox
         TimelinePlayerComponent(const TimelinePlayerComponent&) = default;
     };
 
+    // A particle emitter (docs/Hybrid_Renderer_Plan_2026-10.md §6, V1 / V2): particles spawned around the entity and simulated on
+    // the CPU (Scene/ParticleSystem.h: gravity, drag, spin), drawn as camera-facing quads -- a texture (a flipbook sheet of
+    // columns x rows frames) or soft round dots -- added (fire, sparks) or alpha blended (smoke, dust), optionally lit by the
+    // scene's lights and environment, faded where they meet geometry. Runs in Edit, Simulate and Play.
+    // Lengths are in meters (scaled by the project's world unit), angles in degrees.
+    enum class ParticleShape : uint8_t
+    {
+        Point,
+        Sphere, // inside a sphere of ShapeSize.x radius
+        Box,    // inside a box of ShapeSize half extents
+        Cone    // from a disc of ShapeSize.x radius, directions within ConeAngle of the emitter's +Y
+    };
+
+    enum class ParticleBlend : uint8_t
+    {
+        Additive, // light added (fire, sparks, magic): order-free
+        Alpha     // covering (smoke, dust): sorted back to front
+    };
+
+    // What an emitter is doing (runtime only, never saved).
+    struct ParticleSimulation
+    {
+        struct Particle
+        {
+            glm::vec3 Position{ 0.0f }; // world units: world space, or the emitter's space (LocalSpace)
+            float Age = 0.0f;
+            glm::vec3 Velocity{ 0.0f }; // world units per second
+            float Lifetime = 1.0f;
+            float Rotation = 0.0f;      // radians
+            float Spin = 0.0f;          // radians per second
+            float SizeScale = 1.0f;     // random per particle (SizeRandom)
+            float Variation = 0.0f;     // random per particle in [0, 1): the flipbook's start frame, the color pick
+        };
+        std::vector<Particle> Particles;
+        float Time = 0.0f;              // into the current loop / the one shot
+        float SpawnCarry = 0.0f;        // a fraction of a particle owed by the spawn rate
+        uint32_t Random = 0x9E3779B9u;
+        bool BurstDone = false;
+        uint32_t PendingBurst = 0;      // Emit(count) from scripts, spawned on the next update
+        bool Started = false;
+    };
+
+    struct ParticleEmitterComponent
+    {
+        bool Emitting = true;           // spawning (particles already out live on either way)
+        bool Looping = true;            // spawn on after Duration, a new burst each loop; else a one-shot of Duration seconds
+        float Duration = 5.0f;          // seconds
+        float SpawnRate = 30.0f;        // particles per second
+        uint32_t Burst = 0;             // spawned at once when a loop starts
+        uint32_t MaxParticles = 1000;
+
+        ParticleShape Shape = ParticleShape::Point;
+        glm::vec3 ShapeSize{ 0.25f, 0.25f, 0.25f };
+        float ConeAngle = 25.0f;
+
+        float LifetimeMin = 1.0f;       // seconds
+        float LifetimeMax = 2.0f;
+        glm::vec3 Velocity{ 0.0f, 1.0f, 0.0f };        // m/s in the emitter's space (a cone shoots along its directions at this length)
+        glm::vec3 VelocityRandom{ 0.3f, 0.3f, 0.3f };  // +/- per axis
+        float Gravity = 0.0f;           // multiples of Earth's (1 falls, -0.2 rises like hot smoke)
+        float Drag = 0.0f;              // per second
+        float SpinMin = 0.0f;           // degrees per second
+        float SpinMax = 0.0f;
+
+        float SizeStart = 0.2f;         // meters, over each particle's life
+        float SizeEnd = 0.4f;
+        float SizeRandom = 0.0f;        // 0..1: each particle's size varies by up to this fraction
+        glm::vec4 ColorStart{ 1.0f, 1.0f, 1.0f, 1.0f }; // linear color and opacity over life
+        glm::vec4 ColorEnd{ 1.0f, 1.0f, 1.0f, 0.0f };
+        float Intensity = 1.0f;         // brightness multiplier (HDR: above 1 glows with bloom)
+
+        AssetHandle Texture = 0;        // none: soft round dots
+        uint32_t FlipbookColumns = 1;
+        uint32_t FlipbookRows = 1;
+        float FlipbookFPS = 0.0f;       // 0: the sheet's frames spread over each particle's life
+        ParticleBlend Blend = ParticleBlend::Additive;
+        bool Lit = false;               // shaded by the scene's lights (the sun's shadow too) and environment, else emissive
+        bool SoftParticles = true;      // fade out where they meet geometry instead of cutting into it
+        float SoftDistance = 0.3f;      // meters
+        bool LocalSpace = false;        // particles move with the entity
+
+        ParticleSimulation Simulation;
+
+        ParticleEmitterComponent() = default;
+        ParticleEmitterComponent(const ParticleEmitterComponent&) = default;
+    };
+
     struct SpriteRendererComponent
     {
         glm::vec4 Color{ 1.0f, 1.0f, 1.0f, 1.0f };
@@ -622,7 +709,7 @@ namespace Nox
     using AllComponents = 
         ComponentGroup<TransformComponent, WorldTransformComponent, RelationshipComponent, DirtyTransformComponent, FolderComponent,
         MeshComponent, MaterialComponent, ModelInstanceComponent, ModelNodeComponent, PrefabInstanceComponent, PrefabNodeComponent, DirectionalLightComponent, PointLightComponent, SpotLightComponent, EnvironmentLightComponent, AnimatorComponent,
-        TimelinePlayerComponent, SpriteRendererComponent,
+        TimelinePlayerComponent, ParticleEmitterComponent, SpriteRendererComponent,
             CircleRendererComponent, CameraComponent, ScriptComponent,
             /*NativeScriptComponent,*/ RigidBody2DComponent, BoxCollider2DComponent,
             CircleCollider2DComponent, RigidBody3DComponent, BoxCollider3DComponent,

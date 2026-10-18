@@ -14,6 +14,7 @@
 #include "NoxCore/Core/WorldUnits.h"
 #include "NoxCore/Scene/EntityBounds.h"
 #include "NoxCore/Scene/ModelInstance.h"
+#include "NoxCore/Scene/ParticleSystem.h"
 #include "NoxCore/Scene/Prefab.h"
 #include "NoxCore/Scene/PrefabInstance.h"
 #include "NoxCore/Core/Log.h"
@@ -885,6 +886,7 @@ namespace Nox
 
             DisplayAddComponentEntry<AnimatorComponent>("Animator");
             DisplayAddComponentEntry<TimelinePlayerComponent>("Timeline Player");
+            DisplayAddComponentEntry<ParticleEmitterComponent>("Particle Emitter");
 
             DisplayAddComponentEntry<CameraComponent>("Camera");
             DisplayAddComponentEntry<ScriptComponent>("Script");
@@ -2194,6 +2196,109 @@ namespace Nox
             ImGui::Text("Texture");
 
             ImGui::DragFloat("Tiling Factor", &component.TilingFactor, 0.1f, 0.0f, 100.0f);
+        });
+
+        DrawComponent<ParticleEmitterComponent>("Particle Emitter", entity, [](auto& component)
+        {
+            ImGui::Text("%zu particles", component.Simulation.Particles.size());
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Restart"))
+                ParticleSystem::Restart(component);
+            ImGui::SetItemTooltip("Clears the particles and starts the emitter over (its burst again). Play and Simulate restart every emitter.");
+
+            ImGui::SeparatorText("Emission");
+            ImGui::Checkbox("Emitting", &component.Emitting);
+            ImGui::SameLine();
+            ImGui::Checkbox("Looping", &component.Looping);
+            ImGui::DragFloat("Duration", &component.Duration, 0.05f, 0.01f, 600.0f, "%.2f s");
+            ImGui::SetItemTooltip("A loop's length (a new burst each loop), or the one shot's when Looping is off.");
+            ImGui::DragFloat("Rate", &component.SpawnRate, 0.5f, 0.0f, 100000.0f, "%.1f / s");
+            ImGui::DragScalar("Burst", ImGuiDataType_U32, &component.Burst, 1.0f);
+            uint32_t minParticles = 1, maxParticles = 1000000;
+            ImGui::DragScalar("Max Particles", ImGuiDataType_U32, &component.MaxParticles, 10.0f, &minParticles, &maxParticles);
+
+            ImGui::SeparatorText("Shape");
+            const char* shapeNames[] = { "Point", "Sphere", "Box", "Cone" };
+            int shape = static_cast<int>(component.Shape);
+            if (ImGui::Combo("Shape", &shape, shapeNames, IM_ARRAYSIZE(shapeNames)))
+                component.Shape = static_cast<ParticleShape>(shape);
+            if (component.Shape == ParticleShape::Box)
+                ImGui::DragFloat3("Half Extents", glm::value_ptr(component.ShapeSize), 0.01f, 0.0f, 10000.0f, "%.2f m");
+            else if (component.Shape != ParticleShape::Point)
+                ImGui::DragFloat("Radius", &component.ShapeSize.x, 0.01f, 0.0f, 10000.0f, "%.2f m");
+            if (component.Shape == ParticleShape::Cone)
+                ImGui::DragFloat("Cone Angle", &component.ConeAngle, 0.5f, 0.0f, 180.0f, "%.1f deg");
+
+            ImGui::SeparatorText("Motion");
+            ImGui::DragFloatRange2("Lifetime", &component.LifetimeMin, &component.LifetimeMax, 0.05f, 0.01f, 600.0f, "%.2f s", "%.2f s");
+            ImGui::DragFloat3("Velocity", glm::value_ptr(component.Velocity), 0.01f, -1000.0f, 1000.0f, "%.2f m/s");
+            ImGui::SetItemTooltip("In the emitter's space (+Y is its up). A cone shoots along its directions at this speed.");
+            ImGui::DragFloat3("Velocity Random", glm::value_ptr(component.VelocityRandom), 0.01f, 0.0f, 1000.0f, "%.2f m/s");
+            ImGui::DragFloat("Gravity", &component.Gravity, 0.01f, -10.0f, 10.0f, "%.2f g");
+            ImGui::SetItemTooltip("Multiples of Earth's gravity: 1 falls like a stone, a little below 0 rises like hot smoke.");
+            ImGui::DragFloat("Drag", &component.Drag, 0.01f, 0.0f, 100.0f, "%.2f / s");
+            ImGui::DragFloatRange2("Spin", &component.SpinMin, &component.SpinMax, 1.0f, -3600.0f, 3600.0f, "%.0f deg/s", "%.0f deg/s");
+            ImGui::Checkbox("Local Space", &component.LocalSpace);
+            ImGui::SetItemTooltip("Particles move with the entity (a jet's flame). Off: they stay where they were spawned (a trail of smoke).");
+
+            ImGui::SeparatorText("Look");
+            ImGui::DragFloat("Size Start", &component.SizeStart, 0.005f, 0.0f, 1000.0f, "%.3f m");
+            ImGui::DragFloat("Size End", &component.SizeEnd, 0.005f, 0.0f, 1000.0f, "%.3f m");
+            ImGui::SliderFloat("Size Random", &component.SizeRandom, 0.0f, 1.0f);
+            ImGui::ColorEdit4("Color Start", glm::value_ptr(component.ColorStart), ImGuiColorEditFlags_Float);
+            ImGui::ColorEdit4("Color End", glm::value_ptr(component.ColorEnd), ImGuiColorEditFlags_Float);
+            ImGui::DragFloat("Intensity", &component.Intensity, 0.05f, 0.0f, 10000.0f);
+            ImGui::SetItemTooltip("Brightness: above 1 the particles glow (bloom).");
+            const char* blendNames[] = { "Additive", "Alpha" };
+            int blend = static_cast<int>(component.Blend);
+            if (ImGui::Combo("Blend", &blend, blendNames, IM_ARRAYSIZE(blendNames)))
+                component.Blend = static_cast<ParticleBlend>(blend);
+            ImGui::SetItemTooltip("Additive: light added (fire, sparks). Alpha: covering what is behind (smoke, dust), sorted back to front.");
+            ImGui::Checkbox("Lit", &component.Lit);
+            ImGui::SetItemTooltip("Shaded by the scene's lights and environment (the sun's shadow with RT shadows on). Off: the color is the light they give.");
+            ImGui::SameLine();
+            ImGui::Checkbox("Soft", &component.SoftParticles);
+            ImGui::SetItemTooltip("Fade out where they meet geometry instead of cutting into it.");
+            if (component.SoftParticles)
+                ImGui::DragFloat("Soft Distance", &component.SoftDistance, 0.01f, 0.0f, 100.0f, "%.2f m");
+
+            // The flipbook sheet: a texture dropped from the Content Browser (none: soft round dots).
+            std::string label = "Soft Dot";
+            if (component.Texture != 0)
+            {
+                label = AssetManager::IsAssetHandleValid(component.Texture) ? AssetManager::GetMetadata(component.Texture).FilePath.filename().string() : "Invalid";
+                if (label.empty())
+                    label = "Texture";
+            }
+            ImGui::Button(label.c_str(), ImVec2(glm::max(100.0f, ImGui::CalcTextSize(label.c_str()).x + 20.0f), 0.0f));
+            if (ImGui::BeginDragDropTarget())
+            {
+                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEM"))
+                {
+                    const AssetHandle handle = *(AssetHandle*)payload->Data;
+                    if (AssetManager::GetAssetType(handle) == AssetType::Texture2D)
+                        component.Texture = handle;
+                    else
+                        NOX_CORE_WARN("A particle sheet must be a texture");
+                }
+                ImGui::EndDragDropTarget();
+            }
+            if (component.Texture != 0)
+            {
+                ImGui::SameLine();
+                if (ImGui::SmallButton("X"))
+                    component.Texture = 0;
+            }
+            ImGui::SameLine();
+            ImGui::Text("Texture");
+            if (component.Texture != 0)
+            {
+                uint32_t minCells = 1, maxCells = 64;
+                ImGui::DragScalar("Columns", ImGuiDataType_U32, &component.FlipbookColumns, 0.1f, &minCells, &maxCells);
+                ImGui::DragScalar("Rows", ImGuiDataType_U32, &component.FlipbookRows, 0.1f, &minCells, &maxCells);
+                ImGui::DragFloat("Frames / s", &component.FlipbookFPS, 0.1f, 0.0f, 240.0f, "%.1f");
+                ImGui::SetItemTooltip("0: the sheet's frames are spread over each particle's life.");
+            }
         });
 
         DrawComponent<CircleRendererComponent>("Circle Renderer", entity, [](auto& component)

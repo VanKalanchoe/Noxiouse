@@ -40,6 +40,11 @@ internal static unsafe class InternalCalls
     private static delegate*<ulong, float> Timeline_GetTime;
     private static delegate*<ulong, float, void> Timeline_SetTime;
     private static delegate*<ulong, float, void> Timeline_SetSpeed;
+    private static delegate*<ulong, uint, void> Particles_Play;
+    private static delegate*<ulong, void> Particles_Stop;
+    private static delegate*<ulong, int, void> Particles_Emit;
+    private static delegate*<ulong, uint> Particles_IsEmitting;
+    private static delegate*<ulong, int> Particles_GetCount;
     private static delegate*<ulong, float, float, float, void> Character_SetMoveVelocity;
     private static delegate*<ulong, float, void> Character_Jump;
     private static delegate*<ulong, uint> Character_IsGrounded;
@@ -199,6 +204,16 @@ internal static unsafe class InternalCalls
     internal static void SetTimelineTime(ulong entityID, float time) => Timeline_SetTime(entityID, time);
 
     internal static void SetTimelineSpeed(ulong entityID, float speed) => Timeline_SetSpeed(entityID, speed);
+
+    internal static void PlayParticles(ulong entityID, bool restart) => Particles_Play(entityID, restart ? 1u : 0u);
+
+    internal static void StopParticles(ulong entityID) => Particles_Stop(entityID);
+
+    internal static void EmitParticles(ulong entityID, int count) => Particles_Emit(entityID, count);
+
+    internal static bool IsEmittingParticles(ulong entityID) => Particles_IsEmitting(entityID) != 0;
+
+    internal static int GetParticleCount(ulong entityID) => Particles_GetCount(entityID);
 
     internal static void SetCharacterMoveVelocity(ulong entityID, Vector3 velocity) =>
         Character_SetMoveVelocity(entityID, velocity.X, velocity.Y, velocity.Z);

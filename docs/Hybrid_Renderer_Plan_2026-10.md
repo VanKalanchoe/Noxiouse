@@ -247,6 +247,33 @@ EmberGen / Blender, meshes for mesh particles, and sometimes baked simulations (
 | V4 | Volumetric clouds: Hillaire-style raymarched cloud layer (weather map + 3D noise), lit by the sky atmosphere of §5 (needs S1-S4), temporal reprojection |
 | V5 | Volumes from files (OpenVDB) for explosions / smoke, ray marched in the path tracer and the raster volumetric pass |
 
+### 6b. Built (2026-10-18, untested): V1 and V2 (without OIT)
+
+- **Particle Emitter** component (Add Component > Particle Emitter; `Components.h`): emission (rate, burst per loop, duration,
+  looping, max particles), shape (point, sphere, box, cone with angle), motion (lifetime range, velocity + random per axis in the
+  emitter's space, gravity in g, drag, spin range, local or world space), look (size and color + opacity over life, size random,
+  intensity for HDR glow, additive or alpha blend, lit, soft with a distance, a flipbook texture of columns x rows at a frame rate
+  or over each life). Lengths in meters, scaled by the project's world unit. Saved in the scene; Restart button and live count in
+  the panel.
+- **Simulation on the CPU** (`Scene/ParticleSystem.{h,cpp}`, the "Particles" update system after transform propagation): spawn,
+  integrate, retire with swap-remove, xorshift random per emitter. It runs whenever the scene steps -- in Edit too, so effects
+  preview while placed -- and Play / Simulate restart every emitter. Chosen over a GPU simulation for now: a few thousand
+  particles per emitter cost little, the state is plain data scripts drive, and nothing reads back from the GPU; the GPU
+  simulation (and GPU sorting) is the next step when effects need hundreds of thousands.
+- **Rendering** (`Particles.slang`, `Renderer::SubmitParticles` / `addParticlePass`): the "Submit Particles" system hands each
+  emitter's particles (position, size, color, rotation, flipbook frame) to the renderer, which sorts alpha-blended ones back to
+  front, uploads all into a host-visible buffer per frame in flight, and draws them after the forward pass over the HDR scene
+  (before DLSS, like transparent meshes): a mesh shader makes 32 camera-facing quads per workgroup, emitters far to near,
+  additive or premultiplied-alpha blending per emitter. No depth attachment: each fragment reads the scene depth, hides behind
+  geometry and, soft, fades over the last Soft Distance. **Lit** particles are shaded once per particle in the mesh stage: DDGI
+  (or the irradiance cubemap) for the environment, the first 8 lights as a diffuse puff, the first directional light behind a
+  shadow ray (ray query) while RT shadows are on.
+- **Scripts:** `ParticleEmitterComponent.Play(restart)`, `Stop()`, `Emit(count)`, `IsEmitting`, `ParticleCount`.
+
+Not yet: OIT (H4: emitters are sorted against each other by their centers, not against transparent meshes), GPU simulation,
+collisions, mesh particles, color / size curves beyond start-end, the module editor (V3), particles in the editor's extra
+viewports and in the path tracer, motion vectors for DLSS (fast particles can smear).
+
 ## 7. Order
 
 H1 outline (built) -> H1 overlay depth -> S1-S4 (sky) -> H2/H3b (transparency) -> preset ladder (§2) -> H3 -> V1/V2 -> S5 + V4 -> V3, V5.

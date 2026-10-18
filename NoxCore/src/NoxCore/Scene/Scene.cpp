@@ -1,6 +1,7 @@
 #include "Scene.h"
 #include "ModelInstance.h"
 #include "PrefabInstance.h"
+#include "ParticleSystem.h"
 
 #include <box2d/box2d.h>
 #include <algorithm>
@@ -16,6 +17,7 @@
 #include "NoxCore/Physics/Physics2D.h"
 #include "NoxCore/Physics/Physics3DScene.h"
 #include "NoxCore/Profiling/Profiler.h"
+#include "NoxCore/Core/WorldUnits.h"
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Renderer/DynamicMesh.h"
 #include "NoxCore/Scripting/ScriptEngine.h"
@@ -170,6 +172,7 @@ namespace Nox
         struct MovedEntities {};
         struct LightSubmission {};
         struct Renderer2DSubmission {};
+        struct ParticleSubmission {};
 
         // Identifies the scene that owns the renderer's GPU scene (a scene address can be reused by the next scene).
         uint64_t s_NextSceneID = 1;
@@ -398,6 +401,9 @@ namespace Nox
         for (auto entity : m_Registry.view<TimelinePlayerComponent>())
             outHandles.insert(m_Registry.get<TimelinePlayerComponent>(entity).Timeline);
 
+        for (auto entity : m_Registry.view<ParticleEmitterComponent>())
+            outHandles.insert(m_Registry.get<ParticleEmitterComponent>(entity).Texture);
+
         for (auto entity : m_Registry.view<SpriteRendererComponent>())
             outHandles.insert(m_Registry.get<SpriteRendererComponent>(entity).Texture);
 
@@ -470,6 +476,7 @@ namespace Nox
         OnPhysics2DStart();
         OnPhysics3DStart();
         StartTimelines();
+        StartParticles();
         
         // Scripting
         {
@@ -502,6 +509,7 @@ namespace Nox
         OnPhysics2DStart();
         OnPhysics3DStart();
         StartTimelines();
+        StartParticles();
     }
 
     void Scene::OnSimulationStop()
@@ -620,6 +628,10 @@ namespace Nox
         m_UpdateSystems.AddSystem("Transform Propagation",
             ComponentAccess().Read<TransformComponent, RelationshipComponent, MeshComponent>().Write<WorldTransformComponent, DirtyTransformComponent, MovedEntities>(),
             [this]() { SceneGraph::UpdateWorldTransforms(m_Registry, m_EntityMap, m_CommandBuffers, m_MovedEntities); });
+        // Particles spawn where their emitter is now: after propagation.
+        m_UpdateSystems.AddSystem("Particles",
+            ComponentAccess().Read<WorldTransformComponent>().Write<ParticleEmitterComponent>(),
+            [this]() { UpdateParticles(); });
 
         // Submission (after BeginScene). No conflicts: they run in parallel. Meshes are not submitted: the GPU scene keeps
         // them (SyncGpuScene).
@@ -629,6 +641,9 @@ namespace Nox
         m_SubmitSystems.AddSystem("Submit 2D",
             ComponentAccess().Read<WorldTransformComponent, SpriteRendererComponent, CircleRendererComponent, TextComponent>().Write<Renderer2DSubmission>(),
             [this]() { Submit2D(); });
+        m_SubmitSystems.AddSystem("Submit Particles",
+            ComponentAccess().Read<WorldTransformComponent, ParticleEmitterComponent>().Write<ParticleSubmission>(),
+            [this]() { SubmitParticles(); });
     }
 
     void Scene::RunUpdateSystems(Timestep ts, bool stepPhysics, bool stepAnimation)
@@ -819,6 +834,71 @@ namespace Nox
             return;
 
         m_Physics3DScene->Step(m_FrameInput.Timestep);
+    }
+
+    void Scene::StartParticles()
+    {
+        // Play / Simulate start every emitter over (the editor's preview ran them while editing).
+        for (auto entity : m_Registry.view<ParticleEmitterComponent>())
+            ParticleSystem::Restart(m_Registry.get<ParticleEmitterComponent>(entity));
+    }
+
+    void Scene::UpdateParticles()
+    {
+        if (!m_FrameInput.StepAnimation)
+            return;
+        auto view = m_Registry.view<ParticleEmitterComponent, WorldTransformComponent>();
+        for (auto entity : view)
+        {
+            auto [emitter, world] = view.get<ParticleEmitterComponent, WorldTransformComponent>(entity);
+            ParticleSystem::Simulate(emitter, world.WorldMatrix, m_FrameInput.Timestep);
+        }
+    }
+
+    void Scene::SubmitParticles()
+    {
+        std::vector<AssetHandle>& missingAssets = m_MissingAssets.Local();
+        std::vector<shaderio::GpuParticle> particles;
+        auto view = m_Registry.view<ParticleEmitterComponent, WorldTransformComponent>();
+        for (auto entity : view)
+        {
+            auto [emitter, world] = view.get<ParticleEmitterComponent, WorldTransformComponent>(entity);
+            if (emitter.Simulation.Particles.empty())
+                continue;
+
+            Renderer::ParticleBatchSettings settings;
+            if (emitter.Texture != 0)
+            {
+                // Soft dots until the sheet has loaded (requested at the sync point).
+                if (const Texture2D* texture = AssetManager::FindLoadedAsset<Texture2D>(emitter.Texture))
+                    settings.TextureSlot = texture->GetDescriptorIndexSlot();
+                else
+                    missingAssets.push_back(emitter.Texture);
+            }
+            settings.FlipbookColumns = std::max(emitter.FlipbookColumns, 1u);
+            settings.FlipbookRows = std::max(emitter.FlipbookRows, 1u);
+            settings.Additive = emitter.Blend == ParticleBlend::Additive;
+            settings.Lit = emitter.Lit;
+            settings.Soft = emitter.SoftParticles;
+            settings.SoftDistance = WorldUnits::FromMeters(std::max(emitter.SoftDistance, 0.0f));
+
+            particles.clear();
+            particles.reserve(emitter.Simulation.Particles.size());
+            for (const ParticleSimulation::Particle& particle : emitter.Simulation.Particles)
+            {
+                const ParticleSystem::Appearance appearance = ParticleSystem::Evaluate(emitter, particle, world.WorldMatrix);
+                if (appearance.Color.a <= 0.0f || appearance.Size <= 0.0f)
+                    continue;
+                shaderio::GpuParticle gpu{};
+                gpu.position = appearance.Position;
+                gpu.size = appearance.Size;
+                gpu.color = appearance.Color;
+                gpu.rotation = particle.Rotation;
+                gpu.frame = appearance.Frame;
+                particles.push_back(gpu);
+            }
+            m_renderer->SubmitParticles(settings, particles);
+        }
     }
 
     void Scene::StartTimelines()
@@ -1247,7 +1327,7 @@ namespace Nox
         using DuplicatableComponents = ComponentGroup<
             MeshComponent, MaterialComponent, ModelInstanceComponent, PrefabInstanceComponent, DirectionalLightComponent,
             PointLightComponent, SpotLightComponent, EnvironmentLightComponent, AnimatorComponent, TimelinePlayerComponent, FolderComponent,
-            SpriteRendererComponent, CircleRendererComponent, CameraComponent,
+            ParticleEmitterComponent, SpriteRendererComponent, CircleRendererComponent, CameraComponent,
             ScriptComponent, RigidBody2DComponent, BoxCollider2DComponent,
             CircleCollider2DComponent, TextComponent>;
 
@@ -1670,6 +1750,11 @@ namespace Nox
 
     template <>
     void Scene::OnComponentAdded<TimelinePlayerComponent>(Entity entity, TimelinePlayerComponent& component)
+    {
+    }
+
+    template <>
+    void Scene::OnComponentAdded<ParticleEmitterComponent>(Entity entity, ParticleEmitterComponent& component)
     {
     }
 

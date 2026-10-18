@@ -962,6 +962,38 @@ struct PushConstantColorPyramid
     uint32_t padding;
 };
 
+// Particles.slang (Hybrid_Renderer_Plan_2026-10.md §6 V1 / V2): one camera-facing quad per particle, written each frame by the CPU
+// (Renderer::SubmitParticles) into a host-visible buffer read through its address.
+struct GpuParticle
+{
+    vec3 position;     // world units
+    float size;        // edge of the quad, world units
+    vec4 color;        // linear rgb (intensity applied), a = opacity
+    float rotation;    // radians around the view direction
+    uint32_t frame;    // flipbook frame
+    float padding0;
+    float padding1;
+};
+
+STATIC_CONST uint32_t PARTICLE_LIT = 1;      // shaded by the scene's lights and environment (per particle, in the mesh stage)
+STATIC_CONST uint32_t PARTICLE_SOFT = 2;     // faded near the geometry behind (the scene depth)
+STATIC_CONST uint32_t PARTICLE_ADDITIVE = 4; // light added: alpha only scales it (else premultiplied alpha blending)
+STATIC_CONST uint32_t PARTICLE_SHADOW = 8;   // lit particles trace a shadow ray to the first directional light
+
+struct PushConstantParticles
+{
+    uint64_t matrixReference;
+    uint64_t particlesReference;  // GpuParticle[]
+    uint32_t firstParticle;
+    uint32_t particleCount;
+    uint32_t textureIndex;        // flipbook sheet slot (image heap offset added in the shader), 0xFFFFFFFF: a soft round dot
+    uint32_t flipbookColumns;
+    uint32_t flipbookRows;
+    uint32_t flags;               // PARTICLE_*
+    uint32_t depthTextureIndex;   // the scene depth (render resolution), image heap offset added in the shader
+    float softDistance;           // world units
+};
+
 struct PushConstantDDGIRadiance
 {
     uint64_t matrixReference;

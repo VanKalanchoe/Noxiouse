@@ -13,6 +13,7 @@
 #include "NoxCore/Math/Math.h"
 #include "NoxCore/Renderer/DynamicMesh.h"
 #include "NoxCore/Scene/Entity.h"
+#include "NoxCore/Scene/ParticleSystem.h"
 
 #include <thread>
 
@@ -197,6 +198,48 @@ namespace Nox
             return true;
         }
 
+        // Nox.ParticleEmitterComponent.
+        ParticleEmitterComponent* FindEmitter(uint64_t entityID)
+        {
+            if (!s_Scene) return nullptr;
+            Entity entity = s_Scene->GetEntityByUUID(UUID(entityID));
+            return entity && entity.HasComponent<ParticleEmitterComponent>() ? &entity.GetComponent<ParticleEmitterComponent>() : nullptr;
+        }
+
+        void ParticlesPlay(uint64_t entityID, Coral::Bool32 restart)
+        {
+            if (ParticleEmitterComponent* emitter = FindEmitter(entityID))
+            {
+                if (restart)
+                    ParticleSystem::Restart(*emitter);
+                emitter->Emitting = true;
+            }
+        }
+
+        void ParticlesStop(uint64_t entityID)
+        {
+            if (ParticleEmitterComponent* emitter = FindEmitter(entityID))
+                emitter->Emitting = false;
+        }
+
+        void ParticlesEmit(uint64_t entityID, int32_t count)
+        {
+            if (ParticleEmitterComponent* emitter = FindEmitter(entityID); emitter && count > 0)
+                emitter->Simulation.PendingBurst += static_cast<uint32_t>(count);
+        }
+
+        Coral::Bool32 ParticlesIsEmitting(uint64_t entityID)
+        {
+            const ParticleEmitterComponent* emitter = FindEmitter(entityID);
+            return emitter && emitter->Emitting;
+        }
+
+        int32_t ParticlesGetCount(uint64_t entityID)
+        {
+            const ParticleEmitterComponent* emitter = FindEmitter(entityID);
+            return emitter ? static_cast<int32_t>(emitter->Simulation.Particles.size()) : 0;
+        }
+
         // Nox.RigidBody3DComponent: forces and velocities of the entity's physics body (Play / Simulate only).
         template <typename Function>
         void WithRigidBody(uint64_t entityID, Function function)
@@ -282,6 +325,7 @@ namespace Nox
                 case 3: return entity.HasComponent<CharacterController3DComponent>();
                 case 4: return entity.HasComponent<RigidBody3DComponent>();
                 case 5: return entity.HasComponent<TimelinePlayerComponent>();
+                case 6: return entity.HasComponent<ParticleEmitterComponent>();
                 default: return false;
             }
         }
@@ -649,6 +693,11 @@ namespace Nox
         assembly.AddInternalCall("Nox.InternalCalls", "Timeline_GetTime", reinterpret_cast<void*>(&TimelineGetTime));
         assembly.AddInternalCall("Nox.InternalCalls", "Timeline_SetTime", reinterpret_cast<void*>(&TimelineSetTime));
         assembly.AddInternalCall("Nox.InternalCalls", "Timeline_SetSpeed", reinterpret_cast<void*>(&TimelineSetSpeed));
+        assembly.AddInternalCall("Nox.InternalCalls", "Particles_Play", reinterpret_cast<void*>(&ParticlesPlay));
+        assembly.AddInternalCall("Nox.InternalCalls", "Particles_Stop", reinterpret_cast<void*>(&ParticlesStop));
+        assembly.AddInternalCall("Nox.InternalCalls", "Particles_Emit", reinterpret_cast<void*>(&ParticlesEmit));
+        assembly.AddInternalCall("Nox.InternalCalls", "Particles_IsEmitting", reinterpret_cast<void*>(&ParticlesIsEmitting));
+        assembly.AddInternalCall("Nox.InternalCalls", "Particles_GetCount", reinterpret_cast<void*>(&ParticlesGetCount));
         assembly.AddInternalCall("Nox.InternalCalls", "Character_SetMoveVelocity", reinterpret_cast<void*>(&CharacterSetMoveVelocity));
         assembly.AddInternalCall("Nox.InternalCalls", "Character_Jump", reinterpret_cast<void*>(&CharacterJump));
         assembly.AddInternalCall("Nox.InternalCalls", "Character_IsGrounded", reinterpret_cast<void*>(&CharacterIsGrounded));

@@ -260,6 +260,7 @@ namespace Nox
         watchShader("assets/shaders/PostProcess.slang", "PostProcess", [this]() { createPostProcessPipeline(true); });
         watchShader("assets/shaders/AutoExposure.slang", "AutoExposure", [this]() { createAutoExposurePipelines(true); });
         watchShader("assets/shaders/ColorPyramid.slang", "ColorPyramid", [this]() { createColorPyramidPipelines(true); });
+        watchShader("assets/shaders/Particles.slang", "Particles", [this]() { createParticlePipeline(true); });
         watchShader("assets/shaders/TextureInspect.slang", "TextureInspect", [this]() { createTextureInspectPipeline(true); });
         watchShader("assets/shaders/InstanceCulling.slang", "InstanceCulling", [this]() { createInstanceCullingPipelines(true); });
         watchShader("assets/shaders/HiZBuild.slang", "HiZBuild", [this]() { createHiZBuildPipeline(true); });
@@ -438,6 +439,7 @@ namespace Nox
         createPostProcessPipeline(false);
         createAutoExposurePipelines(false);
         createColorPyramidPipelines(false);
+        createParticlePipeline(false);
         createTextureInspectPipeline(false);
         createInstanceCullingPipelines(false);
         createHiZBuildPipeline(false);
@@ -2061,6 +2063,80 @@ namespace Nox
         m_colorPyramidCopyPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
         desc.shaders.front().entryPoint = "downsampleMain";
         m_colorPyramidDownsamplePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+    }
+
+    void Renderer::createParticlePipeline(bool forceCompile)
+    {
+        // Mesh + fragment, over the HDR scene only (no depth attachment: the fragments test the scene depth themselves).
+        NRI::PipelineDesc desc{};
+        desc.forceCompile = forceCompile;
+        desc.colorFormats = { NRI::ImageFormat::R16G16B16A16_SFLOAT };
+        desc.shaders.push_back({ .stage = NRI::ShaderStage::Mesh, .entryPoint = "meshMain", .sourcePath = "assets/shaders/Particles.slang" });
+        desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "fragMain", .sourcePath = "assets/shaders/Particles.slang" });
+        m_particlePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+    }
+
+    void Renderer::SubmitParticles(const ParticleBatchSettings& settings, std::span<const shaderio::GpuParticle> particles)
+    {
+        if (particles.empty())
+            return;
+        ParticleBatch batch;
+        batch.Settings = settings;
+        batch.First = static_cast<uint32_t>(m_particles.size());
+        batch.Count = static_cast<uint32_t>(particles.size());
+
+        const glm::vec3 camera(uniformData.cameraWorldPos);
+        glm::vec3 center(0.0f);
+        const size_t start = m_particles.size();
+        m_particles.insert(m_particles.end(), particles.begin(), particles.end());
+        for (size_t index = start; index < m_particles.size(); ++index)
+            center += m_particles[index].position;
+        batch.Distance = glm::length(center / static_cast<float>(particles.size()) - camera);
+
+        // Covering particles: the farthest first, so the near ones blend over them.
+        if (!settings.Additive)
+        {
+            std::sort(m_particles.begin() + static_cast<std::ptrdiff_t>(start), m_particles.end(),
+                      [&camera](const shaderio::GpuParticle& a, const shaderio::GpuParticle& b)
+                      {
+                          const glm::vec3 da = a.position - camera;
+                          const glm::vec3 db = b.position - camera;
+                          return glm::dot(da, da) > glm::dot(db, db);
+                      });
+        }
+        m_particleBatches.push_back(batch);
+    }
+
+    void Renderer::updateParticleBuffer(uint32_t currentImage)
+    {
+        if (m_particles.empty())
+            return;
+        const uint64_t required = sizeof(shaderio::GpuParticle) * m_particles.size();
+        if (required > m_particleBufferCapacity || m_particleBuffers.size() != MAX_FRAMES_IN_FLIGHT)
+        {
+            // Grown for every frame slot at once; the old buffers leave once the frames in flight are done with them.
+            for (auto& old : m_particleBuffers)
+            {
+                if (old)
+                {
+                    std::scoped_lock lock(m_deferredReleasesMutex);
+                    m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, std::move(old) });
+                }
+            }
+            m_particleBuffers.clear();
+            m_particleBuffersMapped.clear();
+            m_particleBufferCapacity = std::max<uint64_t>(required * 2, sizeof(shaderio::GpuParticle) * 4096);
+            for (uint32_t slot = 0; slot < MAX_FRAMES_IN_FLIGHT; ++slot)
+            {
+                std::unique_ptr<NRI::Buffer> buffer = m_device->createBuffer(NRI::BufferDesc{
+                    .size = m_particleBufferCapacity,
+                    .usage = NRI::BufferUsage::Storage
+                });
+                m_particleBuffersMapped.push_back(buffer->map(0, m_particleBufferCapacity));
+                m_particleBuffers.push_back(std::move(buffer));
+            }
+        }
+        memcpy(m_particleBuffersMapped[currentImage], m_particles.data(), required);
     }
 
     void Renderer::createTextureImage()
@@ -3944,6 +4020,7 @@ namespace Nox
             addPathTracerPasses();
             addDeferredLightingPass();
             addForward3DPass();
+            addParticlePass();
             addMipFeedbackReadbackPass();
             addDLSSPass();
             addEntityDepthBlitPass();
@@ -4776,6 +4853,7 @@ namespace Nox
         {
             NOX_PROFILE_SCOPE("Bones Upload");
             updateBoneBuffer(frameIndex);
+            updateParticleBuffer(frameIndex);
         }
 
         {
@@ -4835,6 +4913,8 @@ namespace Nox
         m_sceneFrameCounter++;
 
         m_lightBufferObjects.clear();
+        m_particles.clear();
+        m_particleBatches.clear();
     }
 
     void Renderer::updateSceneAccelerationStructure(uint32_t currentFrameIndex)
