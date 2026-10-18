@@ -128,8 +128,10 @@ namespace Nox
         if (args.Count > 1)
             return std::filesystem::path(args[1]);
 
+        // A packaged game keeps its project in Game/ next to the executable (File > Package Game in the editor).
         const std::filesystem::path workingDirectory = std::filesystem::current_path();
-        for (const std::filesystem::path& directory : { workingDirectory, std::filesystem::path(SDL_GetBasePath()), workingDirectory / ".." / "Facerun" })
+        const std::filesystem::path executableDirectory(SDL_GetBasePath());
+        for (const std::filesystem::path& directory : { workingDirectory, executableDirectory, executableDirectory / "Game", workingDirectory / ".." / "Facerun" })
         {
             const std::filesystem::path project = FirstProjectIn(directory);
             if (!project.empty())

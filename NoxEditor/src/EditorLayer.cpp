@@ -37,6 +37,7 @@
 #include "NoxCore/Scripting/ScriptEngine.h"
 #include "NoxCore/Utils/Utils.h"
 #include "Panels/AssetPreviewRenderer.h"
+#include "GamePackager.h"
 
 namespace Nox
 {
@@ -413,6 +414,7 @@ namespace Nox
         // Before the dockspace, which fits above it.
         UI_StatusBar();
         UI_PrefabExitPrompt();
+        UI_PackageGame();
 
         // 1. Grab the style and save the default minimum size
         ImGuiStyle& style = ImGui::GetStyle();
@@ -470,6 +472,19 @@ namespace Nox
                 if (ImGui::MenuItem("Save Scene As...", "Ctrl+Shift+S"))
                 {
                     SaveSceneAs();
+                }
+
+                ImGui::Separator();
+
+                if (ImGui::MenuItem("Package Game..."))
+                {
+                    if (m_PackageOutput[0] == '\0' && Project::GetActive())
+                    {
+                        const std::filesystem::path defaultOutput = Project::GetProjectDirectory() / "Build" / Project::GetActive()->GetConfig().Name;
+                        snprintf(m_PackageOutput, sizeof(m_PackageOutput), "%s", defaultOutput.generic_string().c_str());
+                    }
+                    m_PackageResult.clear();
+                    m_ShowPackageGame = true;
                 }
 
                 ImGui::Separator();
@@ -3476,6 +3491,59 @@ namespace Nox
         // Placed like a model dropped on the hierarchy: at the point the editor camera orbits. One mesh node, so it spawns as a
         // plain mesh entity named after the shape once the asset has loaded.
         PlaceAssets({ mesh }, m_EditorCamera.GetPosition() + m_EditorCamera.GetForwardDirection() * m_EditorCamera.GetDistance(), folder);
+    }
+
+    void EditorLayer::UI_PackageGame()
+    {
+        if (m_ShowPackageGame)
+        {
+            ImGui::OpenPopup("Package Game");
+            m_ShowPackageGame = false;
+        }
+        ImGui::SetNextWindowSize(ImVec2(620.0f, 0.0f), ImGuiCond_Appearing);
+        if (!ImGui::BeginPopupModal("Package Game", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+            return;
+
+        ImGui::TextWrapped("A folder that runs the game on its own: the runtime (NoxRuntime, renamed after the project), the engine's "
+                           "libraries, scripts and shaders, and only the assets the scenes need, cooked, without their sources.");
+        ImGui::Spacing();
+        ImGui::SetNextItemWidth(480.0f);
+        ImGui::InputText("Output folder", m_PackageOutput, sizeof(m_PackageOutput));
+        ImGui::Checkbox("Every scene (not only the start scene)", &m_PackageAllScenes);
+        ImGui::SetItemTooltip("The start scene and what it uses is the game; tick this when scripts load other scenes.");
+        ImGui::Spacing();
+
+        if (ImGui::Button("Package", ImVec2(120.0f, 0.0f)))
+        {
+            EndTimelinePreviews();
+            SaveScene(); // the scene as edited is what ships
+            PackageSettings settings;
+            settings.OutputDirectory = std::filesystem::path(m_PackageOutput);
+            settings.AllScenes = m_PackageAllScenes;
+            const PackageReport report = PackageGame(settings);
+            if (!report.Success)
+                m_PackageResult = "Failed: " + report.Error;
+            else
+            {
+                char summary[512];
+                snprintf(summary, sizeof(summary), "Done: %zu assets, %zu files, %.1f MB.\nRun %s", report.Assets, report.Files,
+                         static_cast<double>(report.Bytes) / (1024.0 * 1024.0), report.Executable.generic_string().c_str());
+                m_PackageResult = summary;
+                for (const std::string& warning : report.Warnings)
+                    m_PackageResult += "\n- " + warning;
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Close", ImVec2(120.0f, 0.0f)))
+            ImGui::CloseCurrentPopup();
+        if (!m_PackageResult.empty())
+        {
+            ImGui::Separator();
+            ImGui::BeginChild("##package_result", ImVec2(600.0f, 160.0f), ImGuiChildFlags_Borders);
+            ImGui::TextWrapped("%s", m_PackageResult.c_str());
+            ImGui::EndChild();
+        }
+        ImGui::EndPopup();
     }
 
     void EditorLayer::EndTimelinePreviews()

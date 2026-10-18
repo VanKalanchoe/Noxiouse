@@ -64,6 +64,27 @@ headers; measure the build time before and after), but it is unrelated to packag
   reader of R4 to read it. Until then the player uses the editor's manager, which works because the editor has cooked
   everything once.
 
+## 2d. R3 + R6 + a first R7 built (2026-10-18, untested): File > Package Game
+
+- **File > Package Game...** (editor, `NoxEditor/src/GamePackager.{h,cpp}`): an output folder (default `<project>/Build/<Name>`)
+  and "every scene" (else the start scene). It saves the open scene, then writes:
+  - `<Output>/<Name>.exe` -- NoxRuntime, renamed (it must have been built: CMake `-DNOX_BUILD_RUNTIME=ON`), plus everything
+    else next to the editor's executable (engine DLLs, the .NET host, `Scripts/` with the managed assemblies, the `cache/`
+    folder) except the editor itself, `.pdb / .ilk / .exp / .lib / .log` and `imgui.ini` (R6: framework-dependent).
+  - `<Output>/assets/{shaders,fonts,textures}` -- the engine's assets (shaders are still compiled at start: R5 is not done).
+  - `<Output>/Game/<Name>.nproj` and `Game/<AssetDirectory>/` with **only the assets the scenes need** (R3,
+    `EditorAssetManager::CollectDependencies`): the B3 reference rules read forwards -- what each file names by handle or path,
+    what a mesh owns by name, every asset cooked from the same model as a mesh (a model instance spawns them) -- starting at the
+    scenes plus every script (which name prefabs by path). Cooked files ship without their sources (a texture's `.ntex`, a mesh's
+    `.nsmesh`, with their `.hash` / `.notifies` companions); a `.gltf` placed as itself ships with its buffers and images. The
+    registry lists just those (`SerializeAssetRegistry(path, handles)`).
+- **Importers take a cooked file as it is when its source is gone** (`MeshImporter::ReadCookedMesh`,
+  `TextureImporter::ImportTexture2D / ReadCookedTextureHeader`): what makes a package without sources load. In the editor this
+  only matters when a source file was deleted (its cooked file keeps working instead of failing).
+- NoxRuntime also looks for the project in `Game/` next to the executable, so double-clicking `<Name>.exe` plays it.
+- Not yet: pack files (R4: still one file per asset), precompiled shaders (R5), a Release / editor-free build of the runtime,
+  the game assembly's name is still `Facerun.dll` in `ScriptEngine` (one game per engine build for now).
+
 ## 3. Phases
 
 | Phase | What | Exit test |

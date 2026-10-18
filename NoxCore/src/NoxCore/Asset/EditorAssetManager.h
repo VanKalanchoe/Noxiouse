@@ -60,6 +60,12 @@ namespace Nox
         std::vector<std::filesystem::path> FindReferences(AssetHandle handle) const;
         // Registered assets nothing uses, by the same rules (scenes are where use starts, so never listed).
         std::vector<AssetHandle> FindUnusedAssets() const;
+        // Every asset the roots need, transitively, by the same rules read forwards (what their files name, what a mesh owns by name),
+        // plus the assets cooked from the same model as a mesh (a model instance spawns its siblings) and extra path / handle tokens
+        // (scripts naming prefabs). For packaging a game (Build > Package Game).
+        std::unordered_set<AssetHandle> CollectDependencies(const std::vector<AssetHandle>& roots, const std::vector<std::filesystem::path>& extraTokenFiles) const;
+        // The registry with only these assets, written to `path` (a packaged game's registry).
+        void SerializeAssetRegistry(const std::filesystem::path& path, const std::unordered_set<AssetHandle>& handles) const;
         // The registered asset of this type at a path under the asset directory (or as its source), 0 when there is none.
         AssetHandle FindHandleByPath(const std::filesystem::path& path, AssetType type) const override;
         // Imports a glTF like Unreal: the file's content decides the assets -- skinned meshes become a skeletal mesh

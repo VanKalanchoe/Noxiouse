@@ -59,6 +59,12 @@ namespace Nox
         AssetHandle CreateVariant(AssetHandle base, const std::filesystem::path& relativeFolder);
         void SaveScene();
         void SaveSceneAs();
+        // File > Package Game (GamePackager): the output folder, every scene or the start scene, and the last result.
+        void UI_PackageGame();
+        bool m_ShowPackageGame = false;
+        char m_PackageOutput[512] = {};
+        bool m_PackageAllScenes = false;
+        std::string m_PackageResult;
 
         // Undo / redo (EditorHistory): UpdateHistory runs at the end of every ImGui frame, after the panels made their changes.
         void UpdateHistory();

@@ -202,11 +202,12 @@ namespace Nox
         const std::filesystem::path cookedPath = GetCookedTexturePath(assetDirectory, metadata);
         const std::filesystem::path sourcePath = GetTextureSourcePath(assetDirectory, metadata);
 
-        // Same test as ImportTexture2D: a cooked source is its own cook, anything else must match the recorded hash.
-        if (!IsCookedTextureSource(sourcePath))
+        // Same test as ImportTexture2D: a cooked source is its own cook, anything else must match the recorded hash -- unless the
+        // source is gone (a packaged game ships the cooked file alone), then the cooked file is taken as it is.
+        if (!IsCookedTextureSource(sourcePath) && std::filesystem::exists(sourcePath))
         {
             XXH128_hash_t cookedHash{};
-            if (!std::filesystem::exists(sourcePath) || !Utility::loadHashFromFile(cookedPath.string() + ".hash", cookedHash) ||
+            if (!Utility::loadHashFromFile(cookedPath.string() + ".hash", cookedHash) ||
                 !XXH128_isEqual(TextureCookHash(sourcePath, metadata.TextureSpec), cookedHash))
             {
                 return std::nullopt;
@@ -252,14 +253,14 @@ namespace Nox
         std::filesystem::path cookedPath = GetCookedTexturePath(assetDirectory, metadata);
         std::filesystem::path sourcePath = GetTextureSourcePath(assetDirectory, metadata);
 
+        // A packaged game ships the cooked file without its source: with the source gone it is taken as it is.
         const bool sourceIsCooked = IsCookedTextureSource(sourcePath);
+        const bool sourceExists = std::filesystem::exists(sourcePath);
         const auto hashPath = cookedPath.string() + ".hash";
-        const XXH128_hash_t sourceHash = sourceIsCooked ? XXH128_hash_t{} : TextureCookHash(sourcePath, metadata.TextureSpec);
+        const XXH128_hash_t sourceHash = sourceIsCooked || !sourceExists ? XXH128_hash_t{} : TextureCookHash(sourcePath, metadata.TextureSpec);
         XXH128_hash_t cookedHash{};
-        const bool cookedIsCurrent = sourceIsCooked ||
-            (std::filesystem::exists(sourcePath) &&
-             (Utility::loadHashFromFile(hashPath, cookedHash) &&
-              XXH128_isEqual(sourceHash, cookedHash)));
+        const bool cookedIsCurrent = sourceIsCooked || !sourceExists ||
+            (Utility::loadHashFromFile(hashPath, cookedHash) && XXH128_isEqual(sourceHash, cookedHash));
 
         if (std::filesystem::exists(cookedPath) && cookedIsCurrent)
             return LoadTexture2D(cookedPath, metadata.TextureSpec);

@@ -23,7 +23,8 @@ namespace Nox
 
     private:
         // The project to play: the first command line argument, else the first .nproj in the working directory, next to the
-        // executable, or in ../Facerun (the sample project, from the editor's working directory).
+        // executable, in Game/ next to it (a packaged game), or in ../Facerun (the sample project, from the editor's working
+        // directory).
         std::filesystem::path FindProjectFile() const;
         void StartScene(AssetHandle sceneHandle);
         void UnloadUnusedAssets();

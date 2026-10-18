@@ -176,10 +176,14 @@ namespace Nox
         const std::filesystem::path cookedPath = assetDirectory / metadata.FilePath;
         const std::filesystem::path sourcePath = assetDirectory / metadata.SourceFilePath;
 
-        // Same test as ImportMesh / ImportStaticMesh.
+        // Same test as ImportMesh / ImportStaticMesh. A packaged game ships the cooked file without its source (Build > Package
+        // Game): with the source gone, the cooked file is taken as it is.
+        std::error_code error;
+        const bool sourceMissing = !metadata.SourceFilePath.empty() && !std::filesystem::exists(sourcePath, error);
         XXH128_hash_t cookedHash{};
-        if (!std::filesystem::exists(cookedPath) || !Utility::loadHashFromFile(cookedPath.string() + ".hash", cookedHash) ||
-            !XXH128_isEqual(Utility::calcul_hash_streaming(sourcePath.string()), cookedHash))
+        if (!std::filesystem::exists(cookedPath) ||
+            (!sourceMissing && (!Utility::loadHashFromFile(cookedPath.string() + ".hash", cookedHash) ||
+                                !XXH128_isEqual(Utility::calcul_hash_streaming(sourcePath.string()), cookedHash))))
         {
             return std::nullopt;
         }

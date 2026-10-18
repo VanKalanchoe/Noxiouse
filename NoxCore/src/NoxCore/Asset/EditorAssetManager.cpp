@@ -1142,6 +1142,85 @@ namespace Nox
         return unused;
     }
 
+    std::unordered_set<AssetHandle> EditorAssetManager::CollectDependencies(const std::vector<AssetHandle>& roots,
+                                                                         const std::vector<std::filesystem::path>& extraTokenFiles) const
+    {
+        const std::filesystem::path assetDirectory = Project::GetActiveAssetDirectory();
+
+        // Path index (both the file and the source a cooked asset names) and the assets each model source made.
+        std::unordered_map<std::string, std::vector<AssetHandle>> byPath;
+        std::unordered_map<std::string, std::vector<AssetHandle>> bySource;
+        std::vector<std::pair<AssetHandle, const AssetMetadata*>> ownable; // materials, skeletons, clips (owned by name by meshes)
+        for (const auto& [handle, metadata] : m_AssetRegistry)
+        {
+            byPath[NormalizeReferencePath(metadata.FilePath.lexically_normal().generic_string())].push_back(handle);
+            if (!metadata.SourceFilePath.empty() && metadata.SourceFilePath != metadata.FilePath)
+            {
+                const std::string source = NormalizeReferencePath(metadata.SourceFilePath.lexically_normal().generic_string());
+                bySource[source].push_back(handle);
+                if (metadata.Type == AssetType::Texture2D)
+                    byPath[source].push_back(handle);
+            }
+            if (metadata.Type == AssetType::Material || metadata.Type == AssetType::Skeleton || metadata.Type == AssetType::AnimationSequence)
+                ownable.emplace_back(handle, &metadata);
+        }
+
+        std::unordered_set<AssetHandle> result;
+        std::vector<AssetHandle> pending;
+        auto add = [&](AssetHandle handle)
+        {
+            if (handle != 0 && m_AssetRegistry.contains(handle) && result.insert(handle).second)
+                pending.push_back(handle);
+        };
+        auto addTokens = [&](const ReferenceTokens& tokens)
+        {
+            for (AssetHandle handle : tokens.Handles)
+                add(handle);
+            for (const std::string& path : tokens.Paths)
+            {
+                if (auto found = byPath.find(path); found != byPath.end())
+                    for (AssetHandle handle : found->second)
+                        add(handle);
+            }
+        };
+
+        for (AssetHandle root : roots)
+            add(root);
+        for (const std::filesystem::path& file : extraTokenFiles)
+            addTokens(ReadReferenceTokens(file));
+
+        while (!pending.empty())
+        {
+            const AssetHandle handle = pending.back();
+            pending.pop_back();
+            const AssetMetadata& metadata = m_AssetRegistry.at(handle);
+
+            // What its file names (scenes, prefabs, graphs, timelines by handle; materials and meshes name textures by path).
+            if (IsReferencingType(metadata.Type) || metadata.Type == AssetType::Timeline)
+                addTokens(ReadReferenceTokens(assetDirectory / metadata.FilePath));
+
+            const bool meshLike = metadata.Type == AssetType::Mesh || metadata.Type == AssetType::StaticMesh ||
+                                  metadata.Type == AssetType::SkeletalMesh || metadata.Type == AssetType::MeshSource;
+            if (!meshLike)
+                continue;
+            // The materials, skeleton and clips cooked from its model, which it owns by name.
+            for (const auto& [owned, ownedMetadata] : ownable)
+            {
+                if (!result.contains(owned) && OwnsByName(metadata, *ownedMetadata))
+                    add(owned);
+            }
+            // The other assets cooked from the same model (a model instance spawns them), or made from this source.
+            const std::filesystem::path& source = metadata.SourceFilePath.empty() || metadata.SourceFilePath == metadata.FilePath
+                ? metadata.FilePath : metadata.SourceFilePath;
+            if (auto found = bySource.find(NormalizeReferencePath(source.lexically_normal().generic_string())); found != bySource.end())
+            {
+                for (AssetHandle sibling : found->second)
+                    add(sibling);
+            }
+        }
+        return result;
+    }
+
     bool EditorAssetManager::RenameAsset(AssetHandle handle, const std::string& newName)
     {
         if (!CanRename(handle) || newName.empty() || newName.find_first_of("\\/:*?\"<>|") != std::string::npos)
@@ -1535,8 +1614,14 @@ namespace Nox
 
     void EditorAssetManager::SerializeAssetRegistry()
     {
-        auto path = Project::GetActiveAssetRegistryPath();
+        std::unordered_set<AssetHandle> all;
+        for (const auto& [handle, metadata] : m_AssetRegistry)
+            all.insert(handle);
+        SerializeAssetRegistry(Project::GetActiveAssetRegistryPath(), all);
+    }
 
+    void EditorAssetManager::SerializeAssetRegistry(const std::filesystem::path& path, const std::unordered_set<AssetHandle>& handles) const
+    {
         YAML::Emitter out;
         {
             out << YAML::BeginMap; // Root
@@ -1545,6 +1630,8 @@ namespace Nox
             out << YAML::BeginSeq;
             for (const auto&[handle, metadata] : m_AssetRegistry)
             {
+                if (!handles.contains(handle))
+                    continue;
                 out << YAML::BeginMap;
                 out << YAML::Key << "Handle" << YAML::Value << handle;
                 std::string filepathStr = metadata.FilePath.generic_string();
