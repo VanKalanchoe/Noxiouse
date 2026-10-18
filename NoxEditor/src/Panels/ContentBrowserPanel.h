@@ -33,6 +33,8 @@ namespace Nox
         // Called for the right-click "Create Variant" of a prefab: creates the variant in the folder (relative to the asset
         // directory), returns its handle (0 on failure); it then goes into rename mode.
         void SetCreateVariantCallback(std::function<AssetHandle(AssetHandle, const std::filesystem::path&)> callback) { m_CreateVariant = std::move(callback); }
+        // The assets the open scenes use right now (unsaved changes included), for the reference checks before deleting.
+        void SetSceneReferencesCallback(std::function<void(std::unordered_set<AssetHandle>&)> callback) { m_SceneReferences = std::move(callback); }
     private:
         void RefreshAssetTree();
         AssetHandle FindAssetHandle(const std::filesystem::path& relativePath) const;
@@ -41,6 +43,13 @@ namespace Nox
         // Windows-style rename: the asset's name becomes a text field with the whole name selected.
         void BeginRename(AssetHandle handle);
         void RequestPrefabFromDrop(const ImGuiPayload* payload, const std::filesystem::path& folder);
+        // Assets dragged from the browser onto a folder (tile, tree, path): moved there next frame.
+        void AcceptAssetMoveDrop(const std::filesystem::path& folder);
+        // The right-click menu of an asset tile; delete / find references / unused assets dialogs and what they act on.
+        void DrawAssetContextMenu(AssetHandle handle, const AssetMetadata& metadata);
+        void RequestDelete(std::vector<AssetHandle> handles);
+        void DrawAssetDialogs();
+        void ProcessPendingAssetActions();
 
         // The modern layout (docs/Future.md item 2): a toolbar with the add/import buttons, a clickable path, search, a type filter
         // and the tile size; the folder tree on the left; the tiles of the folder (or the search results) on the right.
@@ -132,5 +141,30 @@ namespace Nox
         bool m_RenameFocus = false;
         bool m_RenameCommit = false;
         std::string m_RenameCommitText;
+
+        std::function<void(std::unordered_set<AssetHandle>&)> m_SceneReferences;
+        // Asset management (Future.md item 2, B3): moves dropped on folders, deletes with their reference check, find references,
+        // unused assets. The lists are filled when the dialog opens (they read the project's files).
+        std::vector<AssetHandle> m_PendingMoveAssets;
+        std::filesystem::path m_PendingMoveFolder;
+        struct DeleteCandidate
+        {
+            AssetHandle Handle = 0;
+            std::string Name;
+            std::vector<std::string> UsedBy; // files, and "the open scene" for in-memory use
+        };
+        std::vector<DeleteCandidate> m_DeleteCandidates;
+        bool m_OpenDeleteDialog = false;
+        AssetHandle m_ReferencesAsset = 0;
+        std::vector<std::string> m_References;
+        bool m_OpenReferencesDialog = false;
+        struct UnusedEntry
+        {
+            AssetHandle Handle = 0;
+            std::string Path;
+            bool Delete = true;
+        };
+        std::vector<UnusedEntry> m_UnusedAssets;
+        bool m_OpenUnusedDialog = false;
     };
 };

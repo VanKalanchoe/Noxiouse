@@ -63,6 +63,23 @@
 | B2 | The Material Editor shows a live preview sphere (same preview view, re-rendered on change) instead of the color swatch |
 | B3 | Asset context menu: rename for every type (E2), **delete with a reference check** (what in the open scene, other scenes and prefabs uses it; Force Delete / Replace References like UE), show in explorer, reimport; drag assets onto folders to move them (registry paths updated); an **unused assets** report (registered, referenced by no scene or prefab). Deleting an entity never unregisters its assets (Future.md item 14, answered in `Status_Audit_2026-10.md`) |
 
+**B3 built (2026-10-18, untested):**
+- **Right-click on any asset:** Rename (F2), Create Variant (prefabs), Find References, Show in Explorer, Delete; with several
+  selected it acts on the selection. **Del** deletes the selection.
+- **Delete with a reference check:** a dialog lists the assets and, per asset, what uses it -- the open scene's current state
+  (unsaved changes included) and the project's files -- then **Delete**, or **Force Delete** when something still does.
+  Deleting removes the asset's file, its source when nothing else is made from it (a model's .gltf stays while any of its
+  meshes, skeleton or clips remain), and its registry entry.
+- **Who uses what** (`EditorAssetManager::FindReferences / FindUnusedAssets`, read from the files on demand): scenes, prefabs,
+  animation graphs and the project name assets by handle (YAML numbers); materials and meshes name textures by path (the
+  strings in their binary files, relative or absolute, any slashes, case ignored); scripts by path; a model's mesh owns the
+  materials, skeleton and clips cooked from it by name; assets made from a source (meshes from a .gltf) use it.
+- **Move:** drag assets onto a folder (a folder tile, the folder tree, a part of the path). Prefabs and animation graphs
+  move (and rename); everything else is named by path somewhere or cooked with companion files, so it stays (logged).
+- **Tools > Find Unused Assets:** every registered asset nothing uses (scenes are where use starts, never listed), with
+  checkboxes and Delete Selected (through the same confirmation).
+- Not yet: moving / renaming textures, materials and meshes (needs rewriting the paths that name them), redirectors.
+
 B1 needs the renderer to draw more than one view per frame, the same work as F5's M2 (§4); do M2 first.
 
 ## 3. F3, the rest: animation

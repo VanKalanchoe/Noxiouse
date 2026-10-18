@@ -47,6 +47,19 @@ namespace Nox
         // or taken, or when the asset has cooked companions named after it (meshes).
         bool RenameAsset(AssetHandle handle, const std::string& newName);
         bool CanRename(AssetHandle handle) const;
+        // Moves a self-contained asset (what CanRename allows) into another folder, relative to the asset directory; keeps its
+        // handle. False when the name is taken there.
+        bool MoveAsset(AssetHandle handle, const std::filesystem::path& relativeFolder);
+        // Deletes the asset's file, its source when nothing else is made from it, and its registry entry; a loaded copy is
+        // dropped (entities still using it keep theirs until they let go of it).
+        bool DeleteAsset(AssetHandle handle);
+        // Who uses an asset, from the project's files: scenes, prefabs, animation graphs and the project name assets by handle;
+        // materials and meshes name textures by path; scripts name assets by path; the materials, skeleton and clips cooked
+        // from a model belong to its mesh by name. Relative paths of the files that use it (the open scene's unsaved state
+        // is the caller's to add). Reads the files: meant for a user's action, not every frame.
+        std::vector<std::filesystem::path> FindReferences(AssetHandle handle) const;
+        // Registered assets nothing uses, by the same rules (scenes are where use starts, so never listed).
+        std::vector<AssetHandle> FindUnusedAssets() const;
         // The registered asset of this type at a path under the asset directory (or as its source), 0 when there is none.
         AssetHandle FindHandleByPath(const std::filesystem::path& path, AssetType type) const override;
         // Imports a glTF like Unreal: the file's content decides the assets -- skinned meshes become a skeletal mesh

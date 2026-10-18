@@ -15,7 +15,7 @@
 | # | Item | State |
 |---|---|---|
 | F1 | Docs audit | done: `Status_Audit_2026-10.md` |
-| F2 | Modern content browser, material window | first part **built, untested** (tree, path, search, type filter, Material Editor); rendered thumbnails: `Editor_Features_Plan_2026-10.md` §2 |
+| F2 | Modern content browser, material window | first part **built, untested** (tree, path, search, type filter, Material Editor); **B3 built** (context menu, delete with reference check, find references, move by drag, unused assets); rendered thumbnails: `Editor_Features_Plan_2026-10.md` §2 |
 | F3 | Animation player node, sequencer, editing | first part **built, untested** (Clip = Sequence Player with Speed pin + Start Position, BlendSpace1D); rest: same plan §3 |
 | F4 | Hybrid renderer near the path tracer, RT fallbacks, DLSS edge jitter, transparency / transmission | DLSS outline jitter **fixed, confirmed by the user** (non-jittered selection mask, `Hybrid_Renderer_Plan_2026-10.md` §3); grid/overlay depth jitter, fallbacks and transparency planned (§1-4) |
 | F5 | Up to four viewports with layout presets | planned: `Editor_Features_Plan_2026-10.md` §4 |

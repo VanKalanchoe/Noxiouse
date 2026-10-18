@@ -2096,6 +2096,14 @@ namespace Nox
                 }
             });
             m_ContentBrowserPanel->SetCreateVariantCallback([this](AssetHandle base, const std::filesystem::path& folder) { return CreateVariant(base, folder); });
+            // The browser's reference checks see what the open scenes use right now, unsaved changes included.
+            m_ContentBrowserPanel->SetSceneReferencesCallback([this](std::unordered_set<AssetHandle>& handles)
+            {
+                if (m_EditorScene)
+                    m_EditorScene->CollectAssetReferences(handles);
+                if (m_ActiveScene && m_ActiveScene != m_EditorScene)
+                    m_ActiveScene->CollectAssetReferences(handles);
+            });
         }
     }
 

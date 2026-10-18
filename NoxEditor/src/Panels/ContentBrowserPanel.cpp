@@ -20,6 +20,8 @@
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Utils/Utils.h"
 
+#include <SDL3/SDL_misc.h>
+
 namespace Nox
 {
     ContentBrowserPanel::ContentBrowserPanel(Ref<Project> project)
@@ -233,6 +235,15 @@ namespace Nox
             }
             m_RenameHandle = 0;
             RefreshAssetTree();
+        }
+
+        ProcessPendingAssetActions();
+
+        // Delete: the selected assets, after their reference check.
+        if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && ImGui::IsKeyPressed(ImGuiKey_Delete, false) &&
+            !ImGui::GetIO().WantTextInput && !m_Selected.empty())
+        {
+            RequestDelete(std::vector<AssetHandle>(m_Selected.begin(), m_Selected.end()));
         }
 
         if (m_EntriesDirectory != m_CurrentDirectory)
@@ -566,6 +577,7 @@ namespace Nox
             }
             ImGui::EndPopup();
         }
+        DrawAssetDialogs();
         ImGui::End();
     }
 
@@ -605,6 +617,7 @@ namespace Nox
                         {
                             if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("SCENE_HIERARCHY_ENTITY"))
                                 RequestPrefabFromDrop(payload, browserEntry.Path);
+                            AcceptAssetMoveDrop(browserEntry.Path);
                             ImGui::EndDragDropTarget();
                         }
                     }
@@ -674,13 +687,9 @@ namespace Nox
                             ImGui::EndDragDropSource();
                         }
 
-                        if (metadata.Type == AssetType::Prefab && ImGui::BeginPopupContextItem())
+                        if (ImGui::BeginPopupContextItem())
                         {
-                            if (ImGui::MenuItem("Create Variant"))
-                            {
-                                m_HasVariantRequest = true;
-                                m_VariantBase = handle;
-                            }
+                            DrawAssetContextMenu(handle, metadata);
                             ImGui::EndPopup();
                         }
 
@@ -790,6 +799,33 @@ namespace Nox
             ImGui::EndPopup();
         }
         ImGui::SameLine();
+        if (ImGui::Button("Tools"))
+            ImGui::OpenPopup("##content_tools");
+        if (ImGui::BeginPopup("##content_tools"))
+        {
+            if (ImGui::MenuItem("Find Unused Assets..."))
+            {
+                m_UnusedAssets.clear();
+                auto* assets = m_Project->GetEditorAssetManager().get();
+                std::unordered_set<AssetHandle> inScene;
+                if (m_SceneReferences)
+                    m_SceneReferences(inScene);
+                for (AssetHandle handle : assets->FindUnusedAssets())
+                {
+                    if (!inScene.contains(handle))
+                        m_UnusedAssets.push_back({ handle, assets->GetMetadata(handle).FilePath.generic_string(), true });
+                }
+                std::sort(m_UnusedAssets.begin(), m_UnusedAssets.end(), [](const UnusedEntry& a, const UnusedEntry& b) { return a.Path < b.Path; });
+                m_OpenUnusedDialog = true;
+            }
+            if (ImGui::MenuItem("Refresh"))
+            {
+                m_FolderTreeDirty = true;
+                RefreshAssetTree();
+            }
+            ImGui::EndPopup();
+        }
+        ImGui::SameLine();
         if (ImGui::Button("Import"))
         {
             static constexpr char filter[] = "Scene and glTF files\0nox;gltf;glb";
@@ -852,6 +888,7 @@ namespace Nox
             {
                 if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("SCENE_HIERARCHY_ENTITY"))
                     RequestPrefabFromDrop(payload, folder);
+                AcceptAssetMoveDrop(folder);
                 ImGui::EndDragDropTarget();
             }
             ImGui::PopID();
@@ -918,6 +955,7 @@ namespace Nox
         {
             if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("SCENE_HIERARCHY_ENTITY"))
                 RequestPrefabFromDrop(payload, node.Path);
+            AcceptAssetMoveDrop(node.Path);
             ImGui::EndDragDropTarget();
         }
         if (open)
@@ -1038,5 +1076,260 @@ namespace Nox
         m_EntriesDirectory = m_CurrentDirectory;
         ++m_EntriesVersion;
         m_FolderTreeDirty = true;
+    }
+}
+
+namespace Nox
+{
+    void ContentBrowserPanel::AcceptAssetMoveDrop(const std::filesystem::path& folder)
+    {
+        std::vector<AssetHandle> handles;
+        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEM"))
+            handles.push_back(*static_cast<const AssetHandle*>(payload->Data));
+        else if (const ImGuiPayload* payloads = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEMS"))
+        {
+            const auto* data = static_cast<const AssetHandle*>(payloads->Data);
+            handles.assign(data, data + payloads->DataSize / sizeof(AssetHandle));
+        }
+        if (handles.empty())
+            return;
+        m_PendingMoveAssets = std::move(handles);
+        m_PendingMoveFolder = folder;
+    }
+
+    void ContentBrowserPanel::DrawAssetContextMenu(AssetHandle handle, const AssetMetadata& metadata)
+    {
+        auto* assets = m_Project->GetEditorAssetManager().get();
+        // The menu acts on the selection when the clicked asset is part of it.
+        const bool inSelection = m_Selected.contains(handle);
+        if (!inSelection)
+        {
+            m_Selected.clear();
+            m_Selected.insert(handle);
+        }
+
+        if (ImGui::MenuItem("Rename", "F2", false, m_Selected.size() == 1 && assets->CanRename(handle)))
+            BeginRename(handle);
+        if (metadata.Type == AssetType::Prefab && ImGui::MenuItem("Create Variant"))
+        {
+            m_HasVariantRequest = true;
+            m_VariantBase = handle;
+        }
+        if (ImGui::MenuItem("Find References"))
+        {
+            m_ReferencesAsset = handle;
+            m_References.clear();
+            std::unordered_set<AssetHandle> inScene;
+            if (m_SceneReferences)
+                m_SceneReferences(inScene);
+            if (inScene.contains(handle))
+                m_References.push_back("(the open scene)");
+            for (const std::filesystem::path& file : assets->FindReferences(handle))
+                m_References.push_back(file.generic_string());
+            m_OpenReferencesDialog = true;
+        }
+        if (ImGui::MenuItem("Show in Explorer"))
+        {
+            const std::filesystem::path folder = (Project::GetActiveAssetDirectory() / metadata.FilePath).parent_path();
+            const std::string url = "file:///" + std::filesystem::absolute(folder).generic_string();
+            SDL_OpenURL(url.c_str());
+        }
+        ImGui::Separator();
+        if (ImGui::MenuItem(m_Selected.size() > 1 ? "Delete Selected..." : "Delete...", "Del"))
+            RequestDelete(std::vector<AssetHandle>(m_Selected.begin(), m_Selected.end()));
+    }
+
+    void ContentBrowserPanel::RequestDelete(std::vector<AssetHandle> handles)
+    {
+        auto* assets = m_Project->GetEditorAssetManager().get();
+        std::unordered_set<AssetHandle> inScene;
+        if (m_SceneReferences)
+            m_SceneReferences(inScene);
+        const std::unordered_set<AssetHandle> deleting(handles.begin(), handles.end());
+
+        m_DeleteCandidates.clear();
+        for (AssetHandle handle : handles)
+        {
+            if (!assets->IsAssetHandleValid(handle))
+                continue;
+            DeleteCandidate candidate;
+            candidate.Handle = handle;
+            candidate.Name = assets->GetMetadata(handle).FilePath.generic_string();
+            if (inScene.contains(handle))
+                candidate.UsedBy.push_back("(the open scene)");
+            // Users that are deleted along with it do not count.
+            for (const std::filesystem::path& file : assets->FindReferences(handle))
+            {
+                const AssetHandle user = assets->FindHandleByPath(file, assets->GetAssetTypeFromExtension(file.extension()));
+                if (user == 0 || !deleting.contains(user))
+                    candidate.UsedBy.push_back(file.generic_string());
+            }
+            m_DeleteCandidates.push_back(std::move(candidate));
+        }
+        m_OpenDeleteDialog = !m_DeleteCandidates.empty();
+    }
+
+    void ContentBrowserPanel::ProcessPendingAssetActions()
+    {
+        if (m_PendingMoveAssets.empty())
+            return;
+        auto* assets = m_Project->GetEditorAssetManager().get();
+        const std::filesystem::path relativeFolder = m_PendingMoveFolder.lexically_relative(m_BaseDirectory);
+        size_t moved = 0;
+        for (AssetHandle handle : m_PendingMoveAssets)
+        {
+            if (!assets->IsAssetHandleValid(handle))
+                continue;
+            const std::string name = assets->GetMetadata(handle).FilePath.filename().string();
+            if (!assets->CanRename(handle))
+                NOX_CORE_WARN("'{}' was not moved: only prefabs and animation graphs move (other assets are named by path, or are cooked with companion files)", name);
+            else if (!assets->MoveAsset(handle, relativeFolder == "." ? std::filesystem::path() : relativeFolder))
+                NOX_CORE_WARN("'{}' was not moved: the folder already has a file of that name", name);
+            else
+                ++moved;
+        }
+        m_PendingMoveAssets.clear();
+        if (moved > 0)
+        {
+            m_FolderTreeDirty = true;
+            RefreshAssetTree();
+        }
+    }
+
+    void ContentBrowserPanel::DrawAssetDialogs()
+    {
+        auto* assets = m_Project->GetEditorAssetManager().get();
+        const ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+
+        if (m_OpenDeleteDialog)
+        {
+            ImGui::OpenPopup("Delete Assets");
+            m_OpenDeleteDialog = false;
+        }
+        ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+        ImGui::SetNextWindowSize(ImVec2(560.0f, 0.0f), ImGuiCond_Appearing);
+        if (ImGui::BeginPopupModal("Delete Assets", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+        {
+            size_t referenced = 0;
+            for (const DeleteCandidate& candidate : m_DeleteCandidates)
+                referenced += candidate.UsedBy.empty() ? 0 : 1;
+
+            ImGui::Text("Delete %zu asset%s? This removes the files from disk.", m_DeleteCandidates.size(), m_DeleteCandidates.size() == 1 ? "" : "s");
+            if (ImGui::BeginChild("##delete_list", ImVec2(540.0f, std::min(300.0f, 40.0f + 22.0f * m_DeleteCandidates.size())), ImGuiChildFlags_Borders))
+            {
+                for (const DeleteCandidate& candidate : m_DeleteCandidates)
+                {
+                    if (candidate.UsedBy.empty())
+                    {
+                        ImGui::BulletText("%s", candidate.Name.c_str());
+                        continue;
+                    }
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.7f, 0.3f, 1.0f));
+                    const bool open = ImGui::TreeNode(candidate.Name.c_str(), "%s  (used by %zu)", candidate.Name.c_str(), candidate.UsedBy.size());
+                    ImGui::PopStyleColor();
+                    if (open)
+                    {
+                        for (const std::string& user : candidate.UsedBy)
+                            ImGui::BulletText("%s", user.c_str());
+                        ImGui::TreePop();
+                    }
+                }
+            }
+            ImGui::EndChild();
+
+            if (referenced > 0)
+                ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.3f, 1.0f), "%zu of them %s still used: what uses them will miss them (empty meshes, default materials).",
+                                   referenced, referenced == 1 ? "is" : "are");
+            if (ImGui::Button(referenced > 0 ? "Force Delete" : "Delete"))
+            {
+                for (const DeleteCandidate& candidate : m_DeleteCandidates)
+                {
+                    if (!assets->DeleteAsset(candidate.Handle))
+                        NOX_CORE_WARN("Could not delete '{}'", candidate.Name);
+                    m_Selected.erase(candidate.Handle);
+                }
+                m_DeleteCandidates.clear();
+                m_FolderTreeDirty = true;
+                RefreshAssetTree();
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape))
+            {
+                m_DeleteCandidates.clear();
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndPopup();
+        }
+
+        if (m_OpenReferencesDialog)
+        {
+            ImGui::OpenPopup("Asset References");
+            m_OpenReferencesDialog = false;
+        }
+        ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+        if (ImGui::BeginPopupModal("Asset References", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+        {
+            ImGui::Text("%s", assets->GetMetadata(m_ReferencesAsset).FilePath.generic_string().c_str());
+            if (m_References.empty())
+                ImGui::TextDisabled("Nothing uses it.");
+            else
+                ImGui::Text("Used by %zu:", m_References.size());
+            for (const std::string& user : m_References)
+                ImGui::BulletText("%s", user.c_str());
+            if (ImGui::Button("Close") || ImGui::IsKeyPressed(ImGuiKey_Escape))
+                ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+        }
+
+        if (m_OpenUnusedDialog)
+        {
+            ImGui::OpenPopup("Unused Assets");
+            m_OpenUnusedDialog = false;
+        }
+        ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+        ImGui::SetNextWindowSize(ImVec2(620.0f, 460.0f), ImGuiCond_Appearing);
+        if (ImGui::BeginPopupModal("Unused Assets", nullptr))
+        {
+            ImGui::TextWrapped("Registered assets no scene, prefab, animation graph, material, mesh, script or the project uses (scenes are "
+                               "where use starts, so they are never listed). %zu found.", m_UnusedAssets.size());
+            if (ImGui::SmallButton("Select all"))
+                for (UnusedEntry& entry : m_UnusedAssets)
+                    entry.Delete = true;
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Select none"))
+                for (UnusedEntry& entry : m_UnusedAssets)
+                    entry.Delete = false;
+            if (ImGui::BeginChild("##unused_list", ImVec2(0.0f, -ImGui::GetFrameHeightWithSpacing()), ImGuiChildFlags_Borders))
+            {
+                for (UnusedEntry& entry : m_UnusedAssets)
+                {
+                    ImGui::PushID(static_cast<int>(static_cast<uint64_t>(entry.Handle)));
+                    ImGui::Checkbox(entry.Path.c_str(), &entry.Delete);
+                    ImGui::PopID();
+                }
+            }
+            ImGui::EndChild();
+            if (ImGui::Button("Delete Selected..."))
+            {
+                std::vector<AssetHandle> chosen;
+                for (const UnusedEntry& entry : m_UnusedAssets)
+                {
+                    if (entry.Delete)
+                        chosen.push_back(entry.Handle);
+                }
+                m_UnusedAssets.clear();
+                ImGui::CloseCurrentPopup();
+                if (!chosen.empty())
+                    RequestDelete(std::move(chosen)); // the confirmation dialog opens next frame
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Close") || ImGui::IsKeyPressed(ImGuiKey_Escape))
+            {
+                m_UnusedAssets.clear();
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndPopup();
+        }
     }
 }
