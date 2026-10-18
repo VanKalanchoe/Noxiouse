@@ -8,7 +8,8 @@
 
 ### F12 Undo / redo -- `NoxEditor/src/EditorHistory.{h,cpp}`
 - **Ctrl+Z** undo, **Ctrl+Y** / **Ctrl+Shift+Z** redo, and **Edit > Undo / Redo** with the step's name ("Undo Delete
-  Entity", "Undo Edit Cube", "Undo Transform"). Text fields keep their own Ctrl+Z while typing.
+  Entity", "Undo Edit Cube", "Undo Transform"). Text fields keep their own Ctrl+Z while typing. Letter shortcuts follow the
+  keyboard layout (2026-10-18 fix: they read physical US positions, so on a German QWERTZ keyboard Z and Y were swapped).
 - **How:** every step is the whole scene as its scene-file text (`SceneSerializer::SerializeToText`, new); undoing loads
   that text into a new scene (`SceneSerializer::DeserializeText`, new) and swaps it in like opening a scene. So anything
   the scene file holds is undoable without per-command code: gizmo drags, Properties edits, add / remove component,
@@ -49,6 +50,9 @@
 - **New BlendSpace1D node** (Blending): up to four clips along one axis with their positions, the **Value** pin picks the
   point (e.g. Speed -> idle / walk / run in one node); the two clips around the value play in step (shared normalized
   phase), so feet stay together while blending.
+- **Graph editor fixes (2026-10-18):** node properties are drawn in the order the node type declares them, each in its own
+  ImGui ID scope (BlendSpace1D's four empty clip buttons all read "None" and collided), a pin's literal is greyed out
+  while a link feeds the pin, and the asset picker keeps same-named clips apart (hover shows the path).
 
 ## 2. F2, the rest: rendered thumbnails and material previews
 

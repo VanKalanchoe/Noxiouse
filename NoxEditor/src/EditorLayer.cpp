@@ -13,6 +13,7 @@
 #include <imgui_internal.h>// For Docking
 #include <ImGuizmo.h>
 #include <SDL3/SDL_filesystem.h>
+#include <SDL3/SDL_keyboard.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>
 #include <glm/gtc/type_ptr.hpp>  // for pointer to matrix or vector
@@ -384,7 +385,7 @@ namespace Nox
                 const std::string redoLabel = m_History.CanRedo() ? "Redo " + m_History.GetRedoName() : std::string("Redo");
                 if (ImGui::MenuItem(undoLabel.c_str(), "Ctrl+Z", false, editing && m_History.CanUndo()))
                     Undo();
-                if (ImGui::MenuItem(redoLabel.c_str(), "Ctrl+Y", false, editing && m_History.CanRedo()))
+                if (ImGui::MenuItem(redoLabel.c_str(), "Ctrl+Y / Ctrl+Shift+Z", false, editing && m_History.CanRedo()))
                     Redo();
                 ImGui::Separator();
                 ImGui::TextDisabled("History: %zu steps, %.1f MB", m_History.GetStateCount() > 0 ? m_History.GetStateCount() - 1 : 0,
@@ -1726,7 +1727,16 @@ namespace Nox
         // Shortcuts change the scene outside any ImGui item (Delete, Ctrl+D, End): the history looks for a change this frame.
         m_HistoryCheckRequested = true;
 
-        switch (e.GetKeyCode())
+        // Letter shortcuts follow the keyboard layout, like in every editor: Ctrl+Z is the key labeled Z on a German QWERTZ
+        // keyboard too. The event carries the physical scancode, which names the US position (Z and Y are swapped on QWERTZ,
+        // so undo and redo came out reversed); a letter key is mapped back to the scancode of the letter it types. The fly
+        // camera's WASD stays physical on purpose (Input::IsKeyPressed).
+        int keyCode = e.GetKeyCode();
+        const SDL_Keycode layoutKey = SDL_GetKeyFromScancode(static_cast<SDL_Scancode>(keyCode), SDL_KMOD_NONE, false);
+        if (layoutKey >= SDLK_A && layoutKey <= SDLK_Z)
+            keyCode = SDL_SCANCODE_A + static_cast<int>(layoutKey - SDLK_A);
+
+        switch (keyCode)
         {
         case SDL_SCANCODE_Z:
             {

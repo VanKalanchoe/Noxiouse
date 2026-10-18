@@ -235,10 +235,38 @@ namespace Nox
         if (hasVisibleProperties)
         {
             ImGui::Separator();
-            for (auto& [name, value] : node.Properties)
+            // In the order the node type declares them (Clip0, Position0, Clip1, ... for a blend space), not the map's hash
+            // order; properties the type does not declare (older files) after them, by name.
+            std::vector<std::string> order;
+            order.reserve(node.Properties.size());
+            for (const auto& [name, defaultValue] : type.DefaultProperties)
+            {
+                if (node.Properties.contains(name))
+                    order.push_back(name);
+            }
+            std::vector<std::string> extra;
+            for (const auto& [name, value] : node.Properties)
+            {
+                if (std::none_of(order.begin(), order.end(), [&](const std::string& declared) { return declared == name; }))
+                    extra.push_back(name);
+            }
+            std::sort(extra.begin(), extra.end());
+            order.insert(order.end(), extra.begin(), extra.end());
+
+            for (const std::string& name : order)
             {
                 if (type.OwnsSubGraphs && name == "EntryState")
                     continue; // set from the state view
+                NodeGraphValue& value = node.Properties[name];
+                // One ID scope per property: widgets whose label is their value (asset buttons all reading "None") would
+                // otherwise collide inside the node.
+                ImGui::PushID(name.c_str());
+                // A pin's literal does nothing while a link feeds the pin: shown, but greyed out.
+                const auto pin = std::find_if(type.Inputs.begin(), type.Inputs.end(), [&](const NodePinDesc& input) { return input.Name == name; });
+                const uint32_t pinIndex = static_cast<uint32_t>(pin - type.Inputs.begin());
+                const bool pinConnected = pin != type.Inputs.end() &&
+                    std::any_of(links.begin(), links.end(), [&](const GraphLink& l) { return l.ToNode == node.Id && l.ToPin == pinIndex; });
+                ImGui::BeginDisabled(pinConnected);
                 if (uint64_t* handle = std::get_if<uint64_t>(&value))
                 {
                     auto hintIt = type.PropertyAssetTypeHints.find(name);
@@ -250,6 +278,8 @@ namespace Nox
                     if (DrawNodeGraphProperty(name, value, rangeIt != type.PropertyRanges.end() ? &rangeIt->second : nullptr))
                         onGraphEdited();
                 }
+                ImGui::EndDisabled();
+                ImGui::PopID();
             }
         }
 
@@ -290,7 +320,7 @@ namespace Nox
         // clickable inside an imgui-node-editor node (see this backend's header comment and
         // NodeGraphPropertyEditor.cpp's). This only records the request; DrawPendingAssetPicker draws the
         // actual list later, suspended, once every node this frame is done drawing.
-        if (ImGui::Button(label.c_str()))
+        if (ImGui::Button((label + "##asset").c_str()))
         {
             m_ShowAssetPicker = true;
             m_AssetPickerNodeId = nodeId;
@@ -352,6 +382,8 @@ namespace Nox
                         continue;
                 }
 
+                // Clips of different models often share a name ("Walk"): the handle keeps their IDs apart, the path tells them apart.
+                ImGui::PushID(static_cast<int>(static_cast<uint64_t>(handle) ^ (static_cast<uint64_t>(handle) >> 32)));
                 if (ImGui::Selectable(label.c_str()))
                 {
                     if (node)
@@ -361,6 +393,9 @@ namespace Nox
                     }
                     ImGui::CloseCurrentPopup();
                 }
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("%s", metadata.FilePath.generic_string().c_str());
+                ImGui::PopID();
             }
         }
 
