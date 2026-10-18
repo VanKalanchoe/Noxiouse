@@ -26,7 +26,7 @@
 | F10 | Basic shapes | **built, untested**: Create > Shapes / hierarchy right-click > Shapes |
 | F11 | Minecraft-style game: script or C++? | answered: `Runtime_And_Packaging_Plan_2026-10.md` §4 (C++ voxel module + C# gameplay) |
 | F12 | Undo / redo | **built, tested by the user** (works); 2026-10-18: shortcuts follow the keyboard layout (Z/Y were swapped on QWERTZ) and read the modifiers of the key event (Ctrl+Shift+Z read as Ctrl+Z when Shift was let go before the frame handled the key) |
-| F13 | VFX, particles, clouds | answered + planned: `Hybrid_Renderer_Plan_2026-10.md` §6 |
+| F13 | VFX, particles, clouds | answered + planned: `Hybrid_Renderer_Plan_2026-10.md` §6; **volumetric clouds built** (untested, in the procedural sky, §5b) |
 | F14 | Unregister a mesh when its entity is deleted? | answered: no (`Status_Audit_2026-10.md`, F14 answer); stale registry entries (files gone) are removed at load: **built, untested**; asset Delete with reference check + unused-asset report: `Editor_Features_Plan_2026-10.md` B3 |
 
 ## Prefabs (plan: `Prefab_Architecture_Plan_2026.md`, section 8)

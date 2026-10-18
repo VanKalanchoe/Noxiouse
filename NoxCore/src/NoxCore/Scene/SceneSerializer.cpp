@@ -515,6 +515,13 @@ namespace Nox
             out << YAML::Key << "GroundAlbedo" << YAML::Value << elc.GroundAlbedo;
             out << YAML::Key << "AltitudeKm" << YAML::Value << elc.AltitudeKm;
             out << YAML::Key << "AerialPerspectiveScale" << YAML::Value << elc.AerialPerspectiveScale;
+            out << YAML::Key << "Clouds" << YAML::Value << elc.Clouds;
+            out << YAML::Key << "CloudCoverage" << YAML::Value << elc.CloudCoverage;
+            out << YAML::Key << "CloudDensity" << YAML::Value << elc.CloudDensity;
+            out << YAML::Key << "CloudBottomKm" << YAML::Value << elc.CloudBottomKm;
+            out << YAML::Key << "CloudThicknessKm" << YAML::Value << elc.CloudThicknessKm;
+            out << YAML::Key << "CloudScaleKm" << YAML::Value << elc.CloudScaleKm;
+            out << YAML::Key << "CloudOffsetKm" << YAML::Value << elc.CloudOffsetKm;
             out << YAML::Key << "HeightFog" << YAML::Value << elc.HeightFog;
             out << YAML::Key << "FogDensity" << YAML::Value << elc.FogDensity;
             out << YAML::Key << "FogHeightFalloff" << YAML::Value << elc.FogHeightFalloff;
@@ -1333,6 +1340,20 @@ namespace Nox
                 elc.AltitudeKm = environmentLightComponent["AltitudeKm"].as<float>();
             if (environmentLightComponent["AerialPerspectiveScale"])
                 elc.AerialPerspectiveScale = environmentLightComponent["AerialPerspectiveScale"].as<float>();
+            if (environmentLightComponent["Clouds"])
+                elc.Clouds = environmentLightComponent["Clouds"].as<bool>();
+            if (environmentLightComponent["CloudCoverage"])
+                elc.CloudCoverage = environmentLightComponent["CloudCoverage"].as<float>();
+            if (environmentLightComponent["CloudDensity"])
+                elc.CloudDensity = environmentLightComponent["CloudDensity"].as<float>();
+            if (environmentLightComponent["CloudBottomKm"])
+                elc.CloudBottomKm = environmentLightComponent["CloudBottomKm"].as<float>();
+            if (environmentLightComponent["CloudThicknessKm"])
+                elc.CloudThicknessKm = environmentLightComponent["CloudThicknessKm"].as<float>();
+            if (environmentLightComponent["CloudScaleKm"])
+                elc.CloudScaleKm = environmentLightComponent["CloudScaleKm"].as<float>();
+            if (environmentLightComponent["CloudOffsetKm"])
+                elc.CloudOffsetKm = environmentLightComponent["CloudOffsetKm"].as<glm::vec2>();
             if (environmentLightComponent["HeightFog"])
                 elc.HeightFog = environmentLightComponent["HeightFog"].as<bool>();
             if (environmentLightComponent["FogDensity"])

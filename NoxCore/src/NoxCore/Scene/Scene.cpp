@@ -60,6 +60,13 @@ namespace Nox
         settings.MieAnisotropy = environment.MieAnisotropy;
         settings.AltitudeKm = environment.AltitudeKm;
         settings.AerialPerspectiveScale = environment.AerialPerspectiveScale;
+        settings.Clouds = environment.Clouds;
+        settings.CloudCoverage = environment.CloudCoverage;
+        settings.CloudDensity = environment.CloudDensity;
+        settings.CloudBottomKm = environment.CloudBottomKm;
+        settings.CloudThicknessKm = environment.CloudThicknessKm;
+        settings.CloudScaleKm = environment.CloudScaleKm;
+        settings.CloudOffsetKm = environment.CloudOffsetKm;
         return settings;
     }
 

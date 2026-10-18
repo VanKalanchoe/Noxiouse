@@ -147,6 +147,14 @@ namespace Nox
         float AltitudeKm = 0.0f;                    // the viewer's height above the ground
         float SunAngularRadius = 0.004675f;         // radians: the disc the skybox draws (the light's angular diameter / 2)
         float AerialPerspectiveScale = 1.0f;        // multiplies view distances for the haze on the scene (UE's distance scale)
+        // Volumetric clouds, raymarched into the environment with the sky.
+        bool Clouds = true;
+        float CloudCoverage = 0.35f;                // 0 = clear, 1 = overcast
+        float CloudDensity = 1.0f;
+        float CloudBottomKm = 1.5f;
+        float CloudThicknessKm = 2.0f;
+        float CloudScaleKm = 8.0f;                  // one tile of the shape noise: clouds of ~2 km
+        glm::vec2 CloudOffsetKm{ 0.0f };            // moves them (wind)
 
         bool operator==(const SkyAtmosphereSettings&) const = default;
     };
@@ -1352,6 +1360,11 @@ namespace Nox
         std::unique_ptr<NRI::Pipeline> m_skyMultiScatteringPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_skyCubemapPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_skyAerialPerspectivePipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_skyDownsamplePipeline = nullptr;
+        // Cloud noise (CloudNoise.slang), made once when the sky is created: shape and detail 3D noise as 2D arrays, weather.
+        Ref<Texture2D> m_skyCloudShape;
+        Ref<Texture2D> m_skyCloudDetail;
+        Ref<Texture2D> m_skyCloudWeather;
         Ref<Texture2D> m_skyAerialPerspective; // camera volume, rewritten every frame the scene is lit by deferred lighting
         Ref<Texture2D> m_skyTransmittanceLut;
         Ref<Texture2D> m_skyMultiScatteringLut;

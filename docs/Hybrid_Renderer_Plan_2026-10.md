@@ -142,6 +142,20 @@ path tracer and raster agree on the sky color.
   takes a light blue haze at 10 km (T 0.81) and heads for the horizon color at 30 km (T 0.55), barely anything within
   a few hundred meters -- so small scenes use 10-100 for a visible effect, 0 turns it off. Not applied yet to forward
   passes (unlit and transparent surfaces).
+- **Volumetric clouds (built 2026-10-18, untested; Future.md item 13's clouds, plan V4)**, Schneider 2015 / Hillaire
+  2016: a cumulus layer (Cloud Bottom 1.5 km, Thickness 2 km) raymarched into the environment cubemap's top mip with the
+  sky, so skybox, IBL, reflections, DDGI and path tracer misses all see the same clouds. Tiling noise made once on the
+  GPU when the sky is created (`CloudNoise.slang`): 64^3 Perlin-Worley + Worley FBMs for the shapes, 32^3 Worley FBMs
+  eroding the edges (wispy below, billowy above), a 128^2 weather map spreading the coverage; 3D textures stored as 2D
+  arrays and filtered between layers by hand. Per texel: 64 steps through the layer (jittered), six steps towards the
+  sun per cloud sample, Hillaire's three multiple-scattering octaves, a two-lobe phase (silver lining towards the sun),
+  ambient light from the sky's multiple-scattering LUT, the air in front of the clouds (distant clouds fade into the
+  haze). The lower mips are now averaged from the top one (`downsampleCubeMain`) instead of raymarched (clouds would
+  alias). Controls: Coverage (0.35), Cloud Density, Bottom, Thickness, Size (8 km noise tile), Offset (move it over time
+  for wind; each change re-renders the sky). On by default. Previewed with a numpy port of the noise and the march
+  through the engine's tonemap: scattered white cumulus at noon, grey undersides and a warm glow round a low sun.
+  Cost: only when the sky updates; estimated a few ms more than the sky alone. Not yet: cloud shadows on the scene,
+  per-frame animated clouds (wind needs a time-sliced update), clouds seen from above at high altitude.
 - **Exponential height fog (built 2026-10-18, untested)**, UE's Exponential Height Fog, as a **Height Fog** section of
   the Environment Light (either source): density(y) = Fog Density * exp(-Height Falloff * (y - Fog Height)), its optical
   depth along the view ray in closed form (`HeightFog.slang`, one exp per pixel), Start Distance, Max Opacity; the fog is

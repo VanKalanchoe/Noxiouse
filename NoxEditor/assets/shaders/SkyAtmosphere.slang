@@ -1,5 +1,6 @@
 #include "shaderIO.h"
 #include "SkyAtmosphereCommon.slang"
+#include "CloudNoise.slang"
 
 // Procedural sky: Sebastien Hillaire, "A Scalable and Production Ready Sky and Atmosphere Rendering Technique" (EGSR 2020),
 // the model behind Unreal's SkyAtmosphere, after the paper's reference implementation (github.com/sebh/UnrealEngineSkyAtmosphere).
@@ -83,25 +84,28 @@ struct ScatteringResult
 {
     float3 luminance;       // in-scattered light along the ray (per unit sun illuminance unless the caller scales it)
     float3 multiScatterAs1; // the paper's f_ms integrand (multiple-scattering LUT pass only)
+    float3 transmittance;   // through the air marched
 };
 
 // The paper's IntegrateScatteredLuminance: march the view ray through the atmosphere (to the ground or the top), at each step
 // add the sun's light scattered towards the eye (single scattering with the planet's shadow, plus the multiple-scattering
 // term) and attenuate by the medium in between. `uniformPhase`: the multiple-scattering LUT pass integrates with an
 // isotropic phase and no multiple-scattering input; the sky pass uses the real phase functions and the LUT.
+// `maxDistance` stops the march early (the air in front of a cloud); the ground's light is added only when the ray reaches it.
 ScatteringResult integrateScatteredLuminance(PushConstantSkyAtmosphere push, float3 origin, float3 direction, float3 sunDirection,
-                                             int sampleCount, bool uniformPhase, bool withGround)
+                                             int sampleCount, bool uniformPhase, bool withGround, float maxDistance = 1e30)
 {
     ScatteringResult result;
     result.luminance = float3(0.0);
     result.multiScatterAs1 = float3(0.0);
+    result.transmittance = float3(1.0);
 
     const float tTop = raySphere(origin, direction, TopRadius);
     const float tBottom = raySphere(origin, direction, BottomRadius);
     if (tTop < 0.0)
         return result; // outside the atmosphere looking away from it (not a case for a camera on the ground)
-    const bool hitsGround = tBottom >= 0.0;
-    const float tMax = hitsGround ? tBottom : tTop;
+    const bool hitsGround = tBottom >= 0.0 && tBottom <= maxDistance;
+    const float tMax = min(tBottom >= 0.0 ? tBottom : tTop, maxDistance);
 
     const float cosTheta = dot(direction, sunDirection);
     const float phaseRayleigh = uniformPhase ? 1.0 / (4.0 * SkyPI) : rayleighPhase(cosTheta);
@@ -144,6 +148,7 @@ ScatteringResult integrateScatteredLuminance(PushConstantSkyAtmosphere push, flo
         result.multiScatterAs1 += throughput * (medium.scattering - medium.scattering * segmentTransmittance) / extinction;
         throughput *= segmentTransmittance;
     }
+    result.transmittance = throughput;
 
     // Light bounced off the ground (Lambertian), for rays that end on it.
     if (withGround && hitsGround)
@@ -248,6 +253,257 @@ float3 cubemapDirection(uint face, float2 st)
     return normalize(direction);
 }
 
+// ---------------------------------------------------------------------------------------------------------------------
+// Volumetric clouds (Schneider 2015 / Hillaire 2016 "Physically Based Sky, Atmosphere and Cloud Rendering in Frostbite"):
+// a layer of cumulus cloudBottomKm above the ground, raymarched into the environment cubemap together with the sky, so the
+// skybox, the IBL and the path tracer's misses all see them. Lengths in km, like the atmosphere.
+// ---------------------------------------------------------------------------------------------------------------------
+
+static const uint CloudShapeSize = 64;      // the 3D noise textures, stored as 2D arrays of that many layers
+static const uint CloudDetailSize = 32;
+static const uint CloudWeatherSize = 128;
+static const float CloudWeatherTileKm = 40.0;
+static const float CloudDetailTileFraction = 0.15; // the detail noise repeats this much faster than the shape noise
+static const float CloudExtinctionPerKm = 40.0;    // cumulus: ~0.04 per meter
+static const float CloudMaxMarchKm = 80.0;
+static const float CloudAmbientScale = 1.5;        // the sky's light on the clouds (the LUT holds its multiple-scattered part)
+
+// Shape noise texel: billowy Perlin remapped by Worley (Perlin-Worley) in r, Worley FBMs at three frequencies in gba.
+[shader("compute")]
+[numthreads(4, 4, 4)]
+void cloudShapeNoiseMain(uint3 id : SV_DispatchThreadID, uniform PushConstantSkyAtmosphere push)
+{
+    if (any(id >= uint3(CloudShapeSize)))
+        return;
+    const float3 uvw = (float3(id) + 0.5) / float(CloudShapeSize);
+    const float billow = abs(cloudPerlinFbm(uvw, 4, 5, 11u));
+    const float worley0 = cloudWorleyFbm(uvw, 4, 23u);
+    const float worley1 = cloudWorleyFbm(uvw, 8, 37u);
+    const float worley2 = cloudWorleyFbm(uvw, 16, 53u);
+    RWTexture2DArray<float4> output = RWTexture2DArray<float4>.Handle(uint2(push.outputStorageIndex, 0));
+    output[id] = float4(cloudRemap(billow, 0.0, 1.0, worley0, 1.0), worley0, worley1, worley2);
+}
+
+// Detail noise texel: Worley FBMs at three frequencies (rgb).
+[shader("compute")]
+[numthreads(4, 4, 4)]
+void cloudDetailNoiseMain(uint3 id : SV_DispatchThreadID, uniform PushConstantSkyAtmosphere push)
+{
+    if (any(id >= uint3(CloudDetailSize)))
+        return;
+    const float3 uvw = (float3(id) + 0.5) / float(CloudDetailSize);
+    RWTexture2DArray<float4> output = RWTexture2DArray<float4>.Handle(uint2(push.outputStorageIndex, 0));
+    output[id] = float4(cloudWorleyFbm(uvw, 4, 71u), cloudWorleyFbm(uvw, 8, 83u), cloudWorleyFbm(uvw, 16, 97u), 1.0);
+}
+
+// Weather texel: where clouds gather (Perlin FBM, more contrast), r.
+[shader("compute")]
+[numthreads(8, 8, 1)]
+void cloudWeatherMain(uint3 id : SV_DispatchThreadID, uniform PushConstantSkyAtmosphere push)
+{
+    if (id.x >= CloudWeatherSize || id.y >= CloudWeatherSize)
+        return;
+    const float2 uv = (float2(id.xy) + 0.5) / float(CloudWeatherSize);
+    const float value = cloudPerlinFbm(float3(uv, 0.5), 4, 4, 131u) * 0.5 + 0.5;
+    RWTexture2DArray<float4> output = RWTexture2DArray<float4>.Handle(uint2(push.outputStorageIndex, 0));
+    output[uint3(id.xy, 0)] = float4(saturate((value - 0.5) * 1.8 + 0.5), 0.0, 0.0, 1.0);
+}
+
+// A tiling 3D texture stored as a 2D array: linear in x and y by the sampler, between layers by hand (wrapping).
+float4 sampleCloudVolume(uint textureIndex, float3 uvw, uint layers)
+{
+    Texture2DArray volume = Texture2DArray.Handle(uint2(textureIndex, 0));
+    SamplerState linearRepeat = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
+    const float layer = frac(uvw.z) * float(layers) - 0.5;
+    const float lower = floor(layer);
+    const float below = lower < 0.0 ? float(layers - 1) : lower;
+    const float above = lower + 1.0 >= float(layers) ? 0.0 : lower + 1.0;
+    return lerp(volume.SampleLevel(linearRepeat, float3(uvw.xy, below), 0.0),
+                volume.SampleLevel(linearRepeat, float3(uvw.xy, above), 0.0), layer - lower);
+}
+
+// Cloud extinction (per km) at p (planet-centered km); heightFraction: where in the layer, 0 bottom to 1 top.
+float cloudDensity(PushConstantSkyAtmosphere push, float3 p, bool withDetail, out float heightFraction)
+{
+    const float r = length(p);
+    heightFraction = (r - (BottomRadius + push.cloudBottomKm)) / max(push.cloudThicknessKm, 1e-3);
+    if (heightFraction <= 0.0 || heightFraction >= 1.0)
+        return 0.0;
+
+    // Horizontal position (around the pole x and z are the ground plane) moved by the wind offset; height in the layer.
+    const float3 q = float3(p.x + push.cloudOffsetXKm, r - BottomRadius - push.cloudBottomKm, p.z + push.cloudOffsetZKm);
+
+    Texture2D weatherTexture = Texture2D.Handle(uint2(push.cloudWeatherTextureIndex, 0));
+    SamplerState linearRepeat = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
+    const float weather = weatherTexture.SampleLevel(linearRepeat, q.xz / CloudWeatherTileKm, 0.0).r;
+    const float coverage = saturate(push.cloudCoverage + (weather - 0.5) * 0.7);
+    if (coverage <= 0.0)
+        return 0.0;
+
+    // Cumulus profile: a rounded bottom, thinning towards the top.
+    const float profile = saturate(heightFraction / 0.12) * saturate((1.0 - heightFraction) / 0.55);
+
+    const float4 shape = sampleCloudVolume(push.cloudShapeTextureIndex, q / push.cloudScaleKm, CloudShapeSize);
+    const float lowFrequency = shape.g * 0.625 + shape.b * 0.25 + shape.a * 0.125;
+    float cloud = saturate(cloudRemap(shape.r, -(1.0 - lowFrequency), 1.0, 0.0, 1.0)) * profile;
+    // Coverage: only the densest part of the shape where coverage is low, all of it under an overcast sky.
+    cloud = saturate(cloudRemap(cloud, 1.0 - coverage, 1.0, 0.0, 1.0)) * coverage;
+    if (cloud <= 0.0)
+        return 0.0;
+
+    if (withDetail)
+    {
+        // Wispy edges at the bottom, billowy towards the top (Schneider's detail erosion).
+        const float3 detail = sampleCloudVolume(push.cloudDetailTextureIndex, q / (push.cloudScaleKm * CloudDetailTileFraction), CloudDetailSize).rgb;
+        const float highFrequency = detail.r * 0.625 + detail.g * 0.25 + detail.b * 0.125;
+        const float erosion = lerp(highFrequency, 1.0 - highFrequency, saturate(heightFraction * 4.0));
+        cloud = saturate(cloudRemap(cloud, erosion * 0.3, 1.0, 0.0, 1.0));
+    }
+    return cloud * push.cloudDensity * CloudExtinctionPerKm;
+}
+
+float henyeyGreenstein(float g, float cosTheta)
+{
+    const float g2 = g * g;
+    return (1.0 - g2) / (4.0 * SkyPI * pow(max(1.0 + g2 - 2.0 * g * cosTheta, 1e-4), 1.5));
+}
+
+// Clouds scatter strongly forward (the silver lining towards the sun) and a little backward.
+float cloudPhase(float cosTheta, float eccentricityScale)
+{
+    return lerp(henyeyGreenstein(-0.3 * eccentricityScale, cosTheta), henyeyGreenstein(0.8 * eccentricityScale, cosTheta), 0.7);
+}
+
+bool raySphereRange(float3 origin, float3 direction, float radius, out float tNear, out float tFar)
+{
+    const float b = dot(origin, direction);
+    const float c = dot(origin, origin) - radius * radius;
+    const float discriminant = b * b - c;
+    tNear = -1.0;
+    tFar = -1.0;
+    if (discriminant < 0.0)
+        return false;
+    const float s = sqrt(discriminant);
+    tNear = -b - s;
+    tFar = -b + s;
+    return true;
+}
+
+// The stretch of the ray inside the cloud layer, for a camera below, inside or above it.
+bool cloudLayerSegment(float3 origin, float3 direction, float inner, float outer, out float tStart, out float tEnd)
+{
+    tStart = 0.0;
+    tEnd = 0.0;
+    float outerNear, outerFar, innerNear, innerFar;
+    if (!raySphereRange(origin, direction, outer, outerNear, outerFar) || outerFar <= 0.0)
+        return false;
+    const bool hitsInner = raySphereRange(origin, direction, inner, innerNear, innerFar);
+    const float r = length(origin);
+    if (r < inner)
+    {
+        tStart = innerFar;
+        tEnd = outerFar;
+    }
+    else if (r < outer)
+    {
+        tStart = 0.0;
+        tEnd = (hitsInner && innerNear > 0.0) ? innerNear : outerFar;
+    }
+    else
+    {
+        tStart = max(outerNear, 0.0);
+        tEnd = (hitsInner && innerNear > 0.0) ? innerNear : outerFar;
+    }
+    return tEnd > tStart;
+}
+
+struct CloudResult
+{
+    float3 luminance;     // per unit sun illuminance, like the sky
+    float transmittance;  // through the clouds
+    float distance;       // where along the ray the clouds are (their light-weighted mean), for the air in front of them
+};
+
+CloudResult marchClouds(PushConstantSkyAtmosphere push, float3 origin, float3 direction, float3 sunDirection, float jitter)
+{
+    CloudResult result;
+    result.luminance = float3(0.0);
+    result.transmittance = 1.0;
+    result.distance = 0.0;
+    if (push.cloudShapeTextureIndex == 0xFFFFFFFF || push.cloudCoverage <= 0.0 || push.cloudDensity <= 0.0)
+        return result;
+
+    const float inner = BottomRadius + push.cloudBottomKm;
+    const float outer = inner + max(push.cloudThicknessKm, 1e-3);
+    float tStart, tEnd;
+    if (!cloudLayerSegment(origin, direction, inner, outer, tStart, tEnd))
+        return result;
+    // The ground in front of the layer (looking down from below it).
+    const float tGround = raySphere(origin, direction, BottomRadius);
+    if (tGround >= 0.0 && tGround < tStart)
+        return result;
+    tEnd = min(tEnd, tStart + CloudMaxMarchKm);
+
+    const int steps = 64;
+    const float dt = (tEnd - tStart) / float(steps);
+    const float cosTheta = dot(direction, sunDirection);
+    float weightedDistance = 0.0;
+    float weightSum = 0.0;
+    for (int i = 0; i < steps; ++i)
+    {
+        const float t = tStart + (float(i) + jitter) * dt;
+        const float3 p = origin + direction * t;
+        float heightFraction;
+        const float density = cloudDensity(push, p, true, heightFraction);
+        if (density <= 0.0)
+            continue;
+
+        // Optical depth towards the sun through the clouds: six growing steps, ~1.3 km.
+        float sunOpticalDepth = 0.0;
+        float travelled = 0.0;
+        for (int j = 0; j < 6; ++j)
+        {
+            const float lightStep = 0.06 * float(j + 1);
+            float unused;
+            sunOpticalDepth += cloudDensity(push, p + sunDirection * (travelled + 0.5 * lightStep), false, unused) * lightStep;
+            travelled += lightStep;
+        }
+
+        const float r = length(p);
+        const float3 up = p / r;
+        const float cosSunZenith = dot(sunDirection, up);
+        const float planetShadow = raySphere(p, sunDirection, BottomRadius) >= 0.0 ? 0.0 : 1.0;
+        const float3 sunLight = planetShadow * sampleTransmittance(push, r, cosSunZenith);
+        const float3 ambient = sampleMultiScattering(push, r, cosSunZenith) * CloudAmbientScale * lerp(0.5, 1.0, heightFraction);
+
+        // Hillaire 2016: multiple scattering as octaves of less extinction, less energy and a wider phase.
+        float scattering = 0.0;
+        float extinctionScale = 1.0;
+        float contribution = 1.0;
+        float eccentricity = 1.0;
+        for (int octave = 0; octave < 3; ++octave)
+        {
+            scattering += contribution * cloudPhase(cosTheta, eccentricity) * exp(-sunOpticalDepth * extinctionScale);
+            extinctionScale *= 0.5;
+            contribution *= 0.5;
+            eccentricity *= 0.5;
+        }
+
+        // Albedo ~1: scattering = extinction. Energy-conserving step, as for the air.
+        const float3 inScattered = density * (sunLight * scattering + ambient);
+        const float stepTransmittance = exp(-density * dt);
+        result.luminance += result.transmittance * (inScattered - inScattered * stepTransmittance) / density;
+        const float absorbed = result.transmittance * (1.0 - stepTransmittance);
+        weightedDistance += t * absorbed;
+        weightSum += absorbed;
+        result.transmittance *= stepTransmittance;
+        if (result.transmittance < 0.01)
+            break;
+    }
+    result.distance = weightSum > 0.0 ? weightedDistance / weightSum : tStart;
+    return result;
+}
+
 [shader("compute")]
 [numthreads(16, 16, 1)]
 void skyCubemapMain(uint3 id : SV_DispatchThreadID, uniform PushConstantSkyAtmosphere push)
@@ -261,10 +517,37 @@ void skyCubemapMain(uint3 id : SV_DispatchThreadID, uniform PushConstantSkyAtmos
     // The world's +Y is up; the camera stands at the planet's north pole, cameraAltitudeKm above the ground.
     const float3 origin = float3(0.0, BottomRadius + max(push.cameraAltitudeKm, PlanetRadiusOffset), 0.0);
     const float3 sunDirection = normalize(push.sunDirection);
-    const ScatteringResult result = integrateScatteredLuminance(push, origin, direction, sunDirection, 32, false, true);
+    const ScatteringResult sky = integrateScatteredLuminance(push, origin, direction, sunDirection, 32, false, true);
+    float3 luminance = sky.luminance;
+
+    // Clouds: in front of the sky behind them, behind the air in front of them.
+    const float jitter = float(cloudHashPcg3d(id).x & 0xFFFFu) / 65536.0;
+    const CloudResult clouds = marchClouds(push, origin, direction, sunDirection, jitter);
+    if (clouds.transmittance < 0.999)
+    {
+        const ScatteringResult front = integrateScatteredLuminance(push, origin, direction, sunDirection, 16, false, false, clouds.distance);
+        // sky = front + T_air * behind, so behind the clouds: (sky - front) dimmed by them.
+        luminance = front.luminance + front.transmittance * clouds.luminance + clouds.transmittance * max(sky.luminance - front.luminance, 0.0);
+    }
 
     RWTexture2DArray<float4> output = RWTexture2DArray<float4>.Handle(uint2(push.outputStorageIndex, 0));
-    output[id] = float4(result.luminance * push.sunIlluminance, 1.0);
+    output[id] = float4(luminance * push.sunIlluminance, 1.0);
+}
+
+// A mip of the environment cubemap from the one above: the centre of a texel here is the shared corner of four texels
+// there, so one bilinear read averages them (the clouds need filtered mips; raymarching each mip would alias them).
+[shader("compute")]
+[numthreads(16, 16, 1)]
+void downsampleCubeMain(uint3 id : SV_DispatchThreadID, uniform PushConstantSkyAtmosphere push)
+{
+    if (id.x >= push.outputSize || id.y >= push.outputSize)
+        return;
+    const float2 st = (float2(id.xy) + 0.5) / float(push.outputSize) * 2.0 - 1.0;
+    TextureCube source = TextureCube.Handle(uint2(push.sourceTextureIndex, 0));
+    SamplerState linearClamp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
+    const float3 color = source.SampleLevel(linearClamp, cubemapDirection(id.z, st), push.sourceLod).rgb;
+    RWTexture2DArray<float4> output = RWTexture2DArray<float4>.Handle(uint2(push.outputStorageIndex, 0));
+    output[id] = float4(color, 1.0);
 }
 
 // Aerial perspective (the paper's camera volume, UE's "aerial perspective LUT"): for each froxel column the camera's view

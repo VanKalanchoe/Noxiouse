@@ -303,6 +303,14 @@ namespace Nox
         glm::vec3 GroundAlbedo{ 0.3f, 0.3f, 0.3f };
         float AltitudeKm = 0.0f;
         float AerialPerspectiveScale = 1.0f; // haze on the scene: multiplies view distances (UE's "distance scale")
+        // Volumetric clouds (procedural sky): a cumulus layer, raymarched into the sky.
+        bool Clouds = true;
+        float CloudCoverage = 0.35f;      // 0 = clear, 1 = overcast
+        float CloudDensity = 1.0f;
+        float CloudBottomKm = 1.5f;
+        float CloudThicknessKm = 2.0f;
+        float CloudScaleKm = 8.0f;        // larger = bigger clouds
+        glm::vec2 CloudOffsetKm{ 0.0f, 0.0f }; // moves the clouds (animate it for wind)
 
         // Exponential height fog (UE's Exponential Height Fog), with either source: thick low down and at the horizon.
         bool HeightFog = false;

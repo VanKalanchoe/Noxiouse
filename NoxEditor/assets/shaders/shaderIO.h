@@ -606,7 +606,22 @@ struct PushConstantSkyAtmosphere
     float ozoneScale;                     // 1 = Earth: the deep blue at the zenith / purple at dusk
     float mieAnisotropy;                  // Mie phase g (0.8: forward-scattering glow around the sun)
     float cameraAltitudeKm;               // where the sky is seen from, above the ground
-    float padding;                        // std430 rounds the block up to 16 bytes
+    float padding;
+    // Volumetric clouds (CloudNoise.slang textures; cloudShapeTextureIndex ~0 = no clouds): a layer cloudBottomKm above
+    // the ground, cloudThicknessKm thick.
+    uint32_t cloudShapeTextureIndex;      // 2D array standing in for a 3D texture: Perlin-Worley (r) + Worley FBMs (gba)
+    uint32_t cloudDetailTextureIndex;     // 2D array: Worley FBMs eroding the edges
+    uint32_t cloudWeatherTextureIndex;    // 2D: where clouds are (coverage variation)
+    float cloudCoverage;                  // 0 = clear, 1 = overcast
+    float cloudDensity;                   // scales the extinction (1 = cumulus, ~40 / km)
+    float cloudBottomKm;
+    float cloudThicknessKm;
+    float cloudScaleKm;                   // size of one tile of the shape noise
+    float cloudOffsetXKm;                 // moves the clouds (wind)
+    float cloudOffsetZKm;
+    // downsampleCubeMain: the cubemap read (sampled slot) and the mip read from it.
+    uint32_t sourceTextureIndex;
+    float sourceLod;
 };
 
 struct PushConstantSkybox
@@ -653,7 +668,8 @@ struct PushConstantAerialPerspective
 // The std430 offsets the shaders read (checked against the SPIR-V of the engine's own compile path).
 static_assert(offsetof(PushConstantSkyAtmosphere, sunDirection) == 16 && offsetof(PushConstantSkyAtmosphere, sunIlluminance) == 32 &&
               offsetof(PushConstantSkyAtmosphere, groundAlbedo) == 48 && offsetof(PushConstantSkyAtmosphere, cameraAltitudeKm) == 72 &&
-              sizeof(PushConstantSkyAtmosphere) == 80, "PushConstantSkyAtmosphere must match its std430 layout");
+              offsetof(PushConstantSkyAtmosphere, cloudShapeTextureIndex) == 80 && offsetof(PushConstantSkyAtmosphere, sourceLod) == 124 &&
+              sizeof(PushConstantSkyAtmosphere) == 128, "PushConstantSkyAtmosphere must match its std430 layout");
 static_assert(offsetof(PushConstantSkybox, sunDirection) == 16 && offsetof(PushConstantSkybox, sunDiscRadiance) == 32 &&
               offsetof(PushConstantSkybox, skyAltitudeKm) == 44 && sizeof(PushConstantSkybox) == 48,
               "PushConstantSkybox must match its std430 layout");

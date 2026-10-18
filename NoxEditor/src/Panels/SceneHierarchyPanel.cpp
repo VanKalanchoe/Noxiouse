@@ -1491,6 +1491,23 @@ namespace Nox
                 ImGui::DragFloat("Aerial Perspective", &component.AerialPerspectiveScale, 0.1f, 0.0f, 1000.0f, "%.1f x");
                 ImGui::SetItemTooltip("Haze on the scene: distant objects fade into the sky's color. Multiplies distances:\n"
                                       "1 = real air (subtle below a few km), higher for a hazier look in small scenes, 0 = off.");
+
+                ImGui::SeparatorText("Clouds");
+                ImGui::Checkbox("Volumetric Clouds", &component.Clouds);
+                if (component.Clouds)
+                {
+                    ImGui::SliderFloat("Coverage", &component.CloudCoverage, 0.0f, 1.0f, "%.2f");
+                    ImGui::SetItemTooltip("How much of the sky the clouds cover: 0 = clear, 0.35 = scattered cumulus, 1 = overcast.");
+                    ImGui::DragFloat("Cloud Density", &component.CloudDensity, 0.01f, 0.0f, 10.0f, "%.2f x");
+                    ImGui::SetItemTooltip("Thicker clouds are darker underneath and block more sun.");
+                    ImGui::DragFloat("Cloud Bottom", &component.CloudBottomKm, 0.01f, 0.0f, 20.0f, "%.2f km");
+                    ImGui::DragFloat("Cloud Thickness", &component.CloudThicknessKm, 0.01f, 0.1f, 10.0f, "%.2f km");
+                    ImGui::DragFloat("Cloud Size", &component.CloudScaleKm, 0.05f, 0.5f, 100.0f, "%.1f km");
+                    ImGui::SetItemTooltip("Scale of the cloud shapes: larger = bigger clouds.");
+                    ImGui::DragFloat2("Cloud Offset", glm::value_ptr(component.CloudOffsetKm), 0.05f, -1000.0f, 1000.0f, "%.2f km");
+                    ImGui::SetItemTooltip("Moves the clouds (change it over time for wind). Each change re-renders the sky (~ms).");
+                }
+
                 DrawHeightFogControls(component);
                 return;
             }

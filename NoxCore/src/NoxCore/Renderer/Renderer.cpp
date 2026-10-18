@@ -2116,6 +2116,9 @@ namespace Nox
         releaseEnvironmentTexture(m_skyTransmittanceLut);
         releaseEnvironmentTexture(m_skyMultiScatteringLut);
         releaseEnvironmentTexture(m_skyAerialPerspective);
+        releaseEnvironmentTexture(m_skyCloudShape);
+        releaseEnvironmentTexture(m_skyCloudDetail);
+        releaseEnvironmentTexture(m_skyCloudWeather);
 
         releaseEnvironmentTexture(m_environmentCubemap);
         m_renderGraph.ResetHistory("PT Environment Importance");
@@ -2469,6 +2472,8 @@ namespace Nox
             m_skyCubemapPipeline = createSkyPipeline("skyCubemapMain");
         if (!m_skyAerialPerspectivePipeline)
             m_skyAerialPerspectivePipeline = createSkyPipeline("aerialPerspectiveMain");
+        if (!m_skyDownsamplePipeline)
+            m_skyDownsamplePipeline = createSkyPipeline("downsampleCubeMain");
 
         auto createLut = [this](uint32_t width, uint32_t height)
         {
@@ -2519,6 +2524,58 @@ namespace Nox
         m_resourceHeap->registerTexture(*m_skyAerialPerspective, NRI::TextureUsage::ShaderResource);
         m_skyStorageSlots.push_back(m_resourceHeap->registerStorageTextureMip(*m_skyAerialPerspective, 0));
 
+        // Cloud noise, made once here (it never changes): tiling 3D noise stored as 2D arrays, and the weather map.
+        auto createNoise = [this](uint32_t size, uint32_t layers)
+        {
+            Ref<Texture2D> texture = m_device->createTexture(NRI::TextureDesc{
+                .width = size,
+                .height = size,
+                .arrayLayers = layers,
+                .isCubeMap = false,
+                .mipLevels = 1,
+                .sampleCount = 1,
+                .usage = NRI::TextureUsage::Storage,
+                .format = NRI::ImageFormat::R16G16B16A16_SFLOAT
+            });
+            m_resourceHeap->registerTexture(*texture, NRI::TextureUsage::ShaderResource);
+            return texture;
+        };
+        constexpr uint32_t CloudShapeSize = 64;   // SkyAtmosphere.slang's sizes
+        constexpr uint32_t CloudDetailSize = 32;
+        constexpr uint32_t CloudWeatherSize = 128;
+        m_skyCloudShape = createNoise(CloudShapeSize, CloudShapeSize);
+        m_skyCloudDetail = createNoise(CloudDetailSize, CloudDetailSize);
+        m_skyCloudWeather = createNoise(CloudWeatherSize, 1);
+        {
+            std::unique_ptr<NRI::Pipeline> shapePipeline = createSkyPipeline("cloudShapeNoiseMain");
+            std::unique_ptr<NRI::Pipeline> detailPipeline = createSkyPipeline("cloudDetailNoiseMain");
+            std::unique_ptr<NRI::Pipeline> weatherPipeline = createSkyPipeline("cloudWeatherMain");
+            const uint32_t shapeStorage = m_resourceHeap->registerStorageTextureMip(*m_skyCloudShape, 0);
+            const uint32_t detailStorage = m_resourceHeap->registerStorageTextureMip(*m_skyCloudDetail, 0);
+            const uint32_t weatherStorage = m_resourceHeap->registerStorageTextureMip(*m_skyCloudWeather, 0);
+
+            std::unique_ptr<NRI::CommandBuffer> cmd = beginSingleTimeCommands();
+            cmd->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
+            shaderio::PushConstantSkyAtmosphere noisePush{};
+            noisePush.outputStorageIndex = shapeStorage;
+            cmd->bindPipeline(NRI::PipelineBindPoint::Compute, *shapePipeline);
+            cmd->pushData(&noisePush, sizeof(noisePush));
+            cmd->dispatch(CloudShapeSize / 4, CloudShapeSize / 4, CloudShapeSize / 4);
+            noisePush.outputStorageIndex = detailStorage;
+            cmd->bindPipeline(NRI::PipelineBindPoint::Compute, *detailPipeline);
+            cmd->pushData(&noisePush, sizeof(noisePush));
+            cmd->dispatch(CloudDetailSize / 4, CloudDetailSize / 4, CloudDetailSize / 4);
+            noisePush.outputStorageIndex = weatherStorage;
+            cmd->bindPipeline(NRI::PipelineBindPoint::Compute, *weatherPipeline);
+            cmd->pushData(&noisePush, sizeof(noisePush));
+            cmd->dispatch(CloudWeatherSize / 8, CloudWeatherSize / 8, 1);
+            endSingleTimeCommands(std::move(cmd));
+
+            m_resourceHeap->unregisterTexture(shapeStorage);
+            m_resourceHeap->unregisterTexture(detailStorage);
+            m_resourceHeap->unregisterTexture(weatherStorage);
+        }
+
         // The BRDF LUT stays across environments; a scene that starts with the sky has none yet.
         createBRDFLut();
     }
@@ -2536,6 +2593,7 @@ namespace Nox
             NRI::Pipeline* transmittance;
             NRI::Pipeline* multiScattering;
             NRI::Pipeline* cubemap;
+            NRI::Pipeline* downsample;
             NRI::Pipeline* irradiance;
             NRI::Pipeline* prefilter;
             shaderio::PushConstantSkyAtmosphere push;
@@ -2546,6 +2604,7 @@ namespace Nox
         data.transmittance = m_skyTransmittancePipeline.get();
         data.multiScattering = m_skyMultiScatteringPipeline.get();
         data.cubemap = m_skyCubemapPipeline.get();
+        data.downsample = m_skyDownsamplePipeline.get();
         data.irradiance = m_irradiancePipeline.get();
         data.prefilter = m_prefilterPipeline.get();
         data.storageSlots = m_skyStorageSlots;
@@ -2565,6 +2624,17 @@ namespace Nox
         push.cameraAltitudeKm = glm::clamp(settings.AltitudeKm, 0.0f, 99.0f);
         push.transmittanceTextureIndex = m_skyTransmittanceLut->GetDescriptorIndexSlot();
         push.multiScatteringTextureIndex = m_skyMultiScatteringLut->GetDescriptorIndexSlot();
+        const bool clouds = settings.Clouds && m_skyCloudShape && settings.CloudCoverage > 0.0f && settings.CloudDensity > 0.0f;
+        push.cloudShapeTextureIndex = clouds ? m_skyCloudShape->GetDescriptorIndexSlot() : 0xFFFFFFFF;
+        push.cloudDetailTextureIndex = clouds ? m_skyCloudDetail->GetDescriptorIndexSlot() : 0xFFFFFFFF;
+        push.cloudWeatherTextureIndex = clouds ? m_skyCloudWeather->GetDescriptorIndexSlot() : 0xFFFFFFFF;
+        push.cloudCoverage = glm::clamp(settings.CloudCoverage, 0.0f, 1.0f);
+        push.cloudDensity = glm::max(settings.CloudDensity, 0.0f);
+        push.cloudBottomKm = glm::clamp(settings.CloudBottomKm, 0.0f, 90.0f);
+        push.cloudThicknessKm = glm::clamp(settings.CloudThicknessKm, 0.05f, 20.0f);
+        push.cloudScaleKm = glm::max(settings.CloudScaleKm, 0.1f);
+        push.cloudOffsetXKm = settings.CloudOffsetKm.x;
+        push.cloudOffsetZKm = settings.CloudOffsetKm.y;
 
         m_renderGraph.AddPass("Procedural Sky", RGPassFlags::NeverCull,
             [](RGBuilder&)
@@ -2605,18 +2675,27 @@ namespace Nox
                     cmd.executionBarrier();
                 }
 
-                // Every mip raymarched directly (the sky is smooth, no blit chain needed).
+                // The top mip raymarched (sky and clouds), every other mip averaged from the one above it.
                 cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *data.cubemap);
-                for (uint32_t mip = 0; mip < environmentMips; ++mip)
+                push.outputStorageIndex = environmentStorage[0];
+                push.outputSize = SkyEnvironmentSize;
+                push.outputHeight = SkyEnvironmentSize;
+                cmd.pushData(&push, sizeof(push));
+                cmd.dispatch((SkyEnvironmentSize + 15) / 16, (SkyEnvironmentSize + 15) / 16, 6);
+                cmd.executionBarrier();
+                cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *data.downsample);
+                for (uint32_t mip = 1; mip < environmentMips; ++mip)
                 {
                     const uint32_t size = std::max(SkyEnvironmentSize >> mip, 1u);
                     push.outputStorageIndex = environmentStorage[mip];
                     push.outputSize = size;
                     push.outputHeight = size;
+                    push.sourceTextureIndex = data.environmentSlot;
+                    push.sourceLod = static_cast<float>(mip - 1);
                     cmd.pushData(&push, sizeof(push));
                     cmd.dispatch((size + 15) / 16, (size + 15) / 16, 6);
+                    cmd.executionBarrier();
                 }
-                cmd.executionBarrier();
 
                 // The IBL filters, as for an HDR map, both reading the environment's mips.
                 cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *data.irradiance);
