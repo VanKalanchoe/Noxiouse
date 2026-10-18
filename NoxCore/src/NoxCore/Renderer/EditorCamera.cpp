@@ -345,6 +345,16 @@ namespace Nox
 		}
 	}
 
+	void EditorCamera::SetOrientation(float pitch, float yaw)
+	{
+		m_Pitch = m_TargetPitch = pitch;
+		m_Yaw = m_TargetYaw = yaw;
+		m_TargetFocalPoint = m_FocalPoint;
+		m_TargetDistance = m_Distance;
+		m_TargetsValid = true;
+		UpdateView();
+	}
+
 	void EditorCamera::SetViewMode(EditorViewMode mode)
 	{
 		if (mode == m_ViewMode)

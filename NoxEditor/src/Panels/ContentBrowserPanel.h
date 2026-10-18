@@ -38,7 +38,7 @@ namespace Nox
     private:
         void RefreshAssetTree();
         AssetHandle FindAssetHandle(const std::filesystem::path& relativePath) const;
-        Ref<Texture2D> GetThumbnail(AssetHandle handle, const AssetMetadata& metadata);
+        Ref<Texture2D> GetThumbnail(AssetHandle handle, const AssetMetadata& metadata, bool& rendered);
         void SetImportDestination(const std::filesystem::path& path);
         // Windows-style rename: the asset's name becomes a text field with the whole name selected.
         void BeginRename(AssetHandle handle);

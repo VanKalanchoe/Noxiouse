@@ -2,6 +2,7 @@
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Asset/Material.h"
 #include "NoxCore/Asset/TextureImporter.h"
+#include "AssetPreviewRenderer.h"
 
 namespace Nox
 {
@@ -12,8 +13,20 @@ namespace Nox
         m_ThumbnailCachePath = m_Project->GetAssetDirectory() / "Thumbnail.cache";
     }
 
-    Ref<Texture2D> ThumbnailCache::GetOrCreateThumbnail(AssetHandle handle, const AssetMetadata& metadata)
+    Ref<Texture2D> ThumbnailCache::GetOrCreateThumbnail(AssetHandle handle, const AssetMetadata& metadata, bool& rendered)
     {
+        rendered = false;
+        if (AssetPreviewRenderer::CanRender(metadata.Type))
+        {
+            if (Ref<Texture2D> drawn = AssetPreviewRenderer::Get().GetThumbnail(handle))
+            {
+                rendered = true;
+                return drawn;
+            }
+            if (metadata.Type != AssetType::Material)
+                return {};
+        }
+
         // Thumbnails are GPU assets kept alive for the lifetime of this cache.
         // Do not hit the filesystem again for every ImGui frame.
         auto existing = m_CachedImages.find(handle);
@@ -30,7 +43,7 @@ namespace Nox
         }
         else if (metadata.Type == AssetType::Material)
         {
-            // Until the offscreen material preview pass exists, use the material's base-color asset as its thumbnail.
+            // Until its sphere has been drawn, the material's base-color texture.
             textureHandle = GetMaterialTexture(handle);
         }
         if (textureHandle == 0 || AssetManager::RequestAsset(textureHandle) != AssetState::Ready)

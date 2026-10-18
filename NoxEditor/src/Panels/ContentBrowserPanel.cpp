@@ -46,9 +46,9 @@ namespace Nox
         return 0;
     }
 
-    Ref<Texture2D> ContentBrowserPanel::GetThumbnail(AssetHandle handle, const AssetMetadata& metadata)
+    Ref<Texture2D> ContentBrowserPanel::GetThumbnail(AssetHandle handle, const AssetMetadata& metadata, bool& rendered)
     {
-        return m_ThumbnailCache->GetOrCreateThumbnail(handle, metadata);
+        return m_ThumbnailCache->GetOrCreateThumbnail(handle, metadata, rendered);
     }
 
     void ContentBrowserPanel::SetImportDestination(const std::filesystem::path& path)
@@ -626,16 +626,23 @@ namespace Nox
                         const AssetHandle handle = browserEntry.Handle;
                         const auto& metadata = browserEntry.Metadata;
 
-                        Ref<Texture2D> thumbnail = GetThumbnail(handle, metadata);
+                        bool renderedThumbnail = false;
+                        Ref<Texture2D> thumbnail = GetThumbnail(handle, metadata, renderedThumbnail);
                         if (!thumbnail)
+                        {
                             thumbnail = m_FileIcon;
+                            renderedThumbnail = false;
+                        }
+                        // Drawn previews are upright; imported textures and the icons are stored the other way up.
+                        const ImVec2 uv0 = renderedThumbnail ? ImVec2(0, 0) : ImVec2(0, 1);
+                        const ImVec2 uv1 = renderedThumbnail ? ImVec2(1, 1) : ImVec2(1, 0);
 
                         const bool selected = m_Selected.contains(handle);
                         ImGui::PushStyleColor(ImGuiCol_Button, selected ? ImVec4(0.26f, 0.45f, 0.75f, 0.55f) : ImVec4(0, 0, 0, 0));
                         // Prefabs are blue (icon and name), like prefab instances in the hierarchy.
                         const bool isPrefab = metadata.Type == AssetType::Prefab;
                         const bool clicked = ImGui::ImageButton(browserEntry.Id.c_str(), thumbnail->getImTextureID(),
-                            {m_ThumbnailSize, m_ThumbnailSize}, {0, 1}, {1, 0}, ImVec4(0, 0, 0, 0),
+                            {m_ThumbnailSize, m_ThumbnailSize}, uv0, uv1, ImVec4(0, 0, 0, 0),
                             isPrefab ? ImVec4(0.45f, 0.7f, 1.0f, 1.0f) : ImVec4(1, 1, 1, 1));
                         ImGui::PopStyleColor();
 

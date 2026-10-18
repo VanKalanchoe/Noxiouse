@@ -3945,6 +3945,7 @@ namespace Nox
             commandBuffers = m_renderGraph.Execute(frameIndex);
         }
         NOX_PROFILE_COUNTER("Command Buffers", commandBuffers.size());
+        m_takenExtraViewImages.clear();
         // An extra view draws in the frames it is submitted in. What it drew is shown from the next frame on (this frame's ImGui
         // still shows the previous texture, released once the frames in flight are done with it).
         for (ExtraView& view : m_extraViews)
@@ -5453,7 +5454,7 @@ namespace Nox
         m_renderer2D->EndScene();
     }
 
-    void Renderer::SubmitExtraView(uint32_t index, const EditorCamera& camera, NRI::Extent2D size, const shaderio::PushConstantGrid* grid)
+    void Renderer::SubmitExtraView(uint32_t index, const EditorCamera& camera, NRI::Extent2D size, const shaderio::PushConstantGrid* grid, bool preview)
     {
         if (!m_isEditor || index >= MaxExtraViews || size.width == 0 || size.height == 0)
             return;
@@ -5501,7 +5502,24 @@ namespace Nox
         view.HasGrid = grid != nullptr;
         if (grid)
             view.Grid = *grid;
+        view.Preview = preview;
         view.Submitted = true;
+    }
+
+    Ref<Texture2D> Renderer::TakeExtraViewTexture(uint32_t index)
+    {
+        if (index >= MaxExtraViews)
+            return nullptr;
+        ExtraView& view = m_extraViews[index];
+        Ref<Texture2D> image = view.Shown;
+        if (view.Output && view.Output != view.Shown)
+            deferAssetRelease(view.Output);
+        view.Output = nullptr;
+        view.Shown = nullptr;
+        view.Size = { 0, 0 };
+        if (image)
+            m_takenExtraViewImages.push_back(image);
+        return image;
     }
 
     void Renderer::ReleaseExtraView(uint32_t index)
@@ -5545,6 +5563,12 @@ namespace Nox
             // The atlases are only read (and declared) when DDGI ran this frame.
             if (!m_frame.ddgiAdded)
                 uniforms.enableDDGI = 0;
+            // An asset preview stands far below the scene: its shadow rays would hit the world above, its DDGI lookups the grid's edge.
+            if (view.Preview)
+            {
+                uniforms.enableRTShadows = 0;
+                uniforms.enableDDGI = 0;
+            }
             memcpy(view.UniformBuffersMapped[frameIndex], &uniforms, sizeof(shaderio::UniformBufferObject));
         }
     }

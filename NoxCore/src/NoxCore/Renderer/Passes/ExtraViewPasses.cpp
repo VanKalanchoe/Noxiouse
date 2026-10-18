@@ -15,14 +15,14 @@ namespace Nox
     namespace
     {
         // Graph names must outlive the graph: a literal per view.
-        constexpr const char* kCullNames[Renderer::MaxExtraViews] = { "Viewport 1 Culling", "Viewport 2 Culling", "Viewport 3 Culling", "Viewport 4 Culling" };
-        constexpr const char* kForwardNames[Renderer::MaxExtraViews] = { "Viewport 1 Forward", "Viewport 2 Forward", "Viewport 3 Forward", "Viewport 4 Forward" };
-        constexpr const char* kPostNames[Renderer::MaxExtraViews] = { "Viewport 1 Post Process", "Viewport 2 Post Process", "Viewport 3 Post Process", "Viewport 4 Post Process" };
-        constexpr const char* kOverlayNames[Renderer::MaxExtraViews] = { "Viewport 1 2D Overlay", "Viewport 2 2D Overlay", "Viewport 3 2D Overlay", "Viewport 4 2D Overlay" };
-        constexpr const char* kOutputNames[Renderer::MaxExtraViews] = { "Viewport 1 Image", "Viewport 2 Image", "Viewport 3 Image", "Viewport 4 Image" };
-        constexpr const char* kHdrNames[Renderer::MaxExtraViews] = { "Viewport 1 HDR", "Viewport 2 HDR", "Viewport 3 HDR", "Viewport 4 HDR" };
-        constexpr const char* kEntityNames[Renderer::MaxExtraViews] = { "Viewport 1 Entity IDs", "Viewport 2 Entity IDs", "Viewport 3 Entity IDs", "Viewport 4 Entity IDs" };
-        constexpr const char* kDepthNames[Renderer::MaxExtraViews] = { "Viewport 1 Depth", "Viewport 2 Depth", "Viewport 3 Depth", "Viewport 4 Depth" };
+        constexpr const char* kCullNames[Renderer::MaxExtraViews] = { "Viewport 1 Culling", "Viewport 2 Culling", "Viewport 3 Culling", "Viewport 4 Culling", "Thumbnail Culling", "Material Preview Culling" };
+        constexpr const char* kForwardNames[Renderer::MaxExtraViews] = { "Viewport 1 Forward", "Viewport 2 Forward", "Viewport 3 Forward", "Viewport 4 Forward", "Thumbnail Forward", "Material Preview Forward" };
+        constexpr const char* kPostNames[Renderer::MaxExtraViews] = { "Viewport 1 Post Process", "Viewport 2 Post Process", "Viewport 3 Post Process", "Viewport 4 Post Process", "Thumbnail Post Process", "Material Preview Post Process" };
+        constexpr const char* kOverlayNames[Renderer::MaxExtraViews] = { "Viewport 1 2D Overlay", "Viewport 2 2D Overlay", "Viewport 3 2D Overlay", "Viewport 4 2D Overlay", "Thumbnail 2D Overlay", "Material Preview 2D Overlay" };
+        constexpr const char* kOutputNames[Renderer::MaxExtraViews] = { "Viewport 1 Image", "Viewport 2 Image", "Viewport 3 Image", "Viewport 4 Image", "Thumbnail Image", "Material Preview Image" };
+        constexpr const char* kHdrNames[Renderer::MaxExtraViews] = { "Viewport 1 HDR", "Viewport 2 HDR", "Viewport 3 HDR", "Viewport 4 HDR", "Thumbnail HDR", "Material Preview HDR" };
+        constexpr const char* kEntityNames[Renderer::MaxExtraViews] = { "Viewport 1 Entity IDs", "Viewport 2 Entity IDs", "Viewport 3 Entity IDs", "Viewport 4 Entity IDs", "Thumbnail Entity IDs", "Material Preview Entity IDs" };
+        constexpr const char* kDepthNames[Renderer::MaxExtraViews] = { "Viewport 1 Depth", "Viewport 2 Depth", "Viewport 3 Depth", "Viewport 4 Depth", "Thumbnail Depth", "Material Preview Depth" };
     }
 
     void Renderer::addExtraViewPasses()
@@ -39,7 +39,7 @@ namespace Nox
         const uint32_t blockCount = (entryCount + shaderio::CULL_BLOCK_SIZE - 1) / shaderio::CULL_BLOCK_SIZE;
         // The camera's exposure is shared (auto exposure measured the main view; addPostProcessPass wrote it earlier).
         const bool postReady = m_postProcessPipeline && m_autoExposureBuildPipeline && m_autoExposureReducePipeline;
-        const bool autoExposure = postReady && m_autoExposure;
+        const bool cameraAutoExposure = postReady && m_autoExposure;
         const shaderio::PushConstantSkybox skyboxSun = makeSkyboxSunPush();
         const bool ddgi = m_frame.ddgiAdded;
         const uint32_t ddgiIndex = m_frame.ddgiWriteIndex;
@@ -54,6 +54,8 @@ namespace Nox
             NRI::Buffer* uniformBuffer = view.UniformBuffers[frameIndex].get();
             NRI::Buffer* cullViewBuffer = view.CullViewBuffers[frameIndex].get();
             const glm::mat4 viewProjection = view.Projection * view.View;
+            // An asset preview keeps its own brightness whatever the scene's exposure is doing.
+            const bool autoExposure = cameraAutoExposure && !view.Preview;
 
             // What this camera sees of the draw list: the frustum test only (no depth pyramid of its own).
             ViewDrawResources draws;

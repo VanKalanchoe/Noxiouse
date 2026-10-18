@@ -12,12 +12,15 @@ namespace Nox
         const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
 
         // The editor's extra viewports show their own images (addExtraViewPasses draws them; importing again returns the same handle).
-        std::array<RGTexture, MaxExtraViews> extraViewImages{};
+        std::vector<RGTexture> extraViewImages;
         for (uint32_t index = 0; index < MaxExtraViews; ++index)
         {
             if (m_extraViews[index].Shown)
-                extraViewImages[index] = m_renderGraph.ImportTexture("Extra View Image", m_extraViews[index].Shown.get());
+                extraViewImages.push_back(m_renderGraph.ImportTexture("Extra View Image", m_extraViews[index].Shown.get()));
         }
+        // Asset thumbnails taken from a view this frame: read once more here, after that nothing writes them.
+        for (const Ref<Texture2D>& image : m_takenExtraViewImages)
+            extraViewImages.push_back(m_renderGraph.ImportTexture("Asset Thumbnail", image.get()));
 
         // Editor: ImGui (its viewport window shows the scene image). Runtime: fullscreen present of the scene image.
         m_renderGraph.AddPass("ImGui / Present Pass", RGPassFlags::Raster,

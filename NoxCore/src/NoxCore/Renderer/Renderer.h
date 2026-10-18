@@ -290,11 +290,16 @@ namespace Nox
         // a texture of its own. Submit it every frame it should draw, from OnUpdate (before ImGui shows the texture). GetExtraViewTexture is
         // the last image drawn completely (after a resize the old one, until the new size has been drawn once; null before the first).
         // grid: the view's world grid (Renderer2D::MakeGrid), or null.
-        static constexpr uint32_t MaxExtraViews = 4;
-        void SubmitExtraView(uint32_t index, const EditorCamera& camera, NRI::Extent2D size, const shaderio::PushConstantGrid* grid);
+        // Slots 0-3 are the editor's viewports; the asset previews use their own (preview: no shadow rays, no DDGI, fixed exposure).
+        static constexpr uint32_t MaxExtraViews = 6;
+        static constexpr uint32_t ThumbnailView = 4;
+        static constexpr uint32_t LivePreviewView = 5;
+        void SubmitExtraView(uint32_t index, const EditorCamera& camera, NRI::Extent2D size, const shaderio::PushConstantGrid* grid, bool preview = false);
         Texture2D* GetExtraViewTexture(uint32_t index) const { return index < MaxExtraViews ? m_extraViews[index].Shown.get() : nullptr; }
         // Drops a view's texture (its viewport closed).
         void ReleaseExtraView(uint32_t index);
+        // Hands the view's last drawn image over for good (an asset thumbnail): the view starts a new texture at its next submit.
+        Ref<Texture2D> TakeExtraViewTexture(uint32_t index);
         // The camera jumped (the editor's active viewport changed): the temporal histories start over from the next frame (DLSS,
         // the denoisers, path tracer accumulation, the occlusion test's depth pyramid of the old view).
         void ResetCameraHistory()
@@ -1186,6 +1191,7 @@ namespace Nox
             bool Orthographic = false;
             NRI::Extent2D Size{ 0, 0 };
             bool HasGrid = false;
+            bool Preview = false; // an asset preview: no shadow rays (the scene is above its stage), no DDGI, the uniforms' exposure
             shaderio::PushConstantGrid Grid{};
             Ref<Texture2D> Output; // LDR (Surface format) this frame draws into
             Ref<Texture2D> Shown;  // the last texture drawn completely: what the viewport window shows
@@ -1194,6 +1200,9 @@ namespace Nox
             std::vector<std::unique_ptr<NRI::Buffer>> CullViewBuffers;
         };
         std::array<ExtraView, MaxExtraViews> m_extraViews;
+        // Images taken this frame (TakeExtraViewTexture): the present pass reads them once more, so the graph orders their last write
+        // before ImGui samples them from now on.
+        std::vector<Ref<Texture2D>> m_takenExtraViewImages;
 
         // Entity ID readback (entity IDs themselves are render graph textures, see Passes/FrameGraphResources.h)
         bool m_orthographic = false; // the editor camera is in an ortho view (no jitter, no upscaling, full mesh detail)

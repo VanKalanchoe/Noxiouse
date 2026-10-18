@@ -16,8 +16,10 @@ namespace Nox
     public:
         ThumbnailCache(Ref<Project> project);
 
-        // Null until the thumbnail's texture has loaded (requested in the background; the panel shows the file icon).
-        Ref<Texture2D> GetOrCreateThumbnail(AssetHandle handle, const AssetMetadata& metadata);
+        // Null until the thumbnail's texture has loaded or been drawn (requested in the background; the panel shows the file icon).
+        // Meshes and materials are drawn by AssetPreviewRenderer (a material shows its base color texture until then); rendered:
+        // such a drawn image, which is upright (imported textures show flipped).
+        Ref<Texture2D> GetOrCreateThumbnail(AssetHandle handle, const AssetMetadata& metadata, bool& rendered);
     private:
         // The texture a material's thumbnail shows (its base color), 0 for none or until the material has loaded.
         AssetHandle GetMaterialTexture(AssetHandle material);

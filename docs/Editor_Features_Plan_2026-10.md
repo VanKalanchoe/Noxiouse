@@ -80,7 +80,24 @@
   checkboxes and Delete Selected (through the same confirmation).
 - Not yet: moving / renaming textures, materials and meshes (needs rewriting the paths that name them), redirectors.
 
-B1 needs the renderer to draw more than one view per frame, the same work as F5's M2 (§4); do M2 first.
+**B1 / B2 built (2026-10-18, untested)** on the extra views of F5 (`Panels/AssetPreviewRenderer.{h,cpp}`):
+
+- The asset is put on a **preview stage 10 km below the world** (GPU instances only, no entity): out of every camera's sight,
+  and the preview views trace no shadow rays and skip DDGI (`Renderer::SubmitExtraView(..., preview = true)`), so the scene
+  above neither shadows nor lights it wrongly. A 30 degree camera frames its bounds from the front right, 22 degrees above;
+  the scene's lights and environment light it, at the uniforms' fixed exposure.
+- **B1, thumbnails:** meshes and static meshes as themselves, materials on the Sphere shape (made in the project's Shapes
+  folder the first time, like Create > Shapes). One at a time, the most recently asked-for first (the tiles on screen), drawn
+  8 frames (GPU scene upload, materials settling) and then taken over as a 192 x 192 texture
+  (`Renderer::TakeExtraViewTexture`); up to 512 kept for the session, the least recently shown dropped. A material shows its
+  base-color texture until its sphere is drawn; editing it draws it again. Prefabs and source models (.gltf) keep their icons.
+- **B2:** the Material Editor shows the material on a sphere at 160 px, drawn every frame the window shows (its own extra
+  view), so every edit shows at once. A second Material Editor shown at the same time shows its thumbnail.
+- The assets on the stage are reported to the unused-asset sweep (`CollectAssetReferences`).
+
+Not yet: saving thumbnails to disk (they are drawn again each session), texture streaming feedback from the preview views
+(their textures stay at the mips the scene asked for), prefab and model (.gltf) thumbnails, a neutral backdrop instead of the
+sky.
 
 ## 3. F3, the rest: animation
 

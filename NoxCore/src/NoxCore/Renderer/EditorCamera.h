@@ -39,6 +39,8 @@ namespace Nox
         // UE5's "Frame Selected" (F, or double-clicking an entity in the Outliner): re-centres on `centre` at a distance that
         // fits a sphere of `radius` in view (padded so it isn't touching the frame edge), instead of a fixed offset.
         void Focus(const glm::vec3& centre, float radius);
+        // Looks at the focal point from this pitch (radians, positive looks down) and yaw (0 looks along -Z), at once.
+        void SetOrientation(float pitch, float yaw);
 
         inline void SetViewportSize(float width, float height) { m_ViewportWidth = width; m_ViewportHeight = height; UpdateProjection(); }
 

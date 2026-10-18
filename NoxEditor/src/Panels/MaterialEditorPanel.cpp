@@ -12,6 +12,7 @@
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Renderer/Renderer.h"
+#include "AssetPreviewRenderer.h"
 
 namespace Nox
 {
@@ -54,11 +55,17 @@ namespace Nox
         const AssetMetadata metadata = Project::GetActive()->GetEditorAssetManager()->GetMetadata(m_Material);
         ImGui::TextDisabled("%s", metadata.FilePath.generic_string().c_str());
 
-        // A swatch of the color the material shades with until a rendered preview exists (planned: an offscreen sphere preview,
-        // docs/Editor_Features_Plan_2026-10.md).
-        const glm::vec4 swatch = data.Workflow == 1.0f ? data.DiffuseFactor : data.BaseColorFactor;
-        ImGui::ColorButton("##swatch", ImVec4(swatch.r, swatch.g, swatch.b, 1.0f),
-                           ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoDragDrop, ImVec2(64.0f, 64.0f));
+        // The material on a sphere, drawn every frame this window shows (AssetPreviewRenderer), so edits show at once. A swatch of
+        // its color until the first image is there.
+        constexpr float PreviewSize = 160.0f;
+        if (Texture2D* preview = AssetPreviewRenderer::Get().GetLivePreview(m_Material, static_cast<uint32_t>(PreviewSize)))
+            ImGui::Image(preview->getImTextureID(), ImVec2(PreviewSize, PreviewSize));
+        else
+        {
+            const glm::vec4 swatch = data.Workflow == 1.0f ? data.DiffuseFactor : data.BaseColorFactor;
+            ImGui::ColorButton("##swatch", ImVec4(swatch.r, swatch.g, swatch.b, 1.0f),
+                               ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoDragDrop, ImVec2(PreviewSize, PreviewSize));
+        }
         ImGui::Separator();
 
         DrawProperties(m_Material, data);
@@ -146,8 +153,9 @@ namespace Nox
 
         if (changed)
         {
-            // Every instance using this material shades with the edit from this frame.
+            // Every instance using this material shades with the edit from this frame; its Content Browser thumbnail is drawn again.
             Renderer::MarkMaterialChanged(handle);
+            AssetPreviewRenderer::Get().Invalidate(handle);
             const auto& metadata = Project::GetActive()->GetEditorAssetManager()->GetMetadata(handle);
             MaterialSerializer::Serialize(
                 Project::GetActiveAssetDirectory() / metadata.FilePath,

@@ -36,6 +36,7 @@
 #include "NoxCore/Scene/SceneSerializer.h"
 #include "NoxCore/Scripting/ScriptEngine.h"
 #include "NoxCore/Utils/Utils.h"
+#include "Panels/AssetPreviewRenderer.h"
 
 namespace Nox
 {
@@ -168,6 +169,8 @@ namespace Nox
         m_Viewports[0].CameraSet = true;
         // Before ImGui's first frame, which reads imgui.ini.
         RegisterViewportIniHandler();
+        // Material thumbnails and the Material Editor's preview show on the Sphere shape.
+        AssetPreviewRenderer::Get().SetSphereProvider([this]() { return GetShapeAsset(PrimitiveShape::Sphere); });
 
         Project::GetActive()->GetEditorAssetManager()->Init();
 
@@ -180,6 +183,7 @@ namespace Nox
         NOX_CORE_INFO("EditorLayer Shutdown");
 
         ScriptEngine::Shutdown();
+        AssetPreviewRenderer::Get().Clear();
 
         m_Font->ReleaseDefault(); // Since Editor Layer since static dies After renderer not needed for components
 
@@ -362,8 +366,9 @@ namespace Nox
         }
 
         OnOverlayRender();
-        // The other viewports' cameras, drawn after the main view this frame.
+        // The other viewports' cameras, drawn after the main view this frame; the asset thumbnail in progress.
         SubmitExtraViewports(ts);
+        AssetPreviewRenderer::Get().Update();
 
         {
             NOX_PROFILE_SCOPE("Asset Manager Update");
@@ -3908,6 +3913,7 @@ namespace Nox
             m_ActiveScene->CollectAssetReferences(referencedAssets);
         if (m_PrefabMode.ReturnScene) // the level waits while a prefab is edited: its assets stay
             m_PrefabMode.ReturnScene->CollectAssetReferences(referencedAssets);
+        AssetPreviewRenderer::Get().CollectAssetReferences(referencedAssets); // what the asset previews draw right now
 
         Project::GetActive()->GetEditorAssetManager()->UnloadUnusedAssets(referencedAssets);
     }
