@@ -4,6 +4,7 @@
 #include "NoxCore/Core/WorldUnits.h"
 #include <algorithm>
 #include <memory>
+#include <span>
 #include <vector>
 #include <glm/glm.hpp>
 
@@ -41,6 +42,13 @@ namespace Nox {
         // inside the fixed step from the component's input fields, results written back to the component + transform.
         virtual void CreateCharacter(Entity entity) = 0;
         virtual void DestroyCharacter(Entity entity) = 0;
+
+        // A static triangle-mesh collider at the entity's world transform (terrain, a voxel chunk, level geometry a script
+        // built: DynamicMeshes), replacing the one the entity had; empty arrays remove it. Counter-clockwise front faces. It
+        // does not follow the entity: set it again after moving it.
+        virtual void SetMeshCollider(Entity entity, std::span<const glm::vec3> positions, std::span<const uint32_t> indices,
+                                     float friction = 0.5f, float restitution = 0.0f) = 0;
+        virtual void RemoveMeshCollider(Entity entity) = 0;
 
         // Queries
         virtual bool RayCast(const glm::vec3& origin, const glm::vec3& direction, float maxDistance,

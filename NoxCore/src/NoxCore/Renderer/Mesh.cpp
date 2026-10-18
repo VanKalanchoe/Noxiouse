@@ -16,6 +16,17 @@ namespace Nox
         }
     }
     
+    void StaticMesh::ReleaseGeometry()
+    {
+        for (const MeshHandle& handle : m_SubMeshes)
+        {
+            if (handle.IsValid())
+                Renderer::UnloadMesh(handle);
+        }
+        m_SubMeshes.clear();
+        m_SubmeshNames.clear();
+    }
+
     Mesh::~Mesh()
     {
         // When the Mesh object dies, release all its submesh allocations from the GPU allocators

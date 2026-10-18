@@ -56,9 +56,14 @@ namespace Nox
         
         static AssetType GetStaticType() { return AssetType::StaticMesh; }
         virtual AssetType GetAssetType() const { return GetStaticType(); }
+
+        // Frees the GPU geometry now (its ranges are returned once frames in flight are done with them) and leaves the mesh
+        // empty: entities drawing it register again, with whatever replaced it (DynamicMeshes swapping in new geometry).
+        void ReleaseGeometry();
         
     private:
         friend class MeshImporter;
+        friend class DynamicMeshes;
         std::vector<MeshHandle> m_SubMeshes;
         std::vector<MaterialData> m_Materials;
         std::vector<AssetHandle> m_MaterialAssets;

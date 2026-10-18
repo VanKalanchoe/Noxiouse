@@ -10,6 +10,16 @@ internal static unsafe class InternalCalls
     private static delegate*<int, uint> Input_IsMouseButtonDown;
     private static delegate*<NativeString, float, float, float, ulong> Scene_Instantiate;
     private static delegate*<ulong, void> Scene_Destroy;
+    private static delegate*<NativeString, float, float, float, ulong> Scene_CreateEntity;
+    private static delegate*<ulong> Mesh_Create;
+    private static delegate*<ulong, void> Mesh_Destroy;
+    private static delegate*<ulong, Vector3*, int, uint*, int, Vector3*, int, Vector2*, int, uint> Mesh_SetData;
+    private static delegate*<ulong, void> Mesh_Clear;
+    private static delegate*<ulong, float, float, float, float, float, float, float, float, float, void> Mesh_SetColor;
+    private static delegate*<ulong, NativeString, uint> Mesh_SetMaterial;
+    private static delegate*<ulong, ulong, void> Entity_SetMesh;
+    private static delegate*<ulong, ulong, float, float, void> Entity_SetMeshCollider;
+    private static delegate*<float, float, float, float, float, float, float, RaycastHit*, uint> Physics_Raycast;
     private static delegate*<ulong, float, float, float, void> RigidBody_SetLinearVelocity;
     private static delegate*<ulong, float, float, float, void> RigidBody_AddForce;
     private static delegate*<ulong, float, float, float, void> RigidBody_AddImpulse;
@@ -57,6 +67,52 @@ internal static unsafe class InternalCalls
     }
 
     internal static void DestroyEntity(ulong entityID) => Scene_Destroy(entityID);
+
+    internal static ulong CreateEntity(string name, Vector3 position)
+    {
+        using NativeString nativeName = new(name);
+        return Scene_CreateEntity(nativeName, position.X, position.Y, position.Z);
+    }
+
+    internal static ulong CreateMesh() => Mesh_Create();
+
+    internal static void DestroyMesh(ulong mesh) => Mesh_Destroy(mesh);
+
+    internal static bool SetMeshData(ulong mesh, ReadOnlySpan<Vector3> positions, ReadOnlySpan<uint> indices, ReadOnlySpan<Vector3> normals,
+                                     ReadOnlySpan<Vector2> uvs)
+    {
+        fixed (Vector3* positionData = positions)
+        fixed (uint* indexData = indices)
+        fixed (Vector3* normalData = normals)
+        fixed (Vector2* uvData = uvs)
+        {
+            return Mesh_SetData(mesh, positionData, positions.Length, indexData, indices.Length, normalData, normals.Length, uvData, uvs.Length) != 0;
+        }
+    }
+
+    internal static void ClearMesh(ulong mesh) => Mesh_Clear(mesh);
+
+    internal static void SetMeshColor(ulong mesh, float r, float g, float b, float a, float metallic, float roughness, Vector3 emissive) =>
+        Mesh_SetColor(mesh, r, g, b, a, metallic, roughness, emissive.X, emissive.Y, emissive.Z);
+
+    internal static bool SetMeshMaterial(ulong mesh, string materialPath)
+    {
+        using NativeString nativePath = new(materialPath);
+        return Mesh_SetMaterial(mesh, nativePath) != 0;
+    }
+
+    internal static void SetEntityMesh(ulong entityID, ulong mesh) => Entity_SetMesh(entityID, mesh);
+
+    internal static void SetEntityMeshCollider(ulong entityID, ulong mesh, float friction, float restitution) =>
+        Entity_SetMeshCollider(entityID, mesh, friction, restitution);
+
+    internal static bool Raycast(Vector3 origin, Vector3 direction, float maxDistance, out RaycastHit hit)
+    {
+        RaycastHit result = default;
+        bool found = Physics_Raycast(origin.X, origin.Y, origin.Z, direction.X, direction.Y, direction.Z, maxDistance, &result) != 0;
+        hit = result;
+        return found;
+    }
 
     internal static void SetRigidBodyVelocity(ulong entityID, Vector3 velocity) =>
         RigidBody_SetLinearVelocity(entityID, velocity.X, velocity.Y, velocity.Z);

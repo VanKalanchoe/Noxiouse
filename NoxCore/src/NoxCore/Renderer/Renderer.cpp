@@ -2172,6 +2172,12 @@ namespace Nox
             s_Instance->m_gpuMaterialsDirty = true;
     }
 
+    void Renderer::MarkMeshMaterialsChanged()
+    {
+        if (s_Instance)
+            s_Instance->m_gpuMaterialsDirty = true;
+    }
+
     Ref<Texture2D> Renderer::createSolidColorTexture(uint8_t r, uint8_t g, uint8_t b, uint8_t a)
     {
         std::array<uint8_t, 4> pixel = {r, g, b, a};

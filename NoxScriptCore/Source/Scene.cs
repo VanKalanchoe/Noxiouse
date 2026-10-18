@@ -9,6 +9,9 @@ public static class Scene
     /// </summary>
     public static Entity Instantiate(string prefabPath, Vector3 position) => new(InternalCalls.InstantiatePrefab(prefabPath, position));
 
+    /// <summary>An empty entity (just a transform) at a position, e.g. to show a <see cref="Mesh"/> on.</summary>
+    public static Entity CreateEntity(string name, Vector3 position) => new(InternalCalls.CreateEntity(name, position));
+
     /// <summary>Destroys the entity (and its children) at the end of this frame's script update.</summary>
     public static void Destroy(Entity entity) => InternalCalls.DestroyEntity(entity.ID);
 }

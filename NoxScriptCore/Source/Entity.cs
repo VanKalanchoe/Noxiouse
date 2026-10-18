@@ -39,6 +39,17 @@ public readonly struct Entity
 
     public Entity FindChild(string path) => new(InternalCalls.FindChild(ID, path));
 
+    /// <summary>Shows a mesh built at run time on this entity (null: nothing).</summary>
+    public void SetMesh(Mesh? mesh) => InternalCalls.SetEntityMesh(ID, mesh?.Handle ?? 0);
+
+    /// <summary>
+    /// Makes the entity solid with the mesh's triangles: a static collider at its transform as it is now, for characters,
+    /// rigid bodies and <see cref="Physics.Raycast"/> (null removes it). Set it again after the mesh's data changes or the
+    /// entity moves. Play only.
+    /// </summary>
+    public void SetMeshCollider(Mesh? mesh, float friction = 0.5f, float restitution = 0.0f) =>
+        InternalCalls.SetEntityMeshCollider(ID, mesh?.Handle ?? 0, friction, restitution);
+
     public static Entity FindByName(string name) =>
         new(InternalCalls.FindEntityByName(name));
 }

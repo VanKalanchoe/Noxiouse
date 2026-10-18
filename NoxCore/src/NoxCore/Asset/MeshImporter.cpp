@@ -2520,4 +2520,17 @@ namespace Nox
 
         return result;
     }
+
+    void MeshImporter::BuildRuntimeGeometry(MeshData& data, std::vector<uint32_t> indices, bool generateTangents)
+    {
+        data.Bounds.clear();
+        data.Draws.clear();
+        data.MeshletVertices.clear();
+        data.MeshletTriangles.clear();
+        if (data.Vertices.empty() || indices.empty())
+            return;
+        if (generateTangents)
+            GenerateMissingTangents(data.Vertices, indices);
+        buildMeshlets(data, indices);
+    }
 }

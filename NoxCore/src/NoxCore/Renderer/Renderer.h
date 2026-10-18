@@ -280,6 +280,8 @@ namespace Nox
         void ConsumeInvalidatedMeshEntities(std::vector<int32_t>& outEntityIDs) { outEntityIDs.swap(m_invalidatedMeshEntities); m_invalidatedMeshEntities.clear(); }
         // A material asset's data was edited: instances using it shade with the new data from this frame.
         static void MarkMaterialChanged(AssetHandle material);
+        // A mesh's own (embedded) material data changed in place (DynamicMeshes::SetColor): every GPU material is packed again.
+        static void MarkMeshMaterialsChanged();
 
         void SubmitLight(const glm::mat4& transform, const DirectionalLightComponent& light);
         void SubmitLight(const glm::mat4& transform, const PointLightComponent& light);

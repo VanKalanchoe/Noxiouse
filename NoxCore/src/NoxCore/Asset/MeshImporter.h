@@ -97,6 +97,11 @@ namespace Nox
         
         // Load from filepath
         static Ref<Mesh> LoadMesh(const std::filesystem::path& path);
+
+        // Any thread. The clusters of geometry made at run time (DynamicMeshes): one level, no LOD chain (cheap to rebuild).
+        // With `generateTangents` the tangents come from the UVs (MikkTSpace, may split vertices along UV seams); data.Vertices
+        // must hold the vertices `indices` refer to.
+        static void BuildRuntimeGeometry(MeshData& data, std::vector<uint32_t> indices, bool generateTangents);
         
     private:
         // Main thread: uploads every submesh now (synchronous loads).

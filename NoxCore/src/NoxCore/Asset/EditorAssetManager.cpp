@@ -140,26 +140,44 @@ namespace Nox
     
     bool EditorAssetManager::IsAssetHandleValid(AssetHandle handle) const
     {
-        return handle != 0 && m_AssetRegistry.find(handle) != m_AssetRegistry.end();
+        return handle != 0 && (m_AssetRegistry.find(handle) != m_AssetRegistry.end() || m_MemoryAssets.contains(handle));
     }
 
     Asset* EditorAssetManager::FindLoadedAsset(AssetHandle handle) const
     {
         auto found = m_LoadedAssets.find(handle);
-        return found != m_LoadedAssets.end() ? found->second.get() : nullptr;
+        if (found != m_LoadedAssets.end())
+            return found->second.get();
+        auto memory = m_MemoryAssets.find(handle);
+        return memory != m_MemoryAssets.end() ? memory->second.get() : nullptr;
     }
 
     bool EditorAssetManager::IsAssetLoaded(AssetHandle handle) const
     {
-        return m_LoadedAssets.find(handle) != m_LoadedAssets.end();
+        return m_LoadedAssets.find(handle) != m_LoadedAssets.end() || m_MemoryAssets.contains(handle);
     }
 
     AssetType EditorAssetManager::GetAssetType(AssetHandle handle) const
     {
+        if (auto memory = m_MemoryAssets.find(handle); memory != m_MemoryAssets.end())
+            return memory->second->GetType();
         if (!IsAssetHandleValid(handle))
             return AssetType::None;
 
         return m_AssetRegistry.at(handle).Type;
+    }
+
+    void EditorAssetManager::AddMemoryAsset(AssetHandle handle, Ref<Asset> asset)
+    {
+        if (handle == 0 || !asset)
+            return;
+        asset->Handle = handle;
+        m_MemoryAssets[handle] = std::move(asset);
+    }
+
+    void EditorAssetManager::RemoveMemoryAsset(AssetHandle handle)
+    {
+        m_MemoryAssets.erase(handle);
     }
 
     void EditorAssetManager::Init()
@@ -292,7 +310,7 @@ namespace Nox
     
     void EditorAssetManager::ReimportAsset(AssetHandle handle, bool force)
     {
-        if (!IsAssetHandleValid(handle)) return;
+        if (!IsAssetHandleValid(handle) || m_MemoryAssets.contains(handle)) return;
 
         const AssetMetadata& metadata = GetMetadata(handle);
         auto sourcePath = Project::GetActiveAssetDirectory() / metadata.SourceFilePath;
@@ -1306,6 +1324,8 @@ namespace Nox
 
     Ref<Asset> EditorAssetManager::GetAsset(AssetHandle handle)
     {
+        if (auto memory = m_MemoryAssets.find(handle); memory != m_MemoryAssets.end())
+            return memory->second;
         // 1. check if handle is valid
         if (!IsAssetHandleValid(handle))
             return {};

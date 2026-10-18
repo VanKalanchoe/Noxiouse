@@ -33,6 +33,8 @@ namespace Nox
         virtual bool IsAssetHandleValid(AssetHandle handle) const override;
         virtual bool IsAssetLoaded(AssetHandle handle) const override;
         virtual AssetType GetAssetType(AssetHandle handle) const override;
+        virtual void AddMemoryAsset(AssetHandle handle, Ref<Asset> asset) override;
+        virtual void RemoveMemoryAsset(AssetHandle handle) override;
 
         static AssetType GetAssetTypeFromExtension(const std::filesystem::path& extension);
         void Init();
@@ -168,6 +170,7 @@ namespace Nox
         std::chrono::steady_clock::time_point m_RegistryWritten = std::chrono::steady_clock::now();
         void IndexPath(AssetHandle handle, const AssetMetadata& metadata);
         AssetMap m_LoadedAssets;
+        AssetMap m_MemoryAssets; // AddMemoryAsset: no file, no registry entry
 
         // Background loads (RequestAsset) until they are published into m_LoadedAssets.
         AssetLoader m_Loader;

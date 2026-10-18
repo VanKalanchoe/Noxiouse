@@ -11,7 +11,10 @@
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Math/Math.h"
+#include "NoxCore/Renderer/DynamicMesh.h"
 #include "NoxCore/Scene/Entity.h"
+
+#include <thread>
 
 namespace Nox
 {
@@ -24,7 +27,27 @@ namespace Nox
             ManagedVector3 Rotation;
             ManagedVector3 Scale;
         };
+        // Nox.Physics.Raycast's result (Nox.RaycastHit's layout).
+        struct ManagedRaycastHit
+        {
+            uint64_t Entity;
+            ManagedVector3 Point;
+            ManagedVector3 Normal;
+            float Distance;
+        };
+        static_assert(sizeof(ManagedVector3) == sizeof(glm::vec3) && sizeof(glm::vec2) == 8, "Nox.Vector3 / Vector2 are passed as glm vectors");
         Scene* s_Scene = nullptr;
+        std::thread::id s_MainThread;
+
+        // The engine's state is the main thread's: a call from a job (Nox.Jobs, a Task) is refused instead of racing the frame.
+        bool OnMainThread(const char* call)
+        {
+            if (std::this_thread::get_id() == s_MainThread)
+                return true;
+            NOX_CORE_ERROR("[C#] {} was called from a job thread: engine calls belong in OnCreate / OnUpdate (compute data in the job, "
+                           "apply it on the main thread)", call);
+            return false;
+        }
 
         void LogInfo(Coral::String message)
         {
@@ -61,6 +84,117 @@ namespace Nox
             if (!s_Scene) return;
             if (Entity entity = s_Scene->GetEntityByUUID(UUID(entityID)))
                 s_Scene->QueueDestroy(entity);
+        }
+
+        // Scene.CreateEntity(name, position): an empty entity (a transform), e.g. to show a Mesh on.
+        uint64_t SceneCreateEntity(Coral::String name, float x, float y, float z)
+        {
+            if (!s_Scene || !OnMainThread("Scene.CreateEntity")) return 0;
+            Entity entity = s_Scene->CreateEntity(std::string(name));
+            entity.GetComponent<TransformComponent>().Translation = { x, y, z };
+            return static_cast<uint64_t>(entity.GetUUID());
+        }
+
+        // Nox.Mesh: meshes built at run time (DynamicMeshes). The handle is the mesh's asset handle.
+        uint64_t MeshCreate()
+        {
+            if (!OnMainThread("new Mesh()")) return 0;
+            return static_cast<uint64_t>(DynamicMeshes::Create());
+        }
+
+        void MeshDestroy(uint64_t mesh)
+        {
+            if (OnMainThread("Mesh.Dispose"))
+                DynamicMeshes::Destroy(AssetHandle(mesh));
+        }
+
+        Coral::Bool32 MeshSetData(uint64_t mesh, const glm::vec3* positions, int32_t positionCount, const uint32_t* indices, int32_t indexCount,
+                                  const glm::vec3* normals, int32_t normalCount, const glm::vec2* uvs, int32_t uvCount)
+        {
+            if (!OnMainThread("Mesh.SetData")) return false;
+            auto span = [](const auto* data, int32_t count) { return std::span(data, data && count > 0 ? static_cast<size_t>(count) : 0); };
+            return DynamicMeshes::SetData(AssetHandle(mesh), span(positions, positionCount), span(indices, indexCount),
+                                          span(normals, normalCount), span(uvs, uvCount));
+        }
+
+        void MeshClear(uint64_t mesh)
+        {
+            if (OnMainThread("Mesh.Clear"))
+                DynamicMeshes::Clear(AssetHandle(mesh));
+        }
+
+        void MeshSetColor(uint64_t mesh, float r, float g, float b, float a, float metallic, float roughness, float emissiveR, float emissiveG,
+                          float emissiveB)
+        {
+            if (OnMainThread("Mesh.SetColor"))
+                DynamicMeshes::SetColor(AssetHandle(mesh), { r, g, b, a }, metallic, roughness, { emissiveR, emissiveG, emissiveB });
+        }
+
+        // Mesh.SetMaterial("Materials/Grass.nmat"): a material asset by its path under the asset directory ("" = the mesh's color).
+        Coral::Bool32 MeshSetMaterial(uint64_t mesh, Coral::String pathValue)
+        {
+            if (!OnMainThread("Mesh.SetMaterial")) return false;
+            const std::string path(pathValue);
+            AssetHandle material = 0;
+            if (!path.empty())
+            {
+                material = AssetManager::FindHandleByPath(std::filesystem::path(path), AssetType::Material);
+                if (material == 0)
+                {
+                    NOX_CORE_ERROR("[C#] Mesh.SetMaterial: no material '{}' in the asset registry", path);
+                    return false;
+                }
+            }
+            DynamicMeshes::SetMaterial(AssetHandle(mesh), material);
+            return true;
+        }
+
+        // Entity.SetMesh(mesh): the entity draws the mesh (null: nothing).
+        void EntitySetMesh(uint64_t entityID, uint64_t mesh)
+        {
+            if (!s_Scene || !OnMainThread("Entity.SetMesh")) return;
+            Entity entity = s_Scene->GetEntityByUUID(UUID(entityID));
+            if (!entity) return;
+            if (mesh == 0)
+            {
+                if (entity.HasComponent<MeshComponent>())
+                    entity.RemoveComponent<MeshComponent>();
+                return;
+            }
+            entity.AddOrReplaceComponent<MeshComponent>(AssetHandle(mesh));
+        }
+
+        // Entity.SetMeshCollider(mesh): a static collider from the mesh's triangles at the entity's transform (null: none).
+        void EntitySetMeshCollider(uint64_t entityID, uint64_t mesh, float friction, float restitution)
+        {
+            if (!s_Scene || !OnMainThread("Entity.SetMeshCollider")) return;
+            IPhysics3DScene* physics = s_Scene->GetPhysics3DScene();
+            Entity entity = s_Scene->GetEntityByUUID(UUID(entityID));
+            if (!physics || !entity) return;
+            if (const DynamicMeshes::Triangles* triangles = mesh != 0 ? DynamicMeshes::GetTriangles(AssetHandle(mesh)) : nullptr)
+                physics->SetMeshCollider(entity, triangles->Positions, triangles->Indices, friction, restitution);
+            else
+                physics->RemoveMeshCollider(entity);
+        }
+
+        // Physics.Raycast: the first collider along the ray (rigid bodies, mesh colliders; not characters' own capsules).
+        Coral::Bool32 PhysicsRaycast(float originX, float originY, float originZ, float directionX, float directionY, float directionZ,
+                                     float maxDistance, ManagedRaycastHit* outHit)
+        {
+            *outHit = {};
+            if (!s_Scene || !OnMainThread("Physics.Raycast")) return false;
+            IPhysics3DScene* physics = s_Scene->GetPhysics3DScene();
+            const glm::vec3 direction(directionX, directionY, directionZ);
+            if (!physics || glm::length(direction) < 1e-6f || maxDistance <= 0.0f) return false;
+
+            RayCastHit hit;
+            if (!physics->RayCast({ originX, originY, originZ }, glm::normalize(direction), maxDistance, hit))
+                return false;
+            outHit->Entity = hit.HitEntity ? static_cast<uint64_t>(hit.HitEntity.GetUUID()) : 0;
+            outHit->Point = { hit.Position.x, hit.Position.y, hit.Position.z };
+            outHit->Normal = { hit.Normal.x, hit.Normal.y, hit.Normal.z };
+            outHit->Distance = hit.Distance;
+            return true;
         }
 
         // Nox.RigidBody3DComponent: forces and velocities of the entity's physics body (Play / Simulate only).
@@ -485,6 +619,16 @@ namespace Nox
         assembly.AddInternalCall("Nox.InternalCalls", "Input_IsMouseButtonDown", reinterpret_cast<void*>(&IsMouseButtonDown));
         assembly.AddInternalCall("Nox.InternalCalls", "Scene_Instantiate", reinterpret_cast<void*>(&SceneInstantiate));
         assembly.AddInternalCall("Nox.InternalCalls", "Scene_Destroy", reinterpret_cast<void*>(&SceneDestroy));
+        assembly.AddInternalCall("Nox.InternalCalls", "Scene_CreateEntity", reinterpret_cast<void*>(&SceneCreateEntity));
+        assembly.AddInternalCall("Nox.InternalCalls", "Mesh_Create", reinterpret_cast<void*>(&MeshCreate));
+        assembly.AddInternalCall("Nox.InternalCalls", "Mesh_Destroy", reinterpret_cast<void*>(&MeshDestroy));
+        assembly.AddInternalCall("Nox.InternalCalls", "Mesh_SetData", reinterpret_cast<void*>(&MeshSetData));
+        assembly.AddInternalCall("Nox.InternalCalls", "Mesh_Clear", reinterpret_cast<void*>(&MeshClear));
+        assembly.AddInternalCall("Nox.InternalCalls", "Mesh_SetColor", reinterpret_cast<void*>(&MeshSetColor));
+        assembly.AddInternalCall("Nox.InternalCalls", "Mesh_SetMaterial", reinterpret_cast<void*>(&MeshSetMaterial));
+        assembly.AddInternalCall("Nox.InternalCalls", "Entity_SetMesh", reinterpret_cast<void*>(&EntitySetMesh));
+        assembly.AddInternalCall("Nox.InternalCalls", "Entity_SetMeshCollider", reinterpret_cast<void*>(&EntitySetMeshCollider));
+        assembly.AddInternalCall("Nox.InternalCalls", "Physics_Raycast", reinterpret_cast<void*>(&PhysicsRaycast));
         assembly.AddInternalCall("Nox.InternalCalls", "RigidBody_SetLinearVelocity", reinterpret_cast<void*>(&RigidBodySetLinearVelocity));
         assembly.AddInternalCall("Nox.InternalCalls", "RigidBody_AddForce", reinterpret_cast<void*>(&RigidBodyAddForce));
         assembly.AddInternalCall("Nox.InternalCalls", "RigidBody_AddImpulse", reinterpret_cast<void*>(&RigidBodyAddImpulse));
@@ -599,5 +743,6 @@ namespace Nox
     {
         m_Scene = scene;
         s_Scene = scene;
+        s_MainThread = std::this_thread::get_id();
     }
 }

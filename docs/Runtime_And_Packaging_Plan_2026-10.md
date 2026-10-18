@@ -120,6 +120,42 @@ only voxels: a **dynamic mesh API** (a script fills vertices / indices, the engi
 **job API** for scripts (schedule work on the worker threads with blittable data, like Unity's Jobs; needs care with
 CoreCLR thread attachment, so after the C++ voxel module exists).
 
+### 4b. Built (2026-10-18, untested): run-time meshes, jobs, mesh colliders and raycasts for scripts
+
+The two general APIs, enough to write a voxel game in C# today (the C++ voxel module stays the path for big worlds):
+
+- **`Nox.Mesh`** (`Mesh.cs`, native `NoxCore/Renderer/DynamicMesh.{h,cpp}`): `new Mesh()`, `SetData(positions, indices,
+  normals?, uvs?)` or `SetData(MeshBuilder)`, `Clear()`, `SetColor(r, g, b, a, metallic, roughness)` (alpha < 1 = see-through,
+  an emissive overload), `SetMaterial("Materials/X.nmat")`, `Dispose()`. Natively each mesh is a `StaticMesh` with one
+  submesh held by the asset manager as a **memory asset** (`AssetManagerBase::AddMemoryAsset`: no file, no registry entry,
+  answers like a loaded asset), so a `MeshComponent` naming its handle goes through the normal path: GPU scene, meshlet
+  culling, shadows, BLAS / ray tracing, picking, outline. `SetData` validates the arrays, works out smooth normals when none
+  are given, tangents (MikkTSpace from UVs, or any orthonormal one without), builds one level of meshlets
+  (`MeshImporter::BuildRuntimeGeometry`, no LOD chain: cheap to rebuild), uploads, swaps the submesh in under the same
+  handle and frees the old geometry; `Scene::SyncGpuScene` re-registers the entities drawing a changed mesh in the same
+  frame (`DynamicMeshes::ConsumeChanged`). Meshes live until `Dispose` or until Play stops (`Scene::OnRuntimeStop` ->
+  `DynamicMeshes::DestroyAll`).
+- **`Nox.MeshBuilder`**: plain lists (`AddVertex`, `AddTriangle`, `AddQuad`), fillable inside a job.
+- **`Nox.Jobs`** (`Jobs.cs`): `Jobs.Run(() => ...)` -> `JobHandle` / `JobHandle<T>` (`IsCompleted`, `TryGetResult`,
+  `Complete`), `Jobs.ParallelFor(count, i => ...)`. They run on .NET's own thread pool, so no native thread has to attach to
+  CoreCLR; the rule is that a job computes data only. Every new engine call checks it is on the main thread and refuses
+  (with a log line saying why) otherwise.
+- **`Entity.SetMesh(mesh)`**, **`Scene.CreateEntity(name, position)`**.
+- **`Entity.SetMeshCollider(mesh, friction, restitution)`**: a static Jolt `MeshShape` from the mesh's triangles at the
+  entity's transform (`IPhysics3DScene::SetMeshCollider` / `RemoveMeshCollider`; removed with the entity). Characters walk on
+  it, rigid bodies land on it. Set it again after the data changes or the entity moves.
+- **`Physics.Raycast(origin, direction, maxDistance, out RaycastHit)`**: entity, point, normal, distance.
+
+Example: `Facerun/Assets/Scripts/Source/VoxelTerrain.cs`, a 4 x 4-chunk Minecraft-style terrain (fractal value noise,
+16 x 16 x 48 blocks per chunk, only faces next to air), generated and meshed in jobs, made solid with mesh colliders; left
+click digs, right click places (raycast from the entity named "Camera"), rebuilding the chunk and the neighbours a border
+edit uncovers on the main thread.
+
+Not done: uploads wait for the copy (`Renderer::UploadMesh`), so re-meshing many chunks in one frame stalls; vertex colors
+(one color or material per mesh: split by material, or use a texture atlas through UVs); an alpha change after `SetData`
+keeps the ray tracing structure's opaque flag (set the color first); the mesh collider is static only; the C++ voxel
+module of the table above.
+
 ## 5. Order
 
 R1 (quick win, testing without editor overhead) -> R2 (also unblocks P6) -> R3 -> R5 -> R6 -> R4 -> R7. The voxel module

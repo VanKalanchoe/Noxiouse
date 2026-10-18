@@ -13,6 +13,7 @@
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
 #include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
+#include <Jolt/Physics/Collision/Shape/MeshShape.h>
 #include <Jolt/Physics/Collision/RayCast.h>
 #include <Jolt/Physics/Collision/ShapeCast.h>
 #include <Jolt/Physics/Collision/CastResult.h>
@@ -144,6 +145,12 @@ namespace Nox {
                 }
             }
             m_EntityToBodyMap.clear();
+            for (auto& [entityId, bodyId] : m_MeshColliders)
+            {
+                bodyInterface.RemoveBody(bodyId);
+                bodyInterface.DestroyBody(bodyId);
+            }
+            m_MeshColliders.clear();
             m_BodyPoses.clear();
             m_EntityToCharacterMap.clear();
             m_BodyToEntityMap.clear();
@@ -401,6 +408,78 @@ namespace Nox {
 
         if (entity.HasComponent<RigidBody3DComponent>())
             entity.GetComponent<RigidBody3DComponent>().RuntimeBodyID = 0xFFFFFFFF;
+    }
+
+    void JoltPhysics3DScene::SetMeshCollider(Entity entity, std::span<const glm::vec3> positions, std::span<const uint32_t> indices,
+                                             float friction, float restitution)
+    {
+        RemoveMeshCollider(entity);
+        if (!m_PhysicsSystem || !entity || positions.empty() || indices.size() < 3)
+            return;
+
+        // The entity's whole world transform (scale and rotation too) is baked into the vertices: the body stands at the origin.
+        // From its local transform, current even when the entity was made or moved this frame (before propagation ran).
+        glm::mat4 world = entity.GetComponent<TransformComponent>().GetTransform();
+        if (m_Scene && entity.HasComponent<RelationshipComponent>())
+        {
+            if (Entity parent = m_Scene->GetEntityByUUID(entity.GetComponent<RelationshipComponent>().Parent);
+                parent && parent.HasComponent<WorldTransformComponent>())
+                world = parent.GetComponent<WorldTransformComponent>().WorldMatrix * world;
+        }
+
+        JPH::VertexList vertices;
+        vertices.reserve(positions.size());
+        for (const glm::vec3& position : positions)
+        {
+            const glm::vec3 placed = ToNative(glm::vec3(world * glm::vec4(position, 1.0f)));
+            vertices.push_back(JPH::Float3(placed.x, placed.y, placed.z));
+        }
+        JPH::IndexedTriangleList triangles;
+        triangles.reserve(indices.size() / 3);
+        for (size_t corner = 0; corner + 2 < indices.size(); corner += 3)
+        {
+            if (indices[corner] < positions.size() && indices[corner + 1] < positions.size() && indices[corner + 2] < positions.size())
+                triangles.push_back(JPH::IndexedTriangle(indices[corner], indices[corner + 1], indices[corner + 2], 0));
+        }
+
+        JPH::MeshShapeSettings shapeSettings(std::move(vertices), std::move(triangles));
+        JPH::Shape::ShapeResult shape = shapeSettings.Create();
+        if (shape.HasError())
+        {
+            SPDLOG_ERROR("Mesh collider for entity {}: {}", static_cast<uint32_t>(entity), shape.GetError().c_str());
+            return;
+        }
+
+        JPH::BodyCreationSettings bodySettings(shape.Get(), JPH::RVec3::sZero(), JPH::Quat::sIdentity(), JPH::EMotionType::Static,
+                                               PhysicsLayers::NON_MOVING);
+        bodySettings.mFriction = friction;
+        bodySettings.mRestitution = restitution;
+        bodySettings.mUserData = static_cast<uint64_t>(static_cast<uint32_t>(entity));
+
+        JPH::BodyInterface& bodyInterface = m_PhysicsSystem->GetBodyInterface();
+        JPH::Body* body = bodyInterface.CreateBody(bodySettings);
+        if (!body)
+        {
+            SPDLOG_ERROR("Failed to create the mesh collider body for entity {} (too many bodies?)", static_cast<uint32_t>(entity));
+            return;
+        }
+        bodyInterface.AddBody(body->GetID(), JPH::EActivation::DontActivate);
+        m_MeshColliders[static_cast<uint32_t>(entity)] = body->GetID();
+        m_BodyToEntityMap[body->GetID().GetIndexAndSequenceNumber()] = entity;
+    }
+
+    void JoltPhysics3DScene::RemoveMeshCollider(Entity entity)
+    {
+        if (!m_PhysicsSystem)
+            return;
+        auto found = m_MeshColliders.find(static_cast<uint32_t>(entity));
+        if (found == m_MeshColliders.end())
+            return;
+        JPH::BodyInterface& bodyInterface = m_PhysicsSystem->GetBodyInterface();
+        bodyInterface.RemoveBody(found->second);
+        bodyInterface.DestroyBody(found->second);
+        m_BodyToEntityMap.erase(found->second.GetIndexAndSequenceNumber());
+        m_MeshColliders.erase(found);
     }
 
     // Ported from Jolt's Samples/Tests/Character/CharacterVirtualTest.cpp: the capsule shape is offset so the

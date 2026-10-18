@@ -1136,7 +1136,8 @@ namespace Nox
                     if (type == AssetType::MeshSource || type == AssetType::StaticMesh || type == AssetType::Mesh)
                     {
                         const AssetMetadata& metadata = Project::GetActive()->GetEditorAssetManager()->GetMetadata(component.Mesh);
-                        label = metadata.FilePath.filename().string();
+                        // A mesh a script built (DynamicMeshes) has no file.
+                        label = metadata.FilePath.empty() ? "(built at run time)" : metadata.FilePath.filename().string();
                         isMeshValid = true;
                     }
                     else

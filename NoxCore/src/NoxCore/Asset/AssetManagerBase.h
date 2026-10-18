@@ -35,5 +35,10 @@ namespace Nox
         virtual AssetHandle FindHandleByPath(const std::filesystem::path& path, AssetType type) const = 0;
         // How many assets are registered (grows with every registration: callers use it to notice new assets).
         virtual size_t GetAssetCount() const = 0;
+
+        // Assets made at run time, with no file and no registry entry (a script's Mesh, DynamicMeshes): they answer like loaded
+        // assets of their own type until removed, and are never saved, listed, unloaded or reimported. Main thread.
+        virtual void AddMemoryAsset(AssetHandle handle, Ref<Asset> asset) = 0;
+        virtual void RemoveMemoryAsset(AssetHandle handle) = 0;
     };
 }

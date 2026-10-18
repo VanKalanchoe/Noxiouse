@@ -5,6 +5,7 @@
 #include <box2d/box2d.h>
 #include <algorithm>
 #include <functional>
+#include <unordered_set>
 
 #include "Entity.h"
 #include "Components.h"
@@ -16,6 +17,7 @@
 #include "NoxCore/Physics/Physics3DScene.h"
 #include "NoxCore/Profiling/Profiler.h"
 #include "NoxCore/Project/Project.h"
+#include "NoxCore/Renderer/DynamicMesh.h"
 #include "NoxCore/Scripting/ScriptEngine.h"
 #include "NoxCore/Tasks/JobSystem.h"
 
@@ -356,6 +358,7 @@ namespace Nox
                 m_Physics3DScene->DestroyBody(entity);
             if (entity.HasComponent<CharacterController3DComponent>())
                 m_Physics3DScene->DestroyCharacter(entity);
+            m_Physics3DScene->RemoveMeshCollider(entity);
         }
         if (m_IsRunning && entity.HasComponent<ScriptComponent>())
             ScriptEngine::OnDestroyEntity(entity);
@@ -490,6 +493,8 @@ namespace Nox
         ScriptEngine::OnRuntimeStop();
         OnPhysics2DStop();
         OnPhysics3DStop();
+        // What the scripts built lives as long as the Play session.
+        DynamicMeshes::DestroyAll();
     }
 
     void Scene::OnSimulationStart()
@@ -675,6 +680,20 @@ namespace Nox
             m_renderer->ConsumeInvalidatedMeshEntities(invalidated);
             for (int32_t entityID : invalidated)
                 m_PendingMeshEntities.push_back(static_cast<entt::entity>(entityID));
+        }
+        // ... and entities drawing a mesh made at run time that changed (new geometry, material, destroyed).
+        {
+            std::vector<AssetHandle> changed;
+            DynamicMeshes::ConsumeChanged(changed);
+            if (!changed.empty())
+            {
+                const std::unordered_set<AssetHandle> meshes(changed.begin(), changed.end());
+                for (auto entity : m_Registry.view<MeshComponent>())
+                {
+                    if (meshes.contains(m_Registry.get<MeshComponent>(entity).Mesh))
+                        m_PendingMeshEntities.push_back(entity);
+                }
+            }
         }
 
         // 3. Added, changed and removed mesh entities. An entity whose assets are not loaded yet stays pending (the

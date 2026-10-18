@@ -34,6 +34,10 @@ namespace Nox
         virtual void CreateCharacter(Entity entity) override;
         virtual void DestroyCharacter(Entity entity) override;
 
+        virtual void SetMeshCollider(Entity entity, std::span<const glm::vec3> positions, std::span<const uint32_t> indices,
+                                     float friction, float restitution) override;
+        virtual void RemoveMeshCollider(Entity entity) override;
+
         virtual bool RayCast(const glm::vec3& origin, const glm::vec3& direction, float maxDistance,
                              RayCastHit& outHit, uint16_t layerMask = PhysicsLayers::MASK_ALL) override;
 
@@ -69,6 +73,7 @@ namespace Nox
 
         std::unordered_map<uint32_t, JPH::BodyID> m_EntityToBodyMap;
         std::unordered_map<uint32_t, Entity> m_BodyToEntityMap;
+        std::unordered_map<uint32_t, JPH::BodyID> m_MeshColliders; // SetMeshCollider: static bodies, apart from the rigid bodies
         // A character and its positions at the last two fixed steps: the entity is drawn interpolated between them, so
         // motion is smooth however many steps a frame ran (0, 1 or 2 -- unevenly stepped movement made a follow camera flicker).
         struct CharacterState
