@@ -322,6 +322,20 @@ struct UniformBufferObject
     // project. Every shader-side distance that is a physical length in meters (self-shadowing ray offsets, TMin epsilons, ...)
     // multiplies its literal by this instead of assuming meters.
     float unitsPerMeter;
+
+    // Exponential height fog (the Environment Light's Height Fog; HeightFog.slang), applied by deferred lighting and the
+    // skybox: density(y) = heightFogDensity * exp(-heightFogFalloff * (y - heightFogBaseY)), lengths in world units.
+    // Read through the pointer (natural layout, like C++): plain 4-byte members, no padding rules to meet.
+    float heightFogDensity;          // extinction per world unit at heightFogBaseY; 0 = no fog
+    float heightFogFalloff;          // per world unit
+    float heightFogBaseY;
+    float heightFogStartDistance;
+    float heightFogMaxOpacity;
+    uint32_t heightFogFromEnvironment; // 1: heightFogColor multiplies the environment's light (its irradiance cubemap)
+    float heightFogSunExponent;
+    vec3 heightFogColor;
+    vec3 heightFogSunDirection;      // towards the sun
+    vec3 heightFogSunColor;          // directional inscattering: the sun's light scattered by the fog towards the camera
 };
 
 struct Vertex

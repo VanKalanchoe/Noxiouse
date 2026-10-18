@@ -1,5 +1,6 @@
 #include "shaderIO.h"
 #include "SkyAtmosphereCommon.slang"
+#include "HeightFog.slang"
 
     struct SkyboxPayload
     {
@@ -124,6 +125,8 @@
         }
         // Radiance Scale (scaleIBLAmbient) scales the environment, not the sun: that is the directional light's intensity.
         float3 envColor = (envSum / 16.0) * ubo->scaleIBLAmbient + sunSum / 16.0;
+        // Height fog over the sky (and the sun): seen to "infinity", thick at the horizon, thin overhead.
+        envColor = applyHeightFog(ubo, envColor, normalize(ray), 1e30);
 
         output.color = float4(envColor, 1.0);
         output.entityID = -1;

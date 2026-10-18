@@ -142,6 +142,15 @@ path tracer and raster agree on the sky color.
   takes a light blue haze at 10 km (T 0.81) and heads for the horizon color at 30 km (T 0.55), barely anything within
   a few hundred meters -- so small scenes use 10-100 for a visible effect, 0 turns it off. Not applied yet to forward
   passes (unlit and transparent surfaces).
+- **Exponential height fog (built 2026-10-18, untested)**, UE's Exponential Height Fog, as a **Height Fog** section of
+  the Environment Light (either source): density(y) = Fog Density * exp(-Height Falloff * (y - Fog Height)), its optical
+  depth along the view ray in closed form (`HeightFog.slang`, one exp per pixel), Start Distance, Max Opacity; the fog is
+  lit by the environment (its irradiance cubemap above the view direction, so it takes the sky's or the HDR map's
+  color) tinted by Fog Color, or Fog Color alone; plus a glow towards the sun (Sun Glow x the sun's illuminance,
+  pow(cos, Sun Glow Size)). Applied after the aerial perspective in deferred lighting and on the skybox at "infinity"
+  (thick at the horizon, thin overhead). Defaults: 0.5 / km, falloff 5 / km (halves every ~140 m): ~10 % at the zenith,
+  a soft band at the horizon, ~10 % on a surface 200 m away. Off by default; its parameters ride in the frame uniforms
+  (read through the pointer: natural layout, the same as C++).
 - **Applied** only from `Scene::SetRenderer` (main thread, every frame); the Submit Lights system, which may run on a
   worker, only reads the scale.
 - **2026-10-18 fix 2, the wrong colors** ("light yellow above, brown-green below, a black cut"): push constants compile

@@ -739,7 +739,33 @@ namespace Nox
 
     // A scalar length (Radius, Range, Height, a clip plane, ...). `rateSuffix` appends e.g. "/s^2" for an acceleration -- still a
     // length, just per second squared, so it converts the same way; min/max are raw world-unit bounds (0, 0 = unbounded).
-    static bool DrawLengthControl(const std::string& label, float& worldValue, float minWorld = 0.0f, float maxWorld = 0.0f, const char* rateSuffix = "")
+    static bool DrawLengthControl(const std::string& label, float& worldValue, float minWorld = 0.0f, float maxWorld = 0.0f, const char* rateSuffix = "");
+
+    // The Environment Light's Height Fog section (either source).
+    static void DrawHeightFogControls(EnvironmentLightComponent& component)
+    {
+        ImGui::SeparatorText("Height Fog");
+        ImGui::Checkbox("Height Fog", &component.HeightFog);
+        ImGui::SetItemTooltip("Exponential height fog (like Unreal's): thick low down and towards the horizon, thinning upwards.");
+        if (!component.HeightFog)
+            return;
+        ImGui::DragFloat("Fog Density", &component.FogDensity, 0.01f, 0.0f, 1000.0f, "%.3f / km");
+        ImGui::SetItemTooltip("How much the fog dims per km at the fog height: 0.5 = light haze, 5 = thick fog, 50 = pea soup.");
+        ImGui::DragFloat("Height Falloff", &component.FogHeightFalloff, 0.01f, 0.0f, 1000.0f, "%.2f / km");
+        ImGui::SetItemTooltip("How fast the fog thins upwards: it halves every 0.69 / falloff km (5 = every ~140 m). 0 = the same everywhere.");
+        DrawLengthControl("Fog Height", component.FogHeight, 0.0f, 0.0f);
+        DrawLengthControl("Start Distance", component.FogStartDistance, 0.0f, 0.0f);
+        ImGui::SliderFloat("Max Opacity", &component.FogMaxOpacity, 0.0f, 1.0f, "%.2f");
+        ImGui::Checkbox("Color From Sky", &component.FogFromEnvironment);
+        ImGui::SetItemTooltip("On: the fog is lit by the environment (it takes the sky's color), tinted by Fog Color.\nOff: Fog Color is the fog's own brightness.");
+        ImGui::ColorEdit3("Fog Color", glm::value_ptr(component.FogColor), ImGuiColorEditFlags_Float | ImGuiColorEditFlags_HDR);
+        ImGui::DragFloat("Sun Glow", &component.FogSunScattering, 0.001f, 0.0f, 10.0f, "%.3f");
+        ImGui::SetItemTooltip("Light of the sun scattered by the fog towards the camera: the bright haze looking towards the sun.");
+        ImGui::DragFloat("Sun Glow Size", &component.FogSunExponent, 0.1f, 1.0f, 256.0f, "%.1f");
+        ImGui::SetItemTooltip("Higher = a tighter glow around the sun.");
+    }
+
+    static bool DrawLengthControl(const std::string& label, float& worldValue, float minWorld, float maxWorld, const char* rateSuffix)
     {
         const LengthUnit unit = GetLengthUnit(worldValue);
         float display = worldValue / unit.Factor;
@@ -1465,6 +1491,7 @@ namespace Nox
                 ImGui::DragFloat("Aerial Perspective", &component.AerialPerspectiveScale, 0.1f, 0.0f, 1000.0f, "%.1f x");
                 ImGui::SetItemTooltip("Haze on the scene: distant objects fade into the sky's color. Multiplies distances:\n"
                                       "1 = real air (subtle below a few km), higher for a hazier look in small scenes, 0 = off.");
+                DrawHeightFogControls(component);
                 return;
             }
 
@@ -1517,6 +1544,7 @@ namespace Nox
                     }
                 }
             }
+            DrawHeightFogControls(component);
         });
 
         DrawComponent<AnimatorComponent>("Animator", entity, [this](auto& component)

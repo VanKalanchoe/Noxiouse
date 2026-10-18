@@ -20,23 +20,39 @@
 
 namespace Nox
 {
-    // The procedural sky's settings: the atmosphere from the component, the sun from the scene's first directional light
-    // (the sky's own sun when there is none, which SubmitLights also submits as the scene's light).
-    static SkyAtmosphereSettings MakeSkyAtmosphereSettings(entt::registry& registry, const EnvironmentLightComponent& environment)
+    // The scene's sun: its first directional light, or the procedural sky's own sun when there is none (SubmitLights
+    // submits that one as the scene's light).
+    struct SceneSun
     {
-        SkyAtmosphereSettings settings;
-        settings.SunDirection = DefaultSkySunDirection();
-        settings.SunIlluminance = glm::vec3(DefaultSkySunIntensity);
+        glm::vec3 Direction = DefaultSkySunDirection(); // towards the sun, not normalized
+        glm::vec3 Illuminance = glm::vec3(DefaultSkySunIntensity);
+        float AngularRadius = 0.004675f;
+    };
+
+    static SceneSun FindSun(entt::registry& registry)
+    {
+        SceneSun sun;
         auto lights = registry.view<WorldTransformComponent, DirectionalLightComponent>();
         for (auto entity : lights)
         {
             auto [wtc, light] = lights.get<WorldTransformComponent, DirectionalLightComponent>(entity);
             // Renderer::SubmitLight's convention: the light shines along its local -Z, the sun is the other way.
-            settings.SunDirection = -glm::vec3(wtc.WorldMatrix * glm::vec4(0.0f, 0.0f, -1.0f, 0.0f));
-            settings.SunIlluminance = light.Color * light.Intensity;
-            settings.SunAngularRadius = glm::radians(glm::max(light.AngularDiameter, 0.0f)) * 0.5f;
+            sun.Direction = -glm::vec3(wtc.WorldMatrix * glm::vec4(0.0f, 0.0f, -1.0f, 0.0f));
+            sun.Illuminance = light.Color * light.Intensity;
+            sun.AngularRadius = glm::radians(glm::max(light.AngularDiameter, 0.0f)) * 0.5f;
             break;
         }
+        return sun;
+    }
+
+    // The procedural sky's settings: the atmosphere from the component, the sun from the scene.
+    static SkyAtmosphereSettings MakeSkyAtmosphereSettings(entt::registry& registry, const EnvironmentLightComponent& environment)
+    {
+        SkyAtmosphereSettings settings;
+        const SceneSun sun = FindSun(registry);
+        settings.SunDirection = sun.Direction;
+        settings.SunIlluminance = sun.Illuminance;
+        settings.SunAngularRadius = sun.AngularRadius;
         settings.GroundAlbedo = environment.GroundAlbedo;
         settings.RayleighScale = environment.RayleighScale;
         settings.MieScale = environment.MieScale;
@@ -78,6 +94,24 @@ namespace Nox
             m_renderer->SetProceduralSky(MakeSkyAtmosphereSettings(m_Registry, *environment));
         else
             m_renderer->SetEnvironmentMap(Project::GetActiveAssetDirectory() / environment->TexturePath);
+
+        HeightFogSettings fog;
+        if (environment && environment->HeightFog)
+        {
+            fog.Enabled = true;
+            fog.DensityPerKm = environment->FogDensity;
+            fog.FalloffPerKm = environment->FogHeightFalloff;
+            fog.BaseHeight = environment->FogHeight;
+            fog.StartDistance = environment->FogStartDistance;
+            fog.MaxOpacity = environment->FogMaxOpacity;
+            fog.Color = environment->FogColor;
+            fog.FromEnvironment = environment->FogFromEnvironment;
+            const SceneSun sun = FindSun(m_Registry);
+            fog.SunDirection = sun.Direction;
+            fog.SunColor = sun.Illuminance * environment->FogSunScattering;
+            fog.SunExponent = environment->FogSunExponent;
+        }
+        m_renderer->SetHeightFog(fog);
     }
 
     template <typename... Component>

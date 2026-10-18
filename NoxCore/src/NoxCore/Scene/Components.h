@@ -304,6 +304,18 @@ namespace Nox
         float AltitudeKm = 0.0f;
         float AerialPerspectiveScale = 1.0f; // haze on the scene: multiplies view distances (UE's "distance scale")
 
+        // Exponential height fog (UE's Exponential Height Fog), with either source: thick low down and at the horizon.
+        bool HeightFog = false;
+        float FogDensity = 0.5f;          // extinction per km at FogHeight
+        float FogHeightFalloff = 5.0f;    // per km: density halves every ln(2) / falloff km upwards (5: ~140 m)
+        float FogHeight = 0.0f;           // world units
+        float FogStartDistance = 0.0f;    // world units
+        float FogMaxOpacity = 1.0f;
+        glm::vec3 FogColor{ 1.0f, 1.0f, 1.0f }; // tint of the environment's light (FogFromEnvironment) or the fog's radiance
+        bool FogFromEnvironment = true;
+        float FogSunScattering = 0.05f;   // glow towards the sun: the sun's illuminance times this
+        float FogSunExponent = 8.0f;      // how tight that glow is
+
         EnvironmentLightComponent() = default;
         EnvironmentLightComponent(const EnvironmentLightComponent&) = default;
     };

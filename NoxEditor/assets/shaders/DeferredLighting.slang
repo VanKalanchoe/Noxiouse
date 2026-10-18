@@ -2,6 +2,7 @@
 #include "NRDFrontEnd.slang"
 #include "DDGICommon.slang"
 #include "PBRLighting.slang"
+#include "HeightFog.slang"
 
     import Tonemapping;
     import Math;
@@ -693,7 +694,10 @@
         float3 finalColor = directLighting + iblColor;
         finalColor = lerp(finalColor, finalColor * occlusion, 1.0);
         finalColor += emissionSample.rgb;
-        finalColor = applyAerialPerspective(finalColor, pushConstant, uv, length(worldPos - ubo->cameraWorldPos.xyz));
+        const float3 toSurface = worldPos - ubo->cameraWorldPos.xyz;
+        const float surfaceDistance = length(toSurface);
+        finalColor = applyAerialPerspective(finalColor, pushConstant, uv, surfaceDistance);
+        finalColor = applyHeightFog(ubo, finalColor, toSurface / max(surfaceDistance, 1e-6), surfaceDistance);
 
         return float4(finalColor, 1.0);
     }

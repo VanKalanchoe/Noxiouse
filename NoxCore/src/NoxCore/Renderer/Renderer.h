@@ -151,6 +151,22 @@ namespace Nox
         bool operator==(const SkyAtmosphereSettings&) const = default;
     };
 
+    // Exponential height fog (HeightFog.slang): density(y) = DensityPerKm * exp(-FalloffPerKm * (y - BaseHeight)).
+    struct HeightFogSettings
+    {
+        bool Enabled = false;
+        float DensityPerKm = 0.5f;   // extinction per km at BaseHeight
+        float FalloffPerKm = 5.0f;   // density halves every ln(2) / falloff km upwards
+        float BaseHeight = 0.0f;     // world units
+        float StartDistance = 0.0f;  // world units: no fog closer than this
+        float MaxOpacity = 1.0f;
+        glm::vec3 Color{ 1.0f };     // tint of the environment's light (FromEnvironment) or the fog's own radiance
+        bool FromEnvironment = true;
+        glm::vec3 SunDirection{ 0.0f, 1.0f, 0.0f }; // towards the sun
+        glm::vec3 SunColor{ 0.0f };  // the sun's illuminance * the fog's directional scattering
+        float SunExponent = 8.0f;
+    };
+
     class Renderer
     {
     public:
@@ -233,6 +249,8 @@ namespace Nox
         // misses). Called every frame while the scene wants it; a frame in which the settings changed updates the sky and
         // its IBL inside the frame (a few compute passes, no wait). SetEnvironmentMap switches back to a texture or none.
         void SetProceduralSky(const SkyAtmosphereSettings& settings);
+        // Per frame, main thread (Scene::SetRenderer): the fog of the scene's environment, or disabled.
+        void SetHeightFog(const HeightFogSettings& settings) { m_heightFog = settings; }
 
         // GPU scene (§5.5), main thread. Mesh entities live on the GPU until their owner changes them; the renderer
         // uploads only what changed.
@@ -1340,6 +1358,7 @@ namespace Nox
         // Storage slots: [transmittance, multiple scattering, environment mips..., irradiance mips..., prefiltered mips...,
         // aerial perspective].
         std::vector<uint32_t> m_skyStorageSlots;
+        HeightFogSettings m_heightFog;
         bool m_proceduralSkyActive = false;
         bool m_skyLutsDirty = false;
         bool m_skyDirty = false;

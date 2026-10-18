@@ -515,6 +515,16 @@ namespace Nox
             out << YAML::Key << "GroundAlbedo" << YAML::Value << elc.GroundAlbedo;
             out << YAML::Key << "AltitudeKm" << YAML::Value << elc.AltitudeKm;
             out << YAML::Key << "AerialPerspectiveScale" << YAML::Value << elc.AerialPerspectiveScale;
+            out << YAML::Key << "HeightFog" << YAML::Value << elc.HeightFog;
+            out << YAML::Key << "FogDensity" << YAML::Value << elc.FogDensity;
+            out << YAML::Key << "FogHeightFalloff" << YAML::Value << elc.FogHeightFalloff;
+            out << YAML::Key << "FogHeight" << YAML::Value << elc.FogHeight;
+            out << YAML::Key << "FogStartDistance" << YAML::Value << elc.FogStartDistance;
+            out << YAML::Key << "FogMaxOpacity" << YAML::Value << elc.FogMaxOpacity;
+            out << YAML::Key << "FogColor" << YAML::Value << elc.FogColor;
+            out << YAML::Key << "FogFromEnvironment" << YAML::Value << elc.FogFromEnvironment;
+            out << YAML::Key << "FogSunScattering" << YAML::Value << elc.FogSunScattering;
+            out << YAML::Key << "FogSunExponent" << YAML::Value << elc.FogSunExponent;
 
             out << YAML::EndMap;
         }
@@ -1323,6 +1333,26 @@ namespace Nox
                 elc.AltitudeKm = environmentLightComponent["AltitudeKm"].as<float>();
             if (environmentLightComponent["AerialPerspectiveScale"])
                 elc.AerialPerspectiveScale = environmentLightComponent["AerialPerspectiveScale"].as<float>();
+            if (environmentLightComponent["HeightFog"])
+                elc.HeightFog = environmentLightComponent["HeightFog"].as<bool>();
+            if (environmentLightComponent["FogDensity"])
+                elc.FogDensity = environmentLightComponent["FogDensity"].as<float>();
+            if (environmentLightComponent["FogHeightFalloff"])
+                elc.FogHeightFalloff = environmentLightComponent["FogHeightFalloff"].as<float>();
+            if (environmentLightComponent["FogHeight"])
+                elc.FogHeight = environmentLightComponent["FogHeight"].as<float>();
+            if (environmentLightComponent["FogStartDistance"])
+                elc.FogStartDistance = environmentLightComponent["FogStartDistance"].as<float>();
+            if (environmentLightComponent["FogMaxOpacity"])
+                elc.FogMaxOpacity = environmentLightComponent["FogMaxOpacity"].as<float>();
+            if (environmentLightComponent["FogColor"])
+                elc.FogColor = environmentLightComponent["FogColor"].as<glm::vec3>();
+            if (environmentLightComponent["FogFromEnvironment"])
+                elc.FogFromEnvironment = environmentLightComponent["FogFromEnvironment"].as<bool>();
+            if (environmentLightComponent["FogSunScattering"])
+                elc.FogSunScattering = environmentLightComponent["FogSunScattering"].as<float>();
+            if (environmentLightComponent["FogSunExponent"])
+                elc.FogSunExponent = environmentLightComponent["FogSunExponent"].as<float>();
         }
 
         auto animatorComponent = entity["AnimatorComponent"];

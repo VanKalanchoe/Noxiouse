@@ -4116,6 +4116,22 @@ namespace Nox
         uniformData.lodFullDetail = (m_lodFullDetail || m_orthographic) ? 1u : 0u; // the LOD cut assumes a perspective camera
         uniformData.clusterStatsReference = m_clusterStatsBuffer->getDeviceAddress();
         uniformData.unitsPerMeter = WorldUnits::PerMeter();
+        {
+            // Height fog in world units (the settings are per km).
+            const HeightFogSettings& fog = m_heightFog;
+            const float kmPerUnit = WorldUnits::ToMeters(1.0f) / 1000.0f;
+            uniformData.heightFogDensity = fog.Enabled ? glm::max(fog.DensityPerKm, 0.0f) * kmPerUnit : 0.0f;
+            uniformData.heightFogFalloff = glm::max(fog.FalloffPerKm, 0.0f) * kmPerUnit;
+            uniformData.heightFogBaseY = fog.BaseHeight;
+            uniformData.heightFogStartDistance = glm::max(fog.StartDistance, 0.0f);
+            uniformData.heightFogMaxOpacity = glm::clamp(fog.MaxOpacity, 0.0f, 1.0f);
+            uniformData.heightFogFromEnvironment = fog.FromEnvironment ? 1u : 0u;
+            uniformData.heightFogSunExponent = glm::max(fog.SunExponent, 1.0f);
+            uniformData.heightFogColor = glm::max(fog.Color, glm::vec3(0.0f));
+            const float sunLength = glm::length(fog.SunDirection);
+            uniformData.heightFogSunDirection = sunLength > 1e-6f ? fog.SunDirection / sunLength : glm::vec3(0.0f, 1.0f, 0.0f);
+            uniformData.heightFogSunColor = glm::max(fog.SunColor, glm::vec3(0.0f));
+        }
 
         // PBR IBL
         uniformData.irradianceMapIndex = m_irradianceCubemap ? m_irradianceCubemap->GetDescriptorIndexSlot() : ~0u;
