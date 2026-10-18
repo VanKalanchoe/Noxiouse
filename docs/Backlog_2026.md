@@ -10,6 +10,24 @@
 |---|---|---|
 | N4 | **World units and world tools** (grid, snap, ortho views, measure, bounds readout, unit conversion at the boundaries, physics unit interface) | plan written 2026-09-26: `Units_And_World_Tools_Plan_2026.md`; decisions taken 2026-09-26 (cm, tools first); **U1 (WorldUnits) and the first part of U2 (Inspector size readout, snap toolbar) built, untested**; world grid (Godot port) + snap feedback line built, being tuned; world grid, snap feedback, Measure tool and reference figure built (U2); U1-U6 built, plus per-field unit display/editing (Transform Position, script [Expose] Unit) -- testing next. Replaces the old E1 idea of a bare "model size in the import dialog" (that is phase U4 of the plan) |
 
+## Future.md (2026-10-18; audit: `Status_Audit_2026-10.md`)
+
+| # | Item | State |
+|---|---|---|
+| F1 | Docs audit | done: `Status_Audit_2026-10.md` |
+| F2 | Modern content browser, material window | first part **built, untested** (tree, path, search, type filter, Material Editor); rendered thumbnails: `Editor_Features_Plan_2026-10.md` §2 |
+| F3 | Animation player node, sequencer, editing | first part **built, untested** (Clip = Sequence Player with Speed pin + Start Position, BlendSpace1D); rest: same plan §3 |
+| F4 | Hybrid renderer near the path tracer, RT fallbacks, DLSS edge jitter, transparency / transmission | planned: `Hybrid_Renderer_Plan_2026-10.md` §1-4 (DLSS jitter cause found: jittered entity/depth blit) |
+| F5 | Up to four viewports with layout presets | planned: `Editor_Features_Plan_2026-10.md` §4 |
+| F6 | Procedural sky (Hillaire / UE SkyAtmosphere recommended over Hosek-Wilkie) | planned: `Hybrid_Renderer_Plan_2026-10.md` §5 |
+| F7 | Runtime asset manager + runtime player | planned: `Runtime_And_Packaging_Plan_2026-10.md` R1-R2 |
+| F8 | Packaging a distribution build | answered + planned: same doc §2, R3-R7 (a PCH is a build-speed tool, not packaging) |
+| F9 | Stats overlay text broken | **built, untested**: drawn in screen space (was world-space quads: inside the scene in ortho views, float precision far from the origin); replaces R4 |
+| F10 | Basic shapes | **built, untested**: Create > Shapes / hierarchy right-click > Shapes |
+| F11 | Minecraft-style game: script or C++? | answered: `Runtime_And_Packaging_Plan_2026-10.md` §4 (C++ voxel module + C# gameplay) |
+| F12 | Undo / redo | **built, untested**: Ctrl+Z / Ctrl+Y, Edit menu (`EditorHistory`) |
+| F13 | VFX, particles, clouds | answered + planned: `Hybrid_Renderer_Plan_2026-10.md` §6 |
+
 ## Prefabs (plan: `Prefab_Architecture_Plan_2026.md`, section 8)
 
 | # | Item |
@@ -47,7 +65,7 @@
 | R1 | **Own TAA** (UE4/Karis style: variance clipping in YCoCg, Catmull-Rom history, closest-depth motion vectors) -- decided 2026-09-26 to keep **DLSS DLAA (no RR)** for now; edge stepping / crawling with DLSS off is the missing AA, not a bug. DLSS costs measured: DLAA/Balanced ~1.1-1.2 ms, with Ray Reconstruction 4.3 ms (raster) / 11.6 ms (path tracing, replaces NRD) |
 | R2 | Phase 6b **geometry streaming** (cluster pages): paused on purpose, returns with a scene that does not fit in memory or with cluster acceleration structures (D8) |
 | R3 | Phase 6b-2 RT fallback LOD: tried and reverted (holes in the path tracer) -- see the plan |
-| R4 | **Stats overlay text** looked broken after the viewport-resize fix (possibly large Peak values; Shift+F3 resets) -- never confirmed |
+| R4 | ~~Stats overlay text looked broken~~ -> F9 (cause found 2026-10-18: the overlay was world-space geometry through the camera; now screen space) |
 | R5 | Editor/DDGI: the probe grid is a fixed 1.8 m grid at the Bistro scale (a moving character crossing it can show stepping in the lighting) |
 
 ## Editor and tools
