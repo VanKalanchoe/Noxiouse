@@ -637,6 +637,67 @@ namespace Nox
         }
 #endif
 
+        // Render quality presets (docs/Hybrid_Renderer_Plan_2026-10.md §2), saved in the project file.
+        {
+            ProjectConfig& config = Project::GetActive()->GetConfig();
+            const Renderer::RenderQuality recommended = m_Renderer->GetRecommendedQuality();
+            const Renderer::RenderQuality current = m_Renderer->GetCurrentQuality();
+            const bool automatic = config.RenderQuality == "Auto";
+            char preview[64];
+            if (automatic && current == recommended)
+                snprintf(preview, sizeof(preview), "Auto (%s)", Renderer::GetQualityName(recommended));
+            else
+                snprintf(preview, sizeof(preview), "%s", Renderer::GetQualityName(current));
+
+            auto applyQuality = [this](Renderer::RenderQuality quality)
+            {
+                m_Renderer->ApplyQualityPreset(quality);
+                // An ortho view stays raster only; the preset comes back when it is left.
+                if (m_EditorCamera.IsOrthographic())
+                {
+                    m_OrthoSaved = { true, m_Renderer->isDLSSEnabled(), m_Renderer->getRayTracingEnabled(), m_Renderer->isPathTracingEnabled() };
+                    m_Renderer->setDLSSEnabled(false);
+                    m_Renderer->setRayTracingEnabled(false);
+                    m_Renderer->setPathTracingEnabled(false);
+                }
+            };
+
+            ImGui::SetNextItemWidth(160.0f);
+            if (ImGui::BeginCombo("Render Quality", preview))
+            {
+                char autoLabel[64];
+                snprintf(autoLabel, sizeof(autoLabel), "Auto (%s for this GPU)", Renderer::GetQualityName(recommended));
+                if (ImGui::Selectable(autoLabel, automatic))
+                {
+                    config.RenderQuality = "Auto";
+                    applyQuality(recommended);
+                    Project::SaveActive();
+                }
+                for (Renderer::RenderQuality quality : { Renderer::RenderQuality::Low, Renderer::RenderQuality::Medium, Renderer::RenderQuality::High })
+                {
+                    if (ImGui::Selectable(Renderer::GetQualityName(quality), !automatic && config.RenderQuality == Renderer::GetQualityName(quality)))
+                    {
+                        config.RenderQuality = Renderer::GetQualityName(quality);
+                        applyQuality(quality);
+                        Project::SaveActive();
+                    }
+                }
+                if (ImGui::Selectable("Custom (keep these settings, no preset at start)", config.RenderQuality == "Custom"))
+                {
+                    config.RenderQuality = "Custom";
+                    Project::SaveActive();
+                }
+                ImGui::EndCombo();
+            }
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Every preset is ray traced (no shadow maps):\n"
+                                  "  Low: RT shadows of the sun, DDGI, SSAO, DLSS Performance (the fallback for smaller RT GPUs)\n"
+                                  "  Medium: + RT reflections, ReSTIR DI (every light shadowed), DLSS Balanced\n"
+                                  "  High: + RTAO, ReSTIR GI, DLSS Quality (the closest to the path tracer)\n"
+                                  "The project opens with it (saved in the .nproj). Changing a setting below makes it Custom for this session.");
+            ImGui::Separator();
+        }
+
         if (ImGui::Button("Dump Frame Graph"))
         {
             // Next to Nox.log (opened relative to the working directory); open the .dot files with GraphViz.
@@ -1861,6 +1922,7 @@ namespace Nox
         if (Project::Load(path))
         {
             m_EditorCamera.ApplyWorldUnitDefaults(); // the project's world unit is only known now (U6)
+            m_Renderer->ApplyQualitySetting(Project::GetActive()->GetConfig().RenderQuality);
 
             AssetHandle startScene = Project::GetActive()->GetConfig().StartScene;
             if (startScene)

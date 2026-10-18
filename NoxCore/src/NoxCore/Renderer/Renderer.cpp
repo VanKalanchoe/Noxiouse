@@ -573,6 +573,130 @@ namespace Nox
         m_lastViewportResizeRequestTime = std::chrono::steady_clock::now();
     }
 
+    namespace
+    {
+        struct QualityPresetSettings
+        {
+            bool RTShadows;
+            bool RTReflections;
+            bool RTAO;               // else SSAO
+            uint32_t DiffuseGI;      // 1 DDGI, 2 ReSTIR GI
+            uint32_t DirectLighting; // 0 the loop (the first light shadowed), 1 ReSTIR DI (every light shadowed)
+            NRI::UpscaleMode Upscale;
+        };
+
+        QualityPresetSettings GetQualityPresetSettings(Renderer::RenderQuality quality)
+        {
+            switch (quality)
+            {
+            case Renderer::RenderQuality::Low: return { true, false, false, 1, 0, NRI::UpscaleMode::Performance };
+            case Renderer::RenderQuality::Medium: return { true, true, false, 1, 1, NRI::UpscaleMode::Balanced };
+            default: return { true, true, true, 2, 1, NRI::UpscaleMode::Quality };
+            }
+        }
+    }
+
+    void Renderer::ApplyQualityPreset(RenderQuality quality)
+    {
+        if (quality == RenderQuality::Custom)
+            return;
+
+        const QualityPresetSettings preset = GetQualityPresetSettings(quality);
+        setPathTracingEnabled(false);
+        setRayTracingEnabled(true);
+        setRayTracingShadows(preset.RTShadows);
+        setNRDShadowsEnabled(true);
+        setRayTracingReflections(preset.RTReflections);
+        if (preset.RTReflections)
+            setNRDReflectionDenoiser(NRI::NRDReflectionDenoiser::REBLUR);
+        if (preset.RTAO)
+            setRTAOEnabled(true);
+        else
+            setSSAOEnabled(true);
+        setDiffuseGIMode(preset.DiffuseGI);
+        setDDGIEnabled(preset.DiffuseGI == 1);
+        if (preset.DiffuseGI == 2)
+            setNRDGIDenoiser(NRI::NRDDiffuseDenoiser::REBLUR);
+        setDirectLightingMode(preset.DirectLighting);
+        if (preset.DirectLighting == 1)
+            setNRDDIDenoiser(NRI::NRDDiffuseDenoiser::REBLUR);
+        if (isDLSSSupported())
+        {
+            setDLSSEnabled(true);
+            setUpscaleMode(preset.Upscale);
+        }
+        setRefractionEnabled(true);
+        NOX_CORE_INFO("Render quality: {}", GetQualityName(quality));
+    }
+
+    Renderer::RenderQuality Renderer::GetCurrentQuality() const
+    {
+        for (RenderQuality quality : { RenderQuality::Low, RenderQuality::Medium, RenderQuality::High })
+        {
+            const QualityPresetSettings preset = GetQualityPresetSettings(quality);
+            const bool upscaleMatches = !isDLSSSupported() || (m_dlssEnabled && m_dlssMode == preset.Upscale);
+            if (!m_pathTracingEnabled && m_rayTracingEnabled && m_rayTracingShadows == preset.RTShadows &&
+                m_rayTracingReflections == preset.RTReflections && m_rtaoEnabled == preset.RTAO && m_diffuseGIMode == preset.DiffuseGI &&
+                m_directLightingMode == preset.DirectLighting && upscaleMatches)
+                return quality;
+        }
+        return RenderQuality::Custom;
+    }
+
+    Renderer::RenderQuality Renderer::GetRecommendedQuality() const
+    {
+        // The device's memory budget (most of its VRAM): ReSTIR GI / DI, RT reflections and their denoisers need the room and the
+        // speed that come with the bigger cards. Asked from the device: the frame's budget is only measured once frames run.
+        uint64_t budget = m_memoryBudget.GetDeviceBudget();
+        if (budget == 0 && m_device)
+        {
+            std::vector<NRI::MemoryHeapStats> heaps;
+            m_device->getMemoryStats(heaps);
+            for (const NRI::MemoryHeapStats& heap : heaps)
+            {
+                if (heap.deviceLocal)
+                    budget = std::max(budget, heap.budget);
+            }
+        }
+        const double gigabytes = static_cast<double>(budget) / (1024.0 * 1024.0 * 1024.0);
+        if (gigabytes <= 0.0)
+            return RenderQuality::Medium;
+        if (gigabytes < 6.5)
+            return RenderQuality::Low;
+        if (gigabytes < 10.0)
+            return RenderQuality::Medium;
+        return RenderQuality::High;
+    }
+
+    const char* Renderer::GetQualityName(RenderQuality quality)
+    {
+        switch (quality)
+        {
+        case RenderQuality::Low: return "Low";
+        case RenderQuality::Medium: return "Medium";
+        case RenderQuality::High: return "High";
+        default: return "Custom";
+        }
+    }
+
+    Renderer::RenderQuality Renderer::ParseQualityName(const std::string& name, RenderQuality fallback)
+    {
+        for (RenderQuality quality : { RenderQuality::Low, RenderQuality::Medium, RenderQuality::High, RenderQuality::Custom })
+        {
+            if (name == GetQualityName(quality))
+                return quality;
+        }
+        return fallback;
+    }
+
+    void Renderer::ApplyQualitySetting(const std::string& setting)
+    {
+        if (setting == "Auto")
+            ApplyQualityPreset(GetRecommendedQuality());
+        else
+            ApplyQualityPreset(ParseQualityName(setting, RenderQuality::Custom));
+    }
+
     void Renderer::setDLSSEnabled(bool enabled)
     {
         if (m_dlssEnabled == enabled) return;

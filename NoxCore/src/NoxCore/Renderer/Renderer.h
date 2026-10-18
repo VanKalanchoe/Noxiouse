@@ -524,6 +524,20 @@ namespace Nox
         // jitter instead of blitted, so the grid, gizmo lines, collider wireframes and picking hold still. Costs a depth-only pass.
         void setStableEditorDepth(bool enabled) { m_stableEditorDepth = enabled; }
         bool getStableEditorDepth() const { return m_stableEditorDepth; }
+        // Quality presets (docs/Hybrid_Renderer_Plan_2026-10.md §2): the hybrid renderer's toggles as one set, every rung ray traced (no
+        // shadow maps). Low is the fallback for smaller RT GPUs (RT shadows of the sun, DDGI, SSAO, DLSS Performance), High the closest
+        // to the path tracer (RT shadows of every light through ReSTIR DI, RT reflections, RTAO, ReSTIR GI, DLSS Quality). Custom: the
+        // settings were changed one by one.
+        enum class RenderQuality : uint8_t { Low, Medium, High, Custom };
+        void ApplyQualityPreset(RenderQuality quality);
+        RenderQuality GetCurrentQuality() const; // the preset the settings equal now, or Custom
+        RenderQuality GetRecommendedQuality() const; // from this GPU's memory budget
+        static const char* GetQualityName(RenderQuality quality);
+        static RenderQuality ParseQualityName(const std::string& name, RenderQuality fallback);
+        // A project's setting (ProjectConfig::RenderQuality): "Auto" applies the recommended preset, a preset's name that preset,
+        // anything else (Custom) leaves the settings as they are.
+        void ApplyQualitySetting(const std::string& setting);
+
         // Glass (transmissive materials) refracts the lit scene behind it, bent by IOR and thickness and blurred by roughness (a copy of
         // the scene with blur mips; transparent surfaces then draw in a pass of their own). Off: transmission only lowers the alpha.
         void setRefractionEnabled(bool enabled) { m_refractionEnabled = enabled; }

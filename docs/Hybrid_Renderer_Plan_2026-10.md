@@ -40,6 +40,19 @@ Implementation: one `RenderQuality` preset struct in `Renderer` (today the toggl
 checkboxes), applied as a whole and saved with the project; the Settings panel keeps the individual overrides.
 Auto-detect picks the fallback preset on GPUs below a VRAM / shader-model threshold.
 
+**Built (2026-10-18, untested):** `Renderer::RenderQuality` Low / Medium / High (+ Custom), Settings > **Render Quality**,
+saved in the project file (`RenderQuality: Auto | Low | Medium | High | Custom`; the editor and NoxRuntime apply it when the
+project opens). Auto picks by the GPU's memory budget: < 6.5 GB Low, < 10 GB Medium, else High.
+
+| Preset | Shadows | Reflections | AO | Diffuse GI | Direct light | DLSS |
+|---|---|---|---|---|---|---|
+| Low (fallback) | RT, sun only (the loop shadows light 0) + SIGMA | IBL | SSAO | DDGI | analytic loop | Performance |
+| Medium | RT + SIGMA | RT + REBLUR | SSAO | DDGI | ReSTIR DI (every light shadowed) + REBLUR | Balanced |
+| High (near the path tracer) | RT + SIGMA | RT + REBLUR | RTAO | ReSTIR GI + REBLUR | ReSTIR DI + REBLUR | Quality |
+
+Glass refraction is on in all three. Changing one setting afterwards shows Custom for the session. Not yet: half-resolution
+reflections and a roughness cut as their own rungs.
+
 ## 3. DLSS edge jitter (Future.md: "when DLSS is enabled, edge detection jittering")
 
 **Cause (found, see `Status_Audit_2026-10.md`):** `Renderer::addEntityDepthBlitPass` (`UpscalePasses.cpp`) copies the
@@ -59,10 +72,12 @@ Why not a "de-jittered blit" (shifting the nearest blit by the jitter, the first
 jittered sample of a pixel is the same one with or without the shift, so it changes nothing; with upscaling it halves the
 error but edges still move. Only geometry rendered without jitter holds still.
 
-**Still open:** picking and the 2D overlay's depth test (grid, gizmo lines, collider wireframes) keep reading the jittered
-`EntityHi` / `DepthHi`. A one-pixel jitter in picking is invisible; the grid crawling along geometry edges with DLSS on is
-the remaining visible part (fix: a non-jittered depth of the scene for the overlay, or depth testing the grid in the shader
-against a stabilized depth).
+**Built (2026-10-18, untested): the rest.** With a jittered camera the editor no longer blits the jittered `Entity` /
+`Depth` to display resolution: `Renderer::addStableEntityDepthPass` (`UpscalePasses.cpp`, `EditorStableDepth.slang`) draws the
+camera's visible instances again at display resolution with `nonJitteredProj` (both culling phases; depth-writing buckets,
+then the transparent ones for their entity IDs, depth tested), so the 2D overlay's depth test (grid, gizmo lines, collider
+wireframes), picking and the measure tool's depth hold still. Settings > DLSS > **Stable Overlays** (on by default; a depth-only
+pass of the scene, editor only).
 
 ## 4. Transparency and transmission that hold up
 
@@ -73,6 +88,22 @@ against a stabilized depth).
 | H3b | **Refraction (fallback)**: sample the lit opaque scene color behind the surface with an offset from the normal and IOR (screen-space), rough glass = blurred mip of the scene color | what most raster engines ship |
 | H4 | **Order-independent transparency**: weighted blended OIT for many overlapping layers (foliage cards, particles), sorting by object as today otherwise | needed once particles exist (§6) |
 | H5 | Denoising for the transparent signals (RT shadows on glass, refraction) through the existing NRD front end | |
+
+**Built (2026-10-18, untested):**
+
+- **H2:** `Material_TransparentLit_Mesh.slang` traces one hard shadow ray (ray query, `forwardShadowed`) for the four strongest
+  lights of each pixel (by their unshadowed contribution; the rest stay unshadowed) while RT shadows are on. The ray forces
+  non-opaque so every candidate is decided in the shader: blended and transmissive occluders let the light through (glass
+  neither throws a black shadow nor shadows itself), alpha-masked ones are cut out. The forward passes declare the TLAS read.
+  The editor's extra viewports use the same shader for all surfaces, so they get shadows too.
+- **H3b:** with glass in view (a lit transparent draw whose material has transmission), `addForward3DPass` splits: Forward 3D
+  (unlit, sky), then the HDR image is copied with a mip chain of 2x2 averages (`ColorPyramid.slang`, "Refraction Source"), then
+  **Forward Transparent** draws the transparent buckets. Glass bends the view ray by its IOR through the volume's thickness
+  (`KHR_materials_volume` thickness x model scale; 0 = thin-walled, no bending), offsets the lookup by the exit point's screen
+  offset, reads the mip `log2(size) * roughness * clamp(2 ior - 2)` (the Khronos viewer's rule), tints by the base color and
+  takes out the Fresnel reflectance; it covers what is behind it by its alpha alone. Settings > **Glass Refraction**. Without
+  glass in view the frame is unchanged. Not yet: volume absorption (attenuation color / distance are not imported), the RT
+  rung (H3), OIT (H4), denoising of the forward shadows (H5).
 
 ## 5. Procedural sky (Future.md item 6: "hazemut or something")
 

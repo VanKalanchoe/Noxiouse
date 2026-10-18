@@ -24,6 +24,7 @@ namespace Nox
         if (serializer.Deserialize(path))
         {
             project->m_ProjectDirectory = path.parent_path();
+            project->m_ProjectFile = path;
             s_ActiveProject = project;
             WorldUnits::SetPerMeter(project->GetConfig().WorldUnitsPerMeter);
             std::shared_ptr<EditorAssetManager> editorAssetManager = std::make_shared<EditorAssetManager>();
@@ -35,12 +36,20 @@ namespace Nox
         return {};
     }
 
+    bool Project::SaveActive()
+    {
+        if (!s_ActiveProject || s_ActiveProject->m_ProjectFile.empty())
+            return false;
+        return SaveActive(s_ActiveProject->m_ProjectFile);
+    }
+
     bool Project::SaveActive(const std::filesystem::path& path)
     {
         ProjectSerializer serializer(s_ActiveProject);
         if (serializer.Serialize(path))
         {
             s_ActiveProject->m_ProjectDirectory = path.parent_path();
+            s_ActiveProject->m_ProjectFile = path;
             return true;
         }
         return false;

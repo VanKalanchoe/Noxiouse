@@ -52,6 +52,8 @@ namespace Nox
             return;
         }
         NOX_CORE_INFO("NoxRuntime: playing '{}'", projectFile.generic_string());
+        // The project's quality preset ("Auto": the one this GPU should run, the fallback on smaller RT cards).
+        m_Renderer->ApplyQualitySetting(Project::GetActive()->GetConfig().RenderQuality);
 
         // The editor's asset manager, read-only: assets are already cooked by the editor, and no file watcher runs (Init is not
         // called). R2 replaces it with a RuntimeAssetManager reading the runtime registry / pack files.

@@ -23,6 +23,10 @@ namespace Nox
         // 1 (meters) was the default through U1-U5 while the tools were being built; existing scenes/prefabs built under it are not
         // converted (no compatibility tooling) -- re-place / re-tune them by hand after re-importing assets.
         float WorldUnitsPerMeter = 100.0f;
+
+        // The renderer's quality preset the project opens with (Renderer::RenderQuality by name): "Auto" picks the one this GPU
+        // should run (Renderer::GetRecommendedQuality); "Custom" leaves the renderer's own defaults.
+        std::string RenderQuality = "Auto";
     };
     
     class Project : public RefCounted
@@ -97,10 +101,13 @@ namespace Nox
         static Ref<Project> New();
         static Ref<Project> Load(const std::filesystem::path& path);
         static bool SaveActive(const std::filesystem::path& path);
+        // Back into the file it was loaded from.
+        static bool SaveActive();
 
     private:
         ProjectConfig m_Config;
         std::filesystem::path m_ProjectDirectory;
+        std::filesystem::path m_ProjectFile;
         std::shared_ptr<AssetManagerBase> m_AssetManager;
 
         inline static Ref<Project> s_ActiveProject;

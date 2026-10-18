@@ -27,6 +27,7 @@ namespace Nox
                 out << YAML::Key << "AssetRegistryPath" << YAML::Value << config.AssetRegistryPath.string();
                 out << YAML::Key << "ScriptModulePath" << YAML::Value << config.ScriptModulePath.string();
                 out << YAML::Key << "WorldUnitsPerMeter" << YAML::Value << config.WorldUnitsPerMeter;
+                out << YAML::Key << "RenderQuality" << YAML::Value << config.RenderQuality;
                 out << YAML::EndMap; // Project
             }
             out << YAML::EndMap; // Root
@@ -64,6 +65,8 @@ namespace Nox
         config.ScriptModulePath = projectNode["ScriptModulePath"].as<std::string>();
         if (projectNode["WorldUnitsPerMeter"])
             config.WorldUnitsPerMeter = projectNode["WorldUnitsPerMeter"].as<float>();
+        if (projectNode["RenderQuality"])
+            config.RenderQuality = projectNode["RenderQuality"].as<std::string>();
 
         return true;
     }
