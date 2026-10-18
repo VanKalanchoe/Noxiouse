@@ -42,6 +42,28 @@
 | Animation authoring (sequencer, clip editing) | see the animation row above | 3 |
 | VFX / particles / volumetric clouds | nothing in code | 13 |
 
+## 4a. Where every Future.md item stands now (updated 2026-10-18, end of the implementation round)
+
+Everything below is built and pushed but **untested unless it says confirmed** -- the user builds and tests. Details in the
+plan each row names.
+
+| # | Item | State now | Open |
+|---|---|---|---|
+| F1 | Docs audit | done (this file, kept current here) | -- |
+| F2 | Modern content browser | folder tree, search, filters, Material Editor window with a live sphere, rendered thumbnails (materials on spheres, meshes), thumbnail cache on disk (`Editor_Features_Plan_2026-10.md` §2) | prefab / model thumbnails, a neutral backdrop |
+| F3 | Animation | Sequence Player node, BlendSpace1D / 2D, notifies, layered blend, additive, montages, root motion, clip preview window, Sequencer with Timeline assets and C# control (§3) | audio graph, clip trimming |
+| F4 | Hybrid renderer | DLSS outline jitter fixed (**confirmed**), Stable Overlays, quality presets with Auto, RT shadows on transparency, screen-space and ray traced glass refraction (`Hybrid_Renderer_Plan_2026-10.md` §2-4) | OIT (H4), transparent-signal denoising (H5), volume absorption |
+| F5 | Up to 4 viewports | movable / resizable, 1 / 2 / 3 / 4 layouts, independent cameras (`Editor_Features_Plan_2026-10.md` §4) | -- |
+| F6 | Procedural sky | Hillaire atmosphere, sun disc, aerial perspective, volumetric clouds, height fog; HDR environment rotation applied (§5) | night sky |
+| F7 | Runtime asset manager + runtime project | NoxRuntime player, `RuntimeAssetManager` (read-only pipeline), engine code off the editor manager (`Runtime_And_Packaging_Plan_2026-10.md` §2b-2c) | pack-file reads (R4) |
+| F8 | Packaging | File > Package Game: runtime exe, engine assets, only the assets the scenes need, registry subset (§2d); PCH answered (compile speed only) | pack files (R4), precompiled shaders (R5), per-project script assembly name |
+| F9 | Stats overlay text | fixed | -- |
+| F10 | Basic shapes | built | -- |
+| F11 | Minecraft-style game | answered (§4); script APIs built: run-time meshes, jobs, mesh colliders, raycasts, `VoxelTerrain.cs` example (§4b) | the C++ voxel module for big worlds |
+| F12 | Undo / redo | built (Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y, **confirmed**) | -- |
+| F13 | VFX, particles, clouds | clouds in the sky; Particle Emitter with CPU simulation, lit and soft rendering, flipbooks, C# control (`Hybrid_Renderer_Plan_2026-10.md` §6b) | GPU simulation, OIT, collisions, module editor (V3), VDB volumes (V5) |
+| F14 | Unregister meshes of deleted entities? | answered (no, below); stale registry entries pruned at load | -- |
+
 ## 4. Future.md items: where each one stands
 
 | # | Item | Where it stands | Size | What happens with it now |

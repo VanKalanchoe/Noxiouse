@@ -3,6 +3,7 @@
 #include <chrono>
 #include <filesystem>
 #include <functional>
+#include <span>
 #include "Renderer2D.h"
 #include "NoxCore/Core/Window.h"
 #include "Mesh.h"
