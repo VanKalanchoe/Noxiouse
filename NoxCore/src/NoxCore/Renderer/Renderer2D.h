@@ -56,9 +56,18 @@ namespace Nox
         
         // actual Render Path
         bool BeginFrame();
-        void Update(uint32_t currentImage);
+        // frameUniforms: this frame's camera uniforms; the screen-space batch draws with a copy of them whose matrices map
+        // output pixels instead.
+        void Update(uint32_t currentImage, const shaderio::UniformBufferObject& frameUniforms);
         void Flush(NRI::CommandBuffer& commandBuffer, const NRI::Buffer& currentUniformBuffer, uint32_t frameIndex);
         void EndFrame();
+
+        // Screen space: DrawQuad / DrawString calls between these two record positions in output pixels (origin top left,
+        // x right, y down; quads and glyphs keep their y-up local axes) and are drawn last, on top of the scene, through a
+        // pixel projection instead of the camera. For HUD-like text (the Nox Stats overlay) that must look the same in
+        // every view: no camera precision, no ortho depth range, never hidden by geometry. Circles and lines stay world space.
+        void BeginScreenSpace(const glm::vec2& outputSize);
+        void EndScreenSpace();
         
         // Render Data
         void BeginScene(const Camera& camera, const glm::mat4& transform);
@@ -115,6 +124,9 @@ namespace Nox
         void createGridMeshPipeline(bool forceCompile);
         void createLineStorageBuffers();
 
+        // Screen space
+        void createScreenUniformBuffers();
+
     private:
         struct Data
         {
@@ -141,6 +153,12 @@ namespace Nox
             std::vector<shaderio::LineData> xrayLineDatas; // stored after the thin ones; drawn with depth testing off
             std::vector<std::unique_ptr<NRI::Buffer>> lineStorageBuffers;
             std::vector<void*> lineStorageBuffersMapped;
+
+            // Screen space (BeginScreenSpace): stored after the world-space quads / glyphs in the same storage buffers
+            std::vector<shaderio::QuadData> screenQuadDatas;
+            std::vector<shaderio::TextData> screenTextDatas;
+            std::vector<std::unique_ptr<NRI::Buffer>> screenUniformBuffers; // the frame's uniforms with a pixel projection
+            std::vector<void*> screenUniformBuffersMapped;
         };
         
     private:
@@ -155,5 +173,7 @@ namespace Nox
         std::unique_ptr<NRI::Pipeline> m_GridMeshPipeline = nullptr;
         shaderio::PushConstantGrid m_Grid{};
         bool m_GridDraw = false; // set by DrawGrid, one frame
-    };   
+        bool m_ScreenSpace = false; // between BeginScreenSpace / EndScreenSpace
+        glm::vec2 m_ScreenSize{ 0.0f }; // output size in pixels the screen-space batch was recorded for
+    };
 }

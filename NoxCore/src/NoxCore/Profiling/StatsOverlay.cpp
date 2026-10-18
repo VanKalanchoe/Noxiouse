@@ -29,10 +29,6 @@ namespace Nox
         constexpr float ValueColumnWidth = 4.2f * TextPixelHeight;
         constexpr int ValueColumnCount = 4;
 
-        // NDC depth of the overlay plane. Reverse-Z: 0.5 is twice the near-plane distance, so the overlay passes the
-        // 2D pass depth test (GreaterOrEqual) against everything except geometry closer than that.
-        constexpr double OverlayDepth = 0.5;
-
         // Dark enough to keep white text readable over bright scenes.
         constexpr glm::vec4 BackgroundColor{ 0.0f, 0.0f, 0.0f, 0.75f };
         constexpr glm::vec4 TextColor{ 0.95f, 0.95f, 0.95f, 1.0f };
@@ -45,15 +41,6 @@ namespace Nox
         double ToMegabytes(uint64_t bytes)
         {
             return static_cast<double>(bytes) / BytesPerMegabyte;
-        }
-
-        // Output pixel -> world position on the overlay plane. The 2D overlay pass uses the viewport {0, h, w, -h},
-        // so pixel y = 0 (top) is NDC y = +1.
-        glm::dvec3 UnprojectPixel(const glm::dmat4& inverseViewProjection, const glm::dvec2& pixel, const glm::dvec2& outputSize)
-        {
-            const glm::dvec4 ndc(pixel.x / outputSize.x * 2.0 - 1.0, 1.0 - pixel.y / outputSize.y * 2.0, OverlayDepth, 1.0);
-            const glm::dvec4 world = inverseViewProjection * ndc;
-            return glm::dvec3(world) / world.w;
         }
     }
 
@@ -76,29 +63,16 @@ namespace Nox
             m_Font = Font::GetDefault();
         m_Renderer2D = renderer.getRenderer2D();
 
-        BeginPlane(renderer);
+        // Output pixels, not a plane in front of the camera: the overlay used to be world-space quads at NDC depth 0.5,
+        // which put it inside the scene in the ortho views (their depth range is thousands of units) and let float
+        // precision near a far-from-origin camera bend the glyphs.
+        m_Renderer2D->BeginScreenSpace(glm::vec2(static_cast<float>(outputExtent.width), static_cast<float>(outputExtent.height)));
         m_Cursor = Origin;
 
         DrawBasic(renderer);
         if (m_Detailed)
             DrawDetailed();
-    }
-
-    void StatsOverlay::BeginPlane(Renderer& renderer)
-    {
-        // Built from the far corners (not 1-pixel steps) and in double precision, so the per-pixel axes stay accurate
-        // when the camera is far from the world origin.
-        const NRI::Extent2D outputExtent = renderer.getOutputSize();
-        const glm::dvec2 outputSize(outputExtent.width, outputExtent.height);
-        const glm::dmat4 inverseViewProjection = glm::inverse(glm::dmat4(renderer.getViewProjection()));
-        const glm::dvec3 origin = UnprojectPixel(inverseViewProjection, glm::dvec2(0.0), outputSize);
-        const glm::dvec3 right = (UnprojectPixel(inverseViewProjection, glm::dvec2(outputSize.x, 0.0), outputSize) - origin) / outputSize.x;
-        const glm::dvec3 down = (UnprojectPixel(inverseViewProjection, glm::dvec2(0.0, outputSize.y), outputSize) - origin) / outputSize.y;
-
-        m_PlaneOrigin = glm::vec3(origin);
-        m_PixelRight = glm::vec3(right);
-        m_PixelDown = glm::vec3(down);
-        m_PlaneNormal = glm::vec3(glm::normalize(glm::cross(right, down)));
+        m_Renderer2D->EndScreenSpace();
     }
 
     void StatsOverlay::DrawBasic(Renderer& renderer)
@@ -200,11 +174,11 @@ namespace Nox
 
     glm::mat4 StatsOverlay::PixelTransform(const glm::vec2& pixel, const glm::vec2& pixelScale) const
     {
-        // Local x maps to screen right, local y to screen up (Renderer2D quads and glyphs are y-up).
-        return glm::mat4(glm::vec4(m_PixelRight * pixelScale.x, 0.0f),
-                         glm::vec4(-m_PixelDown * pixelScale.y, 0.0f),
-                         glm::vec4(m_PlaneNormal, 0.0f),
-                         glm::vec4(m_PlaneOrigin + m_PixelRight * pixel.x + m_PixelDown * pixel.y, 1.0f));
+        // Screen-space pixels (y down). Local x maps to screen right, local y to screen up (Renderer2D quads and glyphs are y-up).
+        return glm::mat4(glm::vec4(pixelScale.x, 0.0f, 0.0f, 0.0f),
+                         glm::vec4(0.0f, -pixelScale.y, 0.0f, 0.0f),
+                         glm::vec4(0.0f, 0.0f, 1.0f, 0.0f),
+                         glm::vec4(pixel.x, pixel.y, 0.0f, 1.0f));
     }
 
     float StatsOverlay::MeasureText(std::string_view text) const

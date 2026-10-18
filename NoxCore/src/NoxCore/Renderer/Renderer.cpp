@@ -4134,7 +4134,7 @@ namespace Nox
 
         {
             NOX_PROFILE_SCOPE("Renderer2D Update");
-            m_renderer2D->Update(frameIndex);
+            m_renderer2D->Update(frameIndex, uniformData);
         }
 
         std::span<NRI::CommandBuffer* const> commandBuffers;

@@ -44,6 +44,9 @@ namespace Nox
         createLineMeshPipeline(false);
         createLineStorageBuffers();
         createGridMeshPipeline(false);
+
+        // Screen space
+        createScreenUniformBuffers();
     }
 
     // needed for pipeline management you cant run this inside a commandbuffer that already started
@@ -67,13 +70,51 @@ namespace Nox
     namespace
     {
         constexpr size_t kMaxLines = 10000; // the line storage buffer holds this many, thick and thin together
+        // The quad / circle / text storage buffers hold this many each (world and screen space together); anything past it
+        // is dropped instead of written past the end of the mapped buffer.
+        constexpr size_t kMaxQuads = 10000;
+        constexpr size_t kMaxCircles = 10000;
+        constexpr size_t kMaxGlyphs = 10000;
+
+        // Output pixel (x right, y down, origin top left) -> clip space for the 2D pass's flipped viewport {0, h, w, -h}, where
+        // NDC y = +1 is the top row. Depth is reverse-Z 1.0 (the near plane); the screen-space draws also turn depth testing off.
+        glm::mat4 ScreenProjection(const glm::vec2& outputSize)
+        {
+            const glm::vec2 size = glm::max(outputSize, glm::vec2(1.0f));
+            return glm::mat4(glm::vec4(2.0f / size.x, 0.0f, 0.0f, 0.0f),
+                             glm::vec4(0.0f, -2.0f / size.y, 0.0f, 0.0f),
+                             glm::vec4(0.0f, 0.0f, 0.0f, 0.0f),
+                             glm::vec4(-1.0f, 1.0f, 1.0f, 1.0f));
+        }
     }
 
-    void Renderer2D::Update(uint32_t currentImage)
+    void Renderer2D::Update(uint32_t currentImage, const shaderio::UniformBufferObject& frameUniforms)
     {
-        memcpy(m_data.quadStorageBuffersMapped[currentImage], m_data.quadDatas.data(), m_data.quadDatas.size() * sizeof(shaderio::QuadData));
-        memcpy(m_data.circleStorageBuffersMapped[currentImage], m_data.circleDatas.data(), m_data.circleDatas.size() * sizeof(shaderio::CircleData));
-        memcpy(m_data.textStorageBuffersMapped[currentImage], m_data.textDatas.data(), m_data.textDatas.size() * sizeof(shaderio::TextData));
+        const size_t worldQuadCount = std::min(m_data.quadDatas.size(), kMaxQuads);
+        const size_t screenQuadCount = std::min(m_data.screenQuadDatas.size(), kMaxQuads - worldQuadCount);
+        auto* quads = static_cast<shaderio::QuadData*>(m_data.quadStorageBuffersMapped[currentImage]);
+        memcpy(quads, m_data.quadDatas.data(), worldQuadCount * sizeof(shaderio::QuadData));
+        memcpy(quads + worldQuadCount, m_data.screenQuadDatas.data(), screenQuadCount * sizeof(shaderio::QuadData));
+
+        memcpy(m_data.circleStorageBuffersMapped[currentImage], m_data.circleDatas.data(),
+               std::min(m_data.circleDatas.size(), kMaxCircles) * sizeof(shaderio::CircleData));
+
+        const size_t worldGlyphCount = std::min(m_data.textDatas.size(), kMaxGlyphs);
+        const size_t screenGlyphCount = std::min(m_data.screenTextDatas.size(), kMaxGlyphs - worldGlyphCount);
+        auto* glyphs = static_cast<shaderio::TextData*>(m_data.textStorageBuffersMapped[currentImage]);
+        memcpy(glyphs, m_data.textDatas.data(), worldGlyphCount * sizeof(shaderio::TextData));
+        memcpy(glyphs + worldGlyphCount, m_data.screenTextDatas.data(), screenGlyphCount * sizeof(shaderio::TextData));
+
+        if (!m_data.screenQuadDatas.empty() || !m_data.screenTextDatas.empty())
+        {
+            // Everything else the 2D shaders read (the bindless heap offset) stays the frame's own.
+            shaderio::UniformBufferObject screenUniforms = frameUniforms;
+            screenUniforms.view = glm::mat4(1.0f);
+            screenUniforms.proj = ScreenProjection(m_ScreenSize);
+            screenUniforms.nonJitteredProj = screenUniforms.proj;
+            memcpy(m_data.screenUniformBuffersMapped[currentImage], &screenUniforms, sizeof(shaderio::UniformBufferObject));
+        }
+
         const size_t thickCount = std::min(m_data.lineDatas.size(), kMaxLines);
         const size_t thinCount = std::min(m_data.thinLineDatas.size(), kMaxLines - thickCount);
         const size_t xrayCount = std::min(m_data.xrayLineDatas.size(), kMaxLines - thickCount - thinCount);
@@ -94,7 +135,7 @@ namespace Nox
             shaderio::PushConstantQuad quadReferences;
             quadReferences.matrixReference = currentUniformBuffer.getDeviceAddress();
             quadReferences.quadDataReference = m_data.quadStorageBuffers[frameIndex]->getDeviceAddress();
-            quadReferences.numOfElements = m_data.quadDatas.size();
+            quadReferences.numOfElements = std::min(m_data.quadDatas.size(), kMaxQuads);
             commandBuffer.pushData(&quadReferences, sizeof(shaderio::PushConstantQuad));
             
             commandBuffer.drawMeshTasks(1, 1, 1);
@@ -108,7 +149,7 @@ namespace Nox
             shaderio::PushConstantCircle circleReferences;
             circleReferences.matrixReference = currentUniformBuffer.getDeviceAddress();
             circleReferences.circleDataReference = m_data.circleStorageBuffers[frameIndex]->getDeviceAddress();
-            circleReferences.numOfElements = m_data.circleDatas.size();
+            circleReferences.numOfElements = std::min(m_data.circleDatas.size(), kMaxCircles);
             commandBuffer.pushData(&circleReferences, sizeof(shaderio::PushConstantCircle));
 
             commandBuffer.drawMeshTasks(1, 1, 1);
@@ -122,7 +163,7 @@ namespace Nox
             shaderio::PushConstantText circleReferences;
             circleReferences.matrixReference = currentUniformBuffer.getDeviceAddress();
             circleReferences.textDataReference = m_data.textStorageBuffers[frameIndex]->getDeviceAddress();
-            circleReferences.numOfElements = m_data.textDatas.size();
+            circleReferences.numOfElements = std::min(m_data.textDatas.size(), kMaxGlyphs);
             commandBuffer.pushData(&circleReferences, sizeof(shaderio::PushConstantText));
 
             commandBuffer.drawMeshTasks(1, 1, 1);
@@ -197,10 +238,83 @@ namespace Nox
                 commandBuffer.setDepthTestEnable(true);
             }
         }
+
+        // Screen space last, so it lands on top of the world-space 2D content too: panels before their text, same
+        // pipelines, the pixel-projection uniforms instead of the camera's, depth testing off (nothing may hide it).
+        const NRI::Buffer& screenUniforms = *m_data.screenUniformBuffers[frameIndex];
+        const size_t worldQuadCount = std::min(m_data.quadDatas.size(), kMaxQuads);
+        const size_t screenQuadCount = std::min(m_data.screenQuadDatas.size(), kMaxQuads - worldQuadCount);
+        const size_t worldGlyphCount = std::min(m_data.textDatas.size(), kMaxGlyphs);
+        const size_t screenGlyphCount = std::min(m_data.screenTextDatas.size(), kMaxGlyphs - worldGlyphCount);
+        if (screenQuadCount == 0 && screenGlyphCount == 0)
+            return;
+        commandBuffer.setDepthTestEnable(false);
+
+        if (screenQuadCount > 0)
+        {
+            commandBuffer.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_QuadMeshPipeline);
+
+            shaderio::PushConstantQuad screenQuadReferences;
+            screenQuadReferences.matrixReference = screenUniforms.getDeviceAddress();
+            screenQuadReferences.quadDataReference = m_data.quadStorageBuffers[frameIndex]->getDeviceAddress() + worldQuadCount * sizeof(shaderio::QuadData);
+            screenQuadReferences.numOfElements = screenQuadCount;
+            commandBuffer.pushData(&screenQuadReferences, sizeof(shaderio::PushConstantQuad));
+
+            commandBuffer.drawMeshTasks(1, 1, 1);
+        }
+
+        if (screenGlyphCount > 0)
+        {
+            commandBuffer.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_TextMeshPipeline);
+
+            shaderio::PushConstantText screenTextReferences;
+            screenTextReferences.matrixReference = screenUniforms.getDeviceAddress();
+            screenTextReferences.textDataReference = m_data.textStorageBuffers[frameIndex]->getDeviceAddress() + worldGlyphCount * sizeof(shaderio::TextData);
+            screenTextReferences.numOfElements = screenGlyphCount;
+            commandBuffer.pushData(&screenTextReferences, sizeof(shaderio::PushConstantText));
+
+            commandBuffer.drawMeshTasks(1, 1, 1);
+        }
+        commandBuffer.setDepthTestEnable(true); // restored like the x-ray lines do: not necessarily the pass's last draw
+    }
+
+    void Renderer2D::BeginScreenSpace(const glm::vec2& outputSize)
+    {
+        m_ScreenSpace = true;
+        m_ScreenSize = outputSize;
+    }
+
+    void Renderer2D::EndScreenSpace()
+    {
+        m_ScreenSpace = false;
+    }
+
+    void Renderer2D::createScreenUniformBuffers()
+    {
+        const uint64_t bufferSize = sizeof(shaderio::UniformBufferObject);
+        m_data.screenUniformBuffers.reserve(MAX_FRAMES_IN_FLIGHT);
+        m_data.screenUniformBuffersMapped.reserve(MAX_FRAMES_IN_FLIGHT);
+
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+        {
+            std::unique_ptr<NRI::Buffer> uboBuffer = m_context.device.createBuffer(NRI::BufferDesc
+                {
+                    .size = bufferSize,
+                    .usage = NRI::BufferUsage::Uniform
+                });
+
+            void* mappedMemory = uboBuffer->map(0, bufferSize);
+
+            m_data.screenUniformBuffers.emplace_back(std::move(uboBuffer));
+            m_data.screenUniformBuffersMapped.emplace_back(mappedMemory);
+        }
     }
 
     void Renderer2D::EndFrame()
     {
+        m_data.screenQuadDatas.clear();
+        m_data.screenTextDatas.clear();
+        m_ScreenSpace = false;
         m_data.quadDatas.clear();
         m_data.circleDatas.clear();
         m_data.textDatas.clear();
@@ -283,7 +397,7 @@ namespace Nox
         instance.materialIndex = m_context.whiteTexture->GetDescriptorIndexSlot();
         instance.entityID = entityID;
 
-        m_data.quadDatas.emplace_back(instance);
+        (m_ScreenSpace ? m_data.screenQuadDatas : m_data.quadDatas).emplace_back(instance);
     }
 
     void Renderer2D::DrawQuad(const glm::mat4& transform, const Ref<Texture2D>& texture, float tilingFactor, const glm::vec4& tintColor, int entityID)
@@ -294,7 +408,7 @@ namespace Nox
         instance.materialIndex = texture->GetDescriptorIndexSlot();
         instance.entityID = entityID;
 
-        m_data.quadDatas.emplace_back(instance);
+        (m_ScreenSpace ? m_data.screenQuadDatas : m_data.quadDatas).emplace_back(instance);
     }
 
     void Renderer2D::DrawSprite(const glm::mat4& transform, SpriteRendererComponent& src, int entityID)
@@ -504,7 +618,7 @@ namespace Nox
             instance.materialIndex = fontAtlas->GetDescriptorIndexSlot();
             instance.entityID = entityID;
 
-            m_data.textDatas.emplace_back(instance);
+            (m_ScreenSpace ? m_data.screenTextDatas : m_data.textDatas).emplace_back(instance);
 
             if (i < string.size() - 1)
             {
