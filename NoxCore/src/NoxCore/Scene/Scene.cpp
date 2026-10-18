@@ -20,6 +20,44 @@
 
 namespace Nox
 {
+    // The procedural sky's settings: the atmosphere from the component, the sun from the scene's first directional light
+    // (a default sun when there is none).
+    static SkyAtmosphereSettings MakeSkyAtmosphereSettings(entt::registry& registry, const EnvironmentLightComponent& environment)
+    {
+        SkyAtmosphereSettings settings;
+        settings.SunDirection = glm::normalize(glm::vec3(0.3f, 0.8f, 0.5f));
+        settings.SunIlluminance = glm::vec3(1.0f);
+        auto lights = registry.view<WorldTransformComponent, DirectionalLightComponent>();
+        for (auto entity : lights)
+        {
+            auto [wtc, light] = lights.get<WorldTransformComponent, DirectionalLightComponent>(entity);
+            // Renderer::SubmitLight's convention: the light shines along its local -Z, the sun is the other way.
+            settings.SunDirection = -glm::vec3(wtc.WorldMatrix * glm::vec4(0.0f, 0.0f, -1.0f, 0.0f));
+            settings.SunIlluminance = light.Color * light.Intensity;
+            break;
+        }
+        settings.GroundAlbedo = environment.GroundAlbedo;
+        settings.RayleighScale = environment.RayleighScale;
+        settings.MieScale = environment.MieScale;
+        settings.OzoneScale = environment.OzoneScale;
+        settings.MieAnisotropy = environment.MieAnisotropy;
+        settings.AltitudeKm = environment.AltitudeKm;
+        return settings;
+    }
+
+    // The scene's environment: the first enabled component with something to show, or null.
+    static const EnvironmentLightComponent* FindEnvironment(entt::registry& registry)
+    {
+        auto view = registry.view<EnvironmentLightComponent>();
+        for (auto entity : view)
+        {
+            const auto& environment = view.get<EnvironmentLightComponent>(entity);
+            if (environment.Enabled && (environment.Source == EnvironmentSource::ProceduralSky || !environment.TexturePath.empty()))
+                return &environment;
+        }
+        return nullptr;
+    }
+
     void Scene::SetRenderer(Renderer* renderer)
     {
         m_renderer = renderer;
@@ -29,19 +67,15 @@ namespace Nox
         // Environment settings are scene data, not global renderer defaults. The first
         // enabled component owns the scene environment; multiple environments are not
         // physically meaningful for the current IBL pipeline.
-        auto view = m_Registry.view<EnvironmentLightComponent>();
-        bool environmentSelected = false;
-        for (auto entity : view)
-        {
-            const auto& environment = view.get<EnvironmentLightComponent>(entity);
-            if (!environment.Enabled || environment.TexturePath.empty())
-                continue;
-            m_renderer->SetEnvironmentMap(Project::GetActiveAssetDirectory() / environment.TexturePath);
-            environmentSelected = true;
-            break;
-        }
-        if (!environmentSelected)
+        // Called on the main thread every frame (editor and runtime player): the one place the environment is applied,
+        // since changing it waits for the GPU and rebuilds the IBL set.
+        const EnvironmentLightComponent* environment = FindEnvironment(m_Registry);
+        if (!environment)
             m_renderer->SetEnvironmentMap({});
+        else if (environment->Source == EnvironmentSource::ProceduralSky)
+            m_renderer->SetProceduralSky(MakeSkyAtmosphereSettings(m_Registry, *environment));
+        else
+            m_renderer->SetEnvironmentMap(Project::GetActiveAssetDirectory() / environment->TexturePath);
     }
 
     template <typename... Component>
@@ -1194,18 +1228,9 @@ namespace Nox
                 m_renderer->SubmitLight(wtc.WorldMatrix, light);
             }
         }
-        {
-            auto view = m_Registry.view<EnvironmentLightComponent>();
-            for (auto entity : view)
-            {
-                const auto& environment = view.get<EnvironmentLightComponent>(entity);
-                if (!environment.Enabled || environment.TexturePath.empty())
-                    continue;
-                m_renderer->SetEnvironmentMap(Project::GetActiveAssetDirectory() / environment.TexturePath);
-                m_renderer->setScaleIBLAmbient(environment.RadianceScale.x);
-                break;
-            }
-        }
+        // The environment itself is applied by SetRenderer (main thread); this system may run on a worker.
+        if (const EnvironmentLightComponent* environment = FindEnvironment(m_Registry))
+            m_renderer->setScaleIBLAmbient(environment->RadianceScale.x);
     }
 
     void Scene::Submit2D()

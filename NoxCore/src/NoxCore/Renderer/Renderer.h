@@ -133,6 +133,22 @@ namespace Nox
         bool hasDepth = false;
     };
 
+    // Procedural sky (SkyAtmosphere.slang, Hillaire 2020): Earth's atmosphere lit by the sun, used as the scene environment
+    // instead of an HDR file. Scales multiply the Earth defaults.
+    struct SkyAtmosphereSettings
+    {
+        glm::vec3 SunDirection{ 0.0f, 1.0f, 0.0f }; // world space, towards the sun
+        glm::vec3 SunIlluminance{ 1.0f };           // the directional light's color * intensity
+        glm::vec3 GroundAlbedo{ 0.3f };
+        float RayleighScale = 1.0f;                 // air: the blue of the sky, the red of sunsets
+        float MieScale = 1.0f;                      // haze / aerosols: the bright glow around the sun
+        float OzoneScale = 1.0f;                    // the blue tint of twilight
+        float MieAnisotropy = 0.8f;                 // how strongly haze scatters forward (0 = evenly)
+        float AltitudeKm = 0.0f;                    // the viewer's height above the ground
+
+        bool operator==(const SkyAtmosphereSettings&) const = default;
+    };
+
     class Renderer
     {
     public:
@@ -211,6 +227,10 @@ namespace Nox
         // Rebuild the image-based lighting set for a scene environment. Equirectangular
         // HDR files are converted to a cubemap; DDS cubemaps are uploaded directly.
         void SetEnvironmentMap(const std::filesystem::path& path);
+        // Use the procedural sky as the scene environment (skybox, IBL, reflections, DDGI, path tracer misses). Called
+        // every frame while the scene wants it; a change is rebuilt once the settings have been still for a moment
+        // (rebuilding the IBL set takes tens of ms). SetEnvironmentMap switches back to a texture or to none.
+        void SetProceduralSky(const SkyAtmosphereSettings& settings);
 
         // GPU scene (§5.5), main thread. Mesh entities live on the GPU until their owner changes them; the renderer
         // uploads only what changed.
@@ -495,6 +515,10 @@ namespace Nox
         static void MarkTexturesLoaded();
         Ref<Texture2D> createSolidColorTexture(uint8_t r, uint8_t g, uint8_t b, uint8_t a);
         void InitializeEnvironmentLighting(const std::filesystem::path& environmentPath);
+        void releaseEnvironmentTextures(bool keepBrdfLut);
+        void createEnvironmentCubemap();
+        void generateEnvironmentLighting();
+        void renderProceduralSky(const SkyAtmosphereSettings& settings);
 
         template <class T>
         void UploadBufferSlice(NRI::Buffer& dstBuffer, const T* data, uint32_t elementOffset, uint32_t elementCount);
@@ -1291,6 +1315,17 @@ namespace Nox
         Ref<Texture2D> m_prefilteredEnvMap;
         uint32_t prefilterCubeMipLevels = 0;
         Ref<Texture2D> m_brdfLUT;
+
+        // Procedural sky: the settings the environment shows, and the newest request waiting for its rebuild.
+        std::unique_ptr<NRI::Pipeline> m_skyTransmittancePipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_skyMultiScatteringPipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_skyCubemapPipeline = nullptr;
+        bool m_proceduralSkyActive = false;
+        bool m_proceduralSkyPending = false;
+        SkyAtmosphereSettings m_proceduralSkyBuilt;
+        SkyAtmosphereSettings m_proceduralSkyWanted;
+        std::chrono::steady_clock::time_point m_proceduralSkyChanged{};      // when the wanted settings last changed
+        std::chrono::steady_clock::time_point m_proceduralSkyPendingSince{}; // when they first differed from the built ones
 
         // Lighting
         std::vector<shaderio::LightData> m_lightBufferObjects;

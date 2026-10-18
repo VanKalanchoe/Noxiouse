@@ -274,12 +274,27 @@ namespace Nox
     // Image-based environment lighting. The renderer will preprocess TexturePath into its
     // diffuse irradiance/specular IBL maps; this is deliberately separate from punctual
     // directional/point/spot lights.
+    enum class EnvironmentSource : uint8_t
+    {
+        Texture = 0,   // an HDR panorama or DDS cubemap (TexturePath)
+        ProceduralSky, // Earth's atmosphere lit by the scene's first directional light (the sun)
+    };
+
     struct EnvironmentLightComponent
     {
+        EnvironmentSource Source = EnvironmentSource::Texture;
         std::string TexturePath;
         glm::vec3 RadianceScale{ 1.0f, 1.0f, 1.0f };
         float Rotation = 0.0f; // radians around the world Y axis
         bool Enabled = true;
+
+        // Procedural sky (Source == ProceduralSky); scales multiply Earth's atmosphere.
+        float RayleighScale = 1.0f;
+        float MieScale = 1.0f;
+        float OzoneScale = 1.0f;
+        float MieAnisotropy = 0.8f;
+        glm::vec3 GroundAlbedo{ 0.3f, 0.3f, 0.3f };
+        float AltitudeKm = 0.0f;
 
         EnvironmentLightComponent() = default;
         EnvironmentLightComponent(const EnvironmentLightComponent&) = default;

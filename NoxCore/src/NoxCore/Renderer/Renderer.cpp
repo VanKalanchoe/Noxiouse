@@ -2038,8 +2038,9 @@ namespace Nox
 
     void Renderer::SetEnvironmentMap(const std::filesystem::path& path)
     {
-        if ((!path.empty() && path == m_environmentPath) ||
-            (path.empty() && m_environmentPath.empty() && !m_environmentCubemap))
+        if (!m_proceduralSkyActive &&
+            ((!path.empty() && path == m_environmentPath) ||
+             (path.empty() && m_environmentPath.empty() && !m_environmentCubemap)))
             return;
         if (!path.empty() && !std::filesystem::exists(path))
         {
@@ -2050,17 +2051,9 @@ namespace Nox
         // The environment textures are imported into the bindless heap and may still be
         // referenced by the current frame. Wait before replacing their descriptors.
         m_device->waitIdle();
-        auto releaseEnvironmentTexture = [this](Ref<Texture2D>& texture)
-        {
-            if (texture)
-                m_resourceHeap->unregisterTexture(texture->GetDescriptorIndexSlot());
-            texture = nullptr;
-        };
-        releaseEnvironmentTexture(m_environmentCubemap);
-        m_renderGraph.ResetHistory("PT Environment Importance");
-        releaseEnvironmentTexture(m_irradianceCubemap);
-        releaseEnvironmentTexture(m_prefilteredEnvMap);
-        releaseEnvironmentTexture(m_brdfLUT);
+        releaseEnvironmentTextures(false);
+        m_proceduralSkyActive = false;
+        m_proceduralSkyPending = false;
 
         if (!path.empty())
         {
@@ -2072,6 +2065,62 @@ namespace Nox
             m_environmentPath.clear();
         }
         m_renderGraph.ResetHistory(NRDHistoryKey);
+    }
+
+    void Renderer::SetProceduralSky(const SkyAtmosphereSettings& settings)
+    {
+        using namespace std::chrono_literals;
+        const auto now = std::chrono::steady_clock::now();
+        if (m_proceduralSkyActive)
+        {
+            if (settings == m_proceduralSkyBuilt)
+            {
+                m_proceduralSkyPending = false;
+                return;
+            }
+            if (!m_proceduralSkyPending)
+            {
+                m_proceduralSkyPending = true;
+                m_proceduralSkyPendingSince = now;
+                m_proceduralSkyWanted = settings;
+                m_proceduralSkyChanged = now;
+            }
+            else if (settings != m_proceduralSkyWanted)
+            {
+                m_proceduralSkyWanted = settings;
+                m_proceduralSkyChanged = now;
+            }
+            // Wait until the settings have been still for a moment (a sun being dragged, a slider), but rebuild at least
+            // once a second while they keep changing (a slow drag, a scripted day cycle).
+            if (now - m_proceduralSkyChanged < 150ms && now - m_proceduralSkyPendingSince < 1000ms)
+                return;
+        }
+
+        // Switching from a texture (or none) to the sky builds it right away.
+        m_device->waitIdle();
+        releaseEnvironmentTextures(true); // the BRDF LUT does not depend on the environment
+        m_environmentPath.clear();
+        renderProceduralSky(settings);
+        m_proceduralSkyActive = true;
+        m_proceduralSkyPending = false;
+        m_proceduralSkyBuilt = settings;
+        m_renderGraph.ResetHistory(NRDHistoryKey);
+    }
+
+    void Renderer::releaseEnvironmentTextures(bool keepBrdfLut)
+    {
+        auto releaseEnvironmentTexture = [this](Ref<Texture2D>& texture)
+        {
+            if (texture)
+                m_resourceHeap->unregisterTexture(texture->GetDescriptorIndexSlot());
+            texture = nullptr;
+        };
+        releaseEnvironmentTexture(m_environmentCubemap);
+        m_renderGraph.ResetHistory("PT Environment Importance");
+        releaseEnvironmentTexture(m_irradianceCubemap);
+        releaseEnvironmentTexture(m_prefilteredEnvMap);
+        if (!keepBrdfLut)
+            releaseEnvironmentTexture(m_brdfLUT);
     }
 
     void Renderer::InitializeEnvironmentLighting(const std::filesystem::path& environmentPath)
@@ -2101,25 +2150,11 @@ namespace Nox
         } pushData;
 
         {
-        // 2. Create the permanent Cubemap Texture (512x512 per face, 6 array layers)
-        constexpr uint32_t cubemapSize = 512;
-        uint32_t cubemapNumMips = static_cast<uint32_t>(floor(log2(cubemapSize))) + 1;
+        // 2. Create the permanent Cubemap Texture (512x512 per face, 6 array layers), registered for compute writes
+        createEnvironmentCubemap();
+        const uint32_t cubemapSize = m_environmentCubemap->GetWidth();
 
-        m_environmentCubemap = m_device->createTexture(NRI::TextureDesc{
-            .width = cubemapSize,
-            .height = cubemapSize,
-            .arrayLayers = 6,
-            .isCubeMap = true,
-            .mipLevels = cubemapNumMips, // Can be increased if generating specular mips later
-            .sampleCount = 1,
-            .usage = NRI::TextureUsage::Storage, // Allows compute shader writing
-            .format = NRI::ImageFormat::R16G16B16A16_SFLOAT
-        });
-
-        // 3. Register slot X as eStorageImage (writes Storage Descriptor to memory)
-        m_resourceHeap->registerTexture(*m_environmentCubemap, NRI::TextureUsage::Storage);
-
-        // 4. Create local resample compute pipeline (cube-to-cube for a DDS source, equirect-to-cube for a panorama)
+        // 3. Create local resample compute pipeline (cube-to-cube for a DDS source, equirect-to-cube for a panorama)
         NRI::PipelineDesc computeDesc{};
         computeDesc.type = NRI::PipelineType::Compute;
         computeDesc.shaders.push_back({
@@ -2129,12 +2164,12 @@ namespace Nox
         });
         std::unique_ptr<NRI::Pipeline> equirectPipeline = m_device->createPipeline(computeDesc, *m_shaderCompiler);
 
-        // 5. Structure for Push Constants to pass descriptor slots to Slang
+        // 4. Structure for Push Constants to pass descriptor slots to Slang
         pushData.hdrTextureIndex = enviromentHDR->GetDescriptorIndexSlot();
         pushData.cubemapStorageIndex = m_environmentCubemap->GetDescriptorIndexSlot();
         pushData.cubemapSize = cubemapSize;
 
-        // 6. Record and dispatch the compute work
+        // 5. Record and dispatch the compute work
 
         std::unique_ptr<NRI::CommandBuffer> cmd = beginSingleTimeCommands();
 
@@ -2154,6 +2189,44 @@ namespace Nox
 
         // Submit command buffer and wait for execution to complete
         endSingleTimeCommands(std::move(cmd));
+        }
+
+        // equiRectPipeline and enviromentHDR cleanly go out of scope and release temporary resources
+
+        generateEnvironmentLighting();
+        m_environmentPath = environmentPath;
+    }
+
+    void Renderer::createEnvironmentCubemap()
+    {
+        constexpr uint32_t cubemapSize = 512;
+        uint32_t cubemapNumMips = static_cast<uint32_t>(floor(log2(cubemapSize))) + 1;
+
+        m_environmentCubemap = m_device->createTexture(NRI::TextureDesc{
+            .width = cubemapSize,
+            .height = cubemapSize,
+            .arrayLayers = 6,
+            .isCubeMap = true,
+            .mipLevels = cubemapNumMips, // the IBL filters read through the blurred mips
+            .sampleCount = 1,
+            .usage = NRI::TextureUsage::Storage, // Allows compute shader writing
+            .format = NRI::ImageFormat::R16G16B16A16_SFLOAT
+        });
+
+        // Register slot X as eStorageImage (writes Storage Descriptor to memory)
+        m_resourceHeap->registerTexture(*m_environmentCubemap, NRI::TextureUsage::Storage);
+    }
+
+    // The image-based lighting set from the environment cubemap's top mip (written by the HDR resample or the procedural
+    // sky): its mip chain, the diffuse irradiance and the pre-filtered specular cubemaps, and the BRDF LUT if there is none.
+    void Renderer::generateEnvironmentLighting()
+    {
+        struct EquirectPushConstants
+        {
+            uint32_t hdrTextureIndex;
+            uint32_t cubemapStorageIndex;
+            uint32_t cubemapSize;
+        } pushData;
 
         {
             std::unique_ptr<NRI::CommandBuffer> mipCmd = beginSingleTimeCommands();
@@ -2161,11 +2234,8 @@ namespace Nox
             endSingleTimeCommands(std::move(mipCmd));
         }
 
-        // 7. Overwrite descriptor slot in heap with Sampled Image Descriptor
+        // Overwrite descriptor slot in heap with Sampled Image Descriptor
         m_resourceHeap->registerTexture(*m_environmentCubemap, NRI::TextureUsage::ShaderResource);
-        }
-
-        // equiRectPipeline and enviromentHDR cleanly go out of scope and release temporary resources
 
         // ==========================================
         //  DIFFUSE IRRADIANCE CONVOLUTION
@@ -2311,52 +2381,150 @@ namespace Nox
         // ==========================================
         //  SPECULAR IBL: BRDF INTEGRATION MAP (2D LUT)
         // ==========================================
-        constexpr uint32_t brdfLUTSize = 512;
-
-        m_brdfLUT = m_device->createTexture(NRI::TextureDesc{
-            .width = brdfLUTSize,
-            .height = brdfLUTSize,
-            .arrayLayers = 1,
-            .isCubeMap = false,
-            .mipLevels = 1,
-            .sampleCount = 1,
-            .usage = NRI::TextureUsage::Storage,
-            .format = NRI::ImageFormat::R16G16_SFLOAT
-        });
-
-        m_resourceHeap->registerTexture(*m_brdfLUT, NRI::TextureUsage::Storage);
-
-        NRI::PipelineDesc brdfComputeDesc{};
-        brdfComputeDesc.type = NRI::PipelineType::Compute;
-        brdfComputeDesc.shaders.push_back({
-            .stage = NRI::ShaderStage::Compute,
-            .entryPoint = "compMain",
-            .sourcePath = "assets/shaders/BRDFIntegration.slang"
-        });
-        std::unique_ptr<NRI::Pipeline> brdfPipeline = m_device->createPipeline(brdfComputeDesc, *m_shaderCompiler);
-
-        struct BRDFPushConstants
+        // The same for every environment: kept while the procedural sky rebuilds.
+        if (!m_brdfLUT)
         {
-            uint32_t lutStorageIndex;
-            uint32_t lutSize;
-        } brdfData;
+            constexpr uint32_t brdfLUTSize = 512;
 
-        brdfData.lutStorageIndex = m_brdfLUT->GetDescriptorIndexSlot();
-        brdfData.lutSize = brdfLUTSize;
+            m_brdfLUT = m_device->createTexture(NRI::TextureDesc{
+                .width = brdfLUTSize,
+                .height = brdfLUTSize,
+                .arrayLayers = 1,
+                .isCubeMap = false,
+                .mipLevels = 1,
+                .sampleCount = 1,
+                .usage = NRI::TextureUsage::Storage,
+                .format = NRI::ImageFormat::R16G16_SFLOAT
+            });
 
-        std::unique_ptr<NRI::CommandBuffer> brdfCmd = beginSingleTimeCommands();
-        brdfCmd->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
+            m_resourceHeap->registerTexture(*m_brdfLUT, NRI::TextureUsage::Storage);
 
-        brdfCmd->bindPipeline(NRI::PipelineBindPoint::Compute, *brdfPipeline);
-        brdfCmd->pushData(&brdfData, sizeof(BRDFPushConstants));
+            NRI::PipelineDesc brdfComputeDesc{};
+            brdfComputeDesc.type = NRI::PipelineType::Compute;
+            brdfComputeDesc.shaders.push_back({
+                .stage = NRI::ShaderStage::Compute,
+                .entryPoint = "compMain",
+                .sourcePath = "assets/shaders/BRDFIntegration.slang"
+            });
+            std::unique_ptr<NRI::Pipeline> brdfPipeline = m_device->createPipeline(brdfComputeDesc, *m_shaderCompiler);
 
-        uint32_t brdfGroupX = (brdfLUTSize + 15) / 16;
-        uint32_t brdfGroupY = (brdfLUTSize + 15) / 16;
-        brdfCmd->dispatch(brdfGroupX, brdfGroupY, 1);
+            struct BRDFPushConstants
+            {
+                uint32_t lutStorageIndex;
+                uint32_t lutSize;
+            } brdfData;
 
-        endSingleTimeCommands(std::move(brdfCmd));
-        m_resourceHeap->registerTexture(*m_brdfLUT, NRI::TextureUsage::ShaderResource);
-        m_environmentPath = environmentPath;
+            brdfData.lutStorageIndex = m_brdfLUT->GetDescriptorIndexSlot();
+            brdfData.lutSize = brdfLUTSize;
+
+            std::unique_ptr<NRI::CommandBuffer> brdfCmd = beginSingleTimeCommands();
+            brdfCmd->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
+
+            brdfCmd->bindPipeline(NRI::PipelineBindPoint::Compute, *brdfPipeline);
+            brdfCmd->pushData(&brdfData, sizeof(BRDFPushConstants));
+
+            uint32_t brdfGroupX = (brdfLUTSize + 15) / 16;
+            uint32_t brdfGroupY = (brdfLUTSize + 15) / 16;
+            brdfCmd->dispatch(brdfGroupX, brdfGroupY, 1);
+
+            endSingleTimeCommands(std::move(brdfCmd));
+            m_resourceHeap->registerTexture(*m_brdfLUT, NRI::TextureUsage::ShaderResource);
+        }
+    }
+
+    // The procedural sky into the environment cubemap (SkyAtmosphere.slang), then the IBL set from it like from an HDR map.
+    // The two atmosphere LUTs depend only on the atmosphere, but are tiny: made again with every rebuild and dropped after.
+    void Renderer::renderProceduralSky(const SkyAtmosphereSettings& settings)
+    {
+        NOX_PROFILE_SCOPE("Procedural Sky");
+        auto createSkyPipeline = [this](const char* entryPoint)
+        {
+            NRI::PipelineDesc desc{};
+            desc.type = NRI::PipelineType::Compute;
+            desc.shaders.push_back({
+                .stage = NRI::ShaderStage::Compute,
+                .entryPoint = entryPoint,
+                .sourcePath = "assets/shaders/SkyAtmosphere.slang"
+            });
+            return m_device->createPipeline(desc, *m_shaderCompiler);
+        };
+        if (!m_skyTransmittancePipeline)
+            m_skyTransmittancePipeline = createSkyPipeline("transmittanceMain");
+        if (!m_skyMultiScatteringPipeline)
+            m_skyMultiScatteringPipeline = createSkyPipeline("multiScatteringMain");
+        if (!m_skyCubemapPipeline)
+            m_skyCubemapPipeline = createSkyPipeline("skyCubemapMain");
+
+        auto createLut = [this](uint32_t width, uint32_t height)
+        {
+            Ref<Texture2D> lut = m_device->createTexture(NRI::TextureDesc{
+                .width = width,
+                .height = height,
+                .arrayLayers = 1,
+                .isCubeMap = false,
+                .mipLevels = 1,
+                .sampleCount = 1,
+                .usage = NRI::TextureUsage::Storage,
+                .format = NRI::ImageFormat::R16G16B16A16_SFLOAT
+            });
+            m_resourceHeap->registerTexture(*lut, NRI::TextureUsage::Storage);
+            return lut;
+        };
+        // Sizes from the paper: transmittance 256 x 64, multiple scattering 32 x 32.
+        constexpr uint32_t transmittanceWidth = 256;
+        constexpr uint32_t transmittanceHeight = 64;
+        constexpr uint32_t multiScatteringSize = 32;
+        Ref<Texture2D> transmittanceLut = createLut(transmittanceWidth, transmittanceHeight);
+        Ref<Texture2D> multiScatteringLut = createLut(multiScatteringSize, multiScatteringSize);
+
+        shaderio::PushConstantSkyAtmosphere push{};
+        const float sunLength = glm::length(settings.SunDirection);
+        push.sunDirection = sunLength > 1e-6f ? settings.SunDirection / sunLength : glm::vec3(0.0f, 1.0f, 0.0f);
+        push.sunIlluminance = glm::max(settings.SunIlluminance, glm::vec3(0.0f));
+        push.groundAlbedo = glm::clamp(settings.GroundAlbedo, glm::vec3(0.0f), glm::vec3(1.0f));
+        push.rayleighScale = glm::max(settings.RayleighScale, 0.0f);
+        push.mieScale = glm::max(settings.MieScale, 0.0f);
+        push.ozoneScale = glm::max(settings.OzoneScale, 0.0f);
+        push.mieAnisotropy = glm::clamp(settings.MieAnisotropy, 0.0f, 0.99f);
+        push.cameraAltitudeKm = glm::clamp(settings.AltitudeKm, 0.0f, 99.0f);
+        push.transmittanceTextureIndex = transmittanceLut->GetDescriptorIndexSlot();
+        push.multiScatteringTextureIndex = multiScatteringLut->GetDescriptorIndexSlot();
+
+        // One submission per pass, like the IBL passes: each reads what the one before wrote.
+        auto dispatchPass = [this, &push](NRI::Pipeline& pipeline, uint32_t groupsX, uint32_t groupsY, uint32_t groupsZ)
+        {
+            std::unique_ptr<NRI::CommandBuffer> cmd = beginSingleTimeCommands();
+            cmd->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
+            cmd->bindPipeline(NRI::PipelineBindPoint::Compute, pipeline);
+            cmd->pushData(&push, sizeof(push));
+            cmd->dispatch(groupsX, groupsY, groupsZ);
+            endSingleTimeCommands(std::move(cmd));
+        };
+
+        push.outputStorageIndex = transmittanceLut->GetDescriptorIndexSlot();
+        push.outputSize = transmittanceWidth;
+        push.outputHeight = transmittanceHeight;
+        dispatchPass(*m_skyTransmittancePipeline, (transmittanceWidth + 7) / 8, (transmittanceHeight + 7) / 8, 1);
+        m_resourceHeap->registerTexture(*transmittanceLut, NRI::TextureUsage::ShaderResource);
+
+        push.outputStorageIndex = multiScatteringLut->GetDescriptorIndexSlot();
+        push.outputSize = multiScatteringSize;
+        push.outputHeight = multiScatteringSize;
+        dispatchPass(*m_skyMultiScatteringPipeline, (multiScatteringSize + 7) / 8, (multiScatteringSize + 7) / 8, 1);
+        m_resourceHeap->registerTexture(*multiScatteringLut, NRI::TextureUsage::ShaderResource);
+
+        createEnvironmentCubemap();
+        const uint32_t cubemapSize = m_environmentCubemap->GetWidth();
+        push.outputStorageIndex = m_environmentCubemap->GetDescriptorIndexSlot();
+        push.outputSize = cubemapSize;
+        push.outputHeight = cubemapSize;
+        dispatchPass(*m_skyCubemapPipeline, (cubemapSize + 15) / 16, (cubemapSize + 15) / 16, 6);
+
+        // Every submission above has finished (endSingleTimeCommands waits), so the LUTs can go now.
+        m_resourceHeap->unregisterTexture(transmittanceLut->GetDescriptorIndexSlot());
+        m_resourceHeap->unregisterTexture(multiScatteringLut->GetDescriptorIndexSlot());
+
+        generateEnvironmentLighting();
     }
 
     template <typename T>

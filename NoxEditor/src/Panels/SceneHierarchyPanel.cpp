@@ -1382,6 +1382,29 @@ namespace Nox
         {
             ImGui::Checkbox("Enabled", &component.Enabled);
             ImGui::DragFloat3("Radiance Scale", glm::value_ptr(component.RadianceScale), 0.01f, 0.0f, 100.0f);
+
+            const char* sourceStrings[] = { "Texture", "Procedural Sky" };
+            int source = static_cast<int>(component.Source);
+            if (ImGui::Combo("Source", &source, sourceStrings, IM_ARRAYSIZE(sourceStrings)))
+                component.Source = static_cast<EnvironmentSource>(source);
+
+            if (component.Source == EnvironmentSource::ProceduralSky)
+            {
+                ImGui::TextDisabled("Sun: the scene's first Directional Light (its rotation, color and intensity).");
+                ImGui::DragFloat("Air (Rayleigh)", &component.RayleighScale, 0.01f, 0.0f, 10.0f, "%.2f x");
+                ImGui::SetItemTooltip("Scattering by air: the blue of the sky and the red of sunsets. 1 = Earth.");
+                ImGui::DragFloat("Haze (Mie)", &component.MieScale, 0.01f, 0.0f, 50.0f, "%.2f x");
+                ImGui::SetItemTooltip("Aerosols, dust, pollution: a whiter sky and a bright glow around the sun. 1 = clear day.");
+                ImGui::DragFloat("Haze Forward", &component.MieAnisotropy, 0.005f, 0.0f, 0.99f, "%.3f");
+                ImGui::SetItemTooltip("How much of the haze's light goes on towards the viewer: higher = a tighter glow around the sun.");
+                ImGui::DragFloat("Ozone", &component.OzoneScale, 0.01f, 0.0f, 10.0f, "%.2f x");
+                ImGui::SetItemTooltip("Ozone absorbs orange light: keeps the sky blue at twilight. 1 = Earth.");
+                ImGui::ColorEdit3("Ground Albedo", glm::value_ptr(component.GroundAlbedo));
+                ImGui::DragFloat("Altitude", &component.AltitudeKm, 0.05f, 0.0f, 99.0f, "%.2f km");
+                ImGui::SetItemTooltip("The viewer's height above the planet's surface (the horizon drops, the sky darkens).");
+                return;
+            }
+
             ImGui::DragFloat("Rotation", &component.Rotation, 0.01f, -glm::radians(180.0f), glm::radians(180.0f), "%.3f rad");
             auto manager = Project::GetActive()->GetEditorAssetManager();
             const auto& registry = manager->GetAssetRegistry();

@@ -51,7 +51,7 @@
 | F3 | Animation graph: player node, sequencer, editing | five node types, no authoring | L | **first part built this round**: Clip node as a Sequence Player (Speed pin, Start Position), BlendSpace1D node; notifies, layered blend, montages, root motion, preview window and a Sequencer planned in `Editor_Features_Plan_2026-10.md` §3 |
 | F4 | Hybrid renderer near path-tracer quality, RT-only fallbacks, DLSS edge jitter, robust transparency/transmission | hybrid renderer works; DLSS edge jitter cause found (below) | XL | plan in `Hybrid_Renderer_Plan_2026-10.md`; root cause of the jitter written down there |
 | F5 | Up to 4 viewports | single viewport and camera | L (renderer needs per-view resources) | plan in `Editor_Features_Plan_2026-10.md` |
-| F6 | Procedural sky (Hosek-Wilkie / Hillaire) | HDR IBL only | M | plan in `Hybrid_Renderer_Plan_2026-10.md` |
+| F6 | Procedural sky (Hosek-Wilkie / Hillaire) | HDR IBL only -> **Hillaire sky built** (2026-10-18, untested) | M | `Hybrid_Renderer_Plan_2026-10.md` §5b; open: sun disc, sky-view LUT, aerial perspective |
 | F7 | Runtime asset manager + runtime project | empty class | L | plan in `Runtime_And_Packaging_Plan_2026-10.md` |
 | F8 | How to package a distribution build | nothing | L | answered in `Runtime_And_Packaging_Plan_2026-10.md` |
 | F9 | Stats overlay text broken | cause found | S | **fixed this round**: drawn in screen space (below) |

@@ -573,6 +573,25 @@ struct PushConstantEquirect
     uint32_t cubemapSize;
 };
 
+// SkyAtmosphere.slang, the procedural sky (Hillaire 2020, UE's SkyAtmosphere): one struct for its three compute passes
+// (transmittance LUT, multiple-scattering LUT, environment cubemap). Lengths in km inside the shader.
+struct PushConstantSkyAtmosphere
+{
+    uint32_t outputStorageIndex;          // what this pass writes (storage slot): a LUT, or the environment cubemap
+    uint32_t transmittanceTextureIndex;   // sampled slot of the transmittance LUT (read by the two later passes)
+    uint32_t multiScatteringTextureIndex; // sampled slot of the multiple-scattering LUT (read by the cubemap pass)
+    uint32_t outputSize;                  // width of what is written (LUT width, or the cubemap face size)
+    uint32_t outputHeight;                // LUT height (unused by the cubemap pass)
+    vec3 sunDirection;                    // world space, toward the sun
+    vec3 sunIlluminance;                  // the sun's color * intensity (the scene's directional light)
+    vec3 groundAlbedo;
+    float rayleighScale;                  // 1 = Earth: the blue of the sky
+    float mieScale;                       // 1 = Earth: haze
+    float ozoneScale;                     // 1 = Earth: the deep blue at the zenith / purple at dusk
+    float mieAnisotropy;                  // Mie phase g (0.8: forward-scattering glow around the sun)
+    float cameraAltitudeKm;               // where the sky is seen from, above the ground
+};
+
 struct PushConstantSkybox
 {
     uint64_t matrixReference; // BDA to UniformBufferObject

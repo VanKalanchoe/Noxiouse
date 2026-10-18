@@ -97,6 +97,35 @@ The user means one of the analytic / physically based sky models. Options:
 Exit test per phase: sun at noon / sunset / below the horizon looks right in raster and path tracer alike, and the
 path tracer and raster agree on the sky color.
 
+### 5b. Built (2026-10-18, untested): S1, S2 and S4
+
+- **Use:** Environment Light component -> **Source: Procedural Sky**. The sun is the scene's first Directional Light (its
+  rotation, color and intensity); without one a default sun stands at ~54 degrees. Controls: Air (Rayleigh), Haze (Mie),
+  Haze Forward (Mie anisotropy), Ozone (scales of Earth's values, 1 = Earth), Ground Albedo, Altitude (km). Radiance Scale
+  still scales the environment's light as for an HDR map. Saved in the scene file, undoable.
+- **`SkyAtmosphere.slang`**, after the paper's reference implementation: transmittance LUT (256 x 64, Bruneton's
+  parametrization), multiple-scattering LUT (32 x 32, the paper's Psi_ms), then the sky raymarched into the environment
+  cubemap itself (512 per face, 32 samples per ray on quadratically growing segments, planet shadow, ground bounce below the
+  horizon). Earth constants: radii 6360 / 6460 km, Rayleigh (5.802, 13.558, 33.1)e-3 / km over 8 km, Mie 3.996e-3
+  scattering + 0.444e-3 absorption over 1.2 km, ozone (0.650, 1.881, 0.085)e-3 in a tent at 25 +- 15 km.
+- **One environment for everything:** the cubemap goes through the same mips / irradiance / prefilter passes as an HDR
+  map, so skybox, raster IBL, reflections, DDGI and the path tracer's misses all see the same sky (S4 without a sky-view
+  LUT: the sky is smooth, so the cubemap is drawn as the skybox directly).
+- **Rebuilds** (`Renderer::SetProceduralSky`): when the sun or a setting changes, once they have been still for 150 ms, at
+  least once a second while they keep changing (a sun being dragged, a scripted day cycle). A rebuild waits for the GPU and
+  costs tens of ms (the 1024-sample prefilter dominates): a hitch, not a frame-rate cost. Applied only from
+  `Scene::SetRenderer` (main thread, every frame); the Submit Lights system, which may run on a worker, only reads the scale.
+- **Checked here:** all three entry points compile with slangc; a numpy port of the passes gives a blue zenith (blue / red
+  ~4.9, ~3 % of the sun's illuminance per steradian at noon), a red-orange horizon towards the sun at 2 degrees elevation, and a
+  dark sky after sunset; 32 quadratic steps stay within ~6 % of 512 steps.
+- **Brightness:** the sky is physically relative to the sun -- with a sun of intensity 1 the noon zenith is ~0.03. Auto
+  exposure (camera) or Radiance Scale bring it up; a sunlit white wall stays ~8x brighter than the zenith, as outside.
+- **Still open:** S3's sun disc (the directional light is the sun's light; there is no visible disc yet) and a per-frame
+  sky-view LUT (needed for a moving sun without rebuild hitches: time-slice the IBL update like UE's real-time sky
+  capture); S5 aerial perspective; night (no moon / stars, the sky just goes dark); the viewer's altitude comes from the
+  component, not the camera. Found while here: the component's **Rotation** is drawn in the UI but no shader applies it
+  (HDR maps too); the fix is to rotate the direction in the resample pass.
+
 ## 6. VFX, particles and clouds (Future.md item 13)
 
 **How it works in real engines (the user's question):** effects are *authored inside the engine*, not imported --

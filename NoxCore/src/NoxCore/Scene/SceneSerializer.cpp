@@ -503,10 +503,17 @@ namespace Nox
             out << YAML::BeginMap;
 
             auto& elc = entity.GetComponent<EnvironmentLightComponent>();
+            out << YAML::Key << "Source" << YAML::Value << (elc.Source == EnvironmentSource::ProceduralSky ? "ProceduralSky" : "Texture");
             out << YAML::Key << "TexturePath" << YAML::Value << elc.TexturePath;
             out << YAML::Key << "RadianceScale" << YAML::Value << elc.RadianceScale;
             out << YAML::Key << "Rotation" << YAML::Value << elc.Rotation;
             out << YAML::Key << "Enabled" << YAML::Value << elc.Enabled;
+            out << YAML::Key << "RayleighScale" << YAML::Value << elc.RayleighScale;
+            out << YAML::Key << "MieScale" << YAML::Value << elc.MieScale;
+            out << YAML::Key << "OzoneScale" << YAML::Value << elc.OzoneScale;
+            out << YAML::Key << "MieAnisotropy" << YAML::Value << elc.MieAnisotropy;
+            out << YAML::Key << "GroundAlbedo" << YAML::Value << elc.GroundAlbedo;
+            out << YAML::Key << "AltitudeKm" << YAML::Value << elc.AltitudeKm;
 
             out << YAML::EndMap;
         }
@@ -1299,6 +1306,20 @@ namespace Nox
                 elc.Rotation = environmentLightComponent["Rotation"].as<float>();
             if (environmentLightComponent["Enabled"])
                 elc.Enabled = environmentLightComponent["Enabled"].as<bool>();
+            if (environmentLightComponent["Source"])
+                elc.Source = environmentLightComponent["Source"].as<std::string>() == "ProceduralSky" ? EnvironmentSource::ProceduralSky : EnvironmentSource::Texture;
+            if (environmentLightComponent["RayleighScale"])
+                elc.RayleighScale = environmentLightComponent["RayleighScale"].as<float>();
+            if (environmentLightComponent["MieScale"])
+                elc.MieScale = environmentLightComponent["MieScale"].as<float>();
+            if (environmentLightComponent["OzoneScale"])
+                elc.OzoneScale = environmentLightComponent["OzoneScale"].as<float>();
+            if (environmentLightComponent["MieAnisotropy"])
+                elc.MieAnisotropy = environmentLightComponent["MieAnisotropy"].as<float>();
+            if (environmentLightComponent["GroundAlbedo"])
+                elc.GroundAlbedo = environmentLightComponent["GroundAlbedo"].as<glm::vec3>();
+            if (environmentLightComponent["AltitudeKm"])
+                elc.AltitudeKm = environmentLightComponent["AltitudeKm"].as<float>();
         }
 
         auto animatorComponent = entity["AnimatorComponent"];
