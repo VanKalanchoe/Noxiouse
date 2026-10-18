@@ -697,25 +697,97 @@ namespace Nox
         return skyboxSun;
     }
 
+    bool Renderer::hasTransmissiveDraws() const
+    {
+        // Lit transparent draws whose material transmits (glass): they refract the scene behind them.
+        for (RenderBucket bucket : { RenderBucket::Transparent, RenderBucket::TransparentDoubleSided })
+        {
+            const size_t start = m_drawBucketStarts[static_cast<size_t>(bucket)];
+            const size_t end = start + getBucketEntryCount(bucket);
+            for (size_t entry = start; entry < end && entry < m_drawList.size(); ++entry)
+            {
+                const uint32_t material = m_gpuScene.GetInstances().Get(m_drawList[entry]).materialIndex;
+                if (m_gpuScene.GetMaterials().Get(material).transmissionFactor > 0.0f)
+                    return true;
+            }
+        }
+        return false;
+    }
+
+    void Renderer::drawForwardTransparent(NRI::CommandBuffer& cmd, const RGPassContext& context, const ViewDrawResources& draws, MeshletDrawCursor& cursor) const
+    {
+        const bool hasAnyTransparent = getBucketEntryCount(RenderBucket::Transparent) > 0 || getBucketEntryCount(RenderBucket::TransparentDoubleSided) > 0 ||
+                                       getBucketEntryCount(RenderBucket::TransparentUnlit) > 0 || getBucketEntryCount(RenderBucket::TransparentUnlitDoubleSided) > 0;
+        if (!m_unlitPipeline || !m_transparentLitPipeline || !hasAnyTransparent)
+            return;
+
+        cursor.boundPipeline = nullptr;
+        cmd.setDepthTestEnable(true);
+        cmd.setDepthWriteEnable(false);
+        cmd.setDepthCompareOp(NRI::CompareOp::GreaterOrEqual);
+        cmd.setColorBlendEnable(0, true);
+        const NRI::ColorBlendEquation blendEquation
+        {
+            .srcColorBlendFactor = NRI::BlendFactor::One,
+            .dstColorBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha,
+            .colorBlendOp = NRI::BlendOp::Add,
+            .srcAlphaBlendFactor = NRI::BlendFactor::One,
+            .dstAlphaBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha,
+            .alphaBlendOp = NRI::BlendOp::Add,
+        };
+        cmd.setColorBlendEquation(0, blendEquation);
+        cmd.setColorWriteMask(0, NRI::ColorComponent::All);
+        cmd.setColorBlendEnable(1, false);
+        cmd.setColorWriteMask(1, NRI::ColorComponent::All);
+
+        // Non-unlit Blend objects get real shading (same BRDF/IBL as the deferred opaque path, via
+        // PBRLighting.slang) instead of a flat baseColor pass-through, so they don't look self-lit next to
+        // shaded Opaque/Mask geometry. True KHR_materials_unlit objects still use the flat shader.
+        //
+        // CullMode matches each object's own doubleSided flag (mirroring the opaque/mask queues): a closed,
+        // single-sided translucent shape needs its own backface culled, or both hemispheres blend on top of
+        // each other and wash the result out.
+        drawMeshletBucket(cmd, cursor, RenderBucket::Transparent, *m_transparentLitPipeline, NRI::CullMode::Back, false, true);
+        drawMeshletBucket(cmd, cursor, RenderBucket::TransparentDoubleSided, *m_transparentLitPipeline, NRI::CullMode::None, false, true);
+        drawMeshletBucket(cmd, cursor, RenderBucket::TransparentUnlit, *m_unlitPipeline, NRI::CullMode::Back, false, true);
+        drawMeshletBucket(cmd, cursor, RenderBucket::TransparentUnlitDoubleSided, *m_unlitPipeline, NRI::CullMode::None, false, true);
+
+        MeshletDrawCursor lateCursor = beginMeshletDraws(context, draws, true);
+        lateCursor.boundPipeline = cursor.boundPipeline;
+        lateCursor.references.ssaoTextureIndex = cursor.references.ssaoTextureIndex;
+        lateCursor.references.refractionTextureIndex = cursor.references.refractionTextureIndex;
+        drawMeshletBucket(cmd, lateCursor, RenderBucket::Transparent, *m_transparentLitPipeline, NRI::CullMode::Back, false, true);
+        drawMeshletBucket(cmd, lateCursor, RenderBucket::TransparentDoubleSided, *m_transparentLitPipeline, NRI::CullMode::None, false, true);
+        drawMeshletBucket(cmd, lateCursor, RenderBucket::TransparentUnlit, *m_unlitPipeline, NRI::CullMode::Back, false, true);
+        drawMeshletBucket(cmd, lateCursor, RenderBucket::TransparentUnlitDoubleSided, *m_unlitPipeline, NRI::CullMode::None, false, true);
+        cursor.boundPipeline = lateCursor.boundPipeline;
+
+        cmd.setColorBlendEnable(0, false);
+        cmd.setDepthWriteEnable(true);
+    }
+
     void Renderer::addForward3DPass()
     {
-        const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
+        FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
         // Debug mode 17 draws the DDGI irradiance atlas written this frame on the probe spheres.
         const bool drawProbes = m_ddgiDebugSpheresPipeline && m_debugMode == 17 && m_frame.ddgiAdded;
+        const bool hasDraws = resources.CameraDraws.Commands.IsValid();
 
         const shaderio::PushConstantSkybox skyboxSun = makeSkyboxSunPush();
 
-        // Unlit & skybox & transparent geometry rendered in HDR on top of the lit scene.
-        m_renderGraph.AddPass("Forward 3D", RGPassFlags::Raster,
-            [&](RGBuilder& builder)
+        // Glass in view (transmissive materials) refracts the lit scene behind it (Hybrid_Renderer_Plan_2026-10.md §4 H3b): the
+        // transparent surfaces then draw in a pass of their own, after the scene so far is copied with blur mips. Without glass,
+        // one pass as always.
+        const bool refraction = m_refractionEnabled && hasDraws && m_colorPyramidCopyPipeline && m_colorPyramidDownsamplePipeline &&
+                                m_frame.renderExtent.width > 0 && m_frame.renderExtent.height > 0 && hasTransmissiveDraws();
+
+        // Shared setup of the passes that draw over the lit scene.
+        auto declareForward = [&](RGBuilder& builder, bool lit)
+        {
+            builder.ColorTarget(resources.Entity, NRI::LoadOP::load, NRI::StoreOP::store);
+            builder.DepthTarget(resources.Depth, NRI::LoadOP::load, NRI::StoreOP::store);
+            if (lit)
             {
-                // Composites over deferred lighting; path-traced frames never lit the HDR scene, so it starts cleared.
-                if (m_frame.deferredLightingAdded)
-                    builder.ColorTarget(resources.HDRScene, NRI::LoadOP::load, NRI::StoreOP::store);
-                else
-                    builder.ColorTarget(resources.HDRScene, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 1.0f });
-                builder.ColorTarget(resources.Entity, NRI::LoadOP::load, NRI::StoreOP::store);
-                builder.DepthTarget(resources.Depth, NRI::LoadOP::load, NRI::StoreOP::store);
                 // Transparent lit shading samples the DDGI atlases (through the uniforms); the probe spheres show irradiance.
                 if (m_frame.ddgiAdded)
                 {
@@ -728,19 +800,31 @@ namespace Nox
                 // Transparent lit shading traces its own shadow rays (ray query) against the scene.
                 if (resources.TLAS.IsValid())
                     builder.Read(resources.TLAS, RGBufferAccess::AccelerationStructureRead);
-                builder.SetRenderArea(m_frame.renderExtent);
-                ReadGpuScene(builder, resources);
-                ReadViewDraws(builder, resources.CameraDraws);
-                ReadViewDraws(builder, resources.CameraDraws, true);
-                // Transparent surfaces report the mips their textures need (texture streaming feedback): read and written.
-                builder.Read(resources.MipFeedback);
-                builder.Write(resources.MipFeedback);
+            }
+            builder.SetRenderArea(m_frame.renderExtent);
+            ReadGpuScene(builder, resources);
+            ReadViewDraws(builder, resources.CameraDraws);
+            ReadViewDraws(builder, resources.CameraDraws, true);
+            // Transparent surfaces report the mips their textures need (texture streaming feedback): read and written.
+            builder.Read(resources.MipFeedback);
+            builder.Write(resources.MipFeedback);
+        };
+
+        // Unlit & skybox (& transparent, without glass) geometry rendered in HDR on top of the lit scene.
+        m_renderGraph.AddPass("Forward 3D", RGPassFlags::Raster,
+            [&](RGBuilder& builder)
+            {
+                // Composites over deferred lighting; path-traced frames never lit the HDR scene, so it starts cleared.
+                if (m_frame.deferredLightingAdded)
+                    builder.ColorTarget(resources.HDRScene, NRI::LoadOP::load, NRI::StoreOP::store);
+                else
+                    builder.ColorTarget(resources.HDRScene, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 1.0f });
+                declareForward(builder, true);
             },
-            [this, res = &resources, drawProbes, skyboxSun](RGPassContext& context)
+            [this, res = &resources, drawProbes, skyboxSun, hasDraws, refraction](RGPassContext& context)
             {
                 NRI::CommandBuffer& cmd = context.Cmd();
                 const uint32_t totalDDGIProbes = m_frame.totalDDGIProbes;
-                const bool hasDraws = res->CameraDraws.Commands.IsValid();
                 MeshletDrawCursor cursor = hasDraws ? beginMeshletDraws(context, res->CameraDraws) : MeshletDrawCursor{};
 
                 // A. UNLIT MESHES
@@ -769,6 +853,7 @@ namespace Nox
                 if (m_skyboxPipeline && m_environmentCubemap && m_debugMode == 0)
                 {
                     cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_skyboxPipeline);
+                    cursor.boundPipeline = m_skyboxPipeline.get();
                     cmd.setCullMode(NRI::CullMode::None);
                     cmd.setDepthTestEnable(true);
                     cmd.setDepthWriteEnable(false);
@@ -785,58 +870,14 @@ namespace Nox
                     cmd.drawMeshTasks(1, 1, 1);
                 }
 
-                // C. TRANSPARENT FORWARD PASS (Back-to-front sorted, Alpha Blending)
-                bool hasAnyTransparent = hasDraws && (getBucketEntryCount(RenderBucket::Transparent) > 0 || getBucketEntryCount(RenderBucket::TransparentDoubleSided) > 0 ||
-                                                      getBucketEntryCount(RenderBucket::TransparentUnlit) > 0 || getBucketEntryCount(RenderBucket::TransparentUnlitDoubleSided) > 0);
-                if (m_unlitPipeline && m_transparentLitPipeline && hasAnyTransparent)
+                // C. TRANSPARENT FORWARD PASS (Back-to-front sorted, Alpha Blending), here unless glass needs the scene first.
+                if (hasDraws && !refraction)
                 {
-                    cursor.boundPipeline = nullptr;
-                    cmd.setDepthTestEnable(true);
-                    cmd.setDepthWriteEnable(false);
-                    cmd.setDepthCompareOp(NRI::CompareOp::GreaterOrEqual);
-                    cmd.setColorBlendEnable(0, true);
-                    const NRI::ColorBlendEquation blendEquation
-                    {
-                        .srcColorBlendFactor = NRI::BlendFactor::One,
-                        .dstColorBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha,
-                        .colorBlendOp = NRI::BlendOp::Add,
-                        .srcAlphaBlendFactor = NRI::BlendFactor::One,
-                        .dstAlphaBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha,
-                        .alphaBlendOp = NRI::BlendOp::Add,
-                    };
-                    cmd.setColorBlendEquation(0, blendEquation);
-                    cmd.setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
-                    cmd.setColorBlendEnable(1, false);
-                    cmd.setColorWriteMask(1, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
-
                     // Whichever of SSAO/RTAO ran this frame (never both -- see Renderer::m_ssaoEnabled), for the
                     // specular occlusion approximation in Material_TransparentLit_Mesh.slang; every other consumer
                     // of this cursor's push constant (unlit, skybox, opaque) never reads the field.
                     cursor.references.ssaoTextureIndex = m_frame.ssaoAdded ? context.Slot(res->SSAO) : 0xFFFFFFFF;
-
-                    // Non-unlit Blend objects get real shading (same BRDF/IBL as the deferred opaque path, via
-                    // PBRLighting.slang) instead of a flat baseColor pass-through, so they don't look self-lit next to
-                    // shaded Opaque/Mask geometry. True KHR_materials_unlit objects still use the flat shader.
-                    //
-                    // CullMode matches each object's own doubleSided flag (mirroring the opaque/mask queues): a closed,
-                    // single-sided translucent shape needs its own backface culled, or both hemispheres blend on top of
-                    // each other and wash the result out.
-                    drawMeshletBucket(cmd, cursor, RenderBucket::Transparent, *m_transparentLitPipeline, NRI::CullMode::Back, false, true);
-                    drawMeshletBucket(cmd, cursor, RenderBucket::TransparentDoubleSided, *m_transparentLitPipeline, NRI::CullMode::None, false, true);
-                    drawMeshletBucket(cmd, cursor, RenderBucket::TransparentUnlit, *m_unlitPipeline, NRI::CullMode::Back, false, true);
-                    drawMeshletBucket(cmd, cursor, RenderBucket::TransparentUnlitDoubleSided, *m_unlitPipeline, NRI::CullMode::None, false, true);
-
-                    MeshletDrawCursor lateCursor = beginMeshletDraws(context, res->CameraDraws, true);
-                    lateCursor.boundPipeline = cursor.boundPipeline;
-                    lateCursor.references.ssaoTextureIndex = cursor.references.ssaoTextureIndex;
-                    drawMeshletBucket(cmd, lateCursor, RenderBucket::Transparent, *m_transparentLitPipeline, NRI::CullMode::Back, false, true);
-                    drawMeshletBucket(cmd, lateCursor, RenderBucket::TransparentDoubleSided, *m_transparentLitPipeline, NRI::CullMode::None, false, true);
-                    drawMeshletBucket(cmd, lateCursor, RenderBucket::TransparentUnlit, *m_unlitPipeline, NRI::CullMode::Back, false, true);
-                    drawMeshletBucket(cmd, lateCursor, RenderBucket::TransparentUnlitDoubleSided, *m_unlitPipeline, NRI::CullMode::None, false, true);
-                    cursor.boundPipeline = lateCursor.boundPipeline;
-
-                    cmd.setColorBlendEnable(0, false);
-                    cmd.setDepthWriteEnable(true);
+                    drawForwardTransparent(cmd, context, res->CameraDraws, cursor);
                 }
 
                 // D. DDGI PROBE SPHERES (Debug Mode 17: Visualizes 3D Probe Grid with Irradiance)
@@ -861,6 +902,59 @@ namespace Nox
 
                     cmd.drawMeshTasks(totalDDGIProbes, 1, 1);
                 }
+            });
+
+        if (!refraction)
+            return;
+
+        // The scene behind the glass: the HDR image so far (opaque, unlit, sky) with a mip chain of 2x2 averages (ColorPyramid.slang).
+        RGTextureDesc pyramidDesc;
+        pyramidDesc.Format = NRI::ImageFormat::R16G16B16A16_SFLOAT;
+        pyramidDesc.Usage = NRI::TextureUsage::Storage;
+        pyramidDesc.MipLevels = 1;
+        for (uint32_t size = std::max(m_frame.renderExtent.width, m_frame.renderExtent.height); size > 1; size >>= 1)
+            ++pyramidDesc.MipLevels;
+        resources.RefractionSource = m_renderGraph.CreateTexture("Refraction Source", pyramidDesc);
+        const uint32_t mipCount = pyramidDesc.MipLevels;
+        for (uint32_t mip = 0; mip < mipCount; ++mip)
+        {
+            m_renderGraph.AddPass(mip == 0 ? "Refraction Source" : "Refraction Source Mip", RGPassFlags::None,
+                [&, mip](RGBuilder& builder)
+                {
+                    builder.Read(mip == 0 ? resources.HDRScene : resources.RefractionSource);
+                    builder.Write(resources.RefractionSource, RGTextureAccess::StorageWrite);
+                },
+                [this, res = &resources, mip](RGPassContext& context)
+                {
+                    NRI::CommandBuffer& cmd = context.Cmd();
+                    cmd.bindPipeline(NRI::PipelineBindPoint::Compute, mip == 0 ? *m_colorPyramidCopyPipeline : *m_colorPyramidDownsamplePipeline);
+
+                    shaderio::PushConstantColorPyramid push{};
+                    push.sourceIndex = uniformData.imageHeapIndexOffset + context.Slot(mip == 0 ? res->HDRScene : res->RefractionSource);
+                    push.outputIndex = context.StorageSlot(res->RefractionSource, mip);
+                    push.sourceMip = mip == 0 ? 0 : mip - 1;
+                    push.width = std::max(m_frame.renderExtent.width >> mip, 1u);
+                    push.height = std::max(m_frame.renderExtent.height >> mip, 1u);
+                    cmd.pushData(&push, sizeof(push));
+                    cmd.dispatch((push.width + 7) / 8, (push.height + 7) / 8, 1);
+                });
+        }
+
+        // Transparent surfaces over the scene; glass refracts the copy.
+        m_renderGraph.AddPass("Forward Transparent", RGPassFlags::Raster,
+            [&](RGBuilder& builder)
+            {
+                builder.ColorTarget(resources.HDRScene, NRI::LoadOP::load, NRI::StoreOP::store);
+                declareForward(builder, true);
+                builder.Read(resources.RefractionSource);
+            },
+            [this, res = &resources](RGPassContext& context)
+            {
+                NRI::CommandBuffer& cmd = context.Cmd();
+                MeshletDrawCursor cursor = beginMeshletDraws(context, res->CameraDraws);
+                cursor.references.ssaoTextureIndex = m_frame.ssaoAdded ? context.Slot(res->SSAO) : 0xFFFFFFFF;
+                cursor.references.refractionTextureIndex = context.Slot(res->RefractionSource);
+                drawForwardTransparent(cmd, context, res->CameraDraws, cursor);
             });
     }
 }

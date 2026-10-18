@@ -242,8 +242,13 @@ FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform Pu
         transmission = 0.0;
         baseColor.a = 1.0;
     }
-    float diffuseAlpha = baseColor.a * (1.0 - transmission);
-    baseColor.a = diffuseAlpha;
+    // Refraction (Hybrid_Renderer_Plan_2026-10.md §4 H3b) when the pass has the lit scene behind it: the transmitted part comes from
+    // there, bent and blurred (below), and the surface covers what is behind it by its alpha alone. Without it, transmission only
+    // lets the background through unbent (lower alpha).
+    const bool refraction = transmission > 0.0 && pushConstant.refractionTextureIndex != 0xFFFFFFFF;
+    const float coverage = instance.alphaMode == 2 ? baseColor.a : 1.0;
+    float diffuseAlpha = refraction ? (1.0 - transmission) : baseColor.a * (1.0 - transmission);
+    baseColor.a = refraction ? coverage : diffuseAlpha;
 
     float3 diffuseColor = baseColor.rgb * (1.0 - metallic) * diffuseAlpha;
     float3 specularColor = lerp(f0, baseColor.rgb, metallic);
@@ -412,6 +417,45 @@ FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform Pu
         emissive *= emissiveTex.Sample(sampLinearHandle, instance.emissiveTextureSet == 0 ? vertIn.uv0 : vertIn.uv1).rgb;
     }
     color += emissive;
+
+    if (refraction)
+    {
+        // What is behind the surface, seen along the refracted ray: through the volume's thickness (KHR_materials_volume, in model
+        // units, so scaled with the model; 0 = thin-walled, no bending), blurred by the roughness the IOR leaves (as the Khronos
+        // glTF viewer does), tinted by the base color, less what the surface reflects (Fresnel). Rough or thick glass reads a
+        // blurrier mip; what is outside the screen is clamped to its edge.
+        Texture2D refractionSource = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.refractionTextureIndex, 0));
+        uint sourceWidth, sourceHeight, sourceLevels;
+        refractionSource.GetDimensions(0, sourceWidth, sourceHeight, sourceLevels);
+
+        const float ior = max(instance.ior, 1.0);
+        float3 refracted = refract(-v, n, 1.0 / ior);
+        if (dot(refracted, refracted) < 1e-6)
+            refracted = -v;
+        const float4x4 model = instance.modelMatrix;
+        const float modelScale = (length(float3(model[0][0], model[1][0], model[2][0])) + length(float3(model[0][1], model[1][1], model[2][1])) +
+                                  length(float3(model[0][2], model[1][2], model[2][2]))) / 3.0;
+        const float3 exitPoint = vertIn.worldPos + normalize(refracted) * instance.thickness * modelScale;
+
+        // The exit point's offset on screen from the surface's own pixel (the same projection the HDR image was drawn with).
+        const float4x4 viewProjection = mul(ubo->proj, ubo->view);
+        const float4 surfaceClip = mul(viewProjection, float4(vertIn.worldPos, 1.0));
+        const float4 exitClip = mul(viewProjection, float4(exitPoint, 1.0));
+        float2 offset = float2(0.0);
+        if (surfaceClip.w > 1e-5 && exitClip.w > 1e-5)
+            offset = (exitClip.xy / exitClip.w - surfaceClip.xy / surfaceClip.w) * float2(0.5, -0.5);
+        const float2 uv = saturate(vertIn.pos.xy / float2(sourceWidth, sourceHeight) + offset);
+
+        const float lod = log2(float(max(sourceWidth, sourceHeight))) * perceptualRoughness * saturate(ior * 2.0 - 2.0);
+        SamplerState linearClamp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
+        const float3 behind = refractionSource.SampleLevel(linearClamp, uv, min(lod, float(sourceLevels - 1))).rgb;
+
+        const float3 fresnel = specularEnvironmentR0 + (1.0 - specularEnvironmentR0) * pow(1.0 - NdotV, 5.0);
+        color += behind * baseColor.rgb * (transmission * (1.0 - metallic)) * (1.0 - fresnel);
+        output.color = float4(color * coverage, coverage);
+        output.entityID = vertIn.entityID;
+        return output;
+    }
 
     // Linear HDR, not tonemapped - this pipeline writes into the same m_hdrSceneResource as
     // everything else in the forward pass, which is only tonemapped once at the end of the frame.

@@ -740,6 +740,14 @@ namespace Nox
         {
             m_Renderer->setScaleIBLAmbient(iblAmbient);
         }
+
+        bool refraction = m_Renderer->getRefractionEnabled();
+        if (ImGui::Checkbox("Glass Refraction", &refraction))
+            m_Renderer->setRefractionEnabled(refraction);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Transmissive materials (glass) show the scene behind them bent by their IOR and thickness and blurred\n"
+                              "by their roughness (a copy of the lit scene with blur mips, only while glass is in view).\n"
+                              "Off: transmission only makes them see-through.");
         
         bool jitter = m_Renderer->getCameraJitterEnabled();
         if (ImGui::Checkbox("Camera Subpixel Jitter (R2)", &jitter))

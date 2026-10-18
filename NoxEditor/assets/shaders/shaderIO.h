@@ -531,6 +531,9 @@ struct PushConstantMeshlets
     // Renderer::addForward3DPass -- every other consumer of this struct (task/mesh stages, the opaque G-buffer
     // resolve) leaves it unread. 0xFFFFFFFF when neither SSAO nor RTAO ran this frame.
     uint32_t ssaoTextureIndex;
+    // Material_TransparentLit_Mesh.slang only: the lit scene behind transparent surfaces with its blur mips (ColorPyramid.slang),
+    // which transmissive materials refract. 0xFFFFFFFF: none this pass (transmission then only lets the background show through).
+    uint32_t refractionTextureIndex;
 };
 
 struct PushConstantSkinning
@@ -944,6 +947,17 @@ struct PushConstantAutoExposure
     uint32_t outputIndex;
     uint32_t sourceMip;
     uint32_t dimension;
+};
+
+// ColorPyramid.slang: the refraction source of transparent surfaces (copy, then 2x2 downsamples).
+struct PushConstantColorPyramid
+{
+    uint32_t sourceIndex;  // sampled slot (image heap offset included)
+    uint32_t outputIndex;  // storage slot of the mip being written
+    uint32_t sourceMip;
+    uint32_t width;        // of the mip being written
+    uint32_t height;
+    uint32_t padding;
 };
 
 struct PushConstantDDGIRadiance

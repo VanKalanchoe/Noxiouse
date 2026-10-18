@@ -524,6 +524,10 @@ namespace Nox
         // jitter instead of blitted, so the grid, gizmo lines, collider wireframes and picking hold still. Costs a depth-only pass.
         void setStableEditorDepth(bool enabled) { m_stableEditorDepth = enabled; }
         bool getStableEditorDepth() const { return m_stableEditorDepth; }
+        // Glass (transmissive materials) refracts the lit scene behind it, bent by IOR and thickness and blurred by roughness (a copy of
+        // the scene with blur mips; transparent surfaces then draw in a pass of their own). Off: transmission only lowers the alpha.
+        void setRefractionEnabled(bool enabled) { m_refractionEnabled = enabled; }
+        bool getRefractionEnabled() const { return m_refractionEnabled; }
         glm::vec2 getCurrentJitter() const { return m_currentJitter; }
 
         Ref<Texture2D> UploadTexture(const TextureData& cpuData);
@@ -674,6 +678,7 @@ namespace Nox
         // Post Process
         void createPostProcessPipeline(bool forceCompile = false);
         void createAutoExposurePipelines(bool forceCompile = false);
+        void createColorPyramidPipelines(bool forceCompile = false);
         // Render graph texture inspection
         void createTextureInspectPipeline(bool forceCompile = false);
         // GPU instance culling (InstanceCulling.slang: cull, count, offset, write, late) and the depth pyramid build
@@ -761,6 +766,8 @@ namespace Nox
         void addPathTracerPasses();
         void addDeferredLightingPass();
         void addForward3DPass();
+        // Lit transparent draws whose material transmits (glass) in this frame's draw list.
+        bool hasTransmissiveDraws() const;
         // The skybox push constants of the sun's disc (procedural sky), without the uniforms and cubemap.
         shaderio::PushConstantSkybox makeSkyboxSunPush() const;
         void addDLSSPass();
@@ -790,6 +797,8 @@ namespace Nox
         };
         MeshletDrawCursor beginMeshletDraws(const RGPassContext& context, const ViewDrawResources& draws, bool late = false) const;
         void drawMeshletBucket(NRI::CommandBuffer& cmd, MeshletDrawCursor& cursor, RenderBucket bucket, NRI::Pipeline& pipeline, NRI::CullMode cullMode, bool depthWrite, bool blendEnable) const;
+        // The transparent buckets (both culling phases), blended over the HDR scene; the cursor carries the SSAO and refraction slots.
+        void drawForwardTransparent(NRI::CommandBuffer& cmd, const RGPassContext& context, const ViewDrawResources& draws, MeshletDrawCursor& cursor) const;
         // Draw list entries of a bucket (its visible instances are at most that many).
         uint32_t getBucketEntryCount(RenderBucket bucket) const
         {
@@ -869,6 +878,10 @@ namespace Nox
         std::unique_ptr<NRI::Pipeline> m_postProcessPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_autoExposureBuildPipeline;
         std::unique_ptr<NRI::Pipeline> m_autoExposureReducePipeline;
+        // ColorPyramid.slang: the refraction source of glass (copy, downsample).
+        std::unique_ptr<NRI::Pipeline> m_colorPyramidCopyPipeline;
+        std::unique_ptr<NRI::Pipeline> m_colorPyramidDownsamplePipeline;
+        bool m_refractionEnabled = true;
         // NRD
         std::unique_ptr<NRI::Pipeline> m_shadowMaskPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_nrdGuidesPipeline = nullptr; // NRD view Z + normal/roughness (NRDGuides.slang)

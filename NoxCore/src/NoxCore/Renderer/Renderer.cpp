@@ -259,6 +259,7 @@ namespace Nox
         // Post Process
         watchShader("assets/shaders/PostProcess.slang", "PostProcess", [this]() { createPostProcessPipeline(true); });
         watchShader("assets/shaders/AutoExposure.slang", "AutoExposure", [this]() { createAutoExposurePipelines(true); });
+        watchShader("assets/shaders/ColorPyramid.slang", "ColorPyramid", [this]() { createColorPyramidPipelines(true); });
         watchShader("assets/shaders/TextureInspect.slang", "TextureInspect", [this]() { createTextureInspectPipeline(true); });
         watchShader("assets/shaders/InstanceCulling.slang", "InstanceCulling", [this]() { createInstanceCullingPipelines(true); });
         watchShader("assets/shaders/HiZBuild.slang", "HiZBuild", [this]() { createHiZBuildPipeline(true); });
@@ -436,6 +437,7 @@ namespace Nox
         // Post Process
         createPostProcessPipeline(false);
         createAutoExposurePipelines(false);
+        createColorPyramidPipelines(false);
         createTextureInspectPipeline(false);
         createInstanceCullingPipelines(false);
         createHiZBuildPipeline(false);
@@ -1922,6 +1924,17 @@ namespace Nox
         m_autoExposureBuildPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
         desc.shaders.front().entryPoint = "reduceMain";
         m_autoExposureReducePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+    }
+
+    void Renderer::createColorPyramidPipelines(bool forceCompile)
+    {
+        NRI::PipelineDesc desc{};
+        desc.type = NRI::PipelineType::Compute;
+        desc.forceCompile = forceCompile;
+        desc.shaders.push_back({ NRI::ShaderStage::Compute, "copyMain", "assets/shaders/ColorPyramid.slang" });
+        m_colorPyramidCopyPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        desc.shaders.front().entryPoint = "downsampleMain";
+        m_colorPyramidDownsamplePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
     void Renderer::createTextureImage()
@@ -3897,6 +3910,8 @@ namespace Nox
             references.skinnedVertexReference = hasSkinnedVertices ? m_skinnedVertexBuffers[frameIndex]->getDeviceAddress() : 0;
             // Real value (or left at "none") set later, in addForward3DPass, once SSAO/RTAO's result actually exists.
             references.ssaoTextureIndex = 0xFFFFFFFF;
+            // Set by the pass that draws glass over a copy of the scene (addForward3DPass).
+            references.refractionTextureIndex = 0xFFFFFFFF;
         }
         frame.skinningWorkCount = static_cast<uint32_t>(m_skinningWorkItems.size());
         frame.skinnedHistoryValid = frame.skinningWorkCount > 0 && m_skinnedVertexHistoryValid;

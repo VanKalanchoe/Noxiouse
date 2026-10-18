@@ -44,6 +44,7 @@ namespace Nox
         RGTexture PrevAlbedo;
         RGTexture PrevMaterial;
         RGTexture HDRScene;
+        RGTexture RefractionSource; // the lit scene behind transparent surfaces with blur mips (addForward3DPass, glass in view)
         RGTexture AutoExposure;
         RGTexture Scene;
         RGTexture EnvironmentCubemap;
