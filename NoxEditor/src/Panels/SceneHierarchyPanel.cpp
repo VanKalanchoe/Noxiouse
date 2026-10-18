@@ -1462,6 +1462,9 @@ namespace Nox
                 ImGui::ColorEdit3("Ground Albedo", glm::value_ptr(component.GroundAlbedo));
                 ImGui::DragFloat("Altitude", &component.AltitudeKm, 0.05f, 0.0f, 99.0f, "%.2f km");
                 ImGui::SetItemTooltip("The viewer's height above the planet's surface (the horizon drops, the sky darkens).");
+                ImGui::DragFloat("Aerial Perspective", &component.AerialPerspectiveScale, 0.1f, 0.0f, 1000.0f, "%.1f x");
+                ImGui::SetItemTooltip("Haze on the scene: distant objects fade into the sky's color. Multiplies distances:\n"
+                                      "1 = real air (subtle below a few km), higher for a hazier look in small scenes, 0 = off.");
                 return;
             }
 

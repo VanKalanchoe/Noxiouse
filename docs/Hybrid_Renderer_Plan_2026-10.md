@@ -132,6 +132,16 @@ path tracer and raster agree on the sky color.
   **2026-10-18 fix:** the first version rebuilt an HDR-sized IBL set (512 prefilter at 1024 samples, ~550 M texture reads)
   with a GPU wait per step and pipelines created each time, debounced 150 ms after the last change: the ~1 s freeze after
   letting go of the sun. The IBL filter pipelines are now created once, for HDR maps too.
+- **Aerial perspective (S5, built 2026-10-18, untested):** the paper's camera volume -- 32 x 32 froxels x 32 depth
+  slices (a 2D array texture: rgb scattered light, a mean transmittance), slice z ending at 32 km * ((z + 1) / 32)^2,
+  marched every frame from the camera with 2 samples per slice (`SkyAtmosphere.slang aerialPerspectiveMain`, the same
+  medium, phase functions and LUTs as the sky). `DeferredLighting.slang` applies `color * T + scattered` at the end of the
+  lit result, looked up by the pixel's distance. The pass is declared right before deferred lighting and imported into the
+  graph, so it runs only when deferred lighting does (not in path-traced views) and its read is ordered by the graph.
+  **Aerial Perspective** on the component multiplies distances (UE's distance scale): 1 = real air -- a grey object
+  takes a light blue haze at 10 km (T 0.81) and heads for the horizon color at 30 km (T 0.55), barely anything within
+  a few hundred meters -- so small scenes use 10-100 for a visible effect, 0 turns it off. Not applied yet to forward
+  passes (unlit and transparent surfaces).
 - **Applied** only from `Scene::SetRenderer` (main thread, every frame); the Submit Lights system, which may run on a
   worker, only reads the scale.
 - **2026-10-18 fix 2, the wrong colors** ("light yellow above, brown-green below, a black cut"): push constants compile
@@ -153,7 +163,7 @@ path tracer and raster agree on the sky color.
   (~0.013 in luminance), a sunlit white wall ~20x brighter, as outside. Auto exposure (camera) or Radiance Scale bring the
   sky up when it reads too dark next to an exposure tuned for a bright HDR map.
 - **Still open:** time-slicing the update over a few frames (UE's real-time sky capture) if 1-2 ms per changing frame
-  shows; S5 aerial perspective; night (no moon / stars, the sky just goes dark); the viewer's altitude comes from the
+  shows; aerial perspective on forward-rendered (unlit / transparent) surfaces; night (no moon / stars, the sky just goes dark); the viewer's altitude comes from the
   component, not the camera; the sun disc in path-traced views. Found while here: the component's **Rotation** is drawn
   in the UI but no shader applies it (HDR maps too); the fix is to rotate the direction in the resample pass.
 

@@ -266,3 +266,75 @@ void skyCubemapMain(uint3 id : SV_DispatchThreadID, uniform PushConstantSkyAtmos
     RWTexture2DArray<float4> output = RWTexture2DArray<float4>.Handle(uint2(push.outputStorageIndex, 0));
     output[id] = float4(result.luminance * push.sunIlluminance, 1.0);
 }
+
+// Aerial perspective (the paper's camera volume, UE's "aerial perspective LUT"): for each froxel column the camera's view
+// ray is marched through the atmosphere once, writing the light scattered towards the camera and the transmittance at the
+// end of every depth slice. Deferred lighting looks it up by the pixel's distance: color * transmittance + scattered.
+[shader("compute")]
+[numthreads(8, 8, 1)]
+void aerialPerspectiveMain(uint3 id : SV_DispatchThreadID, uniform PushConstantAerialPerspective ap)
+{
+    if (id.x >= AerialPerspectiveSize || id.y >= AerialPerspectiveSize)
+        return;
+
+    UniformBufferObject* ubo = (UniformBufferObject*)ap.matrixReference;
+
+    // The sky's functions take the sky's push constants: the same atmosphere.
+    PushConstantSkyAtmosphere atmosphere = (PushConstantSkyAtmosphere)0;
+    atmosphere.transmittanceTextureIndex = ap.transmittanceTextureIndex;
+    atmosphere.multiScatteringTextureIndex = ap.multiScatteringTextureIndex;
+    atmosphere.rayleighScale = ap.rayleighScale;
+    atmosphere.mieScale = ap.mieScale;
+    atmosphere.ozoneScale = ap.ozoneScale;
+    atmosphere.mieAnisotropy = ap.mieAnisotropy;
+
+    // The froxel column's view direction, with the same screen convention as DeferredLighting.slang's reconstruction. A
+    // point well in front of the camera, not at the near plane (precision, see Skybox.slang).
+    const float2 uv = (float2(id.xy) + 0.5) / float(AerialPerspectiveSize);
+    const float4 farPoint = mul(ubo->invViewProj, float4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, 0.001, 1.0));
+    const float3 direction = normalize(farPoint.xyz / farPoint.w - ubo->cameraWorldPos.xyz);
+
+    // The camera in the atmosphere: the world origin AltitudeKm above the ground, +Y up, kept above the ground.
+    float3 cameraKm = ubo->cameraWorldPos.xyz * ap.kmPerWorldUnit;
+    cameraKm.y = max(cameraKm.y + BottomRadius + ap.altitudeKm, BottomRadius + PlanetRadiusOffset);
+
+    const float3 sunDirection = normalize(ap.sunDirection);
+    const float cosTheta = dot(direction, sunDirection);
+    const float phaseRayleigh = rayleighPhase(cosTheta);
+    const float phaseMie = miePhase(ap.mieAnisotropy, cosTheta);
+
+    RWTexture2DArray<float4> output = RWTexture2DArray<float4>.Handle(uint2(ap.outputStorageIndex, 0));
+    float3 scattered = float3(0.0);
+    float3 throughput = float3(1.0);
+    float sliceStart = 0.0;
+    for (uint slice = 0; slice < AerialPerspectiveSlices; ++slice)
+    {
+        const float sliceFraction = float(slice + 1) / float(AerialPerspectiveSlices);
+        const float sliceEnd = AerialPerspectiveMaxDistanceKm * sliceFraction * sliceFraction;
+        const int samplesPerSlice = 2;
+        for (int s = 0; s < samplesPerSlice; ++s)
+        {
+            const float dt = (sliceEnd - sliceStart) / float(samplesPerSlice);
+            const float t = sliceStart + (float(s) + 0.5) * dt;
+            const float3 position = cameraKm + direction * t;
+            // Below the ground (a view ray going down past where geometry would be): the air at ground level.
+            const float r = max(length(position), BottomRadius + PlanetRadiusOffset);
+            const float3 up = normalize(position);
+            const float cosSunZenith = dot(sunDirection, up);
+            const Medium medium = sampleMedium(r - BottomRadius, atmosphere);
+
+            const float3 sunTransmittance = sampleTransmittance(atmosphere, r, cosSunZenith);
+            const float planetShadow = raySphere(up * r, sunDirection, BottomRadius) >= 0.0 ? 0.0 : 1.0;
+            const float3 multiScattered = sampleMultiScattering(atmosphere, r, cosSunZenith);
+            const float3 inScattered = planetShadow * sunTransmittance * (medium.rayleigh * phaseRayleigh + medium.mie * phaseMie) +
+                                       multiScattered * medium.scattering;
+
+            const float3 segmentTransmittance = exp(-medium.extinction * dt);
+            const float3 extinction = max(medium.extinction, float3(1e-7));
+            scattered += throughput * (inScattered - inScattered * segmentTransmittance) / extinction;
+            throughput *= segmentTransmittance;
+        }
+        sliceStart = sliceEnd;
+        output[uint3(id.xy, slice)] = float4(scattered * ap.sunIlluminance, dot(throughput, float3(1.0 / 3.0)));
+    }
+}

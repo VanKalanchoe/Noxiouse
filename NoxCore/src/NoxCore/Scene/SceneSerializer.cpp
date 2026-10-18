@@ -514,6 +514,7 @@ namespace Nox
             out << YAML::Key << "MieAnisotropy" << YAML::Value << elc.MieAnisotropy;
             out << YAML::Key << "GroundAlbedo" << YAML::Value << elc.GroundAlbedo;
             out << YAML::Key << "AltitudeKm" << YAML::Value << elc.AltitudeKm;
+            out << YAML::Key << "AerialPerspectiveScale" << YAML::Value << elc.AerialPerspectiveScale;
 
             out << YAML::EndMap;
         }
@@ -1320,6 +1321,8 @@ namespace Nox
                 elc.GroundAlbedo = environmentLightComponent["GroundAlbedo"].as<glm::vec3>();
             if (environmentLightComponent["AltitudeKm"])
                 elc.AltitudeKm = environmentLightComponent["AltitudeKm"].as<float>();
+            if (environmentLightComponent["AerialPerspectiveScale"])
+                elc.AerialPerspectiveScale = environmentLightComponent["AerialPerspectiveScale"].as<float>();
         }
 
         auto animatorComponent = entity["AnimatorComponent"];

@@ -43,6 +43,7 @@ namespace Nox
         settings.OzoneScale = environment.OzoneScale;
         settings.MieAnisotropy = environment.MieAnisotropy;
         settings.AltitudeKm = environment.AltitudeKm;
+        settings.AerialPerspectiveScale = environment.AerialPerspectiveScale;
         return settings;
     }
 

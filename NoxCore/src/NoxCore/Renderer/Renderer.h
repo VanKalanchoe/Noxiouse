@@ -146,6 +146,7 @@ namespace Nox
         float MieAnisotropy = 0.8f;                 // how strongly haze scatters forward (0 = evenly)
         float AltitudeKm = 0.0f;                    // the viewer's height above the ground
         float SunAngularRadius = 0.004675f;         // radians: the disc the skybox draws (the light's angular diameter / 2)
+        float AerialPerspectiveScale = 1.0f;        // multiplies view distances for the haze on the scene (UE's distance scale)
 
         bool operator==(const SkyAtmosphereSettings&) const = default;
     };
@@ -523,6 +524,7 @@ namespace Nox
         void createBRDFLut();
         void createProceduralSkyResources();
         void addProceduralSkyPass();
+        RGTexture addAerialPerspectivePass();
 
         template <class T>
         void UploadBufferSlice(NRI::Buffer& dstBuffer, const T* data, uint32_t elementOffset, uint32_t elementCount);
@@ -1331,9 +1333,12 @@ namespace Nox
         std::unique_ptr<NRI::Pipeline> m_skyTransmittancePipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_skyMultiScatteringPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_skyCubemapPipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_skyAerialPerspectivePipeline = nullptr;
+        Ref<Texture2D> m_skyAerialPerspective; // camera volume, rewritten every frame the scene is lit by deferred lighting
         Ref<Texture2D> m_skyTransmittanceLut;
         Ref<Texture2D> m_skyMultiScatteringLut;
-        // Per-mip storage slots of the sky's cubemaps: [environment mips..., irradiance mips..., prefiltered mips...].
+        // Storage slots: [transmittance, multiple scattering, environment mips..., irradiance mips..., prefiltered mips...,
+        // aerial perspective].
         std::vector<uint32_t> m_skyStorageSlots;
         bool m_proceduralSkyActive = false;
         bool m_skyLutsDirty = false;

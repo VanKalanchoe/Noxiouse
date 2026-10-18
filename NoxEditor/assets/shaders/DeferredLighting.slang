@@ -145,6 +145,34 @@
         return (sq.CommittedStatus() == COMMITTED_TRIANGLE_HIT);
     }
 
+    // Aerial perspective over a procedural sky (SkyAtmosphere.slang aerialPerspectiveMain): the air between the camera and
+    // this surface dims it and adds the light it scatters, looked up in the camera volume at the pixel and its distance.
+    float3 applyAerialPerspective(float3 color, PushConstantDeferredLighting pushConstant, float2 uv, float distance)
+    {
+        if (pushConstant.aerialPerspectiveTextureIndex == 0xFFFFFFFF)
+            return color;
+        Texture2DArray volume = Texture2DArray.Handle(uint2(pushConstant.aerialPerspectiveTextureIndex, 0));
+        SamplerState linearClamp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
+
+        // Slice z ends at max * ((z + 1) / slices)^2: the inverse, -1 = at the camera.
+        const float distanceKm = distance * pushConstant.aerialPerspectiveKmPerUnit;
+        const float slice = sqrt(saturate(distanceKm / AerialPerspectiveMaxDistanceKm)) * float(AerialPerspectiveSlices) - 1.0;
+        float4 aerial;
+        if (slice < 0.0)
+        {
+            // Between the camera (no air yet: nothing scattered, all transmitted) and the end of the first slice.
+            aerial = lerp(float4(0.0, 0.0, 0.0, 1.0), volume.SampleLevel(linearClamp, float3(uv, 0.0), 0.0), slice + 1.0);
+        }
+        else
+        {
+            const float lower = floor(slice);
+            const float upper = min(lower + 1.0, float(AerialPerspectiveSlices - 1));
+            aerial = lerp(volume.SampleLevel(linearClamp, float3(uv, lower), 0.0),
+                          volume.SampleLevel(linearClamp, float3(uv, upper), 0.0), slice - lower);
+        }
+        return color * aerial.a + aerial.rgb;
+    }
+
     [shader("fragment")]
     float4 fragMain(
         MSOutput input,
@@ -665,6 +693,7 @@
         float3 finalColor = directLighting + iblColor;
         finalColor = lerp(finalColor, finalColor * occlusion, 1.0);
         finalColor += emissionSample.rgb;
+        finalColor = applyAerialPerspective(finalColor, pushConstant, uv, length(worldPos - ubo->cameraWorldPos.xyz));
 
         return float4(finalColor, 1.0);
     }

@@ -2092,10 +2092,11 @@ namespace Nox
         if (settings.RayleighScale != m_proceduralSky.RayleighScale || settings.MieScale != m_proceduralSky.MieScale ||
             settings.OzoneScale != m_proceduralSky.OzoneScale || settings.GroundAlbedo != m_proceduralSky.GroundAlbedo)
             m_skyLutsDirty = true;
-        // The disc's size only changes what the skybox draws.
-        SkyAtmosphereSettings sameDisc = settings;
-        sameDisc.SunAngularRadius = m_proceduralSky.SunAngularRadius;
-        if (sameDisc != m_proceduralSky)
+        // The disc's size only changes what the skybox draws, the aerial perspective scale only its lookup.
+        SkyAtmosphereSettings sameSky = settings;
+        sameSky.SunAngularRadius = m_proceduralSky.SunAngularRadius;
+        sameSky.AerialPerspectiveScale = m_proceduralSky.AerialPerspectiveScale;
+        if (sameSky != m_proceduralSky)
             m_skyDirty = true;
         m_proceduralSky = settings;
     }
@@ -2114,6 +2115,7 @@ namespace Nox
         m_skyStorageSlots.clear();
         releaseEnvironmentTexture(m_skyTransmittanceLut);
         releaseEnvironmentTexture(m_skyMultiScatteringLut);
+        releaseEnvironmentTexture(m_skyAerialPerspective);
 
         releaseEnvironmentTexture(m_environmentCubemap);
         m_renderGraph.ResetHistory("PT Environment Importance");
@@ -2465,6 +2467,8 @@ namespace Nox
             m_skyMultiScatteringPipeline = createSkyPipeline("multiScatteringMain");
         if (!m_skyCubemapPipeline)
             m_skyCubemapPipeline = createSkyPipeline("skyCubemapMain");
+        if (!m_skyAerialPerspectivePipeline)
+            m_skyAerialPerspectivePipeline = createSkyPipeline("aerialPerspectiveMain");
 
         auto createLut = [this](uint32_t width, uint32_t height)
         {
@@ -2501,6 +2505,19 @@ namespace Nox
         for (Texture2D* cube : { m_environmentCubemap.get(), m_irradianceCubemap.get(), m_prefilteredEnvMap.get() })
             for (uint32_t mip = 0; mip < cube->getMipLevels(); ++mip)
                 m_skyStorageSlots.push_back(m_resourceHeap->registerStorageTextureMip(*cube, mip));
+
+        m_skyAerialPerspective = m_device->createTexture(NRI::TextureDesc{
+            .width = shaderio::AerialPerspectiveSize,
+            .height = shaderio::AerialPerspectiveSize,
+            .arrayLayers = shaderio::AerialPerspectiveSlices,
+            .isCubeMap = false,
+            .mipLevels = 1,
+            .sampleCount = 1,
+            .usage = NRI::TextureUsage::Storage,
+            .format = NRI::ImageFormat::R16G16B16A16_SFLOAT
+        });
+        m_resourceHeap->registerTexture(*m_skyAerialPerspective, NRI::TextureUsage::ShaderResource);
+        m_skyStorageSlots.push_back(m_resourceHeap->registerStorageTextureMip(*m_skyAerialPerspective, 0));
 
         // The BRDF LUT stays across environments; a scene that starts with the sky has none yet.
         createBRDFLut();
@@ -2640,6 +2657,46 @@ namespace Nox
         // Built from the environment: made again from the new sky next frame. The path tracer's accumulation restarts.
         m_renderGraph.ResetHistory("PT Environment Importance");
         m_renderGraph.ResetHistory("Path Tracer Accumulation");
+    }
+
+    // The camera's aerial perspective volume for this frame (the camera moves every frame; 32 x 32 columns of 64 samples,
+    // a few microseconds), declared in the graph so deferred lighting's read is ordered after it. Invalid without a sky.
+    RGTexture Renderer::addAerialPerspectivePass()
+    {
+        if (!m_proceduralSkyActive || !m_skyAerialPerspective || !m_skyAerialPerspectivePipeline)
+            return {};
+
+        const SkyAtmosphereSettings& settings = m_proceduralSky;
+        shaderio::PushConstantAerialPerspective push{};
+        push.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+        push.outputStorageIndex = m_skyStorageSlots.back();
+        push.transmittanceTextureIndex = m_skyTransmittanceLut->GetDescriptorIndexSlot();
+        push.multiScatteringTextureIndex = m_skyMultiScatteringLut->GetDescriptorIndexSlot();
+        const float sunLength = glm::length(settings.SunDirection);
+        push.sunDirection = sunLength > 1e-6f ? settings.SunDirection / sunLength : glm::vec3(0.0f, 1.0f, 0.0f);
+        push.sunIlluminance = glm::max(settings.SunIlluminance, glm::vec3(0.0f));
+        push.rayleighScale = glm::max(settings.RayleighScale, 0.0f);
+        push.mieScale = glm::max(settings.MieScale, 0.0f);
+        push.ozoneScale = glm::max(settings.OzoneScale, 0.0f);
+        push.mieAnisotropy = glm::clamp(settings.MieAnisotropy, 0.0f, 0.99f);
+        push.kmPerWorldUnit = WorldUnits::ToMeters(1.0f) / 1000.0f;
+        push.altitudeKm = glm::clamp(settings.AltitudeKm, 0.0f, 99.0f);
+
+        const RGTexture volume = m_renderGraph.ImportTexture("Aerial Perspective", m_skyAerialPerspective.get());
+        NRI::Pipeline* pipeline = m_skyAerialPerspectivePipeline.get();
+        m_renderGraph.AddPass("Aerial Perspective", RGPassFlags::None,
+            [&](RGBuilder& builder)
+            {
+                builder.Write(volume, RGTextureAccess::StorageWrite);
+            },
+            [push, pipeline](RGPassContext& context)
+            {
+                NRI::CommandBuffer& cmd = context.Cmd();
+                cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *pipeline);
+                cmd.pushData(&push, sizeof(push));
+                cmd.dispatch((shaderio::AerialPerspectiveSize + 7) / 8, (shaderio::AerialPerspectiveSize + 7) / 8, 1);
+            });
+        return volume;
     }
 
     template <typename T>

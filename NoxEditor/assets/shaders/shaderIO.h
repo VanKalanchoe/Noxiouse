@@ -608,6 +608,33 @@ struct PushConstantSkybox
     float skyAltitudeKm;            // the viewer's height in the sky model
 };
 
+// Aerial perspective (SkyAtmosphere.slang aerialPerspectiveMain): the atmosphere between the camera and the scene, as a
+// camera-aligned volume of AerialPerspectiveSize x AerialPerspectiveSize froxels and AerialPerspectiveSlices depth slices
+// (a 2D array texture: rgb = light scattered towards the camera up to the slice, a = mean transmittance). Slice z ends at
+// maxDistanceKm * ((z + 1) / slices)^2: finer near the camera. Deferred lighting applies it to the lit scene.
+STATIC_CONST uint32_t AerialPerspectiveSize = 32;
+STATIC_CONST uint32_t AerialPerspectiveSlices = 32;
+STATIC_CONST float AerialPerspectiveMaxDistanceKm = 32.0;
+
+struct PushConstantAerialPerspective
+{
+    uint64_t matrixReference;           // BDA to UniformBufferObject (camera)
+    uint32_t outputStorageIndex;        // storage slot of the volume
+    uint32_t transmittanceTextureIndex;
+    vec3 sunDirection;                  // world space, towards the sun
+    uint32_t multiScatteringTextureIndex;
+    vec3 sunIlluminance;
+    float rayleighScale;
+    float mieScale;
+    float ozoneScale;
+    float mieAnisotropy;
+    float kmPerWorldUnit;               // the camera's position in the atmosphere
+    float altitudeKm;                   // the world origin's height above the ground
+    float padding0;
+    float padding1;
+    float padding2;
+};
+
 #ifndef __SLANG__
 // The std430 offsets the shaders read (checked against the SPIR-V of the engine's own compile path).
 static_assert(offsetof(PushConstantSkyAtmosphere, sunDirection) == 16 && offsetof(PushConstantSkyAtmosphere, sunIlluminance) == 32 &&
@@ -616,6 +643,9 @@ static_assert(offsetof(PushConstantSkyAtmosphere, sunDirection) == 16 && offseto
 static_assert(offsetof(PushConstantSkybox, sunDirection) == 16 && offsetof(PushConstantSkybox, sunDiscRadiance) == 32 &&
               offsetof(PushConstantSkybox, skyAltitudeKm) == 44 && sizeof(PushConstantSkybox) == 48,
               "PushConstantSkybox must match its std430 layout");
+static_assert(offsetof(PushConstantAerialPerspective, sunDirection) == 16 && offsetof(PushConstantAerialPerspective, sunIlluminance) == 32 &&
+              offsetof(PushConstantAerialPerspective, altitudeKm) == 64 && sizeof(PushConstantAerialPerspective) == 80,
+              "PushConstantAerialPerspective must match its std430 layout");
 #endif
 
 struct PushConstantVisibilityDebug
@@ -708,6 +738,13 @@ struct PushConstantDeferredLighting
     uint32_t restirDIDenoiserMode; // how both were packed: NRD_SIGNAL_RAW / REBLUR / RELAX
 
     uint32_t ssaoTextureIndex; // 0xFFFFFFFF when SSAO didn't run this frame (disabled, or RTAO owns occlusion instead)
+
+    // Aerial perspective over a procedural sky (0xFFFFFFFF otherwise): sampled slot of the volume, and world units -> km of
+    // the view distance it is looked up with (times the component's distance scale).
+    uint32_t aerialPerspectiveTextureIndex;
+    float aerialPerspectiveKmPerUnit;
+    float aerialPerspectivePadding0;
+    float aerialPerspectivePadding1;
 };
 
 // Raster-only ambient occlusion (SSAO.slang): hemisphere-kernel, world-space reprojection, one fullscreen pass.

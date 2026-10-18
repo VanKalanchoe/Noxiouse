@@ -436,6 +436,9 @@ namespace Nox
         const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
         const FrameGraphState& frame = m_frame;
         m_frame.deferredLightingAdded = true;
+        // Over a procedural sky: the haze between the camera and the lit scene (only when deferred lighting runs).
+        const RGTexture aerialPerspective = addAerialPerspectivePass();
+        const float aerialKmPerUnit = WorldUnits::ToMeters(1.0f) / 1000.0f * glm::max(m_proceduralSky.AerialPerspectiveScale, 0.0f);
 
         m_renderGraph.AddPass("Deferred Lighting", RGPassFlags::Raster,
             [&](RGBuilder& builder)
@@ -482,10 +485,12 @@ namespace Nox
                     builder.Read(resources.SSAO);
                 ReadIfValid(builder, resources.TLAS);
                 ReadGpuScene(builder, resources);
+                if (aerialPerspective.IsValid())
+                    builder.Read(aerialPerspective);
                 builder.ColorTarget(resources.HDRScene, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 1.0f });
                 builder.SetRenderArea(frame.renderExtent);
             },
-            [this, res = &resources](RGPassContext& context)
+            [this, res = &resources, aerialPerspective, aerialKmPerUnit](RGPassContext& context)
             {
                 NRI::CommandBuffer& cmd = context.Cmd();
                 const FrameGraphState& frame = m_frame;
@@ -537,6 +542,8 @@ namespace Nox
                 lightingPush.restirDISpecularTextureIndex = uniformData.restirDISpecularTextureIndex;
                 lightingPush.restirDIDenoiserMode = frame.nrdDIAdded ? static_cast<uint32_t>(m_nrdDIDenoiser) : 0;
                 lightingPush.ssaoTextureIndex = frame.ssaoAdded ? context.Slot(res->SSAO) : 0xFFFFFFFF;
+                lightingPush.aerialPerspectiveTextureIndex = aerialPerspective.IsValid() ? context.Slot(aerialPerspective) : 0xFFFFFFFF;
+                lightingPush.aerialPerspectiveKmPerUnit = aerialKmPerUnit;
                 cmd.pushData(&lightingPush, sizeof(shaderio::PushConstantDeferredLighting));
 
                 cmd.drawMeshTasks(1, 1, 1);

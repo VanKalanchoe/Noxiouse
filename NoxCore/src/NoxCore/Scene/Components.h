@@ -302,6 +302,7 @@ namespace Nox
         float MieAnisotropy = 0.8f;
         glm::vec3 GroundAlbedo{ 0.3f, 0.3f, 0.3f };
         float AltitudeKm = 0.0f;
+        float AerialPerspectiveScale = 1.0f; // haze on the scene: multiplies view distances (UE's "distance scale")
 
         EnvironmentLightComponent() = default;
         EnvironmentLightComponent(const EnvironmentLightComponent&) = default;
