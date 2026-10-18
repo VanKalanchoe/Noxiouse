@@ -48,7 +48,7 @@ namespace Nox
         bool RenameAsset(AssetHandle handle, const std::string& newName);
         bool CanRename(AssetHandle handle) const;
         // The registered asset of this type at a path under the asset directory (or as its source), 0 when there is none.
-        AssetHandle FindHandleByPath(const std::filesystem::path& path, AssetType type) const;
+        AssetHandle FindHandleByPath(const std::filesystem::path& path, AssetType type) const override;
         // Imports a glTF like Unreal: the file's content decides the assets -- skinned meshes become a skeletal mesh
         // (destPath with .nmesh, plus skeleton and clips), the rest a static mesh (.nsmesh); a file with both gets both.
         // False when the settings leave nothing to import. Cooking and loading happen in the background.
@@ -56,7 +56,8 @@ namespace Nox
         // New overload for textures with custom spec (also void)
         void ImportAsset(const std::filesystem::path& sourcePath, const TextureSpecification& spec, const std::filesystem::path& destPath = {});
         
-        const AssetMetadata GetMetadata(AssetHandle handle) const;
+        AssetMetadata GetMetadata(AssetHandle handle) const override;
+        size_t GetAssetCount() const override { return m_AssetRegistry.size(); }
         const std::filesystem::path GetFilePath(AssetHandle handle) const;
 
         const AssetRegistry& GetAssetRegistry() const { return m_AssetRegistry; }

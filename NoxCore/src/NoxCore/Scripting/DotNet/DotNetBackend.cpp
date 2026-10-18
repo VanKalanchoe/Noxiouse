@@ -46,7 +46,7 @@ namespace Nox
         uint64_t SceneInstantiate(Coral::String path, float x, float y, float z)
         {
             if (!s_Scene) return 0;
-            const AssetHandle prefab = Project::GetActive()->GetEditorAssetManager()->FindHandleByPath(std::filesystem::path(std::string(path)), AssetType::Prefab);
+            const AssetHandle prefab = AssetManager::FindHandleByPath(std::filesystem::path(std::string(path)), AssetType::Prefab);
             if (prefab == 0)
             {
                 NOX_CORE_ERROR("[C#] Scene.Instantiate: no prefab '{}' in the asset registry", std::string(path));

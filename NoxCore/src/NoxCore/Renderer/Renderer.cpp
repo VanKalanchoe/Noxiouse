@@ -86,18 +86,16 @@ namespace Nox
             return cached->second;
         }
 
-        for (const auto& [handle, metadata] : Project::GetActive()->GetEditorAssetManager()->GetAssetRegistry())
+        // The registry's path index (the cooked file, else the source it was imported from) instead of a walk over every entry.
+        AssetHandle handle = AssetManager::FindHandleByPath(cookedPath, AssetType::Texture2D);
+        if (handle == 0)
+            handle = AssetManager::FindHandleByPath(sourcePath, AssetType::Texture2D);
+        if (handle != 0)
         {
-            if (metadata.Type != AssetType::Texture2D)
-                continue;
-            if (metadata.FilePath == cookedPath || metadata.SourceFilePath == sourcePath)
-            {
-                textureCache.emplace(cacheKey, handle);
-                rawPathCache.emplace(texturePath, handle);
-                return handle;
-            }
+            textureCache.emplace(cacheKey, handle);
+            rawPathCache.emplace(texturePath, handle);
         }
-        return 0;
+        return handle;
     }
 
     // MaterialData stores source paths, while the renderer needs the bindless descriptor slot.
@@ -128,7 +126,7 @@ namespace Nox
     // Main thread. Returns true when the misses were dropped (the registry changed, a missing texture may exist now).
     static bool RefreshTextureDescriptorMisses()
     {
-        const size_t registrySize = Project::GetActive()->GetEditorAssetManager()->GetAssetRegistry().size();
+        const size_t registrySize = AssetManager::GetAssetCount();
         if (registrySize == s_TextureDescriptorMissesRegistrySize)
             return false;
 

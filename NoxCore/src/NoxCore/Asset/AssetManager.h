@@ -44,5 +44,20 @@ namespace Nox
         {
             return Project::GetActiveAssetManager().GetAssetType(handle);
         }
+
+        static AssetMetadata GetMetadata(AssetHandle handle)
+        {
+            return Project::GetActiveAssetManager().GetMetadata(handle);
+        }
+
+        static AssetHandle FindHandleByPath(const std::filesystem::path& path, AssetType type)
+        {
+            return Project::GetActiveAssetManager().FindHandleByPath(path, type);
+        }
+
+        static size_t GetAssetCount()
+        {
+            return Project::GetActiveAssetManager().GetAssetCount();
+        }
     };
 }

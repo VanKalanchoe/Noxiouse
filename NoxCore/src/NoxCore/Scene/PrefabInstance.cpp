@@ -1209,7 +1209,7 @@ namespace Nox
         if (!patched)
             return false;
 
-        const AssetMetadata metadata = Project::GetActive()->GetEditorAssetManager()->GetMetadata(handle);
+        const AssetMetadata metadata = AssetManager::GetMetadata(handle);
         if (!PrefabImporter::SavePrefab(*prefab, Project::GetActiveAssetDirectory() / metadata.FilePath))
             NOX_CORE_ERROR("Could not write prefab '{}'", metadata.FilePath.generic_string());
 
@@ -1395,7 +1395,7 @@ namespace Nox
             outerPrefab->Nested.push_back(record);
         }
 
-        const AssetMetadata metadata = Project::GetActive()->GetEditorAssetManager()->GetMetadata(outerHandle);
+        const AssetMetadata metadata = AssetManager::GetMetadata(outerHandle);
         if (!PrefabImporter::SavePrefab(*outerPrefab, Project::GetActiveAssetDirectory() / metadata.FilePath))
             NOX_CORE_ERROR("Could not write prefab '{}'", metadata.FilePath.generic_string());
 

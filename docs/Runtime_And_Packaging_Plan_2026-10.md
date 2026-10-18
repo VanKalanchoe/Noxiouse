@@ -51,6 +51,19 @@ headers; measure the build time before and after), but it is unrelated to packag
   settings are the renderer's defaults (the editor's Settings panel choices are not saved anywhere yet).
 - To compare: Play in the editor vs NoxRuntime on the same scene, both with F3 (Ctrl+F3 writes a stats report).
 
+## 2c. R2 first part built (2026-10-18, untested)
+
+- Engine code no longer reaches into the editor's asset manager: `AssetManagerBase` has the read-only lookups
+  `GetMetadata`, `FindHandleByPath`, `GetAssetCount` (wrapped by `AssetManager::`), and the five call sites use them --
+  the renderer's texture-by-path lookup (now the registry's path index instead of a walk over every entry), its
+  "registry grew" check, the two prefab-save paths in `PrefabInstance.cpp`, and C#'s `Scene.Instantiate` (P6: the prefab
+  lookup goes through whichever asset manager is active).
+- **Changed plan:** a separate `RuntimeAssetManager` moves to R4. Loading (background loads, uploads, texture streaming,
+  the unused-asset sweep) lives inside `EditorAssetManager` today and registers textures / materials it discovers while a
+  model loads; a runtime manager needs the cooked set and runtime registry of R3 to know everything up front, and the pack
+  reader of R4 to read it. Until then the player uses the editor's manager, which works because the editor has cooked
+  everything once.
+
 ## 3. Phases
 
 | Phase | What | Exit test |

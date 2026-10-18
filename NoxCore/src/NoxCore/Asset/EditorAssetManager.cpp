@@ -918,7 +918,7 @@ namespace Nox
             static_cast<StaticMesh*>(meshAsset.get())->SetImportedAssets(skeleton, std::move(animationHandles));
     }
 
-    const AssetMetadata EditorAssetManager::GetMetadata(AssetHandle handle) const
+    AssetMetadata EditorAssetManager::GetMetadata(AssetHandle handle) const
     {
         static AssetMetadata s_NullMetadata;
         auto it = m_AssetRegistry.find(handle);
