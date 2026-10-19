@@ -487,6 +487,13 @@ namespace Nox
         bool& getDDGIDebugXRay() { return m_ddgiDebugXRay; }
         void resetDDGIHistory() { m_renderGraph.ResetHistory(DDGIHistoryKey); }
         void resetDDGIGridToDefaults();
+        // The probe volume follows the camera (on by default): centered on it, Spacing in meters (scaled by the project's world
+        // unit), scrolled in whole cells with each probe's history kept. Off: the grid stays where Grid Origin / Grid Spacing say
+        // (world units). Either way the volume hands over to the environment's irradiance at its faces.
+        bool& getDDGIFollowCamera() { return m_ddgiFollowCamera; }
+        glm::vec3& getDDGISpacingMeters() { return m_ddgiSpacingMeters; }
+        // 1: every probe traces every frame; 2 / 4: half / a quarter of them in turn (cheaper, the light settles more slowly).
+        uint32_t& getDDGIUpdateStride() { return m_ddgiUpdateStride; }
 
         // ReSTIR GI (Screen-Space Diffuse Indirect Resampling via RTXDI)
         uint32_t getDiffuseGIMode() const { return m_diffuseGIMode; }
@@ -805,6 +812,8 @@ namespace Nox
         // Decides whether DDGI runs and declares its atlases up front: RT reflections and forward shading, which come
         // earlier in the frame, sample them too.
         void prepareDDGIFrame(FrameGraphResources& resources);
+        // Once per frame: where the probe volume is (camera-following or fixed) and how far it scrolled, into the uniforms.
+        void updateDDGIVolume();
         void addDDGIPasses();
         void addLightPresamplingPasses();
         // RTXDI light sampling over this frame's presampled lights (RTXDILightSampling.slang), for ReSTIR DI and GI.
@@ -1072,14 +1081,20 @@ namespace Nox
         bool m_ddgiEnabled = false;
         glm::vec3 m_ddgiGridOrigin = glm::vec3(-20.0f, -0.5f, -12.0f);
         glm::vec3 m_ddgiGridSpacing = glm::vec3(1.8f, 1.4f, 1.7f);
-        uint32_t m_ddgiProbeCountX = 22;
+        uint32_t m_ddgiProbeCountX = 20;
         uint32_t m_ddgiProbeCountY = 10;
-        uint32_t m_ddgiProbeCountZ = 14;
+        uint32_t m_ddgiProbeCountZ = 20;
         uint32_t m_ddgiRaysPerProbe = 128;
         float m_ddgiHysteresis = 0.97f;
         float m_ddgiNormalBias = 0.2f;
-        float m_ddgiDebugSphereRadius = 0.15f;
+        float m_ddgiDebugSphereRadius = 0.15f; // meters
         bool m_ddgiDebugXRay = true;
+        bool m_ddgiFollowCamera = true;
+        glm::vec3 m_ddgiSpacingMeters = glm::vec3(2.0f, 1.5f, 2.0f);
+        uint32_t m_ddgiUpdateStride = 2;
+        glm::ivec3 m_ddgiGridMin{ 0 };          // grid coordinate of the volume's first probe (camera-following)
+        glm::vec3 m_ddgiVolumeSpacing{ 0.0f };  // the spacing m_ddgiGridMin is in
+        bool m_ddgiVolumeValid = false;
 
         // ReSTIR GI (Screen-Space Diffuse Path Resampling via RTXDI) -- proper 3-pass pipeline
         // (Initial candidate -> Temporal -> Spatial), matching RTXPT's actual architecture instead

@@ -40,13 +40,20 @@ namespace Nox
         glm::vec3 LiveStage() { return glm::vec3(WorldUnits::FromMeters(2000.0f), -WorldUnits::FromMeters(10000.0f), 0.0f); }
         glm::vec3 AnimationStage() { return glm::vec3(WorldUnits::FromMeters(4000.0f), -WorldUnits::FromMeters(10000.0f), 0.0f); }
 
-        Renderer* GetRenderer() { return Application::Get().GetRenderer(); }
+        // Set by the editor (SetRenderer): Application::Get() is gone by the time the editor layer is destroyed and clears this.
+        Renderer* s_Renderer = nullptr;
+        Renderer* GetRenderer() { return s_Renderer; }
     }
 
     AssetPreviewRenderer& AssetPreviewRenderer::Get()
     {
         static AssetPreviewRenderer instance;
         return instance;
+    }
+
+    void AssetPreviewRenderer::SetRenderer(Renderer* renderer)
+    {
+        s_Renderer = renderer;
     }
 
     bool AssetPreviewRenderer::CanRender(AssetType type)

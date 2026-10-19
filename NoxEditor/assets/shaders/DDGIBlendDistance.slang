@@ -73,6 +73,15 @@ float2 fragMain(
         return float2(100.0, 10000.0);
     }
 
+    // Not updated this frame (ddgiUpdateStride): kept as it was.
+    const bool updates = ddgi_probe_updates(ubo, probeIndex, pushConstant.frameIndex);
+    const bool entered = ddgi_probe_entered(ubo, probeIndex);
+    if (!updates && pushConstant.firstFrame == 0 && pushConstant.prevAtlasTextureIndex != 0xFFFFFFFF)
+    {
+        Texture2D keptAtlas = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.prevAtlasTextureIndex, 0));
+        return keptAtlas.Load(int3(pixel, 0)).rg;
+    }
+
     uint2 localCoord = uint2(pixel.x % totalSide, pixel.y % totalSide);
 
     // Resolve border texels by wrapping to octahedral interior
@@ -112,7 +121,9 @@ float2 fragMain(
         float cosTheta = max(0.0, dot(dir, rayDir));
         float weight = pow(cosTheta, 16.0); // Sharper directional weighting for distance moments
 
-        float dist = min(raySample.w, 100.0);
+        // Clamped to about a cell and a half (in world units): misses and far hits only need to read as "open". A back face
+        // (negative, DDGIRadiance.slang) counts as a fifth of its distance, so what lies behind it reads as occluded.
+        float dist = min(raySample.w < 0.0 ? -raySample.w * 0.2 : raySample.w, ddgi_max_distance(ubo));
         meanDist += dist * weight;
         meanDistSq += (dist * dist) * weight;
         totalWeight += weight;
@@ -120,8 +131,8 @@ float2 fragMain(
 
     float2 currentDist = float2(meanDist, meanDistSq) / max(totalWeight, 1e-4);
 
-    // Temporal Hysteresis Blending
-    if (pushConstant.firstFrame != 0 || pushConstant.prevAtlasTextureIndex == 0xFFFFFFFF)
+    // Temporal Hysteresis Blending (a probe that just came into the volume starts over)
+    if (pushConstant.firstFrame != 0 || pushConstant.prevAtlasTextureIndex == 0xFFFFFFFF || entered)
     {
         return currentDist;
     }

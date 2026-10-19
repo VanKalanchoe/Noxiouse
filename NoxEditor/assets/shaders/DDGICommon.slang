@@ -73,6 +73,67 @@ float3 get_probe_world_pos(uint probeIndex, float3 origin, float3 spacing, uint 
 }
 
 // =========================================================================
+// Volume addressing (a volume that follows the camera)
+// A probe's atlas slot ("storage index", what the passes iterate over) is its grid coordinate modulo the counts; its place in
+// the volume ("local" coordinate, 0 at the volume's origin) is that slot minus the scroll, modulo the counts.
+// =========================================================================
+uint3 ddgi_counts(UniformBufferObject* ubo)
+{
+    return uint3(uint(ubo->ddgiGridOrigin.w), uint(ubo->ddgiGridSpacing.w), uint(ubo->ddgiGridParams.x));
+}
+
+uint ddgi_storage_index(UniformBufferObject* ubo, uint3 localCoord)
+{
+    const uint3 counts = ddgi_counts(ubo);
+    const uint3 slot = (localCoord + uint3(ubo->ddgiScrollX, ubo->ddgiScrollY, ubo->ddgiScrollZ)) % counts;
+    return get_probe_index(slot, counts.x, counts.y);
+}
+
+uint3 ddgi_local_coord(UniformBufferObject* ubo, uint storageIndex)
+{
+    const uint3 counts = ddgi_counts(ubo);
+    const uint3 slot = get_probe_coords(storageIndex, counts.x, counts.y);
+    const uint3 scroll = uint3(ubo->ddgiScrollX, ubo->ddgiScrollY, ubo->ddgiScrollZ) % counts;
+    return (slot + counts - scroll) % counts;
+}
+
+float3 ddgi_probe_position(UniformBufferObject* ubo, uint storageIndex)
+{
+    return ubo->ddgiGridOrigin.xyz + float3(ddgi_local_coord(ubo, storageIndex)) * ubo->ddgiGridSpacing.xyz;
+}
+
+// The probe came into the volume this frame (the volume moved): what its slot holds belongs to a probe that left, so it starts over.
+bool ddgi_probe_entered(UniformBufferObject* ubo, uint storageIndex)
+{
+    const int3 counts = int3(ddgi_counts(ubo));
+    const int3 local = int3(ddgi_local_coord(ubo, storageIndex));
+    const int3 shift = int3(ubo->ddgiShiftX, ubo->ddgiShiftY, ubo->ddgiShiftZ);
+    for (int axis = 0; axis < 3; ++axis)
+    {
+        if (abs(shift[axis]) >= counts[axis])
+            return true;
+        if (shift[axis] > 0 && local[axis] >= counts[axis] - shift[axis])
+            return true;
+        if (shift[axis] < 0 && local[axis] < -shift[axis])
+            return true;
+    }
+    return false;
+}
+
+// Updated this frame: every probe, or every second / fourth one in turn (ddgiUpdateStride), and always the ones that just came in.
+bool ddgi_probe_updates(UniformBufferObject* ubo, uint storageIndex, uint frameIndex)
+{
+    const uint stride = max(ubo->ddgiUpdateStride, 1u);
+    return stride == 1 || ((storageIndex + frameIndex) % stride) == 0 || ddgi_probe_entered(ubo, storageIndex);
+}
+
+// How far a probe's distance moments look: rays are clamped to this (about one and a half cells), whatever the world unit.
+float ddgi_max_distance(UniformBufferObject* ubo)
+{
+    return 1.5 * length(ubo->ddgiGridSpacing.xyz);
+}
+
+// =========================================================================
 // Atlas Coordinate Helpers
 // Converts probe ID and direction to UV coordinate inside octahedral atlas.
 //
@@ -106,7 +167,7 @@ float2 get_probe_atlas_uv(uint probeIndex, float3 dir, uint probeSide, uint prob
 // Chebyshev Visibility Test (Variance Shadow Mapping for DDGI Probes)
 // Eliminates light leaking through walls by evaluating mean & variance distance.
 // =========================================================================
-float chebyshev_visibility(float distToProbe, float meanDist, float meanDistSq)
+float chebyshev_visibility(float distToProbe, float meanDist, float meanDistSq, float varianceFloor)
 {
     float d = distToProbe - meanDist;
     if (d <= 0.0)
@@ -114,8 +175,8 @@ float chebyshev_visibility(float distToProbe, float meanDist, float meanDistSq)
         return 1.0;
     }
 
-    // Variance floor: prevents division by zero while maintaining sharp shadows
-    float variance = max(abs(meanDistSq - (meanDist * meanDist)), 0.0005);
+    // Variance floor (in world units squared): prevents division by zero while maintaining sharp shadows
+    float variance = max(abs(meanDistSq - (meanDist * meanDist)), varianceFloor);
     float pMax = variance / (variance + d * d);
 
     // Aggressive leak suppression threshold and power 4 falloff (matching RTXGI standard)
@@ -144,6 +205,24 @@ float3 sample_ddgi_diffuse(
     uint countY = uint(ubo->ddgiGridSpacing.w);
     uint countZ = uint(ubo->ddgiGridParams.x);
     float normalBias = ubo->ddgiGridParams.w;
+    // (2 cm)^2 in the project's units.
+    const float varianceFloor = 0.0004 * ubo->unitsPerMeter * ubo->unitsPerMeter;
+
+    // The environment's irradiance (what the IBL path uses): where the volume ends the probes hand over to it, one cell wide,
+    // instead of the edge probes stretching over everything outside.
+    float3 fallback = float3(0.0);
+    if (ubo->irradianceMapIndex != 0xFFFFFFFF)
+    {
+        TextureCube irradianceTex = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + ubo->irradianceMapIndex, 0));
+        SamplerState samplerIrradiance = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_IRRADIANCE, 0));
+        fallback = irradianceTex.SampleLevel(samplerIrradiance, normal, 0).rgb * ubo->scaleIBLAmbient;
+    }
+    const float3 extent = float3(countX - 1, countY - 1, countZ - 1) * spacing;
+    const float3 fromOrigin = worldPos - origin;
+    const float3 cellsInside = min(fromOrigin, extent - fromOrigin) / spacing;
+    const float volumeWeight = saturate(min(cellsInside.x, min(cellsInside.y, cellsInside.z)));
+    if (volumeWeight <= 0.0)
+        return fallback;
 
     // Shift sampling position along surface normal (isotropic in world units)
     float minSpacing = min(spacing.x, min(spacing.y, spacing.z));
@@ -167,8 +246,8 @@ float3 sample_ddgi_diffuse(
             for (int dx = 0; dx <= 1; dx++)
             {
                 uint3 probeCoord = uint3(baseCoord + int3(dx, dy, dz));
-                uint probeIndex = get_probe_index(probeCoord, countX, countY);
-                float3 probePos = get_probe_world_pos(probeIndex, origin, spacing, countX, countY);
+                uint probeIndex = ddgi_storage_index(ubo, probeCoord);
+                float3 probePos = origin + float3(probeCoord) * spacing;
 
                 float3 toProbeVec = probePos - worldPos;
                 float distToProbe = length(toProbeVec);
@@ -190,7 +269,7 @@ float3 sample_ddgi_diffuse(
                 // 3. Chebyshev visibility test: does the probe have line of sight to the surface?
                 float2 distUV = get_probe_atlas_uv(probeIndex, -toProbeDir, 16, probesPerRowDist, ubo->ddgiAtlasParams.zw);
                 float2 moments = distanceAtlas.SampleLevel(atlasSampler, distUV, 0).rg;
-                float visibility = chebyshev_visibility(distToProbe, moments.x, moments.y);
+                float visibility = chebyshev_visibility(distToProbe, moments.x, moments.y, varianceFloor);
 
                 float weight = trilinear * normalWeight * visibility;
                 if (weight < 1e-5)
@@ -198,21 +277,22 @@ float3 sample_ddgi_diffuse(
                     continue;
                 }
 
-                // 4. Fetch probe irradiance along the surface normal
+                // 4. Fetch probe irradiance along the surface normal; alpha 0 is a probe buried in geometry (classification), skipped
                 float2 irrUV = get_probe_atlas_uv(probeIndex, normal, 8, probesPerRowIrr, ubo->ddgiAtlasParams.xy);
-                float3 probeIrr = irradianceAtlas.SampleLevel(atlasSampler, irrUV, 0).rgb;
+                float4 probeIrr = irradianceAtlas.SampleLevel(atlasSampler, irrUV, 0);
+                weight *= saturate(probeIrr.a);
+                if (weight < 1e-5)
+                {
+                    continue;
+                }
 
-                totalIrradiance += probeIrr * weight;
+                totalIrradiance += probeIrr.rgb * weight;
                 totalWeight += weight;
             }
         }
     }
 
-    if (totalWeight > 1e-4)
-    {
-        return totalIrradiance / totalWeight;
-    }
-
-    return float3(0.0);
+    const float3 probes = totalWeight > 1e-4 ? totalIrradiance / totalWeight : float3(0.0);
+    return lerp(fallback, probes, volumeWeight);
 }
 

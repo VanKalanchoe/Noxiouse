@@ -985,7 +985,7 @@ namespace Nox
                     shaderio::PushConstantDDGIDebug debugPush{};
                     debugPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
                     debugPush.probeCountTotal = totalDDGIProbes;
-                    debugPush.sphereRadius = m_ddgiDebugSphereRadius;
+                    debugPush.sphereRadius = WorldUnits::FromMeters(m_ddgiDebugSphereRadius);
                     debugPush.irradianceAtlasIndex = context.Slot(res->DDGIIrradiance[m_frame.ddgiWriteIndex]);
                     cmd.pushData(&debugPush, sizeof(shaderio::PushConstantDDGIDebug));
 

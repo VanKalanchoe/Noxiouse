@@ -194,7 +194,8 @@ float3 shadeRayHit(UniformBufferObject* ubo, uint instanceSlot, uint primitive, 
         }
     }
 
-    // Ambient diffuse light: sample DDGI probes if active, or scene irradiance cubemap
+    // Ambient diffuse light: sample DDGI probes if active, or scene irradiance cubemap. Both hold irradiance / pi (cosine-weighted
+    // mean radiance), as the deferred and forward lighting read them: the light the hit reflects is albedo times it.
     float3 ambientLight = float3(0.0);
     if (ubo->enableDDGI != 0 && ubo->ddgiIrradianceTextureIndex != 0xFFFFFFFF && ubo->ddgiDistanceTextureIndex != 0xFFFFFFFF)
     {
@@ -203,7 +204,7 @@ float3 shadeRayHit(UniformBufferObject* ubo, uint instanceSlot, uint primitive, 
         SamplerState ddgiSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
 
         float3 ddgiIrr = sample_ddgi_diffuse(ubo, hitPos, hitNormal, ddgiIrrTex, ddgiDistTex, ddgiSampler);
-        ambientLight = (albedo / 3.14159265) * ddgiIrr;
+        ambientLight = albedo * ddgiIrr;
     }
     else if (ubo->irradianceMapIndex != 0xFFFFFFFF)
     {
@@ -215,11 +216,11 @@ float3 shadeRayHit(UniformBufferObject* ubo, uint instanceSlot, uint primitive, 
         // visible in a scene with strong direct lights (they dominate the sum below); in an environment-only scene
         // (Bistro, no direct light does anything on its own) that dim ambient term was the reflection's entire
         // radiance, reading as almost black.
-        ambientLight = irradianceTex.SampleLevel(samplerIrradiance, hitNormal, 0).rgb * (albedo / 3.14159265) * ubo->scaleIBLAmbient;
+        ambientLight = irradianceTex.SampleLevel(samplerIrradiance, hitNormal, 0).rgb * albedo * ubo->scaleIBLAmbient;
     }
     else
     {
-        ambientLight = (albedo / 3.14159265) * 0.05 * ubo->scaleIBLAmbient;
+        ambientLight = albedo * 0.05 * ubo->scaleIBLAmbient;
     }
 
     // Emissive light from hit surface (e.g. Cornell Box ceiling light)

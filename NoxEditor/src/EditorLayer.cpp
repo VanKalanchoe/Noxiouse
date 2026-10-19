@@ -183,6 +183,7 @@ namespace Nox
         // Before ImGui's first frame, which reads imgui.ini.
         RegisterViewportIniHandler();
         // Material thumbnails and the Material Editor's preview show on the Sphere shape.
+        AssetPreviewRenderer::SetRenderer(m_Renderer);
         AssetPreviewRenderer::Get().SetSphereProvider([this]() { return GetShapeAsset(PrimitiveShape::Sphere); });
 
         Project::GetActive()->GetEditorAssetManager()->Init();
@@ -197,6 +198,7 @@ namespace Nox
 
         ScriptEngine::Shutdown();
         AssetPreviewRenderer::Get().Clear();
+        AssetPreviewRenderer::SetRenderer(nullptr);
 
         m_Font->ReleaseDefault(); // Since Editor Layer since static dies After renderer not needed for components
 
@@ -1241,11 +1243,37 @@ namespace Nox
                         totalProbes,
                         m_Renderer->getDDGIRaysPerProbe());
 
-                    glm::vec3& origin = m_Renderer->getDDGIGridOrigin();
-                    ImGui::DragFloat3("Grid Origin", glm::value_ptr(origin), 0.1f);
+                    bool& follow = m_Renderer->getDDGIFollowCamera();
+                    ImGui::Checkbox("Follow Camera", &follow);
+                    if (ImGui::IsItemHovered())
+                        ImGui::SetTooltip("The probe volume is centered on the camera and scrolls with it in whole cells, each probe keeping its\n"
+                                          "history. Beyond the volume the environment's light takes over. Off: a fixed grid (origin and spacing\n"
+                                          "below, in world units).");
+                    if (follow)
+                    {
+                        glm::vec3& spacingMeters = m_Renderer->getDDGISpacingMeters();
+                        ImGui::DragFloat3("Probe Spacing", glm::value_ptr(spacingMeters), 0.05f, 0.25f, 50.0f, "%.2f m");
+                        const glm::vec3 extent = spacingMeters * glm::vec3(m_Renderer->getDDGIProbeCountX() - 1, m_Renderer->getDDGIProbeCountY() - 1,
+                                                                           m_Renderer->getDDGIProbeCountZ() - 1);
+                        ImGui::TextDisabled("Covers %.0f x %.0f x %.0f m around the camera", extent.x, extent.y, extent.z);
+                    }
+                    else
+                    {
+                        glm::vec3& origin = m_Renderer->getDDGIGridOrigin();
+                        ImGui::DragFloat3("Grid Origin", glm::value_ptr(origin), 0.1f);
 
-                    glm::vec3& spacing = m_Renderer->getDDGIGridSpacing();
-                    ImGui::DragFloat3("Grid Spacing", glm::value_ptr(spacing), 0.05f, 0.2f, 10.0f);
+                        glm::vec3& spacing = m_Renderer->getDDGIGridSpacing();
+                        ImGui::DragFloat3("Grid Spacing", glm::value_ptr(spacing), 0.05f, 0.2f, 10000.0f);
+                    }
+
+                    static const char* strideNames[] = { "Every probe, every frame", "Half of them a frame", "A quarter a frame" };
+                    uint32_t& stride = m_Renderer->getDDGIUpdateStride();
+                    int strideIndex = stride >= 4 ? 2 : (stride >= 2 ? 1 : 0);
+                    if (ImGui::Combo("Probe Updates", &strideIndex, strideNames, IM_ARRAYSIZE(strideNames)))
+                        stride = strideIndex == 0 ? 1u : (strideIndex == 1 ? 2u : 4u);
+                    if (ImGui::IsItemHovered())
+                        ImGui::SetTooltip("How many probes trace rays each frame. Fewer is cheaper; light changes settle a little more slowly.\n"
+                                          "Probes the volume just scrolled over always update at once.");
 
                     float& hysteresis = m_Renderer->getDDGIHysteresis();
                     ImGui::SliderFloat("Temporal Hysteresis", &hysteresis, 0.80f, 0.995f, "%.3f");
@@ -1263,7 +1291,7 @@ namespace Nox
                         ImGui::SetTooltip("Disables depth testing for probe spheres so all probes are visible in the scene without being occluded by walls or floors.");
                     }
 
-                    if (ImGui::Button("Reset Grid to Sponza Defaults"))
+                    if (ImGui::Button("Reset Volume to Defaults"))
                     {
                         m_Renderer->resetDDGIGridToDefaults();
                     }

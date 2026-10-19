@@ -336,6 +336,18 @@ struct UniformBufferObject
     vec3 heightFogColor;
     vec3 heightFogSunDirection;      // towards the sun
     vec3 heightFogSunColor;          // directional inscattering: the sun's light scattered by the fog towards the camera
+
+    // DDGI volume (DDGICommon.slang). A probe's atlas slot is its grid coordinate in the world modulo the probe counts (toroidal
+    // addressing), so a volume that follows the camera keeps every probe's history where it is while it scrolls: ddgiScroll* is
+    // the slot of the volume's first probe, ddgiShift* how many probes the volume moved this frame (the probes that came in on
+    // that side start over). ddgiUpdateStride: 1 updates every probe each frame, 2 every other one alternately, 4 a quarter.
+    uint32_t ddgiScrollX;
+    uint32_t ddgiScrollY;
+    uint32_t ddgiScrollZ;
+    int32_t ddgiShiftX;
+    int32_t ddgiShiftY;
+    int32_t ddgiShiftZ;
+    uint32_t ddgiUpdateStride;
 };
 
 struct Vertex

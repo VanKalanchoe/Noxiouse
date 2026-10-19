@@ -2276,10 +2276,12 @@ namespace Nox
                 if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEM"))
                 {
                     const AssetHandle handle = *(AssetHandle*)payload->Data;
-                    if (AssetManager::GetAssetType(handle) == AssetType::Texture2D)
+                    const AssetType type = AssetManager::GetAssetType(handle);
+                    if (type == AssetType::Texture2D)
                         component.Texture = handle;
                     else
-                        NOX_CORE_WARN("A particle sheet must be a texture");
+                        NOX_CORE_WARN("A particle sheet must be a texture (an image file in the Content Browser); '{}' is {}",
+                                      AssetManager::GetMetadata(handle).FilePath.generic_string(), AssetTypeToString(type));
                 }
                 ImGui::EndDragDropTarget();
             }

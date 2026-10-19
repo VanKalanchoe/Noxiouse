@@ -73,6 +73,15 @@ float4 fragMain(
         return float4(0.0, 0.0, 0.0, 1.0);
     }
 
+    // Not updated this frame (ddgiUpdateStride): kept as it was.
+    const bool updates = ddgi_probe_updates(ubo, probeIndex, pushConstant.frameIndex);
+    const bool entered = ddgi_probe_entered(ubo, probeIndex);
+    if (!updates && pushConstant.firstFrame == 0 && pushConstant.prevAtlasTextureIndex != 0xFFFFFFFF)
+    {
+        Texture2D keptAtlas = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.prevAtlasTextureIndex, 0));
+        return keptAtlas.Load(int3(pixel, 0));
+    }
+
     uint2 localCoord = uint2(pixel.x % totalSide, pixel.y % totalSide);
 
     // Resolve border texels by wrapping to octahedral interior
@@ -101,6 +110,7 @@ float4 fragMain(
 
     float3 accumulatedRadiance = float3(0.0);
     float totalWeight = 0.0;
+    uint backFaces = 0;
 
     float rotAngle = float((pushConstant.frameIndex + probeIndex * 17) % 128) * (2.0 * 3.14159265359 / 128.0);
     float3 rotAxis = normalize(float3(0.57735, 0.57735, 0.57735));
@@ -108,6 +118,12 @@ float4 fragMain(
     for (uint r = 0; r < pushConstant.raysPerProbe; r++)
     {
         float4 raySample = rayDataTex.Load(int3(r, probeIndex, 0));
+        // A back face (DDGIRadiance.slang): no light from inside the geometry.
+        if (raySample.w < 0.0)
+        {
+            ++backFaces;
+            continue;
+        }
         float3 rayDir = rotate_vector(spherical_fibonacci(r, pushConstant.raysPerProbe), rotAxis, rotAngle);
 
         float weight = max(0.0, dot(dir, rayDir));
@@ -116,16 +132,19 @@ float4 fragMain(
     }
 
     float3 currentIrradiance = accumulatedRadiance / max(totalWeight, 1e-4);
+    // Classification (alpha): a probe that sees mostly back faces is buried in geometry and is switched off -- the surfaces around it
+    // take their light from the probes outside instead of going dark next to every wall.
+    const float active = float(backFaces) > 0.25 * float(pushConstant.raysPerProbe) ? 0.0 : 1.0;
 
-    // Temporal Hysteresis Blending
-    if (pushConstant.firstFrame != 0 || pushConstant.prevAtlasTextureIndex == 0xFFFFFFFF)
+    // Temporal Hysteresis Blending (a probe that just came into the volume starts over)
+    if (pushConstant.firstFrame != 0 || pushConstant.prevAtlasTextureIndex == 0xFFFFFFFF || entered)
     {
-        return float4(currentIrradiance, 1.0);
+        return float4(currentIrradiance, active);
     }
 
     Texture2D prevAtlasTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.prevAtlasTextureIndex, 0));
     float3 prevIrradiance = prevAtlasTex.Load(int3(pixel, 0)).rgb;
 
     float3 blended = lerp(currentIrradiance, prevIrradiance, pushConstant.hysteresis);
-    return float4(blended, 1.0);
+    return float4(blended, active);
 }

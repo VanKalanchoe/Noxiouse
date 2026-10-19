@@ -14,6 +14,8 @@
 
 namespace Nox
 {
+    class Renderer;
+
     // Rendered previews of assets (docs/Editor_Features_Plan_2026-10.md B1 / B2), drawn by the renderer's extra views
     // (Renderer::SubmitExtraView with preview on). The asset is placed on a preview stage 10 km below the world -- out of every
     // camera's sight, and the preview views trace no shadow rays, so the scene above casts nothing on it -- and a camera framing it
@@ -27,6 +29,8 @@ namespace Nox
     public:
         static AssetPreviewRenderer& Get();
 
+        // The renderer the previews draw with (the editor's; it outlives the editor layer, which clears this on its way out).
+        static void SetRenderer(Renderer* renderer);
         // Where material previews get their sphere (EditorLayer: the Sphere shape asset, made the first time it is needed).
         void SetSphereProvider(std::function<AssetHandle()> provider) { m_SphereProvider = std::move(provider); }
         // Once per frame before ImGui (EditorLayer::OnUpdate): advances the thumbnail being drawn and takes the live preview down

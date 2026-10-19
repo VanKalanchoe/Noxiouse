@@ -109,12 +109,7 @@ void meshMain(
 
     UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
 
-    uint countX = uint(ubo->ddgiGridOrigin.w);
-    uint countY = uint(ubo->ddgiGridSpacing.w);
-    float3 gridOrigin = ubo->ddgiGridOrigin.xyz;
-    float3 gridSpacing = ubo->ddgiGridSpacing.xyz;
-
-    float3 probeWorldPos = get_probe_world_pos(probeIndex, gridOrigin, gridSpacing, countX, countY);
+    float3 probeWorldPos = ddgi_probe_position(ubo, probeIndex);
 
     for (uint v = threadID; v < 114; v += 32)
     {
@@ -153,7 +148,11 @@ FragOutput fragMain(
     Texture2D irrAtlas = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.irradianceAtlasIndex, 0));
     SamplerState atlasSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
 
-    float3 probeColor = irrAtlas.SampleLevel(atlasSampler, irrUV, 0).rgb;
+    float4 probeSample = irrAtlas.SampleLevel(atlasSampler, irrUV, 0);
+    float3 probeColor = probeSample.rgb;
+    // A probe switched off (buried in geometry, DDGIBlendIrradiance.slang): dark red.
+    if (probeSample.a < 0.5)
+        probeColor = float3(0.25, 0.0, 0.0);
 
     FragOutput output;
     // Boost brightness slightly and add subtle ambient floor so spheres in shadow never vanish

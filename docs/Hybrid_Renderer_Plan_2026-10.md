@@ -53,6 +53,34 @@ project opens). Auto picks by the GPU's memory budget: < 6.5 GB Low, < 10 GB Med
 Glass refraction is on in all three. Changing one setting afterwards shows Custom for the session. Not yet: half-resolution
 reflections and a roughness cut as their own rungs.
 
+### 2b. DDGI fixed and made camera-following (2026-10-19, untested)
+
+The user reported GI as "broken or slow". DDGI (the Low / Medium rungs, and what Auto picks on an 8 GB card) was broken in any
+project not in meters: the probe grid was a fixed box at the origin in raw world units (22 x 10 x 14 probes 1.8 units apart --
+40 cm wide in a centimeter project like Facerun's Bistro), and the distance moments clamped ray lengths at 100 world units (1 m),
+so the visibility test rejected most probes and surfaces went dark. Now:
+
+- **The volume follows the camera** (Settings > DDGI > Follow Camera, on): 20 x 10 x 20 probes, spacing in meters (2 x 1.5 x 2 by
+  default, scaled by the project's world unit: about 38 x 13.5 x 38 m around the camera), snapped to whole cells and scrolled with
+  **toroidal addressing** (a probe's atlas slot is its world grid coordinate modulo the counts: `DDGICommon.slang`
+  `ddgi_storage_index` / `ddgi_local_coord`), so probes keep their history while the camera moves; the probes that come in on a
+  side start over (`ddgi_probe_entered`, from the per-frame shift in the uniforms). Off: the old fixed grid, now in world units.
+- **The volume's faces blend into the environment's irradiance** over one cell, instead of the edge probes stretching over
+  everything outside.
+- **Unit-aware limits**: the distance moments clamp at 1.5 cells, the Chebyshev variance floor is (2 cm)^2 in project units, the
+  debug spheres' radius is in meters.
+- **Probe classification**: rays that hit the back of single-sided geometry are marked (negative distance); a probe that sees more
+  than a quarter back faces is inside something and is switched off (irradiance alpha 0, skipped when shading; dark red in the
+  probe-sphere debug view), so walls no longer have dark probes behind them bleeding in.
+- **Update budget** (Probe Updates: every probe / half / a quarter a frame, in turn; probes that scrolled in always update):
+  half by default, a quarter on Low -- a quarter of the rays of tracing every probe each frame on Low.
+- **Energy**: the probes hold irradiance / pi (as the lighting reads them); the second bounce inside DDGI and the ambient term of
+  ray-hit shading (RT reflections, ray traced glass) divided by pi once more, which made multi-bounce light about three times too
+  dark. Fixed.
+
+Not done: probe relocation (moving probes out of geometry instead of switching them off), a second, coarser cascade for the far
+field, and a faster ReSTIR GI (half resolution / checkerboard) for the High rung.
+
 ## 3. DLSS edge jitter (Future.md: "when DLSS is enabled, edge detection jittering")
 
 **Cause (found, see `Status_Audit_2026-10.md`):** `Renderer::addEntityDepthBlitPass` (`UpscalePasses.cpp`) copies the

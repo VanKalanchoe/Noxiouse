@@ -630,6 +630,8 @@ namespace Nox
         }
         setRefractionEnabled(true);
         setRTRefractionEnabled(preset.RTRefraction);
+        // DDGI's probes trace in turn: a quarter a frame on the fallback rung, half on the others.
+        m_ddgiUpdateStride = quality == RenderQuality::Low ? 4u : 2u;
         NOX_CORE_INFO("Render quality: {}", GetQualityName(quality));
     }
 
@@ -1080,10 +1082,52 @@ namespace Nox
 
     }
 
+    void Renderer::updateDDGIVolume()
+    {
+        const glm::ivec3 counts(static_cast<int>(m_ddgiProbeCountX), static_cast<int>(m_ddgiProbeCountY), static_cast<int>(m_ddgiProbeCountZ));
+        glm::ivec3 shift(0);
+        glm::uvec3 scroll(0u);
+        if (m_ddgiFollowCamera && counts.x > 1 && counts.y > 1 && counts.z > 1)
+        {
+            // Centered on the camera, snapped to whole cells of the grid every probe belongs to wherever the volume is.
+            const glm::vec3 spacing = glm::max(m_ddgiSpacingMeters, glm::vec3(0.05f)) * WorldUnits::PerMeter();
+            const glm::vec3 camera(uniformData.cameraWorldPos);
+            const glm::ivec3 gridMin = glm::ivec3(glm::floor(camera / spacing)) - counts / 2;
+            if (m_ddgiVolumeValid && spacing == m_ddgiVolumeSpacing)
+                shift = gridMin - m_ddgiGridMin;
+            else
+                shift = counts; // a new volume: every probe starts over
+            m_ddgiVolumeValid = true;
+            m_ddgiVolumeSpacing = spacing;
+            m_ddgiGridMin = gridMin;
+            m_ddgiGridOrigin = glm::vec3(gridMin) * spacing;
+            m_ddgiGridSpacing = spacing;
+            for (int axis = 0; axis < 3; ++axis)
+                scroll[axis] = static_cast<uint32_t>(((gridMin[axis] % counts[axis]) + counts[axis]) % counts[axis]);
+        }
+        else
+        {
+            m_ddgiVolumeValid = false; // fixed grid: slots in place, nothing scrolls
+        }
+
+        uniformData.ddgiGridOrigin = glm::vec4(m_ddgiGridOrigin, static_cast<float>(m_ddgiProbeCountX));
+        uniformData.ddgiGridSpacing = glm::vec4(m_ddgiGridSpacing, static_cast<float>(m_ddgiProbeCountY));
+        uniformData.ddgiScrollX = scroll.x;
+        uniformData.ddgiScrollY = scroll.y;
+        uniformData.ddgiScrollZ = scroll.z;
+        uniformData.ddgiShiftX = shift.x;
+        uniformData.ddgiShiftY = shift.y;
+        uniformData.ddgiShiftZ = shift.z;
+        uniformData.ddgiUpdateStride = std::max(m_ddgiUpdateStride, 1u);
+    }
+
     void Renderer::resetDDGIGridToDefaults()
     {
-        m_ddgiGridOrigin = glm::vec3(-20.0f, -0.5f, -12.0f);
-        m_ddgiGridSpacing = glm::vec3(1.8f, 1.4f, 1.7f);
+        m_ddgiGridOrigin = glm::vec3(-20.0f, -0.5f, -12.0f) * WorldUnits::PerMeter();
+        m_ddgiGridSpacing = glm::vec3(1.8f, 1.4f, 1.7f) * WorldUnits::PerMeter();
+        m_ddgiSpacingMeters = glm::vec3(2.0f, 1.5f, 2.0f);
+        m_ddgiFollowCamera = true;
+        m_ddgiVolumeValid = false;
         m_ddgiHysteresis = 0.97f;
         m_ddgiNormalBias = 0.2f;
         m_ddgiDebugSphereRadius = 0.15f;
@@ -4334,6 +4378,7 @@ namespace Nox
         resources.MipFeedback = graph.ImportBuffer("Mip Feedback", m_mipFeedbackBuffer.get());
         resources.ClusterStats = graph.ImportBuffer("Cluster Stats", m_clusterStatsBuffer.get());
 
+        updateDDGIVolume();
         prepareDDGIFrame(resources);
 
         graph.GetBlackboard().Add(resources);

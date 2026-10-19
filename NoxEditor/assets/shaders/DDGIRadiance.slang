@@ -89,12 +89,11 @@ float4 fragMain(
         return float4(0.0, 0.0, 0.0, 1000.0);
     }
 
-    uint countX = uint(ubo->ddgiGridOrigin.w);
-    uint countY = uint(ubo->ddgiGridSpacing.w);
-    float3 gridOrigin = ubo->ddgiGridOrigin.xyz;
-    float3 gridSpacing = ubo->ddgiGridSpacing.xyz;
+    // Probes not updated this frame (ddgiUpdateStride) trace nothing; their blend keeps the atlas as it was.
+    if (!ddgi_probe_updates(ubo, probeIndex, pushConstant.frameIndex))
+        return float4(0.0, 0.0, 0.0, 1000.0);
 
-    float3 probePos = get_probe_world_pos(probeIndex, gridOrigin, gridSpacing, countX, countY);
+    float3 probePos = ddgi_probe_position(ubo, probeIndex);
 
     // Uniformly distributed spherical Fibonacci ray direction
     float3 baseRayDir = spherical_fibonacci(rayIndex, pushConstant.raysPerProbe);
@@ -193,6 +192,13 @@ float4 fragMain(
     float2 hitUV = w0 * vertex0.uv0 + w1 * vertex1.uv0 + w2 * vertex2.uv0;
     float3 localNormal = normalize(w0 * vertex0.normal + w1 * vertex1.normal + w2 * vertex2.normal);
     float3 hitNormal = normalize(mul((float3x3)hitLut.normalMatrix, localNormal));
+
+    // The back of single-sided geometry: the probe is inside something (a wall, a building). A negative distance marks it; the
+    // blend keeps such rays out of the probe's light and switches off probes that see mostly back faces (classification).
+    if (hitLut.doubleSided == 0 && dot(hitNormal, rayDir) > 0.1)
+    {
+        return float4(0.0, 0.0, 0.0, -hitT);
+    }
 
     if (hitLut.doubleSided != 0 && dot(hitNormal, -rayDir) < 0.0)
     {
@@ -300,15 +306,16 @@ float4 fragMain(
         Texture2D prevDistTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->ddgiDistanceTextureIndex, 0));
         SamplerState ddgiSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
 
+        // The probes hold irradiance / pi (a cosine-weighted mean of radiance), as the lighting reads them: reflected = albedo * it.
         float3 bouncedIrradiance = sample_ddgi_diffuse(ubo, hitPos, hitNormal, prevIrrTex, prevDistTex, ddgiSampler);
-        indirectLight = (albedo / 3.14159265) * bouncedIrradiance;
+        indirectLight = albedo * bouncedIrradiance;
     }
     else if (ubo->irradianceMapIndex != 0xFFFFFFFF)
     {
         // Initial frame fallback to scene irradiance cubemap
         TextureCube irradianceTex = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + ubo->irradianceMapIndex, 0));
         SamplerState samplerIrradiance = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_IRRADIANCE, 0));
-        indirectLight = irradianceTex.SampleLevel(samplerIrradiance, hitNormal, 0).rgb * (albedo / 3.14159265) * ubo->scaleIBLAmbient * 0.2;
+        indirectLight = irradianceTex.SampleLevel(samplerIrradiance, hitNormal, 0).rgb * albedo * ubo->scaleIBLAmbient;
     }
 
     float3 hitRadiance = directLight + emissiveLight + indirectLight;

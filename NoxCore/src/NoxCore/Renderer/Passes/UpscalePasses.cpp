@@ -155,6 +155,9 @@ namespace Nox
                 // instead of depending on a result another recording thread would have to publish.
                 if (!m_device->evaluateDLSS(dlssParams))
                     inputColor.blitTo(cmd, outputColor);
+                // Streamline / NGX bound descriptor sets of their own (classic descriptors), which unbinds the engine's heaps for the
+                // passes recorded after this one in the same command buffer (Stable Entity/Depth, post, overlays).
+                cmd.bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
             });
     }
 
@@ -212,6 +215,8 @@ namespace Nox
             [this, res = &resources](RGPassContext& context)
             {
                 NRI::CommandBuffer& cmd = context.Cmd();
+                // Right after DLSS (as the blit it replaces did): NGX may have bound its own descriptors.
+                cmd.bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
                 cmd.setDepthTestEnable(true);
                 cmd.setDepthCompareOp(NRI::CompareOp::GreaterOrEqual);
                 cmd.setColorBlendEnable(0, false);
