@@ -224,10 +224,15 @@
                     return float4(visualVel, 1.0);
                 }
 
-            // Mode 16: Diffuse GI (ReSTIR GI Diffuse or DDGI Probes)
+            // Mode 16: Diffuse GI (screen probes, ReSTIR GI Diffuse or DDGI Probes)
                 if (pushConstant.debugMode == 16)
                 {
-                    if (pushConstant.diffuseGIMode == 2 && pushConstant.restirGIDiffuseTextureIndex != 0xFFFFFFFF)
+                    if (pushConstant.diffuseGIMode == 3 && pushConstant.screenProbeGITextureIndex != 0xFFFFFFFF)
+                    {
+                        Texture2D screenProbeTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.screenProbeGITextureIndex, 0));
+                        return float4(screenProbeTex.Load(int3(pixelCoord, 0)).rgb, 1.0);
+                    }
+                    else if (pushConstant.diffuseGIMode == 2 && pushConstant.restirGIDiffuseTextureIndex != 0xFFFFFFFF)
                     {
                         Texture2D restirTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.restirGIDiffuseTextureIndex, 0));
                         float3 restirDiffuse = NRD_UnpackSignal(pushConstant.restirGIDenoiserMode, restirTex.Load(int3(pixelCoord, 0)));
@@ -532,8 +537,20 @@
         float3 ambientSpecular = ibl.specular;
 
         float specularOcclusion = 1.0;
-        // Diffuse Global Illumination: ReSTIR GI (Screen-Space Resampling) or DDGI Probes
-        if ((pushConstant.diffuseGIMode == 2 || pushConstant.debugMode == 16) && pushConstant.restirGIDiffuseTextureIndex != 0xFFFFFFFF)
+        // Diffuse Global Illumination: screen probes (ScreenProbeIntegrate.slang), ReSTIR GI (Screen-Space Resampling) or DDGI Probes
+        if (pushConstant.diffuseGIMode == 3 && pushConstant.screenProbeGITextureIndex != 0xFFFFFFFF)
+        {
+            Texture2D screenProbeTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.screenProbeGITextureIndex, 0));
+            const float3 screenProbeIrradiance = screenProbeTex.Load(int3(pixelCoord, 0)).rgb;
+            ambientDiffuse = screenProbeIrradiance * diffuseColor;
+
+            // The sky's reflection only as far as the sky reaches this surface (indoors it does not).
+            const float giLuma = dot(screenProbeIrradiance, float3(0.2126, 0.7152, 0.0722));
+            const float skyLuma = max(ubo->scaleIBLAmbient, 0.01);
+            specularOcclusion = saturate(giLuma / skyLuma);
+            ambientSpecular *= specularOcclusion;
+        }
+        else if ((pushConstant.diffuseGIMode == 2 || pushConstant.debugMode == 16) && pushConstant.restirGIDiffuseTextureIndex != 0xFFFFFFFF)
         {
             Texture2D restirTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.restirGIDiffuseTextureIndex, 0));
             float3 restirDiffuse = NRD_UnpackSignal(pushConstant.restirGIDenoiserMode, restirTex.Load(int3(pixelCoord, 0)));

@@ -134,6 +134,11 @@ namespace Nox
                     AppendSetting(out, "Diffuse GI: DDGI | probes {}x{}x{} | rays per probe {}", renderer.getDDGIProbeCountX(),
                                   renderer.getDDGIProbeCountY(), renderer.getDDGIProbeCountZ(), renderer.getDDGIRaysPerProbe());
                     break;
+                case 3:
+                    AppendSetting(out, "Diffuse GI: Screen Probes | {} px per probe | filter passes {} | max history {} | DDGI cascades {}",
+                                  renderer.getScreenProbeTileSize(), renderer.getScreenProbeFilterPasses(), renderer.getScreenProbeMaxHistory(),
+                                  renderer.getDDGICascadeCount());
+                    break;
                 case 2:
                     AppendSetting(out, "Diffuse GI: ReSTIR GI | spatial samples {} | max history {} | denoiser {}",
                                   renderer.getReSTIRGINumSpatialSamples(), renderer.getReSTIRGIMaxHistoryLength(),

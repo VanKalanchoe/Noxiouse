@@ -278,6 +278,10 @@ namespace Nox
         watchShader("assets/shaders/DDGIBlendIrradiance.slang", "DDGIBlendIrradiance", [this]() { createDDGIPipelines(true); });
         watchShader("assets/shaders/DDGIBlendDistance.slang", "DDGIBlendDistance", [this]() { createDDGIPipelines(true); });
         watchShader("assets/shaders/DDGIProbeSpheres.slang", "DDGIProbeSpheres", [this]() { createDDGIPipelines(true); });
+        // Screen-probe GI
+        for (const char* shader : { "ScreenProbeCommon", "ScreenProbePlace", "ScreenProbeTrace", "ScreenProbeIrradiance", "ScreenProbeFilter",
+                                    "ScreenProbeIntegrate" })
+            watchShader(std::string("assets/shaders/") + shader + ".slang", "ScreenProbeGI", [this]() { createScreenProbePipelines(true); });
         // ReSTIR GI
         watchShader("assets/shaders/RTXDI/GI/ReSTIRGIInitial.slang", "ReSTIRGIInitial", [this]() { createReSTIRGIPipelines(true); });
         watchShader("assets/shaders/RTXDI/GI/ReSTIRGITemporal.slang", "ReSTIRGITemporal", [this]() { createReSTIRGIPipelines(true); });
@@ -452,6 +456,7 @@ namespace Nox
         createPathTracerPipeline(false);
         // DDGI
         createDDGIPipelines(false);
+        createScreenProbePipelines(false);
         // ReSTIR GI
         createReSTIRGIPipelines(false);
         // ReSTIR DI
@@ -582,7 +587,8 @@ namespace Nox
             bool RTShadows;
             bool RTReflections;
             bool RTAO;               // else SSAO
-            uint32_t DiffuseGI;      // 1 DDGI, 2 ReSTIR GI
+            uint32_t DiffuseGI;      // 1 DDGI, 2 ReSTIR GI, 3 screen probes (DDGI underneath)
+            uint32_t ScreenProbeTile; // pixels per screen probe
             uint32_t DirectLighting; // 0 the loop (the first light shadowed), 1 ReSTIR DI (every light shadowed)
             NRI::UpscaleMode Upscale;
             bool RTRefraction;       // smooth glass traced (H3); else the screen-space refraction only
@@ -592,9 +598,9 @@ namespace Nox
         {
             switch (quality)
             {
-            case Renderer::RenderQuality::Low: return { true, false, false, 1, 0, NRI::UpscaleMode::Performance, false };
-            case Renderer::RenderQuality::Medium: return { true, true, false, 1, 1, NRI::UpscaleMode::Balanced, false };
-            default: return { true, true, true, 2, 1, NRI::UpscaleMode::Quality, true };
+            case Renderer::RenderQuality::Low: return { true, false, false, 3, 24, 0, NRI::UpscaleMode::Performance, false };
+            case Renderer::RenderQuality::Medium: return { true, true, false, 3, 16, 1, NRI::UpscaleMode::Balanced, false };
+            default: return { true, true, true, 3, 16, 1, NRI::UpscaleMode::Quality, true };
             }
         }
     }
@@ -617,7 +623,8 @@ namespace Nox
         else
             setSSAOEnabled(true);
         setDiffuseGIMode(preset.DiffuseGI);
-        setDDGIEnabled(preset.DiffuseGI == 1);
+        setDDGIEnabled(preset.DiffuseGI == 1 || preset.DiffuseGI == 3);
+        m_screenProbeTileSize = preset.ScreenProbeTile;
         if (preset.DiffuseGI == 2)
             setNRDGIDenoiser(NRI::NRDDiffuseDenoiser::REBLUR);
         setDirectLightingMode(preset.DirectLighting);
@@ -631,7 +638,8 @@ namespace Nox
         setRefractionEnabled(true);
         setRTRefractionEnabled(preset.RTRefraction);
         // DDGI's probes trace in turn: a quarter a frame on the fallback rung, half on the others; two cascades on the fallback rung.
-        m_ddgiUpdateStride = quality == RenderQuality::Low ? 4u : 2u;
+        // Under the screen probes DDGI is only the second bounce: a quarter of its probes a frame is plenty.
+        m_ddgiUpdateStride = (quality == RenderQuality::Low || preset.DiffuseGI == 3) ? 4u : 2u;
         m_ddgiCascadeCount = quality == RenderQuality::Low ? 2u : 3u;
         NOX_CORE_INFO("Render quality: {}", GetQualityName(quality));
     }
@@ -1424,6 +1432,33 @@ namespace Nox
             });
             m_ddgiDebugSpheresPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
         }
+    }
+
+    void Renderer::createScreenProbePipelines(bool forceCompile)
+    {
+        // Fullscreen passes over their own targets (ScreenProbeCommon.slang's task and mesh stages, the pass's fragment stage).
+        auto create = [&](const char* source, std::vector<NRI::ImageFormat> formats)
+        {
+            NRI::PipelineDesc desc{};
+            desc.forceCompile = forceCompile;
+            desc.colorFormats = std::move(formats);
+            desc.shaders.push_back({ .stage = NRI::ShaderStage::Task, .entryPoint = "taskMain", .sourcePath = source });
+            desc.shaders.push_back({ .stage = NRI::ShaderStage::Mesh, .entryPoint = "meshMain", .sourcePath = source });
+            desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "fragMain", .sourcePath = source });
+            return m_device->createPipeline(desc, *m_shaderCompiler);
+        };
+        m_screenProbePlacePipeline = create("assets/shaders/ScreenProbePlace.slang",
+                                            { NRI::ImageFormat::R32G32B32A32_SFLOAT, NRI::ImageFormat::R16G16B16A16_SFLOAT });
+        m_screenProbeTracePipeline = create("assets/shaders/ScreenProbeTrace.slang", { NRI::ImageFormat::R16G16B16A16_SFLOAT });
+        m_screenProbeIrradiancePipeline = create("assets/shaders/ScreenProbeIrradiance.slang", { NRI::ImageFormat::R16G16B16A16_SFLOAT });
+        m_screenProbeFilterPipeline = create("assets/shaders/ScreenProbeFilter.slang", { NRI::ImageFormat::R16G16B16A16_SFLOAT });
+        m_screenProbeIntegratePipeline = create("assets/shaders/ScreenProbeIntegrate.slang", { NRI::ImageFormat::R16G16B16A16_SFLOAT });
+    }
+
+    NRI::Extent2D Renderer::getScreenProbeCounts() const
+    {
+        const uint32_t tile = std::clamp(m_screenProbeTileSize, 4u, 64u);
+        return { (m_renderSize.width + tile - 1) / tile, (m_renderSize.height + tile - 1) / tile };
     }
 
     void Renderer::createReSTIRGIPipelines(bool forceCompile)
@@ -3638,9 +3673,10 @@ namespace Nox
 
         const bool isPathTracing = m_pathTracingEnabled || m_debugMode == 18 || m_debugMode == 19;
         const bool isDDGI = m_rayTracingEnabled && (m_ddgiEnabled || m_debugMode == 16 || m_debugMode == 17);
-        const bool isReSTIRGI = m_rayTracingEnabled && (m_diffuseGIMode == 2 || (m_debugMode == 16 && m_diffuseGIMode != 1));
+        const bool isReSTIRGI = m_rayTracingEnabled && isReSTIRGIRequested();
+        const bool isScreenProbeGI = m_rayTracingEnabled && m_diffuseGIMode == 3;
         const bool isHybridRT = m_rayTracingEnabled && (m_rayTracingShadows || m_rayTracingReflections || m_rtaoEnabled);
-        if (!isPathTracing && !isDDGI && !isReSTIRGI && !isHybridRT)
+        if (!isPathTracing && !isDDGI && !isReSTIRGI && !isScreenProbeGI && !isHybridRT)
             return;
 
         auto retire = [this](uint32_t instanceSlot, AnimatedBLAS& animated)
@@ -4085,6 +4121,7 @@ namespace Nox
             addRTShadowPasses();
             addRTReflectionPasses();
             addDDGIPasses();
+            addScreenProbeGIPasses();
             addLightPresamplingPasses();
             addReSTIRGIPasses();
             addReSTIRDIPasses();
@@ -4999,7 +5036,9 @@ namespace Nox
         // tracing hardware access -- require the master toggle here too, matching runDDGI/runReSTIRGI,
         // so disabling "Enable Hybrid Ray Tracing" actually stops the TLAS rebuild cost as well.
         bool isDDGI = m_rayTracingEnabled && (m_ddgiEnabled || m_debugMode == 16 || m_debugMode == 17);
-        bool isReSTIRGI = m_rayTracingEnabled && (m_diffuseGIMode == 2 || (m_debugMode == 16 && m_diffuseGIMode != 1));
+        bool isReSTIRGI = m_rayTracingEnabled && isReSTIRGIRequested();
+        // The screen probes trace it too.
+        bool isScreenProbeGI = m_rayTracingEnabled && m_diffuseGIMode == 3;
         // RTAO traces its own rays too (RTAO.slang), same as shadows/reflections do -- without it here, enabling
         // only RTAO (shadows and reflections both off) took the early-out below every frame, which explicitly
         // zeroes uniformData.tlasDeviceAddress: RTAO's own trace_occlusion_ray checks that and silently reports "no
@@ -5007,7 +5046,7 @@ namespace Nox
         // (turning shadows or reflections on happened to keep a valid TLAS around for RTAO to piggyback on).
         bool isHybridRT = m_rayTracingEnabled && (m_rayTracingShadows || m_rayTracingReflections || m_rtaoEnabled);
 
-        if (!isPathTracing && !isDDGI && !isReSTIRGI && !isHybridRT)
+        if (!isPathTracing && !isDDGI && !isReSTIRGI && !isScreenProbeGI && !isHybridRT)
         {
             // Built once ray tracing is used again.
             m_hasTLASBuild = false;

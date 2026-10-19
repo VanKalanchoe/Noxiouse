@@ -501,9 +501,22 @@ namespace Nox
         // 1: every probe traces every frame; 2 / 4: half / a quarter of them in turn (cheaper, the light settles more slowly).
         uint32_t& getDDGIUpdateStride() { return m_ddgiUpdateStride; }
 
-        // ReSTIR GI (Screen-Space Diffuse Indirect Resampling via RTXDI)
+        // Diffuse GI: 0 the environment's irradiance (IBL), 1 DDGI, 2 ReSTIR GI, 3 screen probes (with DDGI underneath as the
+        // world radiance cache: turn DDGI on with it).
         uint32_t getDiffuseGIMode() const { return m_diffuseGIMode; }
         void setDiffuseGIMode(uint32_t mode) { m_diffuseGIMode = mode; }
+        // ReSTIR GI runs for its mode, and for the "Indirect Diffuse GI Only" debug view (16) when no GI technique is chosen.
+        bool isReSTIRGIRequested() const { return m_diffuseGIMode == 2 || (m_debugMode == 16 && m_diffuseGIMode == 0); }
+        // Screen-probe GI (ScreenProbeCommon.slang): pixels per probe each way (8..32), spatial filter passes (0..3), frames
+        // accumulated at most.
+        uint32_t& getScreenProbeTileSize() { return m_screenProbeTileSize; }
+        uint32_t& getScreenProbeFilterPasses() { return m_screenProbeFilterPasses; }
+        uint32_t& getScreenProbeMaxHistory() { return m_screenProbeMaxHistory; }
+        void resetScreenProbeHistory() { m_renderGraph.ResetHistory(ScreenProbeHistoryKey); }
+        // Probes over the render resolution (the tile size's grid).
+        NRI::Extent2D getScreenProbeCounts() const;
+
+        // ReSTIR GI (Screen-Space Diffuse Indirect Resampling via RTXDI)
         float& getReSTIRGISpatialRadius() { return m_restirGISpatialRadius; }
         uint32_t& getReSTIRGINumSpatialSamples() { return m_restirGINumSpatialSamples; }
         uint32_t& getReSTIRGIMaxHistoryLength() { return m_restirGIMaxHistoryLength; }
@@ -759,6 +772,7 @@ namespace Nox
 
         // DDGI (Dynamic Diffuse Global Illumination)
         void createDDGIPipelines(bool forceCompile = false);
+        void createScreenProbePipelines(bool forceCompile = false);
 
         // ReSTIR GI (Screen-Space Diffuse Path Resampling via RTXDI)
         void createRTXDINeighborOffsets();
@@ -821,6 +835,8 @@ namespace Nox
         // Once per frame: where the probe volume is (camera-following or fixed) and how far it scrolled, into the uniforms.
         void updateDDGIVolume();
         void addDDGIPasses();
+        // Screen-probe GI (diffuse GI mode 3): placement, trace, convolution, spatial filter, per-pixel integration.
+        void addScreenProbeGIPasses();
         void addLightPresamplingPasses();
         // RTXDI light sampling over this frame's presampled lights (RTXDILightSampling.slang), for ReSTIR DI and GI.
         shaderio::RTXDILightSamplingParams lightSamplingParams(const RGPassContext& context, RGBuffer risBuffer) const;
@@ -979,6 +995,12 @@ namespace Nox
         std::unique_ptr<NRI::Pipeline> m_ddgiBlendIrradiancePipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_ddgiBlendDistancePipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_ddgiDebugSpheresPipeline = nullptr;
+        // Screen-probe GI
+        std::unique_ptr<NRI::Pipeline> m_screenProbePlacePipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_screenProbeTracePipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_screenProbeIrradiancePipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_screenProbeFilterPipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_screenProbeIntegratePipeline = nullptr;
 
         std::unique_ptr<NRI::CommandAllocator> m_commandAllocator = nullptr; // single-time commands
 
@@ -1020,6 +1042,8 @@ namespace Nox
             bool rtReflectionsAdded = false;
             bool nrdReflectionsAdded = false;
             bool ddgiAdded = false;
+            bool screenProbeGIAdded = false;
+            uint32_t screenProbeGIWriteIndex = 0; // the result this frame writes (resources.ScreenProbeGI)
             bool restirGIAdded = false;
             bool nrdGIAdded = false;
             bool restirDIAdded = false;
@@ -1047,6 +1071,7 @@ namespace Nox
         static constexpr const char* NRDHistoryKey = "NRD";
         static constexpr const char* DLSSHistoryKey = "DLSS";
         static constexpr const char* DDGIHistoryKey = "DDGI";
+        static constexpr const char* ScreenProbeHistoryKey = "Screen Probe GI"; // also the history texture's key
         // DDGI atlas layout: probes per atlas row (atlas sizes, uniforms and the blend shaders agree on it).
         static constexpr uint32_t DDGIProbesPerRow = 64;
 
@@ -1113,7 +1138,13 @@ namespace Nox
         std::unique_ptr<NRI::Pipeline> m_restirGISpatialPipeline = nullptr;
         std::unique_ptr<NRI::Buffer> m_restirGINeighborOffsetsBuffer;
 
-        uint32_t m_diffuseGIMode = 0; // 0 = Off (IBL), 1 = DDGI, 2 = ReSTIR GI
+        uint32_t m_diffuseGIMode = 0; // 0 = Off (IBL), 1 = DDGI, 2 = ReSTIR GI, 3 = screen probes
+        // Screen-probe GI
+        uint32_t m_screenProbeTileSize = 16;
+        uint32_t m_screenProbeFilterPasses = 2;
+        uint32_t m_screenProbeMaxHistory = 24;
+        uint32_t m_screenProbeHistoryIndex = 0; // which of the two results is last frame's
+        uint64_t m_screenProbeLastFrame = ~0ull; // scene frame it last ran (its history is only good for the next one)
         float m_restirGISpatialRadius = 32.0f;
         uint32_t m_restirGINumSpatialSamples = 2;
         uint32_t m_restirGIMaxHistoryLength = 10;

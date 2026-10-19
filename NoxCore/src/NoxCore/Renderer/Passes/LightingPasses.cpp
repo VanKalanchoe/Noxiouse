@@ -481,6 +481,8 @@ namespace Nox
                     builder.Read(resources.DDGIIrradiance[frame.ddgiWriteIndex]);
                     builder.Read(resources.DDGIDistance[frame.ddgiWriteIndex]);
                 }
+                if (frame.screenProbeGIAdded)
+                    builder.Read(resources.ScreenProbeGI[frame.screenProbeGIWriteIndex]);
                 if (frame.ssaoAdded)
                     builder.Read(resources.SSAO);
                 ReadIfValid(builder, resources.TLAS);
@@ -544,6 +546,8 @@ namespace Nox
                 lightingPush.ssaoTextureIndex = frame.ssaoAdded ? context.Slot(res->SSAO) : 0xFFFFFFFF;
                 lightingPush.aerialPerspectiveTextureIndex = aerialPerspective.IsValid() ? context.Slot(aerialPerspective) : 0xFFFFFFFF;
                 lightingPush.aerialPerspectiveKmPerUnit = aerialKmPerUnit;
+                lightingPush.screenProbeGITextureIndex = frame.screenProbeGIAdded ? context.Slot(res->ScreenProbeGI[frame.screenProbeGIWriteIndex])
+                                                                                  : 0xFFFFFFFF;
                 cmd.pushData(&lightingPush, sizeof(shaderio::PushConstantDeferredLighting));
 
                 cmd.drawMeshTasks(1, 1, 1);

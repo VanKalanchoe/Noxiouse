@@ -734,9 +734,9 @@ namespace Nox
             }
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("Every preset is ray traced (no shadow maps):\n"
-                                  "  Low: RT shadows of the sun, DDGI, SSAO, DLSS Performance (the fallback for smaller RT GPUs)\n"
-                                  "  Medium: + RT reflections, ReSTIR DI (every light shadowed), DLSS Balanced\n"
-                                  "  High: + RTAO, ReSTIR GI, DLSS Quality (the closest to the path tracer)\n"
+                                  "  Low: RT shadows of the sun, screen-probe GI (24 px probes), SSAO, DLSS Performance (the fallback for smaller RT GPUs)\n"
+                                  "  Medium: + RT reflections, ReSTIR DI (every light shadowed), screen-probe GI (16 px), DLSS Balanced\n"
+                                  "  High: + RTAO, RT glass, DLSS Quality (the closest to the path tracer)\n"
                                   "The project opens with it (saved in the .nproj). Changing a setting below makes it Custom for this session.");
             ImGui::Separator();
         }
@@ -767,7 +767,7 @@ namespace Nox
             "13: RT Shadow Mask",
             "14: RT Reflections",
             "15: Motion Vectors (Velocity Buffer)",
-            "16: Indirect Diffuse GI Only (DDGI / ReSTIR GI)",
+            "16: Indirect Diffuse GI Only (Screen Probes / DDGI / ReSTIR GI)",
             "17: DDGI Probe Grid Spheres",
             "18: Path Tracer (1-SPP Raw)",
             "19: Path Tracer (Progressive Ground Truth)",
@@ -1158,41 +1158,79 @@ namespace Nox
                 static const char* giModeNames[] = {
                     "Off (IBL Ambient)",
                     "DDGI (Probe Volumes)",
-                    "ReSTIR GI (Screen-Space Resampling via RTXDI)"
+                    "ReSTIR GI (Screen-Space Resampling via RTXDI)",
+                    "Screen Probes (Lumen-style final gather)"
                 };
                 int currentGIMode = static_cast<int>(m_Renderer->getDiffuseGIMode());
                 if (ImGui::Combo("Diffuse Global Illumination", &currentGIMode, giModeNames, IM_ARRAYSIZE(giModeNames)))
                 {
                     m_Renderer->setDiffuseGIMode(static_cast<uint32_t>(currentGIMode));
-                    if (currentGIMode == 1)
-                    {
-                        m_Renderer->setDDGIEnabled(true);
-                    }
-                    else
-                    {
-                        m_Renderer->setDDGIEnabled(false);
-                    }
+                    // The screen probes' rays read DDGI at their hits (the second bounce): it runs under them.
+                    m_Renderer->setDDGIEnabled(currentGIMode == 1 || currentGIMode == 3);
 
                     // "PBR Debug View" mode 16 ("Indirect Diffuse GI Only") is a second, independent
-                    // switch that also keeps ReSTIR GI's full pipeline running (see runReSTIRGI's
-                    // `m_debugMode == 16 && m_diffuseGIMode != 1` clause) even after this combo is
-                    // switched away from ReSTIR GI -- leaving it stuck on 16 silently keeps paying
+                    // switch that also keeps ReSTIR GI's full pipeline running when no GI technique is
+                    // chosen (Renderer::isReSTIRGIRequested) -- leaving it stuck on 16 silently keeps paying
                     // for TLAS build + all three ReSTIR GI passes + NRD GI denoise every frame with
                     // no visual indication why. Clear it whenever GI mode no longer needs it.
-                    if (currentGIMode != 2 && m_Renderer->getDebugMode() == 16)
+                    if (currentGIMode == 0 && m_Renderer->getDebugMode() == 16)
                     {
                         m_Renderer->setDebugMode(0);
                     }
                 }
                 if (ImGui::IsItemHovered())
                 {
-                    ImGui::SetTooltip("Select indirect diffuse lighting technique:\n- Off: Constant or Cubemap IBL\n- DDGI: Irradiance probe volume grid\n- ReSTIR GI: RTXDI Spatiotemporal reservoir resampling (screen-space indirect diffuse)");
+                    ImGui::SetTooltip("Select indirect diffuse lighting technique:\n- Off: Constant or Cubemap IBL\n- DDGI: Irradiance probe volume grid\n- ReSTIR GI: RTXDI Spatiotemporal reservoir resampling (screen-space indirect diffuse)\n- Screen Probes: what Lumen does for its final gather -- probes on the visible surfaces trace the scene,\n  DDGI underneath gives the second bounce. Smooth, no light through walls (the default of every preset)");
                 }
 
                 uint32_t activeDebugMode = m_Renderer->getDebugMode();
 
+                // Screen-probe GI settings
+                if (m_Renderer->getDiffuseGIMode() == 3)
+                {
+                    ImGui::Indent();
+                    const NRI::Extent2D probes = m_Renderer->getScreenProbeCounts();
+                    ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.8f, 1.0f), "Screen probes: %ux%u (%u probes, 64 rays each)", probes.width, probes.height,
+                                       probes.width * probes.height);
+
+                    static const char* tileNames[] = { "8 px (finest, 4x the rays of 16)", "12 px", "16 px", "24 px", "32 px (fastest)" };
+                    static const uint32_t tileSizes[] = { 8, 12, 16, 24, 32 };
+                    uint32_t& tileSize = m_Renderer->getScreenProbeTileSize();
+                    int tileIndex = 2;
+                    for (int i = 0; i < IM_ARRAYSIZE(tileSizes); ++i)
+                    {
+                        if (tileSizes[i] == tileSize)
+                            tileIndex = i;
+                    }
+                    if (ImGui::Combo("Screen Probe Spacing", &tileIndex, tileNames, IM_ARRAYSIZE(tileNames)))
+                        tileSize = tileSizes[tileIndex];
+                    if (ImGui::IsItemHovered())
+                        ImGui::SetTooltip("One probe per this many pixels each way (render resolution). Finer: more detail in corners and on small\n"
+                                          "objects, and more rays (cost grows with the square).");
+
+                    uint32_t& filterPasses = m_Renderer->getScreenProbeFilterPasses();
+                    int filterInt = static_cast<int>(std::min(filterPasses, 3u));
+                    if (ImGui::SliderInt("Spatial Filter Passes", &filterInt, 0, 3))
+                        filterPasses = static_cast<uint32_t>(filterInt);
+                    if (ImGui::IsItemHovered())
+                        ImGui::SetTooltip("Each pass averages a probe with its neighbours on the same surface: smoother, less local.");
+
+                    uint32_t& maxHistory = m_Renderer->getScreenProbeMaxHistory();
+                    int historyInt = static_cast<int>(std::clamp(maxHistory, 1u, 64u));
+                    if (ImGui::SliderInt("Temporal Frames", &historyInt, 1, 64))
+                        maxHistory = static_cast<uint32_t>(historyInt);
+                    if (ImGui::IsItemHovered())
+                        ImGui::SetTooltip("Frames accumulated at most per pixel: more is smoother and slower to follow changes in the light\n"
+                                          "(a large change still shortens it on its own).");
+
+                    if (ImGui::Button("Reset Screen Probe History"))
+                        m_Renderer->resetScreenProbeHistory();
+                    ImGui::TextDisabled("Second bounce: the DDGI cascades (settings below)");
+                    ImGui::Unindent();
+                }
+
                 // ReSTIR GI Settings (RTXDI)
-                if (m_Renderer->getDiffuseGIMode() == 2 || (activeDebugMode == 16 && m_Renderer->getDiffuseGIMode() != 1))
+                if (m_Renderer->isReSTIRGIRequested())
                 {
                     ImGui::Indent();
                     ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f), "ReSTIR GI (RTXDI SDK Active)");
@@ -1232,7 +1270,7 @@ namespace Nox
                 }
 
                 // DDGI Settings
-                if (m_Renderer->getDiffuseGIMode() == 1 || activeDebugMode == 17)
+                if (m_Renderer->getDiffuseGIMode() == 1 || m_Renderer->getDiffuseGIMode() == 3 || activeDebugMode == 17)
                 {
                     ImGui::Indent();
                     uint32_t totalProbes = m_Renderer->getDDGIProbeCountTotal();
@@ -1453,7 +1491,7 @@ namespace Nox
                 }
             }
 
-            if (m_Renderer->getDiffuseGIMode() == 2 || (m_Renderer->getDebugMode() == 16 && m_Renderer->getDiffuseGIMode() != 1))
+            if (m_Renderer->isReSTIRGIRequested())
             {
                 showAnyDenoiserControl = true;
                 static const char* giDenoiserNames[] = {

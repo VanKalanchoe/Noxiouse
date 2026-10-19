@@ -15,7 +15,7 @@ namespace Nox
         // ReSTIR GI ray-traces its initial candidate against the scene TLAS, so like DDGI it needs ray tracing access.
         const bool runReSTIRGI = (!m_frame.runPathTracer || m_frame.pathTracerUsesRTXDI) &&
                                  (m_rayTracingEnabled || m_frame.pathTracerUsesRTXDI) &&
-                                 (m_diffuseGIMode == 2 || (m_debugMode == 16 && m_diffuseGIMode != 1)) &&
+                                 isReSTIRGIRequested() &&
                                  m_hasTLASBuild && m_sceneTLAS && (uniformData.tlasDeviceAddress != 0) &&
                                  (uniformData.sceneInstancesReference != 0) &&
                                  m_restirGIInitialPipeline && m_restirGITemporalPipeline && m_restirGISpatialPipeline &&
@@ -270,9 +270,9 @@ namespace Nox
     void Renderer::addPreviousFrameCopyPass()
     {
         // Snapshot this frame's depth/normal (and albedo/material for ReSTIR PT) as next frame's "previous" G-buffer
-        // for temporal reprojection validity checks. This pass is added after every ReSTIR consumer has read the old
-        // snapshot, and is omitted when no ReSTIR lighting path needs that history.
-        if (!m_frame.restirGIAdded && !m_frame.restirDIAdded && !m_frame.restirPTActive)
+        // for temporal reprojection validity checks. This pass is added after every ReSTIR consumer (and the screen-probe GI's
+        // history reprojection) has read the old snapshot, and is omitted when none of them needs that history.
+        if (!m_frame.restirGIAdded && !m_frame.restirDIAdded && !m_frame.restirPTActive && !m_frame.screenProbeGIAdded)
             return;
 
         const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
@@ -305,7 +305,7 @@ namespace Nox
     {
         // RTXDI's light presampling (light PDF mip chain, RIS tiles, ReGIR cells), once per frame for everything that samples
         // lights through it: ReSTIR DI's primary surfaces and ReSTIR GI's path vertices (RTXDILightSampling.slang).
-        const bool rtxdiLighting = m_directLightingMode == 1 || m_diffuseGIMode == 2 || (m_debugMode == 16 && m_diffuseGIMode != 1);
+        const bool rtxdiLighting = m_directLightingMode == 1 || isReSTIRGIRequested();
         const bool runPresampling = rtxdiLighting && m_restirDINumLocalLights > 0 &&
                                     (!m_frame.runPathTracer || m_frame.pathTracerUsesRTXDI) &&
                                     (m_rayTracingEnabled || m_frame.pathTracerUsesRTXDI) &&

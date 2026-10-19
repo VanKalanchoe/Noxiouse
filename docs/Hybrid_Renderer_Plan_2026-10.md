@@ -46,11 +46,11 @@ project opens). Auto picks by the GPU's memory budget: < 6.5 GB Low, < 10 GB Med
 
 | Preset | Shadows | Reflections | AO | Diffuse GI | Direct light | DLSS |
 |---|---|---|---|---|---|---|
-| Low (fallback) | RT, sun only (the loop shadows light 0) + SIGMA | IBL | SSAO | DDGI | analytic loop | Performance |
-| Medium | RT + SIGMA | RT + REBLUR | SSAO | DDGI | ReSTIR DI (every light shadowed) + REBLUR | Balanced |
-| High (near the path tracer) | RT + SIGMA | RT + REBLUR | RTAO | ReSTIR GI + REBLUR | ReSTIR DI + REBLUR | Quality |
+| Low (fallback) | RT, sun only (the loop shadows light 0) + SIGMA | IBL | SSAO | screen probes, 24 px (§2c) | analytic loop | Performance |
+| Medium | RT + SIGMA | RT + REBLUR | SSAO | screen probes, 16 px | ReSTIR DI (every light shadowed) + REBLUR | Balanced |
+| High (near the path tracer) | RT + SIGMA | RT + REBLUR | RTAO | screen probes, 16 px | ReSTIR DI + REBLUR | Quality |
 
-Glass refraction is on in all three. Changing one setting afterwards shows Custom for the session. Not yet: half-resolution
+(Until 2026-10-19 the GI column was DDGI / DDGI / ReSTIR GI + REBLUR; §2c.) Glass refraction is on in all three. Changing one setting afterwards shows Custom for the session. Not yet: half-resolution
 reflections and a roughness cut as their own rungs.
 
 ### 2b. DDGI fixed and made camera-following (2026-10-19, untested)
@@ -107,6 +107,35 @@ so the visibility test rejected most probes and surfaces went dark. Now:
 
 Not done: probe relocation (moving probes out of geometry instead of switching them off) and a faster ReSTIR GI (half
 resolution / checkerboard) for the High rung.
+
+### 2c. Screen-probe GI: the default diffuse GI (2026-10-19, untested)
+
+After the DDGI fixes the user still saw DDGI as broken ("make a modern solution, rewrite if needed, close to Lumen / Godot").
+A probe grid in world space is the wrong tool for the final gather: its cells cut through walls, so a wall's light is an
+interpolation of probes on both sides of it (leaks, wiggles, classification flicker), whatever the weighting. Lumen's answer is
+to gather from probes **on the visible surfaces** and keep a world-space cache only for what those probes' rays hit. That is
+now **Diffuse GI mode 3, "Screen Probes"**, the GI of every quality preset (DDGI and ReSTIR GI stay selectable):
+
+| Pass (`ScreenProbe*.slang`, `Renderer::addScreenProbeGIPasses`, after DDGI) | Output |
+|---|---|
+| **Place**: one probe per tile (16 x 16 px at render resolution; 24 on Low, whose DLSS Performance renders at half size) on a pixel of the tile that is not sky, at an offset that moves every frame (R2 sequence), with the surface's flat normal from the depth buffer | probe positions (RGBA32F) and normals |
+| **Trace**: 8 x 8 rays per probe, uniform over its hemisphere, stratified and rotated per frame. Hits: lights (sun always with its shadow ray, every light when there are up to 4, else two picked by weighted reservoir sampling), emission, and **the DDGI cascades as the world radiance cache** (second bounce and beyond). Misses: the sky. Glass and clear blended surfaces let rays through (light through windows), alpha masks cut out, the back of single-sided geometry is black | ray atlas (RGBA16F, radiance + hit distance) |
+| **Irradiance**: per probe a world-space octahedral irradiance map (6 x 6 + border, like DDGI's), the clamped cosine of each direction over the rays: E/pi = 2/N sum L max(0, d.w) | irradiance atlas |
+| **Filter** (x2 by default): each texel averaged with the same direction of the 3 x 3 neighbouring probes that lie on the same surface (plane distance relative to the view distance, normal agreement) | irradiance atlas (ping-pong) |
+| **Integrate**: per pixel, the 4 probes around it (bilinear over the jittered grid) weighted by plane distance and normal, read towards the pixel's normal-mapped normal; none on its surface: the 4 x 4 around; still none: DDGI / environment. Then **temporal accumulation**: last frame's result reprojected with the motion vectors, accepted per tap against last frame's depth and normal, blended by 1 / frames (up to 24); a jump of 8x shortens the history | per-pixel irradiance / pi (history, ping-pong) |
+
+The deferred lighting reads it like DDGI (ambient diffuse = it x diffuse color; the sky's specular is occluded by it). The
+probes start on the surface they light, so no light comes through walls; every pixel reads the same few probes as its
+neighbours on the same surface, so walls are smooth; the jittered placement and the temporal accumulation average over the
+tile, so small objects and corners converge to their own light. DDGI keeps running underneath (a quarter of its probes a frame
+in this mode) as the cache for the rays' hits, its artifacts averaged away by 64 rays x the filters x the history.
+
+Settings > Diffuse Global Illumination > Screen Probes: Screen Probe Spacing (8 / 12 / 16 / 24 / 32 px), Spatial Filter Passes
+(0-3), Temporal Frames (1-64), Reset Screen Probe History; the DDGI settings below it are the cache's. Debug view 16 (Indirect
+Diffuse GI Only) shows the result. Cost at 1080p render resolution, 16 px: 8160 probes, ~520k rays + their shadow rays a frame.
+
+Not done: Lumen's importance sampling of the probe rays (by last frame's light and the BRDF), its adaptive extra probes where
+the interpolation fails (here the 4 x 4 search and the DDGI fallback), and a screen-space trace before the ray trace.
 
 ## 3. DLSS edge jitter (Future.md: "when DLSS is enabled, edge detection jittering")
 

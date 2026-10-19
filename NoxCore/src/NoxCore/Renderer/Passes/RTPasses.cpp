@@ -1,4 +1,4 @@
-// Hybrid ray tracing passes: RT shadows (+ NRD SIGMA), RT reflections (+ NRD REBLUR/RELAX), DDGI probe update.
+// Hybrid ray tracing passes: RT shadows (+ NRD SIGMA), RT reflections (+ NRD REBLUR/RELAX), DDGI probe update, screen-probe GI.
 #include "NoxCore/Renderer/Renderer.h"
 
 #include "FrameGraphResources.h"
@@ -428,6 +428,230 @@ namespace Nox
                 cmd.pushData(&blendDistPush, sizeof(shaderio::PushConstantDDGIBlend));
 
                 cmd.drawMeshTasks(1, 1, 1);
+            });
+
+        m_renderGraph.PopGroup();
+    }
+
+    void Renderer::addScreenProbeGIPasses()
+    {
+        // Diffuse GI mode 3 on the hybrid path: the probes trace the scene TLAS (DDGI, when it runs, is their world radiance cache).
+        FrameGraphState& frame = m_frame;
+        const bool run = !frame.runPathTracer && m_rayTracingEnabled && m_diffuseGIMode == 3 && m_hasTLASBuild && m_sceneTLAS &&
+                         uniformData.tlasDeviceAddress != 0 && uniformData.sceneRayTracingInstancesReference != 0 &&
+                         m_screenProbePlacePipeline && m_screenProbeTracePipeline && m_screenProbeIrradiancePipeline &&
+                         m_screenProbeFilterPipeline && m_screenProbeIntegratePipeline;
+        if (!run)
+            return;
+
+        FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
+        const uint32_t tile = std::clamp(m_screenProbeTileSize, 4u, 64u);
+        const NRI::Extent2D probes = { (frame.renderExtent.width + tile - 1) / tile, (frame.renderExtent.height + tile - 1) / tile };
+        const NRI::Extent2D rayExtent = { probes.width * 8, probes.height * 8 }; // ScreenProbeRayRes, ScreenProbeIrradianceRes
+
+        RGTextureDesc probeDesc;
+        probeDesc.Size = RGSize::Absolute;
+        probeDesc.Width = probes.width;
+        probeDesc.Height = probes.height;
+        probeDesc.Format = NRI::ImageFormat::R32G32B32A32_SFLOAT;
+        resources.ScreenProbePosition = m_renderGraph.CreateTexture("Screen Probe Positions", probeDesc);
+        probeDesc.Format = NRI::ImageFormat::R16G16B16A16_SFLOAT;
+        resources.ScreenProbeNormal = m_renderGraph.CreateTexture("Screen Probe Normals", probeDesc);
+        RGTextureDesc atlasDesc = probeDesc;
+        atlasDesc.Width = rayExtent.width;
+        atlasDesc.Height = rayExtent.height;
+        resources.ScreenProbeRays = m_renderGraph.CreateTexture("Screen Probe Rays", atlasDesc);
+        resources.ScreenProbeIrradiance[0] = m_renderGraph.CreateTexture("Screen Probe Irradiance", atlasDesc);
+        resources.ScreenProbeIrradiance[1] = m_renderGraph.CreateTexture("Screen Probe Irradiance (Filtered)", atlasDesc);
+
+        // The per-pixel result ping-pongs: this frame blends last frame's into the other one, which the lighting reads.
+        RGTextureDesc resultDesc;
+        resultDesc.Format = NRI::ImageFormat::R16G16B16A16_SFLOAT;
+        const RGTextureHistory history = m_renderGraph.GetHistoryTexture(ScreenProbeHistoryKey, resultDesc, 2);
+        resources.ScreenProbeGI[0] = history.Textures[0];
+        resources.ScreenProbeGI[1] = history.Textures[1];
+        const uint32_t readIndex = m_screenProbeHistoryIndex;
+        const uint32_t writeIndex = 1 - readIndex;
+        m_screenProbeHistoryIndex = writeIndex;
+        // Last frame's result is only this view's history if it was rendered last frame (not after a pause of the mode, a resize
+        // or a reset); the previous depth / normal snapshot (addPreviousFrameCopyPass) is then last frame's too.
+        const bool historyValid = !m_isFirstFrame && !history.WasReset && m_screenProbeLastFrame + 1 == m_sceneFrameCounter;
+        m_screenProbeLastFrame = m_sceneFrameCounter;
+        frame.screenProbeGIAdded = true;
+        frame.screenProbeGIWriteIndex = writeIndex;
+
+        shaderio::PushConstantScreenProbe common{};
+        common.invViewProj = uniformData.invViewProj;
+        common.prevInvViewProj = glm::inverse(uniformData.prevProj * uniformData.prevView);
+        common.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+        common.inputTextureIndex = 0xFFFFFFFF;
+        common.historyTextureIndex = 0xFFFFFFFF;
+        common.prevDepthTextureIndex = 0xFFFFFFFF;
+        common.prevNormalTextureIndex = 0xFFFFFFFF;
+        common.velocityTextureIndex = 0xFFFFFFFF;
+        common.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
+        common.viewportSize = glm::vec2(static_cast<float>(frame.renderExtent.width), static_cast<float>(frame.renderExtent.height));
+        common.probeCountX = probes.width;
+        common.probeCountY = probes.height;
+        common.tileSize = tile;
+        common.historyValid = historyValid ? 1u : 0u;
+        common.maxHistory = std::clamp(m_screenProbeMaxHistory, 1u, 256u);
+
+        // Every pass is one triangle over its target.
+        auto draw = [](NRI::CommandBuffer& cmd, NRI::Pipeline& pipeline, uint32_t targets, const shaderio::PushConstantScreenProbe& push)
+        {
+            cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, pipeline);
+            cmd.setCullMode(NRI::CullMode::None);
+            cmd.setDepthTestEnable(false);
+            cmd.setDepthWriteEnable(false);
+            for (uint32_t target = 0; target < targets; ++target)
+            {
+                cmd.setColorBlendEnable(target, false);
+                cmd.setColorWriteMask(target, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
+            }
+            cmd.pushData(&push, sizeof(shaderio::PushConstantScreenProbe));
+            cmd.drawMeshTasks(1, 1, 1);
+        };
+
+        const bool readDDGI = frame.ddgiAdded;
+        const uint32_t ddgiIndex = frame.ddgiWriteIndex;
+        m_renderGraph.PushGroup("Screen Probe GI");
+
+        // 1. Where the probes stand.
+        m_renderGraph.AddPass("Screen Probe Place", RGPassFlags::Raster,
+            [&](RGBuilder& builder)
+            {
+                builder.Read(resources.Depth);
+                builder.Read(resources.GBufferNormal);
+                builder.ColorTarget(resources.ScreenProbePosition, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
+                builder.ColorTarget(resources.ScreenProbeNormal, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 1.0f, 0.0f, 0.0f });
+                builder.SetRenderArea(probes);
+            },
+            [this, res = &resources, common, draw](RGPassContext& context)
+            {
+                shaderio::PushConstantScreenProbe push = common;
+                push.depthTextureIndex = context.Slot(res->Depth);
+                push.normalTextureIndex = context.Slot(res->GBufferNormal);
+                draw(context.Cmd(), *m_screenProbePlacePipeline, 2, push);
+            });
+
+        // 2. Their rays.
+        m_renderGraph.AddPass("Screen Probe Trace", RGPassFlags::Raster,
+            [&](RGBuilder& builder)
+            {
+                builder.Read(resources.ScreenProbePosition);
+                builder.Read(resources.ScreenProbeNormal);
+                if (resources.TLAS.IsValid())
+                    builder.Read(resources.TLAS, RGBufferAccess::AccelerationStructureRead);
+                ReadGpuScene(builder, resources);
+                // The hits' bounce light: this frame's DDGI atlases (through the uniforms).
+                if (readDDGI)
+                {
+                    builder.Read(resources.DDGIIrradiance[ddgiIndex]);
+                    builder.Read(resources.DDGIDistance[ddgiIndex]);
+                }
+                builder.ColorTarget(resources.ScreenProbeRays, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
+                builder.SetRenderArea(rayExtent);
+            },
+            [this, res = &resources, common, draw](RGPassContext& context)
+            {
+                shaderio::PushConstantScreenProbe push = common;
+                push.probePositionTextureIndex = context.Slot(res->ScreenProbePosition);
+                push.probeNormalTextureIndex = context.Slot(res->ScreenProbeNormal);
+                draw(context.Cmd(), *m_screenProbeTracePipeline, 1, push);
+            });
+
+        // 3. The rays convolved into each probe's irradiance.
+        m_renderGraph.AddPass("Screen Probe Irradiance", RGPassFlags::Raster,
+            [&](RGBuilder& builder)
+            {
+                builder.Read(resources.ScreenProbeRays);
+                builder.Read(resources.ScreenProbePosition);
+                builder.Read(resources.ScreenProbeNormal);
+                builder.ColorTarget(resources.ScreenProbeIrradiance[0], NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
+                builder.SetRenderArea(rayExtent);
+            },
+            [this, res = &resources, common, draw](RGPassContext& context)
+            {
+                shaderio::PushConstantScreenProbe push = common;
+                push.probePositionTextureIndex = context.Slot(res->ScreenProbePosition);
+                push.probeNormalTextureIndex = context.Slot(res->ScreenProbeNormal);
+                push.inputTextureIndex = context.Slot(res->ScreenProbeRays);
+                draw(context.Cmd(), *m_screenProbeIrradiancePipeline, 1, push);
+            });
+
+        // 4. Spatial filter between neighbouring probes, ping-pong.
+        static constexpr const char* FilterPassNames[] = { "Screen Probe Filter 1", "Screen Probe Filter 2", "Screen Probe Filter 3" };
+        const uint32_t filterPasses = std::min(m_screenProbeFilterPasses, 3u);
+        uint32_t current = 0;
+        for (uint32_t filterPass = 0; filterPass < filterPasses; ++filterPass)
+        {
+            const uint32_t source = current;
+            const uint32_t target = 1 - current;
+            m_renderGraph.AddPass(FilterPassNames[filterPass], RGPassFlags::Raster,
+                [&](RGBuilder& builder)
+                {
+                    builder.Read(resources.ScreenProbeIrradiance[source]);
+                    builder.Read(resources.ScreenProbePosition);
+                    builder.Read(resources.ScreenProbeNormal);
+                    builder.ColorTarget(resources.ScreenProbeIrradiance[target], NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
+                    builder.SetRenderArea(rayExtent);
+                },
+                [this, res = &resources, common, draw, source](RGPassContext& context)
+                {
+                    shaderio::PushConstantScreenProbe push = common;
+                    push.probePositionTextureIndex = context.Slot(res->ScreenProbePosition);
+                    push.probeNormalTextureIndex = context.Slot(res->ScreenProbeNormal);
+                    push.inputTextureIndex = context.Slot(res->ScreenProbeIrradiance[source]);
+                    draw(context.Cmd(), *m_screenProbeFilterPipeline, 1, push);
+                });
+            current = target;
+        }
+
+        // 5. Per pixel: the probes around it, accumulated over frames.
+        const bool readVelocity = frame.gbufferVelocityWritten;
+        m_renderGraph.AddPass("Screen Probe Integrate", RGPassFlags::Raster,
+            [&](RGBuilder& builder)
+            {
+                builder.Read(resources.Depth);
+                builder.Read(resources.GBufferNormal);
+                builder.Read(resources.ScreenProbePosition);
+                builder.Read(resources.ScreenProbeNormal);
+                builder.Read(resources.ScreenProbeIrradiance[current]);
+                if (historyValid)
+                {
+                    builder.Read(resources.ScreenProbeGI[readIndex]);
+                    builder.Read(resources.PrevDepth);
+                    builder.Read(resources.PrevNormal);
+                }
+                if (readVelocity)
+                    builder.Read(resources.GBufferVelocity);
+                // The fallback where no probe stands on a surface.
+                if (readDDGI)
+                {
+                    builder.Read(resources.DDGIIrradiance[ddgiIndex]);
+                    builder.Read(resources.DDGIDistance[ddgiIndex]);
+                }
+                builder.ColorTarget(resources.ScreenProbeGI[writeIndex], NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
+                builder.SetRenderArea(frame.renderExtent);
+            },
+            [this, res = &resources, common, draw, current, readIndex, historyValid, readVelocity](RGPassContext& context)
+            {
+                shaderio::PushConstantScreenProbe push = common;
+                push.depthTextureIndex = context.Slot(res->Depth);
+                push.normalTextureIndex = context.Slot(res->GBufferNormal);
+                push.probePositionTextureIndex = context.Slot(res->ScreenProbePosition);
+                push.probeNormalTextureIndex = context.Slot(res->ScreenProbeNormal);
+                push.inputTextureIndex = context.Slot(res->ScreenProbeIrradiance[current]);
+                if (historyValid)
+                {
+                    push.historyTextureIndex = context.Slot(res->ScreenProbeGI[readIndex]);
+                    push.prevDepthTextureIndex = context.Slot(res->PrevDepth);
+                    push.prevNormalTextureIndex = context.Slot(res->PrevNormal);
+                }
+                if (readVelocity)
+                    push.velocityTextureIndex = context.Slot(res->GBufferVelocity);
+                draw(context.Cmd(), *m_screenProbeIntegratePipeline, 1, push);
             });
 
         m_renderGraph.PopGroup();

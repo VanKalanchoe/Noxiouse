@@ -64,6 +64,13 @@ namespace Nox
         RGTexture DDGIIrradiance[2];
         RGTexture DDGIDistance[2];
 
+        // Screen-probe GI (ScreenProbe*.slang)
+        RGTexture ScreenProbePosition;     // per probe: world position (w: 1, 0 for none)
+        RGTexture ScreenProbeNormal;       // per probe: the surface's flat normal
+        RGTexture ScreenProbeRays;         // 8 x 8 rays per probe
+        RGTexture ScreenProbeIrradiance[2]; // octahedral irradiance per probe, ping-pong of the spatial filter
+        RGTexture ScreenProbeGI[2];        // the per-pixel result, ping-pong history (FrameGraphState::screenProbeGIWriteIndex)
+
         // ReSTIR GI / DI
         RGTexture ReSTIRGIRaw;
         RGTexture ReSTIRGIDenoised;

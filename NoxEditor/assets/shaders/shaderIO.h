@@ -806,7 +806,8 @@ struct PushConstantDeferredLighting
     // the view distance it is looked up with (times the component's distance scale).
     uint32_t aerialPerspectiveTextureIndex;
     float aerialPerspectiveKmPerUnit;
-    float aerialPerspectivePadding0;
+    // Screen-probe GI's result (ScreenProbeIntegrate.slang: irradiance / pi), 0xFFFFFFFF when it did not run (diffuseGIMode 3).
+    uint32_t screenProbeGITextureIndex;
     float aerialPerspectivePadding1;
 };
 
@@ -1040,6 +1041,31 @@ struct PushConstantDDGIBlend
     float hysteresis;
     uint32_t firstFrame;
     uint32_t frameIndex;
+};
+
+// Screen-probe GI (ScreenProbeCommon.slang): one layout for its five passes (Place, Trace, Irradiance, Filter, Integrate).
+struct PushConstantScreenProbe
+{
+    mat4 invViewProj;     // this frame's: the G-buffer's pixels -> world
+    mat4 prevInvViewProj; // last frame's (Integrate: its depth snapshot -> world)
+    uint64_t matrixReference;
+    uint32_t depthTextureIndex;
+    uint32_t normalTextureIndex;        // the G-buffer's
+    uint32_t probePositionTextureIndex; // ScreenProbePlace's outputs
+    uint32_t probeNormalTextureIndex;
+    uint32_t inputTextureIndex;         // what the pass reads: the rays, the irradiance atlas, the filtered atlas
+    uint32_t historyTextureIndex;       // Integrate: last frame's result
+    uint32_t prevDepthTextureIndex;
+    uint32_t prevNormalTextureIndex;
+    uint32_t velocityTextureIndex;      // 0xFFFFFFFF: reprojected with the camera's matrices
+    uint32_t frameIndex;
+    vec2 viewportSize;
+    uint32_t probeCountX;
+    uint32_t probeCountY;
+    uint32_t tileSize;   // pixels per probe each way
+    uint32_t historyValid;
+    uint32_t maxHistory; // frames accumulated at most
+    uint32_t padding0;
 };
 
 struct PushConstantDDGIDebug

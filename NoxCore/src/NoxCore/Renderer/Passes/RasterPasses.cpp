@@ -499,15 +499,16 @@ namespace Nox
         const bool nrdReflectionsNeedVelocity = !m_frame.runPathTracer && uniformData.enableRTReflections != 0 &&
                                                 m_reflectionPipeline &&
                                                 m_nrdReflectionDenoiser != NRI::NRDReflectionDenoiser::Off && nrdAvailable;
-        const bool restirGINeedsVelocity = (!m_frame.runPathTracer || m_frame.pathTracerUsesRTXDI) &&
-                                           (m_diffuseGIMode == 2 || (m_debugMode == 16 && m_diffuseGIMode != 1));
+        const bool restirGINeedsVelocity = (!m_frame.runPathTracer || m_frame.pathTracerUsesRTXDI) && isReSTIRGIRequested();
+        // Screen-probe GI reprojects its history with them.
+        const bool screenProbeGINeedsVelocity = !m_frame.runPathTracer && m_rayTracingEnabled && m_diffuseGIMode == 3;
         const bool restirDINeedsVelocity = (!m_frame.runPathTracer || m_frame.pathTracerUsesRTXDI) && m_directLightingMode == 1;
         const bool restirPTNeedsVelocity = m_frame.runPathTracer && m_restirPTEnabled && m_restirPTTemporalEnabled;
         const bool pathTracerNRDNeedsVelocity = m_frame.runPathTracer &&
                                                 m_nrdPTDenoiser != NRI::NRDDiffuseDenoiser::Off && nrdAvailable;
         const bool inspectVelocity = m_textureInspection.Name == "GBuffer Velocity";
         const bool writeVelocity = dlssNeedsVelocity || nrdShadowsNeedVelocity || nrdReflectionsNeedVelocity ||
-                                   restirGINeedsVelocity || restirDINeedsVelocity || restirPTNeedsVelocity ||
+                                   restirGINeedsVelocity || screenProbeGINeedsVelocity || restirDINeedsVelocity || restirPTNeedsVelocity ||
                                    pathTracerNRDNeedsVelocity || m_debugMode == 15 || inspectVelocity;
         m_frame.gbufferVelocityWritten = writeVelocity;
 
