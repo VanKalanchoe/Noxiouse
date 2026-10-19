@@ -70,6 +70,7 @@ namespace Nox
         RGTexture ScreenProbeRays;         // 8 x 8 rays per probe
         RGTexture ScreenProbeIrradiance[2]; // octahedral irradiance per probe, ping-pong of the spatial filter
         RGTexture ScreenProbeGI[2];        // the per-pixel result, ping-pong history (FrameGraphState::screenProbeGIWriteIndex)
+        RGTexture ScreenProbeGIDistance;   // per pixel: the distance from the camera of the surface the result is for (SceneGI.slang)
 
         // ReSTIR GI / DI
         RGTexture ReSTIRGIRaw;

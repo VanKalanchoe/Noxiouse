@@ -363,6 +363,12 @@ struct UniformBufferObject
     DDGICascade ddgiCascades[4];
     uint32_t ddgiCascadeCount;
     uint32_t ddgiUpdateStride;
+
+    // Screen-probe GI's per-pixel result for the passes that shade something else than the G-buffer's pixels (SceneGI.slang):
+    // irradiance / pi, and the distance from the camera of the surface each pixel is for (0: sky). Render resolution, this
+    // camera's (jittered) pixels; 0xFFFFFFFF when it did not run.
+    uint32_t screenGITextureIndex;
+    uint32_t screenGIDistanceTextureIndex;
 };
 
 struct Vertex

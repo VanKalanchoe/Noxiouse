@@ -884,6 +884,12 @@ namespace Nox
                     builder.Read(resources.DDGIIrradiance[m_frame.ddgiWriteIndex]);
                     builder.Read(resources.DDGIDistance[m_frame.ddgiWriteIndex]);
                 }
+                // ...and the screen-probe GI of the surface right behind (decals) or of a traced hit on screen (SceneGI.slang).
+                if (m_frame.screenProbeGIAdded)
+                {
+                    builder.Read(resources.ScreenProbeGI[m_frame.screenProbeGIWriteIndex]);
+                    builder.Read(resources.ScreenProbeGIDistance);
+                }
                 // Transparent lit shading's specular occlusion approximation (Material_TransparentLit_Mesh.slang).
                 if (m_frame.ssaoAdded)
                     builder.Read(resources.SSAO);

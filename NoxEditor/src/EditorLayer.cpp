@@ -735,7 +735,7 @@ namespace Nox
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("Every preset is ray traced (no shadow maps):\n"
                                   "  Low: RT shadows of the sun, screen-probe GI (24 px probes), SSAO, DLSS Performance (the fallback for smaller RT GPUs)\n"
-                                  "  Medium: + RT reflections, ReSTIR DI (every light shadowed), screen-probe GI (16 px), DLSS Balanced\n"
+                                  "  Medium: + RT reflections, screen-probe GI (16 px), DLSS Balanced\n"
                                   "  High: + RTAO, RT glass, DLSS Quality (the closest to the path tracer)\n"
                                   "The project opens with it (saved in the .nproj). Changing a setting below makes it Custom for this session.");
             ImGui::Separator();
@@ -905,6 +905,10 @@ namespace Nox
                 {
                     m_Renderer->setUpscaleMode(static_cast<NRI::UpscaleMode>(currentUpscaleMode));
                 }
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Also the ray tracing resolution: every ray traced effect (shadows, reflections, GI, AO, glass)\n"
+                                      "runs at the render resolution and DLSS upscales the result. Per axis: DLAA 100%%, Quality 67%%,\n"
+                                      "Balanced 58%%, Performance 50%%, Ultra Performance 33%% -- Performance traces a quarter of DLAA's rays.");
 
                 bool stableDepth = m_Renderer->getStableEditorDepth();
                 if (ImGui::Checkbox("Stable Overlays", &stableDepth))
@@ -1357,7 +1361,7 @@ namespace Nox
 
                 // Direct Lighting (ReSTIR DI)
                 static const char* directLightingModeNames[] = {
-                    "Brute-Force Analytic Loop (existing)",
+                    "Brute-Force Loop (every light, default)",
                     "ReSTIR DI (Screen-Space Resampled, RTXDI)"
                 };
                 int currentDirectLightingMode = static_cast<int>(m_Renderer->getDirectLightingMode());
@@ -1367,7 +1371,11 @@ namespace Nox
                 }
                 if (ImGui::IsItemHovered())
                 {
-                    ImGui::SetTooltip("Brute-force loop only ray-traces a shadow for light index 0 -- every other point/spot light is unshadowed.\nReSTIR DI resamples down to one light per pixel and shadow-rays it, so every light gets a real shadow.\nSwitch \"PBR Debug View\" to \"8: Direct Lights Only\" to compare the two in isolation.");
+                    ImGui::SetTooltip("Brute-force loop: every light in range, each with its own shadow ray per pixel (the sun's from the\n"
+                                      "denoised shadow mask). Exact and noise-free; the cost grows with the number of lights that reach a pixel.\n"
+                                      "ReSTIR DI: one light per pixel resampled from all of them, one shadow ray, then denoised -- the\n"
+                                      "many-light technique (UE5's MegaLights is the same idea); worth it with hundreds of overlapping lights.\n"
+                                      "Switch \"PBR Debug View\" to \"8: Direct Lights Only\" to compare the two in isolation.");
                 }
 
                 if (m_Renderer->getDirectLightingMode() == 1)

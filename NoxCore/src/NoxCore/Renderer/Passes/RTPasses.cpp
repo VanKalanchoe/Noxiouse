@@ -173,11 +173,17 @@ namespace Nox
                 builder.Read(resources.Visibility);
                 ReadIfValid(builder, resources.TLAS);
                 ReadGpuScene(builder, resources);
-                // Hit shading samples the DDGI atlases (through the uniforms) when DDGI runs.
+                // Hit shading samples the DDGI atlases (through the uniforms) when DDGI runs, and the screen-probe GI where the hit
+                // is on screen (SceneGI.slang).
                 if (m_frame.ddgiAdded)
                 {
                     builder.Read(resources.DDGIIrradiance[m_frame.ddgiWriteIndex]);
                     builder.Read(resources.DDGIDistance[m_frame.ddgiWriteIndex]);
+                }
+                if (m_frame.screenProbeGIAdded)
+                {
+                    builder.Read(resources.ScreenProbeGI[m_frame.screenProbeGIWriteIndex]);
+                    builder.Read(resources.ScreenProbeGIDistance);
                 }
                 builder.ColorTarget(resources.RawReflection, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 10000.0f });
                 builder.SetRenderArea(m_frame.renderExtent);
@@ -470,6 +476,9 @@ namespace Nox
         const RGTextureHistory history = m_renderGraph.GetHistoryTexture(ScreenProbeHistoryKey, resultDesc, 2);
         resources.ScreenProbeGI[0] = history.Textures[0];
         resources.ScreenProbeGI[1] = history.Textures[1];
+        RGTextureDesc distanceDesc;
+        distanceDesc.Format = NRI::ImageFormat::R32_SFLOAT;
+        resources.ScreenProbeGIDistance = m_renderGraph.CreateTexture("Screen Probe GI Distance", distanceDesc);
         const uint32_t readIndex = m_screenProbeHistoryIndex;
         const uint32_t writeIndex = 1 - readIndex;
         m_screenProbeHistoryIndex = writeIndex;
@@ -608,7 +617,7 @@ namespace Nox
             current = target;
         }
 
-        // 5. Per pixel: the probes around it, accumulated over frames.
+        // 5. Per pixel: the probes around it, accumulated over frames (+ which surface each pixel's result is for).
         const bool readVelocity = frame.gbufferVelocityWritten;
         m_renderGraph.AddPass("Screen Probe Integrate", RGPassFlags::Raster,
             [&](RGBuilder& builder)
@@ -633,6 +642,7 @@ namespace Nox
                     builder.Read(resources.DDGIDistance[ddgiIndex]);
                 }
                 builder.ColorTarget(resources.ScreenProbeGI[writeIndex], NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
+                builder.ColorTarget(resources.ScreenProbeGIDistance, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
                 builder.SetRenderArea(frame.renderExtent);
             },
             [this, res = &resources, common, draw, current, readIndex, historyValid, readVelocity](RGPassContext& context)
@@ -651,7 +661,7 @@ namespace Nox
                 }
                 if (readVelocity)
                     push.velocityTextureIndex = context.Slot(res->GBufferVelocity);
-                draw(context.Cmd(), *m_screenProbeIntegratePipeline, 1, push);
+                draw(context.Cmd(), *m_screenProbeIntegratePipeline, 2, push);
             });
 
         m_renderGraph.PopGroup();

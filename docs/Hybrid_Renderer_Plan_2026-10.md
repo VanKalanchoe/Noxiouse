@@ -46,11 +46,13 @@ project opens). Auto picks by the GPU's memory budget: < 6.5 GB Low, < 10 GB Med
 
 | Preset | Shadows | Reflections | AO | Diffuse GI | Direct light | DLSS |
 |---|---|---|---|---|---|---|
-| Low (fallback) | RT, sun only (the loop shadows light 0) + SIGMA | IBL | SSAO | screen probes, 24 px (§2c) | analytic loop | Performance |
-| Medium | RT + SIGMA | RT + REBLUR | SSAO | screen probes, 16 px | ReSTIR DI (every light shadowed) + REBLUR | Balanced |
-| High (near the path tracer) | RT + SIGMA | RT + REBLUR | RTAO | screen probes, 16 px | ReSTIR DI + REBLUR | Quality |
+| Low (fallback) | RT + SIGMA (sun), a ray per light (others) | IBL | SSAO | screen probes, 24 px (§2c) | loop, every light shadowed | Performance |
+| Medium | RT + SIGMA | RT + REBLUR | SSAO | screen probes, 16 px | loop, every light shadowed | Balanced |
+| High (near the path tracer) | RT + SIGMA | RT + REBLUR | RTAO | screen probes, 16 px | loop, every light shadowed | Quality |
 
-(Until 2026-10-19 the GI column was DDGI / DDGI / ReSTIR GI + REBLUR; §2c.) Glass refraction is on in all three. Changing one setting afterwards shows Custom for the session. Not yet: half-resolution
+(Until 2026-10-19 the GI column was DDGI / DDGI / ReSTIR GI + REBLUR (§2c), and Medium / High used ReSTIR DI + REBLUR for
+direct light -- the user found ReSTIR DI broken; it stays selectable. The loop already traces a shadow ray per light in range
+per pixel, not only for light 0 as older notes said.) Glass refraction is on in all three. Changing one setting afterwards shows Custom for the session. Not yet: half-resolution
 reflections and a roughness cut as their own rungs.
 
 ### 2b. DDGI fixed and made camera-following (2026-10-19, untested)
@@ -136,6 +138,30 @@ Diffuse GI Only) shows the result. Cost at 1080p render resolution, 16 px: 8160 
 
 Not done: Lumen's importance sampling of the probe rays (by last frame's light and the BRDF), its adaptive extra probes where
 the interpolation fails (here the 4 x 4 search and the DDGI fallback), and a screen-space trace before the ray trace.
+
+**Everything else lit by the same GI (2026-10-19, after the user's test: "decals have a light white background compared to the
+path tracer; looking through windows the inside loses its color, with GI off it comes back"):**
+- **The cause of the pale veil was transparency, not GI**: the forward shader (Material_TransparentLit_Mesh.slang) scaled a blended
+  surface's diffuse light by its alpha but added its reflection (sky, sun highlights) whole, so a decal's clear parts and
+  low-alpha window glass laid the sky's reflection over what is behind them. Alpha is coverage now, for all of it, as the path
+  tracer takes it (it keeps a blended surface with probability alpha). With GI on the inside of the Bistro is darker (the
+  sky's light no longer reaches it unoccluded), so the constant veil over the windows hid its colors -- hence "GI off brings
+  the color back".
+- **One GI for every shaded point** (`SceneGI.slang`): the screen-probe pass also writes each pixel's distance from the camera;
+  a point shaded elsewhere -- a decal or glass in the forward pass, an RT reflection or refraction hit -- that is the surface the
+  camera sees at its pixel takes that pixel's screen-probe GI (a decal gets exactly its wall's light, a reflected or refracted
+  object on screen the light it has when seen directly); other points take DDGI, then the environment. RT reflections now run
+  after the GI for that. Forward surfaces also get the deferred lighting's specular occlusion.
+- **Thin glass is no longer traced** on the High rung: an unbent view ray only finds the surface right behind the pane, which
+  the screen-space refraction source already holds fully lit (GI, reflections, shadows); the trace shaded it more simply. Glass
+  with a volume (thickness) is still traced.
+- **Rough reflections from the GI** (screen probes): the environment's reflection hands over to the GI times the BRDF's
+  specular albedo from roughness 0.35 to 0.8 -- a rough metal indoors reflects the room, not the sky.
+
+Ray tracing resolution: every RT pass runs at the render resolution, which the DLSS mode sets (DLAA 100 %, Quality 67 %,
+Balanced 58 %, Performance 50 %, Ultra Performance 33 % per axis; Settings shows "Rendering W x H -> W x H"). Performance traces a
+quarter of DLAA's rays for every effect. Per effect: Screen Probe Spacing (24 px: about half the GI rays of 16 px), DDGI Probe
+Updates, RT reflections off on Low.
 
 ## 3. DLSS edge jitter (Future.md: "when DLSS is enabled, edge detection jittering")
 

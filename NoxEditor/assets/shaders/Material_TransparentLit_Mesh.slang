@@ -374,9 +374,11 @@ FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform Pu
     // there, bent and blurred (below), and the surface covers what is behind it by its alpha alone. Without it, transmission only
     // lets the background through unbent (lower alpha).
     const bool refraction = transmission > 0.0 && pushConstant.refractionTextureIndex != 0xFFFFFFFF;
+    // A blended surface is there by its alpha (coverage), all of it -- its reflection too, as the path tracer takes alpha (a decal's
+    // clear parts reflect nothing; they used to add the sky's reflection over the wall, a pale veil). Applied once to the result
+    // (premultiplied output). What transmission leaves is the surface's diffuse share.
     const float coverage = instance.alphaMode == 2 ? baseColor.a : 1.0;
-    float diffuseAlpha = refraction ? (1.0 - transmission) : baseColor.a * (1.0 - transmission);
-    baseColor.a = refraction ? coverage : diffuseAlpha;
+    const float diffuseAlpha = 1.0 - transmission;
 
     float3 diffuseColor = baseColor.rgb * (1.0 - metallic) * diffuseAlpha;
     float3 specularColor = lerp(f0, baseColor.rgb, metallic);
@@ -526,17 +528,18 @@ FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform Pu
 
     IBLResult ibl = getIBLContribution(ubo, iblInputs, n, reflection, ao);
     float3 ambientDiffuse = ibl.diffuse;
+    float3 ambientSpecular = ibl.specular;
 
-    if (ubo->enableDDGI != 0 && ubo->ddgiIrradianceTextureIndex != 0xFFFFFFFF && ubo->ddgiDistanceTextureIndex != 0xFFFFFFFF)
+    // With a GI technique running: the scene's diffuse light here (SceneGI.slang -- a decal gets exactly its wall's screen-probe
+    // GI, glass the DDGI cascades), and the sky's reflection only as far as the sky reaches, as the deferred lighting does.
+    float3 sceneIrradiance;
+    if ((ubo->screenGITextureIndex != 0xFFFFFFFF || ubo->enableDDGI != 0) && sample_scene_gi(ubo, vertIn.worldPos, n, normalize(vertIn.normal), v, sceneIrradiance))
     {
-        Texture2D ddgiIrrTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->ddgiIrradianceTextureIndex, 0));
-        Texture2D ddgiDistTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->ddgiDistanceTextureIndex, 0));
-        SamplerState ddgiSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
-        float3 ddgiIrradiance = sample_ddgi_diffuse(ubo, vertIn.worldPos, n, ddgiIrrTex, ddgiDistTex, ddgiSampler);
-        ambientDiffuse = ddgiIrradiance * diffuseColor;
+        ambientDiffuse = sceneIrradiance * diffuseColor;
+        ambientSpecular *= scene_gi_specular_occlusion(ubo, sceneIrradiance);
     }
 
-    float3 color = (directLighting + ambientDiffuse + ibl.specular) * ao;
+    float3 color = (directLighting + ambientDiffuse + ambientSpecular) * ao;
 
     float3 emissive = instance.emissiveFactor.rgb * instance.emissiveStrength;
     if (instance.emissiveTextureIndex != 0xFFFFFFFF)
@@ -558,8 +561,11 @@ FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform Pu
                                   length(float3(model[0][2], model[1][2], model[2][2]))) / 3.0;
 
         // Smooth glass on the high rung: traced (H3); rougher glass, or the lower rungs: the color pyramid (H3b), both in between.
+        // Thin-walled glass (no volume) does not bend the view ray: what it shows is the lit scene right behind it, which the
+        // color pyramid already holds with everything the deferred lighting gives it (GI, reflections, shadows) -- tracing it
+        // again would only shade it more simply.
         float tracedWeight = 0.0;
-        if ((pushConstant.meshletCulling & MESHLET_RT_REFRACTION) != 0 && ubo->tlasDeviceAddress != 0)
+        if ((pushConstant.meshletCulling & MESHLET_RT_REFRACTION) != 0 && ubo->tlasDeviceAddress != 0 && instance.thickness > 0.0)
             tracedWeight = saturate((RTRefractionMaxRoughness - perceptualRoughness) / (RTRefractionMaxRoughness - RTRefractionFullRoughness));
 
         float3 behind = float3(0.0);
@@ -599,7 +605,8 @@ FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform Pu
 
     // Linear HDR, not tonemapped - this pipeline writes into the same m_hdrSceneResource as
     // everything else in the forward pass, which is only tonemapped once at the end of the frame.
-    output.color = float4(color, baseColor.a);
+    // Without the refraction source, the transmitted part lets the background through unbent.
+    output.color = float4(color * coverage, coverage * diffuseAlpha);
     output.entityID = vertIn.entityID;
 
     return output;

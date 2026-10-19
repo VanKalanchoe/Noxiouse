@@ -4,8 +4,16 @@
 // looks a tile further, then falls back to the DDGI cascades / the environment. Then accumulated over frames: last frame's
 // result where this surface was (motion vectors, checked against last frame's depth and normal), blended with this frame's
 // by 1 / (frames accumulated), up to maxHistory; a sudden large change (a light switched on) shortens the history.
-// Output: irradiance / pi (rgb), frames accumulated (a). This is the texture the deferred lighting reads.
+// Outputs: irradiance / pi (rgb), frames accumulated (a) -- the texture the deferred lighting reads -- and the distance from the
+// camera of the surface each pixel is for (0: sky), with which the forward and ray-hit shading find out whether a point they
+// shade is that surface (SceneGI.slang).
 #include "ScreenProbeCommon.slang"
+
+struct ScreenProbeIntegrateOutput
+{
+    float4 irradiance : SV_Target0;
+    float distance : SV_Target1;
+};
 
 float3 screen_probe_fallback(UniformBufferObject* ubo, float3 position, float3 normal, float3 geometricNormal)
 {
@@ -27,14 +35,18 @@ float3 screen_probe_fallback(UniformBufferObject* ubo, float3 position, float3 n
 }
 
 [shader("fragment")]
-float4 fragMain(ScreenProbeVertex input, uniform PushConstantScreenProbe pushConstant) : SV_Target0
+ScreenProbeIntegrateOutput fragMain(ScreenProbeVertex input, uniform PushConstantScreenProbe pushConstant)
 {
+    ScreenProbeIntegrateOutput output;
+    output.irradiance = float4(0.0);
+    output.distance = 0.0;
+
     const int2 pixel = int2(input.pos.xy);
     UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
     Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
     const float depth = depthTex.Load(int3(pixel, 0));
     if (depth <= 0.0)
-        return float4(0.0);
+        return output;
 
     const float2 pixelCenter = float2(pixel) + 0.5;
     const float3 position = screen_probe_world_position(pushConstant.invViewProj, pixelCenter, pushConstant.viewportSize, depth);
@@ -168,5 +180,7 @@ float4 fragMain(ScreenProbeVertex input, uniform PushConstantScreenProbe pushCon
             frames = min(frames, 4.0);
     }
     const float3 result = history.a > 0.0 ? lerp(history.rgb, current, 1.0 / frames) : current;
-    return float4(max(result, 0.0), frames);
+    output.irradiance = float4(max(result, 0.0), frames);
+    output.distance = viewDistance;
+    return output;
 }

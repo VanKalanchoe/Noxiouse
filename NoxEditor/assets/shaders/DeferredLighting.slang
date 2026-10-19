@@ -549,6 +549,17 @@
             const float skyLuma = max(ubo->scaleIBLAmbient, 0.01);
             specularOcclusion = saturate(giLuma / skyLuma);
             ambientSpecular *= specularOcclusion;
+
+            // A rough reflection's wide lobe sees about the light around the surface, not the sky: the GI in place of the
+            // environment's reflection, more so the rougher (RT reflections, where they run, replace both for the smoother below).
+            if (ubo->brdfLutIndex != 0xFFFFFFFF)
+            {
+                SamplerState samplerBrdf = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_BRDFLUT, 0));
+                Texture2D brdfTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->brdfLutIndex, 0));
+                const float2 brdf = brdfTex.SampleLevel(samplerBrdf, float2(NdotV, 1.0 - perceptualRoughness), 0).rg;
+                const float3 giSpecular = screenProbeIrradiance * (specularColor * brdf.x + brdf.y);
+                ambientSpecular = lerp(ambientSpecular, giSpecular, smoothstep(0.35, 0.8, perceptualRoughness));
+            }
         }
         else if ((pushConstant.diffuseGIMode == 2 || pushConstant.debugMode == 16) && pushConstant.restirGIDiffuseTextureIndex != 0xFFFFFFFF)
         {

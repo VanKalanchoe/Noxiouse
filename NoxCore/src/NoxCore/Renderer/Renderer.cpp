@@ -589,7 +589,7 @@ namespace Nox
             bool RTAO;               // else SSAO
             uint32_t DiffuseGI;      // 1 DDGI, 2 ReSTIR GI, 3 screen probes (DDGI underneath)
             uint32_t ScreenProbeTile; // pixels per screen probe
-            uint32_t DirectLighting; // 0 the loop (the first light shadowed), 1 ReSTIR DI (every light shadowed)
+            uint32_t DirectLighting; // 0 the loop (a shadow ray per light in range), 1 ReSTIR DI (one resampled light per pixel)
             NRI::UpscaleMode Upscale;
             bool RTRefraction;       // smooth glass traced (H3); else the screen-space refraction only
         };
@@ -598,9 +598,10 @@ namespace Nox
         {
             switch (quality)
             {
+            // Direct light: the loop on every rung (ReSTIR DI stays selectable; the user found it broken, 2026-10-19).
             case Renderer::RenderQuality::Low: return { true, false, false, 3, 24, 0, NRI::UpscaleMode::Performance, false };
-            case Renderer::RenderQuality::Medium: return { true, true, false, 3, 16, 1, NRI::UpscaleMode::Balanced, false };
-            default: return { true, true, true, 3, 16, 1, NRI::UpscaleMode::Quality, true };
+            case Renderer::RenderQuality::Medium: return { true, true, false, 3, 16, 0, NRI::UpscaleMode::Balanced, false };
+            default: return { true, true, true, 3, 16, 0, NRI::UpscaleMode::Quality, true };
             }
         }
     }
@@ -1452,7 +1453,8 @@ namespace Nox
         m_screenProbeTracePipeline = create("assets/shaders/ScreenProbeTrace.slang", { NRI::ImageFormat::R16G16B16A16_SFLOAT });
         m_screenProbeIrradiancePipeline = create("assets/shaders/ScreenProbeIrradiance.slang", { NRI::ImageFormat::R16G16B16A16_SFLOAT });
         m_screenProbeFilterPipeline = create("assets/shaders/ScreenProbeFilter.slang", { NRI::ImageFormat::R16G16B16A16_SFLOAT });
-        m_screenProbeIntegratePipeline = create("assets/shaders/ScreenProbeIntegrate.slang", { NRI::ImageFormat::R16G16B16A16_SFLOAT });
+        m_screenProbeIntegratePipeline = create("assets/shaders/ScreenProbeIntegrate.slang",
+                                                { NRI::ImageFormat::R16G16B16A16_SFLOAT, NRI::ImageFormat::R32_SFLOAT });
     }
 
     NRI::Extent2D Renderer::getScreenProbeCounts() const
@@ -4119,9 +4121,10 @@ namespace Nox
             addOcclusionBlurPass();
             addNRDGuidesPass();
             addRTShadowPasses();
-            addRTReflectionPasses();
             addDDGIPasses();
             addScreenProbeGIPasses();
+            // After the GI: reflection hits on screen take its light (SceneGI.slang), off screen this frame's DDGI.
+            addRTReflectionPasses();
             addLightPresamplingPasses();
             addReSTIRGIPasses();
             addReSTIRDIPasses();
@@ -4464,6 +4467,10 @@ namespace Nox
         // The atlases this frame's DDGI blend writes (the lighting pass reads them).
         uniformData.ddgiIrradianceTextureIndex = frame.ddgiAdded ? graph.GetSlotOr(resources.DDGIIrradiance[frame.ddgiWriteIndex], NoTexture) : NoTexture;
         uniformData.ddgiDistanceTextureIndex = frame.ddgiAdded ? graph.GetSlotOr(resources.DDGIDistance[frame.ddgiWriteIndex], NoTexture) : NoTexture;
+        // The screen-probe GI's per-pixel result for forward and ray-hit shading (SceneGI.slang).
+        uniformData.screenGITextureIndex = frame.screenProbeGIAdded ? graph.GetSlotOr(resources.ScreenProbeGI[frame.screenProbeGIWriteIndex], NoTexture)
+                                                                    : NoTexture;
+        uniformData.screenGIDistanceTextureIndex = frame.screenProbeGIAdded ? graph.GetSlotOr(resources.ScreenProbeGIDistance, NoTexture) : NoTexture;
 
         // ReSTIR GI: the denoised result when its NRD pass runs (NRD evaluation cannot fail once initialized), else raw.
         if (frame.restirGIAdded)
@@ -5834,6 +5841,9 @@ namespace Nox
             // The atlases are only read (and declared) when DDGI ran this frame.
             if (!m_frame.ddgiAdded)
                 uniforms.enableDDGI = 0;
+            // The screen-probe GI is the camera's pixels: another view's points would land on the wrong ones.
+            uniforms.screenGITextureIndex = 0xFFFFFFFF;
+            uniforms.screenGIDistanceTextureIndex = 0xFFFFFFFF;
             // An asset preview stands far below the scene: its shadow rays would hit the world above, its DDGI lookups the grid's edge.
             if (view.Preview)
             {

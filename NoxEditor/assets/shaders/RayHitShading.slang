@@ -2,6 +2,8 @@
 #ifndef RAY_HIT_SHADING_SLANG
 #define RAY_HIT_SHADING_SLANG
 
+#include "SceneGI.slang"
+
 // Intersection UV interpolation
 float2 intersection_uv(GpuRayTracingInstance lut, uint primIndex, float2 barycentrics)
 {
@@ -33,7 +35,8 @@ float2 intersection_uv(GpuRayTracingInstance lut, uint primIndex, float2 barycen
 }
 
 // The radiance leaving a ray's hit towards the ray's origin, without a G-buffer: the hit's base color, every analytic light
-// with one shadow ray each (alpha-masked occluders cut out), DDGI or the irradiance cubemap for the ambient part, emission.
+// with one shadow ray each (alpha-masked occluders cut out), the scene's GI for the ambient part (SceneGI.slang: the
+// screen-probe GI where the hit is on screen, else DDGI / the irradiance cubemap), emission.
 // Diffuse only (the hit's own reflections are not traced). For rays traced from raster passes: RT reflections
 // (Reflection.slang), RT refraction (Material_TransparentLit_Mesh.slang).
 float3 shadeRayHit(UniformBufferObject* ubo, uint instanceSlot, uint primitive, float2 barycentrics, float3 rayOrigin, float3 R, float hitT)
@@ -194,34 +197,14 @@ float3 shadeRayHit(UniformBufferObject* ubo, uint instanceSlot, uint primitive, 
         }
     }
 
-    // Ambient diffuse light: sample DDGI probes if active, or scene irradiance cubemap. Both hold irradiance / pi (cosine-weighted
-    // mean radiance), as the deferred and forward lighting read them: the light the hit reflects is albedo times it.
-    float3 ambientLight = float3(0.0);
-    if (ubo->enableDDGI != 0 && ubo->ddgiIrradianceTextureIndex != 0xFFFFFFFF && ubo->ddgiDistanceTextureIndex != 0xFFFFFFFF)
-    {
-        Texture2D ddgiIrrTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->ddgiIrradianceTextureIndex, 0));
-        Texture2D ddgiDistTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->ddgiDistanceTextureIndex, 0));
-        SamplerState ddgiSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
-
-        float3 ddgiIrr = sample_ddgi_diffuse(ubo, hitPos, hitNormal, ddgiIrrTex, ddgiDistTex, ddgiSampler);
-        ambientLight = albedo * ddgiIrr;
-    }
-    else if (ubo->irradianceMapIndex != 0xFFFFFFFF)
-    {
-        TextureCube irradianceTex = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + ubo->irradianceMapIndex, 0));
-        SamplerState samplerIrradiance = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_IRRADIANCE, 0));
-        // Matches getIBLContribution's diffuse term in PBRLighting.slang exactly (the same irradiance cubemap, the
-        // same scaleIBLAmbient, no extra factor) -- this used to have an additional, undocumented * 0.2 here, making
-        // a reflected surface's ambient lighting five times dimmer than the exact same surface lit directly. Never
-        // visible in a scene with strong direct lights (they dominate the sum below); in an environment-only scene
-        // (Bistro, no direct light does anything on its own) that dim ambient term was the reflection's entire
-        // radiance, reading as almost black.
-        ambientLight = irradianceTex.SampleLevel(samplerIrradiance, hitNormal, 0).rgb * albedo * ubo->scaleIBLAmbient;
-    }
-    else
-    {
-        ambientLight = albedo * 0.05 * ubo->scaleIBLAmbient;
-    }
+    // Ambient diffuse light (irradiance / pi, as the deferred and forward lighting read it: the light the hit reflects is albedo
+    // times it): the same light the camera sees on that surface where it is on screen, else DDGI or the environment. (The
+    // environment's term matches getIBLContribution's diffuse in PBRLighting.slang exactly -- an extra * 0.2 here once made
+    // reflections of environment-lit scenes such as Bistro almost black.)
+    float3 ambientLight = albedo * 0.05 * ubo->scaleIBLAmbient;
+    float3 sceneIrradiance;
+    if (sample_scene_gi(ubo, hitPos, hitNormal, hitNormal, -R, sceneIrradiance))
+        ambientLight = albedo * sceneIrradiance;
 
     // Emissive light from hit surface (e.g. Cornell Box ceiling light)
     float3 emissiveLight = hitLut.emissiveFactor.rgb * hitLut.emissiveFactor.a;
