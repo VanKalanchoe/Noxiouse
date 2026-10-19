@@ -393,10 +393,10 @@ PSOutput fragMain(
         {
             RaytracingAccelerationStructure accelerationStructure = RaytracingAccelerationStructure(g_UBO->tlasDeviceAddress);
             RayDesc visRay;
-            visRay.Origin = surface.worldPos + surface.normal * 0.02;
+            visRay.Origin = surface.worldPos + surface.normal * (0.02 * g_UBO->unitsPerMeter);
             visRay.Direction = L;
-            visRay.TMin = 0.005;
-            visRay.TMax = max(0.01, hitDist - 0.02);
+            visRay.TMin = 0.005 * g_UBO->unitsPerMeter;
+            visRay.TMax = max(0.01 * g_UBO->unitsPerMeter, hitDist - 0.02 * g_UBO->unitsPerMeter);
             RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE> visQuery;
             visQuery.TraceRayInline(accelerationStructure,
                 RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE,

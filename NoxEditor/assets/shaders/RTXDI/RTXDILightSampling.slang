@@ -91,64 +91,16 @@ float2 RAB_SampleDisk(float2 random)
 
 RAB_LightSample RAB_SamplePolymorphicLight(RAB_LightInfo light, RAB_Surface surface, float2 random)
 {
-    RAB_LightSample sample = RAB_EmptyLightSample();
-    sample.lightType = (uint)light.position.w;
-    sample.solidAnglePdf = 1.0;
-
-    if (sample.lightType == 0)
-    {
-        float3 direction = normalize(light.direction.xyz);
-        if (light.spotParams.z > 1e-4)
-        {
-            float3 tangent, bitangent;
-            RAB_BuildBasis(direction, tangent, bitangent);
-            float2 disk = RAB_SampleDisk(random);
-            direction = normalize(direction + (disk.x * tangent + disk.y * bitangent) * tan(light.spotParams.z));
-        }
-        sample.normal = direction;
-        sample.radiance = light.color.rgb * light.color.a;
-        return sample;
-    }
-
-    float3 centerVector = light.position.xyz - surface.worldPos;
-    float centerDistance = length(centerVector);
-    float range = light.direction.w;
-    if (range > 0.0 && centerDistance - light.spotParams.z >= range)
-    {
-        sample.position = light.position.xyz;
-        sample.normal = centerDistance > 1e-4 ? centerVector / centerDistance : float3(0.0, 1.0, 0.0);
-        return sample;
-    }
-
-    float3 sampledPosition = light.position.xyz;
-    if (light.spotParams.z > 1e-4)
-    {
-        float3 centerDirection = centerDistance > 1e-4 ? centerVector / centerDistance : float3(0.0, 1.0, 0.0);
-        float3 tangent, bitangent;
-        RAB_BuildBasis(centerDirection, tangent, bitangent);
-        float2 disk = RAB_SampleDisk(random);
-        sampledPosition += (disk.x * tangent + disk.y * bitangent) * light.spotParams.z;
-    }
-
-    float3 lightVector = sampledPosition - surface.worldPos;
-    float distance = length(lightVector);
-    sample.position = sampledPosition;
-    sample.normal = distance > 1e-4 ? lightVector / distance : float3(0.0, 1.0, 0.0);
-
-    float distanceSquared = max(distance * distance, 1e-4);
-    float attenuation = 1.0 / distanceSquared;
-    if (range > 0.0)
-    {
-        float normalizedDistance = distance / range;
-        attenuation = max(1.0 - pow(normalizedDistance, 4.0), 0.0) / distanceSquared;
-    }
-    if (sample.lightType == 2)
-    {
-        float cone = saturate(dot(normalize(light.direction.xyz), -sample.normal) * light.spotParams.x + light.spotParams.y);
-        attenuation *= cone * cone;
-    }
-    sample.radiance = light.color.rgb * light.color.a * attenuation;
-    return sample;
+    // The engine's light sampling (shaderIO.h, shared with the rest of the renderer): a point on the light -- the sun's cone, a sphere
+    // light's disc, a rect light's area -- and the light from it with the falloff, cone and a rect's area / distance^2 folded in.
+    const LightPointSample lightPoint = sample_light_point(light, surface.worldPos, random);
+    RAB_LightSample s;
+    s.lightType = (uint)light.position.w;
+    s.position = lightPoint.position;
+    s.normal = lightPoint.direction; // directional: the direction itself; local: towards the sampled point
+    s.radiance = lightPoint.radiance;
+    s.solidAnglePdf = 1.0;
+    return s;
 }
 
 void RAB_GetLightDirDistance(RAB_Surface surface, RAB_LightSample sample, out float3 direction, out float distance)

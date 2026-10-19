@@ -34,74 +34,15 @@ RAB_LightInfo RAB_LoadLightInfo(uint index, bool prevFrame)
 
 RAB_LightSample RAB_SamplePolymorphicLight(RAB_LightInfo light, float3 worldPos, float2 uv)
 {
+    // The engine's light sampling (shaderIO.h, shared with the rest of the renderer): a point on the light -- the sun's cone, a sphere
+    // light's disc, a rect light's area -- and the light from it with the falloff, cone and a rect's area / distance^2 folded in.
+    const LightPointSample lightPoint = sample_light_point(light, worldPos, uv);
     RAB_LightSample s;
-    s.position = float3(0.0);
-    s.normal = float3(0.0, 1.0, 0.0);
-    s.radiance = float3(0.0);
+    s.lightType = (uint)light.position.w;
+    s.position = lightPoint.position;
+    s.normal = lightPoint.direction; // directional: the direction itself; local: towards the sampled point
+    s.radiance = lightPoint.radiance;
     s.solidAnglePdf = 1.0;
-    uint lightType = (uint)light.position.w;
-    s.lightType = lightType;
-
-    if (lightType == 0) // Directional
-    {
-        // LightData.direction.xyz is already the "toward the light" vector in this engine's
-        // convention (both DeferredLighting.slang's brute-force loop and PathTracer.slang use it
-        // directly, unnegated, as their lighting L vector) -- do NOT negate it here.
-        float3 dir = normalize(light.direction.xyz);
-        if (light.spotParams.z > 1e-4)
-        {
-            float3 t, b;
-            build_orthonormal_basis(dir, t, b);
-            float r = sqrt(saturate(uv.x));
-            float phi = 2.0 * 3.14159265359 * frac(uv.y);
-            dir = normalize(dir + (r * cos(phi) * t + r * sin(phi) * b) * tan(light.spotParams.z));
-        }
-        s.normal = dir;
-        s.radiance = light.color.rgb * light.color.a;
-        return s;
-    }
-
-    float3 centerVec = light.position.xyz - worldPos;
-    float centerDistance = length(centerVec);
-    float3 sampledPosition = light.position.xyz;
-    if (light.spotParams.z > 1e-4)
-    {
-        float3 centerDir = centerDistance > 1e-4 ? centerVec / centerDistance : float3(0.0, 1.0, 0.0);
-        float3 t, b;
-        build_orthonormal_basis(centerDir, t, b);
-        float r = sqrt(saturate(uv.x));
-        float phi = 2.0 * 3.14159265359 * frac(uv.y);
-        sampledPosition += (r * cos(phi) * t + r * sin(phi) * b) * light.spotParams.z;
-    }
-
-    float3 lightVec = sampledPosition - worldPos;
-    float distance = length(lightVec);
-    s.position = sampledPosition;
-    s.normal = distance > 0.0001 ? (lightVec / distance) : float3(0.0, 1.0, 0.0);
-
-    float attenuation;
-    float range = light.direction.w;
-    float distSq = max(distance * distance, 1e-4);
-    if (range > 0.0)
-    {
-        float dOverR = distance / range;
-        float window = max(1.0 - pow(dOverR, 4.0), 0.0);
-        attenuation = window / distSq;
-    }
-    else
-    {
-        attenuation = 1.0 / distSq;
-    }
-
-    if (lightType == 2) // Spot
-    {
-        float cd = dot(normalize(light.direction.xyz), -s.normal);
-        float angular = saturate(cd * light.spotParams.x + light.spotParams.y);
-        angular *= angular;
-        attenuation *= angular;
-    }
-
-    s.radiance = light.color.rgb * light.color.a * attenuation;
     return s;
 }
 
@@ -239,8 +180,9 @@ bool trace_visibility(float3 origin, float3 direction, float maxDist)
     RayDesc shadowRay;
     shadowRay.Origin = origin;
     shadowRay.Direction = direction;
-    shadowRay.TMin = 0.005;
-    shadowRay.TMax = max(0.01, maxDist);
+    // World units (the project's: meters or centimeters).
+    shadowRay.TMin = 0.005 * g_UBO->unitsPerMeter;
+    shadowRay.TMax = max(0.01 * g_UBO->unitsPerMeter, maxDist);
 
     RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> shadowQuery;
     shadowQuery.TraceRayInline(accelerationStructure,
@@ -526,7 +468,7 @@ PSOutput fragMain(
         if (isDirectional)
         {
             dir = normalize(lightSample.normal);
-            dist = 1e4;
+            dist = 100000.0 * g_UBO->unitsPerMeter;
         }
         else
         {
@@ -547,7 +489,7 @@ PSOutput fragMain(
 
         // One stochastic shadow ray, matching RTXPT. The old soft-shadow loop issued up to 16
         // rays per light per pixel and was the source of the severe Bistro regression.
-        if (!trace_visibility(worldPos + shadowNormal * 0.02, dir, dist - 0.02))
+        if (!trace_visibility(worldPos + shadowNormal * (0.02 * g_UBO->unitsPerMeter), dir, dist - 0.02 * g_UBO->unitsPerMeter))
             continue;
 
         float NdotL = clamp(NdotLRaw, 0.001, 1.0);

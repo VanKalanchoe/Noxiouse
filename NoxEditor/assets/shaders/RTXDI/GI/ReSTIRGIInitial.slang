@@ -157,8 +157,9 @@ bool trace_visibility_alpha(
     RayDesc shadowRay;
     shadowRay.Origin = origin;
     shadowRay.Direction = direction;
-    shadowRay.TMin = 0.005;
-    shadowRay.TMax = max(0.01, maxDist);
+    // World units (the project's: meters or centimeters).
+    shadowRay.TMin = 0.005 * ubo->unitsPerMeter;
+    shadowRay.TMax = max(0.01 * ubo->unitsPerMeter, maxDist);
 
     RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> shadowQuery;
     shadowQuery.TraceRayInline(accelerationStructure,
@@ -228,7 +229,7 @@ float3 sample_direct_light(
     if (lightSample.lightType == 0)
     {
         lightDir = normalize(lightSample.normal);
-        lightDist = 1e4;
+        lightDist = 100000.0 * ubo->unitsPerMeter;
     }
     else
     {
@@ -247,7 +248,7 @@ float3 sample_direct_light(
     float3 shadowNormal = doubleSided && signedNdotL < 0.0 ? -normal : normal;
     bool visible = trace_visibility_alpha(
         ubo, instanceLUTBuffer, textureSampler,
-        worldPos + shadowNormal * 0.02, lightDir, lightDist - 0.02);
+        worldPos + shadowNormal * (0.02 * ubo->unitsPerMeter), lightDir, lightDist - 0.02 * ubo->unitsPerMeter);
     if (!visible)
     {
         return float3(0.0);
@@ -390,12 +391,12 @@ PSOutput fragMain(
     float rayPdf = max(NdotL / 3.14159265359, 1e-6);
 
     // 5. Trace Indirect Diffuse Ray against TLAS
-    float3 rayOrigin = worldPos + normal * 0.01;
+    float3 rayOrigin = worldPos + normal * (0.01 * ubo->unitsPerMeter);
     RayDesc diffuseRay;
     diffuseRay.Origin = rayOrigin;
     diffuseRay.Direction = rayDir;
-    diffuseRay.TMin = 0.005;
-    diffuseRay.TMax = 1e4;
+    diffuseRay.TMin = 0.005 * ubo->unitsPerMeter;
+    diffuseRay.TMax = 1000.0 * ubo->unitsPerMeter;
 
     RaytracingAccelerationStructure accelerationStructure = RaytracingAccelerationStructure(ubo->tlasDeviceAddress);
     RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> rq;

@@ -3,6 +3,7 @@
 #define RAY_HIT_SHADING_SLANG
 
 #include "SceneGI.slang"
+#include "LightSelection.slang"
 
 // Intersection UV interpolation
 float2 intersection_uv(GpuRayTracingInstance lut, uint primIndex, float2 barycentrics)
@@ -34,8 +35,40 @@ float2 intersection_uv(GpuRayTracingInstance lut, uint primIndex, float2 barycen
     return w0 * uv0 + w1 * uv1 + w2 * uv2;
 }
 
+// A shadow ray from a ray's hit (any hit ends it; alpha-masked occluders cut out).
+bool ray_hit_shadowed(UniformBufferObject* ubo, float3 origin, float3 direction, float maxDistance)
+{
+    RayDesc shadowRay;
+    shadowRay.Origin = origin;
+    shadowRay.Direction = direction;
+    shadowRay.TMin = 0.005 * ubo->unitsPerMeter;
+    shadowRay.TMax = maxDistance;
+
+    RaytracingAccelerationStructure accelerationStructure = RaytracingAccelerationStructure(ubo->tlasDeviceAddress);
+    GpuRayTracingInstance* instanceLUTBuffer = (GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference;
+    SamplerState textureSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
+    RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> shadowRq;
+    shadowRq.TraceRayInline(accelerationStructure, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES, 0xFF, shadowRay);
+    while (shadowRq.Proceed())
+    {
+        GpuRayTracingInstance shadowLut = instanceLUTBuffer[shadowRq.CandidateRayInstanceCustomIndex()];
+        if (shadowLut.alphaMode == 0 || shadowLut.baseColorTextureIndex == 0xFFFFFFFF)
+        {
+            shadowRq.CommitNonOpaqueTriangleHit();
+        }
+        else
+        {
+            float2 shadowUV = intersection_uv(shadowLut, shadowRq.CandidatePrimitiveIndex(), shadowRq.CandidateTriangleBarycentrics());
+            Texture2D tex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + shadowLut.baseColorTextureIndex, 0));
+            if (tex.SampleLevel(textureSampler, shadowUV, 0).a >= shadowLut.alphaCutoff)
+                shadowRq.CommitNonOpaqueTriangleHit();
+        }
+    }
+    return shadowRq.CommittedStatus() == COMMITTED_TRIANGLE_HIT;
+}
+
 // The radiance leaving a ray's hit towards the ray's origin, without a G-buffer: the hit's base color, every analytic light
-// with one shadow ray each (alpha-masked occluders cut out), the scene's GI for the ambient part (SceneGI.slang: the
+// with shadow rays (alpha-masked occluders cut out; the strongest exactly, LightSelection.slang), the scene's GI for the ambient part (SceneGI.slang: the
 // screen-probe GI where the hit is on screen, else DDGI / the irradiance cubemap), emission.
 // Diffuse only (the hit's own reflections are not traced). For rays traced from raster passes: RT reflections
 // (Reflection.slang), RT refraction (Material_TransparentLit_Mesh.slang).
@@ -90,112 +123,18 @@ float3 shadeRayHit(UniformBufferObject* ubo, uint instanceSlot, uint primitive, 
         albedo *= hitTex.SampleLevel(textureSampler, hitUV, 0).rgb;
     }
 
-    // Direct analytical lighting from scene lights
-    LightData* lights = (LightData*)ubo->lightDataReference;
-    float3 directLight = float3(0.0);
-
-    for (uint i = 0; i < ubo->lightCount; i++)
+    // Direct light: the strongest lights at the hit exactly, one more for all the others (LightSelection.slang), each behind a
+    // shadow ray with alpha-masked occluders cut out.
+    uint lightRng = (primitive * 9781u + instanceSlot * 6271u + asuint(hitT) * 26699u) | 1u;
+    const LightSelection selectedLights = select_lights(ubo, hitPos, hitNormal, 0.0, lightRng);
+    float3 directIrradiance = float3(0.0);
+    for (uint i = 0; i < selectedLights.count; ++i)
     {
-        LightData light = lights[i];
-        uint lightType = (uint)light.position.w;
-
-        float3 l;
-        float dist = 1000.0;
-        float attenuation = 1.0;
-
-        if (lightType == 0) // Directional Light
-        {
-            l = normalize(light.direction.xyz);
-        }
-        else // Point (1) or Spot (2)
-        {
-            float3 lightVec = light.position.xyz - hitPos;
-            dist = length(lightVec);
-            l = dist > 0.0001 ? lightVec / dist : float3(0.0, 1.0, 0.0);
-
-            float range = light.direction.w;
-            if (range > 0.0)
-            {
-                float dOverR = dist / range;
-                float window = max(1.0 - pow(dOverR, 4.0), 0.0);
-                attenuation = window / (dist * dist);
-            }
-            else
-            {
-                attenuation = 1.0 / (dist * dist);
-            }
-
-            if (lightType == 2) // Spot Cone
-            {
-                float cd = dot(normalize(light.direction.xyz), -l);
-                float lightAngleScale = light.spotParams.x;
-                float lightAngleOffset = light.spotParams.y;
-                float angularAttenuation = saturate(cd * lightAngleScale + lightAngleOffset);
-                angularAttenuation *= angularAttenuation;
-                attenuation *= angularAttenuation;
-            }
-        }
-
-        if (attenuation <= 0.0)
-            continue;
-
-        float NdotL = dot(hitNormal, l);
-        float3 shadowNormal = hitNormal;
-        if (hitLut.doubleSided != 0)
-        {
-            if (NdotL < 0.0)
-            {
-                NdotL = -NdotL;
-                shadowNormal = -hitNormal;
-            }
-        }
-        else
-        {
-            NdotL = max(NdotL, 0.0);
-        }
-
-        if (NdotL > 0.0)
-        {
-            // Shadow test: Ensure reflected surface is truly lit and not in shadow
-            RayDesc shadowRay;
-            shadowRay.Origin = hitPos + shadowNormal * (0.02 * ubo->unitsPerMeter);
-            shadowRay.Direction = l;
-            shadowRay.TMin = 0.005 * ubo->unitsPerMeter;
-            shadowRay.TMax = (lightType == 0) ? 1000.0 * ubo->unitsPerMeter : dist;
-
-            RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> shadowRq;
-            shadowRq.TraceRayInline(accelerationStructure, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES, 0xFF, shadowRay);
-            
-            while (shadowRq.Proceed())
-            {
-                uint shadowInstanceID = shadowRq.CandidateRayInstanceCustomIndex();
-                uint shadowPrimIndex = shadowRq.CandidatePrimitiveIndex();
-                GpuRayTracingInstance shadowLut = instanceLUTBuffer[shadowInstanceID];
-
-                if (shadowLut.alphaMode == 0 || shadowLut.baseColorTextureIndex == 0xFFFFFFFF)
-                {
-                    shadowRq.CommitNonOpaqueTriangleHit();
-                }
-                else
-                {
-                    float2 shadowUV = intersection_uv(shadowLut, shadowPrimIndex, shadowRq.CandidateTriangleBarycentrics());
-                    Texture2D tex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + shadowLut.baseColorTextureIndex, 0));
-                    float4 intersectionColor = tex.SampleLevel(textureSampler, shadowUV, 0);
-
-                    if (intersectionColor.a >= shadowLut.alphaCutoff)
-                    {
-                        shadowRq.CommitNonOpaqueTriangleHit();
-                    }
-                }
-            }
-
-            if (shadowRq.CommittedStatus() != COMMITTED_TRIANGLE_HIT)
-            {
-                float3 lightRadiance = light.color.rgb * light.color.w * attenuation;
-                directLight += (albedo / 3.14159265) * lightRadiance * NdotL;
-            }
-        }
+        if (!ray_hit_shadowed(ubo, hitPos + hitNormal * (0.02 * ubo->unitsPerMeter), selectedLights.direction[i],
+                              max(selectedLights.distance[i] - 0.02 * ubo->unitsPerMeter, 0.0)))
+            directIrradiance += selectedLights.irradiance[i];
     }
+    const float3 directLight = (albedo / 3.14159265) * directIrradiance;
 
     // Ambient diffuse light (irradiance / pi, as the deferred and forward lighting read it: the light the hit reflects is albedo
     // times it): the same light the camera sees on that surface where it is on screen, else DDGI or the environment. (The

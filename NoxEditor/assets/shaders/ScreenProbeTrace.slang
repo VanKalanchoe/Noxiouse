@@ -1,10 +1,11 @@
 // Screen-probe GI, 2/5: the rays (ScreenProbeCommon.slang). One output texel per ray, 8 x 8 per probe: the radiance coming back
-// along it (rgb) and how far it went in meters (a). A hit is shaded like a diffuse surface: the lights with shadow rays (every
-// light when there are a few, the sun always, else two picked in proportion to what they give), its emission, and the light
-// already bouncing around it from the DDGI cascades (the world radiance cache: the second bounce and beyond). A miss is the sky.
+// along it (rgb) and how far it went in meters (a). A hit is shaded like a diffuse surface: the lights with shadow rays (the
+// strongest few exactly, one for all the others: LightSelection.slang), its emission, and the light already bouncing around it
+// from the DDGI cascades (the world radiance cache: the second bounce and beyond). A miss is the sky.
 // Glass and clear blended surfaces let the rays through (light comes in through windows); alpha-masked leaves are cut out.
 #include "ScreenProbeCommon.slang"
 #include "RayHitShading.slang"
+#include "LightSelection.slang"
 
 // Does this candidate stop light? Glass (transmission) never, cut-outs where their alpha passes, blended surfaces from half
 // opaque on.
@@ -108,92 +109,18 @@ float3 screen_probe_shade_hit(UniformBufferObject* ubo, uint instanceSlot, uint 
         emission *= tex.SampleLevel(linearRepeat, uv, lod).rgb;
     }
 
-    // Direct light. Every light's unshadowed share costs nothing; the shadow rays are what costs, and scenes can have hundreds of
-    // lights: with a few each gets its ray, with more two are picked in proportion to their share (weighted reservoir sampling)
-    // and only they trace one. Directional lights (the sun) always trace their own.
-    LightData* lights = (LightData*)ubo->lightDataReference;
-    const uint ExactLightCount = 4;
-    const uint PickedLights = 2;
-    const bool pickLights = ubo->lightCount > ExactLightCount;
+    // Direct light: the strongest lights at the hit exactly, one more for all the others (LightSelection.slang), each behind its
+    // shadow ray. Point and spot lights give at most what they give 10 cm away (a ray grazing a lamp's own fixture is no firefly).
     const float3 shadowOrigin = position + faceNormal * (0.02 * ubo->unitsPerMeter);
-
-    float3 direct = float3(0.0);
-    uint pickState = seed | 1u;
-    float pickedWeightSum[PickedLights];
-    float3 pickedContribution[PickedLights];
-    float3 pickedDirection[PickedLights];
-    float pickedDistance[PickedLights];
-    bool picked[PickedLights];
-    for (uint slot = 0; slot < PickedLights; ++slot)
+    uint rng = seed | 1u;
+    const LightSelection lights = select_lights(ubo, position, normal, 0.1 * ubo->unitsPerMeter, rng);
+    float3 irradiance = float3(0.0);
+    for (uint i = 0; i < lights.count; ++i)
     {
-        pickedWeightSum[slot] = 0.0;
-        pickedContribution[slot] = float3(0.0);
-        pickedDirection[slot] = float3(0.0, 1.0, 0.0);
-        pickedDistance[slot] = 0.0;
-        picked[slot] = false;
+        if (!screen_probe_occluded(ubo, shadowOrigin, lights.direction[i], max(lights.distance[i] - 0.02 * ubo->unitsPerMeter, 0.0)))
+            irradiance += lights.irradiance[i];
     }
-
-    for (uint i = 0; i < ubo->lightCount; ++i)
-    {
-        const LightData light = lights[i];
-        const uint lightType = (uint)light.position.w;
-        float3 l;
-        float distance = 1000.0 * ubo->unitsPerMeter;
-        float attenuation = 1.0;
-        if (lightType == 0)
-        {
-            l = normalize(light.direction.xyz);
-        }
-        else
-        {
-            const float3 toLight = light.position.xyz - position;
-            distance = length(toLight);
-            l = distance > 1e-4 ? toLight / distance : float3(0.0, 1.0, 0.0);
-            const float range = light.direction.w;
-            attenuation = range > 0.0 ? max(1.0 - pow(distance / range, 4.0), 0.0) / max(distance * distance, 1e-4)
-                                      : 1.0 / max(distance * distance, 1e-4);
-            if (lightType == 2)
-            {
-                const float angular = saturate(dot(normalize(light.direction.xyz), -l) * light.spotParams.x + light.spotParams.y);
-                attenuation *= angular * angular;
-            }
-        }
-        const float NdotL = dot(normal, l);
-        if (attenuation <= 0.0 || NdotL <= 0.0)
-            continue;
-
-        const float3 contribution = (albedo / ScreenProbePi) * light.color.rgb * light.color.w * attenuation * NdotL;
-        if (!pickLights || lightType == 0)
-        {
-            if (!screen_probe_occluded(ubo, shadowOrigin, l, distance))
-                direct += contribution;
-            continue;
-        }
-
-        const float weight = dot(contribution, float3(0.2126, 0.7152, 0.0722));
-        if (weight <= 0.0)
-            continue;
-        for (uint slot = 0; slot < PickedLights; ++slot)
-        {
-            pickedWeightSum[slot] += weight;
-            pickState ^= pickState << 13;
-            pickState ^= pickState >> 17;
-            pickState ^= pickState << 5;
-            const float u = float(pickState >> 8) * (1.0 / 16777216.0);
-            if (u * pickedWeightSum[slot] < weight)
-            {
-                picked[slot] = true;
-                pickedContribution[slot] = contribution / weight;
-                pickedDirection[slot] = l;
-                pickedDistance[slot] = distance;
-            }
-        }
-    }
-    for (uint slot = 0; slot < PickedLights; ++slot)
-    {
-        if (picked[slot] && !screen_probe_occluded(ubo, shadowOrigin, pickedDirection[slot], pickedDistance[slot]))
-            direct += pickedContribution[slot] * pickedWeightSum[slot] / float(PickedLights);
-    }
+    const float3 direct = albedo / ScreenProbePi * irradiance;
 
     // The light around the hit: the DDGI cascades (seen from the probe), else the environment's irradiance.
     float3 bounce = float3(0.0);

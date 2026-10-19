@@ -1,5 +1,6 @@
 #include "shaderIO.h"
 #include "DDGICommon.slang"
+#include "LightSelection.slang"
 
 struct DDGIRadiancePayload
 {
@@ -230,133 +231,18 @@ float4 fragMain(
         albedo *= hitTex.SampleLevel(textureSampler, hitUV, 0).rgb;
     }
 
-    // Direct light. Every light's unshadowed contribution is cheap (no ray); the shadow rays are what costs, and scenes have hundreds of
-    // lights. With a few lights each gets its shadow ray; with more, two are picked in proportion to their contribution (weighted
-    // reservoir sampling) and only they trace one: the estimate stays right on average and the probes' temporal blend averages it.
-    LightData* lights = (LightData*)ubo->lightDataReference;
-    float3 directLight = float3(0.0);
-    const uint ExactLightCount = 4;
-    const uint PickedLights = 2;
-    const bool pickLights = ubo->lightCount > ExactLightCount;
-
+    // Direct light: the strongest lights at the hit exactly, one more for all the others (LightSelection.slang), each behind its
+    // shadow ray; point and spot lights at most what they give 10 cm away.
     uint pickState = (probeIndex * 9781u + rayIndex * 6271u + pushConstant.frameIndex * 26699u) | 1u;
-    float pickedWeightSum[PickedLights];
-    uint pickedLight[PickedLights];
-    float3 pickedContribution[PickedLights];
-    float3 pickedDirection[PickedLights];
-    float pickedDistance[PickedLights];
-    float3 pickedShadowNormal[PickedLights];
-    for (uint slot = 0; slot < PickedLights; ++slot)
+    const LightSelection selectedLights = select_lights(ubo, hitPos, hitNormal, 0.1 * ubo->unitsPerMeter, pickState);
+    float3 directIrradiance = float3(0.0);
+    for (uint i = 0; i < selectedLights.count; ++i)
     {
-        pickedWeightSum[slot] = 0.0;
-        pickedLight[slot] = 0xFFFFFFFF;
-        pickedContribution[slot] = float3(0.0);
-        pickedDirection[slot] = float3(0.0, 1.0, 0.0);
-        pickedDistance[slot] = 0.0;
-        pickedShadowNormal[slot] = hitNormal;
+        if (!ddgiShadowed(accelerationStructure, ubo, hitPos + hitNormal * (0.02 * ubo->unitsPerMeter), selectedLights.direction[i],
+                          max(selectedLights.distance[i] - 0.02 * ubo->unitsPerMeter, 0.0)))
+            directIrradiance += selectedLights.irradiance[i];
     }
-
-    for (uint i = 0; i < ubo->lightCount; i++)
-    {
-        LightData light = lights[i];
-        uint lightType = (uint)light.position.w;
-
-        float3 l;
-        float dist = 1000.0;
-        float attenuation = 1.0;
-
-        if (lightType == 0) // Directional Light
-        {
-            l = normalize(light.direction.xyz);
-        }
-        else // Point (1) or Spot (2)
-        {
-            float3 lightVec = light.position.xyz - hitPos;
-            dist = length(lightVec);
-            l = dist > 0.0001 ? lightVec / dist : float3(0.0, 1.0, 0.0);
-
-            float range = light.direction.w;
-            if (range > 0.0)
-            {
-                float dOverR = dist / range;
-                float window = max(1.0 - pow(dOverR, 4.0), 0.0);
-                attenuation = window / (dist * dist);
-            }
-            else
-            {
-                attenuation = 1.0 / max(dist * dist, 0.001);
-            }
-
-            if (lightType == 2) // Spot Cone
-            {
-                float cd = dot(normalize(light.direction.xyz), -l);
-                float lightAngleScale = light.spotParams.x;
-                float lightAngleOffset = light.spotParams.y;
-                float angularAttenuation = saturate(cd * lightAngleScale + lightAngleOffset);
-                angularAttenuation *= angularAttenuation;
-                attenuation *= angularAttenuation;
-            }
-        }
-
-        if (attenuation <= 0.0)
-            continue;
-
-        float NdotL = dot(hitNormal, l);
-        float3 shadowNormal = hitNormal;
-        if (hitLut.doubleSided != 0)
-        {
-            if (NdotL < 0.0)
-            {
-                NdotL = -NdotL;
-                shadowNormal = -hitNormal;
-            }
-        }
-        if (NdotL <= 0.001)
-            continue;
-
-        const float3 contribution = (albedo / 3.14159265) * light.color.rgb * light.color.w * attenuation * NdotL;
-        const float maxDistance = (lightType == 0) ? 1000.0 * ubo->unitsPerMeter : dist;
-        // The sun (directional lights) always gets its own ray: it is most of the light outdoors, and a picked one flickers.
-        if (!pickLights || lightType == 0)
-        {
-            if (!ddgiShadowed(accelerationStructure, ubo, hitPos + shadowNormal * (0.02 * ubo->unitsPerMeter), l, maxDistance))
-                directLight += contribution;
-            continue;
-        }
-
-        // Each reservoir keeps this light with probability weight / (sum so far).
-        const float weight = dot(contribution, float3(0.2126, 0.7152, 0.0722));
-        if (weight <= 0.0)
-            continue;
-        for (uint slot = 0; slot < PickedLights; ++slot)
-        {
-            pickedWeightSum[slot] += weight;
-            pickState ^= pickState << 13;
-            pickState ^= pickState >> 17;
-            pickState ^= pickState << 5;
-            const float u = float(pickState >> 8) * (1.0 / 16777216.0);
-            if (u * pickedWeightSum[slot] < weight)
-            {
-                pickedLight[slot] = i;
-                pickedContribution[slot] = contribution / weight; // times the sum below: contribution / probability
-                pickedDirection[slot] = l;
-                pickedDistance[slot] = maxDistance;
-                pickedShadowNormal[slot] = shadowNormal;
-            }
-        }
-    }
-
-    if (pickLights)
-    {
-        for (uint slot = 0; slot < PickedLights; ++slot)
-        {
-            if (pickedLight[slot] == 0xFFFFFFFF)
-                continue;
-            if (!ddgiShadowed(accelerationStructure, ubo, hitPos + pickedShadowNormal[slot] * (0.02 * ubo->unitsPerMeter), pickedDirection[slot],
-                              pickedDistance[slot]))
-                directLight += pickedContribution[slot] * pickedWeightSum[slot] / float(PickedLights);
-        }
-    }
+    const float3 directLight = albedo / 3.14159265 * directIrradiance;
 
     // Emissive component (e.g. glowing panels)
     float3 emissiveLight = hitLut.emissiveFactor.rgb * hitLut.emissiveFactor.a;

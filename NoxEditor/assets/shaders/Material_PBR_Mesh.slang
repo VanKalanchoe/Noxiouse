@@ -406,41 +406,19 @@ FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform Pu
         float3 l;
         float attenuation = 1.0;
 
+        if (lightType == 3) // Rect lights: the deferred and transparent shaders (this fragment stage is not in a pipeline today)
+            continue;
+
         if(lightType == 0) // Directional Light
         {
             l = normalize(light.direction.xyz); // Vector from surface point to light
         }
-        else // Point Light (1) or Spot Light (2)
+        else // Point Light (1) or Spot Light (2): inverse square held at the source radius, range window, cone (shaderIO.h)
         {
             float3 lightVec = light.position.xyz - vertIn.worldPos;
             float distance = length(lightVec);
             l = distance > 0.0001 ? lightVec / distance : float3(0.0, 1.0, 0.0);
-
-            float range = light.direction.w;
-            if (range > 0.0)
-            {
-                float dOverR = distance / range;
-
-                float window = max(1.0 -  pow(dOverR, 4.0), 0.0);
-
-                attenuation = window / (distance * distance);
-            }
-            else
-            {
-                attenuation = 1.0 / (distance * distance);
-            }
-
-            if(lightType == 2) // Spot Light Cone Attenuatuion
-            {
-                float cd = dot(normalize(light.direction.xyz), -l);
-                float lightAngleScale = light.spotParams.x;
-                float lightAngleOffset = light.spotParams.y;
-
-                float angularAttenuation = saturate(cd * lightAngleScale + lightAngleOffset);
-                angularAttenuation *= angularAttenuation;
-
-                attenuation *= angularAttenuation;
-            }
+            attenuation = light_distance_attenuation(light, distance) * light_spot_attenuation(light, l);
         }
 
         if(attenuation <= 0.0)

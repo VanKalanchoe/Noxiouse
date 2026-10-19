@@ -77,34 +77,21 @@ float3 litParticle(UniformBufferObject* ubo, float3 albedo, float3 position, flo
     {
         LightData light = lights[i];
         const uint lightType = (uint)light.position.w;
-        float3 l;
-        float attenuation = 1.0;
-        if (lightType == 0)
+        // The light arriving at the particle from the light's middle (shaderIO.h: falloff, cone; a rect light's solid angle, the
+        // puff turned towards it).
+        const float3 towards = lightType == 0 ? normalize(light.direction.xyz) : normalize(light.position.xyz - position);
+        LightPointSample sample;
+        const float3 irradiance = light_surface_irradiance(light, position, towards, float2(0.5, 0.5), sample);
+        const float3 l = sample.direction;
+        if (lightType == 0 && traceShadow && !sunTested)
         {
-            l = normalize(light.direction.xyz);
-            if (traceShadow && !sunTested)
-            {
-                sunTested = true;
-                if (particleShadowed(ubo, position, l))
-                    continue;
-            }
-        }
-        else
-        {
-            const float3 toLight = light.position.xyz - position;
-            const float distance = length(toLight);
-            l = distance > 0.0001 ? toLight / distance : float3(0.0, 1.0, 0.0);
-            const float range = light.direction.w;
-            attenuation = range > 0.0 ? max(1.0 - pow(distance / range, 4.0), 0.0) / (distance * distance) : 1.0 / (distance * distance);
-            if (lightType == 2)
-            {
-                const float angular = saturate(dot(normalize(light.direction.xyz), -l) * light.spotParams.x + light.spotParams.y);
-                attenuation *= angular * angular;
-            }
+            sunTested = true;
+            if (particleShadowed(ubo, position, l))
+                continue;
         }
         // A diffuse puff facing the light; a little brighter seen against it (light shining through the particle's edge).
         const float through = 0.75 + 0.25 * saturate(dot(-l, toCamera));
-        direct += light.color.rgb * light.color.w * attenuation * through;
+        direct += irradiance * through;
     }
 
     return albedo * (ambient + direct / 3.14159265);

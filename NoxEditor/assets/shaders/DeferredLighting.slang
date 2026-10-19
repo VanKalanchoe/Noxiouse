@@ -96,6 +96,29 @@
         return w0 * uv0 + w1 * uv1 + w2 * uv2;
     }
 
+    bool trace_shadow_ray(UniformBufferObject* ubo, float3 rayOrigin, float3 rayDir, float maxDist);
+
+    // How much of a rect light a point sees: shadow rays to 4 points of the rectangle (2 x 2 cells, jittered per pixel and frame;
+    // DLSS / the temporal upscale smooths the soft shadow's grain). 1 without RT shadows.
+    float rect_light_visibility(UniformBufferObject* ubo, LightData light, float3 position, float3 shadowOrigin, uint2 pixel, uint frameIndex)
+    {
+        if (ubo->enableRTShadows == 0 || ubo->tlasDeviceAddress == 0)
+            return 1.0;
+        const float2 jitter = frac(float2(52.9829189 * frac(0.06711056 * float(pixel.x) + 0.00583715 * float(pixel.y)),
+                                          0.7548776662 * float(frameIndex % 64u) + 0.5698402910 * float(pixel.x + pixel.y)));
+        float visible = 0.0;
+        for (uint i = 0; i < 4; ++i)
+        {
+            const float2 u = (float2(i & 1u, i >> 1u) + frac(jitter + float2(0.5 * float(i), 0.25 * float(i)))) * 0.5;
+            const LightPointSample sample = sample_light_point(light, position, u);
+            const float3 toSample = sample.position - shadowOrigin;
+            const float distance = length(toSample);
+            if (distance > 1e-5 && !trace_shadow_ray(ubo, shadowOrigin, toSample / distance, max(distance - 0.01 * ubo->unitsPerMeter, 0.0)))
+                visible += 1.0;
+        }
+        return visible * 0.25;
+    }
+
     bool trace_shadow_ray(UniformBufferObject* ubo, float3 rayOrigin, float3 rayDir, float maxDist)
     {
         if (ubo->enableRTShadows == 0 || ubo->tlasDeviceAddress == 0)
@@ -412,44 +435,32 @@
                 LightData light = lights[i];
                 uint lightType = (uint)light.position.w;
 
+                if (lightType == 3) // Rect: exact diffuse, representative-point specular (PBRLighting.slang), times its soft shadow
+                {
+                    PBRInfo rectInputs = PBRInfo(1.0, NdotV, 1.0, 1.0, 1.0, perceptualRoughness, metallic, specularEnvironmentR0,
+                                                 specularEnvironmentR90, alphaRoughness, diffuseColor, specularColor);
+                    const float3 rectLight = evaluateRectLight(rectInputs, light, worldPos, n, v);
+                    if (any(rectLight > 0.0))
+                        directLighting += rectLight * rect_light_visibility(ubo, light, worldPos, worldPos + n * (0.02 * ubo->unitsPerMeter),
+                                                                            uint2(pixelCoord), pushConstant.frameIndex);
+                    continue;
+                }
+
                 float3 l;
                 float attenuation = 1.0;
-                float maxDist = 1e4;
+                float maxDist = 100000.0 * ubo->unitsPerMeter; // a directional light: as far as a shadow ray needs to go
 
                 if (lightType == 0) // Directional Light
                 {
                     l = normalize(light.direction.xyz);
-                    maxDist = 1e4;
                 }
-                else // Point (1) or Spot (2)
+                else // Point (1) or Spot (2): inverse square held at the source radius, range window, cone (shaderIO.h)
                 {
                     float3 lightVec = light.position.xyz - worldPos;
                     float distance = length(lightVec);
                     l = distance > 0.0001 ? lightVec / distance : float3(0.0, 1.0, 0.0);
                     maxDist = distance;
-
-                    float range = light.direction.w;
-                    if (range > 0.0)
-                    {
-                        float dOverR = distance / range;
-                        float window = max(1.0 - pow(dOverR, 4.0), 0.0);
-                        attenuation = window / (distance * distance);
-                    }
-                    else
-                    {
-                        attenuation = 1.0 / (distance * distance);
-                    }
-
-                    if (lightType == 2) // Spot Cone
-                    {
-                        float cd = dot(normalize(light.direction.xyz), -l);
-                        float lightAngleScale = light.spotParams.x;
-                        float lightAngleOffset = light.spotParams.y;
-
-                        float angularAttenuation = saturate(cd * lightAngleScale + lightAngleOffset);
-                        angularAttenuation *= angularAttenuation;
-                        attenuation *= angularAttenuation;
-                    }
+                    attenuation = light_distance_attenuation(light, distance) * light_spot_attenuation(light, l);
                 }
 
                 if (attenuation <= 0.0)
@@ -473,9 +484,9 @@
                 float lightShadow = 1.0;
                 if (ubo->enableRTShadows != 0 && ubo->tlasDeviceAddress != 0)
                 {
-                    if (i == 0 && pushConstant.shadowMaskTextureIndex != 0 && pushConstant.shadowMaskTextureIndex != 0xFFFFFFFF)
+                    if (i == ubo->shadowMaskLightIndex && pushConstant.shadowMaskTextureIndex != 0 && pushConstant.shadowMaskTextureIndex != 0xFFFFFFFF)
                     {
-                        // Primary directional light uses the decoupled shadow mask / NRD SIGMA if available
+                        // The sun (the first directional light) uses the decoupled shadow mask / NRD SIGMA if available
                         lightShadow = shadowFactor;
                     }
                     else if (lightType == 0 || (attenuation * light.color.w > 0.001))

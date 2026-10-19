@@ -77,6 +77,65 @@ float3 evaluateDirectLight(PBRInfo pbrInputs, float3 lightRadiance)
     return pbrInputs.NdotL * lightRadiance * (diffuseContrib + specContrib);
 }
 
+// A rect light (LightType::Rect, shaderIO.h) at a surface, unshadowed (multiply by its visibility). Diffuse exactly: the light's
+// radiance times the cosine-weighted solid angle it fills above the surface's horizon. Specular from the point of the rectangle
+// nearest the reflected ray, as a point light as strong as the whole rectangle seen from here, its energy spread over the
+// wider lobe a light of that size makes (Karis 2013's "representative point", with a sphere of the same area's normalization).
+// `pbrInputs` needs NdotV, the roughness and the colors; the per-light terms are set here.
+float3 evaluateRectLight(PBRInfo pbrInputs, LightData light, float3 position, float3 n, float3 v)
+{
+    const float formFactor = rect_light_form_factor(light, position, n);
+    if (formFactor <= 0.0)
+        return float3(0.0);
+    const float3 toCentre = light.position.xyz - position;
+    const float centreDistance = length(toCentre);
+    const float3 radiance = light.color.rgb * light.color.w * rect_light_window(light, centreDistance);
+    const float3 diffuseLight = diffuse(pbrInputs) * radiance * formFactor;
+
+    // The reflected ray against the light's plane, clamped into the rectangle.
+    const float3 front = normalize(light.direction.xyz);
+    const float3 r = reflect(-v, n);
+    const float3 axisX = rect_light_axis_x(light);
+    const float3 axisY = rect_light_axis_y(light);
+    const float halfX = length(axisX);
+    const float halfY = length(axisY);
+    const float3 unitX = axisX / max(halfX, 1e-12);
+    const float3 unitY = axisY / max(halfY, 1e-12);
+    const float facing = dot(r, front);
+    float3 target = position + r * centreDistance;
+    if (facing < -1e-4)
+        target = position + r * max(dot(toCentre, front) / facing, 0.0);
+    const float3 local = target - light.position.xyz;
+    const float3 closest = light.position.xyz + unitX * clamp(dot(local, unitX), -halfX, halfX) + unitY * clamp(dot(local, unitY), -halfY, halfY);
+
+    const float3 toPoint = closest - position;
+    const float pointDistance = length(toPoint);
+    const float3 l = toPoint / max(pointDistance, 1e-6);
+    const float NdotL = dot(n, l);
+    if (NdotL <= 0.0)
+        return diffuseLight;
+
+    // The whole rectangle's light as from its solid angle (at most a hemisphere), the lobe widened by its size.
+    const float area = rect_light_area(light);
+    const float solidAngle = min(area * max(dot(front, -toCentre / max(centreDistance, 1e-6)), 0.0) / max(centreDistance * centreDistance, 1e-12),
+                                 6.28318530718);
+    const float alpha = max(pbrInputs.alphaRoughness, 1e-3);
+    const float alphaWide = saturate(alpha + sqrt(area / M_PI) / (2.0 * max(centreDistance, 1e-6)));
+    const float normalization = (alpha * alpha) / max(alphaWide * alphaWide, 1e-8);
+
+    PBRInfo lit = pbrInputs;
+    const float3 h = normalize(l + v);
+    lit.NdotL = clamp(NdotL, 0.001, 1.0);
+    lit.NdotH = clamp(dot(n, h), 0.0, 1.0);
+    lit.LdotH = clamp(dot(l, h), 0.0, 1.0);
+    lit.VdotH = clamp(dot(v, h), 0.0, 1.0);
+    const float3 F = specularReflection(lit);
+    const float G = geometricOcclusion(lit);
+    const float D = microfacetDistribution(lit);
+    const float3 specular = F * G * D / (4.0 * lit.NdotL * lit.NdotV) * lit.NdotL * radiance * solidAngle * normalization;
+    return diffuseLight + specular;
+}
+
 // Specular occlusion (Lagarde & de Rousiers, "Moving Frostbite to PBR", 2014): a flat AO value describes how much
 // of the sky a point sees in EVERY direction, but specular reflection only cares about one -- the reflection
 // vector. Multiplying specular by the same diffuse `ao` either over-darkens a rough surface (whose wide lobe

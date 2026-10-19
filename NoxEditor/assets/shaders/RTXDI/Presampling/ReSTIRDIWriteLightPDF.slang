@@ -8,9 +8,12 @@
 
 #include "Rtxdi/Utils/Math.hlsli"
 
+// A local light's share of the light sampled: its power. A point light's is 4 pi intensity, a rect light's pi radiance area
+// (shaderIO.h's LightData): relative to points, area / 4.
 float LightImportance(LightData light)
 {
-    return max(dot(light.color.rgb, float3(0.2126, 0.7152, 0.0722)) * light.color.a, 1e-6);
+    const float power = dot(light.color.rgb, float3(0.2126, 0.7152, 0.0722)) * light.color.a;
+    return max((uint)light.position.w == 3u ? power * rect_light_area(light) * 0.25 : power, 1e-6);
 }
 
 [shader("compute")]

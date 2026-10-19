@@ -387,3 +387,45 @@ viewports and in the path tracer, motion vectors for DLSS (fast particles can sm
 ## 7. Order
 
 H1 outline (built) -> H1 overlay depth -> S1-S4 (sky) -> H2/H3b (transparency) -> preset ladder (§2) -> H3 -> V1/V2 -> S5 + V4 -> V3, V5.
+
+## 8. Lights (2026-10-19, untested)
+
+After the user's night-time test ("the GI flashes with every light, rainbowy; fix all punctual lights; add rect area lights"):
+
+**Punctual lights fixed** (one model for every shader: `shaderIO.h` `light_distance_attenuation`, `light_spot_attenuation`,
+`sample_light_point`):
+- **Unit-correct falloff.** The inverse square law ran in world units: in a centimeter project (Facerun) a light was 10 000
+  times dimmer than the same light in a meter project -- a default point light (Intensity 5, 3 m away) gave 0.00006. The
+  renderer now multiplies point / spot intensities by (units per meter)^2 (`Renderer::SubmitLight`), so the falloff is the one
+  in meters everywhere, the shaders unchanged in form. **Lights in centimeter projects are much brighter now: lower intensities
+  that were raised to compensate.**
+- **Range follows the entity's scale**: a glTF light's range is in the file's meters while its node is scaled into the
+  project's units -- it reached a hundredth as far in centimeters.
+- **Held at the source radius** (at least 1 cm): exact for a sphere light, no blow-up on a lamp's shade right next to the bulb.
+  The range window is Karis's smooth (1 - (d/r)^4)^2 everywhere (one shader had another).
+- **The sun keeps its soft shadow.** The RT shadow mask (NRD SIGMA) took light 0, but the light buffer puts point / spot lights
+  first (ReSTIR DI's regions): with any local light in the scene the sun got a hard shadow, a lamp the soft one, and SIGMA a zero
+  light direction. It now takes the first directional light (`UniformBufferObject::shadowMaskLightIndex`); without one the pass
+  is skipped and every light traces its own rays.
+- **Every consumer the same**: deferred, transparent, particles, ray hits (reflections, refraction, screen probes, DDGI), both
+  path tracers and ReSTIR DI / GI / PT (their six copies of the light sampler replaced by `sample_light_point`). ReSTIR DI / GI's
+  shadow-ray offsets were 0.02 world units -- 0.2 mm in centimeters, shadow acne; now 2 cm in any unit.
+
+**Night-time GI flashing** (`LightSelection.slang`): a probe ray's hit traced shadow rays for two lights picked at random among
+all of them when there were more than four -- with dozens of colored street lamps every ray saw a different lamp, the colors
+flickered. Now the strongest four at the hit (and every directional light) are traced exactly and one more, picked in
+proportion to its light from the rest, stands for them: exact where a few lights dominate. GI rays take point / spot lights at
+most at 10 cm (a ray grazing a lamp's own fixture is no firefly), and the screen-probe history no longer drops to 4 frames on a
+large jump (one bright frame made it flash). Used by the screen probes, DDGI and RT reflection / refraction hits.
+
+**Rect area lights** (Add Component > Rect Light: color, intensity = the radiance of its surface, width / height along the
+entity's X / Y, range; it shines along -Z; an outline and direction stroke in the editor viewport):
+- Deferred and transparent shading (`PBRLighting.slang` `evaluateRectLight`): **diffuse exact** (Lambert's polygon formula
+  over the rectangle clipped to the surface's horizon), **specular from the representative point** (the rectangle's point
+  nearest the reflected ray, energy normalized for the lobe the light's size widens -- Karis 2013). Not LTC (it needs fitted
+  tables), close for diffuse, an approximation for sharp reflections of large lights.
+- **Soft ray traced shadows**: 4 shadow rays per pixel to jittered points of the rectangle (deferred; one in the transparent
+  pass), the grain smoothed by the temporal upscale.
+- GI / reflection hits: the exact diffuse with a shadow ray to a random point; path tracers and ReSTIR: area sampling
+  (radiance x area x cos / distance^2). Rect lights are not geometry: they are not seen directly or in mirrors (an emissive
+  plane in front of one shows it).

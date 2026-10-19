@@ -54,7 +54,9 @@ namespace Nox
     {
         // Only the hybrid RT shadow path needs this; ReSTIR DI traces its own selected light, and raster PBR/IBL must not
         // pay for a full-resolution ray-query pass.
-        if (uniformData.enableRTShadows == 0 || !m_shadowMaskPipeline)
+        // The soft shadow mask is the sun's (updateLightBuffer); without a directional light every light traces its own rays in the
+        // deferred lighting.
+        if (uniformData.enableRTShadows == 0 || !m_shadowMaskPipeline || m_shadowMaskLightIndex == ~0u)
             return;
 
         const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
@@ -135,11 +137,8 @@ namespace Nox
                 nrdParams.prevView = uniformData.prevView;
                 nrdParams.prevProj = uniformData.prevProj;
 
-                glm::vec3 lightDir = glm::vec3(0.0f, 1.0f, 0.0f);
-                if (!m_lightBufferObjects.empty())
-                {
-                    lightDir = glm::normalize(glm::vec3(m_lightBufferObjects[0].direction));
-                }
+                // The sun's (updateLightBuffer: the light the shadow mask is for).
+                const glm::vec3 lightDir = m_shadowMaskLightIndex != ~0u ? m_shadowMaskLightDirection : glm::vec3(0.0f, 1.0f, 0.0f);
                 nrdParams.lightDirection[0] = lightDir.x;
                 nrdParams.lightDirection[1] = lightDir.y;
                 nrdParams.lightDirection[2] = lightDir.z;

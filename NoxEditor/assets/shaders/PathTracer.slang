@@ -493,76 +493,17 @@
                     uint lightType = (uint)light.position.w;
 
                     float3 lightDir;
-                    float maxDist = 1e4;
+                    float maxDist = 100000.0 * ubo->unitsPerMeter; // a directional light: as far as a shadow ray needs to go
                     float attenuation = 1.0;
 
-                    float angularDiameter = light.spotParams.z; // Angular radius (radians) for Directional; Radius (meters) for Point/Spot
-
-                    if (lightType == 0) // Directional Light (Sun Cone Sampling)
-                    {
-                        float3 unjitteredDir = normalize(light.direction.xyz);
-                        if (angularDiameter > 1e-4)
-                        {
-                            // Sample a random point on the sun disk
-                            float u1 = rand(rngState);
-                            float u2 = rand(rngState);
-                            float r = sqrt(u1) * tan(angularDiameter);
-                            float theta = 2.0 * M_PI * u2;
-
-                            float3 T, B;
-                            build_orthonormal_basis(unjitteredDir, T, B);
-                            lightDir = normalize(unjitteredDir + (cos(theta) * T + sin(theta) * B) * r);
-                        }
-                        else
-                        {
-                            lightDir = unjitteredDir;
-                        }
-                    }
-                    else // Point / Spot Light (Sphere Source Sampling)
-                    {
-                        float3 lightPos = light.position.xyz;
-                        if (angularDiameter > 1e-4)
-                        {
-                            // Jitter light position within source sphere radius
-                            float u1 = rand(rngState);
-                            float u2 = rand(rngState);
-                            float r = sqrt(u1) * angularDiameter;
-                            float theta = 2.0 * M_PI * u2;
-
-                            float3 toLightBase = normalize(lightPos - hitPos);
-                            float3 T, B;
-                            build_orthonormal_basis(toLightBase, T, B);
-                            lightPos += (cos(theta) * T + sin(theta) * B) * r;
-                        }
-
-                        float3 toLight = lightPos - hitPos;
-                        float dist = length(toLight);
-                        lightDir = dist > 1e-4 ? toLight / dist : float3(0, 1, 0);
-                        maxDist = dist;
-
-                        float range = light.direction.w;
-                        if (range > 0.0)
-                        {
-                            float dOverR = dist / range;
-                            float window = max(1.0 - pow(dOverR, 4.0), 0.0);
-                            attenuation = window / (dist * dist);
-                        }
-                        else
-                        {
-                            attenuation = 1.0 / max(dist * dist, 0.001);
-                        }
-
-                        if (lightType == 2) // Spot Cone
-                        {
-                            float cd = dot(normalize(light.direction.xyz), -lightDir);
-                            float lightAngleScale = light.spotParams.x;
-                            float lightAngleOffset = light.spotParams.y;
-
-                            float angularAttenuation = saturate(cd * lightAngleScale + lightAngleOffset);
-                            angularAttenuation *= angularAttenuation;
-                            attenuation *= angularAttenuation;
-                        }
-                    }
+                    // The engine's light sampling (shaderIO.h): the sun's cone, a sphere light's disc, a rect light's area, with the
+                    // falloff, cone and a rect's area / distance^2 folded in (attenuation 1: it is all in the sample's radiance).
+                    const LightPointSample lightPoint = sample_light_point(light, hitPos, float2(rand(rngState), rand(rngState)));
+                    lightDir = lightPoint.direction;
+                    maxDist = lightType == 0 ? maxDist : lightPoint.distance;
+                    const float3 sampledRadiance = lightPoint.radiance;
+                    if (!any(sampledRadiance > 0.0))
+                        attenuation = 0.0;
 
                     if (attenuation <= 0.0)
                     {
@@ -581,7 +522,7 @@
                         {
                             // Smooth terminator falloff: eliminates stepped polygon tessellation rings at grazing angles
                             float terminatorFade = saturate(NdotL * 10.0);
-                            float3 lightRadiance = light.color.rgb * light.color.w * attenuation;
+                            float3 lightRadiance = sampledRadiance;
 
                             float3 H = normalize(lightDir + V);
                             float NdotH = clamp(dot(hitNormal, H), 0.0, 1.0);

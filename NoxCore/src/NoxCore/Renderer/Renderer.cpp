@@ -4712,6 +4712,14 @@ namespace Nox
         m_restirDIFirstInfiniteLight = m_restirDINumLocalLights;
         m_restirDINumInfiniteLights = static_cast<uint32_t>(m_lightBufferObjects.size()) - m_restirDINumLocalLights;
 
+        // The light the RT shadow pass (soft, NRD SIGMA) works for: the first directional light, the sun. That pass used to take light
+        // 0, which the partition above makes the first point light whenever there is one -- the sun then lost its soft shadow
+        // and SIGMA got a point light's zero direction. None: every light gets its shadow rays in the deferred lighting.
+        m_shadowMaskLightIndex = m_restirDINumInfiniteLights > 0 ? m_restirDIFirstInfiniteLight : ~0u;
+        uniformData.shadowMaskLightIndex = m_shadowMaskLightIndex;
+        if (m_shadowMaskLightIndex != ~0u)
+            m_shadowMaskLightDirection = glm::normalize(glm::vec3(m_lightBufferObjects[m_shadowMaskLightIndex].direction));
+
         uint64_t requiredLightSize = sizeof(shaderio::LightData) * m_lightBufferObjects.size();
         if (requiredLightSize > m_LightBufferCapacity)
         {
@@ -6041,16 +6049,40 @@ namespace Nox
         m_lightBufferObjects.push_back(l);
     }
 
+    namespace
+    {
+        // Point and spot lights (LightData in shaderIO.h): the shaders' inverse square law is in world units, so the intensity is
+        // scaled by (units per meter)^2 -- the falloff is then the one in meters in any project. It used to be in world units: in a
+        // centimeter project a light was 10 000 times dimmer than in a meter one. Range follows the entity's scale (a glTF light's
+        // range is in the file's meters, its node scaled into the project's units); the source radius is at least 1 cm (the
+        // falloff is held there: no blow-up on a lamp's own shade).
+        float PunctualIntensity(float intensity)
+        {
+            const float perMeter = WorldUnits::PerMeter();
+            return glm::max(intensity, 0.0f) * perMeter * perMeter;
+        }
+
+        float TransformScale(const glm::mat4& transform)
+        {
+            return (glm::length(glm::vec3(transform[0])) + glm::length(glm::vec3(transform[1])) + glm::length(glm::vec3(transform[2]))) / 3.0f;
+        }
+
+        float SourceRadius(float radius)
+        {
+            return glm::max(radius, WorldUnits::FromMeters(0.01f));
+        }
+    }
+
     void Renderer::SubmitLight(const glm::mat4& transform, const PointLightComponent& light)
     {
         glm::vec3 worldPos = glm::vec3(transform[3]);
 
         shaderio::LightData l{};
         l.position = glm::vec4(worldPos, (float)shaderio::LightType::Point);
-        l.direction = glm::vec4(0.0f, 0.0f, 0.0f, light.Range);
-        l.color = glm::vec4(light.Color, light.Intensity);
-        // spotParams.z: light source radius in meters; spotParams.w: shadow samples
-        l.spotParams = glm::vec4(0.0f, 0.0f, glm::max(0.0f, light.Radius), (float)glm::max(1u, light.ShadowSamples));
+        l.direction = glm::vec4(0.0f, 0.0f, 0.0f, glm::max(light.Range, 0.0f) * TransformScale(transform));
+        l.color = glm::vec4(light.Color, PunctualIntensity(light.Intensity));
+        // spotParams.z: light source radius (world units); spotParams.w: shadow samples
+        l.spotParams = glm::vec4(0.0f, 0.0f, SourceRadius(light.Radius), (float)glm::max(1u, light.ShadowSamples));
 
         m_lightBufferObjects.push_back(l);
     }
@@ -6072,9 +6104,38 @@ namespace Nox
 
         shaderio::LightData l{};
         l.position = glm::vec4(worldPos, (float)shaderio::LightType::Spot);
-        l.direction = glm::vec4(forward, light.Range);
+        l.direction = glm::vec4(forward, glm::max(light.Range, 0.0f) * TransformScale(transform));
+        l.color = glm::vec4(light.Color, PunctualIntensity(light.Intensity));
+        l.spotParams = glm::vec4(lightAngleScale, lightAngleOffset, SourceRadius(light.Radius), (float)glm::max(1u, light.ShadowSamples));
+
+        m_lightBufferObjects.push_back(l);
+    }
+
+    void Renderer::SubmitLight(const glm::mat4& transform, const RectLightComponent& light)
+    {
+        // The entity's X / Y span the rectangle (scaled with it), it shines along its -Z.
+        const glm::vec3 axisX = glm::vec3(transform[0]);
+        const glm::vec3 axisY = glm::vec3(transform[1]);
+        const glm::vec3 forward = -glm::vec3(transform[2]);
+        const float scaleX = glm::length(axisX);
+        const float scaleY = glm::length(axisY);
+        const float halfWidth = 0.5f * glm::max(light.Width, 0.0f) * scaleX;
+        const float halfHeight = 0.5f * glm::max(light.Height, 0.0f) * scaleY;
+        if (halfWidth <= 0.0f || halfHeight <= 0.0f || glm::length(forward) < 1e-8f || light.Intensity <= 0.0f)
+            return;
+        const glm::vec3 front = glm::normalize(forward);
+        glm::vec3 right = axisX / scaleX;
+        right -= front * glm::dot(right, front); // a sheared transform: the width axis made perpendicular to the front
+        if (glm::length(right) < 1e-6f)
+            return;
+        right = glm::normalize(right);
+
+        shaderio::LightData l{};
+        l.position = glm::vec4(glm::vec3(transform[3]), (float)shaderio::LightType::Rect);
+        l.direction = glm::vec4(front, glm::max(light.Range, 0.0f) * TransformScale(transform));
+        // Radiance: the light a surface gets is it times the solid angle the rectangle fills (no unit conversion).
         l.color = glm::vec4(light.Color, light.Intensity);
-        l.spotParams = glm::vec4(lightAngleScale, lightAngleOffset, glm::max(0.0f, light.Radius), (float)glm::max(1u, light.ShadowSamples));
+        l.spotParams = glm::vec4(right * halfWidth, halfHeight);
 
         m_lightBufferObjects.push_back(l);
     }

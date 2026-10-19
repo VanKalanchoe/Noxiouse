@@ -193,14 +193,16 @@
         float lenSqN = dot(normalSample.rgb, normalSample.rgb);
         float3 normal = lenSqN > 1e-6 ? normalSample.rgb * rsqrt(lenSqN) : float3(0.0, 1.0, 0.0);
 
-        if (ubo->lightCount == 0 || ubo->enableRTShadows == 0 || ubo->tlasDeviceAddress == 0)
+        // The sun's shadow: the first directional light (Renderer::updateLightBuffer). None: every light traces its own rays in the
+        // deferred lighting.
+        if (ubo->shadowMaskLightIndex >= ubo->lightCount || ubo->enableRTShadows == 0 || ubo->tlasDeviceAddress == 0)
         {
             output.shadowData = float2(NRD_FP16_MAX, 1.0);
             return output;
         }
 
         LightData* lights = (LightData*)ubo->lightDataReference;
-        LightData light = lights[0]; // Primary shadow caster (Directional / Sun)
+        LightData light = lights[ubo->shadowMaskLightIndex];
 
         uint lightType = (uint)light.position.w;
         float sourceRadius = light.spotParams.z;

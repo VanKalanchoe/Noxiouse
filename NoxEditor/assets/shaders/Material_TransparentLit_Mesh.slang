@@ -421,52 +421,61 @@ FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform Pu
         float3 l;
         float attenuation = 1.0;
         float lightDistance = 100000.0 * ubo->unitsPerMeter; // a directional light: as far as a shadow ray needs to go
+        float3 contribution;
 
-        if (lightType == 0)
+        if (lightType == 3)
         {
-            l = normalize(light.direction.xyz);
+            // Rect: exact diffuse, representative-point specular (PBRLighting.slang); its shadow ray to a point of it that moves
+            // with the pixel and the frame (a soft shadow's grain the temporal upscale smooths).
+            PBRInfo rectInputs = PBRInfo(1.0, NdotV, 1.0, 1.0, 1.0, perceptualRoughness, metallic, specularEnvironmentR0,
+                                         specularEnvironmentR90, alphaRoughness, diffuseColor, specularColor);
+            contribution = evaluateRectLight(rectInputs, light, vertIn.worldPos, n, v);
+            if (!any(contribution > 0.0))
+                continue;
+            const float2 u = frac(float2(52.9829189 * frac(0.06711056 * vertIn.pos.x + 0.00583715 * vertIn.pos.y),
+                                         0.7548776662 * float(ubo->mipFeedbackFrame % 64u) + 0.5698402910 * (vertIn.pos.x + vertIn.pos.y)));
+            const LightPointSample sample = sample_light_point(light, vertIn.worldPos, u);
+            l = sample.direction;
+            lightDistance = sample.distance;
         }
         else
         {
-            float3 lightVec = light.position.xyz - vertIn.worldPos;
-            float distance = length(lightVec);
-            lightDistance = distance;
-            l = distance > 0.0001 ? lightVec / distance : float3(0.0, 1.0, 0.0);
-
-            float range = light.direction.w;
-            attenuation = range > 0.0
-                ? max(1.0 - pow(distance / range, 4.0), 0.0) / (distance * distance)
-                : 1.0 / (distance * distance);
-
-            if (lightType == 2)
+            if (lightType == 0)
             {
-                float cd = dot(normalize(light.direction.xyz), -l);
-                float angularAttenuation = saturate(cd * light.spotParams.x + light.spotParams.y);
-                attenuation *= angularAttenuation * angularAttenuation;
+                l = normalize(light.direction.xyz);
             }
+            else
+            {
+                // Inverse square held at the source radius, range window, cone (shaderIO.h).
+                float3 lightVec = light.position.xyz - vertIn.worldPos;
+                float distance = length(lightVec);
+                lightDistance = distance;
+                l = distance > 0.0001 ? lightVec / distance : float3(0.0, 1.0, 0.0);
+                attenuation = light_distance_attenuation(light, distance) * light_spot_attenuation(light, l);
+            }
+
+            if (attenuation <= 0.0)
+            {
+                continue;
+            }
+
+            float NdotL = clamp(dot(n, l), 0.001, 1.0);
+            if (dot(n, l) <= 0.0)
+            {
+                continue;
+            }
+
+            float3 h = normalize(l + v);
+            PBRInfo pbrInputs = PBRInfo(
+                NdotL, NdotV, clamp(dot(n, h), 0.0, 1.0), clamp(dot(l, h), 0.0, 1.0), clamp(dot(v, h), 0.0, 1.0),
+                perceptualRoughness, metallic,
+                specularEnvironmentR0, specularEnvironmentR90, alphaRoughness,
+                diffuseColor, specularColor
+            );
+
+            float3 lightRadiance = light.color.rgb * light.color.w * attenuation;
+            contribution = evaluateDirectLight(pbrInputs, lightRadiance);
         }
-
-        if (attenuation <= 0.0)
-        {
-            continue;
-        }
-
-        float NdotL = clamp(dot(n, l), 0.001, 1.0);
-        if (dot(n, l) <= 0.0)
-        {
-            continue;
-        }
-
-        float3 h = normalize(l + v);
-        PBRInfo pbrInputs = PBRInfo(
-            NdotL, NdotV, clamp(dot(n, h), 0.0, 1.0), clamp(dot(l, h), 0.0, 1.0), clamp(dot(v, h), 0.0, 1.0),
-            perceptualRoughness, metallic,
-            specularEnvironmentR0, specularEnvironmentR90, alphaRoughness,
-            diffuseColor, specularColor
-        );
-
-        float3 lightRadiance = light.color.rgb * light.color.w * attenuation;
-        float3 contribution = evaluateDirectLight(pbrInputs, lightRadiance);
         directLighting += contribution;
 
         if (traceShadows)

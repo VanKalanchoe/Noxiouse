@@ -302,6 +302,7 @@ namespace Nox
         void SubmitLight(const glm::mat4& transform, const DirectionalLightComponent& light);
         void SubmitLight(const glm::mat4& transform, const PointLightComponent& light);
         void SubmitLight(const glm::mat4& transform, const SpotLightComponent& light);
+        void SubmitLight(const glm::mat4& transform, const RectLightComponent& light);
 
         Texture2D* GetSceneResource() const { return m_sceneResource.get(); }
 
@@ -1173,6 +1174,9 @@ namespace Nox
         uint32_t m_restirDIFirstLocalLight = 0;
         uint32_t m_restirDINumLocalLights = 0;
         uint32_t m_restirDIFirstInfiniteLight = 0;
+        // The first directional light: the one the RT shadow pass (NRD SIGMA) is for, ~0u for none (updateLightBuffer).
+        uint32_t m_shadowMaskLightIndex = ~0u;
+        glm::vec3 m_shadowMaskLightDirection{ 0.0f, 1.0f, 0.0f };
         uint32_t m_restirDINumInfiniteLights = 0;
 
         // Defaults match RTXPT's own RtxdiApplicationSettings.cpp (getReSTIRDIInitialSamplingParams/

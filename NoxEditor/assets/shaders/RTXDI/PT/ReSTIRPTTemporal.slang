@@ -342,47 +342,15 @@ RAB_LightSample RAB_EmptyLightSample()
 
 RAB_LightSample RAB_SamplePolymorphicLight(RAB_LightInfo light, float3 worldPos)
 {
-    RAB_LightSample s = RAB_EmptyLightSample();
-    uint lightType = (uint)light.position.w;
-    s.lightType = lightType;
+    // The engine's light sampling (shaderIO.h, shared with the rest of the renderer): a point on the light -- the sun's cone, a sphere
+    // light's disc, a rect light's area -- and the light from it with the falloff, cone and a rect's area / distance^2 folded in.
+    const LightPointSample lightPoint = sample_light_point(light, worldPos, (uint)light.position.w == 3u ? float2(0.5, 0.5) : float2(0.0, 0.0));
+    RAB_LightSample s;
+    s.lightType = (uint)light.position.w;
+    s.position = lightPoint.position;
+    s.normal = lightPoint.direction; // directional: the direction itself; local: towards the sampled point
+    s.radiance = lightPoint.radiance;
     s.solidAnglePdf = 1.0;
-
-    if (lightType == 0) // Directional
-    {
-        float3 dir = normalize(light.direction.xyz);
-        s.normal = dir;
-        s.radiance = light.color.rgb * light.color.a;
-        return s;
-    }
-
-    float3 lightVec = light.position.xyz - worldPos;
-    float distance = length(lightVec);
-    s.position = light.position.xyz;
-    s.normal = distance > 0.0001 ? (lightVec / distance) : float3(0.0, 1.0, 0.0);
-
-    float attenuation;
-    float range = light.direction.w;
-    float distSq = max(distance * distance, 1e-4);
-    if (range > 0.0)
-    {
-        float dOverR = distance / range;
-        float window = max(1.0 - pow(dOverR, 4.0), 0.0);
-        attenuation = window / distSq;
-    }
-    else
-    {
-        attenuation = 1.0 / distSq;
-    }
-
-    if (lightType == 2) // Spot
-    {
-        float cd = dot(normalize(light.direction.xyz), -s.normal);
-        float angular = saturate(cd * light.spotParams.x + light.spotParams.y);
-        angular *= angular;
-        attenuation *= angular;
-    }
-
-    s.radiance = light.color.rgb * light.color.a * attenuation;
     return s;
 }
 
@@ -391,7 +359,16 @@ RAB_LightSample RAB_SamplePolymorphicLight(RAB_LightInfo light, float3 worldPos)
 // surface/UV parameters (meant for area-light sampling) are simply unused.
 RAB_LightSample RAB_SamplePolymorphicLight(RAB_LightInfo light, RAB_Surface surface, float2 uv)
 {
-    return RAB_SamplePolymorphicLight(light, surface.worldPos);
+    // The engine's light sampling (shaderIO.h, shared with the rest of the renderer): a point on the light -- the sun's cone, a sphere
+    // light's disc, a rect light's area -- and the light from it with the falloff, cone and a rect's area / distance^2 folded in.
+    const LightPointSample lightPoint = sample_light_point(light, surface.worldPos, uv);
+    RAB_LightSample s;
+    s.lightType = (uint)light.position.w;
+    s.position = lightPoint.position;
+    s.normal = lightPoint.direction; // directional: the direction itself; local: towards the sampled point
+    s.radiance = lightPoint.radiance;
+    s.solidAnglePdf = 1.0;
+    return s;
 }
 
 float3 RAB_LightSamplePosition(RAB_LightSample lightSample) { return lightSample.position; }

@@ -369,6 +369,8 @@ struct UniformBufferObject
     // camera's (jittered) pixels; 0xFFFFFFFF when it did not run.
     uint32_t screenGITextureIndex;
     uint32_t screenGIDistanceTextureIndex;
+    // The light the RT shadow mask is for (the first directional light, the sun); 0xFFFFFFFF: none, every light traces its own.
+    uint32_t shadowMaskLightIndex;
 };
 
 struct Vertex
@@ -428,16 +430,202 @@ enum LightType : uint32_t
 {
     Directional = 0,
     Point = 1,
-    Spot = 2
+    Spot = 2,
+    Rect = 3
 };
 
+// Filled by Renderer::SubmitLight. Point and spot lights: Intensity arrives multiplied by (world units per meter)^2, so the inverse
+// square law in world units is the one in meters whatever the project's unit; Range and the source radius are world units.
+// Rect lights: position = the centre, direction.xyz = the side they shine towards, spotParams.xyz = the half-width axis and
+// spotParams.w = the half height (world units); Intensity is the radiance of their surface (one-sided, Lambertian).
 struct LightData
 {
-    vec4 position;     // xyz: World Position, w: LightType (0 = Directional, 1 = Point, 2 = Spot)
-    vec4 direction;    // xyz: Normalized Direction, w: Range (0.0 = infinite)
+    vec4 position;     // xyz: World Position, w: LightType (0 = Directional, 1 = Point, 2 = Spot, 3 = Rect)
+    vec4 direction;    // xyz: Normalized Direction (directional: towards the light; spot: where it points; rect: its front), w: Range (0.0 = infinite)
     vec4 color;        // rgb: Color, w: Intensity
-    vec4 spotParams;   // x/y: spot cone terms, z: source radius (radians for directional, meters otherwise), w: shadow samples
+    vec4 spotParams;   // x/y: spot cone terms, z: source radius (radians for directional, world units otherwise), w: shadow samples
+                       // (rect: xyz the half-width axis, w the half height)
 };
+
+#ifdef __SLANG__
+// ---- Light evaluation every shader shares (docs/Hybrid_Renderer_Plan_2026-10.md §7) ----
+
+// A point / spot light's falloff: the inverse square law, held at the source's radius (exact for a sphere light, and no blow-up on
+// a lamp's own shade right next to the bulb), smoothly windowed to 0 at Range (Karis 2013; 0 = unlimited).
+float light_distance_attenuation(LightData light, float distance)
+{
+    const float radius = light.spotParams.z;
+    float attenuation = 1.0 / max(distance * distance, max(radius * radius, 1e-8));
+    const float range = light.direction.w;
+    if (range > 0.0)
+    {
+        const float ratio = distance / range;
+        const float window = saturate(1.0 - ratio * ratio * ratio * ratio);
+        attenuation *= window * window;
+    }
+    return attenuation;
+}
+
+// A spot light's cone (KHR_lights_punctual: smooth from the inner to the outer angle); 1 for the other lights. toLight: unit, from
+// the surface towards the light.
+float light_spot_attenuation(LightData light, float3 toLight)
+{
+    if ((uint)light.position.w != 2u)
+        return 1.0;
+    const float cone = saturate(dot(normalize(light.direction.xyz), -toLight) * light.spotParams.x + light.spotParams.y);
+    return cone * cone;
+}
+
+float3 rect_light_axis_x(LightData light) { return light.spotParams.xyz; }
+
+float3 rect_light_axis_y(LightData light)
+{
+    const float3 x = light.spotParams.xyz;
+    const float lengthX = length(x);
+    return lengthX > 1e-12 ? normalize(cross(x / lengthX, normalize(light.direction.xyz))) * light.spotParams.w : float3(0.0);
+}
+
+float rect_light_area(LightData light) { return 4.0 * length(light.spotParams.xyz) * light.spotParams.w; }
+
+// The range window of a rect light at `distance` from its centre (1 without a Range).
+float rect_light_window(LightData light, float distance)
+{
+    const float range = light.direction.w;
+    if (range <= 0.0)
+        return 1.0;
+    const float ratio = distance / range;
+    const float window = saturate(1.0 - ratio * ratio * ratio * ratio);
+    return window * window;
+}
+
+// The cosine-weighted solid angle (steradians, at most pi) the rect fills above a surface's horizon: its irradiance there is the
+// light's radiance times this (Lambert's polygon formula, the rectangle clipped to the surface's hemisphere first). 0 behind it.
+float rect_light_form_factor(LightData light, float3 position, float3 normal)
+{
+    const float3 front = normalize(light.direction.xyz);
+    if (dot(position - light.position.xyz, front) <= 0.0)
+        return 0.0;
+    const float3 x = rect_light_axis_x(light);
+    const float3 y = rect_light_axis_y(light);
+    const float3 c = light.position.xyz - position;
+    const float3 corners[4] = { c - x - y, c + x - y, c + x + y, c - x + y };
+
+    // Clip to the half-space in front of the surface (Sutherland-Hodgman: a quad becomes at most 5 vertices).
+    float3 clipped[5];
+    uint count = 0;
+    for (uint i = 0; i < 4; ++i)
+    {
+        const float3 a = corners[i];
+        const float3 b = corners[(i + 1) % 4];
+        const float da = dot(a, normal);
+        const float db = dot(b, normal);
+        if (da >= 0.0)
+            clipped[count++] = a;
+        if ((da >= 0.0) != (db >= 0.0))
+            clipped[count++] = a + (b - a) * (da / (da - db));
+    }
+    if (count < 3)
+        return 0.0;
+
+    float sum = 0.0;
+    for (uint i = 0; i < count; ++i)
+    {
+        const float3 a = normalize(clipped[i]);
+        const float3 b = normalize(clipped[(i + 1) % count]);
+        const float3 edge = cross(a, b);
+        const float edgeLength = length(edge);
+        if (edgeLength > 1e-9)
+            sum += acos(clamp(dot(a, b), -1.0, 1.0)) * dot(edge / edgeLength, normal);
+    }
+    return min(0.5 * abs(sum), 3.14159265);
+}
+
+// One sample of a light seen from `position` (u: two uniform random numbers): a point on it -- in the sun's cone, on a sphere
+// light's disc, on a rect light's area -- and the light arriving from there at a surface facing it, everything folded in (falloff,
+// cone, for a rect its area / distance^2 and its own cosine). Light reflected = brdf * radiance * cos(surface), averaged over u.
+struct LightPointSample
+{
+    float3 position;  // the sampled point (directional: far along the direction)
+    float3 direction; // unit, from `position` towards the sample
+    float distance;   // to the sample: the shadow ray's length
+    float3 radiance;
+};
+
+void light_basis(float3 n, out float3 tangent, out float3 bitangent)
+{
+    const float sign = n.z >= 0.0 ? 1.0 : -1.0;
+    const float a = -1.0 / (sign + n.z);
+    const float b = n.x * n.y * a;
+    tangent = float3(1.0 + sign * n.x * n.x * a, sign * b, -sign * n.x);
+    bitangent = float3(b, sign + n.y * n.y * a, -n.y);
+}
+
+LightPointSample sample_light_point(LightData light, float3 position, float2 u)
+{
+    LightPointSample s;
+    const uint type = (uint)light.position.w;
+    const float radiusSqrt = sqrt(saturate(u.x));
+    const float phi = 6.28318530718 * frac(u.y);
+    const float2 disc = radiusSqrt * float2(cos(phi), sin(phi));
+
+    if (type == 0u)
+    {
+        float3 direction = normalize(light.direction.xyz);
+        if (light.spotParams.z > 1e-5)
+        {
+            float3 tangent, bitangent;
+            light_basis(direction, tangent, bitangent);
+            direction = normalize(direction + (disc.x * tangent + disc.y * bitangent) * tan(light.spotParams.z));
+        }
+        s.direction = direction;
+        s.distance = 1e7;
+        s.position = position + direction * s.distance;
+        s.radiance = light.color.rgb * light.color.w;
+        return s;
+    }
+
+    if (type == 3u)
+    {
+        s.position = light.position.xyz + rect_light_axis_x(light) * (2.0 * u.x - 1.0) + rect_light_axis_y(light) * (2.0 * u.y - 1.0);
+        const float3 toSample = s.position - position;
+        s.distance = length(toSample);
+        s.direction = s.distance > 1e-6 ? toSample / s.distance : normalize(light.direction.xyz);
+        const float cosLight = dot(normalize(light.direction.xyz), -s.direction);
+        // Area sampling: radiance * area * cos / d^2, which cannot exceed the hemisphere's 2 pi.
+        const float solidAngle = cosLight > 0.0 ? min(rect_light_area(light) * cosLight / max(s.distance * s.distance, 1e-12), 6.28318530718) : 0.0;
+        s.radiance = light.color.rgb * light.color.w * solidAngle * rect_light_window(light, length(light.position.xyz - position));
+        return s;
+    }
+
+    float3 samplePosition = light.position.xyz;
+    const float3 toCentre = samplePosition - position;
+    const float centreDistance = length(toCentre);
+    if (light.spotParams.z > 1e-5 && centreDistance > 1e-6)
+    {
+        float3 tangent, bitangent;
+        light_basis(toCentre / centreDistance, tangent, bitangent);
+        samplePosition += (disc.x * tangent + disc.y * bitangent) * light.spotParams.z;
+    }
+    const float3 toSample = samplePosition - position;
+    s.position = samplePosition;
+    s.distance = length(toSample);
+    s.direction = s.distance > 1e-6 ? toSample / s.distance : float3(0.0, 1.0, 0.0);
+    // The falloff by the centre's distance (the disc only spreads the shadow ray).
+    s.radiance = light.color.rgb * light.color.w * light_distance_attenuation(light, centreDistance) * light_spot_attenuation(light, s.direction);
+    return s;
+}
+
+// The irradiance a light gives a surface (normal `normal`, unshadowed: times the visibility of the returned sample), with the
+// shadow ray to test: towards the sample. Exact for rect lights (the form factor; the sample only places the shadow ray).
+float3 light_surface_irradiance(LightData light, float3 position, float3 normal, float2 u, out LightPointSample sample)
+{
+    sample = sample_light_point(light, position, u);
+    if ((uint)light.position.w == 3u)
+        return light.color.rgb * light.color.w * rect_light_form_factor(light, position, normal) *
+               rect_light_window(light, length(light.position.xyz - position));
+    return sample.radiance * max(dot(normal, sample.direction), 0.0);
+}
+#endif
 
 // GPU instance culling (§5.6): per view, the draw list (instance slots in bucket order) is tested against the view and
 // compacted per bucket into the visible instance list and one indirect command per visible instance, without atomics:

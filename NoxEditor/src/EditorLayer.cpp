@@ -1949,6 +1949,27 @@ namespace Nox
         if (m_SceneState != SceneState::Play && m_ShowReferenceFigure)
             DrawReferenceFigure();
 
+        // Rect lights are not geometry: their rectangle and a stroke the way they shine (the entity's -Z) show where they are.
+        if (m_SceneState != SceneState::Play)
+        {
+            auto rectLights = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, RectLightComponent>();
+            for (auto entity : rectLights)
+            {
+                auto [wtc, light] = rectLights.get<WorldTransformComponent, RectLightComponent>(entity);
+                const glm::mat4& world = wtc.WorldMatrix;
+                const glm::vec3 centre = glm::vec3(world[3]);
+                const glm::vec3 halfX = glm::vec3(world[0]) * (0.5f * light.Width);
+                const glm::vec3 halfY = glm::vec3(world[1]) * (0.5f * light.Height);
+                const glm::vec3 corners[4] = { centre - halfX - halfY, centre + halfX - halfY, centre + halfX + halfY, centre - halfX + halfY };
+                const glm::vec4 colour(glm::mix(light.Color, glm::vec3(1.0f, 0.9f, 0.4f), 0.5f), 1.0f);
+                for (int i = 0; i < 4; ++i)
+                    m_Renderer2D->DrawXRayLine(corners[i], corners[(i + 1) % 4], colour);
+                const glm::vec3 forward = -glm::vec3(world[2]);
+                if (glm::length(forward) > 1e-6f)
+                    m_Renderer2D->DrawXRayLine(centre, centre + glm::normalize(forward) * 0.5f * (glm::length(halfX) + glm::length(halfY)), colour);
+            }
+        }
+
         if (m_ShowPhysicsColliders)
         {
             // Box Colliders

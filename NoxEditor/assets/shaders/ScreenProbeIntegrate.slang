@@ -3,7 +3,7 @@
 // towards the pixel's normal (its normal map included). A pixel no nearby probe speaks for (a thin pole, an inside corner)
 // looks a tile further, then falls back to the DDGI cascades / the environment. Then accumulated over frames: last frame's
 // result where this surface was (motion vectors, checked against last frame's depth and normal), blended with this frame's
-// by 1 / (frames accumulated), up to maxHistory; a sudden large change (a light switched on) shortens the history.
+// by 1 / (frames accumulated), up to maxHistory.
 // Outputs: irradiance / pi (rgb), frames accumulated (a) -- the texture the deferred lighting reads -- and the distance from the
 // camera of the surface each pixel is for (0: sky), with which the forward and ray-hit shading find out whether a point they
 // shade is that surface (SceneGI.slang).
@@ -168,17 +168,8 @@ ScreenProbeIntegrateOutput fragMain(ScreenProbeVertex input, uniform PushConstan
         }
     }
 
-    float frames = min(floor(history.a + 0.5) + 1.0, float(max(pushConstant.maxHistory, 1u)));
-    if (history.a > 0.0)
-    {
-        // Far from what it was (lights changed, something moved away): mostly this frame's again, quickly.
-        const float3 luma = float3(0.2126, 0.7152, 0.0722);
-        const float currentLuma = dot(current, luma);
-        const float historyLuma = dot(history.rgb, luma);
-        const float ratio = (currentLuma + 1e-3) / (historyLuma + 1e-3);
-        if (ratio > 8.0 || ratio < 0.125)
-            frames = min(frames, 4.0);
-    }
+    // No shortcut for large changes: a probe catching a bright spot for one frame (a lamp's fixture at night) made it flash.
+    const float frames = min(floor(history.a + 0.5) + 1.0, float(max(pushConstant.maxHistory, 1u)));
     const float3 result = history.a > 0.0 ? lerp(history.rgb, current, 1.0 / frames) : current;
     output.irradiance = float4(max(result, 0.0), frames);
     output.distance = viewDistance;

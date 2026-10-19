@@ -131,69 +131,15 @@ float2 RAB_SampleDisk(float2 uv)
 
 RAB_LightSample RAB_SamplePolymorphicLight(RAB_LightInfo light, RAB_Surface surface, float2 uv)
 {
-    RAB_LightSample s = RAB_EmptyLightSample();
-    uint lightType = (uint)light.position.w;
-    s.lightType = lightType;
+    // The engine's light sampling (shaderIO.h, shared with the rest of the renderer): a point on the light -- the sun's cone, a sphere
+    // light's disc, a rect light's area -- and the light from it with the falloff, cone and a rect's area / distance^2 folded in.
+    const LightPointSample lightPoint = sample_light_point(light, surface.worldPos, uv);
+    RAB_LightSample s;
+    s.lightType = (uint)light.position.w;
+    s.position = lightPoint.position;
+    s.normal = lightPoint.direction; // directional: the direction itself; local: towards the sampled point
+    s.radiance = lightPoint.radiance;
     s.solidAnglePdf = 1.0;
-
-    if (lightType == 0) // Directional
-    {
-        // LightData.direction.xyz is already the "toward the light" vector in this engine's
-        // convention (both DeferredLighting.slang's brute-force loop and PathTracer.slang use it
-        // directly, unnegated, as their lighting L vector) -- do NOT negate it here.
-        float3 dir = normalize(light.direction.xyz);
-        if (light.spotParams.z > 1e-4)
-        {
-            float3 t, b;
-            RAB_BuildBasis(dir, t, b);
-            float2 disk = RAB_SampleDisk(uv);
-            dir = normalize(dir + (disk.x * t + disk.y * b) * tan(light.spotParams.z));
-        }
-        s.normal = dir;
-        s.radiance = light.color.rgb * light.color.a;
-        return s;
-    }
-
-    float3 centerVec = light.position.xyz - surface.worldPos;
-    float centerDistance = length(centerVec);
-    float3 sampledPosition = light.position.xyz;
-    if (light.spotParams.z > 1e-4)
-    {
-        float3 centerDir = centerDistance > 1e-4 ? centerVec / centerDistance : float3(0.0, 1.0, 0.0);
-        float3 t, b;
-        RAB_BuildBasis(centerDir, t, b);
-        float2 disk = RAB_SampleDisk(uv);
-        sampledPosition += (disk.x * t + disk.y * b) * light.spotParams.z;
-    }
-
-    float3 lightVec = sampledPosition - surface.worldPos;
-    float distance = length(lightVec);
-    s.position = sampledPosition;
-    s.normal = distance > 0.0001 ? (lightVec / distance) : float3(0.0, 1.0, 0.0);
-
-    float attenuation;
-    float range = light.direction.w;
-    float distSq = max(distance * distance, 1e-4);
-    if (range > 0.0)
-    {
-        float dOverR = distance / range;
-        float window = max(1.0 - pow(dOverR, 4.0), 0.0);
-        attenuation = window / distSq;
-    }
-    else
-    {
-        attenuation = 1.0 / distSq;
-    }
-
-    if (lightType == 2) // Spot
-    {
-        float cd = dot(normalize(light.direction.xyz), -s.normal);
-        float angular = saturate(cd * light.spotParams.x + light.spotParams.y);
-        angular *= angular;
-        attenuation *= angular;
-    }
-
-    s.radiance = light.color.rgb * light.color.a * attenuation;
     return s;
 }
 

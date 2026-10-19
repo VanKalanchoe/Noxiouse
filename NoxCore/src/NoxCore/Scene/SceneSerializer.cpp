@@ -497,6 +497,21 @@ namespace Nox
             out << YAML::EndMap;
         }
 
+        if (entity.HasComponent<RectLightComponent>())
+        {
+            out << YAML::Key << "RectLightComponent";
+            out << YAML::BeginMap;
+
+            auto& rlc = entity.GetComponent<RectLightComponent>();
+            out << YAML::Key << "Color" << YAML::Value << rlc.Color;
+            out << YAML::Key << "Intensity" << YAML::Value << rlc.Intensity;
+            out << YAML::Key << "Width" << YAML::Value << rlc.Width;
+            out << YAML::Key << "Height" << YAML::Value << rlc.Height;
+            out << YAML::Key << "Range" << YAML::Value << rlc.Range;
+
+            out << YAML::EndMap;
+        }
+
         if (entity.HasComponent<EnvironmentLightComponent>())
         {
             out << YAML::Key << "EnvironmentLightComponent";
@@ -1364,6 +1379,22 @@ namespace Nox
                 slc.Radius = spotLightComponent["Radius"].as<float>();
             if (spotLightComponent["ShadowSamples"])
                 slc.ShadowSamples = spotLightComponent["ShadowSamples"].as<uint32_t>();
+        }
+
+        auto rectLightComponent = entity["RectLightComponent"];
+        if (rectLightComponent)
+        {
+            auto& rlc = deserializedEntity.AddComponent<RectLightComponent>();
+            if (rectLightComponent["Color"])
+                rlc.Color = rectLightComponent["Color"].as<glm::vec3>();
+            if (rectLightComponent["Intensity"])
+                rlc.Intensity = rectLightComponent["Intensity"].as<float>();
+            if (rectLightComponent["Width"])
+                rlc.Width = rectLightComponent["Width"].as<float>();
+            if (rectLightComponent["Height"])
+                rlc.Height = rectLightComponent["Height"].as<float>();
+            if (rectLightComponent["Range"])
+                rlc.Range = rectLightComponent["Range"].as<float>();
         }
 
         auto environmentLightComponent = entity["EnvironmentLightComponent"];

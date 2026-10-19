@@ -42,31 +42,14 @@ namespace PathTracer
         }
         else
         {
+            // The engine's light sampling (shaderIO.h): the sun's cone, a sphere light's disc, a rect light's area, with the
+            // falloff, cone and a rect's area / distance^2 folded in -- the same light the raster and GI passes see.
             LightData* lights = (LightData*)ubo->lightDataReference;
-            LightData light = lights[lightIndex];
-            uint lightType = uint(light.position.w);
-            if (lightType == LightType::Directional)
-            {
-                c.L = normalize(light.direction.xyz);
-                c.distance = 1e8;
-                Li = light.color.rgb * light.color.w;
-            }
-            else
-            {
-                float3 toLight = light.position.xyz - sd.posW;
-                c.distance = length(toLight);
-                c.L = toLight / max(c.distance, 1e-6);
-                float attenuation = 1.0 / max(c.distance * c.distance, 1e-4);
-                if (light.direction.w > 0.0)
-                    attenuation *= max(0.0, 1.0 - pow(c.distance / light.direction.w, 4.0));
-                if (lightType == LightType::Spot)
-                {
-                    float cosAngle = dot(-c.L, light.direction.xyz);
-                    float spot = saturate(cosAngle * light.spotParams.x + light.spotParams.y);
-                    attenuation *= spot * spot;
-                }
-                Li = light.color.rgb * light.color.w * attenuation;
-            }
+            const LightPointSample lightPoint = sample_light_point(lights[lightIndex], sd.posW,
+                                                                   float2(Bridge::rand(rngState), Bridge::rand(rngState)));
+            c.L = lightPoint.direction;
+            c.distance = uint(lights[lightIndex].position.w) == LightType::Directional ? 1e8 : lightPoint.distance;
+            Li = lightPoint.radiance;
         }
 
         if (all(Li <= float3(0.0))) return c;

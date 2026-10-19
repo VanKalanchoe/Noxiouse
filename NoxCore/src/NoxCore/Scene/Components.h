@@ -271,6 +271,21 @@ namespace Nox
         SpotLightComponent(const SpotLightComponent&) = default;
     };
 
+    // A rectangle that emits light from its front (the entity's -Z, like a spot light's direction): soft area light and soft ray traced
+    // shadows, a light panel, a window, a TV. Width / Height are world units along the entity's X / Y (scaled with it); Intensity is the
+    // brightness of its surface (radiance): a 1 x 0.5 m panel of Intensity 10 lights a wall 2 m away about as a default point light.
+    struct RectLightComponent
+    {
+        glm::vec3 Color{ 1.0f, 1.0f, 1.0f };
+        float Intensity = 10.0f;
+        float Width = WorldUnits::FromMeters(1.0f);
+        float Height = WorldUnits::FromMeters(0.5f);
+        float Range = 0.0f; // world units; 0 = unlimited
+
+        RectLightComponent() = default;
+        RectLightComponent(const RectLightComponent&) = default;
+    };
+
     // Image-based environment lighting. The renderer will preprocess TexturePath into its
     // diffuse irradiance/specular IBL maps; this is deliberately separate from punctual
     // directional/point/spot lights.
@@ -708,7 +723,7 @@ namespace Nox
 
     using AllComponents = 
         ComponentGroup<TransformComponent, WorldTransformComponent, RelationshipComponent, DirtyTransformComponent, FolderComponent,
-        MeshComponent, MaterialComponent, ModelInstanceComponent, ModelNodeComponent, PrefabInstanceComponent, PrefabNodeComponent, DirectionalLightComponent, PointLightComponent, SpotLightComponent, EnvironmentLightComponent, AnimatorComponent,
+        MeshComponent, MaterialComponent, ModelInstanceComponent, ModelNodeComponent, PrefabInstanceComponent, PrefabNodeComponent, DirectionalLightComponent, PointLightComponent, SpotLightComponent, RectLightComponent, EnvironmentLightComponent, AnimatorComponent,
         TimelinePlayerComponent, ParticleEmitterComponent, SpriteRendererComponent,
             CircleRendererComponent, CameraComponent, ScriptComponent,
             /*NativeScriptComponent,*/ RigidBody2DComponent, BoxCollider2DComponent,

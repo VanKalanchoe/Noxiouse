@@ -636,7 +636,8 @@ namespace Nox
         // Submission (after BeginScene). No conflicts: they run in parallel. Meshes are not submitted: the GPU scene keeps
         // them (SyncGpuScene).
         m_SubmitSystems.AddSystem("Submit Lights",
-            ComponentAccess().Read<WorldTransformComponent, CameraComponent, DirectionalLightComponent, PointLightComponent, SpotLightComponent>().Write<LightSubmission>(),
+            ComponentAccess().Read<WorldTransformComponent, CameraComponent, DirectionalLightComponent, PointLightComponent, SpotLightComponent,
+                                   RectLightComponent>().Write<LightSubmission>(),
             [this]() { SubmitLights(); });
         m_SubmitSystems.AddSystem("Submit 2D",
             ComponentAccess().Read<WorldTransformComponent, SpriteRendererComponent, CircleRendererComponent, TextComponent>().Write<Renderer2DSubmission>(),
@@ -1326,8 +1327,8 @@ namespace Nox
         // them directly makes duplicated glTF hierarchies share their children.
         using DuplicatableComponents = ComponentGroup<
             MeshComponent, MaterialComponent, ModelInstanceComponent, PrefabInstanceComponent, DirectionalLightComponent,
-            PointLightComponent, SpotLightComponent, EnvironmentLightComponent, AnimatorComponent, TimelinePlayerComponent, FolderComponent,
-            ParticleEmitterComponent, SpriteRendererComponent, CircleRendererComponent, CameraComponent,
+            PointLightComponent, SpotLightComponent, RectLightComponent, EnvironmentLightComponent, AnimatorComponent, TimelinePlayerComponent,
+            FolderComponent, ParticleEmitterComponent, SpriteRendererComponent, CircleRendererComponent, CameraComponent,
             ScriptComponent, RigidBody2DComponent, BoxCollider2DComponent,
             CircleCollider2DComponent, TextComponent>;
 
@@ -1589,6 +1590,14 @@ namespace Nox
                 m_renderer->SubmitLight(wtc.WorldMatrix, light);
             }
         }
+        {
+            auto view = m_Registry.view<WorldTransformComponent, RectLightComponent>();
+            for (auto entity : view)
+            {
+                auto [wtc, light] = view.get<WorldTransformComponent, RectLightComponent>(entity);
+                m_renderer->SubmitLight(wtc.WorldMatrix, light);
+            }
+        }
         // The environment itself is applied by SetRenderer (main thread); this system may run on a worker.
         if (environment)
             m_renderer->setScaleIBLAmbient(environment->RadianceScale.x);
@@ -1735,6 +1744,11 @@ namespace Nox
     
     template <>
     void Scene::OnComponentAdded<SpotLightComponent>(Entity entity, SpotLightComponent& component)
+    {
+    }
+
+    template <>
+    void Scene::OnComponentAdded<RectLightComponent>(Entity entity, RectLightComponent& component)
     {
     }
 
