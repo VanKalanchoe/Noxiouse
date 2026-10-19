@@ -175,7 +175,7 @@ float chebyshev_visibility(float distToProbe, float meanDist, float meanDistSq, 
         return 1.0;
     }
 
-    // Variance floor (in world units squared): prevents division by zero while maintaining sharp shadows
+    // Variance floor (meters squared, like the moments): prevents division by zero while maintaining sharp shadows
     float variance = max(abs(meanDistSq - (meanDist * meanDist)), varianceFloor);
     float pMax = variance / (variance + d * d);
 
@@ -205,8 +205,8 @@ float3 sample_ddgi_diffuse(
     uint countY = uint(ubo->ddgiGridSpacing.w);
     uint countZ = uint(ubo->ddgiGridParams.x);
     float normalBias = ubo->ddgiGridParams.w;
-    // (2 cm)^2 in the project's units.
-    const float varianceFloor = 0.0004 * ubo->unitsPerMeter * ubo->unitsPerMeter;
+    // The distance moments are in meters (DDGIBlendDistance.slang): (2 cm)^2.
+    const float varianceFloor = 0.0004;
 
     // The environment's irradiance (what the IBL path uses): where the volume ends the probes hand over to it, one cell wide,
     // instead of the edge probes stretching over everything outside.
@@ -269,7 +269,7 @@ float3 sample_ddgi_diffuse(
                 // 3. Chebyshev visibility test: does the probe have line of sight to the surface?
                 float2 distUV = get_probe_atlas_uv(probeIndex, -toProbeDir, 16, probesPerRowDist, ubo->ddgiAtlasParams.zw);
                 float2 moments = distanceAtlas.SampleLevel(atlasSampler, distUV, 0).rg;
-                float visibility = chebyshev_visibility(distToProbe, moments.x, moments.y, varianceFloor);
+                float visibility = chebyshev_visibility(distToProbe / ubo->unitsPerMeter, moments.x, moments.y, varianceFloor);
 
                 float weight = trilinear * normalWeight * visibility;
                 if (weight < 1e-5)

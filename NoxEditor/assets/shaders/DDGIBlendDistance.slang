@@ -123,7 +123,8 @@ float2 fragMain(
 
         // Clamped to about a cell and a half (in world units): misses and far hits only need to read as "open". A back face
         // (negative, DDGIRadiance.slang) counts as a fifth of its distance, so what lies behind it reads as occluded.
-        float dist = min(raySample.w < 0.0 ? -raySample.w * 0.2 : raySample.w, ddgi_max_distance(ubo));
+        // Stored in meters: the atlas is 16-bit float, and squared centimeters overflow it.
+        float dist = min(raySample.w < 0.0 ? -raySample.w * 0.2 : raySample.w, ddgi_max_distance(ubo)) / ubo->unitsPerMeter;
         meanDist += dist * weight;
         meanDistSq += (dist * dist) * weight;
         totalWeight += weight;
