@@ -384,6 +384,11 @@ namespace Nox
         const FrameGraphState& frame = m_frame;
         m_frame.occlusionRawAdded = true;
 
+        // At a lower ray tracing resolution the rays go into a reduced target, brought back below.
+        const bool reduced = m_rtSubsample > 1 && m_rtUpsamplePipelines[2];
+        const RGTexture traceTarget = reduced ? createReducedRTTarget("RTAO (Reduced)", NRI::ImageFormat::R16_SFLOAT) : resources.SSAORaw;
+        const NRI::Extent2D traceExtent = reduced ? reducedRTExtent() : frame.renderExtent;
+
         m_renderGraph.AddPass("RTAO", RGPassFlags::Raster,
             [&](RGBuilder& builder)
             {
@@ -395,8 +400,8 @@ namespace Nox
                 if (resources.TLAS.IsValid())
                     builder.Read(resources.TLAS, RGBufferAccess::AccelerationStructureRead);
                 ReadGpuScene(builder, resources);
-                builder.ColorTarget(resources.SSAORaw, NRI::LoadOP::clear, NRI::StoreOP::store, { 1.0f, 0.0f, 0.0f, 0.0f });
-                builder.SetRenderArea(frame.renderExtent);
+                builder.ColorTarget(traceTarget, NRI::LoadOP::clear, NRI::StoreOP::store, { 1.0f, 0.0f, 0.0f, 0.0f });
+                builder.SetRenderArea(traceExtent);
             },
             [this, res = &resources](RGPassContext& context)
             {
@@ -426,6 +431,8 @@ namespace Nox
 
                 cmd.drawMeshTasks(1, 1, 1);
             });
+        if (reduced)
+            addRTUpsamplePass("RTAO Upsample", traceTarget, resources.SSAORaw, m_rtUpsamplePipelines[2].get(), 0);
     }
 
     void Renderer::addDeferredLightingPass()

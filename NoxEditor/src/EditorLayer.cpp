@@ -1138,6 +1138,17 @@ namespace Nox
             if (rtEnabled)
             {
                 ImGui::Indent();
+                static const char* rtResolutionNames[] = { "Full (every pixel)", "Half (a quarter of the rays)" };
+                int rtResolution = m_Renderer->getRayTracingResolutionDivisor() > 1 ? 1 : 0;
+                if (ImGui::Combo("Ray Tracing Resolution", &rtResolution, rtResolutionNames, IM_ARRAYSIZE(rtResolutionNames)))
+                    m_Renderer->setRayTracingResolutionDivisor(rtResolution == 1 ? 2u : 1u);
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Only the ray traced effects, not the image: textures, geometry and DLSS stay as they are.\n"
+                                      "Half: RT reflections, RT sun shadows and RTAO trace one pixel of every 2 x 2 block, a different\n"
+                                      "one each frame; the others are filled from their neighbours on the same surface before the\n"
+                                      "denoisers, which accumulate the four over frames. About a quarter of their cost, a little\n"
+                                      "softer. The GI has its own setting (Screen Probe Spacing); the other lights' shadow rays stay\n"
+                                      "per pixel.");
                 bool rtShadows = m_Renderer->getRayTracingShadows();
                 if (ImGui::Checkbox("Ray Tracing Shadows", &rtShadows))
                 {

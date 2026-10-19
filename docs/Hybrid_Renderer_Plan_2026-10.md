@@ -163,6 +163,16 @@ Balanced 58 %, Performance 50 %, Ultra Performance 33 % per axis; Settings shows
 quarter of DLAA's rays for every effect. Per effect: Screen Probe Spacing (24 px: about half the GI rays of 16 px), DDGI Probe
 Updates, RT reflections off on Low.
 
+**Ray Tracing Resolution, independent of DLSS (2026-10-19, untested;** the user: "DLSS lowers the textures too, I need the ray
+traced effects alone lower"): Settings > Enable Hybrid Ray Tracing > Ray Tracing Resolution, Full / Half. Half: RT reflections,
+the RT sun shadow mask and RTAO render into a half-width, half-height target, each texel tracing one pixel of its 2 x 2 block
+(`rt_trace_pixel`, shaderIO.h), a different one every frame (`UniformBufferObject::rtSubsample` / `rtSubsampleOffset`, the four
+over four frames). `RTUpsample.slang` brings each back to the render resolution before its denoiser: every pixel takes the traced
+samples of the 3 x 3 blocks around that lie on its surface (depth within a few percent, normal agreeing), the nearest weighing
+most -- blended for reflections and AO (the hit distance from the best match), the best match alone for the shadow mask (its
+penumbra distance does not average). NRD's temporal accumulation then sees every pixel over the frames. A quarter of those
+passes' rays; the GI keeps its own setting, the deferred lighting's shadow rays for local lights stay per pixel.
+
 ## 3. DLSS edge jitter (Future.md: "when DLSS is enabled, edge detection jittering")
 
 **Cause (found, see `Status_Audit_2026-10.md`):** `Renderer::addEntityDepthBlitPass` (`UpscalePasses.cpp`) copies the

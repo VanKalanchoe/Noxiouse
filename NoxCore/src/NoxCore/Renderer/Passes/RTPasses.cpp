@@ -50,6 +50,59 @@ namespace Nox
             });
     }
 
+    NRI::Extent2D Renderer::reducedRTExtent() const
+    {
+        const uint32_t divisor = std::max(m_rtSubsample, 1u);
+        return { (m_frame.renderExtent.width + divisor - 1) / divisor, (m_frame.renderExtent.height + divisor - 1) / divisor };
+    }
+
+    RGTexture Renderer::createReducedRTTarget(const char* name, NRI::ImageFormat format)
+    {
+        const NRI::Extent2D extent = reducedRTExtent();
+        RGTextureDesc desc;
+        desc.Size = RGSize::Absolute;
+        desc.Width = extent.width;
+        desc.Height = extent.height;
+        desc.Format = format;
+        return m_renderGraph.CreateTexture(name, desc);
+    }
+
+    void Renderer::addRTUpsamplePass(const char* name, RGTexture source, RGTexture target, NRI::Pipeline* pipeline, uint32_t mode)
+    {
+        const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
+        const NRI::Extent2D sourceExtent = reducedRTExtent();
+        m_renderGraph.AddPass(name, RGPassFlags::Raster,
+            [&](RGBuilder& builder)
+            {
+                builder.Read(source);
+                builder.Read(resources.Depth);
+                builder.Read(resources.GBufferNormal);
+                builder.ColorTarget(target, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
+                builder.SetRenderArea(m_frame.renderExtent);
+            },
+            [this, res = &resources, source, pipeline, mode, sourceExtent](RGPassContext& context)
+            {
+                NRI::CommandBuffer& cmd = context.Cmd();
+                cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *pipeline);
+                cmd.setCullMode(NRI::CullMode::None);
+                cmd.setDepthTestEnable(false);
+                cmd.setDepthWriteEnable(false);
+                cmd.setColorBlendEnable(0, false);
+                cmd.setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
+
+                shaderio::PushConstantRTUpsample push{};
+                push.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                push.sourceTextureIndex = context.Slot(source);
+                push.depthTextureIndex = context.Slot(res->Depth);
+                push.normalTextureIndex = context.Slot(res->GBufferNormal);
+                push.mode = mode;
+                push.viewportSize = glm::vec2(static_cast<float>(m_frame.renderExtent.width), static_cast<float>(m_frame.renderExtent.height));
+                push.sourceSize = glm::vec2(static_cast<float>(sourceExtent.width), static_cast<float>(sourceExtent.height));
+                cmd.pushData(&push, sizeof(shaderio::PushConstantRTUpsample));
+                cmd.drawMeshTasks(1, 1, 1);
+            });
+    }
+
     void Renderer::addRTShadowPasses()
     {
         // Only the hybrid RT shadow path needs this; ReSTIR DI traces its own selected light, and raster PBR/IBL must not
@@ -62,6 +115,11 @@ namespace Nox
         const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
         m_frame.rtShadowsAdded = true;
 
+        // At a lower ray tracing resolution the rays go into a reduced target, brought back below.
+        const bool reduced = m_rtSubsample > 1 && m_rtUpsamplePipelines[1];
+        const RGTexture traceTarget = reduced ? createReducedRTTarget("RT Shadows (Reduced)", NRI::ImageFormat::R16G16_SFLOAT) : resources.RawShadowMask;
+        const NRI::Extent2D traceExtent = reduced ? reducedRTExtent() : m_frame.renderExtent;
+
         // 1-SPP RT shadow -> raw shadow mask (NRD's guides: addNRDGuidesPass).
         m_renderGraph.AddPass("RT Shadows", RGPassFlags::Raster,
             [&](RGBuilder& builder)
@@ -70,8 +128,8 @@ namespace Nox
                 builder.Read(resources.GBufferNormal);
                 ReadIfValid(builder, resources.TLAS);
                 ReadGpuScene(builder, resources);
-                builder.ColorTarget(resources.RawShadowMask, NRI::LoadOP::clear, NRI::StoreOP::store, { 65504.0f, 1.0f, 0.0f, 0.0f });
-                builder.SetRenderArea(m_frame.renderExtent);
+                builder.ColorTarget(traceTarget, NRI::LoadOP::clear, NRI::StoreOP::store, { 65504.0f, 1.0f, 0.0f, 0.0f });
+                builder.SetRenderArea(traceExtent);
             },
             [this, res = &resources](RGPassContext& context)
             {
@@ -103,6 +161,9 @@ namespace Nox
 
                 cmd.drawMeshTasks(1, 1, 1);
             });
+        // The penumbra distance does not average: each pixel takes its best matching traced sample.
+        if (reduced)
+            addRTUpsamplePass("RT Shadows Upsample", traceTarget, resources.RawShadowMask, m_rtUpsamplePipelines[1].get(), 1);
 
         if (!m_nrdShadowsEnabled || !m_device->isNRDInitialized())
             return;
@@ -161,8 +222,13 @@ namespace Nox
         const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
         m_frame.rtReflectionsAdded = true;
 
-        // 1-SPP GGX VNDF reflection -> raw reflection (radiance + hit distance).
+        // 1-SPP GGX VNDF reflection -> raw reflection (radiance + hit distance); at a lower ray tracing resolution into a reduced
+        // target, brought back below.
         const bool denoiseReflections = m_nrdReflectionDenoiser != NRI::NRDReflectionDenoiser::Off && m_device->isNRDInitialized();
+        const bool reduced = m_rtSubsample > 1 && m_rtUpsamplePipelines[0];
+        const RGTexture traceTarget = reduced ? createReducedRTTarget("RT Reflections (Reduced)", NRI::ImageFormat::R16G16B16A16_SFLOAT)
+                                              : resources.RawReflection;
+        const NRI::Extent2D traceExtent = reduced ? reducedRTExtent() : m_frame.renderExtent;
         m_renderGraph.AddPass("RT Reflections", RGPassFlags::Raster,
             [&](RGBuilder& builder)
             {
@@ -184,8 +250,8 @@ namespace Nox
                     builder.Read(resources.ScreenProbeGI[m_frame.screenProbeGIWriteIndex]);
                     builder.Read(resources.ScreenProbeGIDistance);
                 }
-                builder.ColorTarget(resources.RawReflection, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 10000.0f });
-                builder.SetRenderArea(m_frame.renderExtent);
+                builder.ColorTarget(traceTarget, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 10000.0f });
+                builder.SetRenderArea(traceExtent);
             },
             [this, res = &resources, denoiseReflections](RGPassContext& context)
             {
@@ -217,6 +283,9 @@ namespace Nox
 
                 cmd.drawMeshTasks(1, 1, 1);
             });
+        // Radiance blended from the matching samples around, the hit distance from the best one.
+        if (reduced)
+            addRTUpsamplePass("RT Reflections Upsample", traceTarget, resources.RawReflection, m_rtUpsamplePipelines[0].get(), 0);
 
         if (!denoiseReflections)
             return;

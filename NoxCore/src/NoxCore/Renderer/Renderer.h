@@ -506,6 +506,20 @@ namespace Nox
         // world radiance cache: turn DDGI on with it).
         uint32_t getDiffuseGIMode() const { return m_diffuseGIMode; }
         void setDiffuseGIMode(uint32_t mode) { m_diffuseGIMode = mode; }
+        // Ray tracing resolution, independent of DLSS (which scales everything, textures included): 1 traces every pixel, 2 one of each
+        // 2 x 2 block (a quarter of the rays), a different one every frame, for RT reflections, RT shadows and RTAO; RTUpsample.slang
+        // fills in the rest before their denoisers. The GI has its own (Screen Probe Spacing).
+        uint32_t getRayTracingResolutionDivisor() const { return m_rtSubsample; }
+        void setRayTracingResolutionDivisor(uint32_t divisor)
+        {
+            divisor = std::clamp(divisor, 1u, 2u);
+            if (m_rtSubsample != divisor)
+            {
+                m_rtSubsample = divisor;
+                m_renderGraph.ResetHistory(NRDHistoryKey);
+            }
+        }
+
         // ReSTIR GI runs for its mode, and for the "Indirect Diffuse GI Only" debug view (16) when no GI technique is chosen.
         bool isReSTIRGIRequested() const { return m_diffuseGIMode == 2 || (m_debugMode == 16 && m_diffuseGIMode == 0); }
         // Screen-probe GI (ScreenProbeCommon.slang): pixels per probe each way (8..32), spatial filter passes (0..3), frames
@@ -774,6 +788,7 @@ namespace Nox
         // DDGI (Dynamic Diffuse Global Illumination)
         void createDDGIPipelines(bool forceCompile = false);
         void createScreenProbePipelines(bool forceCompile = false);
+        void createRTUpsamplePipelines(bool forceCompile = false);
 
         // ReSTIR GI (Screen-Space Diffuse Path Resampling via RTXDI)
         void createRTXDINeighborOffsets();
@@ -838,6 +853,11 @@ namespace Nox
         void addDDGIPasses();
         // Screen-probe GI (diffuse GI mode 3): placement, trace, convolution, spatial filter, per-pixel integration.
         void addScreenProbeGIPasses();
+        // A lower ray tracing resolution (m_rtSubsample): the size the reduced RT passes render at, a target of that size, and the
+        // pass bringing such a result back to the render resolution (RTUpsample.slang; mode 1: best match only).
+        NRI::Extent2D reducedRTExtent() const;
+        RGTexture createReducedRTTarget(const char* name, NRI::ImageFormat format);
+        void addRTUpsamplePass(const char* name, RGTexture source, RGTexture target, NRI::Pipeline* pipeline, uint32_t mode);
         void addLightPresamplingPasses();
         // RTXDI light sampling over this frame's presampled lights (RTXDILightSampling.slang), for ReSTIR DI and GI.
         shaderio::RTXDILightSamplingParams lightSamplingParams(const RGPassContext& context, RGBuffer risBuffer) const;
@@ -996,6 +1016,10 @@ namespace Nox
         std::unique_ptr<NRI::Pipeline> m_ddgiBlendIrradiancePipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_ddgiBlendDistancePipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_ddgiDebugSpheresPipeline = nullptr;
+        // RT results at a lower ray tracing resolution back to the render resolution: RGBA16F (reflections), RG16F (shadow mask),
+        // R16F (RTAO).
+        std::array<std::unique_ptr<NRI::Pipeline>, 3> m_rtUpsamplePipelines{};
+        uint32_t m_rtSubsample = 1;
         // Screen-probe GI
         std::unique_ptr<NRI::Pipeline> m_screenProbePlacePipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_screenProbeTracePipeline = nullptr;

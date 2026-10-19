@@ -129,7 +129,8 @@ float4 fragMain(
 ) : SV_Target0
 {
     UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
-    int2 pixelCoord = int2(input.pos.xy);
+    // At a lower ray tracing resolution one pixel of each block (shaderIO.h); RTUpsample.slang fills in the others.
+    int2 pixelCoord = rt_trace_pixel(ubo, input.pos.xy, pushConstant.viewportSize);
 
     // 1. Check Visibility Buffer and Depth
     Texture2D<uint4> visTex = Texture2D<uint4>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.visibilityTextureIndex, 0));

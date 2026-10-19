@@ -282,6 +282,7 @@ namespace Nox
         for (const char* shader : { "ScreenProbeCommon", "ScreenProbePlace", "ScreenProbeTrace", "ScreenProbeIrradiance", "ScreenProbeFilter",
                                     "ScreenProbeIntegrate" })
             watchShader(std::string("assets/shaders/") + shader + ".slang", "ScreenProbeGI", [this]() { createScreenProbePipelines(true); });
+        watchShader("assets/shaders/RTUpsample.slang", "RTUpsample", [this]() { createRTUpsamplePipelines(true); });
         // ReSTIR GI
         watchShader("assets/shaders/RTXDI/GI/ReSTIRGIInitial.slang", "ReSTIRGIInitial", [this]() { createReSTIRGIPipelines(true); });
         watchShader("assets/shaders/RTXDI/GI/ReSTIRGITemporal.slang", "ReSTIRGITemporal", [this]() { createReSTIRGIPipelines(true); });
@@ -457,6 +458,7 @@ namespace Nox
         // DDGI
         createDDGIPipelines(false);
         createScreenProbePipelines(false);
+        createRTUpsamplePipelines(false);
         // ReSTIR GI
         createReSTIRGIPipelines(false);
         // ReSTIR DI
@@ -1455,6 +1457,21 @@ namespace Nox
         m_screenProbeFilterPipeline = create("assets/shaders/ScreenProbeFilter.slang", { NRI::ImageFormat::R16G16B16A16_SFLOAT });
         m_screenProbeIntegratePipeline = create("assets/shaders/ScreenProbeIntegrate.slang",
                                                 { NRI::ImageFormat::R16G16B16A16_SFLOAT, NRI::ImageFormat::R32_SFLOAT });
+    }
+
+    void Renderer::createRTUpsamplePipelines(bool forceCompile)
+    {
+        const NRI::ImageFormat formats[3] = { NRI::ImageFormat::R16G16B16A16_SFLOAT, NRI::ImageFormat::R16G16_SFLOAT, NRI::ImageFormat::R16_SFLOAT };
+        for (uint32_t i = 0; i < 3; ++i)
+        {
+            NRI::PipelineDesc desc{};
+            desc.forceCompile = forceCompile;
+            desc.colorFormats = { formats[i] };
+            desc.shaders.push_back({ .stage = NRI::ShaderStage::Task, .entryPoint = "taskMain", .sourcePath = "assets/shaders/RTUpsample.slang" });
+            desc.shaders.push_back({ .stage = NRI::ShaderStage::Mesh, .entryPoint = "meshMain", .sourcePath = "assets/shaders/RTUpsample.slang" });
+            desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "fragMain", .sourcePath = "assets/shaders/RTUpsample.slang" });
+            m_rtUpsamplePipelines[i] = m_device->createPipeline(desc, *m_shaderCompiler);
+        }
     }
 
     NRI::Extent2D Renderer::getScreenProbeCounts() const
@@ -4593,6 +4610,13 @@ namespace Nox
         uniformData.lodFullDetail = (m_lodFullDetail || m_orthographic) ? 1u : 0u; // the LOD cut assumes a perspective camera
         uniformData.clusterStatsReference = m_clusterStatsBuffer->getDeviceAddress();
         uniformData.unitsPerMeter = WorldUnits::PerMeter();
+        {
+            // Ray tracing resolution: which pixel of each block the reduced RT passes trace this frame (all four over four frames).
+            static constexpr uint32_t BlockOrder[4][2] = { { 0, 0 }, { 1, 1 }, { 1, 0 }, { 0, 1 } };
+            uniformData.rtSubsample = std::max(m_rtSubsample, 1u);
+            const uint32_t* offset = BlockOrder[m_sceneFrameCounter % 4];
+            uniformData.rtSubsampleOffset = uniformData.rtSubsample > 1 ? (offset[0] | (offset[1] << 16)) : 0u;
+        }
         {
             // Height fog in world units (the settings are per km).
             const HeightFogSettings& fog = m_heightFog;

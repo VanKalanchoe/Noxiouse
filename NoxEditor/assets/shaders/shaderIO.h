@@ -371,6 +371,11 @@ struct UniformBufferObject
     uint32_t screenGIDistanceTextureIndex;
     // The light the RT shadow mask is for (the first directional light, the sun); 0xFFFFFFFF: none, every light traces its own.
     uint32_t shadowMaskLightIndex;
+    // Ray tracing resolution (Settings > Ray Tracing Resolution, independent of DLSS): RT reflections, RT shadows and RTAO trace one
+    // pixel of every rtSubsample x rtSubsample block (1: every pixel), which one moving every frame (rtSubsampleOffset: x | y << 16);
+    // RTUpsample.slang brings their results back to the render resolution.
+    uint32_t rtSubsample;
+    uint32_t rtSubsampleOffset;
 };
 
 struct Vertex
@@ -446,6 +451,17 @@ struct LightData
     vec4 spotParams;   // x/y: spot cone terms, z: source radius (radians for directional, world units otherwise), w: shadow samples
                        // (rect: xyz the half-width axis, w the half height)
 };
+
+#ifdef __SLANG__
+// The pixel a ray traced pass's fragment traces (UniformBufferObject::rtSubsample): its own at full ray tracing resolution, one of
+// its block's otherwise.
+int2 rt_trace_pixel(UniformBufferObject* ubo, float2 fragmentPosition, float2 viewportSize)
+{
+    const uint subsample = max(ubo->rtSubsample, 1u);
+    const int2 offset = int2(ubo->rtSubsampleOffset & 0xFFFFu, ubo->rtSubsampleOffset >> 16);
+    return min(int2(fragmentPosition) * int(subsample) + offset, int2(viewportSize) - 1);
+}
+#endif
 
 #ifdef __SLANG__
 // ---- Light evaluation every shader shares (docs/Hybrid_Renderer_Plan_2026-10.md §7) ----
@@ -1235,6 +1251,18 @@ struct PushConstantDDGIBlend
     float hysteresis;
     uint32_t firstFrame;
     uint32_t frameIndex;
+};
+
+// Ray traced results at a lower ray tracing resolution back to the render resolution (RTUpsample.slang).
+struct PushConstantRTUpsample
+{
+    uint64_t matrixReference;
+    uint32_t sourceTextureIndex; // the reduced result
+    uint32_t depthTextureIndex;
+    uint32_t normalTextureIndex;
+    uint32_t mode;               // 0: color blended, alpha from the best match; 1: everything from the best match (the shadow mask)
+    vec2 viewportSize;           // render resolution
+    vec2 sourceSize;
 };
 
 // Screen-probe GI (ScreenProbeCommon.slang): one layout for its five passes (Place, Trace, Irradiance, Filter, Integrate).
