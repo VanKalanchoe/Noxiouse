@@ -91,6 +91,20 @@ so the visibility test rejected most probes and surfaces went dark. Now:
   picked in proportion to it (weighted reservoir sampling) for the only two shadow rays -- unbiased, the noise averaged by the
   probes' temporal blend.
 
+- **Smooth walls, no flicker (2026-10-19, after the user's test: "wiggly, not smooth across the board compared to the path
+  tracer; some flickering on window edges and curtains"):** the shading now weights probes the way RTXGI does --
+  - a flat **geometric normal** (rebuilt from the depth buffer in DeferredLighting, `ddgi_geometric_normal`: nearer-side
+    neighbours, so silhouettes do not bend it) for the sample offset and the backface term; the normal-mapped normal only
+    picks the irradiance direction. Weights that followed the normal map made the probes' light wiggle with every bump;
+  - a **smooth backface term** ((cos + 1) / 2)^2 + 0.2 instead of dropping probes behind the tangent plane at once;
+  - the sample point offset mostly **towards the viewer** (0.8 view + 0.2 normal, Normal Bias x 1.5 cells);
+  - RTXGI's **gentler Chebyshev** (cubed, at least 0.05) instead of a remapped fourth power, and its **weight crushing**
+    below 0.2.
+  - **Classification blended over time** (the probe's alpha follows the same hysteresis as its light): probes near the
+    back-face threshold (thin curtains, window frames) fade instead of flipping on and off -- the flicker.
+  - **The sun always gets its own shadow ray** in probe-ray shading; only local lights are picked by reservoir sampling
+    (a picked sun flickered).
+
 Not done: probe relocation (moving probes out of geometry instead of switching them off) and a faster ReSTIR GI (half
 resolution / checkerboard) for the High rung.
 

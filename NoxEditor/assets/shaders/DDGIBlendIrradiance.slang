@@ -133,8 +133,9 @@ float4 fragMain(
 
     float3 currentIrradiance = accumulatedRadiance / max(totalWeight, 1e-4);
     // Classification (alpha): a probe that sees mostly back faces is buried in geometry and is switched off -- the surfaces around it
-    // take their light from the probes outside instead of going dark next to every wall.
-    const float active = float(backFaces) > 0.25 * float(pushConstant.raysPerProbe) ? 0.0 : 1.0;
+    // take their light from the probes outside instead of going dark next to every wall. Blended over time like the light, so a
+    // probe near the threshold (thin curtains, window frames) fades instead of flipping on and off.
+    float active = float(backFaces) > 0.25 * float(pushConstant.raysPerProbe) ? 0.0 : 1.0;
 
     // Temporal Hysteresis Blending (a probe that just came into the volume starts over)
     if (pushConstant.firstFrame != 0 || pushConstant.prevAtlasTextureIndex == 0xFFFFFFFF || entered)
@@ -146,5 +147,6 @@ float4 fragMain(
     float3 prevIrradiance = prevAtlasTex.Load(int3(pixel, 0)).rgb;
 
     float3 blended = lerp(currentIrradiance, prevIrradiance, pushConstant.hysteresis);
+    active = lerp(active, prevAtlasTex.Load(int3(pixel, 0)).a, pushConstant.hysteresis);
     return float4(blended, active);
 }

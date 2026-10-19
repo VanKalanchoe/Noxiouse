@@ -252,7 +252,9 @@
                         float4 worldPosH = mul(ubo->invViewProj, ndc);
                         float3 worldPos = worldPosH.xyz / worldPosH.w;
 
-                        float3 ddgiIrradiance = sample_ddgi_diffuse(ubo, worldPos, n, ddgiIrrTex, ddgiDistTex, ddgiSampler);
+                        const float3 geometricNormal = ddgi_geometric_normal(depthTex, int2(pixelCoord), pushConstant.viewportSize, ubo->invViewProj, worldPos, n);
+                        const float3 toViewer = normalize(ubo->cameraWorldPos.xyz - worldPos);
+                        float3 ddgiIrradiance = sample_ddgi_diffuse_surface(ubo, worldPos, n, geometricNormal, toViewer, ddgiIrrTex, ddgiDistTex, ddgiSampler);
                         return float4(ddgiIrradiance, 1.0);
                     }
                 }
@@ -549,7 +551,10 @@
             Texture2D ddgiDistTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->ddgiDistanceTextureIndex, 0));
             SamplerState ddgiSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
 
-            float3 ddgiIrradiance = sample_ddgi_diffuse(ubo, worldPos, n, ddgiIrrTex, ddgiDistTex, ddgiSampler);
+            // The probe weights follow the flat surface, not its normal map (DDGICommon.slang).
+            const float3 geometricNormal = ddgi_geometric_normal(depthTex, int2(pixelCoord), pushConstant.viewportSize, pushConstant.invViewProj, worldPos, n);
+            float3 ddgiIrradiance = sample_ddgi_diffuse_surface(ubo, worldPos, n, geometricNormal, normalize(ubo->cameraWorldPos.xyz - worldPos),
+                                                                ddgiIrrTex, ddgiDistTex, ddgiSampler);
             ambientDiffuse = ddgiIrradiance * diffuseColor;
 
             // Prevent outdoor skybox specular from leaking onto dark indoor surfaces

@@ -316,7 +316,8 @@ float4 fragMain(
 
         const float3 contribution = (albedo / 3.14159265) * light.color.rgb * light.color.w * attenuation * NdotL;
         const float maxDistance = (lightType == 0) ? 1000.0 * ubo->unitsPerMeter : dist;
-        if (!pickLights)
+        // The sun (directional lights) always gets its own ray: it is most of the light outdoors, and a picked one flickers.
+        if (!pickLights || lightType == 0)
         {
             if (!ddgiShadowed(accelerationStructure, ubo, hitPos + shadowNormal * (0.02 * ubo->unitsPerMeter), l, maxDistance))
                 directLight += contribution;
@@ -369,7 +370,7 @@ float4 fragMain(
         SamplerState ddgiSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
 
         // The probes hold irradiance / pi (a cosine-weighted mean of radiance), as the lighting reads them: reflected = albedo * it.
-        float3 bouncedIrradiance = sample_ddgi_diffuse(ubo, hitPos, hitNormal, prevIrrTex, prevDistTex, ddgiSampler);
+        float3 bouncedIrradiance = sample_ddgi_diffuse_surface(ubo, hitPos, hitNormal, hitNormal, -rayDir, prevIrrTex, prevDistTex, ddgiSampler);
         indirectLight = albedo * bouncedIrradiance;
     }
     else if (ubo->irradianceMapIndex != 0xFFFFFFFF)

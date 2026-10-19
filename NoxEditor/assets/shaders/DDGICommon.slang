@@ -216,9 +216,11 @@ float chebyshev_visibility(float distToProbe, float meanDist, float meanDistSq, 
 }
 
 // =========================================================================
-// Multi-Probe Trilinear & Chebyshev Interpolation for Surface Shading
-// Samples the 8 nearest probes of a cascade, weighting by trilinear position, surface orientation cosine, Chebyshev depth
-// visibility (no light leaking through walls) and classification (probes buried in geometry are off).
+// Multi-Probe Trilinear & Chebyshev Interpolation for Surface Shading (RTXGI's weighting)
+// The 8 nearest probes of a cascade, weighted by trilinear position, a smooth backface term, Chebyshev depth visibility (no
+// light leaking through walls) and classification (probes buried in geometry fade out). The offset and the backface term use
+// the surface's geometric normal: a normal map moves the shading normal from pixel to pixel, and weights that follow it make
+// the probes' light wiggle with the bumps. The shading normal only picks the direction the irradiance is read in.
 // =========================================================================
 
 // How far inside the cascade the point is: 1 one cell or more in from its faces, falling to 0 at them (outside: 0).
@@ -236,7 +238,9 @@ float3 sample_ddgi_cascade(
     UniformBufferObject* ubo,
     uint cascade,
     float3 worldPos,
-    float3 normal,
+    float3 shadingNormal,
+    float3 geometricNormal,
+    float3 toViewer,
     Texture2D irradianceAtlas,
     Texture2D distanceAtlas,
     SamplerState atlasSampler
@@ -245,13 +249,11 @@ float3 sample_ddgi_cascade(
     const uint3 counts = ddgi_counts(ubo);
     const float3 origin = ddgi_cascade_origin(ubo, cascade);
     const float3 spacing = ddgi_cascade_spacing(ubo, cascade);
-    const float normalBias = ubo->ddgiGridParams.w;
-    // The distance moments are in meters (DDGIBlendDistance.slang): (2 cm)^2.
-    const float varianceFloor = 0.0004;
 
-    // Shift sampling position along surface normal (isotropic, relative to the cascade's cells)
+    // The sampling point moves off the surface, mostly towards the viewer (RTXGI's view bias: the surface's own probes see it
+    // from the front), by Normal Bias x 1.5 cells (0.2: 0.3 cells).
     const float minSpacing = min(spacing.x, min(spacing.y, spacing.z));
-    const float3 biasedPos = worldPos + normal * (normalBias * minSpacing);
+    const float3 biasedPos = worldPos + (geometricNormal * 0.2 + toViewer * 0.8) * (ubo->ddgiGridParams.w * 1.5 * minSpacing);
 
     const float3 relativePos = (biasedPos - origin) / spacing;
     const int3 maxIndices = int3(counts) - 2;
@@ -274,42 +276,42 @@ float3 sample_ddgi_cascade(
                 const uint probeIndex = ddgi_storage_index(ubo, cascade, probeCoord);
                 const float3 probePos = origin + float3(probeCoord) * spacing;
 
-                const float3 toProbeVec = probePos - worldPos;
-                const float distToProbe = length(toProbeVec);
-                const float3 toProbeDir = distToProbe > 1e-4 ? toProbeVec / distToProbe : normal;
+                // 1. Backface term: probes behind the surface fade smoothly instead of dropping out at once.
+                const float3 trueToProbe = probePos - worldPos;
+                const float3 trueDir = dot(trueToProbe, trueToProbe) > 1e-8 ? normalize(trueToProbe) : geometricNormal;
+                const float wrap = (dot(trueDir, geometricNormal) + 1.0) * 0.5;
+                float weight = wrap * wrap + 0.2;
 
-                // 1. Normal orientation test: Probes behind the surface tangent plane MUST NOT contribute
-                const float NdotL = dot(normal, toProbeDir);
-                if (NdotL <= 0.0)
-                {
-                    continue;
-                }
-                const float normalWeight = NdotL * NdotL;
-
-                // 2. Trilinear interpolation factor
-                const float trilinear = (dx != 0 ? fracCoord.x : (1.0 - fracCoord.x)) *
-                                        (dy != 0 ? fracCoord.y : (1.0 - fracCoord.y)) *
-                                        (dz != 0 ? fracCoord.z : (1.0 - fracCoord.z));
-
-                // 3. Chebyshev visibility test: does the probe have line of sight to the surface?
-                const float2 distUV = get_probe_atlas_uv(probeIndex, -toProbeDir, 16, probesPerRowDist, ubo->ddgiAtlasParams.zw);
+                // 2. Chebyshev visibility from the biased point (moments in meters, DDGIBlendDistance.slang).
+                const float3 biasedToProbe = probePos - biasedPos;
+                const float biasedDistance = length(biasedToProbe);
+                const float3 biasedDir = biasedDistance > 1e-6 ? biasedToProbe / biasedDistance : geometricNormal;
+                const float2 distUV = get_probe_atlas_uv(probeIndex, -biasedDir, 16, probesPerRowDist, ubo->ddgiAtlasParams.zw);
                 const float2 moments = distanceAtlas.SampleLevel(atlasSampler, distUV, 0).rg;
-                const float visibility = chebyshev_visibility(distToProbe / ubo->unitsPerMeter, moments.x, moments.y, varianceFloor);
-
-                float weight = trilinear * normalWeight * visibility;
-                if (weight < 1e-5)
+                const float distanceMeters = biasedDistance / ubo->unitsPerMeter;
+                float chebyshev = 1.0;
+                if (distanceMeters > moments.x)
                 {
-                    continue;
+                    const float variance = abs(moments.y - moments.x * moments.x);
+                    const float d = distanceMeters - moments.x;
+                    chebyshev = variance / (variance + d * d);
+                    chebyshev = chebyshev * chebyshev * chebyshev;
                 }
+                weight *= max(0.05, chebyshev);
 
-                // 4. Fetch probe irradiance along the surface normal; alpha 0 is a probe buried in geometry (classification), skipped
-                const float2 irrUV = get_probe_atlas_uv(probeIndex, normal, 8, probesPerRowIrr, ubo->ddgiAtlasParams.xy);
+                // 3. Very small weights crushed further (keeps a barely visible probe from tinting the surface), then trilinear.
+                weight = max(1e-6, weight);
+                const float crushThreshold = 0.2;
+                if (weight < crushThreshold)
+                    weight *= (weight * weight) / (crushThreshold * crushThreshold);
+                weight *= (dx != 0 ? fracCoord.x : (1.0 - fracCoord.x)) *
+                          (dy != 0 ? fracCoord.y : (1.0 - fracCoord.y)) *
+                          (dz != 0 ? fracCoord.z : (1.0 - fracCoord.z));
+
+                // 4. Irradiance along the shading normal; alpha is the probe's classification (0: buried in geometry).
+                const float2 irrUV = get_probe_atlas_uv(probeIndex, shadingNormal, 8, probesPerRowIrr, ubo->ddgiAtlasParams.xy);
                 const float4 probeIrr = irradianceAtlas.SampleLevel(atlasSampler, irrUV, 0);
                 weight *= saturate(probeIrr.a);
-                if (weight < 1e-5)
-                {
-                    continue;
-                }
 
                 totalIrradiance += probeIrr.rgb * weight;
                 totalWeight += weight;
@@ -317,15 +319,48 @@ float3 sample_ddgi_cascade(
         }
     }
 
-    return totalWeight > 1e-4 ? totalIrradiance / totalWeight : float3(0.0);
+    return totalWeight > 1e-6 ? totalIrradiance / totalWeight : float3(0.0);
+}
+
+// A surface's flat (geometric) normal from the depth buffer: the cross product of the position differences to the neighbours on
+// the nearer side in x and in y, so a silhouette does not bend it; facing the shading normal's side. For DeferredLighting, whose
+// G-buffer holds only the normal-mapped normal.
+float3 ddgi_geometric_normal(Texture2D<float> depthTex, int2 pixel, float2 viewportSize, float4x4 invViewProj, float3 worldPos, float3 shadingNormal)
+{
+    const int2 maxPixel = int2(viewportSize) - 1;
+    float3 positions[4];
+    const int2 offsets[4] = { int2(-1, 0), int2(1, 0), int2(0, -1), int2(0, 1) };
+    for (uint i = 0; i < 4; ++i)
+    {
+        const int2 neighbour = clamp(pixel + offsets[i], int2(0, 0), maxPixel);
+        const float depth = depthTex.Load(int3(neighbour, 0)).r;
+        const float2 uv = (float2(neighbour) + 0.5) / viewportSize;
+        const float4 h = mul(invViewProj, float4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, depth, 1.0));
+        positions[i] = depth > 0.0 ? h.xyz / h.w : worldPos + float3(1e6, 1e6, 1e6); // the sky: never the nearer side
+    }
+    const float3 left = worldPos - positions[0];
+    const float3 right = positions[1] - worldPos;
+    const float3 up = worldPos - positions[2];
+    const float3 down = positions[3] - worldPos;
+    const float3 dx = dot(left, left) < dot(right, right) ? left : right;
+    const float3 dy = dot(up, up) < dot(down, down) ? up : down;
+    float3 n = cross(dx, dy);
+    const float lengthSq = dot(n, n);
+    if (lengthSq < 1e-20 || dot(dx, dx) > 1e10 || dot(dy, dy) > 1e10)
+        return shadingNormal;
+    n *= rsqrt(lengthSq);
+    return dot(n, shadingNormal) < 0.0 ? -n : n;
 }
 
 // The diffuse irradiance (/ pi, as the lighting reads it) at a surface: from the finest cascade around it, handing over to the next
 // coarser one over its last cell, and to the environment's irradiance (what the IBL path uses) beyond the coarsest.
-float3 sample_ddgi_diffuse(
+// toViewer: unit vector from the surface towards whoever sees it (the camera; a probe ray's origin for its hits).
+float3 sample_ddgi_diffuse_surface(
     UniformBufferObject* ubo,
     float3 worldPos,
-    float3 normal,
+    float3 shadingNormal,
+    float3 geometricNormal,
+    float3 toViewer,
     Texture2D irradianceAtlas,
     Texture2D distanceAtlas,
     SamplerState atlasSampler
@@ -336,7 +371,7 @@ float3 sample_ddgi_diffuse(
     {
         TextureCube irradianceTex = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + ubo->irradianceMapIndex, 0));
         SamplerState samplerIrradiance = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_IRRADIANCE, 0));
-        environment = irradianceTex.SampleLevel(samplerIrradiance, normal, 0).rgb * ubo->scaleIBLAmbient;
+        environment = irradianceTex.SampleLevel(samplerIrradiance, shadingNormal, 0).rgb * ubo->scaleIBLAmbient;
     }
 
     const uint cascadeCount = clamp(ubo->ddgiCascadeCount, 1u, 4u);
@@ -354,7 +389,7 @@ float3 sample_ddgi_diffuse(
     if (finest == cascadeCount)
         return environment;
 
-    float3 result = sample_ddgi_cascade(ubo, finest, worldPos, normal, irradianceAtlas, distanceAtlas, atlasSampler);
+    float3 result = sample_ddgi_cascade(ubo, finest, worldPos, shadingNormal, geometricNormal, toViewer, irradianceAtlas, distanceAtlas, atlasSampler);
     if (finestWeight < 1.0)
     {
         // Near the cascade's faces: what the next one out says (itself fading into the environment at its own faces).
@@ -364,9 +399,25 @@ float3 sample_ddgi_diffuse(
         {
             const float nextWeight = ddgi_cascade_weight(ubo, next, worldPos);
             if (nextWeight > 0.0)
-                outer = lerp(environment, sample_ddgi_cascade(ubo, next, worldPos, normal, irradianceAtlas, distanceAtlas, atlasSampler), nextWeight);
+                outer = lerp(environment, sample_ddgi_cascade(ubo, next, worldPos, shadingNormal, geometricNormal, toViewer, irradianceAtlas,
+                                                              distanceAtlas, atlasSampler), nextWeight);
         }
         result = lerp(outer, result, finestWeight);
     }
     return result;
+}
+
+// The common case: one normal for both, seen from the camera.
+float3 sample_ddgi_diffuse(
+    UniformBufferObject* ubo,
+    float3 worldPos,
+    float3 normal,
+    Texture2D irradianceAtlas,
+    Texture2D distanceAtlas,
+    SamplerState atlasSampler
+)
+{
+    const float3 toCamera = ubo->cameraWorldPos.xyz - worldPos;
+    const float3 toViewer = dot(toCamera, toCamera) > 1e-8 ? normalize(toCamera) : normal;
+    return sample_ddgi_diffuse_surface(ubo, worldPos, normal, normal, toViewer, irradianceAtlas, distanceAtlas, atlasSampler);
 }
