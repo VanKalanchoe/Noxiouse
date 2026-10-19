@@ -60,8 +60,8 @@ project not in meters: the probe grid was a fixed box at the origin in raw world
 40 cm wide in a centimeter project like Facerun's Bistro), and the distance moments clamped ray lengths at 100 world units (1 m),
 so the visibility test rejected most probes and surfaces went dark. Now:
 
-- **The volume follows the camera** (Settings > DDGI > Follow Camera, on): 20 x 10 x 20 probes, spacing in meters (2 x 1.5 x 2 by
-  default, scaled by the project's world unit: about 38 x 13.5 x 38 m around the camera), snapped to whole cells and scrolled with
+- **The volume follows the camera** (Settings > DDGI > Follow Camera, on): first 20 x 10 x 20 probes 2 x 1.5 x 2 m apart (about
+  38 x 13.5 x 38 m around the camera; now cascades, below), spacing in meters scaled by the project's world unit, snapped to whole cells and scrolled with
   **toroidal addressing** (a probe's atlas slot is its world grid coordinate modulo the counts: `DDGICommon.slang`
   `ddgi_storage_index` / `ddgi_local_coord`), so probes keep their history while the camera moves; the probes that come in on a
   side start over (`ddgi_probe_entered`, from the per-frame shift in the uniforms). Off: the old fixed grid, now in world units.
@@ -78,8 +78,21 @@ so the visibility test rejected most probes and surfaces went dark. Now:
   ray-hit shading (RT reflections, ray traced glass) divided by pi once more, which made multi-bounce light about three times too
   dark. Fixed.
 
-Not done: probe relocation (moving probes out of geometry instead of switching them off), a second, coarser cascade for the far
-field, and a faster ReSTIR GI (half resolution / checkerboard) for the High rung.
+- **Cascades (2026-10-19, after the user's test: "across the street in Bistro is already not lit by GI"):** the single
+  camera-following volume (~38 x 13.5 x 38 m) was too small. Now Cascades (default 3, 2 on Low) nested volumes of 20 x 12 x 20
+  probes, each Cascade Scale (3x) wider than the one inside: 2 m cells over ~38 x 22 x 38 m, 6 m over ~114 x 66 x 114 m, 18 m over
+  ~342 x 198 x 342 m. Probes are stored cascade after cascade in the same atlases (`UniformBufferObject::ddgiCascades`, one
+  `DDGICascade` per cascade: origin, spacing, toroidal scroll, shift). Shading uses the finest cascade around the point and
+  hands over to the next coarser one over its last cell, then to the environment. Each further cascade updates half as often
+  as the one inside it (so three cascades cost about 1.75x the probe updates of one, not 3x); debug spheres scale with their
+  cascade.
+- **Cheaper probe rays in many-light scenes:** a probe ray's hit used to trace a shadow ray to every light (Bistro has many).
+  Up to 4 lights still get one each; with more, every light's unshadowed contribution is summed (no rays) and two lights are
+  picked in proportion to it (weighted reservoir sampling) for the only two shadow rays -- unbiased, the noise averaged by the
+  probes' temporal blend.
+
+Not done: probe relocation (moving probes out of geometry instead of switching them off) and a faster ReSTIR GI (half
+resolution / checkerboard) for the High rung.
 
 ## 3. DLSS edge jitter (Future.md: "when DLSS is enabled, edge detection jittering")
 

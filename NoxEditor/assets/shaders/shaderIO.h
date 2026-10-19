@@ -215,6 +215,25 @@ struct GpuMesh
     float padding1;
 };
 
+// One DDGI cascade (UniformBufferObject::ddgiCascades). Plain 4-byte members (read through the uniforms' pointer). A probe's atlas slot
+// is its grid coordinate in the world modulo the probe counts (toroidal addressing), so a cascade that follows the camera keeps every
+// probe's history where it is while it scrolls.
+struct DDGICascade
+{
+    float originX;     // world position of the cascade's first probe
+    float originY;
+    float originZ;
+    float spacingX;    // world units between probes
+    float spacingY;
+    float spacingZ;
+    uint32_t scrollX;  // atlas slot (within the cascade) of the first probe
+    uint32_t scrollY;
+    uint32_t scrollZ;
+    int32_t shiftX;    // probes the cascade moved this frame: the ones that came in on that side start over
+    int32_t shiftY;
+    int32_t shiftZ;
+};
+
 struct UniformBufferObject 
 {
     mat4 view;
@@ -337,16 +356,12 @@ struct UniformBufferObject
     vec3 heightFogSunDirection;      // towards the sun
     vec3 heightFogSunColor;          // directional inscattering: the sun's light scattered by the fog towards the camera
 
-    // DDGI volume (DDGICommon.slang). A probe's atlas slot is its grid coordinate in the world modulo the probe counts (toroidal
-    // addressing), so a volume that follows the camera keeps every probe's history where it is while it scrolls: ddgiScroll* is
-    // the slot of the volume's first probe, ddgiShift* how many probes the volume moved this frame (the probes that came in on
-    // that side start over). ddgiUpdateStride: 1 updates every probe each frame, 2 every other one alternately, 4 a quarter.
-    uint32_t ddgiScrollX;
-    uint32_t ddgiScrollY;
-    uint32_t ddgiScrollZ;
-    int32_t ddgiShiftX;
-    int32_t ddgiShiftY;
-    int32_t ddgiShiftZ;
+    // DDGI cascades (DDGICommon.slang): ddgiCascadeCount nested probe volumes around the camera, each with the probe counts of
+    // ddgiGridOrigin.w / ddgiGridSpacing.w / ddgiGridParams.x and a wider spacing than the one inside it. Probes are stored cascade
+    // after cascade. ddgiUpdateStride: 1 updates every probe of the first cascade each frame, 2 every other one in turn, 4 a quarter
+    // (each further cascade half as often again).
+    DDGICascade ddgiCascades[4];
+    uint32_t ddgiCascadeCount;
     uint32_t ddgiUpdateStride;
 };
 

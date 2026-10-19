@@ -110,11 +110,14 @@ void meshMain(
     UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
 
     float3 probeWorldPos = ddgi_probe_position(ubo, probeIndex);
+    // Coarser cascades draw bigger spheres, in proportion to their cells.
+    const uint cascade = ddgi_cascade_of(ubo, probeIndex);
+    const float sphereRadius = pushConstant.sphereRadius * ddgi_cascade_spacing(ubo, cascade).x / max(ddgi_cascade_spacing(ubo, 0).x, 1e-4);
 
     for (uint v = threadID; v < 114; v += 32)
     {
         float3 localPos = get_sphere_vertex(v);
-        float3 worldPos = probeWorldPos + localPos * pushConstant.sphereRadius;
+        float3 worldPos = probeWorldPos + localPos * sphereRadius;
 
         vertices[v].pos = mul(ubo->proj, mul(ubo->view, float4(worldPos, 1.0)));
         vertices[v].normal = localPos;

@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <filesystem>
@@ -478,7 +479,12 @@ namespace Nox
         uint32_t getDDGIProbeCountX() const { return m_ddgiProbeCountX; }
         uint32_t getDDGIProbeCountY() const { return m_ddgiProbeCountY; }
         uint32_t getDDGIProbeCountZ() const { return m_ddgiProbeCountZ; }
-        uint32_t getDDGIProbeCountTotal() const { return m_ddgiProbeCountX * m_ddgiProbeCountY * m_ddgiProbeCountZ; }
+        // Every cascade's probes (the atlases hold them all).
+        uint32_t getDDGIProbeCountTotal() const { return m_ddgiProbeCountX * m_ddgiProbeCountY * m_ddgiProbeCountZ * getDDGICascadeCount(); }
+        // Cascades in use: nested volumes around the camera, each DDGI Cascade Scale times wider than the one inside (1 for the fixed grid).
+        uint32_t getDDGICascadeCount() const { return m_ddgiFollowCamera ? std::clamp(m_ddgiCascadeCount, 1u, 4u) : 1u; }
+        uint32_t& getDDGICascadeSetting() { return m_ddgiCascadeCount; }
+        float& getDDGICascadeScale() { return m_ddgiCascadeScale; }
         uint32_t getDDGIRaysPerProbe() const { return m_ddgiRaysPerProbe; }
         void setDDGIRaysPerProbe(uint32_t count) { m_ddgiRaysPerProbe = count; }
         float& getDDGIHysteresis() { return m_ddgiHysteresis; }
@@ -1082,7 +1088,7 @@ namespace Nox
         glm::vec3 m_ddgiGridOrigin = glm::vec3(-20.0f, -0.5f, -12.0f);
         glm::vec3 m_ddgiGridSpacing = glm::vec3(1.8f, 1.4f, 1.7f);
         uint32_t m_ddgiProbeCountX = 20;
-        uint32_t m_ddgiProbeCountY = 10;
+        uint32_t m_ddgiProbeCountY = 12;
         uint32_t m_ddgiProbeCountZ = 20;
         uint32_t m_ddgiRaysPerProbe = 128;
         float m_ddgiHysteresis = 0.97f;
@@ -1090,11 +1096,14 @@ namespace Nox
         float m_ddgiDebugSphereRadius = 0.15f; // meters
         bool m_ddgiDebugXRay = true;
         bool m_ddgiFollowCamera = true;
-        glm::vec3 m_ddgiSpacingMeters = glm::vec3(2.0f, 1.5f, 2.0f);
+        glm::vec3 m_ddgiSpacingMeters = glm::vec3(2.0f, 2.0f, 2.0f); // the first cascade's
         uint32_t m_ddgiUpdateStride = 2;
-        glm::ivec3 m_ddgiGridMin{ 0 };          // grid coordinate of the volume's first probe (camera-following)
-        glm::vec3 m_ddgiVolumeSpacing{ 0.0f };  // the spacing m_ddgiGridMin is in
-        bool m_ddgiVolumeValid = false;
+        uint32_t m_ddgiCascadeCount = 3;
+        float m_ddgiCascadeScale = 3.0f;
+        // Per cascade (camera-following): grid coordinate of its first probe, the spacing that is in, and whether it is placed yet.
+        std::array<glm::ivec3, 4> m_ddgiCascadeGridMin{};
+        std::array<glm::vec3, 4> m_ddgiCascadeSpacing{};
+        uint32_t m_ddgiPlacedCascades = 0;
 
         // ReSTIR GI (Screen-Space Diffuse Path Resampling via RTXDI) -- proper 3-pass pipeline
         // (Initial candidate -> Temporal -> Spatial), matching RTXPT's actual architecture instead

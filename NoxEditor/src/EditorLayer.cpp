@@ -1253,9 +1253,23 @@ namespace Nox
                     {
                         glm::vec3& spacingMeters = m_Renderer->getDDGISpacingMeters();
                         ImGui::DragFloat3("Probe Spacing", glm::value_ptr(spacingMeters), 0.05f, 0.25f, 50.0f, "%.2f m");
-                        const glm::vec3 extent = spacingMeters * glm::vec3(m_Renderer->getDDGIProbeCountX() - 1, m_Renderer->getDDGIProbeCountY() - 1,
-                                                                           m_Renderer->getDDGIProbeCountZ() - 1);
-                        ImGui::TextDisabled("Covers %.0f x %.0f x %.0f m around the camera", extent.x, extent.y, extent.z);
+                        if (ImGui::IsItemHovered())
+                            ImGui::SetTooltip("Between the probes of the first (finest) cascade.");
+                        uint32_t& cascades = m_Renderer->getDDGICascadeSetting();
+                        int cascadeCount = static_cast<int>(std::clamp(cascades, 1u, 4u));
+                        if (ImGui::SliderInt("Cascades", &cascadeCount, 1, 4))
+                            cascades = static_cast<uint32_t>(cascadeCount);
+                        float& cascadeScale = m_Renderer->getDDGICascadeScale();
+                        ImGui::SliderFloat("Cascade Scale", &cascadeScale, 1.5f, 4.0f, "%.1fx");
+                        if (ImGui::IsItemHovered())
+                            ImGui::SetTooltip("Nested volumes around the camera, each this much wider (and coarser) than the one inside it: fine\n"
+                                              "detail near you, light on buildings across the street and beyond. Far cascades update less often.");
+                        const glm::vec3 cells = glm::vec3(m_Renderer->getDDGIProbeCountX() - 1, m_Renderer->getDDGIProbeCountY() - 1,
+                                                          m_Renderer->getDDGIProbeCountZ() - 1);
+                        const glm::vec3 first = spacingMeters * cells;
+                        const glm::vec3 last = first * std::pow(std::max(cascadeScale, 1.5f), static_cast<float>(cascadeCount - 1));
+                        ImGui::TextDisabled("Around the camera: %.0f x %.0f x %.0f m fine, %.0f x %.0f x %.0f m in all", first.x, first.y, first.z,
+                                            last.x, last.y, last.z);
                     }
                     else
                     {

@@ -73,6 +73,21 @@ float2 intersection_uv(GpuRayTracingInstance lut, uint primIndex, float2 barycen
     return w0 * vertices[i0].uv0 + barycentrics.x * vertices[i1].uv0 + barycentrics.y * vertices[i2].uv0;
 }
 
+// One shadow ray from a probe ray's hit towards a light (any hit ends it).
+bool ddgiShadowed(RaytracingAccelerationStructure accelerationStructure, UniformBufferObject* ubo, float3 origin, float3 direction, float maxDistance)
+{
+    RayDesc shadowRay;
+    shadowRay.Origin = origin;
+    shadowRay.Direction = direction;
+    shadowRay.TMin = 0.005 * ubo->unitsPerMeter;
+    shadowRay.TMax = maxDistance;
+
+    RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> shadowRq;
+    shadowRq.TraceRayInline(accelerationStructure, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES, 0xFF, shadowRay);
+    shadowRq.Proceed();
+    return shadowRq.CommittedStatus() == COMMITTED_TRIANGLE_HIT;
+}
+
 [shader("fragment")]
 float4 fragMain(
     MSOutput input,
@@ -108,7 +123,8 @@ float4 fragMain(
     rayDesc.Origin = probePos;
     rayDesc.Direction = rayDir;
     rayDesc.TMin = 0.01 * ubo->unitsPerMeter;
-    rayDesc.TMax = 100.0 * ubo->unitsPerMeter;
+    // Far enough for the coarse cascades' cells too.
+    rayDesc.TMax = max(100.0 * ubo->unitsPerMeter, 4.0 * length(ddgi_cascade_spacing(ubo, ddgi_cascade_of(ubo, probeIndex))));
 
     RaytracingAccelerationStructure accelerationStructure = RaytracingAccelerationStructure(ubo->tlasDeviceAddress);
     RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> rq;
@@ -214,9 +230,31 @@ float4 fragMain(
         albedo *= hitTex.SampleLevel(textureSampler, hitUV, 0).rgb;
     }
 
-    // Direct Analytical Lighting
+    // Direct light. Every light's unshadowed contribution is cheap (no ray); the shadow rays are what costs, and scenes have hundreds of
+    // lights. With a few lights each gets its shadow ray; with more, two are picked in proportion to their contribution (weighted
+    // reservoir sampling) and only they trace one: the estimate stays right on average and the probes' temporal blend averages it.
     LightData* lights = (LightData*)ubo->lightDataReference;
     float3 directLight = float3(0.0);
+    const uint ExactLightCount = 4;
+    const uint PickedLights = 2;
+    const bool pickLights = ubo->lightCount > ExactLightCount;
+
+    uint pickState = (probeIndex * 9781u + rayIndex * 6271u + pushConstant.frameIndex * 26699u) | 1u;
+    float pickedWeightSum[PickedLights];
+    uint pickedLight[PickedLights];
+    float3 pickedContribution[PickedLights];
+    float3 pickedDirection[PickedLights];
+    float pickedDistance[PickedLights];
+    float3 pickedShadowNormal[PickedLights];
+    for (uint slot = 0; slot < PickedLights; ++slot)
+    {
+        pickedWeightSum[slot] = 0.0;
+        pickedLight[slot] = 0xFFFFFFFF;
+        pickedContribution[slot] = float3(0.0);
+        pickedDirection[slot] = float3(0.0, 1.0, 0.0);
+        pickedDistance[slot] = 0.0;
+        pickedShadowNormal[slot] = hitNormal;
+    }
 
     for (uint i = 0; i < ubo->lightCount; i++)
     {
@@ -273,25 +311,49 @@ float4 fragMain(
                 shadowNormal = -hitNormal;
             }
         }
+        if (NdotL <= 0.001)
+            continue;
 
-        if (NdotL > 0.001)
+        const float3 contribution = (albedo / 3.14159265) * light.color.rgb * light.color.w * attenuation * NdotL;
+        const float maxDistance = (lightType == 0) ? 1000.0 * ubo->unitsPerMeter : dist;
+        if (!pickLights)
         {
-            // Simple shadow test for direct light
-            RayDesc shadowRay;
-            shadowRay.Origin = hitPos + shadowNormal * (0.02 * ubo->unitsPerMeter);
-            shadowRay.Direction = l;
-            shadowRay.TMin = 0.005 * ubo->unitsPerMeter;
-            shadowRay.TMax = (lightType == 0) ? 1000.0 * ubo->unitsPerMeter : dist;
+            if (!ddgiShadowed(accelerationStructure, ubo, hitPos + shadowNormal * (0.02 * ubo->unitsPerMeter), l, maxDistance))
+                directLight += contribution;
+            continue;
+        }
 
-            RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> shadowRq;
-            shadowRq.TraceRayInline(accelerationStructure, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES, 0xFF, shadowRay);
-            shadowRq.Proceed();
-
-            if (shadowRq.CommittedStatus() != COMMITTED_TRIANGLE_HIT)
+        // Each reservoir keeps this light with probability weight / (sum so far).
+        const float weight = dot(contribution, float3(0.2126, 0.7152, 0.0722));
+        if (weight <= 0.0)
+            continue;
+        for (uint slot = 0; slot < PickedLights; ++slot)
+        {
+            pickedWeightSum[slot] += weight;
+            pickState ^= pickState << 13;
+            pickState ^= pickState >> 17;
+            pickState ^= pickState << 5;
+            const float u = float(pickState >> 8) * (1.0 / 16777216.0);
+            if (u * pickedWeightSum[slot] < weight)
             {
-                float3 lightRadiance = light.color.rgb * light.color.w * attenuation;
-                directLight += (albedo / 3.14159265) * lightRadiance * NdotL;
+                pickedLight[slot] = i;
+                pickedContribution[slot] = contribution / weight; // times the sum below: contribution / probability
+                pickedDirection[slot] = l;
+                pickedDistance[slot] = maxDistance;
+                pickedShadowNormal[slot] = shadowNormal;
             }
+        }
+    }
+
+    if (pickLights)
+    {
+        for (uint slot = 0; slot < PickedLights; ++slot)
+        {
+            if (pickedLight[slot] == 0xFFFFFFFF)
+                continue;
+            if (!ddgiShadowed(accelerationStructure, ubo, hitPos + pickedShadowNormal[slot] * (0.02 * ubo->unitsPerMeter), pickedDirection[slot],
+                              pickedDistance[slot]))
+                directLight += pickedContribution[slot] * pickedWeightSum[slot] / float(PickedLights);
         }
     }
 

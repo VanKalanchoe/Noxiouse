@@ -630,8 +630,9 @@ namespace Nox
         }
         setRefractionEnabled(true);
         setRTRefractionEnabled(preset.RTRefraction);
-        // DDGI's probes trace in turn: a quarter a frame on the fallback rung, half on the others.
+        // DDGI's probes trace in turn: a quarter a frame on the fallback rung, half on the others; two cascades on the fallback rung.
         m_ddgiUpdateStride = quality == RenderQuality::Low ? 4u : 2u;
+        m_ddgiCascadeCount = quality == RenderQuality::Low ? 2u : 3u;
         NOX_CORE_INFO("Render quality: {}", GetQualityName(quality));
     }
 
@@ -1085,49 +1086,78 @@ namespace Nox
     void Renderer::updateDDGIVolume()
     {
         const glm::ivec3 counts(static_cast<int>(m_ddgiProbeCountX), static_cast<int>(m_ddgiProbeCountY), static_cast<int>(m_ddgiProbeCountZ));
-        glm::ivec3 shift(0);
-        glm::uvec3 scroll(0u);
+        const uint32_t cascadeCount = getDDGICascadeCount();
+        uniformData.ddgiCascadeCount = cascadeCount;
+        uniformData.ddgiUpdateStride = std::max(m_ddgiUpdateStride, 1u);
+
         if (m_ddgiFollowCamera && counts.x > 1 && counts.y > 1 && counts.z > 1)
         {
-            // Centered on the camera, snapped to whole cells of the grid every probe belongs to wherever the volume is.
-            const glm::vec3 spacing = glm::max(m_ddgiSpacingMeters, glm::vec3(0.05f)) * WorldUnits::PerMeter();
+            // Each cascade centered on the camera, snapped to whole cells of the grid its probes belong to wherever it is, and
+            // DDGI Cascade Scale times wider than the one inside it.
             const glm::vec3 camera(uniformData.cameraWorldPos);
-            const glm::ivec3 gridMin = glm::ivec3(glm::floor(camera / spacing)) - counts / 2;
-            if (m_ddgiVolumeValid && spacing == m_ddgiVolumeSpacing)
-                shift = gridMin - m_ddgiGridMin;
-            else
-                shift = counts; // a new volume: every probe starts over
-            m_ddgiVolumeValid = true;
-            m_ddgiVolumeSpacing = spacing;
-            m_ddgiGridMin = gridMin;
-            m_ddgiGridOrigin = glm::vec3(gridMin) * spacing;
-            m_ddgiGridSpacing = spacing;
-            for (int axis = 0; axis < 3; ++axis)
-                scroll[axis] = static_cast<uint32_t>(((gridMin[axis] % counts[axis]) + counts[axis]) % counts[axis]);
+            glm::vec3 spacing = glm::max(m_ddgiSpacingMeters, glm::vec3(0.05f)) * WorldUnits::PerMeter();
+            const float scale = std::max(m_ddgiCascadeScale, 1.5f);
+            for (uint32_t index = 0; index < 4; ++index, spacing *= scale)
+            {
+                shaderio::DDGICascade& cascade = uniformData.ddgiCascades[index];
+                cascade = {};
+                if (index >= cascadeCount)
+                    continue;
+                const glm::ivec3 gridMin = glm::ivec3(glm::floor(camera / spacing)) - counts / 2;
+                // A new cascade (or a new spacing): every probe of it starts over.
+                const glm::ivec3 shift = index < m_ddgiPlacedCascades && spacing == m_ddgiCascadeSpacing[index] ? gridMin - m_ddgiCascadeGridMin[index] : counts;
+                m_ddgiCascadeGridMin[index] = gridMin;
+                m_ddgiCascadeSpacing[index] = spacing;
+
+                const glm::vec3 origin = glm::vec3(gridMin) * spacing;
+                cascade.originX = origin.x;
+                cascade.originY = origin.y;
+                cascade.originZ = origin.z;
+                cascade.spacingX = spacing.x;
+                cascade.spacingY = spacing.y;
+                cascade.spacingZ = spacing.z;
+                cascade.scrollX = static_cast<uint32_t>(((gridMin.x % counts.x) + counts.x) % counts.x);
+                cascade.scrollY = static_cast<uint32_t>(((gridMin.y % counts.y) + counts.y) % counts.y);
+                cascade.scrollZ = static_cast<uint32_t>(((gridMin.z % counts.z) + counts.z) % counts.z);
+                cascade.shiftX = shift.x;
+                cascade.shiftY = shift.y;
+                cascade.shiftZ = shift.z;
+                if (index == 0)
+                {
+                    m_ddgiGridOrigin = origin;
+                    m_ddgiGridSpacing = spacing;
+                }
+            }
+            m_ddgiPlacedCascades = cascadeCount;
         }
         else
         {
-            m_ddgiVolumeValid = false; // fixed grid: slots in place, nothing scrolls
+            // The fixed grid: one cascade where Grid Origin / Grid Spacing say, slots in place, nothing scrolls.
+            m_ddgiPlacedCascades = 0;
+            for (shaderio::DDGICascade& unused : uniformData.ddgiCascades)
+                unused = {};
+            shaderio::DDGICascade& cascade = uniformData.ddgiCascades[0];
+            cascade.originX = m_ddgiGridOrigin.x;
+            cascade.originY = m_ddgiGridOrigin.y;
+            cascade.originZ = m_ddgiGridOrigin.z;
+            cascade.spacingX = m_ddgiGridSpacing.x;
+            cascade.spacingY = m_ddgiGridSpacing.y;
+            cascade.spacingZ = m_ddgiGridSpacing.z;
         }
 
         uniformData.ddgiGridOrigin = glm::vec4(m_ddgiGridOrigin, static_cast<float>(m_ddgiProbeCountX));
         uniformData.ddgiGridSpacing = glm::vec4(m_ddgiGridSpacing, static_cast<float>(m_ddgiProbeCountY));
-        uniformData.ddgiScrollX = scroll.x;
-        uniformData.ddgiScrollY = scroll.y;
-        uniformData.ddgiScrollZ = scroll.z;
-        uniformData.ddgiShiftX = shift.x;
-        uniformData.ddgiShiftY = shift.y;
-        uniformData.ddgiShiftZ = shift.z;
-        uniformData.ddgiUpdateStride = std::max(m_ddgiUpdateStride, 1u);
     }
 
     void Renderer::resetDDGIGridToDefaults()
     {
         m_ddgiGridOrigin = glm::vec3(-20.0f, -0.5f, -12.0f) * WorldUnits::PerMeter();
         m_ddgiGridSpacing = glm::vec3(1.8f, 1.4f, 1.7f) * WorldUnits::PerMeter();
-        m_ddgiSpacingMeters = glm::vec3(2.0f, 1.5f, 2.0f);
+        m_ddgiSpacingMeters = glm::vec3(2.0f, 2.0f, 2.0f);
         m_ddgiFollowCamera = true;
-        m_ddgiVolumeValid = false;
+        m_ddgiCascadeCount = 3;
+        m_ddgiCascadeScale = 3.0f;
+        m_ddgiPlacedCascades = 0;
         m_ddgiHysteresis = 0.97f;
         m_ddgiNormalBias = 0.2f;
         m_ddgiDebugSphereRadius = 0.15f;
@@ -4200,7 +4230,7 @@ namespace Nox
         // structure is a device loss. The TLAS is prepared before the graph is built (drawFrame).
         frame.runPathTracer = (m_pathTracingEnabled || m_debugMode == 18 || m_debugMode == 19) && uniformData.tlasDeviceAddress != 0;
         frame.pathTracerUsesRTXDI = frame.runPathTracer && m_pathTracerUsesRTXDI;
-        frame.totalDDGIProbes = m_ddgiProbeCountX * m_ddgiProbeCountY * m_ddgiProbeCountZ;
+        frame.totalDDGIProbes = getDDGIProbeCountTotal();
 
         // "A denoiser was toggled / the resolution changed": every NRD pass of this frame flushes its history.
         frame.resetNRD = graph.WasHistoryReset(NRDHistoryKey);
@@ -5479,7 +5509,7 @@ namespace Nox
             m_ddgiHysteresis,
             m_ddgiNormalBias
         );
-        uint32_t ddgiTotalProbes = m_ddgiProbeCountX * m_ddgiProbeCountY * m_ddgiProbeCountZ;
+        uint32_t ddgiTotalProbes = getDDGIProbeCountTotal();
         uint32_t ddgiProbeRows = (ddgiTotalProbes + DDGIProbesPerRow - 1) / DDGIProbesPerRow;
         uniformData.ddgiAtlasParams = glm::vec4(
             static_cast<float>(DDGIProbesPerRow * 10),
@@ -5613,7 +5643,7 @@ namespace Nox
             m_ddgiHysteresis,
             m_ddgiNormalBias
         );
-        uint32_t ddgiTotalProbes = m_ddgiProbeCountX * m_ddgiProbeCountY * m_ddgiProbeCountZ;
+        uint32_t ddgiTotalProbes = getDDGIProbeCountTotal();
         uint32_t ddgiProbeRows = (ddgiTotalProbes + DDGIProbesPerRow - 1) / DDGIProbesPerRow;
         uniformData.ddgiAtlasParams = glm::vec4(
             static_cast<float>(DDGIProbesPerRow * 10),
