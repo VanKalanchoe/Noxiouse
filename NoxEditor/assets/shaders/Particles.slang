@@ -13,7 +13,6 @@
 #include "DDGICommon.slang"
 
 static const uint ParticlesPerGroup = 32;
-static const uint LitLightCount = 8; // the first lights of the scene light a particle (scenes can have hundreds)
 
 struct ParticleVertex
 {
@@ -73,7 +72,9 @@ float3 litParticle(UniformBufferObject* ubo, float3 albedo, float3 position, flo
     float3 direct = float3(0.0);
     LightData* lights = (LightData*)ubo->lightDataReference;
     bool sunTested = false;
-    for (uint i = 0; i < min(ubo->lightCount, LitLightCount); ++i)
+    // Every light, unshadowed but for the sun (once per particle: cheap). It used to be the first 8 -- and the light buffer puts point
+    // and spot lights first, so with 8 lamps the sun no longer lit any particle.
+    for (uint i = 0; i < ubo->lightCount; ++i)
     {
         LightData light = lights[i];
         const uint lightType = (uint)light.position.w;

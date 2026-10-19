@@ -1,8 +1,138 @@
-# Status audit -- where the docs say we are, what the code says, what is missing (2026-10-18)
+# Status audit -- where the docs say we are, what the code says, what is missing (2026-10-18, second audit 2026-10-19)
 
 > Item 1 of `Future.md`: "check first all docs md files where we are currently, what's missing". Every `.md` in the repo
 > was read and its claims checked against the code at commit `509dd11` ("before unleashing claude"). This file is the
 > snapshot; `Backlog_2026.md` stays the living index (the Future.md items are now in it as F1-F14).
+
+## 0. Second audit (2026-10-19): what is broken, untested and missing -- read this first
+
+Every `.md` (the 12 in `docs/` and the 4 at the root) was read again and each open item checked against the code at `69de5f3`
+(after the screen-probe GI, light and ray tracing resolution work). Sections 1-5 below are the first audit (2026-10-18), kept
+for history. File references are to the code as of this audit.
+
+### 0.1 Broken -- bugs found in code or reported and not fixed
+
+| Area | Bug | Where |
+|---|---|---|
+| Core | **No `NOX_ASSERT` fires in any build**: `NOX_DEBUG` is never defined, so asserts compile out even in Debug (several also pass a string as the condition and could never fire) | `Core/core.h:21` |
+| Renderer | **ReSTIR DI** reported broken by the user (cause not found; possibly the 0.2 mm shadow offsets fixed in `e2506eb`); off in every preset, still selectable | `ReSTIRPasses.cpp:477` |
+| Renderer | ReSTIR PT temporal reuse: lighting "rotation" artifact with a static camera; off by default | `EditorLayer.cpp:981` |
+| Renderer | ReSTIR DI / PT assume light indices never change between frames (identity mapping): adding / removing a light corrupts their history for a frame | `RTXDI/DI/ReSTIRDITemporal.slang:110`, `PT/ReSTIRPTTemporal.slang:465` |
+| Renderer | Meshlet cone culling was removed because it dropped visible meshlets; cause never found (cones still cooked, unread) | `MeshImporter.cpp:57`, `shaderIO.h` |
+| Animation | **Root motion is lost on entities with a character controller**: added to the Transform, then overwritten by the controller every frame | `Scene.cpp:1161`, `JoltPhysics3DScene.cpp:632` |
+| Animation | Fox locomotion `Speed` thresholds are in m/s while the project is in cm: Walk -> Run always fires | `CharacterMovement.cs:13`, Fox graph |
+| Scripting | A **failed hot reload leaves scripting unloaded** (the old assemblies are cleared before the new ones load) | `DotNetBackend.cpp:558` |
+| Scripting | The reload generation never increases, so the stale-object check does nothing; `OnAfterReload` is declared but never called | `ScriptEngine.cpp:159`, `EntityBehaviour.cs:25` |
+| Scripting | Reloading while script jobs (`Nox.Jobs`) run is unsafe: no fence before the assemblies are swapped | `Jobs.cs`, `DotNetBackend.cpp:643` |
+| Scene | `TextComponent` font is neither saved nor loaded (always the default font) | `SceneSerializer.cpp:942, 1843` |
+| Scene | `SerializeRuntime` / `DeserializeRuntime` are empty (return false) | `SceneSerializer.cpp:1188, 1924` |
+| Asset | `MeshImporter::LoadMesh` is a dead stub with no return value (undefined behaviour if anything calls it) | `MeshImporter.cpp:1010` |
+| Editor | Ortho camera constants are not unit-scaled (5000 back, far 10000: only 50 m / 100 m in a cm project); sky is flat in ortho | `EditorCamera.h:123` |
+| Editor | Import Scale tooltip says the model is untouched; the scale is baked into the cooked mesh | `ContentBrowserPanel.cpp:493` |
+| Editor | Cancelling the open-project dialog quits the editor (no new-project / folder picker) | `EditorLayer.cpp:164` |
+| Editor | ImGui multi-viewport (panels outside the main window) is switched off as broken | `ImGuiLayer.cpp:27` |
+| Physics | 3D physics components (rigid body, colliders, character controller) are not copied by Duplicate; controllers added during Play are not created | `Scene.cpp:1328`, `Scene.cpp:427` |
+| Units | NRD denoiser distance settings and the DLSS far plane (10000) are raw world units (meter defaults) in a cm project | `DeviceVK.cpp:1007, 1557` |
+| Particles | Fixed 2026-10-19 (this audit): lit particles read only the first 8 lights, and point / spot lights come first in the buffer -- with 8 lamps the sun did not light them | `Particles.slang` |
+
+### 0.2 Built but not tested by the user (newest first)
+
+- **2026-10-19:** Ray Tracing Resolution Full / Half (`RTUpsample.slang`; not saved in the project); unit-correct punctual lights
+  (**cm projects: lights much brighter, lower old intensities**), range scaled with the entity, sun keeps the soft shadow mask;
+  rect area lights; steady night GI (`LightSelection.slang`); one GI for transparency / ray hits (`SceneGI.slang`); thin glass not
+  traced; rough reflections from GI; brute-force direct light in every preset. Confirmed: the decal veil fix.
+- **Screen-probe GI** (the GI of every preset), DDGI cascades / camera-follow / classification (now its second bounce).
+- Quality presets with Auto; Stable Overlays; H2 shadowed transparency; H3b screen-space and H3 traced refraction.
+- Procedural sky (S1, S2, S4, sun disc), aerial perspective (S5), volumetric clouds (V4), height fog, environment rotation.
+- Particles V1 / V2; script APIs for run-time meshes, jobs, mesh colliders, raycasts (`VoxelTerrain.cs`).
+- Runtime player (`NOX_BUILD_RUNTIME`, off by default), `RuntimeAssetManager`, File > Package Game.
+- Content browser B1-B3 (rendered thumbnails, disk cache, delete / references / move / unused), basic shapes, F3 first part,
+  animation A2-A8 (notifies, layered, additive, montages, root motion, BlendSpace2D, clip preview, Timeline / Sequencer).
+- Up to 4 viewports (M1).
+- Older and still untested: units U3-U6 (ortho views, import units, physics unit boundary, cm switch), compute skinning
+  stage 1, model-instance save / reopen, import I2-I4 and Import Into Level of skeletal models, outliner folders, character
+  controller and state-machine transitions in Play, animation graph steps 4-6 workflows.
+
+### 0.3 Missing / open, by area
+
+**Rendering and lights**
+- OIT for transparent surfaces and particles (H4); denoising of transparent signals (H5); volume absorption (KHR attenuation).
+- LTC area lights (rect lights use the exact diffuse + representative-point specular), disc lights, emissive meshes as lights
+  (RTXDI); rect lights are invisible directly and in mirrors (not geometry).
+- Screen-probe GI: importance sampling of probe rays, adaptive extra probes, screen-space trace before the ray trace.
+- DDGI probe relocation; faster (half-res / checkerboard) ReSTIR GI; ReSTIR PT spatial pass; pairwise MIS / boiling filter for DI.
+- Volumetric fog / light shafts (froxels); NVIDIA Reflex; NRD SH denoisers.
+- Fallback rung "shadow rays for the N strongest lights" (every light in range traces per pixel, also on Low).
+- Half-res reflections / roughness cut as preset rungs (Ray Tracing Resolution exists, no preset sets it); Auto preset checks
+  VRAM only.
+- Own TAA (DLSS DLAA only today; R1).
+
+**Sky, VFX**
+- Night sky (moon, stars); aerial perspective and height fog on forward surfaces (glass, unlit, particles); the path tracer
+  has no sun disc / haze / fog; sky update not time-sliced; viewer altitude not taken from the camera.
+- Cloud shadows on the scene, animated clouds / wind, cloud temporal reprojection.
+- Particles: GPU simulation and sorting, collisions, mesh particles, color / size curves, module editor (V3), motion vectors
+  for DLSS, particles in the extra viewports and the path tracer; OpenVDB volumes (V5).
+
+**Editor**
+- Prefab: P1 nested additions into the outer prefab, P4 re-parenting overrides, P5 overrides of deleted entities, P7 Unpack
+  All, prefab / .gltf thumbnails, variant tint.
+- Content browser: rename / move of textures, materials, meshes (E2); Reimport and Replace References; neutral thumbnail
+  backdrop and streaming feedback from preview views.
+- Viewports: lower resolution / realtime off (M3), show flags (M4), selection outline and gizmo in the extra views, camera not
+  saved between sessions; ortho zoom at the cursor, wireframe mode, move-to-grid, snap to floor by ray, mesh bounds in the
+  Content Browser.
+- Thumbnail.cache written into the asset folder; Unity-style new-project flow.
+
+**Animation**
+- Sync markers (A2); notifies only in graph mode; graph preview and loop ranges (A7); double-click a skeletal mesh to preview;
+  Timeline curve editor, material tracks, auto-key, sub-sequences / camera cuts (A8); audio graph (A9).
+- Variable node input pins; per-instance skeleton poses (the Skeleton asset's nodes are shared); sockets; clip / graph picker
+  filtered by skeleton; jump / fall states (C1, needs clips); multi-skin models spawn as nodes (C3).
+
+**Scripting**
+- Field values kept across hot reload; debounced build + source watching; `ScriptBehaviour` component model; scripts and asset
+  references as assets; richer field metadata; `OnFixedUpdate` / `OnLateUpdate`; camera smoothing; API version check and
+  debugger; backend-independent API; Lua (deferred).
+- Per-project game assembly (Facerun.dll is hard-coded); WorldUnits API for scripts.
+
+**Runtime and packaging**
+- Pack files (R4), precompiled shaders and pipeline cache (R5), a cook step for textures, self-contained .NET runtime,
+  Release / NOX_EDITOR-free build (R7), fullscreen window, a binary registry, renderer settings beyond the preset.
+- C++ voxel module and VoxelWorld API; dynamic mesh upload without a stall; vertex colors in `Nox.Mesh`; dynamic mesh colliders.
+- `SerializeRuntime`; no shipping configuration (stats and logging always compiled in).
+
+**Engine architecture and performance** (Engine plan)
+- Async compute queue; JobSystem priorities / budgets; overlapped IO; parallel animation; frame pipelining.
+- Geometry / cluster page streaming (6b, paused), RT fallback LOD (reverted), discrete LOD for small meshes, world streaming
+  (6c), virtual texturing, DirectStorage, IoStore-like containers.
+- Hard memory budgets and eviction, out-of-memory handling, sparse binding, BLAS sub-allocation / eviction, RT instance culling.
+- Lights in the GPU scene (rewritten every frame); materials reference textures by path; BC4 / BC5 / BC6H cooking; scene
+  YAML read on the main thread; model-instance overrides do not keep added components / re-parenting.
+- Profiling: frame-time / flame graph, RAM by category, sortable overlay tables, GPU-to-CPU frame matching.
+
+**Import (glTF)**
+- Vertex colors, morph targets, `EXT_mesh_gpu_instancing`, `KHR_node_visibility`, materials variants, extras, several scenes,
+  physics extensions; level import of a skeletal model's clips.
+
+**Other**
+- Metal backend (throws); text: fonts from memory, outline / background color; Box2D physics materials.
+
+### 0.4 Docs that no longer match the code
+
+- **Root docs** (`PROJECT_CONTEXT.md`, `architecture.md`, `GEMINI.md`): written for the visibility-buffer migration. They miss Jolt,
+  .NET scripting, the render graph (~70 passes), GPU scene, GI, NoxRuntime; say descriptor buffers (the code uses
+  `VK_EXT_descriptor_heap`), C++23 (the build is C++20), "13 debug modes" (23), PBR Neutral tonemapping (default Hable),
+  `PathTracer.slang` (the pipeline is `PathTracer/*.slang`), and call the live forward shaders dead.
+- `Engine_Architecture_Plan_2026.md` §3b is the pre-plan snapshot; D9 is decided and built; skinned BLAS, BLAS compaction and
+  a second view are built.
+- `RayTracing_Architecture_Plan_2026.md`: progress table says Phase 5 "next up" and 6-7 not started -- ReSTIR GI / DI / PT and
+  RTAO are built; GI modes 0-3, debug views 0-22.
+- `Prefab_*`, `Units_*`, `Runtime_And_Packaging_*`: headers still say "plan, nothing built".
+- `Animation_Graph_*`: §5 marks steps 4-7 untested while §8 says built; prefab asset and outliner folders listed as open.
+- `Scripting_Architecture_and_Status.md`: lists 6 C# files and 3 API groups (21 files and ~12 groups now).
+- `Hybrid_Renderer_Plan_2026-10.md` §1 table (transparency, GI rows) and §2 ladder (High = ReSTIR DI / GI) are older than §2c / §8.
+- `Backlog_2026.md`: P6 is closed by R2; R5 (DDGI fixed grid) replaced by the camera-following cascades.
 
 ## 1. The docs, one by one
 

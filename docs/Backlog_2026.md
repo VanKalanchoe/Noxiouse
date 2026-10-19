@@ -10,6 +10,15 @@
 |---|---|---|
 | N4 | **World units and world tools** (grid, snap, ortho views, measure, bounds readout, unit conversion at the boundaries, physics unit interface) | plan written 2026-09-26: `Units_And_World_Tools_Plan_2026.md`; decisions taken 2026-09-26 (cm, tools first); **U1 (WorldUnits) and the first part of U2 (Inspector size readout, snap toolbar) built, untested**; world grid (Godot port) + snap feedback line built, being tuned; world grid, snap feedback, Measure tool and reference figure built (U2); U1-U6 built, plus per-field unit display/editing (Transform Position, script [Expose] Unit) -- testing next. Replaces the old E1 idea of a bare "model size in the import dialog" (that is phase U4 of the plan) |
 
+## Bugs and open items found by the second audit (2026-10-19)
+
+Full list with file references: `Status_Audit_2026-10.md` §0 (broken, untested, missing by area, stale docs). The bugs, to pick from:
+asserts compiled out everywhere (`NOX_DEBUG` never defined), ReSTIR DI broken (cause unknown), ReSTIR PT temporal artifact, ReSTIR light
+indices across light changes, meshlet cone culling, root motion lost on character controllers, Fox speed thresholds in m/s, failed script
+reload leaves scripting unloaded / reload generation / `OnAfterReload`, script jobs during reload, Text font not saved, empty runtime
+serializer, dead `LoadMesh`, ortho camera not unit-scaled, Import Scale tooltip, quit on cancelled project dialog, 3D physics not
+duplicated, NRD / DLSS distances in raw units.
+
 ## Future.md (2026-10-18; audit: `Status_Audit_2026-10.md`)
 
 | # | Item | State |
@@ -36,7 +45,7 @@
 | P1 | **Apply of a nested instance's change into the OUTER prefab** (today Apply on the inner instance writes into the inner prefab) |
 | P4 | Re-parenting a spawned entity is not tracked as an override; entities attached directly below an instance root also show as `+ Entity` |
 | P5 | Overrides on a deleted instance entity are dropped with it (only its name is remembered) |
-| P6 | Exported games need their own prefab lookup for `Scene.Instantiate` (it resolves paths through the editor asset registry) |
+| P6 | ~~Exported games need their own prefab lookup for `Scene.Instantiate`~~ -> closed by R2 (engine code asks `AssetManagerBase`, 2026-10-18) |
 | P7 | Unpack of a nested instance / Unpack All; prefab thumbnails in the Content Browser; variants tinted differently |
 
 ## Characters, animation and gameplay (plan: `Animation_Graph_Architecture_Plan_2026.md`)
@@ -67,7 +76,7 @@
 | R2 | Phase 6b **geometry streaming** (cluster pages): paused on purpose, returns with a scene that does not fit in memory or with cluster acceleration structures (D8) |
 | R3 | Phase 6b-2 RT fallback LOD: tried and reverted (holes in the path tracer) -- see the plan |
 | R4 | ~~Stats overlay text looked broken~~ -> F9 (cause found 2026-10-18: the overlay was world-space geometry through the camera; now screen space) |
-| R5 | Editor/DDGI: the probe grid is a fixed 1.8 m grid at the Bistro scale (a moving character crossing it can show stepping in the lighting) |
+| R5 | ~~Editor/DDGI: the probe grid is a fixed 1.8 m grid~~ -> camera-following DDGI cascades (2026-10-19), now only the second bounce under the screen-probe GI (`Hybrid_Renderer_Plan_2026-10.md` §2b-2c) |
 
 ## Editor and tools
 
