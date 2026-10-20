@@ -1,6 +1,7 @@
 #pragma once
 
 #include "PathTracerBridge.slang"
+#include "EmissiveLights.slang"
 
 namespace PathTracer
 {
@@ -24,15 +25,28 @@ namespace PathTracer
         uint analyticCount = ubo->lightCount;
         bool hasEnvironment = skyboxTextureIndex != 0xFFFFFFFF;
         uint lightCount = analyticCount + (hasEnvironment ? 1u : 0u);
-        if (lightCount == 0) return c;
+        // The emissive meshes (EmissiveLights.slang) take this share of the samples, the analytic lights and the environment the rest.
+        const float emissiveProbability = EmissiveLights::branchProbability(ubo, hasEnvironment);
+        if (lightCount == 0 && emissiveProbability <= 0.0) return c;
 
-        uint lightIndex = min(uint(Bridge::rand(rngState) * float(lightCount)), lightCount - 1);
-        float lightSelectPdf = 1.0 / float(lightCount);
-        bool environmentSample = lightIndex == analyticCount;
+        const bool emissiveSample = Bridge::rand(rngState) < emissiveProbability;
+        uint lightIndex = min(uint(Bridge::rand(rngState) * float(lightCount)), max(lightCount, 1u) - 1);
+        float lightSelectPdf = emissiveSample ? emissiveProbability : (1.0 - emissiveProbability) / float(max(lightCount, 1u));
+        bool environmentSample = !emissiveSample && lightIndex == analyticCount;
         float3 Li = 0.0;
         float directionalPdf = 1.0;
 
-        if (environmentSample)
+        if (emissiveSample)
+        {
+            const EmissiveLights::Sample sample = EmissiveLights::sample(ubo, sd.posW,
+                float4(Bridge::rand(rngState), Bridge::rand(rngState), Bridge::rand(rngState), Bridge::rand(rngState)));
+            if (!sample.valid) return c;
+            c.L = sample.direction;
+            c.distance = sample.distance;
+            Li = sample.radiance;
+            directionalPdf = sample.pdf;
+        }
+        else if (environmentSample)
         {
             EnvMapSampler sampler = Bridge::environmentSampler(ubo, skyboxTextureIndex, importanceIndex);
             DistantLightSample sample = sampler.MIPDescentSample(float2(Bridge::rand(rngState), Bridge::rand(rngState)));
@@ -62,7 +76,7 @@ namespace PathTracer
         c.bsdfPdf = bsdf.evalPdf(sd, c.L);
         c.lightPdf = lightSelectPdf * directionalPdf;
         float misWeight = 1.0;
-        if (environmentSample)
+        if (environmentSample || emissiveSample)
         {
             float lightPdf2 = c.lightPdf * c.lightPdf;
             float bsdfPdf2 = c.bsdfPdf * c.bsdfPdf;

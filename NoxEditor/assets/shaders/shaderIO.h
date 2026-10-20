@@ -435,6 +435,22 @@ struct UniformBufferObject
     // DDGI probe relocation (DDGIRelocation.slang): a texture of each probe's offset from its grid point in cells of its cascade
     // (one texel per probe, DDGI_PROBES_PER_ROW a row), matching the atlases of this frame. 0xFFFFFFFF: probes on the grid.
     uint32_t ddgiProbeOffsetsTextureIndex;
+    // The emissive mesh instances the path tracer samples as lights (PathTracer/EmissiveLights.slang): EmissiveLightInstance
+    // [emissiveLightCount], sorted by instance slot, with the running sum of their weights (emissiveLightTotalWeight at the end).
+    // 0 / 0: none (or the path tracer is off).
+    uint32_t emissiveLightCount;
+    float emissiveLightTotalWeight;
+    uint64_t emissiveLightsReference;
+};
+
+// An emissive mesh instance as a light for the path tracer's direct light sampling: picked by weight (its emission's luminance
+// times its approximate area), then one of its triangles uniformly, then a point on it uniformly.
+struct EmissiveLightInstance
+{
+    uint32_t instanceSlot;  // GPU scene instance slot (the TLAS instanceCustomIndex)
+    uint32_t triangleCount; // its ray tracing triangles
+    float cdf;              // the weights up to and including this one
+    float weight;
 };
 
 struct Vertex

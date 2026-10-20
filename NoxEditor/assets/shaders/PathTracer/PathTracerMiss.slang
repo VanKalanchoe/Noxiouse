@@ -2,6 +2,7 @@
 
 #include "PathPayload.slang"
 #include "PathTracerBridge.slang"
+#include "EmissiveLights.slang"
 
 [[vk::push_constant]]
 ConstantBuffer<PushConstantPathTracer> pushConstant;
@@ -44,7 +45,8 @@ void missMain(inout PathPayload payload : SV_RayPayload)
         if (!rectLight && path.getVertexIndex() > 0 && path.bsdfScatterPdf > 0.0 && pushConstant.skyboxTextureIndex != 0xFFFFFFFF)
         {
             EnvMapSampler sampler = Bridge::environmentSampler(ubo, pushConstant.skyboxTextureIndex, pushConstant.environmentImportanceIndex);
-            float lightPdf = sampler.MIPDescentEvalPdf(rayDir) / float(ubo->lightCount + 1);
+            // The environment's share of the light samples: what the emissive meshes leave (PathTracerNEE.slang), over the lights.
+            float lightPdf = sampler.MIPDescentEvalPdf(rayDir) * (1.0 - EmissiveLights::branchProbability(ubo, true)) / float(ubo->lightCount + 1);
             float bsdfPdf = path.bsdfScatterPdf;
             misWeight = bsdfPdf*bsdfPdf / max(bsdfPdf*bsdfPdf + lightPdf*lightPdf, 1e-30);
         }

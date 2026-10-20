@@ -1755,6 +1755,11 @@ namespace Nox
         std::vector<std::unique_ptr<NRI::Buffer>> m_lightBuffers;
         std::vector<void*> m_lightBuffersMapped;
         uint64_t m_LightBufferCapacity = 0;
+        // The path tracer's emissive lights (GpuScene::CollectEmissiveLights), one host-visible buffer per frame in flight.
+        std::vector<shaderio::EmissiveLightInstance> m_emissiveLights;
+        std::array<std::unique_ptr<NRI::Buffer>, MAX_FRAMES_IN_FLIGHT> m_emissiveLightBuffers;
+        std::array<void*, MAX_FRAMES_IN_FLIGHT> m_emissiveLightBuffersMapped{};
+        uint64_t m_emissiveLightBufferCapacity = 0;
 
         // Temporal & Motion Vector State
         glm::mat4 m_prevView = glm::mat4(1.0f);

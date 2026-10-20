@@ -615,6 +615,37 @@ namespace Nox
         }
     }
 
+    float GpuScene::CollectEmissiveLights(std::vector<shaderio::EmissiveLightInstance>& outLights) const
+    {
+        outLights.clear();
+        float total = 0.0f;
+        for (uint32_t slot = 0; slot < static_cast<uint32_t>(m_TlasInstances.size()); ++slot)
+        {
+            if (m_TlasInstances[slot].accelerationStructureReference == 0)
+                continue;
+            const InstanceState& state = m_InstanceStates[slot];
+            if (state.Mesh == InvalidSlot || state.Material == InvalidSlot)
+                continue;
+            const shaderio::GpuMaterial& material = m_Materials.Get(state.Material);
+            const float luminance = glm::dot(material.emissiveFactor * material.emissiveStrength, glm::vec3(0.2126f, 0.7152f, 0.0722f));
+            const shaderio::GpuMesh& mesh = m_Meshes.Get(state.Mesh);
+            if (!(luminance > 0.0f) || mesh.triangleCount == 0 || mesh.vertexCount == 0)
+                continue;
+
+            // Its area, roughly: the surface of its bounds in the world (the axes' scale applied to the local box).
+            const glm::mat4& world = m_Transforms.Get(slot).world;
+            const glm::vec3 extent = glm::max(mesh.boundsMax - mesh.boundsMin, glm::vec3(0.0f)) *
+                                     glm::vec3(glm::length(glm::vec3(world[0])), glm::length(glm::vec3(world[1])), glm::length(glm::vec3(world[2])));
+            const float area = std::max(2.0f * (extent.x * extent.y + extent.y * extent.z + extent.z * extent.x), 1e-8f);
+            const float weight = luminance * area;
+            if (!std::isfinite(weight))
+                continue;
+            total += weight;
+            outLights.push_back({ slot, mesh.triangleCount, total, weight });
+        }
+        return total;
+    }
+
     void GpuScene::WriteRayTracingInstance(uint32_t instanceSlot)
     {
         const shaderio::GpuInstance& instance = m_Instances.Get(instanceSlot);

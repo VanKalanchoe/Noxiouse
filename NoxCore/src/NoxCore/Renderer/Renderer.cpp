@@ -5125,6 +5125,41 @@ namespace Nox
 
         uniformData.lightDataReference = m_lightBuffers[currentImage]->getDeviceAddress();
         uniformData.lightCount = static_cast<uint32_t>(m_lightBufferObjects.size());
+
+        // Emissive meshes as lights, for the path tracer (it found them only by chance before: a lamp-lit room came out black).
+        uniformData.emissiveLightCount = 0;
+        uniformData.emissiveLightTotalWeight = 0.0f;
+        uniformData.emissiveLightsReference = 0;
+        if (m_pathTracingEnabled)
+        {
+            const float total = m_gpuScene.CollectEmissiveLights(m_emissiveLights);
+            const uint64_t required = sizeof(shaderio::EmissiveLightInstance) * m_emissiveLights.size();
+            if (required > 0 && total > 0.0f)
+            {
+                if (required > m_emissiveLightBufferCapacity)
+                {
+                    m_emissiveLightBufferCapacity = required * 2;
+                    for (auto& buffer : m_emissiveLightBuffers)
+                    {
+                        if (buffer)
+                        {
+                            std::scoped_lock lock(m_deferredReleasesMutex);
+                            m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, std::move(buffer) });
+                        }
+                    }
+                    for (size_t frame = 0; frame < MAX_FRAMES_IN_FLIGHT; ++frame)
+                    {
+                        m_emissiveLightBuffers[frame] = m_device->createBuffer(NRI::BufferDesc{ .size = m_emissiveLightBufferCapacity,
+                                                                                                .usage = NRI::BufferUsage::Storage });
+                        m_emissiveLightBuffersMapped[frame] = m_emissiveLightBuffers[frame]->map(0, m_emissiveLightBufferCapacity);
+                    }
+                }
+                memcpy(m_emissiveLightBuffersMapped[currentImage], m_emissiveLights.data(), required);
+                uniformData.emissiveLightCount = static_cast<uint32_t>(m_emissiveLights.size());
+                uniformData.emissiveLightTotalWeight = total;
+                uniformData.emissiveLightsReference = m_emissiveLightBuffers[currentImage]->getDeviceAddress();
+            }
+        }
     }
 
     void Renderer::processDeferredReleases()

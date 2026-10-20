@@ -170,6 +170,9 @@ namespace Nox
         // Whether any ray traced instance was added, removed, moved or re-flagged since the last call (the TLAS is rebuilt,
         // not refitted: NVIDIA RT best practices).
         bool ConsumeTlasChanged() { return std::exchange(m_TlasChanged, false); }
+        // The ray traced instances whose material emits light, in slot order, for the path tracer to sample as lights
+        // (shaderIO.h EmissiveLightInstance). Returns the sum of their weights.
+        float CollectEmissiveLights(std::vector<shaderio::EmissiveLightInstance>& outLights) const;
 
     private:
         struct InstanceState

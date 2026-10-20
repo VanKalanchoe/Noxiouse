@@ -38,6 +38,9 @@ namespace Bridge
         // The ray reached the surface from inside its volume (a back face): what the volume absorbs per world unit on the way
         // (KHR_materials_volume attenuation; 0 outside, for a thin surface, or without absorption).
         float3 absorptionCoefficient;
+        // The hit triangle in the world: its area and the cosine between its face and the ray (emissive light MIS).
+        float triangleArea;
+        float cosFace;
     };
 
     // RTXPT's stateless uniform generator advances with Hash32. Effect-specific seed construction is
@@ -166,6 +169,8 @@ namespace Bridge
         float2 duv1 = v1.uv0 - v0.uv0, duv2 = v2.uv0 - v0.uv0;
         float determinant = duv1.x * duv2.y - duv1.y * duv2.x;
         float worldDoubleArea = length(cross(edge1, edge2));
+        surface.triangleArea = 0.5 * worldDoubleArea;
+        surface.cosFace = worldDoubleArea > 0.0 ? abs(dot(cross(edge1, edge2) / worldDoubleArea, rayDir)) : 0.0;
         float uvPerWorld = sqrt(abs(determinant) / max(worldDoubleArea, 1e-12));
         if (abs(determinant) > 1e-10)
         {

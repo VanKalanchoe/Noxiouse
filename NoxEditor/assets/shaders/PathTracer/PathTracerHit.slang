@@ -128,8 +128,18 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
     // 2. Collect surface emission (with MIS if previous bounce used NEE)
     if (any(surface.emission > float3(0.0)))
     {
-        // No competing emissive-triangle sampler exists yet; retain full weight.
-        float3 filteredEmission = FireflyFilter(surface.emission, pushConstant.fireflyFilterThreshold, path.fireflyFilterK);
+        // Weighed against the previous vertex's emissive light sampling (PathTracerNEE.slang): power heuristic with the pdf that
+        // sampling had for this point. Seen from the camera, in mirrors and through glass from the camera (pdf 0: a delta event)
+        // only the BSDF finds it: full weight. Through glass after a rough vertex the pdf is that vertex's, as in the miss shader.
+        float misWeight = 1.0;
+        if (vertexIdx > 1 && path.bsdfScatterPdf > 0.0)
+        {
+            const float lightPdf = EmissiveLights::branchProbability(ubo, pushConstant.skyboxTextureIndex != 0xFFFFFFFF) *
+                                   EmissiveLights::pdf(ubo, InstanceID(), surface.triangleArea, rayT, surface.cosFace);
+            const float bsdfPdf = path.bsdfScatterPdf;
+            misWeight = bsdfPdf * bsdfPdf / max(bsdfPdf * bsdfPdf + lightPdf * lightPdf, 1e-30);
+        }
+        float3 filteredEmission = FireflyFilter(surface.emission * misWeight, pushConstant.fireflyFilterThreshold, path.fireflyFilterK);
         float3 emissionContrib = path.thp * filteredEmission;
         path.L.rgb += emissionContrib;
 
