@@ -322,6 +322,41 @@ namespace Bridge
         return lut.alphaMode == 2 ? opacitySample < saturate(alpha) : alpha >= lut.alphaCutoff;
     }
 
+    // How much light a shadow-ray candidate lets through (the raster's rule, Material_TransparentLit_Mesh.slang forwardShadowed):
+    // transmissive surfaces (glass) by their transmission and tint (two interfaces' reflection off), blended ones by 1 - alpha,
+    // alpha-masked ones by their cut-out, opaque ones not at all. Glass then casts a tinted shadow and sunlight comes through
+    // windows, instead of the black shadow a path tracer gives when only refracted paths (caustics) may carry light through it.
+    float3 OccluderTransmittance(uint instanceID, uint primitiveIndex, float2 barycentrics, UniformBufferObject* ubo)
+    {
+        GpuRayTracingInstance* lutBuffer = (GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference;
+        GpuRayTracingInstance lut = lutBuffer[instanceID];
+        if (lut.transmissionFactor > 0.0)
+            return saturate(lut.transmissionFactor) * saturate(lut.baseColorFactor.rgb) * 0.92;
+        if (lut.alphaMode == 0)
+            return float3(0.0);
+
+        uint3 idx;
+        if (lut.indexBufferAddress != 0)
+            idx = ((uint3*)lut.indexBufferAddress)[primitiveIndex];
+        else
+            idx = uint3(primitiveIndex * 3 + 0, primitiveIndex * 3 + 1, primitiveIndex * 3 + 2);
+        Vertex v0 = LoadRayTracingVertex(lut, idx.x);
+        Vertex v1 = LoadRayTracingVertex(lut, idx.y);
+        Vertex v2 = LoadRayTracingVertex(lut, idx.z);
+        float3 bary = float3(1.0 - barycentrics.x - barycentrics.y, barycentrics.x, barycentrics.y);
+        float2 uv = v0.uv0 * bary.x + v1.uv0 * bary.y + v2.uv0 * bary.z;
+        SamplerState textureSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
+        float alpha = lut.baseColorFactor.a;
+        if (lut.baseColorTextureIndex != 0xFFFFFFFF)
+        {
+            Texture2D albedoTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + lut.baseColorTextureIndex, 0));
+            alpha *= albedoTex.SampleLevel(textureSampler, uv, 0.0).a;
+        }
+        if (lut.alphaMode == 2)
+            return float3(1.0 - saturate(alpha));
+        return alpha >= lut.alphaCutoff ? float3(0.0) : float3(1.0);
+    }
+
     // Environment map / skybox sampling
     float3 sampleSkybox(float3 dir, UniformBufferObject* ubo, uint skyboxTextureIndex, float lod = 0.0)
     {

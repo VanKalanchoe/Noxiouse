@@ -233,9 +233,12 @@
     }
 
     // Ray query shadow test for direct analytical lights (Next Event Estimation)
-    bool trace_shadow_ray(UniformBufferObject* ubo, float3 rayOrigin, float3 rayDir, float maxDist, inout uint rngState)
+    // The light a shadow ray lets through (the raster's rule, Material_TransparentLit_Mesh.slang forwardShadowed): 0 behind an
+    // opaque surface, transmissive ones (glass) by their transmission and tint, blended ones by 1 - alpha, masked ones by their
+    // cut-out. Forced non-opaque so opaque-mode glass is seen; an opaque candidate ends the search.
+    float3 shadow_transmittance(UniformBufferObject* ubo, float3 rayOrigin, float3 rayDir, float maxDist)
     {
-        if (ubo->tlasDeviceAddress == 0) return false;
+        if (ubo->tlasDeviceAddress == 0) return float3(1.0);
 
         RayDesc shadowRay;
         shadowRay.Origin = rayOrigin;
@@ -244,36 +247,46 @@
         shadowRay.TMax = maxDist;
 
         RaytracingAccelerationStructure as = RaytracingAccelerationStructure(ubo->tlasDeviceAddress);
-        RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> sq;
-        sq.TraceRayInline(as, RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, 0xFF, shadowRay);
+        RayQuery<RAY_FLAG_FORCE_NON_OPAQUE | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> sq;
+        sq.TraceRayInline(as, RAY_FLAG_FORCE_NON_OPAQUE | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, 0xFF, shadowRay);
 
         GpuRayTracingInstance* instanceLUTBuffer = (GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference;
         SamplerState textureSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
 
+        float3 transmittance = float3(1.0);
         while (sq.Proceed())
         {
             uint instID = sq.CandidateRayInstanceCustomIndex();
             uint primIndex = sq.CandidatePrimitiveIndex();
             GpuRayTracingInstance lut = instanceLUTBuffer[instID];
 
-            if (lut.alphaMode == 0 || lut.baseColorTextureIndex == 0xFFFFFFFF)
+            if (lut.transmissionFactor > 0.0)
             {
-                sq.CommitNonOpaqueTriangleHit();
+                transmittance *= saturate(lut.transmissionFactor) * saturate(lut.baseColorFactor.rgb) * 0.92;
+            }
+            else if (lut.alphaMode == 0)
+            {
+                transmittance = float3(0.0);
             }
             else
             {
-                float2 uv = intersection_uv(lut, primIndex, sq.CandidateTriangleBarycentrics());
-                Texture2D tex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + lut.baseColorTextureIndex, 0));
-                float4 col = tex.SampleLevel(textureSampler, uv, 0);
-                if ((lut.alphaMode == 2 && rand(rngState) < saturate(col.a)) ||
-                    (lut.alphaMode != 2 && col.a >= lut.alphaCutoff))
+                float alpha = lut.baseColorFactor.a;
+                if (lut.baseColorTextureIndex != 0xFFFFFFFF)
                 {
-                    sq.CommitNonOpaqueTriangleHit();
+                    float2 uv = intersection_uv(lut, primIndex, sq.CandidateTriangleBarycentrics());
+                    Texture2D tex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + lut.baseColorTextureIndex, 0));
+                    alpha *= tex.SampleLevel(textureSampler, uv, 0).a;
                 }
+                if (lut.alphaMode == 2)
+                    transmittance *= 1.0 - saturate(alpha);
+                else if (alpha >= lut.alphaCutoff)
+                    transmittance = float3(0.0);
             }
+            if (all(transmittance < 1e-3))
+                sq.CommitNonOpaqueTriangleHit();
         }
 
-        return (sq.CommittedStatus() == COMMITTED_TRIANGLE_HIT);
+        return sq.CommittedStatus() == COMMITTED_TRIANGLE_HIT ? float3(0.0) : transmittance;
     }
 
     // color: the pixel (raw mode), or its primary emission beside the NRD signals (PathTracerSignals.slang).
@@ -516,13 +529,13 @@
                     {
                         // Robust offset along normal prevents self-shadowing on curved meshes (a world-unit-scaled 0.02 m)
                         float3 shadowOrigin = hitPos + hitNormal * (0.02 * ubo->unitsPerMeter);
-                        bool inShadow = trace_shadow_ray(ubo, shadowOrigin, lightDir, maxDist, rngState);
+                        const float3 visibility = shadow_transmittance(ubo, shadowOrigin, lightDir, maxDist);
 
-                        if (!inShadow)
+                        if (any(visibility > 0.0))
                         {
                             // Smooth terminator falloff: eliminates stepped polygon tessellation rings at grazing angles
                             float terminatorFade = saturate(NdotL * 10.0);
-                            float3 lightRadiance = sampledRadiance;
+                            float3 lightRadiance = sampledRadiance * visibility; // tinted through glass
 
                             float3 H = normalize(lightDir + V);
                             float NdotH = clamp(dot(hitNormal, H), 0.0, 1.0);
@@ -563,7 +576,8 @@
                 {
                     float envPdf = 1.0 / (4.0 * M_PI);
                     float3 shadowOrigin = hitPos + hitNormal * (0.02 * ubo->unitsPerMeter);
-                    bool envOccluded = trace_shadow_ray(ubo, shadowOrigin, envDir, 1e4, rngState);
+                    // Opaque to glass here: a path through glass meets the sky by itself (no MIS with it on this path).
+                    bool envOccluded = any(shadow_transmittance(ubo, shadowOrigin, envDir, 1e4) < 1.0);
                     if (!envOccluded)
                     {
                         float3 Henv = normalize(envDir + V);

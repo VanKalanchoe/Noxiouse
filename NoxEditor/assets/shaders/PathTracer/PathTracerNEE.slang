@@ -76,24 +76,29 @@ namespace PathTracer
         return c;
     }
 
-    bool visibleNEECandidate(NEECandidate c, ShadingData sd,
+    // The light a candidate's shadow ray lets through: 0 behind something opaque, tinted behind glass and blended surfaces
+    // (Bridge::OccluderTransmittance). Every candidate is looked at (forced non-opaque: opaque-mode glass is a FORCE_OPAQUE
+    // instance in the TLAS); an opaque one ends the search.
+    float3 visibleNEECandidate(NEECandidate c, ShadingData sd,
         RaytracingAccelerationStructure as, UniformBufferObject* ubo, inout uint rngState)
     {
+        const float offset = 0.002 * ubo->unitsPerMeter;
         RayDesc shadowRay;
-        shadowRay.Origin = sd.posW + sd.N * (dot(sd.N, c.L) >= 0 ? 0.002 : -0.002);
+        shadowRay.Origin = sd.posW + sd.N * (dot(sd.N, c.L) >= 0 ? offset : -offset);
         shadowRay.Direction = c.L;
-        shadowRay.TMin = 0.001;
-        shadowRay.TMax = max(c.distance - 0.004, 0.002);
-        RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER> rq;
-        rq.TraceRayInline(as, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER, 0xFF, shadowRay);
+        shadowRay.TMin = 0.5 * offset;
+        shadowRay.TMax = max(c.distance - 2.0 * offset, offset);
+        RayQuery<RAY_FLAG_FORCE_NON_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER> rq;
+        rq.TraceRayInline(as, RAY_FLAG_FORCE_NON_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER, 0xFF, shadowRay);
+        float3 transmittance = float3(1.0);
         while (rq.Proceed())
         {
-            uint instID = rq.CandidateRayInstanceCustomIndex();
-            uint primIdx = rq.CandidatePrimitiveIndex();
-            if (Bridge::AlphaTest(instID, primIdx, rq.CandidateTriangleBarycentrics(), ubo, Bridge::rand(rngState)))
+            transmittance *= Bridge::OccluderTransmittance(rq.CandidateRayInstanceCustomIndex(), rq.CandidatePrimitiveIndex(),
+                                                           rq.CandidateTriangleBarycentrics(), ubo);
+            if (all(transmittance < 1e-3))
                 rq.CommitNonOpaqueTriangleHit();
         }
-        return rq.CommittedStatus() != COMMITTED_TRIANGLE_HIT;
+        return rq.CommittedStatus() == COMMITTED_TRIANGLE_HIT ? float3(0.0) : transmittance;
     }
 
     float3 evaluateNEE(ShadingData sd, StandardBSDF bsdf,
@@ -117,11 +122,14 @@ namespace PathTracer
                 if (Bridge::rand(rngState) * weightSum < candidate.weight)
                     selected = candidate;
             }
-            if (!selected.valid || weightSum <= 0.0 || !visibleNEECandidate(selected, sd, as, ubo, rngState))
+            if (!selected.valid || weightSum <= 0.0)
+                continue;
+            const float3 visibility = visibleNEECandidate(selected, sd, as, ubo, rngState);
+            if (all(visibility <= 0.0))
                 continue;
             float normalization = weightSum / max(float(candidateCount) * selected.weight, 1e-30);
-            diffuseDirect += selected.diffuse * normalization;
-            specularDirect += selected.specular * normalization;
+            diffuseDirect += selected.diffuse * visibility * normalization;
+            specularDirect += selected.specular * visibility * normalization;
         }
         float invFullSamples = 1.0 / float(fullSampleCount);
         diffuseDirect *= invFullSamples;

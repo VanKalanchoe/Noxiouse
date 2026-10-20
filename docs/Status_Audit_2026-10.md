@@ -56,6 +56,10 @@ for history. File references are to the code as of this audit.
 ### 0.3 Missing / open, by area
 
 **Rendering and lights**
+- (Path tracer and glass, reported 2026-10-20: fixed -- its shadow rays treated glass as opaque, so glass threw black shadows
+  and the sun did not come through windows; they now let transmissive and blended surfaces through like the raster does,
+  with the sun disc and sky behind glass not counted twice. Soft shadows: the path tracer samples the light's size like the
+  raster (directional Angular Diameter, point / spot Radius); a hard shadow there is that light's size, unless shown otherwise.)
 - Denoising of transparent signals (H5). (Volume absorption, KHR attenuation: built 2026-10-20.) (OIT for transparent
   surfaces and alpha-blended particles, H4: built 2026-10-20 -- weighted blended, the Order-Independent Transparency toggle,
   off by default; additive particles add after its resolve.)

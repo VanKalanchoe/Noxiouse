@@ -231,7 +231,12 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
 
     // Update throughput
     path.thp *= sampleResult.weight;
-    path.bsdfScatterPdf = sampleResult.pdf;
+    // Through glass after a rough vertex (a delta transmission, not from the camera): the light beyond reached that vertex's
+    // NEE through the glass (shadow rays let transmissive surfaces through, PathTracerNEE.slang), so the environment met beyond
+    // is weighed against it with that vertex's pdf, not the glass's (0, which would count it fully a second time).
+    const bool throughGlassAfterScatter = (sampleResult.lobe & LobeType::DeltaTransmission) != 0 && !path.hasFlag(PathFlags::deltaOnlyPath);
+    if (!throughGlassAfterScatter)
+        path.bsdfScatterPdf = sampleResult.pdf;
     path.fireflyFilterK = ComputeNewScatterFireflyFilterK(path.fireflyFilterK, sampleResult.pdf, sampleResult.lobeP);
     if (sampleResult.pdf > 0.0)
         path.rayCone = RayCone::make(path.rayCone.getWidth(),

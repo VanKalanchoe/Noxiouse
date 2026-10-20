@@ -22,9 +22,11 @@ void missMain(inout PathPayload payload : SV_RayPayload)
         !path.hasFlag(PathFlags::specular) && !path.hasFlag(PathFlags::delta)
         ? float(pushConstant.environmentDiffuseMip) : 0.0;
     float3 envRadiance = Bridge::sampleSkybox(rayDir, ubo, pushConstant.skyboxTextureIndex, environmentLod);
-    // The sun's (and moon's) disc, and rect lights' faces, where nothing else adds their light: seen directly and in mirrors.
+    // The sun's (and moon's) disc, and rect lights' faces, where nothing else adds their light: seen directly, through glass from
+    // the camera, and in mirrors. Not through glass after a rough vertex: that vertex's NEE already let them through the glass.
     bool rectLight = false;
-    if (path.getVertexIndex() == 0 || path.hasFlag(PathFlags::delta))
+    const bool seenThroughGlassAfterScatter = path.hasFlag(PathFlags::transmission) && !path.hasFlag(PathFlags::deltaOnlyPath);
+    if (path.getVertexIndex() == 0 || path.hasFlag(PathFlags::deltaOnlyPath) || (path.hasFlag(PathFlags::delta) && !seenThroughGlassAfterScatter))
     {
         envRadiance += directional_light_discs(ubo, rayDir);
         float rectT = 1e30;
