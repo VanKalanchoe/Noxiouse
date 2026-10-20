@@ -81,8 +81,10 @@ namespace Nox
         bool ApplyOverrideToOuter(Scene& scene, Entity innerRoot, const OverrideEntry& entry);
 
         // Turns the instance into ordinary entities: the link to the prefab is cut and the spawned entities are saved with the
-        // scene from now on (Unity's Unpack Completely).
+        // scene from now on; prefab instances inside it stay instances (Unity's Unpack).
         void Unpack(Scene& scene, Entity root);
+        // Unpack, and every prefab instance inside it too (all levels): nothing of it stays linked to a prefab.
+        void UnpackCompletely(Scene& scene, Entity root);
 
         // Prefab Mode for a variant (P6c): the variant's BASE as an instance in `scene` carrying the variant's own changes, and the entities
         // the variant adds attached below it. Editing it is editing an instance; SaveVariant writes the changes back into the variant.

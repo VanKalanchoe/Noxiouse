@@ -88,8 +88,8 @@ for history. File references are to the code as of this audit.
   2026-10-20.)
 
 **Editor**
-- Prefab: P1 nested additions into the outer prefab, P4 re-parenting overrides, P5 overrides of deleted entities, P7 Unpack
-  All, prefab / .gltf thumbnails, variant tint.
+- Prefab: P1 nested additions into the outer prefab, P4 re-parenting overrides, prefab / .gltf thumbnails, variant tint.
+  (Built 2026-10-20: overrides of deleted entities kept for Revert (P5), Unpack Completely (P7).)
 - Content browser: streaming feedback from preview views. (Built 2026-10-20: rename / move of textures, materials and meshes
   (E2) with their companion files, the old paths kept as aliases in the registry; Reimport; Replace References in the project's
   files and the open scene; neutral thumbnail backdrop. A reimported mesh whose material was renamed writes a fresh .nmat at

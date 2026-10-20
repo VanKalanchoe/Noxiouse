@@ -929,6 +929,11 @@ namespace Nox
             ImGui::SameLine();
             if (ImGui::SmallButton("Unpack"))
                 PrefabInstance::Unpack(*m_Context, entity);
+            ImGui::SetItemTooltip("Ordinary entities from now on; the prefab instances inside it stay instances.");
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Unpack Completely"))
+                PrefabInstance::UnpackCompletely(*m_Context, entity);
+            ImGui::SetItemTooltip("Ordinary entities all the way down: the instances inside it are unpacked too.");
             ImGui::TextDisabled("What you change here (fields, components, entities) is kept on this instance as an override; Apply writes it into the prefab.");
 
             // Overrides: everything that differs from the prefab (worked out from the spawned entities): fields, deleted entities,

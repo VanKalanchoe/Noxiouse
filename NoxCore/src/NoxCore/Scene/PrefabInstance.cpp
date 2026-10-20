@@ -574,6 +574,27 @@ namespace Nox
         return root;
     }
 
+    void PrefabInstance::UnpackCompletely(Scene& scene, Entity root)
+    {
+        if (!root || !root.HasComponent<PrefabInstanceComponent>())
+            return;
+        // The instances inside it (spawned entities that are instance roots themselves), found before its own link goes.
+        const UUID rootID = root.GetUUID();
+        std::vector<UUID> inner;
+        auto nodes = scene.GetAllEntitiesWith<PrefabNodeComponent, PrefabInstanceComponent>();
+        for (auto handle : nodes)
+        {
+            if (nodes.get<PrefabNodeComponent>(handle).Instance == rootID)
+                inner.push_back(Entity(handle, &scene).GetUUID());
+        }
+        Unpack(scene, root);
+        for (UUID id : inner)
+        {
+            if (Entity entity = scene.GetEntityByUUID(id))
+                UnpackCompletely(scene, entity);
+        }
+    }
+
     void PrefabInstance::Unpack(Scene& scene, Entity root)
     {
         if (!root || !root.HasComponent<PrefabInstanceComponent>())
@@ -764,6 +785,16 @@ namespace Nox
             Entity entity = FindEntity(scene, root, fileID);
             if (entity)
                 diffEntity(node, SceneSerializer::EntityToNode(scene, entity), fileID, fileID == prefab->Root, result);
+            else
+            {
+                // A deleted entity keeps the overrides it had (not shown, not applied while it is gone): reverting the deletion
+                // brings it back as it was on this instance, not as the prefab has it.
+                for (const PrefabPropertyOverride& kept : instance.Overrides)
+                {
+                    if (kept.Entity == fileID)
+                        result.push_back(kept);
+                }
+            }
         }
         return result;
     }
@@ -982,8 +1013,14 @@ namespace Nox
     std::vector<PrefabInstance::OverrideEntry> PrefabInstance::ListOverrides(Scene& scene, Entity root)
     {
         std::vector<OverrideEntry> entries;
+        const bool spawned = root.GetComponent<PrefabInstanceComponent>().Spawned;
         for (const PrefabPropertyOverride& o : CollectOverrides(scene, root))
+        {
+            // The kept overrides of a deleted entity are not listed: the deletion is (reverting it brings them back).
+            if (spawned && !FindEntity(scene, root, o.Entity))
+                continue;
             entries.push_back({ OverrideEntry::EntryKind::Property, o.Entity, o.Component, o.Field, o.Value, UUID(0), {} });
+        }
         for (const PrefabStructureChange& change : CollectStructureChanges(scene, root))
         {
             const OverrideEntry::EntryKind kind = change.Kind == PrefabStructureChange::ChangeKind::RemovedEntity ? OverrideEntry::EntryKind::RemovedEntity

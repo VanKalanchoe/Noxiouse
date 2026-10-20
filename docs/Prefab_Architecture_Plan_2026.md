@@ -270,6 +270,6 @@ Missing script API this needs: `Input` mouse buttons, rigid body velocity/force,
 3. Clearing script entity references that point outside the dragged set when a prefab is created (they keep their UUID).
 4. ~~Prefab Mode save prompt~~ **Built 2026-09-26 (untested):** Prefab Mode compares the prefab's text with the text taken once everything in its scene had spawned (`*` in the toolbar; periodic check every 20 frames, exact check when leaving); **Exit** and opening another scene ask Save / Don't Save / Cancel first.
 5. Re-parenting a spawned entity is not tracked as an override; entities attached directly below an instance root also show as `+ Entity`.
-6. Overrides on an instance's entity that was DELETED are dropped with it (only its name is remembered, and put back on Revert).
+6. ~~Overrides on an instance's entity that was DELETED are dropped with it~~ **Built 2026-10-20:** the deleted entity's overrides stay on the instance (not listed while it is gone) and come back with it on Revert. **Unpack Completely** (the hierarchy's instance menu) also unpacks every nested instance below; plain **Unpack** keeps them as instances.
 7. Exported games need their own prefab lookup for `Scene.Instantiate` (it resolves paths through the editor asset registry).
 
