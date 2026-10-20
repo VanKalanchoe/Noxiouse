@@ -37,7 +37,7 @@ namespace Nox
         bool success = MeshSerializer::DeserializeMesh(path, meshDataList, materialDataList, lightDataList);
         if (!success)
         {
-            NOX_CORE_ASSERT(false, "SkeletalMeshImporter::LoadSkeletalMesh - Failed to deserialize skeletal mesh file: {}", path.string());
+            NOX_CORE_ERROR("SkeletalMeshImporter::LoadSkeletalMesh - Failed to deserialize skeletal mesh file: {}", path.string());
             return {};
         }
 

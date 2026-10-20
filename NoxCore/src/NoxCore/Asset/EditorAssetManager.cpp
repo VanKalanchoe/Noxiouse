@@ -415,7 +415,11 @@ namespace Nox
         // If a target type was provided (e.g. from a UI menu), use it.
         // Otherwise, fall back to whatever the file extension is.
         metadata.Type = (targetType != AssetType::None) ? targetType : GetAssetTypeFromExtension(sourcePath.extension());
-        NOX_CORE_ASSERT(metadata.Type != AssetType::None, "could not determine asset type from extension");
+        if (metadata.Type == AssetType::None)
+        {
+            NOX_CORE_ERROR("EditorAssetManager::ImportAsset - could not determine the asset type of '{}' from its extension", sourcePath.string());
+            return;
+        }
 
         if (destPath.empty() && metadata.Type == AssetType::MeshSource)
             metadata.FilePath = GeneratedAssetPath(sourcePath, "Meshes", ".nmesh");
@@ -1363,8 +1367,9 @@ namespace Nox
             }
             if (!asset)
             {
-                // import failed
-                NOX_CORE_ASSERT("EditorAssetManager::GetAsset - asset import failed")
+                // A missing or broken file on disk, not a programming error: log it, the null asset is kept so it is not
+                // imported again every frame.
+                NOX_CORE_ERROR("EditorAssetManager::GetAsset - importing '{}' failed", metadata.FilePath.string());
             }
             m_LoadedAssets[handle] = asset;
             const Clock::time_point importDone = Clock::now();

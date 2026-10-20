@@ -94,9 +94,6 @@ namespace Nox
         static Ref<Mesh> ImportMesh(AssetHandle handle, const AssetMetadata& metadata);
         
         static Ref<StaticMesh> ImportStaticMesh(AssetHandle handle, const AssetMetadata& metadata);
-        
-        // Load from filepath
-        static Ref<Mesh> LoadMesh(const std::filesystem::path& path);
 
         // Any thread. The clusters of geometry made at run time (DynamicMeshes): one level, no LOD chain (cheap to rebuild).
         // With `generateTangents` the tangents come from the UVs (MikkTSpace, may split vertices along UV seams); data.Vertices

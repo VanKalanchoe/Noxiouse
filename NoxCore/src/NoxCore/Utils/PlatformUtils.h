@@ -10,4 +10,7 @@ namespace Nox::Platform
     };
 
     ProcessMemory QueryProcessMemory();
+
+    // True while a debugger is attached to this process: a failed NOX_ASSERT only breaks then.
+    bool IsDebuggerAttached();
 }

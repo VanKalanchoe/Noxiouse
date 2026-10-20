@@ -599,7 +599,9 @@ namespace NRI
     
     void CommandBufferVK::drawMeshTasksIndirect(uint64_t indirectBufferDeviceAddress, uint64_t offset, uint32_t drawCount, uint32_t stride)
     {
-        NOX_CORE_ASSERT("My GPU doesnt support idk why will have to look");
+        // Nothing calls this yet: the device-address form of the indirect draw was not supported on the GPU it was written
+        // on, so it has never run. The renderer draws with drawMeshTasksIndirectCount.
+        NOX_CORE_ASSERT(false, "CommandBufferVK::drawMeshTasksIndirect by device address has never been tested");
         vk::DrawIndirect2InfoKHR drawInfo = 
         {
             .pNext = nullptr,

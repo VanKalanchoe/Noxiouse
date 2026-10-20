@@ -1005,49 +1005,6 @@ namespace Nox
         return mesh;
     }
 
-    Ref<Mesh> MeshImporter::LoadMesh(const std::filesystem::path& path)
-    {
-        NOX_ASSERT(fasle, "broken");
-        /*NOX_CORE_INFO("MeshImporter::LoadMesh loading raw mesh from {}", path.string());
-        
-        std::filesystem::path sourcePath = path;
-        std::filesystem::path cookedPath = sourcePath;
-        cookedPath.replace_extension(".nmesh");
-        
-        std::vector<MeshData> meshDataList;
-        std::vector<MaterialData> materialDataList;
-        
-        if (std::filesystem::exists(cookedPath))
-        {
-            bool success = MeshSerializer::DeserializeMesh(path, meshDataList, materialDataList);
-            if (!success) NOX_CORE_ASSERT(false, "MeshImporter::LoadMesh - Failed to deserialize .nmesh file");
-        }
-        else
-        {
-            meshDataList = ParseGltfToMeshData(path, materialDataList, TODO, TODO);
-            if (meshDataList.empty())
-            {
-                NOX_CORE_ASSERT("MeshImporter::LoadMesh - Failed to load or empty mesh at path: {}", path.string());
-                return Ref<Mesh>(nullptr);
-            }
-            
-            MeshSerializer::SerializeMesh(cookedPath, meshDataList, materialDataList);
-        }
-        
-        Ref<Mesh> meshAsset = CreateRef<Mesh>();
-        
-        // Upload each sub-mesh independently -> Vector of Handles
-        for (const auto& data : meshDataList)
-        {
-            MeshHandle subMeshHandle = Renderer::UploadMesh(data);
-            meshAsset->m_SubMeshes.push_back(subMeshHandle);
-            meshAsset->m_SubmeshNames.push_back(data.Name);
-        }
-        meshAsset->m_Materials = std::move(materialDataList);
-        
-        return meshAsset;*/
-    }
-
     int32_t FindAttribute(const tg3_primitive& primitive, const char* name)
     {
         for (uint32_t i = 0; i < primitive.attributes_count; i++)

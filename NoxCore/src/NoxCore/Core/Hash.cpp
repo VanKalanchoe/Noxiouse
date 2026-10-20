@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "core.h"
+#include "Log.h"
 
 namespace Nox
 {
@@ -24,7 +25,12 @@ namespace Nox
     {
         std::ifstream file(path, std::ios::binary | std::ios::ate);
 
-        if (!file) NOX_CORE_ASSERT("Hash::computeFile failed to open file: {}", path);
+        // A file that cannot be opened has no size (tellg is -1): reading on would allocate a huge buffer.
+        if (!file)
+        {
+            NOX_CORE_ERROR("Hash::computeFile failed to open file: {}", path);
+            return 0;
+        }
 
         size_t size = file.tellg();
         file.seekg(0);

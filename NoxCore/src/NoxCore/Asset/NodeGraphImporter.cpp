@@ -33,7 +33,7 @@ namespace Nox
         Ref<NodeGraphAsset> graph = CreateRef<NodeGraphAsset>();
         if (!NodeGraphSerializer::Deserialize(path, graph->Graph))
         {
-            NOX_CORE_ASSERT(false, "NodeGraphImporter::LoadNodeGraph - Failed to deserialize .nanimgraph file: {}", path.string());
+            NOX_CORE_ERROR("NodeGraphImporter::LoadNodeGraph - Failed to deserialize .nanimgraph file: {}", path.string());
             return {};
         }
 

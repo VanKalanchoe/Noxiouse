@@ -213,3 +213,7 @@ target_compile_definitions(${PROJECT_NAME} PUBLIC
     NOX_ENABLE_TRACY=$<BOOL:${NOX_ENABLE_TRACY}>
     NOX_BUILD_CONFIG="$<CONFIG>"
 )
+
+# Debug builds turn on NOX_ASSERT / NOX_CORE_ASSERT (NoxCore/Core/core.h). PUBLIC so the editor, the runtime and
+# every header they include from NoxCore agree on it.
+target_compile_definitions(${PROJECT_NAME} PUBLIC $<$<CONFIG:Debug>:NOX_DEBUG>)

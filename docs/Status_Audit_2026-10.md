@@ -14,7 +14,7 @@ for history. File references are to the code as of this audit.
 
 | Area | Bug | Where |
 |---|---|---|
-| Core | **No `NOX_ASSERT` fires in any build**: `NOX_DEBUG` is never defined, so asserts compile out even in Debug (several also pass a string as the condition and could never fire) | `Core/core.h:21` |
+| Core | Fixed 2026-10-20: no `NOX_ASSERT` fired in any build (`NOX_DEBUG` was never defined; several asserts passed a string as the condition). Debug builds now define it; a failed assert logs and breaks only under a debugger | `Core/core.h`, `NoxCore/CMakeLists.txt` |
 | Renderer | **ReSTIR DI** reported broken by the user (cause not found; possibly the 0.2 mm shadow offsets fixed in `e2506eb`); off in every preset, still selectable | `ReSTIRPasses.cpp:477` |
 | Renderer | ReSTIR PT temporal reuse: lighting "rotation" artifact with a static camera; off by default | `EditorLayer.cpp:981` |
 | Renderer | ReSTIR DI / PT assume light indices never change between frames (identity mapping): adding / removing a light corrupts their history for a frame | `RTXDI/DI/ReSTIRDITemporal.slang:110`, `PT/ReSTIRPTTemporal.slang:465` |
@@ -26,7 +26,7 @@ for history. File references are to the code as of this audit.
 | Scripting | Reloading while script jobs (`Nox.Jobs`) run is unsafe: no fence before the assemblies are swapped | `Jobs.cs`, `DotNetBackend.cpp:643` |
 | Scene | `TextComponent` font is neither saved nor loaded (always the default font) | `SceneSerializer.cpp:942, 1843` |
 | Scene | `SerializeRuntime` / `DeserializeRuntime` are empty (return false) | `SceneSerializer.cpp:1188, 1924` |
-| Asset | `MeshImporter::LoadMesh` is a dead stub with no return value (undefined behaviour if anything calls it) | `MeshImporter.cpp:1010` |
+| Asset | Fixed 2026-10-20: `MeshImporter::LoadMesh` was a dead stub with no return value -- removed | `MeshImporter.cpp` |
 | Editor | Ortho camera constants are not unit-scaled (5000 back, far 10000: only 50 m / 100 m in a cm project); sky is flat in ortho | `EditorCamera.h:123` |
 | Editor | Import Scale tooltip says the model is untouched; the scale is baked into the cooked mesh | `ContentBrowserPanel.cpp:493` |
 | Editor | Cancelling the open-project dialog quits the editor (no new-project / folder picker) | `EditorLayer.cpp:164` |

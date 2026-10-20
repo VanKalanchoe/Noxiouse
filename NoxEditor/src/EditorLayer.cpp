@@ -4127,7 +4127,7 @@ namespace Nox
 
     void EditorLayer::OnSceneStop()
     {
-        NOX_CORE_ASSERT("OnSceneStop failed no sceneState match", m_SceneState == SceneState::Play || m_SceneState == SceneState::Simulate);
+        NOX_CORE_ASSERT(m_SceneState == SceneState::Play || m_SceneState == SceneState::Simulate, "OnSceneStop failed no sceneState match");
 
         if (m_SceneState == SceneState::Play)
             m_ActiveScene->OnRuntimeStop();

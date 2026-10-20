@@ -148,10 +148,7 @@ namespace NRI
         if (desc.type == PipelineType::Graphics)
         {
             // Verify we have shader
-            if (desc.shaders.empty())
-            {
-                NOX_CORE_ASSERT("PipelineVK requires a shader stage");
-            }
+            NOX_CORE_ASSERT(!desc.shaders.empty(), "PipelineVK requires a shader stage");
 
             if (useShaderObjects)
             {
@@ -312,10 +309,7 @@ namespace NRI
                     m_shaders = m_deviceVK.getDevice().createShadersEXT(shaderCreateInfos);
                 }
                 
-                if (m_shaders.empty())
-                {
-                    NOX_CORE_ASSERT("PipelineVK::PipelineVK Failed to create Binary and SPIR-V shaders");
-                }
+                NOX_CORE_ASSERT(!m_shaders.empty(), "PipelineVK::PipelineVK Failed to create Binary and SPIR-V shaders");
                 
                 m_stages = g_allGraphicsStages;
                 m_rawShaders.assign(g_allGraphicsStages.size(), vk::ShaderEXT{});
@@ -523,10 +517,7 @@ namespace NRI
         }
   else if (desc.type == PipelineType::Compute)
         {
-            if (desc.shaders.empty())
-            {
-                NOX_CORE_ASSERT("PipelineVK: Compute pipeline requires a shader stage!");
-            }
+            NOX_CORE_ASSERT(!desc.shaders.empty(), "PipelineVK: Compute pipeline requires a shader stage!");
 
             const auto& shaderDesc = desc.shaders[0];
 
@@ -577,10 +568,7 @@ namespace NRI
                     m_shaders = m_deviceVK.getDevice().createShadersEXT({ info });
                 }
 
-                if (m_shaders.empty())
-                {
-                    NOX_CORE_ASSERT("PipelineVK Failed to create compute shader object");
-                }
+                NOX_CORE_ASSERT(!m_shaders.empty(), "PipelineVK Failed to create compute shader object");
 
                 // Compute: Strictly 1 stage, 1 shader handle
                 m_stages = { vk::ShaderStageFlagBits::eCompute };
@@ -618,10 +606,7 @@ namespace NRI
 }
         else if (desc.type == PipelineType::RayTracing)
         {
-            if (desc.shaders.empty())
-            {
-                NOX_CORE_ASSERT("PipelineVK: RayTracing pipeline requires shader stages!");
-            }
+            NOX_CORE_ASSERT(!desc.shaders.empty(), "PipelineVK: RayTracing pipeline requires shader stages!");
 
             std::vector<vk::raii::ShaderModule> shaderModules;
             std::vector<vk::PipelineShaderStageCreateInfo> shaderStageCreateInfos;
@@ -767,8 +752,9 @@ namespace NRI
         case ShaderStage::Callable: return vk::ShaderStageFlagBits::eCallableKHR;
 
         default:
-            NOX_CORE_ASSERT("PipelineVK::translateShaderStage unsupported shader stage passed to Vulkan backend!");
+            NOX_CORE_ASSERT(false, "PipelineVK::translateShaderStage unsupported shader stage passed to Vulkan backend!");
         }
+        return {};
     }
 
     vk::ShaderStageFlagBits PipelineVK::determineNextStage(ShaderStage stage)

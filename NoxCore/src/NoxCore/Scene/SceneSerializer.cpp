@@ -1650,11 +1650,12 @@ namespace Nox
 
                         ScriptFieldInstance& fieldInstance = entityFields[name];
 
-                        // TODO(Yan): turn this assert into Hazelnut log warning
-                        NOX_CORE_ASSERT(fields.find(name) != fields.end(), "field not found");
-
+                        // A field the script no longer has (renamed or removed since the scene was saved): its value is dropped.
                         if (fields.find(name) == fields.end())
+                        {
+                            NOX_CORE_WARN("SceneSerializer: script field '{}' is no longer on the entity's script, its saved value is dropped", name);
                             continue;
+                        }
 
                         fieldInstance.Field = fields.at(name);
 

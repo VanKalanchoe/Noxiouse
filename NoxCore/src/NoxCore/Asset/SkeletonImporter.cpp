@@ -33,7 +33,7 @@ namespace Nox
         bool success = SkeletonSerializer::Deserialize(path, *skeleton);
         if (!success)
         {
-            NOX_CORE_ASSERT(false, "SkeletonImporter::LoadSkeleton - Failed to deserialize .nskel file: {}", path.string());
+            NOX_CORE_ERROR("SkeletonImporter::LoadSkeleton - Failed to deserialize .nskel file: {}", path.string());
             return {};
         }
 

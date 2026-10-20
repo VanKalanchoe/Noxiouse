@@ -56,7 +56,7 @@ namespace Nox
             msdfgen::FontHandle* font = msdfgen::loadFont(ft, fileString.c_str());
             if (!font)
             {
-                NOX_CORE_ASSERT("Failed to load font: {}", fileString);
+                NOX_CORE_ERROR("Failed to load font: {}", fileString);
                 return;
             }
 

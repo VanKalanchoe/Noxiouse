@@ -7,6 +7,10 @@
 #define NOMINMAX
 #include <windows.h>
 #include <psapi.h>
+#elif defined(__linux__)
+#include <cstdlib>
+#include <fstream>
+#include <string>
 #endif
 
 namespace Nox::Platform
@@ -26,5 +30,24 @@ namespace Nox::Platform
         }
 #endif
         return result;
+    }
+
+    bool IsDebuggerAttached()
+    {
+#if defined(_WIN32)
+        return IsDebuggerPresent() != FALSE;
+#elif defined(__linux__)
+        // A process under a debugger has the debugger's pid as its tracer (0 when nothing traces it).
+        std::ifstream status("/proc/self/status");
+        std::string line;
+        while (std::getline(status, line))
+        {
+            if (line.rfind("TracerPid:", 0) == 0)
+                return std::atoi(line.c_str() + 10) != 0;
+        }
+        return false;
+#else
+        return false;
+#endif
     }
 }

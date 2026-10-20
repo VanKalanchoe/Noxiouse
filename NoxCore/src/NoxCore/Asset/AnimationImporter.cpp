@@ -37,7 +37,7 @@ namespace Nox
         bool success = AnimationSerializer::Deserialize(path, *anim);
         if (!success)
         {
-            NOX_CORE_ASSERT(false, "AnimationImporter::LoadAnimation - Failed to deserialize .nanim file: {}", path.string());
+            NOX_CORE_ERROR("AnimationImporter::LoadAnimation - Failed to deserialize .nanim file: {}", path.string());
             return {};
         }
         anim->Notifies = LoadNotifies(path);

@@ -214,7 +214,7 @@ namespace Nox
         s_Instance = this;
 
         m_device = NRI::Device::create(NRI::GraphicsAPI::Vulkan, *m_window);
-        if (!m_device) NOX_CORE_ASSERT("Failed to create NRI device");
+        NOX_CORE_ASSERT(m_device, "Failed to create NRI device");
 
         // Staging for every upload, right after the device: startup already uploads (textures, IBL inputs). A ring on
         // the transfer queue that streamed loads fill over several frames; oversized uploads get their own buffer.
@@ -228,11 +228,6 @@ namespace Nox
 #endif
 
         initRenderer();
-
-        /*
-        bunnyMesh = MeshImporter::LoadMesh(MODEL_PATH_GLTF_STANDFORD);
-        foxMesh = MeshImporter::LoadMesh(MODEL_PATH_FOX_GLTF);
-        */
 
         // Outline
         watchShader("assets/shaders/Outline.slang", "Outline", [this]() { createOutlinePipeline(true); });

@@ -1,4 +1,5 @@
 #include "Log.h"
+#include "core.h"
 
 #include <cstdlib>
 #include <exception>
@@ -56,5 +57,15 @@ namespace Nox
             s_CoreLogger->flush();
             std::abort();
         });
+    }
+
+    namespace Detail
+    {
+        void ReportAssertFailure(bool core, const std::string& message)
+        {
+            const std::shared_ptr<spdlog::logger>& logger = core ? Log::GetCoreLogger() : Log::GetClientLogger();
+            if (logger)
+                logger->error("{}", message);
+        }
     }
 }
