@@ -136,7 +136,8 @@ for history. File references are to the code as of this audit.
 **Import (glTF)**
 - Vertex colors (a new cooked vertex layout: every consumer of `shaderio::Vertex`, RT vertex fetch and the cooked file version
   change together), morph targets, materials variants, extras, several scenes, physics extensions; level import of a skeletal
-  model's clips. (Built 2026-10-20: `EXT_mesh_gpu_instancing` -- one node entity per instance below the node --, and
+  model's clips. (Built 2026-10-20: stale clips -- a re-cook deletes the .nanim files its previous cook wrote and this one did
+  not, from a `<model>.clips` list --, `EXT_mesh_gpu_instancing` -- one node entity per instance below the node --, and
   `KHR_node_visibility` -- hidden nodes and what is below them draw no mesh.)
 
 **Other**

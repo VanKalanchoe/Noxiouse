@@ -7,6 +7,7 @@
 #include <array>
 #include <chrono>
 #include <cstring>
+#include <fstream>
 #include <functional>
 #include <unordered_map>
 #include <unordered_set>
@@ -711,6 +712,41 @@ namespace Nox
         return !out.Meshes.empty();
     }
 
+    // The clips a cook of `cookedBase` wrote, listed in <cookedBase>.clips: the ones a previous cook wrote and this one did not (a clip
+    // renamed or removed in the source, animations turned off) are deleted, so no stale .nanim stays registered next to the model.
+    // A list rather than a name pattern: <model>_*.nanim would also match another model named <model>_Something in the folder.
+    static void ReplaceClipManifest(const std::filesystem::path& cookedBase, const std::vector<std::filesystem::path>& written)
+    {
+        const std::filesystem::path manifest = cookedBase.string() + ".clips";
+        std::unordered_set<std::string> keep;
+        for (const std::filesystem::path& clip : written)
+            keep.insert(clip.filename().string());
+
+        std::error_code error;
+        if (std::ifstream previous(manifest); previous)
+        {
+            std::string name;
+            while (std::getline(previous, name))
+            {
+                // Only names this model writes (a model renamed since keeps the clips its scenes may still use).
+                if (name.empty() || keep.contains(name) || name.find('/') != std::string::npos || name.find('\\') != std::string::npos ||
+                    name.rfind(cookedBase.stem().string() + "_", 0) != 0)
+                    continue;
+                const std::filesystem::path stale = cookedBase.parent_path() / name;
+                if (stale.extension() == ".nanim" && std::filesystem::remove(stale, error))
+                    NOX_CORE_INFO("[Importer] Removed the stale clip {} (no longer in the source)", stale.generic_string());
+            }
+        }
+        if (written.empty())
+        {
+            std::filesystem::remove(manifest, error);
+            return;
+        }
+        std::ofstream out(manifest, std::ios::trunc);
+        for (const std::filesystem::path& clip : written)
+            out << clip.filename().string() << "\n";
+    }
+
     bool MeshImporter::CookMesh(const std::filesystem::path& assetDirectory, const AssetMetadata& metadata)
     {
         const std::filesystem::path cookedPath = assetDirectory / metadata.FilePath;
@@ -802,15 +838,21 @@ namespace Nox
             NOX_CORE_INFO("[Importer] Extracted and cooked Skeleton ({} nodes) to {}", extractedSkeleton.AllNodes.size(), skelPath.string());
         }
 
-        if (!singleMesh && !bakedStatic && importSettings.ImportAnimations)
+        if (!singleMesh && !bakedStatic)
         {
-            for (const Ref<AnimationSequence>& animation : extractedAnimations)
+            std::vector<std::filesystem::path> clips;
+            if (importSettings.ImportAnimations)
             {
-                ApplyAnimationScale(*animation, importSettings.ImportScale);
-                std::filesystem::path animPath = cookedPath.parent_path() / (cookedPath.stem().string() + "_" + animation->Name + ".nanim");
-                AnimationSerializer::Serialize(animPath, *animation);
-                NOX_CORE_INFO("[Importer] Extracted and cooked Animation Sequence '{}' to {}", animation->Name, animPath.string());
+                for (const Ref<AnimationSequence>& animation : extractedAnimations)
+                {
+                    ApplyAnimationScale(*animation, importSettings.ImportScale);
+                    std::filesystem::path animPath = cookedPath.parent_path() / (cookedPath.stem().string() + "_" + animation->Name + ".nanim");
+                    AnimationSerializer::Serialize(animPath, *animation);
+                    clips.push_back(animPath);
+                    NOX_CORE_INFO("[Importer] Extracted and cooked Animation Sequence '{}' to {}", animation->Name, animPath.string());
+                }
             }
+            ReplaceClipManifest(cookedPath, clips);
         }
 
         WriteMaterials(assetDirectory, importSettings.MaterialBasePath.empty() ? metadata.FilePath : importSettings.MaterialBasePath, subset);
@@ -923,6 +965,7 @@ namespace Nox
                 skelPath.replace_extension(".nskel");
                 SkeletonSerializer::Serialize(skelPath, extractedSkeleton);
             }
+            std::vector<std::filesystem::path> clips;
             if (wholeFile.MeshSettings.ImportAnimations)
             {
                 for (const Ref<AnimationSequence>& animation : extractedAnimations)
@@ -930,8 +973,10 @@ namespace Nox
                     ApplyAnimationScale(*animation, scale);
                     const std::filesystem::path animPath = base.parent_path() / (base.stem().string() + "_" + animation->Name + ".nanim");
                     AnimationSerializer::Serialize(animPath, *animation);
+                    clips.push_back(animPath);
                 }
             }
+            ReplaceClipManifest(base, clips);
         }
         // Import Into Level: the file's node animations (Bistro's fans, a door) go with the level, named after the whole-file
         // base path like a skeletal model's clips.
