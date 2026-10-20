@@ -1,6 +1,9 @@
 # NoxEngine: Animation Graph & Character Movement Architecture Plan (2026)
 
 > **Document Version:** 1.0 (September 2026)
+> **Status 2026-10-20:** steps 1-7 built (§5, §8); step 8 (audio graph) future. Import stages A and B done; Stage C, the
+> prefab asset, is built (`Prefab_Architecture_Plan_2026.md`, `Scene/Prefab.h`, `Scene/PrefabInstance.cpp`); outliner
+> folders are built (`FolderComponent`, end of §7).
 > **Scope:** a reusable, editor-authored node-graph framework (state machine + blend space), first applied to
 > character animation, with a physics-driven character controller so a character can be walked around with
 > real movement and blended animation.
@@ -126,24 +129,25 @@ performance measurement). The points that matter most for this plan:
   creation, deletion, save, live recompile, asset picker). Backed by `INodeGraphCanvasBackend` so the canvas
   library is swappable.
 
-- [~] **Step 4 — Double-click asset workflow.** Code complete, syntax-checked; needs a rebuild + test.
+- [x] **Step 4 — Double-click asset workflow.** Built (status 2026-10-20, see §8; no separate test entry was recorded).
   `AssetType → open-function` registry on `EditorLayer` (`m_AssetOpeners`, `OpenAsset(handle)`); Content
   Browser double-click and the Animator's Graph field double-click both call it; "New Animation Graph"
   creates + registers a graph. (Graph mode lives on `AnimatorComponent`, so there's no separate component
   inspector block -- see Step 2's correction.)
   **Test:** full create → assign → edit → play loop, no manual file editing needed.
 
-- [~] **Step 5 — Parameters + script binding.** Code complete; C++ syntax-checked, the C# side (not compiled by
-  me) needs a build. Parameters panel in the graph editor, a `GetParameter` node, and
+- [x] **Step 5 — Parameters + script binding.** Built (status 2026-10-20, see §8; used since by `CharacterMovement.cs`,
+  which drives the Fox's `Speed` parameter). Parameters panel in the graph editor, a `GetParameter` node, and
   `Nox.AnimatorComponent.SetFloat/GetFloat/SetBool/GetBool` for scripts.
   **Test:** a script drives a parameter, the blend responds live.
 
-- [~] **Step 6 — Character controller.**
+- [x] **Step 6 — Character controller.** Built (status 2026-10-20, see §8 and "Movement feel" in §7).
   `CharacterController3DComponent` on `JPH::CharacterVirtual` (per Jolt's own sample), a movement script
   feeding Speed/IsGrounded/MoveDirection into the graph's parameters.
   **Test:** walk a physics character around the level, idle/walk/run blending live from real movement.
 
-- [~] **Step 7 — State Machine node.** (7a runtime + file format tested with the Fox; 7b/7c editor built 2026-09-25, untested)
+- [x] **Step 7 — State Machine node.** Built: 7a runtime + file format tested with the Fox; 7b/7c editor confirmed opening and
+  editing (§8); rule / blend behaviour in Play still to be checked by the user.
   Nested sub-graphs per state, transitions with conditions/blend duration/curve, breadcrumb editing.
   **Test:** Idle↔Walk↔Run↔Jump state machine driven by real movement, smooth blended transitions.
 
@@ -608,7 +612,7 @@ performance measurement). The points that matter most for this plan:
     needs a `Speed` parameter; `Fox_WalkRun` has it), with a static box collider floor; Play; walk/run/jump. Tune
     `ModelYawOffset` if the Fox faces the wrong way. C# is not compiled by me -- rebuild the script projects.
 
-## 7. Import & scene restructure -- UE5 style (Stage A done, Stage B mostly done, Stage C open -- see "Status and backlog" at the end)
+## 7. Import & scene restructure -- UE5 style (Stage A done, Stage B done -- see "Stage B completion" --, Stage C built as the prefab plan -- see "Status and backlog" at the end)
 
 Trigger: with Step 6 the Fox exposed that the current model spawn puts the Animator on an internal glTF node that is
 never saved. Survey: a glTF becomes one `.nmesh` (all submeshes + node table) -> `ModelInstanceComponent` root ->
@@ -635,7 +639,7 @@ UE Level Instances / Packed Level Actors cover "a group of things placed as one"
 Open decisions (asked of the user before Stage A starts): (1) Stage B keeps `ModelInstance` as the prefab mechanism vs
 a new saved-entities prefab asset (would put Bistro back to ~6000 saved entities); (2) where the import options
 live: the existing MeshSource import dialog (double-click a `.gltf` in the Content Browser).
-- [ ] **Stage C -- Prefab asset (planned 2026-09-26, see `Prefab_Architecture_Plan_2026.md`).** A saved template of authored entities + components (door with collider/script,
+- [x] **Stage C -- Prefab asset (planned 2026-09-26, built: P1-P6c in `Prefab_Architecture_Plan_2026.md`).** A saved template of authored entities + components (door with collider/script,
   enemy with weapon), instanced in scenes with overrides. Complements `ModelInstance` (imported-file expansion):
   prefabs may reference model instances instead of expanding them, so big imports never become thousands of saved
   entities.
@@ -752,17 +756,19 @@ live: the existing MeshSource import dialog (double-click a `.gltf` in the Conte
 **UE5-style import/scene restructure (section 7)**
 - **Stage A (skeletal mesh as ONE entity):** DONE. A skinned model drops in as a single entity with Mesh + Animator; import splits by content (`.nmesh` skeletal + `.nskel` + `.nanim`, `.nsmesh` static); `MeshImportSettings` (import static / skeletal / animations, import scale).
 - **Stage B (static / scene models):** MOSTLY DONE. Built: static combine modes (do not combine / visible / all), skeletal combine modes, per-mesh assets for Do Not Combine (one `.nsmesh` per mesh in the import folder, shared materials), multi-select in the Content Browser and multi-drag placing every mesh at its file position (`FileLayoutParent` nodes + `AtFileLayout`), import progress bar, path index + batched registry writes for big imports. STILL OPEN: (1) UE's "content type" option (geometry + skin weights / geometry only / skin weights only); (2) per-mesh assets for skinned meshes (skeletal "do not combine": one asset per skinned mesh sharing the skeleton); (3) `ModelInstance` internals collapsed by default with viewport picks resolving to the root ("Editable Children" toggle) -- planned in Stage B, not built; (4) cosmetic rename `Mesh`/`.nmesh` -> `SkeletalMesh`/`.nskmesh` (the legacy unused `SkeletalMesh` asset type is the same idea); (5) the layout scene for Do Not Combine was tried and removed by decision (Unreal's Content Browser import makes only assets).
-- **Stage C (prefab asset):** OPEN, later. A saved template of authored entities + components with per-instance overrides; may reference `ModelInstance`s instead of expanding them, so big imports never become thousands of saved entities.
+- **Stage C (prefab asset):** ~~OPEN, later.~~ **Built** (status 2026-10-20): `.nprefab` assets with instances, property and
+  structure overrides, nested prefabs and variants, `Prefab_Architecture_Plan_2026.md` P1-P6c. Original note: A saved template of authored entities + components with per-instance overrides; may reference `ModelInstance`s instead of expanding them, so big imports never become thousands of saved entities.
 
 **Backlog / possible next steps (not started unless stated)**
 1. **Character polish:** a jump/fall state using `IsGrounded` (the Fox has no jump clip); a late-update phase for scripts (the follow camera has a constant one-frame lag because scripts run before physics); physics render interpolation for rigid bodies (characters already interpolate); Stats overlay columns after long-running Peak values (reported broken-looking after the resize-loop fix; cause not confirmed).
 2. **Step 8, audio graph:** a second node-graph domain reusing the core and editor panel unchanged (proves the "reusable graph compiler" goal).
-3. **Stage C prefab asset** (above). Also open: **outliner folders** (group entities in the hierarchy like UE, e.g. after a multi-drag of Bistro pieces).
+3. ~~**Stage C prefab asset** (above). Also open: **outliner folders**~~ Both built (status 2026-10-20): the prefab asset (above)
+   and outliner folders (`FolderComponent`, "Outliner folders" at the end of §7).
 4. **Engine roadmap Phase 6b (Engine_Architecture_Plan_2026.md, §5.7/5.9/5.14): geometry streaming and LOD:** cluster DAG cook (meshoptimizer `clodBuild`), GPU cut selection, page streaming pool, coarse RT fallback LOD; exit: geometry exceeding the geometry budget renders with streaming, no popping beyond threshold. Its step-by-step plan is in `C:\Users\YA\.claude\plans\swift-sauteeing-puzzle.md` (6b-1 cluster DAG cook + GPU cut, 6b-2 RT fallback LOD, 6b-3 cluster pages, 6b-4 page streaming).
 5. **Known leftovers from this session:** the Fox's `Speed` thresholds in `Fox_Locomotion` assume walk 2 / run 5 m/s; skeletal meshes with several skins or unskinned meshes next to the skin still spawn as nodes (not the single-entity path); DoNotCombine drops the file's lights, cameras and node animations (they lived with the whole-file asset).
 
 ### Stage B completion (2026-09-25, untested)
-- **Collapsed model internals: REVERTED by decision (2026-09-25).** Hiding a model instance's node entities and making viewport clicks select the root made pieces uninteractive (Bistro, Do Not Combine). Rule now, like Unreal: whatever is drawn is selectable in the viewport and listed in the hierarchy. A combined import is one piece (selecting it selects that piece); Do Not Combine gives every piece its own selectable entity. Organizing many entities is the job of **folders** in the hierarchy (UE's outliner folders) -- open backlog item, not built.
+- **Collapsed model internals: REVERTED by decision (2026-09-25).** Hiding a model instance's node entities and making viewport clicks select the root made pieces uninteractive (Bistro, Do Not Combine). Rule now, like Unreal: whatever is drawn is selectable in the viewport and listed in the hierarchy. A combined import is one piece (selecting it selects that piece); Do Not Combine gives every piece its own selectable entity. Organizing many entities is the job of **folders** in the hierarchy (UE's outliner folders) -- open backlog item, not built. (Built later the same day: "Outliner folders" below.)
 - **Per-mesh skeletal assets:** `Combine Skeletal Meshes = Do Not Combine` with two or more skinned glTF meshes runs the same split job for skinned meshes (`CookSplitMeshes(..., skinned)`): one `.nmesh` per skinned mesh (`.nmesh`, source mesh index recorded), the skeleton `.nskel` and clips `.nanim` written once next to them named after the import, materials shared; `LinkImportedAssets` finds them through `MaterialBasePath`, so each per-mesh skeletal asset still becomes a single animated entity on drop. One skinned mesh stays a single asset.
 - **Content type:** `MeshImportSettings::ImportSkinWeights` (dialog "Import Skin Weights"): off = Unreal's Geometry Only, skinned meshes are imported as static geometry (no skeleton / clips from them). Unreal's third option, Skin Weights Only, is not offered: it applies weights to an existing mesh and this engine has no such import.
 - **Not done, by decision:** renaming `Mesh` / `.nmesh` to `SkeletalMesh` / `.nskmesh` (cosmetic, touches the renderer's `Mesh` class everywhere; `.nmesh` already means "skeletal mesh" after the content split).
@@ -783,7 +789,7 @@ Unreal has two actions: the Content Browser import (assets only: flat, no lights
 3. Combining static meshes drops the file's node structure, lights, cameras and node animations by design.
 4. ~~Skeletal "Do Not Combine" has no level placement~~ **Built 2026-09-26, untested:** the static and skinned cook jobs of one Import Into Level share a `LevelGroup` (`EditorAssetManager`); each adds its per-mesh assets (one `MeshAssets` map, glTF mesh index -> handle) and the level is placed when the last job finishes. `SpawnLevel` puts a per-mesh skeletal asset on every skinned node that has one.
 5. Not-yet-handled glTF features: morph targets, vertex colors, `EXT_mesh_gpu_instancing`, `KHR_node_visibility`, `KHR_materials_variants`, extras, multiple scenes, physics extensions.
-6. Outliner folders (group flat entities, like UE's outliner folders).
+6. ~~Outliner folders (group flat entities, like UE's outliner folders).~~ Built 2026-09-25, see "Outliner folders" below.
 
 ### Outliner folders (2026-09-25, untested)
 Like Unreal's: a folder is NOT an entity. `FolderComponent { Path }` ("Bistro/Props", '/' nests) on an entity only groups rows in the Scene Hierarchy panel; no transform, no parenting. `Scene::GetFolders/AddFolder/RemoveFolder/RenameFolder` keep the folders the user made (empty ones included), saved as `Folders:` in the `.nox` (entities carry `FolderComponent`). Panel: folders draw first (`DrawFolderNode`), then the loose top-level entities; right-click blank space or a folder -> New Folder; folder menu: New Folder (nested), Rename (moves subfolders and entities with it), Select Contents, Delete Folder (unfiles the entities, deletes none); dragging entities (or the whole selection) onto a folder files them (and unparents them: a folder holds top-level entities); dropping on blank space unfiles. Multi-drag from the Content Browser no longer creates a "Placed Assets" group entity: like Unreal, the pieces land at the top level, each root offset to the drop point and flattened into plain mesh entities (`ModelInstance::spawn` copies a root's folder to the pieces).

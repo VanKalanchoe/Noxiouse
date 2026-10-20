@@ -6,8 +6,11 @@
 > **Target API:** Vulkan 1.4 through NRI — full extension/feature/shader baseline in §3 (Renderer Technology Baseline)
 > **Companion documents:**
 > - `docs/RayTracing_Architecture_Plan_2026.md` — lighting, GI, denoising, RTXDI/NRD/DLSS (unchanged by this plan)
-> - `architecture.md` — earlier NRI / RenderGraph / TaskGraph proposals (v2/v3) and the completed
->   visibility-buffer migration record. Where this document differs, this document wins (see §5.4.6).
+> - `architecture.md` — the NRI, render graph and job system as built (rewritten 2026-10-20; its §7 summarizes the
+>   earlier v2/v3 proposals). Where an older proposal differs, this document wins (see §5.4.9).
+> **Status 2026-10-20:** phases 0-5 and 6a built; 6b-1 (cluster DAG + GPU cut) built, 6b page streaming paused, the RT
+> fallback LOD reverted; 6c and 7 not started. D9 decided and built (§7). From §9: skinned BLAS, BLAS compaction and extra
+> views are built. §3b is the snapshot from before this plan.
 > **Industry references:** Unreal Engine 5 (Tasks System, RDG, GPU Scene, Nanite, Virtual Textures,
 > Texture Streaming, World Partition, IoStore/Zen loader), Frostbite (FrameGraph), id Tech (job system).
 
@@ -59,7 +62,8 @@
 
 ### Non-Goals (for this plan)
 - Multiple graphics APIs. NRI keeps the abstraction boundary, but only the Vulkan backend is in scope.
-- Networking, audio, scripting runtime, physics beyond the existing Box2D integration.
+- Networking, audio, scripting runtime, physics beyond the existing Box2D integration. (Since then, outside this plan:
+  Jolt 3D physics and C# scripting through Coral; see `PROJECT_CONTEXT.md`.)
 - Replacing the lighting/GI architecture — this plan provides the scene, memory and scheduling
   foundations that architecture runs on.
 
@@ -113,6 +117,8 @@ Source of truth: `NoxCore/src/NRI/Vulkan/DeviceVK.cpp` (`requiredDeviceExtension
 - Memory: **Vulkan Memory Allocator** (VMA, dynamic Vulkan functions) behind NRI.
 - **Queues: one combined graphics + compute + present queue** (single queue family, one queue). Async
   compute and dedicated transfer queues are not used yet (Open Decision D6).
+  **Status 2026-10-20:** a transfer queue for uploads exists since Phase 5a (D6, §5.11.6): a dedicated queue family
+  when the GPU has one, else the graphics queue (`DeviceVK`). Async compute is still not used.
 
 ### 3.2 Device extensions (all required unless noted)
 | Extension | What we use it for | What it simplifies / architectural consequence |
@@ -175,6 +181,11 @@ Not enabled yet; each is added to §3.1–3.3 when implemented.
 ---
 
 ## 3b. Current State Snapshot (September 2026)
+
+> **Pre-plan snapshot.** This section records the engine as it was *before* this plan's phases, as the baseline they were
+> measured against. Most limits in §3b.2 have been removed since (task system, render graph, GPU scene and culling, unified
+> geometry, async loading, texture streaming, profiler, BLAS compaction). For the current state see the phase tables in §5,
+> the roadmap in §6 and `PROJECT_CONTEXT.md`.
 
 ### 3b.1 What exists and works
 | Area | State |
@@ -746,6 +757,11 @@ position/normal cache for opaque and masked skinned instances. Visibility and G-
 cache, and the previous ring slot supplies skeletal motion vectors. Stage 2 remains the per-instance animated BLAS
 update/refit that makes ray queries see the deformed pose.
 
+**Status 2026-10-20: Stage 2 is built.** Each ray-traced skinned instance has its own BLAS (`AnimatedBLAS` in
+`Renderer.h`), rebuilt or refit from the compute-skinned vertices in the "Animated BLAS Update" pass
+(`Renderer::addAnimatedBLASPass`, `Renderer/Passes/RasterPasses.cpp`), right after "Compute Skinning" and before the TLAS
+build.
+
 #### 5.5.4 Implementation (Phase 3, September 2026)
 Decisions: culling per view (N-view infrastructure; a second fully rendered viewport later with per-view graph passes),
 per-object motion vectors (previous world matrix), mesh-shader skinning kept (compute skinning §5.5.3 later), meshlet
@@ -1096,6 +1112,12 @@ Baseline before 6a: every texture is resident at full resolution once loaded -- 
 - **Memory:** RT category budget; eviction of BLAS for far/invisible meshes, rebuild on demand.
 - Lighting/GI features and their arbitration remain defined by the RT plan.
 
+**Status 2026-10-20:** BLAS **compaction** is built: a frame's BLAS builds write their compacted sizes into a per-frame-slot
+query pool; once that slot is done the compacted structures are created, the next "BLAS Build" pass copies each BLAS into
+its compacted one and the old one goes to the deferred release (`BlasCompaction` in `Renderer.h`,
+`Renderer::readBlasCompactedSizes`). Skinned meshes get per-instance BLAS refit (§5.5.3). Not built: RT-specific TLAS
+culling, BLAS eviction, the RT category budget.
+
 ### 5.15 Asset Lifetime (Garbage Collection)
 
 Implemented this session (editor): mark from live scenes (meshes → materials → textures, animations,
@@ -1151,7 +1173,7 @@ Phases 1, 2 and 3 are architecture-defining and each gets its own plan-mode desi
 | D6 | Additional queues (**transfer decided**) | ~~one combined graphics/compute queue~~ · **dedicated transfer queue for uploads (Phase 5a, §5.11.6)** · async compute queue(s) for culling/RT/denoising still open | Transfer: multi-queue device creation, queue-family detection, timeline semaphores and per-queue command pools in NRI; concurrent sharing instead of ownership transfers |
 | D7 | IO backend | IoRing/overlapped IO vs DirectStorage | DirectStorage enables GPU decompression |
 | D8 | RT geometry LOD policy | ~~dedicated coarse RT LOD~~ (tried in 6b-2, reverted: holes in the path tracer, shadows lost to ray offsets) · RT from the same clusters as raster: cluster acceleration structures per frame (nvpro-samples vk_lod_clusters, `VK_NV_cluster_acceleration_structure`, NVIDIA only for now) | Until then ray tracing uses the original clusters (resident, full detail) |
-| D9 | Editor vs runtime asset managers | split now vs after async loading | runtime needs containers + handle-based refs |
+| D9 | ~~Editor vs runtime asset managers~~ **Decided and built** | **One loading pipeline, two modes:** `RuntimeAssetManager` is `EditorAssetManager` in read-only mode (no file watcher, reimports, registry writes or recooks); engine code uses read-only lookups on `AssetManagerBase`; a packaged game reads through `VirtualFileSystem` (`.npak`) | Decided and built October 2026 (`docs/Runtime_And_Packaging_Plan_2026-10.md` R2, R4) |
 | D10 | Budgets & targets | per-category VRAM shares, frame-time targets per reference scene | set after Phase 0 baselines |
 | D11 | ~~ECS parallelism~~ **Decided** | **Declared system read/write sets** (`ComponentAccess` + `SystemGraph`, §5.2.6) | Decided September 2026 (Phase 1) |
 | D12 | Scene file format | per-cell YAML vs binary cooked cells with YAML for editing | version control friendliness |
@@ -1190,8 +1212,8 @@ and what it needs; pick one up whenever its trigger is reached or it blocks some
 
 | Item | From | Why it waited | What it needs | Pick up when |
 |---|---|---|---|---|
-| **Animated skinned BLAS** (§5.5.3) | Phase 3 | Compute skinning Stage 1 now writes per-instance current/previous position-normal caches and raster consumes them; capture verification is pending. | Give each ray-traced skinned instance dynamic BLAS state and update/refit it from the current compute-skinned range after the skinning pass. | Stage 1 is verified and its measured cost/reuse benefit is acceptable. |
-| **A second real view** (§5.6) | Phase 3 | Culling and draws are per view already (`CullView`, `ViewDrawResources`, parameterised passes), but only the camera view is instantiated; the frozen culling view is a flag on that same view. | A second `CullView` with its own draw resources and graph passes, driven by its first real consumer. | A shadow-map view, a game-camera preview viewport, or reflection/probe capture needs its own culled draws. |
+| ~~**Animated skinned BLAS**~~ **Built** (§5.5.3, status 2026-10-20) | Phase 3 | Compute skinning Stage 1 now writes per-instance current/previous position-normal caches and raster consumes them; capture verification is pending. | Give each ray-traced skinned instance dynamic BLAS state and update/refit it from the current compute-skinned range after the skinning pass. | Stage 1 is verified and its measured cost/reuse benefit is acceptable. |
+| ~~**A second real view**~~ **Built** (status 2026-10-20: the editor's extra views, up to 7 -- 4 viewports, thumbnails, material and animation previews -- each with its own culling, forward, post and overlay passes, `Renderer::SubmitExtraView`, `Renderer/Passes/ExtraViewPasses.cpp`; raster only) (§5.6) | Phase 3 | Culling and draws are per view already (`CullView`, `ViewDrawResources`, parameterised passes), but only the camera view is instantiated; the frozen culling view is a flag on that same view. | A second `CullView` with its own draw resources and graph passes, driven by its first real consumer. | A shadow-map view, a game-camera preview viewport, or reflection/probe capture needs its own culled draws. |
 | **Geometry stream sizing** (§5.8.2) | Phase 4 | Streams start at the old page sizes and double; Bistro holds 259 MB committed for 154 MB used, which is 18 % of the geometry budget, so there is no pressure. | Initial capacities from the geometry category budget, or a trim to the used size after a load (one copy at a load boundary). | Geometry committed approaches its budget, or a scene loads with many grow-and-copy steps. |
 
 ### Viewport resize loop / camera jitter (2026-09-25)

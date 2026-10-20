@@ -3,7 +3,11 @@
 > Future.md items 7 (runtime asset manager + runtime project, to test without the editor's overhead), 8 (how do we package
 > a distribution build -- a PCH? how do modern engines do it?) and 11 (a Minecraft-style game: script or C++, and what to
 > expose). Closes Engine plan open decision **D9 "Editor vs runtime asset managers"** and prefab backlog item **P6**
-> (exported games need their own prefab lookup). Nothing here is built yet.
+> (exported games need their own prefab lookup).
+>
+> Status 2026-10-20: **R1-R7 built, all untested** (sections 2b-2e), and section 4b (run-time meshes, jobs, mesh
+> colliders and raycasts for scripts, untested). Not done: pack compression, a binary registry, an installer. Section 1
+> describes the code as it was on 2026-10-18, before any of it.
 
 ## 1. Where it stands (checked in code, 2026-10-18)
 

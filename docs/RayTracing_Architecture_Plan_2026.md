@@ -1,10 +1,11 @@
 # NoxEngine: Modern Ray Tracing & Lighting Architecture Plan (2026)
 
 > **Document Version:** 6.0 (Dual-Track GI Architecture: DDGI vs ReSTIR GI & RTXDI Integration — March 2026)  
-> **Target API:** Vulkan 1.3 / 1.4 (`VK_KHR_ray_query`, `VK_KHR_acceleration_structure`, `VK_KHR_ray_tracing_pipeline`, `VK_EXT_descriptor_buffer`, `VK_EXT_shader_object`)  
+> **Target API:** Vulkan 1.4 (`VK_KHR_ray_query`, `VK_KHR_acceleration_structure`, `VK_KHR_ray_tracing_pipeline`, `VK_EXT_descriptor_heap`, `VK_EXT_shader_object`)  
 > **Shading Language:** Slang (SPIR-V Target)  
 > **Orchestration & Denoising Framework:** NVIDIA Streamline (SL) + DLSS 3.5 / DLSS-RR + Standalone NRD  
 > **Industry Benchmarks:** Unreal Engine 5.4 (Lumen & MegaLights), Cyberpunk 2077 (REDengine 4 RT Overdrive), NVIDIA RTX SDKs (RTXPT, RTXDI, RTXGI)  
+> **Status 2026-10-20:** phases 1-5 built, ReSTIR DI / ReSTIR PT from phase 6 and RTAO from phase 7 built, plus screen-probe GI (diffuse GI mode 3) and 23 debug views (0-22). Not built: LTC area lights, volumetric froxels, Reflex (phase 8). The progress table in §6 is current; the phase texts in §5 are the original plan with status notes. The path tracer is now the ray tracing pipeline in `NoxEditor/assets/shaders/PathTracer/*.slang`; where the text says `PathTracer.slang`, that is the earlier version, which no pipeline compiles any more.  
 
 ---
 
@@ -163,14 +164,15 @@ To achieve optimal visual fidelity across all hardware platforms and rendering p
    - **Mode 0 (Off)**: Deferred lighting uses environment cubemap `irradianceMap`.
    - **Mode 1 (DDGI Probes)**: Evaluates 3D probe field. Zero denoiser overhead.
    - **Mode 2 (RTXDI ReSTIR GI)**: Evaluates 1-ray-per-pixel screen-space path resampling + NRD/DLSS-RR denoising.
+   - **Mode 3 (Screen probes)**: added later (status 2026-10-20): screen-space probes placed per tile, traced, filtered and integrated (`ScreenProbe*.slang`, `Renderer::addScreenProbeGIPasses`).
 4. **Path Tracing Overrides**:
    - Activating full Path Tracing (`m_pathTracingEnabled = true`) automatically disables G-Buffer hybrid ray tracing passes (RT Shadows, RT Reflections, NRD SIGMA, NRD REBLUR, DDGI).
 
 ---
 
-## 4. Viewport Visual Debug View Modes (0 - 19)
+## 4. Viewport Visual Debug View Modes (0 - 22)
 
-NoxEngine provides 20 interactive debug view modes selectable in the Viewport Toolbar:
+NoxEngine provides 23 interactive debug view modes, selectable in the editor's "PBR Debug View" combo (`EditorLayer.cpp`). Modes 0-19 are listed below; added since (status 2026-10-20): **20** texture streaming mips (red: needs more, green: as needed, blue: more than needed), **21** cluster LOD level, **22** ambient occlusion (SSAO / RTAO). Mode 16 now covers screen probes, DDGI and ReSTIR GI; modes 18-19 come from the ray tracing pipeline path tracer (`PathTracer/*.slang`).
 
 | Mode ID | Visual Mode Name | Target Shader Pass | Visual Output Description |
 | :---: | :--- | :--- | :--- |
@@ -237,7 +239,8 @@ NoxEngine provides 20 interactive debug view modes selectable in the Viewport To
 - Strict runtime arbitration UI toggle (mutually exclusive with DLSS-RR).
 - Physically correct specular Fresnel blending in `DeferredLighting.slang` (preserving 96% dielectric albedo on foliage and 100% metal reflections).
 
-### Phase 5: Dual-Track Indirect Diffuse GI (DDGI Probes vs RTXDI ReSTIR GI) 🚀 IN PROGRESS
+### Phase 5: Dual-Track Indirect Diffuse GI (DDGI Probes vs RTXDI ReSTIR GI) ✅ COMPLETED
+- **Status 2026-10-20:** both tracks built, and a third GI method (screen probes, mode 3). ReSTIR GI: `RTXDI/GI/ReSTIRGIInitial.slang`, `ReSTIRGITemporal.slang`, `ReSTIRGISpatial.slang`, passes "ReSTIR GI Initial / Temporal / Spatial" + "NRD GI" in `Renderer/Passes/ReSTIRPasses.cpp`; the file names below are the original plan's.
 - **Objective**: Implement real-time multi-bounce diffuse indirect illumination with a runtime toggle between **3D Octahedral Probe Fields (DDGI)** and **Screen-Space Ray Resampling (RTXDI ReSTIR GI)** to benchmark graphics, VRAM, and performance.
 - **Track A: Dynamic Diffuse Global Illumination (DDGI Probes)**: ✅ COMPLETED
   1. Complete DDGI shader suite created:
@@ -253,7 +256,7 @@ NoxEngine provides 20 interactive debug view modes selectable in the Viewport To
      - **Mode 17**: DDGI Probe Grid Spheres (Reverse-Z depth tested in Forward 3D Pass).
   4. Interactive Editor Controls:
      - Real-time sliders for Grid Origin, Grid Spacing, Temporal Hysteresis, Normal Bias, Debug Sphere Radius, and "Reset DDGI History" button.
-- **Track B: RTXDI ReSTIR GI (Screen-Space Path Resampling)**: 🚀 NEXT UP
+- **Track B: RTXDI ReSTIR GI (Screen-Space Path Resampling)**: ✅ COMPLETED (see the status line above)
   - **Integration Reference**: [`Doc/Integration.md`](https://github.com/NVIDIA-RTX/RTXDI/blob/main/Doc/Integration.md)
   1. Allocate RTXDI GI Context and reservoir textures (`m_restirGIReservoirs`, `m_restirGIRadiance`, `m_restirGIWeights`).
   2. Trace 1 indirect diffuse ray per screen pixel from primary G-Buffer hit points (`ReSTIRGIInitial.slang`) to discover secondary hit surface data.
@@ -264,6 +267,7 @@ NoxEngine provides 20 interactive debug view modes selectable in the Viewport To
   - Side-by-side performance profiling (ms/frame, VRAM consumption, visual comparison).
 
 ### Phase 6: Many-Light Direct Illumination & Path Resampling via RTXDI v3.1.0 (ReSTIR DI & ReSTIR PT)
+- **Status 2026-10-20: mostly built.** ReSTIR DI for the deferred renderer (direct lighting mode 1, `Renderer::setDirectLightingMode`): light PDF + presampling (RIS and ReGIR), initial, temporal, spatial and final shading passes (`RTXDI/Presampling/*`, `RTXDI/DI/*`) with NRD. Path tracer: RTXDI light sampling (`setPathTracerUsesRTXDI`) and ReSTIR PT (`RTXDI/PT/ReSTIRPTInitial/Temporal/FinalShading.slang`, `setReSTIRPTEnabled`). Rect and disc area lights exist (`RectLightComponent`, `DiscLightComponent`, shaded in `PBRLighting.slang`) but not through LTC: **LTC is not built.**
 - **Objective**: Scale direct lighting to thousands of dynamic shadow-casting lights (punctual, directional, emissive triangles, and area lights) at 1-ray-per-pixel across both the Hybrid Deferred Renderer and the Path Tracer, plus multi-bounce path resampling (ReSTIR PT / GRIS).
 - **Reference**: [RTXDI Integration Guide: ReSTIR DI & ReSTIR PT](https://github.com/NVIDIA-RTX/RTXDI/blob/main/Doc/Integration.md)
 - **Components**:
@@ -280,6 +284,7 @@ NoxEngine provides 20 interactive debug view modes selectable in the Viewport To
      - Rapid convergence for indirect bounces and caustic paths in the interactive path tracer.
 
 ### Phase 7: Ray-Traced Ambient Occlusion (RTAO) & Volumetric Froxels
+- **Status 2026-10-20: RTAO built, froxels not.** `RTAO.slang` traces the same hemisphere kernel as `SSAO.slang` (radius and power mean the same) and writes the same target, denoised by `SSAOBlur.slang`; SSAO and RTAO are alternatives (`setSSAOEnabled` / `setRTAOEnabled`), it did not replace SSAO. Volumetric froxel lighting is not built (the procedural sky has height fog and an aerial perspective LUT, which are not froxel volumes).
 - **Objective**: Physical contact darkening and atmospheric light shafts.
 - **Tasks**:
   1. RTAO 1-spp cosine-weighted hemisphere ray query ($d \le 3.0\text{m}$) replacing SSAO.
@@ -298,6 +303,8 @@ NoxEngine provides 20 interactive debug view modes selectable in the Viewport To
 
 ## 6. Current Implementation Progress Checkpoint
 
+Status 2026-10-20 (checked against `Renderer/Passes/*.cpp` and `NoxEditor/assets/shaders/`).
+
 | Feature / Phase | Technology | Status |
 | :--- | :--- | :---: |
 | **Meshlet Rasterization** | `VK_EXT_mesh_shader` + Task Shader | ✅ Complete |
@@ -312,8 +319,10 @@ NoxEngine provides 20 interactive debug view modes selectable in the Viewport To
 | **RTXPT Microfacet Multi-Lobe BSDF** | GGX VNDF, Metals, Roughness, Tangent Normals, Glass Transmission | ✅ Complete (Phase 3.5) |
 | **Standalone NRD SIGMA** | `RayTracingDenoiser` Shadow Mask Penumbra Hardening | ✅ Complete (Phase 4) |
 | **NRD REBLUR / RELAX & Auto-Arbitration** | Specular Reflections Denoising (Decoupled 1-SPP Pass) | ✅ Complete (Phase 4.5) |
-| **Dual-Track Indirect Diffuse GI** | **DDGI Probes vs RTXDI ReSTIR GI (Hybrid Renderer Switch)** | 🚀 **NEXT UP (Phase 5)** |
-| **Many-Light RTXDI & Area Lights** | **ReSTIR DI (Deferred + Path Tracer) + ReSTIR PT + LTC Area Lights**| ⏳ Phase 6 |
-| **RTAO & Volumetric Froxels** | 3D Frustum Grid + Ray Query Occlusion | ⏳ Phase 7 |
+| **Dual-Track Indirect Diffuse GI** | DDGI Probes, RTXDI ReSTIR GI, Screen Probes (GI modes 1-3) | ✅ Complete (Phase 5) |
+| **Many-Light RTXDI** | ReSTIR DI (deferred) + RTXDI light sampling and ReSTIR PT in the path tracer | ✅ Complete (Phase 6) |
+| **Area Lights via LTC** | LTC LUTs for rect / disc lights (rect / disc lights exist without LTC) | ⏳ Not started |
+| **RTAO** | Ray query hemisphere occlusion, alternative to SSAO | ✅ Complete (Phase 7) |
+| **Volumetric Froxels** | 3D Frustum Grid + in-scattering | ⏳ Not started (Phase 7) |
 | **NVIDIA Reflex Low-Latency** | `sl.reflex` + PCL Markers + Refresh Synchronization | ⏳ Phase 8 |
 

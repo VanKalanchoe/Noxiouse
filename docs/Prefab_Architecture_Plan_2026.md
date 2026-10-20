@@ -1,6 +1,9 @@
 # Prefab Architecture Plan (Stage C) -- September 2026
 
-> Status: **PLAN, nothing built.** Written 2026-09-26 with the user. Follows the collaboration contract of the other plan
+> Status 2026-10-20: **P1-P6c built**; P1-P6b tested by the user, P6c (variants) untested. Open items: section 8. See the
+> status log in section 7. (Originally: plan written 2026-09-26 with the user.)
+>
+> Written 2026-09-26 with the user. Follows the collaboration contract of the other plan
 > docs: the user builds and runs, phase gates (each phase ends with something the user tests), no compatibility code
 > (delete and re-save when a format changes), class layout rules (public / private functions / private members), Vulkan never
 > leaks outside NRI.
@@ -271,5 +274,7 @@ Missing script API this needs: `Input` mouse buttons, rigid body velocity/force,
 4. ~~Prefab Mode save prompt~~ **Built 2026-09-26 (untested):** Prefab Mode compares the prefab's text with the text taken once everything in its scene had spawned (`*` in the toolbar; periodic check every 20 frames, exact check when leaving); **Exit** and opening another scene ask Save / Don't Save / Cancel first.
 5. ~~Re-parenting a spawned entity is not tracked as an override~~ **Decided 2026-10-20: Unity's rule.** An instance's entities cannot be moved to another parent (dragging one shows why); restructure in Prefab Mode or after Unpack. Entities attached directly below an instance root show as `+ Entity`, as additions should.
 6. ~~Overrides on an instance's entity that was DELETED are dropped with it~~ **Built 2026-10-20:** the deleted entity's overrides stay on the instance (not listed while it is gone) and come back with it on Revert. **Unpack Completely** (the hierarchy's instance menu) also unpacks every nested instance below; plain **Unpack** keeps them as instances.
-7. Exported games need their own prefab lookup for `Scene.Instantiate` (it resolves paths through the editor asset registry).
+7. ~~Exported games need their own prefab lookup for `Scene.Instantiate` (it resolves paths through the editor asset registry).~~
+   **Built 2026-10-18 (untested):** the lookup goes through whichever asset manager is active (`Runtime_And_Packaging_Plan_2026-10.md`
+   section 2c, R2), and File > Package Game ships the prefabs scripts name by path, with a registry of the packaged assets.
 

@@ -147,17 +147,13 @@ for history. File references are to the code as of this audit.
 
 ### 0.4 Docs that no longer match the code
 
-- **Root docs** (`PROJECT_CONTEXT.md`, `architecture.md`, `GEMINI.md`): written for the visibility-buffer migration. They miss Jolt,
-  .NET scripting, the render graph (~70 passes), GPU scene, GI, NoxRuntime; say descriptor buffers (the code uses
-  `VK_EXT_descriptor_heap`), C++23 (the build is C++20), "13 debug modes" (23), PBR Neutral tonemapping (default Hable),
-  `PathTracer.slang` (the pipeline is `PathTracer/*.slang`), and call the live forward shaders dead.
-- `Engine_Architecture_Plan_2026.md` §3b is the pre-plan snapshot; D9 is decided and built; skinned BLAS, BLAS compaction and
-  a second view are built.
-- `RayTracing_Architecture_Plan_2026.md`: progress table says Phase 5 "next up" and 6-7 not started -- ReSTIR GI / DI / PT and
-  RTAO are built; GI modes 0-3, debug views 0-22.
-- `Prefab_*`, `Units_*`, `Runtime_And_Packaging_*`: headers still say "plan, nothing built".
-- `Animation_Graph_*`: §5 marks steps 4-7 untested while §8 says built; prefab asset and outliner folders listed as open.
-- `Scripting_Architecture_and_Status.md`: lists 6 C# files and 3 API groups (21 files and ~12 groups now).
+Fixed 2026-10-20: the root docs (`README.md`, `PROJECT_CONTEXT.md`, `architecture.md`, `GEMINI.md`) were rewritten against the code
+(C++20, Jolt + Box2D, Coral / .NET 9, Taskflow `JobSystem`, `VK_EXT_descriptor_heap`, render graph, GPU scene, GI, NoxRuntime and
+packaging, 23 debug views, Hable UC2 default tonemapper, `PathTracer/*.slang`); the plan docs' stale headers and status tables
+(Engine §3b / D9 / skinned BLAS / compaction / extra views, RayTracing phases 5-7, Prefab / Units / Runtime headers, Animation
+Graph §5 / §8) and `Scripting_Architecture_and_Status.md` were brought up to date. Notes found on the way: `PathTracer.slang` is an
+older path tracer only on the hot-reload watch list (no pipeline compiles it); C# `Nox.Jobs` runs on .NET's thread pool, not
+`JobSystem`; imgui-node-editor is cloned by hand (README says how).
 - `Hybrid_Renderer_Plan_2026-10.md` §1 table (transparency, GI rows) and §2 ladder (High = ReSTIR DI / GI) are older than §2c / §8.
 - `Backlog_2026.md`: P6 is closed by R2; R5 (DDGI fixed grid) replaced by the camera-following cascades.
 

@@ -1,6 +1,9 @@
 # World Units and World Tools Plan -- September 2026
 
-> Status: **PLAN, nothing built.** Written 2026-09-26 with the user, after the Fox (authored in centimeters, declared as meters by its glTF)
+> Status 2026-10-20: **U1-U6 built** (the world unit is now 1 cm: `WorldUnitsPerMeter` defaults to 100). U2 confirmed by the
+> user; U1 and U3-U6 untested. See the status log in section 8.
+>
+> Written 2026-09-26 with the user, after the Fox (authored in centimeters, declared as meters by its glTF)
 > came in 100x too big and cost a long debugging session. Same working rules as the other plan docs: the user builds and tests, phase gates,
 > no compatibility code (the user deletes cooked files and re-imports; scenes are converted once or rebuilt), class layout rules, Vulkan never
 > leaks outside NRI. Index: `Backlog_2026.md`.
