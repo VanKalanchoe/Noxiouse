@@ -1494,7 +1494,7 @@ namespace Nox
                 if (m_Renderer->getDirectLightingMode() == 1)
                 {
                     ImGui::Indent();
-                    ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f), "ReSTIR DI (RTXDI SDK Active) -- v1: uniform light sampling, no RIS/ReGIR yet");
+                    ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f), "ReSTIR DI (RTXDI): presampled lights (RIS tiles, ReGIR grid), temporal + spatial reuse");
 
                     uint32_t& numLocal = m_Renderer->getReSTIRDINumLocalLightSamples();
                     int numLocalInt = static_cast<int>(numLocal);
@@ -3739,8 +3739,50 @@ namespace Nox
                 }
             }
 
-            const float drop = floorY - mover.Min.y;
-            top.SetWorldTransform(glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, drop, 0.0f)) * top.GetComponent<WorldTransformComponent>().WorldMatrix);
+            // The real surface below (Renderer::RequestRaycast, a frame or two later): five rays down from just under the object,
+            // at its centre and towards its corners; the highest surface they find is the floor -- a slope, a curved rock, the
+            // inside of a bowl, not their bounding boxes. Nothing found (ray tracing off, nothing below): the boxes' answer.
+            struct SnapRays
+            {
+                UUID Entity;
+                float BoundsFloor = 0.0f;
+                float OriginY = 0.0f;
+                int Pending = 0;
+                bool Hit = false;
+                float NearestDistance = 0.0f;
+            };
+            auto snap = std::make_shared<SnapRays>();
+            snap->Entity = top.GetUUID();
+            snap->BoundsFloor = floorY;
+            snap->OriginY = mover.Min.y - WorldUnits::FromMeters(0.01f);
+            const glm::vec3 centre = 0.5f * (mover.Min + mover.Max);
+            const glm::vec3 halfInset = 0.25f * (mover.Max - mover.Min);
+            const glm::vec2 offsets[5] = { { 0.0f, 0.0f }, { -1.0f, -1.0f }, { 1.0f, -1.0f }, { -1.0f, 1.0f }, { 1.0f, 1.0f } };
+            snap->Pending = 5;
+            for (const glm::vec2& offset : offsets)
+            {
+                const glm::vec3 origin(centre.x + offset.x * halfInset.x, snap->OriginY, centre.z + offset.y * halfInset.z);
+                m_Renderer->RequestRaycast(origin, glm::vec3(0.0f, -1.0f, 0.0f), WorldUnits::FromMeters(1000.0f), [this, snap](bool hit, float distance)
+                {
+                    if (hit && (!snap->Hit || distance < snap->NearestDistance))
+                    {
+                        snap->Hit = true;
+                        snap->NearestDistance = distance;
+                    }
+                    if (--snap->Pending > 0)
+                        return;
+                    Entity entity = m_ActiveScene ? m_ActiveScene->GetEntityByUUID(snap->Entity) : Entity{};
+                    if (!entity || !entity.HasComponent<WorldTransformComponent>())
+                        return;
+                    const WorldBounds now = ComputeWorldBounds(*m_ActiveScene, entity);
+                    if (!now.Valid)
+                        return;
+                    const float floor = snap->Hit ? snap->OriginY - snap->NearestDistance : snap->BoundsFloor;
+                    const float drop = floor - now.Min.y;
+                    entity.SetWorldTransform(glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, drop, 0.0f)) * entity.GetComponent<WorldTransformComponent>().WorldMatrix);
+                    m_HistoryCheckRequested = true; // one undo step
+                });
+            }
         }
     }
 

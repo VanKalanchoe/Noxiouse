@@ -331,6 +331,11 @@ namespace Nox
         static constexpr uint32_t LivePreviewView = 5;
         static constexpr uint32_t AnimationPreviewView = 6;
         void SubmitExtraView(uint32_t index, const EditorCamera& camera, NRI::Extent2D size, const shaderio::PushConstantGrid* grid, bool preview = false);
+        // A ray against the scene's geometry (ray query on the TLAS: the real surface, not bounding boxes), answered a frame or two
+        // later on the main thread: the distance to the first opaque surface, or a miss (also without ray tracing / a TLAS).
+        // Up to shaderio::EDITOR_RAYCAST_MAX a frame; more wait for the next one.
+        using RaycastCallback = std::function<void(bool hit, float distance)>;
+        void RequestRaycast(const glm::vec3& origin, const glm::vec3& direction, float maxDistance, RaycastCallback callback);
         Texture2D* GetExtraViewTexture(uint32_t index) const { return index < MaxExtraViews ? m_extraViews[index].Shown.get() : nullptr; }
         // Drops a view's texture (its viewport closed).
         void ReleaseExtraView(uint32_t index);
@@ -768,6 +773,9 @@ namespace Nox
         // Re-packs materials whose texture slots may have changed (texture imported or unloaded).
         void refreshGpuMaterials();
         void readPickResult(uint32_t frameSlot);
+        void readRaycastResults(uint32_t frameSlot);
+        void addEditorRaycastPass();
+        void createEditorRaycastPipeline(bool forceCompile = false);
         void readTextureReadbacks(uint32_t frameSlot);
         void readInspectionProbe(uint32_t frameSlot);
         void readCullStats(uint32_t frameSlot);
@@ -1427,6 +1435,12 @@ namespace Nox
         std::vector<TextureReadback> m_textureReadbacks;
         PickRequest m_pickRequest;
         PickResult m_pickResult;
+        // RequestRaycast: waiting, and in flight per frame slot (its rays are in that slot's buffer).
+        struct PendingRaycast { shaderio::EditorRay Ray; RaycastCallback Callback; };
+        std::vector<PendingRaycast> m_raycastQueue;
+        std::vector<std::vector<RaycastCallback>> m_raycastsInFlight;
+        std::vector<std::unique_ptr<NRI::Buffer>> m_raycastBuffers;
+        std::unique_ptr<NRI::Pipeline> m_editorRaycastPipeline;
         std::vector<int32_t> m_SelectedEntityIDs;
 
         // Render graph texture inspection (editor)

@@ -1107,6 +1107,25 @@ struct PushConstantLightShapes
     uint64_t matrixReference; // BDA to UniformBufferObject
 };
 
+// EditorRaycast.slang: rays the editor asks about (Renderer::RequestRaycast), one thread each, against the scene's TLAS. The buffer
+// (host visible, one per frame in flight) holds the rays and receives the distance of each one's first opaque hit, -1 for none.
+STATIC_CONST uint32_t EDITOR_RAYCAST_MAX = 64;
+struct EditorRay
+{
+    vec3 origin;
+    float maxDistance;
+    vec3 direction;
+    float hitDistance; // written by the shader
+};
+
+struct PushConstantEditorRaycast
+{
+    uint64_t matrixReference; // BDA to UniformBufferObject (its TLAS)
+    uint64_t raysReference;   // BDA to EditorRay[rayCount]
+    uint32_t rayCount;
+    uint32_t padding;
+};
+
 // OITComposite.slang: the order-independent transparency's targets, resolved over the HDR scene (descriptor heap slots, the
 // image heap's offset already added).
 struct PushConstantOITComposite

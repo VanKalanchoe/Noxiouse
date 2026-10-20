@@ -266,6 +266,7 @@ namespace Nox
         watchShader("assets/shaders/HiZBuild.slang", "HiZBuild", [this]() { createHiZBuildPipeline(true); });
         watchShader("assets/shaders/RRGuides.slang", "RRGuides", [this]() { createRRGuidesPipeline(true); });
         watchShader("assets/shaders/TAA.slang", "TAA", [this]() { createTAAPipeline(true); });
+        watchShader("assets/shaders/EditorRaycast.slang", "EditorRaycast", [this]() { createEditorRaycastPipeline(true); });
         // NRD
         watchShader("assets/shaders/ShadowMask.slang", "ShadowMask", [this]() { createShadowMaskPipeline(true); });
         watchShader("assets/shaders/NRDGuides.slang", "NRDGuides", [this]() { createNRDGuidesPipeline(true); });
@@ -312,6 +313,16 @@ namespace Nox
             m_pickerStagingBuffers.emplace_back(m_device->createBuffer(NRI::BufferDesc{
                 .size = maxPickerBufferSize,
                 .usage = NRI::BufferUsage::Staging
+            }));
+        }
+        m_raycastBuffers.reserve(MAX_FRAMES_IN_FLIGHT);
+        m_raycastsInFlight.resize(MAX_FRAMES_IN_FLIGHT);
+        for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+        {
+            // Host visible and reached through its address: the CPU writes the rays, the shader the distances, the CPU reads them.
+            m_raycastBuffers.emplace_back(m_device->createBuffer(NRI::BufferDesc{
+                .size = sizeof(shaderio::EditorRay) * shaderio::EDITOR_RAYCAST_MAX,
+                .usage = NRI::BufferUsage::Uniform
             }));
         }
         m_pickerDepthStagingBuffers.reserve(MAX_FRAMES_IN_FLIGHT);
@@ -456,6 +467,7 @@ namespace Nox
         createHiZBuildPipeline(false);
         createRRGuidesPipeline(false);
         createTAAPipeline(false);
+        createEditorRaycastPipeline(false);
         //NRD
         createShadowMaskPipeline();
         createNRDGuidesPipeline();
@@ -4447,6 +4459,7 @@ namespace Nox
             addExtraViewPasses();
             addPresentPass();
             addPickReadbackPass();
+            addEditorRaycastPass();
             addTextureReadbackPasses();
             addTextureInspection();
         }
@@ -5266,6 +5279,7 @@ namespace Nox
             // acquireNextImage waited for this slot's previous submission, which recorded the slot's pick copy.
             NOX_PROFILE_SCOPE("Pick Readback");
             readPickResult(frameIndex);
+            readRaycastResults(frameIndex);
             readTextureReadbacks(frameIndex);
             readInspectionProbe(frameIndex);
             readCullStats(frameIndex);
@@ -5621,6 +5635,44 @@ namespace Nox
         memcpy(&m_inspectionProbeValue, mappedMemory, sizeof(float) * 4);
         m_inspectionProbeBuffers[frameSlot]->unmap();
         m_inspectionProbeValid = true;
+    }
+
+    void Renderer::RequestRaycast(const glm::vec3& origin, const glm::vec3& direction, float maxDistance, RaycastCallback callback)
+    {
+        PendingRaycast pending;
+        pending.Ray.origin = origin;
+        pending.Ray.direction = glm::length(direction) > 1e-8f ? glm::normalize(direction) : glm::vec3(0.0f, -1.0f, 0.0f);
+        pending.Ray.maxDistance = std::max(maxDistance, 0.0f);
+        pending.Ray.hitDistance = -1.0f;
+        pending.Callback = std::move(callback);
+        m_raycastQueue.push_back(std::move(pending));
+    }
+
+    void Renderer::createEditorRaycastPipeline(bool forceCompile)
+    {
+        NRI::PipelineDesc desc{};
+        desc.type = NRI::PipelineType::Compute;
+        desc.forceCompile = forceCompile;
+        desc.shaders.push_back({ .stage = NRI::ShaderStage::Compute, .entryPoint = "computeMain", .sourcePath = "assets/shaders/EditorRaycast.slang" });
+        m_editorRaycastPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+    }
+
+    void Renderer::readRaycastResults(uint32_t frameSlot)
+    {
+        if (frameSlot >= m_raycastsInFlight.size() || m_raycastsInFlight[frameSlot].empty())
+            return;
+        std::vector<RaycastCallback> callbacks = std::move(m_raycastsInFlight[frameSlot]);
+        m_raycastsInFlight[frameSlot].clear();
+        std::vector<shaderio::EditorRay> rays(callbacks.size());
+        const uint64_t bytes = sizeof(shaderio::EditorRay) * rays.size();
+        memcpy(rays.data(), m_raycastBuffers[frameSlot]->map(0, bytes), bytes);
+        m_raycastBuffers[frameSlot]->unmap();
+        for (size_t index = 0; index < callbacks.size(); ++index)
+        {
+            const float distance = rays[index].hitDistance;
+            if (callbacks[index])
+                callbacks[index](distance >= 0.0f, distance);
+        }
     }
 
     void Renderer::readPickResult(uint32_t frameSlot)

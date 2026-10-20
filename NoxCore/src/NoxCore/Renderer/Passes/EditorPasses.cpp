@@ -142,6 +142,51 @@ namespace Nox
         }
     }
 
+    void Renderer::addEditorRaycastPass()
+    {
+        if (m_raycastQueue.empty() || frameIndex >= m_raycastBuffers.size() || !m_raycastsInFlight[frameIndex].empty())
+            return;
+        const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
+        const uint32_t count = static_cast<uint32_t>(std::min<size_t>(m_raycastQueue.size(), shaderio::EDITOR_RAYCAST_MAX));
+        std::vector<shaderio::EditorRay> rays(count);
+        for (uint32_t index = 0; index < count; ++index)
+        {
+            rays[index] = m_raycastQueue[index].Ray;
+            m_raycastsInFlight[frameIndex].push_back(std::move(m_raycastQueue[index].Callback));
+        }
+        m_raycastQueue.erase(m_raycastQueue.begin(), m_raycastQueue.begin() + count);
+        memcpy(m_raycastBuffers[frameIndex]->map(0, sizeof(shaderio::EditorRay) * count), rays.data(), sizeof(shaderio::EditorRay) * count);
+        m_raycastBuffers[frameIndex]->unmap();
+
+        // Without a TLAS (ray tracing off, nothing built yet) every ray misses: the callbacks fall back by themselves.
+        const bool traced = m_editorRaycastPipeline && resources.TLAS.IsValid();
+        if (!traced)
+        {
+            for (shaderio::EditorRay& ray : rays)
+                ray.hitDistance = -1.0f;
+            memcpy(m_raycastBuffers[frameIndex]->map(0, sizeof(shaderio::EditorRay) * count), rays.data(), sizeof(shaderio::EditorRay) * count);
+            m_raycastBuffers[frameIndex]->unmap();
+            return;
+        }
+        m_renderGraph.AddPass("Editor Raycasts", RGPassFlags::NeverCull,
+            [&](RGBuilder& builder)
+            {
+                builder.Read(resources.TLAS, RGBufferAccess::AccelerationStructureRead);
+                ReadGpuScene(builder, resources);
+            },
+            [this, count](RGPassContext& context)
+            {
+                shaderio::PushConstantEditorRaycast push{};
+                push.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                push.raysReference = m_raycastBuffers[frameIndex]->getDeviceAddress();
+                push.rayCount = count;
+                NRI::CommandBuffer& cmd = context.Cmd();
+                cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *m_editorRaycastPipeline);
+                cmd.pushData(&push, sizeof(push));
+                cmd.dispatch((count + 63) / 64, 1, 1);
+            });
+    }
+
     void Renderer::addPickReadbackPass()
     {
         const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
