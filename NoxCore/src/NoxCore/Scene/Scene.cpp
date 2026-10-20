@@ -993,7 +993,7 @@ namespace Nox
             particles.reserve(emitter.Simulation.Particles.size());
             for (const ParticleSimulation::Particle& particle : emitter.Simulation.Particles)
             {
-                const ParticleSystem::Appearance appearance = ParticleSystem::Evaluate(emitter, particle, world.WorldMatrix);
+                const ParticleSystem::Appearance appearance = ParticleSystem::Evaluate(emitter, particle, world.WorldMatrix, m_FrameInput.Timestep);
                 if (appearance.Color.a <= 0.0f || appearance.Size <= 0.0f)
                     continue;
                 shaderio::GpuParticle gpu{};
@@ -1002,6 +1002,7 @@ namespace Nox
                 gpu.color = appearance.Color;
                 gpu.rotation = particle.Rotation;
                 gpu.frame = appearance.Frame;
+                gpu.previousPosition = appearance.PreviousPosition;
                 particles.push_back(gpu);
             }
             m_renderer->SubmitParticles(settings, particles);

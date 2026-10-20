@@ -1060,6 +1060,7 @@ namespace Nox
         uint64_t m_particleBufferCapacity = 0;
         std::unique_ptr<NRI::Pipeline> m_particlePipeline;
         std::unique_ptr<NRI::Pipeline> m_particleOITPipeline; // alpha-blended particles into the OIT targets
+        std::unique_ptr<NRI::Pipeline> m_particleMotionPipeline; // their motion into the velocity target (DLSS / TAA)
         std::unique_ptr<NRI::Pipeline> m_colorPyramidDownsamplePipeline;
         bool m_refractionEnabled = true;
         bool m_oitEnabled = false;

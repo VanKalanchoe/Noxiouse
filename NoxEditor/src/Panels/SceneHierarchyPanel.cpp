@@ -2304,8 +2304,68 @@ namespace Nox
             ImGui::DragFloat("Size Start", &component.SizeStart, 0.005f, 0.0f, 1000.0f, "%.3f m");
             ImGui::DragFloat("Size End", &component.SizeEnd, 0.005f, 0.0f, 1000.0f, "%.3f m");
             ImGui::SliderFloat("Size Random", &component.SizeRandom, 0.0f, 1.0f);
+            const bool sizeCurveOpen = ImGui::TreeNodeEx("Size over Life", ImGuiTreeNodeFlags_SpanAvailWidth);
+            ImGui::SetItemTooltip("Size keys over each particle's life (0 birth, 1 death). With two or more they replace Size Start / End.");
+            if (sizeCurveOpen)
+            {
+                if (component.SizeOverLife.empty() && ImGui::Button("Start from Start / End##Size"))
+                    component.SizeOverLife = { { 0.0f, component.SizeStart }, { 1.0f, component.SizeEnd } };
+                int removeKey = -1;
+                for (size_t i = 0; i < component.SizeOverLife.size(); ++i)
+                {
+                    ParticleSizeKey& key = component.SizeOverLife[i];
+                    ImGui::PushID(static_cast<int>(i) + 1000);
+                    ImGui::SetNextItemWidth(60.0f);
+                    ImGui::DragFloat("##Time", &key.Time, 0.005f, 0.0f, 1.0f, "%.2f");
+                    ImGui::SameLine();
+                    ImGui::SetNextItemWidth(90.0f);
+                    ImGui::DragFloat("##Size", &key.Size, 0.005f, 0.0f, 1000.0f, "%.3f m");
+                    ImGui::SameLine();
+                    if (ImGui::SmallButton("x"))
+                        removeKey = static_cast<int>(i);
+                    ImGui::PopID();
+                }
+                if (removeKey >= 0)
+                    component.SizeOverLife.erase(component.SizeOverLife.begin() + removeKey);
+                if (ImGui::Button("Add Size Key"))
+                    component.SizeOverLife.push_back({ 0.5f, ParticleSystem::SizeOverLife(component, 0.5f) });
+                // The curve as it plays out (life left to right).
+                float samples[32];
+                for (int i = 0; i < 32; ++i)
+                    samples[i] = ParticleSystem::SizeOverLife(component, static_cast<float>(i) / 31.0f);
+                ImGui::PlotLines("##SizeCurve", samples, 32, 0, nullptr, 0.0f, FLT_MAX, ImVec2(0.0f, 40.0f));
+                ImGui::TreePop();
+            }
             ImGui::ColorEdit4("Color Start", glm::value_ptr(component.ColorStart), ImGuiColorEditFlags_Float);
             ImGui::ColorEdit4("Color End", glm::value_ptr(component.ColorEnd), ImGuiColorEditFlags_Float);
+
+            // Curves over life: keys at a time of life each, linear between them; two or more replace the start / end pair.
+            const bool colorCurveOpen = ImGui::TreeNodeEx("Color over Life", ImGuiTreeNodeFlags_SpanAvailWidth);
+            ImGui::SetItemTooltip("Color keys over each particle's life (0 birth, 1 death). With two or more they replace Color Start / End.");
+            if (colorCurveOpen)
+            {
+                if (component.ColorOverLife.empty() && ImGui::Button("Start from Start / End"))
+                    component.ColorOverLife = { { 0.0f, component.ColorStart }, { 1.0f, component.ColorEnd } };
+                int removeKey = -1;
+                for (size_t i = 0; i < component.ColorOverLife.size(); ++i)
+                {
+                    ParticleColorKey& key = component.ColorOverLife[i];
+                    ImGui::PushID(static_cast<int>(i));
+                    ImGui::SetNextItemWidth(60.0f);
+                    ImGui::DragFloat("##Time", &key.Time, 0.005f, 0.0f, 1.0f, "%.2f");
+                    ImGui::SameLine();
+                    ImGui::ColorEdit4("##Color", glm::value_ptr(key.Color), ImGuiColorEditFlags_Float | ImGuiColorEditFlags_NoInputs);
+                    ImGui::SameLine();
+                    if (ImGui::SmallButton("x"))
+                        removeKey = static_cast<int>(i);
+                    ImGui::PopID();
+                }
+                if (removeKey >= 0)
+                    component.ColorOverLife.erase(component.ColorOverLife.begin() + removeKey);
+                if (ImGui::Button("Add Color Key"))
+                    component.ColorOverLife.push_back({ 0.5f, ParticleSystem::ColorOverLife(component, 0.5f) });
+                ImGui::TreePop();
+            }
             ImGui::DragFloat("Intensity", &component.Intensity, 0.05f, 0.0f, 10000.0f);
             ImGui::SetItemTooltip("Brightness: above 1 the particles glow (bloom).");
             const char* blendNames[] = { "Additive", "Alpha" };

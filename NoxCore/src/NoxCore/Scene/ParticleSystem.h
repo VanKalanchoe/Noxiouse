@@ -21,10 +21,15 @@ namespace Nox
         struct Appearance
         {
             glm::vec3 Position;  // world units, world space
+            glm::vec3 PreviousPosition; // where it was `dt` earlier (its motion for DLSS / TAA)
             float Size;          // world units, edge of the quad
             glm::vec4 Color;     // linear, Intensity applied; alpha = opacity
             uint32_t Frame;      // flipbook frame
         };
-        Appearance Evaluate(const ParticleEmitterComponent& emitter, const ParticleSimulation::Particle& particle, const glm::mat4& world);
+        // dt: the frame's step, for PreviousPosition.
+        Appearance Evaluate(const ParticleEmitterComponent& emitter, const ParticleSimulation::Particle& particle, const glm::mat4& world, float dt = 0.0f);
+        // The curves over life at t (0..1): the keys when there are two or more, else the start / end pair.
+        glm::vec4 ColorOverLife(const ParticleEmitterComponent& emitter, float t);
+        float SizeOverLife(const ParticleEmitterComponent& emitter, float t); // meters
     }
 }

@@ -1490,6 +1490,8 @@ struct GpuParticle
     uint32_t frame;    // flipbook frame
     float padding0;
     float padding1;
+    vec3 previousPosition; // where it was last frame (its motion vectors, Particles.slang fragMainMotion)
+    float padding2;
 };
 
 STATIC_CONST uint32_t PARTICLE_LIT = 1;      // shaded by the scene's lights and environment (per particle, in the mesh stage)

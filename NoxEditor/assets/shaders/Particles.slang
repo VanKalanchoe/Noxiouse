@@ -22,6 +22,8 @@ struct ParticleVertex
     float2 uv : TEXCOORD0;
     nointerpolation float4 color : COLOR0;
     nointerpolation uint frame : FRAME;
+    float4 currentClip : CURRENT_CLIP;   // without the jitter, for the motion vectors (fragMainMotion)
+    float4 previousClip : PREVIOUS_CLIP; // the same corner last frame
 };
 
 // The sun hidden from the particle? Blended and transmissive occluders let it through (forwardShadowed in
@@ -146,9 +148,12 @@ void meshMain(
     const float2 corners[4] = { float2(-1.0, -1.0), float2(1.0, -1.0), float2(1.0, 1.0), float2(-1.0, 1.0) };
     for (uint corner = 0; corner < 4; ++corner)
     {
-        const float3 worldPos = particle.position + (rotatedRight * corners[corner].x + rotatedUp * corners[corner].y) * halfSize;
+        const float3 cornerOffset = (rotatedRight * corners[corner].x + rotatedUp * corners[corner].y) * halfSize;
+        const float3 worldPos = particle.position + cornerOffset;
         ParticleVertex vertex;
         vertex.pos = mul(ubo->proj, mul(ubo->view, float4(worldPos, 1.0)));
+        vertex.currentClip = mul(ubo->nonJitteredProj, mul(ubo->view, float4(worldPos, 1.0)));
+        vertex.previousClip = mul(ubo->prevProj, mul(ubo->prevView, float4(particle.previousPosition + cornerOffset, 1.0)));
         vertex.worldPos = worldPos;
         vertex.uv = float2(corners[corner].x * 0.5 + 0.5, 0.5 - corners[corner].y * 0.5);
         vertex.color = color;
@@ -184,6 +189,21 @@ ParticleOITOutput fragMainOIT(ParticleVertex input, uniform PushConstantParticle
     output.accum = oit.accum;
     output.reveal = oit.reveal;
     return output;
+}
+
+// The particles' motion into the velocity target (GBufferVelocity's convention: the uv offset to where the pixel was last frame),
+// where they cover the pixel at least half: DLSS / TAA then move their history with the particle instead of with what is behind
+// (a fast spark otherwise smears). Additive ones count by their brightness. Drawn after the particles, without lighting.
+[shader("fragment")]
+float2 fragMainMotion(ParticleVertex input, uniform PushConstantParticles pushConstant) : SV_Target0
+{
+    const float4 shaded = shadeParticle(input, pushConstant);
+    const float coverage = (pushConstant.flags & PARTICLE_ADDITIVE) != 0 ? saturate(max(shaded.r, max(shaded.g, shaded.b))) : shaded.a;
+    if (coverage < 0.5 || input.currentClip.w <= 0.0 || input.previousClip.w <= 0.0)
+        discard;
+    const float2 currentNDC = input.currentClip.xy / input.currentClip.w;
+    const float2 previousNDC = input.previousClip.xy / input.previousClip.w;
+    return (previousNDC - currentNDC) * float2(0.5, -0.5);
 }
 
 float4 shadeParticle(ParticleVertex input, PushConstantParticles pushConstant)

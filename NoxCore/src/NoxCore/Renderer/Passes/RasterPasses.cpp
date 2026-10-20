@@ -866,6 +866,7 @@ namespace Nox
         // after the resolve.
         std::vector<ParticleBatch> batches = m_particleBatches;
         std::stable_sort(batches.begin(), batches.end(), [](const ParticleBatch& a, const ParticleBatch& b) { return a.Distance > b.Distance; });
+        std::vector<ParticleBatch> motionBatches = batches;
         std::vector<ParticleBatch> oitBatches;
         if (m_oitEnabled && m_particleOITPipeline && m_oitCompositePipeline)
         {
@@ -958,52 +959,82 @@ namespace Nox
         }
 
         addOITCompositePass();
-        if (batches.empty())
-            return;
 
-        m_renderGraph.AddPass("Particles", RGPassFlags::Raster,
-            [&](RGBuilder& builder)
-            {
-                builder.ColorTarget(resources.HDRScene, NRI::LoadOP::load, NRI::StoreOP::store);
-                declareParticles(builder);
-            },
-            [this, res = &resources, batches = std::move(batches), drawBatch](RGPassContext& context)
-            {
-                NRI::CommandBuffer& cmd = context.Cmd();
-                cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_particlePipeline);
-                cmd.setCullMode(NRI::CullMode::None);
-                cmd.setDepthTestEnable(false);
-                cmd.setDepthWriteEnable(false);
-                cmd.setColorBlendEnable(0, true);
-                cmd.setColorWriteMask(0, NRI::ColorComponent::All);
-                const uint32_t depthSlot = context.Slot(res->Depth);
+        if (!batches.empty())
+        {
+            m_renderGraph.AddPass("Particles", RGPassFlags::Raster,
+                [&](RGBuilder& builder)
+                {
+                    builder.ColorTarget(resources.HDRScene, NRI::LoadOP::load, NRI::StoreOP::store);
+                    declareParticles(builder);
+                },
+                [this, res = &resources, batches = std::move(batches), drawBatch](RGPassContext& context)
+                {
+                    NRI::CommandBuffer& cmd = context.Cmd();
+                    cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_particlePipeline);
+                    cmd.setCullMode(NRI::CullMode::None);
+                    cmd.setDepthTestEnable(false);
+                    cmd.setDepthWriteEnable(false);
+                    cmd.setColorBlendEnable(0, true);
+                    cmd.setColorWriteMask(0, NRI::ColorComponent::All);
+                    const uint32_t depthSlot = context.Slot(res->Depth);
 
-                // Premultiplied colors: additive adds them and keeps what is behind; alpha covers it by their alpha.
-                const NRI::ColorBlendEquation additive
+                    // Premultiplied colors: additive adds them and keeps what is behind; alpha covers it by their alpha.
+                    const NRI::ColorBlendEquation additive
+                    {
+                        .srcColorBlendFactor = NRI::BlendFactor::One,
+                        .dstColorBlendFactor = NRI::BlendFactor::One,
+                        .colorBlendOp = NRI::BlendOp::Add,
+                        .srcAlphaBlendFactor = NRI::BlendFactor::Zero,
+                        .dstAlphaBlendFactor = NRI::BlendFactor::One,
+                        .alphaBlendOp = NRI::BlendOp::Add,
+                    };
+                    const NRI::ColorBlendEquation covering
+                    {
+                        .srcColorBlendFactor = NRI::BlendFactor::One,
+                        .dstColorBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha,
+                        .colorBlendOp = NRI::BlendOp::Add,
+                        .srcAlphaBlendFactor = NRI::BlendFactor::One,
+                        .dstAlphaBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha,
+                        .alphaBlendOp = NRI::BlendOp::Add,
+                    };
+                    for (const ParticleBatch& batch : batches)
+                    {
+                        cmd.setColorBlendEquation(0, batch.Settings.Additive ? additive : covering);
+                        drawBatch(cmd, batch, depthSlot);
+                    }
+                    cmd.setColorBlendEnable(0, false);
+                });
+        }
+
+        // Their motion for DLSS / TAA, where they cover the pixel (Particles.slang fragMainMotion), unlit.
+        const bool temporal = isTAAActive() || (m_dlssEnabled && m_dlssMode != NRI::UpscaleMode::Off && m_device->isDLSSSupported());
+        if (temporal && m_particleMotionPipeline && resources.GBufferVelocity.IsValid() && m_frame.deferredLightingAdded)
+        {
+            m_renderGraph.AddPass("Particle Motion", RGPassFlags::Raster,
+                [&](RGBuilder& builder)
                 {
-                    .srcColorBlendFactor = NRI::BlendFactor::One,
-                    .dstColorBlendFactor = NRI::BlendFactor::One,
-                    .colorBlendOp = NRI::BlendOp::Add,
-                    .srcAlphaBlendFactor = NRI::BlendFactor::Zero,
-                    .dstAlphaBlendFactor = NRI::BlendFactor::One,
-                    .alphaBlendOp = NRI::BlendOp::Add,
-                };
-                const NRI::ColorBlendEquation covering
+                    builder.ColorTarget(resources.GBufferVelocity, NRI::LoadOP::load, NRI::StoreOP::store);
+                    builder.Read(resources.Depth);
+                    builder.SetRenderArea(m_frame.renderExtent);
+                },
+                [this, res = &resources, motionBatches = std::move(motionBatches), drawBatch](RGPassContext& context)
                 {
-                    .srcColorBlendFactor = NRI::BlendFactor::One,
-                    .dstColorBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha,
-                    .colorBlendOp = NRI::BlendOp::Add,
-                    .srcAlphaBlendFactor = NRI::BlendFactor::One,
-                    .dstAlphaBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha,
-                    .alphaBlendOp = NRI::BlendOp::Add,
-                };
-                for (const ParticleBatch& batch : batches)
-                {
-                    cmd.setColorBlendEquation(0, batch.Settings.Additive ? additive : covering);
-                    drawBatch(cmd, batch, depthSlot);
-                }
-                cmd.setColorBlendEnable(0, false);
-            });
+                    NRI::CommandBuffer& cmd = context.Cmd();
+                    cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_particleMotionPipeline);
+                    cmd.setCullMode(NRI::CullMode::None);
+                    cmd.setDepthTestEnable(false);
+                    cmd.setDepthWriteEnable(false);
+                    cmd.setColorBlendEnable(0, false);
+                    cmd.setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G);
+                    const uint32_t depthSlot = context.Slot(res->Depth);
+                    for (ParticleBatch batch : motionBatches)
+                    {
+                        batch.Settings.Lit = false; // the motion needs no light
+                        drawBatch(cmd, batch, depthSlot);
+                    }
+                });
+        }
     }
 
     void Renderer::addForward3DPass()

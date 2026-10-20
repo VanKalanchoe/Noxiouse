@@ -2261,6 +2261,10 @@ namespace Nox
         desc.colorFormats = { NRI::ImageFormat::R16G16B16A16_SFLOAT, NRI::ImageFormat::R16_SFLOAT };
         desc.shaders.back().entryPoint = "fragMainOIT";
         m_particleOITPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+
+        desc.colorFormats = { NRI::ImageFormat::R32G32_SFLOAT };
+        desc.shaders.back().entryPoint = "fragMainMotion";
+        m_particleMotionPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
     void Renderer::createOITCompositePipeline(bool forceCompile)

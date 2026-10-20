@@ -79,8 +79,9 @@ for history. File references are to the code as of this audit.
   (Aerial perspective and height fog on forward surfaces and particles; the path tracer's sun / moon discs and fog; wind,
   time-sliced sky updates and the viewer's altitude from the camera: built 2026-10-20, untested.)
 - Cloud temporal reprojection. (Cloud shadows on the scene: built 2026-10-20.)
-- Particles: GPU simulation and sorting, collisions, mesh particles, color / size curves, module editor (V3), motion vectors
-  for DLSS, particles in the extra viewports and the path tracer; OpenVDB volumes (V5).
+- Particles: GPU simulation and sorting, collisions, mesh particles, module editor (V3), particles in the path tracer;
+  OpenVDB volumes (V5). (Color / size over life keys, motion vectors for DLSS / TAA, particles in the extra viewports: built
+  2026-10-20.)
 
 **Editor**
 - Prefab: P1 nested additions into the outer prefab, P4 re-parenting overrides, P5 overrides of deleted entities, P7 Unpack

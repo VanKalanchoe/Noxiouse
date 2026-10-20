@@ -16,6 +16,7 @@ namespace Nox
     {
         // Graph names must outlive the graph: a literal per view.
         constexpr const char* kCullNames[Renderer::MaxExtraViews] = { "Viewport 1 Culling", "Viewport 2 Culling", "Viewport 3 Culling", "Viewport 4 Culling", "Thumbnail Culling", "Material Preview Culling", "Animation Preview Culling" };
+        constexpr const char* kParticleNames[Renderer::MaxExtraViews] = { "Viewport 1 Particles", "Viewport 2 Particles", "Viewport 3 Particles", "Viewport 4 Particles", "Thumbnail Particles", "Material Preview Particles", "Animation Preview Particles" };
         constexpr const char* kForwardNames[Renderer::MaxExtraViews] = { "Viewport 1 Forward", "Viewport 2 Forward", "Viewport 3 Forward", "Viewport 4 Forward", "Thumbnail Forward", "Material Preview Forward", "Animation Preview Forward" };
         constexpr const char* kPostNames[Renderer::MaxExtraViews] = { "Viewport 1 Post Process", "Viewport 2 Post Process", "Viewport 3 Post Process", "Viewport 4 Post Process", "Thumbnail Post Process", "Material Preview Post Process", "Animation Preview Post Process" };
         constexpr const char* kOverlayNames[Renderer::MaxExtraViews] = { "Viewport 1 2D Overlay", "Viewport 2 2D Overlay", "Viewport 3 2D Overlay", "Viewport 4 2D Overlay", "Thumbnail 2D Overlay", "Material Preview 2D Overlay", "Animation Preview 2D Overlay" };
@@ -188,6 +189,62 @@ namespace Nox
                         cmd.setDepthWriteEnable(true);
                     }
                 });
+
+            // The scene's particles, from this camera (asset previews have none): blended like the camera's, without OIT.
+            if (!view.Preview && !m_particleBatches.empty() && m_particlePipeline && m_particleBuffers.size() > frameIndex && m_particleBuffers[frameIndex])
+            {
+                const bool particleShadows = m_rayTracingEnabled && m_rayTracingShadows && resources.TLAS.IsValid();
+                m_renderGraph.AddPass(kParticleNames[index], RGPassFlags::Raster,
+                    [&](RGBuilder& builder)
+                    {
+                        builder.ColorTarget(hdr, NRI::LoadOP::load, NRI::StoreOP::store);
+                        builder.Read(depth);
+                        if (ddgi)
+                            ReadDDGI(builder, resources, ddgiIndex);
+                        if (particleShadows)
+                        {
+                            builder.Read(resources.TLAS, RGBufferAccess::AccelerationStructureRead);
+                            ReadGpuScene(builder, resources);
+                        }
+                        builder.SetRenderArea(extent);
+                    },
+                    [this, uniformBuffer, depth, particleShadows](RGPassContext& context)
+                    {
+                        NRI::CommandBuffer& cmd = context.Cmd();
+                        cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_particlePipeline);
+                        cmd.setCullMode(NRI::CullMode::None);
+                        cmd.setDepthTestEnable(false);
+                        cmd.setDepthWriteEnable(false);
+                        cmd.setColorBlendEnable(0, true);
+                        cmd.setColorWriteMask(0, NRI::ColorComponent::All);
+                        const NRI::ColorBlendEquation additive{ NRI::BlendFactor::One, NRI::BlendFactor::One, NRI::BlendOp::Add,
+                                                                NRI::BlendFactor::Zero, NRI::BlendFactor::One, NRI::BlendOp::Add };
+                        const NRI::ColorBlendEquation covering{ NRI::BlendFactor::One, NRI::BlendFactor::OneMinusSrcAlpha, NRI::BlendOp::Add,
+                                                                NRI::BlendFactor::One, NRI::BlendFactor::OneMinusSrcAlpha, NRI::BlendOp::Add };
+                        std::vector<ParticleBatch> batches = m_particleBatches;
+                        std::stable_sort(batches.begin(), batches.end(), [](const ParticleBatch& a, const ParticleBatch& b) { return a.Distance > b.Distance; });
+                        for (const ParticleBatch& batch : batches)
+                        {
+                            cmd.setColorBlendEquation(0, batch.Settings.Additive ? additive : covering);
+                            shaderio::PushConstantParticles push{};
+                            push.matrixReference = uniformBuffer->getDeviceAddress();
+                            push.particlesReference = m_particleBuffers[frameIndex]->getDeviceAddress();
+                            push.firstParticle = batch.First;
+                            push.particleCount = batch.Count;
+                            push.textureIndex = batch.Settings.TextureSlot;
+                            push.flipbookColumns = std::max(batch.Settings.FlipbookColumns, 1u);
+                            push.flipbookRows = std::max(batch.Settings.FlipbookRows, 1u);
+                            push.flags = (batch.Settings.Lit ? shaderio::PARTICLE_LIT : 0u) | (batch.Settings.Soft ? shaderio::PARTICLE_SOFT : 0u) |
+                                         (batch.Settings.Additive ? shaderio::PARTICLE_ADDITIVE : 0u) |
+                                         (batch.Settings.Lit && particleShadows ? shaderio::PARTICLE_SHADOW : 0u);
+                            push.depthTextureIndex = context.Slot(depth);
+                            push.softDistance = batch.Settings.SoftDistance;
+                            cmd.pushData(&push, sizeof(push));
+                            cmd.drawMeshTasks((batch.Count + 31) / 32, 1, 1);
+                        }
+                        cmd.setColorBlendEnable(0, false);
+                    });
+            }
 
             // HDR -> the view's image, with the camera's exposure and tonemapper.
             m_renderGraph.AddPass(kPostNames[index], RGPassFlags::Raster,

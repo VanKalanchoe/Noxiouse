@@ -652,6 +652,20 @@ namespace Nox
             out << YAML::Key << "SizeRandom" << YAML::Value << emitter.SizeRandom;
             out << YAML::Key << "ColorStart" << YAML::Value << emitter.ColorStart;
             out << YAML::Key << "ColorEnd" << YAML::Value << emitter.ColorEnd;
+            if (!emitter.ColorOverLife.empty())
+            {
+                out << YAML::Key << "ColorOverLife" << YAML::Value << YAML::BeginSeq;
+                for (const ParticleColorKey& key : emitter.ColorOverLife)
+                    out << YAML::Flow << YAML::BeginSeq << key.Time << key.Color.r << key.Color.g << key.Color.b << key.Color.a << YAML::EndSeq;
+                out << YAML::EndSeq;
+            }
+            if (!emitter.SizeOverLife.empty())
+            {
+                out << YAML::Key << "SizeOverLife" << YAML::Value << YAML::BeginSeq;
+                for (const ParticleSizeKey& key : emitter.SizeOverLife)
+                    out << YAML::Flow << YAML::BeginSeq << key.Time << key.Size << YAML::EndSeq;
+                out << YAML::EndSeq;
+            }
             out << YAML::Key << "Intensity" << YAML::Value << emitter.Intensity;
             out << YAML::Key << "Texture" << YAML::Value << emitter.Texture;
             out << YAML::Key << "FlipbookColumns" << YAML::Value << emitter.FlipbookColumns;
@@ -1601,6 +1615,25 @@ namespace Nox
             read("SizeRandom", emitter.SizeRandom);
             read("ColorStart", emitter.ColorStart);
             read("ColorEnd", emitter.ColorEnd);
+            // Keys as [time, r, g, b, a] / [time, meters].
+            emitter.ColorOverLife.clear();
+            if (const YAML::Node keys = particleEmitter["ColorOverLife"]; keys && keys.IsSequence())
+            {
+                for (const YAML::Node& key : keys)
+                {
+                    if (key.IsSequence() && key.size() == 5)
+                        emitter.ColorOverLife.push_back({ key[0].as<float>(), glm::vec4(key[1].as<float>(), key[2].as<float>(), key[3].as<float>(), key[4].as<float>()) });
+                }
+            }
+            emitter.SizeOverLife.clear();
+            if (const YAML::Node keys = particleEmitter["SizeOverLife"]; keys && keys.IsSequence())
+            {
+                for (const YAML::Node& key : keys)
+                {
+                    if (key.IsSequence() && key.size() == 2)
+                        emitter.SizeOverLife.push_back({ key[0].as<float>(), key[1].as<float>() });
+                }
+            }
             read("Intensity", emitter.Intensity);
             read("Texture", emitter.Texture);
             read("FlipbookColumns", emitter.FlipbookColumns);

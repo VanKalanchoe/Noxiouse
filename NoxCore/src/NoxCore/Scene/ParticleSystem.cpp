@@ -178,13 +178,53 @@ namespace Nox::ParticleSystem
         }
     }
 
-    Appearance Evaluate(const ParticleEmitterComponent& emitter, const ParticleSimulation::Particle& particle, const glm::mat4& world)
+    namespace
+    {
+        // Linear between the keys around t; the keys need not be sorted.
+        template<typename Key, typename Value, typename Get>
+        Value EvaluateKeys(const std::vector<Key>& keys, float t, Get get)
+        {
+            const Key* before = nullptr;
+            const Key* after = nullptr;
+            for (const Key& key : keys)
+            {
+                if (key.Time <= t && (!before || key.Time >= before->Time))
+                    before = &key;
+                if (key.Time >= t && (!after || key.Time <= after->Time))
+                    after = &key;
+            }
+            if (!before)
+                return get(*after);
+            if (!after)
+                return get(*before);
+            const float span = after->Time - before->Time;
+            return span > 1e-6f ? glm::mix(get(*before), get(*after), (t - before->Time) / span) : get(*before);
+        }
+    }
+
+    glm::vec4 ColorOverLife(const ParticleEmitterComponent& emitter, float t)
+    {
+        if (emitter.ColorOverLife.size() >= 2)
+            return EvaluateKeys<ParticleColorKey, glm::vec4>(emitter.ColorOverLife, t, [](const ParticleColorKey& key) { return key.Color; });
+        return glm::mix(emitter.ColorStart, emitter.ColorEnd, t);
+    }
+
+    float SizeOverLife(const ParticleEmitterComponent& emitter, float t)
+    {
+        if (emitter.SizeOverLife.size() >= 2)
+            return EvaluateKeys<ParticleSizeKey, float>(emitter.SizeOverLife, t, [](const ParticleSizeKey& key) { return key.Size; });
+        return glm::mix(emitter.SizeStart, emitter.SizeEnd, t);
+    }
+
+    Appearance Evaluate(const ParticleEmitterComponent& emitter, const ParticleSimulation::Particle& particle, const glm::mat4& world, float dt)
     {
         const float t = glm::clamp(particle.Age / particle.Lifetime, 0.0f, 1.0f);
         Appearance appearance;
+        const glm::vec3 previous = particle.Position - particle.Velocity * std::max(dt, 0.0f);
         appearance.Position = emitter.LocalSpace ? glm::vec3(world * glm::vec4(particle.Position, 1.0f)) : particle.Position;
-        appearance.Size = glm::mix(emitter.SizeStart, emitter.SizeEnd, t) * particle.SizeScale * WorldUnits::PerMeter();
-        appearance.Color = glm::mix(emitter.ColorStart, emitter.ColorEnd, t);
+        appearance.PreviousPosition = emitter.LocalSpace ? glm::vec3(world * glm::vec4(previous, 1.0f)) : previous;
+        appearance.Size = std::max(SizeOverLife(emitter, t), 0.0f) * particle.SizeScale * WorldUnits::PerMeter();
+        appearance.Color = ColorOverLife(emitter, t);
         appearance.Color = glm::vec4(glm::vec3(appearance.Color) * std::max(emitter.Intensity, 0.0f), glm::clamp(appearance.Color.a, 0.0f, 1.0f));
 
         const uint32_t frames = std::max(emitter.FlipbookColumns, 1u) * std::max(emitter.FlipbookRows, 1u);

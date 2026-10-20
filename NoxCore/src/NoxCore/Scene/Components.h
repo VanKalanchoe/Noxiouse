@@ -475,6 +475,18 @@ namespace Nox
         bool Started = false;
     };
 
+    // A key of a particle's color / size over its life (Time 0 at birth, 1 at death), linearly interpolated between keys.
+    struct ParticleColorKey
+    {
+        float Time = 0.0f;
+        glm::vec4 Color{ 1.0f, 1.0f, 1.0f, 1.0f }; // linear color and opacity
+    };
+    struct ParticleSizeKey
+    {
+        float Time = 0.0f;
+        float Size = 0.2f; // meters
+    };
+
     struct ParticleEmitterComponent
     {
         bool Emitting = true;           // spawning (particles already out live on either way)
@@ -503,6 +515,10 @@ namespace Nox
         glm::vec4 ColorStart{ 1.0f, 1.0f, 1.0f, 1.0f }; // linear color and opacity over life
         glm::vec4 ColorEnd{ 1.0f, 1.0f, 1.0f, 0.0f };
         float Intensity = 1.0f;         // brightness multiplier (HDR: above 1 glows with bloom)
+        // Curves over each particle's life: with two keys or more they replace Color Start / End and Size Start / End (sorted by
+        // time when evaluated).
+        std::vector<ParticleColorKey> ColorOverLife;
+        std::vector<ParticleSizeKey> SizeOverLife;
 
         AssetHandle Texture = 0;        // none: soft round dots
         uint32_t FlipbookColumns = 1;
