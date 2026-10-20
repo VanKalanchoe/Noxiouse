@@ -47,16 +47,19 @@ namespace Nox
         void ImportAsset(const std::filesystem::path& sourcePath, const std::filesystem::path& destPath, AssetType targetType = AssetType::None, const MeshImportSettings& meshSettings = {});
         // Registers an asset file that already exists (relative to the asset directory) and returns its handle.
         AssetHandle RegisterExistingFile(const std::filesystem::path& relativePath, AssetType type);
-        // Renames a self-contained asset's file (same folder, same extension), keeping its handle. False when the name is invalid
-        // or taken, or when the asset has cooked companions named after it (meshes).
+        // Renames an asset's file (same folder) with its companions (a texture's source and .ntex, the .hash files), keeping its
+        // handle; its old path stays an alias (FormerPaths) for what names it by path. False when the name is invalid or taken.
         bool RenameAsset(AssetHandle handle, const std::string& newName);
+        // Prefabs, graphs, timelines, materials, textures and meshes (not scenes, nor a model's skeletons and clips).
         bool CanRename(AssetHandle handle) const;
-        // Moves a self-contained asset (what CanRename allows) into another folder, relative to the asset directory; keeps its
-        // handle. False when the name is taken there.
+        // Moves an asset (what CanRename allows) into another folder, relative to the asset directory, the same way.
         bool MoveAsset(AssetHandle handle, const std::filesystem::path& relativeFolder);
         // Deletes the asset's file, its source when nothing else is made from it, and its registry entry; a loaded copy is
         // dropped (entities still using it keep theirs until they let go of it).
         bool DeleteAsset(AssetHandle handle);
+        // Every reference to `from` in the project's files (scenes, prefabs, graphs, timelines: they name assets by handle) now
+        // names `to`, of the same type; how many files changed. The open scenes are the caller's (Content Browser callback).
+        size_t ReplaceReferences(AssetHandle from, AssetHandle to);
         // Who uses an asset, from the project's files: scenes, prefabs, animation graphs and the project name assets by handle;
         // materials and meshes name textures by path; scripts name assets by path; the materials, skeleton and clips cooked
         // from a model belong to its mesh by name. Relative paths of the files that use it (the open scene's unsaved state
@@ -126,6 +129,7 @@ namespace Nox
         explicit EditorAssetManager(ReadOnlyTag) : m_ReadOnly(true) {}
         
     private:
+        bool RelocateAsset(AssetHandle handle, const std::filesystem::path& relativeFolder, const std::string& newStem);
         void OnAssetModifiedOnDisk(const std::filesystem::path& absolutePath);
         void ImportMeshTextures(const Ref<Asset>& meshAsset);
         void ImportMeshMaterials(const Ref<Asset>& meshAsset, const AssetMetadata& meshMetadata);

@@ -1,5 +1,6 @@
 #pragma once
 #include <filesystem>
+#include <vector>
 
 #include "Asset.h"
 #include "NRI/Texture.h"
@@ -53,6 +54,9 @@ namespace Nox
         std::filesystem::path SourceFilePath;
         TextureSpecification TextureSpec; // Import settings for Texture2D assets
         MeshImportSettings MeshSettings;  // Import settings for Mesh / StaticMesh assets
+        // Where the asset was before it was renamed or moved (EditorAssetManager::MoveAsset): still found by those paths, which
+        // materials (their textures) and meshes (their materials, derived from the mesh's name) name it by.
+        std::vector<std::filesystem::path> FormerPaths;
 
         operator bool () const { return Type != AssetType::None; }
     };

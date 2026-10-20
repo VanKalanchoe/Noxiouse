@@ -784,7 +784,10 @@ namespace Nox
             const std::string materialKey = materialPath.lexically_normal().generic_string();
             AssetHandle materialHandle = FindHandleByPath(materialPath, AssetType::Material);
 
-            const auto fullMaterialPath = Project::GetActiveAssetDirectory() / materialPath;
+            // Where the material is now: a renamed or moved one is found by its former path (FormerPaths) and lives elsewhere.
+            const auto materialEntry = materialHandle != 0 ? m_AssetRegistry.find(materialHandle) : m_AssetRegistry.end();
+            const auto fullMaterialPath = Project::GetActiveAssetDirectory() /
+                                          (materialEntry != m_AssetRegistry.end() ? materialEntry->second.FilePath : materialPath);
             if (materialHandle == 0 || (checkedPaths.insert(materialKey).second && !VFS::Exists(fullMaterialPath)))
             {
                 // Read-only: a material file that is not there leaves the slot to the mesh's embedded material.
@@ -854,6 +857,9 @@ namespace Nox
             m_HandleByPath[metadata.FilePath.lexically_normal().generic_string()] = handle;
         if (!metadata.SourceFilePath.empty())
             m_HandleByPath[metadata.SourceFilePath.lexically_normal().generic_string()] = handle;
+        // Former paths only where nothing else lives now.
+        for (const std::filesystem::path& former : metadata.FormerPaths)
+            m_HandleByPath.try_emplace(former.lexically_normal().generic_string(), handle);
     }
 
     AssetHandle EditorAssetManager::FindHandleByPath(const std::filesystem::path& path, AssetType type) const
@@ -879,41 +885,136 @@ namespace Nox
     bool EditorAssetManager::CanRename(AssetHandle handle) const
     {
         const auto found = m_AssetRegistry.find(handle);
-        if (found == m_AssetRegistry.end())
+        if (found == m_AssetRegistry.end() || m_ReadOnly)
             return false;
         const AssetMetadata& metadata = found->second;
-        // Cooked assets (meshes, textures) have files named after them, and materials name textures by path: only
-        // self-contained assets that everything names by handle are renamed (and moved). Not scenes: the editor keeps the
-        // open scene's path.
-        return (metadata.Type == AssetType::Prefab || metadata.Type == AssetType::AnimationGraph || metadata.Type == AssetType::Timeline) &&
-               (metadata.SourceFilePath.empty() || metadata.SourceFilePath == metadata.FilePath);
+        // Not scenes (the editor keeps the open scene's path) and not what a model made beside its meshes (skeletons, clips:
+        // found by the model's name). Textures, materials and meshes keep their old paths as aliases (FormerPaths): materials
+        // name textures by path, meshes derive their materials' paths from their own name.
+        switch (metadata.Type)
+        {
+        case AssetType::Prefab:
+        case AssetType::AnimationGraph:
+        case AssetType::Timeline:
+        case AssetType::Material:
+        case AssetType::Texture2D:
+        case AssetType::StaticMesh:
+        case AssetType::Mesh:
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    namespace
+    {
+        // A file and the companions named after it ("x.ntex.hash", "x.nsmesh.hash"): what moves together.
+        std::vector<std::filesystem::path> FileWithCompanions(const std::filesystem::path& assetDirectory, const std::filesystem::path& relative)
+        {
+            std::vector<std::filesystem::path> files;
+            std::error_code error;
+            if (relative.empty() || !std::filesystem::exists(assetDirectory / relative, error))
+                return files;
+            files.push_back(relative);
+            const std::string prefix = relative.filename().string() + ".";
+            for (const auto& entry : std::filesystem::directory_iterator((assetDirectory / relative).parent_path(), error))
+            {
+                const std::string name = entry.path().filename().string();
+                if (entry.is_regular_file(error) && name.size() > prefix.size() && name.rfind(prefix, 0) == 0)
+                    files.push_back(relative.parent_path() / name);
+            }
+            return files;
+        }
+    }
+
+    bool EditorAssetManager::RelocateAsset(AssetHandle handle, const std::filesystem::path& relativeFolder, const std::string& newStem)
+    {
+        if (!CanRename(handle) || newStem.empty() || newStem.find_first_of("\\/:*?\"<>|") != std::string::npos)
+            return false;
+        AssetMetadata& metadata = m_AssetRegistry.find(handle)->second;
+        const std::filesystem::path assetDirectory = Project::GetActiveAssetDirectory();
+        const std::string oldStem = metadata.FilePath.stem().string();
+
+        // The files it is: its file; a texture's source and its cooked .ntex beside it (same name); never a model's source,
+        // which other assets are made from too.
+        std::vector<std::filesystem::path> files = FileWithCompanions(assetDirectory, metadata.FilePath);
+        if (metadata.Type == AssetType::Texture2D)
+        {
+            std::filesystem::path cooked = metadata.FilePath;
+            cooked.replace_extension(".ntex");
+            for (const std::filesystem::path& extra : { metadata.SourceFilePath, cooked })
+            {
+                if (extra.empty() || extra == metadata.FilePath || extra.parent_path() != metadata.FilePath.parent_path() || extra.stem() != metadata.FilePath.stem())
+                    continue;
+                for (const std::filesystem::path& file : FileWithCompanions(assetDirectory, extra))
+                {
+                    if (std::find(files.begin(), files.end(), file) == files.end())
+                        files.push_back(file);
+                }
+            }
+        }
+        if (files.empty())
+            return false;
+
+        // Each file: the same name after the stem ("x.ntex.hash" -> "y.ntex.hash"), in the new folder.
+        auto target = [&](const std::filesystem::path& file)
+        {
+            const std::string name = file.filename().string();
+            const std::string rest = name.rfind(oldStem, 0) == 0 ? name.substr(oldStem.size()) : file.extension().string();
+            return relativeFolder / (newStem + rest);
+        };
+        std::error_code error;
+        for (const std::filesystem::path& file : files)
+        {
+            if (target(file).lexically_normal() != file.lexically_normal() && std::filesystem::exists(assetDirectory / target(file), error))
+                return false; // taken
+        }
+        std::filesystem::create_directories(assetDirectory / relativeFolder, error);
+        for (const std::filesystem::path& file : files)
+        {
+            std::filesystem::rename(assetDirectory / file, assetDirectory / target(file), error);
+            if (error)
+            {
+                NOX_CORE_ERROR("Could not move {}: {}", file.generic_string(), error.message());
+                return false;
+            }
+        }
+
+        // A mesh's materials (and skeleton, clips) are named after the path it was cooked under: that name stays their base.
+        if ((metadata.Type == AssetType::StaticMesh || metadata.Type == AssetType::Mesh) && metadata.MeshSettings.MaterialBasePath.empty())
+            metadata.MeshSettings.MaterialBasePath = metadata.FilePath;
+        auto remember = [&](const std::filesystem::path& former)
+        {
+            if (!former.empty() && std::find(metadata.FormerPaths.begin(), metadata.FormerPaths.end(), former) == metadata.FormerPaths.end())
+                metadata.FormerPaths.push_back(former);
+        };
+        m_HandleByPath.erase(metadata.FilePath.lexically_normal().generic_string());
+        remember(metadata.FilePath);
+        const bool sourceMoved = !metadata.SourceFilePath.empty() &&
+                                 std::find(files.begin(), files.end(), metadata.SourceFilePath) != files.end();
+        if (metadata.SourceFilePath == metadata.FilePath || sourceMoved)
+        {
+            if (metadata.SourceFilePath != metadata.FilePath)
+            {
+                m_HandleByPath.erase(metadata.SourceFilePath.lexically_normal().generic_string());
+                remember(metadata.SourceFilePath);
+            }
+            metadata.SourceFilePath = target(metadata.SourceFilePath);
+        }
+        metadata.FilePath = target(metadata.FilePath);
+        IndexPath(handle, metadata);
+        SerializeAssetRegistry();
+        return true;
     }
 
     bool EditorAssetManager::MoveAsset(AssetHandle handle, const std::filesystem::path& relativeFolder)
     {
-        if (!CanRename(handle))
+        const auto found = m_AssetRegistry.find(handle);
+        if (found == m_AssetRegistry.end())
             return false;
-        AssetMetadata& metadata = m_AssetRegistry.find(handle)->second;
-        const std::filesystem::path oldPath = metadata.FilePath;
-        const std::filesystem::path newPath = relativeFolder / oldPath.filename();
-        if (newPath.lexically_normal() == oldPath.lexically_normal())
+        if (relativeFolder.lexically_normal() == found->second.FilePath.parent_path().lexically_normal())
             return true;
-
-        const std::filesystem::path assetDirectory = Project::GetActiveAssetDirectory();
-        std::error_code error;
-        if (std::filesystem::exists(assetDirectory / newPath, error))
-            return false;
-        std::filesystem::create_directories(assetDirectory / relativeFolder, error);
-        std::filesystem::rename(assetDirectory / oldPath, assetDirectory / newPath, error);
-        if (error)
-            return false;
-
-        m_HandleByPath.erase(oldPath.lexically_normal().generic_string());
-        metadata.FilePath = newPath;
-        metadata.SourceFilePath = newPath;
-        IndexPath(handle, metadata);
-        SerializeAssetRegistry();
-        return true;
+        return RelocateAsset(handle, relativeFolder, found->second.FilePath.stem().string());
     }
 
     bool EditorAssetManager::DeleteAsset(AssetHandle handle)
@@ -1138,6 +1239,58 @@ namespace Nox
         return referencing;
     }
 
+    size_t EditorAssetManager::ReplaceReferences(AssetHandle from, AssetHandle to)
+    {
+        const auto fromEntry = m_AssetRegistry.find(from);
+        const auto toEntry = m_AssetRegistry.find(to);
+        if (m_ReadOnly || from == to || fromEntry == m_AssetRegistry.end() || toEntry == m_AssetRegistry.end() ||
+            fromEntry->second.Type != toEntry->second.Type)
+            return 0;
+
+        // The text files that name assets by handle (YAML: a handle is a run of digits on its own).
+        std::vector<std::filesystem::path> files;
+        for (const auto& [handle, metadata] : m_AssetRegistry)
+        {
+            if ((metadata.Type == AssetType::Scene || metadata.Type == AssetType::Prefab || metadata.Type == AssetType::AnimationGraph ||
+                 metadata.Type == AssetType::Timeline) && !metadata.FilePath.empty())
+                files.push_back(Project::GetActiveAssetDirectory() / metadata.FilePath);
+        }
+        const std::string fromText = std::to_string(static_cast<uint64_t>(from));
+        const std::string toText = std::to_string(static_cast<uint64_t>(to));
+        size_t changedFiles = 0;
+        for (const std::filesystem::path& file : files)
+        {
+            std::string content;
+            {
+                std::ifstream in(file, std::ios::binary);
+                if (!in)
+                    continue;
+                content.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+            }
+            bool changed = false;
+            for (size_t at = content.find(fromText); at != std::string::npos; at = content.find(fromText, at))
+            {
+                const bool digitBefore = at > 0 && std::isdigit(static_cast<unsigned char>(content[at - 1]));
+                const bool digitAfter = at + fromText.size() < content.size() && std::isdigit(static_cast<unsigned char>(content[at + fromText.size()]));
+                if (digitBefore || digitAfter)
+                {
+                    at += fromText.size();
+                    continue;
+                }
+                content.replace(at, fromText.size(), toText);
+                at += toText.size();
+                changed = true;
+            }
+            if (!changed)
+                continue;
+            std::ofstream out(file, std::ios::binary | std::ios::trunc);
+            out << content;
+            ++changedFiles;
+        }
+        NOX_CORE_INFO("Replace References: {} -> {} in {} files", fromEntry->second.FilePath.generic_string(), toEntry->second.FilePath.generic_string(), changedFiles);
+        return changedFiles;
+    }
+
     std::vector<AssetHandle> EditorAssetManager::FindUnusedAssets() const
     {
         std::unordered_set<AssetHandle> used;
@@ -1257,29 +1410,12 @@ namespace Nox
 
     bool EditorAssetManager::RenameAsset(AssetHandle handle, const std::string& newName)
     {
-        if (!CanRename(handle) || newName.empty() || newName.find_first_of("\\/:*?\"<>|") != std::string::npos)
+        const auto found = m_AssetRegistry.find(handle);
+        if (found == m_AssetRegistry.end())
             return false;
-
-        AssetMetadata& metadata = m_AssetRegistry.find(handle)->second;
-        const std::filesystem::path oldPath = metadata.FilePath;
-        const std::filesystem::path newPath = oldPath.parent_path() / (newName + oldPath.extension().string());
-        if (newPath == oldPath)
+        if (newName == found->second.FilePath.stem().string())
             return true;
-
-        const std::filesystem::path assetDirectory = Project::GetActiveAssetDirectory();
-        std::error_code error;
-        if (std::filesystem::exists(assetDirectory / newPath, error))
-            return false;
-        std::filesystem::rename(assetDirectory / oldPath, assetDirectory / newPath, error);
-        if (error)
-            return false;
-
-        m_HandleByPath.erase(oldPath.lexically_normal().generic_string());
-        metadata.FilePath = newPath;
-        metadata.SourceFilePath = newPath;
-        IndexPath(handle, metadata);
-        SerializeAssetRegistry();
-        return true;
+        return RelocateAsset(handle, found->second.FilePath.parent_path(), newName);
     }
 
     AssetHandle EditorAssetManager::RegisterAsset(const AssetMetadata& metadata)
@@ -1677,6 +1813,13 @@ namespace Nox
                 if (!metadata.SourceFilePath.empty())
                     out << YAML::Key << "SourceFilePath" << YAML::Value << metadata.SourceFilePath.generic_string();
                 out << YAML::Key << "Type" << YAML::Value << AssetTypeToString(metadata.Type);
+                if (!metadata.FormerPaths.empty())
+                {
+                    out << YAML::Key << "FormerPaths" << YAML::Value << YAML::BeginSeq;
+                    for (const std::filesystem::path& former : metadata.FormerPaths)
+                        out << former.generic_string();
+                    out << YAML::EndSeq;
+                }
                 
                 // --- ADD THIS: Save TextureSpecification for Texture2D assets ---
                 if (metadata.Type == AssetType::Texture2D)
@@ -1805,6 +1948,11 @@ namespace Nox
             if (node["SourceFilePath"])
                 metadata.SourceFilePath = node["SourceFilePath"].as<std::string>();
             metadata.Type = AssetTypeFromString(node["Type"].as<std::string>());
+            if (const YAML::Node former = node["FormerPaths"]; former && former.IsSequence())
+            {
+                for (const YAML::Node& path : former)
+                    metadata.FormerPaths.emplace_back(path.as<std::string>());
+            }
             
             // --- ADD THIS: Load TextureSpecification if present ---
             if (node["TextureSpec"])

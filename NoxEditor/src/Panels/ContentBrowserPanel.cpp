@@ -1194,6 +1194,20 @@ namespace Nox
                 m_References.push_back(file.generic_string());
             m_OpenReferencesDialog = true;
         }
+        // Cooked from a source (textures, models): cook it again from the source now.
+        const bool hasSource = !metadata.SourceFilePath.empty() && metadata.SourceFilePath != metadata.FilePath;
+        if (ImGui::MenuItem("Reimport", nullptr, false, hasSource || metadata.Type == AssetType::Texture2D))
+        {
+            for (AssetHandle selected : m_Selected)
+                assets->ReimportAsset(selected, true);
+        }
+        if (ImGui::MenuItem("Replace References...", nullptr, false, m_Selected.size() == 1))
+        {
+            m_ReplaceFrom = handle;
+            m_ReplaceTo = 0;
+            m_ReplaceFilter[0] = 0;
+            m_OpenReplaceDialog = true;
+        }
         if (ImGui::MenuItem("Show in Explorer"))
         {
             const std::filesystem::path folder = (Project::GetActiveAssetDirectory() / metadata.FilePath).parent_path();
@@ -1248,7 +1262,7 @@ namespace Nox
                 continue;
             const std::string name = assets->GetMetadata(handle).FilePath.filename().string();
             if (!assets->CanRename(handle))
-                NOX_CORE_WARN("'{}' was not moved: only prefabs and animation graphs move (other assets are named by path, or are cooked with companion files)", name);
+                NOX_CORE_WARN("'{}' was not moved: scenes and what a model made beside its meshes (skeletons, clips) stay where they are", name);
             else if (!assets->MoveAsset(handle, relativeFolder == "." ? std::filesystem::path() : relativeFolder))
                 NOX_CORE_WARN("'{}' was not moved: the folder already has a file of that name", name);
             else
@@ -1344,6 +1358,52 @@ namespace Nox
             for (const std::string& user : m_References)
                 ImGui::BulletText("%s", user.c_str());
             if (ImGui::Button("Close") || ImGui::IsKeyPressed(ImGuiKey_Escape))
+                ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+        }
+
+        // Replace References: every scene, prefab, graph and timeline that names the asset names another of its type instead (and
+        // the open scenes); the asset itself stays (delete it after, if it is no longer wanted).
+        if (m_OpenReplaceDialog)
+        {
+            ImGui::OpenPopup("Replace References");
+            m_OpenReplaceDialog = false;
+        }
+        ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+        ImGui::SetNextWindowSize(ImVec2(520.0f, 420.0f), ImGuiCond_Appearing);
+        if (ImGui::BeginPopupModal("Replace References", nullptr))
+        {
+            const AssetType type = assets->IsAssetHandleValid(m_ReplaceFrom) ? assets->GetMetadata(m_ReplaceFrom).Type : AssetType::None;
+            ImGui::TextWrapped("Everything that uses %s will use the asset picked below instead.",
+                               assets->IsAssetHandleValid(m_ReplaceFrom) ? assets->GetMetadata(m_ReplaceFrom).FilePath.generic_string().c_str() : "?");
+            ImGui::InputTextWithHint("##ReplaceFilter", "Search", m_ReplaceFilter, sizeof(m_ReplaceFilter));
+            const std::string filter = ToLower(m_ReplaceFilter);
+            if (ImGui::BeginChild("##ReplaceCandidates", ImVec2(0.0f, -ImGui::GetFrameHeightWithSpacing() * 1.5f), ImGuiChildFlags_Borders))
+            {
+                for (const auto& [candidate, candidateMetadata] : assets->GetAssetRegistry())
+                {
+                    if (candidate == m_ReplaceFrom || candidateMetadata.Type != type)
+                        continue;
+                    const std::string path = candidateMetadata.FilePath.generic_string();
+                    if (!filter.empty() && ToLower(path).find(filter) == std::string::npos)
+                        continue;
+                    if (ImGui::Selectable(path.c_str(), m_ReplaceTo == candidate))
+                        m_ReplaceTo = candidate;
+                }
+            }
+            ImGui::EndChild();
+            ImGui::BeginDisabled(m_ReplaceTo == 0);
+            if (ImGui::Button("Replace"))
+            {
+                const size_t files = assets->ReplaceReferences(m_ReplaceFrom, m_ReplaceTo);
+                if (m_ReplaceInScenes)
+                    m_ReplaceInScenes(m_ReplaceFrom, m_ReplaceTo);
+                NOX_CORE_INFO("Replace References: {} files rewritten, the open scene updated", files);
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndDisabled();
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape))
                 ImGui::CloseCurrentPopup();
             ImGui::EndPopup();
         }

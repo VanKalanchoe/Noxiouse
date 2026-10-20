@@ -90,8 +90,10 @@ for history. File references are to the code as of this audit.
 **Editor**
 - Prefab: P1 nested additions into the outer prefab, P4 re-parenting overrides, P5 overrides of deleted entities, P7 Unpack
   All, prefab / .gltf thumbnails, variant tint.
-- Content browser: rename / move of textures, materials, meshes (E2); Reimport and Replace References; neutral thumbnail
-  backdrop and streaming feedback from preview views.
+- Content browser: streaming feedback from preview views. (Built 2026-10-20: rename / move of textures, materials and meshes
+  (E2) with their companion files, the old paths kept as aliases in the registry; Reimport; Replace References in the project's
+  files and the open scene; neutral thumbnail backdrop. A reimported mesh whose material was renamed writes a fresh .nmat at
+  the old name, unused.)
 - Viewports: lower resolution / realtime off (M3), show flags (M4), selection outline and gizmo in the extra views. (Built
   2026-10-20: cameras saved per scene, ortho zoom at the cursor, Wireframe overlay, To Grid, Snap to Floor by ray (GPU
   raycasts), mesh size in the Content Browser tooltip, neutral thumbnail backdrop; Thumbnail.cache moved to Cache/.)

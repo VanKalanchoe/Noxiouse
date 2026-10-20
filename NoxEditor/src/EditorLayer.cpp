@@ -2382,6 +2382,36 @@ namespace Nox
             });
             m_ContentBrowserPanel->SetCreateVariantCallback([this](AssetHandle base, const std::filesystem::path& folder) { return CreateVariant(base, folder); });
             // The browser's reference checks see what the open scenes use right now, unsaved changes included.
+            // Replace References in the open scene: through its text (the same load as an undo step), every token of the old
+            // handle becomes the new one.
+            m_ContentBrowserPanel->SetReplaceInScenesCallback([this](AssetHandle from, AssetHandle to)
+            {
+                if (!m_EditorScene || m_SceneState != SceneState::Edit)
+                    return;
+                SceneSerializer serializer(m_EditorScene);
+                std::string text = serializer.SerializeToText();
+                const std::string fromText = std::to_string(static_cast<uint64_t>(from));
+                const std::string toText = std::to_string(static_cast<uint64_t>(to));
+                bool changed = false;
+                for (size_t at = text.find(fromText); at != std::string::npos; at = text.find(fromText, at))
+                {
+                    const bool digitBefore = at > 0 && std::isdigit(static_cast<unsigned char>(text[at - 1]));
+                    const bool digitAfter = at + fromText.size() < text.size() && std::isdigit(static_cast<unsigned char>(text[at + fromText.size()]));
+                    if (digitBefore || digitAfter)
+                    {
+                        at += fromText.size();
+                        continue;
+                    }
+                    text.replace(at, fromText.size(), toText);
+                    at += toText.size();
+                    changed = true;
+                }
+                if (changed)
+                {
+                    RestoreHistoryState(text);
+                    m_HistoryCheckRequested = true;
+                }
+            });
             m_ContentBrowserPanel->SetSceneReferencesCallback([this](std::unordered_set<AssetHandle>& handles)
             {
                 if (m_EditorScene)

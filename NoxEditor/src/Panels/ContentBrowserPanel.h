@@ -35,6 +35,8 @@ namespace Nox
         void SetCreateVariantCallback(std::function<AssetHandle(AssetHandle, const std::filesystem::path&)> callback) { m_CreateVariant = std::move(callback); }
         // The assets the open scenes use right now (unsaved changes included), for the reference checks before deleting.
         void SetSceneReferencesCallback(std::function<void(std::unordered_set<AssetHandle>&)> callback) { m_SceneReferences = std::move(callback); }
+        // Replace References in the open scenes (the project's files are rewritten by the asset manager).
+        void SetReplaceInScenesCallback(std::function<void(AssetHandle, AssetHandle)> callback) { m_ReplaceInScenes = std::move(callback); }
     private:
         void RefreshAssetTree();
         AssetHandle FindAssetHandle(const std::filesystem::path& relativePath) const;
@@ -159,6 +161,12 @@ namespace Nox
         AssetHandle m_ReferencesAsset = 0;
         std::vector<std::string> m_References;
         bool m_OpenReferencesDialog = false;
+        // Replace References: from (the asset), to (picked in the dialog among the same type).
+        AssetHandle m_ReplaceFrom = 0;
+        AssetHandle m_ReplaceTo = 0;
+        char m_ReplaceFilter[128] = {};
+        bool m_OpenReplaceDialog = false;
+        std::function<void(AssetHandle, AssetHandle)> m_ReplaceInScenes;
         struct UnusedEntry
         {
             AssetHandle Handle = 0;
