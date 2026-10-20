@@ -28,6 +28,18 @@ namespace Nox
                 out << YAML::Key << "ScriptModulePath" << YAML::Value << config.ScriptModulePath.string();
                 out << YAML::Key << "WorldUnitsPerMeter" << YAML::Value << config.WorldUnitsPerMeter;
                 out << YAML::Key << "RenderQuality" << YAML::Value << config.RenderQuality;
+                out << YAML::Key << "WindowMode" << YAML::Value << config.WindowMode;
+                const ProjectRendererSettings& renderer = config.Renderer;
+                if (renderer.RayTracingResolution >= 0 || renderer.DiffuseGI >= 0 || renderer.ShadowedLights >= 0 || renderer.OIT >= 0 || renderer.TAA >= 0)
+                {
+                    out << YAML::Key << "Renderer" << YAML::Value << YAML::BeginMap;
+                    if (renderer.RayTracingResolution >= 0) out << YAML::Key << "RayTracingResolution" << YAML::Value << renderer.RayTracingResolution;
+                    if (renderer.DiffuseGI >= 0) out << YAML::Key << "DiffuseGI" << YAML::Value << renderer.DiffuseGI;
+                    if (renderer.ShadowedLights >= 0) out << YAML::Key << "ShadowedLights" << YAML::Value << renderer.ShadowedLights;
+                    if (renderer.OIT >= 0) out << YAML::Key << "OIT" << YAML::Value << renderer.OIT;
+                    if (renderer.TAA >= 0) out << YAML::Key << "TAA" << YAML::Value << renderer.TAA;
+                    out << YAML::EndMap;
+                }
                 out << YAML::EndMap; // Project
             }
             out << YAML::EndMap; // Root
@@ -67,6 +79,18 @@ namespace Nox
             config.WorldUnitsPerMeter = projectNode["WorldUnitsPerMeter"].as<float>();
         if (projectNode["RenderQuality"])
             config.RenderQuality = projectNode["RenderQuality"].as<std::string>();
+        if (projectNode["WindowMode"])
+            config.WindowMode = projectNode["WindowMode"].as<std::string>();
+        config.Renderer = {};
+        if (const YAML::Node renderer = projectNode["Renderer"]; renderer && renderer.IsMap())
+        {
+            auto read = [&](const char* key, int32_t& value) { if (renderer[key]) value = renderer[key].as<int32_t>(); };
+            read("RayTracingResolution", config.Renderer.RayTracingResolution);
+            read("DiffuseGI", config.Renderer.DiffuseGI);
+            read("ShadowedLights", config.Renderer.ShadowedLights);
+            read("OIT", config.Renderer.OIT);
+            read("TAA", config.Renderer.TAA);
+        }
 
         return true;
     }

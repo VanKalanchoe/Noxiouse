@@ -1,4 +1,5 @@
 #include "Renderer.h"
+#include "NoxCore/Project/ProjectRendererSettings.h"
 #include <Rtxdi/GI/ReSTIRGI.h>
 #include <Rtxdi/PT/ReSTIRPT.h>
 #include <Rtxdi/RtxdiUtils.h>
@@ -727,6 +728,23 @@ namespace Nox
             ApplyQualityPreset(GetRecommendedQuality());
         else
             ApplyQualityPreset(ParseQualityName(setting, RenderQuality::Custom));
+    }
+
+    void Renderer::ApplyProjectRendererSettings(const ProjectRendererSettings& settings)
+    {
+        if (settings.RayTracingResolution >= 1)
+            setRayTracingResolutionDivisor(static_cast<uint32_t>(settings.RayTracingResolution));
+        if (settings.DiffuseGI >= 0 && settings.DiffuseGI <= 3)
+        {
+            setDiffuseGIMode(static_cast<uint32_t>(settings.DiffuseGI));
+            setDDGIEnabled(settings.DiffuseGI == 1 || settings.DiffuseGI == 3); // screen probes keep DDGI underneath
+        }
+        if (settings.ShadowedLights >= 0)
+            setShadowRayLightLimit(static_cast<uint32_t>(settings.ShadowedLights));
+        if (settings.OIT >= 0)
+            setOITEnabled(settings.OIT != 0);
+        if (settings.TAA >= 0)
+            setTAAEnabled(settings.TAA != 0);
     }
 
     void Renderer::setDLSSEnabled(bool enabled)

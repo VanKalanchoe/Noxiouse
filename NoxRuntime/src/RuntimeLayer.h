@@ -20,6 +20,7 @@ namespace Nox
         ~RuntimeLayer() override;
 
         void OnUpdate(Timestep ts) override;
+        void OnEvent(Event& event) override;
 
     private:
         // The project to play: the first command line argument, else the first .nproj in the working directory, next to the

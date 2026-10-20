@@ -26,6 +26,7 @@
 #include "NoxCore/Core/Application.h"
 #include "NoxCore/Core/Input.h"
 #include "NoxCore/Core/WorldUnits.h"
+#include "NoxCore/Core/Window.h"
 #include "NoxCore/Scene/EntityBounds.h"
 #include "NoxCore/Events/InputEvents.h"
 #include "NoxCore/ImGui/ImGuiLayer.h"
@@ -761,6 +762,49 @@ namespace Nox
                                   "  Medium: + RT reflections, screen-probe GI (16 px), DLSS Balanced\n"
                                   "  High: + RTAO, RT glass, DLSS Quality (the closest to the path tracer)\n"
                                   "The project opens with it (saved in the .nproj). Changing a setting below makes it Custom for this session.");
+
+            // Saved on top of the preset (the .nproj's Renderer map): the game starts with them too.
+            if (ImGui::TreeNode("Project Settings (saved, on top of the preset)"))
+            {
+                ProjectRendererSettings& saved = config.Renderer;
+                bool changed = false;
+                auto choice = [&](const char* label, int32_t& value, std::initializer_list<std::pair<int32_t, const char*>> options)
+                {
+                    const char* current = "Preset's";
+                    for (const auto& [optionValue, name] : options)
+                        if (optionValue == value) current = name;
+                    ImGui::SetNextItemWidth(180.0f);
+                    if (ImGui::BeginCombo(label, current))
+                    {
+                        if (ImGui::Selectable("Preset's", value < 0)) { value = -1; changed = true; }
+                        for (const auto& [optionValue, name] : options)
+                            if (ImGui::Selectable(name, value == optionValue)) { value = optionValue; changed = true; }
+                        ImGui::EndCombo();
+                    }
+                };
+                choice("Ray Tracing Resolution##Project", saved.RayTracingResolution, { { 1, "Full" }, { 2, "Half" } });
+                choice("Diffuse GI##Project", saved.DiffuseGI, { { 0, "Environment (IBL)" }, { 1, "DDGI" }, { 2, "ReSTIR GI" }, { 3, "Screen Probes" } });
+                choice("Shadowed Lights##Project", saved.ShadowedLights, { { 0, "All" }, { 1, "1" }, { 2, "2" }, { 4, "4" }, { 8, "8" } });
+                choice("Order-Independent Transparency##Project", saved.OIT, { { 0, "Off" }, { 1, "On" } });
+                choice("Temporal Anti-Aliasing##Project", saved.TAA, { { 0, "Off" }, { 1, "On" } });
+
+                const char* windowModes[] = { "Windowed", "Borderless", "Fullscreen" };
+                int windowMode = static_cast<int>(ParseWindowMode(config.WindowMode));
+                ImGui::SetNextItemWidth(180.0f);
+                if (ImGui::Combo("Game Window", &windowMode, windowModes, IM_ARRAYSIZE(windowModes)))
+                {
+                    config.WindowMode = windowModes[windowMode];
+                    Project::SaveActive();
+                }
+                ImGui::SetItemTooltip("How the packaged game opens (NoxRuntime): Borderless covers the screen at the desktop's resolution,\n"
+                                      "Fullscreen switches the display (exclusive). Alt+Enter toggles a window in the game.");
+                if (changed)
+                {
+                    m_Renderer->ApplyProjectRendererSettings(saved);
+                    Project::SaveActive();
+                }
+                ImGui::TreePop();
+            }
             ImGui::Separator();
         }
 
@@ -2309,6 +2353,7 @@ namespace Nox
             RememberRecentProject(path);
             m_EditorCamera.ApplyWorldUnitDefaults(); // the project's world unit is only known now (U6)
             m_Renderer->ApplyQualitySetting(Project::GetActive()->GetConfig().RenderQuality);
+            m_Renderer->ApplyProjectRendererSettings(Project::GetActive()->GetConfig().Renderer);
             Project::GetActive()->GetEditorAssetManager()->Init();
             // The project's scripts (at startup ScriptEngine::Initialize loads them, after this).
             if (ScriptEngine::IsInitialized())

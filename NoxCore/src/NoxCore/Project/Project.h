@@ -6,6 +6,7 @@
 
 #include "NoxCore/Asset/RuntimeAssetManager.h"
 #include "NoxCore/Asset/EditorAssetManager.h"
+#include "NoxCore/Project/ProjectRendererSettings.h"
 
 namespace Nox
 {
@@ -27,6 +28,9 @@ namespace Nox
         // The renderer's quality preset the project opens with (Renderer::RenderQuality by name): "Auto" picks the one this GPU
         // should run (Renderer::GetRecommendedQuality); "Custom" leaves the renderer's own defaults.
         std::string RenderQuality = "Auto";
+        // Settings kept on top of the preset (ray tracing resolution, GI, ...), and the packaged game's window mode.
+        ProjectRendererSettings Renderer;
+        std::string WindowMode = kDefaultWindowMode;
     };
     
     class Project : public RefCounted

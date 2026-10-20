@@ -73,6 +73,7 @@ inline std::vector<std::string> samplerNames{"Linear", "Nearest"};
 
 namespace Nox
 {
+    struct ProjectRendererSettings;
     struct FrameGraphResources;
     struct ViewDrawResources;
 
@@ -639,6 +640,8 @@ namespace Nox
         // A project's setting (ProjectConfig::RenderQuality): "Auto" applies the recommended preset, a preset's name that preset,
         // anything else (Custom) leaves the settings as they are.
         void ApplyQualitySetting(const std::string& setting);
+        // The project's settings on top of the preset (ProjectConfig::Renderer): each one that is set (>= 0) replaces the preset's.
+        void ApplyProjectRendererSettings(const ProjectRendererSettings& settings);
 
         // Glass (transmissive materials) refracts the lit scene behind it, bent by IOR and thickness and blurred by roughness (a copy of
         // the scene with blur mips; transparent surfaces then draw in a pass of their own). Off: transmission only lowers the alpha.

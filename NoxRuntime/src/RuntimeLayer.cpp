@@ -4,10 +4,13 @@
 
 #include <SDL3/SDL_events.h>
 #include <SDL3/SDL_filesystem.h>
+#include <SDL3/SDL_keyboard.h>
 
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Core/Application.h"
 #include "NoxCore/Core/Log.h"
+#include "NoxCore/Core/Window.h"
+#include "NoxCore/Events/InputEvents.h"
 #include "NoxCore/Profiling/Profiler.h"
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Renderer/Font.h"
@@ -54,6 +57,17 @@ namespace Nox
         NOX_CORE_INFO("NoxRuntime: playing '{}'", projectFile.generic_string());
         // The project's quality preset ("Auto": the one this GPU should run, the fallback on smaller RT cards).
         m_Renderer->ApplyQualitySetting(Project::GetActive()->GetConfig().RenderQuality);
+        m_Renderer->ApplyProjectRendererSettings(Project::GetActive()->GetConfig().Renderer);
+
+        // The project's window mode (Borderless by default); "--windowed" on the command line keeps a window (testing).
+        {
+            const ApplicationCommandLineArgs& args = Application::Get().GetSpecification().CommandLineArgs;
+            bool windowed = false;
+            for (int index = 1; index < args.Count; ++index)
+                windowed |= std::string_view(args[index]) == "--windowed";
+            if (!windowed)
+                Application::Get().getWindow()->SetMode(ParseWindowMode(Project::GetActive()->GetConfig().WindowMode));
+        }
 
         // The RuntimeAssetManager (Project::Load(path, true)): the cooked assets as they are, nothing on disk is ever written.
         if (!ScriptEngine::Initialize(SDL_GetBasePath()))
@@ -119,6 +133,21 @@ namespace Nox
             NOX_PROFILE_SCOPE("Asset Manager Update");
             assetManager->Update(); // publishes the background loads that finished
         }
+    }
+
+    void RuntimeLayer::OnEvent(Event& event)
+    {
+        // Alt+Enter: windowed <-> full screen.
+        EventDispatcher dispatcher(event);
+        dispatcher.Dispatch<KeyPressedEvent>([](KeyPressedEvent& pressed)
+        {
+            if (pressed.GetKeyCode() == SDL_SCANCODE_RETURN && (pressed.GetModifiers() & SDL_KMOD_ALT) != 0 && !pressed.IsRepeat())
+            {
+                Application::Get().getWindow()->ToggleFullscreen();
+                return true;
+            }
+            return false;
+        });
     }
 
     std::filesystem::path RuntimeLayer::FindProjectFile() const
