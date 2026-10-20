@@ -1,5 +1,6 @@
 #include "Renderer.h"
 #include "ShaderCompileSplash.h"
+#include <SDL3/SDL_filesystem.h>
 #include "NoxCore/Project/ProjectRendererSettings.h"
 #include <Rtxdi/GI/ReSTIRGI.h>
 #include <Rtxdi/PT/ReSTIRPT.h>
