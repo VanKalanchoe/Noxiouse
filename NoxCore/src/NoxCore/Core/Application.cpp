@@ -166,7 +166,11 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[])
 /* This function runs when a new event (mouse input, keypresses, etc) occurs. */
 SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* currentEvent)
 {
+    // SDL can call this (and SDL_AppIterate) before SDL_AppInit has returned: Windows runs a modal loop while a window is dragged
+    // (the shader compile splash, the main window) and SDL keeps the program iterating from inside it. Nothing exists yet then.
     auto applicationState = static_cast<Nox::AppState*>(appstate);
+    if (!applicationState || !applicationState->app)
+        return SDL_APP_CONTINUE;
 
     if (applicationState->app->GetSpecification().isEditor)
         ImGui_ImplSDL3_ProcessEvent(currentEvent);
@@ -273,15 +277,24 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* currentEvent)
 /* This function runs once per frame, and is the heart of the program. */
 SDL_AppResult SDL_AppIterate(void* appstate)
 {
+    auto applicationState = static_cast<Nox::AppState*>(appstate);
+    if (!applicationState || !applicationState->app)
+        return SDL_APP_CONTINUE; // still in SDL_AppInit (see SDL_AppEvent)
+
     if (minimized)
     {
         SDL_Delay(10);
         return SDL_APP_CONTINUE;
     }
 
-    auto applicationState = static_cast<Nox::AppState*>(appstate);
-
+    // Not again from inside a frame: a window dragged while a frame pumps events (a file dialog, a progress window) makes SDL
+    // iterate from the modal loop.
+    static bool s_Iterating = false;
+    if (s_Iterating)
+        return SDL_APP_CONTINUE;
+    s_Iterating = true;
     applicationState->app->Run(*applicationState);
+    s_Iterating = false;
 
     return SDL_APP_CONTINUE; /* carry on with the program! */
 }
