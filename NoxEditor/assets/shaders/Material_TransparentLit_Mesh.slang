@@ -564,10 +564,18 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         Texture2D occlusionTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.occlusionTextureIndex, 0));
         ao = occlusionTex.Sample(sampLinearHandle, instance.occlusionTextureSet == 0 ? vertIn.uv0 : vertIn.uv1).r;
     }
-    if (pushConstant.ssaoTextureIndex != 0xFFFFFFFF)
+    // The screen-space AO at this pixel is the opaque surface's behind it: right for a decal lying on that surface, wrong for glass
+    // or anything standing in front of it (the background's occlusion, noisy and sliding as the camera moves). Only where this
+    // surface is the one the pixel sees (the screen-probe GI's distance says so; without it, only what lets no light through).
+    if (pushConstant.ssaoTextureIndex != 0xFFFFFFFF && transmission <= 0.0)
     {
-        Texture2D<float> ssaoTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.ssaoTextureIndex, 0));
-        ao *= ssaoTex.Load(int3(int2(vertIn.pos.xy), 0)).r;
+        float3 unusedIrradiance;
+        const bool onSurfaceBehind = ubo->screenGIDistanceTextureIndex == 0xFFFFFFFF || sample_screen_gi(ubo, vertIn.worldPos, unusedIrradiance);
+        if (onSurfaceBehind)
+        {
+            Texture2D<float> ssaoTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.ssaoTextureIndex, 0));
+            ao *= ssaoTex.Load(int3(int2(vertIn.pos.xy), 0)).r;
+        }
     }
 
     IBLResult ibl = getIBLContribution(ubo, iblInputs, n, reflection, ao);
