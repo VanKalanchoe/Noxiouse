@@ -4,7 +4,7 @@
 #include <span>
 #include <vector>
 
-#include <nri/NRI.h>
+#include <NRI/NRI.h>
 
 namespace Nox
 {
