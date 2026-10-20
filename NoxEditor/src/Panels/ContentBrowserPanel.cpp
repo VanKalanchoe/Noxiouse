@@ -7,11 +7,13 @@
 #include <cctype>
 #include <unordered_map>
 #include <cstring>
+#include <cfloat>
 
 #include "NoxCore/Animation/AnimationGraphNodes.h"
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Asset/EditorAssetManager.h"
 #include "NoxCore/Asset/MeshImporter.h"
+#include "NoxCore/Renderer/Mesh.h"
 #include "NoxCore/Core/WorldUnits.h"
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Asset/NodeGraphSerializer.h"
@@ -646,6 +648,40 @@ namespace Nox
                             {m_ThumbnailSize, m_ThumbnailSize}, uv0, uv1, ImVec4(0, 0, 0, 0),
                             isPrefab ? ImVec4(0.45f, 0.7f, 1.0f, 1.0f) : ImVec4(1, 1, 1, 1));
                         ImGui::PopStyleColor();
+
+                        // A mesh's size (its bounds, in meters and the project's units): what the importer scale made of it.
+                        if ((metadata.Type == AssetType::StaticMesh || metadata.Type == AssetType::Mesh) &&
+                            ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip))
+                        {
+                            glm::vec3 boundsMin(FLT_MAX), boundsMax(-FLT_MAX);
+                            auto addSubmeshes = [&](const auto& mesh)
+                            {
+                                for (const MeshHandle& submesh : mesh.GetSubMeshes())
+                                {
+                                    if (!submesh.hasBounds)
+                                        continue;
+                                    boundsMin = glm::min(boundsMin, glm::vec3(submesh.boundsMin));
+                                    boundsMax = glm::max(boundsMax, glm::vec3(submesh.boundsMax));
+                                }
+                            };
+                            AssetManager::RequestAsset(handle);
+                            if (metadata.Type == AssetType::StaticMesh)
+                            {
+                                if (const StaticMesh* mesh = AssetManager::FindLoadedAsset<StaticMesh>(handle))
+                                    addSubmeshes(*mesh);
+                            }
+                            else if (const Mesh* mesh = AssetManager::FindLoadedAsset<Mesh>(handle))
+                                addSubmeshes(*mesh);
+                            if (boundsMax.x >= boundsMin.x)
+                            {
+                                const glm::vec3 size = boundsMax - boundsMin;
+                                const glm::vec3 meters = glm::vec3(WorldUnits::ToMeters(size.x), WorldUnits::ToMeters(size.y), WorldUnits::ToMeters(size.z));
+                                ImGui::SetTooltip("%s\nSize: %.2f x %.2f x %.2f m (W x H x D)\n%.1f x %.1f x %.1f world units",
+                                                  browserEntry.Name.c_str(), meters.x, meters.y, meters.z, size.x, size.y, size.z);
+                            }
+                            else
+                                ImGui::SetTooltip("%s\nSize: loading...", browserEntry.Name.c_str());
+                        }
 
                         if (clicked)
                         {

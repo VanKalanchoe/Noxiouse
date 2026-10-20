@@ -9,8 +9,11 @@ namespace Nox
     ThumbnailCache::ThumbnailCache(Ref<Project> project)
         : m_Project(project)
     {
-        // TODO(Yan): revisit this path (move to Cache dir)
-        m_ThumbnailCachePath = m_Project->GetAssetDirectory() / "Thumbnail.cache";
+        // With the rendered thumbnails (AssetPreviewRenderer: Cache/Thumbnails), outside the assets: nothing the asset scan sees
+        // or a package ships. A file an older build left in the asset folder goes.
+        m_ThumbnailCachePath = m_Project->GetProjectDirectory() / "Cache" / "Thumbnail.cache";
+        std::error_code error;
+        std::filesystem::remove(m_Project->GetAssetDirectory() / "Thumbnail.cache", error);
     }
 
     Ref<Texture2D> ThumbnailCache::GetOrCreateThumbnail(AssetHandle handle, const AssetMetadata& metadata, bool& rendered)

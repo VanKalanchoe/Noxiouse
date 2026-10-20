@@ -100,7 +100,10 @@ namespace Nox
             m_renderGraph.AddPass(kForwardNames[index], RGPassFlags::Raster,
                 [&](RGBuilder& builder)
                 {
-                    builder.ColorTarget(hdr, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 1.0f });
+                    // An asset preview (thumbnails, the Material Editor) stands on a neutral grey instead of the scene's sky, so a
+                    // thumbnail looks the same by day and by night (the sky is not drawn for it below).
+                    const float backdrop = view.Preview ? 0.18f : 0.0f;
+                    builder.ColorTarget(hdr, NRI::LoadOP::clear, NRI::StoreOP::store, { backdrop, backdrop, backdrop * 1.08f, 1.0f });
                     builder.ColorTarget(entity, NRI::LoadOP::clear, NRI::StoreOP::store, { -1.0f, 0.0f, 0.0f, 0.0f }); // R32SINT
                     builder.DepthTarget(depth, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0 });                    // reverse Z
                     // Forward shading samples the DDGI atlases (through the uniforms) when DDGI ran this frame.
@@ -115,7 +118,7 @@ namespace Nox
                     ReadGpuScene(builder, resources);
                     ReadViewDraws(builder, draws);
                 },
-                [this, draws, uniformBuffer, skyboxSun](RGPassContext& context)
+                [this, draws, uniformBuffer, skyboxSun, preview = view.Preview](RGPassContext& context)
                 {
                     NRI::CommandBuffer& cmd = context.Cmd();
                     const uint64_t uniforms = uniformBuffer->getDeviceAddress();
@@ -153,7 +156,7 @@ namespace Nox
                     }
 
                     // C. The sky where nothing was drawn (depth 0).
-                    if (m_skyboxPipeline && m_environmentCubemap)
+                    if (m_skyboxPipeline && m_environmentCubemap && !preview)
                     {
                         cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_skyboxPipeline);
                         cursor.boundPipeline = m_skyboxPipeline.get();
