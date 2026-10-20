@@ -142,6 +142,19 @@ namespace Nox
             (removeIfProvided<Components>(entity), ...);
         }
 
+        // Whether `entity` was spawned by the instance `rootID` or by an instance nested in it.
+        bool ownedBy(Scene& scene, Entity entity, UUID rootID)
+        {
+            for (int depth = 0; depth < 16 && entity && entity.HasComponent<PrefabNodeComponent>(); ++depth)
+            {
+                const UUID instance = entity.GetComponent<PrefabNodeComponent>().Instance;
+                if (instance == rootID)
+                    return true;
+                entity = scene.GetEntityByUUID(instance);
+            }
+            return false;
+        }
+
         // The prefab's text of one entity with an instance's overrides patched in: a copy, the prefab's own text is never touched.
         // (Beware of yaml-cpp: assigning a node to another that shares data with the prefab's overwrites the prefab's data, so
         // the copy is returned by value and never assigned over a shared node.)
@@ -255,6 +268,39 @@ namespace Nox
                     result.push_back(node);
             }
             return result;
+        }
+
+        // Entities spawned by the instances nested in a prefab are not in its text: an entity of the prefab that hangs below one names
+        // it by the UUID derived from the nested instance's file id (what Prefab Mode spawns). `out` maps those to the UUIDs the
+        // entities get where the prefab is spawned (`sceneIdOf`: a file id of `nodes` -> its UUID there), nested instances inside
+        // nested instances too.
+        void addNestedNodeUUIDs(const std::vector<YAML::Node>& nodes, uint64_t rootId, const std::function<uint64_t(uint64_t)>& fileIdOf,
+                                const std::function<UUID(uint64_t)>& sceneIdOf, std::unordered_map<uint64_t, UUID>& out, int depth = 0)
+        {
+            if (depth >= 8)
+                return;
+            for (const YAML::Node node : nodes)
+            {
+                const uint64_t id = node["Entity"].as<uint64_t>();
+                const YAML::Node component = node["PrefabInstanceComponent"];
+                if (id == rootId || !component || !component["Prefab"])
+                    continue;
+                Ref<Prefab> inner = AssetManager::GetAsset<Prefab>(AssetHandle(component["Prefab"].as<uint64_t>()));
+                if (!inner)
+                    continue;
+                const uint64_t fileU = fileIdOf(id);
+                const UUID sceneU = sceneIdOf(id);
+                const std::vector<YAML::Node> innerNodes = effectiveNodes(*inner);
+                for (const YAML::Node innerNode : innerNodes)
+                {
+                    const uint64_t innerId = innerNode["Entity"].as<uint64_t>();
+                    if (innerId != inner->Root)
+                        out[static_cast<uint64_t>(PrefabInstance::NodeUUID(UUID(fileU), innerId))] = PrefabInstance::NodeUUID(sceneU, innerId);
+                }
+                addNestedNodeUUIDs(innerNodes, inner->Root,
+                    [&](uint64_t innerId) { return innerId == inner->Root ? fileU : static_cast<uint64_t>(PrefabInstance::NodeUUID(UUID(fileU), innerId)); },
+                    [&](uint64_t innerId) { return innerId == inner->Root ? sceneU : PrefabInstance::NodeUUID(sceneU, innerId); }, out, depth + 1);
+            }
         }
 
         // The prefab's entities under `root` (the instance root stands for the prefab's root entity: it keeps its own name,
@@ -373,6 +419,9 @@ namespace Nox
 
             // The file stores parent/child links as file ids: they become the spawned entities' UUIDs, and an entity without a
             // parent in the file hangs from the root.
+            // A parent that is an entity of a nested instance (P1) is linked up when that instance spawns.
+            std::unordered_map<uint64_t, UUID> nestedIds;
+            bool nestedIdsBuilt = false;
             if (!root.HasComponent<RelationshipComponent>())
                 root.AddComponent<RelationshipComponent>();
             for (Entity entity : spawned)
@@ -381,8 +430,20 @@ namespace Nox
                     entity.AddComponent<RelationshipComponent>();
                 auto& relationship = entity.GetComponent<RelationshipComponent>();
 
-                const auto parent = ids.find(static_cast<uint64_t>(relationship.Parent));
-                relationship.Parent = relationship.Parent != 0 && parent != ids.end() ? parent->second : rootID;
+                const uint64_t fileParent = static_cast<uint64_t>(relationship.Parent);
+                const auto parent = ids.find(fileParent);
+                relationship.Parent = fileParent != 0 && parent != ids.end() ? parent->second : rootID;
+                if (fileParent != 0 && parent == ids.end())
+                {
+                    if (!nestedIdsBuilt)
+                    {
+                        addNestedNodeUUIDs(nodes, prefab.Root, [](uint64_t id) { return id; },
+                                           [&](uint64_t id) { const auto found = ids.find(id); return found != ids.end() ? found->second : UUID(0); }, nestedIds);
+                        nestedIdsBuilt = true;
+                    }
+                    if (const auto nested = nestedIds.find(fileParent); nested != nestedIds.end())
+                        relationship.Parent = nested->second;
+                }
 
                 std::vector<UUID> children;
                 for (UUID child : relationship.Children)
@@ -638,11 +699,20 @@ namespace Nox
         }
 
         // The file was written from scene entities: links to entities that are not in it (the root's old parent, the tops' parent)
-        // are cut, and the tops hang from the root.
+        // are cut, and the tops hang from the root. A link to an entity of a nested instance stays: here the instance spawns it with
+        // the UUID the file names (its id is its UUID), and links it up then.
         if (!root.HasComponent<RelationshipComponent>())
             root.AddComponent<RelationshipComponent>();
         root.GetComponent<RelationshipComponent>().Parent = 0;
         root.GetComponent<TransformComponent>().Translation = glm::vec3(0.0f);
+
+        std::unordered_map<uint64_t, UUID> nestedIds;
+        {
+            std::vector<YAML::Node> nodeList;
+            for (const YAML::Node node : nodes)
+                nodeList.push_back(node);
+            addNestedNodeUUIDs(nodeList, prefab.Root, [](uint64_t id) { return id; }, [](uint64_t id) { return UUID(id); }, nestedIds);
+        }
 
         for (Entity entity : created)
         {
@@ -653,7 +723,8 @@ namespace Nox
             if (entity == root)
                 continue;
 
-            if (relationship.Parent == 0 || !fileIDs.contains(static_cast<uint64_t>(relationship.Parent)))
+            const uint64_t parentId = static_cast<uint64_t>(relationship.Parent);
+            if (parentId == 0 || (!fileIDs.contains(parentId) && !nestedIds.contains(parentId)))
                 relationship.Parent = root.GetUUID();
         }
 
@@ -691,8 +762,9 @@ namespace Nox
                 if (nodes.get<PrefabNodeComponent>(nodeHandle).Instance == rootID)
                     spawned.push_back(Entity(nodeHandle, &scene).GetUUID());
             }
-            // What the user attached below the spawned entities is not the prefab's: it must not go with its parent (it keeps its
-            // parent's UUID and hangs from the respawned entity again).
+            // What is attached below the spawned entities (and below the entities of the instances nested in them) and not this
+            // instance's -- the user's additions, an outer prefab's entities hung below a nested one -- must not go with its parent: it
+            // keeps its parent's UUID and hangs from the respawned entity again.
             auto detachAttached = [&](Entity parent)
             {
                 if (!parent || !parent.HasComponent<RelationshipComponent>())
@@ -700,12 +772,16 @@ namespace Nox
                 std::erase_if(parent.GetComponent<RelationshipComponent>().Children, [&](UUID childID)
                 {
                     Entity child = scene.GetEntityByUUID(childID);
-                    return child && !child.HasComponent<PrefabNodeComponent>();
+                    return child && !ownedBy(scene, child, rootID);
                 });
             };
             detachAttached(root);
-            for (UUID id : spawned)
-                detachAttached(scene.GetEntityByUUID(id));
+            for (auto nodeHandle : nodes)
+            {
+                Entity entity(nodeHandle, &scene);
+                if (ownedBy(scene, entity, rootID))
+                    detachAttached(entity);
+            }
 
             for (UUID id : spawned)
             {
@@ -830,8 +906,8 @@ namespace Nox
         }
 
         // Scene entities below the instance's spawned entities that the prefab does not have (top ones: their own children come
-        // with them). The parent is the spawned entity they hang from.
-        std::vector<std::pair<Entity, Entity>> attachedEntities(Scene& scene, Entity root)
+        // with them). The parent is the spawned entity they hang from. `deep`: below the entities of the instances nested in it too.
+        std::vector<std::pair<Entity, Entity>> attachedEntities(Scene& scene, Entity root, bool deep = false)
         {
             const UUID rootID = root.GetUUID();
             std::vector<std::pair<Entity, Entity>> result; // child, spawned parent
@@ -839,8 +915,9 @@ namespace Nox
             std::vector<Entity> spawned{ root };
             for (auto handle : nodes)
             {
-                if (nodes.get<PrefabNodeComponent>(handle).Instance == rootID)
-                    spawned.push_back(Entity(handle, &scene));
+                Entity entity(handle, &scene);
+                if (nodes.get<PrefabNodeComponent>(handle).Instance == rootID || (deep && ownedBy(scene, entity, rootID)))
+                    spawned.push_back(entity);
             }
             for (Entity parent : spawned)
             {
@@ -904,6 +981,21 @@ namespace Nox
             if (entity == root)
                 return prefab.Root;
             return entity.HasComponent<PrefabNodeComponent>() ? entity.GetComponent<PrefabNodeComponent>().LocalId : 0;
+        }
+
+        // How the prefab's text names one of the instance's entities: its local id, or for an entity of an instance nested in it the UUID
+        // derived from that instance's id (what addNestedNodeUUIDs resolves).
+        uint64_t fileIdOf(Scene& scene, Entity entity, Entity root, const Prefab& prefab, int depth = 0)
+        {
+            if (entity == root || !entity.HasComponent<PrefabNodeComponent>())
+                return localIdOf(entity, root, prefab);
+            const PrefabNodeComponent node = entity.GetComponent<PrefabNodeComponent>();
+            if (node.Instance == root.GetUUID() || depth >= 8)
+                return node.LocalId;
+            Entity instance = scene.GetEntityByUUID(node.Instance);
+            if (!instance)
+                return 0;
+            return static_cast<uint64_t>(PrefabInstance::NodeUUID(UUID(fileIdOf(scene, instance, root, prefab, depth + 1)), node.LocalId));
         }
     }
 
@@ -1283,6 +1375,20 @@ namespace Nox
             for (const YAML::Node node : *variant.Entities)
                 ownIds.insert(node["Entity"].as<uint64_t>());
 
+            // Below an entity of an instance nested in the base or among the variant's own entities: the UUID that instance spawns it with.
+            std::unordered_map<uint64_t, UUID> nestedIds;
+            if (Ref<Prefab> base = AssetManager::GetAsset<Prefab>(variant.Base))
+            {
+                addNestedNodeUUIDs(effectiveNodes(*base), base->Root, [](uint64_t id) { return id; },
+                                   [&](uint64_t id) { return id == base->Root ? rootID : NodeUUID(rootID, id); }, nestedIds);
+            }
+            {
+                std::vector<YAML::Node> own;
+                for (const YAML::Node node : *variant.Entities)
+                    own.push_back(node);
+                addNestedNodeUUIDs(own, variant.Root, [](uint64_t id) { return id; }, [](uint64_t id) { return UUID(id); }, nestedIds);
+            }
+
             for (const YAML::Node node : *variant.Entities)
             {
                 const uint64_t id = node["Entity"].as<uint64_t>();
@@ -1296,7 +1402,9 @@ namespace Nox
                     entity.AddComponent<RelationshipComponent>();
                 auto& relationship = entity.GetComponent<RelationshipComponent>();
                 const uint64_t parentId = static_cast<uint64_t>(relationship.Parent);
-                if (!ownIds.contains(parentId))
+                if (const auto nested = nestedIds.find(parentId); !ownIds.contains(parentId) && nested != nestedIds.end())
+                    relationship.Parent = nested->second;
+                else if (!ownIds.contains(parentId))
                     relationship.Parent = (parentId == 0 || parentId == variant.Root) ? rootID : NodeUUID(rootID, parentId);
                 std::erase_if(relationship.Children, [&](UUID child) { return !ownIds.contains(static_cast<uint64_t>(child)); });
                 entity.MarkTransformDirty();
@@ -1321,8 +1429,8 @@ namespace Nox
         variant.Nested = CollectNested(scene, root);
 
         YAML::Node entities(YAML::NodeType::Sequence);
-        for (auto [child, parent] : attachedEntities(scene, root))
-            appendAddedSubtree(scene, child, localIdOf(parent, root, *base), base->Root, entities);
+        for (auto [child, parent] : attachedEntities(scene, root, true))
+            appendAddedSubtree(scene, child, fileIdOf(scene, parent, root, *base), base->Root, entities);
         variant.Entities = std::make_shared<YAML::Node>(entities);
         return true;
     }
@@ -1336,11 +1444,6 @@ namespace Nox
     {
         if (!innerRoot || !innerRoot.HasComponent<PrefabNodeComponent>() || !innerRoot.HasComponent<PrefabInstanceComponent>())
             return false;
-        if (entry.Kind == OverrideEntry::EntryKind::AddedEntity)
-        {
-            NOX_CORE_WARN("An entity added below a nested instance cannot be applied to the outer prefab yet");
-            return false;
-        }
 
         const PrefabNodeComponent placement = innerRoot.GetComponent<PrefabNodeComponent>();
         Entity outer = scene.GetEntityByUUID(placement.Instance);
@@ -1353,6 +1456,28 @@ namespace Nox
 
         // The instances take their differences first: the outer prefab's text is about to change.
         CaptureOverrides(scene, outerHandle);
+
+        // An entity added below the nested instance becomes an entity of the outer prefab (its own, for a variant) that hangs from
+        // the nested instance's entity, named by the UUID derived from the instance's id in the outer prefab.
+        if (entry.Kind == OverrideEntry::EntryKind::AddedEntity)
+        {
+            Entity added = scene.GetEntityByUUID(entry.SceneEntity);
+            const Prefab* innerPrefab = AssetManager::FindLoadedAsset<Prefab>(innerRoot.GetComponent<PrefabInstanceComponent>().Prefab);
+            if (!added || !innerPrefab)
+                return false;
+            const uint64_t parentId = entry.Entity == innerPrefab->Root ? placement.LocalId
+                                                                        : static_cast<uint64_t>(NodeUUID(UUID(placement.LocalId), entry.Entity));
+            YAML::Node entities = outerPrefab->Entities ? YAML::Clone(*outerPrefab->Entities) : YAML::Node(YAML::NodeType::Sequence);
+            appendAddedSubtree(scene, added, parentId, outerPrefab->Root, entities);
+            outerPrefab->Entities = std::make_shared<YAML::Node>(entities);
+            scene.DestroyEntity(added);
+
+            const AssetMetadata metadata = AssetManager::GetMetadata(outerHandle);
+            if (!PrefabImporter::SavePrefab(*outerPrefab, Project::GetActiveAssetDirectory() / metadata.FilePath))
+                NOX_CORE_ERROR("Could not write prefab '{}'", metadata.FilePath.generic_string());
+            RespawnAll(scene, outerHandle);
+            return true;
+        }
 
         // The nested instance's changes as the outer prefab has them now: in its own text of it, else (the outer prefab is a variant and
         // the instance belongs to its base) in the variant's record of it, else in the base's text.

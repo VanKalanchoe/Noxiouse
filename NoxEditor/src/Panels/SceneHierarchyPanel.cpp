@@ -522,7 +522,10 @@ namespace Nox
             m_PendingSingleSelect = {};
         }
 
-        // --- 1. DRAG SOURCE: Pick up this entity to drag it (not the entities of a prefab instance: they belong to it) ---
+        // --- 1. DRAG SOURCE: Pick up this entity to drag it (not the entities of a prefab instance: they belong to it; Unity's rule,
+        // restructuring an instance needs Unpack or Prefab Mode) ---
+        if (prefabNode && ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left))
+            ImGui::SetTooltip("Part of a prefab instance: it cannot be moved to another parent.\nUnpack the instance, or open the prefab to restructure it.");
         if (!prefabNode && ImGui::BeginDragDropSource())
         {
             UUID entityID = entity.GetUUID();
@@ -995,7 +998,7 @@ namespace Nox
                     }
                     if (ImGui::IsItemHovered())
                         ImGui::SetTooltip("Apply writes this change into the prefab: every instance takes it.");
-                    if (entity.HasComponent<PrefabNodeComponent>() && entry.Kind != Kind::AddedEntity)
+                    if (entity.HasComponent<PrefabNodeComponent>())
                     {
                         // This instance sits inside another prefab: the change can also become part of THAT prefab's text of it.
                         ImGui::SameLine();

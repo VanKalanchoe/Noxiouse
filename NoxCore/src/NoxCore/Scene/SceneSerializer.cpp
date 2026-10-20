@@ -1096,21 +1096,24 @@ namespace Nox
         if (tops.empty())
             return std::string();
 
+        // The entities a prefab instance spawned are not written (the instance is), but what hangs below them and is not theirs is:
+        // it names the spawned parent by its UUID, derived from the instance's (which is its id in the file), and the spawn links it up.
         std::vector<Entity> written; // depth first, parents before children
-        std::function<void(Entity)> collect = [&](Entity entity)
+        std::function<void(Entity, bool)> collect = [&](Entity entity, bool write)
         {
-            written.push_back(entity);
+            if (write)
+                written.push_back(entity);
             if (!entity.HasComponent<RelationshipComponent>())
                 return;
             for (UUID childID : entity.GetComponent<RelationshipComponent>().Children)
             {
                 Entity child = scene.GetEntityByUUID(childID);
-                if (child && !IsSpawnedModelNode(scene, childID) && !IsSpawnedPrefabNode(scene, childID))
-                    collect(child);
+                if (child && !IsSpawnedModelNode(scene, childID))
+                    collect(child, !IsSpawnedPrefabNode(scene, childID));
             }
         };
         for (Entity top : tops)
-            collect(top);
+            collect(top, true);
 
         auto worldPosition = [](Entity entity) -> glm::vec3
         {
