@@ -277,6 +277,7 @@ namespace Nox
         watchShader("assets/shaders/DDGIBlendIrradiance.slang", "DDGIBlendIrradiance", [this]() { createDDGIPipelines(true); });
         watchShader("assets/shaders/DDGIBlendDistance.slang", "DDGIBlendDistance", [this]() { createDDGIPipelines(true); });
         watchShader("assets/shaders/DDGIProbeSpheres.slang", "DDGIProbeSpheres", [this]() { createDDGIPipelines(true); });
+        watchShader("assets/shaders/DDGIRelocation.slang", "DDGIRelocation", [this]() { createDDGIPipelines(true); });
         // Screen-probe GI
         for (const char* shader : { "ScreenProbeCommon", "ScreenProbePlace", "ScreenProbeTrace", "ScreenProbeIrradiance", "ScreenProbeFilter",
                                     "ScreenProbeIntegrate" })
@@ -1422,6 +1423,17 @@ namespace Nox
                 .sourcePath = "assets/shaders/DDGIBlendDistance.slang"
             });
             m_ddgiBlendDistancePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        }
+
+        // 3b. Probe relocation (one texel per probe: its offset in cells)
+        {
+            NRI::PipelineDesc desc{};
+            desc.forceCompile = forceCompile;
+            desc.colorFormats = {NRI::ImageFormat::R16G16B16A16_SFLOAT};
+            desc.shaders.push_back({ .stage = NRI::ShaderStage::Task, .entryPoint = "taskMain", .sourcePath = "assets/shaders/DDGIRelocation.slang" });
+            desc.shaders.push_back({ .stage = NRI::ShaderStage::Mesh, .entryPoint = "meshMain", .sourcePath = "assets/shaders/DDGIRelocation.slang" });
+            desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "fragMain", .sourcePath = "assets/shaders/DDGIRelocation.slang" });
+            m_ddgiRelocationPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
         }
 
         // 4. Debug Spheres Pipeline (Rendered in Forward 3D pass into the HDR scene + entity ID targets)
@@ -4722,6 +4734,8 @@ namespace Nox
         // The atlases this frame's DDGI blend writes (the lighting pass reads them).
         uniformData.ddgiIrradianceTextureIndex = frame.ddgiAdded ? graph.GetSlotOr(resources.DDGIIrradiance[frame.ddgiWriteIndex], NoTexture) : NoTexture;
         uniformData.ddgiDistanceTextureIndex = frame.ddgiAdded ? graph.GetSlotOr(resources.DDGIDistance[frame.ddgiWriteIndex], NoTexture) : NoTexture;
+        uniformData.ddgiProbeOffsetsTextureIndex = frame.ddgiAdded && resources.DDGIProbeOffsets[frame.ddgiWriteIndex].IsValid()
+                                                       ? graph.GetSlotOr(resources.DDGIProbeOffsets[frame.ddgiWriteIndex], NoTexture) : NoTexture;
         // The screen-probe GI's per-pixel result for forward and ray-hit shading (SceneGI.slang).
         uniformData.screenGITextureIndex = frame.screenProbeGIAdded ? graph.GetSlotOr(resources.ScreenProbeGI[frame.screenProbeGIWriteIndex], NoTexture)
                                                                     : NoTexture;

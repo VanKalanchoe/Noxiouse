@@ -109,7 +109,12 @@ float4 fragMain(
     if (!ddgi_probe_updates(ubo, probeIndex, pushConstant.frameIndex))
         return float4(0.0, 0.0, 0.0, 1000.0);
 
-    float3 probePos = ddgi_probe_position(ubo, probeIndex);
+    // From where last frame's relocation put it (a probe that just came into its cascade: its grid point; the slot's offset was the
+    // probe's that left).
+    const uint cascade = ddgi_cascade_of(ubo, probeIndex);
+    float3 probePos = ddgi_cascade_origin(ubo, cascade) + float3(ddgi_local_coord(ubo, probeIndex)) * ddgi_cascade_spacing(ubo, cascade);
+    if (!ddgi_probe_entered(ubo, probeIndex))
+        probePos += ddgi_probe_offset(ubo, probeIndex, pushConstant.probeOffsetsTextureIndex);
 
     // Uniformly distributed spherical Fibonacci ray direction
     float3 baseRayDir = spherical_fibonacci(rayIndex, pushConstant.raysPerProbe);

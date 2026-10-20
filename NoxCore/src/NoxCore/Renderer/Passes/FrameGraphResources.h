@@ -65,6 +65,7 @@ namespace Nox
         RGTexture DDGIRayData;
         RGTexture DDGIIrradiance[2];
         RGTexture DDGIDistance[2];
+        RGTexture DDGIProbeOffsets[2]; // probe relocation, ping-ponged with the atlases (invalid while relocation is off)
 
         // Screen-probe GI (ScreenProbe*.slang)
         RGTexture ScreenProbePosition;     // per probe: world position (w: 1, 0 for none)
@@ -134,6 +135,15 @@ namespace Nox
     {
         if (texture.IsValid())
             builder.Read(texture);
+    }
+
+    // A pass that samples the DDGI probes (through the uniforms): the atlases of `index` and the probes' relocation with them.
+    inline void ReadDDGI(RGBuilder& builder, const FrameGraphResources& resources, uint32_t index)
+    {
+        builder.Read(resources.DDGIIrradiance[index]);
+        builder.Read(resources.DDGIDistance[index]);
+        if (resources.DDGIProbeOffsets[index].IsValid())
+            builder.Read(resources.DDGIProbeOffsets[index]);
     }
 
     inline void ReadIfValid(RGBuilder& builder, RGBuffer buffer)

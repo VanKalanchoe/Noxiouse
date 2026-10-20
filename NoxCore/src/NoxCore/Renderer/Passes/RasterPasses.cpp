@@ -892,8 +892,7 @@ namespace Nox
             {
                 if (m_frame.ddgiAdded)
                 {
-                    builder.Read(resources.DDGIIrradiance[m_frame.ddgiWriteIndex]);
-                    builder.Read(resources.DDGIDistance[m_frame.ddgiWriteIndex]);
+                    ReadDDGI(builder, resources, m_frame.ddgiWriteIndex);
                 }
                 if (shadows && resources.TLAS.IsValid())
                 {
@@ -1039,8 +1038,7 @@ namespace Nox
                 // Transparent lit shading samples the DDGI atlases (through the uniforms); the probe spheres show irradiance.
                 if (m_frame.ddgiAdded)
                 {
-                    builder.Read(resources.DDGIIrradiance[m_frame.ddgiWriteIndex]);
-                    builder.Read(resources.DDGIDistance[m_frame.ddgiWriteIndex]);
+                    ReadDDGI(builder, resources, m_frame.ddgiWriteIndex);
                 }
                 // ...and the screen-probe GI of the surface right behind (decals) or of a traced hit on screen (SceneGI.slang).
                 if (m_frame.screenProbeGIAdded)

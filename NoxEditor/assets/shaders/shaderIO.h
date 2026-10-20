@@ -432,6 +432,9 @@ struct UniformBufferObject
     // The shadow-ray budget of the deferred lighting's light loop: per pixel, only the N lights that light it the most trace their
     // shadow rays (the sun through its shadow mask aside); the weaker ones light it unshadowed. 0: every light in range traces.
     uint32_t shadowRayLightLimit;
+    // DDGI probe relocation (DDGIRelocation.slang): a texture of each probe's offset from its grid point in cells of its cascade
+    // (one texel per probe, DDGI_PROBES_PER_ROW a row), matching the atlases of this frame. 0xFFFFFFFF: probes on the grid.
+    uint32_t ddgiProbeOffsetsTextureIndex;
 };
 
 struct Vertex
@@ -1499,6 +1502,7 @@ struct PushConstantDDGIRadiance
     uint32_t raysPerProbe;
     uint32_t probeCountTotal;
     uint32_t frameIndex;
+    uint32_t probeOffsetsTextureIndex; // where the probes trace from: last frame's relocation (0xFFFFFFFF: the grid points)
 };
 
 struct PushConstantDDGIBlend

@@ -1369,6 +1369,11 @@ namespace Nox
                         ImGui::SetTooltip("How many probes trace rays each frame. Fewer is cheaper; light changes settle a little more slowly.\n"
                                           "Probes the volume just scrolled over always update at once.");
 
+                    ImGui::Checkbox("Probe Relocation", &m_Renderer->getDDGIRelocation());
+                    if (ImGui::IsItemHovered())
+                        ImGui::SetTooltip("Probes that end up inside walls or right against a surface move (up to 45 %% of a cell) to\n"
+                                          "free space nearby, so the light next to thin walls and floors neither goes dark nor leaks.");
+
                     float& hysteresis = m_Renderer->getDDGIHysteresis();
                     ImGui::SliderFloat("Temporal Hysteresis", &hysteresis, 0.80f, 0.995f, "%.3f");
 

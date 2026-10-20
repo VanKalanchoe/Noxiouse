@@ -105,8 +105,7 @@ namespace Nox
                     // Forward shading samples the DDGI atlases (through the uniforms) when DDGI ran this frame.
                     if (ddgi)
                     {
-                        builder.Read(resources.DDGIIrradiance[ddgiIndex]);
-                        builder.Read(resources.DDGIDistance[ddgiIndex]);
+                        ReadDDGI(builder, resources, ddgiIndex);
                     }
                     // The forward shading's shadow rays (ray query).
                     if (resources.TLAS.IsValid())

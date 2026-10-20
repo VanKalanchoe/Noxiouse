@@ -125,10 +125,26 @@ uint3 ddgi_local_coord(UniformBufferObject* ubo, uint storageIndex)
     return (slot + counts - scroll) % counts;
 }
 
+// A probe's relocation (DDGIRelocation.slang) in world units, from an offsets texture (0xFFFFFFFF: none). Bounded to the 45 % of a
+// cell relocation keeps to, so a texture not written yet (the first frames) cannot throw a probe out of its cell.
+float3 ddgi_probe_offset(UniformBufferObject* ubo, uint storageIndex, uint offsetsTextureIndex)
+{
+    if (offsetsTextureIndex == 0xFFFFFFFF)
+        return float3(0.0);
+    Texture2D offsetsTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + offsetsTextureIndex, 0));
+    const uint probesPerRow = max(uint(ubo->ddgiAtlasParams.x) / 10, 1u);
+    float3 cells = offsetsTex.Load(int3(int(storageIndex % probesPerRow), int(storageIndex / probesPerRow), 0)).xyz;
+    if (any(isnan(cells)) || any(isinf(cells)))
+        cells = float3(0.0);
+    return clamp(cells, -0.45, 0.45) * ddgi_cascade_spacing(ubo, ddgi_cascade_of(ubo, storageIndex));
+}
+
+// Where a probe is: its grid point plus its relocation of this frame's atlases (the uniforms').
 float3 ddgi_probe_position(UniformBufferObject* ubo, uint storageIndex)
 {
     const uint cascade = ddgi_cascade_of(ubo, storageIndex);
-    return ddgi_cascade_origin(ubo, cascade) + float3(ddgi_local_coord(ubo, storageIndex)) * ddgi_cascade_spacing(ubo, cascade);
+    return ddgi_cascade_origin(ubo, cascade) + float3(ddgi_local_coord(ubo, storageIndex)) * ddgi_cascade_spacing(ubo, cascade) +
+           ddgi_probe_offset(ubo, storageIndex, ubo->ddgiProbeOffsetsTextureIndex);
 }
 
 // The probe came into its cascade this frame (the cascade moved): what its slot holds belongs to a probe that left, so it starts over.
@@ -274,7 +290,7 @@ float3 sample_ddgi_cascade(
             {
                 const uint3 probeCoord = uint3(baseCoord + int3(dx, dy, dz));
                 const uint probeIndex = ddgi_storage_index(ubo, cascade, probeCoord);
-                const float3 probePos = origin + float3(probeCoord) * spacing;
+                const float3 probePos = origin + float3(probeCoord) * spacing + ddgi_probe_offset(ubo, probeIndex, ubo->ddgiProbeOffsetsTextureIndex);
 
                 // 1. Backface term: probes behind the surface fade smoothly instead of dropping out at once.
                 const float3 trueToProbe = probePos - worldPos;

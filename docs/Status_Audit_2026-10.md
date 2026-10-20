@@ -64,7 +64,8 @@ for history. File references are to the code as of this audit.
   mirror rays; RT reflections show them through their specular highlight only, as engines do, not as a panel, which would
   count them twice.)
 - Screen-probe GI: importance sampling of probe rays, adaptive extra probes, screen-space trace before the ray trace.
-- DDGI probe relocation; faster (half-res / checkerboard) ReSTIR GI; ReSTIR PT spatial pass; pairwise MIS / boiling filter for DI.
+- Faster (half-res / checkerboard) ReSTIR GI; ReSTIR PT spatial pass; pairwise MIS / boiling filter for DI. (DDGI probe
+  relocation: built 2026-10-20, Probe Relocation in the DDGI settings, on by default.)
 - Volumetric fog / light shafts (froxels); NVIDIA Reflex; NRD SH denoisers.
 - (Fallback rung "shadow rays for the N strongest lights": built 2026-10-20 -- Shadowed Lights per Pixel, Low 4, Medium 8,
   High all.)

@@ -502,6 +502,8 @@ namespace Nox
         uint32_t getDDGIRaysPerProbe() const { return m_ddgiRaysPerProbe; }
         void setDDGIRaysPerProbe(uint32_t count) { m_ddgiRaysPerProbe = count; }
         float& getDDGIHysteresis() { return m_ddgiHysteresis; }
+        // Probe relocation (DDGIRelocation.slang): probes inside walls or against surfaces move up to 45 % of a cell to free space.
+        bool& getDDGIRelocation() { return m_ddgiRelocation; }
         float& getDDGINormalBias() { return m_ddgiNormalBias; }
         float& getDDGIDebugSphereRadius() { return m_ddgiDebugSphereRadius; }
         bool& getDDGIDebugXRay() { return m_ddgiDebugXRay; }
@@ -1064,6 +1066,7 @@ namespace Nox
         std::unique_ptr<NRI::Pipeline> m_ddgiRadiancePipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_ddgiBlendIrradiancePipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_ddgiBlendDistancePipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_ddgiRelocationPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_ddgiDebugSpheresPipeline = nullptr;
         // RT results at a lower ray tracing resolution back to the render resolution: RGBA16F (reflections), RG16F (shadow mask),
         // R16F (RTAO).
@@ -1194,6 +1197,7 @@ namespace Nox
         uint32_t m_ddgiProbeCountZ = 20;
         uint32_t m_ddgiRaysPerProbe = 128;
         float m_ddgiHysteresis = 0.97f;
+        bool m_ddgiRelocation = true;
         float m_ddgiNormalBias = 0.2f;
         float m_ddgiDebugSphereRadius = 0.15f; // meters
         bool m_ddgiDebugXRay = true;

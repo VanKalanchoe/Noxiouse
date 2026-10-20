@@ -242,8 +242,7 @@ namespace Nox
                 // is on screen (SceneGI.slang).
                 if (m_frame.ddgiAdded)
                 {
-                    builder.Read(resources.DDGIIrradiance[m_frame.ddgiWriteIndex]);
-                    builder.Read(resources.DDGIDistance[m_frame.ddgiWriteIndex]);
+                    ReadDDGI(builder, resources, m_frame.ddgiWriteIndex);
                 }
                 if (m_frame.screenProbeGIAdded)
                 {
@@ -372,13 +371,27 @@ namespace Nox
             resources.DDGIIrradiance[i] = irradianceHistory.Textures[i];
             resources.DDGIDistance[i] = distanceHistory.Textures[i];
         }
+        bool offsetsReset = false;
+        if (m_ddgiRelocation && m_ddgiRelocationPipeline)
+        {
+            // Probe relocation: one texel per probe (its offset in cells), laid out like the atlases' probes.
+            RGTextureDesc offsets;
+            offsets.Size = RGSize::Absolute;
+            offsets.Width = DDGIProbesPerRow;
+            offsets.Height = probeRows;
+            offsets.Format = NRI::ImageFormat::R16G16B16A16_SFLOAT;
+            const RGTextureHistory offsetsHistory = graph.GetHistoryTexture("DDGI Probe Offsets", offsets, 2);
+            for (uint32_t i = 0; i < 2; ++i)
+                resources.DDGIProbeOffsets[i] = offsetsHistory.Textures[i];
+            offsetsReset = offsetsHistory.WasReset;
+        }
 
         // Atlases ping-pong: blend reads last frame's atlas and writes the other one, which lighting reads this frame.
         frame.ddgiReadIndex = m_ddgiHistoryIndex;
         frame.ddgiWriteIndex = 1 - m_ddgiHistoryIndex;
         m_ddgiHistoryIndex = frame.ddgiWriteIndex;
         // New atlases (first use, probe grid resized) or a requested reset: the blend ignores the previous atlas.
-        frame.ddgiFirstFrame = m_isFirstFrame || irradianceHistory.WasReset || distanceHistory.WasReset ||
+        frame.ddgiFirstFrame = m_isFirstFrame || irradianceHistory.WasReset || distanceHistory.WasReset || offsetsReset ||
                                graph.WasHistoryReset(DDGIHistoryKey);
     }
 
@@ -406,12 +419,14 @@ namespace Nox
                 ReadIfValid(builder, resources.TLAS);
                 ReadGpuScene(builder, resources);
                 // Multi-bounce: hits sample the atlases bound in the uniforms.
-                builder.Read(resources.DDGIIrradiance[writeIndex]);
-                builder.Read(resources.DDGIDistance[writeIndex]);
+                ReadDDGI(builder, resources, writeIndex);
+                // The probes trace from where last frame's relocation put them.
+                if (resources.DDGIProbeOffsets[readIndex].IsValid())
+                    builder.Read(resources.DDGIProbeOffsets[readIndex]);
                 builder.ColorTarget(resources.DDGIRayData, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 1000.0f });
                 builder.SetRenderArea(radianceExtent);
             },
-            [this, totalDDGIProbes](RGPassContext& context)
+            [this, res = &resources, totalDDGIProbes, readIndex](RGPassContext& context)
             {
                 NRI::CommandBuffer& cmd = context.Cmd();
 
@@ -428,10 +443,48 @@ namespace Nox
                 radPush.raysPerProbe = m_ddgiRaysPerProbe;
                 radPush.probeCountTotal = totalDDGIProbes;
                 radPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
+                radPush.probeOffsetsTextureIndex = res->DDGIProbeOffsets[readIndex].IsValid() && !m_frame.ddgiFirstFrame
+                                                       ? context.Slot(res->DDGIProbeOffsets[readIndex]) : 0xFFFFFFFF;
                 cmd.pushData(&radPush, sizeof(shaderio::PushConstantDDGIRadiance));
 
                 cmd.drawMeshTasks(1, 1, 1);
             });
+
+        // 1b. Relocate the probes from what their rays saw (DDGIRelocation.slang).
+        if (resources.DDGIProbeOffsets[writeIndex].IsValid())
+        {
+            const NRI::Extent2D offsetsExtent = { DDGIProbesPerRow, probeRows };
+            m_renderGraph.AddPass("DDGI Relocation", RGPassFlags::Raster,
+                [&](RGBuilder& builder)
+                {
+                    builder.Read(resources.DDGIRayData);
+                    builder.Read(resources.DDGIProbeOffsets[readIndex]);
+                    builder.ColorTarget(resources.DDGIProbeOffsets[writeIndex], NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
+                    builder.SetRenderArea(offsetsExtent);
+                },
+                [this, res = &resources, totalDDGIProbes, readIndex](RGPassContext& context)
+                {
+                    NRI::CommandBuffer& cmd = context.Cmd();
+                    cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_ddgiRelocationPipeline);
+                    cmd.setCullMode(NRI::CullMode::None);
+                    cmd.setDepthTestEnable(false);
+                    cmd.setDepthWriteEnable(false);
+                    cmd.setColorBlendEnable(0, false);
+                    cmd.setColorWriteMask(0, NRI::ColorComponent::All);
+
+                    shaderio::PushConstantDDGIBlend push{};
+                    push.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                    push.rayDataTextureIndex = context.Slot(res->DDGIRayData);
+                    push.prevAtlasTextureIndex = context.Slot(res->DDGIProbeOffsets[readIndex]);
+                    push.probesPerRow = DDGIProbesPerRow;
+                    push.raysPerProbe = m_ddgiRaysPerProbe;
+                    push.probeCountTotal = totalDDGIProbes;
+                    push.firstFrame = m_frame.ddgiFirstFrame ? 1 : 0;
+                    push.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
+                    cmd.pushData(&push, sizeof(push));
+                    cmd.drawMeshTasks(1, 1, 1);
+                });
+        }
 
         // 2. Blend irradiance atlas.
         m_renderGraph.AddPass("DDGI Blend Irradiance", RGPassFlags::Raster,
@@ -624,8 +677,7 @@ namespace Nox
                 // The hits' bounce light: this frame's DDGI atlases (through the uniforms).
                 if (readDDGI)
                 {
-                    builder.Read(resources.DDGIIrradiance[ddgiIndex]);
-                    builder.Read(resources.DDGIDistance[ddgiIndex]);
+                    ReadDDGI(builder, resources, ddgiIndex);
                 }
                 builder.ColorTarget(resources.ScreenProbeRays, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
                 builder.SetRenderArea(rayExtent);
@@ -706,8 +758,7 @@ namespace Nox
                 // The fallback where no probe stands on a surface.
                 if (readDDGI)
                 {
-                    builder.Read(resources.DDGIIrradiance[ddgiIndex]);
-                    builder.Read(resources.DDGIDistance[ddgiIndex]);
+                    ReadDDGI(builder, resources, ddgiIndex);
                 }
                 builder.ColorTarget(resources.ScreenProbeGI[writeIndex], NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
                 builder.ColorTarget(resources.ScreenProbeGIDistance, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });

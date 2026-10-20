@@ -493,8 +493,7 @@ namespace Nox
                 }
                 if (frame.ddgiAdded)
                 {
-                    builder.Read(resources.DDGIIrradiance[frame.ddgiWriteIndex]);
-                    builder.Read(resources.DDGIDistance[frame.ddgiWriteIndex]);
+                    ReadDDGI(builder, resources, frame.ddgiWriteIndex);
                 }
                 if (frame.screenProbeGIAdded)
                     builder.Read(resources.ScreenProbeGI[frame.screenProbeGIWriteIndex]);
