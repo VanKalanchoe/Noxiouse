@@ -401,6 +401,78 @@ namespace Nox
         combined.Skinned = skinned;
     }
 
+    static const tg3_extension* FindExtension(const tg3_extras_ext& ext, std::string_view name)
+    {
+        for (uint32_t i = 0; i < ext.extensions_count; i++)
+        {
+            if (std::string_view(ext.extensions[i].name.data, ext.extensions[i].name.len) == name)
+                return &ext.extensions[i];
+        }
+        return nullptr;
+    }
+
+    static const tg3_value* FindMember(const tg3_value& object, std::string_view key)
+    {
+        if (object.type != TG3_VALUE_OBJECT)
+            return nullptr;
+        for (uint32_t i = 0; i < object.object_count; i++)
+        {
+            if (std::string_view(object.object_data[i].key.data, object.object_data[i].key.len) == key)
+                return &object.object_data[i].value;
+        }
+        return nullptr;
+    }
+
+    // An accessor's elements as floats (`components` per element): float, or normalized / plain integer components. Empty when it
+    // cannot be read.
+    static std::vector<float> ReadAccessorFloats(const tg3_model& model, int64_t accessorIndex, uint32_t components)
+    {
+        std::vector<float> values;
+        if (accessorIndex < 0 || accessorIndex >= static_cast<int64_t>(model.accessors_count))
+            return values;
+        const tg3_accessor& accessor = model.accessors[accessorIndex];
+        if (accessor.buffer_view < 0 || accessor.buffer_view >= static_cast<int32_t>(model.buffer_views_count))
+            return values;
+        const tg3_buffer_view& view = model.buffer_views[accessor.buffer_view];
+        if (view.buffer < 0 || view.buffer >= static_cast<int32_t>(model.buffers_count))
+            return values;
+        const tg3_buffer& buffer = model.buffers[view.buffer];
+
+        uint32_t componentSize = 0;
+        switch (accessor.component_type)
+        {
+        case TG3_COMPONENT_TYPE_FLOAT: componentSize = 4; break;
+        case TG3_COMPONENT_TYPE_BYTE: case TG3_COMPONENT_TYPE_UNSIGNED_BYTE: componentSize = 1; break;
+        case TG3_COMPONENT_TYPE_SHORT: case TG3_COMPONENT_TYPE_UNSIGNED_SHORT: componentSize = 2; break;
+        default: return values;
+        }
+        const uint64_t stride = view.byte_stride != 0 ? view.byte_stride : static_cast<uint64_t>(componentSize) * components;
+        const uint64_t start = view.byte_offset + accessor.byte_offset;
+        if (accessor.count == 0 || start + stride * (accessor.count - 1) + componentSize * components > buffer.data.count)
+            return values;
+
+        values.resize(accessor.count * components);
+        for (uint64_t element = 0; element < accessor.count; element++)
+        {
+            const uint8_t* at = buffer.data.data + start + stride * element;
+            for (uint32_t c = 0; c < components; c++)
+            {
+                const uint8_t* component = at + componentSize * c;
+                float value = 0.0f;
+                switch (accessor.component_type)
+                {
+                case TG3_COMPONENT_TYPE_FLOAT: std::memcpy(&value, component, 4); break;
+                case TG3_COMPONENT_TYPE_BYTE: value = accessor.normalized ? std::max(static_cast<int8_t>(*component) / 127.0f, -1.0f) : static_cast<int8_t>(*component); break;
+                case TG3_COMPONENT_TYPE_UNSIGNED_BYTE: value = accessor.normalized ? *component / 255.0f : *component; break;
+                case TG3_COMPONENT_TYPE_SHORT: { int16_t v; std::memcpy(&v, component, 2); value = accessor.normalized ? std::max(v / 32767.0f, -1.0f) : v; break; }
+                case TG3_COMPONENT_TYPE_UNSIGNED_SHORT: { uint16_t v; std::memcpy(&v, component, 2); value = accessor.normalized ? v / 65535.0f : v; break; }
+                }
+                values[element * components + c] = value;
+            }
+        }
+        return values;
+    }
+
     MeshImporter::GltfContent MeshImporter::InspectGltf(const std::filesystem::path& sourcePath)
     {
         GltfContent content;
@@ -474,9 +546,50 @@ namespace Nox
                 if (nodeIndex < 0 || nodeIndex >= static_cast<int32_t>(model.nodes_count) || depth > 64)
                     return;
                 const tg3_node& node = model.nodes[nodeIndex];
+                // KHR_node_visibility: a hidden node draws nothing, nor does anything below it (as the cook treats it).
+                if (const tg3_extension* visibility = FindExtension(node.ext, "KHR_node_visibility"))
+                {
+                    const tg3_value* visible = FindMember(visibility->value, "visible");
+                    if (visible && visible->type == TG3_VALUE_BOOL && !visible->bool_val)
+                        return;
+                }
                 const glm::mat4 world = parent * localMatrix(node);
                 if (node.mesh >= 0 && node.mesh < static_cast<int32_t>(model.meshes_count))
-                    meshBounds(node.mesh, world);
+                {
+                    // EXT_mesh_gpu_instancing: the mesh at each instance's transform instead of the node's own.
+                    bool instanced = false;
+                    if (const tg3_extension* instancing = node.skin < 0 ? FindExtension(node.ext, "EXT_mesh_gpu_instancing") : nullptr)
+                    {
+                        if (const tg3_value* attributes = FindMember(instancing->value, "attributes"))
+                        {
+                            auto accessorOf = [&](std::string_view name) -> int64_t
+                            {
+                                const tg3_value* value = FindMember(*attributes, name);
+                                if (!value)
+                                    return -1;
+                                return value->type == TG3_VALUE_INT ? value->int_val : value->type == TG3_VALUE_REAL ? static_cast<int64_t>(value->real_val) : -1;
+                            };
+                            const std::vector<float> t = ReadAccessorFloats(model, accessorOf("TRANSLATION"), 3);
+                            const std::vector<float> r = ReadAccessorFloats(model, accessorOf("ROTATION"), 4);
+                            const std::vector<float> sc = ReadAccessorFloats(model, accessorOf("SCALE"), 3);
+                            const size_t count = std::max({ t.size() / 3, r.size() / 4, sc.size() / 3 });
+                            for (size_t k = 0; k < count; ++k)
+                            {
+                                glm::mat4 instance(1.0f);
+                                if (k * 3 + 2 < t.size())
+                                    instance = glm::translate(instance, glm::vec3(t[k * 3], t[k * 3 + 1], t[k * 3 + 2]));
+                                if (k * 4 + 3 < r.size())
+                                    instance *= glm::mat4_cast(glm::normalize(glm::quat(r[k * 4 + 3], r[k * 4], r[k * 4 + 1], r[k * 4 + 2])));
+                                if (k * 3 + 2 < sc.size())
+                                    instance = glm::scale(instance, glm::vec3(sc[k * 3], sc[k * 3 + 1], sc[k * 3 + 2]));
+                                meshBounds(node.mesh, world * instance);
+                            }
+                            instanced = count > 0;
+                        }
+                    }
+                    if (!instanced)
+                        meshBounds(node.mesh, world);
+                }
                 for (uint32_t c = 0; c < node.children_count; ++c)
                     visit(node.children[c], world, depth + 1);
             };
@@ -1586,78 +1699,6 @@ namespace Nox
         }
 
         return texture.source;
-    }
-
-    static const tg3_extension* FindExtension(const tg3_extras_ext& ext, std::string_view name)
-    {
-        for (uint32_t i = 0; i < ext.extensions_count; i++)
-        {
-            if (std::string_view(ext.extensions[i].name.data, ext.extensions[i].name.len) == name)
-                return &ext.extensions[i];
-        }
-        return nullptr;
-    }
-
-    static const tg3_value* FindMember(const tg3_value& object, std::string_view key)
-    {
-        if (object.type != TG3_VALUE_OBJECT)
-            return nullptr;
-        for (uint32_t i = 0; i < object.object_count; i++)
-        {
-            if (std::string_view(object.object_data[i].key.data, object.object_data[i].key.len) == key)
-                return &object.object_data[i].value;
-        }
-        return nullptr;
-    }
-
-    // An accessor's elements as floats (`components` per element): float, or normalized / plain integer components. Empty when it
-    // cannot be read.
-    static std::vector<float> ReadAccessorFloats(const tg3_model& model, int64_t accessorIndex, uint32_t components)
-    {
-        std::vector<float> values;
-        if (accessorIndex < 0 || accessorIndex >= static_cast<int64_t>(model.accessors_count))
-            return values;
-        const tg3_accessor& accessor = model.accessors[accessorIndex];
-        if (accessor.buffer_view < 0 || accessor.buffer_view >= static_cast<int32_t>(model.buffer_views_count))
-            return values;
-        const tg3_buffer_view& view = model.buffer_views[accessor.buffer_view];
-        if (view.buffer < 0 || view.buffer >= static_cast<int32_t>(model.buffers_count))
-            return values;
-        const tg3_buffer& buffer = model.buffers[view.buffer];
-
-        uint32_t componentSize = 0;
-        switch (accessor.component_type)
-        {
-        case TG3_COMPONENT_TYPE_FLOAT: componentSize = 4; break;
-        case TG3_COMPONENT_TYPE_BYTE: case TG3_COMPONENT_TYPE_UNSIGNED_BYTE: componentSize = 1; break;
-        case TG3_COMPONENT_TYPE_SHORT: case TG3_COMPONENT_TYPE_UNSIGNED_SHORT: componentSize = 2; break;
-        default: return values;
-        }
-        const uint64_t stride = view.byte_stride != 0 ? view.byte_stride : static_cast<uint64_t>(componentSize) * components;
-        const uint64_t start = view.byte_offset + accessor.byte_offset;
-        if (accessor.count == 0 || start + stride * (accessor.count - 1) + componentSize * components > buffer.data.count)
-            return values;
-
-        values.resize(accessor.count * components);
-        for (uint64_t element = 0; element < accessor.count; element++)
-        {
-            const uint8_t* at = buffer.data.data + start + stride * element;
-            for (uint32_t c = 0; c < components; c++)
-            {
-                const uint8_t* component = at + componentSize * c;
-                float value = 0.0f;
-                switch (accessor.component_type)
-                {
-                case TG3_COMPONENT_TYPE_FLOAT: std::memcpy(&value, component, 4); break;
-                case TG3_COMPONENT_TYPE_BYTE: value = accessor.normalized ? std::max(static_cast<int8_t>(*component) / 127.0f, -1.0f) : static_cast<int8_t>(*component); break;
-                case TG3_COMPONENT_TYPE_UNSIGNED_BYTE: value = accessor.normalized ? *component / 255.0f : *component; break;
-                case TG3_COMPONENT_TYPE_SHORT: { int16_t v; std::memcpy(&v, component, 2); value = accessor.normalized ? std::max(v / 32767.0f, -1.0f) : v; break; }
-                case TG3_COMPONENT_TYPE_UNSIGNED_SHORT: { uint16_t v; std::memcpy(&v, component, 2); value = accessor.normalized ? v / 65535.0f : v; break; }
-                }
-                values[element * components + c] = value;
-            }
-        }
-        return values;
     }
 
     // Node extensions that change what the node table spawns:
