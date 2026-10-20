@@ -16,6 +16,7 @@
 #include "Panels/TimelinePanel.h"
 #include "NoxCore/Renderer/Font.h"
 #include "NoxCore/Renderer/Renderer.h"
+#include "NoxCore/Scene/SceneLoader.h"
 
 namespace Nox
 {
@@ -58,6 +59,10 @@ namespace Nox
         void NewScene();
         void OpenScene();
         void OpenScene(AssetHandle handle);
+        // The scene being opened (SceneLoader: read and parsed on a thread, its entities created a slice a frame); the one shown
+        // until then stays. FinishSceneLoad swaps it in.
+        void FinishSceneLoad();
+        void UI_SceneLoadProgress();
         void PlaceAssets(const std::vector<AssetHandle>& handles, const glm::vec3& point, const std::string& folder);
         // Basic shapes (docs/Future.md item 10): the static mesh asset of a shape, written into the project's Shapes folder and
         // imported the first time it is asked for (0 on failure); CreateShape places it where the editor camera looks.
@@ -188,6 +193,8 @@ namespace Nox
         Renderer2D* m_Renderer2D;
         
         Ref<Scene> m_ActiveScene;
+        Scope<SceneLoader> m_SceneLoad;
+        AssetHandle m_SceneLoadHandle = 0;
         Ref<Scene> m_EditorScene;
         std::filesystem::path m_EditorScenePath;
 

@@ -295,6 +295,9 @@ namespace Nox
     {
         if (!Project::GetActive())
             return; // closing: no project was opened
+        // A scene being opened: a slice of its entities each frame (8 ms), swapped in once complete.
+        if (m_SceneLoad && m_SceneLoad->Step(8.0))
+            FinishSceneLoad();
         UpdatePrefabModeDirty();
         m_ScriptBuilder.Update();
 
@@ -473,6 +476,7 @@ namespace Nox
         // Before the dockspace, which fits above it.
         UI_StatusBar();
         UI_PrefabExitPrompt();
+        UI_SceneLoadProgress();
         UI_PackageGame();
 
         // 1. Grab the style and save the default minimum size
@@ -2532,8 +2536,30 @@ namespace Nox
             OnSceneStop();
         }
 
-        Ref<Scene> readOnlyScene = AssetManager::GetAsset<Scene>(handle);
-        Ref<Scene> newScene = Scene::Copy(readOnlyScene);
+        // Read and built without stopping the editor (a large scene took seconds of frozen window): the file is parsed on a thread,
+        // the entities created a slice a frame (OnUpdate), and the scene swapped in once complete. Another scene opened meanwhile
+        // replaces this load.
+        m_SceneLoad = CreateScope<SceneLoader>(Project::GetActiveAssetDirectory() / Project::GetActive()->GetEditorAssetManager()->GetFilePath(handle));
+        m_SceneLoadHandle = handle;
+    }
+
+    void EditorLayer::FinishSceneLoad()
+    {
+        Scope<SceneLoader> load = std::move(m_SceneLoad);
+        const AssetHandle handle = std::exchange(m_SceneLoadHandle, AssetHandle(0));
+        if (!load || load->Failed())
+            return; // the loader logged why; the scene shown stays
+        if (m_PrefabMode.Active)
+        {
+            NOX_CORE_WARN("'{}' finished loading while a prefab is open: not opened", load->GetPath().filename().string());
+            return;
+        }
+        if (m_SceneState != SceneState::Edit)
+            OnSceneStop(); // Play / Simulate started while it loaded: they ran on the scene being left
+
+        Ref<Scene> newScene = load->GetScene();
+        if (m_ViewportSize.x > 0 && m_ViewportSize.y > 0)
+            newScene->OnViewportResize(m_ViewportSize.x, m_ViewportSize.y);
 
         m_EditorScene = newScene;
         m_SceneHierarchyPanel.SetContext(m_EditorScene);
@@ -2546,6 +2572,24 @@ namespace Nox
 #if NOX_PROFILE_STATS
         Profiler::Get().ResetStats();
 #endif
+    }
+
+    void EditorLayer::UI_SceneLoadProgress()
+    {
+        if (!m_SceneLoad)
+            return;
+        // A small window at the bottom of the screen; the editor stays usable meanwhile.
+        const ImGuiViewport* viewport = ImGui::GetMainViewport();
+        ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + viewport->WorkSize.x * 0.5f, viewport->WorkPos.y + viewport->WorkSize.y - 60.0f),
+                                ImGuiCond_Always, ImVec2(0.5f, 1.0f));
+        ImGui::SetNextWindowBgAlpha(0.9f);
+        if (ImGui::Begin("##SceneLoad", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings |
+                                                 ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav))
+        {
+            ImGui::Text("Opening %s", m_SceneLoad->GetPath().filename().string().c_str());
+            ImGui::ProgressBar(m_SceneLoad->GetProgress(), ImVec2(320.0f, 0.0f), m_SceneLoad->GetStage().c_str());
+        }
+        ImGui::End();
     }
 
     namespace
