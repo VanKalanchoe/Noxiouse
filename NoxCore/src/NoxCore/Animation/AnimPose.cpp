@@ -177,47 +177,29 @@ namespace Nox
         }
     }
 
-    void ApplyPoseToSkeleton(const AnimPose& pose, const Skeleton& skeleton, std::vector<glm::mat4>& outFinalBoneTransforms)
+    void EvaluateSkeleton(const Skeleton& skeleton, const std::vector<glm::mat4>& localMatrices, std::vector<glm::mat4>& outGlobalMatrices,
+                          std::vector<glm::mat4>& outFinalBoneTransforms)
     {
-        for (Node* node : skeleton.AllNodes)
+        // Parents before children, from the roots; a node's global matrix is its parent's times its local one.
+        outGlobalMatrices.assign(localMatrices.size(), glm::mat4(1.0f));
+        auto walk = [&](auto& self, const Node* node, const glm::mat4& parentGlobal) -> void
         {
-            if (!node)
-                continue;
-
-            if (node->Index >= 0 && node->Index < (int32_t)pose.LocalTransforms.size())
+            glm::mat4 global = parentGlobal;
+            if (node->Index >= 0 && node->Index < static_cast<int32_t>(localMatrices.size()))
             {
-                const Animator::NodeTransform& t = pose.LocalTransforms[node->Index];
-                node->Translation = t.Translation;
-                node->Rotation = t.Rotation;
-                node->Scale = t.Scale;
+                global = parentGlobal * localMatrices[node->Index];
+                outGlobalMatrices[node->Index] = global;
             }
-            else
-            {
-                node->Translation = node->RestTranslation;
-                node->Rotation = node->RestRotation;
-                node->Scale = node->RestScale;
-            }
-            node->HasMatrix = false; // the pose is always expressed as TRS, never a baked matrix
+            for (const Node* child : node->Children)
+                self(self, child, global);
+        };
+        for (const Node* root : skeleton.RootNodes)
+        {
+            if (root)
+                walk(walk, root, glm::mat4(1.0f));
         }
 
-        // Same recursive local/global matrix walk as Animator::UpdateTransforms step 3.
-        auto updateNodeRecursive = [](auto& self, Node* node) -> void
-        {
-            glm::mat4 trsMatrix = glm::translate(glm::mat4(1.0f), node->Translation) *
-                                  glm::toMat4(node->Rotation) *
-                                  glm::scale(glm::mat4(1.0f), node->Scale);
-
-            node->LocalMatrix = node->HasMatrix ? node->Matrix : trsMatrix;
-            node->GlobalMatrix = node->Parent ? node->Parent->GlobalMatrix * node->LocalMatrix : node->LocalMatrix;
-
-            for (Node* child : node->Children)
-                self(self, child);
-        };
-
-        for (Node* root : skeleton.RootNodes)
-            updateNodeRecursive(updateNodeRecursive, root);
-
-        // Same final skinning matrix step as Animator::UpdateTransforms step 4.
+        // Skinning matrices: the skin's joints' global matrices times their inverse bind matrices.
         outFinalBoneTransforms.clear();
         if (!skeleton.Skins.empty() && skeleton.Skins[0] != nullptr)
         {
@@ -225,11 +207,41 @@ namespace Nox
             outFinalBoneTransforms.resize(skin->Joints.size());
             for (size_t i = 0; i < skin->Joints.size(); ++i)
             {
-                Node* jointNode = skin->Joints[i];
-                outFinalBoneTransforms[i] = jointNode
-                    ? jointNode->GlobalMatrix * skin->InverseBindMatrices[i]
+                const Node* jointNode = skin->Joints[i];
+                const bool valid = jointNode && jointNode->Index >= 0 && jointNode->Index < static_cast<int32_t>(outGlobalMatrices.size());
+                outFinalBoneTransforms[i] = valid && i < skin->InverseBindMatrices.size()
+                    ? outGlobalMatrices[jointNode->Index] * skin->InverseBindMatrices[i]
                     : glm::mat4(1.0f);
             }
         }
+    }
+
+    glm::mat4 NodeRestLocalMatrix(const Node& node)
+    {
+        if (node.HasRestMatrix)
+            return node.RestMatrix;
+        return glm::translate(glm::mat4(1.0f), node.RestTranslation) * glm::toMat4(node.RestRotation) * glm::scale(glm::mat4(1.0f), node.RestScale);
+    }
+
+    void ApplyPoseToSkeleton(const AnimPose& pose, const Skeleton& skeleton, std::vector<glm::mat4>& outFinalBoneTransforms,
+                             std::vector<glm::mat4>* outGlobalMatrices)
+    {
+        // The pose's local TRS for the nodes it has, the rest pose for the others (always TRS: a pose is never a baked matrix).
+        std::vector<glm::mat4> local(skeleton.AllNodes.size(), glm::mat4(1.0f));
+        for (const Node* node : skeleton.AllNodes)
+        {
+            if (!node || node->Index < 0 || node->Index >= static_cast<int32_t>(local.size()))
+                continue;
+            if (node->Index < static_cast<int32_t>(pose.LocalTransforms.size()))
+            {
+                const Animator::NodeTransform& t = pose.LocalTransforms[node->Index];
+                local[node->Index] = glm::translate(glm::mat4(1.0f), t.Translation) * glm::toMat4(t.Rotation) * glm::scale(glm::mat4(1.0f), t.Scale);
+            }
+            else
+                local[node->Index] = glm::translate(glm::mat4(1.0f), node->RestTranslation) * glm::toMat4(node->RestRotation) *
+                                     glm::scale(glm::mat4(1.0f), node->RestScale);
+        }
+        std::vector<glm::mat4> globals;
+        EvaluateSkeleton(skeleton, local, outGlobalMatrices ? *outGlobalMatrices : globals, outFinalBoneTransforms);
     }
 }

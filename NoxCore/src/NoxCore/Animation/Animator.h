@@ -56,6 +56,7 @@ namespace Nox
         const std::vector<glm::mat4>& GetFinalBoneTransforms() const { return m_FinalBoneTransforms; }
         
         // Returns unskinned global transforms for bone debug drawing
+        // Every skeleton node's model-space matrix, by node Index (this animator's own pose).
         const std::vector<glm::mat4>& GetGlobalBoneTransforms() const { return m_GlobalBoneTransforms; }
 
         // Keyframe sampling helpers using NodeAnimationChannel. Static and public so anything sampling a clip

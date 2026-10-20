@@ -44,10 +44,14 @@ namespace Nox
     // clip's end -- or start, playing backwards -- once in between), appended to `out`.
     void CollectCrossedNotifies(const AnimationSequence& clip, float from, float to, bool wrapped, std::vector<std::string>& out);
 
-    // Walks the skeleton hierarchy exactly like Animator::UpdateTransforms steps 3-4: pose's local TRS -> each
-    // node's LocalMatrix/GlobalMatrix -> final skinning matrices (GlobalMatrix * InverseBindMatrix). Writes into
-    // skeleton's Node objects (shared per-asset state, same as Animator does) and outFinalBoneTransforms. Takes
-    // Skeleton by const& like Animator::UpdateTransforms does -- AllNodes is a vector of Node*, so the pointees
-    // aren't const even through a const Skeleton&.
-    void ApplyPoseToSkeleton(const AnimPose& pose, const Skeleton& skeleton, std::vector<glm::mat4>& outFinalBoneTransforms);
+    // A pose's local TRS (the rest pose for nodes it does not have) -> every node's model-space matrix and the skin's final skinning
+    // matrices (global * inverse bind). Per call: the Skeleton asset is shared by every instance and is not written, so two
+    // characters with the same skeleton never see each other's pose. outGlobalMatrices (optional): indexed by node Index.
+    void ApplyPoseToSkeleton(const AnimPose& pose, const Skeleton& skeleton, std::vector<glm::mat4>& outFinalBoneTransforms,
+                             std::vector<glm::mat4>* outGlobalMatrices = nullptr);
+    // The walk itself: local matrices (by node Index) -> global matrices and skinning matrices.
+    void EvaluateSkeleton(const Skeleton& skeleton, const std::vector<glm::mat4>& localMatrices, std::vector<glm::mat4>& outGlobalMatrices,
+                          std::vector<glm::mat4>& outFinalBoneTransforms);
+    // A node's rest pose as a local matrix (its baked matrix when it has one).
+    glm::mat4 NodeRestLocalMatrix(const Node& node);
 }

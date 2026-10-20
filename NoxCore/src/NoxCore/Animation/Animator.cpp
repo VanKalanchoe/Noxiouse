@@ -1,4 +1,5 @@
 #include "Animator.h"
+#include "AnimPose.h"
 #include "NoxCore/Core/Log.h"
 #include <glm/gtx/quaternion.hpp>
 
@@ -68,98 +69,44 @@ namespace Nox
 
     void Animator::UpdateTransforms(const Skeleton& skeleton)
     {
-        // 1. Reset all nodes to their rest pose
-        for (Node* node : skeleton.AllNodes)
+        // The rest pose, with the clip's channels over it (a channel replaces the node's baked matrix with TRS), into this
+        // animator's own matrices: the Skeleton asset is shared by every instance and is never written.
+        std::vector<glm::mat4> local(skeleton.AllNodes.size(), glm::mat4(1.0f));
+        std::vector<uint8_t> animated(skeleton.AllNodes.size(), 0);
+        std::vector<NodeTransform> trs(skeleton.AllNodes.size());
+        for (const Node* node : skeleton.AllNodes)
         {
-            if (!node) continue;
-            node->Translation = node->RestTranslation;
-            node->Rotation = node->RestRotation;
-            node->Scale = node->RestScale;
-            node->Matrix = node->RestMatrix;
-            node->HasMatrix = node->HasRestMatrix;
+            if (!node || node->Index < 0 || node->Index >= static_cast<int32_t>(local.size()))
+                continue;
+            local[node->Index] = NodeRestLocalMatrix(*node);
+            trs[node->Index] = { node->RestTranslation, node->RestRotation, node->RestScale };
         }
 
-        // 2. Evaluate animation tracks and override animated node channels
         if (m_CurrentAnimation)
         {
             for (const auto& channel : m_CurrentAnimation->Channels)
             {
-                int32_t nodeIndex = channel.TargetNodeIndex;
-
-                if (nodeIndex < 0 || nodeIndex >= static_cast<int32_t>(skeleton.AllNodes.size()))
+                const int32_t nodeIndex = channel.TargetNodeIndex;
+                if (nodeIndex < 0 || nodeIndex >= static_cast<int32_t>(local.size()))
                     continue;
-
-                Node* node = skeleton.AllNodes[nodeIndex];
-                if (!node) continue;
-
-                // Clear matrix flag so animated TRS takes effect
-                node->HasMatrix = false;
-
+                NodeTransform& t = trs[nodeIndex];
                 if (!channel.PositionKeys.empty())
-                    node->Translation = InterpolatePosition(m_CurrentTime, channel);
+                    t.Translation = InterpolatePosition(m_CurrentTime, channel);
                 if (!channel.RotationKeys.empty())
-                    node->Rotation = InterpolateRotation(m_CurrentTime, channel);
+                    t.Rotation = InterpolateRotation(m_CurrentTime, channel);
                 if (!channel.ScaleKeys.empty())
-                    node->Scale = InterpolateScale(m_CurrentTime, channel);
+                    t.Scale = InterpolateScale(m_CurrentTime, channel);
+                animated[nodeIndex] = 1;
+            }
+            for (size_t index = 0; index < local.size(); ++index)
+            {
+                if (animated[index])
+                    local[index] = glm::translate(glm::mat4(1.0f), trs[index].Translation) * glm::toMat4(trs[index].Rotation) *
+                                   glm::scale(glm::mat4(1.0f), trs[index].Scale);
             }
         }
 
-        // 3. Recursively calculate node local and global matrices down the tree
-        auto updateNodeRecursive = [](auto& self, Node* node) -> void {
-            glm::mat4 trsMatrix = glm::translate(glm::mat4(1.0f), node->Translation) *
-                                  glm::toMat4(node->Rotation) *
-                                  glm::scale(glm::mat4(1.0f), node->Scale);
-
-            if (node->HasMatrix)
-            {
-                node->LocalMatrix = node->Matrix;
-            }
-            else
-            {
-                node->LocalMatrix = trsMatrix;
-            }
-
-            if (node->Parent)
-                node->GlobalMatrix = node->Parent->GlobalMatrix * node->LocalMatrix;
-            else
-                node->GlobalMatrix = node->LocalMatrix;
-
-            for (Node* child : node->Children)
-            {
-                self(self, child);
-            }
-        };
-
-        for (Node* root : skeleton.RootNodes)
-        {
-            updateNodeRecursive(updateNodeRecursive, root);
-        }
-
-        // 4. Populate final shader matrices using ONLY the Skin joints array
-        if (!skeleton.Skins.empty() && skeleton.Skins[0] != nullptr)
-        {
-            const Skin* skin = skeleton.Skins[0];
-            size_t jointCount = skin->Joints.size();
-            m_FinalBoneTransforms.resize(jointCount);
-
-            for (size_t i = 0; i < jointCount; ++i)
-            {
-                Node* jointNode = skin->Joints[i];
-                if (jointNode)
-                {
-                    // Transforms vertex: Mesh Local -> Joint Bind Space -> Animated Skeleton Space
-                    m_FinalBoneTransforms[i] = jointNode->GlobalMatrix * skin->InverseBindMatrices[i];
-                }
-                else
-                {
-                    m_FinalBoneTransforms[i] = glm::mat4(1.0f);
-                }
-            }
-        }
-        else
-        {
-            m_FinalBoneTransforms.clear();
-        }
+        EvaluateSkeleton(skeleton, local, m_GlobalBoneTransforms, m_FinalBoneTransforms);
     }
 
     void Animator::UpdateNodeAnimation(float deltaTime, const Ref<AnimationSequence>& animation,
