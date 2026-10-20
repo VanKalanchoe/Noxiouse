@@ -158,6 +158,7 @@ namespace Nox
         settings.CloudThicknessKm = environment.CloudThicknessKm;
         settings.CloudScaleKm = environment.CloudScaleKm;
         settings.CloudOffsetKm = environment.CloudOffsetKm;
+        settings.CloudWindKmPerSecond = environment.CloudWind / 1000.0f;
         settings.MoonDirection = lights.MoonDirection;
         settings.MoonIlluminance = lights.MoonLights ? lights.MoonIlluminance : glm::vec3(0.0f);
         settings.MoonDiscIlluminance = lights.MoonFull;

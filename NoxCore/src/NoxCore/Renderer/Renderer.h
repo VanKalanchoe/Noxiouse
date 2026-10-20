@@ -157,7 +157,8 @@ namespace Nox
         float CloudBottomKm = 1.5f;
         float CloudThicknessKm = 2.0f;
         float CloudScaleKm = 8.0f;                  // one tile of the shape noise: clouds of ~2 km
-        glm::vec2 CloudOffsetKm{ 0.0f };            // moves them (wind)
+        glm::vec2 CloudOffsetKm{ 0.0f };            // moves them
+        glm::vec2 CloudWindKmPerSecond{ 0.0f };     // and moves them on over time (x, z)
         // Night: the moon lights the air and the clouds like the sun (MoonIlluminance 0 by day: it does not count then); the
         // skybox draws its disc and the stars.
         glm::vec3 MoonDirection{ 0.0f, -1.0f, 0.0f };
@@ -678,6 +679,10 @@ namespace Nox
         void createBRDFLut();
         void createProceduralSkyResources();
         void addProceduralSkyPass();
+        shaderio::PushConstantSkyAtmosphere makeSkyAtmospherePush(const SkyAtmosphereSettings& settings, const glm::vec2& cloudOffsetKm,
+                                                                  float viewerAltitudeKm) const;
+        // The height the sky is seen from (km): the settings' altitude of the world origin plus the camera's.
+        float skyViewerAltitudeKm() const;
         RGTexture addAerialPerspectivePass();
 
         template <class T>
@@ -1629,6 +1634,14 @@ namespace Nox
         bool m_skyLutsDirty = false;
         bool m_skyDirty = false;
         SkyAtmosphereSettings m_proceduralSky;
+        // Wind and viewer height re-render the sky in slices (addProceduralSkyPass): the cycle's stage (-1: none running), what
+        // it renders, and the wind offset / height last rendered.
+        int m_skySliceStage = -1;
+        shaderio::PushConstantSkyAtmosphere m_skyCyclePush{};
+        glm::vec2 m_skyWindOffsetKm{ 0.0f };
+        glm::vec2 m_skyRenderedWindOffsetKm{ 0.0f };
+        float m_skyRenderedAltitudeKm = 0.0f;
+        std::chrono::steady_clock::time_point m_skyLastUpdateTime{};
 
         // Lighting
         std::vector<shaderio::LightData> m_lightBufferObjects;

@@ -325,7 +325,8 @@ namespace Nox
         float CloudBottomKm = 1.5f;
         float CloudThicknessKm = 2.0f;
         float CloudScaleKm = 8.0f;        // larger = bigger clouds
-        glm::vec2 CloudOffsetKm{ 0.0f, 0.0f }; // moves the clouds (animate it for wind)
+        glm::vec2 CloudOffsetKm{ 0.0f, 0.0f }; // moves the clouds
+        glm::vec2 CloudWind{ 0.0f, 0.0f };     // m/s along x and z: the clouds drift (the sky re-renders over 8 frames while they do)
 
         // The sun (and moon) light the scene as seen through the air: yellow-white at noon, red at sunset, gone below the horizon.
         bool SunThroughAtmosphere = true;

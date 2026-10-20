@@ -881,7 +881,7 @@ struct PushConstantSkyAtmosphere
     float sourceLod;
     // The moon (at night): the air and the clouds scatter its light as they do the sun's. moonIlluminance 0: none (by day).
     vec3 moonDirection;                   // world space, towards the moon
-    float moonPadding0;
+    uint32_t firstFace;                   // skyCubemapMain: the cube face of dispatch z = 0 (one face per frame while the wind blows)
     vec3 moonIlluminance;                 // its color * intensity * the lit fraction of its disc, above the atmosphere
     float moonPadding1;
 };

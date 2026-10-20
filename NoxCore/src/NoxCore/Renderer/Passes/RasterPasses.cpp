@@ -693,7 +693,7 @@ namespace Nox
             skyboxSun.sunDirection = sunLength > 1e-6f ? sky.SunDirection / sunLength : glm::vec3(0.0f, 1.0f, 0.0f);
             skyboxSun.sunDiscRadiance = glm::max(sky.SunIlluminance, glm::vec3(0.0f)) * std::min(1.0f / solidAngle, 64.0f);
             skyboxSun.sunCosAngularRadius = std::cos(radius);
-            skyboxSun.skyAltitudeKm = glm::clamp(sky.AltitudeKm, 0.0f, 99.0f);
+            skyboxSun.skyAltitudeKm = m_skyRenderedAltitudeKm; // the height the sky cubemap was rendered from
 
             // The moon's disc. Its light on the scene is ~1000x the real moon's (so moonlit scenes read); its disc is not, or it would
             // glare like a second sun: about the real ratio of a full moon's brightness to the ground it lights, and comparable

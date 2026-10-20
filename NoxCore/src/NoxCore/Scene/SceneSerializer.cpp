@@ -540,6 +540,7 @@ namespace Nox
             out << YAML::Key << "CloudThicknessKm" << YAML::Value << elc.CloudThicknessKm;
             out << YAML::Key << "CloudScaleKm" << YAML::Value << elc.CloudScaleKm;
             out << YAML::Key << "CloudOffsetKm" << YAML::Value << elc.CloudOffsetKm;
+            out << YAML::Key << "CloudWind" << YAML::Value << elc.CloudWind;
             out << YAML::Key << "SunThroughAtmosphere" << YAML::Value << elc.SunThroughAtmosphere;
             out << YAML::Key << "Moon" << YAML::Value << elc.Moon;
             out << YAML::Key << "MoonIntensity" << YAML::Value << elc.MoonIntensity;
@@ -1483,6 +1484,8 @@ namespace Nox
                 elc.CloudScaleKm = environmentLightComponent["CloudScaleKm"].as<float>();
             if (environmentLightComponent["CloudOffsetKm"])
                 elc.CloudOffsetKm = environmentLightComponent["CloudOffsetKm"].as<glm::vec2>();
+            if (environmentLightComponent["CloudWind"])
+                elc.CloudWind = environmentLightComponent["CloudWind"].as<glm::vec2>();
             if (environmentLightComponent["SunThroughAtmosphere"])
                 elc.SunThroughAtmosphere = environmentLightComponent["SunThroughAtmosphere"].as<bool>();
             if (environmentLightComponent["Moon"])

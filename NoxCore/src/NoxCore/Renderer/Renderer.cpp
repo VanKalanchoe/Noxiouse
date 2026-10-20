@@ -3017,10 +3017,82 @@ namespace Nox
     // A frame in which the sky's settings changed rewrites it and its IBL before anything reads them: the atmosphere LUTs
     // (only when the atmosphere changed), every mip of the environment cubemap, the irradiance and the pre-filtered cubemaps.
     // ~1-2 ms of compute in that frame and no CPU wait, instead of rebuilding the HDR-sized set with a GPU wait per step.
+    shaderio::PushConstantSkyAtmosphere Renderer::makeSkyAtmospherePush(const SkyAtmosphereSettings& settings, const glm::vec2& cloudOffsetKm,
+                                                                        float viewerAltitudeKm) const
+    {
+        shaderio::PushConstantSkyAtmosphere push{};
+        const float sunLength = glm::length(settings.SunDirection);
+        push.sunDirection = sunLength > 1e-6f ? settings.SunDirection / sunLength : glm::vec3(0.0f, 1.0f, 0.0f);
+        push.sunIlluminance = glm::max(settings.SunIlluminance, glm::vec3(0.0f));
+        push.groundAlbedo = glm::clamp(settings.GroundAlbedo, glm::vec3(0.0f), glm::vec3(1.0f));
+        push.rayleighScale = glm::max(settings.RayleighScale, 0.0f);
+        push.mieScale = glm::max(settings.MieScale, 0.0f);
+        push.ozoneScale = glm::max(settings.OzoneScale, 0.0f);
+        push.mieAnisotropy = glm::clamp(settings.MieAnisotropy, 0.0f, 0.99f);
+        push.cameraAltitudeKm = glm::clamp(viewerAltitudeKm, 0.0f, 99.0f);
+        push.transmittanceTextureIndex = m_skyTransmittanceLut->GetDescriptorIndexSlot();
+        push.multiScatteringTextureIndex = m_skyMultiScatteringLut->GetDescriptorIndexSlot();
+        const bool clouds = settings.Clouds && m_skyCloudShape && settings.CloudCoverage > 0.0f && settings.CloudDensity > 0.0f;
+        push.cloudShapeTextureIndex = clouds ? m_skyCloudShape->GetDescriptorIndexSlot() : 0xFFFFFFFF;
+        push.cloudDetailTextureIndex = clouds ? m_skyCloudDetail->GetDescriptorIndexSlot() : 0xFFFFFFFF;
+        push.cloudWeatherTextureIndex = clouds ? m_skyCloudWeather->GetDescriptorIndexSlot() : 0xFFFFFFFF;
+        push.cloudCoverage = glm::clamp(settings.CloudCoverage, 0.0f, 1.0f);
+        push.cloudDensity = glm::max(settings.CloudDensity, 0.0f);
+        push.cloudBottomKm = glm::clamp(settings.CloudBottomKm, 0.0f, 90.0f);
+        push.cloudThicknessKm = glm::clamp(settings.CloudThicknessKm, 0.05f, 20.0f);
+        push.cloudScaleKm = glm::max(settings.CloudScaleKm, 0.1f);
+        push.cloudOffsetXKm = cloudOffsetKm.x;
+        push.cloudOffsetZKm = cloudOffsetKm.y;
+        const float moonLength = glm::length(settings.MoonDirection);
+        push.moonDirection = moonLength > 1e-6f ? settings.MoonDirection / moonLength : glm::vec3(0.0f, -1.0f, 0.0f);
+        push.moonIlluminance = glm::max(settings.MoonIlluminance, glm::vec3(0.0f));
+        return push;
+    }
+
+    float Renderer::skyViewerAltitudeKm() const
+    {
+        // The world origin's altitude plus the camera's height above it (not below: the ground of the sky model is there).
+        const float cameraKm = glm::max(m_cameraPosition.y, 0.0f) * WorldUnits::ToMeters(1.0f) / 1000.0f;
+        return glm::clamp(m_proceduralSky.AltitudeKm + cameraKm, 0.0f, 99.0f);
+    }
+
     void Renderer::addProceduralSkyPass()
     {
-        if (!m_proceduralSkyActive || (!m_skyDirty && !m_skyLutsDirty))
+        if (!m_proceduralSkyActive)
             return;
+
+        // Wind moves the clouds' offset on in real time (also while editing).
+        const auto now = std::chrono::steady_clock::now();
+        const float elapsed = m_skyLastUpdateTime == std::chrono::steady_clock::time_point{}
+            ? 0.0f : glm::clamp(std::chrono::duration<float>(now - m_skyLastUpdateTime).count(), 0.0f, 0.25f);
+        m_skyLastUpdateTime = now;
+        m_skyWindOffsetKm += m_proceduralSky.CloudWindKmPerSecond * elapsed;
+        const float viewerAltitudeKm = skyViewerAltitudeKm();
+
+        // A change of the sky's settings renders it whole, in this frame. The wind and the viewer's height (which change a little
+        // every frame) render it over 8 frames instead: one cube face per frame, then the mips and the irradiance, then the
+        // reflections' filter. Each cycle renders one wind offset and height (taken when it starts), so the faces agree.
+        int stage = -1; // -1: everything now; 0..5: that face; 6: mips + irradiance; 7: pre-filtered reflections
+        if (!m_skyDirty && !m_skyLutsDirty)
+        {
+            if (m_skySliceStage >= 0)
+                stage = m_skySliceStage;
+            else
+            {
+                const bool clouds = m_proceduralSky.Clouds && m_proceduralSky.CloudCoverage > 0.0f && m_proceduralSky.CloudDensity > 0.0f;
+                const bool windMoved = clouds && glm::length(m_skyWindOffsetKm - m_skyRenderedWindOffsetKm) > 0.002f;
+                const bool viewerMoved = std::abs(viewerAltitudeKm - m_skyRenderedAltitudeKm) > 0.02f;
+                if (!windMoved && !viewerMoved)
+                    return;
+                stage = 0;
+            }
+        }
+        if (stage <= 0)
+        {
+            m_skyCyclePush = makeSkyAtmospherePush(m_proceduralSky, m_proceduralSky.CloudOffsetKm + m_skyWindOffsetKm, viewerAltitudeKm);
+            m_skyRenderedWindOffsetKm = m_skyWindOffsetKm;
+            m_skyRenderedAltitudeKm = viewerAltitudeKm;
+        }
 
         struct SkyPassData
         {
@@ -3034,6 +3106,7 @@ namespace Nox
             std::vector<uint32_t> storageSlots;
             uint32_t environmentSlot;
             bool updateLuts;
+            int stage;
         } data{};
         data.transmittance = m_skyTransmittancePipeline.get();
         data.multiScattering = m_skyMultiScatteringPipeline.get();
@@ -3044,34 +3117,8 @@ namespace Nox
         data.storageSlots = m_skyStorageSlots;
         data.environmentSlot = m_environmentCubemap->GetDescriptorIndexSlot();
         data.updateLuts = m_skyLutsDirty;
-
-        const SkyAtmosphereSettings& settings = m_proceduralSky;
-        shaderio::PushConstantSkyAtmosphere& push = data.push;
-        const float sunLength = glm::length(settings.SunDirection);
-        push.sunDirection = sunLength > 1e-6f ? settings.SunDirection / sunLength : glm::vec3(0.0f, 1.0f, 0.0f);
-        push.sunIlluminance = glm::max(settings.SunIlluminance, glm::vec3(0.0f));
-        push.groundAlbedo = glm::clamp(settings.GroundAlbedo, glm::vec3(0.0f), glm::vec3(1.0f));
-        push.rayleighScale = glm::max(settings.RayleighScale, 0.0f);
-        push.mieScale = glm::max(settings.MieScale, 0.0f);
-        push.ozoneScale = glm::max(settings.OzoneScale, 0.0f);
-        push.mieAnisotropy = glm::clamp(settings.MieAnisotropy, 0.0f, 0.99f);
-        push.cameraAltitudeKm = glm::clamp(settings.AltitudeKm, 0.0f, 99.0f);
-        push.transmittanceTextureIndex = m_skyTransmittanceLut->GetDescriptorIndexSlot();
-        push.multiScatteringTextureIndex = m_skyMultiScatteringLut->GetDescriptorIndexSlot();
-        const bool clouds = settings.Clouds && m_skyCloudShape && settings.CloudCoverage > 0.0f && settings.CloudDensity > 0.0f;
-        push.cloudShapeTextureIndex = clouds ? m_skyCloudShape->GetDescriptorIndexSlot() : 0xFFFFFFFF;
-        push.cloudDetailTextureIndex = clouds ? m_skyCloudDetail->GetDescriptorIndexSlot() : 0xFFFFFFFF;
-        push.cloudWeatherTextureIndex = clouds ? m_skyCloudWeather->GetDescriptorIndexSlot() : 0xFFFFFFFF;
-        push.cloudCoverage = glm::clamp(settings.CloudCoverage, 0.0f, 1.0f);
-        push.cloudDensity = glm::max(settings.CloudDensity, 0.0f);
-        push.cloudBottomKm = glm::clamp(settings.CloudBottomKm, 0.0f, 90.0f);
-        push.cloudThicknessKm = glm::clamp(settings.CloudThicknessKm, 0.05f, 20.0f);
-        push.cloudScaleKm = glm::max(settings.CloudScaleKm, 0.1f);
-        push.cloudOffsetXKm = settings.CloudOffsetKm.x;
-        push.cloudOffsetZKm = settings.CloudOffsetKm.y;
-        const float moonLength = glm::length(settings.MoonDirection);
-        push.moonDirection = moonLength > 1e-6f ? settings.MoonDirection / moonLength : glm::vec3(0.0f, -1.0f, 0.0f);
-        push.moonIlluminance = glm::max(settings.MoonIlluminance, glm::vec3(0.0f));
+        data.push = m_skyCyclePush;
+        data.stage = stage;
 
         m_renderGraph.AddPass("Procedural Sky", RGPassFlags::NeverCull,
             [](RGBuilder&)
@@ -3088,12 +3135,13 @@ namespace Nox
                 const uint32_t* environmentStorage = data.storageSlots.data() + 2;
                 const uint32_t* irradianceStorage = environmentStorage + environmentMips;
                 const uint32_t* prefilteredStorage = irradianceStorage + irradianceMips;
+                const bool all = data.stage < 0;
 
                 // The previous frames still in flight read these textures: their reads finish before this rewrites them.
                 cmd.executionBarrier();
 
                 shaderio::PushConstantSkyAtmosphere push = data.push;
-                if (data.updateLuts)
+                if (all && data.updateLuts)
                 {
                     cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *data.transmittance);
                     push.outputStorageIndex = data.storageSlots[0];
@@ -3112,56 +3160,68 @@ namespace Nox
                     cmd.executionBarrier();
                 }
 
-                // The top mip raymarched (sky and clouds), every other mip averaged from the one above it.
-                cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *data.cubemap);
-                push.outputStorageIndex = environmentStorage[0];
-                push.outputSize = SkyEnvironmentSize;
-                push.outputHeight = SkyEnvironmentSize;
-                cmd.pushData(&push, sizeof(push));
-                cmd.dispatch((SkyEnvironmentSize + 15) / 16, (SkyEnvironmentSize + 15) / 16, 6);
-                cmd.executionBarrier();
-                cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *data.downsample);
-                for (uint32_t mip = 1; mip < environmentMips; ++mip)
+                // The top mip raymarched (sky and clouds): all six faces, or the one of this slice.
+                if (all || data.stage <= 5)
                 {
-                    const uint32_t size = std::max(SkyEnvironmentSize >> mip, 1u);
-                    push.outputStorageIndex = environmentStorage[mip];
-                    push.outputSize = size;
-                    push.outputHeight = size;
-                    push.sourceTextureIndex = data.environmentSlot;
-                    push.sourceLod = static_cast<float>(mip - 1);
+                    cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *data.cubemap);
+                    push.outputStorageIndex = environmentStorage[0];
+                    push.outputSize = SkyEnvironmentSize;
+                    push.outputHeight = SkyEnvironmentSize;
+                    push.firstFace = all ? 0u : static_cast<uint32_t>(data.stage);
                     cmd.pushData(&push, sizeof(push));
-                    cmd.dispatch((size + 15) / 16, (size + 15) / 16, 6);
+                    cmd.dispatch((SkyEnvironmentSize + 15) / 16, (SkyEnvironmentSize + 15) / 16, all ? 6 : 1);
                     cmd.executionBarrier();
+                    push.firstFace = 0;
                 }
 
-                // The IBL filters, as for an HDR map, both reading the environment's mips.
-                cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *data.irradiance);
-                for (uint32_t mip = 0; mip < irradianceMips; ++mip)
+                // Every other mip averaged from the one above it, then the IBL filters, as for an HDR map (reading the mips).
+                if (all || data.stage == 6)
                 {
-                    shaderio::PushConstantEquirect filter{};
-                    filter.hdrTextureIndex = data.environmentSlot;
-                    filter.cubemapStorageIndex = irradianceStorage[mip];
-                    filter.cubemapSize = std::max(SkyIrradianceSize >> mip, 1u);
-                    cmd.pushData(&filter, sizeof(filter));
-                    cmd.dispatch((filter.cubemapSize + 15) / 16, (filter.cubemapSize + 15) / 16, 6);
+                    cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *data.downsample);
+                    for (uint32_t mip = 1; mip < environmentMips; ++mip)
+                    {
+                        const uint32_t size = std::max(SkyEnvironmentSize >> mip, 1u);
+                        push.outputStorageIndex = environmentStorage[mip];
+                        push.outputSize = size;
+                        push.outputHeight = size;
+                        push.sourceTextureIndex = data.environmentSlot;
+                        push.sourceLod = static_cast<float>(mip - 1);
+                        cmd.pushData(&push, sizeof(push));
+                        cmd.dispatch((size + 15) / 16, (size + 15) / 16, 6);
+                        cmd.executionBarrier();
+                    }
+
+                    cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *data.irradiance);
+                    for (uint32_t mip = 0; mip < irradianceMips; ++mip)
+                    {
+                        shaderio::PushConstantEquirect filter{};
+                        filter.hdrTextureIndex = data.environmentSlot;
+                        filter.cubemapStorageIndex = irradianceStorage[mip];
+                        filter.cubemapSize = std::max(SkyIrradianceSize >> mip, 1u);
+                        cmd.pushData(&filter, sizeof(filter));
+                        cmd.dispatch((filter.cubemapSize + 15) / 16, (filter.cubemapSize + 15) / 16, 6);
+                    }
                 }
-                struct PrefilterPushConstants // PrefilterEnv.slang
+                if (all || data.stage == 7)
                 {
-                    uint32_t envTextureIndex;
-                    uint32_t cubemapStorageIndex;
-                    uint32_t cubemapSize;
-                    float roughness;
-                };
-                cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *data.prefilter);
-                for (uint32_t mip = 0; mip < prefilteredMips; ++mip)
-                {
-                    PrefilterPushConstants filter{};
-                    filter.envTextureIndex = data.environmentSlot;
-                    filter.cubemapStorageIndex = prefilteredStorage[mip];
-                    filter.cubemapSize = std::max(SkyPrefilteredSize >> mip, 1u);
-                    filter.roughness = static_cast<float>(mip) / static_cast<float>(prefilteredMips - 1);
-                    cmd.pushData(&filter, sizeof(filter));
-                    cmd.dispatch((filter.cubemapSize + 15) / 16, (filter.cubemapSize + 15) / 16, 6);
+                    struct PrefilterPushConstants // PrefilterEnv.slang
+                    {
+                        uint32_t envTextureIndex;
+                        uint32_t cubemapStorageIndex;
+                        uint32_t cubemapSize;
+                        float roughness;
+                    };
+                    cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *data.prefilter);
+                    for (uint32_t mip = 0; mip < prefilteredMips; ++mip)
+                    {
+                        PrefilterPushConstants filter{};
+                        filter.envTextureIndex = data.environmentSlot;
+                        filter.cubemapStorageIndex = prefilteredStorage[mip];
+                        filter.cubemapSize = std::max(SkyPrefilteredSize >> mip, 1u);
+                        filter.roughness = static_cast<float>(mip) / static_cast<float>(prefilteredMips - 1);
+                        cmd.pushData(&filter, sizeof(filter));
+                        cmd.dispatch((filter.cubemapSize + 15) / 16, (filter.cubemapSize + 15) / 16, 6);
+                    }
                 }
 
                 // Everything after this in the frame (skybox, lighting, reflections, DDGI, path tracer) sees the new sky.
@@ -3170,9 +3230,13 @@ namespace Nox
 
         m_skyDirty = false;
         m_skyLutsDirty = false;
-        // Built from the environment: made again from the new sky next frame. The path tracer's accumulation restarts.
-        m_renderGraph.ResetHistory("PT Environment Importance");
-        m_renderGraph.ResetHistory("Path Tracer Accumulation");
+        m_skySliceStage = stage >= 0 && stage < 7 ? stage + 1 : -1;
+        if (m_skySliceStage < 0)
+        {
+            // Built from the environment: made again from the new sky next frame. The path tracer's accumulation restarts.
+            m_renderGraph.ResetHistory("PT Environment Importance");
+            m_renderGraph.ResetHistory("Path Tracer Accumulation");
+        }
     }
 
     // The camera's aerial perspective volume for this frame (the camera moves every frame; 32 x 32 columns of 64 samples,

@@ -1523,7 +1523,10 @@ namespace Nox
                     ImGui::DragFloat("Cloud Size", &component.CloudScaleKm, 0.05f, 0.5f, 100.0f, "%.1f km");
                     ImGui::SetItemTooltip("Scale of the cloud shapes: larger = bigger clouds.");
                     ImGui::DragFloat2("Cloud Offset", glm::value_ptr(component.CloudOffsetKm), 0.05f, -1000.0f, 1000.0f, "%.2f km");
-                    ImGui::SetItemTooltip("Moves the clouds (change it over time for wind). Each change re-renders the sky (~ms).");
+                    ImGui::SetItemTooltip("Moves the clouds. Each change re-renders the sky at once (~ms).");
+                    ImGui::DragFloat2("Wind", glm::value_ptr(component.CloudWind), 0.1f, -100.0f, 100.0f, "%.1f m/s");
+                    ImGui::SetItemTooltip("The clouds drift along X and Z (10 m/s: a breeze at their height). While they move the sky is\n"
+                                          "re-rendered a little every frame (one cube face per frame), so it costs a little all the time.");
                 }
 
                 ImGui::SeparatorText("Sun and Night");

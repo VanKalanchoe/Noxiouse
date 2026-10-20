@@ -532,12 +532,13 @@ void skyCubemapMain(uint3 id : SV_DispatchThreadID, uniform PushConstantSkyAtmos
     if (id.x >= push.outputSize || id.y >= push.outputSize)
         return;
 
+    const uint3 texel = uint3(id.xy, id.z + push.firstFace);
     const float2 st = (float2(id.xy) + 0.5) / float(push.outputSize) * 2.0 - 1.0;
-    const float3 direction = cubemapDirection(id.z, st);
+    const float3 direction = cubemapDirection(texel.z, st);
 
     // The world's +Y is up; the camera stands at the planet's north pole, cameraAltitudeKm above the ground.
     const float3 origin = float3(0.0, BottomRadius + max(push.cameraAltitudeKm, PlanetRadiusOffset), 0.0);
-    const float jitter = float(cloudHashPcg3d(id).x & 0xFFFFu) / 65536.0;
+    const float jitter = float(cloudHashPcg3d(texel).x & 0xFFFFu) / 65536.0;
     float cloudTransmittance;
     float3 luminance = skyLuminance(push, origin, direction, normalize(push.sunDirection), jitter, cloudTransmittance) * push.sunIlluminance;
     // At night the moon's light too (the same air and clouds, from another direction).
@@ -548,7 +549,7 @@ void skyCubemapMain(uint3 id : SV_DispatchThreadID, uniform PushConstantSkyAtmos
     }
 
     RWTexture2DArray<float4> output = RWTexture2DArray<float4>.Handle(uint2(push.outputStorageIndex, 0));
-    output[id] = float4(luminance, cloudTransmittance);
+    output[texel] = float4(luminance, cloudTransmittance);
 }
 
 // A mip of the environment cubemap from the one above: the centre of a texel here is the shared corner of four texels
