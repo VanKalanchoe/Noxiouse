@@ -25,6 +25,16 @@ namespace Nox
         // Spawns the entities of the instances whose prefab is loaded; requests the rest.
         void SpawnPending(Scene& scene);
 
+        // A mesh a prefab draws: its entities', its nested prefabs' and its placed models' (the whole model mesh), relative to the
+        // prefab's root. What its Content Browser thumbnail shows.
+        struct MeshPart
+        {
+            glm::mat4 Transform{ 1.0f };
+            MeshComponent Mesh;
+            std::vector<AssetHandle> Materials; // MaterialComponent overrides, empty for the mesh's own
+        };
+        std::vector<MeshPart> CollectMeshParts(const Prefab& prefab);
+
         // Places a prefab in the scene and spawns it at once (Play mode: a script shoots a ball and sets its velocity in the same
         // call). The prefab asset is read synchronously (a small text file); the assets its entities use load in the
         // background as usual. `outSpawned` gets the root first, then the spawned entities. Returns the root, an invalid entity

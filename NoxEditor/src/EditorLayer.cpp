@@ -4390,6 +4390,9 @@ namespace Nox
         if (m_PrefabMode.ReturnScene)
             PrefabInstance::RespawnAll(*m_PrefabMode.ReturnScene, m_PrefabMode.Prefab);
 
+        // Its Content Browser thumbnail is drawn again.
+        AssetPreviewRenderer::Get().Invalidate(m_PrefabMode.Prefab);
+
         // Saved: what is in the scene now is the reference.
         m_PrefabMode.Snapshot = CurrentPrefabText();
         m_PrefabMode.SnapshotTaken = !m_PrefabMode.Snapshot.empty();

@@ -18,6 +18,8 @@
 #include "NoxCore/Renderer/Mesh.h"
 #include "NoxCore/Renderer/Renderer.h"
 #include "NoxCore/Scene/Components.h"
+#include "NoxCore/Scene/Prefab.h"
+#include "NoxCore/Scene/PrefabInstance.h"
 
 namespace Nox
 {
@@ -58,7 +60,8 @@ namespace Nox
 
     bool AssetPreviewRenderer::CanRender(AssetType type)
     {
-        return type == AssetType::Mesh || type == AssetType::StaticMesh || type == AssetType::Material;
+        return type == AssetType::Mesh || type == AssetType::StaticMesh || type == AssetType::Material || type == AssetType::Prefab ||
+               type == AssetType::MeshSource;
     }
 
     Ref<Texture2D> AssetPreviewRenderer::GetThumbnail(AssetHandle handle)
@@ -295,6 +298,9 @@ namespace Nox
             m_Requests.erase(next);
             if (m_Thumbnails.contains(asset) || !AssetManager::IsAssetHandleValid(asset) || !CanRender(AssetManager::GetAssetType(asset)))
                 return;
+            // A model file not cooked yet is not cooked for its thumbnail (the import dialog decides how): drawn once it is loaded.
+            if (AssetManager::GetAssetType(asset) == AssetType::MeshSource && !AssetManager::IsAssetLoaded(asset))
+                return;
             m_Job = Job{};
             m_Job->Asset = asset;
         }
@@ -380,49 +386,86 @@ namespace Nox
         if (!renderer || !AssetManager::IsAssetHandleValid(asset))
             return false;
 
-        // A material shows on the sphere; a mesh is itself.
+        // What is drawn: a material on the sphere; a mesh (or a model) itself; a prefab's meshes where its entities have them.
         const AssetType type = AssetManager::GetAssetType(asset);
-        MeshComponent mesh;
-        mesh.SubmeshCount = UINT32_MAX;
+        std::vector<PrefabInstance::MeshPart> parts;
         if (type == AssetType::Material)
         {
-            mesh.Mesh = m_SphereProvider ? m_SphereProvider() : AssetHandle(0);
-            if (mesh.Mesh == 0 || AssetManager::RequestAsset(asset) != AssetState::Ready)
+            PrefabInstance::MeshPart part;
+            part.Mesh.Mesh = m_SphereProvider ? m_SphereProvider() : AssetHandle(0);
+            part.Mesh.SubmeshCount = UINT32_MAX;
+            if (part.Mesh.Mesh == 0 || AssetManager::RequestAsset(asset) != AssetState::Ready)
                 return false;
+            parts.push_back(std::move(part));
+        }
+        else if (type == AssetType::Prefab)
+        {
+            if (AssetManager::RequestAsset(asset) != AssetState::Ready)
+                return false;
+            const Prefab* prefab = AssetManager::FindLoadedAsset<Prefab>(asset);
+            if (!prefab)
+                return false;
+            parts = PrefabInstance::CollectMeshParts(*prefab);
+            if (parts.empty())
+            {
+                // Nothing to draw (lights, scripts, sounds): the tile keeps its icon.
+                m_Failed[asset] = true;
+                return false;
+            }
         }
         else
-            mesh.Mesh = asset;
-        if (AssetManager::RequestAsset(mesh.Mesh) != AssetState::Ready)
+        {
+            PrefabInstance::MeshPart part;
+            part.Mesh.Mesh = asset;
+            part.Mesh.SubmeshCount = UINT32_MAX;
+            parts.push_back(std::move(part));
+        }
+
+        // Every mesh loaded first; then their bounds in the stage's space.
+        bool ready = true;
+        for (const PrefabInstance::MeshPart& part : parts)
+        {
+            if (AssetManager::RequestAsset(part.Mesh.Mesh) != AssetState::Ready)
+                ready = false;
+        }
+        if (!ready)
             return false;
 
-        // Its local bounds (the stage puts it unrotated at the origin given).
         glm::vec3 lowest(FLT_MAX), highest(-FLT_MAX);
-        size_t submeshCount = 0;
-        auto gather = [&](const auto& loaded)
+        std::vector<size_t> submeshCounts;
+        for (const PrefabInstance::MeshPart& part : parts)
         {
-            submeshCount = loaded.GetSubMeshCount();
-            for (size_t index = 0; index < submeshCount; ++index)
+            size_t submeshCount = 0;
+            auto gather = [&](const auto& loaded)
             {
-                const MeshHandle& submesh = loaded.GetSubMesh(index);
-                if (!submesh.hasBounds)
-                    continue;
-                lowest = glm::min(lowest, submesh.boundsMin);
-                highest = glm::max(highest, submesh.boundsMax);
+                submeshCount = loaded.GetSubMeshCount();
+                const size_t first = std::min<size_t>(part.Mesh.SubmeshIndex, submeshCount);
+                const size_t last = part.Mesh.SubmeshCount == UINT32_MAX ? submeshCount : std::min<size_t>(first + part.Mesh.SubmeshCount, submeshCount);
+                for (size_t index = first; index < last; ++index)
+                {
+                    const MeshHandle& submesh = loaded.GetSubMesh(index);
+                    if (!submesh.hasBounds)
+                        continue;
+                    for (int corner = 0; corner < 8; ++corner)
+                    {
+                        const glm::vec3 local((corner & 1) ? submesh.boundsMax.x : submesh.boundsMin.x,
+                                              (corner & 2) ? submesh.boundsMax.y : submesh.boundsMin.y,
+                                              (corner & 4) ? submesh.boundsMax.z : submesh.boundsMin.z);
+                        const glm::vec3 placed = glm::vec3(part.Transform * glm::vec4(local, 1.0f));
+                        lowest = glm::min(lowest, placed);
+                        highest = glm::max(highest, placed);
+                    }
+                }
+            };
+            const AssetType meshType = AssetManager::GetAssetType(part.Mesh.Mesh);
+            if (meshType == AssetType::StaticMesh)
+            {
+                if (const StaticMesh* loaded = AssetManager::FindLoadedAsset<StaticMesh>(part.Mesh.Mesh))
+                    gather(*loaded);
             }
-        };
-        if (AssetManager::GetAssetType(mesh.Mesh) == AssetType::StaticMesh)
-        {
-            const StaticMesh* loaded = AssetManager::FindLoadedAsset<StaticMesh>(mesh.Mesh);
-            if (!loaded)
-                return false;
-            gather(*loaded);
-        }
-        else
-        {
-            const Mesh* loaded = AssetManager::FindLoadedAsset<Mesh>(mesh.Mesh);
-            if (!loaded)
-                return false;
-            gather(*loaded);
+            else if (const Mesh* loaded = AssetManager::FindLoadedAsset<Mesh>(part.Mesh.Mesh))
+                gather(*loaded);
+            submeshCounts.push_back(submeshCount);
         }
         if (lowest.x > highest.x)
         {
@@ -430,14 +473,22 @@ namespace Nox
             highest = glm::vec3(WorldUnits::FromMeters(0.5f));
         }
 
-        MaterialComponent materials;
-        if (type == AssetType::Material)
-            materials.MaterialAssets.assign(std::max<size_t>(submeshCount, 1), asset);
-
         Placement placement;
         std::vector<AssetHandle> missing;
-        renderer->AddMeshInstances(glm::translate(glm::mat4(1.0f), origin), mesh, type == AssetType::Material ? &materials : nullptr, -1,
-                                   placement.Instances, missing);
+        const glm::mat4 stage = glm::translate(glm::mat4(1.0f), origin);
+        for (size_t index = 0; index < parts.size(); ++index)
+        {
+            const PrefabInstance::MeshPart& part = parts[index];
+            MaterialComponent materials;
+            if (type == AssetType::Material)
+                materials.MaterialAssets.assign(std::max<size_t>(submeshCounts[index], 1), asset);
+            else
+                materials.MaterialAssets = part.Materials;
+            renderer->AddMeshInstances(stage * part.Transform, part.Mesh, materials.MaterialAssets.empty() ? nullptr : &materials, -1,
+                                       placement.Instances, missing);
+            placement.Assets.push_back(part.Mesh.Mesh);
+            placement.Assets.insert(placement.Assets.end(), part.Materials.begin(), part.Materials.end());
+        }
         if (!missing.empty() && !allowStandIns)
         {
             // The mesh's own materials are still loading: wait for them rather than show the stand-ins.
@@ -448,7 +499,7 @@ namespace Nox
         }
 
         placement.Asset = asset;
-        placement.Assets = { asset, mesh.Mesh };
+        placement.Assets.push_back(asset);
         placement.Assets.insert(placement.Assets.end(), missing.begin(), missing.end());
         placement.Center = origin + (lowest + highest) * 0.5f;
         placement.Radius = std::max(glm::length(highest - lowest) * 0.5f, WorldUnits::FromMeters(0.001f));

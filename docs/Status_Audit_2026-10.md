@@ -88,9 +88,10 @@ for history. File references are to the code as of this audit.
   2026-10-20.)
 
 **Editor**
-- Prefab: prefab / .gltf thumbnails, variant tint.
-  (Built 2026-10-20: overrides of deleted entities kept for Revert (P5), Unpack Completely (P7), added entities applied into the
-  outer prefab (P1); re-parenting inside an instance stays blocked as in Unity (P4, decided).)
+- Prefab: (Built 2026-10-20: overrides of deleted entities kept for Revert (P5), Unpack Completely (P7), added entities applied
+  into the outer prefab (P1); re-parenting inside an instance stays blocked as in Unity (P4, decided); rendered prefab thumbnails
+  (their meshes, nested prefabs and placed models; drawn again on Save / Apply), variants purple; .gltf thumbnails once the model
+  is loaded -- the browser never cooks a model for its thumbnail.)
 - Content browser: streaming feedback from preview views. (Built 2026-10-20: rename / move of textures, materials and meshes
   (E2) with their companion files, the old paths kept as aliases in the registry; Reimport; Replace References in the project's
   files and the open scene; neutral thumbnail backdrop. A reimported mesh whose material was renamed writes a fresh .nmat at
@@ -198,7 +199,7 @@ plan each row names.
 | # | Item | State now | Open |
 |---|---|---|---|
 | F1 | Docs audit | done (this file, kept current here) | -- |
-| F2 | Modern content browser | folder tree, search, filters, Material Editor window with a live sphere, rendered thumbnails (materials on spheres, meshes), thumbnail cache on disk (`Editor_Features_Plan_2026-10.md` §2) | prefab / model thumbnails, a neutral backdrop |
+| F2 | Modern content browser | folder tree, search, filters, Material Editor window with a live sphere, rendered thumbnails (materials on spheres, meshes), thumbnail cache on disk (`Editor_Features_Plan_2026-10.md` §2) | (prefab / model thumbnails and the neutral backdrop built 2026-10-20) |
 | F3 | Animation | Sequence Player node, BlendSpace1D / 2D, notifies, layered blend, additive, montages, root motion, clip preview window, Sequencer with Timeline assets and C# control (§3) | audio graph, clip trimming |
 | F4 | Hybrid renderer | DLSS outline jitter fixed (**confirmed**), Stable Overlays, quality presets with Auto, RT shadows on transparency, screen-space and ray traced glass refraction, DDGI cascades, Lumen-style screen-probe GI as every preset's GI (`Hybrid_Renderer_Plan_2026-10.md` §2-4, §2c) | OIT (H4), transparent-signal denoising (H5), volume absorption, screen-probe importance sampling |
 | F5 | Up to 4 viewports | movable / resizable, 1 / 2 / 3 / 4 layouts, independent cameras (`Editor_Features_Plan_2026-10.md` §4) | -- |

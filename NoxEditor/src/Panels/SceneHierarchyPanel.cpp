@@ -16,6 +16,7 @@
 #include "NoxCore/Scene/ModelInstance.h"
 #include "NoxCore/Scene/ParticleSystem.h"
 #include "NoxCore/Scene/Prefab.h"
+#include "AssetPreviewRenderer.h"
 #include "NoxCore/Scene/PrefabInstance.h"
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Animation/Animator.h"
@@ -993,7 +994,9 @@ namespace Nox
                     ImGui::SameLine();
                     if (ImGui::SmallButton("Apply"))
                     {
-                        PrefabInstance::ApplyOverride(*m_Context, entity, entry);
+                        const AssetHandle applied = entity.GetComponent<PrefabInstanceComponent>().Prefab;
+                        if (PrefabInstance::ApplyOverride(*m_Context, entity, entry))
+                            AssetPreviewRenderer::Get().Invalidate(applied); // its thumbnail is drawn again
                         changedInstance = true;
                     }
                     if (ImGui::IsItemHovered())
@@ -1004,7 +1007,10 @@ namespace Nox
                         ImGui::SameLine();
                         if (ImGui::SmallButton("Apply to Outer"))
                         {
-                            PrefabInstance::ApplyOverrideToOuter(*m_Context, entity, entry);
+                            Entity outer = m_Context->GetEntityByUUID(entity.GetComponent<PrefabNodeComponent>().Instance);
+                            const AssetHandle applied = outer && outer.HasComponent<PrefabInstanceComponent>() ? outer.GetComponent<PrefabInstanceComponent>().Prefab : AssetHandle(0);
+                            if (PrefabInstance::ApplyOverrideToOuter(*m_Context, entity, entry) && applied != 0)
+                                AssetPreviewRenderer::Get().Invalidate(applied);
                             changedInstance = true;
                         }
                         if (ImGui::IsItemHovered())

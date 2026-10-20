@@ -1,4 +1,5 @@
 #include "ContentBrowserPanel.h"
+#include "NoxCore/Scene/Prefab.h"
 
 #include <fstream>
 #include <iterator>
@@ -47,6 +48,17 @@ namespace Nox
                 metadata.SourceFilePath.lexically_normal() == normalized)
                 return handle;
         return 0;
+    }
+
+    ImVec4 ContentBrowserPanel::PrefabTileColor(AssetHandle handle, const AssetMetadata& metadata)
+    {
+        // A variant is known once the (small) prefab file has loaded; until then it shows as a prefab.
+        if (metadata.Type == AssetType::Prefab && AssetManager::RequestAsset(handle) == AssetState::Ready)
+        {
+            if (const Prefab* prefab = AssetManager::FindLoadedAsset<Prefab>(handle); prefab && prefab->Base != 0)
+                return ImVec4(0.72f, 0.55f, 1.0f, 1.0f);
+        }
+        return ImVec4(0.45f, 0.7f, 1.0f, 1.0f);
     }
 
     Ref<Texture2D> ContentBrowserPanel::GetThumbnail(AssetHandle handle, const AssetMetadata& metadata, bool& rendered)
@@ -642,12 +654,21 @@ namespace Nox
 
                         const bool selected = m_Selected.contains(handle);
                         ImGui::PushStyleColor(ImGuiCol_Button, selected ? ImVec4(0.26f, 0.45f, 0.75f, 0.55f) : ImVec4(0, 0, 0, 0));
-                        // Prefabs are blue (icon and name), like prefab instances in the hierarchy.
+                        // Prefabs are blue (icon and name), like prefab instances in the hierarchy; variants purple (Unity marks them
+                        // apart too). A drawn thumbnail keeps its colors and gets a bar in that color along its bottom.
                         const bool isPrefab = metadata.Type == AssetType::Prefab;
+                        const ImVec4 prefabColor = PrefabTileColor(handle, metadata);
                         const bool clicked = ImGui::ImageButton(browserEntry.Id.c_str(), thumbnail->getImTextureID(),
                             {m_ThumbnailSize, m_ThumbnailSize}, uv0, uv1, ImVec4(0, 0, 0, 0),
-                            isPrefab ? ImVec4(0.45f, 0.7f, 1.0f, 1.0f) : ImVec4(1, 1, 1, 1));
+                            isPrefab && !renderedThumbnail ? prefabColor : ImVec4(1, 1, 1, 1));
                         ImGui::PopStyleColor();
+                        if (isPrefab && renderedThumbnail)
+                        {
+                            const ImVec2 imageMax = ImGui::GetItemRectMax();
+                            const ImVec2 imageMin = ImGui::GetItemRectMin();
+                            const float bar = std::max(3.0f, m_ThumbnailSize * 0.03f);
+                            ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(imageMin.x, imageMax.y - bar), imageMax, ImGui::GetColorU32(prefabColor));
+                        }
 
                         // A mesh's size (its bounds, in meters and the project's units): what the importer scale made of it.
                         if ((metadata.Type == AssetType::StaticMesh || metadata.Type == AssetType::Mesh) &&
@@ -777,7 +798,7 @@ namespace Nox
                     {
                         const bool bluePrefabName = !browserEntry.IsDirectory && browserEntry.Metadata.Type == AssetType::Prefab;
                         if (bluePrefabName)
-                            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.45f, 0.7f, 1.0f, 1.0f));
+                            ImGui::PushStyleColor(ImGuiCol_Text, PrefabTileColor(browserEntry.Handle, browserEntry.Metadata));
                         const ImVec2 nameMin = ImGui::GetCursorScreenPos();
                         ImGui::PushClipRect(nameMin, ImVec2(nameMin.x + m_ThumbnailSize, nameMin.y + ImGui::GetTextLineHeight()), true);
                         ImGui::TextUnformatted(browserEntry.Name.c_str());

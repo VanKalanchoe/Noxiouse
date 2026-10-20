@@ -100,9 +100,10 @@ pass in the next frame, the pixels on the main thread once that frame is done) a
 the next session uploads it (four a frame) instead of drawing it, unless the asset's file is newer. Editing a material deletes its
 cached image.
 
-Not yet: texture streaming feedback from the preview views
-(their textures stay at the mips the scene asked for), prefab and model (.gltf) thumbnails, a neutral backdrop instead of the
-sky.
+Built 2026-10-20: prefab thumbnails (`PrefabInstance::CollectMeshParts`: the meshes of its entities, nested prefabs and placed
+models, framed by their combined bounds; drawn again after Prefab Mode Save or Apply; variants purple instead of blue), model
+(.gltf) thumbnails once the model has been loaded (the browser never cooks a model just for its tile), a neutral grey backdrop.
+Not yet: texture streaming feedback from the preview views (their textures stay at the mips the scene asked for).
 
 ## 3. F3, the rest: animation
 

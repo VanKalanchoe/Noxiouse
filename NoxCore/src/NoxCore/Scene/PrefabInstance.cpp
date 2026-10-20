@@ -142,6 +142,14 @@ namespace Nox
             (removeIfProvided<Components>(entity), ...);
         }
 
+        uint64_t parentIdOf(const YAML::Node& node, uint64_t rootId)
+        {
+            const auto relationship = node["RelationshipComponent"];
+            if (relationship && relationship["Parent"] && relationship["Parent"].as<uint64_t>() != 0)
+                return relationship["Parent"].as<uint64_t>();
+            return rootId;
+        }
+
         // Whether `entity` was spawned by the instance `rootID` or by an instance nested in it.
         bool ownedBy(Scene& scene, Entity entity, UUID rootID)
         {
@@ -532,6 +540,151 @@ namespace Nox
         }
     }
 
+    namespace
+    {
+        void collectMeshParts(const Prefab& prefab, const glm::mat4& rootWorld, const std::vector<PrefabPropertyOverride>& overrides,
+                              const std::vector<PrefabStructureChange>& structure, const std::vector<PrefabNestedChange>& nestedChanges,
+                              std::vector<PrefabInstance::MeshPart>& out, int depth)
+        {
+            if (depth >= 8)
+                return;
+            const std::vector<YAML::Node> nodes = effectiveNodes(prefab);
+
+            // Deleted on this layer, with what is below them.
+            std::unordered_set<uint64_t> removed;
+            for (const PrefabStructureChange& change : structure)
+            {
+                if (change.Kind == PrefabStructureChange::ChangeKind::RemovedEntity && change.Entity != prefab.Root)
+                    removed.insert(change.Entity);
+            }
+            std::unordered_map<uint64_t, YAML::Node> byId;
+            for (const YAML::Node node : nodes)
+            {
+                const uint64_t id = node["Entity"].as<uint64_t>();
+                byId[id] = patchedEntityNode(node, id, overrides, structure);
+            }
+            for (bool grew = !removed.empty(); grew;)
+            {
+                grew = false;
+                for (const auto& [id, node] : byId)
+                {
+                    if (!removed.contains(id) && id != prefab.Root && removed.contains(parentIdOf(node, prefab.Root)))
+                    {
+                        removed.insert(id);
+                        grew = true;
+                    }
+                }
+            }
+
+            auto transformOf = [](const YAML::Node& node)
+            {
+                TransformComponent transform;
+                if (const YAML::Node t = node["TransformComponent"])
+                {
+                    auto readVec3 = [](const YAML::Node& value, const glm::vec3& fallback)
+                    {
+                        return value && value.IsSequence() && value.size() == 3 ? glm::vec3(value[0].as<float>(), value[1].as<float>(), value[2].as<float>()) : fallback;
+                    };
+                    transform.Translation = readVec3(t["Translation"], glm::vec3(0.0f));
+                    transform.Rotation = readVec3(t["Rotation"], glm::vec3(0.0f));
+                    transform.Scale = readVec3(t["Scale"], glm::vec3(1.0f));
+                }
+                return transform;
+            };
+
+            // The outermost root is placed where an instance would put it: at the origin with the file's rotation and scale. A nested
+            // instance's root is where the outer prefab has it (rootWorld).
+            glm::mat4 rootMatrix = rootWorld;
+            if (depth == 0)
+            {
+                if (const auto rootNode = byId.find(prefab.Root); rootNode != byId.end())
+                {
+                    TransformComponent transform = transformOf(rootNode->second);
+                    transform.Translation = glm::vec3(0.0f);
+                    rootMatrix = transform.GetTransform();
+                }
+            }
+
+            // World matrices relative to the thumbnail's origin, parents first (memoized; a broken parent link hangs from the root).
+            std::unordered_map<uint64_t, glm::mat4> worlds;
+            std::function<glm::mat4(uint64_t, int)> worldOf = [&](uint64_t id, int guard) -> glm::mat4
+            {
+                if (id == prefab.Root)
+                    return rootMatrix;
+                if (const auto found = worlds.find(id); found != worlds.end())
+                    return found->second;
+                const auto node = byId.find(id);
+                if (node == byId.end() || guard > 64)
+                    return rootMatrix;
+                const glm::mat4 world = worldOf(parentIdOf(node->second, prefab.Root), guard + 1) * transformOf(node->second).GetTransform();
+                worlds[id] = world;
+                return world;
+            };
+
+            for (const auto& [id, node] : byId)
+            {
+                if (removed.contains(id))
+                    continue;
+                const glm::mat4 world = worldOf(id, 0);
+
+                if (const YAML::Node mesh = node["MeshComponent"]; mesh && mesh["MeshHandle"])
+                {
+                    PrefabInstance::MeshPart part;
+                    part.Transform = world;
+                    part.Mesh.Mesh = mesh["MeshHandle"].as<uint64_t>();
+                    if (mesh["SubmeshIndex"])
+                        part.Mesh.SubmeshIndex = mesh["SubmeshIndex"].as<uint32_t>();
+                    if (mesh["SubmeshCount"])
+                        part.Mesh.SubmeshCount = mesh["SubmeshCount"].as<uint32_t>();
+                    if (const YAML::Node materials = node["MaterialComponent"]; materials && materials["MaterialAssets"] && materials["MaterialAssets"].IsSequence())
+                    {
+                        for (const YAML::Node material : materials["MaterialAssets"])
+                            part.Materials.push_back(material.as<uint64_t>());
+                    }
+                    if (part.Mesh.Mesh != 0)
+                        out.push_back(std::move(part));
+                }
+                // A placed model: its whole mesh (the model's nodes are in its space).
+                if (const YAML::Node model = node["ModelInstanceComponent"]; model && model["Model"])
+                {
+                    PrefabInstance::MeshPart part;
+                    part.Transform = world;
+                    part.Mesh.Mesh = model["Model"].as<uint64_t>();
+                    part.Mesh.SubmeshCount = UINT32_MAX;
+                    if (part.Mesh.Mesh != 0)
+                        out.push_back(std::move(part));
+                }
+                // A nested prefab: its parts below this entity, with the changes this layer (or its own text) has for it.
+                if (const YAML::Node inner = node["PrefabInstanceComponent"]; inner && inner["Prefab"] && id != prefab.Root)
+                {
+                    Ref<Prefab> innerPrefab = AssetManager::GetAsset<Prefab>(AssetHandle(inner["Prefab"].as<uint64_t>()));
+                    if (!innerPrefab)
+                        continue;
+                    std::vector<PrefabPropertyOverride> innerOverrides;
+                    std::vector<PrefabStructureChange> innerStructure;
+                    std::vector<PrefabNestedChange> innerNested;
+                    SceneSerializer::ReadPrefabChanges(inner, innerOverrides, innerStructure, innerNested);
+                    for (const PrefabNestedChange& change : nestedChanges)
+                    {
+                        if (change.Entity != id)
+                            continue;
+                        innerOverrides = change.Overrides;
+                        innerStructure = change.Structure;
+                        innerNested = change.Nested;
+                    }
+                    collectMeshParts(*innerPrefab, world, innerOverrides, innerStructure, innerNested, out, depth + 1);
+                }
+            }
+        }
+    }
+
+    std::vector<PrefabInstance::MeshPart> PrefabInstance::CollectMeshParts(const Prefab& prefab)
+    {
+        std::vector<MeshPart> parts;
+        collectMeshParts(prefab, glm::mat4(1.0f), {}, {}, {}, parts, 0);
+        return parts;
+    }
+
     UUID PrefabInstance::NodeUUID(UUID instance, uint64_t localId)
     {
         // SplitMix64 of the pair, like ModelInstance::NodeUUID (a different salt: the two never produce the same UUID).
@@ -895,14 +1048,6 @@ namespace Nox
         {
             static const std::unordered_set<std::string> keys = { "Entity", "RelationshipComponent", "FolderComponent", "PrefabInstanceComponent" };
             return keys;
-        }
-
-        uint64_t parentIdOf(const YAML::Node& node, uint64_t rootId)
-        {
-            const auto relationship = node["RelationshipComponent"];
-            if (relationship && relationship["Parent"] && relationship["Parent"].as<uint64_t>() != 0)
-                return relationship["Parent"].as<uint64_t>();
-            return rootId;
         }
 
         // Scene entities below the instance's spawned entities that the prefab does not have (top ones: their own children come

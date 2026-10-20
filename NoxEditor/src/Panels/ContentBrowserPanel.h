@@ -41,6 +41,8 @@ namespace Nox
         void RefreshAssetTree();
         AssetHandle FindAssetHandle(const std::filesystem::path& relativePath) const;
         Ref<Texture2D> GetThumbnail(AssetHandle handle, const AssetMetadata& metadata, bool& rendered);
+        // A prefab tile's color: blue, purple for a variant.
+        ImVec4 PrefabTileColor(AssetHandle handle, const AssetMetadata& metadata);
         void SetImportDestination(const std::filesystem::path& path);
         // Windows-style rename: the asset's name becomes a text field with the whole name selected.
         void BeginRename(AssetHandle handle);
