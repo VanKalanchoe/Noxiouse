@@ -133,6 +133,40 @@ namespace Nox
             }
             m_AnimationClipPanels.push_back(CreateScope<AnimationClipPanel>(handle));
         };
+        // A skinned mesh opens the window of a clip made for it (cooked from the same model, else one in its folder), previewing on it.
+        m_AssetOpeners[AssetType::Mesh] = [this](AssetHandle handle)
+        {
+            const auto& registry = Project::GetActive()->GetEditorAssetManager()->GetAssetRegistry();
+            const AssetMetadata& mesh = AssetManager::GetMetadata(handle);
+            bool skinned = false;
+            AssetHandle sameSource = 0, sameFolder = 0;
+            for (const auto& [candidate, metadata] : registry)
+            {
+                if (metadata.Type == AssetType::Skeleton && !mesh.SourceFilePath.empty() && metadata.SourceFilePath == mesh.SourceFilePath)
+                    skinned = true;
+                if (metadata.Type != AssetType::AnimationSequence)
+                    continue;
+                if (!mesh.SourceFilePath.empty() && metadata.SourceFilePath == mesh.SourceFilePath && sameSource == 0)
+                    sameSource = candidate;
+                if (metadata.FilePath.parent_path() == mesh.FilePath.parent_path() && sameFolder == 0)
+                    sameFolder = candidate;
+            }
+            const AssetHandle clip = sameSource != 0 ? sameSource : sameFolder;
+            if (!skinned || clip == 0)
+            {
+                NOX_CORE_INFO("'{}': {}", mesh.FilePath.filename().string(), !skinned ? "not a skinned mesh, nothing to preview" : "no animation clip found for it");
+                return;
+            }
+            for (auto& panel : m_AnimationClipPanels)
+            {
+                if (panel->GetClip() == clip)
+                {
+                    ImGui::SetWindowFocus(panel->GetTitle().c_str());
+                    return;
+                }
+            }
+            m_AnimationClipPanels.push_back(CreateScope<AnimationClipPanel>(clip, handle));
+        };
         m_AssetOpeners[AssetType::Timeline] = [this](AssetHandle handle)
         {
             for (auto& panel : m_TimelinePanels)

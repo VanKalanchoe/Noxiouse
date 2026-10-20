@@ -14,7 +14,8 @@ namespace Nox
     class AnimationClipPanel
     {
     public:
-        explicit AnimationClipPanel(AssetHandle clip);
+        // previewMesh: the skeletal mesh to show it on (0: the one cooked from the clip's model).
+        explicit AnimationClipPanel(AssetHandle clip, AssetHandle previewMesh = 0);
 
         void OnImGuiRender();
         bool IsOpen() const { return m_Open; }

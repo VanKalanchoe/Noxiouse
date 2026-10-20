@@ -1777,8 +1777,23 @@ namespace Nox
                 currentAnimName = registry.at(component.Animation).FilePath.stem().string();
             }
 
+            // The clips made for this skeleton (cooked from the same model, or next to it) unless "All" is ticked: a clip of another
+            // skeleton moves the wrong bones.
+            static bool s_AllClips = false;
+            const AssetMetadata* skeletonMetadata = component.Skeleton != 0 && registry.contains(component.Skeleton) ? &registry.at(component.Skeleton) : nullptr;
+            auto clipFitsSkeleton = [&](const AssetMetadata& clip)
+            {
+                if (s_AllClips || !skeletonMetadata)
+                    return true;
+                if (!skeletonMetadata->SourceFilePath.empty() && clip.SourceFilePath == skeletonMetadata->SourceFilePath)
+                    return true;
+                return clip.FilePath.parent_path() == skeletonMetadata->FilePath.parent_path();
+            };
+
             if (ImGui::BeginCombo("Animation Clip", currentAnimName.c_str()))
             {
+                if (skeletonMetadata)
+                    ImGui::Checkbox("All clips (not only this skeleton's)", &s_AllClips);
                 bool isNoneSelected = (currentAnim == nullptr && component.Animation == 0);
                 if (ImGui::Selectable("None", isNoneSelected))
                 {
@@ -1792,7 +1807,7 @@ namespace Nox
 
                 for (const auto& [handle, metadata] : registry)
                 {
-                    if (metadata.Type == AssetType::AnimationSequence)
+                    if (metadata.Type == AssetType::AnimationSequence && clipFitsSkeleton(metadata))
                     {
                         std::string animName = metadata.FilePath.stem().string();
                         bool isSelected = (currentAnim && (currentAnim->Handle == handle || component.Animation == handle));

@@ -103,10 +103,10 @@ for history. File references are to the code as of this audit.
   (New-project flow: built 2026-10-20, no project templates.)
 
 **Animation**
-- Sync markers (A2); (notifies in single-clip mode: built 2026-10-20); graph preview and loop ranges (A7); double-click a skeletal mesh to preview;
+- Sync markers (A2); (notifies in single-clip mode: built 2026-10-20); graph preview and loop ranges (A7); (double-click a skinned mesh to preview it: built 2026-10-20);
   Timeline curve editor, material tracks, auto-key, sub-sequences / camera cuts (A8); audio graph (A9).
-- Variable node input pins; per-instance skeleton poses (the Skeleton asset's nodes are shared); sockets; clip / graph picker
-  filtered by skeleton; jump / fall states (C1, needs clips); multi-skin models spawn as nodes (C3).
+- Variable node input pins; per-instance skeleton poses (the Skeleton asset's nodes are shared); sockets; (clip picker filtered by
+  skeleton: built 2026-10-20); jump / fall states (C1, needs clips); multi-skin models spawn as nodes (C3).
 
 **Scripting**
 - `ScriptBehaviour` component model; scripts and asset references as assets; camera smoothing; backend-independent API;

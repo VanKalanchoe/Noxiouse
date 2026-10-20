@@ -16,10 +16,15 @@
 
 namespace Nox
 {
-    AnimationClipPanel::AnimationClipPanel(AssetHandle clip)
+    AnimationClipPanel::AnimationClipPanel(AssetHandle clip, AssetHandle previewMesh)
         : m_Clip(clip)
     {
         m_Title = AssetManager::GetMetadata(clip).FilePath.stem().string() + " (Animation Clip)##" + std::to_string(static_cast<uint64_t>(clip));
+        if (previewMesh != 0)
+        {
+            SetPreviewMesh(previewMesh);
+            m_PreviewSearched = true;
+        }
     }
 
     void AnimationClipPanel::Save()
