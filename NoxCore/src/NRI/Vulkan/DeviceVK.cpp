@@ -1400,7 +1400,9 @@ namespace NRI
 
     void DeviceVK::initImGui(Nox::Window& window)
     {
-        const uint32_t maxCustomTextures = 1000;
+        // Every image ImGui shows (Content Browser thumbnails, the viewports, texture previews) takes one; a big folder of
+        // textures went past the 1000 this used to allow.
+        const uint32_t maxCustomTextures = 8192;
 
 #if IMGUI_VERSION_NUM >= 19280
         vk::DescriptorPoolSize poolSizes[] =
