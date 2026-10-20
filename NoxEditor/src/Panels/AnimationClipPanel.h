@@ -40,6 +40,9 @@ namespace Nox
         bool m_PreviewSearched = false;
         bool m_Playing = true;
         bool m_Loop = true;
+        // The loop range (seconds; end 0 = the clip's end): playing loops / stops inside it, set on the timeline.
+        float m_RangeStart = 0.0f;
+        float m_RangeEnd = 0.0f;
         float m_Speed = 1.0f;
         std::string m_LastNotify; // the last notify the playing preview passed, shown for a moment
         float m_LastNotifyAge = 10.0f;

@@ -81,29 +81,49 @@ namespace Nox
         if (!m_PreviewSearched)
             FindPreviewModel();
 
-        // Playing moves the playhead (looping or stopping at the end) and reports the notifies it passes.
+        // Playing moves the playhead inside the loop range (looping or stopping at its end) and reports the notifies it passes.
+        const float rangeStart = std::clamp(m_RangeStart, 0.0f, duration);
+        const float rangeEnd = m_RangeEnd > rangeStart ? std::min(m_RangeEnd, duration) : duration;
+        const float rangeLength = std::max(rangeEnd - rangeStart, 1e-4f);
+        if (m_Playing && (m_Cursor < rangeStart || m_Cursor > rangeEnd))
+            m_Cursor = m_Speed >= 0.0f ? rangeStart : rangeEnd; // started (or the range moved) outside it
         const float previous = m_Cursor;
         bool wrapped = false;
         if (m_Playing && duration > 0.0f)
         {
             m_Cursor += ImGui::GetIO().DeltaTime * m_Speed;
-            if (m_Cursor > duration || m_Cursor < 0.0f)
+            if (m_Cursor > rangeEnd || m_Cursor < rangeStart)
             {
                 if (m_Loop)
                 {
-                    m_Cursor = std::fmod(std::fmod(m_Cursor, duration) + duration, duration);
+                    m_Cursor = rangeStart + std::fmod(std::fmod(m_Cursor - rangeStart, rangeLength) + rangeLength, rangeLength);
                     wrapped = true;
                 }
                 else
                 {
-                    m_Cursor = std::clamp(m_Cursor, 0.0f, duration);
+                    m_Cursor = std::clamp(m_Cursor, rangeStart, rangeEnd);
                     m_Playing = false;
                 }
             }
             if (clip)
             {
+                // Across the range's ends: the part up to the end, then from the start (the notifies of each).
                 std::vector<std::string> crossed;
-                CollectCrossedNotifies(*clip, previous, m_Cursor, wrapped, crossed);
+                if (wrapped && (rangeStart > 0.0f || rangeEnd < duration))
+                {
+                    if (m_Speed >= 0.0f)
+                    {
+                        CollectCrossedNotifies(*clip, previous, rangeEnd, false, crossed);
+                        CollectCrossedNotifies(*clip, rangeStart - 1e-5f, m_Cursor, false, crossed);
+                    }
+                    else
+                    {
+                        CollectCrossedNotifies(*clip, previous, rangeStart, false, crossed);
+                        CollectCrossedNotifies(*clip, rangeEnd + 1e-5f, m_Cursor, false, crossed);
+                    }
+                }
+                else
+                    CollectCrossedNotifies(*clip, previous, m_Cursor, wrapped, crossed);
                 if (!crossed.empty())
                 {
                     m_LastNotify = crossed.back();
@@ -141,8 +161,8 @@ namespace Nox
         ImGui::BeginGroup();
         if (ImGui::Button(m_Playing ? "Pause" : "Play", ImVec2(70.0f, 0.0f)))
         {
-            if (!m_Playing && !m_Loop && m_Cursor >= duration)
-                m_Cursor = 0.0f;
+            if (!m_Playing && !m_Loop && m_Cursor >= rangeEnd)
+                m_Cursor = rangeStart;
             m_Playing = !m_Playing;
         }
         ImGui::Checkbox("Loop", &m_Loop);
@@ -205,12 +225,42 @@ namespace Nox
             const ImVec2 min = ImGui::GetItemRectMin();
             const ImVec2 max = ImGui::GetItemRectMax();
             ImDrawList* drawList = ImGui::GetWindowDrawList();
+            // The loop range, shaded.
+            const float rangeStart = std::clamp(m_RangeStart, 0.0f, duration);
+            const float rangeEnd = m_RangeEnd > rangeStart ? std::min(m_RangeEnd, duration) : duration;
+            if (rangeStart > 0.0f || rangeEnd < duration)
+            {
+                const float x0 = min.x + (max.x - min.x) * rangeStart / duration;
+                const float x1 = min.x + (max.x - min.x) * rangeEnd / duration;
+                drawList->AddRectFilled(ImVec2(x0, min.y), ImVec2(x1, max.y), IM_COL32(80, 160, 255, 50));
+                drawList->AddLine(ImVec2(x0, min.y), ImVec2(x0, max.y), IM_COL32(80, 160, 255, 255), 2.0f);
+                drawList->AddLine(ImVec2(x1, min.y), ImVec2(x1, max.y), IM_COL32(80, 160, 255, 255), 2.0f);
+            }
             for (const AnimationNotify& notify : clip->Notifies)
             {
                 const float x = min.x + (max.x - min.x) * std::clamp(notify.Time / duration, 0.0f, 1.0f);
                 drawList->AddLine(ImVec2(x, min.y), ImVec2(x, max.y), IM_COL32(255, 190, 60, 255), 2.0f);
             }
         }
+
+        // The loop range: [ and ] at the playhead, or typed.
+        if (ImGui::SmallButton("Range Start Here"))
+            m_RangeStart = m_Cursor;
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Range End Here"))
+            m_RangeEnd = m_Cursor;
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Whole Clip"))
+            m_RangeStart = m_RangeEnd = 0.0f;
+        ImGui::SameLine();
+        float range[2] = { m_RangeStart, m_RangeEnd > 0.0f ? m_RangeEnd : duration };
+        ImGui::SetNextItemWidth(-1.0f);
+        if (ImGui::DragFloat2("##range", range, 0.005f, 0.0f, duration, "%.3f s"))
+        {
+            m_RangeStart = std::clamp(std::min(range[0], range[1]), 0.0f, duration);
+            m_RangeEnd = std::clamp(std::max(range[0], range[1]), 0.0f, duration);
+        }
+        ImGui::SetItemTooltip("Loop range: playing loops (or stops) inside it");
 
         ImGui::SeparatorText("Notifies");
         ImGui::SetNextItemWidth(160.0f);
