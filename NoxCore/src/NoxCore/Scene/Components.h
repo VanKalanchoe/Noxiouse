@@ -696,8 +696,11 @@ namespace Nox
         float BrakingDeceleration = WorldUnits::FromMeters(20.0f); // m/s^2 when no movement is wanted
 
         // Input, set by scripts each frame
-        glm::vec3 MoveVelocity = { 0.0f, 0.0f, 0.0f }; // desired horizontal world velocity (m/s)
+        glm::vec3 MoveVelocity = { 0.0f, 0.0f, 0.0f }; // desired horizontal world velocity (world units per second)
         float JumpSpeed = 0.0f;                        // upward speed to apply on the next fixed step, then cleared
+        // Written by the entity's animator: the root motion of what it plays, as a world velocity. Moves the character on top
+        // of MoveVelocity, horizontally (gravity and the floor keep the height), through the same collision as any movement.
+        glm::vec3 RootMotionVelocity = { 0.0f, 0.0f, 0.0f };
 
         // Runtime state, written by the physics step
         bool IsGrounded = false;

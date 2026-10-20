@@ -19,7 +19,7 @@ for history. File references are to the code as of this audit.
 | Renderer | ReSTIR PT temporal reuse: lighting "rotation" artifact with a static camera; off by default | `EditorLayer.cpp:981` |
 | Renderer | ReSTIR DI / PT assume light indices never change between frames (identity mapping): adding / removing a light corrupts their history for a frame | `RTXDI/DI/ReSTIRDITemporal.slang:110`, `PT/ReSTIRPTTemporal.slang:465` |
 | Renderer | Meshlet cone culling was removed because it dropped visible meshlets; cause never found (cones still cooked, unread) | `MeshImporter.cpp:57`, `shaderIO.h` |
-| Animation | **Root motion is lost on entities with a character controller**: added to the Transform, then overwritten by the controller every frame | `Scene.cpp:1161`, `JoltPhysics3DScene.cpp:632` |
+| Animation | Fixed 2026-10-20: root motion was lost on entities with a character controller (added to the Transform, overwritten by the controller). The controller now gets it as a velocity (`RootMotionVelocity`, horizontal) and moves by it with collisions | `Scene.cpp` (UpdateAnimators), `JoltPhysics3DScene.cpp` |
 | Animation | Fox locomotion `Speed` thresholds are in m/s while the project is in cm: Walk -> Run always fires | `CharacterMovement.cs:13`, Fox graph |
 | Scripting | A **failed hot reload leaves scripting unloaded** (the old assemblies are cleared before the new ones load) | `DotNetBackend.cpp:558` |
 | Scripting | The reload generation never increases, so the stale-object check does nothing; `OnAfterReload` is declared but never called | `ScriptEngine.cpp:159`, `EntityBehaviour.cs:25` |

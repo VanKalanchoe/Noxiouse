@@ -583,6 +583,9 @@ namespace Nox {
                 state.Horizontal = distance <= step || distance < 1e-5f ? wanted : state.Horizontal + toWanted * (step / distance);
             }
             velocity += JPH::Vec3(state.Horizontal.x, 0.0f, state.Horizontal.z);
+            // The animation's root motion, as it is (not ramped: the clip already starts and stops the way it moves).
+            const glm::vec3 rootMotion = ToNative(glm::vec3(controller.RootMotionVelocity.x, 0.0f, controller.RootMotionVelocity.z));
+            velocity += JPH::Vec3(rootMotion.x, 0.0f, rootMotion.z);
 
             character->SetLinearVelocity(velocity);
 

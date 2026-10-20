@@ -631,7 +631,7 @@ namespace Nox
             ComponentAccess().Read<RigidBody3DComponent>().Write<CharacterController3DComponent, TransformComponent, DirtyTransformComponent>(),
             [this]() { UpdatePhysics3D(); });
         m_UpdateSystems.AddSystem("Animation",
-            ComponentAccess().Write<AnimatorComponent, TransformComponent, DirtyTransformComponent>(),
+            ComponentAccess().Read<WorldTransformComponent>().Write<AnimatorComponent, TransformComponent, DirtyTransformComponent, CharacterController3DComponent>(),
             [this]() { UpdateAnimators(); });
         m_UpdateSystems.AddSystem("Timelines",
             ComponentAccess().Read<RelationshipComponent, TagComponent>()
@@ -1168,11 +1168,23 @@ namespace Nox
 
             // What the graph's evaluation produced besides the pose: notifies for the scripts, and root motion moving this
             // entity (the skeleton's model space is this entity's: rotate and scale the step into its parent's space).
+            // A character controller owns the entity's translation (it would overwrite the step): it gets the root motion as
+            // a velocity instead and moves by it in the next physics steps, colliding like any other movement.
+            auto* character = m_Registry.try_get<CharacterController3DComponent>(entity);
+            if (character)
+                character->RootMotionVelocity = glm::vec3(0.0f);
             if (animatorComp.Graph != 0 && animatorComp.Playing)
             {
                 animatorComp.FiredNotifies = animatorComp.GraphInstance.GetFiredNotifies();
                 const glm::vec3 rootMotion = animatorComp.GraphInstance.ConsumeRootMotion();
-                if (rootMotion != glm::vec3(0.0f) && m_Registry.all_of<TransformComponent>(entity))
+                if (rootMotion != glm::vec3(0.0f) && character && ts > 0.0f)
+                {
+                    const auto* world = m_Registry.try_get<WorldTransformComponent>(entity);
+                    const glm::mat3 toWorld = world ? glm::mat3(world->WorldMatrix)
+                                                    : glm::mat3(m_Registry.get<TransformComponent>(entity).GetTransform());
+                    character->RootMotionVelocity = toWorld * rootMotion / ts;
+                }
+                else if (rootMotion != glm::vec3(0.0f) && m_Registry.all_of<TransformComponent>(entity))
                 {
                     auto& transform = m_Registry.get<TransformComponent>(entity);
                     transform.Translation += glm::mat3(transform.GetTransform()) * rootMotion;
