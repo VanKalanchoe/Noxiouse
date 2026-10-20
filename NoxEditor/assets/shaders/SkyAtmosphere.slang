@@ -446,7 +446,10 @@ CloudResult marchClouds(PushConstantSkyAtmosphere push, float3 origin, float3 di
         return result;
     tEnd = min(tEnd, tStart + CloudMaxMarchKm);
 
-    const int steps = 64;
+    // A step of at most ~0.6 km (64 to 128 steps): a ray grazing the horizon crosses up to 80 km of the layer, and 64 steps there
+    // were 1.25 km each against ~2 km clouds -- every texel a different random sample of them, blocky noise far away (worst at
+    // night, moonlit clouds against a dark sky).
+    const int steps = clamp(int(ceil((tEnd - tStart) / 0.6)), 64, 128);
     const float dt = (tEnd - tStart) / float(steps);
     const float cosTheta = dot(direction, sunDirection);
     float weightedDistance = 0.0;
@@ -456,7 +459,8 @@ CloudResult marchClouds(PushConstantSkyAtmosphere push, float3 origin, float3 di
         const float t = tStart + (float(i) + jitter) * dt;
         const float3 p = origin + direction * t;
         float heightFraction;
-        const float density = cloudDensity(push, p, true, heightFraction);
+        // The detail noise (tens of meters) only near: farther than ~20 km it is smaller than a texel and only aliases.
+        const float density = cloudDensity(push, p, t < 20.0, heightFraction);
         if (density <= 0.0)
             continue;
 
@@ -533,20 +537,36 @@ void skyCubemapMain(uint3 id : SV_DispatchThreadID, uniform PushConstantSkyAtmos
         return;
 
     const uint3 texel = uint3(id.xy, id.z + push.firstFace);
-    const float2 st = (float2(id.xy) + 0.5) / float(push.outputSize) * 2.0 - 1.0;
-    const float3 direction = cubemapDirection(texel.z, st);
+    const float2 centerSt = (float2(id.xy) + 0.5) / float(push.outputSize) * 2.0 - 1.0;
 
     // The world's +Y is up; the camera stands at the planet's north pole, cameraAltitudeKm above the ground.
     const float3 origin = float3(0.0, BottomRadius + max(push.cameraAltitudeKm, PlanetRadiusOffset), 0.0);
-    const float jitter = float(cloudHashPcg3d(texel).x & 0xFFFFu) / 65536.0;
-    float cloudTransmittance;
-    float3 luminance = skyLuminance(push, origin, direction, normalize(push.sunDirection), jitter, cloudTransmittance) * push.sunIlluminance;
-    // At night the moon's light too (the same air and clouds, from another direction).
-    if (any(push.moonIlluminance > 0.0))
+    const uint hash = cloudHashPcg3d(texel).x;
+
+    // Near the horizon the clouds are tens of km away and smaller than a texel: two rays a texel (diagonally apart, each with its
+    // own jitter) average them instead of one ray picking a random part.
+    const bool horizon = abs(cubemapDirection(texel.z, centerSt).y) < 0.15;
+    const uint sampleCount = horizon ? 2u : 1u;
+    float3 luminance = float3(0.0);
+    float cloudTransmittance = 0.0;
+    for (uint sampleIndex = 0; sampleIndex < sampleCount; ++sampleIndex)
     {
-        float moonCloudTransmittance;
-        luminance += skyLuminance(push, origin, direction, normalize(push.moonDirection), jitter, moonCloudTransmittance) * push.moonIlluminance;
+        const float2 subPixel = horizon ? (sampleIndex == 0 ? float2(0.25) : float2(0.75)) : float2(0.5);
+        const float2 st = (float2(id.xy) + subPixel) / float(push.outputSize) * 2.0 - 1.0;
+        const float3 direction = cubemapDirection(texel.z, st);
+        const float jitter = float(((hash >> (sampleIndex * 16u)) & 0xFFFFu)) / 65536.0;
+        float sampleTransmittance;
+        luminance += skyLuminance(push, origin, direction, normalize(push.sunDirection), jitter, sampleTransmittance) * push.sunIlluminance;
+        // At night the moon's light too (the same air and clouds, from another direction).
+        if (any(push.moonIlluminance > 0.0))
+        {
+            float moonCloudTransmittance;
+            luminance += skyLuminance(push, origin, direction, normalize(push.moonDirection), jitter, moonCloudTransmittance) * push.moonIlluminance;
+        }
+        cloudTransmittance += sampleTransmittance;
     }
+    luminance /= float(sampleCount);
+    cloudTransmittance /= float(sampleCount);
 
     RWTexture2DArray<float4> output = RWTexture2DArray<float4>.Handle(uint2(push.outputStorageIndex, 0));
     output[texel] = float4(luminance, cloudTransmittance);
