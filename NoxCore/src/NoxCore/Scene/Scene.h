@@ -135,6 +135,8 @@ namespace Nox
         void UpdatePhysics2D();
         void UpdatePhysics3D();
         void UpdateAnimators();
+        // Places the entities with a BoneSocketComponent on their bone (after the animators).
+        void UpdateBoneSockets();
         // Sequencer timelines (TimelinePlayerComponent): played in Play and Simulate from their start.
         void StartTimelines();
         void UpdateTimelines();

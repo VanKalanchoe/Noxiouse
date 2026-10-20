@@ -1004,6 +1004,17 @@ namespace Nox
             out << YAML::EndMap; // TextComponent
         }
 
+        if (entity.HasComponent<BoneSocketComponent>())
+        {
+            const auto& socket = entity.GetComponent<BoneSocketComponent>();
+            out << YAML::Key << "BoneSocketComponent" << YAML::BeginMap;
+            out << YAML::Key << "Bone" << YAML::Value << socket.Bone;
+            out << YAML::Key << "Offset" << YAML::Value << socket.Offset;
+            out << YAML::Key << "RotationOffset" << YAML::Value << socket.RotationOffset;
+            out << YAML::Key << "Scale" << YAML::Value << socket.Scale;
+            out << YAML::EndMap;
+        }
+
         out << YAML::EndMap; // Corrected: No parentheses
     }
 
@@ -1988,6 +1999,19 @@ namespace Nox
                 cct.MaxAcceleration = characterController3DComponent["MaxAcceleration"].as<float>();
             if (characterController3DComponent["BrakingDeceleration"])
                 cct.BrakingDeceleration = characterController3DComponent["BrakingDeceleration"].as<float>();
+        }
+
+        if (auto socketNode = entity["BoneSocketComponent"])
+        {
+            auto& socket = deserializedEntity.AddOrReplaceComponent<BoneSocketComponent>();
+            if (socketNode["Bone"])
+                socket.Bone = socketNode["Bone"].as<std::string>();
+            if (socketNode["Offset"])
+                socket.Offset = socketNode["Offset"].as<glm::vec3>();
+            if (socketNode["RotationOffset"])
+                socket.RotationOffset = socketNode["RotationOffset"].as<glm::vec3>();
+            if (socketNode["Scale"])
+                socket.Scale = socketNode["Scale"].as<glm::vec3>();
         }
 
         auto textComponent = entity["TextComponent"];

@@ -8,6 +8,7 @@
 #include <glm/gtc/type_ptr.hpp>
 
 #include "NoxCore/Asset/AssetManager.h"
+#include "NoxCore/Animation/Skeleton.h"
 #include "NoxCore/Asset/Material.h"
 #include "NoxCore/Asset/MaterialSerializer.h"
 #include "NoxCore/Renderer/Mesh.h"
@@ -937,6 +938,7 @@ namespace Nox
 
             DisplayAddComponentEntry<AnimatorComponent>("Animator");
             DisplayAddComponentEntry<TimelinePlayerComponent>("Timeline Player");
+            DisplayAddComponentEntry<BoneSocketComponent>("Bone Socket");
             DisplayAddComponentEntry<ParticleEmitterComponent>("Particle Emitter");
 
             DisplayAddComponentEntry<CameraComponent>("Camera");
@@ -2644,6 +2646,47 @@ namespace Nox
             ImGui::Checkbox("Grounded", &component.IsGrounded);
             DrawLengthVec3Control("Velocity", component.Velocity);
             ImGui::EndDisabled();
+        });
+
+        DrawComponent<BoneSocketComponent>("Bone Socket", entity, [entity](auto& component) mutable
+        {
+            // The nearest animator above this entity, and its skeleton's nodes to pick the bone from.
+            Entity animatorEntity = entity.GetParent();
+            for (int depth = 0; depth < 256 && animatorEntity && !animatorEntity.HasComponent<AnimatorComponent>(); ++depth)
+                animatorEntity = animatorEntity.GetParent();
+            const Skeleton* skeleton = nullptr;
+            if (animatorEntity && animatorEntity.HasComponent<AnimatorComponent>())
+            {
+                const AssetHandle skeletonHandle = animatorEntity.GetComponent<AnimatorComponent>().Skeleton;
+                if (skeletonHandle != 0 && AssetManager::RequestAsset(skeletonHandle) == AssetState::Ready)
+                    skeleton = AssetManager::FindLoadedAsset<Skeleton>(skeletonHandle);
+                ImGui::TextDisabled("Follows a bone of '%s'", animatorEntity.GetName().c_str());
+            }
+            else
+                ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.3f, 1.0f), "Put it below an entity with an Animator (a skeleton).");
+
+            if (ImGui::BeginCombo("Bone", component.Bone.empty() ? "(none)" : component.Bone.c_str()))
+            {
+                static char filter[64] = "";
+                ImGui::InputTextWithHint("##bonefilter", "Search", filter, sizeof(filter));
+                if (skeleton)
+                {
+                    for (const Node* node : skeleton->AllNodes)
+                    {
+                        if (!node || (filter[0] && node->Name.find(filter) == std::string::npos))
+                            continue;
+                        if (ImGui::Selectable(node->Name.c_str(), node->Name == component.Bone))
+                            component.Bone = node->Name;
+                    }
+                }
+                ImGui::EndCombo();
+            }
+            ImGui::DragFloat3("Offset", glm::value_ptr(component.Offset), 0.1f);
+            glm::vec3 degrees = glm::degrees(component.RotationOffset);
+            if (ImGui::DragFloat3("Rotation", glm::value_ptr(degrees), 0.5f))
+                component.RotationOffset = glm::radians(degrees);
+            ImGui::DragFloat3("Scale", glm::value_ptr(component.Scale), 0.01f);
+            ImGui::TextDisabled("Its transform is set every frame from the bone (edit the offset here).");
         });
 
         DrawComponent<TextComponent>("Text Renderer", entity, [](auto& component)

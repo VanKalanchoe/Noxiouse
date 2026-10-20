@@ -408,11 +408,28 @@ namespace Nox
         // Runtime only: final bone matrices for Graph mode's self-contained path (Skeleton set, NodeEntities
         // empty) -- Animator's own GetFinalBoneTransforms() serves the equivalent single-clip case.
         std::vector<glm::mat4> GraphFinalBoneTransforms;
+        // Runtime only: Graph mode's self-contained path, every node's model-space matrix by node index (bone sockets read it).
+        std::vector<glm::mat4> GraphGlobalMatrices;
 
         AnimatorComponent() = default;
         AnimatorComponent(const AnimatorComponent&) = default;
         AnimatorComponent(const Ref<AnimationSequence>& animation)
             : Animator(animation) {}
+    };
+
+    // A bone socket (UE's sockets, Unity's attaching to a bone): every frame this entity is placed on a bone of the nearest animator
+    // above it -- a sword in a hand, a hat on a head -- with an offset in the bone's space. Works for every animator mode (single
+    // clip, graph, a model's joint entities).
+    struct BoneSocketComponent
+    {
+        std::string Bone;                        // the skeleton node's name
+        glm::vec3 Offset{ 0.0f };                // in the bone's space (world units)
+        glm::vec3 RotationOffset{ 0.0f };        // radians
+        glm::vec3 Scale{ 1.0f };
+
+        // Runtime only: the node index the name was found at, for the skeleton it was looked up in.
+        int32_t CachedIndex = -1;
+        AssetHandle CachedSkeleton = 0;
     };
 
     // Plays a sequencer timeline (Animation/Timeline.h) on this entity and the entities below it: its tracks name their targets
@@ -786,5 +803,5 @@ namespace Nox
             CircleRendererComponent, CameraComponent, ScriptComponent,
             /*NativeScriptComponent,*/ RigidBody2DComponent, BoxCollider2DComponent,
             CircleCollider2DComponent, RigidBody3DComponent, BoxCollider3DComponent,
-            SphereCollider3DComponent, CapsuleCollider3DComponent, CharacterController3DComponent, TextComponent>;
+            SphereCollider3DComponent, CapsuleCollider3DComponent, CharacterController3DComponent, TextComponent, BoneSocketComponent>;
 }

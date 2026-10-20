@@ -13,6 +13,7 @@
 #include "Components.h"
 #include "SceneGraph.h"
 #include "NoxCore/Animation/AnimPose.h"
+#include "NoxCore/Math/Math.h"
 #include "NoxCore/Animation/Timeline.h"
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Physics/Physics2D.h"
@@ -759,8 +760,8 @@ namespace Nox
             ComponentAccess().Read<RigidBody3DComponent>().Write<CharacterController3DComponent, TransformComponent, DirtyTransformComponent>(),
             [this]() { UpdatePhysics3D(); });
         m_UpdateSystems.AddSystem("Animation",
-            ComponentAccess().Read<WorldTransformComponent>().Write<AnimatorComponent, TransformComponent, DirtyTransformComponent, CharacterController3DComponent>(),
-            [this]() { UpdateAnimators(); });
+            ComponentAccess().Read<WorldTransformComponent, RelationshipComponent>().Write<AnimatorComponent, TransformComponent, DirtyTransformComponent, CharacterController3DComponent, BoneSocketComponent>(),
+            [this]() { UpdateAnimators(); UpdateBoneSockets(); });
         m_UpdateSystems.AddSystem("Timelines",
             ComponentAccess().Read<RelationshipComponent, TagComponent>()
                 .Write<TimelinePlayerComponent, TransformComponent, DirtyTransformComponent, DirectionalLightComponent, PointLightComponent, SpotLightComponent, CameraComponent>(),
@@ -1258,7 +1259,7 @@ namespace Nox
                     if (animatorComp.Graph != 0)
                     {
                         if (const AnimPose* pose = animatorComp.GraphInstance.Evaluate(ts, animatorComp.Playing, *skeleton))
-                            ApplyPoseToSkeleton(*pose, *skeleton, animatorComp.GraphFinalBoneTransforms);
+                            ApplyPoseToSkeleton(*pose, *skeleton, animatorComp.GraphFinalBoneTransforms, &animatorComp.GraphGlobalMatrices);
                     }
                     else if (animatorComp.Playing)
                         animatorComp.Animator.Update(ts, *skeleton);
@@ -1388,6 +1389,109 @@ namespace Nox
                     const bool wrapped = forward ? clipTimeAfter < clipTimeBefore : clipTimeAfter > clipTimeBefore;
                     CollectCrossedNotifies(*clipBefore, clipTimeBefore, clipTimeAfter, wrapped, animatorComp.FiredNotifies);
                 }
+            }
+        }
+    }
+
+    void Scene::UpdateBoneSockets()
+    {
+        auto sockets = m_Registry.view<BoneSocketComponent, TransformComponent>();
+        if (sockets.begin() == sockets.end())
+            return;
+
+        auto parentOf = [&](entt::entity entity) -> entt::entity
+        {
+            const auto* relationship = m_Registry.try_get<RelationshipComponent>(entity);
+            if (!relationship || relationship->Parent == 0)
+                return entt::null;
+            const auto found = m_EntityMap.find(relationship->Parent);
+            return found != m_EntityMap.end() && m_Registry.valid(found->second) ? found->second : entt::null;
+        };
+        // An entity's transform relative to `ancestor` (the product of the local transforms on the way up), false when it is not below it.
+        auto relativeTo = [&](entt::entity entity, entt::entity ancestor, glm::mat4& out) -> bool
+        {
+            out = glm::mat4(1.0f);
+            for (int depth = 0; depth < 256 && entity != entt::null; ++depth)
+            {
+                if (entity == ancestor)
+                    return true;
+                if (const auto* transform = m_Registry.try_get<TransformComponent>(entity))
+                    out = transform->GetTransform() * out;
+                entity = parentOf(entity);
+            }
+            return false;
+        };
+
+        for (auto socketEntity : sockets)
+        {
+            auto& socket = sockets.get<BoneSocketComponent>(socketEntity);
+            if (socket.Bone.empty())
+                continue;
+
+            // The nearest animator above it.
+            entt::entity animatorEntity = parentOf(socketEntity);
+            for (int depth = 0; depth < 256 && animatorEntity != entt::null && !m_Registry.all_of<AnimatorComponent>(animatorEntity); ++depth)
+                animatorEntity = parentOf(animatorEntity);
+            if (animatorEntity == entt::null || !m_Registry.all_of<AnimatorComponent>(animatorEntity))
+                continue;
+            const AnimatorComponent& animator = m_Registry.get<AnimatorComponent>(animatorEntity);
+            const Skeleton* skeleton = animator.Skeleton != 0 ? AssetManager::FindLoadedAsset<Skeleton>(animator.Skeleton) : nullptr;
+            if (!skeleton)
+                continue;
+
+            if (socket.CachedSkeleton != animator.Skeleton || socket.CachedIndex < 0 || socket.CachedIndex >= static_cast<int32_t>(skeleton->AllNodes.size()) ||
+                !skeleton->AllNodes[socket.CachedIndex] || skeleton->AllNodes[socket.CachedIndex]->Name != socket.Bone)
+            {
+                socket.CachedIndex = -1;
+                socket.CachedSkeleton = animator.Skeleton;
+                for (const Node* node : skeleton->AllNodes)
+                {
+                    if (node && node->Name == socket.Bone)
+                    {
+                        socket.CachedIndex = node->Index;
+                        break;
+                    }
+                }
+            }
+            if (socket.CachedIndex < 0)
+                continue;
+
+            // The bone in the animator entity's space: from its joint entity (a model's node table), else the animator's own pose.
+            glm::mat4 bone(1.0f);
+            if (!animator.NodeEntities.empty())
+            {
+                if (socket.CachedIndex >= static_cast<int32_t>(animator.NodeEntities.size()))
+                    continue;
+                const auto joint = m_EntityMap.find(animator.NodeEntities[socket.CachedIndex]);
+                if (joint == m_EntityMap.end() || !m_Registry.valid(joint->second) || !relativeTo(joint->second, animatorEntity, bone))
+                    continue;
+            }
+            else
+            {
+                const std::vector<glm::mat4>& globals = animator.Graph != 0 ? animator.GraphGlobalMatrices : animator.Animator.GetGlobalBoneTransforms();
+                if (socket.CachedIndex >= static_cast<int32_t>(globals.size()))
+                    continue;
+                bone = globals[socket.CachedIndex];
+            }
+
+            // Its local transform: the bone (with the offset) seen from the socket's parent.
+            glm::mat4 parentToAnimator(1.0f);
+            const entt::entity parent = parentOf(socketEntity);
+            if (parent != animatorEntity && !relativeTo(parent, animatorEntity, parentToAnimator))
+                continue;
+            const glm::mat4 offset = glm::translate(glm::mat4(1.0f), socket.Offset) * glm::toMat4(glm::quat(socket.RotationOffset)) *
+                                     glm::scale(glm::mat4(1.0f), socket.Scale);
+            const glm::mat4 local = glm::inverse(parentToAnimator) * bone * offset;
+
+            auto& transform = sockets.get<TransformComponent>(socketEntity);
+            glm::vec3 translation, rotation, scale;
+            if (Math::DecomposeTransform(local, translation, rotation, scale))
+            {
+                transform.Translation = translation;
+                transform.Rotation = rotation;
+                transform.Scale = scale;
+                if (auto* dirty = m_Registry.try_get<DirtyTransformComponent>(socketEntity))
+                    dirty->isDirty = true;
             }
         }
     }
@@ -2081,6 +2185,11 @@ namespace Nox
 
     template <>
     void Scene::OnComponentAdded<TextComponent>(Entity entity, TextComponent& component)
+    {
+    }
+
+    template <>
+    void Scene::OnComponentAdded<BoneSocketComponent>(Entity entity, BoneSocketComponent& component)
     {
     }
 
