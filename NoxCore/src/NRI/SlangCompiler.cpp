@@ -10,6 +10,13 @@
 #include "NoxCore/Core/Hash.h"
 #include "NoxCore/Core/Log.h"
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 namespace NRI
 {
     // assets/shaders (+ ../ variants) added when RTXDI-related .slang files were reorganized into
@@ -42,9 +49,35 @@ namespace NRI
         return std::make_unique<SlangCompiler>();
     }
 
-    SlangCompiler::SlangCompiler()
+    SlangCompiler::SlangCompiler() = default;
+
+    bool SlangCompiler::canCompile()
     {
+        if (m_available < 0)
+        {
+#ifdef _WIN32
+            // Delay-loaded: calling into it without the DLL would end the process, so look for it first.
+            HMODULE module = LoadLibraryExW(L"slang.dll", nullptr, LOAD_LIBRARY_SEARCH_APPLICATION_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+            m_available = module != nullptr ? 1 : 0;
+            if (module)
+                FreeLibrary(module);
+#else
+            m_available = 1;
+#endif
+            if (!m_available)
+                NOX_CORE_INFO("Slang is not shipped: shaders come from the precompiled cache only");
+        }
+        return m_available == 1;
+    }
+
+    bool SlangCompiler::ensureSession()
+    {
+        if (m_globalSession)
+            return true;
+        if (!canCompile())
+            return false;
         slang::createGlobalSession(m_globalSession.writeRef());
+        return static_cast<bool>(m_globalSession);
     }
     
     // Mirrors how Slang resolves a quoted include: the including file's own directory first, then the search paths.
@@ -93,6 +126,9 @@ namespace NRI
     std::vector<char> SlangCompiler::compile(const std::string& path)
     {
         if (!std::filesystem::exists(path)) NOX_CORE_ERROR("SlangCompiler::compile file not found: {}", path);
+        if (!ensureSession())
+            throw std::runtime_error("No precompiled binary for '" + path + "' and no shader compiler shipped (rebuild the package with "
+                                     "the editor having created every pipeline once)");
         
         Slang::ComPtr<slang::ISession> session;
         

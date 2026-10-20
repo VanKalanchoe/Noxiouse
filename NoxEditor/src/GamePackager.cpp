@@ -153,6 +153,8 @@ namespace Nox
                 return IsWithin(binaryDirectory / relative, output) || (relative.parent_path().empty() && Lower(relative.filename().string()) == "assets");
             const std::string name = Lower(relative.filename().string());
             const std::string extension = Lower(relative.extension().string());
+            if (settings.PrecompiledShadersOnly && name.rfind("slang", 0) == 0 && (extension == ".dll" || extension == ".so" || extension == ".dylib"))
+                return true;
             return name.rfind("noxeditor", 0) == 0 || name.rfind("noxruntime", 0) == 0 || extension == ".pdb" || extension == ".ilk" ||
                    extension == ".exp" || extension == ".lib" || extension == ".log" || name == "imgui.ini";
         });

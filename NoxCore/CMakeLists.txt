@@ -173,6 +173,13 @@ file(GLOB_RECURSE NOXCORE_FILES
 
 add_library(${PROJECT_NAME} STATIC ${NOXCORE_FILES} ${IMGUI_SOURCES} ${IMGUIZMO_SOURCES} ${IMGUI_NODE_EDITOR_SOURCES} ${TINYGLTF_SOURCE} ${MESHOPTIMIZER_SOURCES} ${OFFSETALLOCATOR_SOURCES} ${BC7ENC_SOURCES} ${RTXDI_SOURCES}) #main file here
 
+# slang.dll is delay-loaded: it is only loaded when a shader has to be compiled (SlangCompiler::ensureSession), so a packaged game
+# with a complete precompiled shader cache runs without it (File > Package Game: "Precompiled shaders only").
+if(MSVC)
+    target_link_options(${PROJECT_NAME} INTERFACE "/DELAYLOAD:slang.dll")
+    target_link_libraries(${PROJECT_NAME} INTERFACE delayimp)
+endif()
+
 target_link_libraries (${PROJECT_NAME} PUBLIC Coral.Native Vulkan::cppm SDL3::SDL3 glm::glm spdlog::spdlog Slang::slang EnTT::EnTT xxHash::xxhash yaml-cpp::yaml-cpp box2d::box2d msdf-atlas-gen::msdf-atlas-gen tinyobjloader::tinyobjloader "${STREAMLINE_LIB}" ${NRD_LIBS} Jolt)
 # Add here vendors
 target_include_directories (${PROJECT_NAME} SYSTEM PRIVATE ${STB_INCLUDEDIR} ${CMAKE_CURRENT_SOURCE_DIR}/vendors/taskflow ${CMAKE_CURRENT_SOURCE_DIR}/vendors/VulkanMemoryAllocator-Hpp/include ${CMAKE_CURRENT_SOURCE_DIR}/vendors/VulkanMemoryAllocator-Hpp/VulkanMemoryAllocator/include ${IMGUI_DIR}/backends)

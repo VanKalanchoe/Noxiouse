@@ -115,6 +115,23 @@ namespace NRI
         return data;
     }
     
+    // SPIR-V of a stage for a pipeline that is not a shader object (ray tracing, the non-shader-object paths): cached next to the
+    // shader-object binaries under the same key (".spv"), so a packaged game without the compiler still has it.
+    static std::vector<char> compileSpirvCached(const ShaderStageDesc& shaderDesc, ShaderCompiler& compiler, bool forceCompile)
+    {
+        std::filesystem::path path = shaderBinaryPath(shaderDesc, compiler);
+        path.replace_extension(".spv");
+        if (std::filesystem::exists(path) && (!forceCompile || !compiler.canCompile()))
+        {
+            const std::vector<uint8_t> cached = loadShaderBinary(path);
+            if (!cached.empty())
+                return std::vector<char>(cached.begin(), cached.end());
+        }
+        std::vector<char> spirv = compiler.compile(shaderDesc.sourcePath);
+        std::ofstream(path, std::ios::binary).write(spirv.data(), static_cast<std::streamsize>(spirv.size()));
+        return spirv;
+    }
+
     // List of all supported graphics stages for explicit binding/unbinding
     static const std::vector<vk::ShaderStageFlagBits> g_allGraphicsStages = {
         vk::ShaderStageFlagBits::eVertex,
@@ -177,7 +194,7 @@ namespace NRI
                     auto binaryPath = shaderBinaryPath(shaderDesc, compiler);
                     std::string stageKey = shaderDesc.sourcePath + "." + shaderDesc.entryPoint;
 
-                    if (std::filesystem::exists(binaryPath) && !desc.forceCompile)
+                    if (std::filesystem::exists(binaryPath) && (!desc.forceCompile || !compiler.canCompile()))
                     {
                         NOX_CORE_INFO("PipelineVK loading shader binary: {}", binaryPath);
                         
@@ -193,7 +210,7 @@ namespace NRI
 
                         try
                         {
-                            tempBytecodeStorage[i] = compiler.compile(shaderDesc.sourcePath);
+                            tempBytecodeStorage[i] = compileSpirvCached(shaderDesc, compiler, desc.forceCompile);
                             loadedFromBinary.push_back(false);
                         }
                         catch (const std::exception& e)
@@ -292,7 +309,7 @@ namespace NRI
                         {
                             NOX_CORE_INFO("PipelineVK:PipelineVk Recompiling invalidated shader: {}", desc.shaders[i].sourcePath);
                             
-                            tempBytecodeStorage[i] = compiler.compile(desc.shaders[i].sourcePath);
+                            tempBytecodeStorage[i] = compileSpirvCached(desc.shaders[i], compiler, desc.forceCompile);
                             
                             shaderCreateInfos[i].codeType = vk::ShaderCodeTypeEXT::eSpirv;
                             shaderCreateInfos[i].codeSize = tempBytecodeStorage[i].size();
@@ -355,7 +372,7 @@ namespace NRI
 
                 for (const auto& shaderDesc : desc.shaders)
                 {
-                    tempBytecodeStorage.emplace_back(compiler.compile(shaderDesc.sourcePath));
+                    tempBytecodeStorage.emplace_back(compileSpirvCached(shaderDesc, compiler, desc.forceCompile));
                     temporaryModules.push_back(createShaderModule(tempBytecodeStorage.back()));
 
                     auto& allocatedModule = temporaryModules.back();
@@ -528,7 +545,7 @@ namespace NRI
                 std::vector<char> spirvStorage;
                 bool loadedFromBinary = false;
 
-                if (std::filesystem::exists(binaryPath) && !desc.forceCompile)
+                if (std::filesystem::exists(binaryPath) && (!desc.forceCompile || !compiler.canCompile()))
                 {
                     NOX_CORE_INFO("PipelineVK loading compute shader binary: {}", binaryPath);
                     binaryStorage = loadShaderBinary(binaryPath);
@@ -537,7 +554,7 @@ namespace NRI
                 else
                 {
                     NOX_CORE_INFO("PipelineVK compiling compute shader: {}", shaderDesc.sourcePath);
-                    spirvStorage = compiler.compile(shaderDesc.sourcePath);
+                    spirvStorage = compileSpirvCached(shaderDesc, compiler, desc.forceCompile);
                 }
 
                 vk::ShaderCreateInfoEXT info
@@ -558,7 +575,7 @@ namespace NRI
                 if (m_shaders.empty() && loadedFromBinary)
                 {
                     NOX_CORE_WARN("PipelineVK compute binary incompatible. Recompiling SPIR-V...");
-                    spirvStorage = compiler.compile(shaderDesc.sourcePath);
+                    spirvStorage = compileSpirvCached(shaderDesc, compiler, desc.forceCompile);
 
                     info.codeType = vk::ShaderCodeTypeEXT::eSpirv;
                     info.codeSize = spirvStorage.size();
@@ -583,7 +600,7 @@ namespace NRI
             }
     else
     {
-        tempBytecodeStorage.push_back(compiler.compile(shaderDesc.sourcePath));
+        tempBytecodeStorage.push_back(compileSpirvCached(shaderDesc, compiler, desc.forceCompile));
         auto shaderModule = createShaderModule(tempBytecodeStorage.back());
 
         vk::PipelineShaderStageCreateInfo computeShaderStageInfo
@@ -621,7 +638,7 @@ namespace NRI
             for (size_t i = 0; i < desc.shaders.size(); ++i)
             {
                 const auto& shaderDesc = desc.shaders[i];
-                std::vector<char> spirvStorage = compiler.compile(shaderDesc.sourcePath);
+                std::vector<char> spirvStorage = compileSpirvCached(shaderDesc, compiler, desc.forceCompile);
                 shaderModules.push_back(createShaderModule(spirvStorage));
 
                 vk::ShaderStageFlagBits vkStage = translateShaderStage(shaderDesc.stage);

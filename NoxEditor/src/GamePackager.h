@@ -25,6 +25,9 @@ namespace Nox
         bool AllScenes = false;
         // The assets in one pack file (Game/Content.npak) the game reads from, instead of a folder of loose files.
         bool PackFiles = true;
+        // Shaders from the precompiled cache only (shaders/ next to the executable: shader-object binaries and SPIR-V of every
+        // pipeline the editor created): the Slang compiler is left out, which is delay-loaded and never needed then.
+        bool PrecompiledShadersOnly = true;
     };
 
     struct PackageReport

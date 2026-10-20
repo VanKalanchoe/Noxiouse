@@ -3866,6 +3866,9 @@ namespace Nox
         ImGui::InputText("Output folder", m_PackageOutput, sizeof(m_PackageOutput));
         ImGui::Checkbox("Every scene (not only the start scene)", &m_PackageAllScenes);
         ImGui::Checkbox("Pack files (Content.npak)", &m_PackagePackFiles);
+        ImGui::Checkbox("Precompiled shaders only (no Slang)", &m_PackagePrecompiledShaders);
+        ImGui::SetItemTooltip("The game uses the shader cache the editor wrote (every pipeline it created) and ships without the\n"
+                              "shader compiler. A shader the editor never compiled would fail: off ships Slang to compile it.");
         ImGui::SetItemTooltip("The assets in one pack file the game reads from (only its table of contents stays in memory).\n"
                               "Off: a folder of loose files, easier to inspect.");
         ImGui::SetItemTooltip("The start scene and what it uses is the game; tick this when scripts load other scenes.");
@@ -3879,6 +3882,7 @@ namespace Nox
             settings.OutputDirectory = std::filesystem::path(m_PackageOutput);
             settings.AllScenes = m_PackageAllScenes;
             settings.PackFiles = m_PackagePackFiles;
+            settings.PrecompiledShadersOnly = m_PackagePrecompiledShaders;
             const PackageReport report = PackageGame(settings);
             if (!report.Success)
                 m_PackageResult = "Failed: " + report.Error;

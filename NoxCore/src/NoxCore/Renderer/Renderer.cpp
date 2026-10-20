@@ -426,7 +426,9 @@ namespace Nox
         createCompiler();
         createUnlitPipeline(false);
         createTransparentLitPipeline(false);
-        if (!m_isEditor) createPresentPipeline(false);
+        // The runtime's only (the editor presents through ImGui), created in the editor too: its shaders then are in the cache a
+        // packaged game without the shader compiler reads (File > Package Game, precompiled shaders only).
+        createPresentPipeline(false);
         createComputePipeline();
         createSkyboxPipeline(false);
         createLightShapesPipeline(false);
