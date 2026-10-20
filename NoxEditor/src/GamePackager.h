@@ -28,6 +28,9 @@ namespace Nox
         // Shaders from the precompiled cache only (shaders/ next to the executable: shader-object binaries and SPIR-V of every
         // pipeline the editor created): the Slang compiler is left out, which is delay-loaded and never needed then.
         bool PrecompiledShadersOnly = true;
+        // The .NET runtime the editor uses, copied into <Output>/dotnet (host/fxr and shared/Microsoft.NETCore.App, about
+        // 70 MB): the game runs on machines without .NET installed. Off: they need the .NET 9 runtime.
+        bool SelfContainedDotNet = false;
     };
 
     struct PackageReport

@@ -1,4 +1,5 @@
 #include "DotNetBackend.h"
+#include <cstdlib>
 
 #include "CoralCompat.h"
 #include <Coral/String.hpp>
@@ -540,6 +541,22 @@ namespace Nox
 
     bool DotNetBackend::Initialize(const std::filesystem::path& runtimeDirectory)
     {
+        // A game shipped with its own .NET runtime (dotnet/ next to it, File > Package Game "Self-contained .NET"): Coral looks
+        // there first (NOX_DOTNET_ROOT, a patch in NoxCore/CMake/Dependencies.cmake), so no system-wide install is needed.
+        if (const std::filesystem::path privateRuntime = runtimeDirectory / "dotnet"; std::filesystem::exists(privateRuntime / "host/fxr"))
+        {
+            // The C runtime's environment (Coral reads it with std::getenv; hostfxr reads DOTNET_ROOT for the shared framework).
+            for (const char* name : { "NOX_DOTNET_ROOT", "DOTNET_ROOT" })
+            {
+#ifdef _WIN32
+                _putenv_s(name, privateRuntime.string().c_str());
+#else
+                setenv(name, privateRuntime.string().c_str(), 1);
+#endif
+            }
+            NOX_CORE_INFO("Scripts: using the .NET runtime shipped in {}", privateRuntime.generic_string());
+        }
+
         Coral::HostSettings settings;
         settings.CoralDirectory = runtimeDirectory.string();
         settings.MessageCallback = [](std::string_view message, Coral::MessageLevel)

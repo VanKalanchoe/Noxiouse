@@ -18,6 +18,11 @@ target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/
 set_target_properties(${PROJECT_NAME} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "$<TARGET_FILE_DIR:NoxEditor>")
 add_dependencies(${PROJECT_NAME} NoxEditor)
 
+# Shipping: a windowed application (no console next to the game); SDL_main.h supplies WinMain.
+if(NOX_DIST AND WIN32)
+    set_target_properties(${PROJECT_NAME} PROPERTIES WIN32_EXECUTABLE ON)
+endif()
+
 if(WIN32 AND (MSVC OR ${CMAKE_GENERATOR} MATCHES "Visual Studio.*"))
     # Engine assets (shaders, fonts) are found relative to NoxEditor/ like for the editor; the sample project is played by default.
     set_target_properties(${PROJECT_NAME} PROPERTIES

@@ -74,6 +74,7 @@ namespace Nox
         bool m_PackageAllScenes = false;
         bool m_PackagePackFiles = true;
         bool m_PackagePrecompiledShaders = true;
+        bool m_PackageSelfContainedDotNet = false;
         std::string m_PackageResult;
 
         // Undo / redo (EditorHistory): UpdateHistory runs at the end of every ImGui frame, after the panels made their changes.

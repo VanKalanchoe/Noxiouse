@@ -3912,6 +3912,8 @@ namespace Nox
         ImGui::Checkbox("Every scene (not only the start scene)", &m_PackageAllScenes);
         ImGui::Checkbox("Pack files (Content.npak)", &m_PackagePackFiles);
         ImGui::Checkbox("Precompiled shaders only (no Slang)", &m_PackagePrecompiledShaders);
+        ImGui::Checkbox("Self-contained .NET", &m_PackageSelfContainedDotNet);
+        ImGui::SetItemTooltip("Copies the .NET 9 runtime into the game (about 70 MB): it runs where .NET is not installed.");
         ImGui::SetItemTooltip("The game uses the shader cache the editor wrote (every pipeline it created) and ships without the\n"
                               "shader compiler. A shader the editor never compiled would fail: off ships Slang to compile it.");
         ImGui::SetItemTooltip("The assets in one pack file the game reads from (only its table of contents stays in memory).\n"
@@ -3928,6 +3930,7 @@ namespace Nox
             settings.AllScenes = m_PackageAllScenes;
             settings.PackFiles = m_PackagePackFiles;
             settings.PrecompiledShadersOnly = m_PackagePrecompiledShaders;
+            settings.SelfContainedDotNet = m_PackageSelfContainedDotNet;
             const PackageReport report = PackageGame(settings);
             if (!report.Success)
                 m_PackageResult = "Failed: " + report.Error;

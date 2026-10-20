@@ -1,6 +1,7 @@
 #include "GamePackager.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <fstream>
 #include <regex>
 #include <system_error>
@@ -177,6 +178,47 @@ namespace Nox
             }
             else
                 report.Warnings.push_back("The project's script assembly was not found (build its scripts first): scripts will not run");
+        }
+
+        // 1b. The .NET runtime itself (self-contained): its host resolver and the shared framework, version 9.
+        if (settings.SelfContainedDotNet)
+        {
+            std::vector<std::filesystem::path> roots;
+            if (const char* dotnetRoot = std::getenv("DOTNET_ROOT"))
+                roots.emplace_back(dotnetRoot);
+#ifdef _WIN32
+            if (const char* programFiles = std::getenv("ProgramFiles"))
+                roots.push_back(std::filesystem::path(programFiles) / "dotnet");
+#else
+            roots.insert(roots.end(), { "/usr/share/dotnet", "/usr/lib/dotnet", "/usr/local/share/dotnet" });
+#endif
+            bool copied = false;
+            for (const std::filesystem::path& root : roots)
+            {
+                // The newest 9.x of each part.
+                auto newest9 = [&](const std::filesystem::path& folder)
+                {
+                    std::filesystem::path best;
+                    for (const auto& entry : std::filesystem::directory_iterator(folder, error))
+                    {
+                        const std::string name = entry.path().filename().string();
+                        if (entry.is_directory(error) && name.rfind("9.", 0) == 0 && (best.empty() || name > best.filename().string()))
+                            best = entry.path();
+                    }
+                    return best;
+                };
+                const std::filesystem::path fxr = newest9(root / "host/fxr");
+                const std::filesystem::path framework = newest9(root / "shared/Microsoft.NETCore.App");
+                if (fxr.empty() || framework.empty())
+                    continue;
+                auto all = [](const std::filesystem::path&, bool) { return false; };
+                copier.Tree(fxr, output / "dotnet/host/fxr" / fxr.filename(), all);
+                copier.Tree(framework, output / "dotnet/shared/Microsoft.NETCore.App" / framework.filename(), all);
+                copied = true;
+                break;
+            }
+            if (!copied)
+                report.Warnings.push_back("Self-contained .NET: no .NET 9 runtime found (DOTNET_ROOT, Program Files/dotnet): the game needs one installed");
         }
 
         // 2. The engine's assets the runtime reads (shaders are compiled at start, fonts for text, textures for defaults).

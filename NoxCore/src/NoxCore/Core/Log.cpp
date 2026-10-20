@@ -6,6 +6,8 @@
 
 #include "spdlog/sinks/stdout_color_sinks.h"
 #include <spdlog/sinks/basic_file_sink.h>
+#include <SDL3/SDL_filesystem.h>
+#include <SDL3/SDL_stdinc.h>
 
 namespace Nox
 {
@@ -15,12 +17,21 @@ namespace Nox
     void Log::Init()
     {
         std::vector<spdlog::sink_ptr> logSinks;
+#if NOX_DIST
+        // A shipped game: no console, and its folder may be read-only (Program Files): the log goes to the user's folder.
+        std::string logPath = "Nox.log";
+        if (char* prefPath = SDL_GetPrefPath("Nox", "Game"))
+        {
+            logPath = std::string(prefPath) + "Game.log";
+            SDL_free(prefPath);
+        }
+        logSinks.emplace_back(std::make_shared<spdlog::sinks::basic_file_sink_mt>(logPath, true));
+#else
         logSinks.emplace_back(std::make_shared<spdlog::sinks::stdout_color_sink_mt>());
-        
         logSinks.emplace_back(std::make_shared<spdlog::sinks::basic_file_sink_mt>("Nox.log", true));
-        
-        logSinks[0]->set_pattern("%^[%T] %n: %v%$");
-        logSinks[1]->set_pattern("%^[%T] %n: %v%$");
+#endif
+        for (const spdlog::sink_ptr& sink : logSinks)
+            sink->set_pattern("%^[%T] %n: %v%$");
         
         s_CoreLogger = std::make_shared<spdlog::logger>("NOX", logSinks.begin(), logSinks.end());
         spdlog::register_logger(s_CoreLogger);

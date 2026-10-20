@@ -21,6 +21,16 @@ set(CROSS_PLATFORM_DETERMINISTIC ON CACHE BOOL "" FORCE)
 set(USE_AVX2 ON CACHE BOOL "" FORCE)
 add_subdirectory(NoxCore/vendors/JoltPhysics/Build NoxCore/vendors/JoltPhysics/Build EXCLUDE_FROM_ALL)
 
+# The shipping build of a game (docs/Runtime_And_Packaging_Plan_2026-10.md R7): build the Release configuration with it on.
+# NoxRuntime then has no console window, no stats overlay / profiler, and logs into the user's folder (SDL_GetPrefPath)
+# instead of the working directory; asserts are already off outside Debug. It builds NoxRuntime.
+option(NOX_DIST "Shipping build of the runtime: no console, no profiler, log in the user's folder" OFF)
+if(NOX_DIST)
+    set(NOX_PROFILE_STATS OFF CACHE BOOL "" FORCE)
+    set(NOX_ENABLE_TRACY OFF CACHE BOOL "" FORCE)
+    set(NOX_BUILD_RUNTIME ON CACHE BOOL "" FORCE)
+endif()
+
 add_subdirectory(NoxCore)
 add_subdirectory(NoxEditor)
 

@@ -45,6 +45,24 @@ if(WIN32)
     file(WRITE "${_coral_host_file}" "${_coral_host_contents}")
 endif()
 
+# A game can ship its own .NET runtime (File > Package Game, "Self-contained .NET": <game>/dotnet/host/fxr and
+# shared/Microsoft.NETCore.App): Coral then looks in NOX_DOTNET_ROOT (set by the engine when that folder exists) before the
+# system-wide install, so the game runs on a machine without .NET.
+set(_coral_host_file "${coral_SOURCE_DIR}/Coral.Native/Source/Coral/HostInstance.cpp")
+file(READ "${_coral_host_file}" _coral_host_contents)
+string(FIND "${_coral_host_contents}" "NOX_DOTNET_ROOT" _coral_nox_patched)
+if(_coral_nox_patched EQUAL -1)
+    string(REPLACE
+        "static std::filesystem::path GetHostFXRPath()\n\t{"
+        "static std::filesystem::path GetHostFXRPath()\n\t{\n\t\tif (const char* noxRoot = std::getenv(\"NOX_DOTNET_ROOT\"))\n\t\t{\n\t\t\tconst std::filesystem::path fxr = std::filesystem::path(noxRoot) / \"host/fxr\";\n\t\t\tif (std::filesystem::exists(fxr))\n\t\t\t\tfor (const auto& dir : std::filesystem::directory_iterator(fxr))\n\t\t\t\t\tif (dir.is_directory() && dir.path().filename().string().rfind(\"9\", 0) == 0 && std::filesystem::exists(dir.path() / CORAL_HOSTFXR_NAME))\n\t\t\t\t\t\treturn dir.path() / CORAL_HOSTFXR_NAME;\n\t\t}"
+        _coral_host_contents
+        "${_coral_host_contents}"
+    )
+    string(REPLACE "#include \"Coral/HostInstance.hpp\"" "#include \"Coral/HostInstance.hpp\"\n#include <cstdlib>"
+        _coral_host_contents "${_coral_host_contents}")
+    file(WRITE "${_coral_host_file}" "${_coral_host_contents}")
+endif()
+
 set(CORAL_EXAMPLE OFF CACHE BOOL "Build Coral examples" FORCE)
 set(CORAL_TESTING OFF CACHE BOOL "Build Coral tests" FORCE)
 add_subdirectory("${coral_SOURCE_DIR}/cmake" "${coral_BINARY_DIR}")

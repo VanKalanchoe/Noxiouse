@@ -219,6 +219,7 @@ target_compile_definitions(${PROJECT_NAME} PUBLIC
     NOX_PROFILE_STATS=$<BOOL:${NOX_PROFILE_STATS}>
     NOX_ENABLE_TRACY=$<BOOL:${NOX_ENABLE_TRACY}>
     NOX_BUILD_CONFIG="$<CONFIG>"
+    NOX_DIST=$<BOOL:${NOX_DIST}>
 )
 
 # Debug builds turn on NOX_ASSERT / NOX_CORE_ASSERT (NoxCore/Core/core.h). PUBLIC so the editor, the runtime and
