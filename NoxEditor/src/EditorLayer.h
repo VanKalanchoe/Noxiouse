@@ -128,8 +128,9 @@ namespace Nox
         // They are raster only: entering one turns DLSS, ray tracing and path tracing off (what they were is put back when leaving).
         void SetViewMode(EditorViewMode mode);
         int GridPlaneAxis() const; // the normal of the plane the grid lies on: 1 (the ground) in perspective / Top / Bottom, 2 Front / Back, 0 Left / Right
-        // A 180 cm blocky figure standing at the world origin (a size reference, like UE's mannequin); toolbar "Figure".
-        void DrawReferenceFigure();
+        // A 180 cm blocky figure (a size reference, like UE's mannequin) standing at `position`; toolbar "Figure": at the world origin,
+        // or on the surface under the cursor.
+        void DrawReferenceFigure(const glm::vec3& position);
         // Drops every selected top entity straight down until its bounds' bottom rests on the surface below (the top of the highest
         // other mesh whose bounds overlap it from above), or on the ground plane when there is none.
         void SnapSelectionToFloor();
@@ -220,6 +221,8 @@ namespace Nox
             bool PathTracing = false;
         } m_OrthoSaved;
         bool m_ShowReferenceFigure = false;
+        bool m_ReferenceFigureAtCursor = false;
+        glm::vec3 m_ReferenceFigurePosition{ 0.0f };
         bool m_GizmoWasUsing = false;
         bool m_MeasureTool = false;
         int m_MeasureStage = 0; // 0 nothing, 1 first point set (line follows the cursor), 2 both set (kept until the next click)

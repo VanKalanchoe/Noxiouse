@@ -96,7 +96,7 @@ for history. File references are to the code as of this audit.
   (E2) with their companion files, the old paths kept as aliases in the registry; Reimport; Replace References in the project's
   files and the open scene; neutral thumbnail backdrop. A reimported mesh whose material was renamed writes a fresh .nmat at
   the old name, unused.)
-- Viewports: per-viewport stats overlay and collider toggles. (Built 2026-10-20: lower resolution / realtime off (M3), show flags
+- Viewports: per-viewport stats overlay and collider toggles. (Built 2026-10-20: reference figure at the cursor, lower resolution / realtime off (M3), show flags
   (M4: lit / unlit / wireframe / sky / particles / outline / grid), selection outline and gizmo axes in the extra views.) (Built
   2026-10-20: cameras saved per scene, ortho zoom at the cursor, Wireframe overlay, To Grid, Snap to Floor by ray (GPU
   raycasts), mesh size in the Content Browser tooltip, neutral thumbnail backdrop; Thumbnail.cache moved to Cache/.)

@@ -2082,7 +2082,13 @@ namespace Nox
         if (m_SceneState != SceneState::Play && m_ShowGrid)
             DrawWorldGrid();
         if (m_SceneState != SceneState::Play && m_ShowReferenceFigure)
-            DrawReferenceFigure();
+        {
+            // Under the cursor: where the cursor points on the surfaces (the y = 0 plane past them), kept while the mouse is elsewhere.
+            glm::vec3 underCursor;
+            if (m_ReferenceFigureAtCursor && m_ViewportHovered && PickWorldPoint(underCursor))
+                m_ReferenceFigurePosition = underCursor;
+            DrawReferenceFigure(m_ReferenceFigureAtCursor ? m_ReferenceFigurePosition : glm::vec3(0.0f));
+        }
 
         // Rect lights are not geometry: their rectangle and a stroke the way they shine (the entity's -Z) show where they are.
         if (m_SceneState != SceneState::Play)
@@ -3539,9 +3545,18 @@ namespace Nox
                 ImGui::SetTooltip("View: Perspective, or an orthographic view along an axis (raster only). Numpad 7 / 1 / 3 (Ctrl: the opposite side), 5 = perspective");
         }
         ImGui::SameLine();
-        ImGui::Checkbox("Figure", &m_ShowReferenceFigure);
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("A 180 cm figure at the world origin, to judge sizes");
+        {
+            int figure = !m_ShowReferenceFigure ? 0 : m_ReferenceFigureAtCursor ? 2 : 1;
+            const char* figureModes[] = { "No Figure", "Figure at Origin", "Figure at Cursor" };
+            ImGui::SetNextItemWidth(120.0f);
+            if (ImGui::Combo("##figure", &figure, figureModes, 3))
+            {
+                m_ShowReferenceFigure = figure != 0;
+                m_ReferenceFigureAtCursor = figure == 2;
+            }
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("A 180 cm figure to judge sizes: at the world origin, or standing on the surface under the cursor");
+        }
         ImGui::SameLine();
         ImGui::Checkbox("Grid", &m_ShowGrid);
         if (ImGui::IsItemHovered())
@@ -3582,16 +3597,16 @@ namespace Nox
         ImGui::End();
     }
 
-    void EditorLayer::DrawReferenceFigure()
+    void EditorLayer::DrawReferenceFigure(const glm::vec3& position)
     {
-        // Sizes in cm, converted to world units; the figure stands on y = 0 at the origin, facing -Z, 180 cm tall.
+        // Sizes in cm, converted to world units; the figure stands on `position`, facing -Z, 180 cm tall.
         auto cm = [](float centimeters) { return WorldUnits::FromCentimeters(centimeters); };
         const glm::vec4 color(1.0f, 0.62f, 0.2f, 0.9f);
 
         auto box = [&](float minX, float maxX, float minY, float maxY, float minZ, float maxZ)
         {
-            const glm::vec3 low(cm(minX), cm(minY), cm(minZ));
-            const glm::vec3 high(cm(maxX), cm(maxY), cm(maxZ));
+            const glm::vec3 low = position + glm::vec3(cm(minX), cm(minY), cm(minZ));
+            const glm::vec3 high = position + glm::vec3(cm(maxX), cm(maxY), cm(maxZ));
             const glm::vec3 corners[8] = {
                 { low.x, low.y, low.z }, { high.x, low.y, low.z }, { high.x, low.y, high.z }, { low.x, low.y, high.z },
                 { low.x, high.y, low.z }, { high.x, high.y, low.z }, { high.x, high.y, high.z }, { low.x, high.y, high.z } };
