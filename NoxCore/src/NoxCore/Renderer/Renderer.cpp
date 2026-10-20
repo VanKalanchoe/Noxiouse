@@ -545,13 +545,17 @@ namespace Nox
 
         m_device->waitIdle();
 
-        if (!m_isEditor)
-        {
-            m_resourceHeap->unregisterTexture(m_sceneResource->GetDescriptorIndexSlot());
-        }
-
         cleanupSwapChain();
         createSwapChain();
+
+        // The game renders at the window's size: a new swapchain size (a resize, fullscreen, Alt+Enter) is a new output size, so the
+        // render size (DLSS's optimal one for it), every render target, NRD and the DLSS feature follow it. Without this the render
+        // size stayed the first window's and DLSS rejected every frame ("RenderSubrect outside of Min / Max dynamic res").
+        if (!m_isEditor)
+        {
+            applyRenderResolution();
+            return;
+        }
         createSceneResources();
 
         // Output-resolution graph targets follow the new swapchain size by themselves.
@@ -913,6 +917,9 @@ namespace Nox
 #endif
 
         m_device->waitIdle();
+        // The game's final image is in the bindless heap: the old one leaves it before the new one is registered.
+        if (!m_isEditor && m_sceneResource)
+            m_resourceHeap->unregisterTexture(m_sceneResource->GetDescriptorIndexSlot());
         createSceneResources();
 
         // Graph-owned targets and histories follow the new sizes; with the GPU idle, drop the old-size ones right away
