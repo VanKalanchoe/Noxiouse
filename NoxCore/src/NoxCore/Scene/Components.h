@@ -710,7 +710,7 @@ namespace Nox
     struct TextComponent
     {
         std::string TextString;
-        Ref<Font> FontAsset = Font::GetDefault();
+        AssetHandle Font = 0; // a Font asset (.ttf / .otf); 0 = the default font, which also stands in until it has loaded
         glm::vec4 Color{ 1.0f };
         float Kerning = 0.0f;
         float LineSpacing = 0.0f;

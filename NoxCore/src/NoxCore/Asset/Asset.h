@@ -27,7 +27,9 @@ namespace Nox
 
         Prefab, // Scene/Prefab.h: a saved recipe of entities (.nprefab), instanced in scenes by PrefabInstanceComponent
 
-        Timeline // Animation/Timeline.h: a sequencer timeline (.ntimeline), played by TimelinePlayerComponent
+        Timeline, // Animation/Timeline.h: a sequencer timeline (.ntimeline), played by TimelinePlayerComponent
+
+        Font // Renderer/Font.h: a TrueType / OpenType font (.ttf, .otf), drawn by TextComponent
     };
 
     // Where an asset is on its way into memory (§5.11.2). A request starts the load once; the asset is usable when Ready.

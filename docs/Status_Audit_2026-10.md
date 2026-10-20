@@ -24,7 +24,7 @@ for history. File references are to the code as of this audit.
 | Scripting | A **failed hot reload leaves scripting unloaded** (the old assemblies are cleared before the new ones load) | `DotNetBackend.cpp:558` |
 | Scripting | The reload generation never increases, so the stale-object check does nothing; `OnAfterReload` is declared but never called | `ScriptEngine.cpp:159`, `EntityBehaviour.cs:25` |
 | Scripting | Reloading while script jobs (`Nox.Jobs`) run is unsafe: no fence before the assemblies are swapped | `Jobs.cs`, `DotNetBackend.cpp:643` |
-| Scene | `TextComponent` font is neither saved nor loaded (always the default font) | `SceneSerializer.cpp:942, 1843` |
+| Scene | Fixed 2026-10-20: `TextComponent` font was neither saved nor loaded. Fonts (.ttf / .otf) are assets now; the component keeps the font's handle, saved with the scene | `SceneSerializer.cpp`, `Font.h` |
 | Scene | `SerializeRuntime` / `DeserializeRuntime` are empty (return false) | `SceneSerializer.cpp:1188, 1924` |
 | Asset | Fixed 2026-10-20: `MeshImporter::LoadMesh` was a dead stub with no return value -- removed | `MeshImporter.cpp` |
 | Editor | Ortho camera constants are not unit-scaled (5000 back, far 10000: only 50 m / 100 m in a cm project); sky is flat in ortho | `EditorCamera.h:123` |
@@ -116,7 +116,7 @@ for history. File references are to the code as of this audit.
   physics extensions; level import of a skeletal model's clips.
 
 **Other**
-- Metal backend (throws); text: fonts from memory, outline / background color; Box2D physics materials.
+- Metal backend (throws); text: outline / background color (fonts load from memory since 2026-10-20); Box2D physics materials.
 
 ### 0.4 Docs that no longer match the code
 

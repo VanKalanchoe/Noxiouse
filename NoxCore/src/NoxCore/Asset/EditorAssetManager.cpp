@@ -118,7 +118,9 @@ namespace Nox
         { ".nskmesh", AssetType::SkeletalMesh },
         { ".nanimgraph", AssetType::AnimationGraph },
         { ".nprefab", AssetType::Prefab },
-        { ".ntimeline", AssetType::Timeline }
+        { ".ntimeline", AssetType::Timeline },
+        { ".ttf", AssetType::Font },
+        { ".otf", AssetType::Font }
     };
 
     AssetType EditorAssetManager::GetAssetTypeFromExtension(const std::filesystem::path& extension)

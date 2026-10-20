@@ -939,7 +939,7 @@ namespace Nox
 
             auto& textComponent = entity.GetComponent<TextComponent>();
             out << YAML::Key << "TextString" << YAML::Value << textComponent.TextString;
-            // todo: textComponent.FontAsset;
+            out << YAML::Key << "Font" << YAML::Value << static_cast<uint64_t>(textComponent.Font);
             out << YAML::Key << "Color" << YAML::Value << textComponent.Color;
             out << YAML::Key << "Kerning" << YAML::Value << textComponent.Kerning;
             out << YAML::Key << "LineSpacing" << YAML::Value << textComponent.LineSpacing;
@@ -1841,7 +1841,8 @@ namespace Nox
         {
             auto& tc = deserializedEntity.AddComponent<TextComponent>();
             tc.TextString = textComponent["TextString"].as<std::string>();
-            // tc.FontAsset // todo
+            if (textComponent["Font"])
+                tc.Font = textComponent["Font"].as<uint64_t>();
             tc.Color = textComponent["Color"].as<glm::vec4>();
             tc.Kerning = textComponent["Kerning"].as<float>();
             tc.LineSpacing = textComponent["LineSpacing"].as<float>();

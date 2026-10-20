@@ -2462,6 +2462,33 @@ namespace Nox
         DrawComponent<TextComponent>("Text Renderer", entity, [](auto& component)
         {
             ImGui::InputTextMultiline("Text String", &component.TextString);
+            // The font: a .ttf / .otf in the project (drop one from the Content Browser), or the default font.
+            const auto& registry = Project::GetActive()->GetEditorAssetManager()->GetAssetRegistry();
+            const std::string currentFont = component.Font != 0 && registry.contains(component.Font)
+                ? registry.at(component.Font).FilePath.stem().string() : std::string("Default (Open Sans)");
+            if (ImGui::BeginCombo("Font", currentFont.c_str()))
+            {
+                if (ImGui::Selectable("Default (Open Sans)", component.Font == 0))
+                    component.Font = 0;
+                for (const auto& [handle, metadata] : registry)
+                {
+                    if (metadata.Type != AssetType::Font)
+                        continue;
+                    if (ImGui::Selectable(metadata.FilePath.stem().string().c_str(), component.Font == handle))
+                        component.Font = handle;
+                }
+                ImGui::EndCombo();
+            }
+            if (ImGui::BeginDragDropTarget())
+            {
+                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEM"))
+                {
+                    const AssetHandle handle = *static_cast<const AssetHandle*>(payload->Data);
+                    if (AssetManager::GetAssetType(handle) == AssetType::Font)
+                        component.Font = handle;
+                }
+                ImGui::EndDragDropTarget();
+            }
             ImGui::ColorEdit4("Color", glm::value_ptr(component.Color));
             ImGui::DragFloat("Kerning", &component.Kerning, 0.025f);
             ImGui::DragFloat("Line Spacing", &component.LineSpacing, 0.025f);

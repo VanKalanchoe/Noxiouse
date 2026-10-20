@@ -1648,7 +1648,19 @@ namespace Nox
             for (auto entity : view)
             {
                 auto [transform, text] = view.get<WorldTransformComponent, TextComponent>(entity);
-                m_renderer2D->DrawString(text.TextString, transform.WorldMatrix, text, static_cast<int>(entity));
+                // The default font until the text's own has loaded (requested at the sync point).
+                Ref<Font> font;
+                if (text.Font != 0)
+                {
+                    if (Font* loaded = AssetManager::FindLoadedAsset<Font>(text.Font))
+                        font = Ref<Font>(loaded);
+                    else
+                        missingAssets.push_back(text.Font);
+                }
+                if (!font)
+                    font = Font::GetDefault();
+                m_renderer2D->DrawString(text.TextString, font, transform.WorldMatrix, { text.Color, text.Kerning, text.LineSpacing },
+                                         static_cast<int>(entity));
             }
         }
     }

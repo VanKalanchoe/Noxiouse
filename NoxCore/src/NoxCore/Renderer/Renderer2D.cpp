@@ -636,11 +636,6 @@ namespace Nox
         }
     }
 
-    void Renderer2D::DrawString(const std::string& string, const glm::mat4& transform, const TextComponent& component, int entityID)
-    {
-        DrawString(string, component.FontAsset, transform, {component.Color, component.Kerning, component.LineSpacing}, entityID);
-    }
-    
     void Renderer2D::createLineMeshPipeline(bool forceCompile)
     {
         NRI::PipelineDesc desc{};

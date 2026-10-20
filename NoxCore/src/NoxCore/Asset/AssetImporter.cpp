@@ -14,6 +14,8 @@
 #include "PrefabImporter.h"
 #include "TimelineImporter.h"
 #include "NoxCore/Core/Log.h"
+#include "NoxCore/Project/Project.h"
+#include "NoxCore/Renderer/Font.h"
 
 namespace Nox
 {
@@ -64,6 +66,13 @@ namespace Nox
         }},
         { AssetType::Timeline, [](AssetHandle h, const AssetMetadata& meta) -> Ref<Asset> {
             return Ref<Asset>(TimelineImporter::ImportTimeline(h, meta));
+        }},
+        { AssetType::Font, [](AssetHandle h, const AssetMetadata& meta) -> Ref<Asset> {
+            Ref<Font> font = CreateRef<Font>(Project::GetActiveAssetDirectory() / meta.FilePath);
+            if (!font->IsValid())
+                return {};
+            font->Handle = h;
+            return Ref<Asset>(font);
         }}
     };
     

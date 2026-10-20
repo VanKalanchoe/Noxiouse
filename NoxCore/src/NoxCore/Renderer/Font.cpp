@@ -1,5 +1,7 @@
 #include "Font.h"
 
+#include <fstream>
+
 #undef INFINITE
 #include "msdf-atlas-gen/msdf-atlas-gen.h"
 #include "msdf-atlas-gen/FontGeometry.h"
@@ -44,19 +46,37 @@ namespace Nox
 
     Font::Font(const std::filesystem::path& filepath) : m_Data(new MSDFData())
     {
-        NOX_CORE_INFO("Font Constructor");
-        
+        std::ifstream file(filepath, std::ios::binary | std::ios::ate);
+        if (!file)
+        {
+            NOX_CORE_ERROR("Failed to open font: {}", filepath.string());
+            return;
+        }
+        std::vector<uint8_t> fontData(static_cast<size_t>(file.tellg()));
+        file.seekg(0);
+        file.read(reinterpret_cast<char*>(fontData.data()), static_cast<std::streamsize>(fontData.size()));
+        Load(fontData, filepath.string());
+    }
+
+    Font::Font(const std::vector<uint8_t>& fontData, const std::string& name) : m_Data(new MSDFData())
+    {
+        Load(fontData, name);
+    }
+
+    void Font::Load(const std::vector<uint8_t>& fontData, const std::string& name)
+    {
         msdfgen::FreetypeHandle* ft = msdfgen::initializeFreetype();
         NOX_CORE_ASSERT(ft, "Freetype initialization failed!");
 
         if (ft)
         {
-            std::string fileString = filepath.string();
-            // todo msdfgen::loadFontData loads from memory buffer which we ll need
-            msdfgen::FontHandle* font = msdfgen::loadFont(ft, fileString.c_str());
+            // From memory: the same path for a file on disk and one read out of a pack.
+            msdfgen::FontHandle* font = fontData.empty() ? nullptr
+                : msdfgen::loadFontData(ft, reinterpret_cast<const msdfgen::byte*>(fontData.data()), static_cast<int>(fontData.size()));
             if (!font)
             {
-                NOX_CORE_ERROR("Failed to load font: {}", fileString);
+                NOX_CORE_ERROR("Failed to load font: {}", name);
+                msdfgen::deinitializeFreetype(ft);
                 return;
             }
 
@@ -81,7 +101,7 @@ namespace Nox
             double fontScale = 1.0;
             m_Data->FontGeometry = msdf_atlas::FontGeometry(&m_Data->Glyphs);
             int glyphsLoaded = m_Data->FontGeometry.loadCharset(font, fontScale, charset);
-            NOX_CORE_INFO("Loaded {} glyphs from font: (out of {})", glyphsLoaded, charset.size());
+            NOX_CORE_INFO("Loaded {} glyphs from font {} (out of {})", glyphsLoaded, name, charset.size());
 
             double emSize = 40.0;
 
@@ -150,8 +170,6 @@ namespace Nox
 
     Font::~Font()
     {
-        NOX_CORE_INFO("Font Destructor");
-
         delete m_Data;
     }
 
