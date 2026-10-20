@@ -1718,6 +1718,10 @@ namespace Nox
         std::unique_ptr<NRI::Pipeline> m_skyAerialPerspectivePipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_skyDownsamplePipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_skyCloudShadowPipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_skyHorizonBandPipeline = nullptr;
+        // The sky near the horizon at ~4x the cubemap's resolution, for the skybox (shaderIO.h SkyHorizonBand*), and its storage slot.
+        Ref<Texture2D> m_skyHorizonBand;
+        uint32_t m_skyHorizonBandStorageSlot = ~0u;
         // Cloud noise (CloudNoise.slang), made once when the sky is created: shape and detail 3D noise as 2D arrays, weather.
         Ref<Texture2D> m_skyCloudShape;
         Ref<Texture2D> m_skyCloudDetail;

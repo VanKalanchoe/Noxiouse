@@ -937,7 +937,8 @@ namespace Nox
         }
         
         float exposure = m_Renderer->getExposure();
-        if (ImGui::SliderFloat("Exposure", &exposure, 0.0f, 10.0f, "%.2f"))
+        // Logarithmic up to 1000 (+10 EV): a moonlit night is ~9 stops under daylight (or the camera's Auto Exposure).
+        if (ImGui::SliderFloat("Exposure", &exposure, 0.01f, 1000.0f, "%.2f", ImGuiSliderFlags_Logarithmic))
         {
             m_Renderer->setExposure(exposure);
         }

@@ -1092,7 +1092,8 @@ struct PushConstantSkyAtmosphere
     float sourceLod;
     // The moon (at night): the air and the clouds scatter its light as they do the sun's. moonIlluminance 0: none (by day).
     vec3 moonDirection;                   // world space, towards the moon
-    uint32_t firstFace;                   // skyCubemapMain: the cube face of dispatch z = 0 (one face per frame while the wind blows)
+    uint32_t firstFace;                   // skyCubemapMain: the cube face of dispatch z = 0 (one face per frame while the wind blows);
+                                          // skyHorizonBandMain: the first column written
     vec3 moonIlluminance;                 // its color * intensity * the lit fraction of its disc, above the atmosphere
     // cloudShadowMain: the square it covers (half size, centre: world x / z in km) towards sunDirection (the shadow mask's light).
     float cloudShadowExtentKm;
@@ -1150,7 +1151,21 @@ struct PushConstantSkybox
     float moonCosAngularRadius;
     vec3 moonDiscRadiance;          // a full moon's, at the disc's centre above the atmosphere (0: no moon)
     float starIntensity;            // 0: no stars (daylight)
+    uint32_t horizonBandIndex;      // sampled slot of the sky's horizon band (SkyHorizonBand*), ~0: the cubemap everywhere
+    uint32_t skyboxPad0;
+    uint32_t skyboxPad1;
+    uint32_t skyboxPad2;
 };
+
+// The procedural sky's horizon band: the sky and its clouds near the horizon at about the screen's resolution, where the
+// environment cubemap's texels (0.35 degrees) are hundreds of meters wide on clouds tens of km away. A panorama: x the
+// azimuth (atan2(z, x) over the full circle), y the elevation from SkyHorizonBandMinDegrees (bottom row) to ...MaxDegrees.
+// The skybox draws it in place of the cubemap there (fading into it at the top); lighting and reflections keep the cubemap.
+STATIC_CONST uint32_t SkyHorizonBandWidth = 4096;  // 0.088 degrees a texel
+STATIC_CONST uint32_t SkyHorizonBandHeight = 192;  // 0.073 degrees a texel
+STATIC_CONST float SkyHorizonBandMinDegrees = -2.0;
+STATIC_CONST float SkyHorizonBandMaxDegrees = 12.0;
+STATIC_CONST uint32_t SkyHorizonBandSlices = 8;    // rendered a slice of columns per frame while the wind blows
 
 // Aerial perspective (SkyAtmosphere.slang aerialPerspectiveMain): the atmosphere between the camera and the scene, as a
 // camera-aligned volume of AerialPerspectiveSize x AerialPerspectiveSize froxels and AerialPerspectiveSlices depth slices
@@ -1197,7 +1212,7 @@ static_assert(offsetof(PushConstantSkyAtmosphere, sunDirection) == 16 && offseto
 static_assert(offsetof(PushConstantSkybox, sunDirection) == 16 && offsetof(PushConstantSkybox, sunDiscRadiance) == 32 &&
               offsetof(PushConstantSkybox, skyAltitudeKm) == 44 && offsetof(PushConstantSkybox, moonDirection) == 48 &&
               offsetof(PushConstantSkybox, moonDiscRadiance) == 64 && offsetof(PushConstantSkybox, starIntensity) == 76 &&
-              sizeof(PushConstantSkybox) == 80, "PushConstantSkybox must match its std430 layout");
+              offsetof(PushConstantSkybox, horizonBandIndex) == 80 && sizeof(PushConstantSkybox) == 96, "PushConstantSkybox must match its std430 layout");
 static_assert(offsetof(PushConstantAerialPerspective, sunDirection) == 16 && offsetof(PushConstantAerialPerspective, sunIlluminance) == 32 &&
               offsetof(PushConstantAerialPerspective, altitudeKm) == 64 && offsetof(PushConstantAerialPerspective, moonDirection) == 80 &&
               offsetof(PushConstantAerialPerspective, moonIlluminance) == 96 && sizeof(PushConstantAerialPerspective) == 112,

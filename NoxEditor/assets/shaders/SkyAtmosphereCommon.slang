@@ -57,3 +57,19 @@ float3 sampleSkyTransmittance(uint lutIndex, float r, float mu)
     SamplerState linearClamp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
     return lut.SampleLevel(linearClamp, transmittanceRMuToUv(r, mu), 0.0).rgb;
 }
+
+// The horizon band's mapping (shaderIO.h SkyHorizonBand*): a direction's texture coordinates, and back.
+float2 horizonBandUv(float3 direction)
+{
+    const float azimuth = atan2(direction.z, direction.x);
+    const float elevation = asin(clamp(direction.y, -1.0, 1.0)) * (180.0 / 3.14159265);
+    return float2(azimuth / (2.0 * 3.14159265) + 0.5,
+                  (elevation - SkyHorizonBandMinDegrees) / (SkyHorizonBandMaxDegrees - SkyHorizonBandMinDegrees));
+}
+
+float3 horizonBandDirection(float2 uv)
+{
+    const float azimuth = (uv.x - 0.5) * 2.0 * 3.14159265;
+    const float elevation = lerp(SkyHorizonBandMinDegrees, SkyHorizonBandMaxDegrees, uv.y) * (3.14159265 / 180.0);
+    return float3(cos(elevation) * cos(azimuth), sin(elevation), cos(elevation) * sin(azimuth));
+}

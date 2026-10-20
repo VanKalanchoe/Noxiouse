@@ -681,6 +681,7 @@ namespace Nox
         // The sun's disc over a procedural sky (an HDR map has its own sun in the image).
         shaderio::PushConstantSkybox skyboxSun{};
         skyboxSun.skyTransmittanceIndex = ~0u;
+        skyboxSun.horizonBandIndex = ~0u;
         if (m_proceduralSkyActive && m_skyTransmittanceLut)
         {
             const SkyAtmosphereSettings& sky = m_proceduralSky;
@@ -705,6 +706,8 @@ namespace Nox
             skyboxSun.moonCosAngularRadius = std::cos(moonRadius);
             skyboxSun.moonDiscRadiance = glm::max(sky.MoonDiscIlluminance, glm::vec3(0.0f)) * (0.002f / moonSolidAngle);
             skyboxSun.starIntensity = glm::max(sky.StarIntensity, 0.0f);
+            if (m_skyHorizonBand)
+                skyboxSun.horizonBandIndex = m_skyHorizonBand->GetDescriptorIndexSlot();
         }
         return skyboxSun;
     }

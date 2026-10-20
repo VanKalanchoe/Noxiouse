@@ -200,9 +200,10 @@
         else                starDirection = float3(starUv.x, starUv.y, side);
         starDirection = normalize(starDirection);
 
-        // Flux: a Pareto tail over ten magnitudes (count ~ flux^-1.2); the brightest about a full moon's / 25000.
+        // Flux: a Pareto tail over ~nine magnitudes (count ~ flux^-1.2); the brightest about a full moon's / 25000. The faintest at
+        // 3e-4 of it: ~4x as many stars bright enough to see as at 1e-4 (a few hundred were too sparse a sky).
         const float brightest = 1.5e-6;
-        const float flux = min(brightest * 1e-4 * pow(max(starRandom(state), 1e-6), -1.0 / 1.2), brightest);
+        const float flux = min(brightest * 3e-4 * pow(max(starRandom(state), 1e-6), -1.0 / 1.2), brightest);
         const float temperature = starRandom(state);
         float3 color = lerp(float3(1.0, 0.72, 0.5), float3(0.72, 0.82, 1.0), temperature);
         color /= dot(color, float3(0.2126, 0.7152, 0.0722));
@@ -248,7 +249,23 @@
             {
                 float2 offset = (float2(x, y) + 0.5) / 4.0 - 0.5;
                 float3 direction = normalize(ray + rayDx * offset.x + rayDy * offset.y);
-                envSum += texHandle.SampleLevel(sampHandle, direction, 0.0);
+                float4 environment = texHandle.SampleLevel(sampHandle, direction, 0.0);
+                // Near the horizon a procedural sky's band (its far clouds at the screen's resolution), fading into the cubemap at
+                // its top. Its bottom is under the horizon (the ground), where both agree.
+                if (pushConstant.horizonBandIndex != 0xFFFFFFFF)
+                {
+                    const float2 bandUv = horizonBandUv(direction);
+                    const float bandWeight = saturate((1.0 - bandUv.y) * 6.0) * step(0.0, bandUv.y);
+                    if (bandWeight > 0.0)
+                    {
+                        Texture2D band = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.horizonBandIndex, 0));
+                        // Repeat across the azimuth's seam, clamped in elevation (the half texel at the bottom edge).
+                        const float2 uv = float2(bandUv.x, clamp(bandUv.y, 0.5 / float(SkyHorizonBandHeight), 1.0 - 0.5 / float(SkyHorizonBandHeight)));
+                        const float4 bandSample = band.SampleLevel(SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0)), uv, 0.0);
+                        environment = lerp(environment, bandSample, bandWeight);
+                    }
+                }
+                envSum += environment;
                 discSum += sunDisc(pushConstant, direction) + moonDisc(pushConstant, direction);
             }
         }

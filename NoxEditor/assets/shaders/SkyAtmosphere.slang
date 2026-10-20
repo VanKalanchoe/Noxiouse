@@ -572,6 +572,31 @@ void skyCubemapMain(uint3 id : SV_DispatchThreadID, uniform PushConstantSkyAtmos
     output[texel] = float4(luminance, cloudTransmittance);
 }
 
+// The horizon band (shaderIO.h SkyHorizonBand*): the same sky and clouds as the cubemap, at ~4x its resolution where the clouds
+// are far. One ray a texel; outputSize x outputHeight is the band, the dispatch's x starts at column firstFace.
+[shader("compute")]
+[numthreads(16, 16, 1)]
+void skyHorizonBandMain(uint3 id : SV_DispatchThreadID, uniform PushConstantSkyAtmosphere push)
+{
+    const uint2 texel = uint2(id.x + push.firstFace, id.y);
+    if (texel.x >= push.outputSize || texel.y >= push.outputHeight)
+        return;
+
+    const float3 origin = float3(0.0, BottomRadius + max(push.cameraAltitudeKm, PlanetRadiusOffset), 0.0);
+    const float3 direction = horizonBandDirection((float2(texel) + 0.5) / float2(push.outputSize, push.outputHeight));
+    const float jitter = float(cloudHashPcg3d(uint3(texel, 7u)).x & 0xFFFFu) / 65536.0;
+    float cloudTransmittance;
+    float3 luminance = skyLuminance(push, origin, direction, normalize(push.sunDirection), jitter, cloudTransmittance) * push.sunIlluminance;
+    if (any(push.moonIlluminance > 0.0))
+    {
+        float moonCloudTransmittance;
+        luminance += skyLuminance(push, origin, direction, normalize(push.moonDirection), jitter, moonCloudTransmittance) * push.moonIlluminance;
+    }
+
+    RWTexture2D<float4> output = RWTexture2D<float4>.Handle(uint2(push.outputStorageIndex, 0));
+    output[texel] = float4(luminance, cloudTransmittance);
+}
+
 // The clouds' shadow on the scene: for each point of a square of the ground around the camera (a texel of the map), the cloud
 // layer's transmittance towards the light (the sun, or the moon at night) -- 16 steps of the shape noise, without the detail
 // erosion (soft shadows do not show it). Every frame (the wind moves them); cloud_shadow() in shaderIO.h reads it.

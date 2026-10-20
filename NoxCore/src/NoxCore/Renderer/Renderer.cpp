@@ -2684,6 +2684,10 @@ namespace Nox
         releaseEnvironmentTexture(m_skyTransmittanceLut);
         releaseEnvironmentTexture(m_skyMultiScatteringLut);
         releaseEnvironmentTexture(m_skyAerialPerspective);
+        if (m_skyHorizonBand)
+            m_resourceHeap->unregisterTexture(m_skyHorizonBandStorageSlot);
+        m_skyHorizonBandStorageSlot = ~0u;
+        releaseEnvironmentTexture(m_skyHorizonBand);
         for (size_t frame = 0; frame < m_skyCloudShadow.size(); ++frame)
         {
             if (m_skyCloudShadow[frame])
@@ -3054,6 +3058,8 @@ namespace Nox
             m_skyDownsamplePipeline = createSkyPipeline("downsampleCubeMain");
         if (!m_skyCloudShadowPipeline)
             m_skyCloudShadowPipeline = createSkyPipeline("cloudShadowMain");
+        if (!m_skyHorizonBandPipeline)
+            m_skyHorizonBandPipeline = createSkyPipeline("skyHorizonBandMain");
 
         auto createLut = [this](uint32_t width, uint32_t height)
         {
@@ -3078,6 +3084,8 @@ namespace Nox
         };
         m_skyTransmittanceLut = createLut(SkyTransmittanceWidth, SkyTransmittanceHeight);
         m_skyMultiScatteringLut = createLut(SkyMultiScatteringSize, SkyMultiScatteringSize);
+        m_skyHorizonBand = createLut(shaderio::SkyHorizonBandWidth, shaderio::SkyHorizonBandHeight);
+        m_skyHorizonBandStorageSlot = m_resourceHeap->registerStorageTextureMip(*m_skyHorizonBand, 0);
         m_environmentCubemap = createCube(SkyEnvironmentSize, NRI::ImageFormat::R16G16B16A16_SFLOAT);
         m_irradianceCubemap = createCube(SkyIrradianceSize, NRI::ImageFormat::R32G32B32A32_SFLOAT);
         m_prefilteredEnvMap = createCube(SkyPrefilteredSize, NRI::ImageFormat::R16G16B16A16_SFLOAT);
@@ -3264,9 +3272,11 @@ namespace Nox
             NRI::Pipeline* downsample;
             NRI::Pipeline* irradiance;
             NRI::Pipeline* prefilter;
+            NRI::Pipeline* horizonBand;
             shaderio::PushConstantSkyAtmosphere push;
             std::vector<uint32_t> storageSlots;
             uint32_t environmentSlot;
+            uint32_t horizonBandSlot;
             bool updateLuts;
             int stage;
         } data{};
@@ -3278,6 +3288,8 @@ namespace Nox
         data.prefilter = m_prefilterPipeline.get();
         data.storageSlots = m_skyStorageSlots;
         data.environmentSlot = m_environmentCubemap->GetDescriptorIndexSlot();
+        data.horizonBand = m_skyHorizonBand ? m_skyHorizonBandPipeline.get() : nullptr;
+        data.horizonBandSlot = m_skyHorizonBandStorageSlot;
         data.updateLuts = m_skyLutsDirty;
         data.push = m_skyCyclePush;
         data.stage = stage;
@@ -3333,6 +3345,20 @@ namespace Nox
                     cmd.pushData(&push, sizeof(push));
                     cmd.dispatch((SkyEnvironmentSize + 15) / 16, (SkyEnvironmentSize + 15) / 16, all ? 6 : 1);
                     cmd.executionBarrier();
+                    push.firstFace = 0;
+                }
+
+                // The horizon band (the skybox's far clouds): whole, or this stage's slice of its columns.
+                if (data.horizonBand && (all || data.stage < static_cast<int>(shaderio::SkyHorizonBandSlices)))
+                {
+                    const uint32_t columns = all ? shaderio::SkyHorizonBandWidth : shaderio::SkyHorizonBandWidth / shaderio::SkyHorizonBandSlices;
+                    cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *data.horizonBand);
+                    push.outputStorageIndex = data.horizonBandSlot;
+                    push.outputSize = shaderio::SkyHorizonBandWidth;
+                    push.outputHeight = shaderio::SkyHorizonBandHeight;
+                    push.firstFace = all ? 0u : static_cast<uint32_t>(data.stage) * columns;
+                    cmd.pushData(&push, sizeof(push));
+                    cmd.dispatch((columns + 15) / 16, (shaderio::SkyHorizonBandHeight + 15) / 16, 1);
                     push.firstFace = 0;
                 }
 
