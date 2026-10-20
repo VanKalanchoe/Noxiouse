@@ -106,8 +106,8 @@ for history. File references are to the code as of this audit.
   `Nox.WorldUnits`; `Scripting_Architecture_and_Status.md` refreshed.)
 
 **Runtime and packaging**
-- A cook step for textures, self-contained .NET runtime, Release / NOX_EDITOR-free build (R7), fullscreen window, a binary
-  registry, renderer settings beyond the preset. (Built 2026-10-20: pack files `.npak` with a VFS every asset read goes
+- A binary registry, compression in packs. (Built 2026-10-20: texture cook while packaging, self-contained .NET, NOX_DIST
+  shipping build, window modes with Alt+Enter, renderer settings saved in the project; pack files `.npak` with a VFS every asset read goes
   through (R4); precompiled shaders -- SPIR-V cached for every pipeline kind, Slang delay-loaded and left out of a package (R5);
   the project's own script assembly shipped.)
 - C++ voxel module and VoxelWorld API; dynamic mesh upload without a stall; vertex colors in `Nox.Mesh`; dynamic mesh colliders.

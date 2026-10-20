@@ -93,6 +93,41 @@ headers; measure the build time before and after), but it is unrelated to packag
 - Not yet: pack files (R4: still one file per asset), precompiled shaders (R5), a Release / editor-free build of the runtime,
   the game assembly's name is still `Facerun.dll` in `ScriptEngine` (one game per engine build for now).
 
+## 2e. R4, R5, R6, R7 built (2026-10-20, untested)
+
+**How a packaged game holds and reads its content.** Nothing is "converted into memory" up front. The assets are cooked to
+their final, GPU-ready form (textures block-compressed `.ntex`, meshes `.nsmesh` with meshlets, scenes, prefabs, materials) and
+written into one pack file, `Game/Content.npak`, with a table of contents (path -> offset, size). The game opens the pack at
+start and keeps only that table in memory; when the asset manager loads an asset it reads that asset's bytes from its offset,
+the same background loads, uploads and texture streaming (which reads just the mip range it needs) as in the editor, and
+unloads what the scenes no longer use. Shaders ship precompiled, scripts as their built DLLs.
+
+- **Pack files (R4):** `NoxCore/Core/VirtualFileSystem.{h,cpp}`. `.npak`: magic `NOXPAK01`, version, entry count, offset of
+  the table of contents; 16-byte aligned file bytes; the table (path, offset, size). Uncompressed (textures are already BC
+  compressed; LZ4 per blob can come later). `VFS::Open / ReadBytes / ReadText / ReadRange / Exists / FileSize` read the loose
+  file when there is one, else the entry of a mounted pack -- every asset read goes through it (cooked meshes, skeletons,
+  animations and their notifies, materials, textures, scenes, prefabs, timelines, node graphs, fonts, the registry). A runtime
+  project (`Project::Load(path, true)`) mounts every `*.npak` next to its `.nproj` over its asset directory before the
+  registry is read. The editor mounts nothing. File > Package Game writes `Game/Content.npak` (option "Pack files", on).
+- **Precompiled shaders (R5):** Slang is delay-loaded on Windows and its session created on the first compile; SPIR-V is
+  cached (`.spv`) next to the shader-object binaries for every pipeline kind (ray tracing pipelines compiled on every start
+  before), and is the fallback when a driver rejects the shader-object binaries. The package leaves Slang out ("Precompiled
+  shaders only", on): every pipeline the editor created is in the cache (the present pipeline is now created in the editor
+  too). A shader that never compiled in the editor fails with a clear message -- turn the option off to ship Slang.
+- **Texture cook:** a texture never loaded in the editor is cooked while packaging instead of shipping its PNG/JPG.
+- **Scripts (R6):** the project's own assembly (`ScriptModulePath`'s name) in `Scripts/<Name>/`, other games' scripts built
+  next to the editor left out. **Self-contained .NET** (option): the .NET 9 host resolver and shared framework copied into
+  `dotnet/`; Coral (patched at configure time) and the host look there first (`NOX_DOTNET_ROOT`, `DOTNET_ROOT`).
+- **Shipping build (R7):** CMake `-DNOX_DIST=ON` with the Release configuration: NoxRuntime without a console window, no
+  stats overlay / profiler, the log in the user's folder (`SDL_GetPrefPath`). Package from an editor built that way.
+- **Window:** Windowed / Borderless (default) / Fullscreen (exclusive) from the project's `WindowMode`; Alt+Enter toggles;
+  `--windowed` on the command line for testing.
+- **Renderer settings in the project:** `ProjectConfig::Renderer` (ray tracing resolution, diffuse GI, shadowed lights, OIT,
+  TAA) on top of the quality preset, applied in the editor and the game (Render Quality > Project Settings).
+
+Still not done: compression in packs, a binary registry, several packs (DLC / patches are possible already: packs mount in
+name order and a loose file wins), an installer.
+
 ## 3. Phases
 
 | Phase | What | Exit test |
