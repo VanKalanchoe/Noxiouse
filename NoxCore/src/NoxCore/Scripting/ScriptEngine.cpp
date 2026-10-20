@@ -4,6 +4,7 @@
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Scene/Entity.h"
 #include "NoxCore/Scene/ModelInstance.h"
+#include "NoxCore/Project/Project.h"
 
 #include <optional>
 #include <system_error>
@@ -12,16 +13,45 @@ namespace Nox
 {
     namespace
     {
+#ifdef NDEBUG
+        constexpr const char* kConfiguration = "Release";
+#else
+        constexpr const char* kConfiguration = "Debug";
+#endif
+
+        // The engine's source checkout above the executable (a development build): where NoxScriptCore is built.
         std::filesystem::path FindRepositoryRoot(const std::filesystem::path& executableDirectory)
         {
             std::filesystem::path candidate = executableDirectory;
             for (int depth = 0; depth < 8 && !candidate.empty(); ++depth)
             {
-                if (std::filesystem::exists(candidate / "Facerun/Assets/Scripts/Facerun.csproj"))
+                if (std::filesystem::exists(candidate / "NoxScriptCore/Nox.ScriptCore.csproj"))
                     return candidate;
+                if (candidate == candidate.parent_path())
+                    break;
                 candidate = candidate.parent_path();
             }
             return {};
+        }
+
+        // The newest of the files that exist (empty if none does).
+        std::filesystem::path Newest(std::initializer_list<std::filesystem::path> candidates)
+        {
+            std::filesystem::path newest;
+            std::filesystem::file_time_type newestTime{};
+            for (const std::filesystem::path& candidate : candidates)
+            {
+                std::error_code error;
+                if (candidate.empty() || !std::filesystem::is_regular_file(candidate, error))
+                    continue;
+                const auto time = std::filesystem::last_write_time(candidate, error);
+                if (!error && (newest.empty() || time > newestTime))
+                {
+                    newest = candidate;
+                    newestTime = time;
+                }
+            }
+            return newest;
         }
 
         struct ScriptGeneration
@@ -30,105 +60,66 @@ namespace Nox
             std::filesystem::path GameAssembly;
         };
 
-        bool CopyArtifact(const std::filesystem::path& source,
-                          const std::filesystem::path& destination,
-                          bool required)
+        // An assembly and the files beside it that load with it (.pdb for the debugger, .deps.json, .runtimeconfig.json).
+        bool CopyAssembly(const std::filesystem::path& assembly, const std::filesystem::path& directory)
         {
-            if (!std::filesystem::exists(source))
-            {
-                if (required)
-                    NOX_CORE_ERROR("Cannot reload scripts: built artifact '{}' does not exist. Build Facerun.sln first.",
-                                   source.string());
-                return !required;
-            }
-
             std::error_code error;
-            std::filesystem::copy_file(source, destination,
-                std::filesystem::copy_options::overwrite_existing, error);
-            if (error)
+            for (const char* extension : { ".dll", ".pdb", ".deps.json", ".runtimeconfig.json" })
             {
-                NOX_CORE_ERROR("Cannot stage script artifact '{}': {}", source.string(), error.message());
-                return false;
+                std::filesystem::path source = assembly;
+                source.replace_extension(extension);
+                if (!std::filesystem::exists(source, error))
+                {
+                    if (std::string_view(extension) == ".dll")
+                        return false;
+                    continue;
+                }
+                std::filesystem::copy_file(source, directory / source.filename(), std::filesystem::copy_options::overwrite_existing, error);
+                if (error)
+                {
+                    NOX_CORE_ERROR("Cannot stage script file '{}': {}", source.string(), error.message());
+                    return false;
+                }
             }
             return true;
         }
 
-        std::optional<ScriptGeneration> StageBuiltScripts(const std::filesystem::path& executableDirectory)
+        // Copies of the assemblies in a directory of their own: the loaded ones stay locked (Windows maps them), so the next
+        // build can still write its output.
+        std::optional<ScriptGeneration> StageAssemblies(const ScriptGeneration& built, const std::filesystem::path& stagingRoot)
         {
-            const std::filesystem::path repositoryRoot = FindRepositoryRoot(executableDirectory);
-            if (repositoryRoot.empty())
-            {
-                NOX_CORE_ERROR("Cannot reload scripts: Facerun.csproj was not found above '{}'",
-                               executableDirectory.string());
-                return std::nullopt;
-            }
-
-#ifdef NDEBUG
-            constexpr const char* configuration = "Release";
-#else
-            constexpr const char* configuration = "Debug";
-#endif
-            const std::filesystem::path coreBuildDirectory =
-                repositoryRoot / "NoxScriptCore/bin" / configuration / "net9.0";
-            const std::filesystem::path gameBuildDirectory =
-                repositoryRoot / "Facerun/Assets/Scripts/bin" / configuration;
-
             static uint64_t generation = 0;
-            const std::filesystem::path candidateDirectory =
-                repositoryRoot / "build/managed/HotReload" /
-                ("Generation-" + std::to_string(++generation));
-
+            if (generation == 0)
+            {
+                // Generations of an earlier session (the ones still locked stay; nothing needs them).
+                std::error_code ignored;
+                std::filesystem::remove_all(stagingRoot, ignored);
+            }
+            const std::filesystem::path directory = stagingRoot / ("Generation-" + std::to_string(++generation));
             std::error_code error;
-            std::filesystem::remove_all(candidateDirectory, error);
+            std::filesystem::create_directories(directory, error);
             if (error)
             {
-                NOX_CORE_ERROR("Cannot clear script candidate directory '{}': {}",
-                               candidateDirectory.string(), error.message());
+                NOX_CORE_ERROR("Cannot create the script staging directory '{}': {}", directory.string(), error.message());
                 return std::nullopt;
             }
-            std::filesystem::create_directories(candidateDirectory, error);
-            if (error)
-            {
-                NOX_CORE_ERROR("Cannot create script candidate directory '{}': {}",
-                               candidateDirectory.string(), error.message());
+            if (!CopyAssembly(built.CoreAssembly, directory) || !CopyAssembly(built.GameAssembly, directory))
                 return std::nullopt;
-            }
-
-            const bool copied =
-                CopyArtifact(coreBuildDirectory / "Nox.ScriptCore.dll",
-                             candidateDirectory / "Nox.ScriptCore.dll", true) &&
-                CopyArtifact(coreBuildDirectory / "Nox.ScriptCore.pdb",
-                             candidateDirectory / "Nox.ScriptCore.pdb", false) &&
-                CopyArtifact(coreBuildDirectory / "Nox.ScriptCore.deps.json",
-                             candidateDirectory / "Nox.ScriptCore.deps.json", false) &&
-                CopyArtifact(gameBuildDirectory / "Facerun.dll",
-                             candidateDirectory / "Facerun.dll", true) &&
-                CopyArtifact(gameBuildDirectory / "Facerun.pdb",
-                             candidateDirectory / "Facerun.pdb", false) &&
-                CopyArtifact(gameBuildDirectory / "Facerun.deps.json",
-                             candidateDirectory / "Facerun.deps.json", false) &&
-                CopyArtifact(gameBuildDirectory / "Facerun.runtimeconfig.json",
-                             candidateDirectory / "Facerun.runtimeconfig.json", false);
-            if (!copied) return std::nullopt;
-
-            ScriptGeneration build{
-                .CoreAssembly = candidateDirectory / "Nox.ScriptCore.dll",
-                .GameAssembly = candidateDirectory / "Facerun.dll"
-            };
-            NOX_CORE_INFO("Staged manually built C# assemblies as hot-reload generation {}", generation);
-            return build;
+            return ScriptGeneration{ directory / built.CoreAssembly.filename(), directory / built.GameAssembly.filename() };
         }
     }
 
     std::unique_ptr<IScriptBackend> ScriptEngine::s_Backend;
     std::unordered_map<UUID, std::vector<ScriptInstanceHandle>> ScriptEngine::s_Instances;
     std::filesystem::path ScriptEngine::s_ExecutableDirectory;
+    bool ScriptEngine::s_StageAssemblies = false;
     Scene* ScriptEngine::s_Scene = nullptr;
 
-    bool ScriptEngine::Initialize(const std::filesystem::path& executableDirectory)
+    bool ScriptEngine::Initialize(const std::filesystem::path& executableDirectory, bool stageAssemblies)
     {
         if (s_Backend) return true;
         s_ExecutableDirectory = executableDirectory;
+        s_StageAssemblies = stageAssemblies;
         s_Backend = std::make_unique<DotNetBackend>();
         if (!s_Backend->Initialize(executableDirectory))
         {
@@ -138,11 +129,87 @@ namespace Nox
         return LoadProjectAssembly();
     }
 
+    std::string ScriptEngine::GetProjectAssemblyName()
+    {
+        Ref<Project> project = Project::GetActive();
+        if (!project)
+            return {};
+        const std::filesystem::path& module = project->GetConfig().ScriptModulePath;
+        return module.empty() ? project->GetConfig().Name : module.stem().string();
+    }
+
+    std::filesystem::path ScriptEngine::GetProjectScriptsProject()
+    {
+        if (!Project::GetActive())
+            return {};
+        const std::filesystem::path scripts = Project::GetActiveAssetDirectory() / "Scripts";
+        const std::string name = GetProjectAssemblyName();
+        std::error_code error;
+        if (!std::filesystem::is_directory(scripts, error))
+            return {};
+        std::filesystem::path first;
+        for (auto it = std::filesystem::recursive_directory_iterator(scripts, error); !error && it != std::filesystem::recursive_directory_iterator(); it.increment(error))
+        {
+            const std::filesystem::path& path = it->path();
+            const std::string folder = path.filename().string();
+            if (it->is_directory() && (folder == "bin" || folder == "obj"))
+            {
+                it.disable_recursion_pending();
+                continue;
+            }
+            if (path.extension() != ".csproj")
+                continue;
+            if (path.stem() == name)
+                return path;
+            if (first.empty())
+                first = path;
+        }
+        return first;
+    }
+
+    bool ScriptEngine::FindAssemblies(std::filesystem::path& coreAssembly, std::filesystem::path& gameAssembly)
+    {
+        const std::filesystem::path repository = FindRepositoryRoot(s_ExecutableDirectory);
+        coreAssembly = Newest({ s_ExecutableDirectory / "Scripts/Core/Nox.ScriptCore.dll",
+                                repository.empty() ? std::filesystem::path() : repository / "NoxScriptCore/bin" / kConfiguration / "net9.0/Nox.ScriptCore.dll" });
+
+        const std::string name = GetProjectAssemblyName();
+        if (name.empty())
+            return false;
+        const std::string file = name + ".dll";
+        std::filesystem::path fromConfig;
+        if (Project::GetActive() && !Project::GetActive()->GetConfig().ScriptModulePath.empty())
+            fromConfig = Project::GetActiveAssetDirectory() / Project::GetActive()->GetConfig().ScriptModulePath;
+        const std::filesystem::path csproj = GetProjectScriptsProject();
+        gameAssembly = Newest({ s_ExecutableDirectory / "Scripts" / name / file, fromConfig,
+                                csproj.empty() ? std::filesystem::path() : csproj.parent_path() / "bin" / kConfiguration / file });
+
+        if (coreAssembly.empty())
+            NOX_CORE_ERROR("Scripts: Nox.ScriptCore.dll was not found (next to the executable in Scripts/Core, or built in NoxScriptCore)");
+        if (gameAssembly.empty())
+            NOX_CORE_WARN("Scripts: the project's script assembly {} was not found{}", file,
+                          csproj.empty() ? std::string(" (no .csproj in the project's Assets/Scripts)") : " -- build " + csproj.generic_string() + " first");
+        return !coreAssembly.empty() && !gameAssembly.empty();
+    }
+
     bool ScriptEngine::LoadProjectAssembly()
     {
-        return s_Backend && s_Backend->LoadModule(
-            s_ExecutableDirectory / "Scripts/Core/Nox.ScriptCore.dll",
-            s_ExecutableDirectory / "Scripts/Facerun/Facerun.dll");
+        if (!s_Backend)
+            return false;
+        std::filesystem::path core, game;
+        if (!FindAssemblies(core, game))
+            return false;
+        // The editor loads copies (the build overwrites its output while the editor runs); a packaged game loads them where they are.
+        if (s_StageAssemblies && Project::GetActive())
+        {
+            const auto staged = StageAssemblies({ core, game }, Project::GetActiveProjectDirectory() / "Intermediate/Scripts");
+            if (!staged)
+                return false;
+            core = staged->CoreAssembly;
+            game = staged->GameAssembly;
+        }
+        NOX_CORE_INFO("Scripts: loading {}", game.generic_string());
+        return s_Backend->LoadModule(core, game);
     }
 
     void ScriptEngine::Shutdown()
@@ -154,8 +221,11 @@ namespace Nox
 
     bool ScriptEngine::ReloadAssembly()
     {
-        const auto build = StageBuiltScripts(s_ExecutableDirectory);
-        if (!build || !s_Backend) return false;
+        if (!s_Backend || !Project::GetActive()) return false;
+        std::filesystem::path core, game;
+        if (!FindAssemblies(core, game)) return false;
+        const auto build = StageAssemblies({ core, game }, Project::GetActiveProjectDirectory() / "Intermediate/Scripts");
+        if (!build) return false;
 
         // The jobs the scripts started run code of the assemblies about to go: they finish first, or the reload waits.
         if (!s_Backend->WaitForJobs(2000))

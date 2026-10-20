@@ -16,9 +16,18 @@ namespace Nox
     class ScriptEngine
     {
     public:
-        static bool Initialize(const std::filesystem::path& executableDirectory);
+        // stageAssemblies (the editor): load copies of the assemblies, so a build can overwrite its output while they are loaded.
+        static bool Initialize(const std::filesystem::path& executableDirectory, bool stageAssemblies = false);
+        static bool IsInitialized() { return s_Backend != nullptr; }
         static void Shutdown();
+        // The active project's script assembly (and Nox.ScriptCore): the newest of the one next to the executable
+        // (Scripts/<Name>/<Name>.dll: the editor's CMake build, a packaged game), the project's ScriptModulePath, and the
+        // project's own build (Assets/Scripts/bin/<config>/<Name>.dll).
         static bool LoadProjectAssembly();
+        // The project's script assembly name: the file name of ProjectConfig::ScriptModulePath, else the project's name.
+        static std::string GetProjectAssemblyName();
+        // The project's C# project: the .csproj under Assets/Scripts (the one named like the assembly, else the first).
+        static std::filesystem::path GetProjectScriptsProject();
         static bool ReloadAssembly();
         static void OnRuntimeStart(Scene* scene);
         static void OnRuntimeStop();
@@ -36,10 +45,12 @@ namespace Nox
         // Exposed field values of an entity's script instances: class -> field -> value (kept across a hot reload).
         using FieldSnapshot = std::unordered_map<std::string, std::unordered_map<std::string, ScriptValue>>;
         static void CreateInstances(Entity entity, const FieldSnapshot* restore);
+        static bool FindAssemblies(std::filesystem::path& coreAssembly, std::filesystem::path& gameAssembly);
 
         static std::unique_ptr<IScriptBackend> s_Backend;
         static std::unordered_map<UUID, std::vector<ScriptInstanceHandle>> s_Instances;
         static std::filesystem::path s_ExecutableDirectory;
+        static bool s_StageAssemblies;
         static Scene* s_Scene;
     };
 }

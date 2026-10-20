@@ -181,7 +181,7 @@ namespace Nox
         AssetPreviewRenderer::SetRenderer(m_Renderer);
         AssetPreviewRenderer::Get().SetSphereProvider([this]() { return GetShapeAsset(PrimitiveShape::Sphere); });
 
-        if (!ScriptEngine::Initialize(SDL_GetBasePath()))
+        if (!ScriptEngine::Initialize(SDL_GetBasePath(), true))
             NOX_CORE_ERROR("Failed to initialize the .NET scripting backend");
     }
 
@@ -246,6 +246,7 @@ namespace Nox
         if (!Project::GetActive())
             return; // closing: no project was opened
         UpdatePrefabModeDirty();
+        m_ScriptBuilder.Update();
 
         // Game scripts read the mouse only over the viewport and the keys only while it is the target: a click in the hierarchy
         // or a key typed in a text field is not the game's.
@@ -601,10 +602,16 @@ namespace Nox
 
             if (ImGui::BeginMenu("Script"))
             {
+                if (ImGui::MenuItem("Build and Reload", "Ctrl+B", false, !m_ScriptBuilder.IsBuilding()))
+                    m_ScriptBuilder.RequestBuild();
                 if (ImGui::MenuItem("Reload assembly", "Ctrl+R"))
                 {
                     ScriptEngine::ReloadAssembly();
                 }
+                ImGui::MenuItem("Build on Save", nullptr, &m_ScriptBuilder.AutoBuild);
+                ImGui::SetItemTooltip("Saving a .cs file of the project builds its scripts and reloads them a moment later.");
+                if (!m_ScriptBuilder.GetStatus().empty())
+                    ImGui::TextDisabled("%s", m_ScriptBuilder.GetStatus().c_str());
 
                 ImGui::EndMenu();
             }
@@ -1846,6 +1853,10 @@ namespace Nox
                 ScriptEngine::ReloadAssembly();
             }
             break;
+        case SDL_SCANCODE_B:
+            if (control)
+                m_ScriptBuilder.RequestBuild();
+            break;
         case SDL_SCANCODE_KP_1:
             if (m_ViewportHovered)
                 SetViewMode(control ? EditorViewMode::Back : EditorViewMode::Front);
@@ -2293,6 +2304,10 @@ namespace Nox
             m_EditorCamera.ApplyWorldUnitDefaults(); // the project's world unit is only known now (U6)
             m_Renderer->ApplyQualitySetting(Project::GetActive()->GetConfig().RenderQuality);
             Project::GetActive()->GetEditorAssetManager()->Init();
+            // The project's scripts (at startup ScriptEngine::Initialize loads them, after this).
+            if (ScriptEngine::IsInitialized())
+                ScriptEngine::LoadProjectAssembly();
+            m_ScriptBuilder.SetProject(ScriptEngine::GetProjectScriptsProject());
 
             AssetHandle startScene = Project::GetActive()->GetConfig().StartScene;
             if (startScene)

@@ -6,6 +6,7 @@
 #include "NoxCore/Core/Layer.h"
 #include "NoxCore/Events/InputEvents.h"
 #include "EditorHistory.h"
+#include "ScriptBuilder.h"
 #include "Panels/SceneHierarchyPanel.h"
 #include "Panels/ContentBrowserPanel.h"
 #include "Panels/RenderGraphPanel.h"
@@ -66,6 +67,8 @@ namespace Nox
         void SaveSceneAs();
         // File > Package Game (GamePackager): the output folder, every scene or the start scene, and the last result.
         void UI_PackageGame();
+        // The project's C# scripts: built (dotnet) and hot-reloaded on request or after a source changed.
+        ScriptBuilder m_ScriptBuilder;
         bool m_ShowPackageGame = false;
         char m_PackageOutput[512] = {};
         bool m_PackageAllScenes = false;
