@@ -20,6 +20,8 @@ struct VSOutput
     uint32_t materialIndex;
     int entityID;
     float4 color;
+    float4 outlineColor;
+    float outlineThickness;
 };
 
 [shader("mesh")]
@@ -56,6 +58,8 @@ void meshMain
 		vertices[i].pos = mul(ubo.nonJitteredProj, mul(ubo.view, worldPos));
         vertices[i].texCooord = uv;
         vertices[i].color = text.color;
+        vertices[i].outlineColor = text.outlineColor;
+        vertices[i].outlineThickness = text.outlineThickness;
         vertices[i].materialIndex =  text.materialIndex;
         vertices[i].entityID = text.entityID;
 	}
@@ -96,13 +100,19 @@ FSOutput fragMain(VSOutput vertIn, uniform PushConstantQuad pushConstant)
     float3 msd = img.rgb;
     float sd = median3(msd.r, msd.g, msd.b);
 
-    float screenPxDistance = screenPxRange(texHandle, vertIn.texCooord) * (sd - 0.5);
+    const float pxRange = screenPxRange(texHandle, vertIn.texCooord);
+    float screenPxDistance = pxRange * (sd - 0.5);
     float opacity = clamp(screenPxDistance + 0.5, 0.0, 1.0);
-    if(opacity == 0.0)
+
+    // The outline: the same distance field read further out (up to the edge of its range), the fill over it.
+    float outlineOpacity = 0.0;
+    if (vertIn.outlineThickness > 0.0)
+        outlineOpacity = clamp(pxRange * (sd - 0.5 + 0.5 * saturate(vertIn.outlineThickness)) + 0.5, 0.0, 1.0);
+    if (opacity == 0.0 && outlineOpacity == 0.0)
         discard;
 
-    float4 bgColor = float4(0.0);
-    output.color = lerp(bgColor, vertIn.color, opacity);
+    const float4 outline = float4(vertIn.outlineColor.rgb, vertIn.outlineColor.a * outlineOpacity);
+    output.color = lerp(outline, vertIn.color, opacity);
     if(output.color.a == 0.0)
         discard;
 

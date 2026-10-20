@@ -88,6 +88,10 @@ namespace Nox
             glm::vec4 Color{ 1.0f };
             float Kerning = 0.0f;
             float LineSpacing = 0.0f;
+            glm::vec4 OutlineColor{ 0.0f, 0.0f, 0.0f, 1.0f };
+            float OutlineThickness = 0.0f; // 0..1 of the font's distance range
+            glm::vec4 BackgroundColor{ 0.0f }; // a rectangle behind the text's bounds (alpha 0: none)
+            float BackgroundPadding = 0.1f;    // its margin, in em
         };
         
         void DrawString(const std::string& string, Ref<Font> font, const glm::mat4& transform, const TextParams& textParams, int entityID = -1);

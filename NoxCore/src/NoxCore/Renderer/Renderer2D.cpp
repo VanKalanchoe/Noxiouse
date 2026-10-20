@@ -1,6 +1,7 @@
 #include "Renderer2D.h"
 
 #include <algorithm>
+#include <cfloat>
 #include <cmath>
 
 #include "NoxCore/Asset/AssetManager.h"
@@ -552,6 +553,8 @@ namespace Nox
         double y = 0.0;
 
         const float spaceGlyphAdvance = fontGeometry.getGlyph(' ')->getAdvance();
+        // The glyphs' bounds (for the background) and where they start in the batch.
+        glm::vec2 boundsMin(FLT_MAX), boundsMax(-FLT_MAX);
 
         for (size_t i = 0; i < string.size(); i++)
         {
@@ -620,8 +623,13 @@ namespace Nox
             instance.texMin = texCoordMin;
             instance.texMax = texCoordMax;
             instance.color = textParams.Color;
+            instance.outlineColor = textParams.OutlineColor;
+            instance.outlineThickness = textParams.OutlineThickness;
             instance.materialIndex = fontAtlas->GetDescriptorIndexSlot();
             instance.entityID = entityID;
+            instance.pad0 = 0;
+            boundsMin = glm::min(boundsMin, quadMin);
+            boundsMax = glm::max(boundsMax, quadMax);
 
             (m_ScreenSpace ? m_data.screenTextDatas : m_data.textDatas).emplace_back(instance);
 
@@ -633,6 +641,16 @@ namespace Nox
 
                 x += fsScale * advance + textParams.Kerning;
             }
+        }
+
+        // The background: a rectangle over the glyphs' bounds and the margin, in the text's plane (quads draw before text).
+        if (textParams.BackgroundColor.a > 0.0f && boundsMax.x >= boundsMin.x)
+        {
+            const glm::vec2 margin(std::max(textParams.BackgroundPadding, 0.0f));
+            const glm::vec2 center = (boundsMin + boundsMax) * 0.5f;
+            const glm::vec2 size = boundsMax - boundsMin + margin * 2.0f;
+            DrawQuad(transform * glm::translate(glm::mat4(1.0f), glm::vec3(center, 0.0f)) * glm::scale(glm::mat4(1.0f), glm::vec3(size, 1.0f)),
+                     textParams.BackgroundColor, entityID);
         }
     }
 

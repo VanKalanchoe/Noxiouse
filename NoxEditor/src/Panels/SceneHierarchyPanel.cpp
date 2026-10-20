@@ -2625,6 +2625,14 @@ namespace Nox
             ImGui::ColorEdit4("Color", glm::value_ptr(component.Color));
             ImGui::DragFloat("Kerning", &component.Kerning, 0.025f);
             ImGui::DragFloat("Line Spacing", &component.LineSpacing, 0.025f);
+            ImGui::SliderFloat("Outline", &component.OutlineThickness, 0.0f, 1.0f, "%.2f");
+            ImGui::SetItemTooltip("Outline thickness around the glyphs (0 = none; 1 = as thick as the font atlas allows)");
+            if (component.OutlineThickness > 0.0f)
+                ImGui::ColorEdit4("Outline Color", glm::value_ptr(component.OutlineColor));
+            ImGui::ColorEdit4("Background", glm::value_ptr(component.BackgroundColor));
+            ImGui::SetItemTooltip("A rectangle behind the text (alpha 0 = none)");
+            if (component.BackgroundColor.a > 0.0f)
+                ImGui::DragFloat("Background Margin", &component.BackgroundPadding, 0.01f, 0.0f, 10.0f, "%.2f em");
         });
     }
 

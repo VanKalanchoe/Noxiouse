@@ -762,6 +762,12 @@ namespace Nox
         glm::vec4 Color{ 1.0f };
         float Kerning = 0.0f;
         float LineSpacing = 0.0f;
+        // An outline around the glyphs (thickness 0..1 of the font's distance range; 0 = none) and a rectangle behind the text
+        // (alpha 0 = none), its margin in em.
+        glm::vec4 OutlineColor{ 0.0f, 0.0f, 0.0f, 1.0f };
+        float OutlineThickness = 0.0f;
+        glm::vec4 BackgroundColor{ 0.0f };
+        float BackgroundPadding = 0.1f;
     };
     
     template<typename... Component>

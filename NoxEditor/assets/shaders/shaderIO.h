@@ -1947,12 +1947,13 @@ struct TextData
     vec2 texMin;
     vec2 texMax;
     vec4 color;
+    vec4 outlineColor;
     uint32_t materialIndex;
+    float outlineThickness; // 0..1 of the atlas' distance range, 0 = no outline
 
-    // TODO: bg color for outline/bg
-    
     // Editor-only
     int entityID;
+    int pad0;
 };
 
 struct PushConstantLine

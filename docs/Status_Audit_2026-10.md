@@ -136,7 +136,8 @@ for history. File references are to the code as of this audit.
   physics extensions; level import of a skeletal model's clips.
 
 **Other**
-- Metal backend (throws); text: outline / background color (fonts load from memory since 2026-10-20); Box2D physics materials.
+- Metal backend (throws); Box2D physics materials. (Built 2026-10-20: text outline and background rectangle; fonts load from
+  memory.)
 
 ### 0.4 Docs that no longer match the code
 

@@ -986,6 +986,16 @@ namespace Nox
             out << YAML::Key << "Color" << YAML::Value << textComponent.Color;
             out << YAML::Key << "Kerning" << YAML::Value << textComponent.Kerning;
             out << YAML::Key << "LineSpacing" << YAML::Value << textComponent.LineSpacing;
+            if (textComponent.OutlineThickness > 0.0f)
+            {
+                out << YAML::Key << "OutlineColor" << YAML::Value << textComponent.OutlineColor;
+                out << YAML::Key << "OutlineThickness" << YAML::Value << textComponent.OutlineThickness;
+            }
+            if (textComponent.BackgroundColor.a > 0.0f)
+            {
+                out << YAML::Key << "BackgroundColor" << YAML::Value << textComponent.BackgroundColor;
+                out << YAML::Key << "BackgroundPadding" << YAML::Value << textComponent.BackgroundPadding;
+            }
 
             out << YAML::EndMap; // TextComponent
         }
@@ -1978,6 +1988,14 @@ namespace Nox
             tc.Color = textComponent["Color"].as<glm::vec4>();
             tc.Kerning = textComponent["Kerning"].as<float>();
             tc.LineSpacing = textComponent["LineSpacing"].as<float>();
+            if (textComponent["OutlineColor"])
+                tc.OutlineColor = textComponent["OutlineColor"].as<glm::vec4>();
+            if (textComponent["OutlineThickness"])
+                tc.OutlineThickness = textComponent["OutlineThickness"].as<float>();
+            if (textComponent["BackgroundColor"])
+                tc.BackgroundColor = textComponent["BackgroundColor"].as<glm::vec4>();
+            if (textComponent["BackgroundPadding"])
+                tc.BackgroundPadding = textComponent["BackgroundPadding"].as<float>();
         }
     }
 

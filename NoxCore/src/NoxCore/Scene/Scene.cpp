@@ -1878,7 +1878,9 @@ namespace Nox
                 }
                 if (!font)
                     font = Font::GetDefault();
-                m_renderer2D->DrawString(text.TextString, font, transform.WorldMatrix, { text.Color, text.Kerning, text.LineSpacing },
+                m_renderer2D->DrawString(text.TextString, font, transform.WorldMatrix,
+                                         { text.Color, text.Kerning, text.LineSpacing, text.OutlineColor, text.OutlineThickness, text.BackgroundColor,
+                                           text.BackgroundPadding },
                                          static_cast<int>(entity));
             }
         }
