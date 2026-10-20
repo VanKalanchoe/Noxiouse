@@ -1647,7 +1647,7 @@ namespace Nox
                 (
                     bc2d.Size.x * transform.Scale.x,
                     bc2d.Size.y * transform.Scale.y,
-                    b2Vec2{bc2d.Offset.x, bc2d.Offset.y},
+                    b2Vec2{bc2d.Offset.x * transform.Scale.x, bc2d.Offset.y * transform.Scale.y}, // the offset scales with the entity
                     b2MakeRot(0.0f)
                 );
 
@@ -1662,8 +1662,7 @@ namespace Nox
             {
                 auto& cc2d = entity.GetComponent<CircleCollider2DComponent>();
 
-                // A circle stays a circle: the larger of the two scales (a non-uniform scale cannot squash it), and the offset
-                // scaled like the box's.
+                // A circle stays a circle: the larger of the two scales (a non-uniform scale cannot squash it); the offset scales.
                 b2Circle circleShape;
                 circleShape.center = b2Vec2{cc2d.Offset.x * transform.Scale.x, cc2d.Offset.y * transform.Scale.y};
                 circleShape.radius = std::max(std::abs(transform.Scale.x), std::abs(transform.Scale.y)) * cc2d.Radius;
