@@ -27,11 +27,12 @@ namespace Nox
         std::string GetInstanceClass(ScriptInstanceHandle instance) const override;
         void DestroyInstance(ScriptInstanceHandle instance) override;
         void Invoke(ScriptInstanceHandle instance, ScriptCallback callback, float argument = 0.0f) override;
+        bool Implements(ScriptInstanceHandle instance, ScriptCallback callback) const override;
         void InvokeWithString(ScriptInstanceHandle instance, std::string_view method, std::string_view argument) override;
         void SetSceneContext(Scene* scene) override;
 
     private:
-        struct Instance { uint32_t Generation; Coral::ManagedObject Object; std::string ClassName; };
+        struct Instance { uint32_t Generation; Coral::ManagedObject Object; std::string ClassName; int32_t CallbackMask = 0; };
         void ClearModule();
         void RegisterInternalCalls(Coral::ManagedAssembly& coreAssembly);
 
@@ -41,6 +42,7 @@ namespace Nox
         Coral::ManagedAssembly* m_GameAssembly = nullptr;
         std::unordered_map<std::string, const Coral::Type*> m_Types;
         std::unordered_map<std::string, std::vector<ScriptFieldInfo>> m_ExposedFields;
+        std::unordered_map<std::string, int32_t> m_CallbackMasks; // per class (EntityBehaviour.GetCallbackMask)
         std::unordered_map<uint64_t, std::unique_ptr<Instance>> m_Instances;
         std::filesystem::path m_CorePath, m_GamePath;
         uint32_t m_LoadContextCount = 0; // names each load context apart: the old one is still loaded while the new one loads

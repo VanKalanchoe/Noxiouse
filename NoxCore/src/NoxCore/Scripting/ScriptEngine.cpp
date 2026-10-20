@@ -289,6 +289,40 @@ namespace Nox
                 s_Backend->Invoke(instance, ScriptCallback::Update, deltaTime);
     }
 
+    bool ScriptEngine::OnFixedUpdateEntity(Entity entity, float fixedDeltaTime)
+    {
+        auto it = s_Instances.find(entity.GetUUID());
+        bool called = false;
+        if (s_Backend && it != s_Instances.end())
+        {
+            for (auto instance : it->second)
+            {
+                if (!s_Backend->Implements(instance, ScriptCallback::FixedUpdate))
+                    continue;
+                s_Backend->Invoke(instance, ScriptCallback::FixedUpdate, fixedDeltaTime);
+                called = true;
+            }
+        }
+        return called;
+    }
+
+    bool ScriptEngine::OnLateUpdateEntity(Entity entity, float deltaTime)
+    {
+        auto it = s_Instances.find(entity.GetUUID());
+        bool called = false;
+        if (s_Backend && it != s_Instances.end())
+        {
+            for (auto instance : it->second)
+            {
+                if (!s_Backend->Implements(instance, ScriptCallback::LateUpdate))
+                    continue;
+                s_Backend->Invoke(instance, ScriptCallback::LateUpdate, deltaTime);
+                called = true;
+            }
+        }
+        return called;
+    }
+
     void ScriptEngine::OnAnimationEvent(Entity entity, const std::string& name)
     {
         auto it = s_Instances.find(entity.GetUUID());

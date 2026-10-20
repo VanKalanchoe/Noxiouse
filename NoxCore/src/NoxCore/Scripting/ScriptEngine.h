@@ -25,6 +25,9 @@ namespace Nox
         static void OnCreateEntity(Entity entity);
         static void OnDestroyEntity(Entity entity);
         static void OnUpdateEntity(Entity entity, float deltaTime);
+        // The optional callbacks; false when none of the entity's scripts implements it (nothing was called).
+        static bool OnFixedUpdateEntity(Entity entity, float fixedDeltaTime);
+        static bool OnLateUpdateEntity(Entity entity, float deltaTime);
         // An animation notify (AnimationSequence::Notifies) the entity's animator crossed: OnAnimationEvent(name) on its scripts.
         static void OnAnimationEvent(Entity entity, const std::string& name);
         static bool EntityClassExists(std::string_view fullName);

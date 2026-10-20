@@ -670,6 +670,7 @@ namespace Nox
         m_Instances.clear();
         m_Types.clear();
         m_ExposedFields.clear();
+        m_CallbackMasks.clear();
         m_CoreAssembly = nullptr;
         m_GameAssembly = nullptr;
         if (m_LoadContext)
@@ -753,6 +754,10 @@ namespace Nox
         instance->ClassName = it->first;
         instance->Object = it->second->CreateInstance();
         instance->Object.SetFieldValue("EntityID", static_cast<uint64_t>(entity));
+        auto mask = m_CallbackMasks.find(instance->ClassName);
+        if (mask == m_CallbackMasks.end())
+            mask = m_CallbackMasks.emplace(instance->ClassName, instance->Object.InvokeMethod<int32_t>("GetCallbackMask")).first;
+        instance->CallbackMask = mask->second;
         const uint64_t id = m_NextInstanceID++;
         m_Instances.emplace(id, std::move(instance));
         return { id, m_Generation };
@@ -837,7 +842,27 @@ namespace Nox
             case ScriptCallback::Update: it->second->Object.InvokeMethod("OnUpdate", argument); break;
             case ScriptCallback::Destroy: it->second->Object.InvokeMethod("OnDestroy"); break;
             case ScriptCallback::AfterReload: it->second->Object.InvokeMethod("OnAfterReload"); break;
+            case ScriptCallback::FixedUpdate:
+                if (it->second->CallbackMask & 1)
+                    it->second->Object.InvokeMethod("OnFixedUpdate", argument);
+                break;
+            case ScriptCallback::LateUpdate:
+                if (it->second->CallbackMask & 2)
+                    it->second->Object.InvokeMethod("OnLateUpdate", argument);
+                break;
         }
+    }
+
+    bool DotNetBackend::Implements(ScriptInstanceHandle handle, ScriptCallback callback) const
+    {
+        auto it = m_Instances.find(handle.ID);
+        if (it == m_Instances.end() || handle.Generation != m_Generation)
+            return false;
+        if (callback == ScriptCallback::FixedUpdate)
+            return (it->second->CallbackMask & 1) != 0;
+        if (callback == ScriptCallback::LateUpdate)
+            return (it->second->CallbackMask & 2) != 0;
+        return true;
     }
 
     void DotNetBackend::InvokeWithString(ScriptInstanceHandle handle, std::string_view method, std::string_view argument)

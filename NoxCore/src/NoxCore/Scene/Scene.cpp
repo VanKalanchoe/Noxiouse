@@ -635,6 +635,19 @@ namespace Nox
                 auto scripts = m_Registry.view<ScriptComponent>();
                 scriptEntities.assign(scripts.begin(), scripts.end());
             }
+            // OnFixedUpdate at 60 Hz (as many steps as the frame's time holds, at most 5: a long hitch does not snowball), then
+            // OnUpdate once.
+            constexpr float fixedStep = 1.0f / 60.0f;
+            m_FixedTimeAccumulator = std::min(m_FixedTimeAccumulator + static_cast<float>(ts), 5.0f * fixedStep);
+            while (m_FixedTimeAccumulator >= fixedStep)
+            {
+                m_FixedTimeAccumulator -= fixedStep;
+                for (entt::entity handle : scriptEntities)
+                {
+                    if (m_Registry.valid(handle))
+                        ScriptEngine::OnFixedUpdateEntity(Entity(handle, this), fixedStep);
+                }
+            }
             for (entt::entity handle : scriptEntities)
             {
                 if (m_Registry.valid(handle))
@@ -665,6 +678,27 @@ namespace Nox
                 if (m_Registry.valid(entity))
                     ScriptEngine::OnAnimationEvent(Entity(entity, this), name);
             }
+
+            // OnLateUpdate: after physics, animation and the transforms of this frame. What it moves is propagated again, so
+            // a following camera shows where its target is this frame, not the one before.
+            bool lateUpdated = false;
+            std::vector<entt::entity> lateEntities;
+            {
+                auto scripts = m_Registry.view<ScriptComponent>();
+                lateEntities.assign(scripts.begin(), scripts.end());
+            }
+            for (entt::entity handle : lateEntities)
+            {
+                if (m_Registry.valid(handle))
+                    lateUpdated |= ScriptEngine::OnLateUpdateEntity(Entity(handle, this), static_cast<float>(ts));
+            }
+            if (lateUpdated)
+            {
+                SceneGraph::UpdateWorldTransforms(m_Registry, m_EntityMap, m_CommandBuffers, m_MovedEntities);
+                ApplySyncPoint();
+            }
+            StartPendingScripts();
+            FlushPendingDestroy();
         }
         SyncGpuScene();
 

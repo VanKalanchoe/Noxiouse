@@ -172,6 +172,7 @@ namespace Nox
         std::unordered_set<UUID> m_PendingPhysics3D;
         bool m_IsPaused = false;
         int m_StepFrames = 0;
+        float m_FixedTimeAccumulator = 0.0f; // seconds owed to OnFixedUpdate
         bool m_AssetReferencesChanged = false;
 
         std::unordered_map<UUID, entt::entity> m_EntityMap;

@@ -10,7 +10,7 @@
 namespace Nox
 {
     enum class ScriptLanguage : uint8_t { DotNet, Lua };
-    enum class ScriptCallback : uint8_t { Create, Update, Destroy, AfterReload };
+    enum class ScriptCallback : uint8_t { Create, Update, Destroy, AfterReload, FixedUpdate, LateUpdate };
     enum class ScriptFieldType : uint8_t { Bool, Int, UInt, Long, ULong, Float, Double, String, Vector3, Entity };
 
     struct ScriptInstanceHandle

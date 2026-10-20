@@ -36,6 +36,8 @@ namespace Nox
         virtual std::string GetInstanceClass(ScriptInstanceHandle instance) const = 0;
         virtual void DestroyInstance(ScriptInstanceHandle instance) = 0;
         virtual void Invoke(ScriptInstanceHandle instance, ScriptCallback callback, float argument = 0.0f) = 0;
+        // Whether the instance's class implements an optional callback (FixedUpdate, LateUpdate); the others always count.
+        virtual bool Implements(ScriptInstanceHandle instance, ScriptCallback callback) const = 0;
         // A method of the script taking one string (e.g. OnAnimationEvent(string name)).
         virtual void InvokeWithString(ScriptInstanceHandle instance, std::string_view method, std::string_view argument) = 0;
         virtual void SetSceneContext(Scene* scene) = 0;
