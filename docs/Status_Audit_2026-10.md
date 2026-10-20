@@ -103,7 +103,7 @@ for history. File references are to the code as of this audit.
   (New-project flow: built 2026-10-20, no project templates.)
 
 **Animation**
-- Sync markers (A2); notifies only in graph mode; graph preview and loop ranges (A7); double-click a skeletal mesh to preview;
+- Sync markers (A2); (notifies in single-clip mode: built 2026-10-20); graph preview and loop ranges (A7); double-click a skeletal mesh to preview;
   Timeline curve editor, material tracks, auto-key, sub-sequences / camera cuts (A8); audio graph (A9).
 - Variable node input pins; per-instance skeleton poses (the Skeleton asset's nodes are shared); sockets; clip / graph picker
   filtered by skeleton; jump / fall states (C1, needs clips); multi-skin models spawn as nodes (C3).

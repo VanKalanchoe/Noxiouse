@@ -1241,6 +1241,11 @@ namespace Nox
                 animatorComp.GraphInstance.RootBone = animatorComp.RootBone;
             }
 
+            // Single-clip mode's playhead before this step: the notifies it crosses fire like in graph mode.
+            const bool clipMode = animatorComp.Graph == 0 && animatorComp.Animation != 0;
+            const float clipTimeBefore = animatorComp.Animator.GetCurrentAnimationTime();
+            const Ref<AnimationSequence> clipBefore = animatorComp.Animator.GetCurrentAnimation();
+
             // 2. Legacy self-contained skeleton evaluation. Imports with a node table skin from the
             // joint entities instead (see GetBoneTransforms), so the skeleton isn't evaluated twice.
             if (animatorComp.Skeleton != 0 && animatorComp.NodeEntities.empty())
@@ -1370,6 +1375,18 @@ namespace Nox
                         if (auto* dirty = m_Registry.try_get<DirtyTransformComponent>(nodeEntity))
                             dirty->isDirty = true;
                     }
+                }
+            }
+
+            // Single-clip mode's notifies: what the playhead crossed this step (across the end when it looped).
+            if (clipMode && animatorComp.Playing && clipBefore && clipBefore == animatorComp.Animator.GetCurrentAnimation())
+            {
+                const float clipTimeAfter = animatorComp.Animator.GetCurrentAnimationTime();
+                if (clipTimeAfter != clipTimeBefore)
+                {
+                    const bool forward = animatorComp.Animator.GetPlaybackSpeed() >= 0.0f;
+                    const bool wrapped = forward ? clipTimeAfter < clipTimeBefore : clipTimeAfter > clipTimeBefore;
+                    CollectCrossedNotifies(*clipBefore, clipTimeBefore, clipTimeAfter, wrapped, animatorComp.FiredNotifies);
                 }
             }
         }
