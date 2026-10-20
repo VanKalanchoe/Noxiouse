@@ -873,6 +873,14 @@ namespace Nox
                               "hidden behind others show too. Rough glass keeps the blurred screen-space refraction. Needs ray tracing.");
         ImGui::Unindent();
         ImGui::EndDisabled();
+
+        bool oit = m_Renderer->getOITEnabled();
+        if (ImGui::Checkbox("Order-Independent Transparency", &oit))
+            m_Renderer->setOITEnabled(oit);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Transparent surfaces and alpha-blended particles blend in any order (weighted blended OIT):\n"
+                              "overlapping layers (foliage cards, smoke, glass behind glass) stop popping as the camera moves.\n"
+                              "Layers of very different colors mix toward their average. Off: sorted back to front by object.");
         
         bool jitter = m_Renderer->getCameraJitterEnabled();
         if (ImGui::Checkbox("Camera Subpixel Jitter (R2)", &jitter))

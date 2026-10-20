@@ -259,6 +259,7 @@ namespace Nox
         watchShader("assets/shaders/AutoExposure.slang", "AutoExposure", [this]() { createAutoExposurePipelines(true); });
         watchShader("assets/shaders/ColorPyramid.slang", "ColorPyramid", [this]() { createColorPyramidPipelines(true); });
         watchShader("assets/shaders/Particles.slang", "Particles", [this]() { createParticlePipeline(true); });
+        watchShader("assets/shaders/OITComposite.slang", "OITComposite", [this]() { createOITCompositePipeline(true); });
         watchShader("assets/shaders/TextureInspect.slang", "TextureInspect", [this]() { createTextureInspectPipeline(true); });
         watchShader("assets/shaders/InstanceCulling.slang", "InstanceCulling", [this]() { createInstanceCullingPipelines(true); });
         watchShader("assets/shaders/HiZBuild.slang", "HiZBuild", [this]() { createHiZBuildPipeline(true); });
@@ -444,6 +445,7 @@ namespace Nox
         createAutoExposurePipelines(false);
         createColorPyramidPipelines(false);
         createParticlePipeline(false);
+        createOITCompositePipeline(false);
         createTextureInspectPipeline(false);
         createInstanceCullingPipelines(false);
         createHiZBuildPipeline(false);
@@ -1748,6 +1750,10 @@ namespace Nox
             .sourcePath = "assets/shaders/Material_Unlit_Mesh.slang"
         });
         m_unlitPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+
+        desc.colorFormats = { NRI::ImageFormat::R16G16B16A16_SFLOAT, NRI::ImageFormat::R16_SFLOAT, NRI::ImageFormat::R32SINT };
+        desc.shaders.back().entryPoint = "fragMainOIT";
+        m_unlitOITPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
     void Renderer::createTransparentLitPipeline(bool forceCompile)
@@ -1776,6 +1782,10 @@ namespace Nox
             .sourcePath = "assets/shaders/Material_TransparentLit_Mesh.slang"
         });
         m_transparentLitPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+
+        desc.colorFormats = { NRI::ImageFormat::R16G16B16A16_SFLOAT, NRI::ImageFormat::R16_SFLOAT, NRI::ImageFormat::R32SINT };
+        desc.shaders.back().entryPoint = "fragMainOIT";
+        m_transparentLitOITPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
     void Renderer::createPresentPipeline(bool forceCompile)
@@ -2224,6 +2234,20 @@ namespace Nox
         desc.shaders.push_back({ .stage = NRI::ShaderStage::Mesh, .entryPoint = "meshMain", .sourcePath = "assets/shaders/Particles.slang" });
         desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "fragMain", .sourcePath = "assets/shaders/Particles.slang" });
         m_particlePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+
+        desc.colorFormats = { NRI::ImageFormat::R16G16B16A16_SFLOAT, NRI::ImageFormat::R16_SFLOAT };
+        desc.shaders.back().entryPoint = "fragMainOIT";
+        m_particleOITPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+    }
+
+    void Renderer::createOITCompositePipeline(bool forceCompile)
+    {
+        NRI::PipelineDesc desc{};
+        desc.forceCompile = forceCompile;
+        desc.colorFormats = { NRI::ImageFormat::R16G16B16A16_SFLOAT };
+        desc.shaders.push_back({ .stage = NRI::ShaderStage::Vertex, .entryPoint = "vertMain", .sourcePath = "assets/shaders/OITComposite.slang" });
+        desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "fragMain", .sourcePath = "assets/shaders/OITComposite.slang" });
+        m_oitCompositePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
     void Renderer::SubmitParticles(const ParticleBatchSettings& settings, std::span<const shaderio::GpuParticle> particles)
@@ -4364,7 +4388,7 @@ namespace Nox
             addPathTracerPasses();
             addDeferredLightingPass();
             addForward3DPass();
-            addParticlePass();
+            addParticlePass(); // the alpha-blended ones into the OIT targets (with OIT), then their resolve, then the rest
             addMipFeedbackReadbackPass();
             addDLSSPass();
             addEntityDepthBlitPass();

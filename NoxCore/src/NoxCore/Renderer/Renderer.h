@@ -636,6 +636,12 @@ namespace Nox
         // this off use the screen-space refraction.
         void setRTRefractionEnabled(bool enabled) { m_rtRefractionEnabled = enabled; }
         bool getRTRefractionEnabled() const { return m_rtRefractionEnabled; }
+        // Order-independent transparency (Hybrid_Renderer_Plan_2026-10.md §4 H4, weighted blended): transparent surfaces and
+        // alpha-blended particles add into two targets in any order, resolved over the scene once (OITComposite.slang). Many
+        // overlapping layers (foliage cards, smoke) stop popping when their order changes; layers of very different colors blend
+        // toward their average instead of the nearest one winning. Off: sorted back to front, by object.
+        void setOITEnabled(bool enabled) { m_oitEnabled = enabled; }
+        bool getOITEnabled() const { return m_oitEnabled; }
         glm::vec2 getCurrentJitter() const { return m_currentJitter; }
 
         Ref<Texture2D> UploadTexture(const TextureData& cpuData);
@@ -796,6 +802,7 @@ namespace Nox
         void createAutoExposurePipelines(bool forceCompile = false);
         void createColorPyramidPipelines(bool forceCompile = false);
         void createParticlePipeline(bool forceCompile = false);
+        void createOITCompositePipeline(bool forceCompile = false);
         // Render graph texture inspection
         void createTextureInspectPipeline(bool forceCompile = false);
         // GPU instance culling (InstanceCulling.slang: cull, count, offset, write, late) and the depth pyramid build
@@ -895,6 +902,14 @@ namespace Nox
         void addDeferredLightingPass();
         void addForward3DPass();
         void addParticlePass();
+        // The order-independent transparency targets of this frame (created on first use; the first writer clears them), and
+        // their resolve over the HDR scene once everything transparent is in them.
+        void ensureOITTargets();
+        // The lit scene so far with blur mips (resources.RefractionSource), for glass to refract.
+        void addRefractionSourcePasses();
+        // Whether the transparent buckets have draws this frame.
+        bool hasTransparentDraws() const;
+        void addOITCompositePass();
         // Lit transparent draws whose material transmits (glass) in this frame's draw list.
         bool hasTransmissiveDraws() const;
         // The skybox push constants of the sun's disc (procedural sky), without the uniforms and cubemap.
@@ -928,7 +943,9 @@ namespace Nox
         MeshletDrawCursor beginMeshletDraws(const RGPassContext& context, const ViewDrawResources& draws, bool late = false) const;
         void drawMeshletBucket(NRI::CommandBuffer& cmd, MeshletDrawCursor& cursor, RenderBucket bucket, NRI::Pipeline& pipeline, NRI::CullMode cullMode, bool depthWrite, bool blendEnable) const;
         // The transparent buckets (both culling phases), blended over the HDR scene; the cursor carries the SSAO and refraction slots.
-        void drawForwardTransparent(NRI::CommandBuffer& cmd, const RGPassContext& context, const ViewDrawResources& draws, MeshletDrawCursor& cursor) const;
+        // With `oit` into the order-independent transparency targets instead (accumulation, revealage, entity IDs).
+        void drawForwardTransparent(NRI::CommandBuffer& cmd, const RGPassContext& context, const ViewDrawResources& draws, MeshletDrawCursor& cursor,
+                                    bool oit = false) const;
         // Draw list entries of a bucket (its visible instances are at most that many).
         uint32_t getBucketEntryCount(RenderBucket bucket) const
         {
@@ -979,6 +996,10 @@ namespace Nox
         std::unique_ptr<NRI::ShaderCompiler> m_shaderCompiler = nullptr;
         std::unique_ptr<NRI::Pipeline> m_unlitPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_transparentLitPipeline = nullptr;
+        // The same fragments into the order-independent transparency targets (accumulation, revealage, entity IDs).
+        std::unique_ptr<NRI::Pipeline> m_unlitOITPipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_transparentLitOITPipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_oitCompositePipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_presentPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_computePipeline = nullptr;
 
@@ -1024,8 +1045,10 @@ namespace Nox
         std::vector<void*> m_particleBuffersMapped;
         uint64_t m_particleBufferCapacity = 0;
         std::unique_ptr<NRI::Pipeline> m_particlePipeline;
+        std::unique_ptr<NRI::Pipeline> m_particleOITPipeline; // alpha-blended particles into the OIT targets
         std::unique_ptr<NRI::Pipeline> m_colorPyramidDownsamplePipeline;
         bool m_refractionEnabled = true;
+        bool m_oitEnabled = false;
         bool m_rtRefractionEnabled = true;
         // NRD
         std::unique_ptr<NRI::Pipeline> m_shadowMaskPipeline = nullptr;
@@ -1106,6 +1129,8 @@ namespace Nox
             bool nrdDIAdded = false;
             bool ptNRDAdded = false;
             bool deferredLightingAdded = false;
+            bool oitTargetsCreated = false; // resources.OITAccum / OITReveal exist this frame
+            bool oitWritten = false;        // something was drawn into them (the next writer loads, the composite runs)
             bool occlusionRawAdded = false; // SSAO or RTAO wrote resources.SSAORaw this frame (never both)
             bool ssaoAdded = false;         // resources.SSAO (the blurred result) is valid this frame
             bool dlssAdded = false;

@@ -726,11 +726,17 @@ namespace Nox
         return false;
     }
 
-    void Renderer::drawForwardTransparent(NRI::CommandBuffer& cmd, const RGPassContext& context, const ViewDrawResources& draws, MeshletDrawCursor& cursor) const
+    bool Renderer::hasTransparentDraws() const
     {
-        const bool hasAnyTransparent = getBucketEntryCount(RenderBucket::Transparent) > 0 || getBucketEntryCount(RenderBucket::TransparentDoubleSided) > 0 ||
-                                       getBucketEntryCount(RenderBucket::TransparentUnlit) > 0 || getBucketEntryCount(RenderBucket::TransparentUnlitDoubleSided) > 0;
-        if (!m_unlitPipeline || !m_transparentLitPipeline || !hasAnyTransparent)
+        return getBucketEntryCount(RenderBucket::Transparent) > 0 || getBucketEntryCount(RenderBucket::TransparentDoubleSided) > 0 ||
+               getBucketEntryCount(RenderBucket::TransparentUnlit) > 0 || getBucketEntryCount(RenderBucket::TransparentUnlitDoubleSided) > 0;
+    }
+
+    void Renderer::drawForwardTransparent(NRI::CommandBuffer& cmd, const RGPassContext& context, const ViewDrawResources& draws, MeshletDrawCursor& cursor, bool oit) const
+    {
+        NRI::Pipeline* litPipeline = oit ? m_transparentLitOITPipeline.get() : m_transparentLitPipeline.get();
+        NRI::Pipeline* unlitPipeline = oit ? m_unlitOITPipeline.get() : m_unlitPipeline.get();
+        if (!unlitPipeline || !litPipeline || !hasTransparentDraws())
             return;
 
         cursor.boundPipeline = nullptr;
@@ -738,19 +744,36 @@ namespace Nox
         cmd.setDepthWriteEnable(false);
         cmd.setDepthCompareOp(NRI::CompareOp::GreaterOrEqual);
         cmd.setColorBlendEnable(0, true);
-        const NRI::ColorBlendEquation blendEquation
-        {
-            .srcColorBlendFactor = NRI::BlendFactor::One,
-            .dstColorBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha,
-            .colorBlendOp = NRI::BlendOp::Add,
-            .srcAlphaBlendFactor = NRI::BlendFactor::One,
-            .dstAlphaBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha,
-            .alphaBlendOp = NRI::BlendOp::Add,
-        };
-        cmd.setColorBlendEquation(0, blendEquation);
         cmd.setColorWriteMask(0, NRI::ColorComponent::All);
-        cmd.setColorBlendEnable(1, false);
-        cmd.setColorWriteMask(1, NRI::ColorComponent::All);
+        if (oit)
+        {
+            // Accumulation: summed. Revealage: multiplied by (1 - alpha). Entity IDs: the last one drawn, the nearest by the sort.
+            cmd.setColorBlendEquation(0, {
+                .srcColorBlendFactor = NRI::BlendFactor::One, .dstColorBlendFactor = NRI::BlendFactor::One, .colorBlendOp = NRI::BlendOp::Add,
+                .srcAlphaBlendFactor = NRI::BlendFactor::One, .dstAlphaBlendFactor = NRI::BlendFactor::One, .alphaBlendOp = NRI::BlendOp::Add });
+            cmd.setColorBlendEnable(1, true);
+            cmd.setColorBlendEquation(1, {
+                .srcColorBlendFactor = NRI::BlendFactor::Zero, .dstColorBlendFactor = NRI::BlendFactor::OneMinusSrcColor, .colorBlendOp = NRI::BlendOp::Add,
+                .srcAlphaBlendFactor = NRI::BlendFactor::Zero, .dstAlphaBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha, .alphaBlendOp = NRI::BlendOp::Add });
+            cmd.setColorWriteMask(1, NRI::ColorComponent::All);
+            cmd.setColorBlendEnable(2, false);
+            cmd.setColorWriteMask(2, NRI::ColorComponent::All);
+        }
+        else
+        {
+            const NRI::ColorBlendEquation blendEquation
+            {
+                .srcColorBlendFactor = NRI::BlendFactor::One,
+                .dstColorBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha,
+                .colorBlendOp = NRI::BlendOp::Add,
+                .srcAlphaBlendFactor = NRI::BlendFactor::One,
+                .dstAlphaBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha,
+                .alphaBlendOp = NRI::BlendOp::Add,
+            };
+            cmd.setColorBlendEquation(0, blendEquation);
+            cmd.setColorBlendEnable(1, false);
+            cmd.setColorWriteMask(1, NRI::ColorComponent::All);
+        }
 
         // Non-unlit Blend objects get real shading (same BRDF/IBL as the deferred opaque path, via
         // PBRLighting.slang) instead of a flat baseColor pass-through, so they don't look self-lit next to
@@ -759,65 +782,193 @@ namespace Nox
         // CullMode matches each object's own doubleSided flag (mirroring the opaque/mask queues): a closed,
         // single-sided translucent shape needs its own backface culled, or both hemispheres blend on top of
         // each other and wash the result out.
-        drawMeshletBucket(cmd, cursor, RenderBucket::Transparent, *m_transparentLitPipeline, NRI::CullMode::Back, false, true);
-        drawMeshletBucket(cmd, cursor, RenderBucket::TransparentDoubleSided, *m_transparentLitPipeline, NRI::CullMode::None, false, true);
-        drawMeshletBucket(cmd, cursor, RenderBucket::TransparentUnlit, *m_unlitPipeline, NRI::CullMode::Back, false, true);
-        drawMeshletBucket(cmd, cursor, RenderBucket::TransparentUnlitDoubleSided, *m_unlitPipeline, NRI::CullMode::None, false, true);
+        drawMeshletBucket(cmd, cursor, RenderBucket::Transparent, *litPipeline, NRI::CullMode::Back, false, true);
+        drawMeshletBucket(cmd, cursor, RenderBucket::TransparentDoubleSided, *litPipeline, NRI::CullMode::None, false, true);
+        drawMeshletBucket(cmd, cursor, RenderBucket::TransparentUnlit, *unlitPipeline, NRI::CullMode::Back, false, true);
+        drawMeshletBucket(cmd, cursor, RenderBucket::TransparentUnlitDoubleSided, *unlitPipeline, NRI::CullMode::None, false, true);
 
         MeshletDrawCursor lateCursor = beginMeshletDraws(context, draws, true);
         lateCursor.boundPipeline = cursor.boundPipeline;
         lateCursor.references.ssaoTextureIndex = cursor.references.ssaoTextureIndex;
         lateCursor.references.refractionTextureIndex = cursor.references.refractionTextureIndex;
-        drawMeshletBucket(cmd, lateCursor, RenderBucket::Transparent, *m_transparentLitPipeline, NRI::CullMode::Back, false, true);
-        drawMeshletBucket(cmd, lateCursor, RenderBucket::TransparentDoubleSided, *m_transparentLitPipeline, NRI::CullMode::None, false, true);
-        drawMeshletBucket(cmd, lateCursor, RenderBucket::TransparentUnlit, *m_unlitPipeline, NRI::CullMode::Back, false, true);
-        drawMeshletBucket(cmd, lateCursor, RenderBucket::TransparentUnlitDoubleSided, *m_unlitPipeline, NRI::CullMode::None, false, true);
+        drawMeshletBucket(cmd, lateCursor, RenderBucket::Transparent, *litPipeline, NRI::CullMode::Back, false, true);
+        drawMeshletBucket(cmd, lateCursor, RenderBucket::TransparentDoubleSided, *litPipeline, NRI::CullMode::None, false, true);
+        drawMeshletBucket(cmd, lateCursor, RenderBucket::TransparentUnlit, *unlitPipeline, NRI::CullMode::Back, false, true);
+        drawMeshletBucket(cmd, lateCursor, RenderBucket::TransparentUnlitDoubleSided, *unlitPipeline, NRI::CullMode::None, false, true);
         cursor.boundPipeline = lateCursor.boundPipeline;
 
         cmd.setColorBlendEnable(0, false);
+        if (oit)
+            cmd.setColorBlendEnable(1, false);
         cmd.setDepthWriteEnable(true);
+    }
+
+    void Renderer::ensureOITTargets()
+    {
+        if (m_frame.oitTargetsCreated)
+            return;
+        FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
+        RGTextureDesc desc;
+        desc.Format = NRI::ImageFormat::R16G16B16A16_SFLOAT;
+        resources.OITAccum = m_renderGraph.CreateTexture("OIT Accumulation", desc);
+        desc.Format = NRI::ImageFormat::R16_SFLOAT;
+        resources.OITReveal = m_renderGraph.CreateTexture("OIT Revealage", desc);
+        m_frame.oitTargetsCreated = true;
+    }
+
+    void Renderer::addOITCompositePass()
+    {
+        if (!m_frame.oitWritten || !m_oitCompositePipeline)
+            return;
+        FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
+        m_renderGraph.AddPass("OIT Composite", RGPassFlags::Raster,
+            [&](RGBuilder& builder)
+            {
+                builder.ColorTarget(resources.HDRScene, NRI::LoadOP::load, NRI::StoreOP::store);
+                builder.Read(resources.OITAccum);
+                builder.Read(resources.OITReveal);
+                builder.SetRenderArea(m_frame.renderExtent);
+            },
+            [this, res = &resources](RGPassContext& context)
+            {
+                NRI::CommandBuffer& cmd = context.Cmd();
+                cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_oitCompositePipeline);
+                cmd.setCullMode(NRI::CullMode::None);
+                cmd.setDepthTestEnable(false);
+                cmd.setDepthWriteEnable(false);
+                cmd.setColorBlendEnable(0, true);
+                cmd.setColorWriteMask(0, NRI::ColorComponent::All);
+                // The average over the scene, which keeps the revealage's share of itself (the shader's alpha); its alpha stays.
+                cmd.setColorBlendEquation(0, {
+                    .srcColorBlendFactor = NRI::BlendFactor::One, .dstColorBlendFactor = NRI::BlendFactor::SrcAlpha, .colorBlendOp = NRI::BlendOp::Add,
+                    .srcAlphaBlendFactor = NRI::BlendFactor::Zero, .dstAlphaBlendFactor = NRI::BlendFactor::One, .alphaBlendOp = NRI::BlendOp::Add });
+                shaderio::PushConstantOITComposite push{};
+                push.accumIndex = uniformData.imageHeapIndexOffset + context.Slot(res->OITAccum);
+                push.revealIndex = uniformData.imageHeapIndexOffset + context.Slot(res->OITReveal);
+                cmd.pushData(&push, sizeof(push));
+                cmd.draw(3, 1, 0, 0);
+                cmd.setColorBlendEnable(0, false);
+            });
     }
 
     void Renderer::addParticlePass()
     {
         if (m_particleBatches.empty() || !m_particlePipeline || m_particleBuffers.size() <= frameIndex || !m_particleBuffers[frameIndex] ||
             m_frame.renderExtent.width == 0 || m_frame.renderExtent.height == 0)
+        {
+            addOITCompositePass(); // the transparent surfaces' alone
             return;
+        }
         FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
 
-        // Emitters far to near (each alpha-blended one is sorted inside already, SubmitParticles).
+        // Emitters far to near (each alpha-blended one is sorted inside already, SubmitParticles). With OIT the alpha-blended ones go
+        // into its targets with the transparent surfaces, in any order; the additive ones are order-independent already and add
+        // after the resolve.
         std::vector<ParticleBatch> batches = m_particleBatches;
         std::stable_sort(batches.begin(), batches.end(), [](const ParticleBatch& a, const ParticleBatch& b) { return a.Distance > b.Distance; });
+        std::vector<ParticleBatch> oitBatches;
+        if (m_oitEnabled && m_particleOITPipeline && m_oitCompositePipeline)
+        {
+            for (const ParticleBatch& batch : batches)
+            {
+                if (!batch.Settings.Additive)
+                    oitBatches.push_back(batch);
+            }
+            std::erase_if(batches, [](const ParticleBatch& batch) { return !batch.Settings.Additive; });
+        }
         bool lit = false;
-        for (const ParticleBatch& batch : batches)
+        for (const ParticleBatch& batch : m_particleBatches)
             lit |= batch.Settings.Lit;
         const bool shadows = lit && m_rayTracingEnabled && m_rayTracingShadows;
         const uint64_t particles = m_particleBuffers[frameIndex]->getDeviceAddress();
         const uint64_t uniforms = m_uniformBuffers[frameIndex]->getDeviceAddress();
 
+        auto declareParticles = [&](RGBuilder& builder)
+        {
+            builder.Read(resources.Depth); // each fragment tests and fades against it
+            if (resources.AerialPerspective.IsValid())
+                builder.Read(resources.AerialPerspective); // the fog in front of them (through the uniforms)
+            if (lit)
+            {
+                if (m_frame.ddgiAdded)
+                {
+                    builder.Read(resources.DDGIIrradiance[m_frame.ddgiWriteIndex]);
+                    builder.Read(resources.DDGIDistance[m_frame.ddgiWriteIndex]);
+                }
+                if (shadows && resources.TLAS.IsValid())
+                {
+                    builder.Read(resources.TLAS, RGBufferAccess::AccelerationStructureRead);
+                    ReadGpuScene(builder, resources);
+                }
+            }
+            builder.SetRenderArea(m_frame.renderExtent);
+        };
+        auto drawBatch = [particles, uniforms, shadows](NRI::CommandBuffer& cmd, const ParticleBatch& batch, uint32_t depthSlot)
+        {
+            shaderio::PushConstantParticles push{};
+            push.matrixReference = uniforms;
+            push.particlesReference = particles;
+            push.firstParticle = batch.First;
+            push.particleCount = batch.Count;
+            push.textureIndex = batch.Settings.TextureSlot;
+            push.flipbookColumns = std::max(batch.Settings.FlipbookColumns, 1u);
+            push.flipbookRows = std::max(batch.Settings.FlipbookRows, 1u);
+            push.flags = (batch.Settings.Lit ? shaderio::PARTICLE_LIT : 0u) | (batch.Settings.Soft ? shaderio::PARTICLE_SOFT : 0u) |
+                         (batch.Settings.Additive ? shaderio::PARTICLE_ADDITIVE : 0u) | (batch.Settings.Lit && shadows ? shaderio::PARTICLE_SHADOW : 0u);
+            push.depthTextureIndex = depthSlot;
+            push.softDistance = batch.Settings.SoftDistance;
+            cmd.pushData(&push, sizeof(push));
+            cmd.drawMeshTasks((batch.Count + 31) / 32, 1, 1);
+        };
+
+        if (!oitBatches.empty())
+        {
+            ensureOITTargets();
+            const bool first = !m_frame.oitWritten;
+            m_frame.oitWritten = true;
+            m_renderGraph.AddPass("Particles OIT", RGPassFlags::Raster,
+                [&](RGBuilder& builder)
+                {
+                    builder.ColorTarget(resources.OITAccum, first ? NRI::LoadOP::clear : NRI::LoadOP::load, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
+                    builder.ColorTarget(resources.OITReveal, first ? NRI::LoadOP::clear : NRI::LoadOP::load, NRI::StoreOP::store, { 1.0f, 1.0f, 1.0f, 1.0f });
+                    declareParticles(builder);
+                },
+                [this, res = &resources, oitBatches = std::move(oitBatches), drawBatch](RGPassContext& context)
+                {
+                    NRI::CommandBuffer& cmd = context.Cmd();
+                    cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_particleOITPipeline);
+                    cmd.setCullMode(NRI::CullMode::None);
+                    cmd.setDepthTestEnable(false);
+                    cmd.setDepthWriteEnable(false);
+                    cmd.setColorBlendEnable(0, true);
+                    cmd.setColorWriteMask(0, NRI::ColorComponent::All);
+                    cmd.setColorBlendEquation(0, {
+                        .srcColorBlendFactor = NRI::BlendFactor::One, .dstColorBlendFactor = NRI::BlendFactor::One, .colorBlendOp = NRI::BlendOp::Add,
+                        .srcAlphaBlendFactor = NRI::BlendFactor::One, .dstAlphaBlendFactor = NRI::BlendFactor::One, .alphaBlendOp = NRI::BlendOp::Add });
+                    cmd.setColorBlendEnable(1, true);
+                    cmd.setColorWriteMask(1, NRI::ColorComponent::All);
+                    cmd.setColorBlendEquation(1, {
+                        .srcColorBlendFactor = NRI::BlendFactor::Zero, .dstColorBlendFactor = NRI::BlendFactor::OneMinusSrcColor, .colorBlendOp = NRI::BlendOp::Add,
+                        .srcAlphaBlendFactor = NRI::BlendFactor::Zero, .dstAlphaBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha, .alphaBlendOp = NRI::BlendOp::Add });
+                    const uint32_t depthSlot = context.Slot(res->Depth);
+                    for (const ParticleBatch& batch : oitBatches)
+                        drawBatch(cmd, batch, depthSlot);
+                    cmd.setColorBlendEnable(0, false);
+                    cmd.setColorBlendEnable(1, false);
+                });
+        }
+
+        addOITCompositePass();
+        if (batches.empty())
+            return;
+
         m_renderGraph.AddPass("Particles", RGPassFlags::Raster,
             [&](RGBuilder& builder)
             {
                 builder.ColorTarget(resources.HDRScene, NRI::LoadOP::load, NRI::StoreOP::store);
-                builder.Read(resources.Depth); // each fragment tests and fades against it
-                if (resources.AerialPerspective.IsValid())
-                    builder.Read(resources.AerialPerspective); // the fog in front of them (through the uniforms)
-                if (lit)
-                {
-                    if (m_frame.ddgiAdded)
-                    {
-                        builder.Read(resources.DDGIIrradiance[m_frame.ddgiWriteIndex]);
-                        builder.Read(resources.DDGIDistance[m_frame.ddgiWriteIndex]);
-                    }
-                    if (shadows && resources.TLAS.IsValid())
-                    {
-                        builder.Read(resources.TLAS, RGBufferAccess::AccelerationStructureRead);
-                        ReadGpuScene(builder, resources);
-                    }
-                }
-                builder.SetRenderArea(m_frame.renderExtent);
+                declareParticles(builder);
             },
-            [this, res = &resources, batches = std::move(batches), particles, uniforms, shadows](RGPassContext& context)
+            [this, res = &resources, batches = std::move(batches), drawBatch](RGPassContext& context)
             {
                 NRI::CommandBuffer& cmd = context.Cmd();
                 cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_particlePipeline);
@@ -850,20 +1001,7 @@ namespace Nox
                 for (const ParticleBatch& batch : batches)
                 {
                     cmd.setColorBlendEquation(0, batch.Settings.Additive ? additive : covering);
-                    shaderio::PushConstantParticles push{};
-                    push.matrixReference = uniforms;
-                    push.particlesReference = particles;
-                    push.firstParticle = batch.First;
-                    push.particleCount = batch.Count;
-                    push.textureIndex = batch.Settings.TextureSlot;
-                    push.flipbookColumns = std::max(batch.Settings.FlipbookColumns, 1u);
-                    push.flipbookRows = std::max(batch.Settings.FlipbookRows, 1u);
-                    push.flags = (batch.Settings.Lit ? shaderio::PARTICLE_LIT : 0u) | (batch.Settings.Soft ? shaderio::PARTICLE_SOFT : 0u) |
-                                 (batch.Settings.Additive ? shaderio::PARTICLE_ADDITIVE : 0u) | (batch.Settings.Lit && shadows ? shaderio::PARTICLE_SHADOW : 0u);
-                    push.depthTextureIndex = depthSlot;
-                    push.softDistance = batch.Settings.SoftDistance;
-                    cmd.pushData(&push, sizeof(push));
-                    cmd.drawMeshTasks((batch.Count + 31) / 32, 1, 1);
+                    drawBatch(cmd, batch, depthSlot);
                 }
                 cmd.setColorBlendEnable(0, false);
             });
@@ -883,6 +1021,10 @@ namespace Nox
         // one pass as always.
         const bool refraction = m_refractionEnabled && hasDraws && m_colorPyramidCopyPipeline && m_colorPyramidDownsamplePipeline &&
                                 m_frame.renderExtent.width > 0 && m_frame.renderExtent.height > 0 && hasTransmissiveDraws();
+        // Order-independent transparency: the transparent surfaces into its targets in a pass of their own (resolved after the
+        // particles, addParticlePass).
+        const bool oit = m_oitEnabled && hasDraws && m_transparentLitOITPipeline && m_unlitOITPipeline && m_oitCompositePipeline &&
+                         hasTransparentDraws();
 
         // Shared setup of the passes that draw over the lit scene.
         auto declareForward = [&](RGBuilder& builder, bool lit)
@@ -933,7 +1075,7 @@ namespace Nox
                     builder.ColorTarget(resources.HDRScene, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 1.0f });
                 declareForward(builder, true);
             },
-            [this, res = &resources, drawProbes, skyboxSun, hasDraws, refraction](RGPassContext& context)
+            [this, res = &resources, drawProbes, skyboxSun, hasDraws, refraction, oit](RGPassContext& context)
             {
                 NRI::CommandBuffer& cmd = context.Cmd();
                 const uint32_t totalDDGIProbes = m_frame.totalDDGIProbes;
@@ -1004,7 +1146,7 @@ namespace Nox
                 }
 
                 // C. TRANSPARENT FORWARD PASS (Back-to-front sorted, Alpha Blending), here unless glass needs the scene first.
-                if (hasDraws && !refraction)
+                if (hasDraws && !refraction && !oit)
                 {
                     // Whichever of SSAO/RTAO ran this frame (never both -- see Renderer::m_ssaoEnabled), for the
                     // specular occlusion approximation in Material_TransparentLit_Mesh.slang; every other consumer
@@ -1037,8 +1179,65 @@ namespace Nox
                 }
             });
 
-        if (!refraction)
+        if (!refraction && !oit)
             return;
+
+        if (oit)
+        {
+            if (refraction)
+                addRefractionSourcePasses();
+            ensureOITTargets();
+            m_frame.oitWritten = true;
+            m_renderGraph.AddPass("Transparent OIT", RGPassFlags::Raster,
+                [&](RGBuilder& builder)
+                {
+                    builder.ColorTarget(resources.OITAccum, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
+                    builder.ColorTarget(resources.OITReveal, NRI::LoadOP::clear, NRI::StoreOP::store, { 1.0f, 1.0f, 1.0f, 1.0f });
+                    declareForward(builder, true);
+                    if (refraction)
+                        builder.Read(resources.RefractionSource);
+                },
+                [this, res = &resources, refraction](RGPassContext& context)
+                {
+                    NRI::CommandBuffer& cmd = context.Cmd();
+                    MeshletDrawCursor cursor = beginMeshletDraws(context, res->CameraDraws);
+                    cursor.references.ssaoTextureIndex = m_frame.ssaoAdded ? context.Slot(res->SSAO) : 0xFFFFFFFF;
+                    if (refraction)
+                    {
+                        cursor.references.refractionTextureIndex = context.Slot(res->RefractionSource);
+                        if (m_rtRefractionEnabled && m_rayTracingEnabled)
+                            cursor.taskFlags |= shaderio::MESHLET_RT_REFRACTION;
+                    }
+                    drawForwardTransparent(cmd, context, res->CameraDraws, cursor, true);
+                });
+            return;
+        }
+
+        addRefractionSourcePasses();
+
+        // Transparent surfaces over the scene; glass refracts the copy.
+        m_renderGraph.AddPass("Forward Transparent", RGPassFlags::Raster,
+            [&](RGBuilder& builder)
+            {
+                builder.ColorTarget(resources.HDRScene, NRI::LoadOP::load, NRI::StoreOP::store);
+                declareForward(builder, true);
+                builder.Read(resources.RefractionSource);
+            },
+            [this, res = &resources](RGPassContext& context)
+            {
+                NRI::CommandBuffer& cmd = context.Cmd();
+                MeshletDrawCursor cursor = beginMeshletDraws(context, res->CameraDraws);
+                cursor.references.ssaoTextureIndex = m_frame.ssaoAdded ? context.Slot(res->SSAO) : 0xFFFFFFFF;
+                cursor.references.refractionTextureIndex = context.Slot(res->RefractionSource);
+                if (m_rtRefractionEnabled && m_rayTracingEnabled)
+                    cursor.taskFlags |= shaderio::MESHLET_RT_REFRACTION;
+                drawForwardTransparent(cmd, context, res->CameraDraws, cursor);
+            });
+    }
+
+    void Renderer::addRefractionSourcePasses()
+    {
+        FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
 
         // The scene behind the glass: the HDR image so far (opaque, unlit, sky) with a mip chain of 2x2 averages (ColorPyramid.slang).
         RGTextureDesc pyramidDesc;
@@ -1072,24 +1271,5 @@ namespace Nox
                     cmd.dispatch((push.width + 7) / 8, (push.height + 7) / 8, 1);
                 });
         }
-
-        // Transparent surfaces over the scene; glass refracts the copy.
-        m_renderGraph.AddPass("Forward Transparent", RGPassFlags::Raster,
-            [&](RGBuilder& builder)
-            {
-                builder.ColorTarget(resources.HDRScene, NRI::LoadOP::load, NRI::StoreOP::store);
-                declareForward(builder, true);
-                builder.Read(resources.RefractionSource);
-            },
-            [this, res = &resources](RGPassContext& context)
-            {
-                NRI::CommandBuffer& cmd = context.Cmd();
-                MeshletDrawCursor cursor = beginMeshletDraws(context, res->CameraDraws);
-                cursor.references.ssaoTextureIndex = m_frame.ssaoAdded ? context.Slot(res->SSAO) : 0xFFFFFFFF;
-                cursor.references.refractionTextureIndex = context.Slot(res->RefractionSource);
-                if (m_rtRefractionEnabled && m_rayTracingEnabled)
-                    cursor.taskFlags |= shaderio::MESHLET_RT_REFRACTION;
-                drawForwardTransparent(cmd, context, res->CameraDraws, cursor);
-            });
     }
 }

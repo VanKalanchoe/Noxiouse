@@ -83,7 +83,8 @@ namespace NRI
         One,
         Zero,
         SrcAlpha,
-        OneMinusSrcAlpha
+        OneMinusSrcAlpha,
+        OneMinusSrcColor
     };
     
     enum class BlendOp

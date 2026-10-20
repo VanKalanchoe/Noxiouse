@@ -174,6 +174,30 @@ float3 volume_transmittance(float3 attenuationColor, float attenuationDistance, 
         return float3(1.0);
     return pow(max(attenuationColor, float3(1e-6)), float3(length / attenuationDistance));
 }
+
+// Weighted blended order-independent transparency (McGuire and Bavoil 2013), what a transparent fragment adds: to the
+// accumulation target (additive) its premultiplied color and alpha times a weight that favors the near ones, to the revealage
+// target (multiplied in: dst * (1 - alpha)) its alpha. OITComposite.slang divides the sum out over the scene behind.
+struct OITOutput
+{
+    float4 accum;
+    float reveal;
+};
+
+OITOutput oit_output(float4 premultiplied, float viewDistanceMeters)
+{
+    const float alpha = saturate(premultiplied.a);
+    const float z = max(viewDistanceMeters, 0.0);
+    // Eq. 9 of the paper, z in meters; the cap is lower than its 3e3: HDR colors in a half-float target overflow sooner.
+    float weight = alpha * clamp(10.0 / (1e-5 + pow(z / 5.0, 2.0) + pow(z / 200.0, 6.0)), 1e-2, 3e2);
+    const float brightest = max(max(premultiplied.r, premultiplied.g), premultiplied.b);
+    if (brightest * weight > 2048.0) // a few overlapping layers of the brightest still fit under the half float's 65504
+        weight = 2048.0 / brightest;
+    OITOutput output;
+    output.accum = float4(premultiplied.rgb, alpha) * weight;
+    output.reveal = alpha;
+    return output;
+}
 #endif
 
 // Ray tracing view of an instance (same slot as GpuInstance): everything the ray tracing shaders read at candidates and
@@ -1078,6 +1102,14 @@ struct PushConstantSkyAtmosphere
 struct PushConstantLightShapes
 {
     uint64_t matrixReference; // BDA to UniformBufferObject
+};
+
+// OITComposite.slang: the order-independent transparency's targets, resolved over the HDR scene (descriptor heap slots, the
+// image heap's offset already added).
+struct PushConstantOITComposite
+{
+    uint32_t accumIndex;
+    uint32_t revealIndex;
 };
 
 struct PushConstantSkybox

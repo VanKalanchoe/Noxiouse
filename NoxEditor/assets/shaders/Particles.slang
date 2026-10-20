@@ -159,8 +159,34 @@ void meshMain(
     triangles[threadID * 2 + 1] = uint3(threadID * 4 + 0, threadID * 4 + 2, threadID * 4 + 3);
 }
 
+float4 shadeParticle(ParticleVertex input, PushConstantParticles pushConstant);
+
 [shader("fragment")]
 float4 fragMain(ParticleVertex input, uniform PushConstantParticles pushConstant) : SV_Target0
+{
+    return shadeParticle(input, pushConstant);
+}
+
+// Order-independent transparency (Renderer::setOITEnabled): alpha-blended particles into the weighted blended targets.
+struct ParticleOITOutput
+{
+    float4 accum : SV_Target0;
+    float reveal : SV_Target1;
+};
+
+[shader("fragment")]
+ParticleOITOutput fragMainOIT(ParticleVertex input, uniform PushConstantParticles pushConstant)
+{
+    const float4 shaded = shadeParticle(input, pushConstant);
+    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+    const OITOutput oit = oit_output(shaded, length(input.worldPos - ubo->cameraWorldPos.xyz) / ubo->unitsPerMeter);
+    ParticleOITOutput output;
+    output.accum = oit.accum;
+    output.reveal = oit.reveal;
+    return output;
+}
+
+float4 shadeParticle(ParticleVertex input, PushConstantParticles pushConstant)
 {
     UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
 

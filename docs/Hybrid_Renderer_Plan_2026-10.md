@@ -206,7 +206,7 @@ pass of the scene, editor only).
 | H2 | **Shadowed transparent lighting**: the forward transparent pass traces its own shadow rays (ray query in the fragment shader, the TLAS is bound) for the directional light and the ReSTIR DI reservoir light of the pixel underneath | today every light is unshadowed on glass |
 | H3 | **Refraction (high rung)**: transmissive materials (`TransmissionFactor > 0`) are drawn in a separate pass after the opaque lighting; each pixel traces one refraction ray (IOR, thickness / volume absorption from `KHR_materials_volume`, already imported) against the TLAS and shades the hit from the G-buffer-free hit shading the path tracer already has (`PathTracerHit.slang`) | the path tracer's BSDF code is the reference |
 | H3b | **Refraction (fallback)**: sample the lit opaque scene color behind the surface with an offset from the normal and IOR (screen-space), rough glass = blurred mip of the scene color | what most raster engines ship |
-| H4 | **Order-independent transparency**: weighted blended OIT for many overlapping layers (foliage cards, particles), sorting by object as today otherwise | needed once particles exist (§6) |
+| H4 | **Order-independent transparency**: weighted blended OIT for many overlapping layers (foliage cards, particles), sorting by object as today otherwise | **built 2026-10-20, untested:** `Renderer::setOITEnabled` (Settings: Order-Independent Transparency, off by default); transparent meshes and alpha-blended particles into an accumulation (RGBA16F) and a revealage (R16F) target, `OITComposite.slang` resolves them over the HDR scene; additive particles add after it; glass still refracts the scene copy |
 | H5 | Denoising for the transparent signals (RT shadows on glass, refraction) through the existing NRD front end | |
 
 **Built (2026-10-18, untested):**
@@ -390,7 +390,7 @@ EmberGen / Blender, meshes for mesh particles, and sometimes baked simulations (
   shadow ray (ray query) while RT shadows are on.
 - **Scripts:** `ParticleEmitterComponent.Play(restart)`, `Stop()`, `Emit(count)`, `IsEmitting`, `ParticleCount`.
 
-Not yet: OIT (H4: emitters are sorted against each other by their centers, not against transparent meshes), GPU simulation,
+Not yet: (OIT built 2026-10-20, H4: with it on, alpha-blended particles and transparent meshes blend in any order), GPU simulation,
 collisions, mesh particles, color / size curves beyond start-end, the module editor (V3), particles in the editor's extra
 viewports and in the path tracer, motion vectors for DLSS (fast particles can smear).
 

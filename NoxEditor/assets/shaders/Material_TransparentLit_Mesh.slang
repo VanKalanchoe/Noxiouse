@@ -256,8 +256,36 @@ struct FSOutput
     int entityID : SV_TARGET1;
 };
 
+struct FSOutputOIT
+{
+    float4 accum : SV_TARGET0;
+    float reveal : SV_TARGET1;
+    int entityID : SV_TARGET2;
+};
+
+FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlets pushConstant);
+
 [shader("fragment")]
 FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform PushConstantMeshlets pushConstant)
+{
+    return shadeTransparent(vertIn, isFrontFace, pushConstant);
+}
+
+// Order-independent transparency (Renderer::setOITEnabled): the same surface into the weighted blended targets.
+[shader("fragment")]
+FSOutputOIT fragMainOIT(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform PushConstantMeshlets pushConstant)
+{
+    const FSOutput shaded = shadeTransparent(vertIn, isFrontFace, pushConstant);
+    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+    const OITOutput oit = oit_output(shaded.color, length(vertIn.worldPos - ubo->cameraWorldPos.xyz) / ubo->unitsPerMeter);
+    FSOutputOIT output;
+    output.accum = oit.accum;
+    output.reveal = oit.reveal;
+    output.entityID = shaded.entityID;
+    return output;
+}
+
+FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlets pushConstant)
 {
     FSOutput output;
 

@@ -21,8 +21,36 @@
         int entityID : SV_TARGET1;
     };
 
+    struct FSOutputOIT
+    {
+        float4 accum : SV_TARGET0;
+        float reveal : SV_TARGET1;
+        int entityID : SV_TARGET2;
+    };
+
+    FSOutput shadeUnlit(VSOutput vertIn, PushConstantMeshlets pushConstant);
+
     [shader("fragment")]
     FSOutput fragMain(VSOutput vertIn, uniform PushConstantMeshlets pushConstant)
+    {
+        return shadeUnlit(vertIn, pushConstant);
+    }
+
+    // Order-independent transparency (Renderer::setOITEnabled): a transparent unlit surface into the weighted blended targets.
+    [shader("fragment")]
+    FSOutputOIT fragMainOIT(VSOutput vertIn, uniform PushConstantMeshlets pushConstant)
+    {
+        const FSOutput shaded = shadeUnlit(vertIn, pushConstant);
+        UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+        const OITOutput oit = oit_output(shaded.color, length(vertIn.worldPos - ubo->cameraWorldPos.xyz) / ubo->unitsPerMeter);
+        FSOutputOIT output;
+        output.accum = oit.accum;
+        output.reveal = oit.reveal;
+        output.entityID = shaded.entityID;
+        return output;
+    }
+
+    FSOutput shadeUnlit(VSOutput vertIn, PushConstantMeshlets pushConstant)
     {
         FSOutput output;
 

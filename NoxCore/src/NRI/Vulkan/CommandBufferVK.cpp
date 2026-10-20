@@ -74,6 +74,7 @@ namespace NRI
         case BlendFactor::One:         return vk::BlendFactor::eOne;
         case BlendFactor::SrcAlpha:         return vk::BlendFactor::eSrcAlpha;
         case BlendFactor::OneMinusSrcAlpha: return vk::BlendFactor::eOneMinusSrcAlpha;
+        case BlendFactor::OneMinusSrcColor: return vk::BlendFactor::eOneMinusSrcColor;
         }
         return vk::BlendFactor::eOne;
     }
