@@ -68,7 +68,8 @@ for history. File references are to the code as of this audit.
 - Own TAA (DLSS DLAA only today; R1).
 
 **Sky, VFX**
-- Night sky (moon, stars); aerial perspective and height fog on forward surfaces (glass, unlit, particles); the path tracer
+- (Night sky -- moon lighting the scene and the sky, its phases, stars, the sun through the air: built 2026-10-20, untested.)
+  Aerial perspective and height fog on forward surfaces (glass, unlit, particles); the path tracer
   has no sun disc / haze / fog; sky update not time-sliced; viewer altitude not taken from the camera.
 - Cloud shadows on the scene, animated clouds / wind, cloud temporal reprojection.
 - Particles: GPU simulation and sorting, collisions, mesh particles, color / size curves, module editor (V3), motion vectors

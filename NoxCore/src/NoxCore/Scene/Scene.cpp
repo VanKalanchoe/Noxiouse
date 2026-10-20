@@ -50,11 +50,97 @@ namespace Nox
         return sun;
     }
 
-    // The procedural sky's settings: the atmosphere from the component, the sun from the scene.
+    // The atmosphere a procedural sky has (the air the sun and moon shine through).
+    static SkyAtmosphereSettings MakeSkyAir(const EnvironmentLightComponent& environment)
+    {
+        SkyAtmosphereSettings air;
+        air.RayleighScale = environment.RayleighScale;
+        air.MieScale = environment.MieScale;
+        air.OzoneScale = environment.OzoneScale;
+        air.AltitudeKm = environment.AltitudeKm;
+        return air;
+    }
+
+    // The sun and the moon of a procedural sky as they light the scene. Seen through the air (SunThroughAtmosphere) the sun is
+    // yellow-white at noon, red at sunset and gone below the horizon. The moon lights the scene and the sky once it counts next
+    // to the sun (after sunset in practice: by day it would only cost a shadow ray per pixel). Without a procedural sky the
+    // sun is the Directional Light as set and there is no moon.
+    struct SkyLights
+    {
+        SceneSun Sun;
+        glm::vec3 SunTransmittance{ 1.0f };
+        bool MoonLights = false;
+        glm::vec3 MoonDirection{ 0.0f, -1.0f, 0.0f };
+        glm::vec3 MoonIlluminance{ 0.0f };     // above the air, its lit fraction included
+        glm::vec3 MoonFull{ 0.0f };            // a full moon's (its disc); 0 = no moon
+        glm::vec3 MoonTransmittance{ 0.0f };
+        float MoonAngularRadius = 0.0046f;
+        float StarIntensity = 0.0f;
+    };
+
+    static float Luminance(const glm::vec3& color)
+    {
+        return glm::dot(color, glm::vec3(0.2126f, 0.7152f, 0.0722f));
+    }
+
+    static SkyLights ResolveSkyLights(entt::registry& registry, const EnvironmentLightComponent* environment)
+    {
+        SkyLights lights;
+        lights.Sun = FindSun(registry);
+        if (!environment || environment->Source != EnvironmentSource::ProceduralSky)
+            return lights;
+
+        const SkyAtmosphereSettings air = MakeSkyAir(*environment);
+        const glm::vec3 sunDirection = glm::normalize(lights.Sun.Direction);
+        if (environment->SunThroughAtmosphere)
+            lights.SunTransmittance = Renderer::ComputeSkyTransmittance(air, sunDirection, lights.Sun.AngularRadius);
+
+        if (environment->Moon && environment->MoonIntensity > 0.0f)
+        {
+            glm::vec3 moonDirection = -sunDirection;
+            if (!environment->MoonOppositeSun)
+            {
+                const float elevation = glm::radians(glm::clamp(environment->MoonElevation, -90.0f, 90.0f));
+                const float azimuth = glm::radians(environment->MoonAzimuth);
+                moonDirection = glm::vec3(std::cos(elevation) * std::sin(azimuth), std::sin(elevation), std::cos(elevation) * std::cos(azimuth));
+            }
+            lights.MoonDirection = moonDirection;
+            lights.MoonAngularRadius = glm::radians(glm::max(environment->MoonAngularDiameter, 0.01f)) * 0.5f;
+            lights.MoonFull = glm::max(environment->MoonColor, glm::vec3(0.0f)) * environment->MoonIntensity;
+            // The lit fraction of its disc: all of it opposite the sun (full), none next to it (new).
+            const float litFraction = 0.5f * (1.0f - glm::dot(sunDirection, moonDirection));
+            lights.MoonIlluminance = lights.MoonFull * litFraction;
+            lights.MoonTransmittance = environment->SunThroughAtmosphere
+                ? Renderer::ComputeSkyTransmittance(air, moonDirection, lights.MoonAngularRadius)
+                : glm::vec3(moonDirection.y > 0.0f ? 1.0f : 0.0f);
+            const float sunAtGround = Luminance(lights.Sun.Illuminance * lights.SunTransmittance);
+            const float moonAtGround = Luminance(lights.MoonIlluminance * lights.MoonTransmittance);
+            lights.MoonLights = moonAtGround > 0.0f && moonAtGround > 0.01f * sunAtGround;
+        }
+
+        // The stars come out as the sky darkens: none while the sun is up, all from 12 degrees below the horizon (nautical dusk).
+        if (environment->Stars)
+        {
+            const float sunElevation = glm::degrees(std::asin(glm::clamp(sunDirection.y, -1.0f, 1.0f)));
+            lights.StarIntensity = glm::max(environment->StarIntensity, 0.0f) * glm::smoothstep(0.0f, 12.0f, -sunElevation);
+        }
+        return lights;
+    }
+
+    // A directional light's rotation whose -Z (the way it shines) points away from `towardLight`.
+    static glm::mat4 DirectionalLightTransform(const glm::vec3& towardLight)
+    {
+        const glm::vec3 forward = -glm::normalize(towardLight);
+        const glm::vec3 up = std::abs(forward.y) > 0.999f ? glm::vec3(0.0f, 0.0f, 1.0f) : glm::vec3(0.0f, 1.0f, 0.0f);
+        return glm::toMat4(glm::quatLookAt(forward, up));
+    }
+
+    // The procedural sky's settings: the atmosphere from the component, the sun and moon from the scene.
     static SkyAtmosphereSettings MakeSkyAtmosphereSettings(entt::registry& registry, const EnvironmentLightComponent& environment)
     {
         SkyAtmosphereSettings settings;
-        const SceneSun sun = FindSun(registry);
+        const SkyLights lights = ResolveSkyLights(registry, &environment);
+        const SceneSun& sun = lights.Sun;
         settings.SunDirection = sun.Direction;
         settings.SunIlluminance = sun.Illuminance;
         settings.SunAngularRadius = sun.AngularRadius;
@@ -72,6 +158,11 @@ namespace Nox
         settings.CloudThicknessKm = environment.CloudThicknessKm;
         settings.CloudScaleKm = environment.CloudScaleKm;
         settings.CloudOffsetKm = environment.CloudOffsetKm;
+        settings.MoonDirection = lights.MoonDirection;
+        settings.MoonIlluminance = lights.MoonLights ? lights.MoonIlluminance : glm::vec3(0.0f);
+        settings.MoonDiscIlluminance = lights.MoonFull;
+        settings.MoonAngularRadius = lights.MoonAngularRadius;
+        settings.StarIntensity = lights.StarIntensity;
         return settings;
     }
 
@@ -118,9 +209,10 @@ namespace Nox
             fog.MaxOpacity = environment->FogMaxOpacity;
             fog.Color = environment->FogColor;
             fog.FromEnvironment = environment->FogFromEnvironment;
-            const SceneSun sun = FindSun(m_Registry);
-            fog.SunDirection = sun.Direction;
-            fog.SunColor = sun.Illuminance * environment->FogSunScattering;
+            // The glow towards the sun is of the light that gets through the air (none once it has set).
+            const SkyLights lights = ResolveSkyLights(m_Registry, environment);
+            fog.SunDirection = lights.Sun.Direction;
+            fog.SunColor = lights.Sun.Illuminance * lights.SunTransmittance * environment->FogSunScattering;
             fog.SunExponent = environment->FogSunExponent;
         }
         m_renderer->SetHeightFog(fog);
@@ -1613,24 +1705,48 @@ namespace Nox
         if (!foundPrimaryCamera)
             m_renderer->setAutoExposure(false, 0.0f, -16.0f, 16.0f);
 
+        const EnvironmentLightComponent* environment = FindEnvironment(m_Registry);
+        const bool proceduralSky = environment && environment->Source == EnvironmentSource::ProceduralSky;
+        const SkyLights sky = ResolveSkyLights(m_Registry, environment);
+
+        // The sun (the first Directional Light) as the air lets it through: not at all once it has set. It goes first, the
+        // moon after it: the first directional light submitted gets the denoised shadow mask, which at night is the moon's.
         bool hasDirectionalLight = false;
         {
             auto view = m_Registry.view<WorldTransformComponent, DirectionalLightComponent>();
             for (auto entity : view)
             {
                 auto [wtc, light] = view.get<WorldTransformComponent, DirectionalLightComponent>(entity);
-                m_renderer->SubmitLight(wtc.WorldMatrix, light);
+                const bool isSun = !hasDirectionalLight;
                 hasDirectionalLight = true;
+                if (isSun && proceduralSky)
+                {
+                    DirectionalLightComponent sun = light;
+                    sun.Color *= sky.SunTransmittance;
+                    if (Luminance(sun.Color) * sun.Intensity > 0.0f)
+                        m_renderer->SubmitLight(wtc.WorldMatrix, sun);
+                    continue;
+                }
+                m_renderer->SubmitLight(wtc.WorldMatrix, light);
             }
         }
-        const EnvironmentLightComponent* environment = FindEnvironment(m_Registry);
         // A procedural sky without a Directional Light: the sun it draws also lights the scene (direct light, shadows).
         // A Directional Light added later is the sun from then on.
-        if (!hasDirectionalLight && environment && environment->Source == EnvironmentSource::ProceduralSky)
+        if (!hasDirectionalLight && proceduralSky)
         {
             DirectionalLightComponent skySun;
             skySun.Intensity = DefaultSkySunIntensity;
-            m_renderer->SubmitLight(glm::toMat4(DefaultSkySunRotation()), skySun);
+            skySun.Color *= sky.SunTransmittance;
+            if (Luminance(skySun.Color) > 0.0f)
+                m_renderer->SubmitLight(glm::toMat4(DefaultSkySunRotation()), skySun);
+        }
+        if (proceduralSky && sky.MoonLights)
+        {
+            DirectionalLightComponent moon;
+            moon.Color = sky.MoonIlluminance * sky.MoonTransmittance;
+            moon.Intensity = 1.0f;
+            moon.AngularDiameter = glm::degrees(sky.MoonAngularRadius * 2.0f);
+            m_renderer->SubmitLight(DirectionalLightTransform(sky.MoonDirection), moon);
         }
         {
             auto view = m_Registry.view<WorldTransformComponent, PointLightComponent>();

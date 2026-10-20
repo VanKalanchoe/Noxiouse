@@ -158,6 +158,13 @@ namespace Nox
         float CloudThicknessKm = 2.0f;
         float CloudScaleKm = 8.0f;                  // one tile of the shape noise: clouds of ~2 km
         glm::vec2 CloudOffsetKm{ 0.0f };            // moves them (wind)
+        // Night: the moon lights the air and the clouds like the sun (MoonIlluminance 0 by day: it does not count then); the
+        // skybox draws its disc and the stars.
+        glm::vec3 MoonDirection{ 0.0f, -1.0f, 0.0f };
+        glm::vec3 MoonIlluminance{ 0.0f };          // above the atmosphere, its lit fraction included
+        glm::vec3 MoonDiscIlluminance{ 0.0f };      // a full moon's light, for its disc (the skybox shades the phase); 0 = no moon
+        float MoonAngularRadius = 0.0046f;          // radians
+        float StarIntensity = 0.0f;                 // 0 = no stars (daylight)
 
         bool operator==(const SkyAtmosphereSettings&) const = default;
     };
@@ -262,6 +269,10 @@ namespace Nox
         // misses). Called every frame while the scene wants it; a frame in which the settings changed updates the sky and
         // its IBL inside the frame (a few compute passes, no wait). SetEnvironmentMap switches back to a texture or none.
         void SetProceduralSky(const SkyAtmosphereSettings& settings);
+        // The air's transmittance from the viewer (sky.AltitudeKm, scales of sky) towards a light in `direction` (normalized),
+        // as SkyAtmosphere.slang's atmosphere has it: what reaches the ground of the sun's or the moon's light. Fades to 0 as a
+        // disc of angularRadius (radians) sinks below the horizon.
+        static glm::vec3 ComputeSkyTransmittance(const SkyAtmosphereSettings& sky, const glm::vec3& direction, float angularRadius);
         // Per frame, main thread (Scene::SetRenderer): the fog of the scene's environment, or disabled.
         void SetHeightFog(const HeightFogSettings& settings) { m_heightFog = settings; }
 

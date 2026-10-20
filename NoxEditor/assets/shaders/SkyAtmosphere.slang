@@ -11,7 +11,9 @@
 //                           environment cubemap per dispatch (every mip raymarched directly: the sky is smooth).
 // The cubemap is the scene's environment like an HDR map would be (skybox, IBL, reflections, DDGI and path tracer misses),
 // so raster and path tracer see the same sky. The sun's disc is not in it (the directional light already lights the scene
-// with the sun, IBL would count it twice): Skybox.slang draws the disc.
+// with the sun, IBL would count it twice): Skybox.slang draws the disc, the moon's and the stars. At night the moon lights the
+// air and the clouds the same way (a second light, moonIlluminance). The cubemap's alpha is the clouds' transmittance: what
+// the skybox's discs and stars show through.
 
 // Earth (the paper's / sebh's defaults), per km at sea level.
 static const float3 RayleighScattering = float3(5.802, 13.558, 33.1) * 1e-3;
@@ -504,6 +506,25 @@ CloudResult marchClouds(PushConstantSkyAtmosphere push, float3 origin, float3 di
     return result;
 }
 
+// The sky and its clouds seen in one direction, lit by one light (the sun or the moon), per unit of that light's illuminance.
+float3 skyLuminance(PushConstantSkyAtmosphere push, float3 origin, float3 direction, float3 lightDirection, float jitter,
+                    out float cloudTransmittance)
+{
+    const ScatteringResult sky = integrateScatteredLuminance(push, origin, direction, lightDirection, 32, false, true);
+    float3 luminance = sky.luminance;
+
+    // Clouds: in front of the sky behind them, behind the air in front of them.
+    const CloudResult clouds = marchClouds(push, origin, direction, lightDirection, jitter);
+    cloudTransmittance = clouds.transmittance;
+    if (clouds.transmittance < 0.999)
+    {
+        const ScatteringResult front = integrateScatteredLuminance(push, origin, direction, lightDirection, 16, false, false, clouds.distance);
+        // sky = front + T_air * behind, so behind the clouds: (sky - front) dimmed by them.
+        luminance = front.luminance + front.transmittance * clouds.luminance + clouds.transmittance * max(sky.luminance - front.luminance, 0.0);
+    }
+    return luminance;
+}
+
 [shader("compute")]
 [numthreads(16, 16, 1)]
 void skyCubemapMain(uint3 id : SV_DispatchThreadID, uniform PushConstantSkyAtmosphere push)
@@ -516,22 +537,18 @@ void skyCubemapMain(uint3 id : SV_DispatchThreadID, uniform PushConstantSkyAtmos
 
     // The world's +Y is up; the camera stands at the planet's north pole, cameraAltitudeKm above the ground.
     const float3 origin = float3(0.0, BottomRadius + max(push.cameraAltitudeKm, PlanetRadiusOffset), 0.0);
-    const float3 sunDirection = normalize(push.sunDirection);
-    const ScatteringResult sky = integrateScatteredLuminance(push, origin, direction, sunDirection, 32, false, true);
-    float3 luminance = sky.luminance;
-
-    // Clouds: in front of the sky behind them, behind the air in front of them.
     const float jitter = float(cloudHashPcg3d(id).x & 0xFFFFu) / 65536.0;
-    const CloudResult clouds = marchClouds(push, origin, direction, sunDirection, jitter);
-    if (clouds.transmittance < 0.999)
+    float cloudTransmittance;
+    float3 luminance = skyLuminance(push, origin, direction, normalize(push.sunDirection), jitter, cloudTransmittance) * push.sunIlluminance;
+    // At night the moon's light too (the same air and clouds, from another direction).
+    if (any(push.moonIlluminance > 0.0))
     {
-        const ScatteringResult front = integrateScatteredLuminance(push, origin, direction, sunDirection, 16, false, false, clouds.distance);
-        // sky = front + T_air * behind, so behind the clouds: (sky - front) dimmed by them.
-        luminance = front.luminance + front.transmittance * clouds.luminance + clouds.transmittance * max(sky.luminance - front.luminance, 0.0);
+        float moonCloudTransmittance;
+        luminance += skyLuminance(push, origin, direction, normalize(push.moonDirection), jitter, moonCloudTransmittance) * push.moonIlluminance;
     }
 
     RWTexture2DArray<float4> output = RWTexture2DArray<float4>.Handle(uint2(push.outputStorageIndex, 0));
-    output[id] = float4(luminance * push.sunIlluminance, 1.0);
+    output[id] = float4(luminance, cloudTransmittance);
 }
 
 // A mip of the environment cubemap from the one above: the centre of a texel here is the shared corner of four texels
@@ -545,9 +562,10 @@ void downsampleCubeMain(uint3 id : SV_DispatchThreadID, uniform PushConstantSkyA
     const float2 st = (float2(id.xy) + 0.5) / float(push.outputSize) * 2.0 - 1.0;
     TextureCube source = TextureCube.Handle(uint2(push.sourceTextureIndex, 0));
     SamplerState linearClamp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
-    const float3 color = source.SampleLevel(linearClamp, cubemapDirection(id.z, st), push.sourceLod).rgb;
+    // Alpha too: the clouds' transmittance (skyCubemapMain).
+    const float4 color = source.SampleLevel(linearClamp, cubemapDirection(id.z, st), push.sourceLod);
     RWTexture2DArray<float4> output = RWTexture2DArray<float4>.Handle(uint2(push.outputStorageIndex, 0));
-    output[id] = float4(color, 1.0);
+    output[id] = color;
 }
 
 // Aerial perspective (the paper's camera volume, UE's "aerial perspective LUT"): for each froxel column the camera's view
@@ -585,9 +603,16 @@ void aerialPerspectiveMain(uint3 id : SV_DispatchThreadID, uniform PushConstantA
     const float cosTheta = dot(direction, sunDirection);
     const float phaseRayleigh = rayleighPhase(cosTheta);
     const float phaseMie = miePhase(ap.mieAnisotropy, cosTheta);
+    // The moon at night: the same air scattering its light from its own direction.
+    const bool moon = any(ap.moonIlluminance > 0.0);
+    const float3 moonDirection = normalize(ap.moonDirection);
+    const float moonCosTheta = dot(direction, moonDirection);
+    const float moonPhaseRayleigh = rayleighPhase(moonCosTheta);
+    const float moonPhaseMie = miePhase(ap.mieAnisotropy, moonCosTheta);
 
     RWTexture2DArray<float4> output = RWTexture2DArray<float4>.Handle(uint2(ap.outputStorageIndex, 0));
     float3 scattered = float3(0.0);
+    float3 moonScattered = float3(0.0);
     float3 throughput = float3(1.0);
     float sliceStart = 0.0;
     for (uint slice = 0; slice < AerialPerspectiveSlices; ++slice)
@@ -615,9 +640,18 @@ void aerialPerspectiveMain(uint3 id : SV_DispatchThreadID, uniform PushConstantA
             const float3 segmentTransmittance = exp(-medium.extinction * dt);
             const float3 extinction = max(medium.extinction, float3(1e-7));
             scattered += throughput * (inScattered - inScattered * segmentTransmittance) / extinction;
+            if (moon)
+            {
+                const float cosMoonZenith = dot(moonDirection, up);
+                const float moonShadow = raySphere(up * r, moonDirection, BottomRadius) >= 0.0 ? 0.0 : 1.0;
+                const float3 moonInScattered =
+                    moonShadow * sampleTransmittance(atmosphere, r, cosMoonZenith) * (medium.rayleigh * moonPhaseRayleigh + medium.mie * moonPhaseMie) +
+                    sampleMultiScattering(atmosphere, r, cosMoonZenith) * medium.scattering;
+                moonScattered += throughput * (moonInScattered - moonInScattered * segmentTransmittance) / extinction;
+            }
             throughput *= segmentTransmittance;
         }
         sliceStart = sliceEnd;
-        output[uint3(id.xy, slice)] = float4(scattered * ap.sunIlluminance, dot(throughput, float3(1.0 / 3.0)));
+        output[uint3(id.xy, slice)] = float4(scattered * ap.sunIlluminance + moonScattered * ap.moonIlluminance, dot(throughput, float3(1.0 / 3.0)));
     }
 }

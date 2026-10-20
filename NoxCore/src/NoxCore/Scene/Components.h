@@ -327,6 +327,20 @@ namespace Nox
         float CloudScaleKm = 8.0f;        // larger = bigger clouds
         glm::vec2 CloudOffsetKm{ 0.0f, 0.0f }; // moves the clouds (animate it for wind)
 
+        // The sun (and moon) light the scene as seen through the air: yellow-white at noon, red at sunset, gone below the horizon.
+        bool SunThroughAtmosphere = true;
+        // Night (procedural sky): a moon lights the scene and the sky once the sun is down, and the stars come out.
+        bool Moon = true;
+        float MoonIntensity = 0.03f;            // a full moon's light, in the sun's units (sun 10 = daylight); the real moon is ~1/400000
+                                                // of the sun: this is brighter so moonlit scenes read (with auto exposure)
+        glm::vec3 MoonColor{ 0.75f, 0.85f, 1.0f };
+        float MoonAngularDiameter = 0.53f;      // degrees (the real moon's)
+        bool MoonOppositeSun = true;            // always opposite the sun: a full moon; else at MoonElevation / MoonAzimuth (degrees,
+        float MoonElevation = 40.0f;            // azimuth from +Z towards +X), its phase from where the sun is
+        float MoonAzimuth = 200.0f;
+        bool Stars = true;
+        float StarIntensity = 1.0f;
+
         // Exponential height fog (UE's Exponential Height Fog), with either source: thick low down and at the horizon.
         bool HeightFog = false;
         float FogDensity = 0.5f;          // extinction per km at FogHeight

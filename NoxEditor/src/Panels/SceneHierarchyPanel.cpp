@@ -1490,7 +1490,7 @@ namespace Nox
                     if (elevation < 8.0f)
                     {
                         ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), elevation < 0.0f
-                            ? "The sun is below the horizon: a night sky (dark)."
+                            ? "The sun is below the horizon: night (the moon and the stars, below)."
                             : "The sun is low: a sunset sky (dark above, orange at the horizon).");
                     }
                 }
@@ -1524,6 +1524,35 @@ namespace Nox
                     ImGui::SetItemTooltip("Scale of the cloud shapes: larger = bigger clouds.");
                     ImGui::DragFloat2("Cloud Offset", glm::value_ptr(component.CloudOffsetKm), 0.05f, -1000.0f, 1000.0f, "%.2f km");
                     ImGui::SetItemTooltip("Moves the clouds (change it over time for wind). Each change re-renders the sky (~ms).");
+                }
+
+                ImGui::SeparatorText("Sun and Night");
+                ImGui::Checkbox("Sun Through Atmosphere", &component.SunThroughAtmosphere);
+                ImGui::SetItemTooltip("The sun (and the moon) light the scene as seen through the air: yellow-white at noon, red at\n"
+                                      "sunset, and not at all once below the horizon. Off: the Directional Light's color as set.");
+                ImGui::Checkbox("Moon", &component.Moon);
+                if (component.Moon)
+                {
+                    ImGui::DragFloat("Moon Intensity", &component.MoonIntensity, 0.001f, 0.0f, 10.0f, "%.3f");
+                    ImGui::SetItemTooltip("A full moon's light, in the sun's units (the sun is ~10). It lights the scene (with shadows)\n"
+                                          "and the sky once it counts next to the sun -- in practice after sunset.");
+                    ImGui::ColorEdit3("Moon Color", glm::value_ptr(component.MoonColor));
+                    ImGui::DragFloat("Moon Size", &component.MoonAngularDiameter, 0.01f, 0.1f, 20.0f, "%.2f deg");
+                    ImGui::SetItemTooltip("Its apparent diameter (the real moon: 0.53 degrees).");
+                    ImGui::Checkbox("Opposite the Sun", &component.MoonOppositeSun);
+                    ImGui::SetItemTooltip("Always where the sun is not: a full moon rising as the sun sets. Off: placed below, with\n"
+                                          "the phase its angle to the sun gives.");
+                    if (!component.MoonOppositeSun)
+                    {
+                        ImGui::DragFloat("Moon Elevation", &component.MoonElevation, 0.2f, -90.0f, 90.0f, "%.1f deg");
+                        ImGui::DragFloat("Moon Azimuth", &component.MoonAzimuth, 0.5f, -360.0f, 360.0f, "%.1f deg");
+                    }
+                }
+                ImGui::Checkbox("Stars", &component.Stars);
+                if (component.Stars)
+                {
+                    ImGui::DragFloat("Star Brightness", &component.StarIntensity, 0.01f, 0.0f, 100.0f, "%.2f x");
+                    ImGui::SetItemTooltip("They fade in after sunset (fully from 12 degrees below the horizon) and hide behind clouds.");
                 }
 
                 DrawHeightFogControls(component);

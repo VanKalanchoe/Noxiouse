@@ -694,6 +694,17 @@ namespace Nox
             skyboxSun.sunDiscRadiance = glm::max(sky.SunIlluminance, glm::vec3(0.0f)) * std::min(1.0f / solidAngle, 64.0f);
             skyboxSun.sunCosAngularRadius = std::cos(radius);
             skyboxSun.skyAltitudeKm = glm::clamp(sky.AltitudeKm, 0.0f, 99.0f);
+
+            // The moon's disc. Its light on the scene is ~1000x the real moon's (so moonlit scenes read); its disc is not, or it would
+            // glare like a second sun: about the real ratio of a full moon's brightness to the ground it lights, and comparable
+            // to the blue sky when it shows by day.
+            const float moonLength = glm::length(sky.MoonDirection);
+            const float moonRadius = glm::clamp(sky.MoonAngularRadius, 0.0005f, 0.2f);
+            const float moonSolidAngle = 2.0f * glm::pi<float>() * (1.0f - std::cos(moonRadius));
+            skyboxSun.moonDirection = moonLength > 1e-6f ? sky.MoonDirection / moonLength : glm::vec3(0.0f, -1.0f, 0.0f);
+            skyboxSun.moonCosAngularRadius = std::cos(moonRadius);
+            skyboxSun.moonDiscRadiance = glm::max(sky.MoonDiscIlluminance, glm::vec3(0.0f)) * (0.002f / moonSolidAngle);
+            skyboxSun.starIntensity = glm::max(sky.StarIntensity, 0.0f);
         }
         return skyboxSun;
     }

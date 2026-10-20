@@ -879,6 +879,11 @@ struct PushConstantSkyAtmosphere
     // downsampleCubeMain: the cubemap read (sampled slot) and the mip read from it.
     uint32_t sourceTextureIndex;
     float sourceLod;
+    // The moon (at night): the air and the clouds scatter its light as they do the sun's. moonIlluminance 0: none (by day).
+    vec3 moonDirection;                   // world space, towards the moon
+    float moonPadding0;
+    vec3 moonIlluminance;                 // its color * intensity * the lit fraction of its disc, above the atmosphere
+    float moonPadding1;
 };
 
 struct PushConstantSkybox
@@ -892,6 +897,11 @@ struct PushConstantSkybox
     float sunCosAngularRadius;
     vec3 sunDiscRadiance;           // at the disc's center above the atmosphere: illuminance / solid angle (capped)
     float skyAltitudeKm;            // the viewer's height in the sky model
+    // The moon's disc (lit by the sun: its phase), and the stars; the cubemap's alpha (the clouds' transmittance) hides them.
+    vec3 moonDirection;             // world space, towards the moon
+    float moonCosAngularRadius;
+    vec3 moonDiscRadiance;          // a full moon's, at the disc's centre above the atmosphere (0: no moon)
+    float starIntensity;            // 0: no stars (daylight)
 };
 
 // Aerial perspective (SkyAtmosphere.slang aerialPerspectiveMain): the atmosphere between the camera and the scene, as a
@@ -922,6 +932,10 @@ struct PushConstantAerialPerspective
     float padding0;
     float padding1;
     float padding2;
+    vec3 moonDirection;                 // the moon at night (moonIlluminance 0: none)
+    float moonPadding0;
+    vec3 moonIlluminance;
+    float moonPadding1;
 };
 
 #ifndef __SLANG__
@@ -929,12 +943,15 @@ struct PushConstantAerialPerspective
 static_assert(offsetof(PushConstantSkyAtmosphere, sunDirection) == 16 && offsetof(PushConstantSkyAtmosphere, sunIlluminance) == 32 &&
               offsetof(PushConstantSkyAtmosphere, groundAlbedo) == 48 && offsetof(PushConstantSkyAtmosphere, cameraAltitudeKm) == 72 &&
               offsetof(PushConstantSkyAtmosphere, cloudShapeTextureIndex) == 80 && offsetof(PushConstantSkyAtmosphere, sourceLod) == 124 &&
-              sizeof(PushConstantSkyAtmosphere) == 128, "PushConstantSkyAtmosphere must match its std430 layout");
+              offsetof(PushConstantSkyAtmosphere, moonDirection) == 128 && offsetof(PushConstantSkyAtmosphere, moonIlluminance) == 144 &&
+              sizeof(PushConstantSkyAtmosphere) == 160, "PushConstantSkyAtmosphere must match its std430 layout");
 static_assert(offsetof(PushConstantSkybox, sunDirection) == 16 && offsetof(PushConstantSkybox, sunDiscRadiance) == 32 &&
-              offsetof(PushConstantSkybox, skyAltitudeKm) == 44 && sizeof(PushConstantSkybox) == 48,
-              "PushConstantSkybox must match its std430 layout");
+              offsetof(PushConstantSkybox, skyAltitudeKm) == 44 && offsetof(PushConstantSkybox, moonDirection) == 48 &&
+              offsetof(PushConstantSkybox, moonDiscRadiance) == 64 && offsetof(PushConstantSkybox, starIntensity) == 76 &&
+              sizeof(PushConstantSkybox) == 80, "PushConstantSkybox must match its std430 layout");
 static_assert(offsetof(PushConstantAerialPerspective, sunDirection) == 16 && offsetof(PushConstantAerialPerspective, sunIlluminance) == 32 &&
-              offsetof(PushConstantAerialPerspective, altitudeKm) == 64 && sizeof(PushConstantAerialPerspective) == 80,
+              offsetof(PushConstantAerialPerspective, altitudeKm) == 64 && offsetof(PushConstantAerialPerspective, moonDirection) == 80 &&
+              offsetof(PushConstantAerialPerspective, moonIlluminance) == 96 && sizeof(PushConstantAerialPerspective) == 112,
               "PushConstantAerialPerspective must match its std430 layout");
 #endif
 

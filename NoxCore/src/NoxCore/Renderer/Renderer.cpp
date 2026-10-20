@@ -2472,13 +2472,64 @@ namespace Nox
         if (settings.RayleighScale != m_proceduralSky.RayleighScale || settings.MieScale != m_proceduralSky.MieScale ||
             settings.OzoneScale != m_proceduralSky.OzoneScale || settings.GroundAlbedo != m_proceduralSky.GroundAlbedo)
             m_skyLutsDirty = true;
-        // The disc's size only changes what the skybox draws, the aerial perspective scale only its lookup.
+        // The discs and the stars only change what the skybox draws, the aerial perspective scale only its lookup.
         SkyAtmosphereSettings sameSky = settings;
         sameSky.SunAngularRadius = m_proceduralSky.SunAngularRadius;
         sameSky.AerialPerspectiveScale = m_proceduralSky.AerialPerspectiveScale;
+        sameSky.MoonDiscIlluminance = m_proceduralSky.MoonDiscIlluminance;
+        sameSky.MoonAngularRadius = m_proceduralSky.MoonAngularRadius;
+        sameSky.StarIntensity = m_proceduralSky.StarIntensity;
+        // Where the moon is only matters while it lights the sky.
+        if (settings.MoonIlluminance == glm::vec3(0.0f) && m_proceduralSky.MoonIlluminance == glm::vec3(0.0f))
+            sameSky.MoonDirection = m_proceduralSky.MoonDirection;
         if (sameSky != m_proceduralSky)
             m_skyDirty = true;
         m_proceduralSky = settings;
+    }
+
+    glm::vec3 Renderer::ComputeSkyTransmittance(const SkyAtmosphereSettings& sky, const glm::vec3& direction, float angularRadius)
+    {
+        // SkyAtmosphere.slang's Earth (sampleMedium), per km: the optical depth from the viewer to the top of the atmosphere.
+        constexpr float bottomRadius = 6360.0f;
+        constexpr float topRadius = 6460.0f;
+        const glm::vec3 rayleighScattering = glm::vec3(5.802f, 13.558f, 33.1f) * 1e-3f * glm::max(sky.RayleighScale, 0.0f);
+        const float mieExtinction = 4.40e-3f * glm::max(sky.MieScale, 0.0f);
+        const glm::vec3 ozoneAbsorption = glm::vec3(0.650f, 1.881f, 0.085f) * 1e-3f * glm::max(sky.OzoneScale, 0.0f);
+
+        const float viewerRadius = bottomRadius + glm::clamp(sky.AltitudeKm, 0.01f, 99.0f);
+        // The disc's height over the horizon (which dips below level when seen from up high): how much of it is still up.
+        const float horizon = -std::acos(glm::clamp(bottomRadius / viewerRadius, -1.0f, 1.0f));
+        const float elevation = std::asin(glm::clamp(direction.y, -1.0f, 1.0f));
+        const float radius = glm::max(angularRadius, 0.002f);
+        const float visible = glm::smoothstep(-radius, radius, elevation - horizon);
+        if (visible <= 0.0f)
+            return glm::vec3(0.0f);
+
+        // Through the air just above the horizon at most (a ray grazing the ground would end on it).
+        const float rayElevation = glm::max(elevation, horizon + 0.001f);
+        const glm::vec3 origin(0.0f, viewerRadius, 0.0f);
+        const glm::vec3 horizontal = glm::length(glm::vec2(direction.x, direction.z)) > 1e-6f
+                                         ? glm::normalize(glm::vec3(direction.x, 0.0f, direction.z)) : glm::vec3(1.0f, 0.0f, 0.0f);
+        const glm::vec3 ray = horizontal * std::cos(rayElevation) + glm::vec3(0.0f, std::sin(rayElevation), 0.0f);
+        // Distance to the top of the atmosphere.
+        const float b = glm::dot(origin, ray);
+        const float c = glm::dot(origin, origin) - topRadius * topRadius;
+        const float length = -b + std::sqrt(glm::max(b * b - c, 0.0f));
+
+        constexpr int steps = 64;
+        glm::vec3 opticalDepth(0.0f);
+        for (int step = 0; step < steps; ++step)
+        {
+            // Denser near the viewer, where the air is (as SkyAtmosphere.slang's march).
+            const float t0 = length * glm::pow(static_cast<float>(step) / steps, 2.0f);
+            const float t1 = length * glm::pow(static_cast<float>(step + 1) / steps, 2.0f);
+            const float height = glm::length(origin + ray * (0.5f * (t0 + t1))) - bottomRadius;
+            const float rayleigh = std::exp(-height / 8.0f);
+            const float mie = std::exp(-height / 1.2f);
+            const float ozone = glm::max(0.0f, 1.0f - std::abs(height - 25.0f) / 15.0f);
+            opticalDepth += (rayleighScattering * rayleigh + glm::vec3(mieExtinction * mie) + ozoneAbsorption * ozone) * (t1 - t0);
+        }
+        return glm::exp(-opticalDepth) * visible;
     }
 
     void Renderer::releaseEnvironmentTextures(bool keepBrdfLut)
@@ -3018,6 +3069,9 @@ namespace Nox
         push.cloudScaleKm = glm::max(settings.CloudScaleKm, 0.1f);
         push.cloudOffsetXKm = settings.CloudOffsetKm.x;
         push.cloudOffsetZKm = settings.CloudOffsetKm.y;
+        const float moonLength = glm::length(settings.MoonDirection);
+        push.moonDirection = moonLength > 1e-6f ? settings.MoonDirection / moonLength : glm::vec3(0.0f, -1.0f, 0.0f);
+        push.moonIlluminance = glm::max(settings.MoonIlluminance, glm::vec3(0.0f));
 
         m_renderGraph.AddPass("Procedural Sky", RGPassFlags::NeverCull,
             [](RGBuilder&)
@@ -3143,6 +3197,9 @@ namespace Nox
         push.mieAnisotropy = glm::clamp(settings.MieAnisotropy, 0.0f, 0.99f);
         push.kmPerWorldUnit = WorldUnits::ToMeters(1.0f) / 1000.0f;
         push.altitudeKm = glm::clamp(settings.AltitudeKm, 0.0f, 99.0f);
+        const float moonLength = glm::length(settings.MoonDirection);
+        push.moonDirection = moonLength > 1e-6f ? settings.MoonDirection / moonLength : glm::vec3(0.0f, -1.0f, 0.0f);
+        push.moonIlluminance = glm::max(settings.MoonIlluminance, glm::vec3(0.0f));
 
         const RGTexture volume = m_renderGraph.ImportTexture("Aerial Perspective", m_skyAerialPerspective.get());
         NRI::Pipeline* pipeline = m_skyAerialPerspectivePipeline.get();

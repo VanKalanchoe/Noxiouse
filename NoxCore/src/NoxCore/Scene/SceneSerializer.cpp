@@ -540,6 +540,16 @@ namespace Nox
             out << YAML::Key << "CloudThicknessKm" << YAML::Value << elc.CloudThicknessKm;
             out << YAML::Key << "CloudScaleKm" << YAML::Value << elc.CloudScaleKm;
             out << YAML::Key << "CloudOffsetKm" << YAML::Value << elc.CloudOffsetKm;
+            out << YAML::Key << "SunThroughAtmosphere" << YAML::Value << elc.SunThroughAtmosphere;
+            out << YAML::Key << "Moon" << YAML::Value << elc.Moon;
+            out << YAML::Key << "MoonIntensity" << YAML::Value << elc.MoonIntensity;
+            out << YAML::Key << "MoonColor" << YAML::Value << elc.MoonColor;
+            out << YAML::Key << "MoonAngularDiameter" << YAML::Value << elc.MoonAngularDiameter;
+            out << YAML::Key << "MoonOppositeSun" << YAML::Value << elc.MoonOppositeSun;
+            out << YAML::Key << "MoonElevation" << YAML::Value << elc.MoonElevation;
+            out << YAML::Key << "MoonAzimuth" << YAML::Value << elc.MoonAzimuth;
+            out << YAML::Key << "Stars" << YAML::Value << elc.Stars;
+            out << YAML::Key << "StarIntensity" << YAML::Value << elc.StarIntensity;
             out << YAML::Key << "HeightFog" << YAML::Value << elc.HeightFog;
             out << YAML::Key << "FogDensity" << YAML::Value << elc.FogDensity;
             out << YAML::Key << "FogHeightFalloff" << YAML::Value << elc.FogHeightFalloff;
@@ -1473,6 +1483,26 @@ namespace Nox
                 elc.CloudScaleKm = environmentLightComponent["CloudScaleKm"].as<float>();
             if (environmentLightComponent["CloudOffsetKm"])
                 elc.CloudOffsetKm = environmentLightComponent["CloudOffsetKm"].as<glm::vec2>();
+            if (environmentLightComponent["SunThroughAtmosphere"])
+                elc.SunThroughAtmosphere = environmentLightComponent["SunThroughAtmosphere"].as<bool>();
+            if (environmentLightComponent["Moon"])
+                elc.Moon = environmentLightComponent["Moon"].as<bool>();
+            if (environmentLightComponent["MoonIntensity"])
+                elc.MoonIntensity = environmentLightComponent["MoonIntensity"].as<float>();
+            if (environmentLightComponent["MoonColor"])
+                elc.MoonColor = environmentLightComponent["MoonColor"].as<glm::vec3>();
+            if (environmentLightComponent["MoonAngularDiameter"])
+                elc.MoonAngularDiameter = environmentLightComponent["MoonAngularDiameter"].as<float>();
+            if (environmentLightComponent["MoonOppositeSun"])
+                elc.MoonOppositeSun = environmentLightComponent["MoonOppositeSun"].as<bool>();
+            if (environmentLightComponent["MoonElevation"])
+                elc.MoonElevation = environmentLightComponent["MoonElevation"].as<float>();
+            if (environmentLightComponent["MoonAzimuth"])
+                elc.MoonAzimuth = environmentLightComponent["MoonAzimuth"].as<float>();
+            if (environmentLightComponent["Stars"])
+                elc.Stars = environmentLightComponent["Stars"].as<bool>();
+            if (environmentLightComponent["StarIntensity"])
+                elc.StarIntensity = environmentLightComponent["StarIntensity"].as<float>();
             if (environmentLightComponent["HeightFog"])
                 elc.HeightFog = environmentLightComponent["HeightFog"].as<bool>();
             if (environmentLightComponent["FogDensity"])
