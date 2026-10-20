@@ -3364,10 +3364,21 @@ namespace Nox
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("The world grid, with the cells of the location step");
         ImGui::SameLine();
+        bool wireframe = m_Renderer->getWireframeOverlay();
+        if (ImGui::Checkbox("Wireframe", &wireframe))
+            m_Renderer->setWireframeOverlay(wireframe);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Every mesh's triangle edges over the image (how dense the geometry is)");
+        ImGui::SameLine();
         if (ImGui::SmallButton("To Floor"))
             SnapSelectionToFloor();
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("Drop the selection onto the surface below it (End)");
+        ImGui::SameLine();
+        if (ImGui::SmallButton("To Grid"))
+            SnapSelectionToGrid();
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Move the selection to the nearest grid point of the location step (its position, not its size)");
 
         ImGui::SameLine();
         if (ImGui::Checkbox("Measure", &m_MeasureTool) && !m_MeasureTool)
@@ -3861,6 +3872,28 @@ namespace Nox
                 });
             }
         }
+    }
+
+    void EditorLayer::SnapSelectionToGrid()
+    {
+        // Unreal's "Snap Origin to Grid": every selected entity whose parent is not selected too (children follow their parent).
+        const float step = LocationSnapWorldUnits();
+        if (step <= 0.0f)
+            return;
+        for (Entity entity : m_SceneHierarchyPanel.GetSelectedEntities())
+        {
+            if (!entity || !entity.HasComponent<WorldTransformComponent>())
+                continue;
+            const bool parentSelected = entity.HasComponent<RelationshipComponent>() && entity.GetComponent<RelationshipComponent>().Parent != 0 &&
+                                        m_SceneHierarchyPanel.IsSelected(m_ActiveScene->GetEntityByUUID(entity.GetComponent<RelationshipComponent>().Parent));
+            if (parentSelected)
+                continue;
+            glm::mat4 world = entity.GetComponent<WorldTransformComponent>().WorldMatrix;
+            const glm::vec3 position(world[3]);
+            world[3] = glm::vec4(glm::round(position / step) * step, 1.0f);
+            entity.SetWorldTransform(world);
+        }
+        m_HistoryCheckRequested = true;
     }
 
     AssetHandle EditorLayer::CreateVariant(AssetHandle baseHandle, const std::filesystem::path& relativeFolder)

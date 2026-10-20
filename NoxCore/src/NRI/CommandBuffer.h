@@ -63,7 +63,8 @@ namespace NRI
     
     enum class PolygonMode
     {
-        Fill
+        Fill,
+        Line // needs the fillModeNonSolid feature (enabled by DeviceVK)
     };
     
     enum class CullMode
@@ -84,7 +85,8 @@ namespace NRI
         Zero,
         SrcAlpha,
         OneMinusSrcAlpha,
-        OneMinusSrcColor
+        OneMinusSrcColor,
+        SrcColor
     };
     
     enum class BlendOp

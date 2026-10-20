@@ -241,6 +241,7 @@ namespace Nox
         watchShader("assets/shaders/LightShapes.slang", "LightShapes", [this]() { createLightShapesPipeline(true); });
         // Unlit
         watchShader("assets/shaders/Material_Unlit_Mesh.slang", "Unlit", [this]() { createUnlitPipeline(true); });
+        watchShader("assets/shaders/Wireframe.slang", "Wireframe", [this]() { createWireframePipeline(true); });
         watchShader("assets/shaders/Material_TransparentLit_Mesh.slang", "TransparentLit", [this]() { createTransparentLitPipeline(true); });
         watchShader("assets/shaders/PBRLighting.slang", "TransparentLit", [this]() { createTransparentLitPipeline(true); });
         watchShader("assets/shaders/PBRLighting.slang", "DeferredLighting", [this]() { createDeferredLightingPipeline(true); });
@@ -438,6 +439,7 @@ namespace Nox
         createCompiler();
         createUnlitPipeline(false);
         createTransparentLitPipeline(false);
+        if (m_isEditor) createWireframePipeline(false);
         // The runtime's only (the editor presents through ImGui), created in the editor too: its shaders then are in the cache a
         // packaged game without the shader compiler reads (File > Package Game, precompiled shaders only).
         createPresentPipeline(false);
@@ -1832,6 +1834,17 @@ namespace Nox
         desc.colorFormats = { NRI::ImageFormat::R16G16B16A16_SFLOAT, NRI::ImageFormat::R16_SFLOAT, NRI::ImageFormat::R32SINT };
         desc.shaders.back().entryPoint = "fragMainOIT";
         m_transparentLitOITPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+    }
+
+    void Renderer::createWireframePipeline(bool forceCompile)
+    {
+        NRI::PipelineDesc desc{};
+        desc.forceCompile = forceCompile;
+        desc.colorFormats = { NRI::ImageFormat::R16G16B16A16_SFLOAT, NRI::ImageFormat::R32SINT };
+        desc.shaders.push_back({ .stage = NRI::ShaderStage::Task, .entryPoint = "taskMain", .sourcePath = "assets/shaders/Material_PBR_MeshTask.slang" });
+        desc.shaders.push_back({ .stage = NRI::ShaderStage::Mesh, .entryPoint = "meshMain", .sourcePath = "assets/shaders/Material_PBR_Mesh.slang" });
+        desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "fragMain", .sourcePath = "assets/shaders/Wireframe.slang" });
+        m_wireframePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
     void Renderer::createPresentPipeline(bool forceCompile)

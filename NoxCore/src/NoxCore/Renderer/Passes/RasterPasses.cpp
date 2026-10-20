@@ -1184,6 +1184,39 @@ namespace Nox
                     drawForwardTransparent(cmd, context, res->CameraDraws, cursor);
                 }
 
+                // E. WIREFRAME OVERLAY (editor): every bucket's triangles as lines, multiplied into the image, depth tested against
+                // the scene (its own surfaces pass: the same vertices). Not into the entity IDs: picking keeps the surfaces.
+                if (hasDraws && m_wireframeOverlay && m_wireframePipeline)
+                {
+                    MeshletDrawCursor wireCursor = beginMeshletDraws(context, res->CameraDraws);
+                    wireCursor.references.ssaoTextureIndex = 0xFFFFFFFF;
+                    cmd.setPolygonMode(NRI::PolygonMode::Line);
+                    cmd.setLineWidth(1.0f);
+                    cmd.setDepthTestEnable(true);
+                    cmd.setDepthWriteEnable(false);
+                    cmd.setDepthCompareOp(NRI::CompareOp::GreaterOrEqual);
+                    cmd.setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B);
+                    cmd.setColorWriteMask(1, 0u);
+                    const NRI::ColorBlendEquation multiply{ NRI::BlendFactor::Zero, NRI::BlendFactor::SrcColor, NRI::BlendOp::Add,
+                                                            NRI::BlendFactor::Zero, NRI::BlendFactor::One, NRI::BlendOp::Add };
+                    cmd.setColorBlendEquation(0, multiply);
+                    constexpr RenderBucket kWireBuckets[] = { RenderBucket::Opaque, RenderBucket::OpaqueDoubleSided, RenderBucket::Mask, RenderBucket::MaskDoubleSided,
+                                                              RenderBucket::Unlit, RenderBucket::UnlitDoubleSided, RenderBucket::Transparent,
+                                                              RenderBucket::TransparentDoubleSided, RenderBucket::TransparentUnlit,
+                                                              RenderBucket::TransparentUnlitDoubleSided };
+                    for (RenderBucket bucket : kWireBuckets)
+                        drawMeshletBucket(cmd, wireCursor, bucket, *m_wireframePipeline, NRI::CullMode::None, false, true);
+                    MeshletDrawCursor lateCursor = beginMeshletDraws(context, res->CameraDraws, true); // the second culling phase's draws
+                    lateCursor.boundPipeline = wireCursor.boundPipeline;
+                    for (RenderBucket bucket : kWireBuckets)
+                        drawMeshletBucket(cmd, lateCursor, bucket, *m_wireframePipeline, NRI::CullMode::None, false, true);
+                    cmd.setColorBlendEnable(0, false);
+                    cmd.setPolygonMode(NRI::PolygonMode::Fill);
+                    cmd.setColorWriteMask(0, NRI::ColorComponent::All);
+                    cmd.setColorWriteMask(1, NRI::ColorComponent::All);
+                    cmd.setDepthWriteEnable(true);
+                }
+
                 // D. DDGI PROBE SPHERES (Debug Mode 17: Visualizes 3D Probe Grid with Irradiance)
                 if (drawProbes)
                 {

@@ -30,7 +30,9 @@ namespace NRI
         switch (polygon)
         {
             case PolygonMode::Fill: return vk::PolygonMode::eFill;
+            case PolygonMode::Line: return vk::PolygonMode::eLine;
         }
+        return vk::PolygonMode::eFill;
     }
     
     static vk::CullModeFlagBits translateCullModeToVk(const CullMode& cullMode)
@@ -75,6 +77,7 @@ namespace NRI
         case BlendFactor::SrcAlpha:         return vk::BlendFactor::eSrcAlpha;
         case BlendFactor::OneMinusSrcAlpha: return vk::BlendFactor::eOneMinusSrcAlpha;
         case BlendFactor::OneMinusSrcColor: return vk::BlendFactor::eOneMinusSrcColor;
+        case BlendFactor::SrcColor: return vk::BlendFactor::eSrcColor;
         }
         return vk::BlendFactor::eOne;
     }

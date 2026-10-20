@@ -660,6 +660,9 @@ namespace Nox
         // alpha-blended particles add into two targets in any order, resolved over the scene once (OITComposite.slang). Many
         // overlapping layers (foliage cards, smoke) stop popping when their order changes; layers of very different colors blend
         // toward their average instead of the nearest one winning. Off: sorted back to front, by object.
+        // Editor: every mesh's triangle edges over the image (Show > Wireframe).
+        void setWireframeOverlay(bool enabled) { m_wireframeOverlay = enabled; }
+        bool getWireframeOverlay() const { return m_wireframeOverlay; }
         void setOITEnabled(bool enabled) { m_oitEnabled = enabled; }
         bool getOITEnabled() const { return m_oitEnabled; }
         glm::vec2 getCurrentJitter() const { return m_currentJitter; }
@@ -792,6 +795,7 @@ namespace Nox
 
         void createUnlitPipeline(bool forceCompile);
         void createTransparentLitPipeline(bool forceCompile);
+        void createWireframePipeline(bool forceCompile = false);
         void createPresentPipeline(bool forceCompile);
         void createComputePipeline();
         void createSkyboxPipeline(bool forceCompile);
@@ -1075,6 +1079,8 @@ namespace Nox
         std::unique_ptr<NRI::Pipeline> m_colorPyramidDownsamplePipeline;
         bool m_refractionEnabled = true;
         bool m_oitEnabled = false;
+        bool m_wireframeOverlay = false;
+        std::unique_ptr<NRI::Pipeline> m_wireframePipeline;
         bool m_rtRefractionEnabled = true;
         // NRD
         std::unique_ptr<NRI::Pipeline> m_shadowMaskPipeline = nullptr;

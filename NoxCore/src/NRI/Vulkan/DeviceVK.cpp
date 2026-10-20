@@ -676,6 +676,7 @@ namespace NRI
                         .tessellationShader = true,
                         .sampleRateShading = true,
                         .multiDrawIndirect = true,
+                        .fillModeNonSolid = true, // the editor's wireframe overlay (lines)
                         .wideLines = true,
                         .samplerAnisotropy = true,
                         .pipelineStatisticsQuery = m_pipelineStatisticsEnabled,

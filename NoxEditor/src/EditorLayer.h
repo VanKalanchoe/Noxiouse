@@ -53,6 +53,8 @@ namespace Nox
         // Each viewport's camera per scene, in <project>/Cache/EditorCameras.txt: a scene opens where it was looked at last.
         void SaveEditorCameras();
         void RestoreEditorCameras();
+        // Moves the selection's positions to the nearest point of the location step's grid.
+        void SnapSelectionToGrid();
         void NewScene();
         void OpenScene();
         void OpenScene(AssetHandle handle);
