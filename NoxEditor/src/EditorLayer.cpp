@@ -882,6 +882,19 @@ namespace Nox
                               "overlapping layers (foliage cards, smoke, glass behind glass) stop popping as the camera moves.\n"
                               "Layers of very different colors mix toward their average. Off: sorted back to front by object.");
         
+        bool taa = m_Renderer->getTAAEnabled();
+        if (ImGui::Checkbox("Temporal Anti-Aliasing", &taa))
+            m_Renderer->setTAAEnabled(taa);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Smooth edges without DLSS: the camera shifts by a fraction of a pixel each frame and the frames are\n"
+                              "blended along the motion vectors. Used while DLSS is off or not supported (DLSS / DLAA does this\n"
+                              "itself) and not with the path tracer, which accumulates on its own.");
+        if (taa && m_Renderer->isTAAActive())
+        {
+            ImGui::SameLine();
+            ImGui::TextDisabled("(active)");
+        }
+
         bool jitter = m_Renderer->getCameraJitterEnabled();
         if (ImGui::Checkbox("Camera Subpixel Jitter (R2)", &jitter))
         {

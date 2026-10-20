@@ -264,6 +264,7 @@ namespace Nox
         watchShader("assets/shaders/InstanceCulling.slang", "InstanceCulling", [this]() { createInstanceCullingPipelines(true); });
         watchShader("assets/shaders/HiZBuild.slang", "HiZBuild", [this]() { createHiZBuildPipeline(true); });
         watchShader("assets/shaders/RRGuides.slang", "RRGuides", [this]() { createRRGuidesPipeline(true); });
+        watchShader("assets/shaders/TAA.slang", "TAA", [this]() { createTAAPipeline(true); });
         // NRD
         watchShader("assets/shaders/ShadowMask.slang", "ShadowMask", [this]() { createShadowMaskPipeline(true); });
         watchShader("assets/shaders/NRDGuides.slang", "NRDGuides", [this]() { createNRDGuidesPipeline(true); });
@@ -451,6 +452,7 @@ namespace Nox
         createInstanceCullingPipelines(false);
         createHiZBuildPipeline(false);
         createRRGuidesPipeline(false);
+        createTAAPipeline(false);
         //NRD
         createShadowMaskPipeline();
         createNRDGuidesPipeline();
@@ -2175,6 +2177,15 @@ namespace Nox
             .sourcePath = "assets/shaders/RRGuides.slang"
         });
         m_rrGuidesPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+    }
+
+    void Renderer::createTAAPipeline(bool forceCompile)
+    {
+        NRI::PipelineDesc desc{};
+        desc.type = NRI::PipelineType::Compute;
+        desc.forceCompile = forceCompile;
+        desc.shaders.push_back({ .stage = NRI::ShaderStage::Compute, .entryPoint = "computeMain", .sourcePath = "assets/shaders/TAA.slang" });
+        m_taaPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
     void Renderer::createHiZBuildPipeline(bool forceCompile)
@@ -4403,6 +4414,7 @@ namespace Nox
             addParticlePass(); // the alpha-blended ones into the OIT targets (with OIT), then their resolve, then the rest
             addMipFeedbackReadbackPass();
             addDLSSPass();
+            addTAAPass();
             addEntityDepthBlitPass();
             addPostProcessPass();
             addOverlay2DPass();
@@ -5754,7 +5766,7 @@ namespace Nox
         // not just "DLSS enabled" (mode == Off means evaluateDLSS never runs, so jitter shouldn't
         // either - the "Camera Subpixel Jitter" toggle only has an effect while DLSS is genuinely off).
         const bool enableJitter =
-            (m_cameraJitterEnabled || (m_dlssEnabled && m_dlssMode != NRI::UpscaleMode::Off && m_device->isDLSSSupported()))
+            (m_cameraJitterEnabled || isTAAActive() || (m_dlssEnabled && m_dlssMode != NRI::UpscaleMode::Off && m_device->isDLSSSupported()))
             && m_viewportSize.width > 0
             && m_viewportSize.height > 0;
 
@@ -5897,7 +5909,7 @@ namespace Nox
         // will actually run this frame, matching that exact gate in RecordCommandBuffer.
         const bool enableJitter =
             !m_orthographic && // the jitter offsets the projection's perspective terms, which an ortho projection does not have
-            (m_cameraJitterEnabled ||
+            (m_cameraJitterEnabled || isTAAActive() ||
                 (m_dlssEnabled && m_dlssMode != NRI::UpscaleMode::Off && m_device->isDLSSSupported()))
             && m_viewportSize.width > 0
             && m_viewportSize.height > 0;

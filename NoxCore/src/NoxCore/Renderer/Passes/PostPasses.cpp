@@ -18,6 +18,8 @@ namespace Nox
         RGTexture hdrSource = resources.HDRScene;
         if (frame.dlssAdded)
             hdrSource = resources.DLSSOutput;
+        else if (frame.taaAdded)
+            hdrSource = resources.TAAHistory[frame.taaWriteIndex];
         else if (frame.restirPTActive)
             hdrSource = frame.ptNRDAdded ? resources.PathTracerDenoised : resources.ReSTIRPTOutput;
         else if (frame.pathTracerActive)
@@ -54,6 +56,8 @@ namespace Nox
             {
                 if (frame.dlssAdded)
                     builder.Read(resources.DLSSOutput);
+                else if (frame.taaAdded)
+                    builder.Read(resources.TAAHistory[frame.taaWriteIndex]);
                 else
                     ReadLitScene(builder, resources, frame.restirPTActive, frame.pathTracerActive, frame.ptNRDAdded, frame.pathTracerWriteIndex);
                 if (m_autoExposure)
@@ -79,6 +83,8 @@ namespace Nox
                 uint32_t activeHdrSlot = 0;
                 if (frame.dlssAdded)
                     activeHdrSlot = context.Slot(res->DLSSOutput);
+                else if (frame.taaAdded)
+                    activeHdrSlot = context.Slot(res->TAAHistory[frame.taaWriteIndex]);
                 else if (frame.restirPTActive)
                     activeHdrSlot = context.Slot(frame.ptNRDAdded ? res->PathTracerDenoised : res->ReSTIRPTOutput);
                 else if (frame.pathTracerActive)

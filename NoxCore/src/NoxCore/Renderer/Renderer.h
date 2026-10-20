@@ -609,6 +609,16 @@ namespace Nox
         float& getReSTIRPTDepthThreshold() { return m_restirPTDepthThreshold; }
         bool& getReSTIRPTEnablePermutationSampling() { return m_restirPTEnablePermutationSampling; }
 
+        // The engine's own temporal anti-aliasing (TAA.slang) while DLSS does not run (not supported, or off): the camera jitters and
+        // each frame blends into the reprojected history. The path tracer accumulates by itself and skips it.
+        void setTAAEnabled(bool enabled) { m_taaEnabled = enabled; }
+        bool getTAAEnabled() const { return m_taaEnabled; }
+        // Whether TAA resolves this frame: on, DLSS not evaluating, no path tracer.
+        bool isTAAActive() const
+        {
+            const bool dlss = m_dlssEnabled && m_dlssMode != NRI::UpscaleMode::Off && m_device && m_device->isDLSSSupported();
+            return m_taaEnabled && m_taaPipeline && !dlss && !m_pathTracingEnabled;
+        }
         void setCameraJitterEnabled(bool enabled) { m_cameraJitterEnabled = enabled; }
         bool getCameraJitterEnabled() const { return m_cameraJitterEnabled; }
         // Editor, while the camera is jittered (DLSS / DLAA): the display-resolution entity IDs and depth are drawn again without the
@@ -811,6 +821,7 @@ namespace Nox
         void createInstanceCullingPipelines(bool forceCompile = false);
         void createHiZBuildPipeline(bool forceCompile = false);
         void createRRGuidesPipeline(bool forceCompile = false);
+        void createTAAPipeline(bool forceCompile = false);
         
         // NRD
         void createShadowMaskPipeline(bool forceCompile = false);
@@ -917,6 +928,7 @@ namespace Nox
         // The skybox push constants of the sun's disc (procedural sky), without the uniforms and cubemap.
         shaderio::PushConstantSkybox makeSkyboxSunPush() const;
         void addDLSSPass();
+        void addTAAPass();
         void addEntityDepthBlitPass();
         // The blit's replacement in the editor while the camera is jittered (setStableEditorDepth).
         void addStableEntityDepthPass();
@@ -1137,6 +1149,8 @@ namespace Nox
             bool occlusionRawAdded = false; // SSAO or RTAO wrote resources.SSAORaw this frame (never both)
             bool ssaoAdded = false;         // resources.SSAO (the blurred result) is valid this frame
             bool dlssAdded = false;
+            bool taaAdded = false;      // resources.TAAHistory[taaWriteIndex] holds this frame's anti-aliased scene
+            uint32_t taaWriteIndex = 0;
             bool gbufferVelocityWritten = false;
             bool computeSkinningAdded = false;
             bool skinnedHistoryValid = false;
@@ -1416,6 +1430,10 @@ namespace Nox
         std::array<std::unique_ptr<NRI::Pipeline>, 5> m_instanceCullingPipelines; // cull, count, offset, write, late
         std::unique_ptr<NRI::Pipeline> m_hiZBuildPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_rrGuidesPipeline = nullptr; // DLSS Ray Reconstruction albedo guides
+        std::unique_ptr<NRI::Pipeline> m_taaPipeline = nullptr;      // TAA.slang
+        bool m_taaEnabled = true;
+        uint32_t m_taaHistoryIndex = 0; // the history the next TAA pass reads
+        bool m_taaRanLastFrame = false; // its history is last frame's (else it starts over)
         TextureInspection m_textureInspection;
         Texture2D* m_inspectionImage = nullptr;
         RGTextureKey m_inspectedTextureKey;

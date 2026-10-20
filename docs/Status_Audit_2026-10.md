@@ -71,7 +71,8 @@ for history. File references are to the code as of this audit.
   High all.)
 - (Preset rungs: built 2026-10-20 -- Low traces at half ray tracing resolution; Auto also steps down without DLSS and above
   1440p.)
-- Own TAA (DLSS DLAA only today; R1).
+- (Own TAA, R1: built 2026-10-20 -- TAA.slang, on by default while DLSS does not run: jitter, nearest-depth motion,
+  Catmull-Rom history, variance clipping in YCoCg.)
 
 **Sky, VFX**
 - (Night sky -- moon lighting the scene and the sky, its phases, stars, the sun through the air: built 2026-10-20, untested.)

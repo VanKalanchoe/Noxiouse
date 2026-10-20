@@ -1464,6 +1464,21 @@ struct PushConstantColorPyramid
     uint32_t padding;
 };
 
+// TAA.slang: the engine's own temporal anti-aliasing (when DLSS does not run). Sampled slots with the image heap's offset added.
+struct PushConstantTAA
+{
+    uint32_t colorIndex;    // this frame's lit scene (jittered)
+    uint32_t depthIndex;    // reverse Z
+    uint32_t velocityIndex; // GBufferVelocity: uv offset to where the pixel was last frame
+    uint32_t historyIndex;  // last frame's result
+    uint32_t outputIndex;   // storage slot of this frame's result
+    uint32_t width;
+    uint32_t height;
+    uint32_t reset;         // 1: no usable history (first frame, resize, cut)
+    float blend;            // the weight of this frame where the history is valid (0.1: about ten frames)
+    uint32_t padding[3];
+};
+
 // Particles.slang (Hybrid_Renderer_Plan_2026-10.md §6 V1 / V2): one camera-facing quad per particle, written each frame by the CPU
 // (Renderer::SubmitParticles) into a host-visible buffer read through its address.
 struct GpuParticle

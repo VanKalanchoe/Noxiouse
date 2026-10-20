@@ -161,6 +161,62 @@ namespace Nox
             });
     }
 
+    void Renderer::addTAAPass()
+    {
+        FrameGraphState& frame = m_frame;
+        const bool run = isTAAActive() && !frame.dlssAdded && !frame.restirPTActive && !frame.pathTracerActive &&
+                         frame.renderExtent.width == frame.outputExtent.width && frame.renderExtent.height == frame.outputExtent.height &&
+                         frame.renderExtent.width > 0 && frame.renderExtent.height > 0;
+        if (!run)
+        {
+            m_taaRanLastFrame = false;
+            return;
+        }
+
+        FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
+        RGTextureDesc desc;
+        desc.Format = NRI::ImageFormat::R16G16B16A16_SFLOAT;
+        desc.Usage = NRI::TextureUsage::Storage;
+        const RGTextureHistory history = m_renderGraph.GetHistoryTexture("TAA History", desc, 2);
+        resources.TAAHistory[0] = history.Textures[0];
+        resources.TAAHistory[1] = history.Textures[1];
+        const uint32_t readIndex = m_taaHistoryIndex;
+        const uint32_t writeIndex = 1 - readIndex;
+        m_taaHistoryIndex = writeIndex;
+        const bool reset = m_isFirstFrame || history.WasReset || !m_taaRanLastFrame || m_renderGraph.WasHistoryReset(DLSSHistoryKey);
+        m_taaRanLastFrame = true;
+        frame.taaAdded = true;
+        frame.taaWriteIndex = writeIndex;
+
+        m_renderGraph.AddPass("TAA", RGPassFlags::None,
+            [&](RGBuilder& builder)
+            {
+                builder.Read(resources.HDRScene);
+                builder.Read(resources.Depth);
+                builder.Read(resources.GBufferVelocity);
+                builder.Read(resources.TAAHistory[readIndex]);
+                builder.Write(resources.TAAHistory[writeIndex], RGTextureAccess::StorageWrite);
+            },
+            [this, res = &resources, readIndex, writeIndex, reset](RGPassContext& context)
+            {
+                shaderio::PushConstantTAA push{};
+                push.colorIndex = uniformData.imageHeapIndexOffset + context.Slot(res->HDRScene);
+                push.depthIndex = uniformData.imageHeapIndexOffset + context.Slot(res->Depth);
+                push.velocityIndex = uniformData.imageHeapIndexOffset + context.Slot(res->GBufferVelocity);
+                push.historyIndex = uniformData.imageHeapIndexOffset + context.Slot(res->TAAHistory[readIndex]);
+                push.outputIndex = context.StorageSlot(res->TAAHistory[writeIndex]);
+                push.width = m_frame.renderExtent.width;
+                push.height = m_frame.renderExtent.height;
+                push.reset = reset ? 1u : 0u;
+                push.blend = 0.1f;
+
+                NRI::CommandBuffer& cmd = context.Cmd();
+                cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *m_taaPipeline);
+                cmd.pushData(&push, sizeof(push));
+                cmd.dispatch((push.width + 7) / 8, (push.height + 7) / 8, 1);
+            });
+    }
+
     void Renderer::addEntityDepthBlitPass()
     {
         const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();

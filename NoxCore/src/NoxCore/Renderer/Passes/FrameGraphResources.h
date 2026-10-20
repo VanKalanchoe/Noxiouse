@@ -102,6 +102,7 @@ namespace Nox
 
         // Upscaling / output / editor
         RGTexture DLSSOutput;
+        RGTexture TAAHistory[2]; // the engine's TAA: last frame's result and this frame's (Renderer::addTAAPass)
         RGBuffer TLAS;
         RGBuffer PickerStaging;
         RGBuffer PickerDepthStaging; // the depth of the picked pixel (the editor's measure tool)
