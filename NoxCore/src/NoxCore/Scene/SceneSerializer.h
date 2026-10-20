@@ -21,10 +21,15 @@ namespace Nox
         SceneSerializer(const Ref<Scene>& scene);
 
         void Serialize(const std::filesystem::path& filepath);
-        void SerializeRuntime(const std::filesystem::path& filepath);
+        // The scene in the form a packaged game loads (a checked header, then the scene): false when it could not be written.
+        bool SerializeRuntime(const std::filesystem::path& filepath);
         
         bool Deserialize(const std::filesystem::path& filepath);
         bool DeserializeRuntime(const std::filesystem::path& filepath);
+        // A runtime scene already in memory (read out of a pack); name is for the log.
+        bool DeserializeRuntimeBytes(const std::string& bytes, const std::string& name);
+        // Whether bytes start like a runtime scene (SerializeRuntime) rather than a scene's text.
+        static bool IsRuntimeScene(const std::string& bytes);
 
         // The scene file's text without the file: exactly what Serialize writes and Deserialize reads (the editor's undo history
         // keeps scene states this way, so restoring one is the same as saving and reopening the scene).

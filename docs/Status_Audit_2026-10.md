@@ -25,7 +25,7 @@ for history. File references are to the code as of this audit.
 | Scripting | Fixed 2026-10-20: the reload generation never increased and `OnAfterReload` was never called. Every load is a new generation; `OnAfterReload` runs after the new instances' `OnCreate`, and exposed field values are kept across the reload | `ScriptEngine.cpp` (ReloadAssembly) |
 | Scripting | Fixed 2026-10-20: reloading while script jobs ran was unsafe. `Nox.Jobs` counts its running jobs; reload and shutdown wait for them (2 s, else the reload is skipped with a log line) | `Jobs.cs`, `DotNetBackend.cpp` (WaitForJobs) |
 | Scene | Fixed 2026-10-20: `TextComponent` font was neither saved nor loaded. Fonts (.ttf / .otf) are assets now; the component keeps the font's handle, saved with the scene | `SceneSerializer.cpp`, `Font.h` |
-| Scene | `SerializeRuntime` / `DeserializeRuntime` are empty (return false) | `SceneSerializer.cpp:1188, 1924` |
+| Scene | Fixed 2026-10-20: `SerializeRuntime` / `DeserializeRuntime` were empty. They write / read a checked container (magic, version, size) around the scene's data; `Deserialize` recognises it, so a packaged scene can keep its name. Not yet a binary encoding of the components | `SceneSerializer.cpp` |
 | Asset | Fixed 2026-10-20: `MeshImporter::LoadMesh` was a dead stub with no return value -- removed | `MeshImporter.cpp` |
 | Editor | Fixed 2026-10-20: ortho camera constants were raw units (50 m / 100 m in a cm project) and the sky was flat in ortho. Now 2 km back / 4 km deep in meters, zoom at the cursor, and ortho views see the sky of a 60 degree camera looking the same way | `EditorCamera.cpp`, `Skybox.slang` |
 | Editor | Fixed 2026-10-20: the Import Scale tooltip said the model was untouched; it now says the scale is baked into the mesh | `ContentBrowserPanel.cpp` |
@@ -100,7 +100,7 @@ for history. File references are to the code as of this audit.
 - Pack files (R4), precompiled shaders and pipeline cache (R5), a cook step for textures, self-contained .NET runtime,
   Release / NOX_EDITOR-free build (R7), fullscreen window, a binary registry, renderer settings beyond the preset.
 - C++ voxel module and VoxelWorld API; dynamic mesh upload without a stall; vertex colors in `Nox.Mesh`; dynamic mesh colliders.
-- `SerializeRuntime`; no shipping configuration (stats and logging always compiled in).
+- No shipping configuration (stats and logging always compiled in).
 
 **Engine architecture and performance** (Engine plan)
 - Async compute queue; JobSystem priorities / budgets; overlapped IO; parallel animation; frame pipelining.

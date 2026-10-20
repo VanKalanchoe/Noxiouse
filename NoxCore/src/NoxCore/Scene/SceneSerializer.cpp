@@ -1,8 +1,11 @@
 #include "SceneSerializer.h"
 
 
+#include <algorithm>
+#include <cstring>
 #include <fstream>
 #include <functional>
+#include <iterator>
 #include <unordered_set>
 
 #include <yaml-cpp/yaml.h>
@@ -1183,10 +1186,41 @@ namespace Nox
         return true;
     }
 
-    void SceneSerializer::SerializeRuntime(const std::filesystem::path& filepath)
+    namespace
     {
-        // Not Implemented
-        NOX_CORE_ASSERT(false, "SerializeRuntime");
+        // The runtime form of a scene (SerializeRuntime): a header that says what the file is and how long its scene is, then the
+        // scene as Serialize writes it. A packaged game can tell a cut-off or foreign file from a scene before it parses a byte; a
+        // binary encoding of the components can replace the body later (a new version) without changing the callers.
+        constexpr char RuntimeSceneMagic[8] = { 'N', 'O', 'X', 'S', 'C', 'E', 'N', 'E' };
+        constexpr uint32_t RuntimeSceneVersion = 1; // body: the scene's YAML text
+    }
+
+    bool SceneSerializer::SerializeRuntime(const std::filesystem::path& filepath)
+    {
+        const std::string text = SerializeToText();
+        std::ofstream out(filepath, std::ios::binary | std::ios::trunc);
+        if (!out)
+        {
+            NOX_CORE_ERROR("Failed to save runtime scene '{}': could not open the file", filepath.string());
+            return false;
+        }
+        const uint64_t size = text.size();
+        out.write(RuntimeSceneMagic, sizeof(RuntimeSceneMagic));
+        out.write(reinterpret_cast<const char*>(&RuntimeSceneVersion), sizeof(RuntimeSceneVersion));
+        out.write(reinterpret_cast<const char*>(&size), sizeof(size));
+        out.write(text.data(), static_cast<std::streamsize>(text.size()));
+        out.close();
+        if (!out)
+        {
+            NOX_CORE_ERROR("Failed to save runtime scene '{}': write failed", filepath.string());
+            return false;
+        }
+        return true;
+    }
+
+    bool SceneSerializer::IsRuntimeScene(const std::string& bytes)
+    {
+        return bytes.size() >= sizeof(RuntimeSceneMagic) && std::equal(std::begin(RuntimeSceneMagic), std::end(RuntimeSceneMagic), bytes.begin());
     }
 
     void SceneSerializer::ReadPrefabChanges(const YAML::Node& node, std::vector<PrefabPropertyOverride>& overrides, std::vector<PrefabStructureChange>& structure,
@@ -1851,15 +1885,21 @@ namespace Nox
 
     bool SceneSerializer::Deserialize(const std::filesystem::path& filepath)
     {
-        /*NOX_CORE_ERROR("{0}", filepath);
-        std::ifstream stream(filepath);
-        std::stringstream strStream;
-        strStream << stream.rdbuf();*/
+        std::ifstream file(filepath, std::ios::binary);
+        if (!file)
+        {
+            NOX_CORE_ERROR("Failed to load .nox file `{0}`: could not open it", filepath.string());
+            return false;
+        }
+        const std::string bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        // A scene saved in its runtime form (a packaged game's) under the same name reads the same way.
+        if (IsRuntimeScene(bytes))
+            return DeserializeRuntimeBytes(bytes, filepath.string());
 
         YAML::Node data;
         try
         {
-            data = YAML::LoadFile(filepath.string());
+            data = YAML::Load(bytes);
         }
         catch (YAML::ParserException& e)
         {
@@ -1923,8 +1963,38 @@ namespace Nox
 
     bool SceneSerializer::DeserializeRuntime(const std::filesystem::path& filepath)
     {
-        // Not Implemented
-        NOX_CORE_ASSERT(false, "DeserializeRuntime");
-        return false;
+        std::ifstream file(filepath, std::ios::binary);
+        if (!file)
+        {
+            NOX_CORE_ERROR("Failed to load runtime scene '{}': could not open the file", filepath.string());
+            return false;
+        }
+        const std::string bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        return DeserializeRuntimeBytes(bytes, filepath.string());
+    }
+
+    bool SceneSerializer::DeserializeRuntimeBytes(const std::string& bytes, const std::string& name)
+    {
+        constexpr size_t headerSize = sizeof(RuntimeSceneMagic) + sizeof(uint32_t) + sizeof(uint64_t);
+        if (!IsRuntimeScene(bytes) || bytes.size() < headerSize)
+        {
+            NOX_CORE_ERROR("'{}' is not a runtime scene", name);
+            return false;
+        }
+        uint32_t version = 0;
+        uint64_t size = 0;
+        std::memcpy(&version, bytes.data() + sizeof(RuntimeSceneMagic), sizeof(version));
+        std::memcpy(&size, bytes.data() + sizeof(RuntimeSceneMagic) + sizeof(version), sizeof(size));
+        if (version != RuntimeSceneVersion)
+        {
+            NOX_CORE_ERROR("Runtime scene '{}' is version {}, this build reads version {}", name, version, RuntimeSceneVersion);
+            return false;
+        }
+        if (size != bytes.size() - headerSize)
+        {
+            NOX_CORE_ERROR("Runtime scene '{}' is cut off or padded ({} bytes of scene, {} expected)", name, bytes.size() - headerSize, size);
+            return false;
+        }
+        return DeserializeText(bytes.substr(headerSize));
     }
 }
