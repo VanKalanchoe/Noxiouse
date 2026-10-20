@@ -533,6 +533,11 @@ namespace Nox
             }
         }
 
+        // The deferred lighting's shadow-ray budget: per pixel only the N lights that light it the most trace shadow rays (1..8),
+        // the weaker ones light it unshadowed; 0 every light in range traces. The sun's shadow mask is outside the budget.
+        uint32_t getShadowRayLightLimit() const { return m_shadowRayLightLimit; }
+        void setShadowRayLightLimit(uint32_t limit) { m_shadowRayLightLimit = std::min(limit, 8u); }
+
         // ReSTIR GI runs for its mode, and for the "Indirect Diffuse GI Only" debug view (16) when no GI technique is chosen.
         bool isReSTIRGIRequested() const { return m_diffuseGIMode == 2 || (m_debugMode == 16 && m_diffuseGIMode == 0); }
         // Screen-probe GI (ScreenProbeCommon.slang): pixels per probe each way (8..32), spatial filter passes (0..3), frames
@@ -609,13 +614,14 @@ namespace Nox
         void setStableEditorDepth(bool enabled) { m_stableEditorDepth = enabled; }
         bool getStableEditorDepth() const { return m_stableEditorDepth; }
         // Quality presets (docs/Hybrid_Renderer_Plan_2026-10.md §2): the hybrid renderer's toggles as one set, every rung ray traced (no
-        // shadow maps). Low is the fallback for smaller RT GPUs (RT shadows of the sun, DDGI, SSAO, DLSS Performance), High the closest
+        // shadow maps). Low is the fallback for smaller RT GPUs (RT shadows, the 4 strongest lights' a pixel, at half ray tracing
+        // resolution; screen probes, SSAO, DLSS Performance), High the closest
         // to the path tracer (RT shadows of every light through ReSTIR DI, RT reflections, RTAO, ReSTIR GI, DLSS Quality). Custom: the
         // settings were changed one by one.
         enum class RenderQuality : uint8_t { Low, Medium, High, Custom };
         void ApplyQualityPreset(RenderQuality quality);
         RenderQuality GetCurrentQuality() const; // the preset the settings equal now, or Custom
-        RenderQuality GetRecommendedQuality() const; // from this GPU's memory budget
+        RenderQuality GetRecommendedQuality() const; // from this GPU's memory budget, its output resolution and DLSS
         static const char* GetQualityName(RenderQuality quality);
         static RenderQuality ParseQualityName(const std::string& name, RenderQuality fallback);
         // A project's setting (ProjectConfig::RenderQuality): "Auto" applies the recommended preset, a preset's name that preset,
@@ -1040,6 +1046,7 @@ namespace Nox
         // R16F (RTAO).
         std::array<std::unique_ptr<NRI::Pipeline>, 3> m_rtUpsamplePipelines{};
         uint32_t m_rtSubsample = 1;
+        uint32_t m_shadowRayLightLimit = 0;
         // Screen-probe GI
         std::unique_ptr<NRI::Pipeline> m_screenProbePlacePipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_screenProbeTracePipeline = nullptr;

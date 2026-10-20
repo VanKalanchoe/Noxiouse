@@ -1164,6 +1164,15 @@ namespace Nox
                 {
                     m_Renderer->setRayTracingShadows(rtShadows);
                 }
+                if (rtShadows)
+                {
+                    int shadowLights = static_cast<int>(m_Renderer->getShadowRayLightLimit());
+                    if (ImGui::SliderInt("Shadowed Lights per Pixel", &shadowLights, 0, 8, shadowLights == 0 ? "All" : "%d"))
+                        m_Renderer->setShadowRayLightLimit(static_cast<uint32_t>(shadowLights));
+                    if (ImGui::IsItemHovered())
+                        ImGui::SetTooltip("Each pixel traces shadow rays only for the lights that light it the most; the weaker ones\n"
+                                          "light it without a shadow. The sun's soft shadow is always traced. All: every light in range.");
+                }
 
                 bool rtReflections = m_Renderer->getRayTracingReflections();
                 if (ImGui::Checkbox("Ray Tracing Reflections", &rtReflections))

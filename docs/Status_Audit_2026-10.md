@@ -65,9 +65,10 @@ for history. File references are to the code as of this audit.
 - Screen-probe GI: importance sampling of probe rays, adaptive extra probes, screen-space trace before the ray trace.
 - DDGI probe relocation; faster (half-res / checkerboard) ReSTIR GI; ReSTIR PT spatial pass; pairwise MIS / boiling filter for DI.
 - Volumetric fog / light shafts (froxels); NVIDIA Reflex; NRD SH denoisers.
-- Fallback rung "shadow rays for the N strongest lights" (every light in range traces per pixel, also on Low).
-- Half-res reflections / roughness cut as preset rungs (Ray Tracing Resolution exists, no preset sets it); Auto preset checks
-  VRAM only.
+- (Fallback rung "shadow rays for the N strongest lights": built 2026-10-20 -- Shadowed Lights per Pixel, Low 4, Medium 8,
+  High all.)
+- (Preset rungs: built 2026-10-20 -- Low traces at half ray tracing resolution; Auto also steps down without DLSS and above
+  1440p.)
 - Own TAA (DLSS DLAA only today; R1).
 
 **Sky, VFX**

@@ -119,6 +119,36 @@
         return visible * 0.25;
     }
 
+    // The shadow-ray budget (UniformBufferObject::shadowRayLightLimit): the priority (light_shadow_priority) a light needs at this
+    // point to trace its shadow rays, the N-th strongest of the lights that would trace (the shadow mask's light aside). 0: all trace.
+    float shadow_ray_threshold(UniformBufferObject* ubo, LightData* lights, float3 position)
+    {
+        const uint limit = min(ubo->shadowRayLightLimit, 8u);
+        if (limit == 0)
+            return 0.0;
+        float strongest[8] = { 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 }; // descending
+        uint candidates = 0;
+        for (uint i = 0; i < ubo->lightCount; i++)
+        {
+            if (i == ubo->shadowMaskLightIndex)
+                continue;
+            float priority = light_shadow_priority(lights[i], position);
+            if (priority <= 0.0)
+                continue;
+            ++candidates;
+            for (uint k = 0; k < limit; k++) // insert, pushing the weaker ones down
+            {
+                if (priority > strongest[k])
+                {
+                    const float pushed = strongest[k];
+                    strongest[k] = priority;
+                    priority = pushed;
+                }
+            }
+        }
+        return candidates > limit ? strongest[limit - 1] : 0.0;
+    }
+
     bool trace_shadow_ray(UniformBufferObject* ubo, float3 rayOrigin, float3 rayDir, float maxDist)
     {
         if (ubo->enableRTShadows == 0 || ubo->tlasDeviceAddress == 0)
@@ -409,6 +439,8 @@
         else
         {
             LightData* lights = (LightData*)ubo->lightDataReference;
+            const bool rtShadows = ubo->enableRTShadows != 0 && ubo->tlasDeviceAddress != 0;
+            const float shadowThreshold = rtShadows ? shadow_ray_threshold(ubo, lights, worldPos) : 0.0;
 
             for (uint i = 0; i < ubo->lightCount; i++)
             {
@@ -420,7 +452,9 @@
                     PBRInfo rectInputs = PBRInfo(1.0, NdotV, 1.0, 1.0, 1.0, perceptualRoughness, metallic, specularEnvironmentR0,
                                                  specularEnvironmentR90, alphaRoughness, diffuseColor, specularColor);
                     const float3 rectLight = evaluateRectLight(rectInputs, light, worldPos, n, v);
-                    if (any(rectLight > 0.0))
+                    if (any(rectLight > 0.0) && light_shadow_priority(light, worldPos) < shadowThreshold)
+                        directLighting += rectLight; // over the shadow-ray budget: unshadowed
+                    else if (any(rectLight > 0.0))
                         directLighting += rectLight * rect_light_visibility(ubo, light, worldPos, worldPos + n * (0.02 * ubo->unitsPerMeter),
                                                                             uint2(pixelCoord), pushConstant.frameIndex);
                     continue;
@@ -463,14 +497,15 @@
                 }
 
                 float lightShadow = 1.0;
-                if (ubo->enableRTShadows != 0 && ubo->tlasDeviceAddress != 0)
+                if (rtShadows)
                 {
                     if (i == ubo->shadowMaskLightIndex && pushConstant.shadowMaskTextureIndex != 0 && pushConstant.shadowMaskTextureIndex != 0xFFFFFFFF)
                     {
                         // The sun (the first directional light) uses the decoupled shadow mask / NRD SIGMA if available
                         lightShadow = shadowFactor;
                     }
-                    else if (lightType == 0 || (attenuation * light.color.w > 0.001))
+                    else if ((lightType == 0 || (attenuation * light.color.w > 0.001)) &&
+                             (shadowThreshold <= 0.0 || light_shadow_priority(light, worldPos) >= shadowThreshold))
                     {
                         // Any additional directional lights (moon, secondary suns) or any punctual light within range
                         float3 shadowNormal = (dot(n, l) < 0.0) ? -n : n;

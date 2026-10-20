@@ -593,6 +593,8 @@ namespace Nox
             uint32_t DirectLighting; // 0 the loop (a shadow ray per light in range), 1 ReSTIR DI (one resampled light per pixel)
             NRI::UpscaleMode Upscale;
             bool RTRefraction;       // smooth glass traced (H3); else the screen-space refraction only
+            uint32_t RTDivisor;      // ray tracing resolution: 1 every pixel, 2 one of each 2 x 2 block
+            uint32_t ShadowRayLights; // the shadow-ray budget a pixel (strongest lights); 0 every light
         };
 
         QualityPresetSettings GetQualityPresetSettings(Renderer::RenderQuality quality)
@@ -600,9 +602,9 @@ namespace Nox
             switch (quality)
             {
             // Direct light: the loop on every rung (ReSTIR DI stays selectable; the user found it broken, 2026-10-19).
-            case Renderer::RenderQuality::Low: return { true, false, false, 3, 24, 0, NRI::UpscaleMode::Performance, false };
-            case Renderer::RenderQuality::Medium: return { true, true, false, 3, 16, 0, NRI::UpscaleMode::Balanced, false };
-            default: return { true, true, true, 3, 16, 0, NRI::UpscaleMode::Quality, true };
+            case Renderer::RenderQuality::Low: return { true, false, false, 3, 24, 0, NRI::UpscaleMode::Performance, false, 2, 4 };
+            case Renderer::RenderQuality::Medium: return { true, true, false, 3, 16, 0, NRI::UpscaleMode::Balanced, false, 1, 8 };
+            default: return { true, true, true, 3, 16, 0, NRI::UpscaleMode::Quality, true, 1, 0 };
             }
         }
     }
@@ -639,6 +641,8 @@ namespace Nox
         }
         setRefractionEnabled(true);
         setRTRefractionEnabled(preset.RTRefraction);
+        setRayTracingResolutionDivisor(preset.RTDivisor);
+        setShadowRayLightLimit(preset.ShadowRayLights);
         // DDGI's probes trace in turn: a quarter a frame on the fallback rung, half on the others; two cascades on the fallback rung.
         // Under the screen probes DDGI is only the second bounce: a quarter of its probes a frame is plenty.
         m_ddgiUpdateStride = (quality == RenderQuality::Low || preset.DiffuseGI == 3) ? 4u : 2u;
@@ -654,7 +658,8 @@ namespace Nox
             const bool upscaleMatches = !isDLSSSupported() || (m_dlssEnabled && m_dlssMode == preset.Upscale);
             if (!m_pathTracingEnabled && m_rayTracingEnabled && m_rayTracingShadows == preset.RTShadows &&
                 m_rayTracingReflections == preset.RTReflections && m_rtaoEnabled == preset.RTAO && m_diffuseGIMode == preset.DiffuseGI &&
-                m_directLightingMode == preset.DirectLighting && m_rtRefractionEnabled == preset.RTRefraction && upscaleMatches)
+                m_directLightingMode == preset.DirectLighting && m_rtRefractionEnabled == preset.RTRefraction && upscaleMatches &&
+                m_rtSubsample == preset.RTDivisor && m_shadowRayLightLimit == preset.ShadowRayLights)
                 return quality;
         }
         return RenderQuality::Custom;
@@ -676,13 +681,16 @@ namespace Nox
             }
         }
         const double gigabytes = static_cast<double>(budget) / (1024.0 * 1024.0 * 1024.0);
-        if (gigabytes <= 0.0)
-            return RenderQuality::Medium;
-        if (gigabytes < 6.5)
-            return RenderQuality::Low;
-        if (gigabytes < 10.0)
-            return RenderQuality::Medium;
-        return RenderQuality::High;
+        int rung = gigabytes <= 0.0 ? 1 : gigabytes < 6.5 ? 0 : gigabytes < 10.0 ? 1 : 2;
+        // The cost grows with the pixels: without DLSS every ray traced effect runs at the output's size, so a rung lower; above
+        // 1440p (4K) the same, unless the card has the memory of the top rung's twice over.
+        const NRI::Extent2D output = getOutputSize();
+        const uint64_t pixels = static_cast<uint64_t>(output.width) * output.height;
+        if (!isDLSSSupported())
+            --rung;
+        if (pixels > 2560ull * 1440ull * 3 / 2 && gigabytes < 20.0)
+            --rung;
+        return rung <= 0 ? RenderQuality::Low : rung == 1 ? RenderQuality::Medium : RenderQuality::High;
     }
 
     const char* Renderer::GetQualityName(RenderQuality quality)
@@ -4852,6 +4860,7 @@ namespace Nox
         uniformData.gamma = m_gamma; // slider in the future in imgui
         uniformData.scaleIBLAmbient = m_scaleIBLAmbient; // slider in the future in imgui
         uniformData.skyDiscs = m_proceduralSkyActive ? 1u : 0u;
+        uniformData.shadowRayLightLimit = m_shadowRayLightLimit;
         uniformData.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
 
         memcpy(m_uniformBuffersMapped[currentImage], &uniformData, sizeof(uniformData));

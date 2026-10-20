@@ -405,6 +405,9 @@ struct UniformBufferObject
     // drawn where rays see them (Skybox.slang for the raster view, directional_light_discs for the path tracer). An HDR map has
     // its own sun in the image (0).
     uint32_t skyDiscs;
+    // The shadow-ray budget of the deferred lighting's light loop: per pixel, only the N lights that light it the most trace their
+    // shadow rays (the sun through its shadow mask aside); the weaker ones light it unshadowed. 0: every light in range traces.
+    uint32_t shadowRayLightLimit;
 };
 
 struct Vertex
@@ -595,6 +598,26 @@ float rect_light_area(LightData light)
 {
     const float halfX = length(light.spotParams.xyz);
     return (uint)light.position.w == 4u ? 3.14159265 * halfX * light.spotParams.w : 4.0 * halfX * light.spotParams.w;
+}
+
+// How much a light lights a point, roughly (luminance; a ranking for UniformBufferObject::shadowRayLightLimit, not a shading term):
+// a directional light its illuminance, a point / spot light its intensity over the distance squared with its range window and cone,
+// a rect / disc light its intensity times its area over the distance squared.
+float light_shadow_priority(LightData light, float3 position)
+{
+    const float strength = dot(light.color.rgb, float3(0.2126, 0.7152, 0.0722)) * light.color.w;
+    const uint type = (uint)light.position.w;
+    if (type == 0)
+        return strength;
+    const float3 toLight = light.position.xyz - position;
+    const float distance = length(toLight);
+    if (type == 3 || type == 4)
+    {
+        const float area = rect_light_area(light);
+        return strength * area / max(distance * distance, area);
+    }
+    const float3 l = distance > 0.0001 ? toLight / distance : float3(0.0, 1.0, 0.0);
+    return strength * light_distance_attenuation(light, distance) * light_spot_attenuation(light, l);
 }
 
 // Whether a point of the light's plane (offset from its centre) lies on it: inside the rectangle, or the disc.
