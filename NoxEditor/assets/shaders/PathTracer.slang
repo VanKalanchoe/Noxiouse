@@ -501,7 +501,7 @@
                     const LightPointSample lightPoint = sample_light_point(light, hitPos, float2(rand(rngState), rand(rngState)));
                     lightDir = lightPoint.direction;
                     maxDist = lightType == 0 ? maxDist : lightPoint.distance;
-                    const float3 sampledRadiance = lightPoint.radiance;
+                    const float3 sampledRadiance = lightPoint.radiance * (lightType == 0 ? cloud_shadow(ubo, hitPos, i, lightDir) : 1.0);
                     if (!any(sampledRadiance > 0.0))
                         attenuation = 0.0;
 

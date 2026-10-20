@@ -453,6 +453,7 @@
                 if (lightType == 0) // Directional Light
                 {
                     l = normalize(light.direction.xyz);
+                    attenuation = cloud_shadow(ubo, worldPos, i, l); // the clouds' shadow (the sun / moon of a procedural sky)
                 }
                 else // Point (1) or Spot (2): inverse square held at the source radius, range window, cone (shaderIO.h)
                 {

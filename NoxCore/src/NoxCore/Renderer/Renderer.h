@@ -684,6 +684,8 @@ namespace Nox
         // The height the sky is seen from (km): the settings' altitude of the world origin plus the camera's.
         float skyViewerAltitudeKm() const;
         RGTexture addAerialPerspectivePass();
+        // The clouds' shadow map for this frame (SkyAtmosphere.slang cloudShadowMain) and its uniforms; none without clouds.
+        void addCloudShadowPass();
 
         template <class T>
         void UploadBufferSlice(NRI::Buffer& dstBuffer, const T* data, uint32_t elementOffset, uint32_t elementCount);
@@ -1619,11 +1621,16 @@ namespace Nox
         std::unique_ptr<NRI::Pipeline> m_skyCubemapPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_skyAerialPerspectivePipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_skyDownsamplePipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_skyCloudShadowPipeline = nullptr;
         // Cloud noise (CloudNoise.slang), made once when the sky is created: shape and detail 3D noise as 2D arrays, weather.
         Ref<Texture2D> m_skyCloudShape;
         Ref<Texture2D> m_skyCloudDetail;
         Ref<Texture2D> m_skyCloudWeather;
         Ref<Texture2D> m_skyAerialPerspective; // camera volume, rewritten every frame the scene is lit by deferred lighting
+        // The clouds' shadow map, one per frame in flight (a frame writes its own while the one before may still read its), and
+        // their storage slots.
+        std::array<Ref<Texture2D>, MAX_FRAMES_IN_FLIGHT> m_skyCloudShadow;
+        std::array<uint32_t, MAX_FRAMES_IN_FLIGHT> m_skyCloudShadowStorageSlots{};
         Ref<Texture2D> m_skyTransmittanceLut;
         Ref<Texture2D> m_skyMultiScatteringLut;
         // Storage slots: [transmittance, multiple scattering, environment mips..., irradiance mips..., prefiltered mips...,

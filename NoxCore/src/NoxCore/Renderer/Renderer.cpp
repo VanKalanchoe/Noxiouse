@@ -2547,6 +2547,12 @@ namespace Nox
         releaseEnvironmentTexture(m_skyTransmittanceLut);
         releaseEnvironmentTexture(m_skyMultiScatteringLut);
         releaseEnvironmentTexture(m_skyAerialPerspective);
+        for (size_t frame = 0; frame < m_skyCloudShadow.size(); ++frame)
+        {
+            if (m_skyCloudShadow[frame])
+                m_resourceHeap->unregisterTexture(m_skyCloudShadowStorageSlots[frame]);
+            releaseEnvironmentTexture(m_skyCloudShadow[frame]);
+        }
         releaseEnvironmentTexture(m_skyCloudShape);
         releaseEnvironmentTexture(m_skyCloudDetail);
         releaseEnvironmentTexture(m_skyCloudWeather);
@@ -2881,6 +2887,7 @@ namespace Nox
     static constexpr uint32_t SkyTransmittanceHeight = 64;
     static constexpr uint32_t SkyMultiScatteringSize = 32;
     static constexpr uint32_t SkyEnvironmentSize = 256;
+    static constexpr uint32_t SkyCloudShadowSize = 256; // over 20 km: ~80 m texels (soft shadows of km-sized clouds)
     static constexpr uint32_t SkyIrradianceSize = 32;
     static constexpr uint32_t SkyPrefilteredSize = 128;
 
@@ -2908,6 +2915,8 @@ namespace Nox
             m_skyAerialPerspectivePipeline = createSkyPipeline("aerialPerspectiveMain");
         if (!m_skyDownsamplePipeline)
             m_skyDownsamplePipeline = createSkyPipeline("downsampleCubeMain");
+        if (!m_skyCloudShadowPipeline)
+            m_skyCloudShadowPipeline = createSkyPipeline("cloudShadowMain");
 
         auto createLut = [this](uint32_t width, uint32_t height)
         {
@@ -2957,6 +2966,22 @@ namespace Nox
         });
         m_resourceHeap->registerTexture(*m_skyAerialPerspective, NRI::TextureUsage::ShaderResource);
         m_skyStorageSlots.push_back(m_resourceHeap->registerStorageTextureMip(*m_skyAerialPerspective, 0));
+
+        for (size_t frame = 0; frame < m_skyCloudShadow.size(); ++frame)
+        {
+            m_skyCloudShadow[frame] = m_device->createTexture(NRI::TextureDesc{
+                .width = SkyCloudShadowSize,
+                .height = SkyCloudShadowSize,
+                .arrayLayers = 1,
+                .isCubeMap = false,
+                .mipLevels = 1,
+                .sampleCount = 1,
+                .usage = NRI::TextureUsage::Storage,
+                .format = NRI::ImageFormat::R16_SFLOAT
+            });
+            m_resourceHeap->registerTexture(*m_skyCloudShadow[frame], NRI::TextureUsage::ShaderResource);
+            m_skyCloudShadowStorageSlots[frame] = m_resourceHeap->registerStorageTextureMip(*m_skyCloudShadow[frame], 0);
+        }
 
         // Cloud noise, made once here (it never changes): tiling 3D noise stored as 2D arrays, and the weather map.
         auto createNoise = [this](uint32_t size, uint32_t layers)
@@ -3237,6 +3262,50 @@ namespace Nox
             m_renderGraph.ResetHistory("PT Environment Importance");
             m_renderGraph.ResetHistory("Path Tracer Accumulation");
         }
+    }
+
+    void Renderer::addCloudShadowPass()
+    {
+        uniformData.cloudShadowTextureIndex = ~0u;
+        const SkyAtmosphereSettings& sky = m_proceduralSky;
+        const bool clouds = sky.Clouds && sky.CloudCoverage > 0.0f && sky.CloudDensity > 0.0f;
+        const Ref<Texture2D>& map = m_skyCloudShadow[frameIndex % m_skyCloudShadow.size()];
+        if (!m_proceduralSkyActive || !clouds || !map || !m_skyCloudShadowPipeline || m_shadowMaskLightIndex == ~0u ||
+            m_shadowMaskLightDirection.y <= 0.0f)
+            return;
+
+        // 20 km around the camera, snapped to whole texels so it does not crawl as the camera moves. The ground (world y = 0)
+        // stands at the world origin's altitude.
+        constexpr float ExtentKm = 10.0f;
+        const float texelKm = 2.0f * ExtentKm / static_cast<float>(SkyCloudShadowSize);
+        const float kmPerUnit = WorldUnits::ToMeters(1.0f) / 1000.0f;
+        const glm::vec2 centerKm = glm::round(glm::vec2(m_cameraPosition.x, m_cameraPosition.z) * kmPerUnit / texelKm) * texelKm;
+
+        shaderio::PushConstantSkyAtmosphere push = makeSkyAtmospherePush(sky, sky.CloudOffsetKm + m_skyWindOffsetKm, sky.AltitudeKm);
+        push.sunDirection = m_shadowMaskLightDirection;
+        push.outputStorageIndex = m_skyCloudShadowStorageSlots[frameIndex % m_skyCloudShadow.size()];
+        push.outputSize = SkyCloudShadowSize;
+        push.cloudShadowExtentKm = ExtentKm;
+        push.cloudShadowCenterKm = centerKm;
+
+        NRI::Pipeline* pipeline = m_skyCloudShadowPipeline.get();
+        m_renderGraph.AddPass("Cloud Shadows", RGPassFlags::NeverCull,
+            [](RGBuilder&)
+            {
+                // Read through the frame uniforms by the lighting passes, which the graph does not track: a full barrier after it.
+            },
+            [push, pipeline](RGPassContext& context)
+            {
+                NRI::CommandBuffer& cmd = context.Cmd();
+                cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *pipeline);
+                cmd.pushData(&push, sizeof(push));
+                cmd.dispatch((SkyCloudShadowSize + 7) / 8, (SkyCloudShadowSize + 7) / 8, 1);
+                cmd.executionBarrier();
+            });
+
+        uniformData.cloudShadowTextureIndex = map->GetDescriptorIndexSlot();
+        uniformData.cloudShadowExtentKm = ExtentKm;
+        uniformData.cloudShadowCenterKm = centerKm;
     }
 
     // The camera's aerial perspective volume for this frame (the camera moves every frame; 32 x 32 columns of 64 samples,
@@ -4237,6 +4306,7 @@ namespace Nox
 
             // Frame order (§5.4.8). Each add* contributes its feature's passes only when the feature runs.
             addProceduralSkyPass(); // before anything reads the environment
+            addCloudShadowPass();
             addGpuSceneUpdatePass();
             addComputeSkinningPass();
             addAnimatedBLASPass();

@@ -60,6 +60,8 @@ LightSelection select_lights(UniformBufferObject* ubo, float3 position, float3 n
         LightPointSample sample;
         const float2 u = float2(light_selection_random(rng), light_selection_random(rng));
         float3 irradiance = light_surface_irradiance(light, position, normal, u, sample);
+        if (type == 0u)
+            irradiance *= cloud_shadow(ubo, position, i, sample.direction);
         if (minDistance > 0.0 && (type == 1u || type == 2u))
         {
             const float centreDistanceSq = max(dot(light.position.xyz - position, light.position.xyz - position), light.spotParams.z * light.spotParams.z);

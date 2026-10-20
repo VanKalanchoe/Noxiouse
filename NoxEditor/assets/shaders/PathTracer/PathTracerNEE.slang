@@ -48,8 +48,11 @@ namespace PathTracer
             const LightPointSample lightPoint = sample_light_point(lights[lightIndex], sd.posW,
                                                                    float2(Bridge::rand(rngState), Bridge::rand(rngState)));
             c.L = lightPoint.direction;
-            c.distance = uint(lights[lightIndex].position.w) == LightType::Directional ? 1e8 : lightPoint.distance;
+            const bool directional = uint(lights[lightIndex].position.w) == LightType::Directional;
+            c.distance = directional ? 1e8 : lightPoint.distance;
             Li = lightPoint.radiance;
+            if (directional)
+                Li *= cloud_shadow(ubo, sd.posW, lightIndex, c.L); // the clouds' shadow, as the raster lighting has it
         }
 
         if (all(Li <= float3(0.0))) return c;

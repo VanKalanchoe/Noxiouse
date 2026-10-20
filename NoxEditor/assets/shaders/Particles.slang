@@ -82,7 +82,9 @@ float3 litParticle(UniformBufferObject* ubo, float3 albedo, float3 position, flo
         // puff turned towards it).
         const float3 towards = lightType == 0 ? normalize(light.direction.xyz) : normalize(light.position.xyz - position);
         LightPointSample sample;
-        const float3 irradiance = light_surface_irradiance(light, position, towards, float2(0.5, 0.5), sample);
+        float3 irradiance = light_surface_irradiance(light, position, towards, float2(0.5, 0.5), sample);
+        if (lightType == 0)
+            irradiance *= cloud_shadow(ubo, position, i, sample.direction);
         const float3 l = sample.direction;
         if (lightType == 0 && traceShadow && !sunTested)
         {

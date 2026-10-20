@@ -552,6 +552,43 @@ void skyCubemapMain(uint3 id : SV_DispatchThreadID, uniform PushConstantSkyAtmos
     output[texel] = float4(luminance, cloudTransmittance);
 }
 
+// The clouds' shadow on the scene: for each point of a square of the ground around the camera (a texel of the map), the cloud
+// layer's transmittance towards the light (the sun, or the moon at night) -- 16 steps of the shape noise, without the detail
+// erosion (soft shadows do not show it). Every frame (the wind moves them); cloud_shadow() in shaderIO.h reads it.
+[shader("compute")]
+[numthreads(8, 8, 1)]
+void cloudShadowMain(uint3 id : SV_DispatchThreadID, uniform PushConstantSkyAtmosphere push)
+{
+    if (id.x >= push.outputSize || id.y >= push.outputSize)
+        return;
+
+    const float2 uv = (float2(id.xy) + 0.5) / float(push.outputSize);
+    const float2 groundKm = push.cloudShadowCenterKm + (uv * 2.0 - 1.0) * push.cloudShadowExtentKm;
+    // The planet's pole is the world origin (as for the sky): a point of the ground here is that far beside it.
+    const float3 origin = float3(groundKm.x, BottomRadius + max(push.cameraAltitudeKm, PlanetRadiusOffset), groundKm.y);
+    const float3 lightDirection = normalize(push.sunDirection);
+
+    float transmittance = 1.0;
+    const float inner = BottomRadius + push.cloudBottomKm;
+    const float outer = inner + max(push.cloudThicknessKm, 1e-3);
+    float tStart, tEnd;
+    if (push.cloudShapeTextureIndex != 0xFFFFFFFF && lightDirection.y > 0.0 && cloudLayerSegment(origin, lightDirection, inner, outer, tStart, tEnd))
+    {
+        tEnd = min(tEnd, tStart + 20.0); // a low light crosses the layer for long: the first 20 km of it
+        const int steps = 16;
+        const float dt = (tEnd - tStart) / float(steps);
+        float opticalDepth = 0.0;
+        for (int i = 0; i < steps; ++i)
+        {
+            float heightFraction;
+            opticalDepth += cloudDensity(push, origin + lightDirection * (tStart + (float(i) + 0.5) * dt), false, heightFraction) * dt;
+        }
+        transmittance = exp(-opticalDepth);
+    }
+    RWTexture2DArray<float> output = RWTexture2DArray<float>.Handle(uint2(push.outputStorageIndex, 0));
+    output[uint3(id.xy, 0)] = transmittance;
+}
+
 // A mip of the environment cubemap from the one above: the centre of a texel here is the shared corner of four texels
 // there, so one bilinear read averages them (the clouds need filtered mips; raymarching each mip would alias them).
 [shader("compute")]

@@ -443,6 +443,7 @@ FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform Pu
             if (lightType == 0)
             {
                 l = normalize(light.direction.xyz);
+                attenuation = cloud_shadow(ubo, vertIn.worldPos, i, l);
             }
             else
             {

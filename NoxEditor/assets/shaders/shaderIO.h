@@ -376,6 +376,12 @@ struct UniformBufferObject
     // RTUpsample.slang brings their results back to the render resolution.
     uint32_t rtSubsample;
     uint32_t rtSubsampleOffset;
+    // The clouds' shadow (procedural sky with clouds; SkyAtmosphere.slang cloudShadowMain): a map of the cloud layer's
+    // transmittance towards the shadow mask's light (the sun, the moon at night), over 2 x cloudShadowExtentKm around the camera
+    // (cloudShadowCenterKm, world x / z in km). cloud_shadow() looks it up. 0xFFFFFFFF: none.
+    uint32_t cloudShadowTextureIndex;
+    float cloudShadowExtentKm;
+    vec2 cloudShadowCenterKm;
 };
 
 struct Vertex
@@ -479,6 +485,25 @@ float reflection_miss_distance(UniformBufferObject* ubo)
 
 #ifdef __SLANG__
 // ---- Light evaluation every shader shares (docs/Hybrid_Renderer_Plan_2026-10.md §7) ----
+
+// How much of a light the clouds let through above worldPos: the cloud shadow map's transmittance for the shadow mask's light (the
+// sun, or the moon at night), 1 for any other light and without clouds. The map holds it from the ground up: a point above the
+// ground looks it up where its ray towards the light starts at ground level. Fades out towards the map's edge.
+float cloud_shadow(UniformBufferObject* ubo, float3 worldPos, uint lightIndex, float3 toLight)
+{
+    if (ubo->cloudShadowTextureIndex == 0xFFFFFFFF || lightIndex != ubo->shadowMaskLightIndex || toLight.y <= 0.0)
+        return 1.0;
+    const float kmPerUnit = 0.001 / max(ubo->unitsPerMeter, 1e-6);
+    const float2 groundKm = worldPos.xz * kmPerUnit - toLight.xz * (worldPos.y * kmPerUnit / max(toLight.y, 0.02));
+    const float2 uv = (groundKm - ubo->cloudShadowCenterKm) / (2.0 * ubo->cloudShadowExtentKm) + 0.5;
+    const float2 edge = min(uv, 1.0 - uv);
+    const float fade = saturate(min(edge.x, edge.y) * 10.0);
+    if (fade <= 0.0)
+        return 1.0;
+    Texture2D<float> map = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + ubo->cloudShadowTextureIndex, 0));
+    SamplerState linearClamp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
+    return lerp(1.0, map.SampleLevel(linearClamp, uv, 0.0), fade);
+}
 
 // A point / spot light's falloff: the inverse square law, held at the source's radius (exact for a sphere light, and no blow-up on
 // a lamp's own shade right next to the bulb), smoothly windowed to 0 at Range (Karis 2013; 0 = unlimited).
@@ -883,7 +908,11 @@ struct PushConstantSkyAtmosphere
     vec3 moonDirection;                   // world space, towards the moon
     uint32_t firstFace;                   // skyCubemapMain: the cube face of dispatch z = 0 (one face per frame while the wind blows)
     vec3 moonIlluminance;                 // its color * intensity * the lit fraction of its disc, above the atmosphere
-    float moonPadding1;
+    // cloudShadowMain: the square it covers (half size, centre: world x / z in km) towards sunDirection (the shadow mask's light).
+    float cloudShadowExtentKm;
+    vec2 cloudShadowCenterKm;
+    float cloudShadowPadding0;
+    float cloudShadowPadding1;
 };
 
 struct PushConstantSkybox
@@ -944,7 +973,8 @@ static_assert(offsetof(PushConstantSkyAtmosphere, sunDirection) == 16 && offseto
               offsetof(PushConstantSkyAtmosphere, groundAlbedo) == 48 && offsetof(PushConstantSkyAtmosphere, cameraAltitudeKm) == 72 &&
               offsetof(PushConstantSkyAtmosphere, cloudShapeTextureIndex) == 80 && offsetof(PushConstantSkyAtmosphere, sourceLod) == 124 &&
               offsetof(PushConstantSkyAtmosphere, moonDirection) == 128 && offsetof(PushConstantSkyAtmosphere, moonIlluminance) == 144 &&
-              sizeof(PushConstantSkyAtmosphere) == 160, "PushConstantSkyAtmosphere must match its std430 layout");
+              offsetof(PushConstantSkyAtmosphere, cloudShadowCenterKm) == 160 &&
+              sizeof(PushConstantSkyAtmosphere) == 176, "PushConstantSkyAtmosphere must match its std430 layout");
 static_assert(offsetof(PushConstantSkybox, sunDirection) == 16 && offsetof(PushConstantSkybox, sunDiscRadiance) == 32 &&
               offsetof(PushConstantSkybox, skyAltitudeKm) == 44 && offsetof(PushConstantSkybox, moonDirection) == 48 &&
               offsetof(PushConstantSkybox, moonDiscRadiance) == 64 && offsetof(PushConstantSkybox, starIntensity) == 76 &&
