@@ -19,6 +19,21 @@
 
 namespace NRI
 {
+    namespace
+    {
+        ShaderProgress* s_ShaderProgress = nullptr;
+    }
+
+    void SetShaderProgress(ShaderProgress* progress)
+    {
+        s_ShaderProgress = progress;
+    }
+
+    ShaderProgress* GetShaderProgress()
+    {
+        return s_ShaderProgress;
+    }
+
     // assets/shaders (+ ../ variants) added when RTXDI-related .slang files were reorganized into
     // assets/shaders/RTXDI/{DI,GI,Presampling,PT}/ subfolders: Slang implicitly searches an
     // included file's OWN directory first, but a bare #include "shaderIO.h" from one of those
@@ -126,6 +141,8 @@ namespace NRI
     std::vector<char> SlangCompiler::compile(const std::string& path)
     {
         if (!std::filesystem::exists(path)) NOX_CORE_ERROR("SlangCompiler::compile file not found: {}", path);
+        if (s_ShaderProgress && s_ShaderProgress->OnCompile)
+            s_ShaderProgress->OnCompile(path);
         if (!ensureSession())
             throw std::runtime_error("No precompiled binary for '" + path + "' and no shader compiler shipped (rebuild the package with "
                                      "the editor having created every pipeline once)");

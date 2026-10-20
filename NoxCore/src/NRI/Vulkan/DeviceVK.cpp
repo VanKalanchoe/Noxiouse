@@ -70,7 +70,10 @@ namespace NRI
 
     std::unique_ptr<Pipeline> DeviceVK::createPipeline(const PipelineDesc& desc, ShaderCompiler& compiler)
     {
-        return std::make_unique<PipelineVK>(*this, desc, compiler);
+        auto pipeline = std::make_unique<PipelineVK>(*this, desc, compiler);
+        if (ShaderProgress* progress = GetShaderProgress(); progress && progress->OnPipelineCreated)
+            progress->OnPipelineCreated();
+        return pipeline;
     }
 
     std::unique_ptr<CommandAllocator> DeviceVK::createCommandAllocator(CommandBufferReset resetMode, QueueType queue)

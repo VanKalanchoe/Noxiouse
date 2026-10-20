@@ -1,4 +1,5 @@
 #include "Renderer.h"
+#include "ShaderCompileSplash.h"
 #include "NoxCore/Project/ProjectRendererSettings.h"
 #include <Rtxdi/GI/ReSTIRGI.h>
 #include <Rtxdi/PT/ReSTIRPT.h>
@@ -230,7 +231,12 @@ namespace Nox
             NOX_CORE_WARN("GPU timestamp queries are not supported on the render queue; GPU timings are unavailable");
 #endif
 
-        initRenderer();
+        {
+            // A progress window while pipelines are created, should shaders have to be compiled (first start, changed shaders).
+            const char* basePath = SDL_GetBasePath();
+            ShaderCompileSplash splash(std::filesystem::path(basePath ? basePath : "") / "shaders" / (m_isEditor ? "pipeline_count_editor.txt" : "pipeline_count.txt"));
+            initRenderer();
+        }
 
         // Outline
         watchShader("assets/shaders/Outline.slang", "Outline", [this]() { createOutlinePipeline(true); });
