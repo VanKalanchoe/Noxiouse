@@ -10,6 +10,7 @@
 
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Asset/EditorAssetManager.h"
+#include "NoxCore/Asset/TextureImporter.h"
 #include "NoxCore/Core/VirtualFileSystem.h"
 #include "NoxCore/Scripting/ScriptEngine.h"
 #include "NoxCore/Core/Log.h"
@@ -238,6 +239,9 @@ namespace Nox
                 std::filesystem::path cooked = metadata.FilePath;
                 if (cooked.extension() != ".ntex")
                     cooked.replace_extension(".ntex");
+                // Not cooked yet: cooked now (the game then ships the GPU-ready, block-compressed file, not the PNG/JPG).
+                if (!std::filesystem::exists(assetDirectory / cooked, error) && TextureImporter::CookTexture(assetDirectory, metadata))
+                    ++report.Cooked;
                 if (std::filesystem::exists(assetDirectory / cooked, error))
                     copyWithCompanions(cooked);
                 else
@@ -292,6 +296,8 @@ namespace Nox
             report.Warnings.push_back("Could not write the project file");
 
         report.Success = true;
+        if (report.Cooked > 0)
+            NOX_CORE_INFO("Package Game: cooked {} textures that were not cooked yet", report.Cooked);
         NOX_CORE_INFO("Packaged {}: {} assets, {} files, {:.1f} MB -> {}", config.Name, report.Assets, report.Files,
                       static_cast<double>(report.Bytes) / (1024.0 * 1024.0), output.generic_string());
         return report;

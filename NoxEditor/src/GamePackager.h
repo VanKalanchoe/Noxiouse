@@ -36,6 +36,7 @@ namespace Nox
         std::string Error;
         size_t Assets = 0;
         size_t Files = 0;
+        size_t Cooked = 0; // textures cooked while packaging (they had never been loaded)
         uint64_t Bytes = 0;
         std::filesystem::path Executable;
         std::vector<std::string> Warnings;
