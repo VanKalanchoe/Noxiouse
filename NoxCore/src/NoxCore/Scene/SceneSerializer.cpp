@@ -875,6 +875,8 @@ namespace Nox
             out << YAML::Key << "Friction" << YAML::Value << bc2dComponent.Friction;
             out << YAML::Key << "Restitution" << YAML::Value << bc2dComponent.Restitution;
             out << YAML::Key << "RestitutionThreshold" << YAML::Value << bc2dComponent.RestitutionThreshold;
+            out << YAML::Key << "RollingResistance" << YAML::Value << bc2dComponent.RollingResistance;
+            out << YAML::Key << "TangentSpeed" << YAML::Value << bc2dComponent.TangentSpeed;
 
             out << YAML::EndMap; // BoxCollider2DComponent
         }
@@ -891,6 +893,8 @@ namespace Nox
             out << YAML::Key << "Friction" << YAML::Value << cc2dComponent.Friction;
             out << YAML::Key << "Restitution" << YAML::Value << cc2dComponent.Restitution;
             out << YAML::Key << "RestitutionThreshold" << YAML::Value << cc2dComponent.RestitutionThreshold;
+            out << YAML::Key << "RollingResistance" << YAML::Value << cc2dComponent.RollingResistance;
+            out << YAML::Key << "TangentSpeed" << YAML::Value << cc2dComponent.TangentSpeed;
 
             out << YAML::EndMap; // CircleCollider2DComponent
         }
@@ -1874,6 +1878,10 @@ namespace Nox
             bc2d.Friction = boxCollider2DComponent["Friction"].as<float>();
             bc2d.Restitution = boxCollider2DComponent["Restitution"].as<float>();
             bc2d.RestitutionThreshold = boxCollider2DComponent["RestitutionThreshold"].as<float>();
+            if (boxCollider2DComponent["RollingResistance"])
+                bc2d.RollingResistance = boxCollider2DComponent["RollingResistance"].as<float>();
+            if (boxCollider2DComponent["TangentSpeed"])
+                bc2d.TangentSpeed = boxCollider2DComponent["TangentSpeed"].as<float>();
         }
 
         auto circleCollider2DComponent = entity["CircleCollider2DComponent"];
@@ -1886,6 +1894,10 @@ namespace Nox
             cc2d.Friction = circleCollider2DComponent["Friction"].as<float>();
             cc2d.Restitution = circleCollider2DComponent["Restitution"].as<float>();
             cc2d.RestitutionThreshold = circleCollider2DComponent["RestitutionThreshold"].as<float>();
+            if (circleCollider2DComponent["RollingResistance"])
+                cc2d.RollingResistance = circleCollider2DComponent["RollingResistance"].as<float>();
+            if (circleCollider2DComponent["TangentSpeed"])
+                cc2d.TangentSpeed = circleCollider2DComponent["TangentSpeed"].as<float>();
         }
 
         auto rigidbody3DComponent = entity["RigidBody3DComponent"];

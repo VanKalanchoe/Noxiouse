@@ -27,6 +27,51 @@
 
 namespace Nox
 {
+    namespace
+    {
+        // A 2D collider's surface material (BoxCollider2DComponent / CircleCollider2DComponent), with presets like Unity's
+        // PhysicsMaterial2D assets.
+        template <typename Collider>
+        void DrawSurfaceMaterial2D(Collider& component)
+        {
+            struct Preset { const char* Name; float Density, Friction, Restitution, RollingResistance, TangentSpeed; };
+            static constexpr Preset presets[] = {
+                { "Default", 1.0f, 0.5f, 0.0f, 0.0f, 0.0f },
+                { "Ice", 0.9f, 0.02f, 0.05f, 0.0f, 0.0f },
+                { "Rubber", 1.1f, 0.9f, 0.6f, 0.05f, 0.0f },
+                { "Wood", 0.7f, 0.45f, 0.2f, 0.02f, 0.0f },
+                { "Metal", 7.8f, 0.3f, 0.1f, 0.01f, 0.0f },
+                { "Bouncy", 1.0f, 0.4f, 0.95f, 0.0f, 0.0f },
+                { "Conveyor", 1.0f, 0.8f, 0.0f, 0.0f, 2.0f },
+            };
+            if (ImGui::BeginCombo("Material Preset", "Apply a preset..."))
+            {
+                for (const Preset& preset : presets)
+                {
+                    if (ImGui::Selectable(preset.Name))
+                    {
+                        component.Density = preset.Density;
+                        component.Friction = preset.Friction;
+                        component.Restitution = preset.Restitution;
+                        component.RollingResistance = preset.RollingResistance;
+                        component.TangentSpeed = preset.TangentSpeed;
+                    }
+                }
+                ImGui::EndCombo();
+            }
+            ImGui::DragFloat("Density", &component.Density, 0.01f, 0.0f, 100.0f, "%.2f kg/m2");
+            ImGui::DragFloat("Friction", &component.Friction, 0.01f, 0.0f, 2.0f);
+            ImGui::DragFloat("Restitution", &component.Restitution, 0.01f, 0.0f, 1.0f);
+            ImGui::SetItemTooltip("Bounce: 0 = none, 1 = keeps all its speed");
+            ImGui::DragFloat("Restitution Threshold", &component.RestitutionThreshold, 0.01f, 0.0f, 100.0f, "%.2f m/s");
+            ImGui::SetItemTooltip("Slower impacts do not bounce. One value for the whole 2D world: the smallest collider's is used.");
+            ImGui::DragFloat("Rolling Resistance", &component.RollingResistance, 0.005f, 0.0f, 1.0f);
+            ImGui::SetItemTooltip("Slows rolling circles down");
+            ImGui::DragFloat("Tangent Speed", &component.TangentSpeed, 0.05f, -100.0f, 100.0f, "%.2f m/s");
+            ImGui::SetItemTooltip("Moves what touches the surface along it: a conveyor belt");
+        }
+    }
+
     SceneHierarchyPanel::SceneHierarchyPanel(const Ref<Scene>& context)
     {
         SetContext(context);
@@ -2488,20 +2533,14 @@ namespace Nox
         {
             ImGui::DragFloat2("Offset", glm::value_ptr(component.Offset));
             ImGui::DragFloat2("Size", glm::value_ptr(component.Size));
-            ImGui::DragFloat("Density", &component.Density, 0.01f, 0.0f, 1.0f);
-            ImGui::DragFloat("Friction", &component.Friction, 0.01f, 0.0f, 1.0f);
-            ImGui::DragFloat("Restitution", &component.Restitution, 0.01f, 0.0f, 1.0f);
-            ImGui::DragFloat("RestitutionThreshold", &component.RestitutionThreshold, 0.01f, 0.0f);
+            DrawSurfaceMaterial2D(component);
         });
 
         DrawComponent<CircleCollider2DComponent>("Circle Collider 2D", entity, [](auto& component)
         {
             ImGui::DragFloat2("Offset", glm::value_ptr(component.Offset));
             ImGui::DragFloat("Radius", &component.Radius);
-            ImGui::DragFloat("Density", &component.Density, 0.01f, 0.0f, 1.0f);
-            ImGui::DragFloat("Friction", &component.Friction, 0.01f, 0.0f, 1.0f);
-            ImGui::DragFloat("Restitution", &component.Restitution, 0.01f, 0.0f, 1.0f);
-            ImGui::DragFloat("RestitutionThreshold", &component.RestitutionThreshold, 0.01f, 0.0f);
+            DrawSurfaceMaterial2D(component);
         });
 
         DrawComponent<RigidBody3DComponent>("Rigidbody 3D", entity, [](auto& component)

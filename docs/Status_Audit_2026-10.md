@@ -136,8 +136,9 @@ for history. File references are to the code as of this audit.
   physics extensions; level import of a skeletal model's clips.
 
 **Other**
-- Metal backend (throws); Box2D physics materials. (Built 2026-10-20: text outline and background rectangle; fonts load from
-  memory.)
+- Metal backend (throws). (Built 2026-10-20: text outline and background rectangle; fonts load from memory; Box2D surface
+  materials -- rolling resistance, conveyor tangent speed, Inspector presets -- and 2D physics in the project's units: gravity and
+  Box2D's length scale follow units per meter, the restitution threshold was set from Restitution.)
 
 ### 0.4 Docs that no longer match the code
 

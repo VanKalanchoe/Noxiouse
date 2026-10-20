@@ -5,6 +5,7 @@
 
 #include <box2d/box2d.h>
 #include <algorithm>
+#include <cfloat>
 #include <functional>
 #include <unordered_set>
 
@@ -1609,17 +1610,22 @@ namespace Nox
     void Scene::OnPhysics2DStart()
     {
         auto view = m_Registry.view<RigidBody2DComponent>();
+        // Box2D works in the world's units: its tolerances follow the project's units per meter, gravity and speeds are converted.
+        b2SetLengthUnitsPerMeter(WorldUnits::PerMeter());
         b2WorldDef worldDef = b2DefaultWorldDef();
-        worldDef.gravity = b2Vec2{0.0f, -9.8f}; //gravity real world
+        worldDef.gravity = b2Vec2{ 0.0f, -WorldUnits::FromMeters(9.81f) };
+        // Restitution threshold is a world setting in Box2D: the smallest of the colliders' (a bouncy ball keeps bouncing).
+        float restitutionThreshold = FLT_MAX;
         for (auto e : view)
         {
             Entity entity = {e, this};
             if (entity.HasComponent<BoxCollider2DComponent>())
-            {
-                auto& bc2d = entity.GetComponent<BoxCollider2DComponent>();
-                worldDef.restitutionThreshold = bc2d.Restitution;
-            }
+                restitutionThreshold = std::min(restitutionThreshold, entity.GetComponent<BoxCollider2DComponent>().RestitutionThreshold);
+            if (entity.HasComponent<CircleCollider2DComponent>())
+                restitutionThreshold = std::min(restitutionThreshold, entity.GetComponent<CircleCollider2DComponent>().RestitutionThreshold);
         }
+        if (restitutionThreshold != FLT_MAX)
+            worldDef.restitutionThreshold = WorldUnits::FromMeters(std::max(restitutionThreshold, 0.0f));
         m_PhysicsWorldID = b2CreateWorld(&worldDef);
 
         for (auto e : view)
@@ -1655,6 +1661,8 @@ namespace Nox
                 shapeDef.density = bc2d.Density;
                 shapeDef.material.friction = bc2d.Friction;
                 shapeDef.material.restitution = bc2d.Restitution;
+                shapeDef.material.rollingResistance = bc2d.RollingResistance;
+                shapeDef.material.tangentSpeed = WorldUnits::FromMeters(bc2d.TangentSpeed);
                 b2ShapeId shapeID = b2CreatePolygonShape(body, &shapeDef, &boxShape);
             }
 
@@ -1671,6 +1679,8 @@ namespace Nox
                 shapeDef.density = cc2d.Density;
                 shapeDef.material.friction = cc2d.Friction;
                 shapeDef.material.restitution = cc2d.Restitution;
+                shapeDef.material.rollingResistance = cc2d.RollingResistance;
+                shapeDef.material.tangentSpeed = WorldUnits::FromMeters(cc2d.TangentSpeed);
                 b2ShapeId shapeID = b2CreateCircleShape(body, &shapeDef, &circleShape);
             }
         }

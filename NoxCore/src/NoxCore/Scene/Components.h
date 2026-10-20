@@ -629,11 +629,13 @@ namespace Nox
         glm::vec2 Offset = { 0.0f, 0.0f };
         glm::vec2 Size = { 0.5f, 0.5f };//1x1m scale object
         
-        //documentation what they do // todo move into physics material in the future maybe
-        float Density = 1.0f; 
-        float Friction = 0.5f;
-        float Restitution = 0.0f;
-        float RestitutionThreshold = 0.5f;
+        // The surface material (Box2D's b2SurfaceMaterial; Inspector presets: Default, Ice, Rubber, Wood, Metal, Bouncy, Conveyor).
+        float Density = 1.0f;              // kg per square meter
+        float Friction = 0.5f;             // Coulomb friction, usually 0..1
+        float Restitution = 0.0f;          // bounce, 0..1
+        float RestitutionThreshold = 0.5f; // m/s: slower impacts do not bounce (one value for the world: the smallest collider's)
+        float RollingResistance = 0.0f;    // slows rolling circles, 0..1
+        float TangentSpeed = 0.0f;         // m/s along the surface: a conveyor belt
         
         // Storage for runtime
         void* RuntimeFixture = nullptr;
@@ -647,11 +649,13 @@ namespace Nox
         glm::vec2 Offset = { 0.0f, 0.0f };
         float Radius = 0.5f;// idk 0.5 doesnt work for me maybe changed with box2d v3 ?1x1m scale object
         
-        //documentation what they do // todo move into physics material in the future maybe
-        float Density = 1.0f; 
-        float Friction = 0.5f;
-        float Restitution = 0.0f;
-        float RestitutionThreshold = 0.5f;
+        // The surface material (Box2D's b2SurfaceMaterial; Inspector presets: Default, Ice, Rubber, Wood, Metal, Bouncy, Conveyor).
+        float Density = 1.0f;              // kg per square meter
+        float Friction = 0.5f;             // Coulomb friction, usually 0..1
+        float Restitution = 0.0f;          // bounce, 0..1
+        float RestitutionThreshold = 0.5f; // m/s: slower impacts do not bounce (one value for the world: the smallest collider's)
+        float RollingResistance = 0.0f;    // slows rolling circles, 0..1
+        float TangentSpeed = 0.0f;         // m/s along the surface: a conveyor belt
         
         // Storage for runtime
         void* RuntimeFixture = nullptr;
