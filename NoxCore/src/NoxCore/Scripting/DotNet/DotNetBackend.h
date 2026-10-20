@@ -18,6 +18,9 @@ namespace Nox
         bool LoadModule(const std::filesystem::path& coreAssembly,
                         const std::filesystem::path& gameAssembly) override;
         bool WaitForJobs(uint32_t timeoutMilliseconds) override;
+        bool WaitForDebugger(uint32_t timeoutMilliseconds) override;
+        // Nox.ScriptApi.Version (ScriptApi.cs) this engine's internal calls match.
+        static constexpr int32_t kScriptApiVersion = 2;
         bool HasType(std::string_view fullName) const override;
         std::vector<ScriptFieldInfo> GetExposedFields(std::string_view fullName) const override;
         ScriptInstanceHandle CreateInstance(std::string_view fullName, UUID entity) override;

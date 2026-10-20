@@ -2019,11 +2019,20 @@ namespace Nox
                             auto& overrides = component.FieldOverrides[className];
                             ScriptValue value = overrides.contains(fieldName) ? overrides[fieldName] : field.DefaultValue;
                             bool changed = false;
+                            // [Expose(Min, Max)]: the range (Min == Max: none), [Expose(ReadOnly)]: shown only.
+                            const bool ranged = field.Max > field.Min;
+                            const float rangeMin = ranged ? field.Min : 0.0f;
+                            const float rangeMax = ranged ? field.Max : 0.0f;
+                            const int32_t intMin = static_cast<int32_t>(field.Min), intMax = static_cast<int32_t>(field.Max);
+                            const uint32_t uintMin = static_cast<uint32_t>(std::max(field.Min, 0.0f)), uintMax = static_cast<uint32_t>(std::max(field.Max, 0.0f));
+                            ImGui::BeginDisabled(field.ReadOnly);
                             switch (field.Type)
                             {
                                 case ScriptFieldType::Bool: changed = ImGui::Checkbox(fieldName.c_str(), &std::get<bool>(value)); break;
-                                case ScriptFieldType::Int: changed = ImGui::DragScalar(fieldName.c_str(), ImGuiDataType_S32, &std::get<int32_t>(value), 1.0f); break;
-                                case ScriptFieldType::UInt: changed = ImGui::DragScalar(fieldName.c_str(), ImGuiDataType_U32, &std::get<uint32_t>(value), 1.0f); break;
+                                case ScriptFieldType::Int: changed = ImGui::DragScalar(fieldName.c_str(), ImGuiDataType_S32, &std::get<int32_t>(value), 1.0f,
+                                                                                         ranged ? &intMin : nullptr, ranged ? &intMax : nullptr); break;
+                                case ScriptFieldType::UInt: changed = ImGui::DragScalar(fieldName.c_str(), ImGuiDataType_U32, &std::get<uint32_t>(value), 1.0f,
+                                                                                          ranged ? &uintMin : nullptr, ranged ? &uintMax : nullptr); break;
                                 case ScriptFieldType::Long: changed = ImGui::DragScalar(fieldName.c_str(), ImGuiDataType_S64, &std::get<int64_t>(value), 1.0f); break;
                                 case ScriptFieldType::ULong: changed = ImGui::DragScalar(fieldName.c_str(), ImGuiDataType_U64, &std::get<uint64_t>(value), 1.0f); break;
                                 case ScriptFieldType::Float:
@@ -2032,7 +2041,8 @@ namespace Nox
                                     if (!field.Unit.empty() && ScriptUnitFactor(field.Unit, worldUnitsPerDisplay))
                                     {
                                         float display = std::get<float>(value) / worldUnitsPerDisplay;
-                                        if (ImGui::DragFloat((fieldName + " (" + field.Unit + ")").c_str(), &display, 0.1f))
+                                        if (ImGui::DragFloat((fieldName + " (" + field.Unit + ")").c_str(), &display, 0.1f, rangeMin, rangeMax,
+                                                             "%.3f", ranged ? ImGuiSliderFlags_AlwaysClamp : 0))
                                         {
                                             value = display * worldUnitsPerDisplay;
                                             changed = true;
@@ -2040,7 +2050,8 @@ namespace Nox
                                     }
                                     else
                                     {
-                                        changed = ImGui::DragFloat(fieldName.c_str(), &std::get<float>(value), 0.1f);
+                                        changed = ImGui::DragFloat(fieldName.c_str(), &std::get<float>(value), 0.1f, rangeMin, rangeMax, "%.3f",
+                                                                   ranged ? ImGuiSliderFlags_AlwaysClamp : 0);
                                     }
                                     break;
                                 }
@@ -2049,7 +2060,10 @@ namespace Nox
                                 case ScriptFieldType::Vector3: changed = ImGui::DragFloat3(fieldName.c_str(), glm::value_ptr(std::get<glm::vec3>(value)), 0.1f); break;
                                 case ScriptFieldType::Entity: break;
                             }
-                            if (changed) overrides[fieldName] = std::move(value);
+                            ImGui::EndDisabled();
+                            if (!field.Tooltip.empty())
+                                ImGui::SetItemTooltip("%s", field.Tooltip.c_str());
+                            if (changed && !field.ReadOnly) overrides[fieldName] = std::move(value);
                             continue;
                         }
 

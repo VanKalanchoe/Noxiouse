@@ -30,6 +30,9 @@ namespace Nox
         static std::filesystem::path GetProjectScriptsProject();
         static bool ReloadAssembly();
         static void OnRuntimeStart(Scene* scene);
+        // Script > Wait for Debugger: the next Play waits (up to 60 s) for a .NET debugger before the first OnCreate.
+        static void SetWaitForDebugger(bool wait) { s_WaitForDebugger = wait; }
+        static bool GetWaitForDebugger() { return s_WaitForDebugger; }
         static void OnRuntimeStop();
         static void OnCreateEntity(Entity entity);
         static void OnDestroyEntity(Entity entity);
@@ -51,6 +54,7 @@ namespace Nox
         static std::unordered_map<UUID, std::vector<ScriptInstanceHandle>> s_Instances;
         static std::filesystem::path s_ExecutableDirectory;
         static bool s_StageAssemblies;
+        static bool s_WaitForDebugger;
         static Scene* s_Scene;
     };
 }

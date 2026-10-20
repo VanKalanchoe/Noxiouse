@@ -579,6 +579,19 @@ namespace Nox
             m_Host.UnloadAssemblyLoadContext(*loadContext);
             return false;
         }
+        {
+            // The managed API this engine was written against (ScriptApi.cs): another version's internal calls do not match.
+            const Coral::Type& api = static_cast<const Coral::ManagedAssembly*>(core)->GetLocalType("Nox.ScriptApi");
+            const int32_t version = api ? api.InvokeStaticMethod<int32_t>("GetVersion") : 0;
+            if (version != kScriptApiVersion)
+            {
+                NOX_CORE_ERROR("Nox.ScriptCore '{}' has script API version {}, the engine needs {}: rebuild NoxScriptCore (and the "
+                               "game's scripts) with this engine{}", coreAssembly.string(), version, kScriptApiVersion,
+                               m_LoadContext ? "; the scripts loaded before keep running" : "");
+                m_Host.UnloadAssemblyLoadContext(*loadContext);
+                return false;
+            }
+        }
 
         ClearModule();
         m_LoadContext = std::move(loadContext);
@@ -606,6 +619,9 @@ namespace Nox
                 bool isExposed = false;
                 bool disallowSelf = false;
                 std::string unit;
+                std::string tooltip;
+                float minimum = 0.0f, maximum = 0.0f;
+                bool readOnly = false;
                 for (Coral::Attribute attribute : field.GetAttributes())
                 {
                     const std::string attributeName(attribute.GetType().GetFullName());
@@ -613,6 +629,10 @@ namespace Nox
                     {
                         isExposed = true;
                         unit = attribute.GetFieldValue<std::string>("Unit");
+                        tooltip = attribute.GetFieldValue<std::string>("Tooltip");
+                        minimum = attribute.GetFieldValue<float>("Min");
+                        maximum = attribute.GetFieldValue<float>("Max");
+                        readOnly = attribute.GetFieldValue<bool>("ReadOnly");
                     }
                     else if (attributeName == "Nox.DisallowSelfAttribute")
                         disallowSelf = true;
@@ -641,12 +661,27 @@ namespace Nox
                 {
                     exposed.back().DisallowSelf = disallowSelf;
                     exposed.back().Unit = unit;
+                    exposed.back().Tooltip = tooltip;
+                    exposed.back().Min = minimum;
+                    exposed.back().Max = maximum;
+                    exposed.back().ReadOnly = readOnly;
                 }
             }
             defaults.Destroy();
         }
         NOX_CORE_INFO("Loaded {} C# script types", m_Types.size());
         return true;
+    }
+
+    bool DotNetBackend::WaitForDebugger(uint32_t timeoutMilliseconds)
+    {
+        if (!m_CoreAssembly)
+            return false;
+        const Coral::Type& api = static_cast<const Coral::ManagedAssembly*>(m_CoreAssembly)->GetLocalType("Nox.ScriptApi");
+        if (!api)
+            return false;
+        NOX_CORE_INFO("Scripts: waiting up to {} s for a .NET debugger to attach to this process", timeoutMilliseconds / 1000);
+        return api.InvokeStaticMethod<int32_t>("WaitForDebugger", static_cast<int32_t>(timeoutMilliseconds)) != 0;
     }
 
     bool DotNetBackend::WaitForJobs(uint32_t timeoutMilliseconds)

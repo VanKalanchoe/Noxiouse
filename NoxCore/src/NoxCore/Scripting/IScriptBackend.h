@@ -25,6 +25,8 @@ namespace Nox
         // Waits for the scripts' background jobs (Nox.Jobs) before their code is unloaded; false if some still run after
         // timeoutMilliseconds.
         virtual bool WaitForJobs(uint32_t timeoutMilliseconds) = 0;
+        // Blocks until a debugger for the scripts attaches (at most timeoutMilliseconds); true once one is.
+        virtual bool WaitForDebugger(uint32_t timeoutMilliseconds) = 0;
         virtual bool HasType(std::string_view fullName) const = 0;
         virtual std::vector<ScriptFieldInfo> GetExposedFields(std::string_view fullName) const = 0;
         virtual ScriptInstanceHandle CreateInstance(std::string_view fullName, UUID entity) = 0;

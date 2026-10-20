@@ -33,5 +33,11 @@ namespace Nox
         // [Expose(Unit = "...")] (docs/Units_And_World_Tools_Plan_2026.md): "cm", "m", "cm/s", "m/s", "km/h", or empty for a value
         // that is not a length/speed. The Inspector shows and edits the field in this unit; the script still sees the raw value.
         std::string Unit;
+        // [Expose(Tooltip, Min, Max, ReadOnly)]: the Inspector's hint, its range (Min == Max: none; in Unit when one is set) and
+        // whether it only shows the value.
+        std::string Tooltip;
+        float Min = 0.0f;
+        float Max = 0.0f;
+        bool ReadOnly = false;
     };
 }

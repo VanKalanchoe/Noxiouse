@@ -100,10 +100,10 @@ for history. File references are to the code as of this audit.
   filtered by skeleton; jump / fall states (C1, needs clips); multi-skin models spawn as nodes (C3).
 
 **Scripting**
-- Debounced build + source watching; `ScriptBehaviour` component model; scripts and asset
-  references as assets; richer field metadata; `OnFixedUpdate` / `OnLateUpdate`; camera smoothing; API version check and
-  debugger; backend-independent API; Lua (deferred).
-- Per-project game assembly (Facerun.dll is hard-coded). (`Nox.WorldUnits` for scripts: built 2026-10-20.)
+- `ScriptBehaviour` component model; scripts and asset references as assets; camera smoothing; backend-independent API;
+  Lua (deferred). (Built 2026-10-20: build on save + Ctrl+B with debounced source watching, per-project game assembly,
+  `[Expose]` Tooltip / Min / Max / ReadOnly, `OnFixedUpdate` / `OnLateUpdate`, API version check, Wait for Debugger,
+  `Nox.WorldUnits`; `Scripting_Architecture_and_Status.md` refreshed.)
 
 **Runtime and packaging**
 - Pack files (R4), precompiled shaders and pipeline cache (R5), a cook step for textures, self-contained .NET runtime,

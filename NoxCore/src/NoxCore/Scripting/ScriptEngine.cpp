@@ -113,6 +113,7 @@ namespace Nox
     std::unordered_map<UUID, std::vector<ScriptInstanceHandle>> ScriptEngine::s_Instances;
     std::filesystem::path ScriptEngine::s_ExecutableDirectory;
     bool ScriptEngine::s_StageAssemblies = false;
+    bool ScriptEngine::s_WaitForDebugger = false;
     Scene* ScriptEngine::s_Scene = nullptr;
 
     bool ScriptEngine::Initialize(const std::filesystem::path& executableDirectory, bool stageAssemblies)
@@ -273,6 +274,8 @@ namespace Nox
     {
         s_Scene = scene;
         if (s_Backend) s_Backend->SetSceneContext(scene);
+        if (s_Backend && s_WaitForDebugger && !s_Backend->WaitForDebugger(60000))
+            NOX_CORE_WARN("Scripts: no debugger attached within 60 s, playing on");
     }
 
     void ScriptEngine::OnRuntimeStop()

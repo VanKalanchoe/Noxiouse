@@ -60,31 +60,23 @@ runtime.
 
 ```text
 NoxCore/src/NoxCore/Scripting/
-  ScriptTypes.h              common language-neutral types
+  ScriptTypes.h              common language-neutral types (values, field metadata, callbacks)
   IScriptBackend.h           backend contract
-  ScriptEngine.h/.cpp        scene-facing facade and instance registry
+  ScriptEngine.h/.cpp        scene-facing facade, instance registry, finding and staging the assemblies
   DotNet/
-    DotNetBackend.h/.cpp     Coral host, ALC, reflection and internal calls
+    DotNetBackend.h/.cpp     Coral host, ALC, reflection, internal calls, API version check
 
-NoxScriptCore/
-  Nox.ScriptCore.csproj
+NoxEditor/src/ScriptBuilder.h/.cpp   dotnet build of the project's scripts, build on save, reload
+
+NoxScriptCore/                       the managed engine API (Nox.ScriptCore.dll)
   Source/
-    EntityBehaviour.cs
-    InternalCalls.cs
-    Vector3.cs
-    Input.cs
-    Log.cs
-    ExposeAttribute.cs
+    EntityBehaviour.cs  Entity.cs  Component.cs  TransformComponent.cs  Transform.cs
+    RigidBody3DComponent.cs  CharacterControllerComponent.cs  AnimatorComponent.cs
+    ParticleEmitterComponent.cs  TimelinePlayerComponent.cs  Physics.cs  Mesh.cs  Jobs.cs
+    Scene.cs  Input.cs  Log.cs  Time.cs  WorldUnits.cs  Vector2.cs  Vector3.cs
+    ExposeAttribute.cs  DisallowSelfAttribute.cs  ScriptApi.cs  InternalCalls.cs
 
-Facerun/
-  Assets/Scripts/
-    Facerun.csproj             normal SDK-style .NET 9 project
-    config/config-win.bat      generates the editable solution locally
-    build/win/Facerun.sln      generated; open in Visual Studio/Rider
-    Binaries/                  generated managed assemblies
-    Source/
-      WASDMovement.cs
-      CameraFollow.cs
+<Project>/Assets/Scripts/            a project's game scripts (Facerun: Facerun.csproj, Source/*.cs)
 ```
 
 ## Runtime ownership and lifetime
@@ -215,47 +207,79 @@ validation and ECS behavior exist in only one place.
 `ScriptComponent`, constructs its managed object, assigns `EntityID`, and
 calls `OnCreate`.
 
-`Scene::OnUpdateRuntime` calls `OnUpdate(deltaTime)` while the scene is
-stepping, before normal update systems propagate dirty transforms.
+Each stepping frame `Scene::OnUpdateRuntime` calls, in this order:
+
+1. `OnFixedUpdate(fixedDeltaTime)` at a fixed 60 Hz (`Time.FixedDeltaTime`): as many
+   steps as the frame's time holds, at most 5 (a long hitch does not snowball).
+2. `OnUpdate(deltaTime)` once.
+3. The update systems: physics, animation, timelines, transform propagation, particles.
+4. `OnAnimationEvent(name)` for the animation notifies and timeline events crossed.
+5. `OnLateUpdate(deltaTime)`; what it moves is propagated again, so a camera that
+   follows a character shows where it is this frame.
+
+`OnFixedUpdate` and `OnLateUpdate` are only called on classes that override them
+(`EntityBehaviour.GetCallbackMask`, read once per class).
 
 `Scene::OnRuntimeStop` calls `OnDestroy`, destroys managed handles, clears the
 scene context, and then tears down physics.
 
-Scripts currently execute on the main thread. Do not invoke managed scripts
-from worker jobs until reload includes an explicit script-job fence.
+Scripts execute on the main thread. `Nox.Jobs` runs background work; engine calls
+from a job are refused (logged), and reload / shutdown wait for running jobs.
+
+## The project's assembly
+
+The game assembly is the project's: its name is the file name of the project's
+`ScriptModulePath` (`Scripts/Binaries/Facerun.dll` -> `Facerun`), else the project's
+name, and its C# project is the `.csproj` under the project's `Assets/Scripts` (the one
+named like the assembly, else the first). `ScriptEngine::LoadProjectAssembly` loads the
+newest of:
+
+- `Scripts/<Name>/<Name>.dll` next to the executable (the editor's CMake build of the
+  sample project; a packaged game);
+- the project's `ScriptModulePath` (relative to the asset directory);
+- the project's own build, `Assets/Scripts/bin/<Configuration>/<Name>.dll`.
+
+`Nox.ScriptCore.dll` comes from `Scripts/Core` next to the executable or the engine
+checkout's `NoxScriptCore/bin`, whichever is newer. Opening another project loads its
+assembly.
 
 ## Hot reload
 
-The editor menu and Ctrl+R invoke `ScriptEngine::ReloadAssembly`. Compilation
-is deliberately explicit: build `Facerun.sln` in Visual Studio/Rider first,
-then request reload in the editor. Current behavior:
+The editor builds and reloads by itself (`ScriptBuilder`):
 
-1. Visual Studio/Rider validates and compiles the projects into their normal
-   `bin/<Configuration>` directories.
-2. Reload verifies the required DLLs exist and shadow-copies them into a unique
-   `build/managed/HotReload/Generation-N` directory to avoid file locking.
-3. Destroy managed instances and cached managed types.
-4. Unload the Coral Assembly Load Context.
-5. Create a new context and load both shadow-copied assemblies.
-6. Rediscover subclasses of `Nox.EntityBehaviour`.
-7. Recreate running-scene instances and call `OnCreate`.
+- **Script > Build and Reload** (Ctrl+B) runs `dotnet build` on the project's `.csproj`;
+- **Build on Save** (on by default): 750 ms after a `.cs` file under the project's
+  scripts changed (several saves build once);
+- **Reload assembly** (Ctrl+R) reloads what was last built (a build in Visual Studio /
+  Rider, for example).
 
-Reload never invokes a compiler. A candidate that fails managed loading can
-still leave scripting unloaded, and runtime fields are not preserved.
+The build runs on its own thread; its compiler errors go to the editor's log (full
+output in `obj/NoxBuild.log`). A reload:
 
-Target design:
+1. Copies the assemblies (with `.pdb`, `.deps.json`, `.runtimeconfig.json`) into
+   `<Project>/Intermediate/Scripts/Generation-N`: the loaded copies stay locked, the
+   build output does not.
+2. Waits for running `Nox.Jobs` (2 s, else the reload is skipped).
+3. Snapshots the running instances' exposed field values.
+4. Loads the copies into a new Assembly Load Context and checks the API version; a
+   build that does not load leaves the running scripts as they were.
+5. Destroys the old instances, unloads the old context (a new generation: old handles
+   stop working).
+6. Recreates the instances with the snapshot's values (fields that kept their name and
+   type), calls `OnCreate`, then `OnAfterReload`.
 
-```text
-source change -> debounced dotnet build -> unique generation directory
-             -> load/validate candidate ALC
-             -> frame-safe state snapshot and swap
-             -> restore compatible fields
-             -> unload old ALC
-```
+## API version
 
-If candidate compilation or loading fails, the old generation must continue
-running. File watching must observe source/project files, not the output DLL,
-and must never reload during a managed call.
+`Nox.ScriptApi.Version` (`ScriptApi.cs`) must equal `DotNetBackend::kScriptApiVersion`.
+Raise both whenever the internal calls change: the engine refuses a Nox.ScriptCore of
+another version (logged) instead of calling functions that moved.
+
+## Debugging scripts
+
+**Script > Wait for Debugger on Play**: Play waits (up to 60 s) until a .NET debugger
+attaches, then breaks once. Visual Studio: Debug > Attach to Process, NoxEditor, code
+type *Managed (.NET Core)*; Rider: Run > Attach to Process. The `.pdb` files are staged
+with the assemblies, so breakpoints in the scripts hit.
 
 ## Editor and serialization target model
 
@@ -287,9 +311,15 @@ native `ScriptFieldStorage`, keyed by behaviour ID and stable field ID; managed
 objects are never authoritative serialized state.
 
 `ScriptValue` is already a language-neutral variant and persists the supported
-exposed values in the scene. Extend metadata with
-display name, range, tooltip, read-only status, default value, and stable
-field ID. C# obtains it through `[Expose]` reflection; Lua will declare an
+exposed values in the scene. `[Expose]` carries `Unit`, `Tooltip`, `Min` / `Max`
+(the Inspector's range, in the unit when one is set; equal: none) and `ReadOnly`:
+
+```csharp
+[Expose(Unit = "m/s", Min = 0, Max = 20, Tooltip = "Top running speed")]
+public float Speed = 600.0f;
+```
+
+Still to add: display name and a stable field ID. C# obtains it through `[Expose]` reflection; Lua will declare an
 equivalent metadata table. Do not return to VanK's fixed 16-byte field buffer.
 
 ## Creating a script
@@ -327,8 +357,8 @@ public sealed class MyBehaviour : EntityBehaviour
 }
 ```
 
-Build the existing C# project in Rider/Visual Studio, then use Reload Scripts
-in Nox. Reload loads the already-built DLL and never invokes the compiler.
+Saving the file builds and reloads the scripts (Build on Save); Ctrl+B does it on
+request.
 
 ## Smoke tests
 
@@ -373,35 +403,24 @@ camera interpolation is still future work.
 
 Completed:
 
-- Reproducible pinned Coral FetchContent integration.
-- Coral native and managed build/deployment wiring.
-- Backend-neutral interface, values, callbacks, and opaque handles.
-- Coral HostFXR/CoreCLR startup and shutdown.
-- Unloadable per-generation Assembly Load Context.
-- `Nox.ScriptCore` and Facerun managed projects.
-- Subclass discovery and managed lifecycle invocation.
-- Scene runtime integration.
-- Manual Ctrl+R/menu reload with play-scene recreation.
-- Log, input, entity lookup, and local transform internal calls.
-- Script class editor field with validity feedback.
-- Multiple script behaviours per entity in the component, editor, and runtime.
-- Scene save/load persistence for the current script class list.
-- Reflected `[Expose]` fields with typed inspector controls and scene persistence.
-- Stable exposed entity references for regular entities and imported model nodes.
-- Content Browser C# creation with an `OnCreate`/`OnUpdate` skeleton.
-- WASD and camera transform smoke-test scripts.
+- Coral integration, unloadable per-generation Assembly Load Contexts, subclass
+  discovery, scene runtime integration, multiple behaviours per entity.
+- `OnCreate`, `OnUpdate`, `OnFixedUpdate` (60 Hz), `OnLateUpdate`, `OnDestroy`,
+  `OnAfterReload`, `OnAnimationEvent`.
+- APIs: log, input, entities and components, transforms, rigidbody forces / impulses /
+  velocity, character controller, animator, particles, timelines, raycasts, run-time
+  meshes and mesh colliders, jobs, world units, scene loading.
+- `[Expose]` fields with units, tooltip, range, read-only; entity references, model
+  nodes; values persisted in the scene and kept across reloads.
+- Per-project game assembly; build on save and Ctrl+B; transactional reload (a broken
+  build keeps the running scripts); job fence; API version check; debugger wait.
+- Content Browser C# script creation from a template.
 
-Next, in order:
+Next:
 
-1. Verify runtime launch and managed calls in an actual play scene.
-2. Add debounced source watching and transactional reload.
-3. Snapshot and migrate non-serialized runtime state across reload.
-4. Replace class-name entries with stable script behaviour IDs/assets.
-5. Add asset references and richer field metadata/attributes.
-6. Add `FixedUpdate` and rigidbody force/impulse API.
-7. Add optional target-follow camera interpolation.
-8. Add script API version validation and debugger support.
-9. Add a Lua backend without changing Scene or serialization contracts.
+1. Replace class-name entries with stable script behaviour IDs / script assets.
+2. Asset references as exposed fields.
+3. A Lua backend without changing Scene or serialization contracts.
 
 ## Important invariants
 

@@ -609,6 +609,12 @@ namespace Nox
                     ScriptEngine::ReloadAssembly();
                 }
                 ImGui::MenuItem("Build on Save", nullptr, &m_ScriptBuilder.AutoBuild);
+                bool waitForDebugger = ScriptEngine::GetWaitForDebugger();
+                if (ImGui::MenuItem("Wait for Debugger on Play", nullptr, &waitForDebugger))
+                    ScriptEngine::SetWaitForDebugger(waitForDebugger);
+                ImGui::SetItemTooltip("Play waits (up to 60 s) until a .NET debugger attaches to the editor, then breaks once.\n"
+                                      "Visual Studio: Debug > Attach to Process, NoxEditor, code type Managed (.NET Core).\n"
+                                      "Rider: Run > Attach to Process. Breakpoints in the scripts then hit (the .pdb is loaded with them).");
                 ImGui::SetItemTooltip("Saving a .cs file of the project builds its scripts and reloads them a moment later.");
                 if (!m_ScriptBuilder.GetStatus().empty())
                     ImGui::TextDisabled("%s", m_ScriptBuilder.GetStatus().c_str());
