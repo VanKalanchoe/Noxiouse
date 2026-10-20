@@ -227,7 +227,11 @@ namespace Nox
         }
 
         if (m_SceneState == SceneState::Edit && m_ViewportHovered)
+        {
+            const ImVec2 mouse = ImGui::GetMousePos();
+            m_EditorCamera.SetCursorPosition({ mouse.x - m_ViewportBounds[0].x, mouse.y - m_ViewportBounds[0].y });
             m_EditorCamera.OnEvent(event);
+        }
 
         EventDispatcher dispatcher(event);
         dispatcher.Dispatch<ExternalFileDropEvent>([this](ExternalFileDropEvent& drop)

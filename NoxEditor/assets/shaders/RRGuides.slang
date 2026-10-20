@@ -7,9 +7,6 @@
 // distance (4.1.9): the world-space distance from the primary surface to what its reflection ray hit, which RR needs to
 // move reflections with the camera.
 
-// What Reflection.slang writes for a reflection ray that missed or was not traced (its alpha).
-static const float ReflectionMissDistance = 10000.0;
-
 // Streamline DLSS-RR programming guide 4.2.1 [Ray Tracing Gems, Chapter 32].
 float3 EnvBRDFApprox2(float3 SpecularColor, float alpha, float NoV)
 {
@@ -50,7 +47,8 @@ void guidesMain(uint3 dispatchThreadID : SV_DispatchThreadID, uniform PushConsta
     {
         Texture2D reflectionTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.rawReflectionIndex, 0));
         RWTexture2D<float> hitDistanceOut = RWTexture2D<float>.Handle(uint2(pushConstant.hitDistanceStorageIndex, 0));
-        hitDistanceOut[pixel] = min(reflectionTex.Load(int3(pixel, 0)).a, ReflectionMissDistance);
+        // A ray that missed or was not traced: Reflection.slang wrote reflection_miss_distance (shaderIO.h) in its alpha.
+        hitDistanceOut[pixel] = min(reflectionTex.Load(int3(pixel, 0)).a, reflection_miss_distance(ubo));
     }
 
     // Background (reverse-Z: nothing drawn at depth 0): no reflectance, as the G-buffer clears it.

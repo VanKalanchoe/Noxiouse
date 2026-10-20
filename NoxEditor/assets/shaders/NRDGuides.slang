@@ -54,7 +54,7 @@ GuidesOutput fragMain(MSOutput input, uniform PushConstantNRDGuides pushConstant
     float depth = depthTex.Load(int3(pixel, 0));
     if (depth <= 0.0)
     {
-        output.viewZ = NRD_FP16_MAX;
+        output.viewZ = nrd_sky_view_z(ubo);
         output.normalRoughness = NRD_FrontEnd_PackNormalAndRoughness(float3(0.0, 1.0, 0.0), 1.0, 0.0);
         return output;
     }

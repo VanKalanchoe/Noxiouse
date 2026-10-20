@@ -18,6 +18,8 @@
 #include "MemoryAllocatorVK.h"
 #include "NoxCore/Core/core.h"
 #include "NoxCore/Core/Log.h"
+#include "NoxCore/Core/WorldUnits.h"
+#include "NoxCore/Renderer/DataTypes.h"
 #include "TimelineSemaphoreVK.h"
 #include "QueryPoolVK.h"
 
@@ -1004,7 +1006,8 @@ namespace NRI
         consts.cameraFwd = {params.cameraFwd.x, params.cameraFwd.y, params.cameraFwd.z};
 
         consts.cameraNear = params.cameraNear;
-        consts.cameraFar = 10000.0f;
+        // Reverse-Z with an infinite far plane: a far plane well beyond the scene, 10 km in the project's unit.
+        consts.cameraFar = Nox::WorldUnits::FromMeters(10000.0f);
         consts.cameraFOV = params.cameraFovRad;
         float aspect = (outputColorVK->GetHeight() > 0)
                            ? (static_cast<float>(outputColorVK->GetWidth()) / static_cast<float>(outputColorVK->GetHeight()))
@@ -1578,6 +1581,9 @@ namespace NRI
             commonSettings.rectSizePrev[0] = static_cast<uint16_t>(m_nrdContext->width);
             commonSettings.rectSizePrev[1] = static_cast<uint16_t>(m_nrdContext->height);
 
+            // NRD's lengths are the scene's: the sky's view Z (nrd_sky_view_z) lies beyond this.
+            commonSettings.denoisingRange = Nox::WorldUnits::FromMeters(shaderio::NRDDenoisingRangeMeters);
+
             commonSettings.frameIndex = frameIndex;
             commonSettings.accumulationMode = resetHistory ? ::nrd::AccumulationMode::RESTART : ::nrd::AccumulationMode::CONTINUE;
 
@@ -1786,6 +1792,8 @@ namespace NRI
         {
             activeDenoiserId = NRDContext::REBLUR_SPECULAR_DENOISER;
             ::nrd::ReblurSettings reblurSettings{};
+            // A length (3 m by default): in world units, as NRDFrontEnd.slang packs the hit distances.
+            reblurSettings.hitDistanceParameters.A = Nox::WorldUnits::FromMeters(3.0f);
             reblurSettings.enableAntiFirefly = true;
             reblurSettings.hitDistanceReconstructionMode = ::nrd::HitDistanceReconstructionMode::AREA_5X5;
             reblurSettings.maxAccumulatedFrameNum = 50;
@@ -1884,6 +1892,8 @@ namespace NRI
         {
             activeDenoiserId = NRDContext::REBLUR_DIFFUSE_DENOISER;
             ::nrd::ReblurSettings reblurSettings{};
+            // A length (3 m by default): in world units, as NRDFrontEnd.slang packs the hit distances.
+            reblurSettings.hitDistanceParameters.A = Nox::WorldUnits::FromMeters(3.0f);
             reblurSettings.enableAntiFirefly = true;
             reblurSettings.hitDistanceReconstructionMode = ::nrd::HitDistanceReconstructionMode::AREA_5X5;
             reblurSettings.maxAccumulatedFrameNum = 50;
@@ -1995,6 +2005,8 @@ namespace NRI
         {
             activeDenoiserId = reblurIdentifier;
             ::nrd::ReblurSettings reblurSettings{};
+            // A length (3 m by default): in world units, as NRDFrontEnd.slang packs the hit distances.
+            reblurSettings.hitDistanceParameters.A = Nox::WorldUnits::FromMeters(3.0f);
             reblurSettings.enableAntiFirefly = true;
             reblurSettings.hitDistanceReconstructionMode = ::nrd::HitDistanceReconstructionMode::AREA_5X5;
             reblurSettings.maxAccumulatedFrameNum = 50;
@@ -2097,6 +2109,8 @@ namespace NRI
         {
             activeDenoiserId = NRDContext::REBLUR_DIFFUSE_PT_DENOISER;
             ::nrd::ReblurSettings reblurSettings{};
+            // A length (3 m by default): in world units, as NRDFrontEnd.slang packs the hit distances.
+            reblurSettings.hitDistanceParameters.A = Nox::WorldUnits::FromMeters(3.0f);
             reblurSettings.enableAntiFirefly = true;
             reblurSettings.hitDistanceReconstructionMode = ::nrd::HitDistanceReconstructionMode::AREA_5X5;
             reblurSettings.maxAccumulatedFrameNum = 50;

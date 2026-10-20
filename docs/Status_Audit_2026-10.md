@@ -27,12 +27,12 @@ for history. File references are to the code as of this audit.
 | Scene | Fixed 2026-10-20: `TextComponent` font was neither saved nor loaded. Fonts (.ttf / .otf) are assets now; the component keeps the font's handle, saved with the scene | `SceneSerializer.cpp`, `Font.h` |
 | Scene | `SerializeRuntime` / `DeserializeRuntime` are empty (return false) | `SceneSerializer.cpp:1188, 1924` |
 | Asset | Fixed 2026-10-20: `MeshImporter::LoadMesh` was a dead stub with no return value -- removed | `MeshImporter.cpp` |
-| Editor | Ortho camera constants are not unit-scaled (5000 back, far 10000: only 50 m / 100 m in a cm project); sky is flat in ortho | `EditorCamera.h:123` |
+| Editor | Fixed 2026-10-20: ortho camera constants were raw units (50 m / 100 m in a cm project) and the sky was flat in ortho. Now 2 km back / 4 km deep in meters, zoom at the cursor, and ortho views see the sky of a 60 degree camera looking the same way | `EditorCamera.cpp`, `Skybox.slang` |
 | Editor | Import Scale tooltip says the model is untouched; the scale is baked into the cooked mesh | `ContentBrowserPanel.cpp:493` |
 | Editor | Cancelling the open-project dialog quits the editor (no new-project / folder picker) | `EditorLayer.cpp:164` |
 | Editor | ImGui multi-viewport (panels outside the main window) is switched off as broken | `ImGuiLayer.cpp:27` |
 | Physics | Fixed 2026-10-20: 3D physics components were not copied by Duplicate, and bodies / controllers added during Play were not created. Now duplicated; added or removed while physics runs, the body is made again after the update systems | `Scene.cpp` (`SyncPendingPhysics3D`) |
-| Units | NRD denoiser distance settings and the DLSS far plane (10000) are raw world units (meter defaults) in a cm project | `DeviceVK.cpp:1007, 1557` |
+| Units | Fixed 2026-10-20: NRD distances and the DLSS far plane were raw world units. REBLUR's hit-distance scale, the denoising range (sky beyond it), the reflection miss distance and the DLSS far plane follow the world unit; NRD's view Z is 32-bit (half floats ended at 655 m in cm) | `DeviceVK.cpp`, `NRDFrontEnd.slang`, `NRDGuides.slang` |
 | Particles | Fixed 2026-10-19 (this audit): lit particles read only the first 8 lights, and point / spot lights come first in the buffer -- with 8 lamps the sun did not light them | `Particles.slang` |
 
 ### 0.2 Built but not tested by the user (newest first)

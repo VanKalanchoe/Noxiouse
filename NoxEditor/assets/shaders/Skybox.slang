@@ -29,6 +29,31 @@
         float2(-1.0,  3.0)
     };
 
+    float3 unprojectPoint(UniformBufferObject* ubo, float2 ndc, float depth)
+    {
+        const float4 point = mul(ubo->invViewProj, float4(ndc, depth, 1.0));
+        return point.xyz / point.w;
+    }
+
+    // The direction of the sky seen at a screen position. Unprojected far along the ray (reverse-Z depth 0.001), not at the near
+    // plane: minus the camera position, a near-plane point (0.01 units away) loses most of its float digits and the sky direction
+    // wobbled by up to a pixel per frame. An orthographic view's rays are all parallel, so its whole sky would be one color: it
+    // gets the sky a 60 degree perspective camera looking the same way would see.
+    float3 skyRay(UniformBufferObject* ubo, float2 ndc)
+    {
+        const float3 centreForward = normalize(unprojectPoint(ubo, float2(0.0), 0.001) - unprojectPoint(ubo, float2(0.0), 0.5));
+        const float3 cornerForward = normalize(unprojectPoint(ubo, float2(1.0), 0.001) - unprojectPoint(ubo, float2(1.0), 0.5));
+        if (dot(centreForward, cornerForward) > 0.999999)
+        {
+            const float3 centre = unprojectPoint(ubo, float2(0.0), 0.001);
+            const float3 right = unprojectPoint(ubo, float2(1.0, 0.0), 0.001) - centre; // half the view's width
+            const float3 up = unprojectPoint(ubo, float2(0.0, 1.0), 0.001) - centre;    // half its height
+            const float tanHalfFov = 0.57735; // tan(30 degrees)
+            return centreForward + (right * ndc.x + up * ndc.y) * (tanHalfFov / max(length(up), 1e-6));
+        }
+        return unprojectPoint(ubo, ndc, 0.001) - ubo->cameraWorldPos.xyz;
+    }
+
     [shader("mesh")]
     [outputtopology("triangle")]
     [numthreads(3, 1, 1)]
@@ -50,11 +75,8 @@
             // REVERSE-Z: Output depth at 0.0 (Far Plane), w = 1.0 (never clipped!)
             vertices[threadID].pos = float4(screenPos, 0.0, 1.0);
 
-            // Unproject near-plane point (depth = 1.0 in Reverse-Z) to world space
-            // Unproject far along the ray (reverse-Z depth 0.001), not at the near plane: minus the camera position, a near-plane
-            // point (0.01 units away) loses most of its float digits and the sky direction wobbled by up to a pixel per frame.
-            float4 unprojected = mul(ubo->invViewProj, float4(screenPos, 0.001, 1.0));
-            vertices[threadID].worldRay = unprojected.xyz / unprojected.w - ubo->cameraWorldPos.xyz;
+            // Linear in the screen position either way: interpolated across the triangle like the position.
+            vertices[threadID].worldRay = skyRay(ubo, screenPos);
         }
 
         if (threadID == 0)

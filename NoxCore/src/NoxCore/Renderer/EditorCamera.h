@@ -43,6 +43,9 @@ namespace Nox
         void SetOrientation(float pitch, float yaw);
 
         inline void SetViewportSize(float width, float height) { m_ViewportWidth = width; m_ViewportHeight = height; UpdateProjection(); }
+        // The cursor over this camera's viewport, in pixels from its top left (before passing it a scroll event): the ortho zoom
+        // zooms towards it. Negative: zoom on the view's centre.
+        void SetCursorPosition(const glm::vec2& viewportPixel) { m_CursorPosition = viewportPixel; }
 
         const glm::mat4& GetViewMatrix() const { return m_ViewMatrix; }
         glm::mat4 GetGizmoView() const;
@@ -118,11 +121,15 @@ namespace Nox
 
         float m_ViewportWidth = 1280, m_ViewportHeight = 720;
 
-        // Ortho views: the camera sits kOrthoCameraDistance from the focal point along the view axis (so the shaders' camera position gives
-        // a nearly parallel view vector) and sees kOrthoNear .. kOrthoFar in front of it; the zoom is the visible half height.
-        static constexpr float kOrthoCameraDistance = 5000.0f;
-        static constexpr float kOrthoNear = 0.1f;
-        static constexpr float kOrthoFar = 10000.0f;
+        // Ortho views: the camera sits OrthoCameraDistance from the focal point along the view axis (so the shaders' camera position
+        // gives a nearly parallel view vector) and sees OrthoNear .. OrthoFar in front of it; the zoom is the visible half height.
+        // Real lengths (2 km back, 4 km deep), in the project's world unit.
+        static float OrthoCameraDistance();
+        static float OrthoNear();
+        static float OrthoFar();
+        // Where the cursor is over the viewport (pixels from its top left; negative: not over it): ortho zoom keeps the point
+        // under it in place.
+        glm::vec2 m_CursorPosition = { -1.0f, -1.0f };
         EditorViewMode m_ViewMode = EditorViewMode::Perspective;
         float m_OrthoHalfHeight = 10.0f;
         float m_TargetOrthoHalfHeight = 10.0f;

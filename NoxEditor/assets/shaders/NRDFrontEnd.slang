@@ -9,7 +9,8 @@ static const float NRD_FP16_MAX = 65504.0;
 static const float NRD_EPS = 1e-6;
 static const float NRD_MATERIAL_FACTOR_MIN_SCALE = 0.02; // smaller values may lead to instabilities
 static const float NRD_ROUGHNESS_FACTOR_MIN_SCALE = 0.1; // smaller values may lead to instabilities and bias
-// nrd::ReblurHitDistanceParameters defaults (NRDSettings.h: A, B, C): the engine does not change them.
+// nrd::ReblurHitDistanceParameters defaults (NRDSettings.h: A, B, C). A is a length (3 m): scaled by the world unit here and in
+// the renderer's REBLUR settings (DeviceVK.cpp), so both normalize hit distances the same way in any project.
 static const float3 NRD_REBLUR_HIT_DISTANCE_PARAMETERS = float3(3.0, 0.1, 20.0);
 
 // The engine's denoiser modes (push constants): what a signal was packed for.
@@ -185,12 +186,13 @@ float4 RELAX_BackEnd_UnpackRadiance( float4 color )
 
 // A de-modulated signal and its hit distance (not including the primary hit) for the denoiser it goes to; unfiltered
 // (NRD_SIGNAL_RAW) it stays linear with the raw distance. hitDist 0: no sample ("no data" for NRD). roughness: 1 for
-// diffuse (NRD: "isDiffuse ? 1.0 : roughness").
-float4 NRD_PackSignal(uint mode, float3 radiance, float hitDist, float viewZ, float roughness)
+// diffuse (NRD: "isDiffuse ? 1.0 : roughness"). unitsPerMeter: UniformBufferObject::unitsPerMeter.
+float4 NRD_PackSignal(uint mode, float3 radiance, float hitDist, float viewZ, float roughness, float unitsPerMeter)
 {
     if (mode == NRD_SIGNAL_REBLUR)
     {
-        float normHitDist = hitDist > 0.0 ? REBLUR_FrontEnd_GetNormHitDist(hitDist, viewZ, NRD_REBLUR_HIT_DISTANCE_PARAMETERS, roughness) : 0.0;
+        const float3 hitDistParams = float3(NRD_REBLUR_HIT_DISTANCE_PARAMETERS.x * unitsPerMeter, NRD_REBLUR_HIT_DISTANCE_PARAMETERS.yz);
+        float normHitDist = hitDist > 0.0 ? REBLUR_FrontEnd_GetNormHitDist(hitDist, viewZ, hitDistParams, roughness) : 0.0;
         return REBLUR_FrontEnd_PackRadianceAndNormHitDist(radiance, normHitDist, true);
     }
     return RELAX_FrontEnd_PackRadianceAndHitDist(radiance, hitDist, true);

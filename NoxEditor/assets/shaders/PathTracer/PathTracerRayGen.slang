@@ -81,9 +81,9 @@ void rayGenMain()
                       pushConstant.gbufferMaterialIndex, surfaceDiffFactor, surfaceSpecFactor, surfaceRoughness);
 
     float4 outDiffuse = NRD_PackSignal(pushConstant.denoiserMode, path.diffuseRadiance / surfaceDiffFactor,
-                                       path.primaryLobe == LobeType::DiffuseReflection ? path.firstBounceHitDist : 0.0, path.primaryViewZ, 1.0);
+                                       path.primaryLobe == LobeType::DiffuseReflection ? path.firstBounceHitDist : 0.0, path.primaryViewZ, 1.0, ubo->unitsPerMeter);
     float4 outSpecular = NRD_PackSignal(pushConstant.denoiserMode, path.specularRadiance / surfaceSpecFactor,
-                                        (path.primaryLobe & (LobeType::Specular | LobeType::Delta)) != 0 ? path.firstBounceHitDist : 0.0, path.primaryViewZ, surfaceRoughness);
+                                        (path.primaryLobe & (LobeType::Specular | LobeType::Delta)) != 0 ? path.firstBounceHitDist : 0.0, path.primaryViewZ, surfaceRoughness, ubo->unitsPerMeter);
 
     float4 outColor;
     if (pushConstant.denoiserMode != NRD_SIGNAL_RAW)

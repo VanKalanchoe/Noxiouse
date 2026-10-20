@@ -77,10 +77,9 @@ float interleaved_gradient_noise(float2 pixelCoord, uint frameIndex)
 
 // No reflection traced at a pixel (background, unlit, too rough, facing away): no radiance at "miss" distance, which is
 // also what the DLSS-RR hit distance guide reads (RRGuides.slang).
-static const float ReflectionMissDistance = 10000.0;
-float4 noReflection(uint denoiserMode)
+float4 noReflection(UniformBufferObject* ubo, uint denoiserMode)
 {
-    return NRD_PackSignal(denoiserMode, float3(0.0), ReflectionMissDistance, 1.0, 1.0);
+    return NRD_PackSignal(denoiserMode, float3(0.0), reflection_miss_distance(ubo), 1.0, 1.0, ubo->unitsPerMeter);
 }
 
 // GGX Visible Normal Distribution Function (VNDF) Importance Sampling (Heitz 2018)
@@ -142,7 +141,7 @@ float4 fragMain(
     // Reverse-Z: 0.0 is background / skybox -> no reflection to cast
     if (rawVis.x == 0 || rawDepth <= 0.0)
     {
-        return noReflection(pushConstant.denoiserMode);
+        return noReflection(ubo, pushConstant.denoiserMode);
     }
 
     // 2. Fetch G-Buffer Normal & Material
@@ -155,7 +154,7 @@ float4 fragMain(
     float lenSqN = dot(normalSample.rgb, normalSample.rgb);
     if (lenSqN < 1e-6 || materialSample.b >= 2.0) // Invalid normal or Unlit material
     {
-        return noReflection(pushConstant.denoiserMode);
+        return noReflection(ubo, pushConstant.denoiserMode);
     }
 
     float3 normal = normalSample.rgb * rsqrt(lenSqN);
@@ -164,7 +163,7 @@ float4 fragMain(
     float maxTraceRoughness = (pushConstant.denoiserMode != 0) ? 0.85 : 0.55;
     if (roughness > maxTraceRoughness || ubo->enableRTReflections == 0 || ubo->tlasDeviceAddress == 0)
     {
-        return noReflection(pushConstant.denoiserMode);
+        return noReflection(ubo, pushConstant.denoiserMode);
     }
 
     // 3. Reconstruct World Position
@@ -177,7 +176,7 @@ float4 fragMain(
     float3 V = normalize(ubo->cameraWorldPos.xyz - worldPos);
     if (dot(normal, V) <= 0.001)
     {
-        return noReflection(pushConstant.denoiserMode);
+        return noReflection(ubo, pushConstant.denoiserMode);
     }
 
     // 4. GGX VNDF Importance-Sampled Reflection Direction
@@ -254,10 +253,10 @@ float4 fragMain(
         SamplerState samplerPrefiltered = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_PREFILTER, 0));
         float lod = roughness * ubo->prefilteredCubeMipLevels;
         float3 skyColor = prefilteredTex.SampleLevel(samplerPrefiltered, R, lod).rgb * ubo->scaleIBLAmbient;
-        return NRD_PackSignal(pushConstant.denoiserMode, skyColor, ReflectionMissDistance, abs(mul(ubo->view, float4(worldPos, 1.0)).z), roughness);
+        return NRD_PackSignal(pushConstant.denoiserMode, skyColor, reflection_miss_distance(ubo), abs(mul(ubo->view, float4(worldPos, 1.0)).z), roughness, ubo->unitsPerMeter);
     }
     if (!hit)
-        return NRD_PackSignal(pushConstant.denoiserMode, float3(0.0), ReflectionMissDistance, abs(mul(ubo->view, float4(worldPos, 1.0)).z), roughness);
+        return NRD_PackSignal(pushConstant.denoiserMode, float3(0.0), reflection_miss_distance(ubo), abs(mul(ubo->view, float4(worldPos, 1.0)).z), roughness, ubo->unitsPerMeter);
 
     // Ray Hit: the hit's lighting (RayHitShading.slang)
     float hitT = rq.CommittedRayT();
@@ -266,5 +265,5 @@ float4 fragMain(
 
     // Incoming radiance (de-modulated: the lighting multiplies the specular factor back) with the ray's hit distance,
     // packed for the denoiser (NRDFrontEnd.slang).
-    return NRD_PackSignal(pushConstant.denoiserMode, finalRadiance, hitT, abs(mul(ubo->view, float4(worldPos, 1.0)).z), roughness);
+    return NRD_PackSignal(pushConstant.denoiserMode, finalRadiance, hitT, abs(mul(ubo->view, float4(worldPos, 1.0)).z), roughness, ubo->unitsPerMeter);
 }

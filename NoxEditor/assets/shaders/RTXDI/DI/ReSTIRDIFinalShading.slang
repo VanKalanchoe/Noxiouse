@@ -529,8 +529,8 @@ PSOutput fragMain(
                         diffuseFactor, specularFactor);
     float viewZ = abs(mul(g_UBO->view, float4(worldPos, 1.0)).z);
     outVal.diffuse = NRD_PackSignal(pushConstant.denoiserMode,
-        diffuseLighting / diffuseFactor, signalHitDistance, viewZ, 1.0);
+        diffuseLighting / diffuseFactor, signalHitDistance, viewZ, 1.0, g_UBO->unitsPerMeter);
     outVal.specular = NRD_PackSignal(pushConstant.denoiserMode,
-        specularLighting / specularFactor, signalHitDistance, viewZ, perceptualRoughness);
+        specularLighting / specularFactor, signalHitDistance, viewZ, perceptualRoughness, g_UBO->unitsPerMeter);
     return outVal;
 }

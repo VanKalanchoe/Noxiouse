@@ -40,6 +40,10 @@ namespace Nox
 		UpdateProjection();
 	}
 
+	float EditorCamera::OrthoCameraDistance() { return WorldUnits::FromMeters(2000.0f); }
+	float EditorCamera::OrthoNear() { return WorldUnits::FromMeters(0.1f); }
+	float EditorCamera::OrthoFar() { return WorldUnits::FromMeters(4000.0f); }
+
 	void EditorCamera::UpdateProjection()
 	{
 		m_AspectRatio = m_ViewportWidth / m_ViewportHeight;
@@ -51,9 +55,9 @@ namespace Nox
 			m_Projection = glm::mat4(
 				1.0f / halfWidth, 0.0f, 0.0f, 0.0f,
 				0.0f, 1.0f / halfHeight, 0.0f, 0.0f,
-				0.0f, 0.0f, -1.0f / (kOrthoFar - kOrthoNear), 0.0f,
-				0.0f, 0.0f, kOrthoFar / (kOrthoFar - kOrthoNear), 1.0f);
-			gizmoProjection = glm::ortho(-halfWidth, halfWidth, -halfHeight, halfHeight, kOrthoNear, kOrthoFar);
+				0.0f, 0.0f, -1.0f / (OrthoFar() - OrthoNear()), 0.0f,
+				0.0f, 0.0f, OrthoFar() / (OrthoFar() - OrthoNear()), 1.0f);
+			gizmoProjection = glm::ortho(-halfWidth, halfWidth, -halfHeight, halfHeight, OrthoNear(), OrthoFar());
 			return;
 		}
 		m_Projection = perspectiveProjection(glm::radians(m_FOV), m_AspectRatio, m_NearClip);
@@ -289,13 +293,23 @@ namespace Nox
 	{
 		if (IsOrthographic())
 		{
-			// Each scroll notch (0.1) scales the visible size by about 11 %.
-			m_TargetOrthoHalfHeight = std::clamp(m_TargetOrthoHalfHeight * std::exp(-delta * 1.2f), 0.001f, 1.0e6f);
+			// Each scroll notch (0.1) scales the visible size by about 11 %, around the point under the cursor: it stays where it
+			// is on screen (the view's centre when the cursor is not over the viewport).
+			const float before = m_TargetOrthoHalfHeight;
+			m_TargetOrthoHalfHeight = std::clamp(before * std::exp(-delta * 1.2f), WorldUnits::FromMeters(0.001f), WorldUnits::FromMeters(1.0e5f));
+			if (m_CursorPosition.x >= 0.0f && m_CursorPosition.y >= 0.0f && m_ViewportHeight > 0.0f)
+			{
+				// The cursor's offset from the centre in half heights: the world point there moves by offset x the size change.
+				const glm::vec2 offset((m_CursorPosition.x - 0.5f * m_ViewportWidth) * 2.0f / m_ViewportHeight,
+				                       (0.5f * m_ViewportHeight - m_CursorPosition.y) * 2.0f / m_ViewportHeight);
+				const float shrink = before - m_TargetOrthoHalfHeight;
+				m_TargetFocalPoint += (GetRightDirection() * offset.x + GetUpDirection() * offset.y) * shrink;
+			}
 			return;
 		}
 
 		m_TargetDistance -= delta * ZoomSpeed();
-		constexpr float minimumDistance = 1.0f;
+		const float minimumDistance = WorldUnits::FromMeters(0.1f);
 		if (m_TargetDistance < minimumDistance)
 		{
 			m_TargetFocalPoint += GetForwardDirection() * (minimumDistance - m_TargetDistance);
@@ -320,7 +334,7 @@ namespace Nox
 
 	glm::vec3 EditorCamera::CalculatePosition() const
 	{
-		return m_FocalPoint - GetForwardDirection() * (IsOrthographic() ? kOrthoCameraDistance : m_Distance);
+		return m_FocalPoint - GetForwardDirection() * (IsOrthographic() ? OrthoCameraDistance() : m_Distance);
 	}
 
 	glm::quat EditorCamera::GetOrientation() const

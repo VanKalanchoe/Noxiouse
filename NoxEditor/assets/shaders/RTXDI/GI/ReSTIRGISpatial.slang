@@ -419,6 +419,6 @@ PSOutput fragMain(
     // NRD expects normalized hit distance (and REBLUR-specific YCoCg), not raw world distance.
     float viewZ = abs(mul(g_UBO->view, float4(surface.worldPos, 1.0)).z);
     outVal.diffuseIrradiance = NRD_PackSignal(
-        pushConstant.denoiserMode, diffuse, hitDist, viewZ, 1.0);
+        pushConstant.denoiserMode, diffuse, hitDist, viewZ, 1.0, g_UBO->unitsPerMeter);
     return outVal;
 }

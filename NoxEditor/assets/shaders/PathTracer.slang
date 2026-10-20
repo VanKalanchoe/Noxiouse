@@ -695,9 +695,9 @@
         // "no data" (0) on the other. With NRD the color target holds the primary emission (PTComposite.slang adds it).
         PTOutput output;
         output.diffuse = NRD_PackSignal(pushConstant.denoiserMode, diffuseRadiance / surfaceDiffFactor,
-                                        lobe == PT_LOBE_DIFFUSE ? bounceHitDist : 0.0, primaryViewZ, 1.0);
+                                        lobe == PT_LOBE_DIFFUSE ? bounceHitDist : 0.0, primaryViewZ, 1.0, ubo->unitsPerMeter);
         output.specular = NRD_PackSignal(pushConstant.denoiserMode, specularRadiance / surfaceSpecFactor,
-                                         lobe == PT_LOBE_SPECULAR ? bounceHitDist : 0.0, primaryViewZ, surfaceRoughness);
+                                         lobe == PT_LOBE_SPECULAR ? bounceHitDist : 0.0, primaryViewZ, surfaceRoughness, ubo->unitsPerMeter);
         if (pushConstant.denoiserMode != NRD_SIGNAL_RAW)
         {
             output.color = float4(emissionRadiance, 1.0);

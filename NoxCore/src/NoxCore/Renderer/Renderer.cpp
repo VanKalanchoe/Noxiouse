@@ -930,7 +930,7 @@ namespace Nox
     {
         NRI::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
-        desc.colorFormats = { NRI::ImageFormat::R16_SFLOAT, NRI::ImageFormat::R10G10B10A2_UNORM }; // view Z, normal + roughness
+        desc.colorFormats = { NRI::ImageFormat::R32_SFLOAT, NRI::ImageFormat::R10G10B10A2_UNORM }; // view Z, normal + roughness
         for (const auto& [stage, entryPoint] : { std::pair{ NRI::ShaderStage::Task, "taskMain" }, std::pair{ NRI::ShaderStage::Mesh, "meshMain" },
                                                  std::pair{ NRI::ShaderStage::Fragment, "fragMain" } })
             desc.shaders.push_back({ .stage = stage, .entryPoint = entryPoint, .sourcePath = "assets/shaders/NRDGuides.slang" });
@@ -4360,7 +4360,8 @@ namespace Nox
         resources.RawReflection = graph.CreateTexture("Raw Reflection", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
         resources.DenoisedReflection = graph.CreateTexture("Denoised Reflection", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
         // NRD's view-Z and packed normal/roughness guides, written each frame any NRD denoiser runs (addNRDGuidesPass).
-        resources.ViewZ = graph.CreateTexture("NRD View Z", renderTarget(NRI::ImageFormat::R16_SFLOAT));
+        // 32-bit: half floats end at 65504 world units (655 m in a centimeter project) and step by centimeters a few meters out.
+        resources.ViewZ = graph.CreateTexture("NRD View Z", renderTarget(NRI::ImageFormat::R32_SFLOAT));
         resources.NRDNormalRoughness = graph.CreateTexture("NRD Normal Roughness", renderTarget(NRI::ImageFormat::R10G10B10A2_UNORM));
 
         resources.ReSTIRGIRaw = graph.CreateTexture("ReSTIR GI Diffuse", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));

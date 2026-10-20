@@ -461,6 +461,20 @@ int2 rt_trace_pixel(UniformBufferObject* ubo, float2 fragmentPosition, float2 vi
     const int2 offset = int2(ubo->rtSubsampleOffset & 0xFFFFu, ubo->rtSubsampleOffset >> 16);
     return min(int2(fragmentPosition) * int(subsample) + offset, int2(viewportSize) - 1);
 }
+
+// NRD's distances are the scene's (world units). The view depth it reads for the sky lies beyond its denoising range (the renderer
+// sets CommonSettings::denoisingRange to NRDDenoisingRangeMeters): the sky is neither denoised nor mixed into the geometry beside it.
+float nrd_sky_view_z(UniformBufferObject* ubo)
+{
+    return 4.0 * NRDDenoisingRangeMeters * ubo->unitsPerMeter;
+}
+
+// The hit distance of a reflection ray that found nothing: far (10 km), but within half floats (the reflection targets are
+// RGBA16F), so ~600 m in a centimeter project.
+float reflection_miss_distance(UniformBufferObject* ubo)
+{
+    return min(10000.0 * ubo->unitsPerMeter, 60000.0);
+}
 #endif
 
 #ifdef __SLANG__
@@ -884,6 +898,9 @@ struct PushConstantSkybox
 // camera-aligned volume of AerialPerspectiveSize x AerialPerspectiveSize froxels and AerialPerspectiveSlices depth slices
 // (a 2D array texture: rgb = light scattered towards the camera up to the slice, a = mean transmittance). Slice z ends at
 // maxDistanceKm * ((z + 1) / slices)^2: finer near the camera. Deferred lighting applies it to the lit scene.
+// NRD's denoising range (CommonSettings::denoisingRange), in meters: farther pixels (the sky) are left alone.
+STATIC_CONST float NRDDenoisingRangeMeters = 100000.0;
+
 STATIC_CONST uint32_t AerialPerspectiveSize = 32;
 STATIC_CONST uint32_t AerialPerspectiveSlices = 32;
 STATIC_CONST float AerialPerspectiveMaxDistanceKm = 32.0;
