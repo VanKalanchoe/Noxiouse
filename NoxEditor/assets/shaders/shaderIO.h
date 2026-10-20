@@ -1255,6 +1255,10 @@ struct PushConstantReflection
     vec2 viewportSize;
     uint32_t frameIndex;
     uint32_t denoiserMode; // 0 = Off, 1 = REBLUR (YCoCg), 2 = RELAX (RGB)
+    // > 0: the full-resolution pass after a lower ray tracing resolution's upsample: every pixel traces its own ray, but only where
+    // the surface is smoother than this roughness (sharp reflections show the reduced resolution); the others keep the upsampled one.
+    float smoothFillRoughness;
+    uint32_t pad0;
 };
 
 struct PushConstantDeferredLighting

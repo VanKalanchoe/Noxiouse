@@ -1113,6 +1113,8 @@ namespace Nox
         // R16F (RTAO).
         std::array<std::unique_ptr<NRI::Pipeline>, 3> m_rtUpsamplePipelines{};
         uint32_t m_rtSubsample = 1;
+        // At a lower ray tracing resolution, reflections on surfaces smoother than this are traced again at full resolution.
+        static constexpr float RTFullResolutionSmoothRoughness = 0.35f;
         uint32_t m_shadowRayLightLimit = 0;
         // Screen-probe GI
         std::unique_ptr<NRI::Pipeline> m_screenProbePlacePipeline = nullptr;

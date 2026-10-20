@@ -129,7 +129,9 @@ float4 fragMain(
 {
     UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
     // At a lower ray tracing resolution one pixel of each block (shaderIO.h); RTUpsample.slang fills in the others.
-    int2 pixelCoord = rt_trace_pixel(ubo, input.pos.xy, pushConstant.viewportSize);
+    // The smooth fill pass traces every pixel itself.
+    const bool smoothFill = pushConstant.smoothFillRoughness > 0.0;
+    int2 pixelCoord = smoothFill ? int2(input.pos.xy) : rt_trace_pixel(ubo, input.pos.xy, pushConstant.viewportSize);
 
     // 1. Check Visibility Buffer and Depth
     Texture2D<uint4> visTex = Texture2D<uint4>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.visibilityTextureIndex, 0));
@@ -159,6 +161,8 @@ float4 fragMain(
 
     float3 normal = normalSample.rgb * rsqrt(lenSqN);
     float roughness = clamp(materialSample.r, 0.001, 1.0);
+    if (smoothFill && roughness >= pushConstant.smoothFillRoughness)
+        discard; // rough enough: the upsampled reduced-resolution result stays
 
     float maxTraceRoughness = (pushConstant.denoiserMode != 0) ? 0.85 : 0.55;
     if (roughness > maxTraceRoughness || ubo->enableRTReflections == 0 || ubo->tlasDeviceAddress == 0)

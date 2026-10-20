@@ -229,62 +229,76 @@ namespace Nox
         const RGTexture traceTarget = reduced ? createReducedRTTarget("RT Reflections (Reduced)", NRI::ImageFormat::R16G16B16A16_SFLOAT)
                                               : resources.RawReflection;
         const NRI::Extent2D traceExtent = reduced ? reducedRTExtent() : m_frame.renderExtent;
-        m_renderGraph.AddPass("RT Reflections", RGPassFlags::Raster,
-            [&](RGBuilder& builder)
-            {
-                builder.Read(resources.Depth);
-                builder.Read(resources.GBufferNormal);
-                builder.Read(resources.GBufferMaterial);
-                builder.Read(resources.Visibility);
-                ReadIfValid(builder, resources.TLAS);
-                ReadGpuScene(builder, resources);
-                // Hit shading samples the DDGI atlases (through the uniforms) when DDGI runs, and the screen-probe GI where the hit
-                // is on screen (SceneGI.slang).
-                if (m_frame.ddgiAdded)
+        // The trace pass: into the reduced target, or (smoothFill > 0, after the upsample) every pixel smoother than smoothFill at the
+        // render resolution over the upsampled result -- a smooth surface's reflection shifts with the pixel it is traced from, so
+        // filling it from the neighbouring traced pixels (which change every frame) blurs it and makes sharp reflections wobble.
+        auto addTrace = [&](const char* name, RGTexture target, NRI::Extent2D extent, float smoothFill)
+        {
+            m_renderGraph.AddPass(name, RGPassFlags::Raster,
+                [&](RGBuilder& builder)
                 {
-                    ReadDDGI(builder, resources, m_frame.ddgiWriteIndex);
-                }
-                if (m_frame.screenProbeGIAdded)
+                    builder.Read(resources.Depth);
+                    builder.Read(resources.GBufferNormal);
+                    builder.Read(resources.GBufferMaterial);
+                    builder.Read(resources.Visibility);
+                    ReadIfValid(builder, resources.TLAS);
+                    ReadGpuScene(builder, resources);
+                    // Hit shading samples the DDGI atlases (through the uniforms) when DDGI runs, and the screen-probe GI where the hit
+                    // is on screen (SceneGI.slang).
+                    if (m_frame.ddgiAdded)
+                    {
+                        ReadDDGI(builder, resources, m_frame.ddgiWriteIndex);
+                    }
+                    if (m_frame.screenProbeGIAdded)
+                    {
+                        builder.Read(resources.ScreenProbeGI[m_frame.screenProbeGIWriteIndex]);
+                        builder.Read(resources.ScreenProbeGIDistance);
+                    }
+                    if (smoothFill > 0.0f)
+                        builder.ColorTarget(target, NRI::LoadOP::load, NRI::StoreOP::store);
+                    else
+                        builder.ColorTarget(target, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 10000.0f });
+                    builder.SetRenderArea(extent);
+                },
+                [this, res = &resources, denoiseReflections, smoothFill](RGPassContext& context)
                 {
-                    builder.Read(resources.ScreenProbeGI[m_frame.screenProbeGIWriteIndex]);
-                    builder.Read(resources.ScreenProbeGIDistance);
-                }
-                builder.ColorTarget(traceTarget, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 10000.0f });
-                builder.SetRenderArea(traceExtent);
-            },
-            [this, res = &resources, denoiseReflections](RGPassContext& context)
-            {
-                NRI::CommandBuffer& cmd = context.Cmd();
-                const float rw = static_cast<float>(m_frame.renderExtent.width);
-                const float rh = static_cast<float>(m_frame.renderExtent.height);
+                    NRI::CommandBuffer& cmd = context.Cmd();
+                    const float rw = static_cast<float>(m_frame.renderExtent.width);
+                    const float rh = static_cast<float>(m_frame.renderExtent.height);
 
-                cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_reflectionPipeline);
-                cmd.setCullMode(NRI::CullMode::None);
-                cmd.setDepthTestEnable(false);
-                cmd.setDepthWriteEnable(false);
-                cmd.setColorBlendEnable(0, false);
-                cmd.setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G |
-                                         NRI::ColorComponent::B | NRI::ColorComponent::A);
+                    cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_reflectionPipeline);
+                    cmd.setCullMode(NRI::CullMode::None);
+                    cmd.setDepthTestEnable(false);
+                    cmd.setDepthWriteEnable(false);
+                    cmd.setColorBlendEnable(0, false);
+                    cmd.setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G |
+                                             NRI::ColorComponent::B | NRI::ColorComponent::A);
 
-                glm::mat4 viewProj = uniformData.proj * uniformData.view;
-                shaderio::PushConstantReflection reflPush{};
-                reflPush.invViewProj = uniformData.invViewProj;
-                reflPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
-                reflPush.depthTextureIndex = context.Slot(res->Depth);
-                reflPush.gbufferNormalIndex = context.Slot(res->GBufferNormal);
-                reflPush.gbufferMaterialIndex = context.Slot(res->GBufferMaterial);
-                reflPush.visibilityTextureIndex = context.Slot(res->Visibility);
-                reflPush.viewportSize = glm::vec2(rw, rh);
-                reflPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
-                // Packed for the NRD pass that runs (the lighting unpacks the same way), plain without one.
-                reflPush.denoiserMode = denoiseReflections ? static_cast<uint32_t>(m_nrdReflectionDenoiser) : 0u;
-                cmd.pushData(&reflPush, sizeof(shaderio::PushConstantReflection));
+                    shaderio::PushConstantReflection reflPush{};
+                    reflPush.invViewProj = uniformData.invViewProj;
+                    reflPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                    reflPush.depthTextureIndex = context.Slot(res->Depth);
+                    reflPush.gbufferNormalIndex = context.Slot(res->GBufferNormal);
+                    reflPush.gbufferMaterialIndex = context.Slot(res->GBufferMaterial);
+                    reflPush.visibilityTextureIndex = context.Slot(res->Visibility);
+                    reflPush.viewportSize = glm::vec2(rw, rh);
+                    reflPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
+                    // Packed for the NRD pass that runs (the lighting unpacks the same way), plain without one.
+                    reflPush.denoiserMode = denoiseReflections ? static_cast<uint32_t>(m_nrdReflectionDenoiser) : 0u;
+                    reflPush.smoothFillRoughness = smoothFill;
+                    cmd.pushData(&reflPush, sizeof(shaderio::PushConstantReflection));
 
-                cmd.drawMeshTasks(1, 1, 1);
-            });
-        // Radiance blended from the matching samples around, the hit distance from the best one.
+                    cmd.drawMeshTasks(1, 1, 1);
+                });
+        };
+        addTrace("RT Reflections", traceTarget, traceExtent, 0.0f);
+        // Radiance blended from the matching samples around, the hit distance from the best one; then the smooth surfaces again at
+        // full resolution.
         if (reduced)
+        {
             addRTUpsamplePass("RT Reflections Upsample", traceTarget, resources.RawReflection, m_rtUpsamplePipelines[0].get(), 0);
+            addTrace("RT Reflections (Smooth, Full Res)", resources.RawReflection, m_frame.renderExtent, RTFullResolutionSmoothRoughness);
+        }
 
         if (!denoiseReflections)
             return;
