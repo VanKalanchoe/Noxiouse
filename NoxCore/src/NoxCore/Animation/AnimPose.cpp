@@ -1,5 +1,9 @@
 #include "AnimPose.h"
 
+#include <algorithm>
+#include <cfloat>
+#include <cmath>
+
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -166,6 +170,8 @@ namespace Nox
         const bool forward = wrapped ? to < from : to > from;
         for (const AnimationNotify& notify : clip.Notifies)
         {
+            if (notify.SyncMarker)
+                continue; // lines clips up, raises nothing
             const float t = notify.Time;
             bool crossed = false;
             if (forward)
@@ -221,6 +227,61 @@ namespace Nox
         if (node.HasRestMatrix)
             return node.RestMatrix;
         return glm::translate(glm::mat4(1.0f), node.RestTranslation) * glm::toMat4(node.RestRotation) * glm::scale(glm::mat4(1.0f), node.RestScale);
+    }
+
+    float SyncedClipTime(const AnimationSequence& leader, float leaderTime, const AnimationSequence& follower, float fallbackTime)
+    {
+        std::vector<const AnimationNotify*> leaderMarkers, followerMarkers;
+        for (const AnimationNotify& notify : leader.Notifies)
+            if (notify.SyncMarker)
+                leaderMarkers.push_back(&notify);
+        for (const AnimationNotify& notify : follower.Notifies)
+            if (notify.SyncMarker)
+                followerMarkers.push_back(&notify);
+        if (leaderMarkers.empty() || followerMarkers.empty() || leader.Duration <= 0.0f || follower.Duration <= 0.0f)
+            return fallbackTime;
+
+        // The leader's markers around its playhead (cyclic: before the first one, the previous is the last one of the loop before)
+        // and how far between them it is.
+        size_t next = 0;
+        while (next < leaderMarkers.size() && leaderMarkers[next]->Time <= leaderTime)
+            ++next;
+        const AnimationNotify& before = *leaderMarkers[(next + leaderMarkers.size() - 1) % leaderMarkers.size()];
+        const AnimationNotify& after = *leaderMarkers[next % leaderMarkers.size()];
+        float beforeTime = before.Time, afterTime = after.Time;
+        if (next == 0)
+            beforeTime -= leader.Duration;
+        if (next == leaderMarkers.size())
+            afterTime += leader.Duration;
+        if (afterTime <= beforeTime)
+            afterTime += leader.Duration; // a single marker: from it round to itself
+        const float fraction = std::clamp((leaderTime - beforeTime) / std::max(afterTime - beforeTime, 1e-5f), 0.0f, 1.0f);
+
+        // The same pair in the follower (its marker named like `before` whose next marker is named like `after`), the one nearest to
+        // where it would be anyway; the same fraction of the way between them.
+        float best = -1.0f, bestDistance = FLT_MAX;
+        for (size_t i = 0; i < followerMarkers.size(); ++i)
+        {
+            const AnimationNotify& from = *followerMarkers[i];
+            const AnimationNotify& to = *followerMarkers[(i + 1) % followerMarkers.size()];
+            if (from.Name != before.Name || to.Name != after.Name)
+                continue;
+            float toTime = to.Time;
+            if (toTime <= from.Time)
+                toTime += follower.Duration;
+            float time = from.Time + fraction * (toTime - from.Time);
+            time = std::fmod(time, follower.Duration);
+            if (time < 0.0f)
+                time += follower.Duration;
+            float distance = std::abs(time - fallbackTime);
+            distance = std::min(distance, follower.Duration - distance);
+            if (distance < bestDistance)
+            {
+                bestDistance = distance;
+                best = time;
+            }
+        }
+        return best >= 0.0f ? best : fallbackTime;
     }
 
     void ApplyPoseToSkeleton(const AnimPose& pose, const Skeleton& skeleton, std::vector<glm::mat4>& outFinalBoneTransforms,

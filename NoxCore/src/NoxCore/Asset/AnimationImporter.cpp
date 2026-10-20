@@ -66,6 +66,7 @@ namespace Nox
                 AnimationNotify notify;
                 notify.Time = entry["Time"] ? entry["Time"].as<float>() : 0.0f;
                 notify.Name = entry["Name"] ? entry["Name"].as<std::string>() : std::string();
+                notify.SyncMarker = entry["Sync"] && entry["Sync"].as<bool>();
                 if (!notify.Name.empty())
                     notifies.push_back(std::move(notify));
             }
@@ -90,7 +91,12 @@ namespace Nox
         YAML::Emitter out;
         out << YAML::BeginMap << YAML::Key << "Notifies" << YAML::Value << YAML::BeginSeq;
         for (const AnimationNotify& notify : notifies)
-            out << YAML::BeginMap << YAML::Key << "Time" << YAML::Value << notify.Time << YAML::Key << "Name" << YAML::Value << notify.Name << YAML::EndMap;
+        {
+            out << YAML::BeginMap << YAML::Key << "Time" << YAML::Value << notify.Time << YAML::Key << "Name" << YAML::Value << notify.Name;
+            if (notify.SyncMarker)
+                out << YAML::Key << "Sync" << YAML::Value << true;
+            out << YAML::EndMap;
+        }
         out << YAML::EndSeq << YAML::EndMap;
         std::ofstream stream(path);
         stream << out.c_str();

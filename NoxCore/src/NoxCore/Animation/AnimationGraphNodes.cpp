@@ -187,11 +187,20 @@ namespace Nox
                 CollectCrossedNotifies(leading, previousPhase * leading.Duration, phase * leading.Duration, wrapped, *data->FiredNotifies);
             }
 
-            SampleClipPose(*samples[first].Clip, phase * samples[first].Clip->Duration, *data->TargetSkeleton, pose);
+            // The leading clip plays at the phase; the other one at its sync markers' matching place (else the same phase).
+            const size_t leadingIndex = weight < 0.5f ? first : second;
+            const AnimationSequence& leadingClip = *samples[leadingIndex].Clip;
+            auto clipTime = [&](size_t index)
+            {
+                const AnimationSequence& clip = *samples[index].Clip;
+                const float normalized = phase * clip.Duration;
+                return index == leadingIndex ? normalized : SyncedClipTime(leadingClip, phase * leadingClip.Duration, clip, normalized);
+            };
+            SampleClipPose(*samples[first].Clip, clipTime(first), *data->TargetSkeleton, pose);
             if (second != first && weight > 0.0f)
             {
                 AnimPose other;
-                SampleClipPose(*samples[second].Clip, phase * samples[second].Clip->Duration, *data->TargetSkeleton, other);
+                SampleClipPose(*samples[second].Clip, clipTime(second), *data->TargetSkeleton, other);
                 AnimPose blended;
                 BlendPoses(pose, other, weight, blended);
                 pose = std::move(blended);
@@ -297,7 +306,10 @@ namespace Nox
             {
                 if (weights[i] < 0.001f)
                     continue;
-                SampleClipPose(*samples[i].Clip, phase * samples[i].Clip->Duration, *data->TargetSkeleton, sampled[i]);
+                const AnimationSequence& leadingClip = *samples[leading].Clip;
+                const float normalized = phase * samples[i].Clip->Duration;
+                const float time = i == leading ? normalized : SyncedClipTime(leadingClip, phase * leadingClip.Duration, *samples[i].Clip, normalized);
+                SampleClipPose(*samples[i].Clip, time, *data->TargetSkeleton, sampled[i]);
                 poses.push_back(&sampled[i]);
                 poseWeights.push_back(weights[i]);
             }

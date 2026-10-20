@@ -44,6 +44,11 @@ namespace Nox
     // clip's end -- or start, playing backwards -- once in between), appended to `out`.
     void CollectCrossedNotifies(const AnimationSequence& clip, float from, float to, bool wrapped, std::vector<std::string>& out);
 
+    // Sync markers (UE's marker-based sync): where `follower` plays while `leader` is at `leaderTime` -- between the follower's
+    // markers with the same names as the two around the leader's playhead, the same fraction of the way. `fallbackTime` (the
+    // normalized-phase time) when the clips have no matching markers.
+    float SyncedClipTime(const AnimationSequence& leader, float leaderTime, const AnimationSequence& follower, float fallbackTime);
+
     // A pose's local TRS (the rest pose for nodes it does not have) -> every node's model-space matrix and the skin's final skinning
     // matrices (global * inverse bind). Per call: the Skeleton asset is shared by every instance and is not written, so two
     // characters with the same skeleton never see each other's pose. outGlobalMatrices (optional): indexed by node Index.

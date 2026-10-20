@@ -239,7 +239,7 @@ namespace Nox
             for (const AnimationNotify& notify : clip->Notifies)
             {
                 const float x = min.x + (max.x - min.x) * std::clamp(notify.Time / duration, 0.0f, 1.0f);
-                drawList->AddLine(ImVec2(x, min.y), ImVec2(x, max.y), IM_COL32(255, 190, 60, 255), 2.0f);
+                drawList->AddLine(ImVec2(x, min.y), ImVec2(x, max.y), notify.SyncMarker ? IM_COL32(90, 220, 140, 255) : IM_COL32(255, 190, 60, 255), 2.0f);
             }
         }
 
@@ -274,11 +274,12 @@ namespace Nox
         }
         ImGui::SetItemTooltip("Scripts on the animated entity receive OnAnimationEvent(\"%s\") when a playhead crosses it.", m_NewName);
 
-        if (ImGui::BeginTable("##notifies", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_ScrollY,
+        if (ImGui::BeginTable("##notifies", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_ScrollY,
                               ImVec2(0.0f, std::max(ImGui::GetContentRegionAvail().y, 80.0f))))
         {
             ImGui::TableSetupColumn("Time", ImGuiTableColumnFlags_WidthFixed, 120.0f);
             ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch);
+            ImGui::TableSetupColumn("Sync", ImGuiTableColumnFlags_WidthFixed, 40.0f);
             ImGui::TableSetupColumn("##actions", ImGuiTableColumnFlags_WidthFixed, 110.0f);
             ImGui::TableHeadersRow();
             int remove = -1;
@@ -296,6 +297,9 @@ namespace Nox
                 ImGui::InputText("##name", &notify.Name);
                 changed |= ImGui::IsItemDeactivatedAfterEdit();
                 ImGui::TableSetColumnIndex(2);
+                changed |= ImGui::Checkbox("##sync", &notify.SyncMarker);
+                ImGui::SetItemTooltip("Sync marker: not raised as an event; blend spaces line their clips up at markers of the same name\n(e.g. L and R where each foot plants)");
+                ImGui::TableSetColumnIndex(3);
                 if (ImGui::SmallButton("Go to"))
                     m_Cursor = notify.Time;
                 ImGui::SameLine();

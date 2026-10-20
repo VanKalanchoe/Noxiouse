@@ -39,10 +39,13 @@ namespace Nox
 
     // A named moment of a clip (UE's anim notify): "FootL" at 0.25 s. Raised when a playhead crosses it -- by a Clip node, a
     // blend space's leading clip or a montage -- and handed to the entity's scripts as OnAnimationEvent(name).
+    // A sync marker (UE's anim sync marker: "L" / "R" where a foot plants) is not raised: blend spaces line their clips up by
+    // their markers, so a walk and a run with different stride timing still plant the same foot together.
     struct AnimationNotify
     {
         float Time = 0.0f;
         std::string Name;
+        bool SyncMarker = false;
     };
 
     class AnimationSequence : public Asset

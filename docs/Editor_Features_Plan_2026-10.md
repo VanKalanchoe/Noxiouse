@@ -130,7 +130,10 @@ What was built:
 - **A2 Notifies:** `AnimationSequence::Notifies` (time + name), kept beside the clip in `<clip>.nanim.notifies` (YAML, so a
   re-cook keeps them). Raised when a playhead crosses one -- Clip nodes, a blend space's leading clip, montages -- forward,
   backward and across the loop point; scripts receive `OnAnimationEvent(string name)` (new virtual on `EntityBehaviour`),
-  after the animation update on the main thread. Sync markers (blend spaces syncing by marker) are not done.
+  after the animation update on the main thread. **Sync markers (2026-10-20):** a notify ticked Sync in the clip window
+  (green on its timeline, `Sync: true` in the .notifies file) is not raised; BlendSpace1D / 2D play the leading clip at the
+  phase and every other clip between its markers named like the two around the leader's playhead, the same fraction of
+  the way (`SyncedClipTime`), else at the shared phase as before.
 - **A7, the Animation Clip window:** double-click a clip: its length and channels, a timeline (playhead + a marker per
   notify), add / edit / delete notifies; saved at once. **3D preview (2026-10-18, untested):** the skeletal mesh cooked from the
   clip's model (else one in its folder; any skeletal mesh can be picked) plays the clip on the preview stage (B1's), with
