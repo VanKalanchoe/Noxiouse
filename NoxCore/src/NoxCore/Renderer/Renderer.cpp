@@ -4461,7 +4461,6 @@ namespace Nox
             addDeferredLightingPass();
             addForward3DPass();
             addParticlePass(); // the alpha-blended ones into the OIT targets (with OIT), then their resolve, then the rest
-            addMipFeedbackReadbackPass();
             addDLSSPass();
             addTAAPass();
             addEntityDepthBlitPass();
@@ -4470,6 +4469,7 @@ namespace Nox
             addSelectionMaskPass();
             addOutlinePass();
             addExtraViewPasses();
+            addMipFeedbackReadbackPass(); // after the extra views: they ask for mips too (an asset preview's textures are not in sight)
             addPresentPass();
             addPickReadbackPass();
             addEditorRaycastPass();
@@ -6230,8 +6230,8 @@ namespace Nox
             uniforms.lodErrorThreshold = m_lodErrorPixels / static_cast<float>(std::max(view.Size.height, 1u));
             uniforms.lodCameraNear = view.NearClip;
             uniforms.lodFullDetail = (m_lodFullDetail || view.Orthographic) ? 1u : 0u;
-            // Texture streaming feedback and cluster statistics are the camera's.
-            uniforms.mipFeedbackReference = 0;
+            // Texture streaming feedback is shared (what a viewport or an asset preview shows is streamed in too); cluster statistics
+            // are the camera's.
             uniforms.clusterStatsReference = 0;
             // The atlases are only read (and declared) when DDGI ran this frame.
             if (!m_frame.ddgiAdded)

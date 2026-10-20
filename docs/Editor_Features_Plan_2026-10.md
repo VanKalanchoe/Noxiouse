@@ -103,7 +103,7 @@ cached image.
 Built 2026-10-20: prefab thumbnails (`PrefabInstance::CollectMeshParts`: the meshes of its entities, nested prefabs and placed
 models, framed by their combined bounds; drawn again after Prefab Mode Save or Apply; variants purple instead of blue), model
 (.gltf) thumbnails once the model has been loaded (the browser never cooks a model just for its tile), a neutral grey backdrop.
-Not yet: texture streaming feedback from the preview views (their textures stay at the mips the scene asked for).
+Built 2026-10-20: texture streaming feedback from the extra views and asset previews (they share the camera's feedback buffer; its readback moved after them), so a viewport or the Material Editor's sphere streams in the mips it shows. Thumbnails are taken after 8 frames, which can still be before a texture has streamed in; the cached image is redrawn when its asset changes.
 
 ## 3. F3, the rest: animation
 

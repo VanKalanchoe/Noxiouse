@@ -92,7 +92,7 @@ for history. File references are to the code as of this audit.
   into the outer prefab (P1); re-parenting inside an instance stays blocked as in Unity (P4, decided); rendered prefab thumbnails
   (their meshes, nested prefabs and placed models; drawn again on Save / Apply), variants purple; .gltf thumbnails once the model
   is loaded -- the browser never cooks a model for its thumbnail.)
-- Content browser: streaming feedback from preview views. (Built 2026-10-20: rename / move of textures, materials and meshes
+- Content browser: (Built 2026-10-20: streaming feedback from preview views and extra viewports; rename / move of textures, materials and meshes
   (E2) with their companion files, the old paths kept as aliases in the registry; Reimport; Replace References in the project's
   files and the open scene; neutral thumbnail backdrop. A reimported mesh whose material was renamed writes a fresh .nmat at
   the old name, unused.)

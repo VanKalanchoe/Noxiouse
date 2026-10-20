@@ -121,6 +121,12 @@ namespace Nox
                     builder.SetRenderArea(extent);
                     ReadGpuScene(builder, resources);
                     ReadViewDraws(builder, draws);
+                    // Texture streaming feedback (the lit shader's): read and written, between the frame's clear and its readback.
+                    if (resources.MipFeedback.IsValid())
+                    {
+                        builder.Read(resources.MipFeedback);
+                        builder.Write(resources.MipFeedback);
+                    }
                 },
                 [this, draws, uniformBuffer, skyboxSun, preview = view.Preview, flags, unlit](RGPassContext& context)
                 {
