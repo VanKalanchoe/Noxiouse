@@ -1543,6 +1543,163 @@ namespace Nox
         return texture.source;
     }
 
+    static const tg3_extension* FindExtension(const tg3_extras_ext& ext, std::string_view name)
+    {
+        for (uint32_t i = 0; i < ext.extensions_count; i++)
+        {
+            if (std::string_view(ext.extensions[i].name.data, ext.extensions[i].name.len) == name)
+                return &ext.extensions[i];
+        }
+        return nullptr;
+    }
+
+    static const tg3_value* FindMember(const tg3_value& object, std::string_view key)
+    {
+        if (object.type != TG3_VALUE_OBJECT)
+            return nullptr;
+        for (uint32_t i = 0; i < object.object_count; i++)
+        {
+            if (std::string_view(object.object_data[i].key.data, object.object_data[i].key.len) == key)
+                return &object.object_data[i].value;
+        }
+        return nullptr;
+    }
+
+    // An accessor's elements as floats (`components` per element): float, or normalized / plain integer components. Empty when it
+    // cannot be read.
+    static std::vector<float> ReadAccessorFloats(const tg3_model& model, int64_t accessorIndex, uint32_t components)
+    {
+        std::vector<float> values;
+        if (accessorIndex < 0 || accessorIndex >= static_cast<int64_t>(model.accessors_count))
+            return values;
+        const tg3_accessor& accessor = model.accessors[accessorIndex];
+        if (accessor.buffer_view < 0 || accessor.buffer_view >= static_cast<int32_t>(model.buffer_views_count))
+            return values;
+        const tg3_buffer_view& view = model.buffer_views[accessor.buffer_view];
+        if (view.buffer < 0 || view.buffer >= static_cast<int32_t>(model.buffers_count))
+            return values;
+        const tg3_buffer& buffer = model.buffers[view.buffer];
+
+        uint32_t componentSize = 0;
+        switch (accessor.component_type)
+        {
+        case TG3_COMPONENT_TYPE_FLOAT: componentSize = 4; break;
+        case TG3_COMPONENT_TYPE_BYTE: case TG3_COMPONENT_TYPE_UNSIGNED_BYTE: componentSize = 1; break;
+        case TG3_COMPONENT_TYPE_SHORT: case TG3_COMPONENT_TYPE_UNSIGNED_SHORT: componentSize = 2; break;
+        default: return values;
+        }
+        const uint64_t stride = view.byte_stride != 0 ? view.byte_stride : static_cast<uint64_t>(componentSize) * components;
+        const uint64_t start = view.byte_offset + accessor.byte_offset;
+        if (accessor.count == 0 || start + stride * (accessor.count - 1) + componentSize * components > buffer.data.count)
+            return values;
+
+        values.resize(accessor.count * components);
+        for (uint64_t element = 0; element < accessor.count; element++)
+        {
+            const uint8_t* at = buffer.data.data + start + stride * element;
+            for (uint32_t c = 0; c < components; c++)
+            {
+                const uint8_t* component = at + componentSize * c;
+                float value = 0.0f;
+                switch (accessor.component_type)
+                {
+                case TG3_COMPONENT_TYPE_FLOAT: std::memcpy(&value, component, 4); break;
+                case TG3_COMPONENT_TYPE_BYTE: value = accessor.normalized ? std::max(static_cast<int8_t>(*component) / 127.0f, -1.0f) : static_cast<int8_t>(*component); break;
+                case TG3_COMPONENT_TYPE_UNSIGNED_BYTE: value = accessor.normalized ? *component / 255.0f : *component; break;
+                case TG3_COMPONENT_TYPE_SHORT: { int16_t v; std::memcpy(&v, component, 2); value = accessor.normalized ? std::max(v / 32767.0f, -1.0f) : v; break; }
+                case TG3_COMPONENT_TYPE_UNSIGNED_SHORT: { uint16_t v; std::memcpy(&v, component, 2); value = accessor.normalized ? v / 65535.0f : v; break; }
+                }
+                values[element * components + c] = value;
+            }
+        }
+        return values;
+    }
+
+    // Node extensions that change what the node table spawns:
+    //  - KHR_node_visibility: a node with "visible": false and everything below it shows no mesh.
+    //  - EXT_mesh_gpu_instancing: the node's mesh is drawn once per instance (TRANSLATION / ROTATION / SCALE accessors), each an
+    //    entity of its own below the node; the node itself draws nothing (the extension's rule).
+    static void ApplyNodeExtensions(const tg3_model& model, std::vector<MeshNodeData>& nodes)
+    {
+        const uint32_t fileNodeCount = std::min<uint32_t>(model.nodes_count, static_cast<uint32_t>(nodes.size()));
+
+        std::vector<uint8_t> hidden(fileNodeCount, 0);
+        for (uint32_t i = 0; i < fileNodeCount; i++)
+        {
+            if (const tg3_extension* visibility = FindExtension(model.nodes[i].ext, "KHR_node_visibility"))
+            {
+                const tg3_value* visible = FindMember(visibility->value, "visible");
+                if (visible && visible->type == TG3_VALUE_BOOL && !visible->bool_val)
+                    hidden[i] = 1;
+            }
+        }
+        for (bool grew = true; grew;)
+        {
+            grew = false;
+            for (uint32_t i = 0; i < fileNodeCount; i++)
+            {
+                const int32_t parent = nodes[i].Parent;
+                if (!hidden[i] && parent >= 0 && parent < static_cast<int32_t>(fileNodeCount) && hidden[parent])
+                {
+                    hidden[i] = 1;
+                    grew = true;
+                }
+            }
+        }
+        for (uint32_t i = 0; i < fileNodeCount; i++)
+        {
+            if (hidden[i] && nodes[i].FirstSubmesh != UINT32_MAX)
+            {
+                nodes[i].FirstSubmesh = UINT32_MAX;
+                nodes[i].SubmeshCount = 0;
+            }
+        }
+
+        for (uint32_t i = 0; i < fileNodeCount; i++)
+        {
+            const tg3_extension* instancing = FindExtension(model.nodes[i].ext, "EXT_mesh_gpu_instancing");
+            if (!instancing || nodes[i].FirstSubmesh == UINT32_MAX || nodes[i].Skinned)
+                continue;
+            const tg3_value* attributes = FindMember(instancing->value, "attributes");
+            if (!attributes)
+                continue;
+            auto accessorOf = [&](std::string_view name) -> int64_t
+            {
+                const tg3_value* value = FindMember(*attributes, name);
+                if (!value)
+                    return -1;
+                return value->type == TG3_VALUE_INT ? value->int_val : value->type == TG3_VALUE_REAL ? static_cast<int64_t>(value->real_val) : -1;
+            };
+            const std::vector<float> translations = ReadAccessorFloats(model, accessorOf("TRANSLATION"), 3);
+            const std::vector<float> rotations = ReadAccessorFloats(model, accessorOf("ROTATION"), 4);
+            const std::vector<float> scales = ReadAccessorFloats(model, accessorOf("SCALE"), 3);
+            const size_t count = std::max({ translations.size() / 3, rotations.size() / 4, scales.size() / 3 });
+            if (count == 0)
+                continue;
+
+            const MeshNodeData source = nodes[i];
+            for (size_t k = 0; k < count; k++)
+            {
+                MeshNodeData instance;
+                instance.Name = source.Name + "_" + std::to_string(k);
+                instance.Parent = static_cast<int32_t>(i);
+                if (k * 3 + 2 < translations.size())
+                    instance.Translation = glm::vec3(translations[k * 3], translations[k * 3 + 1], translations[k * 3 + 2]);
+                if (k * 4 + 3 < rotations.size())
+                    instance.Rotation = glm::normalize(glm::quat(rotations[k * 4 + 3], rotations[k * 4], rotations[k * 4 + 1], rotations[k * 4 + 2]));
+                if (k * 3 + 2 < scales.size())
+                    instance.Scale = glm::vec3(scales[k * 3], scales[k * 3 + 1], scales[k * 3 + 2]);
+                instance.FirstSubmesh = source.FirstSubmesh;
+                instance.SubmeshCount = source.SubmeshCount;
+                instance.MeshIndex = source.MeshIndex;
+                instance.MeshName = source.MeshName;
+                nodes.push_back(std::move(instance));
+            }
+            nodes[i].FirstSubmesh = UINT32_MAX;
+            nodes[i].SubmeshCount = 0;
+        }
+    }
+
     static void ExtractNodeTRS(const tg3_node& node, glm::vec3& translation, glm::quat& rotation, glm::vec3& scale)
     {
         if (node.has_matrix)
@@ -2488,6 +2645,9 @@ namespace Nox
             nodeData.SubmeshCount = static_cast<uint32_t>(result.size()) - nodeData.FirstSubmesh;
             sharedRange = { nodeData.FirstSubmesh, nodeData.SubmeshCount };
         }
+
+        if (model.nodes_count > 0)
+            ApplyNodeExtensions(model, outNodes);
 
         tg3_model_free(&model);
         tg3_error_stack_free(&errors);

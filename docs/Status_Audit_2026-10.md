@@ -132,8 +132,10 @@ for history. File references are to the code as of this audit.
 - Profiling: frame-time / flame graph, RAM by category, sortable overlay tables, GPU-to-CPU frame matching.
 
 **Import (glTF)**
-- Vertex colors, morph targets, `EXT_mesh_gpu_instancing`, `KHR_node_visibility`, materials variants, extras, several scenes,
-  physics extensions; level import of a skeletal model's clips.
+- Vertex colors (a new cooked vertex layout: every consumer of `shaderio::Vertex`, RT vertex fetch and the cooked file version
+  change together), morph targets, materials variants, extras, several scenes, physics extensions; level import of a skeletal
+  model's clips. (Built 2026-10-20: `EXT_mesh_gpu_instancing` -- one node entity per instance below the node --, and
+  `KHR_node_visibility` -- hidden nodes and what is below them draw no mesh.)
 
 **Other**
 - Metal backend (throws). (Built 2026-10-20: text outline and background rectangle; fonts load from memory; Box2D surface
