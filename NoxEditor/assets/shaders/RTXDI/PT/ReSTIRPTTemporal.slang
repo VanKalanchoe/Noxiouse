@@ -344,7 +344,7 @@ RAB_LightSample RAB_SamplePolymorphicLight(RAB_LightInfo light, float3 worldPos)
 {
     // The engine's light sampling (shaderIO.h, shared with the rest of the renderer): a point on the light -- the sun's cone, a sphere
     // light's disc, a rect light's area -- and the light from it with the falloff, cone and a rect's area / distance^2 folded in.
-    const LightPointSample lightPoint = sample_light_point(light, worldPos, (uint)light.position.w == 3u ? float2(0.5, 0.5) : float2(0.0, 0.0));
+    const LightPointSample lightPoint = sample_light_point(light, worldPos, is_area_light((uint)light.position.w) ? float2(0.5, 0.5) : float2(0.0, 0.0));
     RAB_LightSample s;
     s.lightType = (uint)light.position.w;
     s.position = lightPoint.position;

@@ -515,6 +515,20 @@ namespace Nox
             out << YAML::EndMap;
         }
 
+        if (entity.HasComponent<DiscLightComponent>())
+        {
+            out << YAML::Key << "DiscLightComponent";
+            out << YAML::BeginMap;
+
+            auto& dlc = entity.GetComponent<DiscLightComponent>();
+            out << YAML::Key << "Color" << YAML::Value << dlc.Color;
+            out << YAML::Key << "Intensity" << YAML::Value << dlc.Intensity;
+            out << YAML::Key << "Radius" << YAML::Value << dlc.Radius;
+            out << YAML::Key << "Range" << YAML::Value << dlc.Range;
+
+            out << YAML::EndMap;
+        }
+
         if (entity.HasComponent<EnvironmentLightComponent>())
         {
             out << YAML::Key << "EnvironmentLightComponent";
@@ -1440,6 +1454,20 @@ namespace Nox
                 rlc.Height = rectLightComponent["Height"].as<float>();
             if (rectLightComponent["Range"])
                 rlc.Range = rectLightComponent["Range"].as<float>();
+        }
+
+        auto discLightComponent = entity["DiscLightComponent"];
+        if (discLightComponent)
+        {
+            auto& dlc = deserializedEntity.AddComponent<DiscLightComponent>();
+            if (discLightComponent["Color"])
+                dlc.Color = discLightComponent["Color"].as<glm::vec3>();
+            if (discLightComponent["Intensity"])
+                dlc.Intensity = discLightComponent["Intensity"].as<float>();
+            if (discLightComponent["Radius"])
+                dlc.Radius = discLightComponent["Radius"].as<float>();
+            if (discLightComponent["Range"])
+                dlc.Range = discLightComponent["Range"].as<float>();
         }
 
         auto environmentLightComponent = entity["EnvironmentLightComponent"];

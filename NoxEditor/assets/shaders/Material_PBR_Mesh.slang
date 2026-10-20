@@ -406,7 +406,7 @@ FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform Pu
         float3 l;
         float attenuation = 1.0;
 
-        if (lightType == 3) // Rect lights: the deferred and transparent shaders (this fragment stage is not in a pipeline today)
+        if (is_area_light(lightType)) // Rect lights: the deferred and transparent shaders (this fragment stage is not in a pipeline today)
             continue;
 
         if(lightType == 0) // Directional Light

@@ -1989,6 +1989,28 @@ namespace Nox
                 if (glm::length(forward) > 1e-6f)
                     m_Renderer2D->DrawXRayLine(centre, centre + glm::normalize(forward) * 0.5f * (glm::length(halfX) + glm::length(halfY)), colour);
             }
+            // Disc lights likewise: their circle and the way they shine.
+            auto discLights = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, DiscLightComponent>();
+            for (auto entity : discLights)
+            {
+                auto [wtc, light] = discLights.get<WorldTransformComponent, DiscLightComponent>(entity);
+                const glm::mat4& world = wtc.WorldMatrix;
+                const glm::vec3 centre = glm::vec3(world[3]);
+                const float scale = glm::max(glm::length(glm::vec3(world[0])), glm::length(glm::vec3(world[1])));
+                const glm::vec3 axisX = glm::length(glm::vec3(world[0])) > 1e-6f ? glm::normalize(glm::vec3(world[0])) * light.Radius * scale : glm::vec3(0.0f);
+                const glm::vec3 axisY = glm::length(glm::vec3(world[1])) > 1e-6f ? glm::normalize(glm::vec3(world[1])) * light.Radius * scale : glm::vec3(0.0f);
+                const glm::vec4 colour(glm::mix(light.Color, glm::vec3(1.0f, 0.9f, 0.4f), 0.5f), 1.0f);
+                constexpr int Segments = 32;
+                for (int i = 0; i < Segments; ++i)
+                {
+                    const float a0 = glm::two_pi<float>() * static_cast<float>(i) / Segments;
+                    const float a1 = glm::two_pi<float>() * static_cast<float>(i + 1) / Segments;
+                    m_Renderer2D->DrawXRayLine(centre + axisX * std::cos(a0) + axisY * std::sin(a0), centre + axisX * std::cos(a1) + axisY * std::sin(a1), colour);
+                }
+                const glm::vec3 forward = -glm::vec3(world[2]);
+                if (glm::length(forward) > 1e-6f)
+                    m_Renderer2D->DrawXRayLine(centre, centre + glm::normalize(forward) * light.Radius * scale, colour);
+            }
         }
 
         if (m_ShowPhysicsColliders)

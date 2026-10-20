@@ -415,7 +415,7 @@
                 LightData light = lights[i];
                 uint lightType = (uint)light.position.w;
 
-                if (lightType == 3) // Rect: exact diffuse, representative-point specular (PBRLighting.slang), times its soft shadow
+                if (is_area_light(lightType)) // Rect: exact diffuse, representative-point specular (PBRLighting.slang), times its soft shadow
                 {
                     PBRInfo rectInputs = PBRInfo(1.0, NdotV, 1.0, 1.0, 1.0, perceptualRoughness, metallic, specularEnvironmentR0,
                                                  specularEnvironmentR90, alphaRoughness, diffuseColor, specularColor);

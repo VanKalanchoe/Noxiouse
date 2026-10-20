@@ -77,7 +77,7 @@ float3 evaluateDirectLight(PBRInfo pbrInputs, float3 lightRadiance)
     return pbrInputs.NdotL * lightRadiance * (diffuseContrib + specContrib);
 }
 
-// A rect light (LightType::Rect, shaderIO.h) at a surface, unshadowed (multiply by its visibility). Diffuse exactly: the light's
+// A rect or disc light (LightType::Rect / Disc, shaderIO.h) at a surface, unshadowed (multiply by its visibility). Diffuse exactly: the light's
 // radiance times the cosine-weighted solid angle it fills above the surface's horizon. Specular from the point of the rectangle
 // nearest the reflected ray, as a point light as strong as the whole rectangle seen from here, its energy spread over the
 // wider lobe a light of that size makes (Karis 2013's "representative point", with a sphere of the same area's normalization).
@@ -92,21 +92,14 @@ float3 evaluateRectLight(PBRInfo pbrInputs, LightData light, float3 position, fl
     const float3 radiance = light.color.rgb * light.color.w * rect_light_window(light, centreDistance);
     const float3 diffuseLight = diffuse(pbrInputs) * radiance * formFactor;
 
-    // The reflected ray against the light's plane, clamped into the rectangle.
+    // The reflected ray against the light's plane, clamped into the rectangle (or the disc).
     const float3 front = normalize(light.direction.xyz);
     const float3 r = reflect(-v, n);
-    const float3 axisX = rect_light_axis_x(light);
-    const float3 axisY = rect_light_axis_y(light);
-    const float halfX = length(axisX);
-    const float halfY = length(axisY);
-    const float3 unitX = axisX / max(halfX, 1e-12);
-    const float3 unitY = axisY / max(halfY, 1e-12);
     const float facing = dot(r, front);
     float3 target = position + r * centreDistance;
     if (facing < -1e-4)
         target = position + r * max(dot(toCentre, front) / facing, 0.0);
-    const float3 local = target - light.position.xyz;
-    const float3 closest = light.position.xyz + unitX * clamp(dot(local, unitX), -halfX, halfX) + unitY * clamp(dot(local, unitY), -halfY, halfY);
+    const float3 closest = area_light_clamp(light, target - light.position.xyz);
 
     const float3 toPoint = closest - position;
     const float pointDistance = length(toPoint);

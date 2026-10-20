@@ -883,6 +883,7 @@ namespace Nox
             DisplayAddComponentEntry<PointLightComponent>("Point Light");
             DisplayAddComponentEntry<SpotLightComponent>("Spot Light");
             DisplayAddComponentEntry<RectLightComponent>("Rect Light");
+            DisplayAddComponentEntry<DiscLightComponent>("Disc Light");
             DisplayAddComponentEntry<EnvironmentLightComponent>("Environment Light");
 
             DisplayAddComponentEntry<AnimatorComponent>("Animator");
@@ -1417,6 +1418,18 @@ namespace Nox
                 ImGui::SetTooltip("The brightness of its surface: what the light gives grows with its size.");
             DrawLengthControl("Width", component.Width, 0.0f, 0.0f);
             DrawLengthControl("Height", component.Height, 0.0f, 0.0f);
+            DrawLengthControl("Range", component.Range, 0.0f, 0.0f);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Where its light fades out (0: no limit). It shines from its front, the entity's -Z.");
+        });
+
+        DrawComponent<DiscLightComponent>("Disc Light", entity, [](auto& component)
+        {
+            ImGui::ColorEdit3("Color", glm::value_ptr(component.Color));
+            ImGui::DragFloat("Intensity", &component.Intensity, 0.1f, 0.0f, 10000.0f);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("The brightness of its surface: what the light gives grows with its size.");
+            DrawLengthControl("Radius", component.Radius, 0.0f, 0.0f);
             DrawLengthControl("Range", component.Range, 0.0f, 0.0f);
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("Where its light fades out (0: no limit). It shines from its front, the entity's -Z.");

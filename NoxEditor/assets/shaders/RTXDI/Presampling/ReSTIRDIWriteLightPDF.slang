@@ -13,7 +13,7 @@
 float LightImportance(LightData light)
 {
     const float power = dot(light.color.rgb, float3(0.2126, 0.7152, 0.0722)) * light.color.a;
-    return max((uint)light.position.w == 3u ? power * rect_light_area(light) * 0.25 : power, 1e-6);
+    return max(is_area_light((uint)light.position.w) ? power * rect_light_area(light) * 0.25 : power, 1e-6);
 }
 
 [shader("compute")]

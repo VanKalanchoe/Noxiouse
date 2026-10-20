@@ -315,6 +315,7 @@ namespace Nox
         void SubmitLight(const glm::mat4& transform, const PointLightComponent& light);
         void SubmitLight(const glm::mat4& transform, const SpotLightComponent& light);
         void SubmitLight(const glm::mat4& transform, const RectLightComponent& light);
+        void SubmitLight(const glm::mat4& transform, const DiscLightComponent& light);
 
         Texture2D* GetSceneResource() const { return m_sceneResource.get(); }
 

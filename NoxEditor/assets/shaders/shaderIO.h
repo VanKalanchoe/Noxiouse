@@ -450,20 +450,22 @@ enum LightType : uint32_t
     Directional = 0,
     Point = 1,
     Spot = 2,
-    Rect = 3
+    Rect = 3,
+    Disc = 4
 };
 
 // Filled by Renderer::SubmitLight. Point and spot lights: Intensity arrives multiplied by (world units per meter)^2, so the inverse
 // square law in world units is the one in meters whatever the project's unit; Range and the source radius are world units.
 // Rect lights: position = the centre, direction.xyz = the side they shine towards, spotParams.xyz = the half-width axis and
-// spotParams.w = the half height (world units); Intensity is the radiance of their surface (one-sided, Lambertian).
+// spotParams.w = the half height (world units); Intensity is the radiance of their surface (one-sided, Lambertian). Disc lights
+// the same, a circle: both half axes are its radius (spotParams.xyz = an axis of its plane * radius, spotParams.w = radius).
 struct LightData
 {
-    vec4 position;     // xyz: World Position, w: LightType (0 = Directional, 1 = Point, 2 = Spot, 3 = Rect)
+    vec4 position;     // xyz: World Position, w: LightType (0 = Directional, 1 = Point, 2 = Spot, 3 = Rect, 4 = Disc)
     vec4 direction;    // xyz: Normalized Direction (directional: towards the light; spot: where it points; rect: its front), w: Range (0.0 = infinite)
     vec4 color;        // rgb: Color, w: Intensity
     vec4 spotParams;   // x/y: spot cone terms, z: source radius (radians for directional, world units otherwise), w: shadow samples
-                       // (rect: xyz the half-width axis, w the half height)
+                       // (rect / disc: xyz the half-width axis, w the half height)
 };
 
 #ifdef __SLANG__
@@ -562,6 +564,9 @@ float light_spot_attenuation(LightData light, float3 toLight)
     return cone * cone;
 }
 
+// Rect and disc lights are one kind (an area light: a lit face, its two half axes); these functions take either.
+bool is_area_light(uint type) { return type == 3u || type == 4u; }
+
 float3 rect_light_axis_x(LightData light) { return light.spotParams.xyz; }
 
 float3 rect_light_axis_y(LightData light)
@@ -571,7 +576,44 @@ float3 rect_light_axis_y(LightData light)
     return lengthX > 1e-12 ? normalize(cross(x / lengthX, normalize(light.direction.xyz))) * light.spotParams.w : float3(0.0);
 }
 
-float rect_light_area(LightData light) { return 4.0 * length(light.spotParams.xyz) * light.spotParams.w; }
+float rect_light_area(LightData light)
+{
+    const float halfX = length(light.spotParams.xyz);
+    return (uint)light.position.w == 4u ? 3.14159265 * halfX * light.spotParams.w : 4.0 * halfX * light.spotParams.w;
+}
+
+// Whether a point of the light's plane (offset from its centre) lies on it: inside the rectangle, or the disc.
+bool area_light_contains(LightData light, float3 offset)
+{
+    const float3 axisX = rect_light_axis_x(light);
+    const float3 axisY = rect_light_axis_y(light);
+    const float x = dot(offset, axisX) / max(dot(axisX, axisX), 1e-12);
+    const float y = dot(offset, axisY) / max(dot(axisY, axisY), 1e-12);
+    return (uint)light.position.w == 4u ? x * x + y * y <= 1.0 : abs(x) <= 1.0 && abs(y) <= 1.0;
+}
+
+// The point of the light nearest a point of its plane (offset from its centre): clamped into the rectangle, or the disc.
+float3 area_light_clamp(LightData light, float3 offset)
+{
+    const float3 axisX = rect_light_axis_x(light);
+    const float3 axisY = rect_light_axis_y(light);
+    const float halfX = length(axisX);
+    const float halfY = length(axisY);
+    const float3 unitX = axisX / max(halfX, 1e-12);
+    const float3 unitY = axisY / max(halfY, 1e-12);
+    float2 local = float2(dot(offset, unitX), dot(offset, unitY));
+    if ((uint)light.position.w == 4u)
+    {
+        const float radius = length(local);
+        if (radius > halfX)
+            local *= halfX / radius;
+    }
+    else
+    {
+        local = clamp(local, float2(-halfX, -halfY), float2(halfX, halfY));
+    }
+    return light.position.xyz + unitX * local.x + unitY * local.y;
+}
 
 // The emitting face of a rect light a ray meets first, closer than maxT: its radiance, and maxT made its distance (left as it is,
 // and 0 returned, when there is none). A rect light shines along its front: a ray sees it travelling against that.
@@ -582,7 +624,7 @@ float3 ray_rect_lights(UniformBufferObject* ubo, float3 origin, float3 direction
     for (uint i = 0; i < ubo->lightCount; ++i)
     {
         const LightData light = lights[i];
-        if ((uint)light.position.w != 3u)
+        if (!is_area_light((uint)light.position.w))
             continue;
         const float3 front = normalize(light.direction.xyz);
         const float facing = dot(direction, front);
@@ -591,10 +633,7 @@ float3 ray_rect_lights(UniformBufferObject* ubo, float3 origin, float3 direction
         const float t = dot(light.position.xyz - origin, front) / facing;
         if (t <= 0.0 || t >= maxT)
             continue;
-        const float3 offset = origin + direction * t - light.position.xyz;
-        const float3 axisX = rect_light_axis_x(light);
-        const float3 axisY = rect_light_axis_y(light);
-        if (abs(dot(offset, axisX)) > dot(axisX, axisX) || abs(dot(offset, axisY)) > dot(axisY, axisY))
+        if (!area_light_contains(light, origin + direction * t - light.position.xyz))
             continue;
         maxT = t;
         radiance = light.color.rgb * light.color.w;
@@ -613,8 +652,9 @@ float rect_light_window(LightData light, float distance)
     return window * window;
 }
 
-// The cosine-weighted solid angle (steradians, at most pi) the rect fills above a surface's horizon: its irradiance there is the
-// light's radiance times this (Lambert's polygon formula, the rectangle clipped to the surface's hemisphere first). 0 behind it.
+// The cosine-weighted solid angle (steradians, at most pi) the light fills above a surface's horizon: its irradiance there is the
+// light's radiance times this (Lambert's polygon formula, the polygon clipped to the surface's hemisphere first). 0 behind it.
+// A disc is the octagon of the same area: within a percent or two of the circle's.
 float rect_light_form_factor(LightData light, float3 position, float3 normal)
 {
     const float3 front = normalize(light.direction.xyz);
@@ -623,15 +663,33 @@ float rect_light_form_factor(LightData light, float3 position, float3 normal)
     const float3 x = rect_light_axis_x(light);
     const float3 y = rect_light_axis_y(light);
     const float3 c = light.position.xyz - position;
-    const float3 corners[4] = { c - x - y, c + x - y, c + x + y, c - x + y };
+    float3 corners[8];
+    uint cornerCount = 4;
+    if ((uint)light.position.w == 4u)
+    {
+        cornerCount = 8;
+        const float areaScale = 1.05390; // sqrt(pi / (2 sqrt 2)): an octagon through these points has the circle's area
+        for (uint k = 0; k < 8; ++k)
+        {
+            const float angle = 0.78539816 * float(k);
+            corners[k] = c + (x * cos(angle) + y * sin(angle)) * areaScale;
+        }
+    }
+    else
+    {
+        corners[0] = c - x - y;
+        corners[1] = c + x - y;
+        corners[2] = c + x + y;
+        corners[3] = c - x + y;
+    }
 
-    // Clip to the half-space in front of the surface (Sutherland-Hodgman: a quad becomes at most 5 vertices).
-    float3 clipped[5];
+    // Clip to the half-space in front of the surface (Sutherland-Hodgman: one more vertex at most).
+    float3 clipped[9];
     uint count = 0;
-    for (uint i = 0; i < 4; ++i)
+    for (uint i = 0; i < cornerCount; ++i)
     {
         const float3 a = corners[i];
-        const float3 b = corners[(i + 1) % 4];
+        const float3 b = corners[(i + 1) % cornerCount];
         const float da = dot(a, normal);
         const float db = dot(b, normal);
         if (da >= 0.0)
@@ -656,8 +714,9 @@ float rect_light_form_factor(LightData light, float3 position, float3 normal)
 }
 
 // One sample of a light seen from `position` (u: two uniform random numbers): a point on it -- in the sun's cone, on a sphere
-// light's disc, on a rect light's area -- and the light arriving from there at a surface facing it, everything folded in (falloff,
-// cone, for a rect its area / distance^2 and its own cosine). Light reflected = brdf * radiance * cos(surface), averaged over u.
+// light's disc, on a rect or disc light's area -- and the light arriving from there at a surface facing it, everything folded in
+// (falloff, cone, for an area light its area / distance^2 and its own cosine). Light reflected = brdf * radiance * cos(surface),
+// averaged over u.
 struct LightPointSample
 {
     float3 position;  // the sampled point (directional: far along the direction)
@@ -699,9 +758,11 @@ LightPointSample sample_light_point(LightData light, float3 position, float2 u)
         return s;
     }
 
-    if (type == 3u)
+    if (is_area_light(type))
     {
-        s.position = light.position.xyz + rect_light_axis_x(light) * (2.0 * u.x - 1.0) + rect_light_axis_y(light) * (2.0 * u.y - 1.0);
+        // Uniform over the area: the rectangle, or the disc (the same square-root mapping as above).
+        const float2 onLight = type == 4u ? disc : float2(2.0 * u.x - 1.0, 2.0 * u.y - 1.0);
+        s.position = light.position.xyz + rect_light_axis_x(light) * onLight.x + rect_light_axis_y(light) * onLight.y;
         const float3 toSample = s.position - position;
         s.distance = length(toSample);
         s.direction = s.distance > 1e-6 ? toSample / s.distance : normalize(light.direction.xyz);
@@ -735,7 +796,7 @@ LightPointSample sample_light_point(LightData light, float3 position, float2 u)
 float3 light_surface_irradiance(LightData light, float3 position, float3 normal, float2 u, out LightPointSample sample)
 {
     sample = sample_light_point(light, position, u);
-    if ((uint)light.position.w == 3u)
+    if (is_area_light((uint)light.position.w))
         return light.color.rgb * light.color.w * rect_light_form_factor(light, position, normal) *
                rect_light_window(light, length(light.position.xyz - position));
     return sample.radiance * max(dot(normal, sample.direction), 0.0);

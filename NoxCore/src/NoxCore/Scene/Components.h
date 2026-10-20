@@ -286,6 +286,20 @@ namespace Nox
         RectLightComponent(const RectLightComponent&) = default;
     };
 
+    // A disc that emits light from its front (the entity's -Z): a round area light -- a ceiling downlight, a porthole, a lamp
+    // shade's opening. Radius in world units in the entity's X / Y plane (scaled with it); Intensity is its surface's radiance,
+    // like the rect light's.
+    struct DiscLightComponent
+    {
+        glm::vec3 Color{ 1.0f, 1.0f, 1.0f };
+        float Intensity = 10.0f;
+        float Radius = WorldUnits::FromMeters(0.15f);
+        float Range = 0.0f; // world units; 0 = unlimited
+
+        DiscLightComponent() = default;
+        DiscLightComponent(const DiscLightComponent&) = default;
+    };
+
     // Image-based environment lighting. The renderer will preprocess TexturePath into its
     // diffuse irradiance/specular IBL maps; this is deliberately separate from punctual
     // directional/point/spot lights.
@@ -741,7 +755,7 @@ namespace Nox
 
     using AllComponents = 
         ComponentGroup<TransformComponent, WorldTransformComponent, RelationshipComponent, DirtyTransformComponent, FolderComponent,
-        MeshComponent, MaterialComponent, ModelInstanceComponent, ModelNodeComponent, PrefabInstanceComponent, PrefabNodeComponent, DirectionalLightComponent, PointLightComponent, SpotLightComponent, RectLightComponent, EnvironmentLightComponent, AnimatorComponent,
+        MeshComponent, MaterialComponent, ModelInstanceComponent, ModelNodeComponent, PrefabInstanceComponent, PrefabNodeComponent, DirectionalLightComponent, PointLightComponent, SpotLightComponent, RectLightComponent, DiscLightComponent, EnvironmentLightComponent, AnimatorComponent,
         TimelinePlayerComponent, ParticleEmitterComponent, SpriteRendererComponent,
             CircleRendererComponent, CameraComponent, ScriptComponent,
             /*NativeScriptComponent,*/ RigidBody2DComponent, BoxCollider2DComponent,

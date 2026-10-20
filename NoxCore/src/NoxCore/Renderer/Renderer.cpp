@@ -4949,7 +4949,8 @@ namespace Nox
         // and SIGMA got a point light's zero direction. None: every light gets its shadow rays in the deferred lighting.
         m_shadowMaskLightIndex = m_restirDINumInfiniteLights > 0 ? m_restirDIFirstInfiniteLight : ~0u;
         m_rectLightCount = static_cast<uint32_t>(std::count_if(m_lightBufferObjects.begin(), m_lightBufferObjects.end(),
-            [](const shaderio::LightData& light) { return light.position.w == static_cast<float>(shaderio::LightType::Rect); }));
+            [](const shaderio::LightData& light) { return light.position.w == static_cast<float>(shaderio::LightType::Rect) ||
+                                                          light.position.w == static_cast<float>(shaderio::LightType::Disc); }));
         uniformData.shadowMaskLightIndex = m_shadowMaskLightIndex;
         if (m_shadowMaskLightIndex != ~0u)
             m_shadowMaskLightDirection = glm::normalize(glm::vec3(m_lightBufferObjects[m_shadowMaskLightIndex].direction));
@@ -6372,6 +6373,32 @@ namespace Nox
         // Radiance: the light a surface gets is it times the solid angle the rectangle fills (no unit conversion).
         l.color = glm::vec4(light.Color, light.Intensity);
         l.spotParams = glm::vec4(right * halfWidth, halfHeight);
+
+        m_lightBufferObjects.push_back(l);
+    }
+
+    void Renderer::SubmitLight(const glm::mat4& transform, const DiscLightComponent& light)
+    {
+        // A rect light's encoding (LightData), a circle: both half axes are its radius, in the entity's X / Y plane (scaled
+        // by the larger of the two), shining along its -Z.
+        const glm::vec3 axisX = glm::vec3(transform[0]);
+        const glm::vec3 forward = -glm::vec3(transform[2]);
+        const float scale = glm::max(glm::length(axisX), glm::length(glm::vec3(transform[1])));
+        const float radius = glm::max(light.Radius, 0.0f) * scale;
+        if (radius <= 0.0f || glm::length(forward) < 1e-8f || glm::length(axisX) < 1e-8f || light.Intensity <= 0.0f)
+            return;
+        const glm::vec3 front = glm::normalize(forward);
+        glm::vec3 right = glm::normalize(axisX);
+        right -= front * glm::dot(right, front);
+        if (glm::length(right) < 1e-6f)
+            return;
+        right = glm::normalize(right);
+
+        shaderio::LightData l{};
+        l.position = glm::vec4(glm::vec3(transform[3]), (float)shaderio::LightType::Disc);
+        l.direction = glm::vec4(front, glm::max(light.Range, 0.0f) * TransformScale(transform));
+        l.color = glm::vec4(light.Color, light.Intensity);
+        l.spotParams = glm::vec4(right * radius, radius);
 
         m_lightBufferObjects.push_back(l);
     }

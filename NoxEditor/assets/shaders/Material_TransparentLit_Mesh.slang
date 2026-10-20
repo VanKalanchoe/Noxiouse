@@ -424,7 +424,7 @@ FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform Pu
         float lightDistance = 100000.0 * ubo->unitsPerMeter; // a directional light: as far as a shadow ray needs to go
         float3 contribution;
 
-        if (lightType == 3)
+        if (is_area_light(lightType))
         {
             // Rect: exact diffuse, representative-point specular (PBRLighting.slang); its shadow ray to a point of it that moves
             // with the pixel and the frame (a soft shadow's grain the temporal upscale smooths).
