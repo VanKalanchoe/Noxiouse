@@ -1087,12 +1087,25 @@ namespace Nox
         return current;
     }
 
-    void Scene::ApplyTimeline(Entity player, const Timeline& timeline, float time)
+    void Scene::ApplyTimeline(Entity player, const Timeline& timeline, float time, bool cameraCuts)
     {
         for (const TimelineTrack& track : timeline.Tracks)
         {
             if (track.Muted || track.Keys.empty() || track.Property == TimelineProperty::Event)
                 continue;
+            if (track.Property == TimelineProperty::CameraCut)
+            {
+                // The camera the cut names becomes the primary one (the others stop being primary), only when it changes.
+                const std::string* path = cameraCuts ? TimelineEvaluation::CameraCutAt(track, time) : nullptr;
+                Entity camera = path ? FindTimelineTarget(player, *path) : Entity();
+                if (camera && camera.HasComponent<CameraComponent>() && GetPrimaryCameraEntity() != camera)
+                {
+                    for (auto handle : m_Registry.view<CameraComponent>())
+                        m_Registry.get<CameraComponent>(handle).Primary = false;
+                    camera.GetComponent<CameraComponent>().Primary = true;
+                }
+                continue;
+            }
             Entity target = FindTimelineTarget(player, track.Target);
             if (!target)
                 continue;
@@ -1196,7 +1209,7 @@ namespace Nox
                     TimelineEvaluation::CollectEvents(track, previous, player.Time, wrapped, player.FiredEvents);
             }
 
-            ApplyTimeline(Entity(handle, this), *timeline, player.Time);
+            ApplyTimeline(Entity(handle, this), *timeline, player.Time, true);
         }
     }
 

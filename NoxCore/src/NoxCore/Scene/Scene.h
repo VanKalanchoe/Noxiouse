@@ -140,7 +140,8 @@ namespace Nox
         // Sequencer timelines (TimelinePlayerComponent): played in Play and Simulate from their start.
         void StartTimelines();
         void UpdateTimelines();
-        void ApplyTimeline(Entity player, const Timeline& timeline, float time);
+        // cameraCuts: Camera Cut tracks switch the primary camera (Play only: the editor previews through its own camera).
+        void ApplyTimeline(Entity player, const Timeline& timeline, float time, bool cameraCuts = false);
         void SubmitLights();
         void Submit2D();
         // Particle emitters (ParticleSystem.h): simulated every frame the scene steps (the editor's too), restarted by Play / Simulate.

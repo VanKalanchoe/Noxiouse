@@ -72,7 +72,7 @@ namespace Nox
             {
                 out << YAML::Flow << YAML::BeginMap;
                 out << YAML::Key << "Time" << YAML::Value << key.Time;
-                if (track.Property == TimelineProperty::Event)
+                if (TimelineEvaluation::HasNamedKeys(track.Property))
                     out << YAML::Key << "Event" << YAML::Value << key.Event;
                 else
                 {

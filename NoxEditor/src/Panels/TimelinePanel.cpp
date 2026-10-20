@@ -1,11 +1,13 @@
 #include "TimelinePanel.h"
 
 #include <algorithm>
+#include <cfloat>
 #include <cmath>
 #include <cstdio>
 #include <functional>
 
 #include <imgui.h>
+#include <misc/cpp/imgui_stdlib.h>
 #include <glm/gtc/type_ptr.hpp>
 
 #include "NoxCore/Asset/AssetManager.h"
@@ -253,6 +255,8 @@ namespace Nox
                 scene->PreviewTimeline(player, m_Time);
                 m_LastPreviewTime = m_Time;
             }
+            else if (m_AutoKey && !m_Playing)
+                AutoKey(*timeline, *scene, player);
         }
         ImGui::End();
     }
@@ -287,6 +291,14 @@ namespace Nox
         ImGui::SameLine(0.0f, 20.0f);
         ImGui::Checkbox("Preview", &m_PreviewWanted);
         ImGui::SetItemTooltip("Poses the targets at the playhead while editing; what they had comes back when it is off or the window closes.");
+        ImGui::SameLine();
+        ImGui::BeginDisabled(!m_PreviewWanted);
+        ImGui::Checkbox("Auto-Key", &m_AutoKey);
+        ImGui::EndDisabled();
+        ImGui::SetItemTooltip("While previewing: moving a track's target (gizmo, Inspector) keys its new value at the playhead.");
+        ImGui::SameLine();
+        ImGui::Checkbox("Curves", &m_ShowCurves);
+        ImGui::SetItemTooltip("The selected track's values over time; drag a key up or down to change it.");
 
         ImGui::SameLine(0.0f, 20.0f);
         ImGui::SetNextItemWidth(120.0f);
@@ -337,7 +349,10 @@ namespace Nox
                 if (entity.HasComponent<CameraComponent>())
                     propertyItem(TimelineProperty::CameraFOV);
                 if (path.empty())
+                {
                     propertyItem(TimelineProperty::Event);
+                    propertyItem(TimelineProperty::CameraCut);
+                }
                 ImGui::EndMenu();
             }
             if (entity.HasComponent<RelationshipComponent>())
@@ -366,7 +381,7 @@ namespace Nox
         }
         ImGui::TextDisabled("Click the ruler to scrub; click a key to select it, drag to move it (Ctrl: no snapping), Del deletes it.");
 
-        const float detailsHeight = 110.0f;
+        const float detailsHeight = m_ShowCurves ? 270.0f : 110.0f;
         ImGui::BeginChild("##timeline_tracks", ImVec2(0.0f, -detailsHeight), ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar);
         ImDrawList* draw = ImGui::GetWindowDrawList();
         const ImVec2 origin = ImGui::GetCursorScreenPos();
@@ -433,6 +448,11 @@ namespace Nox
             key.Time = m_Time;
             if (addKey && track.Property == TimelineProperty::Event)
                 key.Event = m_NewEventName;
+            else if (addKey && track.Property == TimelineProperty::CameraCut)
+            {
+                key.Event = m_CutCamera;
+                key.Interpolation = TimelineInterpolation::Constant;
+            }
             else if (addKey)
             {
                 const std::optional<glm::vec4> value = scene && player ? ReadTargetValue(*scene, player, track) : std::nullopt;
@@ -456,8 +476,9 @@ namespace Nox
                 m_SelectedKey = static_cast<int>(std::find_if(track.Keys.begin(), track.Keys.end(), [&](const TimelineKey& other) { return std::abs(other.Time - key.Time) < 1e-3f; }) - track.Keys.begin());
                 Save(timeline);
             }
-            ImGui::SetItemTooltip(track.Property == TimelineProperty::Event ? "Adds an event key at the playhead (named below)"
-                                                                            : "Keys the target's current value at the playhead (move it with the gizmo first)");
+            ImGui::SetItemTooltip(track.Property == TimelineProperty::Event       ? "Adds an event key at the playhead (named below)"
+                                  : track.Property == TimelineProperty::CameraCut ? "Cuts to the camera picked below at the playhead (in Play)"
+                                                                                  : "Keys the target's current value at the playhead (move it with the gizmo first)");
             ImGui::SameLine();
             if (ImGui::SmallButton("X"))
                 removeTrack = trackIndex;
@@ -497,7 +518,9 @@ namespace Nox
                 ImGui::PopID();
 
                 const bool keySelected = trackSelected && keyIndex == m_SelectedKey;
-                const ImU32 color = keySelected ? IM_COL32(255, 200, 70, 255) : (track.Property == TimelineProperty::Event ? IM_COL32(120, 200, 255, 255) : IM_COL32(220, 220, 220, 255));
+                const ImU32 color = keySelected ? IM_COL32(255, 200, 70, 255)
+                                  : track.Property == TimelineProperty::Event ? IM_COL32(120, 200, 255, 255)
+                                  : track.Property == TimelineProperty::CameraCut ? IM_COL32(200, 140, 255, 255) : IM_COL32(220, 220, 220, 255);
                 const ImVec2 diamond[4] = { ImVec2(center.x, center.y - 6.0f), ImVec2(center.x + 6.0f, center.y), ImVec2(center.x, center.y + 6.0f), ImVec2(center.x - 6.0f, center.y) };
                 draw->AddConvexPolyFilled(diamond, 4, color);
                 draw->AddPolyline(diamond, 4, IM_COL32(20, 20, 20, 255), ImDrawFlags_Closed, 1.0f);
@@ -528,6 +551,9 @@ namespace Nox
         }
         ImGui::EndChild();
 
+        if (m_ShowCurves)
+            DrawCurves(timeline);
+
         if (removeTrack >= 0)
         {
             timeline.Tracks.erase(timeline.Tracks.begin() + removeTrack);
@@ -538,6 +564,164 @@ namespace Nox
         }
 
         DrawSelectedKey(timeline);
+    }
+
+    void TimelinePanel::AutoKey(Timeline& timeline, Scene& scene, Entity player)
+    {
+        // Not while a mouse button is held (a gizmo drag): the key goes in once the move is done.
+        if (ImGui::IsMouseDown(ImGuiMouseButton_Left) || ImGui::IsMouseDown(ImGuiMouseButton_Right) || ImGui::IsAnyItemActive())
+            return;
+        bool keyed = false;
+        for (TimelineTrack& track : timeline.Tracks)
+        {
+            const int components = TimelineEvaluation::GetComponentCount(track.Property);
+            if (track.Muted || track.Keys.empty() || components == 0)
+                continue;
+            const std::optional<glm::vec4> value = ReadTargetValue(scene, player, track);
+            if (!value)
+                continue;
+            const glm::vec4 expected = TimelineEvaluation::Evaluate(track, m_Time);
+            bool moved = false;
+            for (int c = 0; c < components; ++c)
+                moved |= std::abs((*value)[c] - expected[c]) > 1e-3f * std::max(1.0f, std::abs(expected[c]));
+            if (!moved)
+                continue;
+            auto existing = std::find_if(track.Keys.begin(), track.Keys.end(), [&](const TimelineKey& key) { return std::abs(key.Time - m_Time) < 1e-3f; });
+            if (existing != track.Keys.end())
+                existing->Value = *value;
+            else
+            {
+                TimelineKey key;
+                key.Time = m_Time;
+                key.Value = *value;
+                track.Keys.push_back(key);
+                TimelineEvaluation::SortKeys(track);
+            }
+            keyed = true;
+        }
+        if (keyed)
+            Save(timeline);
+    }
+
+    void TimelinePanel::DrawCurves(Timeline& timeline)
+    {
+        ImGui::SeparatorText("Curves");
+        if (m_SelectedTrack < 0 || m_SelectedTrack >= static_cast<int>(timeline.Tracks.size()))
+        {
+            ImGui::TextDisabled("Select a track to see its curves.");
+            return;
+        }
+        TimelineTrack& track = timeline.Tracks[m_SelectedTrack];
+        const int components = TimelineEvaluation::GetComponentCount(track.Property);
+        if (components == 0 || track.Keys.empty())
+        {
+            ImGui::TextDisabled(components == 0 ? "This track has no values." : "No keys yet.");
+            return;
+        }
+
+        const float duration = std::max(timeline.Duration, 0.01f);
+        const ImVec2 origin = ImGui::GetCursorScreenPos();
+        const float width = std::max(ImGui::GetContentRegionAvail().x, 100.0f);
+        constexpr float Height = 140.0f;
+        ImGui::InvisibleButton("##curves", ImVec2(width, Height));
+        ImDrawList* draw = ImGui::GetWindowDrawList();
+        draw->AddRectFilled(origin, ImVec2(origin.x + width, origin.y + Height), IM_COL32(28, 28, 34, 255));
+
+        // The value range of the keys and of the curve between them, with a margin.
+        float low = FLT_MAX, high = -FLT_MAX;
+        constexpr int Samples = 160;
+        for (int i = 0; i <= Samples; ++i)
+        {
+            const glm::vec4 value = TimelineEvaluation::Evaluate(track, duration * i / Samples);
+            for (int c = 0; c < components; ++c)
+            {
+                low = std::min(low, value[c]);
+                high = std::max(high, value[c]);
+            }
+        }
+        for (const TimelineKey& key : track.Keys)
+            for (int c = 0; c < components; ++c)
+            {
+                low = std::min(low, key.Value[c]);
+                high = std::max(high, key.Value[c]);
+            }
+        if (high - low < 1e-3f)
+        {
+            low -= 0.5f;
+            high += 0.5f;
+        }
+        const float margin = (high - low) * 0.1f;
+        low -= margin;
+        high += margin;
+
+        auto toScreen = [&](float time, float value) { return ImVec2(origin.x + time / duration * width, origin.y + (1.0f - (value - low) / (high - low)) * Height); };
+        auto toValue = [&](float y) { return low + (1.0f - (y - origin.y) / Height) * (high - low); };
+        const ImU32 colors[3] = { IM_COL32(230, 80, 80, 255), IM_COL32(90, 210, 90, 255), IM_COL32(90, 140, 255, 255) };
+
+        // Zero line, playhead.
+        if (low < 0.0f && high > 0.0f)
+            draw->AddLine(toScreen(0.0f, 0.0f), toScreen(duration, 0.0f), IM_COL32(80, 80, 90, 255));
+        const float playheadX = origin.x + std::clamp(m_Time / duration, 0.0f, 1.0f) * width;
+        draw->AddLine(ImVec2(playheadX, origin.y), ImVec2(playheadX, origin.y + Height), IM_COL32(255, 80, 60, 200), 1.5f);
+
+        for (int c = 0; c < components; ++c)
+        {
+            ImVec2 previous = toScreen(0.0f, TimelineEvaluation::Evaluate(track, 0.0f)[c]);
+            for (int i = 1; i <= Samples; ++i)
+            {
+                const float time = duration * i / Samples;
+                const ImVec2 point = toScreen(time, TimelineEvaluation::Evaluate(track, time)[c]);
+                draw->AddLine(previous, point, components == 1 ? IM_COL32(230, 230, 230, 255) : colors[c], 1.5f);
+                previous = point;
+            }
+        }
+
+        // Keys: a dot per component; drag vertically to change that component's value (horizontally its time).
+        const ImVec2 mouse = ImGui::GetIO().MousePos;
+        if (ImGui::IsItemActivated())
+        {
+            m_DraggingCurveKey = -1;
+            float best = 8.0f;
+            for (int k = 0; k < static_cast<int>(track.Keys.size()); ++k)
+                for (int c = 0; c < components; ++c)
+                {
+                    const ImVec2 point = toScreen(track.Keys[k].Time, track.Keys[k].Value[c]);
+                    const float distance = std::hypot(point.x - mouse.x, point.y - mouse.y);
+                    if (distance < best)
+                    {
+                        best = distance;
+                        m_DraggingCurveKey = k;
+                        m_DraggingCurveComponent = c;
+                    }
+                }
+            if (m_DraggingCurveKey >= 0)
+                m_SelectedKey = m_DraggingCurveKey;
+        }
+        if (ImGui::IsItemActive() && m_DraggingCurveKey >= 0 && m_DraggingCurveKey < static_cast<int>(track.Keys.size()) &&
+            ImGui::IsMouseDragging(ImGuiMouseButton_Left, 1.0f))
+        {
+            TimelineKey& key = track.Keys[m_DraggingCurveKey];
+            key.Value[m_DraggingCurveComponent] = toValue(std::clamp(mouse.y, origin.y, origin.y + Height));
+            if (ImGui::GetIO().KeyShift)
+                key.Time = SnapTime(std::clamp((mouse.x - origin.x) / width * duration, 0.0f, duration));
+            m_LastPreviewTime = -1.0f; // shows at once
+        }
+        if (ImGui::IsItemDeactivated() && m_DraggingCurveKey >= 0)
+        {
+            m_DraggingCurveKey = -1;
+            Save(timeline);
+        }
+        for (int k = 0; k < static_cast<int>(track.Keys.size()); ++k)
+            for (int c = 0; c < components; ++c)
+            {
+                const ImVec2 point = toScreen(track.Keys[k].Time, track.Keys[k].Value[c]);
+                const bool selected = k == m_SelectedKey;
+                draw->AddCircleFilled(point, selected ? 5.0f : 4.0f, selected ? IM_COL32(255, 200, 70, 255) : (components == 1 ? IM_COL32(230, 230, 230, 255) : colors[c]));
+            }
+        char range[64];
+        snprintf(range, sizeof(range), "%.3g .. %.3g", low, high);
+        draw->AddText(ImVec2(origin.x + 4.0f, origin.y + 2.0f), IM_COL32(160, 160, 160, 255), range);
+        ImGui::TextDisabled("Drag a key's dot up / down to change its value (Shift: also its time).");
     }
 
     void TimelinePanel::DrawSelectedKey(Timeline& timeline)
@@ -557,6 +741,11 @@ namespace Nox
             {
                 ImGui::SetNextItemWidth(160.0f);
                 ImGui::InputText("New event name", m_NewEventName, sizeof(m_NewEventName));
+            }
+            if (track.Property == TimelineProperty::CameraCut)
+            {
+                ImGui::SetNextItemWidth(240.0f);
+                ImGui::InputTextWithHint("Cut to camera", "name path from the player, e.g. Cameras/Close", &m_CutCamera);
             }
             return;
         }
@@ -592,6 +781,12 @@ namespace Nox
             ImGui::DragFloat("Value (degrees)", &key.Value.x, 0.1f, 1.0f, 179.0f);
             changed |= ImGui::IsItemDeactivatedAfterEdit();
             break;
+        case TimelineProperty::CameraCut:
+            ImGui::SetNextItemWidth(240.0f);
+            ImGui::InputTextWithHint("Camera", "name path from the player", &key.Event);
+            changed |= ImGui::IsItemDeactivatedAfterEdit();
+            ImGui::SetItemTooltip("From this key on (in Play) this camera, below the player, is the primary one.");
+            break;
         case TimelineProperty::Event:
         {
             char name[64];
@@ -606,7 +801,7 @@ namespace Nox
         default:
             break;
         }
-        if (track.Property != TimelineProperty::Event)
+        if (!TimelineEvaluation::HasNamedKeys(track.Property))
         {
             int interpolation = static_cast<int>(key.Interpolation);
             ImGui::SetNextItemWidth(120.0f);

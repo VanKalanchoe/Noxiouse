@@ -22,6 +22,7 @@ namespace Nox
         LightIntensity,
         CameraFOV,      // the target's camera, vertical, degrees
         Event,          // keys carry names: the player's scripts receive OnAnimationEvent(name) when the playhead passes them
+        CameraCut,      // keys carry a camera's name path from the player: from the key on, that camera is the primary one (Play)
         Count
     };
 
@@ -69,6 +70,10 @@ namespace Nox
         // The event names of the keys a playhead passed going from `from` to `to` (`wrapped`: it went past the end, or the start
         // playing backwards, once in between), appended to `out`.
         void CollectEvents(const TimelineTrack& track, float from, float to, bool wrapped, std::vector<std::string>& out);
+        // A Camera Cut track's camera path at `time`: the last key at or before it (the first key's before the first key).
+        const std::string* CameraCutAt(const TimelineTrack& track, float time);
+        // Tracks whose keys carry a name (Event, CameraCut) instead of a value.
+        bool HasNamedKeys(TimelineProperty property);
         void SortKeys(TimelineTrack& track);
     }
 }

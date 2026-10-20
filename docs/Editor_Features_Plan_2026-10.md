@@ -154,8 +154,12 @@ What was built:
   playhead (pose it with the gizmo first), mute, remove; the selected key's time, value, interpolation or event name. It
   previews on the entity whose player uses it (the selected one first): its targets take the pose at the playhead, and
   what they had comes back when Preview is unticked, the window closes, the scene is saved, Play / Simulate start or another
-  scene opens -- the undo history waits while it previews. Not yet: curve editor, material parameter tracks, auto-key,
-  sub-sequences / camera cuts.
+  scene opens -- the undo history waits while it previews. **2026-10-20:** **Auto-Key** (while previewing, a track's target
+  moved away from the timeline's value -- gizmo, Inspector -- is keyed at the playhead once the mouse is released), **Curves**
+  (the selected track's components as curves under the lanes, auto-fitted; drag a key's dot up / down to change it, Shift
+  also moves it in time), **Camera Cut** tracks on the player (keys name a camera by path; in Play the camera named by the
+  last key passed becomes the primary one). Not yet: material parameter tracks (materials are shared assets; per-entity
+  parameter overrides come first), sub-sequences.
 - **A3:** **LayeredBlend** node (Base, Blend, Alpha; "Bone" = the branch root, e.g. spine_02; "BlendDepth" fades in over
   that many bones) and **ApplyAdditive** node (Base, Additive, Reference -- unconnected = rest pose -- and Alpha; rotation
   delta additive * inverse(reference) applied before the base rotation, translation offset, scale ratio).

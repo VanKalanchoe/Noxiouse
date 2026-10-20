@@ -15,6 +15,7 @@ namespace Nox::TimelineEvaluation
         case TimelineProperty::LightIntensity: return "Light Intensity";
         case TimelineProperty::CameraFOV: return "Camera FOV";
         case TimelineProperty::Event: return "Event";
+        case TimelineProperty::CameraCut: return "Camera Cut";
         default: return "Unknown";
         }
     }
@@ -87,6 +88,25 @@ namespace Nox::TimelineEvaluation
             if (crossed)
                 out.push_back(key.Event);
         }
+    }
+
+    const std::string* CameraCutAt(const TimelineTrack& track, float time)
+    {
+        if (track.Property != TimelineProperty::CameraCut || track.Keys.empty())
+            return nullptr;
+        const TimelineKey* current = &track.Keys.front();
+        for (const TimelineKey& key : track.Keys)
+        {
+            if (key.Time > time)
+                break;
+            current = &key;
+        }
+        return &current->Event;
+    }
+
+    bool HasNamedKeys(TimelineProperty property)
+    {
+        return property == TimelineProperty::Event || property == TimelineProperty::CameraCut;
     }
 
     void SortKeys(TimelineTrack& track)

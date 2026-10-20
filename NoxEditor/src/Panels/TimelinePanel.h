@@ -17,7 +17,9 @@ namespace Nox
     // A sequencer timeline's window (docs/Editor_Features_Plan_2026-10.md A8): double-click a .ntimeline in the Content Browser, or
     // Open on a Timeline Player. A ruler with the playhead (click / drag to scrub), Play / Pause, the duration and loop; a lane per
     // track with its keys (click to select, drag to move, Del to delete); "Key" on a track keys its target's current value at the
-    // playhead (move the entity with the gizmo first); the selected key's time, value, interpolation or event name.
+    // playhead (move the entity with the gizmo first); the selected key's time, value, interpolation or event name. Auto-key keys
+    // what is moved while previewing; Curves shows the selected track's values over time (drag keys to change them); a Camera Cut
+    // track switches the primary camera in Play.
     //
     // It previews on an entity whose Timeline Player plays this timeline: its targets take the timeline's pose at the playhead.
     // Previewing does not edit the scene -- what the targets had is put back when the preview ends (the Preview checkbox, or the
@@ -44,6 +46,10 @@ namespace Nox
         void DrawTracks(Timeline& timeline, Scene* scene, Entity player);
         void DrawSelectedKey(Timeline& timeline);
         void DrawAddTrack(Timeline& timeline, Scene& scene, Entity player);
+        // The selected track's values as curves (a line per component) under the lanes; keys dragged up / down change their value.
+        void DrawCurves(Timeline& timeline);
+        // Auto-key: a previewed target moved away from the timeline's value at the playhead gets a key there.
+        void AutoKey(Timeline& timeline, Scene& scene, Entity player);
         // The value the track's property has on its target now (what "Key" records).
         std::optional<glm::vec4> ReadTargetValue(Scene& scene, Entity player, const TimelineTrack& track);
 
@@ -59,6 +65,12 @@ namespace Nox
         int m_SelectedKey = -1;
         bool m_DraggingKey = false;
         float m_PixelsPerSecond = 120.0f;
+        bool m_AutoKey = false;
+        bool m_ShowCurves = false;
+        int m_DraggingCurveKey = -1; // the key dragged in the curve view
+        int m_DraggingCurveComponent = 0;
+        // The camera a new Camera Cut key cuts to (a name path from the player).
+        std::string m_CutCamera;
 
         // What the preview's targets had before it began, by entity.
         struct TargetState
