@@ -1,4 +1,5 @@
 #include "NodeGraphImporter.h"
+#include "NoxCore/Core/VirtualFileSystem.h"
 
 #include "NoxCore/Asset/AssetMetadata.h"
 #include "NoxCore/Asset/NodeGraphSerializer.h"
@@ -24,7 +25,7 @@ namespace Nox
 
     Ref<NodeGraphAsset> NodeGraphImporter::LoadNodeGraph(const std::filesystem::path& path)
     {
-        if (!std::filesystem::exists(path))
+        if (!VFS::Exists(path))
         {
             NOX_CORE_ERROR("NodeGraphImporter::LoadNodeGraph - File does not exist: {}", path.string());
             return {};

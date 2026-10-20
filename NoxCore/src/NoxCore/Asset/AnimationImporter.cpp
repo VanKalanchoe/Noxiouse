@@ -1,4 +1,5 @@
 #include "AnimationImporter.h"
+#include "NoxCore/Core/VirtualFileSystem.h"
 
 #include "MeshSerializer.h"
 #include "NoxCore/Core/Log.h"
@@ -27,7 +28,7 @@ namespace Nox
 
     Ref<AnimationSequence> AnimationImporter::LoadAnimation(const std::filesystem::path& path)
     {
-        if (!std::filesystem::exists(path))
+        if (!VFS::Exists(path))
         {
             NOX_CORE_ERROR("AnimationImporter::LoadAnimation - File does not exist: {}", path.string());
             return {};
@@ -55,11 +56,11 @@ namespace Nox
         std::vector<AnimationNotify> notifies;
         const std::filesystem::path path = NotifiesPath(clipPath);
         std::error_code error;
-        if (!std::filesystem::exists(path, error))
+        if (!VFS::Exists(path))
             return notifies;
         try
         {
-            const YAML::Node root = YAML::LoadFile(path.string());
+            const YAML::Node root = YAML::Load(VFS::ReadTextOrEmpty(path));
             for (const YAML::Node& entry : root["Notifies"])
             {
                 AnimationNotify notify;

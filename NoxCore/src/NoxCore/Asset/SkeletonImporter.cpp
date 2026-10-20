@@ -1,4 +1,5 @@
 #include "SkeletonImporter.h"
+#include "NoxCore/Core/VirtualFileSystem.h"
 
 #include "MeshSerializer.h"
 #include "NoxCore/Core/Log.h"
@@ -23,7 +24,7 @@ namespace Nox
 
     Ref<Skeleton> SkeletonImporter::LoadSkeleton(const std::filesystem::path& path)
     {
-        if (!std::filesystem::exists(path))
+        if (!VFS::Exists(path))
         {
             NOX_CORE_ERROR("SkeletonImporter::LoadSkeleton - File does not exist: {}", path.string());
             return {};

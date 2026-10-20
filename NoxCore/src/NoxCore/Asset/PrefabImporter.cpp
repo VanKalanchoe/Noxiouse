@@ -1,4 +1,5 @@
 #include "PrefabImporter.h"
+#include "NoxCore/Core/VirtualFileSystem.h"
 
 #include <fstream>
 
@@ -19,7 +20,7 @@ namespace Nox
         YAML::Node data;
         try
         {
-            data = YAML::LoadFile(path.string());
+            data = YAML::Load(VFS::ReadTextOrEmpty(path));
         }
         catch (const YAML::Exception& error)
         {

@@ -28,6 +28,8 @@ namespace Nox
         static std::string GetProjectAssemblyName();
         // The project's C# project: the .csproj under Assets/Scripts (the one named like the assembly, else the first).
         static std::filesystem::path GetProjectScriptsProject();
+        // Where LoadProjectAssembly would load Nox.ScriptCore and the game assembly from (built files, not staged copies).
+        static bool FindAssemblies(std::filesystem::path& coreAssembly, std::filesystem::path& gameAssembly);
         static bool ReloadAssembly();
         static void OnRuntimeStart(Scene* scene);
         // Script > Wait for Debugger: the next Play waits (up to 60 s) for a .NET debugger before the first OnCreate.
@@ -48,7 +50,6 @@ namespace Nox
         // Exposed field values of an entity's script instances: class -> field -> value (kept across a hot reload).
         using FieldSnapshot = std::unordered_map<std::string, std::unordered_map<std::string, ScriptValue>>;
         static void CreateInstances(Entity entity, const FieldSnapshot* restore);
-        static bool FindAssemblies(std::filesystem::path& coreAssembly, std::filesystem::path& gameAssembly);
 
         static std::unique_ptr<IScriptBackend> s_Backend;
         static std::unordered_map<UUID, std::vector<ScriptInstanceHandle>> s_Instances;

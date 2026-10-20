@@ -72,6 +72,7 @@ namespace Nox
         bool m_ShowPackageGame = false;
         char m_PackageOutput[512] = {};
         bool m_PackageAllScenes = false;
+        bool m_PackagePackFiles = true;
         std::string m_PackageResult;
 
         // Undo / redo (EditorHistory): UpdateHistory runs at the end of every ImGui frame, after the panels made their changes.

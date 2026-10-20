@@ -2,11 +2,13 @@
 
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <vector>
 #include <string>
 
 #include "NoxCore/Animation/Skeleton.h"
 #include "NoxCore/Animation/AnimationSequence.h"
+#include "NoxCore/Core/VirtualFileSystem.h"
 #include "NoxCore/Renderer/DataTypes.h"
 
 namespace Nox
@@ -21,7 +23,7 @@ namespace Nox
                 stream.write(str.data(), length);
         }
 
-        static void ReadString(std::ifstream& stream, std::string& outStr)
+        static void ReadString(std::istream& stream, std::string& outStr)
         {
             uint32_t length = 0;
             stream.read(reinterpret_cast<char*>(&length), sizeof(uint32_t));
@@ -40,7 +42,7 @@ namespace Nox
         }
 
         template<typename T>
-        static void ReadVector(std::ifstream& stream, std::vector<T>& vec)
+        static void ReadVector(std::istream& stream, std::vector<T>& vec)
         {
             uint32_t size = 0;
             stream.read(reinterpret_cast<char*>(&size), sizeof(uint32_t));
@@ -108,8 +110,10 @@ namespace Nox
 
         static bool Deserialize(const std::filesystem::path& filepath, Skeleton& outSkeleton)
         {
-            std::ifstream stream(filepath, std::ios::binary);
-            if (!stream.is_open()) return false;
+            // A loose file, else a mounted pack's entry (VirtualFileSystem.h).
+            std::unique_ptr<std::istream> file = VFS::Open(filepath);
+            if (!file) return false;
+            std::istream& stream = *file;
 
             char magic[5] = { 0 };
             stream.read(magic, 4);
@@ -249,8 +253,10 @@ namespace Nox
 
         static bool Deserialize(const std::filesystem::path& filepath, AnimationSequence& outAnim)
         {
-            std::ifstream stream(filepath, std::ios::binary);
-            if (!stream.is_open()) return false;
+            // A loose file, else a mounted pack's entry (VirtualFileSystem.h).
+            std::unique_ptr<std::istream> file = VFS::Open(filepath);
+            if (!file) return false;
+            std::istream& stream = *file;
 
             char magic[5] = { 0 };
             stream.read(magic, 4);
@@ -299,7 +305,7 @@ namespace Nox
             SerializerUtils::WriteVector(stream, data.Draws);
         }
 
-        static void ReadMeshData(std::ifstream& stream, MeshData& outData)
+        static void ReadMeshData(std::istream& stream, MeshData& outData)
         {
             SerializerUtils::ReadString(stream, outData.Name);
             SerializerUtils::ReadVector(stream, outData.Vertices);
@@ -364,7 +370,7 @@ namespace Nox
     }
 }
 
-static void ReadMaterials(std::ifstream& stream, std::vector<MaterialData>& outMaterialList)
+static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMaterialList)
 {
     uint32_t matCount = 0;
     stream.read(reinterpret_cast<char*>(&matCount), sizeof(uint32_t));
@@ -457,7 +463,7 @@ static void ReadMaterials(std::ifstream& stream, std::vector<MaterialData>& outM
                 }
             }
 
-            static void ReadLights(std::ifstream& stream, std::vector<LightNodeData>& outLights)
+            static void ReadLights(std::istream& stream, std::vector<LightNodeData>& outLights)
             {
                 uint32_t count = 0;
                 stream.read(reinterpret_cast<char*>(&count), sizeof(uint32_t));
@@ -518,7 +524,7 @@ static void ReadMaterials(std::ifstream& stream, std::vector<MaterialData>& outM
                 }
             }
 
-            static void ReadCameras(std::ifstream& stream, std::vector<CameraNodeData>& outCameras)
+            static void ReadCameras(std::istream& stream, std::vector<CameraNodeData>& outCameras)
             {
                 uint32_t count = 0;
                 stream.read(reinterpret_cast<char*>(&count), sizeof(uint32_t));
@@ -542,7 +548,7 @@ static void ReadMaterials(std::ifstream& stream, std::vector<MaterialData>& outM
                 }
             }
 
-            static void ReadNodes(std::ifstream& stream, std::vector<MeshNodeData>& outNodes)
+            static void ReadNodes(std::istream& stream, std::vector<MeshNodeData>& outNodes)
             {
                 uint32_t count = 0;
                 stream.read(reinterpret_cast<char*>(&count), sizeof(uint32_t));
@@ -621,8 +627,10 @@ static void ReadMaterials(std::ifstream& stream, std::vector<MaterialData>& outM
             std::vector<CameraNodeData>& outCameraList
             )
         {
-            std::ifstream stream(filepath, std::ios::binary);
-            if (!stream.is_open()) return false;
+            // A loose file, else a mounted pack's entry (VirtualFileSystem.h).
+            std::unique_ptr<std::istream> file = VFS::Open(filepath);
+            if (!file) return false;
+            std::istream& stream = *file;
 
             char magic[5] = { 0 };
             stream.read(magic, 4);
@@ -703,8 +711,10 @@ static void ReadMaterials(std::ifstream& stream, std::vector<MaterialData>& outM
             std::vector<CameraNodeData>& outCameraList
         )
         {
-            std::ifstream stream(filepath, std::ios::binary);
-            if (!stream.is_open()) return false;
+            // A loose file, else a mounted pack's entry (VirtualFileSystem.h).
+            std::unique_ptr<std::istream> file = VFS::Open(filepath);
+            if (!file) return false;
+            std::istream& stream = *file;
 
             char magic[5] = { 0 };
             stream.read(magic, 4);

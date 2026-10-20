@@ -1,4 +1,5 @@
 #include "Font.h"
+#include "NoxCore/Core/VirtualFileSystem.h"
 
 #include <fstream>
 
@@ -46,15 +47,13 @@ namespace Nox
 
     Font::Font(const std::filesystem::path& filepath) : m_Data(new MSDFData())
     {
-        std::ifstream file(filepath, std::ios::binary | std::ios::ate);
-        if (!file)
+        std::vector<char> bytes;
+        if (!VFS::ReadBytes(filepath, bytes))
         {
             NOX_CORE_ERROR("Failed to open font: {}", filepath.string());
             return;
         }
-        std::vector<uint8_t> fontData(static_cast<size_t>(file.tellg()));
-        file.seekg(0);
-        file.read(reinterpret_cast<char*>(fontData.data()), static_cast<std::streamsize>(fontData.size()));
+        std::vector<uint8_t> fontData(bytes.begin(), bytes.end());
         Load(fontData, filepath.string());
     }
 

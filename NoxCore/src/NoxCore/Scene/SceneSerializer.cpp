@@ -1,4 +1,5 @@
 #include "SceneSerializer.h"
+#include "NoxCore/Core/VirtualFileSystem.h"
 
 
 #include <algorithm>
@@ -1979,13 +1980,12 @@ namespace Nox
 
     bool SceneSerializer::Deserialize(const std::filesystem::path& filepath)
     {
-        std::ifstream file(filepath, std::ios::binary);
-        if (!file)
+        std::string bytes;
+        if (!VFS::ReadText(filepath, bytes)) // a loose file, else a mounted pack's entry
         {
             NOX_CORE_ERROR("Failed to load .nox file `{0}`: could not open it", filepath.string());
             return false;
         }
-        const std::string bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
         // A scene saved in its runtime form (a packaged game's) under the same name reads the same way.
         if (IsRuntimeScene(bytes))
             return DeserializeRuntimeBytes(bytes, filepath.string());
@@ -2057,13 +2057,12 @@ namespace Nox
 
     bool SceneSerializer::DeserializeRuntime(const std::filesystem::path& filepath)
     {
-        std::ifstream file(filepath, std::ios::binary);
-        if (!file)
+        std::string bytes;
+        if (!VFS::ReadText(filepath, bytes))
         {
             NOX_CORE_ERROR("Failed to load runtime scene '{}': could not open the file", filepath.string());
             return false;
         }
-        const std::string bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
         return DeserializeRuntimeBytes(bytes, filepath.string());
     }
 

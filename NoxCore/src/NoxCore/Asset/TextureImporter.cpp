@@ -11,6 +11,7 @@
 
 #define TINYDDSLOADER_IMPLEMENTATION
 #include "NoxCore/Renderer/tinyddsloader.h"
+#include "NoxCore/Core/VirtualFileSystem.h"
 
 #include <ktx.h>
 
@@ -26,6 +27,26 @@
 
 namespace Nox
 {
+    namespace
+    {
+        // stb_image over a file's bytes: a loose file, else a mounted pack's entry (VirtualFileSystem.h).
+        stbi_uc* LoadImageFile(const std::filesystem::path& path, int* width, int* height, int* channels)
+        {
+            std::vector<char> bytes;
+            if (!VFS::ReadBytes(path, bytes) || bytes.empty())
+                return nullptr;
+            return stbi_load_from_memory(reinterpret_cast<const stbi_uc*>(bytes.data()), static_cast<int>(bytes.size()), width, height, channels, STBI_rgb_alpha);
+        }
+
+        float* LoadImageFileHDR(const std::filesystem::path& path, int* width, int* height, int* channels)
+        {
+            std::vector<char> bytes;
+            if (!VFS::ReadBytes(path, bytes) || bytes.empty())
+                return nullptr;
+            return stbi_loadf_from_memory(reinterpret_cast<const stbi_uc*>(bytes.data()), static_cast<int>(bytes.size()), width, height, channels, STBI_rgb_alpha);
+        }
+    }
+
     static std::filesystem::path GetCookedTexturePath(const std::filesystem::path& assetDirectory, const AssetMetadata& metadata)
     {
         std::filesystem::path path = assetDirectory / metadata.FilePath;
@@ -204,7 +225,7 @@ namespace Nox
 
         // Same test as ImportTexture2D: a cooked source is its own cook, anything else must match the recorded hash -- unless the
         // source is gone (a packaged game ships the cooked file alone), then the cooked file is taken as it is.
-        if (!IsCookedTextureSource(sourcePath) && std::filesystem::exists(sourcePath))
+        if (!IsCookedTextureSource(sourcePath) && VFS::Exists(sourcePath))
         {
             XXH128_hash_t cookedHash{};
             if (!Utility::loadHashFromFile(cookedPath.string() + ".hash", cookedHash) ||
@@ -214,9 +235,10 @@ namespace Nox
             }
         }
 
-        std::ifstream stream(cookedPath, std::ios::binary);
-        if (!stream.is_open())
+        std::unique_ptr<std::istream> file = VFS::Open(cookedPath); // a loose file, else a mounted pack's entry
+        if (!file)
             return std::nullopt;
+        std::istream& stream = *file;
 
         CookedTextureHeader header;
         header.Path = cookedPath;
@@ -239,12 +261,7 @@ namespace Nox
         const uint64_t begin = offsets.empty() ? 0 : offsets[firstMip];
         const uint64_t end = endMip < offsets.size() ? offsets[endMip] : header.DataSize;
 
-        std::ifstream stream(header.Path, std::ios::binary);
-        if (!stream.is_open())
-            return false;
-        stream.seekg(static_cast<std::streamoff>(header.DataOffset + begin));
-        stream.read(reinterpret_cast<char*>(destination), static_cast<std::streamsize>(end - begin));
-        return !stream.fail();
+        return VFS::ReadRange(header.Path, header.DataOffset + begin, end - begin, destination);
     }
 
     Ref<Texture2D> TextureImporter::ImportTexture2D(AssetHandle handle, const AssetMetadata& metadata)
@@ -255,14 +272,14 @@ namespace Nox
 
         // A packaged game ships the cooked file without its source: with the source gone it is taken as it is.
         const bool sourceIsCooked = IsCookedTextureSource(sourcePath);
-        const bool sourceExists = std::filesystem::exists(sourcePath);
+        const bool sourceExists = VFS::Exists(sourcePath);
         const auto hashPath = cookedPath.string() + ".hash";
         const XXH128_hash_t sourceHash = sourceIsCooked || !sourceExists ? XXH128_hash_t{} : TextureCookHash(sourcePath, metadata.TextureSpec);
         XXH128_hash_t cookedHash{};
         const bool cookedIsCurrent = sourceIsCooked || !sourceExists ||
             (Utility::loadHashFromFile(hashPath, cookedHash) && XXH128_isEqual(sourceHash, cookedHash));
 
-        if (std::filesystem::exists(cookedPath) && cookedIsCurrent)
+        if (VFS::Exists(cookedPath) && cookedIsCurrent)
             return LoadTexture2D(cookedPath, metadata.TextureSpec);
 
         // Other formats (e.g. .hdr) load from the source every time.
@@ -316,7 +333,7 @@ namespace Nox
         stbi_set_flip_vertically_on_load_thread(spec.flip);
 
         int texWidth, texHeight, texChannels;
-        stbi_uc* pixels = stbi_load(path.string().c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+        stbi_uc* pixels = LoadImageFile(path, &texWidth, &texHeight, &texChannels);
         if (!pixels)
         {
             NOX_CORE_ERROR("TextureImporter::DecodeSTB - Could not load texture from filepath: {}", path.string());
@@ -342,7 +359,7 @@ namespace Nox
     {
         std::filesystem::path absolutePath = std::filesystem::absolute(path);
         
-        if (!std::filesystem::exists(path))
+        if (!VFS::Exists(path))
         {
             NOX_CORE_ERROR("TextureImporter::ImportTexture2D - file not found from filepath: {}", absolutePath.string());
             return Ref<Texture2D>(nullptr);
@@ -371,7 +388,7 @@ namespace Nox
             stbi_set_flip_vertically_on_load_thread(false);
         
         int texWidth, texHeight, texChannels;
-        stbi_uc* pixels = stbi_load(path.string().c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+        stbi_uc* pixels = LoadImageFile(path, &texWidth, &texHeight, &texChannels);
         if (!pixels)
         {
             NOX_CORE_ERROR("TextureImporter::LoadWithSTB - Could not load texture from filepath: {}", path.string());
@@ -413,7 +430,7 @@ namespace Nox
             stbi_set_flip_vertically_on_load_thread(false);
         
         int texWidth, texHeight, texChannels;
-        float* pixels = stbi_loadf(path.string().c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+        float* pixels = LoadImageFileHDR(path, &texWidth, &texHeight, &texChannels);
         if (!pixels)
         {
             NOX_CORE_ERROR("TextureImporter::LoadWithSTBHDR - Could not load texture from filepath: {}", path.string());
@@ -472,7 +489,9 @@ namespace Nox
     {
         tinyddsloader::DDSFile dds;
 
-        auto result = dds.Load(path.string().c_str());
+        std::vector<char> ddsBytes;
+        auto result = VFS::ReadBytes(path, ddsBytes) ? dds.Load(std::vector<uint8_t>(ddsBytes.begin(), ddsBytes.end()))
+                                                     : tinyddsloader::Result::ErrorRead;
 
         if (result != tinyddsloader::Result::Success)
         {
@@ -788,9 +807,10 @@ namespace Nox
 
     bool TextureImporter::ReadNTEX(const std::filesystem::path& path, TextureData& outData)
     {
-        std::ifstream stream(path, std::ios::binary);
-        if (!stream.is_open())
+        std::unique_ptr<std::istream> file = VFS::Open(path);
+        if (!file)
             return false;
+        std::istream& stream = *file;
 
         uint64_t dataSize = 0;
         if (!ReadNTEXHeader(stream, outData, dataSize))

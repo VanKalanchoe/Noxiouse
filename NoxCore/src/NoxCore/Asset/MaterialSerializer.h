@@ -2,7 +2,9 @@
 
 #include <filesystem>
 #include <fstream>
+#include <memory>
 
+#include "NoxCore/Core/VirtualFileSystem.h"
 #include "NoxCore/Renderer/DataTypes.h"
 
 namespace Nox
@@ -58,9 +60,11 @@ namespace Nox
 
         static bool Deserialize(const std::filesystem::path& path, MaterialData& material)
         {
-            std::ifstream stream(path, std::ios::binary);
-            if (!stream.is_open())
+            // A loose file, else a mounted pack's entry (VirtualFileSystem.h).
+            std::unique_ptr<std::istream> file = VFS::Open(path);
+            if (!file)
                 return false;
+            std::istream& stream = *file;
 
             char magic[4]{};
             stream.read(magic, 4);
@@ -134,7 +138,7 @@ namespace Nox
             stream.write(value.data(), length);
         }
 
-        static void ReadString(std::ifstream& stream, std::string& value)
+        static void ReadString(std::istream& stream, std::string& value)
         {
             uint32_t length = 0;
             stream.read(reinterpret_cast<char*>(&length), sizeof(uint32_t));

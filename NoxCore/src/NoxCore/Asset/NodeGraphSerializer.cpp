@@ -1,4 +1,5 @@
 #include "NodeGraphSerializer.h"
+#include "NoxCore/Core/VirtualFileSystem.h"
 
 #include <fstream>
 #include <type_traits>
@@ -322,7 +323,7 @@ namespace Nox
         YAML::Node data;
         try
         {
-            data = YAML::LoadFile(path.string());
+            data = YAML::Load(VFS::ReadTextOrEmpty(path));
         }
         catch (const YAML::Exception& e)
         {

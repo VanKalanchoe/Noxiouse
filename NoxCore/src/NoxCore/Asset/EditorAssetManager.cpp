@@ -1,4 +1,5 @@
 #include "EditorAssetManager.h"
+#include "NoxCore/Core/VirtualFileSystem.h"
 
 #include <entt/entt.hpp>
 
@@ -784,7 +785,7 @@ namespace Nox
             AssetHandle materialHandle = FindHandleByPath(materialPath, AssetType::Material);
 
             const auto fullMaterialPath = Project::GetActiveAssetDirectory() / materialPath;
-            if (materialHandle == 0 || (checkedPaths.insert(materialKey).second && !std::filesystem::exists(fullMaterialPath)))
+            if (materialHandle == 0 || (checkedPaths.insert(materialKey).second && !VFS::Exists(fullMaterialPath)))
             {
                 // Read-only: a material file that is not there leaves the slot to the mesh's embedded material.
                 if (m_ReadOnly)
@@ -1776,7 +1777,7 @@ namespace Nox
     {
         auto path = Project::GetActiveAssetRegistryPath();
 
-        if (!std::filesystem::exists(path))
+        if (!VFS::Exists(path))
         {
             NOX_CORE_ERROR("Asset Registry file does not exist: {0}", path.string());
             return false;
@@ -1785,7 +1786,7 @@ namespace Nox
         YAML::Node data;
         try
         {
-            data = YAML::LoadFile(path.string());
+            data = YAML::Load(VFS::ReadTextOrEmpty(path));
         }
         catch (YAML::ParserException e)
         {

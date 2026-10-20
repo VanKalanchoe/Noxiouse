@@ -3865,6 +3865,9 @@ namespace Nox
         ImGui::SetNextItemWidth(480.0f);
         ImGui::InputText("Output folder", m_PackageOutput, sizeof(m_PackageOutput));
         ImGui::Checkbox("Every scene (not only the start scene)", &m_PackageAllScenes);
+        ImGui::Checkbox("Pack files (Content.npak)", &m_PackagePackFiles);
+        ImGui::SetItemTooltip("The assets in one pack file the game reads from (only its table of contents stays in memory).\n"
+                              "Off: a folder of loose files, easier to inspect.");
         ImGui::SetItemTooltip("The start scene and what it uses is the game; tick this when scripts load other scenes.");
         ImGui::Spacing();
 
@@ -3875,6 +3878,7 @@ namespace Nox
             PackageSettings settings;
             settings.OutputDirectory = std::filesystem::path(m_PackageOutput);
             settings.AllScenes = m_PackageAllScenes;
+            settings.PackFiles = m_PackagePackFiles;
             const PackageReport report = PackageGame(settings);
             if (!report.Success)
                 m_PackageResult = "Failed: " + report.Error;

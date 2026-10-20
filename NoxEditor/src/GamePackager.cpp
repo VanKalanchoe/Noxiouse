@@ -10,6 +10,8 @@
 
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Asset/EditorAssetManager.h"
+#include "NoxCore/Core/VirtualFileSystem.h"
+#include "NoxCore/Scripting/ScriptEngine.h"
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Project/ProjectSerializer.h"
@@ -141,8 +143,12 @@ namespace Nox
 
         // 1. The runtime: everything next to the editor's executable but the editor, debug files and editor state (and the output
         //    folder itself, when it was chosen in there).
+        const std::string assemblyName = ScriptEngine::GetProjectAssemblyName();
         copier.Tree(binaryDirectory, output, [&](const std::filesystem::path& relative, bool directory)
         {
+            // Scripts/: the engine's (Core) and this project's assembly only, not another game's built next to the editor.
+            if (directory && relative.parent_path() == "Scripts" && relative.filename() != "Core" && relative.filename() != assemblyName)
+                return true;
             if (directory)
                 return IsWithin(binaryDirectory / relative, output) || (relative.parent_path().empty() && Lower(relative.filename().string()) == "assets");
             const std::string name = Lower(relative.filename().string());
@@ -152,6 +158,23 @@ namespace Nox
         });
         report.Executable = output / executableName;
         copier.File(runtime, report.Executable);
+
+        // The project's scripts as last built (the project's own build, or the one next to the editor): Scripts/<Name>/.
+        {
+            std::filesystem::path core, game;
+            if (ScriptEngine::FindAssemblies(core, game))
+            {
+                for (const char* extension : { ".dll", ".deps.json", ".runtimeconfig.json" })
+                {
+                    std::filesystem::path source = game;
+                    source.replace_extension(extension);
+                    if (std::filesystem::exists(source, error))
+                        copier.File(source, output / "Scripts" / assemblyName / source.filename());
+                }
+            }
+            else
+                report.Warnings.push_back("The project's script assembly was not found (build its scripts first): scripts will not run");
+        }
 
         // 2. The engine's assets the runtime reads (shaders are compiled at start, fonts for text, textures for defaults).
         for (const char* folder : { "shaders", "fonts", "textures" })
@@ -239,6 +262,29 @@ namespace Nox
 
         // 4. Its registry and the project file.
         assetManager->SerializeAssetRegistry(gameAssets / config.AssetRegistryPath, assets);
+
+        // 5. Into one pack: the game opens it and reads each asset's bytes from its offset when it loads (only the table of
+        //    contents stays in memory); the loose copies go.
+        if (settings.PackFiles)
+        {
+            std::vector<std::filesystem::path> files;
+            for (auto it = std::filesystem::recursive_directory_iterator(gameAssets, error); !error && it != std::filesystem::recursive_directory_iterator(); it.increment(error))
+            {
+                if (it->is_regular_file(error))
+                    files.push_back(it->path().lexically_relative(gameAssets));
+            }
+            std::sort(files.begin(), files.end());
+            std::string packError;
+            uint64_t packBytes = 0;
+            if (VFS::WritePack(output / "Game" / "Content.npak", gameAssets, files, packError, &packBytes))
+            {
+                std::filesystem::remove_all(gameAssets, error);
+                NOX_CORE_INFO("Packed {} files into Content.npak ({:.1f} MB)", files.size(), static_cast<double>(packBytes) / (1024.0 * 1024.0));
+            }
+            else
+                report.Warnings.push_back("Could not write the pack (" + packError + "): the assets stay loose");
+        }
+
         ProjectSerializer serializer(project);
         if (!serializer.Serialize(output / "Game" / (config.Name + ".nproj")))
             report.Warnings.push_back("Could not write the project file");

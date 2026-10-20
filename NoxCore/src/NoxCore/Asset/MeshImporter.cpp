@@ -1,4 +1,5 @@
 #include "MeshImporter.h"
+#include "NoxCore/Core/VirtualFileSystem.h"
 
 #include <algorithm>
 #include <cfloat>
@@ -181,7 +182,7 @@ namespace Nox
         std::error_code error;
         const bool sourceMissing = !metadata.SourceFilePath.empty() && !std::filesystem::exists(sourcePath, error);
         XXH128_hash_t cookedHash{};
-        if (!std::filesystem::exists(cookedPath) ||
+        if (!VFS::Exists(cookedPath) ||
             (!sourceMissing && (!Utility::loadHashFromFile(cookedPath.string() + ".hash", cookedHash) ||
                                 !XXH128_isEqual(Utility::calcul_hash_streaming(sourcePath.string()), cookedHash))))
         {

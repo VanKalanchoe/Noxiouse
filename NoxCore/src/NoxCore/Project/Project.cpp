@@ -1,4 +1,5 @@
 #include "Project.h"
+#include "NoxCore/Core/VirtualFileSystem.h"
 
 #include "ProjectSerializer.h"
 #include "NoxCore/Core/WorldUnits.h"
@@ -28,6 +29,10 @@ namespace Nox
             s_ActiveProject = project;
             WorldUnits::SetPerMeter(project->GetConfig().WorldUnitsPerMeter);
             // RuntimeAssetManager is the editor's pipeline in read-only mode, so both are reached through GetEditorAssetManager().
+            // A packaged game's assets are in pack files next to its project (GamePackager): mounted over the asset directory
+            // before the registry (which is in them too) is read.
+            if (runtime)
+                VFS::MountPacks(project->m_ProjectDirectory, project->m_ProjectDirectory / project->GetConfig().AssetDirectory);
             std::shared_ptr<EditorAssetManager> assetManager = runtime ? std::make_shared<RuntimeAssetManager>() : std::make_shared<EditorAssetManager>();
             s_ActiveProject->m_AssetManager = assetManager;
             assetManager->DeserializeAssetRegistry();
