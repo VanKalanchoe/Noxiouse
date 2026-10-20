@@ -204,6 +204,16 @@ namespace Nox
         m_Registry.on_destroy<MaterialComponent>().connect<&Scene::OnMeshEntityChanged>(*this);
         m_Registry.on_construct<AnimatorComponent>().connect<&Scene::OnMeshEntityChanged>(*this);
         m_Registry.on_destroy<AnimatorComponent>().connect<&Scene::OnMeshEntityChanged>(*this);
+        m_Registry.on_construct<RigidBody3DComponent>().connect<&Scene::OnPhysics3DComponentChanged>(*this);
+        m_Registry.on_destroy<RigidBody3DComponent>().connect<&Scene::OnPhysics3DComponentChanged>(*this);
+        m_Registry.on_construct<BoxCollider3DComponent>().connect<&Scene::OnPhysics3DComponentChanged>(*this);
+        m_Registry.on_destroy<BoxCollider3DComponent>().connect<&Scene::OnPhysics3DComponentChanged>(*this);
+        m_Registry.on_construct<SphereCollider3DComponent>().connect<&Scene::OnPhysics3DComponentChanged>(*this);
+        m_Registry.on_destroy<SphereCollider3DComponent>().connect<&Scene::OnPhysics3DComponentChanged>(*this);
+        m_Registry.on_construct<CapsuleCollider3DComponent>().connect<&Scene::OnPhysics3DComponentChanged>(*this);
+        m_Registry.on_destroy<CapsuleCollider3DComponent>().connect<&Scene::OnPhysics3DComponentChanged>(*this);
+        m_Registry.on_construct<CharacterController3DComponent>().connect<&Scene::OnPhysics3DComponentChanged>(*this);
+        m_Registry.on_destroy<CharacterController3DComponent>().connect<&Scene::OnPhysics3DComponentChanged>(*this);
 
         RegisterSystems();
     }
@@ -426,6 +436,8 @@ namespace Nox
                     m_Physics3DScene->CreateBody(entity);
                 if (entity.HasComponent<CharacterController3DComponent>())
                     m_Physics3DScene->CreateCharacter(entity);
+                // Made here (a script may push it right away), not again after the update systems.
+                m_PendingPhysics3D.erase(entity.GetUUID());
             }
         }
         // Their scripts start after the script loop, not here: Instantiate is called from a script (managed code), and native code
@@ -653,6 +665,7 @@ namespace Nox
         m_FrameInput = { static_cast<float>(ts), stepPhysics, stepAnimation };
         m_UpdateSystems.Run();
         ApplySyncPoint();
+        SyncPendingPhysics3D();
     }
 
     void Scene::RunSubmitSystems()
@@ -1330,7 +1343,8 @@ namespace Nox
             PointLightComponent, SpotLightComponent, RectLightComponent, EnvironmentLightComponent, AnimatorComponent, TimelinePlayerComponent,
             FolderComponent, ParticleEmitterComponent, SpriteRendererComponent, CircleRendererComponent, CameraComponent,
             ScriptComponent, RigidBody2DComponent, BoxCollider2DComponent,
-            CircleCollider2DComponent, TextComponent>;
+            CircleCollider2DComponent, RigidBody3DComponent, BoxCollider3DComponent, SphereCollider3DComponent, CapsuleCollider3DComponent,
+            CharacterController3DComponent, TextComponent>;
 
         // Source UUID -> duplicate UUID, so a duplicated animator drives the duplicated nodes
         // instead of still pointing at the original hierarchy.
@@ -1536,6 +1550,38 @@ namespace Nox
     void Scene::OnPhysics3DStop()
     {
         m_Physics3DScene.reset();
+        m_PendingPhysics3D.clear();
+    }
+
+    void Scene::OnPhysics3DComponentChanged(entt::registry& registry, entt::entity entity)
+    {
+        // Only while the physics scene runs (Play / Simulate start makes every body itself). The ID may already be gone when
+        // the whole entity is being destroyed: DestroyEntity removes its body and character itself.
+        if (!m_Physics3DScene)
+            return;
+        if (const IDComponent* id = registry.try_get<IDComponent>(entity))
+            m_PendingPhysics3D.insert(id->ID);
+    }
+
+    void Scene::SyncPendingPhysics3D()
+    {
+        // Main thread, after transform propagation: a new entity's world transform is known, nothing else touches the bodies.
+        if (!m_Physics3DScene || m_PendingPhysics3D.empty())
+            return;
+        for (UUID id : m_PendingPhysics3D)
+        {
+            Entity entity = GetEntityByUUID(id);
+            if (!entity)
+                continue;
+            // Made again from the components as they are now: a collider added or removed changes the body's shape.
+            m_Physics3DScene->DestroyBody(entity);
+            m_Physics3DScene->DestroyCharacter(entity);
+            if (entity.HasComponent<RigidBody3DComponent>())
+                m_Physics3DScene->CreateBody(entity);
+            if (entity.HasComponent<CharacterController3DComponent>())
+                m_Physics3DScene->CreateCharacter(entity);
+        }
+        m_PendingPhysics3D.clear();
     }
     
     void Scene::SubmitLights()
@@ -1828,6 +1874,31 @@ namespace Nox
 
     template <>
     void Scene::OnComponentAdded<TextComponent>(Entity entity, TextComponent& component)
+    {
+    }
+
+    template <>
+    void Scene::OnComponentAdded<RigidBody3DComponent>(Entity entity, RigidBody3DComponent& component)
+    {
+    }
+
+    template <>
+    void Scene::OnComponentAdded<BoxCollider3DComponent>(Entity entity, BoxCollider3DComponent& component)
+    {
+    }
+
+    template <>
+    void Scene::OnComponentAdded<SphereCollider3DComponent>(Entity entity, SphereCollider3DComponent& component)
+    {
+    }
+
+    template <>
+    void Scene::OnComponentAdded<CapsuleCollider3DComponent>(Entity entity, CapsuleCollider3DComponent& component)
+    {
+    }
+
+    template <>
+    void Scene::OnComponentAdded<CharacterController3DComponent>(Entity entity, CharacterController3DComponent& component)
     {
     }
 }

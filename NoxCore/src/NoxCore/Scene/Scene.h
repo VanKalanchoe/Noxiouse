@@ -126,6 +126,10 @@ namespace Nox
         void SyncGpuScene();
         // EnTT signals of the components that decide a mesh entity's GPU instances.
         void OnMeshEntityChanged(entt::registry& registry, entt::entity entity);
+        // EnTT signals of the 3D physics components: added or removed while the physics scene runs (Duplicate, a script's
+        // AddComponent, the properties panel), the entity's body / character is made again after the update systems.
+        void OnPhysics3DComponentChanged(entt::registry& registry, entt::entity entity);
+        void SyncPendingPhysics3D();
 
         // Systems (run as tasks).
         void UpdatePhysics2D();
@@ -165,6 +169,7 @@ namespace Nox
         bool m_TimelinesRunning = false; // Play or Simulate
         std::vector<UUID> m_PendingDestroy;
         std::vector<UUID> m_PendingScriptStart;
+        std::unordered_set<UUID> m_PendingPhysics3D;
         bool m_IsPaused = false;
         int m_StepFrames = 0;
         bool m_AssetReferencesChanged = false;
