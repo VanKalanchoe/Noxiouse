@@ -50,6 +50,10 @@ namespace Nox
         // A skeletal mesh posed by a clip at `time` seconds (the Animation Clip window), square at `size` pixels, null until the first
         // image is drawn. Call every frame it is shown.
         Texture2D* GetAnimationPreview(AssetHandle mesh, AssetHandle skeleton, AssetHandle clip, float time, uint32_t size);
+        // A skeletal mesh in a pose the caller worked out (skinning matrices, e.g. an animation graph's: the graph editor's
+        // preview), square at `size` pixels; the same stage as GetAnimationPreview (one of them a frame). `sources`: assets it uses
+        // (kept loaded). Call every frame it is shown.
+        Texture2D* GetPosePreview(AssetHandle mesh, const std::vector<glm::mat4>& bones, const std::vector<AssetHandle>& sources, uint32_t size);
         // The assets on the stage right now (EditorLayer::UnloadUnusedAssets keeps them loaded).
         void CollectAssetReferences(std::unordered_set<AssetHandle>& out) const;
 

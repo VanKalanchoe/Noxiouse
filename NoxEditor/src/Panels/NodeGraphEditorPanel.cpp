@@ -1,4 +1,8 @@
 #include "NodeGraphEditorPanel.h"
+#include "AssetPreviewRenderer.h"
+#include "NoxCore/Animation/Skeleton.h"
+#include "NoxCore/Animation/AnimPose.h"
+#include "NoxCore/Animation/AnimationGraphInstance.h"
 
 #include <imgui.h>
 
@@ -279,6 +283,105 @@ namespace Nox
         }
     }
 
+    void NodeGraphEditorPanel::DrawPreview()
+    {
+        if (!ImGui::CollapsingHeader("Preview"))
+            return;
+        if (!m_PreviewInstance)
+            m_PreviewInstance = CreateScope<AnimationGraphInstance>();
+        const auto& registry = Project::GetActive()->GetEditorAssetManager()->GetAssetRegistry();
+
+        // The skeletal mesh to play it on, and the skeleton cooked from the same model.
+        const std::string meshName = m_PreviewMesh != 0 && registry.contains(m_PreviewMesh) ? registry.at(m_PreviewMesh).FilePath.stem().string() : std::string("(pick a skeletal mesh)");
+        ImGui::SetNextItemWidth(220.0f);
+        if (ImGui::BeginCombo("Mesh##graphPreview", meshName.c_str()))
+        {
+            for (const auto& [handle, metadata] : registry)
+            {
+                if (metadata.Type != AssetType::Mesh)
+                    continue;
+                bool skinned = false;
+                for (const auto& [other, otherMetadata] : registry)
+                {
+                    if (otherMetadata.Type == AssetType::Skeleton && !metadata.SourceFilePath.empty() && otherMetadata.SourceFilePath == metadata.SourceFilePath)
+                    {
+                        skinned = true;
+                        break;
+                    }
+                }
+                if (!skinned)
+                    continue;
+                ImGui::PushID(static_cast<int>(static_cast<uint64_t>(handle) & 0x7fffffff));
+                if (ImGui::Selectable(metadata.FilePath.stem().string().c_str(), handle == m_PreviewMesh))
+                {
+                    m_PreviewMesh = handle;
+                    m_PreviewSkeleton = 0;
+                    for (const auto& [other, otherMetadata] : registry)
+                    {
+                        if (otherMetadata.Type == AssetType::Skeleton && otherMetadata.SourceFilePath == metadata.SourceFilePath)
+                        {
+                            m_PreviewSkeleton = other;
+                            break;
+                        }
+                    }
+                    m_PreviewInstance = CreateScope<AnimationGraphInstance>(); // playheads from the start
+                }
+                ImGui::PopID();
+            }
+            ImGui::EndCombo();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button(m_PreviewPlaying ? "Pause##graphPreview" : "Play##graphPreview"))
+            m_PreviewPlaying = !m_PreviewPlaying;
+        ImGui::SameLine();
+        if (ImGui::Button("Restart##graphPreview"))
+            m_PreviewInstance = CreateScope<AnimationGraphInstance>();
+        if (m_PreviewMesh == 0)
+            return;
+
+        // The instance's parameters, as the scripts would set them.
+        for (const GraphParameter& parameter : m_Asset->Graph.Parameters)
+        {
+            ImGui::PushID(parameter.Name.c_str());
+            if (std::holds_alternative<bool>(parameter.DefaultValue))
+            {
+                bool value = m_PreviewInstance->GetBool(parameter.Name);
+                if (ImGui::Checkbox(parameter.Name.c_str(), &value))
+                    m_PreviewInstance->SetBool(parameter.Name, value);
+            }
+            else if (std::holds_alternative<float>(parameter.DefaultValue) || std::holds_alternative<int32_t>(parameter.DefaultValue))
+            {
+                float value = m_PreviewInstance->GetFloat(parameter.Name);
+                ImGui::SetNextItemWidth(220.0f);
+                if (ImGui::DragFloat(parameter.Name.c_str(), &value, 0.01f))
+                    m_PreviewInstance->SetFloat(parameter.Name, value);
+            }
+            ImGui::PopID();
+        }
+
+        // One evaluation a frame, its pose on the mesh.
+        std::vector<AssetHandle> missing;
+        m_PreviewInstance->Sync(m_GraphHandle, missing);
+        for (AssetHandle asset : missing)
+            AssetManager::RequestAsset(asset);
+        const Skeleton* skeleton = m_PreviewSkeleton != 0 && AssetManager::RequestAsset(m_PreviewSkeleton) == AssetState::Ready
+            ? AssetManager::FindLoadedAsset<Skeleton>(m_PreviewSkeleton) : nullptr;
+        m_PreviewBones.clear();
+        if (skeleton && !skeleton->AllNodes.empty())
+        {
+            if (const AnimPose* pose = m_PreviewInstance->Evaluate(ImGui::GetIO().DeltaTime, m_PreviewPlaying, *skeleton))
+                ApplyPoseToSkeleton(*pose, *skeleton, m_PreviewBones);
+        }
+        constexpr float PreviewSize = 256.0f;
+        Texture2D* image = AssetPreviewRenderer::Get().GetPosePreview(m_PreviewMesh, m_PreviewBones, { m_GraphHandle, m_PreviewSkeleton }, static_cast<uint32_t>(PreviewSize));
+        if (image)
+            ImGui::Image(image->getImTextureID(), ImVec2(PreviewSize, PreviewSize));
+        else
+            ImGui::TextDisabled(skeleton ? "Loading..." : "Loading the skeleton...");
+        if (!m_PreviewInstance->GetFiredNotifies().empty())
+            ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.25f, 1.0f), "Notify: %s", m_PreviewInstance->GetFiredNotifies().back().c_str());
+    }
+
     void NodeGraphEditorPanel::OnImGuiRender()
     {
         m_WantsInput = false; // both stay false if the window is closed or collapsed this frame
@@ -321,6 +424,8 @@ namespace Nox
             else
             {
                 DrawParametersPanel();
+                if (m_Asset->Graph.Domain == "AnimationGraph")
+                    DrawPreview();
 
                 auto onEdited = [this]()
                 {

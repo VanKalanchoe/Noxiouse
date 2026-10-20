@@ -230,6 +230,30 @@ namespace Nox
         return renderer->GetExtraViewTexture(Renderer::AnimationPreviewView);
     }
 
+    Texture2D* AssetPreviewRenderer::GetPosePreview(AssetHandle mesh, const std::vector<glm::mat4>& bones, const std::vector<AssetHandle>& sources, uint32_t size)
+    {
+        Renderer* renderer = GetRenderer();
+        if (!renderer || mesh == 0 || size == 0)
+            return nullptr;
+        // One animated stage: a second window showing another mesh in the same frame waits.
+        if (m_AnimatedRequestedFrame == m_Frame && m_Animated.Asset != 0 && m_Animated.Asset != mesh)
+            return nullptr;
+
+        m_AnimatedRequestedFrame = m_Frame;
+        if (m_Animated.Asset != mesh)
+        {
+            Remove(m_Animated);
+            renderer->ReleaseExtraView(Renderer::AnimationPreviewView);
+            if (!Place(mesh, AnimationStage(), m_Animated, true))
+                return nullptr;
+        }
+        m_AnimatedSources = sources;
+        m_AnimatedBones = bones;
+        renderer->SetMeshInstancesBones(m_Animated.Instances, m_AnimatedBones);
+        Submit(Renderer::AnimationPreviewView, m_Animated, size, 1.3f);
+        return renderer->GetExtraViewTexture(Renderer::AnimationPreviewView);
+    }
+
     void AssetPreviewRenderer::CollectAssetReferences(std::unordered_set<AssetHandle>& out) const
     {
         auto add = [&](const Placement& placement)

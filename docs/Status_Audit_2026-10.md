@@ -103,7 +103,7 @@ for history. File references are to the code as of this audit.
   (New-project flow: built 2026-10-20, no project templates.)
 
 **Animation**
-- (Sync markers (A2) and notifies in single-clip mode: built 2026-10-20); graph preview (A7; loop ranges built 2026-10-20); (double-click a skinned mesh to preview it: built 2026-10-20);
+- (Sync markers (A2) and notifies in single-clip mode: built 2026-10-20); (graph preview and loop ranges (A7): built 2026-10-20); (double-click a skinned mesh to preview it: built 2026-10-20);
   Timeline material tracks (needs per-entity material
   parameters: materials are shared assets), sub-sequences (A8; curve view, auto-key and camera cuts built 2026-10-20); audio graph
   (A9).

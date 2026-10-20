@@ -8,6 +8,8 @@
 #include "NoxCore/Core/Ref.h"
 #include "NoxCore/NodeGraph/NodeGraphAsset.h"
 
+#include <glm/glm.hpp>
+
 namespace Nox
 {
     class INodeGraphCanvasBackend;
@@ -48,6 +50,8 @@ namespace Nox
         void DrawParametersPanel();
         // Below a state machine's state view: the selected state (name, entry) or transition (blend, rules).
         void DrawStateMachineInspector(GraphNode& machine);
+        // An animation graph's preview (A7): the graph played on a skeletal mesh, its parameters set here.
+        void DrawPreview();
 
     private:
         AssetHandle m_GraphHandle;
@@ -66,5 +70,12 @@ namespace Nox
         uint32_t m_SelectedState = 0;
 
         Scope<INodeGraphCanvasBackend> m_Backend;
+
+        // The preview: its own graph instance (playheads, parameters), the mesh and skeleton it plays on.
+        Scope<class AnimationGraphInstance> m_PreviewInstance;
+        AssetHandle m_PreviewMesh = 0;
+        AssetHandle m_PreviewSkeleton = 0;
+        bool m_PreviewPlaying = true;
+        std::vector<glm::mat4> m_PreviewBones;
     };
 }

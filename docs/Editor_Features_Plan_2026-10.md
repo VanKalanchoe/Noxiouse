@@ -140,7 +140,9 @@ What was built:
   play / pause, loop, speed (also backwards), scrubbing, and the notifies flashing as they pass (`AssetPreviewRenderer::
   GetAnimationPreview`: the clip sampled at the playhead, skinned like an Animator without joint entities, its own extra view).
   Loop range (2026-10-20): Range Start / End at the playhead or typed, shaded on the timeline; playing loops or stops inside
-  it and fires the notifies of each part across its ends. Not yet: previewing an animation graph.
+  it and fires the notifies of each part across its ends. **Graph preview (2026-10-20):** the animation graph window's
+  Preview section plays the graph on a skeletal mesh (its own AnimationGraphInstance; parameters set there as a script would;
+  Play / Pause / Restart; the last notify shown), on the same preview stage as the clip window (`GetPosePreview`).
 - **A8 Sequencer (2026-10-18, untested):** a **Timeline** asset (`.ntimeline`, YAML; Content Browser + Add > Timeline) of
   tracks, each a target entity (by name path from the player: "" the player, "Door/Hinge" below it -- so one timeline drives
   every copy of a prefab) and a property: Translation, Rotation (degrees), Scale, Light Color / Intensity, Camera FOV, Event.
