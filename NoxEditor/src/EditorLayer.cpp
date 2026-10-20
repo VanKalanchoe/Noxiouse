@@ -190,6 +190,7 @@ namespace Nox
     {
         NOX_CORE_INFO("EditorLayer Shutdown");
 
+        SaveEditorCameras();
         ScriptEngine::Shutdown();
         AssetPreviewRenderer::Get().Clear();
         AssetPreviewRenderer::SetRenderer(nullptr);
@@ -2401,6 +2402,7 @@ namespace Nox
 
     void EditorLayer::NewScene()
     {
+        SaveEditorCameras();
         EndTimelinePreviews();
         m_HoveredEntity = Entity();
         m_SceneHierarchyPanel.SetSelectedEntity(Entity());
@@ -2450,11 +2452,86 @@ namespace Nox
         m_SceneHierarchyPanel.SetContext(m_EditorScene);
 
         m_ActiveScene = m_EditorScene;
+        SaveEditorCameras(); // the scene being left
         m_EditorScenePath = Project::GetActive()->GetEditorAssetManager()->GetFilePath(handle);
+        RestoreEditorCameras();
         m_UnloadUnusedAssetsRequested = true;
 #if NOX_PROFILE_STATS
         Profiler::Get().ResetStats();
 #endif
+    }
+
+    namespace
+    {
+        std::filesystem::path EditorCamerasFile()
+        {
+            return Project::GetProjectDirectory() / "Cache" / "EditorCameras.txt";
+        }
+
+        // Lines: <scene path>|<viewport>|<focal x y z> <distance> <pitch> <yaw> <view mode> <ortho half height>
+        std::vector<std::string> ReadEditorCameraLines()
+        {
+            std::vector<std::string> lines;
+            std::ifstream in(EditorCamerasFile());
+            for (std::string line; std::getline(in, line);)
+            {
+                if (!line.empty())
+                    lines.push_back(line);
+            }
+            return lines;
+        }
+    }
+
+    void EditorLayer::SaveEditorCameras()
+    {
+        if (!Project::GetActive() || m_EditorScenePath.empty())
+            return;
+        const std::string scene = m_EditorScenePath.generic_string();
+        std::vector<std::string> lines = ReadEditorCameraLines();
+        std::erase_if(lines, [&](const std::string& line) { return line.rfind(scene + "|", 0) == 0; });
+        for (int index = 0; index < kMaxViewports; ++index)
+        {
+            const ViewportSlot& slot = m_Viewports[index];
+            if (index != m_ActiveViewport && !slot.CameraSet)
+                continue;
+            const EditorCamera& camera = index == m_ActiveViewport ? m_EditorCamera : slot.Camera;
+            const glm::vec3 focal = camera.GetFocalPoint();
+            char line[512];
+            snprintf(line, sizeof(line), "%s|%d|%.6g %.6g %.6g %.6g %.6g %.6g %d %.6g", scene.c_str(), index, focal.x, focal.y, focal.z,
+                     camera.GetDistance(), camera.GetPitch(), camera.GetYaw(), static_cast<int>(camera.GetViewMode()), camera.GetOrthoHalfHeight());
+            lines.push_back(line);
+        }
+        std::error_code error;
+        std::filesystem::create_directories(EditorCamerasFile().parent_path(), error);
+        std::ofstream out(EditorCamerasFile(), std::ios::trunc);
+        for (const std::string& line : lines)
+            out << line << "\n";
+    }
+
+    void EditorLayer::RestoreEditorCameras()
+    {
+        if (!Project::GetActive() || m_EditorScenePath.empty())
+            return;
+        const std::string prefix = m_EditorScenePath.generic_string() + "|";
+        for (const std::string& line : ReadEditorCameraLines())
+        {
+            if (line.rfind(prefix, 0) != 0)
+                continue;
+            int index = -1, mode = 0;
+            glm::vec3 focal(0.0f);
+            float distance = 0.0f, pitch = 0.0f, yaw = 0.0f, orthoHalfHeight = 10.0f;
+            if (sscanf(line.c_str() + prefix.size(), "%d|%f %f %f %f %f %f %d %f", &index, &focal.x, &focal.y, &focal.z, &distance, &pitch, &yaw,
+                       &mode, &orthoHalfHeight) != 9 || index < 0 || index >= kMaxViewports || mode < 0 || mode > static_cast<int>(EditorViewMode::Right))
+                continue;
+            EditorCamera& camera = index == m_ActiveViewport ? m_EditorCamera : m_Viewports[index].Camera;
+            camera.SetViewMode(static_cast<EditorViewMode>(mode));
+            camera.SetFocalPoint(focal);
+            camera.SetDistance(distance);
+            camera.SetOrientation(pitch, yaw);
+            if (camera.IsOrthographic())
+                camera.SetOrthoHalfHeight(orthoHalfHeight);
+            m_Viewports[index].CameraSet = true;
+        }
     }
 
     void EditorLayer::UI_StatusBar()

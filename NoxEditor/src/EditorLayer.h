@@ -50,6 +50,9 @@ namespace Nox
         bool OpenStartupProject();
         void SaveProject();
         
+        // Each viewport's camera per scene, in <project>/Cache/EditorCameras.txt: a scene opens where it was looked at last.
+        void SaveEditorCameras();
+        void RestoreEditorCameras();
         void NewScene();
         void OpenScene();
         void OpenScene(AssetHandle handle);

@@ -71,6 +71,7 @@ namespace Nox
         void SetViewMode(EditorViewMode mode);
         // Half the visible height in world units (ortho views only) and the point the camera looks at.
         float GetOrthoHalfHeight() const { return m_OrthoHalfHeight; }
+        void SetOrthoHalfHeight(float halfHeight) { m_OrthoHalfHeight = m_TargetOrthoHalfHeight = std::max(halfHeight, 0.01f); UpdateProjection(); }
         const glm::vec3& GetFocalPoint() const { return m_FocalPoint; }
 
         // Vertical FOV: what the projection matrix, DLSS and ImGuizmo all use -- kept internal so none of them need touching.
