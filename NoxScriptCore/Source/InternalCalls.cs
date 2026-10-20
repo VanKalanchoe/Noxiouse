@@ -53,7 +53,10 @@ internal static unsafe class InternalCalls
     private static delegate*<ulong, Transform*, void> Transform_SetLocal;
     private static delegate*<ulong, Transform*, void> Transform_GetWorld;
     private static delegate*<ulong, Transform*, void> Transform_SetWorld;
+    private static delegate*<float> WorldUnits_PerMeter;
 #pragma warning restore CS0649
+
+    internal static float GetUnitsPerMeter() => WorldUnits_PerMeter();
 
     internal static void LogInfo(string message)
     {

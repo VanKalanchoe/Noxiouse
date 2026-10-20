@@ -10,6 +10,7 @@
 #include "NoxCore/Physics/Physics3DScene.h"
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Core/Log.h"
+#include "NoxCore/Core/WorldUnits.h"
 #include "NoxCore/Math/Math.h"
 #include "NoxCore/Renderer/DynamicMesh.h"
 #include "NoxCore/Scene/Entity.h"
@@ -343,6 +344,11 @@ namespace Nox
         {
             if (AnimatorComponent* animator = FindAnimator(entityID))
                 animator->GraphInstance.SetFloat(std::string(name), value);
+        }
+
+        float WorldUnitsPerMeter()
+        {
+            return WorldUnits::PerMeter();
         }
 
         float AnimatorGetFloat(uint64_t entityID, Coral::String name)
@@ -723,6 +729,7 @@ namespace Nox
         assembly.AddInternalCall("Nox.InternalCalls", "Transform_SetLocal", reinterpret_cast<void*>(&SetLocalTransform));
         assembly.AddInternalCall("Nox.InternalCalls", "Transform_GetWorld", reinterpret_cast<void*>(&GetWorldTransform));
         assembly.AddInternalCall("Nox.InternalCalls", "Transform_SetWorld", reinterpret_cast<void*>(&SetWorldTransform));
+        assembly.AddInternalCall("Nox.InternalCalls", "WorldUnits_PerMeter", reinterpret_cast<void*>(&WorldUnitsPerMeter));
         assembly.UploadInternalCalls();
     }
 

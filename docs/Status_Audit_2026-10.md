@@ -20,7 +20,7 @@ for history. File references are to the code as of this audit.
 | Renderer | ReSTIR DI / PT assume light indices never change between frames (identity mapping): adding / removing a light corrupts their history for a frame | `RTXDI/DI/ReSTIRDITemporal.slang:110`, `PT/ReSTIRPTTemporal.slang:465` |
 | Renderer | Meshlet cone culling was removed because it dropped visible meshlets; cause never found (cones still cooked, unread) | `MeshImporter.cpp:57`, `shaderIO.h` |
 | Animation | Fixed 2026-10-20: root motion was lost on entities with a character controller (added to the Transform, overwritten by the controller). The controller now gets it as a velocity (`RootMotionVelocity`, horizontal) and moves by it with collisions | `Scene.cpp` (UpdateAnimators), `JoltPhysics3DScene.cpp` |
-| Animation | Fox locomotion `Speed` thresholds are in m/s while the project is in cm: Walk -> Run always fires | `CharacterMovement.cs:13`, Fox graph |
+| Animation | Fixed 2026-10-20: the Fox locomotion `Speed` was sent in cm/s to thresholds in m/s (Walk -> Run always fired). `CharacterMovement.cs` sends m/s through the new `Nox.WorldUnits` | `CharacterMovement.cs` |
 | Scripting | Fixed 2026-10-20: a failed hot reload left scripting unloaded. The new assemblies load into their own context first; the running module goes only once they have loaded | `DotNetBackend.cpp` (LoadModule) |
 | Scripting | Fixed 2026-10-20: the reload generation never increased and `OnAfterReload` was never called. Every load is a new generation; `OnAfterReload` runs after the new instances' `OnCreate`, and exposed field values are kept across the reload | `ScriptEngine.cpp` (ReloadAssembly) |
 | Scripting | Fixed 2026-10-20: reloading while script jobs ran was unsafe. `Nox.Jobs` counts its running jobs; reload and shutdown wait for them (2 s, else the reload is skipped with a log line) | `Jobs.cs`, `DotNetBackend.cpp` (WaitForJobs) |
@@ -94,7 +94,7 @@ for history. File references are to the code as of this audit.
 - Debounced build + source watching; `ScriptBehaviour` component model; scripts and asset
   references as assets; richer field metadata; `OnFixedUpdate` / `OnLateUpdate`; camera smoothing; API version check and
   debugger; backend-independent API; Lua (deferred).
-- Per-project game assembly (Facerun.dll is hard-coded); WorldUnits API for scripts.
+- Per-project game assembly (Facerun.dll is hard-coded). (`Nox.WorldUnits` for scripts: built 2026-10-20.)
 
 **Runtime and packaging**
 - Pack files (R4), precompiled shaders and pipeline cache (R5), a cook step for textures, self-contained .NET runtime,
