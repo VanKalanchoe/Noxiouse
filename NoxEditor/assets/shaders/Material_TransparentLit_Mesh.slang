@@ -172,6 +172,8 @@ float3 tracedRefraction(UniformBufferObject* ubo, InstanceData instance, uint se
     const float maxDistance = 1000.0 * ubo->unitsPerMeter;
     float3 origin = position - v * bias;
     float3 direction = -v;
+    // What the volume absorbs on the way through it (KHR_materials_volume attenuation, its distance scaled with the model).
+    float3 absorbed = float3(1.0);
 
     if (instance.thickness > 0.0)
     {
@@ -189,13 +191,16 @@ float3 tracedRefraction(UniformBufferObject* ubo, InstanceData instance, uint se
             if (dot(outward, inside) < 0.0)
                 outward = -outward;
             const float3 exitPoint = entry + inside * hitT;
+            absorbed = volume_transmittance(instance.attenuationColor, instance.attenuationDistance * modelScale, hitT);
             float3 outside = refract(inside, -outward, ior);
             direction = dot(outside, outside) > 1e-6 ? normalize(outside) : reflect(inside, -outward);
             origin = exitPoint + direction * bias;
         }
         else
         {
-            origin = entry + inside * (instance.thickness * modelScale / max(dot(inside, -n), 0.1)) - v * bias;
+            const float slab = instance.thickness * modelScale / max(dot(inside, -n), 0.1);
+            origin = entry + inside * slab - v * bias;
+            absorbed = volume_transmittance(instance.attenuationColor, instance.attenuationDistance * modelScale, slab);
         }
     }
 
@@ -203,13 +208,13 @@ float3 tracedRefraction(UniformBufferObject* ubo, InstanceData instance, uint se
     float2 barycentrics;
     float hitT;
     if (traceRefractionRay(ubo, origin, direction, maxDistance, -1, slot, primitive, barycentrics, hitT))
-        return shadeRayHit(ubo, slot, primitive, barycentrics, origin, direction, hitT);
+        return shadeRayHit(ubo, slot, primitive, barycentrics, origin, direction, hitT) * absorbed;
 
     if (ubo->prefilteredMapIndex == 0xFFFFFFFF)
         return float3(0.0);
     TextureCube environment = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + ubo->prefilteredMapIndex, 0));
     SamplerState samplerPrefiltered = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_PREFILTER, 0));
-    return environment.SampleLevel(samplerPrefiltered, direction, 0.0).rgb * ubo->scaleIBLAmbient;
+    return environment.SampleLevel(samplerPrefiltered, direction, 0.0).rgb * ubo->scaleIBLAmbient * absorbed;
 }
 
 float3 getNormal(UniformBufferObject* ubo, InstanceData instance, VSOutput vertIn, SamplerState samplerState)
@@ -609,7 +614,10 @@ FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform Pu
 
             const float lod = log2(float(max(sourceWidth, sourceHeight))) * perceptualRoughness * saturate(ior * 2.0 - 2.0);
             SamplerState linearClamp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
-            behind += refractionSource.SampleLevel(linearClamp, uv, min(lod, float(sourceLevels - 1))).rgb * (1.0 - tracedWeight);
+            // Through the volume's thickness: what it absorbs on the way (KHR_materials_volume attenuation).
+            const float3 absorbed = volume_transmittance(instance.attenuationColor, instance.attenuationDistance * modelScale,
+                                                         instance.thickness * modelScale / max(dot(normalize(refracted), -n), 0.1));
+            behind += refractionSource.SampleLevel(linearClamp, uv, min(lod, float(sourceLevels - 1))).rgb * absorbed * (1.0 - tracedWeight);
         }
 
         const float3 fresnel = specularEnvironmentR0 + (1.0 - specularEnvironmentR0) * pow(1.0 - NdotV, 5.0);

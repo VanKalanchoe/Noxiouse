@@ -51,6 +51,8 @@ namespace Nox
             stream.write(reinterpret_cast<const char*>(&unlit), sizeof(uint8_t));
             stream.write(reinterpret_cast<const char*>(&material.IOR), sizeof(float));
             stream.write(reinterpret_cast<const char*>(&material.Thickness), sizeof(float));
+            stream.write(reinterpret_cast<const char*>(&material.AttenuationColor), sizeof(glm::vec3));
+            stream.write(reinterpret_cast<const char*>(&material.AttenuationDistance), sizeof(float));
             return stream.good();
         }
 
@@ -98,6 +100,18 @@ namespace Nox
             material.Unlit = unlit != 0;
             stream.read(reinterpret_cast<char*>(&material.IOR), sizeof(float));
             stream.read(reinterpret_cast<char*>(&material.Thickness), sizeof(float));
+            if (!stream.good())
+                return false;
+            // Written since volume absorption: a file from before ends here (no absorption).
+            glm::vec3 attenuationColor(1.0f);
+            float attenuationDistance = 0.0f;
+            if (stream.read(reinterpret_cast<char*>(&attenuationColor), sizeof(glm::vec3)) &&
+                stream.read(reinterpret_cast<char*>(&attenuationDistance), sizeof(float)))
+            {
+                material.AttenuationColor = attenuationColor;
+                material.AttenuationDistance = attenuationDistance;
+            }
+            stream.clear();
 
             // Older transmission-only imports inherited the glTF parser's synthetic 1/1 PBR defaults. RTXPT/Donut
             // uses 0/0 when the PBR object is absent. A fully metallic material cannot transmit, so repair this exact

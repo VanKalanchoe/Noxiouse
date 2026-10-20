@@ -200,6 +200,8 @@ namespace Nox
         packed.transmissionTextureSet = material.TransmissionTextureSet;
         packed.ior = material.IOR;
         packed.thickness = material.Thickness;
+        packed.attenuationColor = glm::clamp(material.AttenuationColor, glm::vec3(0.0f), glm::vec3(1.0f));
+        packed.attenuationDistance = glm::max(material.AttenuationDistance, 0.0f);
         packed.alphaMode = static_cast<uint32_t>(material.Mode);
         packed.alphaMaskCutoff = material.AlphaMaskCutoff;
         packed.doubleSided = material.DoubleSided ? 1u : 0u;

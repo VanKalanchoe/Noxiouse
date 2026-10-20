@@ -58,6 +58,10 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
     );
 
 
+    // A segment through a volume (it ended on the volume's inside): what the volume absorbed on the way.
+    if (any(surface.absorptionCoefficient > 0.0))
+        path.thp *= exp(-surface.absorptionCoefficient * rayT);
+
     // RTXPT exports depth and motion from its chosen path surface rather than from a separate raster pass.
     // Use jitter-free matrices for motion and the jittered clip transform for the depth supplied to Streamline.
     bool rrVisibleSurface = vertexIdx == 1 || (vertexIdx > 1 && path.hasFlag(PathFlags::deltaOnlyPath));

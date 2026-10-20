@@ -97,6 +97,13 @@ namespace Nox
         changed |= ImGui::DragFloat("Transmission", &data.TransmissionFactor, 0.01f, 0.0f, 1.0f);
         changed |= ImGui::DragFloat("IOR", &data.IOR, 0.01f, 1.0f, 3.0f);
         changed |= ImGui::DragFloat("Thickness", &data.Thickness, 0.01f, 0.0f, 10.0f);
+        changed |= ImGui::ColorEdit3("Attenuation Color", glm::value_ptr(data.AttenuationColor));
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Volume absorption (KHR_materials_volume): the color light keeps after travelling Attenuation Distance\n"
+                              "through the material -- thick glass tinted by its depth. Needs Transmission and a Thickness.");
+        changed |= ImGui::DragFloat("Attenuation Distance", &data.AttenuationDistance, 0.01f, 0.0f, 100000.0f);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("World units (scaled with the model). 0: no absorption.");
 
         auto drawTextureReference = [&](const char* labelName,
                                         const char* id,

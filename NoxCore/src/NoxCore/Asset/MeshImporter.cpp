@@ -556,6 +556,12 @@ namespace Nox
                 vertex.pos *= scale;
         for (MeshNodeData& node : subset.Nodes)
             node.Translation *= scale;
+        // The volume's lengths are the file's, like its vertices.
+        for (MaterialData& material : subset.Materials)
+        {
+            material.Thickness *= scale;
+            material.AttenuationDistance *= scale;
+        }
     }
 
     // The skeleton (bone rest poses) and its animation clips need the same uniform scale as the mesh they drive, or a scaled-up
@@ -2437,12 +2443,22 @@ namespace Nox
                                 for (uint32_t j = 0; j < ext.value.object_count; j++)
                                 {
                                     const auto& kv = ext.value.object_data[j];
-                                    if (std::string_view(kv.key.data, kv.key.len) == "thicknessFactor")
+                                    const std::string_view key(kv.key.data, kv.key.len);
+                                    if (key == "thicknessFactor")
                                     {
                                         if (kv.value.type == TG3_VALUE_REAL)
                                             materialData.Thickness = static_cast<float>(kv.value.real_val);
                                         else if (kv.value.type == TG3_VALUE_INT)
                                             materialData.Thickness = static_cast<float>(kv.value.int_val);
+                                    }
+                                    else if (key == "attenuationDistance" && (kv.value.type == TG3_VALUE_REAL || kv.value.type == TG3_VALUE_INT))
+                                    {
+                                        materialData.AttenuationDistance = getFloatVal(kv.value);
+                                    }
+                                    else if (key == "attenuationColor" && kv.value.type == TG3_VALUE_ARRAY && kv.value.array_count >= 3)
+                                    {
+                                        materialData.AttenuationColor = glm::vec3(getFloatVal(kv.value.array_data[0]), getFloatVal(kv.value.array_data[1]),
+                                                                                  getFloatVal(kv.value.array_data[2]));
                                     }
                                 }
                             }

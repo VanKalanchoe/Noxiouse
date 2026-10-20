@@ -56,7 +56,8 @@ for history. File references are to the code as of this audit.
 ### 0.3 Missing / open, by area
 
 **Rendering and lights**
-- OIT for transparent surfaces and particles (H4); denoising of transparent signals (H5); volume absorption (KHR attenuation).
+- OIT for transparent surfaces and particles (H4); denoising of transparent signals (H5). (Volume absorption, KHR attenuation:
+  built 2026-10-20.)
 - LTC area lights (rect and disc lights use the exact diffuse + representative-point specular), emissive meshes as lights
   (RTXDI). (Disc lights: built 2026-10-20.) (Rect lights visible: built 2026-10-20 -- an emissive panel in the raster view, and to the path tracer's camera and
   mirror rays; RT reflections show them through their specular highlight only, as engines do, not as a panel, which would

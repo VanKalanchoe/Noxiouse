@@ -156,12 +156,25 @@ struct GpuMaterial
 
     // Volume thickness (KHR_materials_volume), glTF spec default is 0.0 (infinitely thin)
     float thickness;
+    // Volume absorption (KHR_materials_volume): what crossing attenuationDistance of the volume leaves of the light (0: none)
+    vec3 attenuationColor;
+    float attenuationDistance;
 
     uint32_t alphaMode;   // 0 = Opaque, 1 = Mask, 2 = Blend
     float alphaMaskCutoff;
     uint32_t doubleSided;
     uint32_t unlit;
 };
+
+#ifdef __SLANG__
+// Beer-Lambert absorption over `length` (world units) of a volume whose light keeps attenuationColor over attenuationDistance.
+float3 volume_transmittance(float3 attenuationColor, float attenuationDistance, float length)
+{
+    if (attenuationDistance <= 0.0 || length <= 0.0)
+        return float3(1.0);
+    return pow(max(attenuationColor, float3(1e-6)), float3(length / attenuationDistance));
+}
+#endif
 
 // Ray tracing view of an instance (same slot as GpuInstance): everything the ray tracing shaders read at candidates and
 // hits, in one record. Ray queries look instances up per candidate triangle; reading instance -> material -> mesh ->
@@ -190,6 +203,8 @@ struct GpuRayTracingInstance
     float workflow;                 // 0.0 = MetalRough, 1.0 = SpecGloss
     float ior;
     float thickness;
+    vec3 attenuationColor;          // volume absorption (KHR_materials_volume; attenuationDistance 0: none)
+    float attenuationDistance;
 };
 
 struct GpuMesh
@@ -2005,6 +2020,8 @@ struct InstanceData
     int32_t transmissionTextureSet;
     float ior;
     float thickness;
+    float3 attenuationColor;
+    float attenuationDistance;
     uint32_t alphaMode;
     float alphaMaskCutoff;
     uint32_t doubleSided;
@@ -2073,6 +2090,8 @@ struct SceneInstances
             data.transmissionTextureSet = material.transmissionTextureSet;
             data.ior = material.ior;
             data.thickness = material.thickness;
+            data.attenuationColor = material.attenuationColor;
+            data.attenuationDistance = material.attenuationDistance;
             data.alphaMode = material.alphaMode;
             data.alphaMaskCutoff = material.alphaMaskCutoff;
             data.doubleSided = material.doubleSided;

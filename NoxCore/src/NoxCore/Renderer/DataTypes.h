@@ -96,6 +96,10 @@ namespace Nox
         // breaks down near beveled/rounded edges, where the local surface isn't parallel to the
         // entry face and can bend or total-internal-reflect the ray in unintended directions.
         float Thickness = 0.0f;
+        // Volume absorption (KHR_materials_volume): light crossing AttenuationDistance (world units) of the volume keeps
+        // AttenuationColor of itself (Beer-Lambert). Distance 0 = infinite: no absorption, the glTF default.
+        glm::vec3 AttenuationColor = glm::vec3(1.0f);
+        float AttenuationDistance = 0.0f;
 
         // Alpha properties
         AlphaMode Mode = AlphaMode::Opaque;

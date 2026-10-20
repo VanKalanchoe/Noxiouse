@@ -35,6 +35,9 @@ namespace Bridge
         float3 rrDiffuseAlbedo;
         float3 rrSpecularAlbedo;
         float rrRoughness;
+        // The ray reached the surface from inside its volume (a back face): what the volume absorbs per world unit on the way
+        // (KHR_materials_volume attenuation; 0 outside, for a thin surface, or without absorption).
+        float3 absorptionCoefficient;
     };
 
     // RTXPT's stateless uniform generator advances with Hash32. Effect-specific seed construction is
@@ -138,6 +141,13 @@ namespace Bridge
         if (!frontFace)
         {
             normalW = -normalW;
+        }
+        surface.absorptionCoefficient = float3(0.0);
+        if (!frontFace && lut.transmissionFactor > 0.0 && lut.thickness > 0.0 && lut.attenuationDistance > 0.0)
+        {
+            // Beer-Lambert: attenuationColor left after attenuationDistance, the distance scaled with the instance.
+            const float instanceScale = length(mul((float3x3)ObjectToWorld3x4(), float3(1.0, 0.0, 0.0)));
+            surface.absorptionCoefficient = -log(max(lut.attenuationColor, float3(1e-6))) / max(lut.attenuationDistance * instanceScale, 1e-6);
         }
 
         // 4. Setup ShadingData

@@ -647,6 +647,8 @@ namespace Nox
         record.workflow = material.workflow;
         record.ior = material.ior;
         record.thickness = material.thickness;
+        record.attenuationColor = material.attenuationColor;
+        record.attenuationDistance = material.attenuationDistance;
     }
 
     void GpuScene::ReleaseMaterial(uint32_t materialSlot)
