@@ -5,6 +5,7 @@
 
 #include "imgui_internal.h"  // For Docking
 #include <imgui_impl_sdl3.h>
+#include <SDL3/SDL_stdinc.h>
 
 #include "NoxCore/Renderer/Renderer.h"
 #include "NoxCore/Core/Application.h"
@@ -24,9 +25,12 @@ namespace Nox
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard; // Enable Keyboard Controls
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad; // Enable Gamepad Controls
         io.ConfigFlags |= ImGuiConfigFlags_DockingEnable; // Enable Docking
-        //io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;       // Enable Multi-Viewport / Platform Windows broken right now
-        //io.ConfigFlags |= ImGuiConfigFlags_ViewportsNoTaskBarIcons;
-        //io.ConfigFlags |= ImGuiConfigFlags_ViewportsNoMerge;
+        // Panels dragged out of the main window (platform windows): off unless NOX_IMGUI_VIEWPORTS=1 is set, as it is untested
+        // here. The Vulkan backend gives each such window its own swapchain, command buffers and fence on the renderer's queue,
+        // presented after the frame (DeviceVK::endImGui). What to watch for: a panel showing a render target (a viewport, a
+        // thumbnail) in another window reads it from that window's own submission, which the next frame's passes do not wait for.
+        if (const char* viewports = SDL_getenv("NOX_IMGUI_VIEWPORTS"); viewports && viewports[0] == '1')
+            io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
 
         // Setup Dear ImGui style
         ImGui::StyleColorsDark();

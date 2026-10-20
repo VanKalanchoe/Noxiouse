@@ -39,9 +39,14 @@ namespace Nox
         void OnOverlayRender();
         void UI_StatusBar();
 
-        void NewProject();
+        // A new project: its .nproj picked in a save dialog, its folders made beside it. False when cancelled or it failed.
+        bool NewProject();
+        // A .nproj picked in a dialog. False when cancelled or it did not load.
         bool OpenProject();
-        void OpenProject(const std::filesystem::path& path);
+        bool OpenProject(const std::filesystem::path& path);
+        // Without a project on the command line: the most recent one, else the sample project above the editor's folder, else
+        // a choice of opening one, making one or quitting (asked again until one opens). False: the user chose to quit.
+        bool OpenStartupProject();
         void SaveProject();
         
         void NewScene();

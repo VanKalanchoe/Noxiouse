@@ -490,7 +490,7 @@ namespace Nox
                 if (ImGui::DragFloat("Import Scale", &m_ImportSettings.ImportScale, 0.001f, 0.0001f, 1000.0f, "%.4f"))
                     m_ImportSourceUnit = 5;
                 if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("World units per unit of the file. Applied to the entity a drag-in creates (the model itself is untouched).");
+                    ImGui::SetTooltip("World units per unit of the file. Baked into the imported mesh: its vertices are scaled when it is cooked (import the model again to resize it).");
             }
 
             // How big it will be, and a way to say how big it should be.

@@ -4,6 +4,7 @@
 #include <cstring>
 #include <cmath>
 #include <cstdio>
+#include <fstream>
 #include <iterator>
 #include <unordered_set>
 #include <functional>
@@ -13,6 +14,7 @@
 #include <imgui_internal.h>// For Docking
 #include <ImGuizmo.h>
 #include <SDL3/SDL_filesystem.h>
+#include <SDL3/SDL_messagebox.h>
 #include <SDL3/SDL_keyboard.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>
@@ -159,19 +161,12 @@ namespace Nox
             auto projectFilePath = commandLineArgs[1];
             OpenProject(projectFilePath);
         }
-        else
+        else if (!OpenStartupProject())
         {
-            // TODO: promp the user to select a directory
-            //NewProject();
-
-            // If no project is opened, close nox
-            // note: this is while we dont have a new project path
-            if (!OpenProject())
-            {
-                SDL_Event event;
-                event.type = SDL_EVENT_QUIT;
-                SDL_PushEvent(&event);
-            }
+            // The user chose to quit without a project: the editor closes before its first frame (every frame needs one).
+            SDL_Event event;
+            event.type = SDL_EVENT_QUIT;
+            SDL_PushEvent(&event);
         }
 
         m_EditorCamera = EditorCamera(30.0f, 1.778f, 0.01f, 1000.0f);
@@ -185,8 +180,6 @@ namespace Nox
         // Material thumbnails and the Material Editor's preview show on the Sphere shape.
         AssetPreviewRenderer::SetRenderer(m_Renderer);
         AssetPreviewRenderer::Get().SetSphereProvider([this]() { return GetShapeAsset(PrimitiveShape::Sphere); });
-
-        Project::GetActive()->GetEditorAssetManager()->Init();
 
         if (!ScriptEngine::Initialize(SDL_GetBasePath()))
             NOX_CORE_ERROR("Failed to initialize the .NET scripting backend");
@@ -212,6 +205,8 @@ namespace Nox
     void EditorLayer::OnEvent(Event& event)
     {
         //std::println("{}", event.ToString());
+        if (!Project::GetActive())
+            return; // closing: no project was opened
 
         // A click or a scroll in another viewport makes it the active one first, so its camera and the tools get the input. Not while
         // a button is held: a drag that began in the active viewport keeps it.
@@ -248,6 +243,8 @@ namespace Nox
 
     void EditorLayer::OnUpdate(Timestep ts)
     {
+        if (!Project::GetActive())
+            return; // closing: no project was opened
         UpdatePrefabModeDirty();
 
         // Game scripts read the mouse only over the viewport and the keys only while it is the target: a click in the hierarchy
@@ -397,10 +394,15 @@ namespace Nox
 
     void EditorLayer::OnRender()
     {
+        if (!Project::GetActive())
+            return; // closing: no project was opened
     }
 
     void EditorLayer::OnImGuiRender()
     {
+        if (!Project::GetActive())
+            return; // closing: no project was opened
+
         // Through ImGui's own cursor state instead of raw SDL calls (Input::SetCursorVisible): those fought
         // ImGui_ImplSDL3_NewFrame's own per-frame cursor update and lost unpredictably (flicker). Telling ImGui itself
         // "no cursor" for this frame is the way the backend expects to be told, so there is nothing left to race against.
@@ -458,6 +460,10 @@ namespace Nox
         {
             if (ImGui::BeginMenu("File"))
             {
+                if (ImGui::MenuItem("New Project..."))
+                {
+                    NewProject();
+                }
                 if (ImGui::MenuItem("Open Project...", "Ctrl+O"))
                 {
                     OpenProject();
@@ -2077,32 +2083,165 @@ namespace Nox
         m_Renderer->EndScene();
     }
 
-    void EditorLayer::NewProject()
+    namespace
     {
-        Project::New();
+        // Most recent first, one path per line, in the user's settings folder (not the project's).
+        std::filesystem::path RecentProjectsFile()
+        {
+            char* prefPath = SDL_GetPrefPath("Nox", "NoxEditor");
+            if (!prefPath)
+                return {};
+            std::filesystem::path file = std::filesystem::path(prefPath) / "RecentProjects.txt";
+            SDL_free(prefPath);
+            return file;
+        }
+
+        std::vector<std::filesystem::path> LoadRecentProjects()
+        {
+            std::vector<std::filesystem::path> projects;
+            std::ifstream file(RecentProjectsFile());
+            std::string line;
+            while (std::getline(file, line))
+            {
+                if (!line.empty())
+                    projects.emplace_back(line);
+            }
+            return projects;
+        }
+
+        void RememberRecentProject(const std::filesystem::path& project)
+        {
+            const std::filesystem::path file = RecentProjectsFile();
+            if (file.empty())
+                return;
+            std::error_code error;
+            const std::filesystem::path absolute = std::filesystem::absolute(project, error).lexically_normal();
+            std::vector<std::filesystem::path> projects = LoadRecentProjects();
+            std::erase_if(projects, [&](const std::filesystem::path& recent) { return recent == absolute; });
+            projects.insert(projects.begin(), absolute);
+            if (projects.size() > 10)
+                projects.resize(10);
+            std::ofstream out(file, std::ios::trunc);
+            for (const std::filesystem::path& recent : projects)
+                out << recent.generic_string() << "\n";
+        }
+
+        // The editor run from its build folder inside the repository: the sample project there.
+        std::filesystem::path FindSampleProject()
+        {
+            std::filesystem::path candidate = SDL_GetBasePath() ? std::filesystem::path(SDL_GetBasePath()) : std::filesystem::path();
+            for (int depth = 0; depth < 8 && !candidate.empty(); ++depth)
+            {
+                if (std::filesystem::exists(candidate / "Facerun/Facerun.nproj"))
+                    return candidate / "Facerun/Facerun.nproj";
+                if (candidate == candidate.parent_path())
+                    break;
+                candidate = candidate.parent_path();
+            }
+            return {};
+        }
+
+        // A project's files: <Name>.nproj, Assets/ (Scenes/, Scripts/) and an empty asset registry. Centimeters (100 units per
+        // meter) like the engine's default; the Start Scene is set once a scene is saved.
+        bool CreateProjectFiles(const std::filesystem::path& projectFile)
+        {
+            const std::filesystem::path directory = projectFile.parent_path();
+            std::error_code error;
+            std::filesystem::create_directories(directory / "Assets/Scenes", error);
+            std::filesystem::create_directories(directory / "Assets/Scripts", error);
+            if (error)
+            {
+                NOX_CORE_ERROR("New Project: cannot create the folders of '{}': {}", projectFile.string(), error.message());
+                return false;
+            }
+            const std::filesystem::path registry = directory / "Assets/AssetRegistry.nxr";
+            if (!std::filesystem::exists(registry))
+                std::ofstream(registry) << "AssetRegistry: []\n";
+
+            const std::string name = projectFile.stem().string();
+            std::ofstream out(projectFile, std::ios::trunc);
+            out << "Project:\n"
+                << "  Name: " << name << "\n"
+                << "  StartScene: 0\n"
+                << "  AssetDirectory: \"Assets\"\n"
+                << "  AssetRegistryPath: \"AssetRegistry.nxr\"\n"
+                << "  ScriptModulePath: \"Scripts/Binaries/" << name << ".dll\"\n"
+                << "  WorldUnitsPerMeter: 100\n"
+                << "  RenderQuality: Auto\n";
+            return static_cast<bool>(out);
+        }
+    }
+
+    bool EditorLayer::NewProject()
+    {
+        std::filesystem::path path = Utility::SaveFile("Nox Project\0nproj\0");
+        if (path.empty())
+            return false;
+        if (path.extension() != ".nproj")
+            path += ".nproj";
+        if (std::filesystem::exists(path))
+        {
+            NOX_CORE_ERROR("New Project: '{}' already exists (open it instead)", path.string());
+            return false;
+        }
+        return CreateProjectFiles(path) && OpenProject(path);
     }
 
     bool EditorLayer::OpenProject()
     {
-        std::string filepath = "E:/dev/noxiouse/Facerun/Facerun.nproj"/*Utility::OpenFile("Nox Project *.nproj\0nproj\0")*/;
-
+        const std::string filepath = Utility::OpenFile("Nox Project\0nproj\0");
         if (filepath.empty())
             return false;
-
-        OpenProject(filepath);
-        return true;
+        return OpenProject(filepath);
     }
 
-    void EditorLayer::OpenProject(const std::filesystem::path& path)
+    bool EditorLayer::OpenStartupProject()
     {
+        for (const std::filesystem::path& recent : LoadRecentProjects())
+        {
+            if (std::filesystem::exists(recent) && OpenProject(recent))
+                return true;
+        }
+        if (const std::filesystem::path sample = FindSampleProject(); !sample.empty() && OpenProject(sample))
+            return true;
+
+        while (true)
+        {
+            const SDL_MessageBoxButtonData buttons[] = {
+                { SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 0, "Open Project..." },
+                { 0, 1, "New Project..." },
+                { SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 2, "Quit" },
+            };
+            SDL_MessageBoxData box{};
+            box.flags = SDL_MESSAGEBOX_INFORMATION | SDL_MESSAGEBOX_BUTTONS_LEFT_TO_RIGHT;
+            box.window = Application::Get().getWindow()->getHandle();
+            box.title = "Nox Editor";
+            box.message = "No project is open. Open an existing project (.nproj) or make a new one.";
+            box.numbuttons = SDL_arraysize(buttons);
+            box.buttons = buttons;
+            int choice = 2;
+            if (!SDL_ShowMessageBox(&box, &choice) || choice == 2)
+                return false;
+            if (choice == 0 ? OpenProject() : NewProject())
+                return true;
+        }
+    }
+
+    bool EditorLayer::OpenProject(const std::filesystem::path& path)
+    {
+        const bool hadProject = Project::GetActive() != nullptr;
         if (Project::Load(path))
         {
+            RememberRecentProject(path);
             m_EditorCamera.ApplyWorldUnitDefaults(); // the project's world unit is only known now (U6)
             m_Renderer->ApplyQualitySetting(Project::GetActive()->GetConfig().RenderQuality);
+            Project::GetActive()->GetEditorAssetManager()->Init();
 
             AssetHandle startScene = Project::GetActive()->GetConfig().StartScene;
             if (startScene)
                 OpenScene(startScene);
+            else if (hadProject)
+                NewScene(); // nothing of the project before stays open
 
             m_ContentBrowserPanel = CreateScope<ContentBrowserPanel>(Project::GetActive());
             m_ContentBrowserPanel->SetOpenAssetCallback([this](AssetHandle handle) { OpenAsset(handle); });
@@ -2126,7 +2265,10 @@ namespace Nox
                 if (m_ActiveScene && m_ActiveScene != m_EditorScene)
                     m_ActiveScene->CollectAssetReferences(handles);
             });
+            return true;
         }
+        NOX_CORE_ERROR("Could not open the project '{}'", path.string());
+        return false;
     }
 
     void EditorLayer::SaveProject()
