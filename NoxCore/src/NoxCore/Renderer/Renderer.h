@@ -759,6 +759,7 @@ namespace Nox
         void createPresentPipeline(bool forceCompile);
         void createComputePipeline();
         void createSkyboxPipeline(bool forceCompile);
+        void createLightShapesPipeline(bool forceCompile);
         void createCommandPool();
 
         void createSceneResources();
@@ -1603,6 +1604,8 @@ namespace Nox
         float m_pendingEnvironmentRotation = 0.0f;
         std::chrono::steady_clock::time_point m_environmentRotationChanged{};
         std::unique_ptr<NRI::Pipeline> m_skyboxPipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_lightShapesPipeline = nullptr; // LightShapes.slang: the rect lights' faces
+        uint32_t m_rectLightCount = 0; // in this frame's light buffer
         Ref<Texture2D> m_irradianceCubemap;
         Ref<Texture2D> m_prefilteredEnvMap;
         uint32_t prefilterCubeMipLevels = 0;

@@ -25,6 +25,28 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
     UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
     RaytracingAccelerationStructure as = RaytracingAccelerationStructure(ubo->tlasDeviceAddress);
 
+    // A rect light's face in front of the surface, seen by the camera or in a mirror (its own sampling covers every other path).
+    if (vertexIdx == 1 || path.hasFlag(PathFlags::delta))
+    {
+        float rectT = rayT;
+        const float3 rectRadiance = ray_rect_lights(ubo, rayOrigin, rayDir, rectT);
+        if (rectT < rayT)
+        {
+            const float3 rectContrib = path.thp * rectRadiance;
+            path.L.rgb += rectContrib;
+            if (vertexIdx > 1)
+            {
+                if (path.primaryLobe == LobeType::DiffuseReflection)
+                    path.diffuseRadiance += rectContrib;
+                else
+                    path.specularRadiance += rectContrib;
+            }
+            path.terminate();
+            payload = PathPayload::pack(path);
+            return;
+        }
+    }
+
     // 1. Load surface geometry and material
     Bridge::SurfaceData surface = Bridge::loadSurface(
         InstanceID(),

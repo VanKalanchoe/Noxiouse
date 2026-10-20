@@ -961,6 +961,27 @@ namespace Nox
                     cursor.boundPipeline = lateCursor.boundPipeline;
                 }
 
+                // The rect lights' faces (LightShapes.slang): emissive panels, tested against the scene's depth. Not written to the
+                // entity target: a click there still picks what is behind.
+                if (m_lightShapesPipeline && m_rectLightCount > 0 && m_debugMode == 0)
+                {
+                    cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_lightShapesPipeline);
+                    cursor.boundPipeline = m_lightShapesPipeline.get();
+                    cmd.setCullMode(NRI::CullMode::None);
+                    cmd.setDepthTestEnable(true);
+                    cmd.setDepthWriteEnable(false);
+                    cmd.setDepthCompareOp(NRI::CompareOp::GreaterOrEqual);
+                    cmd.setColorBlendEnable(0, false);
+                    cmd.setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
+                    cmd.setColorBlendEnable(1, false);
+                    cmd.setColorWriteMask(1, 0u);
+                    shaderio::PushConstantLightShapes lightShapesPush{};
+                    lightShapesPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                    cmd.pushData(&lightShapesPush, sizeof(lightShapesPush));
+                    cmd.drawMeshTasks(1, 1, 1);
+                    cmd.setColorWriteMask(1, NRI::ColorComponent::All);
+                }
+
                 // B. SKYBOX (Tested against depth == 0.0)
                 if (m_skyboxPipeline && m_environmentCubemap && m_debugMode == 0)
                 {

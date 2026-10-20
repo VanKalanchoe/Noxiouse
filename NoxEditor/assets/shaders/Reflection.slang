@@ -208,7 +208,7 @@ float4 fragMain(
     reflectionRayDesc.Origin = rayOrigin;
     reflectionRayDesc.Direction = R;
     reflectionRayDesc.TMin = 0.005 * ubo->unitsPerMeter;
-    reflectionRayDesc.TMax = 1e4;
+    reflectionRayDesc.TMax = 100000.0 * ubo->unitsPerMeter; // 100 km: it used to stop at 10000 units (100 m in centimeters)
 
     RaytracingAccelerationStructure accelerationStructure = RaytracingAccelerationStructure(ubo->tlasDeviceAddress);
     RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> rq;

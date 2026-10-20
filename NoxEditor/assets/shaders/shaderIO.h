@@ -573,6 +573,35 @@ float3 rect_light_axis_y(LightData light)
 
 float rect_light_area(LightData light) { return 4.0 * length(light.spotParams.xyz) * light.spotParams.w; }
 
+// The emitting face of a rect light a ray meets first, closer than maxT: its radiance, and maxT made its distance (left as it is,
+// and 0 returned, when there is none). A rect light shines along its front: a ray sees it travelling against that.
+float3 ray_rect_lights(UniformBufferObject* ubo, float3 origin, float3 direction, inout float maxT)
+{
+    LightData* lights = (LightData*)ubo->lightDataReference;
+    float3 radiance = float3(0.0);
+    for (uint i = 0; i < ubo->lightCount; ++i)
+    {
+        const LightData light = lights[i];
+        if ((uint)light.position.w != 3u)
+            continue;
+        const float3 front = normalize(light.direction.xyz);
+        const float facing = dot(direction, front);
+        if (facing >= -1e-6)
+            continue;
+        const float t = dot(light.position.xyz - origin, front) / facing;
+        if (t <= 0.0 || t >= maxT)
+            continue;
+        const float3 offset = origin + direction * t - light.position.xyz;
+        const float3 axisX = rect_light_axis_x(light);
+        const float3 axisY = rect_light_axis_y(light);
+        if (abs(dot(offset, axisX)) > dot(axisX, axisX) || abs(dot(offset, axisY)) > dot(axisY, axisY))
+            continue;
+        maxT = t;
+        radiance = light.color.rgb * light.color.w;
+    }
+    return radiance;
+}
+
 // The range window of a rect light at `distance` from its centre (1 without a Range).
 float rect_light_window(LightData light, float distance)
 {
@@ -944,6 +973,12 @@ struct PushConstantSkyAtmosphere
     vec2 cloudShadowCenterKm;
     float cloudShadowPadding0;
     float cloudShadowPadding1;
+};
+
+// LightShapes.slang: the rect lights' faces drawn into the lit scene.
+struct PushConstantLightShapes
+{
+    uint64_t matrixReference; // BDA to UniformBufferObject
 };
 
 struct PushConstantSkybox

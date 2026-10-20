@@ -22,14 +22,24 @@ void missMain(inout PathPayload payload : SV_RayPayload)
         !path.hasFlag(PathFlags::specular) && !path.hasFlag(PathFlags::delta)
         ? float(pushConstant.environmentDiffuseMip) : 0.0;
     float3 envRadiance = Bridge::sampleSkybox(rayDir, ubo, pushConstant.skyboxTextureIndex, environmentLod);
-    // The sun's (and moon's) disc where nothing else adds their light: seen directly and in mirrors.
+    // The sun's (and moon's) disc, and rect lights' faces, where nothing else adds their light: seen directly and in mirrors.
+    bool rectLight = false;
     if (path.getVertexIndex() == 0 || path.hasFlag(PathFlags::delta))
+    {
         envRadiance += directional_light_discs(ubo, rayDir);
+        float rectT = 1e30;
+        const float3 rectRadiance = ray_rect_lights(ubo, WorldRayOrigin(), rayDir, rectT);
+        if (rectT < 1e30)
+        {
+            envRadiance = rectRadiance; // in front of the sky
+            rectLight = true;
+        }
+    }
 
     if (any(envRadiance > float3(0.0)))
     {
         float misWeight = 1.0;
-        if (path.getVertexIndex() > 0 && path.bsdfScatterPdf > 0.0 && pushConstant.skyboxTextureIndex != 0xFFFFFFFF)
+        if (!rectLight && path.getVertexIndex() > 0 && path.bsdfScatterPdf > 0.0 && pushConstant.skyboxTextureIndex != 0xFFFFFFFF)
         {
             EnvMapSampler sampler = Bridge::environmentSampler(ubo, pushConstant.skyboxTextureIndex, pushConstant.environmentImportanceIndex);
             float lightPdf = sampler.MIPDescentEvalPdf(rayDir) / float(ubo->lightCount + 1);

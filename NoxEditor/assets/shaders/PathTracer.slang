@@ -337,7 +337,7 @@
             ray.Origin = rayOrigin;
             ray.Direction = rayDir;
             ray.TMin = 0.005 * ubo->unitsPerMeter;
-            ray.TMax = 1e4;
+            ray.TMax = 100000.0 * ubo->unitsPerMeter;
 
             RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> rq;
             rq.TraceRayInline(as, RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES, 0xFF, ray);

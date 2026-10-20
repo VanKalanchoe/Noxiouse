@@ -235,6 +235,7 @@ namespace Nox
         watchShader("assets/shaders/EditorStableDepth.slang", "EditorStableDepth", [this]() { createStableEntityDepthPipeline(true); });
         // Skybox
         watchShader("assets/shaders/Skybox.slang", "Skybox", [this]() { createSkyboxPipeline(true); });
+        watchShader("assets/shaders/LightShapes.slang", "LightShapes", [this]() { createLightShapesPipeline(true); });
         // Unlit
         watchShader("assets/shaders/Material_Unlit_Mesh.slang", "Unlit", [this]() { createUnlitPipeline(true); });
         watchShader("assets/shaders/Material_TransparentLit_Mesh.slang", "TransparentLit", [this]() { createTransparentLitPipeline(true); });
@@ -423,6 +424,7 @@ namespace Nox
         if (!m_isEditor) createPresentPipeline(false);
         createComputePipeline();
         createSkyboxPipeline(false);
+        createLightShapesPipeline(false);
         createOutlinePipeline(false);
         if (m_isEditor)
         {
@@ -1801,6 +1803,21 @@ namespace Nox
         };
     
         m_computePipeline = m_device->createPipeline(computeDesc);*/
+    }
+
+    void Renderer::createLightShapesPipeline(bool forceCompile)
+    {
+        NRI::PipelineDesc desc{};
+        desc.forceCompile = forceCompile;
+        desc.colorFormats =
+        {
+            NRI::ImageFormat::R16G16B16A16_SFLOAT,
+            NRI::ImageFormat::R32SINT
+        };
+        for (auto [stage, entryPoint] : { std::pair{ NRI::ShaderStage::Task, "taskMain" }, std::pair{ NRI::ShaderStage::Mesh, "meshMain" },
+                                          std::pair{ NRI::ShaderStage::Fragment, "fragMain" } })
+            desc.shaders.push_back({ .stage = stage, .entryPoint = entryPoint, .sourcePath = "assets/shaders/LightShapes.slang" });
+        m_lightShapesPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
     void Renderer::createSkyboxPipeline(bool forceCompile)
@@ -4931,6 +4948,8 @@ namespace Nox
         // 0, which the partition above makes the first point light whenever there is one -- the sun then lost its soft shadow
         // and SIGMA got a point light's zero direction. None: every light gets its shadow rays in the deferred lighting.
         m_shadowMaskLightIndex = m_restirDINumInfiniteLights > 0 ? m_restirDIFirstInfiniteLight : ~0u;
+        m_rectLightCount = static_cast<uint32_t>(std::count_if(m_lightBufferObjects.begin(), m_lightBufferObjects.end(),
+            [](const shaderio::LightData& light) { return light.position.w == static_cast<float>(shaderio::LightType::Rect); }));
         uniformData.shadowMaskLightIndex = m_shadowMaskLightIndex;
         if (m_shadowMaskLightIndex != ~0u)
             m_shadowMaskLightDirection = glm::normalize(glm::vec3(m_lightBufferObjects[m_shadowMaskLightIndex].direction));
