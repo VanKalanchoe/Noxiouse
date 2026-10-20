@@ -24,6 +24,7 @@
 #include "PBRLighting.slang"
 #include "MipFeedback.slang"
 #include "RayHitShading.slang"
+#include "HeightFog.slang"
 
 import Math;
 
@@ -558,6 +559,11 @@ FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform Pu
         emissive *= emissiveTex.Sample(sampLinearHandle, instance.emissiveTextureSet == 0 ? vertIn.uv0 : vertIn.uv1).rgb;
     }
     color += emissive;
+
+    // The fog in front of the surface (aerial perspective, height fog) on its own light, and its scattered light where the surface
+    // covers what is behind it. The background it lets through (refracted below, or blended) is already fogged at its distance.
+    const float4 fog = sceneFogTerms(ubo, vertIn.worldPos);
+    color = color * fog.a + fog.rgb * diffuseAlpha;
 
     if (refraction)
     {

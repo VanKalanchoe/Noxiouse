@@ -3,6 +3,7 @@
 #include "PathPayload.slang"
 #include "PathTracerBridge.slang"
 #include "../PathTracerSignals.slang"
+#include "../HeightFog.slang"
 
 [[vk::push_constant]]
 ConstantBuffer<PushConstantPathTracer> pushConstant;
@@ -72,6 +73,27 @@ void rayGenMain()
             payload
         );
         path = PathPayload::unpack(payload);
+    }
+
+    // The air and the height fog between the camera and what its ray hit first (the sky: the height fog alone, as the skybox
+    // has it), on each sample before it is accumulated or denoised -- it is linear (color * transmittance + scattered light).
+    {
+        Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
+        const float depth = depthTex.Load(int3(pixelPos, 0));
+        float4 fog;
+        if (depth > 0.0)
+        {
+            const float2 ndc = (float2(pixelPos) + 0.5) / pushConstant.viewportSize * float2(2.0, -2.0) + float2(-1.0, 1.0);
+            const float4 world = mul(ubo->invViewProj, float4(ndc, depth, 1.0));
+            fog = sceneFogTerms(ubo, world.xyz / world.w);
+        }
+        else
+        {
+            fog = heightFogTerms(ubo, cameraRay.dir, 1e30);
+        }
+        path.L.rgb = path.L.rgb * fog.a + fog.rgb;
+        path.diffuseRadiance *= fog.a;
+        path.specularRadiance *= fog.a;
     }
 
     // De-modulation factors and NRD packing

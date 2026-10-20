@@ -382,6 +382,14 @@ struct UniformBufferObject
     uint32_t cloudShadowTextureIndex;
     float cloudShadowExtentKm;
     vec2 cloudShadowCenterKm;
+    // The aerial perspective volume of this frame (over a procedural sky, while deferred lighting runs), for the forward passes'
+    // fog (HeightFog.slang sceneFogTerms); 0xFFFFFFFF: none. Km of air per world unit of distance (its distance scale included).
+    uint32_t aerialPerspectiveTextureIndex;
+    float aerialPerspectiveKmPerUnit;
+    // 1: the sky is the procedural one, whose suns and moons are not in the environment map: the directional lights' discs are
+    // drawn where rays see them (Skybox.slang for the raster view, directional_light_discs for the path tracer). An HDR map has
+    // its own sun in the image (0).
+    uint32_t skyDiscs;
 };
 
 struct Vertex
@@ -485,6 +493,29 @@ float reflection_miss_distance(UniformBufferObject* ubo)
 
 #ifdef __SLANG__
 // ---- Light evaluation every shader shares (docs/Hybrid_Renderer_Plan_2026-10.md §7) ----
+
+// The directional lights' discs a ray sees (over a procedural sky, UniformBufferObject::skyDiscs): each its illuminance over its
+// solid angle, capped as the skybox's sun is (the real ratio only saturates the tonemapper harder). For the rays nothing else
+// sends the lights' light along: camera rays and mirror paths -- every other path samples them directly.
+float3 directional_light_discs(UniformBufferObject* ubo, float3 direction)
+{
+    if (ubo->skyDiscs == 0)
+        return float3(0.0);
+    LightData* lights = (LightData*)ubo->lightDataReference;
+    float3 radiance = float3(0.0);
+    for (uint i = 0; i < ubo->lightCount; ++i)
+    {
+        const LightData light = lights[i];
+        if ((uint)light.position.w != 0u)
+            continue;
+        const float cosRadius = cos(clamp(light.spotParams.z, 0.0005, 0.2));
+        if (dot(direction, normalize(light.direction.xyz)) < cosRadius)
+            continue;
+        const float solidAngle = 2.0 * 3.14159265 * (1.0 - cosRadius);
+        radiance += light.color.rgb * light.color.w * min(1.0 / solidAngle, 64.0);
+    }
+    return radiance;
+}
 
 // How much of a light the clouds let through above worldPos: the cloud shadow map's transmittance for the shadow mask's light (the
 // sun, or the moon at night), 1 for any other light and without clouds. The map holds it from the ground up: a point above the

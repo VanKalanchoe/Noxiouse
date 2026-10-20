@@ -1,5 +1,6 @@
  #include "shaderIO.h"
     #include "Math.slang"
+    #include "HeightFog.slang"
 
     // Matches the exact vertex output from meshMain in Meshlet.slang
     struct VSOutput
@@ -44,7 +45,11 @@
             baseColor = instance.baseColorFactor;
         }
 
-        output.color = baseColor;
+        // The fog in front of it (aerial perspective, height fog). Blended (alpha mode 2: the transparent pass, premultiplied):
+        // its color by its alpha, and the fog's scattered light only where it covers what is behind (already fogged).
+        const float4 fog = sceneFogTerms(ubo, vertIn.worldPos);
+        const float cover = instance.alphaMode == 2 ? baseColor.a : 1.0;
+        output.color = float4((baseColor.rgb * fog.a + fog.rgb) * cover, baseColor.a);
         output.entityID = vertIn.entityID;
         return output;
     }

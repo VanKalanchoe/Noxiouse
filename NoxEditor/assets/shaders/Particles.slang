@@ -11,6 +11,7 @@
 
 #include "shaderIO.h"
 #include "DDGICommon.slang"
+#include "HeightFog.slang"
 
 static const uint ParticlesPerGroup = 32;
 
@@ -206,7 +207,11 @@ float4 fragMain(ParticleVertex input, uniform PushConstantParticles pushConstant
     }
 
     const float alpha = saturate(input.color.a * texel.a * fade);
-    const float3 rgb = input.color.rgb * texel.rgb * alpha; // premultiplied
+    // The fog in front of it (aerial perspective, height fog): its light dimmed, and the fog's own light where it covers what is
+    // behind (already fogged) -- none for additive particles, which cover nothing.
+    const float4 fog = sceneFogTerms(ubo, input.worldPos);
+    const float cover = (pushConstant.flags & PARTICLE_ADDITIVE) != 0 ? 0.0 : 1.0;
+    const float3 rgb = (input.color.rgb * texel.rgb * fog.a + fog.rgb * cover) * alpha; // premultiplied
     // Additive: the light is added and nothing behind is covered (the blend keeps the destination's alpha).
     return float4(rgb, (pushConstant.flags & PARTICLE_ADDITIVE) != 0 ? 0.0 : alpha);
 }

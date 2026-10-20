@@ -800,6 +800,8 @@ namespace Nox
             {
                 builder.ColorTarget(resources.HDRScene, NRI::LoadOP::load, NRI::StoreOP::store);
                 builder.Read(resources.Depth); // each fragment tests and fades against it
+                if (resources.AerialPerspective.IsValid())
+                    builder.Read(resources.AerialPerspective); // the fog in front of them (through the uniforms)
                 if (lit)
                 {
                     if (m_frame.ddgiAdded)
@@ -887,6 +889,9 @@ namespace Nox
         {
             builder.ColorTarget(resources.Entity, NRI::LoadOP::load, NRI::StoreOP::store);
             builder.DepthTarget(resources.Depth, NRI::LoadOP::load, NRI::StoreOP::store);
+            // The fog in front of forward-shaded surfaces (HeightFog.slang sceneFogTerms, through the uniforms).
+            if (resources.AerialPerspective.IsValid())
+                builder.Read(resources.AerialPerspective);
             if (lit)
             {
                 // Transparent lit shading samples the DDGI atlases (through the uniforms); the probe spheres show irradiance.

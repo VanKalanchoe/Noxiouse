@@ -4675,6 +4675,9 @@ namespace Nox
         uniformData.screenGITextureIndex = frame.screenProbeGIAdded ? graph.GetSlotOr(resources.ScreenProbeGI[frame.screenProbeGIWriteIndex], NoTexture)
                                                                     : NoTexture;
         uniformData.screenGIDistanceTextureIndex = frame.screenProbeGIAdded ? graph.GetSlotOr(resources.ScreenProbeGIDistance, NoTexture) : NoTexture;
+        // The air's camera volume, for the forward passes' fog (deferred lighting gets it in its push constants).
+        uniformData.aerialPerspectiveTextureIndex = resources.AerialPerspective.IsValid() ? graph.GetSlotOr(resources.AerialPerspective, NoTexture) : NoTexture;
+        uniformData.aerialPerspectiveKmPerUnit = WorldUnits::ToMeters(1.0f) / 1000.0f * glm::max(m_proceduralSky.AerialPerspectiveScale, 0.0f);
 
         // ReSTIR GI: the denoised result when its NRD pass runs (NRD evaluation cannot fail once initialized), else raw.
         if (frame.restirGIAdded)
@@ -4829,6 +4832,7 @@ namespace Nox
         uniformData.exposure = m_exposure; // slider in the future in imgui
         uniformData.gamma = m_gamma; // slider in the future in imgui
         uniformData.scaleIBLAmbient = m_scaleIBLAmbient; // slider in the future in imgui
+        uniformData.skyDiscs = m_proceduralSkyActive ? 1u : 0u;
         uniformData.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
 
         memcpy(m_uniformBuffersMapped[currentImage], &uniformData, sizeof(uniformData));
@@ -6063,6 +6067,8 @@ namespace Nox
             // The screen-probe GI is the camera's pixels: another view's points would land on the wrong ones.
             uniforms.screenGITextureIndex = 0xFFFFFFFF;
             uniforms.screenGIDistanceTextureIndex = 0xFFFFFFFF;
+            // So is the air's volume (built along the camera's rays): another view's forward fog is the height fog alone.
+            uniforms.aerialPerspectiveTextureIndex = 0xFFFFFFFF;
             // An asset preview stands far below the scene: its shadow rays would hit the world above, its DDGI lookups the grid's edge.
             if (view.Preview)
             {

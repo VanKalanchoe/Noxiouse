@@ -22,6 +22,9 @@ void missMain(inout PathPayload payload : SV_RayPayload)
         !path.hasFlag(PathFlags::specular) && !path.hasFlag(PathFlags::delta)
         ? float(pushConstant.environmentDiffuseMip) : 0.0;
     float3 envRadiance = Bridge::sampleSkybox(rayDir, ubo, pushConstant.skyboxTextureIndex, environmentLod);
+    // The sun's (and moon's) disc where nothing else adds their light: seen directly and in mirrors.
+    if (path.getVertexIndex() == 0 || path.hasFlag(PathFlags::delta))
+        envRadiance += directional_light_discs(ubo, rayDir);
 
     if (any(envRadiance > float3(0.0)))
     {

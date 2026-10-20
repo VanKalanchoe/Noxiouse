@@ -76,12 +76,18 @@ namespace Nox
         const uint32_t writeIndex = frame.pathTracerWriteIndex;
         const uint32_t readIndex = frame.pathTracerReadIndex;
 
+        // The air in front of what the camera rays hit (the path tracer fogs each sample with it, as deferred lighting does).
+        const RGTexture aerialPerspective = addAerialPerspectivePass();
+        resources.AerialPerspective = aerialPerspective;
+
         m_renderGraph.PushGroup("Path Tracer");
 
         m_renderGraph.AddPass("Path Trace", RGPassFlags::RayTracing,
             [&](RGBuilder& builder)
             {
                 builder.Read(resources.PathTracerAccum[readIndex]);
+                if (aerialPerspective.IsValid())
+                    builder.Read(aerialPerspective);
                 if (m_environmentCubemap) builder.Read(environmentImportance);
                 ReadIfValid(builder, resources.TLAS);
                 ReadGpuScene(builder, resources);
@@ -443,8 +449,10 @@ namespace Nox
         const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
         const FrameGraphState& frame = m_frame;
         m_frame.deferredLightingAdded = true;
-        // Over a procedural sky: the haze between the camera and the lit scene (only when deferred lighting runs).
+        // Over a procedural sky: the haze between the camera and the lit scene (only when deferred lighting runs); the forward
+        // passes after it read it too (HeightFog.slang sceneFogTerms, through the uniforms).
         const RGTexture aerialPerspective = addAerialPerspectivePass();
+        m_renderGraph.GetBlackboard().Get<FrameGraphResources>().AerialPerspective = aerialPerspective;
         const float aerialKmPerUnit = WorldUnits::ToMeters(1.0f) / 1000.0f * glm::max(m_proceduralSky.AerialPerspectiveScale, 0.0f);
 
         m_renderGraph.AddPass("Deferred Lighting", RGPassFlags::Raster,

@@ -69,8 +69,8 @@ for history. File references are to the code as of this audit.
 
 **Sky, VFX**
 - (Night sky -- moon lighting the scene and the sky, its phases, stars, the sun through the air: built 2026-10-20, untested.)
-  Aerial perspective and height fog on forward surfaces (glass, unlit, particles); the path tracer
-  has no sun disc / haze / fog. (Wind, time-sliced sky updates and the viewer's altitude from the camera: built 2026-10-20.)
+  (Aerial perspective and height fog on forward surfaces and particles; the path tracer's sun / moon discs and fog; wind,
+  time-sliced sky updates and the viewer's altitude from the camera: built 2026-10-20, untested.)
 - Cloud temporal reprojection. (Cloud shadows on the scene: built 2026-10-20.)
 - Particles: GPU simulation and sorting, collisions, mesh particles, color / size curves, module editor (V3), motion vectors
   for DLSS, particles in the extra viewports and the path tracer; OpenVDB volumes (V5).
