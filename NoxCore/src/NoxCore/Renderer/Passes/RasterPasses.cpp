@@ -3,6 +3,7 @@
 #include "NoxCore/Renderer/Renderer.h"
 
 #include "FrameGraphResources.h"
+#include "NoxCore/Core/Log.h"
 
 namespace Nox
 {
@@ -1049,52 +1050,22 @@ namespace Nox
 
         const shaderio::PushConstantSkybox skyboxSun = makeSkyboxSunPush();
 
+        // With Ray Reconstruction the transparent surfaces wait until after it (addTransparentsAfterRRPasses): none of them here.
+        const bool afterRR = hasDraws && hasTransparentDraws() && transparentsAfterRayReconstruction();
+        m_frame.transparentsAfterRR = afterRR;
+
         // Glass in view (transmissive materials) refracts the lit scene behind it (Hybrid_Renderer_Plan_2026-10.md §4 H3b): the
         // transparent surfaces then draw in a pass of their own, after the scene so far is copied with blur mips. Without glass,
         // one pass as always.
-        const bool refraction = m_refractionEnabled && hasDraws && m_colorPyramidCopyPipeline && m_colorPyramidDownsamplePipeline &&
+        const bool refraction = !afterRR && m_refractionEnabled && hasDraws && m_colorPyramidCopyPipeline && m_colorPyramidDownsamplePipeline &&
                                 m_frame.renderExtent.width > 0 && m_frame.renderExtent.height > 0 && hasTransmissiveDraws();
         // Order-independent transparency: the transparent surfaces into its targets in a pass of their own (resolved after the
         // particles, addParticlePass).
-        const bool oit = m_oitEnabled && hasDraws && m_transparentLitOITPipeline && m_unlitOITPipeline && m_oitCompositePipeline &&
+        const bool oit = !afterRR && m_oitEnabled && hasDraws && m_transparentLitOITPipeline && m_unlitOITPipeline && m_oitCompositePipeline &&
                          hasTransparentDraws();
 
         // Shared setup of the passes that draw over the lit scene.
-        auto declareForward = [&](RGBuilder& builder, bool lit)
-        {
-            builder.ColorTarget(resources.Entity, NRI::LoadOP::load, NRI::StoreOP::store);
-            builder.DepthTarget(resources.Depth, NRI::LoadOP::load, NRI::StoreOP::store);
-            // The fog in front of forward-shaded surfaces (HeightFog.slang sceneFogTerms, through the uniforms).
-            if (resources.AerialPerspective.IsValid())
-                builder.Read(resources.AerialPerspective);
-            if (lit)
-            {
-                // Transparent lit shading samples the DDGI atlases (through the uniforms); the probe spheres show irradiance.
-                if (m_frame.ddgiAdded)
-                {
-                    ReadDDGI(builder, resources, m_frame.ddgiWriteIndex);
-                }
-                // ...and the screen-probe GI of the surface right behind (decals) or of a traced hit on screen (SceneGI.slang).
-                if (m_frame.screenProbeGIAdded)
-                {
-                    builder.Read(resources.ScreenProbeGI[m_frame.screenProbeGIWriteIndex]);
-                    builder.Read(resources.ScreenProbeGIDistance);
-                }
-                // Transparent lit shading's specular occlusion approximation (Material_TransparentLit_Mesh.slang).
-                if (m_frame.ssaoAdded)
-                    builder.Read(resources.SSAO);
-                // Transparent lit shading traces its own shadow rays (ray query) against the scene.
-                if (resources.TLAS.IsValid())
-                    builder.Read(resources.TLAS, RGBufferAccess::AccelerationStructureRead);
-            }
-            builder.SetRenderArea(m_frame.renderExtent);
-            ReadGpuScene(builder, resources);
-            ReadViewDraws(builder, resources.CameraDraws);
-            ReadViewDraws(builder, resources.CameraDraws, true);
-            // Transparent surfaces report the mips their textures need (texture streaming feedback): read and written.
-            builder.Read(resources.MipFeedback);
-            builder.Write(resources.MipFeedback);
-        };
+        auto declareForward = [this](RGBuilder& builder, bool lit) { declareForwardInputs(builder, lit); };
 
         // Unlit & skybox (& transparent, without glass) geometry rendered in HDR on top of the lit scene.
         m_renderGraph.AddPass("Forward 3D", RGPassFlags::Raster,
@@ -1107,7 +1078,7 @@ namespace Nox
                     builder.ColorTarget(resources.HDRScene, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 1.0f });
                 declareForward(builder, true);
             },
-            [this, res = &resources, drawProbes, skyboxSun, hasDraws, refraction, oit](RGPassContext& context)
+            [this, res = &resources, drawProbes, skyboxSun, hasDraws, refraction, oit, afterRR](RGPassContext& context)
             {
                 NRI::CommandBuffer& cmd = context.Cmd();
                 const uint32_t totalDDGIProbes = m_frame.totalDDGIProbes;
@@ -1178,7 +1149,7 @@ namespace Nox
                 }
 
                 // C. TRANSPARENT FORWARD PASS (Back-to-front sorted, Alpha Blending), here unless glass needs the scene first.
-                if (hasDraws && !refraction && !oit)
+                if (hasDraws && !refraction && !oit && !afterRR)
                 {
                     // Whichever of SSAO/RTAO ran this frame (never both -- see Renderer::m_ssaoEnabled), for the
                     // specular occlusion approximation in Material_TransparentLit_Mesh.slang; every other consumer
@@ -1300,9 +1271,133 @@ namespace Nox
             });
     }
 
-    void Renderer::addRefractionSourcePasses()
+    void Renderer::declareForwardInputs(RGBuilder& builder, bool lit)
+    {
+        const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
+        builder.ColorTarget(resources.Entity, NRI::LoadOP::load, NRI::StoreOP::store);
+        builder.DepthTarget(resources.Depth, NRI::LoadOP::load, NRI::StoreOP::store);
+        // The fog in front of forward-shaded surfaces (HeightFog.slang sceneFogTerms, through the uniforms).
+        if (resources.AerialPerspective.IsValid())
+            builder.Read(resources.AerialPerspective);
+        if (lit)
+        {
+            // Transparent lit shading samples the DDGI atlases (through the uniforms); the probe spheres show irradiance.
+            if (m_frame.ddgiAdded)
+            {
+                ReadDDGI(builder, resources, m_frame.ddgiWriteIndex);
+            }
+            // ...and the screen-probe GI of the surface right behind (decals) or of a traced hit on screen (SceneGI.slang).
+            if (m_frame.screenProbeGIAdded)
+            {
+                builder.Read(resources.ScreenProbeGI[m_frame.screenProbeGIWriteIndex]);
+                builder.Read(resources.ScreenProbeGIDistance);
+            }
+            // Transparent lit shading's specular occlusion approximation (Material_TransparentLit_Mesh.slang).
+            if (m_frame.ssaoAdded)
+                builder.Read(resources.SSAO);
+            // Transparent lit shading traces its own shadow rays (ray query) against the scene.
+            if (resources.TLAS.IsValid())
+                builder.Read(resources.TLAS, RGBufferAccess::AccelerationStructureRead);
+        }
+        builder.SetRenderArea(m_frame.renderExtent);
+        ReadGpuScene(builder, resources);
+        ReadViewDraws(builder, resources.CameraDraws);
+        ReadViewDraws(builder, resources.CameraDraws, true);
+        // Transparent surfaces report the mips their textures need (texture streaming feedback): read and written.
+        builder.Read(resources.MipFeedback);
+        builder.Write(resources.MipFeedback);
+    }
+
+    bool Renderer::transparentsAfterRayReconstruction() const
+    {
+        // The same test as addDLSSPass's Ray Reconstruction, on the hybrid path (the path tracers shade glass themselves).
+        return m_dlssEnabled && m_dlssMode != NRI::UpscaleMode::Off && m_device->isDLSSSupported() && m_dlssRayReconstructionEnabled &&
+               m_device->isDLSSRayReconstructionSupported() && m_rrGuidesPipeline && m_transparencyCompositePipeline &&
+               m_colorPyramidCopyScaledPipeline && !m_frame.pathTracerActive && !m_frame.restirPTActive;
+    }
+
+    void Renderer::addTransparentsAfterRRPasses()
+    {
+        if (!m_frame.transparentsAfterRR)
+            return;
+        FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
+        if (!m_frame.dlssAdded)
+        {
+            NOX_CORE_ERROR("Transparent surfaces were held back for DLSS Ray Reconstruction, which did not run");
+            return;
+        }
+
+        // Glass refracts the upscaled, denoised image (scaled back to the render resolution, with blur mips).
+        const bool refraction = m_refractionEnabled && m_colorPyramidDownsamplePipeline && hasTransmissiveDraws();
+        if (refraction)
+            addRefractionSourcePasses(true);
+
+        // The transparent surfaces into a layer of their own at the render resolution (premultiplied color, alpha = coverage), depth
+        // tested against the scene, as the forward pass draws them.
+        RGTextureDesc layerDesc;
+        layerDesc.Format = NRI::ImageFormat::R16G16B16A16_SFLOAT;
+        const RGTexture layer = m_renderGraph.CreateTexture("Transparency Layer", layerDesc);
+        m_renderGraph.AddPass("Forward Transparent (after RR)", RGPassFlags::Raster,
+            [&](RGBuilder& builder)
+            {
+                builder.ColorTarget(layer, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
+                declareForwardInputs(builder, true);
+                if (refraction)
+                    builder.Read(resources.RefractionSource);
+            },
+            [this, res = &resources, refraction](RGPassContext& context)
+            {
+                NRI::CommandBuffer& cmd = context.Cmd();
+                // NGX may have bound its own descriptors.
+                cmd.bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
+                MeshletDrawCursor cursor = beginMeshletDraws(context, res->CameraDraws);
+                cursor.references.ssaoTextureIndex = m_frame.ssaoAdded ? context.Slot(res->SSAO) : 0xFFFFFFFF;
+                if (refraction)
+                {
+                    cursor.references.refractionTextureIndex = context.Slot(res->RefractionSource);
+                    if (m_rtRefractionEnabled && m_rayTracingEnabled)
+                        cursor.taskFlags |= shaderio::MESHLET_RT_REFRACTION;
+                }
+                drawForwardTransparent(cmd, context, res->CameraDraws, cursor);
+            });
+
+        // The layer over the upscaled image, where the unjittered pixel is in it.
+        const glm::vec2 jitterUv = m_currentJitter / glm::vec2(std::max(m_frame.renderExtent.width, 1u), std::max(m_frame.renderExtent.height, 1u));
+        m_renderGraph.AddPass("Transparency Composite", RGPassFlags::Raster,
+            [&](RGBuilder& builder)
+            {
+                builder.ColorTarget(resources.DLSSOutput, NRI::LoadOP::load, NRI::StoreOP::store);
+                builder.Read(layer);
+                builder.SetRenderArea(m_frame.outputExtent);
+            },
+            [this, layer, jitterUv](RGPassContext& context)
+            {
+                NRI::CommandBuffer& cmd = context.Cmd();
+                cmd.bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
+                cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_transparencyCompositePipeline);
+                cmd.setCullMode(NRI::CullMode::None);
+                cmd.setDepthTestEnable(false);
+                cmd.setDepthWriteEnable(false);
+                cmd.setColorBlendEnable(0, true);
+                cmd.setColorWriteMask(0, NRI::ColorComponent::All);
+                cmd.setColorBlendEquation(0, {
+                    .srcColorBlendFactor = NRI::BlendFactor::One, .dstColorBlendFactor = NRI::BlendFactor::SrcAlpha, .colorBlendOp = NRI::BlendOp::Add,
+                    .srcAlphaBlendFactor = NRI::BlendFactor::Zero, .dstAlphaBlendFactor = NRI::BlendFactor::One, .alphaBlendOp = NRI::BlendOp::Add });
+                shaderio::PushConstantTransparencyComposite push{};
+                push.layerIndex = uniformData.imageHeapIndexOffset + context.Slot(layer);
+                push.inverseOutputSize = glm::vec2(1.0f / static_cast<float>(std::max(m_frame.outputExtent.width, 1u)),
+                                                   1.0f / static_cast<float>(std::max(m_frame.outputExtent.height, 1u)));
+                push.jitterUv = jitterUv;
+                cmd.pushData(&push, sizeof(push));
+                cmd.draw(3, 1, 0, 0);
+                cmd.setColorBlendEnable(0, false);
+            });
+    }
+
+    void Renderer::addRefractionSourcePasses(bool fromUpscaledOutput)
     {
         FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
+        const RGTexture source = fromUpscaledOutput ? resources.DLSSOutput : resources.HDRScene;
 
         // The scene behind the glass: the HDR image so far (opaque, unlit, sky) with a mip chain of 2x2 averages (ColorPyramid.slang).
         RGTextureDesc pyramidDesc;
@@ -1318,16 +1413,19 @@ namespace Nox
             m_renderGraph.AddPass(mip == 0 ? "Refraction Source" : "Refraction Source Mip", RGPassFlags::None,
                 [&, mip](RGBuilder& builder)
                 {
-                    builder.Read(mip == 0 ? resources.HDRScene : resources.RefractionSource);
+                    builder.Read(mip == 0 ? source : resources.RefractionSource);
                     builder.Write(resources.RefractionSource, RGTextureAccess::StorageWrite);
                 },
-                [this, res = &resources, mip](RGPassContext& context)
+                [this, res = &resources, mip, source, fromUpscaledOutput](RGPassContext& context)
                 {
                     NRI::CommandBuffer& cmd = context.Cmd();
-                    cmd.bindPipeline(NRI::PipelineBindPoint::Compute, mip == 0 ? *m_colorPyramidCopyPipeline : *m_colorPyramidDownsamplePipeline);
+                    if (fromUpscaledOutput && mip == 0)
+                        cmd.bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get()); // right after DLSS: NGX may have bound its own
+                    NRI::Pipeline& copy = fromUpscaledOutput ? *m_colorPyramidCopyScaledPipeline : *m_colorPyramidCopyPipeline;
+                    cmd.bindPipeline(NRI::PipelineBindPoint::Compute, mip == 0 ? copy : *m_colorPyramidDownsamplePipeline);
 
                     shaderio::PushConstantColorPyramid push{};
-                    push.sourceIndex = uniformData.imageHeapIndexOffset + context.Slot(mip == 0 ? res->HDRScene : res->RefractionSource);
+                    push.sourceIndex = uniformData.imageHeapIndexOffset + context.Slot(mip == 0 ? source : res->RefractionSource);
                     push.outputIndex = context.StorageSlot(res->RefractionSource, mip);
                     push.sourceMip = mip == 0 ? 0 : mip - 1;
                     push.width = std::max(m_frame.renderExtent.width >> mip, 1u);

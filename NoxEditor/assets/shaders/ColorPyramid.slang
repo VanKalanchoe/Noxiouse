@@ -18,6 +18,21 @@ void copyMain(uint3 tid : SV_DispatchThreadID, uniform PushConstantColorPyramid 
     output[tid.xy] = float4(clamp(color.rgb, 0.0, 60000.0), 1.0);
 }
 
+// Mip 0 from an image of another size (the upscaled output, with transparents drawn after DLSS Ray Reconstruction): bilinear.
+[shader("compute")]
+[numthreads(8, 8, 1)]
+void copyScaledMain(uint3 tid : SV_DispatchThreadID, uniform PushConstantColorPyramid pc)
+{
+    if (any(tid.xy >= uint2(pc.width, pc.height)))
+        return;
+
+    Texture2D<float4> source = Texture2D<float4>.Handle(uint2(pc.sourceIndex, 0));
+    RWTexture2D<float4> output = RWTexture2D<float4>.Handle(uint2(pc.outputIndex, 0));
+    const float2 uv = (float2(tid.xy) + 0.5) / float2(pc.width, pc.height);
+    float4 color = source.SampleLevel(SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0)), uv, 0.0);
+    output[tid.xy] = float4(clamp(color.rgb, 0.0, 60000.0), 1.0);
+}
+
 [shader("compute")]
 [numthreads(8, 8, 1)]
 void downsampleMain(uint3 tid : SV_DispatchThreadID, uniform PushConstantColorPyramid pc)

@@ -1151,6 +1151,15 @@ struct PushConstantOITComposite
     uint32_t revealIndex;
 };
 
+// TransparencyComposite.slang: the transparent layer drawn after DLSS Ray Reconstruction over the upscaled image.
+struct PushConstantTransparencyComposite
+{
+    uint32_t layerIndex;       // sampled slot (heap offset included)
+    uint32_t padding;
+    vec2 inverseOutputSize;    // 1 / the upscaled image's size
+    vec2 jitterUv;             // the camera's jitter this frame, in the layer's uv (added: where an unjittered point is in it)
+};
+
 struct PushConstantSkybox
 {
     uint64_t matrixReference; // BDA to UniformBufferObject

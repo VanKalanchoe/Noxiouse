@@ -269,6 +269,7 @@ namespace Nox
         watchShader("assets/shaders/ColorPyramid.slang", "ColorPyramid", [this]() { createColorPyramidPipelines(true); });
         watchShader("assets/shaders/Particles.slang", "Particles", [this]() { createParticlePipeline(true); });
         watchShader("assets/shaders/OITComposite.slang", "OITComposite", [this]() { createOITCompositePipeline(true); });
+        watchShader("assets/shaders/TransparencyComposite.slang", "TransparencyComposite", [this]() { createTransparencyCompositePipeline(true); });
         watchShader("assets/shaders/TextureInspect.slang", "TextureInspect", [this]() { createTextureInspectPipeline(true); });
         watchShader("assets/shaders/InstanceCulling.slang", "InstanceCulling", [this]() { createInstanceCullingPipelines(true); });
         watchShader("assets/shaders/HiZBuild.slang", "HiZBuild", [this]() { createHiZBuildPipeline(true); });
@@ -471,6 +472,7 @@ namespace Nox
         createColorPyramidPipelines(false);
         createParticlePipeline(false);
         createOITCompositePipeline(false);
+        createTransparencyCompositePipeline(false);
         createTextureInspectPipeline(false);
         createInstanceCullingPipelines(false);
         createHiZBuildPipeline(false);
@@ -2305,6 +2307,8 @@ namespace Nox
         m_colorPyramidCopyPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
         desc.shaders.front().entryPoint = "downsampleMain";
         m_colorPyramidDownsamplePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        desc.shaders.front().entryPoint = "copyScaledMain";
+        m_colorPyramidCopyScaledPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
     void Renderer::createParticlePipeline(bool forceCompile)
@@ -2334,6 +2338,16 @@ namespace Nox
         desc.shaders.push_back({ .stage = NRI::ShaderStage::Vertex, .entryPoint = "vertMain", .sourcePath = "assets/shaders/OITComposite.slang" });
         desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "fragMain", .sourcePath = "assets/shaders/OITComposite.slang" });
         m_oitCompositePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+    }
+
+    void Renderer::createTransparencyCompositePipeline(bool forceCompile)
+    {
+        NRI::PipelineDesc desc{};
+        desc.forceCompile = forceCompile;
+        desc.colorFormats = { NRI::ImageFormat::R16G16B16A16_SFLOAT };
+        desc.shaders.push_back({ .stage = NRI::ShaderStage::Vertex, .entryPoint = "vertMain", .sourcePath = "assets/shaders/TransparencyComposite.slang" });
+        desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "fragMain", .sourcePath = "assets/shaders/TransparencyComposite.slang" });
+        m_transparencyCompositePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
     void Renderer::SubmitParticles(const ParticleBatchSettings& settings, std::span<const shaderio::GpuParticle> particles)
@@ -4502,6 +4516,7 @@ namespace Nox
             addForward3DPass();
             addParticlePass(); // the alpha-blended ones into the OIT targets (with OIT), then their resolve, then the rest
             addDLSSPass();
+            addTransparentsAfterRRPasses();
             addTAAPass();
             addEntityDepthBlitPass();
             addPostProcessPass();
