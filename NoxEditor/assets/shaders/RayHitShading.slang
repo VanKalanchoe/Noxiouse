@@ -126,7 +126,9 @@ float3 shadeRayHit(UniformBufferObject* ubo, uint instanceSlot, uint primitive, 
     // Direct light: the strongest lights at the hit exactly, one more for all the others (LightSelection.slang), each behind a
     // shadow ray with alpha-masked occluders cut out.
     uint lightRng = (primitive * 9781u + instanceSlot * 6271u + asuint(hitT) * 26699u) | 1u;
-    const LightSelection selectedLights = select_lights(ubo, hitPos, hitNormal, 0.0, lightRng);
+    // Lights closer than 10 cm count as 10 cm away (as the screen probes' rays do): a hit right next to a lamp otherwise gets an
+    // inverse-square spike that a 1-sample reflection shows as fireflies, worst at night where lamps are most of the light.
+    const LightSelection selectedLights = select_lights(ubo, hitPos, hitNormal, 0.1 * ubo->unitsPerMeter, lightRng);
     float3 directIrradiance = float3(0.0);
     for (uint i = 0; i < selectedLights.count; ++i)
     {

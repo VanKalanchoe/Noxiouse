@@ -638,12 +638,14 @@
             float3 specularFactor = specularColor * brdf.x + brdf.y;
             float3 rtSpecular = reflColor * specularFactor;
 
-            // If the reflection ray missed geometry (sampled outdoor skybox) and we are indoors / in dark area,
-            // attenuate the sky reflection by local specular occlusion!
-            if (reflSample.a >= 1000.0)
-            {
-                rtSpecular *= specularOcclusion;
-            }
+            // Where the reflection rays went to the sky (Reflection.slang: a miss's hit distance is reflection_miss_distance), indoors or
+            // in the dark the sky's light is held back like the environment's (specularOcclusion). The hit distance is in world units
+            // raw and with RELAX, normalized (0..1, a miss near 1) with REBLUR; denoised it blends between hits and misses, so the weight
+            // is smooth instead of an on / off step (a fixed 1000 used to switch it per pixel with RELAX in a cm project, and never with
+            // REBLUR).
+            const float skyShare = reflDenoiserMode == 1 ? smoothstep(0.85, 0.98, reflSample.a)
+                                                         : smoothstep(0.25, 0.9, reflSample.a / reflection_miss_distance(ubo));
+            rtSpecular *= lerp(1.0, specularOcclusion, skyShare);
 
             // Smooth fade out into environment IBL as roughness reaches maxRoughness
             float rtWeight = saturate((maxRoughness - perceptualRoughness) / 0.15);

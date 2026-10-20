@@ -39,6 +39,21 @@ VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 
 namespace NRI
 {
+    namespace
+    {
+        // RELAX (every denoiser that uses it: reflections, direct light, path tracer, GI): NRD's defaults -- the pre-pass blur and the
+        // anti-lag they come with -- with anti-firefly and the hit distances of 1-sample pixels filled in from their neighbours (needed
+        // at a lower ray tracing resolution). The earlier hand tuning (no pre-pass, a much more eager anti-lag) threw the history away
+        // whenever a 1-sample signal moved and showed it raw.
+        ::nrd::RelaxSettings MakeRelaxSettings()
+        {
+            ::nrd::RelaxSettings settings{};
+            settings.enableAntiFirefly = true;
+            settings.hitDistanceReconstructionMode = ::nrd::HitDistanceReconstructionMode::AREA_3X3;
+            return settings;
+        }
+    }
+
     static void check_vk_result(VkResult err)
     {
         if (err == VK_SUCCESS)
@@ -1811,23 +1826,7 @@ namespace NRI
         else if (denoiser == NRDReflectionDenoiser::RELAX)
         {
             activeDenoiserId = NRDContext::RELAX_SPECULAR_DENOISER;
-            ::nrd::RelaxSettings relaxSettings{};
-            relaxSettings.enableAntiFirefly = true;
-            relaxSettings.hitDistanceReconstructionMode = ::nrd::HitDistanceReconstructionMode::OFF;
-            relaxSettings.diffusePrepassBlurRadius = 0.0f;
-            relaxSettings.specularPrepassBlurRadius = 0.0f;
-            relaxSettings.atrousIterationNum = 5;
-            relaxSettings.lobeAngleFraction = 0.7f;
-            relaxSettings.specularLobeAngleSlack = 0.2f;
-            relaxSettings.depthThreshold = 0.004f;
-            relaxSettings.diffuseMaxAccumulatedFrameNum = 25;
-            relaxSettings.specularMaxAccumulatedFrameNum = 40;
-            relaxSettings.diffuseMaxFastAccumulatedFrameNum = 5;
-            relaxSettings.specularMaxFastAccumulatedFrameNum = 6;
-            relaxSettings.antilagSettings.accelerationAmount = 0.55f;
-            relaxSettings.antilagSettings.spatialSigmaScale = 2.5f;
-            relaxSettings.antilagSettings.temporalSigmaScale = 0.3f;
-            relaxSettings.antilagSettings.resetAmount = 0.5f;
+            ::nrd::RelaxSettings relaxSettings = MakeRelaxSettings();
             m_nrdContext->integration.SetDenoiserSettings(activeDenoiserId, &relaxSettings);
         }
 
@@ -1911,23 +1910,7 @@ namespace NRI
         else if (denoiser == NRDDiffuseDenoiser::RELAX)
         {
             activeDenoiserId = NRDContext::RELAX_DIFFUSE_DENOISER;
-            ::nrd::RelaxSettings relaxSettings{};
-            relaxSettings.enableAntiFirefly = true;
-            relaxSettings.hitDistanceReconstructionMode = ::nrd::HitDistanceReconstructionMode::OFF;
-            relaxSettings.diffusePrepassBlurRadius = 0.0f;
-            relaxSettings.specularPrepassBlurRadius = 0.0f;
-            relaxSettings.atrousIterationNum = 5;
-            relaxSettings.lobeAngleFraction = 0.7f;
-            relaxSettings.specularLobeAngleSlack = 0.2f;
-            relaxSettings.depthThreshold = 0.004f;
-            relaxSettings.diffuseMaxAccumulatedFrameNum = 25;
-            relaxSettings.specularMaxAccumulatedFrameNum = 40;
-            relaxSettings.diffuseMaxFastAccumulatedFrameNum = 5;
-            relaxSettings.specularMaxFastAccumulatedFrameNum = 6;
-            relaxSettings.antilagSettings.accelerationAmount = 0.55f;
-            relaxSettings.antilagSettings.spatialSigmaScale = 2.5f;
-            relaxSettings.antilagSettings.temporalSigmaScale = 0.3f;
-            relaxSettings.antilagSettings.resetAmount = 0.5f;
+            ::nrd::RelaxSettings relaxSettings = MakeRelaxSettings();
             m_nrdContext->integration.SetDenoiserSettings(activeDenoiserId, &relaxSettings);
         }
 
@@ -2024,23 +2007,7 @@ namespace NRI
         else if (denoiser == NRDDiffuseDenoiser::RELAX)
         {
             activeDenoiserId = relaxIdentifier;
-            ::nrd::RelaxSettings relaxSettings{};
-            relaxSettings.enableAntiFirefly = true;
-            relaxSettings.hitDistanceReconstructionMode = ::nrd::HitDistanceReconstructionMode::OFF;
-            relaxSettings.diffusePrepassBlurRadius = 0.0f;
-            relaxSettings.specularPrepassBlurRadius = 0.0f;
-            relaxSettings.atrousIterationNum = 5;
-            relaxSettings.lobeAngleFraction = 0.7f;
-            relaxSettings.specularLobeAngleSlack = 0.2f;
-            relaxSettings.depthThreshold = 0.004f;
-            relaxSettings.diffuseMaxAccumulatedFrameNum = 25;
-            relaxSettings.specularMaxAccumulatedFrameNum = 40;
-            relaxSettings.diffuseMaxFastAccumulatedFrameNum = 5;
-            relaxSettings.specularMaxFastAccumulatedFrameNum = 6;
-            relaxSettings.antilagSettings.accelerationAmount = 0.55f;
-            relaxSettings.antilagSettings.spatialSigmaScale = 2.5f;
-            relaxSettings.antilagSettings.temporalSigmaScale = 0.3f;
-            relaxSettings.antilagSettings.resetAmount = 0.5f;
+            ::nrd::RelaxSettings relaxSettings = MakeRelaxSettings();
             m_nrdContext->integration.SetDenoiserSettings(activeDenoiserId, &relaxSettings);
         }
 
@@ -2128,23 +2095,7 @@ namespace NRI
         else if (denoiser == NRDDiffuseDenoiser::RELAX)
         {
             activeDenoiserId = NRDContext::RELAX_DIFFUSE_PT_DENOISER;
-            ::nrd::RelaxSettings relaxSettings{};
-            relaxSettings.enableAntiFirefly = true;
-            relaxSettings.hitDistanceReconstructionMode = ::nrd::HitDistanceReconstructionMode::OFF;
-            relaxSettings.diffusePrepassBlurRadius = 0.0f;
-            relaxSettings.specularPrepassBlurRadius = 0.0f;
-            relaxSettings.atrousIterationNum = 5;
-            relaxSettings.lobeAngleFraction = 0.7f;
-            relaxSettings.specularLobeAngleSlack = 0.2f;
-            relaxSettings.depthThreshold = 0.004f;
-            relaxSettings.diffuseMaxAccumulatedFrameNum = 25;
-            relaxSettings.specularMaxAccumulatedFrameNum = 40;
-            relaxSettings.diffuseMaxFastAccumulatedFrameNum = 5;
-            relaxSettings.specularMaxFastAccumulatedFrameNum = 6;
-            relaxSettings.antilagSettings.accelerationAmount = 0.55f;
-            relaxSettings.antilagSettings.spatialSigmaScale = 2.5f;
-            relaxSettings.antilagSettings.temporalSigmaScale = 0.3f;
-            relaxSettings.antilagSettings.resetAmount = 0.5f;
+            ::nrd::RelaxSettings relaxSettings = MakeRelaxSettings();
             m_nrdContext->integration.SetDenoiserSettings(activeDenoiserId, &relaxSettings);
         }
 

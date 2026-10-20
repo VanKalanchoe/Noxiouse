@@ -170,7 +170,20 @@ ScreenProbeIntegrateOutput fragMain(ScreenProbeVertex input, uniform PushConstan
 
     // No shortcut for large changes: a probe catching a bright spot for one frame (a lamp's fixture at night) made it flash.
     const float frames = min(floor(history.a + 0.5) + 1.0, float(max(pushConstant.maxHistory, 1u)));
-    const float3 result = history.a > 0.0 ? lerp(history.rgb, current, 1.0 / frames) : current;
+    // Outliers: with a few frames of history, this frame may be at most 3x brighter than it. At night a lamp is a tiny target for
+    // a probe's 64 rays: the probe that happens to hit it gets all its light for one frame (the next frame another one does),
+    // which boiled in tile-sized blotches no denoiser removes (REBLUR never sees this signal, DLSS RR takes the blotches for
+    // detail). Light that really comes on still arrives within a few frames (x3 per frame); darkening is not held back.
+    float3 currentClamped = current;
+    if (history.a >= 4.0)
+    {
+        const float historyLuma = dot(history.rgb, float3(0.2126, 0.7152, 0.0722));
+        const float currentLuma = dot(current, float3(0.2126, 0.7152, 0.0722));
+        const float limit = historyLuma * 3.0 + 1e-4;
+        if (currentLuma > limit)
+            currentClamped *= limit / currentLuma;
+    }
+    const float3 result = history.a > 0.0 ? lerp(history.rgb, currentClamped, 1.0 / frames) : current;
     output.irradiance = float4(max(result, 0.0), frames);
     output.distance = viewDistance;
     return output;
