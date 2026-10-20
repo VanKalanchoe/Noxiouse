@@ -45,6 +45,8 @@ namespace Nox
 
         bool CanUndo() const { return m_Index > 0; }
         bool CanRedo() const { return m_Index + 1 < m_States.size(); }
+        // Changes with every commit, undo and redo: something in the scene changed (the extra viewports' "realtime off" redraws).
+        size_t GetPosition() const { return m_Index; }
         // The name of the step an undo / redo would revert / repeat ("Delete Entity", "Edit Cube", ...).
         const std::string& GetUndoName() const;
         const std::string& GetRedoName() const;

@@ -6125,7 +6125,8 @@ namespace Nox
         m_renderer2D->EndScene();
     }
 
-    void Renderer::SubmitExtraView(uint32_t index, const EditorCamera& camera, NRI::Extent2D size, const shaderio::PushConstantGrid* grid, bool preview)
+    void Renderer::SubmitExtraView(uint32_t index, const EditorCamera& camera, NRI::Extent2D size, const shaderio::PushConstantGrid* grid, bool preview,
+                                   uint32_t flags)
     {
         if (!m_isEditor || index >= MaxExtraViews || size.width == 0 || size.height == 0)
             return;
@@ -6174,6 +6175,7 @@ namespace Nox
         if (grid)
             view.Grid = *grid;
         view.Preview = preview;
+        view.Flags = flags;
         view.Submitted = true;
     }
 

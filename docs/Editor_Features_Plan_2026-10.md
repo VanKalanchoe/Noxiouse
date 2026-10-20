@@ -201,9 +201,16 @@ perspective one keeps DLSS and ray tracing while the others are raster.
 - Camera input: the viewport a mouse button went down in keeps the mouse until all buttons are up
   (`EditorCamera::OnUpdate(ts, acceptInput)`), so a right-click in another panel no longer flies the camera.
 
-Open: shadows in extra views (comes with item 4's ray-query lighting in the forward shader, H2), selection outline and
-gizmo in extra views, per-viewport show flags (M4), lower resolution / "realtime off" (rest of M3), the main camera
-itself is not saved between sessions.
+**Built 2026-10-20 (untested):** the rest of M3 and M4. Window > Viewports > *Viewport N Options* (kept in imgui.ini), for
+while the viewport is an extra view: Lit / Unlit (base colors, no exposure), Wireframe, Sky, Particles, Selection Outline (the
+camera's outline shader on the view's own entity IDs), Grid, Full / Half / Quarter resolution (drawn smaller, stretched), and
+Realtime: off, the view is drawn again only when its camera, size or options change, the scene changes (an edit, undo or redo:
+`EditorHistory::GetPosition`), the selection changes, a gizmo is dragged, or every two seconds; always realtime in Play. The
+selected entity's gizmo shows in the extra views as its axes (not draggable there: a click makes the viewport the active one).
+The corner label lists the options in effect. Cameras are saved per scene (2026-10-20).
+
+Open: shadows in extra views (comes with item 4's ray-query lighting in the forward shader, H2), a stats overlay per viewport,
+colliders / icons toggled per viewport (the world overlay is one batch shared by every view).
 
 ## 5. Order
 

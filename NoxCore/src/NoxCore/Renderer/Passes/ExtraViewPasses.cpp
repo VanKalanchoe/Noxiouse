@@ -23,6 +23,7 @@ namespace Nox
         constexpr const char* kOutputNames[Renderer::MaxExtraViews] = { "Viewport 1 Image", "Viewport 2 Image", "Viewport 3 Image", "Viewport 4 Image", "Thumbnail Image", "Material Preview Image", "Animation Preview Image" };
         constexpr const char* kHdrNames[Renderer::MaxExtraViews] = { "Viewport 1 HDR", "Viewport 2 HDR", "Viewport 3 HDR", "Viewport 4 HDR", "Thumbnail HDR", "Material Preview HDR", "Animation Preview HDR" };
         constexpr const char* kEntityNames[Renderer::MaxExtraViews] = { "Viewport 1 Entity IDs", "Viewport 2 Entity IDs", "Viewport 3 Entity IDs", "Viewport 4 Entity IDs", "Thumbnail Entity IDs", "Material Preview Entity IDs", "Animation Preview Entity IDs" };
+        constexpr const char* kOutlineNames[Renderer::MaxExtraViews] = { "Viewport 1 Outline", "Viewport 2 Outline", "Viewport 3 Outline", "Viewport 4 Outline", "Thumbnail Outline", "Material Preview Outline", "Animation Preview Outline" };
         constexpr const char* kDepthNames[Renderer::MaxExtraViews] = { "Viewport 1 Depth", "Viewport 2 Depth", "Viewport 3 Depth", "Viewport 4 Depth", "Thumbnail Depth", "Material Preview Depth", "Animation Preview Depth" };
     }
 
@@ -55,8 +56,11 @@ namespace Nox
             NRI::Buffer* uniformBuffer = view.UniformBuffers[frameIndex].get();
             NRI::Buffer* cullViewBuffer = view.CullViewBuffers[frameIndex].get();
             const glm::mat4 viewProjection = view.Projection * view.View;
-            // An asset preview keeps its own brightness whatever the scene's exposure is doing.
-            const bool autoExposure = cameraAutoExposure && !view.Preview;
+            // An asset preview keeps its own brightness whatever the scene's exposure is doing; an unlit view shows base colors as
+            // they are (no exposure).
+            const uint32_t flags = view.Flags;
+            const bool unlit = (flags & ExtraViewUnlit) != 0;
+            const bool autoExposure = cameraAutoExposure && !view.Preview && !unlit;
 
             // What this camera sees of the draw list: the frustum test only (no depth pyramid of its own).
             ViewDrawResources draws;
@@ -118,7 +122,7 @@ namespace Nox
                     ReadGpuScene(builder, resources);
                     ReadViewDraws(builder, draws);
                 },
-                [this, draws, uniformBuffer, skyboxSun, preview = view.Preview](RGPassContext& context)
+                [this, draws, uniformBuffer, skyboxSun, preview = view.Preview, flags, unlit](RGPassContext& context)
                 {
                     NRI::CommandBuffer& cmd = context.Cmd();
                     const uint64_t uniforms = uniformBuffer->getDeviceAddress();
@@ -137,8 +141,15 @@ namespace Nox
                     cmd.setColorBlendEnable(1, false);
                     cmd.setColorWriteMask(1, NRI::ColorComponent::All);
 
-                    // A. Opaque and masked surfaces, lit in the fragment shader (no G-buffer here).
-                    if (hasDraws && m_transparentLitPipeline)
+                    // A. Opaque and masked surfaces, lit in the fragment shader (no G-buffer here); an unlit view draws their base colors.
+                    if (hasDraws && unlit && m_unlitPipeline)
+                    {
+                        drawMeshletBucket(cmd, cursor, RenderBucket::Opaque, *m_unlitPipeline, NRI::CullMode::Back, true, false);
+                        drawMeshletBucket(cmd, cursor, RenderBucket::OpaqueDoubleSided, *m_unlitPipeline, NRI::CullMode::None, true, false);
+                        drawMeshletBucket(cmd, cursor, RenderBucket::Mask, *m_unlitPipeline, NRI::CullMode::Back, true, false);
+                        drawMeshletBucket(cmd, cursor, RenderBucket::MaskDoubleSided, *m_unlitPipeline, NRI::CullMode::None, true, false);
+                    }
+                    else if (hasDraws && m_transparentLitPipeline)
                     {
                         cursor.taskFlags = taskFlags | shaderio::MESHLET_SHADE_OPAQUE;
                         drawMeshletBucket(cmd, cursor, RenderBucket::Opaque, *m_transparentLitPipeline, NRI::CullMode::Back, true, false);
@@ -156,7 +167,7 @@ namespace Nox
                     }
 
                     // C. The sky where nothing was drawn (depth 0).
-                    if (m_skyboxPipeline && m_environmentCubemap && !preview)
+                    if (m_skyboxPipeline && m_environmentCubemap && !preview && !(flags & ExtraViewNoSky))
                     {
                         cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_skyboxPipeline);
                         cursor.boundPipeline = m_skyboxPipeline.get();
@@ -191,10 +202,37 @@ namespace Nox
                         cmd.setColorBlendEnable(0, false);
                         cmd.setDepthWriteEnable(true);
                     }
+
+                    // E. Wireframe: every bucket's triangles as lines multiplied into the image, depth tested against it (as the camera's).
+                    if (hasDraws && (flags & ExtraViewWireframe) && m_wireframePipeline)
+                    {
+                        cmd.setPolygonMode(NRI::PolygonMode::Line);
+                        cmd.setLineWidth(1.0f);
+                        cmd.setDepthTestEnable(true);
+                        cmd.setDepthWriteEnable(false);
+                        cmd.setDepthCompareOp(NRI::CompareOp::GreaterOrEqual);
+                        cmd.setColorBlendEnable(0, true);
+                        cmd.setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B);
+                        cmd.setColorWriteMask(1, 0u);
+                        const NRI::ColorBlendEquation multiply{ NRI::BlendFactor::Zero, NRI::BlendFactor::SrcColor, NRI::BlendOp::Add,
+                                                                NRI::BlendFactor::Zero, NRI::BlendFactor::One, NRI::BlendOp::Add };
+                        cmd.setColorBlendEquation(0, multiply);
+                        constexpr RenderBucket kWireBuckets[] = { RenderBucket::Opaque, RenderBucket::OpaqueDoubleSided, RenderBucket::Mask, RenderBucket::MaskDoubleSided,
+                                                                  RenderBucket::Unlit, RenderBucket::UnlitDoubleSided, RenderBucket::Transparent,
+                                                                  RenderBucket::TransparentDoubleSided, RenderBucket::TransparentUnlit,
+                                                                  RenderBucket::TransparentUnlitDoubleSided };
+                        for (RenderBucket bucket : kWireBuckets)
+                            drawMeshletBucket(cmd, cursor, bucket, *m_wireframePipeline, NRI::CullMode::None, false, true);
+                        cmd.setColorBlendEnable(0, false);
+                        cmd.setPolygonMode(NRI::PolygonMode::Fill);
+                        cmd.setColorWriteMask(0, NRI::ColorComponent::All);
+                        cmd.setColorWriteMask(1, NRI::ColorComponent::All);
+                        cmd.setDepthWriteEnable(true);
+                    }
                 });
 
             // The scene's particles, from this camera (asset previews have none): blended like the camera's, without OIT.
-            if (!view.Preview && !m_particleBatches.empty() && m_particlePipeline && m_particleBuffers.size() > frameIndex && m_particleBuffers[frameIndex])
+            if (!view.Preview && !(flags & ExtraViewNoParticles) && !m_particleBatches.empty() && m_particlePipeline && m_particleBuffers.size() > frameIndex && m_particleBuffers[frameIndex])
             {
                 const bool particleShadows = m_rayTracingEnabled && m_rayTracingShadows && resources.TLAS.IsValid();
                 m_renderGraph.AddPass(kParticleNames[index], RGPassFlags::Raster,
@@ -259,7 +297,7 @@ namespace Nox
                     builder.ColorTarget(output, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 1.0f });
                     builder.SetRenderArea(extent);
                 },
-                [this, hdr, autoExposure, exposureTexture = resources.AutoExposure, uniformBuffer](RGPassContext& context)
+                [this, hdr, autoExposure, unlit, exposureTexture = resources.AutoExposure, uniformBuffer](RGPassContext& context)
                 {
                     NRI::CommandBuffer& cmd = context.Cmd();
                     cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_postProcessPipeline);
@@ -276,12 +314,48 @@ namespace Nox
                     postPush.debugMode = 0;
                     postPush.tonemapMode = m_tonemapMode;
                     postPush.autoExposureEnabled = autoExposure ? 1u : 0u;
-                    postPush.exposureCompensation = m_exposureCompensation;
+                    postPush.exposureCompensation = unlit ? 0.0f : m_exposureCompensation;
                     postPush.autoExposureMinEV = m_autoExposureMinEV;
                     postPush.autoExposureMaxEV = m_autoExposureMaxEV;
                     cmd.pushData(&postPush, sizeof(shaderio::PushConstantPostProcess));
                     cmd.drawMeshTasks(1, 1, 1);
                 });
+
+            // The selection's outline from this view's entity IDs (the camera's outline shader, pointed at them).
+            if ((flags & ExtraViewOutline) && !m_SelectedEntityIDs.empty() && m_outlinePipeline && frameIndex < m_selectedEntityIDBuffers.size())
+            {
+                m_renderGraph.AddPass(kOutlineNames[index], RGPassFlags::Raster,
+                    [&](RGBuilder& builder)
+                    {
+                        builder.Read(entity);
+                        builder.ColorTarget(output, NRI::LoadOP::load, NRI::StoreOP::store);
+                        builder.SetRenderArea(extent);
+                    },
+                    [this, entity, uniformBuffer](RGPassContext& context)
+                    {
+                        NRI::CommandBuffer& cmd = context.Cmd();
+                        cmd.setPolygonMode(NRI::PolygonMode::Fill);
+                        cmd.setCullMode(NRI::CullMode::None);
+                        cmd.setDepthTestEnable(false);
+                        cmd.setDepthWriteEnable(false);
+                        const NRI::ColorBlendEquation blendEquation{ NRI::BlendFactor::SrcAlpha, NRI::BlendFactor::OneMinusSrcAlpha, NRI::BlendOp::Add,
+                                                                     NRI::BlendFactor::SrcAlpha, NRI::BlendFactor::OneMinusSrcAlpha, NRI::BlendOp::Add };
+                        cmd.setColorBlendEnable(0, true);
+                        cmd.setColorBlendEquation(0, blendEquation);
+                        cmd.setColorWriteMask(0, NRI::ColorComponent::All);
+                        cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_outlinePipeline);
+
+                        shaderio::PushConstantOutline references{};
+                        references.matrixReference = uniformBuffer->getDeviceAddress();
+                        references.selectedEntityIDsReference = m_selectedEntityIDBuffers[frameIndex]->getDeviceAddress();
+                        references.selectedEntityCount = static_cast<uint32_t>(m_SelectedEntityIDs.size());
+                        references.selectionMaskTextureIndex = 0xFFFFFFFF;
+                        references.entityTextureIndex = context.Slot(entity);
+                        cmd.pushData(&references, sizeof(shaderio::PushConstantOutline));
+                        cmd.drawMeshTasks(1, 1, 1);
+                        cmd.setColorBlendEnable(0, false);
+                    });
+            }
 
             // The 2D overlay's world-space content (lines, sprites, text) and this view's grid, depth tested against its depth.
             const std::optional<shaderio::PushConstantGrid> grid = view.HasGrid ? std::optional<shaderio::PushConstantGrid>(view.Grid) : std::nullopt;

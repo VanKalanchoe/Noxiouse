@@ -330,7 +330,18 @@ namespace Nox
         static constexpr uint32_t ThumbnailView = 4;
         static constexpr uint32_t LivePreviewView = 5;
         static constexpr uint32_t AnimationPreviewView = 6;
-        void SubmitExtraView(uint32_t index, const EditorCamera& camera, NRI::Extent2D size, const shaderio::PushConstantGrid* grid, bool preview = false);
+        // Show flags of an editor viewport drawn as an extra view (its View menu): base colors without lighting, the triangles' edges
+        // over the image, no sky, no particles, the selection's outline.
+        enum ExtraViewFlags : uint32_t
+        {
+            ExtraViewUnlit = 1u << 0,
+            ExtraViewWireframe = 1u << 1,
+            ExtraViewNoSky = 1u << 2,
+            ExtraViewNoParticles = 1u << 3,
+            ExtraViewOutline = 1u << 4,
+        };
+        void SubmitExtraView(uint32_t index, const EditorCamera& camera, NRI::Extent2D size, const shaderio::PushConstantGrid* grid, bool preview = false,
+                             uint32_t flags = 0);
         // A ray against the scene's geometry (ray query on the TLAS: the real surface, not bounding boxes), answered a frame or two
         // later on the main thread: the distance to the first opaque surface, or a miss (also without ray tracing / a TLAS).
         // Up to shaderio::EDITOR_RAYCAST_MAX a frame; more wait for the next one.
@@ -1411,6 +1422,7 @@ namespace Nox
             NRI::Extent2D Size{ 0, 0 };
             bool HasGrid = false;
             bool Preview = false; // an asset preview: no shadow rays (the scene is above its stage), no DDGI, the uniforms' exposure
+            uint32_t Flags = 0;   // ExtraViewFlags
             shaderio::PushConstantGrid Grid{};
             Ref<Texture2D> Output; // LDR (Surface format) this frame draws into
             Ref<Texture2D> Shown;  // the last texture drawn completely: what the viewport window shows

@@ -288,6 +288,7 @@ namespace Nox
                 references.selectedEntityIDsReference = m_selectedEntityIDBuffers[frameIndex]->getDeviceAddress();
                 references.selectedEntityCount = static_cast<uint32_t>(m_SelectedEntityIDs.size());
                 references.selectionMaskTextureIndex = context.SlotOr(mask, 0xFFFFFFFF);
+                references.entityTextureIndex = 0xFFFFFFFF;
                 cmd.pushData(&references, sizeof(shaderio::PushConstantOutline));
 
                 cmd.drawMeshTasks(1, 1, 1);

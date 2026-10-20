@@ -173,6 +173,8 @@ namespace Nox
         int OpenViewportCount() const;
         // The extra views' renders for this frame (Renderer::SubmitExtraView), with their own grid.
         void SubmitExtraViewports(Timestep ts);
+        // The options of a viewport as an extra view (Window > Viewports).
+        void UI_ViewportOptionsMenu(int index);
         // Ortho views are raster only: entering one turns DLSS, ray tracing and path tracing off, leaving it puts them back.
         void SyncOrthoRenderSettings(bool wasOrthographic);
 
@@ -254,6 +256,19 @@ namespace Nox
             glm::uvec2 Size = { 0, 0 };
             bool Hovered = false;
             bool Submitted = false;  // its image was submitted to the renderer this frame (an extra view)
+
+            // How it draws while it is not the active viewport (Window > Viewports > its options; kept in imgui.ini).
+            uint32_t ShowFlags = Renderer::ExtraViewOutline; // Renderer::ExtraViewFlags
+            bool ShowGrid = true;
+            int ResolutionIndex = 0;  // full, half, quarter
+            bool Realtime = true;     // off: drawn again only when its camera, its size, the scene or the selection change
+            // What it was last drawn with (realtime off).
+            glm::mat4 DrawnViewProjection{ 0.0f };
+            glm::uvec2 DrawnSize{ 0, 0 };
+            uint32_t DrawnFlags = 0;
+            size_t DrawnHistory = SIZE_MAX;
+            size_t DrawnSelection = 0;
+            float SinceDrawn = 0.0f;
         };
         std::array<ViewportSlot, kMaxViewports> m_Viewports;
         int m_ActiveViewport = 0;

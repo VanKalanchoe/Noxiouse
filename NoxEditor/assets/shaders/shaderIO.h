@@ -1895,6 +1895,9 @@ struct PushConstantOutline
     // SelectionMask.slang's display-resolution, non-jittered mask of the selection (bindless slot); 0xFFFFFFFF: none this
     // frame, the outline falls back to the (jittered) entity IDs.
     uint32_t selectionMaskTextureIndex;
+    // The entity ID texture to outline from (bindless slot): an editor extra view's own; 0xFFFFFFFF: the camera's (the uniforms').
+    uint32_t entityTextureIndex;
+    uint32_t pad0;
 };
 
 struct PushConstantQuad

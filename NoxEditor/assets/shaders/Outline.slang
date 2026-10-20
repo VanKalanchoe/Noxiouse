@@ -115,7 +115,7 @@ float4 fragMain(
         Texture2D<int4>.Handle(
             uint2(
                 ubo->imageHeapIndexOffset +
-                ubo->entityTextureIndex,
+                (pushConstant.entityTextureIndex != 0xFFFFFFFF ? pushConstant.entityTextureIndex : ubo->entityTextureIndex),
                 0
             )
         );

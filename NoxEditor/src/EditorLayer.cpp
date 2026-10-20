@@ -64,6 +64,11 @@ namespace Nox
             bool Loaded = false;
             bool Open[4] = { true, false, false, false };
             int View[4] = { 0, 1, 3, 6 };
+            // Each viewport's options as an extra view (ViewportSlot): show flags, grid, resolution, realtime.
+            uint32_t Flags[4] = { Renderer::ExtraViewOutline, Renderer::ExtraViewOutline, Renderer::ExtraViewOutline, Renderer::ExtraViewOutline };
+            int Grid[4] = { 1, 1, 1, 1 };
+            int Resolution[4] = { 0, 0, 0, 0 };
+            int Realtime[4] = { 1, 1, 1, 1 };
         };
         ViewportIniState s_ViewportIni;
 
@@ -75,12 +80,20 @@ namespace Nox
             handler.ReadOpenFn = [](ImGuiContext*, ImGuiSettingsHandler*, const char*) -> void* { return &s_ViewportIni; };
             handler.ReadLineFn = [](ImGuiContext*, ImGuiSettingsHandler*, void*, const char* line)
             {
-                int index = 0, open = 0, view = 0;
-                if (sscanf(line, "Viewport%d=%d,%d", &index, &open, &view) == 3 && index >= 0 && index < 4 &&
-                    view >= 0 && view <= static_cast<int>(EditorViewMode::Right))
+                int index = 0, open = 0, view = 0, grid = 1, resolution = 0, realtime = 1;
+                unsigned flags = Renderer::ExtraViewOutline;
+                const int read = sscanf(line, "Viewport%d=%d,%d,%u,%d,%d,%d", &index, &open, &view, &flags, &grid, &resolution, &realtime);
+                if (read >= 3 && index >= 0 && index < 4 && view >= 0 && view <= static_cast<int>(EditorViewMode::Right))
                 {
                     s_ViewportIni.Open[index] = index == 0 || open != 0;
                     s_ViewportIni.View[index] = view;
+                    if (read == 7) // the options (older files have the view only)
+                    {
+                        s_ViewportIni.Flags[index] = flags;
+                        s_ViewportIni.Grid[index] = grid;
+                        s_ViewportIni.Resolution[index] = std::clamp(resolution, 0, 2);
+                        s_ViewportIni.Realtime[index] = realtime;
+                    }
                     s_ViewportIni.Loaded = true;
                 }
             };
@@ -88,7 +101,8 @@ namespace Nox
             {
                 buffer->appendf("[%s][State]\n", self->TypeName);
                 for (int index = 0; index < 4; ++index)
-                    buffer->appendf("Viewport%d=%d,%d\n", index, s_ViewportIni.Open[index] ? 1 : 0, s_ViewportIni.View[index]);
+                    buffer->appendf("Viewport%d=%d,%d,%u,%d,%d,%d\n", index, s_ViewportIni.Open[index] ? 1 : 0, s_ViewportIni.View[index],
+                                    s_ViewportIni.Flags[index], s_ViewportIni.Grid[index], s_ViewportIni.Resolution[index], s_ViewportIni.Realtime[index]);
                 buffer->append("\n");
             };
             ImGui::AddSettingsHandler(&handler);
@@ -574,6 +588,9 @@ namespace Nox
                                 m_Viewports[index].Open = false;
                         }
                     }
+                    ImGui::Separator();
+                    for (int index = 0; index < kMaxViewports; ++index)
+                        UI_ViewportOptionsMenu(index);
                     ImGui::Separator();
                     ImGui::TextDisabled("Click a viewport to use it; drag its tab to move it");
                     ImGui::EndMenu();
@@ -2648,9 +2665,14 @@ namespace Nox
         if (s_ViewportIni.Loaded)
         {
             s_ViewportIni.Loaded = false;
-            for (int index = 1; index < kMaxViewports; ++index)
+            for (int index = 0; index < kMaxViewports; ++index)
             {
-                if (s_ViewportIni.Open[index])
+                ViewportSlot& slot = m_Viewports[index];
+                slot.ShowFlags = s_ViewportIni.Flags[index];
+                slot.ShowGrid = s_ViewportIni.Grid[index] != 0;
+                slot.ResolutionIndex = s_ViewportIni.Resolution[index];
+                slot.Realtime = s_ViewportIni.Realtime[index] != 0;
+                if (index > 0 && s_ViewportIni.Open[index])
                     OpenViewport(index);
             }
         }
@@ -2658,6 +2680,10 @@ namespace Nox
         {
             const ViewportSlot& slot = m_Viewports[index];
             s_ViewportIni.Open[index] = slot.Open;
+            s_ViewportIni.Flags[index] = slot.ShowFlags;
+            s_ViewportIni.Grid[index] = slot.ShowGrid ? 1 : 0;
+            s_ViewportIni.Resolution[index] = slot.ResolutionIndex;
+            s_ViewportIni.Realtime[index] = slot.Realtime ? 1 : 0;
             if (index == m_ActiveViewport)
                 s_ViewportIni.View[index] = static_cast<int>(m_EditorCamera.GetViewMode());
             else if (slot.CameraSet)
@@ -3114,9 +3140,65 @@ namespace Nox
         if (texture && texture->getImTextureID() && available.x >= 1.0f && available.y >= 1.0f)
             ImGui::Image(texture->getImTextureID(), ImVec2(std::floor(available.x), std::floor(available.y)));
 
-        // Its view in the corner. A click or a scroll in it makes it the active viewport (OnEvent), with every tool.
-        const char* viewName = kViewModeNames[static_cast<int>(slot.Camera.GetViewMode())];
         ImDrawList* draw = ImGui::GetWindowDrawList();
+
+        // Where the gizmo of the selected entity is (its axes, not draggable here: a click makes this the active viewport, where it is).
+        Entity selectedEntity = m_SceneHierarchyPanel.GetSelectedEntity();
+        if (texture && selectedEntity && m_GizmoType != -1 && m_SceneState != SceneState::Play && selectedEntity.HasComponent<WorldTransformComponent>())
+        {
+            const glm::mat4 world = selectedEntity.GetComponent<WorldTransformComponent>().WorldMatrix;
+            const glm::mat4 viewProjection = slot.Camera.GetProjection() * slot.Camera.GetViewMatrix();
+            auto toScreen = [&](const glm::vec3& point, ImVec2& out) -> bool
+            {
+                const glm::vec4 clip = viewProjection * glm::vec4(point, 1.0f);
+                if (clip.w <= 1e-6f)
+                    return false;
+                const glm::vec2 ndc = glm::vec2(clip) / clip.w;
+                out = ImVec2(origin.x + (ndc.x * 0.5f + 0.5f) * available.x, origin.y + (0.5f - ndc.y * 0.5f) * available.y);
+                return true;
+            };
+            const glm::vec3 center = glm::vec3(world[3]);
+            ImVec2 centerOnScreen;
+            if (toScreen(center, centerOnScreen))
+            {
+                const ImU32 axisColors[3] = { IM_COL32(230, 60, 60, 220), IM_COL32(80, 210, 80, 220), IM_COL32(70, 120, 240, 220) };
+                const float length = std::min(available.x, available.y) * 0.09f;
+                const float probe = WorldUnits::FromMeters(0.01f);
+                for (int axis = 0; axis < 3; ++axis)
+                {
+                    const glm::vec3 direction = glm::length(glm::vec3(world[axis])) > 0.0f ? glm::normalize(glm::vec3(world[axis])) : glm::vec3(0.0f);
+                    ImVec2 probeOnScreen;
+                    if (!toScreen(center + direction * probe, probeOnScreen))
+                        continue;
+                    ImVec2 delta(probeOnScreen.x - centerOnScreen.x, probeOnScreen.y - centerOnScreen.y);
+                    const float deltaLength = std::sqrt(delta.x * delta.x + delta.y * delta.y);
+                    if (deltaLength < 1e-4f)
+                        continue; // the axis points at the camera
+                    const ImVec2 end(centerOnScreen.x + delta.x / deltaLength * length, centerOnScreen.y + delta.y / deltaLength * length);
+                    draw->AddLine(centerOnScreen, end, axisColors[axis], 2.0f);
+                    if (m_GizmoType == ImGuizmo::OPERATION::SCALE)
+                        draw->AddRectFilled(ImVec2(end.x - 3.0f, end.y - 3.0f), ImVec2(end.x + 3.0f, end.y + 3.0f), axisColors[axis]);
+                    else if (m_GizmoType == ImGuizmo::OPERATION::ROTATE)
+                        draw->AddCircle(end, 4.0f, axisColors[axis], 0, 2.0f);
+                    else
+                        draw->AddCircleFilled(end, 3.5f, axisColors[axis]);
+                }
+                draw->AddCircleFilled(centerOnScreen, 3.0f, IM_COL32(255, 255, 255, 200));
+            }
+        }
+
+        // Its view in the corner (with what it shows besides lit geometry). A click or a scroll in it makes it the active viewport
+        // (OnEvent), with every tool.
+        std::string viewLabel = kViewModeNames[static_cast<int>(slot.Camera.GetViewMode())];
+        if (slot.ShowFlags & Renderer::ExtraViewUnlit)
+            viewLabel += " | Unlit";
+        if (slot.ShowFlags & Renderer::ExtraViewWireframe)
+            viewLabel += " | Wireframe";
+        if (slot.ResolutionIndex > 0)
+            viewLabel += slot.ResolutionIndex == 1 ? " | 1/2 res" : " | 1/4 res";
+        if (!slot.Realtime)
+            viewLabel += " | Realtime off";
+        const char* viewName = viewLabel.c_str();
         const ImVec2 textSize = ImGui::CalcTextSize(viewName);
         const ImVec2 labelMin(origin.x + 8.0f, origin.y + 8.0f);
         draw->AddRectFilled(labelMin, ImVec2(labelMin.x + textSize.x + 12.0f, labelMin.y + textSize.y + 6.0f), IM_COL32(0, 0, 0, 160), 3.0f);
@@ -3263,7 +3345,10 @@ namespace Nox
             ViewportSlot& slot = m_Viewports[index];
             slot.Submitted = false;
             if (index == m_ActiveViewport || !slot.Open || slot.Size.x == 0 || slot.Size.y == 0)
+            {
+                slot.DrawnSize = { 0, 0 }; // drawn afresh when it is an extra view again
                 continue;
+            }
 
             const float width = static_cast<float>(slot.Size.x);
             const float height = static_cast<float>(slot.Size.y);
@@ -3272,9 +3357,36 @@ namespace Nox
             // Its own easing (an ortho zoom set before it was put aside); no mouse input reaches it.
             slot.Camera.OnUpdate(ts, false);
 
+            // Lower resolution (M3): the image is drawn smaller and stretched over the window.
+            const uint32_t divisor = 1u << std::clamp(slot.ResolutionIndex, 0, 2);
+            const glm::uvec2 drawSize = glm::max(slot.Size / divisor, glm::uvec2(1));
+            uint32_t flags = slot.ShowFlags;
+
+            // Realtime off (UE's viewport option): drawn again only when what it shows changed -- its camera, size or options, the
+            // scene (an edit, undo or redo), the selection, a gizmo drag in progress -- and every two seconds (assets streaming in).
+            // In Play it is always realtime.
+            const glm::mat4 viewProjection = slot.Camera.GetProjection() * slot.Camera.GetViewMatrix();
+            size_t selection = m_SceneHierarchyPanel.GetSelectedEntities().size();
+            for (const Entity& selected : m_SceneHierarchyPanel.GetSelectedEntities())
+                selection = selection * 31 + static_cast<uint32_t>(selected);
+            slot.SinceDrawn += ts.GetSeconds();
+            if (!slot.Realtime && m_SceneState == SceneState::Edit && slot.DrawnSize == drawSize && slot.DrawnFlags == flags &&
+                slot.DrawnViewProjection == viewProjection && slot.DrawnHistory == m_History.GetPosition() && slot.DrawnSelection == selection &&
+                !ImGuizmo::IsUsing() && slot.SinceDrawn < 2.0f && m_Renderer->GetExtraViewTexture(static_cast<uint32_t>(index)))
+            {
+                slot.Submitted = true; // the last image stays on screen
+                continue;
+            }
+            slot.DrawnSize = drawSize;
+            slot.DrawnFlags = flags;
+            slot.DrawnViewProjection = viewProjection;
+            slot.DrawnHistory = m_History.GetPosition();
+            slot.DrawnSelection = selection;
+            slot.SinceDrawn = 0.0f;
+
             // The grid as DrawWorldGrid would draw it for this camera.
             shaderio::PushConstantGrid grid{};
-            const bool showGrid = m_SceneState != SceneState::Play && m_ShowGrid;
+            const bool showGrid = m_SceneState != SceneState::Play && m_ShowGrid && slot.ShowGrid;
             if (showGrid)
             {
                 const EditorViewMode mode = slot.Camera.GetViewMode();
@@ -3282,9 +3394,50 @@ namespace Nox
                 grid = slot.Camera.IsOrthographic() ? Renderer2D::MakeGrid(slot.Camera.GetFocalPoint(), cell, axis, slot.Camera.GetOrthoHalfHeight())
                                                     : Renderer2D::MakeGrid(slot.Camera.GetPosition(), cell, 1, slot.Camera.GetDistance());
             }
-            m_Renderer->SubmitExtraView(static_cast<uint32_t>(index), slot.Camera, NRI::Extent2D{ slot.Size.x, slot.Size.y }, showGrid ? &grid : nullptr);
+            if (m_SceneState == SceneState::Play)
+                flags &= ~Renderer::ExtraViewOutline;
+            m_Renderer->SubmitExtraView(static_cast<uint32_t>(index), slot.Camera, NRI::Extent2D{ drawSize.x, drawSize.y }, showGrid ? &grid : nullptr, false, flags);
             slot.Submitted = true;
         }
+    }
+
+    void EditorLayer::UI_ViewportOptionsMenu(int index)
+    {
+        ViewportSlot& slot = m_Viewports[index];
+        const std::string label = std::string(slot.Title) + " Options";
+        if (!ImGui::BeginMenu(label.c_str()))
+            return;
+        ImGui::TextDisabled("While it is not the active viewport (that one is the full render)");
+        auto flag = [&](const char* name, uint32_t bit, bool inverted, const char* tooltip)
+        {
+            bool on = ((slot.ShowFlags & bit) != 0) != inverted;
+            if (ImGui::MenuItem(name, nullptr, &on))
+                slot.ShowFlags = (on != inverted) ? (slot.ShowFlags | bit) : (slot.ShowFlags & ~bit);
+            ImGui::SetItemTooltip("%s", tooltip);
+        };
+        bool lit = (slot.ShowFlags & Renderer::ExtraViewUnlit) == 0;
+        if (ImGui::MenuItem("Lit", nullptr, lit))
+            slot.ShowFlags &= ~Renderer::ExtraViewUnlit;
+        if (ImGui::MenuItem("Unlit", nullptr, !lit))
+            slot.ShowFlags |= Renderer::ExtraViewUnlit;
+        ImGui::SetItemTooltip("Base colors without lighting or exposure.");
+        ImGui::Separator();
+        flag("Wireframe", Renderer::ExtraViewWireframe, false, "The triangles' edges over the image.");
+        flag("Sky", Renderer::ExtraViewNoSky, true, "The sky behind the geometry (off: black).");
+        flag("Particles", Renderer::ExtraViewNoParticles, true, "The scene's particle systems.");
+        flag("Selection Outline", Renderer::ExtraViewOutline, false, "The orange outline of the selected entities.");
+        ImGui::MenuItem("Grid", nullptr, &slot.ShowGrid);
+        ImGui::Separator();
+        const char* resolutions[] = { "Full Resolution", "Half Resolution", "Quarter Resolution" };
+        for (int resolution = 0; resolution < 3; ++resolution)
+        {
+            if (ImGui::MenuItem(resolutions[resolution], nullptr, slot.ResolutionIndex == resolution))
+                slot.ResolutionIndex = resolution;
+        }
+        ImGui::Separator();
+        ImGui::MenuItem("Realtime", nullptr, &slot.Realtime);
+        ImGui::SetItemTooltip("Off: drawn again only when its camera, the scene or the selection change (always on in Play).");
+        ImGui::EndMenu();
     }
 
     void EditorLayer::SyncOrthoRenderSettings(bool wasOrthographic)
