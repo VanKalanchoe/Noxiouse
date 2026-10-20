@@ -156,12 +156,45 @@ namespace Nox
     {
         const auto build = StageBuiltScripts(s_ExecutableDirectory);
         if (!build || !s_Backend) return false;
+
+        // The jobs the scripts started run code of the assemblies about to go: they finish first, or the reload waits.
+        if (!s_Backend->WaitForJobs(2000))
+        {
+            NOX_CORE_ERROR("Script reload skipped: script jobs are still running (try again when they have finished)");
+            return false;
+        }
+
+        // What the running instances' exposed fields hold now (tweaked in Play, or changed by the scripts themselves): the
+        // new instances start from it instead of the scene's values.
+        std::unordered_map<UUID, FieldSnapshot> snapshots;
+        for (const auto& [entityID, instances] : s_Instances)
+        {
+            FieldSnapshot& snapshot = snapshots[entityID];
+            for (ScriptInstanceHandle instance : instances)
+            {
+                const std::string className = s_Backend->GetInstanceClass(instance);
+                if (className.empty())
+                    continue;
+                for (const ScriptFieldInfo& field : s_Backend->GetExposedFields(className))
+                    snapshot[className][field.Name] = s_Backend->GetFieldValue(instance, field.Name, field.Type);
+            }
+        }
+
+        // A build that does not load leaves the scripts that were running untouched.
         if (!s_Backend->LoadModule(build->CoreAssembly, build->GameAssembly)) return false;
         s_Instances.clear();
         if (s_Scene)
         {
             auto scripts = s_Scene->GetAllEntitiesWith<ScriptComponent>();
-            for (auto entity : scripts) OnCreateEntity(Entity(entity, s_Scene));
+            for (auto entity : scripts)
+            {
+                Entity scriptEntity(entity, s_Scene);
+                auto snapshot = snapshots.find(scriptEntity.GetUUID());
+                CreateInstances(scriptEntity, snapshot != snapshots.end() ? &snapshot->second : nullptr);
+            }
+            for (const auto& [_, instances] : s_Instances)
+                for (ScriptInstanceHandle instance : instances)
+                    s_Backend->Invoke(instance, ScriptCallback::AfterReload);
         }
         return true;
     }
@@ -184,6 +217,11 @@ namespace Nox
     }
 
     void ScriptEngine::OnCreateEntity(Entity entity)
+    {
+        CreateInstances(entity, nullptr);
+    }
+
+    void ScriptEngine::CreateInstances(Entity entity, const FieldSnapshot* restore)
     {
         const auto& component = entity.GetComponent<ScriptComponent>();
         if (!s_Backend) return;
@@ -208,6 +246,22 @@ namespace Nox
                         if (reference.IsModelNode())
                             target = ModelInstance::NodeUUID(reference.ModelInstance, reference.ModelNodeIndex);
                         s_Backend->SetEntityField(instance, fieldName, target);
+                    }
+                }
+
+                // After a hot reload: the values the instance before it had, for the fields that kept their name and type.
+                if (auto classSnapshot = restore ? restore->find(className) : FieldSnapshot::const_iterator{};
+                    restore && classSnapshot != restore->end())
+                {
+                    for (const ScriptFieldInfo& field : s_Backend->GetExposedFields(className))
+                    {
+                        auto saved = classSnapshot->second.find(field.Name);
+                        if (saved == classSnapshot->second.end() || saved->second.index() != field.DefaultValue.index())
+                            continue;
+                        if (const UUID* target = std::get_if<UUID>(&saved->second))
+                            s_Backend->SetEntityField(instance, field.Name, *target);
+                        else
+                            s_Backend->SetFieldValue(instance, field.Name, saved->second);
                     }
                 }
                 instances.push_back(instance);

@@ -17,19 +17,21 @@ namespace Nox
         void Shutdown() override;
         bool LoadModule(const std::filesystem::path& coreAssembly,
                         const std::filesystem::path& gameAssembly) override;
-        bool ReloadModule() override;
+        bool WaitForJobs(uint32_t timeoutMilliseconds) override;
         bool HasType(std::string_view fullName) const override;
         std::vector<ScriptFieldInfo> GetExposedFields(std::string_view fullName) const override;
         ScriptInstanceHandle CreateInstance(std::string_view fullName, UUID entity) override;
         void SetEntityField(ScriptInstanceHandle instance, std::string_view fieldName, UUID entity) override;
         void SetFieldValue(ScriptInstanceHandle instance, std::string_view fieldName, const ScriptValue& value) override;
+        ScriptValue GetFieldValue(ScriptInstanceHandle instance, std::string_view fieldName, ScriptFieldType type) const override;
+        std::string GetInstanceClass(ScriptInstanceHandle instance) const override;
         void DestroyInstance(ScriptInstanceHandle instance) override;
         void Invoke(ScriptInstanceHandle instance, ScriptCallback callback, float argument = 0.0f) override;
         void InvokeWithString(ScriptInstanceHandle instance, std::string_view method, std::string_view argument) override;
         void SetSceneContext(Scene* scene) override;
 
     private:
-        struct Instance { uint32_t Generation; Coral::ManagedObject Object; };
+        struct Instance { uint32_t Generation; Coral::ManagedObject Object; std::string ClassName; };
         void ClearModule();
         void RegisterInternalCalls(Coral::ManagedAssembly& coreAssembly);
 
@@ -41,6 +43,7 @@ namespace Nox
         std::unordered_map<std::string, std::vector<ScriptFieldInfo>> m_ExposedFields;
         std::unordered_map<uint64_t, std::unique_ptr<Instance>> m_Instances;
         std::filesystem::path m_CorePath, m_GamePath;
+        uint32_t m_LoadContextCount = 0; // names each load context apart: the old one is still loaded while the new one loads
         Scene* m_Scene = nullptr;
         uint64_t m_NextInstanceID = 1;
         uint32_t m_Generation = 1;

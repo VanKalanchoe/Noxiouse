@@ -549,6 +549,7 @@ namespace Nox
 
     void DotNetBackend::Shutdown()
     {
+        WaitForJobs(2000);
         ClearModule();
         m_Host.Shutdown();
     }
@@ -556,23 +557,31 @@ namespace Nox
     bool DotNetBackend::LoadModule(const std::filesystem::path& coreAssembly,
                                    const std::filesystem::path& gameAssembly)
     {
-        ClearModule();
-        m_CorePath = coreAssembly;
-        m_GamePath = gameAssembly;
-
+        // Into a load context of its own first: the module running now stays until the new one has loaded (a reload of a
+        // broken build keeps the scripts that worked).
         const std::string searchPath = coreAssembly.parent_path().string() + ";" +
                                        gameAssembly.parent_path().string();
-        m_LoadContext = std::make_unique<Coral::AssemblyLoadContext>(
-            m_Host.CreateAssemblyLoadContext("NoxGameScripts", searchPath));
-        m_CoreAssembly = &m_LoadContext->LoadAssembly(coreAssembly.string());
-        m_GameAssembly = &m_LoadContext->LoadAssembly(gameAssembly.string());
-        if (m_CoreAssembly->GetLoadStatus() != Coral::AssemblyLoadStatus::Success ||
-            m_GameAssembly->GetLoadStatus() != Coral::AssemblyLoadStatus::Success)
+        auto loadContext = std::make_unique<Coral::AssemblyLoadContext>(
+            m_Host.CreateAssemblyLoadContext("NoxGameScripts-" + std::to_string(++m_LoadContextCount), searchPath));
+        Coral::ManagedAssembly* core = &loadContext->LoadAssembly(coreAssembly.string());
+        Coral::ManagedAssembly* game = &loadContext->LoadAssembly(gameAssembly.string());
+        if (core->GetLoadStatus() != Coral::AssemblyLoadStatus::Success ||
+            game->GetLoadStatus() != Coral::AssemblyLoadStatus::Success)
         {
-            NOX_CORE_ERROR("Failed to load managed scripting assemblies");
-            ClearModule();
+            NOX_CORE_ERROR("Failed to load managed scripting assemblies '{}', '{}'{}", coreAssembly.string(), gameAssembly.string(),
+                           m_LoadContext ? ": the scripts loaded before keep running" : "");
+            m_Host.UnloadAssemblyLoadContext(*loadContext);
             return false;
         }
+
+        ClearModule();
+        m_LoadContext = std::move(loadContext);
+        m_CoreAssembly = core;
+        m_GameAssembly = game;
+        m_CorePath = coreAssembly;
+        m_GamePath = gameAssembly;
+        // Handles of the module before (kept anywhere) no longer reach the new instances.
+        ++m_Generation;
 
         RegisterInternalCalls(*m_CoreAssembly);
         auto& entityBehaviour = m_CoreAssembly->GetLocalType("Nox.EntityBehaviour");
@@ -634,10 +643,18 @@ namespace Nox
         return true;
     }
 
-    bool DotNetBackend::ReloadModule()
+    bool DotNetBackend::WaitForJobs(uint32_t timeoutMilliseconds)
     {
-        ++m_Generation;
-        return LoadModule(m_CorePath, m_GamePath);
+        if (!m_CoreAssembly)
+            return true;
+        // Const: the non-const overload of InvokeStaticMethod returns nothing.
+        const Coral::Type& jobs = m_CoreAssembly->GetLocalType("Nox.Jobs");
+        if (!jobs)
+            return true;
+        const int32_t stillRunning = jobs.InvokeStaticMethod<int32_t>("WaitForAll", static_cast<int32_t>(timeoutMilliseconds));
+        if (stillRunning > 0)
+            NOX_CORE_WARN("{} script job(s) still running after {} ms", stillRunning, timeoutMilliseconds);
+        return stillRunning <= 0;
     }
 
     void DotNetBackend::ClearModule()
@@ -726,6 +743,7 @@ namespace Nox
         if (it == m_Types.end()) return {};
         auto instance = std::make_unique<Instance>();
         instance->Generation = m_Generation;
+        instance->ClassName = it->first;
         instance->Object = it->second->CreateInstance();
         instance->Object.SetFieldValue("EntityID", static_cast<uint64_t>(entity));
         const uint64_t id = m_NextInstanceID++;
@@ -755,6 +773,42 @@ namespace Nox
             else if constexpr (std::is_same_v<T, glm::vec3>) object.SetFieldValue(fieldName, ManagedVector3{data.x, data.y, data.z});
             else if constexpr (!std::is_same_v<T, std::monostate> && !std::is_same_v<T, UUID>) object.SetFieldValue(fieldName, data);
         }, value);
+    }
+
+    ScriptValue DotNetBackend::GetFieldValue(ScriptInstanceHandle handle, std::string_view fieldName, ScriptFieldType type) const
+    {
+        auto it = m_Instances.find(handle.ID);
+        if (it == m_Instances.end() || handle.Generation != m_Generation)
+            return {};
+        const Coral::ManagedObject& object = it->second->Object;
+        switch (type)
+        {
+            case ScriptFieldType::Bool: return object.GetFieldValue<bool>(fieldName);
+            case ScriptFieldType::Int: return object.GetFieldValue<int32_t>(fieldName);
+            case ScriptFieldType::UInt: return object.GetFieldValue<uint32_t>(fieldName);
+            case ScriptFieldType::Long: return object.GetFieldValue<int64_t>(fieldName);
+            case ScriptFieldType::ULong: return object.GetFieldValue<uint64_t>(fieldName);
+            case ScriptFieldType::Float: return object.GetFieldValue<float>(fieldName);
+            case ScriptFieldType::Double: return object.GetFieldValue<double>(fieldName);
+            case ScriptFieldType::String: return object.GetFieldValue<std::string>(fieldName);
+            case ScriptFieldType::Vector3:
+            {
+                const ManagedVector3 value = object.GetFieldValue<ManagedVector3>(fieldName);
+                return glm::vec3(value.X, value.Y, value.Z);
+            }
+            case ScriptFieldType::Entity:
+            {
+                struct ManagedEntity { uint64_t ID; };
+                return UUID(object.GetFieldValue<ManagedEntity>(fieldName).ID);
+            }
+        }
+        return {};
+    }
+
+    std::string DotNetBackend::GetInstanceClass(ScriptInstanceHandle handle) const
+    {
+        auto it = m_Instances.find(handle.ID);
+        return it == m_Instances.end() || handle.Generation != m_Generation ? std::string() : it->second->ClassName;
     }
 
     void DotNetBackend::DestroyInstance(ScriptInstanceHandle handle)

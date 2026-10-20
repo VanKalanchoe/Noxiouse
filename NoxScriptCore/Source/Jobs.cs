@@ -16,9 +16,34 @@ public static class Jobs
     /// <summary>How many jobs run at the same time at most (the machine's logical cores).</summary>
     public static int WorkerCount => Environment.ProcessorCount;
 
-    public static JobHandle Run(Action work) => new(Task.Run(work));
+    /// <summary>Jobs started with <see cref="Run(Action)"/> / <see cref="Run{T}(Func{T})"/> that have not finished yet.</summary>
+    public static int RunningCount => Volatile.Read(ref s_Running);
 
-    public static JobHandle<T> Run<T>(Func<T> work) => new(Task.Run(work));
+    public static JobHandle Run(Action work) => new(Track(Task.Run(work)));
+
+    public static JobHandle<T> Run<T>(Func<T> work) => new(Track(Task.Run(work)));
+
+    /// <summary>
+    /// Waits until every running job has finished, at most <paramref name="timeoutMilliseconds"/>; returns how many are still
+    /// running (0: all done). The engine calls it before it unloads the scripts (hot reload, shutdown): a job still running
+    /// code of an unloaded assembly would crash.
+    /// </summary>
+    public static int WaitForAll(int timeoutMilliseconds)
+    {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        while (Volatile.Read(ref s_Running) > 0 && clock.ElapsedMilliseconds < timeoutMilliseconds)
+            Thread.Sleep(1);
+        return Volatile.Read(ref s_Running);
+    }
+
+    private static int s_Running;
+
+    private static TTask Track<TTask>(TTask task) where TTask : Task
+    {
+        Interlocked.Increment(ref s_Running);
+        task.ContinueWith(_ => Interlocked.Decrement(ref s_Running), TaskContinuationOptions.ExecuteSynchronously);
+        return task;
+    }
 
     /// <summary>
     /// Runs <paramref name="body"/> for every index in [0, count) spread over the cores, and returns when all are done (one

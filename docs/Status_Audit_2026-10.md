@@ -21,9 +21,9 @@ for history. File references are to the code as of this audit.
 | Renderer | Meshlet cone culling was removed because it dropped visible meshlets; cause never found (cones still cooked, unread) | `MeshImporter.cpp:57`, `shaderIO.h` |
 | Animation | Fixed 2026-10-20: root motion was lost on entities with a character controller (added to the Transform, overwritten by the controller). The controller now gets it as a velocity (`RootMotionVelocity`, horizontal) and moves by it with collisions | `Scene.cpp` (UpdateAnimators), `JoltPhysics3DScene.cpp` |
 | Animation | Fox locomotion `Speed` thresholds are in m/s while the project is in cm: Walk -> Run always fires | `CharacterMovement.cs:13`, Fox graph |
-| Scripting | A **failed hot reload leaves scripting unloaded** (the old assemblies are cleared before the new ones load) | `DotNetBackend.cpp:558` |
-| Scripting | The reload generation never increases, so the stale-object check does nothing; `OnAfterReload` is declared but never called | `ScriptEngine.cpp:159`, `EntityBehaviour.cs:25` |
-| Scripting | Reloading while script jobs (`Nox.Jobs`) run is unsafe: no fence before the assemblies are swapped | `Jobs.cs`, `DotNetBackend.cpp:643` |
+| Scripting | Fixed 2026-10-20: a failed hot reload left scripting unloaded. The new assemblies load into their own context first; the running module goes only once they have loaded | `DotNetBackend.cpp` (LoadModule) |
+| Scripting | Fixed 2026-10-20: the reload generation never increased and `OnAfterReload` was never called. Every load is a new generation; `OnAfterReload` runs after the new instances' `OnCreate`, and exposed field values are kept across the reload | `ScriptEngine.cpp` (ReloadAssembly) |
+| Scripting | Fixed 2026-10-20: reloading while script jobs ran was unsafe. `Nox.Jobs` counts its running jobs; reload and shutdown wait for them (2 s, else the reload is skipped with a log line) | `Jobs.cs`, `DotNetBackend.cpp` (WaitForJobs) |
 | Scene | Fixed 2026-10-20: `TextComponent` font was neither saved nor loaded. Fonts (.ttf / .otf) are assets now; the component keeps the font's handle, saved with the scene | `SceneSerializer.cpp`, `Font.h` |
 | Scene | `SerializeRuntime` / `DeserializeRuntime` are empty (return false) | `SceneSerializer.cpp:1188, 1924` |
 | Asset | Fixed 2026-10-20: `MeshImporter::LoadMesh` was a dead stub with no return value -- removed | `MeshImporter.cpp` |
@@ -91,7 +91,7 @@ for history. File references are to the code as of this audit.
   filtered by skeleton; jump / fall states (C1, needs clips); multi-skin models spawn as nodes (C3).
 
 **Scripting**
-- Field values kept across hot reload; debounced build + source watching; `ScriptBehaviour` component model; scripts and asset
+- Debounced build + source watching; `ScriptBehaviour` component model; scripts and asset
   references as assets; richer field metadata; `OnFixedUpdate` / `OnLateUpdate`; camera smoothing; API version check and
   debugger; backend-independent API; Lua (deferred).
 - Per-project game assembly (Facerun.dll is hard-coded); WorldUnits API for scripts.
