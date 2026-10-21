@@ -1316,6 +1316,18 @@ namespace Nox
                m_colorPyramidCopyScaledPipeline && !m_frame.pathTracerActive && !m_frame.restirPTActive;
     }
 
+    glm::vec2 Renderer::jitterScreenOffsetUv() const
+    {
+        // From the two projections themselves, so the sign is whatever the jitter's convention is; uv y is down (flipped viewport).
+        const glm::vec4 point(0.0f, 0.0f, -1.0f, 1.0f); // in front of the camera (view space looks down -Z)
+        const glm::vec4 jittered = uniformData.proj * point;
+        const glm::vec4 still = uniformData.nonJitteredProj * point;
+        if (std::abs(jittered.w) <= 1e-6f || std::abs(still.w) <= 1e-6f)
+            return glm::vec2(0.0f);
+        const glm::vec2 ndcOffset = glm::vec2(jittered) / jittered.w - glm::vec2(still) / still.w;
+        return ndcOffset * glm::vec2(0.5f, -0.5f);
+    }
+
     void Renderer::addTransparentsAfterRRPasses()
     {
         if (!m_frame.transparentsAfterRR)
@@ -1361,19 +1373,8 @@ namespace Nox
                 drawForwardTransparent(cmd, context, res->CameraDraws, cursor);
             });
 
-        // The layer over the upscaled image, where the unjittered pixel is in it: how far the jitter moved a point on screen (from the
-        // two projections themselves, so its sign is whatever the jitter's convention is), in uv (the viewport is flipped: y down).
-        glm::vec2 jitterUv(0.0f);
-        {
-            const glm::vec4 point(0.0f, 0.0f, -1.0f, 1.0f); // in front of the camera (view space looks down -Z)
-            const glm::vec4 jittered = uniformData.proj * point;
-            const glm::vec4 still = uniformData.nonJitteredProj * point;
-            if (std::abs(jittered.w) > 1e-6f && std::abs(still.w) > 1e-6f)
-            {
-                const glm::vec2 ndcOffset = glm::vec2(jittered) / jittered.w - glm::vec2(still) / still.w;
-                jitterUv = ndcOffset * glm::vec2(0.5f, -0.5f);
-            }
-        }
+        // The layer over the upscaled image, where the unjittered pixel is in it.
+        const glm::vec2 jitterUv = jitterScreenOffsetUv();
         m_renderGraph.AddPass("Transparency Composite", RGPassFlags::Raster,
             [&](RGBuilder& builder)
             {
@@ -1441,6 +1442,12 @@ namespace Nox
                     push.sourceMip = mip == 0 ? 0 : mip - 1;
                     push.width = std::max(m_frame.renderExtent.width >> mip, 1u);
                     push.height = std::max(m_frame.renderExtent.height >> mip, 1u);
+                    if (fromUpscaledOutput && mip == 0)
+                    {
+                        const glm::vec2 offset = jitterScreenOffsetUv();
+                        push.offsetU = offset.x;
+                        push.offsetV = offset.y;
+                    }
                     cmd.pushData(&push, sizeof(push));
                     cmd.dispatch((push.width + 7) / 8, (push.height + 7) / 8, 1);
                 });

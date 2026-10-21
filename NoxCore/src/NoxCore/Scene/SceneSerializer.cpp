@@ -1562,7 +1562,12 @@ namespace Nox
             if (environmentLightComponent["Moon"])
                 elc.Moon = environmentLightComponent["Moon"].as<bool>();
             if (environmentLightComponent["MoonIntensity"])
+            {
                 elc.MoonIntensity = environmentLightComponent["MoonIntensity"].as<float>();
+                // Scenes saved with the old default (0.03, far too bright a night) take the new one.
+                if (elc.MoonIntensity == 0.03f)
+                    elc.MoonIntensity = EnvironmentLightComponent{}.MoonIntensity;
+            }
             if (environmentLightComponent["MoonColor"])
                 elc.MoonColor = environmentLightComponent["MoonColor"].as<glm::vec3>();
             if (environmentLightComponent["MoonAngularDiameter"])

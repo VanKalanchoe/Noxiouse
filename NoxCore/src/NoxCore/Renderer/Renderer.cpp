@@ -2297,6 +2297,8 @@ namespace Nox
         m_autoExposureBuildPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
         desc.shaders.front().entryPoint = "reduceMain";
         m_autoExposureReducePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        desc.shaders.front().entryPoint = "adaptMain";
+        m_autoExposureAdaptPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
     void Renderer::createColorPyramidPipelines(bool forceCompile)

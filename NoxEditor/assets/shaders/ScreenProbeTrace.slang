@@ -154,23 +154,54 @@ struct ScreenProbeTraceOutput
 float4 screen_probe_trace_ray(ScreenProbeVertex input, PushConstantScreenProbe pushConstant);
 
 // One sample of the emissive meshes from the probe, behind its shadow ray: its share of the probe's irradiance / pi (before the
-// cosine of the direction the irradiance is for) and its direction.
+// cosine of the direction the irradiance is for) and its direction. Resampled from ScreenProbeEmissiveCandidates points by what
+// each would give unshadowed (its emission, texture included, the probe's cosine, the distance): the list's own pick knows
+// neither where the probe is nor that most of a facade's emissive texture is dark windows, and its raw samples boiled.
+static const uint ScreenProbeEmissiveCandidates = 8;
+
 float4 screen_probe_emissive_sample(UniformBufferObject* ubo, float3 origin, float3 probeNormal, uint seed)
 {
     if (ubo->emissiveLightCount == 0 || ubo->tlasDeviceAddress == 0)
         return float4(0.0);
-    const float4 u = float4(screen_probe_random(seed), screen_probe_random(seed ^ 0x9e3779b9u), screen_probe_random(seed ^ 0x85ebca6bu),
-                            screen_probe_random(seed ^ 0xc2b2ae35u));
-    const EmissiveLights::Sample sample = EmissiveLights::sample(ubo, origin, u);
-    if (!sample.valid || dot(sample.direction, probeNormal) <= 0.0)
+    // Closer than 10 cm a lamp counts as 10 cm away, as the probe rays' light sampling does (no 1/d^2 spike next to a fixture).
+    const float nearDistance = 0.1 * ubo->unitsPerMeter;
+
+    EmissiveLights::Sample chosen = (EmissiveLights::Sample)0;
+    float chosenTarget = 0.0;
+    float weightSum = 0.0;
+    for (uint candidate = 0; candidate < ScreenProbeEmissiveCandidates; ++candidate)
+    {
+        const uint candidateSeed = screen_probe_hash(seed + candidate * 0x9e3779b9u);
+        const float4 u = float4(screen_probe_random(candidateSeed), screen_probe_random(candidateSeed ^ 0x68e31da4u),
+                                screen_probe_random(candidateSeed ^ 0xb5297a4du), screen_probe_random(candidateSeed ^ 0x1b56c4e9u));
+        EmissiveLights::Sample sample = EmissiveLights::sample(ubo, origin, u);
+        const float cosProbe = dot(sample.direction, probeNormal);
+        if (!sample.valid || cosProbe <= 0.0)
+            continue;
+        sample.radiance *= min(1.0, sample.distance * sample.distance / (nearDistance * nearDistance));
+        const float target = dot(sample.radiance, float3(0.2126, 0.7152, 0.0722)) * cosProbe;
+        const float weight = target / sample.pdf;
+        if (!(weight > 0.0) || !isfinite(weight))
+            continue;
+        weightSum += weight;
+        if (screen_probe_random(candidateSeed ^ 0x2545f491u) * weightSum < weight)
+        {
+            chosen = sample;
+            chosenTarget = target;
+        }
+    }
+    if (weightSum <= 0.0 || chosenTarget <= 0.0)
         return float4(0.0);
-    if (screen_probe_occluded(ubo, origin, sample.direction, max(sample.distance - 0.02 * ubo->unitsPerMeter, 0.0)))
+    if (screen_probe_occluded(ubo, origin, chosen.direction, max(chosen.distance - 0.02 * ubo->unitsPerMeter, 0.0)))
         return float4(0.0);
-    // E / pi = 1 / (pi K) * sum(L cos / pdf); the cosine is the irradiance pass's.
-    float3 share = sample.radiance / (sample.pdf * ScreenProbePi * float(ScreenProbeEmissiveSamples));
+
+    // RIS: L(y) / target(y) * mean candidate weight; E / pi = 1 / (pi K) * sum over the probe's K samples, the cosine the irradiance
+    // pass's.
+    const float contributionWeight = weightSum / (float(ScreenProbeEmissiveCandidates) * chosenTarget);
+    float3 share = chosen.radiance * contributionWeight / (ScreenProbePi * float(ScreenProbeEmissiveSamples));
     if (any(isnan(share)) || any(isinf(share)))
         return float4(0.0);
-    return float4(min(share, float3(60000.0)), screen_probe_pack_direction(sample.direction));
+    return float4(min(share, float3(60000.0)), screen_probe_pack_direction(chosen.direction));
 }
 
 [shader("fragment")]

@@ -34,3 +34,18 @@ void reduceMain(uint3 tid : SV_DispatchThreadID, uniform PushConstantAutoExposur
     RWTexture2D<float> output = RWTexture2D<float>.Handle(uint2(pc.outputIndex, 0));
     output[tid.xy] = average * 0.25;
 }
+
+// The eye adapts over time, not at once: the adapted log2 average (one texel, kept across frames) moves towards this frame's
+// (the pyramid's last mip) by `adaptation` (1 - exp(-dt * speed), from the frame time). Without it the exposure jumped with every
+// noisy frame and every bright object entering the view.
+[shader("compute")]
+[numthreads(1, 1, 1)]
+void adaptMain(uint3 tid : SV_DispatchThreadID, uniform PushConstantAutoExposure pc)
+{
+    Texture2D<float> source = Texture2D<float>.Handle(uint2(pc.sourceIndex, 0));
+    const float current = source.Load(int3(0, 0, pc.sourceMip));
+    RWTexture2D<float> adapted = RWTexture2D<float>.Handle(uint2(pc.outputIndex, 0));
+    const float previous = adapted[uint2(0, 0)];
+    const bool valid = pc.historyValid != 0 && isfinite(previous);
+    adapted[uint2(0, 0)] = valid ? lerp(previous, current, saturate(pc.adaptation)) : current;
+}

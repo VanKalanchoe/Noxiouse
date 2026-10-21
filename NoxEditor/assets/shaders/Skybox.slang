@@ -200,10 +200,9 @@
         else                starDirection = float3(starUv.x, starUv.y, side);
         starDirection = normalize(starDirection);
 
-        // Flux: a Pareto tail over ~nine magnitudes (count ~ flux^-1.2); the brightest about a full moon's / 25000. The faintest at
-        // 3e-4 of it: ~4x as many stars bright enough to see as at 1e-4 (a few hundred were too sparse a sky).
+        // Flux: a Pareto tail over ten magnitudes (count ~ flux^-1.2); the brightest about a full moon's / 25000.
         const float brightest = 1.5e-6;
-        const float flux = min(brightest * 3e-4 * pow(max(starRandom(state), 1e-6), -1.0 / 1.2), brightest);
+        const float flux = min(brightest * 1e-4 * pow(max(starRandom(state), 1e-6), -1.0 / 1.2), brightest);
         const float temperature = starRandom(state);
         float3 color = lerp(float3(1.0, 0.72, 0.5), float3(0.72, 0.82, 1.0), temperature);
         color /= dot(color, float3(0.2126, 0.7152, 0.0722));

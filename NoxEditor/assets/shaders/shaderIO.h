@@ -1514,6 +1514,8 @@ struct PushConstantAutoExposure
     uint32_t outputIndex;
     uint32_t sourceMip;
     uint32_t dimension;
+    float adaptation;      // adaptMain: how far the adapted average moves towards this frame's (0..1, from the frame time)
+    uint32_t historyValid; // adaptMain: 0: start at this frame's average
 };
 
 // ColorPyramid.slang: the refraction source of transparent surfaces (copy, then 2x2 downsamples).
@@ -1524,7 +1526,9 @@ struct PushConstantColorPyramid
     uint32_t sourceMip;
     uint32_t width;        // of the mip being written
     uint32_t height;
-    uint32_t padding;
+    // copyScaledMain: where in the source this frame's (jittered) pixel is, in uv: the jitter's screen offset, taken off.
+    float offsetU;
+    float offsetV;
 };
 
 // TAA.slang: the engine's own temporal anti-aliasing (when DLSS does not run). Sampled slots with the image heap's offset added.

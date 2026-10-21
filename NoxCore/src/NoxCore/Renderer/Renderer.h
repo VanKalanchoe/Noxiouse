@@ -959,6 +959,8 @@ namespace Nox
         // instead of into its noisy input: RR's guides describe the opaque surface behind them, and glass refracting the raw ray
         // traced lighting came out as noise RR could not resolve.
         bool transparentsAfterRayReconstruction() const;
+        // How far this frame's jitter moves a point on screen, in uv (y down): from the jittered and the plain projection.
+        glm::vec2 jitterScreenOffsetUv() const;
         void addTransparentsAfterRRPasses();
         // Whether the transparent buckets have draws this frame.
         bool hasTransparentDraws() const;
@@ -1084,6 +1086,9 @@ namespace Nox
         std::unique_ptr<NRI::Pipeline> m_postProcessPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_autoExposureBuildPipeline;
         std::unique_ptr<NRI::Pipeline> m_autoExposureReducePipeline;
+        std::unique_ptr<NRI::Pipeline> m_autoExposureAdaptPipeline;
+        std::chrono::steady_clock::time_point m_autoExposureLastTime{};
+        uint64_t m_autoExposureLastFrame = 0;
         // ColorPyramid.slang: the refraction source of glass (copy, downsample).
         std::unique_ptr<NRI::Pipeline> m_colorPyramidCopyPipeline;
         std::unique_ptr<NRI::Pipeline> m_colorPyramidCopyScaledPipeline;

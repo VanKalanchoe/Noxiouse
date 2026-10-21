@@ -346,8 +346,9 @@ namespace Nox
         bool SunThroughAtmosphere = true;
         // Night (procedural sky): a moon lights the scene and the sky once the sun is down, and the stars come out.
         bool Moon = true;
-        float MoonIntensity = 0.03f;            // a full moon's light, in the sun's units (sun 10 = daylight); the real moon is ~1/400000
-                                                // of the sun: this is brighter so moonlit scenes read (with auto exposure)
+        float MoonIntensity = 0.004f;           // a full moon's light, in the sun's units (sun 10 = daylight); the real moon is ~1/400000
+                                                // of the sun: this is ~100x that so moonlit scenes read with auto exposure, yet stay a
+                                                // night (lamps outshine it). Was 0.03: a grey day once auto exposure made it up.
         glm::vec3 MoonColor{ 0.75f, 0.85f, 1.0f };
         float MoonAngularDiameter = 0.53f;      // degrees (the real moon's)
         bool MoonOppositeSun = true;            // always opposite the sun: a full moon; else at MoonElevation / MoonAzimuth (degrees,
