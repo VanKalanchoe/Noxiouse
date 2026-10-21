@@ -34,6 +34,8 @@
 #include "NoxCore/Asset/MaterialSerializer.h"
 #include "NoxCore/Utils/Utils.h"
 
+#include <yaml-cpp/yaml.h>
+
 namespace Nox
 {
     namespace
@@ -1997,6 +1999,99 @@ namespace Nox
         }
     }
 
+    // NVIDIA RTXPT's hand-tuned materials for a model (RTXPT-Assets/Materials/<model>.<material>.material.json, which RTXPT's
+    // MaterialsBaker prefers over the glTF's): roughness of foliage, fabric and plants, specular colors, and the emission of
+    // the lamps (Bistro's bulbs are 30-50x their glTF emission there). Looked up in a "Materials" folder next to the glTF or in
+    // any folder above it; nothing changes when there is none. Read with yaml-cpp (JSON is YAML). Diffuse transmission and the
+    // other RTXPT-only fields have no counterpart here yet.
+    static void ApplyRtxptMaterialOverride(const std::filesystem::path& gltfPath, MaterialData& material)
+    {
+        if (material.Name.empty())
+            return;
+        // The folder that has them, per model, found once (thread_local: imports run on jobs).
+        thread_local std::unordered_map<std::string, std::filesystem::path> s_Folders;
+        const std::string model = gltfPath.stem().string();
+        const std::string key = gltfPath.parent_path().string() + "|" + model;
+        auto found = s_Folders.find(key);
+        if (found == s_Folders.end())
+        {
+            std::filesystem::path folder;
+            std::error_code error;
+            for (std::filesystem::path directory = gltfPath.parent_path(); !directory.empty(); directory = directory.parent_path())
+            {
+                const std::filesystem::path candidate = directory / "Materials";
+                if (std::filesystem::is_directory(candidate, error))
+                {
+                    for (const auto& entry : std::filesystem::directory_iterator(candidate, error))
+                    {
+                        const std::string name = entry.path().filename().string();
+                        if (name.rfind(model + ".", 0) == 0 && name.size() > 14 && name.ends_with(".material.json"))
+                        {
+                            folder = candidate;
+                            break;
+                        }
+                    }
+                }
+                if (!folder.empty() || directory == directory.parent_path())
+                    break;
+            }
+            found = s_Folders.emplace(key, folder).first;
+            if (!folder.empty())
+                NOX_CORE_INFO("Using RTXPT material overrides from {}", folder.string());
+        }
+        if (found->second.empty())
+            return;
+
+        const std::filesystem::path file = found->second / (model + "." + material.Name + ".material.json");
+        std::error_code error;
+        if (!std::filesystem::exists(file, error))
+            return;
+        try
+        {
+            const YAML::Node json = YAML::LoadFile(file.string());
+            auto number = [&](const char* name, float fallback) { return json[name] ? json[name].as<float>() : fallback; };
+            auto color = [&](const char* name, glm::vec3 fallback)
+            {
+                const YAML::Node node = json[name];
+                return node && node.IsSequence() && node.size() >= 3 ? glm::vec3(node[0].as<float>(), node[1].as<float>(), node[2].as<float>())
+                                                                     : fallback;
+            };
+            const bool specularGloss = json["UseSpecularGlossModel"] && json["UseSpecularGlossModel"].as<bool>();
+            if (specularGloss)
+            {
+                // RTXPT: roughness = 1 - glossTexture * (1 - Roughness), i.e. its Roughness is 1 - the glossiness factor.
+                material.Workflow = 1.0f;
+                material.DiffuseFactor = glm::vec4(color("BaseOrDiffuseColor", glm::vec3(material.DiffuseFactor)), material.DiffuseFactor.a);
+                material.SpecularFactor = glm::vec4(color("SpecularColor", glm::vec3(material.SpecularFactor)),
+                                                    1.0f - number("Roughness", 1.0f - material.SpecularFactor.a));
+            }
+            else
+            {
+                material.BaseColorFactor = glm::vec4(color("BaseOrDiffuseColor", glm::vec3(material.BaseColorFactor)), material.BaseColorFactor.a);
+                material.RoughnessFactor = number("Roughness", material.RoughnessFactor);
+                material.MetallicFactor = number("Metalness", material.MetallicFactor);
+            }
+            material.IOR = number("IoR", material.IOR);
+            if (json["EnableTransmission"])
+                material.TransmissionFactor = json["EnableTransmission"].as<bool>() ? number("TransmissionFactor", 0.0f) : 0.0f;
+            const glm::vec3 emissive = color("EmissiveColor", material.EmissiveFactor);
+            const float emissiveIntensity = number("EmissiveIntensity", material.emissiveStrength);
+            if (glm::dot(emissive, emissive) > 0.0f && emissiveIntensity > 0.0f)
+            {
+                material.EmissiveFactor = emissive;
+                material.emissiveStrength = emissiveIntensity;
+            }
+            else if (json["EmissiveColor"])
+            {
+                material.EmissiveFactor = glm::vec3(0.0f);
+            }
+        }
+        catch (const std::exception& exception)
+        {
+            NOX_CORE_WARN("RTXPT material override {} could not be read: {}", file.string(), exception.what());
+        }
+    }
+
     std::vector<MeshData> MeshImporter::ParseGltfToMeshData
     (
         const std::filesystem::path& path,
@@ -2722,6 +2817,7 @@ namespace Nox
                         materialData.RoughnessFactor = 0.0f;
                     }
                     materialData.emissiveStrength = emissiveStrength;
+                    ApplyRtxptMaterialOverride(path, materialData);
                 }
 
                 outMaterials.push_back(materialData);
