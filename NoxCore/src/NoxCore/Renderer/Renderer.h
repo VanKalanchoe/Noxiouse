@@ -959,6 +959,11 @@ namespace Nox
         // instead of into its noisy input: RR's guides describe the opaque surface behind them, and glass refracting the raw ray
         // traced lighting came out as noise RR could not resolve.
         bool transparentsAfterRayReconstruction() const;
+        // Screen-probe GI's last frame (its history reprojection): the jittered projection and view it was drawn with, its jitter.
+        glm::mat4 m_screenProbePrevProj{ 1.0f };
+        glm::mat4 m_screenProbePrevView{ 1.0f };
+        glm::vec2 m_screenProbePrevJitterUv{ 0.0f };
+        bool m_screenProbePrevMatricesValid = false;
         // How far this frame's jitter moves a point on screen, in uv (y down): from the jittered and the plain projection.
         glm::vec2 jitterScreenOffsetUv() const;
         void addTransparentsAfterRRPasses();

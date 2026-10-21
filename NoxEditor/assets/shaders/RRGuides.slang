@@ -69,7 +69,7 @@ void guidesMain(uint3 dispatchThreadID : SV_DispatchThreadID, uniform PushConsta
     float4 materialSample = materialTex.Load(int3(pixel, 0));
 
     // Unlit (workflow 2): the lighting outputs the base color itself.
-    if (materialSample.b >= 2.0)
+    if (materialSample.b >= 0.75)
     {
         diffuseOut[pixel] = float4(baseColor, 1.0);
         specularOut[pixel] = float4(0.0, 0.0, 0.0, 1.0);

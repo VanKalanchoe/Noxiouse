@@ -57,7 +57,6 @@ float4 fragMain(RTUpsampleVertex input, uniform PushConstantRTUpsample pushConst
 
     const int2 pixel = int2(input.pos.xy);
     const int subsample = int(max(ubo->rtSubsample, 1u));
-    const int2 offset = int2(ubo->rtSubsampleOffset & 0xFFFFu, ubo->rtSubsampleOffset >> 16);
     const int2 sourceMax = int2(pushConstant.sourceSize) - 1;
     const int2 pixelMax = int2(pushConstant.viewportSize) - 1;
     const int2 block = min(pixel / subsample, sourceMax);
@@ -78,7 +77,7 @@ float4 fragMain(RTUpsampleVertex input, uniform PushConstantRTUpsample pushConst
             const int2 candidate = block + int2(dx, dy);
             if (any(candidate < 0) || any(candidate > sourceMax))
                 continue;
-            const int2 traced = min(candidate * subsample + offset, pixelMax);
+            const int2 traced = min(candidate * subsample + rt_block_offset(ubo, candidate), pixelMax);
             const float tracedDepth = depthTex.Load(int3(traced, 0));
             if (tracedDepth <= 0.0)
                 continue;

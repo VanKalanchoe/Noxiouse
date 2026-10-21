@@ -154,7 +154,7 @@ float4 fragMain(
     float4 materialSample = materialTex.Load(int3(pixelCoord, 0));
 
     float lenSqN = dot(normalSample.rgb, normalSample.rgb);
-    if (lenSqN < 1e-6 || materialSample.b >= 2.0) // Invalid normal or Unlit material
+    if (lenSqN < 1e-6 || materialSample.b >= 0.75) // Invalid normal or Unlit material
     {
         return noReflection(ubo, pushConstant.denoiserMode);
     }
@@ -193,7 +193,9 @@ float4 fragMain(
     else
     {
         // Glossy surface with active denoiser (NRD / DLSS-RR): GGX VNDF jitter
-        float ign = interleaved_gradient_noise(float2(pixelCoord), pushConstant.frameIndex);
+        // The noise by the block, not the traced pixel: traced pixels 2 apart got nearly the same gradient noise.
+        const float2 noisePixel = (smoothFill || ubo->rtSubsample <= 1u) ? float2(pixelCoord) : floor(input.pos.xy);
+        float ign = interleaved_gradient_noise(noisePixel, pushConstant.frameIndex);
         float2 u = float2(ign, frac(ign * 1.6180339887 + 0.314159));
         float3 M = sample_ggx_vndf(V, normal, roughness, u);
         R = reflect(-V, M);

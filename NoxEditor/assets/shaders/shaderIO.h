@@ -539,11 +539,25 @@ struct LightData
 #ifdef __SLANG__
 // The pixel a ray traced pass's fragment traces (UniformBufferObject::rtSubsample): its own at full ray tracing resolution, one of
 // its block's otherwise.
+// Which pixel of its block a block traces this frame: each block its own place in the 4-frame cycle (a hash of the block). The
+// whole screen moving its pattern together every frame was structured noise NRD and DLSS RR kept as 2x2 blotches.
+int2 rt_block_offset(UniformBufferObject* ubo, int2 block)
+{
+    if (ubo->rtSubsample <= 1u)
+        return int2(0, 0);
+    static const int2 order[4] = { int2(0, 0), int2(1, 1), int2(1, 0), int2(0, 1) };
+    uint h = (uint(block.x) * 0x8da6b343u) ^ (uint(block.y) * 0xd8163841u);
+    h ^= h >> 13;
+    h *= 0x5bd1e995u;
+    h ^= h >> 15;
+    return order[(ubo->frameIndex + h) & 3u] * int(ubo->rtSubsample) / 2;
+}
+
 int2 rt_trace_pixel(UniformBufferObject* ubo, float2 fragmentPosition, float2 viewportSize)
 {
     const uint subsample = max(ubo->rtSubsample, 1u);
-    const int2 offset = int2(ubo->rtSubsampleOffset & 0xFFFFu, ubo->rtSubsampleOffset >> 16);
-    return min(int2(fragmentPosition) * int(subsample) + offset, int2(viewportSize) - 1);
+    const int2 block = int2(fragmentPosition);
+    return min(block * int(subsample) + rt_block_offset(ubo, block), int2(viewportSize) - 1);
 }
 
 // NRD's distances are the scene's (world units). The view depth it reads for the sky lies beyond its denoising range (the renderer
@@ -1644,6 +1658,10 @@ struct PushConstantScreenProbe
     uint32_t historyValid;
     uint32_t maxHistory; // frames accumulated at most
     uint32_t emissiveTextureIndex; // Irradiance: the trace's emissive light samples (0xFFFFFFFF: none)
+    // Integrate: how far the camera jitter moved the image this frame and last frame (uv, y down). The motion vectors are
+    // jitter-free, the pixels (and the history's) are not.
+    vec2 currJitterUv;
+    vec2 prevJitterUv;
 };
 
 struct PushConstantDDGIDebug

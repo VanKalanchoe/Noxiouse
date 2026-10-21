@@ -48,5 +48,6 @@ float4 fragMain(ScreenProbeVertex input, uniform PushConstantScreenProbe pushCon
             }
         }
     }
+    sum = all(isfinite(sum)) ? min(sum, float3(30000.0)) : float3(0.0);
     return float4(sum, 1.0);
 }

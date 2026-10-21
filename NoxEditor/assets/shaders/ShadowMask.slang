@@ -244,7 +244,9 @@
             return output;
         }
 
-        float ign = interleaved_gradient_noise(float2(pixelCoord), pushConstant.frameIndex);
+        // The noise by the block, not the traced pixel: traced pixels 2 apart got nearly the same gradient noise.
+        const float2 noisePixel = ubo->rtSubsample <= 1u ? float2(pixelCoord) : floor(input.pos.xy);
+        float ign = interleaved_gradient_noise(noisePixel, pushConstant.frameIndex);
         float phiOffset = ign;
         float rOffset = frac(ign * 1.6180339887 + 0.314159);
 

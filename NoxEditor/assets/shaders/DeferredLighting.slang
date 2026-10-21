@@ -13,7 +13,20 @@
     };
     groupshared DeferredLightingPayload gPayload;
 
-    [shader("task")]
+    // The sky's irradiance at a normal, unoccluded (luminance; the same units as the GI's irradiance / pi): what the GI is compared
+// with to know how much of the sky a point sees, so its reflection of the sky is held back as much (indoors, under awnings). It used
+// to be compared with the Radiance Scale slider's value (1), which a lit surface's GI exceeds at once: no occlusion, everything
+// reflected the whole sky and looked wet.
+float skyIrradianceLuma(UniformBufferObject* ubo, float3 n)
+{
+    if (ubo->irradianceMapIndex == 0xFFFFFFFF)
+        return max(ubo->scaleIBLAmbient, 0.01);
+    TextureCube irradiance = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + ubo->irradianceMapIndex, 0));
+    SamplerState irradianceSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_IRRADIANCE, 0));
+    return max(dot(irradiance.SampleLevel(irradianceSampler, n, 0).rgb * ubo->scaleIBLAmbient, float3(0.2126, 0.7152, 0.0722)), 1e-4);
+}
+
+[shader("task")]
     [numthreads(1, 1, 1)]
     void taskMain()
     {
@@ -375,7 +388,7 @@
 
         // --- UNLIT MATERIAL CHECK ---
         // If material is UNLIT (workflow == 2.0), bypass all lighting and output base color directly!
-        if (materialSample.b >= 2.0)
+        if (materialSample.b >= 0.75)
         {
             TonemapParameters tonemapParams;
             tonemapParams.exposure = ubo->exposure;
@@ -485,7 +498,8 @@
 
                 float NdotL_raw = dot(n, l);
                 bool isDoubleSided = (materialSample.a > 0.5);
-                if (isDoubleSided && NdotL_raw < 0.0)
+                const bool backLit = isDoubleSided && NdotL_raw < 0.0;
+                if (backLit)
                 {
                     // Translucent thin cloth / foliage: sun transmits through to the back face
                     NdotL_raw = -NdotL_raw * 0.6;
@@ -540,7 +554,8 @@
                 );
 
                 float3 lightRadiance = light.color.rgb * light.color.w * attenuation * lightShadow;
-                directLighting += evaluateDirectLight(pbrInputs, lightRadiance);
+                // Light through a leaf or cloth from behind is diffuse: no specular highlight on the side it leaves.
+                directLighting += backLit ? NdotL * lightRadiance * diffuse(pbrInputs) : evaluateDirectLight(pbrInputs, lightRadiance);
             }
         }
 
@@ -573,8 +588,7 @@
 
             // The sky's reflection only as far as the sky reaches this surface (indoors it does not).
             const float giLuma = dot(screenProbeIrradiance, float3(0.2126, 0.7152, 0.0722));
-            const float skyLuma = max(ubo->scaleIBLAmbient, 0.01);
-            specularOcclusion = saturate(giLuma / skyLuma);
+            specularOcclusion = saturate(giLuma / skyIrradianceLuma(ubo, n));
             ambientSpecular *= specularOcclusion;
 
             // A rough reflection's wide lobe sees about the light around the surface, not the sky: the GI in place of the
@@ -596,8 +610,7 @@
 
             // Prevent outdoor skybox specular from leaking onto dark indoor surfaces
             float restirLuma = dot(restirDiffuse, float3(0.2126, 0.7152, 0.0722));
-            float skyLuma = max(ubo->scaleIBLAmbient, 0.01);
-            specularOcclusion = saturate(restirLuma / skyLuma + 0.15);
+            specularOcclusion = saturate(restirLuma / skyIrradianceLuma(ubo, n) + 0.15);
             ambientSpecular *= specularOcclusion;
         }
         else if ((pushConstant.diffuseGIMode == 1 || ubo->enableDDGI != 0) && ubo->ddgiIrradianceTextureIndex != 0xFFFFFFFF && ubo->ddgiDistanceTextureIndex != 0xFFFFFFFF)
@@ -614,8 +627,7 @@
 
             // Prevent outdoor skybox specular from leaking onto dark indoor surfaces
             float ddgiLuma = dot(ddgiIrradiance, float3(0.2126, 0.7152, 0.0722));
-            float skyLuma = max(ubo->scaleIBLAmbient, 0.01);
-            specularOcclusion = saturate(ddgiLuma / skyLuma);
+            specularOcclusion = saturate(ddgiLuma / skyIrradianceLuma(ubo, n));
             ambientSpecular *= specularOcclusion;
         }
 
@@ -753,8 +765,10 @@
         // =========================================================================
         // Mode 0: FULL PBR LIT SCENE (Direct + IBL + AO + Emission + Reflections)
         // =========================================================================
-        float3 finalColor = directLighting + iblColor;
-        finalColor = lerp(finalColor, finalColor * occlusion, 1.0);
+        // Ambient occlusion darkens the ambient diffuse only: the direct light has its shadows, the ambient specular its own
+        // specular occlusion (getIBLContribution, the GI's above). Multiplying everything by it darkened lit surfaces and, with
+        // half-resolution RTAO cycling through the pixels of each block, made the whole image flicker with it.
+        float3 finalColor = directLighting + ambientDiffuse * occlusion + ambientSpecular;
         finalColor += emissionSample.rgb;
         const float3 toSurface = worldPos - ubo->cameraWorldPos.xyz;
         const float surfaceDistance = length(toSurface);

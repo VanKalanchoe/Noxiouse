@@ -115,7 +115,9 @@ ScreenProbeIntegrateOutput fragMain(ScreenProbeVertex input, uniform PushConstan
             }
         }
     }
-    const float3 current = weightSum >= 0.01 ? sum / weightSum : screen_probe_fallback(ubo, position, normal, geometricNormal);
+    float3 current = weightSum >= 0.01 ? sum / weightSum : screen_probe_fallback(ubo, position, normal, geometricNormal);
+    if (!all(isfinite(current)))
+        current = screen_probe_fallback(ubo, position, normal, geometricNormal);
 
     // Last frame's result for this surface: bilinear over the four pixels around where it was, each only if it was this surface.
     float4 history = float4(0.0);
@@ -125,12 +127,15 @@ ScreenProbeIntegrateOutput fragMain(ScreenProbeVertex input, uniform PushConstan
         if (pushConstant.velocityTextureIndex != 0xFFFFFFFF)
         {
             Texture2D velocityTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.velocityTextureIndex, 0));
-            previousUV = pixelCenter / pushConstant.viewportSize + velocityTex.Load(int3(pixel, 0)).xy;
+            // This (jittered) pixel's unjittered position, moved by the jitter-free motion, then to last frame's jittered pixels.
+            previousUV = pixelCenter / pushConstant.viewportSize - pushConstant.currJitterUv + velocityTex.Load(int3(pixel, 0)).xy +
+                         pushConstant.prevJitterUv;
         }
         else
         {
             const float4 previousClip = mul(ubo->prevProj, mul(ubo->prevView, float4(position, 1.0)));
-            previousUV = previousClip.w > 0.0 ? (previousClip.xy / previousClip.w) * float2(0.5, -0.5) + 0.5 : float2(-1.0);
+            previousUV = previousClip.w > 0.0 ? (previousClip.xy / previousClip.w) * float2(0.5, -0.5) + 0.5 + pushConstant.prevJitterUv
+                                              : float2(-1.0);
         }
 
         if (all(previousUV > 0.0) && all(previousUV < 1.0))
@@ -157,11 +162,17 @@ ScreenProbeIntegrateOutput fragMain(ScreenProbeVertex input, uniform PushConstan
                 const float planeDistance = abs(dot(previousPosition - position, geometricNormal)) / max(viewDistance, 1e-4);
                 if (planeDistance > 0.02)
                     continue;
+                // Against the flat surface's normal, not the normal-mapped one: with the camera jitter every frame lands on another
+                // texel of the normal map, and a bumpy surface threw its history away nearly every frame (and boiled).
                 const float3 previousRawNormal = previousNormalTex.Load(int3(tap, 0)).xyz;
-                if (dot(previousRawNormal, normal) < 0.7 * length(previousRawNormal))
+                const float3 previousNormal = previousRawNormal * rsqrt(max(dot(previousRawNormal, previousRawNormal), 1e-8));
+                if (dot(previousNormal, geometricNormal) < 0.5)
+                    continue;
+                const float4 tapValue = historyTex.Load(int3(tap, 0));
+                if (!all(isfinite(tapValue)))
                     continue;
                 const float weight = (offset.x != 0 ? previousF.x : 1.0 - previousF.x) * (offset.y != 0 ? previousF.y : 1.0 - previousF.y);
-                history += historyTex.Load(int3(tap, 0)) * weight;
+                history += tapValue * weight;
                 historyWeight += weight;
             }
             history = historyWeight > 0.05 ? history / historyWeight : float4(0.0);
@@ -180,11 +191,12 @@ ScreenProbeIntegrateOutput fragMain(ScreenProbeVertex input, uniform PushConstan
         const float historyLuma = dot(history.rgb, float3(0.2126, 0.7152, 0.0722));
         const float currentLuma = dot(current, float3(0.2126, 0.7152, 0.0722));
         const float limit = historyLuma * 3.0 + 1e-4;
-        if (currentLuma > limit)
+        if (currentLuma > limit && isfinite(currentLuma))
             currentClamped *= limit / currentLuma;
     }
-    const float3 result = history.a > 0.0 ? lerp(history.rgb, currentClamped, 1.0 / frames) : current;
-    output.irradiance = float4(max(result, 0.0), frames);
+    float3 result = history.a > 0.0 ? lerp(history.rgb, currentClamped, 1.0 / frames) : current;
+    result = all(isfinite(result)) ? clamp(result, 0.0, 30000.0) : (all(isfinite(current)) ? clamp(current, 0.0, 30000.0) : float3(0.0));
+    output.irradiance = float4(result, frames);
     output.distance = viewDistance;
     return output;
 }

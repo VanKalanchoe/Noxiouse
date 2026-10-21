@@ -106,8 +106,13 @@ float3 shadeRayHit(UniformBufferObject* ubo, uint instanceSlot, uint primitive, 
     float w2 = committedBary.y;
 
     float2 hitUV = w0 * vertex0.uv0 + w1 * vertex1.uv0 + w2 * vertex2.uv0;
-    float3 localNormal = normalize(w0 * vertex0.normal + w1 * vertex1.normal + w2 * vertex2.normal);
-    float3 hitNormal = normalize(mul((float3x3)hitLut.normalMatrix, localNormal));
+    // Zero vertex normals (imported meshes have them): the triangle's own normal instead of normalize(0) = NaN.
+    float3 hitNormal = mul((float3x3)hitLut.normalMatrix, w0 * vertex0.normal + w1 * vertex1.normal + w2 * vertex2.normal);
+    if (dot(hitNormal, hitNormal) <= 1e-20)
+        hitNormal = mul((float3x3)hitLut.normalMatrix, cross(vertex1.pos - vertex0.pos, vertex2.pos - vertex0.pos));
+    if (dot(hitNormal, hitNormal) <= 1e-20)
+        return float3(0.0);
+    hitNormal = normalize(hitNormal);
 
     if (hitLut.doubleSided != 0 && dot(hitNormal, -R) < 0.0)
     {
@@ -149,6 +154,12 @@ float3 shadeRayHit(UniformBufferObject* ubo, uint instanceSlot, uint primitive, 
 
     // Emissive light from hit surface (e.g. Cornell Box ceiling light)
     float3 emissiveLight = hitLut.emissiveFactor.rgb * hitLut.emissiveFactor.a;
+    // With its texture (a facade's emissive map is mostly dark windows: without it the whole facade glowed in reflections).
+    if (hitLut.emissiveTextureIndex != 0xFFFFFFFF && any(emissiveLight > 0.0))
+    {
+        Texture2D emissiveTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + hitLut.emissiveTextureIndex, 0));
+        emissiveLight *= emissiveTex.SampleLevel(SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0)), hitUV, 2.0).rgb;
+    }
 
     return directLight + ambientLight + emissiveLight;
 }

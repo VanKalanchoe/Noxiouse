@@ -52,7 +52,7 @@ namespace Nox
 
     NRI::Extent2D Renderer::reducedRTExtent() const
     {
-        const uint32_t divisor = std::max(m_rtSubsample, 1u);
+        const uint32_t divisor = std::max(uniformData.rtSubsample, 1u);
         return { (m_frame.renderExtent.width + divisor - 1) / divisor, (m_frame.renderExtent.height + divisor - 1) / divisor };
     }
 
@@ -116,7 +116,7 @@ namespace Nox
         m_frame.rtShadowsAdded = true;
 
         // At a lower ray tracing resolution the rays go into a reduced target, brought back below.
-        const bool reduced = m_rtSubsample > 1 && m_rtUpsamplePipelines[1];
+        const bool reduced = uniformData.rtSubsample > 1 && m_rtUpsamplePipelines[1];
         const RGTexture traceTarget = reduced ? createReducedRTTarget("RT Shadows (Reduced)", NRI::ImageFormat::R16G16_SFLOAT) : resources.RawShadowMask;
         const NRI::Extent2D traceExtent = reduced ? reducedRTExtent() : m_frame.renderExtent;
 
@@ -225,7 +225,7 @@ namespace Nox
         // 1-SPP GGX VNDF reflection -> raw reflection (radiance + hit distance); at a lower ray tracing resolution into a reduced
         // target, brought back below.
         const bool denoiseReflections = m_nrdReflectionDenoiser != NRI::NRDReflectionDenoiser::Off && m_device->isNRDInitialized();
-        const bool reduced = m_rtSubsample > 1 && m_rtUpsamplePipelines[0];
+        const bool reduced = uniformData.rtSubsample > 1 && m_rtUpsamplePipelines[0];
         const RGTexture traceTarget = reduced ? createReducedRTTarget("RT Reflections (Reduced)", NRI::ImageFormat::R16G16B16A16_SFLOAT)
                                               : resources.RawReflection;
         const NRI::Extent2D traceExtent = reduced ? reducedRTExtent() : m_frame.renderExtent;
@@ -629,7 +629,17 @@ namespace Nox
 
         shaderio::PushConstantScreenProbe common{};
         common.invViewProj = uniformData.invViewProj;
-        common.prevInvViewProj = glm::inverse(uniformData.prevProj * uniformData.prevView);
+        // Last frame's pixels were drawn with last frame's jittered projection: the history's depth unprojects with that one.
+        if (m_screenProbePrevMatricesValid)
+            common.prevInvViewProj = glm::mat4(glm::inverse(glm::dmat4(m_screenProbePrevProj) * glm::dmat4(m_screenProbePrevView)));
+        else
+            common.prevInvViewProj = glm::inverse(uniformData.prevProj * uniformData.prevView);
+        common.currJitterUv = jitterScreenOffsetUv();
+        common.prevJitterUv = m_screenProbePrevMatricesValid ? m_screenProbePrevJitterUv : common.currJitterUv;
+        m_screenProbePrevProj = uniformData.proj;
+        m_screenProbePrevView = uniformData.view;
+        m_screenProbePrevJitterUv = common.currJitterUv;
+        m_screenProbePrevMatricesValid = true;
         common.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
         common.inputTextureIndex = 0xFFFFFFFF;
         common.historyTextureIndex = 0xFFFFFFFF;

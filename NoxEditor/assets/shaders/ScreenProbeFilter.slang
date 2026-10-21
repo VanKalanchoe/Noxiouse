@@ -25,6 +25,11 @@ float4 fragMain(ScreenProbeVertex input, uniform PushConstantScreenProbe pushCon
 
     float3 sum = irradiance.Load(int3(texel, 0)).rgb;
     float weightSum = 1.0;
+    if (!all(isfinite(sum)))
+    {
+        sum = float3(0.0);
+        weightSum = 1e-6;
+    }
     for (int dy = -1; dy <= 1; ++dy)
     {
         for (int dx = -1; dx <= 1; ++dx)
@@ -41,7 +46,10 @@ float4 fragMain(ScreenProbeVertex input, uniform PushConstantScreenProbe pushCon
             weight *= (dx == 0 || dy == 0) ? 1.0 : 0.7; // the diagonal ones are farther
             if (weight < 0.01)
                 continue;
-            sum += irradiance.Load(int3(uint2(neighbour) * ScreenProbeIrradianceRes + local, 0)).rgb * weight;
+            const float3 value = irradiance.Load(int3(uint2(neighbour) * ScreenProbeIrradianceRes + local, 0)).rgb;
+            if (!all(isfinite(value)))
+                continue;
+            sum += value * weight;
             weightSum += weight;
         }
     }

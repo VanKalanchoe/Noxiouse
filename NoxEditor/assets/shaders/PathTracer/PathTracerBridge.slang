@@ -109,6 +109,38 @@ namespace Bridge
         return Ray::make(rayOrigin, rayDir, 0.001, 1e9);
     }
 
+    // Specular-glossiness as RTXPT's Donut loader turns it into metal-roughness (ConvertSpecularGlossToMetalRough, the same as the
+    // raster G-buffer's): a metalness solved from the diffuse and specular brightness, the base color from both, then the
+    // metal-rough F0 (dielectric 0.04 from the IOR, the base color for metal). Taking the specular color as F0 directly gave many
+    // Bistro dielectrics an F0 well below 0.04 and the path tracer and the raster path different materials.
+    float perceivedBrightness(float3 color)
+    {
+        return sqrt(0.299 * color.r * color.r + 0.587 * color.g * color.g + 0.114 * color.b * color.b);
+    }
+
+    void specGlossToMetalRough(float3 diffuseColor, float3 specularColor, float dielectricF0, out float metallic, out float3 diffuseAlbedo,
+                               out float3 specularF0)
+    {
+        const float dielectricSpecular = 0.04;
+        const float specularStrength = max(specularColor.r, max(specularColor.g, specularColor.b));
+        const float diffuseBrightness = perceivedBrightness(diffuseColor);
+        const float specularBrightness = perceivedBrightness(specularColor);
+        metallic = 0.0;
+        if (specularBrightness >= dielectricSpecular)
+        {
+            const float a = dielectricSpecular;
+            const float b = diffuseBrightness * (1.0 - specularStrength) / (1.0 - dielectricSpecular) + specularBrightness - 2.0 * dielectricSpecular;
+            const float c = dielectricSpecular - specularBrightness;
+            metallic = saturate((-b + sqrt(max(b * b - 4.0 * a * c, 0.0))) / (2.0 * a));
+        }
+        const float epsilon = 1e-6;
+        const float3 fromDiffuse = diffuseColor * ((1.0 - specularStrength) / (1.0 - dielectricSpecular) / max(1.0 - metallic, epsilon));
+        const float3 fromSpecular = (specularColor - dielectricSpecular * (1.0 - metallic)) / max(metallic, epsilon);
+        const float3 baseColor = saturate(lerp(fromDiffuse, fromSpecular, metallic * metallic));
+        diffuseAlbedo = baseColor * (1.0 - metallic);
+        specularF0 = lerp(float3(dielectricF0), baseColor, metallic);
+    }
+
     // Loads surface geometry and material data at hit point
     SurfaceData loadSurface(
         uint instanceID,
@@ -213,11 +245,8 @@ namespace Bridge
             float4 mrSample = mrTex.SampleLevel(textureSampler, uv, textureLod(mrTex, rayConeWidth, uvPerWorld, ubo->pathTracerTexLodBias));
             if (lut.workflow == 1.0)
             {
-                float3 specularColor = lut.specularFactor.rgb * mrSample.rgb;
                 roughness = 1.0 - lut.specularFactor.a * mrSample.a;
-                diffuseAlbedo = baseColor.rgb * (1.0 - max(specularColor.r, max(specularColor.g, specularColor.b)));
-                specularF0 = specularColor;
-                metallic = 0.0;
+                specGlossToMetalRough(baseColor.rgb, lut.specularFactor.rgb * mrSample.rgb, dielectricF0, metallic, diffuseAlbedo, specularF0);
             }
             else
             {
@@ -229,11 +258,8 @@ namespace Bridge
         }
         else if (lut.workflow == 1.0)
         {
-            float3 specularColor = lut.specularFactor.rgb;
             roughness = 1.0 - lut.specularFactor.a;
-            diffuseAlbedo = baseColor.rgb * (1.0 - max(specularColor.r, max(specularColor.g, specularColor.b)));
-            specularF0 = specularColor;
-            metallic = 0.0;
+            specGlossToMetalRough(baseColor.rgb, lut.specularFactor.rgb, dielectricF0, metallic, diffuseAlbedo, specularF0);
         }
 
         // Normal mapping

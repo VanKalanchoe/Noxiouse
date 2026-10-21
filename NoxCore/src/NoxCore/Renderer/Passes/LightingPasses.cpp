@@ -397,7 +397,7 @@ namespace Nox
         m_frame.occlusionRawAdded = true;
 
         // At a lower ray tracing resolution the rays go into a reduced target, brought back below.
-        const bool reduced = m_rtSubsample > 1 && m_rtUpsamplePipelines[2];
+        const bool reduced = uniformData.rtSubsample > 1 && m_rtUpsamplePipelines[2];
         const RGTexture traceTarget = reduced ? createReducedRTTarget("RTAO (Reduced)", NRI::ImageFormat::R16_SFLOAT) : resources.SSAORaw;
         const NRI::Extent2D traceExtent = reduced ? reducedRTExtent() : frame.renderExtent;
 

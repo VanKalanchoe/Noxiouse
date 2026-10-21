@@ -72,11 +72,17 @@ float3 screen_probe_shade_hit(UniformBufferObject* ubo, uint instanceSlot, uint 
     const float w0 = 1.0 - barycentrics.x - barycentrics.y;
     const float2 uv = w0 * v0.uv0 + barycentrics.x * v1.uv0 + barycentrics.y * v2.uv0;
     const float3 localNormal = w0 * v0.normal + barycentrics.x * v1.normal + barycentrics.y * v2.normal;
-    float3 normal = normalize(mul((float3x3)hit.normalMatrix, localNormal));
     // Which side the ray came from, by the triangle's own plane (an interpolated normal leans away near silhouettes), turned to
-    // the side the vertex normals say is the front.
+    // the side the vertex normals say is the front. Zero vertex normals (imported meshes have them) or a degenerate triangle
+    // must not normalize a zero vector: one NaN here spread through the filter and the history over the whole screen.
+    const float3 worldNormal = mul((float3x3)hit.normalMatrix, localNormal);
     float3 faceNormal = mul((float3x3)hit.normalMatrix, cross(v1.pos - v0.pos, v2.pos - v0.pos));
-    faceNormal = dot(faceNormal, faceNormal) > 1e-20 ? normalize(faceNormal) : normal;
+    const bool faceValid = dot(faceNormal, faceNormal) > 1e-20;
+    const bool smoothValid = dot(worldNormal, worldNormal) > 1e-20;
+    if (!faceValid && !smoothValid)
+        return float3(0.0);
+    faceNormal = faceValid ? normalize(faceNormal) : normalize(worldNormal);
+    float3 normal = smoothValid ? normalize(worldNormal) : faceNormal;
     if (dot(faceNormal, normal) < 0.0)
         faceNormal = -faceNormal;
 
@@ -179,7 +185,9 @@ float4 screen_probe_emissive_sample(UniformBufferObject* ubo, float3 origin, flo
         if (!sample.valid || cosProbe <= 0.0)
             continue;
         sample.radiance *= min(1.0, sample.distance * sample.distance / (nearDistance * nearDistance));
-        const float target = dot(sample.radiance, float3(0.2126, 0.7152, 0.0722)) * cosProbe;
+        // Not the cosine alone: the irradiance pass weighs a sample by the cosine of each direction it is for, so a sample picked
+        // for a near-zero probe cosine came out huge in the sideways directions (unbounded spikes).
+        const float target = dot(sample.radiance, float3(0.2126, 0.7152, 0.0722)) * (0.25 + 0.75 * cosProbe);
         const float weight = target / sample.pdf;
         if (!(weight > 0.0) || !isfinite(weight))
             continue;
@@ -201,7 +209,7 @@ float4 screen_probe_emissive_sample(UniformBufferObject* ubo, float3 origin, flo
     float3 share = chosen.radiance * contributionWeight / (ScreenProbePi * float(ScreenProbeEmissiveSamples));
     if (any(isnan(share)) || any(isinf(share)))
         return float4(0.0);
-    return float4(min(share, float3(60000.0)), screen_probe_pack_direction(chosen.direction));
+    return float4(min(share, float3(2000.0)), screen_probe_pack_direction(chosen.direction)); // 16 x 2000 stays a half float
 }
 
 [shader("fragment")]
@@ -287,7 +295,9 @@ float4 screen_probe_trace_ray(ScreenProbeVertex input, PushConstantScreenProbe p
 
     const float hitT = query.CommittedRayT();
     const uint seed = screen_probe_hash((probe.x * 9781u + probe.y * 6271u) ^ (ray * 26699u) ^ (pushConstant.frameIndex * 7919u));
-    const float3 radiance = screen_probe_shade_hit(ubo, query.CommittedRayInstanceCustomIndex(), query.CommittedPrimitiveIndex(),
-                                                   query.CommittedTriangleBarycentrics(), origin, direction, hitT, seed);
+    float3 radiance = screen_probe_shade_hit(ubo, query.CommittedRayInstanceCustomIndex(), query.CommittedPrimitiveIndex(),
+                                             query.CommittedTriangleBarycentrics(), origin, direction, hitT, seed);
+    // Half floats end at 65504: an overflow becomes Inf, then NaN in the history.
+    radiance = all(isfinite(radiance)) ? min(radiance, float3(30000.0)) : float3(0.0);
     return float4(radiance, min(hitT / max(ubo->unitsPerMeter, 1e-6), 60000.0));
 }

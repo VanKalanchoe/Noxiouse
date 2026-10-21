@@ -4993,7 +4993,12 @@ namespace Nox
         {
             // Ray tracing resolution: which pixel of each block the reduced RT passes trace this frame (all four over four frames).
             static constexpr uint32_t BlockOrder[4][2] = { { 0, 0 }, { 1, 1 }, { 1, 0 }, { 0, 1 } };
-            uniformData.rtSubsample = std::max(m_rtSubsample, 1u);
+            // Full resolution when an upsample pipeline is missing (a pass would then trace its full extent with the reduced
+            // pattern: garbage), and under DLSS Ray Reconstruction (it wants its own per-pixel noise, not 2x2-upsampled input).
+            const bool upsampleReady = m_rtUpsamplePipelines[0] && m_rtUpsamplePipelines[1] && m_rtUpsamplePipelines[2];
+            const bool rayReconstruction = m_dlssEnabled && m_dlssMode != NRI::UpscaleMode::Off && m_dlssRayReconstructionEnabled &&
+                                           m_device->isDLSSRayReconstructionSupported();
+            uniformData.rtSubsample = (upsampleReady && !rayReconstruction) ? std::max(m_rtSubsample, 1u) : 1u;
             const uint32_t* offset = BlockOrder[m_sceneFrameCounter % 4];
             uniformData.rtSubsampleOffset = uniformData.rtSubsample > 1 ? (offset[0] | (offset[1] << 16)) : 0u;
         }
