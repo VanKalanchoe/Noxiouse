@@ -20,6 +20,26 @@ static const uint ScreenProbeRayCount = ScreenProbeRayRes * ScreenProbeRayRes;
 static const uint ScreenProbeIrradianceInterior = 6; // octahedral irradiance per probe: 6 x 6 and a 1-texel border
 static const uint ScreenProbeIrradianceRes = ScreenProbeIrradianceInterior + 2;
 static const float ScreenProbePi = 3.14159265359;
+// Emissive meshes as lights (PathTracer/EmissiveLights.slang): every other ray texel each way (16 a probe) also samples a point on
+// one and traces a shadow ray to it, into a second target (ScreenProbeTrace): rgb its light's share of the probe's irradiance / pi
+// before the cosine, a its direction (octahedral, 12 bits each way, exact in a float). The irradiance pass adds them with the
+// cosine; the rays leave the emission of those meshes out (counted once). A lamp is a tiny target for 64 random rays: only this
+// way does it light the street under it.
+static const uint ScreenProbeEmissiveSamples = 16;
+
+float screen_probe_pack_direction(float3 direction)
+{
+    const float2 oct = saturate(oct_encode(direction) * 0.5 + 0.5);
+    const uint2 q = uint2(round(oct * 4095.0));
+    return float(q.x * 4096u + q.y);
+}
+
+float3 screen_probe_unpack_direction(float packed)
+{
+    const uint value = uint(packed);
+    const float2 oct = float2(float(value / 4096u), float(value % 4096u)) / 4095.0;
+    return oct_decode(oct * 2.0 - 1.0);
+}
 
 struct ScreenProbePayload
 {

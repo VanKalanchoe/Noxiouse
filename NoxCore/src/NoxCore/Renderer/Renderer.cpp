@@ -1525,7 +1525,8 @@ namespace Nox
         };
         m_screenProbePlacePipeline = create("assets/shaders/ScreenProbePlace.slang",
                                             { NRI::ImageFormat::R32G32B32A32_SFLOAT, NRI::ImageFormat::R16G16B16A16_SFLOAT });
-        m_screenProbeTracePipeline = create("assets/shaders/ScreenProbeTrace.slang", { NRI::ImageFormat::R16G16B16A16_SFLOAT });
+        m_screenProbeTracePipeline = create("assets/shaders/ScreenProbeTrace.slang",
+                                            { NRI::ImageFormat::R16G16B16A16_SFLOAT, NRI::ImageFormat::R32G32B32A32_SFLOAT });
         m_screenProbeIrradiancePipeline = create("assets/shaders/ScreenProbeIrradiance.slang", { NRI::ImageFormat::R16G16B16A16_SFLOAT });
         m_screenProbeFilterPipeline = create("assets/shaders/ScreenProbeFilter.slang", { NRI::ImageFormat::R16G16B16A16_SFLOAT });
         m_screenProbeIntegratePipeline = create("assets/shaders/ScreenProbeIntegrate.slang",
@@ -5141,11 +5142,12 @@ namespace Nox
         uniformData.lightDataReference = m_lightBuffers[currentImage]->getDeviceAddress();
         uniformData.lightCount = static_cast<uint32_t>(m_lightBufferObjects.size());
 
-        // Emissive meshes as lights, for the path tracer (it found them only by chance before: a lamp-lit room came out black).
+        // Emissive meshes as lights, for the path tracer and the screen-probe GI (they found them only by chance before: a lamp-lit
+        // room or street came out black).
         uniformData.emissiveLightCount = 0;
         uniformData.emissiveLightTotalWeight = 0.0f;
         uniformData.emissiveLightsReference = 0;
-        if (m_pathTracingEnabled)
+        if (m_pathTracingEnabled || (m_rayTracingEnabled && m_diffuseGIMode == 3))
         {
             const float total = m_gpuScene.CollectEmissiveLights(m_emissiveLights);
             const uint64_t required = sizeof(shaderio::EmissiveLightInstance) * m_emissiveLights.size();

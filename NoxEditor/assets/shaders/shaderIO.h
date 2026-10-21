@@ -1632,7 +1632,7 @@ struct PushConstantScreenProbe
     uint32_t tileSize;   // pixels per probe each way
     uint32_t historyValid;
     uint32_t maxHistory; // frames accumulated at most
-    uint32_t padding0;
+    uint32_t emissiveTextureIndex; // Irradiance: the trace's emissive light samples (0xFFFFFFFF: none)
 };
 
 struct PushConstantDDGIDebug

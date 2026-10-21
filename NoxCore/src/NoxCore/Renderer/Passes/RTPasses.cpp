@@ -602,6 +602,9 @@ namespace Nox
         atlasDesc.Width = rayExtent.width;
         atlasDesc.Height = rayExtent.height;
         resources.ScreenProbeRays = m_renderGraph.CreateTexture("Screen Probe Rays", atlasDesc);
+        RGTextureDesc emissiveDesc = atlasDesc;
+        emissiveDesc.Format = NRI::ImageFormat::R32G32B32A32_SFLOAT; // rgb + a packed direction (ScreenProbeCommon.slang)
+        const RGTexture emissiveSamples = m_renderGraph.CreateTexture("Screen Probe Emissive Samples", emissiveDesc);
         resources.ScreenProbeIrradiance[0] = m_renderGraph.CreateTexture("Screen Probe Irradiance", atlasDesc);
         resources.ScreenProbeIrradiance[1] = m_renderGraph.CreateTexture("Screen Probe Irradiance (Filtered)", atlasDesc);
 
@@ -640,6 +643,7 @@ namespace Nox
         common.tileSize = tile;
         common.historyValid = historyValid ? 1u : 0u;
         common.maxHistory = std::clamp(m_screenProbeMaxHistory, 1u, 256u);
+        common.emissiveTextureIndex = 0xFFFFFFFF;
 
         // Every pass is one triangle over its target.
         auto draw = [](NRI::CommandBuffer& cmd, NRI::Pipeline& pipeline, uint32_t targets, const shaderio::PushConstantScreenProbe& push)
@@ -694,6 +698,7 @@ namespace Nox
                     ReadDDGI(builder, resources, ddgiIndex);
                 }
                 builder.ColorTarget(resources.ScreenProbeRays, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
+                builder.ColorTarget(emissiveSamples, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
                 builder.SetRenderArea(rayExtent);
             },
             [this, res = &resources, common, draw](RGPassContext& context)
@@ -701,7 +706,7 @@ namespace Nox
                 shaderio::PushConstantScreenProbe push = common;
                 push.probePositionTextureIndex = context.Slot(res->ScreenProbePosition);
                 push.probeNormalTextureIndex = context.Slot(res->ScreenProbeNormal);
-                draw(context.Cmd(), *m_screenProbeTracePipeline, 1, push);
+                draw(context.Cmd(), *m_screenProbeTracePipeline, 2, push);
             });
 
         // 3. The rays convolved into each probe's irradiance.
@@ -709,17 +714,19 @@ namespace Nox
             [&](RGBuilder& builder)
             {
                 builder.Read(resources.ScreenProbeRays);
+                builder.Read(emissiveSamples);
                 builder.Read(resources.ScreenProbePosition);
                 builder.Read(resources.ScreenProbeNormal);
                 builder.ColorTarget(resources.ScreenProbeIrradiance[0], NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
                 builder.SetRenderArea(rayExtent);
             },
-            [this, res = &resources, common, draw](RGPassContext& context)
+            [this, res = &resources, common, draw, emissiveSamples](RGPassContext& context)
             {
                 shaderio::PushConstantScreenProbe push = common;
                 push.probePositionTextureIndex = context.Slot(res->ScreenProbePosition);
                 push.probeNormalTextureIndex = context.Slot(res->ScreenProbeNormal);
                 push.inputTextureIndex = context.Slot(res->ScreenProbeRays);
+                push.emissiveTextureIndex = context.Slot(emissiveSamples);
                 draw(context.Cmd(), *m_screenProbeIrradiancePipeline, 1, push);
             });
 

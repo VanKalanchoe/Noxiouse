@@ -6,6 +6,7 @@
 #include "ScreenProbeCommon.slang"
 #include "RayHitShading.slang"
 #include "LightSelection.slang"
+#include "PathTracer/EmissiveLights.slang"
 
 // Does this candidate stop light? Glass (transmission) never, cut-outs where their alpha passes, blended surfaces from half
 // opaque on.
@@ -103,6 +104,9 @@ float3 screen_probe_shade_hit(UniformBufferObject* ubo, uint instanceSlot, uint 
         albedo *= 1.0 - saturate(hit.metallicFactor);
 
     float3 emission = hit.emissiveFactor.rgb * hit.emissiveFactor.a;
+    // An emissive mesh the probes sample as a light: its light comes in through those samples (fragMain), not through the rays.
+    if (any(emission > 0.0) && EmissiveLights::find(ubo, instanceSlot) != 0xFFFFFFFF)
+        emission = float3(0.0);
     if (hit.emissiveTextureIndex != 0xFFFFFFFF && any(emission > 0.0))
     {
         Texture2D tex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + hit.emissiveTextureIndex, 0));
@@ -141,8 +145,62 @@ float3 screen_probe_shade_hit(UniformBufferObject* ubo, uint instanceSlot, uint 
     return direct + emission + albedo * bounce;
 }
 
+struct ScreenProbeTraceOutput
+{
+    float4 ray : SV_Target0;      // radiance, distance in meters
+    float4 emissive : SV_Target1; // an emissive light sample (ScreenProbeCommon.slang ScreenProbeEmissiveSamples), 0: none
+};
+
+float4 screen_probe_trace_ray(ScreenProbeVertex input, PushConstantScreenProbe pushConstant);
+
+// One sample of the emissive meshes from the probe, behind its shadow ray: its share of the probe's irradiance / pi (before the
+// cosine of the direction the irradiance is for) and its direction.
+float4 screen_probe_emissive_sample(UniformBufferObject* ubo, float3 origin, float3 probeNormal, uint seed)
+{
+    if (ubo->emissiveLightCount == 0 || ubo->tlasDeviceAddress == 0)
+        return float4(0.0);
+    const float4 u = float4(screen_probe_random(seed), screen_probe_random(seed ^ 0x9e3779b9u), screen_probe_random(seed ^ 0x85ebca6bu),
+                            screen_probe_random(seed ^ 0xc2b2ae35u));
+    const EmissiveLights::Sample sample = EmissiveLights::sample(ubo, origin, u);
+    if (!sample.valid || dot(sample.direction, probeNormal) <= 0.0)
+        return float4(0.0);
+    if (screen_probe_occluded(ubo, origin, sample.direction, max(sample.distance - 0.02 * ubo->unitsPerMeter, 0.0)))
+        return float4(0.0);
+    // E / pi = 1 / (pi K) * sum(L cos / pdf); the cosine is the irradiance pass's.
+    float3 share = sample.radiance / (sample.pdf * ScreenProbePi * float(ScreenProbeEmissiveSamples));
+    if (any(isnan(share)) || any(isinf(share)))
+        return float4(0.0);
+    return float4(min(share, float3(60000.0)), screen_probe_pack_direction(sample.direction));
+}
+
 [shader("fragment")]
-float4 fragMain(ScreenProbeVertex input, uniform PushConstantScreenProbe pushConstant) : SV_Target0
+ScreenProbeTraceOutput fragMain(ScreenProbeVertex input, uniform PushConstantScreenProbe pushConstant)
+{
+    ScreenProbeTraceOutput output;
+    output.ray = screen_probe_trace_ray(input, pushConstant);
+    output.emissive = float4(0.0);
+
+    const uint2 texel = uint2(input.pos.xy);
+    const uint2 probe = texel / ScreenProbeRayRes;
+    const uint2 local = texel % ScreenProbeRayRes;
+    if (probe.x >= pushConstant.probeCountX || probe.y >= pushConstant.probeCountY || any((local & 1u) != 0u))
+        return output;
+    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+    Texture2D positionTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.probePositionTextureIndex, 0));
+    const float4 probePosition = positionTex.Load(int3(probe, 0));
+    if (probePosition.w <= 0.0)
+        return output;
+    Texture2D normalTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.probeNormalTextureIndex, 0));
+    const float3 probeNormal = normalTex.Load(int3(probe, 0)).xyz;
+    const float viewDistance = length(probePosition.xyz - ubo->cameraWorldPos.xyz);
+    const float3 origin = probePosition.xyz + probeNormal * (0.01 * ubo->unitsPerMeter + 0.001 * viewDistance);
+    const uint seed = screen_probe_hash((probe.x * 7793u + probe.y * 3571u) ^ ((local.y * ScreenProbeRayRes + local.x) * 48611u) ^
+                                       (pushConstant.frameIndex * 104729u) ^ 0x5bd1e995u);
+    output.emissive = screen_probe_emissive_sample(ubo, origin, probeNormal, seed);
+    return output;
+}
+
+float4 screen_probe_trace_ray(ScreenProbeVertex input, PushConstantScreenProbe pushConstant)
 {
     const uint2 texel = uint2(input.pos.xy);
     const uint2 probe = texel / ScreenProbeRayRes;

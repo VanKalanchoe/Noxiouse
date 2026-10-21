@@ -431,11 +431,15 @@ namespace Nox
         void setExposure(float exposure) { m_exposure = exposure; }
         void setAutoExposure(bool enabled, float compensation, float minEV, float maxEV)
         {
-            m_autoExposure = enabled;
+            m_autoExposure = enabled || m_viewportAutoExposure;
             m_exposureCompensation = compensation;
             m_autoExposureMinEV = minEV;
             m_autoExposureMaxEV = maxEV;
         }
+        // The editor's Auto Exposure: on whatever the scene's camera says (a night scene is ~10 stops under daylight; without a primary
+        // camera there is no camera setting at all). The camera's compensation and EV range still apply when it has them.
+        void setViewportAutoExposure(bool enabled) { m_viewportAutoExposure = enabled; m_autoExposure = m_autoExposure || enabled; }
+        bool getViewportAutoExposure() const { return m_viewportAutoExposure; }
         float getGamma() const { return m_gamma; }
         void setGamma(float gamma) { m_gamma = gamma; }
         float getScaleIBLAmbient() const { return m_scaleIBLAmbient; }
@@ -1230,6 +1234,7 @@ namespace Nox
         uint32_t m_tonemapMode = 8; // RTXPT SampleUI explicitly defaults to Hable UC2
         float m_exposure = 1.0f;
         bool m_autoExposure = false;
+        bool m_viewportAutoExposure = false;
         float m_exposureCompensation = 0.0f;
         float m_autoExposureMinEV = -16.0f;
         float m_autoExposureMaxEV = 16.0f;

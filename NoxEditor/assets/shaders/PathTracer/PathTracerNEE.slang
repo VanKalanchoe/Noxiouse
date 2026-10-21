@@ -123,6 +123,10 @@ namespace PathTracer
         diffuseDirect = 0.0;
         specularDirect = 0.0;
         candidateCount = max(candidateCount, 1u);
+        // Emissive meshes: a scene has many (every lit window, lamp, sign), a point is lit by the few near it. More candidates let
+        // the resampling find those (each costs no ray, only the unshadowed contribution).
+        if (ubo->emissiveLightCount > 0)
+            candidateCount = max(candidateCount, 12u);
         fullSampleCount = max(fullSampleCount, 1u);
         for (uint fullSample = 0; fullSample < fullSampleCount; ++fullSample)
         {

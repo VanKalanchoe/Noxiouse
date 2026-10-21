@@ -942,6 +942,12 @@ namespace Nox
         {
             m_Renderer->setExposure(exposure);
         }
+        bool autoExposure = m_Renderer->getViewportAutoExposure();
+        if (ImGui::Checkbox("Auto Exposure", &autoExposure))
+            m_Renderer->setViewportAutoExposure(autoExposure);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Adapts the exposure to the image, like the eye: needed to see a night lit by the moon or lamps\n"
+                              "(they are ~10 stops darker than daylight). On whatever the scene camera's Auto Exposure says.");
 
         float gamma = m_Renderer->getGamma();
         if (ImGui::SliderFloat("Gamma", &gamma, 0.5f, 3.5f, "%.2f"))

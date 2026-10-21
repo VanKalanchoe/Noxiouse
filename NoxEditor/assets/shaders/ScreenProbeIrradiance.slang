@@ -32,5 +32,21 @@ float4 fragMain(ScreenProbeVertex input, uniform PushConstantScreenProbe pushCon
         const float3 rayDirection = screen_probe_ray_direction(probeNormal, probe, ray, pushConstant.frameIndex);
         sum += radiance * max(dot(direction, rayDirection), 0.0);
     }
-    return float4(sum * (2.0 / float(ScreenProbeRayCount)), 1.0);
+    sum *= 2.0 / float(ScreenProbeRayCount);
+
+    // The emissive meshes' samples (ScreenProbeTrace), with this direction's cosine.
+    if (pushConstant.emissiveTextureIndex != 0xFFFFFFFF)
+    {
+        Texture2D emissive = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.emissiveTextureIndex, 0));
+        for (uint y = 0; y < ScreenProbeRayRes; y += 2)
+        {
+            for (uint x = 0; x < ScreenProbeRayRes; x += 2)
+            {
+                const float4 sample = emissive.Load(int3(rayOrigin + uint2(x, y), 0));
+                if (any(sample.rgb > 0.0))
+                    sum += sample.rgb * max(dot(direction, screen_probe_unpack_direction(sample.a)), 0.0);
+            }
+        }
+    }
+    return float4(sum, 1.0);
 }

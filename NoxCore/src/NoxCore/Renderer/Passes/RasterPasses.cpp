@@ -1361,8 +1361,19 @@ namespace Nox
                 drawForwardTransparent(cmd, context, res->CameraDraws, cursor);
             });
 
-        // The layer over the upscaled image, where the unjittered pixel is in it.
-        const glm::vec2 jitterUv = m_currentJitter / glm::vec2(std::max(m_frame.renderExtent.width, 1u), std::max(m_frame.renderExtent.height, 1u));
+        // The layer over the upscaled image, where the unjittered pixel is in it: how far the jitter moved a point on screen (from the
+        // two projections themselves, so its sign is whatever the jitter's convention is), in uv (the viewport is flipped: y down).
+        glm::vec2 jitterUv(0.0f);
+        {
+            const glm::vec4 point(0.0f, 0.0f, -1.0f, 1.0f); // in front of the camera (view space looks down -Z)
+            const glm::vec4 jittered = uniformData.proj * point;
+            const glm::vec4 still = uniformData.nonJitteredProj * point;
+            if (std::abs(jittered.w) > 1e-6f && std::abs(still.w) > 1e-6f)
+            {
+                const glm::vec2 ndcOffset = glm::vec2(jittered) / jittered.w - glm::vec2(still) / still.w;
+                jitterUv = ndcOffset * glm::vec2(0.5f, -0.5f);
+            }
+        }
         m_renderGraph.AddPass("Transparency Composite", RGPassFlags::Raster,
             [&](RGBuilder& builder)
             {
