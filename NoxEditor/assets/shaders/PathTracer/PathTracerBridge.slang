@@ -41,6 +41,8 @@ namespace Bridge
         // The hit triangle in the world: its area and the cosine between its face and the ray (emissive light MIS).
         float triangleArea;
         float cosFace;
+        // The ray cone's width in uv units here (texture LOD: times the texture's texels), for the path tracer's mip requests.
+        float uvFootprint;
     };
 
     // RTXPT's stateless uniform generator advances with Hash32. Effect-specific seed construction is
@@ -67,13 +69,16 @@ namespace Bridge
         b2 = float3(b, sign + n.y * n.y * a, -n.y);
     }
 
-    float textureLod(Texture2D texture, float rayConeWidth, float uvPerWorld)
+    // RTXPT's ray cone texture LOD: the cone's width over the texture's texels (sqrt(w h), as RTXPT), plus its TexLODBias (-1) and
+    // the upscaling bias (log2(render / display): DLSS renders fewer pixels than it shows) -- UniformBufferObject::pathTracerTexLodBias.
+    // The footprint used to be clamped to one texel before the -1, so the bias never went below mip 0 of the clamp and close-ups
+    // and every upscaled frame sampled a mip or two too coarse.
+    float textureLod(Texture2D texture, float rayConeWidth, float uvPerWorld, float lodBias)
     {
         uint width, height, levels;
         texture.GetDimensions(0, width, height, levels);
-        float footprint = rayConeWidth * uvPerWorld * float(max(width, height));
-        // RTXPT realtime default TexLODBias is -1: retain one additional mip of material detail.
-        return clamp(log2(max(footprint, 1.0)) - 1.0, 0.0, float(max(levels, 1u) - 1u));
+        const float lambda = log2(max(rayConeWidth * uvPerWorld, 1e-20)) + 0.5 * log2(float(width) * float(height)) + lodBias;
+        return clamp(lambda, 0.0, float(max(levels, 1u) - 1u));
     }
 
     // Reverse-Z camera ray generation
@@ -172,6 +177,7 @@ namespace Bridge
         surface.triangleArea = 0.5 * worldDoubleArea;
         surface.cosFace = worldDoubleArea > 0.0 ? abs(dot(cross(edge1, edge2) / worldDoubleArea, rayDir)) : 0.0;
         float uvPerWorld = sqrt(abs(determinant) / max(worldDoubleArea, 1e-12));
+        surface.uvFootprint = rayConeWidth * uvPerWorld;
         if (abs(determinant) > 1e-10)
         {
             float3 tangent = (edge1 * duv2.y - edge2 * duv1.y) / determinant;
@@ -192,7 +198,7 @@ namespace Bridge
         if (lut.baseColorTextureIndex != 0xFFFFFFFF)
         {
             Texture2D albedoTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + lut.baseColorTextureIndex, 0));
-            baseColor *= albedoTex.SampleLevel(textureSampler, uv, textureLod(albedoTex, rayConeWidth, uvPerWorld));
+            baseColor *= albedoTex.SampleLevel(textureSampler, uv, textureLod(albedoTex, rayConeWidth, uvPerWorld, ubo->pathTracerTexLodBias));
         }
 
         float metallic = lut.metallicFactor;
@@ -204,7 +210,7 @@ namespace Bridge
         if (lut.metallicRoughnessTextureIndex != 0xFFFFFFFF)
         {
             Texture2D mrTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + lut.metallicRoughnessTextureIndex, 0));
-            float4 mrSample = mrTex.SampleLevel(textureSampler, uv, textureLod(mrTex, rayConeWidth, uvPerWorld));
+            float4 mrSample = mrTex.SampleLevel(textureSampler, uv, textureLod(mrTex, rayConeWidth, uvPerWorld, ubo->pathTracerTexLodBias));
             if (lut.workflow == 1.0)
             {
                 float3 specularColor = lut.specularFactor.rgb * mrSample.rgb;
@@ -234,7 +240,7 @@ namespace Bridge
         if (lut.normalTextureIndex != 0xFFFFFFFF)
         {
             Texture2D normTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + lut.normalTextureIndex, 0));
-            float3 tangentNormal = normTex.SampleLevel(textureSampler, uv, textureLod(normTex, rayConeWidth, uvPerWorld)).xyz;
+            float3 tangentNormal = normTex.SampleLevel(textureSampler, uv, textureLod(normTex, rayConeWidth, uvPerWorld, ubo->pathTracerTexLodBias)).xyz;
             // Match RTXPT's ApplyNormalMapRTXPT. Some Bistro DDNA maps omit Z and expect it to be
             // reconstructed; treating their stored zero as -1 bends highlights into the surface.
             tangentNormal.xy = tangentNormal.xy * 2.0 - 1.0;
@@ -254,7 +260,7 @@ namespace Bridge
         if (lut.transmissionTextureIndex != 0xFFFFFFFF)
         {
             Texture2D transTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + lut.transmissionTextureIndex, 0));
-            transmission *= transTex.SampleLevel(textureSampler, uv, textureLod(transTex, rayConeWidth, uvPerWorld)).r;
+            transmission *= transTex.SampleLevel(textureSampler, uv, textureLod(transTex, rayConeWidth, uvPerWorld, ubo->pathTracerTexLodBias)).r;
         }
 
         // 6. Setup BSDF data
@@ -284,7 +290,7 @@ namespace Bridge
         if (lut.emissiveTextureIndex != 0xFFFFFFFF)
         {
             Texture2D emissiveTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + lut.emissiveTextureIndex, 0));
-            surface.emission *= emissiveTex.SampleLevel(textureSampler, uv, textureLod(emissiveTex, rayConeWidth, uvPerWorld)).rgb;
+            surface.emission *= emissiveTex.SampleLevel(textureSampler, uv, textureLod(emissiveTex, rayConeWidth, uvPerWorld, ubo->pathTracerTexLodBias)).rgb;
         }
         surface.ior = ior;
         surface.isOpaque = (lut.alphaMode == 0);

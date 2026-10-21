@@ -10,7 +10,9 @@ bool isMipFeedbackPixel(int2 pixel, uint frame)
 }
 
 // The mip the UV derivatives ask of the texture, relative to the image it samples (the texture's resident mips): below 0
-// asks for more than the image holds.
+// asks for more than the image holds. As the anisotropic sampler (16x) picks it: the long axis of the footprint over the probes
+// along it, not the long axis alone (that asked up to 4 mips too coarse on streets and walls seen at an angle, which then never
+// got their sharp mips), and with this frame's LOD bias (UniformBufferObject::mipFeedbackLodBias).
 float relativeMipLod(UniformBufferObject* ubo, uint textureIndex, float2 ddxUV, float2 ddyUV)
 {
     Texture2D texture = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + textureIndex, 0));
@@ -19,7 +21,12 @@ float relativeMipLod(UniformBufferObject* ubo, uint textureIndex, float2 ddxUV, 
     const float2 size = float2(width, height);
     const float2 dx = ddxUV * size;
     const float2 dy = ddyUV * size;
-    return 0.5 * log2(max(max(dot(dx, dx), dot(dy, dy)), 1e-12));
+    const float lengthX = dot(dx, dx);
+    const float lengthY = dot(dy, dy);
+    const float major = max(max(lengthX, lengthY), 1e-12);
+    const float minor = max(min(lengthX, lengthY), 1e-12);
+    const float anisotropy = min(ceil(sqrt(major / minor)), 16.0);
+    return 0.5 * log2(major) - log2(anisotropy) + ubo->mipFeedbackLodBias;
 }
 
 // Debug view "Texture Streaming Mips": red wants mips the image does not hold yet, green holds what it needs, blue holds
@@ -30,13 +37,12 @@ float3 mipStreamingDebugColor(float relativeLod, float3 baseColor)
     return color * (0.35 + 0.65 * dot(baseColor, float3(0.2126, 0.7152, 0.0722)));
 }
 
-// The mip the texture is asked for, min-ed into its slot (the CPU adds the image's first mip back).
-void reportMipFeedback(UniformBufferObject* ubo, uint textureIndex, float2 ddxUV, float2 ddyUV)
+// The mip a texture is asked for (relative to its resident image, bias included), min-ed into its slot (the CPU adds the image's
+// first mip back). The path tracer reports this way, with its ray cone LOD (PathTracerHit.slang).
+void reportMipFeedbackLod(UniformBufferObject* ubo, uint textureIndex, float lod)
 {
-    if (textureIndex == 0xFFFFFFFF || textureIndex >= MipFeedbackSlots)
+    if (textureIndex == 0xFFFFFFFF || textureIndex >= MipFeedbackSlots || ubo->mipFeedbackReference == 0)
         return;
-
-    const float lod = relativeMipLod(ubo, textureIndex, ddxUV, ddyUV);
 
     // Most reports repeat what another pixel already wrote: a plain read first skips the atomic (and its contention on
     // the few addresses a screen full of the same textures hits). A stale read only costs the atomic.
@@ -46,4 +52,12 @@ void reportMipFeedback(UniformBufferObject* ubo, uint textureIndex, float2 ddxUV
         return;
     uint previous;
     InterlockedMin(feedback[textureIndex], value, previous);
+}
+
+// The mip the texture is asked for by these UV derivatives (raster passes).
+void reportMipFeedback(UniformBufferObject* ubo, uint textureIndex, float2 ddxUV, float2 ddyUV)
+{
+    if (textureIndex == 0xFFFFFFFF || textureIndex >= MipFeedbackSlots)
+        return;
+    reportMipFeedbackLod(ubo, textureIndex, relativeMipLod(ubo, textureIndex, ddxUV, ddyUV));
 }

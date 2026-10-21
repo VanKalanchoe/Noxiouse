@@ -4981,6 +4981,16 @@ namespace Nox
         uniformData.clusterStatsReference = m_clusterStatsBuffer->getDeviceAddress();
         uniformData.unitsPerMeter = WorldUnits::PerMeter();
         {
+            // Texture LOD biases (shaderIO.h): textures as sharp as the shown resolution wants when DLSS renders fewer pixels; the
+            // path tracer one mip sharper still (RTXPT's TexLODBias), and the streaming asked for the finest of what samples.
+            const NRI::Extent2D shown = m_isEditor ? m_viewportSize : m_swapChainExtent;
+            const float upscaleBias = std::min(std::log2(static_cast<float>(std::max(m_renderSize.width, 1u)) /
+                                                         static_cast<float>(std::max(shown.width, 1u))), 0.0f);
+            uniformData.textureLodBias = upscaleBias;
+            uniformData.pathTracerTexLodBias = upscaleBias - 1.0f;
+            uniformData.mipFeedbackLodBias = m_pathTracingEnabled ? uniformData.pathTracerTexLodBias : uniformData.textureLodBias;
+        }
+        {
             // Ray tracing resolution: which pixel of each block the reduced RT passes trace this frame (all four over four frames).
             static constexpr uint32_t BlockOrder[4][2] = { { 0, 0 }, { 1, 1 }, { 1, 0 }, { 0, 1 } };
             uniformData.rtSubsample = std::max(m_rtSubsample, 1u);

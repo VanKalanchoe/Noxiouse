@@ -3,6 +3,7 @@
 #include "PathPayload.slang"
 #include "PathTracerBridge.slang"
 #include "PathTracerNEE.slang"
+#include "../MipFeedback.slang"
 
 [[vk::push_constant]]
 ConstantBuffer<PushConstantPathTracer> pushConstant;
@@ -57,6 +58,27 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
         ubo
     );
 
+
+    // Texture streaming: the mips the surfaces the camera sees (directly, in mirrors, through glass) ask for, with the ray cone LOD
+    // the samples use. Raster feedback alone asked for the render resolution's mips without the path tracer's sharper bias, and
+    // never for what is seen in a mirror.
+    if ((vertexIdx == 1 || path.hasFlag(PathFlags::deltaOnlyPath)) && ubo->mipFeedbackReference != 0 &&
+        isMipFeedbackPixel(int2(path.id & 0xFFFFu, path.id >> 16), ubo->mipFeedbackFrame))
+    {
+        GpuRayTracingInstance lut = ((GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference)[InstanceID()];
+        const uint textures[5] = { lut.baseColorTextureIndex, lut.metallicRoughnessTextureIndex, lut.normalTextureIndex,
+                                   lut.emissiveTextureIndex, lut.transmissionTextureIndex };
+        for (uint t = 0; t < 5; ++t)
+        {
+            if (textures[t] == 0xFFFFFFFF || textures[t] >= MipFeedbackSlots)
+                continue;
+            Texture2D texture = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + textures[t], 0));
+            uint width, height;
+            texture.GetDimensions(width, height);
+            reportMipFeedbackLod(ubo, textures[t], log2(max(surface.uvFootprint, 1e-20)) + 0.5 * log2(float(width) * float(height)) +
+                                                   ubo->pathTracerTexLodBias);
+        }
+    }
 
     // A segment through a volume (it ended on the volume's inside): what the volume absorbed on the way.
     if (any(surface.absorptionCoefficient > 0.0))

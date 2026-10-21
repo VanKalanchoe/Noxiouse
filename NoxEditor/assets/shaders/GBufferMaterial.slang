@@ -440,6 +440,15 @@
             reportMipFeedback(ubo, instance.transmissionTextureIndex, instance.transmissionTextureSet == 0 ? ddx_uv0 : ddx_uv1, instance.transmissionTextureSet == 0 ? ddy_uv0 : ddy_uv1);
         }
 
+        // Sampled as for the shown resolution, not the (upscaled) render resolution: the gradients scaled by the LOD bias.
+        {
+            const float lodScale = exp2(ubo->textureLodBias);
+            ddx_uv0 *= lodScale; ddy_uv0 *= lodScale;
+            ddx_uv1 *= lodScale; ddy_uv1 *= lodScale;
+            ddx_bc *= lodScale; ddy_bc *= lodScale;
+            ddx_mr *= lodScale; ddy_mr *= lodScale;
+        }
+
         // 2. PBR MATERIAL EVALUATION (Metallic-Roughness vs Specular-Glossiness)
         float4 baseColor;
         float roughness;

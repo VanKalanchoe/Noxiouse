@@ -91,6 +91,12 @@ namespace Nox
                 if (m_environmentCubemap) builder.Read(environmentImportance);
                 ReadIfValid(builder, resources.TLAS);
                 ReadGpuScene(builder, resources);
+                // The path tracer asks for the mips it samples (texture streaming feedback, PathTracerHit.slang).
+                if (resources.MipFeedback.IsValid())
+                {
+                    builder.Read(resources.MipFeedback);
+                    builder.Write(resources.MipFeedback);
+                }
                 // Optional RTXDI primary-surface lighting (RTXPT-style hybrid).
                 if (frame.restirGIAdded)
                     builder.Read(resources.ReSTIRGIRaw);

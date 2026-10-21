@@ -441,6 +441,13 @@ struct UniformBufferObject
     uint32_t emissiveLightCount;
     float emissiveLightTotalWeight;
     uint64_t emissiveLightsReference;
+    // Texture LOD biases (negative: sharper). An upscaled image is rendered at fewer pixels than it is shown: its textures are
+    // sampled as for the shown resolution (log2(render / display), NVIDIA's DLSS guidance) -- the raster passes'. The path
+    // tracer's adds RTXPT's -1. The mips texture streaming is asked for follow the finest of the two that sample this frame.
+    float textureLodBias;
+    float pathTracerTexLodBias;
+    float mipFeedbackLodBias;
+    float textureLodPadding;
 };
 
 // An emissive mesh instance as a light for the path tracer's direct light sampling: picked by weight (its emission's luminance

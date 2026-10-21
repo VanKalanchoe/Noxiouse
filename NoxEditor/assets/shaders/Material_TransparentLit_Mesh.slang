@@ -220,7 +220,7 @@ float3 tracedRefraction(UniformBufferObject* ubo, InstanceData instance, uint se
 float3 getNormal(UniformBufferObject* ubo, InstanceData instance, VSOutput vertIn, SamplerState samplerState)
 {
     Texture2D normalTexture = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.normalTextureIndex, 0));
-    float3 tangentNormal = normalTexture.Sample(samplerState, instance.normalTextureSet == 0 ? vertIn.uv0 : vertIn.uv1).xyz * 2.0 - 1.0;
+    float3 tangentNormal = normalTexture.SampleBias(samplerState, instance.normalTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, ubo->textureLodBias).xyz * 2.0 - 1.0;
 
     float3 q1 = ddx(vertIn.worldPos);
     float3 q2 = ddy(vertIn.worldPos);
@@ -319,7 +319,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         if (instance.baseColorTextureIndex != 0xFFFFFFFF)
         {
             Texture2D baseColorTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.baseColorTextureIndex, 0));
-            maskBaseColor = baseColorTex.Sample(sampLinearHandle, instance.baseColorTextureSet == 0 ? vertIn.uv0 : vertIn.uv1) * instance.baseColorFactor;
+            maskBaseColor = baseColorTex.SampleBias(sampLinearHandle, instance.baseColorTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, ubo->textureLodBias) * instance.baseColorFactor;
         }
         if (maskBaseColor.a < instance.alphaMaskCutoff)
         {
@@ -334,7 +334,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         if (instance.metallicRoughnessTextureIndex != 0xFFFFFFFF)
         {
             Texture2D mrTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.metallicRoughnessTextureIndex, 0));
-            float4 mrSample = mrTex.Sample(sampLinearHandle, instance.physicalDescriptorTextureSet == 0 ? vertIn.uv0 : vertIn.uv1);
+            float4 mrSample = mrTex.SampleBias(sampLinearHandle, instance.physicalDescriptorTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, ubo->textureLodBias);
             perceptualRoughness *= mrSample.g;
             metallic *= mrSample.b;
         }
@@ -344,7 +344,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         if (instance.baseColorTextureIndex != 0xFFFFFFFF)
         {
             Texture2D baseColorTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.baseColorTextureIndex, 0));
-            baseColor = baseColorTex.Sample(sampLinearHandle, instance.baseColorTextureSet == 0 ? vertIn.uv0 : vertIn.uv1) * instance.baseColorFactor;
+            baseColor = baseColorTex.SampleBias(sampLinearHandle, instance.baseColorTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, ubo->textureLodBias) * instance.baseColorFactor;
         }
         else
         {
@@ -367,7 +367,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
             // on sample, alpha (glossiness) is always left linear by that format -- decoding either manually here on top
             // would be a double decode.
             Texture2D specGlossTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.metallicRoughnessTextureIndex, 0));
-            float4 specGlossSample = specGlossTex.Sample(sampLinearHandle, instance.physicalDescriptorTextureSet == 0 ? vertIn.uv0 : vertIn.uv1);
+            float4 specGlossSample = specGlossTex.SampleBias(sampLinearHandle, instance.physicalDescriptorTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, ubo->textureLodBias);
             glossiness *= specGlossSample.a;
             specular *= specGlossSample.rgb;
         }
@@ -380,7 +380,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
             // Imported as SRGBA8 (EditorAssetManager::ImportMeshTextures: importTexture(BaseColorTexturePath, true)),
             // already hardware sRGB-decoded on sample -- decoding it again here was a double decode.
             Texture2D colorMap = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.baseColorTextureIndex, 0));
-            diffuseSample = colorMap.Sample(sampLinearHandle, vertIn.uv0) * instance.diffuseFactor;
+            diffuseSample = colorMap.SampleBias(sampLinearHandle, vertIn.uv0, ubo->textureLodBias) * instance.diffuseFactor;
         }
 
         float maxSpecular = max(max(specular.r, specular.g), specular.b);
@@ -395,7 +395,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     if (instance.transmissionTextureIndex != 0xFFFFFFFF)
     {
         Texture2D transTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.transmissionTextureIndex, 0));
-        transmission *= transTex.Sample(sampLinearHandle, instance.transmissionTextureSet == 0 ? vertIn.uv0 : vertIn.uv1).r;
+        transmission *= transTex.SampleBias(sampLinearHandle, instance.transmissionTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, ubo->textureLodBias).r;
     }
     // Opaque and masked surfaces drawn with this shader (the editor's extra views have no G-buffer, Renderer::addExtraViewPasses):
     // nothing shows through, whatever the base color's alpha or the transmission says.
@@ -562,7 +562,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     if (instance.occlusionTextureIndex != 0xFFFFFFFF)
     {
         Texture2D occlusionTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.occlusionTextureIndex, 0));
-        ao = occlusionTex.Sample(sampLinearHandle, instance.occlusionTextureSet == 0 ? vertIn.uv0 : vertIn.uv1).r;
+        ao = occlusionTex.SampleBias(sampLinearHandle, instance.occlusionTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, ubo->textureLodBias).r;
     }
     // The screen-space AO at this pixel is the opaque surface's behind it: right for a decal lying on that surface, wrong for glass
     // or anything standing in front of it (the background's occlusion, noisy and sliding as the camera moves). Only where this
@@ -597,7 +597,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     if (instance.emissiveTextureIndex != 0xFFFFFFFF)
     {
         Texture2D emissiveTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.emissiveTextureIndex, 0));
-        emissive *= emissiveTex.Sample(sampLinearHandle, instance.emissiveTextureSet == 0 ? vertIn.uv0 : vertIn.uv1).rgb;
+        emissive *= emissiveTex.SampleBias(sampLinearHandle, instance.emissiveTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, ubo->textureLodBias).rgb;
     }
     color += emissive;
 
