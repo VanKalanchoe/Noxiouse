@@ -4978,6 +4978,8 @@ namespace Nox
             uniformData.textureLodBias = upscaleBias;
             uniformData.pathTracerTexLodBias = upscaleBias - 1.0f;
             uniformData.mipFeedbackLodBias = m_pathTracingEnabled ? uniformData.pathTracerTexLodBias : uniformData.textureLodBias;
+            uniformData.rayReconstructionActive = (m_dlssEnabled && m_dlssMode != NRI::UpscaleMode::Off && m_device->isDLSSSupported() &&
+                                                   m_dlssRayReconstructionEnabled && m_device->isDLSSRayReconstructionSupported()) ? 1u : 0u;
         }
         {
             // Ray tracing resolution: which pixel of each block the reduced RT passes trace this frame (all four over four frames).

@@ -723,7 +723,7 @@ namespace Nox
             for (size_t entry = start; entry < end && entry < m_drawList.size(); ++entry)
             {
                 const uint32_t material = m_gpuScene.GetInstances().Get(m_drawList[entry]).materialIndex;
-                if (m_gpuScene.GetMaterials().Get(material).transmissionFactor > 0.0f)
+                if (m_gpuScene.GetMaterials().Get(material).transmissionFactor >= shaderio::SeeThroughTransmission)
                     return true;
             }
         }

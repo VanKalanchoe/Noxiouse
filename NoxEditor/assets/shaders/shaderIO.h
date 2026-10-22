@@ -470,7 +470,9 @@ struct UniformBufferObject
     float textureLodBias;
     float pathTracerTexLodBias;
     float mipFeedbackLodBias;
-    float textureLodPadding;
+    // 1: DLSS Ray Reconstruction denoises this frame's image (no NRD before it): what is drawn into it must keep its noise where
+    // RR's guides are (Material_TransparentLit_Mesh's refraction).
+    uint32_t rayReconstructionActive;
 };
 
 // An emissive mesh instance as a light for the path tracer's direct light sampling: picked by weight (its emission's luminance
@@ -1039,6 +1041,12 @@ struct PushConstantHiZBuild
 STATIC_CONST uint32_t MESHLET_CULL_FRUSTUM = 1;     // PushConstantMeshlets.meshletCulling
 STATIC_CONST uint32_t MESHLET_COUNT_TRIANGLES = 2;  // PushConstantMeshlets.meshletCulling: add the drawn clusters to ClusterStats
 STATIC_CONST uint32_t MESHLET_SHADE_OPAQUE = 4;     // PushConstantMeshlets.meshletCulling: Material_TransparentLit_Mesh shades an opaque / masked surface (alpha 1, no transmission; the editor's extra views)
+// A material is see-through (glass: the raster transparent path, rays pass it) from this much transmission on. Less is a thin
+// solid surface that lets some light through -- RTXPT's leaves (0.36-0.55, alpha tested), fabrics, curtains: rendered solid
+// (cut out where masked), its transmission only for the path tracer and its diffuse transmission for the back light. Routing those
+// through the glass path drew every leaf as glass: no depth, sorted per object (see-through foliage), ~60 ms looking at a tree.
+STATIC_CONST float SeeThroughTransmission = 0.5;
+
 // The mip the hybrid passes' rays read an alpha-masked surface's opacity at (shadows, AO, GI probes, glass): a leaf's cut-out shape
 // is the same 4x coarser, and full-resolution reads for every leaf a ray passes made looking into foliage expensive.
 STATIC_CONST float RayAlphaTestLod = 2.0;

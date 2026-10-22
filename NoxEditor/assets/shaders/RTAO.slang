@@ -132,7 +132,7 @@ float trace_occlusion_ray(UniformBufferObject* ubo, float3 rayOrigin, float3 ray
         // trace_shadow_ray's) never sees it as anything but a solid occluder. Without this, anything visible
         // through or near glass (a display case, a window) went fully black: every AO ray toward it committed a
         // hit against the glass itself instead of continuing through to whatever is actually behind it.
-        if (lut.transmissionFactor >= 0.5)
+        if (lut.transmissionFactor >= SeeThroughTransmission)
         {
             continue;
         }

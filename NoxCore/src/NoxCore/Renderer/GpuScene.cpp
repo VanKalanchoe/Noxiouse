@@ -28,7 +28,11 @@ namespace Nox
             // G-buffer path, which has no transmission handling at all: a solid, bright panel instead of glass.
             // Material_TransparentLit_Mesh.slang already reads transmissionFactor and reduces alpha for it correctly;
             // it was just never getting these materials routed to it.
-            if (material.alphaMode == static_cast<uint32_t>(AlphaMode::Blend) || material.transmissionFactor > 0.0f)
+            // See-through only from shaderio::SeeThroughTransmission on, and never alpha-masked (leaves with some transmission are
+            // cut-out solid surfaces, as RTXPT renders them).
+            const bool seeThrough = material.transmissionFactor >= shaderio::SeeThroughTransmission &&
+                                    material.alphaMode != static_cast<uint32_t>(AlphaMode::Mask);
+            if (material.alphaMode == static_cast<uint32_t>(AlphaMode::Blend) || seeThrough)
             {
                 if (unlit)
                     return doubleSided ? RenderBucket::TransparentUnlitDoubleSided : RenderBucket::TransparentUnlit;
@@ -576,7 +580,7 @@ namespace Nox
             // too, whatever its alpha mode: rays that must see through it (shadows, refraction, AO) decide in their query loop,
             // and every other ray keeps the hardware's own opaque acceptance -- they used to force every triangle non-opaque
             // (RAY_FLAG_FORCE_NON_OPAQUE) to reach the glass, which made a closest-hit query visit the whole scene in the shader.
-            if (material.alphaMode == static_cast<uint32_t>(AlphaMode::Opaque) && material.transmissionFactor <= 0.0f)
+            if (material.alphaMode == static_cast<uint32_t>(AlphaMode::Opaque) && material.transmissionFactor < shaderio::SeeThroughTransmission)
                 record.flags |= 0x04;
             else
                 record.flags |= 0x08;

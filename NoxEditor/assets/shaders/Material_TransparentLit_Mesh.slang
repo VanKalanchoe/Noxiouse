@@ -68,7 +68,7 @@ bool forwardShadowed(UniformBufferObject* ubo, float3 origin, float3 direction, 
     while (query.Proceed())
     {
         GpuRayTracingInstance occluder = rtInstances[query.CandidateRayInstanceCustomIndex()];
-        if (occluder.alphaMode == 2 || occluder.transmissionFactor > 0.0)
+        if (occluder.alphaMode == 2 || occluder.transmissionFactor >= SeeThroughTransmission)
             continue;
         if (occluder.alphaMode == 1 && occluder.baseColorTextureIndex != 0xFFFFFFFF)
         {
@@ -125,7 +125,7 @@ bool traceRefractionRay(UniformBufferObject* ubo, float3 origin, float3 directio
             continue;
         }
         GpuRayTracingInstance surface = rtInstances[candidate];
-        if (surface.alphaMode == 2 || surface.transmissionFactor > 0.0)
+        if (surface.alphaMode == 2 || surface.transmissionFactor >= SeeThroughTransmission)
             continue;
         if (surface.alphaMode == 1 && surface.baseColorTextureIndex != 0xFFFFFFFF)
         {
@@ -648,7 +648,13 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
                 offset = (exitClip.xy / exitClip.w - surfaceClip.xy / surfaceClip.w) * float2(0.5, -0.5);
             const float2 uv = saturate(vertIn.pos.xy / float2(sourceWidth, sourceHeight) + offset);
 
-            const float lod = log2(float(max(sourceWidth, sourceHeight))) * perceptualRoughness * saturate(ior * 2.0 - 2.0);
+            float lod = log2(float(max(sourceWidth, sourceHeight))) * perceptualRoughness * saturate(ior * 2.0 - 2.0);
+            // Under DLSS Ray Reconstruction the scene behind is its raw ray traced lighting (NRD is off), and RR's guides at a glass
+            // pixel describe what is seen through it (RTXPT's convention for transmission). A blur mip of that raw image is noise
+            // grown into blotches RR takes for detail -- the glass that stayed noisy. A sharp read leaves the noise where the guides
+            // are, for RR to remove; rough glass is a little less blurred.
+            if (ubo->rayReconstructionActive != 0)
+                lod = min(lod, 1.0);
             SamplerState linearClamp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
             // Through the volume's thickness: what it absorbs on the way (KHR_materials_volume attenuation).
             const float3 absorbed = volume_transmittance(instance.attenuationColor, instance.attenuationDistance * modelScale,
