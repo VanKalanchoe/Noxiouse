@@ -591,10 +591,13 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         ambientSpecular *= scene_gi_specular_occlusion(ubo, sceneIrradiance, n);
     }
 
-    // Smooth glass with ray traced glass on: its reflection traced like its refraction (the room around a jar on a counter, not the
-    // sky the environment map holds), fading into the occluded environment reflection with roughness.
+    // Smooth glass with a volume (a jar, a bottle) with ray traced glass on: its reflection traced like its refraction (the room
+    // around a jar on a counter, not the sky the environment map holds), fading into the occluded environment reflection with
+    // roughness. Thin panes (windows, picture frames) keep the environment reflection, as with refraction alone: traced, their
+    // sharp reflection over the screen-space view behind read as mirrors under DLSS RR.
     float tracedReflectionWeight = 0.0;
-    if ((pushConstant.meshletCulling & MESHLET_RT_REFRACTION) != 0 && ubo->tlasDeviceAddress != 0 && transmission > 0.0)
+    if ((pushConstant.meshletCulling & MESHLET_RT_REFRACTION) != 0 && ubo->tlasDeviceAddress != 0 && transmission > 0.0 &&
+        instance.thickness > 0.0)
         tracedReflectionWeight = saturate((RTRefractionMaxRoughness - perceptualRoughness) / (RTRefractionMaxRoughness - RTRefractionFullRoughness));
     if (tracedReflectionWeight > 0.0 && ubo->brdfLutIndex != 0xFFFFFFFF)
     {

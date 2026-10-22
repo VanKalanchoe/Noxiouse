@@ -52,7 +52,7 @@ void missMain(inout PathPayload payload : SV_RayPayload)
         }
 
         // Seen by the camera directly, in mirrors or through glass: not clamped (RTXPT's stable planes have no firefly filter).
-        if (path.getVertexIndex() > 0 && !path.hasFlag(PathFlags::deltaOnlyPath))
+        if (path.getVertexIndex() > 0 && !path.hasFlag(PathFlags::deltaTree))
             envRadiance = FireflyFilter(envRadiance, pushConstant.fireflyFilterThreshold, path.fireflyFilterK);
         float3 envContrib = path.thp * envRadiance * misWeight;
         path.L.rgb += envContrib;

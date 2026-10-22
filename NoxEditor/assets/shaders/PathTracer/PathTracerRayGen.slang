@@ -50,7 +50,9 @@ void rayGenMain()
         rrSpecularHitDistance[pixelPos] = 65504.0;
     }
 
-    // Iterative Wavefront/Bounce Loop
+    // Iterative Wavefront/Bounce Loop, then the branch the first smooth glass left (PathTracerHit.slang), if any.
+    for (;;)
+    {
     while (path.isActive())
     {
         RayDesc ray;
@@ -73,6 +75,10 @@ void rayGenMain()
             payload
         );
         path = PathPayload::unpack(payload);
+    }
+    if (!path.hasBranch())
+        break;
+    path.resumeBranch();
     }
 
     // The air and the height fog between the camera and what its ray hit first (the sky: the height fog alone, as the skybox

@@ -39,5 +39,18 @@ struct StandardBSDF
         result.wo=sd.fromLocal(local);
         return valid;
     }
+    // RTXPT's delta lobes (its stable planes): [0] transmission, [1] reflection, each with its world direction and its whole weight
+    // (lobe probability times albedo); nonDeltaPart: what the rough lobes hold. A thin surface's transmission as sample() weighs
+    // it, 1 - the Fresnel reflection (RTXPT's evalDeltaLobes leaves it at 1, its "TODO adjust F for thin surface hack").
+    void evalDeltaLobes(ShadingData sd, out DeltaLobe lobes[cMaxDeltaLobes], out int count, out float nonDeltaPart)
+    {
+        FalcorBSDF b = FalcorBSDF::make(sd.mtl, sd.N, sd.V, data);
+        const float3 wi = sd.toLocal(sd.V);
+        b.evalDeltaLobes(wi, lobes, count, nonDeltaPart);
+        if (sd.mtl.isThinSurface())
+            lobes[0].thp *= 1.0 - evalFresnelDielectric(data.Eta(), wi.z);
+        for (int i = 0; i < count; ++i)
+            lobes[i].dir = sd.fromLocal(lobes[i].dir);
+    }
 
 };

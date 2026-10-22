@@ -680,6 +680,9 @@ namespace Nox
         bool getWireframeOverlay() const { return m_wireframeOverlay; }
         void setOITEnabled(bool enabled) { m_oitEnabled = enabled; }
         bool getOITEnabled() const { return m_oitEnabled; }
+        // OIT is for the raster pipeline alone. The hybrid one sorts its glass back to front and traces through it (ray traced
+        // glass, shadows, GI): blended OIT layers there averaged glass in front of glass into see-through.
+        bool isOITActive() const { return m_oitEnabled && !m_rayTracingEnabled; }
         glm::vec2 getCurrentJitter() const { return m_currentJitter; }
 
         Ref<Texture2D> UploadTexture(const TextureData& cpuData);

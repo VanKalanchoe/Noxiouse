@@ -13,6 +13,7 @@ namespace PathFlags
     static const uint insideDielectricVolume  = (1 << 5);
     static const uint terminateAtNextBounce   = (1 << 6);
     static const uint deltaOnlyPath           = (1 << 12);
+    static const uint deltaTree               = (1 << 13); // only delta events since the camera (RTXPT's stable planes): no firefly filter
 }
 
 namespace PackedCounters
@@ -83,6 +84,14 @@ struct PathState
 
     uint flagsAndVertexIndex;
 
+    // The other branch of the first smooth glass the camera's path met (PathTracerHit.slang): traced once this path ends
+    // (PathTracerRayGen.slang). branchThp 0: none.
+    float3 branchOrigin;
+    float3 branchDir;
+    float3 branchThp;
+    uint branchRayCone;
+    uint branchFlagsAndVertexIndex;
+
     static PathState init(uint2 pixelPos, float pixelSpreadAngle = 0.0)
     {
         PathState path;
@@ -107,10 +116,34 @@ struct PathState
         path.packedMISInfo = 0;
         path.thpRuRuCorrection = 1.0;
         path.flagsAndVertexIndex = 0;
+        path.branchOrigin = float3(0.0);
+        path.branchDir = float3(0.0, 0.0, 1.0);
+        path.branchThp = float3(0.0);
+        path.branchRayCone = 0;
+        path.branchFlagsAndVertexIndex = 0;
         path.setActive(true);
         // Reused as the "camera path has only transmitted so far" marker for RR guide export.
         path.setFlag(PathFlags::deltaOnlyPath, true);
+        path.setFlag(PathFlags::deltaTree, true);
         return path;
+    }
+
+    bool hasBranch() { return any(branchThp > 0.0); }
+
+    // Continues with the stored branch: its ray, weight, vertex and flags; what the path gathered (L) stays.
+    [mutating]
+    void resumeBranch()
+    {
+        origin = branchOrigin;
+        dir = branchDir;
+        thp = branchThp;
+        rayCone.widthSpreadAngleFP16 = branchRayCone;
+        flagsAndVertexIndex = branchFlagsAndVertexIndex;
+        bsdfScatterPdf = 0.0;
+        fireflyFilterK = 1.0;
+        packedCounters = 0; // only delta events before the split: no diffuse bounce yet
+        branchThp = float3(0.0);
+        setActive(true);
     }
 
     // --- Accessors matching RTXPT ---

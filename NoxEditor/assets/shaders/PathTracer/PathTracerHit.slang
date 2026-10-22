@@ -238,7 +238,7 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
         // What the camera sees directly, in mirrors and through glass is not clamped (RTXPT's stable planes have no firefly filter):
         // bright bulbs seen through a window kept only ~38.
         const float3 weightedEmission = surface.emission * misWeight;
-        float3 filteredEmission = (vertexIdx == 1 || path.hasFlag(PathFlags::deltaOnlyPath))
+        float3 filteredEmission = (vertexIdx == 1 || path.hasFlag(PathFlags::deltaTree))
             ? weightedEmission : FireflyFilter(weightedEmission, pushConstant.fireflyFilterThreshold, path.fireflyFilterK);
         float3 emissionContrib = path.thp * filteredEmission;
         path.L.rgb += emissionContrib;
@@ -325,6 +325,42 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
     BSDFSample sampleResult;
     bool valid = surface.bsdf.sample(surface.shadingData, bsdfRand, sampleResult);
 
+    // RTXPT's stable planes: at the first smooth glass the camera's path meets (seen directly or through other glass), both of its
+    // delta lobes are followed every frame, each with its whole weight -- this path goes on through it (and keeps exporting the
+    // surface behind as RR's guide), the reflection is traced once this path ends (PathTracerRayGen.slang). Picking one at random
+    // gave each pixel the full, unweighted mirror image one frame in ~25 and the picture behind the others: RR read the panes as
+    // mirrors (a framed menu behind glass vanished under its reflection) and the reflection boiled.
+    if (path.hasFlag(PathFlags::deltaOnlyPath) && !hasNonDeltaLobes && !path.hasBranch())
+    {
+        DeltaLobe lobes[cMaxDeltaLobes];
+        int lobeCount;
+        float nonDeltaPart;
+        surface.bsdf.evalDeltaLobes(surface.shadingData, lobes, lobeCount, nonDeltaPart);
+        const DeltaLobe transmitted = lobes[0];
+        const DeltaLobe reflected = lobes[1];
+        if (nonDeltaPart <= 0.0 && any(transmitted.thp > 0.0) && any(reflected.thp > 0.0))
+        {
+            PathState branch = path;
+            branch.setFlag(PathFlags::deltaOnlyPath, false); // not RR's guide
+            branch.setFlag(PathFlags::transmission, false);
+            branch.setFlag(PathFlags::specular, true);
+            branch.setFlag(PathFlags::delta, true);
+            path.branchFlagsAndVertexIndex = branch.flagsAndVertexIndex;
+            path.branchOrigin = ComputeRayOrigin(surface.shadingData.posW,
+                                                 dot(reflected.dir, surface.shadingData.N) < 0.0 ? -surface.shadingData.N : surface.shadingData.N);
+            path.branchDir = reflected.dir;
+            path.branchThp = path.thp * reflected.thp;
+            path.branchRayCone = path.rayCone.widthSpreadAngleFP16;
+
+            sampleResult.wo = transmitted.dir;
+            sampleResult.weight = transmitted.thp;
+            sampleResult.pdf = 0.0;
+            sampleResult.lobe = LobeType::DeltaTransmission;
+            sampleResult.lobeP = 1.0;
+            valid = true;
+        }
+    }
+
     // Upstream RTXPT reports pdf == 0 for valid delta events.
     if (!valid || all(sampleResult.weight <= float3(0.0)) || any(!isfinite(sampleResult.weight)))
     {
@@ -346,6 +382,8 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
     path.setFlag(PathFlags::transmission, (sampleResult.lobe & LobeType::Transmission) != 0);
     path.setFlag(PathFlags::specular, (sampleResult.lobe & LobeType::Specular) != 0);
     path.setFlag(PathFlags::delta, (sampleResult.lobe & LobeType::Delta) != 0);
+    if ((sampleResult.lobe & LobeType::Delta) == 0)
+        path.setFlag(PathFlags::deltaTree, false);
 
     // Update throughput
     path.thp *= sampleResult.weight;

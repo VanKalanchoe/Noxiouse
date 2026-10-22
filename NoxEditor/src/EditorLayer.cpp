@@ -1008,7 +1008,8 @@ namespace Nox
         if (pathTracing)
             lockedReason("the path tracer refracts itself");
 
-        ImGui::BeginDisabled(pathTracing);
+        const bool rayTracing = m_Renderer->getRayTracingEnabled();
+        ImGui::BeginDisabled(pathTracing || rayTracing);
         bool oit = m_Renderer->getOITEnabled();
         if (ImGui::Checkbox("Order-Independent Transparency", &oit))
             m_Renderer->setOITEnabled(oit);
@@ -1017,10 +1018,13 @@ namespace Nox
                               "(weighted blended OIT), so overlapping layers (smoke, foliage cards) stop popping. It is an\n"
                               "approximation: overlapping layers average out, so solid-looking transparents (glass in front of\n"
                               "glass, thick leaves) look see-through. Off (sorted back to front) is usually better for glass.\n"
-                              "Not used by the path tracer.");
+                              "Raster pipeline only: not used with ray tracing (hybrid sorts glass and traces through it) or by\n"
+                              "the path tracer.");
         ImGui::EndDisabled();
         if (pathTracing)
             lockedReason("path tracer");
+        else if (rayTracing)
+            lockedReason("raster only: ray tracing is on");
 
         ImGui::BeginDisabled(dlssActive || pathTracing);
         bool taa = m_Renderer->getTAAEnabled();

@@ -4,7 +4,26 @@
 
 struct PathPayload
 {
-    uint4 packed[6];
+    uint4 packed[8];
+
+    // Unit vector <-> two 16-bit octahedral coordinates.
+    static uint packDirection(float3 d)
+    {
+        float2 p = d.xy / (abs(d.x) + abs(d.y) + abs(d.z));
+        if (d.z < 0.0)
+            p = (1.0 - abs(p.yx)) * float2(p.x >= 0.0 ? 1.0 : -1.0, p.y >= 0.0 ? 1.0 : -1.0);
+        const uint2 q = uint2(round(saturate(p * 0.5 + 0.5) * 65535.0));
+        return q.x | (q.y << 16);
+    }
+
+    static float3 unpackDirection(uint u)
+    {
+        const float2 p = float2(u & 0xFFFF, u >> 16) / 65535.0 * 2.0 - 1.0;
+        float3 d = float3(p, 1.0 - abs(p.x) - abs(p.y));
+        if (d.z < 0.0)
+            d.xy = (1.0 - abs(d.yx)) * float2(d.x >= 0.0 ? 1.0 : -1.0, d.y >= 0.0 ? 1.0 : -1.0);
+        return normalize(d);
+    }
 
     static uint packHalf2x16(float2 v)
     {
@@ -50,6 +69,10 @@ struct PathPayload
         p.packed[4].z = (path.packedMISInfo << 16) | (f32tof16(path.thpRuRuCorrection) & 0xFFFF);
         p.packed[4].w = path.flagsAndVertexIndex;
         p.packed[5] = uint4(asuint(path.bsdfScatterPdf), path.packedCounters, path.interiorSlot0, path.interiorSlot1);
+
+        // 6, 7: the pending branch
+        p.packed[6] = uint4(asuint(path.branchOrigin), packDirection(path.branchDir));
+        p.packed[7] = uint4(packHalf2x16(path.branchThp.xy), f32tof16(path.branchThp.z), path.branchRayCone, path.branchFlagsAndVertexIndex);
 
         return p;
     }
@@ -97,6 +120,12 @@ struct PathPayload
         path.interiorSlot1 = p.packed[5].w;
         path.packedCounters = p.packed[5].y;
         path.stableBranchID = 0;
+
+        path.branchOrigin = asfloat(p.packed[6].xyz);
+        path.branchDir = unpackDirection(p.packed[6].w);
+        path.branchThp = float3(unpackHalf2x16(p.packed[7].x), f16tof32(p.packed[7].y));
+        path.branchRayCone = p.packed[7].z;
+        path.branchFlagsAndVertexIndex = p.packed[7].w;
 
         return path;
     }

@@ -872,7 +872,7 @@ namespace Nox
         std::stable_sort(batches.begin(), batches.end(), [](const ParticleBatch& a, const ParticleBatch& b) { return a.Distance > b.Distance; });
         std::vector<ParticleBatch> motionBatches = batches;
         std::vector<ParticleBatch> oitBatches;
-        if (m_oitEnabled && m_particleOITPipeline && m_oitCompositePipeline)
+        if (isOITActive() && m_particleOITPipeline && m_oitCompositePipeline)
         {
             for (const ParticleBatch& batch : batches)
             {
@@ -1061,7 +1061,7 @@ namespace Nox
                                 m_frame.renderExtent.width > 0 && m_frame.renderExtent.height > 0 && hasTransmissiveDraws();
         // Order-independent transparency: the transparent surfaces into its targets in a pass of their own (resolved after the
         // particles, addParticlePass).
-        const bool oit = !pathTraced && m_oitEnabled && hasDraws && m_transparentLitOITPipeline && m_unlitOITPipeline && m_oitCompositePipeline &&
+        const bool oit = !pathTraced && isOITActive() && hasDraws && m_transparentLitOITPipeline && m_unlitOITPipeline && m_oitCompositePipeline &&
                          hasTransparentDraws();
 
         // Shared setup of the passes that draw over the lit scene.
