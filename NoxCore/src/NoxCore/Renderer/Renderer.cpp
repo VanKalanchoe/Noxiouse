@@ -4813,6 +4813,19 @@ namespace Nox
             resources.CameraHiZ = history.Textures[0];
             frame.hiZReset = history.WasReset;
         }
+        // Auto exposure's adapted average (AutoExposure.slang adaptMain, PostPasses.cpp): read before it is updated this frame by the
+        // path tracer (its firefly filter follows the exposure, as RTXPT's), updated by the post process.
+        if (m_autoExposure && m_autoExposureAdaptPipeline)
+        {
+            RGTextureDesc adaptedDesc;
+            adaptedDesc.Size = RGSize::Absolute;
+            adaptedDesc.Width = adaptedDesc.Height = 1;
+            adaptedDesc.Format = NRI::ImageFormat::R32_SFLOAT;
+            adaptedDesc.Usage = NRI::TextureUsage::Storage;
+            const RGTextureHistory adaptedHistory = graph.GetHistoryTexture("Auto Exposure Adapted", adaptedDesc, 1);
+            resources.AutoExposureAdapted = adaptedHistory.Textures[0];
+            resources.AutoExposureAdaptedReset = adaptedHistory.WasReset;
+        }
 
         if (m_tlasBuffer)
             resources.TLAS = graph.ImportBuffer("TLAS", m_tlasBuffer.get());

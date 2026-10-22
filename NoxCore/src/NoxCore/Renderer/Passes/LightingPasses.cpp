@@ -117,6 +117,8 @@ namespace Nox
                 if (m_environmentCubemap) builder.Read(environmentImportance);
                 ReadIfValid(builder, resources.TLAS);
                 ReadGpuScene(builder, resources);
+                if (resources.AutoExposureAdapted.IsValid() && !resources.AutoExposureAdaptedReset)
+                    builder.Read(resources.AutoExposureAdapted); // last frame's (a reset texture is written only later this frame)
                 // The path tracer asks for the mips it samples (texture streaming feedback, PathTracerHit.slang).
                 if (resources.MipFeedback.IsValid())
                 {
@@ -175,9 +177,14 @@ namespace Nox
                 // RTXPT applies its Balanced preset on startup (18 total, 2 diffuse).
                 ptPush.maxBounces = 18;
                 ptPush.maxDiffuseBounces = 2;
-                // RTXPT realtime default: 0.10 * sqrt(pre-exposed middle gray) * 1000.
-                // Nox does not pre-expose the path buffers, so use middle gray directly.
-                ptPush.fireflyFilterThreshold = 0.10f * std::sqrt(0.18f) * 1000.0f;
+                // RTXPT realtime default: 0.10 * sqrt(pre-exposed middle gray) * 1000; the shaders multiply in the square root of
+                // the luminance this frame's exposure maps to middle grey (scene_exposure: last frame's adapted average).
+                ptPush.fireflyFilterThreshold = 0.10f * 1000.0f;
+                ptPush.autoExposureTextureIndex = res->AutoExposureAdapted.IsValid() && !res->AutoExposureAdaptedReset
+                                                      ? context.Slot(res->AutoExposureAdapted) : 0xFFFFFFFF;
+                ptPush.exposureCompensation = m_exposureCompensation;
+                ptPush.autoExposureMinEV = m_autoExposureMinEV;
+                ptPush.autoExposureMaxEV = m_autoExposureMaxEV;
                 ptPush.environmentImportanceIndex = m_environmentCubemap ? context.Slot(environmentImportance) : 0xFFFFFFFF;
                 ptPush.accumulationTextureIndex = context.Slot(res->PathTracerAccum[readIndex]);
                 ptPush.sampleCount = m_frame.pathTracerAccumulate ? m_pathTracerSampleCount : 1;

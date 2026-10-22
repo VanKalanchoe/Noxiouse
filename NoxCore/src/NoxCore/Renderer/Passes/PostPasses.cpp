@@ -56,21 +56,15 @@ namespace Nox
 
         // The adapted average (AutoExposure.slang adaptMain): one texel kept across frames, moving towards this frame's.
         RGTexture adaptedExposure;
-        if (m_autoExposure && m_autoExposureAdaptPipeline)
+        if (resources.AutoExposureAdapted.IsValid())
         {
-            RGTextureDesc adaptedDesc;
-            adaptedDesc.Size = RGSize::Absolute;
-            adaptedDesc.Width = adaptedDesc.Height = 1;
-            adaptedDesc.Format = NRI::ImageFormat::R32_SFLOAT;
-            adaptedDesc.Usage = NRI::TextureUsage::Storage;
-            const RGTextureHistory adaptedHistory = m_renderGraph.GetHistoryTexture("Auto Exposure Adapted", adaptedDesc, 1);
-            adaptedExposure = adaptedHistory.Textures[0];
+            adaptedExposure = resources.AutoExposureAdapted;
             // Eye-like speed: about 63% of the way in 1 / AdaptationSpeed seconds, whatever the frame rate.
             constexpr float AdaptationSpeed = 1.5f;
             const auto now = std::chrono::steady_clock::now();
             const float elapsed = m_autoExposureLastTime == std::chrono::steady_clock::time_point{}
                 ? 0.0f : std::clamp(std::chrono::duration<float>(now - m_autoExposureLastTime).count(), 0.0f, 0.5f);
-            const bool historyValid = !adaptedHistory.WasReset && m_autoExposureLastTime != std::chrono::steady_clock::time_point{} &&
+            const bool historyValid = !resources.AutoExposureAdaptedReset && m_autoExposureLastTime != std::chrono::steady_clock::time_point{} &&
                                       m_autoExposureLastFrame + 1 == m_sceneFrameCounter;
             m_autoExposureLastTime = now;
             m_autoExposureLastFrame = m_sceneFrameCounter;

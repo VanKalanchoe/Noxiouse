@@ -127,7 +127,8 @@ void rayGenMain()
         // DLSSRRBrightnessClampK (4096) * pre-exposed middle gray (0.18 at default exposure).
         if (pushConstant.rrDiffuseAlbedoStorageIndex != 0xFFFFFFFF)
         {
-            const float rrMaxRadiance = 4096.0 * 0.18;
+            const float rrMaxRadiance = 4096.0 * 0.18 / scene_exposure(ubo, pushConstant.autoExposureTextureIndex, pushConstant.exposureCompensation,
+                                                                       pushConstant.autoExposureMinEV, pushConstant.autoExposureMaxEV);
             float peak = max(radiance.x, max(radiance.y, radiance.z));
             if (peak > rrMaxRadiance)
                 radiance *= rrMaxRadiance / peak;

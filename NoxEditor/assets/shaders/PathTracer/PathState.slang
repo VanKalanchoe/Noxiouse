@@ -14,6 +14,7 @@ namespace PathFlags
     static const uint terminateAtNextBounce   = (1 << 6);
     static const uint deltaOnlyPath           = (1 << 12);
     static const uint deltaTree               = (1 << 13); // only delta events since the camera (RTXPT's stable planes): no firefly filter
+    static const uint rrSpecHitPending        = (1 << 14); // the ray leaving RR's guide surface: its length is the specular hit distance
 }
 
 namespace PackedCounters

@@ -1072,6 +1072,9 @@ STATIC_CONST uint32_t MESHLET_SHADE_OPAQUE = 4;     // PushConstantMeshlets.mesh
 // through the glass path drew every leaf as glass: no depth, sorted per object (see-through foliage), ~60 ms looking at a tree.
 STATIC_CONST float SeeThroughTransmission = 0.5;
 
+// How much of the stops a dark scene is under mid-grey auto exposure makes up (1: all; the eye keeps a night darker).
+STATIC_CONST float AutoExposureDarkAdaptation = 0.6;
+
 // Path tracer material flags (GpuMaterial / GpuRayTracingInstance::pathTracerFlags), from RTXPT's material files when present.
 STATIC_CONST uint32_t PathTracerThinSet = 1u;         // the material says whether it is thin (else: thin when it has no thickness)
 STATIC_CONST uint32_t PathTracerThin = 2u;            // thin-walled: no refraction, 1 / IoR on both faces (RTXPT ThinSurface)
@@ -1093,6 +1096,28 @@ bool ray_see_through(float transmission, uint alphaMode)
 bool ray_shadow_passes(GpuRayTracingInstance instance)
 {
     return (instance.pathTracerFlags & PathTracerExcludeFromNEE) != 0 || ray_see_through(instance.transmissionFactor, instance.alphaMode);
+}
+
+// The exposure the post process applies (PostProcess.slang): the base exposure and compensation, and with auto exposure the stops
+// from the adapted log2 average luminance to the mid-grey key (0.042, RTXPT's TONEMAPPING_EXPOSURE_KEY), brightening only partly.
+float scene_exposure(UniformBufferObject* ubo, uint autoExposureTextureIndex, float compensation, float minEV, float maxEV)
+{
+    float exposure = ubo->exposure * exp2(compensation);
+    if (autoExposureTextureIndex != 0xFFFFFFFF)
+    {
+        Texture2D<float> exposureTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + autoExposureTextureIndex, 0));
+        uint width, height, levels;
+        exposureTex.GetDimensions(0, width, height, levels);
+        const float logAverage = exposureTex.Load(int3(0, 0, int(levels) - 1));
+        if (isfinite(logAverage))
+        {
+            float stops = log2(0.042) - logAverage;
+            if (stops > 0.0)
+                stops *= AutoExposureDarkAdaptation;
+            exposure *= exp2(clamp(stops, minEV, maxEV));
+        }
+    }
+    return max(exposure, 1e-8);
 }
 #endif
 
@@ -1533,6 +1558,12 @@ struct PushConstantPathTracer
     uint32_t neeCandidateSamples; // RTXPT realtime NEE-AT default: 5
     uint32_t neeFullSamples;      // RTXPT realtime NEE-AT default: 1
     uint32_t environmentDiffuseMip; // RTXPT default: 2
+    // The exposure the image is shown with (scene_exposure): RTXPT's firefly filter and RR brightness clamp scale with the
+    // luminance it maps to middle grey. 0xFFFFFFFF: no auto exposure (last frame's adapted average otherwise).
+    uint32_t autoExposureTextureIndex;
+    float exposureCompensation;
+    float autoExposureMinEV;
+    float autoExposureMaxEV;
 };
 
 struct PushConstantPTEnvironment

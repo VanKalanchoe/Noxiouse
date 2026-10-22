@@ -129,6 +129,8 @@ namespace Nox
 
         // Views
         ViewDrawResources CameraDraws;
+        RGTexture AutoExposureAdapted; // the adapted log2 average luminance (1 texel, kept across frames), with auto exposure
+        bool AutoExposureAdaptedReset = false;
         RGTexture CameraHiZ; // depth pyramid of the camera view (history: phase 1 tests against the previous frame)
     };
 

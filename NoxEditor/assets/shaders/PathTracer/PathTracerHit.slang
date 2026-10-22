@@ -30,6 +30,16 @@ void writeRRGuides(uint2 pixel, Bridge::SurfaceData surface, UniformBufferObject
     }
 }
 
+// RTXPT's realtime firefly filter threshold: 0.1 * sqrt(the luminance the exposure maps to middle grey) * 1000 (Sample.cpp,
+// ToneMappingPass::GetPreExposedGray). It was fixed at the manual-exposure value (exposure 1): with auto exposure the light near
+// lamps and every bounce of it was clamped several times harder than RTXPT does -- lamp-lit walls and rooms came out dark.
+float fireflyThreshold(UniformBufferObject* ubo)
+{
+    const float exposure = scene_exposure(ubo, pushConstant.autoExposureTextureIndex, pushConstant.exposureCompensation,
+                                          pushConstant.autoExposureMinEV, pushConstant.autoExposureMaxEV);
+    return pushConstant.fireflyFilterThreshold * sqrt(0.18 / exposure);
+}
+
 // A smooth thin pane whose transmission dominates (a window): what RR is guided by is behind it.
 bool isGuideGlass(GpuRayTracingInstance instance)
 {
@@ -149,6 +159,16 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
     if (any(surface.absorptionCoefficient > 0.0))
         path.thp *= exp(-surface.absorptionCoefficient * rayT);
 
+    // RR's specular hit distance (RTXPT's specHitT): how far the ray leaving the guide surface went -- the length of its reflection
+    // ray. It used to be this segment's length whenever the guide surface was not the first hit: behind a pane, the few millimetres
+    // from the glass to the menu, telling RR the menu's reflections lay on the menu itself.
+    if (path.hasFlag(PathFlags::rrSpecHitPending))
+    {
+        path.setFlag(PathFlags::rrSpecHitPending, false);
+        if (pushConstant.rrSpecularHitDistanceStorageIndex != 0xFFFFFFFF)
+            RWTexture2D<float>.Handle(uint2(pushConstant.rrSpecularHitDistanceStorageIndex, 0))[uint2(path.id & 0xFFFFu, path.id >> 16)] = rayT;
+    }
+
     // RTXPT exports depth and motion from its chosen path surface rather than from a separate raster pass.
     // Use jitter-free matrices for motion and the jittered clip transform for the depth supplied to Streamline.
     bool rrVisibleSurface = vertexIdx == 1 || (vertexIdx > 1 && path.hasFlag(PathFlags::deltaOnlyPath));
@@ -171,14 +191,11 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
         RWTexture2D<float> rrDepth = RWTexture2D<float>.Handle(uint2(pushConstant.rrDepthStorageIndex, 0));
         RWTexture2D<float2> rrMotion = RWTexture2D<float2>.Handle(uint2(pushConstant.rrMotionStorageIndex, 0));
         RWTexture2D<float2> rrSpecularMotion = RWTexture2D<float2>.Handle(uint2(pushConstant.rrSpecularMotionStorageIndex, 0));
-        RWTexture2D<float> rrSpecularHitDistance = RWTexture2D<float>.Handle(uint2(pushConstant.rrSpecularHitDistanceStorageIndex, 0));
         rrDepth[pixel] = depthClip.z / depthClip.w;
         rrMotion[pixel] = motion;
         // This is RTXPT's fallback for pixels without a reliable mirror hit. Stable-plane reflection motion can
         // replace it later without changing the Streamline interface.
         rrSpecularMotion[pixel] = motion;
-        if (vertexIdx >= 2)
-            rrSpecularHitDistance[pixel] = rayT;
     }
 
     // Record primary surface view Z and first bounce hit distance for NRD denoiser
@@ -239,7 +256,7 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
         // bright bulbs seen through a window kept only ~38.
         const float3 weightedEmission = surface.emission * misWeight;
         float3 filteredEmission = (vertexIdx == 1 || path.hasFlag(PathFlags::deltaTree))
-            ? weightedEmission : FireflyFilter(weightedEmission, pushConstant.fireflyFilterThreshold, path.fireflyFilterK);
+            ? weightedEmission : FireflyFilter(weightedEmission, fireflyThreshold(ubo), path.fireflyFilterK);
         float3 emissionContrib = path.thp * filteredEmission;
         path.L.rgb += emissionContrib;
 
@@ -285,7 +302,7 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
 
     if (any(directLight > float3(0.0)))
     {
-        float3 filteredDirect = FireflyFilter(directLight, pushConstant.fireflyFilterThreshold, path.fireflyFilterK);
+        float3 filteredDirect = FireflyFilter(directLight, fireflyThreshold(ubo), path.fireflyFilterK);
         float filterScale = Average(directLight) > 0.0 ? Average(filteredDirect) / Average(directLight) : 1.0;
         directLight = filteredDirect;
         directDiffuse *= filterScale;
@@ -378,7 +395,10 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
     // Keep exporting the surface seen through a stack of glass interfaces. Once this sampled path reflects or
     // scatters instead of transmitting, later vertices are indirect lighting and no longer valid primary guides.
     if (path.hasFlag(PathFlags::deltaOnlyPath) && (sampleResult.lobe & LobeType::Transmission) == 0)
+    {
         path.setFlag(PathFlags::deltaOnlyPath, false);
+        path.setFlag(PathFlags::rrSpecHitPending, true); // this is RR's guide surface: the next segment is its specular hit distance
+    }
     path.setFlag(PathFlags::transmission, (sampleResult.lobe & LobeType::Transmission) != 0);
     path.setFlag(PathFlags::specular, (sampleResult.lobe & LobeType::Specular) != 0);
     path.setFlag(PathFlags::delta, (sampleResult.lobe & LobeType::Delta) != 0);

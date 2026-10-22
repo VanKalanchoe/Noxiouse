@@ -1,8 +1,6 @@
 import Tonemapping;
     #include "shaderIO.h"
 
-// How much of the stops a dark scene is under mid-grey auto exposure makes up (1: all; the eye keeps a night darker).
-static const float AutoExposureDarkAdaptation = 0.6;
 
     struct PostProcessPayload
     {
