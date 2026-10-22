@@ -5209,8 +5209,9 @@ namespace Nox
                 uniformData.emissiveLightTotalWeight = total;
                 uniformData.emissiveLightsReference = m_emissiveLightBuffers[currentImage]->getDeviceAddress();
 
-                // The local grid around the camera, snapped to its cells (EmissiveLightGrid.slang builds it this frame).
-                if (m_emissiveGridPipeline)
+                // The local grid around the camera, snapped to its cells (EmissiveLightGrid.slang builds it this frame). The path
+                // tracer's only: the screen-probe GI keeps its global sampling.
+                if (m_emissiveGridPipeline && m_pathTracingEnabled)
                 {
                     if (!m_emissiveGridBuffer)
                         m_emissiveGridBuffer = m_device->createBuffer(NRI::BufferDesc{

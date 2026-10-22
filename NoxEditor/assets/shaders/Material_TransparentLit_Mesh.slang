@@ -427,11 +427,6 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         n = -n;
     }
     float3 v = normalize(ubo->cameraWorldPos.xyz - vertIn.worldPos);
-    // Glass has no back: seen through from either side, its normal faces the viewer (as the path tracer turns a hit's normal to
-    // the ray). A pane modeled facing away -- the Bistro's picture cover glass faces the picture -- was shaded as seen edge-on:
-    // Fresnel 1, a perfect mirror of the room, the picture behind it gone.
-    if (transmission > 0.0 && dot(instance.doubleSided != 0 && !isFrontFace ? -vertIn.normal : vertIn.normal, v) < 0.0)
-        n = -n;
     float3 reflection = normalize(reflect(-v, n));
     float NdotV = clamp(dot(n, v), 0.001, 1.0);
 
@@ -596,10 +591,13 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         ambientSpecular *= scene_gi_specular_occlusion(ubo, sceneIrradiance, n);
     }
 
-    // Smooth glass with ray traced glass on: its reflection traced like its refraction (the room around a jar on a counter, not
-    // the sky the environment map holds), fading into the occluded environment reflection with roughness.
+    // Smooth glass with a volume (a jar, a bottle) with ray traced glass on: its reflection traced like its refraction (the room
+    // around a jar on a counter, not the sky the environment map holds), fading into the occluded environment reflection with
+    // roughness. Thin panes (windows, picture frames) keep the environment reflection, as with refraction alone: traced, their
+    // sharp reflection over the screen-space view behind read as mirrors under DLSS RR.
     float tracedReflectionWeight = 0.0;
-    if ((pushConstant.meshletCulling & MESHLET_RT_REFRACTION) != 0 && ubo->tlasDeviceAddress != 0 && transmission > 0.0)
+    if ((pushConstant.meshletCulling & MESHLET_RT_REFRACTION) != 0 && ubo->tlasDeviceAddress != 0 && transmission > 0.0 &&
+        instance.thickness > 0.0)
         tracedReflectionWeight = saturate((RTRefractionMaxRoughness - perceptualRoughness) / (RTRefractionMaxRoughness - RTRefractionFullRoughness));
     if (tracedReflectionWeight > 0.0 && ubo->brdfLutIndex != 0xFFFFFFFF)
     {

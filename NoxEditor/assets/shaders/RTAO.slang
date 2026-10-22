@@ -183,9 +183,12 @@ RTAOOutput fragMain(MSOutput input, uniform PushConstantRTAO pushConstant)
     float lenN = length(rawNormal);
     float3 N = lenN > 1e-6 ? (rawNormal / lenN) : float3(0.0, 1.0, 0.0);
 
-    // The rotation is fixed per pixel: the occlusion only gets a spatial blur (addOcclusionBlurPass), no temporal accumulation, so
-    // rotating it every frame was new noise every frame -- grain whenever the camera moved.
-    const float2 noiseSeed = float2(pixelCoord);
+    // Without DLSS Ray Reconstruction the rotation is fixed per pixel: the occlusion only gets a spatial blur (addOcclusionBlurPass),
+    // no temporal accumulation, so rotating it every frame was new noise every frame. Under RR it changes every frame, as RR needs
+    // its noisy inputs to (it accumulates them over frames): a pattern fixed to the screen is image detail to it, and slid over the
+    // surfaces as noise whenever the camera moved.
+    const float2 noiseSeed = float2(pixelCoord) +
+                             (ubo->rayReconstructionActive != 0 ? float(ubo->frameIndex % 64u) * float2(5.588238, 3.45367) : float2(0.0));
     float angle = hash12(noiseSeed) * 6.28318530718;
     float3 up = abs(N.y) < 0.999 ? float3(0.0, 1.0, 0.0) : float3(1.0, 0.0, 0.0);
     float3 tangent0 = normalize(cross(up, N));

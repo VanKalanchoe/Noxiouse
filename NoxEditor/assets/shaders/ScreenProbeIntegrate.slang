@@ -123,8 +123,7 @@ ScreenProbeIntegrateOutput fragMain(ScreenProbeVertex input, uniform PushConstan
             }
         }
     }
-    const bool probesFound = weightSum >= 0.01;
-    float3 current = probesFound ? sum / weightSum : screen_probe_fallback(ubo, position, normal, geometricNormal);
+    float3 current = weightSum >= 0.01 ? sum / weightSum : screen_probe_fallback(ubo, position, normal, geometricNormal);
     if (!all(isfinite(current)))
         current = screen_probe_fallback(ubo, position, normal, geometricNormal);
 
@@ -230,18 +229,8 @@ ScreenProbeIntegrateOutput fragMain(ScreenProbeVertex input, uniform PushConstan
             currentClamped *= limit / currentLuma;
     }
     float3 result = history.a > 0.0 ? lerp(history.rgb, currentClamped, 1.0 / frames) : currentClamped;
-    // No probe on this surface this frame (the grid moves with the jitter): what it accumulated stands, rather than this frame's
-    // DDGI fallback -- coarser and at another level, it was blended in at full weight on the frames the grid missed the surface,
-    // and those pixels flickered between the two in blotches that slid as the camera moved. It still drifts in slowly, so a
-    // surface no probe ever lands on (a thin pole) follows the light changing.
-    float resultFrames = frames;
-    if (!probesFound && history.a > 0.0)
-    {
-        result = lerp(history.rgb, currentClamped, 1.0 / 32.0);
-        resultFrames = history.a;
-    }
     result = all(isfinite(result)) ? clamp(result, 0.0, 30000.0) : (all(isfinite(current)) ? clamp(current, 0.0, 30000.0) : float3(0.0));
-    output.irradiance = float4(result, resultFrames);
+    output.irradiance = float4(result, frames);
     output.distance = viewDistance;
     return output;
 }
