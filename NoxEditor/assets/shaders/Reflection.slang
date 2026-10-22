@@ -232,6 +232,10 @@ float4 fragMain(
 
         GpuRayTracingInstance lut = instanceLUTBuffer[instanceID];
 
+        // Glass and blended surfaces are looked through, as every other ray of the hybrid passes does: a window committed here was
+        // shaded as a white wall, and floors and walls inside reflected the windows as lit panels instead of the street.
+        if (lut.alphaMode == 2 || ray_see_through(lut.transmissionFactor, lut.alphaMode))
+            continue;
         if (lut.alphaMode == 0 || lut.baseColorTextureIndex == 0xFFFFFFFF)
         {
             rq.CommitNonOpaqueTriangleHit();
