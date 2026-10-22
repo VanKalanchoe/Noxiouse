@@ -946,6 +946,7 @@ namespace Nox
         void addReSTIRDIPasses();
         void addReSTIRPTPasses();
         void addPathTracerPasses();
+        void addEmissiveLightGridPass();
         void addDeferredLightingPass();
         void addForward3DPass();
         void addParticlePass();
@@ -1786,6 +1787,9 @@ namespace Nox
         std::array<std::unique_ptr<NRI::Buffer>, MAX_FRAMES_IN_FLIGHT> m_emissiveLightBuffers;
         std::array<void*, MAX_FRAMES_IN_FLIGHT> m_emissiveLightBuffersMapped{};
         uint64_t m_emissiveLightBufferCapacity = 0;
+        // The emissive lights' local grid (EmissiveLightGrid.slang), rebuilt every frame the emissive lights are sampled.
+        std::unique_ptr<NRI::Buffer> m_emissiveGridBuffer;
+        std::unique_ptr<NRI::Pipeline> m_emissiveGridPipeline;
 
         // Temporal & Motion Vector State
         glm::mat4 m_prevView = glm::mat4(1.0f);

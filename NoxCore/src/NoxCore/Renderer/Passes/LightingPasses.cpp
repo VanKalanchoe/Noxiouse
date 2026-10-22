@@ -6,6 +6,32 @@
 
 namespace Nox
 {
+    // The emissive lights' local grid (EmissiveLightGrid.slang): before the passes that sample them (the path tracer, the
+    // screen-probe GI), which read it with the GPU scene (ReadGpuScene).
+    void Renderer::addEmissiveLightGridPass()
+    {
+        const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
+        if (!m_emissiveGridPipeline || !resources.EmissiveLightGrid.IsValid() || uniformData.emissiveGridReference == 0)
+            return;
+
+        m_renderGraph.AddPass("Emissive Light Grid", RGPassFlags::NeverCull,
+            [&](RGBuilder& builder)
+            {
+                builder.Write(resources.EmissiveLightGrid);
+            },
+            [this](RGPassContext& context)
+            {
+                shaderio::PushConstantEmissiveGrid push{};
+                push.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                push.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
+                NRI::CommandBuffer& cmd = context.Cmd();
+                cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *m_emissiveGridPipeline);
+                cmd.pushData(&push, sizeof(push));
+                constexpr uint32_t cellCount = shaderio::EmissiveGridSizeX * shaderio::EmissiveGridSizeY * shaderio::EmissiveGridSizeZ;
+                cmd.dispatch((cellCount + 63) / 64, 1, 1);
+            });
+    }
+
     void Renderer::addPathTracerPasses()
     {
         FrameGraphState& frame = m_frame;

@@ -465,6 +465,11 @@ struct UniformBufferObject
     uint32_t emissiveLightCount;
     float emissiveLightTotalWeight;
     uint64_t emissiveLightsReference;
+    // The emissive lights that matter where (EmissiveLightGrid.slang): EmissiveGridEntries list entries per cell of a grid of
+    // EmissiveGridSizeX/Y/Z cells of emissiveGridCellSize world units from emissiveGridOrigin, around the camera. 0: none.
+    uint64_t emissiveGridReference;
+    vec3 emissiveGridOrigin;
+    float emissiveGridCellSize;
     // Texture LOD biases (negative: sharper). An upscaled image is rendered at fewer pixels than it is shown: its textures are
     // sampled as for the shown resolution (log2(render / display), NVIDIA's DLSS guidance) -- the raster passes'. The path
     // tracer's adds RTXPT's -1. The mips texture streaming is asked for follow the finest of the two that sample this frame.
@@ -484,6 +489,25 @@ struct EmissiveLightInstance
     uint32_t triangleCount; // its ray tracing triangles
     float cdf;              // the weights up to and including this one
     float weight;
+    vec3 center;            // its world bounds' center and radius (the light grid's distances)
+    float radius;
+};
+
+// The local light grid of the emissive lights (EmissiveLightGrid.slang, PathTracer/EmissiveLights.slang): around the camera, each
+// cell holds EmissiveGridEntries picks from the emissive light list, drawn by each light's power over its distance squared from
+// the cell. The global list alone (by power) almost never picked the lamp next to a point: the street's string lights and
+// signs outweigh it, and rooms lit by their lamps stayed black.
+STATIC_CONST uint32_t EmissiveGridSizeX = 32;
+STATIC_CONST uint32_t EmissiveGridSizeY = 16;
+STATIC_CONST uint32_t EmissiveGridSizeZ = 32;
+STATIC_CONST uint32_t EmissiveGridEntries = 16;
+STATIC_CONST float EmissiveGridCellMeters = 2.0;
+
+struct PushConstantEmissiveGrid
+{
+    uint64_t matrixReference;
+    uint32_t frameIndex;
+    uint32_t emissiveGridPadding;
 };
 
 struct Vertex

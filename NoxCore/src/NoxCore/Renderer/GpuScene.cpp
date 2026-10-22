@@ -650,7 +650,9 @@ namespace Nox
             if (!std::isfinite(weight))
                 continue;
             total += weight;
-            outLights.push_back({ slot, mesh.triangleCount, total, weight });
+            // Its world bounds' center and radius, for the light grid's distances (EmissiveLightGrid.slang).
+            const glm::vec3 center = glm::vec3(world * glm::vec4(0.5f * (mesh.boundsMin + mesh.boundsMax), 1.0f));
+            outLights.push_back({ slot, mesh.triangleCount, total, weight, center, 0.5f * glm::length(extent) });
         }
         return total;
     }

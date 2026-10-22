@@ -533,6 +533,12 @@ namespace Nox
         // The procedural sky's pipelines with the others, behind the start's splash: made when a sky was first selected, they took
         // ~5 s of compiling there (on every start after a shader change).
         createProceduralSkyPipelines();
+        {
+            NRI::PipelineDesc gridDesc{};
+            gridDesc.type = NRI::PipelineType::Compute;
+            gridDesc.shaders.push_back({ NRI::ShaderStage::Compute, "buildMain", "assets/shaders/EmissiveLightGrid.slang" });
+            m_emissiveGridPipeline = m_device->createPipeline(gridDesc, *m_shaderCompiler);
+        }
 
         // Create every resource needed for PBR
     }
@@ -4496,6 +4502,7 @@ namespace Nox
             addAnimatedBLASPass();
             addBLASBuildPass();
             addTLASBuildPass();
+            addEmissiveLightGridPass();
             addInstanceCullingPass();
             addVisibilityPass();
             addHiZBuildPass();
@@ -4820,6 +4827,8 @@ namespace Nox
             resources.SceneMeshes = graph.ImportBuffer("Scene Meshes", buffer);
         if (NRI::Buffer* buffer = m_gpuScene.GetRayTracingInstances().GetBuffer())
             resources.SceneRayTracingInstances = graph.ImportBuffer("Scene Ray Tracing Instances", buffer);
+        if (m_emissiveGridBuffer && uniformData.emissiveGridReference != 0)
+            resources.EmissiveLightGrid = graph.ImportBuffer("Emissive Light Grid", m_emissiveGridBuffer.get());
         if (frame.skinningWorkCount > 0 && frameIndex < m_skinnedVertexBuffers.size() &&
             frameIndex < m_skinningWorkItemBuffers.size() && frameIndex < m_boneBuffers.size())
         {
@@ -5169,6 +5178,8 @@ namespace Nox
         uniformData.emissiveLightCount = 0;
         uniformData.emissiveLightTotalWeight = 0.0f;
         uniformData.emissiveLightsReference = 0;
+        uniformData.emissiveGridReference = 0;
+        uniformData.emissiveGridCellSize = 0.0f;
         if (m_pathTracingEnabled || (m_rayTracingEnabled && m_diffuseGIMode == 3))
         {
             const float total = m_gpuScene.CollectEmissiveLights(m_emissiveLights);
@@ -5197,6 +5208,21 @@ namespace Nox
                 uniformData.emissiveLightCount = static_cast<uint32_t>(m_emissiveLights.size());
                 uniformData.emissiveLightTotalWeight = total;
                 uniformData.emissiveLightsReference = m_emissiveLightBuffers[currentImage]->getDeviceAddress();
+
+                // The local grid around the camera, snapped to its cells (EmissiveLightGrid.slang builds it this frame).
+                if (m_emissiveGridPipeline)
+                {
+                    if (!m_emissiveGridBuffer)
+                        m_emissiveGridBuffer = m_device->createBuffer(NRI::BufferDesc{
+                            .size = sizeof(uint32_t) * shaderio::EmissiveGridSizeX * shaderio::EmissiveGridSizeY * shaderio::EmissiveGridSizeZ *
+                                    shaderio::EmissiveGridEntries,
+                            .usage = NRI::BufferUsage::Storage });
+                    const float cellSize = shaderio::EmissiveGridCellMeters * uniformData.unitsPerMeter;
+                    const glm::vec3 halfGrid = 0.5f * cellSize * glm::vec3(shaderio::EmissiveGridSizeX, shaderio::EmissiveGridSizeY, shaderio::EmissiveGridSizeZ);
+                    uniformData.emissiveGridReference = m_emissiveGridBuffer->getDeviceAddress();
+                    uniformData.emissiveGridOrigin = glm::floor((glm::vec3(uniformData.cameraWorldPos) - halfGrid) / cellSize) * cellSize;
+                    uniformData.emissiveGridCellSize = cellSize;
+                }
             }
         }
     }
