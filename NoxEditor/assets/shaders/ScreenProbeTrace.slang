@@ -163,7 +163,7 @@ float4 screen_probe_trace_ray(ScreenProbeVertex input, PushConstantScreenProbe p
 // cosine of the direction the irradiance is for) and its direction. Resampled from ScreenProbeEmissiveCandidates points by what
 // each would give unshadowed (its emission, texture included, the probe's cosine, the distance): the list's own pick knows
 // neither where the probe is nor that most of a facade's emissive texture is dark windows, and its raw samples boiled.
-static const uint ScreenProbeEmissiveCandidates = 8;
+static const uint ScreenProbeEmissiveCandidates = 4;
 
 float4 screen_probe_emissive_sample(UniformBufferObject* ubo, float3 origin, float3 probeNormal, uint seed)
 {
@@ -209,7 +209,7 @@ float4 screen_probe_emissive_sample(UniformBufferObject* ubo, float3 origin, flo
     float3 share = chosen.radiance * contributionWeight / (ScreenProbePi * float(ScreenProbeEmissiveSamples));
     if (any(isnan(share)) || any(isinf(share)))
         return float4(0.0);
-    return float4(min(share, float3(2000.0)), screen_probe_pack_direction(chosen.direction)); // 16 x 2000 stays a half float
+    return float4(min(share, float3(4000.0)), screen_probe_pack_direction(chosen.direction)); // 8 x 4000 stays a half float
 }
 
 [shader("fragment")]
@@ -222,7 +222,7 @@ ScreenProbeTraceOutput fragMain(ScreenProbeVertex input, uniform PushConstantScr
     const uint2 texel = uint2(input.pos.xy);
     const uint2 probe = texel / ScreenProbeRayRes;
     const uint2 local = texel % ScreenProbeRayRes;
-    if (probe.x >= pushConstant.probeCountX || probe.y >= pushConstant.probeCountY || any((local & 1u) != 0u))
+    if (probe.x >= pushConstant.probeCountX || probe.y >= pushConstant.probeCountY || !screen_probe_is_emissive_texel(local))
         return output;
     UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
     Texture2D positionTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.probePositionTextureIndex, 0));

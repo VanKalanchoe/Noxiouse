@@ -209,6 +209,7 @@ namespace Nox
         packed.alphaMaskCutoff = material.AlphaMaskCutoff;
         packed.doubleSided = material.DoubleSided ? 1u : 0u;
         packed.unlit = material.Unlit ? 1u : 0u;
+        packed.diffuseTransmission = glm::clamp(material.DiffuseTransmission, 0.0f, 1.0f);
         return packed;
     }
 
@@ -3305,7 +3306,10 @@ namespace Nox
         data.prefilter = m_prefilterPipeline.get();
         data.storageSlots = m_skyStorageSlots;
         data.environmentSlot = m_environmentCubemap->GetDescriptorIndexSlot();
-        data.horizonBand = m_skyHorizonBand ? m_skyHorizonBandPipeline.get() : nullptr;
+        // Only for clouds: without them the sky near the horizon is smooth and the cubemap holds it (the band's raymarch is the
+        // dearest part of the sky update).
+        const bool skyClouds = m_proceduralSky.Clouds && m_proceduralSky.CloudCoverage > 0.0f && m_proceduralSky.CloudDensity > 0.0f;
+        data.horizonBand = (m_skyHorizonBand && skyClouds) ? m_skyHorizonBandPipeline.get() : nullptr;
         data.horizonBandSlot = m_skyHorizonBandStorageSlot;
         data.updateLuts = m_skyLutsDirty;
         data.push = m_skyCyclePush;

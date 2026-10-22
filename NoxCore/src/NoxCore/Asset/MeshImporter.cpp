@@ -2001,9 +2001,9 @@ namespace Nox
 
     // NVIDIA RTXPT's hand-tuned materials for a model (RTXPT-Assets/Materials/<model>.<material>.material.json, which RTXPT's
     // MaterialsBaker prefers over the glTF's): roughness of foliage, fabric and plants, specular colors, and the emission of
-    // the lamps (Bistro's bulbs are 30-50x their glTF emission there). Looked up in a "Materials" folder next to the glTF or in
-    // any folder above it; nothing changes when there is none. Read with yaml-cpp (JSON is YAML). Diffuse transmission and the
-    // other RTXPT-only fields have no counterpart here yet.
+    // the lamps (Bistro's bulbs are 30-50x their glTF emission there), leaves' and cloth's diffuse transmission. Optional: looked
+    // up in a "Materials" folder next to the glTF or in any folder above it, nothing changes when there is none. Read with yaml-cpp
+    // (JSON is YAML).
     static void ApplyRtxptMaterialOverride(const std::filesystem::path& gltfPath, MaterialData& material)
     {
         if (material.Name.empty())
@@ -2072,6 +2072,7 @@ namespace Nox
                 material.MetallicFactor = number("Metalness", material.MetallicFactor);
             }
             material.IOR = number("IoR", material.IOR);
+            material.DiffuseTransmission = std::clamp(number("DiffuseTransmissionFactor", material.DiffuseTransmission), 0.0f, 1.0f);
             if (json["EnableTransmission"])
                 material.TransmissionFactor = json["EnableTransmission"].as<bool>() ? number("TransmissionFactor", 0.0f) : 0.0f;
             const glm::vec3 emissive = color("EmissiveColor", material.EmissiveFactor);
@@ -2772,6 +2773,18 @@ namespace Nox
                                             materialData.IOR = static_cast<float>(kv.value.int_val);
                                     }
                                 }
+                            }
+                        }
+
+                        if (std::string_view(ext.name.data, ext.name.len) == "KHR_materials_diffuse_transmission" &&
+                            ext.value.type == TG3_VALUE_OBJECT)
+                        {
+                            for (uint32_t j = 0; j < ext.value.object_count; j++)
+                            {
+                                const auto& kv = ext.value.object_data[j];
+                                if (std::string_view(kv.key.data, kv.key.len) == "diffuseTransmissionFactor" &&
+                                    (kv.value.type == TG3_VALUE_REAL || kv.value.type == TG3_VALUE_INT))
+                                    materialData.DiffuseTransmission = std::clamp(getFloatVal(kv.value), 0.0f, 1.0f);
                             }
                         }
 

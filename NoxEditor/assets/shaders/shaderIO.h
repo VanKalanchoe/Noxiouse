@@ -164,9 +164,30 @@ struct GpuMaterial
     float alphaMaskCutoff;
     uint32_t doubleSided;
     uint32_t unlit;
+    float diffuseTransmission; // through a thin surface to its back (leaves, cloth); 0: none
 };
 
 #ifdef __SLANG__
+// The G-buffer material target's alpha (RGBA8): 0 for a single-sided surface; a double-sided one 0.25 + 0.75 x its diffuse
+// transmission (leaves, cloth: light from behind comes through).
+float gbuffer_encode_back_light(bool doubleSided, float diffuseTransmission)
+{
+    return doubleSided ? 0.25 + 0.75 * saturate(diffuseTransmission) : 0.0;
+}
+
+bool gbuffer_double_sided(float encoded)
+{
+    return encoded > 0.125;
+}
+
+// How much of a light behind a double-sided surface comes through to the side seen: its diffuse transmission, or 0.6 when the
+// material sets none (the look double-sided foliage always had here).
+float gbuffer_back_light(float encoded)
+{
+    const float diffuseTransmission = saturate((encoded - 0.25) / 0.75);
+    return diffuseTransmission > 0.01 ? diffuseTransmission : 0.6;
+}
+
 // Beer-Lambert absorption over `length` (world units) of a volume whose light keeps attenuationColor over attenuationDistance.
 float3 volume_transmittance(float3 attenuationColor, float attenuationDistance, float length)
 {
@@ -229,6 +250,8 @@ struct GpuRayTracingInstance
     float thickness;
     vec3 attenuationColor;          // volume absorption (KHR_materials_volume; attenuationDistance 0: none)
     float attenuationDistance;
+    float diffuseTransmission;      // through a thin surface to its back (leaves, cloth); 0: none
+    float rayTracingPadding;        // the record stays a multiple of 8 bytes (its addresses)
 };
 
 struct GpuMesh
@@ -2198,6 +2221,7 @@ struct InstanceData
     float alphaMaskCutoff;
     uint32_t doubleSided;
     uint32_t unlit;
+    float diffuseTransmission;
 
     uint32_t boneMatrixOffset;
     uint32_t skinnedVertexOffset;
@@ -2268,6 +2292,7 @@ struct SceneInstances
             data.alphaMaskCutoff = material.alphaMaskCutoff;
             data.doubleSided = material.doubleSided;
             data.unlit = material.unlit;
+            data.diffuseTransmission = material.diffuseTransmission;
 
             data.boneMatrixOffset = instance.boneMatrixOffset;
             data.skinnedVertexOffset = instance.skinnedVertexOffset;

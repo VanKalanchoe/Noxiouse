@@ -479,9 +479,9 @@ PSOutput fragMain(
 
         float NdotLRaw = dot(n, dir);
         float3 shadowNormal = n;
-        if (materialSample.a > 0.5 && NdotLRaw < 0.0)
+        if (gbuffer_double_sided(materialSample.a) && NdotLRaw < 0.0)
         {
-            NdotLRaw = -NdotLRaw * 0.6;
+            NdotLRaw = -NdotLRaw * gbuffer_back_light(materialSample.a);
             shadowNormal = -n;
         }
         if (NdotLRaw <= 0.0)

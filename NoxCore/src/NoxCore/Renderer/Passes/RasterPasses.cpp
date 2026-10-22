@@ -707,7 +707,7 @@ namespace Nox
             skyboxSun.moonCosAngularRadius = std::cos(moonRadius);
             skyboxSun.moonDiscRadiance = glm::max(sky.MoonDiscIlluminance, glm::vec3(0.0f)) * (0.002f / moonSolidAngle);
             skyboxSun.starIntensity = glm::max(sky.StarIntensity, 0.0f);
-            if (m_skyHorizonBand)
+            if (m_skyHorizonBand && sky.Clouds && sky.CloudCoverage > 0.0f && sky.CloudDensity > 0.0f)
                 skyboxSun.horizonBandIndex = m_skyHorizonBand->GetDescriptorIndexSlot();
         }
         return skyboxSun;

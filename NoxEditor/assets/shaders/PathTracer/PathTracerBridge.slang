@@ -294,10 +294,12 @@ namespace Bridge
         // KHR_materials_transmission applies only to the dielectric portion; transparent metals are undefined.
         // This is the exact factor used by RTXPT's PathTracerBridgeDonut.
         transmission *= 1.0 - saturate(metallic);
+        // Diffuse transmission (leaves, cloth): RTXPT's diffuse transmission lobe, for the dielectric part like the specular one.
+        const float diffuseTransmission = saturate(lut.diffuseTransmission) * (1.0 - saturate(metallic));
         StandardBSDFData bsdfData = StandardBSDFData::make(
             diffuseAlbedo,
             specularF0,
-            saturate(roughness), saturate(metallic), eta, baseColor.rgb, 0.0, saturate(transmission));
+            saturate(roughness), saturate(metallic), eta, baseColor.rgb, diffuseTransmission, saturate(transmission));
 
         surface.bsdf = StandardBSDF::make(bsdfData);
         float specularTransmission = saturate(transmission);

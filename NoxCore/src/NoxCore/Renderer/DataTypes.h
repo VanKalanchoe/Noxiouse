@@ -100,6 +100,9 @@ namespace Nox
         // AttenuationColor of itself (Beer-Lambert). Distance 0 = infinite: no absorption, the glTF default.
         glm::vec3 AttenuationColor = glm::vec3(1.0f);
         float AttenuationDistance = 0.0f;
+        // Diffuse transmission (KHR_materials_diffuse_transmission; RTXPT's DiffuseTransmissionFactor): how much of the diffuse
+        // light goes through a thin surface to its other side -- leaves and cloth lit from behind. 0: none.
+        float DiffuseTransmission = 0.0f;
 
         // Alpha properties
         AlphaMode Mode = AlphaMode::Opaque;

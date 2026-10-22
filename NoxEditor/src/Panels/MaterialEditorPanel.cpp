@@ -102,6 +102,9 @@ namespace Nox
             ImGui::SetTooltip("Volume absorption (KHR_materials_volume): the color light keeps after travelling Attenuation Distance\n"
                               "through the material -- thick glass tinted by its depth. Needs Transmission and a Thickness.");
         changed |= ImGui::DragFloat("Attenuation Distance", &data.AttenuationDistance, 0.01f, 0.0f, 100000.0f);
+        changed |= ImGui::SliderFloat("Diffuse Transmission", &data.DiffuseTransmission, 0.0f, 1.0f);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Light through a thin surface to its other side (leaves, cloth, paper, lampshades). Make it double sided.");
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("World units (scaled with the model). 0: no absorption.");
 

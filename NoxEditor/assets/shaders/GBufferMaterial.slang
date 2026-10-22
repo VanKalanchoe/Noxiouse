@@ -610,8 +610,7 @@
         // The material target is RGBA8 (0..1): unlit is 1, the workflow (0 metal-rough, 1 spec-gloss) halved. Unlit used to be
         // stored as 2, which the target clamped to 1: every reader's "unlit" test (>= 2) never held and unlit surfaces were lit.
         float workflow  = (instance.unlit != 0) ? 1.0 : instance.workflow * 0.5;
-        float isDoubleSided = (instance.doubleSided != 0) ? 1.0 : 0.0;
-        output.material = float4(roughness, metallic, workflow, isDoubleSided);
+        output.material = float4(roughness, metallic, workflow, gbuffer_encode_back_light(instance.doubleSided != 0, instance.diffuseTransmission));
 
         output.emission = float4(emission, 1.0);
         output.entityID = instance.entityID;

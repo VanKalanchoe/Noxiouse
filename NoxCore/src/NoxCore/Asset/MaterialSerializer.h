@@ -55,6 +55,7 @@ namespace Nox
             stream.write(reinterpret_cast<const char*>(&material.Thickness), sizeof(float));
             stream.write(reinterpret_cast<const char*>(&material.AttenuationColor), sizeof(glm::vec3));
             stream.write(reinterpret_cast<const char*>(&material.AttenuationDistance), sizeof(float));
+            stream.write(reinterpret_cast<const char*>(&material.DiffuseTransmission), sizeof(float));
             return stream.good();
         }
 
@@ -114,6 +115,10 @@ namespace Nox
             {
                 material.AttenuationColor = attenuationColor;
                 material.AttenuationDistance = attenuationDistance;
+                // Written since diffuse transmission: older files end before it (none).
+                float diffuseTransmission = 0.0f;
+                if (stream.read(reinterpret_cast<char*>(&diffuseTransmission), sizeof(float)))
+                    material.DiffuseTransmission = diffuseTransmission;
             }
             stream.clear();
 

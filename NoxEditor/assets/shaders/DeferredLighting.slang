@@ -497,12 +497,12 @@ float skyIrradianceLuma(UniformBufferObject* ubo, float3 n)
                 }
 
                 float NdotL_raw = dot(n, l);
-                bool isDoubleSided = (materialSample.a > 0.5);
+                bool isDoubleSided = gbuffer_double_sided(materialSample.a);
                 const bool backLit = isDoubleSided && NdotL_raw < 0.0;
                 if (backLit)
                 {
-                    // Translucent thin cloth / foliage: sun transmits through to the back face
-                    NdotL_raw = -NdotL_raw * 0.6;
+                    // Translucent thin cloth / foliage: the light behind comes through by the material's diffuse transmission
+                    NdotL_raw = -NdotL_raw * gbuffer_back_light(materialSample.a);
                 }
 
                 if (NdotL_raw <= 0.0)

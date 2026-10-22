@@ -190,10 +190,15 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
     // 3. Evaluate Next Event Estimation (direct light sampling)
     uint rngState = RTXPTSampling::uniformState(path.id, vertexIdx, pushConstant.frameIndex, RTXPTSampling::EffectNEE);
 
+    // Emissive meshes: a scene has many (every lit window, lamp, sign), a point is lit by the few near it. More candidates let the
+    // resampling find those -- on the surface the camera sees only: every candidate loads a triangle and a texel, and 12 at every
+    // vertex of every path cost more than the rest of the path tracer.
+    const uint candidateSamples = (ubo->emissiveLightCount > 0 && vertexIdx == 1) ? max(pushConstant.neeCandidateSamples, 8u)
+                                                                                  : pushConstant.neeCandidateSamples;
     float3 directDiffuse, directSpecular;
     float3 directLight = PathTracer::evaluateNEE(
         surface.shadingData, surface.bsdf, as, ubo, rngState,
-        pushConstant.neeCandidateSamples, pushConstant.neeFullSamples,
+        candidateSamples, pushConstant.neeFullSamples,
         pushConstant.skyboxTextureIndex, pushConstant.environmentImportanceIndex,
         directDiffuse, directSpecular);
 
