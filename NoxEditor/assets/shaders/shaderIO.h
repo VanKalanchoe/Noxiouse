@@ -1104,6 +1104,10 @@ STATIC_CONST uint32_t PathTracerThin = 2u;            // thin-walled: no refract
 STATIC_CONST uint32_t PathTracerExcludeFromNEE = 4u;  // shadow rays pass it untouched (RTXPT ExcludeFromNEE: window glass)
 STATIC_CONST uint32_t PathTracerRtxptMaterial = 8u;   // from an RTXPT material file: shadow rays follow RTXPT's rule (block
                                                       // unless ExcludeFromNEE or cut out), not the tinted pass-through
+// RTXPT's PSDDominantDeltaLobe (which of a smooth pane's lobes DLSS-RR's guides follow): neither flag the transmission (0, the
+// default), PathTracerPSDDominantReflection the reflection (1), PathTracerPSDDominantSurface the pane itself (-1).
+STATIC_CONST uint32_t PathTracerPSDDominantReflection = 16u;
+STATIC_CONST uint32_t PathTracerPSDDominantSurface = 32u;
 
 #ifdef __SLANG__
 // Whether rays of the hybrid passes go through a surface (and the raster path draws it as glass): see-through transmission and

@@ -81,6 +81,32 @@ void rayGenMain()
     path.resumeBranch();
     }
 
+    // RTXPT's last steps on RR's guides (PostProcess.hlsl DENOISER_PREPARE_INPUTS, MIX_STABLE_RADIANCE): the stable radiance -- the
+    // emitters and sky the camera sees directly, through glass and in mirrors, noise-free -- pulls the diffuse albedo guide towards
+    // its own tone-mapped colour, as far as it outshines the albedo; RR then keeps it as detail (a window's sky reflection, a lamp)
+    // instead of filtering it as lighting over the surface the guides describe. RTXPT applies its Reinhard to radiance in its units, in
+    // which the Bistro sits near exposure 1; here the radiance as exposed, the same picture at any light scale. And no pixel has both
+    // albedo guides near 0.
+    if (pushConstant.rrDiffuseAlbedoStorageIndex != 0xFFFFFFFF)
+    {
+        RWTexture2D<float4> rrDiffuse = RWTexture2D<float4>.Handle(uint2(pushConstant.rrDiffuseAlbedoStorageIndex, 0));
+        RWTexture2D<float4> rrSpecular = RWTexture2D<float4>.Handle(uint2(pushConstant.rrSpecularAlbedoStorageIndex, 0));
+        float3 diffuseAlbedo = rrDiffuse[pixelPos].rgb;
+        const float3 specularAlbedo = rrSpecular[pixelPos].rgb;
+        const float exposure = scene_exposure(ubo, pushConstant.autoExposureTextureIndex, pushConstant.exposureCompensation,
+                                              pushConstant.autoExposureMinEV, pushConstant.autoExposureMaxEV);
+        const float3 stable = max(path.stableL * exposure, float3(0.0));
+        const float stablePeak = max(1e-7, max(stable.x, max(stable.y, stable.z))); // RTXPT's ReinhardMax
+        const float3 stableAlbedo = sqrt(stable * (stablePeak / (stablePeak + 1.0) / stablePeak));
+        const float stableAlbedoAverage = Average(stableAlbedo);
+        const float3 stableAlbedoGreyMix = lerp(stableAlbedo, float3(0.5), 0.2); // never 0
+        diffuseAlbedo = lerp(diffuseAlbedo, stableAlbedoGreyMix,
+                             stableAlbedoAverage / (Average(diffuseAlbedo) + sqrt(stableAlbedoAverage) + 1e-7));
+        if (Average(diffuseAlbedo + specularAlbedo) < 0.05)
+            diffuseAlbedo += 0.05;
+        rrDiffuse[pixelPos] = float4(saturate(diffuseAlbedo), 1.0);
+    }
+
     // The air and the height fog between the camera and what its ray hit first (the sky: the height fog alone, as the skybox
     // has it), on each sample before it is accumulated or denoised -- it is linear (color * transmittance + scattered light).
     {

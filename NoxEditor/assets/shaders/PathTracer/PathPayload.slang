@@ -63,10 +63,11 @@ struct PathPayload
         p.packed[3].z = packHalf2x16(path.specularRadiance.yz);
         p.packed[3].w = (f32tof16(path.firstBounceHitDist) & 0xFFFF) | (f32tof16(path.primaryViewZ) << 16);
 
-        // 4: RayCone, MIS, RR, Counters & Flags
+        // 4: RayCone, firefly filter, stable radiance & Flags (the scatter pdf is in 5)
+        const float3 stableL = min(path.stableL, float3(65504.0));
         p.packed[4].x = path.rayCone.widthSpreadAngleFP16;
-        p.packed[4].y = (f32tof16(path.fireflyFilterK) << 16) | (f32tof16(path.bsdfScatterPdf) & 0xFFFF);
-        p.packed[4].z = (path.packedMISInfo << 16) | (f32tof16(path.thpRuRuCorrection) & 0xFFFF);
+        p.packed[4].y = (f32tof16(path.fireflyFilterK) << 16) | (f32tof16(stableL.z) & 0xFFFF);
+        p.packed[4].z = packHalf2x16(stableL.xy);
         p.packed[4].w = path.flagsAndVertexIndex;
         p.packed[5] = uint4(asuint(path.bsdfScatterPdf), path.packedCounters, path.interiorSlot0, path.interiorSlot1);
 
@@ -111,9 +112,10 @@ struct PathPayload
         // 4: RayCone, MIS, RR, Flags
         path.rayCone.widthSpreadAngleFP16 = p.packed[4].x;
         path.fireflyFilterK               = f16tof32(p.packed[4].y >> 16);
+        path.stableL                      = float3(unpackHalf2x16(p.packed[4].z), f16tof32(p.packed[4].y & 0xFFFF));
         path.bsdfScatterPdf               = asfloat(p.packed[5].x);
-        path.packedMISInfo                = p.packed[4].z >> 16;
-        path.thpRuRuCorrection            = f16tof32(p.packed[4].z & 0xFFFF);
+        path.packedMISInfo                = 0;
+        path.thpRuRuCorrection            = 1.0;
         path.flagsAndVertexIndex          = p.packed[4].w;
 
         path.interiorSlot0 = p.packed[5].z;

@@ -15,6 +15,7 @@ namespace PathFlags
     static const uint deltaOnlyPath           = (1 << 12);
     static const uint deltaTree               = (1 << 13); // only delta events since the camera (RTXPT's stable planes): no firefly filter
     static const uint rrSpecHitPending        = (1 << 14); // the ray leaving RR's guide surface: its length is the specular hit distance
+    static const uint rrGuidesDone            = (1 << 15); // RR's guides for this pixel are final (written at the first glass's split)
 }
 
 namespace PackedCounters
@@ -65,6 +66,9 @@ struct PathState
 
     float3 thp;
     float4 L; // rgb = total radiance, a = specular average
+    // RTXPT's stable radiance: what L gathered along delta-only paths from the camera (emitters and the sky seen directly, through
+    // glass, in mirrors), part of L too. RR's guides take it in (PathTracerRayGen.slang, RTXPT's DLSS-RR input preparation).
+    float3 stableL;
 
     float3 diffuseRadiance;
     float3 specularRadiance;
@@ -102,6 +106,7 @@ struct PathState
         path.sceneLength = 0.0;
         path.thp = float3(1.0);
         path.L = float4(0.0);
+        path.stableL = float3(0.0);
         path.diffuseRadiance = float3(0.0);
         path.specularRadiance = float3(0.0);
         path.firstBounceHitDist = 0.0;

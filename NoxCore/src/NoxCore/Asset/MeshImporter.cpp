@@ -2087,6 +2087,12 @@ namespace Nox
                 material.PathTracerFlags |= shaderio::PathTracerThinSet | (json["ThinSurface"].as<bool>() ? shaderio::PathTracerThin : 0u);
             if (json["ExcludeFromNEE"] && json["ExcludeFromNEE"].as<bool>())
                 material.PathTracerFlags |= shaderio::PathTracerExcludeFromNEE;
+            // Which of a smooth pane's lobes DLSS-RR's guides follow (-1 the pane, 0 the transmission, 1 the reflection).
+            const int dominantLobe = json["PSDDominantDeltaLobe"] ? json["PSDDominantDeltaLobe"].as<int>() : -1;
+            if (dominantLobe < 0)
+                material.PathTracerFlags |= shaderio::PathTracerPSDDominantSurface;
+            else if (dominantLobe >= 1)
+                material.PathTracerFlags |= shaderio::PathTracerPSDDominantReflection;
             if (json["EnableTransmission"])
                 material.TransmissionFactor = json["EnableTransmission"].as<bool>() ? number("TransmissionFactor", 0.0f) : 0.0f;
             const glm::vec3 emissive = color("EmissiveColor", material.EmissiveFactor);

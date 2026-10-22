@@ -59,6 +59,8 @@ void missMain(inout PathPayload payload : SV_RayPayload)
                                         path.fireflyFilterK);
         float3 envContrib = path.thp * envRadiance * misWeight;
         path.L.rgb += envContrib;
+        if (path.hasFlag(PathFlags::deltaTree))
+            path.stableL += envContrib; // RTXPT's stable radiance: the sky seen directly, through glass, in mirrors
 
         if (path.getVertexIndex() == 0)
         {

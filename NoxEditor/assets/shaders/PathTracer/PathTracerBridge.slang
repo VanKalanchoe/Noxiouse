@@ -135,7 +135,8 @@ namespace Bridge
         }
         const float epsilon = 1e-6;
         const float3 fromDiffuse = diffuseColor * ((1.0 - specularStrength) / (1.0 - dielectricSpecular) / max(1.0 - metallic, epsilon));
-        const float3 fromSpecular = (specularColor - dielectricSpecular * (1.0 - metallic)) / max(metallic, epsilon);
+        // Donut's own formula (scene_material.hlsli ConvertSpecularGlossToMetalRough), only the dielectric part over the metalness.
+        const float3 fromSpecular = specularColor - dielectricSpecular * (1.0 - metallic) / max(metallic, epsilon);
         const float3 baseColor = saturate(lerp(fromDiffuse, fromSpecular, metallic * metallic));
         diffuseAlbedo = baseColor * (1.0 - metallic);
         specularF0 = lerp(float3(dielectricF0), baseColor, metallic);
