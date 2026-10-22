@@ -1,4 +1,6 @@
 #include "EditorAssetManager.h"
+
+#include <unordered_set>
 #include "NoxCore/Core/VirtualFileSystem.h"
 
 #include <entt/entt.hpp>
@@ -1989,44 +1991,117 @@ namespace Nox
             }
         }
 
-        // Stale entries (docs/Future.md item 14): neither the asset's file nor its source exists any more -- deleted in the file
-        // explorer, or left behind by an older import. Dropped, so the registry does not keep handles nothing can load. Deleting an
-        // entity never unregisters its assets (other entities, scenes, prefabs and the undo history may use them; their memory is
-        // freed by UnloadUnusedAssets). When most of the registry is missing, that is a moved or unreachable asset folder, not
-        // deleted assets: the registry is left as it is. The file before the clean-up is kept next to it as .bak.
+        // Stale entries (docs/Future.md item 14), as Unity treats a deleted source: what came from it goes with it.
+        //  - neither the asset's file nor its source exists any more (deleted in the file explorer, left by an older import);
+        //  - an imported asset (cooked mesh / texture) whose source is gone: the cooked file is a cache of something that no longer
+        //    exists -- dropped, and the cooked file deleted;
+        //  - the materials a deleted model's import generated (<model folder>/../Materials/<mesh>_*.nmat, MeshImporter::
+        //    MaterialAssetPath): they live outside the model's folder, so deleting the folder left hundreds behind.
+        // Deleting an entity never unregisters its assets (other entities, scenes, prefabs and the undo history may use them; their
+        // memory is freed by UnloadUnusedAssets). Only when nothing of the registry exists at all is it a moved or unreachable asset
+        // folder, left as it is (this used to apply as soon as half was missing -- deleting a model that was most of the project
+        // removed nothing). The registry before the clean-up is kept next to it as .bak.
         bool registryPruned = false;
         if (!m_ReadOnly)
         {
             const std::filesystem::path assetDirectory = Project::GetActiveAssetDirectory();
-            std::vector<AssetHandle> stale;
+            std::error_code error;
+            auto existsInAssets = [&](const std::filesystem::path& relative)
+            {
+                return !relative.empty() && std::filesystem::exists(assetDirectory / relative, error);
+            };
+            auto isMeshType = [](AssetType type)
+            {
+                return type == AssetType::Mesh || type == AssetType::StaticMesh || type == AssetType::MeshSource || type == AssetType::SkeletalMesh;
+            };
+            // The generated materials of a mesh: their folder and file name prefix (MeshImporter::MaterialAssetPath).
+            auto materialPrefix = [](const AssetMetadata& mesh)
+            {
+                const std::filesystem::path base = mesh.MeshSettings.MaterialBasePath.empty() ? mesh.FilePath : std::filesystem::path(mesh.MeshSettings.MaterialBasePath);
+                return std::make_pair((base.parent_path().parent_path() / "Materials").lexically_normal().generic_string(), base.stem().string() + "_");
+            };
+
+            std::unordered_set<AssetHandle> stale;
+            std::vector<std::filesystem::path> orphanedFiles; // cooked caches and generated materials of deleted sources
+            size_t existing = 0;
             for (const auto& [handle, metadata] : m_AssetRegistry)
             {
-                std::error_code error;
-                const bool fileExists = !metadata.FilePath.empty() && std::filesystem::exists(assetDirectory / metadata.FilePath, error);
-                const bool sourceExists = !metadata.SourceFilePath.empty() && std::filesystem::exists(assetDirectory / metadata.SourceFilePath, error);
+                const bool fileExists = existsInAssets(metadata.FilePath);
+                const bool sourceExists = existsInAssets(metadata.SourceFilePath);
+                if (fileExists || sourceExists)
+                    ++existing;
+                const bool imported = !metadata.SourceFilePath.empty() && metadata.SourceFilePath != metadata.FilePath;
                 if (!fileExists && !sourceExists)
-                    stale.push_back(handle);
+                    stale.insert(handle);
+                else if (imported && fileExists && !sourceExists && (isMeshType(metadata.Type) || metadata.Type == AssetType::Texture2D))
+                {
+                    stale.insert(handle);
+                    orphanedFiles.push_back(metadata.FilePath);
+                }
             }
 
-            if (!stale.empty() && stale.size() * 2 > m_AssetRegistry.size())
+            if (existing == 0 && !m_AssetRegistry.empty())
             {
-                NOX_CORE_WARN("Asset registry: {} of {} entries have no file in '{}' -- is the asset folder moved? Nothing was removed.",
-                              stale.size(), m_AssetRegistry.size(), assetDirectory.generic_string());
+                NOX_CORE_WARN("Asset registry: none of its {} entries has a file in '{}' -- is the asset folder moved? Nothing was removed.",
+                              m_AssetRegistry.size(), assetDirectory.generic_string());
+                stale.clear();
+                orphanedFiles.clear();
             }
             else if (!stale.empty())
             {
-                std::error_code error;
+                // The generated materials of the meshes that went, unless a mesh that stays generates the same names.
+                std::vector<std::pair<std::string, std::string>> gonePrefixes;
+                std::vector<std::pair<std::string, std::string>> keptPrefixes;
+                for (const auto& [handle, metadata] : m_AssetRegistry)
+                {
+                    if (isMeshType(metadata.Type))
+                        (stale.contains(handle) ? gonePrefixes : keptPrefixes).push_back(materialPrefix(metadata));
+                }
+                if (!gonePrefixes.empty())
+                {
+                    for (const auto& [handle, metadata] : m_AssetRegistry)
+                    {
+                        if (metadata.Type != AssetType::Material || stale.contains(handle))
+                            continue;
+                        const std::string folder = metadata.FilePath.parent_path().lexically_normal().generic_string();
+                        const std::string name = metadata.FilePath.filename().string();
+                        auto matches = [&](const std::pair<std::string, std::string>& prefix)
+                        {
+                            return prefix.first == folder && name.rfind(prefix.second, 0) == 0;
+                        };
+                        if (std::none_of(gonePrefixes.begin(), gonePrefixes.end(), matches) ||
+                            std::any_of(keptPrefixes.begin(), keptPrefixes.end(), matches))
+                            continue;
+                        stale.insert(handle);
+                        if (existsInAssets(metadata.FilePath))
+                            orphanedFiles.push_back(metadata.FilePath);
+                    }
+                }
+
                 std::filesystem::path backup = path;
                 backup += ".bak";
                 std::filesystem::copy_file(path, backup, std::filesystem::copy_options::overwrite_existing, error);
-                for (size_t i = 0; i < stale.size(); ++i)
+                size_t logged = 0;
+                for (AssetHandle handle : stale)
                 {
-                    if (i < 20)
-                        NOX_CORE_INFO("Asset registry: removed '{}' (its file no longer exists)", m_AssetRegistry[stale[i]].FilePath.generic_string());
-                    m_AssetRegistry.erase(stale[i]);
+                    if (logged++ < 20)
+                        NOX_CORE_INFO("Asset registry: removed '{}' (its source no longer exists)", m_AssetRegistry[handle].FilePath.generic_string());
+                    m_AssetRegistry.erase(handle);
                 }
-                NOX_CORE_INFO("Asset registry: removed {} entries whose files no longer exist (previous registry kept as {})",
-                              stale.size(), backup.filename().string());
+                // The orphaned files themselves: only inside the asset folder, with a cooked file's hash beside it.
+                size_t deleted = 0;
+                for (const std::filesystem::path& relative : orphanedFiles)
+                {
+                    const std::filesystem::path file = (assetDirectory / relative).lexically_normal();
+                    const std::string fileString = file.generic_string();
+                    if (fileString.rfind(assetDirectory.lexically_normal().generic_string(), 0) != 0)
+                        continue;
+                    if (std::filesystem::remove(file, error))
+                        ++deleted;
+                    std::filesystem::remove(fileString + ".hash", error);
+                }
+                NOX_CORE_INFO("Asset registry: removed {} entries whose source no longer exists, deleted {} files left from them "
+                              "(previous registry kept as {})", stale.size(), deleted, backup.filename().string());
                 registryPruned = true;
             }
         }
