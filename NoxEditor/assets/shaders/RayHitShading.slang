@@ -52,6 +52,8 @@ bool ray_hit_shadowed(UniformBufferObject* ubo, float3 origin, float3 direction,
     while (shadowRq.Proceed())
     {
         GpuRayTracingInstance shadowLut = instanceLUTBuffer[shadowRq.CandidateRayInstanceCustomIndex()];
+        if (ray_shadow_passes(shadowLut))
+            continue;
         if (shadowLut.alphaMode == 0 || shadowLut.baseColorTextureIndex == 0xFFFFFFFF)
         {
             shadowRq.CommitNonOpaqueTriangleHit();

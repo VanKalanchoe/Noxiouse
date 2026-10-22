@@ -1062,6 +1062,14 @@ bool ray_see_through(float transmission, uint alphaMode)
 {
     return transmission >= SeeThroughTransmission && alphaMode != 1u;
 }
+
+// Whether a surface lets light through to the hybrid passes' shadow rays: glass seen through, and what RTXPT's materials exclude
+// from shadow rays (ExcludeFromNEE: the Bistro's windows). Windows that blocked the sun left the rooms behind them dark -- only
+// their reflection showed.
+bool ray_shadow_passes(GpuRayTracingInstance instance)
+{
+    return (instance.pathTracerFlags & PathTracerExcludeFromNEE) != 0 || ray_see_through(instance.transmissionFactor, instance.alphaMode);
+}
 #endif
 
 // The mip the hybrid passes' rays read an alpha-masked surface's opacity at (shadows, AO, GI probes, glass). Full resolution: thin
@@ -1346,6 +1354,7 @@ struct PushConstantShadowMask
     uint32_t gbufferNormalIndex;
     vec2 viewportSize;
     uint32_t frameIndex;
+    uint32_t gbufferMaterialIndex; // its alpha: double-sided (foliage, cloth), shadowed from the side the light is on
 };
 
 struct PushConstantReflection

@@ -204,6 +204,8 @@ bool trace_visibility(float3 origin, float3 direction, float maxDist)
         uint primIndex = shadowQuery.CandidatePrimitiveIndex();
         GpuRayTracingInstance lut = instanceLUTBuffer[instanceID];
 
+        if (ray_shadow_passes(lut))
+            continue;
         if (lut.alphaMode == 0 || lut.baseColorTextureIndex == 0xFFFFFFFF)
         {
             shadowQuery.CommitNonOpaqueTriangleHit();

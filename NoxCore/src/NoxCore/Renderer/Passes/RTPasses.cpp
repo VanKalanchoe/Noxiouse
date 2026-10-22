@@ -126,6 +126,7 @@ namespace Nox
             {
                 builder.Read(resources.Depth);
                 builder.Read(resources.GBufferNormal);
+                builder.Read(resources.GBufferMaterial);
                 ReadIfValid(builder, resources.TLAS);
                 ReadGpuScene(builder, resources);
                 builder.ColorTarget(traceTarget, NRI::LoadOP::clear, NRI::StoreOP::store, { 65504.0f, 1.0f, 0.0f, 0.0f });
@@ -155,6 +156,7 @@ namespace Nox
                 shadowPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
                 shadowPush.depthTextureIndex = context.Slot(res->Depth);
                 shadowPush.gbufferNormalIndex = context.Slot(res->GBufferNormal);
+                shadowPush.gbufferMaterialIndex = context.Slot(res->GBufferMaterial);
                 shadowPush.viewportSize = glm::vec2(rw, rh);
                 shadowPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
                 cmd.pushData(&shadowPush, sizeof(shaderio::PushConstantShadowMask));

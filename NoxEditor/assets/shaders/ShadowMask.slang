@@ -108,6 +108,8 @@
 
             GpuRayTracingInstance lut = instanceLUTBuffer[instanceID];
 
+            if (ray_shadow_passes(lut))
+                continue;
             if (lut.alphaMode == 0 || lut.baseColorTextureIndex == 0xFFFFFFFF)
             {
                 sq.CommitNonOpaqueTriangleHit();
@@ -223,6 +225,13 @@
             unjitteredLightDir = dist > 1e-4 ? lightVec / dist : float3(0, 1, 0);
             unjitteredMaxDist = dist;
         }
+
+        // A double-sided surface (a leaf, a curtain) lit from behind is shadowed from that side: the deferred lighting lets the light
+        // through it by its diffuse transmission with this mask, denoised like the rest. It traced its own hard ray before -- leaves
+        // lit in single sparkling pixels wherever that ray found a gap in the canopy, flickering with the jitter.
+        Texture2D materialTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.gbufferMaterialIndex, 0));
+        if (gbuffer_double_sided(materialTex.Load(int3(pixelCoord, 0)).a) && dot(normal, unjitteredLightDir) < 0.0)
+            normal = -normal;
 
         // Backfacing surface relative to light direction: 0.0 distance to occluder (NRD rule: NoL <= 0 is 0.0)
         float NoL = dot(normal, unjitteredLightDir);

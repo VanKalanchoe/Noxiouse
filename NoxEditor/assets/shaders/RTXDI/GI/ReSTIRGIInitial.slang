@@ -171,6 +171,8 @@ bool trace_visibility_alpha(
         uint sInst = shadowQuery.CandidateRayInstanceCustomIndex();
         uint sPrim = shadowQuery.CandidatePrimitiveIndex();
         GpuRayTracingInstance sLut = instanceLUTBuffer[sInst];
+        if (ray_shadow_passes(sLut))
+            continue;
         if (sLut.alphaMode == 0 || sLut.baseColorTextureIndex == 0xFFFFFFFF)
         {
             shadowQuery.CommitNonOpaqueTriangleHit();

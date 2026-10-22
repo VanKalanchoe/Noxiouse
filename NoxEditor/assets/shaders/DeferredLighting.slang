@@ -192,6 +192,8 @@ float skyIrradianceLuma(UniformBufferObject* ubo, float3 n)
 
             GpuRayTracingInstance lut = instanceLUTBuffer[instanceID];
 
+            if (ray_shadow_passes(lut))
+                continue;
             if (lut.alphaMode == 0 || lut.baseColorTextureIndex == 0xFFFFFFFF)
             {
                 sq.CommitNonOpaqueTriangleHit();
@@ -513,15 +515,15 @@ float skyIrradianceLuma(UniformBufferObject* ubo, float3 n)
                 float lightShadow = 1.0;
                 if (rtShadows)
                 {
-                    if (!backLit && i == ubo->shadowMaskLightIndex && pushConstant.shadowMaskTextureIndex != 0 && pushConstant.shadowMaskTextureIndex != 0xFFFFFFFF)
+                    if (i == ubo->shadowMaskLightIndex && pushConstant.shadowMaskTextureIndex != 0 && pushConstant.shadowMaskTextureIndex != 0xFFFFFFFF)
                     {
-                        // The sun (the first directional light) uses the decoupled shadow mask / NRD SIGMA if available
+                        // The sun (the first directional light) uses the decoupled shadow mask / NRD SIGMA if available -- behind a
+                        // leaf too: the mask traces a double-sided surface from the side the sun is on (ShadowMask.slang).
                         lightShadow = shadowFactor;
                     }
                     else if (backLit && i == ubo->shadowMaskLightIndex)
                     {
-                        // The sun behind a leaf: the shadow mask is 0 for surfaces facing away from the sun (NRD's rule), so its own
-                        // ray from the back side, whatever the shadow-ray budget.
+                        // The sun behind a leaf without the mask: its own ray from the back side, whatever the shadow-ray budget.
                         if (trace_shadow_ray(ubo, worldPos - n * (0.02 * ubo->unitsPerMeter), l, maxDist))
                             lightShadow = 0.0;
                     }
