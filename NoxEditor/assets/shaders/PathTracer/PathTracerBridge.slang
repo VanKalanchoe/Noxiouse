@@ -387,11 +387,16 @@ namespace Bridge
     {
         GpuRayTracingInstance* lutBuffer = (GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference;
         GpuRayTracingInstance lut = lutBuffer[instanceID];
-        // RTXPT's rule for its materials: ExcludeFromNEE surfaces (window glass) let shadow rays through untouched, every other one
-        // blocks unless it is cut out there. Without an RTXPT material file: transmissive surfaces let light through tinted.
+        // ExcludeFromNEE surfaces (RTXPT's window glass) let shadow rays through untouched. Glass seen through lets them through
+        // tinted, whatever its material file says: RTXPT blocks them there because its sun is part of the environment map, which a
+        // path through the glass still finds -- ours is an analytic light no path can hit, and blocking it left everything behind
+        // such glass (the Bistro's rooms, a framed menu) without sun, so the panes showed only their reflection. Leaves and fabric
+        // with a little transmission (RTXPT materials below the see-through amount) block, as in RTXPT; without an RTXPT material
+        // file any transmission lets light through tinted.
         if ((lut.pathTracerFlags & PathTracerExcludeFromNEE) != 0)
             return float3(1.0);
-        if (lut.transmissionFactor > 0.0 && (lut.pathTracerFlags & PathTracerRtxptMaterial) == 0)
+        if (lut.transmissionFactor > 0.0 &&
+            ((lut.pathTracerFlags & PathTracerRtxptMaterial) == 0 || ray_see_through(lut.transmissionFactor, lut.alphaMode)))
             return saturate(lut.transmissionFactor) * saturate(lut.baseColorFactor.rgb) * 0.92;
         if (lut.alphaMode == 0)
             return float3(0.0);

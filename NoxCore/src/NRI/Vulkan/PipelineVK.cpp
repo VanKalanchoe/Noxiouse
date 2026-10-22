@@ -2,6 +2,7 @@
 
 #include <fstream>
 #include <iostream>
+#include <mutex>
 #include <SDL3/SDL_filesystem.h>
 
 #include "DeviceVK.h"
@@ -127,7 +128,27 @@ namespace NRI
             if (!cached.empty())
                 return std::vector<char>(cached.begin(), cached.end());
         }
-        std::vector<char> spirv = compiler.compile(shaderDesc.sourcePath);
+        // compile() builds the whole module, every entry point in it: the next entry point of the same source (SkyAtmosphere.slang
+        // has ten, a mesh pipeline's task, mesh and fragment stages share one file) takes that SPIR-V instead of compiling the module
+        // again. Kept for the last few sources only, by their hash (an edited file is a new key).
+        static std::mutex s_recentModulesMutex;
+        static std::vector<std::pair<std::string, std::vector<char>>> s_recentModules;
+        std::lock_guard lock(s_recentModulesMutex);
+        const std::string moduleKey = shaderDesc.sourcePath + "|" + std::to_string(compiler.sourceHash(shaderDesc.sourcePath));
+        std::vector<char> spirv;
+        for (const auto& [key, module] : s_recentModules)
+            if (key == moduleKey)
+                spirv = module;
+        if (spirv.empty())
+        {
+            spirv = compiler.compile(shaderDesc.sourcePath);
+            if (!spirv.empty())
+            {
+                if (s_recentModules.size() >= 8)
+                    s_recentModules.erase(s_recentModules.begin());
+                s_recentModules.emplace_back(moduleKey, spirv);
+            }
+        }
         std::ofstream(path, std::ios::binary).write(spirv.data(), static_cast<std::streamsize>(spirv.size()));
         return spirv;
     }

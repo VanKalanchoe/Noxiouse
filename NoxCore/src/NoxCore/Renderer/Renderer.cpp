@@ -530,6 +530,10 @@ namespace Nox
 
         initGeometryBuffers();
 
+        // The procedural sky's pipelines with the others, behind the start's splash: made when a sky was first selected, they took
+        // ~5 s of compiling there (on every start after a shader change).
+        createProceduralSkyPipelines();
+
         // Create every resource needed for PBR
     }
 
@@ -3039,9 +3043,8 @@ namespace Nox
 
     static uint32_t MipCount(uint32_t size) { return static_cast<uint32_t>(floor(log2(size))) + 1; }
 
-    // The procedural sky's textures and pipelines, when it becomes the environment. Each texture's own slot is its sampled
-    // view; the storage views the passes write through are extra slots (m_skyStorageSlots), kept until the sky is released.
-    void Renderer::createProceduralSkyResources()
+    // The procedural sky's pipelines (and the image-based lighting filters it runs every update), made at the start.
+    void Renderer::createProceduralSkyPipelines()
     {
         createIBLPipelines();
         auto createSkyPipeline = [this](const char* entryPoint)
@@ -3065,6 +3068,19 @@ namespace Nox
             m_skyCloudShadowPipeline = createSkyPipeline("cloudShadowMain");
         if (!m_skyHorizonBandPipeline)
             m_skyHorizonBandPipeline = createSkyPipeline("skyHorizonBandMain");
+        if (!m_skyCloudShapeNoisePipeline)
+            m_skyCloudShapeNoisePipeline = createSkyPipeline("cloudShapeNoiseMain");
+        if (!m_skyCloudDetailNoisePipeline)
+            m_skyCloudDetailNoisePipeline = createSkyPipeline("cloudDetailNoiseMain");
+        if (!m_skyCloudWeatherPipeline)
+            m_skyCloudWeatherPipeline = createSkyPipeline("cloudWeatherMain");
+    }
+
+    // The procedural sky's textures, when it becomes the environment. Each texture's own slot is its sampled view; the storage
+    // views the passes write through are extra slots (m_skyStorageSlots), kept until the sky is released.
+    void Renderer::createProceduralSkyResources()
+    {
+        createProceduralSkyPipelines();
 
         auto createLut = [this](uint32_t width, uint32_t height)
         {
@@ -3156,9 +3172,6 @@ namespace Nox
         m_skyCloudDetail = createNoise(CloudDetailSize, CloudDetailSize);
         m_skyCloudWeather = createNoise(CloudWeatherSize, 1);
         {
-            std::unique_ptr<NRI::Pipeline> shapePipeline = createSkyPipeline("cloudShapeNoiseMain");
-            std::unique_ptr<NRI::Pipeline> detailPipeline = createSkyPipeline("cloudDetailNoiseMain");
-            std::unique_ptr<NRI::Pipeline> weatherPipeline = createSkyPipeline("cloudWeatherMain");
             const uint32_t shapeStorage = m_resourceHeap->registerStorageTextureMip(*m_skyCloudShape, 0);
             const uint32_t detailStorage = m_resourceHeap->registerStorageTextureMip(*m_skyCloudDetail, 0);
             const uint32_t weatherStorage = m_resourceHeap->registerStorageTextureMip(*m_skyCloudWeather, 0);
@@ -3167,15 +3180,15 @@ namespace Nox
             cmd->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
             shaderio::PushConstantSkyAtmosphere noisePush{};
             noisePush.outputStorageIndex = shapeStorage;
-            cmd->bindPipeline(NRI::PipelineBindPoint::Compute, *shapePipeline);
+            cmd->bindPipeline(NRI::PipelineBindPoint::Compute, *m_skyCloudShapeNoisePipeline);
             cmd->pushData(&noisePush, sizeof(noisePush));
             cmd->dispatch(CloudShapeSize / 4, CloudShapeSize / 4, CloudShapeSize / 4);
             noisePush.outputStorageIndex = detailStorage;
-            cmd->bindPipeline(NRI::PipelineBindPoint::Compute, *detailPipeline);
+            cmd->bindPipeline(NRI::PipelineBindPoint::Compute, *m_skyCloudDetailNoisePipeline);
             cmd->pushData(&noisePush, sizeof(noisePush));
             cmd->dispatch(CloudDetailSize / 4, CloudDetailSize / 4, CloudDetailSize / 4);
             noisePush.outputStorageIndex = weatherStorage;
-            cmd->bindPipeline(NRI::PipelineBindPoint::Compute, *weatherPipeline);
+            cmd->bindPipeline(NRI::PipelineBindPoint::Compute, *m_skyCloudWeatherPipeline);
             cmd->pushData(&noisePush, sizeof(noisePush));
             cmd->dispatch(CloudWeatherSize / 8, CloudWeatherSize / 8, 1);
             endSingleTimeCommands(std::move(cmd));

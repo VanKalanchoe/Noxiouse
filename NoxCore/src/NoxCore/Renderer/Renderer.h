@@ -728,6 +728,7 @@ namespace Nox
         void createIBLPipelines();
         void generateEnvironmentLighting();
         void createBRDFLut();
+        void createProceduralSkyPipelines();
         void createProceduralSkyResources();
         void addProceduralSkyPass();
         shaderio::PushConstantSkyAtmosphere makeSkyAtmospherePush(const SkyAtmosphereSettings& settings, const glm::vec2& cloudOffsetKm,
@@ -1738,6 +1739,9 @@ namespace Nox
         std::unique_ptr<NRI::Pipeline> m_skyDownsamplePipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_skyCloudShadowPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_skyHorizonBandPipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_skyCloudShapeNoisePipeline = nullptr;   // the cloud noise, written when the sky is made
+        std::unique_ptr<NRI::Pipeline> m_skyCloudDetailNoisePipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_skyCloudWeatherPipeline = nullptr;
         // The sky near the horizon at ~4x the cubemap's resolution, for the skybox (shaderIO.h SkyHorizonBand*), and its storage slot.
         Ref<Texture2D> m_skyHorizonBand;
         uint32_t m_skyHorizonBandStorageSlot = ~0u;
