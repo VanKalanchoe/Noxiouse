@@ -435,7 +435,9 @@ namespace Nox
                 rtaoPush.kernelReference = context.Buffer(res->SSAOKernel).getDeviceAddress();
                 rtaoPush.depthTextureIndex = context.Slot(res->Depth);
                 rtaoPush.normalTextureIndex = context.Slot(res->GBufferNormal);
-                rtaoPush.kernelSize = static_cast<uint32_t>(m_ssaoKernelSize);
+                // 4 rays a pixel (the blur after it and the per-pixel rotation do the rest). It used SSAO's kernel size, 16 rays a
+                // pixel: ~8 ms of a frame for ambient occlusion alone.
+                rtaoPush.kernelSize = static_cast<uint32_t>(std::clamp(m_ssaoKernelSize, 1, RTAORaysPerPixel));
                 rtaoPush.radius = getSSAORadius();
                 rtaoPush.power = m_ssaoPower;
                 rtaoPush.viewportSize = glm::vec2(rw, rh);

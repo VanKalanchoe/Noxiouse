@@ -1082,6 +1082,7 @@ namespace Nox
         bool m_ssaoEnabled = true;
         bool m_rtaoEnabled = false;
         int m_ssaoKernelSize = 16;
+        static constexpr int RTAORaysPerPixel = 4;
         // Renderer is constructed before Project::Load sets WorldUnits. Keep
         // physical lengths in meters and convert when filling each frame's data.
         float m_ssaoRadiusMeters = 0.5f;

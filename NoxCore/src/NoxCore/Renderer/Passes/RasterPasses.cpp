@@ -1050,18 +1050,21 @@ namespace Nox
 
         const shaderio::PushConstantSkybox skyboxSun = makeSkyboxSunPush();
 
+        // The path tracers shade transparent surfaces in their own image: drawing them here (into the raster image nobody shows)
+        // cost ~13 ms with glass and OIT on.
+        const bool pathTraced = m_frame.pathTracerActive || m_frame.restirPTActive;
         // With Ray Reconstruction the transparent surfaces wait until after it (addTransparentsAfterRRPasses): none of them here.
-        const bool afterRR = hasDraws && hasTransparentDraws() && transparentsAfterRayReconstruction();
+        const bool afterRR = !pathTraced && hasDraws && hasTransparentDraws() && transparentsAfterRayReconstruction();
         m_frame.transparentsAfterRR = afterRR;
 
         // Glass in view (transmissive materials) refracts the lit scene behind it (Hybrid_Renderer_Plan_2026-10.md §4 H3b): the
         // transparent surfaces then draw in a pass of their own, after the scene so far is copied with blur mips. Without glass,
         // one pass as always.
-        const bool refraction = !afterRR && m_refractionEnabled && hasDraws && m_colorPyramidCopyPipeline && m_colorPyramidDownsamplePipeline &&
+        const bool refraction = !afterRR && !pathTraced && m_refractionEnabled && hasDraws && m_colorPyramidCopyPipeline && m_colorPyramidDownsamplePipeline &&
                                 m_frame.renderExtent.width > 0 && m_frame.renderExtent.height > 0 && hasTransmissiveDraws();
         // Order-independent transparency: the transparent surfaces into its targets in a pass of their own (resolved after the
         // particles, addParticlePass).
-        const bool oit = !afterRR && m_oitEnabled && hasDraws && m_transparentLitOITPipeline && m_unlitOITPipeline && m_oitCompositePipeline &&
+        const bool oit = !afterRR && !pathTraced && m_oitEnabled && hasDraws && m_transparentLitOITPipeline && m_unlitOITPipeline && m_oitCompositePipeline &&
                          hasTransparentDraws();
 
         // Shared setup of the passes that draw over the lit scene.
@@ -1078,7 +1081,7 @@ namespace Nox
                     builder.ColorTarget(resources.HDRScene, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 1.0f });
                 declareForward(builder, true);
             },
-            [this, res = &resources, drawProbes, skyboxSun, hasDraws, refraction, oit, afterRR](RGPassContext& context)
+            [this, res = &resources, drawProbes, skyboxSun, hasDraws, refraction, oit, afterRR, pathTraced](RGPassContext& context)
             {
                 NRI::CommandBuffer& cmd = context.Cmd();
                 const uint32_t totalDDGIProbes = m_frame.totalDDGIProbes;
@@ -1149,7 +1152,7 @@ namespace Nox
                 }
 
                 // C. TRANSPARENT FORWARD PASS (Back-to-front sorted, Alpha Blending), here unless glass needs the scene first.
-                if (hasDraws && !refraction && !oit && !afterRR)
+                if (hasDraws && !refraction && !oit && !afterRR && !pathTraced)
                 {
                     // Whichever of SSAO/RTAO ran this frame (never both -- see Renderer::m_ssaoEnabled), for the
                     // specular occlusion approximation in Material_TransparentLit_Mesh.slang; every other consumer

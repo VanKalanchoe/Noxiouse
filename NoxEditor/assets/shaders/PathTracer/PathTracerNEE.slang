@@ -91,8 +91,8 @@ namespace PathTracer
     }
 
     // The light a candidate's shadow ray lets through: 0 behind something opaque, tinted behind glass and blended surfaces
-    // (Bridge::OccluderTransmittance). Every candidate is looked at (forced non-opaque: opaque-mode glass is a FORCE_OPAQUE
-    // instance in the TLAS); an opaque one ends the search.
+    // (Bridge::OccluderTransmittance). Every non-opaque candidate is looked at (glass is a non-opaque instance in the TLAS, like
+    // masked and blended surfaces); an opaque one ends the search in the hardware.
     float3 visibleNEECandidate(NEECandidate c, ShadingData sd,
         RaytracingAccelerationStructure as, UniformBufferObject* ubo, inout uint rngState)
     {
@@ -102,8 +102,8 @@ namespace PathTracer
         shadowRay.Direction = c.L;
         shadowRay.TMin = 0.5 * offset;
         shadowRay.TMax = max(c.distance - 2.0 * offset, offset);
-        RayQuery<RAY_FLAG_FORCE_NON_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER> rq;
-        rq.TraceRayInline(as, RAY_FLAG_FORCE_NON_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER, 0xFF, shadowRay);
+        RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER> rq;
+        rq.TraceRayInline(as, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER, 0xFF, shadowRay);
         float3 transmittance = float3(1.0);
         while (rq.Proceed())
         {
