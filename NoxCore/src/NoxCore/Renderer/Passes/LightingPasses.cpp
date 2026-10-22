@@ -334,7 +334,7 @@ namespace Nox
     {
         // Mutually exclusive with RTAO: both only ever produce resources.SSAORaw, never together (see the comment on
         // m_ssaoEnabled in Renderer.h).
-        if (m_frame.restirPTActive || m_frame.pathTracerActive || !m_ssaoEnabled || m_rtaoEnabled ||
+        if (m_frame.runPathTracer || !m_ssaoEnabled || m_rtaoEnabled ||
             !m_ssaoPipeline || !m_ssaoBlurPipeline || !m_ssaoKernelBuffer)
             return;
 
@@ -388,7 +388,7 @@ namespace Nox
     {
         // RTAO requires the hybrid RT scene and the shared blur pass. Its shader
         // handles an empty TLAS by returning unoccluded pixels.
-        if (m_frame.restirPTActive || m_frame.pathTracerActive || !m_rayTracingEnabled || !m_rtaoEnabled || m_ssaoEnabled ||
+        if (m_frame.runPathTracer || !m_rayTracingEnabled || !m_rtaoEnabled || m_ssaoEnabled ||
             !m_rtaoPipeline || !m_ssaoBlurPipeline || !m_ssaoKernelBuffer)
             return;
 

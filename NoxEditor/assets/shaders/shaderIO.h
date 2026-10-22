@@ -1712,6 +1712,8 @@ struct PushConstantScreenProbe
     // jitter-free, the pixels (and the history's) are not.
     vec2 currJitterUv;
     vec2 prevJitterUv;
+    uint32_t materialTextureIndex; // Integrate: the G-buffer's material (double-sided: foliage), 0xFFFFFFFF: none
+    uint32_t screenProbePadding;
 };
 
 struct PushConstantDDGIDebug

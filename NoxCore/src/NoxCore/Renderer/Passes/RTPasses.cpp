@@ -645,6 +645,7 @@ namespace Nox
         common.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
         common.inputTextureIndex = 0xFFFFFFFF;
         common.historyTextureIndex = 0xFFFFFFFF;
+        common.materialTextureIndex = 0xFFFFFFFF;
         common.prevDepthTextureIndex = 0xFFFFFFFF;
         common.prevNormalTextureIndex = 0xFFFFFFFF;
         common.velocityTextureIndex = 0xFFFFFFFF;
@@ -780,6 +781,7 @@ namespace Nox
                 builder.Read(resources.ScreenProbePosition);
                 builder.Read(resources.ScreenProbeNormal);
                 builder.Read(resources.ScreenProbeIrradiance[current]);
+                builder.Read(resources.GBufferMaterial);
                 if (historyValid)
                 {
                     builder.Read(resources.ScreenProbeGI[readIndex]);
@@ -805,6 +807,7 @@ namespace Nox
                 push.probePositionTextureIndex = context.Slot(res->ScreenProbePosition);
                 push.probeNormalTextureIndex = context.Slot(res->ScreenProbeNormal);
                 push.inputTextureIndex = context.Slot(res->ScreenProbeIrradiance[current]);
+                push.materialTextureIndex = context.Slot(res->GBufferMaterial);
                 if (historyValid)
                 {
                     push.historyTextureIndex = context.Slot(res->ScreenProbeGI[readIndex]);

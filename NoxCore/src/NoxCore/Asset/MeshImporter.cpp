@@ -2067,10 +2067,18 @@ namespace Nox
             }
             else
             {
-                material.BaseColorFactor = glm::vec4(color("BaseOrDiffuseColor", glm::vec3(material.BaseColorFactor)), material.BaseColorFactor.a);
+                // RTXPT's metal-rough model, also for a material the glTF authors as specular-glossiness (the Bistro's glass: its
+                // white specular texture read as specular made the panes metal mirrors). Its texture is then read as RTXPT reads
+                // it, occlusion-roughness-metallic, under these factors.
+                const float alpha = material.Workflow == 1.0f ? material.DiffuseFactor.a : material.BaseColorFactor.a;
+                material.Workflow = 0.0f;
+                material.BaseColorFactor = glm::vec4(color("BaseOrDiffuseColor", glm::vec3(material.BaseColorFactor)), alpha);
                 material.RoughnessFactor = number("Roughness", material.RoughnessFactor);
                 material.MetallicFactor = number("Metalness", material.MetallicFactor);
             }
+            // A normal map RTXPT scales to nothing (its glass) is not applied.
+            if (json["NormalTextureScale"] && json["NormalTextureScale"].as<float>() <= 0.0f)
+                material.NormalTexturePath.clear();
             material.IOR = number("IoR", material.IOR);
             material.DiffuseTransmission = std::clamp(number("DiffuseTransmissionFactor", material.DiffuseTransmission), 0.0f, 1.0f);
             // RTXPT's path tracer flags: thin-walled (no refraction, 1/IoR on both faces), excluded from shadow rays (window glass).

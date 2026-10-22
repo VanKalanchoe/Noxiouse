@@ -56,6 +56,14 @@ ScreenProbeIntegrateOutput fragMain(ScreenProbeVertex input, uniform PushConstan
     const float3 normal = normalLengthSq > 1e-8 ? rawNormal * rsqrt(normalLengthSq) : float3(0.0, 1.0, 0.0);
     const float3 geometricNormal = ddgi_geometric_normal(depthTex, pixel, pushConstant.viewportSize, pushConstant.invViewProj, position, normal);
     const float viewDistance = length(position - ubo->cameraWorldPos.xyz);
+    // Foliage and cloth (double-sided): leaf cards a few pixels wide, whose normal from the depth around (geometricNormal) is
+    // whichever leaf or gap the neighbours are -- a different one every frame with the jitter.
+    bool doubleSided = false;
+    if (pushConstant.materialTextureIndex != 0xFFFFFFFF)
+    {
+        Texture2D materialTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.materialTextureIndex, 0));
+        doubleSided = gbuffer_double_sided(materialTex.Load(int3(pixel, 0)).a);
+    }
 
     Texture2D positionTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.probePositionTextureIndex, 0));
     Texture2D probeNormalTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.probeNormalTextureIndex, 0));
@@ -159,6 +167,22 @@ ScreenProbeIntegrateOutput fragMain(ScreenProbeVertex input, uniform PushConstan
                     continue;
                 const float3 previousPosition = screen_probe_world_position(pushConstant.prevInvViewProj, float2(tap) + 0.5, pushConstant.viewportSize,
                                                                             previousDepth);
+                // A leaf: the same point (within 2% of its distance) is enough; its plane and normal from the depth are noise, and
+                // testing them threw the history of most foliage away every frame while moving -- fresh probe light each frame, in
+                // spots that flashed.
+                if (doubleSided)
+                {
+                    const float3 previousNormal = previousNormalTex.Load(int3(tap, 0)).xyz;
+                    if (length(previousPosition - position) > 0.02 * viewDistance || dot(previousNormal, normal) < -0.2)
+                        continue;
+                    const float4 tapValue = historyTex.Load(int3(tap, 0));
+                    if (!all(isfinite(tapValue)))
+                        continue;
+                    const float weight = (offset.x != 0 ? previousF.x : 1.0 - previousF.x) * (offset.y != 0 ? previousF.y : 1.0 - previousF.y);
+                    history += tapValue * weight;
+                    historyWeight += weight;
+                    continue;
+                }
                 const float planeDistance = abs(dot(previousPosition - position, geometricNormal)) / max(viewDistance, 1e-4);
                 if (planeDistance > 0.02)
                     continue;
@@ -186,15 +210,25 @@ ScreenProbeIntegrateOutput fragMain(ScreenProbeVertex input, uniform PushConstan
     // which boiled in tile-sized blotches no denoiser removes (REBLUR never sees this signal, DLSS RR takes the blotches for
     // detail). Light that really comes on still arrives within a few frames (x3 per frame); darkening is not held back.
     float3 currentClamped = current;
+    const float currentLuma = dot(current, float3(0.2126, 0.7152, 0.0722));
     if (history.a >= 4.0)
     {
         const float historyLuma = dot(history.rgb, float3(0.2126, 0.7152, 0.0722));
-        const float currentLuma = dot(current, float3(0.2126, 0.7152, 0.0722));
         const float limit = historyLuma * 3.0 + 1e-4;
         if (currentLuma > limit && isfinite(currentLuma))
             currentClamped *= limit / currentLuma;
     }
-    float3 result = history.a > 0.0 ? lerp(history.rgb, currentClamped, 1.0 / frames) : current;
+    else if (currentLuma > 0.0 && isfinite(currentLuma))
+    {
+        // Little or no history (just revealed: a leaf's edge, behind a moving object): the probes' one frame of light, held to
+        // 3x the world-space GI here (the DDGI cascades / the sky's irradiance), stable from frame to frame. One probe that caught
+        // the sun through a gap lit the newly revealed pixels for a frame: the spots flashing on foliage while moving.
+        const float fallbackLuma = dot(screen_probe_fallback(ubo, position, normal, geometricNormal), float3(0.2126, 0.7152, 0.0722));
+        const float limit = max(fallbackLuma, history.a > 0.0 ? dot(history.rgb, float3(0.2126, 0.7152, 0.0722)) : 0.0) * 3.0 + 1e-4;
+        if (currentLuma > limit && isfinite(fallbackLuma))
+            currentClamped *= limit / currentLuma;
+    }
+    float3 result = history.a > 0.0 ? lerp(history.rgb, currentClamped, 1.0 / frames) : currentClamped;
     result = all(isfinite(result)) ? clamp(result, 0.0, 30000.0) : (all(isfinite(current)) ? clamp(current, 0.0, 30000.0) : float3(0.0));
     output.irradiance = float4(result, frames);
     output.distance = viewDistance;
