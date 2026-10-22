@@ -975,6 +975,19 @@ namespace Nox
             m_Renderer->setScaleIBLAmbient(iblAmbient);
         }
 
+        // What the current mode makes these settings: the path tracer shades glass, blending and anti-aliasing itself; DLSS
+        // anti-aliases (TAA and the jitter switch then do nothing); with Ray Reconstruction the transparents are drawn after it,
+        // sorted (OIT does not apply). Settings that cannot apply are shown locked, with why.
+        const bool pathTracing = m_Renderer->isPathTracingEnabled();
+        const bool dlssActive = m_Renderer->isDLSSSupported() && m_Renderer->isDLSSEnabled() && m_Renderer->getUpscaleMode() != NRI::UpscaleMode::Off;
+        const bool rayReconstructionActive = dlssActive && m_Renderer->isDLSSRayReconstructionSupported() && m_Renderer->isDLSSRayReconstructionEnabled();
+        auto lockedReason = [](const char* reason)
+        {
+            ImGui::SameLine();
+            ImGui::TextDisabled("(%s)", reason);
+        };
+
+        ImGui::BeginDisabled(pathTracing);
         bool refraction = m_Renderer->getRefractionEnabled();
         if (ImGui::Checkbox("Glass Refraction", &refraction))
             m_Renderer->setRefractionEnabled(refraction);
@@ -993,18 +1006,35 @@ namespace Nox
                               "hidden behind others show too. Rough glass keeps the blurred screen-space refraction. Needs ray tracing.");
         ImGui::Unindent();
         ImGui::EndDisabled();
+        ImGui::EndDisabled();
+        if (pathTracing)
+            lockedReason("the path tracer refracts itself");
 
+        ImGui::BeginDisabled(pathTracing || rayReconstructionActive);
         bool oit = m_Renderer->getOITEnabled();
         if (ImGui::Checkbox("Order-Independent Transparency", &oit))
             m_Renderer->setOITEnabled(oit);
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Transparent surfaces and alpha-blended particles blend in any order (weighted blended OIT):\n"
-                              "overlapping layers (foliage cards, smoke, glass behind glass) stop popping as the camera moves.\n"
-                              "Layers of very different colors mix toward their average. Off: sorted back to front by object.");
-        
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            ImGui::SetTooltip("Raster transparency only: transparent surfaces and alpha-blended particles blend in any order\n"
+                              "(weighted blended OIT), so overlapping layers (smoke, foliage cards) stop popping. It is an\n"
+                              "approximation: overlapping layers average out, so solid-looking transparents (glass in front of\n"
+                              "glass, thick leaves) look see-through. Off (sorted back to front) is usually better for glass.\n"
+                              "Not used by the path tracer or with Ray Reconstruction (transparents are drawn after it, sorted).");
+        ImGui::EndDisabled();
+        if (pathTracing)
+            lockedReason("path tracer");
+        else if (rayReconstructionActive)
+            lockedReason("Ray Reconstruction: sorted after it");
+
+        ImGui::BeginDisabled(dlssActive || pathTracing);
         bool taa = m_Renderer->getTAAEnabled();
         if (ImGui::Checkbox("Temporal Anti-Aliasing", &taa))
             m_Renderer->setTAAEnabled(taa);
+        ImGui::EndDisabled();
+        if (dlssActive)
+            lockedReason("DLSS anti-aliases");
+        else if (pathTracing)
+            lockedReason("path tracer accumulates");
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("Smooth edges without DLSS: the camera shifts by a fraction of a pixel each frame and the frames are\n"
                               "blended along the motion vectors. Used while DLSS is off or not supported (DLSS / DLAA does this\n"
@@ -1015,11 +1045,17 @@ namespace Nox
             ImGui::TextDisabled("(active)");
         }
 
-        bool jitter = m_Renderer->getCameraJitterEnabled();
+        // DLSS and TAA jitter the camera themselves (always on while they run): the switch only matters without them.
+        const bool jitterForced = dlssActive || m_Renderer->isTAAActive();
+        ImGui::BeginDisabled(jitterForced);
+        bool jitter = jitterForced || m_Renderer->getCameraJitterEnabled();
         if (ImGui::Checkbox("Camera Subpixel Jitter (R2)", &jitter))
         {
             m_Renderer->setCameraJitterEnabled(jitter);
         }
+        ImGui::EndDisabled();
+        if (jitterForced)
+            lockedReason(dlssActive ? "on: DLSS needs it" : "on: TAA needs it");
         if (jitter)
         {
             glm::vec2 j = m_Renderer->getCurrentJitter(); // or expose m_currentJitter
@@ -1290,9 +1326,20 @@ namespace Nox
             {
                 ImGui::Indent();
                 static const char* rtResolutionNames[] = { "Full (every pixel)", "Half (a quarter of the rays)" };
-                int rtResolution = m_Renderer->getRayTracingResolutionDivisor() > 1 ? 1 : 0;
+                const bool rrActive = m_Renderer->isDLSSSupported() && m_Renderer->isDLSSEnabled() &&
+                                      m_Renderer->getUpscaleMode() != NRI::UpscaleMode::Off &&
+                                      m_Renderer->isDLSSRayReconstructionSupported() && m_Renderer->isDLSSRayReconstructionEnabled();
+                // Ray Reconstruction wants its own per-pixel noise: the renderer traces at full resolution under it.
+                ImGui::BeginDisabled(rrActive);
+                int rtResolution = (m_Renderer->getRayTracingResolutionDivisor() > 1 && !rrActive) ? 1 : 0;
                 if (ImGui::Combo("Ray Tracing Resolution", &rtResolution, rtResolutionNames, IM_ARRAYSIZE(rtResolutionNames)))
                     m_Renderer->setRayTracingResolutionDivisor(rtResolution == 1 ? 2u : 1u);
+                ImGui::EndDisabled();
+                if (rrActive)
+                {
+                    ImGui::SameLine();
+                    ImGui::TextDisabled("(full: Ray Reconstruction)");
+                }
                 if (ImGui::IsItemHovered())
                     ImGui::SetTooltip("Only the ray traced effects, not the image: textures, geometry and DLSS stay as they are.\n"
                                       "Half: RT reflections, RT sun shadows and RTAO trace one pixel of every 2 x 2 block, a different\n"

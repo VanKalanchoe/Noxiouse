@@ -1364,6 +1364,9 @@ namespace Nox
                 cmd.bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
                 MeshletDrawCursor cursor = beginMeshletDraws(context, res->CameraDraws);
                 cursor.references.ssaoTextureIndex = m_frame.ssaoAdded ? context.Slot(res->SSAO) : 0xFFFFFFFF;
+                // Projected without the jitter: the layer goes over RR's still output as it is. Drawn jittered and moved back, every
+                // edge and texel of the glass and the leaves still shimmered with the jitter (nothing anti-aliases this layer).
+                cursor.taskFlags |= shaderio::MESHLET_UNJITTERED;
                 if (refraction)
                 {
                     cursor.references.refractionTextureIndex = context.Slot(res->RefractionSource);
@@ -1373,8 +1376,8 @@ namespace Nox
                 drawForwardTransparent(cmd, context, res->CameraDraws, cursor);
             });
 
-        // The layer over the upscaled image, where the unjittered pixel is in it.
-        const glm::vec2 jitterUv = jitterScreenOffsetUv();
+        // The layer over the upscaled image: both unjittered, pixel for pixel.
+        const glm::vec2 jitterUv(0.0f);
         m_renderGraph.AddPass("Transparency Composite", RGPassFlags::Raster,
             [&](RGBuilder& builder)
             {
@@ -1442,12 +1445,7 @@ namespace Nox
                     push.sourceMip = mip == 0 ? 0 : mip - 1;
                     push.width = std::max(m_frame.renderExtent.width >> mip, 1u);
                     push.height = std::max(m_frame.renderExtent.height >> mip, 1u);
-                    if (fromUpscaledOutput && mip == 0)
-                    {
-                        const glm::vec2 offset = jitterScreenOffsetUv();
-                        push.offsetU = offset.x;
-                        push.offsetV = offset.y;
-                    }
+                    // From the upscaled output: unjittered like the transparents drawn over it (MESHLET_UNJITTERED), no offset.
                     cmd.pushData(&push, sizeof(push));
                     cmd.dispatch((push.width + 7) / 8, (push.height + 7) / 8, 1);
                 });
