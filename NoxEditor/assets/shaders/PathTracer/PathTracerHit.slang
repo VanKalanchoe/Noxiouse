@@ -248,7 +248,9 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
         if (vertexIdx > 1 && path.bsdfScatterPdf > 0.0)
         {
             const float lightPdf = EmissiveLights::branchProbability(ubo, pushConstant.skyboxTextureIndex != 0xFFFFFFFF) *
-                                   EmissiveLights::pdf(ubo, rayOrigin, InstanceID(), surface.triangleArea, rayT, surface.cosFace);
+                                   (EmissiveLights::hasTriangleLights(ubo)
+                                       ? EmissiveLights::trianglePdf(ubo, rayOrigin, InstanceID(), PrimitiveIndex(), rayT, surface.cosFace)
+                                       : EmissiveLights::pdf(ubo, InstanceID(), surface.triangleArea, rayT, surface.cosFace));
             const float bsdfPdf = path.bsdfScatterPdf;
             misWeight = bsdfPdf * bsdfPdf / max(bsdfPdf * bsdfPdf + lightPdf * lightPdf, 1e-30);
         }

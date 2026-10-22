@@ -1790,6 +1790,12 @@ namespace Nox
         // The emissive lights' local grid (EmissiveLightGrid.slang), rebuilt every frame the emissive lights are sampled.
         std::unique_ptr<NRI::Buffer> m_emissiveGridBuffer;
         std::unique_ptr<NRI::Pipeline> m_emissiveGridPipeline;
+        // The path tracer's emissive triangle lights (EmissiveLightGrid.slang): their records and the running sum of their power.
+        std::unique_ptr<NRI::Buffer> m_emissiveTriangleBuffer;
+        std::unique_ptr<NRI::Buffer> m_emissiveTriangleCdfBuffer;
+        uint32_t m_emissiveTriangleCapacity = 0;
+        std::unique_ptr<NRI::Pipeline> m_emissiveTrianglesPipeline;
+        std::unique_ptr<NRI::Pipeline> m_emissiveScanPipeline;
 
         // Temporal & Motion Vector State
         glm::mat4 m_prevView = glm::mat4(1.0f);

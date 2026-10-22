@@ -538,6 +538,10 @@ namespace Nox
             gridDesc.type = NRI::PipelineType::Compute;
             gridDesc.shaders.push_back({ NRI::ShaderStage::Compute, "buildMain", "assets/shaders/EmissiveLightGrid.slang" });
             m_emissiveGridPipeline = m_device->createPipeline(gridDesc, *m_shaderCompiler);
+            gridDesc.shaders.front().entryPoint = "trianglesMain";
+            m_emissiveTrianglesPipeline = m_device->createPipeline(gridDesc, *m_shaderCompiler);
+            gridDesc.shaders.front().entryPoint = "scanMain";
+            m_emissiveScanPipeline = m_device->createPipeline(gridDesc, *m_shaderCompiler);
         }
 
         // Create every resource needed for PBR
@@ -4840,8 +4844,12 @@ namespace Nox
             resources.SceneMeshes = graph.ImportBuffer("Scene Meshes", buffer);
         if (NRI::Buffer* buffer = m_gpuScene.GetRayTracingInstances().GetBuffer())
             resources.SceneRayTracingInstances = graph.ImportBuffer("Scene Ray Tracing Instances", buffer);
-        if (m_emissiveGridBuffer && uniformData.emissiveGridReference != 0)
+        if (m_emissiveGridBuffer && uniformData.emissiveGridReference != 0 && uniformData.emissiveTriangleCount > 0)
+        {
             resources.EmissiveLightGrid = graph.ImportBuffer("Emissive Light Grid", m_emissiveGridBuffer.get());
+            resources.EmissiveTriangles = graph.ImportBuffer("Emissive Triangles", m_emissiveTriangleBuffer.get());
+            resources.EmissiveTriangleCdf = graph.ImportBuffer("Emissive Triangle CDF", m_emissiveTriangleCdfBuffer.get());
+        }
         if (frame.skinningWorkCount > 0 && frameIndex < m_skinnedVertexBuffers.size() &&
             frameIndex < m_skinningWorkItemBuffers.size() && frameIndex < m_boneBuffers.size())
         {
@@ -5193,6 +5201,9 @@ namespace Nox
         uniformData.emissiveLightsReference = 0;
         uniformData.emissiveGridReference = 0;
         uniformData.emissiveGridCellSize = 0.0f;
+        uniformData.emissiveTrianglesReference = 0;
+        uniformData.emissiveTriangleCdfReference = 0;
+        uniformData.emissiveTriangleCount = 0;
         if (m_pathTracingEnabled || (m_rayTracingEnabled && m_diffuseGIMode == 3))
         {
             const float total = m_gpuScene.CollectEmissiveLights(m_emissiveLights);
@@ -5224,8 +5235,32 @@ namespace Nox
 
                 // The local grid around the camera, snapped to its cells (EmissiveLightGrid.slang builds it this frame). The path
                 // tracer's only: the screen-probe GI keeps its global sampling.
-                if (m_emissiveGridPipeline && m_pathTracingEnabled)
+                uint32_t triangleCount = 0;
+                for (const shaderio::EmissiveLightInstance& light : m_emissiveLights)
+                    triangleCount += light.triangleCount;
+                if (m_emissiveGridPipeline && m_emissiveTrianglesPipeline && m_emissiveScanPipeline && m_pathTracingEnabled && triangleCount > 0)
                 {
+                    // The emissive triangle lights (EmissiveLightGrid.slang trianglesMain / scanMain), grown as needed.
+                    if (triangleCount > m_emissiveTriangleCapacity)
+                    {
+                        for (std::unique_ptr<NRI::Buffer>* buffer : { &m_emissiveTriangleBuffer, &m_emissiveTriangleCdfBuffer })
+                        {
+                            if (*buffer)
+                            {
+                                std::scoped_lock lock(m_deferredReleasesMutex);
+                                m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, std::move(*buffer) });
+                            }
+                        }
+                        m_emissiveTriangleCapacity = triangleCount + triangleCount / 2;
+                        m_emissiveTriangleBuffer = m_device->createBuffer(NRI::BufferDesc{
+                            .size = sizeof(shaderio::EmissiveTriangle) * m_emissiveTriangleCapacity, .usage = NRI::BufferUsage::Storage });
+                        m_emissiveTriangleCdfBuffer = m_device->createBuffer(NRI::BufferDesc{
+                            .size = sizeof(float) * m_emissiveTriangleCapacity, .usage = NRI::BufferUsage::Storage });
+                    }
+                    uniformData.emissiveTrianglesReference = m_emissiveTriangleBuffer->getDeviceAddress();
+                    uniformData.emissiveTriangleCdfReference = m_emissiveTriangleCdfBuffer->getDeviceAddress();
+                    uniformData.emissiveTriangleCount = triangleCount;
+
                     if (!m_emissiveGridBuffer)
                         m_emissiveGridBuffer = m_device->createBuffer(NRI::BufferDesc{
                             .size = sizeof(uint32_t) * shaderio::EmissiveGridSizeX * shaderio::EmissiveGridSizeY * shaderio::EmissiveGridSizeZ *

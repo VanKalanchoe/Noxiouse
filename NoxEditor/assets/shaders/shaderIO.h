@@ -470,6 +470,13 @@ struct UniformBufferObject
     uint64_t emissiveGridReference;
     vec3 emissiveGridOrigin;
     float emissiveGridCellSize;
+    // The path tracer's emissive triangle lights (EmissiveLightGrid.slang): EmissiveTriangle[emissiveTriangleCount], one per
+    // triangle of the emissive instances in list order (EmissiveLightInstance::triangleOffset), and the running sum of their power
+    // (float[emissiveTriangleCount]). 0: none.
+    uint64_t emissiveTrianglesReference;
+    uint64_t emissiveTriangleCdfReference;
+    uint32_t emissiveTriangleCount;
+    uint32_t emissiveTrianglePadding;
     // Texture LOD biases (negative: sharper). An upscaled image is rendered at fewer pixels than it is shown: its textures are
     // sampled as for the shown resolution (log2(render / display), NVIDIA's DLSS guidance) -- the raster passes'. The path
     // tracer's adds RTXPT's -1. The mips texture streaming is asked for follow the finest of the two that sample this frame.
@@ -489,8 +496,21 @@ struct EmissiveLightInstance
     uint32_t triangleCount; // its ray tracing triangles
     float cdf;              // the weights up to and including this one
     float weight;
-    vec3 center;            // its world bounds' center and radius (the light grid's distances)
+    vec3 center;            // its world bounds' center and radius
     float radius;
+    uint32_t triangleOffset; // its first triangle in the emissive triangle list (UniformBufferObject::emissiveTrianglesReference)
+};
+
+// One emissive triangle as a light (EmissiveLightGrid.slang trianglesMain): its instance and triangle, its area and power (the
+// luminance of its average emission -- the emissive texture over the triangle -- times its area), written every frame.
+struct EmissiveTriangle
+{
+    uint32_t instanceSlot;
+    uint32_t primitive;
+    float power;
+    float area;
+    vec3 centroid;
+    float emissiveTrianglePadding;
 };
 
 // The local light grid of the emissive lights (EmissiveLightGrid.slang, PathTracer/EmissiveLights.slang): around the camera, each
@@ -501,6 +521,7 @@ STATIC_CONST uint32_t EmissiveGridSizeX = 32;
 STATIC_CONST uint32_t EmissiveGridSizeY = 16;
 STATIC_CONST uint32_t EmissiveGridSizeZ = 32;
 STATIC_CONST uint32_t EmissiveGridEntries = 16;
+STATIC_CONST uint32_t EmissiveGridCandidates = 64; // triangles drawn by power per cell, of which EmissiveGridEntries are kept
 STATIC_CONST float EmissiveGridCellMeters = 2.0;
 
 struct PushConstantEmissiveGrid
@@ -509,6 +530,8 @@ struct PushConstantEmissiveGrid
     uint32_t frameIndex;
     uint32_t emissiveGridPadding;
 };
+
+STATIC_CONST uint32_t EmissiveScanGroupSize = 1024; // the power sum's one workgroup (EmissiveLightGrid.slang scanMain)
 
 struct Vertex
 {

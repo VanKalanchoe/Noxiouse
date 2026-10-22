@@ -11,12 +11,52 @@ namespace Nox
     void Renderer::addEmissiveLightGridPass()
     {
         const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
-        if (!m_emissiveGridPipeline || !resources.EmissiveLightGrid.IsValid() || uniformData.emissiveGridReference == 0)
+        if (!m_emissiveGridPipeline || !m_emissiveTrianglesPipeline || !m_emissiveScanPipeline || !resources.EmissiveLightGrid.IsValid() ||
+            !resources.EmissiveTriangles.IsValid() || !resources.EmissiveTriangleCdf.IsValid() || uniformData.emissiveGridReference == 0 ||
+            uniformData.emissiveTriangleCount == 0)
             return;
+
+        // Each emissive triangle's record and power, then their running sum, then the cells' picks.
+        const uint32_t triangleCount = uniformData.emissiveTriangleCount;
+        m_renderGraph.AddPass("Emissive Triangles", RGPassFlags::NeverCull,
+            [&](RGBuilder& builder)
+            {
+                ReadIfValid(builder, resources.SceneTransforms);
+                ReadIfValid(builder, resources.SceneRayTracingInstances);
+                builder.Write(resources.EmissiveTriangles);
+            },
+            [this, triangleCount](RGPassContext& context)
+            {
+                shaderio::PushConstantEmissiveGrid push{};
+                push.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                push.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
+                NRI::CommandBuffer& cmd = context.Cmd();
+                cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *m_emissiveTrianglesPipeline);
+                cmd.pushData(&push, sizeof(push));
+                cmd.dispatch((triangleCount + 63) / 64, 1, 1);
+            });
+        m_renderGraph.AddPass("Emissive Power Sum", RGPassFlags::NeverCull,
+            [&](RGBuilder& builder)
+            {
+                builder.Read(resources.EmissiveTriangles);
+                builder.Write(resources.EmissiveTriangleCdf);
+            },
+            [this](RGPassContext& context)
+            {
+                shaderio::PushConstantEmissiveGrid push{};
+                push.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                push.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
+                NRI::CommandBuffer& cmd = context.Cmd();
+                cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *m_emissiveScanPipeline);
+                cmd.pushData(&push, sizeof(push));
+                cmd.dispatch(1, 1, 1);
+            });
 
         m_renderGraph.AddPass("Emissive Light Grid", RGPassFlags::NeverCull,
             [&](RGBuilder& builder)
             {
+                builder.Read(resources.EmissiveTriangles);
+                builder.Read(resources.EmissiveTriangleCdf);
                 builder.Write(resources.EmissiveLightGrid);
             },
             [this](RGPassContext& context)

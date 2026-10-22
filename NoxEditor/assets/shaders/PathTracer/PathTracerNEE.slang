@@ -38,8 +38,10 @@ namespace PathTracer
 
         if (emissiveSample)
         {
-            const EmissiveLights::Sample sample = EmissiveLights::sample(ubo, sd.posW,
-                float4(Bridge::rand(rngState), Bridge::rand(rngState), Bridge::rand(rngState), Bridge::rand(rngState)));
+            const float4 u = float4(Bridge::rand(rngState), Bridge::rand(rngState), Bridge::rand(rngState), Bridge::rand(rngState));
+            // Emissive triangles as RTXPT samples them (EmissiveLights.slang), the instances only without them.
+            const EmissiveLights::Sample sample = EmissiveLights::hasTriangleLights(ubo) ? EmissiveLights::sampleTriangles(ubo, sd.posW, u)
+                                                                                       : EmissiveLights::sample(ubo, sd.posW, u);
             if (!sample.valid) return c;
             c.L = sample.direction;
             c.distance = sample.distance;

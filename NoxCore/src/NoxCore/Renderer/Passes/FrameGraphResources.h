@@ -116,6 +116,8 @@ namespace Nox
         RGBuffer SceneMeshes;
         RGBuffer SceneRayTracingInstances;
         RGBuffer EmissiveLightGrid; // the emissive lights' local grid (EmissiveLightGrid.slang), when the lights are sampled
+        RGBuffer EmissiveTriangles; // the path tracer's emissive triangle lights and the running sum of their power
+        RGBuffer EmissiveTriangleCdf;
 
         // Compute-skinned local-space positions/normals. The previous ring slot supplies true skeletal motion vectors.
         RGBuffer SkinningSourceVertices;
@@ -176,6 +178,8 @@ namespace Nox
         ReadIfValid(builder, resources.SceneMeshes);
         ReadIfValid(builder, resources.SceneRayTracingInstances);
         ReadIfValid(builder, resources.EmissiveLightGrid);
+        ReadIfValid(builder, resources.EmissiveTriangles);
+        ReadIfValid(builder, resources.EmissiveTriangleCdf);
     }
 
     // The HDR image this frame's lighting produced (DLSS or post-process input): ReSTIR PT, else the plain path tracer,
