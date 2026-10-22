@@ -56,6 +56,7 @@ namespace Nox
             stream.write(reinterpret_cast<const char*>(&material.AttenuationColor), sizeof(glm::vec3));
             stream.write(reinterpret_cast<const char*>(&material.AttenuationDistance), sizeof(float));
             stream.write(reinterpret_cast<const char*>(&material.DiffuseTransmission), sizeof(float));
+            stream.write(reinterpret_cast<const char*>(&material.PathTracerFlags), sizeof(uint32_t));
             return stream.good();
         }
 
@@ -118,7 +119,13 @@ namespace Nox
                 // Written since diffuse transmission: older files end before it (none).
                 float diffuseTransmission = 0.0f;
                 if (stream.read(reinterpret_cast<char*>(&diffuseTransmission), sizeof(float)))
+                {
                     material.DiffuseTransmission = diffuseTransmission;
+                    // Written since the path tracer flags: older files end before them (none).
+                    uint32_t pathTracerFlags = 0;
+                    if (stream.read(reinterpret_cast<char*>(&pathTracerFlags), sizeof(uint32_t)))
+                        material.PathTracerFlags = pathTracerFlags;
+                }
             }
             stream.clear();
 

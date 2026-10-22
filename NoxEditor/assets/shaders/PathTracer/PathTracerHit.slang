@@ -8,6 +8,70 @@
 [[vk::push_constant]]
 ConstantBuffer<PushConstantPathTracer> pushConstant;
 
+// DLSS Ray Reconstruction's guides for a pixel: the surface's albedos, normal / roughness, depth and motion.
+void writeRRGuides(uint2 pixel, Bridge::SurfaceData surface, UniformBufferObject* ubo, bool albedoGuides)
+{
+    const float3 position = surface.shadingData.posW;
+    if (pushConstant.rrDepthStorageIndex != 0xFFFFFFFF)
+    {
+        float4 depthClip = mul(ubo->proj, mul(ubo->view, float4(position, 1.0)));
+        float4 currClip = mul(ubo->nonJitteredProj, mul(ubo->view, float4(position, 1.0)));
+        float4 prevClip = mul(ubo->prevProj, mul(ubo->prevView, float4(position, 1.0)));
+        float2 motion = (prevClip.xy / prevClip.w - currClip.xy / currClip.w) * float2(0.5, -0.5);
+        RWTexture2D<float>.Handle(uint2(pushConstant.rrDepthStorageIndex, 0))[pixel] = depthClip.z / depthClip.w;
+        RWTexture2D<float2>.Handle(uint2(pushConstant.rrMotionStorageIndex, 0))[pixel] = motion;
+        RWTexture2D<float2>.Handle(uint2(pushConstant.rrSpecularMotionStorageIndex, 0))[pixel] = motion;
+    }
+    if (albedoGuides && pushConstant.rrDiffuseAlbedoStorageIndex != 0xFFFFFFFF)
+    {
+        RWTexture2D<float4>.Handle(uint2(pushConstant.rrDiffuseAlbedoStorageIndex, 0))[pixel] = float4(surface.rrDiffuseAlbedo, 1.0);
+        RWTexture2D<float4>.Handle(uint2(pushConstant.rrSpecularAlbedoStorageIndex, 0))[pixel] = float4(surface.rrSpecularAlbedo, 1.0);
+        RWTexture2D<float4>.Handle(uint2(pushConstant.rrNormalRoughnessStorageIndex, 0))[pixel] = float4(surface.shadingData.N, surface.rrRoughness);
+    }
+}
+
+// A smooth thin pane whose transmission dominates (a window): what RR is guided by is behind it.
+bool isGuideGlass(GpuRayTracingInstance instance)
+{
+    const bool thin = (instance.pathTracerFlags & PathTracerThinSet) != 0 ? (instance.pathTracerFlags & PathTracerThin) != 0
+                                                                          : instance.thickness <= 0.0;
+    return thin && instance.transmissionFactor >= 0.5 && instance.roughnessFactor < 0.08;
+}
+
+// RTXPT's guides through glass: the camera sees through a smooth thin pane whose transmission dominates, so RR's guides are the
+// surface behind it (RTXPT's stable plane on the transmission branch), every frame -- whichever lobe this frame's path sampled.
+// They followed the sampled lobe before: the pane in some frames, the room in the others, and RR smeared what is behind. A ray
+// straight on past such panes (up to a few) finds that surface; it is loaded as the hit shader loads one.
+void writeGuidesBehindGlass(uint2 pixel, float3 origin, float3 direction, float rayConeWidth, UniformBufferObject* ubo)
+{
+    RaytracingAccelerationStructure tlas = RaytracingAccelerationStructure(ubo->tlasDeviceAddress);
+    GpuRayTracingInstance* instances = (GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference;
+    RayDesc ray;
+    ray.Origin = origin;
+    ray.Direction = direction;
+    ray.TMin = 0.0;
+    ray.TMax = 1e9;
+    RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> query;
+    query.TraceRayInline(tlas, RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES, 0xFF, ray);
+    while (query.Proceed())
+    {
+        const uint slot = query.CandidateRayInstanceCustomIndex();
+        const GpuRayTracingInstance candidate = instances[slot];
+        if (isGuideGlass(candidate))
+            continue;
+        if (candidate.alphaMode == 0 || Bridge::AlphaTest(slot, query.CandidatePrimitiveIndex(), query.CandidateTriangleBarycentrics(), ubo))
+            query.CommitNonOpaqueTriangleHit();
+    }
+    if (query.CommittedStatus() != COMMITTED_TRIANGLE_HIT)
+        return; // the sky behind: the pane's own guides stay
+    const uint slot = query.CommittedRayInstanceCustomIndex();
+    const float4x4 world = ((GpuTransform*)ubo->sceneTransformsReference)[slot].world;
+    const float3x4 objToWorld = float3x4(world[0], world[1], world[2]);
+    const Bridge::SurfaceData behind = Bridge::loadSurface(slot, query.CommittedPrimitiveIndex(), query.CommittedTriangleBarycentrics(),
+                                                           direction, rayConeWidth, ubo, objToWorld);
+    writeRRGuides(pixel, behind, ubo, true);
+}
+
 [shader("closesthit")]
 void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangleIntersectionAttributes attrib)
 {
@@ -55,7 +119,8 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
         attrib.barycentrics,
         rayDir,
         path.rayCone.getWidth(),
-        ubo
+        ubo,
+        ObjectToWorld3x4()
     );
 
 
@@ -87,6 +152,12 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
     // RTXPT exports depth and motion from its chosen path surface rather than from a separate raster pass.
     // Use jitter-free matrices for motion and the jittered clip transform for the depth supplied to Streamline.
     bool rrVisibleSurface = vertexIdx == 1 || (vertexIdx > 1 && path.hasFlag(PathFlags::deltaOnlyPath));
+    // A window the camera sees (directly or through other glass): the guides are what is behind it, traced once at the first pane;
+    // panes further in write nothing (the traced surface already stands for them).
+    const bool guideGlass = rrVisibleSurface && pushConstant.rrDepthStorageIndex != 0xFFFFFFFF &&
+                            isGuideGlass(((GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference)[InstanceID()]);
+    if (guideGlass && vertexIdx > 1)
+        rrVisibleSurface = false;
     if (pushConstant.rrDepthStorageIndex != 0xFFFFFFFF && rrVisibleSurface)
     {
         uint2 pixel = uint2(path.id & 0xFFFFu, path.id >> 16);
@@ -135,7 +206,7 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
         // A primary transmission event shows this surface through the glass. Feeding RR the glass normal/albedo
         // while the noisy color describes the surface behind it makes RR lock onto and smear the pane. RTXPT solves
         // this with stable planes; use the transmitted plane as the guide until the full multi-plane blend runs here.
-        if (path.hasFlag(PathFlags::deltaOnlyPath) && pushConstant.rrDiffuseAlbedoStorageIndex != 0xFFFFFFFF)
+        if (path.hasFlag(PathFlags::deltaOnlyPath) && !guideGlass && pushConstant.rrDiffuseAlbedoStorageIndex != 0xFFFFFFFF)
         {
             RWTexture2D<float4> rrDiffuse = RWTexture2D<float4>.Handle(uint2(pushConstant.rrDiffuseAlbedoStorageIndex, 0));
             RWTexture2D<float4> rrSpecular = RWTexture2D<float4>.Handle(uint2(pushConstant.rrSpecularAlbedoStorageIndex, 0));
@@ -146,6 +217,9 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
             rrNormalRoughness[pixel] = float4(surface.shadingData.N, surface.rrRoughness);
         }
     }
+
+    if (guideGlass && vertexIdx == 1)
+        writeGuidesBehindGlass(uint2(path.id & 0xFFFFu, path.id >> 16), surface.shadingData.posW, rayDir, path.rayCone.getWidth(), ubo);
 
     // 2. Collect surface emission (with MIS if previous bounce used NEE)
     if (any(surface.emission > float3(0.0)))
@@ -161,7 +235,11 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
             const float bsdfPdf = path.bsdfScatterPdf;
             misWeight = bsdfPdf * bsdfPdf / max(bsdfPdf * bsdfPdf + lightPdf * lightPdf, 1e-30);
         }
-        float3 filteredEmission = FireflyFilter(surface.emission * misWeight, pushConstant.fireflyFilterThreshold, path.fireflyFilterK);
+        // What the camera sees directly, in mirrors and through glass is not clamped (RTXPT's stable planes have no firefly filter):
+        // bright bulbs seen through a window kept only ~38.
+        const float3 weightedEmission = surface.emission * misWeight;
+        float3 filteredEmission = (vertexIdx == 1 || path.hasFlag(PathFlags::deltaOnlyPath))
+            ? weightedEmission : FireflyFilter(weightedEmission, pushConstant.fireflyFilterThreshold, path.fireflyFilterK);
         float3 emissionContrib = path.thp * filteredEmission;
         path.L.rgb += emissionContrib;
 
@@ -195,8 +273,11 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
     // vertex of every path cost more than the rest of the path tracer.
     const uint candidateSamples = (ubo->emissiveLightCount > 0 && vertexIdx == 1) ? max(pushConstant.neeCandidateSamples, 8u)
                                                                                   : pushConstant.neeCandidateSamples;
-    float3 directDiffuse, directSpecular;
-    float3 directLight = PathTracer::evaluateNEE(
+    // No light sampling on a surface with only delta lobes (smooth glass, mirrors): no direction of light could be weighed, RTXPT
+    // skips it (PathTracerNEE.hlsli) -- the light beyond is found by the path going on.
+    const bool hasNonDeltaLobes = (FalcorBSDF::getLobes(surface.bsdf.data) & LobeType::NonDelta) != 0;
+    float3 directDiffuse = float3(0.0), directSpecular = float3(0.0);
+    float3 directLight = !hasNonDeltaLobes ? float3(0.0) : PathTracer::evaluateNEE(
         surface.shadingData, surface.bsdf, as, ubo, rngState,
         candidateSamples, pushConstant.neeFullSamples,
         pushConstant.skyboxTextureIndex, pushConstant.environmentImportanceIndex,
@@ -268,17 +349,15 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
 
     // Update throughput
     path.thp *= sampleResult.weight;
-    // Through glass after a rough vertex (a delta transmission, not from the camera): the light beyond reached that vertex's
-    // NEE through the glass (shadow rays let transmissive surfaces through, PathTracerNEE.slang), so the environment met beyond
-    // is weighed against it with that vertex's pdf, not the glass's (0, which would count it fully a second time).
-    const bool throughGlassAfterScatter = (sampleResult.lobe & LobeType::DeltaTransmission) != 0 && !path.hasFlag(PathFlags::deltaOnlyPath);
-    if (!throughGlassAfterScatter)
-        path.bsdfScatterPdf = sampleResult.pdf;
+    // RTXPT: the scatter pdf of this vertex, 0 after a delta event (glass, mirror) -- light met beyond it then counts fully
+    // (RTXPT's "bias" of light through windows that NEE also reaches; matched here, it is a large part of its interiors' light).
+    path.bsdfScatterPdf = sampleResult.pdf;
     path.fireflyFilterK = ComputeNewScatterFireflyFilterK(path.fireflyFilterK, sampleResult.pdf, sampleResult.lobeP);
     if (sampleResult.pdf > 0.0)
         path.rayCone = RayCone::make(path.rayCone.getWidth(),
                                     path.rayCone.getSpreadAngle() + ComputeRayConeSpreadExpansion(sampleResult.pdf));
-    if ((sampleResult.lobe & LobeType::Diffuse) != 0 &&
+    // RTXPT counts a rough specular bounce (roughness > 0.25) as a diffuse one too.
+    if (((sampleResult.lobe & LobeType::Diffuse) != 0 || ((sampleResult.lobe & LobeType::Specular) != 0 && surface.rrRoughness > 0.25)) &&
         !(sampleResult.lobe == LobeType::DiffuseTransmission && (vertexIdx % 2) == 1))
         path.incrementCounter(PackedCounters::DiffuseBounces);
 

@@ -690,6 +690,7 @@ namespace Nox
         record.attenuationColor = material.attenuationColor;
         record.attenuationDistance = material.attenuationDistance;
         record.diffuseTransmission = material.diffuseTransmission;
+        record.pathTracerFlags = material.pathTracerFlags;
     }
 
     void GpuScene::ReleaseMaterial(uint32_t materialSlot)

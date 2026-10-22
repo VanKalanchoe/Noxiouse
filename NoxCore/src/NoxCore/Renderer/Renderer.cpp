@@ -210,6 +210,7 @@ namespace Nox
         packed.doubleSided = material.DoubleSided ? 1u : 0u;
         packed.unlit = material.Unlit ? 1u : 0u;
         packed.diffuseTransmission = glm::clamp(material.DiffuseTransmission, 0.0f, 1.0f);
+        packed.pathTracerFlags = material.PathTracerFlags;
         return packed;
     }
 

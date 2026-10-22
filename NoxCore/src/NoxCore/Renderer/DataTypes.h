@@ -103,6 +103,8 @@ namespace Nox
         // Diffuse transmission (KHR_materials_diffuse_transmission; RTXPT's DiffuseTransmissionFactor): how much of the diffuse
         // light goes through a thin surface to its other side -- leaves and cloth lit from behind. 0: none.
         float DiffuseTransmission = 0.0f;
+        // shaderio::PathTracer* flags (thin surface, excluded from shadow rays, from an RTXPT material file).
+        uint32_t PathTracerFlags = 0;
 
         // Alpha properties
         AlphaMode Mode = AlphaMode::Opaque;

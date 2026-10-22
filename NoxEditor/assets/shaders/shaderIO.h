@@ -165,6 +165,7 @@ struct GpuMaterial
     uint32_t doubleSided;
     uint32_t unlit;
     float diffuseTransmission; // through a thin surface to its back (leaves, cloth); 0: none
+    uint32_t pathTracerFlags;  // PathTracerThin... (above)
 };
 
 #ifdef __SLANG__
@@ -251,7 +252,7 @@ struct GpuRayTracingInstance
     vec3 attenuationColor;          // volume absorption (KHR_materials_volume; attenuationDistance 0: none)
     float attenuationDistance;
     float diffuseTransmission;      // through a thin surface to its back (leaves, cloth); 0: none
-    float rayTracingPadding;        // the record stays a multiple of 8 bytes (its addresses)
+    uint32_t pathTracerFlags;       // PathTracerThin... (the record stays a multiple of 8 bytes: its addresses)
 };
 
 struct GpuMesh
@@ -1046,6 +1047,13 @@ STATIC_CONST uint32_t MESHLET_SHADE_OPAQUE = 4;     // PushConstantMeshlets.mesh
 // (cut out where masked), its transmission only for the path tracer and its diffuse transmission for the back light. Routing those
 // through the glass path drew every leaf as glass: no depth, sorted per object (see-through foliage), ~60 ms looking at a tree.
 STATIC_CONST float SeeThroughTransmission = 0.5;
+
+// Path tracer material flags (GpuMaterial / GpuRayTracingInstance::pathTracerFlags), from RTXPT's material files when present.
+STATIC_CONST uint32_t PathTracerThinSet = 1u;         // the material says whether it is thin (else: thin when it has no thickness)
+STATIC_CONST uint32_t PathTracerThin = 2u;            // thin-walled: no refraction, 1 / IoR on both faces (RTXPT ThinSurface)
+STATIC_CONST uint32_t PathTracerExcludeFromNEE = 4u;  // shadow rays pass it untouched (RTXPT ExcludeFromNEE: window glass)
+STATIC_CONST uint32_t PathTracerRtxptMaterial = 8u;   // from an RTXPT material file: shadow rays follow RTXPT's rule (block
+                                                      // unless ExcludeFromNEE or cut out), not the tinted pass-through
 
 #ifdef __SLANG__
 // Whether rays of the hybrid passes go through a surface (and the raster path draws it as glass): see-through transmission and

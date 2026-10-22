@@ -51,7 +51,9 @@ void missMain(inout PathPayload payload : SV_RayPayload)
             misWeight = bsdfPdf*bsdfPdf / max(bsdfPdf*bsdfPdf + lightPdf*lightPdf, 1e-30);
         }
 
-        envRadiance = FireflyFilter(envRadiance, pushConstant.fireflyFilterThreshold, path.fireflyFilterK);
+        // Seen by the camera directly, in mirrors or through glass: not clamped (RTXPT's stable planes have no firefly filter).
+        if (path.getVertexIndex() > 0 && !path.hasFlag(PathFlags::deltaOnlyPath))
+            envRadiance = FireflyFilter(envRadiance, pushConstant.fireflyFilterThreshold, path.fireflyFilterK);
         float3 envContrib = path.thp * envRadiance * misWeight;
         path.L.rgb += envContrib;
 

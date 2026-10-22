@@ -2073,6 +2073,12 @@ namespace Nox
             }
             material.IOR = number("IoR", material.IOR);
             material.DiffuseTransmission = std::clamp(number("DiffuseTransmissionFactor", material.DiffuseTransmission), 0.0f, 1.0f);
+            // RTXPT's path tracer flags: thin-walled (no refraction, 1/IoR on both faces), excluded from shadow rays (window glass).
+            material.PathTracerFlags = shaderio::PathTracerRtxptMaterial;
+            if (json["ThinSurface"])
+                material.PathTracerFlags |= shaderio::PathTracerThinSet | (json["ThinSurface"].as<bool>() ? shaderio::PathTracerThin : 0u);
+            if (json["ExcludeFromNEE"] && json["ExcludeFromNEE"].as<bool>())
+                material.PathTracerFlags |= shaderio::PathTracerExcludeFromNEE;
             if (json["EnableTransmission"])
                 material.TransmissionFactor = json["EnableTransmission"].as<bool>() ? number("TransmissionFactor", 0.0f) : 0.0f;
             const glm::vec3 emissive = color("EmissiveColor", material.EmissiveFactor);

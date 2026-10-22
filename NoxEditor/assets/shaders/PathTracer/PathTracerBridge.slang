@@ -142,13 +142,15 @@ namespace Bridge
     }
 
     // Loads surface geometry and material data at hit point
+    // `objToWorld`: the instance's transform (ObjectToWorld3x4() in a hit shader; the GPU scene's for a ray query).
     SurfaceData loadSurface(
         uint instanceID,
         uint primitiveIndex,
         float2 barycentrics,
         float3 rayDir,
         float rayConeWidth,
-        UniformBufferObject* ubo
+        UniformBufferObject* ubo,
+        float3x4 objToWorld
     )
     {
         SurfaceData surface;
@@ -173,11 +175,21 @@ namespace Bridge
         float2 uv = v0.uv0 * bary.x + v1.uv0 * bary.y + v2.uv0 * bary.z;
 
         // 3. Transform to world space using DXR intrinsics
-        float3x4 objToWorld = ObjectToWorld3x4();
         float3 posW = mul(objToWorld, float4(localPos, 1.0));
         float3 normalW = normalize(mul((float3x3)lut.normalMatrix, localNormal));
 
-        bool frontFace = dot(normalW, -rayDir) >= 0.0;
+        // Which side the ray hit by the triangle's own plane (turned to the side its vertex normals call the front), as RTXPT takes
+        // the hit's face: an interpolated normal leans away near silhouettes and picked the wrong face there.
+        float3 faceNormalW = mul((float3x3)lut.normalMatrix, cross(v1.pos - v0.pos, v2.pos - v0.pos));
+        if (dot(faceNormalW, faceNormalW) > 1e-20)
+        {
+            faceNormalW = normalize(faceNormalW);
+            if (dot(faceNormalW, normalW) < 0.0)
+                faceNormalW = -faceNormalW;
+        }
+        else
+            faceNormalW = normalW;
+        bool frontFace = dot(faceNormalW, -rayDir) >= 0.0;
         if (!frontFace)
         {
             normalW = -normalW;
@@ -186,7 +198,7 @@ namespace Bridge
         if (!frontFace && lut.transmissionFactor > 0.0 && lut.thickness > 0.0 && lut.attenuationDistance > 0.0)
         {
             // Beer-Lambert: attenuationColor left after attenuationDistance, the distance scaled with the instance.
-            const float instanceScale = length(mul((float3x3)ObjectToWorld3x4(), float3(1.0, 0.0, 0.0)));
+            const float instanceScale = length(mul((float3x3)objToWorld, float3(1.0, 0.0, 0.0)));
             surface.absorptionCoefficient = -log(max(lut.attenuationColor, float3(1e-6))) / max(lut.attenuationDistance * instanceScale, 1e-6);
         }
 
@@ -199,7 +211,10 @@ namespace Bridge
         // infinitely thin sheet. RTXPT's Bistro override marks the painting/window cover glass
         // (LMBR_0000103_Paris_Glass_01) ThinSurface=true. Treating it as a solid volume bends the
         // camera ray without a matching exit interface and replaces the painting with a dark reflection.
-        surface.shadingData.mtl.thinSurface = lut.transmissionFactor <= 0.0 || lut.thickness <= 0.0;
+        // An RTXPT material file says it (ThinSurface); else thin without a volume thickness.
+        surface.shadingData.mtl.thinSurface = (lut.pathTracerFlags & PathTracerThinSet) != 0
+            ? ((lut.pathTracerFlags & PathTracerThin) != 0 || lut.transmissionFactor <= 0.0)
+            : (lut.transmissionFactor <= 0.0 || lut.thickness <= 0.0);
 
         float3 edge1 = mul((float3x3)objToWorld, v1.pos - v0.pos);
         float3 edge2 = mul((float3x3)objToWorld, v2.pos - v0.pos);
@@ -290,7 +305,10 @@ namespace Bridge
         }
 
         // 6. Setup BSDF data
-        float eta = frontFace ? 1.0 / ior : ior;
+        // A thin surface has no inside: 1 / IoR on both faces, as RTXPT's bridge. The inside -> outside ratio on a pane's back face
+        // (Bistro's windows are two single-sided sheets, one crossed from behind) was total internal reflection from ~30 degrees:
+        // the rays bounced between the panes and the window showed only the reflected street over black.
+        float eta = (frontFace || surface.shadingData.mtl.thinSurface) ? 1.0 / ior : ior;
         // KHR_materials_transmission applies only to the dielectric portion; transparent metals are undefined.
         // This is the exact factor used by RTXPT's PathTracerBridgeDonut.
         transmission *= 1.0 - saturate(metallic);
@@ -369,7 +387,11 @@ namespace Bridge
     {
         GpuRayTracingInstance* lutBuffer = (GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference;
         GpuRayTracingInstance lut = lutBuffer[instanceID];
-        if (lut.transmissionFactor > 0.0)
+        // RTXPT's rule for its materials: ExcludeFromNEE surfaces (window glass) let shadow rays through untouched, every other one
+        // blocks unless it is cut out there. Without an RTXPT material file: transmissive surfaces let light through tinted.
+        if ((lut.pathTracerFlags & PathTracerExcludeFromNEE) != 0)
+            return float3(1.0);
+        if (lut.transmissionFactor > 0.0 && (lut.pathTracerFlags & PathTracerRtxptMaterial) == 0)
             return saturate(lut.transmissionFactor) * saturate(lut.baseColorFactor.rgb) * 0.92;
         if (lut.alphaMode == 0)
             return float3(0.0);
