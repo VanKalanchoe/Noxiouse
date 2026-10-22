@@ -5204,7 +5204,8 @@ namespace Nox
         uniformData.emissiveTrianglesReference = 0;
         uniformData.emissiveTriangleCdfReference = 0;
         uniformData.emissiveTriangleCount = 0;
-        if (m_pathTracingEnabled || (m_rayTracingEnabled && m_diffuseGIMode == 3))
+        // The hybrid passes' rays (screen-probe GI, reflections, traced glass) sample them as well.
+        if (m_pathTracingEnabled || m_rayTracingEnabled)
         {
             const float total = m_gpuScene.CollectEmissiveLights(m_emissiveLights);
             const uint64_t required = sizeof(shaderio::EmissiveLightInstance) * m_emissiveLights.size();
@@ -5233,12 +5234,12 @@ namespace Nox
                 uniformData.emissiveLightTotalWeight = total;
                 uniformData.emissiveLightsReference = m_emissiveLightBuffers[currentImage]->getDeviceAddress();
 
-                // The local grid around the camera, snapped to its cells (EmissiveLightGrid.slang builds it this frame). The path
-                // tracer's only: the screen-probe GI keeps its global sampling.
+                // The local grid around the camera, snapped to its cells (EmissiveLightGrid.slang builds it this frame), for the path
+                // tracer and the screen-probe GI alike.
                 uint32_t triangleCount = 0;
                 for (const shaderio::EmissiveLightInstance& light : m_emissiveLights)
                     triangleCount += light.triangleCount;
-                if (m_emissiveGridPipeline && m_emissiveTrianglesPipeline && m_emissiveScanPipeline && m_pathTracingEnabled && triangleCount > 0)
+                if (m_emissiveGridPipeline && m_emissiveTrianglesPipeline && m_emissiveScanPipeline && triangleCount > 0)
                 {
                     // The emissive triangle lights (EmissiveLightGrid.slang trianglesMain / scanMain), grown as needed.
                     if (triangleCount > m_emissiveTriangleCapacity)

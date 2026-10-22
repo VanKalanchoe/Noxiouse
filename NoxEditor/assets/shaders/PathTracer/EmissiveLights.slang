@@ -230,4 +230,24 @@ namespace EmissiveLights
             return 0.0;
         return triangleProbability(ubo, triangle, gridCell(ubo, origin)) / record.area * distance * distance / cosLight;
     }
+
+    // trianglePdf for a ray from `origin` along `direction` that hit instance `instanceSlot`'s triangle `primitive` `distance` away,
+    // the cosine from the triangle's own face (for passes that do not have it: the hybrid reflections).
+    float trianglePdfAlong(UniformBufferObject* ubo, float3 origin, float3 direction, uint instanceSlot, uint primitive, float distance)
+    {
+        if (!hasTriangleLights(ubo) || find(ubo, instanceSlot) == 0xFFFFFFFF)
+            return 0.0;
+        GpuRayTracingInstance instance = ((GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference)[instanceSlot];
+        const float4x4 world = ((GpuTransform*)ubo->sceneTransformsReference)[instanceSlot].world;
+        uint3 index = instance.indexBufferAddress != 0 ? ((uint3*)instance.indexBufferAddress)[primitive]
+                                                       : uint3(primitive * 3 + 0, primitive * 3 + 1, primitive * 3 + 2);
+        const float3 p0 = mul(world, float4(LoadRayTracingVertex(instance, index.x).pos, 1.0)).xyz;
+        const float3 p1 = mul(world, float4(LoadRayTracingVertex(instance, index.y).pos, 1.0)).xyz;
+        const float3 p2 = mul(world, float4(LoadRayTracingVertex(instance, index.z).pos, 1.0)).xyz;
+        const float3 cross01 = cross(p1 - p0, p2 - p0);
+        const float doubleArea = length(cross01);
+        if (doubleArea <= 0.0)
+            return 0.0;
+        return trianglePdf(ubo, origin, instanceSlot, primitive, distance, abs(dot(cross01 / doubleArea, direction)));
+    }
 }

@@ -73,8 +73,10 @@ bool ray_hit_shadowed(UniformBufferObject* ubo, float3 origin, float3 direction,
 // with shadow rays (alpha-masked occluders cut out; the strongest exactly, LightSelection.slang), the scene's GI for the ambient part (SceneGI.slang: the
 // screen-probe GI where the hit is on screen, else DDGI / the irradiance cubemap), emission.
 // Diffuse only (the hit's own reflections are not traced). For rays traced from raster passes: RT reflections
-// (Reflection.slang), RT refraction (Material_TransparentLit_Mesh.slang).
-float3 shadeRayHit(UniformBufferObject* ubo, uint instanceSlot, uint primitive, float2 barycentrics, float3 rayOrigin, float3 R, float hitT)
+// (Reflection.slang), RT refraction (Material_TransparentLit_Mesh.slang). `emissionWeight` scales the hit's emission: the MIS weight
+// of a ray whose pass also samples the emissive triangles as lights (Reflection.slang), 1 otherwise.
+float3 shadeRayHit(UniformBufferObject* ubo, uint instanceSlot, uint primitive, float2 barycentrics, float3 rayOrigin, float3 R, float hitT,
+                   float emissionWeight = 1.0)
 {
     GpuRayTracingInstance* instanceLUTBuffer = (GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference;
     RaytracingAccelerationStructure accelerationStructure = RaytracingAccelerationStructure(ubo->tlasDeviceAddress);
@@ -123,7 +125,9 @@ float3 shadeRayHit(UniformBufferObject* ubo, uint instanceSlot, uint primitive, 
 
     float3 hitPos = rayOrigin + R * hitT;
 
-    float3 albedo = hitLut.baseColorFactor.rgb;
+    // Specular-glossiness materials keep their color in the diffuse factor (the base color factor is the default white there), as the
+    // G-buffer and the path tracer read it.
+    float3 albedo = hitLut.workflow == 1.0 ? hitLut.diffuseFactor.rgb : hitLut.baseColorFactor.rgb;
     if (hitLut.baseColorTextureIndex != 0xFFFFFFFF)
     {
         Texture2D hitTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + hitLut.baseColorTextureIndex, 0));
@@ -163,7 +167,7 @@ float3 shadeRayHit(UniformBufferObject* ubo, uint instanceSlot, uint primitive, 
         emissiveLight *= emissiveTex.SampleLevel(SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0)), hitUV, 2.0).rgb;
     }
 
-    return directLight + ambientLight + emissiveLight;
+    return directLight + ambientLight + emissiveLight * emissionWeight;
 }
 
 #endif

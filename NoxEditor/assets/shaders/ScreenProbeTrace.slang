@@ -100,7 +100,7 @@ float3 screen_probe_shade_hit(UniformBufferObject* ubo, uint instanceSlot, uint 
     // A probe ray stands for a cone of about 0.4 rad: what it sees of a texture is its average over a patch that wide, a high mip.
     const float lod = clamp(log2(max(hitMeters, 1e-3) * 128.0), 0.0, 14.0);
     SamplerState linearRepeat = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
-    float3 albedo = hit.baseColorFactor.rgb;
+    float3 albedo = hit.workflow == 1.0 ? hit.diffuseFactor.rgb : hit.baseColorFactor.rgb; // spec-gloss: the diffuse factor
     if (hit.baseColorTextureIndex != 0xFFFFFFFF)
     {
         Texture2D tex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + hit.baseColorTextureIndex, 0));
@@ -180,7 +180,11 @@ float4 screen_probe_emissive_sample(UniformBufferObject* ubo, float3 origin, flo
         const uint candidateSeed = screen_probe_hash(seed + candidate * 0x9e3779b9u);
         const float4 u = float4(screen_probe_random(candidateSeed), screen_probe_random(candidateSeed ^ 0x68e31da4u),
                                 screen_probe_random(candidateSeed ^ 0xb5297a4du), screen_probe_random(candidateSeed ^ 0x1b56c4e9u));
-        EmissiveLights::Sample sample = EmissiveLights::sample(ubo, origin, u);
+        // The emissive triangles by the light they give around the probe (EmissiveLightGrid.slang), as the path tracer samples them:
+        // an instance and any of its triangles put nearly every sample on a lamp's dark fixture, and the rooms the lamps light came
+        // out dim. The instances only when the triangle lights are not built.
+        EmissiveLights::Sample sample = EmissiveLights::hasTriangleLights(ubo) ? EmissiveLights::sampleTriangles(ubo, origin, u)
+                                                                             : EmissiveLights::sample(ubo, origin, u);
         const float cosProbe = dot(sample.direction, probeNormal);
         if (!sample.valid || cosProbe <= 0.0)
             continue;

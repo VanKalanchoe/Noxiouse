@@ -242,6 +242,7 @@ namespace Nox
                     builder.Read(resources.Depth);
                     builder.Read(resources.GBufferNormal);
                     builder.Read(resources.GBufferMaterial);
+                    ReadIfValid(builder, resources.GBufferAlbedo);
                     builder.Read(resources.Visibility);
                     ReadIfValid(builder, resources.TLAS);
                     ReadGpuScene(builder, resources);
@@ -288,6 +289,7 @@ namespace Nox
                     // Packed for the NRD pass that runs (the lighting unpacks the same way), plain without one.
                     reflPush.denoiserMode = denoiseReflections ? static_cast<uint32_t>(m_nrdReflectionDenoiser) : 0u;
                     reflPush.smoothFillRoughness = smoothFill;
+                    reflPush.gbufferAlbedoIndex = res->GBufferAlbedo.IsValid() ? context.Slot(res->GBufferAlbedo) : 0xFFFFFFFFu;
                     cmd.pushData(&reflPush, sizeof(shaderio::PushConstantReflection));
 
                     cmd.drawMeshTasks(1, 1, 1);

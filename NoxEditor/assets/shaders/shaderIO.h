@@ -1443,7 +1443,7 @@ struct PushConstantReflection
     // > 0: the full-resolution pass after a lower ray tracing resolution's upsample: every pixel traces its own ray, but only where
     // the surface is smoother than this roughness (sharp reflections show the reduced resolution); the others keep the upsampled one.
     float smoothFillRoughness;
-    uint32_t pad0;
+    uint32_t gbufferAlbedoIndex; // the specular color for the emissive light sampling (Reflection.slang); ~0: none
 };
 
 struct PushConstantDeferredLighting
