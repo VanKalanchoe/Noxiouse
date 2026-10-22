@@ -588,7 +588,33 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     if ((ubo->screenGITextureIndex != 0xFFFFFFFF || ubo->enableDDGI != 0) && sample_scene_gi(ubo, vertIn.worldPos, n, normalize(vertIn.normal), v, sceneIrradiance))
     {
         ambientDiffuse = sceneIrradiance * diffuseColor;
-        ambientSpecular *= scene_gi_specular_occlusion(ubo, sceneIrradiance);
+        ambientSpecular *= scene_gi_specular_occlusion(ubo, sceneIrradiance, n);
+    }
+
+    // Smooth glass with ray traced glass on: its reflection traced like its refraction (the room around a jar on a counter, not the
+    // sky the environment map holds), fading into the occluded environment reflection with roughness.
+    float tracedReflectionWeight = 0.0;
+    if ((pushConstant.meshletCulling & MESHLET_RT_REFRACTION) != 0 && ubo->tlasDeviceAddress != 0 && transmission > 0.0)
+        tracedReflectionWeight = saturate((RTRefractionMaxRoughness - perceptualRoughness) / (RTRefractionMaxRoughness - RTRefractionFullRoughness));
+    if (tracedReflectionWeight > 0.0 && ubo->brdfLutIndex != 0xFFFFFFFF)
+    {
+        const float3 reflected = normalize(reflect(-v, n));
+        const float3 origin = vertIn.worldPos + n * (0.002 * ubo->unitsPerMeter);
+        uint slot, primitive;
+        float2 barycentrics;
+        float hitT;
+        float3 radiance;
+        if (traceRefractionRay(ubo, origin, reflected, 1000.0 * ubo->unitsPerMeter, -1, slot, primitive, barycentrics, hitT))
+            radiance = shadeRayHit(ubo, slot, primitive, barycentrics, origin, reflected, hitT);
+        else
+        {
+            TextureCube environment = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + ubo->prefilteredMapIndex, 0));
+            radiance = environment.SampleLevel(SamplerState.Handle(uint2(SamplerIndex::SAMPLER_PREFILTER, 0)), reflected, 0.0).rgb *
+                       ubo->scaleIBLAmbient;
+        }
+        Texture2D brdfTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->brdfLutIndex, 0));
+        const float2 brdf = brdfTex.SampleLevel(SamplerState.Handle(uint2(SamplerIndex::SAMPLER_BRDFLUT, 0)), float2(NdotV, 1.0 - perceptualRoughness), 0).rg;
+        ambientSpecular = lerp(ambientSpecular, radiance * (specularColor * brdf.x + brdf.y), tracedReflectionWeight);
     }
 
     float3 color = (directLighting + ambientDiffuse + ambientSpecular) * ao;

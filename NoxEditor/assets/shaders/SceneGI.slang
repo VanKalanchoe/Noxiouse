@@ -68,10 +68,18 @@ bool sample_scene_gi(UniformBufferObject* ubo, float3 worldPos, float3 shadingNo
     return false;
 }
 
-// How much of the sky's reflection reaches a surface, judged by its diffuse light against the sky's: indoors, little. The same
-// approximation the deferred lighting uses with DDGI / screen probes.
-float scene_gi_specular_occlusion(UniformBufferObject* ubo, float3 irradiance)
+// How much of the sky's reflection reaches a surface, judged by its diffuse light against the sky's at its normal (the irradiance
+// cubemap, unoccluded): indoors, little. The same approximation the deferred lighting uses with DDGI / screen probes. It used to
+// divide by the Radiance Scale slider (1): never any occlusion, glass indoors reflected the whole sky.
+float scene_gi_specular_occlusion(UniformBufferObject* ubo, float3 irradiance, float3 n)
 {
     const float luma = dot(irradiance, float3(0.2126, 0.7152, 0.0722));
-    return saturate(luma / max(ubo->scaleIBLAmbient, 0.01));
+    float skyLuma = max(ubo->scaleIBLAmbient, 0.01);
+    if (ubo->irradianceMapIndex != 0xFFFFFFFF)
+    {
+        TextureCube sky = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + ubo->irradianceMapIndex, 0));
+        SamplerState irradianceSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_IRRADIANCE, 0));
+        skyLuma = max(dot(sky.SampleLevel(irradianceSampler, n, 0).rgb * ubo->scaleIBLAmbient, float3(0.2126, 0.7152, 0.0722)), 1e-4);
+    }
+    return saturate(luma / skyLuma);
 }

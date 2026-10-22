@@ -580,7 +580,9 @@ namespace Nox
             // too, whatever its alpha mode: rays that must see through it (shadows, refraction, AO) decide in their query loop,
             // and every other ray keeps the hardware's own opaque acceptance -- they used to force every triangle non-opaque
             // (RAY_FLAG_FORCE_NON_OPAQUE) to reach the glass, which made a closest-hit query visit the whole scene in the shader.
-            if (material.alphaMode == static_cast<uint32_t>(AlphaMode::Opaque) && material.transmissionFactor < shaderio::SeeThroughTransmission)
+            // Any transmission keeps the instance non-opaque for rays (the path tracer's shadow rays pass curtains and thin glass,
+            // tinted); the hybrid passes' loops decide by shaderio::SeeThroughTransmission themselves.
+            if (material.alphaMode == static_cast<uint32_t>(AlphaMode::Opaque) && material.transmissionFactor <= 0.0f)
                 record.flags |= 0x04;
             else
                 record.flags |= 0x08;
