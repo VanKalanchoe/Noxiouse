@@ -80,7 +80,7 @@ bool forwardShadowed(UniformBufferObject* ubo, float3 origin, float3 direction, 
                         vertices[indices[primitive * 3 + 1]].uv0 * barycentrics.x +
                         vertices[indices[primitive * 3 + 2]].uv0 * barycentrics.y;
             Texture2D baseColorTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + occluder.baseColorTextureIndex, 0));
-            if (baseColorTex.SampleLevel(samp, uv, 0).a * occluder.baseColorFactor.a < occluder.alphaCutoff)
+            if (baseColorTex.SampleLevel(samp, uv, RayAlphaTestLod).a * occluder.baseColorFactor.a < occluder.alphaCutoff)
                 continue;
         }
         query.CommitNonOpaqueTriangleHit();
@@ -131,7 +131,7 @@ bool traceRefractionRay(UniformBufferObject* ubo, float3 origin, float3 directio
         {
             const float2 uv = intersection_uv(surface, query.CandidatePrimitiveIndex(), query.CandidateTriangleBarycentrics());
             Texture2D baseColorTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + surface.baseColorTextureIndex, 0));
-            if (baseColorTex.SampleLevel(samp, uv, 0).a * surface.baseColorFactor.a < surface.alphaCutoff)
+            if (baseColorTex.SampleLevel(samp, uv, RayAlphaTestLod).a * surface.baseColorFactor.a < surface.alphaCutoff)
                 continue;
         }
         query.CommitNonOpaqueTriangleHit();

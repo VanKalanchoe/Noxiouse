@@ -212,7 +212,7 @@ bool trace_visibility(float3 origin, float3 direction, float maxDist)
         {
             float2 uv = intersection_uv(lut, primIndex, shadowQuery.CandidateTriangleBarycentrics());
             Texture2D tex = Texture2D.Handle(uint2(g_UBO->imageHeapIndexOffset + lut.baseColorTextureIndex, 0));
-            if (tex.SampleLevel(textureSampler, uv, 0).a >= lut.alphaCutoff)
+            if (tex.SampleLevel(textureSampler, uv, RayAlphaTestLod).a >= lut.alphaCutoff)
             {
                 shadowQuery.CommitNonOpaqueTriangleHit();
             }

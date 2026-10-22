@@ -22,7 +22,7 @@ bool screen_probe_candidate_blocks(UniformBufferObject* ubo, GpuRayTracingInstan
         const float2 uv = intersection_uv(instance, primitive, barycentrics);
         Texture2D tex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.baseColorTextureIndex, 0));
         SamplerState linearRepeat = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
-        alpha *= tex.SampleLevel(linearRepeat, uv, 0).a;
+        alpha *= tex.SampleLevel(linearRepeat, uv, RayAlphaTestLod).a;
     }
     return instance.alphaMode == 1 ? alpha >= instance.alphaCutoff : alpha >= 0.5;
 }

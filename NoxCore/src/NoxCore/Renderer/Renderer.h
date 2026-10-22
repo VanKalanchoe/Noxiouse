@@ -845,7 +845,6 @@ namespace Nox
         void createColorPyramidPipelines(bool forceCompile = false);
         void createParticlePipeline(bool forceCompile = false);
         void createOITCompositePipeline(bool forceCompile = false);
-        void createTransparencyCompositePipeline(bool forceCompile = false);
         // Render graph texture inspection
         void createTextureInspectPipeline(bool forceCompile = false);
         // GPU instance culling (InstanceCulling.slang: cull, count, offset, write, late) and the depth pyramid build
@@ -949,24 +948,18 @@ namespace Nox
         // The order-independent transparency targets of this frame (created on first use; the first writer clears them), and
         // their resolve over the HDR scene once everything transparent is in them.
         void ensureOITTargets();
-        // The lit scene so far with blur mips (resources.RefractionSource), for glass to refract: from the HDR scene, or (transparents
-        // after Ray Reconstruction) from the upscaled output.
-        void addRefractionSourcePasses(bool fromUpscaledOutput = false);
+        // The lit scene so far with blur mips (resources.RefractionSource), for glass to refract.
+        void addRefractionSourcePasses();
         // What a pass drawing forward surfaces over the scene reads and targets (after its own color target): entity IDs, depth,
         // fog, and for lit surfaces the GI, AO and TLAS they sample.
         void declareForwardInputs(RGBuilder& builder, bool lit);
-        // With DLSS Ray Reconstruction on the hybrid path, transparent surfaces are drawn after it (addTransparentsAfterRRPasses)
-        // instead of into its noisy input: RR's guides describe the opaque surface behind them, and glass refracting the raw ray
-        // traced lighting came out as noise RR could not resolve.
-        bool transparentsAfterRayReconstruction() const;
+        // How far this frame's jitter moves a point on screen, in uv (y down): from the jittered and the plain projection.
+        glm::vec2 jitterScreenOffsetUv() const;
         // Screen-probe GI's last frame (its history reprojection): the jittered projection and view it was drawn with, its jitter.
         glm::mat4 m_screenProbePrevProj{ 1.0f };
         glm::mat4 m_screenProbePrevView{ 1.0f };
         glm::vec2 m_screenProbePrevJitterUv{ 0.0f };
         bool m_screenProbePrevMatricesValid = false;
-        // How far this frame's jitter moves a point on screen, in uv (y down): from the jittered and the plain projection.
-        glm::vec2 jitterScreenOffsetUv() const;
-        void addTransparentsAfterRRPasses();
         // Whether the transparent buckets have draws this frame.
         bool hasTransparentDraws() const;
         void addOITCompositePass();
@@ -1061,7 +1054,6 @@ namespace Nox
         std::unique_ptr<NRI::Pipeline> m_unlitOITPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_transparentLitOITPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_oitCompositePipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_transparencyCompositePipeline = nullptr; // transparents after Ray Reconstruction
         std::unique_ptr<NRI::Pipeline> m_presentPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_computePipeline = nullptr;
 
@@ -1097,7 +1089,6 @@ namespace Nox
         uint64_t m_autoExposureLastFrame = 0;
         // ColorPyramid.slang: the refraction source of glass (copy, downsample).
         std::unique_ptr<NRI::Pipeline> m_colorPyramidCopyPipeline;
-        std::unique_ptr<NRI::Pipeline> m_colorPyramidCopyScaledPipeline;
         // Particles (SubmitParticles): this frame's, uploaded into a host-visible buffer per frame in flight.
         struct ParticleBatch
         {
@@ -1207,7 +1198,6 @@ namespace Nox
             bool occlusionRawAdded = false; // SSAO or RTAO wrote resources.SSAORaw this frame (never both)
             bool ssaoAdded = false;         // resources.SSAO (the blurred result) is valid this frame
             bool dlssAdded = false;
-            bool transparentsAfterRR = false; // the transparent surfaces wait for addTransparentsAfterRRPasses
             bool taaAdded = false;      // resources.TAAHistory[taaWriteIndex] holds this frame's anti-aliased scene
             uint32_t taaWriteIndex = 0;
             bool gbufferVelocityWritten = false;

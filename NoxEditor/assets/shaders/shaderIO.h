@@ -1039,8 +1039,10 @@ struct PushConstantHiZBuild
 STATIC_CONST uint32_t MESHLET_CULL_FRUSTUM = 1;     // PushConstantMeshlets.meshletCulling
 STATIC_CONST uint32_t MESHLET_COUNT_TRIANGLES = 2;  // PushConstantMeshlets.meshletCulling: add the drawn clusters to ClusterStats
 STATIC_CONST uint32_t MESHLET_SHADE_OPAQUE = 4;     // PushConstantMeshlets.meshletCulling: Material_TransparentLit_Mesh shades an opaque / masked surface (alpha 1, no transmission; the editor's extra views)
+// The mip the hybrid passes' rays read an alpha-masked surface's opacity at (shadows, AO, GI probes, glass): a leaf's cut-out shape
+// is the same 4x coarser, and full-resolution reads for every leaf a ray passes made looking into foliage expensive.
+STATIC_CONST float RayAlphaTestLod = 2.0;
 STATIC_CONST uint32_t MESHLET_RT_REFRACTION = 8;    // PushConstantMeshlets.meshletCulling: Material_TransparentLit_Mesh traces refraction rays for smooth glass (Hybrid_Renderer_Plan H3)
-STATIC_CONST uint32_t MESHLET_UNJITTERED = 16;      // PushConstantMeshlets.meshletCulling: Material_PBR_Mesh projects without the camera jitter (transparents drawn after DLSS Ray Reconstruction)
 
 struct PushConstantMeshlets
 {
@@ -1194,15 +1196,6 @@ struct PushConstantOITComposite
 {
     uint32_t accumIndex;
     uint32_t revealIndex;
-};
-
-// TransparencyComposite.slang: the transparent layer drawn after DLSS Ray Reconstruction over the upscaled image.
-struct PushConstantTransparencyComposite
-{
-    uint32_t layerIndex;       // sampled slot (heap offset included)
-    uint32_t padding;
-    vec2 inverseOutputSize;    // 1 / the upscaled image's size
-    vec2 jitterUv;             // the camera's jitter this frame, in the layer's uv (added: where an unjittered point is in it)
 };
 
 struct PushConstantSkybox
@@ -1571,9 +1564,7 @@ struct PushConstantColorPyramid
     uint32_t sourceMip;
     uint32_t width;        // of the mip being written
     uint32_t height;
-    // copyScaledMain: where in the source this frame's (jittered) pixel is, in uv: the jitter's screen offset, taken off.
-    float offsetU;
-    float offsetV;
+    uint32_t padding;
 };
 
 // TAA.slang: the engine's own temporal anti-aliasing (when DLSS does not run). Sampled slots with the image heap's offset added.

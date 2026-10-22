@@ -976,11 +976,9 @@ namespace Nox
         }
 
         // What the current mode makes these settings: the path tracer shades glass, blending and anti-aliasing itself; DLSS
-        // anti-aliases (TAA and the jitter switch then do nothing); with Ray Reconstruction the transparents are drawn after it,
-        // sorted (OIT does not apply). Settings that cannot apply are shown locked, with why.
+        // anti-aliases (TAA and the jitter switch then do nothing). Settings that cannot apply are shown locked, with why.
         const bool pathTracing = m_Renderer->isPathTracingEnabled();
         const bool dlssActive = m_Renderer->isDLSSSupported() && m_Renderer->isDLSSEnabled() && m_Renderer->getUpscaleMode() != NRI::UpscaleMode::Off;
-        const bool rayReconstructionActive = dlssActive && m_Renderer->isDLSSRayReconstructionSupported() && m_Renderer->isDLSSRayReconstructionEnabled();
         auto lockedReason = [](const char* reason)
         {
             ImGui::SameLine();
@@ -1010,7 +1008,7 @@ namespace Nox
         if (pathTracing)
             lockedReason("the path tracer refracts itself");
 
-        ImGui::BeginDisabled(pathTracing || rayReconstructionActive);
+        ImGui::BeginDisabled(pathTracing);
         bool oit = m_Renderer->getOITEnabled();
         if (ImGui::Checkbox("Order-Independent Transparency", &oit))
             m_Renderer->setOITEnabled(oit);
@@ -1019,12 +1017,10 @@ namespace Nox
                               "(weighted blended OIT), so overlapping layers (smoke, foliage cards) stop popping. It is an\n"
                               "approximation: overlapping layers average out, so solid-looking transparents (glass in front of\n"
                               "glass, thick leaves) look see-through. Off (sorted back to front) is usually better for glass.\n"
-                              "Not used by the path tracer or with Ray Reconstruction (transparents are drawn after it, sorted).");
+                              "Not used by the path tracer.");
         ImGui::EndDisabled();
         if (pathTracing)
             lockedReason("path tracer");
-        else if (rayReconstructionActive)
-            lockedReason("Ray Reconstruction: sorted after it");
 
         ImGui::BeginDisabled(dlssActive || pathTracing);
         bool taa = m_Renderer->getTAAEnabled();

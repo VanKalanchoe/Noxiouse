@@ -116,7 +116,7 @@
             {
                 float2 uv = intersection_uv(lut, primIndex, sq.CandidateTriangleBarycentrics());
                 Texture2D tex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + lut.baseColorTextureIndex, 0));
-                float4 intersectionColor = tex.SampleLevel(textureSampler, uv, 0);
+                float4 intersectionColor = tex.SampleLevel(textureSampler, uv, RayAlphaTestLod);
 
                 if (intersectionColor.a >= lut.alphaCutoff)
                 {
