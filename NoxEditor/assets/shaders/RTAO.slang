@@ -132,7 +132,7 @@ float trace_occlusion_ray(UniformBufferObject* ubo, float3 rayOrigin, float3 ray
         // trace_shadow_ray's) never sees it as anything but a solid occluder. Without this, anything visible
         // through or near glass (a display case, a window) went fully black: every AO ray toward it committed a
         // hit against the glass itself instead of continuing through to whatever is actually behind it.
-        if (lut.transmissionFactor >= SeeThroughTransmission)
+        if (ray_see_through(lut.transmissionFactor, lut.alphaMode))
         {
             continue;
         }
@@ -183,7 +183,10 @@ RTAOOutput fragMain(MSOutput input, uniform PushConstantRTAO pushConstant)
     float lenN = length(rawNormal);
     float3 N = lenN > 1e-6 ? (rawNormal / lenN) : float3(0.0, 1.0, 0.0);
 
-    float angle = hash12(float2(pixelCoord)) * 6.28318530718;
+    // The rotation changes every frame (with 4 rays a pixel, a pattern fixed to the screen slid over the surfaces as the camera moved:
+    // new noise every frame for the denoisers).
+    const float2 noiseSeed = float2(pixelCoord) + float(ubo->frameIndex % 64u) * float2(5.588238, 3.45367);
+    float angle = hash12(noiseSeed) * 6.28318530718;
     float3 up = abs(N.y) < 0.999 ? float3(0.0, 1.0, 0.0) : float3(1.0, 0.0, 0.0);
     float3 tangent0 = normalize(cross(up, N));
     float3 bitangent0 = cross(N, tangent0);
@@ -200,7 +203,11 @@ RTAOOutput fragMain(MSOutput input, uniform PushConstantRTAO pushConstant)
 
     for (uint i = 0; i < pushConstant.kernelSize; i++)
     {
-        float3 rayDir = normalize(mul(kernel[i].xyz, TBN));
+        // Cosine-weighted, stratified over the pixel's rays (the kernel's first entries were 4 fixed directions).
+        const float stratum = (float(i) + hash12(noiseSeed + float(i) * 17.17)) / float(max(pushConstant.kernelSize, 1u));
+        const float phi = frac(float(i) * 0.6180339887 + hash12(noiseSeed.yx + 3.7)) * 6.28318530718;
+        const float sinTheta = sqrt(saturate(stratum));
+        float3 rayDir = normalize(mul(float3(sinTheta * cos(phi), sinTheta * sin(phi), sqrt(saturate(1.0 - stratum))), TBN));
         float hitDist = trace_occlusion_ray(ubo, rayOrigin, rayDir, pushConstant.radius);
         if (hitDist >= 0.0)
         {

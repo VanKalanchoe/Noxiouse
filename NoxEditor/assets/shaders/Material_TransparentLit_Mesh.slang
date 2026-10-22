@@ -68,7 +68,7 @@ bool forwardShadowed(UniformBufferObject* ubo, float3 origin, float3 direction, 
     while (query.Proceed())
     {
         GpuRayTracingInstance occluder = rtInstances[query.CandidateRayInstanceCustomIndex()];
-        if (occluder.alphaMode == 2 || occluder.transmissionFactor >= SeeThroughTransmission)
+        if (occluder.alphaMode == 2 || ray_see_through(occluder.transmissionFactor, occluder.alphaMode))
             continue;
         if (occluder.alphaMode == 1 && occluder.baseColorTextureIndex != 0xFFFFFFFF)
         {
@@ -125,7 +125,7 @@ bool traceRefractionRay(UniformBufferObject* ubo, float3 origin, float3 directio
             continue;
         }
         GpuRayTracingInstance surface = rtInstances[candidate];
-        if (surface.alphaMode == 2 || surface.transmissionFactor >= SeeThroughTransmission)
+        if (surface.alphaMode == 2 || ray_see_through(surface.transmissionFactor, surface.alphaMode))
             continue;
         if (surface.alphaMode == 1 && surface.baseColorTextureIndex != 0xFFFFFFFF)
         {

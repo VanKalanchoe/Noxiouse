@@ -1047,9 +1047,19 @@ STATIC_CONST uint32_t MESHLET_SHADE_OPAQUE = 4;     // PushConstantMeshlets.mesh
 // through the glass path drew every leaf as glass: no depth, sorted per object (see-through foliage), ~60 ms looking at a tree.
 STATIC_CONST float SeeThroughTransmission = 0.5;
 
-// The mip the hybrid passes' rays read an alpha-masked surface's opacity at (shadows, AO, GI probes, glass): a leaf's cut-out shape
-// is the same 4x coarser, and full-resolution reads for every leaf a ray passes made looking into foliage expensive.
-STATIC_CONST float RayAlphaTestLod = 2.0;
+#ifdef __SLANG__
+// Whether rays of the hybrid passes go through a surface (and the raster path draws it as glass): see-through transmission and
+// not alpha-masked (masked leaves with transmission are cut-out solid surfaces). The same test as GpuScene's render bucket.
+bool ray_see_through(float transmission, uint alphaMode)
+{
+    return transmission >= SeeThroughTransmission && alphaMode != 1u;
+}
+#endif
+
+// The mip the hybrid passes' rays read an alpha-masked surface's opacity at (shadows, AO, GI probes, glass). Full resolution: thin
+// cut-outs (needles, small leaves) average below their cutoff in coarser mips, the rays then passed through the canopy and leaves
+// inside trees lit up in sunlit speckles.
+STATIC_CONST float RayAlphaTestLod = 0.0;
 STATIC_CONST uint32_t MESHLET_RT_REFRACTION = 8;    // PushConstantMeshlets.meshletCulling: Material_TransparentLit_Mesh traces refraction rays for smooth glass (Hybrid_Renderer_Plan H3)
 
 struct PushConstantMeshlets

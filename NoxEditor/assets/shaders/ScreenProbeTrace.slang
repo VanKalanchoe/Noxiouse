@@ -12,7 +12,7 @@
 // opaque on.
 bool screen_probe_candidate_blocks(UniformBufferObject* ubo, GpuRayTracingInstance instance, uint primitive, float2 barycentrics)
 {
-    if (instance.transmissionFactor >= SeeThroughTransmission)
+    if (ray_see_through(instance.transmissionFactor, instance.alphaMode))
         return false;
     if (instance.alphaMode == 0)
         return true;

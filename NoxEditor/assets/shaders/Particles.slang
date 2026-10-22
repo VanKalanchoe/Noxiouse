@@ -44,7 +44,7 @@ bool particleShadowed(UniformBufferObject* ubo, float3 origin, float3 direction)
     while (query.Proceed())
     {
         GpuRayTracingInstance occluder = rtInstances[query.CandidateRayInstanceCustomIndex()];
-        if (occluder.alphaMode == 2 || occluder.transmissionFactor >= SeeThroughTransmission)
+        if (occluder.alphaMode == 2 || ray_see_through(occluder.transmissionFactor, occluder.alphaMode))
             continue;
         query.CommitNonOpaqueTriangleHit();
     }

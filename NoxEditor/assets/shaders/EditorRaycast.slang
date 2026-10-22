@@ -29,7 +29,7 @@ void computeMain(uint3 tid : SV_DispatchThreadID, uniform PushConstantEditorRayc
     while (query.Proceed())
     {
         const GpuRayTracingInstance candidate = instances[query.CandidateRayInstanceCustomIndex()];
-        if (candidate.alphaMode != 2 && candidate.transmissionFactor < SeeThroughTransmission)
+        if (candidate.alphaMode != 2 && !ray_see_through(candidate.transmissionFactor, candidate.alphaMode))
             query.CommitNonOpaqueTriangleHit();
     }
     rays[tid.x].hitDistance = query.CommittedStatus() == COMMITTED_TRIANGLE_HIT ? query.CommittedRayT() : -1.0;

@@ -479,7 +479,8 @@ PSOutput fragMain(
 
         float NdotLRaw = dot(n, dir);
         float3 shadowNormal = n;
-        if (gbuffer_double_sided(materialSample.a) && NdotLRaw < 0.0)
+        const bool backLit = gbuffer_double_sided(materialSample.a) && NdotLRaw < 0.0;
+        if (backLit)
         {
             NdotLRaw = -NdotLRaw * gbuffer_back_light(materialSample.a);
             shadowNormal = -n;
@@ -493,7 +494,8 @@ PSOutput fragMain(
             continue;
 
         float NdotL = clamp(NdotLRaw, 0.001, 1.0);
-        float3 h = normalize(dir + v);
+        // Light through a leaf from behind is diffuse only (and dir + v may cancel: no half vector).
+        float3 h = backLit ? n : normalize(dir + v);
         PBRInfo pbrInputs;
         pbrInputs.NdotL = NdotL;
         pbrInputs.NdotV = NdotV;
@@ -512,7 +514,7 @@ PSOutput fragMain(
         float G = pbrGeometricOcclusion(pbrInputs);
         float D = pbrMicrofacetDistribution(pbrInputs);
         float3 diffuseContrib = (1.0 - F) * pbrDiffuse(pbrInputs);
-        float3 specContrib = F * G * D / max(4.0 * NdotL * NdotV, 1e-6);
+        float3 specContrib = backLit ? float3(0.0) : F * G * D / max(4.0 * NdotL * NdotV, 1e-6);
         float invPdf = isReservoirCandidate ? RTXDI_GetDIReservoirInvPdf(reservoir) : 1.0;
         float terminatorFade = saturate(NdotL * 10.0);
         float3 incoming = lightSample.radiance * (invPdf * NdotL * terminatorFade);

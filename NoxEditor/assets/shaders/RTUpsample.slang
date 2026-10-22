@@ -68,7 +68,7 @@ float4 fragMain(RTUpsampleVertex input, uniform PushConstantRTUpsample pushConst
 
     float4 sum = float4(0.0);
     float weightSum = 0.0;
-    float bestWeight = -1.0;
+    float bestWeight = 0.0; // nothing fits: the pixel's own block, not the first neighbour
     float4 best = source.Load(int3(block, 0));
     for (int dy = -1; dy <= 1; ++dy)
     {

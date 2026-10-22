@@ -559,8 +559,12 @@
             finalNormal = geomNormal;
         }
 
-        // Only flip normal if the material is explicitly DOUBLE-SIDED (e.g. foliage/cloth)
-        if (instance.doubleSided != 0 && dot(finalNormal, -viewDir) < 0.0)
+        // Only flip normal if the material is explicitly DOUBLE-SIDED (e.g. foliage/cloth). The side seen is the surface's own,
+        // not the normal-mapped normal's: on leaf cards seen at an angle the normal map tipped pixels over the view plane, they
+        // took the other side's normal and a leaf lit from behind read as lit from the front (sunlit speckles, flickering with
+        // the jitter). Flipping the mapped normal is flipping all three tangent axes.
+        const bool backFace = instance.doubleSided != 0 && dot(geomNormal, viewDir) > 0.0;
+        if (backFace)
         {
             finalNormal = -finalNormal;
         }
