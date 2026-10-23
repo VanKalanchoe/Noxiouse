@@ -1181,7 +1181,7 @@ namespace NRI
         tags.push_back(sl::ResourceTag(&mvec, sl::kBufferTypeMotionVectors, sl::ResourceLifecycle::eValidUntilEvaluate, &mvecExtent));
 
         // When Ray Reconstruction is enabled, tag G-Buffer Albedo, Specular Albedo, Normals, and Roughness
-        sl::Resource albedoRes{}, specularAlbedoRes{}, normalRes{}, roughnessRes{}, hitDistanceRes{}, specMotionRes{}, transparencyRes{};
+        sl::Resource albedoRes{}, specularAlbedoRes{}, normalRes{}, roughnessRes{}, hitDistanceRes{}, specMotionRes{}, transparencyRes{}, transparencyOpacityRes{};
         if (useRayReconstruction && params.albedo && params.normal &&
             (params.normalRoughnessPacked || params.roughness))
         {
@@ -1231,6 +1231,13 @@ namespace NRI
             {
                 transparencyRes = wrapTex(dynamic_cast<TextureVK*>(params.transparencyLayer));
                 tags.push_back(sl::ResourceTag(&transparencyRes, sl::kBufferTypeTransparencyLayer, sl::ResourceLifecycle::eValidUntilEvaluate, &inputExtent));
+                // Its opacity per channel (tinted glass): the layer's RGB is then the color, this the alpha (RaGaBa).
+                if (params.transparencyLayerOpacity)
+                {
+                    transparencyOpacityRes = wrapTex(dynamic_cast<TextureVK*>(params.transparencyLayerOpacity));
+                    tags.push_back(sl::ResourceTag(&transparencyOpacityRes, sl::kBufferTypeTransparencyLayerOpacity,
+                                                   sl::ResourceLifecycle::eValidUntilEvaluate, &inputExtent));
+                }
             }
         }
 

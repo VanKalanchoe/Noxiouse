@@ -57,6 +57,7 @@ namespace NRI
         // Transparent surfaces drawn instead of into the input color: premultiplied color, opacity in alpha (Streamline
         // kBufferTypeTransparencyLayer, DLSS-RR programming guide 4.1.10). Optional.
         Texture* transparencyLayer = nullptr;
+        Texture* transparencyLayerOpacity = nullptr; // its opacity per channel (kBufferTypeTransparencyLayerOpacity); optional
 
         glm::mat4 nonJitteredProj{ 1.0f };
         glm::mat4 view{ 1.0f };

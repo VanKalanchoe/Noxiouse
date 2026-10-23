@@ -263,19 +263,45 @@ struct FSOutputOIT
     int entityID : SV_TARGET2;
 };
 
-FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlets pushConstant);
+// layerOpacity: DLSS-RR's transparency layer only (MESHLET_TRANSPARENCY_LAYER) -- how much of the scene behind it the surface hides,
+// per channel (1 - what it lets through, tinted by its base color); negative otherwise.
+FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlets pushConstant, out float3 layerOpacity);
 
 [shader("fragment")]
 FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform PushConstantMeshlets pushConstant)
 {
-    return shadeTransparent(vertIn, isFrontFace, pushConstant);
+    float3 layerOpacity;
+    return shadeTransparent(vertIn, isFrontFace, pushConstant, layerOpacity);
+}
+
+// DLSS-RR's transparency layer (Renderer::addRRTransparencyLayerPass): the color with one opacity for blending the glass over
+// glass, and the opacity per channel (Streamline kBufferTypeTransparencyLayerOpacity) -- a tinted pane (the wall lamps' warm glass)
+// tints the scene behind it, as the path tracer has it; one channel lost the tint.
+struct FSOutputLayer
+{
+    float4 color : SV_TARGET0;
+    int entityID : SV_TARGET1;
+    float4 opacity : SV_TARGET2;
+};
+
+[shader("fragment")]
+FSOutputLayer fragMainLayer(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform PushConstantMeshlets pushConstant)
+{
+    float3 layerOpacity;
+    const FSOutput shaded = shadeTransparent(vertIn, isFrontFace, pushConstant, layerOpacity);
+    FSOutputLayer output;
+    output.color = shaded.color;
+    output.entityID = shaded.entityID;
+    output.opacity = float4(all(layerOpacity >= 0.0) ? layerOpacity : float3(shaded.color.a), 1.0);
+    return output;
 }
 
 // Order-independent transparency (Renderer::setOITEnabled): the same surface into the weighted blended targets.
 [shader("fragment")]
 FSOutputOIT fragMainOIT(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform PushConstantMeshlets pushConstant)
 {
-    const FSOutput shaded = shadeTransparent(vertIn, isFrontFace, pushConstant);
+    float3 layerOpacity;
+    const FSOutput shaded = shadeTransparent(vertIn, isFrontFace, pushConstant, layerOpacity);
     UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
     const OITOutput oit = oit_output(shaded.color, length(vertIn.worldPos - ubo->cameraWorldPos.xyz) / ubo->unitsPerMeter);
     FSOutputOIT output;
@@ -285,9 +311,10 @@ FSOutputOIT fragMainOIT(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, unif
     return output;
 }
 
-FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlets pushConstant)
+FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlets pushConstant, out float3 layerOpacity)
 {
     FSOutput output;
+    layerOpacity = float3(-1.0);
 
     UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
     SceneInstances instances = SceneInstances(ubo);
@@ -701,14 +728,16 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     }
 
     // DLSS-RR's transparency layer (MESHLET_TRANSPARENCY_LAYER, Renderer::addRRTransparencyLayerPass): the light the surface gives
-    // itself, premultiplied, and in alpha how much of the scene behind it hides -- all but what it lets through, weighed as the
-    // refraction above weighs it (the transmission past the Fresnel reflection, through the base color; one channel, the average).
-    // RR composites it over the scene it denoised: color + (1 - alpha) * scene.
+    // itself, premultiplied, and how much of the scene behind it hides -- all but what it lets through, weighed as the refraction
+    // above weighs it (the transmission past the Fresnel reflection, through the base color), per channel in layerOpacity (RR's
+    // opacity layer) and their average in alpha (glass over glass). RR composites it over the scene it denoised:
+    // color + (1 - opacity) * scene.
     if ((pushConstant.meshletCulling & MESHLET_TRANSPARENCY_LAYER) != 0)
     {
         const float3 fresnel = specularEnvironmentR0 + (1.0 - specularEnvironmentR0) * pow(1.0 - NdotV, 5.0);
-        const float3 throughput = baseColor.rgb * (transmission * (1.0 - metallic)) * (1.0 - fresnel);
-        output.color = float4(color * coverage, coverage * (1.0 - saturate(dot(throughput, float3(1.0 / 3.0)))));
+        const float3 throughput = saturate(baseColor.rgb * (transmission * (1.0 - metallic)) * (1.0 - fresnel));
+        layerOpacity = coverage * (1.0 - throughput);
+        output.color = float4(color * coverage, dot(layerOpacity, float3(1.0 / 3.0)));
         output.entityID = vertIn.entityID;
         return output;
     }

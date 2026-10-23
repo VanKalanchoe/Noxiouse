@@ -1009,8 +1009,9 @@ namespace Nox
         void drawMeshletBucket(NRI::CommandBuffer& cmd, MeshletDrawCursor& cursor, RenderBucket bucket, NRI::Pipeline& pipeline, NRI::CullMode cullMode, bool depthWrite, bool blendEnable) const;
         // The transparent buckets (both culling phases), blended over the HDR scene; the cursor carries the SSAO and refraction slots.
         // With `oit` into the order-independent transparency targets instead (accumulation, revealage, entity IDs).
+        // With `rrLayer` into DLSS-RR's transparency layer instead (color, entity IDs, opacity per channel; lit surfaces only).
         void drawForwardTransparent(NRI::CommandBuffer& cmd, const RGPassContext& context, const ViewDrawResources& draws, MeshletDrawCursor& cursor,
-                                    bool oit = false) const;
+                                    bool oit = false, bool rrLayer = false) const;
         // Draw list entries of a bucket (its visible instances are at most that many).
         uint32_t getBucketEntryCount(RenderBucket bucket) const
         {
@@ -1064,6 +1065,8 @@ namespace Nox
         // The same fragments into the order-independent transparency targets (accumulation, revealage, entity IDs).
         std::unique_ptr<NRI::Pipeline> m_unlitOITPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_transparentLitOITPipeline = nullptr;
+        // ...and into DLSS-RR's transparency layer (color, entity IDs, opacity per channel).
+        std::unique_ptr<NRI::Pipeline> m_transparentLitLayerPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_oitCompositePipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_presentPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_computePipeline = nullptr;

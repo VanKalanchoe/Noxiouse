@@ -736,9 +736,10 @@ namespace Nox
                getBucketEntryCount(RenderBucket::TransparentUnlit) > 0 || getBucketEntryCount(RenderBucket::TransparentUnlitDoubleSided) > 0;
     }
 
-    void Renderer::drawForwardTransparent(NRI::CommandBuffer& cmd, const RGPassContext& context, const ViewDrawResources& draws, MeshletDrawCursor& cursor, bool oit) const
+    void Renderer::drawForwardTransparent(NRI::CommandBuffer& cmd, const RGPassContext& context, const ViewDrawResources& draws, MeshletDrawCursor& cursor, bool oit,
+                                          bool rrLayer) const
     {
-        NRI::Pipeline* litPipeline = oit ? m_transparentLitOITPipeline.get() : m_transparentLitPipeline.get();
+        NRI::Pipeline* litPipeline = oit ? m_transparentLitOITPipeline.get() : (rrLayer ? m_transparentLitLayerPipeline.get() : m_transparentLitPipeline.get());
         NRI::Pipeline* unlitPipeline = oit ? m_unlitOITPipeline.get() : m_unlitPipeline.get();
         if (!unlitPipeline || !litPipeline || !hasTransparentDraws())
             return;
@@ -777,6 +778,15 @@ namespace Nox
             cmd.setColorBlendEquation(0, blendEquation);
             cmd.setColorBlendEnable(1, false);
             cmd.setColorWriteMask(1, NRI::ColorComponent::All);
+            if (rrLayer)
+            {
+                // The opacity per channel, glass over glass: what is left of the scene behind multiplies (1 - opacity) per channel.
+                cmd.setColorBlendEnable(2, true);
+                cmd.setColorWriteMask(2, NRI::ColorComponent::All);
+                cmd.setColorBlendEquation(2, {
+                    .srcColorBlendFactor = NRI::BlendFactor::One, .dstColorBlendFactor = NRI::BlendFactor::OneMinusSrcColor, .colorBlendOp = NRI::BlendOp::Add,
+                    .srcAlphaBlendFactor = NRI::BlendFactor::One, .dstAlphaBlendFactor = NRI::BlendFactor::Zero, .alphaBlendOp = NRI::BlendOp::Add });
+            }
         }
 
         // Non-unlit Blend objects get real shading (same BRDF/IBL as the deferred opaque path, via
@@ -788,8 +798,11 @@ namespace Nox
         // each other and wash the result out.
         drawMeshletBucket(cmd, cursor, RenderBucket::Transparent, *litPipeline, NRI::CullMode::Back, false, true);
         drawMeshletBucket(cmd, cursor, RenderBucket::TransparentDoubleSided, *litPipeline, NRI::CullMode::None, false, true);
-        drawMeshletBucket(cmd, cursor, RenderBucket::TransparentUnlit, *unlitPipeline, NRI::CullMode::Back, false, true);
-        drawMeshletBucket(cmd, cursor, RenderBucket::TransparentUnlitDoubleSided, *unlitPipeline, NRI::CullMode::None, false, true);
+        if (!rrLayer) // unlit surfaces are never see-through (no transmission), and their pipeline has no opacity target
+        {
+            drawMeshletBucket(cmd, cursor, RenderBucket::TransparentUnlit, *unlitPipeline, NRI::CullMode::Back, false, true);
+            drawMeshletBucket(cmd, cursor, RenderBucket::TransparentUnlitDoubleSided, *unlitPipeline, NRI::CullMode::None, false, true);
+        }
 
         MeshletDrawCursor lateCursor = beginMeshletDraws(context, draws, true);
         lateCursor.boundPipeline = cursor.boundPipeline;
@@ -800,13 +813,18 @@ namespace Nox
         lateCursor.taskFlags = cursor.taskFlags;
         drawMeshletBucket(cmd, lateCursor, RenderBucket::Transparent, *litPipeline, NRI::CullMode::Back, false, true);
         drawMeshletBucket(cmd, lateCursor, RenderBucket::TransparentDoubleSided, *litPipeline, NRI::CullMode::None, false, true);
-        drawMeshletBucket(cmd, lateCursor, RenderBucket::TransparentUnlit, *unlitPipeline, NRI::CullMode::Back, false, true);
-        drawMeshletBucket(cmd, lateCursor, RenderBucket::TransparentUnlitDoubleSided, *unlitPipeline, NRI::CullMode::None, false, true);
+        if (!rrLayer)
+        {
+            drawMeshletBucket(cmd, lateCursor, RenderBucket::TransparentUnlit, *unlitPipeline, NRI::CullMode::Back, false, true);
+            drawMeshletBucket(cmd, lateCursor, RenderBucket::TransparentUnlitDoubleSided, *unlitPipeline, NRI::CullMode::None, false, true);
+        }
         cursor.boundPipeline = lateCursor.boundPipeline;
 
         cmd.setColorBlendEnable(0, false);
         if (oit)
             cmd.setColorBlendEnable(1, false);
+        if (rrLayer)
+            cmd.setColorBlendEnable(2, false);
         cmd.setDepthWriteEnable(true);
     }
 
@@ -1294,7 +1312,8 @@ namespace Nox
     {
         FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
 
-        // The glass into DLSS-RR's transparency layer (Streamline kBufferTypeTransparencyLayer, tagged in addDLSSPass): at render
+        // The glass into DLSS-RR's transparency layer (Streamline kBufferTypeTransparencyLayer and kBufferTypeTransparencyLayerOpacity,
+        // tagged in addDLSSPass): at render
         // resolution with the jitter, depth tested against the scene, back to front, premultiplied -- what the glass itself gives
         // (its reflection) and how much of the scene behind it hides (MESHLET_TRANSPARENCY_LAYER, Material_TransparentLit_Mesh.slang).
         // The scene behind is RR's input color, denoised with its own guides; RR composites the layer over it.
@@ -1302,7 +1321,8 @@ namespace Nox
             [&](RGBuilder& builder)
             {
                 builder.ColorTarget(resources.RRTransparencyLayer, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
-                declareForwardInputs(builder, true);
+                declareForwardInputs(builder, true); // the entity IDs (attachment 1), the scene's depth
+                builder.ColorTarget(resources.RRTransparencyOpacity, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
             },
             [this, res = &resources](RGPassContext& context)
             {
@@ -1312,7 +1332,7 @@ namespace Nox
                 cursor.references.ssaoTextureIndex = m_frame.ssaoAdded ? context.Slot(res->SSAO) : 0xFFFFFFFF;
                 if (m_rtRefractionEnabled && m_rayTracingEnabled)
                     cursor.taskFlags |= shaderio::MESHLET_RT_REFRACTION; // the smooth glass's traced reflection
-                drawForwardTransparent(cmd, context, res->CameraDraws, cursor);
+                drawForwardTransparent(cmd, context, res->CameraDraws, cursor, false, true);
             });
     }
 
