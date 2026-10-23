@@ -105,6 +105,11 @@ namespace Nox
         float DiffuseTransmission = 0.0f;
         // shaderio::PathTracer* flags (thin surface, excluded from shadow rays, from an RTXPT material file).
         uint32_t PathTracerFlags = 0;
+        // Depth bias (as HDRP's Mesh Decal View Bias, the decal materials' depth offset of the engine the Bistro came from): the
+        // rasterizer draws the surface this much closer to the camera along the view ray, in world units, so geometry modelled onto
+        // another surface (decals, trims, overlay layers lying in its plane) shows over it instead of z-fighting. Where it lands on
+        // screen does not change. 0: none.
+        float DepthBias = 0.0f;
 
         // Alpha properties
         AlphaMode Mode = AlphaMode::Opaque;

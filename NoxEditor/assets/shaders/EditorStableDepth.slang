@@ -73,7 +73,8 @@ void meshMain
             localPos = mul(skinTransform, localPos);
         }
 
-        vertices[i].pos = coplanar_depth_priority(mul(viewProj, mul(modelMatrix, localPos)), instance.depthPriority); // as the visibility pass
+        const float4 worldPos = mul(modelMatrix, localPos);
+        vertices[i].pos = depth_bias_clip(mul(viewProj, worldPos), worldPos.xyz, ubo->cameraWorldPos.xyz, instance.depthBias); // as the visibility pass
         vertices[i].uv0 = vert.uv0;
         vertices[i].uv1 = vert.uv1;
         vertices[i].drawID = sharedPayload.drawID;

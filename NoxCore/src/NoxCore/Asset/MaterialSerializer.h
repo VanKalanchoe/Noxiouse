@@ -57,6 +57,7 @@ namespace Nox
             stream.write(reinterpret_cast<const char*>(&material.AttenuationDistance), sizeof(float));
             stream.write(reinterpret_cast<const char*>(&material.DiffuseTransmission), sizeof(float));
             stream.write(reinterpret_cast<const char*>(&material.PathTracerFlags), sizeof(uint32_t));
+            stream.write(reinterpret_cast<const char*>(&material.DepthBias), sizeof(float));
             return stream.good();
         }
 
@@ -124,7 +125,13 @@ namespace Nox
                     // Written since the path tracer flags: older files end before them (none).
                     uint32_t pathTracerFlags = 0;
                     if (stream.read(reinterpret_cast<char*>(&pathTracerFlags), sizeof(uint32_t)))
+                    {
                         material.PathTracerFlags = pathTracerFlags;
+                        // Written since the depth bias: older files end before it (none).
+                        float depthBias = 0.0f;
+                        if (stream.read(reinterpret_cast<char*>(&depthBias), sizeof(float)))
+                            material.DepthBias = depthBias;
+                    }
                 }
             }
             stream.clear();

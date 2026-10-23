@@ -105,6 +105,11 @@ namespace Nox
         changed |= ImGui::SliderFloat("Diffuse Transmission", &data.DiffuseTransmission, 0.0f, 1.0f);
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("Light through a thin surface to its other side (leaves, cloth, paper, lampshades). Make it double sided.");
+        changed |= ImGui::DragFloat("Depth Bias", &data.DepthBias, 0.0005f, 0.0f, 1.0f, "%.4f");
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Drawn this much closer to the camera (world units), where it lands on screen unchanged: for geometry\n"
+                              "modelled onto another surface -- decals, trims, overlay layers lying in its plane -- that would\n"
+                              "otherwise z-fight with it. A few millimetres are enough. 0: none.");
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("World units (scaled with the model). 0: no absorption.");
 

@@ -80,8 +80,8 @@
             }
 
             float4 worldPos = mul(modelMatrix, localPos);
-            // Of two surfaces in the same plane, the one with the higher depth priority in front (coplanar_depth_priority).
-            float4 clipPos = coplanar_depth_priority(mul(viewProj, worldPos), instance.depthPriority);
+            // The material's depth bias (depth_bias_clip): decals and overlays over the surface they lie on.
+            float4 clipPos = depth_bias_clip(mul(viewProj, worldPos), worldPos.xyz, ubo->cameraWorldPos.xyz, instance.depthBias);
             vertices[i].pos = clipPos;
             vertices[i].uv0 = vert.uv0;
             vertices[i].uv1 = vert.uv1;
