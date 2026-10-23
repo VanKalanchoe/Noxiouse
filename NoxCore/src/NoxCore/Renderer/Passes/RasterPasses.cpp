@@ -797,6 +797,9 @@ namespace Nox
         lateCursor.references.ssaoTextureIndex = cursor.references.ssaoTextureIndex;
         lateCursor.references.refractionTextureIndex = cursor.references.refractionTextureIndex;
         lateCursor.references.coverageDepthTextureIndex = cursor.references.coverageDepthTextureIndex;
+        // The pass's flags too (after RR: the jitter-free projection, the coverage test, glass only): the instances that came into
+        // view this frame were drawn with the jitter and without any depth test, over walls and whatever stood in front.
+        lateCursor.taskFlags = cursor.taskFlags;
         drawMeshletBucket(cmd, lateCursor, RenderBucket::Transparent, *litPipeline, NRI::CullMode::Back, false, true);
         drawMeshletBucket(cmd, lateCursor, RenderBucket::TransparentDoubleSided, *litPipeline, NRI::CullMode::None, false, true);
         drawMeshletBucket(cmd, lateCursor, RenderBucket::TransparentUnlit, *unlitPipeline, NRI::CullMode::Back, false, true);
@@ -1068,8 +1071,10 @@ namespace Nox
                          hasTransparentDraws();
         // Under DLSS Ray Reconstruction the transparent surfaces are drawn over its output instead (addTransparentAfterUpscalePass): RR
         // denoises what is behind them with that surface's own guides and motion, and their reflections are not dragged along by it.
+        // Glass only (MESHLET_SEE_THROUGH_ONLY); decals and other blended surfaces stay in RR's input (MESHLET_SKIP_SEE_THROUGH): they
+        // lie on the surface its guides describe, and drawn after it they read the render resolution's jittered lighting and crawled.
         const bool afterUpscale = !pathTraced && !oit && hasDraws && uniformData.rayReconstructionActive != 0 && m_stableEntityDepthPipeline &&
-                                  hasTransparentDraws();
+                                  hasTransmissiveDraws();
         m_frame.transparentAfterUpscale = afterUpscale;
 
         // Shared setup of the passes that draw over the lit scene.
@@ -1156,9 +1161,12 @@ namespace Nox
                     cmd.drawMeshTasks(1, 1, 1);
                 }
 
-                // C. TRANSPARENT FORWARD PASS (Back-to-front sorted, Alpha Blending), here unless glass needs the scene first.
-                if (hasDraws && !refraction && !oit && !pathTraced && !afterUpscale)
+                // C. TRANSPARENT FORWARD PASS (Back-to-front sorted, Alpha Blending), here unless glass needs the scene first. Under
+                // DLSS-RR with glass in the scene, everything but the glass (drawn after RR).
+                if (hasDraws && !oit && !pathTraced && (!refraction || afterUpscale))
                 {
+                    if (afterUpscale)
+                        cursor.taskFlags |= shaderio::MESHLET_SKIP_SEE_THROUGH;
                     // Whichever of SSAO/RTAO ran this frame (never both -- see Renderer::m_ssaoEnabled), for the
                     // specular occlusion approximation in Material_TransparentLit_Mesh.slang; every other consumer
                     // of this cursor's push constant (unlit, skybox, opaque) never reads the field.
@@ -1332,7 +1340,7 @@ namespace Nox
                 cmd.bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
                 MeshletDrawCursor cursor = beginMeshletDraws(context, res->CameraDraws);
                 cursor.taskFlags &= ~shaderio::MESHLET_COUNT_TRIANGLES; // the stats count the render-resolution passes
-                cursor.taskFlags |= shaderio::MESHLET_AFTER_UPSCALE;
+                cursor.taskFlags |= shaderio::MESHLET_AFTER_UPSCALE | shaderio::MESHLET_SEE_THROUGH_ONLY;
                 cursor.references.ssaoTextureIndex = 0xFFFFFFFF;
                 if (refraction)
                 {

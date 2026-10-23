@@ -1156,6 +1156,11 @@ STATIC_CONST uint32_t MESHLET_RT_REFRACTION = 8;    // PushConstantMeshlets.mesh
 // PushConstantMeshlets.meshletCulling: drawn over the upscaled image at display resolution (transparent surfaces after DLSS Ray
 // Reconstruction, Renderer::addTransparentAfterUpscalePass): the non-jittered projection, what is behind already denoised.
 STATIC_CONST uint32_t MESHLET_AFTER_UPSCALE = 16;
+// PushConstantMeshlets.meshletCulling, the task stage: only the instances that are see-through (ray_see_through: glass), or all but
+// them. Under DLSS-RR only glass is drawn over its output (the scene behind it is denoised with that scene's guides); decals and other
+// blended surfaces lie on the surface RR's guides describe and go into its input as before.
+STATIC_CONST uint32_t MESHLET_SEE_THROUGH_ONLY = 32;
+STATIC_CONST uint32_t MESHLET_SKIP_SEE_THROUGH = 64;
 
 struct PushConstantMeshlets
 {

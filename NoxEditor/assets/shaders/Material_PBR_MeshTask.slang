@@ -48,7 +48,12 @@ void taskMain
     uint8_t threadOffset = (uint8_t)gtid.x;
     uint localMeshletIdx = (gid.x * TASK_SHADER_DISPATCH_X) + threadOffset;
 
-    if (localMeshletIdx < totalMeshlets)
+    // Glass only, or all but glass (MESHLET_SEE_THROUGH_ONLY / MESHLET_SKIP_SEE_THROUGH): the whole instance.
+    const bool seeThrough = ray_see_through(instance.transmissionFactor, instance.alphaMode);
+    const bool instanceDrawn = !((pushConstant.meshletCulling & MESHLET_SEE_THROUGH_ONLY) != 0 && !seeThrough) &&
+                               !((pushConstant.meshletCulling & MESHLET_SKIP_SEE_THROUGH) != 0 && seeThrough);
+
+    if (instanceDrawn && localMeshletIdx < totalMeshlets)
     {
         // The bounds stream holds this mesh's meshlets in the same order as its draws, from its own offset.
         MeshletBounds* meshletBounds = &((MeshletBounds*)ubo->geometryMeshletBoundsReference)[instance.boundsOffset + localMeshletIdx];
