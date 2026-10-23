@@ -108,7 +108,8 @@ namespace Nox
         // Depth bias (as HDRP's Mesh Decal View Bias, the decal materials' depth offset of the engine the Bistro came from): the
         // rasterizer draws the surface this much closer to the camera along the view ray, in world units, so geometry modelled onto
         // another surface (decals, trims, overlay layers lying in its plane) shows over it instead of z-fighting. Where it lands on
-        // screen does not change. 0: none.
+        // screen does not change. Tiny: just past the rounding between the two (~0.05 mm) -- the Bistro's edge decals have other
+        // details 1.7 mm in front of them, which a millimetre of bias jumped over. 0: none.
         float DepthBias = 0.0f;
 
         // Alpha properties
