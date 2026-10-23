@@ -1,0 +1,38 @@
+Scene: LevelStreamingTest_VolumeLevel
+Entities:
+  - Entity: 17551409910611439237
+    TagComponent:
+      Tag: LST_VolumeMarker
+    TransformComponent:
+      Translation: [0, 100, -1500]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    ScriptComponent:
+      Classes: [Facerun.LevelStreamingTestBox]
+      EntityReferences: []
+      FieldOverrides:
+        - Class: Facerun.LevelStreamingTestBox
+          Field: Size
+          Type: Vector3
+          Value: [100, 100, 100]
+        - Class: Facerun.LevelStreamingTestBox
+          Field: Color
+          Type: Vector3
+          Value: [0.1, 0.8, 0.15]
+        - Class: Facerun.LevelStreamingTestBox
+          Field: SpinSpeed
+          Type: Float
+          Value: 1.0
+  - Entity: 9860805077085376152
+    TagComponent:
+      Tag: LST_VolumeLight
+    TransformComponent:
+      Translation: [0, 300, -1500]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    PointLightComponent:
+      Color: [0.4, 1.0, 0.4]
+      Intensity: 20
+      Range: 1500
+      Radius: 5
+      ShadowSamples: 1

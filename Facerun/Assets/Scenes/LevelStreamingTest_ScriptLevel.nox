@@ -1,0 +1,48 @@
+Scene: LevelStreamingTest_ScriptLevel
+Entities:
+  - Entity: 14275312527830037536
+    TagComponent:
+      Tag: LST_ScriptMarker
+    TransformComponent:
+      Translation: [500, 100, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    ScriptComponent:
+      Classes: [Facerun.LevelStreamingTestBox]
+      EntityReferences: []
+      FieldOverrides:
+        - Class: Facerun.LevelStreamingTestBox
+          Field: Size
+          Type: Vector3
+          Value: [100, 100, 100]
+        - Class: Facerun.LevelStreamingTestBox
+          Field: Color
+          Type: Vector3
+          Value: [0.1, 0.3, 0.9]
+        - Class: Facerun.LevelStreamingTestBox
+          Field: SpinSpeed
+          Type: Float
+          Value: 1.5
+  - Entity: 17464701659054367335
+    TagComponent:
+      Tag: LST_ScriptPillar
+    TransformComponent:
+      Translation: [700, 150, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    ScriptComponent:
+      Classes: [Facerun.LevelStreamingTestBox]
+      EntityReferences: []
+      FieldOverrides:
+        - Class: Facerun.LevelStreamingTestBox
+          Field: Size
+          Type: Vector3
+          Value: [40, 300, 40]
+        - Class: Facerun.LevelStreamingTestBox
+          Field: Color
+          Type: Vector3
+          Value: [0.9, 0.9, 0.95]
+        - Class: Facerun.LevelStreamingTestBox
+          Field: Emissive
+          Type: Vector3
+          Value: [0.2, 0.4, 2.0]

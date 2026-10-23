@@ -1,0 +1,97 @@
+Scene: LevelStreamingTest
+Entities:
+  - Entity: 12301638962035380585
+    TagComponent:
+      Tag: Camera
+    TransformComponent:
+      Translation: [0, 170, 800]
+      Rotation: [-0.1, 0, 0]
+      Scale: [1, 1, 1]
+    CameraComponent:
+      Camera:
+        ProjectionType: 0
+        PerspectiveFOV: 0.785398
+        PerspectiveNear: 10
+        PerspectiveFar: 100000
+        OrthographicSize: 10
+        OrthographicNear: -1
+        OrthographicFar: 1
+      Primary: true
+      FixedAspectRatio: false
+    ScriptComponent:
+      Classes: [Facerun.WASDMovement, Facerun.LevelStreamingTest]
+      EntityReferences: []
+      FieldOverrides:
+        - Class: Facerun.WASDMovement
+          Field: Speed
+          Type: Float
+          Value: 500
+  - Entity: 17643008941389581404
+    TagComponent:
+      Tag: Sky
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    EnvironmentLightComponent:
+      Source: ProceduralSky
+      Enabled: true
+  - Entity: 10706950599296957191
+    TagComponent:
+      Tag: Sun
+    TransformComponent:
+      Translation: [0, 500, 0]
+      Rotation: [-0.9, 0.5, 0]
+      Scale: [1, 1, 1]
+    DirectionalLightComponent:
+      Color: [1, 1, 1]
+      Intensity: 10
+  - Entity: 13450079065822543469
+    TagComponent:
+      Tag: Streaming Volume
+    TransformComponent:
+      Translation: [0, 150, -1500]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    LevelStreamingVolumeComponent:
+      Levels: [16839752642391074200]
+      HalfExtents: [400, 300, 400]
+      UnloadDelay: 1
+  - Entity: 12675711417513729733
+    TagComponent:
+      Tag: Ground
+    TransformComponent:
+      Translation: [0, -10, -1000]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    ScriptComponent:
+      Classes: [Facerun.LevelStreamingTestBox]
+      EntityReferences: []
+      FieldOverrides:
+        - Class: Facerun.LevelStreamingTestBox
+          Field: Size
+          Type: Vector3
+          Value: [6000, 20, 6000]
+        - Class: Facerun.LevelStreamingTestBox
+          Field: Color
+          Type: Vector3
+          Value: [0.45, 0.45, 0.45]
+  - Entity: 10002348507010671299
+    TagComponent:
+      Tag: Volume Pad
+    TransformComponent:
+      Translation: [0, 1, -1500]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    ScriptComponent:
+      Classes: [Facerun.LevelStreamingTestBox]
+      EntityReferences: []
+      FieldOverrides:
+        - Class: Facerun.LevelStreamingTestBox
+          Field: Size
+          Type: Vector3
+          Value: [800, 2, 800]
+        - Class: Facerun.LevelStreamingTestBox
+          Field: Color
+          Type: Vector3
+          Value: [1.0, 0.45, 0.05]

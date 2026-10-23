@@ -11483,3 +11483,15 @@ AssetRegistry:
     FilePath: Models/bistro/Materials/bistro_LMBR_0000181_stone.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_0000181_stone.nmat
     Type: AssetType::Material
+  - Handle: 17039033206911107105
+    FilePath: Scenes/LevelStreamingTest.nox
+    SourceFilePath: Scenes/LevelStreamingTest.nox
+    Type: AssetType::Scene
+  - Handle: 16839752642391074200
+    FilePath: Scenes/LevelStreamingTest_VolumeLevel.nox
+    SourceFilePath: Scenes/LevelStreamingTest_VolumeLevel.nox
+    Type: AssetType::Scene
+  - Handle: 11131421571772944526
+    FilePath: Scenes/LevelStreamingTest_ScriptLevel.nox
+    SourceFilePath: Scenes/LevelStreamingTest_ScriptLevel.nox
+    Type: AssetType::Scene

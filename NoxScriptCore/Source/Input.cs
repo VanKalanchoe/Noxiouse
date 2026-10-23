@@ -4,7 +4,10 @@ public enum KeyCode
 {
     A = 4,
     D = 7,
+    L = 15,
     S = 22,
+    T = 23,
+    U = 24,
     W = 26,
     Space = 44,
     LeftShift = 225

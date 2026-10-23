@@ -1110,6 +1110,13 @@ own, loaded **additively** into the running scene and unloaded again.
 - **Scripts:** `Scene.LoadLevel("Levels/Interior.nox")`, `UnloadLevel`, `GetLevelState`, `IsLevelLoaded` (script API version 3).
 - **Packaging:** a level a volume names is a handle in the scene file, one a script names a path in its source: both are collected
   as dependencies already.
+- **Volumes own their levels:** a level any volume names is unloaded once the source has been outside those volumes for the delay,
+  also when a script loaded it. Levels a script loads and unloads itself are levels no volume names.
+- **Test:** Facerun's `Scenes/LevelStreamingTest.nox`. In Play its camera's `LevelStreamingTest` script checks a script level
+  (load, state Loading then Loaded, its entities and their script running, unload, load and unload in one frame) and a volume level
+  (the camera moved into the volume, out again, the level staying for its Unload Delay, then gone) and logs each check and
+  `[LevelStreamingTest] PASS` / `FAIL`; T runs it again, L / U load and unload the script level by hand, and WASD flies the camera
+  into the orange pad (the volume). The levels' boxes are meshes their script builds, so the test needs no imported asset.
 - Not yet: editing several levels together in the editor (Unreal's Levels window -- each level is edited as the scene it is), a level
   shown only once complete (its entities appear over the frames it loads), streaming sources other than the camera, level transforms.
 
