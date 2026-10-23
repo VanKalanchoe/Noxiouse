@@ -20,17 +20,19 @@ static const uint ScreenProbeRayCount = ScreenProbeRayRes * ScreenProbeRayRes;
 static const uint ScreenProbeIrradianceInterior = 6; // octahedral irradiance per probe: 6 x 6 and a 1-texel border
 static const uint ScreenProbeIrradianceRes = ScreenProbeIrradianceInterior + 2;
 static const float ScreenProbePi = 3.14159265359;
-// Emissive meshes as lights (PathTracer/EmissiveLights.slang): every other ray texel across, every fourth down (8 a probe), samples a point on
-// one and traces a shadow ray to it, into a second target (ScreenProbeTrace): rgb its light's share of the probe's irradiance / pi
+// Emissive meshes as lights (PathTracer/EmissiveLights.slang): every ray texel (64 a probe) samples a point on one and traces a
+// shadow ray to it, into a second target (ScreenProbeTrace): rgb its light's share of the probe's irradiance / pi
 // before the cosine, a its direction (octahedral, 12 bits each way, exact in a float). The irradiance pass adds them with the
 // cosine; the rays leave the emission of those meshes out (counted once). A lamp is a tiny target for 64 random rays: only this
-// way does it light the street under it.
-static const uint ScreenProbeEmissiveSamples = 8;
+// way does it light the street under it. 8 a probe (one ray texel in eight) left a wall lit by a lantern's bulb, half hidden by
+// its frame, boiling in blotches the size of the spatial filter with the camera still; 64 are 8x the samples (a third of the
+// noise) for one more shadow ray per probe ray.
+static const uint ScreenProbeEmissiveSamples = 64;
 
-// The ray texels that also take an emissive sample (ScreenProbeEmissiveSamples of the 8 x 8).
+// The ray texels that also take an emissive sample (ScreenProbeEmissiveSamples of the 8 x 8): all of them.
 bool screen_probe_is_emissive_texel(uint2 local)
 {
-    return (local.x & 1u) == 0u && (local.y & 3u) == 0u;
+    return true;
 }
 
 float screen_probe_pack_direction(float3 direction)

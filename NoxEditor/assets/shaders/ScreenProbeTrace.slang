@@ -213,7 +213,7 @@ float4 screen_probe_emissive_sample(UniformBufferObject* ubo, float3 origin, flo
     float3 share = chosen.radiance * contributionWeight / (ScreenProbePi * float(ScreenProbeEmissiveSamples));
     if (any(isnan(share)) || any(isinf(share)))
         return float4(0.0);
-    return float4(min(share, float3(4000.0)), screen_probe_pack_direction(chosen.direction)); // 8 x 4000 stays a half float
+    return float4(min(share, float3(4000.0)), screen_probe_pack_direction(chosen.direction)); // a half float; the irradiance pass sums in float
 }
 
 [shader("fragment")]

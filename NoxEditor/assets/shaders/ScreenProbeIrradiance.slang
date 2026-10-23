@@ -38,9 +38,9 @@ float4 fragMain(ScreenProbeVertex input, uniform PushConstantScreenProbe pushCon
     if (pushConstant.emissiveTextureIndex != 0xFFFFFFFF)
     {
         Texture2D emissive = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.emissiveTextureIndex, 0));
-        for (uint y = 0; y < ScreenProbeRayRes; y += 4)
+        for (uint y = 0; y < ScreenProbeRayRes; ++y)
         {
-            for (uint x = 0; x < ScreenProbeRayRes; x += 2)
+            for (uint x = 0; x < ScreenProbeRayRes; ++x)
             {
                 const float4 sample = emissive.Load(int3(rayOrigin + uint2(x, y), 0));
                 if (any(sample.rgb > 0.0))
