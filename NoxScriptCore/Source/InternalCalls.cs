@@ -11,6 +11,9 @@ internal static unsafe class InternalCalls
     private static delegate*<NativeString, float, float, float, ulong> Scene_Instantiate;
     private static delegate*<ulong, void> Scene_Destroy;
     private static delegate*<NativeString, float, float, float, ulong> Scene_CreateEntity;
+    private static delegate*<NativeString, uint> Scene_LoadLevel;
+    private static delegate*<NativeString, void> Scene_UnloadLevel;
+    private static delegate*<NativeString, int> Scene_GetLevelState;
     private static delegate*<ulong> Mesh_Create;
     private static delegate*<ulong, void> Mesh_Destroy;
     private static delegate*<ulong, Vector3*, int, uint*, int, Vector3*, int, Vector2*, int, uint> Mesh_SetData;
@@ -75,6 +78,24 @@ internal static unsafe class InternalCalls
     }
 
     internal static void DestroyEntity(ulong entityID) => Scene_Destroy(entityID);
+
+    internal static bool LoadLevel(string scenePath)
+    {
+        using NativeString nativePath = new(scenePath);
+        return Scene_LoadLevel(nativePath) != 0;
+    }
+
+    internal static void UnloadLevel(string scenePath)
+    {
+        using NativeString nativePath = new(scenePath);
+        Scene_UnloadLevel(nativePath);
+    }
+
+    internal static int GetLevelState(string scenePath)
+    {
+        using NativeString nativePath = new(scenePath);
+        return Scene_GetLevelState(nativePath);
+    }
 
     internal static ulong CreateEntity(string name, Vector3 position)
     {

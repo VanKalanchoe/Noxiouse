@@ -5,6 +5,7 @@
 
 #include <box2d/box2d.h>
 #include <algorithm>
+#include <chrono>
 #include <cfloat>
 #include <functional>
 #include <unordered_set>
@@ -12,6 +13,7 @@
 #include "Entity.h"
 #include "Components.h"
 #include "SceneGraph.h"
+#include "SceneLoader.h"
 #include "NoxCore/Animation/AnimPose.h"
 #include "NoxCore/Math/Math.h"
 #include "NoxCore/Animation/Timeline.h"
@@ -19,6 +21,7 @@
 #include "NoxCore/Physics/Physics2D.h"
 #include "NoxCore/Physics/Physics3DScene.h"
 #include "NoxCore/Profiling/Profiler.h"
+#include "NoxCore/Core/Log.h"
 #include "NoxCore/Core/WorldUnits.h"
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Renderer/DynamicMesh.h"
@@ -468,6 +471,14 @@ namespace Nox
                 m_Physics3DScene->DestroyCharacter(entity);
             m_Physics3DScene->RemoveMeshCollider(entity);
         }
+        // Its 2D body (it stayed in the Box2D world, still colliding, after its entity was gone).
+        if (entity.HasComponent<RigidBody2DComponent>())
+        {
+            b2BodyId& body = entity.GetComponent<RigidBody2DComponent>().RuntimeBody;
+            if (b2World_IsValid(m_PhysicsWorldID) && b2Body_IsValid(body))
+                b2DestroyBody(body);
+            body = b2_nullBodyId;
+        }
         if (m_IsRunning && entity.HasComponent<ScriptComponent>())
             ScriptEngine::OnDestroyEntity(entity);
 
@@ -546,6 +557,200 @@ namespace Nox
             }
         }
         return root;
+    }
+
+    bool Scene::LoadLevel(AssetHandle level)
+    {
+        if (level == 0 || AssetManager::GetAssetType(level) != AssetType::Scene)
+        {
+            NOX_CORE_ERROR("LoadLevel: {} is not a scene asset", static_cast<uint64_t>(level));
+            return false;
+        }
+        for (StreamedLevel& streamed : m_Levels)
+        {
+            if (streamed.Level != level)
+                continue;
+            if (!streamed.Failed)
+            {
+                streamed.UnloadQueued = false; // loaded again before its unload ran: it stays
+                return true;
+            }
+            // Failed before: asked for again, it is tried again.
+            streamed.Failed = false;
+            streamed.UnloadQueued = false;
+            streamed.OutsideTime = 0.0f;
+            streamed.Loader = std::make_unique<SceneLoader>(Project::GetActiveAssetDirectory() / AssetManager::GetMetadata(level).FilePath, *this, level);
+            return true;
+        }
+        StreamedLevel& streamed = m_Levels.emplace_back();
+        streamed.Level = level;
+        streamed.Loader = std::make_unique<SceneLoader>(Project::GetActiveAssetDirectory() / AssetManager::GetMetadata(level).FilePath, *this, level);
+        return true;
+    }
+
+    void Scene::UnloadLevel(AssetHandle level)
+    {
+        for (StreamedLevel& streamed : m_Levels)
+        {
+            if (streamed.Level == level)
+                streamed.UnloadQueued = true;
+        }
+    }
+
+    Scene::LevelState Scene::GetLevelState(AssetHandle level) const
+    {
+        for (const StreamedLevel& streamed : m_Levels)
+        {
+            if (streamed.Level == level)
+                return streamed.Failed ? LevelState::Unloaded : streamed.Loaded ? LevelState::Loaded : LevelState::Loading;
+        }
+        return LevelState::Unloaded;
+    }
+
+    void Scene::DestroyLevelEntities(AssetHandle level)
+    {
+        std::vector<UUID> entities;
+        for (auto handle : m_Registry.view<LevelComponent, IDComponent>())
+        {
+            if (m_Registry.get<LevelComponent>(handle).Level == level)
+                entities.push_back(m_Registry.get<IDComponent>(handle).ID);
+        }
+        // DestroyEntity takes the children with their parent: the ones already gone are skipped.
+        for (UUID id : entities)
+        {
+            if (Entity entity = GetEntityByUUID(id))
+                DestroyEntity(entity);
+        }
+    }
+
+    void Scene::FinishLevelLoad(AssetHandle level, const std::vector<UUID>& created, const std::vector<UUID>& heldPhysics)
+    {
+        // What Play / Simulate start does for the entities the scene began with (OnRuntimeStart): 3D bodies after the update systems
+        // (SyncPendingPhysics3D), 2D bodies, particles, timelines, and the scripts after the script loop.
+        for (UUID id : heldPhysics)
+            m_PendingPhysics3D.insert(id);
+        for (UUID id : created)
+        {
+            Entity entity = GetEntityByUUID(id);
+            if (!entity)
+                continue;
+            if (entity.HasComponent<RigidBody2DComponent>() && b2World_IsValid(m_PhysicsWorldID))
+                CreatePhysics2DBody(entity);
+            if (entity.HasComponent<ParticleEmitterComponent>())
+                ParticleSystem::Restart(entity.GetComponent<ParticleEmitterComponent>());
+            if (entity.HasComponent<TimelinePlayerComponent>() && m_TimelinesRunning)
+            {
+                auto& player = entity.GetComponent<TimelinePlayerComponent>();
+                player.Time = 0.0f;
+                player.Playing = player.PlayOnStart;
+                player.FiredEvents.clear();
+            }
+            if (m_IsRunning && entity.HasComponent<ScriptComponent>())
+                m_PendingScriptStart.push_back(id);
+        }
+        NOX_CORE_INFO("Level `{}` loaded ({} entities)", AssetManager::GetMetadata(level).FilePath.filename().string(), created.size());
+    }
+
+    // The time a frame may spend creating streamed levels' entities (the rest of a level comes in the next frames).
+    static constexpr double LevelStreamingBudgetMs = 3.0;
+
+    void Scene::UpdateLevelStreaming(const glm::vec3* source, float deltaTime)
+    {
+        // 1. The volumes: a level any volume holding the source names is wanted; one only volumes name, and none holds the source, goes
+        //    after the shortest of their unload delays.
+        if (source)
+        {
+            std::unordered_map<AssetHandle, float> unloadDelays; // the levels volumes name, and the shortest delay among them
+            std::unordered_set<AssetHandle> wanted;
+            for (auto handle : m_Registry.view<WorldTransformComponent, LevelStreamingVolumeComponent>())
+            {
+                const auto& volume = m_Registry.get<LevelStreamingVolumeComponent>(handle);
+                const glm::vec3 local = glm::vec3(glm::inverse(m_Registry.get<WorldTransformComponent>(handle).WorldMatrix) * glm::vec4(*source, 1.0f));
+                const bool inside = glm::all(glm::lessThanEqual(glm::abs(local), volume.HalfExtents));
+                for (AssetHandle level : volume.Levels)
+                {
+                    if (level == 0)
+                        continue;
+                    auto [entry, added] = unloadDelays.try_emplace(level, volume.UnloadDelay);
+                    if (!added)
+                        entry->second = std::min(entry->second, volume.UnloadDelay);
+                    if (inside)
+                        wanted.insert(level);
+                }
+            }
+            for (const auto& [level, unloadDelay] : unloadDelays)
+            {
+                if (wanted.contains(level))
+                {
+                    bool failed = false;
+                    for (StreamedLevel& streamed : m_Levels)
+                    {
+                        if (streamed.Level == level)
+                        {
+                            streamed.OutsideTime = 0.0f;
+                            failed = streamed.Failed;
+                        }
+                    }
+                    if (!failed) // (not again every frame: once the source has left, the next visit tries again)
+                        LoadLevel(level);
+                    continue;
+                }
+                for (StreamedLevel& streamed : m_Levels)
+                {
+                    if (streamed.Level != level || streamed.UnloadQueued)
+                        continue;
+                    streamed.OutsideTime += deltaTime;
+                    if (streamed.OutsideTime >= unloadDelay)
+                        streamed.UnloadQueued = true;
+                }
+            }
+        }
+
+        // 2. The unloads: a level still loading stops (its loader waits for its reading thread) and loses what it made so far.
+        for (StreamedLevel& streamed : m_Levels)
+        {
+            if (!streamed.UnloadQueued)
+                continue;
+            const bool hadEntities = streamed.Loaded || streamed.Loader;
+            streamed.Loader.reset();
+            DestroyLevelEntities(streamed.Level);
+            if (hadEntities)
+                NOX_CORE_INFO("Level `{}` unloaded", AssetManager::GetMetadata(streamed.Level).FilePath.filename().string());
+        }
+        std::erase_if(m_Levels, [](const StreamedLevel& streamed) { return streamed.UnloadQueued; });
+
+        // 3. The loads, oldest first, within the frame's budget. The 3D physics bodies their components ask for (OnPhysics3DComponentChanged)
+        //    are held until the level is complete: a crate made before the floor below it fell through.
+        const auto start = std::chrono::steady_clock::now();
+        for (size_t index = 0; index < m_Levels.size(); ++index)
+        {
+            StreamedLevel& streamed = m_Levels[index];
+            if (streamed.Loaded || !streamed.Loader)
+                continue;
+            const double spent = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+            if (spent >= LevelStreamingBudgetMs)
+                break;
+            std::unordered_set<UUID> pendingBefore = std::move(m_PendingPhysics3D);
+            m_PendingPhysics3D.clear();
+            const bool done = streamed.Loader->Step(LevelStreamingBudgetMs - spent);
+            streamed.HeldPhysics.insert(streamed.HeldPhysics.end(), m_PendingPhysics3D.begin(), m_PendingPhysics3D.end());
+            m_PendingPhysics3D = std::move(pendingBefore);
+            if (!done)
+                continue;
+            if (streamed.Loader->Failed())
+            {
+                // (Refused or unreadable: the loader logged why. Whatever it made goes again.)
+                DestroyLevelEntities(streamed.Level);
+                streamed.Loader.reset();
+                streamed.HeldPhysics.clear();
+                streamed.Failed = true;
+                continue;
+            }
+            FinishLevelLoad(streamed.Level, streamed.Loader->GetCreatedEntities(), streamed.HeldPhysics);
+            streamed.Loaded = true;
+            streamed.Loader.reset();
+            streamed.HeldPhysics.clear();
+        }
     }
 
     void Scene::QueueDestroy(Entity entity)
@@ -631,6 +836,16 @@ namespace Nox
         const bool step = !m_IsPaused || m_StepFrames-- > 0;
         if (step)
         {
+            // Streamed levels first, outside every script call (unloading one calls OnDestroy): where the primary camera stood last
+            // frame is the streaming source.
+            if (Entity camera = GetPrimaryCameraEntity(); camera && camera.HasComponent<WorldTransformComponent>())
+            {
+                const glm::vec3 source = glm::vec3(camera.GetComponent<WorldTransformComponent>().WorldMatrix[3]);
+                UpdateLevelStreaming(&source, static_cast<float>(ts));
+            }
+            else
+                UpdateLevelStreaming(nullptr, static_cast<float>(ts));
+
             // Collected first: a script may instantiate prefabs (new entities, new script components) or destroy entities.
             std::vector<entt::entity> scriptEntities;
             {
@@ -732,6 +947,12 @@ namespace Nox
     void Scene::OnUpdateSimulation(Timestep ts, EditorCamera& camera)
     {
         const bool step = !m_IsPaused || m_StepFrames-- > 0;
+        if (step)
+        {
+            // Simulate streams levels around the editor camera (Unreal's Simulate does the same with its viewport).
+            const glm::vec3 source = camera.GetPosition();
+            UpdateLevelStreaming(&source, static_cast<float>(ts));
+        }
         RunUpdateSystems(ts, step, step);
         SyncGpuScene();
 
@@ -1619,7 +1840,7 @@ namespace Nox
             FolderComponent, ParticleEmitterComponent, SpriteRendererComponent, CircleRendererComponent, CameraComponent,
             ScriptComponent, RigidBody2DComponent, BoxCollider2DComponent,
             CircleCollider2DComponent, RigidBody3DComponent, BoxCollider3DComponent, SphereCollider3DComponent, CapsuleCollider3DComponent,
-            CharacterController3DComponent, TextComponent>;
+            CharacterController3DComponent, TextComponent, LevelStreamingVolumeComponent>;
 
         // Source UUID -> duplicate UUID, so a duplicated animator drives the duplicated nodes
         // instead of still pointing at the original hierarchy.
@@ -1763,63 +1984,65 @@ namespace Nox
         m_PhysicsWorldID = b2CreateWorld(&worldDef);
 
         for (auto e : view)
+            CreatePhysics2DBody(Entity(e, this));
+    }
+
+    void Scene::CreatePhysics2DBody(Entity entity)
+    {
+        auto& transform = entity.GetComponent<TransformComponent>();
+        auto& r2bd = entity.GetComponent<RigidBody2DComponent>();
+
+        b2BodyDef bodyDef = b2DefaultBodyDef();;
+        bodyDef.type = Utils::Rigidbody2DTypeToBox2DBody(r2bd.Type);
+        bodyDef.position = b2Vec2{transform.Translation.x, transform.Translation.y}; //rename to translation
+        bodyDef.rotation = b2MakeRot(transform.Rotation.z); //i could set full rotation will see bodyde.rotation
+
+        b2BodyId body = b2CreateBody(m_PhysicsWorldID, &bodyDef);
+        b2Body_SetFixedRotation(body, r2bd.FixedRotation);
+        r2bd.RuntimeBody = body;
+
+        if (entity.HasComponent<BoxCollider2DComponent>())
         {
-            Entity entity = {e, this};
-            auto& transform = entity.GetComponent<TransformComponent>();
-            auto& r2bd = entity.GetComponent<RigidBody2DComponent>();
+            auto& bc2d = entity.GetComponent<BoxCollider2DComponent>();
 
-            b2BodyDef bodyDef = b2DefaultBodyDef();;
-            bodyDef.type = Utils::Rigidbody2DTypeToBox2DBody(r2bd.Type);
-            bodyDef.position = b2Vec2{transform.Translation.x, transform.Translation.y}; //rename to translation
-            bodyDef.rotation = b2MakeRot(transform.Rotation.z); //i could set full rotation will see bodyde.rotation
+            /*b2Polygon boxShape = b2MakeBox(bc2d.Size.x * transform.Scale.x, bc2d.Size.y * transform.Scale.y);*/
 
-            b2BodyId body = b2CreateBody(m_PhysicsWorldID, &bodyDef);
-            b2Body_SetFixedRotation(body, r2bd.FixedRotation);
-            r2bd.RuntimeBody = body;
+            b2Polygon boxShape = b2MakeOffsetBox
+            (
+                bc2d.Size.x * transform.Scale.x,
+                bc2d.Size.y * transform.Scale.y,
+                b2Vec2{bc2d.Offset.x * transform.Scale.x, bc2d.Offset.y * transform.Scale.y}, // the offset scales with the entity
+                b2MakeRot(0.0f)
+            );
 
-            if (entity.HasComponent<BoxCollider2DComponent>())
-            {
-                auto& bc2d = entity.GetComponent<BoxCollider2DComponent>();
+            b2ShapeDef shapeDef = b2DefaultShapeDef();
+            shapeDef.density = bc2d.Density;
+            shapeDef.material.friction = bc2d.Friction;
+            shapeDef.material.restitution = bc2d.Restitution;
+            shapeDef.material.rollingResistance = bc2d.RollingResistance;
+            shapeDef.material.tangentSpeed = WorldUnits::FromMeters(bc2d.TangentSpeed);
+            b2ShapeId shapeID = b2CreatePolygonShape(body, &shapeDef, &boxShape);
+        }
 
-                /*b2Polygon boxShape = b2MakeBox(bc2d.Size.x * transform.Scale.x, bc2d.Size.y * transform.Scale.y);*/
+        if (entity.HasComponent<CircleCollider2DComponent>())
+        {
+            auto& cc2d = entity.GetComponent<CircleCollider2DComponent>();
 
-                b2Polygon boxShape = b2MakeOffsetBox
-                (
-                    bc2d.Size.x * transform.Scale.x,
-                    bc2d.Size.y * transform.Scale.y,
-                    b2Vec2{bc2d.Offset.x * transform.Scale.x, bc2d.Offset.y * transform.Scale.y}, // the offset scales with the entity
-                    b2MakeRot(0.0f)
-                );
+            // A circle stays a circle: the larger of the two scales (a non-uniform scale cannot squash it); the offset scales.
+            b2Circle circleShape;
+            circleShape.center = b2Vec2{cc2d.Offset.x * transform.Scale.x, cc2d.Offset.y * transform.Scale.y};
+            circleShape.radius = std::max(std::abs(transform.Scale.x), std::abs(transform.Scale.y)) * cc2d.Radius;
 
-                b2ShapeDef shapeDef = b2DefaultShapeDef();
-                shapeDef.density = bc2d.Density;
-                shapeDef.material.friction = bc2d.Friction;
-                shapeDef.material.restitution = bc2d.Restitution;
-                shapeDef.material.rollingResistance = bc2d.RollingResistance;
-                shapeDef.material.tangentSpeed = WorldUnits::FromMeters(bc2d.TangentSpeed);
-                b2ShapeId shapeID = b2CreatePolygonShape(body, &shapeDef, &boxShape);
-            }
-
-            if (entity.HasComponent<CircleCollider2DComponent>())
-            {
-                auto& cc2d = entity.GetComponent<CircleCollider2DComponent>();
-
-                // A circle stays a circle: the larger of the two scales (a non-uniform scale cannot squash it); the offset scales.
-                b2Circle circleShape;
-                circleShape.center = b2Vec2{cc2d.Offset.x * transform.Scale.x, cc2d.Offset.y * transform.Scale.y};
-                circleShape.radius = std::max(std::abs(transform.Scale.x), std::abs(transform.Scale.y)) * cc2d.Radius;
-
-                b2ShapeDef shapeDef = b2DefaultShapeDef();
-                shapeDef.density = cc2d.Density;
-                shapeDef.material.friction = cc2d.Friction;
-                shapeDef.material.restitution = cc2d.Restitution;
-                shapeDef.material.rollingResistance = cc2d.RollingResistance;
-                shapeDef.material.tangentSpeed = WorldUnits::FromMeters(cc2d.TangentSpeed);
-                b2ShapeId shapeID = b2CreateCircleShape(body, &shapeDef, &circleShape);
-            }
+            b2ShapeDef shapeDef = b2DefaultShapeDef();
+            shapeDef.density = cc2d.Density;
+            shapeDef.material.friction = cc2d.Friction;
+            shapeDef.material.restitution = cc2d.Restitution;
+            shapeDef.material.rollingResistance = cc2d.RollingResistance;
+            shapeDef.material.tangentSpeed = WorldUnits::FromMeters(cc2d.TangentSpeed);
+            b2ShapeId shapeID = b2CreateCircleShape(body, &shapeDef, &circleShape);
         }
     }
-    
+
     void Scene::OnPhysics2DStop()
     {
         b2DestroyWorld(m_PhysicsWorldID);
@@ -2228,6 +2451,16 @@ namespace Nox
 
     template <>
     void Scene::OnComponentAdded<CharacterController3DComponent>(Entity entity, CharacterController3DComponent& component)
+    {
+    }
+
+    template <>
+    void Scene::OnComponentAdded<LevelComponent>(Entity entity, LevelComponent& component)
+    {
+    }
+
+    template <>
+    void Scene::OnComponentAdded<LevelStreamingVolumeComponent>(Entity entity, LevelStreamingVolumeComponent& component)
     {
     }
 }

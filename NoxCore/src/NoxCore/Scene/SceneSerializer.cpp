@@ -625,6 +625,20 @@ namespace Nox
             out << YAML::EndMap;
         }
 
+        if (entity.HasComponent<LevelStreamingVolumeComponent>())
+        {
+            const auto& volume = entity.GetComponent<LevelStreamingVolumeComponent>();
+            out << YAML::Key << "LevelStreamingVolumeComponent";
+            out << YAML::BeginMap;
+            out << YAML::Key << "Levels" << YAML::Value << YAML::Flow << YAML::BeginSeq;
+            for (AssetHandle level : volume.Levels)
+                out << level;
+            out << YAML::EndSeq;
+            out << YAML::Key << "HalfExtents" << YAML::Value << volume.HalfExtents;
+            out << YAML::Key << "UnloadDelay" << YAML::Value << volume.UnloadDelay;
+            out << YAML::EndMap;
+        }
+
         if (entity.HasComponent<ParticleEmitterComponent>())
         {
             const auto& emitter = entity.GetComponent<ParticleEmitterComponent>();
@@ -1615,6 +1629,20 @@ namespace Nox
                 player.Speed = timelinePlayer["Speed"].as<float>();
         }
 
+        if (auto levelVolume = entity["LevelStreamingVolumeComponent"])
+        {
+            auto& volume = deserializedEntity.AddComponent<LevelStreamingVolumeComponent>();
+            if (const YAML::Node levels = levelVolume["Levels"])
+            {
+                for (const YAML::Node& level : levels)
+                    volume.Levels.push_back(level.as<AssetHandle>());
+            }
+            if (levelVolume["HalfExtents"])
+                volume.HalfExtents = levelVolume["HalfExtents"].as<glm::vec3>();
+            if (levelVolume["UnloadDelay"])
+                volume.UnloadDelay = levelVolume["UnloadDelay"].as<float>();
+        }
+
         if (auto particleEmitter = entity["ParticleEmitterComponent"])
         {
             auto& emitter = deserializedEntity.AddComponent<ParticleEmitterComponent>();
@@ -2128,7 +2156,7 @@ namespace Nox
         return DeserializeRuntimeBytes(bytes, filepath.string());
     }
 
-    bool SceneSerializer::DeserializeRuntimeBytes(const std::string& bytes, const std::string& name)
+    bool SceneSerializer::RuntimeSceneText(const std::string& bytes, const std::string& name, std::string& outText)
     {
         constexpr size_t headerSize = sizeof(RuntimeSceneMagic) + sizeof(uint32_t) + sizeof(uint64_t);
         if (!IsRuntimeScene(bytes) || bytes.size() < headerSize)
@@ -2150,6 +2178,13 @@ namespace Nox
             NOX_CORE_ERROR("Runtime scene '{}' is cut off or padded ({} bytes of scene, {} expected)", name, bytes.size() - headerSize, size);
             return false;
         }
-        return DeserializeText(bytes.substr(headerSize));
+        outText = bytes.substr(headerSize);
+        return true;
+    }
+
+    bool SceneSerializer::DeserializeRuntimeBytes(const std::string& bytes, const std::string& name)
+    {
+        std::string text;
+        return RuntimeSceneText(bytes, name, text) && DeserializeText(text);
     }
 }

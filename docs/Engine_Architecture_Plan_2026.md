@@ -1089,6 +1089,30 @@ Baseline before 6a: every texture is resident at full resolution once loaded -- 
 | 6a-3 | GPU mip feedback: a 4096-entry buffer (one uint per image slot) cleared each frame, written by the G-buffer material resolve and the transparent pass -- one pixel per 8x8 tile, rotating with the frame, takes `floor(lod) + 16` of each texture it samples against the image's own size and `InterlockedMin`s it into the slot (a plain read first skips the atomic when the slot already holds it) -- and read back per frame slot. The streamer maps slot -> texture and the first mip that image had (a replaced image keeps mapping for 8 more readbacks) to the finest mip each texture is asked for. | **Verified 2026-09-18:** far textures stay low-res and sharpen when approached; Bistro textures 1408 MB after flying through (was 2138). |
 | 6a-4 | Pool, priority, hysteresis, eviction: the pool is the Textures budget minus what other images hold (the streamer's own images in transit -- new images of reallocations in flight, replaced ones not released yet -- are not others), or an editor override. A finer request counts at once; a texture asked for less keeps its mip for 120 readbacks, then relaxes one mip at a time. Plan per frame: the pool is a cache (resident stays, wanted is added); over it, textures out of view give first (longest unseen first), then those in view (larger first, handle as tie-break -- an order that holds still while the view does), first mips nothing wants, then one mip at a time round after round, never below the tail. Shrinks start before grows. Stats (Nox Stats counters, Settings -> Texture Streaming with the pool override slider), debug view 20 "Texture Streaming Mips" (red: the pixel wants a finer mip than the image holds, also for magnified full-resolution textures; green: as needed; blue: more than needed -- a texture's mips follow its closest pixel, so far pixels of a shared texture are blue), status bar refreshed once per second. | **Verified 2026-09-18 (exit criterion):** Bistro view wanting 69 MB with the pool at 64 MB: resident 63 MB, renders correctly with reduced mips, settles with no reallocation in flight; back to the budget it grows to 129 MB. Textures category 342 MB (was 2141 MB before 6a). GPU frame 3.9 ms in both, G-buffer with feedback 0.51 ms. Found while testing: the passes declared the feedback buffer write-only, so the barrier after the clear did not cover the shader's plain read (feedback lost, everything relaxed to the tail); counting the streamer's in-transit images as others shrank the pool with every reallocation (shrinks forcing more shrinks); a texture could start its next reallocation in the frame the previous one completed, copying from the not yet swapped old image one mip off (now starts come before completions); cutting by the exact readback last seen reshuffled every frame (thrashing under pressure). Also fixed: the IBL precompute timed out under a capture tool (TDR: irradiance at 0.1 rad steps from a filtered mip, prefilter one submission per mip, roughness 0 a single sample). |
 
+### 5.12a Level Streaming (built 2026-10-23)
+
+Unreal 4's model, and the base World Streaming builds on: a **level** is another scene file (a scene asset), made and saved on its
+own, loaded **additively** into the running scene and unloaded again.
+
+- **Scene API:** `Scene::LoadLevel(handle)` / `UnloadLevel(handle)` / `GetLevelState(handle)` (Unloaded / Loading / Loaded). The file
+  is read and parsed on a thread and its entities created into the running scene for at most 3 ms a frame (`SceneLoader` in its
+  additive mode); every one carries a runtime-only `LevelComponent` with the level's handle, which `UnloadLevel` destroys. Both are
+  carried out at the start of the next frame, outside every script call (so scripts may call them; unloading calls OnDestroy).
+- **Starting like the scene's own entities** once the whole level is in: scripts (after the script loop), 2D bodies, particles,
+  timelines; 3D bodies the components asked for are held until then (a crate made before its floor fell through).
+- **IDs:** a level whose entity IDs are already in the scene (the same file twice, or a scene saved as a copy of another, which keeps
+  the IDs entities, parents and scripts refer to each other by) is refused with an error naming the entity; nothing is created.
+  Volumes do not retry it until the source has left them.
+- **Level Streaming Volume** (`LevelStreamingVolumeComponent`): a box (HalfExtents in the entity's space, scaled by its transform) and
+  its levels; loaded while the streaming source is inside -- the primary camera in Play, the editor camera in Simulate (Unreal's
+  Simulate does the same) --, unloaded once the source has been outside every volume naming the level for its Unload Delay. Drawn in
+  orange while editing; levels added by drop or combo, their state shown in Play.
+- **Scripts:** `Scene.LoadLevel("Levels/Interior.nox")`, `UnloadLevel`, `GetLevelState`, `IsLevelLoaded` (script API version 3).
+- **Packaging:** a level a volume names is a handle in the scene file, one a script names a path in its source: both are collected
+  as dependencies already.
+- Not yet: editing several levels together in the editor (Unreal's Levels window -- each level is edited as the scene it is), a level
+  shown only once complete (its entities appear over the frames it loads), streaming sources other than the camera, level transforms.
+
 ### 5.13 World Streaming
 
 - **World partition grid:** world cooked into cells (entities, components, cell-local asset
@@ -1154,7 +1178,8 @@ flight, targeted texture-slot cache eviction. Future:
 | **5** | Async IO & upload manager | 1, 4 | Request API + state machine, IO threads, decode tasks, transfer queue, staging ring, async editor drag-in | Loading Bistro never stalls the viewport beyond a frame budget |
 | **6a** | Texture streaming | 5 | BC cooking for all sources, mip tail, GPU mip feedback, residency + eviction | Scene textures exceeding the texture budget render correctly with mip reduction |
 | **6b** | Geometry streaming & LOD | 5 | Cluster hierarchy cook, GPU cut selection (**done, 6b-1**), page streaming pool (paused, §5.7.1), RT fallback LOD (reverted, D8) | Geometry exceeding the geometry budget renders with streaming; no popping beyond threshold |
-| **6c** | World streaming | 6a, 6b | World partition cooking, cell streaming, HLOD, per-cell serialization | Test world larger than RAM/VRAM traversable without stalls |
+| **6c-0** | Level streaming | 5 | Additive scene load / unload, Level Streaming Volumes, script API (§5.12a: **built 2026-10-23**) | A level streams in and out around the camera without a stall |
+| **6c** | World streaming | 6a, 6b, 6c-0 | World partition cooking, cell streaming, HLOD, per-cell serialization | Test world larger than RAM/VRAM traversable without stalls |
 | **7** | Continuous optimization | all | Profile-driven work, VT, DirectStorage, async compute expansion | Ongoing |
 
 Phases 1, 2 and 3 are architecture-defining and each gets its own plan-mode design before code.

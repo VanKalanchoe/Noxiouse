@@ -26,18 +26,33 @@ namespace Nox
     SceneLoader::SceneLoader(std::filesystem::path path)
         : m_Path(std::move(path)), m_Parsed(std::make_unique<Parsed>()), m_Scene(CreateRef<Scene>())
     {
-        m_Thread = std::thread([this]()
+        m_Into = m_Scene.get();
+        StartReading();
+    }
+
+    SceneLoader::SceneLoader(std::filesystem::path path, Scene& into, AssetHandle level)
+        : m_Path(std::move(path)), m_Parsed(std::make_unique<Parsed>()), m_Into(&into), m_Level(level)
+    {
+        StartReading();
+    }
+
+    void SceneLoader::StartReading()
+    {
+        const bool additive = m_Level != 0;
+        m_Thread = std::thread([this, additive]()
         {
             Parsed& parsed = *m_Parsed;
             std::string bytes;
             if (!VFS::ReadText(m_Path, bytes))
                 parsed.Error = "could not open it";
-            else if (SceneSerializer::IsRuntimeScene(bytes))
+            else if (SceneSerializer::IsRuntimeScene(bytes) && !additive)
             {
                 parsed.Bytes = std::move(bytes);
                 parsed.Runtime = true;
                 parsed.Ok = true;
             }
+            else if (SceneSerializer::IsRuntimeScene(bytes) && !SceneSerializer::RuntimeSceneText(bytes, m_Path.string(), bytes))
+                parsed.Error = "not a runtime scene this build reads";
             else
             {
                 try
@@ -82,7 +97,7 @@ namespace Nox
             m_Failed = true;
             return true;
         }
-        if (parsed.Runtime)
+        if (parsed.Runtime) // (a whole scene only: a level's is parsed on the thread like text)
         {
             SceneSerializer serializer(m_Scene);
             m_Failed = !serializer.DeserializeRuntimeBytes(parsed.Bytes, m_Path.string());
@@ -90,16 +105,35 @@ namespace Nox
             return true;
         }
 
+        Scene& scene = *m_Into;
         if (!m_Started)
         {
             m_Started = true;
             NOX_CORE_TRACE("Deserializing scene '{}'", parsed.Document["Scene"].as<std::string>());
+            m_Total = parsed.Entities && parsed.Entities.IsSequence() ? parsed.Entities.size() : 0;
+            // A level: none of its entities may be in the scene already (the same scene file, or one saved as a copy of it, shares the
+            // IDs its entities, parents and scripts refer to each other by). Nothing is created then.
+            if (m_Level != 0)
+            {
+                for (size_t index = 0; index < m_Total; ++index)
+                {
+                    const YAML::Node entity = parsed.Entities[index];
+                    if (Entity existing = scene.GetEntityByUUID(entity["Entity"].as<uint64_t>()))
+                    {
+                        NOX_CORE_ERROR("Level `{}` not loaded: its entity '{}' ({}) is in the scene already (a scene saved as a copy of "
+                                       "another keeps its entity IDs; make the level a new scene, or load it once)",
+                                       m_Path.filename().string(), existing.GetName(), entity["Entity"].as<uint64_t>());
+                        m_Failed = true;
+                        return true;
+                    }
+                }
+                m_Created.reserve(m_Total);
+            }
             if (const YAML::Node folders = parsed.Document["Folders"])
             {
                 for (const YAML::Node& folder : folders)
-                    m_Scene->AddFolder(folder.as<std::string>());
+                    scene.AddFolder(folder.as<std::string>());
             }
-            m_Total = parsed.Entities && parsed.Entities.IsSequence() ? parsed.Entities.size() : 0;
         }
 
         // The entities in file order (what ReadScene does), until the frame's slice is used up.
@@ -111,8 +145,13 @@ namespace Nox
             std::string name;
             if (const YAML::Node tag = entity["TagComponent"])
                 name = tag["Tag"].as<std::string>();
-            Entity created = m_Scene->CreateEntityWithUUID(entity["Entity"].as<uint64_t>(), name);
-            SceneSerializer::DeserializeEntityComponents(*m_Scene, entity, created, false);
+            Entity created = scene.CreateEntityWithUUID(entity["Entity"].as<uint64_t>(), name);
+            SceneSerializer::DeserializeEntityComponents(scene, entity, created, false);
+            if (m_Level != 0)
+            {
+                created.AddComponent<LevelComponent>().Level = m_Level;
+                m_Created.push_back(created.GetUUID());
+            }
 
             // The clock is read every few entities (an entity takes microseconds).
             if ((m_Next & 15) == 0 &&

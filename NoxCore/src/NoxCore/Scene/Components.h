@@ -636,7 +636,7 @@ namespace Nox
         bool FixedRotation = false;
 
         // Storage for runtime
-        b2BodyId RuntimeBody;
+        b2BodyId RuntimeBody = b2_nullBodyId;
 
         RigidBody2DComponent() = default;
         RigidBody2DComponent(const RigidBody2DComponent&) = default;
@@ -792,6 +792,24 @@ namespace Nox
         float BackgroundPadding = 0.1f;
     };
     
+    // The level (a scene asset) a streamed-in entity belongs to (Scene::LoadLevel): what Scene::UnloadLevel removes. Runtime only:
+    // never saved, never copied.
+    struct LevelComponent
+    {
+        AssetHandle Level = 0;
+    };
+
+    // A Level Streaming Volume (Unreal's): while the streaming source -- the primary camera in Play, the editor camera in Simulate --
+    // is inside this box, its levels (scene assets) are loaded into the running scene (Scene::LoadLevel); once it has been outside
+    // every volume naming a level for UnloadDelay seconds, that level is unloaded. The box is HalfExtents in the entity's space,
+    // scaled by its transform (as BoxCollider3DComponent). A level a volume names is left to its volumes.
+    struct LevelStreamingVolumeComponent
+    {
+        std::vector<AssetHandle> Levels;
+        glm::vec3 HalfExtents = { 0.5f, 0.5f, 0.5f };
+        float UnloadDelay = 2.0f; // seconds outside before unloading: walking along the edge does not load and unload every frame
+    };
+
     template<typename... Component>
     struct ComponentGroup
     {
@@ -804,5 +822,5 @@ namespace Nox
             CircleRendererComponent, CameraComponent, ScriptComponent,
             /*NativeScriptComponent,*/ RigidBody2DComponent, BoxCollider2DComponent,
             CircleCollider2DComponent, RigidBody3DComponent, BoxCollider3DComponent,
-            SphereCollider3DComponent, CapsuleCollider3DComponent, CharacterController3DComponent, TextComponent, BoneSocketComponent>;
+            SphereCollider3DComponent, CapsuleCollider3DComponent, CharacterController3DComponent, TextComponent, BoneSocketComponent, LevelStreamingVolumeComponent>;
 }

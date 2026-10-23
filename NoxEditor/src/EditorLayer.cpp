@@ -120,6 +120,8 @@ namespace Nox
 
         m_AssetOpeners[AssetType::AnimationGraph] = [this](AssetHandle handle) { OpenNodeGraphEditor(handle); };
         m_AssetOpeners[AssetType::Prefab] = [this](AssetHandle handle) { OpenPrefabMode(handle); };
+        // A scene (from a Level Streaming Volume's list, say): opened for editing, as a double click in the Content Browser does.
+        m_AssetOpeners[AssetType::Scene] = [this](AssetHandle handle) { OpenScene(handle); };
         m_AssetOpeners[AssetType::Material] = [this](AssetHandle handle) { OpenMaterialEditor(handle); };
         m_AssetOpeners[AssetType::AnimationSequence] = [this](AssetHandle handle)
         {
@@ -2222,6 +2224,26 @@ namespace Nox
                 const glm::vec3 forward = -glm::vec3(world[2]);
                 if (glm::length(forward) > 1e-6f)
                     m_Renderer2D->DrawXRayLine(centre, centre + glm::normalize(forward) * light.Radius * scale, colour);
+            }
+        }
+
+        // Level Streaming Volumes: their boxes while editing and simulating (Unreal shows its volumes in the editor), in orange.
+        if (m_SceneState != SceneState::Play)
+        {
+            constexpr glm::vec4 kVolumeColor(1.0f, 0.55f, 0.1f, 0.9f);
+            constexpr int edges[12][2] = { {0,1},{2,3},{4,5},{6,7}, {0,2},{1,3},{4,6},{5,7}, {0,4},{1,5},{2,6},{3,7} };
+            auto view = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, LevelStreamingVolumeComponent>();
+            for (auto entity : view)
+            {
+                auto [wtc, volume] = view.get<WorldTransformComponent, LevelStreamingVolumeComponent>(entity);
+                glm::vec3 corners[8];
+                for (int i = 0; i < 8; ++i)
+                {
+                    const glm::vec3 sign((i & 1) ? 1.0f : -1.0f, (i & 2) ? 1.0f : -1.0f, (i & 4) ? 1.0f : -1.0f);
+                    corners[i] = glm::vec3(wtc.WorldMatrix * glm::vec4(sign * volume.HalfExtents, 1.0f));
+                }
+                for (const auto& edge : edges)
+                    m_Renderer2D->DrawXRayLine(corners[edge[0]], corners[edge[1]], kVolumeColor);
             }
         }
 

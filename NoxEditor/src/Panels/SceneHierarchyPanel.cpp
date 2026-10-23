@@ -938,6 +938,7 @@ namespace Nox
 
             DisplayAddComponentEntry<AnimatorComponent>("Animator");
             DisplayAddComponentEntry<TimelinePlayerComponent>("Timeline Player");
+            DisplayAddComponentEntry<LevelStreamingVolumeComponent>("Level Streaming Volume");
             DisplayAddComponentEntry<BoneSocketComponent>("Bone Socket");
             DisplayAddComponentEntry<ParticleEmitterComponent>("Particle Emitter");
 
@@ -1977,6 +1978,66 @@ namespace Nox
             ImGui::DragFloat("Speed", &component.Speed, 0.01f, -10.0f, 10.0f, "%.2fx");
             if (component.Playing)
                 ImGui::TextDisabled("Playing: %.2f s", component.Time);
+        });
+
+        DrawComponent<LevelStreamingVolumeComponent>("Level Streaming Volume", entity, [this](auto& component)
+        {
+            // The levels (scene assets) this box streams in while the camera is inside it (Scene::LoadLevel); drop scenes here.
+            const auto& registry = Project::GetActive()->GetEditorAssetManager()->GetAssetRegistry();
+            int removed = -1;
+            for (size_t index = 0; index < component.Levels.size(); ++index)
+            {
+                ImGui::PushID(static_cast<int>(index));
+                const AssetHandle level = component.Levels[index];
+                const std::string name = registry.contains(level) ? registry.at(level).FilePath.stem().string() : std::string("(missing scene)");
+                ImGui::TextUnformatted(name.c_str());
+                if (m_Context->IsRunning() || m_Context->GetLevelState(level) != Scene::LevelState::Unloaded)
+                {
+                    const Scene::LevelState state = m_Context->GetLevelState(level);
+                    ImGui::SameLine();
+                    ImGui::TextDisabled(state == Scene::LevelState::Loaded ? "(loaded)" : state == Scene::LevelState::Loading ? "(loading)" : "(unloaded)");
+                }
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Open") && m_OpenAsset)
+                    m_OpenAsset(level);
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Remove"))
+                    removed = static_cast<int>(index);
+                ImGui::PopID();
+            }
+            if (removed >= 0)
+                component.Levels.erase(component.Levels.begin() + removed);
+
+            if (ImGui::BeginCombo("Add Level", "Scene..."))
+            {
+                for (const auto& [handle, metadata] : registry)
+                {
+                    if (metadata.Type != AssetType::Scene || std::find(component.Levels.begin(), component.Levels.end(), handle) != component.Levels.end())
+                        continue;
+                    if (ImGui::Selectable(metadata.FilePath.stem().string().c_str()))
+                        component.Levels.push_back(handle);
+                }
+                ImGui::EndCombo();
+            }
+            if (ImGui::BeginDragDropTarget())
+            {
+                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEM"))
+                {
+                    const AssetHandle handle = *static_cast<const AssetHandle*>(payload->Data);
+                    if (AssetManager::GetAssetType(handle) == AssetType::Scene &&
+                        std::find(component.Levels.begin(), component.Levels.end(), handle) == component.Levels.end())
+                        component.Levels.push_back(handle);
+                }
+                ImGui::EndDragDropTarget();
+            }
+            ImGui::SetItemTooltip("Drop scenes from the Content Browser. A level is another scene, made and saved on its own; in Play it is\n"
+                                  "loaded into the running scene while the primary camera is inside this box (the editor camera in Simulate).");
+
+            ImGui::DragFloat3("Half Extents", glm::value_ptr(component.HalfExtents), 0.05f, 0.0f, FLT_MAX);
+            ImGui::SetItemTooltip("Half the box's size in the entity's space, scaled by its transform (as a Box Collider 3D).");
+            ImGui::DragFloat("Unload Delay", &component.UnloadDelay, 0.1f, 0.0f, 600.0f, "%.1f s");
+            ImGui::SetItemTooltip("Seconds the camera must have been outside every volume naming a level before it unloads:\n"
+                                  "walking along the edge does not load and unload it every frame.");
         });
 
         DrawComponent<CameraComponent>("Camera", entity, [](auto& component)

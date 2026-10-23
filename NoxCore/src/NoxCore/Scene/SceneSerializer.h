@@ -30,6 +30,9 @@ namespace Nox
         bool DeserializeRuntimeBytes(const std::string& bytes, const std::string& name);
         // Whether bytes start like a runtime scene (SerializeRuntime) rather than a scene's text.
         static bool IsRuntimeScene(const std::string& bytes);
+        // The scene text inside a runtime scene's bytes (checked: header, version, size; logged under `name` when wrong). `outText` may
+        // be `bytes` itself.
+        static bool RuntimeSceneText(const std::string& bytes, const std::string& name, std::string& outText);
 
         // The scene file's text without the file: exactly what Serialize writes and Deserialize reads (the editor's undo history
         // keeps scene states this way, so restoring one is the same as saving and reopening the scene).

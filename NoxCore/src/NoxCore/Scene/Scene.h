@@ -21,6 +21,7 @@ namespace Nox
 {
     class Entity; // Forward declaration
     class IPhysics3DScene;
+    class SceneLoader;
     class Timeline;
 
     class Scene : public Asset
@@ -97,6 +98,22 @@ namespace Nox
         // script loop is removed).
         void QueueDestroy(Entity entity);
 
+        // Level streaming (Unreal's): a level is another scene file (a scene asset) loaded into this running scene, its entities
+        // marked with LevelComponent, and unloaded again (its entities destroyed). It is read on a thread and its entities created a
+        // slice a frame (SceneLoader); its scripts, particles, timelines and physics start once the whole level is in, as if the scene
+        // had begun with them. Both happen at the start of the next frame (UpdateLevelStreaming), so a script may call them. Play and
+        // Simulate; Level Streaming Volumes call them too. A level whose entity IDs are already in the scene (a scene saved as a copy
+        // of another) is refused.
+        enum class LevelState : uint8_t
+        {
+            Unloaded,
+            Loading,
+            Loaded
+        };
+        bool LoadLevel(AssetHandle level);
+        void UnloadLevel(AssetHandle level);
+        LevelState GetLevelState(AssetHandle level) const;
+
         // Outliner folders (FolderComponent paths). Folders that hold entities exist through them; this list keeps the ones the
         // user made and left empty. Paths use '/' for nesting.
         const std::vector<std::string>& GetFolders() const { return m_Folders; }
@@ -130,6 +147,14 @@ namespace Nox
         // AddComponent, the properties panel), the entity's body / character is made again after the update systems.
         void OnPhysics3DComponentChanged(entt::registry& registry, entt::entity entity);
         void SyncPendingPhysics3D();
+
+        // Level streaming, at the start of a running frame: the volumes against the streaming source, the unloads, then the loads for
+        // LevelStreamingBudgetMs.
+        void UpdateLevelStreaming(const glm::vec3* source, float deltaTime);
+        void FinishLevelLoad(AssetHandle level, const std::vector<UUID>& created, const std::vector<UUID>& heldPhysics);
+        void DestroyLevelEntities(AssetHandle level);
+        // A Box2D body for one entity with a RigidBody2DComponent (Play / Simulate start, and entities that come in later).
+        void CreatePhysics2DBody(Entity entity);
 
         // Systems (run as tasks).
         void UpdatePhysics2D();
@@ -165,7 +190,7 @@ namespace Nox
         uint32_t m_ViewportWidth = 0, m_ViewportHeight = 0;
         float nearPlane, farPlane;
 
-        b2WorldId m_PhysicsWorldID;
+        b2WorldId m_PhysicsWorldID = b2_nullWorldId;
         std::unique_ptr<IPhysics3DScene> m_Physics3DScene;
         std::vector<std::string> m_Folders;
         bool m_IsRunning = false;
@@ -179,6 +204,19 @@ namespace Nox
         bool m_AssetReferencesChanged = false;
 
         std::unordered_map<UUID, entt::entity> m_EntityMap;
+
+        // Level streaming: the levels loaded or on their way, and the volume timers (UpdateLevelStreaming).
+        struct StreamedLevel
+        {
+            AssetHandle Level = 0;
+            std::unique_ptr<SceneLoader> Loader; // while loading
+            std::vector<UUID> HeldPhysics;      // 3D physics bodies made once the level is complete, not while its floor is missing
+            bool Loaded = false;
+            bool Failed = false;                // refused or unreadable: volumes leave it until the source has left them
+            bool UnloadQueued = false;
+            float OutsideTime = 0.0f;           // seconds no volume naming it has held the streaming source
+        };
+        std::vector<StreamedLevel> m_Levels;
 
         // Frame graph
         SystemGraph m_UpdateSystems{ "Scene Update" };

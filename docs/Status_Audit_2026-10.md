@@ -129,9 +129,12 @@ for history. File references are to the code as of this audit.
 - Geometry / cluster page streaming (6b, paused), RT fallback LOD (reverted), discrete LOD for small meshes, world streaming
   (6c), virtual texturing, DirectStorage, IoStore-like containers.
 - Hard memory budgets and eviction, out-of-memory handling, sparse binding, BLAS sub-allocation / eviction, RT instance culling.
-- Lights in the GPU scene (rewritten every frame); materials reference textures by path; BC4 / BC5 / BC6H cooking; scene
-  YAML read on the main thread; model-instance overrides do not keep added components / re-parenting.
-- Profiling: frame-time / flame graph, RAM by category, sortable overlay tables, GPU-to-CPU frame matching.
+- Materials reference textures by path; BC6H cooking (no encoder vendored: HDR images load uncompressed). (2026-10-23: normal maps
+  cooked to BC5 and a Grayscale (BC4) setting, texture Compression settings; scene YAML is parsed on a thread since the async scene
+  load; lights rewritten every frame is a few KB into VRAM-resident memory -- measured not worth dirty tracking.) (Level streaming:
+  built 2026-10-23, Engine plan §5.12a.) model-instance overrides do not keep added components / re-parenting.
+- Profiling: an in-editor frame timeline (Tracy, `NOX_ENABLE_TRACY=ON`, already gives the CPU / GPU timeline with Vulkan zones), RAM
+  by category, sortable overlay tables, GPU-to-CPU frame matching.
 
 **Import (glTF)**
 - Vertex colors (a new cooked vertex layout: every consumer of `shaderio::Vertex`, RT vertex fetch and the cooked file version

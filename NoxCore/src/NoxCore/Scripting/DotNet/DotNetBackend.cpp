@@ -82,6 +82,37 @@ namespace Nox
             return root ? static_cast<uint64_t>(root.GetUUID()) : 0;
         }
 
+        // Scene.LoadLevel("Levels/Interior.nox") / UnloadLevel / GetLevelState: a level by its path under the asset directory
+        // (Scene::LoadLevel; carried out at the start of the next frame).
+        AssetHandle FindLevel(Coral::String path, const char* call)
+        {
+            const AssetHandle level = AssetManager::FindHandleByPath(std::filesystem::path(std::string(path)), AssetType::Scene);
+            if (level == 0)
+                NOX_CORE_ERROR("[C#] {}: no scene '{}' in the asset registry", call, std::string(path));
+            return level;
+        }
+
+        Coral::Bool32 SceneLoadLevel(Coral::String path)
+        {
+            if (!s_Scene) return false;
+            const AssetHandle level = FindLevel(path, "Scene.LoadLevel");
+            return level != 0 && s_Scene->LoadLevel(level);
+        }
+
+        void SceneUnloadLevel(Coral::String path)
+        {
+            if (!s_Scene) return;
+            if (const AssetHandle level = FindLevel(path, "Scene.UnloadLevel"))
+                s_Scene->UnloadLevel(level);
+        }
+
+        int32_t SceneGetLevelState(Coral::String path)
+        {
+            if (!s_Scene) return 0;
+            const AssetHandle level = AssetManager::FindHandleByPath(std::filesystem::path(std::string(path)), AssetType::Scene);
+            return level != 0 ? static_cast<int32_t>(s_Scene->GetLevelState(level)) : 0;
+        }
+
         void SceneDestroy(uint64_t entityID)
         {
             if (!s_Scene) return;
@@ -740,6 +771,9 @@ namespace Nox
         assembly.AddInternalCall("Nox.InternalCalls", "Scene_Instantiate", reinterpret_cast<void*>(&SceneInstantiate));
         assembly.AddInternalCall("Nox.InternalCalls", "Scene_Destroy", reinterpret_cast<void*>(&SceneDestroy));
         assembly.AddInternalCall("Nox.InternalCalls", "Scene_CreateEntity", reinterpret_cast<void*>(&SceneCreateEntity));
+        assembly.AddInternalCall("Nox.InternalCalls", "Scene_LoadLevel", reinterpret_cast<void*>(&SceneLoadLevel));
+        assembly.AddInternalCall("Nox.InternalCalls", "Scene_UnloadLevel", reinterpret_cast<void*>(&SceneUnloadLevel));
+        assembly.AddInternalCall("Nox.InternalCalls", "Scene_GetLevelState", reinterpret_cast<void*>(&SceneGetLevelState));
         assembly.AddInternalCall("Nox.InternalCalls", "Mesh_Create", reinterpret_cast<void*>(&MeshCreate));
         assembly.AddInternalCall("Nox.InternalCalls", "Mesh_Destroy", reinterpret_cast<void*>(&MeshDestroy));
         assembly.AddInternalCall("Nox.InternalCalls", "Mesh_SetData", reinterpret_cast<void*>(&MeshSetData));
