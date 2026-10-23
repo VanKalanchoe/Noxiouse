@@ -173,6 +173,13 @@ file(GLOB_RECURSE NOXCORE_FILES
 
 add_library(${PROJECT_NAME} STATIC ${NOXCORE_FILES} ${IMGUI_SOURCES} ${IMGUIZMO_SOURCES} ${IMGUI_NODE_EDITOR_SOURCES} ${TINYGLTF_SOURCE} ${MESHOPTIMIZER_SOURCES} ${OFFSETALLOCATOR_SOURCES} ${BC7ENC_SOURCES} ${RTXDI_SOURCES}) #main file here
 
+# Precompiled header (src/NoxPCH.h): the standard library and the third-party headers most files include, parsed once instead of in
+# every source file. The vendors' own sources compiled into this library build without it (their own configuration macros).
+target_precompile_headers(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/NoxPCH.h")
+set_source_files_properties(${IMGUI_SOURCES} ${IMGUIZMO_SOURCES} ${IMGUI_NODE_EDITOR_SOURCES} ${MESHOPTIMIZER_SOURCES}
+                            ${OFFSETALLOCATOR_SOURCES} ${BC7ENC_SOURCES} ${RTXDI_SOURCES}
+                            PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
+
 # slang.dll is delay-loaded: it is only loaded when a shader has to be compiled (SlangCompiler::ensureSession), so a packaged game
 # with a complete precompiled shader cache runs without it (File > Package Game: "Precompiled shaders only").
 if(MSVC)

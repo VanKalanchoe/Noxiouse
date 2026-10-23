@@ -6,6 +6,16 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Compile the source files in parallel. With the Visual Studio generator and the ClangCL toolset MSBuild compiles a project's
+# files one after another unless its multi-tool task is on (clang-cl has no /MP); with MSVC's own compiler /MP does it. Every
+# target created below gets these (CMAKE_VS_GLOBALS sets their VS_GLOBAL_* properties).
+if(CMAKE_GENERATOR MATCHES "Visual Studio")
+    set(CMAKE_VS_GLOBALS "UseMultiToolTask=true" "EnforceProcessCountAcrossBuilds=true")
+endif()
+if(MSVC AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:/MP>)
+endif()
+
 include(NoxCore/CMake/Dependencies.cmake)
 
 set(MSDF_ATLAS_DYNAMIC_RUNTIME ON CACHE BOOL "Use dynamic runtime for msdf-atlas-gen" FORCE)

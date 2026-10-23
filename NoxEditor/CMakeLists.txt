@@ -11,6 +11,8 @@ file(GLOB_RECURSE NOXEDITOR_FILES
 target_sources(${PROJECT_NAME} PRIVATE ${NOXEDITOR_FILES})
 
 target_link_libraries(${PROJECT_NAME} PRIVATE NoxCore)
+# NoxCore's precompiled header (NoxCore/src/NoxPCH.h), built for this target's own compile flags.
+target_precompile_headers(${PROJECT_NAME} PRIVATE "${CMAKE_SOURCE_DIR}/NoxCore/src/NoxPCH.h")
 
 set(NOX_SCRIPT_CORE_OUTPUT "${CMAKE_BINARY_DIR}/managed/Nox.ScriptCore")
 set(NOX_FACERUN_SCRIPT_OUTPUT "${CMAKE_BINARY_DIR}/managed/Facerun")

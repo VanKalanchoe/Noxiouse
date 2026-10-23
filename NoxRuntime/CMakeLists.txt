@@ -11,6 +11,8 @@ file(GLOB_RECURSE NOXRUNTIME_FILES
 
 target_sources(${PROJECT_NAME} PRIVATE ${NOXRUNTIME_FILES})
 target_link_libraries(${PROJECT_NAME} PRIVATE NoxCore)
+# NoxCore's precompiled header (NoxCore/src/NoxPCH.h), built for this target's own compile flags.
+target_precompile_headers(${PROJECT_NAME} PRIVATE "${CMAKE_SOURCE_DIR}/NoxCore/src/NoxPCH.h")
 target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
 # Next to NoxEditor.exe: the editor's build puts the managed scripts (Scripts/Core, Scripts/Facerun), Coral, slang, Streamline
