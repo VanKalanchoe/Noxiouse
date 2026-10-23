@@ -1,7 +1,16 @@
 #include "GpuProfilerVK.h"
 
+#include <array>
+
 #include "DeviceVK.h"
 #include "CommandBufferVK.h"
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 namespace NRI
 {
@@ -22,6 +31,12 @@ namespace NRI
 
         if (!isSupported())
             return;
+
+#ifdef _WIN32
+        LARGE_INTEGER frequency{};
+        QueryPerformanceFrequency(&frequency);
+        m_hostFrequency = frequency.QuadPart;
+#endif
 
         m_frameCount = framesInFlight;
         m_frames = std::make_unique<FrameQueries[]>(framesInFlight);
@@ -49,6 +64,32 @@ namespace NRI
         m_readback.reserve(QueriesPerFrame);
         m_statisticsReadback.reserve(StatisticsQueriesPerFrame);
         m_resultScratch.resize(std::max<size_t>(static_cast<size_t>(QueriesPerFrame) * 2, static_cast<size_t>(StatisticsQueriesPerFrame) * (StatisticValues + 1)));
+    }
+
+    bool GpuProfilerVK::calibrate(uint64_t& outGpuTicks, int64_t& outHostNanoseconds)
+    {
+        const DeviceVK::CalibratedTimestamps extension = m_deviceVK.getCalibratedTimestamps();
+        if (!isSupported() || extension == DeviceVK::CalibratedTimestamps::None)
+            return false;
+
+        const std::array<vk::CalibratedTimestampInfoKHR, 2> infos{
+            vk::CalibratedTimestampInfoKHR{ .timeDomain = vk::TimeDomainKHR::eDevice },
+            vk::CalibratedTimestampInfoKHR{ .timeDomain = m_deviceVK.getHostTimeDomain() }
+        };
+        const auto [timestamps, maxDeviation] = extension == DeviceVK::CalibratedTimestamps::KHR
+            ? m_deviceVK.getDevice().getCalibratedTimestampsKHR(infos)
+            : m_deviceVK.getDevice().getCalibratedTimestampsEXT(infos);
+        (void)maxDeviation;
+        outGpuTicks = timestamps[0];
+#ifdef _WIN32
+        // QueryPerformanceCounter ticks to nanoseconds the way MSVC's steady_clock::now() converts them.
+        const int64_t frequency = m_hostFrequency;
+        const int64_t counter = static_cast<int64_t>(timestamps[1]);
+        outHostNanoseconds = (counter / frequency) * 1'000'000'000 + (counter % frequency) * 1'000'000'000 / frequency;
+#else
+        outHostNanoseconds = static_cast<int64_t>(timestamps[1]); // CLOCK_MONOTONIC nanoseconds, libstdc++'s steady_clock
+#endif
+        return true;
     }
 
     void GpuProfilerVK::beginFrame(uint32_t frameSlot)

@@ -668,6 +668,27 @@ namespace NRI
         if (m_memoryBudgetEnabled)
             enabledDeviceExtensions.push_back(vk::EXTMemoryBudgetExtensionName);
 
+        // GPU timestamps placed on the CPU timeline (the editor's profiler; Unreal Insights and Tracy calibrate the same way). The
+        // host domain is the one std::chrono::steady_clock reads: QueryPerformanceCounter on Windows, CLOCK_MONOTONIC on Linux.
+#ifdef _WIN32
+        constexpr vk::TimeDomainKHR hostTimeDomain = vk::TimeDomainKHR::eQueryPerformanceCounter;
+#else
+        constexpr vk::TimeDomainKHR hostTimeDomain = vk::TimeDomainKHR::eClockMonotonic;
+#endif
+        const bool calibratedKHR = isExtensionAvailable(vk::KHRCalibratedTimestampsExtensionName);
+        if (calibratedKHR || isExtensionAvailable(vk::EXTCalibratedTimestampsExtensionName))
+        {
+            const std::vector<vk::TimeDomainKHR> domains = calibratedKHR ? m_physicalDevice.getCalibrateableTimeDomainsKHR()
+                                                                          : m_physicalDevice.getCalibrateableTimeDomainsEXT();
+            if (std::ranges::find(domains, vk::TimeDomainKHR::eDevice) != domains.end() &&
+                std::ranges::find(domains, hostTimeDomain) != domains.end())
+            {
+                m_calibratedTimestamps = calibratedKHR ? CalibratedTimestamps::KHR : CalibratedTimestamps::EXT;
+                m_hostTimeDomain = hostTimeDomain;
+                enabledDeviceExtensions.push_back(calibratedKHR ? vk::KHRCalibratedTimestampsExtensionName : vk::EXTCalibratedTimestampsExtensionName);
+            }
+        }
+
         // query for Vulkan 1.3 features
         vk::StructureChain<vk::PhysicalDeviceFeatures2,
                            vk::PhysicalDeviceVulkan11Features,

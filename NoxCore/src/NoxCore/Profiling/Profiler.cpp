@@ -1,6 +1,8 @@
 #include "Profiler.h"
 
 #include <algorithm>
+#include <cmath>
+#include <format>
 #include <limits>
 
 #include "NRI/GpuProfiler.h"
@@ -24,6 +26,11 @@ namespace Nox
         };
 
         thread_local std::vector<OpenCpuScope> t_OpenCpuScopes;
+
+        int64_t ToNanoseconds(Clock::time_point time)
+        {
+            return std::chrono::duration_cast<std::chrono::nanoseconds>(time.time_since_epoch()).count();
+        }
     }
 
     Profiler& Profiler::Get()
@@ -58,6 +65,11 @@ namespace Nox
     void Profiler::SetThreadName(const char* name)
     {
         TracyBackend::SetThreadName(name);
+#if NOX_PROFILE_STATS
+        ThreadScopeBuffer& buffer = GetThreadBuffer();
+        std::scoped_lock lock(buffer.Mutex);
+        buffer.Name = name;
+#endif
     }
 
     uint32_t Profiler::RegisterScopeLocked(const ProfileScopeInfo& info)
@@ -100,10 +112,12 @@ namespace Nox
         const OpenCpuScope open = t_OpenCpuScopes.back();
         t_OpenCpuScopes.pop_back();
         const uint32_t parentId = t_OpenCpuScopes.empty() ? InvalidScopeId : t_OpenCpuScopes.back().ScopeId;
+        const uint32_t depth = static_cast<uint32_t>(t_OpenCpuScopes.size());
 
         ThreadScopeBuffer& buffer = GetThreadBuffer();
         std::scoped_lock lock(buffer.Mutex);
-        buffer.Completed.push_back({ open.ScopeId, parentId, std::chrono::duration_cast<std::chrono::nanoseconds>(end - open.Start).count() });
+        buffer.Completed.push_back({ open.ScopeId, parentId, std::chrono::duration_cast<std::chrono::nanoseconds>(end - open.Start).count(),
+                                     ToNanoseconds(open.Start), depth, 0 });
 #endif
     }
 
@@ -111,17 +125,30 @@ namespace Nox
     {
 #if NOX_PROFILE_STATS
         const Clock::time_point now = Clock::now();
+        const Clock::time_point frameStart = m_LastFrameEnd;
         const bool hasPreviousFrame = m_LastFrameEnd != Clock::time_point{};
         const double frameMs = hasPreviousFrame ? std::chrono::duration<double, std::milli>(now - m_LastFrameEnd).count() : 0.0;
         m_LastFrameEnd = now;
 
         {
             std::scoped_lock lock(m_ThreadBuffersMutex);
-            for (const std::unique_ptr<ThreadScopeBuffer>& buffer : m_ThreadBuffers)
+            if (m_TimelineCapture)
+                m_TimelineThreadNames.resize(m_ThreadBuffers.size());
+            for (uint32_t lane = 0; lane < m_ThreadBuffers.size(); ++lane)
             {
-                std::scoped_lock bufferLock(buffer->Mutex);
-                m_DrainScratch.insert(m_DrainScratch.end(), buffer->Completed.begin(), buffer->Completed.end());
-                buffer->Completed.clear();
+                ThreadScopeBuffer& buffer = *m_ThreadBuffers[lane];
+                std::scoped_lock bufferLock(buffer.Mutex);
+                const size_t first = m_DrainScratch.size();
+                m_DrainScratch.insert(m_DrainScratch.end(), buffer.Completed.begin(), buffer.Completed.end());
+                for (size_t index = first; index < m_DrainScratch.size(); ++index)
+                    m_DrainScratch[index].Lane = lane;
+                buffer.Completed.clear();
+
+                // (EndFrame runs on the main thread.)
+                if (m_TimelineCapture)
+                    m_TimelineThreadNames[lane] = !buffer.Name.empty() ? buffer.Name
+                                                : buffer.Thread == std::this_thread::get_id() ? std::string("Main Thread")
+                                                : std::format("Thread {}", lane);
             }
         }
 
@@ -151,6 +178,30 @@ namespace Nox
             PushSample(m_CpuHistories[scope.ScopeId].Timing, static_cast<float>(scopeFrameMs), m_FrameNumber);
             scopeFrameMs = -1.0;
         }
+        if (m_TimelineCapture && hasPreviousFrame)
+        {
+            if (m_Timeline.empty())
+                m_Timeline.resize(TimelineFrames);
+            TimelineFrame& frame = m_Timeline[m_TimelineNext];
+            m_TimelineNext = (m_TimelineNext + 1) % TimelineFrames;
+            m_TimelineCount = std::min(m_TimelineCount + 1, TimelineFrames);
+
+            frame.Number = m_FrameNumber;
+            frame.StartNs = ToNanoseconds(frameStart);
+            frame.EndNs = ToNanoseconds(now);
+            frame.CpuMs = std::max(frameMs - waitMs, 0.0);
+            frame.GpuMs = -1.0;
+            frame.GpuCalibrated = false;
+            frame.Cpu.clear();
+            frame.Gpu.clear();
+            const size_t kept = std::min<size_t>(m_DrainScratch.size(), MaxTimelineScopesPerFrame);
+            frame.DroppedScopes = static_cast<uint32_t>(m_DrainScratch.size() - kept);
+            for (size_t index = 0; index < kept; ++index)
+            {
+                const CompletedCpuScope& scope = m_DrainScratch[index];
+                frame.Cpu.push_back({ scope.ScopeId, scope.Depth, scope.Lane, scope.StartNs, scope.StartNs + scope.DurationNs });
+            }
+        }
         m_DrainScratch.clear();
 
         if (hasPreviousFrame)
@@ -169,6 +220,8 @@ namespace Nox
         m_GpuProfiler = gpuProfiler;
         m_GpuFrames.clear();
         m_GpuCurrentSlot = NoGpuSlot;
+        m_GpuCalibrated = false;
+        m_LastGpuCalibration = {};
     }
 
     void Profiler::BeginGpuFrame(uint32_t frameSlot)
@@ -182,11 +235,26 @@ namespace Nox
 
         m_GpuProfiler->beginFrame(frameSlot);
 
+#if NOX_PROFILE_STATS
+        // The GPU / CPU clock pair the frame timeline places GPU scopes with, sampled again every second (the clocks drift apart
+        // slowly).
+        if (m_TimelineCapture)
+        {
+            const Clock::time_point now = Clock::now();
+            if (m_LastGpuCalibration == Clock::time_point{} || now - m_LastGpuCalibration > std::chrono::seconds(1))
+            {
+                m_LastGpuCalibration = now;
+                m_GpuCalibrated = m_GpuProfiler->calibrate(m_GpuCalibrationTicks, m_GpuCalibrationHostNs);
+            }
+        }
+#endif
+
         GpuFrameRecord& frame = m_GpuFrames[frameSlot];
         ProcessGpuReadback(frame);
 
         frame.Scopes.clear();
         frame.Statistics.clear();
+        frame.FrameNumber = m_FrameNumber;
         // Tracy's manual: read the connection state once and use the same value for a zone's begin and end
         // (and, for GPU zones, for its times).
         frame.TracyZonesEmitted = m_TracyGpuContextCreated && TracyBackend::IsConnected();
@@ -198,7 +266,7 @@ namespace Nox
         // The frame scope spans every command buffer: its timestamps go into the first and the last one, its Tracy zone
         // is opened and closed here on the main thread.
         const uint32_t query = m_GpuProfiler->allocateQueryPair();
-        frame.Scopes.push_back({ m_GpuFrameScopeId, InvalidScopeId, query });
+        frame.Scopes.push_back({ m_GpuFrameScopeId, InvalidScopeId, query, 0 });
         if (frame.TracyZonesEmitted && query != NRI::GpuProfiler::InvalidQueryId)
             TracyBackend::BeginGpuZone(m_GpuFrameScopeId, query);
 
@@ -239,8 +307,9 @@ namespace Nox
             m_GpuProfiler->writeTimestamp(cmd, beginQuery);
         }
 
+        const uint32_t depth = static_cast<uint32_t>(context.m_OpenScopes.size()) + 1;
         context.m_OpenScopes.push_back(static_cast<uint32_t>(context.m_Scopes.size()));
-        context.m_Scopes.push_back({ scopeId, parentId, beginQuery });
+        context.m_Scopes.push_back({ scopeId, parentId, beginQuery, depth });
 
         if (m_GpuFrames[m_GpuCurrentSlot].TracyZonesEmitted && beginQuery != NRI::GpuProfiler::InvalidQueryId)
             TracyBackend::BeginGpuZone(scopeId, beginQuery);
@@ -420,6 +489,7 @@ namespace Nox
         if (!t_Buffer)
         {
             std::unique_ptr<ThreadScopeBuffer> buffer = std::make_unique<ThreadScopeBuffer>();
+            buffer->Thread = std::this_thread::get_id();
             t_Buffer = buffer.get();
             std::scoped_lock lock(m_ThreadBuffersMutex);
             m_ThreadBuffers.push_back(std::move(buffer));
@@ -494,6 +564,30 @@ namespace Nox
         const uint64_t tickMask = validBits >= 64 ? std::numeric_limits<uint64_t>::max() : (uint64_t{1} << validBits) - 1;
         const double millisecondsPerTick = static_cast<double>(m_GpuProfiler->getTimestampPeriod()) / NanosecondsPerMillisecond;
 
+        // The frame timeline's copy: on the CPU clock through the calibration pair, else from the CPU frame's start.
+        TimelineFrame* timelineFrame = FindTimelineFrame(frame.FrameNumber);
+        uint64_t frameBeginTicks = 0;
+        const GpuScopeContext::Scope& frameScope = frame.Scopes.front();
+        if (timelineFrame && !m_GpuCalibrated &&
+            (frameScope.BeginQuery == NRI::GpuProfiler::InvalidQueryId || !findTicks(frameScope.BeginQuery, frameBeginTicks)))
+            timelineFrame = nullptr;
+        if (timelineFrame)
+        {
+            timelineFrame->Gpu.clear();
+            timelineFrame->GpuCalibrated = m_GpuCalibrated;
+        }
+        const double nanosecondsPerTick = static_cast<double>(m_GpuProfiler->getTimestampPeriod());
+        auto toTimelineNs = [&](uint64_t ticks) -> int64_t
+        {
+            if (!m_GpuCalibrated)
+                return timelineFrame->StartNs + std::llround(static_cast<double>((ticks - frameBeginTicks) & tickMask) * nanosecondsPerTick);
+            // Ticks before the calibration sample are a negative difference (modulo the valid bits).
+            const uint64_t difference = (ticks - m_GpuCalibrationTicks) & tickMask;
+            const int64_t signedDifference = difference > tickMask / 2 ? -static_cast<int64_t>(tickMask - difference) - 1
+                                                                       : static_cast<int64_t>(difference);
+            return m_GpuCalibrationHostNs + std::llround(static_cast<double>(signedDifference) * nanosecondsPerTick);
+        };
+
         for (const GpuScopeContext::Scope& record : frame.Scopes)
         {
             uint64_t beginTicks = 0;
@@ -503,6 +597,12 @@ namespace Nox
                 continue;
 
             const double scopeMs = static_cast<double>((endTicks - beginTicks) & tickMask) * millisecondsPerTick;
+            if (timelineFrame)
+            {
+                timelineFrame->Gpu.push_back({ record.ScopeId, record.Depth, 0, toTimelineNs(beginTicks), toTimelineNs(endTicks) });
+                if (record.ScopeId == m_GpuFrameScopeId)
+                    timelineFrame->GpuMs = scopeMs;
+            }
             double& frameMs = m_GpuFrameMs[record.ScopeId];
             frameMs = std::max(frameMs, 0.0) + scopeMs;
             m_GpuHistories[record.ScopeId].ParentId = record.ParentId;
@@ -520,6 +620,29 @@ namespace Nox
             frameMs = -1.0;
         }
 #endif
+    }
+
+    const TimelineFrame& Profiler::GetTimelineFrame(uint32_t index) const
+    {
+        return m_Timeline[(m_TimelineNext + TimelineFrames - m_TimelineCount + index) % TimelineFrames];
+    }
+
+    void Profiler::ClearTimeline()
+    {
+        m_TimelineCount = 0;
+    }
+
+    TimelineFrame* Profiler::FindTimelineFrame(uint64_t frameNumber)
+    {
+        for (uint32_t back = 0; back < m_TimelineCount; ++back)
+        {
+            TimelineFrame& frame = m_Timeline[(m_TimelineNext + TimelineFrames - 1 - back) % TimelineFrames];
+            if (frame.Number == frameNumber)
+                return &frame;
+            if (frame.Number < frameNumber)
+                break;
+        }
+        return nullptr;
     }
 
     void Profiler::BuildTreeOrder(const std::vector<ScopeHistory>& histories, std::vector<ProfileScopeStats>& outScopes) const

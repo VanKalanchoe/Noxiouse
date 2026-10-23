@@ -465,8 +465,28 @@ The `[AssetLoad]` log lines added this session stay until equivalent scopes exis
 | Overlay | `Profiling/StatsOverlay.{h,cpp}`, `Profiling/StatsOverlayLayer.{h,cpp}` (pushed by `Application` for every app) | Drawn with the existing Renderer2D `DrawQuad`/`DrawString` in the normal 2D overlay pass: quads and glyphs are placed on a plane just in front of the camera, built by unprojecting the output image's corner pixels (`Renderer::getViewProjection/getOutputSize`), so the overlay sits at the top-left, pixel-exact, in the editor viewport and in shipped games. No extra pipeline, pass or shader. F3 toggles, Shift+F3 resets. Basic view (default): FPS, CPU frame time (frame minus `NOX_PROFILE_WAIT_SCOPE` time: GPU fence + present) and GPU frame time with last/avg/min/max, RAM process/installed (`SDL_GetSystemRAM`), VRAM usage/budget. Detailed view (per-scope tables, heaps, counters) is kept but off (`StatsOverlay::SetDetailed`); per-pass analysis uses Tracy for now. Like all 2D overlay content it writes entity ID -1, so picking under the overlay hits nothing. |
 | Switches | `NOX_PROFILE_STATS` (ON), `NOX_ENABLE_TRACY` (OFF) CMake options, `NOX_BUILD_CONFIG` | Both off: every macro compiles to nothing. |
 
-Differences from the design above: GPU samples are not matched to CPU frame indices yet (GPU windows are kept
-separately); stats reset on scene new/open and render-resolution changes (not on every denoiser toggle).
+Differences from the design above: GPU samples are not matched to CPU frame indices in the stats windows (GPU windows are kept
+separately; the frame timeline below matches them); stats reset on scene new/open and render-resolution changes (not on every
+denoiser toggle).
+
+#### 5.1.9 Frame timeline (built 2026-10-23)
+The editor's **Window > Profiler**, Unreal Insights' timing view inside the editor, from the same instrumentation (no new macros):
+- **Capture** (`Profiler::SetTimelineCapture`, on only while the window is open, visible and recording): each frame's CPU scopes with
+  their start / end (steady clock), nesting depth and thread lane, and its GPU scopes, for the last 300 frames
+  (`Profiler::GetTimelineFrame`, at most 65536 CPU scopes a frame). A GPU frame record carries the CPU frame number that recorded it,
+  so its timestamps, read back a few frames later, land on that frame.
+- **GPU on the CPU clock:** `NRI::GpuProfiler::calibrate` samples a device timestamp and the host clock together
+  (`VK_KHR_calibrated_timestamps`, else the EXT original; the host domain std::chrono::steady_clock reads: QueryPerformanceCounter on
+  Windows, CLOCK_MONOTONIC on Linux), again every second; GPU ticks become host nanoseconds through that pair, as Unreal Insights and
+  Tracy calibrate. A device without it gets the GPU track drawn from its frame's start (durations right, offset unknown; the window
+  says so).
+- **Window:** frame-time graph of the kept frames (frame time bars against 60 / 30 fps lines, GPU frame time marks; click picks a frame,
+  Follow keeps the newest whose GPU times came back); timeline with a ruler from the picked frame's start, frame boundaries, a GPU
+  track and one lane per thread (main thread, task workers by name), wheel zoom around the mouse, drag to pan, click marks a scope,
+  double-click zooms to it, tooltips with duration, offset, thread and source location; the picked frame's scopes summed per scope and
+  track (calls, total, max, % of the frame), sortable and filterable.
+- Not yet: saving / loading a capture, spike trigger ("keep the frame over N ms"), memory over time, async compute / transfer queue
+  tracks.
 Process memory stays in `Utils/PlatformUtils.cpp` because SDL3 has no per-process memory API.
 
 ### 5.2 Threading Model & Task System (Taskflow)

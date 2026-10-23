@@ -133,8 +133,8 @@ for history. File references are to the code as of this audit.
   cooked to BC5 and a Grayscale (BC4) setting, texture Compression settings; scene YAML is parsed on a thread since the async scene
   load; lights rewritten every frame is a few KB into VRAM-resident memory -- measured not worth dirty tracking.) (Level streaming:
   built 2026-10-23, Engine plan §5.12a.) model-instance overrides do not keep added components / re-parenting.
-- Profiling: an in-editor frame timeline (Tracy, `NOX_ENABLE_TRACY=ON`, already gives the CPU / GPU timeline with Vulkan zones), RAM
-  by category, sortable overlay tables, GPU-to-CPU frame matching.
+- Profiling: RAM by category, sortable overlay tables. (2026-10-23: in-editor frame timeline, Window > Profiler, with GPU work on the
+  CPU clock through calibrated timestamps and GPU times matched to their CPU frame, Engine plan §5.1.9.)
 
 **Import (glTF)**
 - Vertex colors (a new cooked vertex layout: every consumer of `shaderio::Vertex`, RT vertex fetch and the cooked file version

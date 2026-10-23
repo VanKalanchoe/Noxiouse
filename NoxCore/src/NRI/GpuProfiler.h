@@ -39,6 +39,9 @@ namespace NRI
         virtual float getTimestampPeriod() const = 0;
         // Number of valid bits in a tick value; tick differences must be masked with it.
         virtual uint32_t getTimestampValidBits() const = 0;
+        // A GPU timestamp and the host time sampled together (VK_KHR_calibrated_timestamps), the host time in nanoseconds of
+        // std::chrono::steady_clock's epoch, so GPU ticks can be placed on the CPU timeline. False when the device cannot.
+        virtual bool calibrate(uint64_t& outGpuTicks, int64_t& outHostNanoseconds) = 0;
 
         // Main thread, before the slot's command buffers are recorded: collects the slot's previous timestamps
         // (getReadbackTimestamps) and starts handing out its queries.

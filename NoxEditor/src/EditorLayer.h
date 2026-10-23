@@ -9,6 +9,7 @@
 #include "ScriptBuilder.h"
 #include "Panels/SceneHierarchyPanel.h"
 #include "Panels/ContentBrowserPanel.h"
+#include "Panels/ProfilerPanel.h"
 #include "Panels/RenderGraphPanel.h"
 #include "Panels/NodeGraphEditorPanel.h"
 #include "Panels/MaterialEditorPanel.h"
@@ -312,6 +313,7 @@ namespace Nox
         SceneHierarchyPanel m_SceneHierarchyPanel;
         Scope<ContentBrowserPanel> m_ContentBrowserPanel;
         Scope<RenderGraphPanel> m_RenderGraphPanel;
+        ProfilerPanel m_ProfilerPanel;
         // Open node-graph editors (docs/Animation_Graph_Architecture_Plan_2026.md Step 3), one per opened graph
         // asset; OpenNodeGraphEditor focuses an already-open one instead of duplicating it.
         std::vector<Scope<NodeGraphEditorPanel>> m_NodeGraphEditors;

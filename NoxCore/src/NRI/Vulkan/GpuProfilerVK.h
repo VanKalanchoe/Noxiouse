@@ -19,6 +19,7 @@ namespace NRI
         bool isSupported() const override { return m_timestampValidBits != 0; }
         float getTimestampPeriod() const override { return m_timestampPeriod; }
         uint32_t getTimestampValidBits() const override { return m_timestampValidBits; }
+        bool calibrate(uint64_t& outGpuTicks, int64_t& outHostNanoseconds) override;
 
         void beginFrame(uint32_t frameSlot) override;
         std::span<const GpuTimestamp> getReadbackTimestamps() const override { return m_readback; }
@@ -60,5 +61,6 @@ namespace NRI
         uint32_t m_currentSlot = NoSlot;        // written by beginFrame before recording starts
         float m_timestampPeriod = 0.0f;
         uint32_t m_timestampValidBits = 0;
+        int64_t m_hostFrequency = 1; // QueryPerformanceFrequency (Windows)
     };
 }

@@ -42,6 +42,10 @@ namespace NRI
         // Pipeline statistics queries including task/mesh shader invocations (GpuProfiler).
         bool isPipelineStatisticsEnabled() const { return m_pipelineStatisticsEnabled; }
         bool isMemoryBudgetSupported() const override { return m_memoryBudgetEnabled; }
+        // VK_KHR_calibrated_timestamps (or its EXT original) with the device and the host's steady clock domains (GpuProfiler::calibrate).
+        enum class CalibratedTimestamps : uint8_t { None, KHR, EXT };
+        CalibratedTimestamps getCalibratedTimestamps() const { return m_calibratedTimestamps; }
+        vk::TimeDomainKHR getHostTimeDomain() const { return m_hostTimeDomain; }
         // VK_EXT_debug_utils: required with the validation layers, otherwise enabled whenever the loader offers it so
         // capture tools show debug labels in every build.
         bool isDebugUtilsEnabled() const { return m_debugUtilsEnabled; }
@@ -155,6 +159,8 @@ namespace NRI
         bool m_shaderObjectsEnabled = false;
         bool m_pipelineStatisticsEnabled = false;
         bool m_memoryBudgetEnabled = false;
+        CalibratedTimestamps m_calibratedTimestamps = CalibratedTimestamps::None;
+        vk::TimeDomainKHR m_hostTimeDomain = vk::TimeDomainKHR::eDevice;
         std::atomic<uint64_t> m_textureBytes{ 0 };
         bool m_debugUtilsEnabled = false;
         uint32_t m_queueIndex = ~0;

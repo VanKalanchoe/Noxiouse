@@ -601,6 +601,9 @@ namespace Nox
                 bool renderGraphOpen = m_RenderGraphPanel->IsOpen();
                 if (ImGui::MenuItem("Render Graph", nullptr, &renderGraphOpen))
                     m_RenderGraphPanel->SetOpen(renderGraphOpen);
+                bool profilerOpen = m_ProfilerPanel.IsOpen();
+                if (ImGui::MenuItem("Profiler", nullptr, &profilerOpen))
+                    m_ProfilerPanel.SetOpen(profilerOpen);
 
                 // Up to four viewports, each with its own camera (docs/Future.md item 5). A layout snaps them into place; a
                 // viewport's tab can then be dragged anywhere and the splitters resized.
@@ -701,6 +704,7 @@ namespace Nox
         m_SceneHierarchyPanel.OnImGuiRender();
         m_ContentBrowserPanel->OnImGuiRender();
         m_RenderGraphPanel->OnImGuiRender();
+        m_ProfilerPanel.OnImGuiRender();
 
         for (auto& panel : m_NodeGraphEditors)
             panel->OnImGuiRender();

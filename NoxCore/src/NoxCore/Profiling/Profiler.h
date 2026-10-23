@@ -9,6 +9,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -86,6 +87,32 @@ namespace Nox
         std::vector<MemoryCategoryStats> Categories; // what each part of the engine holds of the device budget (§5.8.3)
     };
 
+    // One scope of a captured frame (the editor's frame timeline, like Unreal Insights' timing view): a CPU scope on its thread's
+    // lane, a GPU scope on the GPU track. Times are std::chrono::steady_clock nanoseconds; GPU scopes are on that clock when the
+    // device calibrates its timestamps (TimelineFrame::GpuCalibrated).
+    struct TimelineScope
+    {
+        uint32_t ScopeId = 0;
+        uint32_t Depth = 0; // nesting in its lane (0: outermost)
+        uint32_t Lane = 0;  // CPU: Profiler::GetTimelineThreadName's index; GPU: 0
+        int64_t StartNs = 0;
+        int64_t EndNs = 0;
+    };
+
+    struct TimelineFrame
+    {
+        uint64_t Number = 0;
+        int64_t StartNs = 0; // the previous frame's end
+        int64_t EndNs = 0;
+        double CpuMs = 0.0;  // frame time minus wait scopes
+        double GpuMs = -1.0; // "GPU Frame", -1 until its timestamps are read back (a few frames later)
+        // GPU scopes placed with calibrated timestamps; otherwise (no VK_KHR_calibrated_timestamps) the GPU frame is drawn from StartNs.
+        bool GpuCalibrated = false;
+        uint32_t DroppedScopes = 0; // beyond MaxTimelineScopesPerFrame
+        std::vector<TimelineScope> Cpu; // in completion order
+        std::vector<TimelineScope> Gpu;
+    };
+
     // GPU scope state of one command buffer while it is recorded (Profiler::BeginGpuScope). A frame's command buffers can
     // be recorded on different threads, each with its own context; a context is used by one thread at a time and keeps
     // its capacity across frames.
@@ -99,6 +126,7 @@ namespace Nox
             uint32_t ScopeId;
             uint32_t ParentId;
             uint32_t BeginQuery; // the end timestamp is BeginQuery + 1
+            uint32_t Depth;      // under "GPU Frame" (depth 0)
         };
 
         struct Statistics
@@ -120,6 +148,9 @@ namespace Nox
         static constexpr uint32_t WindowFrames = 120;
         // Fixed so per-scope tables never reallocate while other threads read them.
         static constexpr uint32_t MaxScopes = 4096;
+        // Frame timeline: the frames kept, and the CPU scopes kept of one frame.
+        static constexpr uint32_t TimelineFrames = 300;
+        static constexpr uint32_t MaxTimelineScopesPerFrame = 65536;
 
         static Profiler& Get();
 
@@ -176,6 +207,23 @@ namespace Nox
         void GetPipelineStatistics(std::vector<ProfilePipelineStatistics>& outStatistics) const;
         const ProfileMemoryStats& GetMemoryStats() const { return m_MemoryStats; }
 
+        // Frame timeline (main thread): while capturing, every frame's scopes with their start and end times are kept for the last
+        // TimelineFrames frames. Off by default (the editor's Profiler window turns it on while it records).
+        void SetTimelineCapture(bool capture) { m_TimelineCapture = capture; }
+        bool IsTimelineCapturing() const { return m_TimelineCapture; }
+        uint32_t GetTimelineFrameCount() const { return m_TimelineCount; }
+        const TimelineFrame& GetTimelineFrame(uint32_t index) const; // 0: the oldest kept
+        void ClearTimeline();
+        // The CPU lanes: "Main Thread", the task system's workers by their names, other threads "Thread n".
+        uint32_t GetTimelineThreadCount() const { return static_cast<uint32_t>(m_TimelineThreadNames.size()); }
+        const std::string& GetTimelineThreadName(uint32_t lane) const { return m_TimelineThreadNames[lane]; }
+        // Whether GPU scopes can be placed on the CPU clock (calibrated timestamps).
+        bool IsGpuTimelineCalibrated() const { return m_GpuCalibrated; }
+        const ProfileScopeInfo* GetScopeInfo(uint32_t scopeId) const
+        {
+            return scopeId < m_ScopeCount.load(std::memory_order_relaxed) ? m_Scopes[scopeId] : nullptr;
+        }
+
     private:
         struct History;
         struct ScopeHistory;
@@ -188,6 +236,7 @@ namespace Nox
         ThreadScopeBuffer& GetThreadBuffer();
         void ProcessGpuReadback(GpuFrameRecord& frame);
         void BuildTreeOrder(const std::vector<ScopeHistory>& histories, std::vector<ProfileScopeStats>& outScopes) const;
+        TimelineFrame* FindTimelineFrame(uint64_t frameNumber);
         void AppendSubtree(const std::vector<ScopeHistory>& histories, const std::vector<std::vector<uint32_t>>& children,
                            uint32_t scopeId, uint32_t depth, std::vector<bool>& listed, std::vector<ProfileScopeStats>& outScopes) const;
         bool IsRecent(uint64_t lastSampleFrame) const;
@@ -220,12 +269,17 @@ namespace Nox
             uint32_t ScopeId;
             uint32_t ParentId;
             int64_t DurationNs;
+            int64_t StartNs; // steady_clock
+            uint32_t Depth;
+            uint32_t Lane;   // set when drained
         };
 
         struct ThreadScopeBuffer
         {
             std::mutex Mutex; // uncontended: the owning thread appends, EndFrame() swaps once per frame
             std::vector<CompletedCpuScope> Completed;
+            std::thread::id Thread;
+            std::string Name; // SetThreadName
         };
 
         struct GpuFrameRecord
@@ -233,6 +287,7 @@ namespace Nox
             std::vector<GpuScopeContext::Scope> Scopes; // "GPU Frame" first, then the contexts in submission order
             std::vector<GpuScopeContext::Statistics> Statistics;
             bool TracyZonesEmitted = false;              // zone begins were sent to Tracy, so their times must be too
+            uint64_t FrameNumber = 0;                    // the CPU frame that recorded it (frame timeline)
         };
 
         struct NamedScope
@@ -281,6 +336,17 @@ namespace Nox
             uint64_t LastFrame = 0;
         };
         std::vector<StatisticsValue> m_GpuStatistics; // per scope
+
+        // Frame timeline
+        bool m_TimelineCapture = false;
+        std::vector<TimelineFrame> m_Timeline; // ring of TimelineFrames
+        uint32_t m_TimelineNext = 0;
+        uint32_t m_TimelineCount = 0;
+        std::vector<std::string> m_TimelineThreadNames; // per lane (ThreadScopeBuffer index)
+        bool m_GpuCalibrated = false;
+        uint64_t m_GpuCalibrationTicks = 0;
+        int64_t m_GpuCalibrationHostNs = 0;
+        std::chrono::steady_clock::time_point m_LastGpuCalibration{};
 
         // Counters + memory
         std::vector<CounterValue> m_Counters;
