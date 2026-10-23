@@ -35,38 +35,54 @@ float2 intersection_uv(GpuRayTracingInstance lut, uint primIndex, float2 barycen
     return w0 * uv0 + w1 * uv1 + w2 * uv2;
 }
 
-// A shadow ray from a ray's hit (any hit ends it; alpha-masked occluders cut out).
-bool ray_hit_shadowed(UniformBufferObject* ubo, float3 origin, float3 direction, float maxDistance)
+// The light a ray lets through a surface it passes, the path tracer's rule (PathTracerBridge.slang Bridge::OccluderTransmittance):
+// ExcludeFromNEE surfaces (RTXPT's window glass) untouched; glass seen through (and any transmission without an RTXPT material file)
+// tinted by its transmission and base color; blended surfaces by 1 - alpha; alpha-masked ones cut out; anything else 0. Glass used
+// to let light through untouched: a wall lantern's yellow panes lit the wall with its bulb's white.
+float3 ray_occluder_transmittance(UniformBufferObject* ubo, GpuRayTracingInstance lut, uint primitive, float2 barycentrics)
+{
+    if ((lut.pathTracerFlags & PathTracerExcludeFromNEE) != 0)
+        return float3(1.0);
+    if (lut.transmissionFactor > 0.0 &&
+        ((lut.pathTracerFlags & PathTracerRtxptMaterial) == 0 || ray_see_through(lut.transmissionFactor, lut.alphaMode)))
+        return saturate(lut.transmissionFactor) * saturate(lut.baseColorFactor.rgb) * 0.92;
+    if (lut.alphaMode == 0)
+        return float3(0.0);
+    float alpha = lut.baseColorFactor.a;
+    if (lut.baseColorTextureIndex != 0xFFFFFFFF)
+    {
+        Texture2D tex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + lut.baseColorTextureIndex, 0));
+        alpha *= tex.SampleLevel(SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0)), intersection_uv(lut, primitive, barycentrics),
+                                 RayAlphaTestLod).a;
+    }
+    if (lut.alphaMode == 2)
+        return float3(1.0 - saturate(alpha));
+    return alpha >= lut.alphaCutoff ? float3(0.0) : float3(1.0);
+}
+
+// What reaches `origin` along `direction` from `maxDistance` away: 0 behind an opaque surface, else the product of what every surface
+// passed lets through (ray_occluder_transmittance), as the path tracer's shadow rays (PathTracerNEE.slang visibleNEECandidate).
+float3 ray_transmittance(UniformBufferObject* ubo, float3 origin, float3 direction, float tMin, float maxDistance)
 {
     RayDesc shadowRay;
     shadowRay.Origin = origin;
     shadowRay.Direction = direction;
-    shadowRay.TMin = 0.005 * ubo->unitsPerMeter;
+    shadowRay.TMin = tMin;
     shadowRay.TMax = maxDistance;
 
     RaytracingAccelerationStructure accelerationStructure = RaytracingAccelerationStructure(ubo->tlasDeviceAddress);
     GpuRayTracingInstance* instanceLUTBuffer = (GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference;
-    SamplerState textureSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
     RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> shadowRq;
     shadowRq.TraceRayInline(accelerationStructure, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES, 0xFF, shadowRay);
+    float3 transmittance = float3(1.0);
     while (shadowRq.Proceed())
     {
-        GpuRayTracingInstance shadowLut = instanceLUTBuffer[shadowRq.CandidateRayInstanceCustomIndex()];
-        if (ray_shadow_passes(shadowLut))
-            continue;
-        if (shadowLut.alphaMode == 0 || shadowLut.baseColorTextureIndex == 0xFFFFFFFF)
-        {
+        transmittance *= ray_occluder_transmittance(ubo, instanceLUTBuffer[shadowRq.CandidateRayInstanceCustomIndex()],
+                                                    shadowRq.CandidatePrimitiveIndex(), shadowRq.CandidateTriangleBarycentrics());
+        if (all(transmittance < 1e-3))
             shadowRq.CommitNonOpaqueTriangleHit();
-        }
-        else
-        {
-            float2 shadowUV = intersection_uv(shadowLut, shadowRq.CandidatePrimitiveIndex(), shadowRq.CandidateTriangleBarycentrics());
-            Texture2D tex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + shadowLut.baseColorTextureIndex, 0));
-            if (tex.SampleLevel(textureSampler, shadowUV, 0).a >= shadowLut.alphaCutoff)
-                shadowRq.CommitNonOpaqueTriangleHit();
-        }
     }
-    return shadowRq.CommittedStatus() == COMMITTED_TRIANGLE_HIT;
+    return shadowRq.CommittedStatus() == COMMITTED_TRIANGLE_HIT ? float3(0.0) : transmittance;
 }
 
 // A ray hit's diffuse albedo, specular F0 and perceptual roughness, as the path tracer reads its material (PathTracerBridge.slang):
@@ -194,9 +210,9 @@ float3 shadeRayHit(UniformBufferObject* ubo, uint instanceSlot, uint primitive, 
     float3 directIrradiance = float3(0.0);
     for (uint i = 0; i < selectedLights.count; ++i)
     {
-        if (!ray_hit_shadowed(ubo, hitPos + hitNormal * (0.02 * ubo->unitsPerMeter), selectedLights.direction[i],
-                              max(selectedLights.distance[i] - 0.02 * ubo->unitsPerMeter, 0.0)))
-            directIrradiance += selectedLights.irradiance[i];
+        directIrradiance += selectedLights.irradiance[i] *
+                            ray_transmittance(ubo, hitPos + hitNormal * (0.02 * ubo->unitsPerMeter), selectedLights.direction[i],
+                                              0.005 * ubo->unitsPerMeter, max(selectedLights.distance[i] - 0.02 * ubo->unitsPerMeter, 0.0));
     }
     const float3 directLight = (albedo / 3.14159265) * directIrradiance;
 

@@ -27,26 +27,6 @@ bool screen_probe_candidate_blocks(UniformBufferObject* ubo, GpuRayTracingInstan
     return instance.alphaMode == 1 ? alpha >= instance.alphaCutoff : alpha >= 0.5;
 }
 
-bool screen_probe_occluded(UniformBufferObject* ubo, float3 origin, float3 direction, float maxDistance)
-{
-    RayDesc ray;
-    ray.Origin = origin;
-    ray.Direction = direction;
-    ray.TMin = 0.0;
-    ray.TMax = maxDistance;
-
-    RaytracingAccelerationStructure tlas = RaytracingAccelerationStructure(ubo->tlasDeviceAddress);
-    RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> query;
-    query.TraceRayInline(tlas, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES, 0xFF, ray);
-    GpuRayTracingInstance* instances = (GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference;
-    while (query.Proceed())
-    {
-        if (screen_probe_candidate_blocks(ubo, instances[query.CandidateRayInstanceCustomIndex()], query.CandidatePrimitiveIndex(),
-                                          query.CandidateTriangleBarycentrics()))
-            query.CommitNonOpaqueTriangleHit();
-    }
-    return query.CommittedStatus() == COMMITTED_TRIANGLE_HIT;
-}
 
 // The radiance leaving a hit back along the ray (diffuse). The back of single-sided geometry (the ray got through a crack, or the
 // probe's surface is a sliver inside something) gives no light.
@@ -121,15 +101,14 @@ float3 screen_probe_shade_hit(UniformBufferObject* ubo, uint instanceSlot, uint 
 
     // Direct light: the strongest lights at the hit exactly, one more for all the others (LightSelection.slang), each behind its
     // shadow ray. Point and spot lights give at most what they give 10 cm away (a ray grazing a lamp's own fixture is no firefly).
+    // Through glass tinted, as the path tracer's shadow rays (ray_transmittance, RayHitShading.slang).
     const float3 shadowOrigin = position + faceNormal * (0.02 * ubo->unitsPerMeter);
     uint rng = seed | 1u;
     const LightSelection lights = select_lights(ubo, position, normal, 0.1 * ubo->unitsPerMeter, rng);
     float3 irradiance = float3(0.0);
     for (uint i = 0; i < lights.count; ++i)
-    {
-        if (!screen_probe_occluded(ubo, shadowOrigin, lights.direction[i], max(lights.distance[i] - 0.02 * ubo->unitsPerMeter, 0.0)))
-            irradiance += lights.irradiance[i];
-    }
+        irradiance += lights.irradiance[i] *
+                      ray_transmittance(ubo, shadowOrigin, lights.direction[i], 0.0, max(lights.distance[i] - 0.02 * ubo->unitsPerMeter, 0.0));
     const float3 direct = albedo / ScreenProbePi * irradiance;
 
     // The light around the hit: the DDGI cascades (seen from the probe), else the environment's irradiance.
@@ -204,13 +183,16 @@ float4 screen_probe_emissive_sample(UniformBufferObject* ubo, float3 origin, flo
     }
     if (weightSum <= 0.0 || chosenTarget <= 0.0)
         return float4(0.0);
-    if (screen_probe_occluded(ubo, origin, chosen.direction, max(chosen.distance - 0.02 * ubo->unitsPerMeter, 0.0)))
+    // Through a lamp's glass tinted (ray_transmittance: the path tracer's shadow rays): a lantern's yellow panes lit the wall with its
+    // bulb's white when glass let the shadow ray through untouched.
+    const float3 transmittance = ray_transmittance(ubo, origin, chosen.direction, 0.0, max(chosen.distance - 0.02 * ubo->unitsPerMeter, 0.0));
+    if (all(transmittance <= 0.0))
         return float4(0.0);
 
     // RIS: L(y) / target(y) * mean candidate weight; E / pi = 1 / (pi K) * sum over the probe's K samples, the cosine the irradiance
     // pass's.
     const float contributionWeight = weightSum / (float(ScreenProbeEmissiveCandidates) * chosenTarget);
-    float3 share = chosen.radiance * contributionWeight / (ScreenProbePi * float(ScreenProbeEmissiveSamples));
+    float3 share = chosen.radiance * transmittance * contributionWeight / (ScreenProbePi * float(ScreenProbeEmissiveSamples));
     if (any(isnan(share)) || any(isinf(share)))
         return float4(0.0);
     return float4(min(share, float3(4000.0)), screen_probe_pack_direction(chosen.direction)); // a half float; the irradiance pass sums in float
@@ -276,12 +258,19 @@ float4 screen_probe_trace_ray(ScreenProbeVertex input, PushConstantScreenProbe p
     RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> query;
     query.TraceRayInline(tlas, RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES, 0xFF, rayDesc);
     GpuRayTracingInstance* instances = (GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference;
+    bool passedThrough = false;
     while (query.Proceed())
     {
         if (screen_probe_candidate_blocks(ubo, instances[query.CandidateRayInstanceCustomIndex()], query.CandidatePrimitiveIndex(),
                                           query.CandidateTriangleBarycentrics()))
             query.CommitNonOpaqueTriangleHit();
+        else
+            passedThrough = true;
     }
+    // What came through glass (or a blended surface) on the way: tinted by it (ray_transmittance up to the hit, the path tracer's rule),
+    // not as if the pane were not there. Only for rays that passed one.
+    const float throughEnd = query.CommittedStatus() == COMMITTED_TRIANGLE_HIT ? query.CommittedRayT() * 0.999 : rayDesc.TMax;
+    const float3 throughGlass = passedThrough ? ray_transmittance(ubo, origin, direction, 0.0, throughEnd) : float3(1.0);
 
     if (query.CommittedStatus() != COMMITTED_TRIANGLE_HIT)
     {
@@ -294,13 +283,13 @@ float4 screen_probe_trace_ray(ScreenProbeVertex input, PushConstantScreenProbe p
             const float lod = min(2.0, max(ubo->prefilteredCubeMipLevels, 0.0));
             sky = prefiltered.SampleLevel(prefilterSampler, direction, lod).rgb * ubo->scaleIBLAmbient;
         }
-        return float4(sky, 60000.0);
+        return float4(sky * throughGlass, 60000.0);
     }
 
     const float hitT = query.CommittedRayT();
     const uint seed = screen_probe_hash((probe.x * 9781u + probe.y * 6271u) ^ (ray * 26699u) ^ (pushConstant.frameIndex * 7919u));
     float3 radiance = screen_probe_shade_hit(ubo, query.CommittedRayInstanceCustomIndex(), query.CommittedPrimitiveIndex(),
-                                             query.CommittedTriangleBarycentrics(), origin, direction, hitT, seed);
+                                             query.CommittedTriangleBarycentrics(), origin, direction, hitT, seed) * throughGlass;
     // Half floats end at 65504: an overflow becomes Inf, then NaN in the history.
     radiance = all(isfinite(radiance)) ? min(radiance, float3(30000.0)) : float3(0.0);
     return float4(radiance, min(hitT / max(ubo->unitsPerMeter, 1e-6), 60000.0));
