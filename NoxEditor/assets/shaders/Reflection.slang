@@ -2,7 +2,6 @@
 #include "NRDFrontEnd.slang"
 #include "DDGICommon.slang"
 #include "RayHitShading.slang"
-#include "PathTracer/EmissiveLights.slang"
 
 struct ReflectionPayload
 {
@@ -122,98 +121,6 @@ float3 sample_ggx_vndf(float3 V, float3 N, float roughness, float2 u)
     return normalize(M);
 }
 
-// GGX with alpha = roughness^2: the distribution and Smith's masking of one direction.
-float ggx_distribution(float alpha, float NdotH)
-{
-    const float a2 = alpha * alpha;
-    const float d = NdotH * NdotH * (a2 - 1.0) + 1.0;
-    return a2 / (3.14159265359 * d * d);
-}
-
-float ggx_masking(float alpha, float NdotX)
-{
-    const float a2 = alpha * alpha;
-    return 2.0 * NdotX / (NdotX + sqrt(a2 + (1.0 - a2) * NdotX * NdotX));
-}
-
-// The solid angle pdf of a direction reflected about a VNDF-sampled normal (Heitz 2018): G1(V) D(H) / (4 N.V).
-float ggx_vndf_reflection_pdf(float alpha, float NdotV, float NdotH)
-{
-    return ggx_masking(alpha, NdotV) * ggx_distribution(alpha, NdotH) / (4.0 * NdotV);
-}
-
-uint reflection_hash(uint x)
-{
-    x ^= x >> 16;
-    x *= 0x7feb352du;
-    x ^= x >> 15;
-    x *= 0x846ca68bu;
-    x ^= x >> 16;
-    return x;
-}
-
-float reflection_random(inout uint state)
-{
-    state = reflection_hash(state);
-    return float(state) * (1.0 / 4294967296.0);
-}
-
-// The emissive triangles' light in a glossy reflection, the path tracer's next event estimation for its specular lobe
-// (PathTracerNEE.slang, the same triangle lights: EmissiveLights.slang). The VNDF ray alone finds a lamp only by chance: a glossy
-// floor or table showed its lamps as a few bright speckles that boiled, or not at all, where the path tracer shows their smooth
-// highlight. Resampled from candidates by their contribution, each weighed against the VNDF ray by the power heuristic (the ray
-// takes the other weight when it hits a lamp: shadeRayHit's emissionWeight), as RTXPT does. Demodulated like the traced ray: the
-// lobe's response over the pre-integrated reflectance the lighting multiplies back (DeferredLighting.slang).
-static const uint ReflectionLightCandidates = 4;
-
-float3 reflection_emissive_light(UniformBufferObject* ubo, float3 origin, float3 N, float3 V, float alpha, float3 f0, float3 reflectance,
-                                 inout uint rng)
-{
-    const float NdotV = max(dot(N, V), 1e-4);
-    const float nearDistance = 0.1 * ubo->unitsPerMeter; // closer than 10 cm a lamp counts as 10 cm away (no 1/d^2 spike)
-    EmissiveLights::Sample chosen = (EmissiveLights::Sample)0;
-    float3 chosenContribution = float3(0.0);
-    float chosenWeight = 0.0;
-    float weightSum = 0.0;
-    for (uint candidate = 0; candidate < ReflectionLightCandidates; ++candidate)
-    {
-        const float4 u = float4(reflection_random(rng), reflection_random(rng), reflection_random(rng), reflection_random(rng));
-        const float selectU = reflection_random(rng);
-        EmissiveLights::Sample sample = EmissiveLights::sampleTriangles(ubo, origin, u);
-        if (!sample.valid)
-            continue;
-        const float NdotL = dot(N, sample.direction);
-        if (NdotL <= 0.0)
-            continue;
-        const float3 H = normalize(V + sample.direction);
-        const float NdotH = saturate(dot(N, H));
-        const float VdotH = saturate(dot(V, H));
-        const float3 fresnel = f0 + (1.0 - f0) * pow(1.0 - VdotH, 5.0);
-        // f cos / pdf: D G2 F / (4 N.V), over the light's pdf, the MIS weight against the VNDF ray.
-        const float bsdfPdf = ggx_vndf_reflection_pdf(alpha, NdotV, NdotH);
-        const float misWeight = sample.pdf * sample.pdf / max(sample.pdf * sample.pdf + bsdfPdf * bsdfPdf, 1e-30);
-        const float lobe = ggx_distribution(alpha, NdotH) * ggx_masking(alpha, NdotV) * ggx_masking(alpha, NdotL) / (4.0 * NdotV);
-        const float3 radiance = sample.radiance * min(1.0, sample.distance * sample.distance / (nearDistance * nearDistance));
-        const float3 contribution = radiance * fresnel * (lobe * misWeight / sample.pdf);
-        const float weight = dot(contribution, float3(0.2126, 0.7152, 0.0722));
-        if (!(weight > 0.0) || !isfinite(weight))
-            continue;
-        weightSum += weight;
-        if (selectU * weightSum < weight)
-        {
-            chosen = sample;
-            chosenContribution = contribution;
-            chosenWeight = weight;
-        }
-    }
-    if (!(weightSum > 0.0) || !(chosenWeight > 0.0))
-        return float3(0.0);
-    if (ray_hit_shadowed(ubo, origin, chosen.direction, max(chosen.distance - 0.02 * ubo->unitsPerMeter, 0.0)))
-        return float3(0.0);
-    const float3 light = chosenContribution * (weightSum / (float(ReflectionLightCandidates) * chosenWeight)) / max(reflectance, float3(1e-3));
-    return all(isfinite(light)) ? light : float3(0.0);
-}
-
 [shader("fragment")]
 float4 fragMain(
     MSOutput input,
@@ -306,25 +213,6 @@ float4 fragMain(
     // Use robust bias to prevent depth-buffer precision self-intersection (same as DeferredLighting)
     float3 rayOrigin = worldPos + normal * (0.01 * ubo->unitsPerMeter);
 
-    // The emissive triangles sampled as lights for a glossy lobe (reflection_emissive_light); the VNDF ray's hit on one is weighed
-    // against that sampling (emissionWeight below). A mirror's lobe is a single direction: its ray alone.
-    const bool sampleLights = roughness >= 0.01 && EmissiveLights::hasTriangleLights(ubo) && ubo->brdfLutIndex != 0xFFFFFFFF &&
-                              pushConstant.gbufferAlbedoIndex != 0xFFFFFFFF;
-    const float alpha = max(roughness * roughness, 0.001); // as sample_ggx_vndf
-    float3 lightSample = float3(0.0);
-    if (sampleLights)
-    {
-        // The surface's specular color and pre-integrated reflectance, as DeferredLighting.slang has them.
-        Texture2D albedoTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.gbufferAlbedoIndex, 0));
-        const float3 baseColor = albedoTex.Load(int3(pixelCoord, 0)).rgb;
-        const float3 f0 = lerp(float3(0.04), baseColor, saturate(materialSample.g));
-        Texture2D brdfTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->brdfLutIndex, 0));
-        const float2 brdf = brdfTex.SampleLevel(SamplerState.Handle(uint2(SamplerIndex::SAMPLER_BRDFLUT, 0)),
-                                                float2(clamp(dot(normal, V), 0.001, 1.0), 1.0 - max(roughness, 0.04)), 0).rg;
-        uint rng = reflection_hash(uint(pixelCoord.x) * 1973u + uint(pixelCoord.y) * 9277u + pushConstant.frameIndex * 26699u) | 1u;
-        lightSample = reflection_emissive_light(ubo, rayOrigin, normal, V, alpha, f0, f0 * brdf.x + brdf.y, rng);
-    }
-
     RayDesc reflectionRayDesc;
     reflectionRayDesc.Origin = rayOrigin;
     reflectionRayDesc.Direction = R;
@@ -379,25 +267,17 @@ float4 fragMain(
         SamplerState samplerPrefiltered = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_PREFILTER, 0));
         float lod = roughness * ubo->prefilteredCubeMipLevels;
         float3 skyColor = prefilteredTex.SampleLevel(samplerPrefiltered, R, lod).rgb * ubo->scaleIBLAmbient;
-        return NRD_PackSignal(pushConstant.denoiserMode, skyColor + lightSample, reflection_miss_distance(ubo), abs(mul(ubo->view, float4(worldPos, 1.0)).z), roughness, ubo->unitsPerMeter);
+        return NRD_PackSignal(pushConstant.denoiserMode, skyColor, reflection_miss_distance(ubo), abs(mul(ubo->view, float4(worldPos, 1.0)).z), roughness, ubo->unitsPerMeter);
     }
     if (!hit)
-        return NRD_PackSignal(pushConstant.denoiserMode, lightSample, reflection_miss_distance(ubo), abs(mul(ubo->view, float4(worldPos, 1.0)).z), roughness, ubo->unitsPerMeter);
+        return NRD_PackSignal(pushConstant.denoiserMode, float3(0.0), reflection_miss_distance(ubo), abs(mul(ubo->view, float4(worldPos, 1.0)).z), roughness, ubo->unitsPerMeter);
 
-    // Ray Hit: the hit's lighting (RayHitShading.slang), its emission weighed against the light sampling (power heuristic).
+    // Ray Hit: the hit's lighting (RayHitShading.slang), its emission included. (Sampling the emissive triangles as lights here,
+    // MIS-weighted against this ray, drew a string light's reflection as a ring with a dark middle where the path tracer shows a soft
+    // glow: removed.)
     float hitT = rq.CommittedRayT();
-    float emissionWeight = 1.0;
-    if (sampleLights)
-    {
-        const float lightPdf = EmissiveLights::trianglePdfAlong(ubo, rayOrigin, R, rq.CommittedRayInstanceCustomIndex(), rq.CommittedPrimitiveIndex(), hitT);
-        if (lightPdf > 0.0)
-        {
-            const float bsdfPdf = ggx_vndf_reflection_pdf(alpha, max(dot(normal, V), 1e-4), saturate(dot(normal, normalize(V + R))));
-            emissionWeight = bsdfPdf * bsdfPdf / max(bsdfPdf * bsdfPdf + lightPdf * lightPdf, 1e-30);
-        }
-    }
     float3 finalRadiance = shadeRayHit(ubo, rq.CommittedRayInstanceCustomIndex(), rq.CommittedPrimitiveIndex(), rq.CommittedTriangleBarycentrics(),
-                                       rayOrigin, R, hitT, emissionWeight) + lightSample;
+                                       rayOrigin, R, hitT);
 
     // Incoming radiance (de-modulated: the lighting multiplies the specular factor back) with the ray's hit distance,
     // packed for the denoiser (NRDFrontEnd.slang).

@@ -60,9 +60,14 @@ namespace Nox
             return bucket < RenderBucket::Count;
         }
 
+        // What picks an instance's draw bucket and its TLAS record (WriteTlasInstance): the alpha mode, unlit, double-sided -- and the
+        // transmission, which makes glass a transparent draw and a non-opaque instance shadow rays see through. It used to be left
+        // out: a material that gained its transmission after its instances were placed (the mesh's own material standing in until the
+        // .nmat loads, an edit) kept glass opaque to every shadow ray in the TLAS.
         bool SameBucketInputs(const shaderio::GpuMaterial& a, const shaderio::GpuMaterial& b)
         {
-            return a.alphaMode == b.alphaMode && a.unlit == b.unlit && a.doubleSided == b.doubleSided;
+            return a.alphaMode == b.alphaMode && a.unlit == b.unlit && a.doubleSided == b.doubleSided &&
+                   SelectRenderBucket(a) == SelectRenderBucket(b) && (a.transmissionFactor > 0.0f) == (b.transmissionFactor > 0.0f);
         }
     }
 
