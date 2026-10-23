@@ -2006,12 +2006,6 @@ namespace Nox
         desc.shaders.push_back({ .stage = NRI::ShaderStage::Mesh, .entryPoint = "meshMain", .sourcePath = "assets/shaders/EditorStableDepth.slang" });
         desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "fragMain", .sourcePath = "assets/shaders/EditorStableDepth.slang" });
         m_stableEntityDepthPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
-
-        // The same surfaces' depth alone, at 2x2 samples per display pixel: what transparent surfaces drawn over DLSS-RR's output
-        // measure their coverage of a pixel against (addStableEntityDepthPass).
-        desc.colorFormats.clear();
-        desc.shaders.back().entryPoint = "fragDepthOnly";
-        m_coverageDepthPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
     void Renderer::createCommandPool()
@@ -4541,7 +4535,6 @@ namespace Nox
             addDLSSPass();
             addTAAPass();
             addEntityDepthBlitPass();
-            addTransparentAfterUpscalePass(); // over DLSS-RR's output, on the jitter-free display depth
             addPostProcessPass();
             addOverlay2DPass();
             addSelectionMaskPass();
@@ -4666,8 +4659,6 @@ namespace Nox
             references.ssaoTextureIndex = 0xFFFFFFFF;
             // Set by the pass that draws glass over a copy of the scene (addForward3DPass).
             references.refractionTextureIndex = 0xFFFFFFFF;
-            // Set by the pass that draws transparent surfaces over DLSS-RR's output (addTransparentAfterUpscalePass).
-            references.coverageDepthTextureIndex = 0xFFFFFFFF;
         }
         frame.skinningWorkCount = static_cast<uint32_t>(m_skinningWorkItems.size());
         frame.skinnedHistoryValid = frame.skinningWorkCount > 0 && m_skinnedVertexHistoryValid;
@@ -4735,6 +4726,8 @@ namespace Nox
             guide.Format = NRI::ImageFormat::R16G16_SFLOAT;
             resources.RRPathMotionVectors = graph.CreateTexture("RR Path Motion Vectors", guide);
             resources.RRSpecularMotionVectors = graph.CreateTexture("RR Specular Motion Vectors", guide);
+            // The glass for RR's transparency layer (addRRTransparencyLayerPass): premultiplied color and opacity, drawn into.
+            resources.RRTransparencyLayer = graph.CreateTexture("RR Transparency Layer", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
         }
         resources.GBufferNormal = graph.CreateTexture("GBuffer Normal", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
         resources.GBufferMaterial = graph.CreateTexture("GBuffer Material", renderTarget(NRI::ImageFormat::RGBA8));

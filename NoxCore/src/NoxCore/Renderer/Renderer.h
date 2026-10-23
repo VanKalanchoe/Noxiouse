@@ -960,7 +960,7 @@ namespace Nox
         // Under DLSS Ray Reconstruction: the transparent surfaces over its output at display resolution, without the jitter. Drawn into
         // its input they reached RR as part of the surface behind them -- RR moved a window's reflection with the room behind it
         // (it trailed after the camera) and took the glass's own shading for noise to filter.
-        void addTransparentAfterUpscalePass();
+        void addRRTransparencyLayerPass();
         // What a pass drawing forward surfaces over the scene reads and targets (after its own color target): entity IDs, depth,
         // fog, and for lit surfaces the GI, AO and TLAS they sample.
         void declareForwardInputs(RGBuilder& builder, bool lit);
@@ -983,7 +983,6 @@ namespace Nox
         void addEntityDepthBlitPass();
         // The blit's replacement in the editor while the camera is jittered (setStableEditorDepth).
         void addStableEntityDepthPass();
-        void addCoverageDepthPass();
         void addPostProcessPass();
         void addOverlay2DPass();
         // Editor: the selected instances drawn again without camera jitter into a display-resolution mask the outline reads.
@@ -1010,9 +1009,8 @@ namespace Nox
         void drawMeshletBucket(NRI::CommandBuffer& cmd, MeshletDrawCursor& cursor, RenderBucket bucket, NRI::Pipeline& pipeline, NRI::CullMode cullMode, bool depthWrite, bool blendEnable) const;
         // The transparent buckets (both culling phases), blended over the HDR scene; the cursor carries the SSAO and refraction slots.
         // With `oit` into the order-independent transparency targets instead (accumulation, revealage, entity IDs).
-        // Without `depthTest` the shaders test against the cursor's coverage depth themselves (transparent surfaces after DLSS-RR).
         void drawForwardTransparent(NRI::CommandBuffer& cmd, const RGPassContext& context, const ViewDrawResources& draws, MeshletDrawCursor& cursor,
-                                    bool oit = false, bool depthTest = true) const;
+                                    bool oit = false) const;
         // Draw list entries of a bucket (its visible instances are at most that many).
         uint32_t getBucketEntryCount(RenderBucket bucket) const
         {
@@ -1211,9 +1209,8 @@ namespace Nox
             bool occlusionRawAdded = false; // SSAO or RTAO wrote resources.SSAORaw this frame (never both)
             bool ssaoAdded = false;         // resources.SSAO (the blurred result) is valid this frame
             bool dlssAdded = false;
-            // The transparent surfaces are drawn over DLSS Ray Reconstruction's output instead of into its input
-            // (addTransparentAfterUpscalePass).
-            bool transparentAfterUpscale = false;
+            // The glass goes into DLSS Ray Reconstruction's transparency layer instead of its input color (addRRTransparencyLayerPass).
+            bool rrTransparencyLayer = false;
             bool taaAdded = false;      // resources.TAAHistory[taaWriteIndex] holds this frame's anti-aliased scene
             uint32_t taaWriteIndex = 0;
             bool gbufferVelocityWritten = false;
@@ -1715,7 +1712,6 @@ namespace Nox
         // reads them as its draw list) and one direct draw per slot.
         std::unique_ptr<NRI::Pipeline> m_selectionMaskPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_stableEntityDepthPipeline = nullptr; // EditorStableDepth.slang
-        std::unique_ptr<NRI::Pipeline> m_coverageDepthPipeline = nullptr;     // EditorStableDepth.slang fragDepthOnly: depth alone
         std::vector<std::unique_ptr<NRI::Buffer>> m_selectionInstanceBuffers;
         std::vector<void*> m_selectionInstanceBuffersMapped;
         std::vector<uint32_t> m_selectionTaskGroups; // per selected instance: task workgroups to cover its meshlets

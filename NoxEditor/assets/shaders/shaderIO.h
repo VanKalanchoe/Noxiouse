@@ -1154,12 +1154,13 @@ float scene_exposure(UniformBufferObject* ubo, uint autoExposureTextureIndex, fl
 // inside trees lit up in sunlit speckles.
 STATIC_CONST float RayAlphaTestLod = 0.0;
 STATIC_CONST uint32_t MESHLET_RT_REFRACTION = 8;    // PushConstantMeshlets.meshletCulling: Material_TransparentLit_Mesh traces refraction rays for smooth glass (Hybrid_Renderer_Plan H3)
-// PushConstantMeshlets.meshletCulling: drawn over the upscaled image at display resolution (transparent surfaces after DLSS Ray
-// Reconstruction, Renderer::addTransparentAfterUpscalePass): the non-jittered projection, what is behind already denoised.
-STATIC_CONST uint32_t MESHLET_AFTER_UPSCALE = 16;
+// PushConstantMeshlets.meshletCulling: Material_TransparentLit_Mesh draws into DLSS Ray Reconstruction's transparency layer
+// (Renderer::addRRTransparencyLayerPass, Streamline kBufferTypeTransparencyLayer): its own light premultiplied, and in alpha how much
+// of the scene behind it hides -- the scene itself is RR's input color.
+STATIC_CONST uint32_t MESHLET_TRANSPARENCY_LAYER = 16;
 // PushConstantMeshlets.meshletCulling, the task stage: only the instances that are see-through (ray_see_through: glass), or all but
-// them. Under DLSS-RR only glass is drawn over its output (the scene behind it is denoised with that scene's guides); decals and other
-// blended surfaces lie on the surface RR's guides describe and go into its input as before.
+// them. Under DLSS-RR only glass goes into its transparency layer; decals and other blended surfaces lie on the surface RR's guides
+// describe and go into its input color.
 STATIC_CONST uint32_t MESHLET_SEE_THROUGH_ONLY = 32;
 STATIC_CONST uint32_t MESHLET_SKIP_SEE_THROUGH = 64;
 
@@ -1179,10 +1180,6 @@ struct PushConstantMeshlets
     // Material_TransparentLit_Mesh.slang only: the lit scene behind transparent surfaces with its blur mips (ColorPyramid.slang),
     // which transmissive materials refract. 0xFFFFFFFF: none this pass (transmission then only lets the background show through).
     uint32_t refractionTextureIndex;
-    // Transparent surfaces drawn over DLSS-RR's output (MESHLET_AFTER_UPSCALE, Material_TransparentLit_Mesh / Material_Unlit_Mesh):
-    // the scene's depth at 2x2 samples per display pixel (Renderer::addStableEntityDepthPass), which they are blended by the share
-    // of in front of. 0xFFFFFFFF: none (the hardware depth test alone).
-    uint32_t coverageDepthTextureIndex;
 };
 
 struct PushConstantSkinning

@@ -736,8 +736,7 @@ namespace Nox
                getBucketEntryCount(RenderBucket::TransparentUnlit) > 0 || getBucketEntryCount(RenderBucket::TransparentUnlitDoubleSided) > 0;
     }
 
-    void Renderer::drawForwardTransparent(NRI::CommandBuffer& cmd, const RGPassContext& context, const ViewDrawResources& draws, MeshletDrawCursor& cursor, bool oit,
-                                          bool depthTest) const
+    void Renderer::drawForwardTransparent(NRI::CommandBuffer& cmd, const RGPassContext& context, const ViewDrawResources& draws, MeshletDrawCursor& cursor, bool oit) const
     {
         NRI::Pipeline* litPipeline = oit ? m_transparentLitOITPipeline.get() : m_transparentLitPipeline.get();
         NRI::Pipeline* unlitPipeline = oit ? m_unlitOITPipeline.get() : m_unlitPipeline.get();
@@ -745,7 +744,7 @@ namespace Nox
             return;
 
         cursor.boundPipeline = nullptr;
-        cmd.setDepthTestEnable(depthTest);
+        cmd.setDepthTestEnable(true);
         cmd.setDepthWriteEnable(false);
         cmd.setDepthCompareOp(NRI::CompareOp::GreaterOrEqual);
         cmd.setColorBlendEnable(0, true);
@@ -796,9 +795,8 @@ namespace Nox
         lateCursor.boundPipeline = cursor.boundPipeline;
         lateCursor.references.ssaoTextureIndex = cursor.references.ssaoTextureIndex;
         lateCursor.references.refractionTextureIndex = cursor.references.refractionTextureIndex;
-        lateCursor.references.coverageDepthTextureIndex = cursor.references.coverageDepthTextureIndex;
-        // The pass's flags too (after RR: the jitter-free projection, the coverage test, glass only): the instances that came into
-        // view this frame were drawn with the jitter and without any depth test, over walls and whatever stood in front.
+        // The pass's flags too (refraction rays, glass only or all but glass, RR's transparency layer): the instances that came into
+        // view this frame were drawn without them.
         lateCursor.taskFlags = cursor.taskFlags;
         drawMeshletBucket(cmd, lateCursor, RenderBucket::Transparent, *litPipeline, NRI::CullMode::Back, false, true);
         drawMeshletBucket(cmd, lateCursor, RenderBucket::TransparentDoubleSided, *litPipeline, NRI::CullMode::None, false, true);
@@ -809,7 +807,6 @@ namespace Nox
         cmd.setColorBlendEnable(0, false);
         if (oit)
             cmd.setColorBlendEnable(1, false);
-        cmd.setDepthTestEnable(true);
         cmd.setDepthWriteEnable(true);
     }
 
@@ -1069,13 +1066,14 @@ namespace Nox
         // particles, addParticlePass).
         const bool oit = !pathTraced && isOITActive() && hasDraws && m_transparentLitOITPipeline && m_unlitOITPipeline && m_oitCompositePipeline &&
                          hasTransparentDraws();
-        // Under DLSS Ray Reconstruction the transparent surfaces are drawn over its output instead (addTransparentAfterUpscalePass): RR
-        // denoises what is behind them with that surface's own guides and motion, and their reflections are not dragged along by it.
-        // Glass only (MESHLET_SEE_THROUGH_ONLY); decals and other blended surfaces stay in RR's input (MESHLET_SKIP_SEE_THROUGH): they
-        // lie on the surface its guides describe, and drawn after it they read the render resolution's jittered lighting and crawled.
-        const bool afterUpscale = !pathTraced && !oit && hasDraws && uniformData.rayReconstructionActive != 0 && m_stableEntityDepthPipeline &&
-                                  hasTransmissiveDraws();
-        m_frame.transparentAfterUpscale = afterUpscale;
+        // Under DLSS Ray Reconstruction the glass goes into RR's transparency layer instead of its input color (NVIDIA's DLSS-RR
+        // programming guide, 4.1.10 "Transparency Overlay"; Streamline kBufferTypeTransparencyLayer): premultiplied color and opacity
+        // at render resolution, with the jitter, which RR upscales and composites over the scene it denoised -- the scene behind the
+        // glass with that scene's own guides and motion (addRRTransparencyLayerPass). Decals and other blended surfaces lie on the
+        // surface the guides describe and stay in the input color (MESHLET_SKIP_SEE_THROUGH).
+        const bool rrLayer = !pathTraced && !oit && hasDraws && uniformData.rayReconstructionActive != 0 && m_rrGuidesPipeline &&
+                             hasTransmissiveDraws();
+        m_frame.rrTransparencyLayer = rrLayer;
 
         // Shared setup of the passes that draw over the lit scene.
         auto declareForward = [this](RGBuilder& builder, bool lit) { declareForwardInputs(builder, lit); };
@@ -1091,7 +1089,7 @@ namespace Nox
                     builder.ColorTarget(resources.HDRScene, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 1.0f });
                 declareForward(builder, true);
             },
-            [this, res = &resources, drawProbes, skyboxSun, hasDraws, refraction, oit, pathTraced, afterUpscale](RGPassContext& context)
+            [this, res = &resources, drawProbes, skyboxSun, hasDraws, refraction, oit, pathTraced, rrLayer](RGPassContext& context)
             {
                 NRI::CommandBuffer& cmd = context.Cmd();
                 const uint32_t totalDDGIProbes = m_frame.totalDDGIProbes;
@@ -1162,10 +1160,10 @@ namespace Nox
                 }
 
                 // C. TRANSPARENT FORWARD PASS (Back-to-front sorted, Alpha Blending), here unless glass needs the scene first. Under
-                // DLSS-RR with glass in the scene, everything but the glass (drawn after RR).
-                if (hasDraws && !oit && !pathTraced && (!refraction || afterUpscale))
+                // DLSS-RR with glass in the scene, everything but the glass (RR's transparency layer).
+                if (hasDraws && !oit && !pathTraced && (!refraction || rrLayer))
                 {
-                    if (afterUpscale)
+                    if (rrLayer)
                         cursor.taskFlags |= shaderio::MESHLET_SKIP_SEE_THROUGH;
                     // Whichever of SSAO/RTAO ran this frame (never both -- see Renderer::m_ssaoEnabled), for the
                     // specular occlusion approximation in Material_TransparentLit_Mesh.slang; every other consumer
@@ -1231,7 +1229,12 @@ namespace Nox
                 }
             });
 
-        if ((!refraction && !oit) || afterUpscale)
+        if (rrLayer)
+        {
+            addRRTransparencyLayerPass();
+            return;
+        }
+        if (!refraction && !oit)
             return;
 
         if (oit)
@@ -1287,72 +1290,29 @@ namespace Nox
             });
     }
 
-    void Renderer::addTransparentAfterUpscalePass()
+    void Renderer::addRRTransparencyLayerPass()
     {
-        if (!m_frame.transparentAfterUpscale || !m_frame.dlssAdded)
-            return;
         FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
-        const NRI::Extent2D extent = m_frame.outputExtent;
-        if (extent.width == 0 || extent.height == 0)
-            return;
 
-        // What is behind them: RR's denoised, upscaled image (with blur mips, for rough and thick glass).
-        const bool refraction = m_refractionEnabled && m_colorPyramidCopyPipeline && m_colorPyramidDownsamplePipeline && hasTransmissiveDraws();
-        if (refraction)
-            addRefractionSourcePasses(resources.DLSSOutput, extent);
-
-        // The forward transparent pass of addForward3DPass, over RR's output at display resolution: blended by the share of each
-        // pixel they are in front of in the jitter-free 2x2-sample depth (addCoverageDepthPass; the display depth of
-        // addStableEntityDepthPass, which already holds their entity IDs, without it), projected without the jitter
-        // (MESHLET_AFTER_UPSCALE), no screen-space AO (it is the render resolution's and lies on the surface behind).
-        m_renderGraph.AddPass("Forward Transparent (After Upscale)", RGPassFlags::Raster,
+        // The glass into DLSS-RR's transparency layer (Streamline kBufferTypeTransparencyLayer, tagged in addDLSSPass): at render
+        // resolution with the jitter, depth tested against the scene, back to front, premultiplied -- what the glass itself gives
+        // (its reflection) and how much of the scene behind it hides (MESHLET_TRANSPARENCY_LAYER, Material_TransparentLit_Mesh.slang).
+        // The scene behind is RR's input color, denoised with its own guides; RR composites the layer over it.
+        m_renderGraph.AddPass("RR Transparency Layer", RGPassFlags::Raster,
             [&](RGBuilder& builder)
             {
-                builder.ColorTarget(resources.DLSSOutput, NRI::LoadOP::load, NRI::StoreOP::store);
-                builder.ColorTarget(resources.EntityHi, NRI::LoadOP::load, NRI::StoreOP::store);
-                builder.DepthTarget(resources.DepthHi, NRI::LoadOP::load, NRI::StoreOP::store);
-                builder.SetRenderArea(extent);
-                if (resources.AerialPerspective.IsValid())
-                    builder.Read(resources.AerialPerspective);
-                if (m_frame.ddgiAdded)
-                    ReadDDGI(builder, resources, m_frame.ddgiWriteIndex);
-                if (m_frame.screenProbeGIAdded)
-                {
-                    builder.Read(resources.ScreenProbeGI[m_frame.screenProbeGIWriteIndex]);
-                    builder.Read(resources.ScreenProbeGIDistance);
-                }
-                if (resources.TLAS.IsValid())
-                    builder.Read(resources.TLAS, RGBufferAccess::AccelerationStructureRead);
-                ReadGpuScene(builder, resources);
-                ReadViewDraws(builder, resources.CameraDraws);
-                ReadViewDraws(builder, resources.CameraDraws, true);
-                builder.Read(resources.MipFeedback);
-                builder.Write(resources.MipFeedback);
-                if (refraction)
-                    builder.Read(resources.RefractionSource);
-                if (resources.DepthCoverage.IsValid())
-                    builder.Read(resources.DepthCoverage);
+                builder.ColorTarget(resources.RRTransparencyLayer, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
+                declareForwardInputs(builder, true);
             },
-            [this, res = &resources, refraction](RGPassContext& context)
+            [this, res = &resources](RGPassContext& context)
             {
                 NRI::CommandBuffer& cmd = context.Cmd();
-                // After DLSS: NGX may have bound its own descriptors.
-                cmd.bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
                 MeshletDrawCursor cursor = beginMeshletDraws(context, res->CameraDraws);
-                cursor.taskFlags &= ~shaderio::MESHLET_COUNT_TRIANGLES; // the stats count the render-resolution passes
-                cursor.taskFlags |= shaderio::MESHLET_AFTER_UPSCALE | shaderio::MESHLET_SEE_THROUGH_ONLY;
-                cursor.references.ssaoTextureIndex = 0xFFFFFFFF;
-                if (refraction)
-                {
-                    cursor.references.refractionTextureIndex = context.Slot(res->RefractionSource);
-                    if (m_rtRefractionEnabled && m_rayTracingEnabled)
-                        cursor.taskFlags |= shaderio::MESHLET_RT_REFRACTION;
-                }
-                // How much of each pixel they cover in front of the scene (addCoverageDepthPass): their own depth test, by share.
-                const bool coverage = res->DepthCoverage.IsValid();
-                if (coverage)
-                    cursor.references.coverageDepthTextureIndex = context.Slot(res->DepthCoverage);
-                drawForwardTransparent(cmd, context, res->CameraDraws, cursor, false, !coverage);
+                cursor.taskFlags |= shaderio::MESHLET_TRANSPARENCY_LAYER | shaderio::MESHLET_SEE_THROUGH_ONLY;
+                cursor.references.ssaoTextureIndex = m_frame.ssaoAdded ? context.Slot(res->SSAO) : 0xFFFFFFFF;
+                if (m_rtRefractionEnabled && m_rayTracingEnabled)
+                    cursor.taskFlags |= shaderio::MESHLET_RT_REFRACTION; // the smooth glass's traced reflection
+                drawForwardTransparent(cmd, context, res->CameraDraws, cursor);
             });
     }
 
@@ -1446,7 +1406,7 @@ namespace Nox
                 [this, res = &resources, mip, source, extent](RGPassContext& context)
                 {
                     NRI::CommandBuffer& cmd = context.Cmd();
-                    // After DLSS (addTransparentAfterUpscalePass): NGX may have bound its own descriptors.
+                    // After DLSS (a source past it): NGX may have bound its own descriptors.
                     cmd.bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
                     cmd.bindPipeline(NRI::PipelineBindPoint::Compute, mip == 0 ? *m_colorPyramidCopyPipeline : *m_colorPyramidDownsamplePipeline);
 

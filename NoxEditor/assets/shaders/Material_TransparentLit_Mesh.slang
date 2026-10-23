@@ -25,7 +25,6 @@
 #include "MipFeedback.slang"
 #include "RayHitShading.slang"
 #include "HeightFog.slang"
-#include "TransparentCoverage.slang"
 
 import Math;
 
@@ -162,55 +161,12 @@ float3 rayHitNormal(GpuRayTracingInstance surface, uint primitive, float2 baryce
     return normalize(mul((float3x3)surface.normalMatrix, local));
 }
 
-// A ray traced from glass drawn over DLSS-RR's output (MESHLET_AFTER_UPSCALE): where its hit is the surface the camera sees on
-// screen, that surface's light from RR's denoised image (the copy refraction reads, before any glass is drawn over it), checked
-// against the jitter-free depth (addCoverageDepthPass). Lit here instead (shadeRayHit), the hit's diffuse light came from the
-// screen-probe GI's render-resolution, jittered pixels and its validity test flipped from frame to frame -- after RR nothing
-// smooths that, and glass seen from the side (mostly reflection) flickered.
-bool afterUpscaleScreenRadiance(UniformBufferObject* ubo, PushConstantMeshlets pushConstant, float3 position, out float3 radiance)
-{
-    radiance = float3(0.0);
-    if ((pushConstant.meshletCulling & MESHLET_AFTER_UPSCALE) == 0 || pushConstant.refractionTextureIndex == 0xFFFFFFFF ||
-        pushConstant.coverageDepthTextureIndex == 0xFFFFFFFF)
-        return false;
-    const float4 clip = mul(ubo->nonJitteredProj, mul(ubo->view, float4(position, 1.0)));
-    if (clip.w <= 1e-5)
-        return false;
-    const float2 uv = clip.xy / clip.w * float2(0.5, -0.5) + 0.5;
-    if (any(uv <= 0.0) || any(uv >= 1.0))
-        return false;
-
-    Texture2D<float> sceneDepth = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.coverageDepthTextureIndex, 0));
-    uint depthWidth, depthHeight;
-    sceneDepth.GetDimensions(depthWidth, depthHeight);
-    const float depth = sceneDepth.Load(int3(min(int2(uv * float2(depthWidth, depthHeight)), int2(depthWidth, depthHeight) - 1), 0));
-    // Reverse Z goes as 1 / distance: the same point within 2 % of its distance.
-    const float hitDepth = clip.z / clip.w;
-    if (depth <= 0.0 || abs(hitDepth - depth) > 0.02 * max(hitDepth, depth))
-        return false;
-
-    Texture2D sceneColor = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.refractionTextureIndex, 0));
-    radiance = sceneColor.SampleLevel(SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0)), uv, 0.0).rgb;
-    return true;
-}
-
-// A traced glass ray's hit: from RR's image where it is on screen (after RR), else lit here.
-float3 shadeGlassRayHit(UniformBufferObject* ubo, PushConstantMeshlets pushConstant, uint slot, uint primitive, float2 barycentrics,
-                        float3 origin, float3 direction, float hitT)
-{
-    float3 radiance;
-    if (afterUpscaleScreenRadiance(ubo, pushConstant, origin + direction * hitT, radiance))
-        return radiance;
-    return shadeRayHit(ubo, slot, primitive, barycentrics, origin, direction, hitT);
-}
-
 // What is seen through the glass at `position`, like the path tracer sees it for a smooth surface. A thin-walled material
 // (thickness 0) passes the view ray on unbent. A volume (KHR_materials_volume) bends it in here and out where it leaves the
 // mesh -- the glass's own far side, found with a second ray that only sees this instance (total internal reflection mirrors it
 // back instead); a mesh that is not closed falls back to a slab of the given thickness (out parallel to the way in). The ray
 // then goes on through the scene, past other see-through surfaces; a miss is the environment.
-float3 tracedRefraction(UniformBufferObject* ubo, PushConstantMeshlets pushConstant, InstanceData instance, uint selfSlot, float3 position, float3 n,
-                        float3 v, float ior, float modelScale)
+float3 tracedRefraction(UniformBufferObject* ubo, InstanceData instance, uint selfSlot, float3 position, float3 n, float3 v, float ior, float modelScale)
 {
     const float bias = 0.002 * ubo->unitsPerMeter;
     const float maxDistance = 1000.0 * ubo->unitsPerMeter;
@@ -252,7 +208,7 @@ float3 tracedRefraction(UniformBufferObject* ubo, PushConstantMeshlets pushConst
     float2 barycentrics;
     float hitT;
     if (traceRefractionRay(ubo, origin, direction, maxDistance, -1, slot, primitive, barycentrics, hitT))
-        return shadeGlassRayHit(ubo, pushConstant, slot, primitive, barycentrics, origin, direction, hitT) * absorbed;
+        return shadeRayHit(ubo, slot, primitive, barycentrics, origin, direction, hitT) * absorbed;
 
     if (ubo->prefilteredMapIndex == 0xFFFFFFFF)
         return float3(0.0);
@@ -261,10 +217,10 @@ float3 tracedRefraction(UniformBufferObject* ubo, PushConstantMeshlets pushConst
     return environment.SampleLevel(samplerPrefiltered, direction, 0.0).rgb * ubo->scaleIBLAmbient * absorbed;
 }
 
-float3 getNormal(UniformBufferObject* ubo, InstanceData instance, VSOutput vertIn, SamplerState samplerState, float lodBias)
+float3 getNormal(UniformBufferObject* ubo, InstanceData instance, VSOutput vertIn, SamplerState samplerState)
 {
     Texture2D normalTexture = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.normalTextureIndex, 0));
-    float3 tangentNormal = normalTexture.SampleBias(samplerState, instance.normalTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, lodBias).xyz * 2.0 - 1.0;
+    float3 tangentNormal = normalTexture.SampleBias(samplerState, instance.normalTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, ubo->textureLodBias).xyz * 2.0 - 1.0;
 
     float3 q1 = ddx(vertIn.worldPos);
     float3 q2 = ddy(vertIn.worldPos);
@@ -312,20 +268,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
 [shader("fragment")]
 FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform PushConstantMeshlets pushConstant)
 {
-    // Over DLSS-RR's output: blended by the share of the pixel it is in front of (the pass has no hardware depth test then).
-    const float pixelCoverage = after_upscale_coverage((UniformBufferObject*)pushConstant.matrixReference, pushConstant, vertIn.pos);
-    if (after_upscale_quad_hidden(pixelCoverage))
-    {
-        // Out now: discard only demotes the invocation to a helper, which would still run all of the shading (rays included) for
-        // every pixel of every pane behind the walls -- the pass has no hardware depth test to cull them.
-        discard;
-        return (FSOutput)0;
-    }
-    FSOutput output = shadeTransparent(vertIn, isFrontFace, pushConstant);
-    output.color *= pixelCoverage;
-    if (pixelCoverage <= 0.0)
-        discard; // hidden, shaded only for its quad's derivatives
-    return output;
+    return shadeTransparent(vertIn, isFrontFace, pushConstant);
 }
 
 // Order-independent transparency (Renderer::setOITEnabled): the same surface into the weighted blended targets.
@@ -347,9 +290,6 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     FSOutput output;
 
     UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
-    // The textures' mip bias: the upscaler's (negative: the render resolution's samples add up to the display's) -- but drawn over
-    // DLSS-RR's output the surface is shaded at display resolution, one sample a pixel that nothing accumulates: none.
-    const float lodBias = (pushConstant.meshletCulling & MESHLET_AFTER_UPSCALE) != 0 ? 0.0 : ubo->textureLodBias;
     SceneInstances instances = SceneInstances(ubo);
     InstanceData instance = instances[vertIn.drawID];
 
@@ -379,7 +319,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         if (instance.baseColorTextureIndex != 0xFFFFFFFF)
         {
             Texture2D baseColorTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.baseColorTextureIndex, 0));
-            maskBaseColor = baseColorTex.SampleBias(sampLinearHandle, instance.baseColorTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, lodBias) * instance.baseColorFactor;
+            maskBaseColor = baseColorTex.SampleBias(sampLinearHandle, instance.baseColorTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, ubo->textureLodBias) * instance.baseColorFactor;
         }
         if (maskBaseColor.a < instance.alphaMaskCutoff)
         {
@@ -394,7 +334,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         if (instance.metallicRoughnessTextureIndex != 0xFFFFFFFF)
         {
             Texture2D mrTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.metallicRoughnessTextureIndex, 0));
-            float4 mrSample = mrTex.SampleBias(sampLinearHandle, instance.physicalDescriptorTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, lodBias);
+            float4 mrSample = mrTex.SampleBias(sampLinearHandle, instance.physicalDescriptorTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, ubo->textureLodBias);
             perceptualRoughness *= mrSample.g;
             metallic *= mrSample.b;
         }
@@ -404,7 +344,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         if (instance.baseColorTextureIndex != 0xFFFFFFFF)
         {
             Texture2D baseColorTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.baseColorTextureIndex, 0));
-            baseColor = baseColorTex.SampleBias(sampLinearHandle, instance.baseColorTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, lodBias) * instance.baseColorFactor;
+            baseColor = baseColorTex.SampleBias(sampLinearHandle, instance.baseColorTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, ubo->textureLodBias) * instance.baseColorFactor;
         }
         else
         {
@@ -427,7 +367,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
             // on sample, alpha (glossiness) is always left linear by that format -- decoding either manually here on top
             // would be a double decode.
             Texture2D specGlossTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.metallicRoughnessTextureIndex, 0));
-            float4 specGlossSample = specGlossTex.SampleBias(sampLinearHandle, instance.physicalDescriptorTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, lodBias);
+            float4 specGlossSample = specGlossTex.SampleBias(sampLinearHandle, instance.physicalDescriptorTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, ubo->textureLodBias);
             glossiness *= specGlossSample.a;
             specular *= specGlossSample.rgb;
         }
@@ -440,7 +380,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
             // Imported as SRGBA8 (EditorAssetManager::ImportMeshTextures: importTexture(BaseColorTexturePath, true)),
             // already hardware sRGB-decoded on sample -- decoding it again here was a double decode.
             Texture2D colorMap = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.baseColorTextureIndex, 0));
-            diffuseSample = colorMap.SampleBias(sampLinearHandle, vertIn.uv0, lodBias) * instance.diffuseFactor;
+            diffuseSample = colorMap.SampleBias(sampLinearHandle, vertIn.uv0, ubo->textureLodBias) * instance.diffuseFactor;
         }
 
         float maxSpecular = max(max(specular.r, specular.g), specular.b);
@@ -455,7 +395,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     if (instance.transmissionTextureIndex != 0xFFFFFFFF)
     {
         Texture2D transTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.transmissionTextureIndex, 0));
-        transmission *= transTex.SampleBias(sampLinearHandle, instance.transmissionTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, lodBias).r;
+        transmission *= transTex.SampleBias(sampLinearHandle, instance.transmissionTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, ubo->textureLodBias).r;
     }
     // Opaque and masked surfaces drawn with this shader (the editor's extra views have no G-buffer, Renderer::addExtraViewPasses):
     // nothing shows through, whatever the base color's alpha or the transmission says.
@@ -481,7 +421,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     float3 specularEnvironmentR0 = specularColor;
     float3 specularEnvironmentR90 = clamp(float3(reflectance * 25.0), 0.0, 1.0);
 
-    float3 n = (instance.normalTextureIndex != 0xFFFFFFFF) ? getNormal(ubo, instance, vertIn, sampLinearHandle, lodBias) : normalize(vertIn.normal);
+    float3 n = (instance.normalTextureIndex != 0xFFFFFFFF) ? getNormal(ubo, instance, vertIn, sampLinearHandle) : normalize(vertIn.normal);
     if (instance.doubleSided != 0 && !isFrontFace)
     {
         n = -n;
@@ -492,18 +432,6 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     // Fresnel 1, a perfect mirror of the room, the picture behind it gone.
     if (transmission > 0.0 && dot(instance.doubleSided != 0 && !isFrontFace ? -vertIn.normal : vertIn.normal, v) < 0.0)
         n = -n;
-    // Specular anti-aliasing over DLSS-RR's output (Tokuyoshi & Kaplanyan 2019, "Improved Geometric Specular Antialiasing"): the
-    // roughness widened by how much the normal turns across the pixel. Drawn after RR, one fixed sample a pixel and nothing
-    // accumulating them, a smooth normal-mapped pane (the street lamps' ribbed lenses) reflected the bulb in single pixels that
-    // sparkled white as the camera moved; before RR, its jittered samples averaged that out.
-    if ((pushConstant.meshletCulling & MESHLET_AFTER_UPSCALE) != 0)
-    {
-        const float3 dndx = ddx(n);
-        const float3 dndy = ddy(n);
-        const float kernelVariance = 0.25 * (dot(dndx, dndx) + dot(dndy, dndy));
-        alphaRoughness = sqrt(saturate(alphaRoughness * alphaRoughness + min(2.0 * kernelVariance, 0.18)));
-        perceptualRoughness = sqrt(alphaRoughness);
-    }
     float3 reflection = normalize(reflect(-v, n));
     float NdotV = clamp(dot(n, v), 0.001, 1.0);
 
@@ -639,7 +567,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     if (instance.occlusionTextureIndex != 0xFFFFFFFF)
     {
         Texture2D occlusionTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.occlusionTextureIndex, 0));
-        ao = occlusionTex.SampleBias(sampLinearHandle, instance.occlusionTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, lodBias).r;
+        ao = occlusionTex.SampleBias(sampLinearHandle, instance.occlusionTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, ubo->textureLodBias).r;
     }
     // The screen-space AO at this pixel is the opaque surface's behind it: right for a decal lying on that surface, wrong for glass
     // or anything standing in front of it (the background's occlusion, noisy and sliding as the camera moves). Only where this
@@ -682,7 +610,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         float hitT;
         float3 radiance;
         if (traceRefractionRay(ubo, origin, reflected, 1000.0 * ubo->unitsPerMeter, -1, slot, primitive, barycentrics, hitT))
-            radiance = shadeGlassRayHit(ubo, pushConstant, slot, primitive, barycentrics, origin, reflected, hitT);
+            radiance = shadeRayHit(ubo, slot, primitive, barycentrics, origin, reflected, hitT);
         else
         {
             TextureCube environment = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + ubo->prefilteredMapIndex, 0));
@@ -700,7 +628,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     if (instance.emissiveTextureIndex != 0xFFFFFFFF)
     {
         Texture2D emissiveTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.emissiveTextureIndex, 0));
-        emissive *= emissiveTex.SampleBias(sampLinearHandle, instance.emissiveTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, lodBias).rgb;
+        emissive *= emissiveTex.SampleBias(sampLinearHandle, instance.emissiveTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, ubo->textureLodBias).rgb;
     }
     color += emissive;
 
@@ -730,7 +658,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
 
         float3 behind = float3(0.0);
         if (tracedWeight > 0.0)
-            behind = tracedRefraction(ubo, pushConstant, instance, vertIn.drawID, vertIn.worldPos, n, v, ior, modelScale) * tracedWeight;
+            behind = tracedRefraction(ubo, instance, vertIn.drawID, vertIn.worldPos, n, v, ior, modelScale) * tracedWeight;
         if (tracedWeight < 1.0)
         {
             Texture2D refractionSource = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.refractionTextureIndex, 0));
@@ -755,9 +683,8 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
             // Under DLSS Ray Reconstruction the scene behind is its raw ray traced lighting (NRD is off), and RR's guides at a glass
             // pixel describe what is seen through it (RTXPT's convention for transmission). A blur mip of that raw image is noise
             // grown into blotches RR takes for detail -- the glass that stayed noisy. A sharp read leaves the noise where the guides
-            // are, for RR to remove; rough glass is a little less blurred. Drawn after RR (MESHLET_AFTER_UPSCALE) the scene behind is
-            // already denoised: the blur is the glass's own again.
-            if (ubo->rayReconstructionActive != 0 && (pushConstant.meshletCulling & MESHLET_AFTER_UPSCALE) == 0)
+            // are, for RR to remove; rough glass is a little less blurred.
+            if (ubo->rayReconstructionActive != 0)
                 lod = min(lod, 1.0);
             SamplerState linearClamp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
             // Through the volume's thickness: what it absorbs on the way (KHR_materials_volume attenuation).
@@ -769,6 +696,19 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         const float3 fresnel = specularEnvironmentR0 + (1.0 - specularEnvironmentR0) * pow(1.0 - NdotV, 5.0);
         color += behind * baseColor.rgb * (transmission * (1.0 - metallic)) * (1.0 - fresnel);
         output.color = float4(color * coverage, coverage);
+        output.entityID = vertIn.entityID;
+        return output;
+    }
+
+    // DLSS-RR's transparency layer (MESHLET_TRANSPARENCY_LAYER, Renderer::addRRTransparencyLayerPass): the light the surface gives
+    // itself, premultiplied, and in alpha how much of the scene behind it hides -- all but what it lets through, weighed as the
+    // refraction above weighs it (the transmission past the Fresnel reflection, through the base color; one channel, the average).
+    // RR composites it over the scene it denoised: color + (1 - alpha) * scene.
+    if ((pushConstant.meshletCulling & MESHLET_TRANSPARENCY_LAYER) != 0)
+    {
+        const float3 fresnel = specularEnvironmentR0 + (1.0 - specularEnvironmentR0) * pow(1.0 - NdotV, 5.0);
+        const float3 throughput = baseColor.rgb * (transmission * (1.0 - metallic)) * (1.0 - fresnel);
+        output.color = float4(color * coverage, coverage * (1.0 - saturate(dot(throughput, float3(1.0 / 3.0)))));
         output.entityID = vertIn.entityID;
         return output;
     }

@@ -54,6 +54,9 @@ namespace NRI
         bool normalRoughnessPacked = false; // normal.rgb + linear roughness.a in one texture
         Texture* specularHitDistance = nullptr; // world-space primary surface -> reflection hit (optional)
         Texture* specularMotionVectors = nullptr; // mutually exclusive with hit distance; UV-space prev-current motion
+        // Transparent surfaces drawn instead of into the input color: premultiplied color, opacity in alpha (Streamline
+        // kBufferTypeTransparencyLayer, DLSS-RR programming guide 4.1.10). Optional.
+        Texture* transparencyLayer = nullptr;
 
         glm::mat4 nonJitteredProj{ 1.0f };
         glm::mat4 view{ 1.0f };
