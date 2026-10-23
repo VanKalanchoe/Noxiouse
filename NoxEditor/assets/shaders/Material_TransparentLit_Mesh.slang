@@ -303,7 +303,11 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     float perceptualRoughness = 1.0;
     float metallic = 0.0;
     float4 baseColor = float4(1.0);
-    float3 f0 = float3(0.04);
+    // The dielectric reflectance from the material's IoR (KHR_materials_ior; the path tracer's dielectricF0, PathTracerBridge.slang):
+    // 0.04 at the default 1.5. Held at 0.04 it left the Bistro's IoR 2.5 headlight lens (F0 0.18) reflecting a quarter of what the
+    // path tracer shows: its ridges faded and the lamp read as flat clear glass.
+    const float iorF0 = (max(instance.ior, 1.0) - 1.0) / (max(instance.ior, 1.0) + 1.0);
+    float3 f0 = float3(iorF0 * iorF0);
 
     if (instance.alphaMode == 1) // Mask
     {
