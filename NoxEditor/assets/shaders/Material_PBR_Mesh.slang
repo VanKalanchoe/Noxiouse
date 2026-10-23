@@ -79,7 +79,7 @@ void meshMain
 
         float4 worldPos = mul(modelMatrix, localPos);
         float3 worldNormal = normalize(mul(float3x3(instance.normalMatrix), localNormal));
-        float4 clipPos = mul(viewProj, worldPos);
+        float4 clipPos = coplanar_depth_priority(mul(viewProj, worldPos), instance.depthPriority); // as the visibility pass
 
         vertices[i].pos = clipPos;
         vertices[i].worldPos = worldPos.xyz;

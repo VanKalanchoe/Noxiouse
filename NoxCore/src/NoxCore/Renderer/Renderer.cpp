@@ -176,6 +176,25 @@ namespace Nox
         return descriptorIndex;
     }
 
+    // Which of two coplanar surfaces the rasterizer shows (shaderIO.h coplanar_depth_priority), from the material's name: what is
+    // modelled onto other surfaces wins -- decals, then details, trims and edges, then blend layers -- and the rest are ordered by a
+    // hash of the name, so two of them in one plane always resolve the same way instead of fighting.
+    static uint32_t CoplanarDepthPriority(const std::string& name)
+    {
+        std::string lower(name);
+        std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (lower.find("decal") != std::string::npos)
+            return 15;
+        if (lower.find("detail") != std::string::npos || lower.find("trim") != std::string::npos || lower.find("edge") != std::string::npos)
+            return 12;
+        if (lower.find("blend") != std::string::npos)
+            return 9;
+        uint32_t hash = 2166136261u; // FNV-1a
+        for (unsigned char c : lower)
+            hash = (hash ^ c) * 16777619u;
+        return hash % 8u;
+    }
+
     // Main thread (resolves textures and requests their loads).
     static shaderio::GpuMaterial PackMaterial(const MaterialData& material)
     {
@@ -211,6 +230,7 @@ namespace Nox
         packed.unlit = material.Unlit ? 1u : 0u;
         packed.diffuseTransmission = glm::clamp(material.DiffuseTransmission, 0.0f, 1.0f);
         packed.pathTracerFlags = material.PathTracerFlags;
+        packed.depthPriority = CoplanarDepthPriority(material.Name);
         return packed;
     }
 

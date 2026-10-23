@@ -166,6 +166,9 @@ struct GpuMaterial
     uint32_t unlit;
     float diffuseTransmission; // through a thin surface to its back (leaves, cloth); 0: none
     uint32_t pathTracerFlags;  // PathTracerThin... (above)
+    // Which of two surfaces lying in the same plane the rasterizer shows (coplanar_depth_priority): the higher. Renderer::PackMaterial
+    // from the material's name (decals over details and trims over blend layers over the rest).
+    uint32_t depthPriority;
 };
 
 #ifdef __SLANG__
@@ -1116,6 +1119,20 @@ STATIC_CONST uint32_t PathTracerPSDDominantSurface = 32u;
 bool ray_see_through(float transmission, uint alphaMode)
 {
     return transmission >= SeeThroughTransmission && alphaMode != 1u;
+}
+
+// Surfaces that lie exactly in the same plane, as the Bistro has by the thousand (edge decals, trims, details and blend layers modelled
+// onto the walls as opaque geometry, 0 mm apart): their depths differ only by rounding, and the rasterizer drew a sawtooth of both
+// that crawled as the camera moved. A ray tracer meets one of them at random and its accumulation blends them, so the path tracer
+// shows no seam. Raster gives the one with the higher depth priority (GpuMaterial::depthPriority) a slightly nearer depth: the clip
+// position's z scaled by 1 + CoplanarDepthStep per level, which under the reverse-Z projection moves it toward the camera by that
+// fraction of its distance (1.5e-5: 0.15 mm at 10 m a level) and leaves where it lands on screen as it is.
+STATIC_CONST float CoplanarDepthStep = 1.5e-5;
+
+float4 coplanar_depth_priority(float4 clipPosition, uint depthPriority)
+{
+    clipPosition.z *= 1.0 + float(depthPriority) * CoplanarDepthStep;
+    return clipPosition;
 }
 
 // Whether a surface lets light through to the hybrid passes' shadow rays: glass seen through, and what RTXPT's materials exclude
@@ -2345,6 +2362,7 @@ struct InstanceData
     uint32_t doubleSided;
     uint32_t unlit;
     float diffuseTransmission;
+    uint32_t depthPriority; // GpuMaterial::depthPriority
 
     uint32_t boneMatrixOffset;
     uint32_t skinnedVertexOffset;
@@ -2416,6 +2434,7 @@ struct SceneInstances
             data.doubleSided = material.doubleSided;
             data.unlit = material.unlit;
             data.diffuseTransmission = material.diffuseTransmission;
+            data.depthPriority = material.depthPriority;
 
             data.boneMatrixOffset = instance.boneMatrixOffset;
             data.skinnedVertexOffset = instance.skinnedVertexOffset;

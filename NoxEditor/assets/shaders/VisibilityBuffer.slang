@@ -80,7 +80,8 @@
             }
 
             float4 worldPos = mul(modelMatrix, localPos);
-            float4 clipPos = mul(viewProj, worldPos);
+            // Of two surfaces in the same plane, the one with the higher depth priority in front (coplanar_depth_priority).
+            float4 clipPos = coplanar_depth_priority(mul(viewProj, worldPos), instance.depthPriority);
             vertices[i].pos = clipPos;
             vertices[i].uv0 = vert.uv0;
             vertices[i].uv1 = vert.uv1;
