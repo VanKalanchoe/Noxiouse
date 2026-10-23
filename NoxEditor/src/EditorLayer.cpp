@@ -1382,6 +1382,27 @@ namespace Nox
                 if (ImGui::IsItemHovered())
                     ImGui::SetTooltip("Traces real rays for ambient occlusion instead of SSAO's screen-space reprojection -- turning this on turns SSAO off (see Ambient Occlusion, above). Same radius/power settings, so the two are directly comparable.");
 
+                bool rtCulling = m_Renderer->getRayTracingCulling();
+                if (ImGui::Checkbox("Ray Tracing Culling", &rtCulling))
+                    m_Renderer->setRayTracingCulling(rtCulling);
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Leaves far, small objects out of what rays can hit (Unreal's ray tracing culling): an object\n"
+                                      "farther than the radius whose bounds look smaller than the angle is not in the TLAS. Within the\n"
+                                      "radius, or larger than the angle, everything stays -- in front of the camera or behind it.\n"
+                                      "Over the ray tracing memory budget, the BLAS of meshes not traced for a while are freed and\n"
+                                      "built again when needed.");
+                if (rtCulling)
+                {
+                    float cullRadiusMeters = WorldUnits::ToMeters(m_Renderer->getRayTracingCullRadius());
+                    if (ImGui::DragFloat("Culling Radius (m)", &cullRadiusMeters, 1.0f, 0.0f, 100000.0f, "%.0f"))
+                        m_Renderer->setRayTracingCullRadius(WorldUnits::FromMeters(cullRadiusMeters));
+                    float cullAngle = m_Renderer->getRayTracingCullAngle();
+                    if (ImGui::SliderFloat("Culling Angle (deg)", &cullAngle, 0.0f, 10.0f, "%.2f"))
+                        m_Renderer->setRayTracingCullAngle(cullAngle);
+                }
+                ImGui::TextDisabled("TLAS: %u instances, %u culled, %u BLAS evicted", m_Renderer->getTlasInstanceCount(),
+                                    m_Renderer->getTlasCulledCount(), m_Renderer->getEvictedBlasCount());
+
                 // Diffuse Global Illumination (GI)
                 static const char* giModeNames[] = {
                     "Off (IBL Ambient)",

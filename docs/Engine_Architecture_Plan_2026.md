@@ -1172,8 +1172,22 @@ own, loaded **additively** into the running scene and unloaded again.
 **Status 2026-10-20:** BLAS **compaction** is built: a frame's BLAS builds write their compacted sizes into a per-frame-slot
 query pool; once that slot is done the compacted structures are created, the next "BLAS Build" pass copies each BLAS into
 its compacted one and the old one goes to the deferred release (`BlasCompaction` in `Renderer.h`,
-`Renderer::readBlasCompactedSizes`). Skinned meshes get per-instance BLAS refit (§5.5.3). Not built: RT-specific TLAS
-culling, BLAS eviction, the RT category budget.
+`Renderer::readBlasCompactedSizes`). Skinned meshes get per-instance BLAS refit (§5.5.3).
+
+**Status 2026-10-23: TLAS culling and BLAS eviction built.**
+- **Culling** (`GpuScene::UpdateTlasCulling`, Unreal's ray tracing culling radius / angle): once a frame before the TLAS is
+  prepared, a ray traced instance farther than the radius (default 300 m) whose world bounding sphere looks smaller than the
+  angle (default 1 degree) is left out of the build; in front of the camera and behind it alike (reflections and GI see behind),
+  within 90% of the radius or above 110% of the angle it comes back (hysteresis, no rebuild after rebuild at the edge). A change
+  in the culled set rebuilds the TLAS like any instance change. Settings next to the other ray tracing switches, with the TLAS
+  instance, culled and evicted counts (also Nox Stats counters).
+- **BLAS eviction** (`Renderer::manageBlasResidency`): the same pass records per mesh the last frame an instance of it was traced
+  (in a traced bucket and not culled). Over the RayTracing category budget -- judged once per memory sample, down to 90% -- the BLAS
+  of meshes no traced instance needed for 300 culling frames go, longest unneeded first: the GPU scene stops referencing them, the
+  structure leaves through the deferred release one frame later than usual (frames in flight may trace it). Each BLAS keeps its build
+  inputs (geometry ranges, opacity; the geometry stays resident), so an instance needing it again queues a new structure under the
+  frame's build budget; it traces again after that build. A compaction measured before the eviction no longer matches (new serial).
+- Not built: an RT budget separate from the category share, eviction of skinned per-instance BLAS, out-of-memory handling.
 
 ### 5.15 Asset Lifetime (Garbage Collection)
 

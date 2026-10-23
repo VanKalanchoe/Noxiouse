@@ -103,6 +103,18 @@ namespace Nox
         std::vector<Staging> m_Staging;
     };
 
+    // Ray tracing culling (§5.14, Unreal's ray tracing culling radius and angle): an instance farther than Radius whose bounds look
+    // smaller than MinAngle from the camera is left out of the TLAS -- far small things add traversal cost and memory for little
+    // light. Everything within the radius, and anything large enough, stays, in front of the camera or behind it (reflections and
+    // GI see behind).
+    struct TlasCulling
+    {
+        bool Enabled = true;
+        glm::vec3 Camera{ 0.0f };
+        float Radius = 0.0f;   // world units
+        float MinAngle = 0.0f; // radians, the bounding sphere's angular diameter
+    };
+
     // The renderer's persistent scene (§5.5): instances (one per mesh entity submesh) with their transforms, shared
     // materials and meshes, draw buckets and the TLAS instance records. Changed only through this API, so uploads and
     // acceleration structure work follow what changed. Main thread.
@@ -166,6 +178,17 @@ namespace Nox
         // Ray traced instances (all render buckets with a BLAS; instanceCustomIndex = instance slot). Opaque geometry
         // skips any-hit, while mask/blend geometry uses the alpha-aware hit group. The TLAS is compacted in bucket order.
         uint32_t GetTlasInstanceCount() const { return m_TlasInstanceCount; }
+        // Once a frame before the TLAS is prepared: which ray traced instances culling leaves out (a change rebuilds the TLAS), and
+        // which meshes ray tracing needs this frame (an instance in a traced bucket that is not culled, with or without its BLAS).
+        // A culled instance comes back within 90% of the radius or above 110% of the angle (no rebuild after rebuild at the edge).
+        void UpdateTlasCulling(const TlasCulling& culling);
+        // The instances the TLAS is built from (ray traced, not culled), and those culling leaves out.
+        uint32_t GetTlasBuildCount() const { return m_TlasInstanceCount - m_TlasCulledCount; }
+        uint32_t GetTlasCulledCount() const { return m_TlasCulledCount; }
+        // The last UpdateTlasCulling call that needed the mesh for ray tracing, and the current one (BLAS eviction).
+        uint64_t GetMeshLastTracedFrame(uint32_t meshSlot) const { return meshSlot < m_MeshLastTraced.size() ? m_MeshLastTraced[meshSlot] : 0; }
+        uint64_t GetCullingFrame() const { return m_CullingFrame; }
+        // The build's instances: GetTlasBuildCount of them.
         void WriteTlasInstances(std::span<NRI::AccelerationStructureInstance> outInstances) const;
         // Whether any ray traced instance was added, removed, moved or re-flagged since the last call (the TLAS is rebuilt,
         // not refitted: NVIDIA RT best practices).
@@ -217,6 +240,10 @@ namespace Nox
         std::vector<NRI::AccelerationStructureInstance> m_TlasInstances; // by instance slot, inactive: no BLAS reference
         uint32_t m_TlasInstanceCount = 0;
         bool m_TlasChanged = false;
+        std::vector<uint8_t> m_TlasCulled; // by instance slot
+        uint32_t m_TlasCulledCount = 0;    // culled instances with a TLAS record
+        std::vector<uint64_t> m_MeshLastTraced; // by mesh slot
+        uint64_t m_CullingFrame = 0;
 
         // Per-object motion: an instance moved in frame N keeps the world of N-1 as its previous transform; once it stops
         // moving, its previous transform is settled to its world.

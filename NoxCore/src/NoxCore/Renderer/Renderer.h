@@ -483,6 +483,18 @@ namespace Nox
             }
         }
         bool getRayTracingReflections() const { return m_rayTracingReflections; }
+        // Ray tracing culling (§5.14, Unreal's ray tracing culling radius / angle): instances farther than the radius whose bounds
+        // look smaller than the angle leave the TLAS. On by default at 300 m and 1 degree, which leaves a scene like Bistro whole.
+        void setRayTracingCulling(bool enabled) { m_rtCullingEnabled = enabled; }
+        bool getRayTracingCulling() const { return m_rtCullingEnabled; }
+        void setRayTracingCullRadius(float radius) { m_rtCullRadiusMeters = std::max(WorldUnits::ToMeters(radius), 0.0f); }
+        float getRayTracingCullRadius() const { return WorldUnits::FromMeters(m_rtCullRadiusMeters); }
+        void setRayTracingCullAngle(float degrees) { m_rtCullAngleDegrees = std::clamp(degrees, 0.0f, 90.0f); }
+        float getRayTracingCullAngle() const { return m_rtCullAngleDegrees; }
+        // The TLAS's instances and those culling leaves out; BLAS evicted under the ray tracing budget (rebuilt when needed).
+        uint32_t getTlasInstanceCount() const { return m_gpuScene.GetTlasBuildCount(); }
+        uint32_t getTlasCulledCount() const { return m_gpuScene.GetTlasCulledCount(); }
+        uint32_t getEvictedBlasCount() const { return m_evictedBlasCount; }
         void setPathTracingEnabled(bool enabled) { m_pathTracingEnabled = enabled; }
         bool isPathTracingEnabled() const { return m_pathTracingEnabled; }
         void setPathTracingAccumulation(bool enabled) { m_pathTracingAccumulation = enabled; }
@@ -802,6 +814,9 @@ namespace Nox
         void readInspectionProbe(uint32_t frameSlot);
         void readCullStats(uint32_t frameSlot);
         void readBlasCompactedSizes(uint32_t frameSlot);
+        // BLAS residency under the ray tracing budget (§5.9 / §5.14): evicted BLAS a traced instance needs again are queued to
+        // build; over the budget, the BLAS of meshes no traced instance needed for BlasEvictionFrames go, longest unneeded first.
+        void manageBlasResidency();
         void readMipFeedback(uint32_t frameSlot);
         void readClusterStats(uint32_t frameSlot);
 
@@ -1566,6 +1581,24 @@ namespace Nox
         MemoryBudget m_memoryBudget;
         std::vector<MeshBLAS> m_meshBLASes;
         std::vector<uint32_t> m_freeBLASIds;
+        // What builds each BLAS again after an eviction (by BLAS id; ranges, not addresses: streams can grow).
+        struct BlasSource
+        {
+            uint32_t meshSlot = UINT32_MAX;
+            GeometryRange vertices;
+            GeometryRange indices;
+            bool isOpaque = true;
+            bool valid = false;   // the mesh is loaded
+            bool evicted = false; // its BLAS is freed until a traced instance needs it
+        };
+        std::vector<BlasSource> m_blasSources;
+        uint32_t m_evictedBlasCount = 0;
+        uint64_t m_memorySampleCount = 0;   // updateMemoryBudget calls
+        uint64_t m_blasEvictionSample = ~0ull; // the sample the last eviction pass judged (one pass per fresh measurement)
+        static constexpr uint64_t BlasEvictionFrames = 300;
+        bool m_rtCullingEnabled = true;
+        float m_rtCullRadiusMeters = 300.0f;
+        float m_rtCullAngleDegrees = 1.0f;
 
         struct AnimatedBLAS
         {

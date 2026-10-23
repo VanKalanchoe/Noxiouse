@@ -3843,7 +3843,12 @@ namespace Nox
         // Not ray traced until its BLAS is built in a frame (SetMeshBlas).
         handle.gpuSceneMesh = m_gpuScene.AddMesh(upload.GpuMesh, 0);
         if (handle.blasId != UINT32_MAX)
+        {
             m_blasBuilds.push_back({ handle.blasId, handle.gpuSceneMesh, handle.vertices, handle.rtIndices, upload.IsOpaque });
+            if (m_blasSources.size() <= handle.blasId)
+                m_blasSources.resize(handle.blasId + 1);
+            m_blasSources[handle.blasId] = { handle.gpuSceneMesh, handle.vertices, handle.rtIndices, upload.IsOpaque, true, false };
+        }
         return handle;
     }
 
@@ -3878,6 +3883,11 @@ namespace Nox
         if (!handle.IsValid()) return;
 
         std::erase_if(m_blasBuilds, [&](const BlasBuild& build) { return build.blasId == handle.blasId; });
+        if (handle.blasId < m_blasSources.size())
+        {
+            m_evictedBlasCount -= m_blasSources[handle.blasId].evicted ? 1 : 0;
+            m_blasSources[handle.blasId] = BlasSource{};
+        }
 
         // Instances of this mesh stop drawing now; their entities register again (with the reloaded mesh).
         if (handle.gpuSceneMesh != GpuScene::InvalidSlot)
@@ -5317,8 +5327,8 @@ namespace Nox
             m_meshletTriangleStream.Free(mesh->meshletTriangles);
             m_rtIndexStream.Free(mesh->rtIndices);
 
-            // The GPU scene stopped tracing this mesh when it was unloaded.
-            if (mesh->blasId != UINT32_MAX && mesh->blasId < m_meshBLASes.size() && m_meshBLASes[mesh->blasId].as)
+            // The GPU scene stopped tracing this mesh when it was unloaded. (An evicted BLAS has no structure left, its id is freed too.)
+            if (mesh->blasId != UINT32_MAX && mesh->blasId < m_meshBLASes.size())
             {
                 m_meshBLASes[mesh->blasId] = MeshBLAS{};
                 m_freeBLASIds.push_back(mesh->blasId);
@@ -5330,6 +5340,7 @@ namespace Nox
     // according to gpt no async since compute and graphics same commandbuffer and executed in order
     void Renderer::updateMemoryBudget()
     {
+        ++m_memorySampleCount;
         m_memoryBudget.Update(m_memoryHeapStats);
 
         // Geometry: the streams hold their capacity, of which the live ranges are in use.
@@ -5607,8 +5618,16 @@ namespace Nox
             return;
         }
 
+        // Culling decides which ray traced instances the TLAS holds (a change rebuilds it) and which meshes ray tracing needs;
+        // evicted BLAS needed again are queued, and over the budget unneeded ones go.
+        m_gpuScene.UpdateTlasCulling({ .Enabled = m_rtCullingEnabled, .Camera = m_cameraPosition,
+                                       .Radius = WorldUnits::FromMeters(m_rtCullRadiusMeters), .MinAngle = glm::radians(m_rtCullAngleDegrees) });
+        manageBlasResidency();
+        NOX_PROFILE_COUNTER("TLAS Culled", m_gpuScene.GetTlasCulledCount());
+        NOX_PROFILE_COUNTER("BLAS Evicted", m_evictedBlasCount);
+
         // Instance records live in the GPU scene (instanceCustomIndex = instance slot).
-        const uint32_t instanceCount = m_gpuScene.GetTlasInstanceCount();
+        const uint32_t instanceCount = m_gpuScene.GetTlasBuildCount();
         if (instanceCount == 0)
         {
             // Nothing left to trace (the scene was deleted): the old TLAS still points at BLASes that are freed, so no pass
@@ -5698,6 +5717,80 @@ namespace Nox
         uniformData.enableRTReflections = (m_rayTracingEnabled && m_rayTracingReflections) ? 1 : 0;
 
         m_hasTLASBuild = true;
+    }
+
+    void Renderer::manageBlasResidency()
+    {
+        const uint64_t frame = m_gpuScene.GetCullingFrame();
+
+        // 1. Evicted BLAS a traced instance needs again: a new structure, built in a frame under the build budget (its instances
+        //    trace from the TLAS after that build).
+        for (uint32_t blasId = 0; blasId < m_blasSources.size(); ++blasId)
+        {
+            BlasSource& source = m_blasSources[blasId];
+            if (!source.valid || !source.evicted || m_gpuScene.GetMeshLastTracedFrame(source.meshSlot) != frame)
+                continue;
+            const BlasBuild build{ blasId, source.meshSlot, source.vertices, source.indices, source.isOpaque };
+            const NRI::AccelerationStructureBuildSizes sizes = m_device->getAccelerationStructureBuildSizes(blasBuildDesc(build));
+            MeshBLAS& blas = m_meshBLASes[blasId];
+            blas.storageBuffer = m_device->createBuffer(NRI::BufferDesc{ .size = sizes.accelerationStructureSize, .usage = NRI::BufferUsage::AccelerationStructure });
+            blas.as = m_device->createAccelerationStructure(NRI::AccelerationStructureDesc{
+                .type = NRI::AccelerationStructureType::BottomLevel,
+                .storageBuffer = blas.storageBuffer.get(),
+                .bufferOffset = 0,
+                .size = sizes.accelerationStructureSize
+            });
+            blas.serial = ++m_blasSerial; // (compaction results measured before the eviction match no more)
+            source.evicted = false;
+            --m_evictedBlasCount;
+            m_blasBuilds.push_back(build);
+        }
+
+        // 2. Over the ray tracing budget: judged once per memory sample (the committed bytes are measured again before the next
+        //    pass), down to 90% of the budget.
+        const MemoryCategoryStats& rayTracing = GetMemoryCategory(MemoryCategory::RayTracing);
+        if (rayTracing.Budget == 0 || rayTracing.Committed <= rayTracing.Budget || m_blasEvictionSample == m_memorySampleCount)
+            return;
+        m_blasEvictionSample = m_memorySampleCount;
+
+        std::unordered_set<uint32_t> pendingBuilds;
+        for (const BlasBuild& build : m_blasBuilds)
+            pendingBuilds.insert(build.blasId);
+        std::vector<std::pair<uint64_t, uint32_t>> candidates; // (last traced frame, BLAS id)
+        for (uint32_t blasId = 0; blasId < m_blasSources.size(); ++blasId)
+        {
+            const BlasSource& source = m_blasSources[blasId];
+            if (!source.valid || source.evicted || !m_meshBLASes[blasId].as || pendingBuilds.contains(blasId))
+                continue;
+            const uint64_t lastTraced = m_gpuScene.GetMeshLastTracedFrame(source.meshSlot);
+            if (lastTraced + BlasEvictionFrames < frame)
+                candidates.emplace_back(lastTraced, blasId);
+        }
+        std::sort(candidates.begin(), candidates.end());
+
+        uint64_t excess = rayTracing.Committed - rayTracing.Budget / 10 * 9;
+        uint32_t evicted = 0;
+        uint64_t freed = 0;
+        for (const auto& [lastTraced, blasId] : candidates)
+        {
+            if (freed >= excess)
+                break;
+            MeshBLAS& blas = m_meshBLASes[blasId];
+            freed += blas.storageBuffer ? blas.storageBuffer->getSize() : 0;
+            // Out of this frame's TLAS; frames in flight may still trace it (as for a compaction's old BLAS).
+            m_gpuScene.SetMeshBlas(m_blasSources[blasId].meshSlot, 0);
+            {
+                std::scoped_lock lock(m_deferredReleasesMutex);
+                m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT + 1, std::move(blas) });
+            }
+            blas = MeshBLAS{};
+            m_blasSources[blasId].evicted = true;
+            ++m_evictedBlasCount;
+            ++evicted;
+        }
+        if (evicted > 0)
+            NOX_CORE_INFO("Ray tracing memory over budget ({} of {} MB): {} BLAS of meshes not traced recently evicted ({} MB)",
+                          rayTracing.Committed >> 20, rayTracing.Budget >> 20, evicted, freed >> 20);
     }
 
     void Renderer::BuildSceneAccelerationStructure(NRI::CommandBuffer& cmd)

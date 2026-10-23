@@ -130,7 +130,7 @@ for history. File references are to the code as of this audit.
   parallel animation and joint matrices, Engine plan §5.2.6 / §5.3.)
 - Geometry / cluster page streaming (6b, paused), RT fallback LOD (reverted), discrete LOD for small meshes, world streaming
   (6c), virtual texturing, DirectStorage, IoStore-like containers.
-- Hard memory budgets and eviction, out-of-memory handling, sparse binding, BLAS sub-allocation / eviction, RT instance culling.
+- Out-of-memory handling, sparse binding, BLAS sub-allocation. (2026-10-23: RT instance culling and BLAS eviction under the ray tracing budget, Engine plan §5.14; textures were already evicted by mip, §5.12.3.)
 - Materials reference textures by path; BC6H cooking (no encoder vendored: HDR images load uncompressed). (2026-10-23: normal maps
   cooked to BC5 and a Grayscale (BC4) setting, texture Compression settings; scene YAML is parsed on a thread since the async scene
   load; lights rewritten every frame is a few KB into VRAM-resident memory -- measured not worth dirty tracking.) (Level streaming:

@@ -1,7 +1,10 @@
 #include "GpuScene.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
+
+#include <glm/gtc/constants.hpp>
 
 #include "NRI/Device.h"
 #include "NoxCore/Core/Log.h"
@@ -356,6 +359,8 @@ namespace Nox
         {
             m_TlasInstances.resize(slot + 1);
         }
+        if (slot < m_TlasCulled.size())
+            m_TlasCulled[slot] = 0; // (a reused slot: culling decides again for this instance)
         WriteTlasInstance(slot);
         return slot;
     }
@@ -600,7 +605,10 @@ namespace Nox
         if (std::memcmp(&current, &record, sizeof(record)) == 0)
             return;
 
-        m_TlasInstanceCount += (record.accelerationStructureReference != 0 ? 1 : 0) - (current.accelerationStructureReference != 0 ? 1 : 0);
+        const int32_t referenceChange = (record.accelerationStructureReference != 0 ? 1 : 0) - (current.accelerationStructureReference != 0 ? 1 : 0);
+        m_TlasInstanceCount += referenceChange;
+        if (instanceSlot < m_TlasCulled.size() && m_TlasCulled[instanceSlot] != 0)
+            m_TlasCulledCount += referenceChange; // (a culled instance whose BLAS came or went)
         if (record.accelerationStructureReference != 0 || current.accelerationStructureReference != 0)
             m_TlasChanged = true;
         current = record;
@@ -614,7 +622,7 @@ namespace Nox
             for (uint32_t instanceSlot : m_Buckets[bucketIndex])
             {
                 const NRI::AccelerationStructureInstance& record = m_TlasInstances[instanceSlot];
-                if (record.accelerationStructureReference == 0)
+                if (record.accelerationStructureReference == 0 || (instanceSlot < m_TlasCulled.size() && m_TlasCulled[instanceSlot] != 0))
                     continue;
 
                 // The buffer is sized from the running count; writing past it would run into whatever follows the
@@ -626,6 +634,45 @@ namespace Nox
                 }
                 outInstances[written++] = record;
             }
+        }
+    }
+
+    void GpuScene::UpdateTlasCulling(const TlasCulling& culling)
+    {
+        ++m_CullingFrame;
+        m_TlasCulled.resize(m_TlasInstances.size(), 0);
+        m_MeshLastTraced.resize(m_MeshBlasAddresses.size(), 0);
+        m_TlasCulledCount = 0;
+        const float cullDistance = std::max(culling.Radius, 0.0f);
+        for (uint32_t slot = 0; slot < static_cast<uint32_t>(m_InstanceStates.size()) && slot < m_TlasCulled.size(); ++slot)
+        {
+            const InstanceState& state = m_InstanceStates[slot];
+            const bool traced = state.Mesh != InvalidSlot && state.Material != InvalidSlot && IsRayTracedBucket(state.Bucket);
+            bool culled = false;
+            if (traced && culling.Enabled)
+            {
+                // The world bounding sphere of the mesh's box.
+                const shaderio::GpuMesh& mesh = m_Meshes.Get(state.Mesh);
+                const glm::mat4& world = m_Transforms.Get(slot).world;
+                const float scale = std::max({ glm::length(glm::vec3(world[0])), glm::length(glm::vec3(world[1])), glm::length(glm::vec3(world[2])) });
+                const float radius = 0.5f * glm::length(glm::max(mesh.boundsMax - mesh.boundsMin, glm::vec3(0.0f))) * scale;
+                const glm::vec3 center = glm::vec3(world * glm::vec4(0.5f * (mesh.boundsMin + mesh.boundsMax), 1.0f));
+                const float centerDistance = glm::length(center - culling.Camera);
+                const float distance = std::max(centerDistance - radius, 0.0f);
+                const float angle = centerDistance > radius ? 2.0f * std::asin(radius / centerDistance) : glm::pi<float>();
+                const bool wasCulled = m_TlasCulled[slot] != 0;
+                culled = wasCulled ? distance > cullDistance * 0.9f && angle < culling.MinAngle * 1.1f
+                                   : distance > cullDistance && angle < culling.MinAngle;
+            }
+            if (traced && !culled)
+                m_MeshLastTraced[state.Mesh] = m_CullingFrame;
+
+            const bool hasRecord = m_TlasInstances[slot].accelerationStructureReference != 0;
+            if ((m_TlasCulled[slot] != 0) != culled && hasRecord)
+                m_TlasChanged = true;
+            m_TlasCulled[slot] = culled ? 1 : 0;
+            if (culled && hasRecord)
+                ++m_TlasCulledCount;
         }
     }
 
