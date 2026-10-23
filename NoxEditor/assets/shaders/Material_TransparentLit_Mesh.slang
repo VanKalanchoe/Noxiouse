@@ -162,12 +162,55 @@ float3 rayHitNormal(GpuRayTracingInstance surface, uint primitive, float2 baryce
     return normalize(mul((float3x3)surface.normalMatrix, local));
 }
 
+// A ray traced from glass drawn over DLSS-RR's output (MESHLET_AFTER_UPSCALE): where its hit is the surface the camera sees on
+// screen, that surface's light from RR's denoised image (the copy refraction reads, before any glass is drawn over it), checked
+// against the jitter-free depth (addCoverageDepthPass). Lit here instead (shadeRayHit), the hit's diffuse light came from the
+// screen-probe GI's render-resolution, jittered pixels and its validity test flipped from frame to frame -- after RR nothing
+// smooths that, and glass seen from the side (mostly reflection) flickered.
+bool afterUpscaleScreenRadiance(UniformBufferObject* ubo, PushConstantMeshlets pushConstant, float3 position, out float3 radiance)
+{
+    radiance = float3(0.0);
+    if ((pushConstant.meshletCulling & MESHLET_AFTER_UPSCALE) == 0 || pushConstant.refractionTextureIndex == 0xFFFFFFFF ||
+        pushConstant.coverageDepthTextureIndex == 0xFFFFFFFF)
+        return false;
+    const float4 clip = mul(ubo->nonJitteredProj, mul(ubo->view, float4(position, 1.0)));
+    if (clip.w <= 1e-5)
+        return false;
+    const float2 uv = clip.xy / clip.w * float2(0.5, -0.5) + 0.5;
+    if (any(uv <= 0.0) || any(uv >= 1.0))
+        return false;
+
+    Texture2D<float> sceneDepth = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.coverageDepthTextureIndex, 0));
+    uint depthWidth, depthHeight;
+    sceneDepth.GetDimensions(depthWidth, depthHeight);
+    const float depth = sceneDepth.Load(int3(min(int2(uv * float2(depthWidth, depthHeight)), int2(depthWidth, depthHeight) - 1), 0));
+    // Reverse Z goes as 1 / distance: the same point within 2 % of its distance.
+    const float hitDepth = clip.z / clip.w;
+    if (depth <= 0.0 || abs(hitDepth - depth) > 0.02 * max(hitDepth, depth))
+        return false;
+
+    Texture2D sceneColor = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.refractionTextureIndex, 0));
+    radiance = sceneColor.SampleLevel(SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0)), uv, 0.0).rgb;
+    return true;
+}
+
+// A traced glass ray's hit: from RR's image where it is on screen (after RR), else lit here.
+float3 shadeGlassRayHit(UniformBufferObject* ubo, PushConstantMeshlets pushConstant, uint slot, uint primitive, float2 barycentrics,
+                        float3 origin, float3 direction, float hitT)
+{
+    float3 radiance;
+    if (afterUpscaleScreenRadiance(ubo, pushConstant, origin + direction * hitT, radiance))
+        return radiance;
+    return shadeRayHit(ubo, slot, primitive, barycentrics, origin, direction, hitT);
+}
+
 // What is seen through the glass at `position`, like the path tracer sees it for a smooth surface. A thin-walled material
 // (thickness 0) passes the view ray on unbent. A volume (KHR_materials_volume) bends it in here and out where it leaves the
 // mesh -- the glass's own far side, found with a second ray that only sees this instance (total internal reflection mirrors it
 // back instead); a mesh that is not closed falls back to a slab of the given thickness (out parallel to the way in). The ray
 // then goes on through the scene, past other see-through surfaces; a miss is the environment.
-float3 tracedRefraction(UniformBufferObject* ubo, InstanceData instance, uint selfSlot, float3 position, float3 n, float3 v, float ior, float modelScale)
+float3 tracedRefraction(UniformBufferObject* ubo, PushConstantMeshlets pushConstant, InstanceData instance, uint selfSlot, float3 position, float3 n,
+                        float3 v, float ior, float modelScale)
 {
     const float bias = 0.002 * ubo->unitsPerMeter;
     const float maxDistance = 1000.0 * ubo->unitsPerMeter;
@@ -209,7 +252,7 @@ float3 tracedRefraction(UniformBufferObject* ubo, InstanceData instance, uint se
     float2 barycentrics;
     float hitT;
     if (traceRefractionRay(ubo, origin, direction, maxDistance, -1, slot, primitive, barycentrics, hitT))
-        return shadeRayHit(ubo, slot, primitive, barycentrics, origin, direction, hitT) * absorbed;
+        return shadeGlassRayHit(ubo, pushConstant, slot, primitive, barycentrics, origin, direction, hitT) * absorbed;
 
     if (ubo->prefilteredMapIndex == 0xFFFFFFFF)
         return float3(0.0);
@@ -622,7 +665,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         float hitT;
         float3 radiance;
         if (traceRefractionRay(ubo, origin, reflected, 1000.0 * ubo->unitsPerMeter, -1, slot, primitive, barycentrics, hitT))
-            radiance = shadeRayHit(ubo, slot, primitive, barycentrics, origin, reflected, hitT);
+            radiance = shadeGlassRayHit(ubo, pushConstant, slot, primitive, barycentrics, origin, reflected, hitT);
         else
         {
             TextureCube environment = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + ubo->prefilteredMapIndex, 0));
@@ -670,7 +713,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
 
         float3 behind = float3(0.0);
         if (tracedWeight > 0.0)
-            behind = tracedRefraction(ubo, instance, vertIn.drawID, vertIn.worldPos, n, v, ior, modelScale) * tracedWeight;
+            behind = tracedRefraction(ubo, pushConstant, instance, vertIn.drawID, vertIn.worldPos, n, v, ior, modelScale) * tracedWeight;
         if (tracedWeight < 1.0)
         {
             Texture2D refractionSource = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.refractionTextureIndex, 0));
