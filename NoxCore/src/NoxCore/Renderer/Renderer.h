@@ -487,6 +487,12 @@ namespace Nox
         // look smaller than the angle leave the TLAS. On by default at 300 m and 1 degree, which leaves a scene like Bistro whole.
         void setRayTracingCulling(bool enabled) { m_rtCullingEnabled = enabled; }
         bool getRayTracingCulling() const { return m_rtCullingEnabled; }
+        // Async compute (§5.4.4): the screen-probe GI runs on the device's compute-only queue beside the graphics work. On by default
+        // where the device has such a queue (isAsyncComputeAvailable); off, or without one, it runs on the graphics queue as before.
+        void setAsyncComputeEnabled(bool enabled) { m_asyncComputeEnabled = enabled; m_renderGraph.SetAsyncCompute(enabled); }
+        bool getAsyncComputeEnabled() const { return m_asyncComputeEnabled; }
+        bool isAsyncComputeAvailable() const { return m_renderGraph.IsAsyncComputeAvailable(); }
+        uint32_t getAsyncComputePassCount() const { return m_renderGraph.GetAsyncComputePassCount(); }
         void setRayTracingCullRadius(float radius) { m_rtCullRadiusMeters = std::max(WorldUnits::ToMeters(radius), 0.0f); }
         float getRayTracingCullRadius() const { return WorldUnits::FromMeters(m_rtCullRadiusMeters); }
         void setRayTracingCullAngle(float degrees) { m_rtCullAngleDegrees = std::clamp(degrees, 0.0f, 90.0f); }
@@ -909,7 +915,8 @@ namespace Nox
         // in submission order. prepareFrameGraph imports the renderer's resources and resolves this frame's CPU-side
         // state; the add* functions (Renderer/Passes/*.cpp) contribute each feature's passes in frame order and make every
         // CPU-side decision there: execute callbacks only record, possibly on worker threads.
-        std::span<NRI::CommandBuffer* const> recordFrame(uint32_t imageIndex);
+        std::span<const RGSubmission> recordFrame(uint32_t imageIndex);
+        std::vector<NRI::TimelinePoint> m_submitWaitScratch;
         // Start of every frame command buffer: descriptor heaps and the dynamic state every pass builds on.
         void applyCommandBufferBaseline(NRI::CommandBuffer& cmd) const;
         void prepareFrameGraph(uint32_t imageIndex);
@@ -1597,6 +1604,7 @@ namespace Nox
         uint64_t m_blasEvictionSample = ~0ull; // the sample the last eviction pass judged (one pass per fresh measurement)
         static constexpr uint64_t BlasEvictionFrames = 300;
         bool m_rtCullingEnabled = true;
+        bool m_asyncComputeEnabled = true;
         float m_rtCullRadiusMeters = 300.0f;
         float m_rtCullAngleDegrees = 1.0f;
 

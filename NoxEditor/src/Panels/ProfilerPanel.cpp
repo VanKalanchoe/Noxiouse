@@ -109,7 +109,8 @@ namespace Nox
             ImGui::Text("Duration: %s", FormatDuration(static_cast<double>(scope.EndNs - scope.StartNs)).c_str());
             ImGui::Text("Start: %s after frame %llu began", FormatDuration(static_cast<double>(scope.StartNs - frame.StartNs)).c_str(),
                         static_cast<unsigned long long>(frame.Number));
-            ImGui::Text("%s, depth %u", gpu ? "GPU" : Profiler::Get().GetTimelineThreadName(scope.Lane).c_str(), scope.Depth);
+            ImGui::Text("%s, depth %u", gpu ? (scope.Lane == 1 ? "GPU, async compute queue" : "GPU, graphics queue")
+                                            : Profiler::Get().GetTimelineThreadName(scope.Lane).c_str(), scope.Depth);
             if (info && info->File && info->File[0] != '\0')
             {
                 std::string_view file(info->File);
@@ -354,8 +355,12 @@ namespace Nox
         // Lanes: the GPU, then the main thread, then the other threads; as many rows as their deepest scope in view.
         const uint32_t threadCount = profiler.GetTimelineThreadCount();
         std::vector<uint32_t> laneDepth(threadCount, 0);
-        uint32_t gpuDepth = 0;
-        bool hasGpu = false;
+        // GPU tracks: the graphics queue, and the async compute queue (its scopes have no "GPU Frame" around them: one level less).
+        static constexpr const char* GpuTrackNames[2] = { "GPU", "GPU Async Compute" };
+        uint32_t gpuDepth[2] = { 0, 0 };
+        bool hasGpu[2] = { false, false };
+        auto gpuTrack = [](const TimelineScope& scope) { return std::min(scope.Lane, 1u); };
+        auto gpuRow = [&](const TimelineScope& scope) { return gpuTrack(scope) == 1 && scope.Depth > 0 ? scope.Depth - 1 : scope.Depth; };
         for (const TimelineFrame* frame : frames)
         {
             for (const TimelineScope& scope : frame->Cpu)
@@ -365,8 +370,8 @@ namespace Nox
             }
             for (const TimelineScope& scope : frame->Gpu)
             {
-                gpuDepth = std::max(gpuDepth, scope.Depth);
-                hasGpu = true;
+                gpuDepth[gpuTrack(scope)] = std::max(gpuDepth[gpuTrack(scope)], gpuRow(scope));
+                hasGpu[gpuTrack(scope)] = true;
             }
         }
         std::vector<uint32_t> laneOrder;
@@ -388,9 +393,13 @@ namespace Nox
         // Lane tops, from below the ruler.
         std::vector<float> laneTop(threadCount, 0.0f);
         float y = rowHeight + laneGap;
-        const float gpuTop = y;
-        if (hasGpu)
-            y += static_cast<float>(gpuDepth + 1) * rowHeight + laneGap;
+        float gpuTop[2] = { 0.0f, 0.0f };
+        for (uint32_t track = 0; track < 2; ++track)
+        {
+            gpuTop[track] = y;
+            if (hasGpu[track])
+                y += static_cast<float>(gpuDepth[track] + 1) * rowHeight + laneGap;
+        }
         for (uint32_t lane : laneOrder)
         {
             laneTop[lane] = y;
@@ -437,8 +446,11 @@ namespace Nox
             drawList->AddText(ImVec2(canvas.x + 4.0f, canvas.y + top + 2.0f), textColor, name);
             drawList->PopClipRect();
         };
-        if (hasGpu)
-            drawLane(gpuTop, gpuDepth, "GPU", IM_COL32(40, 48, 64, 255));
+        for (uint32_t track = 0; track < 2; ++track)
+        {
+            if (hasGpu[track])
+                drawLane(gpuTop[track], gpuDepth[track], GpuTrackNames[track], track == 0 ? IM_COL32(40, 48, 64, 255) : IM_COL32(52, 44, 64, 255));
+        }
         for (uint32_t lane : laneOrder)
             drawLane(laneTop[lane], laneDepth[lane], profiler.GetTimelineThreadName(lane).c_str(), IM_COL32(36, 36, 40, 255));
 
@@ -474,7 +486,7 @@ namespace Nox
                 return;
             float x0 = toX(static_cast<double>(scope.StartNs));
             float x1 = std::max(toX(static_cast<double>(scope.EndNs)), x0 + 1.0f);
-            const float y0 = canvas.y + laneY + static_cast<float>(scope.Depth) * rowHeight;
+            const float y0 = canvas.y + laneY + static_cast<float>(gpu ? gpuRow(scope) : scope.Depth) * rowHeight;
             const float y1 = y0 + rowHeight - 1.0f;
             drawList->AddRectFilled(ImVec2(x0, y0), ImVec2(x1, y1), ScopeColor(scope.ScopeId, !gpu && IsWaitScope(scope.ScopeId), gpu));
             if (scope.ScopeId == m_HighlightScope)
@@ -497,11 +509,8 @@ namespace Nox
         };
         for (const TimelineFrame* frame : frames)
         {
-            if (hasGpu)
-            {
-                for (const TimelineScope& scope : frame->Gpu)
-                    drawScope(scope, *frame, gpuTop, true);
-            }
+            for (const TimelineScope& scope : frame->Gpu)
+                drawScope(scope, *frame, gpuTop[gpuTrack(scope)], true);
             for (const TimelineScope& scope : frame->Cpu)
             {
                 if (scope.Lane < threadCount)
@@ -547,19 +556,19 @@ namespace Nox
         struct Row
         {
             uint32_t ScopeId;
-            bool Gpu;
+            uint32_t Track; // 0 CPU, 1 GPU (graphics queue), 2 GPU (async compute queue)
             uint32_t Calls = 0;
             double TotalMs = 0.0;
             double MaxMs = 0.0;
         };
         std::vector<Row> rows;
         std::unordered_map<uint64_t, size_t> rowIndex;
-        auto add = [&](const TimelineScope& scope, bool gpu)
+        auto add = [&](const TimelineScope& scope, uint32_t track)
         {
-            const uint64_t key = (static_cast<uint64_t>(scope.ScopeId) << 1) | (gpu ? 1u : 0u);
+            const uint64_t key = (static_cast<uint64_t>(scope.ScopeId) << 2) | track;
             auto [entry, added] = rowIndex.try_emplace(key, rows.size());
             if (added)
-                rows.push_back({ scope.ScopeId, gpu });
+                rows.push_back({ scope.ScopeId, track });
             Row& row = rows[entry->second];
             const double ms = static_cast<double>(scope.EndNs - scope.StartNs) / NanosecondsPerMillisecond;
             row.Calls++;
@@ -567,9 +576,9 @@ namespace Nox
             row.MaxMs = std::max(row.MaxMs, ms);
         };
         for (const TimelineScope& scope : frame.Cpu)
-            add(scope, false);
+            add(scope, 0);
         for (const TimelineScope& scope : frame.Gpu)
-            add(scope, true);
+            add(scope, scope.Lane == 1 ? 2u : 1u);
         std::erase_if(rows, [this](const Row& row) { return !ContainsCaseInsensitive(ScopeName(row.ScopeId), m_Filter); });
 
         const double frameMs = static_cast<double>(frame.EndNs - frame.StartNs) / NanosecondsPerMillisecond;
@@ -597,7 +606,7 @@ namespace Nox
                     switch (spec.ColumnIndex)
                     {
                     case 0: return std::string_view(ScopeName(left.ScopeId)) < std::string_view(ScopeName(right.ScopeId));
-                    case 1: return left.Gpu < right.Gpu;
+                    case 1: return left.Track < right.Track;
                     case 2: return left.Calls < right.Calls;
                     case 4: return left.MaxMs < right.MaxMs;
                     default: return left.TotalMs < right.TotalMs; // total and % of frame
@@ -611,12 +620,12 @@ namespace Nox
         {
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
-            ImGui::PushID(static_cast<int>(row.ScopeId * 2 + (row.Gpu ? 1 : 0)));
+            ImGui::PushID(static_cast<int>(row.ScopeId * 4 + row.Track));
             if (ImGui::Selectable(ScopeName(row.ScopeId), row.ScopeId == m_HighlightScope, ImGuiSelectableFlags_SpanAllColumns))
                 m_HighlightScope = row.ScopeId == m_HighlightScope ? ~0u : row.ScopeId;
             ImGui::PopID();
             ImGui::TableNextColumn();
-            ImGui::TextUnformatted(row.Gpu ? "GPU" : (IsWaitScope(row.ScopeId) ? "CPU (wait)" : "CPU"));
+            ImGui::TextUnformatted(row.Track == 2 ? "GPU (async compute)" : row.Track == 1 ? "GPU" : (IsWaitScope(row.ScopeId) ? "CPU (wait)" : "CPU"));
             ImGui::TableNextColumn();
             ImGui::Text("%u", row.Calls);
             ImGui::TableNextColumn();
@@ -624,7 +633,7 @@ namespace Nox
             ImGui::TableNextColumn();
             ImGui::Text("%.3f", row.MaxMs);
             ImGui::TableNextColumn();
-            const double reference = row.Gpu ? frame.GpuMs : frameMs;
+            const double reference = row.Track != 0 ? frame.GpuMs : frameMs;
             if (reference > 0.0)
                 ImGui::Text("%.1f %%", row.TotalMs / reference * 100.0);
             else

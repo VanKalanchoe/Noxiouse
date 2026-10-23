@@ -35,6 +35,9 @@ namespace NRI
         virtual ~GpuProfiler() = default;
 
         virtual bool isSupported() const = 0;
+        // Whether command buffers of the async compute queue (QueueType::Compute) may write timestamps too (its family's own
+        // timestampValidBits).
+        virtual bool isComputeQueueSupported() const { return false; }
         // Nanoseconds per tick (VkPhysicalDeviceLimits::timestampPeriod).
         virtual float getTimestampPeriod() const = 0;
         // Number of valid bits in a tick value; tick differences must be masked with it.

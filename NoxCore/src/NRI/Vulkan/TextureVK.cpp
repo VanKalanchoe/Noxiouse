@@ -134,7 +134,8 @@ namespace NRI
             .sharingMode = vk::SharingMode::eExclusive
         };
         const std::span<const uint32_t> sharedFamilies = m_deviceVK.getSharedQueueFamilies();
-        if (desc.sharedAcrossQueues && sharedFamilies.size() > 1)
+        // (Async compute: every image, so the compute queue may use any of them.)
+        if ((desc.sharedAcrossQueues || m_deviceVK.hasAsyncComputeQueue()) && sharedFamilies.size() > 1)
         {
             imageInfo.sharingMode = vk::SharingMode::eConcurrent;
             imageInfo.queueFamilyIndexCount = static_cast<uint32_t>(sharedFamilies.size());

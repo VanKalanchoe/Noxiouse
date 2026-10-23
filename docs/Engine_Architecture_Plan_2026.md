@@ -685,6 +685,36 @@ The graph therefore tracks **access and lifetime**, not state:
 
 The old `NRI::ResourceState` layout model in `architecture.md` v3 is replaced by this access model.
 
+**Async compute (built 2026-10-23, D6).** `RGPassFlags::AsyncCompute` marks a compute pass that may run on the device's
+compute-only queue (`NRI::QueueType::Compute`, a family with compute but not graphics: its own front end, so its work runs beside
+the graphics queue's; `Device::hasAsyncComputeQueue`). With `RenderGraph::SetAsyncCompute` and Precise synchronization:
+- **Blocks, fork and join** (`RenderGraph::PlanQueues`, after culling): consecutive executed async passes form a block. It starts
+  after its **fork**, the last earlier graphics pass it conflicts with (one of them writes what the other accesses) -- at least the
+  frame's first graphics pass, never before the previous block's fork; the first later graphics pass it conflicts with is its
+  **join** and waits for it (none: the frame's last graphics submission does, so the frame fence covers the block). A block with
+  nothing graphics before it or after its fork stays on the graphics queue, and the planning starts over.
+- **Lifetimes:** what a block accesses lives from its fork to its join, so no transient of the graphics passes running beside it
+  takes its memory (the pool aliases by lifetime).
+- **Barriers:** on the compute queue a barrier names only that queue's stages and accesses (compute, transfer, AS build, indirect,
+  ray tracing); what the graphics queue did before is ordered by the timeline wait at the fork. Graphics barriers are unchanged.
+- **Submissions** (`RGSubmission`, `Execute`): the graphics segments between fork / join points and one per block, each its own
+  command buffers (a compute queue's from a pool of that family, set up with the descriptor heaps only). A fork segment signals the
+  graph's graphics timeline semaphore, the block waits for that value and signals the compute timeline, the join segment waits for
+  it; every submission also waits for the uploads. The last submission is graphics and presents. vkQueueSubmit2's semaphore scopes
+  reach earlier / later submissions on the same queue, which orders the next frame after this one's compute work.
+- **Resources:** with a compute-only family every buffer and image is created `VK_SHARING_MODE_CONCURRENT` over the queue
+  families (no ownership transfers). Reported free on NVIDIA; on AMD concurrent images can lose compression -- ownership transfers
+  would be the alternative there.
+- **Profiling:** a compute command buffer's GPU scopes go on the timeline's "GPU Async Compute" track (Window > Profiler), timed
+  where that family has timestamps, not sent to Tracy (one GPU context there).
+- **First user: the screen-probe GI** (its five passes are compute dispatches since this change, writing their targets as storage
+  images; the pass order declares DDGI and the GI right after the G-buffer so that SSAO, RTAO, the occlusion blur, the NRD guides
+  and the RT shadows run beside it, and the RT reflections or the lighting join). Toggle in the renderer settings, on by default
+  where the queue exists.
+- **Tested** without a GPU: a render graph test against generated NRI mocks (fork / join placement, submission order and timeline
+  values, compute barriers free of graphics stages, no aliasing beside a block, async off, no compute queue), under AddressSanitizer
+  and UBSan. Not yet measured on a GPU.
+
 #### 5.4.5 Synchronization strategy
 Today `NRI::CommandBuffer::executionBarrier()` records a **blanket** synchronization2 memory barrier
 (all stages, all access) through `pipelineBarrier2`, placed by hand 34 times in `recordCommandBuffer`;
@@ -1242,7 +1272,7 @@ Phases 1, 2 and 3 are architecture-defining and each gets its own plan-mode desi
 | D3 | ~~Texture streaming~~ **Decided** | **Mip streaming first** (reallocation into a new image, GPU feedback, §5.12.3); virtual texturing later (§5.12.2) | Decided September 2026 (Phase 6a) |
 | D4 | ~~Geometry LOD~~ **Decided** | **Cluster DAG** with meshoptimizer's clusterlod (§5.7.1) | Decided September 2026 (Phase 6b) |
 | D5 | Geometry buffer growth | grow-and-copy vs sparse binding reserve/commit | Base (Phase 4) uses grow-and-copy at load boundaries; sparse evaluated later, needs driver support validation |
-| D6 | Additional queues (**transfer decided**) | ~~one combined graphics/compute queue~~ · **dedicated transfer queue for uploads (Phase 5a, §5.11.6)** · async compute queue(s) for culling/RT/denoising still open | Transfer: multi-queue device creation, queue-family detection, timeline semaphores and per-queue command pools in NRI; concurrent sharing instead of ownership transfers |
+| D6 | Additional queues (**transfer and async compute decided**) | ~~one combined graphics/compute queue~~ · **dedicated transfer queue for uploads (Phase 5a, §5.11.6)** · **async compute queue: a compute-only family, render graph blocks with fork / join timeline points (§5.4.4), first user the screen-probe GI** | Transfer: multi-queue device creation, queue-family detection, timeline semaphores and per-queue command pools in NRI; concurrent sharing instead of ownership transfers |
 | D7 | IO backend | IoRing/overlapped IO vs DirectStorage | DirectStorage enables GPU decompression |
 | D8 | RT geometry LOD policy | ~~dedicated coarse RT LOD~~ (tried in 6b-2, reverted: holes in the path tracer, shadows lost to ray offsets) · RT from the same clusters as raster: cluster acceleration structures per frame (nvpro-samples vk_lod_clusters, `VK_NV_cluster_acceleration_structure`, NVIDIA only for now) | Until then ray tracing uses the original clusters (resident, full detail) |
 | D9 | ~~Editor vs runtime asset managers~~ **Decided and built** | **One loading pipeline, two modes:** `RuntimeAssetManager` is `EditorAssetManager` in read-only mode (no file watcher, reimports, registry writes or recooks); engine code uses read-only lookups on `AssetManagerBase`; a packaged game reads through `VirtualFileSystem` (`.npak`) | Decided and built October 2026 (`docs/Runtime_And_Packaging_Plan_2026-10.md` R2, R4) |

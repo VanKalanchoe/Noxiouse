@@ -164,6 +164,9 @@ namespace NRI
         virtual std::unique_ptr<TimelineSemaphore> createTimelineSemaphore(uint64_t initialValue = 0) = 0;
         // Whether Transfer is its own queue family (a copy engine running beside graphics) or the graphics queue.
         virtual bool hasDedicatedTransferQueue() const = 0;
+        // A compute-only queue family (async compute): QueueType::Compute runs beside the graphics queue. Every buffer and image
+        // is then shared concurrently by the queue families, so either queue may use it without ownership transfers.
+        virtual bool hasAsyncComputeQueue() const { return false; }
         virtual Nox::Ref<Texture2D> createTexture(const TextureDesc& desc) = 0;
         virtual std::unique_ptr<Buffer> createBuffer(const BufferDesc& desc) = 0;
         virtual std::unique_ptr<DescriptorHeap> createDescriptorHeap(const DescriptorHeapDesc& desc) = 0;

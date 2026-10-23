@@ -1854,6 +1854,9 @@ struct PushConstantScreenProbe
     vec2 currJitterUv;
     vec2 prevJitterUv;
     uint32_t materialTextureIndex; // Integrate: the G-buffer's material (double-sided: foliage), 0xFFFFFFFF: none
+    // The pass's targets (storage slots, RGPassContext::StorageSlot): the compute passes write them as storage images.
+    uint32_t outputStorageIndex0;
+    uint32_t outputStorageIndex1;
     uint32_t screenProbePadding;
 };
 

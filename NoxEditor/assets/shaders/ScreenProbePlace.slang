@@ -6,18 +6,16 @@
 
 struct ProbePlaceOutput
 {
-    float4 position : SV_Target0;
-    float4 normal : SV_Target1;
+    float4 position;
+    float4 normal;
 };
 
-[shader("fragment")]
-ProbePlaceOutput fragMain(ScreenProbeVertex input, uniform PushConstantScreenProbe pushConstant)
+ProbePlaceOutput screen_probe_place(uint2 probe, PushConstantScreenProbe pushConstant)
 {
     ProbePlaceOutput output;
     output.position = float4(0.0);
     output.normal = float4(0.0, 1.0, 0.0, 0.0);
 
-    const uint2 probe = uint2(input.pos.xy);
     if (probe.x >= pushConstant.probeCountX || probe.y >= pushConstant.probeCountY)
         return output;
 
@@ -50,4 +48,15 @@ ProbePlaceOutput fragMain(ScreenProbeVertex input, uniform PushConstantScreenPro
         return output;
     }
     return output;
+}
+
+[shader("compute")]
+[numthreads(SCREEN_PROBE_GROUP_SIZE, SCREEN_PROBE_GROUP_SIZE, 1)]
+void computeMain(uint3 id : SV_DispatchThreadID, uniform PushConstantScreenProbe pushConstant)
+{
+    if (!screen_probe_in_target(pushConstant.outputStorageIndex0, id.xy))
+        return;
+    const ProbePlaceOutput output = screen_probe_place(id.xy, pushConstant);
+    screen_probe_store(pushConstant.outputStorageIndex0, id.xy, output.position);
+    screen_probe_store(pushConstant.outputStorageIndex1, id.xy, output.normal);
 }

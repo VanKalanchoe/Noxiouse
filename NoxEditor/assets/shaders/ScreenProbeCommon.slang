@@ -49,39 +49,29 @@ float3 screen_probe_unpack_direction(float packed)
     return oct_decode(oct * 2.0 - 1.0);
 }
 
-struct ScreenProbePayload
-{
-    uint dummy;
-};
-groupshared ScreenProbePayload gScreenProbePayload;
+// Every pass is a compute dispatch over its target, 8 x 8 texels a group, and writes it through bindless storage images
+// (compute, so the passes can run on the async compute queue: a compute-only queue cannot draw).
+#define SCREEN_PROBE_GROUP_SIZE 8
 
-[shader("task")]
-[numthreads(1, 1, 1)]
-void taskMain()
+void screen_probe_store(uint storageIndex, uint2 texel, float4 value)
 {
-    DispatchMesh(1, 1, 1, gScreenProbePayload);
+    RWTexture2D<float4> target = RWTexture2D<float4>.Handle(uint2(storageIndex, 0));
+    target[texel] = value;
 }
 
-struct ScreenProbeVertex
+void screen_probe_store(uint storageIndex, uint2 texel, float value)
 {
-    float4 pos : SV_Position;
-};
+    RWTexture2D<float> target = RWTexture2D<float>.Handle(uint2(storageIndex, 0));
+    target[texel] = value;
+}
 
-static const float2 ScreenProbeTriangle[3] = { float2(-1.0, -1.0), float2(3.0, -1.0), float2(-1.0, 3.0) };
-
-// One triangle over the whole render area: the fragment shaders work per output texel.
-[shader("mesh")]
-[outputtopology("triangle")]
-[numthreads(3, 1, 1)]
-void meshMain(out indices uint3 triangles[1], out vertices ScreenProbeVertex vertices[3], uint threadID : SV_GroupIndex)
+// Whether a thread's texel is inside the pass's target (the dispatch rounds up to whole groups).
+bool screen_probe_in_target(uint storageIndex, uint2 texel)
 {
-    SetMeshOutputCounts(3, 1);
-    if (threadID < 3)
-    {
-        vertices[threadID].pos = float4(ScreenProbeTriangle[threadID], 0.0, 1.0);
-        if (threadID == 0)
-            triangles[0] = uint3(0, 1, 2);
-    }
+    RWTexture2D<float4> target = RWTexture2D<float4>.Handle(uint2(storageIndex, 0));
+    uint width, height;
+    target.GetDimensions(width, height);
+    return texel.x < width && texel.y < height;
 }
 
 uint screen_probe_hash(uint x)

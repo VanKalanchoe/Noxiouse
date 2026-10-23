@@ -14,6 +14,7 @@
 #include "NRI/CommandAllocator.h"
 #include "NRI/CommandBuffer.h"
 #include "NRI/Texture.h"
+#include "NRI/TimelineSemaphore.h"
 #include "NoxCore/Profiling/Profiler.h"
 #include "NoxCore/Tasks/JobSystem.h"
 #include "RGBlackboard.h"
@@ -90,6 +91,17 @@ namespace Nox
         uint32_t m_PassIndex;
     };
 
+    // One queue submission of the frame (RenderGraph::Execute), in submission order. Every submission but the last goes through
+    // Device::submit; the last is the graphics submission that waits for the swapchain image, presents and signals the frame slot's
+    // fence (Device::submitCommandBuffers). Without async compute there is one.
+    struct RGSubmission
+    {
+        NRI::QueueType Queue = NRI::QueueType::Graphics;
+        std::span<NRI::CommandBuffer* const> CommandBuffers;
+        std::span<const NRI::TimelinePoint> Waits;
+        std::span<const NRI::TimelinePoint> Signals;
+    };
+
     struct RGFrameDesc
     {
         uint64_t FrameNumber = 0;
@@ -118,11 +130,20 @@ namespace Nox
         void ReleaseResources();
 
         // Recorded at the start of every command buffer, before its first pass (descriptor heaps, baseline dynamic state):
-        // a pass never depends on the state left by a pass in another command buffer.
-        void SetCommandBufferSetup(std::function<void(NRI::CommandBuffer&)> setup) { m_CommandBufferSetup = std::move(setup); }
+        // a pass never depends on the state left by a pass in another command buffer. The queue says which state applies (a
+        // compute queue's command buffer takes no raster state).
+        void SetCommandBufferSetup(std::function<void(NRI::CommandBuffer&, NRI::QueueType)> setup) { m_CommandBufferSetup = std::move(setup); }
         // Off: the whole frame records into one command buffer on the calling thread.
         void SetParallelRecording(bool enabled) { m_ParallelRecording = enabled; }
         bool IsParallelRecording() const { return m_ParallelRecording; }
+        // Async compute (§5.4.4, D6): AsyncCompute passes run on the device's compute-only queue, which needs Precise
+        // synchronization. Without that queue (Device::hasAsyncComputeQueue) they run on the graphics queue as before. Takes effect
+        // with the next Compile.
+        void SetAsyncCompute(bool enabled) { m_AsyncComputeEnabled = enabled; }
+        bool IsAsyncComputeEnabled() const { return m_AsyncComputeEnabled; }
+        bool IsAsyncComputeAvailable() const { return m_GraphicsTimeline != nullptr; }
+        // After Compile: passes this frame put on the compute queue.
+        uint32_t GetAsyncComputePassCount() const { return m_AsyncComputePassCount; }
         // Takes effect with the next Compile.
         void SetSynchronization(RGSynchronization synchronization) { m_Synchronization = synchronization; }
         RGSynchronization GetSynchronization() const { return m_Synchronization; }
@@ -165,8 +186,8 @@ namespace Nox
 
         void Compile();
         // Records the compiled frame for a frame-in-flight slot whose previous submission has finished. The returned
-        // command buffers stay valid until the next Execute and are submitted together, in order.
-        std::span<NRI::CommandBuffer* const> Execute(uint32_t frameSlot);
+        // submissions (and their command buffers and timeline points) stay valid until the next Execute and are submitted in order.
+        std::span<const RGSubmission> Execute(uint32_t frameSlot);
 
         // After Compile (e.g. to upload bindless slots before Execute).
         NRI::Texture2D* GetTexture(RGTexture texture) const;
@@ -272,6 +293,7 @@ namespace Nox
             uint32_t ExclusiveMask = 0;  // RecordExclusive keys
             uint32_t ScopeId = 0;        // profiler scope, resolved on the main thread before recording
             uint32_t Chunk = 0;          // command buffer it records into
+            NRI::QueueType Queue = NRI::QueueType::Graphics;
             float RecordMs = 0.0f;       // measured by the recording thread
             bool Culled = false;
             bool SynchronizeAfter = false; // Blanket
@@ -285,9 +307,10 @@ namespace Nox
         struct Chunk
         {
             uint32_t FirstEvent = 0;
-            uint32_t EndEvent = 0;
+            uint32_t EndEvent = 0; // (with async compute a chunk's range may hold other chunks' passes: it records those whose Chunk it is)
             uint32_t OpenGroupsOffset = 0; // groups declared open at FirstEvent, outermost first (m_ChunkOpenGroups)
             uint32_t OpenGroupsCount = 0;
+            NRI::QueueType Queue = NRI::QueueType::Graphics;
         };
 
         // One command buffer per (chunk, frame slot) with its own allocator: a chunk is recorded by one task, so no pool is
@@ -297,6 +320,29 @@ namespace Nox
         {
             std::unique_ptr<NRI::CommandAllocator> Allocator;
             std::unique_ptr<NRI::CommandBuffer> CommandBuffer;
+            NRI::QueueType Queue = NRI::QueueType::Graphics; // the family its pool belongs to
+        };
+
+        // Consecutive executed async passes on the compute queue (positions in m_ExecutedScratch): they start once the graphics
+        // passes up to Fork are done, and the graphics passes from Join on wait for them (Join RGInvalidIndex: the frame's last
+        // graphics submission does).
+        struct AsyncBlock
+        {
+            uint32_t First = 0;
+            uint32_t End = 0;
+            uint32_t Fork = RGInvalidIndex;
+            uint32_t Join = RGInvalidIndex;
+        };
+
+        // A run of chunks submitted together, with what it waits for and signals (Execute turns them into RGSubmissions).
+        struct SubmissionUnit
+        {
+            NRI::QueueType Queue = NRI::QueueType::Graphics;
+            uint32_t FirstChunk = 0;
+            uint32_t ChunkCount = 0;
+            std::vector<uint32_t> JoinBlocks; // graphics: blocks it waits for
+            std::vector<uint32_t> ForkBlocks; // graphics: blocks that wait for it
+            uint32_t Block = RGInvalidIndex;  // compute: the block it runs
         };
 
         // Scratch of one recording thread; own cache lines, no false sharing between chunks recorded in parallel.
@@ -320,6 +366,12 @@ namespace Nox
 
         RGTextureKey ResolveKey(const RGTextureDesc& desc) const;
         void AddAccess(uint32_t passIndex, uint32_t resource, bool isTexture, bool isWrite, NRI::ResourceState state);
+        // After culling and lifetimes: which executed async passes go to the compute queue, their fork and join points, and the
+        // lifetimes of what they access stretched over the time they may run (transients must not alias meanwhile).
+        void PlanQueues();
+        // With async compute: graphics segments between fork / join points and the compute blocks, each split into chunks.
+        void PlanAsyncChunks(float targetMs);
+        void AddChunk(NRI::QueueType queue, uint32_t firstPosition, uint32_t endPosition, float targetMs);
         void PlanBlanketSynchronization();
         void PlanPreciseSynchronization();
         void ValidateHandle(uint32_t handleFrame, const char* passName);
@@ -350,6 +402,8 @@ namespace Nox
         // more recording wall time than this (enough work per thread).
         static constexpr float ChunkOverheadMs = 0.05f;
         static constexpr uint32_t MaxChunks = 8;
+        // Command buffers a frame may record: the parallel split, or with async compute its graphics segments and compute blocks.
+        static constexpr uint32_t MaxRecordedChunks = 16;
         // Until a pass was measured once.
         static constexpr float DefaultPassRecordMs = 0.02f;
 
@@ -381,7 +435,7 @@ namespace Nox
         RGBlackboard m_Blackboard;
 
         // Recording
-        std::function<void(NRI::CommandBuffer&)> m_CommandBufferSetup;
+        std::function<void(NRI::CommandBuffer&, NRI::QueueType)> m_CommandBufferSetup;
         bool m_ParallelRecording = true;
         // D13: Precise (same GPU/CPU cost as Blanket in the Phase 2 captures; checkable by synchronization validation).
         RGSynchronization m_Synchronization = RGSynchronization::Precise;
@@ -396,6 +450,22 @@ namespace Nox
         std::vector<ChunkScratch> m_ChunkScratch;
         std::vector<GpuScopeContext> m_GpuScopeContexts;
         std::vector<NRI::CommandBuffer*> m_SubmitList;
+
+        // Async compute
+        bool m_AsyncComputeEnabled = false;
+        uint32_t m_AsyncComputePassCount = 0;
+        std::unique_ptr<NRI::TimelineSemaphore> m_GraphicsTimeline; // created when the device has a compute-only queue
+        std::unique_ptr<NRI::TimelineSemaphore> m_ComputeTimeline;
+        uint64_t m_GraphicsTimelineValue = 0;
+        uint64_t m_ComputeTimelineValue = 0;
+        std::vector<uint32_t> m_ExecutedScratch; // executed pass indices in order (positions)
+        std::vector<uint8_t> m_BlockAccessScratch; // per resource: 1 read, 2 written by the async block being planned
+        std::vector<uint32_t> m_PassEvent;       // event index of each pass
+        std::vector<AsyncBlock> m_AsyncBlocks;
+        std::vector<SubmissionUnit> m_Units;
+        std::vector<RGSubmission> m_Submissions;
+        std::vector<std::vector<NRI::TimelinePoint>> m_SubmissionWaits;
+        std::vector<std::vector<NRI::TimelinePoint>> m_SubmissionSignals;
         std::unordered_map<const char*, float> m_PassRecordMs; // smoothed recording cost per pass name
 
         // Inspection

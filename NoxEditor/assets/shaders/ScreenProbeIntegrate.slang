@@ -11,8 +11,8 @@
 
 struct ScreenProbeIntegrateOutput
 {
-    float4 irradiance : SV_Target0;
-    float distance : SV_Target1;
+    float4 irradiance;
+    float distance;
 };
 
 float3 screen_probe_fallback(UniformBufferObject* ubo, float3 position, float3 normal, float3 geometricNormal)
@@ -34,14 +34,12 @@ float3 screen_probe_fallback(UniformBufferObject* ubo, float3 position, float3 n
     return float3(0.0);
 }
 
-[shader("fragment")]
-ScreenProbeIntegrateOutput fragMain(ScreenProbeVertex input, uniform PushConstantScreenProbe pushConstant)
+ScreenProbeIntegrateOutput screen_probe_integrate(int2 pixel, PushConstantScreenProbe pushConstant)
 {
     ScreenProbeIntegrateOutput output;
     output.irradiance = float4(0.0);
     output.distance = 0.0;
 
-    const int2 pixel = int2(input.pos.xy);
     UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
     Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
     const float depth = depthTex.Load(int3(pixel, 0));
@@ -233,4 +231,15 @@ ScreenProbeIntegrateOutput fragMain(ScreenProbeVertex input, uniform PushConstan
     output.irradiance = float4(result, frames);
     output.distance = viewDistance;
     return output;
+}
+
+[shader("compute")]
+[numthreads(SCREEN_PROBE_GROUP_SIZE, SCREEN_PROBE_GROUP_SIZE, 1)]
+void computeMain(uint3 id : SV_DispatchThreadID, uniform PushConstantScreenProbe pushConstant)
+{
+    if (!screen_probe_in_target(pushConstant.outputStorageIndex0, id.xy))
+        return;
+    const ScreenProbeIntegrateOutput output = screen_probe_integrate(int2(id.xy), pushConstant);
+    screen_probe_store(pushConstant.outputStorageIndex0, id.xy, output.irradiance);
+    screen_probe_store(pushConstant.outputStorageIndex1, id.xy, output.distance);
 }

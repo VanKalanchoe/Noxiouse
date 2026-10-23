@@ -124,7 +124,12 @@ namespace Nox
         Raster = 1 << 0,
         // Kept even when nothing consumes its outputs (presentation, readbacks, CPU-visible side effects).
         NeverCull = 1 << 1,
-        RayTracing = 1 << 2
+        RayTracing = 1 << 2,
+        // A compute pass that may run on the async compute queue (RenderGraph::SetAsyncCompute), beside the graphics passes
+        // that do not touch what it accesses. Compute dispatches and copies only: a compute-only queue cannot draw. Consecutive
+        // async passes form one block; it starts after the last earlier graphics pass it conflicts with and the first later
+        // graphics pass it conflicts with waits for it.
+        AsyncCompute = 1 << 3
     };
 
     inline RGPassFlags operator|(RGPassFlags a, RGPassFlags b)

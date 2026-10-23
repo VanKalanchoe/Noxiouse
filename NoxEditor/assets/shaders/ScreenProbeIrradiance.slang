@@ -6,10 +6,8 @@
 // catching a sunlit patch through a small window are most of a dark room's light (the filters and the history average them).
 #include "ScreenProbeCommon.slang"
 
-[shader("fragment")]
-float4 fragMain(ScreenProbeVertex input, uniform PushConstantScreenProbe pushConstant) : SV_Target0
+float4 screen_probe_irradiance_texel(uint2 texel, PushConstantScreenProbe pushConstant)
 {
-    const uint2 texel = uint2(input.pos.xy);
     const uint2 probe = texel / ScreenProbeIrradianceRes;
     const uint2 local = texel % ScreenProbeIrradianceRes;
     if (probe.x >= pushConstant.probeCountX || probe.y >= pushConstant.probeCountY)
@@ -50,4 +48,12 @@ float4 fragMain(ScreenProbeVertex input, uniform PushConstantScreenProbe pushCon
     }
     sum = all(isfinite(sum)) ? min(sum, float3(30000.0)) : float3(0.0);
     return float4(sum, 1.0);
+}
+
+[shader("compute")]
+[numthreads(SCREEN_PROBE_GROUP_SIZE, SCREEN_PROBE_GROUP_SIZE, 1)]
+void computeMain(uint3 id : SV_DispatchThreadID, uniform PushConstantScreenProbe pushConstant)
+{
+    if (screen_probe_in_target(pushConstant.outputStorageIndex0, id.xy))
+        screen_probe_store(pushConstant.outputStorageIndex0, id.xy, screen_probe_irradiance_texel(id.xy, pushConstant));
 }

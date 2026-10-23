@@ -501,7 +501,15 @@ namespace Nox
         createSelectedEntityIDBuffers();
         createDescriptorHeaps();
         m_renderGraph.Initialize(*m_device, *m_resourceHeap, MAX_FRAMES_IN_FLIGHT);
-        m_renderGraph.SetCommandBufferSetup([this](NRI::CommandBuffer& cmd) { applyCommandBufferBaseline(cmd); });
+        // A compute queue's command buffer binds the heaps only (no raster state on that queue).
+        m_renderGraph.SetCommandBufferSetup([this](NRI::CommandBuffer& cmd, NRI::QueueType queue)
+        {
+            if (queue == NRI::QueueType::Compute)
+                cmd.bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
+            else
+                applyCommandBufferBaseline(cmd);
+        });
+        m_renderGraph.SetAsyncCompute(m_asyncComputeEnabled);
         createTextureImage();
         createSceneResources();
         // PBR
@@ -1526,25 +1534,20 @@ namespace Nox
 
     void Renderer::createScreenProbePipelines(bool forceCompile)
     {
-        // Fullscreen passes over their own targets (ScreenProbeCommon.slang's task and mesh stages, the pass's fragment stage).
-        auto create = [&](const char* source, std::vector<NRI::ImageFormat> formats)
+        // Compute dispatches over their own targets (ScreenProbeCommon.slang), so they can run on the async compute queue.
+        auto create = [&](const char* source)
         {
             NRI::PipelineDesc desc{};
+            desc.type = NRI::PipelineType::Compute;
             desc.forceCompile = forceCompile;
-            desc.colorFormats = std::move(formats);
-            desc.shaders.push_back({ .stage = NRI::ShaderStage::Task, .entryPoint = "taskMain", .sourcePath = source });
-            desc.shaders.push_back({ .stage = NRI::ShaderStage::Mesh, .entryPoint = "meshMain", .sourcePath = source });
-            desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "fragMain", .sourcePath = source });
+            desc.shaders.push_back({ .stage = NRI::ShaderStage::Compute, .entryPoint = "computeMain", .sourcePath = source });
             return m_device->createPipeline(desc, *m_shaderCompiler);
         };
-        m_screenProbePlacePipeline = create("assets/shaders/ScreenProbePlace.slang",
-                                            { NRI::ImageFormat::R32G32B32A32_SFLOAT, NRI::ImageFormat::R16G16B16A16_SFLOAT });
-        m_screenProbeTracePipeline = create("assets/shaders/ScreenProbeTrace.slang",
-                                            { NRI::ImageFormat::R16G16B16A16_SFLOAT, NRI::ImageFormat::R32G32B32A32_SFLOAT });
-        m_screenProbeIrradiancePipeline = create("assets/shaders/ScreenProbeIrradiance.slang", { NRI::ImageFormat::R16G16B16A16_SFLOAT });
-        m_screenProbeFilterPipeline = create("assets/shaders/ScreenProbeFilter.slang", { NRI::ImageFormat::R16G16B16A16_SFLOAT });
-        m_screenProbeIntegratePipeline = create("assets/shaders/ScreenProbeIntegrate.slang",
-                                                { NRI::ImageFormat::R16G16B16A16_SFLOAT, NRI::ImageFormat::R32_SFLOAT });
+        m_screenProbePlacePipeline = create("assets/shaders/ScreenProbePlace.slang");
+        m_screenProbeTracePipeline = create("assets/shaders/ScreenProbeTrace.slang");
+        m_screenProbeIrradiancePipeline = create("assets/shaders/ScreenProbeIrradiance.slang");
+        m_screenProbeFilterPipeline = create("assets/shaders/ScreenProbeFilter.slang");
+        m_screenProbeIntegratePipeline = create("assets/shaders/ScreenProbeIntegrate.slang");
     }
 
     void Renderer::createRTUpsamplePipelines(bool forceCompile)
@@ -4502,7 +4505,7 @@ namespace Nox
         m_device->submitAndWait(*commandBuffer, 0);
     }
 
-    std::span<NRI::CommandBuffer* const> Renderer::recordFrame(uint32_t imageIndex)
+    std::span<const RGSubmission> Renderer::recordFrame(uint32_t imageIndex)
     {
         {
             NOX_PROFILE_SCOPE("Build Frame Graph");
@@ -4524,13 +4527,15 @@ namespace Nox
             addVisibilityLatePass();
             addClusterStatsReadbackPass();
             addGBufferPass();
+            // The GI right after what it reads (the G-buffer, the TLAS, DDGI's atlases for its second bounce): with async compute the
+            // screen probes then run on the compute queue beside the passes below, which neither read nor write what they use.
+            addDDGIPasses();
+            addScreenProbeGIPasses();
             addSSAOPass();
             addRTAOPass();
             addOcclusionBlurPass();
             addNRDGuidesPass();
             addRTShadowPasses();
-            addDDGIPasses();
-            addScreenProbeGIPasses();
             // After the GI: reflection hits on screen take its light (SceneGI.slang), off screen this frame's DDGI.
             addRTReflectionPasses();
             addLightPresamplingPasses();
@@ -4572,12 +4577,16 @@ namespace Nox
         // after submission.
         memcpy(m_uniformBuffersMapped[frameIndex], &uniformData, sizeof(shaderio::UniformBufferObject));
 
-        std::span<NRI::CommandBuffer* const> commandBuffers;
+        std::span<const RGSubmission> submissions;
         {
             NOX_PROFILE_SCOPE("Execute Frame Graph");
-            commandBuffers = m_renderGraph.Execute(frameIndex);
+            submissions = m_renderGraph.Execute(frameIndex);
         }
-        NOX_PROFILE_COUNTER("Command Buffers", commandBuffers.size());
+        size_t commandBufferCount = 0;
+        for (const RGSubmission& submission : submissions)
+            commandBufferCount += submission.CommandBuffers.size();
+        NOX_PROFILE_COUNTER("Command Buffers", commandBufferCount);
+        NOX_PROFILE_COUNTER("Async Compute Passes", m_renderGraph.GetAsyncComputePassCount());
         m_takenExtraViewImages.clear();
         // An extra view draws in the frames it is submitted in. What it drew is shown from the next frame on (this frame's ImGui
         // still shows the previous texture, released once the frames in flight are done with it).
@@ -4591,7 +4600,7 @@ namespace Nox
                 view.Shown = view.Output;
             }
         }
-        return commandBuffers;
+        return submissions;
     }
 
     void Renderer::applyCommandBufferBaseline(NRI::CommandBuffer& cmd) const
@@ -5546,10 +5555,10 @@ namespace Nox
             m_renderer2D->Update(frameIndex, uniformData);
         }
 
-        std::span<NRI::CommandBuffer* const> commandBuffers;
+        std::span<const RGSubmission> submissions;
         {
             NOX_PROFILE_SCOPE("Record Commands");
-            commandBuffers = recordFrame(imageIndex);
+            submissions = recordFrame(imageIndex);
         }
 
         {
@@ -5559,8 +5568,18 @@ namespace Nox
             // only orders the transfer writes. Streamed copies still in flight are not waited for.
             m_uploads.Flush();
             const NRI::TimelinePoint uploads{ &m_uploads.GetTimeline(), m_uploads.GetFrameWaitValue() };
-            m_device->submitCommandBuffers(commandBuffers, *m_swapChain, frameIndex, imageIndex,
-                                           std::span<const NRI::TimelinePoint>(&uploads, 1));
+            // With async compute the frame is several submissions on two queues, ordered by the graph's timeline points (each also
+            // waits for the uploads); the last one is graphics and presents.
+            for (size_t index = 0; index < submissions.size(); ++index)
+            {
+                const RGSubmission& submission = submissions[index];
+                m_submitWaitScratch.assign(submission.Waits.begin(), submission.Waits.end());
+                m_submitWaitScratch.push_back(uploads);
+                if (index + 1 < submissions.size())
+                    m_device->submit(submission.Queue, submission.CommandBuffers, m_submitWaitScratch, submission.Signals);
+                else
+                    m_device->submitCommandBuffers(submission.CommandBuffers, *m_swapChain, frameIndex, imageIndex, m_submitWaitScratch);
+            }
         }
 
         // Debounced -- see m_lastWindowResizeRequestTime's declaration in Renderer.h. A hard

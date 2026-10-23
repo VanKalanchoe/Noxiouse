@@ -108,6 +108,13 @@ namespace Nox
             return {};
         }
 
+        // What a compute-only queue's barriers may name (VUID-vkCmdPipelineBarrier2-srcStageMask-03849: stages its family supports).
+        constexpr uint32_t ComputeQueueStages = NRI::StageBits::Compute | NRI::StageBits::Transfer | NRI::StageBits::AccelerationStructureBuild |
+                                                NRI::StageBits::Indirect | NRI::StageBits::RayTracing;
+        constexpr uint32_t ComputeQueueAccess = NRI::AccessBits::ShaderRead | NRI::AccessBits::ShaderWrite | NRI::AccessBits::TransferRead |
+                                                NRI::AccessBits::TransferWrite | NRI::AccessBits::AccelerationStructureRead |
+                                                NRI::AccessBits::AccelerationStructureWrite | NRI::AccessBits::IndirectRead;
+
         bool HasWriteAccess(const NRI::ResourceState& state)
         {
             constexpr uint32_t writeBits = NRI::AccessBits::ShaderWrite | NRI::AccessBits::ColorAttachmentWrite | NRI::AccessBits::DepthStencilWrite |
@@ -217,9 +224,16 @@ namespace Nox
         m_FramesInFlight = framesInFlight;
         m_Pool.Initialize(device, resourceHeap);
 
-        m_Recorders.resize(static_cast<size_t>(MaxChunks) * framesInFlight);
-        m_ChunkScratch.resize(MaxChunks);
-        m_GpuScopeContexts.resize(MaxChunks);
+        m_Recorders.resize(static_cast<size_t>(MaxRecordedChunks) * framesInFlight);
+        m_ChunkScratch.resize(MaxRecordedChunks);
+        m_GpuScopeContexts.resize(MaxRecordedChunks);
+
+        // Async compute: the graphics queue signals where a compute block may start, the compute queue where it is done.
+        if (device.hasAsyncComputeQueue())
+        {
+            m_GraphicsTimeline = device.createTimelineSemaphore(0);
+            m_ComputeTimeline = device.createTimelineSemaphore(0);
+        }
     }
 
     void RenderGraph::ReleaseResources()
@@ -556,6 +570,7 @@ namespace Nox
                 lastPass = std::max(lastPass, index);
             }
         }
+        PlanQueues();
         AllocateTransients();
 
         // 3. Synchronization (§5.4.5): where a later executed pass uses what an earlier one wrote.
@@ -674,8 +689,17 @@ namespace Nox
             pass.FirstBufferBarrier = static_cast<uint32_t>(m_BufferBarriers.size());
             for (const auto& [key, state] : passStates)
             {
-                auto addBarrier = [&](const NRI::ResourceState& before)
+                auto addBarrier = [&](NRI::ResourceState before)
                 {
+                    // On the compute queue only what that queue did before is ordered by a barrier; the graphics queue's work it
+                    // depends on is done before the block starts (the timeline wait at its fork), and the stages are not its own.
+                    if (pass.Queue == NRI::QueueType::Compute)
+                    {
+                        before.stages &= ComputeQueueStages;
+                        before.access &= ComputeQueueAccess;
+                        if (before.stages == NRI::StageBits::None)
+                            return;
+                    }
                     if (key < textureCount)
                         m_TextureBarriers.push_back({ m_Textures[key].Texture, before, state });
                     else
@@ -719,6 +743,161 @@ namespace Nox
         }
     }
 
+    void RenderGraph::PlanQueues()
+    {
+        m_AsyncBlocks.clear();
+        m_AsyncComputePassCount = 0;
+        std::vector<uint32_t>& executed = m_ExecutedScratch;
+        executed.clear();
+        for (uint32_t index = 0; index < m_PassCount; ++index)
+        {
+            m_Passes[index].Queue = NRI::QueueType::Graphics;
+            if (!m_Passes[index].Culled)
+                executed.push_back(index);
+        }
+        // Per-queue barriers need Precise synchronization; the inspector records into the inspected pass's command buffer, which
+        // may draw.
+        if (!m_AsyncComputeEnabled || !m_GraphicsTimeline || m_Synchronization != RGSynchronization::Precise || m_InspectedTexture != RGInvalidIndex)
+            return;
+
+        const uint32_t count = static_cast<uint32_t>(executed.size());
+        auto pass = [&](uint32_t position) -> Pass& { return m_Passes[executed[position]]; };
+        bool anyAsync = false;
+        for (uint32_t position = 0; position < count; ++position)
+        {
+            if (HasFlag(pass(position).Flags, RGPassFlags::AsyncCompute))
+            {
+                pass(position).Queue = NRI::QueueType::Compute;
+                anyAsync = true;
+            }
+        }
+        if (!anyAsync)
+            return;
+
+        const size_t textureCount = m_Textures.size();
+        auto resourceKey = [textureCount](const ResourceAccess& access)
+        {
+            return access.IsTexture ? access.Resource : static_cast<uint32_t>(textureCount) + access.Resource;
+        };
+        std::vector<uint8_t>& blockAccess = m_BlockAccessScratch;
+
+        // Blocks, fork and join. A block that cannot run beside graphics work (nothing graphics before it to start after, or none
+        // after its fork to wait for it) goes back to the graphics queue, and the planning starts over: its passes are graphics
+        // passes the other blocks may conflict with now.
+        for (bool replan = true; replan;)
+        {
+            replan = false;
+            m_AsyncBlocks.clear();
+            for (uint32_t first = 0; first < count && !replan;)
+            {
+                if (pass(first).Queue != NRI::QueueType::Compute)
+                {
+                    ++first;
+                    continue;
+                }
+                uint32_t end = first;
+                while (end < count && pass(end).Queue == NRI::QueueType::Compute)
+                    ++end;
+
+                blockAccess.assign(textureCount + m_Buffers.size(), 0);
+                for (uint32_t position = first; position < end; ++position)
+                {
+                    for (const ResourceAccess& access : pass(position).Accesses)
+                        blockAccess[resourceKey(access)] |= access.IsWrite ? 2 : 1;
+                }
+                // A graphics pass conflicts with the block when one of them writes what the other accesses.
+                auto conflicts = [&](const Pass& graphics)
+                {
+                    for (const ResourceAccess& access : graphics.Accesses)
+                    {
+                        const uint8_t blockUse = blockAccess[resourceKey(access)];
+                        if (blockUse != 0 && (access.IsWrite || (blockUse & 2) != 0))
+                            return true;
+                    }
+                    return false;
+                };
+
+                // Fork: the last earlier graphics pass it conflicts with, at least the frame's first graphics pass (the wait then
+                // also orders it after the previous frame's graphics work, earlier on that queue), never before the previous
+                // block's fork (the compute queue runs the blocks in order).
+                uint32_t fork = RGInvalidIndex;
+                uint32_t firstGraphics = RGInvalidIndex;
+                for (uint32_t position = 0; position < first; ++position)
+                {
+                    if (pass(position).Queue == NRI::QueueType::Compute)
+                        continue;
+                    if (firstGraphics == RGInvalidIndex)
+                        firstGraphics = position;
+                    if (conflicts(pass(position)))
+                        fork = position;
+                }
+                if (fork == RGInvalidIndex)
+                    fork = firstGraphics;
+                if (fork != RGInvalidIndex && !m_AsyncBlocks.empty())
+                    fork = std::max(fork, m_AsyncBlocks.back().Fork);
+
+                // Join: the first later graphics pass it conflicts with; none: the frame's last graphics submission waits.
+                uint32_t join = RGInvalidIndex;
+                bool graphicsAfterFork = false;
+                for (uint32_t position = fork == RGInvalidIndex ? count : fork + 1; position < count; ++position)
+                {
+                    if (pass(position).Queue == NRI::QueueType::Compute)
+                        continue;
+                    graphicsAfterFork = true;
+                    if (position >= end && join == RGInvalidIndex && conflicts(pass(position)))
+                        join = position;
+                }
+
+                if (fork == RGInvalidIndex || !graphicsAfterFork)
+                {
+                    for (uint32_t position = first; position < end; ++position)
+                        pass(position).Queue = NRI::QueueType::Graphics;
+                    replan = true;
+                    break;
+                }
+                m_AsyncBlocks.push_back({ first, end, fork, join });
+                first = end;
+            }
+        }
+
+        // Command buffers: the graphics segments between fork / join points, and one per block.
+        std::vector<uint32_t> boundaries;
+        for (const AsyncBlock& block : m_AsyncBlocks)
+        {
+            boundaries.push_back(block.Fork + 1);
+            if (block.Join != RGInvalidIndex)
+                boundaries.push_back(block.Join);
+        }
+        std::sort(boundaries.begin(), boundaries.end());
+        boundaries.erase(std::unique(boundaries.begin(), boundaries.end()), boundaries.end());
+        if (boundaries.size() + 1 + m_AsyncBlocks.size() > MaxRecordedChunks)
+        {
+            for (uint32_t position = 0; position < count; ++position)
+                pass(position).Queue = NRI::QueueType::Graphics;
+            m_AsyncBlocks.clear();
+            return;
+        }
+
+        // While a block may run, the graphics work beside it runs too: what it accesses lives from its fork to its join, so no
+        // transient of the graphics passes in between takes its memory.
+        for (const AsyncBlock& block : m_AsyncBlocks)
+        {
+            const uint32_t forkPass = executed[block.Fork];
+            const uint32_t joinPass = block.Join != RGInvalidIndex ? executed[block.Join] : m_PassCount - 1;
+            for (uint32_t position = block.First; position < block.End; ++position)
+            {
+                for (const ResourceAccess& access : pass(position).Accesses)
+                {
+                    uint32_t& firstPass = access.IsTexture ? m_Textures[access.Resource].FirstPass : m_Buffers[access.Resource].FirstPass;
+                    uint32_t& lastPass = access.IsTexture ? m_Textures[access.Resource].LastPass : m_Buffers[access.Resource].LastPass;
+                    firstPass = std::min(firstPass, forkPass);
+                    lastPass = std::max(lastPass, joinPass);
+                }
+            }
+            m_AsyncComputePassCount += block.End - block.First;
+        }
+    }
+
     void RenderGraph::AllocateTransients()
     {
         // In order of first use, so a resource whose lifetime ended earlier this frame hands its memory to the next one
@@ -757,11 +936,20 @@ namespace Nox
     // ---------------------------------------------------------------------------------------------------------------
     // RenderGraph: execute
 
-    std::span<NRI::CommandBuffer* const> RenderGraph::Execute(uint32_t frameSlot)
+    std::span<const RGSubmission> RenderGraph::Execute(uint32_t frameSlot)
     {
         NOX_CORE_ASSERT(m_Device && frameSlot < m_FramesInFlight, "RenderGraph::Execute: not initialized or invalid frame slot");
 
         PlanChunks();
+        m_Units.clear();
+        if (!m_AsyncBlocks.empty())
+        {
+            // The parallel split's chunk size, now within the queues' segments.
+            float totalMs = 0.0f;
+            for (const uint32_t index : m_ExecutedScratch)
+                totalMs += GetEstimatedRecordMs(m_Passes[index]);
+            PlanAsyncChunks(totalMs / static_cast<float>(std::max<size_t>(m_Chunks.size(), 1)));
+        }
         PrepareRecording(frameSlot);
 
         const uint32_t chunkCount = static_cast<uint32_t>(m_Chunks.size());
@@ -797,12 +985,180 @@ namespace Nox
         for (uint32_t chunkIndex = 0; chunkIndex < chunkCount; ++chunkIndex)
             m_SubmitList.push_back(m_Recorders[static_cast<size_t>(chunkIndex) * m_FramesInFlight + frameSlot].CommandBuffer.get());
 
+        // The submissions: one, or the units in order with their timeline points. A block's fork value is the graphics timeline
+        // value its fork segment signals; its compute value is what its own submission signals and its joins wait for.
+        m_Submissions.clear();
+        if (m_Units.empty())
+        {
+            m_Submissions.push_back({ NRI::QueueType::Graphics, std::span<NRI::CommandBuffer* const>(m_SubmitList), {}, {} });
+        }
+        else
+        {
+            m_SubmissionWaits.resize(m_Units.size());
+            m_SubmissionSignals.resize(m_Units.size());
+            std::vector<uint64_t> forkValues(m_AsyncBlocks.size(), 0);
+            std::vector<uint64_t> computeValues(m_AsyncBlocks.size(), 0);
+            for (size_t unitIndex = 0; unitIndex < m_Units.size(); ++unitIndex)
+            {
+                const SubmissionUnit& unit = m_Units[unitIndex];
+                std::vector<NRI::TimelinePoint>& waits = m_SubmissionWaits[unitIndex];
+                std::vector<NRI::TimelinePoint>& signals = m_SubmissionSignals[unitIndex];
+                waits.clear();
+                signals.clear();
+                if (unit.Queue == NRI::QueueType::Compute)
+                {
+                    waits.push_back({ m_GraphicsTimeline.get(), forkValues[unit.Block] });
+                    computeValues[unit.Block] = ++m_ComputeTimelineValue;
+                    signals.push_back({ m_ComputeTimeline.get(), computeValues[unit.Block] });
+                }
+                else
+                {
+                    for (const uint32_t block : unit.JoinBlocks)
+                        waits.push_back({ m_ComputeTimeline.get(), computeValues[block] });
+                    if (!unit.ForkBlocks.empty())
+                    {
+                        const uint64_t value = ++m_GraphicsTimelineValue;
+                        for (const uint32_t block : unit.ForkBlocks)
+                            forkValues[block] = value;
+                        signals.push_back({ m_GraphicsTimeline.get(), value });
+                    }
+                }
+                m_Submissions.push_back({ unit.Queue, std::span<NRI::CommandBuffer* const>(m_SubmitList.data() + unit.FirstChunk, unit.ChunkCount),
+                                          std::span<const NRI::TimelinePoint>(waits), std::span<const NRI::TimelinePoint>(signals) });
+            }
+        }
+
         if (m_ReportEnabled)
             BuildReport();
 
         ReleaseCallbacks();
         m_Pool.EndFrame();
-        return m_SubmitList;
+        return m_Submissions;
+    }
+
+    void RenderGraph::PlanAsyncChunks(float targetMs)
+    {
+        m_Chunks.clear();
+        m_ChunkOpenGroups.clear();
+        m_ChunkExclusiveMasks.clear();
+        m_ChunkRecordMs.clear();
+        m_Units.clear();
+
+        m_PassEvent.assign(m_PassCount, 0);
+        for (uint32_t eventIndex = 0; eventIndex < m_Events.size(); ++eventIndex)
+        {
+            if (m_Events[eventIndex].Type == EventType::Pass)
+                m_PassEvent[m_Events[eventIndex].Index] = eventIndex;
+        }
+
+        const uint32_t count = static_cast<uint32_t>(m_ExecutedScratch.size());
+        std::vector<uint32_t> boundaries{ 0, count };
+        for (const AsyncBlock& block : m_AsyncBlocks)
+        {
+            boundaries.push_back(block.Fork + 1);
+            if (block.Join != RGInvalidIndex)
+                boundaries.push_back(block.Join);
+        }
+        std::sort(boundaries.begin(), boundaries.end());
+        boundaries.erase(std::unique(boundaries.begin(), boundaries.end()), boundaries.end());
+
+        std::vector<uint32_t> pendingJoins; // joins of segments with no graphics pass carry over to the next one
+        size_t lastGraphicsUnit = 0;
+        for (size_t segment = 0; segment + 1 < boundaries.size(); ++segment)
+        {
+            const uint32_t begin = boundaries[segment];
+            const uint32_t end = boundaries[segment + 1];
+            for (uint32_t block = 0; block < m_AsyncBlocks.size(); ++block)
+            {
+                if (m_AsyncBlocks[block].Join == begin)
+                    pendingJoins.push_back(block);
+            }
+            bool hasGraphics = false;
+            for (uint32_t position = begin; position < end && !hasGraphics; ++position)
+                hasGraphics = m_Passes[m_ExecutedScratch[position]].Queue == NRI::QueueType::Graphics;
+            if (!hasGraphics)
+                continue;
+
+            SubmissionUnit graphics;
+            graphics.Queue = NRI::QueueType::Graphics;
+            graphics.FirstChunk = static_cast<uint32_t>(m_Chunks.size());
+            graphics.JoinBlocks = std::move(pendingJoins);
+            pendingJoins.clear();
+            AddChunk(NRI::QueueType::Graphics, begin, end, targetMs);
+            graphics.ChunkCount = static_cast<uint32_t>(m_Chunks.size()) - graphics.FirstChunk;
+            for (uint32_t block = 0; block < m_AsyncBlocks.size(); ++block)
+            {
+                if (m_AsyncBlocks[block].Fork + 1 == end)
+                    graphics.ForkBlocks.push_back(block);
+            }
+            const std::vector<uint32_t> startedBlocks = graphics.ForkBlocks;
+            lastGraphicsUnit = m_Units.size();
+            m_Units.push_back(std::move(graphics));
+
+            // The blocks this segment lets start, submitted right after it.
+            for (const uint32_t block : startedBlocks)
+            {
+                SubmissionUnit compute;
+                compute.Queue = NRI::QueueType::Compute;
+                compute.FirstChunk = static_cast<uint32_t>(m_Chunks.size());
+                compute.Block = block;
+                AddChunk(NRI::QueueType::Compute, m_AsyncBlocks[block].First, m_AsyncBlocks[block].End, targetMs);
+                compute.ChunkCount = static_cast<uint32_t>(m_Chunks.size()) - compute.FirstChunk;
+                m_Units.push_back(std::move(compute));
+            }
+        }
+        // Blocks nothing waits for: the frame's last graphics submission does (its fence then covers them).
+        for (uint32_t block = 0; block < m_AsyncBlocks.size(); ++block)
+        {
+            if (m_AsyncBlocks[block].Join == RGInvalidIndex)
+                m_Units[lastGraphicsUnit].JoinBlocks.push_back(block);
+        }
+    }
+
+    void RenderGraph::AddChunk(NRI::QueueType queue, uint32_t firstPosition, uint32_t endPosition, float targetMs)
+    {
+        // The queue's passes in [firstPosition, endPosition), split by recording cost while chunks remain (each unit needs one).
+        const uint32_t unitsLeft = static_cast<uint32_t>(m_AsyncBlocks.size()) * 3 + 1;
+        bool open = false;
+        uint32_t chunkPasses = 0;
+        for (uint32_t position = firstPosition; position < endPosition; ++position)
+        {
+            Pass& pass = m_Passes[m_ExecutedScratch[position]];
+            if (pass.Queue != queue)
+                continue;
+            const float passMs = GetEstimatedRecordMs(pass);
+            const bool split = open && chunkPasses > 0 && m_ChunkRecordMs.back() + passMs * 0.5f > targetMs &&
+                               m_Chunks.size() + unitsLeft < MaxRecordedChunks;
+            if (!open || split)
+            {
+                Chunk chunk;
+                chunk.FirstEvent = m_PassEvent[m_ExecutedScratch[position]];
+                chunk.Queue = queue;
+                // The groups open at its first event, outermost first.
+                std::vector<uint32_t>& stack = m_PlanStackScratch;
+                stack.clear();
+                for (uint32_t eventIndex = 0; eventIndex < chunk.FirstEvent; ++eventIndex)
+                {
+                    if (m_Events[eventIndex].Type == EventType::GroupBegin)
+                        stack.push_back(m_Events[eventIndex].Index);
+                    else if (m_Events[eventIndex].Type == EventType::GroupEnd)
+                        stack.pop_back();
+                }
+                chunk.OpenGroupsOffset = static_cast<uint32_t>(m_ChunkOpenGroups.size());
+                chunk.OpenGroupsCount = static_cast<uint32_t>(stack.size());
+                m_ChunkOpenGroups.insert(m_ChunkOpenGroups.end(), stack.begin(), stack.end());
+                m_Chunks.push_back(chunk);
+                m_ChunkExclusiveMasks.push_back(0);
+                m_ChunkRecordMs.push_back(0.0f);
+                open = true;
+                chunkPasses = 0;
+            }
+            pass.Chunk = static_cast<uint32_t>(m_Chunks.size() - 1);
+            m_Chunks.back().EndEvent = m_PassEvent[m_ExecutedScratch[position]] + 1;
+            m_ChunkExclusiveMasks.back() |= pass.ExclusiveMask;
+            m_ChunkRecordMs.back() += passMs;
+            ++chunkPasses;
+        }
     }
 
     float RenderGraph::GetEstimatedRecordMs(const Pass& pass) const
@@ -933,15 +1289,19 @@ namespace Nox
     {
         m_FrameSlot = frameSlot;
 
-        // Command buffers are created on first use; a chunk's pool is reset by its recording task.
+        // Command buffers are created on first use, again when the chunk moved to the other queue (the slot's previous
+        // submission finished, so its old buffer is free); a chunk's pool is reset by its recording task.
         for (uint32_t chunkIndex = 0; chunkIndex < m_Chunks.size(); ++chunkIndex)
         {
             CommandRecorder& recorder = m_Recorders[static_cast<size_t>(chunkIndex) * m_FramesInFlight + frameSlot];
-            if (!recorder.Allocator)
+            if (!recorder.Allocator || recorder.Queue != m_Chunks[chunkIndex].Queue)
             {
-                recorder.Allocator = m_Device->createCommandAllocator(NRI::CommandBufferReset::WithAllocator);
+                recorder.CommandBuffer.reset();
+                recorder.Allocator = m_Device->createCommandAllocator(NRI::CommandBufferReset::WithAllocator, m_Chunks[chunkIndex].Queue);
                 recorder.CommandBuffer = recorder.Allocator->allocateCommandBuffer(1);
+                recorder.Queue = m_Chunks[chunkIndex].Queue;
             }
+            m_GpuScopeContexts[chunkIndex].SetAsyncCompute(m_Chunks[chunkIndex].Queue == NRI::QueueType::Compute);
         }
 
         // Profiler scope ids are registered here: recording threads only read them.
@@ -974,7 +1334,7 @@ namespace Nox
             Profiler::Get().RecordGpuFrameBegin(cmd);
 #endif
         if (m_CommandBufferSetup)
-            m_CommandBufferSetup(cmd);
+            m_CommandBufferSetup(cmd, chunk.Queue);
 
         // Groups open lazily with their chunk's first executed pass, so a group whose passes were all culled leaves no scope,
         // and a group spanning chunks gets one scope per chunk (the profiler sums them).
@@ -1011,7 +1371,8 @@ namespace Nox
             case EventType::Pass:
             {
                 Pass& pass = m_Passes[event.Index];
-                if (pass.Culled)
+                // (With async compute a chunk's event range also holds passes of the other queue's chunks.)
+                if (pass.Culled || pass.Chunk != chunkIndex)
                     break;
 
                 while (openedDepth < groupStack.size())

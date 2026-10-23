@@ -266,7 +266,7 @@ namespace Nox
         // The frame scope spans every command buffer: its timestamps go into the first and the last one, its Tracy zone
         // is opened and closed here on the main thread.
         const uint32_t query = m_GpuProfiler->allocateQueryPair();
-        frame.Scopes.push_back({ m_GpuFrameScopeId, InvalidScopeId, query, 0 });
+        frame.Scopes.push_back({ m_GpuFrameScopeId, InvalidScopeId, query, 0, 0 });
         if (frame.TracyZonesEmitted && query != NRI::GpuProfiler::InvalidQueryId)
             TracyBackend::BeginGpuZone(m_GpuFrameScopeId, query);
 
@@ -299,9 +299,10 @@ namespace Nox
 
         const uint32_t parentId = context.m_OpenScopes.empty() ? m_GpuFrameScopeId : context.m_Scopes[context.m_OpenScopes.back()].ScopeId;
 
-        // Unregistered scopes still get a record so the matching EndGpuScope stays balanced.
+        // Unregistered scopes (and async compute scopes on a queue without timestamps) still get a record so the matching
+        // EndGpuScope stays balanced.
         uint32_t beginQuery = NRI::GpuProfiler::InvalidQueryId;
-        if (scopeId != InvalidScopeId)
+        if (scopeId != InvalidScopeId && (!context.m_AsyncCompute || m_GpuProfiler->isComputeQueueSupported()))
         {
             beginQuery = m_GpuProfiler->allocateQueryPair();
             m_GpuProfiler->writeTimestamp(cmd, beginQuery);
@@ -309,9 +310,9 @@ namespace Nox
 
         const uint32_t depth = static_cast<uint32_t>(context.m_OpenScopes.size()) + 1;
         context.m_OpenScopes.push_back(static_cast<uint32_t>(context.m_Scopes.size()));
-        context.m_Scopes.push_back({ scopeId, parentId, beginQuery, depth });
+        context.m_Scopes.push_back({ scopeId, parentId, beginQuery, depth, context.m_AsyncCompute ? 1u : 0u });
 
-        if (m_GpuFrames[m_GpuCurrentSlot].TracyZonesEmitted && beginQuery != NRI::GpuProfiler::InvalidQueryId)
+        if (m_GpuFrames[m_GpuCurrentSlot].TracyZonesEmitted && !context.m_AsyncCompute && beginQuery != NRI::GpuProfiler::InvalidQueryId)
             TracyBackend::BeginGpuZone(scopeId, beginQuery);
     }
 
@@ -328,7 +329,7 @@ namespace Nox
         if (scope.BeginQuery != NRI::GpuProfiler::InvalidQueryId)
         {
             m_GpuProfiler->writeTimestamp(cmd, scope.BeginQuery + 1);
-            if (m_GpuFrames[m_GpuCurrentSlot].TracyZonesEmitted)
+            if (m_GpuFrames[m_GpuCurrentSlot].TracyZonesEmitted && !context.m_AsyncCompute)
                 TracyBackend::EndGpuZone(scope.BeginQuery + 1);
         }
     }
@@ -503,8 +504,19 @@ namespace Nox
 
         if (frame.TracyZonesEmitted)
         {
-            for (const NRI::GpuTimestamp& timestamp : timestamps)
-                TracyBackend::SetGpuTime(timestamp.queryId, static_cast<int64_t>(timestamp.ticks));
+            // The graphics queue's scopes only: async compute scopes opened no Tracy zone.
+            for (const GpuScopeContext::Scope& record : frame.Scopes)
+            {
+                if (record.Queue != 0 || record.BeginQuery == NRI::GpuProfiler::InvalidQueryId)
+                    continue;
+                for (const uint32_t query : { record.BeginQuery, record.BeginQuery + 1 })
+                {
+                    const auto it = std::lower_bound(timestamps.begin(), timestamps.end(), query,
+                                                     [](const NRI::GpuTimestamp& timestamp, uint32_t id) { return timestamp.queryId < id; });
+                    if (it != timestamps.end() && it->queryId == query)
+                        TracyBackend::SetGpuTime(query, static_cast<int64_t>(it->ticks));
+                }
+            }
         }
 
         // A Tracy GPU context needs an initial GPU time, so it is created from the first read-back timestamp;
@@ -599,7 +611,7 @@ namespace Nox
             const double scopeMs = static_cast<double>((endTicks - beginTicks) & tickMask) * millisecondsPerTick;
             if (timelineFrame)
             {
-                timelineFrame->Gpu.push_back({ record.ScopeId, record.Depth, 0, toTimelineNs(beginTicks), toTimelineNs(endTicks) });
+                timelineFrame->Gpu.push_back({ record.ScopeId, record.Depth, record.Queue, toTimelineNs(beginTicks), toTimelineNs(endTicks) });
                 if (record.ScopeId == m_GpuFrameScopeId)
                     timelineFrame->GpuMs = scopeMs;
             }

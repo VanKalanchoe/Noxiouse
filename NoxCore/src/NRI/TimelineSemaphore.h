@@ -3,11 +3,13 @@
 
 namespace NRI
 {
-    // The queues work is submitted to. Without a dedicated transfer family on the device, Transfer is the graphics queue.
+    // The queues work is submitted to. Without a dedicated transfer family on the device, Transfer is the graphics queue;
+    // without a compute-only family (Device::hasAsyncComputeQueue), Compute is.
     enum class QueueType : uint8_t
     {
         Graphics,
-        Transfer
+        Transfer,
+        Compute // async compute: a compute-only family, beside the graphics queue
     };
 
     // A monotonic clock shared by the GPU and the CPU (Vulkan timeline semaphore): a submission signals a value when it

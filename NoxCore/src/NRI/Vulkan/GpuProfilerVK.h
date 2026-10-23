@@ -17,6 +17,7 @@ namespace NRI
         ~GpuProfilerVK() override = default;
 
         bool isSupported() const override { return m_timestampValidBits != 0; }
+        bool isComputeQueueSupported() const override { return m_computeQueueTimestamps; }
         float getTimestampPeriod() const override { return m_timestampPeriod; }
         uint32_t getTimestampValidBits() const override { return m_timestampValidBits; }
         bool calibrate(uint64_t& outGpuTicks, int64_t& outHostNanoseconds) override;
@@ -62,5 +63,6 @@ namespace NRI
         float m_timestampPeriod = 0.0f;
         uint32_t m_timestampValidBits = 0;
         int64_t m_hostFrequency = 1; // QueryPerformanceFrequency (Windows)
+        bool m_computeQueueTimestamps = false;
     };
 }

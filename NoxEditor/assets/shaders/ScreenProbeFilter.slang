@@ -3,10 +3,8 @@
 // or on the floor below is left out). Run filterPasses times (ping-pong): two passes reach the probes two tiles away.
 #include "ScreenProbeCommon.slang"
 
-[shader("fragment")]
-float4 fragMain(ScreenProbeVertex input, uniform PushConstantScreenProbe pushConstant) : SV_Target0
+float4 screen_probe_filter_texel(uint2 texel, PushConstantScreenProbe pushConstant)
 {
-    const uint2 texel = uint2(input.pos.xy);
     const uint2 probe = texel / ScreenProbeIrradianceRes;
     const uint2 local = texel % ScreenProbeIrradianceRes;
     if (probe.x >= pushConstant.probeCountX || probe.y >= pushConstant.probeCountY)
@@ -54,4 +52,12 @@ float4 fragMain(ScreenProbeVertex input, uniform PushConstantScreenProbe pushCon
         }
     }
     return float4(sum / weightSum, 1.0);
+}
+
+[shader("compute")]
+[numthreads(SCREEN_PROBE_GROUP_SIZE, SCREEN_PROBE_GROUP_SIZE, 1)]
+void computeMain(uint3 id : SV_DispatchThreadID, uniform PushConstantScreenProbe pushConstant)
+{
+    if (screen_probe_in_target(pushConstant.outputStorageIndex0, id.xy))
+        screen_probe_store(pushConstant.outputStorageIndex0, id.xy, screen_probe_filter_texel(id.xy, pushConstant));
 }

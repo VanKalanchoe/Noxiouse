@@ -94,7 +94,7 @@ namespace Nox
     {
         uint32_t ScopeId = 0;
         uint32_t Depth = 0; // nesting in its lane (0: outermost)
-        uint32_t Lane = 0;  // CPU: Profiler::GetTimelineThreadName's index; GPU: 0
+        uint32_t Lane = 0;  // CPU: Profiler::GetTimelineThreadName's index; GPU: 0 the graphics queue, 1 the async compute queue
         int64_t StartNs = 0;
         int64_t EndNs = 0;
     };
@@ -118,6 +118,12 @@ namespace Nox
     // its capacity across frames.
     class alignas(64) GpuScopeContext
     {
+    public:
+        // The context records a command buffer of the async compute queue: its scopes go on the timeline's compute track, timed
+        // only where that queue writes timestamps (GpuProfiler::isComputeQueueSupported), and not to Tracy (one GPU context
+        // there, whose zones must nest).
+        void SetAsyncCompute(bool asyncCompute) { m_AsyncCompute = asyncCompute; }
+
     private:
         friend class Profiler;
 
@@ -127,6 +133,7 @@ namespace Nox
             uint32_t ParentId;
             uint32_t BeginQuery; // the end timestamp is BeginQuery + 1
             uint32_t Depth;      // under "GPU Frame" (depth 0)
+            uint32_t Queue;      // 0 graphics, 1 async compute
         };
 
         struct Statistics
@@ -140,6 +147,7 @@ namespace Nox
         std::vector<uint32_t> m_OpenScopes; // indices into m_Scopes
         std::vector<Statistics> m_Statistics;
         uint32_t m_OpenStatistics = ~0u; // index into m_Statistics (statistics queries do not nest)
+        bool m_AsyncCompute = false;
     };
 
     class Profiler

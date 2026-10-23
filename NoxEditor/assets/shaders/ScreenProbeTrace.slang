@@ -90,7 +90,7 @@ float3 screen_probe_shade_hit(UniformBufferObject* ubo, uint instanceSlot, uint 
         albedo *= 1.0 - saturate(hit.metallicFactor);
 
     float3 emission = hit.emissiveFactor.rgb * hit.emissiveFactor.a;
-    // An emissive mesh the probes sample as a light: its light comes in through those samples (fragMain), not through the rays.
+    // An emissive mesh the probes sample as a light: its light comes in through those samples (screen_probe_trace), not through the rays.
     if (any(emission > 0.0) && EmissiveLights::find(ubo, instanceSlot) != 0xFFFFFFFF)
         emission = float3(0.0);
     if (hit.emissiveTextureIndex != 0xFFFFFFFF && any(emission > 0.0))
@@ -132,11 +132,11 @@ float3 screen_probe_shade_hit(UniformBufferObject* ubo, uint instanceSlot, uint 
 
 struct ScreenProbeTraceOutput
 {
-    float4 ray : SV_Target0;      // radiance, distance in meters
-    float4 emissive : SV_Target1; // an emissive light sample (ScreenProbeCommon.slang ScreenProbeEmissiveSamples), 0: none
+    float4 ray;      // radiance, distance in meters
+    float4 emissive; // an emissive light sample (ScreenProbeCommon.slang ScreenProbeEmissiveSamples), 0: none
 };
 
-float4 screen_probe_trace_ray(ScreenProbeVertex input, PushConstantScreenProbe pushConstant);
+float4 screen_probe_trace_ray(uint2 texel, PushConstantScreenProbe pushConstant);
 
 // One sample of the emissive meshes from the probe, behind its shadow ray: its share of the probe's irradiance / pi (before the
 // cosine of the direction the irradiance is for) and its direction. Resampled from ScreenProbeEmissiveCandidates points by what
@@ -198,14 +198,12 @@ float4 screen_probe_emissive_sample(UniformBufferObject* ubo, float3 origin, flo
     return float4(min(share, float3(4000.0)), screen_probe_pack_direction(chosen.direction)); // a half float; the irradiance pass sums in float
 }
 
-[shader("fragment")]
-ScreenProbeTraceOutput fragMain(ScreenProbeVertex input, uniform PushConstantScreenProbe pushConstant)
+ScreenProbeTraceOutput screen_probe_trace(uint2 texel, PushConstantScreenProbe pushConstant)
 {
     ScreenProbeTraceOutput output;
-    output.ray = screen_probe_trace_ray(input, pushConstant);
+    output.ray = screen_probe_trace_ray(texel, pushConstant);
     output.emissive = float4(0.0);
 
-    const uint2 texel = uint2(input.pos.xy);
     const uint2 probe = texel / ScreenProbeRayRes;
     const uint2 local = texel % ScreenProbeRayRes;
     if (probe.x >= pushConstant.probeCountX || probe.y >= pushConstant.probeCountY || !screen_probe_is_emissive_texel(local))
@@ -225,9 +223,8 @@ ScreenProbeTraceOutput fragMain(ScreenProbeVertex input, uniform PushConstantScr
     return output;
 }
 
-float4 screen_probe_trace_ray(ScreenProbeVertex input, PushConstantScreenProbe pushConstant)
+float4 screen_probe_trace_ray(uint2 texel, PushConstantScreenProbe pushConstant)
 {
-    const uint2 texel = uint2(input.pos.xy);
     const uint2 probe = texel / ScreenProbeRayRes;
     const uint2 local = texel % ScreenProbeRayRes;
     if (probe.x >= pushConstant.probeCountX || probe.y >= pushConstant.probeCountY)
@@ -293,4 +290,15 @@ float4 screen_probe_trace_ray(ScreenProbeVertex input, PushConstantScreenProbe p
     // Half floats end at 65504: an overflow becomes Inf, then NaN in the history.
     radiance = all(isfinite(radiance)) ? min(radiance, float3(30000.0)) : float3(0.0);
     return float4(radiance, min(hitT / max(ubo->unitsPerMeter, 1e-6), 60000.0));
+}
+
+[shader("compute")]
+[numthreads(SCREEN_PROBE_GROUP_SIZE, SCREEN_PROBE_GROUP_SIZE, 1)]
+void computeMain(uint3 id : SV_DispatchThreadID, uniform PushConstantScreenProbe pushConstant)
+{
+    if (!screen_probe_in_target(pushConstant.outputStorageIndex0, id.xy))
+        return;
+    const ScreenProbeTraceOutput output = screen_probe_trace(id.xy, pushConstant);
+    screen_probe_store(pushConstant.outputStorageIndex0, id.xy, output.ray);
+    screen_probe_store(pushConstant.outputStorageIndex1, id.xy, output.emissive);
 }

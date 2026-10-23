@@ -1,5 +1,6 @@
 #include "GpuProfilerVK.h"
 
+#include <algorithm>
 #include <array>
 
 #include "DeviceVK.h"
@@ -27,6 +28,14 @@ namespace NRI
     {
         const std::vector<vk::QueueFamilyProperties> queueFamilies = m_deviceVK.getPhysicalDevice().getQueueFamilyProperties();
         m_timestampValidBits = queueFamilies[m_deviceVK.getQueueIndex()].timestampValidBits;
+        // The async compute queue's timestamps share the pool; differences are masked with the fewer valid bits of the two.
+        if (m_deviceVK.hasAsyncComputeQueue())
+        {
+            const uint32_t computeBits = queueFamilies[m_deviceVK.getQueueFamily(QueueType::Compute)].timestampValidBits;
+            m_computeQueueTimestamps = m_timestampValidBits != 0 && computeBits != 0;
+            if (m_computeQueueTimestamps)
+                m_timestampValidBits = std::min(m_timestampValidBits, computeBits);
+        }
         m_timestampPeriod = m_deviceVK.getPhysicalDevice().getProperties().limits.timestampPeriod;
 
         if (!isSupported())

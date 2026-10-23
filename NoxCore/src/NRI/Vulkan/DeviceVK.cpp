@@ -1,5 +1,7 @@
 #include "DeviceVK.h"
+#include <algorithm>
 #include <iostream>
+#include <string>
 #include <SDL3/SDL_vulkan.h>
 #include <SDL3/SDL_loadso.h>
 
@@ -644,8 +646,26 @@ namespace NRI
                 break;
             }
         }
-        m_sharedQueueFamilies = { m_queueIndex, m_transferQueueIndex };
-        m_sharedQueueFamilyCount = m_transferQueueIndex != m_queueIndex ? 2 : 1;
+        // Async compute: a family that computes but does not draw has its own front end, so its work runs beside the graphics
+        // queue's (Vulkan Tutorial, Asynchronous Compute). Without one there is no async compute.
+        for (uint32_t qfpIndex = 0; qfpIndex < queueFamilyProperties.size(); qfpIndex++)
+        {
+            const vk::QueueFlags flags = queueFamilyProperties[qfpIndex].queueFlags;
+            if ((flags & vk::QueueFlagBits::eCompute) && !(flags & vk::QueueFlagBits::eGraphics) && qfpIndex != m_transferQueueIndex)
+            {
+                m_computeQueueIndex = qfpIndex;
+                break;
+            }
+        }
+
+        // The distinct families: one queue each, and the families a concurrently shared resource names.
+        m_sharedQueueFamilyCount = 0;
+        for (uint32_t family : { m_queueIndex, m_transferQueueIndex, m_computeQueueIndex })
+        {
+            if (family != ~0u && std::find(m_sharedQueueFamilies.begin(), m_sharedQueueFamilies.begin() + m_sharedQueueFamilyCount, family) ==
+                                     m_sharedQueueFamilies.begin() + m_sharedQueueFamilyCount)
+                m_sharedQueueFamilies[m_sharedQueueFamilyCount++] = family;
+        }
         auto features = m_physicalDevice.template getFeatures2<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceShaderObjectFeaturesEXT, vk::PhysicalDeviceMeshShaderFeaturesEXT>();
         m_shaderObjectsEnabled = features.template get<vk::PhysicalDeviceShaderObjectFeaturesEXT>().shaderObject;
         m_pipelineStatisticsEnabled = features.template get<vk::PhysicalDeviceFeatures2>().features.pipelineStatisticsQuery &&
@@ -779,10 +799,10 @@ namespace NRI
 
         // create a Device
         float queuePriority = 0.5f;
-        const std::array<vk::DeviceQueueCreateInfo, 2> deviceQueueCreateInfos{
-            vk::DeviceQueueCreateInfo{.queueFamilyIndex = m_queueIndex, .queueCount = 1, .pQueuePriorities = &queuePriority},
-            vk::DeviceQueueCreateInfo{.queueFamilyIndex = m_transferQueueIndex, .queueCount = 1, .pQueuePriorities = &queuePriority}
-        };
+        std::array<vk::DeviceQueueCreateInfo, 3> deviceQueueCreateInfos{};
+        for (uint32_t index = 0; index < m_sharedQueueFamilyCount; ++index)
+            deviceQueueCreateInfos[index] = vk::DeviceQueueCreateInfo{ .queueFamilyIndex = m_sharedQueueFamilies[index], .queueCount = 1,
+                                                                       .pQueuePriorities = &queuePriority };
         vk::DeviceCreateInfo deviceCreateInfo{
             .pNext = &featureChain.get<vk::PhysicalDeviceFeatures2>(),
             .queueCreateInfoCount = m_sharedQueueFamilyCount,
@@ -794,8 +814,12 @@ namespace NRI
         m_device = vk::raii::Device(m_physicalDevice, deviceCreateInfo);
         m_queue = vk::raii::Queue(m_device, m_queueIndex, 0);
         m_transferQueue = vk::raii::Queue(m_device, m_transferQueueIndex, 0);
+        if (hasAsyncComputeQueue())
+            m_computeQueue = vk::raii::Queue(m_device, m_computeQueueIndex, 0);
         m_submitFence = vk::raii::Fence(m_device, vk::FenceCreateInfo{});
         NOX_CORE_INFO("Transfer queue: {}", hasDedicatedTransferQueue() ? "dedicated family" : "graphics queue");
+        NOX_CORE_INFO("Async compute queue: {}", hasAsyncComputeQueue() ? "compute-only family " + std::to_string(m_computeQueueIndex)
+                                                                           : std::string("none (compute runs on the graphics queue)"));
 
         // Load device-level function pointers for Vulkan-Hpp wrappers.
         // Before we only loaded the function pointers for the instance-level functions.
@@ -1436,7 +1460,10 @@ namespace NRI
             .signalSemaphoreInfoCount = static_cast<uint32_t>(m_signalScratch.size()),
             .pSignalSemaphoreInfos = m_signalScratch.data()
         };
-        (queue == QueueType::Transfer ? m_transferQueue : m_queue).submit2(submitInfo);
+        vk::raii::Queue& target = queue == QueueType::Transfer ? m_transferQueue
+                                : queue == QueueType::Compute && hasAsyncComputeQueue() ? m_computeQueue
+                                : m_queue;
+        target.submit2(submitInfo);
     }
 
     void DeviceVK::waitIdle()

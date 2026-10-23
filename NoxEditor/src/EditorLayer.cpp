@@ -1403,6 +1403,24 @@ namespace Nox
                 ImGui::TextDisabled("TLAS: %u instances, %u culled, %u BLAS evicted", m_Renderer->getTlasInstanceCount(),
                                     m_Renderer->getTlasCulledCount(), m_Renderer->getEvictedBlasCount());
 
+                ImGui::BeginDisabled(!m_Renderer->isAsyncComputeAvailable());
+                bool asyncCompute = m_Renderer->getAsyncComputeEnabled();
+                if (ImGui::Checkbox("Async Compute (Screen-Probe GI)", &asyncCompute))
+                    m_Renderer->setAsyncComputeEnabled(asyncCompute);
+                ImGui::EndDisabled();
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                    ImGui::SetTooltip(m_Renderer->isAsyncComputeAvailable()
+                                          ? "The screen-probe GI runs on the GPU's compute queue, beside the SSAO / RTAO / RT shadow passes,\n"
+                                            "which do not touch what it reads and writes; the reflections and the lighting wait for it.\n"
+                                            "Off: everything runs on the graphics queue, one after another. The image is the same either\n"
+                                            "way; compare the GPU frame time, and see both queues in Window > Profiler."
+                                          : "This GPU has no compute-only queue family: compute runs on the graphics queue.");
+                if (m_Renderer->isAsyncComputeAvailable() && asyncCompute)
+                {
+                    ImGui::SameLine();
+                    ImGui::TextDisabled("(%u passes on the compute queue)", m_Renderer->getAsyncComputePassCount());
+                }
+
                 // Diffuse Global Illumination (GI)
                 static const char* giModeNames[] = {
                     "Off (IBL Ambient)",

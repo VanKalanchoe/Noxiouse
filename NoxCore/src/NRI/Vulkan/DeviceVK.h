@@ -51,10 +51,16 @@ namespace NRI
         bool isDebugUtilsEnabled() const { return m_debugUtilsEnabled; }
         uint32_t getQueueIndex() { return m_queueIndex; }
         vk::raii::Queue& getQueue() { return m_queue; }
-        uint32_t getQueueFamily(QueueType queue) const { return queue == QueueType::Transfer ? m_transferQueueIndex : m_queueIndex; }
+        uint32_t getQueueFamily(QueueType queue) const
+        {
+            if (queue == QueueType::Transfer)
+                return m_transferQueueIndex;
+            return queue == QueueType::Compute && hasAsyncComputeQueue() ? m_computeQueueIndex : m_queueIndex;
+        }
         // The families a concurrently shared resource names (one when there is no dedicated transfer family).
         std::span<const uint32_t> getSharedQueueFamilies() const { return { m_sharedQueueFamilies.data(), m_sharedQueueFamilyCount }; }
         bool hasDedicatedTransferQueue() const override { return m_transferQueueIndex != m_queueIndex; }
+        bool hasAsyncComputeQueue() const override { return m_computeQueueIndex != ~0u; }
         vk::raii::SurfaceKHR& getSurface() { return m_surface; }
         vk::Format& getDepthFormat() { return m_depthFormat; }
         vk::SurfaceFormatKHR& getSurfaceFormat() { return m_surfaceFormat; }
@@ -168,7 +174,10 @@ namespace NRI
         // A family with transfer but neither graphics nor compute (a copy engine), else the graphics family.
         uint32_t m_transferQueueIndex = ~0;
         vk::raii::Queue m_transferQueue = nullptr;
-        std::array<uint32_t, 2> m_sharedQueueFamilies{};
+        // A family with compute but not graphics (async compute), ~0 when the device has none.
+        uint32_t m_computeQueueIndex = ~0u;
+        vk::raii::Queue m_computeQueue = nullptr;
+        std::array<uint32_t, 3> m_sharedQueueFamilies{};
         uint32_t m_sharedQueueFamilyCount = 1;
         vk::raii::Fence m_submitFence = nullptr; // submitAndWait
         std::vector<vk::CommandBufferSubmitInfo> m_submitScratch; // submissions (main thread)
