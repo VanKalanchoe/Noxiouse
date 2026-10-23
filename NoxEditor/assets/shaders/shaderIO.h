@@ -1119,6 +1119,32 @@ bool ray_see_through(float transmission, uint alphaMode)
     return transmission >= SeeThroughTransmission && alphaMode != 1u;
 }
 
+// A tangent-space normal map sample (0..1) as a unit tangent-space normal, as the G-buffer (GBufferMaterial.slang) and the path
+// tracer (PathTracerBridge.slang) decode it: X and Y from the texture, Z rebuilt when the texture stores none (two-channel BC5 maps
+// such as the Bistro's _ddna read 0 in blue -- taken as -1 it turned the normal into the surface).
+float3 tangent_normal_from_map(float3 sampled)
+{
+    float3 tangentNormal;
+    tangentNormal.xy = sampled.xy * 2.0 - 1.0;
+    tangentNormal.z = sampled.z <= 0.0 ? sqrt(saturate(1.0 - dot(tangentNormal.xy, tangentNormal.xy))) : abs(sampled.z * 2.0 - 1.0);
+    return dot(tangentNormal, tangentNormal) > 1e-12 ? normalize(tangentNormal) : float3(0.0, 0.0, 1.0);
+}
+
+// A normal map sample to a world-space normal in the mesh's stored tangent frame (xyz world tangent, w bitangent handedness),
+// Gram-Schmidt'ed against the interpolated normal, as the G-buffer does it.
+float3 normal_from_map(float3 sampled, float3 normal, float4 tangent)
+{
+    const float3 tangentNormal = tangent_normal_from_map(sampled);
+
+    const float3 N = normalize(normal);
+    const float3 t = tangent.xyz - N * dot(N, tangent.xyz);
+    if (dot(t, t) <= 1e-12)
+        return N;
+    const float3 T = normalize(t);
+    const float3 B = cross(N, T) * (tangent.w < 0.0 ? -1.0 : 1.0);
+    return normalize(mul(tangentNormal, float3x3(T, B, N)));
+}
+
 // A material's depth bias (MaterialData::DepthBias; HDRP's Mesh Decal View Bias): the vertex drawn depthBias closer to the camera
 // along its view ray -- under the reverse-Z projection its clip z scaled by distance / (distance - bias), the clip x, y and w, and so
 // where it lands on screen, unchanged. Geometry modelled onto another surface (the Bistro's edge decals, trims and overlay layers,

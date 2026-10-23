@@ -39,6 +39,7 @@ struct VSOutput
     float4 color;
     nointerpolation uint drawID;
     nointerpolation int entityID;
+    float4 tangent; // world tangent, w the bitangent handedness (Material_PBR_Mesh.slang)
 };
 
 static const float PBR_WORKFLOW_METALLIC_ROUGHNESS = 0.0;
@@ -219,20 +220,11 @@ float3 tracedRefraction(UniformBufferObject* ubo, InstanceData instance, uint se
 
 float3 getNormal(UniformBufferObject* ubo, InstanceData instance, VSOutput vertIn, SamplerState samplerState)
 {
+    // The G-buffer's decoding and tangent frame (normal_from_map): the per-pixel derivative frame and a blue channel taken as stored
+    // flattened two-channel maps (the Bistro's headlight and spotlight lenses) into clear glass.
     Texture2D normalTexture = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.normalTextureIndex, 0));
-    float3 tangentNormal = normalTexture.SampleBias(samplerState, instance.normalTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, ubo->textureLodBias).xyz * 2.0 - 1.0;
-
-    float3 q1 = ddx(vertIn.worldPos);
-    float3 q2 = ddy(vertIn.worldPos);
-    float2 st1 = ddx(vertIn.uv0);
-    float2 st2 = ddy(vertIn.uv0);
-
-    float3 N = normalize(vertIn.normal);
-    float3 T = normalize(q1 * st2.y - q2 * st1.y);
-    float3 B = normalize(cross(N, T));
-    float3x3 TBN = float3x3(T, B, N);
-
-    return normalize(mul(tangentNormal, TBN));
+    return normal_from_map(normalTexture.SampleBias(samplerState, instance.normalTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, ubo->textureLodBias).xyz,
+                           vertIn.normal, vertIn.tangent);
 }
 
 float convertMetallic(float3 diffuseCol, float3 specularCol, float maxSpecular)

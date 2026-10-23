@@ -13,6 +13,7 @@
         float4 color;
         nointerpolation uint drawID;
         nointerpolation int entityID;
+        float4 tangent; // Material_PBR_Mesh.slang's output, unused here
     };
 
     struct FSOutput

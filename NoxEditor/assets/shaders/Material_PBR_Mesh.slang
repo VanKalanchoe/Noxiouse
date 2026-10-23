@@ -11,6 +11,7 @@ struct VSOutput
     nointerpolation uint drawID;
 
     nointerpolation int entityID;
+    float4 tangent; // world tangent, w the bitangent handedness (normal_from_map)
 };
 
 [shader("mesh")]
@@ -60,6 +61,7 @@ void meshMain
 
         float4 localPos = float4(v.pos, 1.0);
         float3 localNormal = v.normal;
+        float3 localTangent = v.tangent.xyz;
 
         if(instance.boneMatrixOffset != 0xFFFFFFFF)
         {
@@ -75,6 +77,7 @@ void meshMain
 
             localPos = mul(skinTransform, localPos);
             localNormal = normalize(mul((float3x3)skinTransform, localNormal));
+            localTangent = mul((float3x3)skinTransform, localTangent);
         }
 
         float4 worldPos = mul(modelMatrix, localPos);
@@ -89,6 +92,8 @@ void meshMain
         vertices[i].color = float4(color, 1.0);
         vertices[i].entityID = instance.entityID;
         vertices[i].drawID = sharedPayload.drawID;
+        // Along the surface: with the model matrix itself, not the normal matrix (as GBufferMaterial.slang).
+        vertices[i].tangent = float4(mul((float3x3)modelMatrix, localTangent), v.tangent.w);
     }
 
     // Process triangles
@@ -136,21 +141,9 @@ import Math;
 // or from the interpolated mesh normal and tangent attributes.
 float3 getNormal(UniformBufferObject* ubo, InstanceData instance, VSOutput vertIn, SamplerState samplerState)
 {
-	// Perturb normal, see http://www.thetenthplanet.de/archives/1180
     Texture2D normalTexture = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.normalTextureIndex, 0));
-    float3 tangentNormal = normalTexture.Sample(samplerState, instance.normalTextureSet == 0 ? vertIn.uv0 : vertIn.uv1).xyz * 2.0 - 1.0;
-	
-    float3 q1 = ddx(vertIn.worldPos);
-	float3 q2 = ddy(vertIn.worldPos);
-	float2 st1 = ddx(vertIn.uv0);
-	float2 st2 = ddy(vertIn.uv0);
-
-	float3 N = normalize(vertIn.normal);
-	float3 T = normalize(q1 * st2.y - q2 * st1.y);
-	float3 B = normalize(cross(N, T));
-	float3x3 TBN = float3x3(T, B, N);
-
-	return normalize(mul(tangentNormal, TBN));
+    return normal_from_map(normalTexture.Sample(samplerState, instance.normalTextureSet == 0 ? vertIn.uv0 : vertIn.uv1).xyz,
+                           vertIn.normal, vertIn.tangent);
 }
 
 // Calculation of the lighting contribution from an optional Image Based Light source.

@@ -209,7 +209,7 @@
 
         float3x3 TBN = float3x3(T, B_ortho, N);
         Texture2D normalTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + lut.normalTextureIndex, 0));
-        float3 tangentNormal = normalTex.SampleLevel(textureSampler, hitUV, 0).xyz * 2.0 - 1.0;
+        float3 tangentNormal = tangent_normal_from_map(normalTex.SampleLevel(textureSampler, hitUV, 0).xyz);
         return normalize(mul(tangentNormal, TBN));
     }
 
