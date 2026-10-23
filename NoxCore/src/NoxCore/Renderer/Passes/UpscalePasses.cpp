@@ -310,5 +310,58 @@ namespace Nox
                 drawBuckets(solid, true);
                 drawBuckets(transparent, false);
             });
+
+        if (m_frame.transparentAfterUpscale && m_coverageDepthPipeline)
+            addCoverageDepthPass();
+    }
+
+    void Renderer::addCoverageDepthPass()
+    {
+        FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
+
+        // The surfaces that write depth again, at 2x2 samples per display pixel (no jitter): the transparent surfaces drawn over
+        // DLSS-RR's output blend by the share of these samples they are in front of. Against the display depth alone a pixel was
+        // all glass or none, while RR draws a thin bar in front of a window soft: the pane's reflection went on and off along its
+        // edges as the camera moved, and the bar crawled.
+        RGTextureDesc desc;
+        desc.Size = RGSize::Absolute;
+        desc.Width = m_frame.outputExtent.width * 2;
+        desc.Height = m_frame.outputExtent.height * 2;
+        desc.Usage = NRI::TextureUsage::DepthStencilAttachment;
+        resources.DepthCoverage = m_renderGraph.CreateTexture("Depth (2x2 Coverage)", desc);
+
+        m_renderGraph.AddPass("Coverage Depth (2x2)", RGPassFlags::Raster,
+            [&](RGBuilder& builder)
+            {
+                builder.DepthTarget(resources.DepthCoverage, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0 }); // reverse Z
+                builder.SetRenderArea({ desc.Width, desc.Height });
+                ReadGpuScene(builder, resources);
+                ReadIfValid(builder, resources.SkinnedVertices);
+                ReadViewDraws(builder, resources.CameraDraws);
+                ReadViewDraws(builder, resources.CameraDraws, true);
+            },
+            [this, res = &resources](RGPassContext& context)
+            {
+                NRI::CommandBuffer& cmd = context.Cmd();
+                cmd.bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
+                cmd.setDepthTestEnable(true);
+                cmd.setDepthCompareOp(NRI::CompareOp::GreaterOrEqual);
+
+                NRI::Pipeline& pipeline = *m_coverageDepthPipeline;
+                constexpr std::pair<RenderBucket, NRI::CullMode> solid[] = {
+                    { RenderBucket::Opaque, NRI::CullMode::Back }, { RenderBucket::OpaqueDoubleSided, NRI::CullMode::None },
+                    { RenderBucket::Mask, NRI::CullMode::Back }, { RenderBucket::MaskDoubleSided, NRI::CullMode::None },
+                    { RenderBucket::Unlit, NRI::CullMode::Back }, { RenderBucket::UnlitDoubleSided, NRI::CullMode::None } };
+                NRI::Pipeline* bound = nullptr;
+                for (int late = 0; late < 2; ++late)
+                {
+                    MeshletDrawCursor cursor = beginMeshletDraws(context, res->CameraDraws, late == 1);
+                    cursor.taskFlags &= ~shaderio::MESHLET_COUNT_TRIANGLES; // the stats count the camera's passes
+                    cursor.boundPipeline = bound;
+                    for (const auto& [bucket, cull] : solid)
+                        drawMeshletBucket(cmd, cursor, bucket, pipeline, cull, true, false);
+                    bound = cursor.boundPipeline;
+                }
+            });
     }
 }

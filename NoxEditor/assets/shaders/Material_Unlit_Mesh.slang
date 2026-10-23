@@ -1,6 +1,7 @@
  #include "shaderIO.h"
     #include "Math.slang"
     #include "HeightFog.slang"
+    #include "TransparentCoverage.slang"
 
     // Matches the exact vertex output from meshMain in Meshlet.slang
     struct VSOutput
@@ -33,7 +34,13 @@
     [shader("fragment")]
     FSOutput fragMain(VSOutput vertIn, uniform PushConstantMeshlets pushConstant)
     {
-        return shadeUnlit(vertIn, pushConstant);
+        // Over DLSS-RR's output: blended by the share of the pixel it is in front of (the pass has no hardware depth test then).
+        const float pixelCoverage = after_upscale_coverage((UniformBufferObject*)pushConstant.matrixReference, pushConstant, vertIn.pos);
+        if (pixelCoverage <= 0.0)
+            discard;
+        FSOutput output = shadeUnlit(vertIn, pushConstant);
+        output.color *= pixelCoverage;
+        return output;
     }
 
     // Order-independent transparency (Renderer::setOITEnabled): a transparent unlit surface into the weighted blended targets.

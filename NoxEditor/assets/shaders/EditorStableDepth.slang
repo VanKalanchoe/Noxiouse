@@ -94,10 +94,9 @@ struct StableOutput
     int entityID : SV_Target0;
 };
 
-[shader("fragment")]
-StableOutput fragMain(VSOutput inVert, uniform PushConstantMeshlets pushConstant)
+// Alpha-masked surfaces (foliage cards) cut out like in the visibility pass.
+void alphaMaskCut(VSOutput inVert, PushConstantMeshlets pushConstant)
 {
-    // Alpha-masked surfaces (foliage cards) cut out like in the visibility pass.
     UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
     SceneInstances instances = SceneInstances(ubo);
     InstanceData instance = instances[inVert.drawID];
@@ -110,8 +109,20 @@ StableOutput fragMain(VSOutput inVert, uniform PushConstantMeshlets pushConstant
         if ((baseColorTex.Sample(samp, uv).a * instance.baseColorFactor.a) < instance.alphaMaskCutoff)
             discard;
     }
+}
 
+[shader("fragment")]
+StableOutput fragMain(VSOutput inVert, uniform PushConstantMeshlets pushConstant)
+{
+    alphaMaskCut(inVert, pushConstant);
     StableOutput output;
     output.entityID = inVert.entityID;
     return output;
+}
+
+// Depth alone: the 2x2-samples-per-pixel depth transparent surfaces drawn after DLSS-RR measure their coverage against.
+[shader("fragment")]
+void fragDepthOnly(VSOutput inVert, uniform PushConstantMeshlets pushConstant)
+{
+    alphaMaskCut(inVert, pushConstant);
 }

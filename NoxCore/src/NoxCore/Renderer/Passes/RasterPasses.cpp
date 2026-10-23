@@ -736,7 +736,8 @@ namespace Nox
                getBucketEntryCount(RenderBucket::TransparentUnlit) > 0 || getBucketEntryCount(RenderBucket::TransparentUnlitDoubleSided) > 0;
     }
 
-    void Renderer::drawForwardTransparent(NRI::CommandBuffer& cmd, const RGPassContext& context, const ViewDrawResources& draws, MeshletDrawCursor& cursor, bool oit) const
+    void Renderer::drawForwardTransparent(NRI::CommandBuffer& cmd, const RGPassContext& context, const ViewDrawResources& draws, MeshletDrawCursor& cursor, bool oit,
+                                          bool depthTest) const
     {
         NRI::Pipeline* litPipeline = oit ? m_transparentLitOITPipeline.get() : m_transparentLitPipeline.get();
         NRI::Pipeline* unlitPipeline = oit ? m_unlitOITPipeline.get() : m_unlitPipeline.get();
@@ -744,7 +745,7 @@ namespace Nox
             return;
 
         cursor.boundPipeline = nullptr;
-        cmd.setDepthTestEnable(true);
+        cmd.setDepthTestEnable(depthTest);
         cmd.setDepthWriteEnable(false);
         cmd.setDepthCompareOp(NRI::CompareOp::GreaterOrEqual);
         cmd.setColorBlendEnable(0, true);
@@ -795,6 +796,7 @@ namespace Nox
         lateCursor.boundPipeline = cursor.boundPipeline;
         lateCursor.references.ssaoTextureIndex = cursor.references.ssaoTextureIndex;
         lateCursor.references.refractionTextureIndex = cursor.references.refractionTextureIndex;
+        lateCursor.references.coverageDepthTextureIndex = cursor.references.coverageDepthTextureIndex;
         drawMeshletBucket(cmd, lateCursor, RenderBucket::Transparent, *litPipeline, NRI::CullMode::Back, false, true);
         drawMeshletBucket(cmd, lateCursor, RenderBucket::TransparentDoubleSided, *litPipeline, NRI::CullMode::None, false, true);
         drawMeshletBucket(cmd, lateCursor, RenderBucket::TransparentUnlit, *unlitPipeline, NRI::CullMode::Back, false, true);
@@ -804,6 +806,7 @@ namespace Nox
         cmd.setColorBlendEnable(0, false);
         if (oit)
             cmd.setColorBlendEnable(1, false);
+        cmd.setDepthTestEnable(true);
         cmd.setDepthWriteEnable(true);
     }
 
@@ -1290,8 +1293,9 @@ namespace Nox
         if (refraction)
             addRefractionSourcePasses(resources.DLSSOutput, extent);
 
-        // The forward transparent pass of addForward3DPass, over RR's output at display resolution: depth-tested against the
-        // jitter-free display depth (addStableEntityDepthPass, which already holds their entity IDs), projected without the jitter
+        // The forward transparent pass of addForward3DPass, over RR's output at display resolution: blended by the share of each
+        // pixel they are in front of in the jitter-free 2x2-sample depth (addCoverageDepthPass; the display depth of
+        // addStableEntityDepthPass, which already holds their entity IDs, without it), projected without the jitter
         // (MESHLET_AFTER_UPSCALE), no screen-space AO (it is the render resolution's and lies on the surface behind).
         m_renderGraph.AddPass("Forward Transparent (After Upscale)", RGPassFlags::Raster,
             [&](RGBuilder& builder)
@@ -1318,6 +1322,8 @@ namespace Nox
                 builder.Write(resources.MipFeedback);
                 if (refraction)
                     builder.Read(resources.RefractionSource);
+                if (resources.DepthCoverage.IsValid())
+                    builder.Read(resources.DepthCoverage);
             },
             [this, res = &resources, refraction](RGPassContext& context)
             {
@@ -1334,7 +1340,11 @@ namespace Nox
                     if (m_rtRefractionEnabled && m_rayTracingEnabled)
                         cursor.taskFlags |= shaderio::MESHLET_RT_REFRACTION;
                 }
-                drawForwardTransparent(cmd, context, res->CameraDraws, cursor);
+                // How much of each pixel they cover in front of the scene (addCoverageDepthPass): their own depth test, by share.
+                const bool coverage = res->DepthCoverage.IsValid();
+                if (coverage)
+                    cursor.references.coverageDepthTextureIndex = context.Slot(res->DepthCoverage);
+                drawForwardTransparent(cmd, context, res->CameraDraws, cursor, false, !coverage);
             });
     }
 

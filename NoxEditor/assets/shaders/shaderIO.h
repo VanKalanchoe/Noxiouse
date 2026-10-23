@@ -1173,6 +1173,10 @@ struct PushConstantMeshlets
     // Material_TransparentLit_Mesh.slang only: the lit scene behind transparent surfaces with its blur mips (ColorPyramid.slang),
     // which transmissive materials refract. 0xFFFFFFFF: none this pass (transmission then only lets the background show through).
     uint32_t refractionTextureIndex;
+    // Transparent surfaces drawn over DLSS-RR's output (MESHLET_AFTER_UPSCALE, Material_TransparentLit_Mesh / Material_Unlit_Mesh):
+    // the scene's depth at 2x2 samples per display pixel (Renderer::addStableEntityDepthPass), which they are blended by the share
+    // of in front of. 0xFFFFFFFF: none (the hardware depth test alone).
+    uint32_t coverageDepthTextureIndex;
 };
 
 struct PushConstantSkinning

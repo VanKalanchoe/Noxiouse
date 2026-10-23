@@ -26,6 +26,7 @@ namespace Nox
         RGTexture DepthHi;
         RGTexture Entity;
         RGTexture EntityHi;
+        RGTexture DepthCoverage; // scene depth at 2x2 samples per display pixel, no jitter (addStableEntityDepthPass, transparents after RR)
         RGTexture SelectionMask; // editor: the selection at display resolution, not jittered (addSelectionMaskPass)
         RGTexture GBufferAlbedo;
         RGTexture GBufferNormal;

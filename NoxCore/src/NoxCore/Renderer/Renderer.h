@@ -983,6 +983,7 @@ namespace Nox
         void addEntityDepthBlitPass();
         // The blit's replacement in the editor while the camera is jittered (setStableEditorDepth).
         void addStableEntityDepthPass();
+        void addCoverageDepthPass();
         void addPostProcessPass();
         void addOverlay2DPass();
         // Editor: the selected instances drawn again without camera jitter into a display-resolution mask the outline reads.
@@ -1009,8 +1010,9 @@ namespace Nox
         void drawMeshletBucket(NRI::CommandBuffer& cmd, MeshletDrawCursor& cursor, RenderBucket bucket, NRI::Pipeline& pipeline, NRI::CullMode cullMode, bool depthWrite, bool blendEnable) const;
         // The transparent buckets (both culling phases), blended over the HDR scene; the cursor carries the SSAO and refraction slots.
         // With `oit` into the order-independent transparency targets instead (accumulation, revealage, entity IDs).
+        // Without `depthTest` the shaders test against the cursor's coverage depth themselves (transparent surfaces after DLSS-RR).
         void drawForwardTransparent(NRI::CommandBuffer& cmd, const RGPassContext& context, const ViewDrawResources& draws, MeshletDrawCursor& cursor,
-                                    bool oit = false) const;
+                                    bool oit = false, bool depthTest = true) const;
         // Draw list entries of a bucket (its visible instances are at most that many).
         uint32_t getBucketEntryCount(RenderBucket bucket) const
         {
@@ -1713,6 +1715,7 @@ namespace Nox
         // reads them as its draw list) and one direct draw per slot.
         std::unique_ptr<NRI::Pipeline> m_selectionMaskPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_stableEntityDepthPipeline = nullptr; // EditorStableDepth.slang
+        std::unique_ptr<NRI::Pipeline> m_coverageDepthPipeline = nullptr;     // EditorStableDepth.slang fragDepthOnly: depth alone
         std::vector<std::unique_ptr<NRI::Buffer>> m_selectionInstanceBuffers;
         std::vector<void*> m_selectionInstanceBuffersMapped;
         std::vector<uint32_t> m_selectionTaskGroups; // per selected instance: task workgroups to cover its meshlets

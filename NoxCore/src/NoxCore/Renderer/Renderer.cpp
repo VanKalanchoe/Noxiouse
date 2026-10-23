@@ -2006,6 +2006,12 @@ namespace Nox
         desc.shaders.push_back({ .stage = NRI::ShaderStage::Mesh, .entryPoint = "meshMain", .sourcePath = "assets/shaders/EditorStableDepth.slang" });
         desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "fragMain", .sourcePath = "assets/shaders/EditorStableDepth.slang" });
         m_stableEntityDepthPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+
+        // The same surfaces' depth alone, at 2x2 samples per display pixel: what transparent surfaces drawn over DLSS-RR's output
+        // measure their coverage of a pixel against (addStableEntityDepthPass).
+        desc.colorFormats.clear();
+        desc.shaders.back().entryPoint = "fragDepthOnly";
+        m_coverageDepthPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
     void Renderer::createCommandPool()
@@ -4660,6 +4666,8 @@ namespace Nox
             references.ssaoTextureIndex = 0xFFFFFFFF;
             // Set by the pass that draws glass over a copy of the scene (addForward3DPass).
             references.refractionTextureIndex = 0xFFFFFFFF;
+            // Set by the pass that draws transparent surfaces over DLSS-RR's output (addTransparentAfterUpscalePass).
+            references.coverageDepthTextureIndex = 0xFFFFFFFF;
         }
         frame.skinningWorkCount = static_cast<uint32_t>(m_skinningWorkItems.size());
         frame.skinnedHistoryValid = frame.skinningWorkCount > 0 && m_skinnedVertexHistoryValid;
