@@ -737,8 +737,10 @@ namespace Nox
     }
 
     void Renderer::drawForwardTransparent(NRI::CommandBuffer& cmd, const RGPassContext& context, const ViewDrawResources& draws, MeshletDrawCursor& cursor, bool oit,
-                                          bool rrLayer) const
+                                          TransparentBlend blend) const
     {
+        const bool rrLayer = blend == TransparentBlend::RRLayer;
+        const bool litOnly = blend != TransparentBlend::Over;
         NRI::Pipeline* litPipeline = oit ? m_transparentLitOITPipeline.get() : (rrLayer ? m_transparentLitLayerPipeline.get() : m_transparentLitPipeline.get());
         NRI::Pipeline* unlitPipeline = oit ? m_unlitOITPipeline.get() : m_unlitPipeline.get();
         if (!unlitPipeline || !litPipeline || !hasTransparentDraws())
@@ -766,7 +768,7 @@ namespace Nox
         }
         else
         {
-            const NRI::ColorBlendEquation blendEquation
+            NRI::ColorBlendEquation blendEquation
             {
                 .srcColorBlendFactor = NRI::BlendFactor::One,
                 .dstColorBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha,
@@ -775,6 +777,12 @@ namespace Nox
                 .dstAlphaBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha,
                 .alphaBlendOp = NRI::BlendOp::Add,
             };
+            if (blend == TransparentBlend::GlassMultiply) // scene *= what the pane lets through (MESHLET_GLASS_MULTIPLY)
+                blendEquation = { NRI::BlendFactor::Zero, NRI::BlendFactor::SrcColor, NRI::BlendOp::Add,
+                                  NRI::BlendFactor::Zero, NRI::BlendFactor::One, NRI::BlendOp::Add };
+            else if (blend == TransparentBlend::GlassAdd) // scene += the pane's own light (MESHLET_GLASS_ADD)
+                blendEquation = { NRI::BlendFactor::One, NRI::BlendFactor::One, NRI::BlendOp::Add,
+                                  NRI::BlendFactor::Zero, NRI::BlendFactor::One, NRI::BlendOp::Add };
             cmd.setColorBlendEquation(0, blendEquation);
             cmd.setColorBlendEnable(1, false);
             cmd.setColorWriteMask(1, NRI::ColorComponent::All);
@@ -798,7 +806,7 @@ namespace Nox
         // each other and wash the result out.
         drawMeshletBucket(cmd, cursor, RenderBucket::Transparent, *litPipeline, NRI::CullMode::Back, false, true);
         drawMeshletBucket(cmd, cursor, RenderBucket::TransparentDoubleSided, *litPipeline, NRI::CullMode::None, false, true);
-        if (!rrLayer) // unlit surfaces are never see-through (no transmission), and their pipeline has no opacity target
+        if (!litOnly) // unlit surfaces are never see-through (no transmission), and their pipeline has no opacity target
         {
             drawMeshletBucket(cmd, cursor, RenderBucket::TransparentUnlit, *unlitPipeline, NRI::CullMode::Back, false, true);
             drawMeshletBucket(cmd, cursor, RenderBucket::TransparentUnlitDoubleSided, *unlitPipeline, NRI::CullMode::None, false, true);
@@ -813,7 +821,7 @@ namespace Nox
         lateCursor.taskFlags = cursor.taskFlags;
         drawMeshletBucket(cmd, lateCursor, RenderBucket::Transparent, *litPipeline, NRI::CullMode::Back, false, true);
         drawMeshletBucket(cmd, lateCursor, RenderBucket::TransparentDoubleSided, *litPipeline, NRI::CullMode::None, false, true);
-        if (!rrLayer)
+        if (!litOnly)
         {
             drawMeshletBucket(cmd, lateCursor, RenderBucket::TransparentUnlit, *unlitPipeline, NRI::CullMode::Back, false, true);
             drawMeshletBucket(cmd, lateCursor, RenderBucket::TransparentUnlitDoubleSided, *unlitPipeline, NRI::CullMode::None, false, true);
@@ -1304,7 +1312,17 @@ namespace Nox
                 cursor.references.refractionTextureIndex = context.Slot(res->RefractionSource);
                 if (m_rtRefractionEnabled && m_rayTracingEnabled)
                     cursor.taskFlags |= shaderio::MESHLET_RT_REFRACTION;
+                // Everything but the glass, back to front; then the glass in its two passes (MESHLET_GLASS_MULTIPLY / _ADD), in any
+                // order: the panes behind panes all tint what is behind them, and every pane keeps its reflection. Drawn over the copy
+                // like the rest, each pane replaced the pixel with the copy (no glass in it) tinted once: a lantern seen through, in at
+                // the front and out at the back, came out with one tint or none and only the last pane drawn.
+                const uint32_t passFlags = cursor.taskFlags;
+                cursor.taskFlags = passFlags | shaderio::MESHLET_SKIP_SEE_THROUGH;
                 drawForwardTransparent(cmd, context, res->CameraDraws, cursor);
+                cursor.taskFlags = passFlags | shaderio::MESHLET_SEE_THROUGH_ONLY | shaderio::MESHLET_GLASS_MULTIPLY;
+                drawForwardTransparent(cmd, context, res->CameraDraws, cursor, false, TransparentBlend::GlassMultiply);
+                cursor.taskFlags = passFlags | shaderio::MESHLET_SEE_THROUGH_ONLY | shaderio::MESHLET_GLASS_ADD;
+                drawForwardTransparent(cmd, context, res->CameraDraws, cursor, false, TransparentBlend::GlassAdd);
             });
     }
 
@@ -1332,7 +1350,7 @@ namespace Nox
                 cursor.references.ssaoTextureIndex = m_frame.ssaoAdded ? context.Slot(res->SSAO) : 0xFFFFFFFF;
                 if (m_rtRefractionEnabled && m_rayTracingEnabled)
                     cursor.taskFlags |= shaderio::MESHLET_RT_REFRACTION; // the smooth glass's traced reflection
-                drawForwardTransparent(cmd, context, res->CameraDraws, cursor, false, true);
+                drawForwardTransparent(cmd, context, res->CameraDraws, cursor, false, TransparentBlend::RRLayer);
             });
     }
 

@@ -1009,9 +1009,12 @@ namespace Nox
         void drawMeshletBucket(NRI::CommandBuffer& cmd, MeshletDrawCursor& cursor, RenderBucket bucket, NRI::Pipeline& pipeline, NRI::CullMode cullMode, bool depthWrite, bool blendEnable) const;
         // The transparent buckets (both culling phases), blended over the HDR scene; the cursor carries the SSAO and refraction slots.
         // With `oit` into the order-independent transparency targets instead (accumulation, revealage, entity IDs).
-        // With `rrLayer` into DLSS-RR's transparency layer instead (color, entity IDs, opacity per channel; lit surfaces only).
+        // How drawForwardTransparent blends: over what is drawn (back to front, premultiplied); into DLSS-RR's transparency layer
+        // (color, entity IDs, opacity per channel); the glass's two passes over the scene, multiplied (what it lets through) and
+        // added (its own light). The last three draw lit surfaces only.
+        enum class TransparentBlend { Over, RRLayer, GlassMultiply, GlassAdd };
         void drawForwardTransparent(NRI::CommandBuffer& cmd, const RGPassContext& context, const ViewDrawResources& draws, MeshletDrawCursor& cursor,
-                                    bool oit = false, bool rrLayer = false) const;
+                                    bool oit = false, TransparentBlend blend = TransparentBlend::Over) const;
         // Draw list entries of a bucket (its visible instances are at most that many).
         uint32_t getBucketEntryCount(RenderBucket bucket) const
         {

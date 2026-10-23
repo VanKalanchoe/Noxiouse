@@ -1163,6 +1163,13 @@ STATIC_CONST uint32_t MESHLET_TRANSPARENCY_LAYER = 16;
 // describe and go into its input color.
 STATIC_CONST uint32_t MESHLET_SEE_THROUGH_ONLY = 32;
 STATIC_CONST uint32_t MESHLET_SKIP_SEE_THROUGH = 64;
+// PushConstantMeshlets.meshletCulling, Material_TransparentLit_Mesh: the glass in two passes over the scene, in any order
+// (Renderer::addForward3DPass): first what each pane lets through, multiplied into the scene (MESHLET_GLASS_MULTIPLY), then the light
+// each gives itself, added (MESHLET_GLASS_ADD) -- panes behind panes (a lantern's cylinder: in at the front, out at the back) all
+// tint what is behind them, as in the path tracer. Thick or rough glass, whose view behind is bent or blurred (the color pyramid),
+// blocks what is behind in the first pass and adds it, with its own light, in the second.
+STATIC_CONST uint32_t MESHLET_GLASS_MULTIPLY = 128;
+STATIC_CONST uint32_t MESHLET_GLASS_ADD = 256;
 
 struct PushConstantMeshlets
 {

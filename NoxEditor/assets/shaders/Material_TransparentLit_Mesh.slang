@@ -462,6 +462,19 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     float3 reflection = normalize(reflect(-v, n));
     float NdotV = clamp(dot(n, v), 0.001, 1.0);
 
+    // The glass's first pass (MESHLET_GLASS_MULTIPLY): what the pane lets through of the scene behind it, multiplied into it -- the
+    // transmission past the Fresnel reflection, through the base color, where it covers the pixel. Glass that bends or blurs the view
+    // (a volume, roughness: the color pyramid) lets nothing through here; its second pass adds what it shows.
+    const bool stackedGlass = refraction && instance.thickness <= 0.0 && perceptualRoughness <= 0.02;
+    if ((pushConstant.meshletCulling & MESHLET_GLASS_MULTIPLY) != 0)
+    {
+        const float3 fresnel = specularEnvironmentR0 + (1.0 - specularEnvironmentR0) * pow(1.0 - NdotV, 5.0);
+        const float3 throughput = stackedGlass ? saturate(baseColor.rgb * (transmission * (1.0 - metallic)) * (1.0 - fresnel)) : float3(0.0);
+        output.color = float4(lerp(float3(1.0), throughput, coverage), 1.0);
+        output.entityID = vertIn.entityID;
+        return output;
+    }
+
     // Direct analytic lights, the same evaluateDirectLight the deferred opaque path uses. The strongest ShadowedLightCount of them
     // get a shadow ray once all are summed (see file header).
     float3 directLighting = float3(0.0);
@@ -684,7 +697,11 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
             tracedWeight = saturate((RTRefractionMaxRoughness - perceptualRoughness) / (RTRefractionMaxRoughness - RTRefractionFullRoughness));
 
         float3 behind = float3(0.0);
-        if (tracedWeight > 0.0)
+        // The glass's second pass (MESHLET_GLASS_ADD) for a thin smooth pane: its own light alone, what is behind was let through by
+        // the first.
+        if (stackedGlass && (pushConstant.meshletCulling & MESHLET_GLASS_ADD) != 0)
+            tracedWeight = 1.0;
+        else if (tracedWeight > 0.0)
             behind = tracedRefraction(ubo, instance, vertIn.drawID, vertIn.worldPos, n, v, ior, modelScale) * tracedWeight;
         if (tracedWeight < 1.0)
         {
@@ -722,7 +739,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
 
         const float3 fresnel = specularEnvironmentR0 + (1.0 - specularEnvironmentR0) * pow(1.0 - NdotV, 5.0);
         color += behind * baseColor.rgb * (transmission * (1.0 - metallic)) * (1.0 - fresnel);
-        output.color = float4(color * coverage, coverage);
+        output.color = float4(color * coverage, coverage); // added in the glass's second pass (the alpha unused)
         output.entityID = vertIn.entityID;
         return output;
     }
