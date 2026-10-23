@@ -358,7 +358,10 @@ namespace Nox
                 cmd.setCullMode(NRI::CullMode::Back);
                 cmd.setDepthTestEnable(true);
                 cmd.setDepthWriteEnable(true);
-                cmd.setDepthCompareOp(NRI::CompareOp::Greater);
+                // Near-or-equal (Unreal's CF_DepthNearOrEqual, Godot's GREATER_OR_EQUAL with reverse-Z): at an exact tie
+                // between coplanar triangles the later one in draw order wins, the painter's order layered meshes (decal
+                // strips over their wall in one index buffer) are authored for. The task shader keeps that order fixed.
+                cmd.setDepthCompareOp(NRI::CompareOp::GreaterOrEqual);
                 cmd.setColorBlendEnable(0, false);
                 cmd.setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
 
@@ -477,7 +480,7 @@ namespace Nox
                 cmd.setCullMode(NRI::CullMode::Back);
                 cmd.setDepthTestEnable(true);
                 cmd.setDepthWriteEnable(true);
-                cmd.setDepthCompareOp(NRI::CompareOp::Greater);
+                cmd.setDepthCompareOp(NRI::CompareOp::GreaterOrEqual); // as the Visibility pass
                 cmd.setColorBlendEnable(0, false);
                 cmd.setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
 

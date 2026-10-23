@@ -1,7 +1,10 @@
 #include "shaderIO.h"
 
 groupshared MeshletPayload sharedPayload;
-groupshared Atomic<uint32_t> visibleMeshletCount;
+// One bit per thread's meshlet: the payload is compacted in meshlet order (a prefix count, not an atomic counter), so the
+// mesh workgroups rasterize in the same order every frame (VK_EXT_mesh_shader rasterization order) and exact depth ties
+// between coplanar triangles always resolve the same way.
+groupshared uint visibleMeshletMask[TASK_SHADER_DISPATCH_X / 32];
 groupshared Atomic<uint32_t> visibleTriangleCount;
 
 // Screen-space error of a cluster LOD bound (fraction of the screen height), meshoptimizer demo/nanite.cpp boundsError:
@@ -35,11 +38,13 @@ void taskMain
     uint32_t groupBaseMeshlet = instance.drawsOffset + (gid.x * TASK_SHADER_DISPATCH_X);
 
     // Thread 0 initializes payload metadata
+    if (gtid.x < TASK_SHADER_DISPATCH_X / 32)
+        visibleMeshletMask[gtid.x] = 0;
     if (gtid.x == 0)
     {
-        visibleMeshletCount.store(0);
         visibleTriangleCount.store(0);
         sharedPayload.groupMeshletOffset = groupBaseMeshlet;
+        sharedPayload.drawID = instanceSlot;
     }
 
     GroupMemoryBarrierWithGroupSync();
@@ -53,6 +58,7 @@ void taskMain
     const bool instanceDrawn = !((pushConstant.meshletCulling & MESHLET_SEE_THROUGH_ONLY) != 0 && !seeThrough) &&
                                !((pushConstant.meshletCulling & MESHLET_SKIP_SEE_THROUGH) != 0 && seeThrough);
 
+    bool visible = false;
     if (instanceDrawn && localMeshletIdx < totalMeshlets)
     {
         // The bounds stream holds this mesh's meshlets in the same order as its draws, from its own offset.
@@ -62,7 +68,6 @@ void taskMain
 
         // 1. The LOD cut (clusterlod's rule): the coarser version is too coarse, this cluster is fine enough. The bounds go
         //    to world space with the instance's largest scale; the culling view's camera (frozen with it).
-        bool visible;
         if (ubo->lodFullDetail != 0)
         {
             visible = meshletBounds.lodLevel == 0;
@@ -95,10 +100,7 @@ void taskMain
 
         if (visible)
         {
-            // Compact visible meshlets into payload array
-            uint index = visibleMeshletCount.add(1);
-            sharedPayload.drawID = instanceSlot;
-            sharedPayload.meshletIndices[index] = threadOffset;
+            InterlockedOr(visibleMeshletMask[threadOffset >> 5], 1u << (threadOffset & 31));
             if ((pushConstant.meshletCulling & MESHLET_COUNT_TRIANGLES) != 0)
                 visibleTriangleCount.add(meshletBounds.triangleCount);
         }
@@ -106,10 +108,21 @@ void taskMain
 
     GroupMemoryBarrierWithGroupSync();
 
+    // Compact visible meshlets into the payload array, in meshlet order: a slot is the number of visible meshlets before it.
+    uint count = 0;
+    for (uint word = 0; word < TASK_SHADER_DISPATCH_X / 32; word++)
+    {
+        uint bits = visibleMeshletMask[word];
+        if (visible && word == (threadOffset >> 5))
+            sharedPayload.meshletIndices[count + countbits(bits & ((1u << (threadOffset & 31)) - 1u))] = threadOffset;
+        count += countbits(bits);
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+
     // 3. Dispatch only the visible meshlets to the Mesh Shader
     if (gtid.x == 0)
     {
-        uint count = visibleMeshletCount.load();
         if ((pushConstant.meshletCulling & MESHLET_COUNT_TRIANGLES) != 0 && count > 0)
         {
             ClusterStats* stats = (ClusterStats*)ubo->clusterStatsReference;

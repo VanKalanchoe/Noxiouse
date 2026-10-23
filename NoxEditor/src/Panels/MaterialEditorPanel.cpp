@@ -111,6 +111,8 @@ namespace Nox
                               "modelled exactly onto another surface -- decals, trims, overlay layers lying in its plane -- that\n"
                               "would otherwise z-fight with it. Keep it tiny, just past the rounding between the two (about\n"
                               "0.05 mm: 0.00005 in meters): more lets it jump over real geometry a millimetre in front of it.\n"
+                              "It moves the whole material, so it cannot order two layers of the same material: those resolve\n"
+                              "by draw order (the later triangle in the mesh wins an exact tie).\n"
                               "0: none.");
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("World units (scaled with the model). 0: no absorption.");
