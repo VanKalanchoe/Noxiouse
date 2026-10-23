@@ -459,19 +459,6 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     // Fresnel 1, a perfect mirror of the room, the picture behind it gone.
     if (transmission > 0.0 && dot(instance.doubleSided != 0 && !isFrontFace ? -vertIn.normal : vertIn.normal, v) < 0.0)
         n = -n;
-    // Specular anti-aliasing (Tokuyoshi & Kaplanyan 2019, "Improved Geometric Specular Antialiasing"): the roughness widened by how
-    // much the normal turns across the pixel. A smooth normal-mapped pane (the street lanterns' ribbed glass) turned its reflection
-    // rays a long way within a pixel, and which of them met a string light's tiny bulb changed with the camera's sub-pixel jitter:
-    // single-pixel highlights that flickered, under DLSS-RR's transparency layer and over the scene alike. (Whether glass is smooth
-    // enough to tint what is behind it without the color pyramid's blur stays the material's own roughness.)
-    const float materialRoughness = perceptualRoughness;
-    {
-        const float3 dndx = ddx(n);
-        const float3 dndy = ddy(n);
-        const float kernelVariance = 0.25 * (dot(dndx, dndx) + dot(dndy, dndy));
-        alphaRoughness = sqrt(saturate(alphaRoughness * alphaRoughness + min(2.0 * kernelVariance, 0.18)));
-        perceptualRoughness = sqrt(alphaRoughness);
-    }
     float3 reflection = normalize(reflect(-v, n));
     float NdotV = clamp(dot(n, v), 0.001, 1.0);
 
@@ -481,7 +468,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     // minimum roughness the metallic-roughness path clamps to (c_MinRoughness, 0.04) and a little -- below 0.02 no glass ever was,
     // and every pane took the one-tint path. Under DLSS-RR (MESHLET_TRANSPARENCY_LAYER, into RR's input color): the base color's
     // tint alone, every pane's, whatever it bends; the Fresnel share is the transparency layer's opacity.
-    const bool stackedGlass = refraction && instance.thickness <= 0.0 && materialRoughness <= c_MinRoughness + 0.01;
+    const bool stackedGlass = refraction && instance.thickness <= 0.0 && perceptualRoughness <= c_MinRoughness + 0.01;
     if ((pushConstant.meshletCulling & MESHLET_GLASS_MULTIPLY) != 0)
     {
         const float3 fresnel = specularEnvironmentR0 + (1.0 - specularEnvironmentR0) * pow(1.0 - NdotV, 5.0);
