@@ -78,13 +78,13 @@ namespace Nox
 
         m_MainThreadId = std::this_thread::get_id();
         m_WorkerCount = static_cast<uint32_t>(std::max(1, SDL_GetNumLogicalCPUCores() - 1));
-        m_FrameArenas = std::make_unique<FrameArena[]>(GetThreadSlotCount());
-        t_ThreadSlot = GetThreadSlotCount() - 1;
-
         // As many background workers as frame workers (at low OS priority they take what the frame leaves); Background work
-        // leaves a quarter of them (at least one) free for streaming.
+        // leaves a quarter of them (at least one) free for streaming. Set before anything sized by GetThreadSlotCount.
         m_BackgroundWorkerCount = m_WorkerCount;
         m_BackgroundJobLimit = m_BackgroundWorkerCount > 1 ? m_BackgroundWorkerCount - std::max(1u, m_BackgroundWorkerCount / 4) : 1u;
+
+        m_FrameArenas = std::make_unique<FrameArena[]>(GetThreadSlotCount());
+        t_ThreadSlot = GetThreadSlotCount() - 1;
 
         m_ExclusiveKeys = std::make_unique<tf::Semaphore[]>(MaxExclusiveKeys);
         for (uint32_t key = 0; key < MaxExclusiveKeys; ++key)
