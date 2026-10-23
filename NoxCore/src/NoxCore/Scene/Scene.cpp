@@ -1145,12 +1145,23 @@ namespace Nox
             entities.clear();
         });
 
-        // 5. This frame's joint matrices.
-        for (entt::entity entity : m_SkinnedMeshEntities)
+        // 5. This frame's joint matrices: built in parallel (each skinned mesh writes its own animator's), handed to the renderer in
+        //    order.
+        const uint32_t skinnedCount = static_cast<uint32_t>(m_SkinnedMeshEntities.size());
+        m_SkinnedBones.resize(skinnedCount);
+        JobSystem::Get().ParallelFor("Skin Matrices", skinnedCount, SkinnedMeshesPerTask, [this](uint32_t, uint32_t begin, uint32_t end)
         {
-            const MeshRegistration& registration = m_MeshRegistrations.at(entity);
-            const std::vector<glm::mat4>* bones = GetBoneTransforms(entity, m_Registry.get<WorldTransformComponent>(entity).WorldMatrix);
-            m_renderer->SetMeshInstancesBones(registration.Instances, bones ? std::span<const glm::mat4>(*bones) : std::span<const glm::mat4>());
+            for (uint32_t index = begin; index < end; ++index)
+            {
+                const entt::entity entity = m_SkinnedMeshEntities[index];
+                m_SkinnedBones[index] = GetBoneTransforms(entity, m_Registry.get<WorldTransformComponent>(entity).WorldMatrix);
+            }
+        });
+        for (uint32_t index = 0; index < skinnedCount; ++index)
+        {
+            const std::vector<glm::mat4>* bones = m_SkinnedBones[index];
+            m_renderer->SetMeshInstancesBones(m_MeshRegistrations.at(m_SkinnedMeshEntities[index]).Instances,
+                                              bones ? std::span<const glm::mat4>(*bones) : std::span<const glm::mat4>());
         }
     }
 
@@ -1439,190 +1450,236 @@ namespace Nox
         if (!m_FrameInput.StepAnimation)
             return;
 
-        const float ts = m_FrameInput.Timestep;
-        std::vector<AssetHandle>& missingAssets = m_MissingAssets.Local();
+        // Animators update in parallel (Unreal evaluates each skeletal mesh's animation as a task of its own). The ones that write into
+        // the same node table -- one imported model's joints and nodes: its skinned meshes in graph mode, its node clips, root motion on
+        // its nodes -- update one after another in one task, in registry order as before; any other two write different entities.
         auto view = m_Registry.view<AnimatorComponent>();
+        m_AnimatorOrder.clear();
         for (auto entity : view)
         {
-            auto& animatorComp = view.get<AnimatorComponent>(entity);
+            const AnimatorComponent& animator = view.get<AnimatorComponent>(entity);
+            if (animator.NodeEntities.empty())
+                m_AnimatorOrder.push_back({ false, static_cast<uint64_t>(entt::to_integral(entity)), entity });
+            else
+                m_AnimatorOrder.push_back({ true, static_cast<uint64_t>(animator.NodeEntities.front()), entity });
+        }
+        if (m_AnimatorOrder.empty())
+            return;
+        std::stable_sort(m_AnimatorOrder.begin(), m_AnimatorOrder.end(), [](const AnimatorTask& a, const AnimatorTask& b)
+        {
+            return a.SharesNodeTable != b.SharesNodeTable ? a.SharesNodeTable < b.SharesNodeTable : a.Key < b.Key;
+        });
+        m_AnimatorGroups.clear();
+        for (uint32_t index = 0; index < m_AnimatorOrder.size(); ++index)
+        {
+            if (index == 0 || m_AnimatorOrder[index].SharesNodeTable != m_AnimatorOrder[index - 1].SharesNodeTable ||
+                m_AnimatorOrder[index].Key != m_AnimatorOrder[index - 1].Key)
+                m_AnimatorGroups.push_back(index);
+        }
+        m_AnimatorGroups.push_back(static_cast<uint32_t>(m_AnimatorOrder.size()));
 
-            // 1. Sync Animation sequence from AssetHandle if assigned
-            if (animatorComp.Animation != 0)
+        // The pools the animators look components up in, made before the tasks: looking up a component whose pool does not exist yet
+        // creates the pool, which is not thread-safe.
+        m_Registry.storage<TransformComponent>();
+        m_Registry.storage<DirtyTransformComponent>();
+        m_Registry.storage<WorldTransformComponent>();
+        m_Registry.storage<CharacterController3DComponent>();
+
+        const float ts = m_FrameInput.Timestep;
+        const uint32_t groupCount = static_cast<uint32_t>(m_AnimatorGroups.size() - 1);
+        JobSystem::Get().ParallelFor("Animators", groupCount, AnimatorGroupsPerTask, [&](uint32_t, uint32_t begin, uint32_t end)
+        {
+            for (uint32_t group = begin; group < end; ++group)
             {
-                Ref<AnimationSequence> currentAnim = animatorComp.Animator.GetCurrentAnimation();
-                if (!currentAnim || currentAnim->Handle != animatorComp.Animation)
+                for (uint32_t index = m_AnimatorGroups[group]; index < m_AnimatorGroups[group + 1]; ++index)
                 {
-                    // The animator keeps a Ref to the clip it plays.
-                    Ref<AnimationSequence> anim(AssetManager::FindLoadedAsset<AnimationSequence>(animatorComp.Animation));
-                    if (!anim)
-                        missingAssets.push_back(animatorComp.Animation);
-                    if (anim)
-                    {
-                        anim->Handle = animatorComp.Animation;
-                        animatorComp.Animator.PlayAnimation(anim);
-                        if (!animatorComp.Playing)
-                            animatorComp.Animator.Pause();
-                    }
+                    const entt::entity entity = m_AnimatorOrder[index].Entity;
+                    UpdateAnimator(entity, view.get<AnimatorComponent>(entity), ts);
                 }
             }
+        });
+    }
 
-            // 1b. Sync the graph asset if assigned (graph mode). Animation and Graph are meant to be mutually
-            // exclusive per entity; if both are set, Graph takes precedence below.
-            animatorComp.FiredNotifies.clear();
-            if (animatorComp.Graph != 0)
+    void Scene::UpdateAnimator(entt::entity entity, AnimatorComponent& animatorComp, float ts)
+    {
+        std::vector<AssetHandle>& missingAssets = m_MissingAssets.Local();
+
+        // 1. Sync Animation sequence from AssetHandle if assigned
+        if (animatorComp.Animation != 0)
+        {
+            Ref<AnimationSequence> currentAnim = animatorComp.Animator.GetCurrentAnimation();
+            if (!currentAnim || currentAnim->Handle != animatorComp.Animation)
             {
-                animatorComp.GraphInstance.Sync(animatorComp.Graph, missingAssets);
-                animatorComp.GraphInstance.RootMotion = animatorComp.RootMotion;
-                animatorComp.GraphInstance.RootBone = animatorComp.RootBone;
-            }
-
-            // Single-clip mode's playhead before this step: the notifies it crosses fire like in graph mode.
-            const bool clipMode = animatorComp.Graph == 0 && animatorComp.Animation != 0;
-            const float clipTimeBefore = animatorComp.Animator.GetCurrentAnimationTime();
-            const Ref<AnimationSequence> clipBefore = animatorComp.Animator.GetCurrentAnimation();
-
-            // 2. Legacy self-contained skeleton evaluation. Imports with a node table skin from the
-            // joint entities instead (see GetBoneTransforms), so the skeleton isn't evaluated twice.
-            if (animatorComp.Skeleton != 0 && animatorComp.NodeEntities.empty())
-            {
-                const Skeleton* skeleton = AssetManager::FindLoadedAsset<Skeleton>(animatorComp.Skeleton);
-                if (!skeleton)
-                    missingAssets.push_back(animatorComp.Skeleton);
-                if (skeleton && !skeleton->AllNodes.empty())
+                // The animator keeps a Ref to the clip it plays.
+                Ref<AnimationSequence> anim(AssetManager::FindLoadedAsset<AnimationSequence>(animatorComp.Animation));
+                if (!anim)
+                    missingAssets.push_back(animatorComp.Animation);
+                if (anim)
                 {
-                    if (animatorComp.Graph != 0)
-                    {
-                        if (const AnimPose* pose = animatorComp.GraphInstance.Evaluate(ts, animatorComp.Playing, *skeleton))
-                            ApplyPoseToSkeleton(*pose, *skeleton, animatorComp.GraphFinalBoneTransforms, &animatorComp.GraphGlobalMatrices);
-                    }
-                    else if (animatorComp.Playing)
-                        animatorComp.Animator.Update(ts, *skeleton);
-                    else
-                        animatorComp.Animator.UpdateTransforms(*skeleton);
+                    anim->Handle = animatorComp.Animation;
+                    animatorComp.Animator.PlayAnimation(anim);
+                    if (!animatorComp.Playing)
+                        animatorComp.Animator.Pause();
                 }
             }
+        }
 
-            // Graph mode's node-table skinning path: the whole evaluated pose (every joint, not just one
-            // clip's channels) written straight to ECS transforms -- the same joint-entity path
-            // Animation/NodeEntities already drives, so GetBoneTransforms doesn't need to know which mode
-            // produced them.
-            if (!animatorComp.NodeEntities.empty() && animatorComp.Graph != 0 && animatorComp.Skeleton != 0)
+        // 1b. Sync the graph asset if assigned (graph mode). Animation and Graph are meant to be mutually
+        // exclusive per entity; if both are set, Graph takes precedence below.
+        animatorComp.FiredNotifies.clear();
+        if (animatorComp.Graph != 0)
+        {
+            animatorComp.GraphInstance.Sync(animatorComp.Graph, missingAssets);
+            animatorComp.GraphInstance.RootMotion = animatorComp.RootMotion;
+            animatorComp.GraphInstance.RootBone = animatorComp.RootBone;
+        }
+
+        // Single-clip mode's playhead before this step: the notifies it crosses fire like in graph mode.
+        const bool clipMode = animatorComp.Graph == 0 && animatorComp.Animation != 0;
+        const float clipTimeBefore = animatorComp.Animator.GetCurrentAnimationTime();
+        const Ref<AnimationSequence> clipBefore = animatorComp.Animator.GetCurrentAnimation();
+
+        // 2. Legacy self-contained skeleton evaluation. Imports with a node table skin from the
+        // joint entities instead (see GetBoneTransforms), so the skeleton isn't evaluated twice.
+        if (animatorComp.Skeleton != 0 && animatorComp.NodeEntities.empty())
+        {
+            const Skeleton* skeleton = AssetManager::FindLoadedAsset<Skeleton>(animatorComp.Skeleton);
+            if (!skeleton)
+                missingAssets.push_back(animatorComp.Skeleton);
+            if (skeleton && !skeleton->AllNodes.empty())
             {
-                const Skeleton* skeleton = AssetManager::FindLoadedAsset<Skeleton>(animatorComp.Skeleton);
-                if (!skeleton)
-                    missingAssets.push_back(animatorComp.Skeleton);
-                if (skeleton && !skeleton->AllNodes.empty())
+                if (animatorComp.Graph != 0)
                 {
                     if (const AnimPose* pose = animatorComp.GraphInstance.Evaluate(ts, animatorComp.Playing, *skeleton))
-                    {
-                        size_t nodeCount = std::min(animatorComp.NodeEntities.size(), pose->LocalTransforms.size());
-                        for (size_t nodeIndex = 0; nodeIndex < nodeCount; nodeIndex++)
-                        {
-                            auto it = m_EntityMap.find(animatorComp.NodeEntities[nodeIndex]);
-                            if (it == m_EntityMap.end() || !m_Registry.valid(it->second) ||
-                                !m_Registry.all_of<TransformComponent>(it->second))
-                                continue;
-
-                            auto& transform = m_Registry.get<TransformComponent>(it->second);
-                            const Animator::NodeTransform& t = pose->LocalTransforms[nodeIndex];
-                            transform.Translation = t.Translation;
-                            transform.Rotation = glm::eulerAngles(t.Rotation);
-                            transform.Scale = t.Scale;
-                            if (auto* dirty = m_Registry.try_get<DirtyTransformComponent>(it->second))
-                                dirty->isDirty = true;
-                        }
-                    }
+                        ApplyPoseToSkeleton(*pose, *skeleton, animatorComp.GraphFinalBoneTransforms, &animatorComp.GraphGlobalMatrices);
                 }
+                else if (animatorComp.Playing)
+                    animatorComp.Animator.Update(ts, *skeleton);
+                else
+                    animatorComp.Animator.UpdateTransforms(*skeleton);
             }
+        }
 
-            // What the graph's evaluation produced besides the pose: notifies for the scripts, and root motion moving this
-            // entity (the skeleton's model space is this entity's: rotate and scale the step into its parent's space).
-            // A character controller owns the entity's translation (it would overwrite the step): it gets the root motion as
-            // a velocity instead and moves by it in the next physics steps, colliding like any other movement.
-            auto* character = m_Registry.try_get<CharacterController3DComponent>(entity);
-            if (character)
-                character->RootMotionVelocity = glm::vec3(0.0f);
-            if (animatorComp.Graph != 0 && animatorComp.Playing)
+        // Graph mode's node-table skinning path: the whole evaluated pose (every joint, not just one
+        // clip's channels) written straight to ECS transforms -- the same joint-entity path
+        // Animation/NodeEntities already drives, so GetBoneTransforms doesn't need to know which mode
+        // produced them.
+        if (!animatorComp.NodeEntities.empty() && animatorComp.Graph != 0 && animatorComp.Skeleton != 0)
+        {
+            const Skeleton* skeleton = AssetManager::FindLoadedAsset<Skeleton>(animatorComp.Skeleton);
+            if (!skeleton)
+                missingAssets.push_back(animatorComp.Skeleton);
+            if (skeleton && !skeleton->AllNodes.empty())
             {
-                animatorComp.FiredNotifies = animatorComp.GraphInstance.GetFiredNotifies();
-                const glm::vec3 rootMotion = animatorComp.GraphInstance.ConsumeRootMotion();
-                if (rootMotion != glm::vec3(0.0f) && character && ts > 0.0f)
+                if (const AnimPose* pose = animatorComp.GraphInstance.Evaluate(ts, animatorComp.Playing, *skeleton))
                 {
-                    const auto* world = m_Registry.try_get<WorldTransformComponent>(entity);
-                    const glm::mat3 toWorld = world ? glm::mat3(world->WorldMatrix)
-                                                    : glm::mat3(m_Registry.get<TransformComponent>(entity).GetTransform());
-                    character->RootMotionVelocity = toWorld * rootMotion / ts;
-                }
-                else if (rootMotion != glm::vec3(0.0f) && m_Registry.all_of<TransformComponent>(entity))
-                {
-                    auto& transform = m_Registry.get<TransformComponent>(entity);
-                    transform.Translation += glm::mat3(transform.GetTransform()) * rootMotion;
-                    if (auto* dirty = m_Registry.try_get<DirtyTransformComponent>(entity))
-                        dirty->isDirty = true;
-                }
-            }
-
-            // Node/object animations write the evaluated .nanim TRS directly to ECS transforms.
-            if (!animatorComp.NodeEntities.empty() && animatorComp.Graph == 0 && animatorComp.Animation != 0)
-            {
-                Ref<AnimationSequence> animation(AssetManager::FindLoadedAsset<AnimationSequence>(animatorComp.Animation));
-                if (!animation)
-                    missingAssets.push_back(animatorComp.Animation);
-                if (animation)
-                {
-                    // Only the nodes this clip's channels target. The node table covers the whole
-                    // import (thousands of nodes for Bistro); rewriting and dirtying all of them for
-                    // every animator every frame would re-propagate the entire scene graph.
-                    std::vector<std::pair<int32_t, entt::entity>> targets;
-                    targets.reserve(animation->Channels.size());
-                    for (const auto& channel : animation->Channels)
+                    size_t nodeCount = std::min(animatorComp.NodeEntities.size(), pose->LocalTransforms.size());
+                    for (size_t nodeIndex = 0; nodeIndex < nodeCount; nodeIndex++)
                     {
-                        int32_t nodeIndex = channel.TargetNodeIndex;
-                        if (nodeIndex < 0 || nodeIndex >= static_cast<int32_t>(animatorComp.NodeEntities.size()))
-                            continue;
                         auto it = m_EntityMap.find(animatorComp.NodeEntities[nodeIndex]);
                         if (it == m_EntityMap.end() || !m_Registry.valid(it->second) ||
                             !m_Registry.all_of<TransformComponent>(it->second))
                             continue;
-                        targets.emplace_back(nodeIndex, it->second);
-                    }
 
-                    int32_t maxTarget = -1;
-                    for (const auto& [nodeIndex, nodeEntity] : targets)
-                        maxTarget = std::max(maxTarget, nodeIndex);
-
-                    std::vector<Animator::NodeTransform> nodeTransforms(static_cast<size_t>(maxTarget + 1));
-                    for (const auto& [nodeIndex, nodeEntity] : targets)
-                    {
-                        const auto& transform = m_Registry.get<TransformComponent>(nodeEntity);
-                        nodeTransforms[nodeIndex].Translation = transform.Translation;
-                        nodeTransforms[nodeIndex].Rotation = glm::quat(transform.Rotation);
-                        nodeTransforms[nodeIndex].Scale = transform.Scale;
-                    }
-
-                    animatorComp.Animator.UpdateNodeAnimation(ts, animation, nodeTransforms);
-                    for (const auto& [nodeIndex, nodeEntity] : targets)
-                    {
-                        auto& transform = m_Registry.get<TransformComponent>(nodeEntity);
-                        transform.Translation = nodeTransforms[nodeIndex].Translation;
-                        transform.Rotation = glm::eulerAngles(nodeTransforms[nodeIndex].Rotation);
-                        transform.Scale = nodeTransforms[nodeIndex].Scale;
-                        if (auto* dirty = m_Registry.try_get<DirtyTransformComponent>(nodeEntity))
+                        auto& transform = m_Registry.get<TransformComponent>(it->second);
+                        const Animator::NodeTransform& t = pose->LocalTransforms[nodeIndex];
+                        transform.Translation = t.Translation;
+                        transform.Rotation = glm::eulerAngles(t.Rotation);
+                        transform.Scale = t.Scale;
+                        if (auto* dirty = m_Registry.try_get<DirtyTransformComponent>(it->second))
                             dirty->isDirty = true;
                     }
                 }
             }
+        }
 
-            // Single-clip mode's notifies: what the playhead crossed this step (across the end when it looped).
-            if (clipMode && animatorComp.Playing && clipBefore && clipBefore == animatorComp.Animator.GetCurrentAnimation())
+        // What the graph's evaluation produced besides the pose: notifies for the scripts, and root motion moving this
+        // entity (the skeleton's model space is this entity's: rotate and scale the step into its parent's space).
+        // A character controller owns the entity's translation (it would overwrite the step): it gets the root motion as
+        // a velocity instead and moves by it in the next physics steps, colliding like any other movement.
+        auto* character = m_Registry.try_get<CharacterController3DComponent>(entity);
+        if (character)
+            character->RootMotionVelocity = glm::vec3(0.0f);
+        if (animatorComp.Graph != 0 && animatorComp.Playing)
+        {
+            animatorComp.FiredNotifies = animatorComp.GraphInstance.GetFiredNotifies();
+            const glm::vec3 rootMotion = animatorComp.GraphInstance.ConsumeRootMotion();
+            if (rootMotion != glm::vec3(0.0f) && character && ts > 0.0f)
             {
-                const float clipTimeAfter = animatorComp.Animator.GetCurrentAnimationTime();
-                if (clipTimeAfter != clipTimeBefore)
+                const auto* world = m_Registry.try_get<WorldTransformComponent>(entity);
+                const glm::mat3 toWorld = world ? glm::mat3(world->WorldMatrix)
+                                                : glm::mat3(m_Registry.get<TransformComponent>(entity).GetTransform());
+                character->RootMotionVelocity = toWorld * rootMotion / ts;
+            }
+            else if (rootMotion != glm::vec3(0.0f) && m_Registry.all_of<TransformComponent>(entity))
+            {
+                auto& transform = m_Registry.get<TransformComponent>(entity);
+                transform.Translation += glm::mat3(transform.GetTransform()) * rootMotion;
+                if (auto* dirty = m_Registry.try_get<DirtyTransformComponent>(entity))
+                    dirty->isDirty = true;
+            }
+        }
+
+        // Node/object animations write the evaluated .nanim TRS directly to ECS transforms.
+        if (!animatorComp.NodeEntities.empty() && animatorComp.Graph == 0 && animatorComp.Animation != 0)
+        {
+            Ref<AnimationSequence> animation(AssetManager::FindLoadedAsset<AnimationSequence>(animatorComp.Animation));
+            if (!animation)
+                missingAssets.push_back(animatorComp.Animation);
+            if (animation)
+            {
+                // Only the nodes this clip's channels target. The node table covers the whole
+                // import (thousands of nodes for Bistro); rewriting and dirtying all of them for
+                // every animator every frame would re-propagate the entire scene graph.
+                std::vector<std::pair<int32_t, entt::entity>> targets;
+                targets.reserve(animation->Channels.size());
+                for (const auto& channel : animation->Channels)
                 {
-                    const bool forward = animatorComp.Animator.GetPlaybackSpeed() >= 0.0f;
-                    const bool wrapped = forward ? clipTimeAfter < clipTimeBefore : clipTimeAfter > clipTimeBefore;
-                    CollectCrossedNotifies(*clipBefore, clipTimeBefore, clipTimeAfter, wrapped, animatorComp.FiredNotifies);
+                    int32_t nodeIndex = channel.TargetNodeIndex;
+                    if (nodeIndex < 0 || nodeIndex >= static_cast<int32_t>(animatorComp.NodeEntities.size()))
+                        continue;
+                    auto it = m_EntityMap.find(animatorComp.NodeEntities[nodeIndex]);
+                    if (it == m_EntityMap.end() || !m_Registry.valid(it->second) ||
+                        !m_Registry.all_of<TransformComponent>(it->second))
+                        continue;
+                    targets.emplace_back(nodeIndex, it->second);
                 }
+
+                int32_t maxTarget = -1;
+                for (const auto& [nodeIndex, nodeEntity] : targets)
+                    maxTarget = std::max(maxTarget, nodeIndex);
+
+                std::vector<Animator::NodeTransform> nodeTransforms(static_cast<size_t>(maxTarget + 1));
+                for (const auto& [nodeIndex, nodeEntity] : targets)
+                {
+                    const auto& transform = m_Registry.get<TransformComponent>(nodeEntity);
+                    nodeTransforms[nodeIndex].Translation = transform.Translation;
+                    nodeTransforms[nodeIndex].Rotation = glm::quat(transform.Rotation);
+                    nodeTransforms[nodeIndex].Scale = transform.Scale;
+                }
+
+                animatorComp.Animator.UpdateNodeAnimation(ts, animation, nodeTransforms);
+                for (const auto& [nodeIndex, nodeEntity] : targets)
+                {
+                    auto& transform = m_Registry.get<TransformComponent>(nodeEntity);
+                    transform.Translation = nodeTransforms[nodeIndex].Translation;
+                    transform.Rotation = glm::eulerAngles(nodeTransforms[nodeIndex].Rotation);
+                    transform.Scale = nodeTransforms[nodeIndex].Scale;
+                    if (auto* dirty = m_Registry.try_get<DirtyTransformComponent>(nodeEntity))
+                        dirty->isDirty = true;
+                }
+            }
+        }
+
+        // Single-clip mode's notifies: what the playhead crossed this step (across the end when it looped).
+        if (clipMode && animatorComp.Playing && clipBefore && clipBefore == animatorComp.Animator.GetCurrentAnimation())
+        {
+            const float clipTimeAfter = animatorComp.Animator.GetCurrentAnimationTime();
+            if (clipTimeAfter != clipTimeBefore)
+            {
+                const bool forward = animatorComp.Animator.GetPlaybackSpeed() >= 0.0f;
+                const bool wrapped = forward ? clipTimeAfter < clipTimeBefore : clipTimeAfter > clipTimeBefore;
+                CollectCrossedNotifies(*clipBefore, clipTimeBefore, clipTimeAfter, wrapped, animatorComp.FiredNotifies);
             }
         }
     }

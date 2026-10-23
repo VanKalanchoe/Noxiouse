@@ -20,6 +20,7 @@
 namespace Nox
 {
     class Entity; // Forward declaration
+    struct AnimatorComponent;
     class IPhysics3DScene;
     class SceneLoader;
     class Timeline;
@@ -160,6 +161,8 @@ namespace Nox
         void UpdatePhysics2D();
         void UpdatePhysics3D();
         void UpdateAnimators();
+        // One animator's step (a task of UpdateAnimators).
+        void UpdateAnimator(entt::entity entity, AnimatorComponent& animator, float ts);
         // Places the entities with a BoneSocketComponent on their bone (after the animators).
         void UpdateBoneSockets();
         // Sequencer timelines (TimelinePlayerComponent): played in Play and Simulate from their start.
@@ -234,6 +237,18 @@ namespace Nox
         uint64_t m_SceneID = 0;
         std::unordered_map<entt::entity, MeshRegistration> m_MeshRegistrations;
         std::vector<entt::entity> m_SkinnedMeshEntities;
+        std::vector<const std::vector<glm::mat4>*> m_SkinnedBones; // SyncGpuScene: each skinned mesh's joint matrices this frame
+        static constexpr uint32_t SkinnedMeshesPerTask = 8;
+        // UpdateAnimators: the animators by node table (SharesNodeTable, Key: the table's first node), and where each group starts.
+        struct AnimatorTask
+        {
+            bool SharesNodeTable = false;
+            uint64_t Key = 0; // the table's first node, else the entity
+            entt::entity Entity = entt::null;
+        };
+        static constexpr uint32_t AnimatorGroupsPerTask = 2;
+        std::vector<AnimatorTask> m_AnimatorOrder;
+        std::vector<uint32_t> m_AnimatorGroups;
         std::vector<entt::entity> m_PendingMeshEntities; // (re)registered at the next sync
         WorkerLocal<std::vector<entt::entity>> m_MovedEntities; // world transform changed (transform propagation)
 

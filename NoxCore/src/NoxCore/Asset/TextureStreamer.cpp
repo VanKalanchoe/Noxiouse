@@ -373,7 +373,7 @@ namespace Nox
         if (uploadMipCount > 0)
         {
             // From the file straight into staging, like a load.
-            reallocation->Read = JobSystem::Get().AsyncIO("Read Texture Mips",
+            reallocation->Read = JobSystem::Get().AsyncIO("Read Texture Mips", JobPriority::High,
                 [header = texture.Header, newFirst, uploadMipCount, destination = reallocation->Upload.Staging.data](const CancellationToken&)
                 {
                     return TextureImporter::ReadCookedTextureMips(header, newFirst, uploadMipCount, destination);

@@ -579,7 +579,7 @@ namespace Nox
             if (levelGroup)
                 ++levelGroup->Remaining;
             PendingSplitImport pending;
-            pending.Job = JobSystem::Get().Async("Cook Split Meshes",
+            pending.Job = JobSystem::Get().Async("Cook Split Meshes", JobPriority::Background,
                 [assetDirectory = Project::GetActiveAssetDirectory(), materialBase, directory, skinnedMeshes, total, done, level, placeInLevel](const CancellationToken&)
                 {
                     return MeshImporter::CookSplitMeshes(assetDirectory, materialBase, directory, skinnedMeshes, total.get(), done.get(),

@@ -564,6 +564,7 @@ Process memory stays in `Utils/PlatformUtils.cpp` because SDL3 has no per-proces
 | `FrameArena` | `Tasks/FrameArena.{h,cpp}` | Linear allocator per thread slot, reset by `Application` at the frame sync point after `drawFrame`. Frame graph tasks only (async work outlives the frame). |
 | `SystemGraph` + `ComponentAccess` | `Tasks/SystemGraph.{h,cpp}` | D11 decided: systems declare `Read<...>()` / `Write<...>()` (EnTT `type_hash`; tag types for non-component resources). A system runs after every earlier-registered system it conflicts with; others run in parallel. `RunAfter` for non-data ordering; `DumpDot` via `tf::Taskflow::dump`. |
 | `EntityCommandBuffer` | `Scene/EntityCommandBuffer.{h,cpp}` | Create/destroy entity, add/replace/remove component recorded into the recording thread's frame arena; applied by the Scene on the main thread in slot order. |
+| Priorities (built 2026-10-23) | `JobPriority` in `JobSystem.h` | Taskflow has no priorities, and a worker waiting inside a frame task (`corun`) runs any task it finds, a multi-second cook included, so a cap on the shared pool would not protect the frame. As Unreal does with its background workers: **High** work (Jolt physics jobs) runs on the frame workers at once; **Normal** (scene reading, asset reads and imports) and **Background** (texture / mesh cooking, split-mesh cooking) are queued by JobSystem and run on a second executor of as many **background workers** as frame workers at **low OS thread priority** (`SDL_SetCurrentThreadPriority`), Normal first, Background on at most three quarters of them so streaming keeps room. A `ParallelFor` inside queued work keeps its deterministic chunks but runs them on the background workers its priority may still take (none: the calling thread runs them all). The IO executor takes queued reads by priority too: High reads (texture mip streaming) start at once, Normal reads wait for a free IO worker, Background reads use one. Every `Async` / `AsyncIO` names its priority. `SceneLoader` reads through `Async(Normal)` instead of a thread of its own, sharing only the parse result with the job (a level dropped mid-read no longer waits for it). Not built: per-frame time budgets for applying results on the main thread beyond the existing upload / publish budgets, cancelling queued work by owner. |
 | Worker NRI command pools | Phase 2 | Designed with render-graph partition recording (submit order, per-buffer GPU timestamps, barrier state across partitions); they will live in `WorkerLocal`. |
 
 ### 5.3 Frame Pipeline (Main Thread + Frame Graph)
@@ -604,7 +605,12 @@ Async lane  : asset IO → decode → upload staging (tasks outside the frame gr
   (Phase 2), so the scene runs two `SystemGraph`s from its `OnUpdate*`:
   - **Scene Update:** Physics 2D → Animation → Transform Propagation (roots serial, root-child subtrees
     in a `ParallelFor`), ordered by declared access; then the scene sync point (command buffers, missing
-    assets).
+    assets). **Animation is parallel per animator (2026-10-23):** animators are grouped by the node table they
+    write into (one imported model's joint and node entities; an animator without one is its own group), a group
+    updates in registry order inside one task and groups run in a `ParallelFor`, so no two tasks write the same
+    entity; the component pools the animators look up are created before the tasks (EnTT creates a missing pool
+    on lookup). The skinned meshes' joint matrices (`GetBoneTransforms`) are built in a `ParallelFor` too and
+    handed to the renderer in order.
   - main thread: primary camera → `Renderer::BeginScene` (may recreate render-resolution resources).
   - **Scene Submit:** Submit Meshes (`ParallelFor` over mesh entities; each chunk fills its own
     `MeshSubmissionChunk`, merged in chunk order by `Renderer::EndMeshSubmission`, so instance order equals

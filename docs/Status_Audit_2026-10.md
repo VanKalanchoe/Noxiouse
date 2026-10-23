@@ -125,7 +125,9 @@ for history. File references are to the code as of this audit.
 - No shipping configuration (stats and logging always compiled in).
 
 **Engine architecture and performance** (Engine plan)
-- Async compute queue; JobSystem priorities / budgets; overlapped IO; parallel animation; frame pipelining.
+- Async compute queue; overlapped IO; frame pipelining (Engine plan §5.3: an option, only once the Profiler window shows Game Update +
+  Render Prepare over the frame budget). (2026-10-23: JobSystem priorities -- queued work on low-priority background workers --,
+  parallel animation and joint matrices, Engine plan §5.2.6 / §5.3.)
 - Geometry / cluster page streaming (6b, paused), RT fallback LOD (reverted), discrete LOD for small meshes, world streaming
   (6c), virtual texturing, DirectStorage, IoStore-like containers.
 - Hard memory budgets and eviction, out-of-memory handling, sparse binding, BLAS sub-allocation / eviction, RT instance culling.

@@ -42,7 +42,7 @@ namespace Nox {
     void NoxJoltJobSystem::QueueJob(Job* inJob)
     {
         inJob->AddRef();
-        ::Nox::JobSystem::Get().Async("JoltPhysicsJob", [inJob](const CancellationToken&)
+        ::Nox::JobSystem::Get().Async("JoltPhysicsJob", ::Nox::JobPriority::High, [inJob](const CancellationToken&)
         {
             inJob->Execute();
             inJob->Release();

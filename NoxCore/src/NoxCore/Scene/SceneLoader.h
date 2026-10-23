@@ -1,22 +1,21 @@
 #pragma once
-#include <atomic>
 #include <cstddef>
 #include <filesystem>
 #include <memory>
 #include <string>
-#include <thread>
 #include <vector>
 
 #include "NoxCore/Asset/Asset.h"
 #include "NoxCore/Core/Ref.h"
 #include "NoxCore/Core/UUID.h"
+#include "NoxCore/Tasks/JobSystem.h"
 
 namespace Nox
 {
     class Scene;
 
-    // Opens a scene file without stopping the program. The file is read and parsed (YAML: most of a large scene's cost) on a thread of
-    // its own; the main thread then creates the entities in slices of a few milliseconds a frame (Step), into a new scene nothing
+    // Opens a scene file without stopping the program. The file is read and parsed (YAML: most of a large scene's cost) as a JobSystem
+    // job (Normal priority, a background worker); the main thread then creates the entities in slices of a few milliseconds a frame (Step), into a new scene nothing
     // draws or updates yet. The caller swaps it in once Step says it is complete, and shows Progress meanwhile.
     //
     // A scene in its runtime form (a packaged game's) is read whole in the last Step: it is not text to parse.
@@ -29,7 +28,7 @@ namespace Nox
     public:
         explicit SceneLoader(std::filesystem::path path);
         SceneLoader(std::filesystem::path path, Scene& into, AssetHandle level);
-        ~SceneLoader(); // waits for the reading thread (a loader dropped before it finished)
+        ~SceneLoader(); // a read still going on finishes on its own (it shares only the parse result with the loader)
 
         SceneLoader(const SceneLoader&) = delete;
         SceneLoader& operator=(const SceneLoader&) = delete;
@@ -50,9 +49,8 @@ namespace Nox
         struct Parsed; // the YAML document (kept out of this header)
 
         std::filesystem::path m_Path;
-        std::thread m_Thread;
-        std::atomic<bool> m_ReadDone{ false };
-        std::unique_ptr<Parsed> m_Parsed;
+        std::shared_ptr<Parsed> m_Parsed; // shared with the reading job
+        TaskFuture<void> m_Read;
         Ref<Scene> m_Scene;
         Scene* m_Into = nullptr; // a level's scene (additive), else m_Scene
         AssetHandle m_Level = 0;

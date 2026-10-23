@@ -12,7 +12,7 @@
 
 namespace Nox
 {
-    // Written by the reading thread only before m_ReadDone is set, read by the main thread only after.
+    // Written by the reading job only before it completes (m_Read ready), read by the main thread only after.
     struct SceneLoader::Parsed
     {
         std::string Bytes;      // a runtime scene's bytes (read whole on the main thread)
@@ -24,14 +24,14 @@ namespace Nox
     };
 
     SceneLoader::SceneLoader(std::filesystem::path path)
-        : m_Path(std::move(path)), m_Parsed(std::make_unique<Parsed>()), m_Scene(CreateRef<Scene>())
+        : m_Path(std::move(path)), m_Parsed(std::make_shared<Parsed>()), m_Scene(CreateRef<Scene>())
     {
         m_Into = m_Scene.get();
         StartReading();
     }
 
     SceneLoader::SceneLoader(std::filesystem::path path, Scene& into, AssetHandle level)
-        : m_Path(std::move(path)), m_Parsed(std::make_unique<Parsed>()), m_Into(&into), m_Level(level)
+        : m_Path(std::move(path)), m_Parsed(std::make_shared<Parsed>()), m_Into(&into), m_Level(level)
     {
         StartReading();
     }
@@ -39,11 +39,13 @@ namespace Nox
     void SceneLoader::StartReading()
     {
         const bool additive = m_Level != 0;
-        m_Thread = std::thread([this, additive]()
+        m_Read = JobSystem::Get().Async("Read Scene", JobPriority::Normal, [shared = m_Parsed, path = m_Path, additive](const CancellationToken& token)
         {
-            Parsed& parsed = *m_Parsed;
+            if (token.IsCancelled()) // (the loader is gone)
+                return;
+            Parsed& parsed = *shared;
             std::string bytes;
-            if (!VFS::ReadText(m_Path, bytes))
+            if (!VFS::ReadText(path, bytes))
                 parsed.Error = "could not open it";
             else if (SceneSerializer::IsRuntimeScene(bytes) && !additive)
             {
@@ -51,7 +53,7 @@ namespace Nox
                 parsed.Runtime = true;
                 parsed.Ok = true;
             }
-            else if (SceneSerializer::IsRuntimeScene(bytes) && !SceneSerializer::RuntimeSceneText(bytes, m_Path.string(), bytes))
+            else if (SceneSerializer::IsRuntimeScene(bytes) && !SceneSerializer::RuntimeSceneText(bytes, path.string(), bytes))
                 parsed.Error = "not a runtime scene this build reads";
             else
             {
@@ -71,24 +73,20 @@ namespace Nox
                     parsed.Error = exception.what();
                 }
             }
-            m_ReadDone.store(true, std::memory_order_release);
         });
     }
 
     SceneLoader::~SceneLoader()
     {
-        if (m_Thread.joinable())
-            m_Thread.join();
+        m_Read.Cancel();
     }
 
     bool SceneLoader::Step(double budgetMs)
     {
         if (m_Failed)
             return true;
-        if (!m_ReadDone.load(std::memory_order_acquire))
+        if (!m_Read.IsReady())
             return false;
-        if (m_Thread.joinable())
-            m_Thread.join();
 
         Parsed& parsed = *m_Parsed;
         if (!parsed.Ok)
@@ -175,7 +173,7 @@ namespace Nox
 
     std::string SceneLoader::GetStage() const
     {
-        if (!m_ReadDone.load(std::memory_order_acquire))
+        if (!m_Read.IsReady())
             return "Reading " + m_Path.filename().string();
         if (!m_Started)
             return "Preparing " + m_Path.filename().string();
