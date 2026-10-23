@@ -36,13 +36,13 @@ float2 intersection_uv(GpuRayTracingInstance lut, uint primIndex, float2 barycen
 }
 
 // The light a ray lets through a surface it passes, the path tracer's rule (PathTracerBridge.slang Bridge::OccluderTransmittance):
-// ExcludeFromNEE surfaces (RTXPT's window glass) untouched; glass seen through (and any transmission without an RTXPT material file)
+// ExcludeFromNEE surfaces (RTXPT's window and lantern glass) through with their color only; glass seen through (and any transmission without an RTXPT material file)
 // tinted by its transmission and base color; blended surfaces by 1 - alpha; alpha-masked ones cut out; anything else 0. Glass used
 // to let light through untouched: a wall lantern's yellow panes lit the wall with its bulb's white.
 float3 ray_occluder_transmittance(UniformBufferObject* ubo, GpuRayTracingInstance lut, uint primitive, float2 barycentrics)
 {
     if ((lut.pathTracerFlags & PathTracerExcludeFromNEE) != 0)
-        return float3(1.0);
+        return lut.transmissionFactor > 0.0 ? saturate(lut.baseColorFactor.rgb) : float3(1.0);
     if (lut.transmissionFactor > 0.0 &&
         ((lut.pathTracerFlags & PathTracerRtxptMaterial) == 0 || ray_see_through(lut.transmissionFactor, lut.alphaMode)))
         return saturate(lut.transmissionFactor) * saturate(lut.baseColorFactor.rgb) * 0.92;

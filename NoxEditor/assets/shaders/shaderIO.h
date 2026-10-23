@@ -1103,7 +1103,7 @@ STATIC_CONST float AutoExposureDarkAdaptation = 0.6;
 // Path tracer material flags (GpuMaterial / GpuRayTracingInstance::pathTracerFlags), from RTXPT's material files when present.
 STATIC_CONST uint32_t PathTracerThinSet = 1u;         // the material says whether it is thin (else: thin when it has no thickness)
 STATIC_CONST uint32_t PathTracerThin = 2u;            // thin-walled: no refraction, 1 / IoR on both faces (RTXPT ThinSurface)
-STATIC_CONST uint32_t PathTracerExcludeFromNEE = 4u;  // shadow rays pass it untouched (RTXPT ExcludeFromNEE: window glass)
+STATIC_CONST uint32_t PathTracerExcludeFromNEE = 4u;  // shadow rays pass it, by its color only (RTXPT ExcludeFromNEE: window and lantern glass)
 STATIC_CONST uint32_t PathTracerRtxptMaterial = 8u;   // from an RTXPT material file: shadow rays follow RTXPT's rule (block
                                                       // unless ExcludeFromNEE or cut out), not the tinted pass-through
 // RTXPT's PSDDominantDeltaLobe (which of a smooth pane's lobes DLSS-RR's guides follow): neither flag the transmission (0, the
