@@ -1153,6 +1153,9 @@ float scene_exposure(UniformBufferObject* ubo, uint autoExposureTextureIndex, fl
 // inside trees lit up in sunlit speckles.
 STATIC_CONST float RayAlphaTestLod = 0.0;
 STATIC_CONST uint32_t MESHLET_RT_REFRACTION = 8;    // PushConstantMeshlets.meshletCulling: Material_TransparentLit_Mesh traces refraction rays for smooth glass (Hybrid_Renderer_Plan H3)
+// PushConstantMeshlets.meshletCulling: drawn over the upscaled image at display resolution (transparent surfaces after DLSS Ray
+// Reconstruction, Renderer::addTransparentAfterUpscalePass): the non-jittered projection, what is behind already denoised.
+STATIC_CONST uint32_t MESHLET_AFTER_UPSCALE = 16;
 
 struct PushConstantMeshlets
 {

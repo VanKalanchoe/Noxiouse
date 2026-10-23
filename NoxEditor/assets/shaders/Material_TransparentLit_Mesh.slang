@@ -683,8 +683,9 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
             // Under DLSS Ray Reconstruction the scene behind is its raw ray traced lighting (NRD is off), and RR's guides at a glass
             // pixel describe what is seen through it (RTXPT's convention for transmission). A blur mip of that raw image is noise
             // grown into blotches RR takes for detail -- the glass that stayed noisy. A sharp read leaves the noise where the guides
-            // are, for RR to remove; rough glass is a little less blurred.
-            if (ubo->rayReconstructionActive != 0)
+            // are, for RR to remove; rough glass is a little less blurred. Drawn after RR (MESHLET_AFTER_UPSCALE) the scene behind is
+            // already denoised: the blur is the glass's own again.
+            if (ubo->rayReconstructionActive != 0 && (pushConstant.meshletCulling & MESHLET_AFTER_UPSCALE) == 0)
                 lod = min(lod, 1.0);
             SamplerState linearClamp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
             // Through the volume's thickness: what it absorbs on the way (KHR_materials_volume attenuation).

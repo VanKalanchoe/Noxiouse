@@ -41,7 +41,8 @@ void meshMain
     uint globalMeshletIdx = sharedPayload.groupMeshletOffset + localMeshletOffset;
     
     MeshletDraw meshlet = meshletDrawStream[globalMeshletIdx];
-    float4x4 viewProj = mul(ubo.proj, ubo.view);
+    // Drawn over the upscaled image (transparent surfaces after DLSS Ray Reconstruction): without the sub-pixel jitter, as the image is.
+    float4x4 viewProj = mul((pushConstant.meshletCulling & MESHLET_AFTER_UPSCALE) != 0 ? ubo.nonJitteredProj : ubo.proj, ubo.view);
 
     uint hash = globalMeshletIdx * 747796405u + 2891336453u;
     float3 color = float3(

@@ -457,10 +457,9 @@ namespace Nox
         createLightShapesPipeline(false);
         createOutlinePipeline(false);
         if (m_isEditor)
-        {
             createSelectionMaskPipeline(false);
-            createStableEntityDepthPipeline(false);
-        }
+        // The editor's jitter-free display depth, and everyone's for transparent surfaces drawn after DLSS-RR.
+        createStableEntityDepthPipeline(false);
 
         // Visability
         createVisibilityPipeline(false); // <--- ADD THIS
@@ -4536,6 +4535,7 @@ namespace Nox
             addDLSSPass();
             addTAAPass();
             addEntityDepthBlitPass();
+            addTransparentAfterUpscalePass(); // over DLSS-RR's output, on the jitter-free display depth
             addPostProcessPass();
             addOverlay2DPass();
             addSelectionMaskPass();

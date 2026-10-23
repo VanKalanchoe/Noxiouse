@@ -1063,6 +1063,11 @@ namespace Nox
         // particles, addParticlePass).
         const bool oit = !pathTraced && isOITActive() && hasDraws && m_transparentLitOITPipeline && m_unlitOITPipeline && m_oitCompositePipeline &&
                          hasTransparentDraws();
+        // Under DLSS Ray Reconstruction the transparent surfaces are drawn over its output instead (addTransparentAfterUpscalePass): RR
+        // denoises what is behind them with that surface's own guides and motion, and their reflections are not dragged along by it.
+        const bool afterUpscale = !pathTraced && !oit && hasDraws && uniformData.rayReconstructionActive != 0 && m_stableEntityDepthPipeline &&
+                                  hasTransparentDraws();
+        m_frame.transparentAfterUpscale = afterUpscale;
 
         // Shared setup of the passes that draw over the lit scene.
         auto declareForward = [this](RGBuilder& builder, bool lit) { declareForwardInputs(builder, lit); };
@@ -1078,7 +1083,7 @@ namespace Nox
                     builder.ColorTarget(resources.HDRScene, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 1.0f });
                 declareForward(builder, true);
             },
-            [this, res = &resources, drawProbes, skyboxSun, hasDraws, refraction, oit, pathTraced](RGPassContext& context)
+            [this, res = &resources, drawProbes, skyboxSun, hasDraws, refraction, oit, pathTraced, afterUpscale](RGPassContext& context)
             {
                 NRI::CommandBuffer& cmd = context.Cmd();
                 const uint32_t totalDDGIProbes = m_frame.totalDDGIProbes;
@@ -1149,7 +1154,7 @@ namespace Nox
                 }
 
                 // C. TRANSPARENT FORWARD PASS (Back-to-front sorted, Alpha Blending), here unless glass needs the scene first.
-                if (hasDraws && !refraction && !oit && !pathTraced)
+                if (hasDraws && !refraction && !oit && !pathTraced && !afterUpscale)
                 {
                     // Whichever of SSAO/RTAO ran this frame (never both -- see Renderer::m_ssaoEnabled), for the
                     // specular occlusion approximation in Material_TransparentLit_Mesh.slang; every other consumer
@@ -1215,7 +1220,7 @@ namespace Nox
                 }
             });
 
-        if (!refraction && !oit)
+        if ((!refraction && !oit) || afterUpscale)
             return;
 
         if (oit)
@@ -1271,6 +1276,68 @@ namespace Nox
             });
     }
 
+    void Renderer::addTransparentAfterUpscalePass()
+    {
+        if (!m_frame.transparentAfterUpscale || !m_frame.dlssAdded)
+            return;
+        FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
+        const NRI::Extent2D extent = m_frame.outputExtent;
+        if (extent.width == 0 || extent.height == 0)
+            return;
+
+        // What is behind them: RR's denoised, upscaled image (with blur mips, for rough and thick glass).
+        const bool refraction = m_refractionEnabled && m_colorPyramidCopyPipeline && m_colorPyramidDownsamplePipeline && hasTransmissiveDraws();
+        if (refraction)
+            addRefractionSourcePasses(resources.DLSSOutput, extent);
+
+        // The forward transparent pass of addForward3DPass, over RR's output at display resolution: depth-tested against the
+        // jitter-free display depth (addStableEntityDepthPass, which already holds their entity IDs), projected without the jitter
+        // (MESHLET_AFTER_UPSCALE), no screen-space AO (it is the render resolution's and lies on the surface behind).
+        m_renderGraph.AddPass("Forward Transparent (After Upscale)", RGPassFlags::Raster,
+            [&](RGBuilder& builder)
+            {
+                builder.ColorTarget(resources.DLSSOutput, NRI::LoadOP::load, NRI::StoreOP::store);
+                builder.ColorTarget(resources.EntityHi, NRI::LoadOP::load, NRI::StoreOP::store);
+                builder.DepthTarget(resources.DepthHi, NRI::LoadOP::load, NRI::StoreOP::store);
+                builder.SetRenderArea(extent);
+                if (resources.AerialPerspective.IsValid())
+                    builder.Read(resources.AerialPerspective);
+                if (m_frame.ddgiAdded)
+                    ReadDDGI(builder, resources, m_frame.ddgiWriteIndex);
+                if (m_frame.screenProbeGIAdded)
+                {
+                    builder.Read(resources.ScreenProbeGI[m_frame.screenProbeGIWriteIndex]);
+                    builder.Read(resources.ScreenProbeGIDistance);
+                }
+                if (resources.TLAS.IsValid())
+                    builder.Read(resources.TLAS, RGBufferAccess::AccelerationStructureRead);
+                ReadGpuScene(builder, resources);
+                ReadViewDraws(builder, resources.CameraDraws);
+                ReadViewDraws(builder, resources.CameraDraws, true);
+                builder.Read(resources.MipFeedback);
+                builder.Write(resources.MipFeedback);
+                if (refraction)
+                    builder.Read(resources.RefractionSource);
+            },
+            [this, res = &resources, refraction](RGPassContext& context)
+            {
+                NRI::CommandBuffer& cmd = context.Cmd();
+                // After DLSS: NGX may have bound its own descriptors.
+                cmd.bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
+                MeshletDrawCursor cursor = beginMeshletDraws(context, res->CameraDraws);
+                cursor.taskFlags &= ~shaderio::MESHLET_COUNT_TRIANGLES; // the stats count the render-resolution passes
+                cursor.taskFlags |= shaderio::MESHLET_AFTER_UPSCALE;
+                cursor.references.ssaoTextureIndex = 0xFFFFFFFF;
+                if (refraction)
+                {
+                    cursor.references.refractionTextureIndex = context.Slot(res->RefractionSource);
+                    if (m_rtRefractionEnabled && m_rayTracingEnabled)
+                        cursor.taskFlags |= shaderio::MESHLET_RT_REFRACTION;
+                }
+                drawForwardTransparent(cmd, context, res->CameraDraws, cursor);
+            });
+    }
+
     void Renderer::declareForwardInputs(RGBuilder& builder, bool lit)
     {
         const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
@@ -1322,15 +1389,31 @@ namespace Nox
 
     void Renderer::addRefractionSourcePasses()
     {
+        const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
+        addRefractionSourcePasses(resources.HDRScene, m_frame.renderExtent);
+    }
+
+    void Renderer::addRefractionSourcePasses(RGTexture source, NRI::Extent2D extent)
+    {
         FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
-        const RGTexture source = resources.HDRScene;
 
         // The scene behind the glass: the HDR image so far (opaque, unlit, sky) with a mip chain of 2x2 averages (ColorPyramid.slang).
         RGTextureDesc pyramidDesc;
         pyramidDesc.Format = NRI::ImageFormat::R16G16B16A16_SFLOAT;
         pyramidDesc.Usage = NRI::TextureUsage::Storage;
         pyramidDesc.MipLevels = 1;
-        for (uint32_t size = std::max(m_frame.renderExtent.width, m_frame.renderExtent.height); size > 1; size >>= 1)
+        if (extent.width != m_frame.renderExtent.width || extent.height != m_frame.renderExtent.height)
+        {
+            if (extent.width == m_frame.outputExtent.width && extent.height == m_frame.outputExtent.height)
+                pyramidDesc.Size = RGSize::OutputResolution;
+            else
+            {
+                pyramidDesc.Size = RGSize::Absolute;
+                pyramidDesc.Width = extent.width;
+                pyramidDesc.Height = extent.height;
+            }
+        }
+        for (uint32_t size = std::max(extent.width, extent.height); size > 1; size >>= 1)
             ++pyramidDesc.MipLevels;
         resources.RefractionSource = m_renderGraph.CreateTexture("Refraction Source", pyramidDesc);
         const uint32_t mipCount = pyramidDesc.MipLevels;
@@ -1342,17 +1425,19 @@ namespace Nox
                     builder.Read(mip == 0 ? source : resources.RefractionSource);
                     builder.Write(resources.RefractionSource, RGTextureAccess::StorageWrite);
                 },
-                [this, res = &resources, mip, source](RGPassContext& context)
+                [this, res = &resources, mip, source, extent](RGPassContext& context)
                 {
                     NRI::CommandBuffer& cmd = context.Cmd();
+                    // After DLSS (addTransparentAfterUpscalePass): NGX may have bound its own descriptors.
+                    cmd.bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
                     cmd.bindPipeline(NRI::PipelineBindPoint::Compute, mip == 0 ? *m_colorPyramidCopyPipeline : *m_colorPyramidDownsamplePipeline);
 
                     shaderio::PushConstantColorPyramid push{};
                     push.sourceIndex = uniformData.imageHeapIndexOffset + context.Slot(mip == 0 ? source : res->RefractionSource);
                     push.outputIndex = context.StorageSlot(res->RefractionSource, mip);
                     push.sourceMip = mip == 0 ? 0 : mip - 1;
-                    push.width = std::max(m_frame.renderExtent.width >> mip, 1u);
-                    push.height = std::max(m_frame.renderExtent.height >> mip, 1u);
+                    push.width = std::max(extent.width >> mip, 1u);
+                    push.height = std::max(extent.height >> mip, 1u);
                     cmd.pushData(&push, sizeof(push));
                     cmd.dispatch((push.width + 7) / 8, (push.height + 7) / 8, 1);
                 });

@@ -221,9 +221,10 @@ namespace Nox
     {
         const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
 
-        // Editor with a jittered camera: drawn again without the jitter instead, so what reads them holds still.
-        if (m_isEditor && m_stableEditorDepth && m_stableEntityDepthPipeline && m_currentJitter != glm::vec2(0.0f) &&
-            resources.CameraDraws.Commands.IsValid())
+        // Editor with a jittered camera, or transparent surfaces drawn over DLSS-RR's output (they depth-test against it): drawn
+        // again without the jitter instead, so what reads them holds still.
+        const bool stableWanted = (m_isEditor && m_stableEditorDepth && m_currentJitter != glm::vec2(0.0f)) || m_frame.transparentAfterUpscale;
+        if (stableWanted && m_stableEntityDepthPipeline && resources.CameraDraws.Commands.IsValid())
         {
             addStableEntityDepthPass();
             return;

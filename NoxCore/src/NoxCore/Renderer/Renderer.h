@@ -953,8 +953,14 @@ namespace Nox
         // The order-independent transparency targets of this frame (created on first use; the first writer clears them), and
         // their resolve over the HDR scene once everything transparent is in them.
         void ensureOITTargets();
-        // The lit scene so far with blur mips (resources.RefractionSource), for glass to refract.
+        // The lit scene so far with blur mips (resources.RefractionSource), for glass to refract: the HDR scene at the render
+        // resolution, or (`source`, `extent`) the upscaled image the transparent surfaces are drawn over after DLSS-RR.
         void addRefractionSourcePasses();
+        void addRefractionSourcePasses(RGTexture source, NRI::Extent2D extent);
+        // Under DLSS Ray Reconstruction: the transparent surfaces over its output at display resolution, without the jitter. Drawn into
+        // its input they reached RR as part of the surface behind them -- RR moved a window's reflection with the room behind it
+        // (it trailed after the camera) and took the glass's own shading for noise to filter.
+        void addTransparentAfterUpscalePass();
         // What a pass drawing forward surfaces over the scene reads and targets (after its own color target): entity IDs, depth,
         // fog, and for lit surfaces the GI, AO and TLAS they sample.
         void declareForwardInputs(RGBuilder& builder, bool lit);
@@ -1203,6 +1209,9 @@ namespace Nox
             bool occlusionRawAdded = false; // SSAO or RTAO wrote resources.SSAORaw this frame (never both)
             bool ssaoAdded = false;         // resources.SSAO (the blurred result) is valid this frame
             bool dlssAdded = false;
+            // The transparent surfaces are drawn over DLSS Ray Reconstruction's output instead of into its input
+            // (addTransparentAfterUpscalePass).
+            bool transparentAfterUpscale = false;
             bool taaAdded = false;      // resources.TAAHistory[taaWriteIndex] holds this frame's anti-aliased scene
             uint32_t taaWriteIndex = 0;
             bool gbufferVelocityWritten = false;
