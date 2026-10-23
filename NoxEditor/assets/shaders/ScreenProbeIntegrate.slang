@@ -204,7 +204,7 @@ ScreenProbeIntegrateOutput fragMain(ScreenProbeVertex input, uniform PushConstan
     }
 
     // No shortcut for large changes: a probe catching a bright spot for one frame (a lamp's fixture at night) made it flash.
-    const float frames = min(floor(history.a + 0.5) + 1.0, float(max(pushConstant.maxHistory, 1u)));
+    float frames = min(floor(history.a + 0.5) + 1.0, float(max(pushConstant.maxHistory, 1u)));
     // Outliers: with a few frames of history, this frame may be at most 3x brighter than it. At night a lamp is a tiny target for
     // a probe's 64 rays: the probe that happens to hit it gets all its light for one frame (the next frame another one does),
     // which boiled in tile-sized blotches no denoiser removes (REBLUR never sees this signal, DLSS RR takes the blotches for
@@ -216,13 +216,22 @@ ScreenProbeIntegrateOutput fragMain(ScreenProbeVertex input, uniform PushConstan
         const float historyLuma = dot(history.rgb, float3(0.2126, 0.7152, 0.0722));
         const float limit = historyLuma * 3.0 + 1e-4;
         if (currentLuma > limit && isfinite(currentLuma))
+        {
             currentClamped *= limit / currentLuma;
+            // Held back again: no longer a one-frame spike but light the history has not caught up with. Weighed in at
+            // 1 / (frames accumulated), up to 3x a frame let it grow ~10% a frame: the light of a lamp at night reached a wall only
+            // where it had stayed on screen for a second or more, in a trail of the camera's path (a swirl, and the same shape
+            // in the reflections that read this light), never where the camera had just turned. A short history follows it in a
+            // few frames; one bright frame still adds at most 3x a quarter.
+            frames = min(frames, 4.0);
+        }
     }
-    else if (currentLuma > 0.0 && isfinite(currentLuma))
+    else if (doubleSided && currentLuma > 0.0 && isfinite(currentLuma))
     {
-        // Little or no history (just revealed: a leaf's edge, behind a moving object): the probes' one frame of light, held to
-        // 3x the world-space GI here (the DDGI cascades / the sky's irradiance), stable from frame to frame. One probe that caught
-        // the sun through a gap lit the newly revealed pixels for a frame: the spots flashing on foliage while moving.
+        // Foliage with little or no history (a leaf's edge just revealed): the probes' one frame of light, held to 3x the world-space
+        // GI here (the DDGI cascades / the sky's irradiance), stable from frame to frame. One probe that caught the sun through a gap
+        // lit the newly revealed leaves for a frame: the spots flashing on foliage while moving. Not on other surfaces: the
+        // world-space GI holds no lamp light, so at night every newly seen wall near a lamp started black.
         const float fallbackLuma = dot(screen_probe_fallback(ubo, position, normal, geometricNormal), float3(0.2126, 0.7152, 0.0722));
         const float limit = max(fallbackLuma, history.a > 0.0 ? dot(history.rgb, float3(0.2126, 0.7152, 0.0722)) : 0.0) * 3.0 + 1e-4;
         if (currentLuma > limit && isfinite(fallbackLuma))
