@@ -29,3 +29,13 @@ float after_upscale_coverage(UniformBufferObject* ubo, PushConstantMeshlets push
     }
     return covered;
 }
+
+// Whether the whole 2x2 pixel quad is hidden (coverage 0 in all four), the only case a fragment may leave before its shading: the
+// shading takes derivatives across the quad (texture mips, the normal map's tangent frame, specular anti-aliasing), and a lane that
+// left took its values with it -- the glass's covered pixels next to hidden ones came out as garbage, white dashes along every edge
+// where a pane passes behind something. A hidden pixel in a quad that shades runs along and is discarded at the end.
+bool after_upscale_quad_hidden(float coverage)
+{
+    return coverage <= 0.0 && QuadReadAcrossX(coverage) <= 0.0 && QuadReadAcrossY(coverage) <= 0.0 &&
+           QuadReadAcrossDiagonal(coverage) <= 0.0;
+}

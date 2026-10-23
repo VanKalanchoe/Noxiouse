@@ -36,7 +36,7 @@
     {
         // Over DLSS-RR's output: blended by the share of the pixel it is in front of (the pass has no hardware depth test then).
         const float pixelCoverage = after_upscale_coverage((UniformBufferObject*)pushConstant.matrixReference, pushConstant, vertIn.pos);
-        if (pixelCoverage <= 0.0)
+        if (after_upscale_quad_hidden(pixelCoverage))
         {
             // Out now: discard only demotes the invocation to a helper, which would still run all of the shading (rays included) for
             // every pixel of every pane behind the walls -- the pass has no hardware depth test to cull them.
@@ -45,6 +45,8 @@
         }
         FSOutput output = shadeUnlit(vertIn, pushConstant);
         output.color *= pixelCoverage;
+        if (pixelCoverage <= 0.0)
+            discard; // hidden, shaded only for its quad's derivatives
         return output;
     }
 
