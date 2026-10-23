@@ -164,10 +164,8 @@ float4 fragMain(
     if (smoothFill && roughness >= pushConstant.smoothFillRoughness)
         discard; // rough enough: the upsampled reduced-resolution result stays
 
-    // Denoised (NRD, or DLSS Ray Reconstruction, which takes the 1-sample reflection as it takes the path tracer's) up to rough
-    // surfaces; raw only the glossy ones. DeferredLighting.slang fades the same way.
-    float maxTraceRoughness = (pushConstant.denoiserMode != 0 || ubo->rayReconstructionActive != 0) ? 0.85 : 0.55;
-    if (roughness > maxTraceRoughness || ubo->enableRTReflections == 0 || ubo->tlasDeviceAddress == 0)
+    // Up to RTReflectionMaxRoughness (shaderIO.h); DeferredLighting.slang fades the same way.
+    if (roughness > RTReflectionMaxRoughness || ubo->enableRTReflections == 0 || ubo->tlasDeviceAddress == 0)
     {
         return noReflection(ubo, pushConstant.denoiserMode);
     }

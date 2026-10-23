@@ -1145,6 +1145,13 @@ float3 normal_from_map(float3 sampled, float3 normal, float4 tangent)
     return normalize(mul(tangentNormal, float3x3(T, B, N)));
 }
 
+// The roughest surface the RT reflections trace (Reflection.slang) and the deferred lighting reads them for, faded out over the last
+// 0.15: Unreal's Lumen default (r.Lumen.Reflections.MaxRoughnessToTrace 0.4). Rougher surfaces take their reflection from the GI
+// (the screen probes' light around them, DeferredLighting.slang). Traced up to 0.85 under a denoiser, one GGX ray per pixel on rough
+// concrete now and then found a lamp's small bright bulb; the denoiser spread those few pixels into worm-shaped blotches on matte
+// walls that looked wet.
+STATIC_CONST float RTReflectionMaxRoughness = 0.4;
+
 // A material's depth bias (MaterialData::DepthBias; HDRP's Mesh Decal View Bias): the vertex drawn depthBias closer to the camera
 // along its view ray -- under the reverse-Z projection its clip z scaled by distance / (distance - bias), the clip x, y and w, and so
 // where it lands on screen, unchanged. Geometry modelled onto another surface (the Bistro's edge decals, trims and overlay layers,

@@ -643,8 +643,8 @@ float skyIrradianceLuma(UniformBufferObject* ubo, float3 n)
         // Sample Decoupled RT Reflection (Denoised via NRD REBLUR/RELAX or Raw 1-SPP)
         float3 reflColor = float3(0.0);
         uint reflDenoiserMode = (pushConstant.nrdShadowsEnabled >> 1) & 3;
-        // As far as Reflection.slang traces: denoised (NRD or DLSS Ray Reconstruction) up to rough surfaces.
-        float maxRoughness = (reflDenoiserMode != 0 || ubo->rayReconstructionActive != 0) ? 0.85 : 0.55;
+        // As far as Reflection.slang traces (RTReflectionMaxRoughness, shaderIO.h).
+        const float maxRoughness = RTReflectionMaxRoughness;
         bool hasRTReflection = (ubo->enableRTReflections != 0 && perceptualRoughness < maxRoughness && ubo->brdfLutIndex != 0xFFFFFFFF);
         if (hasRTReflection)
         {
