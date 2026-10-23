@@ -272,7 +272,12 @@ FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform Pu
     // Over DLSS-RR's output: blended by the share of the pixel it is in front of (the pass has no hardware depth test then).
     const float pixelCoverage = after_upscale_coverage((UniformBufferObject*)pushConstant.matrixReference, pushConstant, vertIn.pos);
     if (pixelCoverage <= 0.0)
+    {
+        // Out now: discard only demotes the invocation to a helper, which would still run all of the shading (rays included) for
+        // every pixel of every pane behind the walls -- the pass has no hardware depth test to cull them.
         discard;
+        return (FSOutput)0;
+    }
     FSOutput output = shadeTransparent(vertIn, isFrontFace, pushConstant);
     output.color *= pixelCoverage;
     return output;
