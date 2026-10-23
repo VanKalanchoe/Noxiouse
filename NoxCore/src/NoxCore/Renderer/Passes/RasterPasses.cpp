@@ -1330,8 +1330,25 @@ namespace Nox
     {
         FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
 
-        // The glass into DLSS-RR's transparency layer (Streamline kBufferTypeTransparencyLayer and kBufferTypeTransparencyLayerOpacity,
-        // tagged in addDLSSPass): at render
+        // First every pane's base-color tint, multiplied into RR's input color (MESHLET_GLASS_MULTIPLY with MESHLET_TRANSPARENCY_LAYER):
+        // the scene behind tinted by all the glass in front of it, in any order, as the path tracer has it -- not left to RR's
+        // compositing of the layer's opacity, which did not show it.
+        m_renderGraph.AddPass("RR Glass Tint", RGPassFlags::Raster,
+            [&](RGBuilder& builder)
+            {
+                builder.ColorTarget(resources.HDRScene, NRI::LoadOP::load, NRI::StoreOP::store);
+                declareForwardInputs(builder, true);
+            },
+            [this, res = &resources](RGPassContext& context)
+            {
+                NRI::CommandBuffer& cmd = context.Cmd();
+                MeshletDrawCursor cursor = beginMeshletDraws(context, res->CameraDraws);
+                cursor.taskFlags |= shaderio::MESHLET_TRANSPARENCY_LAYER | shaderio::MESHLET_SEE_THROUGH_ONLY | shaderio::MESHLET_GLASS_MULTIPLY;
+                drawForwardTransparent(cmd, context, res->CameraDraws, cursor, false, TransparentBlend::GlassMultiply);
+            });
+
+        // Then the glass into DLSS-RR's transparency layer (Streamline kBufferTypeTransparencyLayer and
+        // kBufferTypeTransparencyLayerOpacity, tagged in addDLSSPass): at render
         // resolution with the jitter, depth tested against the scene, back to front, premultiplied -- what the glass itself gives
         // (its reflection) and how much of the scene behind it hides (MESHLET_TRANSPARENCY_LAYER, Material_TransparentLit_Mesh.slang).
         // The scene behind is RR's input color, denoised with its own guides; RR composites the layer over it.

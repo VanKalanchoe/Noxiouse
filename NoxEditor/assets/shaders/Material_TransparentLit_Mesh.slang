@@ -464,12 +464,17 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
 
     // The glass's first pass (MESHLET_GLASS_MULTIPLY): what the pane lets through of the scene behind it, multiplied into it -- the
     // transmission past the Fresnel reflection, through the base color, where it covers the pixel. Glass that bends or blurs the view
-    // (a volume, roughness: the color pyramid) lets nothing through here; its second pass adds what it shows.
-    const bool stackedGlass = refraction && instance.thickness <= 0.0 && perceptualRoughness <= 0.02;
+    // (a volume, roughness: the color pyramid) lets nothing through here; its second pass adds what it shows. Smooth: up to the
+    // minimum roughness the metallic-roughness path clamps to (c_MinRoughness, 0.04) and a little -- below 0.02 no glass ever was,
+    // and every pane took the one-tint path. Under DLSS-RR (MESHLET_TRANSPARENCY_LAYER, into RR's input color): the base color's
+    // tint alone, every pane's, whatever it bends; the Fresnel share is the transparency layer's opacity.
+    const bool stackedGlass = refraction && instance.thickness <= 0.0 && perceptualRoughness <= c_MinRoughness + 0.01;
     if ((pushConstant.meshletCulling & MESHLET_GLASS_MULTIPLY) != 0)
     {
         const float3 fresnel = specularEnvironmentR0 + (1.0 - specularEnvironmentR0) * pow(1.0 - NdotV, 5.0);
-        const float3 throughput = stackedGlass ? saturate(baseColor.rgb * (transmission * (1.0 - metallic)) * (1.0 - fresnel)) : float3(0.0);
+        const float3 tint = saturate(baseColor.rgb * (transmission * (1.0 - metallic)));
+        const float3 throughput = (pushConstant.meshletCulling & MESHLET_TRANSPARENCY_LAYER) != 0 ? tint
+                                  : (stackedGlass ? tint * (1.0 - fresnel) : float3(0.0));
         output.color = float4(lerp(float3(1.0), throughput, coverage), 1.0);
         output.entityID = vertIn.entityID;
         return output;
@@ -745,15 +750,15 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     }
 
     // DLSS-RR's transparency layer (MESHLET_TRANSPARENCY_LAYER, Renderer::addRRTransparencyLayerPass): the light the surface gives
-    // itself, premultiplied, and how much of the scene behind it hides -- all but what it lets through, weighed as the refraction
-    // above weighs it (the transmission past the Fresnel reflection, through the base color), per channel in layerOpacity (RR's
-    // opacity layer) and their average in alpha (glass over glass). RR composites it over the scene it denoised:
-    // color + (1 - opacity) * scene.
+    // itself, premultiplied, and how much of the scene behind it hides. The scene is already tinted by every pane's base color in
+    // RR's input color (the glass's multiply pass, MESHLET_GLASS_MULTIPLY): what is left to hide is the Fresnel reflection's share,
+    // per channel in layerOpacity (RR's opacity layer) and averaged in alpha (glass over glass). RR composites it over the scene it
+    // denoised: color + (1 - opacity) * scene. The tint itself is not left to RR's compositing: carried in the opacity only, it did
+    // not show.
     if ((pushConstant.meshletCulling & MESHLET_TRANSPARENCY_LAYER) != 0)
     {
         const float3 fresnel = specularEnvironmentR0 + (1.0 - specularEnvironmentR0) * pow(1.0 - NdotV, 5.0);
-        const float3 throughput = saturate(baseColor.rgb * (transmission * (1.0 - metallic)) * (1.0 - fresnel));
-        layerOpacity = coverage * (1.0 - throughput);
+        layerOpacity = coverage * saturate(fresnel);
         output.color = float4(color * coverage, dot(layerOpacity, float3(1.0 / 3.0)));
         output.entityID = vertIn.entityID;
         return output;
