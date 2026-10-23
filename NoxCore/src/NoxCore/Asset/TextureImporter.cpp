@@ -24,6 +24,7 @@
 #include "NoxCore/Tasks/JobSystem.h"
 
 #include <bc7enc.h>
+#include <rgbcx.h>
 
 namespace Nox
 {
@@ -81,29 +82,24 @@ namespace Nox
             uint8_t flip;
             uint8_t generateMips;
             uint16_t format;
+            // In what was padding (zeroed by the value-initialization below): Default hashes as every cook before it did.
+            uint8_t compression;
         };
         TextureCookSettings cookSettings{};
         cookSettings.source = Utility::calcul_hash_streaming(sourcePath.string());
         cookSettings.flip = static_cast<uint8_t>(spec.flip);
         cookSettings.generateMips = static_cast<uint8_t>(spec.generateMips);
         cookSettings.format = static_cast<uint16_t>(spec.format);
+        cookSettings.compression = static_cast<uint8_t>(spec.compression);
         return XXH3_128bits(&cookSettings, sizeof(cookSettings));
     }
 
-    // An RGBA8 mip chain to BC7 (1 byte per texel instead of 4): every mip encoded by bc7enc, blocks spread over the
-    // workers (a 2048² texture is 262 k blocks). Perceptual weights for color, linear ones for data (normals,
-    // roughness/metalness, occlusion). Edge texels are repeated into the blocks of mips smaller than 4x4 or not a multiple.
-    static void EncodeBC7(TextureData& cpuData)
+    // An RGBA8 mip chain to 4x4 blocks of `blockSize` bytes, each encoded by `encodeBlock` from its 16 RGBA texels: every mip,
+    // blocks spread over the workers (a 2048² texture is 262 k blocks). Edge texels are repeated into the blocks of mips smaller
+    // than 4x4 or not a multiple.
+    template <typename EncodeBlock>
+    static void EncodeBlocks(TextureData& cpuData, uint32_t blockSize, const char* name, const EncodeBlock& encodeBlock)
     {
-        static std::once_flag s_EncoderInit;
-        std::call_once(s_EncoderInit, [] { bc7enc_compress_block_init(); });
-
-        const bool srgb = cpuData.Format == NRI::ImageFormat::SRGBA8;
-        bc7enc_compress_block_params params;
-        bc7enc_compress_block_params_init(&params);
-        if (!srgb)
-            bc7enc_compress_block_params_init_linear_weights(&params);
-
         std::vector<size_t> offsets;
         size_t total = 0;
         for (uint32_t mip = 0; mip < cpuData.MipLevels; ++mip)
@@ -111,7 +107,7 @@ namespace Nox
             const uint32_t blocksX = (std::max(cpuData.Width >> mip, 1u) + 3) / 4;
             const uint32_t blocksY = (std::max(cpuData.Height >> mip, 1u) + 3) / 4;
             offsets.push_back(total);
-            total += static_cast<size_t>(blocksX) * blocksY * BC7ENC_BLOCK_SIZE;
+            total += static_cast<size_t>(blocksX) * blocksY * blockSize;
         }
 
         Buffer encoded(total);
@@ -124,9 +120,9 @@ namespace Nox
             const uint8_t* source = cpuData.Data.Data + cpuData.MipOffsets[mip];
             uint8_t* destination = encoded.Data + offsets[mip];
 
-            JobSystem::Get().ParallelFor("Encode BC7", blocksY, 4, [&](uint32_t, uint32_t begin, uint32_t end)
+            JobSystem::Get().ParallelFor(name, blocksY, 4, [&](uint32_t, uint32_t begin, uint32_t end)
             {
-                color_rgba block[16];
+                uint8_t block[16 * 4];
                 for (uint32_t blockY = begin; blockY < end; ++blockY)
                 {
                     for (uint32_t blockX = 0; blockX < blocksX; ++blockX)
@@ -135,9 +131,9 @@ namespace Nox
                         {
                             const uint32_t x = std::min(blockX * 4 + texel % 4, width - 1);
                             const uint32_t y = std::min(blockY * 4 + texel / 4, height - 1);
-                            memcpy(block[texel].m_c, source + (static_cast<size_t>(y) * width + x) * 4, 4);
+                            memcpy(block + texel * 4, source + (static_cast<size_t>(y) * width + x) * 4, 4);
                         }
-                        bc7enc_compress_block(destination + (static_cast<size_t>(blockY) * blocksX + blockX) * BC7ENC_BLOCK_SIZE, block, &params);
+                        encodeBlock(destination + (static_cast<size_t>(blockY) * blocksX + blockX) * blockSize, block);
                     }
                 }
             });
@@ -146,7 +142,40 @@ namespace Nox
         cpuData.Data.Release();
         cpuData.Data = encoded;
         cpuData.MipOffsets = std::move(offsets);
+    }
+
+    // BC7 (1 byte per texel instead of 4) by bc7enc: perceptual weights for color, linear ones for data (roughness/metalness,
+    // occlusion).
+    static void EncodeBC7(TextureData& cpuData)
+    {
+        static std::once_flag s_EncoderInit;
+        std::call_once(s_EncoderInit, [] { bc7enc_compress_block_init(); });
+
+        const bool srgb = cpuData.Format == NRI::ImageFormat::SRGBA8;
+        bc7enc_compress_block_params params;
+        bc7enc_compress_block_params_init(&params);
+        if (!srgb)
+            bc7enc_compress_block_params_init_linear_weights(&params);
+
+        EncodeBlocks(cpuData, BC7ENC_BLOCK_SIZE, "Encode BC7", [&](uint8_t* destination, const uint8_t* block)
+        {
+            bc7enc_compress_block(destination, block, &params);
+        });
         cpuData.Format = srgb ? NRI::ImageFormat::BC7_UNorm_SRGB : NRI::ImageFormat::BC7_UNorm;
+    }
+
+    // BC5 (normal maps: red and green, 1 byte per texel) and BC4 (grayscale: red, half a byte per texel) by rgbcx, each channel
+    // with its own endpoints -- a normal map's X and Y no longer share BC7's partitions with an unused blue and alpha.
+    static void EncodeBC4BC5(TextureData& cpuData, bool twoChannels)
+    {
+        static std::once_flag s_EncoderInit;
+        std::call_once(s_EncoderInit, [] { rgbcx::init(); });
+
+        if (twoChannels)
+            EncodeBlocks(cpuData, 16, "Encode BC5", [](uint8_t* destination, const uint8_t* block) { rgbcx::encode_bc5_hq(destination, block, 0, 1, 4); });
+        else
+            EncodeBlocks(cpuData, 8, "Encode BC4", [](uint8_t* destination, const uint8_t* block) { rgbcx::encode_bc4_hq(destination, block, 4); });
+        cpuData.Format = twoChannels ? NRI::ImageFormat::BC5_UNorm : NRI::ImageFormat::BC4_UNorm;
     }
 
     static void GenerateRGBA8MipChain(TextureData& cpuData)
@@ -310,9 +339,15 @@ namespace Nox
             decoded = DecodeSTB(sourcePath, metadata.TextureSpec, cpuData);
         if (!decoded)
             return false;
-        // PNG/JPG decode to RGBA8 with generated mips; DDS and KTX2 keep the format they ship in.
+        // PNG/JPG decode to RGBA8 with generated mips, compressed as the texture's settings say (BC7, normal maps BC5, grayscale
+        // BC4: always linear); DDS and KTX2 keep the format they ship in.
         if (cpuData.Format == NRI::ImageFormat::SRGBA8 || cpuData.Format == NRI::ImageFormat::RGBA8)
-            EncodeBC7(cpuData);
+        {
+            if (metadata.TextureSpec.compression == TextureCompression::Default)
+                EncodeBC7(cpuData);
+            else
+                EncodeBC4BC5(cpuData, metadata.TextureSpec.compression == TextureCompression::Normalmap);
+        }
 
         std::error_code error;
         std::filesystem::create_directories(cookedPath.parent_path(), error);

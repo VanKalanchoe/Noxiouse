@@ -7,11 +7,22 @@
 
 namespace Nox
 {
+    // How a PNG / JPG source is block-compressed when cooked (Unreal's texture Compression Settings). DDS and KTX2 keep the
+    // compression they ship with.
+    enum class TextureCompression : uint8_t
+    {
+        Default = 0, // BC7: color (sRGB) or packed data (linear), 4 channels
+        Normalmap,   // BC5: the X and Y of a tangent-space normal map, each at a single channel's full precision; Z is rebuilt
+                     // in the shaders (tangent_normal_from_map), as every engine stores normal maps
+        Grayscale    // BC4: one channel (red), for masks and height maps
+    };
+
     struct TextureSpecification
     {
         bool flip = false;
         bool generateMips = true;
         NRI::ImageFormat format = NRI::ImageFormat::SRGBA8; // Default to sRGB
+        TextureCompression compression = TextureCompression::Default;
     };
     
     // Unreal Interchange: merge the imported meshes of a kind into fewer submeshes (one per material). glTF has no

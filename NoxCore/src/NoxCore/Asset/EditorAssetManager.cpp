@@ -647,7 +647,7 @@ namespace Nox
         std::vector<AssetHandle> texturesNeedingRecook;
         bool registryChanged = false;
 
-        auto importTexture = [&](const std::string& texturePath, bool sRGB)
+        auto importTexture = [&](const std::string& texturePath, bool sRGB, TextureCompression compression = TextureCompression::Default)
         {
             if (texturePath.empty() || !processedPaths.insert(texturePath).second)
                 return;
@@ -679,10 +679,15 @@ namespace Nox
             {
                 AssetMetadata& metadata = m_AssetRegistry.at(registered);
                 const NRI::ImageFormat expectedFormat = sRGB ? NRI::ImageFormat::SRGBA8 : NRI::ImageFormat::RGBA8;
-                // (Read-only: the cooked texture is taken as it is; correcting it means cooking again.)
-                if (metadata.TextureSpec.format != expectedFormat && !m_ReadOnly)
+                // (Read-only: the cooked texture is taken as it is; correcting it means cooking again.) A normal map registered
+                // before compression settings existed becomes BC5 here, once; a compression chosen by hand otherwise stays.
+                const bool compressionChanges = compression == TextureCompression::Normalmap &&
+                                                metadata.TextureSpec.compression == TextureCompression::Default;
+                if ((metadata.TextureSpec.format != expectedFormat || compressionChanges) && !m_ReadOnly)
                 {
                     metadata.TextureSpec.format = expectedFormat;
+                    if (compressionChanges)
+                        metadata.TextureSpec.compression = compression;
                     texturesNeedingRecook.push_back(registered);
                     registryChanged = true;
                 }
@@ -710,6 +715,7 @@ namespace Nox
             // Registered only: it is cooked and loaded in the background when a material first requests it.
             TextureSpecification spec;
             spec.format = sRGB ? NRI::ImageFormat::SRGBA8 : NRI::ImageFormat::RGBA8;
+            spec.compression = compression;
             const AssetHandle newHandle = RegisterAsset(TextureMetadata(relativePath, spec, {}));
             registryChanged = true;
 
@@ -722,7 +728,7 @@ namespace Nox
             // in RGB and linear glossiness in alpha. An sRGB image view decodes RGB only, which is
             // exactly what KHR_materials_pbrSpecularGlossiness requires.
             importTexture(material.MetallicRoughnessTexturePath, material.Workflow == 1.0f);
-            importTexture(material.NormalTexturePath, false);
+            importTexture(material.NormalTexturePath, false, TextureCompression::Normalmap);
             importTexture(material.OcclusionTexturePath, false);
             importTexture(material.EmissiveTexturePath, true);
             importTexture(material.TransmissionTexturePath, false);
@@ -1831,6 +1837,9 @@ namespace Nox
                     out << YAML::Key << "Format" << YAML::Value << std::string(ImageFormatToString(metadata.TextureSpec.format));
                     out << YAML::Key << "GenerateMips" << YAML::Value << metadata.TextureSpec.generateMips;
                     out << YAML::Key << "Flip" << YAML::Value << metadata.TextureSpec.flip;
+                    if (metadata.TextureSpec.compression != TextureCompression::Default)
+                        out << YAML::Key << "Compression" << YAML::Value
+                            << (metadata.TextureSpec.compression == TextureCompression::Normalmap ? "Normalmap" : "Grayscale");
                     out << YAML::EndMap;
                 }
 
@@ -1966,6 +1975,13 @@ namespace Nox
                     metadata.TextureSpec.generateMips = specNode["GenerateMips"].as<bool>();
                 if (specNode["Flip"])
                     metadata.TextureSpec.flip = specNode["Flip"].as<bool>();
+                if (specNode["Compression"])
+                {
+                    const std::string compression = specNode["Compression"].as<std::string>();
+                    metadata.TextureSpec.compression = compression == "Normalmap" ? TextureCompression::Normalmap
+                                                     : compression == "Grayscale" ? TextureCompression::Grayscale
+                                                                                  : TextureCompression::Default;
+                }
             }
 
             if (auto settingsNode = node["MeshSettings"])

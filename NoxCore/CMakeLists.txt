@@ -113,9 +113,9 @@ set(CLUSTERLOD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendors/meshoptimizer/demo")
 set(OFFSETALLOCATOR_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendors/OffsetAllocator")
 set(OFFSETALLOCATOR_SOURCES "${OFFSETALLOCATOR_DIR}/offsetAllocator.cpp")
 
-# BC7 encoder for cooking PNG/JPG textures (the CPU encoder only: the command line tool, RDO and ISPC paths are not used)
+# BC7 / BC5 / BC4 encoders for cooking PNG/JPG textures (the CPU encoders only: the command line tool, RDO and ISPC paths are not used)
 set(BC7ENC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendors/bc7enc_rdo")
-set(BC7ENC_SOURCES "${BC7ENC_DIR}/bc7enc.cpp")
+set(BC7ENC_SOURCES "${BC7ENC_DIR}/bc7enc.cpp" "${BC7ENC_DIR}/rgbcx.cpp") # rgbcx: BC4 / BC5 for grayscale and normal maps
 
 # Set up Vulkan C++ module only if enabled
 if(ENABLE_CPP20_MODULE)
