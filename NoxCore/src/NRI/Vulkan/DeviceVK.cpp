@@ -1181,7 +1181,7 @@ namespace NRI
         tags.push_back(sl::ResourceTag(&mvec, sl::kBufferTypeMotionVectors, sl::ResourceLifecycle::eValidUntilEvaluate, &mvecExtent));
 
         // When Ray Reconstruction is enabled, tag G-Buffer Albedo, Specular Albedo, Normals, and Roughness
-        sl::Resource albedoRes{}, specularAlbedoRes{}, normalRes{}, roughnessRes{}, hitDistanceRes{}, specMotionRes{}, transparencyRes{}, transparencyOpacityRes{};
+        sl::Resource albedoRes{}, specularAlbedoRes{}, normalRes{}, roughnessRes{}, hitDistanceRes{}, specMotionRes{}, colorBeforeTransparencyRes{};
         if (useRayReconstruction && params.albedo && params.normal &&
             (params.normalRoughnessPacked || params.roughness))
         {
@@ -1226,18 +1226,12 @@ namespace NRI
                 specMotionRes = wrapTex(dynamic_cast<TextureVK*>(params.specularMotionVectors));
                 tags.push_back(sl::ResourceTag(&specMotionRes, sl::kBufferTypeSpecularMotionVectors, sl::ResourceLifecycle::eValidUntilEvaluate, &inputExtent));
             }
-            // The transparency overlay (DLSS-RR programming guide 4.1.10): the glass, composited by RR over the scene it denoised.
-            if (params.transparencyLayer)
+            // The input color before transparent surfaces (DLSS-RR programming guide 4.1.11): which part of a pixel is the glass.
+            if (params.colorBeforeTransparency)
             {
-                transparencyRes = wrapTex(dynamic_cast<TextureVK*>(params.transparencyLayer));
-                tags.push_back(sl::ResourceTag(&transparencyRes, sl::kBufferTypeTransparencyLayer, sl::ResourceLifecycle::eValidUntilEvaluate, &inputExtent));
-                // Its opacity per channel (tinted glass): the layer's RGB is then the color, this the alpha (RaGaBa).
-                if (params.transparencyLayerOpacity)
-                {
-                    transparencyOpacityRes = wrapTex(dynamic_cast<TextureVK*>(params.transparencyLayerOpacity));
-                    tags.push_back(sl::ResourceTag(&transparencyOpacityRes, sl::kBufferTypeTransparencyLayerOpacity,
-                                                   sl::ResourceLifecycle::eValidUntilEvaluate, &inputExtent));
-                }
+                colorBeforeTransparencyRes = wrapTex(dynamic_cast<TextureVK*>(params.colorBeforeTransparency));
+                tags.push_back(sl::ResourceTag(&colorBeforeTransparencyRes, sl::kBufferTypeColorBeforeTransparency,
+                                               sl::ResourceLifecycle::eValidUntilEvaluate, &inputExtent));
             }
         }
 

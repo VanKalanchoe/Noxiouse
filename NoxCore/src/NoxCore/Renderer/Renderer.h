@@ -960,7 +960,6 @@ namespace Nox
         // Under DLSS Ray Reconstruction: the transparent surfaces over its output at display resolution, without the jitter. Drawn into
         // its input they reached RR as part of the surface behind them -- RR moved a window's reflection with the room behind it
         // (it trailed after the camera) and took the glass's own shading for noise to filter.
-        void addRRTransparencyLayerPass();
         // What a pass drawing forward surfaces over the scene reads and targets (after its own color target): entity IDs, depth,
         // fog, and for lit surfaces the GI, AO and TLAS they sample.
         void declareForwardInputs(RGBuilder& builder, bool lit);
@@ -1009,10 +1008,9 @@ namespace Nox
         void drawMeshletBucket(NRI::CommandBuffer& cmd, MeshletDrawCursor& cursor, RenderBucket bucket, NRI::Pipeline& pipeline, NRI::CullMode cullMode, bool depthWrite, bool blendEnable) const;
         // The transparent buckets (both culling phases), blended over the HDR scene; the cursor carries the SSAO and refraction slots.
         // With `oit` into the order-independent transparency targets instead (accumulation, revealage, entity IDs).
-        // How drawForwardTransparent blends: over what is drawn (back to front, premultiplied); into DLSS-RR's transparency layer
-        // (color, entity IDs, opacity per channel); the glass's two passes over the scene, multiplied (what it lets through) and
-        // added (its own light). The last three draw lit surfaces only.
-        enum class TransparentBlend { Over, RRLayer, GlassMultiply, GlassAdd };
+        // How drawForwardTransparent blends: over what is drawn (back to front, premultiplied); the glass's two passes over the
+        // scene, multiplied (what it lets through) and added (its own light), lit surfaces only.
+        enum class TransparentBlend { Over, GlassMultiply, GlassAdd };
         void drawForwardTransparent(NRI::CommandBuffer& cmd, const RGPassContext& context, const ViewDrawResources& draws, MeshletDrawCursor& cursor,
                                     bool oit = false, TransparentBlend blend = TransparentBlend::Over) const;
         // Draw list entries of a bucket (its visible instances are at most that many).
@@ -1068,8 +1066,6 @@ namespace Nox
         // The same fragments into the order-independent transparency targets (accumulation, revealage, entity IDs).
         std::unique_ptr<NRI::Pipeline> m_unlitOITPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_transparentLitOITPipeline = nullptr;
-        // ...and into DLSS-RR's transparency layer (color, entity IDs, opacity per channel).
-        std::unique_ptr<NRI::Pipeline> m_transparentLitLayerPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_oitCompositePipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_presentPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_computePipeline = nullptr;
@@ -1215,8 +1211,8 @@ namespace Nox
             bool occlusionRawAdded = false; // SSAO or RTAO wrote resources.SSAORaw this frame (never both)
             bool ssaoAdded = false;         // resources.SSAO (the blurred result) is valid this frame
             bool dlssAdded = false;
-            // The glass goes into DLSS Ray Reconstruction's transparency layer instead of its input color (addRRTransparencyLayerPass).
-            bool rrTransparencyLayer = false;
+            // DLSS Ray Reconstruction is given the lit scene before any transparent surface (resources.RRColorBeforeTransparency).
+            bool rrColorBeforeTransparency = false;
             bool taaAdded = false;      // resources.TAAHistory[taaWriteIndex] holds this frame's anti-aliased scene
             uint32_t taaWriteIndex = 0;
             bool gbufferVelocityWritten = false;

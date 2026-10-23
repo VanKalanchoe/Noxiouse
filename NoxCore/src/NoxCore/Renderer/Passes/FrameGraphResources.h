@@ -39,8 +39,7 @@ namespace Nox
         RGTexture RRPathDepth;
         RGTexture RRPathMotionVectors;
         RGTexture RRSpecularMotionVectors;
-        RGTexture RRTransparencyLayer;   // the glass under DLSS-RR, premultiplied color + opacity (addRRTransparencyLayerPass)
-        RGTexture RRTransparencyOpacity; // ...and its opacity per channel (tinted glass)
+        RGTexture RRColorBeforeTransparency; // DLSS-RR's guide: the lit scene before transparent surfaces (addForward3DPass)
         RGTexture PrevDepth;
         RGTexture PrevNormal;
         RGTexture PrevAlbedo;

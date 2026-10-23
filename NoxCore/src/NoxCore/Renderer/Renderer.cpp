@@ -1864,11 +1864,6 @@ namespace Nox
         desc.colorFormats = { NRI::ImageFormat::R16G16B16A16_SFLOAT, NRI::ImageFormat::R16_SFLOAT, NRI::ImageFormat::R32SINT };
         desc.shaders.back().entryPoint = "fragMainOIT";
         m_transparentLitOITPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
-
-        // Into DLSS-RR's transparency layer (addRRTransparencyLayerPass): color, entity IDs, opacity per channel.
-        desc.colorFormats = { NRI::ImageFormat::R16G16B16A16_SFLOAT, NRI::ImageFormat::R32SINT, NRI::ImageFormat::R16G16B16A16_SFLOAT };
-        desc.shaders.back().entryPoint = "fragMainLayer";
-        m_transparentLitLayerPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
     void Renderer::createWireframePipeline(bool forceCompile)
@@ -4731,9 +4726,8 @@ namespace Nox
             guide.Format = NRI::ImageFormat::R16G16_SFLOAT;
             resources.RRPathMotionVectors = graph.CreateTexture("RR Path Motion Vectors", guide);
             resources.RRSpecularMotionVectors = graph.CreateTexture("RR Specular Motion Vectors", guide);
-            // The glass for RR's transparency layer (addRRTransparencyLayerPass): premultiplied color and opacity, drawn into.
-            resources.RRTransparencyLayer = graph.CreateTexture("RR Transparency Layer", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
-            resources.RRTransparencyOpacity = graph.CreateTexture("RR Transparency Opacity", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
+            // DLSS-RR's Color Before Transparency guide (addForward3DPass): the HDR scene's format, as the guide requires.
+            resources.RRColorBeforeTransparency = graph.CreateTexture("RR Color Before Transparency", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
         }
         resources.GBufferNormal = graph.CreateTexture("GBuffer Normal", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
         resources.GBufferMaterial = graph.CreateTexture("GBuffer Material", renderTarget(NRI::ImageFormat::RGBA8));

@@ -739,9 +739,8 @@ namespace Nox
     void Renderer::drawForwardTransparent(NRI::CommandBuffer& cmd, const RGPassContext& context, const ViewDrawResources& draws, MeshletDrawCursor& cursor, bool oit,
                                           TransparentBlend blend) const
     {
-        const bool rrLayer = blend == TransparentBlend::RRLayer;
         const bool litOnly = blend != TransparentBlend::Over;
-        NRI::Pipeline* litPipeline = oit ? m_transparentLitOITPipeline.get() : (rrLayer ? m_transparentLitLayerPipeline.get() : m_transparentLitPipeline.get());
+        NRI::Pipeline* litPipeline = oit ? m_transparentLitOITPipeline.get() : m_transparentLitPipeline.get();
         NRI::Pipeline* unlitPipeline = oit ? m_unlitOITPipeline.get() : m_unlitPipeline.get();
         if (!unlitPipeline || !litPipeline || !hasTransparentDraws())
             return;
@@ -786,15 +785,6 @@ namespace Nox
             cmd.setColorBlendEquation(0, blendEquation);
             cmd.setColorBlendEnable(1, false);
             cmd.setColorWriteMask(1, NRI::ColorComponent::All);
-            if (rrLayer)
-            {
-                // The opacity per channel, glass over glass: what is left of the scene behind multiplies (1 - opacity) per channel.
-                cmd.setColorBlendEnable(2, true);
-                cmd.setColorWriteMask(2, NRI::ColorComponent::All);
-                cmd.setColorBlendEquation(2, {
-                    .srcColorBlendFactor = NRI::BlendFactor::One, .dstColorBlendFactor = NRI::BlendFactor::OneMinusSrcColor, .colorBlendOp = NRI::BlendOp::Add,
-                    .srcAlphaBlendFactor = NRI::BlendFactor::One, .dstAlphaBlendFactor = NRI::BlendFactor::Zero, .alphaBlendOp = NRI::BlendOp::Add });
-            }
         }
 
         // Non-unlit Blend objects get real shading (same BRDF/IBL as the deferred opaque path, via
@@ -806,7 +796,7 @@ namespace Nox
         // each other and wash the result out.
         drawMeshletBucket(cmd, cursor, RenderBucket::Transparent, *litPipeline, NRI::CullMode::Back, false, true);
         drawMeshletBucket(cmd, cursor, RenderBucket::TransparentDoubleSided, *litPipeline, NRI::CullMode::None, false, true);
-        if (!litOnly) // unlit surfaces are never see-through (no transmission), and their pipeline has no opacity target
+        if (!litOnly) // unlit surfaces are never see-through (no transmission)
         {
             drawMeshletBucket(cmd, cursor, RenderBucket::TransparentUnlit, *unlitPipeline, NRI::CullMode::Back, false, true);
             drawMeshletBucket(cmd, cursor, RenderBucket::TransparentUnlitDoubleSided, *unlitPipeline, NRI::CullMode::None, false, true);
@@ -831,8 +821,6 @@ namespace Nox
         cmd.setColorBlendEnable(0, false);
         if (oit)
             cmd.setColorBlendEnable(1, false);
-        if (rrLayer)
-            cmd.setColorBlendEnable(2, false);
         cmd.setDepthWriteEnable(true);
     }
 
@@ -1092,14 +1080,13 @@ namespace Nox
         // particles, addParticlePass).
         const bool oit = !pathTraced && isOITActive() && hasDraws && m_transparentLitOITPipeline && m_unlitOITPipeline && m_oitCompositePipeline &&
                          hasTransparentDraws();
-        // Under DLSS Ray Reconstruction the glass goes into RR's transparency layer instead of its input color (NVIDIA's DLSS-RR
-        // programming guide, 4.1.10 "Transparency Overlay"; Streamline kBufferTypeTransparencyLayer): premultiplied color and opacity
-        // at render resolution, with the jitter, which RR upscales and composites over the scene it denoised -- the scene behind the
-        // glass with that scene's own guides and motion (addRRTransparencyLayerPass). Decals and other blended surfaces lie on the
-        // surface the guides describe and stay in the input color (MESHLET_SKIP_SEE_THROUGH).
-        const bool rrLayer = !pathTraced && !oit && hasDraws && uniformData.rayReconstructionActive != 0 && m_rrGuidesPipeline &&
-                             hasTransmissiveDraws();
-        m_frame.rrTransparencyLayer = rrLayer;
+        // Under DLSS Ray Reconstruction with glass in view: the glass goes into RR's input color as without RR (so RR accumulates it
+        // like the rest of the image), and RR is given the image as it was before any transparent surface (NVIDIA's DLSS-RR
+        // programming guide, 4.1.11 "Color Before Transparency", Streamline kBufferTypeColorBeforeTransparency): which part of a pixel
+        // is the glass, which is the scene behind it its guides describe. Drawn into the guide's transparency layer instead (4.1.10),
+        // RR did not accumulate it: the small bright reflections in curved glass flickered with the camera's jitter.
+        const bool rrBeforeTransparency = refraction && !oit && uniformData.rayReconstructionActive != 0 && m_rrGuidesPipeline;
+        m_frame.rrColorBeforeTransparency = rrBeforeTransparency;
 
         // Shared setup of the passes that draw over the lit scene.
         auto declareForward = [this](RGBuilder& builder, bool lit) { declareForwardInputs(builder, lit); };
@@ -1115,7 +1102,7 @@ namespace Nox
                     builder.ColorTarget(resources.HDRScene, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 1.0f });
                 declareForward(builder, true);
             },
-            [this, res = &resources, drawProbes, skyboxSun, hasDraws, refraction, oit, pathTraced, rrLayer](RGPassContext& context)
+            [this, res = &resources, drawProbes, skyboxSun, hasDraws, refraction, oit, pathTraced](RGPassContext& context)
             {
                 NRI::CommandBuffer& cmd = context.Cmd();
                 const uint32_t totalDDGIProbes = m_frame.totalDDGIProbes;
@@ -1185,12 +1172,9 @@ namespace Nox
                     cmd.drawMeshTasks(1, 1, 1);
                 }
 
-                // C. TRANSPARENT FORWARD PASS (Back-to-front sorted, Alpha Blending), here unless glass needs the scene first. Under
-                // DLSS-RR with glass in the scene, everything but the glass (RR's transparency layer).
-                if (hasDraws && !oit && !pathTraced && (!refraction || rrLayer))
+                // C. TRANSPARENT FORWARD PASS (Back-to-front sorted, Alpha Blending), here unless glass needs the scene first.
+                if (hasDraws && !refraction && !oit && !pathTraced)
                 {
-                    if (rrLayer)
-                        cursor.taskFlags |= shaderio::MESHLET_SKIP_SEE_THROUGH;
                     // Whichever of SSAO/RTAO ran this frame (never both -- see Renderer::m_ssaoEnabled), for the
                     // specular occlusion approximation in Material_TransparentLit_Mesh.slang; every other consumer
                     // of this cursor's push constant (unlit, skybox, opaque) never reads the field.
@@ -1255,11 +1239,6 @@ namespace Nox
                 }
             });
 
-        if (rrLayer)
-        {
-            addRRTransparencyLayerPass();
-            return;
-        }
         if (!refraction && !oit)
             return;
 
@@ -1294,6 +1273,21 @@ namespace Nox
             return;
         }
 
+        // DLSS-RR's Color Before Transparency guide: the lit scene before any transparent surface, in the input color's format.
+        if (rrBeforeTransparency)
+        {
+            m_renderGraph.AddPass("RR Color Before Transparency", RGPassFlags::None,
+                [&](RGBuilder& builder)
+                {
+                    builder.Read(resources.HDRScene, RGTextureAccess::CopySource);
+                    builder.Write(resources.RRColorBeforeTransparency, RGTextureAccess::CopyDestination);
+                },
+                [res = &resources](RGPassContext& context)
+                {
+                    context.Texture(res->HDRScene).blitTo(context.Cmd(), context.Texture(res->RRColorBeforeTransparency));
+                });
+        }
+
         addRefractionSourcePasses();
 
         // Transparent surfaces over the scene; glass refracts the copy.
@@ -1323,51 +1317,6 @@ namespace Nox
                 drawForwardTransparent(cmd, context, res->CameraDraws, cursor, false, TransparentBlend::GlassMultiply);
                 cursor.taskFlags = passFlags | shaderio::MESHLET_SEE_THROUGH_ONLY | shaderio::MESHLET_GLASS_ADD;
                 drawForwardTransparent(cmd, context, res->CameraDraws, cursor, false, TransparentBlend::GlassAdd);
-            });
-    }
-
-    void Renderer::addRRTransparencyLayerPass()
-    {
-        FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
-
-        // First every pane's base-color tint, multiplied into RR's input color (MESHLET_GLASS_MULTIPLY with MESHLET_TRANSPARENCY_LAYER):
-        // the scene behind tinted by all the glass in front of it, in any order, as the path tracer has it -- not left to RR's
-        // compositing of the layer's opacity, which did not show it.
-        m_renderGraph.AddPass("RR Glass Tint", RGPassFlags::Raster,
-            [&](RGBuilder& builder)
-            {
-                builder.ColorTarget(resources.HDRScene, NRI::LoadOP::load, NRI::StoreOP::store);
-                declareForwardInputs(builder, true);
-            },
-            [this, res = &resources](RGPassContext& context)
-            {
-                NRI::CommandBuffer& cmd = context.Cmd();
-                MeshletDrawCursor cursor = beginMeshletDraws(context, res->CameraDraws);
-                cursor.taskFlags |= shaderio::MESHLET_TRANSPARENCY_LAYER | shaderio::MESHLET_SEE_THROUGH_ONLY | shaderio::MESHLET_GLASS_MULTIPLY;
-                drawForwardTransparent(cmd, context, res->CameraDraws, cursor, false, TransparentBlend::GlassMultiply);
-            });
-
-        // Then the glass into DLSS-RR's transparency layer (Streamline kBufferTypeTransparencyLayer and
-        // kBufferTypeTransparencyLayerOpacity, tagged in addDLSSPass): at render
-        // resolution with the jitter, depth tested against the scene, back to front, premultiplied -- what the glass itself gives
-        // (its reflection) and how much of the scene behind it hides (MESHLET_TRANSPARENCY_LAYER, Material_TransparentLit_Mesh.slang).
-        // The scene behind is RR's input color, denoised with its own guides; RR composites the layer over it.
-        m_renderGraph.AddPass("RR Transparency Layer", RGPassFlags::Raster,
-            [&](RGBuilder& builder)
-            {
-                builder.ColorTarget(resources.RRTransparencyLayer, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
-                declareForwardInputs(builder, true); // the entity IDs (attachment 1), the scene's depth
-                builder.ColorTarget(resources.RRTransparencyOpacity, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
-            },
-            [this, res = &resources](RGPassContext& context)
-            {
-                NRI::CommandBuffer& cmd = context.Cmd();
-                MeshletDrawCursor cursor = beginMeshletDraws(context, res->CameraDraws);
-                cursor.taskFlags |= shaderio::MESHLET_TRANSPARENCY_LAYER | shaderio::MESHLET_SEE_THROUGH_ONLY;
-                cursor.references.ssaoTextureIndex = m_frame.ssaoAdded ? context.Slot(res->SSAO) : 0xFFFFFFFF;
-                if (m_rtRefractionEnabled && m_rayTracingEnabled)
-                    cursor.taskFlags |= shaderio::MESHLET_RT_REFRACTION; // the smooth glass's traced reflection
-                drawForwardTransparent(cmd, context, res->CameraDraws, cursor, false, TransparentBlend::RRLayer);
             });
     }
 

@@ -87,11 +87,8 @@ namespace Nox
                         builder.Read(resources.GBufferMaterial);
                     }
                 }
-                if (rayReconstruction && frame.rrTransparencyLayer)
-                {
-                    builder.Read(resources.RRTransparencyLayer);
-                    builder.Read(resources.RRTransparencyOpacity);
-                }
+                if (rayReconstruction && frame.rrColorBeforeTransparency)
+                    builder.Read(resources.RRColorBeforeTransparency);
                 builder.Write(resources.DLSSOutput);
                 builder.RecordExclusive("Streamline");
             },
@@ -120,11 +117,8 @@ namespace Nox
                     dlssParams.albedo = &context.Texture(res->RRDiffuseAlbedo);
                     dlssParams.specularAlbedo = &context.Texture(res->RRSpecularAlbedo);
                     dlssParams.specularMotionVectors = &context.Texture(res->RRSpecularMotionVectors);
-                    if (frame.rrTransparencyLayer)
-                    {
-                        dlssParams.transparencyLayer = &context.Texture(res->RRTransparencyLayer);
-                        dlssParams.transparencyLayerOpacity = &context.Texture(res->RRTransparencyOpacity);
-                    }
+                    if (frame.rrColorBeforeTransparency)
+                        dlssParams.colorBeforeTransparency = &context.Texture(res->RRColorBeforeTransparency);
                     if (pathTracerGuides)
                     {
                         dlssParams.normal = &context.Texture(res->RRNormalRoughness);
