@@ -109,8 +109,9 @@ namespace Nox
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("Drawn this much closer to the camera (world units), where it lands on screen unchanged: for geometry\n"
                               "modelled exactly onto another surface -- decals, trims, overlay layers lying in its plane -- that\n"
-                              "would otherwise z-fight with it. Keep it tiny, just past the rounding between the two (about\n"
-                              "0.05 mm: 0.00005 in meters): more lets it jump over real geometry a millimetre in front of it.\n"
+                              "would otherwise z-fight with it. Keep it tiny, just past the 32-bit depth buffer's resolution\n"
+                              "(about 1 um per 16 m of distance; 0.02 mm = 0.00002 m covers it): more lets it jump over real\n"
+                              "geometry that sits a fraction of a millimetre in front of it.\n"
                               "It moves the whole material, so it cannot order two layers of the same material: those resolve\n"
                               "by draw order (the later triangle in the mesh wins an exact tie).\n"
                               "0: none.");
