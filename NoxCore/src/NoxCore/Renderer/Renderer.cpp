@@ -4719,9 +4719,10 @@ namespace Nox
             guide.Format = NRI::ImageFormat::R16G16B16A16_SFLOAT; // dielectric specular albedo is a few percent
             resources.RRSpecularAlbedo = graph.CreateTexture("RR Specular Albedo", guide);
             resources.RRNormalRoughness = graph.CreateTexture("RR Normal Roughness", guide);
-            guide.Format = NRI::ImageFormat::R16_SFLOAT;
-            resources.RRSpecularHitDistance = graph.CreateTexture("RR Specular Hit Distance", guide);
+            // 32-bit: the path tracer keeps minus the scene length there until the reflection's hit (RTXPT's specHitT export), and a
+            // reflection of the sky is far away (PathTracerBridge.slang rrSkySpecularDistance).
             guide.Format = NRI::ImageFormat::R32_SFLOAT;
+            resources.RRSpecularHitDistance = graph.CreateTexture("RR Specular Hit Distance", guide);
             resources.RRPathDepth = graph.CreateTexture("RR Path Depth", guide);
             guide.Format = NRI::ImageFormat::R16G16_SFLOAT;
             resources.RRPathMotionVectors = graph.CreateTexture("RR Path Motion Vectors", guide);

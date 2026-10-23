@@ -77,6 +77,14 @@ void missMain(inout PathPayload payload : SV_RayPayload)
 
     if (path.getVertexIndex() == 1) path.firstBounceHitDist = 65504.0;
 
+    // A specular reflection off RR's guide surface that reaches the sky: its image is at infinity (Bridge::rrSkySpecularDistance).
+    if (path.hasFlag(PathFlags::rrSpecHitPending) && pushConstant.rrSpecularHitDistanceStorageIndex != 0xFFFFFFFF)
+    {
+        path.setFlag(PathFlags::rrSpecHitPending, false);
+        RWTexture2D<float>.Handle(uint2(pushConstant.rrSpecularHitDistanceStorageIndex, 0))[uint2(path.id & 0xFFFFu, path.id >> 16)] =
+            Bridge::rrSkySpecularDistance(ubo);
+    }
+
     path.terminate();
     payload = PathPayload::pack(path);
 }

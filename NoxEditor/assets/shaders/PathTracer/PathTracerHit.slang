@@ -112,7 +112,12 @@ void writeSplitRRGuides(uint2 pixel, Bridge::SurfaceData pane, float3 thp, Delta
             dominantPosition = base.shadingData.posW;
     }
     const float3 mirrorOrigin = ComputeRayOrigin(pane.shadingData.posW, dot(reflected.dir, paneN) < 0.0 ? -paneN : paneN);
-    if (rrPlaneBase(mirrorOrigin, reflected.dir, rayConeWidth, ubo, base, hitT))
+    const bool mirrorHit = rrPlaneBase(mirrorOrigin, reflected.dir, rayConeWidth, ubo, base, hitT);
+    // The pane is RTXPT's plane 0, the mirror its specular motion vectors use: what the pane reflects moves as its mirror image does.
+    // The guides' own roughness gate (RTXPT: below 0.25) is not applied -- a smooth pane's reflection is a mirror whatever lies behind.
+    const float2 specularMotion = Bridge::rrSpecularMotionVector(ubo, pane.shadingData.posW, -pane.shadingData.V,
+                                                                 reflected.dir * (mirrorHit ? hitT : Bridge::rrSkySpecularDistance(ubo)));
+    if (mirrorHit)
     {
         diffuse += weights.z * base.rrDiffuseAlbedo;
         specular += weights.z * base.rrSpecularAlbedo;
@@ -129,7 +134,10 @@ void writeSplitRRGuides(uint2 pixel, Bridge::SurfaceData pane, float3 thp, Delta
     RWTexture2D<float4>.Handle(uint2(pushConstant.rrNormalRoughnessStorageIndex, 0))[pixel] =
         float4(normalLength >= 1e-5 ? normal / normalLength : float3(0.0, 0.0, 1.0), roughness);
     if (pushConstant.rrDepthStorageIndex != 0xFFFFFFFF)
+    {
         writeRRDepthMotion(pixel, dominantPosition, ubo);
+        RWTexture2D<float2>.Handle(uint2(pushConstant.rrSpecularMotionStorageIndex, 0))[pixel] = specularMotion;
+    }
 }
 
 [shader("closesthit")]
@@ -211,14 +219,21 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
     if (any(surface.absorptionCoefficient > 0.0))
         path.thp *= exp(-surface.absorptionCoefficient * rayT);
 
-    // RR's specular hit distance (RTXPT's specHitT): how far the ray leaving the guide surface went -- the length of its reflection
-    // ray. It used to be this segment's length whenever the guide surface was not the first hit: behind a pane, the few millimetres
-    // from the glass to the menu, telling RR the menu's reflections lay on the menu itself.
-    if (path.hasFlag(PathFlags::rrSpecHitPending))
+    // Only delta lobes (smooth glass, mirrors): no light sampling here, the stable planes go on through it.
+    const bool hasNonDeltaLobes = (FalcorBSDF::getLobes(surface.bsdf.data) & LobeType::NonDelta) != 0;
+
+    // RR's specular hit distance (RTXPT ExportSpecHitTStop): from the guide surface's specular scatter to the first surface that is
+    // not a mirror or clear glass (it held minus the scene length at the scatter). PathTracerRayGen.slang turns it into RR's specular
+    // motion vectors.
+    if (path.hasFlag(PathFlags::rrSpecHitPending) && hasNonDeltaLobes)
     {
         path.setFlag(PathFlags::rrSpecHitPending, false);
         if (pushConstant.rrSpecularHitDistanceStorageIndex != 0xFFFFFFFF)
-            RWTexture2D<float>.Handle(uint2(pushConstant.rrSpecularHitDistanceStorageIndex, 0))[uint2(path.id & 0xFFFFu, path.id >> 16)] = rayT;
+        {
+            RWTexture2D<float> specHitT = RWTexture2D<float>.Handle(uint2(pushConstant.rrSpecularHitDistanceStorageIndex, 0));
+            const uint2 pixel = uint2(path.id & 0xFFFFu, path.id >> 16);
+            specHitT[pixel] = max(0.0, path.sceneLength + specHitT[pixel]);
+        }
     }
 
     // RTXPT exports depth and motion from its chosen path surface rather than from a separate raster pass (jitter-free matrices
@@ -322,7 +337,6 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
                                                                                   : pushConstant.neeCandidateSamples;
     // No light sampling on a surface with only delta lobes (smooth glass, mirrors): no direction of light could be weighed, RTXPT
     // skips it (PathTracerNEE.hlsli) -- the light beyond is found by the path going on.
-    const bool hasNonDeltaLobes = (FalcorBSDF::getLobes(surface.bsdf.data) & LobeType::NonDelta) != 0;
     float3 directDiffuse = float3(0.0), directSpecular = float3(0.0);
     float3 directLight = !hasNonDeltaLobes ? float3(0.0) : PathTracer::evaluateNEE(
         surface.shadingData, surface.bsdf, as, ubo, rngState,
@@ -446,7 +460,16 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
         ((sampleResult.lobe & LobeType::Transmission) == 0 || (sampleResult.lobe & LobeType::Delta) == 0))
     {
         path.setFlag(PathFlags::deltaOnlyPath, false);
-        path.setFlag(PathFlags::rrSpecHitPending, true); // this is RR's guide surface: the next segment is its specular hit distance
+        // This is RR's guide surface. A specular scatter off it (not diffuse, roughness up to 0.35) starts its specular hit distance
+        // (RTXPT ExportSpecHitTStart: minus the scene length so far); otherwise there is none.
+        if (pushConstant.rrSpecularHitDistanceStorageIndex != 0xFFFFFFFF)
+        {
+            const bool specularScatter = (sampleResult.lobe & (LobeType::DiffuseReflection | LobeType::DiffuseTransmission)) == 0 &&
+                                         surface.rrRoughness <= 0.35;
+            RWTexture2D<float>.Handle(uint2(pushConstant.rrSpecularHitDistanceStorageIndex, 0))[uint2(path.id & 0xFFFFu, path.id >> 16)] =
+                specularScatter ? -path.sceneLength : 0.0;
+            path.setFlag(PathFlags::rrSpecHitPending, specularScatter);
+        }
     }
     path.setFlag(PathFlags::transmission, (sampleResult.lobe & LobeType::Transmission) != 0);
     path.setFlag(PathFlags::specular, (sampleResult.lobe & LobeType::Specular) != 0);

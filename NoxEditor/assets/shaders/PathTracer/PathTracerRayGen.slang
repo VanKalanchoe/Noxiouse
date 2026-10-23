@@ -47,7 +47,7 @@ void rayGenMain()
         const float2 skyMotion = (skyPrevClip.xy / skyPrevClip.w - skyCurrClip.xy / skyCurrClip.w) * float2(0.5, -0.5);
         rrMotion[pixelPos] = skyMotion;
         rrSpecularMotion[pixelPos] = skyMotion;
-        rrSpecularHitDistance[pixelPos] = 65504.0;
+        rrSpecularHitDistance[pixelPos] = 0.0; // none (RTXPT's default)
     }
 
     // Iterative Wavefront/Bounce Loop, then the branch the first smooth glass left (PathTracerHit.slang), if any.
@@ -105,6 +105,28 @@ void rayGenMain()
         if (Average(diffuseAlbedo + specularAlbedo) < 0.05)
             diffuseAlbedo += 0.05;
         rrDiffuse[pixelPos] = float4(saturate(diffuseAlbedo), 1.0);
+
+        // RTXPT's specular motion vectors (PostProcess.hlsl, "compute specular MVs from hitT"): where the guide surface is smooth
+        // (roughness below 0.25) and its specular hit distance is known, what it reflects moves as its mirror image does, not with the
+        // surface -- RR moved reflections with the floor, the table, the puddle under them, and they smeared as the camera moved. A
+        // glass split wrote its own (the pane as the mirror, PathTracerHit.slang writeSplitRRGuides).
+        if (!path.hasFlag(PathFlags::rrGuidesDone))
+        {
+            const float specularHitDistance = RWTexture2D<float>.Handle(uint2(pushConstant.rrSpecularHitDistanceStorageIndex, 0))[pixelPos];
+            const float4 normalRoughness = RWTexture2D<float4>.Handle(uint2(pushConstant.rrNormalRoughnessStorageIndex, 0))[pixelPos];
+            const float depth = RWTexture2D<float>.Handle(uint2(pushConstant.rrDepthStorageIndex, 0))[pixelPos];
+            if (specularHitDistance > 1e-3 && normalRoughness.w < 0.25 && depth > 0.0)
+            {
+                // The guide surface's point on this pixel's ray (its depth was written with the jittered projection).
+                const float2 ndc = (float2(pixelPos) + 0.5) / pushConstant.viewportSize * float2(2.0, -2.0) + float2(-1.0, 1.0);
+                const float4 world = mul(ubo->invViewProj, float4(ndc, depth, 1.0));
+                const float3 hitPosition = world.xyz / world.w;
+                const float3 rayDirection = normalize(hitPosition - ubo->cameraWorldPos.xyz);
+                const float3 reflection = reflect(rayDirection, normalize(normalRoughness.xyz)) * specularHitDistance;
+                RWTexture2D<float2>.Handle(uint2(pushConstant.rrSpecularMotionStorageIndex, 0))[pixelPos] =
+                    Bridge::rrSpecularMotionVector(ubo, hitPosition, rayDirection, reflection);
+            }
+        }
     }
 
     // The air and the height fog between the camera and what its ray hit first (the sky: the height fog alone, as the skybox

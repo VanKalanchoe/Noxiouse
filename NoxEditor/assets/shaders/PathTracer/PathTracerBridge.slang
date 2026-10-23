@@ -436,4 +436,24 @@ namespace Bridge
         TextureCube skybox = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + skyboxTextureIndex, 0));
         return skybox.SampleLevel(sampler, dir, lod).rgb * ubo->scaleIBLAmbient;
     }
+
+    // RR's specular hit distance for a reflection that reaches the sky: its mirror image at infinity (only the camera's turning moves
+    // it). RTXPT records the distance travelled so far there (often 0: the reflection then moved with the surface, smearing the sky
+    // in windows and puddles).
+    float rrSkySpecularDistance(UniformBufferObject* ubo)
+    {
+        return 10000.0 * ubo->unitsPerMeter;
+    }
+
+    // DLSS-RR's specular motion vector (RTXPT PostProcess.hlsl ComputeSpecularMotionVector): a planar reflector at the primary hit
+    // shows the reflected point mirrored behind it, `reflectionRay` (its length the specular hit distance) further along the camera's
+    // ray -- that image's motion between the frames, camera motion only. In the motion vectors' units (uv, current to previous).
+    float2 rrSpecularMotionVector(UniformBufferObject* ubo, float3 primaryHitPos, float3 primaryRayDir, float3 reflectionRay)
+    {
+        // RTXPT builds the image in the reflector's basis (its z mirrored); its distance along the camera's ray is the ray's length.
+        const float3 image = primaryHitPos + primaryRayDir * length(reflectionRay);
+        const float4 currClip = mul(ubo->nonJitteredProj, mul(ubo->view, float4(image, 1.0)));
+        const float4 prevClip = mul(ubo->prevProj, mul(ubo->prevView, float4(image, 1.0)));
+        return (prevClip.xy / prevClip.w - currClip.xy / currClip.w) * float2(0.5, -0.5);
+    }
 }
