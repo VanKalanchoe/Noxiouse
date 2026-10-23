@@ -1070,8 +1070,9 @@ struct PushConstantRRGuides
     uint32_t gbufferMaterialIndex;
     uint32_t diffuseAlbedoStorageIndex;
     uint32_t specularAlbedoStorageIndex;
-    uint32_t rawReflectionIndex;      // RT reflections (alpha: hit distance), 0xFFFFFFFF when they did not run
-    uint32_t hitDistanceStorageIndex; // specular hit distance guide, written when rawReflectionIndex is valid
+    uint32_t rawReflectionIndex;         // RT reflections (alpha: hit distance), 0xFFFFFFFF when they did not run
+    uint32_t velocityTextureIndex;       // the G-buffer's motion vectors
+    uint32_t specularMotionStorageIndex; // DLSS-RR's specular motion vectors (RTXPT's), written every frame
     uint32_t width;
     uint32_t height;
 };

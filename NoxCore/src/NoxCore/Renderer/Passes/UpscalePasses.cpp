@@ -22,12 +22,9 @@ namespace Nox
         // The plain path tracer writes guides from its actual primary surface and the first specular/transmission segment.
         // Raster/deferred rendering still prepares guides from the G-buffer here.
         const bool pathTracerGuides = rayReconstruction && frame.pathTracerActive && !frame.restirPTActive;
-        // Match RTXPT's shipping/default DLSS-RR path: its sample deliberately disables SpecularHitDistance
-        // ("it's buggy") and supplies SpecularMotionVectors for path tracing instead. A single stochastic path
-        // cannot provide a dense, stable hit-distance field; tagging it makes static glass retain the reflected
-        // history until motion happens to invalidate it. Hybrid reflections still have a dense hit-distance buffer.
-        const bool hitDistance = rayReconstruction && frame.rtReflectionsAdded &&
-            !frame.restirPTActive && !frame.pathTracerActive;
+        // RTXPT's DLSS-RR inputs: specular motion vectors, never the specular hit distance (its sample turns that off, "it's buggy").
+        // The path tracer writes its own; the hybrid's come from the RT reflections' hit distance (RRGuides.slang).
+        const bool reflectionDistance = rayReconstruction && frame.rtReflectionsAdded && !frame.restirPTActive && !frame.pathTracerActive;
         if (rayReconstruction && !pathTracerGuides)
         {
             m_renderGraph.AddPass("RR Guides", RGPassFlags::None,
@@ -39,13 +36,12 @@ namespace Nox
                     builder.Read(resources.GBufferMaterial);
                     builder.Write(resources.RRDiffuseAlbedo, RGTextureAccess::StorageWrite);
                     builder.Write(resources.RRSpecularAlbedo, RGTextureAccess::StorageWrite);
-                    if (hitDistance)
-                    {
+                    builder.Read(resources.GBufferVelocity);
+                    builder.Write(resources.RRSpecularMotionVectors, RGTextureAccess::StorageWrite);
+                    if (reflectionDistance)
                         builder.Read(resources.RawReflection);
-                        builder.Write(resources.RRSpecularHitDistance, RGTextureAccess::StorageWrite);
-                    }
                 },
-                [this, res = &resources, hitDistance](RGPassContext& context)
+                [this, res = &resources, reflectionDistance](RGPassContext& context)
                 {
                     shaderio::PushConstantRRGuides push{};
                     push.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
@@ -55,8 +51,9 @@ namespace Nox
                     push.gbufferMaterialIndex = context.Slot(res->GBufferMaterial);
                     push.diffuseAlbedoStorageIndex = context.StorageSlot(res->RRDiffuseAlbedo);
                     push.specularAlbedoStorageIndex = context.StorageSlot(res->RRSpecularAlbedo);
-                    push.rawReflectionIndex = hitDistance ? context.Slot(res->RawReflection) : 0xFFFFFFFF;
-                    push.hitDistanceStorageIndex = hitDistance ? context.StorageSlot(res->RRSpecularHitDistance) : 0xFFFFFFFF;
+                    push.rawReflectionIndex = reflectionDistance ? context.Slot(res->RawReflection) : 0xFFFFFFFF;
+                    push.velocityTextureIndex = context.Slot(res->GBufferVelocity);
+                    push.specularMotionStorageIndex = context.StorageSlot(res->RRSpecularMotionVectors);
                     push.width = m_frame.renderExtent.width;
                     push.height = m_frame.renderExtent.height;
 
@@ -77,12 +74,12 @@ namespace Nox
                 {
                     builder.Read(resources.RRDiffuseAlbedo);
                     builder.Read(resources.RRSpecularAlbedo);
+                    builder.Read(resources.RRSpecularMotionVectors);
                     if (pathTracerGuides)
                     {
                         builder.Read(resources.RRNormalRoughness);
                         builder.Read(resources.RRPathDepth);
                         builder.Read(resources.RRPathMotionVectors);
-                        builder.Read(resources.RRSpecularMotionVectors);
                     }
                     else
                     {
@@ -90,12 +87,10 @@ namespace Nox
                         builder.Read(resources.GBufferMaterial);
                     }
                 }
-                if (hitDistance)
-                    builder.Read(resources.RRSpecularHitDistance);
                 builder.Write(resources.DLSSOutput);
                 builder.RecordExclusive("Streamline");
             },
-            [this, res = &resources, rayReconstruction, pathTracerGuides, hitDistance](RGPassContext& context)
+            [this, res = &resources, rayReconstruction, pathTracerGuides](RGPassContext& context)
             {
                 NRI::CommandBuffer& cmd = context.Cmd();
                 const FrameGraphState& frame = m_frame;
@@ -119,11 +114,11 @@ namespace Nox
                 {
                     dlssParams.albedo = &context.Texture(res->RRDiffuseAlbedo);
                     dlssParams.specularAlbedo = &context.Texture(res->RRSpecularAlbedo);
+                    dlssParams.specularMotionVectors = &context.Texture(res->RRSpecularMotionVectors);
                     if (pathTracerGuides)
                     {
                         dlssParams.normal = &context.Texture(res->RRNormalRoughness);
                         dlssParams.normalRoughnessPacked = true;
-                        dlssParams.specularMotionVectors = &context.Texture(res->RRSpecularMotionVectors);
                     }
                     else
                     {
@@ -131,8 +126,6 @@ namespace Nox
                         dlssParams.roughness = &context.Texture(res->GBufferMaterial);
                     }
                 }
-                if (hitDistance)
-                    dlssParams.specularHitDistance = &context.Texture(res->RRSpecularHitDistance);
                 dlssParams.rayReconstruction = rayReconstruction;
                 dlssParams.commandBuffer = &cmd;
 

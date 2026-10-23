@@ -3,9 +3,10 @@
 // DLSS Ray Reconstruction guides (Streamline docs/ProgrammingGuideDLSS_RR.md 4.1.1, 4.1.2, 4.2.1). RR divides the lit
 // image by the diffuse and specular albedo, denoises the lighting and multiplies back, so both must be the reflectance
 // the image was shaded with: the diffuse and specular color of DeferredLighting.slang, the specular pre-integrated over
-// the view angle and roughness (EnvBRDFApprox2, as given by the guide). With RT reflections, also the specular hit
-// distance (4.1.9): the world-space distance from the primary surface to what its reflection ray hit, which RR needs to
-// move reflections with the camera.
+// the view angle and roughness (EnvBRDFApprox2, as given by the guide). And how reflections move: RTXPT's specular motion
+// vectors (PostProcess.hlsl, ComputeSpecularMotionVector), not the specular hit distance -- RTXPT turns that input off ("it's
+// buggy"). Tagged with the hit distance, RR moved the reflections' history from the wrong places: a string light's reflection
+// in a smooth floor came out as the sign's letter above it, where NRD (and the path tracer) showed the bulb.
 
 // Streamline DLSS-RR programming guide 4.2.1 [Ray Tracing Gems, Chapter 32].
 float3 EnvBRDFApprox2(float3 SpecularColor, float alpha, float NoV)
@@ -43,13 +44,10 @@ void guidesMain(uint3 dispatchThreadID : SV_DispatchThreadID, uniform PushConsta
     UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
     RWTexture2D<float4> diffuseOut = RWTexture2D<float4>.Handle(uint2(pushConstant.diffuseAlbedoStorageIndex, 0));
     RWTexture2D<float4> specularOut = RWTexture2D<float4>.Handle(uint2(pushConstant.specularAlbedoStorageIndex, 0));
-    if (pushConstant.rawReflectionIndex != 0xFFFFFFFF)
-    {
-        Texture2D reflectionTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.rawReflectionIndex, 0));
-        RWTexture2D<float> hitDistanceOut = RWTexture2D<float>.Handle(uint2(pushConstant.hitDistanceStorageIndex, 0));
-        // A ray that missed or was not traced: Reflection.slang wrote reflection_miss_distance (shaderIO.h) in its alpha.
-        hitDistanceOut[pixel] = min(reflectionTex.Load(int3(pixel, 0)).a, reflection_miss_distance(ubo));
-    }
+    // The specular motion vectors: the surface's own where nothing better is known (RTXPT's default).
+    Texture2D<float2> velocityTex = Texture2D<float2>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.velocityTextureIndex, 0));
+    RWTexture2D<float2> specularMotionOut = RWTexture2D<float2>.Handle(uint2(pushConstant.specularMotionStorageIndex, 0));
+    specularMotionOut[pixel] = velocityTex.Load(int3(pixel, 0));
 
     // Background (reverse-Z: nothing drawn at depth 0): no reflectance, as the G-buffer clears it.
     Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
@@ -93,4 +91,22 @@ void guidesMain(uint3 dispatchThreadID : SV_DispatchThreadID, uniform PushConsta
 
     diffuseOut[pixel] = float4(diffuseColor, 1.0);
     specularOut[pixel] = float4(EnvBRDFApprox2(specularColor, roughness * roughness, NoV), 1.0);
+
+    // RTXPT's specular motion vectors (PostProcess.hlsl): on a smooth surface (roughness below 0.25, kSpecularRoughnessThreshold)
+    // with a traced reflection, the reflected point's mirror image behind the surface -- as far along the camera's ray as the
+    // reflection ray went (a miss: the sky, far away) -- moves as the camera does; its motion is the reflection's.
+    if (pushConstant.rawReflectionIndex != 0xFFFFFFFF && roughness < 0.25)
+    {
+        Texture2D reflectionTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.rawReflectionIndex, 0));
+        // A ray that missed: Reflection.slang wrote reflection_miss_distance (shaderIO.h) in its alpha.
+        const float hitDistance = min(reflectionTex.Load(int3(pixel, 0)).a, reflection_miss_distance(ubo));
+        if (hitDistance > 1e-3 * ubo->unitsPerMeter)
+        {
+            const float3 image = worldPos + normalize(worldPos - ubo->cameraWorldPos.xyz) * hitDistance;
+            const float4 currClip = mul(ubo->nonJitteredProj, mul(ubo->view, float4(image, 1.0)));
+            const float4 prevClip = mul(ubo->prevProj, mul(ubo->prevView, float4(image, 1.0)));
+            if (currClip.w > 1e-6 && prevClip.w > 1e-6)
+                specularMotionOut[pixel] = (prevClip.xy / prevClip.w - currClip.xy / currClip.w) * float2(0.5, -0.5); // as the G-buffer's
+        }
+    }
 }
