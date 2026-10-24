@@ -396,6 +396,12 @@ namespace Nox
             m_World->SetShowHLODs(m_ShowHLODsBefore);
     }
 
+    void HLODBuilder::CollectAssetReferences(std::unordered_set<AssetHandle>& outHandles) const
+    {
+        if (m_Work && m_Work->CellScene)
+            m_Work->CellScene->CollectAssetReferences(outHandles);
+    }
+
     float HLODBuilder::GetProgress() const
     {
         return m_Cells.empty() ? 1.0f : static_cast<float>(m_Next) / static_cast<float>(m_Cells.size());

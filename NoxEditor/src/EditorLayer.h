@@ -11,6 +11,7 @@
 #include "Panels/ContentBrowserPanel.h"
 #include "Panels/ProfilerPanel.h"
 #include "Panels/WorldPartitionPanel.h"
+#include "NoxCore/Scene/HLODBuilder.h"
 #include "Panels/RenderGraphPanel.h"
 #include "Panels/NodeGraphEditorPanel.h"
 #include "Panels/MaterialEditorPanel.h"
@@ -316,6 +317,10 @@ namespace Nox
         Scope<RenderGraphPanel> m_RenderGraphPanel;
         ProfilerPanel m_ProfilerPanel;
         WorldPartitionPanel m_WorldPartitionPanel;
+        // Build HLODs, while it runs (stepped every frame; Play, another scene, undo cancel it).
+        Scope<HLODBuilder> m_HLODBuild;
+        void StartHLODBuild();
+        void CancelHLODBuild(const char* reason);
         // A world's cells were loading or unloading last frame: once done, the undo history starts again (loading is not a step).
         bool m_WorldCellsBusy = false;
         // Open node-graph editors (docs/Animation_Graph_Architecture_Plan_2026.md Step 3), one per opened graph

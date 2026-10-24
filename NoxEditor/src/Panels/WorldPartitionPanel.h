@@ -10,6 +10,7 @@
 namespace Nox
 {
     class Scene;
+    class HLODBuilder;
 
     // World partition (docs/Engine_Architecture_Plan_2026.md §5.13.1), like Unreal's World Partition window: the world's cells on a
     // top-down map -- their state (unloaded, loading, loaded), their content bounds, the editor camera and its loading range -- to
@@ -20,6 +21,12 @@ namespace Nox
     public:
         // Saves the scene (unloading a changed cell asks to save first).
         void SetSaveCallback(std::function<void()> save) { m_Save = std::move(save); }
+        // Build HLODs (the editor saves, builds over the next frames, and saves again); the build running, if any.
+        void SetBuildHLODsCallback(std::function<void()> build, std::function<const HLODBuilder*()> running)
+        {
+            m_BuildHLODs = std::move(build);
+            m_RunningBuild = std::move(running);
+        }
 
         // `scene`: the scene shown (the editor's while editing, the running copy in Play / Simulate); `editing`: cells can be changed.
         void OnImGuiRender(const Ref<Scene>& scene, const glm::vec3& cameraPosition, bool editing);
@@ -33,6 +40,7 @@ namespace Nox
         void DrawSettings(Scene& scene, bool editing);
         void DrawToolbar(Scene& scene, const glm::vec3& cameraPosition, bool editing);
         void DrawMap(Scene& scene, const glm::vec3& cameraPosition, bool editing);
+        void DrawHLODs(Scene& scene, bool editing);
         void DrawUnloadPrompt(Scene& scene);
         // Unloads the cells, asking first when one has unsaved changes.
         void RequestUnload(Scene& scene, std::vector<WorldCellCoord> cells);
@@ -51,5 +59,7 @@ namespace Nox
         WorldPartitionSettings m_NewSettings;  // the convert / cell size fields
         const Scene* m_SettingsScene = nullptr; // the scene they were taken from
         std::function<void()> m_Save;
+        std::function<void()> m_BuildHLODs;
+        std::function<const HLODBuilder*()> m_RunningBuild;
     };
 }

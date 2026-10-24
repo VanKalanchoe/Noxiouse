@@ -1254,7 +1254,7 @@ volume or a script.
   (by hand): open it, load / unload cells in the panel, move a pillar into an unloaded cell and save (it joins that cell's file, which
   then loads), Play with unsaved changes, convert a scene and save.
 
-#### 5.13.2 6c-3: HLOD (designed 2026-10-24)
+#### 5.13.2 6c-3: HLOD (built 2026-10-24)
 
 Unreal 5's World Partition HLOD (HLOD layer "Approximated Mesh": a merged, simplified shell with baked materials): what is far
 away stays on screen as one cheap mesh per cell after the cell itself has streamed out.
@@ -1285,6 +1285,13 @@ away stays on screen as one cheap mesh per cell after the cell itself has stream
   (the HLOD grid streams around the editor camera while editing, so the unloaded world is visible as its HLODs). HLOD entities are
   generated: never saved into the scene file or a world cell, never an undo step.
 - **Not in the first HLOD:** HLOD levels above HLOD0 (HLODs of HLODs), instanced HLODs, baking ambient occlusion.
+- **Code:** `Scene/HLODBake` (geometry and bake, engine independent), `Scene/HLODBuilder` (per cell: spawn, read, bake, import; the
+  HLOD grid written), `Scene/WorldPartition.cpp` (HLOD grid streaming, `UpdateHLODVisibility`), `Panels/WorldPartitionPanel` (HLOD
+  section). Vendors: xatlas, bcdec (submodules). Building is cancelled by Play, Simulate, opening or creating a scene and prefab
+  editing (the HLODs imported so far stay; the HLOD grid is written only by a finished build); undo waits for it.
+- **Test:** split a large scene (Bistro: Split Into Separate Entities), convert it (e.g. 32 m cells, 64-100 m loading range), save,
+  Build HLODs; with Show HLODs, move the editor camera away: unloaded cells show as their HLODs, loaded cells hide theirs. Then Play:
+  the cells stream around the player and the HLODs fill the distance, without a frame of hole or double drawing at the boundary.
 
 ### 5.14 Ray Tracing at Scale
 
@@ -1355,7 +1362,7 @@ flight, targeted texture-slot cache eviction. Future:
 | **6a** | Texture streaming | 5 | BC cooking for all sources, mip tail, GPU mip feedback, residency + eviction | Scene textures exceeding the texture budget render correctly with mip reduction |
 | **6b** | Geometry streaming & LOD | 5 | Cluster hierarchy cook, GPU cut selection (**done, 6b-1**), page streaming pool (paused, §5.7.1), RT fallback LOD (reverted, D8) | Geometry exceeding the geometry budget renders with streaming; no popping beyond threshold |
 | **6c-0** | Level streaming | 5 | Additive scene load / unload, Level Streaming Volumes, script API (§5.12a: **built 2026-10-23**) | A level streams in and out around the camera without a stall |
-| **6c** | World streaming | 6a, 6b, 6c-0 | Grid cells, per-cell files, cell streaming, editor (§5.13.1: **6c-1 built 2026-10-24**), activation stages (6c-2), HLOD (6c-3), cooked cells | Test world larger than RAM/VRAM traversable without stalls |
+| **6c** | World streaming | 6a, 6b, 6c-0 | Grid cells, per-cell files, cell streaming, editor (§5.13.1: **6c-1 built 2026-10-24**), activation stages (6c-2), HLOD (§5.13.2: **6c-3 built 2026-10-24**), cooked cells | Test world larger than RAM/VRAM traversable without stalls |
 | **7** | Continuous optimization | all | Profile-driven work, VT, DirectStorage, async compute expansion | Ongoing |
 
 Phases 1, 2 and 3 are architecture-defining and each gets its own plan-mode design before code.

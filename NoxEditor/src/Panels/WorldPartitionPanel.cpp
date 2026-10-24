@@ -9,6 +9,7 @@
 #include <imgui.h>
 
 #include "NoxCore/Core/WorldUnits.h"
+#include "NoxCore/Scene/HLODBuilder.h"
 #include "NoxCore/Scene/Scene.h"
 
 namespace Nox
@@ -25,10 +26,11 @@ namespace Nox
 
         std::vector<WorldCellCoord> AllCells(const Scene& scene)
         {
-            // The indexed cells and the ones loaded without a file yet (new, or emptied and not saved).
+            // The world's indexed cells (not the HLOD grid's) and the ones loaded without a file yet (new, or emptied and not saved).
             std::set<WorldCellCoord> cells;
             for (const auto& [cell, info] : scene.GetWorldPartition().Cells)
-                cells.insert(cell);
+                if (cell.Grid == WorldGrid::WorldGridIndex)
+                    cells.insert(cell);
             for (const WorldCellCoord& cell : scene.GetLoadedWorldCells(true))
                 cells.insert(cell);
             // Big cells first: the small ones are drawn over them.
@@ -58,6 +60,7 @@ namespace Nox
         DrawSettings(*scene, editing);
         if (scene->IsWorldPartitioned())
         {
+            DrawHLODs(*scene, editing);
             DrawToolbar(*scene, cameraPosition, editing);
             DrawMap(*scene, cameraPosition, editing);
         }
@@ -108,7 +111,7 @@ namespace Nox
             m_NewSettings.LoadingRange = world.Settings.LoadingRange;
         bool allLoaded = true;
         for (const auto& [cell, info] : world.Cells)
-            allLoaded &= scene.GetWorldCellState(cell) == Scene::LevelState::Loaded;
+            allLoaded &= cell.Grid != WorldGrid::WorldGridIndex || scene.GetWorldCellState(cell) == Scene::LevelState::Loaded;
         ImGui::BeginDisabled(!allLoaded);
         ImGui::DragFloat("Cell Size (m)", &m_NewSettings.CellSize, 1.0f, 8.0f, 4096.0f, "%.0f");
         ImGui::SameLine();
@@ -129,7 +132,7 @@ namespace Nox
     void WorldPartitionPanel::DrawToolbar(Scene& scene, const glm::vec3& cameraPosition, bool editing)
     {
         const WorldPartition& world = scene.GetWorldPartition();
-        size_t loaded = 0, loading = 0, entities = 0;
+        size_t cells = 0, loaded = 0, loading = 0, entities = 0;
         for (const WorldCellCoord& cell : scene.GetLoadedWorldCells(true))
         {
             if (scene.GetWorldCellState(cell) == Scene::LevelState::Loaded)
@@ -138,8 +141,13 @@ namespace Nox
                 ++loading;
         }
         for (const auto& [cell, info] : world.Cells)
+        {
+            if (cell.Grid != WorldGrid::WorldGridIndex)
+                continue;
+            ++cells;
             entities += info.Entities;
-        ImGui::Text("%zu cells, %zu loaded, %zu loading, %zu entities in cells", world.Cells.size(), loaded, loading, entities);
+        }
+        ImGui::Text("%zu cells, %zu loaded, %zu loading, %zu entities in cells", cells, loaded, loading, entities);
         if (!editing)
             ImGui::TextDisabled("Play / Simulate: cells stream around the camera and streaming sources");
 
@@ -150,10 +158,11 @@ namespace Nox
         ImGui::SameLine();
         if (ImGui::Button("Load All"))
         {
-            std::vector<WorldCellCoord> cells;
+            std::vector<WorldCellCoord> all;
             for (const auto& [cell, info] : world.Cells)
-                cells.push_back(cell);
-            scene.LoadWorldCells(cells);
+                if (cell.Grid == WorldGrid::WorldGridIndex)
+                    all.push_back(cell);
+            scene.LoadWorldCells(all);
         }
         ImGui::SameLine();
         if (ImGui::Button("Unload All"))
@@ -170,6 +179,56 @@ namespace Nox
         ImGui::Checkbox("Follow Camera", &m_FollowCamera);
         ImGui::SameLine();
         ImGui::Checkbox("Show in Viewport", &m_ShowInViewport);
+    }
+
+    void WorldPartitionPanel::DrawHLODs(Scene& scene, bool editing)
+    {
+        WorldPartition& world = scene.GetWorldPartition();
+        size_t hlodCells = 0, hlods = 0;
+        for (const auto& [cell, info] : world.Cells)
+        {
+            if (cell.Grid != WorldGrid::HLODGridIndex)
+                continue;
+            ++hlodCells;
+            hlods += info.Entities;
+        }
+        const HLODBuilder* running = m_RunningBuild ? m_RunningBuild() : nullptr;
+        if (running)
+        {
+            ImGui::ProgressBar(running->GetProgress(), ImVec2(-1.0f, 0.0f), running->GetStage().c_str());
+            return;
+        }
+        if (!ImGui::CollapsingHeader("HLOD"))
+        {
+            ImGui::SameLine();
+            ImGui::TextDisabled(hlods ? "%zu HLODs" : "none built", hlods);
+            return;
+        }
+        // Unreal's World Partition HLODs: every cell's static meshes merged, simplified and baked into one mesh, shown while the cell is out.
+        bool show = scene.GetShowHLODs();
+        if (ImGui::Checkbox("Show HLODs", &show))
+            scene.SetShowHLODs(show);
+        ImGui::SetItemTooltip("While editing, the HLODs stream around the editor camera: the cells not loaded show as their HLODs.");
+        ImGui::Text("%zu HLODs in %zu HLOD cells", hlods, hlodCells);
+        ImGui::BeginDisabled(!editing);
+        ImGui::DragFloat("HLOD Cell Size (m)", &world.Settings.HLODCellSize, 1.0f, 8.0f, 16384.0f, "%.0f");
+        ImGui::DragFloat("HLOD Loading Range (m)", &world.Settings.HLODLoadingRange, 1.0f, 8.0f, 65536.0f, "%.0f");
+        ImGui::SetItemTooltip("How far the HLODs stream: beyond the world's loading range, where the cells themselves are out.");
+        ImGui::DragFloat("Simplification Error (m)", &world.Settings.HLODError, 0.01f, 0.01f, 100.0f, "%.2f");
+        ImGui::SetItemTooltip("How far the HLOD's surface may stray from the cell's (and smaller parts are left out). About a pixel at the\n"
+                              "distance the HLOD is first seen: 0.5 m suits a loading range of a few hundred meters.");
+        int maxTriangles = static_cast<int>(world.Settings.HLODMaxTriangles);
+        if (ImGui::DragInt("Max Triangles", &maxTriangles, 100.0f, 100, 1000000))
+            world.Settings.HLODMaxTriangles = static_cast<uint32_t>(std::max(maxTriangles, 100));
+        ImGui::DragFloat("Texels per Meter", &world.Settings.HLODTexelsPerMeter, 0.1f, 0.25f, 64.0f, "%.2f");
+        ImGui::SetItemTooltip("The baked textures' density (power of two sizes 128-2048, the atlas filled).");
+        ImGui::BeginDisabled(!m_BuildHLODs);
+        if (ImGui::Button("Build HLODs"))
+            m_BuildHLODs();
+        ImGui::EndDisabled();
+        ImGui::SetItemTooltip("Saves the scene, builds an HLOD for every cell from its file (on workers; the editor stays usable), imports\n"
+                              "them, writes the HLOD grid and saves again.");
+        ImGui::EndDisabled();
     }
 
     void WorldPartitionPanel::DrawMap(Scene& scene, const glm::vec3& cameraPosition, bool editing)

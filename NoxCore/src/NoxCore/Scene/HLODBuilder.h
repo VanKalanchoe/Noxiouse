@@ -2,6 +2,7 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <unordered_set>
 #include <vector>
 #include <glm/glm.hpp>
 
@@ -36,6 +37,9 @@ namespace Nox
         float GetProgress() const;
         const std::string& GetStage() const { return m_Stage; }
         size_t GetBuiltCount() const { return m_Entries.size(); }
+        // What the cell being built holds (its models and prefabs, loading for its instances to spawn): kept by the editor's sweep of
+        // unused assets.
+        void CollectAssetReferences(std::unordered_set<AssetHandle>& outHandles) const;
 
     private:
         struct CellWork;

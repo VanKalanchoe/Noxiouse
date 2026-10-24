@@ -117,6 +117,7 @@ namespace Nox
         m_Renderer = app.GetRenderer();
         m_RenderGraphPanel = CreateScope<RenderGraphPanel>(m_Renderer);
         m_WorldPartitionPanel.SetSaveCallback([this]() { SaveScene(); });
+        m_WorldPartitionPanel.SetBuildHLODsCallback([this]() { StartHLODBuild(); }, [this]() { return m_HLODBuild.get(); });
         m_Renderer2D = m_Renderer->getRenderer2D();
 
         m_AssetOpeners[AssetType::AnimationGraph] = [this](AssetHandle handle) { OpenNodeGraphEditor(handle); };
@@ -301,6 +302,16 @@ namespace Nox
         // A scene being opened: a slice of its entities each frame (8 ms), swapped in once complete.
         if (m_SceneLoad && m_SceneLoad->Step(8.0))
             FinishSceneLoad();
+        // Build HLODs: a step a frame; done, the scene is saved (its index names the new HLOD cells).
+        if (m_HLODBuild && m_HLODBuild->Step())
+        {
+            const bool failed = m_HLODBuild->Failed();
+            const size_t built = m_HLODBuild->GetBuiltCount();
+            m_HLODBuild.reset();
+            if (!failed)
+                SaveScene();
+            NOX_CORE_INFO("Build HLODs: {} ({} HLODs)", failed ? "failed (see above)" : "done", built);
+        }
         UpdatePrefabModeDirty();
         m_ScriptBuilder.Update();
 
@@ -2649,6 +2660,7 @@ namespace Nox
 
     void EditorLayer::NewScene()
     {
+        CancelHLODBuild("new scene");
         SaveEditorCameras();
         EndTimelinePreviews();
         m_HoveredEntity = Entity();
@@ -2695,6 +2707,7 @@ namespace Nox
         // Read and built without stopping the editor (a large scene took seconds of frozen window): the file is parsed on a thread,
         // the entities created a slice a frame (OnUpdate), and the scene swapped in once complete. Another scene opened meanwhile
         // replaces this load.
+        CancelHLODBuild("another scene opened");
         m_SceneLoad = CreateScope<SceneLoader>(Project::GetActiveAssetDirectory() / Project::GetActive()->GetEditorAssetManager()->GetFilePath(handle));
         m_SceneLoadHandle = handle;
     }
@@ -4633,7 +4646,7 @@ namespace Nox
     void EditorLayer::Undo()
     {
         // Not in the middle of a drag: the step being dragged is not taken yet.
-        if (m_SceneState != SceneState::Edit || !m_History.CanUndo() || ImGuizmo::IsUsing() || ImGui::IsAnyItemActive() || m_WorldCellsBusy)
+        if (m_SceneState != SceneState::Edit || !m_History.CanUndo() || ImGuizmo::IsUsing() || ImGui::IsAnyItemActive() || m_WorldCellsBusy || m_HLODBuild)
             return;
         const std::string name = m_History.GetUndoName();
         RestoreHistoryState(m_History.StepBack());
@@ -4642,7 +4655,7 @@ namespace Nox
 
     void EditorLayer::Redo()
     {
-        if (m_SceneState != SceneState::Edit || !m_History.CanRedo() || ImGuizmo::IsUsing() || ImGui::IsAnyItemActive() || m_WorldCellsBusy)
+        if (m_SceneState != SceneState::Edit || !m_History.CanRedo() || ImGuizmo::IsUsing() || ImGui::IsAnyItemActive() || m_WorldCellsBusy || m_HLODBuild)
             return;
         const std::string name = m_History.GetRedoName();
         RestoreHistoryState(m_History.StepForward());
@@ -4728,6 +4741,7 @@ namespace Nox
 
     void EditorLayer::OpenPrefabMode(AssetHandle handle)
     {
+        CancelHLODBuild("prefab editing");
         if (m_PrefabMode.Active)
         {
             NOX_CORE_WARN("Prefab Mode is already open for '{}': exit it first", m_PrefabMode.Name);
@@ -5013,8 +5027,32 @@ namespace Nox
         m_MaterialEditors.push_back(CreateScope<MaterialEditorPanel>(handle));
     }
 
+    void EditorLayer::StartHLODBuild()
+    {
+        if (m_HLODBuild || m_SceneLoad || m_SceneState != SceneState::Edit || m_PrefabMode.Active || !m_EditorScene || !m_EditorScene->IsWorldPartitioned())
+            return;
+        if (m_EditorScenePath.empty())
+        {
+            NOX_CORE_WARN("Build HLODs: save the scene first (its cells are built from their files)");
+            return;
+        }
+        SaveScene(); // the cells' files are what is built
+        m_HLODBuild = CreateScope<HLODBuilder>(m_EditorScene);
+        if (m_HLODBuild->Failed())
+            m_HLODBuild.reset();
+    }
+
+    void EditorLayer::CancelHLODBuild(const char* reason)
+    {
+        if (!m_HLODBuild)
+            return;
+        NOX_CORE_WARN("Build HLODs cancelled ({}): the HLODs built so far are imported, the HLOD grid is not written", reason);
+        m_HLODBuild.reset();
+    }
+
     void EditorLayer::OnScenePlay()
     {
+        CancelHLODBuild("Play");
         EndTimelinePreviews(); // Play copies the scene as it is
         SetViewMode(EditorViewMode::Perspective);
         if (m_SceneState == SceneState::Simulate)
@@ -5031,6 +5069,7 @@ namespace Nox
 
     void EditorLayer::OnSceneSimulate()
     {
+        CancelHLODBuild("Simulate");
         EndTimelinePreviews();
         if (m_SceneState == SceneState::Play)
             OnSceneStop();
@@ -5072,6 +5111,8 @@ namespace Nox
             m_ActiveScene->CollectAssetReferences(referencedAssets);
         if (m_PrefabMode.ReturnScene) // the level waits while a prefab is edited: its assets stay
             m_PrefabMode.ReturnScene->CollectAssetReferences(referencedAssets);
+        if (m_HLODBuild) // the cell being built waits for its models and prefabs
+            m_HLODBuild->CollectAssetReferences(referencedAssets);
         AssetPreviewRenderer::Get().CollectAssetReferences(referencedAssets); // what the asset previews draw right now
 
         Project::GetActive()->GetEditorAssetManager()->UnloadUnusedAssets(referencedAssets);
