@@ -1278,7 +1278,10 @@ away stays on screen as one cheap mesh per cell after the cell itself has stream
   HLOD's tangent frame, roughness / metallic (specular-glossiness converted), emissive. Glass (alpha blended or transmissive) stays in
   the shell but is baked as what shows through it -- what is behind, by its transmission, else dark -- under its own gloss and normal
   (baked as its own colour, Bistro's windows came out as white panels). Textures are read from the cooked .ntex
-  (BC1-BC7 decoded with bcdec, the mip nearest the bake's texel size). Empty texels are filled from their neighbours (no seams in
+  (BC1-BC7 decoded with bcdec, the mip nearest the bake's texel size). Each texel is sampled n x n (`SamplesPerTexel`, 2) and the
+  source textures are read at the mip level of a sample's size (box-filtered mips on the CPU, the source triangle's texture
+  coordinates per world unit): read at full resolution with one sample, fine detail aliased into speckled normals and every pin hole
+  of an alpha-masked texture cut a hole in the HLOD (Bistro's walls). A texel is cut out only where most of its samples are. Empty texels are filled from their neighbours (no seams in
   the mips). Texture size from the surface area and a texel density, power of two, 128-2048.
 - **Output:** a glTF (positions in meters, normals, tangents, UVs; base color, normal, metallic-roughness and emissive PNGs) in
   `<Scene>_Cells/HLOD/`, imported like any model (cooked to .nsmesh / .nmat / BC7 .ntex), so packaging, texture streaming and the

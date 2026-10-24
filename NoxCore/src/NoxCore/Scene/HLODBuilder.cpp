@@ -594,7 +594,10 @@ namespace Nox
                         bool twoChannel = false;
                         std::string why;
                         if (DecodeCookedTexture(assetDirectory, metadata, BakeTextureSize, *texture, twoChannel, why))
+                        {
+                            texture->BuildMips(); // (a bake sample reads the level of its size)
                             decoded[handle] = { texture, twoChannel };
+                        }
                         else
                             NOX_CORE_WARN("Build HLODs: {}: texture '{}' left out ({})", cellName, metadata.FilePath.generic_string(), why);
                     }

@@ -18,9 +18,14 @@ namespace Nox::HLOD
         uint32_t Width = 0;
         uint32_t Height = 0;
         std::vector<uint8_t> Texels; // RGBA8, rows top to bottom
+        std::vector<Texture> Mips;   // the smaller levels, each half the last (BuildMips)
 
         bool Valid() const { return Width > 0 && Height > 0 && Texels.size() >= size_t(Width) * Height * 4; }
         glm::vec4 Sample(glm::vec2 uv) const; // channels 0..1
+        // Trilinear: lod 0 is this level, 1 the first mip (the level whose texel is as large as the area a sample stands for: a bake
+        // sample reads the source as the source renders at that size, not its full-resolution detail, which aliased into noise).
+        glm::vec4 SampleLevel(glm::vec2 uv, float lod) const;
+        void BuildMips(); // box filtered, down to 1 x 1
     };
 
     // A source material, the glTF metallic-roughness model (specular-glossiness converted on evaluation).
@@ -67,6 +72,9 @@ namespace Nox::HLOD
         uint32_t MaxTextureSize = 2048;
         float HardEdgeAngle = 60.0f;    // degrees between faces where the HLOD's normals are split
         float MinPartSize = 0.0f;       // world units: smaller parts are left out of the geometry (still baked); 0: 2 x Error
+        // Bake samples per texel and axis (n x n), averaged: anti-aliasing, and the coverage of alpha-masked parts (a texel is cut out
+        // only where most of it is). The source textures are read at the mip level of a sample's size.
+        uint32_t SamplesPerTexel = 2;
         // The geometry as Unreal's Approximated Mesh: one closed shell voxelised around the parts (half the error off them), then
         // simplified. Off: the parts themselves merged and simplified (open, overlapping parts tear into shards).
         bool Remesh = true;

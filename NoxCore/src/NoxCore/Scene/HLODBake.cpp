@@ -101,6 +101,7 @@ namespace Nox::HLOD
             glm::vec3 N[3];         // vertex normals, world orientation
             glm::vec4 T[3];         // vertex tangents
             glm::vec2 UV[3];
+            float UVPerUnit = 0.0f; // texture coordinates per world unit (which mip a sample of a given size reads)
             uint32_t Material = 0;
         };
 
@@ -312,8 +313,14 @@ namespace Nox::HLOD
             glm::vec3 Emissive{ 0.0f };           // linear
         };
 
-        Surface Evaluate(const Material& material, const SourceTriangle& tri, float u, float v)
+        // footprint: the world size a sample stands for (0: the full-resolution texture).
+        Surface Evaluate(const Material& material, const SourceTriangle& tri, float u, float v, float footprint = 0.0f)
         {
+            auto sample = [&](const Texture& texture, glm::vec2 uv)
+            {
+                const float texels = footprint * tri.UVPerUnit * float(std::max(texture.Width, texture.Height));
+                return texels > 1.0f ? texture.SampleLevel(uv, std::log2(texels)) : texture.Sample(uv);
+            };
             const float w = 1.0f - u - v;
             const glm::vec2 uv = tri.UV[0] * w + tri.UV[1] * u + tri.UV[2] * v;
             glm::vec3 normal = glm::normalize(tri.N[0] * w + tri.N[1] * u + tri.N[2] * v);
@@ -323,7 +330,7 @@ namespace Nox::HLOD
             glm::vec4 base = material.BaseColorFactor;
             if (material.BaseColor && material.BaseColor->Valid())
             {
-                const glm::vec4 texel = material.BaseColor->Sample(uv);
+                const glm::vec4 texel = sample(*material.BaseColor, uv);
                 base *= glm::vec4(SrgbToLinear(texel.r), SrgbToLinear(texel.g), SrgbToLinear(texel.b), texel.a);
             }
             surface.BaseColor = glm::vec3(base);
@@ -340,7 +347,7 @@ namespace Nox::HLOD
                 surface.Metallic = material.MetallicFactor;
                 if (material.MetallicRoughness && material.MetallicRoughness->Valid())
                 {
-                    const glm::vec4 texel = material.MetallicRoughness->Sample(uv);
+                    const glm::vec4 texel = sample(*material.MetallicRoughness, uv);
                     surface.Roughness *= texel.g;
                     surface.Metallic *= texel.b;
                 }
@@ -349,7 +356,7 @@ namespace Nox::HLOD
             surface.Normal = normal;
             if (material.Normal && material.Normal->Valid() && glm::dot(glm::vec3(tangent), glm::vec3(tangent)) > 1e-12f)
             {
-                const glm::vec4 texel = material.Normal->Sample(uv);
+                const glm::vec4 texel = sample(*material.Normal, uv);
                 glm::vec3 local(texel.r * 2.0f - 1.0f, texel.g * 2.0f - 1.0f, texel.b * 2.0f - 1.0f);
                 if (material.NormalTwoChannel)
                     local.z = std::sqrt(std::max(0.0f, 1.0f - local.x * local.x - local.y * local.y));
@@ -365,7 +372,7 @@ namespace Nox::HLOD
             glm::vec3 emissive = material.EmissiveFactor;
             if (material.Emissive && material.Emissive->Valid())
             {
-                const glm::vec4 texel = material.Emissive->Sample(uv);
+                const glm::vec4 texel = sample(*material.Emissive, uv);
                 emissive *= glm::vec3(SrgbToLinear(texel.r), SrgbToLinear(texel.g), SrgbToLinear(texel.b));
             }
             surface.Emissive = emissive;
@@ -648,6 +655,50 @@ namespace Nox::HLOD
         return glm::mix(top, bottom, ay);
     }
 
+    glm::vec4 Texture::SampleLevel(glm::vec2 uv, float lod) const
+    {
+        lod = std::clamp(lod, 0.0f, float(Mips.size()));
+        const uint32_t level = static_cast<uint32_t>(lod);
+        const float blend = lod - float(level);
+        auto at = [&](uint32_t index) -> const Texture& { return index == 0 ? *this : Mips[std::min<size_t>(index, Mips.size()) - 1]; };
+        const glm::vec4 fine = at(level).Sample(uv);
+        return blend > 0.0f && level < Mips.size() ? glm::mix(fine, at(level + 1).Sample(uv), blend) : fine;
+    }
+
+    void Texture::BuildMips()
+    {
+        Mips.clear();
+        if (!Valid())
+            return;
+        size_t levels = 0;
+        for (uint32_t extent = std::max(Width, Height); extent > 1; extent /= 2)
+            ++levels;
+        Mips.reserve(levels); // (from points into it while it grows)
+        const Texture* from = this;
+        while (from->Width > 1 || from->Height > 1)
+        {
+            Texture next;
+            next.Width = std::max(1u, from->Width / 2);
+            next.Height = std::max(1u, from->Height / 2);
+            next.Texels.resize(size_t(next.Width) * next.Height * 4);
+            for (uint32_t y = 0; y < next.Height; ++y)
+                for (uint32_t x = 0; x < next.Width; ++x)
+                    for (uint32_t channel = 0; channel < 4; ++channel)
+                    {
+                        uint32_t sum = 0;
+                        for (uint32_t dy = 0; dy < 2; ++dy)
+                            for (uint32_t dx = 0; dx < 2; ++dx)
+                            {
+                                const uint32_t sx = std::min(from->Width - 1, x * 2 + dx), sy = std::min(from->Height - 1, y * 2 + dy);
+                                sum += from->Texels[(size_t(sy) * from->Width + sx) * 4 + channel];
+                            }
+                        next.Texels[(size_t(y) * next.Width + x) * 4 + channel] = static_cast<uint8_t>((sum + 2) / 4);
+                    }
+            Mips.push_back(std::move(next));
+            from = &Mips.back();
+        }
+    }
+
     Result Build(const std::vector<SourceMesh>& meshes, const std::vector<Material>& materials, const Settings& settings)
     {
         Result result;
@@ -738,6 +789,12 @@ namespace Nox::HLOD
                 if (!std::isfinite(tri.N[0].x) || glm::dot(glm::cross(tri.E1, tri.E2), glm::cross(tri.E1, tri.E2)) <= 0.0f)
                     continue; // degenerate
                 tri.Material = mesh.Material;
+                {
+                    const glm::vec2 du = tri.UV[1] - tri.UV[0], dv = tri.UV[2] - tri.UV[0];
+                    const float uvArea = std::abs(du.x * dv.y - dv.x * du.y);
+                    const float worldArea = glm::length(glm::cross(tri.E1, tri.E2));
+                    tri.UVPerUnit = worldArea > 0.0f ? std::sqrt(uvArea / worldArea) : 0.0f;
+                }
                 sources.push_back(tri);
             }
         }
@@ -927,6 +984,7 @@ namespace Nox::HLOD
             result.Error = "the UV atlas does not fit";
             return result;
         }
+        const float texelsPerUnit = pack.texelsPerUnit; // the atlas' density: what a texel of the HLOD stands for
         const xatlas::Mesh& laidOut = atlas->meshes[0];
         result.Positions.resize(laidOut.vertexCount);
         result.Normals.resize(laidOut.vertexCount);
@@ -978,9 +1036,9 @@ namespace Nox::HLOD
             }
         }
 
-        // 6. The bake: every texel the atlas covers is a point and frame on the HLOD; the source surface it stands for is found along
-        //    the normal, from outside in first (the visible surface), else from inside out, within the simplification error. Per texel
-        //    only the HLOD triangle covering it is kept (2048^2 texels of full frames would be hundreds of MB).
+        // 6. The bake: every texel the atlas covers is a patch of the HLOD, sampled n x n; each sample finds the source surface it
+        //    stands for (bakeSample). Per texel only the HLOD triangle covering its centre is kept (2048^2 texels of full frames would
+        //    be hundreds of MB).
         Bvh bvh;
         bvh.Build(sources);
         const size_t texelCount = size_t(size) * size;
@@ -1029,129 +1087,162 @@ namespace Nox::HLOD
         // How far from the HLOD's surface its source can be: twice the error, or more where the shell stands farther off (voxels grown
         // for a large cell) -- searching only the error left most of such a shell without its source.
         const float search = std::max({ settings.Error * 2.0f, (shellOffset + simplifyError) * 1.5f, 1e-3f });
+        // n x n samples per texel, each the size of its share of the texel (the mip level its textures are read at).
+        const uint32_t samplesPerAxis = std::max(1u, settings.SamplesPerTexel);
+        const float footprint = 1.0f / std::max(texelsPerUnit * float(samplesPerAxis), 1e-12f);
+        enum class SampleKind { None, Hit, Cut };
+
+        // One point of the HLOD: the source surface it stands for, found along the normal from outside in first (the visible
+        // surface), else from inside out. Alpha-masked hits that are cut away let the ray go on, and so do see-through ones (glass),
+        // adding what they cover of what is behind them. Where neither way finds a surface (a thin part's rim faces along the part,
+        // a ray there runs past it): the source point nearest to it.
+        auto bakeSample = [&](const glm::vec3& position, const glm::vec3& frameNormal, Surface& out) -> SampleKind
+        {
+            bool cut = false;
+            for (int pass = 0; pass < 2; ++pass)
+            {
+                const glm::vec3 direction = pass == 0 ? -frameNormal : frameNormal;
+                const glm::vec3 rayOrigin = position - direction * search;
+                float tMin = 0.0f;
+                glm::vec3 seenColor(0.0f), seenEmissive(0.0f);
+                float through = 1.0f; // what the glass in front lets through
+                std::optional<Surface> front;
+                for (int step = 0; step < 8; ++step)
+                {
+                    uint32_t hitTriangle = 0;
+                    float t = 0.0f, u = 0.0f, v = 0.0f;
+                    const bool hit = bvh.Intersect(rayOrigin, direction, tMin, search * 2.0f, hitTriangle, t, u, v);
+                    if (!hit && !front)
+                        break;
+                    Surface surface;
+                    if (hit)
+                    {
+                        const SourceTriangle& tri = sources[hitTriangle];
+                        const Material& material = materials[tri.Material];
+                        surface = Evaluate(material, tri, u, v, footprint);
+                        if (material.AlphaMask && surface.Alpha < material.AlphaCutoff)
+                        {
+                            cut = true;
+                            tMin = t + search * 1e-4f;
+                            continue;
+                        }
+                        if (material.Translucent && step + 1 < 8)
+                        {
+                            const float coverage = std::clamp(surface.Alpha * (1.0f - material.Transmission), 0.0f, 1.0f);
+                            seenColor += surface.BaseColor * (through * coverage);
+                            seenEmissive += surface.Emissive * through;
+                            through *= 1.0f - coverage;
+                            if (!front)
+                                front = surface;
+                            tMin = t + search * 1e-4f;
+                            continue;
+                        }
+                        seenColor += surface.BaseColor * through;
+                        seenEmissive += surface.Emissive * through;
+                    }
+                    // (no hit behind the glass: nothing more to see through it)
+                    if (front)
+                    {
+                        surface.BaseColor = seenColor;
+                        surface.Emissive = seenEmissive;
+                        surface.Roughness = front->Roughness;
+                        surface.Metallic = front->Metallic;
+                        surface.Normal = front->Normal;
+                    }
+                    out = surface;
+                    return SampleKind::Hit;
+                }
+            }
+            if (cut)
+                return SampleKind::Cut;
+            uint32_t nearest = 0;
+            float u = 0.0f, v = 0.0f;
+            if (!bvh.Closest(position, search, nearest, u, v))
+                return SampleKind::None;
+            const SourceTriangle& tri = sources[nearest];
+            const Material& material = materials[tri.Material];
+            out = Evaluate(material, tri, u, v, footprint);
+            if (material.AlphaMask && out.Alpha < material.AlphaCutoff)
+                return SampleKind::Cut;
+            if (material.Translucent) // nothing behind it is looked for here: what it covers of the dark
+                out.BaseColor *= std::clamp(out.Alpha * (1.0f - material.Transmission), 0.0f, 1.0f);
+            return SampleKind::Hit;
+        };
+
         parallelFor(size, [&](uint32_t row)
         {
             for (uint32_t column = 0; column < size; ++column)
             {
                 const size_t texel = size_t(row) * size + column;
                 const uint32_t triangle = texelTriangle[texel];
-                float w0, w1, w2;
-                if (triangle == NoTriangle || !barycentrics(triangle, float(column) + 0.5f, float(row) + 0.5f, w0, w1, w2))
+                if (triangle == NoTriangle)
                     continue;
                 const uint32_t i0 = result.Indices[triangle * 3 + 0], i1 = result.Indices[triangle * 3 + 1], i2 = result.Indices[triangle * 3 + 2];
-                const glm::vec3 position = result.Positions[i0] * w0 + result.Positions[i1] * w1 + result.Positions[i2] * w2;
-                const glm::vec3 frameNormal = glm::normalize(result.Normals[i0] * w0 + result.Normals[i1] * w1 + result.Normals[i2] * w2);
-                const glm::vec4 frameTangent = result.Tangents[i0] * w0 + result.Tangents[i1] * w1 + result.Tangents[i2] * w2;
 
-                // The texel takes a source surface: colour, gloss, emissive, its normal in the HLOD's tangent frame.
-                auto write = [&](const Surface& surface)
+                // The texel's samples (those inside its triangle; at least its centre, which is): averaged, the source normal in the
+                // HLOD's tangent frame at each sample. Coverage: the share of samples not cut away.
+                glm::vec3 color(0.0f), glow(0.0f), local(0.0f);
+                float roughness = 0.0f, metallic = 0.0f;
+                uint32_t hits = 0, cuts = 0, taken = 0;
+                auto take = [&](float px, float py)
                 {
-                    states[texel] = TexelState::Baked;
-                    uint8_t* color = &result.BaseColor[texel * 4];
-                    color[0] = ToByte(LinearToSrgb(surface.BaseColor.r));
-                    color[1] = ToByte(LinearToSrgb(surface.BaseColor.g));
-                    color[2] = ToByte(LinearToSrgb(surface.BaseColor.b));
-                    color[3] = 255;
-                    uint8_t* mr = &result.MetallicRoughness[texel * 4];
-                    mr[0] = 255;
-                    mr[1] = ToByte(surface.Roughness);
-                    mr[2] = ToByte(surface.Metallic);
-                    mr[3] = 255;
-                    emissive[texel] = surface.Emissive;
-                    // The source's shading normal in the HLOD's tangent frame at this texel.
+                    float w0, w1, w2;
+                    if (!barycentrics(triangle, px, py, w0, w1, w2) || w0 < -1e-4f || w1 < -1e-4f || w2 < -1e-4f)
+                        return;
+                    ++taken;
+                    const glm::vec3 position = result.Positions[i0] * w0 + result.Positions[i1] * w1 + result.Positions[i2] * w2;
+                    const glm::vec3 frameNormal = glm::normalize(result.Normals[i0] * w0 + result.Normals[i1] * w1 + result.Normals[i2] * w2);
+                    const glm::vec4 frameTangent = result.Tangents[i0] * w0 + result.Tangents[i1] * w1 + result.Tangents[i2] * w2;
+                    Surface surface;
+                    const SampleKind kind = bakeSample(position, frameNormal, surface);
+                    if (kind == SampleKind::Cut)
+                        ++cuts;
+                    if (kind != SampleKind::Hit)
+                        return;
+                    ++hits;
+                    color += surface.BaseColor;
+                    glow += surface.Emissive;
+                    roughness += surface.Roughness;
+                    metallic += surface.Metallic;
                     glm::vec3 tangent = glm::vec3(frameTangent) - frameNormal * glm::dot(frameNormal, glm::vec3(frameTangent));
                     tangent = glm::dot(tangent, tangent) > 1e-20f ? glm::normalize(tangent) : glm::vec3(1, 0, 0);
                     const glm::vec3 bitangent = glm::cross(frameNormal, tangent) * (frameTangent.w < 0.0f ? -1.0f : 1.0f);
-                    glm::vec3 local(glm::dot(surface.Normal, tangent), glm::dot(surface.Normal, bitangent), glm::dot(surface.Normal, frameNormal));
-                    local.z = std::max(local.z, 0.0f); // a back-facing source normal: flat on the HLOD rather than inverted
-                    local = glm::dot(local, local) > 1e-12f ? glm::normalize(local) : glm::vec3(0, 0, 1);
-                    uint8_t* normal = &result.Normal[texel * 4];
-                    normal[0] = ToByte(local.x * 0.5f + 0.5f);
-                    normal[1] = ToByte(local.y * 0.5f + 0.5f);
-                    normal[2] = ToByte(local.z * 0.5f + 0.5f);
-                    normal[3] = 255;
+                    glm::vec3 normal(glm::dot(surface.Normal, tangent), glm::dot(surface.Normal, bitangent), glm::dot(surface.Normal, frameNormal));
+                    normal.z = std::max(normal.z, 0.0f); // a back-facing source normal: flat on the HLOD rather than inverted
+                    local += glm::dot(normal, normal) > 1e-12f ? glm::normalize(normal) : glm::vec3(0, 0, 1);
                 };
+                for (uint32_t sy = 0; sy < samplesPerAxis; ++sy)
+                    for (uint32_t sx = 0; sx < samplesPerAxis; ++sx)
+                        take(float(column) + (float(sx) + 0.5f) / float(samplesPerAxis), float(row) + (float(sy) + 0.5f) / float(samplesPerAxis));
+                if (taken == 0)
+                    take(float(column) + 0.5f, float(row) + 0.5f);
 
-                // From outside in, then from inside out; alpha-masked hits that are cut away let the ray go on, and so do see-through
-                // ones (glass), adding what they cover of what is behind them.
-                bool cut = false;
-                for (int pass = 0; pass < 2 && states[texel] != TexelState::Baked; ++pass)
+                if (hits == 0 || cuts * 2 > hits + cuts)
                 {
-                    const glm::vec3 direction = pass == 0 ? -frameNormal : frameNormal;
-                    const glm::vec3 rayOrigin = position - direction * search;
-                    float tMin = 0.0f;
-                    glm::vec3 seenColor(0.0f), seenEmissive(0.0f);
-                    float through = 1.0f; // what the glass in front lets through
-                    std::optional<Surface> front;
-                    for (int step = 0; step < 8; ++step)
-                    {
-                        uint32_t hitTriangle = 0;
-                        float t = 0.0f, u = 0.0f, v = 0.0f;
-                        const bool hit = bvh.Intersect(rayOrigin, direction, tMin, search * 2.0f, hitTriangle, t, u, v);
-                        if (!hit && !front)
-                            break;
-                        Surface surface;
-                        if (hit)
-                        {
-                            const SourceTriangle& tri = sources[hitTriangle];
-                            const Material& material = materials[tri.Material];
-                            surface = Evaluate(material, tri, u, v);
-                            if (material.AlphaMask && surface.Alpha < material.AlphaCutoff)
-                            {
-                                cut = true;
-                                tMin = t + search * 1e-4f;
-                                continue;
-                            }
-                            if (material.Translucent && step + 1 < 8)
-                            {
-                                const float coverage = std::clamp(surface.Alpha * (1.0f - material.Transmission), 0.0f, 1.0f);
-                                seenColor += surface.BaseColor * (through * coverage);
-                                seenEmissive += surface.Emissive * through;
-                                through *= 1.0f - coverage;
-                                if (!front)
-                                    front = surface;
-                                tMin = t + search * 1e-4f;
-                                continue;
-                            }
-                            seenColor += surface.BaseColor * through;
-                            seenEmissive += surface.Emissive * through;
-                        }
-                        // (no hit behind the glass: nothing more to see through it)
-                        if (front)
-                        {
-                            surface.BaseColor = seenColor;
-                            surface.Emissive = seenEmissive;
-                            surface.Roughness = front->Roughness;
-                            surface.Metallic = front->Metallic;
-                            surface.Normal = front->Normal;
-                        }
-                        write(surface);
-                        break;
-                    }
+                    if (cuts > 0)
+                        states[texel] = TexelState::CutOut;
+                    continue;
                 }
-                // Neither way along the normal found it (a thin part's rim faces along the part, a ray there runs past it): the source
-                // point nearest to the texel.
-                if (states[texel] != TexelState::Baked && !cut)
-                {
-                    uint32_t nearest = 0;
-                    float u = 0.0f, v = 0.0f;
-                    if (bvh.Closest(position, search, nearest, u, v))
-                    {
-                        const SourceTriangle& tri = sources[nearest];
-                        const Material& material = materials[tri.Material];
-                        Surface surface = Evaluate(material, tri, u, v);
-                        if (material.AlphaMask && surface.Alpha < material.AlphaCutoff)
-                            cut = true;
-                        else
-                        {
-                            if (material.Translucent) // nothing behind it is looked for here: what it covers of the dark
-                                surface.BaseColor *= std::clamp(surface.Alpha * (1.0f - material.Transmission), 0.0f, 1.0f);
-                            write(surface);
-                        }
-                    }
-                }
-                if (states[texel] != TexelState::Baked && cut)
-                    states[texel] = TexelState::CutOut;
+                const float scale = 1.0f / float(hits);
+                color *= scale;
+                states[texel] = TexelState::Baked;
+                uint8_t* out = &result.BaseColor[texel * 4];
+                out[0] = ToByte(LinearToSrgb(color.r));
+                out[1] = ToByte(LinearToSrgb(color.g));
+                out[2] = ToByte(LinearToSrgb(color.b));
+                out[3] = 255;
+                uint8_t* mr = &result.MetallicRoughness[texel * 4];
+                mr[0] = 255;
+                mr[1] = ToByte(roughness * scale);
+                mr[2] = ToByte(metallic * scale);
+                mr[3] = 255;
+                emissive[texel] = glow * scale;
+                local = glm::dot(local, local) > 1e-12f ? glm::normalize(local) : glm::vec3(0, 0, 1);
+                uint8_t* normal = &result.Normal[texel * 4];
+                normal[0] = ToByte(local.x * 0.5f + 0.5f);
+                normal[1] = ToByte(local.y * 0.5f + 0.5f);
+                normal[2] = ToByte(local.z * 0.5f + 0.5f);
+                normal[3] = 255;
             }
         });
         size_t covered = 0;
