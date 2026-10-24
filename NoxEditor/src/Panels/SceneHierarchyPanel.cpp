@@ -2092,6 +2092,14 @@ namespace Nox
             ImGui::Checkbox("Enabled", &component.Enabled);
             ImGui::SetItemTooltip("In Play and Simulate the world's cells within the loading range of this entity are loaded, besides the\n"
                                   "ones around the camera (a vehicle, another player, a cutscene's target).");
+            int target = component.Target == WorldStreamingSourceComponent::TargetState::Loaded ? 1 : 0;
+            if (ImGui::Combo("Target State", &target, "Activated\0Loaded\0"))
+                component.Target = target == 1 ? WorldStreamingSourceComponent::TargetState::Loaded : WorldStreamingSourceComponent::TargetState::Activated;
+            ImGui::SetItemTooltip("Activated: its cells are in the world (drawn, simulated). Loaded: only loaded -- built and their assets\n"
+                                  "streamed in, not drawn yet -- so they activate without a hitch when an activating source (the camera)\n"
+                                  "reaches them. A Loaded source with a larger range scale preloads ahead of the player.");
+            ImGui::DragFloat("Loading Range Scale", &component.LoadingRangeScale, 0.01f, 0.0f, 16.0f, "%.2f");
+            ImGui::SetItemTooltip("Times the grid's loading range (1: the world's Loading Range).");
         });
 
         DrawComponent<CameraComponent>("Camera", entity, [](auto& component)

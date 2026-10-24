@@ -140,9 +140,18 @@ namespace Nox
         // By hand (the editor): read on a thread and created a slice a frame like levels; unloading destroys the cell's entities.
         void LoadWorldCells(const std::vector<WorldCellCoord>& cells);
         void UnloadWorldCells(const std::vector<WorldCellCoord>& cells);
+        // Loaded here: in the world (activated); Loading: any stage before.
         LevelState GetWorldCellState(const WorldCellCoord& cell) const;
+        // Unreal's runtime cell states (§5.13.3): Loaded -- built in a scene of its own (nothing draws or simulates it) and its assets
+        // requested; Activating -- its entities going into the world, a slice a frame; Activated -- in the world.
+        enum class WorldCellStage { Unloaded, Loading, Loaded, Activating, Activated };
+        WorldCellStage GetWorldCellStage(const WorldCellCoord& cell) const;
+        // Unreal's IsStreamingCompleted: every world cell whose content is within `range` (world units) of a point has reached `stage`
+        // (Loaded: also those activating or activated; Activated: in the world). E.g. a teleport waits for its target to be Loaded.
+        bool IsWorldStreamingCompleted(const glm::vec3& point, float range, WorldCellStage stage) const;
+        // includeLoading: also the cells on their way in (and the loaded ones not activated).
         std::vector<WorldCellCoord> GetLoadedWorldCells(bool includeLoading, int32_t grid = WorldGrid::WorldGridIndex) const;
-        bool IsWorldStreamingBusy() const; // a cell is loading or about to unload
+        bool IsWorldStreamingBusy() const; // a cell is loading, activating or about to unload
         // The indexed cells whose content is within `range` (world units) of a point, horizontally.
         std::vector<WorldCellCoord> WorldCellsAround(const glm::vec3& point, float range, int32_t grid = WorldGrid::WorldGridIndex) const;
         // HLODs (§5.13.2) while editing: the HLOD grid streams around the editor camera when shown (World Partition panel).
@@ -203,14 +212,32 @@ namespace Nox
         void BeginWorldStreaming(const glm::vec3* source);
         // `composedSources`: the sources' places from their transforms up the parents (before the first update: no world transforms).
         void UpdateWorldStreaming(const glm::vec3* source, bool composedSources = false);
-        void CollectStreamingSources(const glm::vec3* source, std::vector<glm::vec3>& outSources, bool composed);
-        // The cells of every grid (onlyGrid -1) or of one near the sources wanted, the ones all of them have left unloaded.
-        void StreamWorldCells(const std::vector<glm::vec3>& sources, int32_t onlyGrid);
+        // A streaming source: where, how far (times the grid's loading range), and whether the cells it reaches are activated or
+        // only loaded (WorldStreamingSourceComponent; the camera activates).
+        struct StreamingSource
+        {
+            glm::vec3 Position{ 0.0f };
+            float RangeScale = 1.0f;
+            bool Activate = true;
+        };
+        void CollectStreamingSources(const glm::vec3* source, std::vector<StreamingSource>& outSources, bool composed);
+        // The cells of every grid (onlyGrid -1) or of one near the sources wanted -- activated where an activating source reaches them,
+        // else loaded -- the ones all of them have left unloaded.
+        void StreamWorldCells(const std::vector<StreamingSource>& sources, int32_t onlyGrid);
         void UpdateEditorHLODs(const glm::vec3& camera);
         // HLODs whose cell is loaded and drawn are hidden (left out of the GPU scene), the others shown (SyncGpuScene).
         void UpdateHLODVisibility();
         glm::vec3 ComposedWorldPosition(Entity entity);
-        void QueueWorldCellLoad(const WorldCellCoord& cell);
+        void QueueWorldCellLoad(const WorldCellCoord& cell, bool activate = true);
+        // A cell built from its file (or a Play session's text) into a scene of its own: the loader, a slice a frame.
+        void StageWorldCell(StreamedLevel& streamed);
+        // One cell's next step: building it (staged), then -- its target activated, its assets in or waited for long enough -- its
+        // entities copied into this scene. Activated: complete (the caller finishes it, FinishLevelLoad).
+        enum class CellStep { Busy, Activated, Failed };
+        CellStep StepWorldCell(StreamedLevel& streamed, double budgetMs, float deltaTime, bool waitForAssets);
+        bool ActivateWorldCellEntities(StreamedLevel& streamed, double budgetMs); // true once every staged entity is in
+        // Out of the world: a cell activated (or being activated) whose target became Loaded, or that is unloaded.
+        void RemoveWorldCellFromWorld(StreamedLevel& streamed);
         void DestroyWorldCellEntities(const WorldCellCoord& cell);
         // A Box2D body for one entity with a RigidBody2DComponent (Play / Simulate start, and entities that come in later).
         void CreatePhysics2DBody(Entity entity);
@@ -275,16 +302,27 @@ namespace Nox
             std::string Name;                   // for the log
             std::unique_ptr<SceneLoader> Loader; // while loading
             std::vector<UUID> HeldPhysics;      // 3D physics bodies made once the level is complete, not while its floor is missing
-            bool Loaded = false;
+            bool Loaded = false;                // in the scene (a cell: activated)
             bool Failed = false;                // refused or unreadable: volumes leave it until the source has left them
             bool UnloadQueued = false;
             float OutsideTime = 0.0f;           // seconds no volume naming it has held the streaming source
+
+            // World cells (§5.13.3): built into a scene of their own first (Loaded), then copied into this one (Activated).
+            bool Activate = true;                 // the target: in the world, or only loaded
+            bool Empty = false;                   // nothing to load (no file yet, or emptied in the editor): Loaded at once
+            Ref<Scene> Staged;                    // loaded, not (yet) activated: nothing draws or simulates it
+            std::vector<UUID> StagedEntities;     // in file order
+            std::vector<AssetHandle> Assets;      // what the staged cell references, requested once it is built
+            size_t AssetsReady = 0;               // how many of them have finished (in order)
+            float AssetWait = 0.0f;               // seconds its activation has waited for them
+            size_t ActivateNext = 0;              // the next staged entity copied into the world
+            std::vector<UUID> ActivatedEntities;  // copied so far
         };
         std::vector<StreamedLevel> m_Levels;
         WorldPartition m_World;
         bool m_WorldStreaming = false; // Play / Simulate of a world: cells follow the streaming sources
         bool m_ShowHLODs = true;       // editing: the HLOD grid streams around the editor camera
-        std::vector<glm::vec3> m_StreamingSources;
+        std::vector<StreamingSource> m_StreamingSources;
 
         // Frame graph
         SystemGraph m_UpdateSystems{ "Scene Update" };

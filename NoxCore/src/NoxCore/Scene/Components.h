@@ -829,7 +829,13 @@ namespace Nox
     // within the loading range of this entity are loaded in Play and Simulate (a vehicle, a remote player, a cutscene target).
     struct WorldStreamingSourceComponent
     {
+        // Unreal's EStreamingSourceTargetState (§5.13.3). Activated: the cells in its range are in the world (drawn, simulated).
+        // Loaded: only loaded -- built and their assets streamed in, not in the world, ready to activate without a hitch (ahead of
+        // a fast vehicle, at a teleport target).
+        enum class TargetState : uint8_t { Activated = 0, Loaded };
         bool Enabled = true;
+        TargetState Target = TargetState::Activated;
+        float LoadingRangeScale = 1.0f; // times the grid's loading range (Unreal's FStreamingSourceShape::LoadingRangeScale)
     };
 
     // An HLOD (§5.13.2): the merged, simplified, baked stand-in of one world cell, drawn while that cell is not loaded and drawn. Made by

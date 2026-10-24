@@ -7,11 +7,14 @@ namespace Facerun;
 /// on the primary camera: it moves the camera around the world and checks which cells' entities exist.
 /// <list type="bullet">
 /// <item>The world: 6 x 6 cells of 20 m (a floor tile and a turning pillar each, WPT_Tile_x_z / WPT_Cell_x_z), a 70 m slab west of
-/// them in a level 2 cell (WPT_Big), a streaming source in the far corner (WPT_Source) and an always-loaded pillar (WPT_Persistent).
-/// Loading range 40 m, unloaded 10 % beyond it.</item>
+/// them in a level 2 cell (WPT_Big), a streaming source in the far corner (WPT_Source), a source that only loads in the south-east
+/// corner (WPT_Preload, Target State Loaded) and an always-loaded pillar (WPT_Persistent). Loading range 40 m, unloaded 10 % beyond
+/// it.</item>
 /// <item>Checks: the cells around the camera are in before the first frame; cells follow the camera; a big cell loads by the
 /// distance to its content (the slab's edge), not its center; a loaded cell stays inside the hysteresis band and goes beyond it;
-/// the streaming source keeps its cells; always-loaded entities stay; streamed cells' scripts run.</item>
+/// the streaming source keeps its cells; always-loaded entities stay; streamed cells' scripts run; the Loaded source's cells are
+/// loaded and not in the world, go in within a second once the camera reaches them, and leave the world -- staying loaded -- once
+/// it has gone (activation stages, §5.13.3).</item>
 /// </list>
 /// Keys: T runs the checks again. WASD flies the camera (the World Partition panel shows the cells in Play).
 /// </summary>
@@ -25,6 +28,7 @@ public sealed class WorldPartitionTest : EntityBehaviour
     const float UnloadRange = 4400.0f;  // Range + 10 %
     const float Slack = 60.0f;          // the camera's position is read at the start of the frame after it moved
     static readonly Vector3 SourcePosition = new(11000.0f, 0.0f, 11000.0f);
+    static readonly Vector3 PreloadPosition = new(11000.0f, 0.0f, 1000.0f);
     static readonly Vector3 BigMin = new(-11500.0f, 0.0f, 2500.0f);
     static readonly Vector3 BigMax = new(-4500.0f, 0.0f, 9500.0f);
     const float SettleTimeout = 10.0f;
@@ -42,6 +46,9 @@ public sealed class WorldPartitionTest : EntityBehaviour
         WaitHome,
         BandHold,
         BandBeyond,
+        PreloadLoaded,
+        PreloadEnter,
+        PreloadLeave,
         Done
     }
 
@@ -73,6 +80,7 @@ public sealed class WorldPartitionTest : EntityBehaviour
         Check(expected > 0 && present == expected, $"the cells around the camera and the source are in before the first frame ({present} of {expected})");
         Check(Entity.FindByName("WPT_Persistent").IsValid, "the always-loaded pillar is in the scene");
         Check(!Entity.FindByName("WPT_Big").IsValid, "the slab's cell is not loaded at the start (out of range)");
+        Check(!Entity.FindByName(CellMarker(5, 0)).IsValid, "the Loaded source's cells are not in the world at the start");
         Entity marker = Entity.FindByName(CellMarker(0, 0));
         if (marker.IsValid)
             m_SpinStart = marker.GetComponent<TransformComponent>().LocalRotation.Y;
@@ -169,10 +177,49 @@ public sealed class WorldPartitionTest : EntityBehaviour
                 if (!Entity.FindByName(CellMarker(2, 0)).IsValid)
                 {
                     Pass($"the cell went {m_StepTime:0.00} s after the camera passed the band");
-                    Finish();
+                    Next(Step.PreloadLoaded);
                 }
                 else if (m_StepTime > SettleTimeout)
                     Abort("cell 2,0 still loaded with the camera beyond the hysteresis band");
+                break;
+
+            case Step.PreloadLoaded:
+                // The camera is 100 m away: the Loaded source's cells are loaded (built, assets requested) and not in the world.
+                if (!Scene.IsWorldStreamingCompleted(PreloadPosition, Range - Slack, WorldCellState.Loaded))
+                {
+                    if (m_StepTime > SettleTimeout)
+                        Abort("the Loaded source's cells did not load");
+                    break;
+                }
+                Pass("the Loaded source's cells are loaded");
+                Check(!Scene.IsWorldStreamingCompleted(PreloadPosition, Range - Slack, WorldCellState.Activated) &&
+                      !Entity.FindByName(CellMarker(5, 0)).IsValid, "... and not activated (none of their entities is in the world)");
+                SetCameraPosition(PreloadPosition + new Vector3(0.0f, 170.0f, 0.0f));
+                Next(Step.PreloadEnter);
+                break;
+
+            case Step.PreloadEnter:
+                if (!Entity.FindByName(CellMarker(5, 0)).IsValid || !Scene.IsWorldStreamingCompleted(PreloadPosition, Range - Slack, WorldCellState.Activated))
+                {
+                    if (m_StepTime > SettleTimeout)
+                        Abort("the preloaded cells did not activate when the camera reached them");
+                    break;
+                }
+                Check(m_StepTime < 1.0f, $"the preloaded cells activated {m_StepTime:0.00} s after the camera reached them (no file to read: under a second)");
+                SetCameraPosition(new Vector3(1000.0f, 170.0f, 1000.0f));
+                Next(Step.PreloadLeave);
+                break;
+
+            case Step.PreloadLeave:
+                // The camera left: the cells leave the world, and the Loaded source keeps them loaded (built again from the file).
+                if (Entity.FindByName(CellMarker(5, 0)).IsValid || !Scene.IsWorldStreamingCompleted(PreloadPosition, Range - Slack, WorldCellState.Loaded))
+                {
+                    if (m_StepTime > SettleTimeout)
+                        Abort("the preloaded cells did not leave the world, or did not stay loaded, when the camera left");
+                    break;
+                }
+                Pass($"the cells left the world and stayed loaded {m_StepTime:0.00} s after the camera left");
+                Finish();
                 break;
         }
     }

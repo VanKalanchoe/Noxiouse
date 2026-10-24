@@ -30,6 +30,28 @@ public static class Scene
 
     /// <summary>True once the level's entities are all in the scene.</summary>
     public static bool IsLevelLoaded(string scenePath) => GetLevelState(scenePath) == LevelState.Loaded;
+
+    /// <summary>
+    /// A world partition's streaming around a point (Unreal's IsStreamingCompleted): true once every cell whose content is within
+    /// <paramref name="range"/> (world units) of <paramref name="position"/> has reached <paramref name="state"/> -- Loaded counts the
+    /// cells activating or activated too. E.g. a teleport puts a streaming source (Target State Loaded) at its target and waits for
+    /// Loaded, then moves the player: the cells activate without a hitch.
+    /// </summary>
+    public static bool IsWorldStreamingCompleted(Vector3 position, float range, WorldCellState state = WorldCellState.Activated) =>
+        InternalCalls.IsWorldStreamingCompleted(position, range, (int)state);
+}
+
+/// <summary>
+/// A world partition cell's state (Unreal's runtime cell states): Loaded -- built and its assets streamed in, not in the world yet;
+/// Activated -- in the world (drawn, simulated).
+/// </summary>
+public enum WorldCellState
+{
+    Unloaded = 0,
+    Loading = 1,
+    Loaded = 2,
+    Activating = 3,
+    Activated = 4
 }
 
 /// <summary>A streamed level's state (<see cref="Scene.GetLevelState"/>).</summary>

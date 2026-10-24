@@ -659,8 +659,12 @@ namespace Nox
 
         if (entity.HasComponent<WorldStreamingSourceComponent>())
         {
+            const auto& source = entity.GetComponent<WorldStreamingSourceComponent>();
             out << YAML::Key << "WorldStreamingSourceComponent" << YAML::BeginMap;
-            out << YAML::Key << "Enabled" << YAML::Value << entity.GetComponent<WorldStreamingSourceComponent>().Enabled;
+            out << YAML::Key << "Enabled" << YAML::Value << source.Enabled;
+            out << YAML::Key << "TargetState" << YAML::Value
+                << (source.Target == WorldStreamingSourceComponent::TargetState::Loaded ? "Loaded" : "Activated");
+            out << YAML::Key << "LoadingRangeScale" << YAML::Value << source.LoadingRangeScale;
             out << YAML::EndMap;
         }
 
@@ -1845,6 +1849,11 @@ namespace Nox
             auto& component = deserializedEntity.AddComponent<WorldStreamingSourceComponent>();
             if (streamingSource["Enabled"])
                 component.Enabled = streamingSource["Enabled"].as<bool>();
+            if (streamingSource["TargetState"])
+                component.Target = streamingSource["TargetState"].as<std::string>() == "Loaded" ? WorldStreamingSourceComponent::TargetState::Loaded
+                                                                                              : WorldStreamingSourceComponent::TargetState::Activated;
+            if (streamingSource["LoadingRangeScale"])
+                component.LoadingRangeScale = std::max(streamingSource["LoadingRangeScale"].as<float>(), 0.0f);
         }
 
         if (auto particleEmitter = entity["ParticleEmitterComponent"])

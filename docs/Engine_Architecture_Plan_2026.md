@@ -1303,6 +1303,32 @@ away stays on screen as one cheap mesh per cell after the cell itself has stream
   Build HLODs; with Show HLODs, move the editor camera away: unloaded cells show as their HLODs, loaded cells hide theirs. Then Play:
   the cells stream around the player and the HLODs fill the distance, without a frame of hole or double drawing at the boundary.
 
+#### 5.13.3 6c-2: activation stages (built 2026-10-24)
+
+Unreal 5's runtime cell states: a cell is **Loaded** (in memory, not in the world) before it is **Activated** (in the world), and
+each streaming source says which of the two its cells get (`EStreamingSourceTargetState`).
+
+- **Loaded:** the cell's file (or a Play session's text) is read and parsed on a worker and its entities are built, a slice a frame,
+  into a scene of its own that nothing draws, simulates or scripts (as Unreal's actors are loaded outside the world). What it
+  references (meshes, models, prefabs, materials, animations ...: `Scene::CollectAssetReferences`) is requested then, and kept while
+  it stays loaded (the editor's unused-asset sweep counts loaded cells).
+- **Activated:** its entities are copied into the world, every component, a slice a frame within the streaming budget (3 ms), and
+  the built scene is released (nothing is held twice). In Play / Simulate activation waits until its assets are in, at most 2 s
+  (the HLOD shows meanwhile: it is hidden once the cell is drawn); the cells Play starts with, and the editor's, go in at once.
+  Physics bodies, scripts, particles and timelines start as for any streamed level (`FinishLevelLoad`).
+- **Deactivated:** a cell whose sources only load it any more leaves the world and is built again from its file (what ran in it is
+  gone, as when it is unloaded; Unreal keeps the actors' state -- copying runtime state back out of the world, physics and script
+  handles included, is not done). One being activated keeps its built scene.
+- **Sources:** `WorldStreamingSourceComponent` has `TargetState` (Activated / Loaded) and `LoadingRangeScale` (Unreal's names); the
+  camera activates. A cell is activated where an activating source reaches it, else loaded where any does; the 10 % hysteresis
+  applies to both (activated cells stay in until every activating source has left by 10 % more).
+- **Queries:** `Scene::GetWorldCellStage` (Unloaded / Loading / Loaded / Activating / Activated; the World Partition panel colours
+  loaded cells blue), and Unreal's `IsStreamingCompleted` as `Scene::IsWorldStreamingCompleted(point, range, stage)`, also for
+  scripts (`Scene.IsWorldStreamingCompleted`, `WorldCellState`; script API 5): e.g. a teleport puts a Loaded source at its
+  target, waits for Loaded, then moves the player.
+- **Test:** WorldPartitionTest.nox has a Loaded source (WPT_Preload); WorldPartitionTest.cs checks its cells are loaded and not in
+  the world, go in within a second once the camera reaches them, and leave the world staying loaded once it has gone.
+
 ### 5.14 Ray Tracing at Scale
 
 - **TLAS from GPU scene** instances (not render queues), with RT-specific culling: distance, screen
@@ -1372,7 +1398,7 @@ flight, targeted texture-slot cache eviction. Future:
 | **6a** | Texture streaming | 5 | BC cooking for all sources, mip tail, GPU mip feedback, residency + eviction | Scene textures exceeding the texture budget render correctly with mip reduction |
 | **6b** | Geometry streaming & LOD | 5 | Cluster hierarchy cook, GPU cut selection (**done, 6b-1**), page streaming pool (paused, §5.7.1), RT fallback LOD (reverted, D8) | Geometry exceeding the geometry budget renders with streaming; no popping beyond threshold |
 | **6c-0** | Level streaming | 5 | Additive scene load / unload, Level Streaming Volumes, script API (§5.12a: **built 2026-10-23**) | A level streams in and out around the camera without a stall |
-| **6c** | World streaming | 6a, 6b, 6c-0 | Grid cells, per-cell files, cell streaming, editor (§5.13.1: **6c-1 built 2026-10-24**), activation stages (6c-2), HLOD (§5.13.2: **6c-3 built 2026-10-24**), cooked cells | Test world larger than RAM/VRAM traversable without stalls |
+| **6c** | World streaming | 6a, 6b, 6c-0 | Grid cells, per-cell files, cell streaming, editor (§5.13.1: **6c-1 built 2026-10-24**), activation stages (§5.13.3: **6c-2 built 2026-10-24**), HLOD (§5.13.2: **6c-3 built 2026-10-24**), cooked cells | Test world larger than RAM/VRAM traversable without stalls |
 | **7** | Continuous optimization | all | Profile-driven work, VT, DirectStorage, async compute expansion | Ongoing |
 
 Phases 1, 2 and 3 are architecture-defining and each gets its own plan-mode design before code.

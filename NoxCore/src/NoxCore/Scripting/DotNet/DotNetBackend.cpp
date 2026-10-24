@@ -138,6 +138,14 @@ namespace Nox
             return level != 0 ? static_cast<int32_t>(s_Scene->GetLevelState(level)) : 0;
         }
 
+        // stage: 0 Unloaded .. 4 Activated (Scene::WorldCellStage); position and range in world units.
+        Coral::Bool32 SceneIsWorldStreamingCompleted(float x, float y, float z, float range, int32_t stage)
+        {
+            if (!s_Scene || stage < 0 || stage > static_cast<int32_t>(Scene::WorldCellStage::Activated))
+                return false;
+            return s_Scene->IsWorldStreamingCompleted(glm::vec3(x, y, z), range, static_cast<Scene::WorldCellStage>(stage));
+        }
+
         void SceneDestroy(uint64_t entityID)
         {
             if (!s_Scene) return;
@@ -817,6 +825,7 @@ namespace Nox
         assembly.AddInternalCall("Nox.InternalCalls", "Scene_LoadLevel", reinterpret_cast<void*>(&SceneLoadLevel));
         assembly.AddInternalCall("Nox.InternalCalls", "Scene_UnloadLevel", reinterpret_cast<void*>(&SceneUnloadLevel));
         assembly.AddInternalCall("Nox.InternalCalls", "Scene_GetLevelState", reinterpret_cast<void*>(&SceneGetLevelState));
+        assembly.AddInternalCall("Nox.InternalCalls", "Scene_IsWorldStreamingCompleted", reinterpret_cast<void*>(&SceneIsWorldStreamingCompleted));
         assembly.AddInternalCall("Nox.InternalCalls", "Mesh_Create", reinterpret_cast<void*>(&MeshCreate));
         assembly.AddInternalCall("Nox.InternalCalls", "Mesh_Destroy", reinterpret_cast<void*>(&MeshDestroy));
         assembly.AddInternalCall("Nox.InternalCalls", "Mesh_SetData", reinterpret_cast<void*>(&MeshSetData));

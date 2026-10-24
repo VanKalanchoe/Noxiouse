@@ -529,6 +529,13 @@ namespace Nox
         for (auto entity : m_Registry.view<SpriteRendererComponent>())
             outHandles.insert(m_Registry.get<SpriteRendererComponent>(entity).Texture);
 
+        // World cells loaded and not (yet) activated: what they were loaded for stays (§5.13.3).
+        for (const StreamedLevel& streamed : m_Levels)
+        {
+            if (streamed.Staged)
+                streamed.Staged->CollectAssetReferences(outHandles);
+        }
+
         outHandles.erase(AssetHandle(0));
     }
 
@@ -664,6 +671,41 @@ namespace Nox
             NOX_CORE_INFO("Level `{}` loaded ({} entities)", streamed.Name, created.size());
     }
 
+    bool Scene::ActivateWorldCellEntities(StreamedLevel& streamed, double budgetMs)
+    {
+        // The built cell's entities copied into this scene in file order, every component (what a load into the scene would have
+        // made), a slice a frame; one already here (the editor's own copy of an entity saved into this cell) is kept as it is.
+        Scene& staged = *streamed.Staged;
+        if (streamed.ActivateNext == 0)
+        {
+            for (const std::string& folder : staged.GetFolders())
+                AddFolder(folder);
+        }
+        const auto start = std::chrono::steady_clock::now();
+        while (streamed.ActivateNext < streamed.StagedEntities.size())
+        {
+            const UUID id = streamed.StagedEntities[streamed.ActivateNext++];
+            Entity source = staged.GetEntityByUUID(id);
+            if (!source)
+                continue;
+            if (Entity existing = GetEntityByUUID(id))
+            {
+                NOX_CORE_WARN("World cell `{}`: entity '{}' ({}) is in the scene already, kept as it is", streamed.Name, existing.GetName(),
+                              static_cast<uint64_t>(id));
+                continue;
+            }
+            Entity created = CreateEntityWithUUID(id, source.GetName());
+            CopyComponentIfExists(AllComponents{}, created, source);
+            created.AddOrReplaceComponent<LevelComponent>().Level = streamed.Level;
+            streamed.ActivatedEntities.push_back(id);
+            // The clock is read every few entities (an entity takes microseconds).
+            if ((streamed.ActivateNext & 15) == 0 &&
+                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count() >= budgetMs)
+                break;
+        }
+        return streamed.ActivateNext >= streamed.StagedEntities.size();
+    }
+
     // The time a frame may spend creating streamed levels' entities (the rest of a level comes in the next frames).
     static constexpr double LevelStreamingBudgetMs = 3.0;
 
@@ -722,7 +764,10 @@ namespace Nox
             }
         }
 
-        // 2. The unloads: a level still loading stops (its loader waits for its reading thread) and loses what it made so far.
+        // 2. The unloads: a level still loading stops (its loader waits for its reading thread) and loses what it made so far; a cell
+        //    also its built scene and what it had put into the world. Then the cells whose target became Loaded leave the world (§5.13.3):
+        //    one being activated keeps its built scene; one that was in the world is built again from its file (what ran in it is gone,
+        //    as when it is unloaded).
         for (StreamedLevel& streamed : m_Levels)
         {
             if (!streamed.UnloadQueued)
@@ -731,7 +776,8 @@ namespace Nox
             streamed.Loader.reset();
             if (streamed.IsCell)
             {
-                DestroyWorldCellEntities(streamed.Cell);
+                RemoveWorldCellFromWorld(streamed);
+                streamed.Staged = nullptr;
                 NOX_CORE_TRACE("World cell `{}` unloaded", streamed.Name);
                 continue;
             }
@@ -740,18 +786,50 @@ namespace Nox
                 NOX_CORE_INFO("Level `{}` unloaded", streamed.Name);
         }
         std::erase_if(m_Levels, [](const StreamedLevel& streamed) { return streamed.UnloadQueued; });
+        for (StreamedLevel& streamed : m_Levels)
+        {
+            if (!streamed.IsCell || streamed.Activate || streamed.Failed || streamed.Empty || (!streamed.Loaded && streamed.ActivateNext == 0))
+                continue;
+            const bool wasActivated = streamed.Loaded;
+            RemoveWorldCellFromWorld(streamed);
+            if (wasActivated)
+                StageWorldCell(streamed);
+            NOX_CORE_TRACE("World cell `{}` deactivated", streamed.Name);
+        }
 
         // 3. The loads, oldest first, within the frame's budget. The 3D physics bodies their components ask for (OnPhysics3DComponentChanged)
-        //    are held until the level is complete: a crate made before the floor below it fell through.
+        //    are held until the level is complete: a crate made before the floor below it fell through. A world cell is built, then
+        //    -- its target activated -- waits for its assets (Play / Simulate) and goes into the world (StepWorldCell).
         const auto start = std::chrono::steady_clock::now();
         for (size_t index = 0; index < m_Levels.size(); ++index)
         {
             StreamedLevel& streamed = m_Levels[index];
-            if (streamed.Loaded || !streamed.Loader)
+            if (streamed.Loaded || (!streamed.Loader && !(streamed.IsCell && streamed.Staged && streamed.Activate)))
                 continue;
             const double spent = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
             if (spent >= LevelStreamingBudgetMs)
                 break;
+            if (streamed.IsCell)
+            {
+                std::unordered_set<UUID> pendingBefore = std::move(m_PendingPhysics3D);
+                m_PendingPhysics3D.clear();
+                const CellStep step = StepWorldCell(streamed, LevelStreamingBudgetMs - spent, deltaTime, m_WorldStreaming);
+                streamed.HeldPhysics.insert(streamed.HeldPhysics.end(), m_PendingPhysics3D.begin(), m_PendingPhysics3D.end());
+                m_PendingPhysics3D = std::move(pendingBefore);
+                if (step == CellStep::Failed)
+                {
+                    RemoveWorldCellFromWorld(streamed);
+                    streamed.Failed = true;
+                }
+                else if (step == CellStep::Activated)
+                {
+                    FinishLevelLoad(streamed, streamed.ActivatedEntities, streamed.HeldPhysics);
+                    streamed.ActivatedEntities.clear();
+                    streamed.HeldPhysics.clear();
+                    streamed.Loaded = true;
+                }
+                continue;
+            }
             std::unordered_set<UUID> pendingBefore = std::move(m_PendingPhysics3D);
             m_PendingPhysics3D.clear();
             const bool done = streamed.Loader->Step(LevelStreamingBudgetMs - spent);
@@ -762,10 +840,7 @@ namespace Nox
             if (streamed.Loader->Failed())
             {
                 // (Refused or unreadable: the loader logged why. Whatever it made goes again.)
-                if (streamed.IsCell)
-                    DestroyWorldCellEntities(streamed.Cell);
-                else
-                    DestroyLevelEntities(streamed.Level);
+                DestroyLevelEntities(streamed.Level);
                 streamed.Loader.reset();
                 streamed.HeldPhysics.clear();
                 streamed.Failed = true;

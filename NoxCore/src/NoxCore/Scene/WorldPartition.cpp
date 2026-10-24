@@ -1,6 +1,8 @@
 #include "WorldPartition.h"
 
 #include <algorithm>
+#include <unordered_set>
+#include <chrono>
 #include <cfloat>
 #include <cmath>
 #include <fstream>
@@ -14,6 +16,7 @@
 #include "Scene.h"
 #include "SceneLoader.h"
 #include "SceneSerializer.h"
+#include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Core/VirtualFileSystem.h"
 #include "NoxCore/Core/WorldUnits.h"
@@ -299,6 +302,39 @@ namespace Nox
         return LevelState::Unloaded;
     }
 
+    Scene::WorldCellStage Scene::GetWorldCellStage(const WorldCellCoord& cell) const
+    {
+        for (const StreamedLevel& streamed : m_Levels)
+        {
+            if (!streamed.IsCell || streamed.Cell != cell || streamed.UnloadQueued)
+                continue;
+            if (streamed.Failed)
+                return WorldCellStage::Unloaded;
+            if (streamed.Loaded)
+                return WorldCellStage::Activated;
+            if (streamed.Loader)
+                return WorldCellStage::Loading;
+            if (streamed.Staged)
+                return streamed.ActivateNext > 0 ? WorldCellStage::Activating : WorldCellStage::Loaded;
+            return WorldCellStage::Loading;
+        }
+        return WorldCellStage::Unloaded;
+    }
+
+    bool Scene::IsWorldStreamingCompleted(const glm::vec3& point, float range, WorldCellStage stage) const
+    {
+        for (const auto& [cell, info] : m_World.Cells)
+        {
+            if (cell.Grid != WorldGrid::WorldGridIndex || WorldGrid::HorizontalDistance(point, info.BoundsMin, info.BoundsMax) > range)
+                continue;
+            const WorldCellStage reached = GetWorldCellStage(cell);
+            const bool done = stage == WorldCellStage::Activated ? reached == WorldCellStage::Activated : reached >= stage;
+            if (!done)
+                return false;
+        }
+        return true;
+    }
+
     std::vector<WorldCellCoord> Scene::GetLoadedWorldCells(bool includeLoading, int32_t grid) const
     {
         std::vector<WorldCellCoord> cells;
@@ -315,18 +351,20 @@ namespace Nox
         // The world's cells only: HLODs stream on their own around the editor camera and are never edited.
         for (const StreamedLevel& streamed : m_Levels)
         {
-            if (streamed.IsCell && streamed.Cell.Grid == WorldGrid::WorldGridIndex && (streamed.Loader || streamed.UnloadQueued))
+            if (streamed.IsCell && streamed.Cell.Grid == WorldGrid::WorldGridIndex &&
+                (streamed.Loader || streamed.UnloadQueued || (streamed.Staged && streamed.Activate)))
                 return true;
         }
         return false;
     }
 
-    void Scene::QueueWorldCellLoad(const WorldCellCoord& cell)
+    void Scene::QueueWorldCellLoad(const WorldCellCoord& cell, bool activate)
     {
         auto existing = std::find_if(m_Levels.begin(), m_Levels.end(), [&](const StreamedLevel& s) { return s.IsCell && s.Cell == cell; });
         if (existing != m_Levels.end())
         {
             existing->UnloadQueued = false; // wanted again before its unload ran: it stays
+            existing->Activate = activate;  // (a cell in the world whose target is Loaded now leaves it: UpdateLevelStreaming)
             if (!existing->Failed)
                 return;
             // Failed before (unreadable): asked for again, it is tried again.
@@ -338,20 +376,112 @@ namespace Nox
         streamed.IsCell = true;
         streamed.Cell = cell;
         streamed.Name = WorldGrid::CellName(cell);
-        if (auto memory = m_World.Overrides.find(cell); memory != m_World.Overrides.end())
+        streamed.Activate = activate;
+        StageWorldCell(streamed);
+    }
+
+    void Scene::StageWorldCell(StreamedLevel& streamed)
+    {
+        streamed.Staged = nullptr;
+        streamed.StagedEntities.clear();
+        streamed.Assets.clear();
+        streamed.AssetsReady = 0;
+        streamed.AssetWait = 0.0f;
+        streamed.ActivateNext = 0;
+        streamed.ActivatedEntities.clear();
+        streamed.Empty = false;
+        if (auto memory = m_World.Overrides.find(streamed.Cell); memory != m_World.Overrides.end())
         {
             if (memory->second.empty())
-                streamed.Loaded = true; // emptied in the editor: nothing to load
-            else
-                streamed.Loader = std::make_unique<SceneLoader>(streamed.Name, memory->second, *this, streamed.Level, true);
+            {
+                streamed.Loaded = streamed.Empty = true; // emptied in the editor: nothing to load
+                return;
+            }
+            streamed.Staged = CreateRef<Scene>();
+            streamed.Loader = std::make_unique<SceneLoader>(streamed.Name, memory->second, *streamed.Staged, streamed.Level, true);
             return;
         }
-        if (!m_World.Cells.contains(cell) || m_World.CellDirectory.empty())
+        if (!m_World.Cells.contains(streamed.Cell) || m_World.CellDirectory.empty())
         {
-            streamed.Loaded = true; // no file (yet): a new cell, empty
+            streamed.Loaded = streamed.Empty = true; // no file (yet): a new cell, empty
             return;
         }
-        streamed.Loader = std::make_unique<SceneLoader>(Project::GetActiveAssetDirectory() / m_World.CellFile(cell), *this, streamed.Level, true);
+        streamed.Staged = CreateRef<Scene>();
+        streamed.Loader = std::make_unique<SceneLoader>(Project::GetActiveAssetDirectory() / m_World.CellFile(streamed.Cell), *streamed.Staged,
+                                                        streamed.Level, true);
+    }
+
+    // How long a loaded cell's activation waits for its assets (meshes, models, materials) before it goes into the world anyway.
+    static constexpr float MaxAssetWaitSeconds = 2.0f;
+
+    Scene::CellStep Scene::StepWorldCell(StreamedLevel& streamed, double budgetMs, float deltaTime, bool waitForAssets)
+    {
+        const auto start = std::chrono::steady_clock::now();
+        if (streamed.Loader)
+        {
+            if (!streamed.Loader->Step(budgetMs))
+                return CellStep::Busy;
+            if (streamed.Loader->Failed())
+            {
+                streamed.Loader.reset();
+                streamed.Staged = nullptr;
+                streamed.StagedEntities.clear();
+                return CellStep::Failed;
+            }
+            // Loaded: what it references is requested now, to be in when it activates.
+            // Every entity of the built cell: the file's in file order, then any its components made while it was built.
+            streamed.StagedEntities = streamed.Loader->GetCreatedEntities();
+            streamed.Loader.reset();
+            {
+                const std::unordered_set<UUID> listed(streamed.StagedEntities.begin(), streamed.StagedEntities.end());
+                for (auto handle : streamed.Staged->m_Registry.view<IDComponent>())
+                {
+                    const UUID id = streamed.Staged->m_Registry.get<IDComponent>(handle).ID;
+                    if (!listed.contains(id))
+                        streamed.StagedEntities.push_back(id);
+                }
+            }
+            std::unordered_set<AssetHandle> handles;
+            streamed.Staged->CollectAssetReferences(handles);
+            streamed.Assets.assign(handles.begin(), handles.end());
+            for (AssetHandle handle : streamed.Assets)
+                AssetManager::RequestAsset(handle);
+            NOX_CORE_TRACE("World cell `{}` loaded ({} entities, {} assets)", streamed.Name, streamed.StagedEntities.size(), streamed.Assets.size());
+        }
+        if (!streamed.Staged || !streamed.Activate)
+            return CellStep::Busy; // (Loaded is its target)
+        if (streamed.ActivateNext == 0 && waitForAssets)
+        {
+            while (streamed.AssetsReady < streamed.Assets.size() && AssetManager::RequestAsset(streamed.Assets[streamed.AssetsReady]) != AssetState::Loading)
+                ++streamed.AssetsReady;
+            if (streamed.AssetsReady < streamed.Assets.size() && streamed.AssetWait < MaxAssetWaitSeconds)
+            {
+                streamed.AssetWait += deltaTime;
+                return CellStep::Busy;
+            }
+        }
+        const double spent = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+        if (!ActivateWorldCellEntities(streamed, std::max(budgetMs - spent, 0.0)))
+            return CellStep::Busy;
+        streamed.Staged = nullptr;
+        streamed.StagedEntities = {};
+        streamed.Assets = {};
+        return CellStep::Activated;
+    }
+
+    void Scene::RemoveWorldCellFromWorld(StreamedLevel& streamed)
+    {
+        // Its roots once activated (Origins), and the entities copied in so far while it is activating (no origins yet).
+        DestroyWorldCellEntities(streamed.Cell);
+        for (UUID id : streamed.ActivatedEntities)
+        {
+            if (Entity entity = GetEntityByUUID(id))
+                DestroyEntity(entity);
+        }
+        streamed.ActivatedEntities.clear();
+        streamed.ActivateNext = 0;
+        streamed.HeldPhysics.clear();
+        streamed.Loaded = false;
     }
 
     void Scene::LoadWorldCells(const std::vector<WorldCellCoord>& cells)
@@ -423,17 +553,19 @@ namespace Nox
         return glm::vec3(world[3]);
     }
 
-    void Scene::CollectStreamingSources(const glm::vec3* source, std::vector<glm::vec3>& outSources, bool composed)
+    void Scene::CollectStreamingSources(const glm::vec3* source, std::vector<StreamingSource>& outSources, bool composed)
     {
         outSources.clear();
         if (source)
-            outSources.push_back(*source);
+            outSources.push_back({ *source, 1.0f, true }); // the camera activates
         for (auto handle : m_Registry.view<WorldStreamingSourceComponent, WorldTransformComponent>())
         {
-            if (!m_Registry.get<WorldStreamingSourceComponent>(handle).Enabled)
+            const auto& component = m_Registry.get<WorldStreamingSourceComponent>(handle);
+            if (!component.Enabled)
                 continue;
-            outSources.push_back(composed ? ComposedWorldPosition(Entity(handle, this))
-                                          : glm::vec3(m_Registry.get<WorldTransformComponent>(handle).WorldMatrix[3]));
+            const glm::vec3 position = composed ? ComposedWorldPosition(Entity(handle, this))
+                                                : glm::vec3(m_Registry.get<WorldTransformComponent>(handle).WorldMatrix[3]);
+            outSources.push_back({ position, component.LoadingRangeScale, component.Target == WorldStreamingSourceComponent::TargetState::Activated });
         }
     }
 
@@ -441,16 +573,16 @@ namespace Nox
     {
         if (!m_WorldStreaming || !m_World.Settings.Enabled)
             return;
-        std::vector<glm::vec3>& sources = m_StreamingSources;
+        std::vector<StreamingSource>& sources = m_StreamingSources;
         CollectStreamingSources(source, sources, composedSources);
         if (sources.empty())
             return; // no source this frame (no primary camera): the cells stay as they are
         StreamWorldCells(sources, -1);
     }
 
-    void Scene::StreamWorldCells(const std::vector<glm::vec3>& sources, int32_t onlyGrid)
+    void Scene::StreamWorldCells(const std::vector<StreamingSource>& sources, int32_t onlyGrid)
     {
-        // Each grid by its own range: the world's cells by the loading range, the HLODs by theirs.
+        // Each grid by its own range (the world's cells by the loading range, the HLODs by theirs), times each source's scale.
         const float ranges[2] = { WorldUnits::FromMeters(m_World.Settings.LoadingRange), WorldUnits::FromMeters(m_World.Settings.HLODLoadingRange) };
         std::map<WorldCellCoord, StreamedLevel*> present;
         for (StreamedLevel& streamed : m_Levels)
@@ -459,30 +591,49 @@ namespace Nox
                 present[streamed.Cell] = &streamed;
         }
 
-        // Wanted cells nearest first; the ones every source has left by the hysteresis go.
-        std::vector<std::pair<float, WorldCellCoord>> wanted;
+        // Wanted cells nearest first, activated where an activating source reaches them; the hysteresis keeps a cell (and its being in
+        // the world) until every source has left it by that much more.
+        struct Want
+        {
+            float Distance;
+            WorldCellCoord Cell;
+            bool Activate;
+        };
+        std::vector<Want> wanted;
         for (const auto& [cell, info] : m_World.Cells)
         {
             if (onlyGrid >= 0 && cell.Grid != onlyGrid)
                 continue;
             const float range = ranges[cell.Grid == WorldGrid::HLODGridIndex ? 1 : 0];
-            const float unloadRange = range * (1.0f + WorldGrid::UnloadHysteresis);
-            float distance = FLT_MAX;
-            for (const glm::vec3& point : sources)
-                distance = std::min(distance, WorldGrid::HorizontalDistance(point, info.BoundsMin, info.BoundsMax));
+            float nearest = FLT_MAX;
+            bool load = false, keep = false, activate = false, keepActive = false;
+            for (const StreamingSource& source : sources)
+            {
+                const float distance = WorldGrid::HorizontalDistance(source.Position, info.BoundsMin, info.BoundsMax);
+                const float sourceRange = range * source.RangeScale;
+                const bool inside = distance <= sourceRange;
+                const bool kept = distance <= sourceRange * (1.0f + WorldGrid::UnloadHysteresis);
+                nearest = std::min(nearest, distance);
+                load |= inside;
+                keep |= kept;
+                activate |= inside && source.Activate;
+                keepActive |= kept && source.Activate;
+            }
             auto found = present.find(cell);
             StreamedLevel* streamed = found != present.end() ? found->second : nullptr;
-            if (distance <= range)
+            if (!streamed || streamed->UnloadQueued)
             {
-                if (!streamed || streamed->UnloadQueued)
-                    wanted.emplace_back(distance, cell);
+                if (load)
+                    wanted.push_back({ nearest, cell, activate });
             }
-            else if (streamed && distance > unloadRange)
+            else if (!keep)
                 streamed->UnloadQueued = true;
+            else
+                streamed->Activate = streamed->Activate ? keepActive : activate;
         }
-        std::sort(wanted.begin(), wanted.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
-        for (const auto& [distance, cell] : wanted)
-            QueueWorldCellLoad(cell);
+        std::sort(wanted.begin(), wanted.end(), [](const Want& a, const Want& b) { return a.Distance < b.Distance; });
+        for (const Want& want : wanted)
+            QueueWorldCellLoad(want.Cell, want.Activate);
     }
 
     void Scene::UpdateEditorHLODs(const glm::vec3& camera)
@@ -493,7 +644,7 @@ namespace Nox
             return;
         if (m_ShowHLODs)
         {
-            const std::vector<glm::vec3> sources{ camera };
+            const std::vector<StreamingSource> sources{ { camera, 1.0f, true } };
             StreamWorldCells(sources, WorldGrid::HLODGridIndex);
         }
         else
@@ -615,25 +766,24 @@ namespace Nox
             }
         }
 
-        // 2. The cells around the sources, in before the first frame.
+        // 2. The cells around the sources, in before the first frame: built and activated now, without waiting for their assets.
         UpdateWorldStreaming(source, true);
         for (StreamedLevel& streamed : m_Levels)
         {
-            if (!streamed.IsCell || !streamed.Loader)
+            if (!streamed.IsCell || streamed.Loaded || !streamed.Loader)
                 continue;
             streamed.Loader->WaitForRead();
-            streamed.Loader->Step(DBL_MAX);
-            if (streamed.Loader->Failed())
-            {
-                DestroyWorldCellEntities(streamed.Cell);
+            CellStep step = CellStep::Busy;
+            while (step == CellStep::Busy && (streamed.Loader || (streamed.Staged && streamed.Activate)))
+                step = StepWorldCell(streamed, DBL_MAX, 0.0f, false);
+            if (step == CellStep::Failed)
                 streamed.Failed = true;
-            }
-            else
+            else if (step == CellStep::Activated)
             {
-                FinishLevelLoad(streamed, streamed.Loader->GetCreatedEntities(), {});
+                FinishLevelLoad(streamed, streamed.ActivatedEntities, {});
+                streamed.ActivatedEntities.clear();
                 streamed.Loaded = true;
             }
-            streamed.Loader.reset();
         }
     }
 

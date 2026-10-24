@@ -18,6 +18,7 @@ internal static unsafe class InternalCalls
     private static delegate*<NativeString, uint> Scene_LoadLevel;
     private static delegate*<NativeString, void> Scene_UnloadLevel;
     private static delegate*<NativeString, int> Scene_GetLevelState;
+    private static delegate*<float, float, float, float, int, uint> Scene_IsWorldStreamingCompleted;
     private static delegate*<ulong> Mesh_Create;
     private static delegate*<ulong, void> Mesh_Destroy;
     private static delegate*<ulong, Vector3*, int, uint*, int, Vector3*, int, Vector2*, int, uint> Mesh_SetData;
@@ -111,6 +112,9 @@ internal static unsafe class InternalCalls
         using NativeString nativePath = new(scenePath);
         return Scene_GetLevelState(nativePath);
     }
+
+    internal static bool IsWorldStreamingCompleted(Vector3 position, float range, int state) =>
+        Scene_IsWorldStreamingCompleted(position.X, position.Y, position.Z, range, state) != 0;
 
     internal static ulong CreateEntity(string name, Vector3 position)
     {

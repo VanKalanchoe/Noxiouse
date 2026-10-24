@@ -55,6 +55,17 @@ Entities:
       Scale: [1, 1, 1]
     WorldStreamingSourceComponent:
       Enabled: true
+  - Entity: 6770408880458629189
+    TagComponent:
+      Tag: WPT_Preload
+    TransformComponent:
+      Translation: [11000, 0, 1000]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    WorldStreamingSourceComponent:
+      Enabled: true
+      TargetState: Loaded
+      LoadingRangeScale: 1
   - Entity: 13511013768637255349
     TagComponent:
       Tag: WPT_Persistent

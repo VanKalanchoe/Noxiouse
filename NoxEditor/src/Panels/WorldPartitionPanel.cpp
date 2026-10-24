@@ -18,7 +18,20 @@ namespace Nox
     {
         constexpr ImU32 kUnloadedFill = IM_COL32(70, 70, 76, 110);
         constexpr ImU32 kLoadingFill = IM_COL32(230, 170, 40, 150);
-        constexpr ImU32 kLoadedFill = IM_COL32(60, 170, 90, 140);
+        constexpr ImU32 kLoadedFill = IM_COL32(60, 170, 90, 140);       // activated: in the world
+        constexpr ImU32 kStagedFill = IM_COL32(70, 130, 210, 140);      // loaded, not activated (§5.13.3)
+
+        const char* StageName(Scene::WorldCellStage stage)
+        {
+            switch (stage)
+            {
+            case Scene::WorldCellStage::Loading: return "Loading";
+            case Scene::WorldCellStage::Loaded: return "Loaded (not activated: not in the world)";
+            case Scene::WorldCellStage::Activating: return "Activating";
+            case Scene::WorldCellStage::Activated: return "Activated (in the world)";
+            default: return "Unloaded";
+            }
+        }
         constexpr ImU32 kCellBorder = IM_COL32(150, 150, 160, 200);
         constexpr ImU32 kSelectedBorder = IM_COL32(255, 255, 255, 255);
         constexpr ImU32 kBoundsColor = IM_COL32(120, 200, 255, 160);
@@ -132,10 +145,13 @@ namespace Nox
     void WorldPartitionPanel::DrawToolbar(Scene& scene, const glm::vec3& cameraPosition, bool editing)
     {
         const WorldPartition& world = scene.GetWorldPartition();
-        size_t cells = 0, loaded = 0, loading = 0, entities = 0;
+        size_t cells = 0, activated = 0, loaded = 0, loading = 0, entities = 0;
         for (const WorldCellCoord& cell : scene.GetLoadedWorldCells(true))
         {
-            if (scene.GetWorldCellState(cell) == Scene::LevelState::Loaded)
+            const Scene::WorldCellStage stage = scene.GetWorldCellStage(cell);
+            if (stage == Scene::WorldCellStage::Activated)
+                ++activated;
+            else if (stage == Scene::WorldCellStage::Loaded)
                 ++loaded;
             else
                 ++loading;
@@ -147,7 +163,11 @@ namespace Nox
             ++cells;
             entities += info.Entities;
         }
-        ImGui::Text("%zu cells, %zu loaded, %zu loading, %zu entities in cells", cells, loaded, loading, entities);
+        if (loaded > 0)
+            ImGui::Text("%zu cells: %zu activated, %zu loaded (not in the world), %zu loading; %zu entities in cells", cells, activated, loaded,
+                        loading, entities);
+        else
+            ImGui::Text("%zu cells, %zu loaded, %zu loading, %zu entities in cells", cells, activated, loading, entities);
         if (!editing)
             ImGui::TextDisabled("Play / Simulate: cells stream around the camera and streaming sources");
 
@@ -308,8 +328,11 @@ namespace Nox
         {
             glm::vec2 rectMin, rectMax;
             WorldGrid::CellRect(cell, cellSize, rectMin, rectMax);
-            const Scene::LevelState state = scene.GetWorldCellState(cell);
-            const ImU32 fill = state == Scene::LevelState::Loaded ? kLoadedFill : state == Scene::LevelState::Loading ? kLoadingFill : kUnloadedFill;
+            const Scene::WorldCellStage stage = scene.GetWorldCellStage(cell);
+            const ImU32 fill = stage == Scene::WorldCellStage::Activated ? kLoadedFill
+                             : stage == Scene::WorldCellStage::Loaded    ? kStagedFill
+                             : stage == Scene::WorldCellStage::Unloaded  ? kUnloadedFill
+                                                                         : kLoadingFill;
             const ImVec2 a = toScreen(rectMin), b = toScreen(rectMax);
             draw->AddRectFilled(ImVec2(a.x + 1.0f, a.y + 1.0f), b, fill);
             const bool selected = m_Selection.contains(cell);
@@ -374,10 +397,9 @@ namespace Nox
 
         if (hoveredCell && !m_BoxSelecting)
         {
-            const Scene::LevelState state = scene.GetWorldCellState(*hoveredCell);
             ImGui::BeginTooltip();
             ImGui::TextUnformatted(WorldGrid::CellName(*hoveredCell).c_str());
-            ImGui::TextDisabled("%s", state == Scene::LevelState::Loaded ? "Loaded" : state == Scene::LevelState::Loading ? "Loading" : "Unloaded");
+            ImGui::TextDisabled("%s", StageName(scene.GetWorldCellStage(*hoveredCell)));
             if (auto info = world.Cells.find(*hoveredCell); info != world.Cells.end())
             {
                 const glm::vec3 extent = info->second.BoundsMax - info->second.BoundsMin;
