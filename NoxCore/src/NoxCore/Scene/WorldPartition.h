@@ -23,6 +23,9 @@ namespace Nox
         int32_t Z = 0;
 
         auto operator<=>(const WorldCellCoord&) const = default;
+        // Written out, not defaulted: a defaulted == makes the type "trivially equality comparable", and MSVC's STL then takes its
+        // vectorized std::find / std::remove path, which only handles 1, 2, 4 and 8 byte elements (a static_assert on this 12 byte one).
+        bool operator==(const WorldCellCoord& other) const { return Level == other.Level && X == other.X && Z == other.Z; }
     };
 
     // A cell the scene has a file for: what is in it, as of the last save (the streaming decides by the bounds).
