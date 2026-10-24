@@ -742,11 +742,14 @@ namespace Nox
                 if (m_World.Cells.contains(cell) && !m_World.CellDirectory.empty())
                     VFS::ReadText(Project::GetActiveAssetDirectory() / m_World.CellFile(cell), fileText);
                 text = SceneSerializer::MergeWorldCellText(*this, fileText, roots, name, count);
-                if (auto indexed = m_World.Cells.find(cell); indexed != m_World.Cells.end())
-                {
-                    boundsMin = glm::min(boundsMin, indexed->second.BoundsMin);
-                    boundsMax = glm::max(boundsMax, indexed->second.BoundsMax);
-                }
+            }
+            // The index's bounds stay in, the editor's loaded cells' too: an entity without bounds yet (a mesh a script makes in Play,
+            // a model not loaded) counts as its position only, and its cell's content shrank to that -- streamed later than its
+            // file says, or not at all from where it should be (the test world's cells, 45 m away instead of 32).
+            if (auto indexed = m_World.Cells.find(cell); indexed != m_World.Cells.end())
+            {
+                boundsMin = glm::min(boundsMin, indexed->second.BoundsMin);
+                boundsMax = glm::max(boundsMax, indexed->second.BoundsMax);
             }
             if (count == 0)
             {
