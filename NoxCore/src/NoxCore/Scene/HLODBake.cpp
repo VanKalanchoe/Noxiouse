@@ -518,19 +518,28 @@ namespace Nox::HLOD
         pack.blockAlign = true;
         // The texture's size comes from the density; the charts are then scaled to fill it (at least the density asked for, the
         // power of two rounding's room used rather than left empty): packed, measured, scaled, until the atlas spans 90-100 %.
-        pack.texelsPerUnit = static_cast<float>(std::sqrt(0.7 * double(size) * size / area));
-        for (int attempt = 0; attempt < 12; ++attempt)
+        // Every chart also costs its padding and block alignment whatever its scale: a cell simplified down to its budget is mostly
+        // small separate pieces (thousands of charts), whose overhead alone can outgrow the size the surface asks for. Then the
+        // texture grows (up to the largest size) until they fit.
+        for (;;)
         {
-            xatlas::PackCharts(atlas, pack);
-            const uint32_t largest = std::max(atlas->width, atlas->height);
-            if (largest <= size && largest * 10 >= size * 9)
+            pack.texelsPerUnit = static_cast<float>(std::sqrt(0.7 * double(size) * size / area));
+            for (int attempt = 0; attempt < 12; ++attempt)
+            {
+                xatlas::PackCharts(atlas, pack);
+                const uint32_t largest = std::max(atlas->width, atlas->height);
+                if (largest <= size && largest * 10 >= size * 9)
+                    break;
+                pack.texelsPerUnit *= 0.97f * static_cast<float>(size) / static_cast<float>(std::max(largest, 1u));
+            }
+            if (std::max(atlas->width, atlas->height) > size)
+            {
+                pack.texelsPerUnit *= 0.9f * static_cast<float>(size) / static_cast<float>(std::max(atlas->width, atlas->height));
+                xatlas::PackCharts(atlas, pack);
+            }
+            if (std::max(atlas->width, atlas->height) <= size || size >= settings.MaxTextureSize)
                 break;
-            pack.texelsPerUnit *= 0.97f * static_cast<float>(size) / static_cast<float>(std::max(largest, 1u));
-        }
-        if (std::max(atlas->width, atlas->height) > size)
-        {
-            pack.texelsPerUnit *= 0.9f * static_cast<float>(size) / static_cast<float>(std::max(atlas->width, atlas->height));
-            xatlas::PackCharts(atlas, pack);
+            size *= 2;
         }
         if (atlas->meshCount != 1 || std::max(atlas->width, atlas->height) > size || atlas->width == 0)
         {
