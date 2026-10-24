@@ -298,7 +298,7 @@ namespace NRI
         // 1. Initialize NVIDIA Streamline before Vulkan creation
         sl::Preferences pref{};
         pref.showConsole = false;
-        pref.logLevel = sl::LogLevel::eVerbose; // Mutes verbose NGX / Streamline config dumps
+        pref.logLevel = sl::LogLevel::eVerbose; // everything reaches the callback below, which picks what goes to the log
         pref.pathsToPlugins = nullptr;
         pref.numPathsToPlugins = 0; // Searches application exe directory
         pref.applicationId = 231313;
@@ -326,6 +326,11 @@ namespace NRI
             else if (type == sl::LogType::eInfo)
             {
                 std::string_view sv(msg);
+                // NGX's own GPU timing of its evaluations (Begin/EndPerfSection): when it reads a timestamp query whose frame is
+                // still on the GPU it reports "vkGetQueryPoolResults failed: NOT READY" and skips that sample. Info level, every
+                // frame the GPU runs a frame behind; nothing to act on.
+                if (sv.find("PerfSection") != std::string_view::npos)
+                    return;
                 if (sv.find("DLSS") != std::string_view::npos || sv.find("NGX") != std::string_view::npos ||
                     sv.find("extents") != std::string_view::npos || sv.find("optimal") != std::string_view::npos)
                 {
