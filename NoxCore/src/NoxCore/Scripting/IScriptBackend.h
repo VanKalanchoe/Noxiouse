@@ -17,9 +17,10 @@ namespace Nox
         virtual ScriptLanguage GetLanguage() const = 0;
         virtual bool Initialize(const std::filesystem::path& runtimeDirectory) = 0;
         virtual void Shutdown() = 0;
-        // Loads the assemblies; only once they have loaded does the module loaded before go (with its instances), so a
-        // failed load leaves the running scripts as they were. Every successful load is a new generation: handles of the
-        // one before stop working.
+        // Loads the assemblies in place of the module loaded before, which goes first with its instances (a .NET backend cannot
+        // keep two: unloading one clears the runtime's type cache for both). A failed load brings the module before back and
+        // returns false. Every load, the restored one too, is a new generation: instance handles of the one before stop
+        // working, so the caller makes the instances again whenever it called this.
         virtual bool LoadModule(const std::filesystem::path& coreAssembly,
                                 const std::filesystem::path& gameAssembly) = 0;
         // Waits for the scripts' background jobs (Nox.Jobs) before their code is unloaded; false if some still run after

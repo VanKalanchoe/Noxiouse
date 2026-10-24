@@ -37,6 +37,8 @@ namespace Nox
     private:
         struct Instance { uint32_t Generation; Coral::ManagedObject Object; std::string ClassName; int32_t CallbackMask = 0; };
         void ClearModule();
+        // Loads the assemblies into a new load context (no module may be loaded); false (nothing loaded) when they do not load.
+        bool LoadModuleFrom(const std::filesystem::path& coreAssembly, const std::filesystem::path& gameAssembly);
         void RegisterInternalCalls(Coral::ManagedAssembly& coreAssembly);
 
         Coral::HostInstance m_Host;

@@ -251,8 +251,9 @@ namespace Nox
             }
         }
 
-        // A build that does not load leaves the scripts that were running untouched.
-        if (!s_Backend->LoadModule(build->CoreAssembly, build->GameAssembly)) return false;
+        // A build that does not load brings the scripts that were running back; either way the instances are new (from the
+        // snapshots, so they continue where they were).
+        const bool loaded = s_Backend->LoadModule(build->CoreAssembly, build->GameAssembly);
         s_Instances.clear();
         if (s_Scene)
         {
@@ -267,7 +268,7 @@ namespace Nox
                 for (ScriptInstanceHandle instance : instances)
                     s_Backend->Invoke(instance, ScriptCallback::AfterReload);
         }
-        return true;
+        return loaded;
     }
 
     void ScriptEngine::OnRuntimeStart(Scene* scene)

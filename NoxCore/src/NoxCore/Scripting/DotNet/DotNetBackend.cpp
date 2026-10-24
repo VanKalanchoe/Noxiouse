@@ -611,8 +611,23 @@ namespace Nox
     bool DotNetBackend::LoadModule(const std::filesystem::path& coreAssembly,
                                    const std::filesystem::path& gameAssembly)
     {
-        // Into a load context of its own first: the module running now stays until the new one has loaded (a reload of a
-        // broken build keeps the scripts that worked).
+        // The module running now goes first: unloading any load context clears every type Coral has cached, the types of a
+        // context loaded meanwhile too (AssemblyLoader.UnloadAssemblyLoadContext), so the new module's types would be dead (no
+        // script types found, "Cannot invoke method ... on a null type"). A build that does not load brings the module before
+        // back (its generation's copies stay for the session), so the scripts that worked keep working.
+        const std::filesystem::path previousCore = m_CorePath;
+        const std::filesystem::path previousGame = m_GamePath;
+        const bool hadModule = m_LoadContext != nullptr;
+        ClearModule();
+        if (LoadModuleFrom(coreAssembly, gameAssembly))
+            return true;
+        if (hadModule && LoadModuleFrom(previousCore, previousGame))
+            NOX_CORE_WARN("Scripts: the scripts loaded before were loaded again");
+        return false;
+    }
+
+    bool DotNetBackend::LoadModuleFrom(const std::filesystem::path& coreAssembly, const std::filesystem::path& gameAssembly)
+    {
         const std::string searchPath = coreAssembly.parent_path().string() + ";" +
                                        gameAssembly.parent_path().string();
         auto loadContext = std::make_unique<Coral::AssemblyLoadContext>(
@@ -622,8 +637,7 @@ namespace Nox
         if (core->GetLoadStatus() != Coral::AssemblyLoadStatus::Success ||
             game->GetLoadStatus() != Coral::AssemblyLoadStatus::Success)
         {
-            NOX_CORE_ERROR("Failed to load managed scripting assemblies '{}', '{}'{}", coreAssembly.string(), gameAssembly.string(),
-                           m_LoadContext ? ": the scripts loaded before keep running" : "");
+            NOX_CORE_ERROR("Failed to load managed scripting assemblies '{}', '{}'", coreAssembly.string(), gameAssembly.string());
             m_Host.UnloadAssemblyLoadContext(*loadContext);
             return false;
         }
@@ -634,14 +648,12 @@ namespace Nox
             if (version != kScriptApiVersion)
             {
                 NOX_CORE_ERROR("Nox.ScriptCore '{}' has script API version {}, the engine needs {}: rebuild NoxScriptCore (and the "
-                               "game's scripts) with this engine{}", coreAssembly.string(), version, kScriptApiVersion,
-                               m_LoadContext ? "; the scripts loaded before keep running" : "");
+                               "game's scripts) with this engine", coreAssembly.string(), version, kScriptApiVersion);
                 m_Host.UnloadAssemblyLoadContext(*loadContext);
                 return false;
             }
         }
 
-        ClearModule();
         m_LoadContext = std::move(loadContext);
         m_CoreAssembly = core;
         m_GameAssembly = game;
@@ -754,6 +766,8 @@ namespace Nox
         m_Types.clear();
         m_ExposedFields.clear();
         m_CallbackMasks.clear();
+        // Handles of the module going stop working (a new one is a new generation, also when the old one is loaded back).
+        ++m_Generation;
         m_CoreAssembly = nullptr;
         m_GameAssembly = nullptr;
         if (m_LoadContext)
