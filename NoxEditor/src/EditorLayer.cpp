@@ -2847,6 +2847,20 @@ namespace Nox
 
     // The snap switch and steps, floating at the top left of the viewport (its own window: a click on it is not a click in the scene).
 
+    // Only the viewports dock in the viewport area, like Unreal's level viewport: panels dock around it, never in it. A panel
+    // dropped in it became a tab of a node with no tab bar (one viewport), out of sight behind the viewport.
+    static const ImGuiWindowClass* ViewportWindowClass()
+    {
+        static const ImGuiWindowClass windowClass = []
+        {
+            ImGuiWindowClass value;
+            value.ClassId = ImHashStr("NoxViewportWindow");
+            value.DockingAllowUnclassed = false;
+            return value;
+        }();
+        return &windowClass;
+    }
+
     void EditorLayer::UI_Viewports()
     {
         // The area the viewports dock into: a window in the middle of the editor with a dockspace of its own, so a layout preset
@@ -2861,8 +2875,25 @@ namespace Nox
             m_PendingViewportLayout = -1;
             ApplyViewportLayout(static_cast<ViewportLayout>(layout), viewportDockSpace, ImGui::GetContentRegionAvail());
         }
-        ImGui::DockSpace(viewportDockSpace, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_None);
+        ImGui::DockSpace(viewportDockSpace, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_None, ViewportWindowClass());
         ImGui::End();
+
+        // A panel a layout saved before put in the area floats again, where it can be seen and docked elsewhere.
+        auto undockPanels = [this](auto& self, ImGuiDockNode* node) -> void
+        {
+            if (!node)
+                return;
+            for (ImGuiWindow* window : node->Windows)
+            {
+                const bool isViewport = std::any_of(std::begin(m_Viewports), std::end(m_Viewports),
+                    [window](const ViewportSlot& slot) { return std::strcmp(window->Name, slot.Title) == 0; });
+                if (!isViewport)
+                    ImGui::DockContextQueueUndockWindow(ImGui::GetCurrentContext(), window);
+            }
+            self(self, node->ChildNodes[0]);
+            self(self, node->ChildNodes[1]);
+        };
+        undockPanels(undockPanels, ImGui::DockBuilderGetNode(viewportDockSpace));
 
         // The viewports open last session (once imgui.ini was read, before the first frame), then what to write back.
         if (s_ViewportIni.Loaded)
@@ -2947,6 +2978,7 @@ namespace Nox
         ViewportSlot& slot = m_Viewports[m_ActiveViewport];
         // We define "viewport" with no padding an retrieve the rendering area
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+        ImGui::SetNextWindowClass(ViewportWindowClass());
         const bool visible = ImGui::Begin(slot.Title, m_ActiveViewport == 0 ? nullptr : &slot.Open, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
         ImGui::PopStyleVar();
         if (!visible)
@@ -3320,6 +3352,7 @@ namespace Nox
         ViewportSlot& slot = m_Viewports[index];
         ImGui::SetNextWindowSize(ImVec2(640.0f, 400.0f), ImGuiCond_FirstUseEver);
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+        ImGui::SetNextWindowClass(ViewportWindowClass());
         const bool visible = ImGui::Begin(slot.Title, index == 0 ? nullptr : &slot.Open, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
         ImGui::PopStyleVar();
         slot.Hovered = false;
