@@ -67,6 +67,10 @@ namespace Nox::HLOD
         uint32_t MaxTextureSize = 2048;
         float HardEdgeAngle = 60.0f;    // degrees between faces where the HLOD's normals are split
         float MinPartSize = 0.0f;       // world units: smaller parts are left out of the geometry (still baked); 0: 2 x Error
+        // The geometry as Unreal's Approximated Mesh: one closed shell voxelised around the parts (half the error off them), then
+        // simplified. Off: the parts themselves merged and simplified (open, overlapping parts tear into shards).
+        bool Remesh = true;
+        uint64_t MaxVoxels = 32ull << 20; // grid samples (2 bytes each); over it the voxels grow, and the shell's offset with them
         // Runs body(i) for i in [0, count), possibly in parallel. Empty: a plain loop.
         std::function<void(uint32_t count, const std::function<void(uint32_t)>& body)> ParallelFor;
     };
@@ -93,6 +97,7 @@ namespace Nox::HLOD
         float EmissiveScale = 0.0f;
         bool Masked = false;                   // some texels are cut out (alpha-masked sources): alpha test the HLOD
 
+        float VoxelSize = 0.0f;   // world units, with Remesh (larger than the error asks when the grid was capped)
         uint32_t SourceTriangles = 0;
         uint32_t BakedTexels = 0; // texels that found their source
         uint32_t SurfaceTexels = 0;

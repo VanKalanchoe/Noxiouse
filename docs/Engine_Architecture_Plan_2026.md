@@ -1262,13 +1262,18 @@ away stays on screen as one cheap mesh per cell after the cell itself has stream
 - **One HLOD per world cell** that has static meshes, built from that cell's entities (its file, read into a scene of its own --
   the editor's scene is not touched, so every cell can be built, loaded or not). Model and prefab instances in the cell are
   spawned there first; skinned meshes are left out (Unreal's HLODs are static too).
-- **Geometry:** the cell's static meshes merged in the cell's space (parts smaller than the HLOD's error are left out: they would
-  be under a pixel where the HLOD shows), welded by position, simplified with meshoptimizer to the HLOD error (`meshopt_simplify`,
-  then `meshopt_simplifySloppy` -- which also joins separate parts -- when over the triangle budget), hard edges split by normal
-  angle, a new UV atlas laid out by xatlas, tangents computed and written with the mesh (the baked normal map is in exactly that
-  frame).
+- **Geometry (Unreal's Approximated Mesh: one closed shell, not the parts themselves):** the cell's static meshes in the cell's space
+  (parts smaller than twice the HLOD's error are left out: they would be under a pixel where the HLOD shows) are voxelised -- their
+  distances sampled on a grid near them, everything the outside cannot reach solid -- and the surface is taken half the error off
+  them by surface nets: one closed, welded, manifold shell around the cell (thin parts such as awnings become thin slabs). That is
+  simplified with meshoptimizer by the other half of the error (`meshopt_simplify`, then `meshopt_simplifySloppy` when over the
+  triangle budget), hard edges split by normal angle, a new UV atlas laid out by xatlas, tangents computed and written with the mesh
+  (the baked normal map is in exactly that frame). The grid is capped (32M samples, 2 bytes each): a larger cell gets larger voxels
+  and the log says which. Simplifying the parts directly (first version, `Settings::Remesh` off) tore Bistro's open, overlapping
+  parts into shards and holes.
 - **Materials baked (Unreal's ProxyLOD bakes the same way, on the CPU):** every texel of the atlas is a point and normal on the
-  HLOD's surface; a ray along the normal (both ways, within the simplification error) finds the source surface it stands for, and
+  HLOD's surface; a ray along the normal (both ways, within twice the error) finds the source surface it stands for -- where neither
+  does (a slab's rim, facing along its part), the nearest source point -- and
   the source material is evaluated there -- base color (alpha-masked parts are passed through), the normal map turned into the
   HLOD's tangent frame, roughness / metallic (specular-glossiness converted), emissive. Glass (alpha blended or transmissive) stays in
   the shell but is baked as what shows through it -- what is behind, by its transmission, else dark -- under its own gloss and normal

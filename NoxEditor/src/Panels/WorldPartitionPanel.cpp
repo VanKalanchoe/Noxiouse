@@ -215,7 +215,8 @@ namespace Nox
         ImGui::DragFloat("HLOD Loading Range (m)", &world.Settings.HLODLoadingRange, 1.0f, 8.0f, 65536.0f, "%.0f");
         ImGui::SetItemTooltip("How far the HLODs stream: beyond the world's loading range, where the cells themselves are out.");
         ImGui::DragFloat("Simplification Error (m)", &world.Settings.HLODError, 0.01f, 0.01f, 100.0f, "%.2f");
-        ImGui::SetItemTooltip("How far the HLOD's surface may stray from the cell's (parts under twice this are left out). About a pixel\n"
+        ImGui::SetItemTooltip("How far the HLOD's surface may stray from the cell's: half is the voxel shell's distance off the parts, half\n"
+                              "the simplification (parts under twice this are left out). About a pixel\n"
                               "where the HLOD is first seen, the loading range: a pixel there is about loading range / 1000 at 1080p\n"
                               "(100 m: 0.1 m; 500 m: 0.5 m). Seen closer than that, any HLOD looks coarse.");
         int maxTriangles = static_cast<int>(world.Settings.HLODMaxTriangles);

@@ -4,6 +4,7 @@
 #include <array>
 #include <cfloat>
 #include <cmath>
+#include <functional>
 #include <numeric>
 #include <optional>
 #include <unordered_map>
@@ -29,6 +30,67 @@ namespace Nox::HLOD
         uint8_t ToByte(float value)
         {
             return static_cast<uint8_t>(std::lround(std::clamp(value, 0.0f, 1.0f) * 255.0f));
+        }
+
+        // The point of triangle abc closest to p, as a + u (b - a) + v (c - a) (Ericson, Real-Time Collision Detection 5.1.5).
+        glm::vec3 ClosestPointOnTriangle(const glm::vec3& p, const glm::vec3& a, const glm::vec3& b, const glm::vec3& c, float& u, float& v)
+        {
+            const glm::vec3 ab = b - a, ac = c - a, ap = p - a;
+            const float d1 = glm::dot(ab, ap), d2 = glm::dot(ac, ap);
+            if (d1 <= 0.0f && d2 <= 0.0f)
+            {
+                u = 0.0f, v = 0.0f;
+                return a;
+            }
+            const glm::vec3 bp = p - b;
+            const float d3 = glm::dot(ab, bp), d4 = glm::dot(ac, bp);
+            if (d3 >= 0.0f && d4 <= d3)
+            {
+                u = 1.0f, v = 0.0f;
+                return b;
+            }
+            const float vc = d1 * d4 - d3 * d2;
+            if (vc <= 0.0f && d1 >= 0.0f && d3 <= 0.0f)
+            {
+                u = d1 / (d1 - d3), v = 0.0f;
+                return a + ab * u;
+            }
+            const glm::vec3 cp = p - c;
+            const float d5 = glm::dot(ab, cp), d6 = glm::dot(ac, cp);
+            if (d6 >= 0.0f && d5 <= d6)
+            {
+                u = 0.0f, v = 1.0f;
+                return c;
+            }
+            const float vb = d5 * d2 - d1 * d6;
+            if (vb <= 0.0f && d2 >= 0.0f && d6 <= 0.0f)
+            {
+                u = 0.0f, v = d2 / (d2 - d6);
+                return a + ac * v;
+            }
+            const float va = d3 * d6 - d5 * d4;
+            if (va <= 0.0f && d4 - d3 >= 0.0f && d5 - d6 >= 0.0f)
+            {
+                v = (d4 - d3) / ((d4 - d3) + (d5 - d6)), u = 1.0f - v;
+                return b + (c - b) * v;
+            }
+            const float sum = va + vb + vc;
+            if (!(sum > 0.0f)) // degenerate (no area): its nearest corner
+            {
+                const float da = glm::dot(ap, ap), db = glm::dot(bp, bp), dc = glm::dot(cp, cp);
+                u = db < da && db <= dc ? 1.0f : 0.0f;
+                v = dc < da && dc < db ? 1.0f : 0.0f;
+                return a + ab * u + ac * v;
+            }
+            u = vb / sum, v = vc / sum;
+            return a + ab * u + ac * v;
+        }
+
+        float DistanceSquaredToTriangle(const glm::vec3& p, const glm::vec3& a, const glm::vec3& b, const glm::vec3& c)
+        {
+            float u, v;
+            const glm::vec3 offset = p - ClosestPointOnTriangle(p, a, b, c, u, v);
+            return glm::dot(offset, offset);
         }
 
         // --- Source triangles and a BVH over them (the bake's ray casts) ---
@@ -115,6 +177,52 @@ namespace Nox::HLOD
                     }
                 }
                 return hit;
+            }
+
+            // The source point nearest to p within maxDistance: its triangle and barycentrics (u, v), or false.
+            bool Closest(const glm::vec3& p, float maxDistance, uint32_t& outTriangle, float& outU, float& outV) const
+            {
+                if (m_Nodes.empty())
+                    return false;
+                std::array<uint32_t, 64> stack;
+                uint32_t depth = 0;
+                stack[depth++] = 0;
+                float best = maxDistance * maxDistance;
+                bool found = false;
+                while (depth > 0)
+                {
+                    const BvhNode& node = m_Nodes[stack[--depth]];
+                    const glm::vec3 outside = glm::max(glm::max(node.Min - p, p - node.Max), glm::vec3(0.0f));
+                    if (glm::dot(outside, outside) > best)
+                        continue;
+                    if (node.Count > 0)
+                    {
+                        for (uint32_t index = node.First; index < node.First + node.Count; ++index)
+                        {
+                            const uint32_t triangle = m_Order[index];
+                            const SourceTriangle& tri = (*m_Triangles)[triangle];
+                            float u, v;
+                            const glm::vec3 offset = p - ClosestPointOnTriangle(p, tri.P0, tri.P0 + tri.E1, tri.P0 + tri.E2, u, v);
+                            const float squared = glm::dot(offset, offset);
+                            if (squared < best)
+                            {
+                                best = squared;
+                                outTriangle = triangle;
+                                outU = u;
+                                outV = v;
+                                found = true;
+                            }
+                        }
+                        continue;
+                    }
+                    const uint32_t self = static_cast<uint32_t>(&node - m_Nodes.data());
+                    if (depth + 2 <= stack.size())
+                    {
+                        stack[depth++] = node.First;  // right
+                        stack[depth++] = self + 1;    // left
+                    }
+                }
+                return found;
             }
 
         private:
@@ -264,6 +372,252 @@ namespace Nox::HLOD
             return surface;
         }
 
+        // --- The shell: Unreal's "Approximated Mesh" (its mesh approximation and ProxyLOD voxelise the same way) ---
+
+        struct Shell
+        {
+            std::vector<glm::vec3> Positions;
+            std::vector<uint32_t> Indices;
+            float VoxelSize = 0.0f;
+            float Offset = 0.0f;
+        };
+
+        // The parts as one closed surface. Their distances are sampled on a grid near them; everything the outside cannot reach is
+        // solid (a building's walls enclose its inside); the surface is taken at `offset` off the parts by surface nets (a vertex
+        // in each cell it passes, a quad across each grid edge it crosses). Closed and welded by construction: what the
+        // simplification needs -- the parts' own open, overlapping triangles tore into shards and holes under it. Over maxPoints
+        // the voxels grow, and the offset with them: it stays over half a voxel's diagonal, or the outside would leak between two
+        // samples through a surface.
+        Shell VoxelShell(const std::vector<glm::vec3>& positions, const std::vector<uint32_t>& indices, float offset, uint64_t maxPoints,
+                         const std::function<void(uint32_t, const std::function<void(uint32_t)>&)>& parallelFor)
+        {
+            Shell shell;
+            glm::vec3 low(FLT_MAX), high(-FLT_MAX);
+            for (uint32_t index : indices)
+            {
+                low = glm::min(low, positions[index]);
+                high = glm::max(high, positions[index]);
+            }
+            if (indices.size() < 3 || !(offset > 0.0f))
+                return shell;
+
+            constexpr float OffsetPerVoxel = 0.875f; // over half the diagonal (0.866)
+            float h = offset / OffsetPerVoxel;
+            float band = 0.0f;
+            int64_t pad = 0, nx = 0, ny = 0, nz = 0;
+            for (;;)
+            {
+                band = offset + 1.5f * h; // distances are kept up to here: the outside samples next to the solid ones need theirs
+                pad = static_cast<int64_t>(std::ceil(band / h)) + 2;
+                nx = static_cast<int64_t>(std::ceil((high.x - low.x) / h)) + 1 + 2 * pad;
+                ny = static_cast<int64_t>(std::ceil((high.y - low.y) / h)) + 1 + 2 * pad;
+                nz = static_cast<int64_t>(std::ceil((high.z - low.z) / h)) + 1 + 2 * pad;
+                if (static_cast<uint64_t>(nx * ny * nz) <= maxPoints)
+                    break;
+                h *= 1.15f;
+                offset = std::max(offset, h * OffsetPerVoxel);
+            }
+            shell.VoxelSize = h;
+            shell.Offset = offset;
+            const glm::vec3 gridOrigin = low - glm::vec3(static_cast<float>(pad) * h);
+            const size_t pointCount = static_cast<size_t>(nx * ny * nz);
+            auto at = [&](int64_t x, int64_t y, int64_t z) { return static_cast<size_t>(x + nx * (y + ny * z)); };
+            auto point = [&](int64_t x, int64_t y, int64_t z) { return gridOrigin + glm::vec3(float(x), float(y), float(z)) * h; };
+
+            // 1. Distances near the parts, quantised to a byte over the band (255: farther). Slabs of layers on workers, each
+            //    writing only its own layers.
+            std::vector<uint8_t> distance(pointCount, 255);
+            const float toByte = 254.0f / band;
+            const uint8_t solidByte = static_cast<uint8_t>(std::floor(offset * toByte));
+            constexpr int64_t SlabLayers = 8;
+            const int64_t slabCount = (nz + SlabLayers - 1) / SlabLayers;
+            std::vector<std::vector<uint32_t>> slabs(static_cast<size_t>(slabCount));
+            const uint32_t triangleCount = static_cast<uint32_t>(indices.size() / 3);
+            for (uint32_t triangle = 0; triangle < triangleCount; ++triangle)
+            {
+                const float zMin = std::min({ positions[indices[triangle * 3]].z, positions[indices[triangle * 3 + 1]].z, positions[indices[triangle * 3 + 2]].z });
+                const float zMax = std::max({ positions[indices[triangle * 3]].z, positions[indices[triangle * 3 + 1]].z, positions[indices[triangle * 3 + 2]].z });
+                const int64_t first = std::max<int64_t>(0, static_cast<int64_t>(std::floor((zMin - band - gridOrigin.z) / h)));
+                const int64_t last = std::min<int64_t>(nz - 1, static_cast<int64_t>(std::ceil((zMax + band - gridOrigin.z) / h)));
+                for (int64_t slab = first / SlabLayers; slab <= last / SlabLayers; ++slab)
+                    slabs[static_cast<size_t>(slab)].push_back(triangle);
+            }
+            parallelFor(static_cast<uint32_t>(slabCount), [&](uint32_t slab)
+            {
+                const int64_t slabFirst = int64_t(slab) * SlabLayers, slabLast = std::min(nz - 1, slabFirst + SlabLayers - 1);
+                for (uint32_t triangle : slabs[slab])
+                {
+                    const glm::vec3& a = positions[indices[triangle * 3]];
+                    const glm::vec3& b = positions[indices[triangle * 3 + 1]];
+                    const glm::vec3& c = positions[indices[triangle * 3 + 2]];
+                    const glm::vec3 lo = (glm::min(a, glm::min(b, c)) - glm::vec3(band) - gridOrigin) / h;
+                    const glm::vec3 hi = (glm::max(a, glm::max(b, c)) + glm::vec3(band) - gridOrigin) / h;
+                    const int64_t x0 = std::max<int64_t>(0, int64_t(std::floor(lo.x))), x1 = std::min<int64_t>(nx - 1, int64_t(std::ceil(hi.x)));
+                    const int64_t y0 = std::max<int64_t>(0, int64_t(std::floor(lo.y))), y1 = std::min<int64_t>(ny - 1, int64_t(std::ceil(hi.y)));
+                    const int64_t z0 = std::max<int64_t>(slabFirst, int64_t(std::floor(lo.z))), z1 = std::min<int64_t>(slabLast, int64_t(std::ceil(hi.z)));
+                    for (int64_t z = z0; z <= z1; ++z)
+                        for (int64_t y = y0; y <= y1; ++y)
+                            for (int64_t x = x0; x <= x1; ++x)
+                            {
+                                const float squared = DistanceSquaredToTriangle(point(x, y, z), a, b, c);
+                                if (squared >= band * band)
+                                    continue;
+                                const uint8_t value = static_cast<uint8_t>(std::min(254.0f, std::sqrt(squared) * toByte));
+                                uint8_t& stored = distance[at(x, y, z)];
+                                stored = std::min(stored, value);
+                            }
+                }
+            });
+            slabs = {};
+
+            // 2. The outside: flood filled from the grid's corner (the padding is empty all round), a run along x at a time.
+            std::vector<uint8_t> outside(pointCount, 0);
+            auto open = [&](size_t index) { return !outside[index] && distance[index] > solidByte; };
+            std::vector<std::array<int64_t, 3>> stack = { { 0, 0, 0 } };
+            while (!stack.empty())
+            {
+                const auto [x, y, z] = stack.back();
+                stack.pop_back();
+                if (!open(at(x, y, z)))
+                    continue;
+                int64_t left = x, right = x;
+                while (left > 0 && open(at(left - 1, y, z)))
+                    --left;
+                while (right < nx - 1 && open(at(right + 1, y, z)))
+                    ++right;
+                for (int64_t run = left; run <= right; ++run)
+                    outside[at(run, y, z)] = 1;
+                const int64_t neighbours[4][2] = { { y - 1, z }, { y + 1, z }, { y, z - 1 }, { y, z + 1 } };
+                for (const auto& [ny2, nz2] : neighbours)
+                {
+                    if (ny2 < 0 || ny2 >= ny || nz2 < 0 || nz2 >= nz)
+                        continue;
+                    bool inRun = false;
+                    for (int64_t run = left; run <= right; ++run)
+                    {
+                        const bool fillable = open(at(run, ny2, nz2));
+                        if (fillable && !inRun)
+                            stack.push_back({ run, ny2, nz2 });
+                        inRun = fillable;
+                    }
+                }
+            }
+
+            // The field the surface is taken from: distance minus the offset, positive outside, negative in the solid.
+            const float epsilon = h * 1e-4f;
+            auto value = [&](size_t index)
+            {
+                const float d = float(distance[index]) / toByte - offset;
+                return outside[index] ? std::max(d, epsilon) : std::min(d, -epsilon);
+            };
+
+            // 3. Surface nets: a vertex in each cell with corners on both sides, at the mean of its edges' crossings. Per layer on
+            //    workers; joined in layer order, so the cells stay sorted (their vertex is found by binary search).
+            static constexpr int Edges[12][2] = { { 0, 1 }, { 2, 3 }, { 4, 5 }, { 6, 7 }, { 0, 2 }, { 1, 3 }, { 4, 6 }, { 5, 7 },
+                                                  { 0, 4 }, { 1, 5 }, { 2, 6 }, { 3, 7 } };
+            std::vector<std::vector<uint64_t>> layerCells(static_cast<size_t>(nz - 1));
+            std::vector<std::vector<glm::vec3>> layerVertices(static_cast<size_t>(nz - 1));
+            parallelFor(static_cast<uint32_t>(nz - 1), [&](uint32_t layer)
+            {
+                const int64_t z = layer;
+                for (int64_t y = 0; y + 1 < ny; ++y)
+                    for (int64_t x = 0; x + 1 < nx; ++x)
+                    {
+                        size_t corners[8];
+                        int outsideCount = 0;
+                        for (int corner = 0; corner < 8; ++corner)
+                        {
+                            corners[corner] = at(x + (corner & 1), y + ((corner >> 1) & 1), z + ((corner >> 2) & 1));
+                            outsideCount += outside[corners[corner]];
+                        }
+                        if (outsideCount == 0 || outsideCount == 8)
+                            continue;
+                        glm::vec3 sum(0.0f);
+                        int crossings = 0;
+                        for (const auto& edge : Edges)
+                        {
+                            if (outside[corners[edge[0]]] == outside[corners[edge[1]]])
+                                continue;
+                            const float a = value(corners[edge[0]]), b = value(corners[edge[1]]);
+                            const float t = a / (a - b);
+                            const glm::vec3 pa(float(edge[0] & 1), float((edge[0] >> 1) & 1), float((edge[0] >> 2) & 1));
+                            const glm::vec3 pb(float(edge[1] & 1), float((edge[1] >> 1) & 1), float((edge[1] >> 2) & 1));
+                            sum += pa + (pb - pa) * t;
+                            ++crossings;
+                        }
+                        layerCells[layer].push_back(at(x, y, z));
+                        layerVertices[layer].push_back(point(x, y, z) + sum / float(crossings) * h);
+                    }
+            });
+            std::vector<uint64_t> cells;
+            for (size_t layer = 0; layer < layerCells.size(); ++layer)
+            {
+                cells.insert(cells.end(), layerCells[layer].begin(), layerCells[layer].end());
+                shell.Positions.insert(shell.Positions.end(), layerVertices[layer].begin(), layerVertices[layer].end());
+            }
+            layerCells = {};
+            layerVertices = {};
+            auto vertexOf = [&](int64_t x, int64_t y, int64_t z) -> int64_t
+            {
+                if (x < 0 || y < 0 || z < 0 || x + 1 >= nx || y + 1 >= ny || z + 1 >= nz)
+                    return -1;
+                const uint64_t cell = at(x, y, z);
+                const auto found = std::lower_bound(cells.begin(), cells.end(), cell);
+                return found != cells.end() && *found == cell ? int64_t(found - cells.begin()) : -1;
+            };
+
+            // 4. A quad across each grid edge between the outside and the solid, from the four cells around it, facing the outside
+            //    (counter-clockwise seen from there); split along its shorter diagonal.
+            std::vector<std::vector<uint32_t>> layerIndices(static_cast<size_t>(nz));
+            parallelFor(static_cast<uint32_t>(nz), [&](uint32_t layer)
+            {
+                const int64_t z = layer;
+                std::vector<uint32_t>& out = layerIndices[layer];
+                for (int64_t y = 0; y < ny; ++y)
+                    for (int64_t x = 0; x < nx; ++x)
+                    {
+                        const int64_t p[3] = { x, y, z };
+                        const bool here = outside[at(x, y, z)] != 0;
+                        for (int axis = 0; axis < 3; ++axis)
+                        {
+                            int64_t q[3] = { x, y, z };
+                            ++q[axis];
+                            if (q[axis] >= (axis == 0 ? nx : axis == 1 ? ny : nz) || (outside[at(q[0], q[1], q[2])] != 0) == here)
+                                continue;
+                            const int u = (axis + 1) % 3, v = (axis + 2) % 3; // u x v = axis
+                            int64_t c[4][3];
+                            for (int k = 0; k < 4; ++k)
+                                for (int i = 0; i < 3; ++i)
+                                    c[k][i] = p[i];
+                            --c[0][u]; --c[0][v];
+                            --c[1][v];
+                            --c[3][u];
+                            int64_t quad[4];
+                            bool complete = true;
+                            for (int k = 0; k < 4; ++k)
+                            {
+                                quad[k] = vertexOf(c[k][0], c[k][1], c[k][2]);
+                                complete &= quad[k] >= 0;
+                            }
+                            if (!complete)
+                                continue;
+                            if (here) // the solid is on the +axis side: the surface faces -axis
+                                std::swap(quad[1], quad[3]);
+                            const float diagonal02 = glm::length(shell.Positions[quad[0]] - shell.Positions[quad[2]]);
+                            const float diagonal13 = glm::length(shell.Positions[quad[1]] - shell.Positions[quad[3]]);
+                            const uint32_t i0 = uint32_t(quad[0]), i1 = uint32_t(quad[1]), i2 = uint32_t(quad[2]), i3 = uint32_t(quad[3]);
+                            if (diagonal02 <= diagonal13)
+                                out.insert(out.end(), { i0, i1, i2, i0, i2, i3 });
+                            else
+                                out.insert(out.end(), { i0, i1, i3, i1, i2, i3 });
+                        }
+                    }
+            });
+            for (const std::vector<uint32_t>& layer : layerIndices)
+                shell.Indices.insert(shell.Indices.end(), layer.begin(), layer.end());
+            return shell;
+        }
+
         uint32_t NextPowerOfTwo(uint32_t value)
         {
             uint32_t power = 1;
@@ -394,19 +748,42 @@ namespace Nox::HLOD
             return result;
         }
 
-        // 2. Welded by position, simplified to the error; then, over the triangle budget, cut down to it (sloppy: joins parts).
-        std::vector<uint32_t> remap(mergedPositions.size());
-        const size_t uniqueCount = meshopt_generateVertexRemap(remap.data(), mergedIndices.data(), mergedIndices.size(), mergedPositions.data(),
-                                                               mergedPositions.size(), sizeof(glm::vec3));
-        std::vector<glm::vec3> welded(uniqueCount);
-        meshopt_remapVertexBuffer(welded.data(), mergedPositions.data(), mergedPositions.size(), sizeof(glm::vec3), remap.data());
-        std::vector<uint32_t> indices(mergedIndices.size());
-        meshopt_remapIndexBuffer(indices.data(), mergedIndices.data(), mergedIndices.size(), remap.data());
+        // 2. One closed shell around the parts (Remesh: Unreal's Approximated Mesh), else the parts welded by position; simplified to
+        //    what is left of the error, then, over the triangle budget, cut down to it (sloppy: joins parts).
+        std::vector<glm::vec3> welded;
+        std::vector<uint32_t> indices;
+        float simplifyError = settings.Error;
+        if (settings.Remesh)
+        {
+            // Half the error is the shell's distance off the parts, half the simplification's.
+            Shell shell = VoxelShell(mergedPositions, mergedIndices, settings.Error * 0.5f, settings.MaxVoxels, parallelFor);
+            result.VoxelSize = shell.VoxelSize;
+            simplifyError = std::max(settings.Error - shell.Offset, settings.Error * 0.25f);
+            welded = std::move(shell.Positions);
+            indices = std::move(shell.Indices);
+            if (indices.size() < 3)
+            {
+                result.Error = "the voxel shell is empty";
+                return result;
+            }
+        }
+        else
+        {
+            std::vector<uint32_t> remap(mergedPositions.size());
+            const size_t uniqueCount = meshopt_generateVertexRemap(remap.data(), mergedIndices.data(), mergedIndices.size(), mergedPositions.data(),
+                                                                   mergedPositions.size(), sizeof(glm::vec3));
+            welded.resize(uniqueCount);
+            meshopt_remapVertexBuffer(welded.data(), mergedPositions.data(), mergedPositions.size(), sizeof(glm::vec3), remap.data());
+            indices.resize(mergedIndices.size());
+            meshopt_remapIndexBuffer(indices.data(), mergedIndices.data(), mergedIndices.size(), remap.data());
+        }
+        mergedPositions = {};
+        mergedIndices = {};
 
         std::vector<uint32_t> simplified(indices.size());
         float resultError = 0.0f;
         size_t simplifiedCount = meshopt_simplify(simplified.data(), indices.data(), indices.size(), &welded[0].x, welded.size(), sizeof(glm::vec3),
-                                                  0, settings.Error, meshopt_SimplifyErrorAbsolute, &resultError);
+                                                  0, simplifyError, meshopt_SimplifyErrorAbsolute, &resultError);
         simplified.resize(simplifiedCount);
         const size_t budget = size_t(std::max(settings.MaxTriangles, 16u)) * 3;
         if (simplified.size() > budget)
@@ -662,6 +1039,35 @@ namespace Nox::HLOD
                 const glm::vec3 frameNormal = glm::normalize(result.Normals[i0] * w0 + result.Normals[i1] * w1 + result.Normals[i2] * w2);
                 const glm::vec4 frameTangent = result.Tangents[i0] * w0 + result.Tangents[i1] * w1 + result.Tangents[i2] * w2;
 
+                // The texel takes a source surface: colour, gloss, emissive, its normal in the HLOD's tangent frame.
+                auto write = [&](const Surface& surface)
+                {
+                    states[texel] = TexelState::Baked;
+                    uint8_t* color = &result.BaseColor[texel * 4];
+                    color[0] = ToByte(LinearToSrgb(surface.BaseColor.r));
+                    color[1] = ToByte(LinearToSrgb(surface.BaseColor.g));
+                    color[2] = ToByte(LinearToSrgb(surface.BaseColor.b));
+                    color[3] = 255;
+                    uint8_t* mr = &result.MetallicRoughness[texel * 4];
+                    mr[0] = 255;
+                    mr[1] = ToByte(surface.Roughness);
+                    mr[2] = ToByte(surface.Metallic);
+                    mr[3] = 255;
+                    emissive[texel] = surface.Emissive;
+                    // The source's shading normal in the HLOD's tangent frame at this texel.
+                    glm::vec3 tangent = glm::vec3(frameTangent) - frameNormal * glm::dot(frameNormal, glm::vec3(frameTangent));
+                    tangent = glm::dot(tangent, tangent) > 1e-20f ? glm::normalize(tangent) : glm::vec3(1, 0, 0);
+                    const glm::vec3 bitangent = glm::cross(frameNormal, tangent) * (frameTangent.w < 0.0f ? -1.0f : 1.0f);
+                    glm::vec3 local(glm::dot(surface.Normal, tangent), glm::dot(surface.Normal, bitangent), glm::dot(surface.Normal, frameNormal));
+                    local.z = std::max(local.z, 0.0f); // a back-facing source normal: flat on the HLOD rather than inverted
+                    local = glm::dot(local, local) > 1e-12f ? glm::normalize(local) : glm::vec3(0, 0, 1);
+                    uint8_t* normal = &result.Normal[texel * 4];
+                    normal[0] = ToByte(local.x * 0.5f + 0.5f);
+                    normal[1] = ToByte(local.y * 0.5f + 0.5f);
+                    normal[2] = ToByte(local.z * 0.5f + 0.5f);
+                    normal[3] = 255;
+                };
+
                 // From outside in, then from inside out; alpha-masked hits that are cut away let the ray go on, and so do see-through
                 // ones (glass), adding what they cover of what is behind them.
                 bool cut = false;
@@ -715,31 +1121,29 @@ namespace Nox::HLOD
                             surface.Metallic = front->Metallic;
                             surface.Normal = front->Normal;
                         }
-                        states[texel] = TexelState::Baked;
-                        uint8_t* color = &result.BaseColor[texel * 4];
-                        color[0] = ToByte(LinearToSrgb(surface.BaseColor.r));
-                        color[1] = ToByte(LinearToSrgb(surface.BaseColor.g));
-                        color[2] = ToByte(LinearToSrgb(surface.BaseColor.b));
-                        color[3] = 255;
-                        uint8_t* mr = &result.MetallicRoughness[texel * 4];
-                        mr[0] = 255;
-                        mr[1] = ToByte(surface.Roughness);
-                        mr[2] = ToByte(surface.Metallic);
-                        mr[3] = 255;
-                        emissive[texel] = surface.Emissive;
-                        // The source's shading normal in the HLOD's tangent frame at this texel.
-                        glm::vec3 tangent = glm::vec3(frameTangent) - frameNormal * glm::dot(frameNormal, glm::vec3(frameTangent));
-                        tangent = glm::dot(tangent, tangent) > 1e-20f ? glm::normalize(tangent) : glm::vec3(1, 0, 0);
-                        const glm::vec3 bitangent = glm::cross(frameNormal, tangent) * (frameTangent.w < 0.0f ? -1.0f : 1.0f);
-                        glm::vec3 local(glm::dot(surface.Normal, tangent), glm::dot(surface.Normal, bitangent), glm::dot(surface.Normal, frameNormal));
-                        local.z = std::max(local.z, 0.0f); // a back-facing source normal: flat on the HLOD rather than inverted
-                        local = glm::dot(local, local) > 1e-12f ? glm::normalize(local) : glm::vec3(0, 0, 1);
-                        uint8_t* normal = &result.Normal[texel * 4];
-                        normal[0] = ToByte(local.x * 0.5f + 0.5f);
-                        normal[1] = ToByte(local.y * 0.5f + 0.5f);
-                        normal[2] = ToByte(local.z * 0.5f + 0.5f);
-                        normal[3] = 255;
+                        write(surface);
                         break;
+                    }
+                }
+                // Neither way along the normal found it (a thin part's rim faces along the part, a ray there runs past it): the source
+                // point nearest to the texel.
+                if (states[texel] != TexelState::Baked && !cut)
+                {
+                    uint32_t nearest = 0;
+                    float u = 0.0f, v = 0.0f;
+                    if (bvh.Closest(position, search, nearest, u, v))
+                    {
+                        const SourceTriangle& tri = sources[nearest];
+                        const Material& material = materials[tri.Material];
+                        Surface surface = Evaluate(material, tri, u, v);
+                        if (material.AlphaMask && surface.Alpha < material.AlphaCutoff)
+                            cut = true;
+                        else
+                        {
+                            if (material.Translucent) // nothing behind it is looked for here: what it covers of the dark
+                                surface.BaseColor *= std::clamp(surface.Alpha * (1.0f - material.Transmission), 0.0f, 1.0f);
+                            write(surface);
+                        }
                     }
                 }
                 if (states[texel] != TexelState::Baked && cut)
