@@ -131,6 +131,10 @@ namespace Nox
         bool IsSpatiallyLoaded(Entity root);
         // The cell a root entity is kept in, as a save would place it now; false: always loaded (a child, or no world partition).
         bool GetWorldCell(Entity root, WorldCellCoord& outCell);
+        // A model or prefab instance (or any tree) as separate entities, each part with something in the world a root where it stands,
+        // filed in a folder named after it: a world partitions per root, and one instance would be one cell (Bistro). Not for an
+        // animated tree. Returns how many parts became roots; 0 with `outError` when it cannot.
+        int SplitIntoSeparateEntities(Entity root, std::string& outError);
         // The spatially loaded root entities in memory by cell.
         std::map<WorldCellCoord, std::vector<Entity>> CollectWorldCellRoots();
         // By hand (the editor): read on a thread and created a slice a frame like levels; unloading destroys the cell's entities.

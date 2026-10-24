@@ -1223,6 +1223,12 @@ volume or a script.
   is not an undo step (the history starts again; undo waits while cells load), and neither is the world itself (an undo step keeps
   the settings, index and loaded cells: undoing past a conversion does not un-convert). The cell size changes only while every cell
   is loaded (saving then re-partitions the whole world).
+- **Split Into Separate Entities** (Properties > Model Instance): a world partitions per root entity, so a model placed as one
+  instance (Bistro: one root, about 6000 spawned parts) would be one cell. Split, every part with a mesh or light becomes a root
+  where it stands, filed in a folder named after the model, and goes to its own cell (Unreal partitions per actor). Not for
+  animated trees.
+- **Choosing the settings:** the loading range is how far content must be present (view or fog distance, later where HLOD takes
+  over); the cell size sets how coarse streaming is (about half the range; Unreal's defaults are 128 m / 256 m, used here too).
 - **Packaging and references:** the packager ships the cell files of every world it packs and collects what they name; Find
   References, unused-asset detection and Replace References read cell files like scene files.
 - **Not in 6c-1:** activation stages and HLOD (6c-2, 6c-3), data layers, per-entity files, a world larger than memory (6c test world).

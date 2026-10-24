@@ -68,6 +68,9 @@ namespace Nox
         // iterated invalidates it, so they're applied after the loop, resolved by UUID so an entity
         // already destroyed as a child of another pending delete is skipped.
         std::vector<UUID> m_PendingDestroy;
+        // Split Into Separate Entities, asked for while the instance's components were drawn: applied at the start of the next draw
+        // (it may destroy the instance root).
+        UUID m_PendingSplit = 0;
         std::string m_PendingFolderDelete;
         Entity m_PendingSingleSelect; // a plain click on a selected entity narrows the selection on release, so it can be dragged as a group
         std::string m_RenameFolderPath;

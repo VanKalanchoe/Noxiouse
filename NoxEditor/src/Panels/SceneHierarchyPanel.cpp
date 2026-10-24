@@ -201,6 +201,17 @@ namespace Nox
 
     void SceneHierarchyPanel::OnImGuiRender()
     {
+        if (m_PendingSplit != 0 && m_Context)
+        {
+            if (Entity root = m_Context->GetEntityByUUID(m_PendingSplit))
+            {
+                ClearSelection();
+                std::string error;
+                if (m_Context->SplitIntoSeparateEntities(root, error) == 0 && !error.empty())
+                    NOX_CORE_WARN("Split Into Separate Entities: {}", error);
+            }
+            m_PendingSplit = 0;
+        }
         ImGui::Begin("Scene Hierarchy");
         left = ImGui::GetWindowSize();
         leftFocused = ImGui::IsWindowFocused();
@@ -1186,6 +1197,16 @@ namespace Nox
                 if (ImGui::Button("Restore Removed Nodes"))
                     ModelInstance::Respawn(*m_Context, entity);
             }
+
+            // For a world (Window > World Partition): one instance streams as one piece; split, each part goes to its own cell.
+            ImGui::BeginDisabled(!component.Spawned || m_Context->IsRunning());
+            const bool split = ImGui::Button("Split Into Separate Entities");
+            ImGui::EndDisabled();
+            ImGui::SetItemTooltip("Every part with a mesh or light becomes an entity of its own, where it stands, filed in a folder named\n"
+                                  "after the model; the instance is gone (its parts are saved in the scene, not spawned from the model).\n"
+                                  "A world partitions per root entity: as one instance the whole model streams in and out at once.");
+            if (split)
+                m_PendingSplit = Entity(entity).GetUUID();
         });
 
         DrawComponent<MeshComponent>("Mesh", entity, [entity](auto& component)

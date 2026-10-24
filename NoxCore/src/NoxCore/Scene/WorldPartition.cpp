@@ -10,6 +10,7 @@
 #include "Components.h"
 #include "Entity.h"
 #include "EntityBounds.h"
+#include "PrefabInstance.h"
 #include "Scene.h"
 #include "SceneLoader.h"
 #include "SceneSerializer.h"
@@ -220,6 +221,67 @@ namespace Nox
             streamed.Name = WorldGrid::CellName(cell);
             streamed.Loaded = true;
         }
+    }
+
+    int Scene::SplitIntoSeparateEntities(Entity root, std::string& outError)
+    {
+        // Unreal partitions per actor: a model placed as one instance (Bistro: one root, thousands of spawned parts) would be one
+        // cell streaming the whole town at once. Its parts become entities of their own here, each a root where it stands.
+        if (!root || !IsRoot(root))
+        {
+            outError = "only a root entity can be split";
+            return 0;
+        }
+        if (root.HasComponent<ModelInstanceComponent>() && !root.GetComponent<ModelInstanceComponent>().Spawned)
+        {
+            outError = "the model is still loading";
+            return 0;
+        }
+        bool animated = false;
+        Visit(*this, root, [&](Entity entity) { animated |= entity.HasComponent<AnimatorComponent>(); });
+        if (animated)
+        {
+            outError = "it is animated (its animator drives its parts as one tree)";
+            return 0;
+        }
+
+        // Unpacked first: the parts are saved as ordinary entities from now on.
+        if (root.HasComponent<PrefabInstanceComponent>())
+            PrefabInstance::UnpackCompletely(*this, root);
+        Visit(*this, root, [&](Entity entity)
+        {
+            if (entity.HasComponent<ModelInstanceComponent>())
+                entity.RemoveComponent<ModelInstanceComponent>();
+            if (entity.HasComponent<ModelNodeComponent>())
+                entity.RemoveComponent<ModelNodeComponent>();
+        });
+
+        // Every part with something in the world becomes a root (keeping its place, filed in a folder named after the model); what
+        // is left -- the groups that only held them -- goes when nothing is under it any more.
+        std::vector<Entity> order;
+        Visit(*this, root, [&](Entity entity) { order.push_back(entity); });
+        const std::string folder = root.GetName();
+        int split = 0;
+        for (Entity entity : order)
+        {
+            if (entity == root || !HasWorldPresence(entity))
+                continue;
+            entity.SetParent(Entity());
+            if (!entity.HasComponent<FolderComponent>())
+                entity.AddComponent<FolderComponent>(folder);
+            ++split;
+        }
+        for (auto it = order.rbegin(); it != order.rend(); ++it)
+        {
+            Entity entity = *it;
+            if (!entity || HasWorldPresence(entity) || IsGlobal(entity) || entity.HasComponent<ScriptComponent>())
+                continue;
+            const bool hasChildren = entity.HasComponent<RelationshipComponent>() && !entity.GetComponent<RelationshipComponent>().Children.empty();
+            if (!hasChildren)
+                DestroyEntity(entity);
+        }
+        NOX_CORE_INFO("Split '{}' into {} separate entities", folder, split);
+        return split;
     }
 
     // --- Scene: loading and unloading cells ---

@@ -84,6 +84,9 @@ namespace Nox
                                "and out around the camera in Play. Sky, sun, cameras, the player and logic stay in the scene file. The cell "
                                "files are written on the next save.");
             ImGui::Spacing();
+            ImGui::TextDisabled("Each root entity goes into one cell. A model placed as one instance (Bistro) would stream as one piece:\n"
+                                "split it first (Properties > Model Instance > Split Into Separate Entities).");
+            ImGui::Spacing();
             ImGui::BeginDisabled(!editing);
             ImGui::DragFloat("Cell Size (m)", &m_NewSettings.CellSize, 1.0f, 8.0f, 4096.0f, "%.0f");
             ImGui::DragFloat("Loading Range (m)", &m_NewSettings.LoadingRange, 1.0f, 8.0f, 16384.0f, "%.0f");
