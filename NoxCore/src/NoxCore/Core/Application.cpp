@@ -9,6 +9,7 @@
 
 #include "NoxCore/Profiling/Profiler.h"
 #include "NoxCore/Profiling/StatsOverlayLayer.h"
+#include "NoxCore/Core/Input.h"
 #include "NoxCore/Events/InputEvents.h"
 #include "NoxCore/Events/WindowEvents.h"
 #include "NoxCore/Renderer/Renderer.h"
@@ -77,6 +78,7 @@ namespace Nox
             const double currentTime = GetTime();
             Timestep timestep = static_cast<float>(currentTime - m_LastFrameTime);
             m_LastFrameTime = currentTime;
+            Input::BeginFrame(); // the mouse motion since the last frame, for game scripts
 
             // Main layer update here
             {
@@ -218,8 +220,7 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* currentEvent)
 
             int x = motion.x; // X position in **pixels** relative to the window
             int y = motion.y; // Y position in pixels
-            int dx = motion.xrel; // Delta X since last event
-            int dy = motion.yrel; // Delta Y since last event
+            Nox::Input::AddMouseMotion(motion.xrel, motion.yrel); // also in relative mode, where x / y stand still
 
             Nox::MouseMovedEvent event(x, y);
             applicationState->app->RaiseEvent(event);
@@ -228,6 +229,7 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* currentEvent)
         }
     case SDL_EVENT_MOUSE_WHEEL:
         {
+            Nox::Input::AddMouseWheel(currentEvent->wheel.y);
             Nox::MouseScrolledEvent event(currentEvent->wheel.x, currentEvent->wheel.y);
             applicationState->app->RaiseEvent(event);
 

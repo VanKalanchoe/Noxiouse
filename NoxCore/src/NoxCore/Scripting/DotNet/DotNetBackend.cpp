@@ -68,6 +68,31 @@ namespace Nox
             return Input::GameMouseEnabled() && Input::IsMouseButtonPressed(static_cast<SDL_MouseButtonFlags>(button));
         }
 
+        void InputGetMouseDelta(glm::vec2* outDelta)
+        {
+            *outDelta = Input::GameMouseEnabled() ? Input::GetFrameMouseDelta() : glm::vec2(0.0f);
+        }
+
+        float InputGetScrollDelta()
+        {
+            return Input::GameMouseEnabled() ? Input::GetFrameScroll() : 0.0f;
+        }
+
+        // Locked: SDL's relative mouse mode (hidden, held in the window, motion still reported), as the editor camera flies. Only the
+        // game's mouse can be taken (in the editor: over the viewport); letting go always works. Leaving Play releases it.
+        void InputSetCursorLocked(Coral::Bool32 locked)
+        {
+            if (!OnMainThread("Input.CursorLocked") || (locked && !Input::GameMouseEnabled()))
+                return;
+            if (static_cast<bool>(locked) != Input::IsRelativeMouseMode())
+                Input::SetRelativeMouseMode(locked);
+        }
+
+        Coral::Bool32 InputIsCursorLocked()
+        {
+            return Input::IsRelativeMouseMode();
+        }
+
         // Scene.Instantiate("Prefabs/Ball.nprefab", x, y, z): the prefab by its path under the asset directory.
         uint64_t SceneInstantiate(Coral::String path, float x, float y, float z)
         {
@@ -782,6 +807,10 @@ namespace Nox
         assembly.AddInternalCall("Nox.InternalCalls", "Log_Info", reinterpret_cast<void*>(&LogInfo));
         assembly.AddInternalCall("Nox.InternalCalls", "Input_IsKeyDown", reinterpret_cast<void*>(&IsKeyDown));
         assembly.AddInternalCall("Nox.InternalCalls", "Input_IsMouseButtonDown", reinterpret_cast<void*>(&IsMouseButtonDown));
+        assembly.AddInternalCall("Nox.InternalCalls", "Input_GetMouseDelta", reinterpret_cast<void*>(&InputGetMouseDelta));
+        assembly.AddInternalCall("Nox.InternalCalls", "Input_GetScrollDelta", reinterpret_cast<void*>(&InputGetScrollDelta));
+        assembly.AddInternalCall("Nox.InternalCalls", "Input_SetCursorLocked", reinterpret_cast<void*>(&InputSetCursorLocked));
+        assembly.AddInternalCall("Nox.InternalCalls", "Input_IsCursorLocked", reinterpret_cast<void*>(&InputIsCursorLocked));
         assembly.AddInternalCall("Nox.InternalCalls", "Scene_Instantiate", reinterpret_cast<void*>(&SceneInstantiate));
         assembly.AddInternalCall("Nox.InternalCalls", "Scene_Destroy", reinterpret_cast<void*>(&SceneDestroy));
         assembly.AddInternalCall("Nox.InternalCalls", "Scene_CreateEntity", reinterpret_cast<void*>(&SceneCreateEntity));

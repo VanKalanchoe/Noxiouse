@@ -475,8 +475,8 @@ namespace Nox
         // ImGui_ImplSDL3_NewFrame's own per-frame cursor update and lost unpredictably (flicker). Telling ImGui itself
         // "no cursor" for this frame is the way the backend expects to be told, so there is nothing left to race against.
         // ShouldHideCursor(), not just "is flying": UE5 doesn't hide it on the click alone, only once the mouse actually moves.
-        if (m_EditorCamera.ShouldHideCursor())
-            ImGui::SetMouseCursor(ImGuiMouseCursor_None);
+        if (m_EditorCamera.ShouldHideCursor() || (m_SceneState != SceneState::Edit && Input::IsRelativeMouseMode()))
+            ImGui::SetMouseCursor(ImGuiMouseCursor_None); // (or a script locked it: Input.CursorLocked)
 
         /*--
         * IMGUI Docking
@@ -5106,6 +5106,8 @@ namespace Nox
             m_ActiveScene->OnSimulationStop();
 
         m_SceneState = SceneState::Edit;
+        if (Input::IsRelativeMouseMode()) // a script's locked cursor (Input.CursorLocked) is the session's, not the editor's
+            Input::SetRelativeMouseMode(false);
 
         m_HoveredEntity = Entity(); // points into the play scene that is destroyed here
         m_ActiveScene = m_EditorScene;

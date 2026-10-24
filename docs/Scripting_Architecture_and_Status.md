@@ -108,7 +108,11 @@ play scene and validate components.
 Implemented calls:
 
 - `Log.Info`
-- `Input.IsKeyDown`
+- `Input.IsKeyDown` (every letter, digit, F key, arrow and modifier as `KeyCode`), `Input.IsMouseButtonDown`
+- `Input.MouseDelta` (pixels moved during the last frame, also with the cursor locked), `Input.ScrollDelta` (wheel notches),
+  `Input.CursorLocked` (SDL relative mouse mode: hidden and held in the window, for mouse look; Stop releases it). In the editor
+  the game has the keys while the viewport is the target and the mouse while the cursor is over it. Facerun's `FlyCamera` uses
+  them: the editor camera's fly mode in Play (right mouse to look, WASD, E / Q, Shift, wheel for speed). Script API version 4.
 - Generic `GetComponent<T>()`, `HasComponent<T>()`, and `TryGetComponent<T>()`
   access from both `EntityBehaviour` and `Entity`
 - `TransformComponent` explicit `Local`/`World` state and

@@ -8,6 +8,10 @@ internal static unsafe class InternalCalls
     private static delegate*<NativeString, void> Log_Info;
     private static delegate*<int, uint> Input_IsKeyDown;
     private static delegate*<int, uint> Input_IsMouseButtonDown;
+    private static delegate*<Vector2*, void> Input_GetMouseDelta;
+    private static delegate*<float> Input_GetScrollDelta;
+    private static delegate*<uint, void> Input_SetCursorLocked;
+    private static delegate*<uint> Input_IsCursorLocked;
     private static delegate*<NativeString, float, float, float, ulong> Scene_Instantiate;
     private static delegate*<ulong, void> Scene_Destroy;
     private static delegate*<NativeString, float, float, float, ulong> Scene_CreateEntity;
@@ -70,6 +74,17 @@ internal static unsafe class InternalCalls
     internal static bool IsKeyDown(int keycode) => Input_IsKeyDown(keycode) != 0;
 
     internal static bool IsMouseButtonDown(int button) => Input_IsMouseButtonDown(button) != 0;
+
+    internal static Vector2 GetMouseDelta()
+    {
+        Vector2 delta;
+        Input_GetMouseDelta(&delta);
+        return delta;
+    }
+
+    internal static float GetScrollDelta() => Input_GetScrollDelta();
+    internal static void SetCursorLocked(bool locked) => Input_SetCursorLocked(locked ? 1u : 0u);
+    internal static bool IsCursorLocked() => Input_IsCursorLocked() != 0;
 
     internal static ulong InstantiatePrefab(string prefabPath, Vector3 position)
     {

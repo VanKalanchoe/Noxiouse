@@ -56,6 +56,12 @@ namespace Nox
             SDL_SetWindowRelativeMouseMode(window, enabled);
     }
 
+    bool Input::IsRelativeMouseMode()
+    {
+        SDL_Window* window = Application::Get().getWindow()->getHandle();
+        return window && SDL_GetWindowRelativeMouseMode(window);
+    }
+
     glm::vec2 Input::GetRelativeMouseDelta()
     {
         float dx = 0.0f, dy = 0.0f;

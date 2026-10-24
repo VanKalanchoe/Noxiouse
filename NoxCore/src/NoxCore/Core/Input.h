@@ -30,7 +30,23 @@ namespace Nox
         // editor camera enables this only while actually flying (RMB + WASD), and reads motion through
         // GetRelativeMouseDelta while it is on, never through GetMousePosition (which SDL does not keep moving in this mode).
         static void SetRelativeMouseMode(bool enabled);
+        static bool IsRelativeMouseMode();
         static glm::vec2 GetRelativeMouseDelta();
+
+        // Game scripts' mouse (C# Input.MouseDelta / ScrollDelta): what the window's events moved during the last frame, in pixels
+        // (the wheel in notches), summed by Application and taken at the start of each frame. A sum of its own, not SDL's relative
+        // state: the editor camera drains that one (GetRelativeMouseDelta), and neither may take the other's motion.
+        static void AddMouseMotion(float dx, float dy) { s_PendingMouseDelta += glm::vec2(dx, dy); }
+        static void AddMouseWheel(float dy) { s_PendingScroll += dy; }
+        static void BeginFrame()
+        {
+            s_FrameMouseDelta = s_PendingMouseDelta;
+            s_FrameScroll = s_PendingScroll;
+            s_PendingMouseDelta = glm::vec2(0.0f);
+            s_PendingScroll = 0.0f;
+        }
+        static glm::vec2 GetFrameMouseDelta() { return s_FrameMouseDelta; }
+        static float GetFrameScroll() { return s_FrameScroll; }
 
         // What game scripts may read. The editor turns them off while the viewport is not the target (a click in another panel
         // must not shoot); a standalone game leaves them on. The C# Input API asks; the engine's own code does not.
@@ -40,5 +56,9 @@ namespace Nox
     private:
         static inline bool s_GameKeysEnabled = true;
         static inline bool s_GameMouseEnabled = true;
+        static inline glm::vec2 s_PendingMouseDelta{ 0.0f };
+        static inline glm::vec2 s_FrameMouseDelta{ 0.0f };
+        static inline float s_PendingScroll = 0.0f;
+        static inline float s_FrameScroll = 0.0f;
     };
 }
