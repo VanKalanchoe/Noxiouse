@@ -340,6 +340,12 @@ namespace Nox
         // Copy components (except IDComponent and TagComponent)
         CopyComponent(AllComponents{}, dstSceneRegistry, srcSceneRegistry, enttMap);
         newScene->m_Folders = other->m_Folders;
+        // A world: its settings and index, and the cells the editor has fully loaded (their entities are in the copy; Play / Simulate
+        // stream them from memory, BeginWorldStreaming).
+        newScene->m_World = other->m_World;
+        newScene->m_World.Overrides.clear();
+        const std::vector<WorldCellCoord> loadedCells = other->GetLoadedWorldCells(false);
+        newScene->m_World.EditorLoaded = std::set<WorldCellCoord>(loadedCells.begin(), loadedCells.end());
 
         return newScene;
     }
@@ -568,7 +574,7 @@ namespace Nox
         }
         for (StreamedLevel& streamed : m_Levels)
         {
-            if (streamed.Level != level)
+            if (streamed.Level != level || streamed.IsCell)
                 continue;
             if (!streamed.Failed)
             {
@@ -584,6 +590,7 @@ namespace Nox
         }
         StreamedLevel& streamed = m_Levels.emplace_back();
         streamed.Level = level;
+        streamed.Name = AssetManager::GetMetadata(level).FilePath.filename().string();
         streamed.Loader = std::make_unique<SceneLoader>(Project::GetActiveAssetDirectory() / AssetManager::GetMetadata(level).FilePath, *this, level);
         return true;
     }
@@ -592,7 +599,7 @@ namespace Nox
     {
         for (StreamedLevel& streamed : m_Levels)
         {
-            if (streamed.Level == level)
+            if (streamed.Level == level && !streamed.IsCell)
                 streamed.UnloadQueued = true;
         }
     }
@@ -601,7 +608,7 @@ namespace Nox
     {
         for (const StreamedLevel& streamed : m_Levels)
         {
-            if (streamed.Level == level)
+            if (streamed.Level == level && !streamed.IsCell)
                 return streamed.Failed ? LevelState::Unloaded : streamed.Loaded ? LevelState::Loaded : LevelState::Loading;
         }
         return LevelState::Unloaded;
@@ -623,7 +630,7 @@ namespace Nox
         }
     }
 
-    void Scene::FinishLevelLoad(AssetHandle level, const std::vector<UUID>& created, const std::vector<UUID>& heldPhysics)
+    void Scene::FinishLevelLoad(StreamedLevel& streamed, const std::vector<UUID>& created, const std::vector<UUID>& heldPhysics)
     {
         // What Play / Simulate start does for the entities the scene began with (OnRuntimeStart): 3D bodies after the update systems
         // (SyncPendingPhysics3D), 2D bodies, particles, timelines, and the scripts after the script loop.
@@ -647,8 +654,14 @@ namespace Nox
             }
             if (m_IsRunning && entity.HasComponent<ScriptComponent>())
                 m_PendingScriptStart.push_back(id);
+            // A cell's roots: where they go when unloaded by hand, saved or their bounds are unknown.
+            if (streamed.IsCell && (!entity.HasComponent<RelationshipComponent>() || entity.GetComponent<RelationshipComponent>().Parent == 0))
+                m_World.Origins[id] = streamed.Cell;
         }
-        NOX_CORE_INFO("Level `{}` loaded ({} entities)", AssetManager::GetMetadata(level).FilePath.filename().string(), created.size());
+        if (streamed.IsCell)
+            NOX_CORE_TRACE("World cell `{}` loaded ({} entities)", streamed.Name, created.size());
+        else
+            NOX_CORE_INFO("Level `{}` loaded ({} entities)", streamed.Name, created.size());
     }
 
     // The time a frame may spend creating streamed levels' entities (the rest of a level comes in the next frames).
@@ -656,6 +669,9 @@ namespace Nox
 
     void Scene::UpdateLevelStreaming(const glm::vec3* source, float deltaTime)
     {
+        // 0. The world partition's cells around the sources (Play / Simulate of a world).
+        UpdateWorldStreaming(source);
+
         // 1. The volumes: a level any volume holding the source names is wanted; one only volumes name, and none holds the source, goes
         //    after the shortest of their unload delays.
         if (source)
@@ -685,7 +701,7 @@ namespace Nox
                     bool failed = false;
                     for (StreamedLevel& streamed : m_Levels)
                     {
-                        if (streamed.Level == level)
+                        if (streamed.Level == level && !streamed.IsCell)
                         {
                             streamed.OutsideTime = 0.0f;
                             failed = streamed.Failed;
@@ -697,7 +713,7 @@ namespace Nox
                 }
                 for (StreamedLevel& streamed : m_Levels)
                 {
-                    if (streamed.Level != level || streamed.UnloadQueued)
+                    if (streamed.Level != level || streamed.IsCell || streamed.UnloadQueued)
                         continue;
                     streamed.OutsideTime += deltaTime;
                     if (streamed.OutsideTime >= unloadDelay)
@@ -713,9 +729,15 @@ namespace Nox
                 continue;
             const bool hadEntities = streamed.Loaded || streamed.Loader;
             streamed.Loader.reset();
+            if (streamed.IsCell)
+            {
+                DestroyWorldCellEntities(streamed.Cell);
+                NOX_CORE_TRACE("World cell `{}` unloaded", streamed.Name);
+                continue;
+            }
             DestroyLevelEntities(streamed.Level);
             if (hadEntities)
-                NOX_CORE_INFO("Level `{}` unloaded", AssetManager::GetMetadata(streamed.Level).FilePath.filename().string());
+                NOX_CORE_INFO("Level `{}` unloaded", streamed.Name);
         }
         std::erase_if(m_Levels, [](const StreamedLevel& streamed) { return streamed.UnloadQueued; });
 
@@ -740,13 +762,16 @@ namespace Nox
             if (streamed.Loader->Failed())
             {
                 // (Refused or unreadable: the loader logged why. Whatever it made goes again.)
-                DestroyLevelEntities(streamed.Level);
+                if (streamed.IsCell)
+                    DestroyWorldCellEntities(streamed.Cell);
+                else
+                    DestroyLevelEntities(streamed.Level);
                 streamed.Loader.reset();
                 streamed.HeldPhysics.clear();
                 streamed.Failed = true;
                 continue;
             }
-            FinishLevelLoad(streamed.Level, streamed.Loader->GetCreatedEntities(), streamed.HeldPhysics);
+            FinishLevelLoad(streamed, streamed.Loader->GetCreatedEntities(), streamed.HeldPhysics);
             streamed.Loaded = true;
             streamed.Loader.reset();
             streamed.HeldPhysics.clear();
@@ -784,6 +809,13 @@ namespace Nox
 
     void Scene::OnRuntimeStart()
     {
+        // A world: the cells around the primary camera are in before anything starts, so they start with the scene's own entities.
+        if (m_World.Settings.Enabled)
+        {
+            Entity camera = GetPrimaryCameraEntity();
+            const glm::vec3 source = camera ? ComposedWorldPosition(camera) : glm::vec3(0.0f);
+            BeginWorldStreaming(camera ? &source : nullptr);
+        }
         m_IsRunning = true;
         OnPhysics2DStart();
         OnPhysics3DStart();
@@ -807,6 +839,7 @@ namespace Nox
     void Scene::OnRuntimeStop()
     {
         m_IsRunning = false;
+        m_WorldStreaming = false;
         m_TimelinesRunning = false;
         
         ScriptEngine::OnRuntimeStop();
@@ -816,8 +849,9 @@ namespace Nox
         DynamicMeshes::DestroyAll();
     }
 
-    void Scene::OnSimulationStart()
+    void Scene::OnSimulationStart(const glm::vec3* streamingSource)
     {
+        BeginWorldStreaming(streamingSource);
         OnPhysics2DStart();
         OnPhysics3DStart();
         StartTimelines();
@@ -827,6 +861,7 @@ namespace Nox
     void Scene::OnSimulationStop()
     {
         m_TimelinesRunning = false;
+        m_WorldStreaming = false;
         OnPhysics2DStop();
         OnPhysics3DStop();
     }
@@ -963,6 +998,9 @@ namespace Nox
 
     void Scene::OnUpdateEditor(Timestep ts, EditorCamera& camera)
     {
+        // A world's cells the editor loads or unloads (by hand: no streaming source while editing).
+        if (m_World.Settings.Enabled && !m_Levels.empty())
+            UpdateLevelStreaming(nullptr, static_cast<float>(ts));
         RunUpdateSystems(ts, false, true);
         SyncGpuScene();
 
@@ -1897,7 +1935,7 @@ namespace Nox
             FolderComponent, ParticleEmitterComponent, SpriteRendererComponent, CircleRendererComponent, CameraComponent,
             ScriptComponent, RigidBody2DComponent, BoxCollider2DComponent,
             CircleCollider2DComponent, RigidBody3DComponent, BoxCollider3DComponent, SphereCollider3DComponent, CapsuleCollider3DComponent,
-            CharacterController3DComponent, TextComponent, LevelStreamingVolumeComponent>;
+            CharacterController3DComponent, TextComponent, LevelStreamingVolumeComponent, WorldPartitionComponent, WorldStreamingSourceComponent>;
 
         // Source UUID -> duplicate UUID, so a duplicated animator drives the duplicated nodes
         // instead of still pointing at the original hierarchy.
@@ -2518,6 +2556,16 @@ namespace Nox
 
     template <>
     void Scene::OnComponentAdded<LevelStreamingVolumeComponent>(Entity entity, LevelStreamingVolumeComponent& component)
+    {
+    }
+
+    template <>
+    void Scene::OnComponentAdded<WorldPartitionComponent>(Entity entity, WorldPartitionComponent& component)
+    {
+    }
+
+    template <>
+    void Scene::OnComponentAdded<WorldStreamingSourceComponent>(Entity entity, WorldStreamingSourceComponent& component)
     {
     }
 }

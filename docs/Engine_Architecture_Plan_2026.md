@@ -9,7 +9,8 @@
 > - `architecture.md` — the NRI, render graph and job system as built (rewritten 2026-10-20; its §7 summarizes the
 >   earlier v2/v3 proposals). Where an older proposal differs, this document wins (see §5.4.9).
 > **Status 2026-10-20:** phases 0-5 and 6a built; 6b-1 (cluster DAG + GPU cut) built, 6b page streaming paused, the RT
-> fallback LOD reverted; 6c and 7 not started. D9 decided and built (§7). From §9: skinned BLAS, BLAS compaction and extra
+> fallback LOD reverted; 6c and 7 not started. **2026-10-24:** 6c-0 level streaming and 6c-1 world partition (grid cells, streaming,
+> editor) built (§5.12a, §5.13.1); async compute's first user (§5.4.4). D9 decided and built (§7). From §9: skinned BLAS, BLAS compaction and extra
 > views are built. §3b is the snapshot from before this plan.
 > **Industry references:** Unreal Engine 5 (Tasks System, RDG, GPU Scene, Nanite, Virtual Textures,
 > Texture Streaming, World Partition, IoStore/Zen loader), Frostbite (FrameGraph), id Tech (job system).
@@ -1191,6 +1192,62 @@ own, loaded **additively** into the running scene and unloaded again.
 - **Editor:** full world view with cell visualization; editing loads required cells.
 - **Scene serialization** moves from one YAML file to per-cell files for streaming and version control.
 
+#### 5.13.1 6c-1: grid, cells and streaming (designed and built 2026-10-24)
+
+Unreal 5's World Partition, built on level streaming (§5.12a): a **cell** is streamed exactly like a level -- read and parsed on a
+thread, its entities created for at most 3 ms a frame, marked with `LevelComponent` (the cell's ID), started like the scene's own
+entities once complete, destroyed on unload. What World Partition adds is *which* cells: the engine decides from the world, not a
+volume or a script.
+
+- **One world, one scene asset.** A scene is world-partitioned once converted (World Partition panel: cell size, loading range).
+  Its own file keeps the always-loaded entities and the **cell index** (each cell's grid level and coordinates, content bounds and
+  entity count); every cell's entities are in their own file, `<Scene>_Cells/L<level>_X<x>_Z<z>.noxcell`, the scene file format.
+- **D12 decided: YAML per cell.** Cells are edited as text like scenes (diffable, a merge conflict only when two people change the
+  same cell -- Unreal's one-file-per-actor goes further, per entity, which is the next step if cells conflict in practice). A cooked
+  binary cell form waits for a binary scene form (the runtime scene is still YAML behind a header, §5.11).
+- **Which cell (Unreal's hierarchical grid).** Only root entities are placed; a root's children go with it. A root is spatially loaded
+  when its tree has something in the world (a mesh, model or prefab instance, a local light, a sprite, particles, text, a physics body);
+  sky, sun, environment, cameras and logic-only entities stay always loaded. `WorldPartitionComponent` overrides it (Spatial / Always
+  Loaded). A spatial root's grid level is the smallest whose cell size (`CellSize * 2^level`) holds its bounds' larger horizontal side,
+  its cell the one holding the bounds' center; without bounds (a mesh not loaded) it keeps the cell it was loaded from, else its
+  position at level 0. Big things therefore live in big cells and load by the distance to their bounds, not their pivot.
+- **Streaming.** A cell is wanted while a streaming source is within `LoadingRange` of its content bounds (horizontally), unloaded once
+  every source is 10 % beyond it (hysteresis); nearer cells first, the level streaming budget shared. Sources: the primary camera in
+  Play, the editor camera in Simulate, and entities with `WorldStreamingSourceComponent`. Play / Simulate start with the cells around
+  the sources loaded before the first frame (Unreal blocks on initial streaming too).
+- **Editor.** Opening a world loads the cells around the editor camera; the World Partition panel (a top-down map of the cells, their
+  state, the camera and its range) loads and unloads cells or regions, Load All / Unload All. Saving rewrites the loaded cells' files
+  (an emptied cell's file goes), merges entities moved into a cell that is not loaded into its file (and then loads that cell), and
+  writes the index. Unloading a cell whose entities changed asks to save first. Play and Simulate start from the editor's state, unsaved
+  changes included: the loaded cells' entities become in-memory cells the session streams like the files. Loading or unloading cells
+  is not an undo step (the history starts again; undo waits while cells load), and neither is the world itself (an undo step keeps
+  the settings, index and loaded cells: undoing past a conversion does not un-convert). The cell size changes only while every cell
+  is loaded (saving then re-partitions the whole world).
+- **Packaging and references:** the packager ships the cell files of every world it packs and collects what they name; Find
+  References, unused-asset detection and Replace References read cell files like scene files.
+- **Not in 6c-1:** activation stages and HLOD (6c-2, 6c-3), data layers, per-entity files, a world larger than memory (6c test world).
+
+**Built:**
+- `Scene/WorldPartition.{h,cpp}`: the grid (`WorldGrid`: cell IDs, names, hierarchical placement, distances), the scene's
+  `WorldPartition` (settings, cell folder, index, origins, a Play copy's in-memory cells) and Scene's world members (placement,
+  editor load / unload, streaming, Play / Simulate start, saving, Save As, undo). Cells are `StreamedLevel`s (`IsCell`) in level
+  streaming's list: the same loader (`SceneLoader`, which reads a cell from memory too and skips an entity already in the scene),
+  budget, unload and start-up path.
+- `WorldPartitionComponent` (Auto / Spatially Loaded / Always Loaded) and `WorldStreamingSourceComponent` (serialized, in the
+  Properties panel, which shows an entity's cell).
+- `SceneSerializer`: the scene file's `WorldPartition` map (settings, folder, one line per cell: level, x, z, entities, bounds), cell
+  text (the trees in ID order) and merging into a cell file; saving a world writes its cells first and leaves their entities out.
+- Editor: Window > World Partition (`Panels/WorldPartitionPanel`: convert, settings, the map with cell states, content bounds, the
+  camera's range, selection, load / unload / load around camera / all), the loaded cells' bounds in the viewports, cells around the
+  camera on open, undo held while cells stream.
+- **Test:** Facerun's `Scenes/WorldPartitionTest.nox` -- 6 x 6 cells of 20 m (a tile and a turning pillar each), a 70 m slab in a
+  level 2 cell west of them, a streaming source in the far corner, an always-loaded pillar; loading range 40 m. In Play the camera's
+  `WorldPartitionTest` script checks the first cells are in before the first frame, cells follow the camera, the slab loads by its
+  edge (30 m) not its center (65 m), a loaded cell stays inside the hysteresis band and goes beyond it, the source keeps its cell, the
+  always-loaded pillar stays and streamed scripts run, then logs `[WorldPartitionTest] PASS` / `FAIL`; T runs it again. Editor checks
+  (by hand): open it, load / unload cells in the panel, move a pillar into an unloaded cell and save (it joins that cell's file, which
+  then loads), Play with unsaved changes, convert a scene and save.
+
 ### 5.14 Ray Tracing at Scale
 
 - **TLAS from GPU scene** instances (not render queues), with RT-specific culling: distance, screen
@@ -1260,7 +1317,7 @@ flight, targeted texture-slot cache eviction. Future:
 | **6a** | Texture streaming | 5 | BC cooking for all sources, mip tail, GPU mip feedback, residency + eviction | Scene textures exceeding the texture budget render correctly with mip reduction |
 | **6b** | Geometry streaming & LOD | 5 | Cluster hierarchy cook, GPU cut selection (**done, 6b-1**), page streaming pool (paused, §5.7.1), RT fallback LOD (reverted, D8) | Geometry exceeding the geometry budget renders with streaming; no popping beyond threshold |
 | **6c-0** | Level streaming | 5 | Additive scene load / unload, Level Streaming Volumes, script API (§5.12a: **built 2026-10-23**) | A level streams in and out around the camera without a stall |
-| **6c** | World streaming | 6a, 6b, 6c-0 | World partition cooking, cell streaming, HLOD, per-cell serialization | Test world larger than RAM/VRAM traversable without stalls |
+| **6c** | World streaming | 6a, 6b, 6c-0 | Grid cells, per-cell files, cell streaming, editor (§5.13.1: **6c-1 built 2026-10-24**), activation stages (6c-2), HLOD (6c-3), cooked cells | Test world larger than RAM/VRAM traversable without stalls |
 | **7** | Continuous optimization | all | Profile-driven work, VT, DirectStorage, async compute expansion | Ongoing |
 
 Phases 1, 2 and 3 are architecture-defining and each gets its own plan-mode design before code.
@@ -1282,7 +1339,7 @@ Phases 1, 2 and 3 are architecture-defining and each gets its own plan-mode desi
 | D9 | ~~Editor vs runtime asset managers~~ **Decided and built** | **One loading pipeline, two modes:** `RuntimeAssetManager` is `EditorAssetManager` in read-only mode (no file watcher, reimports, registry writes or recooks); engine code uses read-only lookups on `AssetManagerBase`; a packaged game reads through `VirtualFileSystem` (`.npak`) | Decided and built October 2026 (`docs/Runtime_And_Packaging_Plan_2026-10.md` R2, R4) |
 | D10 | Budgets & targets | per-category VRAM shares, frame-time targets per reference scene | set after Phase 0 baselines |
 | D11 | ~~ECS parallelism~~ **Decided** | **Declared system read/write sets** (`ComponentAccess` + `SystemGraph`, §5.2.6) | Decided September 2026 (Phase 1) |
-| D12 | Scene file format | per-cell YAML vs binary cooked cells with YAML for editing | version control friendliness |
+| D12 | ~~Scene file format~~ **Decided** | **YAML per cell** (the scene file format; a cooked binary form waits for a binary scene form) | Decided October 2026 (§5.13.1); per-entity files if cells conflict in version control |
 | D13 | ~~Barrier strategy~~ **Decided** | **Precise** per-resource barriers (Blanket kept as a switch) | Decided September 2026 (Phase 2): equal GPU/CPU cost on Bistro A/B/C; Precise gives drivers exact information and is checkable with synchronization validation (§5.4.11) |
 
 *(Section reserved for the user's additional points — to be added during refinement.)*

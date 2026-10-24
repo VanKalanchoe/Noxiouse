@@ -27,25 +27,33 @@ namespace Nox
         : m_Path(std::move(path)), m_Parsed(std::make_shared<Parsed>()), m_Scene(CreateRef<Scene>())
     {
         m_Into = m_Scene.get();
-        StartReading();
+        StartReading({});
     }
 
-    SceneLoader::SceneLoader(std::filesystem::path path, Scene& into, AssetHandle level)
-        : m_Path(std::move(path)), m_Parsed(std::make_shared<Parsed>()), m_Into(&into), m_Level(level)
+    SceneLoader::SceneLoader(std::filesystem::path path, Scene& into, AssetHandle level, bool cell)
+        : m_Path(std::move(path)), m_Parsed(std::make_shared<Parsed>()), m_Into(&into), m_Level(level), m_Cell(cell)
     {
-        StartReading();
+        StartReading({});
     }
 
-    void SceneLoader::StartReading()
+    SceneLoader::SceneLoader(std::string name, std::string text, Scene& into, AssetHandle level, bool cell)
+        : m_Path(std::move(name)), m_Parsed(std::make_shared<Parsed>()), m_Into(&into), m_Level(level), m_Cell(cell)
+    {
+        StartReading(std::move(text));
+    }
+
+    void SceneLoader::StartReading(std::string text)
     {
         const bool additive = m_Level != 0;
-        m_Read = JobSystem::Get().Async("Read Scene", JobPriority::Normal, [shared = m_Parsed, path = m_Path, additive](const CancellationToken& token)
+        const bool inMemory = !text.empty();
+        m_Read = JobSystem::Get().Async("Read Scene", JobPriority::Normal,
+                                        [shared = m_Parsed, path = m_Path, additive, inMemory, text = std::move(text)](const CancellationToken& token) mutable
         {
             if (token.IsCancelled()) // (the loader is gone)
                 return;
             Parsed& parsed = *shared;
-            std::string bytes;
-            if (!VFS::ReadText(path, bytes))
+            std::string bytes = std::move(text);
+            if (!inMemory && !VFS::ReadText(path, bytes))
                 parsed.Error = "could not open it";
             else if (SceneSerializer::IsRuntimeScene(bytes) && !additive)
             {
@@ -109,9 +117,11 @@ namespace Nox
             m_Started = true;
             NOX_CORE_TRACE("Deserializing scene '{}'", parsed.Document["Scene"].as<std::string>());
             m_Total = parsed.Entities && parsed.Entities.IsSequence() ? parsed.Entities.size() : 0;
+            if (m_Level == 0)
+                SceneSerializer::ReadWorldPartition(scene, parsed.Document);
             // A level: none of its entities may be in the scene already (the same scene file, or one saved as a copy of it, shares the
-            // IDs its entities, parents and scripts refer to each other by). Nothing is created then.
-            if (m_Level != 0)
+            // IDs its entities, parents and scripts refer to each other by). Nothing is created then. A cell skips them one by one.
+            if (m_Level != 0 && !m_Cell)
             {
                 for (size_t index = 0; index < m_Total; ++index)
                 {
@@ -125,8 +135,9 @@ namespace Nox
                         return true;
                     }
                 }
-                m_Created.reserve(m_Total);
             }
+            if (m_Level != 0)
+                m_Created.reserve(m_Total);
             if (const YAML::Node folders = parsed.Document["Folders"])
             {
                 for (const YAML::Node& folder : folders)
@@ -140,6 +151,15 @@ namespace Nox
         {
             const YAML::Node& entities = parsed.Entities;
             const YAML::Node entity = entities[m_Next++];
+            if (m_Cell)
+            {
+                if (Entity existing = scene.GetEntityByUUID(entity["Entity"].as<uint64_t>()))
+                {
+                    NOX_CORE_WARN("World cell `{}`: entity '{}' ({}) is in the scene already, kept as it is", m_Path.filename().string(),
+                                  existing.GetName(), entity["Entity"].as<uint64_t>());
+                    continue;
+                }
+            }
             std::string name;
             if (const YAML::Node tag = entity["TagComponent"])
                 name = tag["Tag"].as<std::string>();

@@ -10,6 +10,7 @@
 #include "Panels/SceneHierarchyPanel.h"
 #include "Panels/ContentBrowserPanel.h"
 #include "Panels/ProfilerPanel.h"
+#include "Panels/WorldPartitionPanel.h"
 #include "Panels/RenderGraphPanel.h"
 #include "Panels/NodeGraphEditorPanel.h"
 #include "Panels/MaterialEditorPanel.h"
@@ -314,6 +315,9 @@ namespace Nox
         Scope<ContentBrowserPanel> m_ContentBrowserPanel;
         Scope<RenderGraphPanel> m_RenderGraphPanel;
         ProfilerPanel m_ProfilerPanel;
+        WorldPartitionPanel m_WorldPartitionPanel;
+        // A world's cells were loading or unloading last frame: once done, the undo history starts again (loading is not a step).
+        bool m_WorldCellsBusy = false;
         // Open node-graph editors (docs/Animation_Graph_Architecture_Plan_2026.md Step 3), one per opened graph
         // asset; OpenNodeGraphEditor focuses an already-open one instead of duplicating it.
         std::vector<Scope<NodeGraphEditorPanel>> m_NodeGraphEditors;

@@ -116,6 +116,7 @@ namespace Nox
         auto& app = Application::Get();
         m_Renderer = app.GetRenderer();
         m_RenderGraphPanel = CreateScope<RenderGraphPanel>(m_Renderer);
+        m_WorldPartitionPanel.SetSaveCallback([this]() { SaveScene(); });
         m_Renderer2D = m_Renderer->getRenderer2D();
 
         m_AssetOpeners[AssetType::AnimationGraph] = [this](AssetHandle handle) { OpenNodeGraphEditor(handle); };
@@ -604,6 +605,9 @@ namespace Nox
                 bool profilerOpen = m_ProfilerPanel.IsOpen();
                 if (ImGui::MenuItem("Profiler", nullptr, &profilerOpen))
                     m_ProfilerPanel.SetOpen(profilerOpen);
+                bool worldPartitionOpen = m_WorldPartitionPanel.IsOpen();
+                if (ImGui::MenuItem("World Partition", nullptr, &worldPartitionOpen))
+                    m_WorldPartitionPanel.SetOpen(worldPartitionOpen);
 
                 // Up to four viewports, each with its own camera (docs/Future.md item 5). A layout snaps them into place; a
                 // viewport's tab can then be dragged anywhere and the splitters resized.
@@ -705,6 +709,16 @@ namespace Nox
         m_ContentBrowserPanel->OnImGuiRender();
         m_RenderGraphPanel->OnImGuiRender();
         m_ProfilerPanel.OnImGuiRender();
+        {
+            // The camera the cells stream around: the primary camera in Play, else the editor camera.
+            glm::vec3 streamingSource = m_EditorCamera.GetPosition();
+            if (m_SceneState == SceneState::Play && m_ActiveScene)
+            {
+                if (Entity camera = m_ActiveScene->GetPrimaryCameraEntity(); camera && camera.HasComponent<WorldTransformComponent>())
+                    streamingSource = glm::vec3(camera.GetComponent<WorldTransformComponent>().WorldMatrix[3]);
+            }
+            m_WorldPartitionPanel.OnImGuiRender(m_ActiveScene, streamingSource, m_SceneState == SceneState::Edit && !m_PrefabMode.Active);
+        }
 
         for (auto& panel : m_NodeGraphEditors)
             panel->OnImGuiRender();
@@ -2290,6 +2304,29 @@ namespace Nox
             }
         }
 
+        // A world's loaded cells: the content bounds of each, in green (World Partition panel, Show in Viewport).
+        if (m_WorldPartitionPanel.ShowCellsInViewport() && m_ActiveScene->IsWorldPartitioned())
+        {
+            constexpr glm::vec4 kCellColor(0.3f, 0.85f, 0.45f, 0.8f);
+            constexpr int edges[12][2] = { {0,1},{2,3},{4,5},{6,7}, {0,2},{1,3},{4,6},{5,7}, {0,4},{1,5},{2,6},{3,7} };
+            const WorldPartition& world = m_ActiveScene->GetWorldPartition();
+            for (const WorldCellCoord& cell : m_ActiveScene->GetLoadedWorldCells(false))
+            {
+                auto info = world.Cells.find(cell);
+                if (info == world.Cells.end())
+                    continue;
+                glm::vec3 corners[8];
+                for (int i = 0; i < 8; ++i)
+                {
+                    corners[i] = glm::vec3((i & 1) ? info->second.BoundsMax.x : info->second.BoundsMin.x,
+                                           (i & 2) ? info->second.BoundsMax.y : info->second.BoundsMin.y,
+                                           (i & 4) ? info->second.BoundsMax.z : info->second.BoundsMin.z);
+                }
+                for (const auto& edge : edges)
+                    m_Renderer2D->DrawXRayLine(corners[edge[0]], corners[edge[1]], kCellColor);
+            }
+        }
+
         if (m_ShowPhysicsColliders)
         {
             // Box Colliders
@@ -2687,6 +2724,10 @@ namespace Nox
         SaveEditorCameras(); // the scene being left
         m_EditorScenePath = Project::GetActive()->GetEditorAssetManager()->GetFilePath(handle);
         RestoreEditorCameras();
+        // A world opens with the cells around the editor camera (the World Partition panel loads others).
+        if (m_EditorScene->IsWorldPartitioned())
+            m_EditorScene->LoadWorldCells(m_EditorScene->WorldCellsAround(m_EditorCamera.GetPosition(),
+                                                                          WorldUnits::FromMeters(m_EditorScene->GetWorldPartition().Settings.LoadingRange)));
         m_UnloadUnusedAssetsRequested = true;
 #if NOX_PROFILE_STATS
         Profiler::Get().ResetStats();
@@ -4571,6 +4612,18 @@ namespace Nox
                 return;
         }
 
+        // A world's cells loading or unloading by hand: not a step (undoing it would take a loaded cell's entities away). The history
+        // waits, and starts again from the scene with them once they are done.
+        const bool cellsBusy = m_ActiveScene->IsWorldStreamingBusy();
+        if (cellsBusy || m_WorldCellsBusy)
+        {
+            if (!cellsBusy)
+                m_History.Clear();
+            m_WorldCellsBusy = cellsBusy;
+            if (cellsBusy)
+                return;
+        }
+
         frame.AssetsLoading = Project::GetActive()->GetEditorAssetManager()->GetLoadingCount() > 0;
         if (Entity selected = m_SceneHierarchyPanel.GetSelectedEntity())
             frame.Watched = selected.GetUUID();
@@ -4580,7 +4633,7 @@ namespace Nox
     void EditorLayer::Undo()
     {
         // Not in the middle of a drag: the step being dragged is not taken yet.
-        if (m_SceneState != SceneState::Edit || !m_History.CanUndo() || ImGuizmo::IsUsing() || ImGui::IsAnyItemActive())
+        if (m_SceneState != SceneState::Edit || !m_History.CanUndo() || ImGuizmo::IsUsing() || ImGui::IsAnyItemActive() || m_WorldCellsBusy)
             return;
         const std::string name = m_History.GetUndoName();
         RestoreHistoryState(m_History.StepBack());
@@ -4589,7 +4642,7 @@ namespace Nox
 
     void EditorLayer::Redo()
     {
-        if (m_SceneState != SceneState::Edit || !m_History.CanRedo() || ImGuizmo::IsUsing() || ImGui::IsAnyItemActive())
+        if (m_SceneState != SceneState::Edit || !m_History.CanRedo() || ImGuizmo::IsUsing() || ImGui::IsAnyItemActive() || m_WorldCellsBusy)
             return;
         const std::string name = m_History.GetRedoName();
         RestoreHistoryState(m_History.StepForward());
@@ -4619,6 +4672,7 @@ namespace Nox
 
         m_HoveredEntity = Entity();
         restored->OnViewportResize(static_cast<uint32_t>(m_ViewportSize.x), static_cast<uint32_t>(m_ViewportSize.y));
+        restored->AdoptWorldState(*m_EditorScene); // which cells are loaded is not part of an undo step
         m_EditorScene = restored;
         m_ActiveScene = restored;
         m_SceneHierarchyPanel.SetContext(restored);
@@ -4660,6 +4714,8 @@ namespace Nox
         std::string filepath = Utility::SaveFile("Nox Scene *.nox\0nox\0");
         if (!filepath.empty())
         {
+            // A world: the copy gets cells of its own (the two scenes must not write each other's cell files).
+            m_ActiveScene->CopyWorldCellsTo(filepath);
             SerializeScene(m_ActiveScene, filepath);
             m_EditorScenePath = filepath;
         }
@@ -4983,7 +5039,8 @@ namespace Nox
 
         m_HoveredEntity = Entity(); // points into the scene being replaced
         m_ActiveScene = Scene::Copy(m_EditorScene);
-        m_ActiveScene->OnSimulationStart();
+        const glm::vec3 streamingSource = m_EditorCamera.GetPosition();
+        m_ActiveScene->OnSimulationStart(&streamingSource);
 
         m_SceneHierarchyPanel.SetContext(m_ActiveScene);
     }

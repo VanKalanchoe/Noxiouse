@@ -1195,7 +1195,8 @@ namespace Nox
             return false;
         }
 
-        // Files that can name assets: the referencing asset types, the project's scripts and the project file.
+        // Files that can name assets: the referencing asset types, world cells (scene files that are not assets), the project's scripts
+        // and the project file.
         std::vector<std::pair<std::filesystem::path, AssetHandle>> ReferencingFiles(const AssetRegistry& registry)
         {
             std::vector<std::pair<std::filesystem::path, AssetHandle>> files;
@@ -1208,7 +1209,7 @@ namespace Nox
             std::error_code error;
             for (auto it = std::filesystem::recursive_directory_iterator(assetDirectory, error); !error && it != std::filesystem::recursive_directory_iterator(); it.increment(error))
             {
-                if (it->is_regular_file(error) && it->path().extension() == ".cs")
+                if (it->is_regular_file(error) && (it->path().extension() == ".cs" || it->path().extension() == ".noxcell"))
                     files.emplace_back(it->path().lexically_relative(assetDirectory), AssetHandle(0));
             }
             for (const auto& entry : std::filesystem::directory_iterator(Project::GetProjectDirectory(), error))
@@ -1262,6 +1263,16 @@ namespace Nox
             if ((metadata.Type == AssetType::Scene || metadata.Type == AssetType::Prefab || metadata.Type == AssetType::AnimationGraph ||
                  metadata.Type == AssetType::Timeline) && !metadata.FilePath.empty())
                 files.push_back(Project::GetActiveAssetDirectory() / metadata.FilePath);
+        }
+        // World cells: a world's entities that are not in its scene file.
+        {
+            std::error_code error;
+            const std::filesystem::path assetDirectory = Project::GetActiveAssetDirectory();
+            for (auto it = std::filesystem::recursive_directory_iterator(assetDirectory, error); !error && it != std::filesystem::recursive_directory_iterator(); it.increment(error))
+            {
+                if (it->is_regular_file(error) && it->path().extension() == ".noxcell")
+                    files.push_back(it->path());
+            }
         }
         const std::string fromText = std::to_string(static_cast<uint64_t>(from));
         const std::string toText = std::to_string(static_cast<uint64_t>(to));

@@ -1,0 +1,23 @@
+Scene: L2_X-1_Z0
+Entities:
+  - Entity: 12406347304520608009
+    TagComponent:
+      Tag: WPT_Big
+    TransformComponent:
+      Translation: [-8000, 50, 6000]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    ScriptComponent:
+      Classes: [Facerun.LevelStreamingTestBox]
+      EntityReferences: []
+      FieldOverrides:
+        - Class: Facerun.LevelStreamingTestBox
+          Field: Size
+          Type: Vector3
+          Value: [7000, 100, 7000]
+        - Class: Facerun.LevelStreamingTestBox
+          Field: Color
+          Type: Vector3
+          Value: [0.8, 0.45, 0.15]
+    WorldPartitionComponent:
+      Mode: Spatial

@@ -1,6 +1,7 @@
 #pragma once
 #include <entt/entt.hpp>
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <string>
 #include <unordered_set>
@@ -9,6 +10,7 @@
 #include <box2d/id.h>
 
 #include "EntityCommandBuffer.h"
+#include "WorldPartition.h"
 #include "NoxCore/Asset/Asset.h"
 #include "NoxCore/Core/UUID.h"
 #include "NoxCore/Core/Timestep.h"
@@ -44,7 +46,8 @@ namespace Nox
         void OnRuntimeStart();
         void OnRuntimeStop();
 
-        void OnSimulationStart();
+        // `streamingSource`: where the world partition's cells are streamed around (the editor camera); Play uses the primary camera.
+        void OnSimulationStart(const glm::vec3* streamingSource = nullptr);
         void OnSimulationStop();
 
         void OnUpdateRuntime(Timestep ts);
@@ -115,6 +118,39 @@ namespace Nox
         void UnloadLevel(AssetHandle level);
         LevelState GetLevelState(AssetHandle level) const;
 
+        // World partition (WorldPartition.h, docs/Engine_Architecture_Plan_2026.md §5.13.1): the spatially loaded root entities are
+        // kept in grid cells, each in its own file next to the scene, and streamed like levels -- around the streaming sources in Play
+        // and Simulate (WorldStreamingSourceComponent, the camera), by hand in the editor.
+        WorldPartition& GetWorldPartition() { return m_World; }
+        const WorldPartition& GetWorldPartition() const { return m_World; }
+        bool IsWorldPartitioned() const { return m_World.Settings.Enabled; }
+        // Makes the scene a world (or applies new settings): the cells of the spatially loaded entities in memory count as loaded, their
+        // files are written on the next save. A new cell size needs every cell loaded (the next save re-partitions the world).
+        void EnableWorldPartition(const WorldPartitionSettings& settings);
+        // Whether a root entity is kept in a cell (else in the scene file: sky, sun, cameras, logic, a WorldPartitionComponent's choice).
+        bool IsSpatiallyLoaded(Entity root);
+        // The cell a root entity is kept in, as a save would place it now; false: always loaded (a child, or no world partition).
+        bool GetWorldCell(Entity root, WorldCellCoord& outCell);
+        // The spatially loaded root entities in memory by cell.
+        std::map<WorldCellCoord, std::vector<Entity>> CollectWorldCellRoots();
+        // By hand (the editor): read on a thread and created a slice a frame like levels; unloading destroys the cell's entities.
+        void LoadWorldCells(const std::vector<WorldCellCoord>& cells);
+        void UnloadWorldCells(const std::vector<WorldCellCoord>& cells);
+        LevelState GetWorldCellState(const WorldCellCoord& cell) const;
+        std::vector<WorldCellCoord> GetLoadedWorldCells(bool includeLoading) const;
+        bool IsWorldStreamingBusy() const; // a cell is loading or about to unload
+        // The indexed cells whose content is within `range` (world units) of a point, horizontally.
+        std::vector<WorldCellCoord> WorldCellsAround(const glm::vec3& point, float range) const;
+        // Whether a loaded cell's entities differ from its file (unsaved changes).
+        bool IsWorldCellModified(const WorldCellCoord& cell);
+        // Saving (SceneSerializer::Serialize): writes the cell files of the scene saved as `scenePath` and the index; the entities written
+        // into cells are added to `outSavedInCells` (the scene file leaves them out). False on a write error.
+        bool SaveWorldCells(const std::filesystem::path& scenePath, std::unordered_set<UUID>& outSavedInCells);
+        // Save As: the cell files are copied to the new scene file's cell folder, which the scene uses from then on.
+        bool CopyWorldCellsTo(const std::filesystem::path& scenePath);
+        // An undo step restored into a new scene: the world's settings, index, loaded cells and where roots came from carry over.
+        void AdoptWorldState(Scene& from);
+
         // Outliner folders (FolderComponent paths). Folders that hold entities exist through them; this list keeps the ones the
         // user made and left empty. Paths use '/' for nesting.
         const std::vector<std::string>& GetFolders() const { return m_Folders; }
@@ -152,8 +188,18 @@ namespace Nox
         // Level streaming, at the start of a running frame: the volumes against the streaming source, the unloads, then the loads for
         // LevelStreamingBudgetMs.
         void UpdateLevelStreaming(const glm::vec3* source, float deltaTime);
-        void FinishLevelLoad(AssetHandle level, const std::vector<UUID>& created, const std::vector<UUID>& heldPhysics);
+        struct StreamedLevel;
+        void FinishLevelLoad(StreamedLevel& streamed, const std::vector<UUID>& created, const std::vector<UUID>& heldPhysics);
         void DestroyLevelEntities(AssetHandle level);
+        // World partition: the copy of an edited world turned into in-memory cells and the cells around the sources loaded (Play /
+        // Simulate start), then every frame the cells near a source wanted, the ones every source has left unloaded.
+        void BeginWorldStreaming(const glm::vec3* source);
+        // `composedSources`: the sources' places from their transforms up the parents (before the first update: no world transforms).
+        void UpdateWorldStreaming(const glm::vec3* source, bool composedSources = false);
+        void CollectStreamingSources(const glm::vec3* source, std::vector<glm::vec3>& outSources, bool composed);
+        glm::vec3 ComposedWorldPosition(Entity entity);
+        void QueueWorldCellLoad(const WorldCellCoord& cell);
+        void DestroyWorldCellEntities(const WorldCellCoord& cell);
         // A Box2D body for one entity with a RigidBody2DComponent (Play / Simulate start, and entities that come in later).
         void CreatePhysics2DBody(Entity entity);
 
@@ -211,7 +257,10 @@ namespace Nox
         // Level streaming: the levels loaded or on their way, and the volume timers (UpdateLevelStreaming).
         struct StreamedLevel
         {
-            AssetHandle Level = 0;
+            AssetHandle Level = 0;              // the level asset, or a world cell's ID (WorldGrid::CellID)
+            bool IsCell = false;
+            WorldCellCoord Cell;
+            std::string Name;                   // for the log
             std::unique_ptr<SceneLoader> Loader; // while loading
             std::vector<UUID> HeldPhysics;      // 3D physics bodies made once the level is complete, not while its floor is missing
             bool Loaded = false;
@@ -220,6 +269,9 @@ namespace Nox
             float OutsideTime = 0.0f;           // seconds no volume naming it has held the streaming source
         };
         std::vector<StreamedLevel> m_Levels;
+        WorldPartition m_World;
+        bool m_WorldStreaming = false; // Play / Simulate of a world: cells follow the streaming sources
+        std::vector<glm::vec3> m_StreamingSources;
 
         // Frame graph
         SystemGraph m_UpdateSystems{ "Scene Update" };

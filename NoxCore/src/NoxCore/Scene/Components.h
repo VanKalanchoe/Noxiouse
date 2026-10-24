@@ -810,6 +810,27 @@ namespace Nox
         float UnloadDelay = 2.0f; // seconds outside before unloading: walking along the edge does not load and unload every frame
     };
 
+    // How a root entity is kept in a world-partitioned scene (WorldPartition.h). Without it the engine decides (Auto): an entity tree
+    // with something in the world (a mesh, a local light, a body ...) goes into a grid cell and streams with it; sky, sun, cameras,
+    // the player and logic stay in the scene file, always loaded. Only a root's choice counts: children go with their root.
+    struct WorldPartitionComponent
+    {
+        enum class LoadingMode : uint8_t
+        {
+            Auto,
+            Spatial,      // in a cell, streamed by distance (Unreal's "Is Spatially Loaded")
+            AlwaysLoaded  // in the scene file
+        };
+        LoadingMode Mode = LoadingMode::AlwaysLoaded;
+    };
+
+    // A streaming source besides the camera (Unreal's World Partition Streaming Source component): while Enabled, the world's cells
+    // within the loading range of this entity are loaded in Play and Simulate (a vehicle, a remote player, a cutscene target).
+    struct WorldStreamingSourceComponent
+    {
+        bool Enabled = true;
+    };
+
     template<typename... Component>
     struct ComponentGroup
     {
@@ -822,5 +843,6 @@ namespace Nox
             CircleRendererComponent, CameraComponent, ScriptComponent,
             /*NativeScriptComponent,*/ RigidBody2DComponent, BoxCollider2DComponent,
             CircleCollider2DComponent, RigidBody3DComponent, BoxCollider3DComponent,
-            SphereCollider3DComponent, CapsuleCollider3DComponent, CharacterController3DComponent, TextComponent, BoneSocketComponent, LevelStreamingVolumeComponent>;
+            SphereCollider3DComponent, CapsuleCollider3DComponent, CharacterController3DComponent, TextComponent, BoneSocketComponent, LevelStreamingVolumeComponent,
+            WorldPartitionComponent, WorldStreamingSourceComponent>;
 }

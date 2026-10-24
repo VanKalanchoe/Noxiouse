@@ -1,5 +1,7 @@
 #include "GamePackager.h"
 
+#include <yaml-cpp/yaml.h>
+
 #include <algorithm>
 #include <cstdlib>
 #include <fstream>
@@ -246,7 +248,44 @@ namespace Nox
             if (it->is_regular_file(error) && it->path().extension() == ".cs")
                 scripts.push_back(it->path());
         }
-        const std::unordered_set<AssetHandle> assets = assetManager->CollectDependencies(roots, scripts);
+        // A world's cells (§5.13.1) are scene files that are not assets: what they name is needed too, and they ship with their scene.
+        // Again until no new world turns up (a level a cell names can be a world).
+        std::unordered_set<AssetHandle> assets = assetManager->CollectDependencies(roots, scripts);
+        std::vector<std::filesystem::path> cellFiles;
+        for (size_t found = 0;;)
+        {
+            cellFiles.clear();
+            for (AssetHandle handle : assets)
+            {
+                const AssetMetadata& metadata = assetManager->GetMetadata(handle);
+                if (metadata.Type != AssetType::Scene)
+                    continue;
+                std::filesystem::path cellDirectory;
+                try
+                {
+                    const YAML::Node scene = YAML::LoadFile((assetDirectory / metadata.FilePath).string());
+                    if (const YAML::Node world = scene["WorldPartition"]; world && world["CellDirectory"])
+                        cellDirectory = world["CellDirectory"].as<std::string>();
+                }
+                catch (const YAML::Exception&)
+                {
+                    continue; // (not text: a runtime scene, which is never a project's own)
+                }
+                if (cellDirectory.empty())
+                    continue;
+                for (const auto& entry : std::filesystem::directory_iterator(assetDirectory / cellDirectory, error))
+                {
+                    if (entry.is_regular_file(error) && entry.path().extension() == ".noxcell")
+                        cellFiles.push_back(entry.path());
+                }
+            }
+            if (cellFiles.size() == found)
+                break;
+            found = cellFiles.size();
+            std::vector<std::filesystem::path> tokenFiles = scripts;
+            tokenFiles.insert(tokenFiles.end(), cellFiles.begin(), cellFiles.end());
+            assets = assetManager->CollectDependencies(roots, tokenFiles);
+        }
         report.Assets = assets.size();
 
         const std::filesystem::path gameAssets = output / "Game" / config.AssetDirectory;
@@ -307,6 +346,9 @@ namespace Nox
                 break;
             }
         }
+
+        for (const std::filesystem::path& cell : cellFiles)
+            copyAsset(cell.lexically_relative(assetDirectory));
 
         // 4. Its registry and the project file.
         assetManager->SerializeAssetRegistry(gameAssets / config.AssetRegistryPath, assets);

@@ -3,6 +3,8 @@
 #include "Components.h"
 #include "Scene.h"
 #include "NoxCore/Core/core.h"
+#include <unordered_set>
+#include <vector>
 
 namespace YAML
 {
@@ -68,8 +70,16 @@ namespace Nox
         // become the children of a new empty root named `name`, positioned relative to the first one. Modified nowhere: the scene
         // is left as it is. Returns false when the file cannot be written.
         static bool SerializePrefab(Scene& scene, const std::vector<Entity>& entities, const std::string& name, const std::filesystem::path& filepath);
+        // World partition (WorldPartition.h): the scene file's settings and cell index, and a cell file's text -- the roots' trees in the
+        // order of their IDs (the same entities, the same text) -- or a cell file's text with the roots' trees put in (merged by ID).
+        static void WriteWorldPartition(YAML::Emitter& out, Scene& scene);
+        static void ReadWorldPartition(Scene& scene, const YAML::Node& data);
+        static std::string WorldCellText(Scene& scene, const std::vector<Entity>& roots, const std::string& name, uint32_t* outCount);
+        static std::string MergeWorldCellText(Scene& scene, const std::string& fileText, const std::vector<Entity>& roots, const std::string& name,
+                                              uint32_t& outCount);
     private:
-        std::string EmitScene(size_t& scriptComponentCount, size_t& scriptClassCount);
+        // `exclude`: entities left out (a world's cells' entities, which are in the cell files).
+        std::string EmitScene(size_t& scriptComponentCount, size_t& scriptClassCount, const std::unordered_set<UUID>* exclude);
         bool ReadScene(const YAML::Node& data);
     private:
         Ref<Scene> m_Scene;

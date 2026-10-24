@@ -11495,3 +11495,7 @@ AssetRegistry:
     FilePath: Scenes/LevelStreamingTest_ScriptLevel.nox
     SourceFilePath: Scenes/LevelStreamingTest_ScriptLevel.nox
     Type: AssetType::Scene
+  - Handle: 18142251642565660321
+    FilePath: Scenes/WorldPartitionTest.nox
+    SourceFilePath: Scenes/WorldPartitionTest.nox
+    Type: AssetType::Scene

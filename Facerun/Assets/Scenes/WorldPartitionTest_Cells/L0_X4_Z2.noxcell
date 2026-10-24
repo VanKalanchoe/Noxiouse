@@ -1,0 +1,48 @@
+Scene: L0_X4_Z2
+Entities:
+  - Entity: 4410440644170735905
+    TagComponent:
+      Tag: WPT_Tile_4_2
+    TransformComponent:
+      Translation: [9000, -10, 5000]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    ScriptComponent:
+      Classes: [Facerun.LevelStreamingTestBox]
+      EntityReferences: []
+      FieldOverrides:
+        - Class: Facerun.LevelStreamingTestBox
+          Field: Size
+          Type: Vector3
+          Value: [1900, 20, 1900]
+        - Class: Facerun.LevelStreamingTestBox
+          Field: Color
+          Type: Vector3
+          Value: [0.25, 0.27, 0.3]
+    WorldPartitionComponent:
+      Mode: Spatial
+  - Entity: 3469668309354464771
+    TagComponent:
+      Tag: WPT_Cell_4_2
+    TransformComponent:
+      Translation: [9000, 150, 5000]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    ScriptComponent:
+      Classes: [Facerun.LevelStreamingTestBox]
+      EntityReferences: []
+      FieldOverrides:
+        - Class: Facerun.LevelStreamingTestBox
+          Field: Size
+          Type: Vector3
+          Value: [300, 300, 300]
+        - Class: Facerun.LevelStreamingTestBox
+          Field: Color
+          Type: Vector3
+          Value: [0.68, 0.3, 0.44]
+        - Class: Facerun.LevelStreamingTestBox
+          Field: SpinSpeed
+          Type: Float
+          Value: 1
+    WorldPartitionComponent:
+      Mode: Spatial

@@ -939,6 +939,8 @@ namespace Nox
             DisplayAddComponentEntry<AnimatorComponent>("Animator");
             DisplayAddComponentEntry<TimelinePlayerComponent>("Timeline Player");
             DisplayAddComponentEntry<LevelStreamingVolumeComponent>("Level Streaming Volume");
+            DisplayAddComponentEntry<WorldPartitionComponent>("World Partition");
+            DisplayAddComponentEntry<WorldStreamingSourceComponent>("World Streaming Source");
             DisplayAddComponentEntry<BoneSocketComponent>("Bone Socket");
             DisplayAddComponentEntry<ParticleEmitterComponent>("Particle Emitter");
 
@@ -2038,6 +2040,37 @@ namespace Nox
             ImGui::DragFloat("Unload Delay", &component.UnloadDelay, 0.1f, 0.0f, 600.0f, "%.1f s");
             ImGui::SetItemTooltip("Seconds the camera must have been outside every volume naming a level before it unloads:\n"
                                   "walking along the edge does not load and unload it every frame.");
+        });
+
+        DrawComponent<WorldPartitionComponent>("World Partition", entity, [this, entity](auto& component)
+        {
+            static const char* modes[] = { "Auto", "Spatially Loaded", "Always Loaded" };
+            int mode = static_cast<int>(component.Mode);
+            if (ImGui::Combo("Loading", &mode, modes, IM_ARRAYSIZE(modes)))
+                component.Mode = static_cast<WorldPartitionComponent::LoadingMode>(mode);
+            ImGui::SetItemTooltip("In a world (Window > World Partition): Spatially Loaded keeps the entity and its children in a grid cell,\n"
+                                  "streamed by distance; Always Loaded keeps it in the scene file. Auto decides by what it has (a mesh,\n"
+                                  "a light ... goes into a cell; sky, sun, cameras, the player and logic stay loaded).");
+            Entity self = entity;
+            if (!m_Context->IsWorldPartitioned())
+                ImGui::TextDisabled("The scene is not a world (Window > World Partition)");
+            else if (self.HasComponent<RelationshipComponent>() && self.GetComponent<RelationshipComponent>().Parent != 0)
+                ImGui::TextDisabled("A child: it goes where its root goes");
+            else
+            {
+                WorldCellCoord cell;
+                if (m_Context->GetWorldCell(self, cell))
+                    ImGui::TextDisabled("In cell %s", WorldGrid::CellName(cell).c_str());
+                else
+                    ImGui::TextDisabled("Always loaded");
+            }
+        });
+
+        DrawComponent<WorldStreamingSourceComponent>("World Streaming Source", entity, [](auto& component)
+        {
+            ImGui::Checkbox("Enabled", &component.Enabled);
+            ImGui::SetItemTooltip("In Play and Simulate the world's cells within the loading range of this entity are loaded, besides the\n"
+                                  "ones around the camera (a vehicle, another player, a cutscene's target).");
         });
 
         DrawComponent<CameraComponent>("Camera", entity, [](auto& component)

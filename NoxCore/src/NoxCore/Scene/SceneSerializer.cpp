@@ -7,6 +7,7 @@
 #include <fstream>
 #include <functional>
 #include <iterator>
+#include <map>
 #include <unordered_set>
 
 #include <yaml-cpp/yaml.h>
@@ -639,6 +640,22 @@ namespace Nox
             out << YAML::EndMap;
         }
 
+        if (entity.HasComponent<WorldPartitionComponent>())
+        {
+            static const char* modeNames[] = { "Auto", "Spatial", "AlwaysLoaded" };
+            const auto mode = entity.GetComponent<WorldPartitionComponent>().Mode;
+            out << YAML::Key << "WorldPartitionComponent" << YAML::BeginMap;
+            out << YAML::Key << "Mode" << YAML::Value << modeNames[static_cast<int>(mode)];
+            out << YAML::EndMap;
+        }
+
+        if (entity.HasComponent<WorldStreamingSourceComponent>())
+        {
+            out << YAML::Key << "WorldStreamingSourceComponent" << YAML::BeginMap;
+            out << YAML::Key << "Enabled" << YAML::Value << entity.GetComponent<WorldStreamingSourceComponent>().Enabled;
+            out << YAML::EndMap;
+        }
+
         if (entity.HasComponent<ParticleEmitterComponent>())
         {
             const auto& emitter = entity.GetComponent<ParticleEmitterComponent>();
@@ -1032,7 +1049,7 @@ namespace Nox
         out << YAML::EndMap; // Corrected: No parentheses
     }
 
-    std::string SceneSerializer::EmitScene(size_t& scriptComponentCount, size_t& scriptClassCount)
+    std::string SceneSerializer::EmitScene(size_t& scriptComponentCount, size_t& scriptClassCount, const std::unordered_set<UUID>* exclude)
     {
         YAML::Emitter out;
         scriptComponentCount = 0;
@@ -1045,6 +1062,8 @@ namespace Nox
             Entity entity(entityID, m_Scene.get());
             if (!entity || IsSpawnedModelNode(*m_Scene, entity.GetUUID()) || IsSpawnedPrefabNode(*m_Scene, entity.GetUUID()))
                 return;
+            if (exclude && exclude->contains(entity.GetUUID()))
+                return; // in a world cell's file
 
             if (entity.HasComponent<ScriptComponent>())
             {
@@ -1062,7 +1081,137 @@ namespace Nox
                 out << folder;
             out << YAML::EndSeq;
         }
+        WriteWorldPartition(out, *m_Scene);
         out << YAML::EndMap; // Corrected: No parentheses
+        return std::string(out.c_str(), out.size());
+    }
+
+    void SceneSerializer::WriteWorldPartition(YAML::Emitter& out, Scene& scene)
+    {
+        const WorldPartition& world = scene.GetWorldPartition();
+        if (!world.Settings.Enabled)
+            return;
+        out << YAML::Key << "WorldPartition" << YAML::Value << YAML::BeginMap;
+        out << YAML::Key << "CellSize" << YAML::Value << world.Settings.CellSize;
+        out << YAML::Key << "LoadingRange" << YAML::Value << world.Settings.LoadingRange;
+        out << YAML::Key << "CellDirectory" << YAML::Value << world.CellDirectory.generic_string();
+        // One line a cell: level, x, z, entities, bounds min, bounds max (world units).
+        out << YAML::Key << "Cells" << YAML::Value << YAML::BeginSeq;
+        for (const auto& [cell, info] : world.Cells)
+        {
+            out << YAML::Flow << YAML::BeginSeq << cell.Level << cell.X << cell.Z << info.Entities
+                << info.BoundsMin.x << info.BoundsMin.y << info.BoundsMin.z << info.BoundsMax.x << info.BoundsMax.y << info.BoundsMax.z
+                << YAML::EndSeq;
+        }
+        out << YAML::EndSeq;
+        out << YAML::EndMap;
+    }
+
+    void SceneSerializer::ReadWorldPartition(Scene& scene, const YAML::Node& data)
+    {
+        const YAML::Node node = data["WorldPartition"];
+        if (!node)
+            return;
+        WorldPartition& world = scene.GetWorldPartition();
+        world.Settings.Enabled = true;
+        if (node["CellSize"])
+            world.Settings.CellSize = node["CellSize"].as<float>();
+        if (node["LoadingRange"])
+            world.Settings.LoadingRange = node["LoadingRange"].as<float>();
+        if (node["CellDirectory"])
+            world.CellDirectory = node["CellDirectory"].as<std::string>();
+        world.Cells.clear();
+        if (const YAML::Node cells = node["Cells"])
+        {
+            for (const YAML::Node& entry : cells)
+            {
+                if (!entry.IsSequence() || entry.size() < 10)
+                    continue;
+                const WorldCellCoord cell{ entry[0].as<int32_t>(), entry[1].as<int32_t>(), entry[2].as<int32_t>() };
+                WorldCellInfo& info = world.Cells[cell];
+                info.Entities = entry[3].as<uint32_t>();
+                info.BoundsMin = { entry[4].as<float>(), entry[5].as<float>(), entry[6].as<float>() };
+                info.BoundsMax = { entry[7].as<float>(), entry[8].as<float>(), entry[9].as<float>() };
+            }
+        }
+    }
+
+    std::string SceneSerializer::WorldCellText(Scene& scene, const std::vector<Entity>& roots, const std::string& name, uint32_t* outCount)
+    {
+        // The roots' trees in the order of their IDs: the same entities give the same text, so whether a loaded cell changed is a
+        // comparison with its file. The order does not matter to reading (entities find each other by ID).
+        std::vector<Entity> entities;
+        for (Entity root : roots)
+        {
+            std::function<void(Entity)> visit = [&](Entity entity)
+            {
+                if (!IsSpawnedModelNode(scene, entity.GetUUID()) && !IsSpawnedPrefabNode(scene, entity.GetUUID()))
+                    entities.push_back(entity);
+                if (!entity.HasComponent<RelationshipComponent>())
+                    return;
+                for (UUID childID : entity.GetComponent<RelationshipComponent>().Children)
+                {
+                    if (Entity child = scene.GetEntityByUUID(childID))
+                        visit(child);
+                }
+            };
+            visit(root);
+        }
+        std::sort(entities.begin(), entities.end(), [](Entity a, Entity b) { return static_cast<uint64_t>(a.GetUUID()) < static_cast<uint64_t>(b.GetUUID()); });
+
+        YAML::Emitter out;
+        out << YAML::BeginMap;
+        out << YAML::Key << "Scene" << YAML::Value << name;
+        out << YAML::Key << "Entities" << YAML::Value << YAML::BeginSeq;
+        for (Entity entity : entities)
+            SerializeEntity(out, scene, entity);
+        out << YAML::EndSeq;
+        out << YAML::EndMap;
+        if (outCount)
+            *outCount = static_cast<uint32_t>(entities.size());
+        return std::string(out.c_str(), out.size());
+    }
+
+    std::string SceneSerializer::MergeWorldCellText(Scene& scene, const std::string& fileText, const std::vector<Entity>& roots, const std::string& name,
+                                                    uint32_t& outCount)
+    {
+        // The file's entities with the given trees put in: one already there is replaced, the others kept; in the order of IDs.
+        std::map<uint64_t, YAML::Node> entities;
+        if (!fileText.empty())
+        {
+            try
+            {
+                std::string text = fileText;
+                if (IsRuntimeScene(text) && !RuntimeSceneText(fileText, name, text))
+                    text.clear();
+                const YAML::Node file = YAML::Load(text);
+                if (const YAML::Node list = file["Entities"])
+                {
+                    for (const YAML::Node& entity : list)
+                        entities[entity["Entity"].as<uint64_t>()] = entity;
+                }
+            }
+            catch (const YAML::Exception& exception)
+            {
+                NOX_CORE_ERROR("World cell `{}`: its file could not be read ({}); it is written with the moved entities only", name, exception.what());
+            }
+        }
+        if (!roots.empty())
+        {
+            const YAML::Node added = YAML::Load(WorldCellText(scene, roots, name, nullptr));
+            for (const YAML::Node& entity : added["Entities"])
+                entities[entity["Entity"].as<uint64_t>()] = entity;
+        }
+
+        YAML::Emitter out;
+        out << YAML::BeginMap;
+        out << YAML::Key << "Scene" << YAML::Value << name;
+        out << YAML::Key << "Entities" << YAML::Value << YAML::BeginSeq;
+        for (const auto& [id, entity] : entities)
+            out << entity;
+        out << YAML::EndSeq;
+        out << YAML::EndMap;
+        outCount = static_cast<uint32_t>(entities.size());
         return std::string(out.c_str(), out.size());
     }
 
@@ -1070,14 +1219,18 @@ namespace Nox
     {
         size_t scriptComponentCount = 0;
         size_t scriptClassCount = 0;
-        return EmitScene(scriptComponentCount, scriptClassCount);
+        return EmitScene(scriptComponentCount, scriptClassCount, nullptr);
     }
 
     void SceneSerializer::Serialize(const std::filesystem::path& filepath)
     {
         size_t scriptComponentCount = 0;
         size_t scriptClassCount = 0;
-        const std::string text = EmitScene(scriptComponentCount, scriptClassCount);
+        // A world: the cells' files first (they update the index the scene file holds), and their entities stay out of it.
+        std::unordered_set<UUID> inCells;
+        if (m_Scene->IsWorldPartitioned() && !m_Scene->SaveWorldCells(filepath, inCells))
+            NOX_CORE_ERROR("Saving scene '{}': some world cells could not be written", filepath.string());
+        const std::string text = EmitScene(scriptComponentCount, scriptClassCount, inCells.empty() ? nullptr : &inCells);
 
         const std::filesystem::path filePath(filepath);
         std::ofstream fout(filePath);
@@ -1643,6 +1796,22 @@ namespace Nox
                 volume.UnloadDelay = levelVolume["UnloadDelay"].as<float>();
         }
 
+        if (auto worldPartition = entity["WorldPartitionComponent"])
+        {
+            auto& component = deserializedEntity.AddComponent<WorldPartitionComponent>();
+            const std::string mode = worldPartition["Mode"] ? worldPartition["Mode"].as<std::string>() : std::string("AlwaysLoaded");
+            component.Mode = mode == "Auto" ? WorldPartitionComponent::LoadingMode::Auto
+                           : mode == "Spatial" ? WorldPartitionComponent::LoadingMode::Spatial
+                           : WorldPartitionComponent::LoadingMode::AlwaysLoaded;
+        }
+
+        if (auto streamingSource = entity["WorldStreamingSourceComponent"])
+        {
+            auto& component = deserializedEntity.AddComponent<WorldStreamingSourceComponent>();
+            if (streamingSource["Enabled"])
+                component.Enabled = streamingSource["Enabled"].as<bool>();
+        }
+
         if (auto particleEmitter = entity["ParticleEmitterComponent"])
         {
             auto& emitter = deserializedEntity.AddComponent<ParticleEmitterComponent>();
@@ -2123,6 +2292,7 @@ namespace Nox
             for (const auto& folder : folders)
                 m_Scene->AddFolder(folder.as<std::string>());
         }
+        ReadWorldPartition(*m_Scene, data);
 
         auto entities = data["Entities"];
         if (entities)
