@@ -165,6 +165,23 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[])
     return SDL_APP_CONTINUE; /* carry on with the program! */
 }
 
+// While the mouse is captured (relative mode: the editor camera flying, a script's Input.CursorLocked) it is the viewport's alone, as
+// in Unreal. SDL still puts a position in its events then, a virtual one moved by the motion across the whole window under the hidden
+// cursor, and ImGui followed it: hovering and clicking the hierarchy or the details panel behind the viewport. Releases still reach
+// ImGui, so the button that started the capture is not left held there.
+static bool ImGuiTakesEvent(const SDL_Event& event)
+{
+    switch (event.type)
+    {
+    case SDL_EVENT_MOUSE_MOTION:
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+    case SDL_EVENT_MOUSE_WHEEL:
+        return !Nox::Input::IsRelativeMouseMode();
+    default:
+        return true;
+    }
+}
+
 /* This function runs when a new event (mouse input, keypresses, etc) occurs. */
 SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* currentEvent)
 {
@@ -174,7 +191,7 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* currentEvent)
     if (!applicationState || !applicationState->app)
         return SDL_APP_CONTINUE;
 
-    if (applicationState->app->GetSpecification().isEditor)
+    if (applicationState->app->GetSpecification().isEditor && ImGuiTakesEvent(*currentEvent))
         ImGui_ImplSDL3_ProcessEvent(currentEvent);
 
     switch (currentEvent->type)

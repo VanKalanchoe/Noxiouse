@@ -29,6 +29,8 @@ namespace Nox
         // cursor keeps moving underneath -- letting it wander onto, and click, other panels while the camera flies. The
         // editor camera enables this only while actually flying (RMB + WASD), and reads motion through
         // GetRelativeMouseDelta while it is on, never through GetMousePosition (which SDL does not keep moving in this mode).
+        // Leaving it puts the cursor back where it was when it was entered (Unreal's viewport too): SDL would leave it where its
+        // virtual position had wandered to meanwhile.
         static void SetRelativeMouseMode(bool enabled);
         static bool IsRelativeMouseMode();
         static glm::vec2 GetRelativeMouseDelta();
@@ -56,6 +58,7 @@ namespace Nox
     private:
         static inline bool s_GameKeysEnabled = true;
         static inline bool s_GameMouseEnabled = true;
+        static inline glm::vec2 s_RelativeModeStart{ 0.0f };
         static inline glm::vec2 s_PendingMouseDelta{ 0.0f };
         static inline glm::vec2 s_FrameMouseDelta{ 0.0f };
         static inline float s_PendingScroll = 0.0f;

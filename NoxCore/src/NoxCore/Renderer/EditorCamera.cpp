@@ -142,8 +142,7 @@ namespace Nox
 		}
 		else if (!flying && m_WasFlying)
 		{
-			Input::SetRelativeMouseMode(false);
-			Input::WarpMouseInWindow(m_FlyStartMousePosition.x, m_FlyStartMousePosition.y);
+			Input::SetRelativeMouseMode(false); // (puts the cursor back where the fly started)
 			m_InitialMousePosition = m_FlyStartMousePosition; // the absolute-position tracking below resumes from the same spot
 		}
 		m_WasFlying = flying;
