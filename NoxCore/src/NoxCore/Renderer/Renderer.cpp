@@ -3886,6 +3886,13 @@ namespace Nox
         if (!handle.IsValid()) return;
 
         std::erase_if(m_blasBuilds, [&](const BlasBuild& build) { return build.blasId == handle.blasId; });
+        // No compaction may replace the BLAS any more: it stays (for the frames in flight) until its release, and a compaction applied
+        // meanwhile would record a copy into a new structure the release then destroys under that copy
+        // (VUID-vkDestroyAccelerationStructureKHR-accelerationStructure-02442). The serial no longer matches a size query or a
+        // compaction measured before; the compactions not recorded yet go now (nothing references them).
+        if (handle.blasId < m_meshBLASes.size())
+            m_meshBLASes[handle.blasId].serial = 0;
+        std::erase_if(m_blasCompactions, [&](const BlasCompaction& compaction) { return compaction.blasId == handle.blasId; });
         if (handle.blasId < m_blasSources.size())
         {
             m_evictedBlasCount -= m_blasSources[handle.blasId].evicted ? 1 : 0;
