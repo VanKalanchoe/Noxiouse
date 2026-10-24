@@ -137,13 +137,18 @@ namespace Nox
 
     void RuntimeLayer::OnEvent(Event& event)
     {
-        // Alt+Enter: windowed <-> full screen.
+        // Alt+Enter: windowed <-> full screen. Esc: quit.
         EventDispatcher dispatcher(event);
         dispatcher.Dispatch<KeyPressedEvent>([](KeyPressedEvent& pressed)
         {
             if (pressed.GetKeyCode() == SDL_SCANCODE_RETURN && (pressed.GetModifiers() & SDL_KMOD_ALT) != 0 && !pressed.IsRepeat())
             {
                 Application::Get().getWindow()->ToggleFullscreen();
+                return true;
+            }
+            if (pressed.GetKeyCode() == SDL_SCANCODE_ESCAPE && !pressed.IsRepeat())
+            {
+                Quit();
                 return true;
             }
             return false;

@@ -2115,7 +2115,7 @@ namespace Nox
             }
         case SDL_SCANCODE_ESCAPE:
             {
-                // Esc: first drops the line being measured, then leaves the tool.
+                // Esc: first drops the line being measured, then leaves the tool; else in Play / Simulate it stops (Unreal's PIE).
                 if (m_MeasureTool)
                 {
                     if (m_MeasureStage != 0)
@@ -2123,6 +2123,8 @@ namespace Nox
                     else
                         m_MeasureTool = false;
                 }
+                else if (m_SceneState != SceneState::Edit)
+                    OnSceneStop();
                 break;
             }
         case SDL_SCANCODE_END:
@@ -3784,6 +3786,16 @@ namespace Nox
             gizmoButton("Rot", "Rotate", ImGuizmo::OPERATION::ROTATE);
             gizmoButton("Scl", "Scale", ImGuizmo::OPERATION::SCALE);
             ImGui::NewLine();
+        }
+
+        // A frozen culling view draws only what its old frustum held: never left on unnoticed (Render Graph panel).
+        if (m_Renderer->getFrozen())
+        {
+            ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.2f, 1.0f), "Culling view frozen");
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Unfreeze"))
+                m_Renderer->setFrozen(false);
+            ImGui::SetItemTooltip("Only what was in view when it froze is drawn (Render Graph panel > Freeze Culling View)");
         }
 
         ImGui::Checkbox("Snap", &m_SnapEnabled);

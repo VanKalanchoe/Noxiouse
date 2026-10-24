@@ -244,14 +244,8 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* currentEvent)
         }
     case SDL_EVENT_KEY_DOWN:
         {
-            if (currentEvent->key.scancode == SDL_SCANCODE_ESCAPE) return SDL_APP_SUCCESS;
-            
-            if (currentEvent->key.scancode == SDL_SCANCODE_F)
-            {
-                // Freezes the culling view (Renderer::setFrozen captures it again on every freeze).
-                applicationState->app->GetRenderer()->setFrozen(!applicationState->app->GetRenderer()->getFrozen());
-            }
-
+            // Keys are the layers' (the editor's shortcuts skip text fields; the runtime quits on Esc): handled here, before them,
+            // F froze the culling view and Esc quit the editor while a name was typed or an entity framed.
             SDL_Scancode scan = currentEvent->key.scancode; // maybe keycode better ?
             bool repeat = (currentEvent->key.repeat != 0);
 

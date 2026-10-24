@@ -164,7 +164,8 @@ namespace Nox
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("Writes RenderGraph.dot next to the editor (GraphViz)");
 
-        // GPU culling (§5.6): instance frustum culling, optional meshlet culling, frozen culling view (also key F).
+        // GPU culling (§5.6): instance frustum culling, optional meshlet culling, frozen culling view (no key: F fired while
+        // typing a name and is the viewport's Frame Selected; the viewport shows when it is frozen).
         bool instanceCulling = m_Renderer->isInstanceCullingEnabled();
         if (ImGui::Checkbox("Instance Culling", &instanceCulling))
             m_Renderer->setInstanceCullingEnabled(instanceCulling);
