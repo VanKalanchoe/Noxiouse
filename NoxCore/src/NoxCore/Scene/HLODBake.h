@@ -100,6 +100,7 @@ namespace Nox::HLOD
         float VoxelSize = 0.0f;   // world units, with Remesh (larger than the error asks when the grid was capped)
         uint32_t SourceTriangles = 0;
         uint32_t BakedTexels = 0; // texels that found their source
+        uint32_t CutTexels = 0;   // texels cut out (alpha-masked sources: foliage, fences): found too, but see-through
         uint32_t SurfaceTexels = 0;
     };
 

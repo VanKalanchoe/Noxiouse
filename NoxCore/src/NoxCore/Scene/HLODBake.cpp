@@ -753,12 +753,14 @@ namespace Nox::HLOD
         std::vector<glm::vec3> welded;
         std::vector<uint32_t> indices;
         float simplifyError = settings.Error;
+        float shellOffset = 0.0f; // how far the shell stands off the parts (0: the parts themselves)
         if (settings.Remesh)
         {
             // Half the error is the shell's distance off the parts, half the simplification's.
             Shell shell = VoxelShell(mergedPositions, mergedIndices, settings.Error * 0.5f, settings.MaxVoxels, parallelFor);
             result.VoxelSize = shell.VoxelSize;
             simplifyError = std::max(settings.Error - shell.Offset, settings.Error * 0.25f);
+            shellOffset = shell.Offset + shell.VoxelSize; // (surface nets place a vertex anywhere in its voxel)
             welded = std::move(shell.Positions);
             indices = std::move(shell.Indices);
             if (indices.size() < 3)
@@ -1024,7 +1026,9 @@ namespace Nox::HLOD
         result.Normal.assign(texelCount * 4, 0);
         result.MetallicRoughness.assign(texelCount * 4, 0);
         std::vector<glm::vec3> emissive(texelCount, glm::vec3(0.0f)); // linear, encoded once its brightest texel is known
-        const float search = std::max(settings.Error * 2.0f, 1e-3f);
+        // How far from the HLOD's surface its source can be: twice the error, or more where the shell stands farther off (voxels grown
+        // for a large cell) -- searching only the error left most of such a shell without its source.
+        const float search = std::max({ settings.Error * 2.0f, (shellOffset + simplifyError) * 1.5f, 1e-3f });
         parallelFor(size, [&](uint32_t row)
         {
             for (uint32_t column = 0; column < size; ++column)
@@ -1164,6 +1168,7 @@ namespace Nox::HLOD
             cutTexels += states[texel] == TexelState::CutOut ? 1 : 0;
         }
         result.BakedTexels = static_cast<uint32_t>(baked);
+        result.CutTexels = static_cast<uint32_t>(cutTexels);
         result.SurfaceTexels = static_cast<uint32_t>(covered);
         std::vector<uint8_t> filled(texelCount);
         for (size_t texel = 0; texel < texelCount; ++texel)

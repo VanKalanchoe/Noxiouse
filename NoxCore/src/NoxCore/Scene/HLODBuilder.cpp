@@ -716,9 +716,10 @@ namespace Nox
             }
             const HLOD::Result& result = *work.Result;
             m_Entries.push_back({ work.Cell, mesh, result.Origin, result.BoundsMin, result.BoundsMax });
-            NOX_CORE_INFO("Build HLODs: {}: {} source triangles -> {}, voxels {:.0f} cm, {}x{} texels ({:.0f} % baked)", cellName,
+            const double surface = std::max(result.SurfaceTexels, 1u);
+            NOX_CORE_INFO("Build HLODs: {}: {} source triangles -> {}, voxels {:.0f} cm, {}x{} texels ({:.0f} % baked, {:.0f} % cut out)", cellName,
                           result.SourceTriangles, result.Indices.size() / 3, WorldUnits::ToCentimeters(result.VoxelSize), result.TextureSize,
-                          result.TextureSize, result.SurfaceTexels ? 100.0 * result.BakedTexels / result.SurfaceTexels : 0.0);
+                          result.TextureSize, 100.0 * result.BakedTexels / surface, 100.0 * result.CutTexels / surface);
             return true;
         }
         }
