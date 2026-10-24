@@ -1270,7 +1270,9 @@ away stays on screen as one cheap mesh per cell after the cell itself has stream
 - **Materials baked (Unreal's ProxyLOD bakes the same way, on the CPU):** every texel of the atlas is a point and normal on the
   HLOD's surface; a ray along the normal (both ways, within the simplification error) finds the source surface it stands for, and
   the source material is evaluated there -- base color (alpha-masked parts are passed through), the normal map turned into the
-  HLOD's tangent frame, roughness / metallic (specular-glossiness converted), emissive. Textures are read from the cooked .ntex
+  HLOD's tangent frame, roughness / metallic (specular-glossiness converted), emissive. Glass (alpha blended or transmissive) stays in
+  the shell but is baked as what shows through it -- what is behind, by its transmission, else dark -- under its own gloss and normal
+  (baked as its own colour, Bistro's windows came out as white panels). Textures are read from the cooked .ntex
   (BC1-BC7 decoded with bcdec, the mip nearest the bake's texel size). Empty texels are filled from their neighbours (no seams in
   the mips). Texture size from the surface area and a texel density, power of two, 128-2048.
 - **Output:** a glTF (positions in meters, normals, tangents, UVs; base color, normal, metallic-roughness and emissive PNGs) in

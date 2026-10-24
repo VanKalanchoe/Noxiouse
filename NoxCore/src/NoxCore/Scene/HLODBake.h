@@ -39,6 +39,11 @@ namespace Nox::HLOD
         float Glossiness = 0.0f;
         bool AlphaMask = false;
         float AlphaCutoff = 0.5f;
+        // Glass and other see-through surfaces (alpha blended, KHR_materials_transmission). The HLOD is opaque: what it shows there is
+        // what is behind, by how much light gets through (nothing behind: dark, an unlit room), under the glass's own gloss and
+        // normal -- not the glass's colour as if it were a wall (a white pane).
+        bool Translucent = false;
+        float Transmission = 0.0f; // 0..1, with Translucent
     };
 
     // One mesh placed in the world: its vertices in its own space, the transform, its material (an index into the materials).

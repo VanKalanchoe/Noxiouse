@@ -5,6 +5,7 @@
 #include <cfloat>
 #include <cmath>
 #include <numeric>
+#include <optional>
 #include <unordered_map>
 
 #include <meshoptimizer.h>
@@ -661,27 +662,58 @@ namespace Nox::HLOD
                 const glm::vec3 frameNormal = glm::normalize(result.Normals[i0] * w0 + result.Normals[i1] * w1 + result.Normals[i2] * w2);
                 const glm::vec4 frameTangent = result.Tangents[i0] * w0 + result.Tangents[i1] * w1 + result.Tangents[i2] * w2;
 
-                // From outside in, then from inside out; alpha-masked hits that are cut away let the ray go on.
+                // From outside in, then from inside out; alpha-masked hits that are cut away let the ray go on, and so do see-through
+                // ones (glass), adding what they cover of what is behind them.
                 bool cut = false;
                 for (int pass = 0; pass < 2 && states[texel] != TexelState::Baked; ++pass)
                 {
                     const glm::vec3 direction = pass == 0 ? -frameNormal : frameNormal;
                     const glm::vec3 rayOrigin = position - direction * search;
                     float tMin = 0.0f;
+                    glm::vec3 seenColor(0.0f), seenEmissive(0.0f);
+                    float through = 1.0f; // what the glass in front lets through
+                    std::optional<Surface> front;
                     for (int step = 0; step < 8; ++step)
                     {
                         uint32_t hitTriangle = 0;
                         float t = 0.0f, u = 0.0f, v = 0.0f;
-                        if (!bvh.Intersect(rayOrigin, direction, tMin, search * 2.0f, hitTriangle, t, u, v))
+                        const bool hit = bvh.Intersect(rayOrigin, direction, tMin, search * 2.0f, hitTriangle, t, u, v);
+                        if (!hit && !front)
                             break;
-                        const SourceTriangle& tri = sources[hitTriangle];
-                        const Material& material = materials[tri.Material];
-                        const Surface surface = Evaluate(material, tri, u, v);
-                        if (material.AlphaMask && surface.Alpha < material.AlphaCutoff)
+                        Surface surface;
+                        if (hit)
                         {
-                            cut = true;
-                            tMin = t + search * 1e-4f;
-                            continue;
+                            const SourceTriangle& tri = sources[hitTriangle];
+                            const Material& material = materials[tri.Material];
+                            surface = Evaluate(material, tri, u, v);
+                            if (material.AlphaMask && surface.Alpha < material.AlphaCutoff)
+                            {
+                                cut = true;
+                                tMin = t + search * 1e-4f;
+                                continue;
+                            }
+                            if (material.Translucent && step + 1 < 8)
+                            {
+                                const float coverage = std::clamp(surface.Alpha * (1.0f - material.Transmission), 0.0f, 1.0f);
+                                seenColor += surface.BaseColor * (through * coverage);
+                                seenEmissive += surface.Emissive * through;
+                                through *= 1.0f - coverage;
+                                if (!front)
+                                    front = surface;
+                                tMin = t + search * 1e-4f;
+                                continue;
+                            }
+                            seenColor += surface.BaseColor * through;
+                            seenEmissive += surface.Emissive * through;
+                        }
+                        // (no hit behind the glass: nothing more to see through it)
+                        if (front)
+                        {
+                            surface.BaseColor = seenColor;
+                            surface.Emissive = seenEmissive;
+                            surface.Roughness = front->Roughness;
+                            surface.Metallic = front->Metallic;
+                            surface.Normal = front->Normal;
                         }
                         states[texel] = TexelState::Baked;
                         uint8_t* color = &result.BaseColor[texel * 4];

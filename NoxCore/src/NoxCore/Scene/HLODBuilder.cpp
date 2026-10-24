@@ -617,6 +617,8 @@ namespace Nox
                         material.EmissiveFactor = data.EmissiveFactor * data.emissiveStrength;
                         material.AlphaMask = data.Mode == AlphaMode::Mask;
                         material.AlphaCutoff = data.AlphaMaskCutoff;
+                        material.Translucent = data.Mode == AlphaMode::Blend || data.TransmissionFactor > 0.0f;
+                        material.Transmission = std::clamp(data.TransmissionFactor, 0.0f, 1.0f);
                         material.BaseColor = find(source.BaseColor).first;
                         material.MetallicRoughness = find(source.MetallicRoughness).first;
                         const auto normal = find(source.Normal);
