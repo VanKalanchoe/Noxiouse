@@ -497,6 +497,9 @@ namespace Nox
         std::vector<NRI::ResourceState> m_VisibleScratch;
         std::vector<bool> m_AccessedScratch;
         std::vector<bool> m_WrittenScratch;
+        std::vector<uint32_t> m_PhysicalSlotScratch;  // graph resource -> physical resource slot (aliased transients share one)
+        std::vector<const void*> m_SlotResourceScratch;
+        std::unordered_map<const void*, uint32_t> m_SlotByResourceScratch;
 
         // What the previous frame left each physical resource in, so the first access of a frame is ordered after it (a
         // barrier reaches across submissions on the queue). One frame is enough: the frame after it is recorded only

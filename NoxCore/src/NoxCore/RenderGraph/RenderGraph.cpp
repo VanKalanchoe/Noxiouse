@@ -623,16 +623,6 @@ namespace Nox
 
         const size_t textureCount = m_Textures.size();
         const size_t resourceCount = textureCount + m_Buffers.size();
-        std::vector<NRI::ResourceState>& lastWrite = m_LastWriteScratch;
-        std::vector<NRI::ResourceState>& readsSinceWrite = m_ReadsSinceWriteScratch;
-        std::vector<NRI::ResourceState>& visible = m_VisibleScratch;
-        std::vector<bool>& accessed = m_AccessedScratch;
-        std::vector<bool>& written = m_WrittenScratch;
-        lastWrite.assign(resourceCount, NRI::ResourceState{});
-        readsSinceWrite.assign(resourceCount, NRI::ResourceState{});
-        visible.assign(resourceCount, NRI::ResourceState{});
-        accessed.assign(resourceCount, false);
-        written.assign(resourceCount, false);
 
         auto physical = [&](size_t key) -> const void*
         {
@@ -640,18 +630,54 @@ namespace Nox
                                       : static_cast<const void*>(m_Buffers[key - textureCount].Buffer);
         };
 
-        // Start where the previous frame left each resource: its first access this frame is ordered after that.
+        // The state is tracked per physical resource, not per graph resource: transients the pool aliases (one texture for two
+        // whose lifetimes do not overlap) share it, so the second one's first access is ordered after the first one's last
+        // (write after write / after read on the same memory).
+        std::vector<uint32_t>& slotOf = m_PhysicalSlotScratch;
+        std::vector<const void*>& slotResource = m_SlotResourceScratch;
+        std::unordered_map<const void*, uint32_t>& slotByResource = m_SlotByResourceScratch;
+        slotOf.resize(resourceCount);
+        slotResource.clear();
+        slotByResource.clear();
         for (size_t key = 0; key < resourceCount; ++key)
         {
             const void* resource = physical(key);
+            if (!resource)
+            {
+                slotOf[key] = static_cast<uint32_t>(slotResource.size());
+                slotResource.push_back(nullptr);
+                continue;
+            }
+            auto [entry, added] = slotByResource.try_emplace(resource, static_cast<uint32_t>(slotResource.size()));
+            if (added)
+                slotResource.push_back(resource);
+            slotOf[key] = entry->second;
+        }
+        const size_t slotCount = slotResource.size();
+
+        std::vector<NRI::ResourceState>& lastWrite = m_LastWriteScratch;
+        std::vector<NRI::ResourceState>& readsSinceWrite = m_ReadsSinceWriteScratch;
+        std::vector<NRI::ResourceState>& visible = m_VisibleScratch;
+        std::vector<bool>& accessed = m_AccessedScratch;
+        std::vector<bool>& written = m_WrittenScratch;
+        lastWrite.assign(slotCount, NRI::ResourceState{});
+        readsSinceWrite.assign(slotCount, NRI::ResourceState{});
+        visible.assign(slotCount, NRI::ResourceState{});
+        accessed.assign(slotCount, false);
+        written.assign(slotCount, false);
+
+        // Start where the previous frame left each resource: its first access this frame is ordered after that.
+        for (size_t slot = 0; slot < slotCount; ++slot)
+        {
+            const void* resource = slotResource[slot];
             auto carried = resource ? m_CarriedStates.find(resource) : m_CarriedStates.end();
             if (carried == m_CarriedStates.end())
                 continue;
-            lastWrite[key] = carried->second.LastWrite;
-            readsSinceWrite[key] = carried->second.ReadsSinceWrite;
-            visible[key] = carried->second.Visible;
-            written[key] = carried->second.Written;
-            accessed[key] = true;
+            lastWrite[slot] = carried->second.LastWrite;
+            readsSinceWrite[slot] = carried->second.ReadsSinceWrite;
+            visible[slot] = carried->second.Visible;
+            written[slot] = carried->second.Written;
+            accessed[slot] = true;
         }
 
         auto merge = [](NRI::ResourceState& into, const NRI::ResourceState& state)
@@ -689,6 +715,7 @@ namespace Nox
             pass.FirstBufferBarrier = static_cast<uint32_t>(m_BufferBarriers.size());
             for (const auto& [key, state] : passStates)
             {
+                const uint32_t slot = slotOf[key];
                 auto addBarrier = [&](NRI::ResourceState before)
                 {
                     // On the compute queue only what that queue did before is ordered by a barrier; the graphics queue's work it
@@ -708,38 +735,38 @@ namespace Nox
 
                 if (HasWriteAccess(state))
                 {
-                    if (accessed[key])
+                    if (accessed[slot])
                     {
-                        NRI::ResourceState before = lastWrite[key];
-                        merge(before, readsSinceWrite[key]);
+                        NRI::ResourceState before = lastWrite[slot];
+                        merge(before, readsSinceWrite[slot]);
                         addBarrier(before);
                     }
-                    lastWrite[key] = state;
-                    readsSinceWrite[key] = {};
-                    visible[key] = state;
-                    written[key] = true;
+                    lastWrite[slot] = state;
+                    readsSinceWrite[slot] = {};
+                    visible[slot] = state;
+                    written[slot] = true;
                 }
                 else
                 {
-                    if (written[key] && !covers(visible[key], state))
+                    if (written[slot] && !covers(visible[slot], state))
                     {
-                        addBarrier(lastWrite[key]);
-                        merge(visible[key], state);
+                        addBarrier(lastWrite[slot]);
+                        merge(visible[slot], state);
                     }
-                    merge(readsSinceWrite[key], state);
+                    merge(readsSinceWrite[slot], state);
                 }
-                accessed[key] = true;
+                accessed[slot] = true;
             }
             pass.TextureBarrierCount = static_cast<uint32_t>(m_TextureBarriers.size()) - pass.FirstTextureBarrier;
             pass.BufferBarrierCount = static_cast<uint32_t>(m_BufferBarriers.size()) - pass.FirstBufferBarrier;
         }
 
         m_CarriedStates.clear();
-        for (size_t key = 0; key < resourceCount; ++key)
+        for (size_t slot = 0; slot < slotCount; ++slot)
         {
-            const void* resource = physical(key);
-            if (resource && accessed[key])
-                m_CarriedStates[resource] = CarriedState{ lastWrite[key], readsSinceWrite[key], visible[key], written[key] };
+            const void* resource = slotResource[slot];
+            if (resource && accessed[slot])
+                m_CarriedStates[resource] = CarriedState{ lastWrite[slot], readsSinceWrite[slot], visible[slot], written[slot] };
         }
     }
 

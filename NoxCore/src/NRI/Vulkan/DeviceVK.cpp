@@ -223,6 +223,22 @@ namespace NRI
     void DeviceVK::beginFrame(uint32_t frameNumber)
     {
         m_allocator->setCurrentFrameIndex(frameNumber);
+
+        std::scoped_lock lock(m_imGuiReleaseMutex);
+        m_frameNumber = frameNumber;
+        std::erase_if(m_imGuiReleases, [frameNumber](const std::pair<VkDescriptorSet, uint64_t>& release)
+        {
+            if (release.second + ImGuiReleaseFrames > frameNumber)
+                return false;
+            ImGui_ImplVulkan_RemoveTexture(release.first);
+            return true;
+        });
+    }
+
+    void DeviceVK::releaseImGuiTexture(VkDescriptorSet set)
+    {
+        std::scoped_lock lock(m_imGuiReleaseMutex);
+        m_imGuiReleases.emplace_back(set, m_frameNumber);
     }
 
     void DeviceVK::getMemoryStats(std::vector<MemoryHeapStats>& outHeaps) const
@@ -1555,6 +1571,11 @@ namespace NRI
 
     void DeviceVK::shutdownImGui()
     {
+        // (ImGui's descriptor pool goes with it, and every set in it: nothing left to free one by one.)
+        {
+            std::scoped_lock lock(m_imGuiReleaseMutex);
+            m_imGuiReleases.clear();
+        }
         ImGui_ImplVulkan_Shutdown();
     }
 

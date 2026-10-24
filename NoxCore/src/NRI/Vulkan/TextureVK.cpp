@@ -244,9 +244,10 @@ namespace NRI
             m_imageResource.descriptorIndexSlot = ~0u;
         }
         
+        // Freed once the frames that may have drawn it are done (the texture can go while its last frame is on the GPU).
         if (!Nox::IsEngineShuttingDown && m_deviceVK.isDeviceInit() && m_imGuiHandle != VK_NULL_HANDLE)
         {
-            ImGui_ImplVulkan_RemoveTexture(m_imGuiHandle);
+            m_deviceVK.releaseImGuiTexture(m_imGuiHandle);
             m_imGuiHandle = VK_NULL_HANDLE;
         }
     }

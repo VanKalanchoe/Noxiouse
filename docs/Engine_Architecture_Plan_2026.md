@@ -711,6 +711,10 @@ the graphics queue's; `Device::hasAsyncComputeQueue`). With `RenderGraph::SetAsy
   images; the pass order declares DDGI and the GI right after the G-buffer so that SSAO, RTAO, the occlusion blur, the NRD guides
   and the RT shadows run beside it, and the RT reflections or the lighting join). Toggle in the renderer settings, on by default
   where the queue exists.
+- **Fixed with it (2026-10-24):** Precise synchronization tracked state per graph resource, so two transients the pool aliases onto
+  one texture (lifetimes that do not overlap) got no barrier between the first one's last access and the second one's first write
+  (SYNC-HAZARD-WRITE-AFTER-WRITE before "NRD Shadows" once the new pass order changed which textures alias). The state is tracked per
+  physical resource now; the test has the case (it failed before the fix).
 - **Tested** without a GPU: a render graph test against generated NRI mocks (fork / join placement, submission order and timeline
   values, compute barriers free of graphics stages, no aliasing beside a block, async off, no compute queue), under AddressSanitizer
   and UBSan. Not yet measured on a GPU.

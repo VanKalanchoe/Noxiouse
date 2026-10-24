@@ -1,5 +1,8 @@
 #pragma once
 #include <atomic>
+#include <mutex>
+#include <utility>
+#include <vector>
 
 #include "VulkanCommon.h"
 
@@ -61,6 +64,10 @@ namespace NRI
         std::span<const uint32_t> getSharedQueueFamilies() const { return { m_sharedQueueFamilies.data(), m_sharedQueueFamilyCount }; }
         bool hasDedicatedTransferQueue() const override { return m_transferQueueIndex != m_queueIndex; }
         bool hasAsyncComputeQueue() const override { return m_computeQueueIndex != ~0u; }
+        // An ImGui texture's descriptor set (TextureVK::getImTextureID) freed once no frame that may have drawn it is on the GPU:
+        // a texture can go while the frame that showed it (a thumbnail, a preview) is still in flight (VUID-vkFreeDescriptorSets-
+        // pDescriptorSets-00309). Any thread.
+        void releaseImGuiTexture(VkDescriptorSet set);
         vk::raii::SurfaceKHR& getSurface() { return m_surface; }
         vk::Format& getDepthFormat() { return m_depthFormat; }
         vk::SurfaceFormatKHR& getSurfaceFormat() { return m_surfaceFormat; }
@@ -176,6 +183,13 @@ namespace NRI
         vk::raii::Queue m_transferQueue = nullptr;
         // A family with compute but not graphics (async compute), ~0 when the device has none.
         uint32_t m_computeQueueIndex = ~0u;
+        // ImGui descriptor sets waiting for the frames that may draw them (releaseImGuiTexture): freed in beginFrame once the frame
+        // that released them is ImGuiReleaseFrames behind -- the frames in flight (Renderer2D.h MAX_FRAMES_IN_FLIGHT, 2) and the
+        // releasing frame itself.
+        static constexpr uint64_t ImGuiReleaseFrames = 3;
+        std::mutex m_imGuiReleaseMutex;
+        std::vector<std::pair<VkDescriptorSet, uint64_t>> m_imGuiReleases;
+        uint64_t m_frameNumber = 0;
         vk::raii::Queue m_computeQueue = nullptr;
         std::array<uint32_t, 3> m_sharedQueueFamilies{};
         uint32_t m_sharedQueueFamilyCount = 1;
