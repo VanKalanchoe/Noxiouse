@@ -226,19 +226,24 @@ namespace NRI
 
         std::scoped_lock lock(m_imGuiReleaseMutex);
         m_frameNumber = frameNumber;
-        std::erase_if(m_imGuiReleases, [frameNumber](const std::pair<VkDescriptorSet, uint64_t>& release)
+        std::erase_if(m_imGuiReleases, [frameNumber](ImGuiRelease& release)
         {
-            if (release.second + ImGuiReleaseFrames > frameNumber)
+            if (release.Frame + ImGuiReleaseFrames > frameNumber)
                 return false;
-            ImGui_ImplVulkan_RemoveTexture(release.first);
+            ImGui_ImplVulkan_RemoveTexture(release.Set);
+            release.Image.reset();
             return true;
         });
     }
 
-    void DeviceVK::releaseImGuiTexture(VkDescriptorSet set)
+    void DeviceVK::releaseImGuiTexture(VkDescriptorSet set, ImageResource&& image)
     {
+        auto owned = std::make_unique<ImageResource>(std::move(image));
         std::scoped_lock lock(m_imGuiReleaseMutex);
-        m_imGuiReleases.emplace_back(set, m_frameNumber);
+        // After ImGui's shutdown (the device is idle then) its pool and every set in it are gone: only the image is left.
+        if (!m_imGuiInitialized)
+            return;
+        m_imGuiReleases.push_back({ set, std::move(owned), m_frameNumber });
     }
 
     void DeviceVK::getMemoryStats(std::vector<MemoryHeapStats>& outHeaps) const
@@ -291,6 +296,7 @@ namespace NRI
     DeviceVK::~DeviceVK()
     {
         destroyNRD();
+        m_imGuiReleases.clear(); // their images belong to the allocator
         // VMA must be destroyed BEFORE the logical device goes out of scope
         if (m_allocator)
         {
@@ -1567,14 +1573,20 @@ namespace NRI
         init_info.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
         init_info.CheckVkResultFn = check_vk_result;
         ImGui_ImplVulkan_Init(&init_info);
+        {
+            std::scoped_lock lock(m_imGuiReleaseMutex);
+            m_imGuiInitialized = true;
+        }
     }
 
     void DeviceVK::shutdownImGui()
     {
-        // (ImGui's descriptor pool goes with it, and every set in it: nothing left to free one by one.)
+        // (ImGui's descriptor pool goes with it, and every set in it: nothing left to free one by one. The device is idle, so the
+        // images waiting with them go now.)
         {
             std::scoped_lock lock(m_imGuiReleaseMutex);
             m_imGuiReleases.clear();
+            m_imGuiInitialized = false;
         }
         ImGui_ImplVulkan_Shutdown();
     }

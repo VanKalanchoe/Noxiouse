@@ -657,12 +657,13 @@ namespace Nox
 
         std::vector<NRI::ResourceState>& lastWrite = m_LastWriteScratch;
         std::vector<NRI::ResourceState>& readsSinceWrite = m_ReadsSinceWriteScratch;
-        std::vector<NRI::ResourceState>& visible = m_VisibleScratch;
+        std::vector<NRI::ResourceState>(&visible)[2] = m_VisibleScratch;
         std::vector<bool>& accessed = m_AccessedScratch;
         std::vector<bool>& written = m_WrittenScratch;
         lastWrite.assign(slotCount, NRI::ResourceState{});
         readsSinceWrite.assign(slotCount, NRI::ResourceState{});
-        visible.assign(slotCount, NRI::ResourceState{});
+        visible[0].assign(slotCount, NRI::ResourceState{});
+        visible[1].assign(slotCount, NRI::ResourceState{});
         accessed.assign(slotCount, false);
         written.assign(slotCount, false);
 
@@ -675,7 +676,8 @@ namespace Nox
                 continue;
             lastWrite[slot] = carried->second.LastWrite;
             readsSinceWrite[slot] = carried->second.ReadsSinceWrite;
-            visible[slot] = carried->second.Visible;
+            visible[0][slot] = carried->second.Visible[0];
+            visible[1][slot] = carried->second.Visible[1];
             written[slot] = carried->second.Written;
             accessed[slot] = true;
         }
@@ -713,6 +715,9 @@ namespace Nox
 
             pass.FirstTextureBarrier = static_cast<uint32_t>(m_TextureBarriers.size());
             pass.FirstBufferBarrier = static_cast<uint32_t>(m_BufferBarriers.size());
+            // A read made visible on one queue is not on the other: a barrier on the compute queue (or the semaphore wait that
+            // stands in for it) does nothing for a later reader on the graphics queue, which needs its own barrier.
+            const uint32_t queue = pass.Queue == NRI::QueueType::Compute ? 1 : 0;
             for (const auto& [key, state] : passStates)
             {
                 const uint32_t slot = slotOf[key];
@@ -743,15 +748,16 @@ namespace Nox
                     }
                     lastWrite[slot] = state;
                     readsSinceWrite[slot] = {};
-                    visible[slot] = state;
+                    visible[queue][slot] = state;
+                    visible[1 - queue][slot] = {};
                     written[slot] = true;
                 }
                 else
                 {
-                    if (written[slot] && !covers(visible[slot], state))
+                    if (written[slot] && !covers(visible[queue][slot], state))
                     {
                         addBarrier(lastWrite[slot]);
-                        merge(visible[slot], state);
+                        merge(visible[queue][slot], state);
                     }
                     merge(readsSinceWrite[slot], state);
                 }
@@ -766,7 +772,7 @@ namespace Nox
         {
             const void* resource = slotResource[slot];
             if (resource && accessed[slot])
-                m_CarriedStates[resource] = CarriedState{ lastWrite[slot], readsSinceWrite[slot], visible[slot], written[slot] };
+                m_CarriedStates[resource] = CarriedState{ lastWrite[slot], readsSinceWrite[slot], { visible[0][slot], visible[1][slot] }, written[slot] };
         }
     }
 

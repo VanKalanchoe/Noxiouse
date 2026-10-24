@@ -1,5 +1,6 @@
 #pragma once
 #include <atomic>
+#include <memory>
 #include <mutex>
 #include <utility>
 #include <vector>
@@ -23,6 +24,7 @@ namespace NRI
 {
     class MemoryAllocatorVK;
     class ShaderCompiler;
+    struct ImageResource;
 
     class DeviceVK final : public Device
     {
@@ -64,10 +66,10 @@ namespace NRI
         std::span<const uint32_t> getSharedQueueFamilies() const { return { m_sharedQueueFamilies.data(), m_sharedQueueFamilyCount }; }
         bool hasDedicatedTransferQueue() const override { return m_transferQueueIndex != m_queueIndex; }
         bool hasAsyncComputeQueue() const override { return m_computeQueueIndex != ~0u; }
-        // An ImGui texture's descriptor set (TextureVK::getImTextureID) freed once no frame that may have drawn it is on the GPU:
-        // a texture can go while the frame that showed it (a thumbnail, a preview) is still in flight (VUID-vkFreeDescriptorSets-
-        // pDescriptorSets-00309). Any thread.
-        void releaseImGuiTexture(VkDescriptorSet set);
+        // An ImGui texture's descriptor set (TextureVK::getImTextureID) freed, and the image and view it points at destroyed, once
+        // no frame that may have drawn it is on the GPU: a texture can go while the frame that showed it (a thumbnail, a preview)
+        // is still in flight (VUID-vkFreeDescriptorSets-pDescriptorSets-00309, VUID-vkDestroyImageView-imageView-01026). Any thread.
+        void releaseImGuiTexture(VkDescriptorSet set, ImageResource&& image);
         vk::raii::SurfaceKHR& getSurface() { return m_surface; }
         vk::Format& getDepthFormat() { return m_depthFormat; }
         vk::SurfaceFormatKHR& getSurfaceFormat() { return m_surfaceFormat; }
@@ -187,8 +189,15 @@ namespace NRI
         // that released them is ImGuiReleaseFrames behind -- the frames in flight (Renderer2D.h MAX_FRAMES_IN_FLIGHT, 2) and the
         // releasing frame itself.
         static constexpr uint64_t ImGuiReleaseFrames = 3;
+        struct ImGuiRelease
+        {
+            VkDescriptorSet Set = VK_NULL_HANDLE;
+            std::unique_ptr<ImageResource> Image; // destroyed after the set is freed
+            uint64_t Frame = 0;
+        };
         std::mutex m_imGuiReleaseMutex;
-        std::vector<std::pair<VkDescriptorSet, uint64_t>> m_imGuiReleases;
+        std::vector<ImGuiRelease> m_imGuiReleases;
+        bool m_imGuiInitialized = false;
         uint64_t m_frameNumber = 0;
         vk::raii::Queue m_computeQueue = nullptr;
         std::array<uint32_t, 3> m_sharedQueueFamilies{};

@@ -491,10 +491,10 @@ namespace Nox
         std::vector<bool> m_ResourceRead;
         std::vector<uint32_t> m_LastWriterScratch;
         // Precise synchronization, per resource: the last write, every read since it, and what that write has already
-        // been made visible to.
+        // been made visible to on each queue (a barrier orders only its own queue: [0] graphics, [1] async compute).
         std::vector<NRI::ResourceState> m_LastWriteScratch;
         std::vector<NRI::ResourceState> m_ReadsSinceWriteScratch;
-        std::vector<NRI::ResourceState> m_VisibleScratch;
+        std::vector<NRI::ResourceState> m_VisibleScratch[2];
         std::vector<bool> m_AccessedScratch;
         std::vector<bool> m_WrittenScratch;
         std::vector<uint32_t> m_PhysicalSlotScratch;  // graph resource -> physical resource slot (aliased transients share one)
@@ -508,7 +508,7 @@ namespace Nox
         {
             NRI::ResourceState LastWrite;
             NRI::ResourceState ReadsSinceWrite;
-            NRI::ResourceState Visible;
+            NRI::ResourceState Visible[2];
             bool Written = false;
         };
         std::unordered_map<const void*, CarriedState> m_CarriedStates;
