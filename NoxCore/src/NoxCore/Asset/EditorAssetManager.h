@@ -47,6 +47,9 @@ namespace Nox
         void ImportAsset(const std::filesystem::path& sourcePath, const std::filesystem::path& destPath, AssetType targetType = AssetType::None, const MeshImportSettings& meshSettings = {});
         // Registers an asset file that already exists (relative to the asset directory) and returns its handle.
         AssetHandle RegisterExistingFile(const std::filesystem::path& relativePath, AssetType type);
+        // Registers a file a tool wrote in its final, cooked form (an .nsmesh, an .ntex: no source, it is its own cook), or returns
+        // the handle already registered at that path. Without writing the registry: the caller does once after a batch.
+        AssetHandle RegisterGeneratedFile(const std::filesystem::path& relativePath, AssetType type);
         // Renames an asset's file (same folder) with its companions (a texture's source and .ntex, the .hash files), keeping its
         // handle; its old path stays an alias (FormerPaths) for what names it by path. False when the name is invalid or taken.
         bool RenameAsset(AssetHandle handle, const std::string& newName);

@@ -48,6 +48,10 @@ namespace Nox
         // Any thread. Cooks a PNG / JPG / DDS / KTX2 source into the asset's .ntex (and its .hash); false for other
         // sources or when it fails.
         static bool CookTexture(const std::filesystem::path& assetDirectory, const AssetMetadata& metadata);
+        // Any thread. Texels made by a tool -- `cpuData` one RGBA8 / SRGBA8 level, its Width x Height -- cooked into an .ntex at
+        // `cookedPath` (absolute) with a mip chain: BC7, or BC1 with `fast` (several times smaller to encode, 4 bits a texel).
+        // Registered with that .ntex as its FilePath and no source, the file is its own cook.
+        static bool CookGeneratedTexture(TextureData& cpuData, const std::filesystem::path& cookedPath, bool fast);
 
         // AssetMetadata filepath is relative to project asset directory
         static Ref<Texture2D> ImportTexture2D(AssetHandle handle, const AssetMetadata& metadata);

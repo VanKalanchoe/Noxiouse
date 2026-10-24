@@ -890,6 +890,16 @@ namespace Nox
         return handle;
     }
 
+    AssetHandle EditorAssetManager::RegisterGeneratedFile(const std::filesystem::path& relativePath, AssetType type)
+    {
+        if (const AssetHandle existing = FindHandleByPath(relativePath, type))
+            return existing;
+        AssetMetadata metadata;
+        metadata.Type = type;
+        metadata.FilePath = relativePath;
+        return RegisterAsset(metadata);
+    }
+
     bool EditorAssetManager::CanRename(AssetHandle handle) const
     {
         const auto found = m_AssetRegistry.find(handle);

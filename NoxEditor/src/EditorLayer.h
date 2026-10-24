@@ -12,6 +12,7 @@
 #include "Panels/ProfilerPanel.h"
 #include "Panels/WorldPartitionPanel.h"
 #include "NoxCore/Scene/HLODBuilder.h"
+#include "StreamingTestWorld.h"
 #include "Panels/RenderGraphPanel.h"
 #include "Panels/NodeGraphEditorPanel.h"
 #include "Panels/MaterialEditorPanel.h"
@@ -319,6 +320,12 @@ namespace Nox
         WorldPartitionPanel m_WorldPartitionPanel;
         // Build HLODs, while it runs (stepped every frame; Play, another scene, undo cancel it).
         Scope<HLODBuilder> m_HLODBuild;
+        // Create > Streaming Test World (§5.13.4): its settings dialog, and the generation while it runs (stepped every frame; the
+        // generated scene opens once it is done).
+        StreamingTestWorldGenerator::Settings m_TestWorldSettings;
+        bool m_OpenTestWorldDialog = false;
+        Scope<StreamingTestWorldGenerator> m_TestWorldGeneration;
+        void UI_StreamingTestWorld();
         void StartHLODBuild();
         void CancelHLODBuild(const char* reason);
         // A world's cells were loading or unloading last frame: once done, the undo history starts again (loading is not a step).

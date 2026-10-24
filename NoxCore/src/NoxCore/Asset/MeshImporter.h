@@ -99,6 +99,9 @@ namespace Nox
         // With `generateTangents` the tangents come from the UVs (MikkTSpace, may split vertices along UV seams); data.Vertices
         // must hold the vertices `indices` refer to.
         static void BuildRuntimeGeometry(MeshData& data, std::vector<uint32_t> indices, bool generateTangents);
+        // Any thread. The clusters an import cooks (the cluster LOD DAG, §5.7), for geometry made by a tool and written cooked
+        // (MeshSerializer::SerializeStaticMesh) -- an asset without a source file (an empty SourceFilePath) is its own cook.
+        static void BuildCookedGeometry(MeshData& data, std::vector<uint32_t> indices, bool generateTangents);
         
     private:
         // Main thread: uploads every submesh now (synchronous loads).

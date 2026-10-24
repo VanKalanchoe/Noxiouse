@@ -164,6 +164,16 @@ namespace Nox
         cpuData.Format = srgb ? NRI::ImageFormat::BC7_UNorm_SRGB : NRI::ImageFormat::BC7_UNorm;
     }
 
+    // BC1 (half a byte per texel, no alpha) by rgbcx: generated content (CookGeneratedTexture) whose encode time matters more.
+    static void EncodeBC1(TextureData& cpuData)
+    {
+        static std::once_flag s_EncoderInit;
+        std::call_once(s_EncoderInit, [] { rgbcx::init(); });
+        const bool srgb = cpuData.Format == NRI::ImageFormat::SRGBA8;
+        EncodeBlocks(cpuData, 8, "Encode BC1", [](uint8_t* destination, const uint8_t* block) { rgbcx::encode_bc1(5, destination, block, false, false); });
+        cpuData.Format = srgb ? NRI::ImageFormat::BC1_UNorm_SRGB : NRI::ImageFormat::BC1_UNorm;
+    }
+
     // BC5 (normal maps: red and green, 1 byte per texel) and BC4 (grayscale: red, half a byte per texel) by rgbcx, each channel
     // with its own endpoints -- a normal map's X and Y no longer share BC7's partitions with an unused blue and alpha.
     static void EncodeBC4BC5(TextureData& cpuData, bool twoChannels)
@@ -361,6 +371,27 @@ namespace Nox
         // Last: a crash before this leaves no hash, so the texture is cooked again.
         Utility::saveHashToFile(cookedPath.string() + ".hash", TextureCookHash(sourcePath, metadata.TextureSpec));
         return true;
+    }
+
+    bool TextureImporter::CookGeneratedTexture(TextureData& cpuData, const std::filesystem::path& cookedPath, bool fast)
+    {
+        if (cpuData.Width == 0 || cpuData.Height == 0 || cpuData.Data.Size < static_cast<uint64_t>(cpuData.Width) * cpuData.Height * 4 ||
+            (cpuData.Format != NRI::ImageFormat::SRGBA8 && cpuData.Format != NRI::ImageFormat::RGBA8))
+            return false;
+        cpuData.MipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(cpuData.Width, cpuData.Height)))) + 1;
+        cpuData.MipOffsets = { 0 };
+        GenerateRGBA8MipChain(cpuData);
+        if (fast)
+            EncodeBC1(cpuData);
+        else
+            EncodeBC7(cpuData);
+        std::error_code error;
+        std::filesystem::create_directories(cookedPath.parent_path(), error);
+        const bool saved = SaveNTEX(cookedPath, cpuData);
+        cpuData.Data.Release();
+        if (!saved)
+            NOX_CORE_ERROR("TextureImporter::CookGeneratedTexture - could not write {}", cookedPath.string());
+        return saved;
     }
 
     bool TextureImporter::DecodeSTB(const std::filesystem::path& path, const TextureSpecification& spec, TextureData& cpuData)

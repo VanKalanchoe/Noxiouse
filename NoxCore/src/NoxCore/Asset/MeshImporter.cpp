@@ -181,9 +181,10 @@ namespace Nox
         const std::filesystem::path sourcePath = assetDirectory / metadata.SourceFilePath;
 
         // Same test as ImportMesh / ImportStaticMesh. A packaged game ships the cooked file without its source (Build > Package
-        // Game): with the source gone, the cooked file is taken as it is.
+        // Game): with the source gone, the cooked file is taken as it is -- as is one that never had a source (made by a tool,
+        // BuildCookedGeometry), like a texture whose file is its .ntex.
         std::error_code error;
-        const bool sourceMissing = !metadata.SourceFilePath.empty() && !std::filesystem::exists(sourcePath, error);
+        const bool sourceMissing = metadata.SourceFilePath.empty() || !std::filesystem::exists(sourcePath, error);
         XXH128_hash_t cookedHash{};
         if (!VFS::Exists(cookedPath) ||
             (!sourceMissing && (!Utility::loadHashFromFile(cookedPath.string() + ".hash", cookedHash) ||
@@ -2881,5 +2882,18 @@ namespace Nox
         if (generateTangents)
             GenerateMissingTangents(data.Vertices, indices);
         buildMeshlets(data, indices);
+    }
+
+    void MeshImporter::BuildCookedGeometry(MeshData& data, std::vector<uint32_t> indices, bool generateTangents)
+    {
+        data.Bounds.clear();
+        data.Draws.clear();
+        data.MeshletVertices.clear();
+        data.MeshletTriangles.clear();
+        if (data.Vertices.empty() || indices.empty())
+            return;
+        if (generateTangents)
+            GenerateMissingTangents(data.Vertices, indices);
+        buildClusterLod(data, indices);
     }
 }

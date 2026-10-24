@@ -302,6 +302,14 @@ namespace Nox
         // A scene being opened: a slice of its entities each frame (8 ms), swapped in once complete.
         if (m_SceneLoad && m_SceneLoad->Step(8.0))
             FinishSceneLoad();
+        // The streaming test world: a step a frame; done, its scene opens.
+        if (m_TestWorldGeneration && m_TestWorldGeneration->Step())
+        {
+            const AssetHandle scene = m_TestWorldGeneration->Failed() ? AssetHandle(0) : m_TestWorldGeneration->GetScene();
+            m_TestWorldGeneration.reset();
+            if (scene != 0)
+                OpenScene(scene);
+        }
         // Build HLODs: a step a frame; done, the scene is saved (its index names the new HLOD cells).
         if (m_HLODBuild && m_HLODBuild->Step())
         {
@@ -605,6 +613,11 @@ namespace Nox
                     }
                     ImGui::EndMenu();
                 }
+                ImGui::Separator();
+                if (ImGui::MenuItem("Streaming Test World...", nullptr, false, !m_TestWorldGeneration && m_SceneState == SceneState::Edit))
+                    m_OpenTestWorldDialog = true;
+                ImGui::SetItemTooltip("A world partition larger than RAM and VRAM (every cell its own terrain mesh and texture), to fly through and\n"
+                                      "see streaming keep up: written into the project, then opened.");
                 ImGui::EndMenu();
             }
 
@@ -3027,6 +3040,71 @@ namespace Nox
             m_MouseCaptureViewport = HoveredViewport();
 
         UI_ViewportOverlay();
+        UI_StreamingTestWorld();
+    }
+
+    void EditorLayer::UI_StreamingTestWorld()
+    {
+        if (m_OpenTestWorldDialog)
+        {
+            ImGui::OpenPopup("Streaming Test World");
+            m_OpenTestWorldDialog = false;
+        }
+        if (ImGui::BeginPopupModal("Streaming Test World", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+        {
+            StreamingTestWorldGenerator::Settings& settings = m_TestWorldSettings;
+            ImGui::TextWrapped("A world of N x N cells, each with its own terrain mesh and texture (nothing shared), so its data is larger\n"
+                               "than RAM and VRAM. It is written into the project as cooked assets and opened.");
+            ImGui::DragFloat("Size on Disk (GB)", &settings.TargetGigabytes, 0.25f, 0.25f, 200.0f, "%.2f");
+            ImGui::SetItemTooltip("N is chosen for it from the first tile's size. Larger than RAM plus VRAM shows that only what is near the\n"
+                                  "camera is in memory. Start small (2 GB) to try it.");
+            ImGui::DragFloat("Cell Size (m)", &settings.CellSizeMeters, 1.0f, 8.0f, 1024.0f, "%.0f");
+            ImGui::DragFloat("Loading Range (m)", &settings.LoadingRangeMeters, 1.0f, 16.0f, 8192.0f, "%.0f");
+            int quads = static_cast<int>(settings.TileQuads);
+            if (ImGui::DragInt("Tile Quads", &quads, 1.0f, 8, 512))
+                settings.TileQuads = static_cast<uint32_t>(quads);
+            ImGui::SetItemTooltip("Per side: 128 is 33k triangles a tile.");
+            int texture = 0; // 256 << index
+            while (texture < 4 && (256u << texture) < settings.TextureSize)
+                ++texture;
+            if (ImGui::Combo("Texture Size", &texture, "256\0" "512\0" "1024\0" "2048\0" "4096\0"))
+                settings.TextureSize = 256u << texture;
+            char folder[256] = {};
+            std::snprintf(folder, sizeof(folder), "%s", settings.Folder.c_str());
+            if (ImGui::InputText("Folder", folder, sizeof(folder)))
+                settings.Folder = folder;
+            char script[256] = {};
+            std::snprintf(script, sizeof(script), "%s", settings.CameraScript.c_str());
+            if (ImGui::InputText("Camera Script", script, sizeof(script)))
+                settings.CameraScript = script;
+            ImGui::SetItemTooltip("A script class put on the camera, e.g. Facerun.StreamingWorldTest (the fly-through test) or\n"
+                                  "Facerun.FlyCamera; empty: none.");
+            ImGui::Spacing();
+            if (ImGui::Button("Generate", ImVec2(120.0f, 0.0f)) && !settings.Folder.empty())
+            {
+                m_TestWorldGeneration = CreateScope<StreamingTestWorldGenerator>(settings);
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f)))
+                ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+        }
+
+        if (m_TestWorldGeneration)
+        {
+            ImGui::SetNextWindowSize(ImVec2(420.0f, 0.0f), ImGuiCond_Always);
+            if (ImGui::Begin("Generating the Streaming Test World", nullptr, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoDocking))
+            {
+                ImGui::ProgressBar(m_TestWorldGeneration->GetProgress(), ImVec2(-1.0f, 0.0f), m_TestWorldGeneration->GetStage().c_str());
+                if (ImGui::Button("Cancel"))
+                {
+                    m_TestWorldGeneration.reset(); // (what was written stays on disk, unregistered)
+                    NOX_CORE_WARN("Streaming test world: cancelled");
+                }
+            }
+            ImGui::End();
+        }
     }
 
     void EditorLayer::UI_ActiveViewport()
