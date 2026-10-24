@@ -271,6 +271,8 @@ NoxCore/vendors/*
 !NoxCore/vendors/OffsetAllocator/
 !NoxCore/vendors/bc7enc_rdo/
 !NoxCore/vendors/JoltPhysics/
+!NoxCore/vendors/xatlas/
+!NoxCore/vendors/bcdec/
 *.ntex
 *.nmesh
 *.hash

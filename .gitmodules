@@ -32,3 +32,9 @@
 [submodule "NoxCore/vendors/JoltPhysics"]
 	path = NoxCore/vendors/JoltPhysics
 	url = https://github.com/jrouwe/JoltPhysics.git
+[submodule "NoxCore/vendors/xatlas"]
+	path = NoxCore/vendors/xatlas
+	url = https://github.com/jpcy/xatlas.git
+[submodule "NoxCore/vendors/bcdec"]
+	path = NoxCore/vendors/bcdec
+	url = https://github.com/iOrange/bcdec.git

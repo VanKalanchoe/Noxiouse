@@ -1254,6 +1254,38 @@ volume or a script.
   (by hand): open it, load / unload cells in the panel, move a pillar into an unloaded cell and save (it joins that cell's file, which
   then loads), Play with unsaved changes, convert a scene and save.
 
+#### 5.13.2 6c-3: HLOD (designed 2026-10-24)
+
+Unreal 5's World Partition HLOD (HLOD layer "Approximated Mesh": a merged, simplified shell with baked materials): what is far
+away stays on screen as one cheap mesh per cell after the cell itself has streamed out.
+
+- **One HLOD per world cell** that has static meshes, built from that cell's entities (its file, read into a scene of its own --
+  the editor's scene is not touched, so every cell can be built, loaded or not). Model and prefab instances in the cell are
+  spawned there first; skinned meshes are left out (Unreal's HLODs are static too).
+- **Geometry:** the cell's static meshes merged in the cell's space (parts smaller than the HLOD's error are left out: they would
+  be under a pixel where the HLOD shows), welded by position, simplified with meshoptimizer to the HLOD error (`meshopt_simplify`,
+  then `meshopt_simplifySloppy` -- which also joins separate parts -- when over the triangle budget), hard edges split by normal
+  angle, a new UV atlas laid out by xatlas, tangents computed and written with the mesh (the baked normal map is in exactly that
+  frame).
+- **Materials baked (Unreal's ProxyLOD bakes the same way, on the CPU):** every texel of the atlas is a point and normal on the
+  HLOD's surface; a ray along the normal (both ways, within the simplification error) finds the source surface it stands for, and
+  the source material is evaluated there -- base color (alpha-masked parts are passed through), the normal map turned into the
+  HLOD's tangent frame, roughness / metallic (specular-glossiness converted), emissive. Textures are read from the cooked .ntex
+  (BC1-BC7 decoded with bcdec, the mip nearest the bake's texel size). Empty texels are filled from their neighbours (no seams in
+  the mips). Texture size from the surface area and a texel density, power of two, 128-2048.
+- **Output:** a glTF (positions in meters, normals, tangents, UVs; base color, normal, metallic-roughness and emissive PNGs) in
+  `<Scene>_Cells/HLOD/`, imported like any model (cooked to .nsmesh / .nmat / BC7 .ntex), so packaging, texture streaming and the
+  GPU scene treat it like any mesh. Its entity (`HLODComponent`: the source cell) is kept in an HLOD cell file.
+- **HLOD grid:** HLOD entities are streamed in a second grid (`WorldCellCoord::Grid` 1: its own cell size and loading range,
+  default 2x the cell size and 4x the loading range) like the world's cells, by the same code.
+- **Showing and hiding:** an HLOD is drawn while its source cell is not loaded and drawn -- hidden once the cell is loaded and none
+  of its entities waits to be registered with the GPU scene (no frame without either), shown again when the cell starts to unload.
+  Hidden HLODs are left out of the GPU scene and the TLAS; shown ones are traced too, so far shadows and GI keep the city.
+- **Editor:** World Partition panel > Build HLODs (all cells, on workers, with progress; the import on the main thread), Show HLODs
+  (the HLOD grid streams around the editor camera while editing, so the unloaded world is visible as its HLODs). HLOD entities are
+  generated: never saved into the scene file or a world cell, never an undo step.
+- **Not in the first HLOD:** HLOD levels above HLOD0 (HLODs of HLODs), instanced HLODs, baking ambient occlusion.
+
 ### 5.14 Ray Tracing at Scale
 
 - **TLAS from GPU scene** instances (not render queues), with RT-specific culling: distance, screen
