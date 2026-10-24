@@ -5339,7 +5339,12 @@ namespace Nox
             // The GPU scene stopped tracing this mesh when it was unloaded. (An evicted BLAS has no structure left, its id is freed too.)
             if (mesh->blasId != UINT32_MAX && mesh->blasId < m_meshBLASes.size())
             {
-                m_meshBLASes[mesh->blasId] = MeshBLAS{};
+                // The structure before the buffer it lives in (VUID-vkDestroyBuffer-buffer-00922); `= MeshBLAS{}` would move-assign the
+                // members in declaration order and free the buffer first.
+                MeshBLAS& blas = m_meshBLASes[mesh->blasId];
+                blas.as.reset();
+                blas.storageBuffer.reset();
+                blas.serial = 0;
                 m_freeBLASIds.push_back(mesh->blasId);
             }
         }

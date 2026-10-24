@@ -82,6 +82,8 @@ namespace Nox
         std::unique_ptr<NRI::Buffer> storageBuffer;
         std::unique_ptr<NRI::AccelerationStructure> as;
         uint64_t serial = 0; // which mesh's BLAS this is: ids are reused, a compaction must find the BLAS it measured
+        // Destroyed backwards, so `as` goes before its buffer. Never overwrite a live one by assignment (that runs the members forwards
+        // and frees the buffer under the structure): move it out first, or reset `as` then `storageBuffer`.
     };
 
     // A texture on its way to the GPU (§5.11.4): created with staging on the main thread, its texels written into the
