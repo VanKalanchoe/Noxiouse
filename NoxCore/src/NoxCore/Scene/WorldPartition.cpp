@@ -307,29 +307,24 @@ namespace Nox
 
     void Scene::DestroyWorldCellEntities(const WorldCellCoord& cell)
     {
-        // The entities the cell's load made (their LevelComponent), and the roots that came from it or were saved to it (an undo step
-        // restored after the load made them anew).
-        const UUID id = WorldGrid::CellID(cell);
-        std::vector<UUID> entities;
-        for (auto handle : m_Registry.view<LevelComponent, IDComponent>())
-        {
-            if (m_Registry.get<LevelComponent>(handle).Level == id)
-                entities.push_back(m_Registry.get<IDComponent>(handle).ID);
-        }
+        // The roots that belong to the cell -- loaded from it, or last saved to it -- with their trees. Not by LevelComponent: that
+        // is the cell an entity was loaded from, and an entity moved into another cell and saved belongs to that one now (unloading
+        // its old cell took it from the editor although its new cell's file holds it).
+        std::vector<UUID> roots;
         for (auto origin = m_World.Origins.begin(); origin != m_World.Origins.end();)
         {
             if (origin->second == cell)
             {
-                entities.push_back(origin->first);
+                roots.push_back(origin->first);
                 origin = m_World.Origins.erase(origin);
             }
             else
                 ++origin;
         }
-        for (UUID entityID : entities)
+        for (UUID rootID : roots)
         {
-            if (Entity entity = GetEntityByUUID(entityID))
-                DestroyEntity(entity);
+            if (Entity root = GetEntityByUUID(rootID))
+                DestroyEntity(root);
         }
     }
 
