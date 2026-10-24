@@ -33,7 +33,7 @@
 
 namespace Nox
 {
-    static AssetHandle FindTextureAsset(const std::string& texturePath)
+    AssetHandle FindTextureAsset(const std::string& texturePath)
     {
         if (texturePath.empty())
             return 0;

@@ -1,4 +1,5 @@
 #pragma once
+#include "WorldPartition.h"
 #include <entt/entt.hpp>
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/quaternion.hpp>
@@ -831,6 +832,14 @@ namespace Nox
         bool Enabled = true;
     };
 
+    // An HLOD (§5.13.2): the merged, simplified, baked stand-in of one world cell, drawn while that cell is not loaded and drawn. Made by
+    // Build HLODs and kept in the HLOD grid's cells; never saved into the scene or a world cell, never edited.
+    struct HLODComponent
+    {
+        WorldCellCoord Source;  // the world cell it stands for
+        bool Hidden = false;    // runtime: its cell is in (not drawn, not traced)
+    };
+
     template<typename... Component>
     struct ComponentGroup
     {
@@ -844,5 +853,5 @@ namespace Nox
             /*NativeScriptComponent,*/ RigidBody2DComponent, BoxCollider2DComponent,
             CircleCollider2DComponent, RigidBody3DComponent, BoxCollider3DComponent,
             SphereCollider3DComponent, CapsuleCollider3DComponent, CharacterController3DComponent, TextComponent, BoneSocketComponent, LevelStreamingVolumeComponent,
-            WorldPartitionComponent, WorldStreamingSourceComponent>;
+            WorldPartitionComponent, WorldStreamingSourceComponent, HLODComponent>;
 }

@@ -99,6 +99,10 @@ namespace Nox
 
     // One submesh's geometry on its way to the GPU: ranges and staging on the main thread, the staging written from
     // any thread (Renderer::WriteMeshUpload), copies recorded and the mesh published on the main thread.
+    // The texture asset a material's texture path names (MaterialData stores source paths): the cooked .ntex beside it, else the
+    // source registered as itself. Main thread (cached).
+    AssetHandle FindTextureAsset(const std::string& texturePath);
+
     struct MeshUpload
     {
         MeshHandle Handle;

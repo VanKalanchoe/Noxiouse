@@ -27,7 +27,8 @@ namespace Nox
     UUID WorldGrid::CellID(const WorldCellCoord& cell)
     {
         // splitmix64 over the packed coordinates and a tag: stable across sessions, spread over the 64 bits like random entity IDs.
-        uint64_t value = 0x9E3779B97F4A7C15ull ^ (static_cast<uint64_t>(static_cast<uint32_t>(cell.Level)) << 56) ^
+        uint64_t value = 0x9E3779B97F4A7C15ull ^ (static_cast<uint64_t>(static_cast<uint32_t>(cell.Grid)) << 61) ^
+                         (static_cast<uint64_t>(static_cast<uint32_t>(cell.Level)) << 56) ^
                          (static_cast<uint64_t>(static_cast<uint32_t>(cell.X)) << 28) ^ static_cast<uint64_t>(static_cast<uint32_t>(cell.Z)) ^
                          0x4E4F5843454C4CULL; // "NOXCELL"
         value += 0x9E3779B97F4A7C15ull;
@@ -39,13 +40,15 @@ namespace Nox
 
     std::string WorldGrid::CellName(const WorldCellCoord& cell)
     {
-        return "L" + std::to_string(cell.Level) + "_X" + std::to_string(cell.X) + "_Z" + std::to_string(cell.Z);
+        return std::string(cell.Grid == HLODGridIndex ? "HLOD_" : "") + "L" + std::to_string(cell.Level) + "_X" + std::to_string(cell.X) + "_Z" +
+               std::to_string(cell.Z);
     }
 
-    WorldCellCoord WorldGrid::CellFor(const glm::vec3& boundsMin, const glm::vec3& boundsMax, float cellSizeWorld)
+    WorldCellCoord WorldGrid::CellFor(const glm::vec3& boundsMin, const glm::vec3& boundsMax, float cellSizeWorld, int32_t grid)
     {
         const float extent = std::max(boundsMax.x - boundsMin.x, boundsMax.z - boundsMin.z);
         WorldCellCoord cell;
+        cell.Grid = grid;
         float size = cellSizeWorld;
         while (extent > size && cell.Level < MaxLevel)
         {
@@ -123,7 +126,7 @@ namespace Nox
 
     bool Scene::IsSpatiallyLoaded(Entity root)
     {
-        if (!root || !IsRoot(root))
+        if (!root || !IsRoot(root) || root.HasComponent<HLODComponent>()) // (HLODs are in their own grid's cells)
             return false;
         if (root.HasComponent<WorldPartitionComponent>())
         {
@@ -296,12 +299,12 @@ namespace Nox
         return LevelState::Unloaded;
     }
 
-    std::vector<WorldCellCoord> Scene::GetLoadedWorldCells(bool includeLoading) const
+    std::vector<WorldCellCoord> Scene::GetLoadedWorldCells(bool includeLoading, int32_t grid) const
     {
         std::vector<WorldCellCoord> cells;
         for (const StreamedLevel& streamed : m_Levels)
         {
-            if (streamed.IsCell && !streamed.UnloadQueued && !streamed.Failed && (streamed.Loaded || includeLoading))
+            if (streamed.IsCell && streamed.Cell.Grid == grid && !streamed.UnloadQueued && !streamed.Failed && (streamed.Loaded || includeLoading))
                 cells.push_back(streamed.Cell);
         }
         return cells;
@@ -309,9 +312,10 @@ namespace Nox
 
     bool Scene::IsWorldStreamingBusy() const
     {
+        // The world's cells only: HLODs stream on their own around the editor camera and are never edited.
         for (const StreamedLevel& streamed : m_Levels)
         {
-            if (streamed.IsCell && (streamed.Loader || streamed.UnloadQueued))
+            if (streamed.IsCell && streamed.Cell.Grid == WorldGrid::WorldGridIndex && (streamed.Loader || streamed.UnloadQueued))
                 return true;
         }
         return false;
@@ -390,12 +394,12 @@ namespace Nox
         }
     }
 
-    std::vector<WorldCellCoord> Scene::WorldCellsAround(const glm::vec3& point, float range) const
+    std::vector<WorldCellCoord> Scene::WorldCellsAround(const glm::vec3& point, float range, int32_t grid) const
     {
         std::vector<WorldCellCoord> cells;
         for (const auto& [cell, info] : m_World.Cells)
         {
-            if (WorldGrid::HorizontalDistance(point, info.BoundsMin, info.BoundsMax) <= range)
+            if (cell.Grid == grid && WorldGrid::HorizontalDistance(point, info.BoundsMin, info.BoundsMax) <= range)
                 cells.push_back(cell);
         }
         return cells;
@@ -441,9 +445,13 @@ namespace Nox
         CollectStreamingSources(source, sources, composedSources);
         if (sources.empty())
             return; // no source this frame (no primary camera): the cells stay as they are
+        StreamWorldCells(sources, -1);
+    }
 
-        const float range = WorldUnits::FromMeters(m_World.Settings.LoadingRange);
-        const float unloadRange = range * (1.0f + WorldGrid::UnloadHysteresis);
+    void Scene::StreamWorldCells(const std::vector<glm::vec3>& sources, int32_t onlyGrid)
+    {
+        // Each grid by its own range: the world's cells by the loading range, the HLODs by theirs.
+        const float ranges[2] = { WorldUnits::FromMeters(m_World.Settings.LoadingRange), WorldUnits::FromMeters(m_World.Settings.HLODLoadingRange) };
         std::map<WorldCellCoord, StreamedLevel*> present;
         for (StreamedLevel& streamed : m_Levels)
         {
@@ -455,6 +463,10 @@ namespace Nox
         std::vector<std::pair<float, WorldCellCoord>> wanted;
         for (const auto& [cell, info] : m_World.Cells)
         {
+            if (onlyGrid >= 0 && cell.Grid != onlyGrid)
+                continue;
+            const float range = ranges[cell.Grid == WorldGrid::HLODGridIndex ? 1 : 0];
+            const float unloadRange = range * (1.0f + WorldGrid::UnloadHysteresis);
             float distance = FLT_MAX;
             for (const glm::vec3& point : sources)
                 distance = std::min(distance, WorldGrid::HorizontalDistance(point, info.BoundsMin, info.BoundsMax));
@@ -473,6 +485,63 @@ namespace Nox
             QueueWorldCellLoad(cell);
     }
 
+    void Scene::UpdateEditorHLODs(const glm::vec3& camera)
+    {
+        // While editing, the HLOD grid streams around the editor camera (the world's cells are loaded by hand): what is not loaded
+        // shows as its HLODs. Off, they go.
+        if (!m_World.Settings.Enabled)
+            return;
+        if (m_ShowHLODs)
+        {
+            const std::vector<glm::vec3> sources{ camera };
+            StreamWorldCells(sources, WorldGrid::HLODGridIndex);
+        }
+        else
+            UnloadWorldCells(GetLoadedWorldCells(true, WorldGrid::HLODGridIndex));
+    }
+
+    void Scene::UpdateHLODVisibility()
+    {
+        // An HLOD is drawn until its cell is loaded and drawn: loaded, its model and prefab instances spawned and none of its entities
+        // waiting to be registered with the GPU scene -- so no frame shows neither. Hidden HLODs are not registered (nor traced).
+        auto hlods = m_Registry.view<HLODComponent>();
+        if (hlods.begin() == hlods.end())
+            return;
+        std::set<WorldCellCoord> drawn;
+        for (const WorldCellCoord& cell : GetLoadedWorldCells(false, WorldGrid::WorldGridIndex))
+            drawn.insert(cell);
+        if (!drawn.empty())
+        {
+            std::unordered_set<uint64_t> notReady; // cell IDs
+            for (entt::entity pending : m_PendingMeshEntities)
+            {
+                if (const LevelComponent* level = m_Registry.valid(pending) ? m_Registry.try_get<LevelComponent>(pending) : nullptr)
+                    notReady.insert(level->Level);
+            }
+            for (auto handle : m_Registry.view<ModelInstanceComponent, LevelComponent>())
+            {
+                if (!m_Registry.get<ModelInstanceComponent>(handle).Spawned)
+                    notReady.insert(m_Registry.get<LevelComponent>(handle).Level);
+            }
+            for (auto it = drawn.begin(); it != drawn.end();)
+            {
+                if (notReady.contains(WorldGrid::CellID(*it)))
+                    it = drawn.erase(it);
+                else
+                    ++it;
+            }
+        }
+        for (auto handle : hlods)
+        {
+            HLODComponent& hlod = hlods.get<HLODComponent>(handle);
+            const bool hidden = drawn.contains(hlod.Source);
+            if (hidden == hlod.Hidden)
+                continue;
+            hlod.Hidden = hidden;
+            m_PendingMeshEntities.push_back(handle); // registered again, or not at all
+        }
+    }
+
     void Scene::BeginWorldStreaming(const glm::vec3* source)
     {
         m_WorldStreaming = false;
@@ -480,6 +549,19 @@ namespace Nox
             return;
         m_WorldStreaming = true;
         NOX_PROFILE_SCOPE("World Streaming Start");
+
+        // 0. The HLODs the editor streamed are in the copy: the session streams its own.
+        {
+            std::vector<UUID> hlods;
+            for (auto handle : m_Registry.view<HLODComponent, IDComponent>())
+                hlods.push_back(m_Registry.get<IDComponent>(handle).ID);
+            for (UUID id : hlods)
+            {
+                m_World.Origins.erase(id);
+                if (Entity entity = GetEntityByUUID(id))
+                    DestroyEntity(entity);
+            }
+        }
 
         // 1. A copy of an edited world: the cells' entities in it become in-memory cells (unsaved changes included), streamed like
         //    the files. A cell the editor had loaded is its entities as they are now (none: nothing); entities moved into a cell it had
@@ -604,7 +686,7 @@ namespace Nox
         std::filesystem::create_directories(directory, error);
 
         const auto groups = CollectWorldCellRoots();
-        const std::vector<WorldCellCoord> loadedList = GetLoadedWorldCells(false);
+        const std::vector<WorldCellCoord> loadedList = GetLoadedWorldCells(false, WorldGrid::WorldGridIndex); // (the HLOD grid is built, not saved)
         const std::set<WorldCellCoord> loaded(loadedList.begin(), loadedList.end());
         static const std::vector<Entity> none;
         bool ok = true;
@@ -703,7 +785,8 @@ namespace Nox
         // The world as the editor has it (settings, index, which cells are loaded, where roots came from): none of it is an undo step
         // (undoing past a conversion does not turn the world back into a scene whose entities are in cell files).
         m_World = from.m_World;
-        for (const WorldCellCoord& cell : from.GetLoadedWorldCells(false))
+        m_ShowHLODs = from.m_ShowHLODs;
+        for (const WorldCellCoord& cell : from.GetLoadedWorldCells(false, WorldGrid::WorldGridIndex))
         {
             StreamedLevel& streamed = m_Levels.emplace_back();
             streamed.Level = WorldGrid::CellID(cell);

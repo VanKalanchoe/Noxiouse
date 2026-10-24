@@ -141,10 +141,13 @@ namespace Nox
         void LoadWorldCells(const std::vector<WorldCellCoord>& cells);
         void UnloadWorldCells(const std::vector<WorldCellCoord>& cells);
         LevelState GetWorldCellState(const WorldCellCoord& cell) const;
-        std::vector<WorldCellCoord> GetLoadedWorldCells(bool includeLoading) const;
+        std::vector<WorldCellCoord> GetLoadedWorldCells(bool includeLoading, int32_t grid = WorldGrid::WorldGridIndex) const;
         bool IsWorldStreamingBusy() const; // a cell is loading or about to unload
         // The indexed cells whose content is within `range` (world units) of a point, horizontally.
-        std::vector<WorldCellCoord> WorldCellsAround(const glm::vec3& point, float range) const;
+        std::vector<WorldCellCoord> WorldCellsAround(const glm::vec3& point, float range, int32_t grid = WorldGrid::WorldGridIndex) const;
+        // HLODs (§5.13.2) while editing: the HLOD grid streams around the editor camera when shown (World Partition panel).
+        void SetShowHLODs(bool show) { m_ShowHLODs = show; }
+        bool GetShowHLODs() const { return m_ShowHLODs; }
         // Whether a loaded cell's entities differ from its file (unsaved changes).
         bool IsWorldCellModified(const WorldCellCoord& cell);
         // Saving (SceneSerializer::Serialize): writes the cell files of the scene saved as `scenePath` and the index; the entities written
@@ -201,6 +204,11 @@ namespace Nox
         // `composedSources`: the sources' places from their transforms up the parents (before the first update: no world transforms).
         void UpdateWorldStreaming(const glm::vec3* source, bool composedSources = false);
         void CollectStreamingSources(const glm::vec3* source, std::vector<glm::vec3>& outSources, bool composed);
+        // The cells of every grid (onlyGrid -1) or of one near the sources wanted, the ones all of them have left unloaded.
+        void StreamWorldCells(const std::vector<glm::vec3>& sources, int32_t onlyGrid);
+        void UpdateEditorHLODs(const glm::vec3& camera);
+        // HLODs whose cell is loaded and drawn are hidden (left out of the GPU scene), the others shown (SyncGpuScene).
+        void UpdateHLODVisibility();
         glm::vec3 ComposedWorldPosition(Entity entity);
         void QueueWorldCellLoad(const WorldCellCoord& cell);
         void DestroyWorldCellEntities(const WorldCellCoord& cell);
@@ -275,6 +283,7 @@ namespace Nox
         std::vector<StreamedLevel> m_Levels;
         WorldPartition m_World;
         bool m_WorldStreaming = false; // Play / Simulate of a world: cells follow the streaming sources
+        bool m_ShowHLODs = true;       // editing: the HLOD grid streams around the editor camera
         std::vector<glm::vec3> m_StreamingSources;
 
         // Frame graph

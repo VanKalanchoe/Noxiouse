@@ -264,6 +264,10 @@ namespace Nox
         {
             if (IsSpawnedNode(scene, registry, handle))
                 continue;
+            // HLODs stream in and out around the editor camera and are never saved (not in the scene text): no step, and no
+            // whole-scene comparison each time one comes in.
+            if (registry.all_of<HLODComponent>(handle))
+                continue;
 
             const UUID id = view.get<IDComponent>(handle).ID;
             const std::string& tag = view.get<TagComponent>(handle).Tag;

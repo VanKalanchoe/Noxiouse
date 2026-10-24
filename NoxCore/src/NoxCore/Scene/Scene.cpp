@@ -998,9 +998,13 @@ namespace Nox
 
     void Scene::OnUpdateEditor(Timestep ts, EditorCamera& camera)
     {
-        // A world's cells the editor loads or unloads (by hand: no streaming source while editing).
-        if (m_World.Settings.Enabled && !m_Levels.empty())
-            UpdateLevelStreaming(nullptr, static_cast<float>(ts));
+        // A world's cells the editor loads or unloads (by hand: no streaming source while editing), and its HLODs around the camera.
+        if (m_World.Settings.Enabled)
+        {
+            UpdateEditorHLODs(camera.GetPosition());
+            if (!m_Levels.empty())
+                UpdateLevelStreaming(nullptr, static_cast<float>(ts));
+        }
         RunUpdateSystems(ts, false, true);
         SyncGpuScene();
 
@@ -1113,6 +1117,9 @@ namespace Nox
             }
         }
 
+        // 2b. HLODs shown or hidden by their cells (§5.13.2).
+        UpdateHLODVisibility();
+
         // 3. Added, changed and removed mesh entities. An entity whose assets are not loaded yet stays pending (the
         // sync point requests them).
         if (!m_PendingMeshEntities.empty())
@@ -1142,6 +1149,8 @@ namespace Nox
                 const MeshComponent* mesh = m_Registry.try_get<MeshComponent>(entity);
                 if (!mesh)
                     continue;
+                if (const HLODComponent* hlod = m_Registry.try_get<HLODComponent>(entity); hlod && hlod->Hidden)
+                    continue; // its cell is in
                 const WorldTransformComponent* world = m_Registry.try_get<WorldTransformComponent>(entity);
                 if (!world)
                 {
@@ -2566,6 +2575,11 @@ namespace Nox
 
     template <>
     void Scene::OnComponentAdded<WorldStreamingSourceComponent>(Entity entity, WorldStreamingSourceComponent& component)
+    {
+    }
+
+    template <>
+    void Scene::OnComponentAdded<HLODComponent>(Entity entity, HLODComponent& component)
     {
     }
 }

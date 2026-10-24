@@ -649,6 +649,14 @@ namespace Nox
             out << YAML::EndMap;
         }
 
+        if (entity.HasComponent<HLODComponent>())
+        {
+            const WorldCellCoord& source = entity.GetComponent<HLODComponent>().Source;
+            out << YAML::Key << "HLODComponent" << YAML::BeginMap;
+            out << YAML::Key << "Source" << YAML::Value << YAML::Flow << YAML::BeginSeq << source.Level << source.X << source.Z << YAML::EndSeq;
+            out << YAML::EndMap;
+        }
+
         if (entity.HasComponent<WorldStreamingSourceComponent>())
         {
             out << YAML::Key << "WorldStreamingSourceComponent" << YAML::BeginMap;
@@ -1064,6 +1072,8 @@ namespace Nox
                 return;
             if (exclude && exclude->contains(entity.GetUUID()))
                 return; // in a world cell's file
+            if (entity.HasComponent<HLODComponent>())
+                return; // generated (Build HLODs), kept in the HLOD grid's cells
 
             if (entity.HasComponent<ScriptComponent>())
             {
@@ -1094,14 +1104,21 @@ namespace Nox
         out << YAML::Key << "WorldPartition" << YAML::Value << YAML::BeginMap;
         out << YAML::Key << "CellSize" << YAML::Value << world.Settings.CellSize;
         out << YAML::Key << "LoadingRange" << YAML::Value << world.Settings.LoadingRange;
+        out << YAML::Key << "HLODCellSize" << YAML::Value << world.Settings.HLODCellSize;
+        out << YAML::Key << "HLODLoadingRange" << YAML::Value << world.Settings.HLODLoadingRange;
+        out << YAML::Key << "HLODError" << YAML::Value << world.Settings.HLODError;
+        out << YAML::Key << "HLODMaxTriangles" << YAML::Value << world.Settings.HLODMaxTriangles;
+        out << YAML::Key << "HLODTexelsPerMeter" << YAML::Value << world.Settings.HLODTexelsPerMeter;
         out << YAML::Key << "CellDirectory" << YAML::Value << world.CellDirectory.generic_string();
-        // One line a cell: level, x, z, entities, bounds min, bounds max (world units).
+        // One line a cell: level, x, z, entities, bounds min, bounds max (world units), and the grid when not the world's (HLODs: 1).
         out << YAML::Key << "Cells" << YAML::Value << YAML::BeginSeq;
         for (const auto& [cell, info] : world.Cells)
         {
             out << YAML::Flow << YAML::BeginSeq << cell.Level << cell.X << cell.Z << info.Entities
-                << info.BoundsMin.x << info.BoundsMin.y << info.BoundsMin.z << info.BoundsMax.x << info.BoundsMax.y << info.BoundsMax.z
-                << YAML::EndSeq;
+                << info.BoundsMin.x << info.BoundsMin.y << info.BoundsMin.z << info.BoundsMax.x << info.BoundsMax.y << info.BoundsMax.z;
+            if (cell.Grid != WorldGrid::WorldGridIndex)
+                out << cell.Grid;
+            out << YAML::EndSeq;
         }
         out << YAML::EndSeq;
         out << YAML::EndMap;
@@ -1118,6 +1135,16 @@ namespace Nox
             world.Settings.CellSize = node["CellSize"].as<float>();
         if (node["LoadingRange"])
             world.Settings.LoadingRange = node["LoadingRange"].as<float>();
+        if (node["HLODCellSize"])
+            world.Settings.HLODCellSize = node["HLODCellSize"].as<float>();
+        if (node["HLODLoadingRange"])
+            world.Settings.HLODLoadingRange = node["HLODLoadingRange"].as<float>();
+        if (node["HLODError"])
+            world.Settings.HLODError = node["HLODError"].as<float>();
+        if (node["HLODMaxTriangles"])
+            world.Settings.HLODMaxTriangles = node["HLODMaxTriangles"].as<uint32_t>();
+        if (node["HLODTexelsPerMeter"])
+            world.Settings.HLODTexelsPerMeter = node["HLODTexelsPerMeter"].as<float>();
         if (node["CellDirectory"])
             world.CellDirectory = node["CellDirectory"].as<std::string>();
         world.Cells.clear();
@@ -1127,7 +1154,8 @@ namespace Nox
             {
                 if (!entry.IsSequence() || entry.size() < 10)
                     continue;
-                const WorldCellCoord cell{ entry[0].as<int32_t>(), entry[1].as<int32_t>(), entry[2].as<int32_t>() };
+                const WorldCellCoord cell{ entry[0].as<int32_t>(), entry[1].as<int32_t>(), entry[2].as<int32_t>(),
+                                           entry.size() > 10 ? entry[10].as<int32_t>() : WorldGrid::WorldGridIndex };
                 WorldCellInfo& info = world.Cells[cell];
                 info.Entities = entry[3].as<uint32_t>();
                 info.BoundsMin = { entry[4].as<float>(), entry[5].as<float>(), entry[6].as<float>() };
@@ -1803,6 +1831,13 @@ namespace Nox
             component.Mode = mode == "Auto" ? WorldPartitionComponent::LoadingMode::Auto
                            : mode == "Spatial" ? WorldPartitionComponent::LoadingMode::Spatial
                            : WorldPartitionComponent::LoadingMode::AlwaysLoaded;
+        }
+
+        if (auto hlod = entity["HLODComponent"])
+        {
+            auto& component = deserializedEntity.AddComponent<HLODComponent>();
+            if (const YAML::Node source = hlod["Source"]; source && source.IsSequence() && source.size() >= 3)
+                component.Source = WorldCellCoord{ source[0].as<int32_t>(), source[1].as<int32_t>(), source[2].as<int32_t>() };
         }
 
         if (auto streamingSource = entity["WorldStreamingSourceComponent"])
