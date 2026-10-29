@@ -1,5 +1,7 @@
 #pragma once
+#include <filesystem>
 #include <string>
+#include <vector>
 #include "GeometryArena.h"
 #include <glm/glm.hpp>
 #include <glm/detail/type_quat.hpp>
@@ -183,6 +185,43 @@ namespace Nox
         std::string MeshName;    // import time only: that mesh's name
     };
     
+    // A streaming page of a mesh's cluster DAG (§5.7.2, Nanite's pages): whole groups of clusters with their own vertices, the
+    // unit geometry is loaded and evicted in. A page's clusters, vertex block and cluster vertex/triangle lists are contiguous
+    // ranges of the MeshData arrays, in page order; its clusters index its own vertex block (MeshletDraw::globalVertexOffset is
+    // the block's first vertex). Saved as is in the cooked file (MeshSerializer).
+    struct MeshPage
+    {
+        static constexpr uint32_t Root = 1u << 0; // always resident: holds groups nothing coarser replaces
+
+        uint32_t FirstCluster = 0;
+        uint32_t ClusterCount = 0;
+        uint32_t FirstVertex = 0;
+        uint32_t VertexCount = 0;
+        uint32_t FirstMeshletVertex = 0;
+        uint32_t MeshletVertexCount = 0;
+        uint32_t FirstMeshletTriangle = 0; // bytes
+        uint32_t MeshletTriangleCount = 0;
+        // Pages that must be resident while this one is: those holding the coarser clusters its groups were simplified into.
+        uint32_t FirstDependency = 0;
+        uint32_t DependencyCount = 0;
+        // Conservative LOD bounds of its groups: a sphere around each group's simplified bounds and the largest error. The page
+        // is wanted wherever that error projects above the LOD threshold (it can only over-ask).
+        glm::vec3 LodCenter{ 0.0f };
+        float LodRadius = 0.0f;
+        float LodError = 0.0f;
+        uint32_t Flags = 0;
+        // Where its data starts in the cooked file: the vertex block, the cluster vertex lists and the triangles, each padded
+        // to 16 bytes (PayloadBytes). Absolute once read.
+        uint64_t PayloadOffset = 0;
+
+        bool IsRoot() const { return (Flags & Root) != 0; }
+        static uint64_t Align16(uint64_t bytes) { return (bytes + 15) / 16 * 16; }
+        uint64_t VertexBlockBytes() const { return Align16(sizeof(shaderio::Vertex) * uint64_t(VertexCount)); }
+        uint64_t MeshletVertexBlockBytes() const { return Align16(sizeof(uint32_t) * uint64_t(MeshletVertexCount)); }
+        uint64_t PayloadBytes() const { return VertexBlockBytes() + MeshletVertexBlockBytes() + Align16(MeshletTriangleCount); }
+    };
+    static_assert(sizeof(MeshPage) == 72, "MeshPage is written to the cooked file as is");
+
     struct MeshData
     {
         std::string Name;
@@ -191,5 +230,16 @@ namespace Nox
         std::vector<shaderio::MeshletDraw> Draws;
         std::vector<uint32_t> MeshletVertices;
         std::vector<uint8_t> MeshletTriangles;
+
+        // Streaming pages (§5.7.2), empty for geometry without a cluster DAG (one level, every cluster always resident). The
+        // root pages come first.
+        std::vector<MeshPage> Pages;
+        std::vector<uint32_t> PageDependencies;
+        uint32_t RootPageCount = 0;
+        // Set when only the root pages were read: Vertices, MeshletVertices and MeshletTriangles hold just those, the other pages
+        // stream from this cooked file (MeshPage::PayloadOffset).
+        std::filesystem::path StreamedFrom;
+
+        bool IsStreamed() const { return !StreamedFrom.empty() && RootPageCount < Pages.size(); }
     };
 }

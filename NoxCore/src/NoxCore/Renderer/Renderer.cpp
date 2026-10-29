@@ -3752,10 +3752,11 @@ namespace Nox
                 for (uint32_t triangle = 0; triangle < draw.triangleCount; ++triangle)
                 {
                     const uint32_t triBase = draw.triangleOffset + triangle * 3;
+                    // A cluster indexes its page's vertex block (§5.7.2), which starts at globalVertexOffset.
                     const uint32_t corners[3] = {
-                        data.MeshletVertices[draw.vertexOffset + data.MeshletTriangles[triBase + 0]],
-                        data.MeshletVertices[draw.vertexOffset + data.MeshletTriangles[triBase + 1]],
-                        data.MeshletVertices[draw.vertexOffset + data.MeshletTriangles[triBase + 2]]
+                        draw.globalVertexOffset + data.MeshletVertices[draw.vertexOffset + data.MeshletTriangles[triBase + 0]],
+                        draw.globalVertexOffset + data.MeshletVertices[draw.vertexOffset + data.MeshletTriangles[triBase + 1]],
+                        draw.globalVertexOffset + data.MeshletVertices[draw.vertexOffset + data.MeshletTriangles[triBase + 2]]
                     };
                     memcpy(indices, corners, sizeof(corners));
                     indices += sizeof(corners);

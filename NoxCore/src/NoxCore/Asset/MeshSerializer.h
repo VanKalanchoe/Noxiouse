@@ -1,8 +1,11 @@
 #pragma once
 
+#include <cstddef>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <sstream>
 #include <vector>
 #include <string>
 
@@ -295,24 +298,139 @@ namespace Nox
     class MeshSerializer
     {
     private:
-        static void WriteMeshData(std::ofstream& stream, const MeshData& data)
+        // Cluster bounds as version 2 files hold them (before the streaming page fields).
+        struct MeshletBoundsV2
+        {
+            glm::vec3 center;
+            float radius;
+            glm::vec3 coneApex;
+            float coneCutoff;
+            glm::vec3 coneAxis;
+            glm::vec3 lodCenter;
+            float lodRadius;
+            float lodError;
+            glm::vec3 parentCenter;
+            float parentRadius;
+            float parentError;
+            uint32_t lodLevel;
+            uint32_t triangleCount;
+        };
+        static_assert(sizeof(MeshletBoundsV2) == 92);
+
+        static void ReadMeshDataV2(std::istream& stream, MeshData& outData)
+        {
+            SerializerUtils::ReadString(stream, outData.Name);
+            SerializerUtils::ReadVector(stream, outData.Vertices);
+            std::vector<MeshletBoundsV2> bounds;
+            SerializerUtils::ReadVector(stream, bounds);
+            SerializerUtils::ReadVector(stream, outData.MeshletVertices);
+            SerializerUtils::ReadVector(stream, outData.MeshletTriangles);
+            SerializerUtils::ReadVector(stream, outData.Draws);
+
+            outData.Bounds.resize(bounds.size());
+            for (size_t index = 0; index < bounds.size(); ++index)
+            {
+                static_assert(offsetof(shaderio::MeshletBounds, page) == sizeof(MeshletBoundsV2));
+                std::memcpy(&outData.Bounds[index], &bounds[index], sizeof(MeshletBoundsV2));
+                outData.Bounds[index].page = 0;
+                outData.Bounds[index].refinedPage = shaderio::ClusterNoPage;
+            }
+        }
+
+        // Version 3 (§5.7.2): a mesh's cluster records, page table and dependencies here; the pages' data (MeshPage::PayloadOffset,
+        // from the payload section) after everything else, so a page is read on its own as it streams in. Geometry without pages
+        // (skinned: one level) keeps its arrays here.
+        static void WriteMeshData(std::ofstream& stream, const MeshData& data, uint64_t& payloadCursor)
         {
             SerializerUtils::WriteString(stream, data.Name);
-            SerializerUtils::WriteVector(stream, data.Vertices);
             SerializerUtils::WriteVector(stream, data.Bounds);
-            SerializerUtils::WriteVector(stream, data.MeshletVertices);
-            SerializerUtils::WriteVector(stream, data.MeshletTriangles);
             SerializerUtils::WriteVector(stream, data.Draws);
+            std::vector<MeshPage> pages = data.Pages;
+            for (MeshPage& page : pages)
+            {
+                page.PayloadOffset = payloadCursor;
+                payloadCursor += page.PayloadBytes();
+            }
+            SerializerUtils::WriteVector(stream, pages);
+            SerializerUtils::WriteVector(stream, data.PageDependencies);
+            stream.write(reinterpret_cast<const char*>(&data.RootPageCount), sizeof(uint32_t));
+            if (data.Pages.empty())
+            {
+                SerializerUtils::WriteVector(stream, data.Vertices);
+                SerializerUtils::WriteVector(stream, data.MeshletVertices);
+                SerializerUtils::WriteVector(stream, data.MeshletTriangles);
+            }
+        }
+
+        static void WritePagePayloads(std::ofstream& stream, const MeshData& data)
+        {
+            static constexpr char Padding[16] = {};
+            auto block = [&](const void* bytes, uint64_t size)
+            {
+                stream.write(static_cast<const char*>(bytes), static_cast<std::streamsize>(size));
+                stream.write(Padding, static_cast<std::streamsize>(MeshPage::Align16(size) - size));
+            };
+            for (const MeshPage& page : data.Pages)
+            {
+                block(data.Vertices.data() + page.FirstVertex, sizeof(shaderio::Vertex) * uint64_t(page.VertexCount));
+                block(data.MeshletVertices.data() + page.FirstMeshletVertex, sizeof(uint32_t) * uint64_t(page.MeshletVertexCount));
+                block(data.MeshletTriangles.data() + page.FirstMeshletTriangle, page.MeshletTriangleCount);
+            }
         }
 
         static void ReadMeshData(std::istream& stream, MeshData& outData)
         {
             SerializerUtils::ReadString(stream, outData.Name);
-            SerializerUtils::ReadVector(stream, outData.Vertices);
             SerializerUtils::ReadVector(stream, outData.Bounds);
-            SerializerUtils::ReadVector(stream, outData.MeshletVertices);
-            SerializerUtils::ReadVector(stream, outData.MeshletTriangles);
             SerializerUtils::ReadVector(stream, outData.Draws);
+            SerializerUtils::ReadVector(stream, outData.Pages);
+            SerializerUtils::ReadVector(stream, outData.PageDependencies);
+            stream.read(reinterpret_cast<char*>(&outData.RootPageCount), sizeof(uint32_t));
+            if (outData.Pages.empty())
+            {
+                SerializerUtils::ReadVector(stream, outData.Vertices);
+                SerializerUtils::ReadVector(stream, outData.MeshletVertices);
+                SerializerUtils::ReadVector(stream, outData.MeshletTriangles);
+            }
+        }
+
+        // The pages' data into the arrays: every page, or with streamPages only the root pages (the rest stream from the file
+        // as they are wanted, MeshData::StreamedFrom).
+        static bool ReadPagePayloads(const std::filesystem::path& filepath, uint64_t payloadBase, MeshData& data, bool streamPages)
+        {
+            if (data.Pages.empty())
+                return true;
+            for (MeshPage& page : data.Pages)
+                page.PayloadOffset += payloadBase;
+
+            const bool streamed = streamPages && data.RootPageCount < data.Pages.size();
+            const size_t readCount = streamed ? data.RootPageCount : data.Pages.size();
+            const MeshPage& last = data.Pages[readCount == 0 ? 0 : readCount - 1];
+            data.Vertices.resize(readCount == 0 ? 0 : last.FirstVertex + last.VertexCount);
+            data.MeshletVertices.resize(readCount == 0 ? 0 : last.FirstMeshletVertex + last.MeshletVertexCount);
+            data.MeshletTriangles.resize(readCount == 0 ? 0 : last.FirstMeshletTriangle + last.MeshletTriangleCount);
+            if (readCount > 0)
+            {
+                // The pages read are contiguous in the file: one read, then each block to its array.
+                const uint64_t begin = data.Pages[0].PayloadOffset;
+                const uint64_t end = last.PayloadOffset + last.PayloadBytes();
+                std::vector<uint8_t> payload(end - begin);
+                if (!VFS::ReadRange(filepath, begin, payload.size(), payload.data()))
+                    return false;
+                for (size_t index = 0; index < readCount; ++index)
+                {
+                    const MeshPage& page = data.Pages[index];
+                    const uint8_t* source = payload.data() + (page.PayloadOffset - begin);
+                    std::memcpy(data.Vertices.data() + page.FirstVertex, source, sizeof(shaderio::Vertex) * uint64_t(page.VertexCount));
+                    source += page.VertexBlockBytes();
+                    std::memcpy(data.MeshletVertices.data() + page.FirstMeshletVertex, source, sizeof(uint32_t) * uint64_t(page.MeshletVertexCount));
+                    source += page.MeshletVertexBlockBytes();
+                    std::memcpy(data.MeshletTriangles.data() + page.FirstMeshletTriangle, source, page.MeshletTriangleCount);
+                }
+            }
+            if (streamed)
+                data.StreamedFrom = filepath;
+            return true;
         }
 
        static void WriteMaterials(std::ofstream& stream, const std::vector<MaterialData>& materialList)
@@ -567,7 +685,111 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
                 }
             }
 
+        static constexpr uint32_t HeaderBytes = 4 + sizeof(uint32_t) + sizeof(uint64_t);
+
+        static void SerializeMeshes(const std::filesystem::path& filepath, const char* magic, const std::vector<MeshData>& dataList,
+                                    const std::vector<MaterialData>& materialList, const std::vector<LightNodeData>& lightList,
+                                    const std::vector<MeshNodeData>& nodeList, const std::vector<CameraNodeData>& cameraList)
+        {
+            std::ofstream stream(filepath, std::ios::binary | std::ios::trunc);
+            stream.write(magic, 4);
+            uint32_t count = static_cast<uint32_t>(dataList.size());
+            stream.write(reinterpret_cast<const char*>(&count), sizeof(uint32_t));
+            uint64_t payloadBase = 0; // written once known
+            stream.write(reinterpret_cast<const char*>(&payloadBase), sizeof(uint64_t));
+
+            uint64_t payloadCursor = 0;
+            for (const auto& data : dataList)
+                WriteMeshData(stream, data, payloadCursor);
+            WriteMaterials(stream, materialList);
+            WriteLights(stream, lightList);
+            WriteNodes(stream, nodeList);
+            WriteCameras(stream, cameraList);
+
+            static constexpr char Padding[16] = {};
+            const uint64_t metadataEnd = static_cast<uint64_t>(stream.tellp());
+            payloadBase = MeshPage::Align16(metadataEnd);
+            stream.write(Padding, static_cast<std::streamsize>(payloadBase - metadataEnd));
+            for (const auto& data : dataList)
+                WritePagePayloads(stream, data);
+
+            stream.seekp(4 + sizeof(uint32_t));
+            stream.write(reinterpret_cast<const char*>(&payloadBase), sizeof(uint64_t));
+        }
+
+        // magic: this kind's version 3; legacyMagic: its version 2 (no pages, read as one level of always resident clusters).
+        static bool DeserializeMeshes(const std::filesystem::path& filepath, const char* magic, const char* legacyMagic, bool streamPages,
+                                      std::vector<MeshData>& outDataList, std::vector<MaterialData>& outMaterialList,
+                                      std::vector<LightNodeData>& outLightList, std::vector<MeshNodeData>& outNodeList,
+                                      std::vector<CameraNodeData>& outCameraList)
+        {
+            char header[HeaderBytes] = {};
+            if (!VFS::ReadRange(filepath, 0, 4, header))
+                return false;
+
+            if (std::memcmp(header, legacyMagic, 4) == 0)
+            {
+                std::unique_ptr<std::istream> file = VFS::Open(filepath);
+                if (!file) return false;
+                std::istream& stream = *file;
+                stream.seekg(4);
+                uint32_t count = 0;
+                stream.read(reinterpret_cast<char*>(&count), sizeof(uint32_t));
+                outDataList.resize(count);
+                for (uint32_t i = 0; i < count; i++)
+                    ReadMeshDataV2(stream, outDataList[i]);
+                ReadMaterials(stream, outMaterialList);
+                ReadLights(stream, outLightList);
+                ReadNodes(stream, outNodeList);
+                ReadCameras(stream, outCameraList);
+                return true;
+            }
+            if (std::memcmp(header, magic, 4) != 0 || !VFS::ReadRange(filepath, 0, HeaderBytes, header))
+                return false;
+
+            // Only what comes before the pages' data is read whole (from a pack as from a loose file).
+            uint64_t payloadBase = 0;
+            std::memcpy(&payloadBase, header + 4 + sizeof(uint32_t), sizeof(uint64_t));
+            std::string metadata(payloadBase, '\0');
+            if (payloadBase < HeaderBytes || !VFS::ReadRange(filepath, 0, payloadBase, metadata.data()))
+                return false;
+            std::istringstream stream(std::move(metadata));
+            stream.seekg(HeaderBytes);
+
+            uint32_t count = 0;
+            std::memcpy(&count, header + 4, sizeof(uint32_t));
+            outDataList.resize(count);
+            for (uint32_t i = 0; i < count; i++)
+                ReadMeshData(stream, outDataList[i]);
+            ReadMaterials(stream, outMaterialList);
+            ReadLights(stream, outLightList);
+            ReadNodes(stream, outNodeList);
+            ReadCameras(stream, outCameraList);
+            if (stream.fail())
+                return false;
+
+            for (MeshData& data : outDataList)
+            {
+                if (!ReadPagePayloads(filepath, payloadBase, data, streamPages))
+                    return false;
+            }
+            return true;
+        }
+
     public:
+        // The cooked format's version (2 or 3) from the magic, 0 when the file is not a mesh.
+        static uint32_t ReadVersion(const std::filesystem::path& filepath)
+        {
+            char magic[4] = {};
+            if (!VFS::ReadRange(filepath, 0, 4, magic))
+                return 0;
+            if (std::memcmp(magic, "NSM3", 4) == 0 || std::memcmp(magic, "NMS3", 4) == 0)
+                return 3;
+            if (std::memcmp(magic, "NSM2", 4) == 0 || std::memcmp(magic, "NMS2", 4) == 0)
+                return 2;
+            return 0;
+        }
+
         static void SerializeStaticMesh
         (
             const std::filesystem::path& filepath,
@@ -578,22 +800,7 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
             const std::vector<CameraNodeData>& cameraList = {}
         )
         {
-            std::ofstream stream(filepath, std::ios::binary | std::ios::trunc);
-            const char magic[5] = "NSM2";
-            stream.write(magic, 4);
-
-            uint32_t count = static_cast<uint32_t>(dataList.size());
-            stream.write(reinterpret_cast<const char*>(&count), sizeof(uint32_t));
-
-            for (const auto& data : dataList)
-            {
-                WriteMeshData(stream, data);
-            }
-
-            WriteMaterials(stream, materialList);
-            WriteLights(stream, lightList);
-            WriteNodes(stream, nodeList);
-            WriteCameras(stream, cameraList);
+            SerializeMeshes(filepath, "NSM3", dataList, materialList, lightList, nodeList, cameraList);
         }
 
         static bool DeserializeStaticMesh(const std::filesystem::path& filepath, std::vector<MeshData>& outDataList, std::vector<MaterialData>& outMaterialList)
@@ -617,6 +824,7 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
             return DeserializeStaticMesh(filepath, outDataList, outMaterialList, outLightList, dummyNodes, dummyCameras);
         }
 
+        // streamPages: only the root pages of streamed geometry are read (§5.7.2); otherwise every page.
         static bool DeserializeStaticMesh
         (
             const std::filesystem::path& filepath,
@@ -624,32 +832,11 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
             std::vector<MaterialData>& outMaterialList,
             std::vector<LightNodeData>& outLightList,
             std::vector<MeshNodeData>& outNodeList,
-            std::vector<CameraNodeData>& outCameraList
+            std::vector<CameraNodeData>& outCameraList,
+            bool streamPages = false
             )
         {
-            // A loose file, else a mounted pack's entry (VirtualFileSystem.h).
-            std::unique_ptr<std::istream> file = VFS::Open(filepath);
-            if (!file) return false;
-            std::istream& stream = *file;
-
-            char magic[5] = { 0 };
-            stream.read(magic, 4);
-            if (strcmp(magic, "NSM2") != 0) return false;
-
-            uint32_t count = 0;
-            stream.read(reinterpret_cast<char*>(&count), sizeof(uint32_t));
-            outDataList.resize(count);
-
-            for (uint32_t i = 0; i < count; i++)
-            {
-                ReadMeshData(stream, outDataList[i]);
-            }
-
-            ReadMaterials(stream, outMaterialList);
-            ReadLights(stream, outLightList);
-            ReadNodes(stream, outNodeList);
-            ReadCameras(stream, outCameraList);
-            return true;
+            return DeserializeMeshes(filepath, "NSM3", "NSM2", streamPages, outDataList, outMaterialList, outLightList, outNodeList, outCameraList);
         }
 
         static void SerializeMesh
@@ -662,22 +849,7 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
             const std::vector<CameraNodeData>& cameraList = {}
         )
         {
-            std::ofstream stream(filepath, std::ios::binary | std::ios::trunc);
-            const char magic[5] = "NMS2";
-            stream.write(magic, 4);
-
-            uint32_t count = static_cast<uint32_t>(dataList.size());
-            stream.write(reinterpret_cast<const char*>(&count), sizeof(uint32_t));
-
-            for (const auto& data : dataList)
-            {
-                WriteMeshData(stream, data);
-            }
-
-            WriteMaterials(stream, materialList);
-            WriteLights(stream, lightList);
-            WriteNodes(stream, nodeList);
-            WriteCameras(stream, cameraList);
+            SerializeMeshes(filepath, "NMS3", dataList, materialList, lightList, nodeList, cameraList);
         }
         
         static bool DeserializeMesh(const std::filesystem::path& filepath, std::vector<MeshData>& outDataList, std::vector<MaterialData>& outMaterialList)
@@ -708,32 +880,11 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
             std::vector<MaterialData>& outMaterialList,
             std::vector<LightNodeData>& outLightList,
             std::vector<MeshNodeData>& outNodeList,
-            std::vector<CameraNodeData>& outCameraList
+            std::vector<CameraNodeData>& outCameraList,
+            bool streamPages = false
         )
         {
-            // A loose file, else a mounted pack's entry (VirtualFileSystem.h).
-            std::unique_ptr<std::istream> file = VFS::Open(filepath);
-            if (!file) return false;
-            std::istream& stream = *file;
-
-            char magic[5] = { 0 };
-            stream.read(magic, 4);
-            if (strcmp(magic, "NMS2") != 0) return false;
-
-            uint32_t count = 0;
-            stream.read(reinterpret_cast<char*>(&count), sizeof(uint32_t));
-            outDataList.resize(count);
-
-            for (uint32_t i = 0; i < count; i++)
-            {
-                ReadMeshData(stream, outDataList[i]);
-            }
-
-            ReadMaterials(stream, outMaterialList);
-            ReadLights(stream, outLightList);
-            ReadNodes(stream, outNodeList);
-            ReadCameras(stream, outCameraList);
-            return true;
+            return DeserializeMeshes(filepath, "NMS3", "NMS2", streamPages, outDataList, outMaterialList, outLightList, outNodeList, outCameraList);
         }
     };
 }

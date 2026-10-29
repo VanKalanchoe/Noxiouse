@@ -270,6 +270,10 @@ struct GpuMesh
     uint32_t indicesOffset;
 
     uint32_t triangleCount; // of all meshlets (stats)
+    // Geometry streaming (§5.7.2): the mesh's pages in the page table (GpuGeometryPage), NoGeometryRange when every cluster is
+    // resident (a mesh that does not stream).
+    uint32_t pageOffset;
+    uint32_t pageCount;
 
     // Local bounds (GPU culling)
     vec4 boundsSphere; // xyz: center, w: radius
@@ -1284,7 +1288,12 @@ struct MeshletBounds
     float parentError;
     uint32_t lodLevel;     // 0: original geometry, n: simplified n times
     uint32_t triangleCount;
+    // Geometry streaming (§5.7.2): the page this cluster's data lives in, and the page holding the group it was simplified from
+    // (its finer version; ClusterNoPage for the original clusters). Pages of the mesh, numbered from 0 (GpuMesh::pageOffset).
+    uint32_t page;
+    uint32_t refinedPage;
 };
+STATIC_CONST uint32_t ClusterNoPage = 0xFFFFFFFF;
 
 // Buffer 2: Read ONLY by Mesh Shader (24 Bytes)
 struct MeshletDraw

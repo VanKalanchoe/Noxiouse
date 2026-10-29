@@ -642,14 +642,9 @@ namespace Nox
                         HLOD::SourceMesh mesh;
                         mesh.Transform = part.World;
                         mesh.Material = part.Material;
-                        mesh.Positions.reserve(data.Vertices.size());
-                        for (const shaderio::Vertex& vertex : data.Vertices)
-                        {
-                            mesh.Positions.push_back(vertex.pos);
-                            mesh.Normals.push_back(vertex.normal);
-                            mesh.Tangents.push_back(vertex.tangent);
-                            mesh.UVs.push_back(vertex.uv0);
-                        }
+                        // The original clusters' triangles. Each streaming page holds its own copy of the vertices it uses
+                        // (§5.7.2): identical copies become one vertex again, so the merge sees the surface welded as it was.
+                        std::unordered_map<std::string, uint32_t> welded;
                         for (size_t index = 0; index < data.Draws.size() && index < data.Bounds.size(); ++index)
                         {
                             if (data.Bounds[index].lodLevel != 0)
@@ -659,7 +654,20 @@ namespace Nox
                             {
                                 const uint32_t base = draw.triangleOffset + triangle * 3;
                                 for (uint32_t corner = 0; corner < 3; ++corner)
-                                    mesh.Indices.push_back(data.MeshletVertices[draw.vertexOffset + data.MeshletTriangles[base + corner]]);
+                                {
+                                    const shaderio::Vertex& vertex =
+                                        data.Vertices[draw.globalVertexOffset + data.MeshletVertices[draw.vertexOffset + data.MeshletTriangles[base + corner]]];
+                                    auto [found, inserted] = welded.try_emplace(std::string(reinterpret_cast<const char*>(&vertex), sizeof(vertex)),
+                                                                                static_cast<uint32_t>(mesh.Positions.size()));
+                                    if (inserted)
+                                    {
+                                        mesh.Positions.push_back(vertex.pos);
+                                        mesh.Normals.push_back(vertex.normal);
+                                        mesh.Tangents.push_back(vertex.tangent);
+                                        mesh.UVs.push_back(vertex.uv0);
+                                    }
+                                    mesh.Indices.push_back(found->second);
+                                }
                             }
                         }
                         meshes.push_back(std::move(mesh));

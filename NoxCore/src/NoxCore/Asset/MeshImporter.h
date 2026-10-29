@@ -32,8 +32,10 @@ namespace Nox
     {
     public:
         // Any thread. The asset's cooked mesh (.nmesh, or .nsmesh for a StaticMesh) when it is current; empty when it
-        // has to be cooked first (that loads synchronously).
-        static std::optional<CookedMesh> ReadCookedMesh(const std::filesystem::path& assetDirectory, const AssetMetadata& metadata);
+        // has to be cooked first (that loads synchronously). streamPages: geometry that streams (§5.7.2) comes with its
+        // root pages only, the rest is read from the cooked file as it is wanted.
+        static std::optional<CookedMesh> ReadCookedMesh(const std::filesystem::path& assetDirectory, const AssetMetadata& metadata,
+                                                        bool streamPages = false);
         // Main thread. The Mesh / StaticMesh asset around cooked data (its CPU data moves in), without geometry: each
         // submesh is set once its upload is published.
         static Ref<Asset> CreateMeshAsset(AssetType type, CookedMesh& cooked);

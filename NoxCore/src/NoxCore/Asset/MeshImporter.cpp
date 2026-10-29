@@ -110,14 +110,174 @@ namespace Nox
                 bounds.parentRadius = bounds.radius;
                 bounds.parentError = shaderio::ClusterTerminalError;
                 bounds.lodLevel = 0;
+                bounds.page = 0;
+                bounds.refinedPage = shaderio::ClusterNoPage;
                 appendCluster(data, bounds, vertices, meshlet.vertex_count, triangles, meshlet.triangle_count);
+            }
+        }
+
+        // A cluster of the DAG as clodBuild emits it, before it is placed in a page: its triangles over the submesh's vertices.
+        struct DagCluster
+        {
+            shaderio::MeshletBounds Bounds{};
+            std::vector<uint32_t> Vertices; // submesh vertex indices
+            std::vector<uint8_t> Triangles; // into Vertices
+            int Refined = -1;               // the group it was simplified from
+        };
+
+        struct DagGroup
+        {
+            clodGroup Group{};
+            std::vector<uint32_t> Clusters; // DagCluster indices
+            bool Terminal = false;          // nothing coarser replaces it (clusterlod: FLT_MAX error)
+        };
+
+        // Streaming pages (§5.7.2): about this much data each (Nanite's 128 KB pages; one group may exceed it alone).
+        constexpr uint64_t PageTargetBytes = 128 * 1024;
+
+        // Packs the DAG into streaming pages and writes the submesh's cluster data in page order. Groups go into pages whole
+        // (a cut never splits a group, so a page is all a group's clusters need), terminal groups first -- they are the
+        // root pages, always resident -- then the others coarsest first, so the pages a page depends on (those holding the
+        // clusters its groups were simplified into) come before it. Each page holds its own copy of the vertices its clusters
+        // use, so it is loaded and evicted on its own.
+        void writePages(MeshData& data, const std::vector<shaderio::Vertex>& vertices, const std::vector<DagCluster>& clusters, const std::vector<DagGroup>& groups)
+        {
+            std::vector<uint32_t> order(groups.size());
+            for (uint32_t index = 0; index < order.size(); ++index)
+                order[index] = index;
+            std::stable_sort(order.begin(), order.end(), [&](uint32_t a, uint32_t b)
+            {
+                if (groups[a].Terminal != groups[b].Terminal)
+                    return groups[a].Terminal;
+                return groups[a].Group.depth > groups[b].Group.depth;
+            });
+
+            // Groups into pages: a new page when the next group would take it past the target, and between root and streamed groups.
+            std::vector<std::vector<uint32_t>> pageGroups;
+            std::vector<uint32_t> groupPage(groups.size(), 0);
+            uint64_t pageBytes = 0;
+            bool pageRoot = true;
+            for (uint32_t group : order)
+            {
+                uint64_t bytes = 0;
+                for (uint32_t cluster : groups[group].Clusters)
+                    bytes += (sizeof(shaderio::Vertex) + sizeof(uint32_t)) * clusters[cluster].Vertices.size() + clusters[cluster].Triangles.size();
+                if (pageGroups.empty() || pageRoot != groups[group].Terminal || (pageBytes > 0 && pageBytes + bytes > PageTargetBytes))
+                {
+                    pageGroups.emplace_back();
+                    pageBytes = 0;
+                    pageRoot = groups[group].Terminal;
+                }
+                pageGroups.back().push_back(group);
+                groupPage[group] = static_cast<uint32_t>(pageGroups.size() - 1);
+                pageBytes += bytes;
+            }
+
+            // The clusters a page's groups were simplified into live in coarser pages (an earlier index): those must stay while the
+            // page is resident, or no coarser version would be there when the LOD moves away from it.
+            std::vector<std::vector<uint32_t>> pageDependencies(pageGroups.size());
+            for (uint32_t group = 0; group < groups.size(); ++group)
+            {
+                for (uint32_t clusterIndex : groups[group].Clusters)
+                {
+                    const int refined = clusters[clusterIndex].Refined;
+                    if (refined >= 0 && groupPage[refined] != groupPage[group])
+                        pageDependencies[groupPage[refined]].push_back(groupPage[group]);
+                }
+            }
+
+            data.Vertices.clear();
+            data.Bounds.clear();
+            data.Draws.clear();
+            data.MeshletVertices.clear();
+            data.MeshletTriangles.clear();
+            data.Pages.clear();
+            data.PageDependencies.clear();
+            data.RootPageCount = 0;
+
+            std::unordered_map<uint32_t, uint32_t> pageVertex; // submesh vertex -> page-local
+            for (uint32_t pageIndex = 0; pageIndex < pageGroups.size(); ++pageIndex)
+            {
+                MeshPage page;
+                page.FirstCluster = static_cast<uint32_t>(data.Draws.size());
+                page.FirstVertex = static_cast<uint32_t>(data.Vertices.size());
+                page.FirstMeshletVertex = static_cast<uint32_t>(data.MeshletVertices.size());
+                page.FirstMeshletTriangle = static_cast<uint32_t>(data.MeshletTriangles.size());
+                pageVertex.clear();
+
+                bool root = false;
+                bool hasLod = false;
+                glm::vec3 lodMin(FLT_MAX), lodMax(-FLT_MAX);
+                for (uint32_t group : pageGroups[pageIndex])
+                {
+                    const DagGroup& dagGroup = groups[group];
+                    root |= dagGroup.Terminal;
+                    if (!dagGroup.Terminal)
+                    {
+                        const clodBounds& simplified = dagGroup.Group.simplified;
+                        const glm::vec3 center(simplified.center[0], simplified.center[1], simplified.center[2]);
+                        lodMin = glm::min(lodMin, center - glm::vec3(simplified.radius));
+                        lodMax = glm::max(lodMax, center + glm::vec3(simplified.radius));
+                        page.LodError = std::max(page.LodError, simplified.error);
+                        hasLod = true;
+                    }
+
+                    for (uint32_t clusterIndex : dagGroup.Clusters)
+                    {
+                        const DagCluster& cluster = clusters[clusterIndex];
+                        shaderio::MeshletDraw draw{};
+                        draw.vertexOffset = static_cast<uint32_t>(data.MeshletVertices.size());
+                        draw.triangleOffset = static_cast<uint32_t>(data.MeshletTriangles.size());
+                        draw.vertexCount = static_cast<uint32_t>(cluster.Vertices.size());
+                        draw.triangleCount = static_cast<uint32_t>(cluster.Triangles.size() / 3);
+                        draw.globalVertexOffset = page.FirstVertex;
+                        for (uint32_t vertex : cluster.Vertices)
+                        {
+                            auto [found, inserted] = pageVertex.try_emplace(vertex, static_cast<uint32_t>(data.Vertices.size()) - page.FirstVertex);
+                            if (inserted)
+                                data.Vertices.push_back(vertices[vertex]);
+                            data.MeshletVertices.push_back(found->second);
+                        }
+                        data.MeshletTriangles.insert(data.MeshletTriangles.end(), cluster.Triangles.begin(), cluster.Triangles.end());
+
+                        shaderio::MeshletBounds bounds = cluster.Bounds;
+                        bounds.page = pageIndex;
+                        bounds.refinedPage = cluster.Refined < 0 ? shaderio::ClusterNoPage : groupPage[cluster.Refined];
+                        data.Draws.push_back(draw);
+                        data.Bounds.push_back(bounds);
+                    }
+                }
+
+                std::vector<uint32_t>& dependencies = pageDependencies[pageIndex];
+                std::sort(dependencies.begin(), dependencies.end());
+                dependencies.erase(std::unique(dependencies.begin(), dependencies.end()), dependencies.end());
+
+                page.ClusterCount = static_cast<uint32_t>(data.Draws.size()) - page.FirstCluster;
+                page.VertexCount = static_cast<uint32_t>(data.Vertices.size()) - page.FirstVertex;
+                page.MeshletVertexCount = static_cast<uint32_t>(data.MeshletVertices.size()) - page.FirstMeshletVertex;
+                page.MeshletTriangleCount = static_cast<uint32_t>(data.MeshletTriangles.size()) - page.FirstMeshletTriangle;
+                page.FirstDependency = static_cast<uint32_t>(data.PageDependencies.size());
+                page.DependencyCount = static_cast<uint32_t>(dependencies.size());
+                data.PageDependencies.insert(data.PageDependencies.end(), dependencies.begin(), dependencies.end());
+                if (hasLod)
+                {
+                    page.LodCenter = (lodMin + lodMax) * 0.5f;
+                    page.LodRadius = glm::length(lodMax - lodMin) * 0.5f;
+                }
+                if (root)
+                {
+                    page.Flags |= MeshPage::Root;
+                    page.LodError = shaderio::ClusterTerminalError;
+                    data.RootPageCount = pageIndex + 1;
+                }
+                data.Pages.push_back(page);
             }
         }
 
         // The cluster LOD DAG (§5.7) with meshoptimizer's clusterlod, set up as its demo/nanite.cpp: clusters of the
         // original geometry are merged into groups and simplified, level after level, until one cluster is left. Every
         // cluster keeps the bounds and error of the group it came from and of the group it went into, so the task shader
-        // can pick the cut. Clusters index the submesh's vertices, like the meshlets.
+        // can pick the cut. The clusters are then packed into streaming pages (writePages).
         void buildClusterLod(MeshData& data, const std::vector<uint32_t>& indices)
         {
             clodConfig config = clodDefaultConfig(shaderio::MAX_PRIMITIVES);
@@ -144,20 +304,24 @@ namespace Nox
             mesh.attribute_count = std::size(attributeWeights);
             mesh.attribute_protect_mask = 0b1111111;
 
-            std::vector<clodGroup> groups;
+            std::vector<DagCluster> clusters;
+            std::vector<DagGroup> groups;
             std::array<unsigned int, shaderio::MAX_VERTICES> vertices{};
             std::array<unsigned char, shaderio::MAX_PRIMITIVES * 3> triangles{};
-            clodBuild(config, mesh, [&](clodGroup group, const clodCluster* clusters, size_t clusterCount) -> int
+            clodBuild(config, mesh, [&](clodGroup group, const clodCluster* groupClusters, size_t clusterCount) -> int
             {
+                DagGroup& dagGroup = groups.emplace_back();
+                dagGroup.Group = group;
+                dagGroup.Terminal = group.simplified.error == FLT_MAX;
                 for (size_t index = 0; index < clusterCount; ++index)
                 {
-                    const clodCluster& cluster = clusters[index];
+                    const clodCluster& cluster = groupClusters[index];
                     const size_t triangleCount = cluster.index_count / 3;
                     const size_t vertexCount = clodLocalIndices(vertices.data(), triangles.data(), cluster.indices, cluster.index_count);
 
                     shaderio::MeshletBounds bounds = clusterBounds(data, vertices.data(), triangles.data(), triangleCount);
                     // The group this cluster was simplified from; the original clusters have no error.
-                    const clodBounds& self = cluster.refined < 0 ? cluster.bounds : groups[cluster.refined].simplified;
+                    const clodBounds& self = cluster.refined < 0 ? cluster.bounds : groups[cluster.refined].Group.simplified;
                     bounds.lodCenter = glm::vec3(self.center[0], self.center[1], self.center[2]);
                     bounds.lodRadius = self.radius;
                     bounds.lodError = cluster.refined < 0 ? 0.0f : self.error;
@@ -165,17 +329,26 @@ namespace Nox
                     bounds.parentCenter = glm::vec3(group.simplified.center[0], group.simplified.center[1], group.simplified.center[2]);
                     bounds.parentRadius = group.simplified.radius;
                     bounds.parentError = group.simplified.error;
-                    bounds.lodLevel = cluster.refined < 0 ? 0u : static_cast<uint32_t>(groups[cluster.refined].depth + 1);
-                    appendCluster(data, bounds, vertices.data(), vertexCount, triangles.data(), triangleCount);
-                }
+                    bounds.lodLevel = cluster.refined < 0 ? 0u : static_cast<uint32_t>(groups[cluster.refined].Group.depth + 1);
+                    bounds.page = shaderio::ClusterNoPage; // writePages
+                    bounds.refinedPage = shaderio::ClusterNoPage;
 
-                groups.push_back(group);
+                    dagGroup.Clusters.push_back(static_cast<uint32_t>(clusters.size()));
+                    DagCluster& dagCluster = clusters.emplace_back();
+                    dagCluster.Bounds = bounds;
+                    dagCluster.Vertices.assign(vertices.begin(), vertices.begin() + vertexCount);
+                    dagCluster.Triangles.assign(triangles.begin(), triangles.begin() + triangleCount * 3);
+                    dagCluster.Refined = cluster.refined;
+                }
                 return static_cast<int>(groups.size() - 1);
             });
+
+            const std::vector<shaderio::Vertex> sourceVertices = std::move(data.Vertices);
+            writePages(data, sourceVertices, clusters, groups);
         }
     }
 
-    std::optional<CookedMesh> MeshImporter::ReadCookedMesh(const std::filesystem::path& assetDirectory, const AssetMetadata& metadata)
+    std::optional<CookedMesh> MeshImporter::ReadCookedMesh(const std::filesystem::path& assetDirectory, const AssetMetadata& metadata, bool streamPages)
     {
         const std::filesystem::path cookedPath = assetDirectory / metadata.FilePath;
         const std::filesystem::path sourcePath = assetDirectory / metadata.SourceFilePath;
@@ -192,11 +365,14 @@ namespace Nox
         {
             return std::nullopt;
         }
+        // A cook from before streaming pages (version 2) is cooked again while its source is there; without one it is read as it is.
+        if (!sourceMissing && MeshSerializer::ReadVersion(cookedPath) < 3)
+            return std::nullopt;
 
         CookedMesh cooked;
         const bool success = metadata.Type == AssetType::StaticMesh
-            ? MeshSerializer::DeserializeStaticMesh(cookedPath, cooked.Submeshes, cooked.Materials, cooked.Lights, cooked.Nodes, cooked.Cameras)
-            : MeshSerializer::DeserializeMesh(cookedPath, cooked.Submeshes, cooked.Materials, cooked.Lights, cooked.Nodes, cooked.Cameras);
+            ? MeshSerializer::DeserializeStaticMesh(cookedPath, cooked.Submeshes, cooked.Materials, cooked.Lights, cooked.Nodes, cooked.Cameras, streamPages)
+            : MeshSerializer::DeserializeMesh(cookedPath, cooked.Submeshes, cooked.Materials, cooked.Lights, cooked.Nodes, cooked.Cameras, streamPages);
         if (!success)
             return std::nullopt;
         return cooked;
