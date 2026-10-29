@@ -496,8 +496,20 @@ namespace Nox
 
     void Scene::CollectAssetReferences(std::unordered_set<AssetHandle>& outHandles)
     {
-        for (auto entity : m_Registry.view<MeshComponent>())
-            outHandles.insert(m_Registry.get<MeshComponent>(entity).Mesh);
+        // Straight over the components (no entity lookups), and a mesh just seen is not hashed again: a world's props share a few
+        // meshes, and tens of thousands of set lookups were most of the unused-asset sweep's time.
+        {
+            AssetHandle recent[4] = {};
+            size_t next = 0;
+            m_Registry.view<MeshComponent>().each([&](const MeshComponent& component)
+            {
+                const AssetHandle mesh = component.Mesh;
+                if (mesh == recent[0] || mesh == recent[1] || mesh == recent[2] || mesh == recent[3])
+                    return;
+                recent[next++ & 3] = mesh;
+                outHandles.insert(mesh);
+            });
+        }
 
         // Before they spawn, instances reference their model only.
         for (auto entity : m_Registry.view<ModelInstanceComponent>())

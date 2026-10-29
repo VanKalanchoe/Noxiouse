@@ -4022,26 +4022,21 @@ namespace Nox
 
     void Renderer::updateSkinningLayout(uint32_t currentImage)
     {
+        // The skinned instances only, in slot order (the others keep NoSkinnedVertices: their default, set again when one stops being
+        // skinned). Walking the whole draw list for them -- copied and sorted every frame -- cost 1.4 ms with 65k instances.
         // Offsets are meaningful only for the visibility/G-buffer buckets. Forward unlit/transparent shaders retain
         // their existing direct skinning path and therefore must not make this compute pass do unused work.
-        const size_t opaqueEnd = std::min<size_t>(
-            m_drawBucketStarts[static_cast<size_t>(RenderBucket::MaskDoubleSided) + 1], m_drawList.size());
-        for (size_t entry = opaqueEnd; entry < m_drawList.size(); ++entry)
-            m_gpuScene.SetSkinnedVertexOffset(m_drawList[entry], shaderio::NoSkinnedVertices);
-
-        std::vector<uint32_t> instanceSlots(m_drawList.begin(), m_drawList.begin() + opaqueEnd);
-        std::sort(instanceSlots.begin(), instanceSlots.end());
-
+        const std::set<uint32_t>& skinned = m_gpuScene.GetSkinnedInstances();
         std::vector<SkinningLayoutEntry> layout;
         std::vector<shaderio::SkinningWorkItem> workItems;
-        layout.reserve(instanceSlots.size());
-        workItems.reserve(instanceSlots.size());
+        layout.reserve(skinned.size());
+        workItems.reserve(skinned.size());
 
         uint32_t destinationVertexOffset = 0;
-        for (uint32_t instanceSlot : instanceSlots)
+        for (uint32_t instanceSlot : skinned)
         {
             const shaderio::GpuInstance& instance = m_gpuScene.GetInstances().Get(instanceSlot);
-            if (instance.boneMatrixOffset == GpuScene::NoBoneMatrices)
+            if (m_gpuScene.GetBucket(instanceSlot) > RenderBucket::MaskDoubleSided) // (forward buckets, or not drawn)
             {
                 m_gpuScene.SetSkinnedVertexOffset(instanceSlot, shaderio::NoSkinnedVertices);
                 continue;

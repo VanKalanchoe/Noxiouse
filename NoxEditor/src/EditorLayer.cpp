@@ -334,7 +334,10 @@ namespace Nox
         // Deleting entities, switching scenes, or leaving Play can leave meshes/textures unreferenced.
         // Sweep at the start of the next frame, before anything re-requests them this frame.
         if (m_EditorScene && m_EditorScene->ConsumeAssetReferencesChanged())
+        {
             m_UnloadUnusedAssetsRequested = true;
+            m_EditorSceneReferencesValid = false;
+        }
         if (m_ActiveScene && m_ActiveScene != m_EditorScene && m_ActiveScene->ConsumeAssetReferencesChanged())
             m_UnloadUnusedAssetsRequested = true;
         // Loads still streaming in during the last sweep have finished: what nothing uses any more goes too.
@@ -5161,6 +5164,7 @@ namespace Nox
 
     void EditorLayer::OnScenePlay()
     {
+        m_EditorSceneReferencesValid = false; // (collected again for this session)
         CancelHLODBuild("Play");
         EndTimelinePreviews(); // Play copies the scene as it is
         SetViewMode(EditorViewMode::Perspective);
@@ -5178,6 +5182,7 @@ namespace Nox
 
     void EditorLayer::OnSceneSimulate()
     {
+        m_EditorSceneReferencesValid = false; // (collected again for this session)
         CancelHLODBuild("Simulate");
         EndTimelinePreviews();
         if (m_SceneState == SceneState::Play)
@@ -5216,8 +5221,23 @@ namespace Nox
     void EditorLayer::UnloadUnusedAssets()
     {
         std::unordered_set<AssetHandle> referencedAssets;
-        if (m_EditorScene)
+        if (m_EditorScene && m_ActiveScene != m_EditorScene)
+        {
+            // Play / Simulate: the edited scene waits as it was, so its references are collected once (half of a streamed world's
+            // sweep was walking its entities again every time).
+            if (!m_EditorSceneReferencesValid)
+            {
+                m_EditorSceneReferences.clear();
+                m_EditorScene->CollectAssetReferences(m_EditorSceneReferences);
+                m_EditorSceneReferencesValid = true;
+            }
+            referencedAssets = m_EditorSceneReferences;
+        }
+        else if (m_EditorScene)
+        {
             m_EditorScene->CollectAssetReferences(referencedAssets);
+            m_EditorSceneReferencesValid = false;
+        }
         if (m_ActiveScene && m_ActiveScene != m_EditorScene)
             m_ActiveScene->CollectAssetReferences(referencedAssets);
         if (m_PrefabMode.ReturnScene) // the level waits while a prefab is edited: its assets stay

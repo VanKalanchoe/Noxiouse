@@ -4,6 +4,7 @@
 #include <functional>
 #include <optional>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "NoxCore/Core/Layer.h"
 #include "NoxCore/Events/InputEvents.h"
@@ -314,6 +315,9 @@ namespace Nox
         bool m_HistoryCheckRequested = false; // an editor shortcut ran (Delete, Ctrl+D, End, ...)
         bool m_UnloadUnusedAssetsRequested = false;
         std::chrono::steady_clock::time_point m_LastUnloadSweep{}; // the sweep runs at most once a second
+        // The edited scene's references while Play / Simulate runs (it does not change meanwhile): collected once.
+        std::unordered_set<AssetHandle> m_EditorSceneReferences;
+        bool m_EditorSceneReferencesValid = false;
         
         // Panels
         SceneHierarchyPanel m_SceneHierarchyPanel;

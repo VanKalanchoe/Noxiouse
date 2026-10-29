@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <set>
 #include <span>
 #include <unordered_map>
 #include <utility>
@@ -151,6 +152,9 @@ namespace Nox
         void SetTransform(uint32_t instanceSlot, const glm::mat4& world);
         void SetBoneMatrixOffset(uint32_t instanceSlot, uint32_t boneMatrixOffset);
         void SetSkinnedVertexOffset(uint32_t instanceSlot, uint32_t skinnedVertexOffset);
+        // The instances with bone matrices, by slot: the skinning layout walks these, not every instance.
+        const std::set<uint32_t>& GetSkinnedInstances() const { return m_SkinnedInstances; }
+        RenderBucket GetBucket(uint32_t instanceSlot) const { return m_InstanceStates[instanceSlot].Bucket; }
         // A skinned instance owns a dynamic BLAS while ray tracing is active. A zero override restores its mesh's
         // shared static BLAS; the optional skinned vertex address is used only by hit shading.
         void SetInstanceRayTracingGeometry(uint32_t instanceSlot, uint64_t blasAddressOverride, uint64_t skinnedVertexAddress);
@@ -227,6 +231,7 @@ namespace Nox
         GpuSceneTable<shaderio::GpuRayTracingInstance> m_RayTracingInstances; // same slots as m_Instances
 
         std::vector<InstanceState> m_InstanceStates;
+        std::set<uint32_t> m_SkinnedInstances;
         uint32_t m_InstanceCount = 0;
         std::array<std::vector<uint32_t>, RenderBucketCount> m_Buckets;
         bool m_BucketsChanged = true;

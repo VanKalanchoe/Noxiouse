@@ -34,6 +34,8 @@ public sealed class StreamingWorldTest : EntityBehaviour
     Phase m_Phase = Phase.WarmUp;
     float m_Time;
     float m_SettledTime;
+    int m_SettledFrames;
+    Vector3 m_Placed; // where PlaceCamera put the camera (its world transform follows a frame later)
     float m_SampleTime;
     Vector3 m_Center;
     float m_Radius;
@@ -84,13 +86,21 @@ public sealed class StreamingWorldTest : EntityBehaviour
             // The camera was moved to the circle's start (a teleport): every cell around it in -- nothing loading any more, as a game
             // waits for streaming after a teleport (Unreal's IsStreamingCompleted) -- and a second to settle. The flight measures
             // streaming at speed, not the teleport.
+            // Judged where the camera was put (its world transform is updated by the next transform pass), over real frames: the first
+            // frame of Play is long (the start's cells are built for it) and must not count as a settled second on its own.
             WorldStreamingStats world = Scene.GetWorldStreamingStats();
-            bool settled = world.Loading == 0 && Scene.IsWorldStreamingCompleted(camera, WorldUnits.FromMeters(HoleRangeMeters));
+            bool settled = world.Loading == 0 && Scene.IsWorldStreamingCompleted(m_Placed, WorldUnits.FromMeters(HoleRangeMeters));
             if (!settled)
+            {
                 m_SettledTime = 0.0f;
+                m_SettledFrames = 0;
+            }
             else
-                m_SettledTime += deltaTime;
-            if (m_SettledTime > 1.0f || m_Time > MaxWarmUpSeconds)
+            {
+                m_SettledTime += MathF.Min(deltaTime, 0.1f);
+                m_SettledFrames++;
+            }
+            if (m_SettledTime > 1.0f && m_SettledFrames >= 30 || m_Time > MaxWarmUpSeconds)
             {
                 Log.Info($"[StreamingWorldTest] flying (warm-up {m_Time:0.0} s)");
                 m_FlightStart = Scene.GetWorldStreamingStats();
@@ -152,6 +162,7 @@ public sealed class StreamingWorldTest : EntityBehaviour
         TransformComponent transform = GetComponent<TransformComponent>();
         Transform world = transform.World;
         world.Position = new Vector3(m_Center.X + m_Radius * MathF.Cos(m_Angle), WorldUnits.FromMeters(HeightMeters), m_Center.Z + m_Radius * MathF.Sin(m_Angle));
+        m_Placed = world.Position;
         // Looking along the circle: forward (-sin, 0, cos) as yaw (forward = (-cos p sin y, sin p, -cos p cos y)).
         float forwardX = -MathF.Sin(m_Angle), forwardZ = MathF.Cos(m_Angle);
         world.Rotation = new Vector3(Pitch, MathF.Atan2(-forwardX, -forwardZ), 0.0f);

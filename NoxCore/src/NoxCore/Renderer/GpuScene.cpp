@@ -352,6 +352,7 @@ namespace Nox
         instance.meshIndex = meshSlot;
         instance.materialIndex = materialSlot;
         instance.boneMatrixOffset = NoBoneMatrices;
+        m_SkinnedInstances.erase(slot); // (a reused slot)
         instance.skinnedVertexOffset = shaderio::NoSkinnedVertices;
         instance.entityID = entityID;
 
@@ -391,6 +392,7 @@ namespace Nox
         RemoveFromBucket(instanceSlot);
         ReleaseMaterial(state.Material);
         state = InstanceState{};
+        m_SkinnedInstances.erase(instanceSlot);
         WriteTlasInstance(instanceSlot);
 
         m_Instances.Free(instanceSlot);
@@ -432,6 +434,10 @@ namespace Nox
     {
         if (m_Instances.Get(instanceSlot).boneMatrixOffset != boneMatrixOffset)
             m_Instances.Edit(instanceSlot).boneMatrixOffset = boneMatrixOffset;
+        if (boneMatrixOffset != NoBoneMatrices)
+            m_SkinnedInstances.insert(instanceSlot);
+        else if (m_SkinnedInstances.erase(instanceSlot) != 0)
+            SetSkinnedVertexOffset(instanceSlot, shaderio::NoSkinnedVertices); // (no longer skinned: drawn from the mesh's vertices)
     }
 
     void GpuScene::SetSkinnedVertexOffset(uint32_t instanceSlot, uint32_t skinnedVertexOffset)
