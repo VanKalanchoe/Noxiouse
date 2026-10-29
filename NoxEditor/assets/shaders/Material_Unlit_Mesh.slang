@@ -66,8 +66,7 @@
         // 1. Fetch Base Color (matches Sascha material_unlit.frag lines 76-80)
         if (instance.baseColorTextureIndex != 0xFFFFFFFF)
         {
-            Texture2D baseColorTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.baseColorTextureIndex, 0));
-            baseColor = baseColorTex.Sample(sampLinearHandle, instance.baseColorTextureSet == 0 ? vertIn.uv0 : vertIn.uv1) * instance.baseColorFactor;
+            baseColor = SampleMaterialTexture(ubo, instance.baseColorTextureIndex, sampLinearHandle, instance.baseColorTextureSet == 0 ? vertIn.uv0 : vertIn.uv1) * instance.baseColorFactor;
         }
         else
         {

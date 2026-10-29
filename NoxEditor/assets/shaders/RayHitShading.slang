@@ -51,8 +51,7 @@ float3 ray_occluder_transmittance(UniformBufferObject* ubo, GpuRayTracingInstanc
     float alpha = lut.baseColorFactor.a;
     if (lut.baseColorTextureIndex != 0xFFFFFFFF)
     {
-        Texture2D tex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + lut.baseColorTextureIndex, 0));
-        alpha *= tex.SampleLevel(SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0)), intersection_uv(lut, primitive, barycentrics),
+        alpha *= SampleMaterialTextureLevel(ubo, lut.baseColorTextureIndex, SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0)), intersection_uv(lut, primitive, barycentrics),
                                  RayAlphaTestLod).a;
     }
     if (lut.alphaMode == 2)
@@ -96,8 +95,7 @@ void hit_material(UniformBufferObject* ubo, GpuRayTracingInstance lut, float3 co
     float4 mrSample = float4(1.0);
     if (lut.metallicRoughnessTextureIndex != 0xFFFFFFFF)
     {
-        Texture2D mrTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + lut.metallicRoughnessTextureIndex, 0));
-        mrSample = mrTex.SampleLevel(textureSampler, uv, 0);
+        mrSample = SampleMaterialTextureLevel(ubo, lut.metallicRoughnessTextureIndex, textureSampler, uv, 0);
     }
 
     if (lut.workflow != 1.0)
@@ -192,8 +190,7 @@ float3 shadeRayHit(UniformBufferObject* ubo, uint instanceSlot, uint primitive, 
     float3 baseColor = hitLut.workflow == 1.0 ? hitLut.diffuseFactor.rgb : hitLut.baseColorFactor.rgb;
     if (hitLut.baseColorTextureIndex != 0xFFFFFFFF)
     {
-        Texture2D hitTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + hitLut.baseColorTextureIndex, 0));
-        baseColor *= hitTex.SampleLevel(textureSampler, hitUV, 0).rgb;
+        baseColor *= SampleMaterialTextureLevel(ubo, hitLut.baseColorTextureIndex, textureSampler, hitUV, 0).rgb;
     }
     // Its diffuse and specular parts, as the path tracer splits them (PathTracerBridge.slang: the metallic-roughness inputs, or the
     // specular-glossiness ones converted). A metal is all specular: chrome's diffuse is near black.
@@ -250,8 +247,7 @@ float3 shadeRayHit(UniformBufferObject* ubo, uint instanceSlot, uint primitive, 
     // With its texture (a facade's emissive map is mostly dark windows: without it the whole facade glowed in reflections).
     if (hitLut.emissiveTextureIndex != 0xFFFFFFFF && any(emissiveLight > 0.0))
     {
-        Texture2D emissiveTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + hitLut.emissiveTextureIndex, 0));
-        emissiveLight *= emissiveTex.SampleLevel(SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0)), hitUV, 2.0).rgb;
+        emissiveLight *= SampleMaterialTextureLevel(ubo, hitLut.emissiveTextureIndex, SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0)), hitUV, 2.0).rgb;
     }
 
     return directLight + ambientLight + specularLight + emissiveLight * emissionWeight;

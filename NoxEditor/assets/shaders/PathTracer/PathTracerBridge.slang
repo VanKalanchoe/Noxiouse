@@ -73,10 +73,10 @@ namespace Bridge
     // the upscaling bias (log2(render / display): DLSS renders fewer pixels than it shows) -- UniformBufferObject::pathTracerTexLodBias.
     // The footprint used to be clamped to one texel before the -1, so the bias never went below mip 0 of the clamp and close-ups
     // and every upscaled frame sampled a mip or two too coarse.
-    float textureLod(Texture2D texture, float rayConeWidth, float uvPerWorld, float lodBias)
+    float textureLod(UniformBufferObject* ubo, uint textureIndex, float rayConeWidth, float uvPerWorld, float lodBias)
     {
         uint width, height, levels;
-        texture.GetDimensions(0, width, height, levels);
+        MaterialTextureSize(ubo, textureIndex, width, height, levels);
         const float lambda = log2(max(rayConeWidth * uvPerWorld, 1e-20)) + 0.5 * log2(float(width) * float(height)) + lodBias;
         return clamp(lambda, 0.0, float(max(levels, 1u) - 1u));
     }
@@ -245,8 +245,7 @@ namespace Bridge
         float4 baseColor = lut.workflow == 1.0 ? lut.diffuseFactor : lut.baseColorFactor;
         if (lut.baseColorTextureIndex != 0xFFFFFFFF)
         {
-            Texture2D albedoTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + lut.baseColorTextureIndex, 0));
-            baseColor *= albedoTex.SampleLevel(textureSampler, uv, textureLod(albedoTex, rayConeWidth, uvPerWorld, ubo->pathTracerTexLodBias));
+            baseColor *= SampleMaterialTextureLevel(ubo, lut.baseColorTextureIndex, textureSampler, uv, textureLod(ubo, lut.baseColorTextureIndex, rayConeWidth, uvPerWorld, ubo->pathTracerTexLodBias));
         }
 
         float metallic = lut.metallicFactor;
@@ -257,8 +256,7 @@ namespace Bridge
         float3 diffuseAlbedo = baseColor.rgb * (1.0 - saturate(metallic));
         if (lut.metallicRoughnessTextureIndex != 0xFFFFFFFF)
         {
-            Texture2D mrTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + lut.metallicRoughnessTextureIndex, 0));
-            float4 mrSample = mrTex.SampleLevel(textureSampler, uv, textureLod(mrTex, rayConeWidth, uvPerWorld, ubo->pathTracerTexLodBias));
+            float4 mrSample = SampleMaterialTextureLevel(ubo, lut.metallicRoughnessTextureIndex, textureSampler, uv, textureLod(ubo, lut.metallicRoughnessTextureIndex, rayConeWidth, uvPerWorld, ubo->pathTracerTexLodBias));
             if (lut.workflow == 1.0)
             {
                 roughness = 1.0 - lut.specularFactor.a * mrSample.a;
@@ -281,8 +279,7 @@ namespace Bridge
         // Normal mapping
         if (lut.normalTextureIndex != 0xFFFFFFFF)
         {
-            Texture2D normTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + lut.normalTextureIndex, 0));
-            float3 tangentNormal = normTex.SampleLevel(textureSampler, uv, textureLod(normTex, rayConeWidth, uvPerWorld, ubo->pathTracerTexLodBias)).xyz;
+            float3 tangentNormal = SampleMaterialTextureLevel(ubo, lut.normalTextureIndex, textureSampler, uv, textureLod(ubo, lut.normalTextureIndex, rayConeWidth, uvPerWorld, ubo->pathTracerTexLodBias)).xyz;
             // Match RTXPT's ApplyNormalMapRTXPT. Some Bistro DDNA maps omit Z and expect it to be
             // reconstructed; treating their stored zero as -1 bends highlights into the surface.
             tangentNormal.xy = tangentNormal.xy * 2.0 - 1.0;
@@ -301,8 +298,7 @@ namespace Bridge
         float transmission = lut.transmissionFactor;
         if (lut.transmissionTextureIndex != 0xFFFFFFFF)
         {
-            Texture2D transTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + lut.transmissionTextureIndex, 0));
-            transmission *= transTex.SampleLevel(textureSampler, uv, textureLod(transTex, rayConeWidth, uvPerWorld, ubo->pathTracerTexLodBias)).r;
+            transmission *= SampleMaterialTextureLevel(ubo, lut.transmissionTextureIndex, textureSampler, uv, textureLod(ubo, lut.transmissionTextureIndex, rayConeWidth, uvPerWorld, ubo->pathTracerTexLodBias)).r;
         }
 
         // 6. Setup BSDF data
@@ -336,8 +332,7 @@ namespace Bridge
         surface.emission = lut.emissiveFactor.rgb * lut.emissiveFactor.a;
         if (lut.emissiveTextureIndex != 0xFFFFFFFF)
         {
-            Texture2D emissiveTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + lut.emissiveTextureIndex, 0));
-            surface.emission *= emissiveTex.SampleLevel(textureSampler, uv, textureLod(emissiveTex, rayConeWidth, uvPerWorld, ubo->pathTracerTexLodBias)).rgb;
+            surface.emission *= SampleMaterialTextureLevel(ubo, lut.emissiveTextureIndex, textureSampler, uv, textureLod(ubo, lut.emissiveTextureIndex, rayConeWidth, uvPerWorld, ubo->pathTracerTexLodBias)).rgb;
         }
         surface.ior = ior;
         surface.isOpaque = (lut.alphaMode == 0);
@@ -373,8 +368,7 @@ namespace Bridge
         float alpha = lut.baseColorFactor.a;
         if (lut.baseColorTextureIndex != 0xFFFFFFFF)
         {
-            Texture2D albedoTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + lut.baseColorTextureIndex, 0));
-            alpha *= albedoTex.SampleLevel(textureSampler, uv, 0.0).a;
+            alpha *= SampleMaterialTextureLevel(ubo, lut.baseColorTextureIndex, textureSampler, uv, 0.0).a;
         }
 
         return lut.alphaMode == 2 ? opacitySample < saturate(alpha) : alpha >= lut.alphaCutoff;
@@ -418,8 +412,7 @@ namespace Bridge
         float alpha = lut.baseColorFactor.a;
         if (lut.baseColorTextureIndex != 0xFFFFFFFF)
         {
-            Texture2D albedoTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + lut.baseColorTextureIndex, 0));
-            alpha *= albedoTex.SampleLevel(textureSampler, uv, 0.0).a;
+            alpha *= SampleMaterialTextureLevel(ubo, lut.baseColorTextureIndex, textureSampler, uv, 0.0).a;
         }
         if (lut.alphaMode == 2)
             return float3(1.0 - saturate(alpha));

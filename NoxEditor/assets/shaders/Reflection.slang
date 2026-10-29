@@ -245,8 +245,7 @@ float4 fragMain(
         else
         {
             float2 hitUV = intersection_uv(lut, primIndex, rq.CandidateTriangleBarycentrics());
-            Texture2D tex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + lut.baseColorTextureIndex, 0));
-            float4 intersectionColor = tex.SampleLevel(textureSampler, hitUV, 0);
+            float4 intersectionColor = SampleMaterialTextureLevel(ubo, lut.baseColorTextureIndex, textureSampler, hitUV, 0);
 
             if (intersectionColor.a >= lut.alphaCutoff)
             {

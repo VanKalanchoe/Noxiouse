@@ -207,9 +207,8 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
         {
             if (textures[t] == 0xFFFFFFFF || textures[t] >= MipFeedbackSlots)
                 continue;
-            Texture2D texture = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + textures[t], 0));
             uint width, height;
-            texture.GetDimensions(width, height);
+            MaterialTextureSize(ubo, textures[t], width, height);
             reportMipFeedbackLod(ubo, textures[t], log2(max(surface.uvFootprint, 1e-20)) + 0.5 * log2(float(width) * float(height)) +
                                                    ubo->pathTracerTexLodBias);
         }

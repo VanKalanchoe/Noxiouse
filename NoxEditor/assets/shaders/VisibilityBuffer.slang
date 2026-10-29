@@ -130,9 +130,8 @@
         if (instance.alphaMode == 1 && instance.baseColorTextureIndex != 0xFFFFFFFF)
         {
             SamplerState samp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
-            Texture2D baseColorTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.baseColorTextureIndex, 0));
             float2 uv = (instance.baseColorTextureSet == 0) ? inVert.uv0 : inVert.uv1;
-            float4 baseColor = baseColorTex.Sample(samp, uv);
+            float4 baseColor = SampleMaterialTexture(ubo, instance.baseColorTextureIndex, samp, uv);
             if ((baseColor.a * instance.baseColorFactor.a) < instance.alphaMaskCutoff)
             {
                 discard;

@@ -208,8 +208,7 @@
             B_ortho = -B_ortho;
 
         float3x3 TBN = float3x3(T, B_ortho, N);
-        Texture2D normalTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + lut.normalTextureIndex, 0));
-        float3 tangentNormal = tangent_normal_from_map(normalTex.SampleLevel(textureSampler, hitUV, 0).xyz);
+        float3 tangentNormal = tangent_normal_from_map(SampleMaterialTextureLevel(ubo, lut.normalTextureIndex, textureSampler, hitUV, 0).xyz);
         return normalize(mul(tangentNormal, TBN));
     }
 
@@ -274,8 +273,7 @@
                 if (lut.baseColorTextureIndex != 0xFFFFFFFF)
                 {
                     float2 uv = intersection_uv(lut, primIndex, sq.CandidateTriangleBarycentrics());
-                    Texture2D tex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + lut.baseColorTextureIndex, 0));
-                    alpha *= tex.SampleLevel(textureSampler, uv, 0).a;
+                    alpha *= SampleMaterialTextureLevel(ubo, lut.baseColorTextureIndex, textureSampler, uv, 0).a;
                 }
                 if (lut.alphaMode == 2)
                     transmittance *= 1.0 - saturate(alpha);
@@ -368,8 +366,7 @@
                 else
                 {
                     float2 uvSample = intersection_uv(lut, primIndex, rq.CandidateTriangleBarycentrics());
-                    Texture2D tex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + lut.baseColorTextureIndex, 0));
-                    float4 col = tex.SampleLevel(textureSampler, uvSample, 0);
+                    float4 col = SampleMaterialTextureLevel(ubo, lut.baseColorTextureIndex, textureSampler, uvSample, 0);
                     if ((lut.alphaMode == 2 && rand(rngState) < saturate(col.a)) ||
                         (lut.alphaMode != 2 && col.a >= lut.alphaCutoff))
                     {
@@ -442,8 +439,7 @@
             float3 albedo = lut.baseColorFactor.rgb;
             if (lut.baseColorTextureIndex != 0xFFFFFFFF)
             {
-                Texture2D colTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + lut.baseColorTextureIndex, 0));
-                albedo *= colTex.SampleLevel(textureSampler, hitUV, 0).rgb;
+                albedo *= SampleMaterialTextureLevel(ubo, lut.baseColorTextureIndex, textureSampler, hitUV, 0).rgb;
             }
 
             // Sample Metallic & Roughness
@@ -451,8 +447,7 @@
             float roughness = clamp(lut.roughnessFactor, 0.04, 1.0);
             if (lut.metallicRoughnessTextureIndex != 0xFFFFFFFF)
             {
-                Texture2D mrTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + lut.metallicRoughnessTextureIndex, 0));
-                float4 mrSample = mrTex.SampleLevel(textureSampler, hitUV, 0);
+                float4 mrSample = SampleMaterialTextureLevel(ubo, lut.metallicRoughnessTextureIndex, textureSampler, hitUV, 0);
                 roughness = clamp(roughness * mrSample.g, 0.04, 1.0);
                 metallic = clamp(metallic * mrSample.b, 0.0, 1.0);
             }
@@ -625,8 +620,7 @@
             float transFactor = lut.transmissionFactor;
             if (lut.transmissionTextureIndex != 0xFFFFFFFF)
             {
-                Texture2D transmissionTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + lut.transmissionTextureIndex, 0));
-                transFactor *= transmissionTex.SampleLevel(textureSampler, hitUV, 0).r;
+                transFactor *= SampleMaterialTextureLevel(ubo, lut.transmissionTextureIndex, textureSampler, hitUV, 0).r;
             }
 
             // Branch 1: Transmission (Glass / Refraction)

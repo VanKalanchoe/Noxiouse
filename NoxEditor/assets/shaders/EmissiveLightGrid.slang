@@ -71,15 +71,14 @@ void trianglesMain(uint3 tid : SV_DispatchThreadID, uniform PushConstantEmissive
         float3 emission = instance.emissiveFactor.rgb * instance.emissiveFactor.a;
         if (instance.emissiveTextureIndex != 0xFFFFFFFF)
         {
-            Texture2D emissive = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.emissiveTextureIndex, 0));
             uint width, height, levels;
-            emissive.GetDimensions(0, width, height, levels);
+            MaterialTextureSize(ubo, instance.emissiveTextureIndex, width, height, levels);
             const float2 e1 = v1.uv0 - v0.uv0;
             const float2 e2 = v2.uv0 - v0.uv0;
             const float uvArea = 0.5 * abs(e1.x * e2.y - e1.y * e2.x);
             // The mip whose texel covers the triangle: its average emission.
             const float lod = clamp(0.5 * log2(max(uvArea * float(width) * float(height), 1e-8)), 0.0, float(levels - 1));
-            emission *= emissive.SampleLevel(SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0)),
+            emission *= SampleMaterialTextureLevel(ubo, instance.emissiveTextureIndex, SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0)),
                                              (v0.uv0 + v1.uv0 + v2.uv0) / 3.0, lod).rgb;
         }
         const float power = dot(max(emission, float3(0.0)), float3(0.2126, 0.7152, 0.0722)) * record.area;

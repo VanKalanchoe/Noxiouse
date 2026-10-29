@@ -180,8 +180,7 @@ bool trace_visibility_alpha(
         else
         {
             float2 sUV = intersection_uv(sLut, sPrim, shadowQuery.CandidateTriangleBarycentrics());
-            Texture2D sTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + sLut.baseColorTextureIndex, 0));
-            if (sTex.SampleLevel(textureSampler, sUV, 0).a >= sLut.alphaCutoff)
+            if (SampleMaterialTextureLevel(ubo, sLut.baseColorTextureIndex, textureSampler, sUV, 0).a >= sLut.alphaCutoff)
             {
                 shadowQuery.CommitNonOpaqueTriangleHit();
             }
@@ -423,8 +422,7 @@ PSOutput fragMain(
         else
         {
             float2 hitUV = intersection_uv(lut, primIndex, rq.CandidateTriangleBarycentrics());
-            Texture2D tex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + lut.baseColorTextureIndex, 0));
-            float4 intersectionColor = tex.SampleLevel(textureSampler, hitUV, 0);
+            float4 intersectionColor = SampleMaterialTextureLevel(ubo, lut.baseColorTextureIndex, textureSampler, hitUV, 0);
 
             if (intersectionColor.a >= lut.alphaCutoff)
             {
@@ -508,8 +506,7 @@ PSOutput fragMain(
         float3 albedo = hitLut.baseColorFactor.rgb;
         if (hitLut.baseColorTextureIndex != 0xFFFFFFFF)
         {
-            Texture2D hitTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + hitLut.baseColorTextureIndex, 0));
-            albedo *= hitTex.SampleLevel(textureSampler, hitUV, 0).rgb;
+            albedo *= SampleMaterialTextureLevel(ubo, hitLut.baseColorTextureIndex, textureSampler, hitUV, 0).rgb;
         }
 
         float3 emissive = hitLut.emissiveFactor.rgb * hitLut.emissiveFactor.a;

@@ -96,8 +96,7 @@ namespace EmissiveLights
         if (instance.emissiveTextureIndex != 0xFFFFFFFF)
         {
             const float2 uv = v0.uv0 * barycentrics.x + v1.uv0 * barycentrics.y + v2.uv0 * barycentrics.z;
-            Texture2D emissive = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.emissiveTextureIndex, 0));
-            result.radiance *= emissive.SampleLevel(SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0)), uv, textureLod).rgb;
+            result.radiance *= SampleMaterialTextureLevel(ubo, instance.emissiveTextureIndex, SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0)), uv, textureLod).rgb;
         }
         const float areaPdf = areaProbability / (0.5 * doubleArea);
         result.pdf = areaPdf * distanceSquared / cosLight;

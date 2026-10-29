@@ -15,9 +15,8 @@ bool isMipFeedbackPixel(int2 pixel, uint frame)
 // got their sharp mips), and with this frame's LOD bias (UniformBufferObject::mipFeedbackLodBias).
 float relativeMipLod(UniformBufferObject* ubo, uint textureIndex, float2 ddxUV, float2 ddyUV)
 {
-    Texture2D texture = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + textureIndex, 0));
     uint width, height;
-    texture.GetDimensions(width, height);
+    MaterialTextureSize(ubo, textureIndex, width, height);
     const float2 size = float2(width, height);
     const float2 dx = ddxUV * size;
     const float2 dy = ddyUV * size;

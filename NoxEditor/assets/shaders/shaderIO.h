@@ -578,6 +578,39 @@ struct SkinningWorkItem
 STATIC_CONST uint32_t SKINNING_VERTICES_PER_WORK_ITEM = 256;
 
 #ifdef __SLANG__
+// Material textures (§5.12.2): every lookup of a material's texture -- raster, ray traced, path traced -- goes through these, by the
+// texture index the material holds. Today that is the image's bindless slot; a streaming virtual texture is resolved here through its
+// page table, so no shader has to know which kind a material uses.
+Texture2D MaterialTexture(UniformBufferObject* ubo, uint textureIndex)
+{
+    return Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + textureIndex, 0));
+}
+float4 SampleMaterialTexture(UniformBufferObject* ubo, uint textureIndex, SamplerState samplerState, float2 uv)
+{
+    return MaterialTexture(ubo, textureIndex).Sample(samplerState, uv);
+}
+float4 SampleMaterialTextureBias(UniformBufferObject* ubo, uint textureIndex, SamplerState samplerState, float2 uv, float bias)
+{
+    return MaterialTexture(ubo, textureIndex).SampleBias(samplerState, uv, bias);
+}
+float4 SampleMaterialTextureGrad(UniformBufferObject* ubo, uint textureIndex, SamplerState samplerState, float2 uv, float2 ddxUV, float2 ddyUV)
+{
+    return MaterialTexture(ubo, textureIndex).SampleGrad(samplerState, uv, ddxUV, ddyUV);
+}
+float4 SampleMaterialTextureLevel(UniformBufferObject* ubo, uint textureIndex, SamplerState samplerState, float2 uv, float lod)
+{
+    return MaterialTexture(ubo, textureIndex).SampleLevel(samplerState, uv, lod);
+}
+// Texels of the full-resolution mip and the mip count (LOD from ray cones and footprints, mip feedback).
+void MaterialTextureSize(UniformBufferObject* ubo, uint textureIndex, out uint width, out uint height, out uint mipCount)
+{
+    MaterialTexture(ubo, textureIndex).GetDimensions(0, width, height, mipCount);
+}
+void MaterialTextureSize(UniformBufferObject* ubo, uint textureIndex, out uint width, out uint height)
+{
+    MaterialTexture(ubo, textureIndex).GetDimensions(width, height);
+}
+
 // Ray traversal can use compact deformed positions while hit shading retains the base vertex's UVs and material data.
 Vertex LoadRayTracingVertex(GpuRayTracingInstance instance, uint vertexIndex)
 {

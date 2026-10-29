@@ -141,8 +141,7 @@ import Math;
 // or from the interpolated mesh normal and tangent attributes.
 float3 getNormal(UniformBufferObject* ubo, InstanceData instance, VSOutput vertIn, SamplerState samplerState)
 {
-    Texture2D normalTexture = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.normalTextureIndex, 0));
-    return normal_from_map(normalTexture.Sample(samplerState, instance.normalTextureSet == 0 ? vertIn.uv0 : vertIn.uv1).xyz,
+    return normal_from_map(SampleMaterialTexture(ubo, instance.normalTextureIndex, samplerState, instance.normalTextureSet == 0 ? vertIn.uv0 : vertIn.uv1).xyz,
                            vertIn.normal, vertIn.tangent);
 }
 
@@ -269,8 +268,7 @@ FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform Pu
     {
         if(instance.baseColorTextureIndex != 0xFFFFFFFF)
         {
-            Texture2D baseColorTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.baseColorTextureIndex, 0));
-            baseColor = baseColorTex.Sample(sampLinearHandle, instance.baseColorTextureSet == 0 ? vertIn.uv0 : vertIn.uv1) * instance.baseColorFactor;
+            baseColor = SampleMaterialTexture(ubo, instance.baseColorTextureIndex, sampLinearHandle, instance.baseColorTextureSet == 0 ? vertIn.uv0 : vertIn.uv1) * instance.baseColorFactor;
         }
         else
         {
@@ -293,8 +291,7 @@ FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform Pu
         {
             // Roughness is stored in the 'g' channel, metallic is stored in the 'b' channel.
 			// This layout intentionally reserves the 'r' channel for (optional) occlusion map data
-            Texture2D metallicRoughnessTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.metallicRoughnessTextureIndex, 0));
-            float4 mrSample = metallicRoughnessTex.Sample(sampLinearHandle, instance.physicalDescriptorTextureSet == 0 ? vertIn.uv0 : vertIn.uv1);
+            float4 mrSample = SampleMaterialTexture(ubo, instance.metallicRoughnessTextureIndex, sampLinearHandle, instance.physicalDescriptorTextureSet == 0 ? vertIn.uv0 : vertIn.uv1);
             perceptualRoughness = mrSample.g * perceptualRoughness;
 			metallic = mrSample.b * metallic;
         }
@@ -309,8 +306,7 @@ FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform Pu
 		// The albedo may be defined from a base texture or a flat color
         if(instance.baseColorTextureIndex != 0xFFFFFFFF)
         {
-            Texture2D baseColorTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.baseColorTextureIndex, 0));
-            baseColor = baseColorTex.Sample(sampLinearHandle, instance.baseColorTextureSet == 0 ? vertIn.uv0 : vertIn.uv1) * instance.baseColorFactor;
+            baseColor = SampleMaterialTexture(ubo, instance.baseColorTextureIndex, sampLinearHandle, instance.baseColorTextureSet == 0 ? vertIn.uv0 : vertIn.uv1) * instance.baseColorFactor;
         }
         else
         {
@@ -323,8 +319,7 @@ FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform Pu
         // Values from specular glossiness workflow are converted to metallic roughness
         if(instance.metallicRoughnessTextureIndex != 0xFFFFFFFF)
         {
-            Texture2D metallicRoughnessTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.metallicRoughnessTextureIndex, 0));
-            perceptualRoughness = 1.0 - metallicRoughnessTex.Sample(sampLinearHandle, instance.physicalDescriptorTextureSet == 0 ? vertIn.uv0 : vertIn.uv1).a;
+            perceptualRoughness = 1.0 - SampleMaterialTexture(ubo, instance.metallicRoughnessTextureIndex, sampLinearHandle, instance.physicalDescriptorTextureSet == 0 ? vertIn.uv0 : vertIn.uv1).a;
         }
         else
         {
@@ -336,15 +331,13 @@ FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform Pu
         float4 diffuse = float4(1.0);
         if(instance.baseColorTextureIndex != 0xFFFFFFFF)
         {
-            Texture2D colorMap = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.baseColorTextureIndex, 0));
-            diffuse = SRGBtoLINEAR(colorMap.Sample(sampLinearHandle, vertIn.uv0)); 
+            diffuse = SRGBtoLINEAR(SampleMaterialTexture(ubo, instance.baseColorTextureIndex, sampLinearHandle, vertIn.uv0)); 
         }
 
         float3 specular = float3(0.0);
         if(instance.metallicRoughnessTextureIndex != 0xFFFFFFFF)
         {
-            Texture2D specGlossTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.metallicRoughnessTextureIndex, 0));
-            specular = SRGBtoLINEAR(specGlossTex.Sample(sampLinearHandle, vertIn.uv0)).rgb;
+            specular = SRGBtoLINEAR(SampleMaterialTexture(ubo, instance.metallicRoughnessTextureIndex, sampLinearHandle, vertIn.uv0)).rgb;
         }
 
         float maxSpecular = max(max(specular.r, specular.g), specular.b);
@@ -477,16 +470,14 @@ FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform Pu
 	// Apply optional PBR terms for additional (optional) shading
     if(instance.occlusionTextureIndex != 0xFFFFFFFF)
     {
-        Texture2D occlusionTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.occlusionTextureIndex, 0));
-        float oa = occlusionTex.Sample(sampLinearHandle, instance.occlusionTextureSet == 0 ? vertIn.uv0 : vertIn.uv1).r;
+        float oa = SampleMaterialTexture(ubo, instance.occlusionTextureIndex, sampLinearHandle, instance.occlusionTextureSet == 0 ? vertIn.uv0 : vertIn.uv1).r;
         color = lerp(color, color * oa, u_OcclusionStrength);
     }
 
     float3 emissive = instance.emissiveFactor.rgb * instance.emissiveStrength;
     if(instance.emissiveTextureIndex != 0xFFFFFFFF)
     {
-        Texture2D emissiveTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.emissiveTextureIndex, 0));
-        emissive *= emissiveTex.Sample(sampLinearHandle, instance.emissiveTextureSet == 0 ? vertIn.uv0 : vertIn.uv1).rgb;
+        emissive *= SampleMaterialTexture(ubo, instance.emissiveTextureIndex, sampLinearHandle, instance.emissiveTextureSet == 0 ? vertIn.uv0 : vertIn.uv1).rgb;
     }
     color += emissive;
 

@@ -1129,8 +1129,7 @@ float3 perturb_normal(GpuRayTracingInstance lut, Vertex v0, Vertex v1, Vertex v2
         B_ortho = -B_ortho;
 
     float3x3 TBN = float3x3(T, B_ortho, N);
-    Texture2D normalTex = Texture2D.Handle(uint2(g_UBO->imageHeapIndexOffset + lut.normalTextureIndex, 0));
-    float3 tangentNormal = tangent_normal_from_map(normalTex.SampleLevel(textureSampler, hitUV, 0).xyz);
+    float3 tangentNormal = tangent_normal_from_map(SampleMaterialTextureLevel(g_UBO, lut.normalTextureIndex, textureSampler, hitUV, 0).xyz);
     return normalize(mul(tangentNormal, TBN));
 }
 
@@ -1172,16 +1171,14 @@ RAB_Surface LoadSurfaceFromRayPayload(RAB_RayPayload rp, float3 rayOrigin, float
     float3 albedo = lut.baseColorFactor.rgb;
     if (lut.baseColorTextureIndex != 0xFFFFFFFF)
     {
-        Texture2D colTex = Texture2D.Handle(uint2(g_UBO->imageHeapIndexOffset + lut.baseColorTextureIndex, 0));
-        albedo *= colTex.SampleLevel(textureSampler, hitUV, 0).rgb;
+        albedo *= SampleMaterialTextureLevel(g_UBO, lut.baseColorTextureIndex, textureSampler, hitUV, 0).rgb;
     }
 
     float metallic = clamp(lut.metallicFactor, 0.0, 1.0);
     float roughness = clamp(lut.roughnessFactor, kMinRoughness, 1.0);
     if (lut.metallicRoughnessTextureIndex != 0xFFFFFFFF)
     {
-        Texture2D mrTex = Texture2D.Handle(uint2(g_UBO->imageHeapIndexOffset + lut.metallicRoughnessTextureIndex, 0));
-        float4 mrSample = mrTex.SampleLevel(textureSampler, hitUV, 0);
+        float4 mrSample = SampleMaterialTextureLevel(g_UBO, lut.metallicRoughnessTextureIndex, textureSampler, hitUV, 0);
         roughness = clamp(roughness * mrSample.g, kMinRoughness, 1.0);
         metallic = clamp(metallic * mrSample.b, 0.0, 1.0);
     }
@@ -1243,8 +1240,7 @@ RAB_RayPayload TraceNextBounce(RayDesc ray)
         else
         {
             float2 uv = intersection_uv_candidate(lut, primIndex, rq.CandidateTriangleBarycentrics());
-            Texture2D tex = Texture2D.Handle(uint2(g_UBO->imageHeapIndexOffset + lut.baseColorTextureIndex, 0));
-            float4 col = tex.SampleLevel(textureSampler, uv, 0);
+            float4 col = SampleMaterialTextureLevel(g_UBO, lut.baseColorTextureIndex, textureSampler, uv, 0);
             if (col.a >= lut.alphaCutoff)
                 rq.CommitNonOpaqueTriangleHit();
         }

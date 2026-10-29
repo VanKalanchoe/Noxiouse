@@ -20,9 +20,8 @@ bool screen_probe_candidate_blocks(UniformBufferObject* ubo, GpuRayTracingInstan
     if (instance.baseColorTextureIndex != 0xFFFFFFFF)
     {
         const float2 uv = intersection_uv(instance, primitive, barycentrics);
-        Texture2D tex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + instance.baseColorTextureIndex, 0));
         SamplerState linearRepeat = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
-        alpha *= tex.SampleLevel(linearRepeat, uv, RayAlphaTestLod).a;
+        alpha *= SampleMaterialTextureLevel(ubo, instance.baseColorTextureIndex, linearRepeat, uv, RayAlphaTestLod).a;
     }
     return instance.alphaMode == 1 ? alpha >= instance.alphaCutoff : alpha >= 0.5;
 }
@@ -83,8 +82,7 @@ float3 screen_probe_shade_hit(UniformBufferObject* ubo, uint instanceSlot, uint 
     float3 albedo = hit.workflow == 1.0 ? hit.diffuseFactor.rgb : hit.baseColorFactor.rgb; // spec-gloss: the diffuse factor
     if (hit.baseColorTextureIndex != 0xFFFFFFFF)
     {
-        Texture2D tex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + hit.baseColorTextureIndex, 0));
-        albedo *= tex.SampleLevel(linearRepeat, uv, lod).rgb;
+        albedo *= SampleMaterialTextureLevel(ubo, hit.baseColorTextureIndex, linearRepeat, uv, lod).rgb;
     }
     if (hit.workflow < 0.5) // metal reflects, it has no diffuse color
         albedo *= 1.0 - saturate(hit.metallicFactor);
@@ -95,8 +93,7 @@ float3 screen_probe_shade_hit(UniformBufferObject* ubo, uint instanceSlot, uint 
         emission = float3(0.0);
     if (hit.emissiveTextureIndex != 0xFFFFFFFF && any(emission > 0.0))
     {
-        Texture2D tex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + hit.emissiveTextureIndex, 0));
-        emission *= tex.SampleLevel(linearRepeat, uv, lod).rgb;
+        emission *= SampleMaterialTextureLevel(ubo, hit.emissiveTextureIndex, linearRepeat, uv, lod).rgb;
     }
 
     // Direct light: the strongest lights at the hit exactly, one more for all the others (LightSelection.slang), each behind its

@@ -155,8 +155,7 @@ float4 fragMain(
         else
         {
             float2 hitUV = intersection_uv(lut, primIndex, rq.CandidateTriangleBarycentrics());
-            Texture2D tex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + lut.baseColorTextureIndex, 0));
-            float4 intersectionColor = tex.SampleLevel(textureSampler, hitUV, 0);
+            float4 intersectionColor = SampleMaterialTextureLevel(ubo, lut.baseColorTextureIndex, textureSampler, hitUV, 0);
 
             if (intersectionColor.a >= lut.alphaCutoff)
             {
@@ -232,8 +231,7 @@ float4 fragMain(
     float3 albedo = hitLut.baseColorFactor.rgb;
     if (hitLut.baseColorTextureIndex != 0xFFFFFFFF)
     {
-        Texture2D hitTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + hitLut.baseColorTextureIndex, 0));
-        albedo *= hitTex.SampleLevel(textureSampler, hitUV, 0).rgb;
+        albedo *= SampleMaterialTextureLevel(ubo, hitLut.baseColorTextureIndex, textureSampler, hitUV, 0).rgb;
     }
 
     // Direct light: the strongest lights at the hit exactly, one more for all the others (LightSelection.slang), each behind its

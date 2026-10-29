@@ -1201,9 +1201,35 @@ Baseline before 5a (Release, no debugger, Bistro dragged into an empty scene): t
   clamp; the new image gets a new bindless slot and materials re-pack onto it (§5.12.3).
 - **Budget:** texture pool share of VRAM; over budget drops highest mips of lowest-priority textures.
 
-#### 5.12.2 Virtual texturing (later)
-Page-table indirection textures + physical page cache (UE Virtual Texture pools): for terrain,
-decals and very large unique textures where mip streaming granularity is insufficient.
+#### 5.12.2 Streaming virtual texturing (SVT, chosen 2026-10-29)
+UE5's Streaming Virtual Texturing: a virtual texture is resident by **tile**, not by whole mip, so a 16K texture of which the view
+shows a corner holds only that corner's tiles at the mips the pixels ask for. It complements mip streaming (§5.12.3) and does not
+replace it: textures stay mip-streamed unless marked virtual (Unreal's per-texture "Virtual Texture Streaming", plus an automatic
+threshold for very large ones).
+
+- **Sampling (SVT-1, built 2026-10-29).** Every material texture lookup goes through one entry point in `shaderIO.h`:
+  `SampleMaterialTexture` / `...Bias` / `...Grad` / `...Level` and `MaterialTextureSize`, by the texture index the material holds.
+  It covers raster, ray-traced hits, the path tracer and ReSTIR: 74 lookups in 25 shaders, converted mechanically and compiled.
+  The behavior is unchanged: the index is still the image's bindless slot. A virtual texture's index will carry a flag and resolve
+  through its page table here, so no material shader has to know which kind it samples.
+- **Cook (SVT-2).** A virtual texture's .ntex holds its block-compressed mips cut into 128x128-texel tiles, each with a 4-texel
+  border copied from its neighbours (UE's defaults: bilinear and anisotropic filtering never read outside the tile). Each tile is
+  one contiguous file range, so it is read on its own (`VFS::ReadRange`), like a geometry page. Mips smaller than a tile go into one
+  tail tile, always resident.
+- **Runtime (SVT-3).**
+  - Physical tile pools: one image per block format, a grid of 136x136 tiles, with LRU slots.
+  - A page table per virtual texture: a uint image with its own mip chain. Each texel holds the physical tile and the mip it maps,
+    always the best resident ancestor, so a missing tile falls back to coarser data with no hole and no shader loop. It is updated
+    by the frame that installs or evicts tiles (as geometry pages are, §5.7.2).
+  - Tile feedback: the G-buffer and transparent passes report, from one pixel per 8x8 tile, the tile and mip they want, deduped
+    into a request list and read back.
+  - The streamer: requests by priority, file reads straight into staging, copies into pool slots, eviction by LRU within the pool
+    budget (the Textures category's share).
+- **Virtual sampling (SVT-4).** A page table lookup at the pixel's mip gives a physical tile and a scale. The pixel samples the pool
+  with gradients scaled into the tile, so anisotropic filtering works within the border. Trilinear is two lookups blended across
+  the mip boundary. Ray-traced and path-traced hits use their ray-cone LOD through the same path, without feedback (as in UE).
+- **Exit criterion:** a 16K test texture renders identically to its mip-streamed version while holding only the visible tiles.
+  Bistro is unchanged with SVT off, and its texture memory falls further with SVT on for its largest textures.
 
 #### 5.12.3 Implementation (Phase 6a, September 2026)
 Baseline before 6a: every texture is resident at full resolution once loaded -- Bistro holds 2141 MB of textures
