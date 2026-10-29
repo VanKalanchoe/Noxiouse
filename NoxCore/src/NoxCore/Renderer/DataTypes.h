@@ -24,6 +24,9 @@ namespace Nox
         GeometryRange rtIndices; // flat triangle list for the BLAS build and hit shading
         uint32_t blasId = UINT32_MAX;
         uint32_t gpuSceneMesh = UINT32_MAX; // GPU scene mesh slot
+        // Geometry streaming (§5.7.2): the mesh's range of the page table, and its GeometryStreamer id (UINT32_MAX: not streamed).
+        GeometryRange geometryPages;
+        uint32_t streamingId = UINT32_MAX;
         // Local axis-aligned bounds of the vertices, worked out at upload (not saved): the editor's size readout and measuring use them.
         glm::vec3 boundsMin{ 0.0f };
         glm::vec3 boundsMax{ 0.0f };
@@ -236,6 +239,9 @@ namespace Nox
         std::vector<MeshPage> Pages;
         std::vector<uint32_t> PageDependencies;
         uint32_t RootPageCount = 0;
+        // Local bounds of all the vertices (paged geometry: the vertex arrays may hold only the root pages).
+        glm::vec3 BoundsMin{ 0.0f };
+        glm::vec3 BoundsMax{ 0.0f };
         // Set when only the root pages were read: Vertices, MeshletVertices and MeshletTriangles hold just those, the other pages
         // stream from this cooked file (MeshPage::PayloadOffset).
         std::filesystem::path StreamedFrom;

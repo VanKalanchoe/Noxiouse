@@ -14,6 +14,7 @@
 #include "GeometryArena.h"
 #include "MemoryBudget.h"
 #include "UploadManager.h"
+#include "GeometryStreamer.h"
 #include "NoxCore/Core/WorldUnits.h"
 #include "GpuScene.h"
 #include "NoxCore/RenderGraph/RenderGraph.h"
@@ -109,6 +110,8 @@ namespace Nox
         StagingSpan Staging;
         shaderio::GpuMesh GpuMesh{}; // counts and bounds, filled by WriteMeshUpload
         bool IsOpaque = true;
+        // Geometry that streams (§5.7.2): what the geometry streamer keeps once the mesh is published; null otherwise.
+        std::shared_ptr<StreamedMeshSource> Streaming;
     };
 
     // Everything whose release must wait for the frames that could still reference it (§5.8.4): a GPU buffer to
@@ -741,6 +744,8 @@ namespace Nox
         std::optional<MeshUpload> BeginMeshUpload(const MeshData& data, bool isOpaque, bool wait);
         // Any thread: the submesh's streams into its staging, with the offsets of its ranges, and its counts and bounds.
         static void WriteMeshUpload(const MeshData& data, MeshUpload& upload);
+        // Whether the cluster is in the submesh's first BLAS: the original clusters, or for streamed geometry the finest of its root pages.
+        static bool rtCluster(const MeshData& data, size_t cluster);
         uint64_t EndMeshUpload(const MeshUpload& upload, bool nextFrameReads);
         // Draws from now on, ray traced once its BLAS is built in a frame.
         MeshHandle PublishMesh(const MeshUpload& upload);
@@ -749,6 +754,12 @@ namespace Nox
         uint64_t GetCompletedUploadValue() const { return m_uploads.GetCompletedValue(); }
         // Meshes that draw but are not ray traced yet (their BLAS waits for a frame's build budget).
         size_t GetPendingBlasBuilds() const { return m_blasBuilds.size(); }
+        // Geometry streaming (§5.7.2): once per frame from the asset manager, within the upload budget it shares with the loads.
+        void UpdateGeometryStreaming(uint64_t& uploadBudget) { m_geometryStreamer.Update(uploadBudget); }
+        GeometryStreamer& GetGeometryStreamer() { return m_geometryStreamer; }
+        // Whether loads read only the root pages of geometry that streams (the rest follows the feedback); off: every page.
+        bool IsGeometryStreamingEnabled() const { return m_geometryStreamer.IsEnabled(); }
+        static bool StreamsGeometryPages();
         // What a memory category holds and may hold (§5.8.3); the budget is 0 until the first sample.
         const MemoryCategoryStats& GetMemoryCategory(MemoryCategory category) const
         {
@@ -851,6 +862,7 @@ namespace Nox
         void manageBlasResidency();
         void readMipFeedback(uint32_t frameSlot);
         void readClusterStats(uint32_t frameSlot);
+        void readGeometryFeedback(uint32_t frameSlot);
 
         void initRenderer();
         void cleanupSwapChain();
@@ -971,6 +983,11 @@ namespace Nox
         void addNRDGuidesPass();
         void addMipFeedbackReadbackPass();
         void addClusterStatsReadbackPass();
+        // Geometry streaming (§5.7.2): the frame's page activations and evictions (cluster records, resident flags), right after the
+        // GPU scene update and before anything reads them; the feedback (which pages the LOD wants) and its readback.
+        void addGeometryPagesUpdatePass();
+        void addGeometryFeedbackPass();
+        void createGeometryStreamingPipelines();
         void addRTShadowPasses();
         void addRTReflectionPasses();
         // Decides whether DDGI runs and declares its atlases up front: RT reflections and forward shading, which come
@@ -1624,6 +1641,7 @@ namespace Nox
             bool isOpaque = true;
             bool valid = false;   // the mesh is loaded
             bool evicted = false; // its BLAS is freed until a traced instance needs it
+            uint32_t streamingId = UINT32_MAX; // streamed geometry (§5.7.2): built from its leaf cut instead
         };
         std::vector<BlasSource> m_blasSources;
         uint32_t m_evictedBlasCount = 0;
@@ -1673,6 +1691,11 @@ namespace Nox
             GeometryRange vertices;
             GeometryRange indices;
             bool isOpaque = true;
+            // Streamed geometry (§5.7.2): the leaf cut is taken when the build is recorded (GeometryStreamer::PrepareBlasBuild), into a
+            // new structure; its indices address the whole vertex stream.
+            uint32_t streamingId = UINT32_MAX;
+            bool absolute = false; // indices into the whole vertex stream (vertices unused)
+            uint32_t maxVertex = 0; // absolute: the highest vertex the indices reach
         };
         std::vector<BlasBuild> m_blasBuilds;
         std::unique_ptr<NRI::Buffer> m_blasScratch; // shared by the builds of one frame, recorded one after another
@@ -1758,6 +1781,36 @@ namespace Nox
         std::vector<std::unique_ptr<NRI::Buffer>> m_clusterStatsReadback;
         std::array<bool, MAX_FRAMES_IN_FLIGHT> m_clusterStatsPending{};
         shaderio::ClusterStats m_clusterStats{};
+
+        // Geometry streaming (§5.7.2). The page table (GpuGeometryPage per page of every streamed mesh) is a geometry stream too.
+        friend class GeometryStreamer;
+        GeometryArena m_geometryPageStream;
+        // Changes the streamer makes to the draw stream and the page table, recorded by the frame (addGeometryPagesUpdatePass):
+        // gathered here, copied into the frame slot's staging buffer once the slot is free.
+        enum class GeometryPatchTarget : uint8_t { Draws, Pages };
+        struct GeometryPatch
+        {
+            GeometryPatchTarget Target = GeometryPatchTarget::Draws;
+            uint64_t Destination = 0; // bytes into the target buffer
+            uint64_t Source = 0;      // bytes into m_geometryPatchData
+            uint64_t Size = 0;
+        };
+        void stageGeometryPatch(GeometryPatchTarget target, uint64_t destination, const void* data, uint64_t size);
+        // Into the frame slot's staging buffer (after its previous submission finished).
+        void prepareGeometryPatches(uint32_t frameSlot);
+        std::vector<uint8_t> m_geometryPatchData;
+        std::vector<GeometryPatch> m_geometryPatches;
+        std::array<std::unique_ptr<NRI::Buffer>, MAX_FRAMES_IN_FLIGHT> m_geometryPatchStaging;
+        std::array<std::vector<NRI::BufferCopyRegion>, MAX_FRAMES_IN_FLIGHT> m_geometryDrawPatchRegions;
+        std::array<std::vector<NRI::BufferCopyRegion>, MAX_FRAMES_IN_FLIGHT> m_geometryPagePatchRegions;
+        std::unique_ptr<NRI::Buffer> m_geometryFeedbackBuffer;
+        std::vector<std::unique_ptr<NRI::Buffer>> m_geometryFeedbackReadback;
+        std::array<bool, MAX_FRAMES_IN_FLIGHT> m_geometryFeedbackPending{};
+        std::unique_ptr<NRI::Pipeline> m_geometryFeedbackPipeline;
+        std::unique_ptr<NRI::Pipeline> m_clusterIndicesPipeline;
+        // Per frame slot: the cluster index jobs of the streamed BLAS builds recorded in it.
+        std::array<std::unique_ptr<NRI::Buffer>, MAX_FRAMES_IN_FLIGHT> m_clusterIndexJobBuffers;
+        GeometryStreamer m_geometryStreamer{ *this };
         uint32_t m_visibleInstanceCount = 0;
         uint32_t m_lateCandidateCount = 0;
         uint32_t m_lateDrawnCount = 0;

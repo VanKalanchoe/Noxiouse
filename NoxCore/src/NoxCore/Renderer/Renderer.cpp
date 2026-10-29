@@ -415,6 +415,17 @@ namespace Nox
             .size = sizeof(shaderio::ClusterStats),
             .usage = NRI::BufferUsage::StorageStatic
         });
+        m_geometryFeedbackBuffer = m_device->createBuffer(NRI::BufferDesc{
+            .size = sizeof(shaderio::GeometryStreamingFeedback),
+            .usage = NRI::BufferUsage::StorageStatic
+        });
+        for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+        {
+            m_geometryFeedbackReadback.emplace_back(m_device->createBuffer(NRI::BufferDesc{
+                .size = sizeof(shaderio::GeometryStreamingFeedback),
+                .usage = NRI::BufferUsage::Staging
+            }));
+        }
 
         m_renderer2D = std::make_unique<Renderer2D>(isEditor, RendererContext
                                                     {
@@ -443,6 +454,8 @@ namespace Nox
         // which asserts on s_Instance and queues its geometry, so this drains in rounds -- clearing the vector in place
         // would push into it while its elements are being destroyed.
         m_device->waitIdle();
+        // Page reads write into staging: done before anything goes.
+        m_geometryStreamer.Shutdown();
         while (!m_deferredReleases.empty())
         {
             std::vector<DeferredRelease> releasing;
@@ -580,6 +593,7 @@ namespace Nox
             gridDesc.shaders.front().entryPoint = "scanMain";
             m_emissiveScanPipeline = m_device->createPipeline(gridDesc, *m_shaderCompiler);
         }
+        createGeometryStreamingPipelines();
 
         // Create every resource needed for PBR
     }
@@ -3591,6 +3605,7 @@ namespace Nox
         m_meshletVertexStream.Init(*m_device, sizeof(uint32_t), INITIAL_VERTS, MAX_ELEMENTS);
         m_meshletTriangleStream.Init(*m_device, sizeof(uint8_t), INITIAL_TRIS, MAX_ELEMENTS);
         m_rtIndexStream.Init(*m_device, sizeof(uint32_t), INITIAL_TRIS, MAX_ELEMENTS, NRI::BufferUsage::Index);
+        m_geometryPageStream.Init(*m_device, sizeof(shaderio::GpuGeometryPage), 4096, MAX_ELEMENTS);
     }
 
     GeometryRange Renderer::allocateGeometry(GeometryArena& stream, uint32_t count)
@@ -3671,20 +3686,29 @@ namespace Nox
         const uint32_t drawCount = static_cast<uint32_t>(data.Draws.size());
         const uint32_t meshVertCount = static_cast<uint32_t>(data.MeshletVertices.size());
         const uint32_t meshTriCount = static_cast<uint32_t>(data.MeshletTriangles.size());
-        // The flat triangle list rebuilt from the meshlets: BLAS build input and hit shading.
+        // The flat triangle list rebuilt from the meshlets: BLAS build input and hit shading. Streamed geometry: the finest clusters
+        // of its root pages (the leaf cut, rebuilt as pages stream in, GeometryStreamer).
+        const bool streamed = data.IsStreamed();
         uint32_t rtIndexCount = 0;
         if (vertCount > 0)
         {
             for (size_t index = 0; index < data.Draws.size(); ++index)
             {
-                if (data.Bounds[index].lodLevel == 0)
+                if (rtCluster(data, index))
                     rtIndexCount += data.Draws[index].triangleCount * 3;
             }
         }
 
         MeshUpload upload;
         upload.IsOpaque = isOpaque;
-        if (!data.Vertices.empty())
+        if (!data.Pages.empty())
+        {
+            // Paged geometry carries the bounds of all its vertices (the arrays may hold only the root pages).
+            upload.Handle.boundsMin = data.BoundsMin;
+            upload.Handle.boundsMax = data.BoundsMax;
+            upload.Handle.hasBounds = true;
+        }
+        else if (!data.Vertices.empty())
         {
             glm::vec3 lowest(FLT_MAX), highest(-FLT_MAX);
             for (const shaderio::Vertex& vertex : data.Vertices)
@@ -3713,7 +3737,34 @@ namespace Nox
         upload.Handle.meshletVertices = allocateGeometry(m_meshletVertexStream, meshVertCount);
         upload.Handle.meshletTriangles = allocateGeometry(m_meshletTriangleStream, meshTriCount);
         upload.Handle.rtIndices = allocateGeometry(m_rtIndexStream, rtIndexCount);
+        if (streamed)
+        {
+            upload.Handle.geometryPages = allocateGeometry(m_geometryPageStream, static_cast<uint32_t>(data.Pages.size()));
+            auto source = std::make_shared<StreamedMeshSource>();
+            source->File = data.StreamedFrom;
+            source->Pages = data.Pages;
+            source->Dependencies = data.PageDependencies;
+            source->Draws = data.Draws;
+            source->RefinedPages.reserve(data.Bounds.size());
+            for (const shaderio::MeshletBounds& bounds : data.Bounds)
+                source->RefinedPages.push_back(bounds.refinedPage);
+            source->RootPageCount = data.RootPageCount;
+            upload.Streaming = std::move(source);
+        }
         return upload;
+    }
+
+    bool Renderer::rtCluster(const MeshData& data, size_t cluster)
+    {
+        // Streamed: resident (a root page) and nothing finer resident. Otherwise the original clusters: the other LOD levels cover the
+        // same surface.
+        if (data.IsStreamed())
+        {
+            const MeshPage& lastRoot = data.Pages[data.RootPageCount - 1];
+            const uint32_t refined = data.Bounds[cluster].refinedPage;
+            return cluster < lastRoot.FirstCluster + lastRoot.ClusterCount && (refined == shaderio::ClusterNoPage || refined >= data.RootPageCount);
+        }
+        return data.Bounds[cluster].lodLevel == 0;
     }
 
     void Renderer::WriteMeshUpload(const MeshData& data, MeshUpload& upload)
@@ -3725,13 +3776,22 @@ namespace Nox
         // Staging memory is written front to back and never read (it may be write-combined). Exactly the ranges'
         // counts: a block holds no more, and the bounds are one per draw.
         memcpy(staging + layout.vertices, data.Vertices.data(), sizeof(shaderio::Vertex) * handle.vertices.count);
+        // Streamed geometry: only its root pages' clusters have data yet (they come first); the others' records are written as their
+        // pages arrive, and are never read before (their pages are not resident).
+        const bool streamed = data.IsStreamed();
+        const size_t clustersWithData = streamed ? data.Pages[data.RootPageCount - 1].FirstCluster + data.Pages[data.RootPageCount - 1].ClusterCount
+                                                 : handle.meshletDraws.count;
         for (size_t index = 0; index < handle.meshletDraws.count; ++index)
         {
             // Meshlet offsets become stream offsets.
-            shaderio::MeshletDraw draw = data.Draws[index];
-            draw.vertexOffset += handle.meshletVertices.offset;
-            draw.triangleOffset += handle.meshletTriangles.offset;
-            draw.globalVertexOffset += handle.vertices.offset;
+            shaderio::MeshletDraw draw{};
+            if (index < clustersWithData)
+            {
+                draw = data.Draws[index];
+                draw.vertexOffset += handle.meshletVertices.offset;
+                draw.triangleOffset += handle.meshletTriangles.offset;
+                draw.globalVertexOffset += handle.vertices.offset;
+            }
             memcpy(staging + layout.draws + index * sizeof(draw), &draw, sizeof(draw));
         }
         memcpy(staging + layout.bounds, data.Bounds.data(), sizeof(shaderio::MeshletBounds) * std::min<size_t>(data.Bounds.size(), handle.meshletBounds.count));
@@ -3742,11 +3802,12 @@ namespace Nox
         gpuMesh = {};
         if (handle.rtIndices.IsValid())
         {
-            // The original clusters: the other LOD levels cover the same surface.
+            // Streamed geometry's indices address the whole vertex stream (its pages lie anywhere in it); the others' their own range.
+            const uint32_t vertexBase = streamed ? handle.vertices.offset : 0u;
             uint8_t* indices = staging + layout.rtIndices;
             for (size_t index = 0; index < data.Draws.size(); ++index)
             {
-                if (data.Bounds[index].lodLevel != 0)
+                if (!rtCluster(data, index))
                     continue;
                 const shaderio::MeshletDraw& draw = data.Draws[index];
                 for (uint32_t triangle = 0; triangle < draw.triangleCount; ++triangle)
@@ -3754,9 +3815,9 @@ namespace Nox
                     const uint32_t triBase = draw.triangleOffset + triangle * 3;
                     // A cluster indexes its page's vertex block (§5.7.2), which starts at globalVertexOffset.
                     const uint32_t corners[3] = {
-                        draw.globalVertexOffset + data.MeshletVertices[draw.vertexOffset + data.MeshletTriangles[triBase + 0]],
-                        draw.globalVertexOffset + data.MeshletVertices[draw.vertexOffset + data.MeshletTriangles[triBase + 1]],
-                        draw.globalVertexOffset + data.MeshletVertices[draw.vertexOffset + data.MeshletTriangles[triBase + 2]]
+                        vertexBase + draw.globalVertexOffset + data.MeshletVertices[draw.vertexOffset + data.MeshletTriangles[triBase + 0]],
+                        vertexBase + draw.globalVertexOffset + data.MeshletVertices[draw.vertexOffset + data.MeshletTriangles[triBase + 1]],
+                        vertexBase + draw.globalVertexOffset + data.MeshletVertices[draw.vertexOffset + data.MeshletTriangles[triBase + 2]]
                     };
                     memcpy(indices, corners, sizeof(corners));
                     indices += sizeof(corners);
@@ -3767,28 +3828,37 @@ namespace Nox
         // GPU scene mesh record: instances reference it by slot.
         gpuMesh.drawsOffset = handle.meshletDraws.offset;
         gpuMesh.boundsOffset = handle.meshletBounds.offset;
-        gpuMesh.verticesOffset = handle.vertices.offset;
-        gpuMesh.vertexCount = handle.vertices.count;
+        // Streamed: the vertex stream from its start (the RT indices are absolute); the count bounds the indices of this BLAS.
+        gpuMesh.verticesOffset = streamed ? 0u : handle.vertices.offset;
+        gpuMesh.vertexCount = streamed ? handle.vertices.offset + handle.vertices.count : handle.vertices.count;
         gpuMesh.indicesOffset = handle.rtIndices.IsValid() ? handle.rtIndices.offset : shaderio::NoGeometryRange;
         gpuMesh.meshletCount = handle.meshletDraws.count;
-        for (size_t index = 0; index < data.Draws.size(); ++index)
-        {
-            if (data.Bounds[index].lodLevel == 0)
-                gpuMesh.triangleCount += data.Draws[index].triangleCount;
-        }
+        gpuMesh.triangleCount = handle.rtIndices.count / 3;
+        gpuMesh.pageOffset = streamed ? handle.geometryPages.offset : shaderio::NoGeometryRange;
+        gpuMesh.pageCount = streamed ? static_cast<uint32_t>(data.Pages.size()) : 0u;
 
-        // Local bounds of the (bind pose) vertices.
+        // Local bounds of the (bind pose) vertices; paged geometry has them from its cook (its arrays may hold only the root pages).
         glm::vec3 boundsMin(std::numeric_limits<float>::max());
         glm::vec3 boundsMax(std::numeric_limits<float>::lowest());
-        for (const shaderio::Vertex& vertex : data.Vertices)
+        float radius = 0.0f;
+        if (!data.Pages.empty())
         {
-            boundsMin = glm::min(boundsMin, vertex.pos);
-            boundsMax = glm::max(boundsMax, vertex.pos);
+            boundsMin = data.BoundsMin;
+            boundsMax = data.BoundsMax;
+            radius = glm::length(boundsMax - boundsMin) * 0.5f;
+        }
+        else
+        {
+            for (const shaderio::Vertex& vertex : data.Vertices)
+            {
+                boundsMin = glm::min(boundsMin, vertex.pos);
+                boundsMax = glm::max(boundsMax, vertex.pos);
+            }
+            const glm::vec3 boxCenter = (boundsMin + boundsMax) * 0.5f;
+            for (const shaderio::Vertex& vertex : data.Vertices)
+                radius = std::max(radius, glm::distance(boxCenter, vertex.pos));
         }
         const glm::vec3 center = (boundsMin + boundsMax) * 0.5f;
-        float radius = 0.0f;
-        for (const shaderio::Vertex& vertex : data.Vertices)
-            radius = std::max(radius, glm::distance(center, vertex.pos));
         gpuMesh.boundsSphere = glm::vec4(center, radius);
         gpuMesh.boundsMin = boundsMin;
         gpuMesh.boundsMax = boundsMax;
@@ -3826,7 +3896,9 @@ namespace Nox
         if (handle.rtIndices.IsValid())
         {
             // The BLAS object now, its build in a frame (addBLASBuildPass).
-            const NRI::AccelerationStructureBuildDesc buildDesc = blasBuildDesc({ .vertices = handle.vertices, .indices = handle.rtIndices, .isOpaque = upload.IsOpaque });
+            const NRI::AccelerationStructureBuildDesc buildDesc = blasBuildDesc({ .vertices = handle.vertices, .indices = handle.rtIndices, .isOpaque = upload.IsOpaque,
+                                                                                  .absolute = upload.Streaming != nullptr,
+                                                                                  .maxVertex = handle.vertices.offset + handle.vertices.count - 1 });
             const NRI::AccelerationStructureBuildSizes buildSizes = m_device->getAccelerationStructureBuildSizes(buildDesc);
 
             std::unique_ptr<NRI::Buffer> asBuffer = m_device->createBuffer(NRI::BufferDesc{
@@ -3861,12 +3933,16 @@ namespace Nox
 
         // Not ray traced until its BLAS is built in a frame (SetMeshBlas).
         handle.gpuSceneMesh = m_gpuScene.AddMesh(upload.GpuMesh, 0);
+        if (upload.Streaming)
+            handle.streamingId = m_geometryStreamer.Register(handle, upload.Streaming, handle.geometryPages.offset, upload.IsOpaque);
         if (handle.blasId != UINT32_MAX)
         {
-            m_blasBuilds.push_back({ handle.blasId, handle.gpuSceneMesh, handle.vertices, handle.rtIndices, upload.IsOpaque });
+            m_blasBuilds.push_back({ .blasId = handle.blasId, .meshSlot = handle.gpuSceneMesh, .vertices = handle.vertices, .indices = handle.rtIndices,
+                                     .isOpaque = upload.IsOpaque, .absolute = upload.Streaming != nullptr,
+                                     .maxVertex = handle.vertices.offset + handle.vertices.count - 1 });
             if (m_blasSources.size() <= handle.blasId)
                 m_blasSources.resize(handle.blasId + 1);
-            m_blasSources[handle.blasId] = { handle.gpuSceneMesh, handle.vertices, handle.rtIndices, upload.IsOpaque, true, false };
+            m_blasSources[handle.blasId] = { handle.gpuSceneMesh, handle.vertices, handle.rtIndices, upload.IsOpaque, true, false, handle.streamingId };
         }
         return handle;
     }
@@ -3884,9 +3960,10 @@ namespace Nox
             .flags = NRI::AccelerationStructureBuildFlags::PreferFastTrace | NRI::AccelerationStructureBuildFlags::AllowCompaction,
             .triangles = {
                 NRI::AccelerationStructureTrianglesDesc{
-                    .vertexBufferAddress = m_vertexStream.GetDeviceAddress() + sizeof(shaderio::Vertex) * uint64_t(build.vertices.offset),
+                    // Streamed geometry's indices address the whole stream (its pages lie anywhere in it).
+                    .vertexBufferAddress = m_vertexStream.GetDeviceAddress() + (build.absolute ? 0 : sizeof(shaderio::Vertex) * uint64_t(build.vertices.offset)),
                     .vertexStride = sizeof(shaderio::Vertex),
-                    .maxVertex = build.vertices.count - 1,
+                    .maxVertex = build.absolute ? build.maxVertex : build.vertices.count - 1,
                     .indexBufferAddress = m_rtIndexStream.GetDeviceAddress() + sizeof(uint32_t) * uint64_t(build.indices.offset),
                     .primitiveCount = build.indices.count / 3,
                     .primitiveOffset = 0,
@@ -3914,6 +3991,10 @@ namespace Nox
             m_evictedBlasCount -= m_blasSources[handle.blasId].evicted ? 1 : 0;
             m_blasSources[handle.blasId] = BlasSource{};
         }
+
+        // Its streamed pages and BLAS index ranges go with the frames in flight (the handle's own ranges below).
+        if (handle.streamingId != UINT32_MAX)
+            m_geometryStreamer.Unregister(handle.streamingId);
 
         // Instances of this mesh stop drawing now; their entities register again (with the reloaded mesh).
         if (handle.gpuSceneMesh != GpuScene::InvalidSlot)
@@ -4533,6 +4614,8 @@ namespace Nox
             addProceduralSkyPass(); // before anything reads the environment
             addCloudShadowPass();
             addGpuSceneUpdatePass();
+            addGeometryPagesUpdatePass();
+            addGeometryFeedbackPass();
             addComputeSkinningPass();
             addAnimatedBLASPass();
             addBLASBuildPass();
@@ -5154,6 +5237,7 @@ namespace Nox
         uniformData.geometryMeshletBoundsReference = m_meshletBoundsStream.GetDeviceAddress();
         uniformData.geometryMeshletVerticesReference = m_meshletVertexStream.GetDeviceAddress();
         uniformData.geometryMeshletTrianglesReference = m_meshletTriangleStream.GetDeviceAddress();
+        uniformData.geometryPagesReference = m_geometryPageStream.GetDeviceAddress();
 
     }
 
@@ -5353,6 +5437,7 @@ namespace Nox
             m_meshletVertexStream.Free(mesh->meshletVertices);
             m_meshletTriangleStream.Free(mesh->meshletTriangles);
             m_rtIndexStream.Free(mesh->rtIndices);
+            m_geometryPageStream.Free(mesh->geometryPages);
 
             // The GPU scene stopped tracing this mesh when it was unloaded. (An evicted BLAS has no structure left, its id is freed too.)
             if (mesh->blasId != UINT32_MAX && mesh->blasId < m_meshBLASes.size())
@@ -5379,7 +5464,7 @@ namespace Nox
         uint64_t geometryCommitted = 0;
         uint64_t geometryUsed = 0;
         for (const GeometryArena* stream : { &m_vertexStream, &m_meshletDrawStream, &m_meshletBoundsStream,
-                                             &m_meshletVertexStream, &m_meshletTriangleStream, &m_rtIndexStream })
+                                             &m_meshletVertexStream, &m_meshletTriangleStream, &m_rtIndexStream, &m_geometryPageStream })
         {
             geometryCommitted += stream->GetCapacityBytes();
             geometryUsed += stream->GetUsedBytes();
@@ -5530,6 +5615,8 @@ namespace Nox
             readBlasCompactedSizes(frameIndex);
             readMipFeedback(frameIndex);
             readClusterStats(frameIndex);
+            readGeometryFeedback(frameIndex);
+            prepareGeometryPatches(frameIndex);
         }
 
         {
@@ -5772,6 +5859,15 @@ namespace Nox
             BlasSource& source = m_blasSources[blasId];
             if (!source.valid || !source.evicted || m_gpuScene.GetMeshLastTracedFrame(source.meshSlot) != frame)
                 continue;
+            if (source.streamingId != UINT32_MAX)
+            {
+                // Streamed geometry: from its leaf cut now, into a structure made when the build is recorded.
+                source.evicted = false;
+                --m_evictedBlasCount;
+                m_blasBuilds.push_back({ .blasId = blasId, .meshSlot = source.meshSlot, .isOpaque = source.isOpaque,
+                                         .streamingId = source.streamingId, .absolute = true });
+                continue;
+            }
             const BlasBuild build{ blasId, source.meshSlot, source.vertices, source.indices, source.isOpaque };
             const NRI::AccelerationStructureBuildSizes sizes = m_device->getAccelerationStructureBuildSizes(blasBuildDesc(build));
             MeshBLAS& blas = m_meshBLASes[blasId];
@@ -5828,6 +5924,8 @@ namespace Nox
             blas = MeshBLAS{};
             m_blasSources[blasId].evicted = true;
             ++m_evictedBlasCount;
+            if (m_blasSources[blasId].streamingId != UINT32_MAX)
+                m_geometryStreamer.OnBlasEvicted(m_blasSources[blasId].streamingId);
             ++evicted;
         }
         if (evicted > 0)
@@ -5902,6 +6000,65 @@ namespace Nox
 
         m_clusterStats = *static_cast<const shaderio::ClusterStats*>(m_clusterStatsReadback[frameSlot]->map(0, sizeof(shaderio::ClusterStats)));
         m_clusterStatsReadback[frameSlot]->unmap();
+    }
+
+    bool Renderer::StreamsGeometryPages()
+    {
+        return s_Instance && s_Instance->m_geometryStreamer.IsEnabled();
+    }
+
+    void Renderer::readGeometryFeedback(uint32_t frameSlot)
+    {
+        if (!std::exchange(m_geometryFeedbackPending[frameSlot], false))
+            return;
+        const auto* feedback = static_cast<const shaderio::GeometryStreamingFeedback*>(
+            m_geometryFeedbackReadback[frameSlot]->map(0, sizeof(shaderio::GeometryStreamingFeedback)));
+        m_geometryStreamer.ApplyFeedback(*feedback, m_sceneFrameCounter);
+        m_geometryFeedbackReadback[frameSlot]->unmap();
+    }
+
+    void Renderer::stageGeometryPatch(GeometryPatchTarget target, uint64_t destination, const void* data, uint64_t size)
+    {
+        if (size == 0)
+            return;
+        const uint64_t source = m_geometryPatchData.size();
+        m_geometryPatchData.resize(source + size);
+        memcpy(m_geometryPatchData.data() + source, data, size);
+        m_geometryPatches.push_back({ target, destination, source, size });
+    }
+
+    void Renderer::prepareGeometryPatches(uint32_t frameSlot)
+    {
+        m_geometryDrawPatchRegions[frameSlot].clear();
+        m_geometryPagePatchRegions[frameSlot].clear();
+        if (m_geometryPatches.empty())
+            return;
+
+        // The slot's previous submission is done (the caller waited for it): its staging buffer can be rewritten or replaced.
+        const uint64_t bytes = m_geometryPatchData.size();
+        std::unique_ptr<NRI::Buffer>& staging = m_geometryPatchStaging[frameSlot];
+        if (!staging || staging->getSize() < bytes)
+            staging = m_device->createBuffer(NRI::BufferDesc{ .size = std::max<uint64_t>(bytes + bytes / 2, 64 * 1024), .usage = NRI::BufferUsage::Staging });
+        memcpy(staging->map(0, bytes), m_geometryPatchData.data(), bytes);
+        staging->unmap();
+        for (const GeometryPatch& patch : m_geometryPatches)
+        {
+            std::vector<NRI::BufferCopyRegion>& regions = patch.Target == GeometryPatchTarget::Draws ? m_geometryDrawPatchRegions[frameSlot]
+                                                                                                     : m_geometryPagePatchRegions[frameSlot];
+            regions.push_back({ .srcOffset = patch.Source, .dstOffset = patch.Destination, .size = patch.Size });
+        }
+        m_geometryPatchData.clear();
+        m_geometryPatches.clear();
+    }
+
+    void Renderer::createGeometryStreamingPipelines()
+    {
+        NRI::PipelineDesc desc{};
+        desc.type = NRI::PipelineType::Compute;
+        desc.shaders.push_back({ NRI::ShaderStage::Compute, "computeMain", "assets/shaders/GeometryStreamingFeedback.slang" });
+        m_geometryFeedbackPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        desc.shaders.front().sourcePath = "assets/shaders/ClusterIndices.slang";
+        m_clusterIndicesPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
     void Renderer::readMipFeedback(uint32_t frameSlot)

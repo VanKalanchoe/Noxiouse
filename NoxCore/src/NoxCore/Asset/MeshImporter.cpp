@@ -186,6 +186,14 @@ namespace Nox
                 }
             }
 
+            data.BoundsMin = glm::vec3(FLT_MAX);
+            data.BoundsMax = glm::vec3(-FLT_MAX);
+            for (const shaderio::Vertex& vertex : vertices)
+            {
+                data.BoundsMin = glm::min(data.BoundsMin, vertex.pos);
+                data.BoundsMax = glm::max(data.BoundsMax, vertex.pos);
+            }
+
             data.Vertices.clear();
             data.Bounds.clear();
             data.Draws.clear();

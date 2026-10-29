@@ -269,13 +269,14 @@ namespace Nox
         class MeshLoad final : public AssetLoader::Load
         {
         public:
-            MeshLoad(AssetHandle handle, const AssetMetadata& metadata, const std::filesystem::path& assetDirectory)
-                : Load(handle, metadata), m_AssetDirectory(assetDirectory)
+            MeshLoad(AssetHandle handle, const AssetMetadata& metadata, const std::filesystem::path& assetDirectory, bool streamPages)
+                : Load(handle, metadata), m_AssetDirectory(assetDirectory), m_StreamPages(streamPages)
             {
-                m_Parse = JobSystem::Get().AsyncIO("Read Mesh", JobPriority::Normal, [assetDirectory, metadata](const CancellationToken&)
+                // Geometry that streams comes with its root pages; the rest follows the feedback (GeometryStreamer, §5.7.2).
+                m_Parse = JobSystem::Get().AsyncIO("Read Mesh", JobPriority::Normal, [assetDirectory, metadata, streamPages](const CancellationToken&)
                 {
                     Parsed parsed;
-                    parsed.Mesh = MeshImporter::ReadCookedMesh(assetDirectory, metadata);
+                    parsed.Mesh = MeshImporter::ReadCookedMesh(assetDirectory, metadata, streamPages);
                     parsed.SourceHash = hashSource(assetDirectory, metadata);
                     return parsed;
                 });
@@ -296,11 +297,12 @@ namespace Nox
                     {
                         // First import or a changed source: cooked (glTF parse, meshlets, clips, materials) as a CPU job.
                         m_CookStarted = true;
-                        m_Parse = JobSystem::Get().Async("Cook Mesh", JobPriority::Background, [assetDirectory = m_AssetDirectory, metadata = m_Metadata](const CancellationToken&)
+                        m_Parse = JobSystem::Get().Async("Cook Mesh", JobPriority::Background,
+                                                         [assetDirectory = m_AssetDirectory, metadata = m_Metadata, streamPages = m_StreamPages](const CancellationToken&)
                         {
                             Parsed cooked;
                             if (MeshImporter::CookMesh(assetDirectory, metadata))
-                                cooked.Mesh = MeshImporter::ReadCookedMesh(assetDirectory, metadata);
+                                cooked.Mesh = MeshImporter::ReadCookedMesh(assetDirectory, metadata, streamPages);
                             return cooked;
                         });
                         return false;
@@ -430,6 +432,7 @@ namespace Nox
             }
 
             std::filesystem::path m_AssetDirectory;
+            bool m_StreamPages = false;
             TaskFuture<Parsed> m_Parse;
             bool m_CookStarted = false;
             CookedMesh m_Cooked;
@@ -530,7 +533,7 @@ namespace Nox
             case AssetType::Mesh:
             case AssetType::StaticMesh:
             case AssetType::MeshSource:
-                m_Loads.push_back(std::make_unique<MeshLoad>(handle, metadata, assetDirectory));
+                m_Loads.push_back(std::make_unique<MeshLoad>(handle, metadata, assetDirectory, Renderer::StreamsGeometryPages()));
                 break;
             default:
                 m_Loads.push_back(std::make_unique<ImportLoad>(handle, metadata, assetDirectory));

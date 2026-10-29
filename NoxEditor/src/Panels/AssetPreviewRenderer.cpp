@@ -28,6 +28,7 @@ namespace Nox
         constexpr uint32_t ThumbnailSize = 192;
         // Frames a thumbnail is drawn before its image is kept: the GPU scene upload, then materials and textures settling.
         constexpr uint32_t SettleFrames = 8;
+        constexpr uint32_t StreamingSettleFrames = 60;
         // Waiting for an asset to load: after this many frames a mesh is drawn with its embedded materials standing in for .nmat
         // files still loading; after the second, the asset is given up (its tile keeps the file icon).
         constexpr uint32_t StandInFrames = 120;
@@ -345,7 +346,8 @@ namespace Nox
             job.IsPlaced = true;
         }
 
-        if (job.Frames < SettleFrames)
+        // Also while geometry pages it asked for are streaming in (§5.7.2), for a while.
+        if (job.Frames < SettleFrames || (!renderer->GetGeometryStreamer().IsIdle() && job.Frames < SettleFrames + StreamingSettleFrames))
         {
             Submit(Renderer::ThumbnailView, job.Placed, ThumbnailSize);
             ++job.Frames;

@@ -234,6 +234,19 @@ namespace Nox
         }
     }
 
+    void GpuScene::UpdateMeshGeometry(uint32_t meshSlot, uint32_t indicesOffset, uint32_t triangleCount, uint32_t vertexCount)
+    {
+        shaderio::GpuMesh& mesh = m_Meshes.Edit(meshSlot);
+        mesh.indicesOffset = indicesOffset;
+        mesh.triangleCount = triangleCount;
+        mesh.vertexCount = vertexCount;
+        for (uint32_t instanceSlot = 0; instanceSlot < static_cast<uint32_t>(m_InstanceStates.size()); ++instanceSlot)
+        {
+            if (m_InstanceStates[instanceSlot].Mesh == meshSlot)
+                WriteRayTracingInstance(instanceSlot);
+        }
+    }
+
     uint64_t GpuScene::GetDeviceBytes() const
     {
         uint64_t bytes = 0;

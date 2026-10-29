@@ -971,6 +971,28 @@ namespace Nox
             if (ImGui::SliderInt("Pool Override (MB, 0 = budget)", &poolOverrideMB, 0, 4096))
                 streamer.SetPoolOverride(static_cast<uint64_t>(poolOverrideMB) * 1024 * 1024);
         }
+
+        // Geometry streaming (§5.7.2): cluster pages of the static meshes, loaded by the LOD's feedback and evicted least recently
+        // wanted first when the pool is full; a smaller pool forces coarser geometry where it is wanted least.
+        if (ImGui::CollapsingHeader("Geometry Streaming"))
+        {
+            GeometryStreamer& streamer = m_Renderer->GetGeometryStreamer();
+            const GeometryStreamer::Stats& stats = streamer.GetStats();
+            constexpr double MB = 1024.0 * 1024.0;
+            bool enabled = streamer.IsEnabled();
+            if (ImGui::Checkbox("Stream Geometry Pages", &enabled))
+                streamer.SetEnabled(enabled);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Meshes loaded from now on read only their root pages, the rest as the LOD asks for it.\n"
+                                  "Off: meshes loaded from now on read every page (reload the scene to apply to loaded ones).");
+            ImGui::Text("Streamed meshes: %u | pages %u of %u resident, %u loading", stats.Meshes, stats.ResidentPages, stats.Pages, stats.LoadingPages);
+            ImGui::Text("Resident %.1f MB | root pages %.1f MB | pool %.0f MB", stats.ResidentBytes / MB, stats.RootBytes / MB, stats.PoolBytes / MB);
+            ImGui::Text("Requests %u (dropped %u) | waiting for room %u | loaded %llu, evicted %llu", stats.Requests, stats.DroppedRequests,
+                        stats.WantedNotResident, static_cast<unsigned long long>(stats.PageLoads), static_cast<unsigned long long>(stats.PageEvictions));
+            int poolOverrideMB = static_cast<int>(streamer.GetPoolOverride() / (1024 * 1024));
+            if (ImGui::SliderInt("Geometry Pool Override (MB, 0 = budget)", &poolOverrideMB, 0, 4096))
+                streamer.SetPoolOverride(static_cast<uint64_t>(poolOverrideMB) * 1024 * 1024);
+        }
         
         static const char* tonemapModeNames[] = {
             "0: None (Clamped Linear)",

@@ -139,9 +139,38 @@ namespace Nox
         std::vector<std::pair<NRI::AccelerationStructureBuildDesc, NRI::AccelerationStructure*>> builds;
         std::vector<BlasCompactionQuery>& queries = m_blasCompactionQueries[frameIndex];
         queries.clear();
+        std::vector<shaderio::ClusterIndexJob> clusterJobs;
         for (; count < m_blasBuilds.size() && primitives < BlasBuildPrimitivesPerFrame && count < BlasCompactionQueriesPerFrame; ++count)
         {
-            const BlasBuild& build = m_blasBuilds[count];
+            BlasBuild build = m_blasBuilds[count];
+            if (build.streamingId != UINT32_MAX)
+            {
+                // Streamed geometry (§5.7.2): its leaf cut as of this frame (pages activated earlier in the frame included), written
+                // by ClusterIndices.slang below, into a new structure of its size; the one it replaces goes once frames are done.
+                if (!m_geometryStreamer.PrepareBlasBuild(build.streamingId, clusterJobs, build.indices, build.maxVertex))
+                    continue;
+                build.absolute = true;
+                const NRI::AccelerationStructureBuildSizes sizes = m_device->getAccelerationStructureBuildSizes(blasBuildDesc(build));
+                MeshBLAS replacement;
+                replacement.storageBuffer = m_device->createBuffer(NRI::BufferDesc{ .size = sizes.accelerationStructureSize, .usage = NRI::BufferUsage::AccelerationStructure });
+                replacement.as = m_device->createAccelerationStructure(NRI::AccelerationStructureDesc{
+                    .type = NRI::AccelerationStructureType::BottomLevel,
+                    .storageBuffer = replacement.storageBuffer.get(),
+                    .bufferOffset = 0,
+                    .size = sizes.accelerationStructureSize
+                });
+                replacement.serial = ++m_blasSerial;
+                if (m_meshBLASes[build.blasId].as)
+                {
+                    std::scoped_lock lock(m_deferredReleasesMutex);
+                    m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT + 1, std::move(m_meshBLASes[build.blasId]) });
+                }
+                m_meshBLASes[build.blasId] = std::move(replacement);
+                if (build.blasId < m_blasSources.size())
+                    m_blasSources[build.blasId].indices = build.indices;
+                // The hit shaders read the new indices from the frame the TLAS references the new BLAS (both the next).
+                m_gpuScene.UpdateMeshGeometry(build.meshSlot, build.indices.offset, build.indices.count / 3, build.maxVertex + 1);
+            }
             MeshBLAS& blas = m_meshBLASes[build.blasId];
             const NRI::AccelerationStructureBuildDesc desc = blasBuildDesc(build);
             scratchSize = std::max(scratchSize, m_device->getAccelerationStructureBuildSizes(desc).buildScratchSize);
@@ -162,12 +191,44 @@ namespace Nox
             m_blasScratch = m_device->createBuffer(NRI::BufferDesc{ .size = scratchSize, .usage = NRI::BufferUsage::AccelerationStructureScratch });
         }
 
+        // The streamed builds' cluster index jobs, in this frame slot's buffer (its previous submission is done).
+        if (!clusterJobs.empty())
+        {
+            const uint64_t jobBytes = sizeof(shaderio::ClusterIndexJob) * clusterJobs.size();
+            std::unique_ptr<NRI::Buffer>& jobBuffer = m_clusterIndexJobBuffers[frameIndex];
+            if (!jobBuffer || jobBuffer->getSize() < jobBytes)
+                jobBuffer = m_device->createBuffer(NRI::BufferDesc{ .size = std::max<uint64_t>(jobBytes + jobBytes / 2, 64 * 1024), .usage = NRI::BufferUsage::Storage });
+            memcpy(jobBuffer->map(0, jobBytes), clusterJobs.data(), jobBytes);
+            jobBuffer->unmap();
+        }
+
         // Reads the geometry streams, which the frame's submission waits on the upload timeline for.
         m_renderGraph.AddPass("BLAS Build", RGPassFlags::NeverCull,
             [&](RGBuilder&) {},
-            [this, copies = std::move(copies), builds = std::move(builds), queryPool = m_blasCompactionQueryPools[frameIndex].get()](RGPassContext& context)
+            [this, copies = std::move(copies), builds = std::move(builds), queryPool = m_blasCompactionQueryPools[frameIndex].get(),
+             jobCount = static_cast<uint32_t>(clusterJobs.size())](RGPassContext& context)
             {
                 NRI::CommandBuffer& cmd = context.Cmd();
+                if (jobCount > 0 && m_clusterIndicesPipeline)
+                {
+                    // The streamed meshes' leaf cut triangles into the RT index stream, before the builds (and the hit shaders) read them.
+                    shaderio::PushConstantClusterIndices push{};
+                    push.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                    push.jobsReference = m_clusterIndexJobBuffers[frameIndex]->getDeviceAddress();
+                    push.indicesReference = m_rtIndexStream.GetDeviceAddress();
+                    push.jobCount = jobCount;
+                    push.groupCount = std::min(jobCount, 4096u);
+                    cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *m_clusterIndicesPipeline);
+                    cmd.pushData(&push, sizeof(push));
+                    cmd.dispatch(push.groupCount, 1, 1);
+                    const NRI::BufferBarrierDesc written{
+                        .buffer = &m_rtIndexStream.GetBuffer(),
+                        .before = { NRI::AccessBits::ShaderWrite, NRI::StageBits::Compute },
+                        .after = { NRI::AccessBits::ShaderRead | NRI::AccessBits::AccelerationStructureRead,
+                                   NRI::StageBits::AccelerationStructureBuild | NRI::StageBits::RayTracing | NRI::StageBits::Compute | NRI::StageBits::Fragment }
+                    };
+                    cmd.resourceBarriers({}, std::span(&written, 1));
+                }
                 for (const auto& [source, compacted] : copies)
                     cmd.copyAccelerationStructure(*source, *compacted, true);
                 if (!copies.empty())
@@ -186,6 +247,108 @@ namespace Nox
                     built.push_back(blas);
                 }
                 cmd.writeCompactedSizes(built, *queryPool, 0);
+            });
+    }
+
+    void Renderer::addGeometryPagesUpdatePass()
+    {
+        std::vector<NRI::BufferCopyRegion>& drawRegions = m_geometryDrawPatchRegions[frameIndex];
+        std::vector<NRI::BufferCopyRegion>& pageRegions = m_geometryPagePatchRegions[frameIndex];
+        if ((drawRegions.empty() && pageRegions.empty()) || !m_geometryPatchStaging[frameIndex])
+            return;
+
+        // Geometry streaming (§5.7.2): pages that became drawable or were evicted, by this frame's commands -- every pass of the frame
+        // sees one residency. Their data arrived earlier on the transfer queue into ranges nothing read.
+        m_renderGraph.AddPass("Geometry Pages Update", RGPassFlags::NeverCull,
+            [&](RGBuilder&) {},
+            [this, drawRegions = std::move(drawRegions), pageRegions = std::move(pageRegions)](RGPassContext& context)
+            {
+                NRI::CommandBuffer& cmd = context.Cmd();
+                constexpr uint32_t readers = NRI::StageBits::Task | NRI::StageBits::Mesh | NRI::StageBits::Compute | NRI::StageBits::Fragment |
+                                             NRI::StageBits::RayTracing | NRI::StageBits::AccelerationStructureBuild;
+                const NRI::BufferBarrierDesc before[2] = {
+                    { &m_meshletDrawStream.GetBuffer(), { NRI::AccessBits::ShaderRead, readers }, { NRI::AccessBits::TransferWrite, NRI::StageBits::Transfer } },
+                    { &m_geometryPageStream.GetBuffer(), { NRI::AccessBits::ShaderRead | NRI::AccessBits::ShaderWrite, readers },
+                      { NRI::AccessBits::TransferWrite, NRI::StageBits::Transfer } }
+                };
+                cmd.resourceBarriers({}, before);
+                NRI::Buffer& staging = *m_geometryPatchStaging[frameIndex];
+                if (!drawRegions.empty())
+                    cmd.copyBuffer(staging, m_meshletDrawStream.GetBuffer(), std::span<const NRI::BufferCopyRegion>(drawRegions));
+                if (!pageRegions.empty())
+                    cmd.copyBuffer(staging, m_geometryPageStream.GetBuffer(), std::span<const NRI::BufferCopyRegion>(pageRegions));
+                const NRI::BufferBarrierDesc after[2] = {
+                    { &m_meshletDrawStream.GetBuffer(), { NRI::AccessBits::TransferWrite, NRI::StageBits::Transfer }, { NRI::AccessBits::ShaderRead, readers } },
+                    { &m_geometryPageStream.GetBuffer(), { NRI::AccessBits::TransferWrite, NRI::StageBits::Transfer },
+                      { NRI::AccessBits::ShaderRead | NRI::AccessBits::ShaderWrite, readers } }
+                };
+                cmd.resourceBarriers({}, after);
+            });
+    }
+
+    void Renderer::addGeometryFeedbackPass()
+    {
+        const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
+        if (!m_geometryFeedbackPipeline || m_drawList.empty() || m_geometryStreamer.GetStats().Meshes == 0 || !m_geometryStreamer.IsEnabled())
+            return;
+
+        // Which pages of the streamed meshes the LOD wants (GeometryStreamingFeedback.slang), read back once this frame slot is done
+        // (Renderer::readGeometryFeedback).
+        const RGBuffer feedback = m_renderGraph.ImportBuffer("Geometry Feedback", m_geometryFeedbackBuffer.get());
+        const RGBuffer staging = m_renderGraph.ImportBuffer("Geometry Feedback Staging", m_geometryFeedbackReadback[frameIndex].get());
+        m_geometryFeedbackPending[frameIndex] = true;
+        const uint32_t drawCount = static_cast<uint32_t>(m_drawList.size());
+        m_renderGraph.AddPass("Geometry Streaming Feedback", RGPassFlags::NeverCull,
+            [&](RGBuilder& builder)
+            {
+                ReadGpuScene(builder, resources);
+                builder.Write(feedback);
+            },
+            [this, feedback, drawCount](RGPassContext& context)
+            {
+                NRI::CommandBuffer& cmd = context.Cmd();
+                NRI::Buffer& buffer = context.Buffer(feedback);
+                // After the previous frame's pass and readback copy, the request count back to 0.
+                const NRI::BufferBarrierDesc reused{ &buffer, { NRI::AccessBits::ShaderRead | NRI::AccessBits::ShaderWrite | NRI::AccessBits::TransferRead,
+                                                                NRI::StageBits::Compute | NRI::StageBits::Transfer },
+                                                     { NRI::AccessBits::TransferWrite, NRI::StageBits::Transfer } };
+                cmd.resourceBarriers({}, std::span(&reused, 1));
+                cmd.fillBuffer(buffer, 0, 16, 0);
+                const NRI::BufferBarrierDesc cleared{ &buffer, { NRI::AccessBits::TransferWrite, NRI::StageBits::Transfer },
+                                                      { NRI::AccessBits::ShaderRead | NRI::AccessBits::ShaderWrite, NRI::StageBits::Compute } };
+                cmd.resourceBarriers({}, std::span(&cleared, 1));
+
+                shaderio::PushConstantGeometryFeedback push{};
+                push.drawListReference = m_drawListBuffers[frameIndex]->getDeviceAddress();
+                push.feedbackReference = buffer.getDeviceAddress();
+                push.drawCount = drawCount;
+                push.groupCount = std::min(drawCount, 4096u);
+                push.frame = static_cast<uint32_t>(m_sceneFrameCounter);
+                cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *m_geometryFeedbackPipeline);
+                // The main view, then every editor view drawn this frame (other viewports, asset previews): each wants the detail
+                // its own camera needs. A page is reported once a frame whichever view asks first.
+                push.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                cmd.pushData(&push, sizeof(push));
+                cmd.dispatch(push.groupCount, 1, 1);
+                for (const ExtraView& view : m_extraViews)
+                {
+                    if (!view.Recorded || frameIndex >= view.UniformBuffers.size() || !view.UniformBuffers[frameIndex])
+                        continue;
+                    push.matrixReference = view.UniformBuffers[frameIndex]->getDeviceAddress();
+                    cmd.pushData(&push, sizeof(push));
+                    cmd.dispatch(push.groupCount, 1, 1);
+                }
+            });
+        m_renderGraph.AddPass("Geometry Feedback Readback", RGPassFlags::NeverCull,
+            [&](RGBuilder& builder)
+            {
+                builder.Read(feedback, RGBufferAccess::CopySource);
+                builder.Write(staging, RGBufferAccess::CopyDestination);
+            },
+            [feedback, staging](RGPassContext& context)
+            {
+                context.Cmd().copyBuffer(context.Buffer(feedback), context.Buffer(staging),
+                                         NRI::BufferCopyRegion{ .size = sizeof(shaderio::GeometryStreamingFeedback) });
             });
     }
 

@@ -878,8 +878,66 @@ occlusion with conservative reprojection to avoid disocclusion popping.
 | 6b-1 | Cluster LOD DAG cooked with meshoptimizer's own builder (`demo/clusterlod.h`, `clodBuild`, implemented in `MeshImporter.cpp`), set up as its `nanite.cpp` demo: 64-vertex / 64-triangle clusters, attribute-aware (normal weights 0.5), every shading seam protected in permissive mode (normals, uv0, uv1 -- the header asks for it; unprotected hard edges came out smoothed), **no sloppy fallback** (it ignores orientation: flipped triangles on flat streets cost no error and were back face culled as holes). Skinned meshes keep one level. Per cluster in `MeshletBounds`: own and parent group bounds + error, LOD level, triangle count. The task shader draws the cut (clusterlod's rule, `nanite.cpp`'s `boundsError` ported) before frustum culling, bounds to world by the instance's largest scale, with the culling view's (frozen) camera. BLAS and "Visible Triangles" use the original clusters only. Cluster stats buffer (drawn clusters / triangles of the visibility passes, the mip feedback pattern), LOD error slider and Full Detail toggle (Render Graph panel), debug view 21 (LOD level). Also: a reimport now only refreshes loaded assets (a model copied in and imported at once was cooked a second time on the main thread, and its 263 .nmat auto-reimported). | **Verified 2026-09-18:** Full Detail identical to before; at 1 px no visible change, LOD level rises with distance. Bistro Release, 1816x948: 2.32M -> 1.40M triangles drawn (-40 %), Visibility 0.49 -> 0.39 ms, GPU frame 3.93 -> 3.82 ms; Geometry used 154 -> 172 MB (LOD levels +18 MB). |
 | 6b-2 | *Reverted.* RT fallback per static mesh (the DAG cut at a fixed object-space error, own vertices, the BLAS built from it) plus ray origin offsets where rays leave the raster surface (first the error bound at the pixel's distance, then the drawn cluster's error through the G-buffer). | Pure path tracing sees the BLAS as primary visibility: 5 mm dropped thin detail (holes on the bike and street); the offsets cost contact shadows in every mode. Every fix needed another offset: the mismatch between traced and rasterized geometry is the approach's own problem (UE's Nanite fallback meshes have it too). Reverted to the 6b-1 state: ray tracing uses the original clusters. |
 
-Page streaming (6b-3/6b-4) is **paused**: ray tracing keeps the original geometry resident, so streaming would only move
-the LOD levels (+18 MB for Bistro). It returns with a scene that does not fit, together with D8.
+Page streaming (6b-3/6b-4) was paused while ray tracing kept the original geometry resident; it is built since 2026-10-29 with the
+BLAS taken from the resident pages instead (§5.7.2).
+
+#### 5.7.2 Geometry streaming (6b-3/6b-4, October 2026)
+Nanite's page streaming, with ray tracing following the pages rather than a fallback mesh.
+
+**Cook (GS-1, `MeshImporter.cpp` writePages).** clodBuild's groups go into pages of about 128 KB, whole groups only (a cut never
+splits a group). Terminal groups (nothing coarser replaces them: the top of the DAG, and groups whose simplification got stuck)
+come first as **root pages**, always resident; the other groups follow coarsest first. A page's **dependencies** are the pages
+holding the clusters its groups were simplified into; they always come earlier. Each page has its own vertex block (its clusters
+index it through `MeshletDraw::globalVertexOffset`, so the mesh shaders did not change); vertices shared across pages are
+copied, ~2.2x the source vertices over all levels, measured on 0.17M and 1.1M triangle test meshes. Per page: its conservative
+LOD bounds (a sphere around its groups' simplified bounds, their largest error). Per cluster in `MeshletBounds`: its page and
+`refinedPage`, the page of the group it was simplified from. Cooked format v3 (`NSM3`/`NMS3`, `MeshSerializer.h`): cluster records,
+page table, dependencies and mesh bounds come first; page data sits in an aligned payload section, one contiguous range per page,
+read alone with `VFS::ReadRange` from a loose file or a pack. v2 files still load (no pages); a v2 cook whose source is present is
+cooked again.
+
+**Exact cut with residency.** The task shader draws cluster *c* when its page is resident, its parent error projects above the
+threshold, and either its own error is below it or its `refinedPage` is not resident. The streamer keeps residency
+**dependency-closed**: a page becomes drawable only after its dependencies, and is evicted only when no resident or loading page
+depends on it. With that, and error and bounds monotonic along the DAG, every group's "refine" decision is monotonic, so the
+surface is drawn exactly once. This is checked offline (scratchpad `gstest`) for 200 random closed residency sets, as the leaf cut
+and as the raster cut from random cameras. Full Detail draws the finest resident clusters.
+
+**Runtime (GS-2, `GeometryStreamer`).**
+- Loads read the cluster records and root pages (`ReadCookedMesh(..., streamPages)`). The rest is fetched on demand.
+- Feedback pass (`GeometryStreamingFeedback.slang`):
+  - Runs over every draw-list instance, for the main view and each recorded editor view (viewports, previews). Instances are not
+    frustum culled: ray tracing sees behind the camera, so detail streams by distance.
+  - A page is wanted once its error passes `GeometryPrefetchFactor` (0.5) × the threshold. It is then resident, and in the BLAS,
+    before the raster cut refines into it.
+  - Missing pages are requested every frame they are wanted. Resident ones report every 16 frames, which keeps the LRU current.
+  - Each page is reported once per frame (`requestFrame`).
+- Requests are read back, most wanted first.
+- Pool:
+  - Size: the Geometry budget share minus the geometry that does not stream, or an override.
+  - When full, it evicts the least recently wanted pages that no page depends on and that have not been wanted for 64 frames.
+- Page load:
+  1. A read job writes from the file straight into staging.
+  2. Copies on the transfer queue go into fresh stream ranges.
+  3. The page is **activated by the frame** (`Geometry Pages Update`, after the GPU scene update): its clusters' draw records are
+     patched and its resident flag set. Every pass of a frame then sees one residency. A transfer-queue flag flip could tear
+     mid-frame or land before its data.
+- Evictions clear the flag the same way.
+
+**Ray tracing (D8 resolved for streamed meshes).** A streamed mesh's BLAS holds its **leaf cut**, the finest resident clusters.
+After its residency changes (at most every 10 frames), `PrepareBlasBuild` takes the cut when the build is recorded:
+- `ClusterIndices.slang` writes the cut's triangles as absolute vertex-stream indices into a new RT index range.
+- The build goes into a new structure of the right size; the hit shaders' index range switches in the same frame as the TLAS
+  (both the next).
+- Evicted pages stay allocated until that BLAS is in use (the hit shaders read their vertices until then).
+
+The leaf cut is never coarser than what the raster draws (the raster cannot draw finer than resident; prefetch covers the rebuild
+delay), so `raster_surface_bias` stays the only ray offset. 6b-2's fixed-error fallback is not repeated: near the camera the BLAS
+is full detail, far away it is what that distance needs.
+
+**Not yet:** vertex compression (positions relative to the cluster, octahedral normals: Nanite's pages are ~4x smaller), streaming
+skinned geometry (one level, not paged), per-view request priorities. Editor: Geometry Streaming section (enable for meshes loaded
+next, stats, pool override for forcing pressure); profiler counters Streamed Geometry Pages / MB.
 
 ### 5.8 GPU Memory & Buffer System
 
@@ -1406,7 +1464,8 @@ camera.
   per-frame budgets; **compaction** after build; refit for skinned/deforming meshes.
 - **RT LOD:** coarse resident fallback geometry for off-screen/secondary rays; visible-surface
   consistency handled by ray origin offsets / matching LOD near the camera (Open Decision D8). Tried in 6b-2 and
-  reverted (§5.7.1): until cluster acceleration structures, the BLAS holds the original clusters.
+  reverted (§5.7.1). Streamed meshes (§5.7.2) build their BLAS from the finest resident clusters instead (view-dependent through
+  residency, rebuilt as pages come and go); meshes that do not stream keep the original clusters.
 - **Memory:** RT category budget; eviction of BLAS for far/invisible meshes, rebuild on demand.
 - Lighting/GI features and their arbitration remain defined by the RT plan.
 
@@ -1511,7 +1570,7 @@ flight, targeted texture-slot cache eviction. Future:
 | **4** | Unified geometry memory & budgets | 3 | Base memory system (§5.8.6): unified geometry buffers incl. RT index stream with TLSF range allocation (page tables removed, offsets instead of addresses), grow-and-copy, memory budget polling, category accounting with soft budgets, no per-frame buffer creation, single deferred release queue | Freed geometry is reused by the next load; VRAM per category visible in Nox Stats; no `createBuffer` in a steady-state frame |
 | **5** | Async IO & upload manager | 1, 4 | Request API + state machine, IO threads, decode tasks, transfer queue, staging ring, async editor drag-in | Loading Bistro never stalls the viewport beyond a frame budget |
 | **6a** | Texture streaming | 5 | BC cooking for all sources, mip tail, GPU mip feedback, residency + eviction | Scene textures exceeding the texture budget render correctly with mip reduction |
-| **6b** | Geometry streaming & LOD | 5 | Cluster hierarchy cook, GPU cut selection (**done, 6b-1**), page streaming pool (paused, §5.7.1), RT fallback LOD (reverted, D8) | Geometry exceeding the geometry budget renders with streaming; no popping beyond threshold |
+| **6b** | Geometry streaming & LOD | 5 | Cluster hierarchy cook, GPU cut selection (**done, 6b-1**), page streaming pool (**built**, §5.7.2), RT fallback LOD (reverted, D8) | Geometry exceeding the geometry budget renders with streaming; no popping beyond threshold |
 | **6c-0** | Level streaming | 5 | Additive scene load / unload, Level Streaming Volumes, script API (§5.12a: **built 2026-10-23**) | A level streams in and out around the camera without a stall |
 | **6c** | World streaming | 6a, 6b, 6c-0 | Grid cells, per-cell files, cell streaming, editor (§5.13.1: **6c-1 built 2026-10-24**), activation stages (§5.13.3: **6c-2 built 2026-10-24**), HLOD (§5.13.2: **6c-3 built 2026-10-24**), test world and fly-through (§5.13.4: **built 2026-10-29**), cells built on workers and cooked cells (§5.13.4) | Test world larger than RAM/VRAM traversable without stalls |
 | **7** | Continuous optimization | all | Profile-driven work, VT, DirectStorage, async compute expansion | Ongoing |
@@ -1531,7 +1590,7 @@ Phases 1, 2 and 3 are architecture-defining and each gets its own plan-mode desi
 | D5 | Geometry buffer growth | grow-and-copy vs sparse binding reserve/commit | Base (Phase 4) uses grow-and-copy at load boundaries; sparse evaluated later, needs driver support validation |
 | D6 | Additional queues (**transfer and async compute decided**) | ~~one combined graphics/compute queue~~ · **dedicated transfer queue for uploads (Phase 5a, §5.11.6)** · **async compute queue: a compute-only family, render graph blocks with fork / join timeline points (§5.4.4), first user the screen-probe GI** | Transfer: multi-queue device creation, queue-family detection, timeline semaphores and per-queue command pools in NRI; concurrent sharing instead of ownership transfers |
 | D7 | IO backend | IoRing/overlapped IO vs DirectStorage | DirectStorage enables GPU decompression |
-| D8 | RT geometry LOD policy | ~~dedicated coarse RT LOD~~ (tried in 6b-2, reverted: holes in the path tracer, shadows lost to ray offsets) · RT from the same clusters as raster: cluster acceleration structures per frame (nvpro-samples vk_lod_clusters, `VK_NV_cluster_acceleration_structure`, NVIDIA only for now) | Until then ray tracing uses the original clusters (resident, full detail) |
+| D8 | RT geometry LOD policy | ~~dedicated coarse RT LOD~~ (tried in 6b-2, reverted: holes in the path tracer, shadows lost to ray offsets) · RT from the same clusters as raster: cluster acceleration structures per frame (nvpro-samples vk_lod_clusters, `VK_NV_cluster_acceleration_structure`, NVIDIA only for now) | Until then ray tracing uses the original clusters (resident, full detail); streamed meshes trace their finest resident clusters (§5.7.2) |
 | D9 | ~~Editor vs runtime asset managers~~ **Decided and built** | **One loading pipeline, two modes:** `RuntimeAssetManager` is `EditorAssetManager` in read-only mode (no file watcher, reimports, registry writes or recooks); engine code uses read-only lookups on `AssetManagerBase`; a packaged game reads through `VirtualFileSystem` (`.npak`) | Decided and built October 2026 (`docs/Runtime_And_Packaging_Plan_2026-10.md` R2, R4) |
 | D10 | Budgets & targets | per-category VRAM shares, frame-time targets per reference scene | set after Phase 0 baselines |
 | D11 | ~~ECS parallelism~~ **Decided** | **Declared system read/write sets** (`ComponentAccess` + `SystemGraph`, §5.2.6) | Decided September 2026 (Phase 1) |

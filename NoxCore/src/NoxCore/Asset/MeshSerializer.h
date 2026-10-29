@@ -354,6 +354,8 @@ namespace Nox
             SerializerUtils::WriteVector(stream, pages);
             SerializerUtils::WriteVector(stream, data.PageDependencies);
             stream.write(reinterpret_cast<const char*>(&data.RootPageCount), sizeof(uint32_t));
+            stream.write(reinterpret_cast<const char*>(&data.BoundsMin), sizeof(glm::vec3));
+            stream.write(reinterpret_cast<const char*>(&data.BoundsMax), sizeof(glm::vec3));
             if (data.Pages.empty())
             {
                 SerializerUtils::WriteVector(stream, data.Vertices);
@@ -386,6 +388,8 @@ namespace Nox
             SerializerUtils::ReadVector(stream, outData.Pages);
             SerializerUtils::ReadVector(stream, outData.PageDependencies);
             stream.read(reinterpret_cast<char*>(&outData.RootPageCount), sizeof(uint32_t));
+            stream.read(reinterpret_cast<char*>(&outData.BoundsMin), sizeof(glm::vec3));
+            stream.read(reinterpret_cast<char*>(&outData.BoundsMax), sizeof(glm::vec3));
             if (outData.Pages.empty())
             {
                 SerializerUtils::ReadVector(stream, outData.Vertices);

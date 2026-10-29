@@ -311,6 +311,8 @@ namespace Nox
         // new image's slot, the old image leaves once frames in flight are done with it.
         std::vector<std::pair<AssetHandle, Ref<Texture2D>>> streamed;
         m_Streamer.Update(*Application::Get().GetRenderer(), uploadBudget, streamed);
+        // Geometry pages (§5.7.2) within what the loads and textures left of the upload budget.
+        Application::Get().GetRenderer()->UpdateGeometryStreaming(uploadBudget);
         std::vector<uint32_t> replacedSlots;
         for (auto& [handle, texture] : streamed)
         {

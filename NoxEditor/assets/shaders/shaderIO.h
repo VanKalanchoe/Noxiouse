@@ -360,6 +360,7 @@ struct UniformBufferObject
     uint64_t geometryMeshletBoundsReference;
     uint64_t geometryMeshletVerticesReference;
     uint64_t geometryMeshletTrianglesReference;
+    uint64_t geometryPagesReference; // GpuGeometryPage table (geometry streaming, §5.7.2)
 
     // GPU scene tables (GpuInstance, GpuTransform, GpuMaterial, GpuMesh, GpuRayTracingInstance); 0 while the scene is empty
     uint64_t sceneInstancesReference;
@@ -1258,6 +1259,69 @@ struct PushConstantSkinning
     uint64_t skinnedVerticesReference;
     uint64_t boneMatricesReference;
     uint64_t workItemsReference;
+};
+
+// Geometry streaming (§5.7.2, Nanite's page streaming). A streamed mesh's clusters live in pages; its records (MeshletDraw,
+// MeshletBounds) always stay, the pages' vertices and triangles come and go. One record per page of every streamed mesh
+// (GpuMesh::pageOffset + page): what the feedback pass needs to ask for it, and whether it is resident -- written by the frame
+// that activates or evicts it (Renderer::addGeometryPagesUpdatePass), so every pass of a frame sees one residency.
+struct GpuGeometryPage
+{
+    vec3 lodCenter;        // conservative LOD bounds of its groups, mesh space (MeshPage::LodCenter)
+    float lodRadius;
+    float lodError;        // ClusterTerminalError: a root page, always resident, never asked for
+    uint32_t resident;     // 1 while its clusters may be drawn
+    uint32_t requestFrame; // GPU only: the last feedback frame that reported it (one report per page and frame)
+    uint32_t padding;
+};
+
+// The feedback pass (GeometryStreamingFeedback.slang): every streamed instance's pages whose LOD error at its distance is above the
+// threshold are wanted. Missing pages are requested every frame, resident ones report every GeometryTouchInterval frames so the
+// streamer knows what is still in use (its LRU). Read back per frame slot.
+STATIC_CONST uint32_t GeometryRequestCapacity = 16384;
+// Pages are asked for once their error passes this fraction of the LOD threshold: resident (and in the ray tracing leaf cut) before
+// the raster cut needs them, so a newly refined surface is never finer in the raster than in the BLAS (raster_surface_bias).
+STATIC_CONST float GeometryPrefetchFactor = 0.5;
+STATIC_CONST uint32_t GeometryTouchInterval = 16;
+STATIC_CONST uint32_t GeometryRequestResident = 0x80000000; // GeometryPageRequest::page: a resident page reporting it is in use
+struct GeometryPageRequest
+{
+    uint32_t page;     // global page (the page table's index), | GeometryRequestResident
+    float priority;    // how far above the threshold its error projects (the largest first)
+};
+struct GeometryStreamingFeedback
+{
+    uint32_t count;    // requests written (may pass the capacity: the rest were dropped)
+    uint32_t padding0;
+    uint32_t padding1;
+    uint32_t padding2;
+    GeometryPageRequest requests[GeometryRequestCapacity];
+};
+
+struct PushConstantGeometryFeedback
+{
+    uint64_t matrixReference;    // the main view's uniforms (its culling camera and LOD threshold)
+    uint64_t drawListReference;  // instance slots of the draw list
+    uint64_t feedbackReference;  // GeometryStreamingFeedback
+    uint32_t drawCount;
+    uint32_t groupCount;         // workgroups dispatched (each walks entries groupCount apart)
+    uint32_t frame;
+};
+
+// A streamed mesh's BLAS is built from its finest resident clusters (the leaf cut); ClusterIndices.slang writes their triangles as
+// vertex stream indices into the RT index stream, one job per cluster.
+struct ClusterIndexJob
+{
+    uint32_t draw;       // MeshletDraw index in the draw stream
+    uint32_t firstIndex; // where its triangles go in the RT index stream
+};
+struct PushConstantClusterIndices
+{
+    uint64_t matrixReference;  // uniforms: the geometry stream addresses
+    uint64_t jobsReference;
+    uint64_t indicesReference; // the RT index stream
+    uint32_t jobCount;
+    uint32_t groupCount;
 };
 
 // What the visibility passes drew after the LOD cut (cleared every frame, read back per frame slot).
@@ -2398,6 +2462,7 @@ struct InstanceData
     uint32_t drawsOffset;
     uint32_t boundsOffset;
     uint32_t meshletCount;
+    uint32_t pageOffset; // GpuMesh::pageOffset: NoGeometryRange when every cluster is resident
 
     float workflow;
     float4 diffuseFactor;
@@ -2470,6 +2535,7 @@ struct SceneInstances
             data.drawsOffset = mesh.drawsOffset;
             data.boundsOffset = mesh.boundsOffset;
             data.meshletCount = mesh.meshletCount;
+            data.pageOffset = mesh.pageOffset;
 
             data.workflow = material.workflow;
             data.diffuseFactor = material.diffuseFactor;

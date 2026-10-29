@@ -66,11 +66,28 @@ void taskMain
         float maxScale = max(length(instance.modelMatrix[0].xyz),
                          max(length(instance.modelMatrix[1].xyz), length(instance.modelMatrix[2].xyz)));
 
-        // 1. The LOD cut (clusterlod's rule): the coarser version is too coarse, this cluster is fine enough. The bounds go
-        //    to world space with the instance's largest scale; the culling view's camera (frozen with it).
-        if (ubo->lodFullDetail != 0)
+        // Geometry streaming (§5.7.2): only clusters whose page is resident can be drawn, and a cluster whose finer version's
+        // page is missing stands in for it (the cut stays exact: a page is only resident while the coarser pages it was
+        // simplified into are, Renderer's GeometryStreamer).
+        bool resident = true;
+        bool finerResident = true;
+        if (instance.pageOffset != NoGeometryRange)
         {
-            visible = meshletBounds.lodLevel == 0;
+            GpuGeometryPage* pages = (GpuGeometryPage*)ubo->geometryPagesReference;
+            resident = pages[instance.pageOffset + meshletBounds.page].resident != 0;
+            finerResident = meshletBounds.refinedPage == ClusterNoPage || pages[instance.pageOffset + meshletBounds.refinedPage].resident != 0;
+        }
+
+        // 1. The LOD cut (clusterlod's rule): the coarser version is too coarse, this cluster is fine enough (or nothing finer
+        //    is resident). The bounds go to world space with the instance's largest scale; the culling view's camera (frozen
+        //    with it). Full detail: the finest resident clusters.
+        if (!resident)
+        {
+            visible = false;
+        }
+        else if (ubo->lodFullDetail != 0)
+        {
+            visible = meshletBounds.lodLevel == 0 || !finerResident;
         }
         else
         {
@@ -82,7 +99,7 @@ void taskMain
                 ? ClusterTerminalError
                 : lodBoundsError(parentCenter, meshletBounds.parentRadius * maxScale, meshletBounds.parentError * maxScale, cameraPosition, cameraProj, ubo->lodCameraNear);
             float selfError = lodBoundsError(lodCenter, meshletBounds.lodRadius * maxScale, meshletBounds.lodError * maxScale, cameraPosition, cameraProj, ubo->lodCameraNear);
-            visible = parentError > ubo->lodErrorThreshold && selfError <= ubo->lodErrorThreshold;
+            visible = parentError > ubo->lodErrorThreshold && (selfError <= ubo->lodErrorThreshold || !finerResident);
         }
 
         // 2. Optional meshlet frustum culling (the instance already passed GPU instance culling).
