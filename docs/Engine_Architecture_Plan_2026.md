@@ -1430,6 +1430,46 @@ its compacted one and the old one goes to the deferred release (`BlasCompaction`
   frame's build budget; it traces again after that build. A compaction measured before the eviction no longer matches (new serial).
 - Not built: an RT budget separate from the category share, eviction of skinned per-instance BLAS, out-of-memory handling.
 
+### 5.14a Large World Coordinates (built 2026-10-29)
+
+A float position keeps about 0.1 mm at 1 km from the origin, 1 mm at 10 km, 1 cm at 100 km and 8 cm at 1000 km (the world unit is
+the centimetre): far out, objects shake, physics bodies jitter and the camera stutters. Unreal 5's answer (LWC) is double precision
+on the CPU and a camera-relative ("translated world") space on the GPU; Nox does the same, with the GPU's space centred on a coarse
+**render origin** (Flax's LargeWorlds origin chunks) instead of per primitive tiles, so no shader changes.
+
+- **CPU: double precision.** `TransformComponent::Translation` is a `glm::dvec3`, `WorldTransformComponent::WorldMatrix` a
+  `glm::dmat4` (rotation and scale need no more than float). The scene graph propagates in double; `WorldBounds`, streaming sources,
+  the cell grid (`WorldGrid::CellFor`, `HorizontalDistance`), prefab spawning, HLOD sources (each HLOD's vertices relative to its own
+  double origin), physics, the editor camera and tools (gizmo, picking, measure, snapping, placement) all work in double.
+- **Explicit narrowing.** `GLM_FORCE_EXPLICIT_CTOR` (public on NoxCore): no double becomes a float without it being written
+  (`Math::RelativeTo`, `Math::Basis`, `Math::ToFloat` say why). Unreal's `FVector3f(FVector)` is explicit for the same reason.
+- **GPU: relative to the render origin.** `Renderer::GetRenderOrigin` sits on a 1024 m grid; once the camera is more than a step
+  away along x or z it moves to the grid point nearest the camera (horizontally only: heights stay the world's, so the atmosphere's
+  altitude, height fog, the cloud layer and the ground grid are untouched). Everything handed to the GPU is relative to it
+  (`Renderer::ToRenderSpace`): instance transforms, lights, the camera, particles, 2D and editor overlays. The camera is never more
+  than ~1.5 km from it, so a vertex near the camera keeps a fraction of a millimetre.
+- **A rebase.** `Renderer::updateRenderOrigin` (in BeginScene, once a frame): the GPU scene keeps every instance's world translation in
+  double and rewrites its transforms (the previous ones too, so motion vectors see no jump), bounds and TLAS records once
+  (`GpuScene::SetRenderOrigin`). Last frame's view and camera positions are moved over, so TAA, DLSS, NRD and the screen probes
+  reproject across it. DDGI keeps its probes: its cascades are placed by the camera's world cell (double), so their storage does
+  not change, only where the GPU space puts them. The cloud shadow map reads the cloud field at world positions. The ReSTIR DI / GI /
+  PT reservoirs hold sample positions: they start over for a frame (at most once a kilometre).
+- **Physics:** Jolt with `JPH_DOUBLE_PRECISION` (`DOUBLE_PRECISION` in its CMake): body and character positions, casts and contact
+  points are double (`JoltUtils::ToJoltPosition`); mesh colliders stand at their entity with float vertices around it. Box2D (2D)
+  stays float.
+- **Particles:** world-space particles are float relative to their simulation's own double origin, which follows the emitter
+  (Niagara's LWC tile).
+- **Files:** scene and cell text writes translations at full double precision; cooked cells are version 2 (double translations; a
+  version 1 file is read from its text and cooked again).
+- **Scripts (API 9):** `Nox.Vector3d` (double) for positions: `Transform.Position`, `LocalPosition` / `WorldPosition`,
+  `RaycastHit.Point`, `Physics.Raycast` origin, `Scene.Instantiate` / `CreateEntity` / `IsWorldStreamingCompleted` positions. A
+  `Vector3` widens to it implicitly; the difference of two positions as a direction is an explicit `(Vector3)(a - b)`.
+- **Test:** the streaming test world generator's **World Offset (km)** builds the same world that far out along x and z; the
+  fly-through (`StreamingWorldTest`, its path now in double) runs there unchanged. At 1000 km nothing may shake, drift or snap that
+  does not at 0.
+- Not done: a camera more than a few km above the ground (space) would want a vertical origin too; editor overlays and the asset
+  preview stage are drawn relative to the origin of the moment.
+
 ### 5.15 Asset Lifetime (Garbage Collection)
 
 Implemented this session (editor): mark from live scenes (meshes → materials → textures, animations,

@@ -1,5 +1,7 @@
 #include "ParticleSystem.h"
 
+#include "NoxCore/Math/Math.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -120,11 +122,26 @@ namespace Nox::ParticleSystem
         simulation.Random = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&emitter) * 2654435761u) | 1u;
     }
 
-    void Simulate(ParticleEmitterComponent& emitter, const glm::mat4& world, float dt)
+    void Simulate(ParticleEmitterComponent& emitter, const glm::dmat4& worldTransform, float dt)
     {
         ParticleSimulation& simulation = emitter.Simulation;
         if (!simulation.Started)
             Restart(emitter);
+        // World-space particles live relative to the simulation's origin (large world coordinates). It moves to the emitter when
+        // there is nothing to carry over, or once the emitter is a kilometre away (the particles are moved with it).
+        const glm::dvec3 emitterPosition(worldTransform[3]);
+        const double rebaseDistance = WorldUnits::FromMeters(1000.0f);
+        if (simulation.Particles.empty() || emitter.LocalSpace || glm::length(emitterPosition - simulation.Origin) > rebaseDistance)
+        {
+            const glm::vec3 shift = glm::vec3(simulation.Origin - emitterPosition);
+            if (!emitter.LocalSpace)
+            {
+                for (ParticleSimulation::Particle& particle : simulation.Particles)
+                    particle.Position += shift;
+            }
+            simulation.Origin = emitterPosition;
+        }
+        const glm::mat4 world = Math::RelativeTo(worldTransform, simulation.Origin);
         dt = glm::clamp(dt, 0.0f, 0.1f); // a hitch does not throw every particle across the scene
 
         // 1. Move and retire. Gravity points down the world; in the emitter's space it turns with the entity.
@@ -216,13 +233,24 @@ namespace Nox::ParticleSystem
         return glm::mix(emitter.SizeStart, emitter.SizeEnd, t);
     }
 
-    Appearance Evaluate(const ParticleEmitterComponent& emitter, const ParticleSimulation::Particle& particle, const glm::mat4& world, float dt)
+    Appearance Evaluate(const ParticleEmitterComponent& emitter, const ParticleSimulation::Particle& particle, const glm::dmat4& worldTransform,
+                        const glm::dvec3& space, float dt)
     {
         const float t = glm::clamp(particle.Age / particle.Lifetime, 0.0f, 1.0f);
         Appearance appearance;
         const glm::vec3 previous = particle.Position - particle.Velocity * std::max(dt, 0.0f);
-        appearance.Position = emitter.LocalSpace ? glm::vec3(world * glm::vec4(particle.Position, 1.0f)) : particle.Position;
-        appearance.PreviousPosition = emitter.LocalSpace ? glm::vec3(world * glm::vec4(previous, 1.0f)) : previous;
+        if (emitter.LocalSpace)
+        {
+            const glm::mat4 world = Math::RelativeTo(worldTransform, space);
+            appearance.Position = glm::vec3(world * glm::vec4(particle.Position, 1.0f));
+            appearance.PreviousPosition = glm::vec3(world * glm::vec4(previous, 1.0f));
+        }
+        else
+        {
+            const glm::vec3 offset = glm::vec3(emitter.Simulation.Origin - space);
+            appearance.Position = particle.Position + offset;
+            appearance.PreviousPosition = previous + offset;
+        }
         appearance.Size = std::max(SizeOverLife(emitter, t), 0.0f) * particle.SizeScale * WorldUnits::PerMeter();
         appearance.Color = ColorOverLife(emitter, t);
         appearance.Color = glm::vec4(glm::vec3(appearance.Color) * std::max(emitter.Intensity, 0.0f), glm::clamp(appearance.Color.a, 0.0f, 1.0f));

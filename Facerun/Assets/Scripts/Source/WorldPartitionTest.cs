@@ -54,7 +54,7 @@ public sealed class WorldPartitionTest : EntityBehaviour
 
     Step m_Step = Step.Idle;
     float m_StepTime;
-    Vector3 m_CameraStart;
+    Vector3d m_CameraStart;
     float m_SpinStart;
     int m_Passed;
     readonly List<string> m_Failures = new();
@@ -66,7 +66,7 @@ public sealed class WorldPartitionTest : EntityBehaviour
             return;
         // Play's first cells are loaded before any script starts: the ones around the camera exist right now.
         Begin();
-        Vector3 camera = CameraPosition();
+        Vector3 camera = (Vector3)CameraPosition(); // (this test's world is near the origin)
         int expected = 0, present = 0;
         ForEachCell((x, z, min, max) =>
         {
@@ -228,7 +228,7 @@ public sealed class WorldPartitionTest : EntityBehaviour
     // the persistent pillar and the source's cell on the way. Fails the run after the timeout.
     bool WaitSettled(string where)
     {
-        Vector3 camera = CameraPosition();
+        Vector3 camera = (Vector3)CameraPosition(); // (this test's world is near the origin)
         bool settled = true;
         string missing = "";
         ForEachCell((x, z, min, max) =>
@@ -327,6 +327,6 @@ public sealed class WorldPartitionTest : EntityBehaviour
             Log.Info($"[WorldPartitionTest] FAIL ({m_Failures.Count} of {m_Passed + m_Failures.Count} checks failed): {string.Join("; ", m_Failures)}");
     }
 
-    Vector3 CameraPosition() => GetComponent<TransformComponent>().LocalPosition;
-    void SetCameraPosition(Vector3 position) => GetComponent<TransformComponent>().LocalPosition = position;
+    Vector3d CameraPosition() => GetComponent<TransformComponent>().LocalPosition;
+    void SetCameraPosition(Vector3d position) => GetComponent<TransformComponent>().LocalPosition = position;
 }

@@ -2245,6 +2245,11 @@ struct PushConstantGrid
     int steps;           // every steps-th line is a primary line
     int gridSize;        // lines each way from the center
     int planeAxis;       // c: 0 = the plane x = 0, 1 = y = 0 (the ground), 2 = z = 0
+    // The world's origin in the GPU's world space (large world coordinates: everything is relative to the render origin): where the
+    // plane and the axis lines are. centerA / centerB are in that space too.
+    float originA;
+    float originB;
+    float originC;
 };
 struct LineData
 {

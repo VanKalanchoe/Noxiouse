@@ -49,7 +49,7 @@ namespace Nox
         {
             auto [wtc, light] = lights.get<WorldTransformComponent, DirectionalLightComponent>(entity);
             // Renderer::SubmitLight's convention: the light shines along its local -Z, the sun is the other way.
-            sun.Direction = -glm::vec3(wtc.WorldMatrix * glm::vec4(0.0f, 0.0f, -1.0f, 0.0f));
+            sun.Direction = -(Math::Basis(wtc.WorldMatrix) * glm::vec3(0.0f, 0.0f, -1.0f));
             sun.Illuminance = light.Color * light.Intensity;
             sun.AngularRadius = glm::radians(glm::max(light.AngularDiameter, 0.0f)) * 0.5f;
             break;
@@ -555,7 +555,7 @@ namespace Nox
         outHandles.erase(AssetHandle(0));
     }
 
-    Entity Scene::Instantiate(AssetHandle prefab, const glm::vec3& position)
+    Entity Scene::Instantiate(AssetHandle prefab, const glm::dvec3& position)
     {
         std::vector<Entity> spawned;
         Entity root = PrefabInstance::Instantiate(*this, prefab, position, spawned);
@@ -737,7 +737,7 @@ namespace Nox
     // The time a frame may spend creating streamed levels' entities (the rest of a level comes in the next frames).
     static constexpr double LevelStreamingBudgetMs = 3.0;
 
-    void Scene::UpdateLevelStreaming(const glm::vec3* source, float deltaTime)
+    void Scene::UpdateLevelStreaming(const glm::dvec3* source, float deltaTime)
     {
         // 0. The world partition's cells around the sources (Play / Simulate of a world).
         UpdateWorldStreaming(source);
@@ -751,7 +751,7 @@ namespace Nox
             for (auto handle : m_Registry.view<WorldTransformComponent, LevelStreamingVolumeComponent>())
             {
                 const auto& volume = m_Registry.get<LevelStreamingVolumeComponent>(handle);
-                const glm::vec3 local = glm::vec3(glm::inverse(m_Registry.get<WorldTransformComponent>(handle).WorldMatrix) * glm::vec4(*source, 1.0f));
+                const glm::vec3 local = glm::vec3(glm::inverse(m_Registry.get<WorldTransformComponent>(handle).WorldMatrix) * glm::dvec4(*source, 1.0));
                 const bool inside = glm::all(glm::lessThanEqual(glm::abs(local), volume.HalfExtents));
                 for (AssetHandle level : volume.Levels)
                 {
@@ -919,7 +919,7 @@ namespace Nox
         if (m_World.Settings.Enabled)
         {
             Entity camera = GetPrimaryCameraEntity();
-            const glm::vec3 source = camera ? ComposedWorldPosition(camera) : glm::vec3(0.0f);
+            const glm::dvec3 source = camera ? ComposedWorldPosition(camera) : glm::dvec3(0.0);
             BeginWorldStreaming(camera ? &source : nullptr);
         }
         m_IsRunning = true;
@@ -955,7 +955,7 @@ namespace Nox
         DynamicMeshes::DestroyAll();
     }
 
-    void Scene::OnSimulationStart(const glm::vec3* streamingSource)
+    void Scene::OnSimulationStart(const glm::dvec3* streamingSource)
     {
         BeginWorldStreaming(streamingSource);
         OnPhysics2DStart();
@@ -981,7 +981,7 @@ namespace Nox
             // frame is the streaming source.
             if (Entity camera = GetPrimaryCameraEntity(); camera && camera.HasComponent<WorldTransformComponent>())
             {
-                const glm::vec3 source = glm::vec3(camera.GetComponent<WorldTransformComponent>().WorldMatrix[3]);
+                const glm::dvec3 source = camera.GetComponent<WorldTransformComponent>().GetPosition();
                 UpdateLevelStreaming(&source, static_cast<float>(ts));
             }
             else
@@ -1062,7 +1062,7 @@ namespace Nox
 
         // The primary camera's world transform is current once the update systems have run.
         Camera* mainCamera = nullptr;
-        glm::mat4 cameraTransform;
+        glm::dmat4 cameraTransform(1.0);
         {
             auto view = m_Registry.view<WorldTransformComponent, CameraComponent>();
             for (auto entity : view)
@@ -1091,7 +1091,7 @@ namespace Nox
         if (step)
         {
             // Simulate streams levels around the editor camera (Unreal's Simulate does the same with its viewport).
-            const glm::vec3 source = camera.GetPosition();
+            const glm::dvec3 source = camera.GetPosition();
             UpdateLevelStreaming(&source, static_cast<float>(ts));
         }
         RunUpdateSystems(ts, step, step);
@@ -1414,7 +1414,8 @@ namespace Nox
             particles.reserve(emitter.Simulation.Particles.size());
             for (const ParticleSimulation::Particle& particle : emitter.Simulation.Particles)
             {
-                const ParticleSystem::Appearance appearance = ParticleSystem::Evaluate(emitter, particle, world.WorldMatrix, m_FrameInput.Timestep);
+                const ParticleSystem::Appearance appearance = ParticleSystem::Evaluate(emitter, particle, world.WorldMatrix, m_renderer->GetRenderOrigin(),
+                                                                                       m_FrameInput.Timestep);
                 if (appearance.Color.a <= 0.0f || appearance.Size <= 0.0f)
                     continue;
                 shaderio::GpuParticle gpu{};
@@ -1760,14 +1761,14 @@ namespace Nox
             if (rootMotion != glm::vec3(0.0f) && character && ts > 0.0f)
             {
                 const auto* world = m_Registry.try_get<WorldTransformComponent>(entity);
-                const glm::mat3 toWorld = world ? glm::mat3(world->WorldMatrix)
-                                                : glm::mat3(m_Registry.get<TransformComponent>(entity).GetTransform());
+                const glm::mat3 toWorld = world ? Math::Basis(world->WorldMatrix)
+                                                : Math::Basis(m_Registry.get<TransformComponent>(entity).GetTransform());
                 character->RootMotionVelocity = toWorld * rootMotion / ts;
             }
             else if (rootMotion != glm::vec3(0.0f) && m_Registry.all_of<TransformComponent>(entity))
             {
                 auto& transform = m_Registry.get<TransformComponent>(entity);
-                transform.Translation += glm::mat3(transform.GetTransform()) * rootMotion;
+                transform.Translation += glm::dvec3(Math::Basis(transform.GetTransform()) * rootMotion);
                 if (auto* dirty = m_Registry.try_get<DirtyTransformComponent>(entity))
                     dirty->isDirty = true;
             }
@@ -1806,7 +1807,7 @@ namespace Nox
                 for (const auto& [nodeIndex, nodeEntity] : targets)
                 {
                     const auto& transform = m_Registry.get<TransformComponent>(nodeEntity);
-                    nodeTransforms[nodeIndex].Translation = transform.Translation;
+                    nodeTransforms[nodeIndex].Translation = glm::vec3(transform.Translation); // (a node's local offset)
                     nodeTransforms[nodeIndex].Rotation = glm::quat(transform.Rotation);
                     nodeTransforms[nodeIndex].Scale = transform.Scale;
                 }
@@ -1815,7 +1816,9 @@ namespace Nox
                 for (const auto& [nodeIndex, nodeEntity] : targets)
                 {
                     auto& transform = m_Registry.get<TransformComponent>(nodeEntity);
-                    transform.Translation = nodeTransforms[nodeIndex].Translation;
+                    // Only a translation the clip moved: one it leaves alone keeps its double precision (a node placed far out).
+                    if (nodeTransforms[nodeIndex].Translation != glm::vec3(transform.Translation))
+                        transform.Translation = glm::dvec3(nodeTransforms[nodeIndex].Translation);
                     transform.Rotation = glm::eulerAngles(nodeTransforms[nodeIndex].Rotation);
                     transform.Scale = nodeTransforms[nodeIndex].Scale;
                     if (auto* dirty = m_Registry.try_get<DirtyTransformComponent>(nodeEntity))
@@ -1860,7 +1863,7 @@ namespace Nox
                 if (entity == ancestor)
                     return true;
                 if (const auto* transform = m_Registry.try_get<TransformComponent>(entity))
-                    out = transform->GetTransform() * out;
+                    out = Math::ToFloat(transform->GetTransform()) * out; // (local offsets below the animator: float is enough)
                 entity = parentOf(entity);
             }
             return false;
@@ -1940,7 +1943,7 @@ namespace Nox
         }
     }
 
-    const std::vector<glm::mat4>* Scene::GetBoneTransforms(entt::entity entity, const glm::mat4& meshWorld)
+    const std::vector<glm::mat4>* Scene::GetBoneTransforms(entt::entity entity, const glm::dmat4& meshWorld)
     {
         AnimatorComponent* animatorComp = m_Registry.try_get<AnimatorComponent>(entity);
         if (!animatorComp)
@@ -1963,7 +1966,7 @@ namespace Nox
         // globalTransform(jointNode) * inverseBindMatrix. The joints are real entities, so whatever
         // animates them (the root's clip, a script, the gizmo) deforms the mesh.
         const Skin* skin = skeleton->Skins[0];
-        const glm::mat4 inverseMeshWorld = glm::inverse(meshWorld);
+        const glm::dmat4 inverseMeshWorld = glm::inverse(meshWorld);
         animatorComp->SkinMatrices.resize(skin->Joints.size());
 
         for (size_t i = 0; i < skin->Joints.size(); ++i)
@@ -1978,7 +1981,8 @@ namespace Nox
                 {
                     const glm::mat4& inverseBind = i < skin->InverseBindMatrices.size()
                         ? skin->InverseBindMatrices[i] : glm::mat4(1.0f);
-                    jointMatrix = inverseMeshWorld * m_Registry.get<WorldTransformComponent>(it->second).WorldMatrix * inverseBind;
+                    // The joint relative to the mesh, in double precision (both may be far from the world's origin), then float.
+                    jointMatrix = Math::ToFloat(inverseMeshWorld * m_Registry.get<WorldTransformComponent>(it->second).WorldMatrix) * inverseBind;
                 }
             }
             animatorComp->SkinMatrices[i] = jointMatrix;
@@ -2204,7 +2208,8 @@ namespace Nox
 
         b2BodyDef bodyDef = b2DefaultBodyDef();;
         bodyDef.type = Utils::Rigidbody2DTypeToBox2DBody(r2bd.Type);
-        bodyDef.position = b2Vec2{transform.Translation.x, transform.Translation.y}; //rename to translation
+        // (2D physics stays single precision: Box2D is float)
+        bodyDef.position = b2Vec2{static_cast<float>(transform.Translation.x), static_cast<float>(transform.Translation.y)};
         bodyDef.rotation = b2MakeRot(transform.Rotation.z); //i could set full rotation will see bodyde.rotation
 
         b2BodyId body = b2CreateBody(m_PhysicsWorldID, &bodyDef);
@@ -2352,7 +2357,7 @@ namespace Nox
             skySun.Intensity = DefaultSkySunIntensity;
             skySun.Color *= sky.SunTransmittance;
             if (Luminance(skySun.Color) > 0.0f)
-                m_renderer->SubmitLight(glm::toMat4(DefaultSkySunRotation()), skySun);
+                m_renderer->SubmitLight(glm::dmat4(glm::toMat4(DefaultSkySunRotation())), skySun);
         }
         if (proceduralSky && sky.MoonLights)
         {
@@ -2360,7 +2365,7 @@ namespace Nox
             moon.Color = sky.MoonIlluminance * sky.MoonTransmittance;
             moon.Intensity = 1.0f;
             moon.AngularDiameter = glm::degrees(sky.MoonAngularRadius * 2.0f);
-            m_renderer->SubmitLight(DirectionalLightTransform(sky.MoonDirection), moon);
+            m_renderer->SubmitLight(glm::dmat4(DirectionalLightTransform(sky.MoonDirection)), moon);
         }
         {
             auto view = m_Registry.view<WorldTransformComponent, PointLightComponent>();
@@ -2411,7 +2416,7 @@ namespace Nox
                 auto [transform, sprite] = view.get<WorldTransformComponent, SpriteRendererComponent>(entity);
                 if (sprite.Texture == 0)
                 {
-                    m_renderer2D->DrawQuad(transform.WorldMatrix, sprite.Color, static_cast<int>(entity));
+                    m_renderer2D->DrawQuad(m_renderer->ToRenderSpace(transform.WorldMatrix), sprite.Color, static_cast<int>(entity));
                     continue;
                 }
 
@@ -2421,10 +2426,10 @@ namespace Nox
                 if (!texture)
                 {
                     missingAssets.push_back(sprite.Texture);
-                    m_renderer2D->DrawQuad(transform.WorldMatrix, sprite.Color, static_cast<int>(entity));
+                    m_renderer2D->DrawQuad(m_renderer->ToRenderSpace(transform.WorldMatrix), sprite.Color, static_cast<int>(entity));
                     continue;
                 }
-                m_renderer2D->DrawQuad(transform.WorldMatrix, texture, sprite.TilingFactor, sprite.Color, static_cast<int>(entity));
+                m_renderer2D->DrawQuad(m_renderer->ToRenderSpace(transform.WorldMatrix), texture, sprite.TilingFactor, sprite.Color, static_cast<int>(entity));
             }
         }
 
@@ -2434,7 +2439,7 @@ namespace Nox
             for (auto entity : view)
             {
                 auto [transform, circle] = view.get<WorldTransformComponent, CircleRendererComponent>(entity);
-                m_renderer2D->DrawCircle(transform.WorldMatrix, circle.Color, circle.Thickness, circle.Fade, static_cast<int>(entity));
+                m_renderer2D->DrawCircle(m_renderer->ToRenderSpace(transform.WorldMatrix), circle.Color, circle.Thickness, circle.Fade, static_cast<int>(entity));
             }
         }
 
@@ -2455,7 +2460,7 @@ namespace Nox
                 }
                 if (!font)
                     font = Font::GetDefault();
-                m_renderer2D->DrawString(text.TextString, font, transform.WorldMatrix,
+                m_renderer2D->DrawString(text.TextString, font, m_renderer->ToRenderSpace(transform.WorldMatrix),
                                          { text.Color, text.Kerning, text.LineSpacing, text.OutlineColor, text.OutlineThickness, text.BackgroundColor,
                                            text.BackgroundPadding },
                                          static_cast<int>(entity));

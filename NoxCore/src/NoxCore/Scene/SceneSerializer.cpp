@@ -53,6 +53,33 @@ namespace YAML
         }
     };
 
+    // World positions (large world coordinates): written at full double precision (yaml-cpp's default for doubles), read from
+    // files written either way.
+    template <>
+    struct convert<glm::dvec3>
+    {
+        static Node encode(const glm::dvec3& rhs)
+        {
+            Node node;
+            node.push_back(rhs.x);
+            node.push_back(rhs.y);
+            node.push_back(rhs.z);
+            node.SetStyle(EmitterStyle::Flow);
+            return node;
+        }
+
+        static bool decode(const Node& node, glm::dvec3& rhs)
+        {
+            if (!node.IsSequence() || node.size() != 3)
+                return false;
+
+            rhs.x = node[0].as<double>();
+            rhs.y = node[1].as<double>();
+            rhs.z = node[2].as<double>();
+            return true;
+        }
+    };
+
     template <>
     struct convert<glm::vec3>
     {
@@ -148,6 +175,13 @@ namespace Nox
     }
 
     YAML::Emitter& operator<<(YAML::Emitter& out, const glm::vec3& v)
+    {
+        out << YAML::Flow;
+        out << YAML::BeginSeq << v.x << v.y << v.z << YAML::EndSeq;
+        return out;
+    }
+
+    YAML::Emitter& operator<<(YAML::Emitter& out, const glm::dvec3& v)
     {
         out << YAML::Flow;
         out << YAML::BeginSeq << v.x << v.y << v.z << YAML::EndSeq;
@@ -1340,10 +1374,10 @@ namespace Nox
         for (Entity top : tops)
             collect(top, true);
 
-        auto worldPosition = [](Entity entity) -> glm::vec3
+        auto worldPosition = [](Entity entity) -> glm::dvec3
         {
             if (entity.HasComponent<WorldTransformComponent>())
-                return glm::vec3(entity.GetComponent<WorldTransformComponent>().WorldMatrix[3]);
+                return entity.GetComponent<WorldTransformComponent>().GetPosition();
             return entity.GetComponent<TransformComponent>().Translation;
         };
 
@@ -1351,7 +1385,7 @@ namespace Nox
         // variant of that prefab (P6c); this makes the instance a nested one.
         const bool synthesizedRoot = tops.size() > 1 || tops.front().HasComponent<PrefabInstanceComponent>();
         const UUID rootID = synthesizedRoot ? UUID() : tops.front().GetUUID();
-        const glm::vec3 pivot = worldPosition(tops.front());
+        const glm::dvec3 pivot = worldPosition(tops.front());
 
         YAML::Emitter out;
         out << YAML::BeginMap;
@@ -1414,7 +1448,7 @@ namespace Nox
             {
                 // Under the new root at the place it had relative to the first selected entity (its transform is put back).
                 auto& transform = entity.GetComponent<TransformComponent>();
-                const glm::vec3 original = transform.Translation;
+                const glm::dvec3 original = transform.Translation;
                 transform.Translation = worldPosition(entity) - pivot;
                 serializeEntry(entity);
                 transform.Translation = original;
@@ -1546,7 +1580,7 @@ namespace Nox
         {
             // Entities always have transforms
             auto& tc = deserializedEntity.GetComponent<TransformComponent>();
-            tc.Translation = transformComponent["Translation"].as<glm::vec3>();
+            tc.Translation = transformComponent["Translation"].as<glm::dvec3>();
             tc.Rotation = transformComponent["Rotation"].as<glm::vec3>();
             tc.Scale = transformComponent["Scale"].as<glm::vec3>();
         }
@@ -1615,7 +1649,7 @@ namespace Nox
                     if (node["Translation"])
                     {
                         TransformComponent transform;
-                        transform.Translation = node["Translation"].as<glm::vec3>();
+                        transform.Translation = node["Translation"].as<glm::dvec3>();
                         transform.Rotation = node["Rotation"].as<glm::vec3>();
                         transform.Scale = node["Scale"].as<glm::vec3>();
                         nodeOverride.Transform = transform;
@@ -2408,7 +2442,7 @@ namespace Nox
     namespace
     {
         constexpr char CookedCellMagic[8] = { 'N', 'O', 'X', 'C', 'E', 'L', 'L', 'B' };
-        constexpr uint32_t CookedCellVersion = 1;
+        constexpr uint32_t CookedCellVersion = 2; // 2: translations in double precision (large world coordinates)
         constexpr size_t CookedCellHeaderSize = sizeof(CookedCellMagic) + sizeof(uint32_t) + sizeof(uint64_t) + sizeof(uint32_t);
 
         enum CookedEntityKind : uint8_t { CookedBinary = 0, CookedText = 1 };
@@ -2522,7 +2556,7 @@ namespace Nox
                 out.PutString(tag["Tag"].as<std::string>());
             if (transform)
             {
-                out.Put(transform["Translation"].as<glm::vec3>());
+                out.Put(transform["Translation"].as<glm::dvec3>()); // double: large world coordinates (version 2)
                 out.Put(transform["Rotation"].as<glm::vec3>());
                 out.Put(transform["Scale"].as<glm::vec3>());
             }
@@ -2562,10 +2596,11 @@ namespace Nox
             std::string name;
             if (components & CookedTag)
                 name = in.GetString();
-            glm::vec3 translation{}, rotation{}, scale{};
+            glm::dvec3 translation{};
+            glm::vec3 rotation{}, scale{};
             if (components & CookedTransform)
             {
-                translation = in.Get<glm::vec3>();
+                translation = in.Get<glm::dvec3>();
                 rotation = in.Get<glm::vec3>();
                 scale = in.Get<glm::vec3>();
             }

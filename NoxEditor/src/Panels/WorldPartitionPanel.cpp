@@ -53,7 +53,7 @@ namespace Nox
         }
     }
 
-    void WorldPartitionPanel::OnImGuiRender(const Ref<Scene>& scene, const glm::vec3& cameraPosition, bool editing)
+    void WorldPartitionPanel::OnImGuiRender(const Ref<Scene>& scene, const glm::dvec3& cameraPosition, bool editing)
     {
         if (!m_Open)
             return;
@@ -142,7 +142,7 @@ namespace Nox
         ImGui::TextDisabled("Cells: %s", world.CellDirectory.empty() ? "(written on the next save)" : world.CellDirectory.generic_string().c_str());
     }
 
-    void WorldPartitionPanel::DrawToolbar(Scene& scene, const glm::vec3& cameraPosition, bool editing)
+    void WorldPartitionPanel::DrawToolbar(Scene& scene, const glm::dvec3& cameraPosition, bool editing)
     {
         const WorldPartition& world = scene.GetWorldPartition();
         size_t cells = 0, activated = 0, loaded = 0, loading = 0, entities = 0;
@@ -253,7 +253,7 @@ namespace Nox
         ImGui::EndDisabled();
     }
 
-    void WorldPartitionPanel::DrawMap(Scene& scene, const glm::vec3& cameraPosition, bool editing)
+    void WorldPartitionPanel::DrawMap(Scene& scene, const glm::dvec3& cameraPosition, bool editing)
     {
         const WorldPartition& world = scene.GetWorldPartition();
         const float cellSize = WorldUnits::FromMeters(world.Settings.CellSize);

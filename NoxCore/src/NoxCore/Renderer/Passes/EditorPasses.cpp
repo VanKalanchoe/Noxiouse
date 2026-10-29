@@ -152,6 +152,7 @@ namespace Nox
         for (uint32_t index = 0; index < count; ++index)
         {
             rays[index] = m_raycastQueue[index].Ray;
+            rays[index].origin = ToRenderSpace(m_raycastQueue[index].Origin); // (large world coordinates: the origin of this frame)
             m_raycastsInFlight[frameIndex].push_back(std::move(m_raycastQueue[index].Callback));
         }
         m_raycastQueue.erase(m_raycastQueue.begin(), m_raycastQueue.begin() + count);

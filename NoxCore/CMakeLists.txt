@@ -235,6 +235,11 @@ target_compile_definitions(${PROJECT_NAME} PUBLIC
     NOX_DIST=$<BOOL:${NOX_DIST}>
 )
 
+# Large world coordinates (docs/Engine_Architecture_Plan_2026.md §5.14a): world positions are double precision, and glm's
+# conversions between double and float (and between vector / matrix sizes) are explicit, so no world position loses its
+# precision silently -- every narrowing is written out (Unreal's FVector3f(FVector) is explicit for the same reason).
+target_compile_definitions(${PROJECT_NAME} PUBLIC GLM_FORCE_EXPLICIT_CTOR)
+
 # Debug builds turn on NOX_ASSERT / NOX_CORE_ASSERT (NoxCore/Core/core.h). PUBLIC so the editor, the runtime and
 # every header they include from NoxCore agree on it.
 target_compile_definitions(${PROJECT_NAME} PUBLIC $<$<CONFIG:Debug>:NOX_DEBUG>)

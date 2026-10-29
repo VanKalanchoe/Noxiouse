@@ -446,8 +446,9 @@ namespace Nox
 
         std::vector<Entity> roots;
         roots.reserve(m_Settings.PropsPerCell + 1);
+        const glm::dvec3 offset = WorldOffset();
         Entity ground = scene.CreateEntity(TileName(x, z).string());
-        ground.GetComponent<TransformComponent>().Translation = glm::vec3(x * cellSize, 0.0f, z * cellSize);
+        ground.GetComponent<TransformComponent>().Translation = offset + glm::dvec3(x * cellSize, 0.0, z * cellSize);
         ground.AddComponent<MeshComponent>(mesh);
         roots.push_back(ground);
 
@@ -489,7 +490,7 @@ namespace Nox
             }
             Entity entity = scene.CreateEntity(PropEntityNames[static_cast<int>(prop)]);
             TransformComponent& transform = entity.GetComponent<TransformComponent>();
-            transform.Translation = glm::vec3(WorldUnits::FromMeters(px), WorldUnits::FromMeters(y), WorldUnits::FromMeters(pz));
+            transform.Translation = offset + glm::dvec3(WorldUnits::FromMeters(px), WorldUnits::FromMeters(y), WorldUnits::FromMeters(pz));
             transform.Rotation = rotation;
             transform.Scale = scale;
             entity.AddComponent<MeshComponent>(m_PropMeshes[static_cast<int>(prop)]);
@@ -497,8 +498,8 @@ namespace Nox
             roots.push_back(entity);
         }
 
-        const glm::vec3 boundsMin(x * cellSize, tile.MinHeight - WorldUnits::FromMeters(1.0f), z * cellSize);
-        const glm::vec3 boundsMax((x + 1) * cellSize, top, (z + 1) * cellSize);
+        const glm::dvec3 boundsMin = offset + glm::dvec3(x * cellSize, tile.MinHeight - WorldUnits::FromMeters(1.0f), z * cellSize);
+        const glm::dvec3 boundsMax = offset + glm::dvec3((x + 1) * cellSize, top, (z + 1) * cellSize);
         const WorldCellCoord cell = WorldGrid::CellFor(boundsMin, boundsMax, cellSize);
         uint32_t count = 0;
         const std::string text = SceneSerializer::WorldCellText(scene, roots, WorldGrid::CellName(cell), &count);
@@ -513,7 +514,7 @@ namespace Nox
         }
         m_CellBytes += text.size();
         m_CellFiles.push_back(m_AssetDirectory / partition.CellFile(cell));
-        partition.Cells[cell] = WorldCellInfo{ boundsMin, boundsMax, count };
+        partition.Cells[cell] = WorldCellInfo{ glm::vec3(boundsMin), glm::vec3(boundsMax), count };
         return true;
     }
 
@@ -526,9 +527,9 @@ namespace Nox
         const std::filesystem::path scenePath = std::filesystem::path(m_Settings.Folder) / "StreamingTestWorld.nox";
         Scene& world = *m_World;
         const float middle = grid * cellSize * 0.5f;
-        m_Middle = glm::vec3(middle, WorldUnits::FromMeters(20.0f), middle);
+        m_Middle = WorldOffset() + glm::dvec3(middle, WorldUnits::FromMeters(20.0f), middle);
         Entity camera = world.CreateEntity("Camera");
-        camera.GetComponent<TransformComponent>().Translation = glm::vec3(middle, WorldUnits::FromMeters(60.0f), middle);
+        camera.GetComponent<TransformComponent>().Translation = WorldOffset() + glm::dvec3(middle, WorldUnits::FromMeters(60.0f), middle);
         camera.GetComponent<TransformComponent>().Rotation = glm::vec3(-0.2f, 0.0f, 0.0f);
         CameraComponent& cameraComponent = camera.AddComponent<CameraComponent>();
         cameraComponent.Primary = true;

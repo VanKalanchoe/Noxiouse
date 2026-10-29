@@ -1793,7 +1793,7 @@ namespace Nox
     {
         if (node.has_matrix)
         {
-            glm::mat4 m = glm::make_mat4(node.matrix);
+            glm::mat4 m = glm::mat4(glm::make_mat4(node.matrix));
             glm::vec3 skew;
             glm::vec4 perspective;
             glm::decompose(m, scale, rotation, translation, skew, perspective);

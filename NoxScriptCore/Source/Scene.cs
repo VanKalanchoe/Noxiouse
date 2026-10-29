@@ -9,10 +9,10 @@ public static class Scene
     /// Places a prefab (its path under the asset directory, e.g. "Prefabs/Ball.nprefab") at a position and spawns it at once,
     /// so its components can be used right away. Returns an invalid entity when the prefab does not exist.
     /// </summary>
-    public static Entity Instantiate(string prefabPath, Vector3 position) => new(InternalCalls.InstantiatePrefab(prefabPath, position));
+    public static Entity Instantiate(string prefabPath, Vector3d position) => new(InternalCalls.InstantiatePrefab(prefabPath, position));
 
     /// <summary>An empty entity (just a transform) at a position, e.g. to show a <see cref="Mesh"/> on.</summary>
-    public static Entity CreateEntity(string name, Vector3 position) => new(InternalCalls.CreateEntity(name, position));
+    public static Entity CreateEntity(string name, Vector3d position) => new(InternalCalls.CreateEntity(name, position));
 
     /// <summary>Destroys the entity (and its children) at the end of this frame's script update.</summary>
     public static void Destroy(Entity entity) => InternalCalls.DestroyEntity(entity.ID);
@@ -39,7 +39,7 @@ public static class Scene
     /// cells activating or activated too. E.g. a teleport puts a streaming source (Target State Loaded) at its target and waits for
     /// Loaded, then moves the player: the cells activate without a hitch.
     /// </summary>
-    public static bool IsWorldStreamingCompleted(Vector3 position, float range, WorldCellState state = WorldCellState.Activated) =>
+    public static bool IsWorldStreamingCompleted(Vector3d position, float range, WorldCellState state = WorldCellState.Activated) =>
         InternalCalls.IsWorldStreamingCompleted(position, range, (int)state);
 
     /// <summary>A world partition's cells by state right now, and the bounds of the world's content (Unreal's stat streaming).</summary>

@@ -1,5 +1,7 @@
 #include "GpuScene.h"
 
+#include "NoxCore/Math/Math.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -340,13 +342,17 @@ namespace Nox
         }
     }
 
-    uint32_t GpuScene::AddInstance(uint32_t meshSlot, uint32_t materialSlot, const glm::mat4& world, int32_t entityID)
+    uint32_t GpuScene::AddInstance(uint32_t meshSlot, uint32_t materialSlot, const glm::dmat4& worldTransform, int32_t entityID)
     {
         const uint32_t slot = m_Instances.Allocate();
         m_Transforms.Grow(slot + 1);
         m_RayTracingInstances.Grow(slot + 1);
         if (m_InstanceStates.size() <= slot)
             m_InstanceStates.resize(slot + 1);
+        if (m_WorldTranslations.size() <= slot)
+            m_WorldTranslations.resize(slot + 1);
+        m_WorldTranslations[slot] = glm::dvec3(worldTransform[3]);
+        const glm::mat4 world = Math::RelativeTo(worldTransform, m_RenderOrigin);
 
         shaderio::GpuInstance& instance = m_Instances.Edit(slot);
         instance.meshIndex = meshSlot;
@@ -408,8 +414,10 @@ namespace Nox
         }
     }
 
-    void GpuScene::SetTransform(uint32_t instanceSlot, const glm::mat4& world)
+    void GpuScene::SetTransform(uint32_t instanceSlot, const glm::dmat4& worldTransform)
     {
+        m_WorldTranslations[instanceSlot] = glm::dvec3(worldTransform[3]);
+        const glm::mat4 world = Math::RelativeTo(worldTransform, m_RenderOrigin);
         InstanceState& state = m_InstanceStates[instanceSlot];
         shaderio::GpuTransform& transform = m_Transforms.Edit(instanceSlot);
 
@@ -428,6 +436,33 @@ namespace Nox
 
         m_RayTracingInstances.Edit(instanceSlot).normalMatrix = transform.normal;
         WriteTlasInstance(instanceSlot);
+    }
+
+    void GpuScene::SetRenderOrigin(const glm::dvec3& origin)
+    {
+        if (origin == m_RenderOrigin)
+            return;
+        // Positions relative to the old origin are this much farther along relative to the new one. The origins sit on a coarse
+        // grid (Renderer::updateRenderOrigin), so the shift is exact in float.
+        const glm::vec3 shift = glm::vec3(m_RenderOrigin - origin);
+        m_RenderOrigin = origin;
+        for (uint32_t instanceSlot = 0; instanceSlot < m_InstanceStates.size(); ++instanceSlot)
+        {
+            InstanceState& state = m_InstanceStates[instanceSlot];
+            if (state.Material == InvalidSlot)
+                continue;
+            shaderio::GpuTransform& transform = m_Transforms.Edit(instanceSlot);
+            transform.world[3] = glm::vec4(glm::vec3(m_WorldTranslations[instanceSlot] - origin), transform.world[3][3]);
+            // Moved this frame: last frame's place, carried over; still: exactly its world (no rounding left as motion).
+            if (state.LastMovedFrame == m_Frame)
+                transform.previousWorld[3] += glm::vec4(shift, 0.0f);
+            else
+                transform.previousWorld = transform.world;
+            transform.normal = glm::transpose(glm::inverse(transform.world));
+            state.WorldSphere += glm::vec4(shift, 0.0f);
+            m_RayTracingInstances.Edit(instanceSlot).normalMatrix = transform.normal;
+            WriteTlasInstance(instanceSlot);
+        }
     }
 
     void GpuScene::SetBoneMatrixOffset(uint32_t instanceSlot, uint32_t boneMatrixOffset)

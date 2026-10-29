@@ -1,4 +1,5 @@
 #include "SceneHierarchyPanel.h"
+#include "NoxCore/Math/Math.h"
 
 #include <algorithm>
 #include <cctype>
@@ -714,7 +715,15 @@ namespace Nox
     }
 
     //styling maybe in the future different clas
-    static bool DrawVec3Control(const std::string& label, glm::vec3& values, float resetValue = 0.0f,
+    // One axis of a Vec3 control: float, or double for world positions (large world coordinates).
+    static bool DragAxis(const char* id, float* value, float dragSpeed) { return ImGui::DragFloat(id, value, dragSpeed, 0.0f, 0.0f, "%.2f"); }
+    static bool DragAxis(const char* id, double* value, float dragSpeed)
+    {
+        return ImGui::DragScalar(id, ImGuiDataType_Double, value, dragSpeed, nullptr, nullptr, "%.2f");
+    }
+
+    template <typename Vec>
+    static bool DrawVec3Control(const std::string& label, Vec& values, typename Vec::value_type resetValue = 0,
                                 float columnWidth = 100.0f, float dragSpeed = 0.1f)
     {
         bool valueChanged = false;
@@ -747,7 +756,7 @@ namespace Nox
         ImGui::PopFont();
 
         ImGui::SameLine();
-        if (ImGui::DragFloat("##X", &values.x, dragSpeed, 0.0f, 0.0f, "%.2f"))
+        if (DragAxis("##X", &values.x, dragSpeed))
             valueChanged = true;
         // the last 3 paramater force it to be only show 2dec
         ImGui::PopItemWidth();
@@ -766,7 +775,7 @@ namespace Nox
         ImGui::PopFont();
 
         ImGui::SameLine();
-        if (ImGui::DragFloat("##Y", &values.y, dragSpeed, 0.0f, 0.0f, "%.2f"))
+        if (DragAxis("##Y", &values.y, dragSpeed))
             valueChanged = true;
         // the last 3 paramater force it to be only show 2dec
         ImGui::PopItemWidth();
@@ -785,7 +794,7 @@ namespace Nox
         ImGui::PopFont();
 
         ImGui::SameLine();
-        if (ImGui::DragFloat("##Z", &values.z, dragSpeed, 0.0f, 0.0f, "%.2f"))
+        if (DragAxis("##Z", &values.z, dragSpeed))
             valueChanged = true;
         // the last 3 paramater force it to be only show 2dec
         ImGui::PopItemWidth();
@@ -867,20 +876,22 @@ namespace Nox
         return true;
     }
 
-    // A vec3 length (Position, Half Extents, a collider Offset, ...).
-    static bool DrawLengthVec3Control(const std::string& label, glm::vec3& worldValue)
+    // A vec3 length (Position -- a dvec3: large world coordinates --, Half Extents, a collider Offset, ...).
+    template <typename Vec>
+    static bool DrawLengthVec3Control(const std::string& label, Vec& worldValue)
     {
-        const float largest = std::max({ std::abs(worldValue.x), std::abs(worldValue.y), std::abs(worldValue.z) });
+        const float largest = static_cast<float>(std::max({ std::abs(worldValue.x), std::abs(worldValue.y), std::abs(worldValue.z) }));
         const LengthUnit unit = GetLengthUnit(largest);
         // 0.1 per pixel of drag felt right when a world unit was a meter; scaled to the display unit, it keeps that feel
         // (0.1 m or 10 cm per pixel) however large the display unit's numbers are.
         const float dragSpeed = unit.Meters ? 0.1f : 10.0f;
 
-        glm::vec3 display = worldValue / unit.Factor;
-        if (!DrawVec3Control(label + " (" + unit.Suffix + ")", display, 0.0f, 100.0f, dragSpeed))
+        using T = typename Vec::value_type;
+        Vec display = worldValue / static_cast<T>(unit.Factor);
+        if (!DrawVec3Control(label + " (" + unit.Suffix + ")", display, T(0), 100.0f, dragSpeed))
             return false;
 
-        worldValue = display * unit.Factor;
+        worldValue = display * static_cast<T>(unit.Factor);
         return true;
     }
 
@@ -1131,7 +1142,7 @@ namespace Nox
         DrawComponent<TransformComponent>("Transform", entity, [this, entity](auto& component)
         {
             // Record old values before UI interaction to compute the delta
-            glm::vec3 oldTranslation = component.Translation;
+            const glm::dvec3 oldTranslation = component.Translation;
             glm::vec3 oldRotation = component.Rotation;
             glm::vec3 oldScale = component.Scale;
 
@@ -1168,7 +1179,7 @@ namespace Nox
                 // If multiple entities are selected, apply the exact same delta to all other selected entities!
                 if (m_SelectionContexts.size() > 1)
                 {
-                    glm::vec3 deltaTranslation = component.Translation - oldTranslation;
+                    const glm::dvec3 deltaTranslation = component.Translation - oldTranslation;
                     glm::vec3 deltaRotation = component.Rotation - oldRotation;
                     glm::vec3 deltaScale = component.Scale - oldScale;
 
@@ -1582,9 +1593,9 @@ namespace Nox
                 }
                 else
                 {
-                    const glm::mat4& world = sun.GetComponent<WorldTransformComponent>().WorldMatrix;
+                    const glm::mat3 world = Math::Basis(sun.GetComponent<WorldTransformComponent>().WorldMatrix);
                     // Renderer::SubmitLight's convention: the light shines along its local -Z, the sun is the other way.
-                    const glm::vec3 toSun = -glm::normalize(glm::vec3(world * glm::vec4(0.0f, 0.0f, -1.0f, 0.0f)));
+                    const glm::vec3 toSun = -glm::normalize(world * glm::vec3(0.0f, 0.0f, -1.0f));
                     float elevation = glm::degrees(std::asin(glm::clamp(toSun.y, -1.0f, 1.0f)));
                     float azimuth = glm::degrees(std::atan2(toSun.x, toSun.z));
                     const auto& sunLight = sun.GetComponent<DirectionalLightComponent>();

@@ -59,7 +59,7 @@ namespace Nox::HLOD
         std::vector<glm::vec4> Tangents; // xyz, w: bitangent sign (bitangent = cross(normal, tangent) * w)
         std::vector<glm::vec2> UVs;
         std::vector<uint32_t> Indices;
-        glm::mat4 Transform{ 1.0f };
+        glm::dmat4 Transform{ 1.0 }; // world (double precision: large world coordinates)
         uint32_t Material = 0;
     };
 
@@ -88,7 +88,7 @@ namespace Nox::HLOD
         bool Ok = false;
         std::string Error;
 
-        glm::vec3 Origin{ 0.0f }; // the vertices are relative to it (the HLOD entity stands here)
+        glm::dvec3 Origin{ 0.0 }; // the vertices are relative to it (the HLOD entity stands here); world, double precision
         std::vector<glm::vec3> Positions;
         std::vector<glm::vec3> Normals;
         std::vector<glm::vec4> Tangents;

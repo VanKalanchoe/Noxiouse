@@ -12,13 +12,13 @@ internal static unsafe class InternalCalls
     private static delegate*<float> Input_GetScrollDelta;
     private static delegate*<uint, void> Input_SetCursorLocked;
     private static delegate*<uint> Input_IsCursorLocked;
-    private static delegate*<NativeString, float, float, float, ulong> Scene_Instantiate;
+    private static delegate*<NativeString, double, double, double, ulong> Scene_Instantiate;
     private static delegate*<ulong, void> Scene_Destroy;
-    private static delegate*<NativeString, float, float, float, ulong> Scene_CreateEntity;
+    private static delegate*<NativeString, double, double, double, ulong> Scene_CreateEntity;
     private static delegate*<NativeString, uint> Scene_LoadLevel;
     private static delegate*<NativeString, void> Scene_UnloadLevel;
     private static delegate*<NativeString, int> Scene_GetLevelState;
-    private static delegate*<float, float, float, float, int, uint> Scene_IsWorldStreamingCompleted;
+    private static delegate*<double, double, double, float, int, uint> Scene_IsWorldStreamingCompleted;
     private static delegate*<WorldStreamingStats*, void> Scene_GetWorldStreamingStats;
     private static delegate*<MemoryStats*, void> Diagnostics_GetMemoryStats;
     private static delegate*<ulong> Mesh_Create;
@@ -29,7 +29,7 @@ internal static unsafe class InternalCalls
     private static delegate*<ulong, NativeString, uint> Mesh_SetMaterial;
     private static delegate*<ulong, ulong, void> Entity_SetMesh;
     private static delegate*<ulong, ulong, float, float, void> Entity_SetMeshCollider;
-    private static delegate*<float, float, float, float, float, float, float, RaycastHit*, uint> Physics_Raycast;
+    private static delegate*<double, double, double, float, float, float, float, RaycastHit*, uint> Physics_Raycast;
     private static delegate*<ulong, float, float, float, void> RigidBody_SetLinearVelocity;
     private static delegate*<ulong, float, float, float, void> RigidBody_AddForce;
     private static delegate*<ulong, float, float, float, void> RigidBody_AddImpulse;
@@ -89,7 +89,7 @@ internal static unsafe class InternalCalls
     internal static void SetCursorLocked(bool locked) => Input_SetCursorLocked(locked ? 1u : 0u);
     internal static bool IsCursorLocked() => Input_IsCursorLocked() != 0;
 
-    internal static ulong InstantiatePrefab(string prefabPath, Vector3 position)
+    internal static ulong InstantiatePrefab(string prefabPath, Vector3d position)
     {
         using NativeString nativePath = new(prefabPath);
         return Scene_Instantiate(nativePath, position.X, position.Y, position.Z);
@@ -115,7 +115,7 @@ internal static unsafe class InternalCalls
         return Scene_GetLevelState(nativePath);
     }
 
-    internal static bool IsWorldStreamingCompleted(Vector3 position, float range, int state) =>
+    internal static bool IsWorldStreamingCompleted(Vector3d position, float range, int state) =>
         Scene_IsWorldStreamingCompleted(position.X, position.Y, position.Z, range, state) != 0;
 
     internal static WorldStreamingStats GetWorldStreamingStats()
@@ -132,7 +132,7 @@ internal static unsafe class InternalCalls
         return stats;
     }
 
-    internal static ulong CreateEntity(string name, Vector3 position)
+    internal static ulong CreateEntity(string name, Vector3d position)
     {
         using NativeString nativeName = new(name);
         return Scene_CreateEntity(nativeName, position.X, position.Y, position.Z);
@@ -170,7 +170,7 @@ internal static unsafe class InternalCalls
     internal static void SetEntityMeshCollider(ulong entityID, ulong mesh, float friction, float restitution) =>
         Entity_SetMeshCollider(entityID, mesh, friction, restitution);
 
-    internal static bool Raycast(Vector3 origin, Vector3 direction, float maxDistance, out RaycastHit hit)
+    internal static bool Raycast(Vector3d origin, Vector3 direction, float maxDistance, out RaycastHit hit)
     {
         RaycastHit result = default;
         bool found = Physics_Raycast(origin.X, origin.Y, origin.Z, direction.X, direction.Y, direction.Z, maxDistance, &result) != 0;

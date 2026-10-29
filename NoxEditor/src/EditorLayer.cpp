@@ -188,7 +188,7 @@ namespace Nox
         m_SceneHierarchyPanel.SetPlaceAssetsCallback([this](const std::vector<AssetHandle>& handles, const std::string& folder)
         {
             // No viewport point for a drop on the hierarchy: at the point the editor camera orbits (in front of it).
-            PlaceAssets(handles, m_EditorCamera.GetPosition() + m_EditorCamera.GetForwardDirection() * m_EditorCamera.GetDistance(), folder);
+            PlaceAssets(handles, m_EditorCamera.GetPosition() + glm::dvec3(m_EditorCamera.GetForwardDirection() * m_EditorCamera.GetDistance()), folder);
         });
         m_SceneHierarchyPanel.SetCreateShapeCallback([this](PrimitiveShape shape, const std::string& folder) { CreateShape(shape, folder); });
 
@@ -306,7 +306,7 @@ namespace Nox
         if (m_TestWorldGeneration && m_TestWorldGeneration->Step())
         {
             const AssetHandle scene = m_TestWorldGeneration->Failed() ? AssetHandle(0) : m_TestWorldGeneration->GetScene();
-            const glm::vec3 middle = m_TestWorldGeneration->GetMiddle();
+            const glm::dvec3 middle = m_TestWorldGeneration->GetMiddle();
             m_TestWorldGeneration.reset();
             if (scene != 0)
             {
@@ -745,11 +745,11 @@ namespace Nox
         m_ProfilerPanel.OnImGuiRender();
         {
             // The camera the cells stream around: the primary camera in Play, else the editor camera.
-            glm::vec3 streamingSource = m_EditorCamera.GetPosition();
+            glm::dvec3 streamingSource = m_EditorCamera.GetPosition();
             if (m_SceneState == SceneState::Play && m_ActiveScene)
             {
                 if (Entity camera = m_ActiveScene->GetPrimaryCameraEntity(); camera && camera.HasComponent<WorldTransformComponent>())
-                    streamingSource = glm::vec3(camera.GetComponent<WorldTransformComponent>().WorldMatrix[3]);
+                    streamingSource = camera.GetComponent<WorldTransformComponent>().GetPosition();
             }
             m_WorldPartitionPanel.OnImGuiRender(m_ActiveScene, streamingSource, m_SceneState == SceneState::Edit && !m_PrefabMode.Active);
         }
@@ -2271,10 +2271,10 @@ namespace Nox
         if (m_SceneState != SceneState::Play && m_ShowReferenceFigure)
         {
             // Under the cursor: where the cursor points on the surfaces (the y = 0 plane past them), kept while the mouse is elsewhere.
-            glm::vec3 underCursor;
+            glm::dvec3 underCursor;
             if (m_ReferenceFigureAtCursor && m_ViewportHovered && PickWorldPoint(underCursor))
                 m_ReferenceFigurePosition = underCursor;
-            DrawReferenceFigure(m_ReferenceFigureAtCursor ? m_ReferenceFigurePosition : glm::vec3(0.0f));
+            DrawReferenceFigure(m_ReferenceFigureAtCursor ? m_ReferenceFigurePosition : glm::dvec3(0.0));
         }
 
         // Rect lights are not geometry: their rectangle and a stroke the way they shine (the entity's -Z) show where they are.
@@ -2284,7 +2284,7 @@ namespace Nox
             for (auto entity : rectLights)
             {
                 auto [wtc, light] = rectLights.get<WorldTransformComponent, RectLightComponent>(entity);
-                const glm::mat4& world = wtc.WorldMatrix;
+                const glm::mat4 world = m_Renderer->ToRenderSpace(wtc.WorldMatrix); // (overlays draw in the renderer's space)
                 const glm::vec3 centre = glm::vec3(world[3]);
                 const glm::vec3 halfX = glm::vec3(world[0]) * (0.5f * light.Width);
                 const glm::vec3 halfY = glm::vec3(world[1]) * (0.5f * light.Height);
@@ -2301,7 +2301,7 @@ namespace Nox
             for (auto entity : discLights)
             {
                 auto [wtc, light] = discLights.get<WorldTransformComponent, DiscLightComponent>(entity);
-                const glm::mat4& world = wtc.WorldMatrix;
+                const glm::mat4 world = m_Renderer->ToRenderSpace(wtc.WorldMatrix); // (overlays draw in the renderer's space)
                 const glm::vec3 centre = glm::vec3(world[3]);
                 const float scale = glm::max(glm::length(glm::vec3(world[0])), glm::length(glm::vec3(world[1])));
                 const glm::vec3 axisX = glm::length(glm::vec3(world[0])) > 1e-6f ? glm::normalize(glm::vec3(world[0])) * light.Radius * scale : glm::vec3(0.0f);
@@ -2333,7 +2333,7 @@ namespace Nox
                 for (int i = 0; i < 8; ++i)
                 {
                     const glm::vec3 sign((i & 1) ? 1.0f : -1.0f, (i & 2) ? 1.0f : -1.0f, (i & 4) ? 1.0f : -1.0f);
-                    corners[i] = glm::vec3(wtc.WorldMatrix * glm::vec4(sign * volume.HalfExtents, 1.0f));
+                    corners[i] = glm::vec3(m_Renderer->ToRenderSpace(wtc.WorldMatrix) * glm::vec4(sign * volume.HalfExtents, 1.0f));
                 }
                 for (const auto& edge : edges)
                     m_Renderer2D->DrawXRayLine(corners[edge[0]], corners[edge[1]], kVolumeColor);
@@ -2381,7 +2381,7 @@ namespace Nox
                         * glm::translate(glm::mat4(1.0f), glm::vec3(bc2d.Offset, 0.001f))
                         * glm::scale(glm::mat4(1.0f), scale * glm::vec3(bc2d.Size * 2.0f, 1.0f));*/
 
-                    glm::mat4 transform = wtc.WorldMatrix
+                    glm::mat4 transform = m_Renderer->ToRenderSpace(wtc.WorldMatrix)
                         * glm::translate(glm::mat4(1.0f), glm::vec3(bc2d.Offset, 0.001f))
                         * glm::scale(glm::mat4(1.0f), glm::vec3(bc2d.Size * 2.0f, 1.0f));
 
@@ -2401,7 +2401,7 @@ namespace Nox
                     glm::mat4 transform = glm::translate(glm::mat4(1.0f), translation)
                         * glm::scale(glm::mat4(1.0f), scale);*/
 
-                    glm::mat4 transform = wtc.WorldMatrix
+                    glm::mat4 transform = m_Renderer->ToRenderSpace(wtc.WorldMatrix)
                         * glm::translate(glm::mat4(1.0f), glm::vec3(cc2d.Offset, 0.001f))
                         * glm::scale(glm::mat4(1.0f), glm::vec3(cc2d.Radius * 2.0f));
 
@@ -2831,9 +2831,9 @@ namespace Nox
             if (index != m_ActiveViewport && !slot.CameraSet)
                 continue;
             const EditorCamera& camera = index == m_ActiveViewport ? m_EditorCamera : slot.Camera;
-            const glm::vec3 focal = camera.GetFocalPoint();
+            const glm::dvec3 focal = camera.GetFocalPoint();
             char line[512];
-            snprintf(line, sizeof(line), "%s|%d|%.6g %.6g %.6g %.6g %.6g %.6g %d %.6g", scene.c_str(), index, focal.x, focal.y, focal.z,
+            snprintf(line, sizeof(line), "%s|%d|%.17g %.17g %.17g %.6g %.6g %.6g %d %.6g", scene.c_str(), index, focal.x, focal.y, focal.z,
                      camera.GetDistance(), camera.GetPitch(), camera.GetYaw(), static_cast<int>(camera.GetViewMode()), camera.GetOrthoHalfHeight());
             lines.push_back(line);
         }
@@ -2854,9 +2854,9 @@ namespace Nox
             if (line.rfind(prefix, 0) != 0)
                 continue;
             int index = -1, mode = 0;
-            glm::vec3 focal(0.0f);
+            glm::dvec3 focal(0.0);
             float distance = 0.0f, pitch = 0.0f, yaw = 0.0f, orthoHalfHeight = 10.0f;
-            if (sscanf(line.c_str() + prefix.size(), "%d|%f %f %f %f %f %f %d %f", &index, &focal.x, &focal.y, &focal.z, &distance, &pitch, &yaw,
+            if (sscanf(line.c_str() + prefix.size(), "%d|%lf %lf %lf %f %f %f %d %f", &index, &focal.x, &focal.y, &focal.z, &distance, &pitch, &yaw,
                        &mode, &orthoHalfHeight) != 9 || index < 0 || index >= kMaxViewports || mode < 0 || mode > static_cast<int>(EditorViewMode::Right))
                 continue;
             EditorCamera& camera = index == m_ActiveViewport ? m_EditorCamera : m_Viewports[index].Camera;
@@ -2923,11 +2923,11 @@ namespace Nox
         return WorldUnits::FromCentimeters(kLocationSnapsCm[m_LocationSnapIndex]);
     }
 
-    glm::vec3 EditorLayer::SnapLocation(const glm::vec3& point) const
+    glm::dvec3 EditorLayer::SnapLocation(const glm::dvec3& point) const
     {
         if (!m_SnapEnabled)
             return point;
-        const float step = LocationSnapWorldUnits();
+        const double step = LocationSnapWorldUnits();
         return glm::round(point / step) * step;
     }
 
@@ -3086,6 +3086,10 @@ namespace Nox
                 settings.PropsPerCell = static_cast<uint32_t>(std::max(props, 0));
             ImGui::SetItemTooltip("Rocks, pines and stumps: an entity each (sharing three meshes), so that cells are as dense as an open\n"
                                   "world's and their entities' cost shows (the fly-through logs it per cell). 0: only the ground.");
+            ImGui::DragFloat("World Offset (km)", &settings.WorldOffsetKm, 10.0f, 0.0f, 100000.0f, "%.0f");
+            ImGui::SetItemTooltip("Large world coordinates test: the whole world this far out along X and Z, the same content as at 0.\n"
+                                  "1000 km is far past where float positions jitter (a few km): anything that drifts, shakes or snaps\n"
+                                  "out there and not at 0 is a precision bug.");
             int texture = 0; // 256 << index
             while (texture < 4 && (256u << texture) < settings.TextureSize)
                 ++texture;
@@ -3324,7 +3328,7 @@ namespace Nox
                             };
 
                             glm::mat4 inverseViewProjection = glm::inverse(
-                                m_EditorCamera.GetGizmoProjection() * m_EditorCamera.GetGizmoView());
+                                m_EditorCamera.GetGizmoProjection() * m_EditorCamera.GetGizmoView(m_Renderer->GetRenderOrigin()));
                             glm::vec4 nearPoint = inverseViewProjection * glm::vec4(ndc, -1.0f, 1.0f);
                             glm::vec4 farPoint = inverseViewProjection * glm::vec4(ndc, 1.0f, 1.0f);
                             nearPoint /= nearPoint.w;
@@ -3340,13 +3344,13 @@ namespace Nox
                             if (std::abs(rayPlaneDenominator) > 0.0001f)
                             {
                                 float distance = glm::dot(
-                                    m_PlacementPreview.InitialTranslation - rayOrigin,
+                                    m_Renderer->ToRenderSpace(m_PlacementPreview.InitialTranslation) - rayOrigin,
                                     planeNormal
                                 ) / rayPlaneDenominator;
                                 if (distance >= 0.0f)
                                 {
                                     auto& transform = m_PlacementPreview.Root.GetComponent<TransformComponent>();
-                                    transform.Translation = SnapLocation(rayOrigin + rayDirection * distance);
+                                    transform.Translation = SnapLocation(m_Renderer->FromRenderSpace(rayOrigin + rayDirection * distance));
                                     m_PlacementPreview.Root.MarkTransformDirty();
                                 }
                             }
@@ -3368,7 +3372,7 @@ namespace Nox
                 const size_t count = multiPayload->DataSize / sizeof(AssetHandle);
                 const AssetHandle* handles = static_cast<const AssetHandle*>(multiPayload->Data);
 
-                glm::vec3 dropPoint(0.0f);
+                glm::dvec3 dropPoint(0.0);
                 const glm::vec2 viewportSize = m_ViewportBounds[1] - m_ViewportBounds[0];
                 if (viewportSize.x > 0.0f && viewportSize.y > 0.0f)
                 {
@@ -3377,7 +3381,7 @@ namespace Nox
                         ((imguiMouse.x - m_ViewportBounds[0].x) / viewportSize.x) * 2.0f - 1.0f,
                         1.0f - ((imguiMouse.y - m_ViewportBounds[0].y) / viewportSize.y) * 2.0f
                     };
-                    const glm::mat4 inverseViewProjection = glm::inverse(m_EditorCamera.GetGizmoProjection() * m_EditorCamera.GetGizmoView());
+                    const glm::mat4 inverseViewProjection = glm::inverse(m_EditorCamera.GetGizmoProjection() * m_EditorCamera.GetGizmoView(m_Renderer->GetRenderOrigin()));
                     glm::vec4 nearPoint = inverseViewProjection * glm::vec4(ndc, -1.0f, 1.0f);
                     glm::vec4 farPoint = inverseViewProjection * glm::vec4(ndc, 1.0f, 1.0f);
                     nearPoint /= nearPoint.w;
@@ -3390,9 +3394,9 @@ namespace Nox
                     const float denominator = glm::dot(rayDirection, planeNormal);
                     if (std::abs(denominator) > 0.0001f)
                     {
-                        const float distance = glm::dot(-rayOrigin, planeNormal) / denominator;
+                        const float distance = glm::dot(m_Renderer->ToRenderSpace(glm::dvec3(0.0)) - rayOrigin, planeNormal) / denominator;
                         if (distance >= 0.0f)
-                            dropPoint = SnapLocation(rayOrigin + rayDirection * distance);
+                            dropPoint = SnapLocation(m_Renderer->FromRenderSpace(rayOrigin + rayDirection * distance));
                     }
                 }
 
@@ -3422,10 +3426,10 @@ namespace Nox
 
             // Editor camera
             const glm::mat4& cameraProjection = m_EditorCamera.GetGizmoProjection();
-            glm::mat4 cameraView = m_EditorCamera.GetGizmoView();
+            glm::mat4 cameraView = m_EditorCamera.GetGizmoView(m_Renderer->GetRenderOrigin());
 
-            // Grab the WORLD transform for ImGuizmo
-            glm::mat4 worldTransform = selectedEntity.GetComponent<WorldTransformComponent>().WorldMatrix;
+            // Grab the WORLD transform for ImGuizmo, in the renderer's space (large world coordinates: the view is relative to it too)
+            glm::mat4 worldTransform = m_Renderer->ToRenderSpace(selectedEntity.GetComponent<WorldTransformComponent>().WorldMatrix);
 
             // Snapping
             // The toolbar switch, inverted while Ctrl is held; the steps are the ones chosen there.
@@ -3474,14 +3478,14 @@ namespace Nox
                             }
                         }
 
-                        glm::mat4 currentWorld = entity.GetComponent<WorldTransformComponent>().WorldMatrix;
-                        entity.SetWorldTransform(deltaMatrix * currentWorld);
+                        const glm::mat4 currentWorld = m_Renderer->ToRenderSpace(entity.GetComponent<WorldTransformComponent>().WorldMatrix);
+                        entity.SetWorldTransform(m_Renderer->FromRenderSpace(deltaMatrix * currentWorld));
                     }
                 }
                 else
                 {
                     // One single line does all the math, finds the parent, and marks it dirty!
-                    selectedEntity.SetWorldTransform(worldTransform);
+                    selectedEntity.SetWorldTransform(m_Renderer->FromRenderSpace(worldTransform));
                 }
             }
         }
@@ -3538,8 +3542,8 @@ namespace Nox
         Entity selectedEntity = m_SceneHierarchyPanel.GetSelectedEntity();
         if (texture && selectedEntity && m_GizmoType != -1 && m_SceneState != SceneState::Play && selectedEntity.HasComponent<WorldTransformComponent>())
         {
-            const glm::mat4 world = selectedEntity.GetComponent<WorldTransformComponent>().WorldMatrix;
-            const glm::mat4 viewProjection = slot.Camera.GetProjection() * slot.Camera.GetViewMatrix();
+            const glm::mat4 world = m_Renderer->ToRenderSpace(selectedEntity.GetComponent<WorldTransformComponent>().WorldMatrix);
+            const glm::mat4 viewProjection = slot.Camera.GetProjection() * slot.Camera.GetViewMatrix(m_Renderer->GetRenderOrigin());
             auto toScreen = [&](const glm::vec3& point, ImVec2& out) -> bool
             {
                 const glm::vec4 clip = viewProjection * glm::vec4(point, 1.0f);
@@ -3757,7 +3761,7 @@ namespace Nox
             // Realtime off (UE's viewport option): drawn again only when what it shows changed -- its camera, size or options, the
             // scene (an edit, undo or redo), the selection, a gizmo drag in progress -- and every two seconds (assets streaming in).
             // In Play it is always realtime.
-            const glm::mat4 viewProjection = slot.Camera.GetProjection() * slot.Camera.GetViewMatrix();
+            const glm::mat4 viewProjection = slot.Camera.GetProjection() * slot.Camera.GetViewMatrix(m_Renderer->GetRenderOrigin());
             size_t selection = m_SceneHierarchyPanel.GetSelectedEntities().size();
             for (const Entity& selected : m_SceneHierarchyPanel.GetSelectedEntities())
                 selection = selection * 31 + static_cast<uint32_t>(selected);
@@ -3783,8 +3787,8 @@ namespace Nox
             {
                 const EditorViewMode mode = slot.Camera.GetViewMode();
                 const int axis = (mode == EditorViewMode::Front || mode == EditorViewMode::Back) ? 2 : (mode == EditorViewMode::Left || mode == EditorViewMode::Right) ? 0 : 1;
-                grid = slot.Camera.IsOrthographic() ? Renderer2D::MakeGrid(slot.Camera.GetFocalPoint(), cell, axis, slot.Camera.GetOrthoHalfHeight())
-                                                    : Renderer2D::MakeGrid(slot.Camera.GetPosition(), cell, 1, slot.Camera.GetDistance());
+                grid = slot.Camera.IsOrthographic() ? Renderer2D::MakeGrid(slot.Camera.GetFocalPoint(), m_Renderer->GetRenderOrigin(), cell, axis, slot.Camera.GetOrthoHalfHeight())
+                                                    : Renderer2D::MakeGrid(slot.Camera.GetPosition(), m_Renderer->GetRenderOrigin(), cell, 1, slot.Camera.GetDistance());
             }
             if (m_SceneState == SceneState::Play)
                 flags &= ~Renderer::ExtraViewOutline;
@@ -3993,8 +3997,9 @@ namespace Nox
         ImGui::End();
     }
 
-    void EditorLayer::DrawReferenceFigure(const glm::vec3& position)
+    void EditorLayer::DrawReferenceFigure(const glm::dvec3& worldPosition)
     {
+        const glm::vec3 position = m_Renderer->ToRenderSpace(worldPosition);
         // Sizes in cm, converted to world units; the figure stands on `position`, facing -Z, 180 cm tall.
         auto cm = [](float centimeters) { return WorldUnits::FromCentimeters(centimeters); };
         const glm::vec4 color(1.0f, 0.62f, 0.2f, 0.9f);
@@ -4072,8 +4077,8 @@ namespace Nox
         for (auto entity : boxView)
         {
             auto [wtc, box] = boxView.get<WorldTransformComponent, BoxCollider3DComponent>(entity);
-            const glm::vec3 halfExtents = box.HalfExtents * DecomposeWorldScale(wtc.WorldMatrix);
-            const glm::mat4 transform = RigidPart(wtc.WorldMatrix);
+            const glm::vec3 halfExtents = box.HalfExtents * DecomposeWorldScale(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
+            const glm::mat4 transform = RigidPart(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
             glm::vec3 corners[8];
             for (int i = 0; i < 8; ++i)
             {
@@ -4090,9 +4095,9 @@ namespace Nox
         for (auto entity : sphereView)
         {
             auto [wtc, sphere] = sphereView.get<WorldTransformComponent, SphereCollider3DComponent>(entity);
-            const glm::vec3 worldScale = DecomposeWorldScale(wtc.WorldMatrix);
+            const glm::vec3 worldScale = DecomposeWorldScale(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
             const float radius = sphere.Radius * std::max({ worldScale.x, worldScale.y, worldScale.z });
-            const glm::mat4 transform = RigidPart(wtc.WorldMatrix);
+            const glm::mat4 transform = RigidPart(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
             for (int axis = 0; axis < 3; ++axis)
                 drawCircle(transform, sphere.Offset, radius, axis);
         }
@@ -4103,10 +4108,10 @@ namespace Nox
         for (auto entity : capsuleView)
         {
             auto [wtc, capsule] = capsuleView.get<WorldTransformComponent, CapsuleCollider3DComponent>(entity);
-            const glm::vec3 worldScale = DecomposeWorldScale(wtc.WorldMatrix);
+            const glm::vec3 worldScale = DecomposeWorldScale(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
             const float halfHeight = capsule.HalfHeight * worldScale.y;
             const float radius = capsule.Radius * std::max(worldScale.x, worldScale.z);
-            const glm::mat4 transform = RigidPart(wtc.WorldMatrix);
+            const glm::mat4 transform = RigidPart(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
             const glm::vec3 topCentre = capsule.Offset + glm::vec3(0.0f, halfHeight, 0.0f);
             const glm::vec3 bottomCentre = capsule.Offset - glm::vec3(0.0f, halfHeight, 0.0f);
             drawCircle(transform, topCentre, radius, 1);
@@ -4128,17 +4133,17 @@ namespace Nox
         if (!entity)
             return;
 
-        glm::vec3 centre;
+        glm::dvec3 centre;
         float radius;
         const WorldBounds bounds = ComputeWorldBounds(*m_ActiveScene, entity);
         if (bounds.Valid)
         {
-            centre = (bounds.Min + bounds.Max) * 0.5f;
+            centre = bounds.Center();
             radius = glm::length(bounds.Size()) * 0.5f;
         }
         else if (entity.HasComponent<WorldTransformComponent>())
         {
-            centre = glm::vec3(entity.GetComponent<WorldTransformComponent>().WorldMatrix[3]);
+            centre = entity.GetComponent<WorldTransformComponent>().GetPosition();
             radius = 0.0f; // Focus() floors this to a sensible minimum
         }
         else
@@ -4154,13 +4159,13 @@ namespace Nox
         // In an ortho view the grid lies on the plane the view looks at and the level follows the ortho size (Godot does the same).
         const float cell = std::max(LocationSnapWorldUnits(), WorldUnits::FromMeters(1.0f));
         if (m_EditorCamera.IsOrthographic())
-            m_Renderer2D->DrawGrid(m_EditorCamera.GetFocalPoint(), cell, GridPlaneAxis(), m_EditorCamera.GetOrthoHalfHeight());
+            m_Renderer2D->DrawGrid(m_EditorCamera.GetFocalPoint(), m_Renderer->GetRenderOrigin(), cell, GridPlaneAxis(), m_EditorCamera.GetOrthoHalfHeight());
         else
             // The orbit distance, not the camera's height above the ground: height alone jumps just from tilting to look straight
             // down (position.y then equals the orbit distance instead of ~0), which made the grid collapse to its coarsest cells
             // on nothing more than a rotation. Orbit distance only changes when you actually zoom, so the grid now looks the same
             // however you're angled at it, like UE5's.
-            m_Renderer2D->DrawGrid(m_EditorCamera.GetPosition(), cell, 1, m_EditorCamera.GetDistance());
+            m_Renderer2D->DrawGrid(m_EditorCamera.GetPosition(), m_Renderer->GetRenderOrigin(), cell, 1, m_EditorCamera.GetDistance());
     }
 
     int EditorLayer::GridPlaneAxis() const
@@ -4235,7 +4240,7 @@ namespace Nox
 
     // The world point under the cursor: the depth the renderer read back for the picked pixel (reverse-Z), unprojected like the lighting
     // shaders do, else the ground plane.
-    bool EditorLayer::PickWorldPoint(glm::vec3& out) const
+    bool EditorLayer::PickWorldPoint(glm::dvec3& out) const
     {
         // The pixel -> NDC mapping uses the size the renderer draws at (what the shaders divide the pixel by), not the ImGui panel.
         const NRI::Extent2D outputSize = m_Renderer->getViewPortSize();
@@ -4257,7 +4262,7 @@ namespace Nox
         }
 
         const glm::vec2 ndc = glm::vec2((pixel.x / viewportSize.x) * 2.0f - 1.0f, 1.0f - (pixel.y / viewportSize.y) * 2.0f);
-        const glm::mat4 inverseViewProjection = glm::inverse(m_EditorCamera.GetGizmoProjection() * m_EditorCamera.GetGizmoView());
+        const glm::mat4 inverseViewProjection = glm::inverse(m_EditorCamera.GetGizmoProjection() * m_EditorCamera.GetGizmoView(m_Renderer->GetRenderOrigin()));
         glm::vec4 nearPoint = inverseViewProjection * glm::vec4(ndc, -1.0f, 1.0f);
         glm::vec4 farPoint = inverseViewProjection * glm::vec4(ndc, 1.0f, 1.0f);
         nearPoint /= nearPoint.w;
@@ -4270,23 +4275,24 @@ namespace Nox
         {
             // The way the lighting shaders do it: the pixel's NDC position with the stored depth through the inverse of the renderer's own
             // projection * view (not the gizmo's), in double precision.
-            const glm::dmat4 inverse = glm::inverse(glm::dmat4(m_EditorCamera.GetProjection()) * glm::dmat4(m_EditorCamera.GetViewMatrix()));
+            const glm::dmat4 inverse = glm::inverse(glm::dmat4(m_EditorCamera.GetProjection()) * glm::dmat4(m_EditorCamera.GetViewMatrix(m_Renderer->GetRenderOrigin())));
             glm::dvec4 world = inverse * glm::dvec4(ndc.x, ndc.y, depth, 1.0);
             if (std::abs(world.w) > 1e-12)
             {
-                out = glm::vec3(world / world.w);
+                out = m_Renderer->GetRenderOrigin() + glm::dvec3(world / world.w); // (the inverse is in the renderer's space)
                 return true;
             }
         }
 
-        // Nothing drawn: the plane the grid lies on.
+        // Nothing drawn: the plane the grid lies on (the world's, through its origin: in the renderer's space at minus the render origin).
         const int axis = GridPlaneAxis();
         if (std::abs(direction[axis]) > 1e-4f)
         {
-            const float distance = -origin[axis] / direction[axis];
+            const float plane = static_cast<float>(-m_Renderer->GetRenderOrigin()[axis]);
+            const float distance = (plane - origin[axis]) / direction[axis];
             if (distance > 0.0f)
             {
-                out = origin + direction * distance;
+                out = m_Renderer->FromRenderSpace(origin + direction * distance);
                 return true;
             }
         }
@@ -4295,12 +4301,12 @@ namespace Nox
 
     void EditorLayer::MeasureClick()
     {
-        glm::vec3 point;
+        glm::dvec3 point;
         if (!PickWorldPoint(point))
             return;
         if (m_SnapEnabled != Input::IsKeyPressed(SDL_SCANCODE_LCTRL))
         {
-            const float step = LocationSnapWorldUnits();
+            const double step = LocationSnapWorldUnits();
             point = glm::round(point / step) * step;
         }
 
@@ -4322,25 +4328,29 @@ namespace Nox
         if (!m_MeasureTool && m_MeasureStage == 0)
             return;
 
-        const glm::mat4 view = m_EditorCamera.GetGizmoView();
+        const glm::mat4 view = m_EditorCamera.GetGizmoView(m_Renderer->GetRenderOrigin());
         const glm::mat4 projection = m_EditorCamera.GetGizmoProjection();
 
-        glm::vec3 cursor{ 0.0f };
+        glm::dvec3 worldCursor{ 0.0 };
         bool hasCursor = false;
         if (m_MeasureTool && m_ViewportHovered)
         {
-            hasCursor = PickWorldPoint(cursor);
+            hasCursor = PickWorldPoint(worldCursor);
             if (hasCursor && m_SnapEnabled != Input::IsKeyPressed(SDL_SCANCODE_LCTRL))
             {
-                const float step = LocationSnapWorldUnits();
-                cursor = glm::round(cursor / step) * step;
+                const double step = LocationSnapWorldUnits();
+                worldCursor = glm::round(worldCursor / step) * step;
             }
         }
+        // Drawn in the renderer's space (the view is relative to its origin).
+        const glm::vec3 cursor = m_Renderer->ToRenderSpace(worldCursor);
+        const glm::vec3 measureA = m_Renderer->ToRenderSpace(m_MeasureA);
+        const glm::vec3 measureB = m_Renderer->ToRenderSpace(m_MeasureB);
 
         if (m_MeasureStage == 1 && hasCursor)
-            DrawMeasureLine(view, projection, m_MeasureA, cursor, 0.0f);
+            DrawMeasureLine(view, projection, measureA, cursor, 0.0f);
         else if (m_MeasureStage == 2)
-            DrawMeasureLine(view, projection, m_MeasureA, m_MeasureB, 0.0f);
+            DrawMeasureLine(view, projection, measureA, measureB, 0.0f);
 
         if (hasCursor)
         {
@@ -4396,11 +4406,11 @@ namespace Nox
             const WorldBounds mover = ComputeWorldBounds(*m_ActiveScene, top);
             if (!mover.Valid)
                 continue;
-            const float centreY = 0.5f * (mover.Min.y + mover.Max.y);
+            const double centreY = 0.5 * (mover.Min.y + mover.Max.y);
 
             // The surface below: the highest top of another mesh that overlaps this one in the ground plane and lies below its middle
             // (bounding boxes: right for floors, tables, boxes; a slope or a curved surface counts as its flat top).
-            float floorY = 0.0f; // nothing below: the world ground
+            double floorY = 0.0; // nothing below: the world ground
             bool found = false;
             for (auto handle : m_ActiveScene->GetAllEntitiesWith<MeshComponent, WorldTransformComponent>())
             {
@@ -4427,8 +4437,8 @@ namespace Nox
             struct SnapRays
             {
                 UUID Entity;
-                float BoundsFloor = 0.0f;
-                float OriginY = 0.0f;
+                double BoundsFloor = 0.0; // world (double precision)
+                double OriginY = 0.0;
                 int Pending = 0;
                 bool Hit = false;
                 float NearestDistance = 0.0f;
@@ -4437,13 +4447,13 @@ namespace Nox
             snap->Entity = top.GetUUID();
             snap->BoundsFloor = floorY;
             snap->OriginY = mover.Min.y - WorldUnits::FromMeters(0.01f);
-            const glm::vec3 centre = 0.5f * (mover.Min + mover.Max);
-            const glm::vec3 halfInset = 0.25f * (mover.Max - mover.Min);
+            const glm::dvec3 centre = mover.Center();
+            const glm::dvec3 halfInset = 0.25 * (mover.Max - mover.Min);
             const glm::vec2 offsets[5] = { { 0.0f, 0.0f }, { -1.0f, -1.0f }, { 1.0f, -1.0f }, { -1.0f, 1.0f }, { 1.0f, 1.0f } };
             snap->Pending = 5;
             for (const glm::vec2& offset : offsets)
             {
-                const glm::vec3 origin(centre.x + offset.x * halfInset.x, snap->OriginY, centre.z + offset.y * halfInset.z);
+                const glm::dvec3 origin(centre.x + offset.x * halfInset.x, snap->OriginY, centre.z + offset.y * halfInset.z);
                 m_Renderer->RequestRaycast(origin, glm::vec3(0.0f, -1.0f, 0.0f), WorldUnits::FromMeters(1000.0f), [this, snap](bool hit, float distance)
                 {
                     if (hit && (!snap->Hit || distance < snap->NearestDistance))
@@ -4459,9 +4469,9 @@ namespace Nox
                     const WorldBounds now = ComputeWorldBounds(*m_ActiveScene, entity);
                     if (!now.Valid)
                         return;
-                    const float floor = snap->Hit ? snap->OriginY - snap->NearestDistance : snap->BoundsFloor;
-                    const float drop = floor - now.Min.y;
-                    entity.SetWorldTransform(glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, drop, 0.0f)) * entity.GetComponent<WorldTransformComponent>().WorldMatrix);
+                    const double floor = snap->Hit ? snap->OriginY - snap->NearestDistance : snap->BoundsFloor;
+                    const double drop = floor - now.Min.y;
+                    entity.SetWorldTransform(glm::translate(glm::dmat4(1.0), glm::dvec3(0.0, drop, 0.0)) * entity.GetComponent<WorldTransformComponent>().WorldMatrix);
                     m_HistoryCheckRequested = true; // one undo step
                 });
             }
@@ -4482,9 +4492,10 @@ namespace Nox
                                         m_SceneHierarchyPanel.IsSelected(m_ActiveScene->GetEntityByUUID(entity.GetComponent<RelationshipComponent>().Parent));
             if (parentSelected)
                 continue;
-            glm::mat4 world = entity.GetComponent<WorldTransformComponent>().WorldMatrix;
-            const glm::vec3 position(world[3]);
-            world[3] = glm::vec4(glm::round(position / step) * step, 1.0f);
+            glm::dmat4 world = entity.GetComponent<WorldTransformComponent>().WorldMatrix;
+            const glm::dvec3 position(world[3]);
+            const double gridStep = step;
+            world[3] = glm::dvec4(glm::round(position / gridStep) * gridStep, 1.0);
             entity.SetWorldTransform(world);
         }
         m_HistoryCheckRequested = true;
@@ -4553,7 +4564,7 @@ namespace Nox
         return Project::GetActive()->GetEditorAssetManager()->RegisterExistingFile(relativePath, AssetType::Prefab);
     }
 
-    void EditorLayer::PlaceAssets(const std::vector<AssetHandle>& handles, const glm::vec3& point, const std::string& folder)
+    void EditorLayer::PlaceAssets(const std::vector<AssetHandle>& handles, const glm::dvec3& point, const std::string& folder)
     {
         m_SceneHierarchyPanel.ClearSelection();
         for (AssetHandle handle : handles)
@@ -4636,7 +4647,7 @@ namespace Nox
             return;
         // Placed like a model dropped on the hierarchy: at the point the editor camera orbits. One mesh node, so it spawns as a
         // plain mesh entity named after the shape once the asset has loaded.
-        PlaceAssets({ mesh }, m_EditorCamera.GetPosition() + m_EditorCamera.GetForwardDirection() * m_EditorCamera.GetDistance(), folder);
+        PlaceAssets({ mesh }, m_EditorCamera.GetPosition() + glm::dvec3(m_EditorCamera.GetForwardDirection() * m_EditorCamera.GetDistance()), folder);
     }
 
     void EditorLayer::UI_PackageGame()
@@ -5192,7 +5203,7 @@ namespace Nox
 
         m_HoveredEntity = Entity(); // points into the scene being replaced
         m_ActiveScene = Scene::Copy(m_EditorScene);
-        const glm::vec3 streamingSource = m_EditorCamera.GetPosition();
+        const glm::dvec3 streamingSource = m_EditorCamera.GetPosition();
         m_ActiveScene->OnSimulationStart(&streamingSource);
 
         m_SceneHierarchyPanel.SetContext(m_ActiveScene);

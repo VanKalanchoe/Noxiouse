@@ -424,7 +424,7 @@ namespace Nox
                     shaderio::PushConstantReSTIRDIPresampleReGIR regirPush{};
                     regirPush.lightDataReference = uniformData.lightDataReference;
                     regirPush.risBufferReference = context.Buffer(res->ReSTIRDIRIS).getDeviceAddress();
-                    regirPush.gridCenterAndCellSize = glm::vec4(m_regirGridCenter, m_regirCellSize);
+                    regirPush.gridCenterAndCellSize = glm::vec4(ToRenderSpace(glm::dvec3(m_regirGridCenter)), m_regirCellSize) /* (a world-space setting) */;
                     regirPush.firstLocalLightIndex = m_restirDIFirstLocalLight;
                     regirPush.numLocalLights = m_restirDINumLocalLights;
                     regirPush.risBufferOffset = risBufferOffset;
@@ -455,7 +455,7 @@ namespace Nox
         shaderio::RTXDILightSamplingParams params{};
         params.lightDataReference = uniformData.lightDataReference;
         params.risBufferReference = context.Buffer(risBuffer).getDeviceAddress();
-        params.gridCenterAndCellSize = glm::vec4(m_regirGridCenter, m_regirCellSize);
+        params.gridCenterAndCellSize = glm::vec4(ToRenderSpace(glm::dvec3(m_regirGridCenter)), m_regirCellSize) /* (a world-space setting) */;
         params.firstLocalLightIndex = m_restirDIFirstLocalLight;
         params.numLocalLights = m_restirDINumLocalLights;
         params.firstInfiniteLightIndex = m_restirDIFirstInfiniteLight;

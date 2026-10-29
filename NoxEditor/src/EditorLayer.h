@@ -70,7 +70,7 @@ namespace Nox
         // until then stays. FinishSceneLoad swaps it in.
         void FinishSceneLoad();
         void UI_SceneLoadProgress();
-        void PlaceAssets(const std::vector<AssetHandle>& handles, const glm::vec3& point, const std::string& folder);
+        void PlaceAssets(const std::vector<AssetHandle>& handles, const glm::dvec3& point, const std::string& folder);
         // Basic shapes (docs/Future.md item 10): the static mesh asset of a shape, written into the project's Shapes folder and
         // imported the first time it is asked for (0 on failure); CreateShape places it where the editor camera looks.
         AssetHandle GetShapeAsset(PrimitiveShape shape);
@@ -142,7 +142,7 @@ namespace Nox
         int GridPlaneAxis() const; // the normal of the plane the grid lies on: 1 (the ground) in perspective / Top / Bottom, 2 Front / Back, 0 Left / Right
         // A 180 cm blocky figure (a size reference, like UE's mannequin) standing at `position`; toolbar "Figure": at the world origin,
         // or on the surface under the cursor.
-        void DrawReferenceFigure(const glm::vec3& position);
+        void DrawReferenceFigure(const glm::dvec3& position);
         // Drops every selected top entity straight down until its bounds' bottom rests on the surface below (the top of the highest
         // other mesh whose bounds overlap it from above), or on the ground plane when there is none.
         void SnapSelectionToFloor();
@@ -153,13 +153,13 @@ namespace Nox
 
         // Measure tool (UE / Godot's ruler): M, click a first point, a line follows the cursor, click the second; it stays until the next click.
         // Points come from the depth under the cursor (perspective), the ground plane where nothing is drawn; they snap like everything else.
-        bool PickWorldPoint(glm::vec3& out) const;
+        bool PickWorldPoint(glm::dvec3& out) const; // in the world (double precision: large world coordinates)
         void MeasureClick();
         void UI_MeasureOverlay();
         // A measuring line in the viewport window: a bar across at both ends, the distance in the middle.
         void DrawMeasureLine(const glm::mat4& view, const glm::mat4& projection, const glm::vec3& start, const glm::vec3& end, float minimumLength);
         float LocationSnapWorldUnits() const;
-        glm::vec3 SnapLocation(const glm::vec3& point) const; // the point itself while snapping is off
+        glm::dvec3 SnapLocation(const glm::dvec3& point) const; // the point itself while snapping is off
 
         void SavePrefabMode();
         void ExitPrefabMode();
@@ -236,13 +236,13 @@ namespace Nox
         } m_OrthoSaved;
         bool m_ShowReferenceFigure = false;
         bool m_ReferenceFigureAtCursor = false;
-        glm::vec3 m_ReferenceFigurePosition{ 0.0f };
+        glm::dvec3 m_ReferenceFigurePosition{ 0.0 };
         bool m_GizmoWasUsing = false;
         bool m_MeasureTool = false;
         int m_MeasureStage = 0; // 0 nothing, 1 first point set (line follows the cursor), 2 both set (kept until the next click)
-        glm::vec3 m_MeasureA{ 0.0f };
-        glm::vec3 m_MeasureB{ 0.0f };
-        glm::mat4 m_GizmoDragStart{ 1.0f }; // the dragged entity's world transform when the drag began
+        glm::dvec3 m_MeasureA{ 0.0 }; // world (double precision)
+        glm::dvec3 m_MeasureB{ 0.0 };
+        glm::mat4 m_GizmoDragStart{ 1.0f }; // the dragged entity's transform when the drag began (in the renderer's space)
         bool m_ShowPrefabExitPrompt = false;
         std::function<void()> m_AfterPrefabExit;
         
@@ -252,7 +252,7 @@ namespace Nox
         {
             AssetHandle Handle = 0;
             Entity Root;
-            glm::vec3 InitialTranslation = { 0.0f, 0.0f, 0.0f };
+            glm::dvec3 InitialTranslation = { 0.0, 0.0, 0.0 };
             bool Active = false;
         };
 
@@ -334,7 +334,7 @@ namespace Nox
         Scope<StreamingTestWorldGenerator> m_TestWorldGeneration;
         // Where the editor camera looks once the scene being opened is in (the generated world: its old view, if any, is another
         // scene's, maybe under the new terrain).
-        std::optional<glm::vec3> m_FocusOnOpen;
+        std::optional<glm::dvec3> m_FocusOnOpen;
         void UI_StreamingTestWorld();
         void StartHLODBuild();
         void CancelHLODBuild(const char* reason);

@@ -41,36 +41,41 @@ namespace Nox
         TagComponent(const std::string& tag) : Tag(tag) {}
     };
     
+    // Large world coordinates (Engine_Architecture_Plan_2026.md §5.14a, Unreal's LWC): the translation is double precision, so a
+    // position keeps sub-millimetre precision anywhere a world reaches (float loses it a few kilometres out). Rotation and scale
+    // need no more than float.
     struct TransformComponent
     {
-        glm::vec3 Translation = {0.0f, 0.0f, 0.0f};
+        glm::dvec3 Translation = {0.0, 0.0, 0.0};
         glm::vec3 Rotation = { 0.0f, 0.0f, 0.0f };
         glm::vec3 Scale = {1.0f, 1.0f, 1.0f};
 
         TransformComponent() = default;
         TransformComponent(const TransformComponent&) = default;
-        TransformComponent(const glm::vec3& translation) : Translation(translation) {}
+        TransformComponent(const glm::dvec3& translation) : Translation(translation) {}
 
-        glm::mat4 GetTransform() const
+        glm::dmat4 GetTransform() const
         {
-            glm::mat4 rotation = glm::toMat4(glm::quat(Rotation));
+            const glm::mat4 rotation = glm::toMat4(glm::quat(Rotation));
 
-            return glm::translate(glm::mat4(1.0f), Translation)
-                * rotation
-                * glm::scale(glm::mat4(1.0f), Scale);
+            return glm::translate(glm::dmat4(1.0), Translation)
+                * glm::dmat4(rotation)
+                * glm::scale(glm::dmat4(1.0), glm::dvec3(Scale));
         }
     };
     
-    // Cached World Matrix for Scene Graph
+    // Cached World Matrix for Scene Graph (double precision: large world coordinates, see TransformComponent). The renderer
+    // takes it relative to its origin (Math::RelativeTo).
     struct WorldTransformComponent
     {
-        glm::mat4 WorldMatrix{ 1.0f };
+        glm::dmat4 WorldMatrix{ 1.0 };
 
         WorldTransformComponent() = default;
         WorldTransformComponent(const WorldTransformComponent&) = default;
-        WorldTransformComponent(const glm::mat4& world) : WorldMatrix(world) {}
+        WorldTransformComponent(const glm::dmat4& world) : WorldMatrix(world) {}
 
-        operator const glm::mat4&() const { return WorldMatrix; }
+        glm::dvec3 GetPosition() const { return glm::dvec3(WorldMatrix[3]); }
+        operator const glm::dmat4&() const { return WorldMatrix; }
     };
 
     // Scene Graph Hierarchy Links (UUID-based for safety)
@@ -492,6 +497,9 @@ namespace Nox
         bool BurstDone = false;
         uint32_t PendingBurst = 0;      // Emit(count) from scripts, spawned on the next update
         bool Started = false;
+        // Large world coordinates (Niagara's LWC tile): world-space particles are relative to this point in float. It follows the
+        // emitter (ParticleSystem::Simulate), so their precision is that of a position near the emitter wherever it is.
+        glm::dvec3 Origin{ 0.0 };
     };
 
     // A key of a particle's color / size over its life (Time 0 at birth, 1 at death), linearly interpolated between keys.

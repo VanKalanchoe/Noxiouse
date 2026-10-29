@@ -7,6 +7,8 @@
 #include <vector>
 #include <glm/glm.hpp>
 
+#include "NoxCore/Core/WorldUnits.h"
+
 #include "NoxCore/Asset/Asset.h"
 #include "NoxCore/Tasks/JobSystem.h"
 
@@ -31,6 +33,9 @@ namespace Nox
             uint32_t TileQuads = 128;          // per side: (n + 1)^2 vertices, 2 n^2 triangles
             uint32_t TextureSize = 2048;
             uint32_t PropsPerCell = 250;       // rocks, pines, stumps: entities of their own, three meshes shared by every cell
+            // Large world coordinates test: the whole world this far out along X and Z (kilometres), the same content as at 0 -- what
+            // drifts, jitters or snaps out there and not at the origin is a precision bug.
+            float WorldOffsetKm = 0.0f;
             std::string Folder = "StreamingTest";  // under the asset directory
             std::string CameraScript;              // a script class put on the camera (the fly-through test), optional
         };
@@ -48,7 +53,7 @@ namespace Nox
         std::string GetStage() const;
         AssetHandle GetScene() const { return m_Scene; }
         // The world's middle, near the ground (world units): where the editor camera looks once it opens.
-        const glm::vec3& GetMiddle() const { return m_Middle; }
+        const glm::dvec3& GetMiddle() const { return m_Middle; }
 
     private:
         struct Tile
@@ -59,6 +64,12 @@ namespace Nox
         };
 
         void BeginCells();
+        // Where the world's corner is (Settings::WorldOffsetKm along X and Z).
+        glm::dvec3 WorldOffset() const
+        {
+            const double offset = static_cast<double>(m_Settings.WorldOffsetKm) * WorldUnits::FromMeters(1000.0f);
+            return glm::dvec3(offset, 0.0, offset);
+        }
         bool WriteCell(uint32_t x, uint32_t z);
         void FinishScene();
 
@@ -86,6 +97,6 @@ namespace Nox
         TaskFuture<void> m_CookJob;
         std::atomic<uint32_t> m_CellsCooked{ 0 };
         std::atomic<uint64_t> m_CookedBytes{ 0 }, m_BinaryEntities{ 0 }, m_CookedEntities{ 0 };
-        glm::vec3 m_Middle{ 0.0f };
+        glm::dvec3 m_Middle{ 0.0 }; // world (double precision)
     };
 }

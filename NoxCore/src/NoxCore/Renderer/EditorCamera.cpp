@@ -68,23 +68,19 @@ namespace Nox
 
 	void EditorCamera::UpdateView()
 	{
-		// m_Yaw = m_Pitch = 0.0f; // Lock the camera's rotation
 		m_Position = CalculatePosition();
-		glm::quat orientation = GetOrientation();
+	}
 
-		// Build the view matrix
-		glm::mat4 view = glm::mat4_cast(orientation);
-		view[3] = glm::vec4(m_Position, 1.0f);
-		view = glm::inverse(view);
-
+	glm::mat4 EditorCamera::GetViewMatrix(const glm::dvec3& origin) const
+	{
 		// Flip Z to account for negative viewport
-		m_ViewMatrix = glm::scale(glm::mat4(1.0f), glm::vec3(1.0f, 1.0f, -1.0f)) * view;
+		return glm::scale(glm::mat4(1.0f), glm::vec3(1.0f, 1.0f, -1.0f)) * GetGizmoView(origin);
 	}
 	
-	glm::mat4 EditorCamera::GetGizmoView() const
+	glm::mat4 EditorCamera::GetGizmoView(const glm::dvec3& origin) const
 	{
 		glm::mat4 view = glm::mat4_cast(GetOrientation());
-		view[3] = glm::vec4(GetPosition(), 1.0f);
+		view[3] = glm::vec4(glm::vec3(m_Position - origin), 1.0f);
 		return glm::inverse(view); // no reverse-Z scale here
 	}
 
@@ -191,7 +187,7 @@ namespace Nox
 
 		// Ease towards the input-driven targets, by time, so the motion is even at any frame rate (time constant 40 ms).
 		const float blend = 1.0f - std::exp(-25.0f * static_cast<float>(ts));
-		m_FocalPoint += (m_TargetFocalPoint - m_FocalPoint) * blend;
+		m_FocalPoint += (m_TargetFocalPoint - m_FocalPoint) * static_cast<double>(blend);
 		m_Distance += (m_TargetDistance - m_Distance) * blend;
 		m_Pitch += (m_TargetPitch - m_Pitch) * blend;
 		m_Yaw += (m_TargetYaw - m_Yaw) * blend;
@@ -232,7 +228,7 @@ namespace Nox
 		// does not move just from looking around. So here the actual current position is captured BEFORE the look, and
 		// FocalPoint is put back afterwards (with the NEW forward direction) to land Position exactly where it started --
 		// only the WASD move below is then allowed to actually shift it.
-		const glm::vec3 positionBeforeLook = CalculatePosition();
+		const glm::dvec3 positionBeforeLook = CalculatePosition();
 
 		// Look: set immediately (not eased) for a responsive FPS-style look; the move below is immediate for the same reason.
 		const float yawSign = GetUpDirection().y < 0.0f ? -1.0f : 1.0f;
@@ -261,7 +257,7 @@ namespace Nox
 		}
 
 		// Re-anchor: FocalPoint so that Position (with the new look direction) is the pre-look position plus this frame's move.
-		m_FocalPoint = m_TargetFocalPoint = positionBeforeLook + offset + GetForwardDirection() * m_Distance;
+		m_FocalPoint = m_TargetFocalPoint = positionBeforeLook + glm::dvec3(offset + GetForwardDirection() * m_Distance);
 	}
 
 	void EditorCamera::MousePan(const glm::vec2& delta)
@@ -271,14 +267,14 @@ namespace Nox
 			// One pixel of mouse movement moves the view by one pixel (delta is in pixels x 0.003).
 			const float worldPerPixel = 2.0f * m_OrthoHalfHeight / std::max(m_ViewportHeight, 1.0f);
 			const glm::vec2 pixels = delta / 0.003f;
-			m_TargetFocalPoint += -GetRightDirection() * pixels.x * worldPerPixel;
-			m_TargetFocalPoint += GetUpDirection() * pixels.y * worldPerPixel;
+			m_TargetFocalPoint += glm::dvec3(-GetRightDirection() * pixels.x * worldPerPixel);
+			m_TargetFocalPoint += glm::dvec3(GetUpDirection() * pixels.y * worldPerPixel);
 			return;
 		}
 
 		auto [xSpeed, ySpeed] = PanSpeed();
-		m_TargetFocalPoint += -GetRightDirection() * delta.x * xSpeed * m_Distance;
-		m_TargetFocalPoint += GetUpDirection() * delta.y * ySpeed * m_Distance;
+		m_TargetFocalPoint += glm::dvec3(-GetRightDirection() * delta.x * xSpeed * m_Distance);
+		m_TargetFocalPoint += glm::dvec3(GetUpDirection() * delta.y * ySpeed * m_Distance);
 	}
 
 	void EditorCamera::MouseRotate(const glm::vec2& delta)
@@ -302,7 +298,7 @@ namespace Nox
 				const glm::vec2 offset((m_CursorPosition.x - 0.5f * m_ViewportWidth) * 2.0f / m_ViewportHeight,
 				                       (0.5f * m_ViewportHeight - m_CursorPosition.y) * 2.0f / m_ViewportHeight);
 				const float shrink = before - m_TargetOrthoHalfHeight;
-				m_TargetFocalPoint += (GetRightDirection() * offset.x + GetUpDirection() * offset.y) * shrink;
+				m_TargetFocalPoint += glm::dvec3((GetRightDirection() * offset.x + GetUpDirection() * offset.y) * shrink);
 			}
 			return;
 		}
@@ -311,7 +307,7 @@ namespace Nox
 		const float minimumDistance = WorldUnits::FromMeters(0.1f);
 		if (m_TargetDistance < minimumDistance)
 		{
-			m_TargetFocalPoint += GetForwardDirection() * (minimumDistance - m_TargetDistance);
+			m_TargetFocalPoint += glm::dvec3(GetForwardDirection() * (minimumDistance - m_TargetDistance));
 			m_TargetDistance = minimumDistance;
 		}
 	}
@@ -331,9 +327,9 @@ namespace Nox
 		return glm::rotate(GetOrientation(), glm::vec3(0.0f, 0.0f, -1.0f));
 	}
 
-	glm::vec3 EditorCamera::CalculatePosition() const
+	glm::dvec3 EditorCamera::CalculatePosition() const
 	{
-		return m_FocalPoint - GetForwardDirection() * (IsOrthographic() ? OrthoCameraDistance() : m_Distance);
+		return m_FocalPoint - glm::dvec3(GetForwardDirection() * (IsOrthographic() ? OrthoCameraDistance() : m_Distance));
 	}
 
 	glm::quat EditorCamera::GetOrientation() const
@@ -341,7 +337,7 @@ namespace Nox
 		return glm::quat(glm::vec3(-m_Pitch, -m_Yaw, 0.0f));
 	}
 
-	void EditorCamera::Focus(const glm::vec3& centre, float radius)
+	void EditorCamera::Focus(const glm::dvec3& centre, float radius)
 	{
 		radius = std::max(radius, WorldUnits::FromCentimeters(10.0f)); // a point-sized entity still frames at a sensible distance
 		SetFocalPoint(centre);

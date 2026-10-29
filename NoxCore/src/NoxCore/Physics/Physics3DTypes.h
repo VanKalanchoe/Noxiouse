@@ -25,7 +25,7 @@ namespace Nox {
     {
         bool Hit = false;
         Entity HitEntity{};
-        glm::vec3 Position{ 0.0f };
+        glm::dvec3 Position{ 0.0 }; // world (double precision)
         glm::vec3 Normal{ 0.0f, 1.0f, 0.0f };
         float Distance = 0.0f;
         float Fraction = 0.0f; // [0, 1] along ray
@@ -35,7 +35,7 @@ namespace Nox {
     {
         bool Hit = false;
         Entity HitEntity{};
-        glm::vec3 ContactPosition{ 0.0f };
+        glm::dvec3 ContactPosition{ 0.0 }; // world (double precision)
         glm::vec3 ContactNormal{ 0.0f, 1.0f, 0.0f };
         float Distance = 0.0f;
         float Fraction = 0.0f;

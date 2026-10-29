@@ -29,7 +29,7 @@ namespace Nox
         }
 
         // `scene`: the scene shown (the editor's while editing, the running copy in Play / Simulate); `editing`: cells can be changed.
-        void OnImGuiRender(const Ref<Scene>& scene, const glm::vec3& cameraPosition, bool editing);
+        void OnImGuiRender(const Ref<Scene>& scene, const glm::dvec3& cameraPosition, bool editing);
 
         bool IsOpen() const { return m_Open; }
         void SetOpen(bool open) { m_Open = open; }
@@ -38,8 +38,8 @@ namespace Nox
 
     private:
         void DrawSettings(Scene& scene, bool editing);
-        void DrawToolbar(Scene& scene, const glm::vec3& cameraPosition, bool editing);
-        void DrawMap(Scene& scene, const glm::vec3& cameraPosition, bool editing);
+        void DrawToolbar(Scene& scene, const glm::dvec3& cameraPosition, bool editing);
+        void DrawMap(Scene& scene, const glm::dvec3& cameraPosition, bool editing);
         void DrawHLODs(Scene& scene, bool editing);
         void DrawUnloadPrompt(Scene& scene);
         // Unloads the cells, asking first when one has unsaved changes.

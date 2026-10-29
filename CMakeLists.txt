@@ -29,6 +29,9 @@ set(INTERPROCEDURAL_OPTIMIZATION OFF CACHE BOOL "" FORCE)
 set(CPP_RTTI_ENABLED ON CACHE BOOL "" FORCE)
 set(CROSS_PLATFORM_DETERMINISTIC ON CACHE BOOL "" FORCE)
 set(USE_AVX2 ON CACHE BOOL "" FORCE)
+# Large world coordinates (docs/Engine_Architecture_Plan_2026.md §5.14a): body positions in double precision (JPH_DOUBLE_PRECISION,
+# public on the Jolt target, so the engine's Jolt code sees the same RVec3 = DVec3).
+set(DOUBLE_PRECISION ON CACHE BOOL "" FORCE)
 add_subdirectory(NoxCore/vendors/JoltPhysics/Build NoxCore/vendors/JoltPhysics/Build EXCLUDE_FROM_ALL)
 
 # The shipping build of a game (docs/Runtime_And_Packaging_Plan_2026-10.md R7): build the Release configuration with it on.

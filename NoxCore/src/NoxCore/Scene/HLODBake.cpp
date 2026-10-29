@@ -1,5 +1,7 @@
 #include "HLODBake.h"
 
+#include "NoxCore/Math/Math.h"
+
 #include <algorithm>
 #include <array>
 #include <cfloat>
@@ -712,12 +714,12 @@ namespace Nox::HLOD
         };
 
         // 1. The sources in world space; the cell's centre is the origin (floats keep their precision far from the world's).
-        glm::vec3 worldLow(FLT_MAX), worldHigh(-FLT_MAX);
+        glm::dvec3 worldLow(DBL_MAX), worldHigh(-DBL_MAX);
         for (const SourceMesh& mesh : meshes)
         {
             for (const glm::vec3& position : mesh.Positions)
             {
-                const glm::vec3 world = glm::vec3(mesh.Transform * glm::vec4(position, 1.0f));
+                const glm::dvec3 world = glm::dvec3(mesh.Transform * glm::dvec4(glm::dvec3(position), 1.0));
                 worldLow = glm::min(worldLow, world);
                 worldHigh = glm::max(worldHigh, world);
             }
@@ -727,7 +729,7 @@ namespace Nox::HLOD
             result.Error = "no geometry";
             return result;
         }
-        const glm::vec3 origin = (worldLow + worldHigh) * 0.5f;
+        const glm::dvec3 origin = (worldLow + worldHigh) * 0.5;
         result.Origin = origin;
 
         const float minPart = settings.MinPartSize > 0.0f ? settings.MinPartSize : 2.0f * settings.Error;
@@ -738,7 +740,8 @@ namespace Nox::HLOD
         {
             if (mesh.Positions.empty() || mesh.Indices.size() < 3 || mesh.Material >= materials.size())
                 continue;
-            const glm::mat3 linear(mesh.Transform);
+            const glm::mat3 linear = Math::Basis(mesh.Transform);
+            const glm::mat4 relative = Math::RelativeTo(mesh.Transform, origin); // (the cell's own space: exact in float)
             const glm::mat3 normalMatrix = glm::transpose(glm::inverse(linear));
             const float determinant = glm::determinant(linear);
             const bool mirrored = determinant < 0.0f;
@@ -747,7 +750,7 @@ namespace Nox::HLOD
             glm::vec3 low(FLT_MAX), high(-FLT_MAX);
             for (size_t index = 0; index < positions.size(); ++index)
             {
-                positions[index] = glm::vec3(mesh.Transform * glm::vec4(mesh.Positions[index], 1.0f)) - origin;
+                positions[index] = glm::vec3(relative * glm::vec4(mesh.Positions[index], 1.0f));
                 low = glm::min(low, positions[index]);
                 high = glm::max(high, positions[index]);
             }
@@ -1361,8 +1364,8 @@ namespace Nox::HLOD
         result.BoundsMax = glm::vec3(-FLT_MAX);
         for (const glm::vec3& position : result.Positions)
         {
-            result.BoundsMin = glm::min(result.BoundsMin, position + origin);
-            result.BoundsMax = glm::max(result.BoundsMax, position + origin);
+            result.BoundsMin = glm::min(result.BoundsMin, glm::vec3(glm::dvec3(position) + origin));
+            result.BoundsMax = glm::max(result.BoundsMax, glm::vec3(glm::dvec3(position) + origin));
         }
         result.Ok = true;
         return result;

@@ -68,11 +68,13 @@ namespace Nox
 
         // The cell for content with these world bounds (world units): the smallest level whose cells hold the larger horizontal side,
         // and there the cell holding the center.
-        WorldCellCoord CellFor(const glm::vec3& boundsMin, const glm::vec3& boundsMax, float cellSizeWorld, int32_t grid = WorldGridIndex);
+        // World bounds in double precision (large world coordinates): the cell is picked from their centre exactly.
+        WorldCellCoord CellFor(const glm::dvec3& boundsMin, const glm::dvec3& boundsMax, float cellSizeWorld, int32_t grid = WorldGridIndex);
         // A cell's square on the ground (x, z), world units.
         void CellRect(const WorldCellCoord& cell, float cellSizeWorld, glm::vec2& outMin, glm::vec2& outMax);
         // The horizontal distance from a point to a box (0 inside).
-        float HorizontalDistance(const glm::vec3& point, const glm::vec3& boundsMin, const glm::vec3& boundsMax);
+        // From a world position (double precision: large world coordinates) to a cell's bounds.
+        float HorizontalDistance(const glm::dvec3& point, const glm::vec3& boundsMin, const glm::vec3& boundsMax);
     }
 
     // A scene's world partition: its settings and cell index (saved in the scene file), and what the editor and a Play session

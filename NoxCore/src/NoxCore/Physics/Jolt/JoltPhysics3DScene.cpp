@@ -1,4 +1,5 @@
 #include "JoltPhysics3DScene.h"
+#include "NoxCore/Math/Math.h"
 #include "JoltUtils.h"
 #include "NoxCore/Physics/PhysicsEngine.h"
 #include "NoxCore/Scene/Scene.h"
@@ -215,14 +216,14 @@ namespace Nox {
         auto& rb = entity.GetComponent<RigidBody3DComponent>();
         const auto& transform = entity.GetComponent<TransformComponent>();
 
-        glm::vec3 worldPos = transform.Translation;
+        glm::dvec3 worldPos = transform.Translation;
         glm::quat worldRot = glm::quat(transform.Rotation);
         glm::vec3 worldScale = transform.Scale;
 
         if (entity.HasComponent<WorldTransformComponent>())
         {
             const auto& world = entity.GetComponent<WorldTransformComponent>();
-            worldPos = glm::vec3(world.WorldMatrix[3]);
+            worldPos = world.GetPosition();
             worldScale = glm::vec3(
                 glm::length(glm::vec3(world.WorldMatrix[0])),
                 glm::length(glm::vec3(world.WorldMatrix[1])),
@@ -341,7 +342,7 @@ namespace Nox {
 
         JPH::BodyCreationSettings bodySettings(
             shape,
-            JoltUtils::ToJolt(ToNative(worldPos)),
+            JoltUtils::ToJoltPosition(ToNative(worldPos)),
             JoltUtils::ToJolt(worldRot),
             motionType,
             objectLayer
@@ -417,9 +418,10 @@ namespace Nox {
         if (!m_PhysicsSystem || !entity || positions.empty() || indices.size() < 3)
             return;
 
-        // The entity's whole world transform (scale and rotation too) is baked into the vertices: the body stands at the origin.
-        // From its local transform, current even when the entity was made or moved this frame (before propagation ran).
-        glm::mat4 world = entity.GetComponent<TransformComponent>().GetTransform();
+        // The entity's rotation and scale are baked into the vertices, the body stands at its position (double precision: the vertices
+        // stay small, so they keep their precision far from the world's origin). From its local transform, current even when the
+        // entity was made or moved this frame (before propagation ran).
+        glm::dmat4 world = entity.GetComponent<TransformComponent>().GetTransform();
         if (m_Scene && entity.HasComponent<RelationshipComponent>())
         {
             if (Entity parent = m_Scene->GetEntityByUUID(entity.GetComponent<RelationshipComponent>().Parent);
@@ -427,11 +429,13 @@ namespace Nox {
                 world = parent.GetComponent<WorldTransformComponent>().WorldMatrix * world;
         }
 
+        const glm::dvec3 bodyPosition(world[3]);
+        const glm::mat4 basis = Math::RelativeTo(world, bodyPosition);
         JPH::VertexList vertices;
         vertices.reserve(positions.size());
         for (const glm::vec3& position : positions)
         {
-            const glm::vec3 placed = ToNative(glm::vec3(world * glm::vec4(position, 1.0f)));
+            const glm::vec3 placed = ToNative(glm::vec3(basis * glm::vec4(position, 1.0f)));
             vertices.push_back(JPH::Float3(placed.x, placed.y, placed.z));
         }
         JPH::IndexedTriangleList triangles;
@@ -450,7 +454,7 @@ namespace Nox {
             return;
         }
 
-        JPH::BodyCreationSettings bodySettings(shape.Get(), JPH::RVec3::sZero(), JPH::Quat::sIdentity(), JPH::EMotionType::Static,
+        JPH::BodyCreationSettings bodySettings(shape.Get(), JoltUtils::ToJoltPosition(ToNative(bodyPosition)), JPH::Quat::sIdentity(), JPH::EMotionType::Static,
                                                PhysicsLayers::NON_MOVING);
         bodySettings.mFriction = friction;
         bodySettings.mRestitution = restitution;
@@ -492,9 +496,9 @@ namespace Nox {
         const auto& controller = entity.GetComponent<CharacterController3DComponent>();
         const auto& transform = entity.GetComponent<TransformComponent>();
 
-        glm::vec3 worldPos = transform.Translation;
+        glm::dvec3 worldPos = transform.Translation;
         if (entity.HasComponent<WorldTransformComponent>())
-            worldPos = glm::vec3(entity.GetComponent<WorldTransformComponent>().WorldMatrix[3]);
+            worldPos = entity.GetComponent<WorldTransformComponent>().GetPosition();
 
         // controller.Radius / Height are world-unit lengths (script-facing); the shape and every native tolerance below are Jolt's own
         // unit -> ToNative once here.
@@ -516,7 +520,7 @@ namespace Nox {
         settings->mEnhancedInternalEdgeRemoval = false;
 
         JPH::Ref<JPH::CharacterVirtual> character = new JPH::CharacterVirtual(
-            settings, JoltUtils::ToJolt(ToNative(worldPos)), JPH::Quat::sIdentity(), static_cast<uint64_t>(static_cast<uint32_t>(entity)), m_PhysicsSystem.get());
+            settings, JoltUtils::ToJoltPosition(ToNative(worldPos)), JPH::Quat::sIdentity(), static_cast<uint64_t>(static_cast<uint32_t>(entity)), m_PhysicsSystem.get());
 
         CharacterState& state = m_EntityToCharacterMap[static_cast<uint32_t>(entity)];
         state.Character = character;
@@ -597,7 +601,7 @@ namespace Nox {
                 m_PhysicsSystem->GetDefaultBroadPhaseLayerFilter(PhysicsLayers::CHARACTER),
                 m_PhysicsSystem->GetDefaultLayerFilter(PhysicsLayers::CHARACTER),
                 {}, {}, *m_TempAllocator);
-            state.Current = ToWorld(JoltUtils::ToGLM(character->GetPosition()));
+            state.Current = ToWorld(JoltUtils::ToGLMPosition(character->GetPosition()));
         }
     }
 
@@ -620,7 +624,7 @@ namespace Nox {
 
             // Drawn between the last two fixed steps by how far the accumulator is into the next one.
             const float alpha = glm::clamp(m_Accumulator / c_FixedDeltaTime, 0.0f, 1.0f);
-            glm::vec3 position = glm::mix(state.Previous, state.Current, alpha);
+            glm::dvec3 position = glm::mix(state.Previous, state.Current, static_cast<double>(alpha));
             if (entity.HasComponent<RelationshipComponent>())
             {
                 UUID parentUUID = entity.GetComponent<RelationshipComponent>().Parent;
@@ -628,7 +632,7 @@ namespace Nox {
                 {
                     Entity parentEntity = m_Scene->GetEntityByUUID(parentUUID);
                     if (parentEntity && parentEntity.HasComponent<WorldTransformComponent>())
-                        position = glm::vec3(glm::inverse(parentEntity.GetComponent<WorldTransformComponent>().WorldMatrix) * glm::vec4(position, 1.0f));
+                        position = glm::dvec3(glm::inverse(parentEntity.GetComponent<WorldTransformComponent>().WorldMatrix) * glm::dvec4(position, 1.0));
                 }
             }
 
@@ -646,7 +650,7 @@ namespace Nox {
             if (bodyId.IsInvalid() || bodyInterface.GetMotionType(bodyId) == JPH::EMotionType::Static)
                 continue;
 
-            const glm::vec3 position = ToWorld(JoltUtils::ToGLM(bodyInterface.GetPosition(bodyId)));
+            const glm::dvec3 position = ToWorld(JoltUtils::ToGLMPosition(bodyInterface.GetPosition(bodyId)));
             const glm::quat rotation = JoltUtils::ToGLM(bodyInterface.GetRotation(bodyId));
             auto [pose, isNew] = m_BodyPoses.try_emplace(entityId);
             if (isNew)
@@ -718,25 +722,25 @@ namespace Nox {
                     auto& transform = entity.GetComponent<TransformComponent>();
                     auto& dirty = entity.GetComponent<DirtyTransformComponent>();
 
-                    glm::vec3 worldPos;
+                    glm::dvec3 worldPos;
                     glm::quat worldRot;
                     if (pose)
                     {
                         // Drawn between the last two fixed steps by how far the accumulator is into the next one.
                         const float alpha = glm::clamp(m_Accumulator / c_FixedDeltaTime, 0.0f, 1.0f);
-                        worldPos = glm::mix(pose->Previous, pose->Current, alpha);
+                        worldPos = glm::mix(pose->Previous, pose->Current, static_cast<double>(alpha));
                         worldRot = glm::slerp(pose->PreviousRotation, pose->CurrentRotation, alpha);
                         if (!active && pose->Previous == pose->Current && pose->PreviousRotation == pose->CurrentRotation)
                             pose->NeedsSync = false; // settled: this frame writes the final pose
                     }
                     else
                     {
-                        worldPos = ToWorld(JoltUtils::ToGLM(bodyInterface.GetPosition(bodyId)));
+                        worldPos = ToWorld(JoltUtils::ToGLMPosition(bodyInterface.GetPosition(bodyId)));
                         worldRot = JoltUtils::ToGLM(bodyInterface.GetRotation(bodyId));
                     }
 
                     bool hasParent = false;
-                    glm::mat4 parentWorldInv(1.0f);
+                    glm::dmat4 parentWorldInv(1.0);
                     if (entity.HasComponent<RelationshipComponent>())
                     {
                         UUID parentUUID = entity.GetComponent<RelationshipComponent>().Parent;
@@ -753,17 +757,18 @@ namespace Nox {
 
                     if (hasParent)
                     {
-                        glm::mat4 worldMat = glm::translate(glm::mat4(1.0f), worldPos) * glm::toMat4(worldRot) * glm::scale(glm::mat4(1.0f), transform.Scale);
-                        glm::mat4 localMat = parentWorldInv * worldMat;
+                        const glm::dmat4 worldMat = glm::translate(glm::dmat4(1.0), worldPos) * glm::dmat4(glm::toMat4(worldRot)) *
+                                                    glm::scale(glm::dmat4(1.0), glm::dvec3(transform.Scale));
+                        const glm::dmat4 localMat = parentWorldInv * worldMat;
 
-                        glm::vec3 localScale, localSkew;
-                        glm::vec4 localPerspective;
-                        glm::quat localRot;
-                        glm::vec3 localPos;
+                        glm::dvec3 localScale, localSkew;
+                        glm::dvec4 localPerspective;
+                        glm::dquat localRot;
+                        glm::dvec3 localPos;
                         glm::decompose(localMat, localScale, localRot, localPos, localSkew, localPerspective);
 
                         transform.Translation = localPos;
-                        transform.Rotation = glm::eulerAngles(glm::conjugate(localRot));
+                        transform.Rotation = glm::vec3(glm::eulerAngles(glm::conjugate(localRot)));
                     }
                     else
                     {
@@ -776,7 +781,7 @@ namespace Nox {
         }
     }
 
-    bool JoltPhysics3DScene::RayCast(const glm::vec3& origin, const glm::vec3& direction, float maxDistance,
+    bool JoltPhysics3DScene::RayCast(const glm::dvec3& origin, const glm::vec3& direction, float maxDistance,
                                      RayCastHit& outHit, uint16_t layerMask)
     {
         if (!m_PhysicsSystem)
@@ -784,7 +789,7 @@ namespace Nox {
 
         // origin / maxDistance are world-unit (the caller's, e.g. a script); Jolt sees native. direction is a unit vector: not a length,
         // never scaled. outHit.Distance / Position are worked out from the world-unit inputs, so they come out in world units already.
-        JPH::RRayCast ray(JoltUtils::ToJolt(ToNative(origin)), JoltUtils::ToJolt(direction * ToNative(maxDistance)));
+        JPH::RRayCast ray(JoltUtils::ToJoltPosition(ToNative(origin)), JoltUtils::ToJolt(direction * ToNative(maxDistance)));
         JPH::RayCastResult hit;
 
         if (m_PhysicsSystem->GetNarrowPhaseQuery().CastRay(ray, hit))
@@ -792,7 +797,7 @@ namespace Nox {
             outHit.Hit = true;
             outHit.Fraction = hit.mFraction;
             outHit.Distance = hit.mFraction * maxDistance;
-            outHit.Position = origin + direction * outHit.Distance;
+            outHit.Position = origin + glm::dvec3(direction * outHit.Distance);
 
             auto it = m_BodyToEntityMap.find(hit.mBodyID.GetIndexAndSequenceNumber());
             if (it != m_BodyToEntityMap.end())
@@ -811,17 +816,19 @@ namespace Nox {
         return false;
     }
 
-    bool JoltPhysics3DScene::SphereCast(const glm::vec3& origin, float radius, const glm::vec3& direction,
+    bool JoltPhysics3DScene::SphereCast(const glm::dvec3& origin, float radius, const glm::vec3& direction,
                                         float maxDistance, ShapeCastHit& outHit, uint16_t layerMask)
     {
         if (!m_PhysicsSystem)
             return false;
 
         JPH::SphereShape sphere(ToNative(radius));
-        JPH::RShapeCast shapeCast(&sphere, JPH::Vec3::sReplicate(1.0f), JPH::RMat44::sTranslation(JoltUtils::ToJolt(ToNative(origin))), JoltUtils::ToJolt(direction * ToNative(maxDistance)));
+        // The contact points come back relative to the base offset: the cast's own origin, so they keep their precision.
+        const JPH::RVec3 base = JoltUtils::ToJoltPosition(ToNative(origin));
+        JPH::RShapeCast shapeCast(&sphere, JPH::Vec3::sReplicate(1.0f), JPH::RMat44::sTranslation(base), JoltUtils::ToJolt(direction * ToNative(maxDistance)));
 
         JPH::ClosestHitCollisionCollector<JPH::CastShapeCollector> collector;
-        m_PhysicsSystem->GetNarrowPhaseQuery().CastShape(shapeCast, JPH::ShapeCastSettings(), JPH::RVec3::sZero(), collector);
+        m_PhysicsSystem->GetNarrowPhaseQuery().CastShape(shapeCast, JPH::ShapeCastSettings(), base, collector);
 
         if (collector.HadHit())
         {
@@ -829,7 +836,7 @@ namespace Nox {
             outHit.Hit = true;
             outHit.Fraction = hit.mFraction;
             outHit.Distance = hit.mFraction * maxDistance;
-            outHit.ContactPosition = ToWorld(JoltUtils::ToGLM(hit.mContactPointOn2));
+            outHit.ContactPosition = origin + glm::dvec3(ToWorld(JoltUtils::ToGLM(hit.mContactPointOn2)));
             outHit.ContactNormal = JoltUtils::ToGLM(-hit.mPenetrationAxis.Normalized());
 
             auto it = m_BodyToEntityMap.find(hit.mBodyID2.GetIndexAndSequenceNumber());
@@ -843,7 +850,7 @@ namespace Nox {
         return false;
     }
 
-    std::vector<Entity> JoltPhysics3DScene::OverlapSphere(const glm::vec3& center, float radius, uint16_t layerMask)
+    std::vector<Entity> JoltPhysics3DScene::OverlapSphere(const glm::dvec3& center, float radius, uint16_t layerMask)
     {
         std::vector<Entity> results;
         if (!m_PhysicsSystem)
@@ -851,7 +858,8 @@ namespace Nox {
 
         JPH::SphereShape sphere(ToNative(radius));
         JPH::AllHitCollisionCollector<JPH::CollideShapeCollector> collector;
-        m_PhysicsSystem->GetNarrowPhaseQuery().CollideShape(&sphere, JPH::Vec3::sReplicate(1.0f), JPH::RMat44::sTranslation(JoltUtils::ToJolt(ToNative(center))), JPH::CollideShapeSettings(), JPH::RVec3::sZero(), collector);
+        m_PhysicsSystem->GetNarrowPhaseQuery().CollideShape(&sphere, JPH::Vec3::sReplicate(1.0f), JPH::RMat44::sTranslation(JoltUtils::ToJoltPosition(ToNative(center))), JPH::CollideShapeSettings(),
+                                                        JoltUtils::ToJoltPosition(ToNative(center)), collector);
 
         results.reserve(collector.mHits.size());
         for (const JPH::CollideShapeResult& hit : collector.mHits)

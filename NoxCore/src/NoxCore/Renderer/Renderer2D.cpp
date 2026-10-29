@@ -732,13 +732,14 @@ namespace Nox
     // Godot's Node3DEditor::_init_grid with Godot's defaults (8 steps, levels 0..2, bias -0.2), the numbers it works out on the CPU.
     // `cell` is the smallest step (Godot's 1 m): the cell size stays the same while you zoom, it only steps up 8x when the camera is
     // far enough that the cells would be too small.
-    void Renderer2D::DrawGrid(const glm::vec3& focus, float cell, int planeAxis, float cameraDistance)
+    void Renderer2D::DrawGrid(const glm::dvec3& focus, const glm::dvec3& renderOrigin, float cell, int planeAxis, float cameraDistance)
     {
-        m_Grid = MakeGrid(focus, cell, planeAxis, cameraDistance);
+        m_Grid = MakeGrid(focus, renderOrigin, cell, planeAxis, cameraDistance);
         m_GridDraw = true;
     }
 
-    shaderio::PushConstantGrid Renderer2D::MakeGrid(const glm::vec3& focus, float cell, int planeAxis, float cameraDistance)
+    shaderio::PushConstantGrid Renderer2D::MakeGrid(const glm::dvec3& focus, const glm::dvec3& renderOrigin, float cell, int planeAxis,
+                                                    float cameraDistance)
     {
         constexpr int steps = 8;
         constexpr int gridSize = 200;
@@ -762,8 +763,13 @@ namespace Nox
         fadeSize = std::clamp(fadeSize, cell * std::pow(static_cast<float>(steps), divisionLevelMin), cell * std::pow(static_cast<float>(steps), divisionLevelMax));
 
         shaderio::PushConstantGrid grid{};
-        grid.centerA = largeStep * std::trunc(focus[axisA] / largeStep);
-        grid.centerB = largeStep * std::trunc(focus[axisB] / largeStep);
+        // The lines sit on multiples of the step in the world; worked out in double precision, then relative to the render origin.
+        const double large = static_cast<double>(largeStep);
+        grid.centerA = static_cast<float>(large * std::trunc(focus[axisA] / large) - renderOrigin[axisA]);
+        grid.centerB = static_cast<float>(large * std::trunc(focus[axisB] / large) - renderOrigin[axisB]);
+        grid.originA = static_cast<float>(-renderOrigin[axisA]);
+        grid.originB = static_cast<float>(-renderOrigin[axisB]);
+        grid.originC = static_cast<float>(-renderOrigin[planeAxis]);
         grid.smallStep = smallStep;
         grid.gridFadeSize = (gridSize - steps) * fadeSize;
         grid.decimals = decimals;
@@ -810,10 +816,10 @@ namespace Nox
 
     void Renderer2D::DrawRect(const glm::mat4& transform, const glm::vec4& color, int entityID)
     {
-        glm::vec3 p0 = transform * glm::vec4(-0.5f, -0.5f, 0.0f, 1.0f);
-        glm::vec3 p1 = transform * glm::vec4(0.5f, -0.5f, 0.0f, 1.0f);
-        glm::vec3 p2 = transform * glm::vec4(0.5f, 0.5f, 0.0f, 1.0f);
-        glm::vec3 p3 = transform * glm::vec4(-0.5f, 0.5f, 0.0f, 1.0f);
+        glm::vec3 p0 = glm::vec3(transform * glm::vec4(-0.5f, -0.5f, 0.0f, 1.0f));
+        glm::vec3 p1 = glm::vec3(transform * glm::vec4(0.5f, -0.5f, 0.0f, 1.0f));
+        glm::vec3 p2 = glm::vec3(transform * glm::vec4(0.5f, 0.5f, 0.0f, 1.0f));
+        glm::vec3 p3 = glm::vec3(transform * glm::vec4(-0.5f, 0.5f, 0.0f, 1.0f));
 
         DrawLine(p0, p1, color, entityID);
         DrawLine(p1, p2, color, entityID);

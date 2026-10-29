@@ -28,9 +28,10 @@ struct VSOutput
 };
 
 // The plane's normal is world axis c; a and b are the other two (Godot: a = (c + 1) % 3, b = (c + 2) % 3). A grid point is (u, v) in them.
-float3 planePoint(int c, float u, float v)
+float3 planePoint(int c, float u, float v, float height)
 {
     float3 point = float3(0.0, 0.0, 0.0);
+    point[c] = height;
     point[(c + 1) % 3] = u;
     point[(c + 2) % 3] = v;
     return point;
@@ -91,16 +92,16 @@ void meshMain
         if (alongB)
         {
             const float position = pushConstant.centerA + i * smallStep;
-            from = planePoint(c, position, pushConstant.centerB - extent);
-            to = planePoint(c, position, pushConstant.centerB + extent);
-            draw = abs(position) > smallStep * 1e-3; // the origin has its own colored line
+            from = planePoint(c, position, pushConstant.centerB - extent, pushConstant.originC);
+            to = planePoint(c, position, pushConstant.centerB + extent, pushConstant.originC);
+            draw = abs(position - pushConstant.originA) > smallStep * 1e-3; // the origin has its own colored line
         }
         else
         {
             const float position = pushConstant.centerB + i * smallStep;
-            from = planePoint(c, pushConstant.centerA - extent, position);
-            to = planePoint(c, pushConstant.centerA + extent, position);
-            draw = abs(position) > smallStep * 1e-3;
+            from = planePoint(c, pushConstant.centerA - extent, position, pushConstant.originC);
+            to = planePoint(c, pushConstant.centerA + extent, position, pushConstant.originC);
+            draw = abs(position - pushConstant.originB) > smallStep * 1e-3;
         }
     }
     else
@@ -109,14 +110,14 @@ void meshMain
         const float reach = pushConstant.gridFadeSize * 2.0;
         if (id == gridLineCount)
         {
-            from = planePoint(c, pushConstant.centerA - reach, 0.0);
-            to = planePoint(c, pushConstant.centerA + reach, 0.0);
+            from = planePoint(c, pushConstant.centerA - reach, pushConstant.originB, pushConstant.originC);
+            to = planePoint(c, pushConstant.centerA + reach, pushConstant.originB, pushConstant.originC);
             color = float4(axisColor((c + 1) % 3), 0.9);
         }
         else
         {
-            from = planePoint(c, 0.0, pushConstant.centerB - reach);
-            to = planePoint(c, 0.0, pushConstant.centerB + reach);
+            from = planePoint(c, pushConstant.originA, pushConstant.centerB - reach, pushConstant.originC);
+            to = planePoint(c, pushConstant.originA, pushConstant.centerB + reach, pushConstant.originC);
             color = float4(axisColor((c + 2) % 3), 0.9);
         }
     }
@@ -152,7 +153,7 @@ FSOutput fragMain(VSOutput vertIn, uniform PushConstantGrid pushConstant)
     float angleFade = smoothstep(0.05, 0.2, abs(viewDirection[c]));
 
     float3 cameraOnPlane = camera;
-    cameraOnPlane[c] = 0.0;
+    cameraOnPlane[c] = pushConstant.originC;
     float distanceFade = 1.0 - distance(vertIn.world, cameraOnPlane) / pushConstant.gridFadeSize;
     distanceFade = smoothstep(0.02, 0.3, distanceFade);
 

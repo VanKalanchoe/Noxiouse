@@ -23,7 +23,7 @@ namespace Nox
             return;
 
         // 1. Calculate and preserve current World Transform before changing hierarchy
-        glm::mat4 worldTransform(1.0f);
+        glm::dmat4 worldTransform(1.0);
         if (HasComponent<WorldTransformComponent>())
         {
             worldTransform = GetComponent<WorldTransformComponent>().WorldMatrix;
@@ -60,20 +60,21 @@ namespace Nox
         // 4. Convert the preserved World Transform into the *new* local space
         if (HasComponent<TransformComponent>())
         {
-            glm::mat4 localTransform = worldTransform;
+            glm::dmat4 localTransform = worldTransform;
 
             if (parent)
             {
                 // If the new parent has a world matrix, invert it to find relative local space
                 if (parent.HasComponent<WorldTransformComponent>())
                 {
-                    glm::mat4 parentWorld = parent.GetComponent<WorldTransformComponent>().WorldMatrix;
+                    const glm::dmat4& parentWorld = parent.GetComponent<WorldTransformComponent>().WorldMatrix;
                     localTransform = glm::inverse(parentWorld) * worldTransform;
                 }
             }
 
             // Decompose the matrix back into Translation, Rotation, and Scale components
-            glm::vec3 translation, rotation, scale;
+            glm::dvec3 translation;
+            glm::vec3 rotation, scale;
             Math::DecomposeTransform(localTransform, translation, rotation, scale);
 
             auto& tc = GetComponent<TransformComponent>();
@@ -93,10 +94,10 @@ namespace Nox
             return m_Scene->GetEntityByUUID(parentUUID);
         }
         
-        void SetWorldTransform(const glm::mat4& newWorldTransform)
+        void SetWorldTransform(const glm::dmat4& newWorldTransform)
         {
             auto& tc = GetComponent<TransformComponent>();
-            glm::mat4 localTransform = newWorldTransform;
+            glm::dmat4 localTransform = newWorldTransform;
 
             // 1. If we have a parent, convert the World transform to a Local transform
             if (HasComponent<RelationshipComponent>())
@@ -108,14 +109,15 @@ namespace Nox
                     Entity parent = m_Scene->GetEntityByUUID(parentUUID);
                     if (parent)
                     {
-                        glm::mat4 parentWorld = parent.GetComponent<WorldTransformComponent>().WorldMatrix;
+                        const glm::dmat4& parentWorld = parent.GetComponent<WorldTransformComponent>().WorldMatrix;
                         localTransform = glm::inverse(parentWorld) * newWorldTransform;
                     }
                 }
             }
 
             // 2. Decompose the final local transform
-            glm::vec3 translation, rotation, scale;
+            glm::dvec3 translation;
+            glm::vec3 rotation, scale;
             Math::DecomposeTransform(localTransform, translation, rotation, scale);
 
             // 3. Apply it to the component (Handle rotation wrap-around smoothly)

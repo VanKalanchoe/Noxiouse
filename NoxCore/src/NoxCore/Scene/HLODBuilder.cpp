@@ -183,9 +183,9 @@ namespace Nox
             return true;
         }
 
-        glm::mat4 ComposedWorldMatrix(Scene& scene, Entity entity)
+        glm::dmat4 ComposedWorldMatrix(Scene& scene, Entity entity)
         {
-            glm::mat4 world = entity.GetComponent<TransformComponent>().GetTransform();
+            glm::dmat4 world = entity.GetComponent<TransformComponent>().GetTransform();
             UUID parentID = entity.HasComponent<RelationshipComponent>() ? entity.GetComponent<RelationshipComponent>().Parent : UUID(0);
             for (int depth = 0; parentID != 0 && depth < 1024; ++depth)
             {
@@ -330,7 +330,7 @@ namespace Nox
         struct Instance
         {
             AssetHandle Mesh = 0;
-            glm::mat4 World{ 1.0f };
+            glm::dmat4 World{ 1.0 };
             uint32_t FirstSubmesh = 0;
             uint32_t SubmeshCount = UINT32_MAX;
             std::vector<AssetHandle> MaterialOverrides;
@@ -351,7 +351,7 @@ namespace Nox
         {
             AssetHandle Mesh = 0;
             uint32_t Submesh = 0;
-            glm::mat4 World{ 1.0f };
+            glm::dmat4 World{ 1.0 };
             uint32_t Material = 0;
         };
         std::vector<Part> Parts;
@@ -757,7 +757,7 @@ namespace Nox
             entity.GetComponent<TransformComponent>().Translation = entry.Origin;
             entity.AddComponent<MeshComponent>(entry.Mesh).SubmeshCount = UINT32_MAX;
             entity.AddComponent<HLODComponent>().Source = entry.Source;
-            groups[WorldGrid::CellFor(entry.BoundsMin, entry.BoundsMax, hlodCellSize, WorldGrid::HLODGridIndex)].push_back(entity);
+            groups[WorldGrid::CellFor(glm::dvec3(entry.BoundsMin), glm::dvec3(entry.BoundsMax), hlodCellSize, WorldGrid::HLODGridIndex)].push_back(entity);
         }
         for (const auto& [cell, entities] : groups)
         {
@@ -778,7 +778,7 @@ namespace Nox
             info.BoundsMax = glm::vec3(-FLT_MAX);
             for (const Entry& entry : m_Entries)
             {
-                if (WorldGrid::CellFor(entry.BoundsMin, entry.BoundsMax, hlodCellSize, WorldGrid::HLODGridIndex) == cell)
+                if (WorldGrid::CellFor(glm::dvec3(entry.BoundsMin), glm::dvec3(entry.BoundsMax), hlodCellSize, WorldGrid::HLODGridIndex) == cell)
                 {
                     info.BoundsMin = glm::min(info.BoundsMin, entry.BoundsMin);
                     info.BoundsMax = glm::max(info.BoundsMax, entry.BoundsMax);

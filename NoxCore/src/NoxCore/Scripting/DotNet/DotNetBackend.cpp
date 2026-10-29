@@ -27,9 +27,11 @@ namespace Nox
     namespace
     {
         struct ManagedVector3 { float X, Y, Z; };
+        // Nox.Vector3d: positions in double precision (large world coordinates).
+        struct ManagedVector3d { double X, Y, Z; };
         struct ManagedTransform
         {
-            ManagedVector3 Position;
+            ManagedVector3d Position;
             ManagedVector3 Rotation;
             ManagedVector3 Scale;
         };
@@ -37,11 +39,12 @@ namespace Nox
         struct ManagedRaycastHit
         {
             uint64_t Entity;
-            ManagedVector3 Point;
+            ManagedVector3d Point;
             ManagedVector3 Normal;
             float Distance;
         };
         static_assert(sizeof(ManagedVector3) == sizeof(glm::vec3) && sizeof(glm::vec2) == 8, "Nox.Vector3 / Vector2 are passed as glm vectors");
+        static_assert(sizeof(ManagedTransform) == 48 && sizeof(ManagedRaycastHit) == 48, "Nox.Transform / RaycastHit: C# sequential layout");
         Scene* s_Scene = nullptr;
         std::thread::id s_MainThread;
 
@@ -97,7 +100,7 @@ namespace Nox
         }
 
         // Scene.Instantiate("Prefabs/Ball.nprefab", x, y, z): the prefab by its path under the asset directory.
-        uint64_t SceneInstantiate(Coral::String path, float x, float y, float z)
+        uint64_t SceneInstantiate(Coral::String path, double x, double y, double z)
         {
             if (!s_Scene) return 0;
             const AssetHandle prefab = AssetManager::FindHandleByPath(std::filesystem::path(std::string(path)), AssetType::Prefab);
@@ -142,11 +145,11 @@ namespace Nox
         }
 
         // stage: 0 Unloaded .. 4 Activated (Scene::WorldCellStage); position and range in world units.
-        Coral::Bool32 SceneIsWorldStreamingCompleted(float x, float y, float z, float range, int32_t stage)
+        Coral::Bool32 SceneIsWorldStreamingCompleted(double x, double y, double z, float range, int32_t stage)
         {
             if (!s_Scene || stage < 0 || stage > static_cast<int32_t>(Scene::WorldCellStage::Activated))
                 return false;
-            return s_Scene->IsWorldStreamingCompleted(glm::vec3(x, y, z), range, static_cast<Scene::WorldCellStage>(stage));
+            return s_Scene->IsWorldStreamingCompleted(glm::dvec3(x, y, z), range, static_cast<Scene::WorldCellStage>(stage));
         }
 
         // Nox.WorldStreamingStats's layout.
@@ -233,7 +236,7 @@ namespace Nox
         }
 
         // Scene.CreateEntity(name, position): an empty entity (a transform), e.g. to show a Mesh on.
-        uint64_t SceneCreateEntity(Coral::String name, float x, float y, float z)
+        uint64_t SceneCreateEntity(Coral::String name, double x, double y, double z)
         {
             if (!s_Scene || !OnMainThread("Scene.CreateEntity")) return 0;
             Entity entity = s_Scene->CreateEntity(std::string(name));
@@ -324,7 +327,7 @@ namespace Nox
         }
 
         // Physics.Raycast: the first collider along the ray (rigid bodies, mesh colliders; not characters' own capsules).
-        Coral::Bool32 PhysicsRaycast(float originX, float originY, float originZ, float directionX, float directionY, float directionZ,
+        Coral::Bool32 PhysicsRaycast(double originX, double originY, double originZ, float directionX, float directionY, float directionZ,
                                      float maxDistance, ManagedRaycastHit* outHit)
         {
             *outHit = {};
@@ -665,7 +668,7 @@ namespace Nox
             if (!s_Scene || !value) return;
             Entity entity = s_Scene->GetEntityByUUID(UUID(entityID));
             if (!entity || !entity.HasComponent<TransformComponent>()) return;
-            const glm::mat4 world = entity.HasComponent<WorldTransformComponent>()
+            const glm::dmat4 world = entity.HasComponent<WorldTransformComponent>()
                 ? entity.GetComponent<WorldTransformComponent>().WorldMatrix
                 : entity.GetComponent<TransformComponent>().GetTransform();
             TransformComponent transform;

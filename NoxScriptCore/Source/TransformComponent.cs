@@ -16,7 +16,7 @@ public sealed class TransformComponent : Component
         set => InternalCalls.SetWorldTransform(EntityID, value);
     }
 
-    public Vector3 LocalPosition
+    public Vector3d LocalPosition
     {
         get => Local.Position;
         set
@@ -49,7 +49,7 @@ public sealed class TransformComponent : Component
         }
     }
 
-    public Vector3 WorldPosition
+    public Vector3d WorldPosition
     {
         get => World.Position;
         set

@@ -1,5 +1,7 @@
 #include "ModelInstance.h"
 
+#include "NoxCore/Math/Math.h"
+
 #include <algorithm>
 #include <functional>
 #include <string>
@@ -29,7 +31,7 @@ namespace Nox
         TransformComponent makeTransform(const glm::vec3& translation, const glm::quat& rotation, const glm::vec3& scale)
         {
             TransformComponent transform;
-            transform.Translation = translation;
+            transform.Translation = glm::dvec3(translation);
             transform.Rotation = glm::eulerAngles(rotation);
             transform.Scale = scale;
             return transform;
@@ -100,10 +102,11 @@ namespace Nox
 
         // Sets a transform from a matrix without glm::decompose (its orientation has been unreliable in this codebase): scale =
         // column lengths, rotation = the normalized basis (a mirrored transform flips one axis), translation = the last column.
-        void setFromMatrix(TransformComponent& transform, const glm::mat4& matrix)
+        void setFromMatrix(TransformComponent& transform, const glm::dmat4& worldMatrix)
         {
+            const glm::mat4 matrix = Math::RelativeTo(worldMatrix, glm::dvec3(worldMatrix[3])); // (the rotation and scale; translation below)
             glm::vec3 scale(glm::length(glm::vec3(matrix[0])), glm::length(glm::vec3(matrix[1])), glm::length(glm::vec3(matrix[2])));
-            transform.Translation = glm::vec3(matrix[3]);
+            transform.Translation = glm::dvec3(worldMatrix[3]);
             if (scale.x < 1e-8f || scale.y < 1e-8f || scale.z < 1e-8f)
             {
                 transform.Rotation = glm::vec3(0.0f);
@@ -362,7 +365,7 @@ namespace Nox
                 {
                     const AssetHandle model = instance.Model;
                     const TransformComponent placed = makeTransform(only->Translation, only->Rotation, only->Scale);
-                    rootTransform.Translation += rootTransform.Scale * placed.Translation;
+                    rootTransform.Translation += glm::dvec3(rootTransform.Scale) * placed.Translation;
                     rootTransform.Rotation = placed.Rotation;
                     rootTransform.Scale *= placed.Scale;
                     root.MarkTransformDirty();
@@ -394,7 +397,7 @@ namespace Nox
                 if (meshSlots.size() + mesh.GetLights().size() + mesh.GetCameras().size() > 0)
                 {
                     const AssetHandle model = instance.Model;
-                    const glm::mat4 rootLocal = root.GetComponent<TransformComponent>().GetTransform();
+                    const glm::dmat4 rootLocal = root.GetComponent<TransformComponent>().GetTransform();
                     const std::string baseName = root.GetName();
                     Entity parent;
                     if (root.HasComponent<RelationshipComponent>() && root.GetComponent<RelationshipComponent>().Parent != 0)
@@ -408,7 +411,7 @@ namespace Nox
                         if (done[index])
                             return world[index];
                         const MeshNodeData& node = nodes[index];
-                        const glm::mat4 local = makeTransform(node.Translation, node.Rotation, node.Scale).GetTransform();
+                        const glm::mat4 local = Math::ToFloat(makeTransform(node.Translation, node.Rotation, node.Scale).GetTransform()); // (model space)
                         const bool hasParent = node.Parent >= 0 && node.Parent < static_cast<int32_t>(nodes.size()) && node.Parent != static_cast<int32_t>(index);
                         world[index] = hasParent ? worldOf(static_cast<size_t>(node.Parent)) * local : local;
                         done[index] = true;
@@ -418,7 +421,7 @@ namespace Nox
                     const std::string rootFolder = root.HasComponent<FolderComponent>() ? root.GetComponent<FolderComponent>().Path : std::string();
                     auto place = [&](Entity entity, const glm::mat4& modelSpace)
                     {
-                        setFromMatrix(entity.GetComponent<TransformComponent>(), rootLocal * modelSpace);
+                        setFromMatrix(entity.GetComponent<TransformComponent>(), rootLocal * glm::dmat4(modelSpace));
                         if (!rootFolder.empty())
                             entity.AddComponent<FolderComponent>(rootFolder);
                         if (parent)
@@ -449,7 +452,7 @@ namespace Nox
                         Entity lightEntity = scene.CreateEntity(light.Name.empty() ? "Light " + std::to_string(i) : light.Name);
                         addLight(lightEntity, light);
                         place(lightEntity, onNode ? worldOf(static_cast<size_t>(light.NodeIndex))
-                                                  : makeTransform(light.Translation, light.Rotation, light.Scale).GetTransform());
+                                                  : Math::ToFloat(makeTransform(light.Translation, light.Rotation, light.Scale).GetTransform()));
                     }
                     for (size_t i = 0; i < mesh.GetCameras().size(); ++i)
                     {
@@ -458,7 +461,7 @@ namespace Nox
                         Entity cameraEntity = scene.CreateEntity(camera.Name.empty() ? "Camera " + std::to_string(i) : camera.Name);
                         addCamera(scene, cameraEntity, camera);
                         place(cameraEntity, onNode ? worldOf(static_cast<size_t>(camera.NodeIndex))
-                                                   : makeTransform(camera.Translation, camera.Rotation, camera.Scale).GetTransform());
+                                                   : Math::ToFloat(makeTransform(camera.Translation, camera.Rotation, camera.Scale).GetTransform()));
                     }
 
                     scene.DestroyEntity(root); // `instance` is gone
@@ -604,6 +607,10 @@ namespace Nox
         bool nearlyEqual(const glm::vec3& a, const glm::vec3& b)
         {
             return glm::all(glm::lessThanEqual(glm::abs(a - b), glm::vec3(1e-4f)));
+        }
+        bool nearlyEqual(const glm::dvec3& a, const glm::dvec3& b)
+        {
+            return glm::all(glm::lessThanEqual(glm::abs(a - b), glm::dvec3(1e-4)));
         }
     }
 

@@ -48,7 +48,7 @@ namespace Nox
         void OnRuntimeStop();
 
         // `streamingSource`: where the world partition's cells are streamed around (the editor camera); Play uses the primary camera.
-        void OnSimulationStart(const glm::vec3* streamingSource = nullptr);
+        void OnSimulationStart(const glm::dvec3* streamingSource = nullptr);
         void OnSimulationStop();
 
         void OnUpdateRuntime(Timestep ts);
@@ -98,7 +98,7 @@ namespace Nox
 
         // Runtime: places a prefab in the scene and spawns it at once (see PrefabInstance::Instantiate); physics bodies and scripts
         // of its entities start as if the scene had begun with them. Returns the instance root (invalid when it fails).
-        Entity Instantiate(AssetHandle prefab, const glm::vec3& position);
+        Entity Instantiate(AssetHandle prefab, const glm::dvec3& position);
         // Destroys the entity at the end of the script update (a script may destroy itself: nothing in the middle of a frame's
         // script loop is removed).
         void QueueDestroy(Entity entity);
@@ -149,7 +149,7 @@ namespace Nox
         WorldCellStage GetWorldCellStage(const WorldCellCoord& cell) const;
         // Unreal's IsStreamingCompleted: every world cell whose content is within `range` (world units) of a point has reached `stage`
         // (Loaded: also those activating or activated; Activated: in the world). E.g. a teleport waits for its target to be Loaded.
-        bool IsWorldStreamingCompleted(const glm::vec3& point, float range, WorldCellStage stage) const;
+        bool IsWorldStreamingCompleted(const glm::dvec3& point, float range, WorldCellStage stage) const;
         // What the cells activated since Play / Simulate began cost (§5.13.4; Unreal's stat streaming): reading and parsing their
         // files on workers, building them and copying them into the world on the main thread, waiting for their assets, and the
         // time from a cell being wanted to it being in the world.
@@ -170,7 +170,7 @@ namespace Nox
         std::vector<WorldCellCoord> GetLoadedWorldCells(bool includeLoading, int32_t grid = WorldGrid::WorldGridIndex) const;
         bool IsWorldStreamingBusy() const; // a cell is loading, activating or about to unload
         // The indexed cells whose content is within `range` (world units) of a point, horizontally.
-        std::vector<WorldCellCoord> WorldCellsAround(const glm::vec3& point, float range, int32_t grid = WorldGrid::WorldGridIndex) const;
+        std::vector<WorldCellCoord> WorldCellsAround(const glm::dvec3& point, float range, int32_t grid = WorldGrid::WorldGridIndex) const;
         // HLODs (§5.13.2) while editing: the HLOD grid streams around the editor camera when shown (World Partition panel).
         void SetShowHLODs(bool show) { m_ShowHLODs = show; }
         bool GetShowHLODs() const { return m_ShowHLODs; }
@@ -220,31 +220,31 @@ namespace Nox
 
         // Level streaming, at the start of a running frame: the volumes against the streaming source, the unloads, then the loads for
         // LevelStreamingBudgetMs.
-        void UpdateLevelStreaming(const glm::vec3* source, float deltaTime);
+        void UpdateLevelStreaming(const glm::dvec3* source, float deltaTime);
         struct StreamedLevel;
         void FinishLevelLoad(StreamedLevel& streamed, const std::vector<UUID>& created, const std::vector<UUID>& heldPhysics);
         void DestroyLevelEntities(AssetHandle level);
         // World partition: the copy of an edited world turned into in-memory cells and the cells around the sources loaded (Play /
         // Simulate start), then every frame the cells near a source wanted, the ones every source has left unloaded.
-        void BeginWorldStreaming(const glm::vec3* source);
+        void BeginWorldStreaming(const glm::dvec3* source);
         // `composedSources`: the sources' places from their transforms up the parents (before the first update: no world transforms).
-        void UpdateWorldStreaming(const glm::vec3* source, bool composedSources = false);
+        void UpdateWorldStreaming(const glm::dvec3* source, bool composedSources = false);
         // A streaming source: where, how far (times the grid's loading range), and whether the cells it reaches are activated or
         // only loaded (WorldStreamingSourceComponent; the camera activates).
         struct StreamingSource
         {
-            glm::vec3 Position{ 0.0f };
+            glm::dvec3 Position{ 0.0 };
             float RangeScale = 1.0f;
             bool Activate = true;
         };
-        void CollectStreamingSources(const glm::vec3* source, std::vector<StreamingSource>& outSources, bool composed);
+        void CollectStreamingSources(const glm::dvec3* source, std::vector<StreamingSource>& outSources, bool composed);
         // The cells of every grid (onlyGrid -1) or of one near the sources wanted -- activated where an activating source reaches them,
         // else loaded -- the ones all of them have left unloaded.
         void StreamWorldCells(const std::vector<StreamingSource>& sources, int32_t onlyGrid);
-        void UpdateEditorHLODs(const glm::vec3& camera);
+        void UpdateEditorHLODs(const glm::dvec3& camera);
         // HLODs whose cell is loaded and drawn are hidden (left out of the GPU scene), the others shown (SyncGpuScene).
         void UpdateHLODVisibility();
-        glm::vec3 ComposedWorldPosition(Entity entity);
+        glm::dvec3 ComposedWorldPosition(Entity entity);
         void QueueWorldCellLoad(const WorldCellCoord& cell, bool activate = true);
         // A cell built from its file (or a Play session's text) into a scene of its own: the loader, a slice a frame.
         void StageWorldCell(StreamedLevel& streamed);
@@ -279,7 +279,7 @@ namespace Nox
         void UpdateParticles();
         void SubmitParticles();
 
-        const std::vector<glm::mat4>* GetBoneTransforms(entt::entity entity, const glm::mat4& meshWorld);
+        const std::vector<glm::mat4>* GetBoneTransforms(entt::entity entity, const glm::dmat4& meshWorld);
 
         std::string MakeUniqueDuplicateName(const std::string& baseName);
     private:

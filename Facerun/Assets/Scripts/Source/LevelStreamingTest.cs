@@ -45,7 +45,7 @@ public sealed class LevelStreamingTest : EntityBehaviour
     Step m_Step = Step.Idle;
     float m_StepTime;
     float m_SpinStart;
-    Vector3 m_CameraStart;
+    Vector3d m_CameraStart;
     int m_Passed;
     readonly List<string> m_Failures = new();
     bool m_KeyT, m_KeyL, m_KeyU;
@@ -224,5 +224,5 @@ public sealed class LevelStreamingTest : EntityBehaviour
             Log.Info($"[LevelStreamingTest] FAIL ({m_Failures.Count} of {m_Passed + m_Failures.Count} checks failed): {string.Join("; ", m_Failures)}");
     }
 
-    void SetCameraPosition(Vector3 position) => GetComponent<TransformComponent>().LocalPosition = position;
+    void SetCameraPosition(Vector3d position) => GetComponent<TransformComponent>().LocalPosition = position;
 }

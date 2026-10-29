@@ -38,13 +38,13 @@ namespace Nox
                                      float friction, float restitution) override;
         virtual void RemoveMeshCollider(Entity entity) override;
 
-        virtual bool RayCast(const glm::vec3& origin, const glm::vec3& direction, float maxDistance,
+        virtual bool RayCast(const glm::dvec3& origin, const glm::vec3& direction, float maxDistance,
                              RayCastHit& outHit, uint16_t layerMask = PhysicsLayers::MASK_ALL) override;
 
-        virtual bool SphereCast(const glm::vec3& origin, float radius, const glm::vec3& direction,
+        virtual bool SphereCast(const glm::dvec3& origin, float radius, const glm::vec3& direction,
                                 float maxDistance, ShapeCastHit& outHit, uint16_t layerMask = PhysicsLayers::MASK_ALL) override;
 
-        virtual std::vector<Entity> OverlapSphere(const glm::vec3& center, float radius,
+        virtual std::vector<Entity> OverlapSphere(const glm::dvec3& center, float radius,
                                                   uint16_t layerMask = PhysicsLayers::MASK_ALL) override;
 
         virtual void AddForce(Entity entity, const glm::vec3& force) override;
@@ -79,8 +79,8 @@ namespace Nox
         struct CharacterState
         {
             JPH::Ref<JPH::CharacterVirtual> Character;
-            glm::vec3 Previous{ 0.0f };
-            glm::vec3 Current{ 0.0f };
+            glm::dvec3 Previous{ 0.0 }; // world positions (double precision)
+            glm::dvec3 Current{ 0.0 };
             glm::vec3 Horizontal{ 0.0f }; // the horizontal velocity the controller has accelerated to (x, z)
         };
         std::unordered_map<uint32_t, CharacterState> m_EntityToCharacterMap;
@@ -89,8 +89,8 @@ namespace Nox
         // moves smoothly at any frame rate instead of in 60 Hz jumps.
         struct BodyPose
         {
-            glm::vec3 Previous{ 0.0f };
-            glm::vec3 Current{ 0.0f };
+            glm::dvec3 Previous{ 0.0 }; // world positions (double precision)
+            glm::dvec3 Current{ 0.0 };
             glm::quat PreviousRotation{ 1.0f, 0.0f, 0.0f, 0.0f };
             glm::quat CurrentRotation{ 1.0f, 0.0f, 0.0f, 0.0f };
             bool NeedsSync = false; // the entity does not show the final pose yet

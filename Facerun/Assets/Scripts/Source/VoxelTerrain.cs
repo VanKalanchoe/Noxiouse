@@ -42,7 +42,7 @@ public sealed class VoxelTerrain : EntityBehaviour
 
     protected override void OnCreate()
     {
-        Vector3 origin = GetComponent<TransformComponent>().World.Position;
+        Vector3d origin = GetComponent<TransformComponent>().World.Position;
         for (int cz = 0; cz < ChunksPerSide; ++cz)
         {
             for (int cx = 0; cx < ChunksPerSide; ++cx)
@@ -125,8 +125,8 @@ public sealed class VoxelTerrain : EntityBehaviour
         if (!Physics.Raycast(view.Position, forward, ReachInBlocks * BlockSize, out RaycastHit hit))
             return;
         // Half a block into the surface is the block hit, half a block out the empty cell in front of it.
-        Vector3 inside = hit.Point + hit.Normal * (dig ? -0.5f * BlockSize : 0.5f * BlockSize);
-        Vector3 local = inside - GetComponent<TransformComponent>().World.Position;
+        Vector3d inside = hit.Point + hit.Normal * (dig ? -0.5f * BlockSize : 0.5f * BlockSize);
+        Vector3 local = (Vector3)(inside - GetComponent<TransformComponent>().World.Position);
         int wx = (int)MathF.Floor(local.X / BlockSize);
         int wy = (int)MathF.Floor(local.Y / BlockSize);
         int wz = (int)MathF.Floor(local.Z / BlockSize);

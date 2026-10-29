@@ -145,11 +145,16 @@ namespace Nox
         void UpdateMaterial(uint32_t materialSlot, const shaderio::GpuMaterial& material);
         void ForEachMaterial(const std::function<void(uint32_t materialSlot, const GpuMaterialKey& key)>& function) const;
 
-        // Instances. AddInstance references the material, RemoveInstance releases it.
-        uint32_t AddInstance(uint32_t meshSlot, uint32_t materialSlot, const glm::mat4& world, int32_t entityID);
+        // Instances. AddInstance references the material, RemoveInstance releases it. World transforms are double precision
+        // (large world coordinates, Engine_Architecture_Plan_2026.md §5.14a); the tables hold them relative to the render origin.
+        uint32_t AddInstance(uint32_t meshSlot, uint32_t materialSlot, const glm::dmat4& world, int32_t entityID);
         void RemoveInstance(uint32_t instanceSlot);
         void RemoveAllInstances();
-        void SetTransform(uint32_t instanceSlot, const glm::mat4& world);
+        void SetTransform(uint32_t instanceSlot, const glm::dmat4& world);
+        // Where the GPU's world space is centred (Renderer::GetRenderOrigin). A new origin rewrites every instance's transforms
+        // (their previous ones too, so motion vectors stay right), bounds and TLAS records once.
+        void SetRenderOrigin(const glm::dvec3& origin);
+        const glm::dvec3& GetRenderOrigin() const { return m_RenderOrigin; }
         void SetBoneMatrixOffset(uint32_t instanceSlot, uint32_t boneMatrixOffset);
         void SetSkinnedVertexOffset(uint32_t instanceSlot, uint32_t skinnedVertexOffset);
         // The instances with bone matrices, by slot: the skinning layout walks these, not every instance.
@@ -257,5 +262,10 @@ namespace Nox
         // moving, its previous transform is settled to its world.
         uint64_t m_Frame = 0;
         std::vector<uint32_t> m_MovedInstances;
+
+        // Large world coordinates: each instance's world translation in double precision (by slot; the rotation and scale are
+        // the tables' own), and the origin the tables are relative to.
+        std::vector<glm::dvec3> m_WorldTranslations;
+        glm::dvec3 m_RenderOrigin{ 0.0 };
     };
 }

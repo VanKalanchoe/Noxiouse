@@ -51,13 +51,13 @@ namespace Nox {
         virtual void RemoveMeshCollider(Entity entity) = 0;
 
         // Queries
-        virtual bool RayCast(const glm::vec3& origin, const glm::vec3& direction, float maxDistance,
+        virtual bool RayCast(const glm::dvec3& origin, const glm::vec3& direction, float maxDistance,
                              RayCastHit& outHit, uint16_t layerMask = PhysicsLayers::MASK_ALL) = 0;
 
-        virtual bool SphereCast(const glm::vec3& origin, float radius, const glm::vec3& direction,
+        virtual bool SphereCast(const glm::dvec3& origin, float radius, const glm::vec3& direction,
                                 float maxDistance, ShapeCastHit& outHit, uint16_t layerMask = PhysicsLayers::MASK_ALL) = 0;
 
-        virtual std::vector<Entity> OverlapSphere(const glm::vec3& center, float radius,
+        virtual std::vector<Entity> OverlapSphere(const glm::dvec3& center, float radius,
                                                   uint16_t layerMask = PhysicsLayers::MASK_ALL) = 0;
 
         // Forces & Velocities
@@ -75,6 +75,9 @@ namespace Nox {
         float ToWorld(float nativeLength) const { return nativeLength / PhysicsScale(); }
         glm::vec3 ToNative(const glm::vec3& worldLength) const { return worldLength * PhysicsScale(); }
         glm::vec3 ToWorld(const glm::vec3& nativeLength) const { return nativeLength / PhysicsScale(); }
+        // Positions (large world coordinates: double precision).
+        glm::dvec3 ToNative(const glm::dvec3& worldPosition) const { return worldPosition * static_cast<double>(PhysicsScale()); }
+        glm::dvec3 ToWorld(const glm::dvec3& nativePosition) const { return nativePosition / static_cast<double>(PhysicsScale()); }
     };
 
 } // namespace Nox

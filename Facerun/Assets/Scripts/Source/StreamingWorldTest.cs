@@ -37,13 +37,13 @@ public sealed class StreamingWorldTest : EntityBehaviour
     float m_Time;
     float m_SettledTime;
     int m_SettledFrames;
-    Vector3 m_Placed; // where PlaceCamera put the camera (its world transform follows a frame later)
+    Vector3d m_Placed; // where PlaceCamera put the camera (its world transform follows a frame later)
     float m_SampleTime;
-    Vector3 m_Center;
+    Vector3d m_Center; // positions in double precision: the world may be far out (the generator's World Offset)
     float m_Radius;
     float m_Angle;
     float m_LapAngle;
-    Vector3 m_StartPosition;
+    Vector3d m_StartPosition;
     Vector3 m_StartRotation;
 
     readonly List<float> m_Frames = new();
@@ -81,7 +81,7 @@ public sealed class StreamingWorldTest : EntityBehaviour
         if (m_Phase == Phase.Done)
             return;
         m_Time += deltaTime;
-        Vector3 camera = GetComponent<TransformComponent>().World.Position;
+        Vector3d camera = GetComponent<TransformComponent>().World.Position;
 
         if (m_Phase == Phase.WarmUp)
         {
@@ -163,7 +163,7 @@ public sealed class StreamingWorldTest : EntityBehaviour
     {
         TransformComponent transform = GetComponent<TransformComponent>();
         Transform world = transform.World;
-        world.Position = new Vector3(m_Center.X + m_Radius * MathF.Cos(m_Angle), WorldUnits.FromMeters(HeightMeters), m_Center.Z + m_Radius * MathF.Sin(m_Angle));
+        world.Position = new Vector3d(m_Center.X + m_Radius * Math.Cos(m_Angle), WorldUnits.FromMeters(HeightMeters), m_Center.Z + m_Radius * Math.Sin(m_Angle));
         m_Placed = world.Position;
         // Looking along the circle: forward (-sin, 0, cos) as yaw (forward = (-cos p sin y, sin p, -cos p cos y)).
         float forwardX = -MathF.Sin(m_Angle), forwardZ = MathF.Cos(m_Angle);
@@ -247,5 +247,6 @@ public sealed class StreamingWorldTest : EntityBehaviour
     float FlightAngle => 2.0f * MathF.PI * Math.Max(Laps, 1);
 
     static float Meters(float worldUnits) => worldUnits / WorldUnits.FromMeters(1.0f);
+    static double Meters(double worldUnits) => worldUnits / WorldUnits.FromMeters(1.0f);
     static double Megabytes(ulong bytes) => bytes / (1024.0 * 1024.0);
 }

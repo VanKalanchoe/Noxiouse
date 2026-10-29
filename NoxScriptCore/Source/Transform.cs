@@ -5,10 +5,10 @@ namespace Nox;
 [StructLayout(LayoutKind.Sequential)]
 public struct Transform
 {
-    public Vector3 Position;
+    public Vector3d Position; // world units (double precision: large world coordinates)
     public Vector3 Rotation;
     public Vector3 Scale;
 
-    public Transform(Vector3 position, Vector3 rotation, Vector3 scale) =>
+    public Transform(Vector3d position, Vector3 rotation, Vector3 scale) =>
         (Position, Rotation, Scale) = (position, rotation, scale);
 }

@@ -33,6 +33,17 @@ namespace Nox {
             return glm::quat(q.GetW(), q.GetX(), q.GetY(), q.GetZ());
         }
 
+        // Positions (large world coordinates): Jolt's RVec3 is double precision (JPH_DOUBLE_PRECISION), like the engine's.
+        inline JPH::RVec3 ToJoltPosition(const glm::dvec3& v)
+        {
+            return JPH::RVec3(static_cast<JPH::Real>(v.x), static_cast<JPH::Real>(v.y), static_cast<JPH::Real>(v.z));
+        }
+
+        inline glm::dvec3 ToGLMPosition(JPH::RVec3Arg v)
+        {
+            return glm::dvec3(v.GetX(), v.GetY(), v.GetZ());
+        }
+
     } // namespace JoltUtils
 
 } // namespace Nox

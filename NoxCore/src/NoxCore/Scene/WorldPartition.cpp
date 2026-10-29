@@ -49,9 +49,9 @@ namespace Nox
                std::to_string(cell.Z);
     }
 
-    WorldCellCoord WorldGrid::CellFor(const glm::vec3& boundsMin, const glm::vec3& boundsMax, float cellSizeWorld, int32_t grid)
+    WorldCellCoord WorldGrid::CellFor(const glm::dvec3& boundsMin, const glm::dvec3& boundsMax, float cellSizeWorld, int32_t grid)
     {
-        const float extent = std::max(boundsMax.x - boundsMin.x, boundsMax.z - boundsMin.z);
+        const float extent = static_cast<float>(std::max(boundsMax.x - boundsMin.x, boundsMax.z - boundsMin.z));
         WorldCellCoord cell;
         cell.Grid = grid;
         float size = cellSizeWorld;
@@ -60,7 +60,7 @@ namespace Nox
             ++cell.Level;
             size *= 2.0f;
         }
-        const glm::vec3 center = (boundsMin + boundsMax) * 0.5f;
+        const glm::dvec3 center = (boundsMin + boundsMax) * 0.5;
         cell.X = static_cast<int32_t>(std::floor(center.x / size));
         cell.Z = static_cast<int32_t>(std::floor(center.z / size));
         return cell;
@@ -73,11 +73,11 @@ namespace Nox
         outMax = outMin + glm::vec2(size);
     }
 
-    float WorldGrid::HorizontalDistance(const glm::vec3& point, const glm::vec3& boundsMin, const glm::vec3& boundsMax)
+    float WorldGrid::HorizontalDistance(const glm::dvec3& point, const glm::vec3& boundsMin, const glm::vec3& boundsMax)
     {
-        const float dx = std::max({ boundsMin.x - point.x, 0.0f, point.x - boundsMax.x });
-        const float dz = std::max({ boundsMin.z - point.z, 0.0f, point.z - boundsMax.z });
-        return std::sqrt(dx * dx + dz * dz);
+        const double dx = std::max({ double(boundsMin.x) - point.x, 0.0, point.x - double(boundsMax.x) });
+        const double dz = std::max({ double(boundsMin.z) - point.z, 0.0, point.z - double(boundsMax.z) });
+        return static_cast<float>(std::sqrt(dx * dx + dz * dz));
     }
 
     std::filesystem::path WorldPartition::CellFile(const WorldCellCoord& cell) const
@@ -166,8 +166,8 @@ namespace Nox
             outCell = origin->second;
             return true;
         }
-        const glm::vec3 position = root.HasComponent<WorldTransformComponent>()
-            ? glm::vec3(root.GetComponent<WorldTransformComponent>().WorldMatrix[3])
+        const glm::dvec3 position = root.HasComponent<WorldTransformComponent>()
+            ? root.GetComponent<WorldTransformComponent>().GetPosition()
             : root.GetComponent<TransformComponent>().Translation;
         outCell = WorldGrid::CellFor(position, position, cellSize);
         return true;
@@ -204,23 +204,25 @@ namespace Nox
     // The bounds of a cell's roots (their positions where they have none), for the index.
     static void RootsBounds(Scene& scene, const std::vector<Entity>& roots, glm::vec3& outMin, glm::vec3& outMax)
     {
-        outMin = glm::vec3(FLT_MAX);
-        outMax = glm::vec3(-FLT_MAX);
+        // Gathered in double precision, kept in float (the index's bounds only decide distances to streaming sources).
+        glm::dvec3 lowest(DBL_MAX), highest(-DBL_MAX);
         for (Entity root : roots)
         {
             const WorldBounds bounds = ComputeWorldBounds(scene, root, true);
             if (bounds.Valid)
             {
-                outMin = glm::min(outMin, bounds.Min);
-                outMax = glm::max(outMax, bounds.Max);
+                lowest = glm::min(lowest, bounds.Min);
+                highest = glm::max(highest, bounds.Max);
                 continue;
             }
-            const glm::vec3 position = root.HasComponent<WorldTransformComponent>()
-                ? glm::vec3(root.GetComponent<WorldTransformComponent>().WorldMatrix[3])
+            const glm::dvec3 position = root.HasComponent<WorldTransformComponent>()
+                ? root.GetComponent<WorldTransformComponent>().GetPosition()
                 : root.GetComponent<TransformComponent>().Translation;
-            outMin = glm::min(outMin, position);
-            outMax = glm::max(outMax, position);
+            lowest = glm::min(lowest, position);
+            highest = glm::max(highest, position);
         }
+        outMin = glm::vec3(lowest);
+        outMax = glm::vec3(highest);
     }
 
     void Scene::EnableWorldPartition(const WorldPartitionSettings& settings)
@@ -336,7 +338,7 @@ namespace Nox
         return WorldCellStage::Unloaded;
     }
 
-    bool Scene::IsWorldStreamingCompleted(const glm::vec3& point, float range, WorldCellStage stage) const
+    bool Scene::IsWorldStreamingCompleted(const glm::dvec3& point, float range, WorldCellStage stage) const
     {
         for (const auto& [cell, info] : m_World.Cells)
         {
@@ -584,7 +586,7 @@ namespace Nox
         }
     }
 
-    std::vector<WorldCellCoord> Scene::WorldCellsAround(const glm::vec3& point, float range, int32_t grid) const
+    std::vector<WorldCellCoord> Scene::WorldCellsAround(const glm::dvec3& point, float range, int32_t grid) const
     {
         std::vector<WorldCellCoord> cells;
         for (const auto& [cell, info] : m_World.Cells)
@@ -597,10 +599,10 @@ namespace Nox
 
     // --- Scene: streaming in Play and Simulate ---
 
-    glm::vec3 Scene::ComposedWorldPosition(Entity entity)
+    glm::dvec3 Scene::ComposedWorldPosition(Entity entity)
     {
         // Up the parents (a scene not updated yet has no world transforms: one just loaded by the runtime).
-        glm::mat4 world = entity.GetComponent<TransformComponent>().GetTransform();
+        glm::dmat4 world = entity.GetComponent<TransformComponent>().GetTransform();
         UUID parentID = entity.HasComponent<RelationshipComponent>() ? entity.GetComponent<RelationshipComponent>().Parent : UUID(0);
         for (int depth = 0; parentID != 0 && depth < 1024; ++depth)
         {
@@ -610,10 +612,10 @@ namespace Nox
             world = parent.GetComponent<TransformComponent>().GetTransform() * world;
             parentID = parent.HasComponent<RelationshipComponent>() ? parent.GetComponent<RelationshipComponent>().Parent : UUID(0);
         }
-        return glm::vec3(world[3]);
+        return glm::dvec3(world[3]);
     }
 
-    void Scene::CollectStreamingSources(const glm::vec3* source, std::vector<StreamingSource>& outSources, bool composed)
+    void Scene::CollectStreamingSources(const glm::dvec3* source, std::vector<StreamingSource>& outSources, bool composed)
     {
         outSources.clear();
         if (source)
@@ -623,13 +625,13 @@ namespace Nox
             const auto& component = m_Registry.get<WorldStreamingSourceComponent>(handle);
             if (!component.Enabled)
                 continue;
-            const glm::vec3 position = composed ? ComposedWorldPosition(Entity(handle, this))
-                                                : glm::vec3(m_Registry.get<WorldTransformComponent>(handle).WorldMatrix[3]);
+            const glm::dvec3 position = composed ? ComposedWorldPosition(Entity(handle, this))
+                                                : m_Registry.get<WorldTransformComponent>(handle).GetPosition();
             outSources.push_back({ position, component.LoadingRangeScale, component.Target == WorldStreamingSourceComponent::TargetState::Activated });
         }
     }
 
-    void Scene::UpdateWorldStreaming(const glm::vec3* source, bool composedSources)
+    void Scene::UpdateWorldStreaming(const glm::dvec3* source, bool composedSources)
     {
         if (!m_WorldStreaming || !m_World.Settings.Enabled)
             return;
@@ -696,7 +698,7 @@ namespace Nox
             QueueWorldCellLoad(want.Cell, want.Activate);
     }
 
-    void Scene::UpdateEditorHLODs(const glm::vec3& camera)
+    void Scene::UpdateEditorHLODs(const glm::dvec3& camera)
     {
         // While editing, the HLOD grid streams around the editor camera (the world's cells are loaded by hand): what is not loaded
         // shows as its HLODs. Off, they go.
@@ -753,7 +755,7 @@ namespace Nox
         }
     }
 
-    void Scene::BeginWorldStreaming(const glm::vec3* source)
+    void Scene::BeginWorldStreaming(const glm::dvec3* source)
     {
         m_WorldStreaming = false;
         if (!m_World.Settings.Enabled)

@@ -1,4 +1,5 @@
 #include "Renderer.h"
+#include "NoxCore/Math/Math.h"
 #include "ShaderCompileSplash.h"
 #include <SDL3/SDL_filesystem.h>
 #include "NoxCore/Project/ProjectRendererSettings.h"
@@ -1211,13 +1212,16 @@ namespace Nox
         const glm::ivec3 counts(static_cast<int>(m_ddgiProbeCountX), static_cast<int>(m_ddgiProbeCountY), static_cast<int>(m_ddgiProbeCountZ));
         const uint32_t cascadeCount = getDDGICascadeCount();
         uniformData.ddgiCascadeCount = cascadeCount;
+        glm::vec3 ddgiShaderOrigin(0.0f); // the first cascade's origin in the GPU's world space
         uniformData.ddgiUpdateStride = std::max(m_ddgiUpdateStride, 1u);
 
         if (m_ddgiFollowCamera && counts.x > 1 && counts.y > 1 && counts.z > 1)
         {
             // Each cascade centered on the camera, snapped to whole cells of the grid its probes belong to wherever it is, and
-            // DDGI Cascade Scale times wider than the one inside it.
-            const glm::vec3 camera(uniformData.cameraWorldPos);
+            // DDGI Cascade Scale times wider than the one inside it. The cells are found from the camera's world position (large
+            // world coordinates): a moved render origin changes neither which cells a cascade covers nor where they are stored, only
+            // where the GPU's world space puts them.
+            const glm::dvec3 camera = m_renderOrigin + glm::dvec3(glm::vec3(uniformData.cameraWorldPos));
             glm::vec3 spacing = glm::max(m_ddgiSpacingMeters, glm::vec3(0.05f)) * WorldUnits::PerMeter();
             const float scale = std::max(m_ddgiCascadeScale, 1.5f);
             for (uint32_t index = 0; index < 4; ++index, spacing *= scale)
@@ -1226,13 +1230,13 @@ namespace Nox
                 cascade = {};
                 if (index >= cascadeCount)
                     continue;
-                const glm::ivec3 gridMin = glm::ivec3(glm::floor(camera / spacing)) - counts / 2;
+                const glm::ivec3 gridMin = glm::ivec3(glm::floor(camera / glm::dvec3(spacing))) - counts / 2;
                 // A new cascade (or a new spacing): every probe of it starts over.
                 const glm::ivec3 shift = index < m_ddgiPlacedCascades && spacing == m_ddgiCascadeSpacing[index] ? gridMin - m_ddgiCascadeGridMin[index] : counts;
                 m_ddgiCascadeGridMin[index] = gridMin;
                 m_ddgiCascadeSpacing[index] = spacing;
 
-                const glm::vec3 origin = glm::vec3(gridMin) * spacing;
+                const glm::vec3 origin = glm::vec3(glm::dvec3(gridMin) * glm::dvec3(spacing) - m_renderOrigin);
                 cascade.originX = origin.x;
                 cascade.originY = origin.y;
                 cascade.originZ = origin.z;
@@ -1247,8 +1251,9 @@ namespace Nox
                 cascade.shiftZ = shift.z;
                 if (index == 0)
                 {
-                    m_ddgiGridOrigin = origin;
+                    m_ddgiGridOrigin = glm::vec3(glm::dvec3(gridMin) * glm::dvec3(spacing)); // (world space: what the panel shows)
                     m_ddgiGridSpacing = spacing;
+                    ddgiShaderOrigin = origin;
                 }
             }
             m_ddgiPlacedCascades = cascadeCount;
@@ -1260,15 +1265,16 @@ namespace Nox
             for (shaderio::DDGICascade& unused : uniformData.ddgiCascades)
                 unused = {};
             shaderio::DDGICascade& cascade = uniformData.ddgiCascades[0];
-            cascade.originX = m_ddgiGridOrigin.x;
-            cascade.originY = m_ddgiGridOrigin.y;
-            cascade.originZ = m_ddgiGridOrigin.z;
+            ddgiShaderOrigin = ToRenderSpace(glm::dvec3(m_ddgiGridOrigin)); // (Grid Origin is in world space)
+            cascade.originX = ddgiShaderOrigin.x;
+            cascade.originY = ddgiShaderOrigin.y;
+            cascade.originZ = ddgiShaderOrigin.z;
             cascade.spacingX = m_ddgiGridSpacing.x;
             cascade.spacingY = m_ddgiGridSpacing.y;
             cascade.spacingZ = m_ddgiGridSpacing.z;
         }
 
-        uniformData.ddgiGridOrigin = glm::vec4(m_ddgiGridOrigin, static_cast<float>(m_ddgiProbeCountX));
+        uniformData.ddgiGridOrigin = glm::vec4(ddgiShaderOrigin, static_cast<float>(m_ddgiProbeCountX));
         uniformData.ddgiGridSpacing = glm::vec4(m_ddgiGridSpacing, static_cast<float>(m_ddgiProbeCountY));
     }
 
@@ -3478,7 +3484,10 @@ namespace Nox
         const float kmPerUnit = WorldUnits::ToMeters(1.0f) / 1000.0f;
         const glm::vec2 centerKm = glm::round(glm::vec2(m_cameraPosition.x, m_cameraPosition.z) * kmPerUnit / texelKm) * texelKm;
 
-        shaderio::PushConstantSkyAtmosphere push = makeSkyAtmospherePush(sky, sky.CloudOffsetKm + m_skyWindOffsetKm, sky.AltitudeKm);
+        // The map is centred in the GPU's (relative) space, the clouds are the world's: the render origin is added to where the cloud
+        // field is read, so the shadows stay where the clouds are when the origin moves (large world coordinates).
+        const glm::vec2 originKm = glm::vec2(glm::dvec2(m_renderOrigin.x, m_renderOrigin.z) * static_cast<double>(kmPerUnit));
+        shaderio::PushConstantSkyAtmosphere push = makeSkyAtmospherePush(sky, sky.CloudOffsetKm + m_skyWindOffsetKm + originKm, sky.AltitudeKm);
         push.sunDirection = m_shadowMaskLightDirection;
         push.outputStorageIndex = m_skyCloudShadowStorageSlots[frameIndex % m_skyCloudShadow.size()];
         push.outputSize = SkyCloudShadowSize;
@@ -5957,10 +5966,10 @@ namespace Nox
         m_inspectionProbeValid = true;
     }
 
-    void Renderer::RequestRaycast(const glm::vec3& origin, const glm::vec3& direction, float maxDistance, RaycastCallback callback)
+    void Renderer::RequestRaycast(const glm::dvec3& origin, const glm::vec3& direction, float maxDistance, RaycastCallback callback)
     {
         PendingRaycast pending;
-        pending.Ray.origin = origin;
+        pending.Origin = origin;
         pending.Ray.direction = glm::length(direction) > 1e-8f ? glm::normalize(direction) : glm::vec3(0.0f, -1.0f, 0.0f);
         pending.Ray.maxDistance = std::max(maxDistance, 0.0f);
         pending.Ray.hitDistance = -1.0f;
@@ -6147,15 +6156,58 @@ namespace Nox
             std::fmod(static_cast<float>(phase) * a2, 1.0f)) - 0.5f;
     }
 
-    void Renderer::BeginScene(const Camera& camera, const glm::mat4& cameraWorldMatrix)
+    glm::mat4 Renderer::ToRenderSpace(const glm::dmat4& world) const
+    {
+        return Math::RelativeTo(world, m_renderOrigin);
+    }
+
+    void Renderer::updateRenderOrigin(const glm::dvec3& cameraWorld)
+    {
+        // Large world coordinates (Engine_Architecture_Plan_2026.md §5.14a; Flax's LargeWorlds origin chunks): the origin moves only
+        // once the camera is a whole step away along x or z, onto the step grid point nearest the camera -- the shift is a multiple
+        // of the step, exact in float, and moving back and forth across a boundary does not move it every frame. Horizontally only:
+        // heights stay the world's (a few km at most, where float keeps a fraction of a millimetre), so everything that works from
+        // a height -- the atmosphere's altitude, height fog, the cloud layer, the ground grid -- is untouched.
+        const double step = static_cast<double>(WorldUnits::FromMeters(RenderOriginStepMeters));
+        const glm::dvec3 offset = glm::abs(cameraWorld - m_renderOrigin);
+        if (std::max(offset.x, offset.z) <= step)
+            return;
+        const glm::dvec3 origin(std::round(cameraWorld.x / step) * step, 0.0, std::round(cameraWorld.z / step) * step);
+        // A position relative to the old origin plus this is the same position relative to the new one.
+        const glm::vec3 shift = glm::vec3(m_renderOrigin - origin);
+        m_renderOrigin = origin;
+        m_gpuScene.SetRenderOrigin(origin);
+
+        // Temporal state that holds positions in the GPU's world space (last frame's camera and view, which become this frame's
+        // previous ones in BeginScene): moved over, so reprojection and motion vectors see no jump.
+        const glm::mat4 toOldSpace = glm::translate(glm::mat4(1.0f), -shift);
+        m_currentView = m_currentView * toOldSpace;
+        m_prevView = m_prevView * toOldSpace;
+        m_pathTracerPrevView = m_pathTracerPrevView * toOldSpace;
+        m_currentCameraWorldPos += shift;
+        m_prevCameraWorldPos += shift;
+        m_prevPrevCameraWorldPos += shift;
+        // The ReSTIR reservoirs hold sample positions in the old space: they start over (one frame of fresh samples; moving every
+        // stored sample is not worth it for a step that comes at most once a kilometre). DDGI keeps its probes (updateDDGIVolume
+        // places the cascades by world position), the screen-space histories reproject through the moved previous view.
+        m_renderGraph.ResetHistory("ReSTIR GI Reservoirs");
+        m_renderGraph.ResetHistory("ReSTIR DI Reservoirs");
+        m_renderGraph.ResetHistory("ReSTIR PT Reservoirs");
+        NOX_CORE_INFO("Render origin moved to ({:.0f}, {:.0f}, {:.0f}) m", origin.x / WorldUnits::PerMeter(), origin.y / WorldUnits::PerMeter(),
+                      origin.z / WorldUnits::PerMeter());
+    }
+
+    void Renderer::BeginScene(const Camera& camera, const glm::dmat4& cameraWorldMatrix)
     {
         m_orthographic = false;
-        // The view must not inherit scale from the entity hierarchy: rigid camera transform only.
+        if (m_lastSceneFrameCounter != m_sceneFrameCounter)
+            updateRenderOrigin(glm::dvec3(cameraWorldMatrix[3]));
+        // The view must not inherit scale from the entity hierarchy: rigid camera transform only. In the GPU's world space.
         glm::mat4 transform(1.0f);
         transform[0] = glm::vec4(glm::normalize(glm::vec3(cameraWorldMatrix[0])), 0.0f);
         transform[1] = glm::vec4(glm::normalize(glm::vec3(cameraWorldMatrix[1])), 0.0f);
         transform[2] = glm::vec4(glm::normalize(glm::vec3(cameraWorldMatrix[2])), 0.0f);
-        transform[3] = glm::vec4(glm::vec3(cameraWorldMatrix[3]), 1.0f);
+        transform[3] = glm::vec4(ToRenderSpace(glm::dvec3(cameraWorldMatrix[3])), 1.0f);
 
         // DLSS/DLAA cannot function without jitter, so it's forced on whenever DLSS will actually
         // evaluate this frame - matching the exact gate in RecordCommandBuffer's evaluateDLSS() call,
@@ -6296,6 +6348,9 @@ namespace Nox
     void Renderer::BeginScene(const EditorCamera& camera)
     {
         m_orthographic = camera.IsOrthographic();
+        if (m_lastSceneFrameCounter != m_sceneFrameCounter)
+            updateRenderOrigin(camera.GetPosition());
+        const glm::vec3 cameraPosition = ToRenderSpace(camera.GetPosition());
         // See comment in the other BeginScene overload - must run before this frame's Viewport
         // ImGui::Image() call, which happens during OnUpdate() -> BeginScene(), before OnImGuiRender().
         applyPendingRenderResolutionIfNeeded();
@@ -6313,11 +6368,11 @@ namespace Nox
         if (m_lastSceneFrameCounter != m_sceneFrameCounter)
         {
             m_lastSceneFrameCounter = m_sceneFrameCounter;
-            const glm::vec3 newCameraWorldPos = camera.GetPosition();
+            const glm::vec3 newCameraWorldPos = cameraPosition;
 
             if (m_isFirstFrame)
             {
-                m_prevView = camera.GetViewMatrix();
+                m_prevView = camera.GetViewMatrix(m_renderOrigin);
                 m_prevNonJitteredProj = camera.GetProjection();
                 m_prevPrevCameraWorldPos = newCameraWorldPos;
                 m_prevCameraWorldPos = newCameraWorldPos;
@@ -6332,11 +6387,11 @@ namespace Nox
                 m_prevCameraWorldPos = m_currentCameraWorldPos;
             }
 
-            m_currentView = camera.GetViewMatrix();
+            m_currentView = camera.GetViewMatrix(m_renderOrigin);
             m_currentNonJitteredProj = camera.GetProjection();
             m_currentCameraWorldPos = newCameraWorldPos;
 
-            m_cameraPosition = camera.GetPosition();
+            m_cameraPosition = cameraPosition;
             m_cameraUp = camera.GetUpDirection();
             m_cameraRight = camera.GetRightDirection();
             m_cameraForward = camera.GetForwardDirection();
@@ -6375,7 +6430,7 @@ namespace Nox
         uniformData.prevView = m_prevView;
 
         uniformData.invViewProj = InvertViewProjection(uniformData.proj, uniformData.view);
-        uniformData.cameraWorldPos = {camera.GetPosition(), 0.0f};
+        uniformData.cameraWorldPos = glm::vec4(cameraPosition, 0.0f);
         uniformData.frustum = shaderio::Frustum{uniformData.proj * uniformData.view};
         uniformData.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
 
@@ -6473,9 +6528,9 @@ namespace Nox
             view.Size = size;
         }
 
-        view.View = camera.GetViewMatrix();
+        view.View = camera.GetViewMatrix(m_renderOrigin);
         view.Projection = camera.GetProjection();
-        view.Position = camera.GetPosition();
+        view.Position = ToRenderSpace(camera.GetPosition());
         view.NearClip = camera.GetNearClip();
         view.Orthographic = camera.IsOrthographic();
         view.HasGrid = grid != nullptr;
@@ -6575,7 +6630,7 @@ namespace Nox
         return true;
     }
 
-    bool Renderer::AddMeshInstances(const glm::mat4& world, const MeshComponent& component, const MaterialComponent* material, int32_t entityID,
+    bool Renderer::AddMeshInstances(const glm::dmat4& world, const MeshComponent& component, const MaterialComponent* material, int32_t entityID,
                                     std::vector<uint32_t>& outInstances, std::vector<AssetHandle>& outMissingAssets)
     {
         if (component.Mesh == 0)
@@ -6607,7 +6662,7 @@ namespace Nox
             m_gpuScene.RemoveInstance(instance);
     }
 
-    void Renderer::SetMeshInstancesTransform(std::span<const uint32_t> instances, const glm::mat4& world)
+    void Renderer::SetMeshInstancesTransform(std::span<const uint32_t> instances, const glm::dmat4& world)
     {
         for (uint32_t instance : instances)
             m_gpuScene.SetTransform(instance, world);
@@ -6641,7 +6696,7 @@ namespace Nox
     }
 
     template <typename MeshAsset>
-    bool Renderer::addSubmeshInstances(const glm::mat4& world, const MeshAsset& mesh, const MeshComponent& component, const MaterialComponent* material,
+    bool Renderer::addSubmeshInstances(const glm::dmat4& world, const MeshAsset& mesh, const MeshComponent& component, const MaterialComponent* material,
                                        int32_t entityID, std::vector<uint32_t>& outInstances, std::vector<AssetHandle>& outMissingAssets)
     {
         // Per slot: the entity's override when it has one, the mesh's imported .nmat otherwise.
@@ -6722,8 +6777,9 @@ namespace Nox
         });
     }
 
-    void Renderer::SubmitLight(const glm::mat4& transform, const DirectionalLightComponent& light)
+    void Renderer::SubmitLight(const glm::dmat4& worldTransform, const DirectionalLightComponent& light)
     {
+        const glm::mat4 transform = ToRenderSpace(worldTransform); // (large world coordinates: the GPU's world space)
         // glTF's KHR_lights_punctual convention defines a light's direction as its local -Z axis
         // transformed to world space - the direction the light EMITS/travels (matches the Khronos
         // spec and this node's rotation directly). But every shader in this project (DeferredLighting,
@@ -6769,8 +6825,9 @@ namespace Nox
         }
     }
 
-    void Renderer::SubmitLight(const glm::mat4& transform, const PointLightComponent& light)
+    void Renderer::SubmitLight(const glm::dmat4& worldTransform, const PointLightComponent& light)
     {
+        const glm::mat4 transform = ToRenderSpace(worldTransform); // (large world coordinates: the GPU's world space)
         glm::vec3 worldPos = glm::vec3(transform[3]);
 
         shaderio::LightData l{};
@@ -6783,8 +6840,9 @@ namespace Nox
         m_lightBufferObjects.push_back(l);
     }
 
-    void Renderer::SubmitLight(const glm::mat4& transform, const SpotLightComponent& light)
+    void Renderer::SubmitLight(const glm::dmat4& worldTransform, const SpotLightComponent& light)
     {
+        const glm::mat4 transform = ToRenderSpace(worldTransform); // (large world coordinates: the GPU's world space)
         glm::vec3 worldPos = glm::vec3(transform[3]);
         glm::vec3 forward = glm::normalize(glm::vec3(transform * glm::vec4(0.0f, 0.0f, -1.0f, 0.0f)));
 
@@ -6807,8 +6865,9 @@ namespace Nox
         m_lightBufferObjects.push_back(l);
     }
 
-    void Renderer::SubmitLight(const glm::mat4& transform, const RectLightComponent& light)
+    void Renderer::SubmitLight(const glm::dmat4& worldTransform, const RectLightComponent& light)
     {
+        const glm::mat4 transform = ToRenderSpace(worldTransform); // (large world coordinates: the GPU's world space)
         // The entity's X / Y span the rectangle (scaled with it), it shines along its -Z.
         const glm::vec3 axisX = glm::vec3(transform[0]);
         const glm::vec3 axisY = glm::vec3(transform[1]);
@@ -6836,8 +6895,9 @@ namespace Nox
         m_lightBufferObjects.push_back(l);
     }
 
-    void Renderer::SubmitLight(const glm::mat4& transform, const DiscLightComponent& light)
+    void Renderer::SubmitLight(const glm::dmat4& worldTransform, const DiscLightComponent& light)
     {
+        const glm::mat4 transform = ToRenderSpace(worldTransform); // (large world coordinates: the GPU's world space)
         // A rect light's encoding (LightData), a circle: both half axes are its radius, in the entity's X / Y plane (scaled
         // by the larger of the two), shining along its -Z.
         const glm::vec3 axisX = glm::vec3(transform[0]);

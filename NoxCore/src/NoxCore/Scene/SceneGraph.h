@@ -23,11 +23,11 @@ namespace Nox
 
     private:
         // Updates one entity's world transform; returns it (null if the entity has no WorldTransformComponent yet).
-        static const glm::mat4* UpdateNode(entt::registry& registry, WorkerLocal<EntityCommandBuffer>& commandBuffers,
+        static const glm::dmat4* UpdateNode(entt::registry& registry, WorkerLocal<EntityCommandBuffer>& commandBuffers,
                                            WorkerLocal<std::vector<entt::entity>>& movedEntities, entt::entity entity,
-                                           const glm::mat4& parentWorldMatrix, bool parentWasDirty, bool& outWasDirty);
+                                           const glm::dmat4& parentWorldMatrix, bool parentWasDirty, bool& outWasDirty);
         static void UpdateSubtree(entt::registry& registry, const std::unordered_map<UUID, entt::entity>& entityMap,
                                   WorkerLocal<EntityCommandBuffer>& commandBuffers, WorkerLocal<std::vector<entt::entity>>& movedEntities,
-                                  entt::entity entity, const glm::mat4& parentWorldMatrix, bool parentWasDirty);
+                                  entt::entity entity, const glm::dmat4& parentWorldMatrix, bool parentWasDirty);
     };
 }

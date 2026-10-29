@@ -41,14 +41,14 @@ public sealed class CameraFollow : EntityBehaviour
 
         TransformComponent targetTransform = Target.GetComponent<TransformComponent>();
         TransformComponent cameraTransform = GetComponent<TransformComponent>();
-        Vector3 targetPosition = targetTransform.World.Position;
-        Vector3 cameraPosition = targetPosition + new Vector3(0.0f, Height, Distance);
+        Vector3d targetPosition = targetTransform.World.Position;
+        Vector3d cameraPosition = targetPosition + new Vector3(0.0f, Height, Distance);
         Transform cameraWorld = cameraTransform.World;
         cameraWorld.Position = cameraPosition;
 
         // Gameplay camera math stays in managed script code. Nox cameras look
         // along local -Z and use local +Y as up.
-        Vector3 direction = targetPosition - cameraPosition;
+        Vector3 direction = (Vector3)(targetPosition - cameraPosition);
         float length = MathF.Sqrt(direction.X * direction.X +
                                   direction.Y * direction.Y +
                                   direction.Z * direction.Z);

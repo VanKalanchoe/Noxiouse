@@ -106,9 +106,11 @@ namespace Nox
         // The editor's world grid on y = 0 (GridMesh.slang): computed per pixel, so it costs nothing per line. cell = smallest cell size.
         // planeAxis: the plane's normal (1 = the ground, y = 0); focus: where the grid is centered; cameraDistance: how far the camera is
         // from the plane (the ortho size in an ortho view).
-        void DrawGrid(const glm::vec3& focus, float cell, int planeAxis, float cameraDistance);
+        // focus: in the world (double precision); renderOrigin: Renderer::GetRenderOrigin (the grid is drawn relative to it).
+        void DrawGrid(const glm::dvec3& focus, const glm::dvec3& renderOrigin, float cell, int planeAxis, float cameraDistance);
         // DrawGrid's numbers without drawing it (an extra view's own grid, Renderer::SubmitExtraView).
-        static shaderio::PushConstantGrid MakeGrid(const glm::vec3& focus, float cell, int planeAxis, float cameraDistance);
+        static shaderio::PushConstantGrid MakeGrid(const glm::dvec3& focus, const glm::dvec3& renderOrigin, float cell, int planeAxis,
+                                                   float cameraDistance);
         void DrawRect(const glm::vec3& position, const glm::vec2& size, const glm::vec4& color, int entityID = -1);
         void DrawRect(const glm::mat4& transform, const glm::vec4& color, int entityID = -1);
         

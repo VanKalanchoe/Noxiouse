@@ -120,6 +120,10 @@ Implemented calls:
   `WorldStreamingStats` also carries the streamed cells' costs since Play began (cells and entities activated; read / build /
   activate milliseconds; asset wait; latency from wanted to in the world). Script API 7.
   `CellsCooked`: of those cells, how many were read from their cooked (binary) files. Script API 8.
+- `Nox.Vector3d`: positions in double precision (large world coordinates, Engine_Architecture_Plan_2026.md §5.14a):
+  `Transform.Position`, `TransformComponent.LocalPosition` / `WorldPosition`, `RaycastHit.Point`, and the positions taken by
+  `Physics.Raycast`, `Scene.Instantiate`, `Scene.CreateEntity` and `Scene.IsWorldStreamingCompleted`. A `Vector3` widens to it on
+  its own; a position back to a `Vector3` (a direction between two positions) is an explicit cast. Script API 9.
 - Generic `GetComponent<T>()`, `HasComponent<T>()`, and `TryGetComponent<T>()`
   access from both `EntityBehaviour` and `Entity`
 - `TransformComponent` explicit `Local`/`World` state and

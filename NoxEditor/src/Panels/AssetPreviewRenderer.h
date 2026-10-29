@@ -65,12 +65,12 @@ namespace Nox
             AssetHandle Asset = 0;
             std::vector<AssetHandle> Assets; // what it draws with (the asset, the sphere, materials)
             std::vector<uint32_t> Instances;
-            glm::vec3 Center{ 0.0f };
+            glm::dvec3 Center{ 0.0 }; // world (double precision: large world coordinates)
             float Radius = 1.0f;
         };
-        // Puts the asset (a mesh, or a material on the sphere) on the stage at `origin`; false while its assets still load
+        // Puts the asset (a mesh, or a material on the sphere) on the stage `stageOffset` from the render origin; false while its assets still load
         // (allowStandIns: the mesh's embedded materials may stand in for .nmat files still loading).
-        bool Place(AssetHandle asset, const glm::vec3& origin, Placement& out, bool allowStandIns);
+        bool Place(AssetHandle asset, const glm::vec3& stageOffset, Placement& out, bool allowStandIns);
         void Remove(Placement& placement);
         void Submit(uint32_t view, const Placement& placement, uint32_t size, float framing = 1.0f);
 

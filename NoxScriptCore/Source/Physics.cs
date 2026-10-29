@@ -7,7 +7,7 @@ namespace Nox;
 public struct RaycastHit
 {
     private ulong m_Entity;
-    public Vector3 Point;
+    public Vector3d Point; // world (double precision)
     public Vector3 Normal;
     public float Distance;
 
@@ -22,6 +22,6 @@ public static class Physics
     /// (<see cref="Entity.SetMeshCollider"/>). Picking a block: cast from the camera, step half a block back along the normal to
     /// place one, half a block in to break one.
     /// </summary>
-    public static bool Raycast(Vector3 origin, Vector3 direction, float maxDistance, out RaycastHit hit) =>
+    public static bool Raycast(Vector3d origin, Vector3 direction, float maxDistance, out RaycastHit hit) =>
         InternalCalls.Raycast(origin, direction, maxDistance, out hit);
 }

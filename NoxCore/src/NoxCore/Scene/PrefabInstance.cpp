@@ -1,5 +1,7 @@
 #include "PrefabInstance.h"
 
+#include "NoxCore/Math/Math.h"
+
 #include <algorithm>
 #include <cmath>
 #include <functional>
@@ -600,8 +602,8 @@ namespace Nox
                 if (const auto rootNode = byId.find(prefab.Root); rootNode != byId.end())
                 {
                     TransformComponent transform = transformOf(rootNode->second);
-                    transform.Translation = glm::vec3(0.0f);
-                    rootMatrix = transform.GetTransform();
+                    transform.Translation = glm::dvec3(0.0);
+                    rootMatrix = Math::ToFloat(transform.GetTransform());
                 }
             }
 
@@ -616,7 +618,8 @@ namespace Nox
                 const auto node = byId.find(id);
                 if (node == byId.end() || guard > 64)
                     return rootMatrix;
-                const glm::mat4 world = worldOf(parentIdOf(node->second, prefab.Root), guard + 1) * transformOf(node->second).GetTransform();
+                // (the prefab's own space: small offsets, float is enough)
+                const glm::mat4 world = worldOf(parentIdOf(node->second, prefab.Root), guard + 1) * Math::ToFloat(transformOf(node->second).GetTransform());
                 worlds[id] = world;
                 return world;
             };
@@ -747,7 +750,7 @@ namespace Nox
         }
     }
 
-    Entity PrefabInstance::Instantiate(Scene& scene, AssetHandle prefabHandle, const glm::vec3& position, std::vector<Entity>& outSpawned)
+    Entity PrefabInstance::Instantiate(Scene& scene, AssetHandle prefabHandle, const glm::dvec3& position, std::vector<Entity>& outSpawned)
     {
         outSpawned.clear();
         Ref<Prefab> prefab = AssetManager::GetAsset<Prefab>(prefabHandle);
@@ -771,9 +774,9 @@ namespace Nox
 
         // Fresh entities have no world matrices yet (the update systems compute them next frame), but physics bodies are
         // created from them right away: work them out now, parents before children.
-        std::function<void(Entity, const glm::mat4&)> propagate = [&](Entity entity, const glm::mat4& parentWorld)
+        std::function<void(Entity, const glm::dmat4&)> propagate = [&](Entity entity, const glm::dmat4& parentWorld)
         {
-            const glm::mat4 world = parentWorld * entity.GetComponent<TransformComponent>().GetTransform();
+            const glm::dmat4 world = parentWorld * entity.GetComponent<TransformComponent>().GetTransform();
             if (entity.HasComponent<WorldTransformComponent>())
                 entity.GetComponent<WorldTransformComponent>().WorldMatrix = world;
             if (!entity.HasComponent<RelationshipComponent>())
@@ -784,7 +787,7 @@ namespace Nox
                     propagate(child, world);
             }
         };
-        propagate(root, glm::mat4(1.0f));
+        propagate(root, glm::dmat4(1.0));
         return root;
     }
 

@@ -35,10 +35,10 @@ namespace Nox
 
         inline float GetDistance() const { return m_Distance; }
         inline void SetDistance(float distance) { m_Distance = m_TargetDistance = distance; }
-        inline void SetFocalPoint(const glm::vec3& point) { m_FocalPoint = m_TargetFocalPoint = point; }
+        inline void SetFocalPoint(const glm::dvec3& point) { m_FocalPoint = m_TargetFocalPoint = point; }
         // UE5's "Frame Selected" (F, or double-clicking an entity in the Outliner): re-centres on `centre` at a distance that
         // fits a sphere of `radius` in view (padded so it isn't touching the frame edge), instead of a fixed offset.
-        void Focus(const glm::vec3& centre, float radius);
+        void Focus(const glm::dvec3& centre, float radius);
         // Looks at the focal point from this pitch (radians, positive looks down) and yaw (0 looks along -Z), at once.
         void SetOrientation(float pitch, float yaw);
 
@@ -47,14 +47,17 @@ namespace Nox
         // zooms towards it. Negative: zoom on the view's centre.
         void SetCursorPosition(const glm::vec2& viewportPixel) { m_CursorPosition = viewportPixel; }
 
-        const glm::mat4& GetViewMatrix() const { return m_ViewMatrix; }
-        glm::mat4 GetGizmoView() const;
-        glm::mat4 GetViewProjection() const { return m_Projection * m_ViewMatrix; }
+        // Large world coordinates (Engine_Architecture_Plan_2026.md §5.14a): the camera's position is double precision, and its view
+        // matrix is built relative to an origin (the renderer's: Renderer::GetRenderOrigin), so it stays exact far from the
+        // world's origin. What the GPU and ImGuizmo see is that relative space.
+        glm::mat4 GetViewMatrix(const glm::dvec3& origin) const;
+        glm::mat4 GetGizmoView(const glm::dvec3& origin) const;
+        glm::mat4 GetViewProjection(const glm::dvec3& origin) const { return m_Projection * GetViewMatrix(origin); }
 
         glm::vec3 GetUpDirection() const;
         glm::vec3 GetRightDirection() const;
         glm::vec3 GetForwardDirection() const;
-        const glm::vec3& GetPosition() const { return m_Position; }
+        const glm::dvec3& GetPosition() const { return m_Position; }
         glm::quat GetOrientation() const;
 
         float GetPitch() const { return m_Pitch; }
@@ -72,7 +75,7 @@ namespace Nox
         // Half the visible height in world units (ortho views only) and the point the camera looks at.
         float GetOrthoHalfHeight() const { return m_OrthoHalfHeight; }
         void SetOrthoHalfHeight(float halfHeight) { m_OrthoHalfHeight = m_TargetOrthoHalfHeight = std::max(halfHeight, 0.01f); UpdateProjection(); }
-        const glm::vec3& GetFocalPoint() const { return m_FocalPoint; }
+        const glm::dvec3& GetFocalPoint() const { return m_FocalPoint; }
 
         // Vertical FOV: what the projection matrix, DLSS and ImGuizmo all use -- kept internal so none of them need touching.
         float GetFOV() const { return m_FOV; }
@@ -92,7 +95,7 @@ namespace Nox
         // Shift to go faster); the wheel changes fly speed while held, instead of dollying.
         void MouseFly(const glm::vec2& mouseDelta, float ts);
 
-        glm::vec3 CalculatePosition() const;
+        glm::dvec3 CalculatePosition() const;
 
         std::pair<float, float> PanSpeed() const;
         float RotationSpeed() const;
@@ -100,9 +103,8 @@ namespace Nox
     private:
         float m_FOV = 90.0f, m_AspectRatio = 1.778f, m_NearClip = 0.01f, m_FarClip = 1000.0f;
 
-        glm::mat4 m_ViewMatrix;
-        glm::vec3 m_Position = { 0.0f, 0.0f, 0.0f };
-        glm::vec3 m_FocalPoint = { 0.0f, 0.0f, 0.0f };
+        glm::dvec3 m_Position = { 0.0, 0.0, 0.0 };
+        glm::dvec3 m_FocalPoint = { 0.0, 0.0, 0.0 };
 
         glm::vec2 m_InitialMousePosition = { 0.0f, 0.0f };
 
@@ -114,7 +116,7 @@ namespace Nox
         // Mouse input moves these; OnUpdate eases the real values towards them over a few frames. The mouse reports at
         // 125-1000 Hz, far below the frame rate of a light scene, so most frames saw no movement and a few saw all of it --
         // fast camera motion stuttered in bursts. Time-based easing turns that into steady motion.
-        glm::vec3 m_TargetFocalPoint = { 0.0f, 0.0f, 0.0f };
+        glm::dvec3 m_TargetFocalPoint = { 0.0, 0.0, 0.0 };
         float m_TargetDistance = 10.0f;
         float m_TargetPitch = 0.0f, m_TargetYaw = 0.0f;
         bool m_TargetsValid = false;

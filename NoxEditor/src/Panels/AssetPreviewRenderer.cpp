@@ -37,7 +37,8 @@ namespace Nox
         constexpr size_t DiskLoadsPerFrame = 4;
         constexpr char CacheMagic[4] = { 'N', 'T', 'H', '1' };
 
-        // The preview stage: 10 km below the world's origin (whatever the project's unit), thumbnails and the live preview 2 km apart.
+        // The preview stage: 10 km below the renderer's origin (whatever the project's unit; relative to it, so a preview keeps its
+        // precision however far out the camera is: large world coordinates), thumbnails and the live preview 2 km apart.
         glm::vec3 ThumbnailStage() { return glm::vec3(0.0f, -WorldUnits::FromMeters(10000.0f), 0.0f); }
         glm::vec3 LiveStage() { return glm::vec3(WorldUnits::FromMeters(2000.0f), -WorldUnits::FromMeters(10000.0f), 0.0f); }
         glm::vec3 AnimationStage() { return glm::vec3(WorldUnits::FromMeters(4000.0f), -WorldUnits::FromMeters(10000.0f), 0.0f); }
@@ -404,7 +405,7 @@ namespace Nox
         }
     }
 
-    bool AssetPreviewRenderer::Place(AssetHandle asset, const glm::vec3& origin, Placement& out, bool allowStandIns)
+    bool AssetPreviewRenderer::Place(AssetHandle asset, const glm::vec3& stageOffset, Placement& out, bool allowStandIns)
     {
         Renderer* renderer = GetRenderer();
         if (!renderer || !AssetManager::IsAssetHandleValid(asset))
@@ -499,7 +500,8 @@ namespace Nox
 
         Placement placement;
         std::vector<AssetHandle> missing;
-        const glm::mat4 stage = glm::translate(glm::mat4(1.0f), origin);
+        const glm::dvec3 origin = renderer->GetRenderOrigin() + glm::dvec3(stageOffset);
+        const glm::dmat4 stage = glm::translate(glm::dmat4(1.0), origin);
         for (size_t index = 0; index < parts.size(); ++index)
         {
             const PrefabInstance::MeshPart& part = parts[index];
@@ -508,7 +510,7 @@ namespace Nox
                 materials.MaterialAssets.assign(std::max<size_t>(submeshCounts[index], 1), asset);
             else
                 materials.MaterialAssets = part.Materials;
-            renderer->AddMeshInstances(stage * part.Transform, part.Mesh, materials.MaterialAssets.empty() ? nullptr : &materials, -1,
+            renderer->AddMeshInstances(stage * glm::dmat4(part.Transform), part.Mesh, materials.MaterialAssets.empty() ? nullptr : &materials, -1,
                                        placement.Instances, missing);
             placement.Assets.push_back(part.Mesh.Mesh);
             placement.Assets.insert(placement.Assets.end(), part.Materials.begin(), part.Materials.end());
@@ -525,7 +527,7 @@ namespace Nox
         placement.Asset = asset;
         placement.Assets.push_back(asset);
         placement.Assets.insert(placement.Assets.end(), missing.begin(), missing.end());
-        placement.Center = origin + (lowest + highest) * 0.5f;
+        placement.Center = origin + glm::dvec3((lowest + highest) * 0.5f);
         placement.Radius = std::max(glm::length(highest - lowest) * 0.5f, WorldUnits::FromMeters(0.001f));
         out = std::move(placement);
         return true;

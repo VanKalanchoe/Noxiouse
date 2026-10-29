@@ -16,7 +16,7 @@ namespace Nox
         struct SubtreeRoot
         {
             entt::entity Entity = entt::null;
-            const glm::mat4* ParentWorldMatrix = nullptr;
+            const glm::dmat4* ParentWorldMatrix = nullptr;
             bool ParentWasDirty = false;
         };
     }
@@ -33,7 +33,7 @@ namespace Nox
         uint32_t frontierCount = 0;
 
         auto appendChildren = [&](std::span<SubtreeRoot> target, uint32_t& count, const RelationshipComponent& relationship,
-                                  const glm::mat4& worldMatrix, bool wasDirty)
+                                  const glm::dmat4& worldMatrix, bool wasDirty)
         {
             for (UUID childUUID : relationship.Children)
             {
@@ -80,7 +80,7 @@ namespace Nox
                 {
                     const SubtreeRoot& node = frontier[index];
                     bool wasDirty = false;
-                    const glm::mat4* worldMatrix = UpdateNode(registry, commandBuffers, movedEntities, node.Entity, *node.ParentWorldMatrix, node.ParentWasDirty, wasDirty);
+                    const glm::dmat4* worldMatrix = UpdateNode(registry, commandBuffers, movedEntities, node.Entity, *node.ParentWorldMatrix, node.ParentWasDirty, wasDirty);
                     if (!worldMatrix)
                         continue;
                     if (const RelationshipComponent* relationship = registry.try_get<RelationshipComponent>(node.Entity))
@@ -104,9 +104,9 @@ namespace Nox
             });
     }
 
-    const glm::mat4* SceneGraph::UpdateNode(entt::registry& registry, WorkerLocal<EntityCommandBuffer>& commandBuffers,
+    const glm::dmat4* SceneGraph::UpdateNode(entt::registry& registry, WorkerLocal<EntityCommandBuffer>& commandBuffers,
                                             WorkerLocal<std::vector<entt::entity>>& movedEntities, entt::entity entity,
-                                            const glm::mat4& parentWorldMatrix, bool parentWasDirty, bool& outWasDirty)
+                                            const glm::dmat4& parentWorldMatrix, bool parentWasDirty, bool& outWasDirty)
     {
         DirtyTransformComponent* dirty = registry.try_get<DirtyTransformComponent>(entity);
         outWasDirty = parentWasDirty || (dirty && dirty->isDirty);
@@ -136,10 +136,10 @@ namespace Nox
 
     void SceneGraph::UpdateSubtree(entt::registry& registry, const std::unordered_map<UUID, entt::entity>& entityMap,
                                    WorkerLocal<EntityCommandBuffer>& commandBuffers, WorkerLocal<std::vector<entt::entity>>& movedEntities,
-                                   entt::entity entity, const glm::mat4& parentWorldMatrix, bool parentWasDirty)
+                                   entt::entity entity, const glm::dmat4& parentWorldMatrix, bool parentWasDirty)
     {
         bool wasDirty = false;
-        const glm::mat4* worldMatrix = UpdateNode(registry, commandBuffers, movedEntities, entity, parentWorldMatrix, parentWasDirty, wasDirty);
+        const glm::dmat4* worldMatrix = UpdateNode(registry, commandBuffers, movedEntities, entity, parentWorldMatrix, parentWasDirty, wasDirty);
         if (!worldMatrix)
             return;
 

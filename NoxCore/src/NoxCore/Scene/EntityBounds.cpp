@@ -15,10 +15,10 @@ namespace Nox
     WorldBounds ComputeWorldBounds(Scene& scene, Entity entity, bool includeChildren)
     {
         WorldBounds result;
-        glm::vec3 lowest(FLT_MAX), highest(-FLT_MAX);
+        glm::dvec3 lowest(DBL_MAX), highest(-DBL_MAX);
 
         // The 8 corners of a submesh's local box in world space.
-        auto addBox = [&](const MeshHandle& submesh, const glm::mat4& world)
+        auto addBox = [&](const MeshHandle& submesh, const glm::dmat4& world)
         {
             if (!submesh.hasBounds)
                 return;
@@ -27,7 +27,7 @@ namespace Nox
                 const glm::vec3 local((corner & 1) ? submesh.boundsMax.x : submesh.boundsMin.x,
                                       (corner & 2) ? submesh.boundsMax.y : submesh.boundsMin.y,
                                       (corner & 4) ? submesh.boundsMax.z : submesh.boundsMin.z);
-                const glm::vec3 point = glm::vec3(world * glm::vec4(local, 1.0f));
+                const glm::dvec3 point = glm::dvec3(world * glm::dvec4(glm::dvec3(local), 1.0));
                 lowest = glm::min(lowest, point);
                 highest = glm::max(highest, point);
                 result.Valid = true;
@@ -39,7 +39,7 @@ namespace Nox
             if (current.HasComponent<MeshComponent>() && current.HasComponent<WorldTransformComponent>())
             {
                 const MeshComponent& meshComponent = current.GetComponent<MeshComponent>();
-                const glm::mat4 world = current.GetComponent<WorldTransformComponent>().WorldMatrix;
+                const glm::dmat4& world = current.GetComponent<WorldTransformComponent>().WorldMatrix;
 
                 auto addSubmeshes = [&](const auto& mesh)
                 {

@@ -75,4 +75,15 @@ namespace Nox::Math
 
 		return true;
 	}
+
+	bool DecomposeTransform(const glm::dmat4& transform, glm::dvec3& translation, glm::vec3& rotation, glm::vec3& scale)
+	{
+		glm::mat4 basis(transform);
+		basis[3] = glm::vec4(0.0f, 0.0f, 0.0f, static_cast<float>(transform[3][3]));
+		glm::vec3 unused;
+		if (!DecomposeTransform(basis, unused, rotation, scale))
+			return false;
+		translation = glm::dvec3(transform[3]) / transform[3][3];
+		return true;
+	}
 }

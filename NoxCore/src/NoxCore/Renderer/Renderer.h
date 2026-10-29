@@ -264,7 +264,22 @@ namespace Nox
         void beginImGui();
         void endImGui();
 
-        void BeginScene(const Camera& camera, const glm::mat4& cameraWorldMatrix);
+        void BeginScene(const Camera& camera, const glm::dmat4& cameraWorldMatrix);
+        // Large world coordinates (Engine_Architecture_Plan_2026.md §5.14a): the GPU's world space is centred on this point, which
+        // follows the camera in steps of RenderOriginStep (BeginScene moves it). Everything the GPU sees -- transforms, lights,
+        // the camera, overlays -- is relative to it, in float, so it stays exact however far from the world's origin the camera is.
+        const glm::dvec3& GetRenderOrigin() const { return m_renderOrigin; }
+        glm::vec3 ToRenderSpace(const glm::dvec3& world) const { return glm::vec3(world - m_renderOrigin); }
+        glm::mat4 ToRenderSpace(const glm::dmat4& world) const;
+        glm::dvec3 FromRenderSpace(const glm::vec3& relative) const { return m_renderOrigin + glm::dvec3(relative); }
+        glm::dmat4 FromRenderSpace(const glm::mat4& relative) const
+        {
+            glm::dmat4 world(relative);
+            world[3] += glm::dvec4(m_renderOrigin, 0.0);
+            return world;
+        }
+        // How far (meters, along x or z) the camera goes from the render origin before the origin moves to it (its height stays 0).
+        static constexpr float RenderOriginStepMeters = 1024.0f;
         void BeginScene(const EditorCamera& camera);
         void EndScene();
 
@@ -292,10 +307,10 @@ namespace Nox
         // One instance per drawn submesh, appended to outInstances. Returns false when an asset is not loaded yet (appended
         // to outMissingAssets, request it on the main thread): the entity is registered with what is loaded and has to be
         // registered again once it is.
-        bool AddMeshInstances(const glm::mat4& world, const MeshComponent& mesh, const MaterialComponent* material, int32_t entityID,
+        bool AddMeshInstances(const glm::dmat4& world, const MeshComponent& mesh, const MaterialComponent* material, int32_t entityID,
                               std::vector<uint32_t>& outInstances, std::vector<AssetHandle>& outMissingAssets);
         void RemoveMeshInstances(std::span<const uint32_t> instances);
-        void SetMeshInstancesTransform(std::span<const uint32_t> instances, const glm::mat4& world);
+        void SetMeshInstancesTransform(std::span<const uint32_t> instances, const glm::dmat4& world);
         // Skinned instances, every frame: this frame's joint matrices.
         void SetMeshInstancesBones(std::span<const uint32_t> instances, std::span<const glm::mat4> bones);
         // Entities whose instances lost their mesh (it was unloaded) since the last call: register them again.
@@ -318,11 +333,11 @@ namespace Nox
             float SoftDistance = 0.0f;         // world units
         };
         void SubmitParticles(const ParticleBatchSettings& settings, std::span<const shaderio::GpuParticle> particles);
-        void SubmitLight(const glm::mat4& transform, const DirectionalLightComponent& light);
-        void SubmitLight(const glm::mat4& transform, const PointLightComponent& light);
-        void SubmitLight(const glm::mat4& transform, const SpotLightComponent& light);
-        void SubmitLight(const glm::mat4& transform, const RectLightComponent& light);
-        void SubmitLight(const glm::mat4& transform, const DiscLightComponent& light);
+        void SubmitLight(const glm::dmat4& transform, const DirectionalLightComponent& light);
+        void SubmitLight(const glm::dmat4& transform, const PointLightComponent& light);
+        void SubmitLight(const glm::dmat4& transform, const SpotLightComponent& light);
+        void SubmitLight(const glm::dmat4& transform, const RectLightComponent& light);
+        void SubmitLight(const glm::dmat4& transform, const DiscLightComponent& light);
 
         Texture2D* GetSceneResource() const { return m_sceneResource.get(); }
 
@@ -352,7 +367,7 @@ namespace Nox
         // later on the main thread: the distance to the first opaque surface, or a miss (also without ray tracing / a TLAS).
         // Up to shaderio::EDITOR_RAYCAST_MAX a frame; more wait for the next one.
         using RaycastCallback = std::function<void(bool hit, float distance)>;
-        void RequestRaycast(const glm::vec3& origin, const glm::vec3& direction, float maxDistance, RaycastCallback callback);
+        void RequestRaycast(const glm::dvec3& origin, const glm::vec3& direction, float maxDistance, RaycastCallback callback);
         Texture2D* GetExtraViewTexture(uint32_t index) const { return index < MaxExtraViews ? m_extraViews[index].Shown.get() : nullptr; }
         // Drops a view's texture (its viewport closed).
         void ReleaseExtraView(uint32_t index);
@@ -816,7 +831,7 @@ namespace Nox
 
     private:
         template <typename MeshAsset>
-        bool addSubmeshInstances(const glm::mat4& world, const MeshAsset& mesh, const MeshComponent& component, const MaterialComponent* material,
+        bool addSubmeshInstances(const glm::dmat4& world, const MeshAsset& mesh, const MeshComponent& component, const MaterialComponent* material,
                                  int32_t entityID, std::vector<uint32_t>& outInstances, std::vector<AssetHandle>& outMissingAssets);
         // Shared material record of a submesh: its material asset when loaded, else the mesh's embedded material.
         uint32_t acquireGpuMaterial(uint64_t meshAsset, uint32_t submesh, const MaterialData& meshMaterial, AssetHandle materialAsset,
@@ -1523,7 +1538,8 @@ namespace Nox
         PickRequest m_pickRequest;
         PickResult m_pickResult;
         // RequestRaycast: waiting, and in flight per frame slot (its rays are in that slot's buffer).
-        struct PendingRaycast { shaderio::EditorRay Ray; RaycastCallback Callback; };
+        // The origin in the world (double precision): made relative to the render origin when it goes to the GPU (it may have moved).
+        struct PendingRaycast { shaderio::EditorRay Ray; glm::dvec3 Origin{ 0.0 }; RaycastCallback Callback; };
         std::vector<PendingRaycast> m_raycastQueue;
         std::vector<std::vector<RaycastCallback>> m_raycastsInFlight;
         std::vector<std::unique_ptr<NRI::Buffer>> m_raycastBuffers;
@@ -1864,6 +1880,10 @@ namespace Nox
         glm::mat4 m_prevNonJitteredProj = glm::mat4(1.0f);
         glm::mat4 m_currentNonJitteredProj = glm::mat4(1.0f);
         glm::mat4 m_currentView = glm::mat4(1.0f);
+        // Large world coordinates: the GPU's world space is relative to this (GetRenderOrigin). Moved by updateRenderOrigin, which
+        // carries every piece of temporal state that holds a position over to the new origin.
+        glm::dvec3 m_renderOrigin{ 0.0 };
+        void updateRenderOrigin(const glm::dvec3& cameraWorld);
         glm::vec3 m_prevPrevCameraWorldPos = glm::vec3(0.0f);
         glm::vec3 m_prevCameraWorldPos = glm::vec3(0.0f);
         glm::vec3 m_currentCameraWorldPos = glm::vec3(0.0f);
