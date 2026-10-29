@@ -48,8 +48,8 @@ namespace Nox
             WorldCellCoord Source;
             AssetHandle Mesh = 0;
             glm::dvec3 Origin{ 0.0 };
-            glm::vec3 BoundsMin{ 0.0f };
-            glm::vec3 BoundsMax{ 0.0f };
+            glm::dvec3 BoundsMin{ 0.0 };
+            glm::dvec3 BoundsMax{ 0.0 };
         };
 
         void StartCell();

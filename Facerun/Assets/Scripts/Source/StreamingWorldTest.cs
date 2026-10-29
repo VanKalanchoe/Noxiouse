@@ -69,7 +69,7 @@ public sealed class StreamingWorldTest : EntityBehaviour
         m_StartPosition = transform.World.Position;
         m_StartRotation = transform.World.Rotation;
         m_Center = (world.BoundsMin + world.BoundsMax) * 0.5f;
-        float side = MathF.Min(world.BoundsMax.X - world.BoundsMin.X, world.BoundsMax.Z - world.BoundsMin.Z);
+        float side = (float)Math.Min(world.BoundsMax.X - world.BoundsMin.X, world.BoundsMax.Z - world.BoundsMin.Z);
         m_Radius = MathF.Max(side * RadiusFraction, WorldUnits.FromMeters(50.0f));
         PlaceCamera();
         Log.Info($"[StreamingWorldTest] {world.Cells} cells, {Meters(world.BoundsMax.X - world.BoundsMin.X):0} x {Meters(world.BoundsMax.Z - world.BoundsMin.Z):0} m; " +

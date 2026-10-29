@@ -2354,9 +2354,9 @@ namespace Nox
                 glm::vec3 corners[8];
                 for (int i = 0; i < 8; ++i)
                 {
-                    corners[i] = glm::vec3((i & 1) ? info->second.BoundsMax.x : info->second.BoundsMin.x,
-                                           (i & 2) ? info->second.BoundsMax.y : info->second.BoundsMin.y,
-                                           (i & 4) ? info->second.BoundsMax.z : info->second.BoundsMin.z);
+                    corners[i] = m_Renderer->ToRenderSpace(glm::dvec3((i & 1) ? info->second.BoundsMax.x : info->second.BoundsMin.x,
+                                                                      (i & 2) ? info->second.BoundsMax.y : info->second.BoundsMin.y,
+                                                                      (i & 4) ? info->second.BoundsMax.z : info->second.BoundsMin.z));
                 }
                 for (const auto& edge : edges)
                     m_Renderer2D->DrawXRayLine(corners[edge[0]], corners[edge[1]], kCellColor);

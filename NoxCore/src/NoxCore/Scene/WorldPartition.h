@@ -33,8 +33,8 @@ namespace Nox
     // A cell the scene has a file for: what is in it, as of the last save (the streaming decides by the bounds).
     struct WorldCellInfo
     {
-        glm::vec3 BoundsMin{ 0.0f };
-        glm::vec3 BoundsMax{ 0.0f };
+        glm::dvec3 BoundsMin{ 0.0 }; // world (double precision: large world coordinates)
+        glm::dvec3 BoundsMax{ 0.0 };
         uint32_t Entities = 0;
     };
 
@@ -74,7 +74,7 @@ namespace Nox
         void CellRect(const WorldCellCoord& cell, float cellSizeWorld, glm::vec2& outMin, glm::vec2& outMax);
         // The horizontal distance from a point to a box (0 inside).
         // From a world position (double precision: large world coordinates) to a cell's bounds.
-        float HorizontalDistance(const glm::dvec3& point, const glm::vec3& boundsMin, const glm::vec3& boundsMax);
+        float HorizontalDistance(const glm::dvec3& point, const glm::dvec3& boundsMin, const glm::dvec3& boundsMax);
     }
 
     // A scene's world partition: its settings and cell index (saved in the scene file), and what the editor and a Play session

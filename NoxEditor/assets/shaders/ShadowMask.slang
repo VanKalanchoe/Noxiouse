@@ -241,7 +241,7 @@
             return output;
         }
 
-        float3 rayOrigin = worldPos + normal * (0.02 * ubo->unitsPerMeter);
+        float3 rayOrigin = worldPos + normal * raster_surface_bias(ubo, worldPos, 0.02 * ubo->unitsPerMeter);
 
         if (sourceRadius <= 1e-4)
         {

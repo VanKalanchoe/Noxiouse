@@ -552,7 +552,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     // light that was summed: the loop skips the others).
     if (traceShadows)
     {
-        float3 shadowOrigin = vertIn.worldPos + n * (0.01 * ubo->unitsPerMeter);
+        float3 shadowOrigin = vertIn.worldPos + n * raster_surface_bias(ubo, vertIn.worldPos, 0.01 * ubo->unitsPerMeter);
         for (uint slot = 0; slot < ShadowedLightCount; ++slot)
         {
             if (shadowedWeight[slot] > 0.0 &&

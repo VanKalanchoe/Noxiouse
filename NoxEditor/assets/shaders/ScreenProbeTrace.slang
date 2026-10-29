@@ -216,7 +216,7 @@ ScreenProbeTraceOutput screen_probe_trace(uint2 texel, PushConstantScreenProbe p
     Texture2D normalTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.probeNormalTextureIndex, 0));
     const float3 probeNormal = normalTex.Load(int3(probe, 0)).xyz;
     const float viewDistance = length(probePosition.xyz - ubo->cameraWorldPos.xyz);
-    const float3 origin = probePosition.xyz + probeNormal * (0.01 * ubo->unitsPerMeter + 0.001 * viewDistance);
+    const float3 origin = probePosition.xyz + probeNormal * raster_surface_bias(ubo, probePosition.xyz, 0.01 * ubo->unitsPerMeter + 0.001 * viewDistance);
     const uint seed = screen_probe_hash((probe.x * 7793u + probe.y * 3571u) ^ ((local.y * ScreenProbeRayRes + local.x) * 48611u) ^
                                        (pushConstant.frameIndex * 104729u) ^ 0x5bd1e995u);
     output.emissive = screen_probe_emissive_sample(ubo, origin, probeNormal, seed);
@@ -243,7 +243,7 @@ float4 screen_probe_trace_ray(uint2 texel, PushConstantScreenProbe pushConstant)
 
     // Off the surface by a little more far away, where the depth buffer's positions are coarser.
     const float viewDistance = length(probePosition.xyz - ubo->cameraWorldPos.xyz);
-    const float3 origin = probePosition.xyz + probeNormal * (0.01 * ubo->unitsPerMeter + 0.001 * viewDistance);
+    const float3 origin = probePosition.xyz + probeNormal * raster_surface_bias(ubo, probePosition.xyz, 0.01 * ubo->unitsPerMeter + 0.001 * viewDistance);
 
     RayDesc rayDesc;
     rayDesc.Origin = origin;

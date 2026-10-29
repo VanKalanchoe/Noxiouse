@@ -209,7 +209,7 @@ float4 fragMain(
 
     // 5. Trace Reflection Ray against TLAS
     // Use robust bias to prevent depth-buffer precision self-intersection (same as DeferredLighting)
-    float3 rayOrigin = worldPos + normal * (0.01 * ubo->unitsPerMeter);
+    float3 rayOrigin = worldPos + normal * raster_surface_bias(ubo, worldPos, 0.01 * ubo->unitsPerMeter);
 
     RayDesc reflectionRayDesc;
     reflectionRayDesc.Origin = rayOrigin;

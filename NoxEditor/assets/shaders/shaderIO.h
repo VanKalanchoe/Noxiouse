@@ -675,6 +675,23 @@ float3 directional_light_discs(UniformBufferObject* ubo, float3 direction)
     return radiance;
 }
 
+// How far a ray that starts on a rasterized surface (rebuilt from the depth buffer, or a raster vertex) must start off it. The raster
+// draws cluster LODs simplified by up to lodErrorThreshold of the render height at their distance; the TLAS holds the original
+// triangles (§5.7.1), so the two surfaces can be that far apart. A ray starting under the traced surface hits it at once: black
+// specks in RTAO, specks of shadow, darker reflections -- far away, gone up close where the raster draws the original triangles
+// (Unreal offsets its ray tracing against Nanite's fallback meshes the same way). minBias: the offset the caller needs anyway.
+float raster_surface_bias(UniformBufferObject* ubo, float3 worldPos, float minBias)
+{
+    if (ubo->lodFullDetail != 0)
+        return minBias;
+    // The size of one render height on screen at worldPos: 2 tan(fovY / 2) x distance (perspective, proj[1][1] = 1 / tan(fovY / 2)),
+    // 2 / proj[1][1] (orthographic: proj[3][3] = 1, no perspective).
+    const float yScale = max(abs(ubo->nonJitteredProj[1][1]), 1e-6);
+    const bool orthographic = ubo->nonJitteredProj[3][3] > 0.5;
+    const float height = orthographic ? 2.0 / yScale : 2.0 * length(worldPos - ubo->cameraWorldPos.xyz) / yScale;
+    return max(minBias, height * ubo->lodErrorThreshold);
+}
+
 // How much of a light the clouds let through above worldPos: the cloud shadow map's transmittance for the shadow mask's light (the
 // sun, or the moon at night), 1 for any other light and without clouds. The map holds it from the ground up: a point above the
 // ground looks it up where its ray towards the light starts at ground level. Fades out towards the map's edge.

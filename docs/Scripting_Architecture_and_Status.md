@@ -124,6 +124,7 @@ Implemented calls:
   `Transform.Position`, `TransformComponent.LocalPosition` / `WorldPosition`, `RaycastHit.Point`, and the positions taken by
   `Physics.Raycast`, `Scene.Instantiate`, `Scene.CreateEntity` and `Scene.IsWorldStreamingCompleted`. A `Vector3` widens to it on
   its own; a position back to a `Vector3` (a direction between two positions) is an explicit cast. Script API 9.
+  `WorldStreamingStats.BoundsMin` / `BoundsMax` are `Vector3d` too. Script API 10.
 - Generic `GetComponent<T>()`, `HasComponent<T>()`, and `TryGetComponent<T>()`
   access from both `EntityBehaviour` and `Entity`
 - `TransformComponent` explicit `Local`/`World` state and

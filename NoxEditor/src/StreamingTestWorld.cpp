@@ -514,7 +514,7 @@ namespace Nox
         }
         m_CellBytes += text.size();
         m_CellFiles.push_back(m_AssetDirectory / partition.CellFile(cell));
-        partition.Cells[cell] = WorldCellInfo{ glm::vec3(boundsMin), glm::vec3(boundsMax), count };
+        partition.Cells[cell] = WorldCellInfo{ boundsMin, boundsMax, count };
         return true;
     }
 

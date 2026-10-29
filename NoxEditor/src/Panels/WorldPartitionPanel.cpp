@@ -402,7 +402,7 @@ namespace Nox
             ImGui::TextDisabled("%s", StageName(scene.GetWorldCellStage(*hoveredCell)));
             if (auto info = world.Cells.find(*hoveredCell); info != world.Cells.end())
             {
-                const glm::vec3 extent = info->second.BoundsMax - info->second.BoundsMin;
+                const glm::vec3 extent = glm::vec3(info->second.BoundsMax - info->second.BoundsMin);
                 ImGui::Text("%u entities", info->second.Entities);
                 ImGui::Text("Content %s x %s", WorldUnits::Format(extent.x).c_str(), WorldUnits::Format(extent.z).c_str());
             }

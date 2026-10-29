@@ -198,9 +198,9 @@ RTAOOutput fragMain(MSOutput input, uniform PushConstantRTAO pushConstant)
     float3x3 TBN = float3x3(tangent, bitangent, N);
 
     float4* kernel = (float4*)pushConstant.kernelReference;
-    // Use a robust shadow-bias style offset to prevent depth-buffer precision
-    // from causing rays to self-intersect the originating triangle (black acne).
-    float originBias = 0.01 * ubo->unitsPerMeter;
+    // Off the surface by 1 cm (depth-buffer precision), or by the LOD's simplification error where that is more (shaderIO.h): either
+    // would let rays self-intersect the surface (black acne).
+    float originBias = raster_surface_bias(ubo, worldPos, 0.01 * ubo->unitsPerMeter);
     float3 rayOrigin = worldPos + N * originBias;
     float occlusion = 0.0;
 

@@ -278,7 +278,7 @@ namespace Nox
             world[3] += glm::dvec4(m_renderOrigin, 0.0);
             return world;
         }
-        // How far (meters, along x or z) the camera goes from the render origin before the origin moves to it (its height stays 0).
+        // How far (meters, along any axis) the camera goes from the render origin before the origin moves to it.
         static constexpr float RenderOriginStepMeters = 1024.0f;
         void BeginScene(const EditorCamera& camera);
         void EndScene();

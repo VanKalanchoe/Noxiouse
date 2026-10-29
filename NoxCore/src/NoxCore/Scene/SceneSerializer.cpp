@@ -1197,8 +1197,8 @@ namespace Nox
                                            entry.size() > 10 ? entry[10].as<int32_t>() : WorldGrid::WorldGridIndex };
                 WorldCellInfo& info = world.Cells[cell];
                 info.Entities = entry[3].as<uint32_t>();
-                info.BoundsMin = { entry[4].as<float>(), entry[5].as<float>(), entry[6].as<float>() };
-                info.BoundsMax = { entry[7].as<float>(), entry[8].as<float>(), entry[9].as<float>() };
+                info.BoundsMin = { entry[4].as<double>(), entry[5].as<double>(), entry[6].as<double>() };
+                info.BoundsMax = { entry[7].as<double>(), entry[8].as<double>(), entry[9].as<double>() };
             }
         }
     }

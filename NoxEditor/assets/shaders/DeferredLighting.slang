@@ -470,7 +470,7 @@ float skyIrradianceLuma(UniformBufferObject* ubo, float3 n)
                     if (any(rectLight > 0.0) && light_shadow_priority(light, worldPos) < shadowThreshold)
                         directLighting += rectLight; // over the shadow-ray budget: unshadowed
                     else if (any(rectLight > 0.0))
-                        directLighting += rectLight * rect_light_visibility(ubo, light, worldPos, worldPos + n * (0.02 * ubo->unitsPerMeter),
+                        directLighting += rectLight * rect_light_visibility(ubo, light, worldPos, worldPos + n * raster_surface_bias(ubo, worldPos, 0.02 * ubo->unitsPerMeter),
                                                                             uint2(pixelCoord), pushConstant.frameIndex);
                     continue;
                 }
@@ -532,7 +532,7 @@ float skyIrradianceLuma(UniformBufferObject* ubo, float3 n)
                     {
                         // Any additional directional lights (moon, secondary suns) or any punctual light within range
                         float3 shadowNormal = (dot(n, l) < 0.0) ? -n : n;
-                        float3 shadowOrigin = worldPos + shadowNormal * (0.02 * ubo->unitsPerMeter);
+                        float3 shadowOrigin = worldPos + shadowNormal * raster_surface_bias(ubo, worldPos, 0.02 * ubo->unitsPerMeter);
                         if (trace_shadow_ray(ubo, shadowOrigin, l, maxDist))
                         {
                             lightShadow = 0.0;

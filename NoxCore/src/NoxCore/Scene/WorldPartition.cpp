@@ -73,10 +73,10 @@ namespace Nox
         outMax = outMin + glm::vec2(size);
     }
 
-    float WorldGrid::HorizontalDistance(const glm::dvec3& point, const glm::vec3& boundsMin, const glm::vec3& boundsMax)
+    float WorldGrid::HorizontalDistance(const glm::dvec3& point, const glm::dvec3& boundsMin, const glm::dvec3& boundsMax)
     {
-        const double dx = std::max({ double(boundsMin.x) - point.x, 0.0, point.x - double(boundsMax.x) });
-        const double dz = std::max({ double(boundsMin.z) - point.z, 0.0, point.z - double(boundsMax.z) });
+        const double dx = std::max({ boundsMin.x - point.x, 0.0, point.x - boundsMax.x });
+        const double dz = std::max({ boundsMin.z - point.z, 0.0, point.z - boundsMax.z });
         return static_cast<float>(std::sqrt(dx * dx + dz * dz));
     }
 
@@ -202,9 +202,8 @@ namespace Nox
     }
 
     // The bounds of a cell's roots (their positions where they have none), for the index.
-    static void RootsBounds(Scene& scene, const std::vector<Entity>& roots, glm::vec3& outMin, glm::vec3& outMax)
+    static void RootsBounds(Scene& scene, const std::vector<Entity>& roots, glm::dvec3& outMin, glm::dvec3& outMax)
     {
-        // Gathered in double precision, kept in float (the index's bounds only decide distances to streaming sources).
         glm::dvec3 lowest(DBL_MAX), highest(-DBL_MAX);
         for (Entity root : roots)
         {
@@ -221,8 +220,8 @@ namespace Nox
             lowest = glm::min(lowest, position);
             highest = glm::max(highest, position);
         }
-        outMin = glm::vec3(lowest);
-        outMax = glm::vec3(highest);
+        outMin = lowest;
+        outMax = highest;
     }
 
     void Scene::EnableWorldPartition(const WorldPartitionSettings& settings)
@@ -793,7 +792,7 @@ namespace Nox
             const std::vector<Entity>& roots = group != groups.end() ? group->second : none;
             const std::string name = WorldGrid::CellName(cell);
             uint32_t count = 0;
-            glm::vec3 boundsMin, boundsMax;
+            glm::dvec3 boundsMin, boundsMax;
             RootsBounds(*this, roots, boundsMin, boundsMax);
             if (m_World.EditorLoaded.contains(cell))
             {
@@ -979,7 +978,7 @@ namespace Nox
             std::string text = SceneSerializer::MergeWorldCellText(*this, fileText, roots, WorldGrid::CellName(cell), count);
             ok &= WriteTextFile(file, text);
             toCook.emplace_back(file, std::move(text));
-            glm::vec3 boundsMin, boundsMax;
+            glm::dvec3 boundsMin, boundsMax;
             RootsBounds(*this, roots, boundsMin, boundsMax);
             auto [entry, added] = m_World.Cells.try_emplace(cell, WorldCellInfo{ boundsMin, boundsMax, count });
             if (!added)

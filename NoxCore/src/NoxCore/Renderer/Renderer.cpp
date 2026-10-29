@@ -3259,7 +3259,8 @@ namespace Nox
     float Renderer::skyViewerAltitudeKm() const
     {
         // The world origin's altitude plus the camera's height above it (not below: the ground of the sky model is there).
-        const float cameraKm = glm::max(m_cameraPosition.y, 0.0f) * WorldUnits::ToMeters(1.0f) / 1000.0f;
+        const float cameraY = static_cast<float>(m_renderOrigin.y + static_cast<double>(m_cameraPosition.y)); // (the world's height)
+        const float cameraKm = glm::max(cameraY, 0.0f) * WorldUnits::ToMeters(1.0f) / 1000.0f;
         return glm::clamp(m_proceduralSky.AltitudeKm + cameraKm, 0.0f, 99.0f);
     }
 
@@ -3511,7 +3512,11 @@ namespace Nox
 
         uniformData.cloudShadowTextureIndex = map->GetDescriptorIndexSlot();
         uniformData.cloudShadowExtentKm = ExtentKm;
-        uniformData.cloudShadowCenterKm = centerKm;
+        // The lookup (shaderIO.h cloud_shadow) slides a point down to the ground along the light by its height, which it knows relative
+        // to the render origin: the origin's own height is that much further along, the same for every point.
+        const float originHeightKm = static_cast<float>(m_renderOrigin.y) * kmPerUnit;
+        uniformData.cloudShadowCenterKm = centerKm + glm::vec2(m_shadowMaskLightDirection.x, m_shadowMaskLightDirection.z) *
+                                                     (originHeightKm / std::max(m_shadowMaskLightDirection.y, 0.02f)); // (the shader's clamp)
     }
 
     // The camera's aerial perspective volume for this frame (the camera moves every frame; 32 x 32 columns of 64 samples,
@@ -3535,7 +3540,8 @@ namespace Nox
         push.ozoneScale = glm::max(settings.OzoneScale, 0.0f);
         push.mieAnisotropy = glm::clamp(settings.MieAnisotropy, 0.0f, 0.99f);
         push.kmPerWorldUnit = WorldUnits::ToMeters(1.0f) / 1000.0f;
-        push.altitudeKm = glm::clamp(settings.AltitudeKm, 0.0f, 99.0f);
+        // The world origin's altitude, and the render origin's height above it (the camera is relative to the render origin).
+        push.altitudeKm = glm::clamp(settings.AltitudeKm, 0.0f, 99.0f) + static_cast<float>(m_renderOrigin.y) * push.kmPerWorldUnit;
         const float moonLength = glm::length(settings.MoonDirection);
         push.moonDirection = moonLength > 1e-6f ? settings.MoonDirection / moonLength : glm::vec3(0.0f, -1.0f, 0.0f);
         push.moonIlluminance = glm::max(settings.MoonIlluminance, glm::vec3(0.0f));
@@ -5076,7 +5082,7 @@ namespace Nox
             const float kmPerUnit = WorldUnits::ToMeters(1.0f) / 1000.0f;
             uniformData.heightFogDensity = fog.Enabled ? glm::max(fog.DensityPerKm, 0.0f) * kmPerUnit : 0.0f;
             uniformData.heightFogFalloff = glm::max(fog.FalloffPerKm, 0.0f) * kmPerUnit;
-            uniformData.heightFogBaseY = fog.BaseHeight;
+            uniformData.heightFogBaseY = static_cast<float>(static_cast<double>(fog.BaseHeight) - m_renderOrigin.y); // (relative to the render origin)
             uniformData.heightFogStartDistance = glm::max(fog.StartDistance, 0.0f);
             uniformData.heightFogMaxOpacity = glm::clamp(fog.MaxOpacity, 0.0f, 1.0f);
             uniformData.heightFogFromEnvironment = fog.FromEnvironment ? 1u : 0u;
@@ -6164,15 +6170,16 @@ namespace Nox
     void Renderer::updateRenderOrigin(const glm::dvec3& cameraWorld)
     {
         // Large world coordinates (Engine_Architecture_Plan_2026.md §5.14a; Flax's LargeWorlds origin chunks): the origin moves only
-        // once the camera is a whole step away along x or z, onto the step grid point nearest the camera -- the shift is a multiple
-        // of the step, exact in float, and moving back and forth across a boundary does not move it every frame. Horizontally only:
-        // heights stay the world's (a few km at most, where float keeps a fraction of a millimetre), so everything that works from
-        // a height -- the atmosphere's altitude, height fog, the cloud layer, the ground grid -- is untouched.
+        // once the camera is a whole step away along some axis, onto the step grid point nearest the camera -- the shift is a multiple
+        // of the step, exact in float, and moving back and forth across a boundary does not move it every frame. Vertically too (a
+        // flight, space): what works from a height -- the atmosphere's altitude, height fog, the cloud shadows, the ground grid -- is
+        // given the origin's height on the CPU (skyViewerAltitudeKm, the aerial perspective's altitude, the fog's base, the cloud
+        // shadow map's centre, the grid's plane).
         const double step = static_cast<double>(WorldUnits::FromMeters(RenderOriginStepMeters));
         const glm::dvec3 offset = glm::abs(cameraWorld - m_renderOrigin);
-        if (std::max(offset.x, offset.z) <= step)
+        if (std::max({ offset.x, offset.y, offset.z }) <= step)
             return;
-        const glm::dvec3 origin(std::round(cameraWorld.x / step) * step, 0.0, std::round(cameraWorld.z / step) * step);
+        const glm::dvec3 origin = glm::round(cameraWorld / step) * step;
         // A position relative to the old origin plus this is the same position relative to the new one.
         const glm::vec3 shift = glm::vec3(m_renderOrigin - origin);
         m_renderOrigin = origin;

@@ -156,12 +156,12 @@ namespace Nox
         struct ManagedWorldStreamingStats
         {
             int32_t Cells, Activated, Loaded, Loading;
-            ManagedVector3 BoundsMin, BoundsMax;
+            ManagedVector3d BoundsMin, BoundsMax; // world (double precision)
             // Scene::WorldStreamingCounters
             int64_t CellsActivated, EntitiesActivated, CellsCooked;
             double ReadMs, BuildMs, ActivateMs, AssetWaitSeconds, LatencySeconds, MaxLatencySeconds;
         };
-        static_assert(offsetof(ManagedWorldStreamingStats, CellsActivated) == 40, "Nox.WorldStreamingStats's layout");
+        static_assert(offsetof(ManagedWorldStreamingStats, CellsActivated) == 64, "Nox.WorldStreamingStats's layout");
 
         // The world's cells (its grid, not the HLODs') by stage, and the bounds of their content (world units).
         void SceneGetWorldStreamingStats(ManagedWorldStreamingStats* out)
@@ -169,7 +169,7 @@ namespace Nox
             *out = {};
             if (!s_Scene)
                 return;
-            glm::vec3 boundsMin(FLT_MAX), boundsMax(-FLT_MAX);
+            glm::dvec3 boundsMin(DBL_MAX), boundsMax(-DBL_MAX);
             for (const auto& [cell, info] : s_Scene->GetWorldPartition().Cells)
             {
                 if (cell.Grid != WorldGrid::WorldGridIndex)

@@ -94,8 +94,8 @@ namespace Nox::HLOD
         std::vector<glm::vec4> Tangents;
         std::vector<glm::vec2> UVs; // 0..1
         std::vector<uint32_t> Indices;
-        glm::vec3 BoundsMin{ 0.0f }; // world
-        glm::vec3 BoundsMax{ 0.0f };
+        glm::dvec3 BoundsMin{ 0.0 }; // world (double precision)
+        glm::dvec3 BoundsMax{ 0.0 };
 
         uint32_t TextureSize = 0;              // square
         std::vector<uint8_t> BaseColor;        // RGBA8, sRGB, alpha: coverage (alpha-masked sources)

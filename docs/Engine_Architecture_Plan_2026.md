@@ -1439,15 +1439,16 @@ on the CPU and a camera-relative ("translated world") space on the GPU; Nox does
 
 - **CPU: double precision.** `TransformComponent::Translation` is a `glm::dvec3`, `WorldTransformComponent::WorldMatrix` a
   `glm::dmat4` (rotation and scale need no more than float). The scene graph propagates in double; `WorldBounds`, streaming sources,
-  the cell grid (`WorldGrid::CellFor`, `HorizontalDistance`), prefab spawning, HLOD sources (each HLOD's vertices relative to its own
+  the cell grid (`WorldGrid::CellFor`, `HorizontalDistance`) and the cell index's bounds (`WorldCellInfo`), prefab spawning, HLOD sources (each HLOD's vertices relative to its own
   double origin), physics, the editor camera and tools (gizmo, picking, measure, snapping, placement) all work in double.
 - **Explicit narrowing.** `GLM_FORCE_EXPLICIT_CTOR` (public on NoxCore): no double becomes a float without it being written
   (`Math::RelativeTo`, `Math::Basis`, `Math::ToFloat` say why). Unreal's `FVector3f(FVector)` is explicit for the same reason.
 - **GPU: relative to the render origin.** `Renderer::GetRenderOrigin` sits on a 1024 m grid; once the camera is more than a step
-  away along x or z it moves to the grid point nearest the camera (horizontally only: heights stay the world's, so the atmosphere's
-  altitude, height fog, the cloud layer and the ground grid are untouched). Everything handed to the GPU is relative to it
-  (`Renderer::ToRenderSpace`): instance transforms, lights, the camera, particles, 2D and editor overlays. The camera is never more
-  than ~1.5 km from it, so a vertex near the camera keeps a fraction of a millimetre.
+  away along any axis it moves to the grid point nearest the camera (vertically too: a flight, space). Everything handed to the GPU is
+  relative to it (`Renderer::ToRenderSpace`): instance transforms, lights, the camera, particles, 2D and editor overlays. The camera is
+  never more than ~1.8 km from it, so a vertex near the camera keeps a fraction of a millimetre. What works from a height gets the
+  origin's height on the CPU, no shader change: the sky's viewer altitude, the aerial perspective's altitude, height fog's base, the
+  cloud shadow map's centre (its lookup slides points down to the ground by their height), the editor grid's plane and picking plane.
 - **A rebase.** `Renderer::updateRenderOrigin` (in BeginScene, once a frame): the GPU scene keeps every instance's world translation in
   double and rewrites its transforms (the previous ones too, so motion vectors see no jump), bounds and TLAS records once
   (`GpuScene::SetRenderOrigin`). Last frame's view and camera positions are moved over, so TAA, DLSS, NRD and the screen probes
@@ -1461,14 +1462,19 @@ on the CPU and a camera-relative ("translated world") space on the GPU; Nox does
   (Niagara's LWC tile).
 - **Files:** scene and cell text writes translations at full double precision; cooked cells are version 2 (double translations; a
   version 1 file is read from its text and cooked again).
-- **Scripts (API 9):** `Nox.Vector3d` (double) for positions: `Transform.Position`, `LocalPosition` / `WorldPosition`,
-  `RaycastHit.Point`, `Physics.Raycast` origin, `Scene.Instantiate` / `CreateEntity` / `IsWorldStreamingCompleted` positions. A
+- **Scripts (API 9, 10):** `Nox.Vector3d` (double) for positions: `Transform.Position`, `LocalPosition` / `WorldPosition`,
+  `RaycastHit.Point`, `Physics.Raycast` origin, `Scene.Instantiate` / `CreateEntity` / `IsWorldStreamingCompleted` positions,
+  `WorldStreamingStats` bounds (API 10). A
   `Vector3` widens to it implicitly; the difference of two positions as a direction is an explicit `(Vector3)(a - b)`.
 - **Test:** the streaming test world generator's **World Offset (km)** builds the same world that far out along x and z; the
   fly-through (`StreamingWorldTest`, its path now in double) runs there unchanged. At 1000 km nothing may shake, drift or snap that
   does not at 0.
-- Not done: a camera more than a few km above the ground (space) would want a vertical origin too; editor overlays and the asset
-  preview stage are drawn relative to the origin of the moment.
+- **Rays from raster surfaces** (`shaderIO.h raster_surface_bias`): the raster draws cluster LODs, the TLAS the original triangles,
+  so a ray starting on the depth buffer's surface starts off it by the LOD's error at that distance (the larger of it and the caller's
+  own offset): RTAO, the shadow mask, deferred and forward shadow rays, reflections, screen probes. Without it RTAO had black specks
+  far away (the simplified surface under the traced one), gone up close.
+- Editor overlays and the asset preview stage are drawn relative to the origin of the moment (a stage placed before an origin move
+  stays where it was, a few km off at most).
 
 ### 5.15 Asset Lifetime (Garbage Collection)
 

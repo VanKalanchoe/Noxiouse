@@ -58,9 +58,9 @@ public struct WorldStreamingStats
     public int Loaded;
     /// <summary>Cells on their way: being read, built, waiting for their assets or going into the world.</summary>
     public int Loading;
-    /// <summary>The bounds of every cell's content, world units (zero without cells).</summary>
-    public Vector3 BoundsMin;
-    public Vector3 BoundsMax;
+    /// <summary>The bounds of every cell's content, world units (zero without cells; double precision).</summary>
+    public Vector3d BoundsMin;
+    public Vector3d BoundsMax;
 
     // What the cells activated since Play began cost (sums: difference two readings for a stretch of time).
     /// <summary>Cells that went into the world, and their entities.</summary>

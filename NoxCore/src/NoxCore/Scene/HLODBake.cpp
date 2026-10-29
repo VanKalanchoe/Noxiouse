@@ -1360,12 +1360,12 @@ namespace Nox::HLOD
             }
         }
 
-        result.BoundsMin = glm::vec3(FLT_MAX);
-        result.BoundsMax = glm::vec3(-FLT_MAX);
+        result.BoundsMin = glm::dvec3(DBL_MAX);
+        result.BoundsMax = glm::dvec3(-DBL_MAX);
         for (const glm::vec3& position : result.Positions)
         {
-            result.BoundsMin = glm::min(result.BoundsMin, glm::vec3(glm::dvec3(position) + origin));
-            result.BoundsMax = glm::max(result.BoundsMax, glm::vec3(glm::dvec3(position) + origin));
+            result.BoundsMin = glm::min(result.BoundsMin, glm::dvec3(position) + origin);
+            result.BoundsMax = glm::max(result.BoundsMax, glm::dvec3(position) + origin);
         }
         result.Ok = true;
         return result;

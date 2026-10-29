@@ -757,7 +757,7 @@ namespace Nox
             entity.GetComponent<TransformComponent>().Translation = entry.Origin;
             entity.AddComponent<MeshComponent>(entry.Mesh).SubmeshCount = UINT32_MAX;
             entity.AddComponent<HLODComponent>().Source = entry.Source;
-            groups[WorldGrid::CellFor(glm::dvec3(entry.BoundsMin), glm::dvec3(entry.BoundsMax), hlodCellSize, WorldGrid::HLODGridIndex)].push_back(entity);
+            groups[WorldGrid::CellFor(entry.BoundsMin, entry.BoundsMax, hlodCellSize, WorldGrid::HLODGridIndex)].push_back(entity);
         }
         for (const auto& [cell, entities] : groups)
         {
@@ -774,11 +774,11 @@ namespace Nox
             }
             WorldCellInfo& info = world.Cells[cell];
             info.Entities = count;
-            info.BoundsMin = glm::vec3(FLT_MAX);
-            info.BoundsMax = glm::vec3(-FLT_MAX);
+            info.BoundsMin = glm::dvec3(DBL_MAX);
+            info.BoundsMax = glm::dvec3(-DBL_MAX);
             for (const Entry& entry : m_Entries)
             {
-                if (WorldGrid::CellFor(glm::dvec3(entry.BoundsMin), glm::dvec3(entry.BoundsMax), hlodCellSize, WorldGrid::HLODGridIndex) == cell)
+                if (WorldGrid::CellFor(entry.BoundsMin, entry.BoundsMax, hlodCellSize, WorldGrid::HLODGridIndex) == cell)
                 {
                     info.BoundsMin = glm::min(info.BoundsMin, entry.BoundsMin);
                     info.BoundsMax = glm::max(info.BoundsMax, entry.BoundsMax);
