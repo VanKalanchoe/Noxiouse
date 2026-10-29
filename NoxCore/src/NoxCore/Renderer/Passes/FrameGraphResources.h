@@ -64,7 +64,6 @@ namespace Nox
 
         // DDGI
         RGTexture DDGIRayData;
-        RGTexture DDGIRayDirections; // rays x 128 rotations (DDGIRayDirections.slang)
         RGTexture DDGIIrradiance[2];
         RGTexture DDGIDistance[2];
         RGTexture DDGIProbeOffsets[2]; // probe relocation, ping-ponged with the atlases (invalid while relocation is off)

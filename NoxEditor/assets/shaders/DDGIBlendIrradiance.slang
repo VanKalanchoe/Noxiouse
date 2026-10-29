@@ -1,135 +1,105 @@
 #include "shaderIO.h"
 #include "DDGICommon.slang"
 
-struct DDGIBlendPayload
-{
-    uint dummy;
-};
-groupshared DDGIBlendPayload gPayload;
+// The irradiance atlas: one workgroup per probe (RTXGI's blending), 8 x 8 threads -- one per interior texel. The probe's rays are
+// read into shared memory once and every texel blends from there; then the border texels copy the interior texels they mirror
+// (DDGIBlendDistance.slang does the same for the distances).
 
-[shader("task")]
-[numthreads(1, 1, 1)]
-void taskMain()
+#define DDGI_IRRADIANCE_SIDE 8
+#define DDGI_IRRADIANCE_TOTAL 10
+#define DDGI_MAX_RAYS 256
+
+groupshared float3 gRayDirections[DDGI_MAX_RAYS];
+groupshared float4 gRaySamples[DDGI_MAX_RAYS];
+groupshared float4 gTexels[DDGI_IRRADIANCE_SIDE * DDGI_IRRADIANCE_SIDE];
+
+uint2 ddgi_irradiance_border_source(uint2 localCoord)
 {
-    DispatchMesh(1, 1, 1, gPayload);
+    const uint probeSide = DDGI_IRRADIANCE_SIDE;
+    const uint totalSide = DDGI_IRRADIANCE_TOTAL;
+    uint2 interiorCoord = localCoord;
+    // Border wrapping: flip coordinates diagonally across octahedral seams
+    if (localCoord.x == 0) interiorCoord.x = probeSide - localCoord.y + 1;
+    else if (localCoord.x == totalSide - 1) interiorCoord.x = probeSide - localCoord.y + 1;
+
+    if (localCoord.y == 0) interiorCoord.y = probeSide - localCoord.x + 1;
+    else if (localCoord.y == totalSide - 1) interiorCoord.y = probeSide - localCoord.x + 1;
+
+    return clamp(interiorCoord, uint2(1, 1), uint2(probeSide, probeSide));
 }
 
-struct MSOutput
+uint2 ddgi_irradiance_border_texel(uint index)
 {
-    float4 pos : SV_Position;
-    float2 uv : TEXCOORD0;
-};
-
-static const float2 positions[3] = {
-    float2(-1.0, -1.0),
-    float2( 3.0, -1.0),
-    float2(-1.0,  3.0)
-};
-
-static const float2 uvs[3] = {
-    float2(0.0, 0.0),
-    float2(2.0, 0.0),
-    float2(0.0, 2.0)
-};
-
-[shader("mesh")]
-[outputtopology("triangle")]
-[numthreads(3, 1, 1)]
-void meshMain(
-    out indices uint3 triangles[1],
-    out vertices MSOutput vertices[3],
-    uint threadID : SV_GroupIndex
-)
-{
-    SetMeshOutputCounts(3, 1);
-
-    if (threadID < 3)
-    {
-        triangles[0] = uint3(0, 1, 2);
-        vertices[threadID].pos = float4(positions[threadID], 0.0, 1.0);
-        vertices[threadID].uv = uvs[threadID];
-    }
+    const uint totalSide = DDGI_IRRADIANCE_TOTAL;
+    if (index < totalSide) return uint2(index, 0);
+    index -= totalSide;
+    if (index < totalSide) return uint2(index, totalSide - 1);
+    index -= totalSide;
+    if (index < totalSide - 2) return uint2(0, index + 1);
+    index -= totalSide - 2;
+    return uint2(totalSide - 1, index + 1);
 }
 
-[shader("fragment")]
-float4 fragMain(
-    MSOutput input,
-    float4 pixelCoord : SV_Position,
-    uniform PushConstantDDGIBlend pushConstant
-) : SV_Target0
+[shader("compute")]
+[numthreads(DDGI_IRRADIANCE_SIDE, DDGI_IRRADIANCE_SIDE, 1)]
+void computeMain(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID, uint threadIndex : SV_GroupIndex,
+                 uniform PushConstantDDGIBlend pushConstant)
 {
     UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
-    uint2 pixel = uint2(pixelCoord.xy);
-
-    const uint probeSide = 8;
-    const uint totalSide = 10;
-
-    uint probeX = pixel.x / totalSide;
-    uint probeY = pixel.y / totalSide;
-    uint probeIndex = probeX + probeY * pushConstant.probesPerRow;
-
+    const uint probeIndex = group.x;
     if (probeIndex >= pushConstant.probeCountTotal)
-    {
-        return float4(0.0, 0.0, 0.0, 1.0);
-    }
+        return;
+
+    const uint totalSide = DDGI_IRRADIANCE_TOTAL;
+    const uint threadCount = DDGI_IRRADIANCE_SIDE * DDGI_IRRADIANCE_SIDE;
+    const uint2 origin = uint2(probeIndex % pushConstant.probesPerRow, probeIndex / pushConstant.probesPerRow) * totalSide;
+    RWTexture2D<float4> atlas = RWTexture2D<float4>.Handle(uint2(pushConstant.outputStorageIndex, 0));
+    const bool hasPrevious = pushConstant.firstFrame == 0 && pushConstant.prevAtlasTextureIndex != 0xFFFFFFFF;
 
     // Not updated this frame (ddgiUpdateStride): kept as it was.
     const bool updates = ddgi_probe_updates(ubo, probeIndex, pushConstant.frameIndex);
     const bool entered = ddgi_probe_entered(ubo, probeIndex);
-    if (!updates && pushConstant.firstFrame == 0 && pushConstant.prevAtlasTextureIndex != 0xFFFFFFFF)
+    if (!updates && hasPrevious)
     {
         Texture2D keptAtlas = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.prevAtlasTextureIndex, 0));
-        return keptAtlas.Load(int3(pixel, 0));
+        for (uint texel = threadIndex; texel < totalSide * totalSide; texel += threadCount)
+        {
+            const uint2 pixel = origin + uint2(texel % totalSide, texel / totalSide);
+            atlas[pixel] = keptAtlas.Load(int3(pixel, 0));
+        }
+        return;
     }
 
-    uint2 localCoord = uint2(pixel.x % totalSide, pixel.y % totalSide);
-
-    // Resolve border texels by wrapping to octahedral interior
-    bool isBorder = (localCoord.x == 0 || localCoord.x == totalSide - 1 ||
-                     localCoord.y == 0 || localCoord.y == totalSide - 1);
-
-    uint2 interiorCoord = localCoord;
-    if (isBorder)
-    {
-        // Border wrapping: flip coordinates diagonally across octahedral seams
-        if (localCoord.x == 0) interiorCoord.x = probeSide - localCoord.y + 1;
-        else if (localCoord.x == totalSide - 1) interiorCoord.x = probeSide - localCoord.y + 1;
-
-        if (localCoord.y == 0) interiorCoord.y = probeSide - localCoord.x + 1;
-        else if (localCoord.y == totalSide - 1) interiorCoord.y = probeSide - localCoord.x + 1;
-
-        interiorCoord = clamp(interiorCoord, uint2(1, 1), uint2(probeSide, probeSide));
-    }
-
-    // Map interior coord [1, 8] to normalized octahedral UV [-1, 1]
-    float2 normalizedUV = (float2(interiorCoord - 1) + 0.5) / float(probeSide);
-    float3 dir = oct_decode(normalizedUV * 2.0 - 1.0);
-
-    // Read rays for this probe and evaluate cosine-weighted irradiance
+    // The probe's rays, once: their directions (DDGIRadiance.slang's) and what they brought back.
     Texture2D rayDataTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.rayDataTextureIndex, 0));
+    const uint rayCount = min(pushConstant.raysPerProbe, DDGI_MAX_RAYS);
+    float rotAngle = float((pushConstant.frameIndex + probeIndex * 17) % 128) * (2.0 * 3.14159265359 / 128.0);
+    float3 rotAxis = normalize(float3(0.57735, 0.57735, 0.57735));
+    for (uint r = threadIndex; r < rayCount; r += threadCount)
+    {
+        gRaySamples[r] = rayDataTex.Load(int3(r, probeIndex, 0));
+        gRayDirections[r] = rotate_vector(spherical_fibonacci(r, pushConstant.raysPerProbe), rotAxis, rotAngle);
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    // This thread's interior texel: its direction (octahedral UV in [-1, 1]).
+    const uint2 interiorCoord = thread.xy + 1;
+    float2 normalizedUV = (float2(interiorCoord - 1) + 0.5) / float(DDGI_IRRADIANCE_SIDE);
+    float3 dir = oct_decode(normalizedUV * 2.0 - 1.0);
 
     float3 accumulatedRadiance = float3(0.0);
     float totalWeight = 0.0;
     uint backFaces = 0;
-
-    // This probe's ray directions: its row of the table DDGIRayDirections.slang wrote this frame (the same expression per ray).
-    Texture2D rayDirectionsTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.rayDirectionsTextureIndex, 0));
-    const int rotation = int((pushConstant.frameIndex + probeIndex * 17) % 128);
-
-    for (uint r = 0; r < pushConstant.raysPerProbe; r++)
+    for (uint r = 0; r < rayCount; r++)
     {
-        float4 raySample = rayDataTex.Load(int3(r, probeIndex, 0));
+        float4 raySample = gRaySamples[r];
         // A back face (DDGIRadiance.slang): no light from inside the geometry.
         if (raySample.w < 0.0)
         {
             ++backFaces;
             continue;
         }
-        float3 rayDir = rayDirectionsTex.Load(int3(r, rotation, 0)).xyz;
-
-        float weight = dot(dir, rayDir);
-        if (weight <= 0.0)
-            continue; // (weight 0: it adds nothing)
+        float weight = max(0.0, dot(dir, gRayDirections[r]));
         accumulatedRadiance += raySample.rgb * weight;
         totalWeight += weight;
     }
@@ -141,15 +111,23 @@ float4 fragMain(
     float active = float(backFaces) > 0.25 * float(pushConstant.raysPerProbe) ? 0.0 : 1.0;
 
     // Temporal Hysteresis Blending (a probe that just came into the volume starts over)
-    if (pushConstant.firstFrame != 0 || pushConstant.prevAtlasTextureIndex == 0xFFFFFFFF || entered)
+    const uint2 pixel = origin + interiorCoord;
+    float4 result = float4(currentIrradiance, active);
+    if (hasPrevious && !entered)
     {
-        return float4(currentIrradiance, active);
+        Texture2D prevAtlasTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.prevAtlasTextureIndex, 0));
+        const float4 previous = prevAtlasTex.Load(int3(pixel, 0));
+        result = float4(lerp(currentIrradiance, previous.rgb, pushConstant.hysteresis), lerp(active, previous.a, pushConstant.hysteresis));
     }
+    atlas[pixel] = result;
+    gTexels[threadIndex] = result;
+    GroupMemoryBarrierWithGroupSync();
 
-    Texture2D prevAtlasTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.prevAtlasTextureIndex, 0));
-    float3 prevIrradiance = prevAtlasTex.Load(int3(pixel, 0)).rgb;
-
-    float3 blended = lerp(currentIrradiance, prevIrradiance, pushConstant.hysteresis);
-    active = lerp(active, prevAtlasTex.Load(int3(pixel, 0)).a, pushConstant.hysteresis);
-    return float4(blended, active);
+    // The border: each border texel repeats the interior texel across its octahedral seam (what it blended to on its own).
+    for (uint border = threadIndex; border < 4 * (totalSide - 1); border += threadCount)
+    {
+        const uint2 localCoord = ddgi_irradiance_border_texel(border);
+        const uint2 source = ddgi_irradiance_border_source(localCoord) - 1;
+        atlas[origin + localCoord] = gTexels[source.x + source.y * DDGI_IRRADIANCE_SIDE];
+    }
 }

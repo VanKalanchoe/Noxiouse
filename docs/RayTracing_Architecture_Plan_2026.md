@@ -248,6 +248,7 @@ NoxEngine provides 23 interactive debug view modes, selectable in the editor's "
      - `DDGIRadiance.slang`: Inline `RayQuery` tracing 128 rays per probe against TLAS evaluating direct lights, emissive, and multi-bounce irradiance.
      - `DDGIBlendIrradiance.slang`: Octahedral irradiance atlas integration with temporal hysteresis ($\alpha = 0.97$) and 1-pixel border wrapping.
      - `DDGIBlendDistance.slang`: Octahedral distance moments ($r, r^2$) integration with temporal hysteresis and border wrapping.
+     - Both blends are compute passes with one workgroup per probe (RTXGI's layout): the probe's rays are read into shared memory once, each thread blends one interior texel, and the border texels copy the interior texels they mirror. A full-screen pass per atlas texel read all 128 rays of its probe per texel (about 41,000 ray reads a probe for the distance atlas instead of 128) and was bound by those reads.
      - `DDGIProbeSpheres.slang`: Mesh/task shader rendering 3D instanced octahedron spheres (18 vertices, 32 triangles per workgroup) colored by probe irradiance.
   2. Integration in Deferred Lighting:
      - Multi-probe trilinear interpolation with normal biasing and Chebyshev visibility weighting in `DeferredLighting.slang`.

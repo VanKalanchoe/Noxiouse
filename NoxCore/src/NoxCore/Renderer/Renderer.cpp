@@ -320,7 +320,6 @@ namespace Nox
         watchShader("assets/shaders/DDGIBlendDistance.slang", "DDGIBlendDistance", [this]() { createDDGIPipelines(true); });
         watchShader("assets/shaders/DDGIProbeSpheres.slang", "DDGIProbeSpheres", [this]() { createDDGIPipelines(true); });
         watchShader("assets/shaders/DDGIRelocation.slang", "DDGIRelocation", [this]() { createDDGIPipelines(true); });
-        watchShader("assets/shaders/DDGIRayDirections.slang", "DDGIRayDirections", [this]() { createDDGIPipelines(true); });
         // Screen-probe GI
         for (const char* shader : { "ScreenProbeCommon", "ScreenProbePlace", "ScreenProbeTrace", "ScreenProbeIrradiance", "ScreenProbeFilter",
                                     "ScreenProbeIntegrate" })
@@ -1482,49 +1481,21 @@ namespace Nox
             m_ddgiRadiancePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
         }
 
-        // 2. Blend Irradiance Pipeline
+        // 2. Blend Irradiance Pipeline (compute: one workgroup per probe)
         {
             NRI::PipelineDesc desc{};
+            desc.type = NRI::PipelineType::Compute;
             desc.forceCompile = forceCompile;
-            desc.colorFormats = {NRI::ImageFormat::R16G16B16A16_SFLOAT};
-            desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Task,
-                .entryPoint = "taskMain",
-                .sourcePath = "assets/shaders/DDGIBlendIrradiance.slang"
-            });
-            desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Mesh,
-                .entryPoint = "meshMain",
-                .sourcePath = "assets/shaders/DDGIBlendIrradiance.slang"
-            });
-            desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Fragment,
-                .entryPoint = "fragMain",
-                .sourcePath = "assets/shaders/DDGIBlendIrradiance.slang"
-            });
+            desc.shaders.push_back({ .stage = NRI::ShaderStage::Compute, .entryPoint = "computeMain", .sourcePath = "assets/shaders/DDGIBlendIrradiance.slang" });
             m_ddgiBlendIrradiancePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
         }
 
-        // 3. Blend Distance Pipeline
+        // 3. Blend Distance Pipeline (compute: one workgroup per probe)
         {
             NRI::PipelineDesc desc{};
+            desc.type = NRI::PipelineType::Compute;
             desc.forceCompile = forceCompile;
-            desc.colorFormats = {NRI::ImageFormat::R16G16_SFLOAT};
-            desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Task,
-                .entryPoint = "taskMain",
-                .sourcePath = "assets/shaders/DDGIBlendDistance.slang"
-            });
-            desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Mesh,
-                .entryPoint = "meshMain",
-                .sourcePath = "assets/shaders/DDGIBlendDistance.slang"
-            });
-            desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Fragment,
-                .entryPoint = "fragMain",
-                .sourcePath = "assets/shaders/DDGIBlendDistance.slang"
-            });
+            desc.shaders.push_back({ .stage = NRI::ShaderStage::Compute, .entryPoint = "computeMain", .sourcePath = "assets/shaders/DDGIBlendDistance.slang" });
             m_ddgiBlendDistancePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
         }
 
@@ -1537,17 +1508,6 @@ namespace Nox
             desc.shaders.push_back({ .stage = NRI::ShaderStage::Mesh, .entryPoint = "meshMain", .sourcePath = "assets/shaders/DDGIRelocation.slang" });
             desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "fragMain", .sourcePath = "assets/shaders/DDGIRelocation.slang" });
             m_ddgiRelocationPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
-        }
-
-        // 3c. The blends' ray directions (one texel per ray and rotation, 32-bit: the directions the blends computed themselves)
-        {
-            NRI::PipelineDesc desc{};
-            desc.forceCompile = forceCompile;
-            desc.colorFormats = {NRI::ImageFormat::R32G32B32A32_SFLOAT};
-            desc.shaders.push_back({ .stage = NRI::ShaderStage::Task, .entryPoint = "taskMain", .sourcePath = "assets/shaders/DDGIRayDirections.slang" });
-            desc.shaders.push_back({ .stage = NRI::ShaderStage::Mesh, .entryPoint = "meshMain", .sourcePath = "assets/shaders/DDGIRayDirections.slang" });
-            desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "fragMain", .sourcePath = "assets/shaders/DDGIRayDirections.slang" });
-            m_ddgiRayDirectionsPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
         }
 
         // 4. Debug Spheres Pipeline (Rendered in Forward 3D pass into the HDR scene + entity ID targets)
