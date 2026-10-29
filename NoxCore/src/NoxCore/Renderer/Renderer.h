@@ -791,7 +791,9 @@ namespace Nox
                 s_Instance->deferAssetRelease(std::move(asset));
         }
 
-        // Device-local (VRAM) bytes the process uses, all of it (VK_EXT_memory_budget), as last sampled: a few times a second.
+        // Device-local (VRAM) bytes, as last sampled (a few times a second): what the engine's resources hold (allocated, not the
+        // allocator's blocks, which stay when what is in them is freed), and what the process uses in all (VK_EXT_memory_budget).
+        static uint64_t GetDeviceLocalAllocatedBytes();
         static uint64_t GetDeviceLocalMemoryUsage();
 
         // Drops cached path -> bindless-slot entries for the given (now freed) texture slots.

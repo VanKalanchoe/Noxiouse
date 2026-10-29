@@ -43,6 +43,8 @@ namespace Nox
         float GetProgress() const;
         std::string GetStage() const;
         AssetHandle GetScene() const { return m_Scene; }
+        // The world's middle, near the ground (world units): where the editor camera looks once it opens.
+        const glm::vec3& GetMiddle() const { return m_Middle; }
 
     private:
         struct Tile
@@ -65,5 +67,6 @@ namespace Nox
         bool m_Failed = false;
         bool m_Finished = false;
         AssetHandle m_Scene = 0;
+        glm::vec3 m_Middle{ 0.0f };
     };
 }

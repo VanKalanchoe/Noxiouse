@@ -306,9 +306,13 @@ namespace Nox
         if (m_TestWorldGeneration && m_TestWorldGeneration->Step())
         {
             const AssetHandle scene = m_TestWorldGeneration->Failed() ? AssetHandle(0) : m_TestWorldGeneration->GetScene();
+            const glm::vec3 middle = m_TestWorldGeneration->GetMiddle();
             m_TestWorldGeneration.reset();
             if (scene != 0)
+            {
+                m_FocusOnOpen = middle;
                 OpenScene(scene);
+            }
         }
         // Build HLODs: a step a frame; done, the scene is saved (its index names the new HLOD cells).
         if (m_HLODBuild && m_HLODBuild->Step())
@@ -2752,6 +2756,13 @@ namespace Nox
         SaveEditorCameras(); // the scene being left
         m_EditorScenePath = Project::GetActive()->GetEditorAssetManager()->GetFilePath(handle);
         RestoreEditorCameras();
+        if (m_FocusOnOpen)
+        {
+            m_EditorCamera.SetFocalPoint(*m_FocusOnOpen);
+            m_EditorCamera.SetDistance(WorldUnits::FromMeters(180.0f));
+            m_EditorCamera.SetOrientation(0.45f, 0.0f); // looking down at it
+            m_FocusOnOpen.reset();
+        }
         // A world opens with the cells around the editor camera (the World Partition panel loads others).
         if (m_EditorScene->IsWorldPartitioned())
             m_EditorScene->LoadWorldCells(m_EditorScene->WorldCellsAround(m_EditorCamera.GetPosition(),

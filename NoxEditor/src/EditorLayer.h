@@ -1,6 +1,7 @@
 #pragma once
 #include <array>
 #include <functional>
+#include <optional>
 #include <unordered_map>
 
 #include "NoxCore/Core/Layer.h"
@@ -325,6 +326,9 @@ namespace Nox
         StreamingTestWorldGenerator::Settings m_TestWorldSettings;
         bool m_OpenTestWorldDialog = false;
         Scope<StreamingTestWorldGenerator> m_TestWorldGeneration;
+        // Where the editor camera looks once the scene being opened is in (the generated world: its old view, if any, is another
+        // scene's, maybe under the new terrain).
+        std::optional<glm::vec3> m_FocusOnOpen;
         void UI_StreamingTestWorld();
         void StartHLODBuild();
         void CancelHLODBuild(const char* reason);

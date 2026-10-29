@@ -301,10 +301,14 @@ namespace Nox
 
         // What stays in the scene file: the camera over the middle (with the test, when named), the sun and the sky.
         const float middle = grid * cellSize * 0.5f;
+        m_Middle = glm::vec3(middle, WorldUnits::FromMeters(20.0f), middle);
         Entity camera = world->CreateEntity("Camera");
         camera.GetComponent<TransformComponent>().Translation = glm::vec3(middle, WorldUnits::FromMeters(60.0f), middle);
         camera.GetComponent<TransformComponent>().Rotation = glm::vec3(-0.2f, 0.0f, 0.0f);
-        camera.AddComponent<CameraComponent>().Primary = true;
+        CameraComponent& cameraComponent = camera.AddComponent<CameraComponent>();
+        cameraComponent.Primary = true;
+        // (A new camera is orthographic: a 10 unit box, nothing of a 3D world in it.)
+        cameraComponent.Camera.SetPerspective(glm::radians(60.0f), WorldUnits::FromMeters(0.1f), WorldUnits::FromMeters(1000.0f));
         if (!m_Settings.CameraScript.empty())
             camera.AddComponent<ScriptComponent>().ClassNames.push_back(m_Settings.CameraScript);
         Entity sun = world->CreateEntity("Sun");

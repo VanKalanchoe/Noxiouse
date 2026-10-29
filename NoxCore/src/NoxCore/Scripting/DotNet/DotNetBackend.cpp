@@ -189,7 +189,7 @@ namespace Nox
         // Nox.MemoryStats's layout.
         struct ManagedMemoryStats
         {
-            uint64_t ProcessBytes, GpuBytes;
+            uint64_t ProcessBytes, GpuBytes, GpuProcessBytes;
             int32_t LoadedAssets, LoadingAssets;
         };
 
@@ -198,7 +198,8 @@ namespace Nox
             *out = {};
             const Platform::ProcessMemory process = Platform::QueryProcessMemory();
             out->ProcessBytes = process.PrivateBytes != 0 ? process.PrivateBytes : process.WorkingSetBytes;
-            out->GpuBytes = Renderer::GetDeviceLocalMemoryUsage();
+            out->GpuBytes = Renderer::GetDeviceLocalAllocatedBytes();
+            out->GpuProcessBytes = Renderer::GetDeviceLocalMemoryUsage();
             if (Project::GetActive())
             {
                 if (const auto assets = Project::GetActive()->GetEditorAssetManager())

@@ -1350,7 +1350,7 @@ camera.
   VRAM, the second's worst frame -- then PASS or FAIL: no frame over 50 ms, the cells within 96 m of the camera in the world on
   every frame, and the second half of the lap needing no more RAM, VRAM or assets than the first (15 % + 64 MB slack). For it,
   script API 6: `Scene.GetWorldStreamingStats()` (cells by state, the world's bounds) and `Diagnostics.Memory` (process private
-  bytes, device-local VRAM in use, assets loaded / loading).
+  bytes, VRAM held by the engine's resources and by the process in all, assets loaded / loading).
 
 ### 5.14 Ray Tracing at Scale
 
