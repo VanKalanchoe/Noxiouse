@@ -252,16 +252,18 @@ float4 fragMain(
     // Emissive component (e.g. glowing panels)
     float3 emissiveLight = hitLut.emissiveFactor.rgb * hitLut.emissiveFactor.a;
 
-    // Multi-Bounce Diffuse GI: Sample previous frame's DDGI probes at the hit surface!
+    // Multi-bounce diffuse GI: last frame's atlases at the hit surface. Not on the atlases' first frame: nothing has written them yet
+    // (uninitialized memory can hold NaN, which the blend's hysteresis would then keep forever).
     float3 indirectLight = float3(0.0);
-    if (ubo->ddgiIrradianceTextureIndex != 0xFFFFFFFF && ubo->ddgiDistanceTextureIndex != 0xFFFFFFFF && pushConstant.frameIndex > 0)
+    if (pushConstant.prevIrradianceTextureIndex != 0xFFFFFFFF && pushConstant.prevDistanceTextureIndex != 0xFFFFFFFF)
     {
-        Texture2D prevIrrTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->ddgiIrradianceTextureIndex, 0));
-        Texture2D prevDistTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->ddgiDistanceTextureIndex, 0));
+        Texture2D prevIrrTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.prevIrradianceTextureIndex, 0));
+        Texture2D prevDistTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.prevDistanceTextureIndex, 0));
         SamplerState ddgiSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
 
         // The probes hold irradiance / pi (a cosine-weighted mean of radiance), as the lighting reads them: reflected = albedo * it.
-        float3 bouncedIrradiance = sample_ddgi_diffuse_surface(ubo, hitPos, hitNormal, hitNormal, -rayDir, prevIrrTex, prevDistTex, ddgiSampler);
+        float3 bouncedIrradiance = sample_ddgi_diffuse_surface(ubo, hitPos, hitNormal, hitNormal, -rayDir, prevIrrTex, prevDistTex, ddgiSampler,
+                                                               pushConstant.probeOffsetsTextureIndex);
         indirectLight = albedo * bouncedIrradiance;
     }
     else if (ubo->irradianceMapIndex != 0xFFFFFFFF)

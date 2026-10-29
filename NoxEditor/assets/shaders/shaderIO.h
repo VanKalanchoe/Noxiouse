@@ -1799,6 +1799,8 @@ struct PushConstantDDGIRadiance
     uint32_t probeCountTotal;
     uint32_t frameIndex;
     uint32_t probeOffsetsTextureIndex; // where the probes trace from: last frame's relocation (0xFFFFFFFF: the grid points)
+    uint32_t prevIrradianceTextureIndex; // multi-bounce: last frame's atlases (0xFFFFFFFF on their first frame: not written yet)
+    uint32_t prevDistanceTextureIndex;
 };
 
 struct PushConstantDDGIBlend

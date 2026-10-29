@@ -259,7 +259,8 @@ float3 sample_ddgi_cascade(
     float3 toViewer,
     Texture2D irradianceAtlas,
     Texture2D distanceAtlas,
-    SamplerState atlasSampler
+    SamplerState atlasSampler,
+    uint offsetsTextureIndex // the probe offsets that go with these atlases (0xFFFFFFFF: the grid points)
 )
 {
     const uint3 counts = ddgi_counts(ubo);
@@ -290,7 +291,7 @@ float3 sample_ddgi_cascade(
             {
                 const uint3 probeCoord = uint3(baseCoord + int3(dx, dy, dz));
                 const uint probeIndex = ddgi_storage_index(ubo, cascade, probeCoord);
-                const float3 probePos = origin + float3(probeCoord) * spacing + ddgi_probe_offset(ubo, probeIndex, ubo->ddgiProbeOffsetsTextureIndex);
+                const float3 probePos = origin + float3(probeCoord) * spacing + ddgi_probe_offset(ubo, probeIndex, offsetsTextureIndex);
 
                 // 1. Backface term: probes behind the surface fade smoothly instead of dropping out at once.
                 const float3 trueToProbe = probePos - worldPos;
@@ -371,6 +372,7 @@ float3 ddgi_geometric_normal(Texture2D<float> depthTex, int2 pixel, float2 viewp
 // The diffuse irradiance (/ pi, as the lighting reads it) at a surface: from the finest cascade around it, handing over to the next
 // coarser one over its last cell, and to the environment's irradiance (what the IBL path uses) beyond the coarsest.
 // toViewer: unit vector from the surface towards whoever sees it (the camera; a probe ray's origin for its hits).
+// offsetsTextureIndex: the probe offsets that go with the atlases (0xFFFFFFFF: the grid points).
 float3 sample_ddgi_diffuse_surface(
     UniformBufferObject* ubo,
     float3 worldPos,
@@ -379,7 +381,8 @@ float3 sample_ddgi_diffuse_surface(
     float3 toViewer,
     Texture2D irradianceAtlas,
     Texture2D distanceAtlas,
-    SamplerState atlasSampler
+    SamplerState atlasSampler,
+    uint offsetsTextureIndex
 )
 {
     float3 environment = float3(0.0);
@@ -405,7 +408,8 @@ float3 sample_ddgi_diffuse_surface(
     if (finest == cascadeCount)
         return environment;
 
-    float3 result = sample_ddgi_cascade(ubo, finest, worldPos, shadingNormal, geometricNormal, toViewer, irradianceAtlas, distanceAtlas, atlasSampler);
+    float3 result = sample_ddgi_cascade(ubo, finest, worldPos, shadingNormal, geometricNormal, toViewer, irradianceAtlas, distanceAtlas, atlasSampler,
+                                        offsetsTextureIndex);
     if (finestWeight < 1.0)
     {
         // Near the cascade's faces: what the next one out says (itself fading into the environment at its own faces).
@@ -416,11 +420,27 @@ float3 sample_ddgi_diffuse_surface(
             const float nextWeight = ddgi_cascade_weight(ubo, next, worldPos);
             if (nextWeight > 0.0)
                 outer = lerp(environment, sample_ddgi_cascade(ubo, next, worldPos, shadingNormal, geometricNormal, toViewer, irradianceAtlas,
-                                                              distanceAtlas, atlasSampler), nextWeight);
+                                                              distanceAtlas, atlasSampler, offsetsTextureIndex), nextWeight);
         }
         result = lerp(outer, result, finestWeight);
     }
     return result;
+}
+
+// This frame's atlases (the uniforms'), with their probe offsets.
+float3 sample_ddgi_diffuse_surface(
+    UniformBufferObject* ubo,
+    float3 worldPos,
+    float3 shadingNormal,
+    float3 geometricNormal,
+    float3 toViewer,
+    Texture2D irradianceAtlas,
+    Texture2D distanceAtlas,
+    SamplerState atlasSampler
+)
+{
+    return sample_ddgi_diffuse_surface(ubo, worldPos, shadingNormal, geometricNormal, toViewer, irradianceAtlas, distanceAtlas, atlasSampler,
+                                       ubo->ddgiProbeOffsetsTextureIndex);
 }
 
 // The common case: one normal for both, seen from the camera.

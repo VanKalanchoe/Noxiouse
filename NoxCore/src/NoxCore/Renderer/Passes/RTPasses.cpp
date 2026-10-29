@@ -435,8 +435,8 @@ namespace Nox
             {
                 ReadIfValid(builder, resources.TLAS);
                 ReadGpuScene(builder, resources);
-                // Multi-bounce: hits sample the atlases bound in the uniforms.
-                ReadDDGI(builder, resources, writeIndex);
+                // Multi-bounce: hits sample last frame's atlases (this frame's are written by the blends below).
+                ReadDDGI(builder, resources, readIndex);
                 // The probes trace from where last frame's relocation put them.
                 if (resources.DDGIProbeOffsets[readIndex].IsValid())
                     builder.Read(resources.DDGIProbeOffsets[readIndex]);
@@ -462,6 +462,8 @@ namespace Nox
                 radPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
                 radPush.probeOffsetsTextureIndex = res->DDGIProbeOffsets[readIndex].IsValid() && !m_frame.ddgiFirstFrame
                                                        ? context.Slot(res->DDGIProbeOffsets[readIndex]) : 0xFFFFFFFF;
+                radPush.prevIrradianceTextureIndex = m_frame.ddgiFirstFrame ? 0xFFFFFFFF : context.Slot(res->DDGIIrradiance[readIndex]);
+                radPush.prevDistanceTextureIndex = m_frame.ddgiFirstFrame ? 0xFFFFFFFF : context.Slot(res->DDGIDistance[readIndex]);
                 cmd.pushData(&radPush, sizeof(shaderio::PushConstantDDGIRadiance));
 
                 cmd.drawMeshTasks(1, 1, 1);
