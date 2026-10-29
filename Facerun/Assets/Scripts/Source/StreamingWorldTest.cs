@@ -22,6 +22,8 @@ public sealed class StreamingWorldTest : EntityBehaviour
     [Expose(Tooltip = "The camera's speed (40 m/s is 144 km/h)")] public float SpeedMetersPerSecond = 40.0f;
     [Expose(Tooltip = "The camera's height above 0")] public float HeightMeters = 70.0f;
     [Expose(Tooltip = "The circle's radius as a share of the world's smaller side")] public float RadiusFraction = 0.35f;
+    [Expose(Tooltip = "Laps flown: at high speed a lap is short, and the memory check compares the first half of the flight with the second")]
+    public int Laps = 1;
     [Expose(Tooltip = "A frame longer than this is a hitch")] public float HitchMilliseconds = 50.0f;
     [Expose(Tooltip = "Cells this close to the camera must be in the world on every frame")] public float HoleRangeMeters = 96.0f;
     [Expose(Tooltip = "Allowed growth of the second half's peak memory over the first half's")] public float MemoryGrowthPercent = 15.0f;
@@ -71,7 +73,7 @@ public sealed class StreamingWorldTest : EntityBehaviour
         m_Radius = MathF.Max(side * RadiusFraction, WorldUnits.FromMeters(50.0f));
         PlaceCamera();
         Log.Info($"[StreamingWorldTest] {world.Cells} cells, {Meters(world.BoundsMax.X - world.BoundsMin.X):0} x {Meters(world.BoundsMax.Z - world.BoundsMin.Z):0} m; " +
-                 $"a lap of {Meters(2.0f * MathF.PI * m_Radius):0} m at {SpeedMetersPerSecond:0} m/s; waiting for the first cells");
+                 $"{Math.Max(Laps, 1)} lap(s) of {Meters(2.0f * MathF.PI * m_Radius):0} m at {SpeedMetersPerSecond:0} m/s; waiting for the first cells");
     }
 
     protected override void OnUpdate(float deltaTime)
@@ -142,7 +144,7 @@ public sealed class StreamingWorldTest : EntityBehaviour
         float step = WorldUnits.FromMeters(SpeedMetersPerSecond) * deltaTime / m_Radius;
         m_Angle += step;
         m_LapAngle += step;
-        if (m_LapAngle >= 2.0f * MathF.PI)
+        if (m_LapAngle >= FlightAngle)
         {
             Sample();
             Finish();
@@ -154,7 +156,7 @@ public sealed class StreamingWorldTest : EntityBehaviour
     protected override void OnDestroy()
     {
         if (m_Phase == Phase.Flying)
-            Log.Info("[StreamingWorldTest] stopped before the lap was done (no result)");
+            Log.Info("[StreamingWorldTest] stopped before the flight was done (no result)");
     }
 
     void PlaceCamera()
@@ -173,13 +175,13 @@ public sealed class StreamingWorldTest : EntityBehaviour
     {
         WorldStreamingStats world = Scene.GetWorldStreamingStats();
         MemoryStats memory = Diagnostics.Memory;
-        bool firstHalf = m_LapAngle < MathF.PI;
+        bool firstHalf = m_LapAngle < FlightAngle * 0.5f;
         ref Peak peak = ref firstHalf ? ref m_FirstHalf : ref m_SecondHalf;
         peak.Process = Math.Max(peak.Process, memory.ProcessBytes);
         peak.Gpu = Math.Max(peak.Gpu, memory.GpuBytes);
         peak.Assets = Math.Max(peak.Assets, memory.LoadedAssets);
         peak.Cells = Math.Max(peak.Cells, world.Activated + world.Loaded + world.Loading);
-        Log.Info($"[StreamingWorldTest] {m_LapAngle / (2.0f * MathF.PI) * 100.0f,3:0} %  cells {world.Activated} in, {world.Loaded} loaded, " +
+        Log.Info($"[StreamingWorldTest] {m_LapAngle / FlightAngle * 100.0f,3:0} %  cells {world.Activated} in, {world.Loaded} loaded, " +
                  $"{world.Loading} loading  assets {memory.LoadedAssets} (+{memory.LoadingAssets})  RAM {Megabytes(memory.ProcessBytes):0} MB  " +
                  $"VRAM {Megabytes(memory.GpuBytes):0} MB  worst frame {m_SecondWorstFrame:0.0} ms");
         m_SecondWorstFrame = 0.0f;
@@ -241,6 +243,8 @@ public sealed class StreamingWorldTest : EntityBehaviour
         else
             Log.Info($"[StreamingWorldTest] FAIL: {string.Join("; ", failures)}");
     }
+
+    float FlightAngle => 2.0f * MathF.PI * Math.Max(Laps, 1);
 
     static float Meters(float worldUnits) => worldUnits / WorldUnits.FromMeters(1.0f);
     static double Megabytes(ulong bytes) => bytes / (1024.0 * 1024.0);
