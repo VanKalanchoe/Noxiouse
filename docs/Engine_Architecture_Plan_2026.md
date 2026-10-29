@@ -1378,7 +1378,9 @@ camera.
   cooked: built from its text and from its values, both written back as text and compared -- one that differs keeps its text, so a
   field the binary form does not know is never lost. Cooked on save (on the workers), by the test world's generator, copied by Save
   As, shipped by packaging; the cell's loading job reads the cooked file when it matches (`SceneLoader`, worker), else the text.
-  The fly-through counts the cells read cooked (script API 8: `WorldStreamingStats.CellsCooked`).
+  The fly-through counts the cells read cooked (script API 8: `WorldStreamingStats.CellsCooked`). Measured (1001 entities a cell,
+  2 GB world): read and built on a worker in 1-2 ms cooked against ~70 ms from text (up to 640 ms when Play starts dozens at once:
+  the text parse allocates heavily, and workers contend); the Read Scene scope averaged 0.8 ms cooked, 81 ms text.
 - **Nothing written while streaming:** the generator writes each tile's material (`.nmat`) beside its mesh and registers it, as a
   model's cook does: a mesh whose material file is missing writes and registers it when it loads, and with the registry's
   deferred write on the main thread that cost the 30 GB world (20k registry entries) ~400 ms every second of flight. The

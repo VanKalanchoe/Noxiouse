@@ -1655,10 +1655,10 @@ namespace Nox
         if (!m_Loader.IsIdle() || !m_Streamer.IsIdle())
             m_SweepDuringLoads = true;
 
-        // Materials reference textures by path, not handle. Cached hits skip the filesystem entirely;
-        // the registry index is only built if some path isn't cached yet.
-        std::unordered_map<std::string, AssetHandle> textureByPath;
-        bool textureIndexBuilt = false;
+        // Materials reference textures by path, not handle. Cached hits skip the filesystem entirely; a path not cached yet is looked
+        // up in the registry's path index (every file and source path, and former paths). Building an index of the whole registry
+        // for it -- on every sweep that met a new path, i.e. every sweep while a world streams in new tiles -- was most of the
+        // sweep's time.
 
         if (m_TexturePathMissesRegistrySize != m_AssetRegistry.size())
         {
@@ -1676,18 +1676,6 @@ namespace Nox
             if (m_TexturePathMisses.contains(texturePath))
                 return 0;
 
-            if (!textureIndexBuilt)
-            {
-                for (const auto& [handle, metadata] : m_AssetRegistry)
-                {
-                    if (metadata.Type != AssetType::Texture2D)
-                        continue;
-                    if (!metadata.SourceFilePath.empty())
-                        textureByPath[metadata.SourceFilePath.generic_string()] = handle;
-                    textureByPath[metadata.FilePath.generic_string()] = handle;
-                }
-                textureIndexBuilt = true;
-            }
 
             std::filesystem::path relativePath(texturePath);
             if (relativePath.is_absolute())
@@ -1712,17 +1700,17 @@ namespace Nox
                 }
             }
 
-            auto it = textureByPath.find(relativePath.generic_string());
-            if (it == textureByPath.end())
-                it = textureByPath.find(GeneratedAssetPath(relativePath, "Textures", ".ntex").generic_string());
-            if (it == textureByPath.end())
+            AssetHandle found = FindHandleByPath(relativePath, AssetType::Texture2D);
+            if (found == 0)
+                found = FindHandleByPath(GeneratedAssetPath(relativePath, "Textures", ".ntex"), AssetType::Texture2D);
+            if (found == 0)
             {
                 m_TexturePathMisses.insert(texturePath);
                 return 0;
             }
 
-            m_TexturePathCache.emplace(texturePath, it->second);
-            return it->second;
+            m_TexturePathCache.emplace(texturePath, found);
+            return found;
         };
 
         // --- Mark ---
