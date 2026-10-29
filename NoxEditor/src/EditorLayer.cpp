@@ -992,6 +992,11 @@ namespace Nox
                         stats.RootBytes / MB, stats.PoolBytes / MB);
             ImGui::Text("Requests %u (dropped %u) | waiting for room %u | loaded %llu, evicted %llu", stats.Requests, stats.DroppedRequests,
                         stats.WantedNotResident, static_cast<unsigned long long>(stats.PageLoads), static_cast<unsigned long long>(stats.PageEvictions));
+            // Unreal's "Nanite streaming pool too small": what the view wants does not fit, so coarser levels stand in near the camera
+            // -- thin geometry (leaf cards, curtain folds) simplifies away in them and disappears.
+            if (stats.WantedBytes > stats.PoolBytes)
+                ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.2f, 1.0f), "Pool too small: %.0f MB wanted, %.0f MB pool (coarser geometry near the camera)",
+                                   stats.WantedBytes / MB, stats.PoolBytes / MB);
             int poolOverrideMB = static_cast<int>(streamer.GetPoolOverride() / (1024 * 1024));
             if (ImGui::SliderInt("Geometry Pool Override (MB, 0 = budget)", &poolOverrideMB, 0, 4096))
                 streamer.SetPoolOverride(static_cast<uint64_t>(poolOverrideMB) * 1024 * 1024);
