@@ -12,9 +12,12 @@
 
 namespace Nox
 {
+    class Scene;
+
     // The 6c test world (docs/Engine_Architecture_Plan_2026.md §5.13.4): a world partition of N x N cells, each holding a terrain
     // tile of its own -- a unique height field mesh and a unique texture -- so that the world's data is larger than RAM and VRAM
-    // and only streaming can show it. Written straight in cooked form (.nsmesh with its cluster LOD, .ntex BC1: nothing to
+    // and only streaming can show it -- and props by the hundred (entities sharing three meshes), so that its cells are as dense as
+    // an open world's. Written straight in cooked form (.nsmesh with its cluster LOD, .ntex BC1: nothing to
     // import) on workers, then registered as assets on the main thread, with the cell files, their index and the scene (a camera,
     // a sun, a procedural sky).
     class StreamingTestWorldGenerator
@@ -27,6 +30,7 @@ namespace Nox
             float LoadingRangeMeters = 256.0f;
             uint32_t TileQuads = 128;          // per side: (n + 1)^2 vertices, 2 n^2 triangles
             uint32_t TextureSize = 2048;
+            uint32_t PropsPerCell = 250;       // rocks, pines, stumps: entities of their own, three meshes shared by every cell
             std::string Folder = "StreamingTest";  // under the asset directory
             std::string CameraScript;              // a script class put on the camera (the fly-through test), optional
         };
@@ -54,7 +58,9 @@ namespace Nox
             bool Written = false;
         };
 
-        void Finish();
+        void BeginCells();
+        bool WriteCell(uint32_t x, uint32_t z);
+        void FinishScene();
 
         Settings m_Settings;
         std::filesystem::path m_AssetDirectory;
@@ -67,6 +73,13 @@ namespace Nox
         bool m_Failed = false;
         bool m_Finished = false;
         AssetHandle m_Scene = 0;
+        // Main thread, once the tiles are written: the world scene being made, the scene each cell's entities are made in (emptied
+        // after each), and how far the cells are.
+        Ref<Scene> m_World;
+        Ref<Scene> m_CellScene;
+        uint32_t m_CellsWritten = 0;
+        uint64_t m_CellBytes = 0;
+        AssetHandle m_PropMeshes[3] = {};
         glm::vec3 m_Middle{ 0.0f };
     };
 }

@@ -390,6 +390,9 @@ namespace Nox
         streamed.ActivateNext = 0;
         streamed.ActivatedEntities.clear();
         streamed.Empty = false;
+        streamed.Requested = std::chrono::steady_clock::now();
+        streamed.ReadMs = streamed.BuildMs = streamed.ActivateMs = 0.0;
+        streamed.BuildSteps = streamed.ActivateSteps = 0;
         if (auto memory = m_World.Overrides.find(streamed.Cell); memory != m_World.Overrides.end())
         {
             if (memory->second.empty())
@@ -430,6 +433,9 @@ namespace Nox
             }
             // Loaded: what it references is requested now, to be in when it activates.
             // Every entity of the built cell: the file's in file order, then any its components made while it was built.
+            streamed.ReadMs = streamed.Loader->GetReadMs();
+            streamed.BuildMs = streamed.Loader->GetCreateMs();
+            streamed.BuildSteps = streamed.Loader->GetCreateSteps();
             streamed.StagedEntities = streamed.Loader->GetCreatedEntities();
             streamed.Loader.reset();
             {
@@ -460,9 +466,28 @@ namespace Nox
                 return CellStep::Busy;
             }
         }
-        const double spent = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
-        if (!ActivateWorldCellEntities(streamed, std::max(budgetMs - spent, 0.0)))
+        const auto activateStart = std::chrono::steady_clock::now();
+        const double spent = std::chrono::duration<double, std::milli>(activateStart - start).count();
+        const bool activated = ActivateWorldCellEntities(streamed, std::max(budgetMs - spent, 0.0));
+        streamed.ActivateMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - activateStart).count();
+        ++streamed.ActivateSteps;
+        if (!activated)
             return CellStep::Busy;
+
+        const double latency = std::chrono::duration<double>(std::chrono::steady_clock::now() - streamed.Requested).count();
+        WorldStreamingCounters& counters = m_WorldStreamingCounters;
+        ++counters.CellsActivated;
+        counters.EntitiesActivated += streamed.StagedEntities.size();
+        counters.ReadMs += streamed.ReadMs;
+        counters.BuildMs += streamed.BuildMs;
+        counters.ActivateMs += streamed.ActivateMs;
+        counters.AssetWaitSeconds += streamed.AssetWait;
+        counters.LatencySeconds += latency;
+        counters.MaxLatencySeconds = std::max(counters.MaxLatencySeconds, latency);
+        NOX_CORE_TRACE("World cell `{}` activated: {} entities; read and parsed {:.1f} ms (worker), built {:.1f} ms in {} steps, assets "
+                       "waited {:.2f} s, activated {:.1f} ms in {} steps; {:.2f} s after it was wanted", streamed.Name,
+                       streamed.StagedEntities.size(), streamed.ReadMs, streamed.BuildMs, streamed.BuildSteps, streamed.AssetWait,
+                       streamed.ActivateMs, streamed.ActivateSteps, latency);
         streamed.Staged = nullptr;
         streamed.StagedEntities = {};
         streamed.Assets = {};
@@ -699,6 +724,7 @@ namespace Nox
         if (!m_World.Settings.Enabled)
             return;
         m_WorldStreaming = true;
+        m_WorldStreamingCounters = {};
         NOX_PROFILE_SCOPE("World Streaming Start");
 
         // 0. The HLODs the editor streamed are in the copy: the session streams its own.

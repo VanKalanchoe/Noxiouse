@@ -49,6 +49,11 @@ namespace Nox
         const std::filesystem::path& GetPath() const { return m_Path; }
         Ref<Scene> GetScene() const { return m_Scene; }
         const std::vector<UUID>& GetCreatedEntities() const { return m_Created; }
+        // Where the time went (world streaming's stats, §5.13.4): reading and parsing the file on a worker (valid once Step has
+        // started creating), and creating the entities on the main thread, in how many Step calls.
+        double GetReadMs() const;
+        double GetCreateMs() const { return m_CreateMs; }
+        uint32_t GetCreateSteps() const { return m_CreateSteps; }
 
     private:
         void StartReading(std::string text);
@@ -67,5 +72,7 @@ namespace Nox
         bool m_Failed = false;
         size_t m_Next = 0;
         size_t m_Total = 0;
+        double m_CreateMs = 0.0;
+        uint32_t m_CreateSteps = 0;
     };
 }

@@ -61,6 +61,22 @@ public struct WorldStreamingStats
     /// <summary>The bounds of every cell's content, world units (zero without cells).</summary>
     public Vector3 BoundsMin;
     public Vector3 BoundsMax;
+
+    // What the cells activated since Play began cost (sums: difference two readings for a stretch of time).
+    /// <summary>Cells that went into the world, and their entities.</summary>
+    public long CellsActivated;
+    public long EntitiesActivated;
+    /// <summary>Reading and parsing their files, on workers (ms).</summary>
+    public double ReadMs;
+    /// <summary>Building them (creating their entities) on the main thread (ms).</summary>
+    public double BuildMs;
+    /// <summary>Copying them into the world on the main thread (ms).</summary>
+    public double ActivateMs;
+    /// <summary>Their activations waiting for their assets (s).</summary>
+    public double AssetWaitSeconds;
+    /// <summary>From a cell being wanted to it being in the world (s); the longest of them.</summary>
+    public double LatencySeconds;
+    public double MaxLatencySeconds;
 }
 
 /// <summary>

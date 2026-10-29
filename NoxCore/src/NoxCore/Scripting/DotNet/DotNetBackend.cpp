@@ -1,4 +1,5 @@
 #include "DotNetBackend.h"
+#include <cstddef>
 #include <cstdlib>
 
 #include "CoralCompat.h"
@@ -153,7 +154,11 @@ namespace Nox
         {
             int32_t Cells, Activated, Loaded, Loading;
             ManagedVector3 BoundsMin, BoundsMax;
+            // Scene::WorldStreamingCounters
+            int64_t CellsActivated, EntitiesActivated;
+            double ReadMs, BuildMs, ActivateMs, AssetWaitSeconds, LatencySeconds, MaxLatencySeconds;
         };
+        static_assert(offsetof(ManagedWorldStreamingStats, CellsActivated) == 40, "Nox.WorldStreamingStats's layout");
 
         // The world's cells (its grid, not the HLODs') by stage, and the bounds of their content (world units).
         void SceneGetWorldStreamingStats(ManagedWorldStreamingStats* out)
@@ -175,6 +180,15 @@ namespace Nox
                 out->BoundsMin = { boundsMin.x, boundsMin.y, boundsMin.z };
                 out->BoundsMax = { boundsMax.x, boundsMax.y, boundsMax.z };
             }
+            const Scene::WorldStreamingCounters& counters = s_Scene->GetWorldStreamingCounters();
+            out->CellsActivated = static_cast<int64_t>(counters.CellsActivated);
+            out->EntitiesActivated = static_cast<int64_t>(counters.EntitiesActivated);
+            out->ReadMs = counters.ReadMs;
+            out->BuildMs = counters.BuildMs;
+            out->ActivateMs = counters.ActivateMs;
+            out->AssetWaitSeconds = counters.AssetWaitSeconds;
+            out->LatencySeconds = counters.LatencySeconds;
+            out->MaxLatencySeconds = counters.MaxLatencySeconds;
             for (const WorldCellCoord& cell : s_Scene->GetLoadedWorldCells(true))
             {
                 switch (s_Scene->GetWorldCellStage(cell))

@@ -3075,6 +3075,11 @@ namespace Nox
             if (ImGui::DragInt("Tile Quads", &quads, 1.0f, 8, 512))
                 settings.TileQuads = static_cast<uint32_t>(quads);
             ImGui::SetItemTooltip("Per side: 128 is 33k triangles a tile.");
+            int props = static_cast<int>(settings.PropsPerCell);
+            if (ImGui::DragInt("Props per Cell", &props, 5.0f, 0, 5000))
+                settings.PropsPerCell = static_cast<uint32_t>(std::max(props, 0));
+            ImGui::SetItemTooltip("Rocks, pines and stumps: an entity each (sharing three meshes), so that cells are as dense as an open\n"
+                                  "world's and their entities' cost shows (the fly-through logs it per cell). 0: only the ground.");
             int texture = 0; // 256 << index
             while (texture < 4 && (256u << texture) < settings.TextureSize)
                 ++texture;

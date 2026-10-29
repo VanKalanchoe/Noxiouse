@@ -7,6 +7,7 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+#include <chrono>
 #include <box2d/id.h>
 
 #include "EntityCommandBuffer.h"
@@ -149,6 +150,21 @@ namespace Nox
         // Unreal's IsStreamingCompleted: every world cell whose content is within `range` (world units) of a point has reached `stage`
         // (Loaded: also those activating or activated; Activated: in the world). E.g. a teleport waits for its target to be Loaded.
         bool IsWorldStreamingCompleted(const glm::vec3& point, float range, WorldCellStage stage) const;
+        // What the cells activated since Play / Simulate began cost (§5.13.4; Unreal's stat streaming): reading and parsing their
+        // files on workers, building them and copying them into the world on the main thread, waiting for their assets, and the
+        // time from a cell being wanted to it being in the world.
+        struct WorldStreamingCounters
+        {
+            uint64_t CellsActivated = 0;
+            uint64_t EntitiesActivated = 0;
+            double ReadMs = 0.0;           // workers
+            double BuildMs = 0.0;          // main thread
+            double ActivateMs = 0.0;       // main thread
+            double AssetWaitSeconds = 0.0;
+            double LatencySeconds = 0.0;   // summed: divide by CellsActivated
+            double MaxLatencySeconds = 0.0;
+        };
+        const WorldStreamingCounters& GetWorldStreamingCounters() const { return m_WorldStreamingCounters; }
         // includeLoading: also the cells on their way in (and the loaded ones not activated).
         std::vector<WorldCellCoord> GetLoadedWorldCells(bool includeLoading, int32_t grid = WorldGrid::WorldGridIndex) const;
         bool IsWorldStreamingBusy() const; // a cell is loading, activating or about to unload
@@ -317,10 +333,15 @@ namespace Nox
             float AssetWait = 0.0f;               // seconds its activation has waited for them
             size_t ActivateNext = 0;              // the next staged entity copied into the world
             std::vector<UUID> ActivatedEntities;  // copied so far
+            // Its costs (WorldStreamingCounters), from the request that staged it.
+            std::chrono::steady_clock::time_point Requested{};
+            double ReadMs = 0.0, BuildMs = 0.0, ActivateMs = 0.0;
+            uint32_t BuildSteps = 0, ActivateSteps = 0;
         };
         std::vector<StreamedLevel> m_Levels;
         WorldPartition m_World;
         bool m_WorldStreaming = false; // Play / Simulate of a world: cells follow the streaming sources
+        WorldStreamingCounters m_WorldStreamingCounters;
         bool m_ShowHLODs = true;       // editing: the HLOD grid streams around the editor camera
         std::vector<StreamingSource> m_StreamingSources;
 

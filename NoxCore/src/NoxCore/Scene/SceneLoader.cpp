@@ -19,6 +19,7 @@ namespace Nox
         bool Runtime = false;
         bool Ok = false;
         std::string Error;
+        double ReadMs = 0.0;    // the file read and parsed
         YAML::Node Document;
         YAML::Node Entities;    // the document's entity sequence
     };
@@ -52,6 +53,13 @@ namespace Nox
             if (token.IsCancelled()) // (the loader is gone)
                 return;
             Parsed& parsed = *shared;
+            const auto readStart = std::chrono::steady_clock::now();
+            struct ReadTimer
+            {
+                Parsed& Result;
+                std::chrono::steady_clock::time_point Start;
+                ~ReadTimer() { Result.ReadMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - Start).count(); }
+            } timer{ parsed, readStart };
             std::string bytes = std::move(text);
             if (!inMemory && !VFS::ReadText(path, bytes))
                 parsed.Error = "could not open it";
@@ -110,6 +118,19 @@ namespace Nox
             parsed.Bytes.clear();
             return true;
         }
+
+        // (Timed from here: what the main thread spends creating, and in how many steps.)
+        const auto stepStart = std::chrono::steady_clock::now();
+        struct StepTimer
+        {
+            SceneLoader& Loader;
+            std::chrono::steady_clock::time_point Start;
+            ~StepTimer()
+            {
+                Loader.m_CreateMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - Start).count();
+                ++Loader.m_CreateSteps;
+            }
+        } stepTimer{ *this, stepStart };
 
         Scene& scene = *m_Into;
         if (!m_Started)
@@ -182,6 +203,11 @@ namespace Nox
         parsed.Document = YAML::Node();
         parsed.Entities = YAML::Node();
         return true;
+    }
+
+    double SceneLoader::GetReadMs() const
+    {
+        return m_Read.IsReady() ? m_Parsed->ReadMs : 0.0;
     }
 
     float SceneLoader::GetProgress() const

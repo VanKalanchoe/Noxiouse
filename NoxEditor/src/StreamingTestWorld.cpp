@@ -1,6 +1,7 @@
 #include "StreamingTestWorld.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <fstream>
 
@@ -9,6 +10,7 @@
 #include "NoxCore/Asset/MaterialSerializer.h"
 #include "NoxCore/Asset/MeshImporter.h"
 #include "NoxCore/Asset/MeshSerializer.h"
+#include "NoxCore/Asset/PrimitiveShapes.h"
 #include "NoxCore/Asset/TextureImporter.h"
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Core/WorldUnits.h"
@@ -81,6 +83,76 @@ namespace Nox
             material.Name = TileName(x, z).string();
             return MeshImporter::MaterialAssetPath(MeshPath(folder, x, z), material, 0);
         }
+
+        // --- Props: a few meshes every cell shares (as a real world reuses its rocks and trees), scattered by the hundred a cell ---
+
+        enum class Prop : uint8_t { Rock, Pine, Stump, Count };
+        constexpr const char* PropNames[] = { "Prop_Rock", "Prop_Pine", "Prop_Stump" };
+        constexpr const char* PropEntityNames[] = { "Rock", "Pine", "Stump" };
+        std::filesystem::path PropMeshPath(const std::string& folder, Prop prop) { return std::filesystem::path(folder) / "Meshes" / (std::string(PropNames[static_cast<int>(prop)]) + ".nsmesh"); }
+        std::filesystem::path PropMaterialPath(const std::string& folder, Prop prop)
+        {
+            MaterialData material;
+            material.Name = PropNames[static_cast<int>(prop)];
+            return MeshImporter::MaterialAssetPath(PropMeshPath(folder, prop), material, 0);
+        }
+
+        // A basic shape (meters, centered on the origin) cooked as a prop's mesh, with its material.
+        bool WritePropMesh(const std::filesystem::path& assetDirectory, const std::string& folder, Prop prop, std::string& outError)
+        {
+            static constexpr PrimitiveShape Shapes[] = { PrimitiveShape::Sphere, PrimitiveShape::Cone, PrimitiveShape::Cylinder };
+            static constexpr uint32_t Segments[] = { 10, 12, 12 };
+            static const glm::vec4 Colors[] = { { 0.36f, 0.35f, 0.33f, 1.0f }, { 0.09f, 0.20f, 0.08f, 1.0f }, { 0.30f, 0.20f, 0.12f, 1.0f } };
+            const int index = static_cast<int>(prop);
+            const PrimitiveGeometry geometry = PrimitiveShapes::Generate(Shapes[index], Segments[index]);
+
+            MeshData mesh;
+            mesh.Name = PropNames[index];
+            mesh.Vertices.resize(geometry.Vertices.size());
+            for (size_t i = 0; i < geometry.Vertices.size(); ++i)
+            {
+                shaderio::Vertex& vertex = mesh.Vertices[i];
+                vertex.pos = geometry.Vertices[i].Position * WorldUnits::FromMeters(1.0f);
+                vertex.normal = geometry.Vertices[i].Normal;
+                vertex.uv0 = vertex.uv1 = geometry.Vertices[i].TexCoord;
+                vertex.tangent = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);
+            }
+            MeshImporter::BuildCookedGeometry(mesh, geometry.Indices, true);
+
+            MaterialData material;
+            material.Name = mesh.Name;
+            material.BaseColorFactor = Colors[index];
+            material.RoughnessFactor = 0.85f;
+            material.MetallicFactor = 0.0f;
+            std::error_code error;
+            const std::filesystem::path meshFile = assetDirectory / PropMeshPath(folder, prop);
+            const std::filesystem::path materialFile = assetDirectory / PropMaterialPath(folder, prop);
+            std::filesystem::create_directories(meshFile.parent_path(), error);
+            MeshSerializer::SerializeStaticMesh(meshFile, { mesh }, { material });
+            if (!std::filesystem::exists(meshFile, error) || !MaterialSerializer::Serialize(materialFile, material))
+            {
+                outError = "could not write " + meshFile.generic_string();
+                return false;
+            }
+            return true;
+        }
+
+        // A small deterministic generator (PCG32): the same world every time.
+        struct Random
+        {
+            uint64_t State;
+            explicit Random(uint64_t seed) : State(seed * 6364136223846793005ull + 1442695040888963407ull) {}
+            float Next() // 0..1
+            {
+                const uint64_t old = State;
+                State = old * 6364136223846793005ull + 1442695040888963407ull;
+                const uint32_t xorshifted = static_cast<uint32_t>(((old >> 18u) ^ old) >> 27u);
+                const uint32_t rotation = static_cast<uint32_t>(old >> 59u);
+                const uint32_t value = (xorshifted >> rotation) | (xorshifted << ((32u - rotation) & 31u));
+                return static_cast<float>(value >> 8) / static_cast<float>(1u << 24);
+            }
+            float Range(float low, float high) { return low + (high - low) * Next(); }
+        };
 
         // One tile: its height field mesh (cooked, cluster LOD) and its texture (BC1), at assetDirectory / their paths. Returns the
         // bytes written; its height range (world units) in min / max.
@@ -201,7 +273,15 @@ namespace Nox
         NOX_CORE_INFO("Streaming test world: {:.1f} GB of {} m tiles into '{}'", m_Settings.TargetGigabytes, m_Settings.CellSizeMeters, m_Settings.Folder);
         m_Job = JobSystem::Get().Async("Generate Streaming Test World", JobPriority::Normal, [this](const CancellationToken& token)
         {
-            // The first tile tells the size of one; the grid is the target over that.
+            // The props every cell shares, then the tiles: the first tells the size of one; the grid is the target over that.
+            if (m_Settings.PropsPerCell > 0)
+            {
+                for (int prop = 0; prop < static_cast<int>(Prop::Count); ++prop)
+                {
+                    if (!WritePropMesh(m_AssetDirectory, m_Settings.Folder, static_cast<Prop>(prop), *m_Error))
+                        return;
+                }
+            }
             float minHeight, maxHeight;
             const uint64_t first = WriteTile(m_AssetDirectory, m_Settings, 0, 0, minHeight, maxHeight, *m_Error);
             if (first == 0)
@@ -237,7 +317,11 @@ namespace Nox
     float StreamingTestWorldGenerator::GetProgress() const
     {
         const uint32_t grid = m_Grid;
-        return grid == 0 ? 0.0f : static_cast<float>(m_Done) / static_cast<float>(grid * grid);
+        if (grid == 0)
+            return 0.0f;
+        // The tiles (on workers) are most of the time; the cells (main thread) the rest.
+        const float cells = static_cast<float>(grid) * grid;
+        return m_World ? 0.8f + 0.2f * static_cast<float>(m_CellsWritten) / cells : 0.8f * static_cast<float>(m_Done) / cells;
     }
 
     std::string StreamingTestWorldGenerator::GetStage() const
@@ -245,6 +329,9 @@ namespace Nox
         const uint32_t grid = m_Grid;
         if (grid == 0)
             return "Generating the first tile";
+        if (m_World)
+            return "Cell " + std::to_string(m_CellsWritten) + " / " + std::to_string(grid * grid) + " (" + std::to_string(m_CellBytes >> 20) +
+                   " MB of cells)";
         return "Tile " + std::to_string(m_Done.load()) + " / " + std::to_string(grid * grid) + " (" + std::to_string(m_Bytes.load() >> 20) + " MB)";
     }
 
@@ -254,72 +341,154 @@ namespace Nox
             return true;
         if (!m_Job.IsReady())
             return false;
-        m_Finished = true;
         const uint32_t grid = m_Grid;
-        if (!m_Error->empty() || grid == 0 || m_Done != grid * grid)
+        if (!m_World)
         {
-            NOX_CORE_ERROR("Streaming test world: not generated ({})", m_Error->empty() ? std::string("stopped") : *m_Error);
-            m_Failed = true;
-            return true;
+            if (!m_Error->empty() || grid == 0 || m_Done != grid * grid)
+            {
+                NOX_CORE_ERROR("Streaming test world: not generated ({})", m_Error->empty() ? std::string("stopped") : *m_Error);
+                m_Failed = m_Finished = true;
+                return true;
+            }
+            BeginCells();
         }
-        Finish();
+        // The cells, a slice a frame: with hundreds of props a cell, all of them at once would hold the editor for a minute.
+        const auto start = std::chrono::steady_clock::now();
+        while (m_CellsWritten < grid * grid && std::chrono::steady_clock::now() - start < std::chrono::milliseconds(12))
+        {
+            if (!WriteCell(m_CellsWritten % grid, m_CellsWritten / grid))
+            {
+                m_Failed = m_Finished = true;
+                return true;
+            }
+            ++m_CellsWritten;
+        }
+        if (m_CellsWritten < grid * grid)
+            return false;
+        FinishScene();
+        m_Finished = true;
         return true;
     }
 
-    void StreamingTestWorldGenerator::Finish()
+    void StreamingTestWorldGenerator::BeginCells()
     {
-        // Main thread: the tiles registered as assets (a new one, or the one already at that path: generated again), their cells
+        // Main thread from here: the assets registered (a new one, or the one already at that path: generated again), the cells
         // written with the index, then the scene.
         EditorAssetManager& assets = *Project::GetActive()->GetEditorAssetManager();
-        auto registered = [&](AssetType type, const std::filesystem::path& path) { return assets.RegisterGeneratedFile(path, type); };
-
-        const uint32_t grid = m_Grid;
-        const float cellSize = WorldUnits::FromMeters(m_Settings.CellSizeMeters);
-        const std::filesystem::path scenePath = std::filesystem::path(m_Settings.Folder) / "StreamingTestWorld.nox";
-        Ref<Scene> world = CreateRef<Scene>();
-        WorldPartition& partition = world->GetWorldPartition();
+        if (m_Settings.PropsPerCell > 0)
+        {
+            for (int prop = 0; prop < static_cast<int>(Prop::Count); ++prop)
+            {
+                assets.RegisterGeneratedFile(PropMaterialPath(m_Settings.Folder, static_cast<Prop>(prop)), AssetType::Material);
+                m_PropMeshes[prop] = assets.RegisterGeneratedFile(PropMeshPath(m_Settings.Folder, static_cast<Prop>(prop)), AssetType::StaticMesh);
+            }
+        }
+        m_World = CreateRef<Scene>();
+        m_CellScene = CreateRef<Scene>();
+        WorldPartition& partition = m_World->GetWorldPartition();
         partition.Settings.Enabled = true;
         partition.Settings.CellSize = m_Settings.CellSizeMeters;
         partition.Settings.LoadingRange = m_Settings.LoadingRangeMeters;
         partition.CellDirectory = std::filesystem::path(m_Settings.Folder) / "StreamingTestWorld_Cells";
         std::error_code error;
         std::filesystem::create_directories(m_AssetDirectory / partition.CellDirectory, error);
+    }
 
-        // The tiles, one entity and one cell each (written as a save writes a cell).
-        Ref<Scene> tiles = CreateRef<Scene>();
-        for (uint32_t z = 0; z < grid; ++z)
+    bool StreamingTestWorldGenerator::WriteCell(uint32_t x, uint32_t z)
+    {
+        // One tile and its props, one cell (written as a save writes a cell). The props stand inside the tile: the cell is theirs too.
+        EditorAssetManager& assets = *Project::GetActive()->GetEditorAssetManager();
+        WorldPartition& partition = m_World->GetWorldPartition();
+        Scene& scene = *m_CellScene;
+        const float cellSize = WorldUnits::FromMeters(m_Settings.CellSizeMeters);
+        const Tile& tile = m_Tiles[static_cast<size_t>(z) * m_Grid + x];
+        assets.RegisterGeneratedFile(TexturePath(m_Settings.Folder, x, z), AssetType::Texture2D);
+        assets.RegisterGeneratedFile(MaterialPath(m_Settings.Folder, x, z), AssetType::Material);
+        const AssetHandle mesh = assets.RegisterGeneratedFile(MeshPath(m_Settings.Folder, x, z), AssetType::StaticMesh);
+
+        std::vector<Entity> roots;
+        roots.reserve(m_Settings.PropsPerCell + 1);
+        Entity ground = scene.CreateEntity(TileName(x, z).string());
+        ground.GetComponent<TransformComponent>().Translation = glm::vec3(x * cellSize, 0.0f, z * cellSize);
+        ground.AddComponent<MeshComponent>(mesh);
+        roots.push_back(ground);
+
+        float top = tile.MaxHeight;
+        Random random((static_cast<uint64_t>(x) << 32) | z);
+        constexpr float Margin = 3.0f; // meters: more than the widest prop's half width
+        const float side = m_Settings.CellSizeMeters;
+        for (uint32_t index = 0; index < m_Settings.PropsPerCell; ++index)
         {
-            for (uint32_t x = 0; x < grid; ++x)
+            const float px = x * side + random.Range(Margin, side - Margin);
+            const float pz = z * side + random.Range(Margin, side - Margin);
+            const float groundHeight = HeightMeters(px, pz);
+            const float kind = random.Next();
+            Prop prop;
+            glm::vec3 scale, rotation(0.0f, random.Range(0.0f, 6.2831853f), 0.0f);
+            float y; // the shape's center, meters
+            if (kind < 0.5f) // a rock, partly sunk, a little tilted
             {
-                const Tile& tile = m_Tiles[static_cast<size_t>(z) * grid + x];
-                registered(AssetType::Texture2D, TexturePath(m_Settings.Folder, x, z));
-                registered(AssetType::Material, MaterialPath(m_Settings.Folder, x, z));
-                const AssetHandle mesh = registered(AssetType::StaticMesh, MeshPath(m_Settings.Folder, x, z));
-                Entity entity = tiles->CreateEntity(TileName(x, z).string());
-                entity.GetComponent<TransformComponent>().Translation = glm::vec3(x * cellSize, 0.0f, z * cellSize);
-                entity.AddComponent<MeshComponent>(mesh);
-
-                const glm::vec3 boundsMin(x * cellSize, tile.MinHeight, z * cellSize);
-                const glm::vec3 boundsMax((x + 1) * cellSize, tile.MaxHeight, (z + 1) * cellSize);
-                const WorldCellCoord cell = WorldGrid::CellFor(boundsMin, boundsMax, cellSize);
-                uint32_t count = 0;
-                const std::string text = SceneSerializer::WorldCellText(*tiles, { entity }, WorldGrid::CellName(cell), &count);
-                std::ofstream out(m_AssetDirectory / partition.CellFile(cell), std::ios::binary | std::ios::trunc);
-                out << text;
-                if (!out)
-                {
-                    NOX_CORE_ERROR("Streaming test world: could not write {}", partition.CellFile(cell).generic_string());
-                    m_Failed = true;
-                    return;
-                }
-                partition.Cells[cell] = WorldCellInfo{ boundsMin, boundsMax, count };
+                prop = Prop::Rock;
+                const float size = random.Range(0.6f, 2.4f);
+                scale = glm::vec3(size, size * random.Range(0.45f, 0.75f), size * random.Range(0.8f, 1.2f));
+                rotation.x = random.Range(-0.25f, 0.25f);
+                y = groundHeight + scale.y * 0.3f;
             }
+            else if (kind < 0.85f) // a pine
+            {
+                prop = Prop::Pine;
+                const float height = random.Range(6.0f, 12.0f);
+                scale = glm::vec3(height * 0.35f, height, height * 0.35f);
+                y = groundHeight + height * 0.5f - 0.2f;
+            }
+            else
+            {
+                prop = Prop::Stump;
+                const float height = random.Range(0.4f, 0.8f);
+                const float width = random.Range(0.5f, 0.9f);
+                scale = glm::vec3(width, height, width);
+                y = groundHeight + height * 0.5f - 0.1f;
+            }
+            Entity entity = scene.CreateEntity(PropEntityNames[static_cast<int>(prop)]);
+            TransformComponent& transform = entity.GetComponent<TransformComponent>();
+            transform.Translation = glm::vec3(WorldUnits::FromMeters(px), WorldUnits::FromMeters(y), WorldUnits::FromMeters(pz));
+            transform.Rotation = rotation;
+            transform.Scale = scale;
+            entity.AddComponent<MeshComponent>(m_PropMeshes[static_cast<int>(prop)]);
+            top = std::max(top, WorldUnits::FromMeters(y + scale.y * 0.5f));
+            roots.push_back(entity);
         }
 
+        const glm::vec3 boundsMin(x * cellSize, tile.MinHeight - WorldUnits::FromMeters(1.0f), z * cellSize);
+        const glm::vec3 boundsMax((x + 1) * cellSize, top, (z + 1) * cellSize);
+        const WorldCellCoord cell = WorldGrid::CellFor(boundsMin, boundsMax, cellSize);
+        uint32_t count = 0;
+        const std::string text = SceneSerializer::WorldCellText(scene, roots, WorldGrid::CellName(cell), &count);
+        for (Entity entity : roots)
+            scene.DestroyEntity(entity);
+        std::ofstream out(m_AssetDirectory / partition.CellFile(cell), std::ios::binary | std::ios::trunc);
+        out << text;
+        if (!out)
+        {
+            NOX_CORE_ERROR("Streaming test world: could not write {}", partition.CellFile(cell).generic_string());
+            return false;
+        }
+        m_CellBytes += text.size();
+        partition.Cells[cell] = WorldCellInfo{ boundsMin, boundsMax, count };
+        return true;
+    }
+
+    void StreamingTestWorldGenerator::FinishScene()
+    {
         // What stays in the scene file: the camera over the middle (with the test, when named), the sun and the sky.
+        EditorAssetManager& assets = *Project::GetActive()->GetEditorAssetManager();
+        const uint32_t grid = m_Grid;
+        const float cellSize = WorldUnits::FromMeters(m_Settings.CellSizeMeters);
+        const std::filesystem::path scenePath = std::filesystem::path(m_Settings.Folder) / "StreamingTestWorld.nox";
+        Scene& world = *m_World;
         const float middle = grid * cellSize * 0.5f;
         m_Middle = glm::vec3(middle, WorldUnits::FromMeters(20.0f), middle);
-        Entity camera = world->CreateEntity("Camera");
+        Entity camera = world.CreateEntity("Camera");
         camera.GetComponent<TransformComponent>().Translation = glm::vec3(middle, WorldUnits::FromMeters(60.0f), middle);
         camera.GetComponent<TransformComponent>().Rotation = glm::vec3(-0.2f, 0.0f, 0.0f);
         CameraComponent& cameraComponent = camera.AddComponent<CameraComponent>();
@@ -328,18 +497,21 @@ namespace Nox
         cameraComponent.Camera.SetPerspective(glm::radians(60.0f), WorldUnits::FromMeters(0.1f), WorldUnits::FromMeters(1000.0f));
         if (!m_Settings.CameraScript.empty())
             camera.AddComponent<ScriptComponent>().ClassNames.push_back(m_Settings.CameraScript);
-        Entity sun = world->CreateEntity("Sun");
+        Entity sun = world.CreateEntity("Sun");
         sun.GetComponent<TransformComponent>().Rotation = glm::vec3(glm::radians(-40.0f), glm::radians(30.0f), 0.0f);
         sun.AddComponent<DirectionalLightComponent>().Intensity = 8.0f;
-        Entity sky = world->CreateEntity("Sky");
+        Entity sky = world.CreateEntity("Sky");
         sky.AddComponent<EnvironmentLightComponent>().Source = EnvironmentSource::ProceduralSky;
 
-        SceneSerializer serializer(world);
+        SceneSerializer serializer(m_World);
         serializer.Serialize(m_AssetDirectory / scenePath);
-        m_Scene = registered(AssetType::Scene, scenePath);
+        m_Scene = assets.RegisterGeneratedFile(scenePath, AssetType::Scene);
         assets.SerializeAssetRegistry();
-        NOX_CORE_INFO("Streaming test world: {} x {} cells of {} m ({:.1f} km across), {:.1f} GB, scene '{}'", grid, grid, m_Settings.CellSizeMeters,
-                      grid * m_Settings.CellSizeMeters / 1000.0f, static_cast<double>(m_Bytes.load()) / (1024.0 * 1024.0 * 1024.0),
+        NOX_CORE_INFO("Streaming test world: {} x {} cells of {} m ({:.1f} km across, {} props a cell), {:.1f} GB of tiles, {:.0f} MB of cells, "
+                      "scene '{}'", grid, grid, m_Settings.CellSizeMeters, grid * m_Settings.CellSizeMeters / 1000.0f, m_Settings.PropsPerCell,
+                      static_cast<double>(m_Bytes.load()) / (1024.0 * 1024.0 * 1024.0), static_cast<double>(m_CellBytes) / (1024.0 * 1024.0),
                       scenePath.generic_string());
+        m_World = nullptr;
+        m_CellScene = nullptr;
     }
 }

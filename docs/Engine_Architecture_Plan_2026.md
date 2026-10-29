@@ -1342,6 +1342,16 @@ camera.
   the main thread (`EditorAssetManager::RegisterGeneratedFile`) with the cell files, their index and the scene (camera, sun,
   procedural sky), which then opens. N is chosen from the first tile's size and a target size on disk (20 GB by default: about
   4.8 MB a tile, 65 x 65 cells of 64 m, 4.2 km across, against a working set of about 70 cells at the 256 m loading range).
+- **Dense cells:** Props per Cell (250 by default) scatters rocks, pines and stumps on each tile, an entity each sharing three
+  cooked meshes (as an open world reuses its props): the cells' entity cost -- parsing their text, building and activating their
+  entities -- is what a sparse world never shows. The cells are written over frames (12 ms a frame) with the progress shown.
+- **Where streaming's time goes:** every cell records reading and parsing its file (worker), building its entities and copying
+  them into the world (main thread, in how many steps), waiting for its assets, and the time from being wanted to being in the
+  world (`Scene::WorldStreamingCounters`, trace log per cell; script API 7: `WorldStreamingStats` carries the sums). The
+  fly-through prints them per cell over the flight, with the main thread's streaming milliseconds per second of flight.
+- **Cooked cells (the roadmap's last 6c item) wait for those numbers:** a binary cell format replaces the parse and the YAML-node
+  lookups, not the entity creation, and doubles the serializer (43 components) to keep in step. It is built if dense cells show
+  the parse or the build is what limits streaming (holes, hitches, or a main-thread share that grows past the budget).
 - **Nothing written while streaming:** the generator writes each tile's material (`.nmat`) beside its mesh and registers it, as a
   model's cook does: a mesh whose material file is missing writes and registers it when it loads, and with the registry's
   deferred write on the main thread that cost the 30 GB world (20k registry entries) ~400 ms every second of flight. The

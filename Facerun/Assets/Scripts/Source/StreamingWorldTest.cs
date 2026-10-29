@@ -49,6 +49,7 @@ public sealed class StreamingWorldTest : EntityBehaviour
 
     struct Peak { public ulong Process, Gpu; public int Assets, Cells; }
     Peak m_FirstHalf, m_SecondHalf;
+    WorldStreamingStats m_FlightStart; // the streaming counters when the flight began (the start's cells excluded)
 
     protected override void OnCreate()
     {
@@ -83,6 +84,7 @@ public sealed class StreamingWorldTest : EntityBehaviour
             if (m_Time > 1.0f && Scene.IsWorldStreamingCompleted(camera, WorldUnits.FromMeters(HoleRangeMeters)) || m_Time > MaxWarmUpSeconds)
             {
                 Log.Info($"[StreamingWorldTest] flying (warm-up {m_Time:0.0} s)");
+                m_FlightStart = Scene.GetWorldStreamingStats();
                 m_Phase = Phase.Flying;
                 m_Time = 0.0f;
                 m_SampleTime = 0.0f;
@@ -180,6 +182,21 @@ public sealed class StreamingWorldTest : EntityBehaviour
         float p99 = m_Frames.Count > 0 ? m_Frames[Math.Min(m_Frames.Count - 1, (int)(m_Frames.Count * 0.99f))] : 0.0f;
         float worst = m_Frames.Count > 0 ? m_Frames[^1] : 0.0f;
         Log.Info($"[StreamingWorldTest] {m_Frames.Count} frames in {m_Time:0} s: average {average:0.0} ms, 99 % under {p99:0.0} ms, worst {worst:0.0} ms");
+        // What streaming cost per cell during the flight: where a stall would come from (the file's parse, building the entities,
+        // copying them into the world) and whether cells kept up.
+        WorldStreamingStats end = Scene.GetWorldStreamingStats();
+        long cells = end.CellsActivated - m_FlightStart.CellsActivated;
+        if (cells > 0)
+        {
+            double entities = (double)(end.EntitiesActivated - m_FlightStart.EntitiesActivated) / cells;
+            double mainThread = end.BuildMs - m_FlightStart.BuildMs + end.ActivateMs - m_FlightStart.ActivateMs;
+            Log.Info($"[StreamingWorldTest] {cells} cells streamed in ({entities:0} entities each): per cell read and parsed " +
+                     $"{(end.ReadMs - m_FlightStart.ReadMs) / cells:0.00} ms (worker), built {(end.BuildMs - m_FlightStart.BuildMs) / cells:0.00} ms and " +
+                     $"activated {(end.ActivateMs - m_FlightStart.ActivateMs) / cells:0.00} ms (main thread), assets waited " +
+                     $"{(end.AssetWaitSeconds - m_FlightStart.AssetWaitSeconds) / cells:0.00} s; in the world " +
+                     $"{(end.LatencySeconds - m_FlightStart.LatencySeconds) / cells:0.00} s after being wanted (longest {end.MaxLatencySeconds:0.00} s); " +
+                     $"main thread {mainThread / m_Time:0.0} ms per second of flight");
+        }
         Log.Info($"[StreamingWorldTest] peak (first half / second half): RAM {Megabytes(m_FirstHalf.Process):0} / {Megabytes(m_SecondHalf.Process):0} MB, " +
                  $"VRAM {Megabytes(m_FirstHalf.Gpu):0} / {Megabytes(m_SecondHalf.Gpu):0} MB, assets {m_FirstHalf.Assets} / {m_SecondHalf.Assets}, " +
                  $"cells {m_FirstHalf.Cells} / {m_SecondHalf.Cells}");
