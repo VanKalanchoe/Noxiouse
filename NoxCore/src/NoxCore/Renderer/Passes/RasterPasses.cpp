@@ -140,6 +140,18 @@ namespace Nox
         std::vector<BlasCompactionQuery>& queries = m_blasCompactionQueries[frameIndex];
         queries.clear();
         std::vector<shaderio::ClusterIndexJob> clusterJobs;
+        // Two passes: the streamed builds allocate their index ranges first, then every build is described. An allocation can grow
+        // the RT index stream into a new buffer, and a build described before it read its indices from the old one while the
+        // expansion wrote the new one (BLAS of stale indices: geometry all over the place, reads past the vertices).
+        // Each with the structure it builds into and its serial, taken when selected: a later streamed build of the same mesh may
+        // replace the mesh's structure in this frame (the earlier build still fills the one it was sized for).
+        struct SelectedBuild
+        {
+            BlasBuild Build;
+            NRI::AccelerationStructure* Target = nullptr;
+            uint64_t Serial = 0;
+        };
+        std::vector<SelectedBuild> selected;
         for (; count < m_blasBuilds.size() && primitives < BlasBuildPrimitivesPerFrame && count < BlasCompactionQueriesPerFrame; ++count)
         {
             BlasBuild build = m_blasBuilds[count];
@@ -171,15 +183,22 @@ namespace Nox
                 // The hit shaders read the new indices from the frame the TLAS references the new BLAS (both the next).
                 m_gpuScene.UpdateMeshGeometry(build.meshSlot, build.indices.offset, build.indices.count / 3, build.maxVertex + 1);
             }
-            MeshBLAS& blas = m_meshBLASes[build.blasId];
-            const NRI::AccelerationStructureBuildDesc desc = blasBuildDesc(build);
-            scratchSize = std::max(scratchSize, m_device->getAccelerationStructureBuildSizes(desc).buildScratchSize);
-            builds.emplace_back(desc, blas.as.get());
-            queries.push_back({ build.blasId, build.meshSlot, blas.serial });
-            m_gpuScene.SetMeshBlas(build.meshSlot, blas.as->getDeviceAddress());
+            selected.push_back({ build, m_meshBLASes[build.blasId].as.get(), m_meshBLASes[build.blasId].serial });
             primitives += build.indices.count / 3;
         }
         m_blasBuilds.erase(m_blasBuilds.begin(), m_blasBuilds.begin() + static_cast<std::ptrdiff_t>(count));
+        for (const SelectedBuild& selection : selected)
+        {
+            const BlasBuild& build = selection.Build;
+            // Superseded in this frame by a streamed build of the same mesh: its structure is already on its way out.
+            if (!selection.Target || selection.Target != m_meshBLASes[build.blasId].as.get())
+                continue;
+            const NRI::AccelerationStructureBuildDesc desc = blasBuildDesc(build);
+            scratchSize = std::max(scratchSize, m_device->getAccelerationStructureBuildSizes(desc).buildScratchSize);
+            builds.emplace_back(desc, selection.Target);
+            queries.push_back({ build.blasId, build.meshSlot, selection.Serial });
+            m_gpuScene.SetMeshBlas(build.meshSlot, selection.Target->getDeviceAddress());
+        }
 
         if (scratchSize > 0 && (!m_blasScratch || m_blasScratch->getSize() < scratchSize))
         {
