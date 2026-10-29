@@ -17,6 +17,7 @@
 #include "NoxCore/Core/Log.h"
 #include <iostream>
 
+#include "NoxCore/Core/Hash.h"
 #include "NoxCore/Core/UUID.h"
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Asset/AssetManager.h"
@@ -2400,5 +2401,408 @@ namespace Nox
     {
         std::string text;
         return RuntimeSceneText(bytes, name, text) && DeserializeText(text);
+    }
+
+    // --- Cooked world cells (§5.13.4) ---
+
+    namespace
+    {
+        constexpr char CookedCellMagic[8] = { 'N', 'O', 'X', 'C', 'E', 'L', 'L', 'B' };
+        constexpr uint32_t CookedCellVersion = 1;
+        constexpr size_t CookedCellHeaderSize = sizeof(CookedCellMagic) + sizeof(uint32_t) + sizeof(uint64_t) + sizeof(uint32_t);
+
+        enum CookedEntityKind : uint8_t { CookedBinary = 0, CookedText = 1 };
+        enum CookedComponents : uint8_t
+        {
+            CookedTag = 1 << 0,
+            CookedTransform = 1 << 1,
+            CookedRelationship = 1 << 2,
+            CookedMesh = 1 << 3,
+            CookedMaterial = 1 << 4,
+            CookedFolder = 1 << 5,
+        };
+        // Optional fields inside a component, as the text has them or not.
+        enum CookedFields : uint8_t
+        {
+            CookedChildren = 1 << 0,     // RelationshipComponent: Children
+            CookedMeshHandle = 1 << 1,   // MeshComponent: MeshHandle, SubmeshIndex, SubmeshCount
+            CookedSubmeshIndex = 1 << 2,
+            CookedSubmeshCount = 1 << 3,
+            CookedMaterialAssets = 1 << 4, // MaterialComponent: MaterialAssets
+            CookedFolderPath = 1 << 5,     // FolderComponent: Path
+        };
+
+        struct ByteWriter
+        {
+            std::string Bytes;
+            template <typename T> void Put(const T& value) { Bytes.append(reinterpret_cast<const char*>(&value), sizeof(T)); }
+            void PutString(const std::string& text)
+            {
+                Put(static_cast<uint32_t>(text.size()));
+                Bytes.append(text);
+            }
+        };
+
+        struct ByteReader
+        {
+            const std::string& Bytes;
+            size_t Offset = 0;
+            bool Failed = false;
+            template <typename T> T Get()
+            {
+                T value{};
+                if (Offset + sizeof(T) > Bytes.size())
+                {
+                    Failed = true;
+                    return value;
+                }
+                std::memcpy(&value, Bytes.data() + Offset, sizeof(T));
+                Offset += sizeof(T);
+                return value;
+            }
+            std::string GetString()
+            {
+                const uint32_t size = Get<uint32_t>();
+                if (Failed || Offset + size > Bytes.size())
+                {
+                    Failed = true;
+                    return {};
+                }
+                std::string text(Bytes.data() + Offset, size);
+                Offset += size;
+                return text;
+            }
+        };
+
+        // Whether a map's keys are all among `allowed`.
+        bool OnlyKeys(const YAML::Node& map, std::initializer_list<const char*> allowed)
+        {
+            if (!map.IsMap())
+                return false;
+            for (const auto& entry : map)
+            {
+                const std::string key = entry.first.as<std::string>();
+                if (std::none_of(allowed.begin(), allowed.end(), [&](const char* name) { return key == name; }))
+                    return false;
+            }
+            return true;
+        }
+
+        // One entity's text as values, when it has nothing else (any other key: false, it stays text). The fields are those
+        // DeserializeEntityComponents reads, with the same optional ones.
+        bool EncodeCookedEntity(const YAML::Node& entity, ByteWriter& out)
+        {
+            if (!OnlyKeys(entity, { "Entity", "TagComponent", "TransformComponent", "RelationshipComponent", "MeshComponent", "MaterialComponent", "FolderComponent" }))
+                return false;
+            uint8_t components = 0, fields = 0;
+            const YAML::Node tag = entity["TagComponent"], transform = entity["TransformComponent"], relationship = entity["RelationshipComponent"];
+            const YAML::Node mesh = entity["MeshComponent"], material = entity["MaterialComponent"], folder = entity["FolderComponent"];
+            if (tag && !OnlyKeys(tag, { "Tag" }) || transform && !OnlyKeys(transform, { "Translation", "Rotation", "Scale" }) ||
+                relationship && !OnlyKeys(relationship, { "Parent", "Children" }) ||
+                mesh && !OnlyKeys(mesh, { "MeshHandle", "SubmeshIndex", "SubmeshCount" }) || material && !OnlyKeys(material, { "MaterialAssets" }) ||
+                folder && !OnlyKeys(folder, { "Path" }))
+                return false;
+            if (tag) components |= CookedTag;
+            if (transform) components |= CookedTransform;
+            if (relationship) components |= CookedRelationship;
+            if (mesh) components |= CookedMesh;
+            if (material) components |= CookedMaterial;
+            if (folder) components |= CookedFolder;
+            if (relationship && relationship["Children"]) fields |= CookedChildren;
+            if (mesh && mesh["MeshHandle"]) fields |= CookedMeshHandle;
+            if (mesh && mesh["SubmeshIndex"]) fields |= CookedSubmeshIndex;
+            if (mesh && mesh["SubmeshCount"]) fields |= CookedSubmeshCount;
+            if (material && material["MaterialAssets"]) fields |= CookedMaterialAssets;
+            if (folder && folder["Path"]) fields |= CookedFolderPath;
+
+            out.Put(entity["Entity"].as<uint64_t>());
+            out.Put(components);
+            out.Put(fields);
+            if (tag)
+                out.PutString(tag["Tag"].as<std::string>());
+            if (transform)
+            {
+                out.Put(transform["Translation"].as<glm::vec3>());
+                out.Put(transform["Rotation"].as<glm::vec3>());
+                out.Put(transform["Scale"].as<glm::vec3>());
+            }
+            if (relationship)
+            {
+                out.Put(relationship["Parent"].as<uint64_t>());
+                if (fields & CookedChildren)
+                {
+                    const YAML::Node children = relationship["Children"];
+                    out.Put(static_cast<uint32_t>(children.size()));
+                    for (const YAML::Node& child : children)
+                        out.Put(child.as<uint64_t>());
+                }
+            }
+            if (fields & CookedMeshHandle) out.Put(mesh["MeshHandle"].as<uint64_t>());
+            if (fields & CookedSubmeshIndex) out.Put(mesh["SubmeshIndex"].as<uint32_t>());
+            if (fields & CookedSubmeshCount) out.Put(mesh["SubmeshCount"].as<uint32_t>());
+            if (fields & CookedMaterialAssets)
+            {
+                const YAML::Node assets = material["MaterialAssets"];
+                out.Put(static_cast<uint32_t>(assets.size()));
+                for (const YAML::Node& asset : assets)
+                    out.Put(asset.as<uint64_t>());
+            }
+            if (fields & CookedFolderPath)
+                out.PutString(folder["Path"].as<std::string>());
+            return true;
+        }
+
+        // A binary entity into a scene, as DeserializeEntityComponents makes it from its text. Null when the bytes run out.
+        Entity DecodeCookedEntity(ByteReader& in, Scene& scene, UUID& outID, bool& outSkipped)
+        {
+            outSkipped = false;
+            outID = in.Get<uint64_t>();
+            const uint8_t components = in.Get<uint8_t>();
+            const uint8_t fields = in.Get<uint8_t>();
+            std::string name;
+            if (components & CookedTag)
+                name = in.GetString();
+            glm::vec3 translation{}, rotation{}, scale{};
+            if (components & CookedTransform)
+            {
+                translation = in.Get<glm::vec3>();
+                rotation = in.Get<glm::vec3>();
+                scale = in.Get<glm::vec3>();
+            }
+            uint64_t parent = 0;
+            std::vector<UUID> children;
+            if (components & CookedRelationship)
+            {
+                parent = in.Get<uint64_t>();
+                if (fields & CookedChildren)
+                {
+                    const uint32_t count = in.Get<uint32_t>();
+                    if (!in.Failed && count <= (in.Bytes.size() - in.Offset) / sizeof(uint64_t))
+                    {
+                        children.reserve(count);
+                        for (uint32_t index = 0; index < count; ++index)
+                            children.push_back(in.Get<uint64_t>());
+                    }
+                    else
+                        in.Failed = true;
+                }
+            }
+            const uint64_t meshHandle = (fields & CookedMeshHandle) ? in.Get<uint64_t>() : 0;
+            const uint32_t submeshIndex = (fields & CookedSubmeshIndex) ? in.Get<uint32_t>() : 0;
+            const uint32_t submeshCount = (fields & CookedSubmeshCount) ? in.Get<uint32_t>() : 0;
+            std::vector<AssetHandle> materials;
+            if (fields & CookedMaterialAssets)
+            {
+                const uint32_t count = in.Get<uint32_t>();
+                if (!in.Failed && count <= (in.Bytes.size() - in.Offset) / sizeof(uint64_t))
+                {
+                    materials.reserve(count);
+                    for (uint32_t index = 0; index < count; ++index)
+                        materials.push_back(in.Get<uint64_t>());
+                }
+                else
+                    in.Failed = true;
+            }
+            const std::string folderPath = (fields & CookedFolderPath) ? in.GetString() : std::string();
+            if (in.Failed)
+                return {};
+            if (scene.GetEntityByUUID(outID))
+            {
+                outSkipped = true;
+                return {};
+            }
+
+            Entity entity = scene.CreateEntityWithUUID(outID, name);
+            if (components & CookedTransform)
+            {
+                TransformComponent& transform = entity.GetComponent<TransformComponent>();
+                transform.Translation = translation;
+                transform.Rotation = rotation;
+                transform.Scale = scale;
+            }
+            if (components & CookedRelationship)
+            {
+                RelationshipComponent& relationship = entity.AddComponent<RelationshipComponent>();
+                relationship.Parent = parent;
+                relationship.Children = std::move(children);
+            }
+            if (components & CookedMesh)
+            {
+                MeshComponent& mesh = entity.AddComponent<MeshComponent>();
+                if (fields & CookedMeshHandle) mesh.Mesh = meshHandle;
+                if (fields & CookedSubmeshIndex) mesh.SubmeshIndex = submeshIndex;
+                if (fields & CookedSubmeshCount) mesh.SubmeshCount = submeshCount;
+            }
+            if (fields & CookedFolderPath)
+                entity.AddComponent<FolderComponent>(folderPath);
+            if (components & CookedMaterial)
+            {
+                MaterialComponent& material = entity.AddComponent<MaterialComponent>();
+                if (fields & CookedMaterialAssets)
+                    material.MaterialAssets = std::move(materials);
+            }
+            return entity;
+        }
+    }
+
+    std::string SceneSerializer::CookWorldCell(const std::string& cellText, size_t* outBinaryEntities, size_t* outEntities)
+    {
+        YAML::Node document;
+        try
+        {
+            document = YAML::Load(cellText);
+        }
+        catch (const YAML::Exception&)
+        {
+            return {};
+        }
+        const YAML::Node entities = document["Entities"];
+        const uint32_t count = entities && entities.IsSequence() ? static_cast<uint32_t>(entities.size()) : 0;
+
+        ByteWriter out;
+        out.Bytes.reserve(cellText.size() / 3);
+        out.Bytes.append(CookedCellMagic, sizeof(CookedCellMagic));
+        out.Put(CookedCellVersion);
+        out.Put(Hash::compute(cellText));
+        out.Put(count);
+
+        // The check: each binary entity built from its text and from its values (scenes of their own), written back as text.
+        Ref<Scene> fromText = CreateRef<Scene>(), fromValues = CreateRef<Scene>();
+        size_t binary = 0;
+        for (uint32_t index = 0; index < count; ++index)
+        {
+            const YAML::Node entity = entities[index];
+            ByteWriter values;
+            bool same = false;
+            try
+            {
+                if (EncodeCookedEntity(entity, values))
+                {
+                    std::string name;
+                    if (const YAML::Node tag = entity["TagComponent"])
+                        name = tag["Tag"].as<std::string>();
+                    Entity expected = fromText->CreateEntityWithUUID(entity["Entity"].as<uint64_t>(), name);
+                    DeserializeEntityComponents(*fromText, entity, expected, false);
+                    ByteReader reader{ values.Bytes };
+                    UUID id;
+                    bool skipped = false;
+                    Entity decoded = DecodeCookedEntity(reader, *fromValues, id, skipped);
+                    same = decoded && !reader.Failed && reader.Offset == values.Bytes.size() &&
+                           EntityToText(*fromText, expected) == EntityToText(*fromValues, decoded);
+                    fromText->DestroyEntity(expected);
+                    if (decoded)
+                        fromValues->DestroyEntity(decoded);
+                }
+            }
+            catch (const YAML::Exception&)
+            {
+                same = false;
+            }
+            if (same)
+            {
+                out.Put(static_cast<uint8_t>(CookedBinary));
+                out.Bytes.append(values.Bytes);
+                ++binary;
+                continue;
+            }
+            YAML::Emitter text;
+            text << entity;
+            out.Put(static_cast<uint8_t>(CookedText));
+            out.PutString(std::string(text.c_str(), text.size()));
+        }
+        if (outBinaryEntities)
+            *outBinaryEntities = binary;
+        if (outEntities)
+            *outEntities = count;
+        return std::move(out.Bytes);
+    }
+
+    bool SceneSerializer::IsCookedWorldCellFor(const std::string& cooked, uint64_t textHash)
+    {
+        if (cooked.size() < CookedCellHeaderSize || !std::equal(std::begin(CookedCellMagic), std::end(CookedCellMagic), cooked.begin()))
+            return false;
+        uint32_t version = 0;
+        uint64_t hash = 0;
+        std::memcpy(&version, cooked.data() + sizeof(CookedCellMagic), sizeof(version));
+        std::memcpy(&hash, cooked.data() + sizeof(CookedCellMagic) + sizeof(version), sizeof(hash));
+        return version == CookedCellVersion && hash == textHash;
+    }
+
+    bool SceneSerializer::ReadCookedWorldCell(const std::string& cooked, Scene& scene, AssetHandle level, const std::string& name,
+                                              std::vector<UUID>& outCreated, std::string& outError, const std::function<bool()>& cancelled)
+    {
+        ByteReader in{ cooked, sizeof(CookedCellMagic) + sizeof(uint32_t) + sizeof(uint64_t) };
+        const uint32_t count = in.Get<uint32_t>();
+        if (in.Failed)
+        {
+            outError = "cut off";
+            return false;
+        }
+        outCreated.reserve(count);
+        for (uint32_t index = 0; index < count; ++index)
+        {
+            if ((index & 63) == 0 && cancelled && cancelled())
+            {
+                outError = "cancelled";
+                return false;
+            }
+            const uint8_t kind = in.Get<uint8_t>();
+            Entity created;
+            UUID id = 0;
+            if (kind == CookedBinary)
+            {
+                bool skipped = false;
+                created = DecodeCookedEntity(in, scene, id, skipped);
+                if (skipped)
+                {
+                    NOX_CORE_WARN("World cell `{}`: entity {} is in the scene already, kept as it is", name, static_cast<uint64_t>(id));
+                    continue;
+                }
+            }
+            else if (kind == CookedText)
+            {
+                const std::string text = in.GetString();
+                if (in.Failed)
+                    break;
+                try
+                {
+                    const YAML::Node entity = YAML::Load(text);
+                    id = entity["Entity"].as<uint64_t>();
+                    if (scene.GetEntityByUUID(id))
+                    {
+                        NOX_CORE_WARN("World cell `{}`: entity {} is in the scene already, kept as it is", name, static_cast<uint64_t>(id));
+                        continue;
+                    }
+                    std::string tag;
+                    if (const YAML::Node tagNode = entity["TagComponent"])
+                        tag = tagNode["Tag"].as<std::string>();
+                    created = scene.CreateEntityWithUUID(id, tag);
+                    DeserializeEntityComponents(scene, entity, created, false);
+                }
+                catch (const YAML::Exception& exception)
+                {
+                    outError = exception.what();
+                    return false;
+                }
+            }
+            else
+                in.Failed = true;
+            if (in.Failed || !created)
+            {
+                outError = "damaged (entity " + std::to_string(index) + ")";
+                return false;
+            }
+            if (level != 0)
+            {
+                created.AddComponent<LevelComponent>().Level = level;
+                outCreated.push_back(id);
+            }
+        }
+        if (in.Failed)
+        {
+            outError = "cut off";
+            return false;
+        }
+        return true;
     }
 }

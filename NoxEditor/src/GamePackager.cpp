@@ -348,7 +348,7 @@ namespace Nox
         }
 
         for (const std::filesystem::path& cell : cellFiles)
-            copyAsset(cell.lexically_relative(assetDirectory));
+            copyWithCompanions(cell.lexically_relative(assetDirectory)); // (and its cooked file, "<cell>.noxcell.cooked")
 
         // 4. Its registry and the project file.
         assetManager->SerializeAssetRegistry(gameAssets / config.AssetRegistryPath, assets);

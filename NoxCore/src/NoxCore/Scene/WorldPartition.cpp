@@ -1,6 +1,7 @@
 #include "WorldPartition.h"
 
 #include <algorithm>
+#include <atomic>
 #include <unordered_set>
 #include <chrono>
 #include <cfloat>
@@ -22,6 +23,7 @@
 #include "NoxCore/Core/WorldUnits.h"
 #include "NoxCore/Profiling/Profiler.h"
 #include "NoxCore/Project/Project.h"
+#include "NoxCore/Tasks/JobSystem.h"
 
 namespace Nox
 {
@@ -406,6 +408,7 @@ namespace Nox
         streamed.Requested = std::chrono::steady_clock::now();
         streamed.ReadMs = streamed.BuildMs = streamed.ActivateMs = 0.0;
         streamed.BuildSteps = streamed.ActivateSteps = 0;
+        streamed.Cooked = false;
         if (auto snapshot = m_WorldSnapshots.find(streamed.Cell); snapshot != m_WorldSnapshots.end())
         {
             // A cell the editor had loaded, back in: built from the session's copy (main thread, a copy like an activation).
@@ -469,6 +472,7 @@ namespace Nox
             // Loaded: what it references is requested now, to be in when it activates.
             // Every entity of the built cell: the file's in file order, then any its components made while it was built.
             streamed.ReadMs = streamed.Loader->GetReadMs() + streamed.Loader->GetWorkerBuildMs();
+            streamed.Cooked = streamed.Loader->WasCooked();
             streamed.BuildMs = streamed.Loader->GetCreateMs();
             streamed.BuildSteps = streamed.Loader->GetCreateSteps();
             streamed.StagedEntities = streamed.Loader->GetCreatedEntities();
@@ -508,14 +512,15 @@ namespace Nox
         WorldStreamingCounters& counters = m_WorldStreamingCounters;
         ++counters.CellsActivated;
         counters.EntitiesActivated += streamed.StagedEntities.size();
+        counters.CellsCooked += streamed.Cooked ? 1 : 0;
         counters.ReadMs += streamed.ReadMs;
         counters.BuildMs += streamed.BuildMs;
         counters.ActivateMs += streamed.ActivateMs;
         counters.AssetWaitSeconds += streamed.AssetWait;
         counters.LatencySeconds += latency;
         counters.MaxLatencySeconds = std::max(counters.MaxLatencySeconds, latency);
-        NOX_CORE_TRACE("World cell `{}` activated: {} entities; read and parsed {:.1f} ms (worker), built {:.1f} ms in {} steps, assets "
-                       "waited {:.2f} s, activated {:.1f} ms in {} steps; {:.2f} s after it was wanted", streamed.Name,
+        NOX_CORE_TRACE("World cell `{}` activated{}: {} entities; read and built {:.1f} ms (worker), took {:.1f} ms in {} steps, assets "
+                       "waited {:.2f} s, activated {:.1f} ms in {} steps; {:.2f} s after it was wanted", streamed.Name, streamed.Cooked ? " (cooked)" : "",
                        streamed.StagedEntities.size(), streamed.ReadMs, streamed.BuildMs, streamed.BuildSteps, streamed.AssetWait,
                        streamed.ActivateMs, streamed.ActivateSteps, latency);
         streamed.Staged = nullptr;
@@ -932,6 +937,7 @@ namespace Nox
         bool ok = true;
         size_t written = 0, removed = 0;
         std::vector<WorldCellCoord> joined; // cells not loaded that entities moved into: loaded after the save
+        std::vector<std::pair<std::filesystem::path, std::string>> toCook; // the files written, cooked after (§5.13.4)
 
         // Loaded cells: their files are what is in memory (no entities: no file).
         for (const WorldCellCoord& cell : loaded)
@@ -943,12 +949,16 @@ namespace Nox
             {
                 if (std::filesystem::remove(file, error))
                     ++removed;
+                std::filesystem::path cooked = file;
+                cooked += SceneSerializer::CookedCellSuffix;
+                std::filesystem::remove(cooked, error);
                 m_World.Cells.erase(cell);
                 continue;
             }
             uint32_t count = 0;
-            const std::string text = SceneSerializer::WorldCellText(*this, roots, WorldGrid::CellName(cell), &count);
+            std::string text = SceneSerializer::WorldCellText(*this, roots, WorldGrid::CellName(cell), &count);
             ok &= WriteTextFile(file, text);
+            toCook.emplace_back(file, std::move(text));
             WorldCellInfo& info = m_World.Cells[cell];
             RootsBounds(*this, roots, info.BoundsMin, info.BoundsMax);
             info.Entities = count;
@@ -964,8 +974,9 @@ namespace Nox
             std::string fileText;
             VFS::ReadText(file, fileText);
             uint32_t count = 0;
-            const std::string text = SceneSerializer::MergeWorldCellText(*this, fileText, roots, WorldGrid::CellName(cell), count);
+            std::string text = SceneSerializer::MergeWorldCellText(*this, fileText, roots, WorldGrid::CellName(cell), count);
             ok &= WriteTextFile(file, text);
+            toCook.emplace_back(file, std::move(text));
             glm::vec3 boundsMin, boundsMax;
             RootsBounds(*this, roots, boundsMin, boundsMax);
             auto [entry, added] = m_World.Cells.try_emplace(cell, WorldCellInfo{ boundsMin, boundsMax, count });
@@ -988,9 +999,27 @@ namespace Nox
                 Visit(*this, root, [&](Entity entity) { outSavedInCells.insert(entity.GetUUID()); });
             }
         }
+        // Their cooked files (§5.13.4), on the workers: cooking a cell checks every entity it makes binary, tens of milliseconds a
+        // thousand entities.
+        std::atomic<size_t> cookedEntities{ 0 }, allEntities{ 0 };
+        JobSystem::Get().ParallelFor("Cook World Cells", static_cast<uint32_t>(toCook.size()), 1, [&](uint32_t, uint32_t begin, uint32_t end)
+        {
+            for (uint32_t index = begin; index < end; ++index)
+            {
+                size_t binary = 0, entities = 0;
+                const std::string cooked = SceneSerializer::CookWorldCell(toCook[index].second, &binary, &entities);
+                std::filesystem::path cookedFile = toCook[index].first;
+                cookedFile += SceneSerializer::CookedCellSuffix;
+                std::ofstream out(cookedFile, std::ios::binary | std::ios::trunc);
+                out.write(cooked.data(), static_cast<std::streamsize>(cooked.size()));
+                cookedEntities += binary;
+                allEntities += entities;
+            }
+        });
+
         LoadWorldCells(joined);
-        NOX_CORE_INFO("World partition: {} cell file(s) written, {} removed, {} cells in '{}'", written, removed, m_World.Cells.size(),
-                      m_World.CellDirectory.generic_string());
+        NOX_CORE_INFO("World partition: {} cell file(s) written and cooked ({} of {} entities binary), {} removed, {} cells in '{}'", written,
+                      cookedEntities.load(), allEntities.load(), removed, m_World.Cells.size(), m_World.CellDirectory.generic_string());
         return ok;
     }
 
@@ -1015,6 +1044,10 @@ namespace Nox
                 NOX_CORE_ERROR("World partition: could not copy cell '{}' for Save As: {}", file, error.message());
                 ok = false;
             }
+            const std::string cooked = file + SceneSerializer::CookedCellSuffix; // (its cooked file, when it has one)
+            if (std::filesystem::exists(assetDirectory / m_World.CellDirectory / cooked, error))
+                std::filesystem::copy_file(assetDirectory / m_World.CellDirectory / cooked, assetDirectory / target / cooked,
+                                           std::filesystem::copy_options::overwrite_existing, error);
         }
         m_World.CellDirectory = target;
         return ok;

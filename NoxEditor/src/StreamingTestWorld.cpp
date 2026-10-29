@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cmath>
 #include <fstream>
+#include <iterator>
 
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Asset/EditorAssetManager.h"
@@ -312,6 +313,8 @@ namespace Nox
     {
         m_Job.Cancel();
         m_Job.Wait();
+        m_CookJob.Cancel();
+        m_CookJob.Wait();
     }
 
     float StreamingTestWorldGenerator::GetProgress() const
@@ -321,7 +324,9 @@ namespace Nox
             return 0.0f;
         // The tiles (on workers) are most of the time; the cells (main thread) the rest.
         const float cells = static_cast<float>(grid) * grid;
-        return m_World ? 0.8f + 0.2f * static_cast<float>(m_CellsWritten) / cells : 0.8f * static_cast<float>(m_Done) / cells;
+        if (m_Cooking)
+            return 0.9f + 0.1f * static_cast<float>(m_CellsCooked) / cells;
+        return m_World ? 0.8f + 0.1f * static_cast<float>(m_CellsWritten) / cells : 0.8f * static_cast<float>(m_Done) / cells;
     }
 
     std::string StreamingTestWorldGenerator::GetStage() const
@@ -329,6 +334,8 @@ namespace Nox
         const uint32_t grid = m_Grid;
         if (grid == 0)
             return "Generating the first tile";
+        if (m_Cooking)
+            return "Cooking cell " + std::to_string(m_CellsCooked.load()) + " / " + std::to_string(grid * grid);
         if (m_World)
             return "Cell " + std::to_string(m_CellsWritten) + " / " + std::to_string(grid * grid) + " (" + std::to_string(m_CellBytes >> 20) +
                    " MB of cells)";
@@ -364,6 +371,37 @@ namespace Nox
             ++m_CellsWritten;
         }
         if (m_CellsWritten < grid * grid)
+            return false;
+
+        // Then their cooked files (§5.13.4), as a save writes them, on the workers: the text is checked entity by entity against
+        // what the binary form makes, too slow for the main thread with hundreds of entities a cell.
+        if (!m_Cooking)
+        {
+            m_Cooking = true;
+            m_CookJob = JobSystem::Get().Async("Cook Streaming Test Cells", JobPriority::Normal, [this](const CancellationToken& token)
+            {
+                JobSystem::Get().ParallelFor("Cook Cells", static_cast<uint32_t>(m_CellFiles.size()), 1, [&](uint32_t, uint32_t begin, uint32_t end)
+                {
+                    for (uint32_t index = begin; index < end && !token.IsCancelled(); ++index)
+                    {
+                        std::string text;
+                        std::ifstream in(m_CellFiles[index], std::ios::binary);
+                        text.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+                        size_t binary = 0, entities = 0;
+                        const std::string cooked = SceneSerializer::CookWorldCell(text, &binary, &entities);
+                        std::filesystem::path cookedFile = m_CellFiles[index];
+                        cookedFile += SceneSerializer::CookedCellSuffix;
+                        std::ofstream out(cookedFile, std::ios::binary | std::ios::trunc);
+                        out.write(cooked.data(), static_cast<std::streamsize>(cooked.size()));
+                        m_CookedBytes += cooked.size();
+                        m_BinaryEntities += binary;
+                        m_CookedEntities += entities;
+                        ++m_CellsCooked;
+                    }
+                });
+            });
+        }
+        if (!m_CookJob.IsReady())
             return false;
         FinishScene();
         m_Finished = true;
@@ -474,6 +512,7 @@ namespace Nox
             return false;
         }
         m_CellBytes += text.size();
+        m_CellFiles.push_back(m_AssetDirectory / partition.CellFile(cell));
         partition.Cells[cell] = WorldCellInfo{ boundsMin, boundsMax, count };
         return true;
     }
@@ -507,10 +546,11 @@ namespace Nox
         serializer.Serialize(m_AssetDirectory / scenePath);
         m_Scene = assets.RegisterGeneratedFile(scenePath, AssetType::Scene);
         assets.SerializeAssetRegistry();
-        NOX_CORE_INFO("Streaming test world: {} x {} cells of {} m ({:.1f} km across, {} props a cell), {:.1f} GB of tiles, {:.0f} MB of cells, "
-                      "scene '{}'", grid, grid, m_Settings.CellSizeMeters, grid * m_Settings.CellSizeMeters / 1000.0f, m_Settings.PropsPerCell,
-                      static_cast<double>(m_Bytes.load()) / (1024.0 * 1024.0 * 1024.0), static_cast<double>(m_CellBytes) / (1024.0 * 1024.0),
-                      scenePath.generic_string());
+        NOX_CORE_INFO("Streaming test world: {} x {} cells of {} m ({:.1f} km across, {} props a cell), {:.1f} GB of tiles, {:.0f} MB of cells "
+                      "({:.0f} MB cooked, {} of {} entities binary), scene '{}'", grid, grid, m_Settings.CellSizeMeters,
+                      grid * m_Settings.CellSizeMeters / 1000.0f, m_Settings.PropsPerCell, static_cast<double>(m_Bytes.load()) / (1024.0 * 1024.0 * 1024.0),
+                      static_cast<double>(m_CellBytes) / (1024.0 * 1024.0), static_cast<double>(m_CookedBytes.load()) / (1024.0 * 1024.0),
+                      m_BinaryEntities.load(), m_CookedEntities.load(), scenePath.generic_string());
         m_World = nullptr;
         m_CellScene = nullptr;
     }

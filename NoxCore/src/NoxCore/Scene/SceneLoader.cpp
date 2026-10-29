@@ -4,6 +4,7 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include "NoxCore/Core/Hash.h"
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Core/VirtualFileSystem.h"
 #include "Entity.h"
@@ -24,12 +25,19 @@ namespace Nox
         YAML::Node Entities;    // the document's entity sequence
         // A world cell built on the worker too (into a scene of its own): its entities, in file order.
         bool Built = false;
+        bool Cooked = false;    // built from the cooked file beside the cell's
         double BuildMs = 0.0;
         std::vector<UUID> Created;
     };
 
     namespace
     {
+        // A world cell from the cooked file beside its text (§5.13.4), when there is one cooked from this very text: its entities
+        // into the cell's scene without parsing. False: the text is read instead (no cooked file, an old one, or a damaged one --
+        // whatever it made is removed first).
+        bool ReadCookedCell(const std::filesystem::path& path, const std::string& text, Scene& scene, AssetHandle level, SceneLoader::Parsed& parsed,
+                            const CancellationToken& token, std::chrono::steady_clock::time_point readStart);
+
         // One entity of a document into a scene: the main thread's slices and a cell's worker alike. A cell's entity already in the
         // scene is skipped (the editor's own copy of one saved into a cell it then loads).
         void CreateDocumentEntity(Scene& scene, const YAML::Node& entity, AssetHandle level, bool cell, const std::filesystem::path& path,
@@ -54,6 +62,39 @@ namespace Nox
                 made.AddComponent<LevelComponent>().Level = level;
                 created.push_back(made.GetUUID());
             }
+        }
+    }
+
+    namespace
+    {
+        bool ReadCookedCell(const std::filesystem::path& path, const std::string& text, Scene& scene, AssetHandle level, SceneLoader::Parsed& parsed,
+                            const CancellationToken& token, std::chrono::steady_clock::time_point readStart)
+        {
+            std::filesystem::path cookedPath = path;
+            cookedPath += SceneSerializer::CookedCellSuffix;
+            std::string cooked;
+            if (!VFS::Exists(cookedPath) || !VFS::ReadText(cookedPath, cooked) || !SceneSerializer::IsCookedWorldCellFor(cooked, Hash::compute(text)))
+                return false;
+            const auto start = std::chrono::steady_clock::now();
+            parsed.ReadMs = std::chrono::duration<double, std::milli>(start - readStart).count();
+            std::string error;
+            if (!SceneSerializer::ReadCookedWorldCell(cooked, scene, level, path.filename().string(), parsed.Created, error,
+                                                      [&token] { return token.IsCancelled(); }))
+            {
+                if (token.IsCancelled())
+                    return true; // (unloaded meanwhile: its scene goes with the job)
+                NOX_CORE_WARN("World cell `{}`: its cooked file is {}, its text is read", path.filename().string(), error);
+                for (UUID id : parsed.Created)
+                {
+                    if (Entity entity = scene.GetEntityByUUID(id))
+                        scene.DestroyEntity(entity);
+                }
+                parsed.Created.clear();
+                return false;
+            }
+            parsed.BuildMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+            parsed.Ok = parsed.Built = parsed.Cooked = true;
+            return true;
         }
     }
 
@@ -100,15 +141,11 @@ namespace Nox
                 return;
             Parsed& parsed = *shared;
             const auto readStart = std::chrono::steady_clock::now();
-            struct ReadTimer
-            {
-                Parsed& Result;
-                std::chrono::steady_clock::time_point Start;
-                ~ReadTimer() { Result.ReadMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - Start).count(); }
-            } timer{ parsed, readStart };
             std::string bytes = std::move(text);
             if (!inMemory && !VFS::ReadText(path, bytes))
                 parsed.Error = "could not open it";
+            else if (buildInto && !inMemory && ReadCookedCell(path, bytes, *buildInto, level, parsed, token, readStart))
+                return; // (built: no text parsed)
             else if (SceneSerializer::IsRuntimeScene(bytes) && !additive)
             {
                 parsed.Bytes = std::move(bytes);
@@ -135,6 +172,8 @@ namespace Nox
                     parsed.Error = exception.what();
                 }
             }
+
+            parsed.ReadMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - readStart).count();
 
             // A world cell into a scene of its own (Unreal's async loading thread): nothing else sees that scene until the job is
             // done, and creating an entity touches only its scene. The main thread is left with copying the cell into the world.
@@ -278,6 +317,11 @@ namespace Nox
     double SceneLoader::GetWorkerBuildMs() const
     {
         return m_Read.IsReady() ? m_Parsed->BuildMs : 0.0;
+    }
+
+    bool SceneLoader::WasCooked() const
+    {
+        return m_Read.IsReady() && m_Parsed->Cooked;
     }
 
     float SceneLoader::GetProgress() const

@@ -119,6 +119,7 @@ Implemented calls:
   bytes, VRAM in use, assets loaded and loading): Facerun's `StreamingWorldTest` fly-through logs them. Script API 6.
   `WorldStreamingStats` also carries the streamed cells' costs since Play began (cells and entities activated; read / build /
   activate milliseconds; asset wait; latency from wanted to in the world). Script API 7.
+  `CellsCooked`: of those cells, how many were read from their cooked (binary) files. Script API 8.
 - Generic `GetComponent<T>()`, `HasComponent<T>()`, and `TryGetComponent<T>()`
   access from both `EntityBehaviour` and `Entity`
 - `TransformComponent` explicit `Local`/`World` state and

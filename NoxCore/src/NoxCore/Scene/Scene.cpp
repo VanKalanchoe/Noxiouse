@@ -1,4 +1,6 @@
 #include "Scene.h"
+
+#include <atomic>
 #include "ModelInstance.h"
 #include "PrefabInstance.h"
 #include "ParticleSystem.h"
@@ -272,8 +274,9 @@ namespace Nox
         struct Renderer2DSubmission {};
         struct ParticleSubmission {};
 
-        // Identifies the scene that owns the renderer's GPU scene (a scene address can be reused by the next scene).
-        uint64_t s_NextSceneID = 1;
+        // Identifies the scene that owns the renderer's GPU scene (a scene address can be reused by the next scene). Atomic: scenes are
+        // made on workers too (a world cell cooked on save).
+        std::atomic<uint64_t> s_NextSceneID{ 1 };
     }
 
     template <typename... Component>

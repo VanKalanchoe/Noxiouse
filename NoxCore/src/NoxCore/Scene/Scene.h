@@ -157,6 +157,7 @@ namespace Nox
         {
             uint64_t CellsActivated = 0;
             uint64_t EntitiesActivated = 0;
+            uint64_t CellsCooked = 0;      // of them, read from their cooked files (§5.13.4)
             double ReadMs = 0.0;           // workers: read, parsed, built
             double BuildMs = 0.0;          // main thread: a worker's result taken, or a session snapshot copied
             double ActivateMs = 0.0;       // main thread
@@ -337,6 +338,7 @@ namespace Nox
             std::chrono::steady_clock::time_point Requested{};
             double ReadMs = 0.0, BuildMs = 0.0, ActivateMs = 0.0;
             uint32_t BuildSteps = 0, ActivateSteps = 0;
+            bool Cooked = false;
         };
         std::vector<StreamedLevel> m_Levels;
         WorldPartition m_World;

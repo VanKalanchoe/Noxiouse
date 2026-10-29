@@ -1371,9 +1371,14 @@ camera.
   2.2 ms; the sphere is kept with the transform). Left as they are: Transform Propagation's walk over the roots (0.7 ms) and the
   draw list rebuilt when instances come and go (GPU Scene 1.5 ms). The fly-through's warm-up now waits until nothing loads (the
   move to the circle's start is a teleport, which a game waits out), so the flight measures streaming at speed.
-- **Cooked cells (a binary cell format) are not built:** with building on workers, the parse only delays a cell (worker time, in
-  parallel), it does not stall a frame, and the dense test has no main-thread cost left that a binary format would remove. It stays
-  the lever for latency if a world needs cells in faster than its loading range allows.
+- **Cooked cells (built 2026-10-29, for faster flight):** beside each cell's text, "<cell>.noxcell.cooked" holds the same cell in
+  binary, stamped with the hash of the text it was cooked from (an edited text is read as text until it is cooked again). An entity
+  with only the common components (ID, tag, transform, hierarchy, mesh, material overrides, folder) is stored as values; any other
+  keeps its text inside the file, so the binary form never has to know every component. Each binary entity is checked when it is
+  cooked: built from its text and from its values, both written back as text and compared -- one that differs keeps its text, so a
+  field the binary form does not know is never lost. Cooked on save (on the workers), by the test world's generator, copied by Save
+  As, shipped by packaging; the cell's loading job reads the cooked file when it matches (`SceneLoader`, worker), else the text.
+  The fly-through counts the cells read cooked (script API 8: `WorldStreamingStats.CellsCooked`).
 - **Nothing written while streaming:** the generator writes each tile's material (`.nmat`) beside its mesh and registers it, as a
   model's cook does: a mesh whose material file is missing writes and registers it when it loads, and with the registry's
   deferred write on the main thread that cost the 30 GB world (20k registry entries) ~400 ms every second of flight. The
@@ -1458,7 +1463,7 @@ flight, targeted texture-slot cache eviction. Future:
 | **6a** | Texture streaming | 5 | BC cooking for all sources, mip tail, GPU mip feedback, residency + eviction | Scene textures exceeding the texture budget render correctly with mip reduction |
 | **6b** | Geometry streaming & LOD | 5 | Cluster hierarchy cook, GPU cut selection (**done, 6b-1**), page streaming pool (paused, §5.7.1), RT fallback LOD (reverted, D8) | Geometry exceeding the geometry budget renders with streaming; no popping beyond threshold |
 | **6c-0** | Level streaming | 5 | Additive scene load / unload, Level Streaming Volumes, script API (§5.12a: **built 2026-10-23**) | A level streams in and out around the camera without a stall |
-| **6c** | World streaming | 6a, 6b, 6c-0 | Grid cells, per-cell files, cell streaming, editor (§5.13.1: **6c-1 built 2026-10-24**), activation stages (§5.13.3: **6c-2 built 2026-10-24**), HLOD (§5.13.2: **6c-3 built 2026-10-24**), test world and fly-through (§5.13.4: **built 2026-10-29**), cells built on workers (§5.13.4; a binary cell format not needed so far) | Test world larger than RAM/VRAM traversable without stalls |
+| **6c** | World streaming | 6a, 6b, 6c-0 | Grid cells, per-cell files, cell streaming, editor (§5.13.1: **6c-1 built 2026-10-24**), activation stages (§5.13.3: **6c-2 built 2026-10-24**), HLOD (§5.13.2: **6c-3 built 2026-10-24**), test world and fly-through (§5.13.4: **built 2026-10-29**), cells built on workers and cooked cells (§5.13.4) | Test world larger than RAM/VRAM traversable without stalls |
 | **7** | Continuous optimization | all | Profile-driven work, VT, DirectStorage, async compute expansion | Ongoing |
 
 Phases 1, 2 and 3 are architecture-defining and each gets its own plan-mode design before code.

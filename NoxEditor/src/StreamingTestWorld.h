@@ -80,6 +80,12 @@ namespace Nox
         uint32_t m_CellsWritten = 0;
         uint64_t m_CellBytes = 0;
         AssetHandle m_PropMeshes[3] = {};
+        // Then the cells' cooked files, on the workers.
+        std::vector<std::filesystem::path> m_CellFiles;
+        bool m_Cooking = false;
+        TaskFuture<void> m_CookJob;
+        std::atomic<uint32_t> m_CellsCooked{ 0 };
+        std::atomic<uint64_t> m_CookedBytes{ 0 }, m_BinaryEntities{ 0 }, m_CookedEntities{ 0 };
         glm::vec3 m_Middle{ 0.0f };
     };
 }

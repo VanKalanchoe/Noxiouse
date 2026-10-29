@@ -66,6 +66,8 @@ public struct WorldStreamingStats
     /// <summary>Cells that went into the world, and their entities.</summary>
     public long CellsActivated;
     public long EntitiesActivated;
+    /// <summary>Of those cells, how many were read from their cooked (binary) files instead of their text.</summary>
+    public long CellsCooked;
     /// <summary>Reading and parsing their files and building their entities, on workers (ms).</summary>
     public double ReadMs;
     /// <summary>What of their building the main thread did (ms): taking a worker's result, or copying a Play session's snapshot.</summary>

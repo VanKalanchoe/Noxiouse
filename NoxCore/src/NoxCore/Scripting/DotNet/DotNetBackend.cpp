@@ -155,7 +155,7 @@ namespace Nox
             int32_t Cells, Activated, Loaded, Loading;
             ManagedVector3 BoundsMin, BoundsMax;
             // Scene::WorldStreamingCounters
-            int64_t CellsActivated, EntitiesActivated;
+            int64_t CellsActivated, EntitiesActivated, CellsCooked;
             double ReadMs, BuildMs, ActivateMs, AssetWaitSeconds, LatencySeconds, MaxLatencySeconds;
         };
         static_assert(offsetof(ManagedWorldStreamingStats, CellsActivated) == 40, "Nox.WorldStreamingStats's layout");
@@ -183,6 +183,7 @@ namespace Nox
             const Scene::WorldStreamingCounters& counters = s_Scene->GetWorldStreamingCounters();
             out->CellsActivated = static_cast<int64_t>(counters.CellsActivated);
             out->EntitiesActivated = static_cast<int64_t>(counters.EntitiesActivated);
+            out->CellsCooked = static_cast<int64_t>(counters.CellsCooked);
             out->ReadMs = counters.ReadMs;
             out->BuildMs = counters.BuildMs;
             out->ActivateMs = counters.ActivateMs;

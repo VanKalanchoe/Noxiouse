@@ -210,7 +210,8 @@ public sealed class StreamingWorldTest : EntityBehaviour
         {
             double entities = (double)(end.EntitiesActivated - m_FlightStart.EntitiesActivated) / cells;
             double mainThread = end.BuildMs - m_FlightStart.BuildMs + end.ActivateMs - m_FlightStart.ActivateMs;
-            Log.Info($"[StreamingWorldTest] {cells} cells streamed in ({entities:0} entities each): per cell read, parsed and built " +
+            long cooked = end.CellsCooked - m_FlightStart.CellsCooked;
+            Log.Info($"[StreamingWorldTest] {cells} cells streamed in ({entities:0} entities each, {cooked} from cooked files): per cell read and built " +
                      $"{(end.ReadMs - m_FlightStart.ReadMs) / cells:0.00} ms (worker); built {(end.BuildMs - m_FlightStart.BuildMs) / cells:0.00} ms and " +
                      $"activated {(end.ActivateMs - m_FlightStart.ActivateMs) / cells:0.00} ms (main thread); assets waited " +
                      $"{(end.AssetWaitSeconds - m_FlightStart.AssetWaitSeconds) / cells:0.00} s; in the world " +

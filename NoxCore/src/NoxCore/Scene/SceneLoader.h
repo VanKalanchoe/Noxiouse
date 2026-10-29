@@ -57,13 +57,14 @@ namespace Nox
         // started creating), and creating the entities on the main thread, in how many Step calls.
         double GetReadMs() const;
         double GetWorkerBuildMs() const; // a cell built on the worker
+        bool WasCooked() const;          // a cell read from its cooked file (§5.13.4)
         double GetCreateMs() const { return m_CreateMs; }
         uint32_t GetCreateSteps() const { return m_CreateSteps; }
 
+        struct Parsed; // the YAML document (kept out of this header)
+
     private:
         void StartReading(std::string text, Ref<Scene> buildInto = nullptr);
-
-        struct Parsed; // the YAML document (kept out of this header)
 
         std::filesystem::path m_Path;
         std::shared_ptr<Parsed> m_Parsed; // shared with the reading job

@@ -3,6 +3,7 @@
 #include "Components.h"
 #include "Scene.h"
 #include "NoxCore/Core/core.h"
+#include <functional>
 #include <unordered_set>
 #include <vector>
 
@@ -40,6 +41,22 @@ namespace Nox
         // keeps scene states this way, so restoring one is the same as saving and reopening the scene).
         std::string SerializeToText();
         bool DeserializeText(const std::string& text);
+
+        // Cooked world cells (§5.13.4, Unreal's cooked packages): a cell's text as a binary file beside it ("<cell>.noxcell.cooked"),
+        // read without parsing text. An entity whose components the binary form has (ID, tag, transform, hierarchy, mesh, material
+        // overrides, folder) is stored as values; any other keeps its text inside the file. Each binary entity is checked when cooked
+        // (built from its text and from its values, both written back as text, compared): one that does not come back the same keeps
+        // its text, so the binary form never loses a field.
+        static constexpr const char* CookedCellSuffix = ".cooked";
+        // Empty when the text does not parse. `outBinaryEntities`: how many entities went binary (of the cell's).
+        static std::string CookWorldCell(const std::string& cellText, size_t* outBinaryEntities = nullptr, size_t* outEntities = nullptr);
+        // Whether bytes are a cooked cell this build reads, cooked from text with this hash (Hash::compute of the text).
+        static bool IsCookedWorldCellFor(const std::string& cooked, uint64_t textHash);
+        // A cooked cell's entities created in `scene` as a cell's loader creates them (one already there is skipped; LevelComponent
+        // with `level`), their IDs in file order. `cancelled` is asked every few entities. False (with why) when the bytes are
+        // damaged; what was created is left for the caller.
+        static bool ReadCookedWorldCell(const std::string& cooked, Scene& scene, AssetHandle level, const std::string& name, std::vector<UUID>& outCreated,
+                                        std::string& outError, const std::function<bool()>& cancelled);
 
         // Reads the components of one serialized entity (a scene file's entity, or a prefab file's) onto `target`. With
         // `keepPlacement` the target keeps its own transform and parent (the root of a prefab instance).
