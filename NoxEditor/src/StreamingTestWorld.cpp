@@ -6,6 +6,7 @@
 
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Asset/EditorAssetManager.h"
+#include "NoxCore/Asset/MaterialSerializer.h"
 #include "NoxCore/Asset/MeshImporter.h"
 #include "NoxCore/Asset/MeshSerializer.h"
 #include "NoxCore/Asset/TextureImporter.h"
@@ -73,6 +74,13 @@ namespace Nox
         std::filesystem::path TileName(uint32_t x, uint32_t z) { return "Tile_" + std::to_string(x) + "_" + std::to_string(z); }
         std::filesystem::path MeshPath(const std::string& folder, uint32_t x, uint32_t z) { return std::filesystem::path(folder) / "Meshes" / (TileName(x, z).string() + ".nsmesh"); }
         std::filesystem::path TexturePath(const std::string& folder, uint32_t x, uint32_t z) { return std::filesystem::path(folder) / "Textures" / (TileName(x, z).string() + ".ntex"); }
+        // Where a mesh's load looks for its material's .nmat (written by the cook, as here; one missing is written and registered then).
+        std::filesystem::path MaterialPath(const std::string& folder, uint32_t x, uint32_t z)
+        {
+            MaterialData material;
+            material.Name = TileName(x, z).string();
+            return MeshImporter::MaterialAssetPath(MeshPath(folder, x, z), material, 0);
+        }
 
         // One tile: its height field mesh (cooked, cluster LOD) and its texture (BC1), at assetDirectory / their paths. Returns the
         // bytes written; its height range (world units) in min / max.
@@ -134,6 +142,14 @@ namespace Nox
             std::error_code error;
             std::filesystem::create_directories(meshFile.parent_path(), error);
             MeshSerializer::SerializeStaticMesh(meshFile, { mesh }, { material });
+            // Its material too, as a model's cook writes them: a load that has to write it (and register it) is a hitch.
+            const std::filesystem::path materialFile = assetDirectory / MaterialPath(settings.Folder, tileX, tileZ);
+            std::filesystem::create_directories(materialFile.parent_path(), error);
+            if (!MaterialSerializer::Serialize(materialFile, material))
+            {
+                outError = "could not write " + materialFile.generic_string();
+                return 0;
+            }
 
             // The texture: height and slope from the vertex grid, fine detail per texel (every tile's texels are its own).
             const uint32_t size = std::max(settings.TextureSize, 4u);
@@ -277,6 +293,7 @@ namespace Nox
             {
                 const Tile& tile = m_Tiles[static_cast<size_t>(z) * grid + x];
                 registered(AssetType::Texture2D, TexturePath(m_Settings.Folder, x, z));
+                registered(AssetType::Material, MaterialPath(m_Settings.Folder, x, z));
                 const AssetHandle mesh = registered(AssetType::StaticMesh, MeshPath(m_Settings.Folder, x, z));
                 Entity entity = tiles->CreateEntity(TileName(x, z).string());
                 entity.GetComponent<TransformComponent>().Translation = glm::vec3(x * cellSize, 0.0f, z * cellSize);

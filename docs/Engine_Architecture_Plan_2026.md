@@ -1342,6 +1342,11 @@ camera.
   the main thread (`EditorAssetManager::RegisterGeneratedFile`) with the cell files, their index and the scene (camera, sun,
   procedural sky), which then opens. N is chosen from the first tile's size and a target size on disk (20 GB by default: about
   4.8 MB a tile, 65 x 65 cells of 64 m, 4.2 km across, against a working set of about 70 cells at the 256 m loading range).
+- **Nothing written while streaming:** the generator writes each tile's material (`.nmat`) beside its mesh and registers it, as a
+  model's cook does: a mesh whose material file is missing writes and registers it when it loads, and with the registry's
+  deferred write on the main thread that cost the 30 GB world (20k registry entries) ~400 ms every second of flight. The
+  deferred registry write now copies the entries and writes on a worker (atomically: beside the file, then renamed over it), and
+  a changed file is matched to its asset through the path index, not a scan of the registry.
 - **Memory follows the cells:** an unloaded or deactivated cell's entities are destroyed, and a Loaded cell's built scene dropped,
   each marking the scene's asset references changed; the next frame's unused-asset sweep (editor and runtime) frees what no
   entity, built cell or HLOD references any more (GPU resources after the frames in flight).

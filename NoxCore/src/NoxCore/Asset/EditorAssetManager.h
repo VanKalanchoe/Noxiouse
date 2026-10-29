@@ -4,6 +4,7 @@
 #include "TextureStreamer.h"
 #include "AssetManagerBase.h"
 #include "AssetMetadata.h"
+#include "NoxCore/Tasks/JobSystem.h"
 
 #include <chrono>
 #include <map>
@@ -120,6 +121,8 @@ namespace Nox
         uint64_t GetPendingUploadBytes() const { return m_Loader.GetPendingUploadBytes() + m_Streamer.GetPendingUploadBytes(); }
         
         void SerializeAssetRegistry();
+        // The deferred write (Update, once a second while the registry changed): copied here, written on a worker.
+        void SerializeAssetRegistryAsync();
         bool DeserializeAssetRegistry();
         // Registers cooked files (.nanim/.nskel/.nmat/...) that aren't in the registry yet. Scans only
         // relativeDirectory (relative to the asset directory) when given, the whole asset tree otherwise.
@@ -185,6 +188,7 @@ namespace Nox
         // hundreds of per-mesh loads each rewriting the whole registry file was most of a big import's time.
         bool m_RegistryDirty = false;
         std::chrono::steady_clock::time_point m_RegistryWritten = std::chrono::steady_clock::now();
+        TaskFuture<void> m_RegistryWrite; // SerializeAssetRegistryAsync's, until done
         void IndexPath(AssetHandle handle, const AssetMetadata& metadata);
         AssetMap m_LoadedAssets;
         AssetMap m_MemoryAssets; // AddMemoryAsset: no file, no registry entry

@@ -209,6 +209,18 @@ namespace Nox
         for (const std::filesystem::path& absolutePath : modifiedPaths)
         {
             const std::filesystem::path relativePath = absolutePath.lexically_relative(assetDir).lexically_normal();
+            // Through the path index (every source path is in it): a scan of the registry per changed file cost milliseconds in
+            // a large project, and every file written under the asset directory comes here (the registry itself too).
+            const auto indexed = m_HandleByPath.find(relativePath.generic_string());
+            if (indexed == m_HandleByPath.end())
+                continue;
+            if (const auto entry = m_AssetRegistry.find(indexed->second);
+                entry != m_AssetRegistry.end() && entry->second.SourceFilePath.lexically_normal() == relativePath)
+            {
+                toReimport.insert(indexed->second);
+                continue;
+            }
+            // The path is another asset's file (or former path) as well: the one whose source it is.
             for (const auto& [handle, metadata] : m_AssetRegistry)
             {
                 if (metadata.SourceFilePath.lexically_normal() == relativePath)
@@ -228,9 +240,10 @@ namespace Nox
         PublishLoadedAssets();
         PublishSplitImports();
 
-        if (m_RegistryDirty && !m_ReadOnly && std::chrono::steady_clock::now() - m_RegistryWritten >= std::chrono::seconds(1))
+        if (m_RegistryDirty && !m_ReadOnly && std::chrono::steady_clock::now() - m_RegistryWritten >= std::chrono::seconds(1) &&
+            (!m_RegistryWrite.IsValid() || m_RegistryWrite.IsReady()))
         {
-            SerializeAssetRegistry();
+            SerializeAssetRegistryAsync();
             m_RegistryDirty = false;
             m_RegistryWritten = std::chrono::steady_clock::now();
         }
@@ -897,6 +910,8 @@ namespace Nox
         AssetMetadata metadata;
         metadata.Type = type;
         metadata.FilePath = relativePath;
+        if (type == AssetType::Material) // as a mesh's load registers the .nmat files it writes: edits on disk reload it
+            metadata.SourceFilePath = relativePath;
         return RegisterAsset(metadata);
     }
 
@@ -1614,6 +1629,7 @@ namespace Nox
 
     void EditorAssetManager::Shutdown()
     {
+        m_RegistryWrite.Wait();
         if (m_RegistryDirty && !m_ReadOnly)
         {
             SerializeAssetRegistry();
@@ -1815,8 +1831,84 @@ namespace Nox
         return unloadedCount;
     }
 
+    namespace
+    {
+        // One registry entry, as the registry file has it.
+        void EmitRegistryEntry(YAML::Emitter& out, AssetHandle handle, const AssetMetadata& metadata)
+        {
+            out << YAML::BeginMap;
+            out << YAML::Key << "Handle" << YAML::Value << handle;
+            std::string filepathStr = metadata.FilePath.generic_string();
+            out << YAML::Key << "FilePath" << YAML::Value << filepathStr;
+            if (!metadata.SourceFilePath.empty())
+                out << YAML::Key << "SourceFilePath" << YAML::Value << metadata.SourceFilePath.generic_string();
+            out << YAML::Key << "Type" << YAML::Value << AssetTypeToString(metadata.Type);
+            if (!metadata.FormerPaths.empty())
+            {
+                out << YAML::Key << "FormerPaths" << YAML::Value << YAML::BeginSeq;
+                for (const std::filesystem::path& former : metadata.FormerPaths)
+                    out << former.generic_string();
+                out << YAML::EndSeq;
+        }
+        
+        // TextureSpecification for Texture2D assets
+        if (metadata.Type == AssetType::Texture2D)
+        {
+            out << YAML::Key << "TextureSpec" << YAML::Value;
+            out << YAML::BeginMap;
+            out << YAML::Key << "Format" << YAML::Value << std::string(ImageFormatToString(metadata.TextureSpec.format));
+            out << YAML::Key << "GenerateMips" << YAML::Value << metadata.TextureSpec.generateMips;
+            out << YAML::Key << "Flip" << YAML::Value << metadata.TextureSpec.flip;
+            if (metadata.TextureSpec.compression != TextureCompression::Default)
+                out << YAML::Key << "Compression" << YAML::Value
+                    << (metadata.TextureSpec.compression == TextureCompression::Normalmap ? "Normalmap" : "Grayscale");
+            out << YAML::EndMap;
+        }
+
+        if (metadata.Type == AssetType::Mesh || metadata.Type == AssetType::StaticMesh)
+        {
+            out << YAML::Key << "MeshSettings" << YAML::Value;
+            out << YAML::BeginMap;
+            out << YAML::Key << "ImportStaticMeshes" << YAML::Value << metadata.MeshSettings.ImportStaticMeshes;
+            out << YAML::Key << "ImportSkeletalMeshes" << YAML::Value << metadata.MeshSettings.ImportSkeletalMeshes;
+            out << YAML::Key << "ImportAnimations" << YAML::Value << metadata.MeshSettings.ImportAnimations;
+            out << YAML::Key << "ImportSkinWeights" << YAML::Value << metadata.MeshSettings.ImportSkinWeights;
+            out << YAML::Key << "StaticCombine" << YAML::Value << static_cast<int>(metadata.MeshSettings.StaticCombine);
+            out << YAML::Key << "SkeletalCombine" << YAML::Value << static_cast<int>(metadata.MeshSettings.SkeletalCombine);
+            out << YAML::Key << "SourceMeshIndex" << YAML::Value << metadata.MeshSettings.SourceMeshIndex;
+            out << YAML::Key << "ImportScale" << YAML::Value << metadata.MeshSettings.ImportScale;
+            if (!metadata.MeshSettings.MaterialBasePath.empty())
+                out << YAML::Key << "MaterialBasePath" << YAML::Value << metadata.MeshSettings.MaterialBasePath.generic_string();
+            out << YAML::EndMap;
+        }
+        
+        out << YAML::EndMap;
+        }
+
+        // Written beside it and moved over it: a write cut short (a crash, a full disk) leaves the old registry, not half of one.
+        void WriteRegistryFile(const std::filesystem::path& path, const char* text)
+        {
+            std::filesystem::path temporary = path;
+            temporary += ".tmp";
+            {
+                std::ofstream fout(temporary, std::ios::binary | std::ios::trunc);
+                fout << text;
+                if (!fout)
+                {
+                    NOX_CORE_ERROR("Could not write the asset registry `{}`", temporary.string());
+                    return;
+                }
+            }
+            std::error_code error;
+            std::filesystem::rename(temporary, path, error);
+            if (error)
+                NOX_CORE_ERROR("Could not replace the asset registry `{}`: {}", path.string(), error.message());
+        }
+    }
+
     void EditorAssetManager::SerializeAssetRegistry()
     {
+        m_RegistryWrite.Wait(); // (the deferred write still running: this one is newer)
         std::unordered_set<AssetHandle> all;
         for (const auto& [handle, metadata] : m_AssetRegistry)
             all.insert(handle);
@@ -1826,69 +1918,35 @@ namespace Nox
     void EditorAssetManager::SerializeAssetRegistry(const std::filesystem::path& path, const std::unordered_set<AssetHandle>& handles) const
     {
         YAML::Emitter out;
+        out << YAML::BeginMap; // Root
+        out << YAML::Key << "AssetRegistry" << YAML::Value << YAML::BeginSeq;
+        for (const auto& [handle, metadata] : m_AssetRegistry)
         {
-            out << YAML::BeginMap; // Root
-            out << YAML::Key << "AssetRegistry" << YAML::Value;
-
-            out << YAML::BeginSeq;
-            for (const auto&[handle, metadata] : m_AssetRegistry)
-            {
-                if (!handles.contains(handle))
-                    continue;
-                out << YAML::BeginMap;
-                out << YAML::Key << "Handle" << YAML::Value << handle;
-                std::string filepathStr = metadata.FilePath.generic_string();
-                out << YAML::Key << "FilePath" << YAML::Value << filepathStr;
-                if (!metadata.SourceFilePath.empty())
-                    out << YAML::Key << "SourceFilePath" << YAML::Value << metadata.SourceFilePath.generic_string();
-                out << YAML::Key << "Type" << YAML::Value << AssetTypeToString(metadata.Type);
-                if (!metadata.FormerPaths.empty())
-                {
-                    out << YAML::Key << "FormerPaths" << YAML::Value << YAML::BeginSeq;
-                    for (const std::filesystem::path& former : metadata.FormerPaths)
-                        out << former.generic_string();
-                    out << YAML::EndSeq;
-                }
-                
-                // --- ADD THIS: Save TextureSpecification for Texture2D assets ---
-                if (metadata.Type == AssetType::Texture2D)
-                {
-                    out << YAML::Key << "TextureSpec" << YAML::Value;
-                    out << YAML::BeginMap;
-                    out << YAML::Key << "Format" << YAML::Value << std::string(ImageFormatToString(metadata.TextureSpec.format));
-                    out << YAML::Key << "GenerateMips" << YAML::Value << metadata.TextureSpec.generateMips;
-                    out << YAML::Key << "Flip" << YAML::Value << metadata.TextureSpec.flip;
-                    if (metadata.TextureSpec.compression != TextureCompression::Default)
-                        out << YAML::Key << "Compression" << YAML::Value
-                            << (metadata.TextureSpec.compression == TextureCompression::Normalmap ? "Normalmap" : "Grayscale");
-                    out << YAML::EndMap;
-                }
-
-                if (metadata.Type == AssetType::Mesh || metadata.Type == AssetType::StaticMesh)
-                {
-                    out << YAML::Key << "MeshSettings" << YAML::Value;
-                    out << YAML::BeginMap;
-                    out << YAML::Key << "ImportStaticMeshes" << YAML::Value << metadata.MeshSettings.ImportStaticMeshes;
-                    out << YAML::Key << "ImportSkeletalMeshes" << YAML::Value << metadata.MeshSettings.ImportSkeletalMeshes;
-                    out << YAML::Key << "ImportAnimations" << YAML::Value << metadata.MeshSettings.ImportAnimations;
-                    out << YAML::Key << "ImportSkinWeights" << YAML::Value << metadata.MeshSettings.ImportSkinWeights;
-                    out << YAML::Key << "StaticCombine" << YAML::Value << static_cast<int>(metadata.MeshSettings.StaticCombine);
-                    out << YAML::Key << "SkeletalCombine" << YAML::Value << static_cast<int>(metadata.MeshSettings.SkeletalCombine);
-                    out << YAML::Key << "SourceMeshIndex" << YAML::Value << metadata.MeshSettings.SourceMeshIndex;
-                    out << YAML::Key << "ImportScale" << YAML::Value << metadata.MeshSettings.ImportScale;
-                    if (!metadata.MeshSettings.MaterialBasePath.empty())
-                        out << YAML::Key << "MaterialBasePath" << YAML::Value << metadata.MeshSettings.MaterialBasePath.generic_string();
-                    out << YAML::EndMap;
-                }
-                
-                out << YAML::EndMap;
-            }
-            out << YAML::EndSeq;
-            out << YAML::EndMap; // Root
+            if (handles.contains(handle))
+                EmitRegistryEntry(out, handle, metadata);
         }
-        
-        std::ofstream fout(path);
-        fout << out.c_str();
+        out << YAML::EndSeq;
+        out << YAML::EndMap; // Root
+        WriteRegistryFile(path, out.c_str());
+    }
+
+    void EditorAssetManager::SerializeAssetRegistryAsync()
+    {
+        // A copy of the entries here (a few ms for tens of thousands); the YAML and the file on a worker. Written on the main thread,
+        // a large registry stalled the frame: the 6c test world's 20k entries took ~400 ms, every second cells registered assets.
+        std::vector<std::pair<AssetHandle, AssetMetadata>> entries(m_AssetRegistry.begin(), m_AssetRegistry.end());
+        m_RegistryWrite = JobSystem::Get().Async("Write Asset Registry", JobPriority::Background,
+                                                 [entries = std::move(entries), path = Project::GetActiveAssetRegistryPath()](const CancellationToken&)
+        {
+            YAML::Emitter out;
+            out << YAML::BeginMap;
+            out << YAML::Key << "AssetRegistry" << YAML::Value << YAML::BeginSeq;
+            for (const auto& [handle, metadata] : entries)
+                EmitRegistryEntry(out, handle, metadata);
+            out << YAML::EndSeq;
+            out << YAML::EndMap;
+            WriteRegistryFile(path, out.c_str());
+        });
     }
 
     void EditorAssetManager::ScanAndRegisterNewAssets(const std::filesystem::path& relativeDirectory)
