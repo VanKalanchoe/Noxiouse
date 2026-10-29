@@ -75,9 +75,14 @@ meshlet cone culling.
 | # | Item |
 |---|---|
 | R1 | ~~Own TAA~~ -> built 2026-10-20 (`TAA.slang`: R2 jitter, nearest-depth velocity, Catmull-Rom history, YCoCg variance clipping; used when DLSS is off) |
-| R2 | Phase 6b **geometry streaming** (cluster pages): paused on purpose, returns with a scene that does not fit in memory or with cluster acceleration structures (D8) |
+| R2 | ~~Phase 6b **geometry streaming** (cluster pages)~~ -> built 2026-10-29 (`Engine_Architecture_Plan_2026.md` §5.7.2), tested by the user on Bistro: pages stream by LOD feedback, live pool, debug view 23 |
 | R3 | Phase 6b-2 RT fallback LOD: tried and reverted (holes in the path tracer) -- see the plan |
 | R4 | ~~Stats overlay text looked broken~~ -> F9 (cause found 2026-10-18: the overlay was world-space geometry through the camera; now screen space) |
+| R6 | **Streaming Virtual Texturing** (UE5 SVT): chosen 2026-10-29, in progress -- phases SVT-1 sampling refactor, SVT-2 tiled cook, SVT-3 runtime (page tables, physical tile cache, tile feedback, IO), SVT-4 virtual sampling + measurement (`Engine_Architecture_Plan_2026.md` §5.12.2) |
+| R7 | **Geometry compression** (Nanite-style packed vertices): octahedral normal / tangent, float positions kept so BLAS builds stay direct; ~56 -> 36 bytes per vertex (~35 % less geometry VRAM, cooked size, page IO). Touches the 17 shaders that read vertices. Deferred 2026-10-29 for R6 |
+| R8 | **Sparse geometry buffers** (Vulkan sparse binding, decision D5): reserve the streams' address space, commit 64 KB pages on demand -- removes committed-but-unused geometry (621 vs 314 MB on Bistro, 2026-10-29) and the grow-copy stalls. Needs the driver's sparse support checked. Deferred 2026-10-29 for R6 |
+| R9 | Geometry streaming: **Preserve Area for foliage** (UE5 Nanite's per-mesh option): coarse levels of leaf cards / curtain folds simplify away, so a pool smaller than what the view wants makes them vanish near the camera (expected, UE5's default behaves the same). Option: keep thin geometry's area in the simplifier, or rank foliage pages higher |
+| R10 | DLSS "WorldToScreenMatrix not invertible" every frame (seen 2026-10-29 after a DLSS recreate in LevelStreamingTest). A one-time log names the degenerate camera input (`addDLSSPass`): needs that log line to fix |
 | R5 | ~~Editor/DDGI: the probe grid is a fixed 1.8 m grid~~ -> camera-following DDGI cascades (2026-10-19), now only the second bounce under the screen-probe GI (`Hybrid_Renderer_Plan_2026-10.md` §2b-2c) |
 
 ## Editor and tools
