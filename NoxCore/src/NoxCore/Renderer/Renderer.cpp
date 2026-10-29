@@ -3616,6 +3616,18 @@ namespace Nox
         // The stream grew: its content moves to the larger buffer unchanged (offsets stay valid, the address changes).
         if (grownFrom)
         {
+            // Geometry streaming (§5.7.2) also writes three streams from the graphics queue: the draw records and page table (page
+            // activation) and the RT indices (ClusterIndices.slang). The copy below runs on the transfer queue, unordered with frames
+            // still on the GPU: a write such a frame makes to the old buffer after the copy ran was lost in the new one (a streamed
+            // mesh's BLAS built from indices its hit shaders then read as stale: wrong UVs, surfaces gone in the path tracer). Those
+            // frames finish first; growth doubles a stream, so this happens a few times while a scene loads.
+            const bool graphicsWritten = &stream == &m_meshletDrawStream || &stream == &m_geometryPageStream || &stream == &m_rtIndexStream;
+            if (graphicsWritten && m_geometryStreamer.GetStats().Meshes > 0)
+            {
+                NOX_PROFILE_SCOPE("Geometry Stream Growth Wait");
+                m_device->waitIdle();
+            }
+
             // Ordered after every write already queued to the old buffer and before the new range's writes (same transfer
             // submission). Frames in flight keep reading the old buffer, and the next frame to be submitted waits for
             // this copy, which reads it too: one frame longer than a release made during recording, as a load grows
