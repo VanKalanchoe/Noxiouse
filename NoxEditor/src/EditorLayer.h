@@ -1,5 +1,6 @@
 #pragma once
 #include <array>
+#include <chrono>
 #include <functional>
 #include <optional>
 #include <unordered_map>
@@ -312,6 +313,7 @@ namespace Nox
         bool m_HistoryGizmoWasUsing = false;
         bool m_HistoryCheckRequested = false; // an editor shortcut ran (Delete, Ctrl+D, End, ...)
         bool m_UnloadUnusedAssetsRequested = false;
+        std::chrono::steady_clock::time_point m_LastUnloadSweep{}; // the sweep runs at most once a second
         
         // Panels
         SceneHierarchyPanel m_SceneHierarchyPanel;

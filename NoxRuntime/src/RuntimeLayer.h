@@ -1,4 +1,5 @@
 #pragma once
+#include <chrono>
 #include <filesystem>
 
 #include "NoxCore/Core/Layer.h"
@@ -34,5 +35,6 @@ namespace Nox
         Renderer* m_Renderer = nullptr;
         Ref<Scene> m_Scene;
         bool m_UnloadUnusedAssetsRequested = false;
+        std::chrono::steady_clock::time_point m_LastUnloadSweep{}; // the sweep runs at most once a second
     };
 }

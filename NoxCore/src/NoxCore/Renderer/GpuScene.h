@@ -207,6 +207,9 @@ namespace Nox
             uint64_t LastMovedFrame = ~0ull;
             uint64_t BlasAddressOverride = 0;
             uint64_t SkinnedVertexAddress = 0;
+            // The world bounding sphere of its mesh's box (center, radius), kept with its transform: the ray tracing culling reads
+            // it every frame for every instance (Unreal keeps a primitive's world bounds the same way).
+            glm::vec4 WorldSphere{ 0.0f };
         };
 
         void InsertIntoBucket(uint32_t instanceSlot);

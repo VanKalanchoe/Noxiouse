@@ -72,6 +72,7 @@ namespace Nox
         // (it may destroy the instance root).
         UUID m_PendingSplit = 0;
         std::string m_PendingFolderDelete;
+        float m_RowHeight = 0.0f;     // a closed top-level row, measured: the height of each one not built (out of view)
         Entity m_PendingSingleSelect; // a plain click on a selected entity narrows the selection on release, so it can be dragged as a group
         std::string m_RenameFolderPath;
         char m_FolderNameBuffer[128] = {};

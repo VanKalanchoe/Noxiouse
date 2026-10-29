@@ -236,6 +236,15 @@ namespace Nox
                     DrawFolderNode(path, folders);
             }
 
+            // The top-level entities, built only where they are on screen (Unreal's Outliner builds its visible rows): a closed row
+            // out of view is a gap of one row's height, an open one is drawn (its subtree's height is known only by drawing it).
+            // A streamed world has tens of thousands of top-level entities: built every frame, they cost 8 ms.
+            const float viewTop = ImGui::GetScrollY();
+            const float viewBottom = viewTop + ImGui::GetWindowHeight();
+            if (m_RowHeight <= 0.0f)
+                m_RowHeight = ImGui::GetTextLineHeightWithSpacing();
+            ImGuiStorage* storage = ImGui::GetStateStorage();
+            float gap = 0.0f; // rows skipped since the last one drawn
             m_Context->m_Registry.view<TagComponent>().each([&](auto entityID, TagComponent&)
             {
                 Entity entity(entityID, m_Context.get());
@@ -246,10 +255,29 @@ namespace Nox
                         isRoot = false;
                 if (entity.HasComponent<FolderComponent>() && !entity.GetComponent<FolderComponent>().Path.empty())
                     isRoot = false; // drawn inside its folder
+                if (!isRoot)
+                    return;
 
-                if (isRoot)
-                    DrawEntityNode(entity);
+                const float top = ImGui::GetCursorPosY() + gap;
+                const ImGuiID id = ImGui::GetID((void*)(uint64_t)(uint32_t)entity);
+                const bool open = storage->GetInt(id, 0) != 0;
+                if (!open && (top + m_RowHeight < viewTop || top > viewBottom))
+                {
+                    gap += m_RowHeight;
+                    return;
+                }
+                if (gap > 0.0f)
+                {
+                    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + gap);
+                    gap = 0.0f;
+                }
+                const float before = ImGui::GetCursorPosY();
+                DrawEntityNode(entity);
+                if (!open && storage->GetInt(id, 0) == 0) // (a row that stayed closed: what each skipped one takes)
+                    m_RowHeight = ImGui::GetCursorPosY() - before;
             });
+            if (gap > 0.0f)
+                ImGui::SetCursorPosY(ImGui::GetCursorPosY() + gap);
 
             if (!m_PendingFolderDelete.empty())
             {

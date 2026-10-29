@@ -33,6 +33,7 @@ public sealed class StreamingWorldTest : EntityBehaviour
 
     Phase m_Phase = Phase.WarmUp;
     float m_Time;
+    float m_SettledTime;
     float m_SampleTime;
     Vector3 m_Center;
     float m_Radius;
@@ -80,8 +81,16 @@ public sealed class StreamingWorldTest : EntityBehaviour
 
         if (m_Phase == Phase.WarmUp)
         {
-            // The start's cells in, and a few frames to settle (the first frames of Play are long).
-            if (m_Time > 1.0f && Scene.IsWorldStreamingCompleted(camera, WorldUnits.FromMeters(HoleRangeMeters)) || m_Time > MaxWarmUpSeconds)
+            // The camera was moved to the circle's start (a teleport): every cell around it in -- nothing loading any more, as a game
+            // waits for streaming after a teleport (Unreal's IsStreamingCompleted) -- and a second to settle. The flight measures
+            // streaming at speed, not the teleport.
+            WorldStreamingStats world = Scene.GetWorldStreamingStats();
+            bool settled = world.Loading == 0 && Scene.IsWorldStreamingCompleted(camera, WorldUnits.FromMeters(HoleRangeMeters));
+            if (!settled)
+                m_SettledTime = 0.0f;
+            else
+                m_SettledTime += deltaTime;
+            if (m_SettledTime > 1.0f || m_Time > MaxWarmUpSeconds)
             {
                 Log.Info($"[StreamingWorldTest] flying (warm-up {m_Time:0.0} s)");
                 m_FlightStart = Scene.GetWorldStreamingStats();

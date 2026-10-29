@@ -329,6 +329,17 @@ namespace Nox
             function(slot, key);
     }
 
+    namespace
+    {
+        glm::vec4 WorldBoundingSphere(const shaderio::GpuMesh& mesh, const glm::mat4& world)
+        {
+            const float scale = std::max({ glm::length(glm::vec3(world[0])), glm::length(glm::vec3(world[1])), glm::length(glm::vec3(world[2])) });
+            const float radius = 0.5f * glm::length(glm::max(mesh.boundsMax - mesh.boundsMin, glm::vec3(0.0f))) * scale;
+            const glm::vec3 center = glm::vec3(world * glm::vec4(0.5f * (mesh.boundsMin + mesh.boundsMax), 1.0f));
+            return glm::vec4(center, radius);
+        }
+    }
+
     uint32_t GpuScene::AddInstance(uint32_t meshSlot, uint32_t materialSlot, const glm::mat4& world, int32_t entityID)
     {
         const uint32_t slot = m_Instances.Allocate();
@@ -349,7 +360,8 @@ namespace Nox
         transform.normal = glm::transpose(glm::inverse(world));
         transform.previousWorld = world;
 
-        m_InstanceStates[slot] = InstanceState{ .Mesh = meshSlot, .Material = materialSlot };
+        m_InstanceStates[slot] = InstanceState{ .Mesh = meshSlot, .Material = materialSlot,
+                                                .WorldSphere = WorldBoundingSphere(m_Meshes.Get(meshSlot), world) };
         ++m_MaterialReferences[materialSlot];
         ++m_InstanceCount;
         WriteRayTracingInstance(slot);
@@ -409,6 +421,8 @@ namespace Nox
         }
         transform.world = world;
         transform.normal = glm::transpose(glm::inverse(world));
+        if (state.Mesh != InvalidSlot)
+            state.WorldSphere = WorldBoundingSphere(m_Meshes.Get(state.Mesh), world);
 
         m_RayTracingInstances.Edit(instanceSlot).normalMatrix = transform.normal;
         WriteTlasInstance(instanceSlot);
@@ -644,6 +658,9 @@ namespace Nox
         m_MeshLastTraced.resize(m_MeshBlasAddresses.size(), 0);
         m_TlasCulledCount = 0;
         const float cullDistance = std::max(culling.Radius, 0.0f);
+        // The angle a sphere covers, 2 asin(r / d), is under a limit A where r < d sin(A / 2): no asin per instance.
+        const float sinHalfAngle = std::sin(std::min(culling.MinAngle * 0.5f, glm::half_pi<float>()));
+        const float sinHalfAngleKept = std::sin(std::min(culling.MinAngle * 1.1f * 0.5f, glm::half_pi<float>())); // (hysteresis)
         for (uint32_t slot = 0; slot < static_cast<uint32_t>(m_InstanceStates.size()) && slot < m_TlasCulled.size(); ++slot)
         {
             const InstanceState& state = m_InstanceStates[slot];
@@ -651,18 +668,12 @@ namespace Nox
             bool culled = false;
             if (traced && culling.Enabled)
             {
-                // The world bounding sphere of the mesh's box.
-                const shaderio::GpuMesh& mesh = m_Meshes.Get(state.Mesh);
-                const glm::mat4& world = m_Transforms.Get(slot).world;
-                const float scale = std::max({ glm::length(glm::vec3(world[0])), glm::length(glm::vec3(world[1])), glm::length(glm::vec3(world[2])) });
-                const float radius = 0.5f * glm::length(glm::max(mesh.boundsMax - mesh.boundsMin, glm::vec3(0.0f))) * scale;
-                const glm::vec3 center = glm::vec3(world * glm::vec4(0.5f * (mesh.boundsMin + mesh.boundsMax), 1.0f));
-                const float centerDistance = glm::length(center - culling.Camera);
+                const float radius = state.WorldSphere.w;
+                const float centerDistance = glm::length(glm::vec3(state.WorldSphere) - culling.Camera);
                 const float distance = std::max(centerDistance - radius, 0.0f);
-                const float angle = centerDistance > radius ? 2.0f * std::asin(radius / centerDistance) : glm::pi<float>();
                 const bool wasCulled = m_TlasCulled[slot] != 0;
-                culled = wasCulled ? distance > cullDistance * 0.9f && angle < culling.MinAngle * 1.1f
-                                   : distance > cullDistance && angle < culling.MinAngle;
+                culled = wasCulled ? distance > cullDistance * 0.9f && radius < centerDistance * sinHalfAngleKept
+                                   : distance > cullDistance && radius < centerDistance * sinHalfAngle;
             }
             if (traced && !culled)
                 m_MeshLastTraced[state.Mesh] = m_CullingFrame;

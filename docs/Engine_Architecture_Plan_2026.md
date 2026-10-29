@@ -1363,6 +1363,14 @@ camera.
   back -- unsaved changes included, as the text was. Before, every loaded cell was written as text, its entities destroyed, and the
   source's cells parsed and built again before the first frame: seconds with a thousand entities a cell. Cells entities were moved
   into that the editor had not loaded still go through text (merged with their files).
+- **With cells built on workers (1000 props):** the main thread's streaming cost fell from 167 ms to 4.7 ms a second of flight and a
+  cell is in 0.38 s after it is wanted (1.8 s before). The frame (CPU-bound: 15.7 ms CPU, 8.1 ms GPU) then showed what 65k
+  entities cost every frame, fixed where it was the engine's own waste: the Scene Hierarchy built a row for every top-level entity
+  (8.2 ms; now only the rows on screen, as Unreal's Outliner), the unused-asset sweep ran nearly every frame (1-7 ms; now at most
+  once a second), and the ray tracing culling computed every instance's world bounding sphere and an asin per frame (TLAS Prepare
+  2.2 ms; the sphere is kept with the transform). Left as they are: Transform Propagation's walk over the roots (0.7 ms) and the
+  draw list rebuilt when instances come and go (GPU Scene 1.5 ms). The fly-through's warm-up now waits until nothing loads (the
+  move to the circle's start is a teleport, which a game waits out), so the flight measures streaming at speed.
 - **Cooked cells (a binary cell format) are not built:** with building on workers, the parse only delays a cell (worker time, in
   parallel), it does not stall a frame, and the dense test has no main-thread cost left that a binary format would remove. It stays
   the lever for latency if a world needs cells in faster than its loading range allows.

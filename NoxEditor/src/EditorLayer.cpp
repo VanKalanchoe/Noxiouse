@@ -340,10 +340,13 @@ namespace Nox
         // Loads still streaming in during the last sweep have finished: what nothing uses any more goes too.
         if (Project::GetActive()->GetEditorAssetManager()->ConsumeLoadsSettledAfterSweep())
             m_UnloadUnusedAssetsRequested = true;
-        if (m_UnloadUnusedAssetsRequested)
+        // The sweep walks every scene's references: at most once a second (Unreal collects garbage on an interval too). A streamed
+        // world asks for it with nearly every cell that goes and every load that lands -- every frame, 1-7 ms with 65k entities.
+        if (m_UnloadUnusedAssetsRequested && std::chrono::steady_clock::now() - m_LastUnloadSweep >= std::chrono::seconds(1))
         {
             NOX_PROFILE_SCOPE("Unload Unused Assets");
             m_UnloadUnusedAssetsRequested = false;
+            m_LastUnloadSweep = std::chrono::steady_clock::now();
             UnloadUnusedAssets();
         }
 

@@ -107,10 +107,12 @@ namespace Nox
         auto assetManager = Project::GetActive()->GetEditorAssetManager();
         if (m_Scene->ConsumeAssetReferencesChanged() || assetManager->ConsumeLoadsSettledAfterSweep())
             m_UnloadUnusedAssetsRequested = true;
-        if (m_UnloadUnusedAssetsRequested)
+        // At most once a second (the editor's rule): a streamed world asks for it with nearly every cell and every load.
+        if (m_UnloadUnusedAssetsRequested && std::chrono::steady_clock::now() - m_LastUnloadSweep >= std::chrono::seconds(1))
         {
             NOX_PROFILE_SCOPE("Unload Unused Assets");
             m_UnloadUnusedAssetsRequested = false;
+            m_LastUnloadSweep = std::chrono::steady_clock::now();
             UnloadUnusedAssets();
         }
 
