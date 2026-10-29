@@ -680,7 +680,7 @@ float skyIrradianceLuma(UniformBufferObject* ubo, float3 n)
         // DEBUG OUTPUT SELECTION
         // =========================================================================
         // Mode 1: Base Color (Matching Sascha Willems Inputs -> Base color)
-        if (pushConstant.debugMode == 1 || pushConstant.debugMode == 20 || pushConstant.debugMode == 21) // 20/21: colors written by the G-buffer
+        if (pushConstant.debugMode == 1 || pushConstant.debugMode == 20 || pushConstant.debugMode == 21 || pushConstant.debugMode == 23) // 20/21/23: colors written by the G-buffer
         {
             return float4(albedoSample.rgb, 1.0);
         }

@@ -373,8 +373,10 @@ namespace Nox
         {
             return std::nullopt;
         }
-        // A cook from before streaming pages (version 2) is cooked again while its source is there; without one it is read as it is.
-        if (!sourceMissing && MeshSerializer::ReadVersion(cookedPath) < 3)
+        // A cook from before streaming pages (version 2) is cooked again while its source is there, so it streams; without one it is
+        // read as it is (no pages: always resident). Not one mesh of a split import (Do Not Combine): cooking it alone parses the whole
+        // file -- Bistro's 551 meshes parsed it 551 times -- so it loads as it is until the model is reimported (one parse for all).
+        if (!sourceMissing && metadata.MeshSettings.SourceMeshIndex < 0 && MeshSerializer::ReadVersion(cookedPath) < 3)
             return std::nullopt;
 
         CookedMesh cooked;

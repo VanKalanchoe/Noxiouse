@@ -608,6 +608,23 @@
                                             float3(0.95, 0.15, 0.1), float3(0.85, 0.2, 0.85), float3(0.25, 0.35, 1.0) };
             output.albedo.rgb = levelColors[min(bounds.lodLevel, 5u)] * (0.35 + 0.65 * dot(baseColor.rgb, float3(0.2126, 0.7152, 0.0722)));
         }
+        // Debug view 23: geometry streaming (§5.7.2) -- the page the drawn cluster comes from: gray a mesh that does not stream, blue a
+        // root page (always resident), green a streamed page, brighter the finer its clusters (cyan: the original geometry).
+        if (pushConstant.debugMode == 23)
+        {
+            const float luminance = 0.35 + 0.65 * dot(baseColor.rgb, float3(0.2126, 0.7152, 0.0722));
+            float3 color = float3(0.45, 0.45, 0.45);
+            if (instance.pageOffset != NoGeometryRange)
+            {
+                MeshletBounds* bounds = &((MeshletBounds*)ubo->geometryMeshletBoundsReference)[instance.boundsOffset + (meshletID - instance.drawsOffset)];
+                GpuGeometryPage* page = &((GpuGeometryPage*)ubo->geometryPagesReference)[instance.pageOffset + bounds.page];
+                if (page.lodError >= ClusterTerminalError)
+                    color = float3(0.2, 0.35, 1.0);
+                else
+                    color = bounds.lodLevel == 0 ? float3(0.1, 0.95, 0.85) : float3(0.15, 0.4, 0.1) + float3(0.0, 0.5, 0.0) / float(bounds.lodLevel);
+            }
+            output.albedo.rgb = color * luminance;
+        }
         output.normal   = (pushConstant.debugMode == 2) ? float4(rawNormalTex, roughness) : float4(finalNormal, roughness);
 
         // Encode unlit flag: 2.0 = UNLIT

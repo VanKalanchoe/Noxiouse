@@ -893,8 +893,9 @@ copied, ~2.2x the source vertices over all levels, measured on 0.17M and 1.1M tr
 LOD bounds (a sphere around its groups' simplified bounds, their largest error). Per cluster in `MeshletBounds`: its page and
 `refinedPage`, the page of the group it was simplified from. Cooked format v3 (`NSM3`/`NMS3`, `MeshSerializer.h`): cluster records,
 page table, dependencies and mesh bounds come first; page data sits in an aligned payload section, one contiguous range per page,
-read alone with `VFS::ReadRange` from a loose file or a pack. v2 files still load (no pages); a v2 cook whose source is present is
-cooked again.
+read alone with `VFS::ReadRange` from a loose file or a pack. v2 files still load (no pages, always resident). A v2 cook whose source is
+present is cooked again, except one mesh of a split import (Do Not Combine): cooking it alone parses the whole file, which for
+Bistro's 551 meshes meant 551 parses, so it loads as it is until the model is reimported.
 
 **Exact cut with residency.** The task shader draws cluster *c* when its page is resident, its parent error projects above the
 threshold, and either its own error is below it or its `refinedPage` is not resident. The streamer keeps residency
@@ -937,7 +938,11 @@ is full detail, far away it is what that distance needs.
 
 **Not yet:** vertex compression (positions relative to the cluster, octahedral normals: Nanite's pages are ~4x smaller), streaming
 skinned geometry (one level, not paged), per-view request priorities. Editor: Geometry Streaming section (enable for meshes loaded
-next, stats, pool override for forcing pressure); profiler counters Streamed Geometry Pages / MB.
+next, stats, pool override for forcing pressure). The stats report's counters say whether streaming is engaged: Streamed Geometry
+Meshes, Pages (resident / total / loading), MB, Root MB, Page Requests, Pages Evicted. Debug view 23 colors clusters by their page:
+gray for a mesh that does not stream, blue for a root page, green for a streamed page (brighter = finer), cyan for original geometry.
+To test: open a scene with streamed meshes, switch to view 23, and fly in. Near surfaces turn green/cyan as their pages arrive. Then
+set the pool override low (32 MB): Pages Evicted climbs, and far geometry goes back to blue/coarser.
 
 ### 5.8 GPU Memory & Buffer System
 

@@ -259,8 +259,15 @@ namespace Nox
         }
 
         m_Stats.ResidentBytes = m_ResidentBytes;
+        // In the stats report: whether streaming is engaged at all (streamed meshes), what it holds and what the feedback asks.
+        NOX_PROFILE_COUNTER("Streamed Geometry Meshes", m_Stats.Meshes);
         NOX_PROFILE_COUNTER("Streamed Geometry Pages", m_Stats.ResidentPages);
+        NOX_PROFILE_COUNTER("Streamed Geometry Pages Total", m_Stats.Pages);
+        NOX_PROFILE_COUNTER("Streamed Geometry Pages Loading", m_Stats.LoadingPages);
         NOX_PROFILE_COUNTER("Streamed Geometry MB", static_cast<int64_t>(m_ResidentBytes >> 20));
+        NOX_PROFILE_COUNTER("Streamed Geometry Root MB", static_cast<int64_t>(m_Stats.RootBytes >> 20));
+        NOX_PROFILE_COUNTER("Geometry Page Requests", m_Stats.Requests);
+        NOX_PROFILE_COUNTER("Geometry Pages Evicted", static_cast<int64_t>(m_Stats.PageEvictions));
     }
 
     void GeometryStreamer::advanceLoads(StreamedMesh& mesh, uint32_t /*id*/)

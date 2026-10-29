@@ -1774,6 +1774,8 @@ namespace Nox
         std::vector<uint32_t> m_mipFeedback;
         uint64_t m_mipFeedbackSerial = 0;
 
+        bool m_dlssCameraWarned = false; // addDLSSPass: a degenerate camera was reported (until it is fine again)
+
         // Cluster LOD (§5.7), and what the visibility passes drew with it: cleared each frame, read back per frame slot.
         float m_lodErrorPixels = 1.0f;
         bool m_lodFullDetail = false;

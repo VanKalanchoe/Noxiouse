@@ -744,8 +744,9 @@ namespace Nox
         m_RenderGraphPanel->OnImGuiRender();
         m_ProfilerPanel.OnImGuiRender();
         {
-            // The camera the cells stream around: the primary camera in Play, else the editor camera.
-            glm::dvec3 streamingSource = m_EditorCamera.GetPosition();
+            // The camera the cells stream around: the primary camera in Play, the editor camera in Simulate; editing, what the editor
+            // camera looks at (where a world opens its cells).
+            glm::dvec3 streamingSource = m_SceneState == SceneState::Edit ? m_EditorCamera.GetFocalPoint() : m_EditorCamera.GetPosition();
             if (m_SceneState == SceneState::Play && m_ActiveScene)
             {
                 if (Entity camera = m_ActiveScene->GetPrimaryCameraEntity(); camera && camera.HasComponent<WorldTransformComponent>())
@@ -950,7 +951,8 @@ namespace Nox
             "19: Path Tracer (Progressive Ground Truth)",
             "20: Texture Streaming Mips (red: needs more, green: as needed, blue: more than needed)",
             "21: Cluster LOD Level (green: original, then yellow, orange, red, magenta, blue)",
-            "22: Ambient Occlusion (SSAO/RTAO, white = unoccluded)"
+            "22: Ambient Occlusion (SSAO/RTAO, white = unoccluded)",
+            "23: Geometry Streaming Pages (gray: not streamed, blue: root page, green: streamed page, cyan: original geometry)"
         };
         int currentMode = static_cast<int>(m_Renderer->getDebugMode());
         if (ImGui::Combo("PBR Debug View", &currentMode, debugModeNames, IM_ARRAYSIZE(debugModeNames)))
@@ -2783,7 +2785,19 @@ namespace Nox
         m_ActiveScene = m_EditorScene;
         SaveEditorCameras(); // the scene being left
         m_EditorScenePath = Project::GetActive()->GetEditorAssetManager()->GetFilePath(handle);
-        RestoreEditorCameras();
+        const bool cameraRestored = RestoreEditorCameras();
+        // A world opened for the first time (no saved view): the camera frames its cells, which then load around it -- left wherever
+        // the previous scene had it, it could be outside the world and nothing would load.
+        if (!cameraRestored && !m_FocusOnOpen && m_EditorScene->IsWorldPartitioned() && !m_EditorScene->GetWorldPartition().Cells.empty())
+        {
+            glm::dvec3 lowest(std::numeric_limits<double>::max()), highest(std::numeric_limits<double>::lowest());
+            for (const auto& [coord, cell] : m_EditorScene->GetWorldPartition().Cells)
+            {
+                lowest = glm::min(lowest, cell.BoundsMin);
+                highest = glm::max(highest, cell.BoundsMax);
+            }
+            m_FocusOnOpen = (lowest + highest) * 0.5;
+        }
         if (m_FocusOnOpen)
         {
             m_EditorCamera.SetFocalPoint(*m_FocusOnOpen);
@@ -2791,9 +2805,10 @@ namespace Nox
             m_EditorCamera.SetOrientation(0.45f, 0.0f); // looking down at it
             m_FocusOnOpen.reset();
         }
-        // A world opens with the cells around the editor camera (the World Partition panel loads others).
+        // A world opens with the cells around what the editor camera looks at (its orbit's focal point: the camera itself orbits up
+        // to hundreds of meters away; the World Partition panel loads others).
         if (m_EditorScene->IsWorldPartitioned())
-            m_EditorScene->LoadWorldCells(m_EditorScene->WorldCellsAround(m_EditorCamera.GetPosition(),
+            m_EditorScene->LoadWorldCells(m_EditorScene->WorldCellsAround(m_EditorCamera.GetFocalPoint(),
                                                                           WorldUnits::FromMeters(m_EditorScene->GetWorldPartition().Settings.LoadingRange)));
         m_UnloadUnusedAssetsRequested = true;
 #if NOX_PROFILE_STATS
@@ -2866,10 +2881,11 @@ namespace Nox
             out << line << "\n";
     }
 
-    void EditorLayer::RestoreEditorCameras()
+    bool EditorLayer::RestoreEditorCameras()
     {
+        bool activeRestored = false;
         if (!Project::GetActive() || m_EditorScenePath.empty())
-            return;
+            return activeRestored;
         const std::string prefix = m_EditorScenePath.generic_string() + "|";
         for (const std::string& line : ReadEditorCameraLines())
         {
@@ -2889,7 +2905,9 @@ namespace Nox
             if (camera.IsOrthographic())
                 camera.SetOrthoHalfHeight(orthoHalfHeight);
             m_Viewports[index].CameraSet = true;
+            activeRestored |= index == m_ActiveViewport;
         }
+        return activeRestored;
     }
 
     void EditorLayer::UI_StatusBar()

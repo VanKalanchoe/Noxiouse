@@ -1,7 +1,10 @@
 // Upscaling passes: DLSS / DLAA / Ray Reconstruction and the render-to-display resolution entity/depth blit.
 #include "NoxCore/Renderer/Renderer.h"
 
+#include <cmath>
+
 #include "FrameGraphResources.h"
+#include "NoxCore/Core/Log.h"
 
 namespace Nox
 {
@@ -62,6 +65,29 @@ namespace Nox
                     cmd.pushData(&push, sizeof(push));
                     cmd.dispatch((push.width + 7) / 8, (push.height + 7) / 8, 1);
                 });
+        }
+
+        // NGX inverts world-to-screen (projection x view) and the previous frame's; a degenerate camera only shows as an NGX warning
+        // every frame ("WorldToScreenMatrix not invertible"). Which input is bad, logged once each time it starts.
+        {
+            auto invertible = [](const glm::mat4& matrix)
+            {
+                const float determinant = glm::determinant(matrix);
+                return std::isfinite(determinant) && std::abs(determinant) > 1e-30f;
+            };
+            const char* bad = !invertible(uniformData.nonJitteredProj * uniformData.view) ? "projection x view"
+                            : !invertible(uniformData.prevProj * uniformData.prevView)    ? "previous projection x view"
+                            : glm::length(m_cameraForward) < 1e-6f || glm::length(m_cameraUp) < 1e-6f || glm::length(m_cameraRight) < 1e-6f
+                                ? "camera basis"
+                                : nullptr;
+            if (bad && !m_dlssCameraWarned)
+            {
+                NOX_CORE_WARN("DLSS: the camera's {} is not invertible (det view {:g}, det projection {:g}, previous {:g} / {:g}, render {}x{}, "
+                              "near {:g}, fov {:g})", bad, glm::determinant(uniformData.view), glm::determinant(uniformData.nonJitteredProj),
+                              glm::determinant(uniformData.prevView), glm::determinant(uniformData.prevProj), m_renderSize.width,
+                              m_renderSize.height, m_cameraNear, m_cameraFOV);
+            }
+            m_dlssCameraWarned = bad != nullptr;
         }
 
         m_renderGraph.AddPass("DLSS", RGPassFlags::None,
