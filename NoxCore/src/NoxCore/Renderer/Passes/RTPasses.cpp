@@ -354,7 +354,7 @@ namespace Nox
         const bool runDDGI = !frame.runPathTracer &&
                              m_rayTracingEnabled &&
                              (m_ddgiEnabled || m_debugMode == 16 || m_debugMode == 17) &&
-                             m_ddgiRadiancePipeline && m_ddgiBlendIrradiancePipeline && m_ddgiBlendDistancePipeline &&
+                             m_ddgiRadiancePipeline && m_ddgiBlendIrradiancePipeline && m_ddgiBlendDistancePipeline && m_ddgiRayDirectionsPipeline &&
                              (totalDDGIProbes > 0);
         if (!runDDGI)
             return;
@@ -370,6 +370,10 @@ namespace Nox
         rayData.Height = totalDDGIProbes;
         rayData.Format = NRI::ImageFormat::R16G16B16A16_SFLOAT;
         resources.DDGIRayData = graph.CreateTexture("DDGI Ray Data", rayData);
+        RGTextureDesc rayDirections = rayData;
+        rayDirections.Height = 128; // the rotations a probe's rays can have
+        rayDirections.Format = NRI::ImageFormat::R32G32B32A32_SFLOAT;
+        resources.DDGIRayDirections = graph.CreateTexture("DDGI Ray Directions", rayDirections);
 
         // Probe atlases: 8x8 irradiance / 16x16 distance interior plus a 1-texel border per probe.
         RGTextureDesc irradiance;
@@ -504,11 +508,35 @@ namespace Nox
                 });
         }
 
+        // 1c. The blends' ray directions: every direction a probe's rays have this frame, once (the blends evaluated them per texel).
+        m_renderGraph.AddPass("DDGI Ray Directions", RGPassFlags::Raster,
+            [&](RGBuilder& builder)
+            {
+                builder.ColorTarget(resources.DDGIRayDirections, NRI::LoadOP::dontCare, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
+                builder.SetRenderArea({ m_ddgiRaysPerProbe, 128 });
+            },
+            [this](RGPassContext& context)
+            {
+                NRI::CommandBuffer& cmd = context.Cmd();
+                cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_ddgiRayDirectionsPipeline);
+                cmd.setCullMode(NRI::CullMode::None);
+                cmd.setDepthTestEnable(false);
+                cmd.setDepthWriteEnable(false);
+                cmd.setColorBlendEnable(0, false);
+                cmd.setColorWriteMask(0, NRI::ColorComponent::All);
+                shaderio::PushConstantDDGIBlend push{};
+                push.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                push.raysPerProbe = m_ddgiRaysPerProbe;
+                cmd.pushData(&push, sizeof(push));
+                cmd.drawMeshTasks(1, 1, 1);
+            });
+
         // 2. Blend irradiance atlas.
         m_renderGraph.AddPass("DDGI Blend Irradiance", RGPassFlags::Raster,
             [&](RGBuilder& builder)
             {
                 builder.Read(resources.DDGIRayData);
+                builder.Read(resources.DDGIRayDirections);
                 builder.Read(resources.DDGIIrradiance[readIndex]);
                 builder.ColorTarget(resources.DDGIIrradiance[writeIndex], NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 1.0f });
                 builder.SetRenderArea(irradianceExtent);
@@ -535,6 +563,7 @@ namespace Nox
                 blendIrrPush.hysteresis = m_ddgiHysteresis;
                 blendIrrPush.firstFrame = m_frame.ddgiFirstFrame ? 1 : 0;
                 blendIrrPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
+                blendIrrPush.rayDirectionsTextureIndex = context.Slot(res->DDGIRayDirections);
                 cmd.pushData(&blendIrrPush, sizeof(shaderio::PushConstantDDGIBlend));
 
                 cmd.drawMeshTasks(1, 1, 1);
@@ -545,6 +574,7 @@ namespace Nox
             [&](RGBuilder& builder)
             {
                 builder.Read(resources.DDGIRayData);
+                builder.Read(resources.DDGIRayDirections);
                 builder.Read(resources.DDGIDistance[readIndex]);
                 builder.ColorTarget(resources.DDGIDistance[writeIndex], NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
                 builder.SetRenderArea(distanceExtent);
@@ -570,6 +600,7 @@ namespace Nox
                 blendDistPush.hysteresis = m_ddgiHysteresis;
                 blendDistPush.firstFrame = m_frame.ddgiFirstFrame ? 1 : 0;
                 blendDistPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
+                blendDistPush.rayDirectionsTextureIndex = context.Slot(res->DDGIRayDirections);
                 cmd.pushData(&blendDistPush, sizeof(shaderio::PushConstantDDGIBlend));
 
                 cmd.drawMeshTasks(1, 1, 1);

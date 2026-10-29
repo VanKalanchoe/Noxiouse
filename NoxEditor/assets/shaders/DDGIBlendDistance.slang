@@ -110,15 +110,17 @@ float2 fragMain(
     float meanDistSq = 0.0;
     float totalWeight = 0.0;
 
-    float rotAngle = float((pushConstant.frameIndex + probeIndex * 17) % 128) * (2.0 * 3.14159265359 / 128.0);
-    float3 rotAxis = normalize(float3(0.57735, 0.57735, 0.57735));
+    // This probe's ray directions: its row of the table DDGIRayDirections.slang wrote this frame (the same expression per ray).
+    Texture2D rayDirectionsTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.rayDirectionsTextureIndex, 0));
+    const int rotation = int((pushConstant.frameIndex + probeIndex * 17) % 128);
 
     for (uint r = 0; r < pushConstant.raysPerProbe; r++)
     {
+        float3 rayDir = rayDirectionsTex.Load(int3(r, rotation, 0)).xyz;
+        float cosTheta = dot(dir, rayDir);
+        if (cosTheta <= 0.0)
+            continue; // (weight 0: it adds nothing)
         float4 raySample = rayDataTex.Load(int3(r, probeIndex, 0));
-        float3 rayDir = rotate_vector(spherical_fibonacci(r, pushConstant.raysPerProbe), rotAxis, rotAngle);
-
-        float cosTheta = max(0.0, dot(dir, rayDir));
         float weight = pow(cosTheta, 16.0); // Sharper directional weighting for distance moments
 
         // Clamped to about a cell and a half (in world units): misses and far hits only need to read as "open". A back face

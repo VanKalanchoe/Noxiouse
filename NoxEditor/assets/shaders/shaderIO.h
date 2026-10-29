@@ -1812,6 +1812,7 @@ struct PushConstantDDGIBlend
     float hysteresis;
     uint32_t firstFrame;
     uint32_t frameIndex;
+    uint32_t rayDirectionsTextureIndex; // the blends: DDGIRayDirections.slang's table (ray x rotation)
 };
 
 // Ray traced results at a lower ray tracing resolution back to the render resolution (RTUpsample.slang).

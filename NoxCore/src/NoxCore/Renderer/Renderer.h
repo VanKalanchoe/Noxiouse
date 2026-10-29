@@ -1172,6 +1172,7 @@ namespace Nox
         std::unique_ptr<NRI::Pipeline> m_ddgiBlendIrradiancePipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_ddgiBlendDistancePipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_ddgiRelocationPipeline = nullptr;
+        std::unique_ptr<NRI::Pipeline> m_ddgiRayDirectionsPipeline = nullptr; // the blends' ray direction table (DDGIRayDirections.slang)
         std::unique_ptr<NRI::Pipeline> m_ddgiDebugSpheresPipeline = nullptr;
         // RT results at a lower ray tracing resolution back to the render resolution: RGBA16F (reflections), RG16F (shadow mask),
         // R16F (RTAO).
