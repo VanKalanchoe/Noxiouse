@@ -176,7 +176,7 @@ namespace Nox
         {
             std::sort(m_Candidates.begin(), m_Candidates.end(), [](const Candidate& a, const Candidate& b) { return a.Priority > b.Priority; });
 
-            std::vector<std::pair<uint64_t, std::pair<uint32_t, uint32_t>>> victims; // (last wanted, (mesh, page)), gathered once needed
+            std::vector<Victim> victims; // gathered once needed
             bool victimsGathered = false;
             size_t nextVictim = 0;
             uint32_t starts = 0;
@@ -202,27 +202,9 @@ namespace Nox
                     if (!victimsGathered)
                     {
                         victimsGathered = true;
-                        for (uint32_t id = 0; id < m_Meshes.size(); ++id)
-                        {
-                            const StreamedMesh& owner = m_Meshes[id];
-                            if (!owner.Valid)
-                                continue;
-                            for (uint32_t page = owner.Source->RootPageCount; page < owner.Pages.size(); ++page)
-                            {
-                                const Page& state = owner.Pages[page];
-                                if (state.State == PageState::Resident && state.Dependents == 0 && state.LastWanted + HoldFrames < m_FeedbackFrame)
-                                    victims.push_back({ state.LastWanted, { id, page } });
-                            }
-                        }
-                        std::sort(victims.begin(), victims.end());
+                        gatherVictims(victims);
                     }
-                    while (m_ResidentBytes + bytes > pool && nextVictim < victims.size())
-                    {
-                        const auto [victimMesh, victimPage] = victims[nextVictim++].second;
-                        StreamedMesh& owner = m_Meshes[victimMesh];
-                        if (owner.Valid && owner.Pages[victimPage].State == PageState::Resident && owner.Pages[victimPage].Dependents == 0)
-                            evict(owner, victimPage);
-                    }
+                    evictDownTo(pool - std::min(pool, bytes), victims, nextVictim, UINT32_MAX);
                 }
                 if (m_ResidentBytes + bytes > pool)
                 {
@@ -240,6 +222,16 @@ namespace Nox
             }
         }
         m_Candidates.clear();
+
+        // Over the pool without anything new to load (the pool was made smaller, or the camera left what it had loaded): what has not
+        // been wanted for a while goes, a bounded number of pages a frame. Pages still wanted stay, whatever the pool says.
+        if (m_ResidentBytes > pool)
+        {
+            std::vector<Victim> victims;
+            gatherVictims(victims);
+            size_t nextVictim = 0;
+            evictDownTo(pool, victims, nextVictim, EvictionsPerFrame);
+        }
 
         // Meshes whose residency changed: a new BLAS from their leaf cut, not more often than BlasRebuildFrames.
         for (uint32_t id = 0; id < m_Meshes.size(); ++id)
@@ -259,6 +251,18 @@ namespace Nox
         }
 
         m_Stats.ResidentBytes = m_ResidentBytes;
+        // What the feedback wants now: resident pages wanted within HoldFrames, and the requested ones still missing.
+        m_Stats.WantedBytes = 0;
+        for (const StreamedMesh& mesh : m_Meshes)
+        {
+            if (!mesh.Valid)
+                continue;
+            for (uint32_t page = mesh.Source->RootPageCount; page < mesh.Pages.size(); ++page)
+            {
+                if (mesh.Pages[page].LastWanted != 0 && mesh.Pages[page].LastWanted + HoldFrames >= m_FeedbackFrame && !mesh.Pages[page].Failed)
+                    m_Stats.WantedBytes += pageBytes(mesh.Source->Pages[page]);
+            }
+        }
         // In the stats report: whether streaming is engaged at all (streamed meshes), what it holds and what the feedback asks.
         NOX_PROFILE_COUNTER("Streamed Geometry Meshes", m_Stats.Meshes);
         NOX_PROFILE_COUNTER("Streamed Geometry Pages", m_Stats.ResidentPages);
@@ -266,8 +270,43 @@ namespace Nox
         NOX_PROFILE_COUNTER("Streamed Geometry Pages Loading", m_Stats.LoadingPages);
         NOX_PROFILE_COUNTER("Streamed Geometry MB", static_cast<int64_t>(m_ResidentBytes >> 20));
         NOX_PROFILE_COUNTER("Streamed Geometry Root MB", static_cast<int64_t>(m_Stats.RootBytes >> 20));
+        NOX_PROFILE_COUNTER("Streamed Geometry Wanted MB", static_cast<int64_t>(m_Stats.WantedBytes >> 20));
+        NOX_PROFILE_COUNTER("Geometry Pool MB", static_cast<int64_t>(m_Stats.PoolBytes >> 20));
         NOX_PROFILE_COUNTER("Geometry Page Requests", m_Stats.Requests);
         NOX_PROFILE_COUNTER("Geometry Pages Evicted", static_cast<int64_t>(m_Stats.PageEvictions));
+    }
+
+    void GeometryStreamer::gatherVictims(std::vector<Victim>& outVictims) const
+    {
+        // Resident streamed pages nothing resident or loading depends on, not wanted for HoldFrames: least recently wanted first.
+        for (uint32_t id = 0; id < m_Meshes.size(); ++id)
+        {
+            const StreamedMesh& owner = m_Meshes[id];
+            if (!owner.Valid)
+                continue;
+            for (uint32_t page = owner.Source->RootPageCount; page < owner.Pages.size(); ++page)
+            {
+                const Page& state = owner.Pages[page];
+                if (state.State == PageState::Resident && state.Dependents == 0 && state.LastWanted + HoldFrames < m_FeedbackFrame)
+                    outVictims.push_back({ state.LastWanted, id, page });
+            }
+        }
+        std::sort(outVictims.begin(), outVictims.end(), [](const Victim& a, const Victim& b) { return a.LastWanted < b.LastWanted; });
+    }
+
+    void GeometryStreamer::evictDownTo(uint64_t targetBytes, const std::vector<Victim>& victims, size_t& nextVictim, uint32_t maxEvictions)
+    {
+        uint32_t evicted = 0;
+        while (m_ResidentBytes > targetBytes && nextVictim < victims.size() && evicted < maxEvictions)
+        {
+            const Victim& victim = victims[nextVictim++];
+            StreamedMesh& owner = m_Meshes[victim.Mesh];
+            if (owner.Valid && owner.Pages[victim.Page].State == PageState::Resident && owner.Pages[victim.Page].Dependents == 0)
+            {
+                evict(owner, victim.Page);
+                ++evicted;
+            }
+        }
     }
 
     void GeometryStreamer::advanceLoads(StreamedMesh& mesh, uint32_t /*id*/)

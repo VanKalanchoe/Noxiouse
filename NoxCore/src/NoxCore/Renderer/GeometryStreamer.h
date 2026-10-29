@@ -48,6 +48,8 @@ namespace Nox
         // A page is kept this long after the feedback last wanted it before it may be evicted (feedback is a few frames old, and
         // resident pages report every GeometryTouchInterval frames).
         static constexpr uint64_t HoldFrames = 4 * shaderio::GeometryTouchInterval;
+        // Pages evicted per frame to bring the streamed pages back within the pool (when nothing new needs the room).
+        static constexpr uint32_t EvictionsPerFrame = 512;
         // A mesh's BLAS is built from its leaf cut again at most this often while its pages change.
         static constexpr uint64_t BlasRebuildFrames = 10;
 
@@ -60,6 +62,7 @@ namespace Nox
             uint64_t ResidentBytes = 0;  // streamed pages' data in the geometry streams
             uint64_t RootBytes = 0;      // root pages' data (always resident)
             uint64_t PoolBytes = 0;
+            uint64_t WantedBytes = 0;    // streamed pages the feedback wanted recently (resident or not)
             uint64_t PageLoads = 0;      // since start
             uint64_t PageEvictions = 0;
             uint32_t Requests = 0;       // in the newest feedback
@@ -153,6 +156,16 @@ namespace Nox
             PageRanges Ranges;
         };
 
+        // An eviction candidate (gatherVictims): least recently wanted first.
+        struct Victim
+        {
+            uint64_t LastWanted = 0;
+            uint32_t Mesh = 0;
+            uint32_t Page = 0;
+        };
+        void gatherVictims(std::vector<Victim>& outVictims) const;
+        // Evicts victims from nextVictim on until the streamed pages fit targetBytes, at most maxEvictions of them.
+        void evictDownTo(uint64_t targetBytes, const std::vector<Victim>& victims, size_t& nextVictim, uint32_t maxEvictions);
         void advanceLoads(StreamedMesh& mesh, uint32_t id);
         void startLoad(StreamedMesh& mesh, uint32_t page, uint64_t& uploadBudget);
         void activate(StreamedMesh& mesh, uint32_t page);

@@ -988,7 +988,8 @@ namespace Nox
                 ImGui::SetTooltip("Meshes loaded from now on read only their root pages, the rest as the LOD asks for it.\n"
                                   "Off: meshes loaded from now on read every page (reload the scene to apply to loaded ones).");
             ImGui::Text("Streamed meshes: %u | pages %u of %u resident, %u loading", stats.Meshes, stats.ResidentPages, stats.Pages, stats.LoadingPages);
-            ImGui::Text("Resident %.1f MB | root pages %.1f MB | pool %.0f MB", stats.ResidentBytes / MB, stats.RootBytes / MB, stats.PoolBytes / MB);
+            ImGui::Text("Resident %.1f MB | wanted %.1f MB | root pages %.1f MB | pool %.0f MB", stats.ResidentBytes / MB, stats.WantedBytes / MB,
+                        stats.RootBytes / MB, stats.PoolBytes / MB);
             ImGui::Text("Requests %u (dropped %u) | waiting for room %u | loaded %llu, evicted %llu", stats.Requests, stats.DroppedRequests,
                         stats.WantedNotResident, static_cast<unsigned long long>(stats.PageLoads), static_cast<unsigned long long>(stats.PageEvictions));
             int poolOverrideMB = static_cast<int>(streamer.GetPoolOverride() / (1024 * 1024));
