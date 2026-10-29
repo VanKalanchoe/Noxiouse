@@ -344,6 +344,7 @@ namespace Nox
         // stream them from memory, BeginWorldStreaming).
         newScene->m_World = other->m_World;
         newScene->m_World.Overrides.clear();
+        newScene->m_WorldSnapshots.clear();
         const std::vector<WorldCellCoord> loadedCells = other->GetLoadedWorldCells(false);
         newScene->m_World.EditorLoaded = std::set<WorldCellCoord>(loadedCells.begin(), loadedCells.end());
 
@@ -532,7 +533,7 @@ namespace Nox
         // World cells loaded and not (yet) activated: what they were loaded for stays (§5.13.3).
         for (const StreamedLevel& streamed : m_Levels)
         {
-            if (streamed.Staged)
+            if (streamed.Staged && !streamed.Loader) // (one still loading is its worker's: built, its assets are requested)
                 streamed.Staged->CollectAssetReferences(outHandles);
         }
 
@@ -669,6 +670,18 @@ namespace Nox
             NOX_CORE_TRACE("World cell `{}` loaded ({} entities)", streamed.Name, created.size());
         else
             NOX_CORE_INFO("Level `{}` loaded ({} entities)", streamed.Name, created.size());
+    }
+
+    void Scene::CopyEntitiesFrom(Scene& source, const std::vector<UUID>& ids)
+    {
+        for (UUID id : ids)
+        {
+            Entity from = source.GetEntityByUUID(id);
+            if (!from)
+                continue;
+            Entity made = CreateEntityWithUUID(id, from.GetName());
+            CopyComponentIfExists(AllComponents{}, made, from);
+        }
     }
 
     bool Scene::ActivateWorldCellEntities(StreamedLevel& streamed, double budgetMs)

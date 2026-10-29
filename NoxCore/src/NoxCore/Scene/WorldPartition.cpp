@@ -186,6 +186,19 @@ namespace Nox
         return cells;
     }
 
+    // A root and its descendants' IDs, each parent before its children.
+    static void CollectTree(Scene& scene, Entity root, std::vector<UUID>& out)
+    {
+        out.push_back(root.GetUUID());
+        if (!root.HasComponent<RelationshipComponent>())
+            return;
+        for (UUID child : root.GetComponent<RelationshipComponent>().Children)
+        {
+            if (Entity entity = scene.GetEntityByUUID(child))
+                CollectTree(scene, entity, out);
+        }
+    }
+
     // The bounds of a cell's roots (their positions where they have none), for the index.
     static void RootsBounds(Scene& scene, const std::vector<Entity>& roots, glm::vec3& outMin, glm::vec3& outMax)
     {
@@ -393,6 +406,18 @@ namespace Nox
         streamed.Requested = std::chrono::steady_clock::now();
         streamed.ReadMs = streamed.BuildMs = streamed.ActivateMs = 0.0;
         streamed.BuildSteps = streamed.ActivateSteps = 0;
+        if (auto snapshot = m_WorldSnapshots.find(streamed.Cell); snapshot != m_WorldSnapshots.end())
+        {
+            // A cell the editor had loaded, back in: built from the session's copy (main thread, a copy like an activation).
+            const auto start = std::chrono::steady_clock::now();
+            streamed.Staged = CreateRef<Scene>();
+            streamed.Staged->CopyEntitiesFrom(*snapshot->second.Entities, snapshot->second.Order);
+            streamed.StagedEntities = snapshot->second.Order;
+            streamed.BuildMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+            streamed.BuildSteps = 1;
+            RequestWorldCellAssets(streamed);
+            return;
+        }
         if (auto memory = m_World.Overrides.find(streamed.Cell); memory != m_World.Overrides.end())
         {
             if (memory->second.empty())
@@ -401,7 +426,7 @@ namespace Nox
                 return;
             }
             streamed.Staged = CreateRef<Scene>();
-            streamed.Loader = std::make_unique<SceneLoader>(streamed.Name, memory->second, *streamed.Staged, streamed.Level, true);
+            streamed.Loader = std::make_unique<SceneLoader>(streamed.Name, memory->second, streamed.Staged, streamed.Level);
             return;
         }
         if (!m_World.Cells.contains(streamed.Cell) || m_World.CellDirectory.empty())
@@ -410,8 +435,18 @@ namespace Nox
             return;
         }
         streamed.Staged = CreateRef<Scene>();
-        streamed.Loader = std::make_unique<SceneLoader>(Project::GetActiveAssetDirectory() / m_World.CellFile(streamed.Cell), *streamed.Staged,
-                                                        streamed.Level, true);
+        streamed.Loader = std::make_unique<SceneLoader>(Project::GetActiveAssetDirectory() / m_World.CellFile(streamed.Cell), streamed.Staged,
+                                                        streamed.Level);
+    }
+
+    void Scene::RequestWorldCellAssets(StreamedLevel& streamed)
+    {
+        std::unordered_set<AssetHandle> handles;
+        streamed.Staged->CollectAssetReferences(handles);
+        streamed.Assets.assign(handles.begin(), handles.end());
+        for (AssetHandle handle : streamed.Assets)
+            AssetManager::RequestAsset(handle);
+        NOX_CORE_TRACE("World cell `{}` loaded ({} entities, {} assets)", streamed.Name, streamed.StagedEntities.size(), streamed.Assets.size());
     }
 
     // How long a loaded cell's activation waits for its assets (meshes, models, materials) before it goes into the world anyway.
@@ -433,7 +468,7 @@ namespace Nox
             }
             // Loaded: what it references is requested now, to be in when it activates.
             // Every entity of the built cell: the file's in file order, then any its components made while it was built.
-            streamed.ReadMs = streamed.Loader->GetReadMs();
+            streamed.ReadMs = streamed.Loader->GetReadMs() + streamed.Loader->GetWorkerBuildMs();
             streamed.BuildMs = streamed.Loader->GetCreateMs();
             streamed.BuildSteps = streamed.Loader->GetCreateSteps();
             streamed.StagedEntities = streamed.Loader->GetCreatedEntities();
@@ -447,12 +482,7 @@ namespace Nox
                         streamed.StagedEntities.push_back(id);
                 }
             }
-            std::unordered_set<AssetHandle> handles;
-            streamed.Staged->CollectAssetReferences(handles);
-            streamed.Assets.assign(handles.begin(), handles.end());
-            for (AssetHandle handle : streamed.Assets)
-                AssetManager::RequestAsset(handle);
-            NOX_CORE_TRACE("World cell `{}` loaded ({} entities, {} assets)", streamed.Name, streamed.StagedEntities.size(), streamed.Assets.size());
+            RequestWorldCellAssets(streamed);
         }
         if (!streamed.Staged || !streamed.Activate)
             return CellStep::Busy; // (Loaded is its target)
@@ -740,9 +770,11 @@ namespace Nox
             }
         }
 
-        // 1. A copy of an edited world: the cells' entities in it become in-memory cells (unsaved changes included), streamed like
-        //    the files. A cell the editor had loaded is its entities as they are now (none: nothing); entities moved into a cell it had
-        //    not loaded join that cell's file.
+        // 1. A copy of an edited world. A cell the editor had loaded stays in the world as it is (unsaved changes included): activated
+        //    from the start, with a copy of it for when it streams out and back (m_WorldSnapshots) -- no text, no rebuild (with a
+        //    thousand entities a cell, writing the loaded cells out as text and building the source's back held Play for seconds).
+        //    Entities moved into a cell it had not loaded join that cell's file, in memory (Overrides).
+        m_WorldSnapshots.clear();
         const std::map<WorldCellCoord, std::vector<Entity>> groups = CollectWorldCellRoots();
         std::set<WorldCellCoord> cells = m_World.EditorLoaded;
         for (const auto& [cell, roots] : groups)
@@ -754,21 +786,48 @@ namespace Nox
             const std::vector<Entity>& roots = group != groups.end() ? group->second : none;
             const std::string name = WorldGrid::CellName(cell);
             uint32_t count = 0;
-            std::string text;
             glm::vec3 boundsMin, boundsMax;
             RootsBounds(*this, roots, boundsMin, boundsMax);
             if (m_World.EditorLoaded.contains(cell))
             {
-                if (!roots.empty())
-                    text = SceneSerializer::WorldCellText(*this, roots, name, &count);
+                if (roots.empty())
+                {
+                    m_World.Overrides[cell] = std::string(); // emptied in the editor
+                    m_World.Cells.erase(cell);
+                    continue;
+                }
+                WorldCellSnapshot& snapshot = m_WorldSnapshots[cell];
+                for (Entity root : roots)
+                    CollectTree(*this, root, snapshot.Order);
+                snapshot.Entities = CreateRef<Scene>();
+                snapshot.Entities->CopyEntitiesFrom(*this, snapshot.Order);
+                const UUID cellID = WorldGrid::CellID(cell);
+                for (UUID id : snapshot.Order)
+                {
+                    if (Entity entity = GetEntityByUUID(id))
+                        entity.AddOrReplaceComponent<LevelComponent>().Level = cellID;
+                }
+                for (Entity root : roots)
+                    m_World.Origins[root.GetUUID()] = cell;
+                if (auto indexed = m_World.Cells.find(cell); indexed != m_World.Cells.end())
+                {
+                    boundsMin = glm::min(boundsMin, indexed->second.BoundsMin);
+                    boundsMax = glm::max(boundsMax, indexed->second.BoundsMax);
+                }
+                m_World.Cells[cell] = WorldCellInfo{ boundsMin, boundsMax, static_cast<uint32_t>(snapshot.Order.size()) };
+                StreamedLevel& streamed = m_Levels.emplace_back();
+                streamed.Level = cellID;
+                streamed.IsCell = true;
+                streamed.Cell = cell;
+                streamed.Name = name;
+                streamed.Activate = true;
+                streamed.Loaded = true;
+                continue;
             }
-            else
-            {
-                std::string fileText;
-                if (m_World.Cells.contains(cell) && !m_World.CellDirectory.empty())
-                    VFS::ReadText(Project::GetActiveAssetDirectory() / m_World.CellFile(cell), fileText);
-                text = SceneSerializer::MergeWorldCellText(*this, fileText, roots, name, count);
-            }
+            std::string fileText;
+            if (m_World.Cells.contains(cell) && !m_World.CellDirectory.empty())
+                VFS::ReadText(Project::GetActiveAssetDirectory() / m_World.CellFile(cell), fileText);
+            std::string text = SceneSerializer::MergeWorldCellText(*this, fileText, roots, name, count);
             // The index's bounds stay in, the editor's loaded cells' too: an entity without bounds yet (a mesh a script makes in Play,
             // a model not loaded) counts as its position only, and its cell's content shrank to that -- streamed later than its
             // file says, or not at all from where it should be (the test world's cells, 45 m away instead of 32).
@@ -788,6 +847,8 @@ namespace Nox
         }
         for (const auto& [cell, roots] : groups)
         {
+            if (m_WorldSnapshots.contains(cell))
+                continue; // (in the world as they are)
             for (Entity root : roots)
             {
                 m_World.Origins.erase(root.GetUUID());

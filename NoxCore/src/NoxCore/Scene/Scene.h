@@ -157,8 +157,8 @@ namespace Nox
         {
             uint64_t CellsActivated = 0;
             uint64_t EntitiesActivated = 0;
-            double ReadMs = 0.0;           // workers
-            double BuildMs = 0.0;          // main thread
+            double ReadMs = 0.0;           // workers: read, parsed, built
+            double BuildMs = 0.0;          // main thread: a worker's result taken, or a session snapshot copied
             double ActivateMs = 0.0;       // main thread
             double AssetWaitSeconds = 0.0;
             double LatencySeconds = 0.0;   // summed: divide by CellsActivated
@@ -340,6 +340,19 @@ namespace Nox
         };
         std::vector<StreamedLevel> m_Levels;
         WorldPartition m_World;
+        // Play / Simulate of an edited world: the cells the editor had loaded stay in the world as the session begins, and this is
+        // each as it was then (its entities, every component, in a scene of their own): streamed out and back, it is built from
+        // here -- unsaved changes included -- with a copy, not a text round trip.
+        struct WorldCellSnapshot
+        {
+            Ref<Scene> Entities;
+            std::vector<UUID> Order; // roots, each before its children
+        };
+        std::map<WorldCellCoord, WorldCellSnapshot> m_WorldSnapshots;
+        // These entities of another scene copied into this one (same IDs, every component).
+        void CopyEntitiesFrom(Scene& source, const std::vector<UUID>& ids);
+        // A built cell's references requested (Loaded: in when it activates).
+        void RequestWorldCellAssets(StreamedLevel& streamed);
         bool m_WorldStreaming = false; // Play / Simulate of a world: cells follow the streaming sources
         WorldStreamingCounters m_WorldStreamingCounters;
         bool m_ShowHLODs = true;       // editing: the HLOD grid streams around the editor camera

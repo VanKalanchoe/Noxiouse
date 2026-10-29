@@ -190,9 +190,9 @@ public sealed class StreamingWorldTest : EntityBehaviour
         {
             double entities = (double)(end.EntitiesActivated - m_FlightStart.EntitiesActivated) / cells;
             double mainThread = end.BuildMs - m_FlightStart.BuildMs + end.ActivateMs - m_FlightStart.ActivateMs;
-            Log.Info($"[StreamingWorldTest] {cells} cells streamed in ({entities:0} entities each): per cell read and parsed " +
-                     $"{(end.ReadMs - m_FlightStart.ReadMs) / cells:0.00} ms (worker), built {(end.BuildMs - m_FlightStart.BuildMs) / cells:0.00} ms and " +
-                     $"activated {(end.ActivateMs - m_FlightStart.ActivateMs) / cells:0.00} ms (main thread), assets waited " +
+            Log.Info($"[StreamingWorldTest] {cells} cells streamed in ({entities:0} entities each): per cell read, parsed and built " +
+                     $"{(end.ReadMs - m_FlightStart.ReadMs) / cells:0.00} ms (worker); built {(end.BuildMs - m_FlightStart.BuildMs) / cells:0.00} ms and " +
+                     $"activated {(end.ActivateMs - m_FlightStart.ActivateMs) / cells:0.00} ms (main thread); assets waited " +
                      $"{(end.AssetWaitSeconds - m_FlightStart.AssetWaitSeconds) / cells:0.00} s; in the world " +
                      $"{(end.LatencySeconds - m_FlightStart.LatencySeconds) / cells:0.00} s after being wanted (longest {end.MaxLatencySeconds:0.00} s); " +
                      $"main thread {mainThread / m_Time:0.0} ms per second of flight");

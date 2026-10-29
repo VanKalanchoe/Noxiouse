@@ -1349,9 +1349,23 @@ camera.
   them into the world (main thread, in how many steps), waiting for its assets, and the time from being wanted to being in the
   world (`Scene::WorldStreamingCounters`, trace log per cell; script API 7: `WorldStreamingStats` carries the sums). The
   fly-through prints them per cell over the flight, with the main thread's streaming milliseconds per second of flight.
-- **Cooked cells (the roadmap's last 6c item) wait for those numbers:** a binary cell format replaces the parse and the YAML-node
-  lookups, not the entity creation, and doubles the serializer (43 components) to keep in step. It is built if dense cells show
-  the parse or the build is what limits streaming (holes, hitches, or a main-thread share that grows past the budget).
+- **What the numbers showed (2026-10-29, 2 GB world, 64 m cells):** 250 props a cell: per cell 14 ms read and parsed (worker),
+  7.3 ms built and 0.2 ms activated (main thread), 44 ms of main thread a second of flight, holes on 56 frames. 1000 props: 56 ms
+  parsed, 28 ms built, 0.7 ms activated; 167 ms of main thread a second -- more than the 3 ms a frame streaming may take, so cells
+  queued (1.8 s from wanted to in the world, holes up to 6 s). The cost was building the entities from the parsed text on the
+  main thread (29 us an entity); copying them into the world is cheap (0.7 us).
+- **Cells are built on their loading job (Unreal's async loading thread):** the worker that reads and parses a cell's file also
+  creates its entities, into the cell's own scene (nothing else sees it until the job is done; creating an entity touches only its
+  scene; UUIDs come from a generator per thread). The main thread takes the result and copies the cell into the world, a slice a
+  frame; cells build in parallel. A cell unloaded while building is dropped by its job.
+- **Play no longer writes the editor's cells out:** the cells the editor had loaded stay in the Play copy as activated cells, and a
+  copy of each (every component, in a scene of its own: `Scene::m_WorldSnapshots`) is what it is built from if it streams out and
+  back -- unsaved changes included, as the text was. Before, every loaded cell was written as text, its entities destroyed, and the
+  source's cells parsed and built again before the first frame: seconds with a thousand entities a cell. Cells entities were moved
+  into that the editor had not loaded still go through text (merged with their files).
+- **Cooked cells (a binary cell format) are not built:** with building on workers, the parse only delays a cell (worker time, in
+  parallel), it does not stall a frame, and the dense test has no main-thread cost left that a binary format would remove. It stays
+  the lever for latency if a world needs cells in faster than its loading range allows.
 - **Nothing written while streaming:** the generator writes each tile's material (`.nmat`) beside its mesh and registers it, as a
   model's cook does: a mesh whose material file is missing writes and registers it when it loads, and with the registry's
   deferred write on the main thread that cost the 30 GB world (20k registry entries) ~400 ms every second of flight. The
@@ -1436,7 +1450,7 @@ flight, targeted texture-slot cache eviction. Future:
 | **6a** | Texture streaming | 5 | BC cooking for all sources, mip tail, GPU mip feedback, residency + eviction | Scene textures exceeding the texture budget render correctly with mip reduction |
 | **6b** | Geometry streaming & LOD | 5 | Cluster hierarchy cook, GPU cut selection (**done, 6b-1**), page streaming pool (paused, §5.7.1), RT fallback LOD (reverted, D8) | Geometry exceeding the geometry budget renders with streaming; no popping beyond threshold |
 | **6c-0** | Level streaming | 5 | Additive scene load / unload, Level Streaming Volumes, script API (§5.12a: **built 2026-10-23**) | A level streams in and out around the camera without a stall |
-| **6c** | World streaming | 6a, 6b, 6c-0 | Grid cells, per-cell files, cell streaming, editor (§5.13.1: **6c-1 built 2026-10-24**), activation stages (§5.13.3: **6c-2 built 2026-10-24**), HLOD (§5.13.2: **6c-3 built 2026-10-24**), test world and fly-through (§5.13.4: **built 2026-10-29**), cooked cells | Test world larger than RAM/VRAM traversable without stalls |
+| **6c** | World streaming | 6a, 6b, 6c-0 | Grid cells, per-cell files, cell streaming, editor (§5.13.1: **6c-1 built 2026-10-24**), activation stages (§5.13.3: **6c-2 built 2026-10-24**), HLOD (§5.13.2: **6c-3 built 2026-10-24**), test world and fly-through (§5.13.4: **built 2026-10-29**), cells built on workers (§5.13.4; a binary cell format not needed so far) | Test world larger than RAM/VRAM traversable without stalls |
 | **7** | Continuous optimization | all | Profile-driven work, VT, DirectStorage, async compute expansion | Ongoing |
 
 Phases 1, 2 and 3 are architecture-defining and each gets its own plan-mode design before code.

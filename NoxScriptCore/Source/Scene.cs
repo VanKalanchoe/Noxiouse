@@ -66,9 +66,9 @@ public struct WorldStreamingStats
     /// <summary>Cells that went into the world, and their entities.</summary>
     public long CellsActivated;
     public long EntitiesActivated;
-    /// <summary>Reading and parsing their files, on workers (ms).</summary>
+    /// <summary>Reading and parsing their files and building their entities, on workers (ms).</summary>
     public double ReadMs;
-    /// <summary>Building them (creating their entities) on the main thread (ms).</summary>
+    /// <summary>What of their building the main thread did (ms): taking a worker's result, or copying a Play session's snapshot.</summary>
     public double BuildMs;
     /// <summary>Copying them into the world on the main thread (ms).</summary>
     public double ActivateMs;

@@ -87,8 +87,9 @@ namespace Nox
         // The cell each spatially loaded root entity was loaded from or last saved to: where it goes when its bounds are not known
         // (its mesh not loaded) and what is unloaded with a cell in the editor (the components of a restored undo step are new).
         std::unordered_map<UUID, WorldCellCoord> Origins;
-        // A Play / Simulate copy of an edited world: the cells the editor had loaded (their entities are in the copy), then their
-        // entities as text, streamed from memory instead of the files (unsaved changes included). Empty text: nothing to load.
+        // A Play / Simulate copy of an edited world: the cells the editor had loaded (their entities are in the copy, and stay in the
+        // world: Scene::m_WorldSnapshots), and the cells entities were moved into that it had not loaded, as text streamed from memory
+        // instead of their files (unsaved changes included). Empty text: nothing to load (a cell emptied in the editor).
         std::set<WorldCellCoord> EditorLoaded;
         std::map<WorldCellCoord, std::string> Overrides;
 

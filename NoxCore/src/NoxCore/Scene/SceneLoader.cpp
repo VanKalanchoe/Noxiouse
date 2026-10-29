@@ -22,7 +22,40 @@ namespace Nox
         double ReadMs = 0.0;    // the file read and parsed
         YAML::Node Document;
         YAML::Node Entities;    // the document's entity sequence
+        // A world cell built on the worker too (into a scene of its own): its entities, in file order.
+        bool Built = false;
+        double BuildMs = 0.0;
+        std::vector<UUID> Created;
     };
+
+    namespace
+    {
+        // One entity of a document into a scene: the main thread's slices and a cell's worker alike. A cell's entity already in the
+        // scene is skipped (the editor's own copy of one saved into a cell it then loads).
+        void CreateDocumentEntity(Scene& scene, const YAML::Node& entity, AssetHandle level, bool cell, const std::filesystem::path& path,
+                                  std::vector<UUID>& created)
+        {
+            if (cell)
+            {
+                if (Entity existing = scene.GetEntityByUUID(entity["Entity"].as<uint64_t>()))
+                {
+                    NOX_CORE_WARN("World cell `{}`: entity '{}' ({}) is in the scene already, kept as it is", path.filename().string(),
+                                  existing.GetName(), entity["Entity"].as<uint64_t>());
+                    return;
+                }
+            }
+            std::string name;
+            if (const YAML::Node tag = entity["TagComponent"])
+                name = tag["Tag"].as<std::string>();
+            Entity made = scene.CreateEntityWithUUID(entity["Entity"].as<uint64_t>(), name);
+            SceneSerializer::DeserializeEntityComponents(scene, entity, made, false);
+            if (level != 0)
+            {
+                made.AddComponent<LevelComponent>().Level = level;
+                created.push_back(made.GetUUID());
+            }
+        }
+    }
 
     SceneLoader::SceneLoader(std::filesystem::path path)
         : m_Path(std::move(path)), m_Parsed(std::make_shared<Parsed>()), m_Scene(CreateRef<Scene>())
@@ -43,12 +76,25 @@ namespace Nox
         StartReading(std::move(text));
     }
 
-    void SceneLoader::StartReading(std::string text)
+    SceneLoader::SceneLoader(std::filesystem::path path, const Ref<Scene>& cellScene, AssetHandle cell)
+        : m_Path(std::move(path)), m_Parsed(std::make_shared<Parsed>()), m_Into(cellScene.get()), m_Level(cell), m_Cell(true)
+    {
+        StartReading({}, cellScene);
+    }
+
+    SceneLoader::SceneLoader(std::string name, std::string text, const Ref<Scene>& cellScene, AssetHandle cell)
+        : m_Path(std::move(name)), m_Parsed(std::make_shared<Parsed>()), m_Into(cellScene.get()), m_Level(cell), m_Cell(true)
+    {
+        StartReading(std::move(text), cellScene);
+    }
+
+    void SceneLoader::StartReading(std::string text, Ref<Scene> buildInto)
     {
         const bool additive = m_Level != 0;
         const bool inMemory = !text.empty();
         m_Read = JobSystem::Get().Async("Read Scene", JobPriority::Normal,
-                                        [shared = m_Parsed, path = m_Path, additive, inMemory, text = std::move(text)](const CancellationToken& token) mutable
+                                        [shared = m_Parsed, path = m_Path, additive, inMemory, text = std::move(text), buildInto = std::move(buildInto),
+                                         level = m_Level](const CancellationToken& token) mutable
         {
             if (token.IsCancelled()) // (the loader is gone)
                 return;
@@ -89,6 +135,38 @@ namespace Nox
                     parsed.Error = exception.what();
                 }
             }
+
+            // A world cell into a scene of its own (Unreal's async loading thread): nothing else sees that scene until the job is
+            // done, and creating an entity touches only its scene. The main thread is left with copying the cell into the world.
+            if (!buildInto || !parsed.Ok)
+                return;
+            const auto buildStart = std::chrono::steady_clock::now();
+            try
+            {
+                Scene& scene = *buildInto;
+                if (const YAML::Node folders = parsed.Document["Folders"])
+                {
+                    for (const YAML::Node& folder : folders)
+                        scene.AddFolder(folder.as<std::string>());
+                }
+                const size_t count = parsed.Entities && parsed.Entities.IsSequence() ? parsed.Entities.size() : 0;
+                parsed.Created.reserve(count);
+                for (size_t index = 0; index < count; ++index)
+                {
+                    if ((index & 63) == 0 && token.IsCancelled()) // (unloaded meanwhile: its scene goes with the job)
+                        return;
+                    CreateDocumentEntity(scene, parsed.Entities[index], level, true, path, parsed.Created);
+                }
+                parsed.Built = true;
+            }
+            catch (const YAML::Exception& exception)
+            {
+                parsed.Ok = false;
+                parsed.Error = exception.what();
+            }
+            parsed.BuildMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - buildStart).count();
+            parsed.Document = YAML::Node();
+            parsed.Entities = YAML::Node();
         });
     }
 
@@ -116,6 +194,13 @@ namespace Nox
             SceneSerializer serializer(m_Scene);
             m_Failed = !serializer.DeserializeRuntimeBytes(parsed.Bytes, m_Path.string());
             parsed.Bytes.clear();
+            return true;
+        }
+        if (parsed.Built) // (a cell: built on the worker)
+        {
+            m_Created = std::move(parsed.Created);
+            m_Total = m_Next = m_Created.size();
+            m_Started = true;
             return true;
         }
 
@@ -170,27 +255,7 @@ namespace Nox
         const auto start = std::chrono::steady_clock::now();
         while (m_Next < m_Total)
         {
-            const YAML::Node& entities = parsed.Entities;
-            const YAML::Node entity = entities[m_Next++];
-            if (m_Cell)
-            {
-                if (Entity existing = scene.GetEntityByUUID(entity["Entity"].as<uint64_t>()))
-                {
-                    NOX_CORE_WARN("World cell `{}`: entity '{}' ({}) is in the scene already, kept as it is", m_Path.filename().string(),
-                                  existing.GetName(), entity["Entity"].as<uint64_t>());
-                    continue;
-                }
-            }
-            std::string name;
-            if (const YAML::Node tag = entity["TagComponent"])
-                name = tag["Tag"].as<std::string>();
-            Entity created = scene.CreateEntityWithUUID(entity["Entity"].as<uint64_t>(), name);
-            SceneSerializer::DeserializeEntityComponents(scene, entity, created, false);
-            if (m_Level != 0)
-            {
-                created.AddComponent<LevelComponent>().Level = m_Level;
-                m_Created.push_back(created.GetUUID());
-            }
+            CreateDocumentEntity(scene, parsed.Entities[m_Next++], m_Level, m_Cell, m_Path, m_Created);
 
             // The clock is read every few entities (an entity takes microseconds).
             if ((m_Next & 15) == 0 &&
@@ -208,6 +273,11 @@ namespace Nox
     double SceneLoader::GetReadMs() const
     {
         return m_Read.IsReady() ? m_Parsed->ReadMs : 0.0;
+    }
+
+    double SceneLoader::GetWorkerBuildMs() const
+    {
+        return m_Read.IsReady() ? m_Parsed->BuildMs : 0.0;
     }
 
     float SceneLoader::GetProgress() const

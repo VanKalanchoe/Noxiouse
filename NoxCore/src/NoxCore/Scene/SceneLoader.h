@@ -33,6 +33,10 @@ namespace Nox
         explicit SceneLoader(std::filesystem::path path);
         SceneLoader(std::filesystem::path path, Scene& into, AssetHandle level, bool cell = false);
         SceneLoader(std::string name, std::string text, Scene& into, AssetHandle level, bool cell);
+        // A world cell into a scene of its own (§5.13.3's built scene): read, parsed and built on the worker, so the main thread only
+        // takes its entities (Step, once). Nothing may use the scene before Step returns true.
+        SceneLoader(std::filesystem::path path, const Ref<Scene>& cellScene, AssetHandle cell);
+        SceneLoader(std::string name, std::string text, const Ref<Scene>& cellScene, AssetHandle cell);
         ~SceneLoader(); // a read still going on finishes on its own (it shares only the parse result with the loader)
 
         SceneLoader(const SceneLoader&) = delete;
@@ -52,11 +56,12 @@ namespace Nox
         // Where the time went (world streaming's stats, §5.13.4): reading and parsing the file on a worker (valid once Step has
         // started creating), and creating the entities on the main thread, in how many Step calls.
         double GetReadMs() const;
+        double GetWorkerBuildMs() const; // a cell built on the worker
         double GetCreateMs() const { return m_CreateMs; }
         uint32_t GetCreateSteps() const { return m_CreateSteps; }
 
     private:
-        void StartReading(std::string text);
+        void StartReading(std::string text, Ref<Scene> buildInto = nullptr);
 
         struct Parsed; // the YAML document (kept out of this header)
 
