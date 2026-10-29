@@ -84,6 +84,7 @@ namespace Nox
             uint16_t format;
             // In what was padding (zeroed by the value-initialization below): Default hashes as every cook before it did.
             uint8_t compression;
+            uint8_t virtualTexture; // padding before too: Auto hashes as before
         };
         TextureCookSettings cookSettings{};
         cookSettings.source = Utility::calcul_hash_streaming(sourcePath.string());
@@ -91,7 +92,64 @@ namespace Nox
         cookSettings.generateMips = static_cast<uint8_t>(spec.generateMips);
         cookSettings.format = static_cast<uint16_t>(spec.format);
         cookSettings.compression = static_cast<uint8_t>(spec.compression);
+        cookSettings.virtualTexture = static_cast<uint8_t>(spec.virtualTexture);
         return XXH3_128bits(&cookSettings, sizeof(cookSettings));
+    }
+
+    // The mips of a width x height texture as an .ntex lays them out: one after the other, each its rows of blocks.
+    static std::vector<size_t> TightMipOffsets(uint32_t width, uint32_t height, uint32_t mipLevels, uint32_t blockSize, uint32_t blockBytes, uint64_t& outTotal)
+    {
+        std::vector<size_t> offsets;
+        uint64_t total = 0;
+        for (uint32_t mip = 0; mip < mipLevels; ++mip)
+        {
+            offsets.push_back(total);
+            const uint64_t blocksX = (std::max(width >> mip, 1u) + blockSize - 1) / blockSize;
+            const uint64_t blocksY = (std::max(height >> mip, 1u) + blockSize - 1) / blockSize;
+            total += blocksX * blocksY * blockBytes;
+        }
+        outTotal = total;
+        return offsets;
+    }
+
+    // The tiles of a virtual texture of this size and format (offsets in the file left out); false when it cannot be one.
+    static bool MakeVirtualTextureLayout(uint32_t width, uint32_t height, uint32_t mipLevels, NRI::ImageFormat format, VirtualTextureLayout& out)
+    {
+        out = VirtualTextureLayout{};
+        if (!NRI::imageFormatBlock(format, out.BlockBytes, out.BlockSize) || out.TileSize % out.BlockSize != 0 || out.Border % out.BlockSize != 0)
+            return false;
+        while (out.TiledMips < mipLevels && std::max(width >> out.TiledMips, height >> out.TiledMips) > out.TileSize)
+            ++out.TiledMips;
+        // Larger than a tile, with the tail down to a tile (the always-resident fallback the tiles stream above).
+        if (out.TiledMips == 0 || out.TiledMips >= mipLevels)
+            return false;
+
+        const uint32_t tileBlocks = out.TileSize / out.BlockSize;
+        for (uint32_t mip = 0; mip < out.TiledMips; ++mip)
+        {
+            const uint32_t blocksX = (std::max(width >> mip, 1u) + out.BlockSize - 1) / out.BlockSize;
+            const uint32_t blocksY = (std::max(height >> mip, 1u) + out.BlockSize - 1) / out.BlockSize;
+            VirtualTextureLayout::Mip& tiles = out.Mips.emplace_back();
+            tiles.TilesX = (blocksX + tileBlocks - 1) / tileBlocks;
+            tiles.TilesY = (blocksY + tileBlocks - 1) / tileBlocks;
+            tiles.FirstTile = out.TileCount;
+            out.TileCount += tiles.TilesX * tiles.TilesY;
+        }
+        return true;
+    }
+
+    bool TextureImporter::ResolveVirtualTexture(VirtualTextureMode mode, const TextureData& texture)
+    {
+        if (mode == VirtualTextureMode::Off || texture.ArrayLayers != 1 || texture.IsCubeMap || texture.DirectFormat != UINT32_MAX)
+            return false;
+        if (mode == VirtualTextureMode::Auto && uint64_t(texture.Width) * texture.Height < uint64_t(VirtualTextureAutoSize) * VirtualTextureAutoSize)
+            return false;
+        VirtualTextureLayout layout;
+        if (!MakeVirtualTextureLayout(texture.Width, texture.Height, texture.MipLevels, texture.Format, layout))
+            return false;
+        // The tiles are cut from mips laid out as an .ntex lays them out.
+        uint64_t total = 0;
+        return texture.MipOffsets == TightMipOffsets(texture.Width, texture.Height, texture.MipLevels, layout.BlockSize, layout.BlockBytes, total);
     }
 
     // An RGBA8 mip chain to 4x4 blocks of `blockSize` bytes, each encoded by `encodeBlock` from its 16 RGBA texels: every mip,
@@ -277,13 +335,17 @@ namespace Nox
         std::unique_ptr<std::istream> file = VFS::Open(cookedPath); // a loose file, else a mounted pack's entry
         if (!file)
             return std::nullopt;
-        std::istream& stream = *file;
 
         CookedTextureHeader header;
         header.Path = cookedPath;
-        if (!ReadNTEXHeader(stream, header.Texture, header.DataSize))
+        if (!ReadCookedHeader(*file, header))
             return std::nullopt;
-        header.DataOffset = static_cast<uint64_t>(stream.tellg());
+        // Cooked before its virtual texture setting resolved the other way (Auto decides by the size the cook found).
+        if (!IsCookedTextureSource(sourcePath) && VFS::Exists(sourcePath) &&
+            ResolveVirtualTexture(metadata.TextureSpec.virtualTexture, header.Texture) != (header.Virtual != nullptr))
+        {
+            return std::nullopt;
+        }
 
         // Streamed textures are plain copies of one 2D layer with a complete mip chain (UploadTexture's transfer path).
         const TextureData& texture = header.Texture;
@@ -299,8 +361,64 @@ namespace Nox
         const uint32_t endMip = firstMip + mipCount;
         const uint64_t begin = offsets.empty() ? 0 : offsets[firstMip];
         const uint64_t end = endMip < offsets.size() ? offsets[endMip] : header.DataSize;
+        if (!header.Virtual)
+            return VFS::ReadRange(header.Path, header.DataOffset + begin, end - begin, destination);
 
-        return VFS::ReadRange(header.Path, header.DataOffset + begin, end - begin, destination);
+        // A virtual texture: its tiled mips put together from the tiles' insides, a row of tiles per read; the tail as it is.
+        const VirtualTextureLayout& layout = *header.Virtual;
+        const uint32_t tileBlocks = layout.TileSize / layout.BlockSize;
+        const uint32_t borderBlocks = layout.Border / layout.BlockSize;
+        const uint32_t storedBlocks = layout.TileBlocks();
+        const uint64_t tileBytes = layout.TileBytes();
+        std::vector<uint8_t> row;
+        for (uint32_t mip = firstMip; mip < endMip; ++mip)
+        {
+            if (mip >= layout.TiledMips)
+            {
+                const uint64_t tailBegin = offsets[mip];
+                return VFS::ReadRange(header.Path, layout.TailOffset + (tailBegin - offsets[layout.TiledMips]), end - tailBegin,
+                                      destination + (tailBegin - begin));
+            }
+
+            const VirtualTextureLayout::Mip& tiles = layout.Mips[mip];
+            const uint32_t blocksX = (std::max(header.Texture.Width >> mip, 1u) + layout.BlockSize - 1) / layout.BlockSize;
+            const uint32_t blocksY = (std::max(header.Texture.Height >> mip, 1u) + layout.BlockSize - 1) / layout.BlockSize;
+            uint8_t* mipDestination = destination + (offsets[mip] - begin);
+            row.resize(tileBytes * tiles.TilesX);
+            for (uint32_t tileY = 0; tileY < tiles.TilesY; ++tileY)
+            {
+                if (!VFS::ReadRange(header.Path, layout.TileFileOffset(mip, 0, tileY), row.size(), row.data()))
+                    return false;
+                for (uint32_t tileX = 0; tileX < tiles.TilesX; ++tileX)
+                {
+                    const uint32_t x = tileX * tileBlocks;
+                    const uint32_t width = std::min(tileBlocks, blocksX - x);
+                    const uint8_t* tile = row.data() + tileX * tileBytes;
+                    for (uint32_t line = 0; line < tileBlocks && tileY * tileBlocks + line < blocksY; ++line)
+                    {
+                        const uint32_t y = tileY * tileBlocks + line;
+                        memcpy(mipDestination + (uint64_t(y) * blocksX + x) * layout.BlockBytes,
+                               tile + (uint64_t(line + borderBlocks) * storedBlocks + borderBlocks) * layout.BlockBytes, uint64_t(width) * layout.BlockBytes);
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
+    bool TextureImporter::ReadVirtualTextureTile(const CookedTextureHeader& header, uint32_t mip, uint32_t tileX, uint32_t tileY, uint8_t* destination)
+    {
+        if (!header.Virtual || mip >= header.Virtual->TiledMips || tileX >= header.Virtual->Mips[mip].TilesX || tileY >= header.Virtual->Mips[mip].TilesY)
+            return false;
+        return VFS::ReadRange(header.Path, header.Virtual->TileFileOffset(mip, tileX, tileY), header.Virtual->TileBytes(), destination);
+    }
+
+    bool TextureImporter::CookedVirtualTextureMatches(const std::filesystem::path& cookedPath, const TextureSpecification& spec)
+    {
+        std::unique_ptr<std::istream> file = VFS::Open(cookedPath);
+        CookedTextureHeader header;
+        header.Path = cookedPath;
+        return file && ReadCookedHeader(*file, header) && ResolveVirtualTexture(spec.virtualTexture, header.Texture) == (header.Virtual != nullptr);
     }
 
     Ref<Texture2D> TextureImporter::ImportTexture2D(AssetHandle handle, const AssetMetadata& metadata)
@@ -316,7 +434,8 @@ namespace Nox
         const XXH128_hash_t sourceHash = sourceIsCooked || !sourceExists ? XXH128_hash_t{} : TextureCookHash(sourcePath, metadata.TextureSpec);
         XXH128_hash_t cookedHash{};
         const bool cookedIsCurrent = sourceIsCooked || !sourceExists ||
-            (Utility::loadHashFromFile(hashPath, cookedHash) && XXH128_isEqual(sourceHash, cookedHash));
+            (Utility::loadHashFromFile(hashPath, cookedHash) && XXH128_isEqual(sourceHash, cookedHash) &&
+             CookedVirtualTextureMatches(cookedPath, metadata.TextureSpec));
 
         if (VFS::Exists(cookedPath) && cookedIsCurrent)
             return LoadTexture2D(cookedPath, metadata.TextureSpec);
@@ -361,7 +480,8 @@ namespace Nox
 
         std::error_code error;
         std::filesystem::create_directories(cookedPath.parent_path(), error);
-        const bool saved = SaveNTEX(cookedPath, cpuData);
+        const bool isVirtual = ResolveVirtualTexture(metadata.TextureSpec.virtualTexture, cpuData);
+        const bool saved = isVirtual ? SaveNTV(cookedPath, cpuData) : SaveNTEX(cookedPath, cpuData);
         cpuData.Data.Release();
         if (!saved)
         {
@@ -871,6 +991,79 @@ namespace Nox
         return true;
     }
 
+    bool TextureImporter::SaveNTV(const std::filesystem::path& path, const TextureData& cpuData)
+    {
+        VirtualTextureLayout layout;
+        uint64_t total = 0;
+        if (!MakeVirtualTextureLayout(cpuData.Width, cpuData.Height, cpuData.MipLevels, cpuData.Format, layout) ||
+            cpuData.MipOffsets != TightMipOffsets(cpuData.Width, cpuData.Height, cpuData.MipLevels, layout.BlockSize, layout.BlockBytes, total) ||
+            cpuData.Data.Size != total)
+            return false;
+
+        std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+        if (!stream.is_open())
+            return false;
+
+        // Header: magic, version, the texture, the tiling, each tiled mip's tile counts, where the tiles and the tail are.
+        const uint32_t fields[] = { 1u, cpuData.Width, cpuData.Height, cpuData.MipLevels, static_cast<uint32_t>(cpuData.Usage),
+                                    static_cast<uint32_t>(cpuData.Format), layout.TileSize, layout.Border, layout.TiledMips };
+        const uint64_t headerBytes = 4 + sizeof(fields) + 2 * sizeof(uint32_t) * layout.TiledMips + 3 * sizeof(uint64_t);
+        layout.TilesOffset = headerBytes;
+        layout.TailOffset = layout.TilesOffset + layout.TileBytes() * layout.TileCount;
+        layout.TailSize = cpuData.Data.Size - cpuData.MipOffsets[layout.TiledMips];
+
+        stream.write("NTV1", 4);
+        stream.write(reinterpret_cast<const char*>(fields), sizeof(fields));
+        for (const VirtualTextureLayout::Mip& mip : layout.Mips)
+        {
+            stream.write(reinterpret_cast<const char*>(&mip.TilesX), sizeof(uint32_t));
+            stream.write(reinterpret_cast<const char*>(&mip.TilesY), sizeof(uint32_t));
+        }
+        stream.write(reinterpret_cast<const char*>(&layout.TilesOffset), sizeof(uint64_t));
+        stream.write(reinterpret_cast<const char*>(&layout.TailOffset), sizeof(uint64_t));
+        stream.write(reinterpret_cast<const char*>(&layout.TailSize), sizeof(uint64_t));
+
+        // The tiles, a row of them at a time: each block of a tile is the mip's block at that place, wrapped around its edges.
+        const uint32_t tileBlocks = layout.TileSize / layout.BlockSize;
+        const int64_t borderBlocks = layout.Border / layout.BlockSize;
+        const uint32_t storedBlocks = layout.TileBlocks();
+        const uint64_t tileBytes = layout.TileBytes();
+        std::vector<uint8_t> row;
+        for (uint32_t mip = 0; mip < layout.TiledMips; ++mip)
+        {
+            const VirtualTextureLayout::Mip& tiles = layout.Mips[mip];
+            const int64_t blocksX = (std::max(cpuData.Width >> mip, 1u) + layout.BlockSize - 1) / layout.BlockSize;
+            const int64_t blocksY = (std::max(cpuData.Height >> mip, 1u) + layout.BlockSize - 1) / layout.BlockSize;
+            const uint8_t* source = cpuData.Data.Data + cpuData.MipOffsets[mip];
+            row.resize(tileBytes * tiles.TilesX);
+            for (uint32_t tileY = 0; tileY < tiles.TilesY; ++tileY)
+            {
+                for (uint32_t tileX = 0; tileX < tiles.TilesX; ++tileX)
+                {
+                    uint8_t* tile = row.data() + tileX * tileBytes;
+                    for (uint32_t line = 0; line < storedBlocks; ++line)
+                    {
+                        const int64_t y = ((int64_t(tileY) * tileBlocks - borderBlocks + line) % blocksY + blocksY) % blocksY;
+                        for (uint32_t column = 0; column < storedBlocks; ++column)
+                        {
+                            const int64_t x = ((int64_t(tileX) * tileBlocks - borderBlocks + column) % blocksX + blocksX) % blocksX;
+                            memcpy(tile + (uint64_t(line) * storedBlocks + column) * layout.BlockBytes,
+                                   source + (uint64_t(y) * blocksX + x) * layout.BlockBytes, layout.BlockBytes);
+                        }
+                    }
+                }
+                stream.write(reinterpret_cast<const char*>(row.data()), row.size());
+            }
+        }
+
+        stream.write(reinterpret_cast<const char*>(cpuData.Data.Data + cpuData.MipOffsets[layout.TiledMips]), layout.TailSize);
+        if (!stream.good())
+            return false;
+        NOX_CORE_INFO("TextureImporter: {} cooked as a virtual texture, {} tiles of {} KB in {} mips, a {} KB tail",
+                      path.filename().string(), layout.TileCount, tileBytes / 1024, layout.TiledMips, layout.TailSize / 1024);
+        return true;
+    }
+
     bool TextureImporter::ReadNTEX(const std::filesystem::path& path, TextureData& outData)
     {
         std::unique_ptr<std::istream> file = VFS::Open(path);
@@ -878,21 +1071,63 @@ namespace Nox
             return false;
         std::istream& stream = *file;
 
-        uint64_t dataSize = 0;
-        if (!ReadNTEXHeader(stream, outData, dataSize))
+        CookedTextureHeader header;
+        header.Path = path;
+        if (!ReadCookedHeader(stream, header))
             return false;
-
-        outData.Data.Allocate(dataSize);
-        if (dataSize > 0)
-            stream.read(reinterpret_cast<char*>(outData.Data.Data), dataSize);
+        outData = header.Texture;
+        outData.Data.Allocate(header.DataSize);
+        if (header.Virtual)
+            return ReadCookedTextureMips(header, 0, std::max(outData.MipLevels, 1u), outData.Data.Data);
+        if (header.DataSize > 0)
+            stream.read(reinterpret_cast<char*>(outData.Data.Data), header.DataSize);
 
         return !stream.fail();
     }
 
-    bool TextureImporter::ReadNTEXHeader(std::istream& stream, TextureData& outData, uint64_t& outDataSize)
+    bool TextureImporter::ReadCookedHeader(std::istream& stream, CookedTextureHeader& header)
     {
+        TextureData& outData = header.Texture;
         char magic[5] = {};
         stream.read(magic, 4);
+        if (strcmp(magic, "NTV1") == 0)
+        {
+            uint32_t fields[9] = {};
+            stream.read(reinterpret_cast<char*>(fields), sizeof(fields));
+            if (stream.fail() || fields[0] != 1)
+                return false;
+            outData.Width = fields[1];
+            outData.Height = fields[2];
+            outData.MipLevels = fields[3];
+            outData.Usage = static_cast<NRI::TextureUsage>(fields[4]);
+            outData.Format = static_cast<NRI::ImageFormat>(fields[5]);
+            outData.ArrayLayers = 1;
+            outData.IsCubeMap = false;
+            outData.DirectFormat = UINT32_MAX;
+
+            // The tiling again from the size and format; the file has to agree with it.
+            auto layout = std::make_shared<VirtualTextureLayout>();
+            if (!MakeVirtualTextureLayout(outData.Width, outData.Height, outData.MipLevels, outData.Format, *layout) ||
+                layout->TileSize != fields[6] || layout->Border != fields[7] || layout->TiledMips != fields[8])
+                return false;
+            for (const VirtualTextureLayout::Mip& mip : layout->Mips)
+            {
+                uint32_t tiles[2] = {};
+                stream.read(reinterpret_cast<char*>(tiles), sizeof(tiles));
+                if (tiles[0] != mip.TilesX || tiles[1] != mip.TilesY)
+                    return false;
+            }
+            stream.read(reinterpret_cast<char*>(&layout->TilesOffset), sizeof(uint64_t));
+            stream.read(reinterpret_cast<char*>(&layout->TailOffset), sizeof(uint64_t));
+            stream.read(reinterpret_cast<char*>(&layout->TailSize), sizeof(uint64_t));
+
+            outData.MipOffsets = TightMipOffsets(outData.Width, outData.Height, outData.MipLevels, layout->BlockSize, layout->BlockBytes, header.DataSize);
+            if (stream.fail() || layout->TailSize != header.DataSize - outData.MipOffsets[layout->TiledMips])
+                return false;
+            header.DataOffset = 0;
+            header.Virtual = std::move(layout);
+            return true;
+        }
         if (strcmp(magic, "NTX1") != 0)
             return false;
 
@@ -923,7 +1158,9 @@ namespace Nox
             outData.MipOffsets[i] = static_cast<size_t>(storedOffset);
         }
 
-        stream.read(reinterpret_cast<char*>(&outDataSize), sizeof(uint64_t));
+        stream.read(reinterpret_cast<char*>(&header.DataSize), sizeof(uint64_t));
+        header.DataOffset = static_cast<uint64_t>(stream.tellg());
+        header.Virtual.reset();
         return !stream.fail();
     }
     

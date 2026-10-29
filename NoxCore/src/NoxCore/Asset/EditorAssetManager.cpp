@@ -1852,6 +1852,9 @@ namespace Nox
             if (metadata.TextureSpec.compression != TextureCompression::Default)
                 out << YAML::Key << "Compression" << YAML::Value
                     << (metadata.TextureSpec.compression == TextureCompression::Normalmap ? "Normalmap" : "Grayscale");
+            if (metadata.TextureSpec.virtualTexture != VirtualTextureMode::Auto)
+                out << YAML::Key << "VirtualTexture" << YAML::Value
+                    << (metadata.TextureSpec.virtualTexture == VirtualTextureMode::On ? "On" : "Off");
             out << YAML::EndMap;
         }
 
@@ -2050,6 +2053,13 @@ namespace Nox
                     metadata.TextureSpec.compression = compression == "Normalmap" ? TextureCompression::Normalmap
                                                      : compression == "Grayscale" ? TextureCompression::Grayscale
                                                                                   : TextureCompression::Default;
+                }
+                if (specNode["VirtualTexture"])
+                {
+                    const std::string mode = specNode["VirtualTexture"].as<std::string>();
+                    metadata.TextureSpec.virtualTexture = mode == "On" ? VirtualTextureMode::On
+                                                        : mode == "Off" ? VirtualTextureMode::Off
+                                                                        : VirtualTextureMode::Auto;
                 }
             }
 

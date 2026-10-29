@@ -1212,14 +1212,27 @@ threshold for very large ones).
   It covers raster, ray-traced hits, the path tracer and ReSTIR: 74 lookups in 25 shaders, converted mechanically and compiled.
   The behavior is unchanged: the index is still the image's bindless slot. A virtual texture's index will carry a flag and resolve
   through its page table here, so no material shader has to know which kind it samples.
-- **Cook (SVT-2).** A virtual texture's .ntex holds its block-compressed mips cut into 128x128-texel tiles, each with a 4-texel
-  border copied from its neighbours (UE's defaults: bilinear and anisotropic filtering never read outside the tile). Each tile is
-  one contiguous file range, so it is read on its own (`VFS::ReadRange`), like a geometry page. Mips smaller than a tile go into one
-  tail tile, always resident.
+- **Cook (SVT-2, built 2026-10-29).** A virtual texture's .ntex is an NTV1 file (`TextureImporter::SaveNTV`):
+  - Every mip larger than a tile is cut into 128x128-texel tiles, each with a 4-texel border (UE's defaults: bilinear and
+    anisotropic filtering never read outside the tile). Tiles go mip by mip, row by row, each one contiguous file range
+    (`ReadVirtualTextureTile`, one `VFS::ReadRange`, like a geometry page). Blocks are copied, never re-encoded. The border and a
+    mip's last tiles past its edge wrap around the texture (repeat addressing).
+  - The mips no larger than a tile (the tail) are stored whole. At runtime they are an ordinary small texture, always resident: the
+    fallback under every tile and the data for the coarsest mips.
+  - Setting: `TextureSpecification::virtualTexture`, Auto / Off / On (Unreal's flag plus its Auto Virtual Texturing Size: Auto is
+    virtual from 4096² texels). Stored in the registry as `VirtualTexture: On|Off`. A texture can be virtual only if it is one 2D
+    layer with a fixed block size (BC or plain texels, not a KTX2 kept in its own format), larger than a tile, with mips down to a
+    tile. A cooked file whose kind disagrees with its setting is cooked again, as a stale hash would be.
+  - `ReadCookedTextureMips` still returns whole mips of an NTV1 file, put together from the tiles' insides. Mip streaming, the
+    synchronous importer and the HLOD bake read virtual textures unchanged until SVT-3 streams their tiles.
+  - Offline test: every tile of every mip, block by block, against the source with wrapping; every run of mips read back
+    byte-identical; NTX1 reads as before. Sizes covered: 4K BC7, 8Kx2K BC1, odd sizes, thin, RGBA8. The cost is the borders, 13% for
+    a 4K texture, as in UE.
 - **Runtime (SVT-3).**
   - Physical tile pools: one image per block format, a grid of 136x136 tiles, with LRU slots.
-  - A page table per virtual texture: a uint image with its own mip chain. Each texel holds the physical tile and the mip it maps,
-    always the best resident ancestor, so a missing tile falls back to coarser data with no hole and no shader loop. It is updated
+  - A page table per virtual texture: a uint image with its own mip chain over the tiled mips. Each texel holds the physical tile
+    and the mip it maps, always the best resident ancestor (or the tail), so a missing tile falls back to coarser data with no hole
+    and no shader loop. It is updated
     by the frame that installs or evicts tiles (as geometry pages are, §5.7.2).
   - Tile feedback: the G-buffer and transparent passes report, from one pixel per 8x8 tile, the tile and mip they want, deduped
     into a request list and read back.

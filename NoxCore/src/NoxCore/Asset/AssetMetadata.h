@@ -17,12 +17,23 @@ namespace Nox
         Grayscale    // BC4: one channel (red), for masks and height maps
     };
 
+    // Whether a texture is cooked as a virtual texture (§5.12.2, Unreal's Virtual Texture Streaming flag): its mips in tiles that
+    // stream as the view samples them, instead of whole mips.
+    enum class VirtualTextureMode : uint8_t
+    {
+        Auto = 0, // virtual from VirtualTextureAutoSize² texels up (Unreal's Auto Virtual Texturing Size)
+        Off,
+        On
+    };
+    inline constexpr uint32_t VirtualTextureAutoSize = 4096;
+
     struct TextureSpecification
     {
         bool flip = false;
         bool generateMips = true;
         NRI::ImageFormat format = NRI::ImageFormat::SRGBA8; // Default to sRGB
         TextureCompression compression = TextureCompression::Default;
+        VirtualTextureMode virtualTexture = VirtualTextureMode::Auto;
     };
     
     // Unreal Interchange: merge the imported meshes of a kind into fewer submeshes (one per material). glTF has no

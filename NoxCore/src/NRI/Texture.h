@@ -85,25 +85,27 @@ namespace NRI
         bool sharedAcrossQueues = false;
     };
 
-    // What a texture costs in device memory: the mip chain of every layer, without the driver's alignment (images are
-    // their own allocations, so this is what the memory categories account for).
-    inline uint64_t estimateTextureBytes(const TextureDesc& desc)
+    // Bytes per texel, or per 4x4 block for the BC formats (blockSize 4). False for the formats without a fixed texel size here
+    // (None, Surface, the 3-byte RGB8 ones).
+    inline bool imageFormatBlock(ImageFormat format, uint32_t& outBlockBytes, uint32_t& outBlockSize)
     {
-        uint64_t blockBytes = 4;  // bytes per pixel, or per 4x4 block for the BC formats
-        uint32_t blockSize = 1;
-        switch (desc.format)
+        outBlockBytes = 4;
+        outBlockSize = 1;
+        switch (format)
         {
-        case ImageFormat::R16_SFLOAT: blockBytes = 2; break;
-        case ImageFormat::R16G16:
-        case ImageFormat::R16G16_SFLOAT: blockBytes = 4; break;
+        case ImageFormat::None:
+        case ImageFormat::Surface:
+        case ImageFormat::RGB8:
+        case ImageFormat::SRGB8: return false;
+        case ImageFormat::R16_SFLOAT: outBlockBytes = 2; break;
         case ImageFormat::R32G32_UINT:
         case ImageFormat::R32G32_SFLOAT:
-        case ImageFormat::R16G16B16A16_SFLOAT: blockBytes = 8; break;
-        case ImageFormat::R32G32B32A32_SFLOAT: blockBytes = 16; break;
+        case ImageFormat::R16G16B16A16_SFLOAT: outBlockBytes = 8; break;
+        case ImageFormat::R32G32B32A32_SFLOAT: outBlockBytes = 16; break;
         case ImageFormat::BC1_UNorm:
         case ImageFormat::BC1_UNorm_SRGB:
         case ImageFormat::BC4_UNorm:
-        case ImageFormat::BC4_SNorm: blockBytes = 8; blockSize = 4; break;
+        case ImageFormat::BC4_SNorm: outBlockBytes = 8; outBlockSize = 4; break;
         case ImageFormat::BC2_UNorm:
         case ImageFormat::BC2_UNorm_SRGB:
         case ImageFormat::BC3_UNorm:
@@ -113,9 +115,20 @@ namespace NRI
         case ImageFormat::BC6H_UF16:
         case ImageFormat::BC6H_SF16:
         case ImageFormat::BC7_UNorm:
-        case ImageFormat::BC7_UNorm_SRGB: blockBytes = 16; blockSize = 4; break;
+        case ImageFormat::BC7_UNorm_SRGB: outBlockBytes = 16; outBlockSize = 4; break;
         default: break;
         }
+        return true;
+    }
+
+    // What a texture costs in device memory: the mip chain of every layer, without the driver's alignment (images are
+    // their own allocations, so this is what the memory categories account for).
+    inline uint64_t estimateTextureBytes(const TextureDesc& desc)
+    {
+        uint32_t blockBytes32 = 4; // bytes per pixel, or per 4x4 block for the BC formats
+        uint32_t blockSize = 1;
+        imageFormatBlock(desc.format, blockBytes32, blockSize);
+        const uint64_t blockBytes = blockBytes32;
 
         uint64_t bytes = 0;
         uint64_t width = desc.width;
