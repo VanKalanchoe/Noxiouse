@@ -1,3 +1,5 @@
+using System.Runtime.InteropServices;
+
 namespace Nox;
 
 /// <summary>The running scene: creating and removing entities from scripts.</summary>
@@ -39,6 +41,26 @@ public static class Scene
     /// </summary>
     public static bool IsWorldStreamingCompleted(Vector3 position, float range, WorldCellState state = WorldCellState.Activated) =>
         InternalCalls.IsWorldStreamingCompleted(position, range, (int)state);
+
+    /// <summary>A world partition's cells by state right now, and the bounds of the world's content (Unreal's stat streaming).</summary>
+    public static WorldStreamingStats GetWorldStreamingStats() => InternalCalls.GetWorldStreamingStats();
+}
+
+/// <summary>What <see cref="Scene.GetWorldStreamingStats"/> returns: the world's cells (not its HLODs) and where they are.</summary>
+[StructLayout(LayoutKind.Sequential)]
+public struct WorldStreamingStats
+{
+    /// <summary>Cells in the world's index.</summary>
+    public int Cells;
+    /// <summary>Cells in the world.</summary>
+    public int Activated;
+    /// <summary>Cells built and waiting outside the world (a streaming source with Target State Loaded).</summary>
+    public int Loaded;
+    /// <summary>Cells on their way: being read, built, waiting for their assets or going into the world.</summary>
+    public int Loading;
+    /// <summary>The bounds of every cell's content, world units (zero without cells).</summary>
+    public Vector3 BoundsMin;
+    public Vector3 BoundsMax;
 }
 
 /// <summary>

@@ -104,6 +104,7 @@ namespace Nox
 
         // For the editor's status bar.
         size_t GetLoadingCount() const { return m_Loader.GetLoadCount(); }
+        size_t GetLoadedAssetCount() const { return m_LoadedAssets.size(); }
         // Model imports cooking in the background (Do Not Combine): how many, and the meshes cooked of those known so far.
         struct ImportProgress
         {

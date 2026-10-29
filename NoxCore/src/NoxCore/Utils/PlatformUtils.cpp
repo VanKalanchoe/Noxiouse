@@ -28,6 +28,17 @@ namespace Nox::Platform
             result.WorkingSetBytes = counters.WorkingSetSize;
             result.PrivateBytes = counters.PrivateUsage;
         }
+#elif defined(__linux__)
+        // Resident set, and of it the anonymous (heap) pages: the nearest to Windows' private bytes.
+        std::ifstream status("/proc/self/status");
+        std::string line;
+        while (std::getline(status, line))
+        {
+            if (line.rfind("VmRSS:", 0) == 0)
+                result.WorkingSetBytes = std::strtoull(line.c_str() + 6, nullptr, 10) * 1024;
+            else if (line.rfind("RssAnon:", 0) == 0)
+                result.PrivateBytes = std::strtoull(line.c_str() + 8, nullptr, 10) * 1024;
+        }
 #endif
         return result;
     }

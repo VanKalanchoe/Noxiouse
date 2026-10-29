@@ -1329,6 +1329,29 @@ each streaming source says which of the two its cells get (`EStreamingSourceTarg
 - **Test:** WorldPartitionTest.nox has a Loaded source (WPT_Preload); WorldPartitionTest.cs checks its cells are loaded and not in
   the world, go in within a second once the camera reaches them, and leave the world staying loaded once it has gone.
 
+#### 5.13.4 The 6c test world: larger than RAM and VRAM (built 2026-10-29)
+
+The roadmap's exit test for 6c: a world whose data does not fit in memory, flown through without stalls, its memory following the
+camera.
+
+- **The world:** editor, Create > Streaming Test World (`StreamingTestWorldGenerator`). N x N cells, one terrain tile each: a height
+  field mesh of its own (128 x 128 quads by default, cooked `.nsmesh` with its cluster LOD) and a texture of its own (2048^2 BC1 with
+  mips, `.ntex`): nothing is shared, so every cell's data is unique, as in a real open world. One height function over the whole
+  world, so tiles meet without seams. Written on a worker straight in cooked form (nothing to import: `MeshImporter::
+  BuildCookedGeometry`, `TextureImporter::CookGeneratedTexture`; an asset without a source file is its own cook), then registered on
+  the main thread (`EditorAssetManager::RegisterGeneratedFile`) with the cell files, their index and the scene (camera, sun,
+  procedural sky), which then opens. N is chosen from the first tile's size and a target size on disk (20 GB by default: about
+  4.8 MB a tile, 65 x 65 cells of 64 m, 4.2 km across, against a working set of about 70 cells at the 256 m loading range).
+- **Memory follows the cells:** an unloaded or deactivated cell's entities are destroyed, and a Loaded cell's built scene dropped,
+  each marking the scene's asset references changed; the next frame's unused-asset sweep (editor and runtime) frees what no
+  entity, built cell or HLOD references any more (GPU resources after the frames in flight).
+- **The fly-through:** `StreamingWorldTest` (Facerun) on the camera flies one lap of a circle around the world's middle (35 % of
+  its side as radius, 40 m/s, 70 m up, looking ahead) and logs a line a second -- cells by state, assets loaded and loading, RAM,
+  VRAM, the second's worst frame -- then PASS or FAIL: no frame over 50 ms, the cells within 96 m of the camera in the world on
+  every frame, and the second half of the lap needing no more RAM, VRAM or assets than the first (15 % + 64 MB slack). For it,
+  script API 6: `Scene.GetWorldStreamingStats()` (cells by state, the world's bounds) and `Diagnostics.Memory` (process private
+  bytes, device-local VRAM in use, assets loaded / loading).
+
 ### 5.14 Ray Tracing at Scale
 
 - **TLAS from GPU scene** instances (not render queues), with RT-specific culling: distance, screen
@@ -1398,7 +1421,7 @@ flight, targeted texture-slot cache eviction. Future:
 | **6a** | Texture streaming | 5 | BC cooking for all sources, mip tail, GPU mip feedback, residency + eviction | Scene textures exceeding the texture budget render correctly with mip reduction |
 | **6b** | Geometry streaming & LOD | 5 | Cluster hierarchy cook, GPU cut selection (**done, 6b-1**), page streaming pool (paused, §5.7.1), RT fallback LOD (reverted, D8) | Geometry exceeding the geometry budget renders with streaming; no popping beyond threshold |
 | **6c-0** | Level streaming | 5 | Additive scene load / unload, Level Streaming Volumes, script API (§5.12a: **built 2026-10-23**) | A level streams in and out around the camera without a stall |
-| **6c** | World streaming | 6a, 6b, 6c-0 | Grid cells, per-cell files, cell streaming, editor (§5.13.1: **6c-1 built 2026-10-24**), activation stages (§5.13.3: **6c-2 built 2026-10-24**), HLOD (§5.13.2: **6c-3 built 2026-10-24**), cooked cells | Test world larger than RAM/VRAM traversable without stalls |
+| **6c** | World streaming | 6a, 6b, 6c-0 | Grid cells, per-cell files, cell streaming, editor (§5.13.1: **6c-1 built 2026-10-24**), activation stages (§5.13.3: **6c-2 built 2026-10-24**), HLOD (§5.13.2: **6c-3 built 2026-10-24**), test world and fly-through (§5.13.4: **built 2026-10-29**), cooked cells | Test world larger than RAM/VRAM traversable without stalls |
 | **7** | Continuous optimization | all | Profile-driven work, VT, DirectStorage, async compute expansion | Ongoing |
 
 Phases 1, 2 and 3 are architecture-defining and each gets its own plan-mode design before code.

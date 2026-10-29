@@ -14,6 +14,8 @@
 #include "NoxCore/Core/WorldUnits.h"
 #include "NoxCore/Math/Math.h"
 #include "NoxCore/Renderer/DynamicMesh.h"
+#include "NoxCore/Renderer/Renderer.h"
+#include "NoxCore/Utils/PlatformUtils.h"
 #include "NoxCore/Scene/Entity.h"
 #include "NoxCore/Scene/ParticleSystem.h"
 
@@ -144,6 +146,67 @@ namespace Nox
             if (!s_Scene || stage < 0 || stage > static_cast<int32_t>(Scene::WorldCellStage::Activated))
                 return false;
             return s_Scene->IsWorldStreamingCompleted(glm::vec3(x, y, z), range, static_cast<Scene::WorldCellStage>(stage));
+        }
+
+        // Nox.WorldStreamingStats's layout.
+        struct ManagedWorldStreamingStats
+        {
+            int32_t Cells, Activated, Loaded, Loading;
+            ManagedVector3 BoundsMin, BoundsMax;
+        };
+
+        // The world's cells (its grid, not the HLODs') by stage, and the bounds of their content (world units).
+        void SceneGetWorldStreamingStats(ManagedWorldStreamingStats* out)
+        {
+            *out = {};
+            if (!s_Scene)
+                return;
+            glm::vec3 boundsMin(FLT_MAX), boundsMax(-FLT_MAX);
+            for (const auto& [cell, info] : s_Scene->GetWorldPartition().Cells)
+            {
+                if (cell.Grid != WorldGrid::WorldGridIndex)
+                    continue;
+                ++out->Cells;
+                boundsMin = glm::min(boundsMin, info.BoundsMin);
+                boundsMax = glm::max(boundsMax, info.BoundsMax);
+            }
+            if (out->Cells > 0)
+            {
+                out->BoundsMin = { boundsMin.x, boundsMin.y, boundsMin.z };
+                out->BoundsMax = { boundsMax.x, boundsMax.y, boundsMax.z };
+            }
+            for (const WorldCellCoord& cell : s_Scene->GetLoadedWorldCells(true))
+            {
+                switch (s_Scene->GetWorldCellStage(cell))
+                {
+                case Scene::WorldCellStage::Activated: ++out->Activated; break;
+                case Scene::WorldCellStage::Loaded: ++out->Loaded; break;
+                default: ++out->Loading; break;
+                }
+            }
+        }
+
+        // Nox.MemoryStats's layout.
+        struct ManagedMemoryStats
+        {
+            uint64_t ProcessBytes, GpuBytes;
+            int32_t LoadedAssets, LoadingAssets;
+        };
+
+        void DiagnosticsGetMemoryStats(ManagedMemoryStats* out)
+        {
+            *out = {};
+            const Platform::ProcessMemory process = Platform::QueryProcessMemory();
+            out->ProcessBytes = process.PrivateBytes != 0 ? process.PrivateBytes : process.WorkingSetBytes;
+            out->GpuBytes = Renderer::GetDeviceLocalMemoryUsage();
+            if (Project::GetActive())
+            {
+                if (const auto assets = Project::GetActive()->GetEditorAssetManager())
+                {
+                    out->LoadedAssets = static_cast<int32_t>(assets->GetLoadedAssetCount());
+                    out->LoadingAssets = static_cast<int32_t>(assets->GetLoadingCount() + assets->GetStreamingCount());
+                }
+            }
         }
 
         void SceneDestroy(uint64_t entityID)
@@ -826,6 +889,8 @@ namespace Nox
         assembly.AddInternalCall("Nox.InternalCalls", "Scene_UnloadLevel", reinterpret_cast<void*>(&SceneUnloadLevel));
         assembly.AddInternalCall("Nox.InternalCalls", "Scene_GetLevelState", reinterpret_cast<void*>(&SceneGetLevelState));
         assembly.AddInternalCall("Nox.InternalCalls", "Scene_IsWorldStreamingCompleted", reinterpret_cast<void*>(&SceneIsWorldStreamingCompleted));
+        assembly.AddInternalCall("Nox.InternalCalls", "Scene_GetWorldStreamingStats", reinterpret_cast<void*>(&SceneGetWorldStreamingStats));
+        assembly.AddInternalCall("Nox.InternalCalls", "Diagnostics_GetMemoryStats", reinterpret_cast<void*>(&DiagnosticsGetMemoryStats));
         assembly.AddInternalCall("Nox.InternalCalls", "Mesh_Create", reinterpret_cast<void*>(&MeshCreate));
         assembly.AddInternalCall("Nox.InternalCalls", "Mesh_Destroy", reinterpret_cast<void*>(&MeshDestroy));
         assembly.AddInternalCall("Nox.InternalCalls", "Mesh_SetData", reinterpret_cast<void*>(&MeshSetData));

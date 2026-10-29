@@ -115,6 +115,8 @@ Implemented calls:
   them: the editor camera's fly mode in Play (right mouse to look, WASD, E / Q, Shift, wheel for speed). Script API version 4.
 - `Scene.IsWorldStreamingCompleted(position, range, WorldCellState)`: a world partition's cells around a point have reached a stage
   (Loaded: built and their assets in, not in the world; Activated: in the world), Unreal's IsStreamingCompleted. Script API 5.
+- `Scene.GetWorldStreamingStats()` (a world partition's cells by state and its bounds) and `Diagnostics.Memory` (process private
+  bytes, VRAM in use, assets loaded and loading): Facerun's `StreamingWorldTest` fly-through logs them. Script API 6.
 - Generic `GetComponent<T>()`, `HasComponent<T>()`, and `TryGetComponent<T>()`
   access from both `EntityBehaviour` and `Entity`
 - `TransformComponent` explicit `Local`/`World` state and

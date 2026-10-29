@@ -111,6 +111,20 @@ namespace Nox
     static std::unordered_set<std::string> s_TextureDescriptorMisses;
     static size_t s_TextureDescriptorMissesRegistrySize = 0;
 
+    uint64_t Renderer::GetDeviceLocalMemoryUsage()
+    {
+        uint64_t usage = 0;
+        if (s_Instance)
+        {
+            for (const NRI::MemoryHeapStats& heap : s_Instance->m_memoryHeapStats)
+            {
+                if (heap.deviceLocal)
+                    usage += heap.usage;
+            }
+        }
+        return usage;
+    }
+
     void Renderer::InvalidateTextureDescriptorSlots(const std::vector<uint32_t>& slots)
     {
         if (slots.empty())

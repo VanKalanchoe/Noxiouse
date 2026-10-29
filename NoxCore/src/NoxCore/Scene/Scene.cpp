@@ -777,6 +777,9 @@ namespace Nox
             if (streamed.IsCell)
             {
                 RemoveWorldCellFromWorld(streamed);
+                // Its built scene held the cell's assets too (a Loaded cell has nothing in the world to destroy): the sweep frees them.
+                if (streamed.Staged)
+                    m_AssetReferencesChanged = true;
                 streamed.Staged = nullptr;
                 NOX_CORE_TRACE("World cell `{}` unloaded", streamed.Name);
                 continue;
