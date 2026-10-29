@@ -2785,6 +2785,7 @@ namespace Nox
         if (m_ViewportSize.x > 0 && m_ViewportSize.y > 0)
             newScene->OnViewportResize(m_ViewportSize.x, m_ViewportSize.y);
 
+        m_HoveredEntity = Entity(); // points into the scene being replaced (freed with it: the hover readout read a dead registry)
         m_EditorScene = newScene;
         m_SceneHierarchyPanel.SetContext(m_EditorScene);
 
