@@ -1380,7 +1380,9 @@ camera.
   As, shipped by packaging; the cell's loading job reads the cooked file when it matches (`SceneLoader`, worker), else the text.
   The fly-through counts the cells read cooked (script API 8: `WorldStreamingStats.CellsCooked`). Measured (1001 entities a cell,
   2 GB world): read and built on a worker in 1-2 ms cooked against ~70 ms from text (up to 640 ms when Play starts dozens at once:
-  the text parse allocates heavily, and workers contend); the Read Scene scope averaged 0.8 ms cooked, 81 ms text.
+  the text parse allocates heavily, and workers contend); the Read Scene scope averaged 0.8 ms cooked, 81 ms text. Same lap, both passing: cooked 0.77 ms a cell on a worker, in the world
+  0.05 s after being wanted (longest 0.29 s), 99 % of frames under 10.2 ms; text 86.7 ms, 0.13 s (longest 2.31 s), 18.9 ms. The
+  unused-asset sweep went from ~4.8 ms to 0.5 ms (texture paths through the registry's index).
 - **Nothing written while streaming:** the generator writes each tile's material (`.nmat`) beside its mesh and registers it, as a
   model's cook does: a mesh whose material file is missing writes and registers it when it loads, and with the registry's
   deferred write on the main thread that cost the 30 GB world (20k registry entries) ~400 ms every second of flight. The
