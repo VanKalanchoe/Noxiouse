@@ -916,7 +916,10 @@ and as the raster cut from random cameras. Full Detail draws the finest resident
 - Requests are read back, most wanted first.
 - Pool:
   - Size: the Geometry budget share minus the geometry that does not stream, or an override.
-  - When full, it evicts the least recently wanted pages that no page depends on and that have not been wanted for 64 frames.
+  - When full, it evicts pages no page depends on: first those not wanted for 64 frames (least recently wanted first), then wanted
+    ones that are clearly less important (by priority, with a 1.25 margin against swapping). A pool smaller than what the view wants
+    therefore holds the most important pages, as Nanite's does. Lowering the pool takes effect live, at up to 512 evictions a
+    frame.
 - Page load:
   1. A read job writes from the file straight into staging.
   2. Copies on the transfer queue go into fresh stream ranges.

@@ -123,6 +123,7 @@ namespace Nox
             PageState State = PageState::Absent;
             PageRanges Ranges;
             uint64_t LastWanted = 0;     // frame of the newest feedback that wanted it
+            float Priority = 0.0f;       // how far above the threshold its error was then (resident pages: every touch)
             uint32_t Dependents = 0;     // pages depending on it that are resident or loading
             StagingSpan Staging;
             TaskFuture<bool> Read;
@@ -156,16 +157,22 @@ namespace Nox
             PageRanges Ranges;
         };
 
-        // An eviction candidate (gatherVictims): least recently wanted first.
+        // An eviction candidate (gatherVictims): pages no longer wanted first, least recently wanted first, then wanted ones, least
+        // important first (a pool smaller than what the view wants keeps the most important pages: Nanite's priority replacement).
         struct Victim
         {
+            bool Wanted = false;
             uint64_t LastWanted = 0;
+            float Priority = 0.0f;
             uint32_t Mesh = 0;
             uint32_t Page = 0;
         };
+        // A wanted page is replaced only by one this much more important (no swapping back and forth between similar ones).
+        static constexpr float ReplacementMargin = 1.25f;
         void gatherVictims(std::vector<Victim>& outVictims) const;
-        // Evicts victims from nextVictim on until the streamed pages fit targetBytes, at most maxEvictions of them.
-        void evictDownTo(uint64_t targetBytes, const std::vector<Victim>& victims, size_t& nextVictim, uint32_t maxEvictions);
+        // Evicts victims from nextVictim on until the streamed pages fit targetBytes, at most maxEvictions of them, stopping at the first
+        // wanted page whose priority is not below priorityLimit.
+        void evictDownTo(uint64_t targetBytes, const std::vector<Victim>& victims, size_t& nextVictim, uint32_t maxEvictions, float priorityLimit);
         void advanceLoads(StreamedMesh& mesh, uint32_t id);
         void startLoad(StreamedMesh& mesh, uint32_t page, uint64_t& uploadBudget);
         void activate(StreamedMesh& mesh, uint32_t page);

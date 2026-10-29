@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <limits>
 
 #include "Renderer.h"
 #include "NoxCore/Core/Log.h"
@@ -142,6 +143,7 @@ namespace Nox
                 continue;
             Page& page = mesh.Pages[local];
             page.LastWanted = m_Frame;
+            page.Priority = request.priority;
             if (page.State == PageState::Absent && !page.Failed)
                 m_Candidates.push_back({ request.priority, id, local });
         }
@@ -204,7 +206,8 @@ namespace Nox
                         victimsGathered = true;
                         gatherVictims(victims);
                     }
-                    evictDownTo(pool - std::min(pool, bytes), victims, nextVictim, UINT32_MAX);
+                    // Room from pages not wanted any more, then from wanted ones clearly less important than this one.
+                    evictDownTo(pool - std::min(pool, bytes), victims, nextVictim, UINT32_MAX, candidate.Priority / ReplacementMargin);
                 }
                 if (m_ResidentBytes + bytes > pool)
                 {
@@ -223,14 +226,15 @@ namespace Nox
         }
         m_Candidates.clear();
 
-        // Over the pool without anything new to load (the pool was made smaller, or the camera left what it had loaded): what has not
-        // been wanted for a while goes, a bounded number of pages a frame. Pages still wanted stay, whatever the pool says.
+        // Over the pool without anything new to load (the pool was made smaller, or the camera left what it had loaded): pages go,
+        // a bounded number a frame, those not wanted any more first, then the least important wanted ones (they ask again, and come
+        // back only in place of something clearly less important).
         if (m_ResidentBytes > pool)
         {
             std::vector<Victim> victims;
             gatherVictims(victims);
             size_t nextVictim = 0;
-            evictDownTo(pool, victims, nextVictim, EvictionsPerFrame);
+            evictDownTo(pool, victims, nextVictim, EvictionsPerFrame, std::numeric_limits<float>::infinity());
         }
 
         // Meshes whose residency changed: a new BLAS from their leaf cut, not more often than BlasRebuildFrames.
@@ -278,7 +282,8 @@ namespace Nox
 
     void GeometryStreamer::gatherVictims(std::vector<Victim>& outVictims) const
     {
-        // Resident streamed pages nothing resident or loading depends on, not wanted for HoldFrames: least recently wanted first.
+        // Resident streamed pages nothing resident or loading depends on (their finer pages go first): not wanted for HoldFrames, least
+        // recently wanted first, then wanted ones, least important first.
         for (uint32_t id = 0; id < m_Meshes.size(); ++id)
         {
             const StreamedMesh& owner = m_Meshes[id];
@@ -287,18 +292,26 @@ namespace Nox
             for (uint32_t page = owner.Source->RootPageCount; page < owner.Pages.size(); ++page)
             {
                 const Page& state = owner.Pages[page];
-                if (state.State == PageState::Resident && state.Dependents == 0 && state.LastWanted + HoldFrames < m_FeedbackFrame)
-                    outVictims.push_back({ state.LastWanted, id, page });
+                if (state.State == PageState::Resident && state.Dependents == 0)
+                    outVictims.push_back({ state.LastWanted + HoldFrames >= m_FeedbackFrame, state.LastWanted, state.Priority, id, page });
             }
         }
-        std::sort(outVictims.begin(), outVictims.end(), [](const Victim& a, const Victim& b) { return a.LastWanted < b.LastWanted; });
+        std::sort(outVictims.begin(), outVictims.end(), [](const Victim& a, const Victim& b)
+        {
+            if (a.Wanted != b.Wanted)
+                return !a.Wanted;
+            return a.Wanted ? a.Priority < b.Priority : a.LastWanted < b.LastWanted;
+        });
     }
 
-    void GeometryStreamer::evictDownTo(uint64_t targetBytes, const std::vector<Victim>& victims, size_t& nextVictim, uint32_t maxEvictions)
+    void GeometryStreamer::evictDownTo(uint64_t targetBytes, const std::vector<Victim>& victims, size_t& nextVictim, uint32_t maxEvictions,
+                                       float priorityLimit)
     {
         uint32_t evicted = 0;
         while (m_ResidentBytes > targetBytes && nextVictim < victims.size() && evicted < maxEvictions)
         {
+            if (victims[nextVictim].Wanted && !(victims[nextVictim].Priority < priorityLimit))
+                break; // the rest are at least as important
             const Victim& victim = victims[nextVictim++];
             StreamedMesh& owner = m_Meshes[victim.Mesh];
             if (owner.Valid && owner.Pages[victim.Page].State == PageState::Resident && owner.Pages[victim.Page].Dependents == 0)
