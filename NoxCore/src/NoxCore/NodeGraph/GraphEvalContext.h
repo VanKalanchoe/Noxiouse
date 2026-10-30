@@ -39,7 +39,7 @@ namespace Nox
             // literal; its unconnected default is just a default-constructed T).
             if constexpr (kIsNodeGraphValueType<T>)
             {
-                const std::string& pinName = node.Type->Inputs[inputPinIndex].Name;
+                const std::string pinName = InputPin(*node.Type, inputPinIndex).Name;
                 auto it = node.Properties.find(pinName);
                 if (it == node.Properties.end())
                     return T{};

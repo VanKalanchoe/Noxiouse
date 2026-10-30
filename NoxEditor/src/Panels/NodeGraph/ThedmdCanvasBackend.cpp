@@ -186,18 +186,44 @@ namespace Nox
         const std::vector<GraphLink>& links = graph.Links;
 
         ImGui::BeginGroup();
-        for (uint32_t p = 0; p < (uint32_t)type.Inputs.size(); p++)
+        const uint32_t inputCount = InputPinCount(type, node.Properties);
+        for (uint32_t p = 0; p < inputCount; p++)
         {
             bool connected = std::any_of(links.begin(), links.end(),
                 [&](const GraphLink& l) { return l.ToNode == node.Id && l.ToPin == p; });
 
+            const NodePinDesc pin = InputPin(type, p);
             ed::BeginPin(MakePinId(node.Id, p, false), ed::PinKind::Input);
-            ax::Widgets::Icon(kPinIconSize, PinIconType(type.Inputs[p].Type), connected, PinColor(type.Inputs[p].Type));
+            ax::Widgets::Icon(kPinIconSize, PinIconType(pin.Type), connected, PinColor(pin.Type));
             ImGui::SameLine();
-            ImGui::TextUnformatted(type.Inputs[p].Name.c_str());
+            ImGui::TextUnformatted(pin.Name.c_str());
             if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("%s", type.Inputs[p].Type.c_str());
+                ImGui::SetTooltip("%s", pin.Type.c_str());
             ed::EndPin();
+        }
+        // Unreal's Add Pin: one more of the type's variable input, or the last one away (its link with it).
+        if (!type.VariableInput.Name.empty())
+        {
+            const uint32_t variable = VariableInputCount(type, node.Properties);
+            ImGui::PushID(static_cast<int>(node.Id));
+            if (ImGui::SmallButton("+ Pin"))
+            {
+                node.Properties[kVariableInputCountProperty] = static_cast<int32_t>(variable + 1);
+                onGraphEdited();
+            }
+            if (variable > type.MinVariableInputs)
+            {
+                ImGui::SameLine();
+                if (ImGui::SmallButton("- Pin"))
+                {
+                    const uint32_t last = inputCount - 1;
+                    graph.Links.erase(std::remove_if(graph.Links.begin(), graph.Links.end(),
+                        [&](const GraphLink& l) { return l.ToNode == node.Id && l.ToPin == last; }), graph.Links.end());
+                    node.Properties[kVariableInputCountProperty] = static_cast<int32_t>(variable - 1);
+                    onGraphEdited();
+                }
+            }
+            ImGui::PopID();
         }
         ImGui::EndGroup();
 
@@ -255,6 +281,8 @@ namespace Nox
 
             for (const std::string& name : order)
             {
+                if (name == kVariableInputCountProperty)
+                    continue; // the + / - pin buttons
                 if (type.OwnsSubGraphs && name == "EntryState")
                     continue; // set from the state view
                 NodeGraphValue& value = node.Properties[name];
@@ -434,8 +462,8 @@ namespace Nox
                     const NodeTypeDesc* toType = toGraphNode ? TypeOf(graph, *toGraphNode) : nullptr;
 
                     bool valid = fromType && toType &&
-                                fromPin < (uint32_t)fromType->Outputs.size() && toPin < (uint32_t)toType->Inputs.size() &&
-                                fromType->Outputs[fromPin].Type == toType->Inputs[toPin].Type;
+                                fromPin < (uint32_t)fromType->Outputs.size() && toPin < InputPinCount(*toType, toGraphNode->Properties) &&
+                                fromType->Outputs[fromPin].Type == InputPin(*toType, toPin).Type;
 
                     if (valid && ed::AcceptNewItem())
                     {

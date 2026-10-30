@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <functional>
 #include <string>
 #include <unordered_map>
@@ -42,7 +43,36 @@ namespace Nox
         NodeEvaluateFn Evaluate;
         // The node owns sub graphs (GraphNode::SubGraphs) -- a state machine -- and an editor opens them on double-click.
         bool OwnsSubGraphs = false;
+        // Unreal's "Add Pin" (Blend Poses by Int, Blend Multi): after Inputs, this pin repeated as often as the node's
+        // kVariableInputCountProperty says ("Pose 0", "Pose 1", ...), never fewer than MinVariableInputs. Empty Name: none.
+        NodePinDesc VariableInput;
+        uint32_t MinVariableInputs = 2;
     };
+
+    // How many copies of its type's VariableInput a node has (an int property; the editor's + / - pins change it).
+    inline constexpr const char* kVariableInputCountProperty = "InputCount";
+
+    inline uint32_t VariableInputCount(const NodeTypeDesc& type, const std::unordered_map<std::string, NodeGraphValue>& properties)
+    {
+        if (type.VariableInput.Name.empty())
+            return 0;
+        const auto found = properties.find(kVariableInputCountProperty);
+        const int32_t* count = found != properties.end() ? std::get_if<int32_t>(&found->second) : nullptr;
+        return std::max<uint32_t>(type.MinVariableInputs, count && *count > 0 ? static_cast<uint32_t>(*count) : 0u);
+    }
+
+    // A node's input pins: its type's fixed ones, then its variable ones.
+    inline uint32_t InputPinCount(const NodeTypeDesc& type, const std::unordered_map<std::string, NodeGraphValue>& properties)
+    {
+        return static_cast<uint32_t>(type.Inputs.size()) + VariableInputCount(type, properties);
+    }
+
+    inline NodePinDesc InputPin(const NodeTypeDesc& type, uint32_t index)
+    {
+        if (index < type.Inputs.size())
+            return type.Inputs[index];
+        return { type.VariableInput.Name + " " + std::to_string(index - type.Inputs.size()), type.VariableInput.Type };
+    }
 
     // Process-wide registry of node types, shared by every domain. Domain-agnostic: it only stores and looks up
     // NodeTypeDesc by (Domain, TypeName) -- this is what makes the graph core reusable for a future domain

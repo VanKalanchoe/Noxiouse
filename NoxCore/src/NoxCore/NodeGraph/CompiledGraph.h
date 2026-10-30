@@ -26,7 +26,7 @@ namespace Nox
         const NodeTypeDesc* Type = nullptr; // permanent-lifetime pointer into NodeTypeRegistry
         uint32_t SourceNodeId = 0;          // GraphNode::Id this came from, for logging/debugging only
         std::unordered_map<std::string, NodeGraphValue> Properties;
-        std::vector<CompiledPin> Inputs;    // parallel to Type->Inputs
+        std::vector<CompiledPin> Inputs;    // parallel to the node's input pins (InputPinCount: Type->Inputs, then its variable ones)
         uint32_t OutputSlotBase = 0;        // this node's outputs live at PinValues[OutputSlotBase, OutputSlotBase + Type->Outputs.size())
         // A state machine node's states (each compiled on its own) and the transitions between them; empty otherwise.
         std::vector<CompiledSubGraph> SubGraphs;

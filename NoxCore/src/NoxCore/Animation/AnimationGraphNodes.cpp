@@ -108,6 +108,58 @@ namespace Nox
             ctx.SetOutput(nodeIndex, 0, std::move(out));
         }
 
+        // UE's Blend Poses by Int: one of the node's "Pose N" pins (as many as the + Pin button made), picked by "Active Index"
+        // (rounded, clamped). Switching cross-fades from the pose shown to the new one over "Blend Time" seconds.
+        struct BlendListState
+        {
+            int32_t Active = -1;
+            int32_t Previous = -1;
+            float Weight = 1.0f; // of Active over Previous
+        };
+
+        void EvaluateBlendByInt(GraphEvalContext& ctx, uint32_t nodeIndex)
+        {
+            auto* data = static_cast<AnimGraphEvalData*>(ctx.UserData);
+            const uint32_t poses = static_cast<uint32_t>(ctx.Graph().Nodes[nodeIndex].Inputs.size()) - 1; // pin 0: the index
+            if (poses == 0)
+            {
+                ctx.SetOutput(nodeIndex, 0, AnimPose{});
+                return;
+            }
+            const int32_t wanted = std::clamp(static_cast<int32_t>(std::lround(ctx.GetInput<float>(nodeIndex, 0))), 0, static_cast<int32_t>(poses) - 1);
+            BlendListState& state = ctx.GetState<BlendListState>(nodeIndex);
+            const float blendTime = ctx.GetProperty<float>(nodeIndex, "BlendTime", 0.2f);
+            if (state.Active < 0)
+            {
+                state.Active = wanted;
+                state.Weight = 1.0f;
+            }
+            else if (wanted != state.Active)
+            {
+                state.Previous = state.Active;
+                state.Active = wanted;
+                state.Weight = blendTime > 0.0f ? 0.0f : 1.0f;
+            }
+            if (state.Weight < 1.0f)
+                state.Weight = std::min(1.0f, state.Weight + (data ? data->DeltaTime : 0.0f) / std::max(blendTime, 1e-4f));
+
+            AnimPose active = ctx.GetInput<AnimPose>(nodeIndex, 1 + state.Active);
+            if (state.Weight >= 1.0f || state.Previous < 0)
+            {
+                ctx.SetOutput(nodeIndex, 0, std::move(active));
+                return;
+            }
+            AnimPose previous = ctx.GetInput<AnimPose>(nodeIndex, 1 + state.Previous);
+            if (previous.LocalTransforms.empty() || active.LocalTransforms.empty())
+            {
+                ctx.SetOutput(nodeIndex, 0, active.LocalTransforms.empty() ? std::move(previous) : std::move(active));
+                return;
+            }
+            AnimPose out;
+            BlendPoses(previous, active, state.Weight, out);
+            ctx.SetOutput(nodeIndex, 0, std::move(out));
+        }
+
         // UE's Blend Space 1D: up to four clips ("Clip0".."Clip3") placed along one axis ("Position0".."Position3"); the
         // "Value" pin (or, unconnected, the property of the same name) picks the point, e.g. Speed for idle / walk / run.
         // The two clips around the value play in step -- one shared normalized phase, advanced at the rate of their blended
@@ -607,6 +659,22 @@ namespace Nox
             /* PropertyRanges    */ { { "Alpha", { 0.0f, 1.0f } } },
             /* Evaluate          */ &EvaluateBlend2D
         });
+
+        {
+            // Variable inputs: "Pose 0", "Pose 1", ... (the editor's + Pin / - Pin).
+            NodeTypeDesc blendByInt;
+            blendByInt.TypeName = "BlendPosesByInt";
+            blendByInt.Domain = kAnimationGraphDomain;
+            blendByInt.Category = "Blending";
+            blendByInt.Inputs = { { "Active Index", "Float" } };
+            blendByInt.Outputs = { { "Pose", "Pose" } };
+            blendByInt.DefaultProperties = { { "Active Index", 0.0f }, { "BlendTime", 0.2f }, { kVariableInputCountProperty, int32_t(2) } };
+            blendByInt.PropertyRanges = { { "BlendTime", { 0.0f, 5.0f } } };
+            blendByInt.Evaluate = &EvaluateBlendByInt;
+            blendByInt.VariableInput = { "Pose", "Pose" };
+            blendByInt.MinVariableInputs = 2;
+            NodeTypeRegistry::Register(std::move(blendByInt));
+        }
 
         NodeTypeRegistry::Register({
             /* TypeName          */ "BlendSpace1D",
