@@ -1219,6 +1219,16 @@ cheap allocation (a range, not a Vulkan call). Separate objects remain correct w
     - Combining three submeshes, the middle one with a variant, gives two groups.
     - v7 round trip, full and streamed, paged and one-level, static and skeletal kinds.
     - A v6 cook reads without variants; v3 is refused.
+- **glTF scenes (I1, 2026-10-31):** a file may hold several scenes. Like Unreal and Godot, Nox imports one: the file's default
+  (`scene`), else the first. There is no scene picker, by decision: neither engine offers one.
+  - **Before:** every node of the file was imported, so another scene's meshes, lights and cameras came along.
+  - **Parse:** `NodesInScene` marks what the imported scene reaches. The other nodes keep their slot in the node table, so indices
+    stay the file's (skins, clips and lights point at them), but they get no geometry (their meshes are not even read), their
+    parent becomes `MeshNodeData::OutsideScene`, and their lights and cameras are dropped.
+  - **Placement:** model instances and Import Into Level skip such nodes. The import dialog's size estimate already used the
+    default scene; the mesh-kind check now does too.
+  - **Offline test (scratchpad `gstest/scenestest`):** default scene 1, no default (first scene, whole subtree), an invalid
+    default, and no scenes at all (every node).
 - **Defragmentation (later, only if measured):** move live ranges and patch the mesh table's offsets.
 
 #### 5.8.3 Budgets: who decides how much

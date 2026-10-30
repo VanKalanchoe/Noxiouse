@@ -816,6 +816,37 @@ namespace Nox
         return "Target " + std::to_string(target);
     }
 
+    // The glTF scene an import takes: the file's default ("scene"), else the first; -1 when the file has no scenes (every node is in
+    // then). Only that one, as Unreal and Godot import it: a file's other scenes are not brought in.
+    static int32_t ImportedScene(const tg3_model& model)
+    {
+        const int32_t count = static_cast<int32_t>(model.scenes_count);
+        if (count == 0)
+            return -1;
+        return model.default_scene >= 0 && model.default_scene < count ? model.default_scene : 0;
+    }
+
+    // Per node of the file: whether the imported scene reaches it (its roots and everything below them). All in without scenes.
+    static std::vector<uint8_t> NodesInScene(const tg3_model& model)
+    {
+        const int32_t imported = ImportedScene(model);
+        std::vector<uint8_t> in(model.nodes_count, imported < 0 ? 1 : 0);
+        if (imported < 0)
+            return in;
+        std::vector<int32_t> pending(model.scenes[imported].nodes, model.scenes[imported].nodes + model.scenes[imported].nodes_count);
+        while (!pending.empty())
+        {
+            const int32_t node = pending.back();
+            pending.pop_back();
+            if (node < 0 || node >= static_cast<int32_t>(model.nodes_count) || in[node])
+                continue;
+            in[node] = 1;
+            for (uint32_t c = 0; c < model.nodes[node].children_count; ++c)
+                pending.push_back(model.nodes[node].children[c]);
+        }
+        return in;
+    }
+
     MeshImporter::GltfContent MeshImporter::InspectGltf(const std::filesystem::path& sourcePath)
     {
         GltfContent content;
@@ -834,7 +865,10 @@ namespace Nox
             return content;
         }
 
-        // The size: every mesh of the default scene, its POSITION accessor's min / max box through the node transforms.
+        const int32_t importedScene = ImportedScene(model);
+        const std::vector<uint8_t> inScene = NodesInScene(model);
+
+        // The size: every mesh of the imported scene, its POSITION accessor's min / max box through the node transforms.
         {
             glm::vec3 lowest(FLT_MAX), highest(-FLT_MAX);
             auto meshBounds = [&](int32_t meshIndex, const glm::mat4& world)
@@ -942,12 +976,11 @@ namespace Nox
                 for (uint32_t m = 0; m < model.meshes_count; ++m)
                     meshBounds(static_cast<int32_t>(m), glm::mat4(1.0f));
             }
-            else if (model.scenes_count > 0)
+            else if (importedScene >= 0)
             {
-                const int32_t sceneIndex = model.default_scene >= 0 && model.default_scene < static_cast<int32_t>(model.scenes_count) ? model.default_scene : 0;
-                const tg3_scene& scene = model.scenes[sceneIndex];
-                for (uint32_t n = 0; n < scene.nodes_count; ++n)
-                    visit(scene.nodes[n], glm::mat4(1.0f), 0);
+                const tg3_scene& imported = model.scenes[importedScene];
+                for (uint32_t n = 0; n < imported.nodes_count; ++n)
+                    visit(imported.nodes[n], glm::mat4(1.0f), 0);
             }
             else
             {
@@ -973,7 +1006,7 @@ namespace Nox
         for (uint32_t i = 0; i < model.nodes_count; ++i)
         {
             const tg3_node& node = model.nodes[i];
-            if (node.mesh < 0 || node.mesh >= static_cast<int32_t>(model.meshes_count))
+            if (node.mesh < 0 || node.mesh >= static_cast<int32_t>(model.meshes_count) || !inScene[i])
                 continue;
             (node.skin >= 0 ? content.HasSkinnedMeshes : content.HasStaticMeshes) = true;
             (node.skin >= 0 ? skinnedMeshes : staticMeshes).insert(node.mesh);
@@ -3075,6 +3108,13 @@ namespace Nox
                                         : ("Mesh_" + std::to_string(i));
                 }
             }
+            // Only the imported scene's nodes: the others keep their place in the table (the file's indices) and nothing else.
+            const std::vector<uint8_t> inScene = NodesInScene(model);
+            for (uint32_t i = 0; i < model.nodes_count; i++)
+            {
+                if (!inScene[i])
+                    outNodes[i].Parent = MeshNodeData::OutsideScene;
+            }
 
             uint32_t totalInstances = (model.nodes_count > 0) ? model.nodes_count : model.meshes_count;
 
@@ -3097,6 +3137,8 @@ namespace Nox
                     const auto& node = model.nodes[instanceIdx];
                     if (node.mesh < 0 || node.mesh >= static_cast<int32_t>(model.meshes_count))
                         continue; // Skip nodes that don't reference a mesh (e.g. empty groupings, cameras)
+                    if (!inScene[instanceIdx])
+                        continue; // another scene's: its meshes are not imported
 
                     meshIndex = static_cast<uint32_t>(node.mesh);
                     meshName = outNodes[instanceIdx].Name;
@@ -3518,7 +3560,16 @@ namespace Nox
         }
 
         if (model.nodes_count > 0)
+        {
             ApplyNodeExtensions(model, outNodes);
+            // Lights and cameras on another scene's nodes are not imported either.
+            auto outside = [&](int32_t node)
+            {
+                return node >= 0 && node < static_cast<int32_t>(outNodes.size()) && outNodes[node].Parent == MeshNodeData::OutsideScene;
+            };
+            std::erase_if(outLights, [&](const LightNodeData& light) { return outside(light.NodeIndex); });
+            std::erase_if(outCameras, [&](const CameraNodeData& camera) { return outside(camera.NodeIndex); });
+        }
 
         tg3_model_free(&model);
         tg3_error_stack_free(&errors);

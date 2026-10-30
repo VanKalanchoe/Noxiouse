@@ -485,6 +485,7 @@ namespace Nox
             auto spawnSlot = [&](size_t slot) -> Entity
             {
                 if (removed.contains(static_cast<uint32_t>(slot)) ||
+                    (slot < nodes.size() && nodes[slot].Parent == MeshNodeData::OutsideScene) ||
                     (hasLayoutNodes && slot < nodes.size() && (nodes[slot].Parent == MeshNodeData::FileLayoutParent) != atFileLayout))
                     return {};
                 const SlotDefaults defaults = slotDefaults(mesh, slot);
@@ -748,16 +749,21 @@ namespace Nox
         if (level.Scale > 0.0f && level.Scale != 1.0f)
             root.GetComponent<TransformComponent>().Scale = glm::vec3(level.Scale);
 
-        // Every node first, then the parent links (a child may come before its parent in the file).
+        // Every node first, then the parent links (a child may come before its parent in the file). Another glTF scene's nodes
+        // (MeshNodeData::OutsideScene) are not placed.
         std::vector<Entity> entities(level.Nodes.size());
         for (size_t i = 0; i < level.Nodes.size(); ++i)
         {
             const MeshNodeData& node = level.Nodes[i];
+            if (node.Parent == MeshNodeData::OutsideScene)
+                continue;
             entities[i] = scene.CreateEntity(node.Name.empty() ? "Node " + std::to_string(i) : node.Name);
             entities[i].GetComponent<TransformComponent>() = makeTransform(node.Translation, node.Rotation, node.Scale);
         }
         for (size_t i = 0; i < level.Nodes.size(); ++i)
         {
+            if (!entities[i])
+                continue;
             const int32_t parent = level.Nodes[i].Parent;
             const bool hasParent = parent >= 0 && parent < static_cast<int32_t>(entities.size()) && parent != static_cast<int32_t>(i);
             attach(entities[i], hasParent ? entities[parent] : root);
@@ -802,7 +808,7 @@ namespace Nox
         {
             std::vector<UUID> nodeTable(entities.size());
             for (size_t i = 0; i < entities.size(); ++i)
-                nodeTable[i] = entities[i].GetUUID();
+                nodeTable[i] = entities[i] ? entities[i].GetUUID() : UUID(0);
 
             std::vector<ClipTargets> clips;
             for (const ModelInstance::LevelDescription::Clip& clip : level.Clips)
@@ -810,7 +816,7 @@ namespace Nox
                 ClipTargets targets{ clip.Handle, {} };
                 for (const int32_t node : clip.Nodes)
                 {
-                    if (node >= 0 && node < static_cast<int32_t>(entities.size()))
+                    if (node >= 0 && node < static_cast<int32_t>(entities.size()) && entities[node])
                         targets.Nodes.push_back(node);
                 }
                 if (!targets.Nodes.empty())

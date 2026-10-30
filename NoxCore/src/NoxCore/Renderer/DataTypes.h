@@ -195,6 +195,9 @@ namespace Nox
         // -1: a root. FileLayoutParent: a per-mesh asset's "where the file put this mesh" instance (world transform); those
         // nodes only spawn when the model instance asks for the file layout (ModelInstanceComponent::AtFileLayout).
         static constexpr int32_t FileLayoutParent = -2;
+        // A node of the file that the imported glTF scene does not reach (another scene's): kept so node indices stay the file's
+        // (skins, clips, lights point at them), never spawned, no geometry.
+        static constexpr int32_t OutsideScene = -3;
         int32_t Parent = -1;
 
         glm::vec3 Translation = glm::vec3(0.0f);
