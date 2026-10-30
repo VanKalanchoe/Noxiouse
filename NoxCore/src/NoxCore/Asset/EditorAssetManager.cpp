@@ -650,10 +650,17 @@ namespace Nox
     void EditorAssetManager::ImportMeshTextures(const Ref<Asset>& meshAsset)
     {
         const std::vector<MaterialData>* materials = nullptr;
+        const std::vector<std::vector<MaterialVariantMapping>>* variants = nullptr;
         if (meshAsset->GetType() == AssetType::Mesh)
+        {
             materials = &static_cast<Mesh*>(meshAsset.get())->GetMaterials();
+            variants = &static_cast<Mesh*>(meshAsset.get())->GetMaterialVariants();
+        }
         else if (meshAsset->GetType() == AssetType::StaticMesh)
+        {
             materials = &static_cast<StaticMesh*>(meshAsset.get())->GetMaterials();
+            variants = &static_cast<StaticMesh*>(meshAsset.get())->GetMaterialVariants();
+        }
 
         if (!materials)
             return;
@@ -741,7 +748,7 @@ namespace Nox
 
         };
 
-        for (const MaterialData& material : *materials)
+        auto importMaterialTextures = [&](const MaterialData& material)
         {
             importTexture(material.BaseColorTexturePath, true);
             // In the legacy specular-glossiness workflow this slot contains sRGB specular color
@@ -752,7 +759,13 @@ namespace Nox
             importTexture(material.OcclusionTexturePath, false);
             importTexture(material.EmissiveTexturePath, true);
             importTexture(material.TransmissionTexturePath, false);
-        }
+        };
+        for (const MaterialData& material : *materials)
+            importMaterialTextures(material);
+        // The variants' materials name textures the submeshes' own may not (MaterialsVariantsShoe: each variant's base color).
+        for (const std::vector<MaterialVariantMapping>& mappings : *variants)
+            for (const MaterialVariantMapping& mapping : mappings)
+                importMaterialTextures(mapping.Material);
 
         if (registryChanged)
             m_RegistryDirty = true; // written by Update(), not per load

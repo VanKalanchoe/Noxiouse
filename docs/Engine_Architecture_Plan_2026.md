@@ -1198,6 +1198,8 @@ cheap allocation (a range, not a Vulkan call). Separate objects remain correct w
     - The mesh asset keeps the mappings per submesh (`GetMaterialVariants`).
     - `EditorAssetManager::ImportMeshMaterials` links each mapping's `.nmat` (`GetVariantMaterialAssets`), with the same lookup
       as the submesh materials.
+    - `ImportMeshTextures` registers the textures of the variant materials too. Found in the editor: the shoe's beach and street
+      drew untextured white-gray, because their base color images are used by no submesh's own material.
     - Packaging takes them like the other materials of the model (owned by name).
   - **Selecting** (`Scene/MaterialVariants`):
     - **What it writes:** a variant is the whole file's, so it covers the entity and everything below it (a model instance's
