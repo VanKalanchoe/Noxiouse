@@ -948,23 +948,38 @@ The pass runs after clodBuild and before the pages are written. Each simplificat
 - The open borders of the clusters it produced are pushed outward, in the surface's plane, along the bisector of their edge normals
   (mitered, at most 2x).
 - The push distance comes from the border length, then a bisection on the actual area, since corners add area with the square of
-  the distance. It is capped at the open edges' average length.
+  the distance. One step is capped at the open edges' average length.
+- **Growth limit.** A vertex moves at most the radius of its original piece (the triangles connected to it, a leaf), so a surviving
+  leaf at most doubles in size. Area of leaves the simplifier removed entirely is mostly not handed to the survivors.
+- **The push is error.** A simplification's error becomes at least how far its vertices are from where they started, kept monotonic
+  up the DAG. Grown levels are then drawn only where that is below the threshold. Their finer pages are also requested at higher
+  priority, so a small pool keeps foliage detail instead of drawing the coarsest leaves up close.
 - A vertex is pushed only if the simplifier could move it. Positions that clusters of other groups at the same level use are what
   clusterlod locks, so they are never moved, and a cut mixing levels stays watertight.
 - A pushed vertex is a copy. The simplification's clusters use it, and so does everything simplified from them later. Clusters whose
-  vertices changed get new culling bounds; LOD bounds and errors stay as they are, so the DAG and its cuts do not change.
+  vertices changed get new culling bounds. LOD spheres and the DAG stay as they are.
 - Closed surfaces have no open borders inside a group, so nothing moves on them. Area a simplifier adds by closing holes is left alone.
+
+The first version had no growth limit and kept errors unchanged. The user tested it on Bistro with a 32 MB pool and found few leaves
+left, each much larger than the original. That version handed all the vanished leaves' area to the survivors: about 8x a leaf's
+length at the bush's coarsest level.
 
 Measured (`pareatest`):
 
-| Case | Without the pass | With the pass |
-|---|---|---|
-| Bush, levels 5 to 10 | 49.6% down to 1.5% of the area | 100.0% at every level |
-| Bush, vertices | – | +3% |
-| Sheet, disc, perforated net | – | at most +0.7% area |
+| Bush | Without the pass | First version | Now |
+|---|---|---|---|
+| Area, levels 5 / 6 / 7 / 10 | 49.6 / 24.7 / 12.4 / 1.5% | 100% at every level | 100 / 100 / 64.3 / 8.0% |
+| Longest edge, coarsest level (leaf: 0.57) | 0.57 | 4.63 | 1.36 |
+| Largest error, coarsest level | 0.27 | 0.27 | 0.40 |
+| Vertices | – | +3% | +3% |
+
+On the sheet, disc and net, the pushes stay below the simplifier's own error, so their errors do not change; area changes by at
+most +0.7%.
 
 Other checks:
 - Triangle counts per level are identical with and without the pass.
+- Every cluster's parent error is at least its own.
+- Cuts are exact under 100 random dependency-closed residency sets.
 - No crack in 60 mixed cuts per case. The check is exact on the disc and the net: any open edge away from the rim and the holes counts.
 - No vertex lies outside its cluster's culling sphere.
 
