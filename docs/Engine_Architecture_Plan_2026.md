@@ -1020,6 +1020,10 @@ cheap allocation (a range, not a Vulkan call). Separate objects remain correct w
   - Devices without `sparseBinding` + `sparseResidencyBuffer` (or without a queue that binds sparse memory) keep the grow-copy path.
   - Offline test against a stub device: random allocate/free sequences on four element sizes, with the bound pages checked to be
     exactly the pages the live ranges touch. No page is committed or released twice, and nothing is left bound at the end.
+  - **Measured on Bistro (2026-10-30, RTX laptop GPU: sparse address space 1 TB, 64 GB reserved per stream at most):** Geometry
+    went from 621 MB committed / 328 MB used to 319 MB committed / 317 MB used. That leaves 2 MB of page rounding, and saves
+    302 MB of VRAM. The ~5000 page allocations are suballocated from VMA's blocks (6126 allocations in all, against 1073 before).
+    The image, the path tracer, geometry streaming and scene reloads behave as before.
   - The geometry streaming pool for cluster pages (§5.7.2) is a byte budget inside these streams, not a separate fixed buffer.
 - **Freeing:** ranges return to the allocator after frames-in-flight (§5.8.4). Unlike pages, freed
   memory is immediately reusable by the next load.
