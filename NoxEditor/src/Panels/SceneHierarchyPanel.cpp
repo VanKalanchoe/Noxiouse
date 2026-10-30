@@ -16,6 +16,7 @@
 #include "NoxCore/Core/WorldUnits.h"
 #include "NoxCore/Scene/EntityBounds.h"
 #include "NoxCore/Scene/ModelInstance.h"
+#include "NoxCore/Scene/MaterialVariants.h"
 #include "NoxCore/Scene/ParticleSystem.h"
 #include "NoxCore/Scene/Prefab.h"
 #include "AssetPreviewRenderer.h"
@@ -1137,6 +1138,27 @@ namespace Nox
             ImGui::TextDisabled("Changes here are kept as overrides on the instance (listed there); Apply writes them into the prefab.");
             if (instance && ImGui::SmallButton("Select Instance"))
                 SetSelectedEntity(instance);
+        }
+
+        // Material variants (KHR_materials_variants) of the meshes here and below: a model's whole set at once, written into the
+        // Material slots of its parts (saved as their overrides).
+        if (const std::vector<std::string> variants = MaterialVariants::List(*m_Context, entity); !variants.empty())
+        {
+            const std::optional<std::string> current = MaterialVariants::Current(*m_Context, entity);
+            const char* preview = !current ? "Custom" : current->empty() ? "Default" : current->c_str();
+            if (ImGui::BeginCombo("Material Variant", preview))
+            {
+                if (ImGui::Selectable("Default", current && current->empty()))
+                    MaterialVariants::Select(*m_Context, entity, "");
+                for (const std::string& name : variants)
+                {
+                    if (ImGui::Selectable(name.c_str(), current && *current == name))
+                        MaterialVariants::Select(*m_Context, entity, name);
+                }
+                ImGui::EndCombo();
+            }
+            ImGui::SetItemTooltip("The model's material sets (glTF KHR_materials_variants). Choosing one sets the Material slots of every\n"
+                                  "part below; Default gives them back their own materials. Custom: the slots were changed by hand.");
         }
 
         DrawComponent<TransformComponent>("Transform", entity, [this, entity](auto& component)

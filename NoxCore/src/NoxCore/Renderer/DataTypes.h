@@ -263,6 +263,15 @@ namespace Nox
         std::vector<glm::vec3> Normals;
     };
 
+    // KHR_materials_variants: the material a submesh draws with while the named variant is selected (a submesh without an entry
+    // for a variant keeps its own). VariantIndex is the variant's place in the file's list, what orders the variants.
+    struct MaterialVariantMapping
+    {
+        std::string Variant;
+        uint32_t VariantIndex = 0;
+        MaterialData Material;
+    };
+
     struct MeshData
     {
         std::string Name;
@@ -285,6 +294,8 @@ namespace Nox
         bool VertexColors = false;
         // Morph targets: a mesh with them is one level (no cluster LOD, as skinned geometry: a simplified surface would move wrongly).
         std::vector<MorphTarget> Morphs;
+        // Material variants of this submesh (empty for most meshes).
+        std::vector<MaterialVariantMapping> MaterialVariants;
         // Set when only the root pages were read: Vertices, MeshletVertices and MeshletTriangles hold just those, the other pages
         // stream from this cooked file (MeshPage::PayloadOffset).
         std::filesystem::path StreamedFrom;

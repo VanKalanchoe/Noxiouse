@@ -44,12 +44,20 @@ namespace Nox
         // The members of Mesh and StaticMesh are the same.
         void fillMeshAsset(CookedMesh& cooked, std::vector<MeshHandle>& subMeshes, std::vector<std::string>& names,
                            std::vector<MaterialData>& materials, std::vector<LightNodeData>& lights, std::vector<CameraNodeData>& cameras,
-                           std::vector<MeshNodeData>& nodes)
+                           std::vector<MeshNodeData>& nodes, std::vector<std::vector<MaterialVariantMapping>>& variants)
         {
             subMeshes.resize(cooked.Submeshes.size());
             names.reserve(cooked.Submeshes.size());
-            for (const MeshData& submesh : cooked.Submeshes)
+            variants.clear();
+            for (MeshData& submesh : cooked.Submeshes)
+            {
                 names.push_back(submesh.Name);
+                if (!submesh.MaterialVariants.empty())
+                {
+                    variants.resize(cooked.Submeshes.size());
+                    variants[&submesh - cooked.Submeshes.data()] = std::move(submesh.MaterialVariants);
+                }
+            }
             materials = std::move(cooked.Materials);
             lights = std::move(cooked.Lights);
             cameras = std::move(cooked.Cameras);
@@ -466,12 +474,12 @@ namespace Nox
         if (type == AssetType::StaticMesh)
         {
             Ref<StaticMesh> mesh = CreateRef<StaticMesh>();
-            fillMeshAsset(cooked, mesh->m_SubMeshes, mesh->m_SubmeshNames, mesh->m_Materials, mesh->m_Lights, mesh->m_Cameras, mesh->m_Nodes);
+            fillMeshAsset(cooked, mesh->m_SubMeshes, mesh->m_SubmeshNames, mesh->m_Materials, mesh->m_Lights, mesh->m_Cameras, mesh->m_Nodes, mesh->m_MaterialVariants);
             return Ref<Asset>(mesh);
         }
 
         Ref<Mesh> mesh = CreateRef<Mesh>();
-        fillMeshAsset(cooked, mesh->m_SubMeshes, mesh->m_SubmeshNames, mesh->m_Materials, mesh->m_Lights, mesh->m_Cameras, mesh->m_Nodes);
+        fillMeshAsset(cooked, mesh->m_SubMeshes, mesh->m_SubmeshNames, mesh->m_Materials, mesh->m_Lights, mesh->m_Cameras, mesh->m_Nodes, mesh->m_MaterialVariants);
         return Ref<Asset>(mesh);
     }
 
@@ -607,10 +615,13 @@ namespace Nox
 
             for (uint32_t i = node.FirstSubmesh; i < node.FirstSubmesh + node.SubmeshCount && i < subset.Meshes.size(); ++i)
             {
-                // A submesh with morph targets is not merged (its targets are its own): a group of its own, per node using it.
+                // A submesh with morph targets is not merged (its targets are its own): a group of its own, per node using it. Submeshes
+                // merge only when their material variants match too (a variant would otherwise change both).
                 const bool morphed = !subset.Meshes[i].Morphs.empty();
-                const std::string key = morphed ? MaterialKey(subset.Materials[i]) + "#morph" + std::to_string(nodeIndex) + "." + std::to_string(i)
-                                                : MaterialKey(subset.Materials[i]);
+                std::string key = morphed ? MaterialKey(subset.Materials[i]) + "#morph" + std::to_string(nodeIndex) + "." + std::to_string(i)
+                                          : MaterialKey(subset.Materials[i]);
+                for (const MaterialVariantMapping& mapping : subset.Meshes[i].MaterialVariants)
+                    key += "#variant" + std::to_string(mapping.VariantIndex) + ":" + MaterialKey(mapping.Material);
                 auto found = groupOfMaterial.find(key);
                 if (found == groupOfMaterial.end())
                 {
@@ -619,6 +630,7 @@ namespace Nox
                     created.Material = subset.Materials[i];
                     created.Data.Name = subset.Materials[i].Name.empty() ? "Combined_" + std::to_string(groups.size() - 1) : subset.Materials[i].Name;
                     created.Geometry.Skinned = skinned;
+                    created.Data.MaterialVariants = subset.Meshes[i].MaterialVariants;
                 }
                 Group& group = groups[found->second];
                 // One merged submesh with colors if any part has them (the others' vertices are white).
@@ -1013,6 +1025,14 @@ namespace Nox
             material.Thickness *= scale;
             material.AttenuationDistance *= scale;
         }
+        for (MeshData& mesh : subset.Meshes)
+        {
+            for (MaterialVariantMapping& mapping : mesh.MaterialVariants)
+            {
+                mapping.Material.Thickness *= scale;
+                mapping.Material.AttenuationDistance *= scale;
+            }
+        }
     }
 
     // The skeleton (bone rest poses) and its animation clips need the same uniform scale as the mesh they drive, or a scaled-up
@@ -1173,6 +1193,19 @@ namespace Nox
             {
                 std::filesystem::create_directories(materialPath.parent_path(), error);
                 MaterialSerializer::Serialize(materialPath, subset.Materials[index]);
+            }
+        }
+        // The materials of the variants (named, as every glTF material: MaterialAssetPath does not fall back to the index).
+        for (size_t index = 0; index < subset.Meshes.size(); ++index)
+        {
+            for (const MaterialVariantMapping& mapping : subset.Meshes[index].MaterialVariants)
+            {
+                const std::filesystem::path materialPath = assetDirectory / MeshImporter::MaterialAssetPath(materialBase, mapping.Material, index);
+                if (!std::filesystem::exists(materialPath, error))
+                {
+                    std::filesystem::create_directories(materialPath.parent_path(), error);
+                    MaterialSerializer::Serialize(materialPath, mapping.Material);
+                }
             }
         }
     }
@@ -2595,6 +2628,366 @@ namespace Nox
         }
     }
 
+    // A glTF material's name: what its .nmat is called (MeshImporter::MaterialAssetPath) and what combining groups by, so it tells
+    // the file's materials apart. A material named like an earlier one gets its index (exporters reuse names: the three variants of
+    // Khronos' MaterialsVariantsShoe are all "phong1SG"); an unnamed one is Material_<index>.
+    static std::string GltfMaterialName(const tg3_model& model, int32_t materialIndex)
+    {
+        auto nameOf = [&](int32_t index)
+        {
+            const tg3_str& name = model.materials[index].name;
+            return name.data ? std::string_view(name.data, name.len) : std::string_view();
+        };
+        const std::string_view name = nameOf(materialIndex);
+        if (name.empty())
+            return "Material_" + std::to_string(materialIndex);
+        for (int32_t earlier = 0; earlier < materialIndex; ++earlier)
+        {
+            if (nameOf(earlier) == name)
+                return std::string(name) + "_" + std::to_string(materialIndex);
+        }
+        return std::string(name);
+    }
+
+    // A glTF material as the engine's (textures extracted next to the cook); defaults when the index is out of range.
+    static MaterialData ReadGltfMaterial(const tg3_model& model, int32_t materialIndex, const std::filesystem::path& path)
+    {
+        MaterialData materialData{};
+        if (materialIndex >= 0 && materialIndex < (int32_t)model.materials_count)
+        {
+            const auto& gltfMaterial = model.materials[materialIndex];
+
+            materialData.Name = GltfMaterialName(model, materialIndex);
+
+            // Alpha Mode ("OPAQUE", "MASK", "BLEND")
+            if (gltfMaterial.alpha_mode.data != nullptr && gltfMaterial.alpha_mode.len > 0)
+            {
+                std::string_view modeStr(gltfMaterial.alpha_mode.data, gltfMaterial.alpha_mode.len);
+                if (modeStr == "OPAQUE" || modeStr == "Opaque") materialData.Mode = AlphaMode::Opaque;
+                else if (modeStr == "MASK") materialData.Mode = AlphaMode::Mask;
+                else if (modeStr == "BLEND") materialData.Mode = AlphaMode::Blend;
+            }
+            else
+            {
+                materialData.Mode = AlphaMode::Opaque;
+            }
+
+            // Alpha Cutoff & Double Sided
+            materialData.AlphaMaskCutoff = static_cast<float>(gltfMaterial.alpha_cutoff);
+            materialData.DoubleSided = (gltfMaterial.double_sided != 0);
+
+            // --- Helper Lambda to safely extract textures ---
+            auto GetTexturePath = [&](int32_t texIndex) -> std::string
+            {
+                if (texIndex >= 0 && texIndex < (int32_t)model.textures_count)
+                {
+                    int32_t imageIndex = GetTextureSourceImageIndex(model.textures[texIndex]);
+                    if (imageIndex >= 0 && imageIndex < (int32_t)model.images_count)
+                    {
+                        std::filesystem::path texPath = ExtractGltfImage(model, model.images[imageIndex], imageIndex, path);
+                        return texPath.string();
+                    }
+                }
+                return "";
+            };
+
+            materialData.BaseColorFactor = glm::vec4(
+                static_cast<float>(gltfMaterial.pbr_metallic_roughness.base_color_factor[0]),
+                static_cast<float>(gltfMaterial.pbr_metallic_roughness.base_color_factor[1]),
+                static_cast<float>(gltfMaterial.pbr_metallic_roughness.base_color_factor[2]),
+                static_cast<float>(gltfMaterial.pbr_metallic_roughness.base_color_factor[3])
+            );
+            materialData.BaseColorTexturePath = GetTexturePath(gltfMaterial.pbr_metallic_roughness.base_color_texture.index);
+            materialData.BaseColorTextureSet = gltfMaterial.pbr_metallic_roughness.base_color_texture.tex_coord;
+
+            materialData.MetallicFactor = static_cast<float>(gltfMaterial.pbr_metallic_roughness.metallic_factor);
+            materialData.RoughnessFactor = static_cast<float>(gltfMaterial.pbr_metallic_roughness.roughness_factor);
+
+            // glTF packs roughness in G and metallic in B.
+            materialData.MetallicRoughnessTexturePath = GetTexturePath(gltfMaterial.pbr_metallic_roughness.metallic_roughness_texture.index);
+            materialData.PhysicalDescriptorTextureSet = gltfMaterial.pbr_metallic_roughness.metallic_roughness_texture.tex_coord;
+
+            // Normal Texture
+            materialData.NormalTexturePath = GetTexturePath(gltfMaterial.normal_texture.index);
+            materialData.NormalTextureSet = gltfMaterial.normal_texture.tex_coord;
+
+            // Ambient Occlusion Texture
+            materialData.OcclusionTexturePath = GetTexturePath(gltfMaterial.occlusion_texture.index);
+            materialData.OcclusionTextureSet = gltfMaterial.occlusion_texture.tex_coord;
+
+            // Emissive Factor & Texture
+            materialData.EmissiveFactor = glm::vec3(
+                static_cast<float>(gltfMaterial.emissive_factor[0]),
+                static_cast<float>(gltfMaterial.emissive_factor[1]),
+                static_cast<float>(gltfMaterial.emissive_factor[2])
+            );
+            materialData.EmissiveTexturePath = GetTexturePath(gltfMaterial.emissive_texture.index);
+            materialData.EmissiveTextureSet = gltfMaterial.emissive_texture.tex_coord;
+            float emissiveStrength = 1.0f;
+
+            // Default setup
+            materialData.Workflow = 0.0f;
+            materialData.DiffuseFactor = glm::vec4(1.0f);
+            materialData.SpecularFactor = glm::vec4(1.0f); // Default: rgb = 1.0 (specular), a = 1.0 (glossiness)
+
+            // Check Extensions
+            for (uint32_t i = 0; i < gltfMaterial.ext.extensions_count; i++)
+            {
+                const tg3_extension& ext = gltfMaterial.ext.extensions[i];
+                
+                if (std::string_view(ext.name.data, ext.name.len) == "KHR_materials_unlit")
+                {
+                    materialData.Unlit = true;
+                }
+                
+                if (std::string_view(ext.name.data, ext.name.len) == "KHR_materials_emissive_strength")
+                {
+                    if (ext.value.type == TG3_VALUE_OBJECT)
+                    {
+                        for (uint32_t j = 0; j < ext.value.object_count; j++)
+                        {
+                            const auto& kv = ext.value.object_data[j];
+                            if (std::string_view(kv.key.data, kv.key.len) == "emissiveStrength")
+                            {
+                                if (kv.value.type == TG3_VALUE_REAL)
+                                {
+                                    emissiveStrength = static_cast<float>(kv.value.real_val);
+                                }
+                                else if (kv.value.type == TG3_VALUE_INT)
+                                {
+                                    emissiveStrength = static_cast<float>(kv.value.int_val);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (std::string_view(ext.name.data, ext.name.len) == "KHR_materials_pbrSpecularGlossiness")
+                {
+                    materialData.Workflow = 1.0f;
+
+                    if (ext.value.type == TG3_VALUE_OBJECT)
+                    {
+                        for (uint32_t j = 0; j < ext.value.object_count; j++)
+                        {
+                            const auto& kv = ext.value.object_data[j];
+                            std::string_view key(kv.key.data, kv.key.len);
+
+                            // 1. diffuseFactor (vec4)
+                            if (key == "diffuseFactor" && kv.value.type == TG3_VALUE_ARRAY && kv.value.array_count >= 4)
+                            {
+                                materialData.DiffuseFactor = glm::vec4(
+                                    getFloatVal(kv.value.array_data[0]),
+                                    getFloatVal(kv.value.array_data[1]),
+                                    getFloatVal(kv.value.array_data[2]),
+                                    getFloatVal(kv.value.array_data[3])
+                                );
+                            }
+                            // 2. specularFactor (vec3 packed into rgb)
+                            else if (key == "specularFactor" && kv.value.type == TG3_VALUE_ARRAY && kv.value.array_count >= 3)
+                            {
+                                materialData.SpecularFactor.r = getFloatVal(kv.value.array_data[0]);
+                                materialData.SpecularFactor.g = getFloatVal(kv.value.array_data[1]);
+                                materialData.SpecularFactor.b = getFloatVal(kv.value.array_data[2]);
+                            }
+                            // 3. glossinessFactor (float packed into a)
+                            else if (key == "glossinessFactor")
+                            {
+                                materialData.SpecularFactor.a = getFloatVal(kv.value);
+                            }
+                            // 4. diffuseTexture
+                            else if (key == "diffuseTexture" && kv.value.type == TG3_VALUE_OBJECT)
+                            {
+                                for (uint32_t t = 0; t < kv.value.object_count; t++)
+                                {
+                                    const auto& texKv = kv.value.object_data[t];
+                                    if (std::string_view(texKv.key.data, texKv.key.len) == "index")
+                                        materialData.BaseColorTexturePath = GetTexturePath(static_cast<int32_t>(texKv.value.int_val));
+                                    else if (std::string_view(texKv.key.data, texKv.key.len) == "texCoord")
+                                        materialData.BaseColorTextureSet = static_cast<int32_t>(texKv.value.int_val);
+                                }
+                            }
+                            // 5. specularGlossinessTexture
+                            else if (key == "specularGlossinessTexture" && kv.value.type == TG3_VALUE_OBJECT)
+                            {
+                                for (uint32_t t = 0; t < kv.value.object_count; t++)
+                                {
+                                    const auto& texKv = kv.value.object_data[t];
+                                    if (std::string_view(texKv.key.data, texKv.key.len) == "index")
+                                        materialData.MetallicRoughnessTexturePath = GetTexturePath(static_cast<int32_t>(texKv.value.int_val));
+                                    else if (std::string_view(texKv.key.data, texKv.key.len) == "texCoord")
+                                        materialData.PhysicalDescriptorTextureSet = static_cast<int32_t>(texKv.value.int_val);
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                if (std::string_view(ext.name.data, ext.name.len) == "KHR_materials_transmission")
+                    {
+                        if (ext.value.type == TG3_VALUE_OBJECT)
+                        {
+                            for (uint32_t j = 0; j < ext.value.object_count; j++)
+                            {
+                                const auto& kv = ext.value.object_data[j];
+                                std::string_view key(kv.key.data, kv.key.len);
+
+                                if (key == "transmissionFactor")
+                                {
+                                    if (kv.value.type == TG3_VALUE_REAL)
+                                        materialData.TransmissionFactor = static_cast<float>(kv.value.real_val);
+                                    else if (kv.value.type == TG3_VALUE_INT)
+                                        materialData.TransmissionFactor = static_cast<float>(kv.value.int_val);
+                                }
+                                else if (key == "transmissionTexture" && kv.value.type == TG3_VALUE_OBJECT)
+                                {
+                                    for (uint32_t t = 0; t < kv.value.object_count; t++)
+                                    {
+                                        const auto& texKv = kv.value.object_data[t];
+                                        std::string_view tkey(texKv.key.data, texKv.key.len);
+                                        if (tkey == "index")
+                                            materialData.TransmissionTexturePath = GetTexturePath(static_cast<int32_t>(texKv.value.int_val));
+                                        else if (tkey == "texCoord")
+                                            materialData.TransmissionTextureSet = static_cast<int32_t>(texKv.value.int_val);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                if (std::string_view(ext.name.data, ext.name.len) == "KHR_materials_ior")
+                {
+                    if (ext.value.type == TG3_VALUE_OBJECT)
+                    {
+                        for (uint32_t j = 0; j < ext.value.object_count; j++)
+                        {
+                            const auto& kv = ext.value.object_data[j];
+                            if (std::string_view(kv.key.data, kv.key.len) == "ior")
+                            {
+                                if (kv.value.type == TG3_VALUE_REAL)
+                                    materialData.IOR = static_cast<float>(kv.value.real_val);
+                                else if (kv.value.type == TG3_VALUE_INT)
+                                    materialData.IOR = static_cast<float>(kv.value.int_val);
+                            }
+                        }
+                    }
+                }
+
+                if (std::string_view(ext.name.data, ext.name.len) == "KHR_materials_diffuse_transmission" &&
+                    ext.value.type == TG3_VALUE_OBJECT)
+                {
+                    for (uint32_t j = 0; j < ext.value.object_count; j++)
+                    {
+                        const auto& kv = ext.value.object_data[j];
+                        if (std::string_view(kv.key.data, kv.key.len) == "diffuseTransmissionFactor" &&
+                            (kv.value.type == TG3_VALUE_REAL || kv.value.type == TG3_VALUE_INT))
+                            materialData.DiffuseTransmission = std::clamp(getFloatVal(kv.value), 0.0f, 1.0f);
+                    }
+                }
+
+                if (std::string_view(ext.name.data, ext.name.len) == "KHR_materials_volume")
+                {
+                    if (ext.value.type == TG3_VALUE_OBJECT)
+                    {
+                        for (uint32_t j = 0; j < ext.value.object_count; j++)
+                        {
+                            const auto& kv = ext.value.object_data[j];
+                            const std::string_view key(kv.key.data, kv.key.len);
+                            if (key == "thicknessFactor")
+                            {
+                                if (kv.value.type == TG3_VALUE_REAL)
+                                    materialData.Thickness = static_cast<float>(kv.value.real_val);
+                                else if (kv.value.type == TG3_VALUE_INT)
+                                    materialData.Thickness = static_cast<float>(kv.value.int_val);
+                            }
+                            else if (key == "attenuationDistance" && (kv.value.type == TG3_VALUE_REAL || kv.value.type == TG3_VALUE_INT))
+                            {
+                                materialData.AttenuationDistance = getFloatVal(kv.value);
+                            }
+                            else if (key == "attenuationColor" && kv.value.type == TG3_VALUE_ARRAY && kv.value.array_count >= 3)
+                            {
+                                materialData.AttenuationColor = glm::vec3(getFloatVal(kv.value.array_data[0]), getFloatVal(kv.value.array_data[1]),
+                                                                          getFloatVal(kv.value.array_data[2]));
+                            }
+                        }
+                    }
+                }
+            }
+
+            // tiny_gltf_v3 exposes initialized metallic/roughness values but not whether the optional
+            // pbrMetallicRoughness object existed. Its synthetic 1/1 defaults make a textureless
+            // KHR_materials_transmission material fully metallic, which removes the entire transmission lobe.
+            // Donut/RTXPT leaves such transmission-only materials at its engine defaults (0/0). Keep this
+            // compatibility in Nox instead of modifying the vendored parser.
+            if (materialData.TransmissionFactor > 0.0f && materialData.Workflow == 0.0f &&
+                materialData.MetallicFactor == 1.0f && materialData.RoughnessFactor == 1.0f &&
+                materialData.BaseColorTexturePath.empty() && materialData.MetallicRoughnessTexturePath.empty())
+            {
+                materialData.MetallicFactor = 0.0f;
+                materialData.RoughnessFactor = 0.0f;
+            }
+            materialData.emissiveStrength = emissiveStrength;
+            ApplyRtxptMaterialOverride(path, materialData);
+        }
+        return materialData;
+    }
+
+    // KHR_materials_variants: the file's variant names (the root extension's "variants"), in order.
+    static std::vector<std::string> ReadMaterialVariantNames(const tg3_model& model)
+    {
+        std::vector<std::string> names;
+        const tg3_extension* extension = FindExtension(model.ext, "KHR_materials_variants");
+        const tg3_value* variants = extension ? FindMember(extension->value, "variants") : nullptr;
+        if (!variants || variants->type != TG3_VALUE_ARRAY)
+            return names;
+        for (uint32_t i = 0; i < variants->array_count; i++)
+        {
+            const tg3_value* name = FindMember(variants->array_data[i], "name");
+            names.push_back(name && name->type == TG3_VALUE_STRING && name->string_val.len > 0
+                                ? std::string(name->string_val.data, name->string_val.len)
+                                : "Variant " + std::to_string(i));
+        }
+        return names;
+    }
+
+    // A primitive's KHR_materials_variants mappings ({ "material", "variants": [indices] }) as the submesh's MaterialVariants, ordered
+    // by variant. A variant named by several mappings takes the first (the extension allows one material per variant).
+    static void ReadMaterialVariantMappings(const tg3_model& model, const tg3_primitive& primitive, const std::vector<std::string>& names,
+                                            const std::filesystem::path& path, MeshData& out)
+    {
+        const tg3_extension* extension = FindExtension(primitive.ext, "KHR_materials_variants");
+        const tg3_value* mappings = extension ? FindMember(extension->value, "mappings") : nullptr;
+        if (!mappings || mappings->type != TG3_VALUE_ARRAY)
+            return;
+        auto integer = [](const tg3_value* value) -> int64_t
+        {
+            if (!value)
+                return -1;
+            return value->type == TG3_VALUE_INT ? value->int_val : value->type == TG3_VALUE_REAL ? static_cast<int64_t>(value->real_val) : -1;
+        };
+        for (uint32_t m = 0; m < mappings->array_count; m++)
+        {
+            const tg3_value& mapping = mappings->array_data[m];
+            const int64_t material = integer(FindMember(mapping, "material"));
+            const tg3_value* variants = FindMember(mapping, "variants");
+            if (material < 0 || material >= static_cast<int64_t>(model.materials_count) || !variants || variants->type != TG3_VALUE_ARRAY)
+                continue;
+            const MaterialData data = ReadGltfMaterial(model, static_cast<int32_t>(material), path);
+            for (uint32_t v = 0; v < variants->array_count; v++)
+            {
+                const int64_t variant = integer(&variants->array_data[v]);
+                if (variant < 0 || variant >= static_cast<int64_t>(names.size()))
+                    continue;
+                const bool taken = std::any_of(out.MaterialVariants.begin(), out.MaterialVariants.end(),
+                                               [&](const MaterialVariantMapping& existing) { return existing.VariantIndex == variant; });
+                if (!taken)
+                    out.MaterialVariants.push_back({ names[variant], static_cast<uint32_t>(variant), data });
+            }
+        }
+        std::sort(out.MaterialVariants.begin(), out.MaterialVariants.end(),
+                  [](const MaterialVariantMapping& a, const MaterialVariantMapping& b) { return a.VariantIndex < b.VariantIndex; });
+    }
+
     std::vector<MeshData> MeshImporter::ParseGltfToMeshData
     (
         const std::filesystem::path& path,
@@ -2638,6 +3031,7 @@ namespace Nox
         ParseLightsFromGltf(model, outLights);
         ParseCamerasFromGltf(model, outCameras);
         outNodes.clear();
+        const std::vector<std::string> variantNames = ReadMaterialVariantNames(model);
 
          // 1. Build parent hierarchy map to resolve accumulated world transforms
             std::vector<int32_t> parentMap(model.nodes_count, -1);
@@ -3112,291 +3506,10 @@ namespace Nox
                 else
                     buildClusterLod(primitiveData, primitiveIndices);
 
-                MaterialData materialData{};
-
-                // Materials
-                if (primitive.material >= 0 && primitive.material < (int32_t)model.materials_count)
-                {
-                    const auto& gltfMaterial = model.materials[primitive.material];
-
-                    // Material Name
-                    if (gltfMaterial.name.data != nullptr && gltfMaterial.name.len > 0)
-                        materialData.Name = std::string(gltfMaterial.name.data, gltfMaterial.name.len);
-                    else
-                        materialData.Name = "Material_" + std::to_string(primitive.material);
-
-                    // Alpha Mode ("OPAQUE", "MASK", "BLEND")
-                    if (gltfMaterial.alpha_mode.data != nullptr && gltfMaterial.alpha_mode.len > 0)
-                    {
-                        std::string_view modeStr(gltfMaterial.alpha_mode.data, gltfMaterial.alpha_mode.len);
-                        if (modeStr == "OPAQUE" || modeStr == "Opaque") materialData.Mode = AlphaMode::Opaque;
-                        else if (modeStr == "MASK") materialData.Mode = AlphaMode::Mask;
-                        else if (modeStr == "BLEND") materialData.Mode = AlphaMode::Blend;
-                    }
-                    else
-                    {
-                        materialData.Mode = AlphaMode::Opaque;
-                    }
-
-                    // Alpha Cutoff & Double Sided
-                    materialData.AlphaMaskCutoff = static_cast<float>(gltfMaterial.alpha_cutoff);
-                    materialData.DoubleSided = (gltfMaterial.double_sided != 0);
-
-                    // --- Helper Lambda to safely extract textures ---
-                    auto GetTexturePath = [&](int32_t texIndex) -> std::string
-                    {
-                        if (texIndex >= 0 && texIndex < (int32_t)model.textures_count)
-                        {
-                            int32_t imageIndex = GetTextureSourceImageIndex(model.textures[texIndex]);
-                            if (imageIndex >= 0 && imageIndex < (int32_t)model.images_count)
-                            {
-                                std::filesystem::path texPath = ExtractGltfImage(model, model.images[imageIndex], imageIndex, path);
-                                return texPath.string();
-                            }
-                        }
-                        return "";
-                    };
-
-                    materialData.BaseColorFactor = glm::vec4(
-                        static_cast<float>(gltfMaterial.pbr_metallic_roughness.base_color_factor[0]),
-                        static_cast<float>(gltfMaterial.pbr_metallic_roughness.base_color_factor[1]),
-                        static_cast<float>(gltfMaterial.pbr_metallic_roughness.base_color_factor[2]),
-                        static_cast<float>(gltfMaterial.pbr_metallic_roughness.base_color_factor[3])
-                    );
-                    materialData.BaseColorTexturePath = GetTexturePath(gltfMaterial.pbr_metallic_roughness.base_color_texture.index);
-                    materialData.BaseColorTextureSet = gltfMaterial.pbr_metallic_roughness.base_color_texture.tex_coord;
-
-                    materialData.MetallicFactor = static_cast<float>(gltfMaterial.pbr_metallic_roughness.metallic_factor);
-                    materialData.RoughnessFactor = static_cast<float>(gltfMaterial.pbr_metallic_roughness.roughness_factor);
-
-                    // glTF packs roughness in G and metallic in B.
-                    materialData.MetallicRoughnessTexturePath = GetTexturePath(gltfMaterial.pbr_metallic_roughness.metallic_roughness_texture.index);
-                    materialData.PhysicalDescriptorTextureSet = gltfMaterial.pbr_metallic_roughness.metallic_roughness_texture.tex_coord;
-
-                    // Normal Texture
-                    materialData.NormalTexturePath = GetTexturePath(gltfMaterial.normal_texture.index);
-                    materialData.NormalTextureSet = gltfMaterial.normal_texture.tex_coord;
-
-                    // Ambient Occlusion Texture
-                    materialData.OcclusionTexturePath = GetTexturePath(gltfMaterial.occlusion_texture.index);
-                    materialData.OcclusionTextureSet = gltfMaterial.occlusion_texture.tex_coord;
-
-                    // Emissive Factor & Texture
-                    materialData.EmissiveFactor = glm::vec3(
-                        static_cast<float>(gltfMaterial.emissive_factor[0]),
-                        static_cast<float>(gltfMaterial.emissive_factor[1]),
-                        static_cast<float>(gltfMaterial.emissive_factor[2])
-                    );
-                    materialData.EmissiveTexturePath = GetTexturePath(gltfMaterial.emissive_texture.index);
-                    materialData.EmissiveTextureSet = gltfMaterial.emissive_texture.tex_coord;
-                    float emissiveStrength = 1.0f;
-
-                    // Default setup
-                    materialData.Workflow = 0.0f;
-                    materialData.DiffuseFactor = glm::vec4(1.0f);
-                    materialData.SpecularFactor = glm::vec4(1.0f); // Default: rgb = 1.0 (specular), a = 1.0 (glossiness)
-
-                    // Check Extensions
-                    for (uint32_t i = 0; i < gltfMaterial.ext.extensions_count; i++)
-                    {
-                        const tg3_extension& ext = gltfMaterial.ext.extensions[i];
-                        
-                        if (std::string_view(ext.name.data, ext.name.len) == "KHR_materials_unlit")
-                        {
-                            materialData.Unlit = true;
-                        }
-                        
-                        if (std::string_view(ext.name.data, ext.name.len) == "KHR_materials_emissive_strength")
-                        {
-                            if (ext.value.type == TG3_VALUE_OBJECT)
-                            {
-                                for (uint32_t j = 0; j < ext.value.object_count; j++)
-                                {
-                                    const auto& kv = ext.value.object_data[j];
-                                    if (std::string_view(kv.key.data, kv.key.len) == "emissiveStrength")
-                                    {
-                                        if (kv.value.type == TG3_VALUE_REAL)
-                                        {
-                                            emissiveStrength = static_cast<float>(kv.value.real_val);
-                                        }
-                                        else if (kv.value.type == TG3_VALUE_INT)
-                                        {
-                                            emissiveStrength = static_cast<float>(kv.value.int_val);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        if (std::string_view(ext.name.data, ext.name.len) == "KHR_materials_pbrSpecularGlossiness")
-                        {
-                            materialData.Workflow = 1.0f;
-
-                            if (ext.value.type == TG3_VALUE_OBJECT)
-                            {
-                                for (uint32_t j = 0; j < ext.value.object_count; j++)
-                                {
-                                    const auto& kv = ext.value.object_data[j];
-                                    std::string_view key(kv.key.data, kv.key.len);
-
-                                    // 1. diffuseFactor (vec4)
-                                    if (key == "diffuseFactor" && kv.value.type == TG3_VALUE_ARRAY && kv.value.array_count >= 4)
-                                    {
-                                        materialData.DiffuseFactor = glm::vec4(
-                                            getFloatVal(kv.value.array_data[0]),
-                                            getFloatVal(kv.value.array_data[1]),
-                                            getFloatVal(kv.value.array_data[2]),
-                                            getFloatVal(kv.value.array_data[3])
-                                        );
-                                    }
-                                    // 2. specularFactor (vec3 packed into rgb)
-                                    else if (key == "specularFactor" && kv.value.type == TG3_VALUE_ARRAY && kv.value.array_count >= 3)
-                                    {
-                                        materialData.SpecularFactor.r = getFloatVal(kv.value.array_data[0]);
-                                        materialData.SpecularFactor.g = getFloatVal(kv.value.array_data[1]);
-                                        materialData.SpecularFactor.b = getFloatVal(kv.value.array_data[2]);
-                                    }
-                                    // 3. glossinessFactor (float packed into a)
-                                    else if (key == "glossinessFactor")
-                                    {
-                                        materialData.SpecularFactor.a = getFloatVal(kv.value);
-                                    }
-                                    // 4. diffuseTexture
-                                    else if (key == "diffuseTexture" && kv.value.type == TG3_VALUE_OBJECT)
-                                    {
-                                        for (uint32_t t = 0; t < kv.value.object_count; t++)
-                                        {
-                                            const auto& texKv = kv.value.object_data[t];
-                                            if (std::string_view(texKv.key.data, texKv.key.len) == "index")
-                                                materialData.BaseColorTexturePath = GetTexturePath(static_cast<int32_t>(texKv.value.int_val));
-                                            else if (std::string_view(texKv.key.data, texKv.key.len) == "texCoord")
-                                                materialData.BaseColorTextureSet = static_cast<int32_t>(texKv.value.int_val);
-                                        }
-                                    }
-                                    // 5. specularGlossinessTexture
-                                    else if (key == "specularGlossinessTexture" && kv.value.type == TG3_VALUE_OBJECT)
-                                    {
-                                        for (uint32_t t = 0; t < kv.value.object_count; t++)
-                                        {
-                                            const auto& texKv = kv.value.object_data[t];
-                                            if (std::string_view(texKv.key.data, texKv.key.len) == "index")
-                                                materialData.MetallicRoughnessTexturePath = GetTexturePath(static_cast<int32_t>(texKv.value.int_val));
-                                            else if (std::string_view(texKv.key.data, texKv.key.len) == "texCoord")
-                                                materialData.PhysicalDescriptorTextureSet = static_cast<int32_t>(texKv.value.int_val);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        
-                        if (std::string_view(ext.name.data, ext.name.len) == "KHR_materials_transmission")
-                            {
-                                if (ext.value.type == TG3_VALUE_OBJECT)
-                                {
-                                    for (uint32_t j = 0; j < ext.value.object_count; j++)
-                                    {
-                                        const auto& kv = ext.value.object_data[j];
-                                        std::string_view key(kv.key.data, kv.key.len);
-
-                                        if (key == "transmissionFactor")
-                                        {
-                                            if (kv.value.type == TG3_VALUE_REAL)
-                                                materialData.TransmissionFactor = static_cast<float>(kv.value.real_val);
-                                            else if (kv.value.type == TG3_VALUE_INT)
-                                                materialData.TransmissionFactor = static_cast<float>(kv.value.int_val);
-                                        }
-                                        else if (key == "transmissionTexture" && kv.value.type == TG3_VALUE_OBJECT)
-                                        {
-                                            for (uint32_t t = 0; t < kv.value.object_count; t++)
-                                            {
-                                                const auto& texKv = kv.value.object_data[t];
-                                                std::string_view tkey(texKv.key.data, texKv.key.len);
-                                                if (tkey == "index")
-                                                    materialData.TransmissionTexturePath = GetTexturePath(static_cast<int32_t>(texKv.value.int_val));
-                                                else if (tkey == "texCoord")
-                                                    materialData.TransmissionTextureSet = static_cast<int32_t>(texKv.value.int_val);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                        if (std::string_view(ext.name.data, ext.name.len) == "KHR_materials_ior")
-                        {
-                            if (ext.value.type == TG3_VALUE_OBJECT)
-                            {
-                                for (uint32_t j = 0; j < ext.value.object_count; j++)
-                                {
-                                    const auto& kv = ext.value.object_data[j];
-                                    if (std::string_view(kv.key.data, kv.key.len) == "ior")
-                                    {
-                                        if (kv.value.type == TG3_VALUE_REAL)
-                                            materialData.IOR = static_cast<float>(kv.value.real_val);
-                                        else if (kv.value.type == TG3_VALUE_INT)
-                                            materialData.IOR = static_cast<float>(kv.value.int_val);
-                                    }
-                                }
-                            }
-                        }
-
-                        if (std::string_view(ext.name.data, ext.name.len) == "KHR_materials_diffuse_transmission" &&
-                            ext.value.type == TG3_VALUE_OBJECT)
-                        {
-                            for (uint32_t j = 0; j < ext.value.object_count; j++)
-                            {
-                                const auto& kv = ext.value.object_data[j];
-                                if (std::string_view(kv.key.data, kv.key.len) == "diffuseTransmissionFactor" &&
-                                    (kv.value.type == TG3_VALUE_REAL || kv.value.type == TG3_VALUE_INT))
-                                    materialData.DiffuseTransmission = std::clamp(getFloatVal(kv.value), 0.0f, 1.0f);
-                            }
-                        }
-
-                        if (std::string_view(ext.name.data, ext.name.len) == "KHR_materials_volume")
-                        {
-                            if (ext.value.type == TG3_VALUE_OBJECT)
-                            {
-                                for (uint32_t j = 0; j < ext.value.object_count; j++)
-                                {
-                                    const auto& kv = ext.value.object_data[j];
-                                    const std::string_view key(kv.key.data, kv.key.len);
-                                    if (key == "thicknessFactor")
-                                    {
-                                        if (kv.value.type == TG3_VALUE_REAL)
-                                            materialData.Thickness = static_cast<float>(kv.value.real_val);
-                                        else if (kv.value.type == TG3_VALUE_INT)
-                                            materialData.Thickness = static_cast<float>(kv.value.int_val);
-                                    }
-                                    else if (key == "attenuationDistance" && (kv.value.type == TG3_VALUE_REAL || kv.value.type == TG3_VALUE_INT))
-                                    {
-                                        materialData.AttenuationDistance = getFloatVal(kv.value);
-                                    }
-                                    else if (key == "attenuationColor" && kv.value.type == TG3_VALUE_ARRAY && kv.value.array_count >= 3)
-                                    {
-                                        materialData.AttenuationColor = glm::vec3(getFloatVal(kv.value.array_data[0]), getFloatVal(kv.value.array_data[1]),
-                                                                                  getFloatVal(kv.value.array_data[2]));
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // tiny_gltf_v3 exposes initialized metallic/roughness values but not whether the optional
-                    // pbrMetallicRoughness object existed. Its synthetic 1/1 defaults make a textureless
-                    // KHR_materials_transmission material fully metallic, which removes the entire transmission lobe.
-                    // Donut/RTXPT leaves such transmission-only materials at its engine defaults (0/0). Keep this
-                    // compatibility in Nox instead of modifying the vendored parser.
-                    if (materialData.TransmissionFactor > 0.0f && materialData.Workflow == 0.0f &&
-                        materialData.MetallicFactor == 1.0f && materialData.RoughnessFactor == 1.0f &&
-                        materialData.BaseColorTexturePath.empty() && materialData.MetallicRoughnessTexturePath.empty())
-                    {
-                        materialData.MetallicFactor = 0.0f;
-                        materialData.RoughnessFactor = 0.0f;
-                    }
-                    materialData.emissiveStrength = emissiveStrength;
-                    ApplyRtxptMaterialOverride(path, materialData);
-                }
-
+                const MaterialData materialData = ReadGltfMaterial(model, primitive.material, path);
                 outMaterials.push_back(materialData);
+                if (!variantNames.empty())
+                    ReadMaterialVariantMappings(model, primitive, variantNames, path, primitiveData);
                 result.push_back(std::move(primitiveData));
             }
 

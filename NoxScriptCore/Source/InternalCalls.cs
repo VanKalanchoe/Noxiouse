@@ -57,6 +57,10 @@ internal static unsafe class InternalCalls
     private static delegate*<ulong, NativeString, float, void> Mesh_SetMorphWeight;
     private static delegate*<ulong, NativeString, float> Mesh_GetMorphWeight;
     private static delegate*<ulong, NativeString, void> Mesh_ClearMorphWeight;
+    private static delegate*<ulong, NativeString, uint> Entity_SetMaterialVariant;
+    private static delegate*<ulong, int, uint> Entity_SetMaterialVariantIndex;
+    private static delegate*<ulong, int> Entity_GetMaterialVariantCount;
+    private static delegate*<ulong, int> Entity_GetMaterialVariantIndex;
     private static delegate*<ulong, int> Particles_GetCount;
     private static delegate*<ulong, float, float, float, void> Character_SetMoveVelocity;
     private static delegate*<ulong, float, void> Character_Jump;
@@ -273,6 +277,18 @@ internal static unsafe class InternalCalls
         using NativeString nativeTarget = new(target);
         Mesh_ClearMorphWeight(entityID, nativeTarget);
     }
+
+    internal static bool SetMaterialVariant(ulong entityID, string variant)
+    {
+        using NativeString nativeVariant = new(variant);
+        return Entity_SetMaterialVariant(entityID, nativeVariant) != 0;
+    }
+
+    internal static bool SetMaterialVariantIndex(ulong entityID, int index) => Entity_SetMaterialVariantIndex(entityID, index) != 0;
+
+    internal static int GetMaterialVariantCount(ulong entityID) => Entity_GetMaterialVariantCount(entityID);
+
+    internal static int GetMaterialVariantIndex(ulong entityID) => Entity_GetMaterialVariantIndex(entityID);
 
     internal static void PlayTimeline(ulong entityID, bool fromStart) => Timeline_Play(entityID, fromStart ? 1u : 0u);
 

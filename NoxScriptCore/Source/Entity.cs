@@ -50,6 +50,25 @@ public readonly struct Entity
     public void SetMeshCollider(Mesh? mesh, float friction = 0.5f, float restitution = 0.0f) =>
         InternalCalls.SetEntityMeshCollider(ID, mesh?.Handle ?? 0, friction, restitution);
 
+    /// <summary>
+    /// The glTF material variants (KHR_materials_variants) of the meshes on this entity and below it: a model's material sets, a
+    /// shoe in three colors. On a model's root it switches every part. Names are the ones the Properties panel lists.
+    /// </summary>
+    /// <returns>False when no mesh there has the variant (or none is loaded).</returns>
+    public bool SetMaterialVariant(string variant) => InternalCalls.SetMaterialVariant(ID, variant);
+
+    /// <summary>Selects a variant by its place in the list (0 to <see cref="MaterialVariantCount"/> - 1; -1: the meshes' own materials).</summary>
+    public bool SetMaterialVariant(int index) => InternalCalls.SetMaterialVariantIndex(ID, index);
+
+    /// <summary>Gives the meshes their own materials back.</summary>
+    public void ClearMaterialVariant() => InternalCalls.SetMaterialVariant(ID, string.Empty);
+
+    /// <summary>How many variants the meshes here have (0 for none).</summary>
+    public int MaterialVariantCount => InternalCalls.GetMaterialVariantCount(ID);
+
+    /// <summary>The variant shown now: its index, -1 for the meshes' own materials, -2 when the slots were set some other way.</summary>
+    public int MaterialVariantIndex => InternalCalls.GetMaterialVariantIndex(ID);
+
     public static Entity FindByName(string name) =>
         new(InternalCalls.FindEntityByName(name));
 }

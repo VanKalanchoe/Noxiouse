@@ -35,6 +35,11 @@ namespace Nox
         }
         const std::vector<AssetHandle>& GetMaterialAssets() const { return m_MaterialAssets; }
         void SetMaterialAssets(std::vector<AssetHandle> assets) { m_MaterialAssets = std::move(assets); }
+        // Material variants (KHR_materials_variants): per submesh its mappings (empty when the mesh has none), and the .nmat of each
+        // mapping (same shape, linked by the asset manager like the materials).
+        const std::vector<std::vector<MaterialVariantMapping>>& GetMaterialVariants() const { return m_MaterialVariants; }
+        const std::vector<std::vector<AssetHandle>>& GetVariantMaterialAssets() const { return m_VariantMaterialAssets; }
+        void SetVariantMaterialAssets(std::vector<std::vector<AssetHandle>> assets) { m_VariantMaterialAssets = std::move(assets); }
 
         // Assets cooked from the same glTF (0 / empty when it has none): what a model instance's nodes animate with.
         AssetHandle GetSkeletonAsset() const { return m_SkeletonAsset; }
@@ -67,6 +72,8 @@ namespace Nox
         std::vector<MeshHandle> m_SubMeshes;
         std::vector<MaterialData> m_Materials;
         std::vector<AssetHandle> m_MaterialAssets;
+        std::vector<std::vector<MaterialVariantMapping>> m_MaterialVariants;
+        std::vector<std::vector<AssetHandle>> m_VariantMaterialAssets;
         AssetHandle m_SkeletonAsset = 0;
         std::vector<AssetHandle> m_AnimationAssets;
         std::vector<LightNodeData> m_Lights;
@@ -103,6 +110,11 @@ namespace Nox
         }
         const std::vector<AssetHandle>& GetMaterialAssets() const { return m_MaterialAssets; }
         void SetMaterialAssets(std::vector<AssetHandle> assets) { m_MaterialAssets = std::move(assets); }
+        // Material variants (KHR_materials_variants): per submesh its mappings (empty when the mesh has none), and the .nmat of each
+        // mapping (same shape, linked by the asset manager like the materials).
+        const std::vector<std::vector<MaterialVariantMapping>>& GetMaterialVariants() const { return m_MaterialVariants; }
+        const std::vector<std::vector<AssetHandle>>& GetVariantMaterialAssets() const { return m_VariantMaterialAssets; }
+        void SetVariantMaterialAssets(std::vector<std::vector<AssetHandle>> assets) { m_VariantMaterialAssets = std::move(assets); }
 
         // Assets cooked from the same glTF (0 / empty when it has none): what a model instance's nodes animate with.
         AssetHandle GetSkeletonAsset() const { return m_SkeletonAsset; }
@@ -130,6 +142,8 @@ namespace Nox
         std::vector<MeshHandle> m_SubMeshes;
         std::vector<MaterialData> m_Materials;
         std::vector<AssetHandle> m_MaterialAssets;
+        std::vector<std::vector<MaterialVariantMapping>> m_MaterialVariants;
+        std::vector<std::vector<AssetHandle>> m_VariantMaterialAssets;
         AssetHandle m_SkeletonAsset = 0;
         std::vector<AssetHandle> m_AnimationAssets;
         std::vector<LightNodeData> m_Lights;

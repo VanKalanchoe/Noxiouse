@@ -780,17 +780,20 @@ namespace Nox
     void EditorAssetManager::ImportMeshMaterials(const Ref<Asset>& meshAsset, const AssetMetadata& meshMetadata)
     {
         const std::vector<MaterialData>* materials = nullptr;
+        const std::vector<std::vector<MaterialVariantMapping>>* variants = nullptr;
         std::vector<AssetHandle> materialAssets;
 
         if (meshAsset->GetType() == AssetType::Mesh)
         {
             auto* mesh = static_cast<Mesh*>(meshAsset.get());
             materials = &mesh->GetMaterials();
+            variants = &mesh->GetMaterialVariants();
         }
         else if (meshAsset->GetType() == AssetType::StaticMesh)
         {
             auto* mesh = static_cast<StaticMesh*>(meshAsset.get());
             materials = &mesh->GetMaterials();
+            variants = &mesh->GetMaterialVariants();
         }
 
         if (!materials)
@@ -804,10 +807,11 @@ namespace Nox
         bool registryChanged = false;
         // Per primitive, but each .nmat is checked on disk once (a check per entry cost Bistro ~2909 file system calls).
         std::unordered_set<std::string> checkedPaths;
-        for (size_t index = 0; index < materials->size(); ++index)
+        const std::filesystem::path materialBase = meshMetadata.MeshSettings.MaterialBasePath.empty() ? meshMetadata.FilePath : meshMetadata.MeshSettings.MaterialBasePath;
+        // The .nmat of one material (0 when there is none to use).
+        auto resolve = [&](const MaterialData& material, size_t index) -> AssetHandle
         {
-            const MaterialData& material = (*materials)[index];
-            const std::filesystem::path materialPath = MeshImporter::MaterialAssetPath(meshMetadata.MeshSettings.MaterialBasePath.empty() ? meshMetadata.FilePath : meshMetadata.MeshSettings.MaterialBasePath, material, index);
+            const std::filesystem::path materialPath = MeshImporter::MaterialAssetPath(materialBase, material, index);
 
             const std::string materialKey = materialPath.lexically_normal().generic_string();
             AssetHandle materialHandle = FindHandleByPath(materialPath, AssetType::Material);
@@ -820,13 +824,10 @@ namespace Nox
             {
                 // Read-only: a material file that is not there leaves the slot to the mesh's embedded material.
                 if (m_ReadOnly)
-                {
-                    materialAssets.push_back(AssetHandle(0));
-                    continue;
-                }
+                    return AssetHandle(0);
                 // The cook writes the .nmat files (MeshImporter::CookMesh); one deleted since is written again here.
                 if (!std::filesystem::exists(fullMaterialPath) && !MaterialSerializer::Serialize(fullMaterialPath, material))
-                    continue;
+                    return AssetHandle(0);
 
                 if (materialHandle != 0)
                 {
@@ -843,18 +844,38 @@ namespace Nox
                     registryChanged = true;
                 }
             }
+            return materialHandle;
+        };
 
-            if (materialHandle != 0)
-                materialAssets.push_back(materialHandle);
+        for (size_t index = 0; index < materials->size(); ++index)
+        {
+            const AssetHandle handle = resolve((*materials)[index], index);
+            // Read-only keeps the slot (0: the embedded material); a material that could not be written leaves it out, as before.
+            if (handle != 0 || m_ReadOnly)
+                materialAssets.push_back(handle);
+        }
+
+        // The materials of the variants, per submesh and mapping (0 where none could be found: the slot keeps its own material).
+        std::vector<std::vector<AssetHandle>> variantAssets(variants ? variants->size() : 0);
+        for (size_t submesh = 0; submesh < variantAssets.size(); ++submesh)
+        {
+            for (const MaterialVariantMapping& mapping : (*variants)[submesh])
+                variantAssets[submesh].push_back(resolve(mapping.Material, submesh));
         }
 
         if (registryChanged)
             m_RegistryDirty = true; // written by Update(), not per load
 
         if (meshAsset->GetType() == AssetType::Mesh)
+        {
             static_cast<Mesh*>(meshAsset.get())->SetMaterialAssets(std::move(materialAssets));
+            static_cast<Mesh*>(meshAsset.get())->SetVariantMaterialAssets(std::move(variantAssets));
+        }
         else
+        {
             static_cast<StaticMesh*>(meshAsset.get())->SetMaterialAssets(std::move(materialAssets));
+            static_cast<StaticMesh*>(meshAsset.get())->SetVariantMaterialAssets(std::move(variantAssets));
+        }
     }
     
     void EditorAssetManager::ImportAsset(const std::filesystem::path& sourcePath, const TextureSpecification& spec, const std::filesystem::path& destPath)

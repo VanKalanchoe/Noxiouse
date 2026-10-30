@@ -284,6 +284,9 @@ namespace Nox
                 hash = Mix(hash ^ static_cast<uint64_t>(relationship->Parent));
             if (const auto* folder = registry.try_get<FolderComponent>(handle))
                 hash = Mix(hash ^ HashBytes(folder->Path.data(), folder->Path.size()));
+            // Material slots: a material variant selected on a parent (MaterialVariants::Select) sets its children's.
+            if (const auto* material = registry.try_get<MaterialComponent>(handle))
+                hash = Mix(hash ^ HashBytes(material->MaterialAssets.data(), material->MaterialAssets.size() * sizeof(AssetHandle)));
             // What a model or prefab instance turns into once its asset has loaded (a single-mesh model becomes a mesh entity).
             const uint64_t kinds = (registry.all_of<MeshComponent>(handle) ? 1ull : 0ull) |
                                    (registry.all_of<ModelInstanceComponent>(handle) ? 2ull : 0ull) |

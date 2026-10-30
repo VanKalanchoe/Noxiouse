@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <cstring>
 #include <filesystem>
@@ -340,6 +341,8 @@ namespace Nox
         // older ones are cooked again from their source (MeshImporter), not read.
         // Version 6: a one-level mesh's morph targets after its triangles: per target its name, default weight and the vertices it
         // moves (sparse: vertex index, position delta, normal delta). Version 5 and 4 cooks read without morph targets.
+        // Version 7: every mesh's material variants (KHR_materials_variants) at the end of its record: per mapping the variant's
+        // name and index, then the materials. Older cooks read without variants.
         static constexpr uint32_t MeshFlagVertexColors = 1u << 0;
 
         struct MorphDelta
@@ -443,6 +446,16 @@ namespace Nox
                 SerializerUtils::WriteVector(stream, data.MeshletTriangles);
                 WriteMorphs(stream, data);
             }
+            const uint32_t variantCount = static_cast<uint32_t>(data.MaterialVariants.size());
+            stream.write(reinterpret_cast<const char*>(&variantCount), sizeof(uint32_t));
+            std::vector<MaterialData> variantMaterials;
+            for (const MaterialVariantMapping& mapping : data.MaterialVariants)
+            {
+                SerializerUtils::WriteString(stream, mapping.Variant);
+                stream.write(reinterpret_cast<const char*>(&mapping.VariantIndex), sizeof(uint32_t));
+                variantMaterials.push_back(mapping.Material);
+            }
+            WriteMaterials(stream, variantMaterials);
         }
 
         static void WritePagePayloads(std::ofstream& stream, const MeshData& data)
@@ -505,6 +518,22 @@ namespace Nox
                 SerializerUtils::ReadVector(stream, outData.MeshletTriangles);
                 if (version >= 6)
                     ReadMorphs(stream, outData);
+            }
+            outData.MaterialVariants.clear();
+            if (version >= 7)
+            {
+                uint32_t variantCount = 0;
+                stream.read(reinterpret_cast<char*>(&variantCount), sizeof(uint32_t));
+                outData.MaterialVariants.resize(variantCount);
+                for (MaterialVariantMapping& mapping : outData.MaterialVariants)
+                {
+                    SerializerUtils::ReadString(stream, mapping.Variant);
+                    stream.read(reinterpret_cast<char*>(&mapping.VariantIndex), sizeof(uint32_t));
+                }
+                std::vector<MaterialData> variantMaterials;
+                ReadMaterials(stream, variantMaterials);
+                for (size_t i = 0; i < variantMaterials.size() && i < outData.MaterialVariants.size(); ++i)
+                    outData.MaterialVariants[i].Material = std::move(variantMaterials[i]);
             }
         }
 
@@ -838,9 +867,17 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
             stream.write(reinterpret_cast<const char*>(&payloadBase), sizeof(uint64_t));
         }
 
-        // magic: this kind's version 6; magicV5: its version 5 (no morph targets); magicV4: its version 4 (no vertex colors either).
-        // Older cooks are not read (MeshImporter cooks them again).
-        static bool DeserializeMeshes(const std::filesystem::path& filepath, const char* magic, const char* magicV5, const char* magicV4, bool streamPages,
+        // The version (2 to 7) of a magic of this kind ("NSM" static, "NMS" skeletal, then the digit), 0 for anything else.
+        static uint32_t MagicVersion(const char* header, const char* kind)
+        {
+            if (std::memcmp(header, kind, 3) != 0 || header[3] < '2' || header[3] > '7')
+                return 0;
+            return static_cast<uint32_t>(header[3] - '0');
+        }
+
+        // kind: "NSM" or "NMS". Versions 4 to 7 are read (each older one without what came after it: variants, morph targets,
+        // vertex colors); older cooks are not read (MeshImporter cooks them again).
+        static bool DeserializeMeshes(const std::filesystem::path& filepath, const char* kind, bool streamPages,
                                       std::vector<MeshData>& outDataList, std::vector<MaterialData>& outMaterialList,
                                       std::vector<LightNodeData>& outLightList, std::vector<MeshNodeData>& outNodeList,
                                       std::vector<CameraNodeData>& outCameraList)
@@ -848,9 +885,8 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
             char header[HeaderBytes] = {};
             if (!VFS::ReadRange(filepath, 0, HeaderBytes, header))
                 return false;
-            const uint32_t version = std::memcmp(header, magic, 4) == 0 ? 6u : std::memcmp(header, magicV5, 4) == 0 ? 5u
-                                   : std::memcmp(header, magicV4, 4) == 0 ? 4u : 0u;
-            if (version == 0)
+            const uint32_t version = MagicVersion(header, kind);
+            if (version < 4)
                 return false;
 
             // Only what comes before the pages' data is read whole (from a pack as from a loose file).
@@ -883,23 +919,13 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
         }
 
     public:
-        // The cooked format's version (2 to 6) from the magic, 0 when the file is not a mesh.
+        // The cooked format's version (2 to 7) from the magic, 0 when the file is not a mesh.
         static uint32_t ReadVersion(const std::filesystem::path& filepath)
         {
             char magic[4] = {};
             if (!VFS::ReadRange(filepath, 0, 4, magic))
                 return 0;
-            if (std::memcmp(magic, "NSM6", 4) == 0 || std::memcmp(magic, "NMS6", 4) == 0)
-                return 6;
-            if (std::memcmp(magic, "NSM5", 4) == 0 || std::memcmp(magic, "NMS5", 4) == 0)
-                return 5;
-            if (std::memcmp(magic, "NSM4", 4) == 0 || std::memcmp(magic, "NMS4", 4) == 0)
-                return 4;
-            if (std::memcmp(magic, "NSM3", 4) == 0 || std::memcmp(magic, "NMS3", 4) == 0)
-                return 3;
-            if (std::memcmp(magic, "NSM2", 4) == 0 || std::memcmp(magic, "NMS2", 4) == 0)
-                return 2;
-            return 0;
+            return std::max(MagicVersion(magic, "NSM"), MagicVersion(magic, "NMS"));
         }
 
         static void SerializeStaticMesh
@@ -912,7 +938,7 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
             const std::vector<CameraNodeData>& cameraList = {}
         )
         {
-            SerializeMeshes(filepath, "NSM6", dataList, materialList, lightList, nodeList, cameraList);
+            SerializeMeshes(filepath, "NSM7", dataList, materialList, lightList, nodeList, cameraList);
         }
 
         static bool DeserializeStaticMesh(const std::filesystem::path& filepath, std::vector<MeshData>& outDataList, std::vector<MaterialData>& outMaterialList)
@@ -948,7 +974,7 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
             bool streamPages = false
             )
         {
-            return DeserializeMeshes(filepath, "NSM6", "NSM5", "NSM4", streamPages, outDataList, outMaterialList, outLightList, outNodeList, outCameraList);
+            return DeserializeMeshes(filepath, "NSM", streamPages, outDataList, outMaterialList, outLightList, outNodeList, outCameraList);
         }
 
         static void SerializeMesh
@@ -961,7 +987,7 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
             const std::vector<CameraNodeData>& cameraList = {}
         )
         {
-            SerializeMeshes(filepath, "NMS6", dataList, materialList, lightList, nodeList, cameraList);
+            SerializeMeshes(filepath, "NMS7", dataList, materialList, lightList, nodeList, cameraList);
         }
         
         static bool DeserializeMesh(const std::filesystem::path& filepath, std::vector<MeshData>& outDataList, std::vector<MaterialData>& outMaterialList)
@@ -996,7 +1022,7 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
             bool streamPages = false
         )
         {
-            return DeserializeMeshes(filepath, "NMS6", "NMS5", "NMS4", streamPages, outDataList, outMaterialList, outLightList, outNodeList, outCameraList);
+            return DeserializeMeshes(filepath, "NMS", streamPages, outDataList, outMaterialList, outLightList, outNodeList, outCameraList);
         }
     };
 }

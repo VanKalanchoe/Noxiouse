@@ -1181,6 +1181,42 @@ cheap allocation (a range, not a Vulkan call). Separate objects remain correct w
         the hinge's world times the door's local transform (error 1e-7).
       - The hinge's own channel is dropped.
       - A clip of weights only keeps its curves, on both nodes.
+- **Material variants (I1, built 2026-10-31; glTF `KHR_materials_variants`, three.js / Babylon's `selectVariant`, a Variant
+  Manager switch in Unreal):** one model, several named material sets (a shoe in three colors).
+  - **Cook:**
+    - The file's variant names (root extension) and each primitive's mappings become `MeshData::MaterialVariants` on the
+      submesh: variant name, its index in the file, the material.
+    - They travel with the submesh through the static/skeletal split, Do Not Combine copies and Import Scale.
+    - Combining keeps a submesh with variants apart from one without (or with others), or a variant would recolor both.
+    - Every variant material gets its `.nmat`, written once like the others.
+  - **Material names:** a `.nmat` is named after its material, and exporters reuse names (all three of Khronos'
+    MaterialsVariantsShoe materials are `phong1SG`). A material named like an earlier one of the file now gets its index
+    (`phong1SG_1`; `GltfMaterialName`). Before, such materials silently shared one `.nmat` and could merge when combining.
+  - **Format v7** (`NSM7` / `NMS7`): every mesh record ends with its variant mappings. Versions 4 to 6 still read, without
+    variants (version from the magic's digit, `MagicVersion`).
+  - **Asset:**
+    - The mesh asset keeps the mappings per submesh (`GetMaterialVariants`).
+    - `EditorAssetManager::ImportMeshMaterials` links each mapping's `.nmat` (`GetVariantMaterialAssets`), with the same lookup
+      as the submesh materials.
+    - Packaging takes them like the other materials of the model (owned by name).
+  - **Selecting** (`Scene/MaterialVariants`):
+    - **What it writes:** a variant is the whole file's, so it covers the entity and everything below it (a model instance's
+      root switches all its nodes). `Select` writes the `MaterialComponent` slots of those meshes: the variant's `.nmat`, or 0
+      (the mesh's own) where the variant has none for that slot.
+    - **What that buys:** it is saved, undone, kept as a model instance's node override, baked by HLOD and drawn like any other
+      material override, with no new state.
+    - **Reading it back:** `Current` works out which variant the slots show (or Default, or Custom when set by hand).
+    - **Undo:** the history fingerprint also hashes material slots, so a variant chosen on a parent is one undo step.
+  - **Editor:** a Material Variant combo at the top of the Properties panel for any entity with variants below it (Default,
+    the variants, and Custom shown when the slots were set by hand).
+  - **Script API (version 12):** `Entity.SetMaterialVariant(name or index)`, `ClearMaterialVariant()`, `MaterialVariantCount`,
+    `MaterialVariantIndex` (-1 Default, -2 Custom).
+  - **Offline test (scratchpad `gstest/variantstest`):**
+    - The importer's own parsing on Khronos' MaterialsVariantsShoe: midnight / beach / street map to `phong1SG`,
+      `phong1SG_1` and `phong1SG_2`, three different `.nmat` files.
+    - Combining three submeshes, the middle one with a variant, gives two groups.
+    - v7 round trip, full and streamed, paged and one-level, static and skeletal kinds.
+    - A v6 cook reads without variants; v3 is refused.
 - **Defragmentation (later, only if measured):** move live ranges and patch the mesh table's offsets.
 
 #### 5.8.3 Budgets: who decides how much

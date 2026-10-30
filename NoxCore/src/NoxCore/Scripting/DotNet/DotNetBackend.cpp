@@ -19,6 +19,7 @@
 #include "NoxCore/Renderer/Renderer.h"
 #include "NoxCore/Utils/PlatformUtils.h"
 #include "NoxCore/Scene/Entity.h"
+#include "NoxCore/Scene/MaterialVariants.h"
 #include "NoxCore/Scene/ParticleSystem.h"
 
 #include <thread>
@@ -589,6 +590,51 @@ namespace Nox
             }
         }
 
+        // Nox.Entity's material variants (MaterialVariants: the entity and everything below it, a model's whole set).
+        Coral::Bool32 EntitySetMaterialVariant(uint64_t entityID, Coral::String variant)
+        {
+            if (!s_Scene) return false;
+            Entity entity = s_Scene->GetEntityByUUID(UUID(entityID));
+            return entity && MaterialVariants::Select(*s_Scene, entity, std::string(variant));
+        }
+
+        // By index into the list (-1: the meshes' own materials).
+        Coral::Bool32 EntitySetMaterialVariantIndex(uint64_t entityID, int32_t index)
+        {
+            if (!s_Scene) return false;
+            Entity entity = s_Scene->GetEntityByUUID(UUID(entityID));
+            if (!entity)
+                return false;
+            if (index < 0)
+                return MaterialVariants::Select(*s_Scene, entity, "");
+            const std::vector<std::string> variants = MaterialVariants::List(*s_Scene, entity);
+            return index < static_cast<int32_t>(variants.size()) && MaterialVariants::Select(*s_Scene, entity, variants[index]);
+        }
+
+        int32_t EntityGetMaterialVariantCount(uint64_t entityID)
+        {
+            if (!s_Scene) return 0;
+            Entity entity = s_Scene->GetEntityByUUID(UUID(entityID));
+            return entity ? static_cast<int32_t>(MaterialVariants::List(*s_Scene, entity).size()) : 0;
+        }
+
+        // The variant shown now: its index, -1 for the meshes' own materials, -2 for anything else (slots set by hand).
+        int32_t EntityGetMaterialVariantIndex(uint64_t entityID)
+        {
+            if (!s_Scene) return -1;
+            Entity entity = s_Scene->GetEntityByUUID(UUID(entityID));
+            if (!entity)
+                return -1;
+            const std::optional<std::string> current = MaterialVariants::Current(*s_Scene, entity);
+            if (!current)
+                return -2;
+            if (current->empty())
+                return -1;
+            const std::vector<std::string> variants = MaterialVariants::List(*s_Scene, entity);
+            const auto found = std::find(variants.begin(), variants.end(), *current);
+            return found != variants.end() ? static_cast<int32_t>(found - variants.begin()) : -2;
+        }
+
         // The Timeline Player (Nox.TimelinePlayerComponent): the next update plays from Time (Scene::UpdateTimelines).
         TimelinePlayerComponent* FindTimelinePlayer(uint64_t entityID)
         {
@@ -989,6 +1035,10 @@ namespace Nox
         assembly.AddInternalCall("Nox.InternalCalls", "Mesh_SetMorphWeight", reinterpret_cast<void*>(&MeshSetMorphWeight));
         assembly.AddInternalCall("Nox.InternalCalls", "Mesh_GetMorphWeight", reinterpret_cast<void*>(&MeshGetMorphWeight));
         assembly.AddInternalCall("Nox.InternalCalls", "Mesh_ClearMorphWeight", reinterpret_cast<void*>(&MeshClearMorphWeight));
+        assembly.AddInternalCall("Nox.InternalCalls", "Entity_SetMaterialVariant", reinterpret_cast<void*>(&EntitySetMaterialVariant));
+        assembly.AddInternalCall("Nox.InternalCalls", "Entity_SetMaterialVariantIndex", reinterpret_cast<void*>(&EntitySetMaterialVariantIndex));
+        assembly.AddInternalCall("Nox.InternalCalls", "Entity_GetMaterialVariantCount", reinterpret_cast<void*>(&EntityGetMaterialVariantCount));
+        assembly.AddInternalCall("Nox.InternalCalls", "Entity_GetMaterialVariantIndex", reinterpret_cast<void*>(&EntityGetMaterialVariantIndex));
         assembly.AddInternalCall("Nox.InternalCalls", "Particles_GetCount", reinterpret_cast<void*>(&ParticlesGetCount));
         assembly.AddInternalCall("Nox.InternalCalls", "Character_SetMoveVelocity", reinterpret_cast<void*>(&CharacterSetMoveVelocity));
         assembly.AddInternalCall("Nox.InternalCalls", "Character_Jump", reinterpret_cast<void*>(&CharacterJump));
