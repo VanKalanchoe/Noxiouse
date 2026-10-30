@@ -30,12 +30,6 @@
 | C5 | Fox sizes: the movement defaults are for a ~1.8 m character; the Fox capsule and speeds need values for a ~0.8 m animal (scene tuning; the `Speed` thresholds were fixed 2026-10-20) |
 | C8 | Timeline material parameter tracks (needs per-entity material parameter overrides first), sub-sequences; variable node input pins |
 
-### Physics
-
-| # | Item |
-|---|---|
-| E3 | Rigid body **default damping**: 0.05 rolls a ball for over a minute; ~0.5 angular damping is more usual |
-
 ### Ignore for now
 
 | # | Item |
@@ -72,6 +66,22 @@ Built items many of which the user has not tested yet (marked "untested"); the p
 - **Tried and reverted:** R3 RT fallback LOD (holes in the path tracer); R9 Preserve Area for foliage (2026-10-30, no gain in the
   Bistro test, §5.7.2)
 - **Rigid body interpolation:** tested by the user, works
+- **E3 Balls roll for minutes (2026-10-30, untested in the editor):** not a damping problem. The 0.05 defaults are Jolt's own, in
+  line with Unreal (0.01 / 0), Unity (0 / 0.05) and Godot (0.1 / 0.1); raising them slows bodies in the air too. What stops a real
+  ball is rolling resistance, which Jolt lacks. Added the 3D one (as the 2D colliders have it from Box2D):
+  - Sphere and capsule colliders have **Rolling Resistance** (default 0.05).
+  - `JoltRollingResistance`, the physics system's contact listener, applies a torque of coefficient x radius x weight along the
+    supporting contact normal against the rolling part of the angular velocity, never past zero.
+
+  Offline with real Jolt (scratchpad `jolt/rolltest`), a ball at 5 m/s:
+  - Before: still rolling after 180 s, 104 m away.
+  - Default 0.05: stops in 10.7 s after 24.5 m; 0.01: 29.8 s, 57 m.
+  - Matches theory (a = Crr g / 1.4) within 2% without damping.
+
+  Other checks:
+  - Spin in the air is unchanged.
+  - On a 5 degree slope a ball rolls with 0.05 and holds with 0.1 (tan 5 degrees = 0.087).
+  - A ball on a dynamic box settles.
 
 ## Done (recent)
 

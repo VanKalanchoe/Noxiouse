@@ -1,6 +1,7 @@
 #pragma once
 
 #include "NoxCore/Physics/Physics3DScene.h"
+#include "NoxCore/Physics/Jolt/JoltRollingResistance.h"
 #include "NoxCore/Physics/Jolt/NoxJoltJobSystem.h"
 
 #include <Jolt/Jolt.h>
@@ -66,6 +67,8 @@ namespace Nox
 
         std::unique_ptr<JPH::TempAllocatorImpl> m_TempAllocator;
         std::unique_ptr<NoxJoltJobSystem> m_JobSystem;
+        // The physics system's contact listener: declared before it, so it outlives it.
+        std::unique_ptr<JoltRollingResistance> m_RollingResistance;
         std::unique_ptr<JPH::PhysicsSystem> m_PhysicsSystem;
 
         struct JoltFilterData;

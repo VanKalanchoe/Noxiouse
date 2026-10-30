@@ -183,6 +183,8 @@ namespace Nox {
         );
 
         m_PhysicsSystem->SetGravity(JPH::Vec3(0.0f, -9.81f, 0.0f)); // Jolt's own native unit (meters/s^2): not a world-unit value, untouched
+        m_RollingResistance = std::make_unique<JoltRollingResistance>();
+        m_PhysicsSystem->SetContactListener(m_RollingResistance.get());
 
         // Create bodies for all entities currently possessing RigidBody3DComponent
         if (m_Scene)
@@ -242,6 +244,7 @@ namespace Nox {
 
         // Create collision shape based on attached collider components
         JPH::Ref<JPH::Shape> shape;
+        float rollingRadius = 0.0f; // Jolt units: the sphere's or capsule's radius, what it rolls on
 
         // Collider sizes are world-unit lengths (the component fields); Jolt wants its own native unit -> ToNative at the shape.
         if (entity.HasComponent<BoxCollider3DComponent>())
@@ -265,6 +268,7 @@ namespace Nox {
             const auto& sphere = entity.GetComponent<SphereCollider3DComponent>();
             float radius = ToNative(std::max(sphere.Radius * std::max(worldScale.x, std::max(worldScale.y, worldScale.z)), 0.001f));
             JPH::SphereShapeSettings shapeSettings(radius);
+            rollingRadius = radius;
 
             if (sphere.Offset != glm::vec3(0.0f))
             {
@@ -282,6 +286,7 @@ namespace Nox {
             float halfHeight = ToNative(std::max(capsule.HalfHeight * worldScale.y, 0.001f));
             float radius = ToNative(std::max(capsule.Radius * std::max(worldScale.x, worldScale.z), 0.001f));
             JPH::CapsuleShapeSettings shapeSettings(halfHeight, radius);
+            rollingRadius = radius;
 
             if (capsule.Offset != glm::vec3(0.0f))
             {
@@ -307,6 +312,7 @@ namespace Nox {
 
         float friction = 0.5f;
         float restitution = 0.0f;
+        float rollingResistance = 0.0f;
         if (entity.HasComponent<BoxCollider3DComponent>())
         {
             friction = entity.GetComponent<BoxCollider3DComponent>().Friction;
@@ -316,11 +322,13 @@ namespace Nox {
         {
             friction = entity.GetComponent<SphereCollider3DComponent>().Friction;
             restitution = entity.GetComponent<SphereCollider3DComponent>().Restitution;
+            rollingResistance = entity.GetComponent<SphereCollider3DComponent>().RollingResistance;
         }
         else if (entity.HasComponent<CapsuleCollider3DComponent>())
         {
             friction = entity.GetComponent<CapsuleCollider3DComponent>().Friction;
             restitution = entity.GetComponent<CapsuleCollider3DComponent>().Restitution;
+            rollingResistance = entity.GetComponent<CapsuleCollider3DComponent>().RollingResistance;
         }
 
         if (rb.Type == RigidBody3DComponent::BodyType::Static)
@@ -376,6 +384,8 @@ namespace Nox {
         }
 
         bodyInterface.AddBody(body->GetID(), (motionType == JPH::EMotionType::Static) ? JPH::EActivation::DontActivate : JPH::EActivation::Activate);
+        if (motionType == JPH::EMotionType::Dynamic && rollingResistance > 0.0f && rollingRadius > 0.0f)
+            m_RollingResistance->Track(body->GetID(), rollingResistance, rollingRadius);
 
         uint32_t bodyIdVal = body->GetID().GetIndexAndSequenceNumber();
         rb.RuntimeBodyID = bodyIdVal;
@@ -400,6 +410,7 @@ namespace Nox {
                 JPH::BodyInterface& bodyInterface = m_PhysicsSystem->GetBodyInterface();
                 bodyInterface.RemoveBody(bodyId);
                 bodyInterface.DestroyBody(bodyId);
+                m_RollingResistance->Untrack(bodyId);
 
                 m_BodyToEntityMap.erase(bodyId.GetIndexAndSequenceNumber());
             }
@@ -685,6 +696,7 @@ namespace Nox {
         {
             StepCharacters(c_FixedDeltaTime);
             m_PhysicsSystem->Update(c_FixedDeltaTime, 1, m_TempAllocator.get(), m_JobSystem.get());
+            m_RollingResistance->Apply(*m_PhysicsSystem, c_FixedDeltaTime);
             CaptureBodyPoses();
             m_Accumulator -= c_FixedDeltaTime;
             steps++;

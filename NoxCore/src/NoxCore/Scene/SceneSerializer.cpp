@@ -1020,6 +1020,7 @@ namespace Nox
             out << YAML::Key << "Offset" << YAML::Value << sc3d.Offset;
             out << YAML::Key << "Friction" << YAML::Value << sc3d.Friction;
             out << YAML::Key << "Restitution" << YAML::Value << sc3d.Restitution;
+            out << YAML::Key << "RollingResistance" << YAML::Value << sc3d.RollingResistance;
 
             out << YAML::EndMap; // SphereCollider3DComponent
         }
@@ -1035,6 +1036,7 @@ namespace Nox
             out << YAML::Key << "Offset" << YAML::Value << cc3d.Offset;
             out << YAML::Key << "Friction" << YAML::Value << cc3d.Friction;
             out << YAML::Key << "Restitution" << YAML::Value << cc3d.Restitution;
+            out << YAML::Key << "RollingResistance" << YAML::Value << cc3d.RollingResistance;
 
             out << YAML::EndMap; // CapsuleCollider3DComponent
         }
@@ -2242,6 +2244,8 @@ namespace Nox
                 sc3d.Friction = sphereCollider3DComponent["Friction"].as<float>();
             if (sphereCollider3DComponent["Restitution"])
                 sc3d.Restitution = sphereCollider3DComponent["Restitution"].as<float>();
+            if (sphereCollider3DComponent["RollingResistance"])
+                sc3d.RollingResistance = sphereCollider3DComponent["RollingResistance"].as<float>();
         }
 
         auto capsuleCollider3DComponent = entity["CapsuleCollider3DComponent"];
@@ -2258,6 +2262,8 @@ namespace Nox
                 cc3d.Friction = capsuleCollider3DComponent["Friction"].as<float>();
             if (capsuleCollider3DComponent["Restitution"])
                 cc3d.Restitution = capsuleCollider3DComponent["Restitution"].as<float>();
+            if (capsuleCollider3DComponent["RollingResistance"])
+                cc3d.RollingResistance = capsuleCollider3DComponent["RollingResistance"].as<float>();
         }
 
         auto characterController3DComponent = entity["CharacterController3DComponent"];

@@ -736,6 +736,9 @@ namespace Nox
 
         float Friction = 0.5f;
         float Restitution = 0.0f;
+        // Slows a rolling body down until it stops (torque = coefficient x radius x its weight on what it rolls on), as Box2D's
+        // rolling resistance does in 2D. ~0.01 a hard floor, ~0.05 grass or carpet, 0 rolls on for minutes (damping alone).
+        float RollingResistance = 0.05f;
 
         SphereCollider3DComponent() = default;
         SphereCollider3DComponent(const SphereCollider3DComponent&) = default;
@@ -749,6 +752,7 @@ namespace Nox
 
         float Friction = 0.5f;
         float Restitution = 0.0f;
+        float RollingResistance = 0.05f; // as SphereCollider3DComponent's (rolling on its side)
 
         CapsuleCollider3DComponent() = default;
         CapsuleCollider3DComponent(const CapsuleCollider3DComponent&) = default;

@@ -2782,6 +2782,8 @@ namespace Nox
             DrawLengthVec3Control("Offset", component.Offset);
             ImGui::DragFloat("Friction", &component.Friction, 0.01f, 0.0f, 1.0f);
             ImGui::DragFloat("Restitution", &component.Restitution, 0.01f, 0.0f, 1.0f);
+            ImGui::DragFloat("Rolling Resistance", &component.RollingResistance, 0.005f, 0.0f, 1.0f);
+            ImGui::SetItemTooltip("Slows it down when it rolls, until it stops: ~0.01 a hard floor, ~0.05 grass or carpet.\n0: rolls on for minutes (damping alone slows it).");
         });
 
         DrawComponent<CapsuleCollider3DComponent>("Capsule Collider 3D", entity, [](auto& component)
@@ -2791,6 +2793,8 @@ namespace Nox
             DrawLengthVec3Control("Offset", component.Offset);
             ImGui::DragFloat("Friction", &component.Friction, 0.01f, 0.0f, 1.0f);
             ImGui::DragFloat("Restitution", &component.Restitution, 0.01f, 0.0f, 1.0f);
+            ImGui::DragFloat("Rolling Resistance", &component.RollingResistance, 0.005f, 0.0f, 1.0f);
+            ImGui::SetItemTooltip("Slows it down when it rolls, until it stops: ~0.01 a hard floor, ~0.05 grass or carpet.\n0: rolls on for minutes (damping alone slows it).");
         });
 
         DrawComponent<CharacterController3DComponent>("Character Controller 3D", entity, [](auto& component)
