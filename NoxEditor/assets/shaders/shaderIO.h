@@ -167,7 +167,51 @@ struct GpuMaterial
     float diffuseTransmission; // through a thin surface to its back (leaves, cloth); 0: none
     uint32_t pathTracerFlags;  // PathTracerThin... (above)
     float depthBias; // MaterialData::DepthBias: drawn this much closer to the camera along the view ray, world units (depth_bias_clip)
+
+    // The lobes past the core model (MaterialData, one slab as UE5 Substrate's): MaterialLobe* bits say which are on.
+    uint32_t lobes;
+    float clearcoatFactor;
+    float clearcoatRoughnessFactor;
+    uint32_t clearcoatTextureIndex;          // R
+    int32_t clearcoatTextureSet;
+    uint32_t clearcoatRoughnessTextureIndex; // G
+    int32_t clearcoatRoughnessTextureSet;
+    uint32_t clearcoatNormalTextureIndex;    // 0xFFFFFFFF: the coat is flat
+    int32_t clearcoatNormalTextureSet;
+    vec3 sheenColorFactor;
+    float sheenRoughnessFactor;
+    uint32_t sheenColorTextureIndex;         // RGB (sRGB)
+    int32_t sheenColorTextureSet;
+    uint32_t sheenRoughnessTextureIndex;     // A
+    int32_t sheenRoughnessTextureSet;
+    vec3 specularColorFactor;
+    float specularStrength;
+    uint32_t specularColorTextureIndex;      // RGB (sRGB)
+    int32_t specularColorTextureSet;
+    uint32_t specularStrengthTextureIndex;   // A
+    int32_t specularStrengthTextureSet;
+    float iridescenceFactor;
+    float iridescenceIor;
+    float iridescenceThicknessMinimum;       // nanometers
+    float iridescenceThicknessMaximum;
+    uint32_t iridescenceTextureIndex;        // R
+    int32_t iridescenceTextureSet;
+    uint32_t iridescenceThicknessTextureIndex; // G
+    int32_t iridescenceThicknessTextureSet;
+    vec2 anisotropyDirection;                // (cos, sin) of the rotation from the tangent
+    float anisotropyStrength;
+    uint32_t anisotropyTextureIndex;         // RG direction, B strength
+    int32_t anisotropyTextureSet;
+    float dispersion;                        // 20 / Abbe number
 };
+
+// GpuMaterial::lobes.
+STATIC_CONST uint32_t MaterialLobeClearcoat = 1u << 0;
+STATIC_CONST uint32_t MaterialLobeSheen = 1u << 1;
+STATIC_CONST uint32_t MaterialLobeSpecular = 1u << 2; // F0 other than IOR 1.5's 4% white, or a reflection weaker than full
+STATIC_CONST uint32_t MaterialLobeIridescence = 1u << 3;
+STATIC_CONST uint32_t MaterialLobeAnisotropy = 1u << 4;
+STATIC_CONST uint32_t MaterialLobeDispersion = 1u << 5;
 
 #ifdef __SLANG__
 // The G-buffer material target's alpha (RGBA8): 0 for a single-sided surface; a double-sided one 0.25 + 0.75 x its diffuse
@@ -254,7 +298,9 @@ struct GpuRayTracingInstance
     vec3 attenuationColor;          // volume absorption (KHR_materials_volume; attenuationDistance 0: none)
     float attenuationDistance;
     float diffuseTransmission;      // through a thin surface to its back (leaves, cloth); 0: none
-    uint32_t pathTracerFlags;       // PathTracerThin... (the record stays a multiple of 8 bytes: its addresses)
+    uint32_t pathTracerFlags;       // PathTracerThin...
+    uint32_t materialIndex;         // GpuMaterial slot: the lobes (when lobes != 0) are read from there
+    uint32_t lobes;                 // GpuMaterial::lobes (the record stays a multiple of 8 bytes: its addresses)
 };
 
 struct GpuMesh

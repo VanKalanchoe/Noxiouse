@@ -761,6 +761,8 @@ namespace Nox
             importTexture(material.OcclusionTexturePath, false);
             importTexture(material.EmissiveTexturePath, true);
             importTexture(material.TransmissionTexturePath, false);
+            for (const MaterialLobeTextureSlot& slot : MaterialLobeTextures)
+                importTexture((material.*slot.Member).Path, slot.SRGB, slot.NormalMap ? TextureCompression::Normalmap : TextureCompression::Default);
         };
         for (const MaterialData& material : *materials)
             importMaterialTextures(material);
@@ -1784,6 +1786,11 @@ namespace Nox
                                              &material.EmissiveTexturePath, &material.TransmissionTexturePath })
             {
                 if (AssetHandle textureHandle = resolveTexture(*path))
+                    pending.push_back(textureHandle);
+            }
+            for (const MaterialLobeTextureSlot& slot : MaterialLobeTextures)
+            {
+                if (AssetHandle textureHandle = resolveTexture((material.*slot.Member).Path))
                     pending.push_back(textureHandle);
             }
         };

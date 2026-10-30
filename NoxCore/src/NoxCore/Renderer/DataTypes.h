@@ -64,7 +64,14 @@ namespace Nox
         Mask   = 1,
         Blend  = 2
     };
-    
+
+    // A texture a material reads: its file (empty: none) and the glTF UV set it is sampled with.
+    struct MaterialTexture
+    {
+        std::string Path;
+        int32_t Set = 0;
+    };
+
     struct MaterialData
     {
         std::string Name;
@@ -143,6 +150,58 @@ namespace Nox
         float AlphaMaskCutoff = 0.5f;
         bool DoubleSided = false;
         bool Unlit = false;
+
+        // The lobes past the core metallic-roughness model, one slab as UE5 Substrate's (each glTF extension's names and defaults;
+        // a factor of 0 turns its lobe off). Textures multiply their factor; the channel each reads is noted.
+        // Clear coat (KHR_materials_clearcoat): a smooth dielectric layer over everything else (car paint, varnish).
+        float ClearcoatFactor = 0.0f;
+        MaterialTexture ClearcoatTexture;          // R
+        float ClearcoatRoughnessFactor = 0.0f;
+        MaterialTexture ClearcoatRoughnessTexture; // G
+        MaterialTexture ClearcoatNormalTexture;    // none: the coat is flat (the base's normal map stays below it)
+        // Sheen (KHR_materials_sheen): the back-scatter of fibers at grazing angles (velvet, cloth).
+        glm::vec3 SheenColorFactor = glm::vec3(0.0f);
+        MaterialTexture SheenColorTexture;         // RGB, sRGB
+        float SheenRoughnessFactor = 0.0f;
+        MaterialTexture SheenRoughnessTexture;     // A
+        // Specular (KHR_materials_specular): the dielectric reflection's strength and F0 tint (with IOR's F0).
+        float SpecularStrength = 1.0f;
+        MaterialTexture SpecularStrengthTexture;   // A
+        glm::vec3 SpecularColorFactor = glm::vec3(1.0f);
+        MaterialTexture SpecularColorTexture;      // RGB, sRGB
+        // Iridescence (KHR_materials_iridescence): a thin film over the surface (soap bubbles, oil, heat-tinted metal).
+        float IridescenceFactor = 0.0f;
+        MaterialTexture IridescenceTexture;        // R
+        float IridescenceIOR = 1.3f;
+        float IridescenceThicknessMinimum = 100.0f; // nanometers
+        float IridescenceThicknessMaximum = 400.0f;
+        MaterialTexture IridescenceThicknessTexture; // G: from minimum (0) to maximum (1); none: the maximum
+        // Anisotropy (KHR_materials_anisotropy): highlights stretched along a direction (brushed metal).
+        float AnisotropyStrength = 0.0f;
+        float AnisotropyRotation = 0.0f;           // radians, counter-clockwise from the tangent
+        MaterialTexture AnisotropyTexture;         // RG: direction in tangent space, B: strength
+        // Dispersion (KHR_materials_dispersion): 20 / Abbe number, how far refraction splits the colors apart (0: none).
+        float Dispersion = 0.0f;
+    };
+
+    // The lobe textures of a material, with how each is read: sRGB color, or a tangent-space normal map.
+    struct MaterialLobeTextureSlot
+    {
+        MaterialTexture MaterialData::* Member;
+        bool SRGB;
+        bool NormalMap;
+    };
+    inline constexpr MaterialLobeTextureSlot MaterialLobeTextures[] = {
+        { &MaterialData::ClearcoatTexture, false, false },
+        { &MaterialData::ClearcoatRoughnessTexture, false, false },
+        { &MaterialData::ClearcoatNormalTexture, false, true },
+        { &MaterialData::SheenColorTexture, true, false },
+        { &MaterialData::SheenRoughnessTexture, false, false },
+        { &MaterialData::SpecularStrengthTexture, false, false },
+        { &MaterialData::SpecularColorTexture, true, false },
+        { &MaterialData::IridescenceTexture, false, false },
+        { &MaterialData::IridescenceThicknessTexture, false, false },
+        { &MaterialData::AnisotropyTexture, false, false },
     };
     
     enum class GltfLightType : uint32_t

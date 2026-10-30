@@ -454,9 +454,9 @@ namespace Nox
         {
             return std::nullopt;
         }
-        // A cook from before the packed vertex format (version 4) is cooked again while its source is there; without one it cannot
-        // be read (no compatibility readers: the old vertex layout is gone).
-        if (MeshSerializer::ReadVersion(cookedPath) < 4)
+        // A cook in an older layout is cooked again while its source is there; without one it cannot be read (no compatibility
+        // readers: MeshSerializer reads the current version only).
+        if (!MeshSerializer::IsCurrentVersion(cookedPath))
         {
             if (sourceMissing)
                 NOX_CORE_ERROR("MeshImporter: {} is cooked in an old format and its source is gone: import it again", cookedPath.generic_string());
@@ -569,7 +569,10 @@ namespace Nox
     // Two submeshes merge when they draw the same way: same material values and textures.
     static std::string MaterialKey(const MaterialData& material)
     {
-        return material.Name + '|' + material.BaseColorTexturePath + '|' + material.MetallicRoughnessTexturePath + '|' +
+        std::string lobeTextures;
+        for (const MaterialLobeTextureSlot& slot : MaterialLobeTextures)
+            lobeTextures += (material.*slot.Member).Path + '|';
+        return lobeTextures + material.Name + '|' + material.BaseColorTexturePath + '|' + material.MetallicRoughnessTexturePath + '|' +
                material.NormalTexturePath + '|' + material.OcclusionTexturePath + '|' + material.EmissiveTexturePath + '|' +
                material.TransmissionTexturePath + '|' + std::to_string(static_cast<int>(material.Mode)) + '|' +
                std::to_string(material.DoubleSided);
@@ -3192,6 +3195,71 @@ namespace Nox
                     }
                 }
             }
+
+            // The lobes past the core model (MaterialData): each extension's members, a member left out keeping the spec default.
+            auto number = [](const tg3_value& object, std::string_view key, float& out)
+            {
+                const tg3_value* value = FindMember(object, key);
+                if (value && (value->type == TG3_VALUE_REAL || value->type == TG3_VALUE_INT))
+                    out = getFloatVal(*value);
+            };
+            auto color = [](const tg3_value& object, std::string_view key, glm::vec3& out)
+            {
+                const tg3_value* value = FindMember(object, key);
+                if (value && value->type == TG3_VALUE_ARRAY && value->array_count >= 3)
+                    out = glm::vec3(getFloatVal(value->array_data[0]), getFloatVal(value->array_data[1]), getFloatVal(value->array_data[2]));
+            };
+            auto texture = [&](const tg3_value& object, std::string_view key, MaterialTexture& out)
+            {
+                const tg3_value* info = FindMember(object, key);
+                if (!info || info->type != TG3_VALUE_OBJECT)
+                    return;
+                const tg3_value* index = FindMember(*info, "index");
+                const tg3_value* texCoord = FindMember(*info, "texCoord");
+                if (index && index->type == TG3_VALUE_INT)
+                    out.Path = GetTexturePath(static_cast<int32_t>(index->int_val));
+                if (texCoord && texCoord->type == TG3_VALUE_INT)
+                    out.Set = static_cast<int32_t>(texCoord->int_val);
+            };
+            if (const tg3_extension* clearcoat = FindExtension(gltfMaterial.ext, "KHR_materials_clearcoat"))
+            {
+                number(clearcoat->value, "clearcoatFactor", materialData.ClearcoatFactor);
+                texture(clearcoat->value, "clearcoatTexture", materialData.ClearcoatTexture);
+                number(clearcoat->value, "clearcoatRoughnessFactor", materialData.ClearcoatRoughnessFactor);
+                texture(clearcoat->value, "clearcoatRoughnessTexture", materialData.ClearcoatRoughnessTexture);
+                texture(clearcoat->value, "clearcoatNormalTexture", materialData.ClearcoatNormalTexture);
+            }
+            if (const tg3_extension* sheen = FindExtension(gltfMaterial.ext, "KHR_materials_sheen"))
+            {
+                color(sheen->value, "sheenColorFactor", materialData.SheenColorFactor);
+                texture(sheen->value, "sheenColorTexture", materialData.SheenColorTexture);
+                number(sheen->value, "sheenRoughnessFactor", materialData.SheenRoughnessFactor);
+                texture(sheen->value, "sheenRoughnessTexture", materialData.SheenRoughnessTexture);
+            }
+            if (const tg3_extension* specular = FindExtension(gltfMaterial.ext, "KHR_materials_specular"))
+            {
+                number(specular->value, "specularFactor", materialData.SpecularStrength);
+                texture(specular->value, "specularTexture", materialData.SpecularStrengthTexture);
+                color(specular->value, "specularColorFactor", materialData.SpecularColorFactor);
+                texture(specular->value, "specularColorTexture", materialData.SpecularColorTexture);
+            }
+            if (const tg3_extension* iridescence = FindExtension(gltfMaterial.ext, "KHR_materials_iridescence"))
+            {
+                number(iridescence->value, "iridescenceFactor", materialData.IridescenceFactor);
+                texture(iridescence->value, "iridescenceTexture", materialData.IridescenceTexture);
+                number(iridescence->value, "iridescenceIor", materialData.IridescenceIOR);
+                number(iridescence->value, "iridescenceThicknessMinimum", materialData.IridescenceThicknessMinimum);
+                number(iridescence->value, "iridescenceThicknessMaximum", materialData.IridescenceThicknessMaximum);
+                texture(iridescence->value, "iridescenceThicknessTexture", materialData.IridescenceThicknessTexture);
+            }
+            if (const tg3_extension* anisotropy = FindExtension(gltfMaterial.ext, "KHR_materials_anisotropy"))
+            {
+                number(anisotropy->value, "anisotropyStrength", materialData.AnisotropyStrength);
+                number(anisotropy->value, "anisotropyRotation", materialData.AnisotropyRotation);
+                texture(anisotropy->value, "anisotropyTexture", materialData.AnisotropyTexture);
+            }
+            if (const tg3_extension* dispersion = FindExtension(gltfMaterial.ext, "KHR_materials_dispersion"))
+                number(dispersion->value, "dispersion", materialData.Dispersion);
 
             // tiny_gltf_v3 exposes initialized metallic/roughness values but not whether the optional
             // pbrMetallicRoughness object existed. Its synthetic 1/1 defaults make a textureless

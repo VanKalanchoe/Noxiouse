@@ -102,6 +102,8 @@ namespace Nox
             ImGui::SetTooltip("Volume absorption (KHR_materials_volume): the color light keeps after travelling Attenuation Distance\n"
                               "through the material -- thick glass tinted by its depth. Needs Transmission and a Thickness.");
         changed |= ImGui::DragFloat("Attenuation Distance", &data.AttenuationDistance, 0.01f, 0.0f, 100000.0f);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("World units (scaled with the model). 0: no absorption.");
         changed |= ImGui::SliderFloat("Diffuse Transmission", &data.DiffuseTransmission, 0.0f, 1.0f);
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("Light through a thin surface to its other side (leaves, cloth, paper, lampshades). Make it double sided.");
@@ -115,8 +117,6 @@ namespace Nox
                               "It moves the whole material, so it cannot order two layers of the same material: those resolve\n"
                               "by draw order (the later triangle in the mesh wins an exact tie).\n"
                               "0: none.");
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("World units (scaled with the model). 0: no absorption.");
 
         auto drawTextureReference = [&](const char* labelName,
                                         const char* id,
@@ -158,6 +158,64 @@ namespace Nox
         drawTextureReference("Occlusion Texture", "Occlusion", data.OcclusionTexturePath);
         drawTextureReference("Emissive Texture", "Emissive", data.EmissiveTexturePath);
         drawTextureReference("Transmission Texture", "Transmission", data.TransmissionTexturePath);
+
+        // The lobes past the core model (the glTF material extensions): a factor of 0 turns a lobe off, a texture scales its factor.
+        if (!specularGlossiness && ImGui::CollapsingHeader("Layers"))
+        {
+            ImGui::SeparatorText("Clear Coat");
+            changed |= ImGui::SliderFloat("Clear Coat", &data.ClearcoatFactor, 0.0f, 1.0f);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("A smooth varnish layer over the whole material (car paint, lacquered wood).");
+            changed |= ImGui::SliderFloat("Clear Coat Roughness", &data.ClearcoatRoughnessFactor, 0.0f, 1.0f);
+            drawTextureReference("Clear Coat Texture (R)", "Clearcoat", data.ClearcoatTexture.Path);
+            drawTextureReference("Clear Coat Roughness (G)", "ClearcoatRoughness", data.ClearcoatRoughnessTexture.Path);
+            drawTextureReference("Clear Coat Normal", "ClearcoatNormal", data.ClearcoatNormalTexture.Path);
+
+            ImGui::SeparatorText("Sheen");
+            changed |= ImGui::ColorEdit3("Sheen Color", glm::value_ptr(data.SheenColorFactor));
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("The glow of fibers at grazing angles (velvet, cloth). Black: no sheen.");
+            changed |= ImGui::SliderFloat("Sheen Roughness", &data.SheenRoughnessFactor, 0.0f, 1.0f);
+            drawTextureReference("Sheen Color Texture (RGB)", "SheenColor", data.SheenColorTexture.Path);
+            drawTextureReference("Sheen Roughness (A)", "SheenRoughness", data.SheenRoughnessTexture.Path);
+
+            ImGui::SeparatorText("Specular");
+            changed |= ImGui::SliderFloat("Specular", &data.SpecularStrength, 0.0f, 1.0f);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("How strong the non-metal reflection is (1: as the IOR gives it, 0: none).");
+            changed |= ImGui::ColorEdit3("Specular Color", glm::value_ptr(data.SpecularColorFactor), ImGuiColorEditFlags_HDR | ImGuiColorEditFlags_Float);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Tints the non-metal reflection head-on (the IOR's F0 times this, at most 1). Above 1 reflects more than the IOR.");
+            drawTextureReference("Specular Texture (A)", "SpecularStrength", data.SpecularStrengthTexture.Path);
+            drawTextureReference("Specular Color Texture (RGB)", "SpecularColor", data.SpecularColorTexture.Path);
+
+            ImGui::SeparatorText("Iridescence");
+            changed |= ImGui::SliderFloat("Iridescence", &data.IridescenceFactor, 0.0f, 1.0f);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("A thin film over the surface, colored by interference (soap bubbles, oil, heat-tinted metal).");
+            changed |= ImGui::DragFloat("Film IOR", &data.IridescenceIOR, 0.01f, 1.0f, 3.0f);
+            changed |= ImGui::DragFloat("Film Thickness Min (nm)", &data.IridescenceThicknessMinimum, 1.0f, 0.0f, 2000.0f);
+            changed |= ImGui::DragFloat("Film Thickness Max (nm)", &data.IridescenceThicknessMaximum, 1.0f, 0.0f, 2000.0f);
+            drawTextureReference("Iridescence Texture (R)", "Iridescence", data.IridescenceTexture.Path);
+            drawTextureReference("Film Thickness Texture (G)", "IridescenceThickness", data.IridescenceThicknessTexture.Path);
+
+            ImGui::SeparatorText("Anisotropy");
+            changed |= ImGui::SliderFloat("Anisotropy", &data.AnisotropyStrength, 0.0f, 1.0f);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Stretches the highlights along a direction (brushed metal). Needs the mesh's tangents.");
+            float rotationDegrees = glm::degrees(data.AnisotropyRotation);
+            if (ImGui::DragFloat("Anisotropy Rotation", &rotationDegrees, 0.5f, -180.0f, 180.0f, "%.1f deg"))
+            {
+                data.AnisotropyRotation = glm::radians(rotationDegrees);
+                changed = true;
+            }
+            drawTextureReference("Anisotropy Texture (RG dir, B)", "Anisotropy", data.AnisotropyTexture.Path);
+
+            ImGui::SeparatorText("Dispersion");
+            changed |= ImGui::DragFloat("Dispersion", &data.Dispersion, 0.01f, 0.0f, 3.0f);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("How far refraction splits the colors (20 / Abbe number: glass 0.33, diamond 0.36). Needs Transmission.");
+        }
 
         int alphaMode = static_cast<int>(data.Mode);
         const char* alphaModes[] = {"Opaque", "Mask", "Blend"};

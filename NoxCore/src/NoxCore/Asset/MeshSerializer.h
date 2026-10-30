@@ -12,6 +12,7 @@
 
 #include "NoxCore/Animation/Skeleton.h"
 #include "NoxCore/Animation/AnimationSequence.h"
+#include "NoxCore/Asset/MaterialSerializer.h"
 #include "NoxCore/Core/VirtualFileSystem.h"
 #include "NoxCore/Renderer/DataTypes.h"
 
@@ -336,16 +337,15 @@ namespace Nox
         // (skinned: one level) keeps its arrays here.
         // Version 4 (§5.8.2): the vertices packed as the geometry stream holds them (shaderio::PackedVertex, read into staging as
         // they are), the bone influences of a skinned mesh in a block of their own (shaderio::SkinVertex).
-        // Version 5: a mesh's flags (vertex colors) after its bounds; with vertex colors, their packed RGBA8 per vertex (VertexPacking::
-        // PackColor) after the bone influences, and in a block of each page (MeshPage::Colors). Version 4 cooks read without colors;
-        // older ones are cooked again from their source (MeshImporter), not read.
-        // Version 6: a one-level mesh's morph targets after its triangles: per target its name, default weight and the vertices it
-        // moves (sparse: vertex index, position delta, normal delta). Version 5 and 4 cooks read without morph targets.
-        // Version 7: every mesh's material variants (KHR_materials_variants) at the end of its record: per mapping the variant's
-        // name and index, then the materials. Older cooks read without variants.
-        // Version 8: every node's extras (key / value strings) and physics (NodePhysics, field by field) after its submesh range.
-        // Older cooks read without them.
-        // Version 9: a node's physics also has its mesh collider, collision filter and joint (after the version 8 fields).
+        // The layout's history: 5 a mesh's flags (vertex colors) after its bounds and with them their packed RGBA8 per vertex
+        // (VertexPacking::PackColor) after the bone influences and in a block of each page (MeshPage::Colors); 6 a one-level mesh's
+        // morph targets after its triangles (per target its name, default weight and the vertices it moves: index, position delta,
+        // normal delta); 7 every mesh's material variants (KHR_materials_variants) at the end of its record (per mapping the variant's
+        // name and index, then the materials); 8 every node's extras (key / value strings) and physics (NodePhysics) after its
+        // submesh range; 9 a node's mesh collider, collision filter and joint; 10 the materials with every MaterialData field
+        // (MaterialSerializer::WriteFields: IOR, volume, the lobes). Only the current version is read: older cooks are cooked again
+        // from their source (MeshImporter).
+        static constexpr uint32_t CurrentVersion = 10;
         static constexpr uint32_t MeshFlagVertexColors = 1u << 0;
 
         struct MorphDelta
@@ -483,7 +483,7 @@ namespace Nox
             }
         }
 
-        static void ReadMeshData(std::istream& stream, MeshData& outData, uint32_t version)
+        static void ReadMeshData(std::istream& stream, MeshData& outData)
         {
             SerializerUtils::ReadString(stream, outData.Name);
             SerializerUtils::ReadVector(stream, outData.Bounds);
@@ -494,8 +494,7 @@ namespace Nox
             stream.read(reinterpret_cast<char*>(&outData.BoundsMin), sizeof(glm::vec3));
             stream.read(reinterpret_cast<char*>(&outData.BoundsMax), sizeof(glm::vec3));
             uint32_t flags = 0;
-            if (version >= 5)
-                stream.read(reinterpret_cast<char*>(&flags), sizeof(uint32_t));
+            stream.read(reinterpret_cast<char*>(&flags), sizeof(uint32_t));
             outData.VertexColors = (flags & MeshFlagVertexColors) != 0;
             for (MeshPage& page : outData.Pages)
                 page.Flags = outData.VertexColors ? page.Flags | MeshPage::Colors : page.Flags & ~MeshPage::Colors;
@@ -519,25 +518,20 @@ namespace Nox
                 }
                 SerializerUtils::ReadVector(stream, outData.MeshletVertices);
                 SerializerUtils::ReadVector(stream, outData.MeshletTriangles);
-                if (version >= 6)
-                    ReadMorphs(stream, outData);
+                ReadMorphs(stream, outData);
             }
-            outData.MaterialVariants.clear();
-            if (version >= 7)
+            uint32_t variantCount = 0;
+            stream.read(reinterpret_cast<char*>(&variantCount), sizeof(uint32_t));
+            outData.MaterialVariants.assign(stream.fail() ? 0 : variantCount, {});
+            for (MaterialVariantMapping& mapping : outData.MaterialVariants)
             {
-                uint32_t variantCount = 0;
-                stream.read(reinterpret_cast<char*>(&variantCount), sizeof(uint32_t));
-                outData.MaterialVariants.resize(variantCount);
-                for (MaterialVariantMapping& mapping : outData.MaterialVariants)
-                {
-                    SerializerUtils::ReadString(stream, mapping.Variant);
-                    stream.read(reinterpret_cast<char*>(&mapping.VariantIndex), sizeof(uint32_t));
-                }
-                std::vector<MaterialData> variantMaterials;
-                ReadMaterials(stream, variantMaterials);
-                for (size_t i = 0; i < variantMaterials.size() && i < outData.MaterialVariants.size(); ++i)
-                    outData.MaterialVariants[i].Material = std::move(variantMaterials[i]);
+                SerializerUtils::ReadString(stream, mapping.Variant);
+                stream.read(reinterpret_cast<char*>(&mapping.VariantIndex), sizeof(uint32_t));
             }
+            std::vector<MaterialData> variantMaterials;
+            ReadMaterials(stream, variantMaterials);
+            for (size_t i = 0; i < variantMaterials.size() && i < outData.MaterialVariants.size(); ++i)
+                outData.MaterialVariants[i].Material = std::move(variantMaterials[i]);
         }
 
         // The pages' data into the arrays: every page, or with streamPages only the root pages (the rest stream from the file
@@ -586,133 +580,25 @@ namespace Nox
             return true;
         }
 
-       static void WriteMaterials(std::ofstream& stream, const std::vector<MaterialData>& materialList)
-{
-    uint32_t matCount = static_cast<uint32_t>(materialList.size());
-    stream.write(reinterpret_cast<const char*>(&matCount), sizeof(uint32_t));
-    for (const auto& mat : materialList)
-    {
-        SerializerUtils::WriteString(stream, mat.Name);
-        
-        // Workflow + Specular Glossines
-        stream.write(reinterpret_cast<const char*>(&mat.Workflow), sizeof(float));
-        stream.write(reinterpret_cast<const char*>(&mat.DiffuseFactor), sizeof(glm::vec4));
-        stream.write(reinterpret_cast<const char*>(&mat.SpecularFactor), sizeof(glm::vec4));
-        
-        // Base Color
-        stream.write(reinterpret_cast<const char*>(&mat.BaseColorFactor), sizeof(glm::vec4));
-        SerializerUtils::WriteString(stream, mat.BaseColorTexturePath);
-        stream.write(reinterpret_cast<const char*>(&mat.BaseColorTextureSet), sizeof(int32_t));
-        
-        // PBR Properties
-        stream.write(reinterpret_cast<const char*>(&mat.MetallicFactor), sizeof(float));
-        stream.write(reinterpret_cast<const char*>(&mat.RoughnessFactor), sizeof(float));
-        SerializerUtils::WriteString(stream, mat.MetallicRoughnessTexturePath);
-        stream.write(reinterpret_cast<const char*>(&mat.PhysicalDescriptorTextureSet), sizeof(int32_t));
-        
-        // Additional Maps
-        SerializerUtils::WriteString(stream, mat.NormalTexturePath);
-        stream.write(reinterpret_cast<const char*>(&mat.NormalTextureSet), sizeof(int32_t));
-        
-        SerializerUtils::WriteString(stream, mat.OcclusionTexturePath);
-        stream.write(reinterpret_cast<const char*>(&mat.OcclusionTextureSet), sizeof(int32_t));
-        
-        // Emission
-        stream.write(reinterpret_cast<const char*>(&mat.EmissiveFactor), sizeof(glm::vec3));
-        SerializerUtils::WriteString(stream, mat.EmissiveTexturePath);
-        stream.write(reinterpret_cast<const char*>(&mat.EmissiveTextureSet), sizeof(int32_t));
-        stream.write(reinterpret_cast<const char*>(&mat.emissiveStrength), sizeof(float));
-        
-        // Transmission
-        stream.write(reinterpret_cast<const char*>(&mat.TransmissionFactor), sizeof(float));
-        SerializerUtils::WriteString(stream, mat.TransmissionTexturePath);
-        stream.write(reinterpret_cast<const char*>(&mat.TransmissionTextureSet), sizeof(int32_t));
-        
-        // Alpha & Render settings
-        uint32_t modeVal = static_cast<uint32_t>(mat.Mode);
-        stream.write(reinterpret_cast<const char*>(&modeVal), sizeof(uint32_t));
-        stream.write(reinterpret_cast<const char*>(&mat.AlphaMaskCutoff), sizeof(float));
-        
-        uint8_t doubleSidedVal = mat.DoubleSided ? 1 : 0;
-        stream.write(reinterpret_cast<const char*>(&doubleSidedVal), sizeof(uint8_t));
-        
-        uint8_t unlitVal = mat.Unlit ? 1 : 0;
-        stream.write(reinterpret_cast<const char*>(&unlitVal), sizeof(uint8_t));
-    }
-}
-
-static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMaterialList)
-{
-    uint32_t matCount = 0;
-    stream.read(reinterpret_cast<char*>(&matCount), sizeof(uint32_t));
-    if (stream.fail()) return;
-
-    outMaterialList.resize(matCount);
-    for (uint32_t i = 0; i < matCount; i++)
-    {
-        SerializerUtils::ReadString(stream, outMaterialList[i].Name);
-        
-        // Workflow + Specular Glossines
-        stream.read(reinterpret_cast<char*>(&outMaterialList[i].Workflow), sizeof(float));
-        stream.read(reinterpret_cast<char*>(&outMaterialList[i].DiffuseFactor), sizeof(glm::vec4));
-        stream.read(reinterpret_cast<char*>(&outMaterialList[i].SpecularFactor), sizeof(glm::vec4));
-        
-        // Base Color
-        stream.read(reinterpret_cast<char*>(&outMaterialList[i].BaseColorFactor), sizeof(glm::vec4));
-        SerializerUtils::ReadString(stream, outMaterialList[i].BaseColorTexturePath);
-        stream.read(reinterpret_cast<char*>(&outMaterialList[i].BaseColorTextureSet), sizeof(int32_t));
-        
-        // PBR Properties
-        stream.read(reinterpret_cast<char*>(&outMaterialList[i].MetallicFactor), sizeof(float));
-        stream.read(reinterpret_cast<char*>(&outMaterialList[i].RoughnessFactor), sizeof(float));
-        SerializerUtils::ReadString(stream, outMaterialList[i].MetallicRoughnessTexturePath);
-        stream.read(reinterpret_cast<char*>(&outMaterialList[i].PhysicalDescriptorTextureSet), sizeof(int32_t));
-        
-        // Additional Maps
-        SerializerUtils::ReadString(stream, outMaterialList[i].NormalTexturePath);
-        stream.read(reinterpret_cast<char*>(&outMaterialList[i].NormalTextureSet), sizeof(int32_t));
-        
-        SerializerUtils::ReadString(stream, outMaterialList[i].OcclusionTexturePath);
-        stream.read(reinterpret_cast<char*>(&outMaterialList[i].OcclusionTextureSet), sizeof(int32_t));
-        
-        // Emission
-        stream.read(reinterpret_cast<char*>(&outMaterialList[i].EmissiveFactor), sizeof(glm::vec3));
-        SerializerUtils::ReadString(stream, outMaterialList[i].EmissiveTexturePath);
-        stream.read(reinterpret_cast<char*>(&outMaterialList[i].EmissiveTextureSet), sizeof(int32_t));
-        stream.read(reinterpret_cast<char*>(&outMaterialList[i].emissiveStrength), sizeof(float));
-        
-        // Transmission
-        stream.read(reinterpret_cast<char*>(&outMaterialList[i].TransmissionFactor), sizeof(float));
-        SerializerUtils::ReadString(stream, outMaterialList[i].TransmissionTexturePath);
-        stream.read(reinterpret_cast<char*>(&outMaterialList[i].TransmissionTextureSet), sizeof(int32_t));
-        
-        // Alpha & Render settings
-        uint32_t modeVal = 0;
-        stream.read(reinterpret_cast<char*>(&modeVal), sizeof(uint32_t));
-        outMaterialList[i].Mode = static_cast<AlphaMode>(modeVal);
-        stream.read(reinterpret_cast<char*>(&outMaterialList[i].AlphaMaskCutoff), sizeof(float));
-        
-        uint8_t doubleSidedVal = 0;
-        stream.read(reinterpret_cast<char*>(&doubleSidedVal), sizeof(uint8_t));
-        outMaterialList[i].DoubleSided = (doubleSidedVal != 0);
-        
-        uint8_t unlitVal = 0;
-        stream.read(reinterpret_cast<char*>(&unlitVal), sizeof(uint8_t));
-        outMaterialList[i].Unlit = (unlitVal != 0);
-
-        // Compatibility with textureless transmission-only materials that inherited the glTF parser's synthetic
-        // 1/1 PBR defaults (see MaterialSerializer). Keep the repair in Nox, not the vendored parser.
-        MaterialData& material = outMaterialList[i];
-        if (material.TransmissionFactor > 0.0f && material.MetallicFactor == 1.0f &&
-            material.RoughnessFactor == 1.0f && material.BaseColorTexturePath.empty() &&
-            material.MetallicRoughnessTexturePath.empty())
+        // The materials as MaterialSerializer writes a .nmat file's fields (every field, the lobes included).
+        static void WriteMaterials(std::ofstream& stream, const std::vector<MaterialData>& materialList)
         {
-            material.MetallicFactor = 0.0f;
-            material.RoughnessFactor = 0.0f;
+            uint32_t matCount = static_cast<uint32_t>(materialList.size());
+            stream.write(reinterpret_cast<const char*>(&matCount), sizeof(uint32_t));
+            for (const MaterialData& material : materialList)
+                MaterialSerializer::WriteFields(stream, material);
         }
-    }
-}
-        
+
+        static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMaterialList)
+        {
+            uint32_t matCount = 0;
+            stream.read(reinterpret_cast<char*>(&matCount), sizeof(uint32_t));
+            if (stream.fail()) return;
+            outMaterialList.resize(matCount);
+            for (MaterialData& material : outMaterialList)
+                MaterialSerializer::ReadFields(stream, material);
+        }
+
         static void WriteLights(std::ofstream& stream, const std::vector<LightNodeData>& lights)
             {
                 uint32_t count = static_cast<uint32_t>(lights.size());
@@ -865,7 +751,7 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
                 }
             }
 
-            static void ReadNodes(std::istream& stream, std::vector<MeshNodeData>& outNodes, uint32_t version)
+            static void ReadNodes(std::istream& stream, std::vector<MeshNodeData>& outNodes)
             {
                 uint32_t count = 0;
                 stream.read(reinterpret_cast<char*>(&count), sizeof(uint32_t));
@@ -881,8 +767,6 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
                     stream.read(reinterpret_cast<char*>(&outNodes[i].Scale), sizeof(glm::vec3));
                     stream.read(reinterpret_cast<char*>(&outNodes[i].FirstSubmesh), sizeof(uint32_t));
                     stream.read(reinterpret_cast<char*>(&outNodes[i].SubmeshCount), sizeof(uint32_t));
-                    if (version < 8)
-                        continue;
                     uint32_t extraCount = 0;
                     stream.read(reinterpret_cast<char*>(&extraCount), sizeof(uint32_t));
                     if (stream.fail()) return;
@@ -903,8 +787,6 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
                     stream.read(reinterpret_cast<char*>(&physics.Size), sizeof(glm::vec3));
                     stream.read(reinterpret_cast<char*>(&physics.Friction), sizeof(float));
                     stream.read(reinterpret_cast<char*>(&physics.Restitution), sizeof(float));
-                    if (version < 9)
-                        continue;
                     stream.read(reinterpret_cast<char*>(&physics.ColliderMesh), sizeof(int32_t));
                     stream.read(reinterpret_cast<char*>(&physics.ColliderFirstSubmesh), sizeof(uint32_t));
                     stream.read(reinterpret_cast<char*>(&physics.ColliderSubmeshCount), sizeof(uint32_t));
@@ -976,16 +858,18 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
             stream.write(reinterpret_cast<const char*>(&payloadBase), sizeof(uint64_t));
         }
 
-        // The version (2 to 9) of a magic of this kind ("NSM" static, "NMS" skeletal, then the digit), 0 for anything else.
+        // A magic is its kind ("NSM" static, "NMS" skeletal) and a character: '0' plus the version (version 10 is ':').
+        static constexpr char MagicCharacter(uint32_t version) { return static_cast<char>('0' + version); }
+
+        // The version of a magic of this kind, 0 for anything else.
         static uint32_t MagicVersion(const char* header, const char* kind)
         {
-            if (std::memcmp(header, kind, 3) != 0 || header[3] < '2' || header[3] > '9')
+            if (std::memcmp(header, kind, 3) != 0 || header[3] < '2' || header[3] > MagicCharacter(CurrentVersion))
                 return 0;
             return static_cast<uint32_t>(header[3] - '0');
         }
 
-        // kind: "NSM" or "NMS". Versions 4 to 9 are read (each older one without what came after it: mesh colliders, joints and filters, node extras and physics,
-        // variants, morph targets, vertex colors); older cooks are not read (MeshImporter cooks them again).
+        // kind: "NSM" or "NMS". Only the current version is read (MeshImporter cooks older ones again).
         static bool DeserializeMeshes(const std::filesystem::path& filepath, const char* kind, bool streamPages,
                                       std::vector<MeshData>& outDataList, std::vector<MaterialData>& outMaterialList,
                                       std::vector<LightNodeData>& outLightList, std::vector<MeshNodeData>& outNodeList,
@@ -994,8 +878,7 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
             char header[HeaderBytes] = {};
             if (!VFS::ReadRange(filepath, 0, HeaderBytes, header))
                 return false;
-            const uint32_t version = MagicVersion(header, kind);
-            if (version < 4)
+            if (MagicVersion(header, kind) != CurrentVersion)
                 return false;
 
             // Only what comes before the pages' data is read whole (from a pack as from a loose file).
@@ -1011,10 +894,10 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
             std::memcpy(&count, header + 4, sizeof(uint32_t));
             outDataList.resize(count);
             for (uint32_t i = 0; i < count; i++)
-                ReadMeshData(stream, outDataList[i], version);
+                ReadMeshData(stream, outDataList[i]);
             ReadMaterials(stream, outMaterialList);
             ReadLights(stream, outLightList);
-            ReadNodes(stream, outNodeList, version);
+            ReadNodes(stream, outNodeList);
             ReadCameras(stream, outCameraList);
             if (stream.fail())
                 return false;
@@ -1028,7 +911,7 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
         }
 
     public:
-        // The cooked format's version (2 to 9) from the magic, 0 when the file is not a mesh.
+        // The cooked format's version from the magic, 0 when the file is not a mesh.
         static uint32_t ReadVersion(const std::filesystem::path& filepath)
         {
             char magic[4] = {};
@@ -1036,6 +919,9 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
                 return 0;
             return std::max(MagicVersion(magic, "NSM"), MagicVersion(magic, "NMS"));
         }
+
+        // The cooked file is in the layout this build reads (else it is cooked again from its source).
+        static bool IsCurrentVersion(const std::filesystem::path& filepath) { return ReadVersion(filepath) == CurrentVersion; }
 
         static void SerializeStaticMesh
         (
@@ -1047,7 +933,7 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
             const std::vector<CameraNodeData>& cameraList = {}
         )
         {
-            SerializeMeshes(filepath, "NSM9", dataList, materialList, lightList, nodeList, cameraList);
+            SerializeMeshes(filepath, std::string{ 'N', 'S', 'M', MagicCharacter(CurrentVersion) }.c_str(), dataList, materialList, lightList, nodeList, cameraList);
         }
 
         static bool DeserializeStaticMesh(const std::filesystem::path& filepath, std::vector<MeshData>& outDataList, std::vector<MaterialData>& outMaterialList)
@@ -1096,7 +982,7 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
             const std::vector<CameraNodeData>& cameraList = {}
         )
         {
-            SerializeMeshes(filepath, "NMS9", dataList, materialList, lightList, nodeList, cameraList);
+            SerializeMeshes(filepath, std::string{ 'N', 'M', 'S', MagicCharacter(CurrentVersion) }.c_str(), dataList, materialList, lightList, nodeList, cameraList);
         }
         
         static bool DeserializeMesh(const std::filesystem::path& filepath, std::vector<MeshData>& outDataList, std::vector<MaterialData>& outMaterialList)

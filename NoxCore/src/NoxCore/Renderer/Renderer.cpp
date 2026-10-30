@@ -244,6 +244,59 @@ namespace Nox
         packed.diffuseTransmission = glm::clamp(material.DiffuseTransmission, 0.0f, 1.0f);
         packed.pathTracerFlags = material.PathTracerFlags;
         packed.depthBias = glm::max(material.DepthBias, 0.0f);
+
+        // The lobes (GpuMaterial::lobes): a lobe is on when its factor is (a texture only scales its factor).
+        auto texture = [](const MaterialTexture& source, uint32_t& index, int32_t& set)
+        {
+            index = static_cast<uint32_t>(GetTextureIndex(source.Path));
+            set = source.Set;
+        };
+        packed.lobes = 0;
+        packed.clearcoatFactor = glm::clamp(material.ClearcoatFactor, 0.0f, 1.0f);
+        packed.clearcoatRoughnessFactor = glm::clamp(material.ClearcoatRoughnessFactor, 0.0f, 1.0f);
+        texture(material.ClearcoatTexture, packed.clearcoatTextureIndex, packed.clearcoatTextureSet);
+        texture(material.ClearcoatRoughnessTexture, packed.clearcoatRoughnessTextureIndex, packed.clearcoatRoughnessTextureSet);
+        texture(material.ClearcoatNormalTexture, packed.clearcoatNormalTextureIndex, packed.clearcoatNormalTextureSet);
+        if (packed.clearcoatFactor > 0.0f)
+            packed.lobes |= shaderio::MaterialLobeClearcoat;
+
+        packed.sheenColorFactor = glm::max(material.SheenColorFactor, glm::vec3(0.0f));
+        packed.sheenRoughnessFactor = glm::clamp(material.SheenRoughnessFactor, 0.0f, 1.0f);
+        texture(material.SheenColorTexture, packed.sheenColorTextureIndex, packed.sheenColorTextureSet);
+        texture(material.SheenRoughnessTexture, packed.sheenRoughnessTextureIndex, packed.sheenRoughnessTextureSet);
+        if (glm::any(glm::greaterThan(packed.sheenColorFactor, glm::vec3(0.0f))))
+            packed.lobes |= shaderio::MaterialLobeSheen;
+
+        // The specular lobe also carries KHR_materials_ior's F0 for the metallic-roughness model (IOR 1.5: the 4% every surface
+        // without it has). The specular-glossiness model gives its F0 itself.
+        packed.specularStrength = glm::max(material.SpecularStrength, 0.0f);
+        packed.specularColorFactor = glm::max(material.SpecularColorFactor, glm::vec3(0.0f));
+        texture(material.SpecularStrengthTexture, packed.specularStrengthTextureIndex, packed.specularStrengthTextureSet);
+        texture(material.SpecularColorTexture, packed.specularColorTextureIndex, packed.specularColorTextureSet);
+        if (material.Workflow == 0.0f &&
+            (packed.specularStrength != 1.0f || packed.specularColorFactor != glm::vec3(1.0f) || material.IOR != 1.5f ||
+             packed.specularStrengthTextureIndex != 0xFFFFFFFFu || packed.specularColorTextureIndex != 0xFFFFFFFFu))
+            packed.lobes |= shaderio::MaterialLobeSpecular;
+
+        packed.iridescenceFactor = glm::clamp(material.IridescenceFactor, 0.0f, 1.0f);
+        packed.iridescenceIor = glm::max(material.IridescenceIOR, 1.0f);
+        packed.iridescenceThicknessMinimum = glm::max(material.IridescenceThicknessMinimum, 0.0f);
+        packed.iridescenceThicknessMaximum = glm::max(material.IridescenceThicknessMaximum, 0.0f);
+        texture(material.IridescenceTexture, packed.iridescenceTextureIndex, packed.iridescenceTextureSet);
+        texture(material.IridescenceThicknessTexture, packed.iridescenceThicknessTextureIndex, packed.iridescenceThicknessTextureSet);
+        if (packed.iridescenceFactor > 0.0f)
+            packed.lobes |= shaderio::MaterialLobeIridescence;
+
+        packed.anisotropyStrength = glm::clamp(material.AnisotropyStrength, 0.0f, 1.0f);
+        packed.anisotropyDirection = glm::vec2(std::cos(material.AnisotropyRotation), std::sin(material.AnisotropyRotation));
+        texture(material.AnisotropyTexture, packed.anisotropyTextureIndex, packed.anisotropyTextureSet);
+        if (packed.anisotropyStrength > 0.0f)
+            packed.lobes |= shaderio::MaterialLobeAnisotropy;
+
+        // Dispersion only changes refraction: on for a transmissive material.
+        packed.dispersion = glm::max(material.Dispersion, 0.0f);
+        if (packed.dispersion > 0.0f && material.TransmissionFactor > 0.0f)
+            packed.lobes |= shaderio::MaterialLobeDispersion;
         return packed;
     }
 
