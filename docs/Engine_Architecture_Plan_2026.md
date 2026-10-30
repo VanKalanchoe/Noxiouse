@@ -1049,6 +1049,19 @@ cheap allocation (a range, not a Vulkan call). Separate objects remain correct w
     - A version 3 file written by the previous commit's code reads back byte-identical, and its streamed page packs exactly as a
       version 4 page.
     - The cooked test mesh is 46% smaller.
+  - **Measured on Bistro (2026-10-30):**
+    - Geometry went from 319 MB committed / 317 MB used to 161 / 159 MB (-49%), with the same image.
+    - The streamed pages' resident share went from 243 to 110 MB; the root pages from 44 to 19 MB.
+    - A re-import as version 4 shrank the project folder from 4.21 to 4.03 GB: the 180 MB saved are the meshes, and the textures
+      are most of the rest.
+- **Vertex indexing (2026-10-30):** the cook now starts as meshoptimizer's pipeline does, with `meshopt_generateVertexRemap` (in
+  `indexVertices`). It welds vertices identical in every byte (exporters split them per face, primitive or attribute set) and
+  drops vertices no triangle uses, before the cluster LOD (`buildClusterLod`) or the one-level clusters (`buildMeshlets`).
+  - For the cluster LOD, a duplicate vertex is also a border the simplifier must keep: welded, it simplifies across it.
+  - The one-level path also gets the vertex cache and vertex fetch orders (`meshopt_optimizeVertexCache`,
+    `meshopt_optimizeVertexFetch`), so a cluster's vertices lie close in memory.
+  - Until then only the per-cluster steps ran (`meshopt_buildMeshlets`, `meshopt_optimizeMeshlet`, bounds, tangents). The log
+    reports each cook's welded count.
 - **Defragmentation (later, only if measured):** move live ranges and patch the mesh table's offsets.
 
 #### 5.8.3 Budgets: who decides how much

@@ -86,9 +86,36 @@ namespace Nox
             data.MeshletTriangles.insert(data.MeshletTriangles.end(), triangles, triangles + triangleCount * 3);
         }
 
-        // One level of clusters, always drawn (no coarser version).
-        void buildMeshlets(MeshData& data, const std::vector<uint32_t>& indices)
+        // Vertices before and after indexVertices, per thread (BuildClusters reports a cook's totals).
+        thread_local uint64_t s_VerticesBeforeIndexing = 0;
+        thread_local uint64_t s_VerticesAfterIndexing = 0;
+
+        // meshoptimizer's first step (its README's "Indexing", the start of its demo's pipeline): vertices identical in every byte
+        // (exporters split them per face, per primitive or per attribute set) become one, and vertices no triangle uses go. For the
+        // cluster LOD a duplicate is also a border the simplifier has to keep, so welding them lets it simplify across.
+        void indexVertices(MeshData& data, std::vector<uint32_t>& indices)
         {
+            s_VerticesBeforeIndexing += data.Vertices.size();
+            std::vector<unsigned int> remap(data.Vertices.size());
+            const size_t unique = meshopt_generateVertexRemap(remap.data(), indices.data(), indices.size(), data.Vertices.data(),
+                                                              data.Vertices.size(), sizeof(shaderio::Vertex));
+            meshopt_remapIndexBuffer(indices.data(), indices.data(), indices.size(), remap.data());
+            std::vector<shaderio::Vertex> vertices(unique);
+            meshopt_remapVertexBuffer(vertices.data(), data.Vertices.data(), data.Vertices.size(), sizeof(shaderio::Vertex), remap.data());
+            data.Vertices = std::move(vertices);
+            s_VerticesAfterIndexing += data.Vertices.size();
+        }
+
+        // One level of clusters, always drawn (no coarser version).
+        void buildMeshlets(MeshData& data, std::vector<uint32_t> indices)
+        {
+            // Indexed, the triangles in vertex cache order (the meshlets then gather neighbors) and the vertices in the order the
+            // triangles first use them (meshoptimizer's vertex cache and vertex fetch steps): a cluster's vertices lie close in memory.
+            indexVertices(data, indices);
+            meshopt_optimizeVertexCache(indices.data(), indices.data(), indices.size(), data.Vertices.size());
+            meshopt_optimizeVertexFetch(data.Vertices.data(), indices.data(), indices.size(), data.Vertices.data(), data.Vertices.size(),
+                                        sizeof(shaderio::Vertex));
+
             std::vector<meshopt_Meshlet> meshlets(meshopt_buildMeshletsBound(indices.size(), shaderio::MAX_VERTICES, shaderio::MAX_PRIMITIVES));
             std::vector<unsigned int> meshletVertices(indices.size());
             std::vector<unsigned char> meshletTriangles(indices.size());
@@ -286,8 +313,11 @@ namespace Nox
         // original geometry are merged into groups and simplified, level after level, until one cluster is left. Every
         // cluster keeps the bounds and error of the group it came from and of the group it went into, so the task shader
         // can pick the cut. The clusters are then packed into streaming pages (writePages).
-        void buildClusterLod(MeshData& data, const std::vector<uint32_t>& indices)
+        void buildClusterLod(MeshData& data, std::vector<uint32_t> indices)
         {
+            // Indexed first (vertex order does not matter here: each page takes its own vertex block, writePages).
+            indexVertices(data, indices);
+
             clodConfig config = clodDefaultConfig(shaderio::MAX_PRIMITIVES);
             config.max_vertices = shaderio::MAX_VERTICES;
             // No sloppy fallback when regular simplification gets stuck: sloppy ignores topology and orientation, and a
@@ -910,14 +940,19 @@ namespace Nox
 
     static void BuildClusters(MeshSubset& subset)
     {
+        s_VerticesBeforeIndexing = 0;
+        s_VerticesAfterIndexing = 0;
         for (size_t i = 0; i < subset.Meshes.size(); ++i)
         {
             if (subset.Pending[i].Skinned)
-                buildMeshlets(subset.Meshes[i], subset.Pending[i].Indices);
+                buildMeshlets(subset.Meshes[i], std::move(subset.Pending[i].Indices));
             else
-                buildClusterLod(subset.Meshes[i], subset.Pending[i].Indices);
+                buildClusterLod(subset.Meshes[i], std::move(subset.Pending[i].Indices));
         }
         subset.Pending.clear();
+        if (s_VerticesAfterIndexing < s_VerticesBeforeIndexing)
+            NOX_CORE_INFO("MeshImporter: indexing welded {} -> {} vertices ({:.1f}% fewer)", s_VerticesBeforeIndexing, s_VerticesAfterIndexing,
+                          100.0 * double(s_VerticesBeforeIndexing - s_VerticesAfterIndexing) / double(s_VerticesBeforeIndexing));
     }
 
     // One .nmat per material, written once: edits made to it later survive a recook of the model. `materialBase` is the
