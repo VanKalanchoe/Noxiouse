@@ -444,9 +444,13 @@ namespace Nox
     void SceneHierarchyPanel::DrawFolderNode(const std::string& path, const std::set<std::string>& allFolders)
     {
         ImGui::PushID(path.c_str());
-        ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_DefaultOpen;
+        ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth;
         const std::string label = "[Folder]  " + FolderLeaf(path);
+        // Open or folded as the scene keeps it (saved with it): the same after reopening the scene, an undo, or a restart.
+        ImGui::SetNextItemOpen(!m_Context->IsFolderCollapsed(path), ImGuiCond_Always);
         const bool opened = ImGui::TreeNodeEx("##folder", flags, "%s", label.c_str());
+        if (ImGui::IsItemToggledOpen())
+            m_Context->SetFolderCollapsed(path, !opened);
 
         // Entities dragged onto the folder are filed in it.
         if (ImGui::BeginDragDropTarget())

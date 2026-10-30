@@ -1237,6 +1237,13 @@ namespace Nox
                 out << folder;
             out << YAML::EndSeq;
         }
+        if (!m_Scene->m_CollapsedFolders.empty())
+        {
+            out << YAML::Key << "CollapsedFolders" << YAML::Value << YAML::Flow << YAML::BeginSeq;
+            for (const std::string& folder : m_Scene->m_CollapsedFolders)
+                out << folder;
+            out << YAML::EndSeq;
+        }
         WriteWorldPartition(out, *m_Scene);
         out << YAML::EndMap; // Corrected: No parentheses
         return std::string(out.c_str(), out.size());
@@ -2579,6 +2586,11 @@ namespace Nox
         {
             for (const auto& folder : folders)
                 m_Scene->AddFolder(folder.as<std::string>());
+        }
+        if (auto collapsed = data["CollapsedFolders"])
+        {
+            for (const auto& folder : collapsed)
+                m_Scene->SetFolderCollapsed(folder.as<std::string>(), true);
         }
         ReadWorldPartition(*m_Scene, data);
 

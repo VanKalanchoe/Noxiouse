@@ -1,4 +1,5 @@
 #pragma once
+#include <set>
 #include <entt/entt.hpp>
 #include <filesystem>
 #include <map>
@@ -191,6 +192,11 @@ namespace Nox
         // Removes the folder and its subfolders; their entities go back to the top level.
         void RemoveFolder(const std::string& path);
         void RenameFolder(const std::string& from, const std::string& to);
+        // Folders the outliner shows folded (Unreal's actor folder bIsInitiallyExpanded): saved with the scene, so they stay folded
+        // when it is opened again, after an undo, or in another session.
+        bool IsFolderCollapsed(const std::string& path) const { return m_CollapsedFolders.contains(path); }
+        void SetFolderCollapsed(const std::string& path, bool collapsed);
+        const std::set<std::string>& GetCollapsedFolders() const { return m_CollapsedFolders; }
     private:
         template<typename T>
         void OnComponentAdded(Entity entity, T& component);
@@ -301,6 +307,7 @@ namespace Nox
         b2WorldId m_PhysicsWorldID = b2_nullWorldId;
         std::unique_ptr<IPhysics3DScene> m_Physics3DScene;
         std::vector<std::string> m_Folders;
+        std::set<std::string> m_CollapsedFolders;
         bool m_IsRunning = false;
         bool m_TimelinesRunning = false; // Play or Simulate
         std::vector<UUID> m_PendingDestroy;

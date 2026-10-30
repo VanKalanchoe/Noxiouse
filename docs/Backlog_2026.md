@@ -12,6 +12,22 @@
 |---|---|
 | R10 | DLSS "WorldToScreenMatrix not invertible" every frame (seen 2026-10-29 after a DLSS recreate in LevelStreamingTest). A one-time log names the degenerate camera input (`addDLSSPass`): needs that log line to fix |
 
+| R11 | **More async compute:** only the screen-probe GI passes are marked `RGPassFlags::AsyncCompute` (`RTPasses.cpp`). Candidates: the sky lookup tables, particles, skinning and the light grid -- the queue, fork/join and submissions are built; each is mostly marking the pass and measuring it |
+
+### Levels and streaming (plan: `Engine_Architecture_Plan_2026.md` §6c)
+
+| # | Item |
+|---|---|
+| L1 | **Editing several levels together** (Unreal's Levels window): today each level is edited as its own scene |
+| L2 | **A streamed level shows once complete:** its entities are activated within a 3 ms budget per frame (`ActivateStreamedLevel`), so a big level appears over several frames; Unreal makes a level visible only when all of it was added |
+| L3 | **Level streaming volumes use every streaming source:** the world partition streams around the camera and every World Streaming Source; volumes (`UpdateLevelStreaming`) still test the camera alone |
+
+### Tools (plan: `Engine_Architecture_Plan_2026.md`)
+
+| # | Item |
+|---|---|
+| P1 | **Frame profiler extras:** save / load a capture; keep frames slower than N ms on their own (spikes); memory over time (the fly-through test logs it to a file, the panel has no graph); a track for the transfer queue (the GPU and async compute queues have theirs) |
+
 ### Import / glTF (plan: `Animation_Graph_Architecture_Plan_2026.md` section 8)
 
 | # | Item |

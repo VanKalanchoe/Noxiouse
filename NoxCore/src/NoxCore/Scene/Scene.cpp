@@ -353,6 +353,7 @@ namespace Nox
         // Copy components (except IDComponent and TagComponent)
         CopyComponent(AllComponents{}, dstSceneRegistry, srcSceneRegistry, enttMap);
         newScene->m_Folders = other->m_Folders;
+        newScene->m_CollapsedFolders = other->m_CollapsedFolders;
         // A world: its settings and index, and the cells the editor has fully loaded (their entities are in the copy; Play / Simulate
         // stream them from memory, BeginWorldStreaming).
         newScene->m_World = other->m_World;
@@ -370,10 +371,19 @@ namespace Nox
             m_Folders.push_back(path);
     }
 
+    void Scene::SetFolderCollapsed(const std::string& path, bool collapsed)
+    {
+        if (collapsed)
+            m_CollapsedFolders.insert(path);
+        else
+            m_CollapsedFolders.erase(path);
+    }
+
     void Scene::RemoveFolder(const std::string& path)
     {
         auto inside = [&](const std::string& other) { return other == path || other.rfind(path + "/", 0) == 0; };
         std::erase_if(m_Folders, inside);
+        std::erase_if(m_CollapsedFolders, inside);
         for (auto entity : m_Registry.view<FolderComponent>())
         {
             if (inside(m_Registry.get<FolderComponent>(entity).Path))
@@ -396,6 +406,10 @@ namespace Nox
         };
         for (std::string& folder : m_Folders)
             folder = renamed(folder);
+        std::set<std::string> collapsed;
+        for (const std::string& folder : m_CollapsedFolders)
+            collapsed.insert(renamed(folder));
+        m_CollapsedFolders = std::move(collapsed);
         for (auto entity : m_Registry.view<FolderComponent>())
         {
             std::string& path = m_Registry.get<FolderComponent>(entity).Path;
